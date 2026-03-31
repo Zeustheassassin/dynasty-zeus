@@ -32,8 +32,11 @@ export default function Home() {
   const [rookies, setRookies] = useState<any[]>([]);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [rookieSearch, setRookieSearch] = useState("");
-  
-  
+  const [userCache, setUserCache] = useState<any>({});
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+const [externalShares, setExternalShares] = useState<any[]>([]);
+const [loadingShares, setLoadingShares] = useState(false);
+ 
 
   // -------------------------
   // 🔥 NEW: LINEUP SETTINGS
@@ -119,6 +122,20 @@ useEffect(() => {
   loadPlayers();
 }, []);
 useEffect(() => {
+  const saved = localStorage.getItem("sleeperUser");
+
+  if (saved) {
+    const parsed = JSON.parse(saved);
+    setUser(parsed);
+
+    fetch(
+      `https://api.sleeper.app/v1/user/${parsed.user_id}/leagues/nfl/${CURRENT_YEAR}`
+    )
+      .then((res) => res.json())
+      .then((data) => setLeagues(data));
+  }
+}, []);
+useEffect(() => {
   if (rookies.length > 0) {
     localStorage.setItem("rookieBoard", JSON.stringify(rookies));
   }
@@ -165,6 +182,7 @@ const getStarterSlots = (roster: any, league: any) => {
     const res = await fetch(`https://api.sleeper.app/v1/user/${username}`);
     const data = await res.json();
     setUser(data);
+    localStorage.setItem("sleeperUser", JSON.stringify(data));
 
     const leaguesRes = await fetch(
       `https://api.sleeper.app/v1/user/${data.user_id}/leagues/nfl/${CURRENT_YEAR}`
@@ -179,6 +197,7 @@ const getStarterSlots = (roster: any, league: any) => {
   setRoster(null);
   setRosters([]);
   setPicks([]);
+  localStorage.removeItem("sleeperUser");
 };
 
   // -------------------------
@@ -207,6 +226,19 @@ const getStarterSlots = (roster: any, league: any) => {
       );
 
       setAllLeagueData(results);
+        const savedLeague = localStorage.getItem("selectedLeague");
+
+  if (savedLeague) {
+    const parsedLeague = JSON.parse(savedLeague);
+
+    const match = leagues.find(
+      (l: any) => l.league_id === parsedLeague.league_id
+    );
+
+    if (match) {
+      loadRoster(match);
+    }
+  }
     };
 
     loadAll();
@@ -409,6 +441,80 @@ myPicks.forEach((pick: any) => {
 
   setStandings(standingsData);
 };
+const loadUserExposure = async (userId: string) => {
+  // ✅ CACHE CHECK (PUT THIS FIRST)
+if (userCache[userId]) {
+  setExternalShares(userCache[userId]);
+  setSelectedUserId(userId);
+  return;
+}
+  try {
+    setLoadingShares(true);
+    setSelectedUserId(userId);
+
+    // 1. Fetch leagues
+    const leaguesRes = await fetch(
+      `https://api.sleeper.app/v1/user/${userId}/leagues/nfl/${CURRENT_YEAR}`
+    );
+    const leagues = await leaguesRes.json();
+
+    // 2. Fetch rosters for each league
+    const rosterResults = await Promise.all(
+      leagues.map(async (league: any) => {
+        const res = await fetch(
+          `https://api.sleeper.app/v1/league/${league.league_id}/rosters`
+        );
+        const rosters = await res.json();
+
+        return rosters.find((r: any) => r.owner_id === userId);
+      })
+    );
+
+    const validRosters = rosterResults.filter(Boolean);
+    const leagueCount = validRosters.length;
+
+    // 3. Build player count map
+    const map: any = {};
+
+    validRosters.forEach((r: any) => {
+      r.players?.forEach((id: string) => {
+        if (!map[id]) map[id] = 0;
+        map[id]++;
+      });
+    });
+
+    // 4. Sort + take top 15
+    const topPlayers = Object.entries(map)
+  .sort((a: any, b: any) => b[1] - a[1])
+  .slice(0, 15)
+  .map(([playerId, count]: any) => ({
+    playerId,
+    count,
+    percent: leagueCount
+      ? Math.round((count / leagueCount) * 100)
+      : 0,
+  }));
+
+// ✅ SAVE TO STATE
+setExternalShares({
+  players: topPlayers,
+  leagueCount,
+});
+
+// ✅ SAVE TO CACHE
+setUserCache((prev: any) => ({
+  ...prev,
+  [userId]: {
+  players: topPlayers,
+  leagueCount,
+},
+}));
+  } catch (err) {
+    console.error("Error loading user exposure:", err);
+  } finally {
+    setLoadingShares(false);
+  }
+};
 
   // -------------------------
   // PLAYER LOGIC
@@ -447,9 +553,26 @@ myPicks.forEach((pick: any) => {
 
   const grouped = groupPlayers();
 
-  const filteredPlayers = grouped[activeTab]?.filter((p: any) =>
+  const filteredPlayers = grouped[activeTab]
+  ?.filter((p: any) =>
     p.full_name?.toLowerCase().includes(search.toLowerCase())
-  );
+  )
+  ?.sort((a: any, b: any) => {
+  const rolePriority: any = {
+    starter: 0,
+    bench: 1,
+    taxi: 2,
+  };
+
+  const roleDiff =
+    rolePriority[a.role] - rolePriority[b.role];
+
+  // ✅ First: sort by role
+  if (roleDiff !== 0) return roleDiff;
+
+  // ✅ Then: sort by value
+  return (b.value || 0) - (a.value || 0);
+});
 const getTeamSummary = () => {
   if (!roster || !players) return null;
 
@@ -460,6 +583,10 @@ const getTeamSummary = () => {
     TE: 0,
     TAXI: roster?.taxi?.length || 0,
   };
+  // -------------------------
+// MY CURRENT LEAGUE PLAYER SET
+// -------------------------
+const myPlayerSet = new Set<string>(roster?.players || []);
 
   roster.players?.forEach((id: string) => {
     const p = players[id];
@@ -502,66 +629,62 @@ const moveToRank = (fromIndex: number, toRank: number) => {
 
   setRookies(updated);
 };
+// -------------------------
+// MY CURRENT LEAGUE PLAYER SET
+// -------------------------
+const myPlayerSet = new Set<string>(roster?.players || []);
   return (
     <main className="min-h-screen bg-gray-950 text-white">
 
       {/* HEADER */}
-      <div className="bg-gray-900 border-b border-gray-700 p-4 flex items-center justify-between">
+      <div className="bg-gray-900 border-b border-gray-700 p-4 flex items-center justify-center">
   
-  {/* LEFT SIDE */}
-  <div className="flex items-center gap-4">
-    <h1 className="text-xl font-bold">Dynasty Zeus</h1>
+  <div className="flex items-center gap-6">
 
-    {user && (
-      <span className="text-sm text-gray-400">
-        Sleeper: {user.display_name}
-      </span>
-    )}
+  <h1 className="text-xl font-bold">DynastyZeus</h1>
 
-    {user && (
-      <button
-        onClick={disconnectSleeper}
-        className="px-3 py-1 text-sm bg-gray-700 rounded hover:bg-gray-600"
-      >
-        Disconnect
-      </button>
-    )}
-  </div>
+  {user && (
+    <span className="text-sm text-gray-400">
+      Sleeper: {user.display_name}
+    </span>
+  )}
 
-  {/* RIGHT SIDE */}
-  <div className="flex items-center gap-3">
-    
-    {leagues.length > 0 && (
-      <select
-        value={selectedLeague?.league_id || ""}
-        onChange={(e) => {
-          const league = leagues.find(
-            (l: any) => l.league_id === e.target.value
-          );
-          if (league) loadRoster(league);
-        }}
-        className="bg-gray-800 border border-gray-700 rounded px-3 py-1 text-sm"
-      >
-        <option value="">Select League</option>
-        {leagues.map((l: any) => (
-          <option key={l.league_id} value={l.league_id}>
-            {l.name}
-          </option>
-        ))}
-      </select>
-    )}
-
+  {user && (
     <button
+      onClick={disconnectSleeper}
       className="px-3 py-1 text-sm bg-gray-700 rounded hover:bg-gray-600"
-      onClick={() => document.body.classList.toggle("light")}
     >
-      Light
+      Disconnect
     </button>
+  )}
 
-  </div>
+  {leagues.length > 0 && (
+    <select
+      value={selectedLeague?.league_id || ""}
+      onChange={(e) => {
+        const league = leagues.find(
+          (l: any) => l.league_id === e.target.value
+        );
+        if (league) {
+          loadRoster(league);
+          localStorage.setItem("selectedLeague", JSON.stringify(league));
+        }
+      }}
+      className="bg-gray-800 border border-gray-700 rounded px-3 py-1 text-sm"
+    >
+      <option value="">Select League</option>
+      {leagues.map((l: any) => (
+        <option key={l.league_id} value={l.league_id}>
+          {l.name}
+        </option>
+      ))}
+    </select>
+  )}
+
+</div>
 </div>
       {/* NAV */}
-      <div className="flex gap-4 p-4 border-b border-gray-700">
+      <div className="flex justify-center gap-6 p-4 border-b border-gray-700">
         <button
           onClick={() => setMainTab("LEAGUES")}
           className={mainTab === "LEAGUES" ? "text-blue-400" : ""}
@@ -715,7 +838,12 @@ const moveToRank = (fromIndex: number, toRank: number) => {
                         >
                           <div className="text-sm">
                             {index + 1}.{" "}
-                            {users[team.owner_id] || "Team"}
+                            <span
+  className="cursor-pointer hover:text-blue-400"
+  onClick={() => loadUserExposure(team.owner_id)}
+>
+  {users[team.owner_id] || "Team"}
+</span>
                           </div>
 
                           <div className="text-xs text-gray-400">
@@ -770,17 +898,33 @@ const moveToRank = (fromIndex: number, toRank: number) => {
 
     return (
       <div
-        key={p.player_id}
-        className={`p-3 rounded mb-2 ${colors[p.role]}`}
-      >
-        <div className="font-medium">{p.full_name}</div>
-        <div className="text-xs text-gray-400">
-          {p.team} • {p.role.toUpperCase()}
-        </div>
-        <div className="text-xs text-gray-500">
-          Age {p.age || "—"}
-        </div>
-      </div>
+  key={p.player_id}
+  className={`flex items-center justify-between px-3 py-1 mb-1 rounded text-sm ${colors[p.role]}`}
+>
+  {/* LEFT SIDE */}
+  <div className="flex items-center gap-2 truncate">
+    <span className="font-medium">{p.full_name}</span>
+
+    <span className="text-xs text-gray-400">
+      {p.team}
+    </span>
+
+    <span className="text-xs text-gray-500">
+      {p.role.toUpperCase()}
+    </span>
+  </div>
+
+  {/* RIGHT SIDE */}
+  <div className="flex items-center gap-3 text-xs whitespace-nowrap">
+  <span className="text-gray-400">
+    Age {p.age || "—"}
+  </span>
+
+  <span className="text-blue-400 font-semibold">
+    {p.value || 0}
+  </span>
+</div>
+</div>
     );
   })}
   {activeTab === "ROSTER" && (
@@ -1122,22 +1266,37 @@ const starters = starterSlots
                     </div>
 
                     <div className="text-xs text-gray-400 mt-1">
-                      Owned in:
-                      {data.leagues.map((l: string, i: number) => (
-                        <div key={i}>• {l}</div>
-                      ))}
-                    </div>
+  Owned or
+  <span className="ml-2 text-green-400">
+    (Starting)
+  </span>
+                      {[...data.leagues]
+  .sort((a: string, b: string) => {
+    const aStarter = data.starters.includes(a);
+    const bStarter = data.starters.includes(b);
 
-                    {data.starters.length > 0 && (
-                      <div className="text-xs text-green-400 mt-2">
-                        Starting in:
-                        {data.starters.map(
-                          (l: string, i: number) => (
-                            <div key={i}>• {l}</div>
-                          )
-                        )}
-                      </div>
-                    )}
+    // starters first
+    if (aStarter && !bStarter) return -1;
+    if (!aStarter && bStarter) return 1;
+
+    return 0;
+  })
+  .map((l: string, i: number) => {
+    const isStarter = data.starters.includes(l);
+
+    return (
+      <div
+        key={i}
+        className={`${
+          isStarter ? "text-green-400 font-medium" : ""
+        }`}
+      >
+        • {l} {isStarter && "🔥"}
+      </div>
+    );
+  })}
+                    </div>
+                    
                   </div>
                 );
               })}
@@ -1209,6 +1368,58 @@ const starters = starterSlots
 )}
 
       </div>
+      {selectedUserId && (
+  <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+    <div className="bg-gray-900 p-6 rounded w-96">
+
+      <div className="text-lg font-bold mb-4">
+        {users[selectedUserId]}'s Top Owned Players
+      </div>
+
+      {loadingShares ? (
+        <div className="text-sm text-gray-400">
+          Loading exposure...
+        </div>
+      ) : (
+        externalShares?.players?.map((entry: any) => {
+  const p = players[entry.playerId];
+  if (!p) return null;
+
+  const isMine = myPlayerSet.has(entry.playerId);
+
+  return (
+  <div
+    key={entry.playerId}
+    className={`flex items-center justify-between text-sm py-1 px-2 ${
+      isMine ? "bg-green-900/30 border border-green-700 rounded" : ""
+    }`}
+  >
+    <div className="truncate">
+      {p.full_name}
+      {isMine && (
+        <span className="ml-2 text-green-400 text-xs">
+          🔥
+        </span>
+      )}
+    </div>
+
+    <div className="text-gray-400 text-xs whitespace-nowrap ml-2">
+      {entry.count} • {entry.percent}%
+    </div>
+  </div>
+);
+})
+      )}
+
+      <button
+        onClick={() => setSelectedUserId(null)}
+        className="mt-4 w-full bg-blue-600 p-2 rounded"
+      >
+        Close
+      </button>
+    </div>
+  </div>
+)}
     </main>
   );
 }
