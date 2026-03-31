@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
+import Dashboard from "../components/Dashboard";
 
 export default function Home() {
   const CURRENT_YEAR = "2026";
@@ -13,6 +14,8 @@ export default function Home() {
   const [user, setUser] = useState<any>(null);
   const [leagues, setLeagues] = useState<any[]>([]);
   const [selectedLeague, setSelectedLeague] = useState<any>(null);
+  console.log("FULL LEAGUE OBJECT:", selectedLeague);
+console.log("SCORING SETTINGS RAW:", selectedLeague?.scoring_settings);
   const [roster, setRoster] = useState<any>(null);
   const [rosters, setRosters] = useState<any[]>([]);
   const [players, setPlayers] = useState<any>({});
@@ -23,7 +26,7 @@ export default function Home() {
   const [users, setUsers] = useState<any>({});
   const [standings, setStandings] = useState<any[]>([]);
 
-  const [mainTab, setMainTab] = useState("LEAGUES");
+  const [mainTab, setMainTab] = useState("DASHBOARD");
 
   const [allLeagueData, setAllLeagueData] = useState<any[]>([]);
   const [shareSearch, setShareSearch] = useState("");
@@ -36,6 +39,18 @@ export default function Home() {
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
 const [externalShares, setExternalShares] = useState<any>(null);
 const [loadingShares, setLoadingShares] = useState(false);
+const handleRankChange = (currentIndex: number, newRank: string) => {
+  const rank = parseInt(newRank);
+
+  if (!rank || rank < 1 || rank > rookies.length) return;
+
+  const updated = [...rookies];
+  const [moved] = updated.splice(currentIndex, 1);
+
+  updated.splice(rank - 1, 0, moved);
+
+  setRookies(updated);
+};
  
 
   // -------------------------
@@ -60,6 +75,115 @@ const [loadingShares, setLoadingShares] = useState(false);
       })
       .join(" • ");
   };
+  const STANDARD_SCORING: any = {
+  pass_yd: 0.04,
+  pass_td: 4,
+  pass_int: -2,
+  pass_first_down: 0,
+  pass_cmp: 0,
+  pass_inc: 0,
+  pass_attempt: 0,
+  pass_sack: 0,
+  pass_sack_yd: 0,
+  pass_pick_six: 0,
+  bonus_pass_yd_40: 0,
+  bonus_pass_td_40: 0,
+  bonus_pass_td_50: 0,
+  rush_yd: 0.1,
+  rush_td: 6,
+  rec: 0,
+  rec_yd: 0.1,
+  rec_td: 6,
+  rec_2pt: 2,
+  rush_2pt: 2,
+  pass_2pt: 2,
+};
+const getNonStandardRules = (scoring: any) => {
+  console.log("SCORING SETTINGS:", scoring);
+  const changes: any[] = [];
+
+  Object.keys(scoring || {}).forEach((key) => {
+    const value = scoring[key];
+    const standard = STANDARD_SCORING[key];
+
+    if (value === 0 || value === null) return;
+
+    if (standard === undefined || value !== standard) {
+      changes.push({ key, value });
+    }
+  });
+
+  return changes;
+};
+const formatRule = (key: string) => {
+  const labels: Record<string, string> = {
+    // PASSING
+    pass_int: "Interceptions Thrown",
+    pass_td_40p: "40+ Yard TD Pass",
+    pass_td_50p: "50+ Yard TD Pass",
+    pass_int_td: "Pick Six Thrown",
+    pass_att: "Pass Attempts",
+    pass_sack: "Times Sacked",
+    pass_cmp: "Completions",
+    pass_cmp_40p: "40+ Yard Completion",
+    pass_fd: "Passing First Downs",
+    pass_inc: "Incompletions",
+
+    // RUSHING
+    rush_td_50p: "50+ Yard TD Run",
+    rush_td_40p: "40+ Yard TD Run",
+    rush_fd: "Rushing First Downs",
+    rush_att: "Rush Attempts",
+    rush_40p: "40+ Yard Rush",
+
+    // RECEIVING
+    rec: "PPR",
+    rec_fd: "Receiving First Downs",
+
+    rec_0_4: "0–4 Yard Catch",
+    rec_5_9: "5–9 Yard Catch",
+    rec_10_19: "10–19 Yard Catch",
+    rec_20_29: "20–29 Yard Catch",
+    rec_30_39: "30–39 Yard Catch",
+    rec_40p: "40+ Yard Catch",
+
+    rec_td_40p: "40+ Yard TD Catch",
+    rec_td_50p: "50+ Yard TD Catch",
+
+    // POSITION BONUSES
+    bonus_rec_rb: "RB Premium",
+    bonus_rec_wr: "WR Premium",
+    bonus_rec_te: "TE Premium",
+  };
+
+  return (
+    labels[key] ||
+    key
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (l) => l.toUpperCase())
+  );
+};
+const groupRules = (rules: any[]) => {
+  return {
+    Passing: rules.filter(r =>
+  r.key.startsWith("pass") ||
+  r.key === "pass_int_td" ||   // ✅ PICK 6 FIX
+  r.key === "pass_cmp" ||
+  r.key === "pass_attempt" ||
+  r.key === "pass_sack"
+),
+
+    Rushing: rules.filter(r =>
+      r.key.startsWith("rush")
+    ),
+
+    Receiving: rules.filter(r =>
+      r.key === "rec" ||
+      r.key.startsWith("rec_") ||
+      r.key.startsWith("bonus_rec")
+    ),
+  };
+};
 
 const getLeagueRules = (league: any) => {
   const scoring = league?.scoring_settings || {};
@@ -281,6 +405,32 @@ const getStarterSlots = (roster: any, league: any) => {
 // LOAD LEAGUE 
 // -------------------------
 const loadRoster = async (league: any) => {
+
+  // 🔥 SAVE RECENT LEAGUE
+  const saveRecentLeague = (league: any) => {
+    const stored = localStorage.getItem("recentLeagues");
+    let recents = stored ? JSON.parse(stored) : [];
+
+    // remove duplicate
+    recents = recents.filter(
+      (l: any) => l.league_id !== league.league_id
+    );
+
+    // add to front
+    recents.unshift({
+      league_id: league.league_id,
+      name: league.name,
+    });
+
+    // keep only 5
+    recents = recents.slice(0, 5);
+
+    localStorage.setItem("recentLeagues", JSON.stringify(recents));
+  };
+
+  // ✅ CALL IT HERE
+  saveRecentLeague(league);
+
   setSelectedLeague(league);
 
   const res = await fetch(
@@ -662,14 +812,15 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     <select
       value={selectedLeague?.league_id || ""}
       onChange={(e) => {
-        const league = leagues.find(
-          (l: any) => l.league_id === e.target.value
-        );
-        if (league) {
-          loadRoster(league);
-          localStorage.setItem("selectedLeague", JSON.stringify(league));
-        }
-      }}
+  const league = leagues.find(
+    (l: any) => l.league_id === e.target.value
+  );
+  if (league) {
+    loadRoster(league);
+    setMainTab("LEAGUES"); // 🔥 ADD THIS
+    localStorage.setItem("selectedLeague", JSON.stringify(league));
+  }
+}}
       className="bg-gray-800 border border-gray-700 rounded px-3 py-1 text-sm"
     >
       <option value="">Select League</option>
@@ -686,63 +837,108 @@ const myPlayerSet = new Set<string>(roster?.players || []);
       {/* NAV */}
       <div className="flex justify-center gap-6 p-4 border-b border-gray-700">
         <button
-          onClick={() => setMainTab("LEAGUES")}
-          className={mainTab === "LEAGUES" ? "text-blue-400" : ""}
-        >
-          Leagues & Depth Charts
-        </button>
+  onClick={() => setMainTab("DASHBOARD")}
+  className={mainTab === "DASHBOARD" ? "text-blue-400" : ""}
+>
+  Dashboard
+</button>
+        <button
+  onClick={() => user && setMainTab("LEAGUES")}
+  className={`${mainTab === "LEAGUES" ? "text-blue-400" : ""} ${
+    !user ? "opacity-50 cursor-not-allowed" : ""
+  }`}
+>
+  Leagues & Depth Charts
+</button>
 
         <button
-          onClick={() => setMainTab("SHARES")}
-          className={mainTab === "SHARES" ? "text-blue-400" : ""}
-        >
-          Player Ownership & Tools
-        </button>
+  onClick={() => user && setMainTab("SHARES")}
+  className={`${mainTab === "SHARES" ? "text-blue-400" : ""} ${
+    !user ? "opacity-50 cursor-not-allowed" : ""
+  }`}
+>
+  Player Ownership & Tools
+</button>
 
         <button
-  onClick={() => setMainTab("BIGBOARD")}
-  className={mainTab === "BIGBOARD" ? "text-blue-400" : ""}
+  onClick={() => user && setMainTab("BIGBOARD")}
+  className={`${mainTab === "BIGBOARD" ? "text-blue-400" : ""} ${
+    !user ? "opacity-50 cursor-not-allowed" : ""
+  }`}
 >
   Rookie Big Board
 </button>
       </div>
 
       <div className="max-w-3xl mx-auto p-6">
+{mainTab === "DASHBOARD" && (
+  <>
+    <>
+  {!user && (
+    <div className="flex gap-2 mb-6">
+      <input
+        className="p-2 rounded bg-gray-800 w-full"
+        placeholder="Enter Sleeper username"
+        value={username}
+        onChange={(e) => setUsername(e.target.value)}
+      />
+      <button
+        onClick={connectSleeper}
+        className="bg-blue-600 px-4 rounded"
+      >
+        Connect
+      </button>
+    </div>
+  )}
 
+  <Dashboard
+    username={user?.display_name || ""}
+    leagues={leagues}
+    onSelectLeague={loadRoster}
+    onNavigate={setMainTab}
+  />
+</>
+  </>
+)}
         {/* LEAGUES */}
         {mainTab === "LEAGUES" && (
-          <>
-            {!user && (
-              <div className="flex gap-2 mb-6">
-                <input
-                  className="p-2 rounded bg-gray-800 w-full"
-                  placeholder="Sleeper username"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                />
-                <button
-                  onClick={connectSleeper}
-                  className="bg-blue-600 px-4 rounded"
-                >
-                  Connect
-                </button>
-              </div>
-            )}
+          <>            
+           {user && leagues.length > 0 && !selectedLeague && (
+  <div className="max-w-4xl mx-auto">
 
-            {leagues.length > 0 && !selectedLeague && (
-              <div>
-                {leagues.map((l) => (
-                  <div
-                    key={l.league_id}
-                    onClick={() => loadRoster(l)}
-                    className="bg-gray-800 p-4 rounded mb-3 cursor-pointer"
-                  >
-                    {l.name}
-                  </div>
-                ))}
-              </div>
-            )}
+    <h2 className="text-xl font-semibold mb-4 text-slate-300">
+      Your Leagues
+    </h2>
 
+    <input
+      className="w-full mb-6 px-4 py-3 rounded-xl bg-slate-900 border border-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-slate-500"
+      placeholder="Search leagues..."
+      value={search}
+      onChange={(e) => setSearch(e.target.value)}
+    />
+
+    {leagues
+      .filter((l: any) =>
+        l.name.toLowerCase().includes(search.toLowerCase())
+      )
+      .sort((a: any, b: any) => a.name.localeCompare(b.name))
+      .map((l: any) => (
+        <div
+  key={l.league_id}
+  onClick={() => loadRoster(l)}
+  className="group bg-slate-900 border border-slate-800 p-4 rounded-xl mb-3 cursor-pointer hover:bg-slate-800 transition flex justify-between items-center"
+>
+  {/* LEFT */}
+  <p className="font-medium">{l.name}</p>
+
+  {/* RIGHT */}
+  <span className="text-slate-500 group-hover:text-blue-400 transition">
+    →
+  </span>
+</div>
+      ))}
+  </div>
+)}
             {selectedLeague && roster && (
               <>
                 <button
@@ -765,23 +961,42 @@ const myPlayerSet = new Set<string>(roster?.players || []);
                     {getLineupSettings(selectedLeague)}
                   </div>
                 </div>
-                <div className="text-xs text-yellow-400 mt-2">
-  {(() => {
-    const r = getLeagueRules(selectedLeague);
-    return (
-      <>
-        {r.teams} Team • Pass TD: {r.passTD} • PPR: {r.ppr}
+                {(() => {
+  const rules = getNonStandardRules(selectedLeague?.scoring_settings);
+  const grouped = groupRules(rules);
 
-        {r.tePremium !== 0 && (
-          <>
-            <br />
-            TE Premium: +{r.tePremium}
-          </>
-        )}
-      </>
-    );
-  })()}
+  return Object.entries(grouped).map(([section, items]) => {
+    if (items.length === 0) return null;
+
+    return (
+      <div key={section} className="mb-2">
+  <div className="text-xs font-medium text-gray-400 mb-0.5 uppercase tracking-wide">
+  {section}
 </div>
+
+  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">  {/* 👈 ADD THIS */}
+
+    {items.map((rule: any, i: number) => (
+      <div
+        key={i}
+        className="flex justify-between items-center bg-yellow-200/10 border border-yellow-500/20 rounded px-2 py-1.5"
+      >
+        <span className="text-yellow-300 text-xs">
+          {formatRule(rule.key)}
+        </span>
+
+        <span className="text-green-400 text-xs">
+          {rule.value > 0 ? `+${rule.value}` : rule.value}
+        </span>
+      </div>
+    ))}
+
+  </div> {/* 👈 ADD THIS */}
+
+</div>
+    );
+  });
+})()}
 {/* 🔥 TEAM SUMMARY */}
 {(() => {
   const data = getTeamSummary();
@@ -1333,31 +1548,33 @@ const starters = starterSlots
         setDragIndex(null);
       }
     }}
-    className="flex items-center bg-gray-800 px-3 py-2 rounded cursor-move hover:bg-gray-700"
+    className="flex items-center bg-slate-900 border border-slate-800 px-2 py-1.5 rounded-xl cursor-move hover:bg-slate-800 transition"
   >
     <div className="flex gap-3 items-center">
-      <div className="text-gray-400 w-6">
-        {index + 1}
-      </div>
+      <input
+  type="number"
+  value={index + 1}
+  onChange={(e) => handleRankChange(index, e.target.value)}
+  className="w-12 text-center bg-transparent text-gray-400 outline-none"
+/>
 
       <div className="flex items-center gap-2">
         <span className="font-medium">{p.name}</span>
-        <span className="text-xs text-gray-400">{p.position}</span>
-        <input
-  type="number"
-  min={1}
-  placeholder="#"
-  className="w-14 ml-auto bg-gray-700 text-xs px-2 py-1 rounded"
-  onKeyDown={(e) => {
-    if (e.key === "Enter") {
-      const value = Number((e.target as HTMLInputElement).value);
-      if (!isNaN(value)) {
-        moveToRank(index, value);
-        (e.target as HTMLInputElement).value = "";
-      }
-    }
-  }}
-/>
+        <span
+  className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+    p.position === "QB"
+      ? "bg-purple-500/20 text-purple-400"
+      : p.position === "RB"
+      ? "bg-green-500/20 text-green-400"
+      : p.position === "WR"
+      ? "bg-blue-500/20 text-blue-400"
+      : p.position === "TE"
+      ? "bg-orange-500/20 text-orange-400"
+      : "bg-gray-700 text-gray-400"
+  }`}
+>
+  {p.position}
+</span>      
       </div>
     </div>
   </div>
