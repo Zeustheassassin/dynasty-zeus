@@ -1005,13 +1005,13 @@ const myPlayerSet = new Set<string>(roster?.players || []);
   const { summary, pickSummary } = data;
 
   return (
-    <div className="mt-4 flex flex-wrap gap-2 text-xs">
+    <div className="mt-4 flex flex-wrap gap-2 text-xs mb-4">
 
       {/* POSITION COUNTS */}
       {["QB", "RB", "WR", "TE"].map((pos) => (
   <div
     key={pos}
-    className="px-3 py-1 bg-gray-800 rounded-full border border-gray-700"
+    className="px-3 py-1 bg-gray-800/60 rounded-full border border-gray-700/50"
   >
     {pos}: {summary[pos]}
   </div>
@@ -1029,119 +1029,77 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     </div>
   );
 })()}
-                {/* STANDINGS */}
-                <div className="mb-6">
-                  <h3 className="text-sm font-semibold text-gray-300 mb-2">
-                    Standings
-                  </h3>
 
-                  {standings.map((team: any, index: number) => {
-                    const isMe = team.roster_id === roster.roster_id;
+<div className="bg-gray-900 border border-gray-700 rounded-xl p-4 mb-4">
 
-                    const playoffTeams =
-                      selectedLeague?.settings?.playoff_teams ||
-                      Math.ceil(rosters.length / 2);
-
-                    const isCutLine = index === playoffTeams - 1;
-
-                    return (
-                      <div key={team.roster_id}>
-                        <div
-                          className={`flex justify-between p-2 rounded mb-1 ${
-                            isMe ? "bg-blue-800/40" : "bg-gray-800"
-                          }`}
-                        >
-                          <div className="text-sm">
-                            {index + 1}.{" "}
-                            <span
-  className="cursor-pointer hover:text-blue-400"
-  onClick={() => loadUserExposure(team.owner_id)}
->
-  {users[team.owner_id] || "Team"}
-</span>
-                          </div>
-
-                          <div className="text-xs text-gray-400">
-                            {team.wins}-{team.losses}
-                            {team.ties ? `-${team.ties}` : ""} •{" "}
-                            {Math.round(team.fpts)} pts • Max{" "}
-                            {Math.round(team.max_pf)}
-                          </div>
-                        </div>
-
-                        {isCutLine && (
-                          <div className="border-t border-yellow-500 my-2 text-center text-xs text-yellow-400">
-                            Playoff Cut Line
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* PLAYER TABS */}
-                <div className="flex gap-2 mb-4">
-  {["ROSTER", "QB", "RB", "WR", "TE", "PICKS", "FREE AGENTS"].map((pos) => (
-  <button
-    key={pos}
-    onClick={() => setActiveTab(pos)}
-    className={`px-3 py-1 rounded ${
-      activeTab === pos
-        ? "bg-blue-600"
-        : "bg-gray-800"
-    }`}
-  >
-    {pos}
-  </button>
-))}
-</div>
-
-                <input
-                  className="w-full p-2 mb-4 rounded bg-gray-800"
-                  placeholder="Search players..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
-
-                {activeTab !== "PICKS" &&
-  filteredPlayers?.map((p: any) => {
-    const colors: any = {
-      starter: "bg-green-800/60",
-      bench: "bg-blue-800/40",
-      taxi: "bg-purple-800/60",
-    };
-
-    return (
-      <div
-  key={p.player_id}
-  className={`flex items-center justify-between px-3 py-1 mb-1 rounded text-sm ${colors[p.role]}`}
->
-  {/* LEFT SIDE */}
-  <div className="flex items-center gap-2 truncate">
-    <span className="font-medium">{p.full_name}</span>
-
-    <span className="text-xs text-gray-400">
-      {p.team}
-    </span>
-
-    <span className="text-xs text-gray-500">
-      {p.role.toUpperCase()}
-    </span>
+  {/* PLAYER TABS */}
+  <div className="flex flex-wrap gap-2 mb-3">
+    {["ROSTER", "QB", "RB", "WR", "TE", "PICKS", "FREE AGENTS"].map((pos) => (
+      <button
+        key={pos}
+        onClick={() => setActiveTab(pos)}
+        className={`px-3 py-1 rounded ${
+          activeTab === pos
+            ? "bg-blue-600"
+            : "bg-gray-800 hover:bg-gray-700"
+        }`}
+      >
+        {pos}
+      </button>
+    ))}
   </div>
 
-  {/* RIGHT SIDE */}
-  <div className="flex items-center gap-3 text-xs whitespace-nowrap">
-  <span className="text-gray-400">
-    Age {p.age || "—"}
-  </span>
+  {/* SEARCH */}
+  <input
+    className="w-full p-2.5 rounded bg-gray-800 border border-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+    placeholder="Search players..."
+    value={search}
+    onChange={(e) => setSearch(e.target.value)}
+  />
 
-  <span className="text-blue-400 font-semibold">
-    {p.value || 0}
-  </span>
 </div>
-</div>
-    );
-  })}
+                {["QB", "RB", "WR", "TE"].includes(activeTab) && (
+  <div className="bg-gray-900 border border-gray-700 rounded-xl p-4">
+
+    <div className="text-sm font-semibold mb-3 text-gray-300">
+      {activeTab}
+    </div>
+
+    {filteredPlayers?.map((p: any) => {
+      const colors: any = {
+        starter: "bg-green-800/60",
+        bench: "bg-blue-800/40",
+        taxi: "bg-purple-800/60",
+      };
+
+      return (
+        <div
+          key={p.player_id}
+          className={`flex items-center justify-between px-3 py-1.5 mb-1 rounded text-sm ${colors[p.role]}`}
+        >
+          {/* LEFT */}
+          <div className="flex items-center gap-2 truncate">
+            <span className="font-medium">{p.full_name}</span>
+            <span className="text-xs text-gray-400">{p.team}</span>
+            <span className="text-xs text-gray-500">
+              {p.role.toUpperCase()}
+            </span>
+          </div>
+
+          {/* RIGHT */}
+          <div className="flex items-center gap-3 text-xs whitespace-nowrap">
+            <span className="text-gray-400">
+              Age {p.age || "—"}
+            </span>
+            <span className="text-blue-400 font-semibold">
+              {p.value || 0}
+            </span>
+          </div>
+        </div>
+      );
+    })}
+  </div>
+)}
   {activeTab === "ROSTER" && (
   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
     {["QB", "RB", "WR", "TE"].map((pos) => {
@@ -1392,30 +1350,79 @@ const starters = starterSlots
   </div>
 )}
 {activeTab === "FREE AGENTS" && (
-  <div className="mt-4">
-    <div className="text-sm font-semibold mb-2">
+  <div className="mt-4 bg-gray-900 border border-gray-800 rounded-xl p-4">
+    <div className="text-sm font-semibold mb-3 text-gray-300">
       Top Free Agents (by Value)
     </div>
 
     {freeAgents.map((p: any, i: number) => (
       <div
         key={p.player_id}
-        className="flex justify-between items-center bg-gray-800 p-2 rounded mb-2"
+        className="flex justify-between items-center bg-gray-800/70 px-3 py-1.5 rounded-lg mb-1 text-sm"
       >
         <div className="flex items-center gap-2">
-          <div className="text-xs px-2 py-1 rounded bg-gray-700">
+          <div className="text-[10px] px-2 py-0.5 rounded bg-gray-700/80">
             {p.position}
           </div>
           <div>{p.full_name}</div>
         </div>
 
-        <div className="text-xs text-gray-400">
+        <div className="text-[11px] text-gray-400">
           VAL {p.value || 0}
         </div>
       </div>
     ))}
   </div>
 )}
+                {/* STANDINGS */}
+                <div className="mt-4 bg-gray-900 border border-gray-700 rounded-xl p-5 shadow-md">
+                  <h3 className="text-sm font-semibold text-gray-200 mb-4">
+                    Standings
+                  </h3>
+
+                  {standings.map((team: any, index: number) => {
+                    const isMe = team.roster_id === roster.roster_id;
+
+                    const playoffTeams =
+                      selectedLeague?.settings?.playoff_teams ||
+                      Math.ceil(rosters.length / 2);
+
+                    const isCutLine = index === playoffTeams - 1;
+
+                    return (
+                      <div key={team.roster_id}>
+                        <div
+                          className={`flex justify-between p-2 rounded mb-1 ${
+                            isMe ? "bg-blue-800/40" : "bg-gray-800"
+                          }`}
+                        >
+                          <div className="text-sm">
+                            {index + 1}.{" "}
+                            <span
+  className="cursor-pointer hover:text-blue-400"
+  onClick={() => loadUserExposure(team.owner_id)}
+>
+  {users[team.owner_id] || "Team"}
+</span>
+                          </div>
+
+                          <div className="text-xs text-gray-400">
+                            {team.wins}-{team.losses}
+                            {team.ties ? `-${team.ties}` : ""} •{" "}
+                            {Math.round(team.fpts)} pts • Max{" "}
+                            {Math.round(team.max_pf)}
+                          </div>
+                        </div>
+
+                        {isCutLine && (
+                          <div className="border-t border-yellow-500 my-2 text-center text-xs text-yellow-400">
+                            Playoff Cut Line
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </>
             )}
           </>
@@ -1548,7 +1555,7 @@ const starters = starterSlots
         setDragIndex(null);
       }
     }}
-    className="flex items-center bg-slate-900 border border-slate-800 px-2 py-1.5 rounded-xl cursor-move hover:bg-slate-800 transition"
+    className="flex items-center justify-between bg-gray-800/70 px-3 py-1.5 mb-1 rounded-lg text-sm cursor-move hover:bg-gray-700/70 transition"
   >
     <div className="flex gap-3 items-center">
       <input
