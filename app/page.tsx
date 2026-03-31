@@ -34,7 +34,7 @@ export default function Home() {
   const [rookieSearch, setRookieSearch] = useState("");
   const [userCache, setUserCache] = useState<any>({});
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
-const [externalShares, setExternalShares] = useState<any[]>([]);
+const [externalShares, setExternalShares] = useState<any>(null);
 const [loadingShares, setLoadingShares] = useState(false);
  
 
