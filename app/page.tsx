@@ -187,10 +187,11 @@ const [draftSettings, setDraftSettings] = useState<any>(null);
 const [draftScoutUserId, setDraftScoutUserId] = useState<string | null>(null);
 const [draftScoutData, setDraftScoutData] = useState<any[] | null>(null);
 const [loadingDraftScout, setLoadingDraftScout] = useState(false);
+const [loadingDraftRefresh, setLoadingDraftRefresh] = useState(false);
 const [tradeHubUserId, setTradeHubUserId] = useState<string | null>(null);
 const [tradeHubData, setTradeHubData] = useState<any[] | null>(null);
 const [loadingTradeHub, setLoadingTradeHub] = useState(false);
-const [tradeHubSection, setTradeHubSection] = useState<"TRADES" | "CALCULATOR">("TRADES");
+const [tradeHubSection, setTradeHubSection] = useState<"TRADES" | "CALCULATOR" | "FINDER">("TRADES");
 const [draftHubSection, setDraftHubSection] = useState<"BOARD" | "BIG_BOARD">("BOARD");
 const [pickFcValues, setPickFcValues] = useState<Record<string, number>>({});
 const [calcFcValues, setCalcFcValues] = useState<Record<string, number>>({});
@@ -305,9 +306,9 @@ useEffect(() => {
   loadPlayers();
 }, []);
 
-// Load league-specific FC values whenever the calculator tab is active and a league is selected
+// Load league-specific FC values whenever the calculator or finder tab is active and a league is selected
 useEffect(() => {
-  if (tradeHubSection === "CALCULATOR" && selectedLeague?.league_id) {
+  if ((tradeHubSection === "CALCULATOR" || tradeHubSection === "FINDER") && selectedLeague?.league_id) {
     loadCalcValues(selectedLeague.league_id);
   }
 }, [tradeHubSection, selectedLeague?.league_id]);
@@ -565,44 +566,34 @@ useEffect(() => {
   localStorage.setItem(`rookieBoard_${ROOKIE_YEAR}`, JSON.stringify(merged));
   setRookies(merged);
 }, [players]);
+const refreshDraftBoard = async () => {
+  if (!selectedLeague) return;
+  setLoadingDraftRefresh(true);
+  try {
+    const draftsRes = await fetch(
+      `https://api.sleeper.app/v1/league/${selectedLeague.league_id}/drafts`
+    );
+    const drafts = await draftsRes.json();
+    const currentDraft = drafts[0];
+    if (!currentDraft) return;
+    setDraftId(currentDraft.draft_id);
+    setDraftOrder(currentDraft.draft_order || currentDraft.slot_to_roster_id || {});
+    setDraftSettings(currentDraft.settings);
+    const picksRes = await fetch(
+      `https://api.sleeper.app/v1/draft/${currentDraft.draft_id}/picks`
+    );
+    const picks = await picksRes.json();
+    setDraftPicks(picks);
+  } catch (err) {
+    console.warn("Draft refresh failed");
+  } finally {
+    setLoadingDraftRefresh(false);
+  }
+};
+
 useEffect(() => {
   if (!selectedLeague || mainTab !== "DRAFT" || draftHubSection !== "BOARD") return;
-
-  let interval: any;
-
-  const loadDraft = async () => {
-    try {
-      // 1. Get drafts
-      const draftsRes = await fetch(
-        `https://api.sleeper.app/v1/league/${selectedLeague.league_id}/drafts`
-      );
-      const drafts = await draftsRes.json();
-
-      const currentDraft = drafts[0];
-if (!currentDraft) return;
-
-setDraftId(currentDraft.draft_id);
-
-// 🔥 ADD THESE TWO LINES
-setDraftOrder(currentDraft.draft_order || currentDraft.slot_to_roster_id || {});
-setDraftSettings(currentDraft.settings);
-
-      // 2. Get picks
-      const picksRes = await fetch(
-        `https://api.sleeper.app/v1/draft/${currentDraft.draft_id}/picks`
-      );
-      const picks = await picksRes.json();
-
-      setDraftPicks(picks);
-    } catch (err) {
-      console.warn("Draft polling failed");
-    }
-  };
-
-  loadDraft();
-  interval = setInterval(loadDraft, 5000);
-
-  return () => clearInterval(interval);
+  refreshDraftBoard();
 }, [selectedLeague, mainTab, draftHubSection]);
 const getStarterSlots = (roster: any, league: any) => {
   if (!roster?.starters || !league?.roster_positions) return [];
@@ -1967,6 +1958,18 @@ const starters = starterSlots
       </button>
     </div>
 
+    {draftHubSection === "BOARD" && (
+      <div className="flex justify-end mb-3">
+        <button
+          onClick={refreshDraftBoard}
+          disabled={loadingDraftRefresh}
+          className="flex items-center gap-2 px-4 py-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg transition"
+        >
+          {loadingDraftRefresh ? "Refreshing…" : "↻ Refresh Board"}
+        </button>
+      </div>
+    )}
+
     {draftHubSection === "BOARD" && !draftSettings && (
       <div className="text-gray-400">
         No draft data available
@@ -2238,6 +2241,16 @@ const starters = starterSlots
       >
         Trade Calculator
       </button>
+      <button
+        onClick={() => setTradeHubSection("FINDER")}
+        className={`pb-2 px-1 text-sm font-semibold transition ${
+          tradeHubSection === "FINDER"
+            ? "border-b-2 border-blue-400 text-blue-400"
+            : "text-gray-400 hover:text-white"
+        }`}
+      >
+        Trade Finder
+      </button>
     </div>
 
     {/* ── League Trade Database ── */}
@@ -2342,7 +2355,37 @@ const starters = starterSlots
         calcReceive.reduce((s: number, id: string) => s + calcVal(id), 0) +
         calcReceivePicks.reduce((s: number, k: string) => s + getPickValue(k), 0);
 
-      const net = totalReceive - totalGive;
+      // Waiver adjustment — when one side has more assets, the side with fewer gets
+      // a waiver credit equal to each extra asset's value × 0.42 (FantasyCalc approximation)
+      const giveAssets = [
+        ...calcGive.map((id: string) => calcVal(id)),
+        ...calcGivePicks.map((k: string) => getPickValue(k)),
+      ].sort((a, b) => b - a);
+      const receiveAssets = [
+        ...calcReceive.map((id: string) => calcVal(id)),
+        ...calcReceivePicks.map((k: string) => getPickValue(k)),
+      ].sort((a, b) => b - a);
+      const assetDiff = giveAssets.length - receiveAssets.length;
+      let waiverAdj = 0;
+      let waiverAdjSide: "give" | "receive" | null = null;
+      // No waiver adjustment if either side is completely empty
+      const calcWaiverAdj = (extras: number[]) =>
+        extras.reduce((sum, val, i) => {
+          const cap = i === 0 ? 550 : 750;
+          return sum + Math.min(Math.round(val * 0.42), cap);
+        }, 0);
+      if (assetDiff > 0 && receiveAssets.length > 0) {
+        waiverAdj = calcWaiverAdj(giveAssets.slice(receiveAssets.length));
+        waiverAdjSide = "receive";
+      } else if (assetDiff < 0 && giveAssets.length > 0) {
+        waiverAdj = calcWaiverAdj(receiveAssets.slice(giveAssets.length));
+        waiverAdjSide = "give";
+      }
+
+      const totalGiveAdj = totalGive + (waiverAdjSide === "give" ? waiverAdj : 0);
+      const totalReceiveAdj = totalReceive + (waiverAdjSide === "receive" ? waiverAdj : 0);
+
+      const net = totalReceiveAdj - totalGiveAdj;
       const verdict = Math.abs(net) <= 300 ? "EVEN" : net > 0 ? "YOU WIN" : "YOU LOSE";
       const verdictColor = verdict === "EVEN" ? "text-yellow-400" : verdict === "YOU WIN" ? "text-green-400" : "text-red-400";
 
@@ -2424,17 +2467,22 @@ const starters = starterSlots
                 className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-xs mb-3 focus:outline-none focus:border-blue-500"
               />
               <div className="space-y-1 max-h-56 overflow-y-auto pr-1">
-                {filterPlayers(myAvailPlayers, calcSearchA).map((p: any) =>
-                  assetRow(`${p.full_name} (${p.position} · ${p.team})`, calcVal(p.player_id),
-                    () => setCalcGive((prev) => [...prev, p.player_id]))
-                )}
-                {myAvailPicks.map((p: any) =>
-                  assetRow(pickLabel(p), pickFcValues[`${p.season}-${p.round}`] ?? 0,
-                    () => setCalcGivePicks((prev) => [...prev, pickKey(p)]))
-                )}
-                {myAvailPlayers.length === 0 && myAvailPicks.length === 0 && (
-                  <p className="text-xs text-gray-600">No assets available</p>
-                )}
+                {(() => {
+                  const items = [
+                    ...filterPlayers(myAvailPlayers, calcSearchA).map((p: any) => ({
+                      label: `${p.full_name} (${p.position} · ${p.team})`,
+                      value: calcVal(p.player_id),
+                      onAdd: () => setCalcGive((prev: string[]) => [...prev, p.player_id]),
+                    })),
+                    ...myAvailPicks.map((p: any) => ({
+                      label: pickLabel(p),
+                      value: pickFcValues[`${p.season}-${p.round}`] ?? 0,
+                      onAdd: () => setCalcGivePicks((prev: string[]) => [...prev, pickKey(p)]),
+                    })),
+                  ].sort((a, b) => b.value - a.value);
+                  if (items.length === 0) return <p className="text-xs text-gray-600">No assets available</p>;
+                  return items.map((item) => assetRow(item.label, item.value, item.onAdd));
+                })()}
               </div>
             </div>
 
@@ -2449,28 +2497,56 @@ const starters = starterSlots
                 type="text"
                 value={calcSearchB}
                 onChange={(e) => setCalcSearchB(e.target.value)}
-                placeholder="Filter players..."
-                disabled={!opponentRoster}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-xs mb-3 focus:outline-none focus:border-blue-500 disabled:opacity-40"
+                placeholder={opponentRoster ? "Filter players..." : "Search any player to find their team..."}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-xs mb-3 focus:outline-none focus:border-blue-500"
               />
               <div className="space-y-1 max-h-56 overflow-y-auto pr-1">
-                {!opponentRoster ? (
-                  <p className="text-xs text-gray-600">Select an opponent above</p>
-                ) : (
-                  <>
-                    {filterPlayers(theirAvailPlayers, calcSearchB).map((p: any) =>
-                      assetRow(`${p.full_name} (${p.position} · ${p.team})`, calcVal(p.player_id),
-                        () => setCalcReceive((prev) => [...prev, p.player_id]))
-                    )}
-                    {theirAvailPicks.map((p: any) =>
-                      assetRow(pickLabel(p), pickFcValues[`${p.season}-${p.round}`] ?? 0,
-                        () => setCalcReceivePicks((prev) => [...prev, pickKey(p)]))
-                    )}
-                    {theirAvailPlayers.length === 0 && theirAvailPicks.length === 0 && (
-                      <p className="text-xs text-gray-600">No assets available</p>
-                    )}
-                  </>
-                )}
+                {!opponentRoster ? (() => {
+                  const q = calcSearchB.trim().toLowerCase();
+                  if (q.length < 1) return (
+                    <p className="text-xs text-gray-600">Search a player name above or select an opponent from the dropdown</p>
+                  );
+                  const allRosterPlayers = rosters
+                    .filter((r: any) => r.owner_id !== user?.user_id)
+                    .flatMap((r: any) =>
+                      (r.players || []).map((id: string) => {
+                        const p = (players as any)[id];
+                        return p ? { ...p, _rosterId: r.roster_id } : null;
+                      })
+                    )
+                    .filter((p: any) =>
+                      p &&
+                      ["QB","RB","WR","TE"].includes(p.position) &&
+                      p.full_name?.toLowerCase().includes(q) &&
+                      !calcReceive.includes(p.player_id)
+                    )
+                    .sort((a: any, b: any) => calcVal(b.player_id) - calcVal(a.player_id));
+                  if (allRosterPlayers.length === 0) return (
+                    <p className="text-xs text-gray-600">No player found — try a different name</p>
+                  );
+                  return allRosterPlayers.map((p: any) =>
+                    assetRow(`${p.full_name} (${p.position} · ${p.team})`, calcVal(p.player_id), () => {
+                      setCalcOpponentRosterId(p._rosterId);
+                      setCalcReceive((prev) => [...prev, p.player_id]);
+                    })
+                  );
+                })() : (() => {
+                    const items = [
+                      ...filterPlayers(theirAvailPlayers, calcSearchB).map((p: any) => ({
+                        label: `${p.full_name} (${p.position} · ${p.team})`,
+                        value: calcVal(p.player_id),
+                        onAdd: () => setCalcReceive((prev: string[]) => [...prev, p.player_id]),
+                      })),
+                      ...theirAvailPicks.map((p: any) => ({
+                        label: pickLabel(p),
+                        value: pickFcValues[`${p.season}-${p.round}`] ?? 0,
+                        onAdd: () => setCalcReceivePicks((prev: string[]) => [...prev, pickKey(p)]),
+                      })),
+                    ].sort((a, b) => b.value - a.value);
+                    if (items.length === 0) return <p className="text-xs text-gray-600">No assets available</p>;
+                    return items.map((item) => assetRow(item.label, item.value, item.onAdd));
+                  })()
+                }
               </div>
             </div>
           </div>
@@ -2494,16 +2570,21 @@ const starters = starterSlots
                     );
                   })}
                   {calcGivePicks.map((k: string) => {
-                    const [season, round, origId] = k.split("-");
-                    const origName = (users as any)[rosterToUser[Number(origId)]] || `Team ${origId}`;
-                    const label = `${season} Rd ${round}${origId !== String(myRoster?.roster_id) ? ` (via ${origName})` : ""}`;
+                    const pick = (allPicks as any[]).find((p: any) => pickKey(p) === k);
+                    const label = pick ? pickLabel(pick) : k;
                     return tradeRow(label, getPickValue(k),
                       () => setCalcGivePicks((prev) => prev.filter((x) => x !== k)));
                   })}
                 </div>
+                {waiverAdjSide === "give" && waiverAdj > 0 && (
+                  <div className="flex items-center justify-between px-3 py-1.5 bg-gray-800 rounded-lg">
+                    <span className="text-xs text-gray-400 italic">Waiver Adjustment</span>
+                    <span className="text-xs text-blue-300 font-mono">+{waiverAdj.toLocaleString()}</span>
+                  </div>
+                )}
                 <div className="mt-3 pt-2 border-t border-gray-700 flex justify-between items-center">
                   <span className="text-xs text-gray-500">Total</span>
-                  <span className="text-base font-bold text-red-400">{totalGive.toLocaleString()}</span>
+                  <span className="text-base font-bold text-red-400">{totalGiveAdj.toLocaleString()}</span>
                 </div>
               </div>
 
@@ -2523,16 +2604,21 @@ const starters = starterSlots
                     );
                   })}
                   {calcReceivePicks.map((k: string) => {
-                    const [season, round, origId] = k.split("-");
-                    const origName = (users as any)[rosterToUser[Number(origId)]] || `Team ${origId}`;
-                    const label = `${season} Rd ${round}${origId !== String(opponentRoster?.roster_id) ? ` (via ${origName})` : ""}`;
+                    const pick = (allPicks as any[]).find((p: any) => pickKey(p) === k);
+                    const label = pick ? pickLabel(pick) : k;
                     return tradeRow(label, getPickValue(k),
                       () => setCalcReceivePicks((prev) => prev.filter((x) => x !== k)));
                   })}
                 </div>
+                {waiverAdjSide === "receive" && waiverAdj > 0 && (
+                  <div className="flex items-center justify-between px-3 py-1.5 bg-gray-800 rounded-lg">
+                    <span className="text-xs text-gray-400 italic">Waiver Adjustment</span>
+                    <span className="text-xs text-blue-300 font-mono">+{waiverAdj.toLocaleString()}</span>
+                  </div>
+                )}
                 <div className="mt-3 pt-2 border-t border-gray-700 flex justify-between items-center">
                   <span className="text-xs text-gray-500">Total</span>
-                  <span className="text-base font-bold text-green-400">{totalReceive.toLocaleString()}</span>
+                  <span className="text-base font-bold text-green-400">{totalReceiveAdj.toLocaleString()}</span>
                 </div>
               </div>
             </div>
@@ -2558,9 +2644,426 @@ const starters = starterSlots
             )}
           </div>
 
+          {/* Trade Equalizer */}
+          {verdict !== "EVEN" &&
+            (calcGive.length + calcGivePicks.length) > 0 &&
+            (calcReceive.length + calcReceivePicks.length) > 0 &&
+            (() => {
+              const gap = Math.abs(net);
+              const youWin = net > 0;
+
+              type EqCandidate = {
+                label: string; value: number; age?: number;
+                position?: string; isPick: boolean; onAdd: () => void;
+              };
+
+              const candidates: EqCandidate[] = youWin
+                ? [
+                    ...myAvailPlayers.map((p: any) => ({
+                      label: p.full_name, value: calcVal(p.player_id),
+                      age: p.age, position: p.position, isPick: false,
+                      onAdd: () => setCalcGive((prev: string[]) => [...prev, p.player_id]),
+                    })),
+                    ...myAvailPicks.map((p: any) => ({
+                      label: pickLabel(p),
+                      value: pickFcValues[`${p.season}-${p.round}`] ?? 0,
+                      isPick: true,
+                      onAdd: () => setCalcGivePicks((prev: string[]) => [...prev, pickKey(p)]),
+                    })),
+                  ]
+                : [
+                    ...theirAvailPlayers.map((p: any) => ({
+                      label: p.full_name, value: calcVal(p.player_id),
+                      age: p.age, position: p.position, isPick: false,
+                      onAdd: () => setCalcReceive((prev: string[]) => [...prev, p.player_id]),
+                    })),
+                    ...theirAvailPicks.map((p: any) => ({
+                      label: pickLabel(p),
+                      value: pickFcValues[`${p.season}-${p.round}`] ?? 0,
+                      isPick: true,
+                      onAdd: () => setCalcReceivePicks((prev: string[]) => [...prev, pickKey(p)]),
+                    })),
+                  ];
+
+              const suggestions = candidates
+                .filter((c) => c.value > 0)
+                .sort((a, b) => Math.abs(a.value - gap) - Math.abs(b.value - gap))
+                .slice(0, 5);
+
+              if (suggestions.length === 0) return null;
+
+              return (
+                <div className="mt-4 flex justify-center">
+                  <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5 w-full max-w-md">
+                    <h3 className="text-sm font-semibold text-gray-200 mb-3">Players To Equalize Trade</h3>
+                    <div className="flex justify-end gap-6 text-[11px] text-gray-500 mb-1 pr-9">
+                      <span>Age</span>
+                      <span>Value</span>
+                    </div>
+                    <div className="space-y-1">
+                      {suggestions.map((s) => (
+                        <div key={s.label} className="flex items-center justify-between px-3 py-2 bg-gray-800 rounded-lg">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="text-sm font-medium text-blue-400 truncate">{s.label}</span>
+                            <span className="text-[10px] bg-gray-700 text-gray-400 px-1.5 py-0.5 rounded font-bold uppercase shrink-0">
+                              {s.isPick ? "PICK" : s.position}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-3 shrink-0 ml-3">
+                            <span className="text-xs text-gray-400 w-8 text-right">{s.age ?? ""}</span>
+                            <span className="text-xs font-mono text-gray-300 w-12 text-right">{s.value.toLocaleString()}</span>
+                            <button
+                              onClick={s.onAdd}
+                              className="w-6 h-6 bg-blue-500 hover:bg-blue-400 rounded-full flex items-center justify-center text-white text-sm font-bold transition shrink-0"
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
           <p className="text-[10px] text-gray-700 mt-3">
-            Pick values shown as averages for that round. Waiver wire adjustment not included — FantasyCalc computes this from proprietary market data.
+            Pick values shown as averages for that round. Waiver adjustment approximated at 42% of extra assets' value when sides have unequal player counts.
           </p>
+        </div>
+      );
+    })()}
+
+    {/* ── Trade Finder ── */}
+    {tradeHubSection === "FINDER" && (() => {
+      if (!selectedLeague) return (
+        <p className="text-gray-400 text-sm">Select a league from the dropdown above to use the Trade Finder.</p>
+      );
+
+      const calcVal = (id: string) => calcFcValues[id] ?? (players as any)[id]?.value ?? 0;
+
+      // Build roster player list with values
+      const rosterPlayers = (roster: any) =>
+        (roster?.players || [])
+          .map((id: string) => { const p = (players as any)[id]; return p ? { ...p, value: calcVal(id) } : null; })
+          .filter((p: any) => p && ["QB","RB","WR","TE"].includes(p.position) && p.value > 0)
+          .sort((a: any, b: any) => b.value - a.value);
+
+      // Position totals for a player list
+      const posTotals = (plist: any[]) => {
+        const t: Record<string, number> = { QB: 0, RB: 0, WR: 0, TE: 0 };
+        plist.forEach((p: any) => { t[p.position] = (t[p.position] || 0) + p.value; });
+        return t;
+      };
+
+      // Waiver adj using same caps as calculator
+      const tradeWaiverAdj = (giveVals: number[], receiveVals: number[]) => {
+        const diff = giveVals.length - receiveVals.length;
+        if (diff === 0) return 0;
+        const capAdj = (extras: number[]) =>
+          extras.reduce((s, v, i) => s + Math.min(Math.round(v * 0.42), i === 0 ? 550 : 750), 0);
+        if (diff > 0) {
+          const sg = [...giveVals].sort((a, b) => b - a);
+          return capAdj(sg.slice(receiveVals.length));
+        } else {
+          const sr = [...receiveVals].sort((a, b) => b - a);
+          return capAdj(sr.slice(giveVals.length));
+        }
+      };
+
+      // Check if a trade is value-balanced (within ±400 after waiver adj)
+      const isBalanced = (giveVals: number[], receiveVals: number[]) => {
+        const gTotal = giveVals.reduce((s, v) => s + v, 0);
+        const rTotal = receiveVals.reduce((s, v) => s + v, 0);
+        const diff = giveVals.length - receiveVals.length;
+        const adjG = gTotal + (diff < 0 ? tradeWaiverAdj(giveVals, receiveVals) : 0);
+        const adjR = rTotal + (diff > 0 ? tradeWaiverAdj(giveVals, receiveVals) : 0);
+        return Math.abs(adjR - adjG) <= 400;
+      };
+
+      const myRoster = rosters.find((r: any) => r.owner_id === user?.user_id);
+      const myPlayers = rosterPlayers(myRoster);
+      const myT = posTotals(myPlayers);
+      const myTop = myPlayers.slice(0, 10);
+
+      // League-wide positional totals for every team (used for ranking)
+      const allTeamPosTotals = rosters.map((r: any) => posTotals(rosterPlayers(r)));
+      const numTeams = rosters.length;
+
+      // Rank user (1 = best) at a given position given their total at that position
+      const leagueRank = (pos: string, total: number) => {
+        const sorted = allTeamPosTotals.map((t) => t[pos] || 0).sort((a, b) => b - a);
+        let rank = 1;
+        for (const t of sorted) { if (total >= t) break; rank++; }
+        return Math.min(rank, numTeams);
+      };
+
+      // Positional fit score using post-trade league rankings.
+      // Rewards improving weak positions, penalizes destroying strong ones.
+      const posScore = (givePL: any[], receivePL: any[]) => {
+        const postT: Record<string, number> = { ...myT };
+        givePL.forEach((p: any) => { postT[p.position] = (postT[p.position] || 0) - p.value; });
+        receivePL.forEach((p: any) => { postT[p.position] = (postT[p.position] || 0) + p.value; });
+
+        let score = 0;
+        for (const pos of ["QB", "RB", "WR", "TE"]) {
+          const beforeRank = leagueRank(pos, myT[pos] || 0);
+          const afterRank  = leagueRank(pos, postT[pos] || 0);
+          const rankDelta  = beforeRank - afterRank; // positive = moved up (improved)
+
+          // Hard cutoff — never let any position group fall below 8th in the league
+          if (afterRank > 8) return -Infinity;
+
+          // Scale reward/penalty by rank change; improving a weak spot is worth more
+          const wasWeak = beforeRank > Math.floor(numTeams / 2);
+          score += rankDelta * (wasWeak && rankDelta > 0 ? 3 : 2);
+        }
+        return score;
+      };
+
+      if (loadingCalcValues) return <p className="text-sm text-blue-400">Loading player values…</p>;
+
+      // QB safety gate — find the top-32 QB value floor across all known players
+      const allQBsSorted = Object.values(players as Record<string, any>)
+        .filter((p: any) => p.position === "QB")
+        .map((p: any) => calcVal(p.player_id))
+        .filter((v) => v > 0)
+        .sort((a, b) => b - a);
+      const top32QBFloor = allQBsSorted[31] ?? 0; // value of the 32nd-best QB
+
+      // How many of my QBs are within top-32 threshold
+      const myTop32QBs = myPlayers.filter(
+        (p: any) => p.position === "QB" && p.value >= top32QBFloor
+      );
+
+      // Returns true if giving these players still leaves ≥3 top-32 QBs on my roster
+      const qbSafe = (givePlayers: any[]) => {
+        const qbsGiven = givePlayers.filter((p: any) => p.position === "QB" && p.value >= top32QBFloor).length;
+        return myTop32QBs.length - qbsGiven >= 3;
+      };
+
+      type TradeResult = {
+        give: any[]; receive: any[];
+        oppName: string; oppRosterId: number;
+        score: number; net: number; format: string;
+      };
+
+      const results: TradeResult[] = [];
+
+      for (const oppRoster of rosters.filter((r: any) => r.owner_id !== user?.user_id)) {
+        const oppPlayers = rosterPlayers(oppRoster);
+
+        const oppTop = oppPlayers.slice(0, 10);
+        const oppName = (users as any)[oppRoster.owner_id] || `Team ${oppRoster.roster_id}`;
+
+        // 1v1
+        for (const mp of myTop) {
+          for (const op of oppTop) {
+            if (!isBalanced([mp.value], [op.value])) continue;
+            if (!qbSafe([mp])) continue;
+            results.push({
+              give: [mp], receive: [op], oppName, oppRosterId: oppRoster.roster_id,
+              score: posScore([mp], [op]),
+              net: op.value - mp.value, format: "1 for 1",
+            });
+          }
+        }
+
+        // 1v2
+        for (const mp of myTop) {
+          for (let i = 0; i < Math.min(oppTop.length, 9); i++) {
+            for (let j = i + 1; j < Math.min(oppTop.length, 9); j++) {
+              const op1 = oppTop[i], op2 = oppTop[j];
+              if (!isBalanced([mp.value], [op1.value, op2.value])) continue;
+              if (!qbSafe([mp])) continue;
+              const adj = tradeWaiverAdj([mp.value], [op1.value, op2.value]);
+              results.push({
+                give: [mp], receive: [op1, op2], oppName, oppRosterId: oppRoster.roster_id,
+                score: posScore([mp], [op1, op2]),
+                // receive>give: opp gets waiver credit → adj raises their side (costs us)
+                net: op1.value + op2.value - mp.value - adj, format: "1 for 2",
+              });
+            }
+          }
+        }
+
+        // 2v1
+        for (let i = 0; i < Math.min(myTop.length, 9); i++) {
+          for (let j = i + 1; j < Math.min(myTop.length, 9); j++) {
+            for (const op of oppTop) {
+              const mp1 = myTop[i], mp2 = myTop[j];
+              if (!isBalanced([mp1.value, mp2.value], [op.value])) continue;
+              if (!qbSafe([mp1, mp2])) continue;
+              const adj = tradeWaiverAdj([mp1.value, mp2.value], [op.value]);
+              results.push({
+                give: [mp1, mp2], receive: [op], oppName, oppRosterId: oppRoster.roster_id,
+                score: posScore([mp1, mp2], [op]),
+                net: op.value + adj - mp1.value - mp2.value, format: "2 for 1",
+              });
+            }
+          }
+        }
+
+        // 2v2
+        for (let i = 0; i < Math.min(myTop.length, 8); i++) {
+          for (let j = i + 1; j < Math.min(myTop.length, 8); j++) {
+            for (let k = 0; k < Math.min(oppTop.length, 8); k++) {
+              for (let l = k + 1; l < Math.min(oppTop.length, 8); l++) {
+                const mp1 = myTop[i], mp2 = myTop[j];
+                const op1 = oppTop[k], op2 = oppTop[l];
+                if (!isBalanced([mp1.value, mp2.value], [op1.value, op2.value])) continue;
+                if (!qbSafe([mp1, mp2])) continue;
+                results.push({
+                  give: [mp1, mp2], receive: [op1, op2], oppName, oppRosterId: oppRoster.roster_id,
+                  score: posScore([mp1, mp2], [op1, op2]),
+                  net: op1.value + op2.value - mp1.value - mp2.value, format: "2 for 2",
+                });
+              }
+            }
+          }
+        }
+
+        // 2v3
+        for (let i = 0; i < Math.min(myTop.length, 7); i++) {
+          for (let j = i + 1; j < Math.min(myTop.length, 7); j++) {
+            for (let k = 0; k < Math.min(oppTop.length, 7); k++) {
+              for (let l = k + 1; l < Math.min(oppTop.length, 7); l++) {
+                for (let m = l + 1; m < Math.min(oppTop.length, 7); m++) {
+                  const mp1 = myTop[i], mp2 = myTop[j];
+                  const op1 = oppTop[k], op2 = oppTop[l], op3 = oppTop[m];
+                  if (!isBalanced([mp1.value, mp2.value], [op1.value, op2.value, op3.value])) continue;
+                  if (!qbSafe([mp1, mp2])) continue;
+                  const adj = tradeWaiverAdj([mp1.value, mp2.value], [op1.value, op2.value, op3.value]);
+                  results.push({
+                    give: [mp1, mp2], receive: [op1, op2, op3], oppName, oppRosterId: oppRoster.roster_id,
+                    score: posScore([mp1, mp2], [op1, op2, op3]),
+                    // receive>give: opp gets waiver credit → adj raises their side (costs us)
+                    net: op1.value + op2.value + op3.value - mp1.value - mp2.value - adj, format: "2 for 3",
+                  });
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Deduplicate by player set, sort by score, take top 10
+      const seen = new Set<string>();
+      const top10 = results
+        .filter((r) => isFinite(r.score))
+        .sort((a, b) => b.score - a.score)
+        .filter((r) => {
+          const key = [...r.give.map((p: any) => p.player_id), ...r.receive.map((p: any) => p.player_id)].sort().join(",");
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+        .slice(0, 10);
+
+      if (top10.length === 0) return (
+        <p className="text-gray-400 text-sm">
+          No balanced trades found. Try selecting a league with more roster data loaded.
+        </p>
+      );
+
+      return (
+        <div className="space-y-4">
+          <p className="text-xs text-gray-500">
+            Top trade suggestions based on value balance and positional fit for <strong className="text-gray-300">{selectedLeague.name}</strong>.
+            {loadingCalcValues && <span className="ml-2 text-blue-400">Loading values…</span>}
+          </p>
+          {top10.map((trade, idx) => {
+            const giveTotal = trade.give.reduce((s: number, p: any) => s + p.value, 0);
+            const receiveTotal = trade.receive.reduce((s: number, p: any) => s + p.value, 0);
+            const giveCount = trade.give.length;
+            const recCount = trade.receive.length;
+            const cardAdj = giveCount !== recCount
+              ? tradeWaiverAdj(trade.give.map((p: any) => p.value), trade.receive.map((p: any) => p.value))
+              : 0;
+            // give>receive → waiver credit added to receive; receive>give → waiver credit added to give
+            const adjOnGive = recCount > giveCount ? cardAdj : 0;
+            const adjOnReceive = giveCount > recCount ? cardAdj : 0;
+            const giveTotalAdj = giveTotal + adjOnGive;
+            const receiveTotalAdj = receiveTotal + adjOnReceive;
+            const netDisplay = Math.abs(trade.net);
+            const isEven = netDisplay <= 100;
+            return (
+              <div key={idx} className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+                {/* Header */}
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">{trade.format}</span>
+                    <span className="text-xs text-gray-500">with</span>
+                    <span className="text-sm font-semibold text-blue-300">{trade.oppName}</span>
+                  </div>
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${isEven ? "bg-yellow-900 text-yellow-300" : trade.net > 0 ? "bg-green-900 text-green-300" : "bg-red-900 text-red-300"}`}>
+                    {isEven ? "EVEN" : trade.net > 0 ? `+${netDisplay.toLocaleString()}` : `-${netDisplay.toLocaleString()}`}
+                  </span>
+                </div>
+                {/* Trade columns */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <div className="text-[10px] font-bold uppercase tracking-widest text-red-400 mb-1.5">You Give</div>
+                    <div className="space-y-1">
+                      {trade.give.map((p: any) => (
+                        <div key={p.player_id} className="flex items-center justify-between bg-gray-800 rounded-lg px-2 py-1.5">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-xs text-white truncate">{p.full_name}</span>
+                            <span className="text-[10px] text-gray-500 shrink-0">{p.position}</span>
+                          </div>
+                          <span className="text-xs text-gray-400 font-mono shrink-0 ml-1">{p.value.toLocaleString()}</span>
+                        </div>
+                      ))}
+                      {adjOnGive > 0 && (
+                        <div className="flex items-center justify-between px-2 py-1">
+                          <span className="text-[10px] text-gray-500 italic">Waiver Adjustment</span>
+                          <span className="text-[10px] text-blue-400 font-mono">+{adjOnGive.toLocaleString()}</span>
+                        </div>
+                      )}
+                      <div className="text-[10px] text-gray-600 text-right pr-1">Total: {giveTotalAdj.toLocaleString()}</div>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-bold uppercase tracking-widest text-green-400 mb-1.5">You Receive</div>
+                    <div className="space-y-1">
+                      {trade.receive.map((p: any) => (
+                        <div key={p.player_id} className="flex items-center justify-between bg-gray-800 rounded-lg px-2 py-1.5">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-xs text-white truncate">{p.full_name}</span>
+                            <span className="text-[10px] text-gray-500 shrink-0">{p.position}</span>
+                          </div>
+                          <span className="text-xs text-gray-400 font-mono shrink-0 ml-1">{p.value.toLocaleString()}</span>
+                        </div>
+                      ))}
+                      {adjOnReceive > 0 && (
+                        <div className="flex items-center justify-between px-2 py-1">
+                          <span className="text-[10px] text-gray-500 italic">Waiver Adjustment</span>
+                          <span className="text-[10px] text-blue-400 font-mono">+{adjOnReceive.toLocaleString()}</span>
+                        </div>
+                      )}
+                      <div className="text-[10px] text-gray-600 text-right pr-1">Total: {receiveTotalAdj.toLocaleString()}</div>
+                    </div>
+                  </div>
+                </div>
+                {/* Send to Calculator */}
+                <button
+                  onClick={() => {
+                    setCalcOpponentRosterId(trade.oppRosterId);
+                    setCalcGive(trade.give.map((p: any) => p.player_id));
+                    setCalcReceive(trade.receive.map((p: any) => p.player_id));
+                    setCalcGivePicks([]);
+                    setCalcReceivePicks([]);
+                    setCalcSearchA("");
+                    setCalcSearchB("");
+                    setTradeHubSection("CALCULATOR");
+                  }}
+                  className="mt-3 w-full text-xs text-gray-500 hover:text-blue-400 border border-gray-700 hover:border-blue-500 rounded-lg py-1.5 transition"
+                >
+                  Open in Trade Calculator →
+                </button>
+              </div>
+            );
+          })}
         </div>
       );
     })()}
