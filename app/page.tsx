@@ -2851,6 +2851,13 @@ const starters = starterSlots
         return oppTop32QBs.length - qbsGiven >= 3;
       };
 
+      // No package (give or receive) may contain 2+ QBs or 2+ TEs
+      const packageOk = (pkg: any[]) => {
+        const qbs = pkg.filter((p: any) => p.position === "QB").length;
+        const tes = pkg.filter((p: any) => p.position === "TE").length;
+        return qbs <= 1 && tes <= 1;
+      };
+
       type TradeResult = {
         give: any[]; receive: any[];
         oppName: string; oppRosterId: number;
@@ -2885,6 +2892,7 @@ const starters = starterSlots
             for (let j = i + 1; j < Math.min(oppTop.length, 9); j++) {
               const op1 = oppTop[i], op2 = oppTop[j];
               if (!isBalanced([mp.value], [op1.value, op2.value])) continue;
+              if (!packageOk([op1, op2])) continue;
               if (!qbSafe([mp])) continue;
               if (!oppQbSafe(oppPlayers, [op1, op2])) continue;
               const adj = tradeWaiverAdj([mp.value], [op1.value, op2.value]);
@@ -2904,6 +2912,7 @@ const starters = starterSlots
             for (const op of oppTop) {
               const mp1 = myTop[i], mp2 = myTop[j];
               if (!isBalanced([mp1.value, mp2.value], [op.value])) continue;
+              if (!packageOk([mp1, mp2])) continue;
               if (!qbSafe([mp1, mp2])) continue;
               if (!oppQbSafe(oppPlayers, [op])) continue;
               const adj = tradeWaiverAdj([mp1.value, mp2.value], [op.value]);
@@ -2924,6 +2933,8 @@ const starters = starterSlots
                 const mp1 = myTop[i], mp2 = myTop[j];
                 const op1 = oppTop[k], op2 = oppTop[l];
                 if (!isBalanced([mp1.value, mp2.value], [op1.value, op2.value])) continue;
+                if (!packageOk([mp1, mp2])) continue;
+                if (!packageOk([op1, op2])) continue;
                 if (!qbSafe([mp1, mp2])) continue;
                 if (!oppQbSafe(oppPlayers, [op1, op2])) continue;
                 results.push({
@@ -2945,6 +2956,8 @@ const starters = starterSlots
                   const mp1 = myTop[i], mp2 = myTop[j];
                   const op1 = oppTop[k], op2 = oppTop[l], op3 = oppTop[m];
                   if (!isBalanced([mp1.value, mp2.value], [op1.value, op2.value, op3.value])) continue;
+                  if (!packageOk([mp1, mp2])) continue;
+                  if (!packageOk([op1, op2, op3])) continue;
                   if (!qbSafe([mp1, mp2])) continue;
                   if (!oppQbSafe(oppPlayers, [op1, op2, op3])) continue;
                   const adj = tradeWaiverAdj([mp1.value, mp2.value], [op1.value, op2.value, op3.value]);
