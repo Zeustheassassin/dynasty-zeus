@@ -2842,6 +2842,15 @@ const starters = starterSlots
         return myTop32QBs.length - qbsGiven >= 3;
       };
 
+      // Returns true if the opponent still has ≥3 top-32 QBs after giving these players away
+      const oppQbSafe = (oppPlayersList: any[], givePlayers: any[]) => {
+        const oppTop32QBs = oppPlayersList.filter(
+          (p: any) => p.position === "QB" && p.value >= top32QBFloor
+        );
+        const qbsGiven = givePlayers.filter((p: any) => p.position === "QB" && p.value >= top32QBFloor).length;
+        return oppTop32QBs.length - qbsGiven >= 3;
+      };
+
       type TradeResult = {
         give: any[]; receive: any[];
         oppName: string; oppRosterId: number;
@@ -2861,6 +2870,7 @@ const starters = starterSlots
           for (const op of oppTop) {
             if (!isBalanced([mp.value], [op.value])) continue;
             if (!qbSafe([mp])) continue;
+            if (!oppQbSafe(oppPlayers, [op])) continue;
             results.push({
               give: [mp], receive: [op], oppName, oppRosterId: oppRoster.roster_id,
               score: posScore([mp], [op]),
@@ -2876,6 +2886,7 @@ const starters = starterSlots
               const op1 = oppTop[i], op2 = oppTop[j];
               if (!isBalanced([mp.value], [op1.value, op2.value])) continue;
               if (!qbSafe([mp])) continue;
+              if (!oppQbSafe(oppPlayers, [op1, op2])) continue;
               const adj = tradeWaiverAdj([mp.value], [op1.value, op2.value]);
               results.push({
                 give: [mp], receive: [op1, op2], oppName, oppRosterId: oppRoster.roster_id,
@@ -2894,6 +2905,7 @@ const starters = starterSlots
               const mp1 = myTop[i], mp2 = myTop[j];
               if (!isBalanced([mp1.value, mp2.value], [op.value])) continue;
               if (!qbSafe([mp1, mp2])) continue;
+              if (!oppQbSafe(oppPlayers, [op])) continue;
               const adj = tradeWaiverAdj([mp1.value, mp2.value], [op.value]);
               results.push({
                 give: [mp1, mp2], receive: [op], oppName, oppRosterId: oppRoster.roster_id,
@@ -2913,6 +2925,7 @@ const starters = starterSlots
                 const op1 = oppTop[k], op2 = oppTop[l];
                 if (!isBalanced([mp1.value, mp2.value], [op1.value, op2.value])) continue;
                 if (!qbSafe([mp1, mp2])) continue;
+                if (!oppQbSafe(oppPlayers, [op1, op2])) continue;
                 results.push({
                   give: [mp1, mp2], receive: [op1, op2], oppName, oppRosterId: oppRoster.roster_id,
                   score: posScore([mp1, mp2], [op1, op2]),
@@ -2933,6 +2946,7 @@ const starters = starterSlots
                   const op1 = oppTop[k], op2 = oppTop[l], op3 = oppTop[m];
                   if (!isBalanced([mp1.value, mp2.value], [op1.value, op2.value, op3.value])) continue;
                   if (!qbSafe([mp1, mp2])) continue;
+                  if (!oppQbSafe(oppPlayers, [op1, op2, op3])) continue;
                   const adj = tradeWaiverAdj([mp1.value, mp2.value], [op1.value, op2.value, op3.value]);
                   results.push({
                     give: [mp1, mp2], receive: [op1, op2, op3], oppName, oppRosterId: oppRoster.roster_id,
@@ -2947,20 +2961,30 @@ const starters = starterSlots
         }
       }
 
-      // Deduplicate by player set, sort by score, take top 10
+      // Deduplicate by player set, enforce per-player and per-opponent appearance caps, take top 15
       const seen = new Set<string>();
-      const top10 = results
+      const playerCount: Record<string, number> = {};
+      const oppCount: Record<string, number> = {};
+      const top15 = results
         .filter((r) => isFinite(r.score))
         .sort((a, b) => b.score - a.score)
         .filter((r) => {
-          const key = [...r.give.map((p: any) => p.player_id), ...r.receive.map((p: any) => p.player_id)].sort().join(",");
+          const allIds = [...r.give.map((p: any) => p.player_id), ...r.receive.map((p: any) => p.player_id)];
+          const key = [...allIds].sort().join(",");
           if (seen.has(key)) return false;
+          // Each player may appear in at most 4 shown trades
+          if (allIds.some((pid) => (playerCount[pid] || 0) >= 4)) return false;
+          // Each opponent may appear in at most 4 shown trades
+          const oppKey = String(r.oppRosterId);
+          if ((oppCount[oppKey] || 0) >= 4) return false;
           seen.add(key);
+          allIds.forEach((pid) => { playerCount[pid] = (playerCount[pid] || 0) + 1; });
+          oppCount[oppKey] = (oppCount[oppKey] || 0) + 1;
           return true;
         })
-        .slice(0, 10);
+        .slice(0, 15);
 
-      if (top10.length === 0) return (
+      if (top15.length === 0) return (
         <p className="text-gray-400 text-sm">
           No balanced trades found. Try selecting a league with more roster data loaded.
         </p>
@@ -2972,7 +2996,7 @@ const starters = starterSlots
             Top trade suggestions based on value balance and positional fit for <strong className="text-gray-300">{selectedLeague.name}</strong>.
             {loadingCalcValues && <span className="ml-2 text-blue-400">Loading values…</span>}
           </p>
-          {top10.map((trade, idx) => {
+          {top15.map((trade: TradeResult, idx: number) => {
             const giveTotal = trade.give.reduce((s: number, p: any) => s + p.value, 0);
             const receiveTotal = trade.receive.reduce((s: number, p: any) => s + p.value, 0);
             const giveCount = trade.give.length;
