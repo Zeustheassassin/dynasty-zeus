@@ -39,11 +39,13 @@ export default function Dashboard({ username, leagues, onSelectLeague, onNavigat
       </div>
 
       {/* ⚡ QUICK ACTIONS */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-12">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-5 mb-12">
         {[
           { title: "Leagues & Depth Charts", icon: "🏈" },
           { title: "Player Ownership", icon: "📊" },
           { title: "Rookie Big Board", icon: "🧠" },
+          { title: "Live Draft Hub", icon: "⚡" },
+          { title: "Trade Hub", icon: "🔄" },
         ].map((item, i) => (
           <motion.div
             key={i}
@@ -60,6 +62,14 @@ export default function Dashboard({ username, leagues, onSelectLeague, onNavigat
 
   if (item.title === "Rookie Big Board") {
     onNavigate("BIGBOARD");
+  }
+
+  if (item.title === "Live Draft Hub") {
+    onNavigate("DRAFT");
+  }
+
+  if (item.title === "Trade Hub") {
+    onNavigate("TRADE_HUB");
   }
 }}
             whileHover={isConnected ? { scale: 1.03 } : {}}
