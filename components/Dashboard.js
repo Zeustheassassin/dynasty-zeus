@@ -39,11 +39,10 @@ export default function Dashboard({ username, leagues, onSelectLeague, onNavigat
       </div>
 
       {/* ⚡ QUICK ACTIONS */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-5 mb-12">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-5 mb-12">
         {[
           { title: "Leagues & Depth Charts", icon: "🏈" },
           { title: "Player Ownership", icon: "📊" },
-          { title: "Rookie Big Board", icon: "🧠" },
           { title: "Live Draft Hub", icon: "⚡" },
           { title: "Trade Hub", icon: "🔄" },
         ].map((item, i) => (
@@ -58,10 +57,6 @@ export default function Dashboard({ username, leagues, onSelectLeague, onNavigat
 
   if (item.title === "Player Ownership") {
     onNavigate("SHARES");
-  }
-
-  if (item.title === "Rookie Big Board") {
-    onNavigate("BIGBOARD");
   }
 
   if (item.title === "Live Draft Hub") {

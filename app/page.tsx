@@ -9,6 +9,10 @@ const CURRENT_YEAR = "2026";
 const YEARS = ["2026", "2027", "2028"];
 const ROUNDS = [1, 2, 3, 4];
 const ROOKIE_YEAR = "2026";
+const ROOKIE_BOARD_POSITIONS = new Set(["QB", "RB", "WR", "TE"]);
+const ROOKIE_BOARD_RESET_KEY = `rookieBoardReset_${ROOKIE_YEAR}_sleeper_v2`;
+const ROOKIE_BOARD_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vROmAn0k3A92okpYE7UeelIy0vYUMY0NFAGHrI52V68Zm8ff9aruDXB1E6u0hRNr2EHgr54_D7gMBti/pub?output=csv";
+const ROOKIE_BOARD_ADP_URL = `https://api.sleeper.app/projections/nfl/${ROOKIE_YEAR}?season_type=regular&position=QB&position=RB&position=WR&position=TE&order_by=adp_dynasty_2qb`;
 
 // -------------------------
 // PURE HELPER FUNCTIONS
@@ -147,6 +151,17 @@ const formatRelativeDate = (ts: number) => {
   return "1 month ago";
 };
 
+const normalizeRookieName = (name: string) =>
+  (name || "")
+    .toLowerCase()
+    .replace(/\./g, "")
+    .replace(/'/g, "")
+    .replace(/-/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const buildSleeperRookieBoard = (_playerMap: any) => [];
+
 export default function Home() {
 
   // -------------------------
@@ -176,6 +191,7 @@ const [tradeHubUserId, setTradeHubUserId] = useState<string | null>(null);
 const [tradeHubData, setTradeHubData] = useState<any[] | null>(null);
 const [loadingTradeHub, setLoadingTradeHub] = useState(false);
 const [tradeHubSection, setTradeHubSection] = useState<"TRADES" | "CALCULATOR">("TRADES");
+const [draftHubSection, setDraftHubSection] = useState<"BOARD" | "BIG_BOARD">("BOARD");
 const [pickFcValues, setPickFcValues] = useState<Record<string, number>>({});
 const [calcFcValues, setCalcFcValues] = useState<Record<string, number>>({});
 const [loadingCalcValues, setLoadingCalcValues] = useState(false);
@@ -230,10 +246,20 @@ useEffect(() => {
     const ONE_DAY = 24 * 60 * 60 * 1000;
 
     if (cached && cachedAt && Date.now() - Number(cachedAt) < ONE_DAY) {
-      setPlayers(JSON.parse(cached));
-      // Still load pick values even when players come from cache
-      fetchFantasyCalcValues().then(({ pickValues }) => setPickFcValues(pickValues)).catch(() => {});
-      return;
+      const parsedCache = JSON.parse(cached);
+      const cacheSample = Object.values(parsedCache).find((player: any) => player && typeof player === "object") as any;
+      const hasRookieFields =
+        cacheSample &&
+        "years_exp" in cacheSample &&
+        "search_rank" in cacheSample &&
+        "fantasy_positions" in cacheSample;
+
+      if (hasRookieFields) {
+        setPlayers(parsedCache);
+        // Still load pick values even when players come from cache
+        fetchFantasyCalcValues().then(({ pickValues }) => setPickFcValues(pickValues)).catch(() => {});
+        return;
+      }
     }
 
     const res = await fetch("https://api.sleeper.app/v1/players/nfl");
@@ -259,6 +285,11 @@ useEffect(() => {
         team: p.team,
         age: p.age,
         value: p.value,
+        years_exp: p.years_exp,
+        search_rank: p.search_rank,
+        fantasy_positions: p.fantasy_positions,
+        active: p.active,
+        status: p.status,
       };
     });
 
@@ -307,6 +338,121 @@ useEffect(() => {
   }
 }, [rookies]);
 useEffect(() => {
+  const loadRookieBoard = async () => {
+    const [sheetText, adpResponse] = await Promise.all([
+      fetch(ROOKIE_BOARD_SHEET_URL).then((res) => res.text()),
+      fetch(ROOKIE_BOARD_ADP_URL).then((res) => res.json()),
+    ]);
+
+    const sheetPlayers = sheetText
+      .split("\n")
+      .slice(1)
+      .map((row) => {
+        const cols = row.split(",");
+
+        return {
+          name: cols[0]?.replace(/"/g, "").trim(),
+          position: cols[1]?.replace(/"/g, "").trim(),
+        };
+      })
+      .filter((player) => player.name && player.name !== "Player Invalid");
+
+    const adpByName = new Map<string, any>();
+    adpResponse
+      .filter((entry: any) =>
+        entry?.player &&
+        entry?.stats &&
+        entry.player.first_name !== "Player" &&
+        ROOKIE_BOARD_POSITIONS.has(entry.player.position) &&
+        typeof entry.stats.adp_dynasty_2qb === "number"
+      )
+      .forEach((entry: any) => {
+        const playerName = `${entry.player.first_name} ${entry.player.last_name}`.trim();
+        const normalizedName = normalizeRookieName(playerName);
+
+        if (!normalizedName || adpByName.has(normalizedName)) return;
+
+        adpByName.set(normalizedName, {
+          player_id: String(entry.player_id),
+          name: playerName,
+          position: entry.player.position,
+          team: entry.player.team || "",
+          adp: entry.stats.adp_dynasty_2qb,
+        });
+      });
+
+    const canonicalBoard = sheetPlayers
+      .map((player) => {
+        const adpPlayer = adpByName.get(normalizeRookieName(player.name));
+
+        return {
+          player_id: adpPlayer?.player_id || null,
+          name: adpPlayer?.name || player.name,
+          position: adpPlayer?.position || player.position,
+          team: adpPlayer?.team || "",
+          adp: typeof adpPlayer?.adp === "number" ? adpPlayer.adp : Number.MAX_SAFE_INTEGER,
+        };
+      })
+      .sort((a, b) => {
+        if (a.adp !== b.adp) return a.adp - b.adp;
+        return a.name.localeCompare(b.name);
+      });
+
+    const canonicalNames = new Set(canonicalBoard.map((player) => normalizeRookieName(player.name)));
+    const hasReset = localStorage.getItem(ROOKIE_BOARD_RESET_KEY) === "true";
+
+    if (!hasReset) {
+      setRookies(canonicalBoard);
+      localStorage.setItem(`rookieBoard_${ROOKIE_YEAR}`, JSON.stringify(canonicalBoard));
+      localStorage.setItem(ROOKIE_BOARD_RESET_KEY, "true");
+      return;
+    }
+
+    const saved = localStorage.getItem(`rookieBoard_${ROOKIE_YEAR}`);
+
+    if (!saved) {
+      setRookies(canonicalBoard);
+      return;
+    }
+
+    const savedData = JSON.parse(saved).filter((player: any) => {
+      const normalizedName = normalizeRookieName(player?.name || "");
+      return normalizedName && canonicalNames.has(normalizedName);
+    });
+
+    const savedByName: any = {};
+    savedData.forEach((player: any) => {
+      savedByName[normalizeRookieName(player.name)] = player;
+    });
+
+    const merged = canonicalBoard.map((player) => {
+      const savedPlayer = savedByName[normalizeRookieName(player.name)];
+      return savedPlayer ? { ...player, ...savedPlayer, ...player } : player;
+    });
+
+    merged.sort((a: any, b: any) => {
+      const savedIndexA = savedData.findIndex(
+        (player: any) => normalizeRookieName(player?.name || "") === normalizeRookieName(a.name)
+      );
+      const savedIndexB = savedData.findIndex(
+        (player: any) => normalizeRookieName(player?.name || "") === normalizeRookieName(b.name)
+      );
+
+      if (savedIndexA === -1 && savedIndexB === -1) {
+        return a.adp - b.adp;
+      }
+
+      if (savedIndexA === -1) return 1;
+      if (savedIndexB === -1) return -1;
+      return savedIndexA - savedIndexB;
+    });
+
+    localStorage.setItem(`rookieBoard_${ROOKIE_YEAR}`, JSON.stringify(merged));
+    setRookies(merged);
+  };
+
+  loadRookieBoard().catch(() => {});
+  return;
   fetch("https://docs.google.com/spreadsheets/d/e/2PACX-1vROmAn0k3A92okpYE7UeelIy0vYUMY0NFAGHrI52V68Zm8ff9aruDXB1E6u0hRNr2EHgr54_D7gMBti/pub?output=csv")
     .then((res) => res.text())
     .then((text) => {
@@ -326,7 +472,7 @@ useEffect(() => {
       const saved = localStorage.getItem(`rookieBoard_${ROOKIE_YEAR}`);
 
 if (saved) {
-  const savedData = JSON.parse(saved);
+  const savedData = JSON.parse(saved || "[]");
 
   // 🔥 Create map of saved players by name
   const savedMap: any = {};
@@ -358,7 +504,69 @@ if (saved) {
     });
 }, []);
 useEffect(() => {
-  if (!selectedLeague || mainTab !== "DRAFT") return;
+  return;
+  if (Object.keys(players).length === 0) return;
+
+  const sleeperBoard = buildSleeperRookieBoard(players);
+  const hasReset = localStorage.getItem(ROOKIE_BOARD_RESET_KEY) === "true";
+
+  if (!hasReset) {
+    setRookies(sleeperBoard);
+    localStorage.setItem(`rookieBoard_${ROOKIE_YEAR}`, JSON.stringify(sleeperBoard));
+    localStorage.setItem(ROOKIE_BOARD_RESET_KEY, "true");
+    return;
+  }
+
+  const saved = localStorage.getItem(`rookieBoard_${ROOKIE_YEAR}`);
+
+  if (!saved) {
+    setRookies(sleeperBoard);
+    return;
+  }
+
+  const savedData = JSON.parse(saved || "[]");
+  const savedById: any = {};
+  const savedByName: any = {};
+
+  savedData.forEach((player: any) => {
+    if (player?.name === "Player Invalid") return;
+    if (player?.player_id) {
+      savedById[String(player.player_id)] = player;
+    }
+    if (player?.name) {
+      savedByName[player.name] = player;
+    }
+  });
+
+  const merged = sleeperBoard.map((player: any) => {
+    const savedPlayer = savedById[player.player_id] || savedByName[player.name];
+    return savedPlayer ? { ...player, ...savedPlayer, ...player } : player;
+  });
+
+  merged.sort((a: any, b: any) => {
+    const savedIndexA = savedData.findIndex((player: any) =>
+      String(player?.player_id || "") === a.player_id || player?.name === a.name
+    );
+    const savedIndexB = savedData.findIndex((player: any) =>
+      String(player?.player_id || "") === b.player_id || player?.name === b.name
+    );
+
+    if (savedIndexA === -1 && savedIndexB === -1) {
+      const rankA = typeof a.search_rank === "number" ? a.search_rank : Number.MAX_SAFE_INTEGER;
+      const rankB = typeof b.search_rank === "number" ? b.search_rank : Number.MAX_SAFE_INTEGER;
+      return rankA - rankB;
+    }
+
+    if (savedIndexA === -1) return 1;
+    if (savedIndexB === -1) return -1;
+    return savedIndexA - savedIndexB;
+  });
+
+  localStorage.setItem(`rookieBoard_${ROOKIE_YEAR}`, JSON.stringify(merged));
+  setRookies(merged);
+}, [players]);
+useEffect(() => {
+  if (!selectedLeague || mainTab !== "DRAFT" || draftHubSection !== "BOARD") return;
 
   let interval: any;
 
@@ -395,7 +603,7 @@ setDraftSettings(currentDraft.settings);
   interval = setInterval(loadDraft, 5000);
 
   return () => clearInterval(interval);
-}, [selectedLeague, mainTab]);
+}, [selectedLeague, mainTab, draftHubSection]);
 const getStarterSlots = (roster: any, league: any) => {
   if (!roster?.starters || !league?.roster_positions) return [];
 
@@ -944,6 +1152,21 @@ const getTeamSummary = () => {
 };
 
   const teamSummary = useMemo(() => getTeamSummary(), [roster, players, picks]);
+  const draftedPlayerIds = useMemo(
+    () => new Set(draftPicks.map((pick: any) => String(pick.player_id)).filter(Boolean)),
+    [draftPicks]
+  );
+  const topAvailableRookies = useMemo(
+    () =>
+      rookies
+        .map((player, index) => ({
+          ...player,
+          boardRank: index + 1,
+        }))
+        .filter((player: any) => !draftedPlayerIds.has(String(player.player_id)))
+        .slice(0, 10),
+    [rookies, draftedPlayerIds]
+  );
   // -------------------------
   // UI
   // -------------------------
@@ -1043,14 +1266,6 @@ const myPlayerSet = new Set<string>(roster?.players || []);
   Player Ownership & Tools
 </button>
 
-        <button
-  onClick={() => user && setMainTab("BIGBOARD")}
-  className={`${mainTab === "BIGBOARD" ? "text-blue-400" : ""} ${
-    !user ? "opacity-50 cursor-not-allowed" : ""
-  }`}
->
-  Rookie Big Board
-</button>
 <button
   onClick={() => user && setMainTab("DRAFT")}
   className={`${mainTab === "DRAFT" ? "text-blue-400" : ""} ${
@@ -1723,111 +1938,42 @@ const starters = starterSlots
               })}
           </>
         )}
-        {mainTab === "BIGBOARD" && (
-  <div className="p-4 max-w-3xl mx-auto">
-
-    <div className="text-xl font-bold mb-4">
-      Rookie / Dynasty Big Board
-    </div>
-    <input
-  type="text"
-  placeholder="Search rookies..."
-  value={rookieSearch}
-  onChange={(e) => setRookieSearch(e.target.value)}
-  className="w-full mb-3 p-2 rounded bg-gray-800 text-sm"
-/>
-
-    <div className="space-y-2">
-  {rookies
-  .map((p, originalIndex) => ({ p, originalIndex }))
-  .filter(({ p }) =>
-    p.name.toLowerCase().includes(rookieSearch.toLowerCase())
-  )
-  .map(({ p, originalIndex }) => (
-  <div
-    key={originalIndex}
-    draggable
-    onDragStart={() => setDragIndex(originalIndex)}
-    onDragOver={(e) => e.preventDefault()}
-    onDrop={() => {
-      if (dragIndex !== null) {
-        movePlayer(dragIndex, originalIndex);
-        setDragIndex(null);
-      }
-    }}
-    className="flex items-center justify-between bg-gray-800/70 px-3 py-1.5 mb-1 rounded-lg text-sm cursor-move hover:bg-gray-700/70 transition"
-  >
-    <div className="flex gap-3 items-center">
-      <input
-  type="number"
-  value={tempRanks[originalIndex] ?? originalIndex + 1}
-  onChange={(e) => {
-    setTempRanks((prev) => ({
-      ...prev,
-      [originalIndex]: e.target.value,
-    }));
-  }}
-  onKeyDown={(e) => {
-    if (e.key === "Enter") {
-      handleRankChange(originalIndex, tempRanks[originalIndex] ?? originalIndex + 1);
-      setTempRanks((prev) => {
-        const updated = { ...prev };
-        delete updated[originalIndex];
-        return updated;
-      });
-    }
-  }}
-  onBlur={() => {
-    if (tempRanks[originalIndex] !== undefined) {
-      handleRankChange(originalIndex, tempRanks[originalIndex]);
-      setTempRanks((prev) => {
-        const updated = { ...prev };
-        delete updated[originalIndex];
-        return updated;
-      });
-    }
-  }}
-  className="w-12 text-center bg-transparent text-gray-400 outline-none"
-/>
-
-      <div className="flex items-center gap-2">
-        <span className="font-medium">{p.name}</span>
-        <span
-  className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
-    p.position === "QB"
-      ? "bg-purple-500/20 text-purple-400"
-      : p.position === "RB"
-      ? "bg-green-500/20 text-green-400"
-      : p.position === "WR"
-      ? "bg-blue-500/20 text-blue-400"
-      : p.position === "TE"
-      ? "bg-orange-500/20 text-orange-400"
-      : "bg-gray-700 text-gray-400"
-  }`}
->
-  {p.position}
-</span>      
-      </div>
-    </div>
-  </div>
-))}
-    </div>
-
-  </div>
-)}
 {mainTab === "DRAFT" && (
   <div className="p-4">
     <div className="text-xl font-bold mb-4">
       Live Draft Hub
     </div>
 
-    {!draftSettings && (
+    <div className="flex gap-6 border-b border-gray-700 mb-6">
+      <button
+        onClick={() => setDraftHubSection("BOARD")}
+        className={`pb-2 px-1 text-sm font-semibold transition ${
+          draftHubSection === "BOARD"
+            ? "border-b-2 border-blue-400 text-blue-400"
+            : "text-gray-400 hover:text-white"
+        }`}
+      >
+        Live Draft Board
+      </button>
+      <button
+        onClick={() => setDraftHubSection("BIG_BOARD")}
+        className={`pb-2 px-1 text-sm font-semibold transition ${
+          draftHubSection === "BIG_BOARD"
+            ? "border-b-2 border-blue-400 text-blue-400"
+            : "text-gray-400 hover:text-white"
+        }`}
+      >
+        Rookie Big Board
+      </button>
+    </div>
+
+    {draftHubSection === "BOARD" && !draftSettings && (
       <div className="text-gray-400">
         No draft data available
       </div>
     )}
 
-    {draftSettings && (
+    {draftHubSection === "BOARD" && draftSettings && (
       <div className="overflow-x-auto">
 
         {/* TEAM HEADER — ordered by actual draft slot */}
@@ -1912,6 +2058,153 @@ const starters = starterSlots
     </div>
   );
 })}
+      </div>
+    )}
+
+    {draftHubSection === "BOARD" && (
+      <div className="mt-8">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-lg font-semibold">Top 10 Available From Your Big Board</h2>
+            <p className="text-sm text-gray-400">
+              Automatically removes players after they are drafted in this Sleeper draft.
+            </p>
+          </div>
+          <div className="text-xs text-gray-500">
+            {topAvailableRookies.length} shown
+          </div>
+        </div>
+
+        {!rookies.length ? (
+          <div className="text-gray-400 text-sm">
+            Your rookie board is still loading from Sleeper.
+          </div>
+        ) : topAvailableRookies.length === 0 ? (
+          <div className="text-gray-400 text-sm">
+            No ranked rookies are currently available.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {topAvailableRookies.map((player: any) => (
+              <div
+                key={player.player_id}
+                className="bg-gray-900 border border-gray-800 rounded-xl px-4 py-3"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm text-blue-400 font-semibold">
+                      #{player.boardRank}
+                    </div>
+                    <div className="font-medium text-white">
+                      {player.name}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-xs text-gray-400">
+                      {player.team || "FA"}
+                    </div>
+                    <div className="text-xs text-gray-300">
+                      {player.position}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    )}
+
+    {draftHubSection === "BIG_BOARD" && (
+      <div className="max-w-3xl">
+        <div className="text-xl font-bold mb-4">
+          Rookie / Dynasty Big Board
+        </div>
+        <input
+          type="text"
+          placeholder="Search rookies..."
+          value={rookieSearch}
+          onChange={(e) => setRookieSearch(e.target.value)}
+          className="w-full mb-3 p-2 rounded bg-gray-800 text-sm"
+        />
+
+        <div className="space-y-2">
+          {rookies
+            .map((p, originalIndex) => ({ p, originalIndex }))
+            .filter(({ p }) =>
+              p.name &&
+              p.name !== "Player Invalid" &&
+              p.name.toLowerCase().includes(rookieSearch.toLowerCase())
+            )
+            .map(({ p, originalIndex }) => (
+              <div
+                key={p.player_id || originalIndex}
+                draggable
+                onDragStart={() => setDragIndex(originalIndex)}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={() => {
+                  if (dragIndex !== null) {
+                    movePlayer(dragIndex, originalIndex);
+                    setDragIndex(null);
+                  }
+                }}
+                className="flex items-center justify-between bg-gray-800/70 px-3 py-1.5 mb-1 rounded-lg text-sm cursor-move hover:bg-gray-700/70 transition"
+              >
+                <div className="flex gap-3 items-center">
+                  <input
+                    type="number"
+                    value={tempRanks[originalIndex] ?? originalIndex + 1}
+                    onChange={(e) => {
+                      setTempRanks((prev) => ({
+                        ...prev,
+                        [originalIndex]: e.target.value,
+                      }));
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        handleRankChange(originalIndex, tempRanks[originalIndex] ?? originalIndex + 1);
+                        setTempRanks((prev) => {
+                          const updated = { ...prev };
+                          delete updated[originalIndex];
+                          return updated;
+                        });
+                      }
+                    }}
+                    onBlur={() => {
+                      if (tempRanks[originalIndex] !== undefined) {
+                        handleRankChange(originalIndex, tempRanks[originalIndex]);
+                        setTempRanks((prev) => {
+                          const updated = { ...prev };
+                          delete updated[originalIndex];
+                          return updated;
+                        });
+                      }
+                    }}
+                    className="w-12 text-center bg-transparent text-gray-400 outline-none"
+                  />
+
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">{p.name}</span>
+                    <span
+                      className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+                        p.position === "QB"
+                          ? "bg-purple-500/20 text-purple-400"
+                          : p.position === "RB"
+                          ? "bg-green-500/20 text-green-400"
+                          : p.position === "WR"
+                          ? "bg-blue-500/20 text-blue-400"
+                          : p.position === "TE"
+                          ? "bg-orange-500/20 text-orange-400"
+                          : "bg-gray-700 text-gray-400"
+                      }`}
+                    >
+                      {p.position}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ))}
+        </div>
       </div>
     )}
   </div>
@@ -2506,5 +2799,3 @@ const starters = starterSlots
     </main>
   );
 }
-
-
