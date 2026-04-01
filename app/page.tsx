@@ -192,6 +192,7 @@ const [tradeHubUserId, setTradeHubUserId] = useState<string | null>(null);
 const [tradeHubData, setTradeHubData] = useState<any[] | null>(null);
 const [loadingTradeHub, setLoadingTradeHub] = useState(false);
 const [tradeHubSection, setTradeHubSection] = useState<"TRADES" | "CALCULATOR" | "FINDER">("TRADES");
+const [finderSeed, setFinderSeed] = useState(() => Math.random());
 const [draftHubSection, setDraftHubSection] = useState<"BOARD" | "BIG_BOARD">("BOARD");
 const [pickFcValues, setPickFcValues] = useState<Record<string, number>>({});
 const [calcFcValues, setCalcFcValues] = useState<Record<string, number>>({});
@@ -2974,14 +2975,17 @@ const starters = starterSlots
         }
       }
 
-      // Deduplicate by player set, enforce per-player and per-opponent appearance caps, take top 15
+      // Deduplicate by player set, shuffle randomly, enforce per-player and per-opponent appearance caps, take 15
       const seen = new Set<string>();
       const playerCount: Record<string, number> = {};
       const oppCount: Record<string, number> = {};
-      const top15 = results
+      // Seeded shuffle so Refresh button produces a new random set
+      const shuffled = results
         .filter((r) => isFinite(r.score))
-        .sort((a, b) => b.score - a.score)
-        .filter((r) => {
+        .map((r) => ({ r, sort: Math.abs(Math.sin(finderSeed * (results.indexOf(r) + 1)) * 10000) % 1 }))
+        .sort((a, b) => a.sort - b.sort)
+        .map(({ r }) => r);
+      const top15 = shuffled.filter((r) => {
           const allIds = [...r.give.map((p: any) => p.player_id), ...r.receive.map((p: any) => p.player_id)];
           const key = [...allIds].sort().join(",");
           if (seen.has(key)) return false;
@@ -3005,10 +3009,18 @@ const starters = starterSlots
 
       return (
         <div className="space-y-4">
-          <p className="text-xs text-gray-500">
-            Top trade suggestions based on value balance and positional fit for <strong className="text-gray-300">{selectedLeague.name}</strong>.
-            {loadingCalcValues && <span className="ml-2 text-blue-400">Loading values…</span>}
-          </p>
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-gray-500">
+              Random trade suggestions based on value balance and positional fit for <strong className="text-gray-300">{selectedLeague.name}</strong>.
+              {loadingCalcValues && <span className="ml-2 text-blue-400">Loading values…</span>}
+            </p>
+            <button
+              onClick={() => setFinderSeed(Math.random())}
+              className="text-xs font-semibold text-blue-400 hover:text-blue-300 border border-blue-700 hover:border-blue-500 rounded-lg px-3 py-1.5 transition shrink-0 ml-3"
+            >
+              Refresh
+            </button>
+          </div>
           {top15.map((trade: TradeResult, idx: number) => {
             const giveTotal = trade.give.reduce((s: number, p: any) => s + p.value, 0);
             const receiveTotal = trade.receive.reduce((s: number, p: any) => s + p.value, 0);
