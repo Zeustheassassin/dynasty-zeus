@@ -2,7 +2,39 @@
   "permissions": {
     "allow": [
       "WebFetch(domain:fantasycalc.com)",
-      "WebFetch(domain:api.fantasycalc.com)"
+      "WebFetch(domain:api.fantasycalc.com)",
+      "Bash(curl -s \"https://api.sleeper.app/projections/nfl/2025/1?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE\")",
+      "Bash(curl -s \"https://api.sleeper.app/projections/nfl/2025?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE\")",
+      "Bash(node -e ':*)",
+      "Bash(curl -s -A \"Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36 \\(KHTML, like Gecko\\) Chrome/120.0.0.0 Safari/537.36\" \"https://www.fantasypros.com/nfl/projections/qb.php?week=draft&scoring=HALF\")",
+      "Bash(echo \"Exit: $?\")",
+      "Read(//tmp/**)",
+      "Bash(curl -s -o /tmp/nf_qb.html -w \"%{http_code}\" \"https://www.numberfire.com/nfl/fantasy/fantasy-football-projections/qb\" -H \"User-Agent: Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36 \\(KHTML, like Gecko\\) Chrome/120.0.0.0 Safari/537.36\" -H \"Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\" -H \"Accept-Language: en-US,en;q=0.5\" -L)",
+      "Bash(curl -s -o /tmp/nf_rb.html -w \"%{http_code}\" \"https://www.numberfire.com/nfl/fantasy/fantasy-football-projections/rb\" -H \"User-Agent: Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36 \\(KHTML, like Gecko\\) Chrome/120.0.0.0 Safari/537.36\" -H \"Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\" -H \"Accept-Language: en-US,en;q=0.5\" -L)",
+      "Bash(curl -s -o /tmp/nf_wr.html -w \"%{http_code}\" \"https://www.numberfire.com/nfl/fantasy/fantasy-football-projections/wr\" -H \"User-Agent: Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36 \\(KHTML, like Gecko\\) Chrome/120.0.0.0 Safari/537.36\" -H \"Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\" -H \"Accept-Language: en-US,en;q=0.5\" -L)",
+      "Bash(curl -s -o /tmp/nf_te.html -w \"%{http_code}\" \"https://www.numberfire.com/nfl/fantasy/fantasy-football-projections/te\" -H \"User-Agent: Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36 \\(KHTML, like Gecko\\) Chrome/120.0.0.0 Safari/537.36\" -H \"Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\" -H \"Accept-Language: en-US,en;q=0.5\" -L)",
+      "Bash(curl -s -v -o /dev/null \"https://www.numberfire.com/nfl/fantasy/fantasy-football-projections/qb\")",
+      "Bash(curl -s -v -o /dev/null \"https://www.fanduel.com/research/nfl/fantasy/fantasy-football-projections/qb\")",
+      "Bash(curl -s -o /tmp/fd_qb.html -w \"%{http_code}\" \"https://www.fanduel.com/research/nfl/fantasy/fantasy-football-projections/qb\" -H \"User-Agent: Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36 \\(KHTML, like Gecko\\) Chrome/120.0.0.0 Safari/537.36\" -H \"Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\")",
+      "Bash(curl -s -o /tmp/fd_rb.html -w \"%{http_code}\" \"https://www.fanduel.com/research/nfl/fantasy/fantasy-football-projections/rb\" -H \"User-Agent: Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36 \\(KHTML, like Gecko\\) Chrome/120.0.0.0 Safari/537.36\" -H \"Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\")",
+      "Bash(curl -s -o /tmp/fd_wr.html -w \"%{http_code}\" \"https://www.fanduel.com/research/nfl/fantasy/fantasy-football-projections/wr\" -H \"User-Agent: Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36 \\(KHTML, like Gecko\\) Chrome/120.0.0.0 Safari/537.36\" -H \"Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\")",
+      "Bash(curl -s -o /tmp/fd_te.html -w \"%{http_code}\" \"https://www.fanduel.com/research/nfl/fantasy/fantasy-football-projections/te\" -H \"User-Agent: Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36 \\(KHTML, like Gecko\\) Chrome/120.0.0.0 Safari/537.36\" -H \"Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\")",
+      "Bash(grep -o '\"columns\":\\\\[.\\\\{0,2000\\\\}\\\\]' /tmp/fd_qb.html)",
+      "Bash(curl -s \"https://www.fanduel.com/research/_next/static/chunks/pages/%5Bslug%5D/fantasy/%5B...projection%5D-23d7a95ef0b936cb.js\")",
+      "Bash(curl -s \"https://www.fanduel.com/research/_next/static/chunks/pages/_app-383642487bdef8c4.js\")",
+      "Bash(curl -s \"https://www.fanduel.com/research/_next/static/chunks/main-4609cde8637c68c0.js\")",
+      "Bash(grep -o 'GetProjections.\\\\{0,3000\\\\}')",
+      "Bash(grep -o 'GetProjections.\\\\{0,5000\\\\}')",
+      "Bash(curl -s -X POST https://fdresearch-api.fanduel.com/graphql -H 'Content-Type: application/json' -H 'Origin: https://www.fanduel.com' -H 'Referer: https://www.fanduel.com/research/nfl/fantasy/fantasy-football-projections/qb' -H 'User-Agent: Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36' -d '{\"query\":\"{ __type\\(name: \\\\\"PlayerPositions\\\\\"\\) { enumValues { name } } }\"}' -w '\\\\nHTTP: %{http_code}')",
+      "Bash(grep -o 'getProjectionTableMetadata[^\\)]*\\)\\\\|TableMetadata.\\\\{0,300\\\\}')",
+      "Bash(grep -o 'fantasy-football-projection.\\\\{0,200\\\\}\\\\|ppr.\\\\{0,100\\\\}WEEKLY\\\\|WEEKLY.\\\\{0,200\\\\}\\\\|dfs-projection.\\\\{0,200\\\\}')",
+      "Bash(grep -o '.\\\\{100\\\\}\\\\.Q9\\\\.\\\\|Q9=.\\\\{0,300\\\\}')",
+      "Bash(grep -o '\\\\$\\\\.\\\\\\(ym\\\\|Q9\\\\\\)=.\\\\{0,500\\\\}')",
+      "Bash(curl -s \"https://www.fanduel.com/research/_next/static/chunks/45655-7a322a7e3a0eb265.js\")",
+      "Bash(grep -o 'Daily=\"[^\"]*\"\\\\|DAILY=\"[^\"]*\"\\\\|WEEKLY=\"[^\"]*\"\\\\|Weekly=\"[^\"]*\"\\\\|PPR=\"[^\"]*\"\\\\|e\\\\.Daily=.\\\\{0,50\\\\}')",
+      "Bash(grep -o 'e\\\\.Daily=.\\\\{0,200\\\\}')",
+      "Bash(curl -s -X POST https://fdresearch-api.fanduel.com/graphql -H 'Content-Type: application/json' -H 'Origin: https://www.fanduel.com' -H 'User-Agent: Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36' -d '{\"query\":\"{ __type\\(name: \\\\\"ProjectionSports\\\\\"\\) { enumValues { name } } }\"}')",
+      "Bash(grep -o '\"TE Columns.\\\\{0,800\\\\}' /tmp/fd_qb.html)"
     ]
   }
 }

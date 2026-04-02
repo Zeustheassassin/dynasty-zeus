@@ -15,6 +15,32 @@ const ROOKIE_BOARD_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1
 const ROOKIE_BOARD_ADP_URL = `https://api.sleeper.app/projections/nfl/${ROOKIE_YEAR}?season_type=regular&position=QB&position=RB&position=WR&position=TE&order_by=adp_dynasty_2qb`;
 
 // -------------------------
+// PROJECTION SOURCES
+// Tier 1 (higher weight) = broader consensus aggregates.
+// Tier 2 = respected single-source projections.
+// Add new sources here; weights redistribute automatically when a source fails.
+// -------------------------
+// Scoring: PPR + 0.5 TE premium (TEs earn an extra 0.5 pts per reception).
+// FantasyPros fetched with scoring=PPR; Sleeper and numberFire both apply the
+// TE premium via their rec stat so it's exact. Weights are tiered:
+//   Tier 1 — consensus aggregates (most analysts behind them)
+//   Tier 2 — respected independent models
+// Weights redistribute automatically when a source fails to load.
+const PROJ_SOURCES = [
+  { id: 'fantasypros' as const, label: 'FantasyPros',       tier: 1, weight: 0.45 },
+  { id: 'numberfire'  as const, label: 'numberFire',         tier: 1, weight: 0.35 },
+  { id: 'sleeper'     as const, label: 'RotoWire/Sleeper',   tier: 2, weight: 0.20 },
+];
+type ProjSourceId = typeof PROJ_SOURCES[number]['id'];
+
+// Strips punctuation, spaces, and common suffixes so names from different sources
+// collapse to the same key and can be matched against Sleeper player IDs.
+const normalizeProjName = (n: string) =>
+  n.toLowerCase()
+    .replace(/\b(jr|sr|ii|iii|iv|v)\b\.?/gi, '')
+    .replace(/[^a-z]/g, '');
+
+// -------------------------
 // PURE HELPER FUNCTIONS
 // -------------------------
 const getLineupSettings = (league: any) => {
@@ -193,6 +219,21 @@ const [tradeHubData, setTradeHubData] = useState<any[] | null>(null);
 const [loadingTradeHub, setLoadingTradeHub] = useState(false);
 const [tradeHubSection, setTradeHubSection] = useState<"TRADES" | "CALCULATOR" | "FINDER">("TRADES");
 const [finderSeed, setFinderSeed] = useState(() => Math.random());
+const [dataHubTab, setDataHubTab] = useState<"OWNERSHIP" | "DYNASTY" | "REDRAFT" | "PROJECTIONS">("OWNERSHIP");
+const [dynastyRankPos, setDynastyRankPos] = useState("ALL");
+const [redraftValues, setRedraftValues] = useState<Record<string, number>>({});
+const [loadingRedraft, setLoadingRedraft] = useState(false);
+const [redraftLoaded, setRedraftLoaded] = useState(false);
+const [redraftRankPos, setRedraftRankPos] = useState("ALL");
+const [projectionData, setProjectionData] = useState<any[]>([]);
+const [loadingProjections, setLoadingProjections] = useState(false);
+const [projectionWeek, setProjectionWeek] = useState(1);
+const [projectionSeasonYear, setProjectionSeasonYear] = useState<number | null>(null);
+const [projectionPosFilter, setProjectionPosFilter] = useState("ALL");
+const [projectionSourceStatus, setProjectionSourceStatus] = useState<Record<string, boolean>>({});
+const [projectionLoaded, setProjectionLoaded] = useState(false);
+const [finderPlayerSearch, setFinderPlayerSearch] = useState("");
+const [finderPinnedPlayerId, setFinderPinnedPlayerId] = useState<string | null>(null);
 const [draftHubSection, setDraftHubSection] = useState<"BOARD" | "BIG_BOARD">("BOARD");
 const [pickFcValues, setPickFcValues] = useState<Record<string, number>>({});
 const [calcFcValues, setCalcFcValues] = useState<Record<string, number>>({});
@@ -313,6 +354,24 @@ useEffect(() => {
     loadCalcValues(selectedLeague.league_id);
   }
 }, [tradeHubSection, selectedLeague?.league_id]);
+
+useEffect(() => {
+  if (mainTab === "DATA_HUB" && dataHubTab === "DYNASTY" && selectedLeague?.league_id) {
+    loadCalcValues(selectedLeague.league_id);
+  }
+}, [mainTab, dataHubTab, selectedLeague?.league_id]);
+
+useEffect(() => {
+  if (mainTab === "DATA_HUB" && dataHubTab === "REDRAFT") {
+    loadRedraftValues();
+  }
+}, [mainTab, dataHubTab]);
+
+useEffect(() => {
+  if (mainTab === "DATA_HUB" && dataHubTab === "PROJECTIONS" && !projectionLoaded) {
+    loadProjections(projectionWeek === 0 ? 'season' : projectionWeek);
+  }
+}, [mainTab, dataHubTab]);
 
 useEffect(() => {
   const saved = localStorage.getItem("sleeperUser");
@@ -983,6 +1042,165 @@ const loadCalcValues = async (leagueId: string) => {
   }
 };
 
+const loadRedraftValues = async () => {
+  if (redraftLoaded) return;
+  setLoadingRedraft(true);
+  try {
+    const res = await fetch(
+      `https://api.fantasycalc.com/values/current?isDynasty=false&numQbs=2`
+    );
+    const data = await res.json();
+    const vals: Record<string, number> = {};
+    data.forEach((entry: any) => {
+      const sleeperId = entry.player?.sleeperId;
+      if (sleeperId) vals[String(sleeperId)] = entry.value;
+    });
+    setRedraftValues(vals);
+    setRedraftLoaded(true);
+  } catch {
+    // silently fail
+  } finally {
+    setLoadingRedraft(false);
+  }
+};
+
+const loadProjections = async (week: number | 'season') => {
+  setLoadingProjections(true);
+  const statusMap: Record<string, boolean> = {};
+  const currentNflYear = new Date().getFullYear();
+  let resolvedProjectionYear = currentNflYear;
+  setProjectionSeasonYear(currentNflYear);
+
+  try {
+    // ── Build name→sleeperId lookup from the players object ──────────────────
+    // Both full name and "F. LastName" variants are indexed so we can match
+    // whatever format a source returns.
+    const nameIndex = new Map<string, string>(); // normalizedName → sleeperId
+    Object.values(players as Record<string, any>).forEach((p: any) => {
+      if (!['QB','RB','WR','TE'].includes(p.position)) return;
+      const full = normalizeProjName(p.full_name ?? '');
+      if (full) nameIndex.set(full, p.player_id);
+      // First-initial variant: "jsmith" for "John Smith"
+      const parts = (p.full_name ?? '').split(' ');
+      if (parts.length >= 2) {
+        const short = normalizeProjName(parts[0][0] + parts.slice(1).join(''));
+        if (short) nameIndex.set(short, p.player_id);
+      }
+    });
+
+    // ── Fetch each source ─────────────────────────────────────────────────────
+    // sourceRows: sleeperId → { fpts, sources }
+    const sourceRows = new Map<string, { totalWeightedFpts: number; totalWeight: number; sources: string[] }>();
+
+    const addRow = (sleeperId: string, fpts: number, sourceId: string, weight: number) => {
+      const existing = sourceRows.get(sleeperId) ?? { totalWeightedFpts: 0, totalWeight: 0, sources: [] };
+      existing.totalWeightedFpts += fpts * weight;
+      existing.totalWeight += weight;
+      if (!existing.sources.includes(sourceId)) existing.sources.push(sourceId);
+      sourceRows.set(sleeperId, existing);
+    };
+
+    // ── Source 1: Sleeper/RotoWire ────────────────────────────────────────────
+    // Try the current NFL season year first; fall back one year if no data
+    // returned (handles pre-season when next year's projections aren't live yet).
+    try {
+      const weekParam = week === 'season' ? '' : `/${week}`;
+      const posParams = 'position[]=QB&position[]=RB&position[]=WR&position[]=TE';
+      const tryYear = async (yr: number) => {
+        const url = `https://api.sleeper.app/projections/nfl/${yr}${weekParam}?season_type=regular&${posParams}`;
+        const data: any[] = await fetch(url).then(r => r.json());
+        // If Sleeper has no projections for this year yet, it returns an empty array
+        return Array.isArray(data) && data.length > 0 ? data : null;
+      };
+      let data = await tryYear(currentNflYear);
+      if (!data) {
+        data = await tryYear(currentNflYear - 1);
+        if (data) resolvedProjectionYear = currentNflYear - 1;
+      }
+      data ??= [];
+      const src = PROJ_SOURCES.find(s => s.id === 'sleeper')!;
+      data.forEach((item: any) => {
+        const pos: string = item.player?.position ?? '';
+        if (!['QB','RB','WR','TE'].includes(pos) || !item.player_id) return;
+        // PPR points + 0.5 TE premium (extra half-point per reception for TEs)
+        const pprFpts: number = item.stats?.pts_ppr ?? 0;
+        const tePremium: number = pos === 'TE' ? (item.stats?.rec ?? 0) * 0.5 : 0;
+        const fpts = pprFpts + tePremium;
+        if (fpts <= 0) return;
+        addRow(String(item.player_id), fpts, src.id, src.weight);
+      });
+      statusMap['sleeper'] = data.length > 0;
+    } catch {
+      statusMap['sleeper'] = false;
+    }
+
+    // ── Source 2: FantasyPros (via our server-side proxy route) ──────────────
+    try {
+      const weekParam = week === 'season' ? 'draft' : String(week);
+      const data: Array<{ name: string; position: string; fpts: number }> =
+        await fetch(`/api/projections/fantasypros?week=${weekParam}`).then(r => r.json());
+      const src = PROJ_SOURCES.find(s => s.id === 'fantasypros')!;
+      data.forEach((item) => {
+        if (item.fpts <= 0) return;
+        const key = normalizeProjName(item.name);
+        const sleeperId = nameIndex.get(key);
+        if (!sleeperId) return;
+        addRow(sleeperId, item.fpts, src.id, src.weight);
+      });
+      statusMap['fantasypros'] = true;
+    } catch {
+      statusMap['fantasypros'] = false;
+    }
+
+    // ── Source 3: numberFire / FanDuel Research (GraphQL, no auth) ───────────
+    // PPR base + 0.5 TE premium already applied server-side in the route.
+    try {
+      const weekParam = week === 'season' ? '0' : String(week);
+      const data: Array<{ name: string; position: string; fpts: number }> =
+        await fetch(`/api/projections/numberfire?week=${weekParam}`).then(r => r.json());
+      const src = PROJ_SOURCES.find(s => s.id === 'numberfire')!;
+      data.forEach((item) => {
+        if (item.fpts <= 0) return;
+        const key = normalizeProjName(item.name);
+        const sleeperId = nameIndex.get(key);
+        if (!sleeperId) return;
+        addRow(sleeperId, item.fpts, src.id, src.weight);
+      });
+      statusMap['numberfire'] = data.length > 0;
+    } catch {
+      statusMap['numberfire'] = false;
+    }
+
+    // ── Build final consensus list ────────────────────────────────────────────
+    // Weight is whatever each player's sources contributed. Players only seen by
+    // one source still appear but with that source's full contribution.
+    const rows: any[] = [];
+    sourceRows.forEach((row, sleeperId) => {
+      const p = (players as any)[sleeperId];
+      if (!p) return;
+      const consensusFpts = row.totalWeight > 0
+        ? row.totalWeightedFpts / row.totalWeight
+        : 0;
+      rows.push({
+        sleeperId,
+        full_name: p.full_name,
+        position: p.position,
+        team: p.team,
+        fpts: Math.round(consensusFpts * 10) / 10,
+        sources: row.sources,
+      });
+    });
+
+    rows.sort((a, b) => b.fpts - a.fpts);
+    setProjectionData(rows);
+    setProjectionSeasonYear(resolvedProjectionYear);
+    setProjectionSourceStatus(statusMap);
+    setProjectionLoaded(true);
+  } finally {
+    setLoadingProjections(false);
+  }
+};
+
 const loadUserTrades = async (targetUserId: string) => {
   setTradeHubUserId(targetUserId);
   setTradeHubData(null);
@@ -1250,12 +1468,12 @@ const myPlayerSet = new Set<string>(roster?.players || []);
 </button>
 
         <button
-  onClick={() => user && setMainTab("SHARES")}
-  className={`${mainTab === "SHARES" ? "text-blue-400" : ""} ${
+  onClick={() => user && setMainTab("DATA_HUB")}
+  className={`${mainTab === "DATA_HUB" ? "text-blue-400" : ""} ${
     !user ? "opacity-50 cursor-not-allowed" : ""
   }`}
 >
-  Player Ownership & Tools
+  Data Hub
 </button>
 
 <button
@@ -1834,100 +2052,290 @@ const starters = starterSlots
           </>
         )}
 
-        {/* SHARES TAB (UNCHANGED) */}
-        {mainTab === "SHARES" && (
+        {/* DATA HUB TAB */}
+        {mainTab === "DATA_HUB" && (
           <>
-            <input
-              className="w-full p-2 mb-4 rounded bg-gray-800"
-              placeholder="Search player shares..."
-              value={shareSearch}
-              onChange={(e) => setShareSearch(e.target.value)}
-            />
-
-            <div className="flex gap-2 mb-4">
-              {["ALL", "QB", "RB", "WR", "TE"].map((pos) => (
+            {/* Sub-tab nav */}
+            <div className="flex gap-6 border-b border-gray-800 mb-6">
+              {(["OWNERSHIP", "DYNASTY", "REDRAFT", "PROJECTIONS"] as const).map((tab) => (
                 <button
-                  key={pos}
-                  onClick={() => setSharePosition(pos)}
-                  className={`px-3 py-1 rounded ${
-                    sharePosition === pos
-                      ? "bg-blue-600"
-                      : "bg-gray-800"
+                  key={tab}
+                  onClick={() => setDataHubTab(tab)}
+                  className={`pb-2 px-1 text-sm font-semibold transition ${
+                    dataHubTab === tab
+                      ? "border-b-2 border-blue-400 text-blue-400"
+                      : "text-gray-400 hover:text-white"
                   }`}
                 >
-                  {pos}
+                  {tab === "OWNERSHIP" ? "Player Ownership" : tab === "DYNASTY" ? "Dynasty Rankings" : tab === "REDRAFT" ? "Redraft Rankings" : "Player Projections"}
                 </button>
               ))}
             </div>
 
-            {Object.entries(shares)
-              .filter(([playerId]) => {
-                const p = players[playerId];
-                if (!p) return false;
+            {/* ── Player Ownership ── */}
+            {dataHubTab === "OWNERSHIP" && (
+              <>
+                <input
+                  className="w-full p-2 mb-4 rounded bg-gray-800"
+                  placeholder="Search player shares..."
+                  value={shareSearch}
+                  onChange={(e) => setShareSearch(e.target.value)}
+                />
+                <div className="flex gap-2 mb-4">
+                  {["ALL", "QB", "RB", "WR", "TE"].map((pos) => (
+                    <button
+                      key={pos}
+                      onClick={() => setSharePosition(pos)}
+                      className={`px-3 py-1 rounded ${sharePosition === pos ? "bg-blue-600" : "bg-gray-800"}`}
+                    >
+                      {pos}
+                    </button>
+                  ))}
+                </div>
+                {Object.entries(shares)
+                  .filter(([playerId]) => {
+                    const p = players[playerId];
+                    if (!p) return false;
+                    const matchesSearch = p.full_name?.toLowerCase().includes(shareSearch.toLowerCase());
+                    const matchesPosition = sharePosition === "ALL" || p.position === sharePosition;
+                    return matchesSearch && matchesPosition;
+                  })
+                  .sort((a: any, b: any) => b[1].count - a[1].count)
+                  .map(([playerId, data]: any) => {
+                    const p = players[playerId];
+                    if (!p) return null;
+                    return (
+                      <div key={playerId} className="bg-gray-800 p-3 rounded mb-3">
+                        <div className="font-medium">
+                          {p.full_name} ({data.count} shares •{" "}
+                          {Math.round((data.count / totalLeagues) * 100)}%)
+                        </div>
+                        <div className="text-xs text-gray-400 mt-1">
+                          Owned or
+                          <span className="ml-2 text-green-400">(Starting)</span>
+                          {[...data.leagues]
+                            .sort((a: string, b: string) => {
+                              const aStarter = data.starters.includes(a);
+                              const bStarter = data.starters.includes(b);
+                              if (aStarter && !bStarter) return -1;
+                              if (!aStarter && bStarter) return 1;
+                              return 0;
+                            })
+                            .map((l: string, i: number) => {
+                              const isStarter = data.starters.includes(l);
+                              return (
+                                <div key={i} className={isStarter ? "text-green-400 font-medium" : ""}>
+                                  • {l} {isStarter && "🔥"}
+                                </div>
+                              );
+                            })}
+                        </div>
+                      </div>
+                    );
+                  })}
+              </>
+            )}
 
-                const matchesSearch = p.full_name
-                  ?.toLowerCase()
-                  .includes(shareSearch.toLowerCase());
+            {/* ── Dynasty Rankings ── */}
+            {dataHubTab === "DYNASTY" && (() => {
+              const fcVal = (id: string) => calcFcValues[id] ?? (players as any)[id]?.value ?? 0;
+              const ranked = Object.values(players as Record<string, any>)
+                .filter((p: any) => ["QB", "RB", "WR", "TE"].includes(p.position) && fcVal(p.player_id) > 0)
+                .filter((p: any) => dynastyRankPos === "ALL" || p.position === dynastyRankPos)
+                .sort((a: any, b: any) => fcVal(b.player_id) - fcVal(a.player_id));
 
-                const matchesPosition =
-                  sharePosition === "ALL" ||
-                  p.position === sharePosition;
+              const posColor: Record<string, string> = {
+                QB: "text-red-400", RB: "text-green-400", WR: "text-blue-400", TE: "text-yellow-400",
+              };
 
-                return matchesSearch && matchesPosition;
-              })
-              .sort((a: any, b: any) => b[1].count - a[1].count)
-              .map(([playerId, data]: any) => {
-                const p = players[playerId];
-                if (!p) return null;
-
-                return (
-                  <div
-                    key={playerId}
-                    className="bg-gray-800 p-3 rounded mb-3"
-                  >
-                    <div className="font-medium">
-                      {p.full_name} ({data.count} shares •{" "}
-                      {Math.round(
-                        (data.count / totalLeagues) * 100
-                      )}
-                      %)
-                    </div>
-
-                    <div className="text-xs text-gray-400 mt-1">
-  Owned or
-  <span className="ml-2 text-green-400">
-    (Starting)
-  </span>
-                      {[...data.leagues]
-  .sort((a: string, b: string) => {
-    const aStarter = data.starters.includes(a);
-    const bStarter = data.starters.includes(b);
-
-    // starters first
-    if (aStarter && !bStarter) return -1;
-    if (!aStarter && bStarter) return 1;
-
-    return 0;
-  })
-  .map((l: string, i: number) => {
-    const isStarter = data.starters.includes(l);
-
-    return (
-      <div
-        key={i}
-        className={`${
-          isStarter ? "text-green-400 font-medium" : ""
-        }`}
-      >
-        • {l} {isStarter && "🔥"}
-      </div>
-    );
-  })}
-                    </div>
-                    
+              return (
+                <>
+                  {loadingCalcValues && (
+                    <p className="text-sm text-blue-400 mb-4">Loading values…</p>
+                  )}
+                  <div className="flex gap-2 mb-4">
+                    {["ALL", "QB", "RB", "WR", "TE"].map((pos) => (
+                      <button
+                        key={pos}
+                        onClick={() => setDynastyRankPos(pos)}
+                        className={`px-3 py-1 rounded text-sm font-medium transition ${dynastyRankPos === pos ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:text-white"}`}
+                      >
+                        {pos}
+                      </button>
+                    ))}
                   </div>
-                );
-              })}
+                  <div className="space-y-1">
+                    {ranked.map((p: any, idx: number) => (
+                      <div key={p.player_id} className="flex items-center gap-3 bg-gray-800 rounded-lg px-3 py-2">
+                        <span className="text-xs text-gray-500 w-6 text-right shrink-0">{idx + 1}</span>
+                        <span className={`text-[10px] font-bold w-7 shrink-0 ${posColor[p.position] ?? "text-gray-400"}`}>{p.position}</span>
+                        <span className="text-sm text-white flex-1 truncate">{p.full_name}</span>
+                        <span className="text-xs text-gray-400 font-mono shrink-0">{fcVal(p.player_id).toLocaleString()}</span>
+                      </div>
+                    ))}
+                    {ranked.length === 0 && !loadingCalcValues && (
+                      <p className="text-gray-400 text-sm">No data yet. Select a league to load values.</p>
+                    )}
+                  </div>
+                </>
+              );
+            })()}
+
+            {/* ── Redraft Rankings ── */}
+            {dataHubTab === "REDRAFT" && (() => {
+              const ranked = Object.values(players as Record<string, any>)
+                .filter((p: any) => ["QB", "RB", "WR", "TE"].includes(p.position) && (redraftValues[p.player_id] ?? 0) > 0)
+                .filter((p: any) => redraftRankPos === "ALL" || p.position === redraftRankPos)
+                .sort((a: any, b: any) => (redraftValues[b.player_id] ?? 0) - (redraftValues[a.player_id] ?? 0));
+
+              const posColor: Record<string, string> = {
+                QB: "text-red-400", RB: "text-green-400", WR: "text-blue-400", TE: "text-yellow-400",
+              };
+
+              return (
+                <>
+                  {loadingRedraft && <p className="text-sm text-blue-400 mb-4">Loading values…</p>}
+                  <div className="flex gap-2 mb-4">
+                    {["ALL", "QB", "RB", "WR", "TE"].map((pos) => (
+                      <button
+                        key={pos}
+                        onClick={() => setRedraftRankPos(pos)}
+                        className={`px-3 py-1 rounded text-sm font-medium transition ${redraftRankPos === pos ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:text-white"}`}
+                      >
+                        {pos}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="space-y-1">
+                    {ranked.map((p: any, idx: number) => (
+                      <div key={p.player_id} className="flex items-center gap-3 bg-gray-800 rounded-lg px-3 py-2">
+                        <span className="text-xs text-gray-500 w-6 text-right shrink-0">{idx + 1}</span>
+                        <span className={`text-[10px] font-bold w-7 shrink-0 ${posColor[p.position] ?? "text-gray-400"}`}>{p.position}</span>
+                        <span className="text-sm text-white flex-1 truncate">{p.full_name}</span>
+                        <span className="text-xs text-gray-400 font-mono shrink-0">{(redraftValues[p.player_id] ?? 0).toLocaleString()}</span>
+                      </div>
+                    ))}
+                    {ranked.length === 0 && !loadingRedraft && (
+                      <p className="text-gray-400 text-sm">No redraft data available.</p>
+                    )}
+                  </div>
+                </>
+              );
+            })()}
+
+            {/* ── Player Projections ── */}
+            {dataHubTab === "PROJECTIONS" && (() => {
+              const posColor: Record<string, string> = {
+                QB: "text-red-400", RB: "text-green-400", WR: "text-blue-400", TE: "text-yellow-400",
+              };
+              const visible = projectionData.filter(
+                (p) => projectionPosFilter === "ALL" || p.position === projectionPosFilter
+              );
+
+              return (
+                <>
+                  {/* Controls row */}
+                  <div className="flex flex-wrap items-center gap-3 mb-4">
+                    {/* Week selector */}
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-500 shrink-0">View:</span>
+                      <select
+                        value={projectionWeek}
+                        onChange={(e) => {
+                          const w = Number(e.target.value);
+                          setProjectionWeek(w);
+                          setProjectionLoaded(false);
+                          setProjectionData([]);
+                          loadProjections(w === 0 ? 'season' : w);
+                        }}
+                        className="bg-gray-800 border border-gray-700 text-sm text-white rounded-lg px-2 py-1 focus:outline-none focus:border-blue-500"
+                      >
+                        <option value={0}>Full Season</option>
+                        {Array.from({ length: 18 }, (_, i) => i + 1).map((w) => (
+                          <option key={w} value={w}>Week {w}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {projectionSeasonYear && (
+                      <span className="rounded-full border border-gray-700 bg-gray-900/70 px-3 py-1 text-[11px] font-medium text-gray-300">
+                        {projectionWeek === 0 ? `${projectionSeasonYear} season projections` : `${projectionSeasonYear} projections`}
+                      </span>
+                    )}
+
+                    {/* Position filter */}
+                    <div className="flex gap-2">
+                      {["ALL", "QB", "RB", "WR", "TE"].map((pos) => (
+                        <button
+                          key={pos}
+                          onClick={() => setProjectionPosFilter(pos)}
+                          className={`px-3 py-1 rounded text-sm font-medium transition ${projectionPosFilter === pos ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:text-white"}`}
+                        >
+                          {pos}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Refresh */}
+                    <button
+                      onClick={() => { setProjectionLoaded(false); setProjectionData([]); loadProjections(projectionWeek === 0 ? 'season' : projectionWeek); }}
+                      className="ml-auto text-xs font-semibold text-blue-400 hover:text-blue-300 border border-blue-700 hover:border-blue-500 rounded-lg px-3 py-1.5 transition"
+                    >
+                      Refresh
+                    </button>
+                  </div>
+
+                  {/* Source status pills */}
+                  <div className="flex gap-2 mb-4 flex-wrap">
+                    {PROJ_SOURCES.map((src) => {
+                      const ok = projectionSourceStatus[src.id];
+                      const pct = Math.round(src.weight * 100);
+                      return (
+                        <span
+                          key={src.id}
+                          className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${ok === undefined ? "bg-gray-800 text-gray-500" : ok ? "bg-green-900 text-green-300" : "bg-red-900 text-red-400"}`}
+                        >
+                          {src.label} {ok !== undefined && `(${pct}%)`}{ok === false && " ✕"}
+                        </span>
+                      );
+                    })}
+                    {loadingProjections && <span className="text-[10px] text-blue-400">Loading…</span>}
+                  </div>
+
+                  {/* List */}
+                  {loadingProjections && projectionData.length === 0 ? (
+                    <p className="text-sm text-blue-400">Fetching consensus projections…</p>
+                  ) : visible.length === 0 ? (
+                    <p className="text-sm text-gray-500">No projection data. Hit Refresh or check your connection.</p>
+                  ) : (
+                    <>
+                      {/* Header */}
+                      <div className="flex items-center gap-3 px-3 pb-1 text-[10px] font-bold uppercase tracking-widest text-gray-600">
+                        <span className="w-6 text-right shrink-0">#</span>
+                        <span className="w-7 shrink-0">Pos</span>
+                        <span className="flex-1">Player</span>
+                        <span className="w-10 text-right shrink-0">FPTS</span>
+                        <span className="w-10 text-right shrink-0 pr-1">Srcs</span>
+                      </div>
+                      <div className="space-y-1">
+                        {visible.map((p, idx) => (
+                          <div key={p.sleeperId} className="flex items-center gap-3 bg-gray-800 rounded-lg px-3 py-2">
+                            <span className="text-xs text-gray-500 w-6 text-right shrink-0">{idx + 1}</span>
+                            <span className={`text-[10px] font-bold w-7 shrink-0 ${posColor[p.position] ?? "text-gray-400"}`}>{p.position}</span>
+                            <span className="text-sm text-white flex-1 truncate">{p.full_name}</span>
+                            {p.team && <span className="text-[10px] text-gray-500 shrink-0">{p.team}</span>}
+                            <span className="text-xs text-gray-300 font-mono w-10 text-right shrink-0">{p.fpts.toFixed(1)}</span>
+                            <span className="text-[10px] text-gray-600 w-10 text-right shrink-0 pr-1">
+                              {p.sources.length}/{PROJ_SOURCES.length}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </>
+              );
+            })()}
           </>
         )}
 {mainTab === "DRAFT" && (
@@ -2785,7 +3193,10 @@ const starters = starterSlots
       const myRoster = rosters.find((r: any) => r.owner_id === user?.user_id);
       const myPlayers = rosterPlayers(myRoster);
       const myT = posTotals(myPlayers);
-      const myTop = myPlayers.slice(0, 10);
+      // When a player is pinned, ensure they're always in the give pool even if outside top 10
+      const myTop = finderPinnedPlayerId && !myPlayers.slice(0, 10).some((p: any) => p.player_id === finderPinnedPlayerId)
+        ? [...myPlayers.slice(0, 9), myPlayers.find((p: any) => p.player_id === finderPinnedPlayerId)].filter(Boolean)
+        : myPlayers.slice(0, 10);
 
       // League-wide positional totals for every team (used for ranking)
       const allTeamPosTotals = rosters.map((r: any) => posTotals(rosterPlayers(r)));
@@ -2823,6 +3234,16 @@ const starters = starterSlots
       };
 
       if (loadingCalcValues) return <p className="text-sm text-blue-400">Loading player values…</p>;
+
+      // ── Player search / pin UI ──
+      const searchMatches = finderPlayerSearch.trim().length >= 2
+        ? myPlayers.filter((p: any) =>
+            p.full_name.toLowerCase().includes(finderPlayerSearch.toLowerCase())
+          ).slice(0, 6)
+        : [];
+      const pinnedPlayer = finderPinnedPlayerId
+        ? myPlayers.find((p: any) => p.player_id === finderPinnedPlayerId) ?? null
+        : null;
 
       // QB safety gate — find the top-32 QB value floor across all known players
       const allQBsSorted = Object.values(players as Record<string, any>)
@@ -2982,6 +3403,7 @@ const starters = starterSlots
       // Seeded shuffle so Refresh button produces a new random set
       const shuffled = results
         .filter((r) => isFinite(r.score))
+        .filter((r) => !pinnedPlayer || r.give.some((p: any) => p.player_id === pinnedPlayer.player_id))
         .map((r) => ({ r, sort: Math.abs(Math.sin(finderSeed * (results.indexOf(r) + 1)) * 10000) % 1 }))
         .sort((a, b) => a.sort - b.sort)
         .map(({ r }) => r);
@@ -2989,8 +3411,8 @@ const starters = starterSlots
           const allIds = [...r.give.map((p: any) => p.player_id), ...r.receive.map((p: any) => p.player_id)];
           const key = [...allIds].sort().join(",");
           if (seen.has(key)) return false;
-          // Each player may appear in at most 4 shown trades
-          if (allIds.some((pid) => (playerCount[pid] || 0) >= 4)) return false;
+          // Each player may appear in at most 4 shown trades (pinned player is exempt)
+          if (allIds.some((pid) => pid !== finderPinnedPlayerId && (playerCount[pid] || 0) >= 4)) return false;
           // Each opponent may appear in at most 4 shown trades
           const oppKey = String(r.oppRosterId);
           if ((oppCount[oppKey] || 0) >= 4) return false;
@@ -3003,15 +3425,68 @@ const starters = starterSlots
 
       if (top15.length === 0) return (
         <p className="text-gray-400 text-sm">
-          No balanced trades found. Try selecting a league with more roster data loaded.
+          {pinnedPlayer
+            ? `No balanced trades found involving ${pinnedPlayer.full_name}. Try a different player or hit Refresh.`
+            : "No balanced trades found. Try selecting a league with more roster data loaded."
+          }
         </p>
       );
 
       return (
         <div className="space-y-4">
+          {/* ── Player pin search ── */}
+          <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 space-y-2">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Find trades involving a specific player</p>
+            {pinnedPlayer ? (
+              <div className="flex items-center justify-between bg-gray-800 rounded-lg px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-white font-medium">{pinnedPlayer.full_name}</span>
+                  <span className="text-[10px] text-gray-500 uppercase">{pinnedPlayer.position}</span>
+                  <span className="text-xs text-gray-500 font-mono">{pinnedPlayer.value.toLocaleString()}</span>
+                </div>
+                <button
+                  onClick={() => { setFinderPinnedPlayerId(null); setFinderPlayerSearch(""); }}
+                  className="text-xs text-gray-500 hover:text-red-400 transition ml-3"
+                >
+                  ✕ Clear
+                </button>
+              </div>
+            ) : (
+              <div className="relative">
+                <input
+                  type="text"
+                  value={finderPlayerSearch}
+                  onChange={(e) => { setFinderPlayerSearch(e.target.value); setFinderPinnedPlayerId(null); }}
+                  placeholder="Search your roster…"
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+                />
+                {searchMatches.length > 0 && (
+                  <div className="absolute z-10 top-full mt-1 w-full bg-gray-800 border border-gray-700 rounded-lg overflow-hidden shadow-xl">
+                    {searchMatches.map((p: any) => (
+                      <button
+                        key={p.player_id}
+                        onClick={() => { setFinderPinnedPlayerId(p.player_id); setFinderPlayerSearch(""); setFinderSeed(Math.random()); }}
+                        className="w-full flex items-center justify-between px-3 py-2 hover:bg-gray-700 transition text-left"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-white">{p.full_name}</span>
+                          <span className="text-[10px] text-gray-500 uppercase">{p.position}</span>
+                        </div>
+                        <span className="text-xs text-gray-400 font-mono">{p.value.toLocaleString()}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           <div className="flex items-center justify-between">
             <p className="text-xs text-gray-500">
-              Random trade suggestions based on value balance and positional fit for <strong className="text-gray-300">{selectedLeague.name}</strong>.
+              {pinnedPlayer
+                ? <>Trades involving <strong className="text-gray-300">{pinnedPlayer.full_name}</strong> for <strong className="text-gray-300">{selectedLeague.name}</strong>.</>
+                : <>Random trade suggestions for <strong className="text-gray-300">{selectedLeague.name}</strong>.</>
+              }
               {loadingCalcValues && <span className="ml-2 text-blue-400">Loading values…</span>}
             </p>
             <button
