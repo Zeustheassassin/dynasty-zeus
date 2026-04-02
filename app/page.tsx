@@ -1767,27 +1767,31 @@ const myPlayerSet = new Set<string>(roster?.players || []);
               return (
                 <div className="space-y-2">
                   {loadingLeagueOverview && <p className="text-xs text-blue-400 mb-2">Loading…</p>}
-                  {/* Header */}
-                  <div className="grid grid-cols-[1fr_140px_60px_60px_60px_60px] gap-2 px-3 pb-1 text-[10px] font-bold uppercase tracking-widest text-gray-600">
-                    <span>League</span>
-                    <span>Direction</span>
-                    <span className="text-center">Dyn</span>
-                    <span className="text-center">Rdft</span>
-                    <span className="text-center">Stnd</span>
-                    <span className="text-center">MaxPF</span>
-                  </div>
-                  {leagueRows.map((row: any) => (
-                    <div key={row.league.league_id} className="grid grid-cols-[1fr_140px_60px_60px_60px_60px] gap-2 items-center bg-gray-900 border border-gray-800 rounded-xl px-3 py-2.5">
-                      <button className="text-sm text-white font-medium text-left truncate hover:text-blue-400 transition" onClick={() => { loadRoster(row.league); setLeagueHubTab("ROSTERS"); }}>
-                        {row.league.name}
-                      </button>
-                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border text-center truncate ${row.bucketColor}`}>{row.bucket}</span>
-                      <span className="text-xs text-center text-gray-300">{row.dynRank}<span className="text-gray-600">/{row.n}</span></span>
-                      <span className="text-xs text-center text-gray-300">{row.redRank}<span className="text-gray-600">/{row.n}</span></span>
-                      <span className="text-xs text-center text-gray-300">{row.standRank}<span className="text-gray-600">/{row.n}</span></span>
-                      <span className="text-xs text-center text-gray-300">{row.maxPfRank}<span className="text-gray-600">/{row.n}</span></span>
+                  <div className="overflow-x-auto pb-1">
+                    <div className="min-w-[780px] space-y-2">
+                      {/* Header */}
+                      <div className="grid grid-cols-[minmax(220px,1.4fr)_minmax(150px,1fr)_72px_72px_72px_72px] gap-2 px-3 pb-1 text-[10px] font-bold uppercase tracking-widest text-gray-600">
+                        <span>League</span>
+                        <span>Direction</span>
+                        <span className="text-center">Dyn</span>
+                        <span className="text-center">Rdft</span>
+                        <span className="text-center">Stnd</span>
+                        <span className="text-center">MaxPF</span>
+                      </div>
+                      {leagueRows.map((row: any) => (
+                        <div key={row.league.league_id} className="grid grid-cols-[minmax(220px,1.4fr)_minmax(150px,1fr)_72px_72px_72px_72px] gap-2 items-center bg-gray-900 border border-gray-800 rounded-xl px-3 py-2.5">
+                          <button className="min-w-0 text-sm text-white font-medium text-left truncate hover:text-blue-400 transition" onClick={() => { loadRoster(row.league); setLeagueHubTab("ROSTERS"); }}>
+                            {row.league.name}
+                          </button>
+                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border text-center truncate ${row.bucketColor}`}>{row.bucket}</span>
+                          <span className="text-xs text-center text-gray-300">{row.dynRank}<span className="text-gray-600">/{row.n}</span></span>
+                          <span className="text-xs text-center text-gray-300">{row.redRank}<span className="text-gray-600">/{row.n}</span></span>
+                          <span className="text-xs text-center text-gray-300">{row.standRank}<span className="text-gray-600">/{row.n}</span></span>
+                          <span className="text-xs text-center text-gray-300">{row.maxPfRank}<span className="text-gray-600">/{row.n}</span></span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  </div>
                   {!leagueOverviewLoaded && !loadingLeagueOverview && (
                     <button onClick={() => { loadLeagueOverview(); loadRedraftValues(); }} className="text-xs text-blue-400 hover:text-blue-300 border border-blue-700 rounded-lg px-3 py-1.5 transition">
                       Load Overview
@@ -2952,10 +2956,7 @@ const starters = starterSlots
     )}
 
     {draftHubSection === "BIG_BOARD" && (
-      <div className="max-w-3xl">
-        <div className="text-xl font-bold mb-4">
-          Rookie / Dynasty Big Board
-        </div>
+      <div className="max-w-3xl mx-auto">
         <input
           type="text"
           placeholder="Search rookies..."
