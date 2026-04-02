@@ -746,7 +746,7 @@ useEffect(() => {
   };
 
   loadRookieBoard().catch(() => {});
-}, [supabaseUser]);
+}, [supabaseUser?.id]); // use ID not object — prevents re-runs when auth refreshes recreate the user object
 useEffect(() => {
   return;
   if (Object.keys(players).length === 0) return;
