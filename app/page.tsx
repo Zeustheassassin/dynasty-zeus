@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import Dashboard from "../components/Dashboard";
 import { supabase } from "../lib/supabaseclient";
 
@@ -341,6 +341,15 @@ const handleRankChange = (currentIndex: number, newRank: string) => {
 };
  
 
+// Ref so the rookie-board save effect can read the current user
+// without adding supabaseUser as a dependency (which would cause it
+// to fire on login and overwrite Supabase with stale localStorage data).
+const supabaseUserRef = useRef<any>(null);
+useEffect(() => { supabaseUserRef.current = supabaseUser; }, [supabaseUser]);
+// Flag: once Supabase has provided the authoritative board, prevent
+// the sheet/ADP load effect from overwriting it with localStorage data.
+const rookieBoardSupabaseLoaded = useRef(false);
+
 const refreshSupabaseUser = async () => {
   const { data } = await supabase.auth.getUser();
   console.log("refreshSupabaseUser", data.user ? data.user.email : "null");
@@ -394,6 +403,7 @@ useEffect(() => {
     .single()
     .then(({ data }) => {
       if (data?.players && Array.isArray(data.players) && data.players.length > 0) {
+        rookieBoardSupabaseLoaded.current = true;
         setRookies(data.players);
         localStorage.setItem(`rookieBoard_${ROOKIE_YEAR}`, JSON.stringify(data.players));
       }
@@ -446,6 +456,7 @@ const signOut = async () => {
   setLoginEmail("");
   setLoginPassword("");
   setSupabaseError("");
+  rookieBoardSupabaseLoaded.current = false;
   // Clear localStorage user-specific data so next user starts fresh
   localStorage.removeItem("leagueNotes");
   localStorage.removeItem(`rookieBoard_${ROOKIE_YEAR}`);
@@ -625,14 +636,15 @@ useEffect(() => {
 useEffect(() => {
   if (rookies.length > 0) {
     localStorage.setItem(`rookieBoard_${ROOKIE_YEAR}`, JSON.stringify(rookies));
-    if (supabaseUser) {
+    const user = supabaseUserRef.current;
+    if (user) {
       supabase.from("rookie_board").upsert(
-        { user_id: supabaseUser.id, year: ROOKIE_YEAR, players: rookies, updated_at: new Date().toISOString() },
+        { user_id: user.id, year: ROOKIE_YEAR, players: rookies, updated_at: new Date().toISOString() },
         { onConflict: "user_id,year" }
       );
     }
   }
-}, [rookies, supabaseUser]);
+}, [rookies]); // intentionally omits supabaseUser — use ref to avoid overwriting Supabase on login
 useEffect(() => {
   const loadRookieBoard = async () => {
     const [sheetText, adpResponse] = await Promise.all([
@@ -693,6 +705,9 @@ useEffect(() => {
         if (a.adp !== b.adp) return a.adp - b.adp;
         return a.name.localeCompare(b.name);
       });
+
+    // If Supabase already provided the authoritative board, don't overwrite it.
+    if (rookieBoardSupabaseLoaded.current) return;
 
     const canonicalNames = new Set(canonicalBoard.map((player) => normalizeRookieName(player.name)));
     const hasReset = localStorage.getItem(ROOKIE_BOARD_RESET_KEY) === "true";
@@ -1759,104 +1774,65 @@ const myPlayerSet = new Set<string>(roster?.players || []);
       <div className={!supabaseUser ? "pointer-events-none select-none opacity-40" : ""}>
       <>
       {/* HEADER */}
-      <div className="bg-gray-900 border-b border-gray-700 p-4 flex items-center justify-center">
-  
-  <div className="flex items-center gap-6">
-
-  <h1 className="text-xl font-bold">DynastyZeus</h1>
-
-  {user && (
-    <span className="text-sm text-gray-400">
-      Sleeper: {user.display_name}
-    </span>
-  )}
-
-  {user && (
-    <button
-      onClick={disconnectSleeper}
-      className="px-3 py-1 text-sm bg-gray-700 rounded hover:bg-gray-600"
-    >
-      Disconnect
-    </button>
-  )}
-
-  {leagues.length > 0 && (
-    <select
-      value={selectedLeague?.league_id || ""}
-      onChange={(e) => {
-  const league = leagues.find(
-    (l: any) => l.league_id === e.target.value
-  );
-  if (league) {
-    loadRoster(league);
-    if (mainTab === "DASHBOARD") setMainTab("LEAGUES");
-    localStorage.setItem("selectedLeague", JSON.stringify(league));
-  }
-}}
-      className="bg-gray-800 border border-gray-700 rounded px-3 py-1 text-sm"
-    >
-      <option value="">Select League</option>
-      {leagues.map((l: any) => (
-        <option key={l.league_id} value={l.league_id}>
-          {l.name}
-        </option>
-      ))}
-    </select>
-  )}
-
-  {supabaseUser && (
-    <button
-      onClick={signOut}
-      className="px-3 py-1 text-sm bg-red-600 hover:bg-red-500 rounded transition"
-    >
-      Log Out
-    </button>
-  )}
-
-</div>
-</div>
-      {/* NAV */}
-      <div className="flex justify-center gap-6 p-4 border-b border-gray-700">
-        <button
-  onClick={() => setMainTab("DASHBOARD")}
-  className={mainTab === "DASHBOARD" ? "text-blue-400" : ""}
->
-  Dashboard
-</button>
-        <button
-  onClick={() => user && setMainTab("LEAGUES")}
-  className={`${mainTab === "LEAGUES" ? "text-blue-400" : ""} ${
-    !user ? "opacity-50 cursor-not-allowed" : ""
-  }`}
->
-  League Hub
-</button>
-
-        <button
-  onClick={() => user && setMainTab("DATA_HUB")}
-  className={`${mainTab === "DATA_HUB" ? "text-blue-400" : ""} ${
-    !user ? "opacity-50 cursor-not-allowed" : ""
-  }`}
->
-  Data Hub
-</button>
-
-<button
-  onClick={() => user && setMainTab("DRAFT")}
-  className={`${mainTab === "DRAFT" ? "text-blue-400" : ""} ${
-    !user ? "opacity-50 cursor-not-allowed" : ""
-  }`}
->
-  Draft Hub
-</button>
-<button
-  onClick={() => user && setMainTab("TRADE_HUB")}
-  className={`${mainTab === "TRADE_HUB" ? "text-blue-400" : ""} ${
-    !user ? "opacity-50 cursor-not-allowed" : ""
-  }`}
->
-  Trade Hub
-</button>
+      <div className="sticky top-0 z-10 bg-gray-900 border-b border-gray-700">
+        {/* Top bar */}
+        <div className="flex items-center justify-between px-3 py-2 gap-2">
+          <h1 className="text-base font-bold shrink-0">DynastyZeus</h1>
+          <div className="flex items-center gap-2 min-w-0">
+            {user && (
+              <span className="text-xs text-gray-400 truncate hidden sm:inline max-w-[100px]">
+                {user.display_name}
+              </span>
+            )}
+            {user && (
+              <button onClick={disconnectSleeper} className="px-2 py-1 text-xs bg-gray-700 rounded hover:bg-gray-600 shrink-0">
+                Disconnect
+              </button>
+            )}
+            {leagues.length > 0 && (
+              <select
+                value={selectedLeague?.league_id || ""}
+                onChange={(e) => {
+                  const league = leagues.find((l: any) => l.league_id === e.target.value);
+                  if (league) {
+                    loadRoster(league);
+                    if (mainTab === "DASHBOARD") setMainTab("LEAGUES");
+                    localStorage.setItem("selectedLeague", JSON.stringify(league));
+                  }
+                }}
+                className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs max-w-[120px] truncate"
+              >
+                <option value="">Select League</option>
+                {leagues.map((l: any) => (
+                  <option key={l.league_id} value={l.league_id}>{l.name}</option>
+                ))}
+              </select>
+            )}
+            {supabaseUser && (
+              <button onClick={signOut} className="px-2 py-1 text-xs bg-red-600 hover:bg-red-500 rounded transition shrink-0">
+                Log Out
+              </button>
+            )}
+          </div>
+        </div>
+        {/* NAV */}
+        <div className="flex overflow-x-auto px-3 pb-2 gap-5 border-t border-gray-800 scrollbar-none">
+          <button onClick={() => setMainTab("DASHBOARD")} className={`text-sm whitespace-nowrap py-1 ${mainTab === "DASHBOARD" ? "text-blue-400 font-semibold" : "text-gray-400"}`}>
+            Dashboard
+          </button>
+          <button onClick={() => user && setMainTab("LEAGUES")} className={`text-sm whitespace-nowrap py-1 ${mainTab === "LEAGUES" ? "text-blue-400 font-semibold" : "text-gray-400"} ${!user ? "opacity-40 cursor-not-allowed" : ""}`}>
+            League Hub
+          </button>
+          <button onClick={() => user && setMainTab("DATA_HUB")} className={`text-sm whitespace-nowrap py-1 ${mainTab === "DATA_HUB" ? "text-blue-400 font-semibold" : "text-gray-400"} ${!user ? "opacity-40 cursor-not-allowed" : ""}`}>
+            Data Hub
+          </button>
+          <button onClick={() => user && setMainTab("DRAFT")} className={`text-sm whitespace-nowrap py-1 ${mainTab === "DRAFT" ? "text-blue-400 font-semibold" : "text-gray-400"} ${!user ? "opacity-40 cursor-not-allowed" : ""}`}>
+            Draft Hub
+          </button>
+          <button onClick={() => user && setMainTab("TRADE_HUB")} className={`text-sm whitespace-nowrap py-1 ${mainTab === "TRADE_HUB" ? "text-blue-400 font-semibold" : "text-gray-400"} ${!user ? "opacity-40 cursor-not-allowed" : ""}`}>
+            Trade Hub
+          </button>
+        </div>
       </div>
 
       <div className={mainTab === "DRAFT" || mainTab === "TRADE_HUB" ? "" : "max-w-3xl mx-auto p-6"}>
