@@ -33,9 +33,9 @@ export default function Dashboard({ username, leagues, onSelectLeague, onNavigat
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-5 mb-12">
         {[
-          { title: "Leagues & Depth Charts", icon: "🏈" },
+          { title: "League Hub", icon: "🏈" },
           { title: "Data Hub", icon: "📊" },
-          { title: "Live Draft Hub", icon: "⚡" },
+          { title: "Draft Hub", icon: "⚡" },
           { title: "Trade Hub", icon: "🔄" },
         ].map((item, i) => (
           <motion.div
@@ -43,7 +43,7 @@ export default function Dashboard({ username, leagues, onSelectLeague, onNavigat
             onClick={() => {
               if (!isConnected) return;
 
-              if (item.title === "Leagues & Depth Charts") {
+              if (item.title === "League Hub") {
                 onNavigate("LEAGUES");
               }
 
@@ -51,7 +51,7 @@ export default function Dashboard({ username, leagues, onSelectLeague, onNavigat
                 onNavigate("DATA_HUB");
               }
 
-              if (item.title === "Live Draft Hub") {
+              if (item.title === "Draft Hub") {
                 onNavigate("DRAFT");
               }
 
@@ -76,7 +76,7 @@ export default function Dashboard({ username, leagues, onSelectLeague, onNavigat
 
       {isConnected && (
         <div className="mb-12">
-          <h2 className="text-xl font-semibold mb-4 text-slate-300">Recently Viewed</h2>
+          <h2 className="text-xl font-semibold mb-4 text-slate-300">Recently Viewed Leagues</h2>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {recentLeagues.map((league) => (

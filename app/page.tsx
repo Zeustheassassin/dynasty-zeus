@@ -107,23 +107,65 @@ const groupRules = (rules: any[]) => ({
   ),
 });
 
+const getPickValueKey = (pick: any) => {
+  if (pick?.season === CURRENT_YEAR && pick?.slot && String(pick.slot).includes(".")) {
+    return `${pick.season}-${pick.slot}`;
+  }
+  return `${pick?.season}-${pick?.round}`;
+};
+
+const getStoredPickValue = (pickValues: Record<string, number>, pick: any) =>
+  pickValues[getPickValueKey(pick)] ?? pickValues[`${pick?.season}-${pick?.round}`] ?? 0;
+
+const getLeagueDirectionBucket = (dynRank: number, redRank: number) => {
+  if (dynRank <= 2 && redRank <= 2) {
+    return { bucket: "Elite", bucketColor: "text-yellow-300 bg-yellow-900/40 border-yellow-600" };
+  }
+  if (dynRank <= 4 && redRank <= 4) {
+    return { bucket: "True Contender", bucketColor: "text-green-300 bg-green-900/40 border-green-600" };
+  }
+  if (dynRank <= 4 && redRank >= 5 && redRank <= 8) {
+    return { bucket: "Almost There", bucketColor: "text-cyan-300 bg-cyan-900/40 border-cyan-600" };
+  }
+  if (dynRank <= 4 && redRank >= 9) {
+    return { bucket: "Rebuilder", bucketColor: "text-indigo-300 bg-indigo-900/40 border-indigo-600" };
+  }
+  if (dynRank >= 5 && dynRank <= 12 && redRank <= 4) {
+    return { bucket: "Fading Contender", bucketColor: "text-blue-300 bg-blue-900/40 border-blue-600" };
+  }
+  if (dynRank >= 5 && dynRank <= 12 && redRank >= 5 && redRank <= 8) {
+    return { bucket: "Purgatory", bucketColor: "text-orange-300 bg-orange-900/40 border-orange-600" };
+  }
+  if (dynRank >= 5 && dynRank <= 8 && redRank >= 9) {
+    return { bucket: "Blow Up", bucketColor: "text-rose-300 bg-rose-900/40 border-rose-600" };
+  }
+  if (dynRank >= 9 && redRank >= 9) {
+    return { bucket: "Hopeless", bucketColor: "text-red-300 bg-red-900/40 border-red-600" };
+  }
+  return { bucket: "Mixed Identity", bucketColor: "text-gray-300 bg-gray-800 border-gray-600" };
+};
+
 const fetchFantasyCalcValues = async (): Promise<{ playerValues: Record<string, number>; pickValues: Record<string, number> }> => {
   const res = await fetch(
     "https://api.fantasycalc.com/values/current?isDynasty=true&numQbs=1&numTeams=12&ppr=1"
   );
   const data = await res.json();
   const playerValues: Record<string, number> = {};
+  const slotPickValues: Record<string, number[]> = {};
   const pickBuckets: Record<string, number[]> = {};
   const pickRoundValues: Record<string, number> = {};
 
   data.forEach((entry: any) => {
     if (entry.player?.position === "PICK") {
       // Specific slot format: "2026 Pick 1.04"
-      const slotMatch = entry.player.name?.match(/^(\d{4}) Pick (\d+)\./);
+      const slotMatch = entry.player.name?.match(/^(\d{4}) Pick (\d+)\.(\d{1,2})$/);
       if (slotMatch) {
-        const key = `${slotMatch[1]}-${slotMatch[2]}`;
-        if (!pickBuckets[key]) pickBuckets[key] = [];
-        pickBuckets[key].push(entry.value);
+        const roundKey = `${slotMatch[1]}-${slotMatch[2]}`;
+        const slotKey = `${slotMatch[1]}-${slotMatch[2]}.${slotMatch[3].padStart(2, "0")}`;
+        if (!slotPickValues[slotKey]) slotPickValues[slotKey] = [];
+        slotPickValues[slotKey].push(entry.value);
+        if (!pickBuckets[roundKey]) pickBuckets[roundKey] = [];
+        pickBuckets[roundKey].push(entry.value);
         return;
       }
       // Future round format: "2027 1st", "2028 2nd", etc.
@@ -138,6 +180,9 @@ const fetchFantasyCalcValues = async (): Promise<{ playerValues: Record<string, 
   });
 
   const pickValues: Record<string, number> = {};
+  Object.entries(slotPickValues).forEach(([key, vals]) => {
+    pickValues[key] = Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+  });
   // Use averaged specific slot values for current year
   Object.entries(pickBuckets).forEach(([key, vals]) => {
     pickValues[key] = Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
@@ -214,11 +259,19 @@ const [draftScoutUserId, setDraftScoutUserId] = useState<string | null>(null);
 const [draftScoutData, setDraftScoutData] = useState<any[] | null>(null);
 const [loadingDraftScout, setLoadingDraftScout] = useState(false);
 const [loadingDraftRefresh, setLoadingDraftRefresh] = useState(false);
+const [selectedLeagueDraftHasOccurred, setSelectedLeagueDraftHasOccurred] = useState(false);
 const [tradeHubUserId, setTradeHubUserId] = useState<string | null>(null);
 const [tradeHubData, setTradeHubData] = useState<any[] | null>(null);
 const [loadingTradeHub, setLoadingTradeHub] = useState(false);
-const [tradeHubSection, setTradeHubSection] = useState<"TRADES" | "CALCULATOR" | "FINDER">("TRADES");
+const [tradeHubSection, setTradeHubSection] = useState<"CALCULATOR" | "FINDER">("CALCULATOR");
 const [finderSeed, setFinderSeed] = useState(() => Math.random());
+const [finderDraftCapitalMode, setFinderDraftCapitalMode] = useState(false);
+const [leagueHubTab, setLeagueHubTab] = useState<"OVERVIEW" | "ROSTERS" | "STANDINGS" | "STARTERS" | "NOTES">("OVERVIEW");
+const [leagueOverviewData, setLeagueOverviewData] = useState<Record<string, any>>({});
+const [loadingLeagueOverview, setLoadingLeagueOverview] = useState(false);
+const [leagueOverviewLoaded, setLeagueOverviewLoaded] = useState(false);
+const [leagueNotes, setLeagueNotes] = useState<Record<string, string>>({});
+const [nflState, setNflState] = useState<any>(null);
 const [dataHubTab, setDataHubTab] = useState<"OWNERSHIP" | "DYNASTY" | "REDRAFT" | "PROJECTIONS">("OWNERSHIP");
 const [dynastyRankPos, setDynastyRankPos] = useState("ALL");
 const [redraftValues, setRedraftValues] = useState<Record<string, number>>({});
@@ -366,6 +419,32 @@ useEffect(() => {
     loadRedraftValues();
   }
 }, [mainTab, dataHubTab]);
+
+useEffect(() => {
+  if (mainTab === "LEAGUES" && leagueHubTab === "OVERVIEW" && !leagueOverviewLoaded) {
+    loadLeagueOverview();
+    loadNflState();
+    loadRedraftValues();
+  }
+}, [mainTab, leagueHubTab, leagues.length]);
+
+useEffect(() => {
+  if (mainTab === "LEAGUES" && leagueHubTab === "STARTERS") {
+    loadNflState();
+    if (selectedLeague?.league_id) loadCalcValues(selectedLeague.league_id);
+  }
+}, [mainTab, leagueHubTab, selectedLeague?.league_id]);
+
+// Persist notes to localStorage
+useEffect(() => {
+  const saved = localStorage.getItem("leagueNotes");
+  if (saved) setLeagueNotes(JSON.parse(saved));
+}, []);
+const saveLeagueNote = (leagueId: string, text: string) => {
+  const updated = { ...leagueNotes, [leagueId]: text };
+  setLeagueNotes(updated);
+  localStorage.setItem("leagueNotes", JSON.stringify(updated));
+};
 
 useEffect(() => {
   if (mainTab === "DATA_HUB" && dataHubTab === "PROJECTIONS" && !projectionLoaded) {
@@ -639,6 +718,7 @@ const refreshDraftBoard = async () => {
     setDraftId(currentDraft.draft_id);
     setDraftOrder(currentDraft.draft_order || currentDraft.slot_to_roster_id || {});
     setDraftSettings(currentDraft.settings);
+    setSelectedLeagueDraftHasOccurred(currentDraft.status !== "pre_draft");
     const picksRes = await fetch(
       `https://api.sleeper.app/v1/draft/${currentDraft.draft_id}/picks`
     );
@@ -690,6 +770,7 @@ const getStarterSlots = (roster: any, league: any) => {
   setRoster(null);
   setRosters([]);
   setPicks([]);
+  setMainTab("DASHBOARD");
   localStorage.removeItem("sleeperUser");
 };
 
@@ -832,6 +913,7 @@ const loadRoster = async (league: any) => {
   // ── Step 6: Assign draft slots ───────────────────────────────────────────
   const currentDraft = draftsData.find((d: any) => d.season === CURRENT_YEAR);
   const order = currentDraft?.draft_order || {};
+  setSelectedLeagueDraftHasOccurred(currentDraft?.status !== "pre_draft");
 
   tempPicks.forEach((pick: any) => {
     if (pick.season === CURRENT_YEAR) {
@@ -1042,6 +1124,78 @@ const loadCalcValues = async (leagueId: string) => {
   }
 };
 
+const loadNflState = async () => {
+  if (nflState) return;
+  try {
+    const data = await fetch('https://api.sleeper.app/v1/state/nfl').then(r => r.json());
+    setNflState(data);
+  } catch { /* silently fail */ }
+};
+
+const loadLeagueOverview = async () => {
+  if (!leagues.length || !user) return;
+  setLoadingLeagueOverview(true);
+  try {
+    // Fetch all rosters, traded picks, and drafts for every league in parallel
+    const results = await Promise.all(
+      leagues.map(async (league: any) => {
+        try {
+          const [rostersData, tradedPicksData, draftsData] = await Promise.all([
+            fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`).then(r => r.json()),
+            fetch(`https://api.sleeper.app/v1/league/${league.league_id}/traded_picks`).then(r => r.json()).catch(() => []),
+            fetch(`https://api.sleeper.app/v1/league/${league.league_id}/drafts`).then(r => r.json()).catch(() => []),
+          ]);
+
+          const tempPicks: any[] = [];
+          const rosterToUser: Record<string, string> = {};
+          rostersData.forEach((r: any) => {
+            rosterToUser[String(r.roster_id)] = r.owner_id;
+            YEARS.forEach((year) => {
+              ROUNDS.forEach((round) => {
+                tempPicks.push({
+                  season: year,
+                  round,
+                  roster_id: r.roster_id,
+                  owner_id: r.roster_id,
+                });
+              });
+            });
+          });
+
+          tradedPicksData.forEach((tp: any) => {
+            const match = tempPicks.find(
+              (p) => p.season === tp.season && p.round === tp.round && p.roster_id === tp.roster_id
+            );
+            if (match) match.owner_id = tp.owner_id;
+          });
+
+          const currentDraft = draftsData.find((d: any) => d.season === CURRENT_YEAR);
+          const order = currentDraft?.draft_order || {};
+          tempPicks.forEach((pick: any) => {
+            if (pick.season === CURRENT_YEAR) {
+              const userId = rosterToUser[String(pick.roster_id)];
+              const slot = order[String(userId)];
+              pick.slot = slot
+                ? `${pick.round}.${String(slot).padStart(2, "0")}`
+                : `${pick.round}`;
+            }
+          });
+
+          return { league, rosters: rostersData, picks: tempPicks };
+        } catch { return null; }
+      })
+    );
+    const byLeague: Record<string, any> = {};
+    results.filter(Boolean).forEach(({ league, rosters: lr, picks }: any) => {
+      byLeague[league.league_id] = { league, rosters: lr, picks };
+    });
+    setLeagueOverviewData(byLeague);
+    setLeagueOverviewLoaded(true);
+  } finally {
+    setLoadingLeagueOverview(false);
+  }
+};
+
 const loadRedraftValues = async () => {
   if (redraftLoaded) return;
   setLoadingRedraft(true);
@@ -1129,7 +1283,7 @@ const loadProjections = async (week: number | 'season') => {
         if (fpts <= 0) return;
         addRow(String(item.player_id), fpts, src.id, src.weight);
       });
-      statusMap['sleeper'] = data.length > 0;
+      statusMap['sleeper'] = true;
     } catch {
       statusMap['sleeper'] = false;
     }
@@ -1166,7 +1320,7 @@ const loadProjections = async (week: number | 'season') => {
         if (!sleeperId) return;
         addRow(sleeperId, item.fpts, src.id, src.weight);
       });
-      statusMap['numberfire'] = data.length > 0;
+      statusMap['numberfire'] = true;
     } catch {
       statusMap['numberfire'] = false;
     }
@@ -1464,7 +1618,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     !user ? "opacity-50 cursor-not-allowed" : ""
   }`}
 >
-  Leagues & Depth Charts
+  League Hub
 </button>
 
         <button
@@ -1482,7 +1636,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     !user ? "opacity-50 cursor-not-allowed" : ""
   }`}
 >
-  Live Draft Hub
+  Draft Hub
 </button>
 <button
   onClick={() => user && setMainTab("TRADE_HUB")}
@@ -1494,7 +1648,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
 </button>
       </div>
 
-      <div className={mainTab === "DRAFT" ? "p-6" : "max-w-3xl mx-auto p-6"}>
+      <div className={mainTab === "DRAFT" || mainTab === "TRADE_HUB" ? "" : "max-w-3xl mx-auto p-6"}>
 {mainTab === "DASHBOARD" && (
   <>
     <>
@@ -1524,9 +1678,128 @@ const myPlayerSet = new Set<string>(roster?.players || []);
 </>
   </>
 )}
-        {/* LEAGUES */}
+        {/* LEAGUE HUB */}
         {mainTab === "LEAGUES" && (
-          <>            
+          <>
+            {/* Sub-tab nav */}
+            <div className="flex justify-center border-b border-gray-800 mb-6 overflow-x-auto">
+              <div className="flex justify-center gap-6 text-center">
+              {(["OVERVIEW","ROSTERS","STANDINGS","STARTERS","NOTES"] as const).map((tab) => (
+                <button key={tab} onClick={() => setLeagueHubTab(tab)}
+                  className={`pb-2 px-1 text-sm font-semibold whitespace-nowrap transition ${leagueHubTab === tab ? "border-b-2 border-blue-400 text-blue-400" : "text-gray-400 hover:text-white"}`}>
+                  {tab === "OVERVIEW" ? "League Overview" : tab === "ROSTERS" ? "Rosters & Rules" : tab === "STANDINGS" ? "Standings" : tab === "STARTERS" ? "Suggested Starters" : "League Notes"}
+                </button>
+              ))}
+              </div>
+            </div>
+
+            {/* ── League Overview ── */}
+            {leagueHubTab === "OVERVIEW" && (() => {
+              if (loadingLeagueOverview) return <p className="text-sm text-blue-400">Loading league data…</p>;
+              if (!leagues.length) return <p className="text-sm text-gray-500">No leagues found.</p>;
+
+              const bucketOrder: Record<string, number> = {
+                Elite: 0,
+                "True Contender": 1,
+                "Fading Contender": 2,
+                "Almost There": 3,
+                Rebuilder: 4,
+                Purgatory: 5,
+                "Blow Up": 6,
+                Hopeless: 7,
+                "Mixed Identity": 8,
+              };
+
+              // Build per-league dynasty + redraft values for every team
+              const leagueRows = leagues.map((league: any) => {
+                const entry = leagueOverviewData[league.league_id];
+                if (!entry) return null;
+                const lr: any[] = entry.rosters;
+                const ownedPicks: any[] = entry.picks || [];
+                const myRosterId = lr.find((r: any) => r.owner_id === user?.user_id)?.roster_id;
+
+                // Dynasty value per roster
+                const rosterDynVal = lr.map((r: any) => ({
+                  roster_id: r.roster_id,
+                  val:
+                    (r.players || []).reduce((s: number, id: string) => {
+                      const p = (players as any)[id];
+                      return s + (p?.value || 0);
+                    }, 0) +
+                    ownedPicks
+                      .filter((p: any) => p.owner_id === r.roster_id)
+                      .reduce((s: number, p: any) => s + getStoredPickValue(pickFcValues, p), 0),
+                })).sort((a, b) => b.val - a.val);
+
+                // Redraft value per roster
+                const rosterRedVal = lr.map((r: any) => ({
+                  roster_id: r.roster_id,
+                  val: (r.players || []).reduce((s: number, id: string) => {
+                    return s + (redraftValues[id] || 0);
+                  }, 0),
+                })).sort((a, b) => b.val - a.val);
+
+                // Standings rank from fpts+wins
+                const standingsSorted = [...lr].sort((a, b) => {
+                  const aw = a.settings?.wins || 0, bw = b.settings?.wins || 0;
+                  return bw !== aw ? bw - aw : (b.settings?.fpts || 0) - (a.settings?.fpts || 0);
+                });
+                const maxPfSorted = [...lr].sort((a, b) => (b.settings?.fpts_max || 0) - (a.settings?.fpts_max || 0));
+
+                const dynRank = rosterDynVal.findIndex(r => r.roster_id === myRosterId) + 1;
+                const redRank = rosterRedVal.findIndex(r => r.roster_id === myRosterId) + 1;
+                const standRank = standingsSorted.findIndex(r => r.roster_id === myRosterId) + 1;
+                const maxPfRank = maxPfSorted.findIndex(r => r.roster_id === myRosterId) + 1;
+                const n = lr.length;
+
+                // Bucket logic (ordered — first match wins)
+                const { bucket, bucketColor } = getLeagueDirectionBucket(dynRank, redRank);
+
+                return { league, dynRank, redRank, standRank, maxPfRank, n, bucket, bucketColor };
+              }).filter(Boolean).sort((a: any, b: any) => {
+                const bucketDiff = (bucketOrder[a.bucket] ?? 999) - (bucketOrder[b.bucket] ?? 999);
+                if (bucketDiff !== 0) return bucketDiff;
+                if (a.dynRank !== b.dynRank) return a.dynRank - b.dynRank;
+                if (a.redRank !== b.redRank) return a.redRank - b.redRank;
+                return a.league.name.localeCompare(b.league.name);
+              });
+
+              return (
+                <div className="space-y-2">
+                  {loadingLeagueOverview && <p className="text-xs text-blue-400 mb-2">Loading…</p>}
+                  {/* Header */}
+                  <div className="grid grid-cols-[1fr_140px_60px_60px_60px_60px] gap-2 px-3 pb-1 text-[10px] font-bold uppercase tracking-widest text-gray-600">
+                    <span>League</span>
+                    <span>Direction</span>
+                    <span className="text-center">Dyn</span>
+                    <span className="text-center">Rdft</span>
+                    <span className="text-center">Stnd</span>
+                    <span className="text-center">MaxPF</span>
+                  </div>
+                  {leagueRows.map((row: any) => (
+                    <div key={row.league.league_id} className="grid grid-cols-[1fr_140px_60px_60px_60px_60px] gap-2 items-center bg-gray-900 border border-gray-800 rounded-xl px-3 py-2.5">
+                      <button className="text-sm text-white font-medium text-left truncate hover:text-blue-400 transition" onClick={() => { loadRoster(row.league); setLeagueHubTab("ROSTERS"); }}>
+                        {row.league.name}
+                      </button>
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border text-center truncate ${row.bucketColor}`}>{row.bucket}</span>
+                      <span className="text-xs text-center text-gray-300">{row.dynRank}<span className="text-gray-600">/{row.n}</span></span>
+                      <span className="text-xs text-center text-gray-300">{row.redRank}<span className="text-gray-600">/{row.n}</span></span>
+                      <span className="text-xs text-center text-gray-300">{row.standRank}<span className="text-gray-600">/{row.n}</span></span>
+                      <span className="text-xs text-center text-gray-300">{row.maxPfRank}<span className="text-gray-600">/{row.n}</span></span>
+                    </div>
+                  ))}
+                  {!leagueOverviewLoaded && !loadingLeagueOverview && (
+                    <button onClick={() => { loadLeagueOverview(); loadRedraftValues(); }} className="text-xs text-blue-400 hover:text-blue-300 border border-blue-700 rounded-lg px-3 py-1.5 transition">
+                      Load Overview
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* ── Rosters & Rules ── */}
+            {leagueHubTab === "ROSTERS" && (
+           <>
            {user && leagues.length > 0 && !selectedLeague && (
   <div className="max-w-4xl mx-auto">
 
@@ -1998,57 +2271,208 @@ const starters = starterSlots
     ))}
   </div>
 )}
-                {/* STANDINGS */}
-                <div className="mt-4 bg-gray-900 border border-gray-700 rounded-xl p-5 shadow-md">
-                  <h3 className="text-sm font-semibold text-gray-200 mb-4">
-                    Standings
-                  </h3>
+              </>
+            )}
+            </>
+            )}
 
+            {/* ── Standings ── */}
+            {leagueHubTab === "STANDINGS" && (
+              selectedLeague && roster ? (
+                <div className="bg-gray-900 border border-gray-700 rounded-xl p-5 shadow-md">
+                  <h3 className="text-sm font-semibold text-gray-200 mb-1">{selectedLeague.name} — Standings</h3>
+                  <p className="text-xs text-gray-500 mb-4">Select a league from Rosters &amp; Rules to view its standings.</p>
                   {standings.map((team: any, index: number) => {
                     const isMe = team.roster_id === roster.roster_id;
-
-                    const playoffTeams =
-                      selectedLeague?.settings?.playoff_teams ||
-                      Math.ceil(rosters.length / 2);
-
+                    const playoffTeams = selectedLeague?.settings?.playoff_teams || Math.ceil(rosters.length / 2);
                     const isCutLine = index === playoffTeams - 1;
-
                     return (
                       <div key={team.roster_id}>
-                        <div
-                          className={`flex justify-between p-2 rounded mb-1 ${
-                            isMe ? "bg-blue-800/40" : "bg-gray-800"
-                          }`}
-                        >
+                        <div className={`flex justify-between p-2 rounded mb-1 ${isMe ? "bg-blue-800/40" : "bg-gray-800"}`}>
                           <div className="text-sm">
                             {index + 1}.{" "}
-                            <span
-  className="cursor-pointer hover:text-blue-400"
-  onClick={() => loadUserExposure(team.owner_id)}
->
-  {users[team.owner_id] || "Team"}
-</span>
+                            <span>{users[team.owner_id] || "Team"}</span>
                           </div>
-
                           <div className="text-xs text-gray-400">
-                            {team.wins}-{team.losses}
-                            {team.ties ? `-${team.ties}` : ""} •{" "}
-                            {Math.round(team.fpts)} pts • Max{" "}
-                            {Math.round(team.max_pf)}
+                            {team.wins}-{team.losses}{team.ties ? `-${team.ties}` : ""} • {Math.round(team.fpts)} pts • Max {Math.round(team.max_pf)}
                           </div>
                         </div>
-
-                        {isCutLine && (
-                          <div className="border-t border-yellow-500 my-2 text-center text-xs text-yellow-400">
-                            Playoff Cut Line
-                          </div>
-                        )}
+                        {isCutLine && <div className="border-t border-yellow-500 my-2 text-center text-xs text-yellow-400">Playoff Cut Line</div>}
                       </div>
                     );
                   })}
                 </div>
-              </>
+              ) : (
+                <p className="text-sm text-gray-500">Select a league from Rosters &amp; Rules first to see its standings.</p>
+              )
             )}
+
+            {/* ── Suggested Starters ── */}
+            {leagueHubTab === "STARTERS" && (() => {
+              if (!selectedLeague || !roster) return (
+                <p className="text-sm text-gray-500">Select a league from Rosters &amp; Rules first.</p>
+              );
+              const week = nflState?.week;
+              const season = nflState?.season;
+              const isInSeason = season && week && week >= 1 && week <= 17;
+
+              // Score function: uses projections if in-season, redraft values otherwise
+              const playerScore = (id: string) => {
+                if (isInSeason) {
+                  const proj = projectionData.find((p: any) => p.sleeperId === id);
+                  return proj?.fpts ?? 0;
+                }
+                return redraftValues[id] ?? 0;
+              };
+
+              const positions: string[] = selectedLeague.roster_positions?.filter((p: string) => !["BN","IR","TAXI"].includes(p)) ?? [];
+              const myPlayerIds: string[] = roster.players ?? [];
+              const taxiIds = new Set<string>((roster.taxi ?? []).map((id: any) => String(id)));
+              const used = new Set<string>();
+              const lineup: Array<{ slot: string; player: any; score: number }> = [];
+
+              // Fill each slot greedily with highest-scoring eligible player
+              for (const slot of positions) {
+                const eligible = (slot === "FLEX"
+                  ? ["RB","WR","TE"]
+                  : slot === "SUPER_FLEX"
+                  ? ["QB","RB","WR","TE"]
+                  : [slot]
+                );
+                const best = myPlayerIds
+                  .filter(id => !used.has(id))
+                  .map(id => ({ id, p: (players as any)[id] }))
+                  .filter(({ p }) => p && eligible.includes(p.position))
+                  .sort((a, b) => playerScore(b.id) - playerScore(a.id))[0];
+                if (best) {
+                  used.add(best.id);
+                  lineup.push({ slot, player: best.p, score: playerScore(best.id) });
+                } else {
+                  lineup.push({ slot, player: null, score: 0 });
+                }
+              }
+
+              const benchPlayers = myPlayerIds
+                .filter((id) => !used.has(id) && !taxiIds.has(String(id)))
+                .map((id) => (players as any)[id])
+                .filter((p: any) => p)
+                .sort((a: any, b: any) => playerScore(b.player_id) - playerScore(a.player_id));
+
+              const taxiPlayers = myPlayerIds
+                .filter((id) => taxiIds.has(String(id)))
+                .map((id) => (players as any)[id])
+                .filter((p: any) => p)
+                .sort((a: any, b: any) => playerScore(b.player_id) - playerScore(a.player_id));
+
+              const posColor: Record<string,string> = { QB:"bg-red-900/50 border-red-700", RB:"bg-green-900/50 border-green-700", WR:"bg-blue-900/50 border-blue-700", TE:"bg-yellow-900/50 border-yellow-700", FLEX:"bg-purple-900/50 border-purple-700", SUPER_FLEX:"bg-pink-900/50 border-pink-700" };
+
+              return (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-xs text-gray-500">
+                      {isInSeason
+                        ? <>Week {week} starters based on <strong className="text-gray-300">consensus projections</strong></>
+                        : <>Offseason starters based on <strong className="text-gray-300">redraft rankings</strong></>
+                      }
+                      {" — "}<span className="text-blue-400">{selectedLeague.name}</span>
+                    </p>
+                  </div>
+                  {lineup.map(({ slot, player, score }, i) => (
+                    <div key={i} className={`flex items-center gap-3 border rounded-xl px-3 py-2 ${posColor[slot] ?? "bg-gray-800 border-gray-700"}`}>
+                      <span className="text-[10px] font-bold uppercase w-16 shrink-0 text-gray-300">{slot.replace("_"," ")}</span>
+                      {player ? (
+                        <>
+                          <span className="text-sm text-white flex-1 font-medium">{player.full_name}</span>
+                          <span className="text-[10px] text-gray-400 shrink-0">{player.team}</span>
+                          <span className="text-xs font-mono text-gray-300 shrink-0">{score > 0 ? score.toFixed(1) : "—"}</span>
+                        </>
+                      ) : (
+                        <span className="text-sm text-gray-600 italic">Empty</span>
+                      )}
+                    </div>
+                  ))}
+                  <div className="grid gap-3 pt-2 md:grid-cols-2">
+                    <div className="bg-gray-900 border border-gray-800 rounded-xl p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-bold uppercase tracking-widest text-gray-400">Bench</span>
+                        <span className="text-[10px] text-gray-600">{benchPlayers.length}</span>
+                      </div>
+                      <div className="space-y-1.5">
+                        {benchPlayers.length === 0 ? (
+                          <p className="text-xs text-gray-600 italic">No bench players</p>
+                        ) : (
+                          benchPlayers.map((player: any) => {
+                            const score = playerScore(player.player_id);
+                            return (
+                              <div key={player.player_id} className="flex items-center gap-2 rounded-lg bg-gray-800/80 px-3 py-1.5">
+                                <span className="text-[10px] font-bold w-7 shrink-0 text-gray-400">{player.position}</span>
+                                <span className="text-sm text-white flex-1 truncate">{player.full_name}</span>
+                                <span className="text-[10px] text-gray-500 shrink-0">{player.team}</span>
+                                <span className="text-xs font-mono text-gray-300 shrink-0">{score > 0 ? score.toFixed(1) : "—"}</span>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                    <div className="bg-gray-900 border border-gray-800 rounded-xl p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-bold uppercase tracking-widest text-gray-400">Taxi</span>
+                        <span className="text-[10px] text-gray-600">{taxiPlayers.length}</span>
+                      </div>
+                      <div className="space-y-1.5">
+                        {taxiPlayers.length === 0 ? (
+                          <p className="text-xs text-gray-600 italic">No taxi players</p>
+                        ) : (
+                          taxiPlayers.map((player: any) => {
+                            const score = playerScore(player.player_id);
+                            return (
+                              <div key={player.player_id} className="flex items-center gap-2 rounded-lg bg-gray-800/80 px-3 py-1.5">
+                                <span className="text-[10px] font-bold w-7 shrink-0 text-gray-400">{player.position}</span>
+                                <span className="text-sm text-white flex-1 truncate">{player.full_name}</span>
+                                <span className="text-[10px] text-gray-500 shrink-0">{player.team}</span>
+                                <span className="text-xs font-mono text-gray-300 shrink-0">{score > 0 ? score.toFixed(1) : "—"}</span>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* ── League Notes ── */}
+            {leagueHubTab === "NOTES" && (() => {
+              const noteLeague = selectedLeague ?? leagues[0];
+              if (!noteLeague) return <p className="text-sm text-gray-500">No leagues found.</p>;
+              return (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3 mb-2">
+                    <span className="text-sm font-semibold text-gray-300">Notes for:</span>
+                    <select
+                      className="bg-gray-800 border border-gray-700 text-sm text-white rounded-lg px-2 py-1 focus:outline-none focus:border-blue-500"
+                      value={noteLeague.league_id}
+                      onChange={(e) => {
+                        const l = leagues.find((lg: any) => lg.league_id === e.target.value);
+                        if (l) setSelectedLeague(l);
+                      }}
+                    >
+                      {leagues.map((lg: any) => <option key={lg.league_id} value={lg.league_id}>{lg.name}</option>)}
+                    </select>
+                  </div>
+                  <textarea
+                    className="w-full h-96 bg-gray-900 border border-gray-700 rounded-xl p-4 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 resize-none"
+                    placeholder={`Jot down thoughts, trade ideas, waiver targets for ${noteLeague.name}…`}
+                    value={leagueNotes[noteLeague.league_id] ?? ""}
+                    onChange={(e) => saveLeagueNote(noteLeague.league_id, e.target.value)}
+                  />
+                  <p className="text-[10px] text-gray-600">Notes auto-save to your browser.</p>
+                </div>
+              );
+            })()}
+
           </>
         )}
 
@@ -2056,7 +2480,8 @@ const starters = starterSlots
         {mainTab === "DATA_HUB" && (
           <>
             {/* Sub-tab nav */}
-            <div className="flex gap-6 border-b border-gray-800 mb-6">
+            <div className="flex justify-center border-b border-gray-800 mb-6 overflow-x-auto">
+              <div className="flex justify-center gap-6 text-center">
               {(["OWNERSHIP", "DYNASTY", "REDRAFT", "PROJECTIONS"] as const).map((tab) => (
                 <button
                   key={tab}
@@ -2070,6 +2495,7 @@ const starters = starterSlots
                   {tab === "OWNERSHIP" ? "Player Ownership" : tab === "DYNASTY" ? "Dynasty Rankings" : tab === "REDRAFT" ? "Redraft Rankings" : "Player Projections"}
                 </button>
               ))}
+              </div>
             </div>
 
             {/* ── Player Ownership ── */}
@@ -2340,11 +2766,8 @@ const starters = starterSlots
         )}
 {mainTab === "DRAFT" && (
   <div className="p-4">
-    <div className="text-xl font-bold mb-4">
-      Live Draft Hub
-    </div>
-
-    <div className="flex gap-6 border-b border-gray-700 mb-6">
+    <div className="flex justify-center border-b border-gray-700 mb-6 overflow-x-auto">
+      <div className="flex justify-center gap-6 text-center">
       <button
         onClick={() => setDraftHubSection("BOARD")}
         className={`pb-2 px-1 text-sm font-semibold transition ${
@@ -2365,6 +2788,7 @@ const starters = starterSlots
       >
         Rookie Big Board
       </button>
+      </div>
     </div>
 
     {draftHubSection === "BOARD" && (
@@ -2629,17 +3053,8 @@ const starters = starterSlots
   <div className="max-w-4xl mx-auto p-6">
 
     {/* Sub-tab nav */}
-    <div className="flex gap-6 border-b border-gray-700 mb-6">
-      <button
-        onClick={() => setTradeHubSection("TRADES")}
-        className={`pb-2 px-1 text-sm font-semibold transition ${
-          tradeHubSection === "TRADES"
-            ? "border-b-2 border-blue-400 text-blue-400"
-            : "text-gray-400 hover:text-white"
-        }`}
-      >
-        League Trade Database
-      </button>
+    <div className="flex justify-center border-b border-gray-700 mb-6 overflow-x-auto">
+      <div className="flex justify-center gap-6 text-center">
       <button
         onClick={() => setTradeHubSection("CALCULATOR")}
         className={`pb-2 px-1 text-sm font-semibold transition ${
@@ -2660,50 +3075,8 @@ const starters = starterSlots
       >
         Trade Finder
       </button>
+      </div>
     </div>
-
-    {/* ── League Trade Database ── */}
-    {tradeHubSection === "TRADES" && (
-      <>
-        {!selectedLeague ? (
-          <div className="text-gray-400 text-sm">
-            Select a league from the dropdown above to view the Trade Hub.
-          </div>
-        ) : (
-          <>
-            <div className="mb-6">
-              <h2 className="text-xl font-bold">{selectedLeague.name}</h2>
-              <p className="text-sm text-gray-400 mt-1">
-                Click any manager to see their trades across all dynasty leagues in the past 30 days
-              </p>
-            </div>
-            <div className="space-y-2">
-              {rosters.map((r: any) => {
-                const name = users[r.owner_id] || `Team ${r.roster_id}`;
-                const isMe = r.owner_id === user?.user_id;
-                return (
-                  <div
-                    key={r.roster_id}
-                    onClick={() => loadUserTrades(r.owner_id)}
-                    className="flex items-center justify-between bg-gray-900 border border-gray-800 rounded-xl px-4 py-3 cursor-pointer hover:bg-gray-800 transition"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="font-medium text-sm">{name}</span>
-                      {isMe && (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-700 text-white">
-                          You
-                        </span>
-                      )}
-                    </div>
-                    <span className="text-gray-500 text-xs">View trades →</span>
-                  </div>
-                );
-              })}
-            </div>
-          </>
-        )}
-      </>
-    )}
 
     {/* ── Trade Calculator ── */}
     {tradeHubSection === "CALCULATOR" && (() => {
@@ -2742,8 +3115,9 @@ const starters = starterSlots
       );
 
       const getPickValue = (key: string) => {
-        const parts = key.split("-");
-        return pickFcValues[`${parts[0]}-${parts[1]}`] ?? 0;
+        const pick = (allPicks as any[]).find((p: any) => pickKey(p) === key);
+        if (!pick) return 0;
+        return getStoredPickValue(pickFcValues, pick);
       };
       const pickLabel = (p: any) => {
         const origOwnerUserId = rosterToUser[p.roster_id];
@@ -2840,25 +3214,45 @@ const starters = starterSlots
           {/* Opponent picker */}
           <div className="mb-6">
             <label className="text-xs text-gray-400 mb-1 block">Trade with</label>
-            <select
-              value={calcOpponentRosterId ?? ""}
-              onChange={(e) => {
-                setCalcOpponentRosterId(e.target.value ? Number(e.target.value) : null);
-                setCalcReceive([]);
-                setCalcReceivePicks([]);
-                setCalcSearchB("");
-              }}
-              className="bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500 w-full md:w-64"
-            >
-              <option value="">Select opponent...</option>
-              {rosters
-                .filter((r: any) => r.owner_id !== user?.user_id)
-                .map((r: any) => (
-                  <option key={r.roster_id} value={r.roster_id}>
-                    {(users as any)[r.owner_id] || `Team ${r.roster_id}`}
-                  </option>
+            <div className="flex flex-col md:flex-row gap-3">
+              <select
+                value={calcOpponentRosterId ?? ""}
+                onChange={(e) => {
+                  setCalcOpponentRosterId(e.target.value ? Number(e.target.value) : null);
+                  setCalcReceive([]);
+                  setCalcReceivePicks([]);
+                  setCalcSearchB("");
+                }}
+                className="bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500 w-full md:w-64"
+              >
+                <option value="">Select opponent...</option>
+                {rosters
+                  .filter((r: any) => r.owner_id !== user?.user_id)
+                  .map((r: any) => (
+                    <option key={r.roster_id} value={r.roster_id}>
+                      {(users as any)[r.owner_id] || `Team ${r.roster_id}`}
+                    </option>
                 ))}
-            </select>
+              </select>
+
+          {opponentRoster && (
+            <>
+              <button
+                onClick={() => loadUserExposure(opponentRoster.owner_id)}
+                className="bg-gray-800 border border-gray-700 hover:border-blue-500 text-white rounded-xl px-3 py-2 text-sm font-medium transition whitespace-nowrap"
+              >
+                Most Owned Players
+              </button>
+
+              <button
+                onClick={() => loadUserTrades(opponentRoster.owner_id)}
+                className="bg-gray-800 border border-gray-700 hover:border-blue-500 text-white rounded-xl px-3 py-2 text-sm font-medium transition whitespace-nowrap"
+              >
+                Recent Trades
+              </button>
+            </>
+          )}
+            </div>
           </div>
 
           {/* Two-column asset panels */}
@@ -2885,7 +3279,7 @@ const starters = starterSlots
                     })),
                     ...myAvailPicks.map((p: any) => ({
                       label: pickLabel(p),
-                      value: pickFcValues[`${p.season}-${p.round}`] ?? 0,
+                      value: getStoredPickValue(pickFcValues, p),
                       onAdd: () => setCalcGivePicks((prev: string[]) => [...prev, pickKey(p)]),
                     })),
                   ].sort((a, b) => b.value - a.value);
@@ -2948,7 +3342,7 @@ const starters = starterSlots
                       })),
                       ...theirAvailPicks.map((p: any) => ({
                         label: pickLabel(p),
-                        value: pickFcValues[`${p.season}-${p.round}`] ?? 0,
+                        value: getStoredPickValue(pickFcValues, p),
                         onAdd: () => setCalcReceivePicks((prev: string[]) => [...prev, pickKey(p)]),
                       })),
                     ].sort((a, b) => b.value - a.value);
@@ -3075,7 +3469,7 @@ const starters = starterSlots
                     })),
                     ...myAvailPicks.map((p: any) => ({
                       label: pickLabel(p),
-                      value: pickFcValues[`${p.season}-${p.round}`] ?? 0,
+                      value: getStoredPickValue(pickFcValues, p),
                       isPick: true,
                       onAdd: () => setCalcGivePicks((prev: string[]) => [...prev, pickKey(p)]),
                     })),
@@ -3088,7 +3482,7 @@ const starters = starterSlots
                     })),
                     ...theirAvailPicks.map((p: any) => ({
                       label: pickLabel(p),
-                      value: pickFcValues[`${p.season}-${p.round}`] ?? 0,
+                      value: getStoredPickValue(pickFcValues, p),
                       isPick: true,
                       onAdd: () => setCalcReceivePicks((prev: string[]) => [...prev, pickKey(p)]),
                     })),
@@ -3150,6 +3544,14 @@ const starters = starterSlots
       );
 
       const calcVal = (id: string) => calcFcValues[id] ?? (players as any)[id]?.value ?? 0;
+      const finderPickKey = (p: any) => `${p.season}-${p.round}-${p.roster_id}`;
+      const finderPickLabel = (p: any) => {
+        const via = p.roster_id !== p.owner_id ? ` (via ${users[p.roster_id] || `Team ${p.roster_id}`})` : "";
+        const slotLabel = p.slot && String(p.slot).includes(".")
+          ? `${p.season} ${p.slot}`
+          : `${p.season} Rd ${p.round}`;
+        return `${slotLabel}${via}`;
+      };
 
       // Build roster player list with values
       const rosterPlayers = (roster: any) =>
@@ -3193,6 +3595,36 @@ const starters = starterSlots
       const myRoster = rosters.find((r: any) => r.owner_id === user?.user_id);
       const myPlayers = rosterPlayers(myRoster);
       const myT = posTotals(myPlayers);
+      const rosterDynVal = rosters
+        .map((r: any) => ({
+          roster_id: r.roster_id,
+          val:
+            rosterPlayers(r).reduce((s: number, p: any) => s + p.value, 0) +
+            (allPicks as any[])
+              .filter((p: any) => p.owner_id === r.roster_id)
+              .reduce((s: number, p: any) => s + getStoredPickValue(pickFcValues, p), 0),
+        }))
+        .sort((a, b) => b.val - a.val);
+      const rosterRedVal = rosters
+        .map((r: any) => ({
+          roster_id: r.roster_id,
+          val: (r.players || []).reduce((s: number, id: string) => s + (redraftValues[id] || 0), 0),
+        }))
+        .sort((a, b) => b.val - a.val);
+      const dynRank = myRoster ? rosterDynVal.findIndex((r) => r.roster_id === myRoster.roster_id) + 1 : 0;
+      const redRank = myRoster ? rosterRedVal.findIndex((r) => r.roster_id === myRoster.roster_id) + 1 : 0;
+      const finderDirection = getLeagueDirectionBucket(dynRank, redRank).bucket;
+      const draftCapitalMode = finderDraftCapitalMode;
+      const priorityDraftYear = String(
+        Number(CURRENT_YEAR) + (selectedLeagueDraftHasOccurred ? 1 : 0)
+      );
+      const orderedDraftYears = [
+        ...YEARS.filter((year) => Number(year) >= Number(priorityDraftYear)),
+        ...YEARS.filter((year) => Number(year) < Number(priorityDraftYear)),
+      ];
+      const draftYearPriority = Object.fromEntries(
+        orderedDraftYears.map((year, idx) => [year, idx])
+      ) as Record<string, number>;
       // When a player is pinned, ensure they're always in the give pool even if outside top 10
       const myTop = finderPinnedPlayerId && !myPlayers.slice(0, 10).some((p: any) => p.player_id === finderPinnedPlayerId)
         ? [...myPlayers.slice(0, 9), myPlayers.find((p: any) => p.player_id === finderPinnedPlayerId)].filter(Boolean)
@@ -3273,6 +3705,32 @@ const starters = starterSlots
         return oppTop32QBs.length - qbsGiven >= 3;
       };
 
+      // Any QB/WR/TE the opponent receives must rank within the positional threshold
+      // on their roster post-trade. Prevents dumping low-end players on teams that
+      // already have better depth at that spot.
+      //   QB  → must be top 3  (they need a real starter)
+      //   WR  → must be top 5  (starter/flex quality)
+      //   TE  → must be top 2  (positional scarcity)
+      const POS_RANK_LIMITS: Record<string, number> = { QB: 3, WR: 5, TE: 2 };
+      const oppReceiveOk = (oppPlayersList: any[], givePlayers: any[], receivePlayers: any[]) => {
+        const outgoingIds = new Set(receivePlayers.map((p: any) => p.player_id));
+        for (const pos of ["QB", "WR", "TE"] as const) {
+          const limit = POS_RANK_LIMITS[pos];
+          const incoming = givePlayers.filter((p: any) => p.position === pos);
+          if (incoming.length === 0) continue;
+          const oppPosAfter = oppPlayersList
+            .filter((p: any) => p.position === pos && !outgoingIds.has(p.player_id))
+            .concat(incoming)
+            .sort((a: any, b: any) => b.value - a.value);
+          const passes = incoming.every((pl: any) => {
+            const rank = oppPosAfter.findIndex((p: any) => p.player_id === pl.player_id);
+            return rank < limit; // 0-indexed: rank 0…limit-1 = top N
+          });
+          if (!passes) return false;
+        }
+        return true;
+      };
+
       // No package (give or receive) may contain 2+ QBs or 2+ TEs
       const packageOk = (pkg: any[]) => {
         const qbs = pkg.filter((p: any) => p.position === "QB").length;
@@ -3282,17 +3740,79 @@ const starters = starterSlots
 
       type TradeResult = {
         give: any[]; receive: any[];
+        givePicks: any[]; receivePicks: any[];
         oppName: string; oppRosterId: number;
         score: number; net: number; format: string;
+        draftCapital?: boolean;
       };
 
       const results: TradeResult[] = [];
 
       for (const oppRoster of rosters.filter((r: any) => r.owner_id !== user?.user_id)) {
         const oppPlayers = rosterPlayers(oppRoster);
+        const oppPicks = (allPicks as any[])
+          .filter((p: any) => p.owner_id === oppRoster.roster_id)
+          .map((p: any) => ({ ...p, value: getStoredPickValue(pickFcValues, p) }))
+          .filter((p: any) => p.value > 0)
+          .sort((a: any, b: any) => {
+            const yearDiff = (draftYearPriority[a.season] ?? 999) - (draftYearPriority[b.season] ?? 999);
+            if (yearDiff !== 0) return yearDiff;
+            if (a.round !== b.round) return a.round - b.round;
+            return b.value - a.value;
+          })
+          .slice(0, 8);
 
         const oppTop = oppPlayers.slice(0, 10);
         const oppName = (users as any)[oppRoster.owner_id] || `Team ${oppRoster.roster_id}`;
+
+        if (draftCapitalMode) {
+          for (const mp of myTop) {
+            for (const pick of oppPicks) {
+              if (!isBalanced([mp.value], [pick.value])) continue;
+              if (!qbSafe([mp])) continue;
+              if (!oppReceiveOk(oppPlayers, [mp], [])) continue;
+              results.push({
+                give: [mp], receive: [], givePicks: [], receivePicks: [pick], oppName, oppRosterId: oppRoster.roster_id,
+                score: -Math.abs(pick.value - mp.value), net: pick.value - mp.value, format: "1 for 1", draftCapital: true,
+              });
+            }
+          }
+
+          for (const mp of myTop) {
+            for (let i = 0; i < oppPicks.length; i++) {
+              for (let j = i + 1; j < oppPicks.length; j++) {
+                const p1 = oppPicks[i], p2 = oppPicks[j];
+                if (!isBalanced([mp.value], [p1.value, p2.value])) continue;
+                if (!qbSafe([mp])) continue;
+                if (!oppReceiveOk(oppPlayers, [mp], [])) continue;
+                const adj = tradeWaiverAdj([mp.value], [p1.value, p2.value]);
+                results.push({
+                  give: [mp], receive: [], givePicks: [], receivePicks: [p1, p2], oppName, oppRosterId: oppRoster.roster_id,
+                  score: -Math.abs((p1.value + p2.value - adj) - mp.value), net: p1.value + p2.value - mp.value - adj, format: "1 for 2", draftCapital: true,
+                });
+              }
+            }
+          }
+
+          for (let i = 0; i < Math.min(myTop.length, 8); i++) {
+            for (let j = i + 1; j < Math.min(myTop.length, 8); j++) {
+              const mp1 = myTop[i], mp2 = myTop[j];
+              if (!packageOk([mp1, mp2])) continue;
+              if (!qbSafe([mp1, mp2])) continue;
+              if (!oppReceiveOk(oppPlayers, [mp1, mp2], [])) continue;
+              for (const pick of oppPicks) {
+                if (!isBalanced([mp1.value, mp2.value], [pick.value])) continue;
+                const adj = tradeWaiverAdj([mp1.value, mp2.value], [pick.value]);
+                results.push({
+                  give: [mp1, mp2], receive: [], givePicks: [], receivePicks: [pick], oppName, oppRosterId: oppRoster.roster_id,
+                  score: -Math.abs((pick.value + adj) - (mp1.value + mp2.value)), net: pick.value + adj - mp1.value - mp2.value, format: "2 for 1", draftCapital: true,
+                });
+              }
+            }
+          }
+
+          continue;
+        }
 
         // 1v1
         for (const mp of myTop) {
@@ -3300,8 +3820,9 @@ const starters = starterSlots
             if (!isBalanced([mp.value], [op.value])) continue;
             if (!qbSafe([mp])) continue;
             if (!oppQbSafe(oppPlayers, [op])) continue;
+            if (!oppReceiveOk(oppPlayers, [mp], [op])) continue;
             results.push({
-              give: [mp], receive: [op], oppName, oppRosterId: oppRoster.roster_id,
+              give: [mp], receive: [op], givePicks: [], receivePicks: [], oppName, oppRosterId: oppRoster.roster_id,
               score: posScore([mp], [op]),
               net: op.value - mp.value, format: "1 for 1",
             });
@@ -3317,9 +3838,10 @@ const starters = starterSlots
               if (!packageOk([op1, op2])) continue;
               if (!qbSafe([mp])) continue;
               if (!oppQbSafe(oppPlayers, [op1, op2])) continue;
+              if (!oppReceiveOk(oppPlayers, [mp], [op1, op2])) continue;
               const adj = tradeWaiverAdj([mp.value], [op1.value, op2.value]);
               results.push({
-                give: [mp], receive: [op1, op2], oppName, oppRosterId: oppRoster.roster_id,
+                give: [mp], receive: [op1, op2], givePicks: [], receivePicks: [], oppName, oppRosterId: oppRoster.roster_id,
                 score: posScore([mp], [op1, op2]),
                 // receive>give: opp gets waiver credit → adj raises their side (costs us)
                 net: op1.value + op2.value - mp.value - adj, format: "1 for 2",
@@ -3337,9 +3859,10 @@ const starters = starterSlots
               if (!packageOk([mp1, mp2])) continue;
               if (!qbSafe([mp1, mp2])) continue;
               if (!oppQbSafe(oppPlayers, [op])) continue;
+              if (!oppReceiveOk(oppPlayers, [mp1, mp2], [op])) continue;
               const adj = tradeWaiverAdj([mp1.value, mp2.value], [op.value]);
               results.push({
-                give: [mp1, mp2], receive: [op], oppName, oppRosterId: oppRoster.roster_id,
+                give: [mp1, mp2], receive: [op], givePicks: [], receivePicks: [], oppName, oppRosterId: oppRoster.roster_id,
                 score: posScore([mp1, mp2], [op]),
                 net: op.value + adj - mp1.value - mp2.value, format: "2 for 1",
               });
@@ -3359,8 +3882,9 @@ const starters = starterSlots
                 if (!packageOk([op1, op2])) continue;
                 if (!qbSafe([mp1, mp2])) continue;
                 if (!oppQbSafe(oppPlayers, [op1, op2])) continue;
+                if (!oppReceiveOk(oppPlayers, [mp1, mp2], [op1, op2])) continue;
                 results.push({
-                  give: [mp1, mp2], receive: [op1, op2], oppName, oppRosterId: oppRoster.roster_id,
+                  give: [mp1, mp2], receive: [op1, op2], givePicks: [], receivePicks: [], oppName, oppRosterId: oppRoster.roster_id,
                   score: posScore([mp1, mp2], [op1, op2]),
                   net: op1.value + op2.value - mp1.value - mp2.value, format: "2 for 2",
                 });
@@ -3382,9 +3906,10 @@ const starters = starterSlots
                   if (!packageOk([op1, op2, op3])) continue;
                   if (!qbSafe([mp1, mp2])) continue;
                   if (!oppQbSafe(oppPlayers, [op1, op2, op3])) continue;
+                  if (!oppReceiveOk(oppPlayers, [mp1, mp2], [op1, op2, op3])) continue;
                   const adj = tradeWaiverAdj([mp1.value, mp2.value], [op1.value, op2.value, op3.value]);
                   results.push({
-                    give: [mp1, mp2], receive: [op1, op2, op3], oppName, oppRosterId: oppRoster.roster_id,
+                    give: [mp1, mp2], receive: [op1, op2, op3], givePicks: [], receivePicks: [], oppName, oppRosterId: oppRoster.roster_id,
                     score: posScore([mp1, mp2], [op1, op2, op3]),
                     // receive>give: opp gets waiver credit → adj raises their side (costs us)
                     net: op1.value + op2.value + op3.value - mp1.value - mp2.value - adj, format: "2 for 3",
@@ -3404,15 +3929,32 @@ const starters = starterSlots
       const shuffled = results
         .filter((r) => isFinite(r.score))
         .filter((r) => !pinnedPlayer || r.give.some((p: any) => p.player_id === pinnedPlayer.player_id))
-        .map((r) => ({ r, sort: Math.abs(Math.sin(finderSeed * (results.indexOf(r) + 1)) * 10000) % 1 }))
-        .sort((a, b) => a.sort - b.sort)
+        .map((r) => {
+          const bucketPriority = draftCapitalMode && r.receivePicks.length > 0
+            ? Math.min(...r.receivePicks.map((p: any) => draftYearPriority[p.season] ?? 999))
+            : 999;
+          return {
+            r,
+            bucketPriority,
+            sort: Math.abs(Math.sin(finderSeed * (results.indexOf(r) + 1)) * 10000) % 1,
+          };
+        })
+        .sort((a, b) => {
+          if (a.bucketPriority !== b.bucketPriority) return a.bucketPriority - b.bucketPriority;
+          return a.sort - b.sort;
+        })
         .map(({ r }) => r);
       const top15 = shuffled.filter((r) => {
-          const allIds = [...r.give.map((p: any) => p.player_id), ...r.receive.map((p: any) => p.player_id)];
+          const allIds = [
+            ...r.give.map((p: any) => `player-${p.player_id}`),
+            ...r.receive.map((p: any) => `player-${p.player_id}`),
+            ...r.givePicks.map((p: any) => `pick-${finderPickKey(p)}`),
+            ...r.receivePicks.map((p: any) => `pick-${finderPickKey(p)}`),
+          ];
           const key = [...allIds].sort().join(",");
           if (seen.has(key)) return false;
           // Each player may appear in at most 4 shown trades (pinned player is exempt)
-          if (allIds.some((pid) => pid !== finderPinnedPlayerId && (playerCount[pid] || 0) >= 4)) return false;
+          if (allIds.some((pid) => pid !== `player-${finderPinnedPlayerId}` && (playerCount[pid] || 0) >= 4)) return false;
           // Each opponent may appear in at most 4 shown trades
           const oppKey = String(r.oppRosterId);
           if ((oppCount[oppKey] || 0) >= 4) return false;
@@ -3423,20 +3965,33 @@ const starters = starterSlots
         })
         .slice(0, 15);
 
-      if (top15.length === 0) return (
-        <p className="text-gray-400 text-sm">
-          {pinnedPlayer
-            ? `No balanced trades found involving ${pinnedPlayer.full_name}. Try a different player or hit Refresh.`
-            : "No balanced trades found. Try selecting a league with more roster data loaded."
-          }
-        </p>
-      );
-
       return (
         <div className="space-y-4">
           {/* ── Player pin search ── */}
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 space-y-2">
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Find trades involving a specific player</p>
+            <div className="flex items-center justify-between gap-3 rounded-lg bg-gray-800/70 px-3 py-2">
+              <div>
+                <div className="text-sm font-medium text-white">Draft Capital Mode</div>
+                <div className="text-[11px] text-gray-400">
+                  Current direction: <span className="text-gray-300">{finderDirection}</span>. When on, Finder can turn roster talent into picks while still respecting opponent fit rules.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFinderDraftCapitalMode((prev) => !prev)}
+                aria-pressed={finderDraftCapitalMode}
+                className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full border transition ${
+                  finderDraftCapitalMode ? "border-blue-500 bg-blue-600/80" : "border-gray-700 bg-gray-700"
+                }`}
+              >
+                <span
+                  className={`inline-block h-5 w-5 rounded-full bg-white transition ${
+                    finderDraftCapitalMode ? "translate-x-6" : "translate-x-1"
+                  }`}
+                />
+              </button>
+            </div>
             {pinnedPlayer ? (
               <div className="flex items-center justify-between bg-gray-800 rounded-lg px-3 py-2">
                 <div className="flex items-center gap-2">
@@ -3496,13 +4051,25 @@ const starters = starterSlots
               Refresh
             </button>
           </div>
+          {top15.length === 0 && (
+            <p className="text-gray-400 text-sm">
+              {pinnedPlayer
+                ? `No balanced trades found involving ${pinnedPlayer.full_name}. Try a different player or hit Refresh.`
+                : draftCapitalMode
+                ? "No balanced draft-capital trades found. Try Refresh, pin a player you want to move, or turn Draft Capital Mode off."
+                : "No balanced trades found. You can still turn Draft Capital Mode on above to look for pick-return deals."
+              }
+            </p>
+          )}
           {top15.map((trade: TradeResult, idx: number) => {
-            const giveTotal = trade.give.reduce((s: number, p: any) => s + p.value, 0);
-            const receiveTotal = trade.receive.reduce((s: number, p: any) => s + p.value, 0);
-            const giveCount = trade.give.length;
-            const recCount = trade.receive.length;
+            const giveVals = [...trade.give.map((p: any) => p.value), ...trade.givePicks.map((p: any) => p.value)];
+            const receiveVals = [...trade.receive.map((p: any) => p.value), ...trade.receivePicks.map((p: any) => p.value)];
+            const giveTotal = giveVals.reduce((s: number, v: number) => s + v, 0);
+            const receiveTotal = receiveVals.reduce((s: number, v: number) => s + v, 0);
+            const giveCount = giveVals.length;
+            const recCount = receiveVals.length;
             const cardAdj = giveCount !== recCount
-              ? tradeWaiverAdj(trade.give.map((p: any) => p.value), trade.receive.map((p: any) => p.value))
+              ? tradeWaiverAdj(giveVals, receiveVals)
               : 0;
             // give>receive → waiver credit added to receive; receive>give → waiver credit added to give
             const adjOnGive = recCount > giveCount ? cardAdj : 0;
@@ -3538,6 +4105,15 @@ const starters = starterSlots
                           <span className="text-xs text-gray-400 font-mono shrink-0 ml-1">{p.value.toLocaleString()}</span>
                         </div>
                       ))}
+                      {trade.givePicks.map((p: any) => (
+                        <div key={finderPickKey(p)} className="flex items-center justify-between bg-gray-800 rounded-lg px-2 py-1.5">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-xs text-white truncate">{finderPickLabel(p)}</span>
+                            <span className="text-[10px] text-gray-500 shrink-0">PICK</span>
+                          </div>
+                          <span className="text-xs text-gray-400 font-mono shrink-0 ml-1">{p.value.toLocaleString()}</span>
+                        </div>
+                      ))}
                       {adjOnGive > 0 && (
                         <div className="flex items-center justify-between px-2 py-1">
                           <span className="text-[10px] text-gray-500 italic">Waiver Adjustment</span>
@@ -3559,6 +4135,15 @@ const starters = starterSlots
                           <span className="text-xs text-gray-400 font-mono shrink-0 ml-1">{p.value.toLocaleString()}</span>
                         </div>
                       ))}
+                      {trade.receivePicks.map((p: any) => (
+                        <div key={finderPickKey(p)} className="flex items-center justify-between bg-gray-800 rounded-lg px-2 py-1.5">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-xs text-white truncate">{finderPickLabel(p)}</span>
+                            <span className="text-[10px] text-gray-500 shrink-0">PICK</span>
+                          </div>
+                          <span className="text-xs text-gray-400 font-mono shrink-0 ml-1">{p.value.toLocaleString()}</span>
+                        </div>
+                      ))}
                       {adjOnReceive > 0 && (
                         <div className="flex items-center justify-between px-2 py-1">
                           <span className="text-[10px] text-gray-500 italic">Waiver Adjustment</span>
@@ -3575,8 +4160,8 @@ const starters = starterSlots
                     setCalcOpponentRosterId(trade.oppRosterId);
                     setCalcGive(trade.give.map((p: any) => p.player_id));
                     setCalcReceive(trade.receive.map((p: any) => p.player_id));
-                    setCalcGivePicks([]);
-                    setCalcReceivePicks([]);
+                    setCalcGivePicks(trade.givePicks.map((p: any) => finderPickKey(p)));
+                    setCalcReceivePicks(trade.receivePicks.map((p: any) => finderPickKey(p)));
                     setCalcSearchA("");
                     setCalcSearchB("");
                     setTradeHubSection("CALCULATOR");
