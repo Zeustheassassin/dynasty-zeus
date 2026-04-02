@@ -2815,9 +2815,11 @@ const starters = starterSlots
 
     {draftHubSection === "BOARD" && draftSettings && (
       <div className="overflow-x-auto">
-
-        {/* TEAM HEADER — ordered by actual draft slot */}
-        <div className="flex mb-2">
+        <div
+          className="inline-grid min-w-max gap-y-2"
+          style={{ gridTemplateColumns: `repeat(${rosters.length}, minmax(9rem, 1fr))` }}
+        >
+          {/* TEAM HEADER — ordered by actual draft slot */}
           {Array.from({ length: rosters.length }, (_, i) => i + 1).map((slot) => {
             const userId = Object.keys(draftOrder).find(
               (uid) => draftOrder[uid] === slot
@@ -2828,76 +2830,69 @@ const starters = starterSlots
               <button
                 key={slot}
                 onClick={() => userId && loadDraftScout(userId)}
-                className="w-36 text-center text-xs text-blue-400 hover:text-blue-300 truncate px-1 cursor-pointer"
+                className="min-w-0 min-h-[2.75rem] px-2 text-center text-xs text-blue-400 hover:text-blue-300 cursor-pointer whitespace-normal break-words leading-tight"
                 title={`View ${teamName}'s 2026 draft picks`}
               >
                 {teamName}
               </button>
             );
           })}
+
+          {ROUNDS.flatMap((round) => {
+            const roundPicks = Array.from({ length: rosters.length }, (_, i) => {
+              const slot = `${round}.${String(i + 1).padStart(2, "0")}`;
+
+              const pick = allPicks.find((p: any) => p.slot === slot);
+
+              return (
+                pick || {
+                  slot,
+                  owner_id: null,
+                  roster_id: null,
+                }
+              );
+            });
+
+            return roundPicks.map((pick, i) => {
+              const playerPick = draftPicks.find(
+                (dp: any) =>
+                  dp.round === round &&
+                  dp.roster_id === pick.owner_id
+              );
+
+              const player = playerPick
+                ? players[playerPick.player_id]
+                : null;
+
+              return (
+                <div
+                  key={`${round}-${i}`}
+                  className="min-w-0 h-16 bg-gray-800 rounded-md flex flex-col justify-center items-center text-xs border border-gray-700 px-2 gap-0.5"
+                >
+                  {player ? (
+                    <>
+                      <div className="text-center w-full text-white font-medium whitespace-normal break-words leading-tight">
+                        {player.full_name}
+                      </div>
+                      <div className="text-gray-400 text-[10px]">
+                        {player.position}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-gray-500 font-semibold">
+                        {pick.slot}
+                      </div>
+                      <div className="text-blue-400 text-[10px] text-center w-full whitespace-normal break-words leading-tight">
+                        {users[pick.owner_id] || ""}
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            });
+          })}
         </div>
-
-        {/* GRID */}
-        {/* GRID (NOW MATCHES PILLS) */}
-{ROUNDS.map((round) => {
-  const roundPicks = Array.from({ length: rosters.length }, (_, i) => {
-  const slot = `${round}.${String(i + 1).padStart(2, "0")}`;
-
-  const pick = allPicks.find((p: any) => p.slot === slot);
-
-  return (
-    pick || {
-      slot,
-      owner_id: null,
-      roster_id: null,
-    }
-  );
-});
-    
-  return (
-    <div key={round} className="flex mb-2">
-      {roundPicks.map((pick, i) => {
-
-        const playerPick = draftPicks.find(
-          (dp: any) =>
-            dp.round === round &&
-            dp.roster_id === pick.owner_id
-        );
-
-        const player = playerPick
-          ? players[playerPick.player_id]
-          : null;
-
-        return (
-          <div
-            key={i}
-            className="w-36 h-16 bg-gray-800 rounded-md flex flex-col justify-center items-center text-xs border border-gray-700 px-1 gap-0.5"
-          >
-            {player ? (
-              <>
-                <div className="text-center truncate w-full text-white font-medium">
-                  {player.full_name}
-                </div>
-                <div className="text-gray-400 text-[10px]">
-                  {player.position}
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="text-gray-500 font-semibold">
-                  {pick.slot}
-                </div>
-                <div className="text-blue-400 text-[10px] text-center truncate w-full">
-                  {users[pick.owner_id] || ""}
-                </div>
-              </>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-})}
       </div>
     )}
 
