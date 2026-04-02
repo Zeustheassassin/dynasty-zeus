@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
 import Dashboard from "../components/Dashboard";
+import { supabase } from "../lib/supabaseclient";
 
 // -------------------------
 // MODULE-LEVEL CONSTANTS
@@ -240,6 +241,14 @@ export default function Home() {
   // -------------------------
   const [username, setUsername] = useState("");
   const [user, setUser] = useState<any>(null);
+  const [supabaseUser, setSupabaseUser] = useState<any>(null);
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [notes, setNotes] = useState<any[]>([]);
+  const [noteTitle, setNoteTitle] = useState("");
+  const [noteBody, setNoteBody] = useState("");
+  const [supabaseError, setSupabaseError] = useState("");
+  const [loginLoading, setLoginLoading] = useState(false);
   const [leagues, setLeagues] = useState<any[]>([]);
   const [selectedLeague, setSelectedLeague] = useState<any>(null);
   const [roster, setRoster] = useState<any>(null);
@@ -331,6 +340,140 @@ const handleRankChange = (currentIndex: number, newRank: string) => {
   setRookies(updated);
 };
  
+
+const refreshSupabaseUser = async () => {
+  const { data } = await supabase.auth.getUser();
+  console.log("refreshSupabaseUser", data.user ? data.user.email : "null");
+  setSupabaseUser(data.user);
+  if (!data.user) {
+    setNotes([]);
+  }
+};
+
+useEffect(() => {
+  refreshSupabaseUser();
+  const { data: subscription } = supabase.auth.onAuthStateChange(() => refreshSupabaseUser());
+  return () => subscription?.subscription?.unsubscribe?.();
+}, []);
+
+const loadNotes = async () => {
+  if (!supabaseUser) { setNotes([]); return; }
+  const { data, error } = await supabase
+    .from("notes")
+    .select("*")
+    .eq("user_id", supabaseUser.id)
+    .order("updated_at", { ascending: false });
+  if (error) setSupabaseError(error.message);
+  else setNotes(data ?? []);
+};
+
+// Load all Supabase-persisted user data whenever the logged-in user changes
+useEffect(() => {
+  if (!supabaseUser) return;
+  // 1. Title/body note cards
+  loadNotes();
+  // 2. League notes (per-league textarea)
+  supabase
+    .from("league_notes")
+    .select("league_id, content")
+    .eq("user_id", supabaseUser.id)
+    .then(({ data }) => {
+      if (data && data.length > 0) {
+        const map: Record<string, string> = {};
+        data.forEach((row: any) => { map[row.league_id] = row.content; });
+        setLeagueNotes(map);
+        localStorage.setItem("leagueNotes", JSON.stringify(map));
+      }
+    });
+  // 3. Rookie big board (load saved order; only override if user has a saved board)
+  supabase
+    .from("rookie_board")
+    .select("players")
+    .eq("user_id", supabaseUser.id)
+    .eq("year", ROOKIE_YEAR)
+    .single()
+    .then(({ data }) => {
+      if (data?.players && Array.isArray(data.players) && data.players.length > 0) {
+        setRookies(data.players);
+        localStorage.setItem(`rookieBoard_${ROOKIE_YEAR}`, JSON.stringify(data.players));
+      }
+    });
+}, [supabaseUser]);
+
+const signUp = async () => {
+  setSupabaseError("");
+  const { error } = await supabase.auth.signUp({ email: loginEmail, password: loginPassword });
+  if (error) setSupabaseError(error.message);
+};
+
+const signIn = async () => {
+  setSupabaseError("");
+  setLoginLoading(true);
+  try {
+    const signInPromise = supabase.auth.signInWithPassword({
+      email: loginEmail.trim(),
+      password: loginPassword,
+    });
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("Request timed out — check your internet or Supabase project status.")), 10000)
+    );
+    const { data, error } = await Promise.race([signInPromise, timeoutPromise]);
+    if (error) {
+      setSupabaseError(error.message || error.name || "Sign-in failed. Check your credentials.");
+      return;
+    }
+    if (data?.user) {
+      setSupabaseUser(data.user);
+      setLoginEmail("");
+      setLoginPassword("");
+      setNotes([]);
+      await loadNotes();
+    } else {
+      setSupabaseError("Sign-in failed — no user returned. Check your credentials or confirm your email.");
+    }
+  } catch (err: any) {
+    setSupabaseError(err?.message || "Unexpected error — check your internet connection.");
+  } finally {
+    setLoginLoading(false);
+  }
+};
+
+const signOut = async () => {
+  await supabase.auth.signOut();
+  setSupabaseUser(null);
+  setNotes([]);
+  setLeagueNotes({});
+  setLoginEmail("");
+  setLoginPassword("");
+  setSupabaseError("");
+  // Clear localStorage user-specific data so next user starts fresh
+  localStorage.removeItem("leagueNotes");
+  localStorage.removeItem(`rookieBoard_${ROOKIE_YEAR}`);
+  localStorage.removeItem(ROOKIE_BOARD_RESET_KEY);
+  // Also clear Sleeper session so the app returns fully to the logged-out state
+  disconnectSleeper();
+};
+
+const createNote = async () => {
+  if (!supabaseUser || !noteTitle.trim()) return;
+  const { error } = await supabase.from("notes").insert([{
+    user_id: supabaseUser.id,
+    title: noteTitle,
+    body: noteBody,
+  }]);
+  if (error) setSupabaseError(error.message);
+  else { setNoteTitle(""); setNoteBody(""); loadNotes(); }
+};
+
+const deleteNote = async (id: string) => {
+  const { error } = await supabase
+    .from("notes")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", supabaseUser.id);
+  if (error) setSupabaseError(error.message);
+  else loadNotes();
+};
 
 // -------------------------
 // LOAD PLAYERS
@@ -435,15 +578,22 @@ useEffect(() => {
   }
 }, [mainTab, leagueHubTab, selectedLeague?.league_id]);
 
-// Persist notes to localStorage
+// League notes — load from localStorage on mount (fast), then override with Supabase on login
 useEffect(() => {
   const saved = localStorage.getItem("leagueNotes");
   if (saved) setLeagueNotes(JSON.parse(saved));
 }, []);
-const saveLeagueNote = (leagueId: string, text: string) => {
+
+const saveLeagueNote = async (leagueId: string, text: string) => {
   const updated = { ...leagueNotes, [leagueId]: text };
   setLeagueNotes(updated);
   localStorage.setItem("leagueNotes", JSON.stringify(updated));
+  if (supabaseUser) {
+    await supabase.from("league_notes").upsert(
+      { user_id: supabaseUser.id, league_id: leagueId, content: text, updated_at: new Date().toISOString() },
+      { onConflict: "user_id,league_id" }
+    );
+  }
 };
 
 useEffect(() => {
@@ -475,8 +625,14 @@ useEffect(() => {
 useEffect(() => {
   if (rookies.length > 0) {
     localStorage.setItem(`rookieBoard_${ROOKIE_YEAR}`, JSON.stringify(rookies));
+    if (supabaseUser) {
+      supabase.from("rookie_board").upsert(
+        { user_id: supabaseUser.id, year: ROOKIE_YEAR, players: rookies, updated_at: new Date().toISOString() },
+        { onConflict: "user_id,year" }
+      );
+    }
   }
-}, [rookies]);
+}, [rookies, supabaseUser]);
 useEffect(() => {
   const loadRookieBoard = async () => {
     const [sheetText, adpResponse] = await Promise.all([
@@ -1554,8 +1710,54 @@ const moveToRank = (fromIndex: number, toRank: number) => {
 // -------------------------
 const myPlayerSet = new Set<string>(roster?.players || []);
   return (
+    <>
+      {/* Login overlay — lives outside <main> so no stacking context interferes */}
+      {!supabaseUser && (
+        <div
+          style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+        >
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl p-8 w-full max-w-sm shadow-2xl" style={{ position: "relative", zIndex: 10000 }}>
+            <h2 className="text-xl font-bold mb-1 text-center">DynastyZeus</h2>
+            <p className="text-sm text-gray-400 text-center mb-6">Sign in to your account</p>
+            {supabaseError && <div className="text-red-400 text-sm mb-3">{supabaseError}</div>}
+            <div className="space-y-3">
+              <input
+                className="w-full p-2.5 rounded-lg bg-gray-800 border border-gray-700 text-sm focus:outline-none focus:border-blue-500"
+                placeholder="Email"
+                value={loginEmail}
+                onChange={(e) => setLoginEmail(e.target.value)}
+              />
+              <input
+                className="w-full p-2.5 rounded-lg bg-gray-800 border border-gray-700 text-sm focus:outline-none focus:border-blue-500"
+                type="password"
+                placeholder="Password"
+                value={loginPassword}
+                onChange={(e) => setLoginPassword(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); signIn(); } }}
+              />
+              <button
+                type="button"
+                disabled={loginLoading}
+                className="w-full py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded-lg text-sm font-semibold transition"
+                onClick={(e) => { e.stopPropagation(); signIn(); }}
+              >
+                {loginLoading ? "Signing in…" : "Sign In"}
+              </button>
+              <button
+                type="button"
+                className="w-full py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm font-semibold transition"
+                onClick={(e) => { e.stopPropagation(); signUp(); }}
+              >
+                Create Account
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     <main className="min-h-screen bg-gray-950 text-white">
-
+      {/* App content — always rendered but non-interactive when not signed in */}
+      <div className={!supabaseUser ? "pointer-events-none select-none opacity-40" : ""}>
+      <>
       {/* HEADER */}
       <div className="bg-gray-900 border-b border-gray-700 p-4 flex items-center justify-center">
   
@@ -1600,6 +1802,15 @@ const myPlayerSet = new Set<string>(roster?.players || []);
         </option>
       ))}
     </select>
+  )}
+
+  {supabaseUser && (
+    <button
+      onClick={signOut}
+      className="px-3 py-1 text-sm bg-red-600 hover:bg-red-500 rounded transition"
+    >
+      Log Out
+    </button>
   )}
 
 </div>
@@ -2472,7 +2683,7 @@ const starters = starterSlots
                     value={leagueNotes[noteLeague.league_id] ?? ""}
                     onChange={(e) => saveLeagueNote(noteLeague.league_id, e.target.value)}
                   />
-                  <p className="text-[10px] text-gray-600">Notes auto-save to your browser.</p>
+                  <p className="text-[10px] text-gray-600">{supabaseUser ? "Notes sync across your devices." : "Notes save to this browser only."}</p>
                 </div>
               );
             })()}
@@ -4404,6 +4615,9 @@ const starters = starterSlots
     </div>
   </div>
 )}
+      </>
+      </div>
     </main>
+    </>
   );
 }
