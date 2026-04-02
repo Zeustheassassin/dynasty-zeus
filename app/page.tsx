@@ -394,20 +394,7 @@ useEffect(() => {
         localStorage.setItem("leagueNotes", JSON.stringify(map));
       }
     });
-  // 3. Rookie big board (load saved order; only override if user has a saved board)
-  supabase
-    .from("rookie_board")
-    .select("players")
-    .eq("user_id", supabaseUser.id)
-    .eq("year", ROOKIE_YEAR)
-    .single()
-    .then(({ data }) => {
-      if (data?.players && Array.isArray(data.players) && data.players.length > 0) {
-        rookieBoardSupabaseLoaded.current = true;
-        setRookies(data.players);
-        localStorage.setItem(`rookieBoard_${ROOKIE_YEAR}`, JSON.stringify(data.players));
-      }
-    });
+  // Rookie board is handled by the loadRookieBoard effect (depends on supabaseUser)
 }, [supabaseUser]);
 
 const signUp = async () => {
@@ -638,15 +625,23 @@ useEffect(() => {
     localStorage.setItem(`rookieBoard_${ROOKIE_YEAR}`, JSON.stringify(rookies));
     const user = supabaseUserRef.current;
     if (user) {
+      // Save just the ordered names — small payload, easy to apply to any canonical board
+      const orderedNames = rookies.map((r: any) => r.name);
       supabase.from("rookie_board").upsert(
-        { user_id: user.id, year: ROOKIE_YEAR, players: rookies, updated_at: new Date().toISOString() },
+        { user_id: user.id, year: ROOKIE_YEAR, players: orderedNames, updated_at: new Date().toISOString() },
         { onConflict: "user_id,year" }
-      );
+      ).then(({ error }: { error: any }) => {
+        if (error) console.error("rookie_board save failed:", error.message, error.code);
+      });
     }
   }
 }, [rookies]); // intentionally omits supabaseUser — use ref to avoid overwriting Supabase on login
+// Single effect handles all rookie board loading.
+// Runs on mount AND whenever supabaseUser changes (login/logout).
+// Order of preference: Supabase (if logged in) > localStorage > ADP default.
 useEffect(() => {
   const loadRookieBoard = async () => {
+    // 1. Fetch fresh player data from sheet + ADP
     const [sheetText, adpResponse] = await Promise.all([
       fetch(ROOKIE_BOARD_SHEET_URL).then((res) => res.text()),
       fetch(ROOKIE_BOARD_ADP_URL).then((res) => res.json()),
@@ -657,7 +652,6 @@ useEffect(() => {
       .slice(1)
       .map((row) => {
         const cols = row.split(",");
-
         return {
           name: cols[0]?.replace(/"/g, "").trim(),
           position: cols[1]?.replace(/"/g, "").trim(),
@@ -677,9 +671,7 @@ useEffect(() => {
       .forEach((entry: any) => {
         const playerName = `${entry.player.first_name} ${entry.player.last_name}`.trim();
         const normalizedName = normalizeRookieName(playerName);
-
         if (!normalizedName || adpByName.has(normalizedName)) return;
-
         adpByName.set(normalizedName, {
           player_id: String(entry.player_id),
           name: playerName,
@@ -692,7 +684,6 @@ useEffect(() => {
     const canonicalBoard = sheetPlayers
       .map((player) => {
         const adpPlayer = adpByName.get(normalizeRookieName(player.name));
-
         return {
           player_id: adpPlayer?.player_id || null,
           name: adpPlayer?.name || player.name,
@@ -701,61 +692,53 @@ useEffect(() => {
           adp: typeof adpPlayer?.adp === "number" ? adpPlayer.adp : Number.MAX_SAFE_INTEGER,
         };
       })
-      .sort((a, b) => {
-        if (a.adp !== b.adp) return a.adp - b.adp;
-        return a.name.localeCompare(b.name);
-      });
+      .sort((a, b) => (a.adp !== b.adp ? a.adp - b.adp : a.name.localeCompare(b.name)));
 
-    // If Supabase already provided the authoritative board, don't overwrite it.
-    if (rookieBoardSupabaseLoaded.current) return;
+    // 2. Try Supabase for saved order (if logged in)
+    if (supabaseUser) {
+      const { data, error } = await supabase
+        .from("rookie_board")
+        .select("players")
+        .eq("user_id", supabaseUser.id)
+        .eq("year", ROOKIE_YEAR)
+        .single();
+      if (!error && data?.players && Array.isArray(data.players) && data.players.length > 0) {
+        // data.players is an ordered array of player names
+        const orderMap = new Map<string, number>(
+          (data.players as string[]).map((name, i) => [normalizeRookieName(name), i])
+        );
+        const ordered = [...canonicalBoard].sort((a, b) => {
+          const ia = orderMap.get(normalizeRookieName(a.name)) ?? 9999;
+          const ib = orderMap.get(normalizeRookieName(b.name)) ?? 9999;
+          return ia !== ib ? ia - ib : a.adp - b.adp;
+        });
+        localStorage.setItem(`rookieBoard_${ROOKIE_YEAR}`, JSON.stringify(ordered));
+        setRookies(ordered);
+        return;
+      }
+    }
 
-    const canonicalNames = new Set(canonicalBoard.map((player) => normalizeRookieName(player.name)));
+    // 3. Fall back to localStorage order
+    const saved = localStorage.getItem(`rookieBoard_${ROOKIE_YEAR}`);
     const hasReset = localStorage.getItem(ROOKIE_BOARD_RESET_KEY) === "true";
 
-    if (!hasReset) {
+    if (!hasReset || !saved) {
       setRookies(canonicalBoard);
       localStorage.setItem(`rookieBoard_${ROOKIE_YEAR}`, JSON.stringify(canonicalBoard));
       localStorage.setItem(ROOKIE_BOARD_RESET_KEY, "true");
       return;
     }
 
-    const saved = localStorage.getItem(`rookieBoard_${ROOKIE_YEAR}`);
-
-    if (!saved) {
-      setRookies(canonicalBoard);
-      return;
-    }
-
-    const savedData = JSON.parse(saved).filter((player: any) => {
-      const normalizedName = normalizeRookieName(player?.name || "");
-      return normalizedName && canonicalNames.has(normalizedName);
-    });
-
-    const savedByName: any = {};
-    savedData.forEach((player: any) => {
-      savedByName[normalizeRookieName(player.name)] = player;
-    });
-
-    const merged = canonicalBoard.map((player) => {
-      const savedPlayer = savedByName[normalizeRookieName(player.name)];
-      return savedPlayer ? { ...player, ...savedPlayer, ...player } : player;
-    });
-
-    merged.sort((a: any, b: any) => {
-      const savedIndexA = savedData.findIndex(
-        (player: any) => normalizeRookieName(player?.name || "") === normalizeRookieName(a.name)
-      );
-      const savedIndexB = savedData.findIndex(
-        (player: any) => normalizeRookieName(player?.name || "") === normalizeRookieName(b.name)
-      );
-
-      if (savedIndexA === -1 && savedIndexB === -1) {
-        return a.adp - b.adp;
-      }
-
-      if (savedIndexA === -1) return 1;
-      if (savedIndexB === -1) return -1;
-      return savedIndexA - savedIndexB;
+    const savedNames: string[] = JSON.parse(saved).map((p: any) =>
+      typeof p === "string" ? p : p.name
+    );
+    const canonicalNames = new Set(canonicalBoard.map((p) => normalizeRookieName(p.name)));
+    const validSaved = savedNames.filter((n) => canonicalNames.has(normalizeRookieName(n)));
+    const orderMap = new Map(validSaved.map((name, i) => [normalizeRookieName(name), i]));
+    const merged = [...canonicalBoard].sort((a, b) => {
+      const ia = orderMap.get(normalizeRookieName(a.name)) ?? 9999;
+      const ib = orderMap.get(normalizeRookieName(b.name)) ?? 9999;
+      return ia !== ib ? ia - ib : a.adp - b.adp;
     });
 
     localStorage.setItem(`rookieBoard_${ROOKIE_YEAR}`, JSON.stringify(merged));
@@ -763,57 +746,7 @@ useEffect(() => {
   };
 
   loadRookieBoard().catch(() => {});
-  return;
-  fetch("https://docs.google.com/spreadsheets/d/e/2PACX-1vROmAn0k3A92okpYE7UeelIy0vYUMY0NFAGHrI52V68Zm8ff9aruDXB1E6u0hRNr2EHgr54_D7gMBti/pub?output=csv")
-    .then((res) => res.text())
-    .then((text) => {
-      const rows = text.split("\n").slice(1);
-
-      const data = rows
-        .map((row) => {
-          const cols = row.split(",");
-
-          return {
-            name: cols[0]?.replace(/"/g, "").trim(),
-            position: cols[1]?.replace(/"/g, "").trim(),
-          };
-        })
-        .filter((p) => p.name);
-
-      const saved = localStorage.getItem(`rookieBoard_${ROOKIE_YEAR}`);
-
-if (saved) {
-  const savedData = JSON.parse(saved || "[]");
-
-  // 🔥 Create map of saved players by name
-  const savedMap: any = {};
-  savedData.forEach((p: any) => {
-    savedMap[p.name] = p;
-  });
-
-  // 🔥 Merge sheet data + saved rankings
-  const merged = data.map((p) => {
-    if (savedMap[p.name]) {
-      return savedMap[p.name]; // keep user ranking
-    }
-    return p; // new player from sheet
-  });
-
-  // 🔥 Add any players that were removed from sheet (optional)
-  const mergedNames = new Set(merged.map((p) => p.name));
-
-  savedData.forEach((p: any) => {
-    if (!mergedNames.has(p.name)) {
-      merged.push(p);
-    }
-  });
-
-  setRookies(merged);
-} else {
-  setRookies(data);
-}
-    });
-}, []);
+}, [supabaseUser]);
 useEffect(() => {
   return;
   if (Object.keys(players).length === 0) return;
