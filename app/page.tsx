@@ -275,13 +275,18 @@ const [loadingTradeHub, setLoadingTradeHub] = useState(false);
 const [tradeHubSection, setTradeHubSection] = useState<"CALCULATOR" | "FINDER">("CALCULATOR");
 const [finderSeed, setFinderSeed] = useState(() => Math.random());
 const [finderDraftCapitalMode, setFinderDraftCapitalMode] = useState(false);
-const [leagueHubTab, setLeagueHubTab] = useState<"OVERVIEW" | "ROSTERS" | "STANDINGS" | "STARTERS" | "NOTES">("OVERVIEW");
+const [leagueHubTab, setLeagueHubTab] = useState<"OVERVIEW" | "ROSTERS" | "OPP_ROSTERS" | "STANDINGS" | "STARTERS" | "NOTES">("OVERVIEW");
 const [leagueOverviewData, setLeagueOverviewData] = useState<Record<string, any>>({});
 const [loadingLeagueOverview, setLoadingLeagueOverview] = useState(false);
 const [leagueOverviewLoaded, setLeagueOverviewLoaded] = useState(false);
 const [leagueNotes, setLeagueNotes] = useState<Record<string, string>>({});
 const [nflState, setNflState] = useState<any>(null);
-const [dataHubTab, setDataHubTab] = useState<"OWNERSHIP" | "DYNASTY" | "REDRAFT" | "PROJECTIONS">("OWNERSHIP");
+const [dataHubTab, setDataHubTab] = useState<"OWNERSHIP" | "DYNASTY" | "REDRAFT" | "PROJECTIONS" | "LEAGUEMATES">("OWNERSHIP");
+const [leagueMateStats, setLeagueMateStats] = useState<any[]>([]);
+const [leagueMateStatsLoaded, setLeagueMateStatsLoaded] = useState(false);
+const [loadingLeagueMateStats, setLoadingLeagueMateStats] = useState(false);
+const [leagueMateSort, setLeagueMateSort] = useState<"name" | "total" | "bestball" | "shared">("total");
+const [leagueMateSearch, setLeagueMateSearch] = useState("");
 const [dynastyRankPos, setDynastyRankPos] = useState("ALL");
 const [redraftValues, setRedraftValues] = useState<Record<string, number>>({});
 const [loadingRedraft, setLoadingRedraft] = useState(false);
@@ -329,6 +334,9 @@ const [tempRanks, setTempRanks] = useState<{ [key: number]: string }>({});
 // ── MANAGEMENT HUB ────────────────────────────────────────────
 const [mgmtHubTab, setMgmtHubTab] = useState<"LEAGUE_MGMT" | "COMMISSIONER_TOOLS">("LEAGUE_MGMT");
 // leagueMgmtData: { [leagueId]: { paid_2026, paid_2027, paid_2028, paid_2029, commissioner, year_in_advance, picks_traded } }
+const [oppRosterTab, setOppRosterTab] = useState("QB");
+const [oppRosterOwnerId, setOppRosterOwnerId] = useState<string>("");
+const [oppRosterSearch, setOppRosterSearch] = useState("");
 const [leagueMgmtData, setLeagueMgmtData] = useState<Record<string, Record<string, boolean>>>({});
 // commPaymentsData: { [leagueId]: { [ownerId]: { paid_2026, paid_2027, paid_2028, paid_2029 } } }
 const [commPaymentsData, setCommPaymentsData] = useState<Record<string, Record<string, Record<string, boolean>>>>({});
@@ -1774,7 +1782,8 @@ const myPlayerSet = new Set<string>(roster?.players || []);
       {/* HEADER */}
       <div className="sticky top-0 z-10 bg-gray-900 border-b border-gray-700">
         {/* Top bar */}
-        <div className="flex items-center justify-between px-3 py-2 gap-2">
+        <div className="flex overflow-x-auto scrollbar-none md:justify-center">
+          <div className="flex items-center px-3 py-2 gap-4 shrink-0">
           <h1 className="text-base font-bold shrink-0">DynastyZeus</h1>
           <div className="flex items-center gap-2 min-w-0">
             {user && (
@@ -1812,9 +1821,11 @@ const myPlayerSet = new Set<string>(roster?.players || []);
               </button>
             )}
           </div>
+          </div>
         </div>
         {/* NAV */}
-        <div className="flex overflow-x-auto px-3 pb-2 gap-5 border-t border-gray-800 scrollbar-none">
+        <div className="flex overflow-x-auto border-t border-gray-800 scrollbar-none">
+          <div className="flex gap-5 px-3 pb-2 md:mx-auto">
           <button onClick={() => setMainTab("DASHBOARD")} className={`text-sm whitespace-nowrap py-1 ${mainTab === "DASHBOARD" ? "text-blue-400 font-semibold" : "text-gray-400"}`}>
             Dashboard
           </button>
@@ -1833,10 +1844,11 @@ const myPlayerSet = new Set<string>(roster?.players || []);
           <button onClick={() => user && setMainTab("MANAGEMENT_HUB")} className={`text-sm whitespace-nowrap py-1 ${mainTab === "MANAGEMENT_HUB" ? "text-blue-400 font-semibold" : "text-gray-400"} ${!user ? "opacity-40 cursor-not-allowed" : ""}`}>
             Management Hub
           </button>
+          </div>
         </div>
       </div>
 
-      <div className={mainTab === "DRAFT" || mainTab === "TRADE_HUB" || mainTab === "MANAGEMENT_HUB" ? "" : "max-w-3xl mx-auto p-6"}>
+      <div className={mainTab === "DRAFT" || mainTab === "TRADE_HUB" || mainTab === "MANAGEMENT_HUB" || mainTab === "LEAGUES" ? "" : "max-w-3xl mx-auto p-6"}>
 {mainTab === "DASHBOARD" && (
   <>
     <>
@@ -1868,14 +1880,15 @@ const myPlayerSet = new Set<string>(roster?.players || []);
 )}
         {/* LEAGUE HUB */}
         {mainTab === "LEAGUES" && (
+          <div className="max-w-5xl mx-auto px-4 py-6">
           <>
             {/* Sub-tab nav */}
             <div className="flex justify-center border-b border-gray-800 mb-6 overflow-x-auto">
               <div className="flex justify-center gap-6 text-center">
-              {(["OVERVIEW","ROSTERS","STANDINGS","STARTERS","NOTES"] as const).map((tab) => (
+              {(["OVERVIEW","ROSTERS","OPP_ROSTERS","STANDINGS","STARTERS","NOTES"] as const).map((tab) => (
                 <button key={tab} onClick={() => setLeagueHubTab(tab)}
                   className={`pb-2 px-1 text-sm font-semibold whitespace-nowrap transition ${leagueHubTab === tab ? "border-b-2 border-blue-400 text-blue-400" : "text-gray-400 hover:text-white"}`}>
-                  {tab === "OVERVIEW" ? "League Overview" : tab === "ROSTERS" ? "Rosters & Rules" : tab === "STANDINGS" ? "Standings" : tab === "STARTERS" ? "Suggested Starters" : "League Notes"}
+                  {tab === "OVERVIEW" ? "League Overview" : tab === "ROSTERS" ? "Rosters & Rules" : tab === "OPP_ROSTERS" ? "Opponent Rosters" : tab === "STANDINGS" ? "Standings" : tab === "STARTERS" ? "Suggested Starters" : "League Notes"}
                 </button>
               ))}
               </div>
@@ -2468,6 +2481,218 @@ const starters = starterSlots
             </>
             )}
 
+            {/* ── Opponent Rosters ── */}
+            {leagueHubTab === "OPP_ROSTERS" && (() => {
+              if (!selectedLeague || !rosters.length) return (
+                <p className="text-sm text-gray-500">Select a league from Rosters &amp; Rules first to view opponent rosters.</p>
+              );
+
+              const oppRolePriority: any = { starter: 0, bench: 1, taxi: 2 };
+
+              // Build opponent roster from selected owner
+              const oppRoster = rosters.find((r: any) => r.owner_id === oppRosterOwnerId);
+              const oppPlayerIds: string[] = oppRoster?.players || [];
+              const oppTaxiIds = new Set<string>(oppRoster?.taxi || []);
+              const oppStarterIds = new Set<string>(oppRoster?.starters || []);
+
+              const getOppRole = (id: string) => {
+                if (oppStarterIds.has(id)) return "starter";
+                if (oppTaxiIds.has(id)) return "taxi";
+                return "bench";
+              };
+
+              const oppGrouped: Record<string, any[]> = { QB: [], RB: [], WR: [], TE: [] };
+              oppPlayerIds.forEach((id) => {
+                const p = players[id];
+                if (!p || !oppGrouped[p.position]) return;
+                oppGrouped[p.position].push({ ...p, role: getOppRole(id) });
+              });
+              Object.keys(oppGrouped).forEach((pos) => {
+                oppGrouped[pos].sort((a: any, b: any) => {
+                  const rd = oppRolePriority[a.role] - oppRolePriority[b.role];
+                  return rd !== 0 ? rd : (b.value || 0) - (a.value || 0);
+                });
+              });
+
+              const oppFilteredPlayers = (["QB","RB","WR","TE"].includes(oppRosterTab) ? oppGrouped[oppRosterTab] : [])
+                ?.filter((p: any) => p.full_name?.toLowerCase().includes(oppRosterSearch.toLowerCase()));
+
+              const oppPicksForOwner = allPicks.filter((p: any) => p.owner_id === oppRoster?.roster_id);
+
+              const roleColors: Record<string, string> = {
+                starter: "bg-green-800/60",
+                bench: "bg-blue-800/40",
+                taxi: "bg-purple-800/60",
+              };
+
+              return (
+                <div>
+                  {/* League name + owner dropdown */}
+                  <div className="mb-4 flex flex-wrap items-center gap-3">
+                    <span className="text-sm text-gray-400">{selectedLeague.name}</span>
+                    <select
+                      value={oppRosterOwnerId}
+                      onChange={(e) => { setOppRosterOwnerId(e.target.value); setOppRosterTab("QB"); setOppRosterSearch(""); }}
+                      className="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-white"
+                    >
+                      <option value="">— select an owner —</option>
+                      {rosters
+                        .filter((r: any) => r.owner_id && r.owner_id !== user?.user_id)
+                        .map((r: any) => (
+                          <option key={r.roster_id} value={r.owner_id}>
+                            {users[r.owner_id] || r.owner_id}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+
+                  {oppRosterOwnerId && !oppRoster && (
+                    <p className="text-sm text-gray-500">Roster not found.</p>
+                  )}
+
+                  {oppRoster && (
+                    <>
+                      {/* Tabs + search */}
+                      <div className="bg-gray-900 border border-gray-700 rounded-xl p-4 mb-4">
+                        <div className="flex flex-wrap gap-2 mb-3">
+                          {["ROSTER","QB","RB","WR","TE","PICKS"].map((pos) => (
+                            <button
+                              key={pos}
+                              onClick={() => setOppRosterTab(pos)}
+                              className={`px-3 py-1 rounded text-sm ${oppRosterTab === pos ? "bg-blue-600" : "bg-gray-800 hover:bg-gray-700"}`}
+                            >
+                              {pos}
+                            </button>
+                          ))}
+                        </div>
+                        {["QB","RB","WR","TE"].includes(oppRosterTab) && (
+                          <input
+                            className="w-full p-2.5 rounded bg-gray-800 border border-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            placeholder="Search players..."
+                            value={oppRosterSearch}
+                            onChange={(e) => setOppRosterSearch(e.target.value)}
+                          />
+                        )}
+                      </div>
+
+                      {/* Position view */}
+                      {["QB","RB","WR","TE"].includes(oppRosterTab) && (
+                        <div className="bg-gray-900 border border-gray-700 rounded-xl p-4">
+                          <div className="text-sm font-semibold mb-3 text-gray-300">{oppRosterTab}</div>
+                          {oppFilteredPlayers?.map((p: any) => (
+                            <div key={p.player_id} className={`flex items-center justify-between px-3 py-1.5 mb-1 rounded text-sm ${roleColors[p.role]}`}>
+                              <div className="flex items-center gap-2 truncate">
+                                <span className="font-medium">{p.full_name}</span>
+                                <span className="text-xs text-gray-400">{p.team}</span>
+                                <span className="text-xs text-gray-500">{p.role.toUpperCase()}</span>
+                              </div>
+                              <div className="flex items-center gap-3 text-xs whitespace-nowrap">
+                                <span className="text-gray-400">Age {p.age || "—"}</span>
+                                <span className="text-blue-400 font-semibold">{p.value || 0}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Full roster grid */}
+                      {oppRosterTab === "ROSTER" && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {["QB","RB","WR","TE"].map((pos) => {
+                            const posPlayers = oppGrouped[pos];
+                            const starters = posPlayers.filter((p: any) => p.role === "starter");
+                            const bench = posPlayers.filter((p: any) => p.role === "bench");
+                            const totalVal = posPlayers.reduce((s: number, p: any) => s + (p.value || 0), 0);
+                            return (
+                              <div key={pos} className="bg-gray-900 border border-gray-700 rounded-lg p-4">
+                                <div className="flex justify-between mb-3">
+                                  <div className="font-semibold text-sm">{pos} {posPlayers.length} TOTAL</div>
+                                  <div className="text-xs text-gray-400">TOTAL {pos} VAL {totalVal}</div>
+                                </div>
+                                {starters.map((p: any, i: number) => (
+                                  <div key={`s-${i}`} className="flex justify-between items-center bg-green-900/30 border border-green-700 rounded p-2 mb-2">
+                                    <div className="flex items-center gap-2">
+                                      <div className="text-xs px-2 py-1 rounded bg-green-700">STARTER</div>
+                                      <div>{p.full_name}</div>
+                                    </div>
+                                    <div className="text-xs text-gray-300">VAL {p.value || 0}</div>
+                                  </div>
+                                ))}
+                                {bench.map((p: any, i: number) => (
+                                  <div key={`b-${i}`} className="flex justify-between items-center bg-blue-900/30 border border-blue-700 rounded p-2 mb-2">
+                                    <div className="flex items-center gap-2">
+                                      <div className="text-xs px-2 py-1 rounded bg-blue-700">{pos}{starters.length + i + 1}</div>
+                                      <div>{p.full_name}</div>
+                                    </div>
+                                    <div className="text-xs text-gray-300">VAL {p.value || 0}</div>
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })}
+                          {/* Taxi */}
+                          {oppTaxiIds.size > 0 && (
+                            <div className="bg-gray-900 border border-gray-700 rounded-lg p-4">
+                              <div className="font-semibold text-sm text-purple-400 mb-3">TAXI {oppTaxiIds.size} TOTAL</div>
+                              {[...oppTaxiIds].map((id, i) => {
+                                const p = players[id];
+                                if (!p) return null;
+                                return (
+                                  <div key={i} className="flex justify-between items-center bg-purple-900/30 border border-purple-700 rounded p-2 mb-2">
+                                    <div className="flex items-center gap-2">
+                                      <div className="text-xs px-2 py-1 rounded bg-purple-700">TX{i+1}</div>
+                                      <div>{p.full_name}</div>
+                                    </div>
+                                    <div className="text-xs text-gray-400">VAL {p.value || 0}</div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Picks */}
+                      {oppRosterTab === "PICKS" && (
+                        <div className="mt-2">
+                          {["2026","2027","2028"].map((year) => {
+                            const yearPicks = oppPicksForOwner
+                              .filter((p: any) => p.season === year)
+                              .sort((a: any, b: any) => a.round !== b.round ? a.round - b.round : (a.pick_no || 0) - (b.pick_no || 0));
+                            if (!yearPicks.length) return null;
+                            return (
+                              <div key={year} className="mb-4 bg-gray-900 border border-gray-700 rounded-lg p-4">
+                                <div className="font-semibold text-sm mb-2">{year} Picks — {yearPicks.length} TOTAL</div>
+                                <div className="flex flex-wrap gap-2">
+                                  {yearPicks.map((pick: any, i: number) => {
+                                    const label = pick.season === CURRENT_YEAR ? pick.slot : `${pick.round}${["th","st","nd","rd"][pick.round] || "th"}`;
+                                    const originalOwner = users[pick.roster_id] || "";
+                                    return (
+                                      <div key={i} className={`px-3 py-1 rounded-full text-xs border flex items-center gap-1 ${
+                                        pick.round === 1 ? "bg-yellow-900/40 border-yellow-600 text-yellow-300"
+                                        : pick.round === 2 ? "bg-green-900/40 border-green-600 text-green-300"
+                                        : pick.round === 3 ? "bg-blue-900/40 border-blue-600 text-blue-300"
+                                        : "bg-orange-900/40 border-orange-600 text-orange-300"
+                                      }`}>
+                                        <span className="font-semibold">{label}</span>
+                                        {originalOwner && pick.roster_id !== oppRoster.roster_id && (
+                                          <span className="text-[10px] text-gray-300">via {originalOwner}</span>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })()}
+
             {/* ── Standings ── */}
             {leagueHubTab === "STANDINGS" && (
               selectedLeague && roster ? (
@@ -2666,6 +2891,7 @@ const starters = starterSlots
             })()}
 
           </>
+          </div>
         )}
 
         {/* DATA HUB TAB */}
@@ -2674,7 +2900,7 @@ const starters = starterSlots
             {/* Sub-tab nav */}
             <div className="flex justify-center border-b border-gray-800 mb-6 overflow-x-auto">
               <div className="flex justify-center gap-6 text-center">
-              {(["OWNERSHIP", "DYNASTY", "REDRAFT", "PROJECTIONS"] as const).map((tab) => (
+              {(["OWNERSHIP", "DYNASTY", "REDRAFT", "PROJECTIONS", "LEAGUEMATES"] as const).map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setDataHubTab(tab)}
@@ -2684,7 +2910,7 @@ const starters = starterSlots
                       : "text-gray-400 hover:text-white"
                   }`}
                 >
-                  {tab === "OWNERSHIP" ? "Player Ownership" : tab === "DYNASTY" ? "Dynasty Rankings" : tab === "REDRAFT" ? "Redraft Rankings" : "Player Projections"}
+                  {tab === "OWNERSHIP" ? "Player Ownership" : tab === "DYNASTY" ? "Dynasty Rankings" : tab === "REDRAFT" ? "Redraft Rankings" : tab === "PROJECTIONS" ? "Player Projections" : "League Mate Stats"}
                 </button>
               ))}
               </div>
@@ -2952,6 +3178,158 @@ const starters = starterSlots
                     </>
                   )}
                 </>
+              );
+            })()}
+
+            {/* ── League Mate Stats ── */}
+            {dataHubTab === "LEAGUEMATES" && (() => {
+              const loadLeagueMateStats = async () => {
+                if (!user || !leagues.length) return;
+                setLoadingLeagueMateStats(true);
+                try {
+                  // Step 1: Fetch rosters + users for each of my leagues to get display names
+                  // and build the shared-leagues count.
+                  const myLeagueData = await Promise.all(
+                    leagues.map(async (league: any) => {
+                      const [rostersRes, leagueUsersRes] = await Promise.all([
+                        fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`).then(r => r.json()).catch(() => []),
+                        fetch(`https://api.sleeper.app/v1/league/${league.league_id}/users`).then(r => r.json()).catch(() => []),
+                      ]);
+                      return { league, rosters: rostersRes, leagueUsers: leagueUsersRes };
+                    })
+                  );
+
+                  // Step 2: Build display name map and collect unique owner IDs + shared league counts
+                  const displayNameMap: Record<string, string> = {};
+                  const sharedLeaguesCount: Record<string, number> = {};
+                  const allOwnerIds = new Set<string>();
+
+                  myLeagueData.forEach(({ rosters, leagueUsers }) => {
+                    (leagueUsers as any[]).forEach((u: any) => {
+                      if (u?.user_id && u?.display_name) displayNameMap[u.user_id] = u.display_name;
+                    });
+                    (rosters as any[]).forEach((r: any) => {
+                      if (!r.owner_id || r.owner_id === user.user_id) return;
+                      allOwnerIds.add(r.owner_id);
+                      sharedLeaguesCount[r.owner_id] = (sharedLeaguesCount[r.owner_id] || 0) + 1;
+                    });
+                  });
+
+                  // Step 3: For each unique owner, fetch their total 2026 Sleeper league count.
+                  const ownerStats = await Promise.all([...allOwnerIds].map(async (ownerId) => {
+                    const theirLeagues: any[] = await fetch(`https://api.sleeper.app/v1/user/${ownerId}/leagues/nfl/${CURRENT_YEAR}`)
+                      .then(r => r.json())
+                      .then(d => Array.isArray(d) ? d : [])
+                      .catch(() => []);
+
+                    return {
+                      userId: ownerId,
+                      displayName: displayNameMap[ownerId] || users[ownerId] || ownerId,
+                      totalLeagues: theirLeagues.filter((l: any) => (l.settings?.best_ball ?? 0) === 0).length,
+                      bestBallLeagues: theirLeagues.filter((l: any) => (l.settings?.best_ball ?? 0) !== 0).length,
+                      sharedLeagues: sharedLeaguesCount[ownerId] || 0,
+                    };
+                  }));
+
+                  setLeagueMateStats(ownerStats);
+                  setLeagueMateStatsLoaded(true);
+                } finally {
+                  setLoadingLeagueMateStats(false);
+                }
+              };
+
+              const filtered = leagueMateStats.filter((o) =>
+                o.displayName.toLowerCase().includes(leagueMateSearch.toLowerCase())
+              );
+
+              const sorted = [...filtered].sort((a, b) => {
+                if (leagueMateSort === "total")  return b.totalLeagues  - a.totalLeagues  || a.displayName.localeCompare(b.displayName);
+                if (leagueMateSort === "bestball") return b.bestBallLeagues - a.bestBallLeagues || a.displayName.localeCompare(b.displayName);
+                if (leagueMateSort === "shared") return b.sharedLeagues - a.sharedLeagues || a.displayName.localeCompare(b.displayName);
+                return a.displayName.localeCompare(b.displayName);
+              });
+
+              const thSort = (col: typeof leagueMateSort, label: string) => (
+                <button
+                  onClick={() => setLeagueMateSort(col)}
+                  className={`flex items-center gap-1 whitespace-nowrap ${leagueMateSort === col ? "text-blue-400" : "text-gray-500 hover:text-gray-300"}`}
+                >
+                  {label}
+                  <span className="text-[10px]">{leagueMateSort === col ? "▼" : "↕"}</span>
+                </button>
+              );
+
+              return (
+                <div className="max-w-3xl mx-auto">
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-base font-semibold text-white">League Mate Stats</h2>
+                    {!leagueMateStatsLoaded && (
+                      <button
+                        onClick={loadLeagueMateStats}
+                        disabled={loadingLeagueMateStats}
+                        className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded transition"
+                      >
+                        {loadingLeagueMateStats ? "Loading…" : "Load Stats"}
+                      </button>
+                    )}
+                    {leagueMateStatsLoaded && (
+                      <button
+                        onClick={loadLeagueMateStats}
+                        disabled={loadingLeagueMateStats}
+                        className="px-3 py-1.5 text-xs bg-gray-700 hover:bg-gray-600 disabled:opacity-50 rounded transition"
+                      >
+                        {loadingLeagueMateStats ? "Refreshing…" : "Refresh"}
+                      </button>
+                    )}
+                  </div>
+
+                  {!leagueMateStatsLoaded && !loadingLeagueMateStats && (
+                    <p className="text-sm text-gray-500">Click Load Stats to fetch data across all your leagues.</p>
+                  )}
+                  {loadingLeagueMateStats && (
+                    <p className="text-sm text-blue-400">Loading league mate data…</p>
+                  )}
+
+                  {leagueMateStatsLoaded && (
+                    <>
+                      <input
+                        className="w-full mb-4 p-2.5 rounded bg-gray-800 border border-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-500"
+                        placeholder="Search owner name…"
+                        value={leagueMateSearch}
+                        onChange={(e) => setLeagueMateSearch(e.target.value)}
+                      />
+                      {sorted.length === 0 ? (
+                        <p className="text-sm text-gray-500">No owners match your search.</p>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm border-collapse">
+                            <thead>
+                              <tr className="border-b border-gray-700">
+                                <th className="text-left py-2 px-3">{thSort("name", "Owner")}</th>
+                                <th className="text-center py-2 px-3">{thSort("total", "Total Leagues")}</th>
+                                <th className="text-center py-2 px-3">{thSort("bestball", "Best Ball")}</th>
+                                <th className="text-center py-2 px-3">{thSort("shared", "Shared Leagues")}</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {sorted.map((owner, i) => (
+                                <tr key={owner.userId} className={i % 2 === 0 ? "bg-slate-900" : "bg-slate-950"}>
+                                  <td className="py-2 px-3 text-white font-medium">{owner.displayName}</td>
+                                  <td className="py-2 px-3 text-center text-gray-300">{owner.totalLeagues}</td>
+                                  <td className="py-2 px-3 text-center text-gray-300">{owner.bestBallLeagues}</td>
+                                  <td className="py-2 px-3 text-center">
+                                    <span className="text-blue-400 font-semibold">{owner.sharedLeagues}</span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                          <p className="text-xs text-gray-600 mt-3">Total Leagues = 2026 non-best-ball NFL leagues for that owner on Sleeper.</p>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
               );
             })()}
           </>
