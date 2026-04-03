@@ -31,12 +31,13 @@ export default function Dashboard({ username, leagues, onSelectLeague, onNavigat
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-5 mb-12">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-5 mb-12">
         {[
           { title: "League Hub", icon: "🏈" },
           { title: "Data Hub", icon: "📊" },
           { title: "Draft Hub", icon: "⚡" },
           { title: "Trade Hub", icon: "🔄" },
+          { title: "Management Hub", icon: "⚙️" },
         ].map((item, i) => (
           <motion.div
             key={i}
@@ -57,6 +58,10 @@ export default function Dashboard({ username, leagues, onSelectLeague, onNavigat
 
               if (item.title === "Trade Hub") {
                 onNavigate("TRADE_HUB");
+              }
+
+              if (item.title === "Management Hub") {
+                onNavigate("MANAGEMENT_HUB");
               }
             }}
             whileHover={isConnected ? { scale: 1.03 } : {}}

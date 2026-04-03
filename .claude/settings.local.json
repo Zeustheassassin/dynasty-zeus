@@ -34,7 +34,8 @@
       "Bash(grep -o 'Daily=\"[^\"]*\"\\\\|DAILY=\"[^\"]*\"\\\\|WEEKLY=\"[^\"]*\"\\\\|Weekly=\"[^\"]*\"\\\\|PPR=\"[^\"]*\"\\\\|e\\\\.Daily=.\\\\{0,50\\\\}')",
       "Bash(grep -o 'e\\\\.Daily=.\\\\{0,200\\\\}')",
       "Bash(curl -s -X POST https://fdresearch-api.fanduel.com/graphql -H 'Content-Type: application/json' -H 'Origin: https://www.fanduel.com' -H 'User-Agent: Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36' -d '{\"query\":\"{ __type\\(name: \\\\\"ProjectionSports\\\\\"\\) { enumValues { name } } }\"}')",
-      "Bash(grep -o '\"TE Columns.\\\\{0,800\\\\}' /tmp/fd_qb.html)"
+      "Bash(grep -o '\"TE Columns.\\\\{0,800\\\\}' /tmp/fd_qb.html)",
+      "Bash(npx next:*)"
     ]
   }
 }
