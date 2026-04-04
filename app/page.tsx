@@ -301,6 +301,9 @@ const [projectionSourceStatus, setProjectionSourceStatus] = useState<Record<stri
 const [projectionLoaded, setProjectionLoaded] = useState(false);
 const [finderPlayerSearch, setFinderPlayerSearch] = useState("");
 const [finderPinnedPlayerId, setFinderPinnedPlayerId] = useState<string | null>(null);
+const [finderTargetOppRosterId, setFinderTargetOppRosterId] = useState<number | null>(null);
+const [finderTargetPlayerSearch, setFinderTargetPlayerSearch] = useState("");
+const [finderTargetPlayerId, setFinderTargetPlayerId] = useState<string | null>(null);
 const [draftHubSection, setDraftHubSection] = useState<"BOARD" | "BIG_BOARD">("BOARD");
 const [pickFcValues, setPickFcValues] = useState<Record<string, number>>({});
 const [calcFcValues, setCalcFcValues] = useState<Record<string, number>>({});
@@ -4191,6 +4194,8 @@ const starters = starterSlots
       const myTop = finderPinnedPlayerId && !myPlayers.slice(0, 10).some((p: any) => p.player_id === finderPinnedPlayerId)
         ? [...myPlayers.slice(0, 9), myPlayers.find((p: any) => p.player_id === finderPinnedPlayerId)].filter(Boolean)
         : myPlayers.slice(0, 10);
+      // When either give or receive player is pinned, relax loop caps so rarer combos surface
+      const pinnedActive = !!(finderPinnedPlayerId || finderTargetPlayerId);
 
       // League-wide positional totals for every team (used for ranking)
       const allTeamPosTotals = rosters.map((r: any) => posTotals(rosterPlayers(r)));
@@ -4237,6 +4242,21 @@ const starters = starterSlots
         : [];
       const pinnedPlayer = finderPinnedPlayerId
         ? myPlayers.find((p: any) => p.player_id === finderPinnedPlayerId) ?? null
+        : null;
+
+      // Opponent roster(s) for target player search
+      const finderOppRostersFiltered = rosters.filter((r: any) =>
+        r.owner_id !== user?.user_id &&
+        (finderTargetOppRosterId === null || r.roster_id === finderTargetOppRosterId)
+      );
+      const allOppPlayers = finderOppRostersFiltered.flatMap((r: any) => rosterPlayers(r));
+      const targetSearchMatches = finderTargetPlayerSearch.trim().length >= 2
+        ? allOppPlayers.filter((p: any) =>
+            p.full_name.toLowerCase().includes(finderTargetPlayerSearch.toLowerCase())
+          ).slice(0, 6)
+        : [];
+      const targetPinnedPlayer = finderTargetPlayerId
+        ? allOppPlayers.find((p: any) => p.player_id === finderTargetPlayerId) ?? null
         : null;
 
       // QB safety gate — find the top-32 QB value floor across all known players
@@ -4310,7 +4330,7 @@ const starters = starterSlots
 
       const results: TradeResult[] = [];
 
-      for (const oppRoster of rosters.filter((r: any) => r.owner_id !== user?.user_id)) {
+      for (const oppRoster of rosters.filter((r: any) => r.owner_id !== user?.user_id && (finderTargetOppRosterId === null || r.roster_id === finderTargetOppRosterId))) {
         const oppPlayers = rosterPlayers(oppRoster);
         const oppPicks = (allPicks as any[])
           .filter((p: any) => p.owner_id === oppRoster.roster_id)
@@ -4324,7 +4344,11 @@ const starters = starterSlots
           })
           .slice(0, 8);
 
-        const oppTop = oppPlayers.slice(0, 10);
+        // Ensure target player (if on this roster) is always in the pool even if ranked 11+
+        const oppTopBase = oppPlayers.slice(0, 10);
+        const oppTop = finderTargetPlayerId && !oppTopBase.some((p: any) => p.player_id === finderTargetPlayerId)
+          ? [...oppTopBase.slice(0, 9), oppPlayers.find((p: any) => p.player_id === finderTargetPlayerId)].filter(Boolean)
+          : oppTopBase;
         const oppName = (users as any)[oppRoster.owner_id] || `Team ${oppRoster.roster_id}`;
 
         if (draftCapitalMode) {
@@ -4376,6 +4400,9 @@ const starters = starterSlots
           continue;
         }
 
+        const myCap = (base: number) => pinnedActive ? myTop.length : Math.min(myTop.length, base);
+        const oppCap = (base: number) => pinnedActive ? oppTop.length : Math.min(oppTop.length, base);
+
         // 1v1
         for (const mp of myTop) {
           for (const op of oppTop) {
@@ -4393,8 +4420,8 @@ const starters = starterSlots
 
         // 1v2
         for (const mp of myTop) {
-          for (let i = 0; i < Math.min(oppTop.length, 9); i++) {
-            for (let j = i + 1; j < Math.min(oppTop.length, 9); j++) {
+          for (let i = 0; i < oppCap(9); i++) {
+            for (let j = i + 1; j < oppCap(9); j++) {
               const op1 = oppTop[i], op2 = oppTop[j];
               if (!isBalanced([mp.value], [op1.value, op2.value])) continue;
               if (!packageOk([op1, op2])) continue;
@@ -4405,16 +4432,61 @@ const starters = starterSlots
               results.push({
                 give: [mp], receive: [op1, op2], givePicks: [], receivePicks: [], oppName, oppRosterId: oppRoster.roster_id,
                 score: posScore([mp], [op1, op2]),
-                // receive>give: opp gets waiver credit → adj raises their side (costs us)
                 net: op1.value + op2.value - mp.value - adj, format: "1 for 2",
               });
             }
           }
         }
 
+        // 1v3
+        for (const mp of myTop) {
+          for (let i = 0; i < oppCap(8); i++) {
+            for (let j = i + 1; j < oppCap(8); j++) {
+              for (let k = j + 1; k < oppCap(8); k++) {
+                const op1 = oppTop[i], op2 = oppTop[j], op3 = oppTop[k];
+                if (!isBalanced([mp.value], [op1.value, op2.value, op3.value])) continue;
+                if (!packageOk([op1, op2, op3])) continue;
+                if (!qbSafe([mp])) continue;
+                if (!oppQbSafe(oppPlayers, [op1, op2, op3])) continue;
+                if (!oppReceiveOk(oppPlayers, [mp], [op1, op2, op3])) continue;
+                const adj = tradeWaiverAdj([mp.value], [op1.value, op2.value, op3.value]);
+                results.push({
+                  give: [mp], receive: [op1, op2, op3], givePicks: [], receivePicks: [], oppName, oppRosterId: oppRoster.roster_id,
+                  score: posScore([mp], [op1, op2, op3]),
+                  net: op1.value + op2.value + op3.value - mp.value - adj, format: "1 for 3",
+                });
+              }
+            }
+          }
+        }
+
+        // 1v4
+        for (const mp of myTop) {
+          for (let i = 0; i < oppCap(7); i++) {
+            for (let j = i + 1; j < oppCap(7); j++) {
+              for (let k = j + 1; k < oppCap(7); k++) {
+                for (let l = k + 1; l < oppCap(7); l++) {
+                  const op1 = oppTop[i], op2 = oppTop[j], op3 = oppTop[k], op4 = oppTop[l];
+                  if (!isBalanced([mp.value], [op1.value, op2.value, op3.value, op4.value])) continue;
+                  if (!packageOk([op1, op2, op3, op4])) continue;
+                  if (!qbSafe([mp])) continue;
+                  if (!oppQbSafe(oppPlayers, [op1, op2, op3, op4])) continue;
+                  if (!oppReceiveOk(oppPlayers, [mp], [op1, op2, op3, op4])) continue;
+                  const adj = tradeWaiverAdj([mp.value], [op1.value, op2.value, op3.value, op4.value]);
+                  results.push({
+                    give: [mp], receive: [op1, op2, op3, op4], givePicks: [], receivePicks: [], oppName, oppRosterId: oppRoster.roster_id,
+                    score: posScore([mp], [op1, op2, op3, op4]),
+                    net: op1.value + op2.value + op3.value + op4.value - mp.value - adj, format: "1 for 4",
+                  });
+                }
+              }
+            }
+          }
+        }
+
         // 2v1
-        for (let i = 0; i < Math.min(myTop.length, 9); i++) {
-          for (let j = i + 1; j < Math.min(myTop.length, 9); j++) {
+        for (let i = 0; i < myCap(9); i++) {
+          for (let j = i + 1; j < myCap(9); j++) {
             for (const op of oppTop) {
               const mp1 = myTop[i], mp2 = myTop[j];
               if (!isBalanced([mp1.value, mp2.value], [op.value])) continue;
@@ -4433,10 +4505,10 @@ const starters = starterSlots
         }
 
         // 2v2
-        for (let i = 0; i < Math.min(myTop.length, 8); i++) {
-          for (let j = i + 1; j < Math.min(myTop.length, 8); j++) {
-            for (let k = 0; k < Math.min(oppTop.length, 8); k++) {
-              for (let l = k + 1; l < Math.min(oppTop.length, 8); l++) {
+        for (let i = 0; i < myCap(8); i++) {
+          for (let j = i + 1; j < myCap(8); j++) {
+            for (let k = 0; k < oppCap(8); k++) {
+              for (let l = k + 1; l < oppCap(8); l++) {
                 const mp1 = myTop[i], mp2 = myTop[j];
                 const op1 = oppTop[k], op2 = oppTop[l];
                 if (!isBalanced([mp1.value, mp2.value], [op1.value, op2.value])) continue;
@@ -4456,11 +4528,11 @@ const starters = starterSlots
         }
 
         // 2v3
-        for (let i = 0; i < Math.min(myTop.length, 7); i++) {
-          for (let j = i + 1; j < Math.min(myTop.length, 7); j++) {
-            for (let k = 0; k < Math.min(oppTop.length, 7); k++) {
-              for (let l = k + 1; l < Math.min(oppTop.length, 7); l++) {
-                for (let m = l + 1; m < Math.min(oppTop.length, 7); m++) {
+        for (let i = 0; i < myCap(7); i++) {
+          for (let j = i + 1; j < myCap(7); j++) {
+            for (let k = 0; k < oppCap(7); k++) {
+              for (let l = k + 1; l < oppCap(7); l++) {
+                for (let m = l + 1; m < oppCap(7); m++) {
                   const mp1 = myTop[i], mp2 = myTop[j];
                   const op1 = oppTop[k], op2 = oppTop[l], op3 = oppTop[m];
                   if (!isBalanced([mp1.value, mp2.value], [op1.value, op2.value, op3.value])) continue;
@@ -4473,9 +4545,124 @@ const starters = starterSlots
                   results.push({
                     give: [mp1, mp2], receive: [op1, op2, op3], givePicks: [], receivePicks: [], oppName, oppRosterId: oppRoster.roster_id,
                     score: posScore([mp1, mp2], [op1, op2, op3]),
-                    // receive>give: opp gets waiver credit → adj raises their side (costs us)
                     net: op1.value + op2.value + op3.value - mp1.value - mp2.value - adj, format: "2 for 3",
                   });
+                }
+              }
+            }
+          }
+        }
+
+        // 2v4
+        for (let i = 0; i < myCap(7); i++) {
+          for (let j = i + 1; j < myCap(7); j++) {
+            for (let k = 0; k < oppCap(7); k++) {
+              for (let l = k + 1; l < oppCap(7); l++) {
+                for (let m = l + 1; m < oppCap(7); m++) {
+                  for (let n = m + 1; n < oppCap(7); n++) {
+                    const mp1 = myTop[i], mp2 = myTop[j];
+                    const op1 = oppTop[k], op2 = oppTop[l], op3 = oppTop[m], op4 = oppTop[n];
+                    if (!isBalanced([mp1.value, mp2.value], [op1.value, op2.value, op3.value, op4.value])) continue;
+                    if (!packageOk([mp1, mp2])) continue;
+                    if (!packageOk([op1, op2, op3, op4])) continue;
+                    if (!qbSafe([mp1, mp2])) continue;
+                    if (!oppQbSafe(oppPlayers, [op1, op2, op3, op4])) continue;
+                    if (!oppReceiveOk(oppPlayers, [mp1, mp2], [op1, op2, op3, op4])) continue;
+                    const adj = tradeWaiverAdj([mp1.value, mp2.value], [op1.value, op2.value, op3.value, op4.value]);
+                    results.push({
+                      give: [mp1, mp2], receive: [op1, op2, op3, op4], givePicks: [], receivePicks: [], oppName, oppRosterId: oppRoster.roster_id,
+                      score: posScore([mp1, mp2], [op1, op2, op3, op4]),
+                      net: op1.value + op2.value + op3.value + op4.value - mp1.value - mp2.value - adj, format: "2 for 4",
+                    });
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        // 3v3
+        for (let i = 0; i < myCap(7); i++) {
+          for (let j = i + 1; j < myCap(7); j++) {
+            for (let k = j + 1; k < myCap(7); k++) {
+              const mp1 = myTop[i], mp2 = myTop[j], mp3 = myTop[k];
+              if (!packageOk([mp1, mp2, mp3])) continue;
+              if (!qbSafe([mp1, mp2, mp3])) continue;
+              for (let a = 0; a < oppCap(7); a++) {
+                for (let b = a + 1; b < oppCap(7); b++) {
+                  for (let c = b + 1; c < oppCap(7); c++) {
+                    const op1 = oppTop[a], op2 = oppTop[b], op3 = oppTop[c];
+                    if (!isBalanced([mp1.value, mp2.value, mp3.value], [op1.value, op2.value, op3.value])) continue;
+                    if (!packageOk([op1, op2, op3])) continue;
+                    if (!oppQbSafe(oppPlayers, [op1, op2, op3])) continue;
+                    if (!oppReceiveOk(oppPlayers, [mp1, mp2, mp3], [op1, op2, op3])) continue;
+                    results.push({
+                      give: [mp1, mp2, mp3], receive: [op1, op2, op3], givePicks: [], receivePicks: [], oppName, oppRosterId: oppRoster.roster_id,
+                      score: posScore([mp1, mp2, mp3], [op1, op2, op3]),
+                      net: op1.value + op2.value + op3.value - mp1.value - mp2.value - mp3.value, format: "3 for 3",
+                    });
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        // 3v4
+        for (let i = 0; i < myCap(6); i++) {
+          for (let j = i + 1; j < myCap(6); j++) {
+            for (let k = j + 1; k < myCap(6); k++) {
+              const mp1 = myTop[i], mp2 = myTop[j], mp3 = myTop[k];
+              if (!packageOk([mp1, mp2, mp3])) continue;
+              if (!qbSafe([mp1, mp2, mp3])) continue;
+              for (let a = 0; a < oppCap(6); a++) {
+                for (let b = a + 1; b < oppCap(6); b++) {
+                  for (let c = b + 1; c < oppCap(6); c++) {
+                    for (let d = c + 1; d < oppCap(6); d++) {
+                      const op1 = oppTop[a], op2 = oppTop[b], op3 = oppTop[c], op4 = oppTop[d];
+                      if (!isBalanced([mp1.value, mp2.value, mp3.value], [op1.value, op2.value, op3.value, op4.value])) continue;
+                      if (!packageOk([op1, op2, op3, op4])) continue;
+                      if (!oppQbSafe(oppPlayers, [op1, op2, op3, op4])) continue;
+                      if (!oppReceiveOk(oppPlayers, [mp1, mp2, mp3], [op1, op2, op3, op4])) continue;
+                      const adj = tradeWaiverAdj([mp1.value, mp2.value, mp3.value], [op1.value, op2.value, op3.value, op4.value]);
+                      results.push({
+                        give: [mp1, mp2, mp3], receive: [op1, op2, op3, op4], givePicks: [], receivePicks: [], oppName, oppRosterId: oppRoster.roster_id,
+                        score: posScore([mp1, mp2, mp3], [op1, op2, op3, op4]),
+                        net: op1.value + op2.value + op3.value + op4.value - mp1.value - mp2.value - mp3.value - adj, format: "3 for 4",
+                      });
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        // 4v4
+        for (let i = 0; i < myCap(6); i++) {
+          for (let j = i + 1; j < myCap(6); j++) {
+            for (let k = j + 1; k < myCap(6); k++) {
+              for (let l = k + 1; l < myCap(6); l++) {
+                const mp1 = myTop[i], mp2 = myTop[j], mp3 = myTop[k], mp4 = myTop[l];
+                if (!packageOk([mp1, mp2, mp3, mp4])) continue;
+                if (!qbSafe([mp1, mp2, mp3, mp4])) continue;
+                for (let a = 0; a < oppCap(6); a++) {
+                  for (let b = a + 1; b < oppCap(6); b++) {
+                    for (let c = b + 1; c < oppCap(6); c++) {
+                      for (let d = c + 1; d < oppCap(6); d++) {
+                        const op1 = oppTop[a], op2 = oppTop[b], op3 = oppTop[c], op4 = oppTop[d];
+                        if (!isBalanced([mp1.value, mp2.value, mp3.value, mp4.value], [op1.value, op2.value, op3.value, op4.value])) continue;
+                        if (!packageOk([op1, op2, op3, op4])) continue;
+                        if (!oppQbSafe(oppPlayers, [op1, op2, op3, op4])) continue;
+                        if (!oppReceiveOk(oppPlayers, [mp1, mp2, mp3, mp4], [op1, op2, op3, op4])) continue;
+                        results.push({
+                          give: [mp1, mp2, mp3, mp4], receive: [op1, op2, op3, op4], givePicks: [], receivePicks: [], oppName, oppRosterId: oppRoster.roster_id,
+                          score: posScore([mp1, mp2, mp3, mp4], [op1, op2, op3, op4]),
+                          net: op1.value + op2.value + op3.value + op4.value - mp1.value - mp2.value - mp3.value - mp4.value, format: "4 for 4",
+                        });
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -4491,6 +4678,7 @@ const starters = starterSlots
       const shuffled = results
         .filter((r) => isFinite(r.score))
         .filter((r) => !pinnedPlayer || r.give.some((p: any) => p.player_id === pinnedPlayer.player_id))
+        .filter((r) => !finderTargetPlayerId || r.receive.some((p: any) => p.player_id === finderTargetPlayerId))
         .map((r) => {
           const bucketPriority = draftCapitalMode && r.receivePicks.length > 0
             ? Math.min(...r.receivePicks.map((p: any) => draftYearPriority[p.season] ?? 999))
@@ -4583,6 +4771,77 @@ const starters = starterSlots
                       <button
                         key={p.player_id}
                         onClick={() => { setFinderPinnedPlayerId(p.player_id); setFinderPlayerSearch(""); setFinderSeed(Math.random()); }}
+                        className="w-full flex items-center justify-between px-3 py-2 hover:bg-gray-700 transition text-left"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-white">{p.full_name}</span>
+                          <span className="text-[10px] text-gray-500 uppercase">{p.position}</span>
+                        </div>
+                        <span className="text-xs text-gray-400 font-mono">{p.value.toLocaleString()}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── Owner filter dropdown ── */}
+            <select
+              value={finderTargetOppRosterId ?? ""}
+              onChange={(e) => {
+                const val = e.target.value ? Number(e.target.value) : null;
+                setFinderTargetOppRosterId(val);
+                setFinderTargetPlayerId(null);
+                setFinderTargetPlayerSearch("");
+                setFinderSeed(Math.random());
+              }}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+            >
+              <option value="">Trade with any owner…</option>
+              {rosters
+                .filter((r: any) => r.owner_id !== user?.user_id)
+                .slice()
+                .sort((a: any, b: any) =>
+                  ((users as any)[a.owner_id] || "").localeCompare((users as any)[b.owner_id] || "")
+                )
+                .map((r: any) => (
+                  <option key={r.roster_id} value={r.roster_id}>
+                    {(users as any)[r.owner_id] || `Team ${r.roster_id}`}
+                  </option>
+                ))}
+            </select>
+
+            {/* ── Target player (want to receive) search ── */}
+            {targetPinnedPlayer ? (
+              <div className="flex items-center justify-between bg-gray-800 rounded-lg px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-gray-500 uppercase tracking-wider">Want to receive</span>
+                  <span className="text-sm text-white font-medium">{targetPinnedPlayer.full_name}</span>
+                  <span className="text-[10px] text-gray-500 uppercase">{targetPinnedPlayer.position}</span>
+                  <span className="text-xs text-gray-500 font-mono">{targetPinnedPlayer.value.toLocaleString()}</span>
+                </div>
+                <button
+                  onClick={() => { setFinderTargetPlayerId(null); setFinderTargetPlayerSearch(""); setFinderSeed(Math.random()); }}
+                  className="text-xs text-gray-500 hover:text-red-400 transition ml-3"
+                >
+                  ✕ Clear
+                </button>
+              </div>
+            ) : (
+              <div className="relative">
+                <input
+                  type="text"
+                  value={finderTargetPlayerSearch}
+                  onChange={(e) => { setFinderTargetPlayerSearch(e.target.value); setFinderTargetPlayerId(null); }}
+                  placeholder={finderTargetOppRosterId ? "Search their roster for a player to receive…" : "Search league for a player you want to receive…"}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+                />
+                {targetSearchMatches.length > 0 && (
+                  <div className="absolute z-10 top-full mt-1 w-full bg-gray-800 border border-gray-700 rounded-lg overflow-hidden shadow-xl">
+                    {targetSearchMatches.map((p: any) => (
+                      <button
+                        key={p.player_id}
+                        onClick={() => { setFinderTargetPlayerId(p.player_id); setFinderTargetPlayerSearch(""); setFinderSeed(Math.random()); }}
                         className="w-full flex items-center justify-between px-3 py-2 hover:bg-gray-700 transition text-left"
                       >
                         <div className="flex items-center gap-2">
