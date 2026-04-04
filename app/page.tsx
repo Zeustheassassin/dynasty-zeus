@@ -275,7 +275,7 @@ const [loadingTradeHub, setLoadingTradeHub] = useState(false);
 const [tradeHubSection, setTradeHubSection] = useState<"CALCULATOR" | "FINDER">("CALCULATOR");
 const [finderSeed, setFinderSeed] = useState(() => Math.random());
 const [finderDraftCapitalMode, setFinderDraftCapitalMode] = useState(false);
-const [leagueHubTab, setLeagueHubTab] = useState<"OVERVIEW" | "ROSTERS" | "OPP_ROSTERS" | "STANDINGS" | "STARTERS" | "NOTES">("OVERVIEW");
+const [leagueHubTab, setLeagueHubTab] = useState<"OVERVIEW" | "ROSTERS" | "OPP_ROSTERS" | "STANDINGS" | "STARTERS" | "NOTES" | "POWER_RANKINGS">("OVERVIEW");
 const [leagueOverviewData, setLeagueOverviewData] = useState<Record<string, any>>({});
 const [loadingLeagueOverview, setLoadingLeagueOverview] = useState(false);
 const [leagueOverviewLoaded, setLeagueOverviewLoaded] = useState(false);
@@ -305,6 +305,9 @@ const [finderTargetOppRosterId, setFinderTargetOppRosterId] = useState<number | 
 const [finderTargetPlayerSearch, setFinderTargetPlayerSearch] = useState("");
 const [finderTargetPlayerId, setFinderTargetPlayerId] = useState<string | null>(null);
 const [draftHubSection, setDraftHubSection] = useState<"BOARD" | "BIG_BOARD">("BOARD");
+const [prSortKey, setPrSortKey] = useState<"dynTotal"|"redTotal"|"qbTotal"|"rbTotal"|"wrTotal"|"teTotal">("dynTotal");
+const [prSortAsc, setPrSortAsc] = useState(false);
+const [prPopup, setPrPopup] = useState<{ rosterId: number; col: "dyn"|"red"|"QB"|"RB"|"WR"|"TE" } | null>(null);
 const [pickFcValues, setPickFcValues] = useState<Record<string, number>>({});
 const [calcFcValues, setCalcFcValues] = useState<Record<string, number>>({});
 const [loadingCalcValues, setLoadingCalcValues] = useState(false);
@@ -649,6 +652,13 @@ useEffect(() => {
   if (mainTab === "LEAGUES" && leagueHubTab === "STARTERS") {
     loadNflState();
     if (selectedLeague?.league_id) loadCalcValues(selectedLeague.league_id);
+  }
+}, [mainTab, leagueHubTab, selectedLeague?.league_id]);
+
+useEffect(() => {
+  if (mainTab === "LEAGUES" && leagueHubTab === "POWER_RANKINGS" && selectedLeague?.league_id) {
+    loadCalcValues(selectedLeague.league_id);
+    loadRedraftValues();
   }
 }, [mainTab, leagueHubTab, selectedLeague?.league_id]);
 
@@ -1888,10 +1898,10 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             {/* Sub-tab nav */}
             <div className="flex justify-center border-b border-gray-800 mb-6 overflow-x-auto">
               <div className="flex justify-center gap-6 text-center">
-              {(["OVERVIEW","ROSTERS","OPP_ROSTERS","STANDINGS","STARTERS","NOTES"] as const).map((tab) => (
+              {(["OVERVIEW","ROSTERS","POWER_RANKINGS","OPP_ROSTERS","STANDINGS","STARTERS","NOTES"] as const).map((tab) => (
                 <button key={tab} onClick={() => setLeagueHubTab(tab)}
                   className={`pb-2 px-1 text-sm font-semibold whitespace-nowrap transition ${leagueHubTab === tab ? "border-b-2 border-blue-400 text-blue-400" : "text-gray-400 hover:text-white"}`}>
-                  {tab === "OVERVIEW" ? "League Overview" : tab === "ROSTERS" ? "Rosters & Rules" : tab === "OPP_ROSTERS" ? "Opponent Rosters" : tab === "STANDINGS" ? "Standings" : tab === "STARTERS" ? "Suggested Starters" : "League Notes"}
+                  {tab === "OVERVIEW" ? "League Overview" : tab === "ROSTERS" ? "Rosters & Rules" : tab === "POWER_RANKINGS" ? "Power Rankings" : tab === "OPP_ROSTERS" ? "Opponent Rosters" : tab === "STANDINGS" ? "Standings" : tab === "STARTERS" ? "Suggested Starters" : "League Notes"}
                 </button>
               ))}
               </div>
@@ -2890,6 +2900,192 @@ const starters = starterSlots
                   />
                   <p className="text-[10px] text-gray-600">{supabaseUser ? "Notes sync across your devices." : "Notes save to this browser only."}</p>
                 </div>
+              );
+            })()}
+
+            {/* ── Power Rankings ── */}
+            {leagueHubTab === "POWER_RANKINGS" && (() => {
+              if (!selectedLeague || !rosters.length) return (
+                <p className="text-sm text-gray-500">Select a league from Rosters &amp; Rules first to view Power Rankings.</p>
+              );
+              if (loadingCalcValues) return <p className="text-sm text-blue-400">Loading player values…</p>;
+
+              const calcVal = (id: string) => calcFcValues[id] ?? (players as any)[id]?.value ?? 0;
+
+              // Build all rosters with per-position dynasty totals + picks
+              const prRows = rosters.map((r: any) => {
+                const ownerId = r.owner_id;
+                const ownerName = (users as any)[ownerId] || `Team ${r.roster_id}`;
+                const playerList = (r.players || []).map((id: string) => {
+                  const p = (players as any)[id];
+                  return p ? { ...p, dynVal: calcVal(id), redVal: redraftValues[id] || 0 } : null;
+                }).filter(Boolean);
+
+                const pickVal = (allPicks as any[])
+                  .filter((p: any) => p.owner_id === r.roster_id)
+                  .reduce((s: number, p: any) => s + getStoredPickValue(pickFcValues, p), 0);
+
+                const dynTotal = playerList.reduce((s: number, p: any) => s + p.dynVal, 0) + pickVal;
+                const redTotal = playerList.reduce((s: number, p: any) => s + p.redVal, 0);
+                const qbTotal  = playerList.filter((p: any) => p.position === "QB").reduce((s: number, p: any) => s + p.dynVal, 0);
+                const rbTotal  = playerList.filter((p: any) => p.position === "RB").reduce((s: number, p: any) => s + p.dynVal, 0);
+                const wrTotal  = playerList.filter((p: any) => p.position === "WR").reduce((s: number, p: any) => s + p.dynVal, 0);
+                const teTotal  = playerList.filter((p: any) => p.position === "TE").reduce((s: number, p: any) => s + p.dynVal, 0);
+
+                return { roster_id: r.roster_id, ownerId, ownerName, playerList, dynTotal, redTotal, qbTotal, rbTotal, wrTotal, teTotal };
+              });
+
+              const rankMap = (key: "dynTotal"|"redTotal"|"qbTotal"|"rbTotal"|"wrTotal"|"teTotal") => {
+                const sorted = [...prRows].sort((a, b) => b[key] - a[key]);
+                return Object.fromEntries(sorted.map((row, i) => [row.roster_id, i + 1]));
+              };
+
+              const dynRanks = rankMap("dynTotal");
+              const redRanks = rankMap("redTotal");
+              const qbRanks  = rankMap("qbTotal");
+              const rbRanks  = rankMap("rbTotal");
+              const wrRanks  = rankMap("wrTotal");
+              const teRanks  = rankMap("teTotal");
+
+              const n = prRows.length;
+              const ordinal = (r: number) => r === 1 ? "1st" : r === 2 ? "2nd" : r === 3 ? "3rd" : `${r}th`;
+              const pillColor = (r: number) => {
+                const top3rd = Math.ceil(n / 3);
+                const bot3rd = n - Math.floor(n / 3) + 1;
+                if (r <= top3rd) return "bg-green-900/40 text-green-400 border-green-700";
+                if (r >= bot3rd) return "bg-red-900/40 text-red-400 border-red-700";
+                return "bg-gray-800/60 text-gray-400 border-gray-700";
+              };
+
+              const myRosterId = rosters.find((r: any) => r.owner_id === user?.user_id)?.roster_id;
+
+              const sortedRows = [...prRows].sort((a, b) => {
+                const diff = b[prSortKey] - a[prSortKey];
+                return prSortAsc ? -diff : diff;
+              });
+
+              const SortTh = ({ col, label }: { col: typeof prSortKey; label: string }) => {
+                const active = prSortKey === col;
+                return (
+                  <th
+                    className="text-center pb-2 px-2 cursor-pointer select-none hover:text-white transition"
+                    onClick={() => { if (active) setPrSortAsc(v => !v); else { setPrSortKey(col); setPrSortAsc(false); } }}
+                  >
+                    {label}{active ? (prSortAsc ? " ↑" : " ↓") : ""}
+                  </th>
+                );
+              };
+
+              const RankPill = ({ r, rosterId, col }: { r: number; rosterId: number; col: "dyn"|"red"|"QB"|"RB"|"WR"|"TE" }) => (
+                <button
+                  onClick={() => setPrPopup({ rosterId, col })}
+                  className={`inline-block text-[11px] font-bold px-2 py-0.5 rounded-full border transition hover:opacity-80 cursor-pointer ${pillColor(r)}`}
+                >
+                  {ordinal(r)}
+                </button>
+              );
+
+              // Popup content
+              let popupContent: React.ReactNode = null;
+              if (prPopup) {
+                const popRow = prRows.find(r => r.roster_id === prPopup.rosterId);
+                if (popRow) {
+                  const col = prPopup.col;
+                  let popPlayers: any[] = [];
+                  if (col === "dyn" || col === "red") {
+                    popPlayers = [...popRow.playerList].sort((a, b) =>
+                      col === "dyn" ? b.dynVal - a.dynVal : b.redVal - a.redVal
+                    );
+                  } else {
+                    popPlayers = popRow.playerList.filter((p: any) => p.position === col)
+                      .sort((a: any, b: any) => b.dynVal - a.dynVal);
+                  }
+                  const colLabel = col === "dyn" ? "Dynasty" : col === "red" ? "Redraft" : col;
+                  popupContent = (
+                    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={() => setPrPopup(null)}>
+                      <div className="bg-gray-900 border border-gray-700 rounded-2xl p-5 w-80 max-h-[80vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-between mb-3">
+                          <div>
+                            <p className="text-xs text-gray-500 uppercase tracking-wider">{colLabel} Roster</p>
+                            <p className="text-sm font-semibold text-white">{popRow.ownerName}</p>
+                          </div>
+                          <button onClick={() => setPrPopup(null)} className="text-gray-500 hover:text-white text-lg leading-none">✕</button>
+                        </div>
+                        <div className="space-y-1">
+                          {popPlayers.map((p: any) => (
+                            <div key={p.player_id} className="flex items-center justify-between bg-gray-800 rounded-lg px-2 py-1.5">
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <span className="text-xs text-white truncate">{p.full_name}</span>
+                                <span className="text-[10px] text-gray-500 shrink-0">{p.position}</span>
+                              </div>
+                              <span className="text-xs text-gray-400 font-mono shrink-0 ml-2">
+                                {col === "red" ? (p.redVal || 0).toLocaleString() : (p.dynVal || 0).toLocaleString()}
+                              </span>
+                            </div>
+                          ))}
+                          {(col === "dyn") && (allPicks as any[]).filter((p: any) => p.owner_id === prPopup.rosterId).length > 0 && (
+                            <>
+                              <p className="text-[10px] text-gray-600 uppercase tracking-wider pt-1 pb-0.5 pl-1">Picks</p>
+                              {(allPicks as any[]).filter((p: any) => p.owner_id === prPopup.rosterId).map((p: any, i: number) => {
+                                const via = p.roster_id !== p.owner_id ? ` (via Team ${p.roster_id})` : "";
+                                const label = p.slot && String(p.slot).includes(".") ? `${p.season} ${p.slot}` : `${p.season} Rd ${p.round}`;
+                                const val = getStoredPickValue(pickFcValues, p);
+                                return (
+                                  <div key={i} className="flex items-center justify-between bg-gray-800 rounded-lg px-2 py-1.5">
+                                    <span className="text-xs text-white truncate">{label}{via}</span>
+                                    <span className="text-xs text-gray-400 font-mono shrink-0 ml-2">{val.toLocaleString()}</span>
+                                  </div>
+                                );
+                              })}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+              }
+
+              return (
+                <>
+                  {popupContent}
+                  <div className="space-y-3">
+                    <p className="text-xs text-gray-500">Power rankings for <strong className="text-gray-300">{selectedLeague.name}</strong>. Dynasty rank includes picks. Click any pill to see that team's roster. Click column headers to sort.</p>
+                    <div className="overflow-x-auto pb-1">
+                      <table className="min-w-full text-sm border-separate border-spacing-y-1">
+                        <thead>
+                          <tr className="text-[10px] font-bold uppercase tracking-widest text-gray-600">
+                            <th className="text-left pl-3 pb-2 pr-2">Owner</th>
+                            <SortTh col="dynTotal" label="Dynasty" />
+                            <SortTh col="redTotal" label="Redraft" />
+                            <SortTh col="qbTotal" label="QB" />
+                            <SortTh col="rbTotal" label="RB" />
+                            <SortTh col="wrTotal" label="WR" />
+                            <SortTh col="teTotal" label="TE" />
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sortedRows.map((row) => {
+                            const isMe = row.roster_id === myRosterId;
+                            return (
+                              <tr key={row.roster_id} className={`${isMe ? "bg-blue-900/20" : "bg-gray-900"}`}>
+                                <td className={`pl-3 pr-2 py-2.5 rounded-l-xl text-sm font-medium ${isMe ? "text-blue-300" : "text-white"}`}>
+                                  {row.ownerName}{isMe && <span className="ml-1.5 text-[10px] text-blue-500">(you)</span>}
+                                </td>
+                                <td className="text-center px-2 py-2.5"><RankPill r={dynRanks[row.roster_id]} rosterId={row.roster_id} col="dyn" /></td>
+                                <td className="text-center px-2 py-2.5"><RankPill r={redRanks[row.roster_id]} rosterId={row.roster_id} col="red" /></td>
+                                <td className="text-center px-2 py-2.5"><RankPill r={qbRanks[row.roster_id]} rosterId={row.roster_id} col="QB" /></td>
+                                <td className="text-center px-2 py-2.5"><RankPill r={rbRanks[row.roster_id]} rosterId={row.roster_id} col="RB" /></td>
+                                <td className="text-center px-2 py-2.5"><RankPill r={wrRanks[row.roster_id]} rosterId={row.roster_id} col="WR" /></td>
+                                <td className="text-center px-2 py-2.5 rounded-r-xl"><RankPill r={teRanks[row.roster_id]} rosterId={row.roster_id} col="TE" /></td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </>
               );
             })()}
 
