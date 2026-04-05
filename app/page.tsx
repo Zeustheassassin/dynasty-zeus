@@ -33,6 +33,40 @@ const PROJ_SOURCES = [
   { id: 'sleeper'     as const, label: 'RotoWire/Sleeper',   tier: 2, weight: 0.20 },
 ];
 type ProjSourceId = typeof PROJ_SOURCES[number]['id'];
+type LeagueHubTab = "OVERVIEW" | "ROSTERS" | "LEAGUE_MATES" | "OPP_ROSTERS" | "STANDINGS" | "STARTERS" | "NOTES" | "POWER_RANKINGS";
+
+const LEAGUE_HUB_GROUPS: Array<{
+  id: string;
+  label: string;
+  tabs: Array<{ id: LeagueHubTab; label: string }>;
+}> = [
+  {
+    id: "SUMMARY",
+    label: "Summary",
+    tabs: [
+      { id: "OVERVIEW", label: "League Overview" },
+      { id: "LEAGUE_MATES", label: "League Mates" },
+      { id: "POWER_RANKINGS", label: "Power Rankings" },
+      { id: "STANDINGS", label: "Standings" },
+    ],
+  },
+  {
+    id: "ROSTERS",
+    label: "Rosters",
+    tabs: [
+      { id: "ROSTERS", label: "Rosters & Rules" },
+      { id: "OPP_ROSTERS", label: "Opponent Rosters" },
+      { id: "STARTERS", label: "Suggested Starters" },
+    ],
+  },
+  {
+    id: "NOTES",
+    label: "Notes",
+    tabs: [
+      { id: "NOTES", label: "League Notes" },
+    ],
+  },
+];
 
 // Strips punctuation, spaces, and common suffixes so names from different sources
 // collapse to the same key and can be matched against Sleeper player IDs.
@@ -144,6 +178,442 @@ const getLeagueDirectionBucket = (dynRank: number, redRank: number) => {
     return { bucket: "Hopeless", bucketColor: "text-red-300 bg-red-900/40 border-red-600" };
   }
   return { bucket: "Mixed Identity", bucketColor: "text-gray-300 bg-gray-800 border-gray-600" };
+};
+
+const ordinal = (rank: number) => {
+  if (!rank) return "-";
+  if (rank % 100 >= 11 && rank % 100 <= 13) return `${rank}th`;
+  if (rank % 10 === 1) return `${rank}st`;
+  if (rank % 10 === 2) return `${rank}nd`;
+  if (rank % 10 === 3) return `${rank}rd`;
+  return `${rank}th`;
+};
+
+const average = (values: number[]) =>
+  values.length ? Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 10) / 10 : 0;
+
+const rankAgainstLeague = (totals: number[], value: number) => {
+  const sorted = [...totals].sort((a, b) => b - a);
+  let rank = 1;
+  for (const total of sorted) {
+    if (value >= total) break;
+    rank++;
+  }
+  return Math.min(rank, sorted.length || 1);
+};
+
+const getRosterDirectionProfile = ({
+  rosterId,
+  rosters,
+  ownedPicks,
+  players,
+  pickValues,
+  redraftValues,
+  dynastyValueForPlayer,
+}: any) => {
+  if (!rosterId || !rosters?.length) return null;
+
+  const targetRoster = rosters.find((r: any) => Number(r.roster_id) === Number(rosterId));
+  if (!targetRoster) return null;
+
+  const positions = ["QB", "RB", "WR", "TE"];
+  const n = rosters.length;
+  const pickList = (ownedPicks || []).filter((pick: any) => Number(pick.owner_id) === Number(rosterId));
+  const firstRounders = pickList.filter((pick: any) => Number(pick.round) === 1);
+  const currentYearFirsts = firstRounders.filter((pick: any) => String(pick.season) === CURRENT_YEAR);
+  const premiumCurrentFirsts = currentYearFirsts.filter((pick: any) => {
+    const slot = String(pick.slot || "");
+    if (!slot.includes(".")) return false;
+    const [, rawPick] = slot.split(".");
+    return Number(rawPick) > 0 && Number(rawPick) <= 6;
+  });
+  const futureFirsts = firstRounders.filter((pick: any) => String(pick.season) !== CURRENT_YEAR);
+  const pickTotal = pickList.reduce((sum: number, pick: any) => sum + getStoredPickValue(pickValues, pick), 0);
+
+  const rosterPlayers = (targetRoster.players || [])
+    .map((id: string) => {
+      const player = players?.[id];
+      return player
+        ? {
+            ...player,
+            dynValue: dynastyValueForPlayer(id),
+            redValue: redraftValues?.[id] || 0,
+          }
+        : null;
+    })
+    .filter(Boolean);
+
+  const skillPlayers = rosterPlayers.filter((player: any) => positions.includes(player.position));
+  const topDynastyCore = [...skillPlayers]
+    .sort((a: any, b: any) => b.dynValue - a.dynValue)
+    .slice(0, 8);
+
+  const coreAge = average(topDynastyCore.map((player: any) => Number(player.age)).filter(Boolean));
+  const oldCoreCount = topDynastyCore.filter((player: any) => {
+    if (!player.age) return false;
+    if (player.position === "QB") return player.age >= 30;
+    if (player.position === "RB") return player.age >= 26;
+    return player.age >= 29;
+  }).length;
+  const youngCoreCount = topDynastyCore.filter((player: any) => Number(player.age) > 0 && Number(player.age) <= 24).length;
+
+  const rosterDynVal = rosters
+    .map((roster: any) => ({
+      roster_id: roster.roster_id,
+      val:
+        (roster.players || []).reduce((sum: number, id: string) => sum + dynastyValueForPlayer(id), 0) +
+        (ownedPicks || [])
+          .filter((pick: any) => Number(pick.owner_id) === Number(roster.roster_id))
+          .reduce((sum: number, pick: any) => sum + getStoredPickValue(pickValues, pick), 0),
+    }))
+    .sort((a: any, b: any) => b.val - a.val);
+
+  const rosterRedVal = rosters
+    .map((roster: any) => ({
+      roster_id: roster.roster_id,
+      val: (roster.players || []).reduce((sum: number, id: string) => sum + (redraftValues?.[id] || 0), 0),
+    }))
+    .sort((a: any, b: any) => b.val - a.val);
+
+  const standingsSorted = [...rosters].sort((a: any, b: any) => {
+    const aw = a.settings?.wins || 0;
+    const bw = b.settings?.wins || 0;
+    return bw !== aw ? bw - aw : (b.settings?.fpts || 0) - (a.settings?.fpts || 0);
+  });
+  const maxPfSorted = [...rosters].sort((a: any, b: any) => (b.settings?.fpts_max || 0) - (a.settings?.fpts_max || 0));
+
+  const dynRank = rosterDynVal.findIndex((row: any) => Number(row.roster_id) === Number(rosterId)) + 1;
+  const redRank = rosterRedVal.findIndex((row: any) => Number(row.roster_id) === Number(rosterId)) + 1;
+  const standRank = standingsSorted.findIndex((row: any) => Number(row.roster_id) === Number(rosterId)) + 1;
+  const maxPfRank = maxPfSorted.findIndex((row: any) => Number(row.roster_id) === Number(rosterId)) + 1;
+  const { bucket, bucketColor } = getLeagueDirectionBucket(dynRank, redRank);
+
+  const positionTotals = positions.reduce((acc: Record<string, number>, pos) => {
+    acc[pos] = skillPlayers
+      .filter((player: any) => player.position === pos)
+      .reduce((sum: number, player: any) => sum + player.dynValue, 0);
+    return acc;
+  }, {});
+
+  const positionRanks = positions.map((pos) => {
+    const leagueTotals = rosters.map((roster: any) =>
+      (roster.players || []).reduce((sum: number, id: string) => {
+        const player = players?.[id];
+        if (!player || player.position !== pos) return sum;
+        return sum + dynastyValueForPlayer(id);
+      }, 0)
+    );
+    return {
+      pos,
+      total: positionTotals[pos],
+      rank: rankAgainstLeague(leagueTotals, positionTotals[pos]),
+    };
+  });
+
+  const strongThreshold = Math.max(2, Math.ceil(n / 3));
+  const weakThreshold = Math.max(strongThreshold + 1, n - 2);
+  const strengths = positionRanks
+    .filter((entry) => entry.rank <= strongThreshold)
+    .sort((a, b) => a.rank - b.rank)
+    .map((entry) => `${entry.pos} strength (${ordinal(entry.rank)} of ${n})`);
+  const concerns = positionRanks
+    .filter((entry) => entry.rank >= weakThreshold)
+    .sort((a, b) => b.rank - a.rank)
+    .map((entry) => `${entry.pos} needs help (${ordinal(entry.rank)} of ${n})`);
+
+  if (pickTotal >= 3500 || futureFirsts.length >= 2) {
+    strengths.push(`Strong draft capital (${firstRounders.length} firsts)`);
+  } else if (firstRounders.length <= 1 && pickTotal < 1500) {
+    concerns.push("Thin future draft capital");
+  }
+
+  if (youngCoreCount >= 4) strengths.push(`Young core (avg age ${coreAge || "-"})`);
+  if (oldCoreCount >= 4) concerns.push("Core is aging");
+
+  const weakestPos = [...positionRanks].sort((a, b) => b.rank - a.rank)[0]?.pos || "RB";
+  const strongestPos = [...positionRanks].sort((a, b) => a.rank - b.rank)[0]?.pos || "WR";
+  const agingSellPos = oldCoreCount > 0
+    ? (
+        ["RB", "WR", "TE", "QB"].find((pos) =>
+          topDynastyCore.some((player: any) => player.position === pos && (
+            (pos === "RB" && Number(player.age) >= 26) ||
+            (pos === "QB" && Number(player.age) >= 30) ||
+            ((pos === "WR" || pos === "TE") && Number(player.age) >= 29)
+          ))
+        ) || strongestPos
+      )
+    : strongestPos;
+
+  let summary = "";
+  let actions: string[] = [];
+
+  switch (bucket) {
+    case "Elite":
+      summary = "You have both insulation and points. This roster should be hunting difference-makers, not depth.";
+      actions = [
+        `Package picks for an impact ${weakestPos}`,
+        "Consolidate 2-for-1 without touching core pieces",
+        "Protect playoff depth instead of adding more bench value",
+      ];
+      break;
+    case "True Contender":
+      summary = "Your build is ready to compete now. Lean into weekly points while keeping your best long-term assets.";
+      actions = [
+        `Buy points at ${weakestPos}`,
+        "Turn spare picks into startable production",
+        "Prefer consolidation trades over future-only bets",
+      ];
+      break;
+    case "Almost There":
+      summary = "You are close enough to buy help, but not close enough to burn the whole future without discipline.";
+      actions = [
+        `Add one reliable ${weakestPos}`,
+        "Keep at least one future first on the roster",
+        "Target stable veterans instead of volatile splash bets",
+      ];
+      break;
+    case "Rebuilder":
+      summary = "The dynasty value is here, but the weekly points are not. Stay patient and only push if the price is right.";
+      actions = [
+        "Hold cornerstone youth unless you get a clear overpay",
+        `Shop aging ${agingSellPos} pieces for picks or young starters`,
+        "Look for undervalued producers once your weekly floor improves",
+      ];
+      break;
+    case "Fading Contender":
+      summary = "You can still compete, but the long-term insulation is slipping. Avoid doubling down on short-window assets.";
+      actions = [
+        `Sell one aging ${agingSellPos} before the cliff hits`,
+        `Patch ${weakestPos} only with short-term discounts`,
+        "Take value insulation over thin all-in moves",
+      ];
+      break;
+    case "Purgatory":
+      summary = "This roster is stuck in the middle. Sideways trades will not fix it, so pick a direction and press it.";
+      actions = [
+        "Decide now between points and picks",
+        `If buying, focus only on ${weakestPos}; if selling, move aging ${agingSellPos}`,
+        "Prioritize 2-for-1 or tier-up deals that change roster shape",
+      ];
+      break;
+    case "Blow Up":
+      summary = "You are better off converting present points into insulation than chasing a low-probability run.";
+      actions = [
+        `Move aging ${agingSellPos} pieces for firsts or young WR/QB value`,
+        "Take multi-asset packages over single declining veterans",
+        "Keep young anchors and widen the value base",
+      ];
+      break;
+    case "Hopeless":
+      summary = "The path here is a true rebuild. Your best move is to maximize insulation and future flexibility.";
+      actions = [
+        "Prioritize first-rounders and young WR/QB assets",
+        `Sell productive ${agingSellPos} pieces before the market cools`,
+        "Avoid buying RB points until the rest of the roster is ready",
+      ];
+      break;
+    default:
+      summary = "The roster has mixed signals. Stay flexible and make moves that raise insulation or weekly certainty.";
+      actions = [
+        `Use strength at ${strongestPos} to address ${weakestPos} if value is there`,
+        "Prefer tier-ups over horizontal swaps",
+        "Do not force an all-in or full rebuild move yet",
+      ];
+      break;
+  }
+
+  return {
+    bucket,
+    bucketColor,
+    dynRank,
+    redRank,
+    standRank,
+    maxPfRank,
+    n,
+    summary,
+    actions,
+    shortAction: actions[0],
+    strengths: strengths.slice(0, 3),
+    concerns: concerns.slice(0, 3),
+    positionRanks,
+    coreAge,
+    pickTotal,
+    firstRounders: firstRounders.length,
+    premiumCurrentFirsts: premiumCurrentFirsts.length,
+    futureFirsts: futureFirsts.length,
+  };
+};
+
+const getProfilePosBuckets = (profile: any) => {
+  const positions = profile?.positionRanks || [];
+  const n = profile?.n || 12;
+  const strongThreshold = Math.max(2, Math.ceil(n / 3));
+  const weakThreshold = Math.max(strongThreshold + 1, n - 2);
+  return {
+    strong: positions.filter((entry: any) => entry.rank <= strongThreshold).map((entry: any) => entry.pos),
+    weak: positions.filter((entry: any) => entry.rank >= weakThreshold).map((entry: any) => entry.pos),
+  };
+};
+
+const getLeagueMateMotivation = (profile: any, tradeCount30d: number) => {
+  if (!profile) return "No clear read yet.";
+  const activeTrader = tradeCount30d >= 2 ? " Active trader lately." : "";
+  switch (profile.bucket) {
+    case "Elite":
+    case "True Contender":
+      return `Likely buying weekly points and lineup upgrades.${activeTrader}`;
+    case "Almost There":
+      return `Probably open to a focused win-now patch without burning the whole future.${activeTrader}`;
+    case "Rebuilder":
+    case "Blow Up":
+    case "Hopeless":
+      return `Most likely to listen on aging producers for picks or younger insulation.${activeTrader}`;
+    case "Fading Contender":
+      return `Could go either way, but should be receptive to rebalancing aging production into flexibility.${activeTrader}`;
+    case "Purgatory":
+      return `Needs a direction-changing deal more than a small lateral swap.${activeTrader}`;
+    default:
+      return `Mixed signals. Best offers should clearly solve a roster problem.${activeTrader}`;
+  }
+};
+
+const getTradePartnerFitLabel = (fitScore: number) => {
+  if (fitScore >= 34) return "Best Trade Partner";
+  if (fitScore >= 24) return "Strong Fit";
+  if (fitScore >= 14) return "Solid Fit";
+  if (fitScore < 4) return "Tough Fit";
+  return "Neutral Fit";
+};
+
+const getTradePartnerFit = ({ myProfile, oppProfile, tradeCount30d }: any) => {
+  if (!myProfile || !oppProfile) {
+    return { fitScore: 0, fitLabel: "Neutral Fit", fitReasons: [] as string[] };
+  }
+
+  const myBuckets = getProfilePosBuckets(myProfile);
+  const oppBuckets = getProfilePosBuckets(oppProfile);
+  const overlapToBuy = myBuckets.weak.filter((pos: string) => oppBuckets.strong.includes(pos));
+  const overlapToSell = myBuckets.strong.filter((pos: string) => oppBuckets.weak.includes(pos));
+  const sharedWeakness = myBuckets.weak.filter((pos: string) => oppBuckets.weak.includes(pos));
+  const fitReasons: string[] = [];
+  let fitScore = 0;
+
+  if (overlapToBuy.length > 0) {
+    fitScore += overlapToBuy.length * 12;
+    fitReasons.push(`They are strong where you need help: ${overlapToBuy.join("/")}`);
+  }
+  if (overlapToSell.length > 0) {
+    fitScore += overlapToSell.length * 10;
+    fitReasons.push(`You can pressure their weak spots at ${overlapToSell.join("/")}`);
+  }
+  if (sharedWeakness.length > 0) {
+    fitScore -= sharedWeakness.length * 6;
+  }
+
+  const myBucket = myProfile.bucket;
+  const oppBucket = oppProfile.bucket;
+  const iAmBuying = ["Elite", "True Contender", "Almost There"].includes(myBucket);
+  const iAmSelling = ["Rebuilder", "Blow Up", "Hopeless"].includes(myBucket);
+  const oppBuying = ["Elite", "True Contender", "Almost There"].includes(oppBucket);
+  const oppSelling = ["Rebuilder", "Blow Up", "Hopeless"].includes(oppBucket);
+
+  if (iAmBuying && oppSelling) {
+    fitScore += 14;
+    fitReasons.push("Your timelines line up: buyer vs seller");
+  } else if (iAmSelling && oppBuying) {
+    fitScore += 14;
+    fitReasons.push("Your timelines line up: seller vs buyer");
+  } else if ((iAmBuying && oppBuying) || (iAmSelling && oppSelling)) {
+    fitScore -= 5;
+  }
+
+  if ((oppProfile?.futureFirsts || 0) >= 2 || (oppProfile?.pickTotal || 0) >= 3200) {
+    fitScore += 5;
+    fitReasons.push("They have enough draft insulation to deal");
+  }
+
+  fitScore += Math.min(tradeCount30d || 0, 3) * 3;
+  if ((tradeCount30d || 0) >= 2) {
+    fitReasons.push("They have been active in the market recently");
+  }
+
+  return {
+    fitScore,
+    fitLabel: getTradePartnerFitLabel(fitScore),
+    fitReasons: fitReasons.slice(0, 3),
+  };
+};
+
+const getCrossLeaguePreferenceFit = ({ myProfile, crossLeagueIntel }: any) => {
+  if (!myProfile || !crossLeagueIntel || (crossLeagueIntel.totalDynastyLeagues || 0) < 2) {
+    return { fitScore: 0, fitReasons: [] as string[] };
+  }
+
+  const myBuckets = getProfilePosBuckets(myProfile);
+  const preferredPositions = crossLeagueIntel.preferredPositions || [];
+  const overlappingStrengths = myBuckets.strong.filter((pos: string) => preferredPositions.includes(pos));
+  const fitReasons: string[] = [];
+  let fitScore = 0;
+
+  if (overlappingStrengths.length > 0) {
+    fitScore += overlappingStrengths.length * 7;
+    fitReasons.push(`Across leagues they keep collecting ${overlappingStrengths.join("/")} assets`);
+  }
+
+  if ((crossLeagueIntel.youngQbWrRate || 0) >= 0.22 && myBuckets.strong.some((pos: string) => ["QB", "WR"].includes(pos))) {
+    fitScore += 5;
+    fitReasons.push("They show a clear bias toward young QB/WR insulation");
+  }
+
+  if ((crossLeagueIntel.veteranRbRate || 0) >= 0.12 && myBuckets.strong.includes("RB")) {
+    fitScore += 4;
+    fitReasons.push("They repeatedly roster veteran RB production");
+  }
+
+  if ((crossLeagueIntel.totalDynastyLeagues || 0) >= 6) {
+    fitScore += 2;
+  }
+
+  return {
+    fitScore,
+    fitReasons: fitReasons.slice(0, 2),
+  };
+};
+
+const getCrossLeagueTradeBehaviorFit = ({ myProfile, crossLeagueIntel }: any) => {
+  if (!myProfile || !crossLeagueIntel || (crossLeagueIntel.crossLeagueTradeCount30d || 0) <= 0) {
+    return { fitScore: 0, fitReasons: [] as string[] };
+  }
+
+  const myBuckets = getProfilePosBuckets(myProfile);
+  const tradePreferredPositions = crossLeagueIntel.tradePreferredPositions || [];
+  const fitReasons: string[] = [];
+  let fitScore = 0;
+
+  const overlappingStrengths = myBuckets.strong.filter((pos: string) => tradePreferredPositions.includes(pos));
+  if (overlappingStrengths.length > 0) {
+    fitScore += overlappingStrengths.length * 8;
+    fitReasons.push(`They actively trade for ${overlappingStrengths.join("/")} across leagues`);
+  }
+
+  if ((crossLeagueIntel.youngQbWrBuyRate || 0) >= 0.2 && myBuckets.strong.some((pos: string) => ["QB", "WR"].includes(pos))) {
+    fitScore += 5;
+    fitReasons.push("Their recent deals skew toward young QB/WR insulation");
+  }
+
+  if ((crossLeagueIntel.veteranRbBuyRate || 0) >= 0.15 && myBuckets.strong.includes("RB")) {
+    fitScore += 4;
+    fitReasons.push("They have been paying for veteran RB production");
+  }
+
+  if ((crossLeagueIntel.crossLeagueTradeCount30d || 0) >= 4) {
+    fitScore += 3;
+  }
+
+  return {
+    fitScore,
+    fitReasons: fitReasons.slice(0, 2),
+  };
 };
 
 const fetchFantasyCalcValues = async (): Promise<{ playerValues: Record<string, number>; pickValues: Record<string, number> }> => {
@@ -275,10 +745,15 @@ const [loadingTradeHub, setLoadingTradeHub] = useState(false);
 const [tradeHubSection, setTradeHubSection] = useState<"CALCULATOR" | "FINDER">("CALCULATOR");
 const [finderSeed, setFinderSeed] = useState(() => Math.random());
 const [finderDraftCapitalMode, setFinderDraftCapitalMode] = useState(false);
-const [leagueHubTab, setLeagueHubTab] = useState<"OVERVIEW" | "ROSTERS" | "OPP_ROSTERS" | "STANDINGS" | "STARTERS" | "NOTES" | "POWER_RANKINGS">("OVERVIEW");
+const [leagueHubTab, setLeagueHubTab] = useState<LeagueHubTab>("OVERVIEW");
 const [leagueOverviewData, setLeagueOverviewData] = useState<Record<string, any>>({});
 const [loadingLeagueOverview, setLoadingLeagueOverview] = useState(false);
 const [leagueOverviewLoaded, setLeagueOverviewLoaded] = useState(false);
+const [leagueMateTradeIntel, setLeagueMateTradeIntel] = useState<Record<string, any>>({});
+const [loadingLeagueMateIntel, setLoadingLeagueMateIntel] = useState(false);
+const [crossLeagueMateIntel, setCrossLeagueMateIntel] = useState<Record<string, any>>({});
+const [loadingCrossLeagueMateIntel, setLoadingCrossLeagueMateIntel] = useState(false);
+const [leagueMateProfileCache, setLeagueMateProfileCache] = useState<Record<string, any[]>>({});
 const [leagueNotes, setLeagueNotes] = useState<Record<string, string>>({});
 const [nflState, setNflState] = useState<any>(null);
 const [dataHubTab, setDataHubTab] = useState<"OWNERSHIP" | "DYNASTY" | "REDRAFT" | "PROJECTIONS" | "LEAGUEMATES">("OWNERSHIP");
@@ -304,6 +779,7 @@ const [finderPinnedPlayerId, setFinderPinnedPlayerId] = useState<string | null>(
 const [finderTargetOppRosterId, setFinderTargetOppRosterId] = useState<number | null>(null);
 const [finderTargetPlayerSearch, setFinderTargetPlayerSearch] = useState("");
 const [finderTargetPlayerId, setFinderTargetPlayerId] = useState<string | null>(null);
+
 const [draftHubSection, setDraftHubSection] = useState<"BOARD" | "BIG_BOARD">("BOARD");
 const [prSortKey, setPrSortKey] = useState<"dynTotal"|"redTotal"|"qbTotal"|"rbTotal"|"wrTotal"|"teTotal">("dynTotal");
 const [prSortAsc, setPrSortAsc] = useState(false);
@@ -661,6 +1137,310 @@ useEffect(() => {
     loadRedraftValues();
   }
 }, [mainTab, leagueHubTab, selectedLeague?.league_id]);
+
+useEffect(() => {
+  if (!selectedLeague?.league_id || !rosters.length || !Object.keys(players || {}).length) {
+    setLeagueMateTradeIntel({});
+    return;
+  }
+
+  let cancelled = false;
+
+  const loadLeagueMateIntel = async () => {
+    setLoadingLeagueMateIntel(true);
+    try {
+      const [t1, t2] = await Promise.all([
+        fetch(`https://api.sleeper.app/v1/league/${selectedLeague.league_id}/transactions/1`).then((r) => r.json()).catch(() => []),
+        fetch(`https://api.sleeper.app/v1/league/${selectedLeague.league_id}/transactions/2`).then((r) => r.json()).catch(() => []),
+      ]);
+
+      const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+      const rosterStats: Record<string, any> = {};
+      const ensureRoster = (rosterId: number | string) => {
+        const key = String(rosterId);
+        if (!rosterStats[key]) {
+          rosterStats[key] = {
+            tradeCount30d: 0,
+            bought: { QB: 0, RB: 0, WR: 0, TE: 0 },
+            picksIn: 0,
+            picksOut: 0,
+            lastTradeAt: null,
+          };
+        }
+        return rosterStats[key];
+      };
+
+      [...(Array.isArray(t1) ? t1 : []), ...(Array.isArray(t2) ? t2 : [])]
+        .filter((trade: any) => trade?.type === "trade" && trade?.status === "complete" && Number(trade?.created || 0) >= thirtyDaysAgo)
+        .forEach((trade: any) => {
+          (trade.roster_ids || []).forEach((rosterId: number) => {
+            const entry = ensureRoster(rosterId);
+            entry.tradeCount30d += 1;
+            entry.lastTradeAt = Math.max(entry.lastTradeAt || 0, Number(trade.created || 0));
+          });
+
+          Object.entries(trade.adds || {}).forEach(([playerId, rosterId]: any) => {
+            const pos = (players as any)?.[playerId]?.position;
+            if (!["QB", "RB", "WR", "TE"].includes(pos)) return;
+            const entry = ensureRoster(rosterId);
+            entry.bought[pos] = (entry.bought[pos] || 0) + 1;
+          });
+
+          (trade.draft_picks || []).forEach((pick: any) => {
+            if (pick?.owner_id != null) ensureRoster(pick.owner_id).picksIn += 1;
+            if (pick?.previous_owner_id != null) ensureRoster(pick.previous_owner_id).picksOut += 1;
+          });
+        });
+
+      if (!cancelled) setLeagueMateTradeIntel(rosterStats);
+    } finally {
+      if (!cancelled) setLoadingLeagueMateIntel(false);
+    }
+  };
+
+  loadLeagueMateIntel();
+  return () => { cancelled = true; };
+}, [selectedLeague?.league_id, rosters, players]);
+
+useEffect(() => {
+  if (!supabaseUser || !selectedLeague?.league_id) return;
+  supabase
+    .from("leaguemate_profiles")
+    .select("profiles")
+    .eq("user_id", supabaseUser.id)
+    .eq("league_id", selectedLeague.league_id)
+    .single()
+    .then(({ data, error }) => {
+      if (error || !data?.profiles || !Array.isArray(data.profiles)) return;
+      setLeagueMateProfileCache((prev) => ({
+        ...prev,
+        [selectedLeague.league_id]: data.profiles,
+      }));
+    });
+}, [supabaseUser?.id, selectedLeague?.league_id]);
+
+useEffect(() => {
+  const shouldLoadCrossLeagueIntel =
+    !!selectedLeague?.league_id &&
+    !!rosters.length &&
+    !!user?.user_id &&
+    !!Object.keys(players || {}).length &&
+    (
+      (mainTab === "LEAGUES" && leagueHubTab === "LEAGUE_MATES") ||
+      (mainTab === "TRADE_HUB" && tradeHubSection === "FINDER")
+    );
+
+  if (!shouldLoadCrossLeagueIntel) return;
+
+  const ownerIds = rosters
+    .filter((r: any) => r.owner_id && r.owner_id !== user?.user_id)
+    .map((r: any) => String(r.owner_id));
+  const missingOwnerIds = ownerIds.filter((ownerId) => !crossLeagueMateIntel[ownerId]);
+  if (missingOwnerIds.length === 0) return;
+
+  let cancelled = false;
+
+  const loadCrossLeagueMateIntel = async () => {
+    setLoadingCrossLeagueMateIntel(true);
+    try {
+      const entries = await Promise.all(
+        missingOwnerIds.map(async (ownerId) => {
+          const ownerLeagues = await fetch(`https://api.sleeper.app/v1/user/${ownerId}/leagues/nfl/${CURRENT_YEAR}`)
+            .then((r) => r.json())
+            .then((data) => Array.isArray(data) ? data : [])
+            .catch(() => []);
+
+          const dynastyLeagues = ownerLeagues.filter((league: any) =>
+            ((league.settings?.taxi_slots ?? 0) > 0 || (league.roster_positions?.length ?? 0) > 20) &&
+            (league.settings?.best_ball ?? 0) === 0
+          );
+
+          const rosterResults = await Promise.all(
+            dynastyLeagues.map(async (league: any) => {
+              const leagueRosters = await fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`)
+                .then((r) => r.json())
+                .catch(() => []);
+              return (Array.isArray(leagueRosters) ? leagueRosters : []).find((roster: any) => String(roster.owner_id) === ownerId) || null;
+            })
+          );
+
+          const tradeLeagueResults = await Promise.all(
+            dynastyLeagues.map(async (league: any) => {
+              const [leagueRosters, t1, t2, draftsData] = await Promise.all([
+                fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`).then((r) => r.json()).catch(() => []),
+                fetch(`https://api.sleeper.app/v1/league/${league.league_id}/transactions/1`).then((r) => r.json()).catch(() => []),
+                fetch(`https://api.sleeper.app/v1/league/${league.league_id}/transactions/2`).then((r) => r.json()).catch(() => []),
+                fetch(`https://api.sleeper.app/v1/league/${league.league_id}/drafts`).then((r) => r.json()).catch(() => []),
+              ]);
+              const ownerRoster = (Array.isArray(leagueRosters) ? leagueRosters : []).find((roster: any) => String(roster.owner_id) === ownerId) || null;
+              return {
+                ownerRoster,
+                trades: [...(Array.isArray(t1) ? t1 : []), ...(Array.isArray(t2) ? t2 : [])],
+                draftsData: Array.isArray(draftsData) ? draftsData : [],
+              };
+            })
+          );
+
+          const ownedPlayerCounts: Record<string, number> = {};
+          const ownedPositionCounts: Record<string, number> = { QB: 0, RB: 0, WR: 0, TE: 0 };
+          const allSkillPlayers: any[] = [];
+          const acquiredPositionCounts: Record<string, number> = { QB: 0, RB: 0, WR: 0, TE: 0 };
+          const acquiredPlayerCounts: Record<string, number> = {};
+          let crossLeagueTradeCount30d = 0;
+          let crossLeaguePickBuys30d = 0;
+          let crossLeaguePickSells30d = 0;
+          let youngQbWrBuys = 0;
+          let veteranRbBuys = 0;
+          let totalSkillBuys = 0;
+
+          rosterResults.filter(Boolean).forEach((ownerRoster: any) => {
+            (ownerRoster.players || []).forEach((playerId: string) => {
+              const player = (players as any)?.[playerId];
+              if (!player || !["QB", "RB", "WR", "TE"].includes(player.position)) return;
+              ownedPlayerCounts[playerId] = (ownedPlayerCounts[playerId] || 0) + 1;
+              ownedPositionCounts[player.position] = (ownedPositionCounts[player.position] || 0) + 1;
+              allSkillPlayers.push(player);
+            });
+          });
+
+          const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+          tradeLeagueResults.forEach(({ ownerRoster, trades, draftsData }: any) => {
+            if (!ownerRoster) return;
+            const startupDraft = draftsData
+              .filter((d: any) => (d.settings?.rounds ?? 0) > 6)
+              .sort((a: any, b: any) => (b.settings?.rounds ?? 0) - (a.settings?.rounds ?? 0))[0];
+            const startupStart = startupDraft?.start_time ?? 0;
+            const startupEnd = startupDraft?.last_picked
+              ?? (startupStart ? startupStart + 60 * 24 * 60 * 60 * 1000 : 0);
+
+            trades
+              .filter((trade: any) =>
+                trade?.type === "trade" &&
+                trade?.status === "complete" &&
+                Number(trade?.created || 0) >= thirtyDaysAgo &&
+                (trade.roster_ids || []).includes(ownerRoster.roster_id) &&
+                !(startupStart > 0 && trade.created >= startupStart && trade.created <= startupEnd)
+              )
+              .forEach((trade: any) => {
+                crossLeagueTradeCount30d += 1;
+
+                Object.entries(trade.adds || {}).forEach(([playerId, rosterId]: any) => {
+                  if (Number(rosterId) !== Number(ownerRoster.roster_id)) return;
+                  const player = (players as any)?.[playerId];
+                  if (!player || !["QB", "RB", "WR", "TE"].includes(player.position)) return;
+                  acquiredPositionCounts[player.position] = (acquiredPositionCounts[player.position] || 0) + 1;
+                  acquiredPlayerCounts[String(playerId)] = (acquiredPlayerCounts[String(playerId)] || 0) + 1;
+                  totalSkillBuys += 1;
+                  if (["QB", "WR"].includes(player.position) && Number(player.age || 99) <= 24) youngQbWrBuys += 1;
+                  if (player.position === "RB" && Number(player.age || 0) >= 26) veteranRbBuys += 1;
+                });
+
+                (trade.draft_picks || []).forEach((pick: any) => {
+                  if (Number(pick?.owner_id) === Number(ownerRoster.roster_id)) crossLeaguePickBuys30d += 1;
+                  if (Number(pick?.previous_owner_id) === Number(ownerRoster.roster_id)) crossLeaguePickSells30d += 1;
+                });
+              });
+          });
+
+          const totalSkillPlayers = allSkillPlayers.length || 1;
+          const sortedPositions = Object.entries(ownedPositionCounts)
+            .sort((a: any, b: any) => b[1] - a[1])
+            .map(([pos]) => pos);
+          const tradePreferredPositions = Object.entries(acquiredPositionCounts)
+            .filter(([, count]: any) => count > 0)
+            .sort((a: any, b: any) => b[1] - a[1])
+            .map(([pos]) => pos);
+          const repeatedPlayers = Object.entries(ownedPlayerCounts)
+            .map(([playerId, count]) => {
+              const player = (players as any)?.[playerId];
+              return player ? { playerId, count, name: player.full_name, position: player.position } : null;
+            })
+            .filter(Boolean)
+            .sort((a: any, b: any) => b.count - a.count || a.name.localeCompare(b.name))
+            .slice(0, 3);
+          const acquiredPlayers = Object.entries(acquiredPlayerCounts)
+            .map(([playerId, count]) => {
+              const player = (players as any)?.[playerId];
+              return player ? { playerId, count, name: player.full_name, position: player.position } : null;
+            })
+            .filter(Boolean)
+            .sort((a: any, b: any) => b.count - a.count || a.name.localeCompare(b.name))
+            .slice(0, 3);
+          const averageAgeAllLeagues = average(
+            allSkillPlayers.map((player: any) => Number(player.age)).filter(Boolean)
+          );
+          const youngQbWrRate = allSkillPlayers.filter((player: any) =>
+            ["QB", "WR"].includes(player.position) && Number(player.age || 99) <= 24
+          ).length / totalSkillPlayers;
+          const veteranRbRate = allSkillPlayers.filter((player: any) =>
+            player.position === "RB" && Number(player.age || 0) >= 26
+          ).length / totalSkillPlayers;
+          const youngQbWrBuyRate = totalSkillBuys > 0 ? youngQbWrBuys / totalSkillBuys : 0;
+          const veteranRbBuyRate = totalSkillBuys > 0 ? veteranRbBuys / totalSkillBuys : 0;
+          const topPos = sortedPositions[0] || "WR";
+          const secondPos = sortedPositions[1] || "QB";
+          const preferenceLabel =
+            youngQbWrRate >= 0.22 ? "Youth-skewed investor" :
+            veteranRbRate >= 0.12 ? "Veteran production buyer" :
+            `${topPos}-leaning portfolio`;
+          const tradePreferenceLabel =
+            crossLeagueTradeCount30d === 0 ? "No meaningful 30d trade history" :
+            youngQbWrBuyRate >= 0.2 ? "Actively buying young QB/WR insulation" :
+            veteranRbBuyRate >= 0.15 ? "Actively buying veteran RB points" :
+            tradePreferredPositions[0] ? `Recent ${tradePreferredPositions[0]} buyer` :
+            "Recent cross-league trade activity";
+          const repeatedNames = repeatedPlayers.filter((player: any) => player.count >= 2).map((player: any) => player.name);
+          const crossLeagueSummary = repeatedNames.length > 0
+            ? `Across ${dynastyLeagues.length} dynasty leagues, leans ${topPos}/${secondPos} and repeatedly holds ${repeatedNames.join(", ")}.`
+            : `Across ${dynastyLeagues.length} dynasty leagues, leans ${topPos}/${secondPos} with an average skill-player age of ${averageAgeAllLeagues || "-"}.`;
+          const acquiredNames = acquiredPlayers.filter((player: any) => player.count >= 2).map((player: any) => player.name);
+          const crossLeagueTradeSummary =
+            crossLeagueTradeCount30d === 0
+              ? "No strong cross-league trade tendency in the last 30 days."
+              : acquiredNames.length > 0
+              ? `Over the last 30 days, they made ${crossLeagueTradeCount30d} cross-league trades and kept buying ${acquiredNames.join(", ")}.`
+              : `Over the last 30 days, they made ${crossLeagueTradeCount30d} cross-league trades, leaning ${tradePreferredPositions.slice(0, 2).join("/") || "best-player"} while moving picks ${crossLeaguePickBuys30d}-${crossLeaguePickSells30d}.`;
+
+          return [
+            ownerId,
+            {
+              totalDynastyLeagues: dynastyLeagues.length,
+              ownedPositionCounts,
+              preferredPositions: sortedPositions.slice(0, 2),
+              repeatedPlayers,
+              averageAgeAllLeagues,
+              youngQbWrRate,
+              veteranRbRate,
+              tradePreferredPositions: tradePreferredPositions.slice(0, 2),
+              acquiredPlayers,
+              crossLeagueTradeCount30d,
+              crossLeaguePickBuys30d,
+              crossLeaguePickSells30d,
+              youngQbWrBuyRate,
+              veteranRbBuyRate,
+              preferenceLabel,
+              tradePreferenceLabel,
+              crossLeagueSummary,
+              crossLeagueTradeSummary,
+            },
+          ] as const;
+        })
+      );
+
+      if (!cancelled) {
+        setCrossLeagueMateIntel((prev) => ({
+          ...prev,
+          ...Object.fromEntries(entries),
+        }));
+      }
+    } finally {
+      if (!cancelled) setLoadingCrossLeagueMateIntel(false);
+    }
+  };
+
+  loadCrossLeagueMateIntel();
+  return () => { cancelled = true; };
+}, [selectedLeague?.league_id, rosters, user?.user_id, players, mainTab, leagueHubTab, tradeHubSection, crossLeagueMateIntel]);
 
 // League notes — load from localStorage on mount (fast), then override with Supabase on login
 useEffect(() => {
@@ -1706,6 +2486,165 @@ const getTeamSummary = () => {
 };
 
   const teamSummary = useMemo(() => getTeamSummary(), [roster, players, picks]);
+  const selectedLeagueDirection = useMemo(() => {
+    if (!selectedLeague || !rosters.length || !user?.user_id) return null;
+    const myRosterId = rosters.find((r: any) => r.owner_id === user.user_id)?.roster_id;
+    if (!myRosterId) return null;
+    return getRosterDirectionProfile({
+      rosterId: myRosterId,
+      rosters,
+      ownedPicks: allPicks,
+      players,
+      pickValues: pickFcValues,
+      redraftValues,
+      dynastyValueForPlayer: (id: string) => calcFcValues[id] ?? (players as any)?.[id]?.value ?? 0,
+    });
+  }, [selectedLeague?.league_id, rosters, allPicks, players, pickFcValues, redraftValues, calcFcValues, user?.user_id]);
+  const selectedLeagueMateProfiles = useMemo(() => {
+    if (!selectedLeague || !rosters.length || !user?.user_id) return [];
+
+    const dynastyValueForPlayer = (id: string) => calcFcValues[id] ?? (players as any)?.[id]?.value ?? 0;
+    const myRoster = rosters.find((r: any) => r.owner_id === user.user_id);
+    if (!myRoster) return [];
+
+    const myProfile = getRosterDirectionProfile({
+      rosterId: myRoster.roster_id,
+      rosters,
+      ownedPicks: allPicks,
+      players,
+      pickValues: pickFcValues,
+      redraftValues,
+      dynastyValueForPlayer,
+    });
+
+    return rosters
+      .filter((r: any) => r.owner_id && r.owner_id !== user.user_id)
+      .map((r: any) => {
+        const directionProfile = getRosterDirectionProfile({
+          rosterId: r.roster_id,
+          rosters,
+          ownedPicks: allPicks,
+          players,
+          pickValues: pickFcValues,
+          redraftValues,
+          dynastyValueForPlayer,
+        });
+        if (!directionProfile) return null;
+
+        const rosterPlayers = (r.players || [])
+          .map((id: string) => {
+            const player = (players as any)?.[id];
+            return player
+              ? {
+                  ...player,
+                  dynValue: dynastyValueForPlayer(id),
+                }
+              : null;
+          })
+          .filter(Boolean)
+          .filter((player: any) => ["QB", "RB", "WR", "TE"].includes(player.position));
+
+        const posValueTotals = ["QB", "RB", "WR", "TE"].map((pos) => ({
+          pos,
+          total: rosterPlayers
+            .filter((player: any) => player.position === pos)
+            .reduce((sum: number, player: any) => sum + (player.dynValue || 0), 0),
+        })).sort((a, b) => b.total - a.total);
+
+        const tradeIntel = leagueMateTradeIntel[String(r.roster_id)] || {
+          tradeCount30d: 0,
+          bought: { QB: 0, RB: 0, WR: 0, TE: 0 },
+          picksIn: 0,
+          picksOut: 0,
+          lastTradeAt: null,
+        };
+        const recentBuy = Object.entries(tradeIntel.bought || {}) as Array<[string, number]>;
+        const recentBuyTop = [...recentBuy]
+          .sort((a: any, b: any) => b[1] - a[1])[0];
+        const fit = getTradePartnerFit({
+          myProfile,
+          oppProfile: directionProfile,
+          tradeCount30d: tradeIntel.tradeCount30d,
+        });
+        const ownerCrossLeagueIntel = crossLeagueMateIntel[String(r.owner_id)] || null;
+        const crossLeaguePreferenceFit = getCrossLeaguePreferenceFit({
+          myProfile,
+          crossLeagueIntel: ownerCrossLeagueIntel,
+        });
+        const crossLeagueTradeFit = getCrossLeagueTradeBehaviorFit({
+          myProfile,
+          crossLeagueIntel: ownerCrossLeagueIntel,
+        });
+        const totalFitScore = fit.fitScore + crossLeaguePreferenceFit.fitScore + crossLeagueTradeFit.fitScore;
+        const combinedFitReasons = [
+          ...fit.fitReasons,
+          ...crossLeaguePreferenceFit.fitReasons,
+          ...crossLeagueTradeFit.fitReasons,
+        ].slice(0, 4);
+
+        return {
+          rosterId: r.roster_id,
+          ownerId: r.owner_id,
+          ownerName: (users as any)[r.owner_id] || `Team ${r.roster_id}`,
+          directionProfile,
+          tradeCount30d: tradeIntel.tradeCount30d || 0,
+          picksIn30d: tradeIntel.picksIn || 0,
+          picksOut30d: tradeIntel.picksOut || 0,
+          lastTradeAt: tradeIntel.lastTradeAt,
+          recentBuyLabel: recentBuyTop && recentBuyTop[1] > 0 ? `Recently bought ${recentBuyTop[0]}` : "No strong recent buy signal",
+          buildBiasLabel: posValueTotals[0]?.total > 0 ? `${posValueTotals[0].pos}-heavy build` : "Balanced build",
+          strongestPos: posValueTotals[0]?.pos || "-",
+          secondPos: posValueTotals[1]?.pos || "-",
+          motivation: getLeagueMateMotivation(directionProfile, tradeIntel.tradeCount30d || 0),
+          fitScore: totalFitScore,
+          fitLabel: getTradePartnerFitLabel(totalFitScore),
+          fitReasons: combinedFitReasons,
+          baseFitReasons: fit.fitReasons,
+          crossLeagueFitReasons: [...crossLeaguePreferenceFit.fitReasons, ...crossLeagueTradeFit.fitReasons],
+          crossLeagueSummary: ownerCrossLeagueIntel?.crossLeagueSummary || "Cross-league tendencies still loading.",
+          crossLeagueTradeSummary: ownerCrossLeagueIntel?.crossLeagueTradeSummary || "Cross-league trade behavior still loading.",
+          preferenceLabel: ownerCrossLeagueIntel?.preferenceLabel || "League-specific read only",
+          tradePreferenceLabel: ownerCrossLeagueIntel?.tradePreferenceLabel || "Trade behavior still loading",
+          preferredPositions: ownerCrossLeagueIntel?.preferredPositions || [],
+          tradePreferredPositions: ownerCrossLeagueIntel?.tradePreferredPositions || [],
+          repeatedPlayers: ownerCrossLeagueIntel?.repeatedPlayers || [],
+          acquiredPlayers: ownerCrossLeagueIntel?.acquiredPlayers || [],
+          totalDynastyLeagues: ownerCrossLeagueIntel?.totalDynastyLeagues || 0,
+          averageAgeAllLeagues: ownerCrossLeagueIntel?.averageAgeAllLeagues || 0,
+          crossLeagueTradeCount30d: ownerCrossLeagueIntel?.crossLeagueTradeCount30d || 0,
+        };
+      })
+      .filter(Boolean)
+      .sort((a: any, b: any) => {
+        if (b.fitScore !== a.fitScore) return b.fitScore - a.fitScore;
+        if (b.tradeCount30d !== a.tradeCount30d) return b.tradeCount30d - a.tradeCount30d;
+        return a.ownerName.localeCompare(b.ownerName);
+      });
+  }, [selectedLeague?.league_id, rosters, user?.user_id, allPicks, players, pickFcValues, redraftValues, calcFcValues, leagueMateTradeIntel, users, crossLeagueMateIntel]);
+  const selectedLeagueMateProfilesView =
+    selectedLeagueMateProfiles.length > 0
+      ? selectedLeagueMateProfiles
+      : (selectedLeague?.league_id ? leagueMateProfileCache[selectedLeague.league_id] || [] : []);
+  const activeLeagueHubGroup = useMemo(
+    () => LEAGUE_HUB_GROUPS.find((group) => group.tabs.some((tab) => tab.id === leagueHubTab)) || LEAGUE_HUB_GROUPS[0],
+    [leagueHubTab]
+  );
+  const leagueMateProfileByRosterId = useMemo(
+    () => new Map(selectedLeagueMateProfilesView.map((profile: any) => [Number(profile.rosterId), profile])),
+    [selectedLeagueMateProfilesView]
+  );
+  useEffect(() => {
+    if (!supabaseUser || !selectedLeague?.league_id || selectedLeagueMateProfiles.length === 0) return;
+    supabase.from("leaguemate_profiles").upsert(
+      {
+        user_id: supabaseUser.id,
+        league_id: selectedLeague.league_id,
+        profiles: selectedLeagueMateProfiles,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "user_id,league_id" }
+    ).then(() => {});
+  }, [supabaseUser?.id, selectedLeague?.league_id, selectedLeagueMateProfiles]);
   const draftedPlayerIds = useMemo(
     () => new Set(draftPicks.map((pick: any) => String(pick.player_id)).filter(Boolean)),
     [draftPicks]
@@ -1896,14 +2835,43 @@ const myPlayerSet = new Set<string>(roster?.players || []);
           <div className="max-w-5xl mx-auto px-4 py-6">
           <>
             {/* Sub-tab nav */}
-            <div className="flex justify-center border-b border-gray-800 mb-6 overflow-x-auto">
-              <div className="flex justify-center gap-6 text-center">
-              {(["OVERVIEW","ROSTERS","POWER_RANKINGS","OPP_ROSTERS","STANDINGS","STARTERS","NOTES"] as const).map((tab) => (
-                <button key={tab} onClick={() => setLeagueHubTab(tab)}
-                  className={`pb-2 px-1 text-sm font-semibold whitespace-nowrap transition ${leagueHubTab === tab ? "border-b-2 border-blue-400 text-blue-400" : "text-gray-400 hover:text-white"}`}>
-                  {tab === "OVERVIEW" ? "League Overview" : tab === "ROSTERS" ? "Rosters & Rules" : tab === "POWER_RANKINGS" ? "Power Rankings" : tab === "OPP_ROSTERS" ? "Opponent Rosters" : tab === "STANDINGS" ? "Standings" : tab === "STARTERS" ? "Suggested Starters" : "League Notes"}
-                </button>
-              ))}
+            <div className="mb-6 rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
+              <div className="flex flex-wrap justify-center gap-2">
+                {LEAGUE_HUB_GROUPS.map((group) => {
+                  const isActive = activeLeagueHubGroup.id === group.id;
+                  return (
+                    <button
+                      key={group.id}
+                      onClick={() => setLeagueHubTab(group.tabs[0].id)}
+                      className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                        isActive
+                          ? "bg-blue-600 text-white"
+                          : "bg-gray-800 text-gray-400 hover:text-white"
+                      }`}
+                    >
+                      {group.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="mx-auto mt-4 max-w-md">
+                <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                  Current View
+                </label>
+                <select
+                  value={leagueHubTab}
+                  onChange={(e) => setLeagueHubTab(e.target.value as LeagueHubTab)}
+                  className="w-full rounded-xl border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                >
+                  {activeLeagueHubGroup.tabs.map((tab) => (
+                    <option key={tab.id} value={tab.id}>
+                      {tab.label}
+                    </option>
+                  ))}
+                </select>
+                <div className="mt-2 text-center text-[11px] text-gray-500">
+                  {activeLeagueHubGroup.tabs.map((tab) => tab.label).join(" • ")}
+                </div>
               </div>
             </div>
 
@@ -1931,45 +2899,18 @@ const myPlayerSet = new Set<string>(roster?.players || []);
                 const lr: any[] = entry.rosters;
                 const ownedPicks: any[] = entry.picks || [];
                 const myRosterId = lr.find((r: any) => r.owner_id === user?.user_id)?.roster_id;
-
-                // Dynasty value per roster
-                const rosterDynVal = lr.map((r: any) => ({
-                  roster_id: r.roster_id,
-                  val:
-                    (r.players || []).reduce((s: number, id: string) => {
-                      const p = (players as any)[id];
-                      return s + (p?.value || 0);
-                    }, 0) +
-                    ownedPicks
-                      .filter((p: any) => p.owner_id === r.roster_id)
-                      .reduce((s: number, p: any) => s + getStoredPickValue(pickFcValues, p), 0),
-                })).sort((a, b) => b.val - a.val);
-
-                // Redraft value per roster
-                const rosterRedVal = lr.map((r: any) => ({
-                  roster_id: r.roster_id,
-                  val: (r.players || []).reduce((s: number, id: string) => {
-                    return s + (redraftValues[id] || 0);
-                  }, 0),
-                })).sort((a, b) => b.val - a.val);
-
-                // Standings rank from fpts+wins
-                const standingsSorted = [...lr].sort((a, b) => {
-                  const aw = a.settings?.wins || 0, bw = b.settings?.wins || 0;
-                  return bw !== aw ? bw - aw : (b.settings?.fpts || 0) - (a.settings?.fpts || 0);
+                if (!myRosterId) return null;
+                const profile = getRosterDirectionProfile({
+                  rosterId: myRosterId,
+                  rosters: lr,
+                  ownedPicks,
+                  players,
+                  pickValues: pickFcValues,
+                  redraftValues,
+                  dynastyValueForPlayer: (id: string) => (players as any)[id]?.value ?? 0,
                 });
-                const maxPfSorted = [...lr].sort((a, b) => (b.settings?.fpts_max || 0) - (a.settings?.fpts_max || 0));
-
-                const dynRank = rosterDynVal.findIndex(r => r.roster_id === myRosterId) + 1;
-                const redRank = rosterRedVal.findIndex(r => r.roster_id === myRosterId) + 1;
-                const standRank = standingsSorted.findIndex(r => r.roster_id === myRosterId) + 1;
-                const maxPfRank = maxPfSorted.findIndex(r => r.roster_id === myRosterId) + 1;
-                const n = lr.length;
-
-                // Bucket logic (ordered — first match wins)
-                const { bucket, bucketColor } = getLeagueDirectionBucket(dynRank, redRank);
-
-                return { league, dynRank, redRank, standRank, maxPfRank, n, bucket, bucketColor };
+                if (!profile) return null;
+                return { league, ...profile };
               }).filter(Boolean).sort((a: any, b: any) => {
                 const bucketDiff = (bucketOrder[a.bucket] ?? 999) - (bucketOrder[b.bucket] ?? 999);
                 if (bucketDiff !== 0) return bucketDiff;
@@ -1993,11 +2934,14 @@ const myPlayerSet = new Set<string>(roster?.players || []);
                         <span className="text-center">MaxPF</span>
                       </div>
                       {leagueRows.map((row: any) => (
-                        <div key={row.league.league_id} className="grid grid-cols-[minmax(220px,1.4fr)_minmax(150px,1fr)_72px_72px_72px_72px] gap-2 items-center bg-gray-900 border border-gray-800 rounded-xl px-3 py-2.5">
+                        <div key={row.league.league_id} className="grid grid-cols-[minmax(220px,1.4fr)_minmax(190px,1.15fr)_72px_72px_72px_72px] gap-2 items-center bg-gray-900 border border-gray-800 rounded-xl px-3 py-2.5">
                           <button className="min-w-0 text-sm text-white font-medium text-left truncate hover:text-blue-400 transition" onClick={() => { loadRoster(row.league); setLeagueHubTab("ROSTERS"); }}>
                             {row.league.name}
                           </button>
-                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border text-center truncate ${row.bucketColor}`}>{row.bucket}</span>
+                          <div className="min-w-0">
+                            <span className={`inline-flex max-w-full text-[10px] font-semibold px-2 py-0.5 rounded-full border text-center truncate ${row.bucketColor}`}>{row.bucket}</span>
+                            <div className="mt-1 text-[10px] text-gray-500 truncate">{row.shortAction}</div>
+                          </div>
                           <span className="text-xs text-center text-gray-300">{row.dynRank}<span className="text-gray-600">/{row.n}</span></span>
                           <span className="text-xs text-center text-gray-300">{row.redRank}<span className="text-gray-600">/{row.n}</span></span>
                           <span className="text-xs text-center text-gray-300">{row.standRank}<span className="text-gray-600">/{row.n}</span></span>
@@ -2076,6 +3020,77 @@ const myPlayerSet = new Set<string>(roster?.players || []);
                     {getLineupSettings(selectedLeague)}
                   </div>
                 </div>
+                {selectedLeagueDirection && (
+                  <div className="mb-4 bg-gray-900 border border-gray-700 rounded-xl p-4">
+                    <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Roster Direction</div>
+                        <div className="mt-1 text-sm text-gray-200">{selectedLeagueDirection.summary}</div>
+                      </div>
+                      <span className={`inline-flex text-[10px] font-semibold px-2 py-1 rounded-full border self-start ${selectedLeagueDirection.bucketColor}`}>
+                        {selectedLeagueDirection.bucket}
+                      </span>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-6">
+                      <div className="rounded-lg border border-gray-800 bg-gray-950/60 px-3 py-2">
+                        <div className="text-[10px] uppercase tracking-wide text-gray-500">Dynasty</div>
+                        <div className="text-sm font-semibold text-white">{ordinal(selectedLeagueDirection.dynRank)}</div>
+                      </div>
+                      <div className="rounded-lg border border-gray-800 bg-gray-950/60 px-3 py-2">
+                        <div className="text-[10px] uppercase tracking-wide text-gray-500">Redraft</div>
+                        <div className="text-sm font-semibold text-white">{ordinal(selectedLeagueDirection.redRank)}</div>
+                      </div>
+                      <div className="rounded-lg border border-gray-800 bg-gray-950/60 px-3 py-2">
+                        <div className="text-[10px] uppercase tracking-wide text-gray-500">Standings</div>
+                        <div className="text-sm font-semibold text-white">{ordinal(selectedLeagueDirection.standRank)}</div>
+                      </div>
+                      <div className="rounded-lg border border-gray-800 bg-gray-950/60 px-3 py-2">
+                        <div className="text-[10px] uppercase tracking-wide text-gray-500">Max PF</div>
+                        <div className="text-sm font-semibold text-white">{ordinal(selectedLeagueDirection.maxPfRank)}</div>
+                      </div>
+                      <div className="rounded-lg border border-gray-800 bg-gray-950/60 px-3 py-2">
+                        <div className="text-[10px] uppercase tracking-wide text-gray-500">Core Age</div>
+                        <div className="text-sm font-semibold text-white">{selectedLeagueDirection.coreAge || "-"}</div>
+                      </div>
+                      <div className="rounded-lg border border-gray-800 bg-gray-950/60 px-3 py-2">
+                        <div className="text-[10px] uppercase tracking-wide text-gray-500">1sts</div>
+                        <div className="text-sm font-semibold text-white">{selectedLeagueDirection.firstRounders}</div>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {selectedLeagueDirection.actions.map((action: string) => (
+                        <span key={action} className="rounded-full border border-blue-800 bg-blue-950/40 px-3 py-1 text-[11px] text-blue-200">
+                          {action}
+                        </span>
+                      ))}
+                    </div>
+
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      <div>
+                        <div className="text-[10px] uppercase tracking-wide text-green-400">What You Have</div>
+                        <div className="mt-1 space-y-1">
+                          {selectedLeagueDirection.strengths.length > 0 ? selectedLeagueDirection.strengths.map((item: string) => (
+                            <div key={item} className="text-xs text-gray-300">{item}</div>
+                          )) : (
+                            <div className="text-xs text-gray-500">No clear structural advantage yet.</div>
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] uppercase tracking-wide text-orange-400">What To Watch</div>
+                        <div className="mt-1 space-y-1">
+                          {selectedLeagueDirection.concerns.length > 0 ? selectedLeagueDirection.concerns.map((item: string) => (
+                            <div key={item} className="text-xs text-gray-300">{item}</div>
+                          )) : (
+                            <div className="text-xs text-gray-500">No major red flags from the current profile.</div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 {(() => {
   const rules = getNonStandardRules(selectedLeague?.scoring_settings);
   const grouped = groupRules(rules);
@@ -2493,6 +3508,169 @@ const starters = starterSlots
             )}
             </>
             )}
+
+            {/* ── League Mates ── */}
+            {leagueHubTab === "LEAGUE_MATES" && (() => {
+              if (!selectedLeague || !rosters.length) {
+                return <p className="text-sm text-gray-500">Select a league from Rosters &amp; Rules first to view league-mate intelligence.</p>;
+              }
+
+              const bestPartnerRosterId = selectedLeagueMateProfilesView[0]?.rosterId;
+
+              return (
+                <div className="space-y-4">
+                  <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+                    <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">League-Mate Intelligence</div>
+                        <div className="mt-1 text-sm text-gray-200">
+                          Static roster profiles, recent trade behavior, and trade-partner fit for <strong className="text-gray-100">{selectedLeague.name}</strong>.
+                        </div>
+                      </div>
+                      <div className="text-[11px] text-gray-500">
+                        {loadingLeagueMateIntel || loadingCrossLeagueMateIntel ? "Refreshing trade behavior and all-league tendencies..." : supabaseUser ? "Supabase cache enabled" : "Browser-only until you log in"}
+                      </div>
+                    </div>
+                  </div>
+
+                  {selectedLeagueMateProfilesView.length === 0 ? (
+                    <p className="text-sm text-gray-500">No league-mate profiles available yet.</p>
+                  ) : (
+                    selectedLeagueMateProfilesView.map((mate: any) => (
+                      <div key={mate.rosterId} className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+                        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <div className="text-base font-semibold text-white">{mate.ownerName}</div>
+                              {Number(mate.rosterId) === Number(bestPartnerRosterId) && (
+                                <span className="rounded-full border border-green-700 bg-green-950/50 px-2 py-0.5 text-[10px] font-semibold text-green-300">
+                                  Best Trade Partner
+                                </span>
+                              )}
+                              <span className={`inline-flex text-[10px] font-semibold px-2 py-0.5 rounded-full border ${mate.directionProfile.bucketColor}`}>
+                                {mate.directionProfile.bucket}
+                              </span>
+                              <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                                mate.fitScore >= 24 ? "border-blue-700 bg-blue-950/40 text-blue-300" :
+                                mate.fitScore >= 10 ? "border-cyan-700 bg-cyan-950/40 text-cyan-300" :
+                                "border-gray-700 bg-gray-950/60 text-gray-400"
+                              }`}>
+                                {mate.fitLabel}
+                              </span>
+                            </div>
+                            <div className="mt-2 text-sm text-gray-300">{mate.motivation}</div>
+                          </div>
+
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              onClick={() => loadUserExposure(mate.ownerId)}
+                              className="rounded-xl border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white transition hover:border-blue-500"
+                            >
+                              Most Owned Players
+                            </button>
+                            <button
+                              onClick={() => loadUserTrades(mate.ownerId)}
+                              className="rounded-xl border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white transition hover:border-blue-500"
+                            >
+                              Recent Trades
+                            </button>
+                            <button
+                              onClick={() => { setCalcOpponentRosterId(Number(mate.rosterId)); setMainTab("TRADE_HUB"); setTradeHubSection("FINDER"); }}
+                              className="rounded-xl border border-blue-700 bg-blue-950/40 px-3 py-2 text-sm text-blue-200 transition hover:border-blue-500"
+                            >
+                              Open In Trade Finder
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                          <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-3">
+                            <div className="text-[10px] uppercase tracking-wide text-gray-500">Build</div>
+                            <div className="mt-1 text-sm font-semibold text-white">{mate.buildBiasLabel}</div>
+                            <div className="mt-1 text-xs text-gray-500">Top groups: {mate.strongestPos} / {mate.secondPos}</div>
+                          </div>
+                          <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-3">
+                            <div className="text-[10px] uppercase tracking-wide text-gray-500">Draft Capital</div>
+                            <div className="mt-1 text-sm font-semibold text-white">{mate.directionProfile.firstRounders} firsts</div>
+                            <div className="mt-1 text-xs text-gray-500">{mate.directionProfile.futureFirsts} future firsts • {Math.round(mate.directionProfile.pickTotal || 0).toLocaleString()} pick value</div>
+                          </div>
+                          <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-3">
+                            <div className="text-[10px] uppercase tracking-wide text-gray-500">Roster Age</div>
+                            <div className="mt-1 text-sm font-semibold text-white">{mate.directionProfile.coreAge || "-"}</div>
+                            <div className="mt-1 text-xs text-gray-500">{mate.directionProfile.summary}</div>
+                          </div>
+                          <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-3">
+                            <div className="text-[10px] uppercase tracking-wide text-gray-500">Recent Behavior</div>
+                            <div className="mt-1 text-sm font-semibold text-white">{mate.tradeCount30d} trades in 30d</div>
+                            <div className="mt-1 text-xs text-gray-500">{mate.recentBuyLabel} • picks {mate.picksIn30d}-{mate.picksOut30d}</div>
+                          </div>
+                        </div>
+
+                        <div className="mt-4 rounded-xl border border-gray-800 bg-gray-950/60 p-3">
+                          <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+                            <div className="text-[10px] uppercase tracking-wide text-violet-400">Across All Leagues</div>
+                            <div className="text-[11px] text-gray-500">
+                              {mate.totalDynastyLeagues > 0 ? `${mate.totalDynastyLeagues} dynasty leagues tracked` : "Loading broader tendencies"}
+                            </div>
+                          </div>
+                          <div className="mt-2 text-sm text-gray-300">{mate.crossLeagueSummary}</div>
+                          <div className="mt-2 text-sm text-gray-400">{mate.crossLeagueTradeSummary}</div>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            <span className="rounded-full border border-violet-800 bg-violet-950/30 px-3 py-1 text-[11px] text-violet-200">
+                              {mate.preferenceLabel}
+                            </span>
+                            <span className="rounded-full border border-amber-800 bg-amber-950/30 px-3 py-1 text-[11px] text-amber-200">
+                              {mate.tradePreferenceLabel}
+                            </span>
+                            {mate.preferredPositions?.map((pos: string) => (
+                              <span key={pos} className="rounded-full border border-gray-700 bg-gray-900 px-3 py-1 text-[11px] text-gray-300">
+                                Prefers {pos}
+                              </span>
+                            ))}
+                            {mate.tradePreferredPositions?.map((pos: string) => (
+                              <span key={`trade-${pos}`} className="rounded-full border border-amber-800 bg-amber-950/20 px-3 py-1 text-[11px] text-amber-200">
+                                Trades For {pos}
+                              </span>
+                            ))}
+                            {mate.repeatedPlayers?.slice(0, 3).map((player: any) => (
+                              <span key={player.playerId} className="rounded-full border border-cyan-800 bg-cyan-950/30 px-3 py-1 text-[11px] text-cyan-200">
+                                Likes {player.name}
+                              </span>
+                            ))}
+                            {mate.acquiredPlayers?.slice(0, 2).map((player: any) => (
+                              <span key={`acquired-${player.playerId}`} className="rounded-full border border-emerald-800 bg-emerald-950/30 px-3 py-1 text-[11px] text-emerald-200">
+                                Recently Bought {player.name}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                          <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-3">
+                            <div className="text-[10px] uppercase tracking-wide text-green-400">Why They Fit</div>
+                            <div className="mt-2 space-y-1">
+                              {mate.fitReasons?.length > 0 ? mate.fitReasons.map((reason: string) => (
+                                <div key={reason} className="text-xs text-gray-300">{reason}</div>
+                              )) : (
+                                <div className="text-xs text-gray-500">No major structural trade edge right now.</div>
+                              )}
+                            </div>
+                          </div>
+                          <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-3">
+                            <div className="text-[10px] uppercase tracking-wide text-orange-400">Likely Motivations</div>
+                            <div className="mt-2 space-y-1">
+                              {mate.directionProfile.actions?.slice(0, 3).map((action: string) => (
+                                <div key={action} className="text-xs text-gray-300">{action}</div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              );
+            })()}
 
             {/* ── Opponent Rosters ── */}
             {leagueHubTab === "OPP_ROSTERS" && (() => {
@@ -4374,7 +5552,16 @@ const starters = starterSlots
         .sort((a, b) => b.val - a.val);
       const dynRank = myRoster ? rosterDynVal.findIndex((r) => r.roster_id === myRoster.roster_id) + 1 : 0;
       const redRank = myRoster ? rosterRedVal.findIndex((r) => r.roster_id === myRoster.roster_id) + 1 : 0;
-      const finderDirection = getLeagueDirectionBucket(dynRank, redRank).bucket;
+      const finderDirectionProfile = myRoster ? getRosterDirectionProfile({
+        rosterId: myRoster.roster_id,
+        rosters,
+        ownedPicks: allPicks,
+        players,
+        pickValues: pickFcValues,
+        redraftValues,
+        dynastyValueForPlayer: (id: string) => calcVal(id),
+      }) : null;
+      const finderDirection = finderDirectionProfile?.bucket || getLeagueDirectionBucket(dynRank, redRank).bucket;
       const draftCapitalMode = finderDraftCapitalMode;
       const priorityDraftYear = String(
         Number(CURRENT_YEAR) + (selectedLeagueDraftHasOccurred ? 1 : 0)
@@ -4386,6 +5573,106 @@ const starters = starterSlots
       const draftYearPriority = Object.fromEntries(
         orderedDraftYears.map((year, idx) => [year, idx])
       ) as Record<string, number>;
+      const numTeams = rosters.length;
+      const myFinderPicks = (allPicks as any[])
+        .filter((p: any) => p.owner_id === myRoster?.roster_id)
+        .map((p: any) => ({ ...p, value: getStoredPickValue(pickFcValues, p) }))
+        .filter((p: any) => p.value > 0)
+        .sort((a: any, b: any) => {
+          const yearDiff = (draftYearPriority[a.season] ?? 999) - (draftYearPriority[b.season] ?? 999);
+          if (yearDiff !== 0) return yearDiff;
+          if (a.round !== b.round) return a.round - b.round;
+          return b.value - a.value;
+        })
+        .slice(0, 6);
+      const ageCutoffByPos: Record<string, number> = { QB: 30, RB: 26, WR: 29, TE: 29 };
+      const weakPositions = new Set(
+        (finderDirectionProfile?.positionRanks || [])
+          .filter((entry: any) => entry.rank >= Math.max(4, numTeams - 2))
+          .map((entry: any) => entry.pos)
+      );
+      const strongPositions = new Set(
+        (finderDirectionProfile?.positionRanks || [])
+          .filter((entry: any) => entry.rank <= Math.max(2, Math.ceil(numTeams / 3)))
+          .map((entry: any) => entry.pos)
+      );
+      const isAgingAsset = (player: any) =>
+        Number(player?.age || 0) >= (ageCutoffByPos[player?.position] || 29);
+      const isYoungBuildingBlock = (player: any) =>
+        ["QB", "WR"].includes(player?.position) && Number(player?.age || 99) <= 24;
+      const isPremiumCurrentPick = (pick: any) =>
+        String(pick?.season) === CURRENT_YEAR && String(pick?.slot || "").match(/^1\.(0[1-6]|[1-6])$/);
+      const getDirectionTradeScore = (trade: TradeResult) => {
+        const outgoingPlayers = trade.give || [];
+        const incomingPlayers = trade.receive || [];
+        const outgoingPicks = trade.givePicks || [];
+        const incomingPicks = trade.receivePicks || [];
+        const outgoingRedraft = outgoingPlayers.reduce((sum: number, p: any) => sum + (redraftValues[p.player_id] || 0), 0);
+        const incomingRedraft = incomingPlayers.reduce((sum: number, p: any) => sum + (redraftValues[p.player_id] || 0), 0);
+        const outgoingDynasty = outgoingPlayers.reduce((sum: number, p: any) => sum + p.value, 0);
+        const incomingDynasty = incomingPlayers.reduce((sum: number, p: any) => sum + p.value, 0);
+        const weakPosAdds = incomingPlayers.filter((p: any) => weakPositions.has(p.position)).length;
+        const weakPosLosses = outgoingPlayers.filter((p: any) => weakPositions.has(p.position)).length;
+        const strongPosSells = outgoingPlayers.filter((p: any) => strongPositions.has(p.position)).length;
+        const agingSells = outgoingPlayers.filter((p: any) => isAgingAsset(p)).length;
+        const youngCoreBuys = incomingPlayers.filter((p: any) => isYoungBuildingBlock(p)).length;
+        const picksIn = incomingPicks.reduce((sum: number, p: any) => sum + p.value, 0);
+        const picksOut = outgoingPicks.reduce((sum: number, p: any) => sum + p.value, 0);
+        const premiumCurrentPicksOut = outgoingPicks.filter((p: any) => isPremiumCurrentPick(p)).length;
+        const futureFirstsIn = incomingPicks.filter((p: any) => Number(p.round) === 1 && String(p.season) !== CURRENT_YEAR).length;
+        const currentPlayerCapitalOut = outgoingPlayers.reduce((sum: number, p: any) => {
+          const age = Number(p.age || 0);
+          const position = p.position;
+          const olderProducer =
+            (position === "RB" && age >= 25) ||
+            (position === "QB" && age >= 28) ||
+            ((position === "WR" || position === "TE") && age >= 27);
+          return sum + (olderProducer ? 1 : 0);
+        }, 0);
+        const assetConsolidation =
+          outgoingPlayers.length + outgoingPicks.length - incomingPlayers.length - incomingPicks.length;
+
+        let score = 0;
+
+        if (["Elite", "True Contender", "Almost There"].includes(finderDirection)) {
+          score += (incomingRedraft - outgoingRedraft) / 160;
+          score += weakPosAdds * 8;
+          score -= weakPosLosses * 10;
+          score += assetConsolidation > 0 ? assetConsolidation * 4 : assetConsolidation * 1.5;
+          score += currentPlayerCapitalOut * 3;
+          score -= outgoingPicks.length * 3;
+          score -= premiumCurrentPicksOut * 10;
+          score -= incomingPicks.length * 2;
+          score -= incomingPlayers.filter((p: any) => p.position === "RB" && Number(p.age || 0) >= 28).length * 4;
+        } else if (["Rebuilder", "Blow Up", "Hopeless"].includes(finderDirection)) {
+          score += agingSells * 9;
+          score += youngCoreBuys * 8;
+          score += futureFirstsIn * 12;
+          score += picksIn / 180;
+          score -= picksOut / 180;
+          score -= premiumCurrentPicksOut * 12;
+          score -= incomingPlayers.filter((p: any) => p.position === "RB" && Number(p.age || 0) >= 25).length * 7;
+          score -= incomingRedraft / 220;
+          score += strongPosSells * 3;
+        } else {
+          score += weakPosAdds * 6;
+          score -= weakPosLosses * 7;
+          score += assetConsolidation > 0 ? assetConsolidation * 5 : assetConsolidation * 1.5;
+          score += agingSells * 4;
+          score += youngCoreBuys * 4;
+          score += futureFirstsIn * 6;
+          score -= outgoingPicks.length * 4;
+          score -= premiumCurrentPicksOut * 9;
+          score += currentPlayerCapitalOut * 2;
+          score += (incomingDynasty - outgoingDynasty) / 250;
+        }
+
+        if (outgoingPicks.length > 0 && currentPlayerCapitalOut === 0) score -= 6;
+        if (incomingPicks.length > 0 && outgoingPlayers.length === 0 && !draftCapitalMode) score -= 4;
+        if (trade.draftCapital && !["Rebuilder", "Blow Up", "Hopeless"].includes(finderDirection)) score -= 3;
+
+        return score;
+      };
       // When a player is pinned, ensure they're always in the give pool even if outside top 10
       const myTop = finderPinnedPlayerId && !myPlayers.slice(0, 10).some((p: any) => p.player_id === finderPinnedPlayerId)
         ? [...myPlayers.slice(0, 9), myPlayers.find((p: any) => p.player_id === finderPinnedPlayerId)].filter(Boolean)
@@ -4393,9 +5680,9 @@ const starters = starterSlots
       // When either give or receive player is pinned, relax loop caps so rarer combos surface
       const pinnedActive = !!(finderPinnedPlayerId || finderTargetPlayerId);
 
+
       // League-wide positional totals for every team (used for ranking)
       const allTeamPosTotals = rosters.map((r: any) => posTotals(rosterPlayers(r)));
-      const numTeams = rosters.length;
 
       // Rank user (1 = best) at a given position given their total at that position
       const leagueRank = (pos: string, total: number) => {
@@ -4407,6 +5694,8 @@ const starters = starterSlots
 
       // Positional fit score using post-trade league rankings.
       // Rewards improving weak positions, penalizes destroying strong ones.
+      // Heavy drops now hurt instead of hard-blocking the trade so rebuild paths
+      // and value-insulation deals can still surface.
       const posScore = (givePL: any[], receivePL: any[]) => {
         const postT: Record<string, number> = { ...myT };
         givePL.forEach((p: any) => { postT[p.position] = (postT[p.position] || 0) - p.value; });
@@ -4418,12 +5707,14 @@ const starters = starterSlots
           const afterRank  = leagueRank(pos, postT[pos] || 0);
           const rankDelta  = beforeRank - afterRank; // positive = moved up (improved)
 
-          // Hard cutoff — never let any position group fall below 8th in the league
-          if (afterRank > 8) return -Infinity;
-
           // Scale reward/penalty by rank change; improving a weak spot is worth more
           const wasWeak = beforeRank > Math.floor(numTeams / 2);
           score += rankDelta * (wasWeak && rankDelta > 0 ? 3 : 2);
+
+          const drop = afterRank - beforeRank;
+          if (drop >= 3) score -= drop * 2.5;
+          if (afterRank >= Math.max(8, numTeams - 2)) score -= 4;
+          if (afterRank === numTeams) score -= 5;
         }
         return score;
       };
@@ -4522,6 +5813,149 @@ const starters = starterSlots
         oppName: string; oppRosterId: number;
         score: number; net: number; format: string;
         draftCapital?: boolean;
+      };
+
+      const starterSlots = (selectedLeague?.roster_positions || []).filter(
+        (slot: string) => !["BN", "IR", "TAXI"].includes(slot)
+      );
+      const starterCounts = starterSlots.reduce((acc: Record<string, number>, slot: string) => {
+        acc[slot] = (acc[slot] || 0) + 1;
+        return acc;
+      }, {});
+      const hasSuperFlex = (starterCounts.SUPER_FLEX || 0) > 0;
+      const hasFlex = (starterCounts.FLEX || 0) > 0;
+      const rosterById = new Map(
+        rosters.map((r: any) => [Number(r.roster_id), r])
+      );
+      const playerTradeScore = (player: any) =>
+        (redraftValues[player?.player_id] ?? 0) * 2 + (player?.value ?? 0);
+
+      const buildPostTradePlayers = (baseRoster: any, givePlayers: any[], receivePlayers: any[]) => {
+        const giveIds = new Set(givePlayers.map((p: any) => p.player_id));
+        return [
+          ...(baseRoster?.players || [])
+            .map((id: string) => (players as any)[id])
+            .filter((p: any) => p && !giveIds.has(p.player_id)),
+          ...receivePlayers,
+        ].filter((p: any) => p && ["QB", "RB", "WR", "TE"].includes(p.position));
+      };
+
+      const evaluateLineupSafety = (rosterPlayersList: any[], relaxed = false) => {
+        const available = [...rosterPlayersList].sort(
+          (a: any, b: any) => playerTradeScore(b) - playerTradeScore(a)
+        );
+        const usedIds = new Set<string>();
+        const lineup: Array<{ slot: string; player: any; score: number }> = [];
+
+        const claimBest = (eligiblePositions: string[], slot: string) => {
+          const idx = available.findIndex(
+            (player: any) =>
+              !usedIds.has(player.player_id) &&
+              eligiblePositions.includes(player.position)
+          );
+          if (idx === -1) {
+            lineup.push({ slot, player: null, score: 0 });
+            return;
+          }
+          const player = available[idx];
+          usedIds.add(player.player_id);
+          lineup.push({ slot, player, score: playerTradeScore(player) });
+        };
+
+        starterSlots.forEach((slot: string) => {
+          if (slot === "FLEX") return claimBest(["RB", "WR", "TE"], slot);
+          if (slot === "SUPER_FLEX") return claimBest(["QB", "RB", "WR", "TE"], slot);
+          return claimBest([slot], slot);
+        });
+
+        const bench = available.filter((player: any) => !usedIds.has(player.player_id));
+        const benchCounts = bench.reduce((acc: Record<string, number>, player: any) => {
+          acc[player.position] = (acc[player.position] || 0) + 1;
+          return acc;
+        }, {});
+
+        const emptySlots = lineup.filter((slot) => !slot.player).length;
+        const lineupScore = lineup.reduce((sum, slot) => sum + slot.score, 0);
+        const reserveFlex = bench.filter((p: any) => ["RB", "WR", "TE"].includes(p.position)).length;
+        const reserveQb = benchCounts.QB || 0;
+        const reserveTe = benchCounts.TE || 0;
+        const reserveRb = benchCounts.RB || 0;
+        const reserveWr = benchCounts.WR || 0;
+        const reserveTotal = bench.length;
+
+        const minReserveQb = hasSuperFlex ? (relaxed ? 0 : 1) : starterCounts.QB ? (relaxed ? 0 : 1) : 0;
+        const minReserveTe = starterCounts.TE ? (relaxed ? 0 : 1) : 0;
+        const minReserveFlex = hasFlex || hasSuperFlex ? (relaxed ? 1 : 2) : (relaxed ? 0 : 1);
+        const minReserveRb = starterCounts.RB >= 2 ? (relaxed ? 0 : 1) : 0;
+        const minReserveWr = starterCounts.WR >= 2 ? (relaxed ? 0 : 1) : 0;
+        const minReserveTotal = relaxed ? 2 : 4;
+
+        const shortages = [
+          emptySlots > 0 ? `empty-${emptySlots}` : null,
+          reserveQb < minReserveQb ? "qb" : null,
+          reserveTe < minReserveTe ? "te" : null,
+          reserveFlex < minReserveFlex ? "flex" : null,
+          reserveRb < minReserveRb ? "rb" : null,
+          reserveWr < minReserveWr ? "wr" : null,
+          reserveTotal < minReserveTotal ? "total" : null,
+        ].filter(Boolean);
+
+        return {
+          valid: emptySlots === 0,
+          shortages,
+          emptySlots,
+          lineupScore,
+          reserveQb,
+          reserveTe,
+          reserveFlex,
+          reserveRb,
+          reserveWr,
+          reserveTotal,
+        };
+      };
+
+      const getTradeLineupSafety = (trade: TradeResult) => {
+        const myAfterPlayers = buildPostTradePlayers(myRoster, trade.give, trade.receive);
+        const oppRoster = rosterById.get(Number(trade.oppRosterId));
+        const oppBeforePlayers = rosterPlayers(oppRoster);
+        const oppAfterPlayers = buildPostTradePlayers(oppRoster, trade.receive, trade.give);
+        const myBefore = evaluateLineupSafety(myPlayers, false);
+        const myAfter = evaluateLineupSafety(myAfterPlayers, false);
+        const oppBefore = evaluateLineupSafety(oppBeforePlayers, true);
+        const oppAfter = evaluateLineupSafety(oppAfterPlayers, true);
+        const myShortagePenalty =
+          myAfter.emptySlots * 14 +
+          Math.max(0, (starterCounts.QB || 0 ? 1 : 0) - myAfter.reserveQb) * (hasSuperFlex ? 7 : 4) +
+          Math.max(0, (starterCounts.TE || 0 ? 1 : 0) - myAfter.reserveTe) * 3 +
+          Math.max(0, (hasFlex || hasSuperFlex ? 1 : 0) - myAfter.reserveFlex) * 2.5 +
+          Math.max(0, 2 - myAfter.reserveTotal) * 2;
+        const oppShortagePenalty =
+          oppAfter.emptySlots * 10 +
+          Math.max(0, (starterCounts.QB || 0 ? 1 : 0) - oppAfter.reserveQb) * (hasSuperFlex ? 5 : 3) +
+          Math.max(0, (starterCounts.TE || 0 ? 1 : 0) - oppAfter.reserveTe) * 2 +
+          Math.max(0, (hasFlex || hasSuperFlex ? 1 : 0) - oppAfter.reserveFlex) * 1.5;
+
+        const myDelta =
+          (myAfter.lineupScore - myBefore.lineupScore) / 150 +
+          (myAfter.reserveFlex - myBefore.reserveFlex) * 2 +
+          (myAfter.reserveQb - myBefore.reserveQb) * (hasSuperFlex ? 3 : 1.5) +
+          (myAfter.reserveTotal - myBefore.reserveTotal) * 1.25;
+        const oppDelta =
+          (oppAfter.lineupScore - oppBefore.lineupScore) / 175 +
+          (oppAfter.reserveFlex - oppBefore.reserveFlex) * 1.5 +
+          (oppAfter.reserveQb - oppBefore.reserveQb) * (hasSuperFlex ? 2 : 1) +
+          (oppAfter.reserveTotal - oppBefore.reserveTotal);
+
+        return {
+          myBefore,
+          myAfter,
+          oppBefore,
+          oppAfter,
+          myValid: myAfter.valid,
+          oppValid: oppAfter.valid,
+          valid: myAfter.emptySlots === 0 && oppAfter.emptySlots === 0,
+          score: myDelta + oppDelta * 0.7 - myShortagePenalty - oppShortagePenalty * 0.7,
+        };
       };
 
       const results: TradeResult[] = [];
@@ -4864,9 +6298,142 @@ const starters = starterSlots
             }
           }
         }
+
+        const myEqualizerPicks = myFinderPicks.slice(0, 4);
+        const oppEqualizerPicks = oppPicks.slice(0, 4);
+
+        // 1 + your pick for 1
+        for (const mp of myTop) {
+          for (const myPick of myEqualizerPicks) {
+            for (const op of oppTop) {
+              if (!isBalanced([mp.value, myPick.value], [op.value])) continue;
+              if (!qbSafe([mp])) continue;
+              if (!oppQbSafe(oppPlayers, [op])) continue;
+              if (!oppReceiveOk(oppPlayers, [mp], [op])) continue;
+              const adj = tradeWaiverAdj([mp.value, myPick.value], [op.value]);
+              results.push({
+                give: [mp], receive: [op], givePicks: [myPick], receivePicks: [], oppName, oppRosterId: oppRoster.roster_id,
+                score: posScore([mp], [op]),
+                net: op.value + adj - mp.value - myPick.value, format: "1 + pick for 1",
+              });
+            }
+          }
+        }
+
+        // 2 + your pick for 1
+        for (let i = 0; i < Math.min(myTop.length, 7); i++) {
+          for (let j = i + 1; j < Math.min(myTop.length, 7); j++) {
+            const mp1 = myTop[i], mp2 = myTop[j];
+            if (!packageOk([mp1, mp2])) continue;
+            if (!qbSafe([mp1, mp2])) continue;
+            for (const myPick of myEqualizerPicks) {
+              for (const op of oppTop) {
+                if (!isBalanced([mp1.value, mp2.value, myPick.value], [op.value])) continue;
+                if (!oppQbSafe(oppPlayers, [op])) continue;
+                if (!oppReceiveOk(oppPlayers, [mp1, mp2], [op])) continue;
+                const adj = tradeWaiverAdj([mp1.value, mp2.value, myPick.value], [op.value]);
+                results.push({
+                  give: [mp1, mp2], receive: [op], givePicks: [myPick], receivePicks: [], oppName, oppRosterId: oppRoster.roster_id,
+                  score: posScore([mp1, mp2], [op]),
+                  net: op.value + adj - mp1.value - mp2.value - myPick.value, format: "2 + pick for 1",
+                });
+              }
+            }
+          }
+        }
+
+        // 1 for 1 + their pick
+        for (const mp of myTop) {
+          for (const op of oppTop) {
+            for (const oppPick of oppEqualizerPicks) {
+              if (!isBalanced([mp.value], [op.value, oppPick.value])) continue;
+              if (!qbSafe([mp])) continue;
+              if (!oppQbSafe(oppPlayers, [op])) continue;
+              if (!oppReceiveOk(oppPlayers, [mp], [op])) continue;
+              const adj = tradeWaiverAdj([mp.value], [op.value, oppPick.value]);
+              results.push({
+                give: [mp], receive: [op], givePicks: [], receivePicks: [oppPick], oppName, oppRosterId: oppRoster.roster_id,
+                score: posScore([mp], [op]),
+                net: op.value + oppPick.value - mp.value - adj, format: "1 for 1 + pick",
+              });
+            }
+          }
+        }
+
+        // 1 for 2 + their pick
+        for (const mp of myTop) {
+          for (let i = 0; i < oppCap(8); i++) {
+            for (let j = i + 1; j < oppCap(8); j++) {
+              const op1 = oppTop[i], op2 = oppTop[j];
+              if (!packageOk([op1, op2])) continue;
+              if (!qbSafe([mp])) continue;
+              if (!oppQbSafe(oppPlayers, [op1, op2])) continue;
+              if (!oppReceiveOk(oppPlayers, [mp], [op1, op2])) continue;
+              for (const oppPick of oppEqualizerPicks) {
+                if (!isBalanced([mp.value], [op1.value, op2.value, oppPick.value])) continue;
+                const adj = tradeWaiverAdj([mp.value], [op1.value, op2.value, oppPick.value]);
+                results.push({
+                  give: [mp], receive: [op1, op2], givePicks: [], receivePicks: [oppPick], oppName, oppRosterId: oppRoster.roster_id,
+                  score: posScore([mp], [op1, op2]),
+                  net: op1.value + op2.value + oppPick.value - mp.value - adj, format: "1 for 2 + pick",
+                });
+              }
+            }
+          }
+        }
       }
 
-      // Deduplicate by player set, shuffle randomly, enforce per-player and per-opponent appearance caps, take 15
+      const getSortedIds = (items: any[], getId: (item: any) => string) =>
+        items.map(getId).filter(Boolean).sort();
+      const sameIds = (a: string[], b: string[]) =>
+        a.length === b.length && a.every((id, index) => id === b[index]);
+      const overlapRatio = (a: string[], b: string[]) => {
+        if (!a.length || !b.length) return 0;
+        const bSet = new Set(b);
+        const overlap = a.filter((id) => bSet.has(id)).length;
+        return overlap / Math.min(a.length, b.length);
+      };
+      const getTradeSimilarityProfile = (trade: any) => {
+        const givePlayers = getSortedIds(trade.give, (p: any) => String(p.player_id));
+        const receivePlayers = getSortedIds(trade.receive, (p: any) => String(p.player_id));
+        const givePicks = getSortedIds(trade.givePicks, (p: any) => finderPickKey(p));
+        const receivePicks = getSortedIds(trade.receivePicks, (p: any) => finderPickKey(p));
+        return {
+          givePlayers,
+          receivePlayers,
+          givePicks,
+          receivePicks,
+          allAssets: [
+            ...givePlayers.map((id) => `give-player-${id}`),
+            ...receivePlayers.map((id) => `receive-player-${id}`),
+            ...givePicks.map((id) => `give-pick-${id}`),
+            ...receivePicks.map((id) => `receive-pick-${id}`),
+          ].sort(),
+        };
+      };
+      const areTradesTooSimilar = (a: any, b: any) => {
+        if (String(a.oppRosterId) !== String(b.oppRosterId)) return false;
+
+        const aProfile = getTradeSimilarityProfile(a);
+        const bProfile = getTradeSimilarityProfile(b);
+        const sameFormat = a.format === b.format;
+        const sameReceivePlayers = sameIds(aProfile.receivePlayers, bProfile.receivePlayers);
+        const sameGivePlayers = sameIds(aProfile.givePlayers, bProfile.givePlayers);
+        const sameReceivePackage = sameReceivePlayers && sameIds(aProfile.receivePicks, bProfile.receivePicks);
+        const sameGivePackage = sameGivePlayers && sameIds(aProfile.givePicks, bProfile.givePicks);
+        const givePlayerOverlap = overlapRatio(aProfile.givePlayers, bProfile.givePlayers);
+        const receivePlayerOverlap = overlapRatio(aProfile.receivePlayers, bProfile.receivePlayers);
+        const fullAssetOverlap = overlapRatio(aProfile.allAssets, bProfile.allAssets);
+
+        if (sameFormat && sameReceivePlayers && givePlayerOverlap >= 0.5) return true;
+        if (sameFormat && sameGivePlayers && receivePlayerOverlap >= 0.5) return true;
+        if (sameFormat && sameReceivePackage && givePlayerOverlap >= 0.5) return true;
+        if (sameFormat && sameGivePackage && receivePlayerOverlap >= 0.5) return true;
+        if (sameFormat && fullAssetOverlap >= 0.75) return true;
+        return false;
+      };
+
+      // Deduplicate by player set, filter near-duplicate frameworks, enforce per-player and per-opponent appearance caps, take 15
       const seen = new Set<string>();
       const playerCount: Record<string, number> = {};
       const oppCount: Record<string, number> = {};
@@ -4876,21 +6443,33 @@ const starters = starterSlots
         .filter((r) => !pinnedPlayer || r.give.some((p: any) => p.player_id === pinnedPlayer.player_id))
         .filter((r) => !finderTargetPlayerId || r.receive.some((p: any) => p.player_id === finderTargetPlayerId))
         .map((r) => {
+          const lineupSafety = getTradeLineupSafety(r);
+          const partnerProfile = leagueMateProfileByRosterId.get(Number(r.oppRosterId));
           const bucketPriority = draftCapitalMode && r.receivePicks.length > 0
             ? Math.min(...r.receivePicks.map((p: any) => draftYearPriority[p.season] ?? 999))
             : 999;
+          const partnerFitScore =
+            (partnerProfile?.fitScore ?? 0) * 0.65 +
+            Math.min(partnerProfile?.tradeCount30d ?? 0, 3) * 1.5 +
+            Math.min(partnerProfile?.totalDynastyLeagues ?? 0, 8) * 0.35;
+          const strategyScore = r.score + getDirectionTradeScore(r) + lineupSafety.score + partnerFitScore;
           return {
             r,
+            lineupSafety,
+            partnerProfile,
             bucketPriority,
+            strategyScore,
             sort: Math.abs(Math.sin(finderSeed * (results.indexOf(r) + 1)) * 10000) % 1,
           };
         })
+        .filter(({ lineupSafety }) => lineupSafety.valid)
         .sort((a, b) => {
           if (a.bucketPriority !== b.bucketPriority) return a.bucketPriority - b.bucketPriority;
+          if (b.strategyScore !== a.strategyScore) return b.strategyScore - a.strategyScore;
           return a.sort - b.sort;
         })
         .map(({ r }) => r);
-      const top15 = shuffled.filter((r) => {
+      const top15 = shuffled.reduce((acc: any[], r) => {
           const allIds = [
             ...r.give.map((p: any) => `player-${p.player_id}`),
             ...r.receive.map((p: any) => `player-${p.player_id}`),
@@ -4898,29 +6477,67 @@ const starters = starterSlots
             ...r.receivePicks.map((p: any) => `pick-${finderPickKey(p)}`),
           ];
           const key = [...allIds].sort().join(",");
-          if (seen.has(key)) return false;
+          if (seen.has(key)) return acc;
+          if (acc.some((existing: any) => areTradesTooSimilar(existing, r))) return acc;
           // Each player may appear in at most 4 shown trades (pinned player is exempt)
-          if (allIds.some((pid) => pid !== `player-${finderPinnedPlayerId}` && (playerCount[pid] || 0) >= 4)) return false;
+          if (allIds.some((pid) => pid !== `player-${finderPinnedPlayerId}` && (playerCount[pid] || 0) >= 4)) return acc;
           // Each opponent may appear in at most 4 shown trades
           const oppKey = String(r.oppRosterId);
-          if ((oppCount[oppKey] || 0) >= 4) return false;
+          if ((oppCount[oppKey] || 0) >= 4) return acc;
           seen.add(key);
           allIds.forEach((pid) => { playerCount[pid] = (playerCount[pid] || 0) + 1; });
           oppCount[oppKey] = (oppCount[oppKey] || 0) + 1;
-          return true;
-        })
+          acc.push(r);
+          return acc.length >= 15 ? acc : acc;
+        }, [])
         .slice(0, 15);
 
       return (
         <div className="space-y-4">
           {/* ── Player pin search ── */}
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 space-y-2">
+            {finderDirectionProfile && (
+              <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-3">
+                <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Direction Engine</div>
+                    <div className="mt-1 text-sm text-gray-200">{finderDirectionProfile.summary}</div>
+                  </div>
+                  <span className={`inline-flex text-[10px] font-semibold px-2 py-1 rounded-full border self-start ${finderDirectionProfile.bucketColor}`}>
+                    {finderDirectionProfile.bucket}
+                  </span>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {finderDirectionProfile.actions.map((action: string) => (
+                    <span key={action} className="rounded-full border border-blue-800 bg-blue-950/40 px-3 py-1 text-[11px] text-blue-200">
+                      {action}
+                    </span>
+                  ))}
+                </div>
+                {selectedLeagueMateProfilesView.length > 0 && (
+                  <div className="mt-3">
+                    <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Best Partner Targets</div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {selectedLeagueMateProfilesView.slice(0, 3).map((mate: any) => (
+                        <button
+                          key={mate.rosterId}
+                          onClick={() => setFinderTargetOppRosterId(Number(mate.rosterId))}
+                          className="rounded-full border border-cyan-800 bg-cyan-950/30 px-3 py-1 text-[11px] text-cyan-200 transition hover:border-cyan-500"
+                        >
+                          {mate.ownerName} • {mate.fitLabel}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Find trades involving a specific player</p>
             <div className="flex items-center justify-between gap-3 rounded-lg bg-gray-800/70 px-3 py-2">
               <div>
                 <div className="text-sm font-medium text-white">Draft Capital Mode</div>
                 <div className="text-[11px] text-gray-400">
-                  Current direction: <span className="text-gray-300">{finderDirection}</span>. When on, Finder can turn roster talent into picks while still respecting opponent fit rules.
+                  Current direction: <span className="text-gray-300">{finderDirection}</span>. {finderDirectionProfile?.shortAction || "When on, Finder can turn roster talent into picks while still respecting opponent fit rules."}
                 </div>
               </div>
               <button
@@ -5079,6 +6696,7 @@ const starters = starterSlots
             </p>
           )}
           {top15.map((trade: TradeResult, idx: number) => {
+            const partnerProfile = leagueMateProfileByRosterId.get(Number(trade.oppRosterId));
             const giveVals = [...trade.give.map((p: any) => p.value), ...trade.givePicks.map((p: any) => p.value)];
             const receiveVals = [...trade.receive.map((p: any) => p.value), ...trade.receivePicks.map((p: any) => p.value)];
             const giveTotal = giveVals.reduce((s: number, v: number) => s + v, 0);
@@ -5103,11 +6721,40 @@ const starters = starterSlots
                     <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">{trade.format}</span>
                     <span className="text-xs text-gray-500">with</span>
                     <span className="text-sm font-semibold text-blue-300">{trade.oppName}</span>
+                    {partnerProfile?.fitLabel && (
+                      <span className="rounded-full border border-cyan-800 bg-cyan-950/30 px-2 py-0.5 text-[10px] font-semibold text-cyan-300">
+                        {partnerProfile.fitLabel}
+                      </span>
+                    )}
                   </div>
                   <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${isEven ? "bg-yellow-900 text-yellow-300" : trade.net > 0 ? "bg-green-900 text-green-300" : "bg-red-900 text-red-300"}`}>
                     {isEven ? "EVEN" : trade.net > 0 ? `+${netDisplay.toLocaleString()}` : `-${netDisplay.toLocaleString()}`}
                   </span>
                 </div>
+                {partnerProfile?.fitReasons?.[0] && (
+                  <div className="mb-3 text-xs text-gray-500">
+                    {partnerProfile.fitReasons[0]}
+                  </div>
+                )}
+                {(partnerProfile?.repeatedPlayers?.length > 0 || partnerProfile?.acquiredPlayers?.length > 0 || partnerProfile?.tradePreferenceLabel) && (
+                  <div className="mb-3 flex flex-wrap gap-2">
+                    {partnerProfile?.tradePreferenceLabel && (
+                      <span className="rounded-full border border-amber-800 bg-amber-950/20 px-2 py-0.5 text-[10px] text-amber-200">
+                        {partnerProfile.tradePreferenceLabel}
+                      </span>
+                    )}
+                    {partnerProfile.repeatedPlayers.slice(0, 2).map((player: any) => (
+                      <span key={player.playerId} className="rounded-full border border-cyan-800 bg-cyan-950/30 px-2 py-0.5 text-[10px] text-cyan-200">
+                        Likes {player.name}
+                      </span>
+                    ))}
+                    {partnerProfile?.acquiredPlayers?.slice(0, 1).map((player: any) => (
+                      <span key={`recent-${player.playerId}`} className="rounded-full border border-emerald-800 bg-emerald-950/30 px-2 py-0.5 text-[10px] text-emerald-200">
+                        Recently Bought {player.name}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 {/* Trade columns */}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
