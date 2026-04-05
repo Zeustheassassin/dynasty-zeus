@@ -86,3 +86,45 @@ drop policy if exists "rookie_board_self" on rookie_board;
 create policy "rookie_board_self" on rookie_board for all
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
+
+-- ── watchlists (alerts center tracked players) ─────────────────
+create table if not exists watchlists (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users(id) on delete cascade not null,
+  player_id text not null,
+  label text not null default '',
+  threshold_up integer not null default 250,
+  threshold_down integer not null default 250,
+  league_id text,
+  updated_at timestamptz not null default now(),
+  unique(user_id, player_id)
+);
+alter table watchlists enable row level security;
+drop policy if exists "watchlists_self" on watchlists;
+create policy "watchlists_self" on watchlists for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+-- ── alerts (alerts center cache + dismiss state) ───────────────
+create table if not exists alerts (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users(id) on delete cascade not null,
+  alert_id text not null,
+  category text not null default 'watchlist',
+  source text not null default 'internal',
+  severity text not null default 'low',
+  title text not null default '',
+  detail text not null default '',
+  actionable boolean not null default true,
+  dismissed boolean not null default false,
+  league_id text,
+  player_id text,
+  payload jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now(),
+  unique(user_id, alert_id)
+);
+alter table alerts enable row level security;
+drop policy if exists "alerts_self" on alerts;
+create policy "alerts_self" on alerts for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);

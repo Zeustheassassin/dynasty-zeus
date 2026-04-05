@@ -97,3 +97,101 @@ drop trigger if exists leaguemate_profiles_set_updated_at on public.leaguemate_p
 create trigger leaguemate_profiles_set_updated_at
   before update on public.leaguemate_profiles
   for each row execute function public.notes_updated_at();
+
+-- Optional alerts center watchlists
+create table if not exists public.watchlists (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  player_id text not null,
+  label text not null default '',
+  threshold_up integer not null default 250,
+  threshold_down integer not null default 250,
+  league_id text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (user_id, player_id)
+);
+
+alter table public.watchlists enable row level security;
+
+drop policy if exists "users can select own watchlists" on public.watchlists;
+drop policy if exists "users can insert own watchlists" on public.watchlists;
+drop policy if exists "users can update own watchlists" on public.watchlists;
+drop policy if exists "users can delete own watchlists" on public.watchlists;
+
+create policy "users can select own watchlists"
+  on public.watchlists
+  for select
+  using (auth.uid() = user_id);
+
+create policy "users can insert own watchlists"
+  on public.watchlists
+  for insert
+  with check (auth.uid() = user_id);
+
+create policy "users can update own watchlists"
+  on public.watchlists
+  for update
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+create policy "users can delete own watchlists"
+  on public.watchlists
+  for delete
+  using (auth.uid() = user_id);
+
+drop trigger if exists watchlists_set_updated_at on public.watchlists;
+create trigger watchlists_set_updated_at
+  before update on public.watchlists
+  for each row execute function public.notes_updated_at();
+
+-- Optional alerts center cache / dismiss state
+create table if not exists public.alerts (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  alert_id text not null,
+  category text not null default 'watchlist',
+  source text not null default 'internal',
+  severity text not null default 'low',
+  title text not null default '',
+  detail text not null default '',
+  actionable boolean not null default true,
+  dismissed boolean not null default false,
+  league_id text,
+  player_id text,
+  payload jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (user_id, alert_id)
+);
+
+alter table public.alerts enable row level security;
+
+drop policy if exists "users can select own alerts" on public.alerts;
+drop policy if exists "users can insert own alerts" on public.alerts;
+drop policy if exists "users can update own alerts" on public.alerts;
+drop policy if exists "users can delete own alerts" on public.alerts;
+
+create policy "users can select own alerts"
+  on public.alerts
+  for select
+  using (auth.uid() = user_id);
+
+create policy "users can insert own alerts"
+  on public.alerts
+  for insert
+  with check (auth.uid() = user_id);
+
+create policy "users can update own alerts"
+  on public.alerts
+  for update
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+create policy "users can delete own alerts"
+  on public.alerts
+  for delete
+  using (auth.uid() = user_id);
+
+drop trigger if exists alerts_set_updated_at on public.alerts;
+create trigger alerts_set_updated_at
+  before update on public.alerts
+  for each row execute function public.notes_updated_at();

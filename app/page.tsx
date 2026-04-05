@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useMemo, useRef } from "react";
 import Dashboard from "../components/Dashboard";
+import AlertsPage from "../components/AlertsPage";
 import { supabase } from "../lib/supabaseclient";
 
 // -------------------------
@@ -152,6 +153,26 @@ const getPickValueKey = (pick: any) => {
 
 const getStoredPickValue = (pickValues: Record<string, number>, pick: any) =>
   pickValues[getPickValueKey(pick)] ?? pickValues[`${pick?.season}-${pick?.round}`] ?? 0;
+
+const isSnakeDraft = (draft: any) => {
+  const typeCandidates = [
+    draft?.type,
+    draft?.settings?.type,
+    draft?.settings?.draft_type,
+    draft?.metadata?.type,
+    draft?.metadata?.draft_type,
+  ]
+    .map((value) => String(value || "").toLowerCase())
+    .filter(Boolean);
+
+  return typeCandidates.some((value) => value.includes("snake"));
+};
+
+const getDraftRoundSlot = (draft: any, round: number, baseSlot: number, totalTeams: number) => {
+  if (!baseSlot || baseSlot < 1 || totalTeams < 2) return baseSlot;
+  if (!isSnakeDraft(draft)) return baseSlot;
+  return round % 2 === 0 ? (totalTeams - baseSlot + 1) : baseSlot;
+};
 
 const getLeagueDirectionBucket = (dynRank: number, redRank: number) => {
   if (dynRank <= 2 && redRank <= 2) {
@@ -751,6 +772,37 @@ const normalizeRookieName = (name: string) =>
 
 const buildSleeperRookieBoard = (_playerMap: any) => [];
 
+type AlertsCenterCategory = "market" | "status" | "league" | "watchlist" | "news";
+type AlertsCenterSource = "internal" | "watchlist" | "external";
+type AlertsCenterSeverity = "high" | "medium" | "low";
+
+type AlertsCenterItem = {
+  id: string;
+  category: AlertsCenterCategory;
+  source: AlertsCenterSource;
+  severity: AlertsCenterSeverity;
+  title: string;
+  detail: string;
+  actionable: boolean;
+  timestamp: number;
+  playerId?: string | null;
+  leagueId?: string | null;
+  teamLabel?: string | null;
+  link?: string | null;
+  payload?: any;
+  dismissed?: boolean;
+};
+
+type WatchlistEntry = {
+  player_id: string;
+  label: string;
+  threshold_up: number;
+  threshold_down: number;
+  league_id?: string | null;
+  created_at?: string;
+  updated_at?: string;
+};
+
 export default function Home() {
 
   // -------------------------
@@ -861,6 +913,13 @@ const [calcSearchB, setCalcSearchB] = useState("");
 const [externalShares, setExternalShares] = useState<any>(null);
 const [loadingShares, setLoadingShares] = useState(false);
 const [tempRanks, setTempRanks] = useState<{ [key: number]: string }>({});
+const [dashboardAlerts, setDashboardAlerts] = useState<AlertsCenterItem[]>([]);
+const [dismissedAlertIds, setDismissedAlertIds] = useState<string[]>([]);
+const [watchlistEntries, setWatchlistEntries] = useState<WatchlistEntry[]>([]);
+const [watchlistSearch, setWatchlistSearch] = useState("");
+const [watchThresholdUp, setWatchThresholdUp] = useState("250");
+const [watchThresholdDown, setWatchThresholdDown] = useState("250");
+const [loadingExternalAlerts, setLoadingExternalAlerts] = useState(false);
 
 // ── MANAGEMENT HUB ────────────────────────────────────────────
 const [mgmtHubTab, setMgmtHubTab] = useState<"LEAGUE_MGMT" | "COMMISSIONER_TOOLS">("LEAGUE_MGMT");
@@ -900,6 +959,17 @@ useEffect(() => { supabaseUserRef.current = supabaseUser; }, [supabaseUser]);
 // Flag: once Supabase has provided the authoritative board, prevent
 // the sheet/ADP load effect from overwriting it with localStorage data.
 const rookieBoardSupabaseLoaded = useRef(false);
+const alertStoreScope = supabaseUser?.id || "guest";
+const watchlistStorageKey = `watchlists_v1_${alertStoreScope}`;
+const alertStorageKey = `alerts_v1_${alertStoreScope}`;
+const alertSnapshotStorageKey = `alertSnapshots_v1_${alertStoreScope}`;
+const dismissedAlertStorageKey = `dismissedAlerts_v1_${alertStoreScope}`;
+const alertBootstrapRef = useRef(false);
+const latestAlertsRef = useRef<AlertsCenterItem[]>([]);
+const latestDismissedAlertsRef = useRef<string[]>([]);
+
+useEffect(() => { latestAlertsRef.current = dashboardAlerts; }, [dashboardAlerts]);
+useEffect(() => { latestDismissedAlertsRef.current = dismissedAlertIds; }, [dismissedAlertIds]);
 
 const refreshSupabaseUser = async () => {
   const { data } = await supabase.auth.getUser();
@@ -930,6 +1000,118 @@ const loadNotes = async () => {
   if (error) setSupabaseError(error.message);
   else setNotes(data ?? []);
 };
+
+const hydrateAlertStateFromLocal = () => {
+  try {
+    const storedWatchlists = localStorage.getItem(watchlistStorageKey);
+    if (storedWatchlists) setWatchlistEntries(JSON.parse(storedWatchlists));
+  } catch {}
+
+  try {
+    const storedAlerts = localStorage.getItem(alertStorageKey);
+    if (storedAlerts) setDashboardAlerts(JSON.parse(storedAlerts));
+  } catch {}
+
+  try {
+    const storedDismissed = localStorage.getItem(dismissedAlertStorageKey);
+    if (storedDismissed) setDismissedAlertIds(JSON.parse(storedDismissed));
+  } catch {}
+};
+
+const mergeDashboardAlerts = (incoming: AlertsCenterItem[]) => {
+  if (!incoming.length) return;
+  setDashboardAlerts((prev) => {
+    const merged = new Map<string, AlertsCenterItem>();
+    [...prev, ...incoming].forEach((alert) => {
+      const existing = merged.get(alert.id);
+      merged.set(alert.id, {
+        ...existing,
+        ...alert,
+        dismissed: alert.dismissed ?? existing?.dismissed ?? false,
+      });
+    });
+    return [...merged.values()]
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, 80);
+  });
+};
+
+const removeWatchlistEntry = async (playerId: string) => {
+  const nextEntries = watchlistEntries.filter((entry) => entry.player_id !== playerId);
+  setWatchlistEntries(nextEntries);
+  localStorage.setItem(watchlistStorageKey, JSON.stringify(nextEntries));
+  if (supabaseUser) {
+    await supabase
+      .from("watchlists")
+      .delete()
+      .eq("user_id", supabaseUser.id)
+      .eq("player_id", playerId);
+  }
+};
+
+const addWatchlistEntry = async (playerId: string) => {
+  const player = (players as any)?.[playerId];
+  if (!player?.full_name) return;
+
+  const thresholdUp = Math.max(25, Number(watchThresholdUp) || 250);
+  const thresholdDown = Math.max(25, Number(watchThresholdDown) || 250);
+  const nextEntry: WatchlistEntry = {
+    player_id: String(playerId),
+    label: player.full_name,
+    threshold_up: thresholdUp,
+    threshold_down: thresholdDown,
+    league_id: selectedLeague?.league_id || null,
+    updated_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+  };
+  const nextEntries = [
+    nextEntry,
+    ...watchlistEntries.filter((entry) => entry.player_id !== nextEntry.player_id),
+  ].slice(0, 40);
+  setWatchlistEntries(nextEntries);
+  localStorage.setItem(watchlistStorageKey, JSON.stringify(nextEntries));
+  setWatchlistSearch("");
+  if (supabaseUser) {
+    await supabase.from("watchlists").upsert(
+      {
+        user_id: supabaseUser.id,
+        player_id: nextEntry.player_id,
+        label: nextEntry.label,
+        threshold_up: nextEntry.threshold_up,
+        threshold_down: nextEntry.threshold_down,
+        league_id: nextEntry.league_id,
+        updated_at: nextEntry.updated_at,
+      },
+      { onConflict: "user_id,player_id" }
+    );
+  }
+};
+
+const dismissDashboardAlert = async (alertId: string) => {
+  const nextDismissed = Array.from(new Set([...dismissedAlertIds, alertId]));
+  setDismissedAlertIds(nextDismissed);
+  localStorage.setItem(dismissedAlertStorageKey, JSON.stringify(nextDismissed));
+  setDashboardAlerts((prev) =>
+    prev.map((alert) => alert.id === alertId ? { ...alert, dismissed: true } : alert)
+  );
+  if (supabaseUser) {
+    await supabase
+      .from("alerts")
+      .upsert(
+        {
+          user_id: supabaseUser.id,
+          alert_id: alertId,
+          dismissed: true,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id,alert_id" }
+      );
+  }
+};
+
+useEffect(() => {
+  hydrateAlertStateFromLocal();
+}, [watchlistStorageKey, alertStorageKey, dismissedAlertStorageKey]);
 
 // Load all Supabase-persisted user data whenever the logged-in user changes
 useEffect(() => {
@@ -992,6 +1174,58 @@ useEffect(() => {
         setCommPaymentsData(map);
       }
     });
+  // 5. Watchlists
+  supabase
+    .from("watchlists")
+    .select("*")
+    .eq("user_id", supabaseUser.id)
+    .order("updated_at", { ascending: false })
+    .then(({ data, error }) => {
+      if (error || !data) return;
+      const rows = data.map((row: any) => ({
+        player_id: String(row.player_id),
+        label: row.label,
+        threshold_up: Number(row.threshold_up || 250),
+        threshold_down: Number(row.threshold_down || 250),
+        league_id: row.league_id || null,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+      }));
+      setWatchlistEntries(rows);
+      localStorage.setItem(watchlistStorageKey, JSON.stringify(rows));
+    });
+  // 6. Alerts cache / dismissed state
+  supabase
+    .from("alerts")
+    .select("*")
+    .eq("user_id", supabaseUser.id)
+    .order("updated_at", { ascending: false })
+    .limit(80)
+    .then(({ data, error }) => {
+      if (error || !data) return;
+      const rows = data.map((row: any) => ({
+        id: row.alert_id,
+        category: row.category || "watchlist",
+        source: row.source || "internal",
+        severity: row.severity || "low",
+        title: row.title || "Saved alert",
+        detail: row.detail || "",
+        actionable: row.actionable !== false,
+        timestamp: Number(new Date(row.updated_at || row.created_at || Date.now())),
+        playerId: row.player_id || null,
+        leagueId: row.league_id || null,
+        link: row.payload?.link || null,
+        payload: row.payload || {},
+        dismissed: !!row.dismissed,
+      })) as AlertsCenterItem[];
+      setDashboardAlerts(rows);
+      setDismissedAlertIds(rows.filter((row) => row.dismissed).map((row) => row.id));
+      localStorage.setItem(alertStorageKey, JSON.stringify(rows));
+      localStorage.setItem(
+        dismissedAlertStorageKey,
+        JSON.stringify(rows.filter((row) => row.dismissed).map((row) => row.id))
+      );
+    });
 }, [supabaseUser]);
 
 const signUp = async () => {
@@ -1040,6 +1274,9 @@ const signOut = async () => {
   setLeagueNotes({});
   setLeagueMgmtData({});
   setCommPaymentsData({});
+  setWatchlistEntries([]);
+  setDashboardAlerts([]);
+  setDismissedAlertIds([]);
   setCommToolsLeagueId("");
   setCommToolsRosters([]);
   setCommToolsUsers({});
@@ -1052,6 +1289,10 @@ const signOut = async () => {
   localStorage.removeItem("leagueNotes");
   localStorage.removeItem(`rookieBoard_${ROOKIE_YEAR}`);
   localStorage.removeItem(ROOKIE_BOARD_RESET_KEY);
+  localStorage.removeItem(watchlistStorageKey);
+  localStorage.removeItem(alertStorageKey);
+  localStorage.removeItem(alertSnapshotStorageKey);
+  localStorage.removeItem(dismissedAlertStorageKey);
   // Disconnect Sleeper so the app returns fully to the logged-out state
   disconnectSleeper();
 };
@@ -1991,11 +2232,13 @@ const loadRoster = async (league: any) => {
   const currentDraft = draftsData.find((d: any) => d.season === CURRENT_YEAR);
   const order = currentDraft?.draft_order || {};
   setSelectedLeagueDraftHasOccurred(currentDraft?.status !== "pre_draft");
+  const totalDraftTeams = allRosters.length || Number(currentDraft?.settings?.teams) || 0;
 
   tempPicks.forEach((pick: any) => {
     if (pick.season === CURRENT_YEAR) {
       const userId = rosterToUser[pick.roster_id];
-      const slot = order[String(userId)];
+      const baseSlot = Number(order[String(userId)] || 0);
+      const slot = getDraftRoundSlot(currentDraft, Number(pick.round), baseSlot, totalDraftTeams);
       pick.slot = slot
         ? `${pick.round}.${String(slot).padStart(2, "0")}`
         : `${pick.round}.${String(pick.roster_id).padStart(2, "0")}`;
@@ -2248,10 +2491,12 @@ const loadLeagueOverview = async () => {
 
           const currentDraft = draftsData.find((d: any) => d.season === CURRENT_YEAR);
           const order = currentDraft?.draft_order || {};
+          const totalDraftTeams = rostersData.length || Number(currentDraft?.settings?.teams) || 0;
           tempPicks.forEach((pick: any) => {
             if (pick.season === CURRENT_YEAR) {
               const userId = rosterToUser[String(pick.roster_id)];
-              const slot = order[String(userId)];
+              const baseSlot = Number(order[String(userId)] || 0);
+              const slot = getDraftRoundSlot(currentDraft, Number(pick.round), baseSlot, totalDraftTeams);
               pick.slot = slot
                 ? `${pick.round}.${String(slot).padStart(2, "0")}`
                 : `${pick.round}`;
@@ -3512,6 +3757,310 @@ const getTeamSummary = () => {
         .slice(0, 10),
     [rookies, draftedPlayerIds]
   );
+  const dashboardOwnedPlayers = useMemo(() => {
+    const map = new Map<string, any>();
+    allLeagueData.forEach((entry: any) => {
+      (entry?.roster?.players || []).forEach((playerId: string) => {
+        const player = (players as any)?.[playerId];
+        if (!player?.full_name) return;
+        const existing = map.get(String(playerId)) || {
+          player_id: String(playerId),
+          leagues: [],
+          shareCount: 0,
+        };
+        existing.player = player;
+        existing.shareCount += 1;
+        if (entry?.leagueName && !existing.leagues.includes(entry.leagueName)) {
+          existing.leagues.push(entry.leagueName);
+        }
+        map.set(String(playerId), existing);
+      });
+    });
+    return [...map.values()].sort((a, b) => {
+      const aValue = Number((players as any)?.[a.player_id]?.value || 0);
+      const bValue = Number((players as any)?.[b.player_id]?.value || 0);
+      return bValue - aValue;
+    });
+  }, [allLeagueData, players]);
+
+  const watchlistSearchResults = useMemo(() => {
+    const normalizedQuery = watchlistSearch.trim().toLowerCase();
+    if (!normalizedQuery || Object.keys(players || {}).length === 0) return [];
+    return Object.values(players as Record<string, any>)
+      .filter((player: any) =>
+        player?.full_name &&
+        ["QB", "RB", "WR", "TE"].includes(player.position) &&
+        player.full_name.toLowerCase().includes(normalizedQuery)
+      )
+      .sort((a: any, b: any) => (b.value || 0) - (a.value || 0))
+      .slice(0, 8);
+  }, [watchlistSearch, players]);
+
+  useEffect(() => {
+    localStorage.setItem(watchlistStorageKey, JSON.stringify(watchlistEntries));
+  }, [watchlistEntries, watchlistStorageKey]);
+
+  useEffect(() => {
+    localStorage.setItem(alertStorageKey, JSON.stringify(dashboardAlerts));
+  }, [dashboardAlerts, alertStorageKey]);
+
+  useEffect(() => {
+    localStorage.setItem(dismissedAlertStorageKey, JSON.stringify(dismissedAlertIds));
+  }, [dismissedAlertIds, dismissedAlertStorageKey]);
+
+  useEffect(() => {
+    if (!supabaseUser || !dashboardAlerts.length) return;
+    const payload = dashboardAlerts.slice(0, 80).map((alert) => ({
+      user_id: supabaseUser.id,
+      alert_id: alert.id,
+      category: alert.category,
+      source: alert.source,
+      severity: alert.severity,
+      title: alert.title,
+      detail: alert.detail,
+      actionable: alert.actionable,
+      dismissed: dismissedAlertIds.includes(alert.id) || !!alert.dismissed,
+      league_id: alert.leagueId || null,
+      player_id: alert.playerId || null,
+      payload: {
+        ...(alert.payload || {}),
+        link: alert.link || null,
+        teamLabel: alert.teamLabel || null,
+      },
+      updated_at: new Date(alert.timestamp || Date.now()).toISOString(),
+    }));
+    supabase.from("alerts").upsert(payload, { onConflict: "user_id,alert_id" }).then(() => {});
+  }, [supabaseUser?.id, dashboardAlerts, dismissedAlertIds]);
+
+  useEffect(() => {
+    const trackedPlayers = [
+      ...dashboardOwnedPlayers.map((entry: any) => ({
+        playerId: String(entry.player_id),
+        player: (players as any)?.[entry.player_id],
+        watch: watchlistEntries.find((watch) => watch.player_id === String(entry.player_id)) || null,
+        shareCount: entry.shareCount || 0,
+        leagues: entry.leagues || [],
+      })),
+      ...watchlistEntries
+        .filter((entry) => !dashboardOwnedPlayers.some((owned: any) => owned.player_id === entry.player_id))
+        .map((entry) => ({
+          playerId: entry.player_id,
+          player: (players as any)?.[entry.player_id],
+          watch: entry,
+          shareCount: 0,
+          leagues: [],
+        })),
+    ].filter((entry) => entry.player?.full_name);
+
+    if (!trackedPlayers.length) return;
+
+    let savedSnapshots: any = {};
+    try {
+      savedSnapshots = JSON.parse(localStorage.getItem(alertSnapshotStorageKey) || "{}");
+    } catch {
+      savedSnapshots = {};
+    }
+
+    const nextPlayerSnapshot = Object.fromEntries(
+      trackedPlayers.map((entry) => {
+        const player = entry.player;
+        const value = Number(calcFcValues[entry.playerId] ?? player?.value ?? 0);
+        return [entry.playerId, {
+          full_name: player.full_name,
+          status: String(player.status || ""),
+          team: String(player.team || ""),
+          value,
+          active: player.active !== false,
+          shareCount: entry.shareCount || 0,
+        }];
+      })
+    );
+
+    const incomingAlerts: AlertsCenterItem[] = [];
+    Object.entries(nextPlayerSnapshot).forEach(([playerId, snapshot]: any) => {
+      const previous = savedSnapshots?.players?.[playerId];
+      if (!previous) return;
+
+      const delta = Number(snapshot.value || 0) - Number(previous.value || 0);
+      const watch = watchlistEntries.find((entry) => entry.player_id === playerId);
+      const upThreshold = Number(watch?.threshold_up || 300);
+      const downThreshold = Number(watch?.threshold_down || 300);
+      if (delta >= upThreshold) {
+        incomingAlerts.push({
+          id: `market-up-${playerId}-${snapshot.value}`,
+          category: watch ? "watchlist" : "market",
+          source: watch ? "watchlist" : "internal",
+          severity: delta >= upThreshold * 1.8 ? "high" : "medium",
+          title: `${snapshot.full_name} is climbing`,
+          detail: `${snapshot.full_name} gained ${delta.toLocaleString()} in value${snapshot.shareCount ? ` across ${snapshot.shareCount} roster${snapshot.shareCount === 1 ? "" : "s"}` : ""}.`,
+          actionable: true,
+          timestamp: Date.now(),
+          playerId,
+          teamLabel: snapshot.team || null,
+          payload: { delta, direction: "up" },
+        });
+      } else if (delta <= -downThreshold) {
+        incomingAlerts.push({
+          id: `market-down-${playerId}-${snapshot.value}`,
+          category: watch ? "watchlist" : "market",
+          source: watch ? "watchlist" : "internal",
+          severity: delta <= -downThreshold * 1.8 ? "high" : "medium",
+          title: `${snapshot.full_name} is falling`,
+          detail: `${snapshot.full_name} dropped ${Math.abs(delta).toLocaleString()} in value${snapshot.shareCount ? ` across ${snapshot.shareCount} roster${snapshot.shareCount === 1 ? "" : "s"}` : ""}.`,
+          actionable: true,
+          timestamp: Date.now(),
+          playerId,
+          teamLabel: snapshot.team || null,
+          payload: { delta, direction: "down" },
+        });
+      }
+
+      if (snapshot.status !== previous.status) {
+        const nextStatus = snapshot.status || (snapshot.active ? "active" : "inactive");
+        incomingAlerts.push({
+          id: `status-${playerId}-${nextStatus}`,
+          category: "status",
+          source: "internal",
+          severity: /out|doubtful|suspended|inactive/i.test(nextStatus) ? "high" : "medium",
+          title: `${snapshot.full_name} status changed`,
+          detail: `${snapshot.full_name} moved from ${previous.status || "active"} to ${nextStatus}.`,
+          actionable: true,
+          timestamp: Date.now(),
+          playerId,
+          teamLabel: snapshot.team || null,
+          payload: { previousStatus: previous.status || "", nextStatus },
+        });
+      }
+
+      if (snapshot.team && previous.team && snapshot.team !== previous.team) {
+        incomingAlerts.push({
+          id: `team-${playerId}-${snapshot.team}`,
+          category: "status",
+          source: "internal",
+          severity: "medium",
+          title: `${snapshot.full_name} changed teams`,
+          detail: `${snapshot.full_name} moved from ${previous.team} to ${snapshot.team}.`,
+          actionable: true,
+          timestamp: Date.now(),
+          playerId,
+          teamLabel: snapshot.team,
+          payload: { previousTeam: previous.team, nextTeam: snapshot.team },
+        });
+      }
+    });
+
+    const nextLeagueSnapshot = Object.fromEntries(
+      selectedLeagueMateProfilesView.map((profile: any) => [
+        String(profile.rosterId),
+        {
+          ownerName: profile.ownerName,
+          fitScore: Number(profile.fitScore || 0),
+          weak: getProfilePosBuckets(profile.directionProfile).weak,
+          bucket: profile.directionProfile?.bucket || "",
+        },
+      ])
+    );
+    const priorLeagueSnapshot = savedSnapshots?.leagues?.[selectedLeague?.league_id || ""] || {};
+    Object.entries(nextLeagueSnapshot).forEach(([rosterId, snapshot]: any) => {
+      const previous = priorLeagueSnapshot?.[rosterId];
+      if (!previous) return;
+      const weakChanged =
+        JSON.stringify([...(snapshot.weak || [])].sort()) !== JSON.stringify([...(previous.weak || [])].sort());
+      const fitDelta = Number(snapshot.fitScore || 0) - Number(previous.fitScore || 0);
+      if (weakChanged || Math.abs(fitDelta) >= 10) {
+        incomingAlerts.push({
+          id: `league-${selectedLeague?.league_id || "none"}-${rosterId}-${snapshot.fitScore}`,
+          category: "league",
+          source: "internal",
+          severity: Math.abs(fitDelta) >= 18 ? "high" : "medium",
+          title: `${snapshot.ownerName} changed trade shape`,
+          detail: weakChanged
+            ? `${snapshot.ownerName} now shows new need pressure at ${(snapshot.weak || []).join("/") || "multiple spots"}.`
+            : `${snapshot.ownerName}'s fit score moved ${fitDelta > 0 ? "up" : "down"} by ${Math.abs(fitDelta)}.`,
+          actionable: true,
+          timestamp: Date.now(),
+          leagueId: selectedLeague?.league_id || null,
+          payload: { previous, snapshot },
+        });
+      }
+    });
+
+    const nextSnapshots = {
+      players: nextPlayerSnapshot,
+      leagues: {
+        ...(savedSnapshots?.leagues || {}),
+        ...(selectedLeague?.league_id ? {
+          [selectedLeague.league_id]: nextLeagueSnapshot,
+        } : {}),
+      },
+    };
+
+    localStorage.setItem(alertSnapshotStorageKey, JSON.stringify(nextSnapshots));
+
+    if (!alertBootstrapRef.current) {
+      alertBootstrapRef.current = true;
+      return;
+    }
+
+    mergeDashboardAlerts(incomingAlerts);
+  }, [
+    dashboardOwnedPlayers,
+    watchlistEntries,
+    players,
+    calcFcValues,
+    selectedLeague?.league_id,
+    selectedLeagueMateProfilesView,
+    alertSnapshotStorageKey,
+  ]);
+
+  useEffect(() => {
+    const trackedNames = [
+      ...dashboardOwnedPlayers.slice(0, 8).map((entry: any) => (players as any)?.[entry.player_id]?.full_name),
+      ...watchlistEntries.slice(0, 8).map((entry) => entry.label),
+    ].filter(Boolean);
+    const uniqueNames = Array.from(new Set(trackedNames)).slice(0, 10);
+    if (uniqueNames.length === 0) return;
+
+    let cancelled = false;
+    setLoadingExternalAlerts(true);
+    fetch(`/api/alerts/news?players=${encodeURIComponent(uniqueNames.join("|"))}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled || !Array.isArray(data?.items)) return;
+        const items = data.items.slice(0, 8).map((item: any) => ({
+          id: `news-${String(item.id || item.link || item.title).replace(/[^a-zA-Z0-9_-]/g, "")}`,
+          category: "news" as const,
+          source: "external" as const,
+          severity: (item.impact || item.playerNames?.length > 0) ? "medium" as const : "low" as const,
+          title: item.title || "Player news",
+          detail: item.summary || item.matchedPlayers?.join(", ") || "External update matched one of your tracked names.",
+          actionable: !!item.playerNames?.length,
+          timestamp: Number(new Date(item.published || Date.now())),
+          link: item.link || null,
+          payload: item,
+        }));
+        mergeDashboardAlerts(items);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoadingExternalAlerts(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [dashboardOwnedPlayers, watchlistEntries, players]);
+
+  const visibleDashboardAlerts = useMemo(
+    () =>
+      dashboardAlerts
+        .filter((alert) => !dismissedAlertIds.includes(alert.id) && !alert.dismissed)
+        .sort((a, b) => b.timestamp - a.timestamp),
+    [dashboardAlerts, dismissedAlertIds]
+  );
+
+  const actionableDashboardAlerts = useMemo(
+    () => visibleDashboardAlerts.filter((alert) => alert.actionable).slice(0, 6),
+    [visibleDashboardAlerts]
+  );
   // -------------------------
   // UI
   // -------------------------
@@ -3645,6 +4194,9 @@ const myPlayerSet = new Set<string>(roster?.players || []);
           <button onClick={() => user && setMainTab("TRADE_HUB")} className={`text-sm whitespace-nowrap py-1 ${mainTab === "TRADE_HUB" ? "text-blue-400 font-semibold" : "text-gray-400"} ${!user ? "opacity-40 cursor-not-allowed" : ""}`}>
             Trade Hub
           </button>
+          <button onClick={() => user && setMainTab("ALERTS")} className={`text-sm whitespace-nowrap py-1 ${mainTab === "ALERTS" ? "text-blue-400 font-semibold" : "text-gray-400"} ${!user ? "opacity-40 cursor-not-allowed" : ""}`}>
+            Alerts
+          </button>
           <button onClick={() => user && setMainTab("MANAGEMENT_HUB")} className={`text-sm whitespace-nowrap py-1 ${mainTab === "MANAGEMENT_HUB" ? "text-blue-400 font-semibold" : "text-gray-400"} ${!user ? "opacity-40 cursor-not-allowed" : ""}`}>
             Management Hub
           </button>
@@ -3652,7 +4204,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
         </div>
       </div>
 
-      <div className={mainTab === "DRAFT" || mainTab === "TRADE_HUB" || mainTab === "MANAGEMENT_HUB" || mainTab === "LEAGUES" ? "" : "max-w-3xl mx-auto p-6"}>
+      <div className={mainTab === "DRAFT" || mainTab === "TRADE_HUB" || mainTab === "MANAGEMENT_HUB" || mainTab === "LEAGUES" || mainTab === "ALERTS" ? "" : "max-w-3xl mx-auto p-6"}>
 {mainTab === "DASHBOARD" && (
   <>
     <>
@@ -3682,6 +4234,24 @@ const myPlayerSet = new Set<string>(roster?.players || []);
 </>
   </>
 )}
+        {mainTab === "ALERTS" && (
+          <AlertsPage
+            alerts={visibleDashboardAlerts}
+            actionableAlerts={actionableDashboardAlerts}
+            watchlistEntries={watchlistEntries}
+            watchlistSearch={watchlistSearch}
+            onWatchlistSearchChange={setWatchlistSearch}
+            watchlistSearchResults={watchlistSearchResults}
+            onAddWatchlist={addWatchlistEntry}
+            onRemoveWatchlist={removeWatchlistEntry}
+            onDismissAlert={dismissDashboardAlert}
+            watchThresholdUp={watchThresholdUp}
+            watchThresholdDown={watchThresholdDown}
+            onWatchThresholdUpChange={setWatchThresholdUp}
+            onWatchThresholdDownChange={setWatchThresholdDown}
+            loadingExternalAlerts={loadingExternalAlerts}
+          />
+        )}
         {/* LEAGUE HUB */}
         {mainTab === "LEAGUES" && (
           <div className="max-w-5xl mx-auto px-4 py-6">
@@ -5944,7 +6514,7 @@ const starters = starterSlots
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {topAvailableRookies.map((player: any) => (
               <div
-                key={player.player_id}
+                key={player.player_id || `${normalizeRookieName(player.name)}-${player.boardRank}`}
                 className="bg-gray-900 border border-gray-800 rounded-xl px-4 py-3"
               >
                 <div className="flex items-center justify-between gap-3">
