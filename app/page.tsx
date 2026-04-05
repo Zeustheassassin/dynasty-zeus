@@ -33,7 +33,7 @@ const PROJ_SOURCES = [
   { id: 'sleeper'     as const, label: 'RotoWire/Sleeper',   tier: 2, weight: 0.20 },
 ];
 type ProjSourceId = typeof PROJ_SOURCES[number]['id'];
-type LeagueHubTab = "OVERVIEW" | "ROSTERS" | "LEAGUE_MATES" | "OPP_ROSTERS" | "STANDINGS" | "STARTERS" | "NOTES" | "POWER_RANKINGS";
+type LeagueHubTab = "OVERVIEW" | "SIMULATOR" | "ROSTERS" | "LEAGUE_MATES" | "OPP_ROSTERS" | "STANDINGS" | "STARTERS" | "NOTES" | "POWER_RANKINGS";
 
 const LEAGUE_HUB_GROUPS: Array<{
   id: string;
@@ -45,6 +45,7 @@ const LEAGUE_HUB_GROUPS: Array<{
     label: "Summary",
     tabs: [
       { id: "OVERVIEW", label: "League Overview" },
+      { id: "SIMULATOR", label: "Season Simulator" },
       { id: "LEAGUE_MATES", label: "League Mates" },
       { id: "POWER_RANKINGS", label: "Power Rankings" },
       { id: "STANDINGS", label: "Standings" },
@@ -191,6 +192,52 @@ const ordinal = (rank: number) => {
 
 const average = (values: number[]) =>
   values.length ? Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 10) / 10 : 0;
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+const sum = (values: number[]) => values.reduce((total, value) => total + value, 0);
+const logisticWinProb = (myScore: number, oppScore: number, scale = 180) =>
+  clamp(1 / (1 + Math.exp((oppScore - myScore) / scale)), 0.05, 0.95);
+const createSeededRandom = (seed: number) => {
+  let state = (seed >>> 0) || 1;
+  return () => {
+    state = (Math.imul(1664525, state) + 1013904223) >>> 0;
+    return state / 4294967296;
+  };
+};
+const randomNormal = (rng: () => number) => {
+  const u1 = Math.max(rng(), 1e-9);
+  const u2 = Math.max(rng(), 1e-9);
+  return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+};
+const buildRoundRobinSchedule = (rosterIds: number[], totalWeeks: number) => {
+  const rotation = [...rosterIds];
+  if (rotation.length % 2 === 1) rotation.push(-1);
+  if (rotation.length < 2) return Array.from({ length: totalWeeks }, () => [] as Array<[number, number]>);
+
+  const rounds: Array<Array<[number, number]>> = [];
+  let current = [...rotation];
+  for (let round = 0; round < current.length - 1; round++) {
+    const pairs: Array<[number, number]> = [];
+    for (let idx = 0; idx < current.length / 2; idx++) {
+      const left = current[idx];
+      const right = current[current.length - 1 - idx];
+      if (left !== -1 && right !== -1) pairs.push([left, right]);
+    }
+    rounds.push(pairs);
+    current = [current[0], current[current.length - 1], ...current.slice(1, -1)];
+  }
+  return Array.from({ length: totalWeeks }, (_, weekIdx) => rounds[weekIdx % rounds.length] || []);
+};
+const percentileFromCounts = (counts: number[], percentile: number) => {
+  const total = sum(counts);
+  if (!total) return 0;
+  const threshold = total * percentile;
+  let running = 0;
+  for (let idx = 0; idx < counts.length; idx++) {
+    running += counts[idx];
+    if (running >= threshold) return idx;
+  }
+  return counts.length - 1;
+};
 
 const rankAgainstLeague = (totals: number[], value: number) => {
   const sorted = [...totals].sort((a, b) => b - a);
@@ -742,7 +789,7 @@ const [selectedLeagueDraftHasOccurred, setSelectedLeagueDraftHasOccurred] = useS
 const [tradeHubUserId, setTradeHubUserId] = useState<string | null>(null);
 const [tradeHubData, setTradeHubData] = useState<any[] | null>(null);
 const [loadingTradeHub, setLoadingTradeHub] = useState(false);
-const [tradeHubSection, setTradeHubSection] = useState<"CALCULATOR" | "FINDER">("CALCULATOR");
+const [tradeHubSection, setTradeHubSection] = useState<"CALCULATOR" | "FINDER" | "RECOMMENDATIONS">("CALCULATOR");
 const [finderSeed, setFinderSeed] = useState(() => Math.random());
 const [finderDraftCapitalMode, setFinderDraftCapitalMode] = useState(false);
 const [leagueHubTab, setLeagueHubTab] = useState<LeagueHubTab>("OVERVIEW");
@@ -756,7 +803,9 @@ const [loadingCrossLeagueMateIntel, setLoadingCrossLeagueMateIntel] = useState(f
 const [leagueMateProfileCache, setLeagueMateProfileCache] = useState<Record<string, any[]>>({});
 const [leagueNotes, setLeagueNotes] = useState<Record<string, string>>({});
 const [nflState, setNflState] = useState<any>(null);
-const [dataHubTab, setDataHubTab] = useState<"OWNERSHIP" | "DYNASTY" | "REDRAFT" | "PROJECTIONS" | "LEAGUEMATES">("OWNERSHIP");
+const [leagueWeeklyMatchups, setLeagueWeeklyMatchups] = useState<Record<string, any[]>>({});
+const [loadingLeagueWeeklyMatchups, setLoadingLeagueWeeklyMatchups] = useState(false);
+const [dataHubTab, setDataHubTab] = useState<"OWNERSHIP" | "DYNASTY" | "REDRAFT" | "PROJECTIONS" | "PICK_VALUES" | "LEAGUEMATES">("OWNERSHIP");
 const [leagueMateStats, setLeagueMateStats] = useState<any[]>([]);
 const [leagueMateStatsLoaded, setLeagueMateStatsLoaded] = useState(false);
 const [loadingLeagueMateStats, setLoadingLeagueMateStats] = useState(false);
@@ -1099,7 +1148,7 @@ useEffect(() => {
 
 // Load league-specific FC values whenever the calculator or finder tab is active and a league is selected
 useEffect(() => {
-  if ((tradeHubSection === "CALCULATOR" || tradeHubSection === "FINDER") && selectedLeague?.league_id) {
+  if ((tradeHubSection === "CALCULATOR" || tradeHubSection === "FINDER" || tradeHubSection === "RECOMMENDATIONS") && selectedLeague?.league_id) {
     loadCalcValues(selectedLeague.league_id);
   }
 }, [tradeHubSection, selectedLeague?.league_id]);
@@ -1137,6 +1186,64 @@ useEffect(() => {
     loadRedraftValues();
   }
 }, [mainTab, leagueHubTab, selectedLeague?.league_id]);
+
+useEffect(() => {
+  if (mainTab === "LEAGUES" && leagueHubTab === "SIMULATOR") {
+    loadNflState();
+    loadRedraftValues();
+    const isRegularSeason = nflState?.season_type === "regular" && (nflState?.week ?? 0) > 0;
+    const simulatorProjectionWeek = isRegularSeason ? Number(nflState?.week) : 0;
+    if (projectionWeek !== simulatorProjectionWeek) {
+      setProjectionWeek(simulatorProjectionWeek);
+      setProjectionLoaded(false);
+      loadProjections(simulatorProjectionWeek === 0 ? "season" : simulatorProjectionWeek);
+    } else if (!projectionLoaded) {
+      loadProjections(simulatorProjectionWeek === 0 ? "season" : simulatorProjectionWeek);
+    }
+  }
+}, [mainTab, leagueHubTab, selectedLeague?.league_id, nflState?.week, nflState?.season_type]);
+
+useEffect(() => {
+  const leagueId = selectedLeague?.league_id;
+  if (mainTab !== "LEAGUES" || leagueHubTab !== "SIMULATOR" || !leagueId) return;
+  const isRegularSeason = nflState?.season_type === "regular" && (nflState?.week ?? 0) > 0;
+  if (!isRegularSeason) return;
+  if (leagueWeeklyMatchups[leagueId]) return;
+
+  let cancelled = false;
+
+  const loadLeagueWeeklyHistory = async () => {
+    const regularSeasonWeeks = Math.max(1, Number(selectedLeague?.settings?.playoff_week_start || 15) - 1);
+    if (regularSeasonWeeks <= 0) return;
+
+    setLoadingLeagueWeeklyMatchups(true);
+    try {
+      const weeks = Array.from({ length: regularSeasonWeeks }, (_, idx) => idx + 1);
+      const results = await Promise.all(
+        weeks.map(async (week) => {
+          const data = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/matchups/${week}`)
+            .then((r) => r.json())
+            .catch(() => []);
+          return {
+            week,
+            matchups: Array.isArray(data) ? data : [],
+          };
+        })
+      );
+      if (!cancelled) {
+        setLeagueWeeklyMatchups((prev) => ({
+          ...prev,
+          [leagueId]: results,
+        }));
+      }
+    } finally {
+      if (!cancelled) setLoadingLeagueWeeklyMatchups(false);
+    }
+  };
+
+  loadLeagueWeeklyHistory();
+  return () => { cancelled = true; };
+}, [mainTab, leagueHubTab, selectedLeague?.league_id, selectedLeague?.settings?.playoff_week_start, nflState?.week, nflState?.season_type, leagueWeeklyMatchups]);
 
 useEffect(() => {
   if (!selectedLeague?.league_id || !rosters.length || !Object.keys(players || {}).length) {
@@ -1227,7 +1334,7 @@ useEffect(() => {
     !!Object.keys(players || {}).length &&
     (
       (mainTab === "LEAGUES" && leagueHubTab === "LEAGUE_MATES") ||
-      (mainTab === "TRADE_HUB" && tradeHubSection === "FINDER")
+      (mainTab === "TRADE_HUB" && (tradeHubSection === "FINDER" || tradeHubSection === "RECOMMENDATIONS"))
     );
 
   if (!shouldLoadCrossLeagueIntel) return;
@@ -1506,7 +1613,7 @@ useEffect(() => {
 // Runs on mount AND whenever supabaseUser changes (login/logout).
 // Order of preference: Supabase (if logged in) > localStorage > ADP default.
 useEffect(() => {
-  const loadRookieBoard = async () => {
+const loadRookieBoard = async () => {
     // 1. Fetch fresh player data from sheet + ADP
     const [sheetText, adpResponse] = await Promise.all([
       fetch(ROOKIE_BOARD_SHEET_URL).then((res) => res.text()),
@@ -2500,6 +2607,491 @@ const getTeamSummary = () => {
       dynastyValueForPlayer: (id: string) => calcFcValues[id] ?? (players as any)?.[id]?.value ?? 0,
     });
   }, [selectedLeague?.league_id, rosters, allPicks, players, pickFcValues, redraftValues, calcFcValues, user?.user_id]);
+  const selectedLeagueSimulation = useMemo(() => {
+    if (!selectedLeague || !rosters.length) return null;
+
+    const leagueId = selectedLeague.league_id;
+    const nflWeek = Number(nflState?.week || 0);
+    const isRegularSeason = nflState?.season_type === "regular" && nflWeek > 0;
+    const currentWeek = isRegularSeason ? nflWeek : 0;
+    const simulationMode = currentWeek > 0 ? "in_season" : "offseason";
+    const regularSeasonWeeks = Math.max(1, Number(selectedLeague?.settings?.playoff_week_start || 15) - 1);
+    const playoffTeams = Number(selectedLeague?.settings?.playoff_teams || Math.ceil(rosters.length / 2));
+    const byeTeams = playoffTeams >= 6 ? 2 : playoffTeams === 5 ? 1 : 0;
+    const simCount = simulationMode === "offseason" ? 350 : 250;
+    const weeklyHistory = (leagueWeeklyMatchups[leagueId] || []) as Array<{ week: number; matchups: any[] }>;
+    const projectionMap = new Map(
+      ((projectionWeek === 0 || projectionWeek === currentWeek) ? projectionData : []).map((row: any) => [String(row.sleeperId), Number(row.fpts || 0)])
+    );
+    const lineupSlots = (selectedLeague?.roster_positions || []).filter(
+      (slot: string) => !["BN", "IR", "TAXI"].includes(slot)
+    );
+    const weeksPlayed = currentWeek > 0
+      ? weeklyHistory.filter((week) => week.week < currentWeek).length
+      : 0;
+    const projectionIsSeason = projectionWeek === 0;
+
+    const scorePlayer = (playerId: string) => {
+      const projected = projectionMap.get(String(playerId));
+      if (typeof projected === "number" && projected > 0) return projected;
+      return (redraftValues[playerId] ?? 0) / 250;
+    };
+
+    const buildLineupStrength = (rosterEntry: any) => {
+      const available = (rosterEntry?.players || [])
+        .map((id: string) => (players as any)?.[id])
+        .filter((player: any) => player && ["QB", "RB", "WR", "TE"].includes(player.position))
+        .map((player: any) => ({
+          ...player,
+          score: scorePlayer(player.player_id),
+        }))
+        .sort((a: any, b: any) => b.score - a.score);
+
+      const used = new Set<string>();
+      const lineup: any[] = [];
+      const claimBest = (eligible: string[], slot: string) => {
+        const next = available.find((player: any) => !used.has(player.player_id) && eligible.includes(player.position));
+        if (!next) {
+          lineup.push({ slot, player: null, score: 0 });
+          return;
+        }
+        used.add(next.player_id);
+        lineup.push({ slot, player: next, score: next.score });
+      };
+
+      lineupSlots.forEach((slot: string) => {
+        if (slot === "FLEX") return claimBest(["RB", "WR", "TE"], slot);
+        if (slot === "SUPER_FLEX") return claimBest(["QB", "RB", "WR", "TE"], slot);
+        return claimBest([slot], slot);
+      });
+
+      const bench = available.filter((player: any) => !used.has(player.player_id));
+      const rawLineupScore = sum(lineup.map((slot) => slot.score || 0));
+      const rawBenchDepth = sum(bench.slice(0, 5).map((player: any) => player.score || 0));
+      const weeklyLineupScore = rawLineupScore / (projectionIsSeason ? regularSeasonWeeks : 1);
+      const weeklyBenchDepth = rawBenchDepth / (projectionIsSeason ? regularSeasonWeeks : 1);
+      const seasonProjection = projectionIsSeason
+        ? rawLineupScore
+        : Number(rosterEntry?.settings?.fpts_max || 0) + (Math.max(regularSeasonWeeks - Math.max(currentWeek - 1, 0), 0) * rawLineupScore);
+      return {
+        lineupScore: weeklyLineupScore,
+        benchDepth: weeklyBenchDepth,
+        projectedMaxPf: Math.round(seasonProjection * 10) / 10,
+        powerScore: Math.round((weeklyLineupScore + weeklyBenchDepth * 0.35) * 10) / 10,
+        weeklyStdDev: Math.max(8, weeklyLineupScore * 0.16 + weeklyBenchDepth * 0.08),
+      };
+    };
+
+    const rows: any[] = rosters.map((rosterEntry: any) => {
+      const strength = buildLineupStrength(rosterEntry);
+      const standing = standings.find((entry: any) => Number(entry.roster_id) === Number(rosterEntry.roster_id));
+      const ownerName = (users as any)[rosterEntry.owner_id] || `Team ${rosterEntry.roster_id}`;
+      return {
+        rosterId: Number(rosterEntry.roster_id),
+        ownerId: rosterEntry.owner_id,
+        ownerName,
+        actualWins: Number(standing?.wins || rosterEntry.settings?.wins || 0),
+        actualLosses: Number(standing?.losses || rosterEntry.settings?.losses || 0),
+        pointsFor: Number(standing?.fpts || rosterEntry.settings?.fpts || 0),
+        maxPf: Number(standing?.max_pf || rosterEntry.settings?.fpts_max || 0),
+        ...strength,
+      };
+    });
+
+    const rowByRosterId = new Map(rows.map((row) => [row.rosterId, row]));
+    const rosterIds = rows.map((row) => row.rosterId).sort((a, b) => a - b);
+    const generatedSchedule = buildRoundRobinSchedule(rosterIds, regularSeasonWeeks);
+    const actualScheduleByWeek = new Map<number, Array<[number, number]>>();
+    weeklyHistory.forEach((week) => {
+      const grouped = new Map<number, number[]>();
+      (week.matchups || [])
+        .filter((entry: any) => entry?.matchup_id && entry?.roster_id)
+        .forEach((entry: any) => {
+          const matchupId = Number(entry.matchup_id);
+          if (!grouped.has(matchupId)) grouped.set(matchupId, []);
+          grouped.get(matchupId)?.push(Number(entry.roster_id));
+        });
+      const pairs = [...grouped.values()]
+        .filter((pair) => pair.length === 2)
+        .map((pair) => [pair[0], pair[1]] as [number, number]);
+      if (pairs.length > 0) actualScheduleByWeek.set(Number(week.week), pairs);
+    });
+
+    const scheduleByWeek = Array.from({ length: regularSeasonWeeks }, (_, idx) => {
+      const week = idx + 1;
+      const actualPairs = actualScheduleByWeek.get(week) || [];
+      return {
+        week,
+        source: actualPairs.length > 0 ? "scheduled" : "generated",
+        pairs: actualPairs.length > 0 ? actualPairs : generatedSchedule[idx] || [],
+      };
+    });
+
+    const playMatch = (aRosterId: number, bRosterId: number, rng: () => number) => {
+      const aRow = rowByRosterId.get(aRosterId);
+      const bRow = rowByRosterId.get(bRosterId);
+      if (!aRow || !bRow) return { winner: aRosterId, loser: bRosterId, aPoints: 0, bPoints: 0 };
+      const aPoints = Math.max(40, aRow.lineupScore + randomNormal(rng) * aRow.weeklyStdDev);
+      const bPoints = Math.max(40, bRow.lineupScore + randomNormal(rng) * bRow.weeklyStdDev);
+      if (aPoints === bPoints) {
+        return rng() < 0.5
+          ? { winner: aRosterId, loser: bRosterId, aPoints, bPoints }
+          : { winner: bRosterId, loser: aRosterId, aPoints, bPoints };
+      }
+      return aPoints > bPoints
+        ? { winner: aRosterId, loser: bRosterId, aPoints, bPoints }
+        : { winner: bRosterId, loser: aRosterId, aPoints, bPoints };
+    };
+
+    const seededIndex = (seededIds: number[], rosterId: number) => seededIds.indexOf(rosterId);
+    const simulatePlayoffs = (seededIds: number[], rng: () => number) => {
+      if (seededIds.length === 0) return null;
+      if (seededIds.length === 1) return seededIds[0];
+
+      let roundTeams = [...seededIds];
+      if (byeTeams > 0 && roundTeams.length > byeTeams) {
+        const byes = roundTeams.slice(0, byeTeams);
+        const openingRound = roundTeams.slice(byeTeams);
+        const winners: number[] = [];
+        while (openingRound.length >= 2) {
+          const high = openingRound.shift()!;
+          const low = openingRound.pop()!;
+          winners.push(playMatch(high, low, rng).winner);
+        }
+        roundTeams = [...byes, ...winners].sort((a, b) => seededIndex(seededIds, a) - seededIndex(seededIds, b));
+      }
+
+      while (roundTeams.length > 1) {
+        const roundSeeds = [...roundTeams].sort((a, b) => seededIndex(seededIds, a) - seededIndex(seededIds, b));
+        const winners: number[] = [];
+        while (roundSeeds.length >= 2) {
+          const high = roundSeeds.shift()!;
+          const low = roundSeeds.pop()!;
+          winners.push(playMatch(high, low, rng).winner);
+        }
+        roundTeams = winners.sort((a, b) => seededIndex(seededIds, a) - seededIndex(seededIds, b));
+      }
+      return roundTeams[0];
+    };
+
+    rows.forEach((row) => {
+      const others = rows.filter((other) => other.rosterId !== row.rosterId);
+      row.avgWinProb = others.length
+        ? average(others.map((other) => logisticWinProb(row.powerScore, other.powerScore, 14) * 100)) / 100
+        : 0.5;
+      row.currentWeekWinProb = row.avgWinProb;
+      row.currentOpponent = null;
+      row.allPlayWins = 0;
+      row.allPlayLosses = 0;
+      row.upcomingSchedule = [] as any[];
+    });
+
+    if (currentWeek > 0) {
+      weeklyHistory
+        .filter((week) => week.week < currentWeek)
+        .forEach((week) => {
+          const scored = (week.matchups || []).filter((matchup: any) => matchup?.roster_id);
+          scored.forEach((entry: any) => {
+            const row = rowByRosterId.get(Number(entry.roster_id));
+            if (!row) return;
+            const wins = scored.filter((other: any) => Number(other.roster_id) !== Number(entry.roster_id) && Number(entry.points || 0) > Number(other.points || 0)).length;
+            const losses = scored.filter((other: any) => Number(other.roster_id) !== Number(entry.roster_id) && Number(entry.points || 0) < Number(other.points || 0)).length;
+            row.allPlayWins += wins;
+            row.allPlayLosses += losses;
+          });
+        });
+    }
+
+    const displayWeeks = scheduleByWeek
+      .filter((week) => week.week >= (currentWeek || 1))
+      .slice(0, 4)
+      .map((week) => {
+        const matchups = week.pairs.map(([aRosterId, bRosterId]) => {
+          const aRow = rowByRosterId.get(aRosterId);
+          const bRow = rowByRosterId.get(bRosterId);
+          if (!aRow || !bRow) return null;
+          const aProb = logisticWinProb(aRow.powerScore, bRow.powerScore, 14);
+          const bProb = 1 - aProb;
+          const matchup = {
+            week: week.week,
+            source: week.source,
+            aRosterId,
+            aName: aRow.ownerName,
+            aWinProb: aProb,
+            aProjected: Math.round(aRow.lineupScore * 10) / 10,
+            bRosterId,
+            bName: bRow.ownerName,
+            bWinProb: bProb,
+            bProjected: Math.round(bRow.lineupScore * 10) / 10,
+          };
+          aRow.upcomingSchedule.push({
+            week: week.week,
+            opponentRosterId: bRosterId,
+            opponentName: bRow.ownerName,
+            winProb: aProb,
+            projectedPoints: matchup.aProjected,
+            source: week.source,
+          });
+          bRow.upcomingSchedule.push({
+            week: week.week,
+            opponentRosterId: aRosterId,
+            opponentName: aRow.ownerName,
+            winProb: bProb,
+            projectedPoints: matchup.bProjected,
+            source: week.source,
+          });
+          if (week.week === currentWeek) {
+            aRow.currentWeekWinProb = aProb;
+            bRow.currentWeekWinProb = bProb;
+            aRow.currentOpponent = bRow.ownerName;
+            bRow.currentOpponent = aRow.ownerName;
+          }
+          return matchup;
+        }).filter(Boolean);
+        return { week: week.week, source: week.source, matchups };
+      });
+
+    const simulationStats = Object.fromEntries(
+      rows.map((row) => [row.rosterId, {
+        winsSum: 0,
+        finishCounts: Array.from({ length: rosters.length + 1 }, () => 0),
+        slotCounts: Array.from({ length: rosters.length + 1 }, () => 0),
+        playoffCount: 0,
+        byeCount: 0,
+        titleCount: 0,
+      }])
+    ) as Record<number, any>;
+
+    const leagueSeed = String(leagueId).split("").reduce((acc, char, idx) => acc + char.charCodeAt(0) * (idx + 1), 0);
+    const simStartWeek = currentWeek > 0 ? currentWeek : 1;
+    for (let sim = 0; sim < simCount; sim++) {
+      const rng = createSeededRandom(leagueSeed + sim * 7919 + regularSeasonWeeks * 17);
+      const winMap = new Map<number, number>(rows.map((row) => [row.rosterId, row.actualWins]));
+      const pointMap = new Map<number, number>(rows.map((row) => [row.rosterId, row.pointsFor]));
+
+      scheduleByWeek
+        .filter((week) => week.week >= simStartWeek)
+        .forEach((week) => {
+          week.pairs.forEach(([aRosterId, bRosterId]) => {
+            const result = playMatch(aRosterId, bRosterId, rng);
+            pointMap.set(aRosterId, (pointMap.get(aRosterId) || 0) + result.aPoints);
+            pointMap.set(bRosterId, (pointMap.get(bRosterId) || 0) + result.bPoints);
+            winMap.set(result.winner, (winMap.get(result.winner) || 0) + 1);
+          });
+        });
+
+      const simStandings = rows
+        .map((row) => ({
+          rosterId: row.rosterId,
+          wins: winMap.get(row.rosterId) || 0,
+          points: pointMap.get(row.rosterId) || 0,
+          powerScore: row.powerScore,
+          projectedMaxPf: row.projectedMaxPf,
+        }))
+        .sort((a, b) => {
+          if (b.wins !== a.wins) return b.wins - a.wins;
+          if (b.points !== a.points) return b.points - a.points;
+          if (b.powerScore !== a.powerScore) return b.powerScore - a.powerScore;
+          return b.projectedMaxPf - a.projectedMaxPf;
+        });
+
+      const seededIds = simStandings.map((entry) => entry.rosterId);
+      seededIds.forEach((rosterId, index) => {
+        const stats = simulationStats[rosterId];
+        stats.winsSum += winMap.get(rosterId) || 0;
+        stats.finishCounts[index + 1] += 1;
+        stats.slotCounts[rosters.length - index] += 1;
+      });
+      seededIds.slice(0, playoffTeams).forEach((rosterId, index) => {
+        simulationStats[rosterId].playoffCount += 1;
+        if (index < byeTeams) simulationStats[rosterId].byeCount += 1;
+      });
+      const championRosterId = simulatePlayoffs(seededIds.slice(0, playoffTeams), rng);
+      if (championRosterId != null) simulationStats[championRosterId].titleCount += 1;
+    }
+
+    rows.forEach((row) => {
+      const stats = simulationStats[row.rosterId];
+      const finishCounts = stats.finishCounts as number[];
+      const slotCounts = stats.slotCounts as number[];
+      const expectedFinish = finishCounts.reduce((total, count, finish) => total + finish * count, 0) / simCount;
+      const likelyFinish = finishCounts.reduce((bestIdx, count, idx, arr) => count > arr[bestIdx] ? idx : bestIdx, 1);
+      const floorFinish = percentileFromCounts(finishCounts, 0.2);
+      const ceilingFinish = percentileFromCounts(finishCounts, 0.8);
+
+      row.expectedWins = Math.round((stats.winsSum / simCount) * 10) / 10;
+      row.avgFinish = Math.round(expectedFinish * 10) / 10;
+      row.projectedFinish = likelyFinish;
+      row.finishRange = `${floorFinish || likelyFinish}-${ceilingFinish || likelyFinish}`;
+      row.playoffOdds = Math.round((stats.playoffCount / simCount) * 1000) / 10;
+      row.byeOdds = Math.round((stats.byeCount / simCount) * 1000) / 10;
+      row.titleOdds = Math.round((stats.titleCount / simCount) * 1000) / 10;
+      row.finishProbabilities = finishCounts.map((count) => count / simCount);
+      row.slotProbabilities = slotCounts.map((count) => count / simCount);
+      row.allPlayExpectedWins = weeksPlayed > 0 ? Math.round((row.allPlayWins / Math.max(rosters.length - 1, 1)) * 10) / 10 : 0;
+      row.luckScore = weeksPlayed > 0 ? Math.round((row.actualWins - row.allPlayExpectedWins) * 10) / 10 : 0;
+      row.oneOhOneOdds = Math.round(((slotCounts[1] || 0) / simCount) * 1000) / 10;
+      row.upcomingSchedule = row.upcomingSchedule.slice(0, 4);
+    });
+
+    const ranked = [...rows].sort((a: any, b: any) => {
+      if (b.playoffOdds !== a.playoffOdds) return b.playoffOdds - a.playoffOdds;
+      if (b.titleOdds !== a.titleOdds) return b.titleOdds - a.titleOdds;
+      if (b.expectedWins !== a.expectedWins) return b.expectedWins - a.expectedWins;
+      return b.powerScore - a.powerScore;
+    });
+
+    return {
+      currentWeek,
+      simulationMode,
+      regularSeasonWeeks,
+      playoffTeams,
+      byeTeams,
+      weeksPlayed,
+      simCount,
+      rows: ranked,
+      weeklyMatchups: displayWeeks,
+      rowByRosterId: new Map(ranked.map((row) => [row.rosterId, row])),
+    };
+  }, [
+    selectedLeague?.league_id,
+    selectedLeague?.settings?.playoff_week_start,
+    selectedLeague?.settings?.playoff_teams,
+    selectedLeague?.roster_positions,
+    rosters,
+    nflState?.week,
+    nflState?.season_type,
+    projectionData,
+    projectionWeek,
+    players,
+    redraftValues,
+    leagueWeeklyMatchups,
+    standings,
+    users,
+  ]);
+  const selectedLeagueDynamicPickValues = useMemo(() => {
+    const leagueId = selectedLeague?.league_id;
+    if (!leagueId || !selectedLeagueSimulation) return {} as Record<string, any>;
+
+    const totalTeams = rosters.length || 12;
+    const slots = Array.from({ length: totalTeams }, (_, idx) => idx + 1);
+    const bucketForSlot = (slot: number) => {
+      const earlyCut = Math.ceil(totalTeams / 3);
+      const midCut = Math.ceil((totalTeams * 2) / 3);
+      if (slot <= earlyCut) return "early";
+      if (slot <= midCut) return "mid";
+      return "late";
+    };
+    const currentRoundValue = (round: number) => pickFcValues[`${CURRENT_YEAR}-${round}`] || 0;
+    const getBandValue = (season: string, round: number, bucket: "early" | "mid" | "late") => {
+      const bucketSlots = slots.filter((slot) => bucketForSlot(slot) === bucket);
+      const baseSlots = bucketSlots
+        .map((slot) => pickFcValues[`${CURRENT_YEAR}-${round}.${String(slot).padStart(2, "0")}`])
+        .filter(Boolean);
+      const baseBandValue = baseSlots.length > 0
+        ? Math.round(sum(baseSlots as number[]) / baseSlots.length)
+        : Math.round((currentRoundValue(round) || 0) * (bucket === "early" ? 1.2 : bucket === "mid" ? 1 : 0.8));
+      const seasonRoundValue = pickFcValues[`${season}-${round}`] || currentRoundValue(round) || baseBandValue;
+      const currentRoundBase = currentRoundValue(round) || baseBandValue || 1;
+      return Math.round(baseBandValue * (seasonRoundValue / currentRoundBase));
+    };
+
+    return Object.fromEntries(
+      (allPicks as any[]).map((pick: any) => {
+        const key = `${pick.season}-${pick.round}-${pick.roster_id}`;
+        const rosterProjection = selectedLeagueSimulation.rowByRosterId.get(Number(pick.roster_id));
+        const fallback = getStoredPickValue(pickFcValues, pick);
+        if (!rosterProjection) {
+          return [key, {
+            bucket: "mid",
+            label: "Mid outcome most likely",
+            expectedValue: fallback,
+            expectedSlot: Math.round((totalTeams + 1) / 2),
+            floorValue: Math.round(fallback * 0.85),
+            ceilingValue: Math.round(fallback * 1.15),
+            probabilities: { early: 0.2, mid: 0.6, late: 0.2 },
+            likelySlots: [],
+          }];
+        }
+
+        if (String(pick.season) === CURRENT_YEAR && String(pick.slot || "").includes(".")) {
+          const slot = Number(String(pick.slot).split(".")[1] || 0);
+          const bucket = bucketForSlot(slot) as "early" | "mid" | "late";
+          const exactValue = getStoredPickValue(pickFcValues, pick);
+          return [key, {
+            bucket,
+            label: `${bucket[0].toUpperCase()}${bucket.slice(1)} slot locked in`,
+            expectedValue: exactValue,
+            expectedSlot: slot,
+            floorValue: exactValue,
+            ceilingValue: exactValue,
+            probabilities: {
+              early: bucket === "early" ? 1 : 0,
+              mid: bucket === "mid" ? 1 : 0,
+              late: bucket === "late" ? 1 : 0,
+            },
+            slotProbabilities: slots.map((currentSlot) => currentSlot === slot ? 1 : 0),
+            likelySlots: [{ slot, probability: 1 }],
+          }];
+        }
+
+        const seasonDistance = Math.max(0, Number(pick.season) - Number(CURRENT_YEAR));
+        const blendWeight = 1 / (1 + seasonDistance * 0.75);
+        const baseSlotProbabilities = slots.map((slot) => rosterProjection.slotProbabilities?.[slot] || (1 / totalTeams));
+        const slotProbabilitiesRaw = baseSlotProbabilities.map((probability) =>
+          probability * blendWeight + ((1 - blendWeight) * (1 / totalTeams))
+        );
+        const slotTotal = sum(slotProbabilitiesRaw) || 1;
+        const slotProbabilities = slotProbabilitiesRaw.map((probability) => probability / slotTotal);
+        const slotValues = slots.map((slot) => {
+          const bucket = bucketForSlot(slot) as "early" | "mid" | "late";
+          const currentSlotValue = pickFcValues[`${CURRENT_YEAR}-${pick.round}.${String(slot).padStart(2, "0")}`];
+          if (currentSlotValue) {
+            const seasonRoundValue = pickFcValues[`${pick.season}-${pick.round}`] || currentRoundValue(Number(pick.round)) || 1;
+            const currentBase = currentRoundValue(Number(pick.round)) || 1;
+            return Math.round((currentSlotValue as number) * (seasonRoundValue / currentBase));
+          }
+          return getBandValue(String(pick.season), Number(pick.round), bucket);
+        });
+        const bucketProbabilities = slotProbabilities.reduce((acc: Record<string, number>, probability, idx) => {
+          const bucket = bucketForSlot(idx + 1);
+          acc[bucket] = (acc[bucket] || 0) + probability;
+          return acc;
+        }, { early: 0, mid: 0, late: 0 });
+        const expectedValue = Math.round(slotProbabilities.reduce((total, probability, idx) => total + probability * slotValues[idx], 0));
+        const expectedSlot = Math.round(slotProbabilities.reduce((total, probability, idx) => total + probability * (idx + 1), 0) * 10) / 10;
+        const likelySlots = slotProbabilities
+          .map((probability, idx) => ({ slot: idx + 1, probability }))
+          .sort((a, b) => b.probability - a.probability)
+          .slice(0, 3);
+        const bestBucket = (Object.entries(bucketProbabilities).sort((a: any, b: any) => b[1] - a[1])[0]?.[0] || "mid") as "early" | "mid" | "late";
+        return [key, {
+          bucket: bestBucket,
+          label: `${bestBucket[0].toUpperCase()}${bestBucket.slice(1)} most likely`,
+          expectedValue,
+          expectedSlot,
+          floorValue: Math.min(...slotValues),
+          ceilingValue: Math.max(...slotValues),
+          probabilities: {
+            early: Math.round((bucketProbabilities.early || 0) * 100) / 100,
+            mid: Math.round((bucketProbabilities.mid || 0) * 100) / 100,
+            late: Math.round((bucketProbabilities.late || 0) * 100) / 100,
+          },
+          bandValues: {
+            early: getBandValue(String(pick.season), Number(pick.round), "early"),
+            mid: getBandValue(String(pick.season), Number(pick.round), "mid"),
+            late: getBandValue(String(pick.season), Number(pick.round), "late"),
+          },
+          slotProbabilities,
+          likelySlots,
+          projectedFinish: rosterProjection.projectedFinish,
+          finishRange: rosterProjection.finishRange,
+          issuerName: rosterProjection.ownerName,
+          issuerPlayoffOdds: rosterProjection.playoffOdds,
+        }];
+      })
+    ) as Record<string, any>;
+  }, [selectedLeague?.league_id, selectedLeagueSimulation, allPicks, pickFcValues, rosters.length]);
   const selectedLeagueMateProfiles = useMemo(() => {
     if (!selectedLeague || !rosters.length || !user?.user_id) return [];
 
@@ -2633,6 +3225,266 @@ const getTeamSummary = () => {
     () => new Map(selectedLeagueMateProfilesView.map((profile: any) => [Number(profile.rosterId), profile])),
     [selectedLeagueMateProfilesView]
   );
+  const tradePartnerRankings = useMemo(() => {
+    if (!selectedLeague || !rosters.length || !user?.user_id || !selectedLeagueSimulation || !selectedLeagueDirection) return [];
+
+    const myRoster = rosters.find((entry: any) => entry.owner_id === user.user_id);
+    if (!myRoster) return [];
+
+    const mySimRow = selectedLeagueSimulation.rowByRosterId.get(Number(myRoster.roster_id));
+    const myBuckets = getProfilePosBuckets(selectedLeagueDirection);
+    const strongPos = myBuckets.strong[0] || selectedLeagueDirection.positionRanks?.sort((a: any, b: any) => a.rank - b.rank)?.[0]?.pos || "WR";
+    const weakPos = myBuckets.weak[0] || selectedLeagueDirection.positionRanks?.sort((a: any, b: any) => b.rank - a.rank)?.[0]?.pos || "RB";
+
+    return selectedLeagueMateProfilesView
+      .map((partner: any) => {
+        const simRow = selectedLeagueSimulation.rowByRosterId.get(Number(partner.rosterId));
+        const partnerBuckets = getProfilePosBuckets(partner.directionProfile);
+        const isSeller = (simRow?.playoffOdds ?? 0) < 45 || ["Rebuilder", "Blow Up", "Hopeless"].includes(partner.directionProfile?.bucket);
+        const isBuyer = (simRow?.playoffOdds ?? 0) >= 55 || ["Elite", "True Contender", "Almost There"].includes(partner.directionProfile?.bucket);
+        const bestApproach =
+          isSeller ? `Buy ${weakPos}` :
+          isBuyer && partnerBuckets.weak.includes(strongPos) ? `Sell ${strongPos}` :
+          partnerBuckets.strong.includes(weakPos) ? `Tier up at ${weakPos}` :
+          `Explore 2-for-1`;
+        const rankScore = Math.round(
+          partner.fitScore +
+          (isSeller ? 8 : 0) +
+          (isBuyer ? 6 : 0) +
+          (partnerBuckets.weak.includes(strongPos) ? 6 : 0) +
+          (partnerBuckets.strong.includes(weakPos) ? 5 : 0) +
+          Math.max(0, 12 - Math.abs((mySimRow?.playoffOdds ?? 50) - (simRow?.playoffOdds ?? 50)) / 6)
+        );
+        const negotiationNotes = [
+          partner.motivation,
+          partner.recentBuyLabel,
+          partner.tradeCount30d >= 2 ? "Lead with a direct, actionable first offer." : "You may need a cleaner first offer and a clearer why-now pitch.",
+        ].filter(Boolean).slice(0, 3);
+
+        return {
+          ...partner,
+          playoffOdds: simRow?.playoffOdds ?? 0,
+          titleOdds: simRow?.titleOdds ?? 0,
+          finishRange: simRow?.finishRange || "-",
+          oneOhOneOdds: simRow?.oneOhOneOdds ?? 0,
+          bestApproach,
+          rankScore,
+          negotiationNotes,
+          isSeller,
+          isBuyer,
+        };
+      })
+      .sort((a: any, b: any) => {
+        if (b.rankScore !== a.rankScore) return b.rankScore - a.rankScore;
+        if (b.fitScore !== a.fitScore) return b.fitScore - a.fitScore;
+        return a.ownerName.localeCompare(b.ownerName);
+      });
+  }, [selectedLeague?.league_id, rosters, user?.user_id, selectedLeagueSimulation, selectedLeagueDirection, selectedLeagueMateProfilesView]);
+  const tradeRecommendationCards = useMemo(() => {
+    if (!selectedLeague || !rosters.length || !user?.user_id || !selectedLeagueDirection) return [];
+
+    const myRoster = rosters.find((entry: any) => entry.owner_id === user.user_id);
+    if (!myRoster) return [];
+
+    const myProfile = selectedLeagueDirection;
+    const myBuckets = getProfilePosBuckets(myProfile);
+    const dynValueForPlayer = (id: string) => calcFcValues[id] ?? (players as any)?.[id]?.value ?? 0;
+    const playerListForRoster = (rosterId: number) => {
+      const rosterEntry = rosters.find((entry: any) => Number(entry.roster_id) === Number(rosterId));
+      return (rosterEntry?.players || [])
+        .map((id: string) => {
+          const player = (players as any)?.[id];
+          return player ? {
+            ...player,
+            dynValue: dynValueForPlayer(id),
+            redValue: redraftValues[id] ?? 0,
+          } : null;
+        })
+        .filter(Boolean)
+        .filter((player: any) => ["QB", "RB", "WR", "TE"].includes(player.position));
+    };
+    const myPlayersDetailed = playerListForRoster(myRoster.roster_id);
+    const myPicksDetailed = (allPicks as any[])
+      .filter((pick: any) => Number(pick.owner_id) === Number(myRoster.roster_id))
+      .map((pick: any) => {
+        const key = `${pick.season}-${pick.round}-${pick.roster_id}`;
+        const dynamic = selectedLeagueDynamicPickValues[key];
+        return {
+          ...pick,
+          expectedValue: dynamic?.expectedValue ?? getStoredPickValue(pickFcValues, pick),
+          dynamic,
+          label: dynamic?.label || "Flat value",
+        };
+      })
+      .sort((a: any, b: any) => b.expectedValue - a.expectedValue);
+
+    const strongPos = myBuckets.strong[0] || myProfile?.positionRanks?.sort((a: any, b: any) => a.rank - b.rank)?.[0]?.pos || "WR";
+    const weakPos = myBuckets.weak[0] || myProfile?.positionRanks?.sort((a: any, b: any) => b.rank - a.rank)?.[0]?.pos || "RB";
+    const agingSellCandidate = [...myPlayersDetailed]
+      .filter((player: any) =>
+        (player.position === "RB" && Number(player.age || 0) >= 25) ||
+        (player.position === "QB" && Number(player.age || 0) >= 29) ||
+        (["WR", "TE"].includes(player.position) && Number(player.age || 0) >= 28)
+      )
+      .sort((a: any, b: any) => (b.redValue - b.dynValue) - (a.redValue - a.dynValue))[0];
+    const depthPieces = [...myPlayersDetailed]
+      .filter((player: any) => player.position === strongPos)
+      .sort((a: any, b: any) => a.dynValue - b.dynValue)
+      .slice(0, 3);
+
+    const recommendations: any[] = [];
+    const sortedPartners = [...tradePartnerRankings];
+    const assetValue = (asset: any) => asset?.expectedValue ?? asset?.dynValue ?? asset?.value ?? 0;
+    const buildCard = ({
+      archetype,
+      partner,
+      give,
+      receive,
+      whyYou,
+      whyThem,
+      summary,
+    }: any) => {
+      const giveTotal = Math.round(sum(give.map((asset: any) => assetValue(asset))));
+      const receiveTotal = Math.round(sum(receive.map((asset: any) => assetValue(asset))));
+      const packageDelta = receiveTotal - giveTotal;
+      const recommendationScore = Math.round(
+        partner.rankScore +
+        Math.max(0, 16 - Math.abs(packageDelta) / 140) +
+        (archetype === "Tier Up" ? 4 : archetype === "Buy Low" ? 3 : 2)
+      );
+      return {
+        archetype,
+        partnerName: partner.ownerName,
+        fitLabel: partner.fitLabel,
+        give,
+        receive,
+        whyYou,
+        whyThem,
+        summary,
+        partnerPlayoffOdds: partner.playoffOdds,
+        partnerTitleOdds: partner.titleOdds,
+        partnerRankScore: partner.rankScore,
+        recommendationScore,
+        giveTotal,
+        receiveTotal,
+        packageDelta,
+        bestApproach: partner.bestApproach,
+        negotiationNotes: partner.negotiationNotes,
+        openingOffer: `Open with the clean version first: ${archetype.toLowerCase()} framed around ${partner.bestApproach.toLowerCase()}.`,
+      };
+    };
+
+    const sellerPartner = sortedPartners.find((partner: any) =>
+      partner.isSeller
+    );
+    if (sellerPartner) {
+      const sellerPlayers = playerListForRoster(Number(sellerPartner.rosterId));
+      const buyLowTarget = sellerPlayers
+        .filter((player: any) => player.position === weakPos && Number(player.age || 99) <= 26)
+        .sort((a: any, b: any) => (a.redValue - a.dynValue) - (b.redValue - b.dynValue) || b.dynValue - a.dynValue)[0];
+      const buyLowPick = myPicksDetailed[0];
+      if (buyLowTarget && buyLowPick) {
+        recommendations.push(buildCard({
+          archetype: "Buy Low",
+          partner: sellerPartner,
+          give: [buyLowPick],
+          receive: [buyLowTarget],
+          whyYou: `Adds a younger ${weakPos} without forcing an all-in move.`,
+          whyThem: `${sellerPartner.ownerName} profiles more like a value-insulation team than a lineup-points team right now.`,
+          summary: `Use draft insulation to target a younger ${weakPos} from a team that should be open to future value.`,
+        }));
+      }
+    }
+
+    const contenderPartner = sortedPartners.find((partner: any) =>
+      partner.isBuyer &&
+      getProfilePosBuckets(partner.directionProfile).weak.includes(strongPos)
+    );
+    if (contenderPartner && agingSellCandidate) {
+      const contenderPicks = (allPicks as any[])
+        .filter((pick: any) => Number(pick.owner_id) === Number(contenderPartner.rosterId))
+        .map((pick: any) => ({
+          ...pick,
+          expectedValue: selectedLeagueDynamicPickValues[`${pick.season}-${pick.round}-${pick.roster_id}`]?.expectedValue ?? getStoredPickValue(pickFcValues, pick),
+        }))
+        .sort((a: any, b: any) => b.expectedValue - a.expectedValue);
+      const returnPick = contenderPicks[0];
+      if (returnPick) {
+        recommendations.push(buildCard({
+          archetype: "Sell High",
+          partner: contenderPartner,
+          give: [agingSellCandidate],
+          receive: [returnPick],
+          whyYou: `Cash out one aging ${agingSellCandidate.position} before the value cliff gets sharper.`,
+          whyThem: `${contenderPartner.ownerName} gets immediate lineup points at a spot they can use.`,
+          summary: `Turn present production into a flexible future asset while contenders still need weekly points.`,
+        }));
+      }
+    }
+
+    const depthPartner = sortedPartners.find((partner: any) =>
+      getProfilePosBuckets(partner.directionProfile).weak.includes(strongPos) &&
+      getProfilePosBuckets(partner.directionProfile).strong.includes(weakPos)
+    );
+    if (depthPartner && depthPieces.length >= 2) {
+      const depthPartnerPlayers = playerListForRoster(Number(depthPartner.rosterId));
+      const tierUpTarget = depthPartnerPlayers
+        .filter((player: any) => player.position === weakPos)
+        .sort((a: any, b: any) => b.dynValue - a.dynValue)[0];
+      if (tierUpTarget) {
+        recommendations.push(buildCard({
+          archetype: "2-for-1",
+          partner: depthPartner,
+          give: depthPieces.slice(0, 2),
+          receive: [tierUpTarget],
+          whyYou: `Condenses spare ${strongPos} depth into one cleaner starter at ${weakPos}.`,
+          whyThem: `${depthPartner.ownerName} gets multiple usable pieces for a thinner room.`,
+          summary: `Use depth from a strength to solve a real lineup need instead of making a sideways swap.`,
+        }));
+      }
+    }
+
+    const tierUpPartner = sortedPartners.find((partner: any) =>
+      partner.directionProfile?.bucket !== "Elite" && partner.directionProfile?.bucket !== "True Contender"
+    );
+    const tierUpPick = myPicksDetailed[0];
+    const tierUpPlayer = [...myPlayersDetailed]
+      .filter((player: any) => player.position === weakPos || player.position === strongPos)
+      .sort((a: any, b: any) => b.dynValue - a.dynValue)[1];
+    if (tierUpPartner && tierUpPick && tierUpPlayer) {
+      const partnerPlayers = playerListForRoster(Number(tierUpPartner.rosterId));
+      const eliteTarget = partnerPlayers
+        .filter((player: any) => player.position === weakPos)
+        .sort((a: any, b: any) => b.dynValue - a.dynValue)[0];
+      if (eliteTarget && eliteTarget.dynValue > tierUpPlayer.dynValue) {
+        recommendations.push(buildCard({
+          archetype: "Tier Up",
+          partner: tierUpPartner,
+          give: [tierUpPlayer, tierUpPick],
+          receive: [eliteTarget],
+          whyYou: `Turns one good asset plus flexible capital into a cleaner difference-maker.`,
+          whyThem: `${tierUpPartner.ownerName} gets insulation and a second asset instead of one concentrated piece.`,
+          summary: `Push one tier higher at ${weakPos} without emptying the whole future.`,
+        }));
+      }
+    }
+
+    return recommendations
+      .sort((a: any, b: any) => b.recommendationScore - a.recommendationScore)
+      .slice(0, 6);
+  }, [
+    selectedLeague?.league_id,
+    rosters,
+    user?.user_id,
+    selectedLeagueDirection,
+    calcFcValues,
+    players,
+    redraftValues,
+    allPicks,
+    selectedLeagueDynamicPickValues,
+    pickFcValues,
+    tradePartnerRankings,
+  ]);
   useEffect(() => {
     if (!supabaseUser || !selectedLeague?.league_id || selectedLeagueMateProfiles.length === 0) return;
     supabase.from("leaguemate_profiles").upsert(
@@ -2954,6 +3806,128 @@ const myPlayerSet = new Set<string>(roster?.players || []);
                     <button onClick={() => { loadLeagueOverview(); loadRedraftValues(); }} className="text-xs text-blue-400 hover:text-blue-300 border border-blue-700 rounded-lg px-3 py-1.5 transition">
                       Load Overview
                     </button>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* ── Simulator ── */}
+            {leagueHubTab === "SIMULATOR" && (() => {
+              if (!selectedLeague || !rosters.length) {
+                return <p className="text-sm text-gray-500">Select a league from Rosters &amp; Rules first to view the simulator.</p>;
+              }
+              if (!selectedLeagueSimulation) {
+                return <p className="text-sm text-blue-400">Building simulator snapshot...</p>;
+              }
+
+              const myRosterId = rosters.find((entry: any) => entry.owner_id === user?.user_id)?.roster_id;
+              return (
+                <div className="space-y-4">
+                  <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
+                    <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Season Simulator</div>
+                        <div className="mt-1 text-sm text-gray-200">
+                          {selectedLeagueSimulation.simulationMode === "offseason"
+                            ? "Offseason mode uses season-long player projections to build optimal lineups, simulate standings, and estimate projected max PF before real schedules exist."
+                            : "In-season mode blends real results, current schedule, and Monte Carlo rest-of-season sims for projected standings and playoff odds."}
+                        </div>
+                      </div>
+                      <div className="text-[11px] text-gray-500">
+                        {selectedLeagueSimulation.simulationMode === "offseason"
+                          ? `${selectedLeagueSimulation.simCount} sims - ${selectedLeagueSimulation.regularSeasonWeeks}-week baseline`
+                          : loadingLeagueWeeklyMatchups
+                          ? "Loading weekly matchup history..."
+                          : `Week ${selectedLeagueSimulation.currentWeek} - ${selectedLeagueSimulation.weeksPlayed} completed weeks - ${selectedLeagueSimulation.simCount} sims`}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto pb-1">
+                    <div className="min-w-[1250px] space-y-2">
+                      <div className="grid grid-cols-[minmax(180px,1.45fr)_78px_108px_88px_92px_92px_88px_82px_96px_92px_110px] gap-2 px-3 pb-1 text-[10px] font-bold uppercase tracking-widest text-gray-600">
+                        <span>Team</span>
+                        <span className="text-center">Power</span>
+                        <span className="text-center">Proj Max PF</span>
+                        <span className="text-center">Exp Wins</span>
+                        <span className="text-center">Avg Finish</span>
+                        <span className="text-center">Finish Band</span>
+                        <span className="text-center">Playoffs</span>
+                        <span className="text-center">Bye</span>
+                        <span className="text-center">Title</span>
+                        <span className="text-center">1.01</span>
+                        <span className="text-center">{selectedLeagueSimulation.simulationMode === "offseason" ? "Avg Matchup" : "This Week"}</span>
+                      </div>
+                      {selectedLeagueSimulation.rows.map((row: any) => {
+                        const isMe = Number(row.rosterId) === Number(myRosterId);
+                        return (
+                          <div key={row.rosterId} className={`grid grid-cols-[minmax(180px,1.45fr)_78px_108px_88px_92px_92px_88px_82px_96px_92px_110px] gap-2 items-center rounded-xl border px-3 py-3 ${isMe ? "border-blue-700 bg-blue-950/20" : "border-gray-800 bg-gray-900"}`}>
+                            <div className="min-w-0">
+                              <div className={`truncate text-sm font-semibold ${isMe ? "text-blue-300" : "text-white"}`}>{row.ownerName}</div>
+                              <div className="text-[11px] text-gray-500">
+                                {row.actualWins}-{row.actualLosses} actual • likely finish {ordinal(row.projectedFinish)}
+                              </div>
+                              {selectedLeagueSimulation.simulationMode !== "offseason" && (
+                                <div className="text-[10px] text-gray-600">
+                                  All-play {row.allPlayWins}-{row.allPlayLosses} • luck {row.luckScore > 0 ? "+" : ""}{row.luckScore.toFixed(1)}
+                                </div>
+                              )}
+                            </div>
+                            <div className="text-center text-sm font-semibold text-white">{row.powerScore.toFixed(1)}</div>
+                            <div className="text-center text-sm text-gray-200">{Math.round(row.projectedMaxPf || row.maxPf || 0).toLocaleString()}</div>
+                            <div className="text-center text-sm text-gray-200">{row.expectedWins.toFixed(1)}</div>
+                            <div className="text-center text-sm text-gray-200">{row.avgFinish?.toFixed?.(1) ?? row.avgFinish}</div>
+                            <div className="text-center text-xs text-gray-300">{row.finishRange}</div>
+                            <div className="text-center text-sm text-green-300">{Math.round(row.playoffOdds)}%</div>
+                            <div className="text-center text-sm text-cyan-300">{Math.round(row.byeOdds)}%</div>
+                            <div className="text-center text-sm text-amber-300">{Math.round(row.titleOdds)}%</div>
+                            <div className="text-center text-sm text-rose-300">{Math.round(row.oneOhOneOdds || 0)}%</div>
+                            <div className="text-center text-xs text-gray-300">
+                              {row.currentOpponent ? `${Math.round(row.currentWeekWinProb * 100)}% vs ${row.currentOpponent}` : `${Math.round(row.avgWinProb * 100)}% avg`}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {selectedLeagueSimulation.weeklyMatchups?.length > 0 && (
+                    <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Schedule Preview</div>
+                          <div className="mt-1 text-sm text-gray-200">
+                            {selectedLeagueSimulation.simulationMode === "offseason"
+                              ? "Generated weekly matchups used for offseason sims."
+                              : "Upcoming matchup forecast from the active league schedule."}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                        {selectedLeagueSimulation.weeklyMatchups.slice(0, 4).map((week: any) => (
+                          <div key={week.week} className="rounded-xl border border-gray-800 bg-gray-950/60 p-3">
+                            <div className="flex items-center justify-between">
+                              <div className="text-xs font-semibold text-white">Week {week.week}</div>
+                              <div className="text-[10px] uppercase tracking-wide text-gray-500">{week.source}</div>
+                            </div>
+                            <div className="mt-2 space-y-1.5">
+                              {week.matchups?.slice(0, 6).map((matchup: any, idx: number) => (
+                                <div key={`${week.week}-${idx}`} className="flex items-center justify-between rounded-lg bg-gray-800/80 px-3 py-2 text-xs">
+                                  <div className="min-w-0 text-gray-200">
+                                    <span className="font-medium text-white">{matchup.aName}</span>
+                                    <span className="text-gray-500"> vs </span>
+                                    <span className="font-medium text-white">{matchup.bName}</span>
+                                  </div>
+                                  <div className="shrink-0 text-right text-gray-400">
+                                    {Math.round((matchup.winProb || 0) * 100)}% • {Math.round(matchup.projectedPoints || 0)}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   )}
                 </div>
               );
@@ -4277,7 +5251,7 @@ const starters = starterSlots
             {/* Sub-tab nav */}
             <div className="flex justify-center border-b border-gray-800 mb-6 overflow-x-auto">
               <div className="flex justify-center gap-6 text-center">
-              {(["OWNERSHIP", "DYNASTY", "REDRAFT", "PROJECTIONS", "LEAGUEMATES"] as const).map((tab) => (
+              {(["OWNERSHIP", "DYNASTY", "REDRAFT", "PROJECTIONS", "PICK_VALUES", "LEAGUEMATES"] as const).map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setDataHubTab(tab)}
@@ -4287,7 +5261,7 @@ const starters = starterSlots
                       : "text-gray-400 hover:text-white"
                   }`}
                 >
-                  {tab === "OWNERSHIP" ? "Player Ownership" : tab === "DYNASTY" ? "Dynasty Rankings" : tab === "REDRAFT" ? "Redraft Rankings" : tab === "PROJECTIONS" ? "Player Projections" : "League Mate Stats"}
+                  {tab === "OWNERSHIP" ? "Player Ownership" : tab === "DYNASTY" ? "Dynasty Rankings" : tab === "REDRAFT" ? "Redraft Rankings" : tab === "PROJECTIONS" ? "Player Projections" : tab === "PICK_VALUES" ? "Pick Values" : "League Mate Stats"}
                 </button>
               ))}
               </div>
@@ -4555,6 +5529,111 @@ const starters = starterSlots
                     </>
                   )}
                 </>
+              );
+            })()}
+
+            {/* ── Pick Values ── */}
+            {dataHubTab === "PICK_VALUES" && (() => {
+              if (!selectedLeague || !rosters.length) {
+                return <p className="text-sm text-gray-500">Select a league first so pick value ranges can be tied to projected finish.</p>;
+              }
+
+              const pickRows = (allPicks as any[])
+                .map((pick: any) => {
+                  const key = `${pick.season}-${pick.round}-${pick.roster_id}`;
+                  const dynamic = selectedLeagueDynamicPickValues[key];
+                  const ownerName = users[pick.owner_id] || `Team ${pick.owner_id}`;
+                  const issuerName = users[pick.roster_id] || `Team ${pick.roster_id}`;
+                  const pickLabel = pick.slot && String(pick.slot).includes(".")
+                    ? `${pick.season} ${pick.slot}`
+                    : `${pick.season} Rd ${pick.round}`;
+                  return {
+                    ...pick,
+                    key,
+                    ownerName,
+                    issuerName,
+                    pickLabel,
+                    dynamic,
+                  };
+                })
+                .sort((a: any, b: any) => (b.dynamic?.expectedValue ?? 0) - (a.dynamic?.expectedValue ?? 0));
+
+              return (
+                <div className="space-y-4">
+                  <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
+                    <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Dynamic Pick Valuation</div>
+                    <div className="mt-1 text-sm text-gray-200">
+                      Each pick now uses simulated finish distributions, expected slot outcomes, and team-specific playoff odds instead of one flat round value.
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    {pickRows.map((pick: any) => {
+                      const dynamic = pick.dynamic;
+                      if (!dynamic) return null;
+                      return (
+                        <div key={pick.key} className="rounded-2xl border border-gray-800 bg-gray-900 p-4">
+                          <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-sm font-semibold text-white">{pick.pickLabel}</span>
+                                <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                                  dynamic.bucket === "early" ? "border-red-700 bg-red-950/40 text-red-300" :
+                                  dynamic.bucket === "late" ? "border-green-700 bg-green-950/40 text-green-300" :
+                                  "border-yellow-700 bg-yellow-950/40 text-yellow-300"
+                                }`}>
+                                  {dynamic.label}
+                                </span>
+                              </div>
+                              <div className="mt-1 text-xs text-gray-500">
+                                Owned by {pick.ownerName} • tied to {pick.issuerName}'s finish
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div className="text-sm font-semibold text-blue-300">{(dynamic.expectedValue || 0).toLocaleString()}</div>
+                              <div className="text-[11px] text-gray-500">Range {dynamic.floorValue?.toLocaleString()} - {dynamic.ceilingValue?.toLocaleString()}</div>
+                            </div>
+                          </div>
+                          <div className="mt-3 grid gap-2 md:grid-cols-3">
+                            <div className="rounded-xl border border-gray-800 bg-gray-950/60 px-3 py-2">
+                              <div className="text-[10px] uppercase tracking-wide text-gray-500">Expected Slot</div>
+                              <div className="mt-1 text-sm font-semibold text-white">
+                                {typeof dynamic.expectedSlot === "number" ? dynamic.expectedSlot.toFixed(1) : "-"}
+                              </div>
+                              <div className="text-[11px] text-gray-500">Finish band {dynamic.finishRange || "-"}</div>
+                            </div>
+                            <div className="rounded-xl border border-gray-800 bg-gray-950/60 px-3 py-2">
+                              <div className="text-[10px] uppercase tracking-wide text-gray-500">Issuer Outlook</div>
+                              <div className="mt-1 text-sm font-semibold text-white">{Math.round(dynamic.issuerPlayoffOdds || 0)}%</div>
+                              <div className="text-[11px] text-gray-500">Playoff odds for {dynamic.issuerName || pick.issuerName}</div>
+                            </div>
+                            <div className="rounded-xl border border-gray-800 bg-gray-950/60 px-3 py-2">
+                              <div className="text-[10px] uppercase tracking-wide text-gray-500">Most Likely Slots</div>
+                              <div className="mt-1 text-xs text-gray-300">
+                                {(dynamic.likelySlots || []).length > 0
+                                  ? dynamic.likelySlots.map((slotRow: any) => `${slotRow.slot} (${Math.round((slotRow.probability || 0) * 100)}%)`).join(" | ")
+                                  : "No slot spread"}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="mt-3 grid gap-2 md:grid-cols-3">
+                            {(["early", "mid", "late"] as const).map((bucket) => (
+                              <div key={bucket} className="rounded-xl border border-gray-800 bg-gray-950/60 px-3 py-2">
+                                <div className="text-[10px] uppercase tracking-wide text-gray-500">{bucket}</div>
+                                <div className="mt-1 text-sm font-semibold text-white">
+                                  {Math.round((dynamic.probabilities?.[bucket] || 0) * 100)}%
+                                </div>
+                                <div className="text-[11px] text-gray-500">
+                                  {(dynamic.bandValues?.[bucket] ?? dynamic.expectedValue ?? 0).toLocaleString()}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
               );
             })()}
 
@@ -5014,6 +6093,16 @@ const starters = starterSlots
       >
         Trade Finder
       </button>
+      <button
+        onClick={() => setTradeHubSection("RECOMMENDATIONS")}
+        className={`pb-2 px-1 text-sm font-semibold transition ${
+          tradeHubSection === "RECOMMENDATIONS"
+            ? "border-b-2 border-blue-400 text-blue-400"
+            : "text-gray-400 hover:text-white"
+        }`}
+      >
+        Recommendations
+      </button>
       </div>
     </div>
 
@@ -5052,21 +6141,23 @@ const starters = starterSlots
       const theirAvailPicks = (allPicks as any[]).filter(
         (p: any) => p.owner_id === opponentRoster?.roster_id && !calcReceivePicks.includes(pickKey(p))
       );
+      const pickInsight = (pick: any) => selectedLeagueDynamicPickValues[pickKey(pick)];
 
       const getPickValue = (key: string) => {
         const pick = (allPicks as any[]).find((p: any) => pickKey(p) === key);
         if (!pick) return 0;
-        return getStoredPickValue(pickFcValues, pick);
+        return pickInsight(pick)?.expectedValue ?? getStoredPickValue(pickFcValues, pick);
       };
       const pickLabel = (p: any) => {
         const origOwnerUserId = rosterToUser[p.roster_id];
         const origName = (users as any)[origOwnerUserId] || `Team ${p.roster_id}`;
         const via = p.roster_id !== p.owner_id ? ` (via ${origName})` : "";
+        const dynamic = pickInsight(p);
         // For current year, slot is "1.04" format; for future years slot is just the round number
         const slotLabel = p.slot && p.slot.includes(".")
           ? `${p.season} ${p.slot}`
           : `${p.season} Rd ${p.round}`;
-        return `${slotLabel}${via}`;
+        return `${slotLabel}${via}${dynamic ? ` • ${dynamic.label}` : ""}`;
       };
 
       // Trade totals using league-specific values
@@ -5218,7 +6309,7 @@ const starters = starterSlots
                     })),
                     ...myAvailPicks.map((p: any) => ({
                       label: pickLabel(p),
-                      value: getStoredPickValue(pickFcValues, p),
+                      value: pickInsight(p)?.expectedValue ?? getStoredPickValue(pickFcValues, p),
                       onAdd: () => setCalcGivePicks((prev: string[]) => [...prev, pickKey(p)]),
                     })),
                   ].sort((a, b) => b.value - a.value);
@@ -5281,7 +6372,7 @@ const starters = starterSlots
                       })),
                       ...theirAvailPicks.map((p: any) => ({
                         label: pickLabel(p),
-                        value: getStoredPickValue(pickFcValues, p),
+                        value: pickInsight(p)?.expectedValue ?? getStoredPickValue(pickFcValues, p),
                         onAdd: () => setCalcReceivePicks((prev: string[]) => [...prev, pickKey(p)]),
                       })),
                     ].sort((a, b) => b.value - a.value);
@@ -5408,7 +6499,7 @@ const starters = starterSlots
                     })),
                     ...myAvailPicks.map((p: any) => ({
                       label: pickLabel(p),
-                      value: getStoredPickValue(pickFcValues, p),
+                      value: pickInsight(p)?.expectedValue ?? getStoredPickValue(pickFcValues, p),
                       isPick: true,
                       onAdd: () => setCalcGivePicks((prev: string[]) => [...prev, pickKey(p)]),
                     })),
@@ -5421,7 +6512,7 @@ const starters = starterSlots
                     })),
                     ...theirAvailPicks.map((p: any) => ({
                       label: pickLabel(p),
-                      value: getStoredPickValue(pickFcValues, p),
+                      value: pickInsight(p)?.expectedValue ?? getStoredPickValue(pickFcValues, p),
                       isPick: true,
                       onAdd: () => setCalcReceivePicks((prev: string[]) => [...prev, pickKey(p)]),
                     })),
@@ -6841,6 +7932,157 @@ const starters = starterSlots
       );
     })()}
 
+    {tradeHubSection === "RECOMMENDATIONS" && (() => {
+      if (!selectedLeague) return (
+        <p className="text-gray-400 text-sm">Select a league from the dropdown above to view recommendations.</p>
+      );
+      if (tradeRecommendationCards.length === 0) return (
+        <p className="text-gray-400 text-sm">Recommendations are still building. Load a league and values first, then come back here.</p>
+      );
+
+      const renderAsset = (asset: any) => {
+        if (!asset) return null;
+        if ("expectedValue" in asset && asset.season) {
+          return (
+            <div key={`${asset.season}-${asset.round}-${asset.roster_id}`} className="flex items-center justify-between rounded-lg bg-gray-800 px-3 py-2">
+              <div className="min-w-0">
+                <div className="truncate text-sm text-white">
+                  {asset.slot && String(asset.slot).includes(".") ? `${asset.season} ${asset.slot}` : `${asset.season} Rd ${asset.round}`}
+                </div>
+                <div className="text-[11px] text-gray-500">{asset.label}</div>
+              </div>
+              <div className="text-xs font-mono text-blue-300">{asset.expectedValue.toLocaleString()}</div>
+            </div>
+          );
+        }
+        return (
+          <div key={asset.player_id} className="flex items-center justify-between rounded-lg bg-gray-800 px-3 py-2">
+            <div className="min-w-0">
+              <div className="truncate text-sm text-white">{asset.full_name}</div>
+              <div className="text-[11px] text-gray-500">{asset.position} • {asset.team || "FA"}</div>
+            </div>
+            <div className="text-xs font-mono text-gray-300">{(asset.dynValue ?? asset.value ?? 0).toLocaleString()}</div>
+          </div>
+        );
+      };
+
+      return (
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Advanced Trade Recommendations</div>
+            <div className="mt-1 text-sm text-gray-200">
+              These recommendations now stack partner ranking, simulated team outlook, and pick-value distributions into concrete trade paths and opening angles.
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Partner Board</div>
+            <div className="mt-3 grid gap-2 lg:grid-cols-2">
+              {tradePartnerRankings.slice(0, 6).map((partner: any) => (
+                <div key={partner.rosterId} className="rounded-xl border border-gray-800 bg-gray-950/60 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-white">{partner.ownerName}</div>
+                      <div className="text-[11px] text-gray-500">{partner.fitLabel} • {partner.bestApproach}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-sm font-semibold text-blue-300">{partner.rankScore}</div>
+                      <div className="text-[10px] uppercase tracking-wide text-gray-500">Partner Score</div>
+                    </div>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-gray-300">
+                    <span className="rounded-full border border-gray-700 bg-gray-900 px-2 py-0.5">Playoffs {Math.round(partner.playoffOdds || 0)}%</span>
+                    <span className="rounded-full border border-gray-700 bg-gray-900 px-2 py-0.5">Title {Math.round(partner.titleOdds || 0)}%</span>
+                    <span className="rounded-full border border-gray-700 bg-gray-900 px-2 py-0.5">Finish {partner.finishRange}</span>
+                    <span className="rounded-full border border-gray-700 bg-gray-900 px-2 py-0.5">1.01 {Math.round(partner.oneOhOneOdds || 0)}%</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {tradeRecommendationCards.map((card: any) => (
+            <div key={`${card.archetype}-${card.partnerName}`} className="rounded-2xl border border-gray-800 bg-gray-900 p-5">
+              <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-semibold text-white">{card.archetype}</span>
+                    <span className="rounded-full border border-blue-700 bg-blue-950/40 px-2 py-0.5 text-[10px] font-semibold text-blue-300">
+                      {card.partnerName}
+                    </span>
+                    <span className="rounded-full border border-gray-700 bg-gray-950/60 px-2 py-0.5 text-[10px] font-semibold text-gray-300">
+                      {card.fitLabel}
+                    </span>
+                    <span className="rounded-full border border-emerald-700 bg-emerald-950/30 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
+                      Score {card.recommendationScore}
+                    </span>
+                  </div>
+                  <div className="mt-2 text-sm text-gray-300">{card.summary}</div>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-center md:min-w-[220px]">
+                  <div className="rounded-lg border border-gray-800 bg-gray-950/60 px-3 py-2">
+                    <div className="text-[10px] uppercase tracking-wide text-gray-500">Partner Playoffs</div>
+                    <div className="mt-1 text-sm font-semibold text-white">{Math.round(card.partnerPlayoffOdds || 0)}%</div>
+                  </div>
+                  <div className="rounded-lg border border-gray-800 bg-gray-950/60 px-3 py-2">
+                    <div className="text-[10px] uppercase tracking-wide text-gray-500">Package Delta</div>
+                    <div className={`mt-1 text-sm font-semibold ${card.packageDelta >= 0 ? "text-green-300" : "text-red-300"}`}>
+                      {card.packageDelta > 0 ? "+" : ""}{card.packageDelta.toLocaleString()}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <div>
+                  <div className="mb-2 text-[10px] font-bold uppercase tracking-widest text-red-400">You Give</div>
+                  <div className="space-y-2">
+                    {card.give.map((asset: any) => renderAsset(asset))}
+                  </div>
+                  <div className="mt-2 text-right text-[11px] text-gray-500">Total {card.giveTotal.toLocaleString()}</div>
+                </div>
+                <div>
+                  <div className="mb-2 text-[10px] font-bold uppercase tracking-widest text-green-400">You Receive</div>
+                  <div className="space-y-2">
+                    {card.receive.map((asset: any) => renderAsset(asset))}
+                  </div>
+                  <div className="mt-2 text-right text-[11px] text-gray-500">Total {card.receiveTotal.toLocaleString()}</div>
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-blue-400">Why You Do It</div>
+                  <div className="mt-1 text-xs text-gray-300">{card.whyYou}</div>
+                </div>
+                <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-orange-400">Why They Might</div>
+                  <div className="mt-1 text-xs text-gray-300">{card.whyThem}</div>
+                </div>
+                <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-violet-400">Best Approach</div>
+                  <div className="mt-1 text-xs text-gray-300">{card.bestApproach}</div>
+                </div>
+                <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-cyan-400">Opening Offer</div>
+                  <div className="mt-1 text-xs text-gray-300">{card.openingOffer}</div>
+                </div>
+              </div>
+
+              <div className="mt-3 rounded-xl border border-gray-800 bg-gray-950/60 p-3">
+                <div className="text-[10px] uppercase tracking-wide text-gray-500">Negotiation Notes</div>
+                <div className="mt-2 space-y-1">
+                  {(card.negotiationNotes || []).map((note: string) => (
+                    <div key={note} className="text-xs text-gray-300">{note}</div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    })()}
+
   </div>
 )}
 
@@ -7342,3 +8584,5 @@ const starters = starterSlots
     </>
   );
 }
+
+
