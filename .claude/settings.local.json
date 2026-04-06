@@ -36,7 +36,11 @@
       "Bash(curl -s -X POST https://fdresearch-api.fanduel.com/graphql -H 'Content-Type: application/json' -H 'Origin: https://www.fanduel.com' -H 'User-Agent: Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36' -d '{\"query\":\"{ __type\\(name: \\\\\"ProjectionSports\\\\\"\\) { enumValues { name } } }\"}')",
       "Bash(grep -o '\"TE Columns.\\\\{0,800\\\\}' /tmp/fd_qb.html)",
       "Bash(npx next:*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "WebSearch",
+      "WebFetch(domain:unsplash.com)",
+      "WebFetch(domain:tutorials.sitecast.com)",
+      "WebFetch(domain:www.pexels.com)"
     ]
   }
 }

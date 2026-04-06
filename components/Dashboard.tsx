@@ -13,6 +13,51 @@ type DashboardProps = {
   onNavigate: (tab: string) => void;
 };
 
+const navCards = [
+  {
+    title: "League Hub",
+    tab: "LEAGUES",
+    // American football on field — yard lines visible
+    image: "https://images.unsplash.com/photo-1566577739112-5180d4bf9390?w=800&q=80&auto=format&fit=crop",
+    overlay: "from-blue-950/70 via-slate-900/60 to-slate-950/80",
+  },
+  {
+    title: "Data Hub",
+    tab: "DATA_HUB",
+    // Clash of American football players — competitive/analytical
+    image: "https://images.pexels.com/photos/274517/pexels-photo-274517.jpeg?auto=compress&cs=tinysrgb&w=800",
+    overlay: "from-cyan-950/70 via-slate-900/60 to-slate-950/80",
+  },
+  {
+    title: "Draft Hub",
+    tab: "DRAFT",
+    // QB running with ball on green field — draft prospect energy
+    image: "https://images.pexels.com/photos/264411/pexels-photo-264411.jpeg?auto=compress&cs=tinysrgb&w=800",
+    overlay: "from-emerald-950/70 via-slate-900/60 to-slate-950/80",
+  },
+  {
+    title: "Trade Hub",
+    tab: "TRADE_HUB",
+    // Handshake — deal making
+    image: "https://images.unsplash.com/photo-1521791136064-7986c2920216?w=800&q=80&auto=format&fit=crop",
+    overlay: "from-orange-950/70 via-slate-900/60 to-slate-950/80",
+  },
+  {
+    title: "Alerts",
+    tab: "ALERTS",
+    // NFL stadium packed with fans, game day
+    image: "https://images.pexels.com/photos/128457/pexels-photo-128457.jpeg?auto=compress&cs=tinysrgb&w=800",
+    overlay: "from-red-950/70 via-slate-900/60 to-slate-950/80",
+  },
+  {
+    title: "Management Hub",
+    tab: "MANAGEMENT_HUB",
+    // Football team running through field — roster/team management
+    image: "https://images.pexels.com/photos/718951/pexels-photo-718951.jpeg?auto=compress&cs=tinysrgb&w=800",
+    overlay: "from-violet-950/70 via-slate-900/60 to-slate-950/80",
+  },
+];
+
 export default function Dashboard({
   username,
   leagues,
@@ -36,15 +81,6 @@ export default function Dashboard({
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [search, leagues]);
 
-  const navCards = [
-    { title: "League Hub", icon: "LH", tab: "LEAGUES" },
-    { title: "Data Hub", icon: "DH", tab: "DATA_HUB" },
-    { title: "Draft Hub", icon: "DR", tab: "DRAFT" },
-    { title: "Trade Hub", icon: "TR", tab: "TRADE_HUB" },
-    { title: "Alerts", icon: "AL", tab: "ALERTS" },
-    { title: "Management Hub", icon: "MG", tab: "MANAGEMENT_HUB" },
-  ];
-
   return (
     <div className="min-h-screen bg-slate-950 text-white p-6">
       <div className="mb-10">
@@ -64,17 +100,31 @@ export default function Dashboard({
             }}
             whileHover={isConnected ? { scale: 1.03 } : {}}
             className={`
-              rounded-3xl border border-slate-800 bg-slate-900 p-6 transition
-              ${isConnected ? "cursor-pointer hover:bg-slate-800" : "opacity-50 cursor-not-allowed"}
+              relative overflow-hidden rounded-3xl border border-slate-800 h-44 transition
+              ${isConnected ? "cursor-pointer" : "opacity-40 cursor-not-allowed"}
             `}
           >
-            <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-700 bg-slate-950 text-sm font-semibold text-slate-200">
-              {item.icon}
+            {/* Background image */}
+            <img
+              src={item.image}
+              alt={item.title}
+              className="absolute inset-0 h-full w-full object-cover"
+              loading="lazy"
+            />
+            {/* Gradient overlay — dims image and ensures text reads clearly */}
+            <div className={`absolute inset-0 bg-gradient-to-b ${item.overlay}`} />
+            {/* Subtle top vignette for extra depth */}
+            <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent" />
+
+            {/* Text content — pinned to bottom */}
+            <div className="relative z-10 flex h-full flex-col justify-end p-5">
+              <h2 className="text-xl font-bold tracking-tight text-white drop-shadow-lg">
+                {item.title}
+              </h2>
+              {!isConnected && (
+                <p className="mt-1 text-xs text-slate-300">Connect to unlock</p>
+              )}
             </div>
-            <h2 className="text-lg font-semibold">{item.title}</h2>
-            {!isConnected && (
-              <div className="mt-2 text-xs text-slate-400">Connect to unlock</div>
-            )}
           </motion.div>
         ))}
       </div>
