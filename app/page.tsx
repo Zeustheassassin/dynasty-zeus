@@ -7343,6 +7343,15 @@ const starters = starterSlots
                             setMyDraftSlotPicks({});
                             if (selectedLeague?.league_id) {
                               localStorage.removeItem(`draftPicks_${selectedLeague.league_id}_${ROOKIE_YEAR}`);
+                              if (supabaseUser) {
+                                supabase
+                                  .from("draft_board_picks")
+                                  .delete()
+                                  .eq("user_id", supabaseUser.id)
+                                  .eq("league_id", selectedLeague.league_id)
+                                  .eq("season", ROOKIE_YEAR)
+                                  .then(() => {});
+                              }
                             }
                           }}
                           className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-gray-700 hover:bg-red-800 text-gray-300 hover:text-white rounded-lg transition"
@@ -8355,6 +8364,15 @@ const starters = starterSlots
               setMyDraftSlotPicks({});
               if (selectedLeague?.league_id) {
                 localStorage.removeItem(`draftPicks_${selectedLeague.league_id}_${ROOKIE_YEAR}`);
+                if (supabaseUser) {
+                  supabase
+                    .from("draft_board_picks")
+                    .delete()
+                    .eq("user_id", supabaseUser.id)
+                    .eq("league_id", selectedLeague.league_id)
+                    .eq("season", ROOKIE_YEAR)
+                    .then(() => {});
+                }
               }
             }}
             className="flex items-center gap-2 px-4 py-1.5 text-xs font-semibold bg-gray-700 hover:bg-red-800 text-gray-300 hover:text-white rounded-lg transition"
