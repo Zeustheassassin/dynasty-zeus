@@ -34,7 +34,7 @@ const PROJ_SOURCES = [
   { id: 'sleeper'     as const, label: 'RotoWire/Sleeper',   tier: 2, weight: 0.20 },
 ];
 type ProjSourceId = typeof PROJ_SOURCES[number]['id'];
-type LeagueHubTab = "OVERVIEW" | "SIMULATOR" | "ROSTERS" | "LEAGUE_MATES" | "OPP_ROSTERS" | "STANDINGS" | "STARTERS" | "NOTES" | "POWER_RANKINGS";
+type LeagueHubTab = "OVERVIEW" | "SIMULATOR" | "ROSTERS" | "LEAGUE_MATES" | "OPP_ROSTERS" | "STANDINGS" | "STARTERS" | "NOTES" | "POWER_RANKINGS" | "ACTIVITY";
 
 const LEAGUE_HUB_GROUPS: Array<{
   id: string;
@@ -66,6 +66,7 @@ const LEAGUE_HUB_GROUPS: Array<{
     label: "Notes",
     tabs: [
       { id: "NOTES", label: "League Notes" },
+      { id: "ACTIVITY", label: "Activity Feed" },
     ],
   },
 ];
@@ -268,6 +269,68 @@ const rankAgainstLeague = (totals: number[], value: number) => {
     rank++;
   }
   return Math.min(rank, sorted.length || 1);
+};
+
+const FLEX_ELIGIBLE_POSITIONS = ["RB", "WR", "TE"];
+const SUPER_FLEX_ELIGIBLE_POSITIONS = ["QB", "RB", "WR", "TE"];
+
+const getProjectionKickoffAt = (projection: any) => {
+  const rawCandidates = [
+    projection?.kickoffAt,
+    projection?.kickoff_at,
+    projection?.gameTime,
+    projection?.game_time,
+    projection?.startTime,
+    projection?.start_time,
+  ];
+  const parsed = rawCandidates
+    .map((value) => Number(value))
+    .find((value) => Number.isFinite(value) && value > 0);
+  return parsed || null;
+};
+
+const getLineupSlotEligiblePositions = (slot: string) => {
+  if (slot === "FLEX") return FLEX_ELIGIBLE_POSITIONS;
+  if (slot === "SUPER_FLEX") return SUPER_FLEX_ELIGIBLE_POSITIONS;
+  return [slot];
+};
+
+const rebalanceLineupForKickoffWindows = (
+  lineup: Array<{ slot: string; player: any; score: number; kickoffAt: number | null }>,
+  hasKickoffData: boolean
+) => {
+  if (!hasKickoffData) return lineup;
+
+  const nextLineup = [...lineup];
+  const getKickoffSortValue = (row: { kickoffAt: number | null }) => row.kickoffAt ?? Number.MAX_SAFE_INTEGER;
+
+  const tryMoveEarlierPlayerIntoLockedSlot = (lockedSlot: string, flexSlot: "FLEX" | "SUPER_FLEX") => {
+    const lockedIndexes = nextLineup
+      .map((row, index) => ({ row, index }))
+      .filter(({ row }) => row.slot === lockedSlot && row.player?.player_id);
+    const flexIndexes = nextLineup
+      .map((row, index) => ({ row, index }))
+      .filter(({ row }) => row.slot === flexSlot && row.player?.player_id);
+
+    lockedIndexes.forEach(({ row: lockedRow, index: lockedIndex }) => {
+      const swapCandidate = flexIndexes
+        .filter(({ row }) => row.player?.position === lockedSlot)
+        .sort((a, b) => getKickoffSortValue(a.row) - getKickoffSortValue(b.row))[0];
+      if (!swapCandidate) return;
+
+      const lockedKickoff = getKickoffSortValue(lockedRow);
+      const flexKickoff = getKickoffSortValue(swapCandidate.row);
+      if (flexKickoff >= lockedKickoff) return;
+
+      nextLineup[lockedIndex] = { ...swapCandidate.row, slot: lockedSlot };
+      nextLineup[swapCandidate.index] = { ...lockedRow, slot: flexSlot };
+    });
+  };
+
+  ["RB", "WR", "TE"].forEach((slot) => tryMoveEarlierPlayerIntoLockedSlot(slot, "FLEX"));
+  ["QB", "RB", "WR", "TE"].forEach((slot) => tryMoveEarlierPlayerIntoLockedSlot(slot, "SUPER_FLEX"));
+
+  return nextLineup;
 };
 
 const getRosterDirectionProfile = ({
@@ -855,6 +918,15 @@ const [loadingCrossLeagueMateIntel, setLoadingCrossLeagueMateIntel] = useState(f
 const [leagueMateProfileCache, setLeagueMateProfileCache] = useState<Record<string, any[]>>({});
 const [leagueNotes, setLeagueNotes] = useState<Record<string, string>>({});
 const [nflState, setNflState] = useState<any>(null);
+const [playerProfileId, setPlayerProfileId] = useState<string | null>(null);
+const [playerNotes, setPlayerNotes] = useState<Record<string, string>>(() => {
+  try { return JSON.parse(localStorage.getItem("playerNotes_v1") || "{}"); } catch { return {}; }
+});
+const [playerDispositions, setPlayerDispositions] = useState<Record<string, { sell: string; buy: string }>>(() => {
+  try { return JSON.parse(localStorage.getItem("playerDispositions_v1") || "{}"); } catch { return {}; }
+});
+const [activityTransactions, setActivityTransactions] = useState<any[]>([]);
+const [loadingActivity, setLoadingActivity] = useState(false);
 const [leagueWeeklyMatchups, setLeagueWeeklyMatchups] = useState<Record<string, any[]>>({});
 const [loadingLeagueWeeklyMatchups, setLoadingLeagueWeeklyMatchups] = useState(false);
 const [dataHubTab, setDataHubTab] = useState<"OWNERSHIP" | "DYNASTY" | "REDRAFT" | "PROJECTIONS" | "PICK_VALUES" | "LEAGUEMATES">("OWNERSHIP");
@@ -1226,6 +1298,38 @@ useEffect(() => {
         JSON.stringify(rows.filter((row) => row.dismissed).map((row) => row.id))
       );
     });
+  // 7. Player notes (Supabase overrides localStorage)
+  supabase
+    .from("player_notes")
+    .select("player_id, note")
+    .eq("user_id", supabaseUser.id)
+    .then(({ data }) => {
+      if (data && data.length > 0) {
+        const map: Record<string, string> = {};
+        data.forEach((row: any) => { map[String(row.player_id)] = row.note; });
+        setPlayerNotes((prev) => {
+          const merged = { ...prev, ...map };
+          try { localStorage.setItem("playerNotes_v1", JSON.stringify(merged)); } catch {}
+          return merged;
+        });
+      }
+    });
+  // 8. Player dispositions
+  supabase
+    .from("player_dispositions")
+    .select("player_id, sell, buy")
+    .eq("user_id", supabaseUser.id)
+    .then(({ data }) => {
+      if (data && data.length > 0) {
+        const map: Record<string, { sell: string; buy: string }> = {};
+        data.forEach((row: any) => { map[String(row.player_id)] = { sell: row.sell, buy: row.buy }; });
+        setPlayerDispositions((prev) => {
+          const merged = { ...prev, ...map };
+          try { localStorage.setItem("playerDispositions_v1", JSON.stringify(merged)); } catch {}
+          return merged;
+        });
+      }
+    });
 }, [supabaseUser]);
 
 const signUp = async () => {
@@ -1427,6 +1531,20 @@ useEffect(() => {
     loadRedraftValues();
   }
 }, [mainTab, leagueHubTab, selectedLeague?.league_id]);
+
+useEffect(() => {
+  if (mainTab === "LEAGUES" && leagueHubTab === "ACTIVITY" && selectedLeague?.league_id) {
+    setActivityTransactions([]);
+    loadActivity(selectedLeague.league_id);
+  }
+}, [mainTab, leagueHubTab, selectedLeague?.league_id]);
+
+// Auto-load data needed by the player profile panel whenever it opens
+useEffect(() => {
+  if (!playerProfileId) return;
+  if (Object.keys(redraftValues).length === 0) loadRedraftValues();
+  if (!leagueOverviewLoaded && leagues.length > 0 && user) loadLeagueOverview();
+}, [playerProfileId, leagues.length, user?.user_id]);
 
 useEffect(() => {
   if (mainTab === "LEAGUES" && leagueHubTab === "SIMULATOR") {
@@ -2452,6 +2570,26 @@ const loadNflState = async () => {
   } catch { /* silently fail */ }
 };
 
+const loadActivity = async (leagueId: string) => {
+  if (!leagueId) return;
+  setLoadingActivity(true);
+  try {
+    // Fetch the last 6 weeks of transactions in parallel
+    const weeks = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
+    const results = await Promise.all(
+      weeks.map(w =>
+        fetch(`https://api.sleeper.app/v1/league/${leagueId}/transactions/${w}`)
+          .then(r => r.json())
+          .catch(() => [])
+      )
+    );
+    const all = results.flat().filter((t: any) => t && t.status === "complete");
+    all.sort((a: any, b: any) => (b.status_updated || b.created || 0) - (a.status_updated || a.created || 0));
+    setActivityTransactions(all.slice(0, 150));
+  } catch { /* silently fail */ }
+  finally { setLoadingActivity(false); }
+};
+
 const loadLeagueOverview = async () => {
   if (!leagues.length || !user) return;
   setLoadingLeagueOverview(true);
@@ -2460,11 +2598,17 @@ const loadLeagueOverview = async () => {
     const results = await Promise.all(
       leagues.map(async (league: any) => {
         try {
-          const [rostersData, tradedPicksData, draftsData] = await Promise.all([
+          const [rostersData, tradedPicksData, draftsData, usersData] = await Promise.all([
             fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`).then(r => r.json()),
             fetch(`https://api.sleeper.app/v1/league/${league.league_id}/traded_picks`).then(r => r.json()).catch(() => []),
             fetch(`https://api.sleeper.app/v1/league/${league.league_id}/drafts`).then(r => r.json()).catch(() => []),
+            fetch(`https://api.sleeper.app/v1/league/${league.league_id}/users`).then(r => r.json()).catch(() => []),
           ]);
+          // Build userId → display_name map for this league
+          const leagueUserMap: Record<string, string> = {};
+          (usersData || []).forEach((u: any) => {
+            leagueUserMap[u.user_id] = u.display_name || u.username || u.metadata?.team_name || `Team`;
+          });
 
           const tempPicks: any[] = [];
           const rosterToUser: Record<string, string> = {};
@@ -2503,13 +2647,13 @@ const loadLeagueOverview = async () => {
             }
           });
 
-          return { league, rosters: rostersData, picks: tempPicks };
+          return { league, rosters: rostersData, picks: tempPicks, userMap: leagueUserMap };
         } catch { return null; }
       })
     );
     const byLeague: Record<string, any> = {};
-    results.filter(Boolean).forEach(({ league, rosters: lr, picks }: any) => {
-      byLeague[league.league_id] = { league, rosters: lr, picks };
+    results.filter(Boolean).forEach(({ league, rosters: lr, picks, userMap }: any) => {
+      byLeague[league.league_id] = { league, rosters: lr, picks, userMap };
     });
     setLeagueOverviewData(byLeague);
     setLeagueOverviewLoaded(true);
@@ -2540,6 +2684,30 @@ const loadRedraftValues = async () => {
   }
 };
 
+const savePlayerNote = async (playerId: string, note: string) => {
+  const updated = { ...playerNotes, [playerId]: note };
+  setPlayerNotes(updated);
+  try { localStorage.setItem("playerNotes_v1", JSON.stringify(updated)); } catch {}
+  if (supabaseUser) {
+    supabase.from("player_notes").upsert(
+      { user_id: supabaseUser.id, player_id: playerId, note, updated_at: new Date().toISOString() },
+      { onConflict: "user_id,player_id" }
+    ).then(() => {});
+  }
+};
+
+const savePlayerDisposition = async (playerId: string, sell: string, buy: string) => {
+  const updated = { ...playerDispositions, [playerId]: { sell, buy } };
+  setPlayerDispositions(updated);
+  try { localStorage.setItem("playerDispositions_v1", JSON.stringify(updated)); } catch {}
+  if (supabaseUser) {
+    supabase.from("player_dispositions").upsert(
+      { user_id: supabaseUser.id, player_id: playerId, sell, buy, updated_at: new Date().toISOString() },
+      { onConflict: "user_id,player_id" }
+    ).then(() => {});
+  }
+};
+
 const loadProjections = async (week: number | 'season') => {
   setLoadingProjections(true);
   const statusMap: Record<string, boolean> = {};
@@ -2566,13 +2734,30 @@ const loadProjections = async (week: number | 'season') => {
 
     // ── Fetch each source ─────────────────────────────────────────────────────
     // sourceRows: sleeperId → { fpts, sources }
-    const sourceRows = new Map<string, { totalWeightedFpts: number; totalWeight: number; sources: string[] }>();
+    const sourceRows = new Map<string, { totalWeightedFpts: number; totalWeight: number; sources: string[]; kickoffAt: number | null }>();
+    const getProjectionSourceKickoffAt = (row: any) => {
+      const direct = getProjectionKickoffAt(row);
+      if (direct) return direct;
+      const nestedCandidates = [
+        row?.game?.kickoffAt,
+        row?.game?.kickoff_at,
+        row?.game?.scheduled,
+        row?.game?.start_time,
+        row?.metadata?.kickoffAt,
+        row?.metadata?.kickoff_at,
+      ];
+      const nested = nestedCandidates
+        .map((value) => Number(value))
+        .find((value) => Number.isFinite(value) && value > 0);
+      return nested || null;
+    };
 
-    const addRow = (sleeperId: string, fpts: number, sourceId: string, weight: number) => {
-      const existing = sourceRows.get(sleeperId) ?? { totalWeightedFpts: 0, totalWeight: 0, sources: [] };
+    const addRow = (sleeperId: string, fpts: number, sourceId: string, weight: number, kickoffAt?: number | null) => {
+      const existing = sourceRows.get(sleeperId) ?? { totalWeightedFpts: 0, totalWeight: 0, sources: [], kickoffAt: null };
       existing.totalWeightedFpts += fpts * weight;
       existing.totalWeight += weight;
       if (!existing.sources.includes(sourceId)) existing.sources.push(sourceId);
+      if (!existing.kickoffAt && kickoffAt) existing.kickoffAt = kickoffAt;
       sourceRows.set(sleeperId, existing);
     };
 
@@ -2603,7 +2788,7 @@ const loadProjections = async (week: number | 'season') => {
         const tePremium: number = pos === 'TE' ? (item.stats?.rec ?? 0) * 0.5 : 0;
         const fpts = pprFpts + tePremium;
         if (fpts <= 0) return;
-        addRow(String(item.player_id), fpts, src.id, src.weight);
+        addRow(String(item.player_id), fpts, src.id, src.weight, getProjectionSourceKickoffAt(item));
       });
       statusMap['sleeper'] = true;
     } catch {
@@ -2664,6 +2849,7 @@ const loadProjections = async (week: number | 'season') => {
         team: p.team,
         fpts: Math.round(consensusFpts * 10) / 10,
         sources: row.sources,
+        kickoffAt: row.kickoffAt,
       });
     });
 
@@ -3565,6 +3751,17 @@ const getTeamSummary = () => {
 
     const strongPos = myBuckets.strong[0] || myProfile?.positionRanks?.sort((a: any, b: any) => a.rank - b.rank)?.[0]?.pos || "WR";
     const weakPos = myBuckets.weak[0] || myProfile?.positionRanks?.sort((a: any, b: any) => b.rank - a.rank)?.[0]?.pos || "RB";
+    const teamCount = rosters.length || 12;
+    const weakPositions = new Set(
+      (myProfile?.positionRanks || [])
+        .filter((entry: any) => entry.rank >= Math.max(4, teamCount - 2))
+        .map((entry: any) => entry.pos)
+    );
+    const strongPositions = new Set(
+      (myProfile?.positionRanks || [])
+        .filter((entry: any) => entry.rank <= Math.max(2, Math.ceil(teamCount / 3)))
+        .map((entry: any) => entry.pos)
+    );
     const agingSellCandidate = [...myPlayersDetailed]
       .filter((player: any) =>
         (player.position === "RB" && Number(player.age || 0) >= 25) ||
@@ -3580,6 +3777,36 @@ const getTeamSummary = () => {
     const recommendations: any[] = [];
     const sortedPartners = [...tradePartnerRankings];
     const assetValue = (asset: any) => asset?.expectedValue ?? asset?.dynValue ?? asset?.value ?? 0;
+    const meaningfulPlayerThreshold = 350;
+    const fairDeltaLimit = (total: number) => Math.max(250, Math.min(900, Math.round(total * 0.16)));
+    const isFairPackage = (give: any[], receive: any[]) => {
+      const giveTotal = Math.round(sum(give.map((asset: any) => assetValue(asset))));
+      const receiveTotal = Math.round(sum(receive.map((asset: any) => assetValue(asset))));
+      if (giveTotal <= 0 || receiveTotal <= 0) return false;
+      const delta = Math.abs(receiveTotal - giveTotal);
+      const ratio = receiveTotal / Math.max(giveTotal, 1);
+      return delta <= fairDeltaLimit(Math.max(giveTotal, receiveTotal)) && ratio >= 0.78 && ratio <= 1.22;
+    };
+    const chooseClosestPackage = (packages: any[][], targetValue: number, opts?: { minValue?: number; maxValue?: number }) => {
+      const minValue = opts?.minValue ?? Math.max(400, Math.round(targetValue * 0.78));
+      const maxValue = opts?.maxValue ?? Math.round(targetValue * 1.22);
+      return packages
+        .map((pkg) => ({
+          assets: pkg,
+          total: Math.round(sum(pkg.map((asset: any) => assetValue(asset)))),
+        }))
+        .filter((entry) => entry.total >= minValue && entry.total <= maxValue)
+        .sort((a, b) => Math.abs(a.total - targetValue) - Math.abs(b.total - targetValue))[0] || null;
+    };
+    const twoAssetCombos = (assets: any[]) => {
+      const combos: any[][] = [];
+      for (let i = 0; i < assets.length; i++) {
+        for (let j = i + 1; j < assets.length; j++) {
+          combos.push([assets[i], assets[j]]);
+        }
+      }
+      return combos;
+    };
     const buildCard = ({
       archetype,
       partner,
@@ -3592,6 +3819,9 @@ const getTeamSummary = () => {
       const giveTotal = Math.round(sum(give.map((asset: any) => assetValue(asset))));
       const receiveTotal = Math.round(sum(receive.map((asset: any) => assetValue(asset))));
       const packageDelta = receiveTotal - giveTotal;
+      if (!isFairPackage(give, receive)) return null;
+      if (give.some((asset: any) => asset?.dynValue != null && asset.dynValue < meaningfulPlayerThreshold && !asset?.season)) return null;
+      if (receive.some((asset: any) => asset?.dynValue != null && asset.dynValue < meaningfulPlayerThreshold && !asset?.season)) return null;
       const recommendationScore = Math.round(
         partner.rankScore +
         Math.max(0, 16 - Math.abs(packageDelta) / 140) +
@@ -3619,104 +3849,235 @@ const getTeamSummary = () => {
       };
     };
 
-    const sellerPartner = sortedPartners.find((partner: any) =>
-      partner.isSeller
-    );
-    if (sellerPartner) {
-      const sellerPlayers = playerListForRoster(Number(sellerPartner.rosterId));
-      const buyLowTarget = sellerPlayers
-        .filter((player: any) => player.position === weakPos && Number(player.age || 99) <= 26)
-        .sort((a: any, b: any) => (a.redValue - a.dynValue) - (b.redValue - b.dynValue) || b.dynValue - a.dynValue)[0];
-      const buyLowPick = myPicksDetailed[0];
-      if (buyLowTarget && buyLowPick) {
-        recommendations.push(buildCard({
-          archetype: "Buy Low",
-          partner: sellerPartner,
-          give: [buyLowPick],
-          receive: [buyLowTarget],
-          whyYou: `Adds a younger ${weakPos} without forcing an all-in move.`,
-          whyThem: `${sellerPartner.ownerName} profiles more like a value-insulation team than a lineup-points team right now.`,
-          summary: `Use draft insulation to target a younger ${weakPos} from a team that should be open to future value.`,
-        }));
-      }
-    }
-
-    const contenderPartner = sortedPartners.find((partner: any) =>
-      partner.isBuyer &&
-      getProfilePosBuckets(partner.directionProfile).weak.includes(strongPos)
-    );
-    if (contenderPartner && agingSellCandidate) {
-      const contenderPicks = (allPicks as any[])
-        .filter((pick: any) => Number(pick.owner_id) === Number(contenderPartner.rosterId))
+    const isAgingAsset = (player: any) =>
+      (player.position === "RB" && Number(player.age || 0) >= 25) ||
+      (player.position === "QB" && Number(player.age || 0) >= 29) ||
+      (["WR", "TE"].includes(player.position) && Number(player.age || 0) >= 28);
+    const isYoungInsulation = (player: any) =>
+      (["QB", "WR"].includes(player.position) && Number(player.age || 99) <= 25) ||
+      (player.position === "TE" && Number(player.age || 99) <= 25) ||
+      (player.position === "RB" && Number(player.age || 99) <= 23);
+    const getPickPackage = (rosterId: number) =>
+      (allPicks as any[])
+        .filter((pick: any) => Number(pick.owner_id) === Number(rosterId))
         .map((pick: any) => ({
           ...pick,
           expectedValue: selectedLeagueDynamicPickValues[`${pick.season}-${pick.round}-${pick.roster_id}`]?.expectedValue ?? getStoredPickValue(pickFcValues, pick),
+          label: selectedLeagueDynamicPickValues[`${pick.season}-${pick.round}-${pick.roster_id}`]?.label || "Flat value",
         }))
-        .sort((a: any, b: any) => b.expectedValue - a.expectedValue);
-      const returnPick = contenderPicks[0];
-      if (returnPick) {
-        recommendations.push(buildCard({
-          archetype: "Sell High",
-          partner: contenderPartner,
-          give: [agingSellCandidate],
-          receive: [returnPick],
-          whyYou: `Cash out one aging ${agingSellCandidate.position} before the value cliff gets sharper.`,
-          whyThem: `${contenderPartner.ownerName} gets immediate lineup points at a spot they can use.`,
-          summary: `Turn present production into a flexible future asset while contenders still need weekly points.`,
-        }));
-      }
-    }
+        .filter((pick: any) => pick.expectedValue > 0)
+        .sort((a: any, b: any) => b.expectedValue - a.expectedValue)
+        .slice(0, 6);
+    const comboPackages = (assets: any[], maxItems = 2) => {
+      const singles = assets.map((asset: any) => [asset]);
+      if (maxItems <= 1) return singles;
+      return [...singles, ...twoAssetCombos(assets)];
+    };
+    const classifyArchetype = (give: any[], receive: any[], partner: any) => {
+      const givePlayers = give.filter((asset: any) => !asset?.season);
+      const receivePlayers = receive.filter((asset: any) => !asset?.season);
+      const givePicks = give.filter((asset: any) => !!asset?.season);
+      const receivePicks = receive.filter((asset: any) => !!asset?.season);
+      if (receivePicks.length > 0 && givePlayers.some((player: any) => isAgingAsset(player))) return "Sell High";
+      if (givePicks.length > 0 && receivePlayers.some((player: any) => weakPositions.has(player.position))) return "Buy Low";
+      if (give.length > receive.length && receivePlayers.length === 1) return "2-for-1";
+      if (give.length >= 2 && receivePlayers.length === 1 && receivePlayers[0]?.dynValue > Math.max(...givePlayers.map((player: any) => player.dynValue || 0), 0)) return "Tier Up";
+      if (partner?.isSeller) return "Insulation Buy";
+      return "Value Rebalance";
+    };
+    const scoreRecommendationFit = (give: any[], receive: any[], partner: any) => {
+      const givePlayers = give.filter((asset: any) => !asset?.season);
+      const receivePlayers = receive.filter((asset: any) => !asset?.season);
+      const givePicks = give.filter((asset: any) => !!asset?.season);
+      const receivePicks = receive.filter((asset: any) => !!asset?.season);
+      const partnerBuckets = getProfilePosBuckets(partner.directionProfile);
+      let myScore = 0;
+      let theirScore = 0;
 
-    const depthPartner = sortedPartners.find((partner: any) =>
-      getProfilePosBuckets(partner.directionProfile).weak.includes(strongPos) &&
-      getProfilePosBuckets(partner.directionProfile).strong.includes(weakPos)
-    );
-    if (depthPartner && depthPieces.length >= 2) {
-      const depthPartnerPlayers = playerListForRoster(Number(depthPartner.rosterId));
-      const tierUpTarget = depthPartnerPlayers
-        .filter((player: any) => player.position === weakPos)
-        .sort((a: any, b: any) => b.dynValue - a.dynValue)[0];
-      if (tierUpTarget) {
-        recommendations.push(buildCard({
-          archetype: "2-for-1",
-          partner: depthPartner,
-          give: depthPieces.slice(0, 2),
-          receive: [tierUpTarget],
-          whyYou: `Condenses spare ${strongPos} depth into one cleaner starter at ${weakPos}.`,
-          whyThem: `${depthPartner.ownerName} gets multiple usable pieces for a thinner room.`,
-          summary: `Use depth from a strength to solve a real lineup need instead of making a sideways swap.`,
-        }));
+      if (["Rebuilder", "Blow Up", "Hopeless"].includes(myProfile.bucket)) {
+        myScore += givePlayers.filter((player: any) => isAgingAsset(player)).length * 8;
+        myScore += receivePlayers.filter((player: any) => isYoungInsulation(player)).length * 8;
+        myScore += receivePicks.length * 7;
+        myScore -= receivePlayers.filter((player: any) => isAgingAsset(player)).length * 14;
+      } else if (["Elite", "True Contender", "Almost There"].includes(myProfile.bucket)) {
+        myScore += receivePlayers.filter((player: any) => weakPositions.has(player.position)).length * 8;
+        myScore += receivePlayers.reduce((sum: number, player: any) => sum + (player.redValue || 0), 0) / 350;
+        myScore -= receivePicks.length * 3;
+      } else {
+        myScore += receivePlayers.filter((player: any) => weakPositions.has(player.position)).length * 6;
+        myScore += receivePlayers.filter((player: any) => isYoungInsulation(player)).length * 4;
+        myScore += receivePicks.length * 3;
       }
-    }
 
-    const tierUpPartner = sortedPartners.find((partner: any) =>
-      partner.directionProfile?.bucket !== "Elite" && partner.directionProfile?.bucket !== "True Contender"
-    );
-    const tierUpPick = myPicksDetailed[0];
-    const tierUpPlayer = [...myPlayersDetailed]
-      .filter((player: any) => player.position === weakPos || player.position === strongPos)
-      .sort((a: any, b: any) => b.dynValue - a.dynValue)[1];
-    if (tierUpPartner && tierUpPick && tierUpPlayer) {
-      const partnerPlayers = playerListForRoster(Number(tierUpPartner.rosterId));
-      const eliteTarget = partnerPlayers
-        .filter((player: any) => player.position === weakPos)
-        .sort((a: any, b: any) => b.dynValue - a.dynValue)[0];
-      if (eliteTarget && eliteTarget.dynValue > tierUpPlayer.dynValue) {
-        recommendations.push(buildCard({
-          archetype: "Tier Up",
-          partner: tierUpPartner,
-          give: [tierUpPlayer, tierUpPick],
-          receive: [eliteTarget],
-          whyYou: `Turns one good asset plus flexible capital into a cleaner difference-maker.`,
-          whyThem: `${tierUpPartner.ownerName} gets insulation and a second asset instead of one concentrated piece.`,
-          summary: `Push one tier higher at ${weakPos} without emptying the whole future.`,
-        }));
+      if (partner.isBuyer) {
+        theirScore += givePlayers.filter((player: any) => partnerBuckets.weak.includes(player.position)).length * 8;
+        theirScore += givePlayers.reduce((sum: number, player: any) => sum + (player.redValue || 0), 0) / 350;
+        theirScore -= receivePicks.length * 2;
+      } else if (partner.isSeller) {
+        theirScore += givePicks.length * 7;
+        theirScore += givePlayers.filter((player: any) => isYoungInsulation(player)).length * 7;
+        theirScore += receivePlayers.filter((player: any) => isAgingAsset(player)).length * 6;
+        theirScore -= givePlayers.filter((player: any) => isAgingAsset(player)).length * 6;
+      } else {
+        theirScore += givePlayers.filter((player: any) => partnerBuckets.weak.includes(player.position)).length * 5;
+        theirScore += givePicks.length * 3;
       }
-    }
+
+      return { myScore, theirScore };
+    };
+    const passesRecommendationGuard = (give: any[], receive: any[], partner: any) => {
+      const givePlayers = give.filter((asset: any) => !asset?.season);
+      const receivePlayers = receive.filter((asset: any) => !asset?.season);
+      const givePicks = give.filter((asset: any) => !!asset?.season);
+      const receivePicks = receive.filter((asset: any) => !!asset?.season);
+      const partnerBuckets = getProfilePosBuckets(partner.directionProfile);
+      const incomingAging = receivePlayers.filter((player: any) => isAgingAsset(player)).length;
+      const incomingYoung = receivePlayers.filter((player: any) => isYoungInsulation(player)).length;
+      const outgoingAging = givePlayers.filter((player: any) => isAgingAsset(player)).length;
+      const givesPremiumCurrentPick = givePicks.some((pick: any) => String(pick.season) === CURRENT_YEAR && Number(pick.round) === 1);
+      const receivesPremiumCurrentPick = receivePicks.some((pick: any) => String(pick.season) === CURRENT_YEAR && Number(pick.round) === 1);
+
+      if (["Rebuilder", "Blow Up", "Hopeless"].includes(myProfile.bucket)) {
+        if (incomingAging > 0) return false;
+        if (givesPremiumCurrentPick && incomingYoung === 0 && receivePicks.length === 0) return false;
+        if (receivePlayers.some((player: any) => player.position === "RB" && Number(player.age || 99) >= 24)) return false;
+      }
+
+      if (["Elite", "True Contender", "Almost There"].includes(myProfile.bucket)) {
+        if (receive.length > 0 && receivePlayers.length === 0) return false;
+        if (receivePlayers.length > 0 && receivePlayers.every((player: any) => isYoungInsulation(player)) && receivePicks.length > 0 && givePlayers.length > 0) {
+          return false;
+        }
+      }
+
+      if (partner.isBuyer) {
+        const pointsComingToPartner = givePlayers.reduce((sum: number, player: any) => sum + (player.redValue || 0), 0);
+        if (pointsComingToPartner <= 0 && givePicks.length > 0) return false;
+        if (partnerBuckets.weak.length > 0 && !givePlayers.some((player: any) => partnerBuckets.weak.includes(player.position)) && pointsComingToPartner < 1000) {
+          return false;
+        }
+      }
+
+      if (partner.isSeller) {
+        if (outgoingAging > 0 && givePicks.length === 0 && givePlayers.filter((player: any) => isYoungInsulation(player)).length === 0) return false;
+        if (receivesPremiumCurrentPick && partner.playoffOdds > 55) return false;
+      }
+
+      return true;
+    };
+    const getCandidateText = (archetype: string, partner: any, give: any[], receive: any[]) => {
+      const givePlayers = give.filter((asset: any) => !asset?.season);
+      const receivePlayers = receive.filter((asset: any) => !asset?.season);
+      const receivePicks = receive.filter((asset: any) => !!asset?.season);
+      if (archetype === "Sell High") {
+        return {
+          whyYou: "Moves present production into future insulation without waiting for the market to cool.",
+          whyThem: `${partner.ownerName} gets immediate points that better match a buying profile.`,
+          summary: "A fair veteran-for-future package that aligns with both roster timelines.",
+        };
+      }
+      if (archetype === "Buy Low" || archetype === "Insulation Buy") {
+        return {
+          whyYou: "Targets younger insulation without paying a reckless premium.",
+          whyThem: `${partner.ownerName} gets the kind of future value a seller should actually consider.`,
+          summary: "A future-facing package built around a player they can realistically move.",
+        };
+      }
+      if (archetype === "2-for-1" || archetype === "Tier Up") {
+        return {
+          whyYou: `Converts extra depth into one stronger piece at a weaker spot without blowing past fair value.`,
+          whyThem: `${partner.ownerName} gets multiple assets that better fit their roster shape.`,
+          summary: "A balanced consolidation deal that should make sense to both sides.",
+        };
+      }
+      return {
+        whyYou: `Improves roster shape with a package that stays inside a realistic value band.`,
+        whyThem: `${partner.ownerName} gets assets that better match their profile and current incentives.`,
+        summary: receivePicks.length > 0
+          ? "A fair rebalance that includes future insulation."
+          : `A fair rebalance centered on ${receivePlayers[0]?.position || "roster"} value.`,
+      };
+    };
+
+    sortedPartners.forEach((partner: any) => {
+      const partnerPlayers = playerListForRoster(Number(partner.rosterId));
+      const partnerPicks = getPickPackage(Number(partner.rosterId));
+      const partnerBuckets = getProfilePosBuckets(partner.directionProfile);
+
+      const myOfferPlayers = myPlayersDetailed
+        .filter((player: any) =>
+          player.dynValue >= meaningfulPlayerThreshold &&
+          (
+            strongPositions.has(player.position) ||
+            isAgingAsset(player) ||
+            partnerBuckets.weak.includes(player.position)
+          )
+        )
+        .sort((a: any, b: any) => a.dynValue - b.dynValue)
+        .slice(0, 10);
+      const myOfferPicks = myPicksDetailed.slice(0, 5);
+
+      const partnerTradeablePlayers = partnerPlayers
+        .filter((player: any) =>
+          player.dynValue >= meaningfulPlayerThreshold &&
+          (
+            weakPositions.has(player.position) ||
+            (partner.isSeller && (isAgingAsset(player) || isYoungInsulation(player))) ||
+            (partner.isBuyer && partnerBuckets.strong.includes(player.position))
+          )
+        )
+        .sort((a: any, b: any) => b.dynValue - a.dynValue)
+        .slice(0, 10);
+
+      const givePackages = comboPackages([...myOfferPlayers, ...myOfferPicks], 2).slice(0, 45);
+      const receivePackages = comboPackages([...partnerTradeablePlayers, ...partnerPicks], 2).slice(0, 45);
+      const candidateCards: any[] = [];
+      const tryBuildCandidates = (minimumFit: number, bandFloor: number, bandCeil: number) => {
+        givePackages.forEach((givePkg: any[]) => {
+          const giveTotal = Math.round(sum(givePkg.map((asset: any) => assetValue(asset))));
+          if (giveTotal < meaningfulPlayerThreshold) return;
+          const matchedReceive = chooseClosestPackage(receivePackages, giveTotal, {
+            minValue: Math.round(giveTotal * bandFloor),
+            maxValue: Math.round(giveTotal * bandCeil),
+          });
+          if (!matchedReceive) return;
+          const receivePkg = matchedReceive.assets;
+          if (!passesRecommendationGuard(givePkg, receivePkg, partner)) return;
+          const fit = scoreRecommendationFit(givePkg, receivePkg, partner);
+          if (fit.myScore < minimumFit || fit.theirScore < minimumFit) return;
+
+          const archetype = classifyArchetype(givePkg, receivePkg, partner);
+          const text = getCandidateText(archetype, partner, givePkg, receivePkg);
+          const card = buildCard({
+            archetype,
+            partner,
+            give: givePkg,
+            receive: receivePkg,
+            whyYou: text.whyYou,
+            whyThem: text.whyThem,
+            summary: text.summary,
+          });
+          if (!card) return;
+          candidateCards.push({
+            ...card,
+            recommendationScore: card.recommendationScore + fit.myScore + fit.theirScore,
+          });
+        });
+      };
+
+      tryBuildCandidates(6, 0.82, 1.12);
+      if (candidateCards.length === 0) tryBuildCandidates(4, 0.86, 1.14);
+      if (candidateCards.length === 0) tryBuildCandidates(3, 0.9, 1.1);
+
+      const bestCard = candidateCards
+        .sort((a: any, b: any) => b.recommendationScore - a.recommendationScore)[0];
+      if (bestCard) recommendations.push(bestCard);
+    });
 
     return recommendations
+      .filter(Boolean)
       .sort((a: any, b: any) => b.recommendationScore - a.recommendationScore)
-      .slice(0, 6);
+      .slice(0, sortedPartners.length || 12);
   }, [
     selectedLeague?.league_id,
     rosters,
@@ -5467,30 +5828,45 @@ const starters = starterSlots
               const week = nflState?.week;
               const season = nflState?.season;
               const isInSeason = season && week && week >= 1 && week <= 17;
+              const projectionBySleeperId = new Map(
+                projectionData.map((row: any) => [String(row.sleeperId), row])
+              );
+              const hasKickoffData = projectionData.some((row: any) => getProjectionKickoffAt(row));
 
               // Score function: uses projections if in-season, redraft values otherwise
               const playerScore = (id: string) => {
                 if (isInSeason) {
-                  const proj = projectionData.find((p: any) => p.sleeperId === id);
+                  const proj = projectionBySleeperId.get(String(id));
                   return proj?.fpts ?? 0;
                 }
                 return redraftValues[id] ?? 0;
+              };
+
+              const playerKickoffAt = (id: string) => {
+                if (!isInSeason) return null;
+                const proj = projectionBySleeperId.get(String(id));
+                return getProjectionKickoffAt(proj);
               };
 
               const positions: string[] = selectedLeague.roster_positions?.filter((p: string) => !["BN","IR","TAXI"].includes(p)) ?? [];
               const myPlayerIds: string[] = roster.players ?? [];
               const taxiIds = new Set<string>((roster.taxi ?? []).map((id: any) => String(id)));
               const used = new Set<string>();
-              const lineup: Array<{ slot: string; player: any; score: number }> = [];
+              const initialLineup: Array<{ slot: string; player: any; score: number; kickoffAt: number | null }> = [];
+              const currentStarterRows = positions.map((slot: string, index: number) => {
+                const starterId = String(roster?.starters?.[index] || "");
+                const starterPlayer = starterId ? (players as any)[starterId] : null;
+                return {
+                  slot,
+                  player: starterPlayer,
+                  score: starterPlayer ? playerScore(starterPlayer.player_id) : 0,
+                  kickoffAt: starterPlayer ? playerKickoffAt(starterPlayer.player_id) : null,
+                };
+              });
 
               // Fill each slot greedily with highest-scoring eligible player
               for (const slot of positions) {
-                const eligible = (slot === "FLEX"
-                  ? ["RB","WR","TE"]
-                  : slot === "SUPER_FLEX"
-                  ? ["QB","RB","WR","TE"]
-                  : [slot]
-                );
+                const eligible = getLineupSlotEligiblePositions(slot);
                 const best = myPlayerIds
                   .filter(id => !used.has(id))
                   .map(id => ({ id, p: (players as any)[id] }))
@@ -5498,11 +5874,13 @@ const starters = starterSlots
                   .sort((a, b) => playerScore(b.id) - playerScore(a.id))[0];
                 if (best) {
                   used.add(best.id);
-                  lineup.push({ slot, player: best.p, score: playerScore(best.id) });
+                  initialLineup.push({ slot, player: best.p, score: playerScore(best.id), kickoffAt: playerKickoffAt(best.id) });
                 } else {
-                  lineup.push({ slot, player: null, score: 0 });
+                  initialLineup.push({ slot, player: null, score: 0, kickoffAt: null });
                 }
               }
+
+              const lineup = rebalanceLineupForKickoffWindows(initialLineup, isInSeason && hasKickoffData);
 
               const benchPlayers = myPlayerIds
                 .filter((id) => !used.has(id) && !taxiIds.has(String(id)))
@@ -5516,6 +5894,51 @@ const starters = starterSlots
                 .filter((p: any) => p)
                 .sort((a: any, b: any) => playerScore(b.player_id) - playerScore(a.player_id));
 
+              const lineupCoachNotes = lineup
+                .map(({ slot, player, score }, index) => {
+                  if (!player?.player_id) return null;
+                  const currentRow = currentStarterRows[index];
+                  const currentPlayer = currentRow?.player;
+                  if (currentPlayer?.player_id === player.player_id) return null;
+                  const delta = score - (currentRow?.score || 0);
+                  const reasonParts = [
+                    delta > 0
+                      ? `${isInSeason ? "Projection" : "Redraft score"} improves by ${delta.toFixed(1)}`
+                      : `${isInSeason ? "Projection" : "Redraft score"} is safer for this slot`,
+                    currentPlayer?.status && /out|doubtful|inactive|suspended/i.test(String(currentPlayer.status))
+                      ? `${currentPlayer.full_name} is ${String(currentPlayer.status).toLowerCase()}`
+                      : null,
+                    slot === "FLEX" || slot === "SUPER_FLEX"
+                      ? `${player.full_name} is the strongest remaining ${slot === "SUPER_FLEX" ? "flex-eligible" : "flex"} fit`
+                      : `${player.full_name} grades best at ${slot.replace("_", " ")}`,
+                    isInSeason &&
+                    hasKickoffData &&
+                    currentRow?.slot !== slot &&
+                    currentPlayer?.position === player.position
+                      ? `${player.full_name} gets the earlier locked slot so later-game flexibility stays in ${currentRow.slot.replace("_", " ")}`
+                      : null,
+                  ].filter(Boolean);
+
+                  return {
+                    slot,
+                    suggested: player,
+                    current: currentPlayer,
+                    delta,
+                    reason: reasonParts.join(" • "),
+                  };
+                })
+                .filter(Boolean) as Array<{
+                  slot: string;
+                  suggested: any;
+                  current: any;
+                  delta: number;
+                  reason: string;
+                }>;
+
+              const currentLineupScore = currentStarterRows.reduce((sum: number, row) => sum + (row.score || 0), 0);
+              const suggestedLineupScore = lineup.reduce((sum: number, row) => sum + (row.score || 0), 0);
+              const lineupDelta = suggestedLineupScore - currentLineupScore;
+
               const posColor: Record<string,string> = { QB:"bg-red-900/50 border-red-700", RB:"bg-green-900/50 border-green-700", WR:"bg-blue-900/50 border-blue-700", TE:"bg-yellow-900/50 border-yellow-700", FLEX:"bg-purple-900/50 border-purple-700", SUPER_FLEX:"bg-pink-900/50 border-pink-700" };
 
               return (
@@ -5528,6 +5951,50 @@ const starters = starterSlots
                       }
                       {" — "}<span className="text-blue-400">{selectedLeague.name}</span>
                     </p>
+                  </div>
+                  <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Lineup Coach</div>
+                        <div className="mt-1 text-sm text-gray-200">
+                          {lineupCoachNotes.length === 0
+                            ? "Your current lineup already matches the coach recommendation."
+                            : `The coach would make ${lineupCoachNotes.length} swap${lineupCoachNotes.length === 1 ? "" : "s"}${lineupDelta > 0 ? ` for roughly +${lineupDelta.toFixed(1)}` : ""}.`}
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-center md:min-w-[220px]">
+                        <div className="rounded-lg border border-gray-800 bg-gray-950/60 px-3 py-2">
+                          <div className="text-[10px] uppercase tracking-wide text-gray-500">Current</div>
+                          <div className="mt-1 text-sm font-semibold text-white">{currentLineupScore.toFixed(1)}</div>
+                        </div>
+                        <div className="rounded-lg border border-gray-800 bg-gray-950/60 px-3 py-2">
+                          <div className="text-[10px] uppercase tracking-wide text-gray-500">Suggested</div>
+                          <div className={`mt-1 text-sm font-semibold ${lineupDelta > 0 ? "text-green-300" : "text-white"}`}>
+                            {suggestedLineupScore.toFixed(1)}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    {lineupCoachNotes.length > 0 && (
+                      <div className="mt-4 grid gap-2">
+                        {lineupCoachNotes.map((note) => (
+                          <div key={`${note.slot}-${note.suggested.player_id}-${note.current?.player_id || "empty"}`} className="rounded-xl border border-gray-800 bg-gray-950/60 p-3">
+                            <div className="flex flex-wrap items-center gap-2 text-sm">
+                              <span className="rounded-full border border-blue-800 bg-blue-950/40 px-2 py-0.5 text-[10px] font-semibold text-blue-300">
+                                {note.slot.replace("_", " ")}
+                              </span>
+                              <span className="text-white">{note.current?.full_name || "Empty slot"}</span>
+                              <span className="text-gray-500">→</span>
+                              <span className="font-semibold text-green-300">{note.suggested.full_name}</span>
+                              <span className={`text-xs font-mono ${note.delta > 0 ? "text-green-300" : "text-gray-400"}`}>
+                                {note.delta > 0 ? "+" : ""}{note.delta.toFixed(1)}
+                              </span>
+                            </div>
+                            <div className="mt-1 text-xs text-gray-400">{note.reason}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   {lineup.map(({ slot, player, score }, i) => (
                     <div key={i} className={`flex items-center gap-3 border rounded-xl px-3 py-2 ${posColor[slot] ?? "bg-gray-800 border-gray-700"}`}>
@@ -5737,7 +6204,7 @@ const starters = starterSlots
                           {popPlayers.map((p: any) => (
                             <div key={p.player_id} className="flex items-center justify-between bg-gray-800 rounded-lg px-2 py-1.5">
                               <div className="flex items-center gap-1.5 min-w-0">
-                                <span className="text-xs text-white truncate">{p.full_name}</span>
+                                <button onClick={() => { setPrPopup(null); setPlayerProfileId(p.player_id); }} className="text-xs text-white hover:text-blue-400 transition truncate text-left">{p.full_name}</button>
                                 <span className="text-[10px] text-gray-500 shrink-0">{p.position}</span>
                               </div>
                               <span className="text-xs text-gray-400 font-mono shrink-0 ml-2">
@@ -5808,6 +6275,162 @@ const starters = starterSlots
                     </div>
                   </div>
                 </>
+              );
+            })()}
+
+            {/* ── Activity Feed ── */}
+            {leagueHubTab === "ACTIVITY" && (() => {
+              if (!selectedLeague) return (
+                <p className="text-sm text-gray-500">Select a league from Rosters &amp; Rules first to view the activity feed.</p>
+              );
+              if (loadingActivity) return <p className="text-sm text-blue-400">Loading transactions…</p>;
+
+              const rosterToUser: Record<number, string> = {};
+              rosters.forEach((r: any) => { rosterToUser[r.roster_id] = r.owner_id; });
+              const ownerName = (rosterId: number) => {
+                const uid = rosterToUser[rosterId];
+                return (users as any)[uid] || `Team ${rosterId}`;
+              };
+
+              const fmtTs = (ts: number) => {
+                if (!ts) return "";
+                const d = new Date(ts);
+                return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+              };
+
+              const txns = activityTransactions.filter((t: any) => {
+                const hasPlayers = Object.keys(t.adds || {}).length > 0 || Object.keys(t.drops || {}).length > 0;
+                const hasTradeParts = (t.draft_picks || []).length > 0 || Object.keys(t.adds || {}).length > 0;
+                return hasPlayers || hasTradeParts;
+              });
+
+              if (!txns.length) return (
+                <div className="text-center py-10 text-gray-500 text-sm">
+                  No transactions found for {selectedLeague.name}. Activity appears here as the season progresses.
+                </div>
+              );
+
+              return (
+                <div className="space-y-2">
+                  <p className="text-xs text-gray-500 mb-3">
+                    Recent transactions for <strong className="text-gray-300">{selectedLeague.name}</strong>. Click any player name to view their profile.
+                  </p>
+                  {txns.map((t: any, idx: number) => {
+                    const isWaiver = t.type === "waiver";
+                    const isFreeAgent = t.type === "free_agent";
+                    const isTrade = t.type === "trade";
+                    const adds = Object.entries(t.adds || {}) as [string, number][];
+                    const drops = Object.entries(t.drops || {}) as [string, number][];
+                    const picks = (t.draft_picks || []) as any[];
+
+                    const typeLabel = isTrade ? "Trade" : isWaiver ? "Waiver" : "Free Agent";
+                    const typeColor = isTrade
+                      ? "bg-purple-900/40 text-purple-300 border-purple-700"
+                      : isWaiver
+                      ? "bg-blue-900/40 text-blue-300 border-blue-700"
+                      : "bg-green-900/40 text-green-300 border-green-700";
+
+                    if (isTrade) {
+                      // Group adds/drops by roster (each roster's perspective)
+                      const rosterIds = Array.from(new Set([
+                        ...adds.map(([, rid]) => rid),
+                        ...drops.map(([, rid]) => rid),
+                        ...(t.roster_ids || []),
+                      ])) as number[];
+
+                      return (
+                        <div key={t.transaction_id || idx} className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+                          <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center gap-2">
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${typeColor}`}>{typeLabel}</span>
+                              <span className="text-xs text-gray-500">{fmtTs(t.status_updated || t.created)}</span>
+                            </div>
+                          </div>
+                          <div className={`grid gap-3`} style={{ gridTemplateColumns: `repeat(${Math.min(rosterIds.length, 3)}, 1fr)` }}>
+                            {rosterIds.map((rid) => {
+                              const got = adds.filter(([, r]) => r === rid).map(([pid]) => pid);
+                              const gave = drops.filter(([, r]) => r === rid).map(([pid]) => pid);
+                              const gotPicks = picks.filter((p: any) => p.owner_id === rid);
+                              const gavePicks = picks.filter((p: any) => p.previous_owner_id === rid);
+                              return (
+                                <div key={rid}>
+                                  <p className="text-xs font-semibold text-blue-300 mb-1">{ownerName(rid)}</p>
+                                  {got.length > 0 && (
+                                    <div className="mb-1">
+                                      <p className="text-[10px] text-green-500 uppercase font-bold mb-0.5">Received</p>
+                                      {got.map(pid => {
+                                        const p = (players as any)[pid];
+                                        return p ? (
+                                          <button key={pid} onClick={() => setPlayerProfileId(pid)} className="block text-xs text-white hover:text-blue-400 transition text-left">
+                                            {p.full_name} <span className="text-gray-500">{p.position}</span>
+                                          </button>
+                                        ) : null;
+                                      })}
+                                      {gotPicks.map((pk: any, i: number) => (
+                                        <p key={i} className="text-xs text-gray-400">{pk.season} Rd {pk.round}</p>
+                                      ))}
+                                    </div>
+                                  )}
+                                  {gave.length > 0 && (
+                                    <div>
+                                      <p className="text-[10px] text-red-400 uppercase font-bold mb-0.5">Gave</p>
+                                      {gave.map(pid => {
+                                        const p = (players as any)[pid];
+                                        return p ? (
+                                          <button key={pid} onClick={() => setPlayerProfileId(pid)} className="block text-xs text-gray-400 hover:text-blue-400 transition text-left line-through">
+                                            {p.full_name} <span className="text-gray-600">{p.position}</span>
+                                          </button>
+                                        ) : null;
+                                      })}
+                                      {gavePicks.map((pk: any, i: number) => (
+                                        <p key={i} className="text-xs text-gray-600 line-through">{pk.season} Rd {pk.round}</p>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    // Add / Drop / Waiver
+                    return (
+                      <div key={t.transaction_id || idx} className="bg-gray-900 border border-gray-800 rounded-xl px-4 py-3 flex items-start gap-3">
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border shrink-0 mt-0.5 ${typeColor}`}>{typeLabel}</span>
+                        <div className="min-w-0 flex-1">
+                          {adds.map(([pid, rid]) => {
+                            const p = (players as any)[pid];
+                            return p ? (
+                              <div key={pid} className="flex items-center gap-1.5 text-xs">
+                                <span className="text-green-400 font-bold">+</span>
+                                <button onClick={() => setPlayerProfileId(pid)} className="text-white hover:text-blue-400 transition font-medium">
+                                  {p.full_name}
+                                </button>
+                                <span className="text-gray-500">{p.position} · {p.team}</span>
+                                <span className="text-gray-600">→ {ownerName(rid)}</span>
+                              </div>
+                            ) : null;
+                          })}
+                          {drops.map(([pid, rid]) => {
+                            const p = (players as any)[pid];
+                            return p ? (
+                              <div key={pid} className="flex items-center gap-1.5 text-xs">
+                                <span className="text-red-400 font-bold">−</span>
+                                <button onClick={() => setPlayerProfileId(pid)} className="text-gray-400 hover:text-blue-400 transition line-through">
+                                  {p.full_name}
+                                </button>
+                                <span className="text-gray-600">{p.position} · {p.team} dropped by {ownerName(rid)}</span>
+                              </div>
+                            ) : null;
+                          })}
+                        </div>
+                        <span className="text-[10px] text-gray-600 shrink-0 mt-0.5">{fmtTs(t.status_updated || t.created)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
               );
             })()}
 
@@ -5912,13 +6535,23 @@ const starters = starterSlots
               const posColor: Record<string, string> = {
                 QB: "text-red-400", RB: "text-green-400", WR: "text-blue-400", TE: "text-yellow-400",
               };
+              const sellColor = (v: string) =>
+                v === "Trade at All Costs" ? "text-green-400" :
+                v === "Lower than Market" ? "text-green-600" :
+                v === "Not Willing to Trade" ? "text-red-400" :
+                v === "Will Trade but Higher than Market" ? "text-yellow-400" : "text-gray-500";
+              const buyColor = (v: string) =>
+                v === "Buy Over Market" ? "text-green-400" :
+                v === "Buy at Market" ? "text-green-600" :
+                v === "Zero Interest" ? "text-red-400" :
+                v === "Buy Low" ? "text-yellow-400" : "text-gray-500";
 
               return (
                 <>
                   {loadingCalcValues && (
                     <p className="text-sm text-blue-400 mb-4">Loading values…</p>
                   )}
-                  <div className="flex gap-2 mb-4">
+                  <div className="flex gap-2 mb-3">
                     {["ALL", "QB", "RB", "WR", "TE"].map((pos) => (
                       <button
                         key={pos}
@@ -5929,15 +6562,51 @@ const starters = starterSlots
                       </button>
                     ))}
                   </div>
-                  <div className="space-y-1">
-                    {ranked.map((p: any, idx: number) => (
-                      <div key={p.player_id} className="flex items-center gap-3 bg-gray-800 rounded-lg px-3 py-2">
-                        <span className="text-xs text-gray-500 w-6 text-right shrink-0">{idx + 1}</span>
-                        <span className={`text-[10px] font-bold w-7 shrink-0 ${posColor[p.position] ?? "text-gray-400"}`}>{p.position}</span>
-                        <span className="text-sm text-white flex-1 truncate">{p.full_name}</span>
-                        <span className="text-xs text-gray-400 font-mono shrink-0">{fcVal(p.player_id).toLocaleString()}</span>
-                      </div>
-                    ))}
+                  {/* Column headers */}
+                  <div className="flex items-center gap-2 px-2 mb-1">
+                    <span className="w-5 shrink-0" />
+                    <span className="w-6 shrink-0" />
+                    <span className="flex-1 text-[10px] text-gray-600 uppercase tracking-wider">Player</span>
+                    <span className="w-14 text-right text-[10px] text-gray-600 uppercase tracking-wider shrink-0">Value</span>
+                    <span className="w-20 text-center text-[10px] text-gray-600 uppercase tracking-wider shrink-0">Away</span>
+                    <span className="w-20 text-center text-[10px] text-gray-600 uppercase tracking-wider shrink-0">For</span>
+                    <span className="w-4 shrink-0" />
+                  </div>
+                  <div className="space-y-0.5">
+                    {ranked.map((p: any, idx: number) => {
+                      const disp = playerDispositions[p.player_id] ?? { sell: "Neutral", buy: "Neutral" };
+                      return (
+                        <div key={p.player_id} className="flex items-center gap-2 bg-gray-800/70 hover:bg-gray-800 rounded-lg px-2 py-1.5 transition">
+                          <span className="text-[10px] text-gray-600 w-5 text-right shrink-0">{idx + 1}</span>
+                          <span className={`text-[10px] font-bold w-6 shrink-0 ${posColor[p.position] ?? "text-gray-400"}`}>{p.position}</span>
+                          <span className="text-xs text-white flex-1 truncate min-w-0">{p.full_name}</span>
+                          <span className="text-[10px] text-gray-400 font-mono w-14 text-right shrink-0">{fcVal(p.player_id).toLocaleString()}</span>
+                          <select
+                            value={disp.sell}
+                            onChange={(e) => savePlayerDisposition(p.player_id, e.target.value, disp.buy)}
+                            className={`w-20 bg-gray-900 border border-gray-700 rounded px-1 py-0.5 text-[10px] shrink-0 focus:outline-none focus:border-blue-500 ${sellColor(disp.sell)}`}
+                          >
+                            <option value="Not Willing to Trade">No Trade</option>
+                            <option value="Will Trade but Higher than Market">↑ Price</option>
+                            <option value="Neutral">Neutral</option>
+                            <option value="Lower than Market">↓ Price</option>
+                            <option value="Trade at All Costs">Must Go</option>
+                          </select>
+                          <select
+                            value={disp.buy}
+                            onChange={(e) => savePlayerDisposition(p.player_id, disp.sell, e.target.value)}
+                            className={`w-20 bg-gray-900 border border-gray-700 rounded px-1 py-0.5 text-[10px] shrink-0 focus:outline-none focus:border-blue-500 ${buyColor(disp.buy)}`}
+                          >
+                            <option value="Buy Over Market">Pay Up</option>
+                            <option value="Buy at Market">At Mkt</option>
+                            <option value="Neutral">Neutral</option>
+                            <option value="Buy Low">Buy Low</option>
+                            <option value="Zero Interest">Skip</option>
+                          </select>
+                          <button onClick={() => setPlayerProfileId(p.player_id)} className="text-gray-600 hover:text-blue-400 text-xs transition shrink-0 w-4" title="View profile">ⓘ</button>
+                        </div>
+                      );
+                    })}
                     {ranked.length === 0 && !loadingCalcValues && (
                       <p className="text-gray-400 text-sm">No data yet. Select a league to load values.</p>
                     )}
@@ -5956,11 +6625,21 @@ const starters = starterSlots
               const posColor: Record<string, string> = {
                 QB: "text-red-400", RB: "text-green-400", WR: "text-blue-400", TE: "text-yellow-400",
               };
+              const sellColor = (v: string) =>
+                v === "Trade at All Costs" ? "text-green-400" :
+                v === "Lower than Market" ? "text-green-600" :
+                v === "Not Willing to Trade" ? "text-red-400" :
+                v === "Will Trade but Higher than Market" ? "text-yellow-400" : "text-gray-500";
+              const buyColor = (v: string) =>
+                v === "Buy Over Market" ? "text-green-400" :
+                v === "Buy at Market" ? "text-green-600" :
+                v === "Zero Interest" ? "text-red-400" :
+                v === "Buy Low" ? "text-yellow-400" : "text-gray-500";
 
               return (
                 <>
                   {loadingRedraft && <p className="text-sm text-blue-400 mb-4">Loading values…</p>}
-                  <div className="flex gap-2 mb-4">
+                  <div className="flex gap-2 mb-3">
                     {["ALL", "QB", "RB", "WR", "TE"].map((pos) => (
                       <button
                         key={pos}
@@ -5971,15 +6650,51 @@ const starters = starterSlots
                       </button>
                     ))}
                   </div>
-                  <div className="space-y-1">
-                    {ranked.map((p: any, idx: number) => (
-                      <div key={p.player_id} className="flex items-center gap-3 bg-gray-800 rounded-lg px-3 py-2">
-                        <span className="text-xs text-gray-500 w-6 text-right shrink-0">{idx + 1}</span>
-                        <span className={`text-[10px] font-bold w-7 shrink-0 ${posColor[p.position] ?? "text-gray-400"}`}>{p.position}</span>
-                        <span className="text-sm text-white flex-1 truncate">{p.full_name}</span>
-                        <span className="text-xs text-gray-400 font-mono shrink-0">{(redraftValues[p.player_id] ?? 0).toLocaleString()}</span>
-                      </div>
-                    ))}
+                  {/* Column headers */}
+                  <div className="flex items-center gap-2 px-2 mb-1">
+                    <span className="w-5 shrink-0" />
+                    <span className="w-6 shrink-0" />
+                    <span className="flex-1 text-[10px] text-gray-600 uppercase tracking-wider">Player</span>
+                    <span className="w-14 text-right text-[10px] text-gray-600 uppercase tracking-wider shrink-0">Value</span>
+                    <span className="w-20 text-center text-[10px] text-gray-600 uppercase tracking-wider shrink-0">Away</span>
+                    <span className="w-20 text-center text-[10px] text-gray-600 uppercase tracking-wider shrink-0">For</span>
+                    <span className="w-4 shrink-0" />
+                  </div>
+                  <div className="space-y-0.5">
+                    {ranked.map((p: any, idx: number) => {
+                      const disp = playerDispositions[p.player_id] ?? { sell: "Neutral", buy: "Neutral" };
+                      return (
+                        <div key={p.player_id} className="flex items-center gap-2 bg-gray-800/70 hover:bg-gray-800 rounded-lg px-2 py-1.5 transition">
+                          <span className="text-[10px] text-gray-600 w-5 text-right shrink-0">{idx + 1}</span>
+                          <span className={`text-[10px] font-bold w-6 shrink-0 ${posColor[p.position] ?? "text-gray-400"}`}>{p.position}</span>
+                          <span className="text-xs text-white flex-1 truncate min-w-0">{p.full_name}</span>
+                          <span className="text-[10px] text-gray-400 font-mono w-14 text-right shrink-0">{(redraftValues[p.player_id] ?? 0).toLocaleString()}</span>
+                          <select
+                            value={disp.sell}
+                            onChange={(e) => savePlayerDisposition(p.player_id, e.target.value, disp.buy)}
+                            className={`w-20 bg-gray-900 border border-gray-700 rounded px-1 py-0.5 text-[10px] shrink-0 focus:outline-none focus:border-blue-500 ${sellColor(disp.sell)}`}
+                          >
+                            <option value="Not Willing to Trade">No Trade</option>
+                            <option value="Will Trade but Higher than Market">↑ Price</option>
+                            <option value="Neutral">Neutral</option>
+                            <option value="Lower than Market">↓ Price</option>
+                            <option value="Trade at All Costs">Must Go</option>
+                          </select>
+                          <select
+                            value={disp.buy}
+                            onChange={(e) => savePlayerDisposition(p.player_id, disp.sell, e.target.value)}
+                            className={`w-20 bg-gray-900 border border-gray-700 rounded px-1 py-0.5 text-[10px] shrink-0 focus:outline-none focus:border-blue-500 ${buyColor(disp.buy)}`}
+                          >
+                            <option value="Buy Over Market">Pay Up</option>
+                            <option value="Buy at Market">At Mkt</option>
+                            <option value="Neutral">Neutral</option>
+                            <option value="Buy Low">Buy Low</option>
+                            <option value="Zero Interest">Skip</option>
+                          </select>
+                          <button onClick={() => setPlayerProfileId(p.player_id)} className="text-gray-600 hover:text-blue-400 text-xs transition shrink-0 w-4" title="View profile">ⓘ</button>
+                        </div>
+                      );
+                    })}
                     {ranked.length === 0 && !loadingRedraft && (
                       <p className="text-gray-400 text-sm">No redraft data available.</p>
                     )}
@@ -6777,16 +7492,24 @@ const starters = starterSlots
           ? list.filter((p: any) => p.full_name?.toLowerCase().includes(search.toLowerCase()))
           : list;
 
-      // Asset row component (inline)
-      const assetRow = (label: string, value: number, onAdd: () => void) => (
-        <button
+      // Asset row component (inline) — playerId optional to enable profile panel
+      const assetRow = (label: string, value: number, onAdd: () => void, playerId?: string) => (
+        <div
           key={label}
-          onClick={onAdd}
-          className="w-full flex items-center justify-between px-3 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg transition text-left"
+          className="w-full flex items-center justify-between px-3 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg transition"
         >
-          <span className="text-sm truncate">{label}</span>
-          <span className="text-xs text-blue-300 font-mono ml-2 shrink-0">{value > 0 ? value.toLocaleString() : "—"}</span>
-        </button>
+          <button onClick={onAdd} className="flex-1 text-sm truncate text-left">{label}</button>
+          <div className="flex items-center gap-2 shrink-0 ml-2">
+            <span className="text-xs text-blue-300 font-mono">{value > 0 ? value.toLocaleString() : "—"}</span>
+            {playerId && (
+              <button
+                onClick={(e) => { e.stopPropagation(); setPlayerProfileId(playerId); }}
+                className="text-gray-600 hover:text-blue-400 text-xs transition"
+                title="View profile"
+              >ⓘ</button>
+            )}
+          </div>
+        </div>
       );
 
       // Trade item row (inline)
@@ -6875,16 +7598,18 @@ const starters = starterSlots
                     ...filterPlayers(myAvailPlayers, calcSearchA).map((p: any) => ({
                       label: `${p.full_name} (${p.position} · ${p.team})`,
                       value: calcVal(p.player_id),
+                      playerId: p.player_id as string | undefined,
                       onAdd: () => setCalcGive((prev: string[]) => [...prev, p.player_id]),
                     })),
                     ...myAvailPicks.map((p: any) => ({
                       label: pickLabel(p),
                       value: pickInsight(p)?.expectedValue ?? getStoredPickValue(pickFcValues, p),
+                      playerId: undefined as string | undefined,
                       onAdd: () => setCalcGivePicks((prev: string[]) => [...prev, pickKey(p)]),
                     })),
                   ].sort((a, b) => b.value - a.value);
                   if (items.length === 0) return <p className="text-xs text-gray-600">No assets available</p>;
-                  return items.map((item) => assetRow(item.label, item.value, item.onAdd));
+                  return items.map((item) => assetRow(item.label, item.value, item.onAdd, item.playerId));
                 })()}
               </div>
             </div>
@@ -6931,23 +7656,25 @@ const starters = starterSlots
                     assetRow(`${p.full_name} (${p.position} · ${p.team})`, calcVal(p.player_id), () => {
                       setCalcOpponentRosterId(p._rosterId);
                       setCalcReceive((prev) => [...prev, p.player_id]);
-                    })
+                    }, p.player_id)
                   );
                 })() : (() => {
                     const items = [
                       ...filterPlayers(theirAvailPlayers, calcSearchB).map((p: any) => ({
                         label: `${p.full_name} (${p.position} · ${p.team})`,
                         value: calcVal(p.player_id),
+                        playerId: p.player_id as string | undefined,
                         onAdd: () => setCalcReceive((prev: string[]) => [...prev, p.player_id]),
                       })),
                       ...theirAvailPicks.map((p: any) => ({
                         label: pickLabel(p),
                         value: pickInsight(p)?.expectedValue ?? getStoredPickValue(pickFcValues, p),
+                        playerId: undefined as string | undefined,
                         onAdd: () => setCalcReceivePicks((prev: string[]) => [...prev, pickKey(p)]),
                       })),
                     ].sort((a, b) => b.value - a.value);
                     if (items.length === 0) return <p className="text-xs text-gray-600">No assets available</p>;
-                    return items.map((item) => assetRow(item.label, item.value, item.onAdd));
+                    return items.map((item) => assetRow(item.label, item.value, item.onAdd, item.playerId));
                   })()
                 }
               </div>
@@ -7259,8 +7986,19 @@ const starters = starterSlots
       );
       const isAgingAsset = (player: any) =>
         Number(player?.age || 0) >= (ageCutoffByPos[player?.position] || 29);
+      const isOldProducerBuy = (player: any) => {
+        const age = Number(player?.age || 0);
+        if (player?.position === "RB") return age >= 25;
+        if (player?.position === "QB") return age >= 31;
+        if (player?.position === "WR" || player?.position === "TE") return age >= 29;
+        return age >= 29;
+      };
       const isYoungBuildingBlock = (player: any) =>
         ["QB", "WR"].includes(player?.position) && Number(player?.age || 99) <= 24;
+      const isFutureInsulationAsset = (player: any) =>
+        (["QB", "WR"].includes(player?.position) && Number(player?.age || 99) <= 25) ||
+        (player?.position === "TE" && Number(player?.age || 99) <= 25) ||
+        (player?.position === "RB" && Number(player?.age || 99) <= 23);
       const isPremiumCurrentPick = (pick: any) =>
         String(pick?.season) === CURRENT_YEAR && String(pick?.slot || "").match(/^1\.(0[1-6]|[1-6])$/);
       const getDirectionTradeScore = (trade: TradeResult) => {
@@ -7281,6 +8019,10 @@ const starters = starterSlots
         const picksOut = outgoingPicks.reduce((sum: number, p: any) => sum + p.value, 0);
         const premiumCurrentPicksOut = outgoingPicks.filter((p: any) => isPremiumCurrentPick(p)).length;
         const futureFirstsIn = incomingPicks.filter((p: any) => Number(p.round) === 1 && String(p.season) !== CURRENT_YEAR).length;
+        const oldProducerBuys = incomingPlayers.filter((p: any) => isOldProducerBuy(p)).length;
+        const oldProducerSells = outgoingPlayers.filter((p: any) => isOldProducerBuy(p)).length;
+        const insulationBuys = incomingPlayers.filter((p: any) => isFutureInsulationAsset(p)).length;
+        const insulationSells = outgoingPlayers.filter((p: any) => isFutureInsulationAsset(p)).length;
         const currentPlayerCapitalOut = outgoingPlayers.reduce((sum: number, p: any) => {
           const age = Number(p.age || 0);
           const position = p.position;
@@ -7307,13 +8049,17 @@ const starters = starterSlots
           score -= incomingPlayers.filter((p: any) => p.position === "RB" && Number(p.age || 0) >= 28).length * 4;
         } else if (["Rebuilder", "Blow Up", "Hopeless"].includes(finderDirection)) {
           score += agingSells * 9;
+          score += oldProducerSells * 8;
           score += youngCoreBuys * 8;
+          score += insulationBuys * 10;
+          score -= insulationSells * 10;
           score += futureFirstsIn * 12;
           score += picksIn / 180;
           score -= picksOut / 180;
           score -= premiumCurrentPicksOut * 12;
+          score -= oldProducerBuys * 18;
           score -= incomingPlayers.filter((p: any) => p.position === "RB" && Number(p.age || 0) >= 25).length * 7;
-          score -= incomingRedraft / 220;
+          score -= incomingRedraft / 160;
           score += strongPosSells * 3;
         } else {
           score += weakPosAdds * 6;
@@ -7334,10 +8080,132 @@ const starters = starterSlots
 
         return score;
       };
+      const getTradeIntent = (trade: TradeResult) => {
+        const outgoingPlayers = trade.give || [];
+        const incomingPlayers = trade.receive || [];
+        const outgoingPicks = trade.givePicks || [];
+        const incomingPicks = trade.receivePicks || [];
+        const outgoingOldProducers = outgoingPlayers.filter((p: any) => isOldProducerBuy(p)).length;
+        const incomingOldProducers = incomingPlayers.filter((p: any) => isOldProducerBuy(p)).length;
+        const incomingInsulation = incomingPlayers.filter((p: any) => isFutureInsulationAsset(p)).length;
+        const outgoingInsulation = outgoingPlayers.filter((p: any) => isFutureInsulationAsset(p)).length;
+        const weakPosAdds = incomingPlayers.filter((p: any) => weakPositions.has(p.position)).length;
+        const strongPosSells = outgoingPlayers.filter((p: any) => strongPositions.has(p.position)).length;
+        const futureFirstsIn = incomingPicks.filter((p: any) => Number(p.round) === 1 && String(p.season) !== CURRENT_YEAR).length;
+        const playerCountDelta =
+          outgoingPlayers.length + outgoingPicks.length - incomingPlayers.length - incomingPicks.length;
+        const incomingBest = [...incomingPlayers].sort((a: any, b: any) => b.value - a.value)[0];
+        const outgoingBest = [...outgoingPlayers].sort((a: any, b: any) => b.value - a.value)[0];
+
+        if (incomingPicks.length > 0 && incomingPlayers.length === 0) {
+          return {
+            label: "Pick Accumulation",
+            detail: "Turning player value into future insulation and draft capital.",
+          };
+        }
+        if (outgoingPicks.length > 0 && incomingPlayers.length > 0 && weakPosAdds > 0) {
+          return {
+            label: "Pick-For-Points",
+            detail: "Using picks to patch a lineup need with immediate player help.",
+          };
+        }
+        if (["Rebuilder", "Blow Up", "Hopeless"].includes(finderDirection) && outgoingOldProducers > 0 && (futureFirstsIn > 0 || incomingInsulation > 0)) {
+          return {
+            label: "Rebuild Sell",
+            detail: "Selling present points for youth, insulation, or future firsts.",
+          };
+        }
+        if (["Elite", "True Contender", "Almost There"].includes(finderDirection) && incomingOldProducers > 0 && weakPosAdds > 0) {
+          return {
+            label: "Win-Now Patch",
+            detail: "Buying immediate production where your current lineup needs help.",
+          };
+        }
+        if (
+          incomingBest &&
+          outgoingBest &&
+          incomingBest.value > outgoingBest.value &&
+          playerCountDelta > 0
+        ) {
+          return {
+            label: "Tier-Up",
+            detail: "Condensing depth into one stronger difference-maker.",
+          };
+        }
+        if (incomingInsulation > outgoingInsulation && incomingOldProducers === 0) {
+          return {
+            label: "Insulation Buy",
+            detail: "Shifting value into younger assets that better fit a long-term build.",
+          };
+        }
+        if (strongPosSells > 0 && weakPosAdds > 0) {
+          return {
+            label: "Strength-For-Need",
+            detail: "Using excess at a strong position to solve a weaker room.",
+          };
+        }
+        if (playerCountDelta > 0 && incomingPlayers.length > 0) {
+          return {
+            label: "Consolidation",
+            detail: "Shrinking asset count to clean up your lineup and bench shape.",
+          };
+        }
+        if (playerCountDelta < 0 && incomingPlayers.length > 1) {
+          return {
+            label: "Depth Split",
+            detail: "Breaking one concentrated asset into multiple usable pieces.",
+          };
+        }
+        if (incomingInsulation > 0 && outgoingOldProducers > 0) {
+          return {
+            label: "Age-Down Bet",
+            detail: "Moving from older production into a younger value window.",
+          };
+        }
+        return {
+          label: "Value Rebalance",
+          detail: "A balanced value move that changes roster shape more than headline value.",
+        };
+      };
+      const failsDirectionGuardrail = (trade: TradeResult) => {
+        const outgoingPlayers = trade.give || [];
+        const incomingPlayers = trade.receive || [];
+        const incomingPicks = trade.receivePicks || [];
+        const futureFirstsIn = incomingPicks.filter((p: any) => Number(p.round) === 1 && String(p.season) !== CURRENT_YEAR).length;
+        const oldProducerBuys = incomingPlayers.filter((p: any) => isOldProducerBuy(p)).length;
+        const insulationBuys = incomingPlayers.filter((p: any) => isFutureInsulationAsset(p)).length;
+        const outgoingOldProducers = outgoingPlayers.filter((p: any) => isOldProducerBuy(p)).length;
+
+        if (["Rebuilder", "Blow Up", "Hopeless"].includes(finderDirection)) {
+          if (oldProducerBuys > 0 && futureFirstsIn === 0 && insulationBuys === 0 && !trade.receivePicks.length) {
+            return true;
+          }
+          if (
+            incomingPlayers.length > 0 &&
+            incomingPlayers.every((p: any) => isOldProducerBuy(p)) &&
+            futureFirstsIn === 0 &&
+            insulationBuys === 0
+          ) {
+            return true;
+          }
+          if (oldProducerBuys > outgoingOldProducers && futureFirstsIn === 0 && insulationBuys === 0) {
+            return true;
+          }
+        }
+
+        if (["Elite", "True Contender", "Almost There"].includes(finderDirection)) {
+          if (incomingPlayers.length === 0 && incomingPicks.length > 0) return true;
+        }
+
+        return false;
+      };
       // When a player is pinned, ensure they're always in the give pool even if outside top 10
-      const myTop = finderPinnedPlayerId && !myPlayers.slice(0, 10).some((p: any) => p.player_id === finderPinnedPlayerId)
-        ? [...myPlayers.slice(0, 9), myPlayers.find((p: any) => p.player_id === finderPinnedPlayerId)].filter(Boolean)
-        : myPlayers.slice(0, 10);
+      const myTopBase = myPlayers
+        .filter((p: any) => p.player_id === finderPinnedPlayerId || playerDispositions[p.player_id]?.sell !== "Not Willing to Trade")
+        .slice(0, 10);
+      const myTop = finderPinnedPlayerId && !myTopBase.some((p: any) => p.player_id === finderPinnedPlayerId)
+        ? [...myTopBase.slice(0, 9), myPlayers.find((p: any) => p.player_id === finderPinnedPlayerId)].filter(Boolean)
+        : myTopBase;
       // When either give or receive player is pinned, relax loop caps so rarer combos surface
       const pinnedActive = !!(finderPinnedPlayerId || finderTargetPlayerId);
 
@@ -7607,6 +8475,35 @@ const starters = starterSlots
           (oppAfter.reserveQb - oppBefore.reserveQb) * (hasSuperFlex ? 2 : 1) +
           (oppAfter.reserveTotal - oppBefore.reserveTotal);
 
+        const contenderBuckets = new Set(["Elite", "True Contender", "Almost There", "Fading Contender"]);
+        const isContenderish = contenderBuckets.has(finderDirection);
+        const reserveTotalDrop = myBefore.reserveTotal - myAfter.reserveTotal;
+        const reserveFlexDrop = myBefore.reserveFlex - myAfter.reserveFlex;
+        const reserveQbDrop = myBefore.reserveQb - myAfter.reserveQb;
+        const reserveTeDrop = myBefore.reserveTe - myAfter.reserveTe;
+        const severeDepthLoss =
+          reserveTotalDrop >= 2 ||
+          reserveFlexDrop >= 2 ||
+          (hasSuperFlex && reserveQbDrop >= 1) ||
+          (!hasSuperFlex && starterCounts.QB > 0 && myAfter.reserveQb < 1 && myBefore.reserveQb >= 1) ||
+          (starterCounts.TE > 0 && myAfter.reserveTe < 1 && myBefore.reserveTe >= 1);
+        const thinBenchForContender =
+          isContenderish && (
+            myAfter.reserveTotal < Math.max(4, Math.min(myBefore.reserveTotal, 5)) ||
+            myAfter.reserveFlex < (hasFlex || hasSuperFlex ? Math.max(2, Math.min(myBefore.reserveFlex, 3)) : 1) ||
+            (starterCounts.QB > 0 && myAfter.reserveQb < 1 && myBefore.reserveQb >= 1) ||
+            (starterCounts.TE > 0 && myAfter.reserveTe < 1 && myBefore.reserveTe >= 1)
+          );
+        const lineupGain = myAfter.lineupScore - myBefore.lineupScore;
+        const depthCollapsePenalty =
+          Math.max(0, reserveTotalDrop) * 3.5 +
+          Math.max(0, reserveFlexDrop) * 4 +
+          Math.max(0, reserveQbDrop) * (hasSuperFlex ? 6 : 3) +
+          Math.max(0, reserveTeDrop) * 2.5;
+        const blocksForDepth =
+          (isContenderish && severeDepthLoss && lineupGain < 90) ||
+          thinBenchForContender;
+
         return {
           myBefore,
           myAfter,
@@ -7614,8 +8511,13 @@ const starters = starterSlots
           oppAfter,
           myValid: myAfter.valid,
           oppValid: oppAfter.valid,
-          valid: myAfter.emptySlots === 0 && oppAfter.emptySlots === 0,
-          score: myDelta + oppDelta * 0.7 - myShortagePenalty - oppShortagePenalty * 0.7,
+          valid: myAfter.emptySlots === 0 && oppAfter.emptySlots === 0 && !blocksForDepth,
+          blocksForDepth,
+          reserveTotalDrop,
+          reserveFlexDrop,
+          reserveQbDrop,
+          reserveTeDrop,
+          score: myDelta + oppDelta * 0.7 - myShortagePenalty - oppShortagePenalty * 0.7 - depthCollapsePenalty,
         };
       };
 
@@ -7636,7 +8538,10 @@ const starters = starterSlots
           .slice(0, 8);
 
         // Ensure target player (if on this roster) is always in the pool even if ranked 11+
-        const oppTopBase = oppPlayers.slice(0, 10);
+        // Also exclude "Zero Interest" buy-disposition players unless explicitly targeted
+        const oppTopBase = oppPlayers
+          .filter((p: any) => p.player_id === finderTargetPlayerId || playerDispositions[p.player_id]?.buy !== "Zero Interest")
+          .slice(0, 10);
         const oppTop = finderTargetPlayerId && !oppTopBase.some((p: any) => p.player_id === finderTargetPlayerId)
           ? [...oppTopBase.slice(0, 9), oppPlayers.find((p: any) => p.player_id === finderTargetPlayerId)].filter(Boolean)
           : oppTopBase;
@@ -8103,6 +9008,7 @@ const starters = starterSlots
         .filter((r) => isFinite(r.score))
         .filter((r) => !pinnedPlayer || r.give.some((p: any) => p.player_id === pinnedPlayer.player_id))
         .filter((r) => !finderTargetPlayerId || r.receive.some((p: any) => p.player_id === finderTargetPlayerId))
+        .filter((r) => !failsDirectionGuardrail(r))
         .map((r) => {
           const lineupSafety = getTradeLineupSafety(r);
           const partnerProfile = leagueMateProfileByRosterId.get(Number(r.oppRosterId));
@@ -8113,7 +9019,18 @@ const starters = starterSlots
             (partnerProfile?.fitScore ?? 0) * 0.65 +
             Math.min(partnerProfile?.tradeCount30d ?? 0, 3) * 1.5 +
             Math.min(partnerProfile?.totalDynastyLeagues ?? 0, 8) * 0.35;
-          const strategyScore = r.score + getDirectionTradeScore(r) + lineupSafety.score + partnerFitScore;
+          // Disposition bonuses: reward giving away eager-to-sell players and acquiring want-to-buy targets
+          const sellScoreMap: Record<string, number> = {
+            "Trade at All Costs": 4, "Lower than Market": 2, "Neutral": 1,
+            "Will Trade but Higher than Market": -1,
+          };
+          const buyScoreMap: Record<string, number> = {
+            "Buy Over Market": 4, "Buy at Market": 2, "Neutral": 1, "Buy Low": -1,
+          };
+          const dispositionScore =
+            r.give.reduce((s: number, gp: any) => s + (sellScoreMap[playerDispositions[gp.player_id]?.sell ?? "Neutral"] ?? 0), 0) +
+            r.receive.reduce((s: number, rp: any) => s + (buyScoreMap[playerDispositions[rp.player_id]?.buy ?? "Neutral"] ?? 0), 0);
+          const strategyScore = r.score + getDirectionTradeScore(r) + lineupSafety.score + partnerFitScore + dispositionScore;
           return {
             r,
             lineupSafety,
@@ -8358,6 +9275,7 @@ const starters = starterSlots
           )}
           {top15.map((trade: TradeResult, idx: number) => {
             const partnerProfile = leagueMateProfileByRosterId.get(Number(trade.oppRosterId));
+            const tradeIntent = getTradeIntent(trade);
             const giveVals = [...trade.give.map((p: any) => p.value), ...trade.givePicks.map((p: any) => p.value)];
             const receiveVals = [...trade.receive.map((p: any) => p.value), ...trade.receivePicks.map((p: any) => p.value)];
             const giveTotal = giveVals.reduce((s: number, v: number) => s + v, 0);
@@ -8382,6 +9300,9 @@ const starters = starterSlots
                     <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">{trade.format}</span>
                     <span className="text-xs text-gray-500">with</span>
                     <span className="text-sm font-semibold text-blue-300">{trade.oppName}</span>
+                    <span className="rounded-full border border-violet-800 bg-violet-950/30 px-2 py-0.5 text-[10px] font-semibold text-violet-300">
+                      {tradeIntent.label}
+                    </span>
                     {partnerProfile?.fitLabel && (
                       <span className="rounded-full border border-cyan-800 bg-cyan-950/30 px-2 py-0.5 text-[10px] font-semibold text-cyan-300">
                         {partnerProfile.fitLabel}
@@ -8394,7 +9315,12 @@ const starters = starterSlots
                 </div>
                 {partnerProfile?.fitReasons?.[0] && (
                   <div className="mb-3 text-xs text-gray-500">
-                    {partnerProfile.fitReasons[0]}
+                    {tradeIntent.detail} {partnerProfile.fitReasons[0] ? `• ${partnerProfile.fitReasons[0]}` : ""}
+                  </div>
+                )}
+                {!partnerProfile?.fitReasons?.[0] && (
+                  <div className="mb-3 text-xs text-gray-500">
+                    {tradeIntent.detail}
                   </div>
                 )}
                 {(partnerProfile?.repeatedPlayers?.length > 0 || partnerProfile?.acquiredPlayers?.length > 0 || partnerProfile?.tradePreferenceLabel) && (
@@ -8424,7 +9350,7 @@ const starters = starterSlots
                       {trade.give.map((p: any) => (
                         <div key={p.player_id} className="flex items-center justify-between bg-gray-800 rounded-lg px-2 py-1.5">
                           <div className="flex items-center gap-1.5 min-w-0">
-                            <span className="text-xs text-white truncate">{p.full_name}</span>
+                            <button onClick={() => setPlayerProfileId(p.player_id)} className="text-xs text-white hover:text-blue-400 transition truncate text-left">{p.full_name}</button>
                             <span className="text-[10px] text-gray-500 shrink-0">{p.position}</span>
                           </div>
                           <span className="text-xs text-gray-400 font-mono shrink-0 ml-1">{p.value.toLocaleString()}</span>
@@ -8454,7 +9380,7 @@ const starters = starterSlots
                       {trade.receive.map((p: any) => (
                         <div key={p.player_id} className="flex items-center justify-between bg-gray-800 rounded-lg px-2 py-1.5">
                           <div className="flex items-center gap-1.5 min-w-0">
-                            <span className="text-xs text-white truncate">{p.full_name}</span>
+                            <button onClick={() => setPlayerProfileId(p.player_id)} className="text-xs text-white hover:text-blue-400 transition truncate text-left">{p.full_name}</button>
                             <span className="text-[10px] text-gray-500 shrink-0">{p.position}</span>
                           </div>
                           <span className="text-xs text-gray-400 font-mono shrink-0 ml-1">{p.value.toLocaleString()}</span>
@@ -9148,6 +10074,175 @@ const starters = starterSlots
     </div>
   </div>
 )}
+      {/* ── Global Player Profile Panel ── */}
+      {(() => {
+        if (!playerProfileId) return null;
+        const p = (players as any)[playerProfileId];
+        if (!p) return null;
+        const dynVal = calcFcValues[playerProfileId] ?? p.value ?? 0;
+        const redVal = redraftValues[playerProfileId] ?? 0;
+        const injuryStatus = p.injury_status || p.status;
+        const injuryNote = [p.injury_body_part, p.injury_notes].filter(Boolean).join(" — ");
+        const practiceDesc = p.practice_description || p.practice_participation || "";
+        const injuryColor =
+          injuryStatus === "IR" || injuryStatus === "PUP" ? "bg-red-900/50 text-red-300 border-red-700" :
+          injuryStatus === "Out" ? "bg-red-900/40 text-red-400 border-red-800" :
+          injuryStatus === "Doubtful" ? "bg-orange-900/40 text-orange-400 border-orange-700" :
+          injuryStatus === "Questionable" ? "bg-yellow-900/40 text-yellow-400 border-yellow-700" :
+          "bg-green-900/30 text-green-400 border-green-700";
+
+        // Which leaguemates own this player
+        const ownersInSelectedLeague = rosters
+          .filter((r: any) => (r.players || []).includes(playerProfileId))
+          .map((r: any) => (users as any)[r.owner_id] || `Team ${r.roster_id}`);
+
+        // Cross-league ownership from overview data (uses per-league user map fetched during loadLeagueOverview)
+        const crossLeagueOwners: { leagueName: string; owner: string }[] = [];
+        Object.entries(leagueOverviewData).forEach(([lid, entry]: [string, any]) => {
+          const lg = leagues.find((l: any) => l.league_id === lid);
+          if (!lg) return;
+          const leagueUserMap: Record<string, string> = entry.userMap || {};
+          (entry.rosters || []).forEach((r: any) => {
+            if ((r.players || []).includes(playerProfileId)) {
+              const ownerName = leagueUserMap[r.owner_id] || (users as any)[r.owner_id] || `Team ${r.roster_id}`;
+              crossLeagueOwners.push({ leagueName: lg.name, owner: ownerName });
+            }
+          });
+        });
+
+        const noteVal = playerNotes[playerProfileId] ?? "";
+        const disp = playerDispositions[playerProfileId] ?? { sell: "Neutral", buy: "Neutral" };
+
+        return (
+          <>
+            {/* Backdrop */}
+            <div
+              className="fixed inset-0 bg-black/50 z-40"
+              onClick={() => setPlayerProfileId(null)}
+            />
+            {/* Panel */}
+            <div className="fixed top-0 right-0 h-full w-full max-w-sm bg-gray-950 border-l border-gray-800 z-50 flex flex-col shadow-2xl overflow-y-auto">
+              {/* Header */}
+              <div className="flex items-start justify-between p-5 border-b border-gray-800">
+                <div>
+                  <h2 className="text-lg font-bold text-white">{p.full_name}</h2>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-xs text-gray-400">{p.position}</span>
+                    {p.team && <span className="text-xs text-gray-500">· {p.team}</span>}
+                    {p.age && <span className="text-xs text-gray-500">· Age {p.age}</span>}
+                  </div>
+                </div>
+                <button onClick={() => setPlayerProfileId(null)} className="text-gray-500 hover:text-white text-xl leading-none mt-1">✕</button>
+              </div>
+
+              <div className="p-5 space-y-5 flex-1">
+                {/* Values */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-gray-900 rounded-xl p-3 border border-gray-800">
+                    <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Dynasty Value</p>
+                    <p className="text-xl font-bold text-white">{dynVal > 0 ? dynVal.toLocaleString() : "—"}</p>
+                  </div>
+                  <div className="bg-gray-900 rounded-xl p-3 border border-gray-800">
+                    <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Redraft Value</p>
+                    <p className="text-xl font-bold text-white">{redVal > 0 ? redVal.toLocaleString() : "—"}</p>
+                  </div>
+                </div>
+
+                {/* Injury / Status */}
+                <div className="bg-gray-900 rounded-xl p-3 border border-gray-800">
+                  <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Status</p>
+                  <span className={`inline-block text-xs font-semibold px-2 py-0.5 rounded-full border ${injuryColor}`}>
+                    {injuryStatus || "Active"}
+                  </span>
+                  {injuryNote && <p className="text-xs text-gray-400 mt-1.5">{injuryNote}</p>}
+                  {practiceDesc && <p className="text-xs text-gray-500 mt-1">{practiceDesc}</p>}
+                </div>
+
+                {/* Ownership */}
+                {ownersInSelectedLeague.length > 0 && (
+                  <div className="bg-gray-900 rounded-xl p-3 border border-gray-800">
+                    <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">
+                      Owned in {selectedLeague?.name || "Selected League"}
+                    </p>
+                    {ownersInSelectedLeague.map((name, i) => (
+                      <p key={i} className="text-sm text-white">{name}</p>
+                    ))}
+                  </div>
+                )}
+
+                {crossLeagueOwners.length > 0 && (
+                  <div className="bg-gray-900 rounded-xl p-3 border border-gray-800">
+                    <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Cross-League Ownership</p>
+                    <div className="space-y-1">
+                      {crossLeagueOwners.map((entry, i) => (
+                        <div key={i} className="flex items-baseline justify-between text-xs">
+                          <span className="text-white truncate mr-2">{entry.owner}</span>
+                          <span className="text-gray-500 shrink-0">{entry.leagueName}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {ownersInSelectedLeague.length === 0 && crossLeagueOwners.length === 0 && (
+                  <div className="bg-gray-900 rounded-xl p-3 border border-gray-800">
+                    <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Ownership</p>
+                    <p className="text-xs text-gray-600">Not on any loaded roster.</p>
+                  </div>
+                )}
+
+                {/* Dispositions */}
+                <div className="bg-gray-900 rounded-xl p-3 border border-gray-800 space-y-3">
+                  <p className="text-[10px] text-gray-500 uppercase tracking-wider">Trade Disposition</p>
+                  <div>
+                    <p className="text-[10px] text-gray-400 mb-1">Trading Away</p>
+                    <select
+                      value={disp.sell}
+                      onChange={(e) => savePlayerDisposition(playerProfileId, e.target.value, disp.buy)}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                    >
+                      <option value="Not Willing to Trade">Not Willing to Trade</option>
+                      <option value="Will Trade but Higher than Market">Will Trade but Higher than Market</option>
+                      <option value="Neutral">Neutral</option>
+                      <option value="Lower than Market">Lower than Market</option>
+                      <option value="Trade at All Costs">Trade at All Costs</option>
+                    </select>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-gray-400 mb-1">Trading For</p>
+                    <select
+                      value={disp.buy}
+                      onChange={(e) => savePlayerDisposition(playerProfileId, disp.sell, e.target.value)}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                    >
+                      <option value="Buy Over Market">Buy Over Market</option>
+                      <option value="Buy at Market">Buy at Market</option>
+                      <option value="Neutral">Neutral</option>
+                      <option value="Buy Low">Buy Low</option>
+                      <option value="Zero Interest">Zero Interest</option>
+                    </select>
+                  </div>
+                  {(disp.sell !== "Neutral" || disp.buy !== "Neutral") && (
+                    <p className="text-[10px] text-blue-400">Trade Finder will factor in these preferences.</p>
+                  )}
+                </div>
+
+                {/* Notes */}
+                <div className="bg-gray-900 rounded-xl p-3 border border-gray-800">
+                  <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Your Notes</p>
+                  <textarea
+                    value={noteVal}
+                    onChange={(e) => savePlayerNote(playerProfileId, e.target.value)}
+                    placeholder={`Jot down thoughts on ${p.first_name || p.full_name}…`}
+                    className="w-full h-28 bg-gray-800 border border-gray-700 rounded-lg p-2.5 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 resize-none"
+                  />
+                </div>
+              </div>
+            </div>
+          </>
+        );
+      })()}
+
       </>
       </div>
     </main>
