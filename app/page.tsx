@@ -159,8 +159,40 @@ const getPickValueKey = (pick: any) => {
   return `${pick?.season}-${pick?.round}`;
 };
 
+const get2027PickBoostMultiplier = (
+  season: string | number,
+  round: string | number,
+  bucket?: "early" | "mid" | "late"
+) => {
+  if (String(season) !== "2027") return 1;
+
+  const normalizedBucket = bucket || "mid";
+  switch (Number(round)) {
+    case 1:
+      return normalizedBucket === "early" ? 1.15 : normalizedBucket === "late" ? 1.1 : 1.125;
+    case 2:
+      return normalizedBucket === "early" ? 1.075 : normalizedBucket === "late" ? 1.03 : 1.05;
+    case 3:
+    case 4:
+      return 1.02;
+    default:
+      return 1;
+  }
+};
+
+const apply2027PickBoost = (
+  value: number,
+  season: string | number,
+  round: string | number,
+  bucket?: "early" | "mid" | "late"
+) => Math.round(value * get2027PickBoostMultiplier(season, round, bucket));
+
 const getStoredPickValue = (pickValues: Record<string, number>, pick: any) =>
-  pickValues[getPickValueKey(pick)] ?? pickValues[`${pick?.season}-${pick?.round}`] ?? 0;
+  apply2027PickBoost(
+    pickValues[getPickValueKey(pick)] ?? pickValues[`${pick?.season}-${pick?.round}`] ?? 0,
+    pick?.season,
+    pick?.round
+  );
 
 const isSnakeDraft = (draft: any) => {
   const typeCandidates = [
@@ -3941,7 +3973,12 @@ const getTeamSummary = () => {
         : Math.round((currentRoundValue(round) || 0) * (bucket === "early" ? 1.2 : bucket === "mid" ? 1 : 0.8));
       const seasonRoundValue = pickFcValues[`${season}-${round}`] || currentRoundValue(round) || baseBandValue;
       const currentRoundBase = currentRoundValue(round) || baseBandValue || 1;
-      return Math.round(baseBandValue * (seasonRoundValue / currentRoundBase));
+      return apply2027PickBoost(
+        Math.round(baseBandValue * (seasonRoundValue / currentRoundBase)),
+        season,
+        round,
+        bucket
+      );
     };
 
     return Object.fromEntries(
@@ -3950,13 +3987,16 @@ const getTeamSummary = () => {
         const rosterProjection = selectedLeagueSimulation.rowByRosterId.get(Number(pick.roster_id));
         const fallback = getStoredPickValue(pickFcValues, pick);
         if (!rosterProjection) {
+          const midFallback = fallback;
+          const floorValue = apply2027PickBoost(Math.round(midFallback * 0.85), pick.season, pick.round, "late");
+          const ceilingValue = apply2027PickBoost(Math.round(midFallback * 1.15), pick.season, pick.round, "early");
           return [key, {
             bucket: "mid",
             label: "Mid outcome most likely",
-            expectedValue: fallback,
+            expectedValue: midFallback,
             expectedSlot: Math.round((totalTeams + 1) / 2),
-            floorValue: Math.round(fallback * 0.85),
-            ceilingValue: Math.round(fallback * 1.15),
+            floorValue,
+            ceilingValue,
             probabilities: { early: 0.2, mid: 0.6, late: 0.2 },
             likelySlots: [],
           }];
@@ -3997,7 +4037,12 @@ const getTeamSummary = () => {
           if (currentSlotValue) {
             const seasonRoundValue = pickFcValues[`${pick.season}-${pick.round}`] || currentRoundValue(Number(pick.round)) || 1;
             const currentBase = currentRoundValue(Number(pick.round)) || 1;
-            return Math.round((currentSlotValue as number) * (seasonRoundValue / currentBase));
+            return apply2027PickBoost(
+              Math.round((currentSlotValue as number) * (seasonRoundValue / currentBase)),
+              pick.season,
+              pick.round,
+              bucket
+            );
           }
           return getBandValue(String(pick.season), Number(pick.round), bucket);
         });
