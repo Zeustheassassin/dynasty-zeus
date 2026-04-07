@@ -1129,6 +1129,7 @@ const [projectionSeasonYear, setProjectionSeasonYear] = useState<number | null>(
 const [projectionPosFilter, setProjectionPosFilter] = useState("ALL");
 const [projectionSourceStatus, setProjectionSourceStatus] = useState<Record<string, boolean>>({});
 const [projectionLoaded, setProjectionLoaded] = useState(false);
+const [projectionUsesSeasonFallback, setProjectionUsesSeasonFallback] = useState(false);
 const [finderPlayerSearch, setFinderPlayerSearch] = useState("");
 const [finderPinnedPlayerId, setFinderPinnedPlayerId] = useState<string | null>(null);
 const [finderTargetOppRosterId, setFinderTargetOppRosterId] = useState<number | null>(null);
@@ -1928,6 +1929,9 @@ useEffect(() => {
 }, [supabaseUser?.id, selectedLeague?.league_id]);
 
 // Load cached simulation results from Supabase for the League Overview playoff% column.
+// Uses a MERGE strategy: if in-memory data has a newer computed_at than the DB row,
+// keep the in-memory value. This prevents Supabase token refreshes from overwriting
+// freshly-run sim results that haven't landed in the DB yet.
 useEffect(() => {
   if (!supabaseUser) return;
   supabase
@@ -1941,7 +1945,22 @@ useEffect(() => {
         if (!byLeague[row.league_id]) byLeague[row.league_id] = {};
         byLeague[row.league_id][Number(row.roster_id)] = row;
       });
-      setLeagueSimCache(byLeague);
+      setLeagueSimCache(prev => {
+        const merged: Record<string, Record<number, any>> = { ...byLeague };
+        // For any entry already in memory with a newer timestamp, keep the in-memory value.
+        Object.entries(prev).forEach(([lid, rosterMap]) => {
+          Object.entries(rosterMap as Record<string, any>).forEach(([rid, memRow]: [string, any]) => {
+            const dbRow = merged[lid]?.[Number(rid)];
+            const memTime = memRow?.computed_at ? new Date(memRow.computed_at).getTime() : 0;
+            const dbTime = dbRow?.computed_at ? new Date(dbRow.computed_at).getTime() : 0;
+            if (memTime > dbTime) {
+              if (!merged[lid]) merged[lid] = {};
+              merged[lid][Number(rid)] = memRow;
+            }
+          });
+        });
+        return merged;
+      });
     });
 }, [supabaseUser?.id]);
 
@@ -3320,9 +3339,33 @@ const savePlayerDisposition = async (playerId: string, sell: string, buy: string
 const loadProjections = async (week: number | 'season') => {
   setLoadingProjections(true);
   const statusMap: Record<string, boolean> = {};
-  const currentNflYear = new Date().getFullYear();
+  const now = new Date();
+  const currentNflYear = now.getFullYear();
+  // NFL regular season runs Sep–Jan. Months 0–7 (Jan–Aug) = offseason.
+  // During offseason, weekly projections don't exist — use Sleeper season / 17.
+  const isOffseason = now.getMonth() < 8;
   let resolvedProjectionYear = currentNflYear;
   setProjectionSeasonYear(currentNflYear);
+
+  // Helper: compute PPR fantasy points from a Sleeper stats object.
+  // Sleeper pre-season projections sometimes omit pts_ppr and store only raw
+  // stat categories — calculate from components when the pre-computed field is absent.
+  const calcSleeperPPR = (stats: any, pos: string): number => {
+    if (!stats) return 0;
+    const stored = stats.pts_ppr ?? 0;
+    if (stored > 0) return stored;
+    const pts =
+      (stats.pass_yd ?? 0) * 0.04 +
+      (stats.pass_td ?? 0) * 4 +
+      (stats.pass_int ?? 0) * -2 +
+      (stats.rush_yd ?? 0) * 0.1 +
+      (stats.rush_td ?? 0) * 6 +
+      (stats.rec ?? 0) * 1 +
+      (stats.rec_yd ?? 0) * 0.1 +
+      (stats.rec_td ?? 0) * 6 +
+      (pos === 'TE' ? (stats.rec ?? 0) * 0.5 : 0);
+    return pts;
+  };
 
   try {
     // ── Build name→sleeperId lookup from the players object ──────────────────
@@ -3370,75 +3413,106 @@ const loadProjections = async (week: number | 'season') => {
       sourceRows.set(sleeperId, existing);
     };
 
-    // ── Source 1: Sleeper/RotoWire ────────────────────────────────────────────
-    // Try the current NFL season year first; fall back one year if no data
-    // returned (handles pre-season when next year's projections aren't live yet).
-    try {
-      const weekParam = week === 'season' ? '' : `/${week}`;
-      const posParams = 'position[]=QB&position[]=RB&position[]=WR&position[]=TE';
-      const tryYear = async (yr: number) => {
-        const url = `https://api.sleeper.app/projections/nfl/${yr}${weekParam}?season_type=regular&${posParams}`;
-        const data: any[] = await fetch(url).then(r => r.json());
-        // If Sleeper has no projections for this year yet, it returns an empty array
-        return Array.isArray(data) && data.length > 0 ? data : null;
-      };
-      let data = await tryYear(currentNflYear);
-      if (!data) {
-        data = await tryYear(currentNflYear - 1);
-        if (data) resolvedProjectionYear = currentNflYear - 1;
+    // ── Offseason path: Sleeper 2026 season projections ÷ 17 ─────────────────
+    // Jan–Aug = offseason. Weekly projections don't exist yet; FantasyPros and
+    // numberFire would return stale 2025 data. Skip all weekly sources and use
+    // Sleeper's full-season projections directly so rankings are accurate.
+    let usingSeasonFallback = false;
+    if (typeof week === 'number' && isOffseason) {
+      try {
+        // Fetch each position separately — Sleeper ignores duplicate position= params
+        // and only returns the last one when they're combined in a single request.
+        const posResults = await Promise.all(
+          ['QB', 'RB', 'WR', 'TE'].map(pos =>
+            fetch(`https://api.sleeper.app/projections/nfl/${currentNflYear}?season_type=regular&position=${pos}`)
+              .then(r => r.json())
+              .catch(() => [])
+          )
+        );
+        const seasonRaw: any[] = posResults.flat();
+        if (seasonRaw.length > 0) {
+          seasonRaw.forEach((item: any) => {
+            const pos: string = item.player?.position ?? '';
+            if (!['QB','RB','WR','TE'].includes(pos) || !item.player_id) return;
+            const seasonFpts = calcSleeperPPR(item.stats, pos);
+            if (seasonFpts <= 0) return;
+            addRow(String(item.player_id), seasonFpts / 17, 'sleeper', 1.0);
+          });
+          statusMap['sleeper'] = true;
+          usingSeasonFallback = true;
+        }
+      } catch { /* silently ignore */ }
+      setProjectionUsesSeasonFallback(usingSeasonFallback);
+    } else {
+      // ── In-season path: multi-source weekly consensus ─────────────────────
+      // Source 1: Sleeper/RotoWire — current year only, no prior-year fallback
+      try {
+        const posParams = 'position[]=QB&position[]=RB&position[]=WR&position[]=TE';
+        const sleeperWeight = PROJ_SOURCES.find(s => s.id === 'sleeper')!.weight;
+        let sleeperData: any[] = [];
+        if (week === 'season') {
+          const curUrl = `https://api.sleeper.app/projections/nfl/${currentNflYear}?season_type=regular&${posParams}`;
+          let data: any[] = await fetch(curUrl).then(r => r.json());
+          if (!Array.isArray(data) || data.length === 0) {
+            const prevUrl = `https://api.sleeper.app/projections/nfl/${currentNflYear - 1}?season_type=regular&${posParams}`;
+            data = await fetch(prevUrl).then(r => r.json());
+            if (Array.isArray(data) && data.length > 0) resolvedProjectionYear = currentNflYear - 1;
+          }
+          sleeperData = Array.isArray(data) ? data : [];
+        } else {
+          const url = `https://api.sleeper.app/projections/nfl/${currentNflYear}/${week}?season_type=regular&${posParams}`;
+          const data: any[] = await fetch(url).then(r => r.json());
+          sleeperData = Array.isArray(data) ? data : [];
+        }
+        sleeperData.forEach((item: any) => {
+          const pos: string = item.player?.position ?? '';
+          if (!['QB','RB','WR','TE'].includes(pos) || !item.player_id) return;
+          const fpts = calcSleeperPPR(item.stats, pos);
+          if (fpts <= 0) return;
+          addRow(String(item.player_id), fpts, 'sleeper', sleeperWeight, getProjectionSourceKickoffAt(item));
+        });
+        statusMap['sleeper'] = true;
+      } catch {
+        statusMap['sleeper'] = false;
       }
-      data ??= [];
-      const src = PROJ_SOURCES.find(s => s.id === 'sleeper')!;
-      data.forEach((item: any) => {
-        const pos: string = item.player?.position ?? '';
-        if (!['QB','RB','WR','TE'].includes(pos) || !item.player_id) return;
-        // PPR points + 0.5 TE premium (extra half-point per reception for TEs)
-        const pprFpts: number = item.stats?.pts_ppr ?? 0;
-        const tePremium: number = pos === 'TE' ? (item.stats?.rec ?? 0) * 0.5 : 0;
-        const fpts = pprFpts + tePremium;
-        if (fpts <= 0) return;
-        addRow(String(item.player_id), fpts, src.id, src.weight, getProjectionSourceKickoffAt(item));
-      });
-      statusMap['sleeper'] = true;
-    } catch {
-      statusMap['sleeper'] = false;
-    }
 
-    // ── Source 2: FantasyPros (via our server-side proxy route) ──────────────
-    try {
-      const weekParam = week === 'season' ? 'draft' : String(week);
-      const data: Array<{ name: string; position: string; fpts: number }> =
-        await fetch(`/api/projections/fantasypros?week=${weekParam}`).then(r => r.json());
-      const src = PROJ_SOURCES.find(s => s.id === 'fantasypros')!;
-      data.forEach((item) => {
-        if (item.fpts <= 0) return;
-        const key = normalizeProjName(item.name);
-        const sleeperId = nameIndex.get(key);
-        if (!sleeperId) return;
-        addRow(sleeperId, item.fpts, src.id, src.weight);
-      });
-      statusMap['fantasypros'] = true;
-    } catch {
-      statusMap['fantasypros'] = false;
-    }
+      // Source 2: FantasyPros
+      try {
+        const weekParam = week === 'season' ? 'draft' : String(week);
+        const data: Array<{ name: string; position: string; fpts: number }> =
+          await fetch(`/api/projections/fantasypros?week=${weekParam}`).then(r => r.json());
+        const src = PROJ_SOURCES.find(s => s.id === 'fantasypros')!;
+        data.forEach((item) => {
+          if (item.fpts <= 0) return;
+          const key = normalizeProjName(item.name);
+          const sleeperId = nameIndex.get(key);
+          if (!sleeperId) return;
+          addRow(sleeperId, item.fpts, src.id, src.weight);
+        });
+        statusMap['fantasypros'] = true;
+      } catch {
+        statusMap['fantasypros'] = false;
+      }
 
-    // ── Source 3: numberFire / FanDuel Research (GraphQL, no auth) ───────────
-    // PPR base + 0.5 TE premium already applied server-side in the route.
-    try {
-      const weekParam = week === 'season' ? '0' : String(week);
-      const data: Array<{ name: string; position: string; fpts: number }> =
-        await fetch(`/api/projections/numberfire?week=${weekParam}`).then(r => r.json());
-      const src = PROJ_SOURCES.find(s => s.id === 'numberfire')!;
-      data.forEach((item) => {
-        if (item.fpts <= 0) return;
-        const key = normalizeProjName(item.name);
-        const sleeperId = nameIndex.get(key);
-        if (!sleeperId) return;
-        addRow(sleeperId, item.fpts, src.id, src.weight);
-      });
-      statusMap['numberfire'] = true;
-    } catch {
-      statusMap['numberfire'] = false;
+      // Source 3: numberFire / FanDuel Research
+      try {
+        const weekParam = week === 'season' ? '0' : String(week);
+        const data: Array<{ name: string; position: string; fpts: number }> =
+          await fetch(`/api/projections/numberfire?week=${weekParam}`).then(r => r.json());
+        const src = PROJ_SOURCES.find(s => s.id === 'numberfire')!;
+        data.forEach((item) => {
+          if (item.fpts <= 0) return;
+          const key = normalizeProjName(item.name);
+          const sleeperId = nameIndex.get(key);
+          if (!sleeperId) return;
+          addRow(sleeperId, item.fpts, src.id, src.weight);
+        });
+        statusMap['numberfire'] = true;
+      } catch {
+        statusMap['numberfire'] = false;
+      }
+
+      setProjectionUsesSeasonFallback(false);
     }
 
     // ── Build final consensus list ────────────────────────────────────────────
@@ -6046,10 +6120,13 @@ const myPlayerSet = new Set<string>(roster?.players || []);
                   dynastyValueForPlayer: (id: string) => calcFcValues[id] ?? (players as any)[id]?.value ?? 0,
                 });
                 if (!profile) return null;
-                // Pull playoff odds from the Supabase sim cache if available
-                const cachedSim = leagueSimCache[league.league_id]?.[Number(myRosterId)];
-                const playoffOdds = cachedSim?.playoff_odds ?? 0;
-                const hasCachedSim = !!cachedSim;
+                // committedSimsByLeague is the source of truth — updated synchronously
+                // in-memory by saveSimulationToSupabase and persisted in localStorage.
+                // leagueSimCache (Supabase) is secondary and can be stale after auth refreshes.
+                const committedRow = committedSimsByLeague[league.league_id]?.[Number(myRosterId)];
+                const cachedSim = committedRow ?? leagueSimCache[league.league_id]?.[Number(myRosterId)];
+                const playoffOdds = committedRow?.playoffOdds ?? cachedSim?.playoff_odds ?? 0;
+                const hasCachedSim = !!(committedRow ?? cachedSim);
                 const simAge = cachedSim?.computed_at
                   ? Math.round((Date.now() - new Date(cachedSim.computed_at).getTime()) / (1000 * 60 * 60))
                   : null;
@@ -8708,6 +8785,13 @@ const starters = starterSlots
                     })}
                     {loadingProjections && <span className="text-[10px] text-blue-400">Loading…</span>}
                   </div>
+
+                  {/* Offseason fallback notice */}
+                  {projectionUsesSeasonFallback && projectionWeek !== 0 && (
+                    <div className="mb-4 rounded-lg border border-yellow-700/50 bg-yellow-950/30 px-3 py-2 text-[11px] text-yellow-300">
+                      Weekly projections not yet available — showing Sleeper full-season projections ÷ 17 as a placeholder. Rankings will automatically switch to the full multi-source consensus once week-by-week projections are published closer to the season.
+                    </div>
+                  )}
 
                   {/* List */}
                   {loadingProjections && projectionData.length === 0 ? (
