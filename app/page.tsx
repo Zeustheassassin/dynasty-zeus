@@ -1762,7 +1762,7 @@ useEffect(() => {
 }, [playerProfileId, leagues.length, user?.user_id]);
 
 useEffect(() => {
-  if (mainTab === "LEAGUES" && leagueHubTab === "SIMULATOR") {
+  if (mainTab === "LEAGUES" && (leagueHubTab === "SIMULATOR" || leagueHubTab === "OVERVIEW")) {
     loadNflState();
     loadRedraftValues();
     const isRegularSeason = nflState?.season_type === "regular" && (nflState?.week ?? 0) > 0;
