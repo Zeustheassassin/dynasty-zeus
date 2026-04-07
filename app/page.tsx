@@ -7,10 +7,11 @@ import { supabase } from "../lib/supabaseclient";
 // -------------------------
 // MODULE-LEVEL CONSTANTS
 // -------------------------
-const CURRENT_YEAR = "2026";
-const YEARS = ["2026", "2027", "2028"];
+const BASE_YEAR = new Date().getFullYear();
+const CURRENT_YEAR = String(BASE_YEAR);
+const YEARS = Array.from({ length: 3 }, (_, index) => String(BASE_YEAR + index));
 const ROUNDS = [1, 2, 3, 4];
-const ROOKIE_YEAR = "2026";
+const ROOKIE_YEAR = CURRENT_YEAR;
 const ROOKIE_BOARD_POSITIONS = new Set(["QB", "RB", "WR", "TE"]);
 const ROOKIE_BOARD_RESET_KEY = `rookieBoardReset_${ROOKIE_YEAR}_sleeper_v2`;
 const ROOKIE_BOARD_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vROmAn0k3A92okpYE7UeelIy0vYUMY0NFAGHrI52V68Zm8ff9aruDXB1E6u0hRNr2EHgr54_D7gMBti/pub?output=csv";
@@ -457,6 +458,28 @@ const getProjectionKickoffAt = (projection: any) => {
     .map((value) => Number(value))
     .find((value) => Number.isFinite(value) && value > 0);
   return parsed || null;
+};
+
+const getKickoffState = (kickoffAt: number | null, now = Date.now()) => {
+  if (!kickoffAt) return "Upcoming";
+  if (now < kickoffAt) return "Upcoming";
+  if (now - kickoffAt < 6 * 60 * 60 * 1000) return "Live";
+  return "Final";
+};
+
+const getKickoffStateClasses = (state: string) => {
+  if (state === "Live") return "border-green-500/40 bg-green-500/10 text-green-300";
+  if (state === "Final") return "border-gray-600 bg-gray-800 text-gray-300";
+  return "border-blue-500/40 bg-blue-500/10 text-blue-300";
+};
+
+const formatKickoffTime = (kickoffAt: number | null) => {
+  if (!kickoffAt) return "--";
+  try {
+    return new Date(kickoffAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  } catch {
+    return "--";
+  }
 };
 
 const getLineupSlotEligiblePositions = (slot: string) => {
@@ -965,8 +988,8 @@ const fetchFantasyCalcValues = async (): Promise<{ playerValues: Record<string, 
   Object.entries(pickRoundValues).forEach(([key, val]) => {
     if (!pickValues[key]) pickValues[key] = val;
   });
-  // FC only provides future-year 1st round values; derive 2nd/3rd/4th using 2026 ratios
-  const base1st = pickValues["2026-1"];
+  // FC only provides future-year 1st round values; derive 2nd/3rd/4th using current-year ratios
+  const base1st = pickValues[`${CURRENT_YEAR}-1`];
   if (base1st) {
     Object.entries(pickRoundValues).forEach(([key]) => {
       const [year, roundStr] = key.split("-");
@@ -975,8 +998,8 @@ const fetchFantasyCalcValues = async (): Promise<{ playerValues: Record<string, 
       [2, 3, 4].forEach((r) => {
         const rKey = `${year}-${r}`;
         if (!pickValues[rKey]) {
-          const base2026 = pickValues[`2026-${r}`];
-          if (base2026) pickValues[rKey] = Math.round(yr1stVal * (base2026 / base1st));
+          const baseCurrentYear = pickValues[`${CURRENT_YEAR}-${r}`];
+          if (baseCurrentYear) pickValues[rKey] = Math.round(yr1stVal * (baseCurrentYear / base1st));
         }
       });
     });
@@ -1096,6 +1119,9 @@ const [loadingCrossLeagueMateIntel, setLoadingCrossLeagueMateIntel] = useState(f
 const [leagueMateProfileCache, setLeagueMateProfileCache] = useState<Record<string, any[]>>({});
 const [leagueNotes, setLeagueNotes] = useState<Record<string, string>>({});
 const [nflState, setNflState] = useState<any>(null);
+const [gamedayMatchups, setGamedayMatchups] = useState<any[]>([]);
+const [loadingGamedayMatchups, setLoadingGamedayMatchups] = useState(false);
+const [selectedGamedayMatchupId, setSelectedGamedayMatchupId] = useState<number | null>(null);
 const [playerProfileId, setPlayerProfileId] = useState<string | null>(null);
 const [playerNotes, setPlayerNotes] = useState<Record<string, string>>(() => {
   try { return JSON.parse(localStorage.getItem("playerNotes_v1") || "{}"); } catch { return {}; }
@@ -1771,6 +1797,34 @@ useEffect(() => {
     }
   }
 }, [mainTab, leagueHubTab, selectedLeague?.league_id, nflState?.week, nflState?.season_type]);
+
+useEffect(() => {
+  if (mainTab !== "GAMEDAY_HUB") return;
+  loadNflState();
+}, [mainTab]);
+
+useEffect(() => {
+  const isRegularSeason = nflState?.season_type === "regular" && Number(nflState?.week || 0) > 0;
+  const currentWeek = isRegularSeason ? Number(nflState?.week) : 0;
+
+  if (mainTab !== "GAMEDAY_HUB" || !selectedLeague?.league_id || !currentWeek) {
+    if (mainTab === "GAMEDAY_HUB" && !currentWeek) {
+      setGamedayMatchups([]);
+      setSelectedGamedayMatchupId(null);
+    }
+    return;
+  }
+
+  if (projectionWeek !== currentWeek) {
+    setProjectionWeek(currentWeek);
+    setProjectionLoaded(false);
+    loadProjections(currentWeek);
+  } else if (!projectionLoaded) {
+    loadProjections(currentWeek);
+  }
+
+  loadGamedayMatchups(selectedLeague.league_id, currentWeek);
+}, [mainTab, selectedLeague?.league_id, nflState?.week, nflState?.season_type]);
 
 useEffect(() => {
   const leagueId = selectedLeague?.league_id;
@@ -2971,6 +3025,19 @@ const loadNflState = async () => {
   } catch { /* silently fail */ }
 };
 
+const loadGamedayMatchups = async (leagueId: string, week: number) => {
+  if (!leagueId || !week) return;
+  setLoadingGamedayMatchups(true);
+  try {
+    const data = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/matchups/${week}`)
+      .then((r) => r.json())
+      .catch(() => []);
+    setGamedayMatchups(Array.isArray(data) ? data : []);
+  } finally {
+    setLoadingGamedayMatchups(false);
+  }
+};
+
 // ── Leaguemate trade alerts ──────────────────────────────────────────────────
 // Scans every dynasty league each leaguemate is in (not just shared leagues)
 // and surfaces trades from the last 14 days as feed alerts.
@@ -3539,11 +3606,10 @@ const getTeamSummary = () => {
     }
   });
 
-  const pickSummary: any = {
-    "2026": 0,
-    "2027": 0,
-    "2028": 0,
-  };
+  const pickSummary = YEARS.reduce((acc: Record<string, number>, year) => {
+    acc[year] = 0;
+    return acc;
+  }, {});
 
   picks.forEach((p: any) => {
     if (pickSummary[p.season] !== undefined) {
@@ -3555,6 +3621,148 @@ const getTeamSummary = () => {
 };
 
   const teamSummary = useMemo(() => getTeamSummary(), [roster, players, picks]);
+  const gamedayWeek = useMemo(() => {
+    const rawWeek = Number(nflState?.week || 0);
+    return nflState?.season_type === "regular" && rawWeek > 0 ? rawWeek : 0;
+  }, [nflState?.week, nflState?.season_type]);
+  const gamedayMatchupCards = useMemo(() => {
+    if (!selectedLeague || !rosters.length || !gamedayWeek) return [];
+
+    const starterSlots = (selectedLeague?.roster_positions || []).filter(
+      (slot: string) => !["BN", "IR", "TAXI"].includes(slot)
+    );
+    const rosterMap = new Map(rosters.map((entry: any) => [Number(entry.roster_id), entry]));
+    const projectionByPlayerId = new Map(
+      projectionData.map((row: any) => [String(row.sleeperId), row])
+    );
+    const matchupMap = new Map<number, any[]>();
+
+    gamedayMatchups.forEach((entry: any) => {
+      const matchupId = Number(entry?.matchup_id || 0);
+      if (!matchupId) return;
+      if (!matchupMap.has(matchupId)) matchupMap.set(matchupId, []);
+      matchupMap.get(matchupId)?.push(entry);
+    });
+
+    const buildTeamView = (entry: any) => {
+      const rosterId = Number(entry?.roster_id || 0);
+      const rosterEntry = rosterMap.get(rosterId);
+      const starterIds = Array.isArray(entry?.starters) && entry.starters.length > 0
+        ? entry.starters.map((id: any) => String(id || ""))
+        : (rosterEntry?.starters || []).map((id: any) => String(id || ""));
+      const playerPoints = entry?.players_points || {};
+      const starterRows = starterSlots.map((slot: string, index: number) => {
+        const playerId = starterIds[index] ? String(starterIds[index]) : "";
+        const player = playerId ? (players as any)?.[playerId] : null;
+        const projection = playerId ? projectionByPlayerId.get(playerId) : null;
+        const kickoffAt = getProjectionKickoffAt(projection);
+        const actualPoints = Number(playerId ? playerPoints[playerId] ?? entry?.starters_points?.[index] ?? 0 : 0);
+        const gameState = getKickoffState(kickoffAt);
+        const remainingProjection = gameState === "Upcoming"
+          ? Number(projection?.fpts || 0)
+          : gameState === "Live"
+          ? Math.max(Number(projection?.fpts || 0) - actualPoints, 0)
+          : 0;
+
+        return {
+          slot,
+          playerId,
+          player,
+          actualPoints,
+          remainingProjection,
+          kickoffAt,
+          kickoffLabel: formatKickoffTime(kickoffAt),
+          gameState,
+        };
+      });
+
+      const starterIdSet = new Set(starterRows.map((row: any) => row.playerId).filter(Boolean));
+      const taxiIdSet = new Set((rosterEntry?.taxi || []).map((id: any) => String(id)));
+      const buildReserveRow = (playerId: string) => {
+        const player = (players as any)?.[playerId];
+        const projection = projectionByPlayerId.get(String(playerId));
+        const kickoffAt = getProjectionKickoffAt(projection);
+        const actualPoints = Number(playerPoints[playerId] ?? 0);
+        const gameState = getKickoffState(kickoffAt);
+        const remainingProjection = gameState === "Upcoming"
+          ? Number(projection?.fpts || 0)
+          : gameState === "Live"
+          ? Math.max(Number(projection?.fpts || 0) - actualPoints, 0)
+          : 0;
+        return {
+          playerId,
+          player,
+          actualPoints,
+          remainingProjection,
+          kickoffAt,
+          kickoffLabel: formatKickoffTime(kickoffAt),
+          gameState,
+        };
+      };
+
+      const benchRows = (rosterEntry?.players || [])
+        .map((id: any) => String(id))
+        .filter((playerId: string) => !starterIdSet.has(playerId) && !taxiIdSet.has(playerId))
+        .map(buildReserveRow)
+        .filter((row: any) => row.player)
+        .sort((a: any, b: any) => (b.remainingProjection + b.actualPoints) - (a.remainingProjection + a.actualPoints));
+
+      const taxiRows = (rosterEntry?.taxi || [])
+        .map((id: any) => String(id))
+        .map(buildReserveRow)
+        .filter((row: any) => row.player)
+        .sort((a: any, b: any) => (b.remainingProjection + b.actualPoints) - (a.remainingProjection + a.actualPoints));
+
+      return {
+        rosterId,
+        ownerId: rosterEntry?.owner_id,
+        ownerName: (users as any)?.[rosterEntry?.owner_id] || (users as any)?.[rosterId] || `Team ${rosterId}`,
+        actualPoints: Number(entry?.points || 0),
+        remainingProjection: Math.round(sum(starterRows.map((row: any) => row.remainingProjection)) * 10) / 10,
+        projectedFinal: Math.round((Number(entry?.points || 0) + sum(starterRows.map((row: any) => row.remainingProjection))) * 10) / 10,
+        finishedStarters: starterRows.filter((row: any) => row.gameState === "Final" && row.playerId).length,
+        liveStarters: starterRows.filter((row: any) => row.gameState === "Live" && row.playerId).length,
+        upcomingStarters: starterRows.filter((row: any) => row.gameState === "Upcoming" && row.playerId).length,
+        totalStarters: starterRows.filter((row: any) => row.playerId).length,
+        starterRows,
+        benchRows,
+        taxiRows,
+      };
+    };
+
+    return [...matchupMap.entries()]
+      .map(([matchupId, entries]) => {
+        const teams = entries
+          .map((entry) => buildTeamView(entry))
+          .sort((a: any, b: any) => b.actualPoints - a.actualPoints);
+        const sortKickoff = teams
+          .flatMap((team: any) => team.starterRows.map((row: any) => row.kickoffAt).filter(Boolean))
+          .sort((a: number, b: number) => a - b)[0] || Number.MAX_SAFE_INTEGER;
+
+        return {
+          matchupId,
+          teams,
+          sortKickoff,
+        };
+      })
+      .sort((a: any, b: any) => {
+        if (a.sortKickoff !== b.sortKickoff) return a.sortKickoff - b.sortKickoff;
+        return a.matchupId - b.matchupId;
+      });
+  }, [selectedLeague?.league_id, selectedLeague?.roster_positions, rosters, gamedayMatchups, gamedayWeek, players, projectionData, users]);
+  const selectedGamedayMatchup = useMemo(
+    () => gamedayMatchupCards.find((card: any) => card.matchupId === selectedGamedayMatchupId) || gamedayMatchupCards[0] || null,
+    [gamedayMatchupCards, selectedGamedayMatchupId]
+  );
+  useEffect(() => {
+    if (!gamedayMatchupCards.length) {
+      setSelectedGamedayMatchupId(null);
+      return;
+    }
+    if (!gamedayMatchupCards.some((card: any) => card.matchupId === selectedGamedayMatchupId)) {
+      setSelectedGamedayMatchupId(gamedayMatchupCards[0].matchupId);
+    }
+  }, [gamedayMatchupCards, selectedGamedayMatchupId]);
   const selectedLeagueDirection = useMemo(() => {
     if (!selectedLeague || !rosters.length || !user?.user_id) return null;
     const myRosterId = rosters.find((r: any) => r.owner_id === user.user_id)?.roster_id;
@@ -5558,34 +5766,38 @@ const myPlayerSet = new Set<string>(roster?.players || []);
           </div>
         </div>
         {/* NAV */}
-        <div className="flex overflow-x-auto border-t border-gray-800 scrollbar-none">
-          <div className="flex gap-5 px-3 pb-2 md:mx-auto">
-          <button onClick={() => setMainTab("DASHBOARD")} className={`text-sm whitespace-nowrap py-1 ${mainTab === "DASHBOARD" ? "text-blue-400 font-semibold" : "text-gray-400"}`}>
-            Dashboard
-          </button>
-          <button onClick={() => user && setMainTab("LEAGUES")} className={`text-sm whitespace-nowrap py-1 ${mainTab === "LEAGUES" ? "text-blue-400 font-semibold" : "text-gray-400"} ${!user ? "opacity-40 cursor-not-allowed" : ""}`}>
-            League Hub
-          </button>
-          <button onClick={() => user && setMainTab("DATA_HUB")} className={`text-sm whitespace-nowrap py-1 ${mainTab === "DATA_HUB" ? "text-blue-400 font-semibold" : "text-gray-400"} ${!user ? "opacity-40 cursor-not-allowed" : ""}`}>
-            Data Hub
-          </button>
-          <button onClick={() => user && setMainTab("DRAFT")} className={`text-sm whitespace-nowrap py-1 ${mainTab === "DRAFT" ? "text-blue-400 font-semibold" : "text-gray-400"} ${!user ? "opacity-40 cursor-not-allowed" : ""}`}>
-            Draft Hub
-          </button>
-          <button onClick={() => user && setMainTab("TRADE_HUB")} className={`text-sm whitespace-nowrap py-1 ${mainTab === "TRADE_HUB" ? "text-blue-400 font-semibold" : "text-gray-400"} ${!user ? "opacity-40 cursor-not-allowed" : ""}`}>
-            Trade Hub
-          </button>
-          <button onClick={() => user && setMainTab("ALERTS")} className={`text-sm whitespace-nowrap py-1 ${mainTab === "ALERTS" ? "text-blue-400 font-semibold" : "text-gray-400"} ${!user ? "opacity-40 cursor-not-allowed" : ""}`}>
-            Alerts
-          </button>
-          <button onClick={() => user && setMainTab("MANAGEMENT_HUB")} className={`text-sm whitespace-nowrap py-1 ${mainTab === "MANAGEMENT_HUB" ? "text-blue-400 font-semibold" : "text-gray-400"} ${!user ? "opacity-40 cursor-not-allowed" : ""}`}>
-            Management Hub
-          </button>
+        <div className="border-t border-gray-800">
+          <div className="mx-auto max-w-7xl overflow-x-auto scrollbar-none">
+            <div className="flex min-w-max justify-start px-2 md:justify-center">
+              {[
+                { id: "DASHBOARD", label: "Dashboard" },
+                { id: "LEAGUES", label: "League Hub" },
+                { id: "DATA_HUB", label: "Data Hub" },
+                { id: "DRAFT", label: "Draft Hub" },
+                { id: "TRADE_HUB", label: "Trade Hub" },
+                { id: "GAMEDAY_HUB", label: "Gameday Hub" },
+                { id: "ALERTS", label: "Alerts" },
+                { id: "MANAGEMENT_HUB", label: "Management Hub" },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setMainTab(tab.id)}
+                  disabled={!user && tab.id !== "DASHBOARD"}
+                  className={`px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition md:px-5 ${
+                    mainTab === tab.id
+                      ? "border-blue-500 text-blue-400"
+                      : "border-transparent text-gray-400 hover:text-white"
+                  } ${!user && tab.id !== "DASHBOARD" ? "opacity-40 cursor-not-allowed" : ""}`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>
 
-      <div className={mainTab === "DRAFT" || mainTab === "TRADE_HUB" || mainTab === "MANAGEMENT_HUB" || mainTab === "LEAGUES" || mainTab === "ALERTS" ? "" : "max-w-3xl mx-auto p-6"}>
+      <div className={mainTab === "DRAFT" || mainTab === "TRADE_HUB" || mainTab === "MANAGEMENT_HUB" || mainTab === "LEAGUES" || mainTab === "ALERTS" || mainTab === "GAMEDAY_HUB" ? "" : "max-w-3xl mx-auto p-6"}>
 {mainTab === "DASHBOARD" && (
   <>
     <>
@@ -6332,7 +6544,7 @@ const starters = starterSlots
 )}
 {/* PICKS */}
 <div className="mt-6">
-  {["2026", "2027", "2028"].map((year) => {
+  {YEARS.map((year) => {
     const yearPicks = picks
       .filter((p: any) => p.season === year)
       .sort((a: any, b: any) => {
@@ -6397,7 +6609,7 @@ const starters = starterSlots
 {activeTab === "PICKS" && (
   <div className="mt-2">
 
-    {["2026", "2027", "2028"].map((year) => {
+    {YEARS.map((year) => {
       const yearPicks = picks
         .filter((p: any) => p.season === year)
         .sort((a: any, b: any) => {
@@ -6828,7 +7040,7 @@ const starters = starterSlots
                       {/* Picks */}
                       {oppRosterTab === "PICKS" && (
                         <div className="mt-2">
-                          {["2026","2027","2028"].map((year) => {
+                          {YEARS.map((year) => {
                             const yearPicks = oppPicksForOwner
                               .filter((p: any) => p.season === year)
                               .sort((a: any, b: any) => a.round !== b.round ? a.round - b.round : (a.pick_no || 0) - (b.pick_no || 0));
@@ -7737,6 +7949,278 @@ const starters = starterSlots
           </div>
         )}
 
+        {mainTab === "GAMEDAY_HUB" && (() => {
+          const starterSlots = (selectedLeague?.roster_positions || []).filter(
+            (slot: string) => !["BN", "IR", "TAXI"].includes(slot)
+          );
+          const selectedMatchup = selectedGamedayMatchup;
+          const teamA = selectedMatchup?.teams?.[0] || null;
+          const teamB = selectedMatchup?.teams?.[1] || null;
+          const renderPlayerCell = (row: any, side: "left" | "right") => {
+            if (!row?.player) {
+              return (
+                <div className={`text-xs text-gray-600 ${side === "right" ? "text-right" : ""}`}>
+                  Open slot
+                </div>
+              );
+            }
+
+            return (
+              <div className={`min-w-0 ${side === "right" ? "text-right" : ""}`}>
+                <button
+                  onClick={() => setPlayerProfileId(row.player.player_id)}
+                  className="block w-full truncate text-sm font-medium text-white hover:text-blue-400 transition"
+                >
+                  {row.player.full_name}
+                </button>
+                <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px] text-gray-500">
+                  <span className={`${side === "right" ? "ml-auto" : ""}`}>
+                    {row.player.position} • {row.player.team || "-"}
+                  </span>
+                  <span className={`rounded-full border px-1.5 py-0.5 ${getKickoffStateClasses(row.gameState)}`}>
+                    {row.gameState}
+                  </span>
+                  <span>{row.kickoffLabel}</span>
+                </div>
+                <div className="mt-1 text-xs text-gray-300">
+                  {row.actualPoints.toFixed(1)} pts now • {row.remainingProjection.toFixed(1)} left
+                </div>
+              </div>
+            );
+          };
+
+          return (
+            <div className="max-w-6xl mx-auto px-4 py-6 space-y-5">
+              <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                  <div>
+                    <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Gameday Hub</div>
+                    <div className="mt-1 text-sm text-gray-200">
+                      Official Sleeper matchup totals for the current week, with projected remaining points layered on from your existing player projection system.
+                    </div>
+                    <div className="mt-2 text-[11px] text-gray-500">
+                      Player status badges use kickoff windows: upcoming before kickoff, live for roughly six hours after kickoff, then final.
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <select
+                      value={selectedLeague?.league_id || ""}
+                      onChange={(e) => {
+                        const nextLeague = leagues.find((league: any) => league.league_id === e.target.value);
+                        if (nextLeague) loadRoster(nextLeague);
+                      }}
+                      className="rounded-xl border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                    >
+                      <option value="">Select a league</option>
+                      {leagues.map((league: any) => (
+                        <option key={league.league_id} value={league.league_id}>
+                          {league.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={() => {
+                        if (selectedLeague?.league_id && gamedayWeek) loadGamedayMatchups(selectedLeague.league_id, gamedayWeek);
+                        if (gamedayWeek) {
+                          setProjectionWeek(gamedayWeek);
+                          setProjectionLoaded(false);
+                          loadProjections(gamedayWeek);
+                        }
+                      }}
+                      disabled={!selectedLeague?.league_id || !gamedayWeek}
+                      className={`rounded-xl border px-3 py-2 text-sm transition ${
+                        selectedLeague?.league_id && gamedayWeek
+                          ? "border-blue-700 text-blue-300 hover:bg-blue-500/10"
+                          : "border-gray-800 text-gray-600 cursor-not-allowed"
+                      }`}
+                    >
+                      Refresh Snapshot
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {!selectedLeague && (
+                <div className="rounded-2xl border border-gray-800 bg-gray-900/60 p-6 text-sm text-gray-400">
+                  Pick a league above to load its current-week matchups.
+                </div>
+              )}
+
+              {selectedLeague && !gamedayWeek && (
+                <div className="rounded-2xl border border-gray-800 bg-gray-900/60 p-6 text-sm text-gray-400">
+                  Gameday Hub only turns on during the regular season once Sleeper posts an active NFL week.
+                </div>
+              )}
+
+              {selectedLeague && gamedayWeek > 0 && (
+                <>
+                  <div className="flex items-center justify-between text-xs text-gray-500">
+                    <span>{selectedLeague.name} • Week {gamedayWeek}</span>
+                    <span>{loadingGamedayMatchups ? "Refreshing matchup totals..." : `${gamedayMatchupCards.length} matchup${gamedayMatchupCards.length === 1 ? "" : "s"}`}</span>
+                  </div>
+
+                  {loadingGamedayMatchups && gamedayMatchupCards.length === 0 ? (
+                    <div className="rounded-2xl border border-gray-800 bg-gray-900/60 p-6 text-sm text-blue-400">
+                      Loading current-week matchup totals...
+                    </div>
+                  ) : gamedayMatchupCards.length === 0 ? (
+                    <div className="rounded-2xl border border-gray-800 bg-gray-900/60 p-6 text-sm text-gray-400">
+                      No matchup data returned yet for this league and week.
+                    </div>
+                  ) : (
+                    <>
+                      <div className="grid gap-3 lg:grid-cols-2">
+                        {gamedayMatchupCards.map((card: any) => (
+                          <button
+                            key={card.matchupId}
+                            onClick={() => setSelectedGamedayMatchupId(card.matchupId)}
+                            className={`rounded-2xl border p-4 text-left transition ${
+                              selectedMatchup?.matchupId === card.matchupId
+                                ? "border-blue-500 bg-blue-500/10"
+                                : "border-gray-800 bg-gray-900/60 hover:border-gray-700"
+                            }`}
+                          >
+                            <div className="mb-3 flex items-center justify-between">
+                              <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                                Matchup {card.matchupId}
+                              </div>
+                              <div className="text-[11px] text-gray-600">
+                                {card.teams.reduce((total: number, team: any) => total + team.liveStarters, 0) > 0 ? "Games in progress" : "Snapshot"}
+                              </div>
+                            </div>
+                            <div className="space-y-3">
+                              {card.teams.map((team: any) => (
+                                <div key={team.rosterId} className="rounded-xl border border-gray-800 bg-gray-950/60 px-3 py-2.5">
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                      <div className="truncate text-sm font-semibold text-white">{team.ownerName}</div>
+                                      <div className="mt-1 text-[11px] text-gray-500">
+                                        {team.finishedStarters} final • {team.liveStarters} live • {team.upcomingStarters} upcoming
+                                      </div>
+                                    </div>
+                                    <div className="text-right">
+                                      <div className="text-lg font-semibold text-white">{team.actualPoints.toFixed(1)}</div>
+                                      <div className="text-[11px] text-gray-500">+{team.remainingProjection.toFixed(1)} left</div>
+                                    </div>
+                                  </div>
+                                  <div className="mt-2 text-xs text-gray-400">
+                                    Projected final: <span className="text-gray-200">{team.projectedFinal.toFixed(1)}</span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+
+                      {selectedMatchup && teamA && teamB && (
+                        <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
+                          <div className="flex flex-col gap-3 border-b border-gray-800 pb-4 lg:flex-row lg:items-start lg:justify-between">
+                            <div>
+                              <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Detailed Matchup View</div>
+                              <div className="mt-1 text-lg font-semibold text-white">
+                                {teamA.ownerName} vs {teamB.ownerName}
+                              </div>
+                              <div className="mt-1 text-sm text-gray-400">
+                                Week {gamedayWeek} • official matchup totals + projected remaining lineup points
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3 text-right">
+                              {[teamA, teamB].map((team: any) => (
+                                <div key={team.rosterId} className="rounded-xl border border-gray-800 bg-gray-950/60 px-3 py-2">
+                                  <div className="text-xs text-gray-500">{team.ownerName}</div>
+                                  <div className="mt-1 text-xl font-semibold text-white">{team.actualPoints.toFixed(1)}</div>
+                                  <div className="text-[11px] text-gray-500">{team.remainingProjection.toFixed(1)} left • {team.projectedFinal.toFixed(1)} final</div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="mt-4 space-y-2">
+                            <div className="grid grid-cols-[minmax(0,1fr)_88px_minmax(0,1fr)_78px] gap-3 px-2 text-[10px] font-semibold uppercase tracking-wide text-gray-600">
+                              <span>{teamA.ownerName}</span>
+                              <span className="text-center">Slot</span>
+                              <span className="text-right">{teamB.ownerName}</span>
+                              <span className="text-right">Delta</span>
+                            </div>
+                            {starterSlots.map((slot: string, index: number) => {
+                              const leftRow = teamA.starterRows[index];
+                              const rightRow = teamB.starterRows[index];
+                              const delta = (leftRow?.actualPoints || 0) - (rightRow?.actualPoints || 0);
+
+                              return (
+                                <div key={`${selectedMatchup.matchupId}-${slot}-${index}`} className="grid grid-cols-[minmax(0,1fr)_88px_minmax(0,1fr)_78px] gap-3 items-center rounded-xl border border-gray-800 bg-gray-950/50 px-3 py-3">
+                                  {renderPlayerCell(leftRow, "left")}
+                                  <div className="text-center">
+                                    <div className="text-[11px] font-semibold text-gray-300">{slot.replace("_", " ")}</div>
+                                    <div className="mt-1 text-[10px] text-gray-600">
+                                      {(leftRow?.actualPoints || 0).toFixed(1)} - {(rightRow?.actualPoints || 0).toFixed(1)}
+                                    </div>
+                                  </div>
+                                  {renderPlayerCell(rightRow, "right")}
+                                  <div className={`text-right text-sm font-semibold ${delta > 0.05 ? "text-green-400" : delta < -0.05 ? "text-red-400" : "text-gray-400"}`}>
+                                    {delta > 0 ? "+" : ""}{delta.toFixed(1)}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                            {[teamA, teamB].map((team: any) => (
+                              <div key={`${selectedMatchup.matchupId}-${team.rosterId}`} className="rounded-xl border border-gray-800 bg-gray-950/50 p-3">
+                                <div className="text-sm font-semibold text-white">{team.ownerName} bench + taxi</div>
+                                <details className="mt-3 group" open={false}>
+                                  <summary className="cursor-pointer list-none text-xs font-semibold text-blue-300 group-open:text-blue-200">
+                                    Bench ({team.benchRows.length})
+                                  </summary>
+                                  <div className="mt-2 space-y-2">
+                                    {team.benchRows.length === 0 ? (
+                                      <div className="text-xs text-gray-600">No bench players loaded.</div>
+                                    ) : team.benchRows.map((row: any) => (
+                                      <div key={`${team.rosterId}-bench-${row.playerId}`} className="flex items-center justify-between gap-3 rounded-lg border border-gray-800 bg-gray-900/60 px-3 py-2">
+                                        <button onClick={() => setPlayerProfileId(row.playerId)} className="min-w-0 truncate text-xs font-medium text-white hover:text-blue-400 transition">
+                                          {row.player.full_name}
+                                        </button>
+                                        <div className="shrink-0 text-right text-[11px] text-gray-500">
+                                          {row.actualPoints.toFixed(1)} now • {row.remainingProjection.toFixed(1)} left
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </details>
+                                <details className="mt-3 group">
+                                  <summary className="cursor-pointer list-none text-xs font-semibold text-blue-300 group-open:text-blue-200">
+                                    Taxi ({team.taxiRows.length})
+                                  </summary>
+                                  <div className="mt-2 space-y-2">
+                                    {team.taxiRows.length === 0 ? (
+                                      <div className="text-xs text-gray-600">No taxi players loaded.</div>
+                                    ) : team.taxiRows.map((row: any) => (
+                                      <div key={`${team.rosterId}-taxi-${row.playerId}`} className="flex items-center justify-between gap-3 rounded-lg border border-gray-800 bg-gray-900/60 px-3 py-2">
+                                        <button onClick={() => setPlayerProfileId(row.playerId)} className="min-w-0 truncate text-xs font-medium text-white hover:text-blue-400 transition">
+                                          {row.player.full_name}
+                                        </button>
+                                        <div className="shrink-0 text-right text-[11px] text-gray-500">
+                                          {row.actualPoints.toFixed(1)} now • {row.remainingProjection.toFixed(1)} left
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </details>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          );
+        })()}
+
         {/* DATA HUB TAB */}
         {mainTab === "DATA_HUB" && (
           <>
@@ -8364,7 +8848,7 @@ const starters = starterSlots
                               ))}
                             </tbody>
                           </table>
-                          <p className="text-xs text-gray-600 mt-3">Total Leagues = 2026 non-best-ball NFL leagues for that owner on Sleeper.</p>
+                          <p className="text-xs text-gray-600 mt-3">Total Leagues = {CURRENT_YEAR} non-best-ball NFL leagues for that owner on Sleeper.</p>
                         </div>
                       )}
                     </>
@@ -8474,7 +8958,7 @@ const starters = starterSlots
                   key={slot}
                   onClick={() => userId && loadDraftScout(userId)}
                   className={`min-w-0 min-h-[2.75rem] px-2 text-center text-xs cursor-pointer whitespace-normal break-words leading-tight ${isMe ? "text-blue-300 font-bold" : "text-blue-400 hover:text-blue-300"}`}
-                  title={`View ${teamName}'s 2026 draft picks`}
+                  title={`View ${teamName}'s ${ROOKIE_YEAR} draft picks`}
                 >
                   {teamName}{isMe ? " ★" : ""}
                 </button>
@@ -11406,7 +11890,7 @@ const starters = starterSlots
     <div className="bg-gray-900 p-6 rounded-xl w-[520px] max-h-[80vh] overflow-y-auto">
 
       <div className="text-lg font-bold mb-1">
-        {users[draftScoutUserId]}'s 2026 Rookie Drafts
+        {users[draftScoutUserId]}'s {ROOKIE_YEAR} Rookie Drafts
       </div>
       <div className="text-xs text-gray-500 mb-4">
         All leagues — click a team name in the header to scout them
@@ -11415,7 +11899,7 @@ const starters = starterSlots
       {loadingDraftScout ? (
         <div className="text-sm text-gray-400">Loading draft history...</div>
       ) : !draftScoutData?.length ? (
-        <div className="text-sm text-gray-400">No 2026 drafts started yet.</div>
+        <div className="text-sm text-gray-400">No {ROOKIE_YEAR} drafts started yet.</div>
       ) : (
         draftScoutData.map((league: any, i: number) => (
           <div key={i} className="mb-5">

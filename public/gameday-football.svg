@@ -1,0 +1,25 @@
+<svg width="320" height="200" viewBox="0 0 320 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="320" height="200" rx="28" fill="#08141E"/>
+  <rect x="12" y="12" width="296" height="176" rx="22" fill="url(#bg)"/>
+  <path d="M44 154C68 118 96 90 128 70C165 47 203 36 254 34C234 60 225 93 213 126C201 156 183 167 154 172C113 179 79 173 44 154Z" fill="#6B2F14"/>
+  <path d="M59 149C83 117 106 93 136 76C169 57 205 46 242 44C226 62 217 89 206 121C196 149 182 160 153 165C118 171 89 167 59 149Z" fill="#8E431E"/>
+  <path d="M124 92C146 86 166 84 188 84C182 97 177 111 171 125C149 127 131 130 110 136C114 121 118 107 124 92Z" fill="#A75429"/>
+  <path d="M153 92C162 103 169 114 176 126" stroke="#F7F3EC" stroke-width="6" stroke-linecap="round"/>
+  <path d="M142 98L165 119" stroke="#F7F3EC" stroke-width="4" stroke-linecap="round"/>
+  <path d="M148 92L170 113" stroke="#F7F3EC" stroke-width="4" stroke-linecap="round"/>
+  <path d="M159 87L181 108" stroke="#F7F3EC" stroke-width="4" stroke-linecap="round"/>
+  <path d="M169 84L191 105" stroke="#F7F3EC" stroke-width="4" stroke-linecap="round"/>
+  <path d="M46 154C83 163 114 165 153 160" stroke="#D97A4D" stroke-width="3" stroke-linecap="round" opacity="0.7"/>
+  <circle cx="241" cy="64" r="20" fill="#22C55E" fill-opacity="0.16"/>
+  <path d="M241 52V76" stroke="#86EFAC" stroke-width="4" stroke-linecap="round"/>
+  <path d="M229 64H253" stroke="#86EFAC" stroke-width="4" stroke-linecap="round"/>
+  <rect x="34" y="36" width="68" height="42" rx="12" fill="#0F2231" fill-opacity="0.86"/>
+  <text x="68" y="52" text-anchor="middle" fill="#93C5FD" font-family="Arial, sans-serif" font-size="10" font-weight="700">LIVE</text>
+  <text x="68" y="69" text-anchor="middle" fill="#F8FAFC" font-family="Arial, sans-serif" font-size="17" font-weight="700">21-17</text>
+  <defs>
+    <linearGradient id="bg" x1="32" y1="28" x2="282" y2="180" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B1B28"/>
+      <stop offset="1" stop-color="#123247"/>
+    </linearGradient>
+  </defs>
+</svg>
