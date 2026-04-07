@@ -4567,6 +4567,10 @@ const getTeamSummary = () => {
 
     const recommendations: any[] = [];
     const sortedPartners = [...tradePartnerRankings];
+    const isBlockedSellDisposition = (playerId?: string | null) =>
+      !!playerId && playerDispositions[playerId]?.sell === "Not Willing to Trade";
+    const isBlockedBuyDisposition = (playerId?: string | null) =>
+      !!playerId && ["Zero Interest", "Skip"].includes(playerDispositions[playerId]?.buy || "");
     const assetValue = (asset: any) => asset?.expectedValue ?? asset?.dynValue ?? asset?.value ?? 0;
     const meaningfulPlayerThreshold = 350;
     const fairDeltaLimit = (total: number) => Math.max(250, Math.min(900, Math.round(total * 0.16)));
@@ -4634,6 +4638,8 @@ const getTeamSummary = () => {
       const giveTotalAdj = giveTotal + (assetDiffCard < 0 ? waiverAdjCard : 0);
       const receiveTotalAdj = receiveTotal + (assetDiffCard > 0 ? waiverAdjCard : 0);
       const packageDelta = receiveTotalAdj - giveTotalAdj;
+      if (give.some((asset: any) => !asset?.season && isBlockedSellDisposition(asset?.player_id))) return null;
+      if (receive.some((asset: any) => !asset?.season && isBlockedBuyDisposition(asset?.player_id))) return null;
       if (!isFairPackage(give, receive)) return null;
       if (give.some((asset: any) => asset?.dynValue != null && asset.dynValue < meaningfulPlayerThreshold && !asset?.season)) return null;
       if (receive.some((asset: any) => asset?.dynValue != null && asset.dynValue < meaningfulPlayerThreshold && !asset?.season)) return null;
@@ -4874,6 +4880,7 @@ const getTeamSummary = () => {
       const myOfferPlayers = myPlayersDetailed
         .filter((player: any) => {
           const disp = playerDispositions[player.player_id];
+          if (isBlockedSellDisposition(player.player_id)) return false;
           // Never offer players I've explicitly tagged as "buy" — I want them
           if (disp?.buy) return false;
           // Always include players I've tagged as "sell" (lower threshold: just needs some real value)
@@ -4901,6 +4908,7 @@ const getTeamSummary = () => {
 
       const partnerTradeablePlayers = partnerPlayers
         .filter((player: any) =>
+          !isBlockedBuyDisposition(player.player_id) &&
           player.dynValue >= meaningfulPlayerThreshold &&
           (
             // Always target players I've explicitly flagged as buy interest, regardless of profile
@@ -5024,6 +5032,10 @@ const getTeamSummary = () => {
 
     return recommendations
       .filter(Boolean)
+      .filter((card: any) =>
+        !card.give.some((asset: any) => !asset?.season && isBlockedSellDisposition(asset?.player_id)) &&
+        !card.receive.some((asset: any) => !asset?.season && isBlockedBuyDisposition(asset?.player_id))
+      )
       .sort((a: any, b: any) => b.recommendationScore - a.recommendationScore)
       .slice(0, sortedPartners.length || 12);
   }, [
@@ -9796,6 +9808,10 @@ const starters = starterSlots
 
       const myRoster = rosters.find((r: any) => r.owner_id === user?.user_id);
       const myPlayers = rosterPlayers(myRoster);
+      const isBlockedSellDisposition = (playerId?: string | null) =>
+        !!playerId && playerDispositions[playerId]?.sell === "Not Willing to Trade";
+      const isBlockedBuyDisposition = (playerId?: string | null) =>
+        !!playerId && ["Zero Interest", "Skip"].includes(playerDispositions[playerId]?.buy || "");
       const myT = posTotals(myPlayers);
       const rosterDynVal = rosters
         .map((r: any) => ({
@@ -10131,10 +10147,13 @@ const starters = starterSlots
       };
       // When a player is pinned, ensure they're always in the give pool even if outside top 10
       const myTopBase = myPlayers
-        .filter((p: any) => p.player_id === finderPinnedPlayerId || playerDispositions[p.player_id]?.sell !== "Not Willing to Trade")
+        .filter((p: any) => !isBlockedSellDisposition(p.player_id))
         .slice(0, 10);
-      const myTop = finderPinnedPlayerId && !myTopBase.some((p: any) => p.player_id === finderPinnedPlayerId)
-        ? [...myTopBase.slice(0, 9), myPlayers.find((p: any) => p.player_id === finderPinnedPlayerId)].filter(Boolean)
+      const myPinnedPlayer = finderPinnedPlayerId && !isBlockedSellDisposition(finderPinnedPlayerId)
+        ? myPlayers.find((p: any) => p.player_id === finderPinnedPlayerId)
+        : null;
+      const myTop = myPinnedPlayer && !myTopBase.some((p: any) => p.player_id === myPinnedPlayer.player_id)
+        ? [...myTopBase.slice(0, 9), myPinnedPlayer].filter(Boolean)
         : myTopBase;
       // When either give or receive player is pinned, relax loop caps so rarer combos surface
       const pinnedActive = !!(finderPinnedPlayerId || finderTargetPlayerId);
@@ -10187,7 +10206,7 @@ const starters = starterSlots
           ).slice(0, 6)
         : [];
       const pinnedPlayer = finderPinnedPlayerId
-        ? myPlayers.find((p: any) => p.player_id === finderPinnedPlayerId) ?? null
+        ? myPlayers.find((p: any) => p.player_id === finderPinnedPlayerId && !isBlockedSellDisposition(p.player_id)) ?? null
         : null;
 
       // Opponent roster(s) for target player search
@@ -10470,10 +10489,13 @@ const starters = starterSlots
         // Ensure target player (if on this roster) is always in the pool even if ranked 11+
         // Also exclude "Zero Interest" buy-disposition players unless explicitly targeted
         const oppTopBase = oppPlayers
-          .filter((p: any) => p.player_id === finderTargetPlayerId || playerDispositions[p.player_id]?.buy !== "Zero Interest")
+          .filter((p: any) => !isBlockedBuyDisposition(p.player_id))
           .slice(0, 10);
-        const oppTop = finderTargetPlayerId && !oppTopBase.some((p: any) => p.player_id === finderTargetPlayerId)
-          ? [...oppTopBase.slice(0, 9), oppPlayers.find((p: any) => p.player_id === finderTargetPlayerId)].filter(Boolean)
+        const targetPinnedOppPlayer = finderTargetPlayerId && !isBlockedBuyDisposition(finderTargetPlayerId)
+          ? oppPlayers.find((p: any) => p.player_id === finderTargetPlayerId)
+          : null;
+        const oppTop = targetPinnedOppPlayer && !oppTopBase.some((p: any) => p.player_id === targetPinnedOppPlayer.player_id)
+          ? [...oppTopBase.slice(0, 9), targetPinnedOppPlayer].filter(Boolean)
           : oppTopBase;
         const oppName = (users as any)[oppRoster.owner_id] || `Team ${oppRoster.roster_id}`;
 
@@ -10887,7 +10909,7 @@ const starters = starterSlots
           Number(p.round) >= 3
         );
         const oppLotteryPlayers = oppPlayers.filter((p: any) => {
-          if (playerDispositions[p.player_id]?.buy === "Zero Interest") return false;
+          if (isBlockedBuyDisposition(p.player_id)) return false;
           const age = Number(p.age || 99);
           const val = Number(p.value || 0);
           if (val < 60 || val >= FINDER_LOTTERY_CEILING) return false;
@@ -10969,6 +10991,8 @@ const starters = starterSlots
       // Seeded shuffle so Refresh button produces a new random set
       const shuffled = results
         .filter((r) => isFinite(r.score))
+        .filter((r) => !r.give.some((p: any) => isBlockedSellDisposition(p.player_id)))
+        .filter((r) => !r.receive.some((p: any) => isBlockedBuyDisposition(p.player_id)))
         .filter((r) => !pinnedPlayer || r.give.some((p: any) => p.player_id === pinnedPlayer.player_id))
         .filter((r) => !finderTargetPlayerId || r.receive.some((p: any) => p.player_id === finderTargetPlayerId))
         .filter((r) => !failsDirectionGuardrail(r))
