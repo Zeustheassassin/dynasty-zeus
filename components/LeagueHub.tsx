@@ -154,8 +154,8 @@ interface LeagueHubProps {
   setDraftSlotEditing: (slot: string | null) => void;
   draftSlotSearchQuery: string;
   setDraftSlotSearchQuery: (q: string) => void;
-  draftHubSection: "BOARD" | "BIG_BOARD";
-  setDraftHubSection: (section: "BOARD" | "BIG_BOARD") => void;
+  draftHubSection: "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES";
+  setDraftHubSection: (section: "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES") => void;
   nflState: any;
 
   // Auth

@@ -148,12 +148,13 @@ const [finderTargetOppRosterId, setFinderTargetOppRosterId] = useState<number | 
 const [finderTargetPlayerSearch, setFinderTargetPlayerSearch] = useState("");
 const [finderTargetPlayerId, setFinderTargetPlayerId] = useState<string | null>(null);
 
-const [draftHubSection, setDraftHubSection] = useState<"BOARD" | "BIG_BOARD">("BOARD");
+const [draftHubSection, setDraftHubSection] = useState<"BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES">("BOARD");
 const [prSortKey, setPrSortKey] = useState<"dynTotal"|"redTotal"|"qbTotal"|"rbTotal"|"wrTotal"|"teTotal">("dynTotal");
 const [prSortAsc, setPrSortAsc] = useState(false);
 const [prPopup, setPrPopup] = useState<{ rosterId: number; col: "dyn"|"red"|"QB"|"RB"|"WR"|"TE" } | null>(null);
 const [pickFcValues, setPickFcValues] = useState<Record<string, number>>({});
 const [calcFcValues, setCalcFcValues] = useState<Record<string, number>>({});
+const [fcNameValues, setFcNameValues] = useState<Record<string, number>>({});
 const [loadingCalcValues, setLoadingCalcValues] = useState(false);
 const [calcValuesLeagueId, setCalcValuesLeagueId] = useState<string | null>(null);
 const [calcOpponentRosterId, setCalcOpponentRosterId] = useState<number | null>(null);
@@ -1321,8 +1322,10 @@ const loadRookieBoard = async () => {
         .then((res) => res.json()).catch(() => []),
     ]);
 
-    // Build name → FC value map (name-based to avoid pre-draft Sleeper ID mismatches)
+    // Build name → FC value map and sleeperId → FC value map
     const fcByName = new Map<string, number>();
+    const fcBySleeperId = new Map<string, number>();
+
     if (Array.isArray(fcRaw)) {
       fcRaw.forEach((entry: any) => {
         if (entry.player?.position === "PICK") return;
@@ -1330,7 +1333,12 @@ const loadRookieBoard = async () => {
         if (fullName && typeof entry.value === "number") {
           fcByName.set(normalizeRookieName(fullName), entry.value);
         }
+        const sid = entry.player?.sleeperId;
+        if (sid && typeof entry.value === "number") {
+          fcBySleeperId.set(String(sid), entry.value);
+        }
       });
+      setFcNameValues(Object.fromEntries(fcByName));
     }
 
     const sheetPlayers = sheetText
@@ -1378,8 +1386,10 @@ const loadRookieBoard = async () => {
           position: adpPlayer?.position || player.position,
           team: adpPlayer?.team || "",
           adp: typeof adpPlayer?.adp === "number" ? adpPlayer.adp : Number.MAX_SAFE_INTEGER,
-          // Match FC value by name — avoids pre-draft Sleeper ID mismatch
-          fcValue: fcByName.get(norm) ?? fcByName.get(normalizeRookieName(adpPlayer?.name || "")) ?? 0,
+          // Match FC value: name first, then Sleeper ID fallback
+          fcValue: fcByName.get(norm)
+            ?? fcByName.get(normalizeRookieName(adpPlayer?.name || ""))
+            ?? (adpPlayer?.player_id ? (fcBySleeperId.get(adpPlayer.player_id) ?? 0) : 0),
         };
       })
       // Sort by FantasyCalc Superflex dynasty value (descending). Falls back to Sleeper ADP then name.
@@ -4360,6 +4370,64 @@ const getTeamSummary = () => {
       .slice(0, 8);
   }, [watchlistSearch, players]);
 
+  // Injury report: all owned + watchlisted players, sorted worst status first
+  const injuryReportPlayers = useMemo(() => {
+    // Build starting lineup map: playerId -> league names where they're a starter
+    const startingMap = new Map<string, string[]>();
+    allLeagueData.forEach((entry: any) => {
+      (entry?.roster?.starters || []).forEach((playerId: string) => {
+        if (!playerId || playerId === "0") return;
+        const existing = startingMap.get(String(playerId)) || [];
+        if (entry?.leagueName && !existing.includes(entry.leagueName)) {
+          existing.push(entry.leagueName);
+        }
+        startingMap.set(String(playerId), existing);
+      });
+    });
+
+    const seen = new Set<string>();
+    const result: Array<{ player: any; playerId: string; leagues: string[]; startingLeagues: string[]; isWatchlisted: boolean }> = [];
+
+    dashboardOwnedPlayers.forEach((entry: any) => {
+      if (seen.has(entry.player_id)) return;
+      const player = (players as any)?.[entry.player_id];
+      if (!player?.full_name || !["QB", "RB", "WR", "TE"].includes(player.position)) return;
+      seen.add(entry.player_id);
+      result.push({
+        player,
+        playerId: entry.player_id,
+        leagues: entry.leagues || [],
+        startingLeagues: startingMap.get(entry.player_id) || [],
+        isWatchlisted: watchlistEntries.some((w) => w.player_id === entry.player_id),
+      });
+    });
+
+    watchlistEntries.forEach((entry) => {
+      if (seen.has(entry.player_id)) return;
+      const player = (players as any)?.[entry.player_id];
+      if (!player?.full_name) return;
+      seen.add(entry.player_id);
+      result.push({
+        player,
+        playerId: entry.player_id,
+        leagues: [],
+        startingLeagues: startingMap.get(entry.player_id) || [],
+        isWatchlisted: true,
+      });
+    });
+
+    const severityOrder = (p: any) => {
+      const s = (p.injury_status || p.status || "").toLowerCase();
+      if (/ir|pup/.test(s)) return 0;
+      if (/out|suspended|inactive/.test(s)) return 1;
+      if (/doubtful/.test(s)) return 2;
+      if (/questionable/.test(s)) return 3;
+      return 4;
+    };
+
+    return result.sort((a, b) => severityOrder(a.player) - severityOrder(b.player));
+  }, [allLeagueData, dashboardOwnedPlayers, watchlistEntries, players]);
+
   useEffect(() => {
     localStorage.setItem(watchlistStorageKey, JSON.stringify(watchlistEntries));
   }, [watchlistEntries, watchlistStorageKey]);
@@ -4601,6 +4669,39 @@ const getTeamSummary = () => {
           teamLabel: snapshot.team || null,
           payload: { previousStatus: previous.status || "", nextStatus },
         });
+
+        // Opportunity alert: when a tracked player goes out, surface their backup
+        if (/out|doubtful|ir|suspended|inactive/i.test(nextStatus)) {
+          const injuredPlayer = (players as any)?.[playerId];
+          if (injuredPlayer?.team && injuredPlayer?.position) {
+            const backups = Object.entries(players as Record<string, any>)
+              .filter(([pid, p]: [string, any]) =>
+                pid !== playerId &&
+                p?.team === injuredPlayer.team &&
+                p?.position === injuredPlayer.position &&
+                p?.depth_chart_position != null &&
+                !/out|ir|suspended|inactive/i.test((p.injury_status || p.status || "").toLowerCase())
+              )
+              .sort(([, a]: any, [, b]: any) => (a.depth_chart_position ?? 99) - (b.depth_chart_position ?? 99));
+
+            if (backups.length > 0) {
+              const [backupId, backup]: any = backups[0];
+              incomingAlerts.push({
+                id: `opp-${playerId}-${backupId}`,
+                category: "market",
+                source: "internal",
+                severity: "medium",
+                title: `${backup.full_name} opportunity`,
+                detail: `With ${snapshot.full_name} now ${nextStatus.toLowerCase()}, ${backup.full_name} (${backup.team || injuredPlayer.team}) moves into an expanded role.`,
+                actionable: true,
+                timestamp: Date.now(),
+                playerId: String(backupId),
+                teamLabel: backup.team || null,
+                payload: { injuredPlayerId: playerId, injuredName: snapshot.full_name, triggerStatus: nextStatus },
+              });
+            }
+          }
+        }
       }
 
       if (snapshot.team && previous.team && snapshot.team !== previous.team) {
@@ -4696,6 +4797,81 @@ const getTeamSummary = () => {
 
     return () => { cancelled = true; };
   }, [dashboardOwnedPlayers, watchlistEntries, players]);
+
+  // ── Bye week alerts ───────────────────────────────────────────────────────
+  useEffect(() => {
+    if (nflState?.season_type !== "regular") return;
+    const currentWeek = Number(nflState?.week || 0);
+    if (!currentWeek) return;
+    if (!dashboardOwnedPlayers.length && !watchlistEntries.length) return;
+
+    const seen = new Set<string>();
+    const alerts: AlertsCenterItem[] = [];
+
+    [...dashboardOwnedPlayers.map((e: any) => String(e.player_id)), ...watchlistEntries.map((e) => e.player_id)]
+      .forEach((playerId) => {
+        if (seen.has(playerId)) return;
+        seen.add(playerId);
+        const player = (players as any)?.[playerId];
+        if (!player?.full_name) return;
+        const byeWeek = Number(player.bye_week || 0);
+        if (!byeWeek) return;
+        const weeksOut = byeWeek - currentWeek;
+        if (weeksOut !== 1 && weeksOut !== 2) return;
+        alerts.push({
+          id: `bye-${playerId}-wk${byeWeek}-${nflState.season}`,
+          category: "status",
+          source: "internal",
+          severity: weeksOut === 1 ? "medium" : "low",
+          title: `${player.full_name} bye ${weeksOut === 1 ? "next week" : "in 2 weeks"}`,
+          detail: `${player.full_name} (${player.team || "?"}) is on bye in Week ${byeWeek}. Plan your lineup.`,
+          actionable: true,
+          timestamp: Date.now(),
+          playerId,
+          teamLabel: player.team || null,
+          payload: { byeWeek, currentWeek },
+        });
+      });
+
+    if (alerts.length) mergeDashboardAlerts(alerts);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nflState?.week, nflState?.season_type, dashboardOwnedPlayers, watchlistEntries, players]);
+
+  // ── Available player alerts (watchlist player recently dropped) ──────────
+  useEffect(() => {
+    if (!watchlistEntries.length || !leagueTransactions.length) return;
+    const watchlistSet = new Set(watchlistEntries.map((e) => e.player_id));
+    const alerts: AlertsCenterItem[] = [];
+    const seen = new Set<string>();
+
+    leagueTransactions
+      .filter((tx) => tx.type === "free_agent" || tx.type === "waiver")
+      .forEach((tx) => {
+        Object.keys(tx.drops || {}).forEach((pid) => {
+          const key = `${pid}-${tx.leagueId}`;
+          if (!watchlistSet.has(pid) || seen.has(key)) return;
+          seen.add(key);
+          const player = (players as any)?.[pid];
+          alerts.push({
+            id: `available-${pid}-${tx.leagueId}-${tx.transaction_id}`,
+            category: "watchlist",
+            source: "watchlist",
+            severity: "high",
+            title: `${player?.full_name || pid} is available`,
+            detail: `A player on your watchlist was recently dropped in ${tx.leagueName}. They may be free to add.`,
+            actionable: true,
+            timestamp: tx.created || Date.now(),
+            playerId: pid,
+            leagueId: tx.leagueId,
+            teamLabel: player?.team || null,
+            payload: { transactionId: tx.transaction_id, leagueName: tx.leagueName },
+          });
+        });
+      });
+
+    if (alerts.length) mergeDashboardAlerts(alerts);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leagueTransactions, watchlistEntries]);
 
   const visibleDashboardAlerts = useMemo(
     () =>
@@ -4905,6 +5081,8 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             leagueTransactions={leagueTransactions}
             loadingTransactions={loadingTransactions}
             players={players}
+            injuryReportPlayers={injuryReportPlayers}
+            currentNFLWeek={nflState?.season_type === "regular" ? Number(nflState?.week || 0) : 0}
           />
         )}
         {/* LEAGUE HUB */}
@@ -5113,6 +5291,10 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     movePlayer={movePlayer}
     handleRankChange={handleRankChange}
     loadingDraftRefresh={loadingDraftRefresh}
+    leagues={leagues}
+    calcFcValues={calcFcValues}
+    pickFcValues={pickFcValues}
+    fcNameValues={fcNameValues}
   />
 )}
 

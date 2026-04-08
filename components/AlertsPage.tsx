@@ -26,6 +26,14 @@ type SearchPlayer = {
   team?: string;
 };
 
+type InjuryReportPlayer = {
+  player: any;
+  playerId: string;
+  leagues: string[];
+  startingLeagues: string[];
+  isWatchlisted: boolean;
+};
+
 type AlertsPageProps = {
   alerts: DashboardAlert[];
   actionableAlerts: DashboardAlert[];
@@ -44,6 +52,8 @@ type AlertsPageProps = {
   leagueTransactions: any[];
   loadingTransactions: boolean;
   players: Record<string, any>;
+  injuryReportPlayers: InjuryReportPlayer[];
+  currentNFLWeek: number;
 };
 
 const severityStyles = {
@@ -58,6 +68,19 @@ const POS_COLOR: Record<string, string> = {
   WR: "text-blue-400",
   TE: "text-yellow-400",
 };
+
+function injuryStatusStyle(player: any) {
+  const s = (player.injury_status || player.status || "").toLowerCase();
+  if (/ir|pup/.test(s))
+    return { cls: "bg-red-900/60 text-red-300 border-red-700", label: player.injury_status || player.status };
+  if (/out|suspended|inactive/.test(s))
+    return { cls: "bg-red-900/40 text-red-400 border-red-800", label: player.injury_status || player.status };
+  if (/doubtful/.test(s))
+    return { cls: "bg-orange-900/40 text-orange-400 border-orange-700", label: "Doubtful" };
+  if (/questionable/.test(s))
+    return { cls: "bg-yellow-900/40 text-yellow-400 border-yellow-700", label: "Questionable" };
+  return { cls: "bg-slate-800/40 text-slate-400 border-slate-700", label: "Active" };
+}
 
 function relTime(ts: number): string {
   const ms = Date.now() - ts;
@@ -81,7 +104,6 @@ function TxCard({ tx, players }: { tx: any; players: Record<string, any> }) {
   const hasAdds = Object.keys(adds).length > 0;
   const hasDrops = Object.keys(drops).length > 0;
 
-  // Card border/bg per type
   const cardCls = isTrade
     ? "border-violet-800/40 bg-violet-950/10"
     : hasAdds && hasDrops
@@ -135,7 +157,6 @@ function TxCard({ tx, players }: { tx: any; players: Record<string, any> }) {
   };
 
   if (isTrade) {
-    // Group receiving assets by roster_id
     const sides: Record<number, { players: string[]; picks: any[] }> = {};
     Object.entries(adds).forEach(([playerId, rosterId]) => {
       if (!sides[rosterId]) sides[rosterId] = { players: [], picks: [] };
@@ -176,7 +197,6 @@ function TxCard({ tx, players }: { tx: any; players: Record<string, any> }) {
     );
   }
 
-  // Waiver / FA — single owner involved
   const rosterId = tx.roster_ids?.[0];
   const ownerName = rosterOwnerMap[rosterId] ?? `Team ${rosterId ?? "?"}`;
 
@@ -226,8 +246,28 @@ export default function AlertsPage({
   leagueTransactions,
   loadingTransactions,
   players,
+  injuryReportPlayers,
+  currentNFLWeek,
 }: AlertsPageProps) {
-  const [feedTab, setFeedTab] = useState<"alerts" | "transactions">("alerts");
+  const [feedTab, setFeedTab] = useState<"alerts" | "transactions" | "waivers" | "injury">("alerts");
+  const [expandedInjuryId, setExpandedInjuryId] = useState<string | null>(null);
+
+  const tradeActivity = leagueTransactions.filter((tx) => tx.type === "trade");
+  const waiverActivity = leagueTransactions.filter(
+    (tx) => tx.type === "free_agent" || tx.type === "waiver"
+  );
+
+  const injuredCount = injuryReportPlayers.filter((r) => {
+    const s = (r.player.injury_status || r.player.status || "").toLowerCase();
+    return /ir|pup|out|doubtful|questionable|suspended|inactive/.test(s);
+  }).length;
+
+  const TABS = [
+    { key: "alerts", label: `Alerts${alerts.length > 0 ? ` (${alerts.length})` : ""}` },
+    { key: "transactions", label: `Trades${tradeActivity.length > 0 ? ` (${tradeActivity.length})` : ""}` },
+    { key: "waivers", label: `Waivers${waiverActivity.length > 0 ? ` (${waiverActivity.length})` : ""}` },
+    { key: "injury", label: `Injury Report${injuredCount > 0 ? ` (${injuredCount})` : ""}` },
+  ] as const;
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-6 space-y-6">
@@ -242,7 +282,7 @@ export default function AlertsPage({
               Internal changes, watchlist triggers, and matched news in one place.
             </p>
           </div>
-          <div className="flex gap-3">
+          <div className="flex gap-3 flex-wrap">
             <div className="rounded-2xl border border-blue-800/60 bg-blue-950/40 px-3 py-2 text-right">
               <div className="text-[11px] uppercase tracking-[0.18em] text-blue-300">Live feed</div>
               <div className="mt-1 text-lg font-semibold text-white">{alerts.length}</div>
@@ -251,32 +291,39 @@ export default function AlertsPage({
               </div>
             </div>
             <div className="rounded-2xl border border-slate-700 bg-slate-900/60 px-3 py-2 text-right">
-              <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Transactions</div>
-              <div className="mt-1 text-lg font-semibold text-white">{leagueTransactions.length}</div>
+              <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Trades</div>
+              <div className="mt-1 text-lg font-semibold text-white">{tradeActivity.length}</div>
               <div className="text-xs text-slate-500">
-                {loadingTransactions ? "Loading…" : "across all leagues"}
+                {loadingTransactions ? "Loading…" : `${waiverActivity.length} waiver moves`}
               </div>
             </div>
+            {injuredCount > 0 && (
+              <div className="rounded-2xl border border-red-800/60 bg-red-950/30 px-3 py-2 text-right">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-red-400">Injured</div>
+                <div className="mt-1 text-lg font-semibold text-white">{injuredCount}</div>
+                <div className="text-xs text-slate-500">tracked players</div>
+              </div>
+            )}
           </div>
         </div>
       </div>
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.85fr)]">
-        {/* ── Left: Feed + Transactions ── */}
+        {/* ── Left: Feed tabs ── */}
         <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-5">
           {/* Tab toggle */}
-          <div className="flex gap-1 bg-slate-800/60 rounded-xl p-1 mb-4 w-fit">
-            {(["alerts", "transactions"] as const).map((tab) => (
+          <div className="flex flex-wrap gap-1 bg-slate-800/60 rounded-xl p-1 mb-4">
+            {TABS.map((tab) => (
               <button
-                key={tab}
-                onClick={() => setFeedTab(tab)}
+                key={tab.key}
+                onClick={() => setFeedTab(tab.key)}
                 className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition ${
-                  feedTab === tab
+                  feedTab === tab.key
                     ? "bg-slate-700 text-white"
                     : "text-slate-400 hover:text-white"
                 }`}
               >
-                {tab === "alerts" ? `Alerts ${alerts.length > 0 ? `(${alerts.length})` : ""}` : `Transactions ${leagueTransactions.length > 0 ? `(${leagueTransactions.length})` : ""}`}
+                {tab.label}
               </button>
             ))}
           </div>
@@ -337,20 +384,160 @@ export default function AlertsPage({
             </div>
           )}
 
-          {/* ── Transactions tab ── */}
+          {/* ── Trades tab ── */}
           {feedTab === "transactions" && (
             <div>
               {loadingTransactions ? (
-                <p className="text-sm text-blue-400 py-4">Loading transactions across all leagues…</p>
-              ) : leagueTransactions.length === 0 ? (
+                <p className="text-sm text-blue-400 py-4">Loading trades across all leagues…</p>
+              ) : tradeActivity.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-6 text-sm text-slate-400">
-                  No recent transactions found. Make sure your leagues are loaded.
+                  No recent trades found. Make sure your leagues are loaded.
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {leagueTransactions.map((tx: any) => (
+                  {tradeActivity.map((tx: any) => (
                     <TxCard key={`${tx.leagueId}-${tx.transaction_id}`} tx={tx} players={players} />
                   ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Waivers tab ── */}
+          {feedTab === "waivers" && (
+            <div>
+              {loadingTransactions ? (
+                <p className="text-sm text-blue-400 py-4">Loading waiver activity…</p>
+              ) : waiverActivity.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-6 text-sm text-slate-400">
+                  No recent waiver or free agent moves found across your leagues.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {waiverActivity.map((tx: any) => (
+                    <TxCard key={`${tx.leagueId}-${tx.transaction_id}`} tx={tx} players={players} />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Injury Report tab ── */}
+          {feedTab === "injury" && (
+            <div>
+              {injuryReportPlayers.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-6 text-sm text-slate-400">
+                  Add players to your watchlist or load your leagues to see injury statuses here.
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  {injuryReportPlayers.map(({ player, playerId, leagues, startingLeagues, isWatchlisted }) => {
+                    const { cls: statusCls, label: statusLabel } = injuryStatusStyle(player);
+                    const byeWeek = Number(player.bye_week || 0);
+                    const byeWeeksOut = currentNFLWeek && byeWeek ? byeWeek - currentNFLWeek : null;
+                    const showBye = byeWeeksOut === 1 || byeWeeksOut === 2;
+                    const isExpanded = expandedInjuryId === playerId;
+
+                    return (
+                      <div key={playerId} className="rounded-2xl border border-slate-800 overflow-hidden">
+                        {/* Clickable nameplate row */}
+                        <button
+                          type="button"
+                          onClick={() => setExpandedInjuryId(isExpanded ? null : playerId)}
+                          className="w-full text-left bg-slate-950/40 px-3 py-2.5 flex items-center gap-3 hover:bg-slate-800/40 transition"
+                        >
+                          <span className={`text-[10px] font-bold shrink-0 ${POS_COLOR[player.position] ?? "text-slate-400"}`}>
+                            {player.position}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <div className="text-sm font-medium text-white truncate">{player.full_name}</div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-xs text-slate-400">{player.team || "FA"}</span>
+                              {startingLeagues.length > 0 && (
+                                <span className="text-[10px] text-emerald-500">
+                                  Starting in {startingLeagues.length} {startingLeagues.length === 1 ? "league" : "leagues"}
+                                </span>
+                              )}
+                              {isWatchlisted && leagues.length === 0 && (
+                                <span className="text-[10px] text-amber-500">Watchlist only</span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {showBye && (
+                              <span className="text-[10px] font-semibold border border-purple-700 bg-purple-900/30 text-purple-300 px-2 py-0.5 rounded-lg">
+                                Bye Wk {byeWeek}
+                              </span>
+                            )}
+                            <span className={`text-[10px] font-semibold border px-2 py-0.5 rounded-lg ${statusCls}`}>
+                              {statusLabel}
+                            </span>
+                            <span className="text-slate-600 text-xs">{isExpanded ? "▲" : "▼"}</span>
+                          </div>
+                        </button>
+
+                        {/* Expanded: starting lineup detail */}
+                        {isExpanded && (
+                          <div className="border-t border-slate-800 bg-slate-900/60 px-4 py-3">
+                            {startingLeagues.length > 0 ? (
+                              <div>
+                                <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-500 mb-2">
+                                  In starting lineup
+                                </div>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {startingLeagues.map((name) => (
+                                    <span
+                                      key={name}
+                                      className="text-xs border border-emerald-800/60 bg-emerald-950/40 text-emerald-300 px-2.5 py-1 rounded-xl"
+                                    >
+                                      {name}
+                                    </span>
+                                  ))}
+                                </div>
+                                {leagues.length > startingLeagues.length && (
+                                  <div className="mt-2.5">
+                                    <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500 mb-1.5">
+                                      On bench
+                                    </div>
+                                    <div className="flex flex-wrap gap-1.5">
+                                      {leagues
+                                        .filter((l) => !startingLeagues.includes(l))
+                                        .map((name) => (
+                                          <span
+                                            key={name}
+                                            className="text-xs border border-slate-700 bg-slate-800/40 text-slate-400 px-2.5 py-1 rounded-xl"
+                                          >
+                                            {name}
+                                          </span>
+                                        ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            ) : leagues.length > 0 ? (
+                              <div>
+                                <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500 mb-1.5">
+                                  On bench in all leagues
+                                </div>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {leagues.map((name) => (
+                                    <span
+                                      key={name}
+                                      className="text-xs border border-slate-700 bg-slate-800/40 text-slate-400 px-2.5 py-1 rounded-xl"
+                                    >
+                                      {name}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : (
+                              <p className="text-xs text-slate-500">Not on any of your rosters — watchlist only.</p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
