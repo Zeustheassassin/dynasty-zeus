@@ -24,7 +24,7 @@ const navCardRows = [
     {
       title: "Gameday Hub",
       tab: "GAMEDAY_HUB",
-      image: "https://images.unsplash.com/photo-1508098682722-e99c643e7485?w=800&q=80&auto=format&fit=crop",
+      image: "https://images.pexels.com/photos/1618200/pexels-photo-1618200.jpeg?auto=compress&cs=tinysrgb&w=800",
       overlay: "from-emerald-950/75 via-slate-900/60 to-slate-950/85",
     },
     {
