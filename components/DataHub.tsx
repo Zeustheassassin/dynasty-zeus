@@ -4,6 +4,14 @@ import React from "react";
 // ── Module-level constants (mirrors page.tsx) ──────────────────────────────
 const CURRENT_YEAR = String(new Date().getFullYear());
 
+const PICK_YEARS = Array.from({ length: 3 }, (_, i) => String(new Date().getFullYear() + i));
+const PICK_ROUNDS = [1, 2, 3, 4];
+const STANDARD_PICK_VALUES: Record<string, number> = {
+  "1-0": 8500, "2-0": 4500, "3-0": 2200, "4-0": 1200,
+  "1-1": 6500, "2-1": 3500, "3-1": 2000, "4-1": 1100,
+  "1-2": 5000, "2-2": 2800, "3-2": 1600, "4-2": 900,
+};
+
 const PROJ_SOURCES = [
   { id: "fantasypros" as const, label: "FantasyPros",       tier: 1 as const, weight: 0.45 },
   { id: "numberfire"  as const, label: "numberFire",         tier: 1 as const, weight: 0.35 },
@@ -18,21 +26,15 @@ const POS_COLOR: Record<string, string> = {
 };
 
 // ── Props ──────────────────────────────────────────────────────────────────
-type DataHubTabId = "OWNERSHIP" | "DYNASTY" | "VALUE_TRENDS" | "REDRAFT" | "PROJECTIONS" | "PICK_VALUES" | "LEAGUEMATES";
+type DataHubTabId = "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "PICK_VALUES" | "LEAGUEMATES";
 
 interface DataHubProps {
   // Navigation
   dataHubTab: DataHubTabId;
   setDataHubTab: (tab: DataHubTabId) => void;
 
-  // Ownership tab
-  shareSearch: string;
-  setShareSearch: (s: string) => void;
-  sharePosition: string;
-  setSharePosition: (pos: string) => void;
-  shares: Record<string, any>;
-  totalLeagues: number;
   players: any;
+  shares: Record<string, any>;
 
   // Dynasty/Redraft rankings
   calcFcValues: Record<string, number>;
@@ -43,8 +45,6 @@ interface DataHubProps {
   savePlayerDisposition: (playerId: string, sell: string, buy: string) => void;
   setPlayerProfileId: (id: string | null) => void;
   redraftValues: Record<string, number>;
-  redraftRankPos: string;
-  setRedraftRankPos: (pos: string) => void;
   loadingRedraft: boolean;
 
   // Projections tab
@@ -127,11 +127,11 @@ const ageColor = (age: number | undefined, pos: string) => {
 // ── Component ──────────────────────────────────────────────────────────────
 export default function DataHub({
   dataHubTab, setDataHubTab,
-  shareSearch, setShareSearch, sharePosition, setSharePosition, shares, totalLeagues,
   players,
+  shares,
   calcFcValues, dynastyRankPos, setDynastyRankPos, loadingCalcValues,
   playerDispositions, savePlayerDisposition, setPlayerProfileId,
-  redraftValues, redraftRankPos, setRedraftRankPos, loadingRedraft,
+  redraftValues, loadingRedraft,
   projectionData, setProjectionData, projectionPosFilter, setProjectionPosFilter,
   projectionWeek, setProjectionWeek, setProjectionLoaded, loadProjections,
   projectionSeasonYear, projectionSourceStatus, loadingProjections, projectionUsesSeasonFallback,
@@ -145,7 +145,12 @@ export default function DataHub({
 }: DataHubProps) {
 
   // ── Local UI state ─────────────────────────────────────────────────────────
-  const [rankView, setRankView] = React.useState<"DYNASTY" | "COMPARE">("DYNASTY");
+  const [rankView, setRankView] = React.useState<"DYNASTY" | "REDRAFT" | "COMPARE">("DYNASTY");
+  const [rankSearch, setRankSearch] = React.useState("");
+  const [projRosterOnly, setProjRosterOnly] = React.useState(false);
+  const [crossLeaguePicks, setCrossLeaguePicks] = React.useState<{leagueName: string; picks: any[]}[]>([]);
+  const [loadingCrossLeaguePicks, setLoadingCrossLeaguePicks] = React.useState(false);
+  const [crossLeaguePicksLoaded, setCrossLeaguePicksLoaded] = React.useState(false);
   const [expandedMateId, setExpandedMateId] = React.useState<string | null>(null);
   const [trendThreshold, setTrendThreshold] = React.useState(10);
   const [trendPos, setTrendPos] = React.useState("ALL");
@@ -202,13 +207,49 @@ export default function DataHub({
     }
   };
 
+  // ── Cross-league picks loader ──────────────────────────────────────────────
+  const loadCrossLeaguePicks = async () => {
+    if (!user || !leagues.length) return;
+    setLoadingCrossLeaguePicks(true);
+    try {
+      const results = await Promise.all(
+        leagues.map(async (league: any) => {
+          const [rostersData, tradedPicksData] = await Promise.all([
+            fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`).then(r => r.json()).catch(() => []),
+            fetch(`https://api.sleeper.app/v1/league/${league.league_id}/traded_picks`).then(r => r.json()).catch(() => []),
+          ]);
+          const myRoster = (rostersData as any[]).find((r: any) => r.owner_id === user.user_id);
+          if (!myRoster) return null;
+          const tempPicks: any[] = [];
+          PICK_YEARS.forEach((year) => {
+            (rostersData as any[]).forEach((r: any) => {
+              PICK_ROUNDS.forEach((round) => {
+                tempPicks.push({ season: year, round, roster_id: r.roster_id, owner_id: r.roster_id });
+              });
+            });
+          });
+          (tradedPicksData as any[]).forEach((tp: any) => {
+            const match = tempPicks.find(p => p.season === tp.season && p.round === tp.round && p.roster_id === tp.roster_id);
+            if (match) match.owner_id = tp.owner_id;
+          });
+          const myPicks = tempPicks.filter(p => p.owner_id === myRoster.roster_id);
+          return myPicks.length > 0 ? { leagueName: league.name, picks: myPicks } : null;
+        })
+      );
+      setCrossLeaguePicks(results.filter(Boolean) as any[]);
+      setCrossLeaguePicksLoaded(true);
+    } finally {
+      setLoadingCrossLeaguePicks(false);
+    }
+  };
+
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <>
       {/* Sub-tab nav */}
       <div className="flex justify-center border-b border-gray-800 mb-6 overflow-x-auto">
         <div className="flex justify-center gap-6 text-center">
-          {(["OWNERSHIP", "DYNASTY", "VALUE_TRENDS", "REDRAFT", "PROJECTIONS", "PICK_VALUES", "LEAGUEMATES"] as const).map((tab) => (
+          {(["RANKINGS", "VALUE_TRENDS", "PROJECTIONS", "PICK_VALUES", "LEAGUEMATES"] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setDataHubTab(tab)}
@@ -218,94 +259,32 @@ export default function DataHub({
                   : "text-gray-400 hover:text-white"
               }`}
             >
-              {tab === "OWNERSHIP" ? "Player Ownership" :
-               tab === "DYNASTY" ? "Dynasty Rankings" :
+              {tab === "RANKINGS" ? "Rankings" :
                tab === "VALUE_TRENDS" ? "Value Trends" :
-               tab === "REDRAFT" ? "Redraft Rankings" :
-               tab === "PROJECTIONS" ? "Player Projections" :
+               tab === "PROJECTIONS" ? "Projections" :
                tab === "PICK_VALUES" ? "Pick Values" :
-               "League Mate Stats"}
+               "League Mates"}
             </button>
           ))}
         </div>
       </div>
 
-      {/* ── PLAYER OWNERSHIP ── */}
-      {dataHubTab === "OWNERSHIP" && (
-        <>
-          <input
-            className="w-full p-2 mb-4 rounded bg-gray-800"
-            placeholder="Search player shares..."
-            value={shareSearch}
-            onChange={(e) => setShareSearch(e.target.value)}
-          />
-          <div className="flex gap-2 mb-4">
-            {["ALL", "QB", "RB", "WR", "TE"].map((pos) => (
-              <button
-                key={pos}
-                onClick={() => setSharePosition(pos)}
-                className={`px-3 py-1 rounded ${sharePosition === pos ? "bg-blue-600" : "bg-gray-800"}`}
-              >
-                {pos}
-              </button>
-            ))}
-          </div>
-          {Object.entries(shares)
-            .filter(([playerId]) => {
-              const p = players[playerId];
-              if (!p) return false;
-              const matchesSearch = p.full_name?.toLowerCase().includes(shareSearch.toLowerCase());
-              const matchesPosition = sharePosition === "ALL" || p.position === sharePosition;
-              return matchesSearch && matchesPosition;
-            })
-            .sort((a: any, b: any) => b[1].count - a[1].count)
-            .map(([playerId, data]: any) => {
-              const p = players[playerId];
-              if (!p) return null;
-              return (
-                <div key={playerId} className="bg-gray-800 p-3 rounded mb-3">
-                  <div className="font-medium">
-                    {p.full_name} ({data.count} shares •{" "}
-                    {Math.round((data.count / totalLeagues) * 100)}%)
-                  </div>
-                  <div className="text-xs text-gray-400 mt-1">
-                    Owned or
-                    <span className="ml-2 text-green-400">(Starting)</span>
-                    {[...data.leagues]
-                      .sort((a: string, b: string) => {
-                        const aStarter = data.starters.includes(a);
-                        const bStarter = data.starters.includes(b);
-                        if (aStarter && !bStarter) return -1;
-                        if (!aStarter && bStarter) return 1;
-                        return 0;
-                      })
-                      .map((l: string, i: number) => {
-                        const isStarter = data.starters.includes(l);
-                        return (
-                          <div key={i} className={isStarter ? "text-green-400 font-medium" : ""}>
-                            • {l} {isStarter && "🔥"}
-                          </div>
-                        );
-                      })}
-                  </div>
-                </div>
-              );
-            })}
-        </>
-      )}
-
-      {/* ── DYNASTY RANKINGS ── */}
-      {dataHubTab === "DYNASTY" && (() => {
-        const fcVal = (id: string) => calcFcValues[id] ?? (players as any)[id]?.value ?? 0;
-        const redVal = (id: string) => redraftValues[id] ?? 0;
+      {/* ── PLAYER RANKINGS ── */}
+      {dataHubTab === "RANKINGS" && (() => {
+        const fcVal = (id: string) => calcFcValues[id] ?? 0;
+        const rdVal = (id: string) => redraftValues[id] ?? 0;
         const ranked = Object.values(players as Record<string, any>)
-          .filter((p: any) => ["QB", "RB", "WR", "TE"].includes(p.position) && fcVal(p.player_id) > 0)
+          .filter((p: any) => ["QB", "RB", "WR", "TE"].includes(p.position))
+          .filter((p: any) => rankView === "REDRAFT" ? rdVal(p.player_id) > 0 : fcVal(p.player_id) > 0)
           .filter((p: any) => dynastyRankPos === "ALL" || p.position === dynastyRankPos)
-          .sort((a: any, b: any) => fcVal(b.player_id) - fcVal(a.player_id));
+          .filter((p: any) => !rankSearch.trim() || p.full_name?.toLowerCase().includes(rankSearch.trim().toLowerCase()))
+          .sort((a: any, b: any) => rankView === "REDRAFT"
+            ? rdVal(b.player_id) - rdVal(a.player_id)
+            : fcVal(b.player_id) - fcVal(a.player_id));
 
         return (
           <>
-            {loadingCalcValues && <p className="text-sm text-blue-400 mb-4">Loading values…</p>}
+            {(loadingCalcValues || loadingRedraft) && <p className="text-sm text-blue-400 mb-4">Loading values…</p>}
             {/* Pos filter + view toggle */}
             <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
               <div className="flex gap-2">
@@ -320,17 +299,24 @@ export default function DataHub({
                 ))}
               </div>
               <div className="flex bg-gray-800 rounded-lg p-0.5 gap-0.5">
-                {(["DYNASTY", "COMPARE"] as const).map((v) => (
+                {(["DYNASTY", "REDRAFT", "COMPARE"] as const).map((v) => (
                   <button
                     key={v}
                     onClick={() => setRankView(v)}
                     className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition ${rankView === v ? "bg-blue-600 text-white" : "text-gray-400 hover:text-white"}`}
                   >
-                    {v === "DYNASTY" ? "Dynasty" : "Compare ↔ Redraft"}
+                    {v === "DYNASTY" ? "Dynasty" : v === "REDRAFT" ? "Redraft" : "Compare"}
                   </button>
                 ))}
               </div>
             </div>
+            {/* Player search */}
+            <input
+              className="w-full p-2 mb-3 rounded bg-gray-800 text-sm placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              placeholder="Search player…"
+              value={rankSearch}
+              onChange={(e) => setRankSearch(e.target.value)}
+            />
             {/* Column headers */}
             <div className="flex items-center gap-2 px-2 mb-1">
               <span className="w-5 shrink-0" />
@@ -354,8 +340,9 @@ export default function DataHub({
               {ranked.map((p: any, idx: number) => {
                 const disp = playerDispositions[p.player_id] ?? { sell: "Neutral", buy: "Neutral" };
                 const dyn = fcVal(p.player_id);
-                const red = redVal(p.player_id);
+                const red = rdVal(p.player_id);
                 const gap = dyn - red;
+                const displayVal = rankView === "REDRAFT" ? red : dyn;
                 return (
                   <div key={p.player_id} className="flex items-center gap-2 bg-gray-800/70 hover:bg-gray-800 rounded-lg px-2 py-1.5 transition">
                     <span className="text-[10px] text-gray-600 w-5 text-right shrink-0">{idx + 1}</span>
@@ -373,7 +360,7 @@ export default function DataHub({
                         </span>
                       </>
                     ) : (
-                      <span className="text-[10px] text-gray-400 font-mono w-14 text-right shrink-0">{dyn.toLocaleString()}</span>
+                      <span className="text-[10px] text-gray-400 font-mono w-14 text-right shrink-0">{displayVal.toLocaleString()}</span>
                     )}
                     <select
                       value={disp.sell}
@@ -401,7 +388,7 @@ export default function DataHub({
                   </div>
                 );
               })}
-              {ranked.length === 0 && !loadingCalcValues && (
+              {ranked.length === 0 && !loadingCalcValues && !loadingRedraft && (
                 <p className="text-gray-400 text-sm">No data yet. Select a league to load values.</p>
               )}
             </div>
@@ -817,88 +804,13 @@ export default function DataHub({
         );
       })()}
 
-      {/* ── REDRAFT RANKINGS ── */}
-      {dataHubTab === "REDRAFT" && (() => {
-        const ranked = Object.values(players as Record<string, any>)
-          .filter((p: any) => ["QB", "RB", "WR", "TE"].includes(p.position) && (redraftValues[p.player_id] ?? 0) > 0)
-          .filter((p: any) => redraftRankPos === "ALL" || p.position === redraftRankPos)
-          .sort((a: any, b: any) => (redraftValues[b.player_id] ?? 0) - (redraftValues[a.player_id] ?? 0));
-
-        return (
-          <>
-            {loadingRedraft && <p className="text-sm text-blue-400 mb-4">Loading values…</p>}
-            <div className="flex gap-2 mb-3">
-              {["ALL", "QB", "RB", "WR", "TE"].map((pos) => (
-                <button
-                  key={pos}
-                  onClick={() => setRedraftRankPos(pos)}
-                  className={`px-3 py-1 rounded text-sm font-medium transition ${redraftRankPos === pos ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:text-white"}`}
-                >
-                  {pos}
-                </button>
-              ))}
-            </div>
-            <div className="flex items-center gap-2 px-2 mb-1">
-              <span className="w-5 shrink-0" />
-              <span className="w-6 shrink-0" />
-              <span className="flex-1 text-[10px] text-gray-600 uppercase tracking-wider">Player</span>
-              <span className="w-7 text-center text-[10px] text-gray-600 uppercase tracking-wider shrink-0">Age</span>
-              <span className="w-14 text-right text-[10px] text-gray-600 uppercase tracking-wider shrink-0">Value</span>
-              <span className="w-20 text-center text-[10px] text-gray-600 uppercase tracking-wider shrink-0">Sell</span>
-              <span className="w-20 text-center text-[10px] text-gray-600 uppercase tracking-wider shrink-0">Buy</span>
-              <span className="w-4 shrink-0" />
-            </div>
-            <div className="space-y-0.5">
-              {ranked.map((p: any, idx: number) => {
-                const disp = playerDispositions[p.player_id] ?? { sell: "Neutral", buy: "Neutral" };
-                return (
-                  <div key={p.player_id} className="flex items-center gap-2 bg-gray-800/70 hover:bg-gray-800 rounded-lg px-2 py-1.5 transition">
-                    <span className="text-[10px] text-gray-600 w-5 text-right shrink-0">{idx + 1}</span>
-                    <span className={`text-[10px] font-bold w-6 shrink-0 ${POS_COLOR[p.position] ?? "text-gray-400"}`}>{p.position}</span>
-                    <span className="text-xs text-white flex-1 truncate min-w-0 flex items-center gap-1">
-                      {p.full_name}{injuryBadge(p.injury_status)}
-                    </span>
-                    <span className={`text-[10px] font-mono w-7 text-center shrink-0 ${ageColor(p.age, p.position)}`}>{p.age || "—"}</span>
-                    <span className="text-[10px] text-gray-400 font-mono w-14 text-right shrink-0">{(redraftValues[p.player_id] ?? 0).toLocaleString()}</span>
-                    <select
-                      value={disp.sell}
-                      onChange={(e) => savePlayerDisposition(p.player_id, e.target.value, disp.buy)}
-                      className={`w-20 bg-gray-900 border border-gray-700 rounded px-1 py-0.5 text-[10px] shrink-0 focus:outline-none focus:border-blue-500 ${sellColor(disp.sell)}`}
-                    >
-                      <option value="Not Willing to Trade">No Trade</option>
-                      <option value="Will Trade but Higher than Market">↑ Price</option>
-                      <option value="Neutral">Neutral</option>
-                      <option value="Lower than Market">↓ Price</option>
-                      <option value="Trade at All Costs">Must Go</option>
-                    </select>
-                    <select
-                      value={disp.buy}
-                      onChange={(e) => savePlayerDisposition(p.player_id, disp.sell, e.target.value)}
-                      className={`w-20 bg-gray-900 border border-gray-700 rounded px-1 py-0.5 text-[10px] shrink-0 focus:outline-none focus:border-blue-500 ${buyColor(disp.buy)}`}
-                    >
-                      <option value="Buy Over Market">Pay Up</option>
-                      <option value="Buy at Market">At Mkt</option>
-                      <option value="Neutral">Neutral</option>
-                      <option value="Buy Low">Buy Low</option>
-                      <option value="Zero Interest">Skip</option>
-                    </select>
-                    <button onClick={() => setPlayerProfileId(p.player_id)} className="text-gray-600 hover:text-blue-400 text-xs transition shrink-0 w-4" title="View profile">ⓘ</button>
-                  </div>
-                );
-              })}
-              {ranked.length === 0 && !loadingRedraft && (
-                <p className="text-gray-400 text-sm">No redraft data available.</p>
-              )}
-            </div>
-          </>
-        );
-      })()}
-
       {/* ── PLAYER PROJECTIONS ── */}
       {dataHubTab === "PROJECTIONS" && (() => {
-        const visible = projectionData.filter(
-          (p) => projectionPosFilter === "ALL" || p.position === projectionPosFilter
-        );
+        const myRoster = (rosters as any[]).find((r: any) => r.owner_id === user?.user_id);
+        const myPlayerSet = new Set<string>(myRoster?.players ?? []);
+        const visible = projectionData
+          .filter((p) => projectionPosFilter === "ALL" || p.position === projectionPosFilter)
+          .filter((p) => !projRosterOnly || myPlayerSet.has(p.sleeperId));
 
         return (
           <>
@@ -941,6 +853,14 @@ export default function DataHub({
                 ))}
               </div>
 
+              <button
+                onClick={() => setProjRosterOnly((v) => !v)}
+                disabled={!myRoster}
+                className={`text-xs font-semibold border rounded-lg px-3 py-1.5 transition disabled:opacity-40 ${projRosterOnly ? "bg-blue-600 border-blue-500 text-white" : "border-gray-700 text-gray-400 hover:text-white hover:border-gray-500"}`}
+                title={myRoster ? "Toggle to show only your rostered players" : "Load a league to use this filter"}
+              >
+                My Roster
+              </button>
               <button
                 onClick={() => {
                   setProjectionLoaded(false);
@@ -1011,8 +931,91 @@ export default function DataHub({
 
       {/* ── PICK VALUES ── */}
       {dataHubTab === "PICK_VALUES" && (() => {
+        const CrossLeagueSection = () => (
+          <div className="mt-6 border-t border-gray-800 pt-5">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-bold text-white">My Picks Across All Leagues</h3>
+              {!crossLeaguePicksLoaded ? (
+                <button
+                  onClick={loadCrossLeaguePicks}
+                  disabled={loadingCrossLeaguePicks || !user || !leagues.length}
+                  className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded transition"
+                >
+                  {loadingCrossLeaguePicks ? "Loading…" : "Load"}
+                </button>
+              ) : (
+                <button
+                  onClick={loadCrossLeaguePicks}
+                  disabled={loadingCrossLeaguePicks}
+                  className="px-3 py-1.5 text-xs bg-gray-700 hover:bg-gray-600 disabled:opacity-50 rounded transition"
+                >
+                  {loadingCrossLeaguePicks ? "Refreshing…" : "Refresh"}
+                </button>
+              )}
+            </div>
+            {!crossLeaguePicksLoaded && !loadingCrossLeaguePicks && (
+              <p className="text-sm text-gray-500">Load to see all draft picks you own across every league.</p>
+            )}
+            {loadingCrossLeaguePicks && <p className="text-sm text-blue-400">Fetching picks from all leagues…</p>}
+            {crossLeaguePicksLoaded && (
+              crossLeaguePicks.length === 0 ? (
+                <p className="text-sm text-gray-500">No future picks found across your leagues.</p>
+              ) : (
+                <div className="space-y-3">
+                  {crossLeaguePicks.map((entry: any) => (
+                    <div key={entry.leagueName} className="rounded-xl border border-gray-800 bg-gray-900/60 p-3">
+                      <div className="text-xs font-semibold text-gray-300 mb-2">{entry.leagueName}</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {[...entry.picks]
+                          .sort((a: any, b: any) => a.season !== b.season ? a.season - b.season : a.round - b.round)
+                          .map((pick: any, i: number) => (
+                            <span key={i} className="text-[10px] font-semibold px-2 py-1 rounded-lg bg-blue-900/30 border border-blue-800/50 text-blue-300">
+                              {pick.season} R{pick.round}
+                            </span>
+                          ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )
+            )}
+          </div>
+        );
+
         if (!selectedLeague || !rosters.length) {
-          return <p className="text-sm text-gray-500">Select a league first so pick value ranges can be tied to projected finish.</p>;
+          return (
+            <>
+              <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4 mb-4">
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-1">Pick Value Benchmarks</div>
+                <p className="text-xs text-gray-400 mb-3">Approximate dynasty (SF) consensus values. Load a league for dynamic pick values tied to actual standings and playoff odds.</p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm border-collapse">
+                    <thead>
+                      <tr className="border-b border-gray-800">
+                        <th className="text-left py-1.5 px-2 text-[10px] text-gray-500 uppercase tracking-wider">Round</th>
+                        {PICK_YEARS.map((year) => (
+                          <th key={year} className="text-right py-1.5 px-2 text-[10px] text-gray-500 uppercase tracking-wider">{year}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {PICK_ROUNDS.map((round) => (
+                        <tr key={round} className="border-b border-gray-800/50">
+                          <td className="py-1.5 px-2 text-xs font-semibold text-white">Round {round}</td>
+                          {PICK_YEARS.map((_, yi) => (
+                            <td key={yi} className="py-1.5 px-2 text-right text-xs text-gray-400 font-mono">
+                              {(STANDARD_PICK_VALUES[`${round}-${yi}`] ?? 0).toLocaleString()}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <CrossLeagueSection />
+            </>
+          );
         }
 
         const pickRows = (allPicks as any[])
@@ -1103,6 +1106,7 @@ export default function DataHub({
                 );
               })}
             </div>
+            <CrossLeagueSection />
           </div>
         );
       })()}

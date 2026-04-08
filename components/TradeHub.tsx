@@ -6,6 +6,7 @@ import {
   average,
   sum,
   CURRENT_YEAR,
+  formatRelativeDate,
 } from "../lib/helpers";
 
 const BASE_YEAR_TH = new Date().getFullYear();
@@ -14,8 +15,8 @@ const YEARS = Array.from({ length: 3 }, (_, index) => String(BASE_YEAR_TH + inde
 // ── Props ──────────────────────────────────────────────────────────────────
 interface TradeHubProps {
   // Tab state
-  tradeHubSection: "CALCULATOR" | "FINDER" | "RECOMMENDATIONS";
-  setTradeHubSection: (section: "CALCULATOR" | "FINDER" | "RECOMMENDATIONS") => void;
+  tradeHubSection: "CALCULATOR" | "FINDER" | "RECOMMENDATIONS" | "TRADE_LOG";
+  setTradeHubSection: (section: "CALCULATOR" | "FINDER" | "RECOMMENDATIONS" | "TRADE_LOG") => void;
 
   // League / roster state
   leagues: any[];
@@ -87,6 +88,11 @@ interface TradeHubProps {
 
   // Value trends
   historicalSnapshot: { players: Record<string, any>; recorded_at: string } | null;
+
+  // Trade log
+  tradeHubData: any[] | null;
+  loadingTradeHub: boolean;
+  tradeHubUserId: string | null;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
@@ -110,6 +116,7 @@ export default function TradeHub({
   tradeRecommendationCards, tradePartnerRankings,
   setPlayerProfileId, loadUserExposure, loadUserTrades,
   historicalSnapshot,
+  tradeHubData, loadingTradeHub, tradeHubUserId,
 }: TradeHubProps) {
   return (
     <>
@@ -147,6 +154,21 @@ export default function TradeHub({
         }`}
       >
         Recommendations
+      </button>
+      <button
+        onClick={() => {
+          if (user?.user_id && tradeHubUserId !== user.user_id) {
+            loadUserTrades(user.user_id);
+          }
+          setTradeHubSection("TRADE_LOG");
+        }}
+        className={`pb-2 px-1 text-sm font-semibold transition ${
+          tradeHubSection === "TRADE_LOG"
+            ? "border-b-2 border-blue-400 text-blue-400"
+            : "text-gray-400 hover:text-white"
+        }`}
+      >
+        Trade Log
       </button>
       </div>
     </div>
@@ -533,6 +555,60 @@ export default function TradeHub({
               </div>
             )}
           </div>
+
+          {/* Position Health Panel */}
+          {(calcGive.length > 0 || calcReceive.length > 0) && (() => {
+            const calcPosTotals = (playerIds: string[]) => {
+              const t: Record<string, number> = { QB: 0, RB: 0, WR: 0, TE: 0 };
+              playerIds.forEach((id) => {
+                const p = (players as any)[id];
+                if (p && ["QB","RB","WR","TE"].includes(p.position)) {
+                  t[p.position] = (t[p.position] || 0) + calcVal(id);
+                }
+              });
+              return t;
+            };
+            const allTeamsCalcPos = rosters.map((r: any) => calcPosTotals(r.players || []));
+            const calcLeagueRank = (pos: string, total: number) => {
+              const sorted = allTeamsCalcPos.map((t) => t[pos] || 0).sort((a, b) => b - a);
+              let rank = 1;
+              for (const t of sorted) { if (total >= t) break; rank++; }
+              return Math.min(rank, rosters.length);
+            };
+            const preT = calcPosTotals(myRoster?.players || []);
+            const postT = { ...preT };
+            calcGive.forEach((id) => {
+              const p = (players as any)[id];
+              if (p && postT[p.position] !== undefined) postT[p.position] = Math.max(0, postT[p.position] - calcVal(id));
+            });
+            calcReceive.forEach((id) => {
+              const p = (players as any)[id];
+              if (p && postT[p.position] !== undefined) postT[p.position] = (postT[p.position] || 0) + calcVal(id);
+            });
+            const positions = ["QB", "RB", "WR", "TE"] as const;
+            return (
+              <div className="mt-4 bg-gray-900 border border-gray-800 rounded-2xl p-4">
+                <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-3">Position Health</h3>
+                <div className="grid grid-cols-4 gap-2">
+                  {positions.map((pos) => {
+                    const preRank = calcLeagueRank(pos, preT[pos]);
+                    const postRank = calcLeagueRank(pos, postT[pos]);
+                    const delta = preRank - postRank;
+                    const color = delta > 0 ? "text-green-400" : delta < 0 ? "text-red-400" : "text-gray-500";
+                    return (
+                      <div key={pos} className="bg-gray-800 rounded-xl p-3 text-center">
+                        <div className="text-[10px] font-bold uppercase tracking-widest text-gray-500 mb-1">{pos}</div>
+                        <div className="text-sm font-bold text-white">#{postRank}</div>
+                        <div className={`text-[10px] mt-0.5 ${color}`}>
+                          {delta > 0 ? `▲${delta}` : delta < 0 ? `▼${Math.abs(delta)}` : "—"} from #{preRank}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Trade Equalizer */}
           {verdict !== "EVEN" &&
@@ -1379,6 +1455,7 @@ export default function TradeHub({
 
         if (draftCapitalMode) {
           for (const mp of myTop) {
+            if (isBlockedSellDisposition(mp.player_id)) continue;
             for (const pick of oppPicks) {
               if (!isBalanced([mp.value], [pick.value])) continue;
               if (!qbSafe([mp])) continue;
@@ -1391,6 +1468,7 @@ export default function TradeHub({
           }
 
           for (const mp of myTop) {
+            if (isBlockedSellDisposition(mp.player_id)) continue;
             for (let i = 0; i < oppPicks.length; i++) {
               for (let j = i + 1; j < oppPicks.length; j++) {
                 const p1 = oppPicks[i], p2 = oppPicks[j];
@@ -1409,6 +1487,7 @@ export default function TradeHub({
           for (let i = 0; i < Math.min(myTop.length, 8); i++) {
             for (let j = i + 1; j < Math.min(myTop.length, 8); j++) {
               const mp1 = myTop[i], mp2 = myTop[j];
+              if (isBlockedSellDisposition(mp1.player_id) || isBlockedSellDisposition(mp2.player_id)) continue;
               if (!packageOk([mp1, mp2])) continue;
               if (!qbSafe([mp1, mp2])) continue;
               if (!oppReceiveOk(oppPlayers, [mp1, mp2], [])) continue;
@@ -2163,6 +2242,37 @@ export default function TradeHub({
           {top15.map((trade: TradeResult, idx: number) => {
             const partnerProfile = leagueMateProfileByRosterId.get(Number(trade.oppRosterId));
             const tradeIntent = getTradeIntent(trade);
+
+            // Score breakdown for Trade Reasoning expander
+            const scoreFactors = (() => {
+              const out = trade.give || [];
+              const inc = trade.receive || [];
+              const outPicks = trade.givePicks || [];
+              const incPicks = trade.receivePicks || [];
+              const factors: { label: string; positive: boolean }[] = [];
+              const oldSells = out.filter((p: any) => isOldProducerBuy(p)).length;
+              const oldBuys = inc.filter((p: any) => isOldProducerBuy(p)).length;
+              const agingSells = out.filter((p: any) => isAgingAsset(p)).length;
+              const youngBuys = inc.filter((p: any) => isYoungBuildingBlock(p)).length;
+              const insulBuys = inc.filter((p: any) => isFutureInsulationAsset(p)).length;
+              const futureFirstsIn = incPicks.filter((p: any) => Number(p.round) === 1 && String(p.season) !== CURRENT_YEAR).length;
+              const weakAdds = inc.filter((p: any) => weakPositions.has(p.position)).length;
+              const weakLosses = out.filter((p: any) => weakPositions.has(p.position)).length;
+              const premPicksOut = outPicks.filter((p: any) => isPremiumCurrentPick(p)).length;
+              if (oldSells > 0) factors.push({ label: `Selling aging ${oldSells > 1 ? "veterans" : "vet"}`, positive: true });
+              if (oldBuys > 0) factors.push({ label: `Buying aging ${oldBuys > 1 ? "veterans" : "vet"}`, positive: ["Elite","True Contender","Almost There"].includes(finderDirection) && !iAmTankingFinder });
+              if (agingSells > 0 && oldSells === 0) factors.push({ label: "Trading aging asset", positive: true });
+              if (youngBuys > 0) factors.push({ label: "Young core incoming", positive: true });
+              if (insulBuys > 0 && youngBuys === 0) factors.push({ label: "Insulation asset incoming", positive: true });
+              if (futureFirstsIn > 0) factors.push({ label: `${futureFirstsIn} future 1st${futureFirstsIn > 1 ? "s" : ""} incoming`, positive: true });
+              if (weakAdds > 0) factors.push({ label: `Patching weak ${weakAdds > 1 ? "positions" : "position"}`, positive: !iAmTankingFinder });
+              if (weakLosses > 0) factors.push({ label: "Weakening a thin position", positive: false });
+              if (premPicksOut > 0) factors.push({ label: `Selling premium pick`, positive: iAmTankingFinder });
+              if (outPicks.length > 0 && incPicks.length === 0 && !iAmTankingFinder) factors.push({ label: "Giving up draft capital", positive: false });
+              if (incPicks.length > 0 && iAmTankingFinder) factors.push({ label: "Accumulating picks", positive: true });
+              if (partnerProfile?.fitLabel) factors.push({ label: `Partner fit: ${partnerProfile.fitLabel}`, positive: partnerProfile.fitScore > 0 });
+              return factors.slice(0, 5);
+            })();
             const giveVals = [...trade.give.map((p: any) => p.value), ...trade.givePicks.map((p: any) => p.value)];
             const receiveVals = [...trade.receive.map((p: any) => p.value), ...trade.receivePicks.map((p: any) => p.value)];
             const giveTotal = giveVals.reduce((s: number, v: number) => s + v, 0);
@@ -2292,6 +2402,30 @@ export default function TradeHub({
                     </div>
                   </div>
                 </div>
+                {/* Trade Reasoning expander */}
+                {scoreFactors.length > 0 && (
+                  <details className="mt-3 group">
+                    <summary className="cursor-pointer text-[11px] text-gray-500 hover:text-gray-300 transition list-none flex items-center gap-1 select-none">
+                      <span className="group-open:rotate-90 inline-block transition-transform">▶</span>
+                      Why this trade?
+                    </summary>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {scoreFactors.map((f) => (
+                        <span
+                          key={f.label}
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-medium border ${
+                            f.positive
+                              ? "border-green-800 bg-green-950/30 text-green-300"
+                              : "border-red-800 bg-red-950/30 text-red-300"
+                          }`}
+                        >
+                          {f.positive ? "+" : "−"} {f.label}
+                        </span>
+                      ))}
+                    </div>
+                  </details>
+                )}
+
                 {/* Send to Calculator */}
                 <button
                   onClick={() => {
@@ -2479,6 +2613,74 @@ export default function TradeHub({
             </div>
           </div>
 
+          {/* ── Value Movers panel ── */}
+          {historicalSnapshot && (() => {
+            const myRosterSnap = rosters.find((r: any) => r.owner_id === user?.user_id);
+            const myIds: string[] = myRosterSnap?.players ?? [];
+            const movers = myIds
+              .map((id) => {
+                const sv = Number(historicalSnapshot.players[id]?.value ?? 0);
+                const cv = calcFcValues[id] ?? 0;
+                if (sv <= 0 || cv <= 0) return null;
+                const pct = ((cv - sv) / sv) * 100;
+                const p = (players as any)[id];
+                return p ? { id, name: p.full_name, position: p.position, pct, cv } : null;
+              })
+              .filter((x): x is NonNullable<typeof x> => x !== null && Math.abs(x.pct) >= 5)
+              .sort((a, b) => b.pct - a.pct);
+            if (movers.length === 0) return null;
+            const risers = movers.filter((m) => m.pct >= 5);
+            const fallers = movers.filter((m) => m.pct <= -5);
+            return (
+              <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Value Movers — Your Roster</div>
+                <div className="mt-1 text-xs text-gray-500">
+                  Players on your roster that have moved ≥5% since your last snapshot ({new Date(historicalSnapshot.recorded_at).toLocaleDateString()}).
+                </div>
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  {risers.length > 0 && (
+                    <div>
+                      <div className="text-[10px] font-bold uppercase tracking-widest text-green-400 mb-2">Risers — Buy Window</div>
+                      <div className="space-y-1">
+                        {risers.slice(0, 5).map((m) => (
+                          <div key={m.id} className="flex items-center justify-between rounded-lg bg-gray-800 px-3 py-2">
+                            <div className="min-w-0">
+                              <span className="text-sm text-white truncate">{m.name}</span>
+                              <span className="ml-2 text-[10px] text-gray-500 uppercase">{m.position}</span>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className="text-xs font-mono text-gray-400">{m.cv.toLocaleString()}</span>
+                              <span className="text-xs font-semibold text-green-400">+{m.pct.toFixed(1)}%</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {fallers.length > 0 && (
+                    <div>
+                      <div className="text-[10px] font-bold uppercase tracking-widest text-red-400 mb-2">Fallers — Sell Window</div>
+                      <div className="space-y-1">
+                        {fallers.slice(-5).reverse().map((m) => (
+                          <div key={m.id} className="flex items-center justify-between rounded-lg bg-gray-800 px-3 py-2">
+                            <div className="min-w-0">
+                              <span className="text-sm text-white truncate">{m.name}</span>
+                              <span className="ml-2 text-[10px] text-gray-500 uppercase">{m.position}</span>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className="text-xs font-mono text-gray-400">{m.cv.toLocaleString()}</span>
+                              <span className="text-xs font-semibold text-red-400">{m.pct.toFixed(1)}%</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
           {/* ── Trend-based trade suggestions ── */}
           {(sellTrades.length > 0 || buyTrades.length > 0) && (
             <>
@@ -2629,6 +2831,135 @@ export default function TradeHub({
               </div>
             </div>
           ))}
+        </div>
+      );
+    })()}
+
+    {/* ── Trade Log ── */}
+    {tradeHubSection === "TRADE_LOG" && (() => {
+      const logPickLabel = (p: any) => {
+        if (String(p.season) === CURRENT_YEAR) {
+          const match = (allPicks as any[]).find(
+            (ap) =>
+              String(ap.season) === String(p.season) &&
+              Number(ap.round) === Number(p.round) &&
+              Number(ap.roster_id) === Number(p.roster_id)
+          );
+          if (match?.slot?.includes(".")) return `${p.season} ${match.slot}`;
+        }
+        return `${p.season} Rd ${p.round}`;
+      };
+
+      return (
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Your Trade Log</div>
+            <div className="mt-1 text-sm text-gray-200">
+              Your trades from the past 30 days across all dynasty leagues.
+            </div>
+          </div>
+
+          {loadingTradeHub && (
+            <p className="text-sm text-gray-400">Loading your trades…</p>
+          )}
+
+          {!loadingTradeHub && tradeHubUserId === user?.user_id && tradeHubData && tradeHubData.length === 0 && (
+            <p className="text-sm text-gray-400">No trades found in the past 30 days.</p>
+          )}
+
+          {!loadingTradeHub && (!tradeHubData || tradeHubUserId !== user?.user_id) && !loadingTradeHub && (
+            <button
+              onClick={() => { if (user?.user_id) loadUserTrades(user.user_id); }}
+              className="w-full rounded-xl border border-blue-700 bg-blue-950/30 py-3 text-sm font-medium text-blue-300 hover:border-blue-500 transition"
+            >
+              Load My Trades
+            </button>
+          )}
+
+          {!loadingTradeHub && tradeHubUserId === user?.user_id && (tradeHubData ?? []).map((trade: any, i: number) => {
+            const myRosterId = trade.myRosterId;
+
+            const received = Object.entries(trade.adds || {})
+              .filter(([, rid]) => rid === myRosterId)
+              .map(([pid]) => {
+                const p = (players as any)[pid];
+                return { name: p?.full_name || "Unknown", pos: p?.position || "", val: calcFcValues[pid] ?? 0 };
+              });
+
+            const given = Object.entries(trade.adds || {})
+              .filter(([, rid]) => rid !== myRosterId)
+              .map(([pid]) => {
+                const p = (players as any)[pid];
+                return { name: p?.full_name || "Unknown", pos: p?.position || "", val: calcFcValues[pid] ?? 0 };
+              });
+
+            const logPickVal = (p: any) =>
+              selectedLeagueDynamicPickValues[`${p.season}-${p.round}-${p.roster_id}`]?.expectedValue
+              ?? getStoredPickValue(pickFcValues, p);
+
+            const picksReceived = (trade.draft_picks || [])
+              .filter((p: any) => p.owner_id === myRosterId)
+              .map((p: any) => ({ name: logPickLabel(p), pos: "PICK", val: logPickVal(p) }));
+
+            const picksGiven = (trade.draft_picks || [])
+              .filter((p: any) => p.previous_owner_id === myRosterId)
+              .map((p: any) => ({ name: logPickLabel(p), pos: "PICK", val: logPickVal(p) }));
+
+            const allReceived = [...received, ...picksReceived];
+            const allGiven = [...given, ...picksGiven];
+
+            const giveTotal = allGiven.reduce((s, x) => s + x.val, 0);
+            const recvTotal = allReceived.reduce((s, x) => s + x.val, 0);
+            const net = recvTotal - giveTotal;
+
+            return (
+              <div key={i} className="rounded-2xl border border-gray-800 bg-gray-900 p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-semibold text-blue-400 uppercase tracking-wide">{trade.leagueName}</span>
+                  <div className="flex items-center gap-2">
+                    {giveTotal > 0 && recvTotal > 0 && (
+                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${Math.abs(net) <= 300 ? "bg-yellow-900 text-yellow-300" : net > 0 ? "bg-green-900 text-green-300" : "bg-red-900 text-red-300"}`}>
+                        {Math.abs(net) <= 300 ? "EVEN" : net > 0 ? `+${net.toLocaleString()}` : `${net.toLocaleString()}`}
+                      </span>
+                    )}
+                    <span className="text-xs text-gray-500">{formatRelativeDate(trade.created)}</span>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <div className="text-[10px] font-bold uppercase tracking-widest text-red-400 mb-1.5">You Gave</div>
+                    <div className="space-y-1">
+                      {allGiven.map((item, j) => (
+                        <div key={j} className="flex items-center justify-between rounded-lg bg-gray-800 px-2 py-1.5">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-xs text-white truncate">{item.name}</span>
+                            <span className="text-[10px] text-gray-500 shrink-0 uppercase">{item.pos}</span>
+                          </div>
+                          {item.val > 0 && <span className="text-[10px] font-mono text-gray-400 shrink-0 ml-1">{item.val.toLocaleString()}</span>}
+                        </div>
+                      ))}
+                      {allGiven.length === 0 && <p className="text-xs text-gray-600">—</p>}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-bold uppercase tracking-widest text-green-400 mb-1.5">You Received</div>
+                    <div className="space-y-1">
+                      {allReceived.map((item, j) => (
+                        <div key={j} className="flex items-center justify-between rounded-lg bg-gray-800 px-2 py-1.5">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-xs text-white truncate">{item.name}</span>
+                            <span className="text-[10px] text-gray-500 shrink-0 uppercase">{item.pos}</span>
+                          </div>
+                          {item.val > 0 && <span className="text-[10px] font-mono text-gray-400 shrink-0 ml-1">{item.val.toLocaleString()}</span>}
+                        </div>
+                      ))}
+                      {allReceived.length === 0 && <p className="text-xs text-gray-600">—</p>}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       );
     })()}

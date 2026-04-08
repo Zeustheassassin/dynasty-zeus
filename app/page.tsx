@@ -76,7 +76,7 @@ const [selectedLeagueDraftHasOccurred, setSelectedLeagueDraftHasOccurred] = useS
 const [tradeHubUserId, setTradeHubUserId] = useState<string | null>(null);
 const [tradeHubData, setTradeHubData] = useState<any[] | null>(null);
 const [loadingTradeHub, setLoadingTradeHub] = useState(false);
-const [tradeHubSection, setTradeHubSection] = useState<"CALCULATOR" | "FINDER" | "RECOMMENDATIONS">("CALCULATOR");
+const [tradeHubSection, setTradeHubSection] = useState<"CALCULATOR" | "FINDER" | "RECOMMENDATIONS" | "TRADE_LOG">("CALCULATOR");
 const [finderSeed, setFinderSeed] = useState(() => Math.random());
 const [finderDraftCapitalMode, setFinderDraftCapitalMode] = useState(false);
 const [leagueHubTab, setLeagueHubTab] = useState<LeagueHubTab>("OVERVIEW");
@@ -120,7 +120,7 @@ const [activityTransactions, setActivityTransactions] = useState<any[]>([]);
 const [loadingActivity, setLoadingActivity] = useState(false);
 const [leagueWeeklyMatchups, setLeagueWeeklyMatchups] = useState<Record<string, any[]>>({});
 const [loadingLeagueWeeklyMatchups, setLoadingLeagueWeeklyMatchups] = useState(false);
-const [dataHubTab, setDataHubTab] = useState<"OWNERSHIP" | "DYNASTY" | "VALUE_TRENDS" | "REDRAFT" | "PROJECTIONS" | "PICK_VALUES" | "LEAGUEMATES">("OWNERSHIP");
+const [dataHubTab, setDataHubTab] = useState<"RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "PICK_VALUES" | "LEAGUEMATES">("RANKINGS");
 const [leagueMateStats, setLeagueMateStats] = useState<any[]>([]);
 const [leagueMateStatsLoaded, setLeagueMateStatsLoaded] = useState(false);
 const [loadingLeagueMateStats, setLoadingLeagueMateStats] = useState(false);
@@ -731,13 +731,13 @@ useEffect(() => {
 }, [tradeHubSection, selectedLeague?.league_id]);
 
 useEffect(() => {
-  if (mainTab === "DATA_HUB" && dataHubTab === "DYNASTY" && selectedLeague?.league_id) {
+  if (mainTab === "DATA_HUB" && dataHubTab === "RANKINGS" && selectedLeague?.league_id) {
     loadCalcValues(selectedLeague.league_id);
   }
 }, [mainTab, dataHubTab, selectedLeague?.league_id]);
 
 useEffect(() => {
-  if (mainTab === "DATA_HUB" && dataHubTab === "REDRAFT") {
+  if (mainTab === "DATA_HUB" && dataHubTab === "RANKINGS") {
     loadRedraftValues();
   }
 }, [mainTab, dataHubTab]);
@@ -4727,6 +4727,23 @@ const getTeamSummary = () => {
 
     localStorage.setItem(alertSnapshotStorageKey, JSON.stringify(nextSnapshots));
 
+    // Build a comprehensive snapshot: all QB/RB/WR/TE with calcFcValues, merged with owned-player data.
+    // This is used for Value Trends so it covers the full player universe, not just owned players.
+    const buildFullSnapshot = () => {
+      const snap: Record<string, any> = { ...nextPlayerSnapshot };
+      const calcEntries = Object.entries(calcFcValues as Record<string, number>).filter(([, v]) => v > 0);
+      if (calcEntries.length > 50) {
+        calcEntries.forEach(([playerId, value]) => {
+          const p = (players as any)?.[playerId];
+          if (!p || !["QB", "RB", "WR", "TE"].includes(p.position)) return;
+          if (!snap[playerId]) {
+            snap[playerId] = { full_name: p.full_name, value, team: p.team || "" };
+          }
+        });
+      }
+      return snap;
+    };
+
     if (!alertBootstrapRef.current) {
       alertBootstrapRef.current = true;
       // Save daily snapshot to Supabase if it's missing or > 24h old.
@@ -4736,19 +4753,42 @@ const getTeamSummary = () => {
         : Infinity;
       if (supabaseUser && snapshotAge > 24 * 60 * 60 * 1000) {
         const recordedAt = new Date().toISOString();
+        const fullSnap = buildFullSnapshot();
         supabase
           .from("player_value_snapshots")
           .upsert(
-            { user_id: supabaseUser.id, snapshot: nextPlayerSnapshot, recorded_at: recordedAt },
+            { user_id: supabaseUser.id, snapshot: fullSnap, recorded_at: recordedAt },
             { onConflict: "user_id" }
           )
           .then(() => {
-            const snap = { players: nextPlayerSnapshot, recorded_at: recordedAt };
+            const snap = { players: fullSnap, recorded_at: recordedAt };
             historicalSnapshotRef.current = snap;
             setHistoricalSnapshot(snap);
           });
       }
       return;
+    }
+
+    // Post-bootstrap: if calcFcValues just loaded and the saved snapshot is too small, expand it.
+    // This handles the case where the snapshot was taken before dynasty values were loaded.
+    if (supabaseUser) {
+      const existingCount = Object.keys(historicalSnapshotRef.current?.players ?? {}).length;
+      const calcCount = Object.values(calcFcValues as Record<string, number>).filter(v => v > 0).length;
+      if (calcCount > 100 && calcCount > existingCount + 50) {
+        const recordedAt = new Date().toISOString();
+        const fullSnap = buildFullSnapshot();
+        supabase
+          .from("player_value_snapshots")
+          .upsert(
+            { user_id: supabaseUser.id, snapshot: fullSnap, recorded_at: recordedAt },
+            { onConflict: "user_id" }
+          )
+          .then(() => {
+            const snap = { players: fullSnap, recorded_at: recordedAt };
+            historicalSnapshotRef.current = snap;
+            setHistoricalSnapshot(snap);
+          });
+      }
     }
 
     mergeDashboardAlerts(incomingAlerts);
@@ -5193,6 +5233,13 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             setProjectionLoaded={setProjectionLoaded}
             loadProjections={loadProjections}
             setPlayerProfileId={setPlayerProfileId}
+            shares={shares}
+            totalLeagues={totalLeagues}
+            shareSearch={shareSearch}
+            setShareSearch={setShareSearch}
+            sharePosition={sharePosition}
+            setSharePosition={setSharePosition}
+            players={players}
           />
         )}
 
@@ -5202,13 +5249,8 @@ const myPlayerSet = new Set<string>(roster?.players || []);
           <DataHub
             dataHubTab={dataHubTab}
             setDataHubTab={setDataHubTab}
-            shareSearch={shareSearch}
-            setShareSearch={setShareSearch}
-            sharePosition={sharePosition}
-            setSharePosition={setSharePosition}
-            shares={shares}
-            totalLeagues={totalLeagues}
             players={players}
+            shares={shares}
             calcFcValues={calcFcValues}
             dynastyRankPos={dynastyRankPos}
             setDynastyRankPos={setDynastyRankPos}
@@ -5217,8 +5259,6 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             savePlayerDisposition={savePlayerDisposition}
             setPlayerProfileId={setPlayerProfileId}
             redraftValues={redraftValues}
-            redraftRankPos={redraftRankPos}
-            setRedraftRankPos={setRedraftRankPos}
             loadingRedraft={loadingRedraft}
             projectionData={projectionData}
             setProjectionData={setProjectionData}
@@ -5357,6 +5397,9 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     loadUserExposure={loadUserExposure}
     loadUserTrades={loadUserTrades}
     historicalSnapshot={historicalSnapshot}
+    tradeHubData={tradeHubData}
+    loadingTradeHub={loadingTradeHub}
+    tradeHubUserId={tradeHubUserId}
   />
 )}
 
@@ -5500,8 +5543,8 @@ const myPlayerSet = new Set<string>(roster?.players || []);
   </div>
 )}
 
-{/* TRADE HUB MODAL */}
-{tradeHubUserId && (
+{/* TRADE HUB MODAL — opponent trades only; own trades shown inline in Trade Log tab */}
+{tradeHubUserId && tradeHubUserId !== user?.user_id && (
   <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
     <div className="bg-gray-900 p-6 rounded-xl w-[560px] max-h-[85vh] overflow-y-auto">
 

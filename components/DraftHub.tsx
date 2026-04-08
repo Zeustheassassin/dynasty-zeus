@@ -178,22 +178,45 @@ export default function DraftHub({
   const [selectedHistoryYear, setSelectedHistoryYear]         = useState("ALL");
   const [myPicksSort, setMyPicksSort] = useState<{ col: "times" | "avgPick" | "value"; dir: "asc" | "desc" }>({ col: "times", dir: "desc" });
 
-  // ── Persist tiers + notes to/from localStorage ───────────────────────────
+  // ── Load notes from localStorage on mount ────────────────────────────────
   useEffect(() => {
-    try {
-      const t = localStorage.getItem(`draftTiersV2_${ROOKIE_YEAR}`);
-      if (t) {
-        const parsed = JSON.parse(t);
-        // Remove any stale "null" key that collapsed all null-player_id players together
-        delete parsed["null"];
-        setTierLabels(parsed);
-      }
-    } catch {}
     try {
       const n = localStorage.getItem(`draftNotes_${ROOKIE_YEAR}`);
       if (n) setPlayerNotes(JSON.parse(n));
     } catch {}
   }, []);
+
+  // ── Load tiers: Supabase first (if logged in), localStorage fallback ──────
+  useEffect(() => {
+    const load = async () => {
+      if (supabaseUser) {
+        try {
+          const { data, error } = await supabase
+            .from("rookie_board_tiers")
+            .select("tiers")
+            .eq("user_id", supabaseUser.id)
+            .eq("year", ROOKIE_YEAR)
+            .single();
+          if (!error && data?.tiers && typeof data.tiers === "object") {
+            setTierLabels(data.tiers as Record<string, number>);
+            localStorage.setItem(`draftTiersV2_${ROOKIE_YEAR}`, JSON.stringify(data.tiers));
+            return;
+          }
+        } catch {}
+      }
+      // Fall back to localStorage
+      try {
+        const t = localStorage.getItem(`draftTiersV2_${ROOKIE_YEAR}`);
+        if (t) {
+          const parsed = JSON.parse(t);
+          // Remove any stale "null" key that collapsed all null-player_id players together
+          delete parsed["null"];
+          setTierLabels(parsed);
+        }
+      } catch {}
+    };
+    load();
+  }, [supabaseUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Historical draft loading ─────────────────────────────────────────────
   useEffect(() => {
@@ -270,16 +293,28 @@ export default function DraftHub({
   }, [historyData.length]); // eslint-disable-line
 
   // ── Tier helpers ─────────────────────────────────────────────────────────
+  const syncTiersToSupabase = (tiers: Record<string, number>) => {
+    if (!supabaseUser) return;
+    supabase.from("rookie_board_tiers").upsert(
+      { user_id: supabaseUser.id, year: ROOKIE_YEAR, tiers, updated_at: new Date().toISOString() },
+      { onConflict: "user_id,year" }
+    ).then(({ error }: { error: any }) => {
+      if (error) console.error("tier sync failed:", error.message);
+    });
+  };
+
   const saveTier = (playerId: string, tierNum: number) => {
     const next = { ...tierLabels, [playerId]: tierNum };
     setTierLabels(next);
     localStorage.setItem(`draftTiersV2_${ROOKIE_YEAR}`, JSON.stringify(next));
+    syncTiersToSupabase(next);
   };
   const removeTier = (playerId: string) => {
     const next = { ...tierLabels };
     delete next[playerId];
     setTierLabels(next);
     localStorage.setItem(`draftTiersV2_${ROOKIE_YEAR}`, JSON.stringify(next));
+    syncTiersToSupabase(next);
   };
 
   // ── Note helper ──────────────────────────────────────────────────────────
