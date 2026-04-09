@@ -706,6 +706,17 @@ export default function TradeHub({
       if (!selectedLeague) return (
         <p className="text-gray-400 text-sm">Select a league from the dropdown above to use the Trade Finder.</p>
       );
+      // Block the entire finder until the authoritative direction profile is ready.
+      // selectedLeagueDirectionAdjusted returns null whenever its inputs are mid-update
+      // (league switch, sim recomputing for the new league, etc.). Showing stale trades
+      // driven by the wrong direction is worse than showing a spinner.
+      if (!selectedLeagueDirectionAdjusted) return (
+        <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+          <div className="w-8 h-8 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
+          <p className="text-sm text-gray-400">Computing direction engine…</p>
+          <p className="text-xs text-gray-600">Analysing your roster, picks, and playoff simulation</p>
+        </div>
+      );
 
       const calcVal = (id: string) => calcFcValues[id] ?? (players as any)[id]?.value ?? 0;
       const finderPickKey = (p: any) => `${p.season}-${p.round}-${p.roster_id}`;
@@ -751,14 +762,16 @@ export default function TradeHub({
         }
       };
 
-      // Check if a trade is value-balanced (within ±400 after waiver adj)
+      // Check if a trade is value-balanced (within ±600 after waiver adj).
+      // ±600 gives enough room for legitimate depth swaps and minor tweaks to surface
+      // without the engine returning zero results on tight rosters.
       const isBalanced = (giveVals: number[], receiveVals: number[]) => {
         const gTotal = giveVals.reduce((s, v) => s + v, 0);
         const rTotal = receiveVals.reduce((s, v) => s + v, 0);
         const diff = giveVals.length - receiveVals.length;
         const adjG = gTotal + (diff < 0 ? tradeWaiverAdj(giveVals, receiveVals) : 0);
         const adjR = rTotal + (diff > 0 ? tradeWaiverAdj(giveVals, receiveVals) : 0);
-        return Math.abs(adjR - adjG) <= 400;
+        return Math.abs(adjR - adjG) <= 600;
       };
 
       const myRoster = rosters.find((r: any) => r.owner_id === user?.user_id);
@@ -775,7 +788,7 @@ export default function TradeHub({
             rosterPlayers(r).reduce((s: number, p: any) => s + p.value, 0) +
             (allPicks as any[])
               .filter((p: any) => p.owner_id === r.roster_id)
-              .reduce((s: number, p: any) => s + getStoredPickValue(pickFcValues, p), 0),
+              .reduce((s: number, p: any) => s + (selectedLeagueDynamicPickValues[`${p.season}-${p.round}-${p.roster_id}`]?.expectedValue ?? getStoredPickValue(pickFcValues, p)), 0),
         }))
         .sort((a, b) => b.val - a.val);
       const rosterRedVal = rosters
@@ -786,16 +799,17 @@ export default function TradeHub({
         .sort((a, b) => b.val - a.val);
       const dynRank = myRoster ? rosterDynVal.findIndex((r) => r.roster_id === myRoster.roster_id) + 1 : 0;
       const redRank = myRoster ? rosterRedVal.findIndex((r) => r.roster_id === myRoster.roster_id) + 1 : 0;
-      // Single source of truth: use the fully adjusted profile (dynasty + redraft + sim + age).
-      // This is the same profile shown in the League Hub — no divergence possible.
-      const finderDirectionProfile = selectedLeagueDirectionAdjusted ?? selectedLeagueDirection;
-      const finderDirection = finderDirectionProfile?.bucket || getLeagueDirectionBucket(dynRank, redRank).bucket;
-      const myFinderPlayoffOdds = (finderDirectionProfile as any)?.playoffOdds ??
-        (selectedLeagueSimulation?.rowByRosterId?.get(Number(myRoster?.roster_id))?.playoffOdds ?? 0);
-      // Below 50% playoff odds = tanking. Filling weak positions wins games you don't want to win —
-      // it slides your 1.02 to 1.05 with zero championship upside.
-      // iAmTankingFinder ALWAYS overrides the asset-based bucket in all scoring logic.
-      const iAmTankingFinder = myFinderPlayoffOdds < 50;
+      // Single source of truth: the fully adjusted profile (dynasty + redraft + sim + age).
+      // At this point selectedLeagueDirectionAdjusted is guaranteed non-null (loading gate above).
+      const finderDirectionProfile = selectedLeagueDirectionAdjusted;
+      const finderDirection = finderDirectionProfile.bucket;
+      // Playoff odds from the sim — null means sim hasn't run yet (offseason / first load).
+      const myFinderPlayoffOdds = (finderDirectionProfile as any).playoffOdds as number | null;
+      // iAmTankingFinder: if sim data exists use real odds; otherwise derive from the bucket
+      // so we never default to "tanking" just because the sim hasn't loaded yet.
+      const iAmTankingFinder = myFinderPlayoffOdds !== null
+        ? myFinderPlayoffOdds < 50
+        : ["Rebuilder", "Blow Up", "Hopeless"].includes(finderDirection);
       const draftCapitalMode = finderDraftCapitalMode;
       const priorityDraftYear = String(
         Number(CURRENT_YEAR) + (selectedLeagueDraftHasOccurred ? 1 : 0)
@@ -808,9 +822,10 @@ export default function TradeHub({
         orderedDraftYears.map((year, idx) => [year, idx])
       ) as Record<string, number>;
       const numTeams = rosters.length;
+      const finderPickValue = (p: any) => selectedLeagueDynamicPickValues[`${p.season}-${p.round}-${p.roster_id}`]?.expectedValue ?? getStoredPickValue(pickFcValues, p);
       const myFinderPicks = (allPicks as any[])
         .filter((p: any) => p.owner_id === myRoster?.roster_id)
-        .map((p: any) => ({ ...p, value: getStoredPickValue(pickFcValues, p) }))
+        .map((p: any) => ({ ...p, value: finderPickValue(p) }))
         .filter((p: any) => p.value > 0)
         .sort((a: any, b: any) => {
           const yearDiff = (draftYearPriority[a.season] ?? 999) - (draftYearPriority[b.season] ?? 999);
@@ -1050,13 +1065,8 @@ export default function TradeHub({
         };
       };
       const failsDirectionGuardrail = (trade: TradeResult) => {
-        const outgoingPlayers = trade.give || [];
         const incomingPlayers = trade.receive || [];
         const incomingPicks = trade.receivePicks || [];
-        const futureFirstsIn = incomingPicks.filter((p: any) => Number(p.round) === 1 && String(p.season) !== CURRENT_YEAR).length;
-        const oldProducerBuys = incomingPlayers.filter((p: any) => isOldProducerBuy(p)).length;
-        const insulationBuys = incomingPlayers.filter((p: any) => isFutureInsulationAsset(p)).length;
-        const outgoingOldProducers = outgoingPlayers.filter((p: any) => isOldProducerBuy(p)).length;
 
         // iAmTankingFinder covers ALL seller/rebuild cases regardless of bucket label.
         // A team at 0% playoff odds is a seller even if their assets say "True Contender."
@@ -1064,25 +1074,11 @@ export default function TradeHub({
         const isEffectiveContender = !iAmTankingFinder && ["Elite", "True Contender", "Almost There"].includes(finderDirection);
 
         if (isEffectiveSeller) {
-          // Never load up on aging producers without future compensation
-          if (oldProducerBuys > 0 && futureFirstsIn === 0 && insulationBuys === 0 && !trade.receivePicks.length) {
-            return true;
-          }
-          if (
-            incomingPlayers.length > 0 &&
-            incomingPlayers.every((p: any) => isOldProducerBuy(p)) &&
-            futureFirstsIn === 0 &&
-            insulationBuys === 0
-          ) {
-            return true;
-          }
-          if (oldProducerBuys > outgoingOldProducers && futureFirstsIn === 0 && insulationBuys === 0) {
-            return true;
-          }
-          // Block Pick-For-Points: never give picks to fill lineup holes.
-          // Valid pick trades only:
-          //   1. Tier-up to a true cornerstone prospect (ALL incoming players are young building blocks)
-          //   2. Excess pick relief (8+ picks owned — can't realistically roster them all)
+          // Block giving away early/mid picks in exchange for non-young players (pick-for-points).
+          // Allowed exceptions:
+          //   1. ALL incoming players are young prospects (building-block trade)
+          //   2. User has 8+ picks already (excess-pick relief)
+          //   3. All outgoing picks are Round 3+ (late picks as sweeteners are fine)
           const outgoingPicksGuard = trade.givePicks || [];
           if (outgoingPicksGuard.length > 0 && incomingPlayers.length > 0) {
             const incomingAllYoung = incomingPlayers.every((p: any) => isFutureInsulationAsset(p));
@@ -1090,7 +1086,8 @@ export default function TradeHub({
               (p: any) => Number(p.owner_id) === Number(myRoster?.roster_id)
             ).length;
             const hasExcessPicks = myTotalPickCount >= 8;
-            if (!incomingAllYoung && !hasExcessPicks) return true;
+            const allOutgoingPicksLate = outgoingPicksGuard.every((p: any) => Number(p.round) >= 3);
+            if (!incomingAllYoung && !hasExcessPicks && !allOutgoingPicksLate) return true;
           }
         }
 
@@ -1100,10 +1097,9 @@ export default function TradeHub({
 
         return false;
       };
-      // When a player is pinned, ensure they're always in the give pool even if outside top 10
+      // Full roster is the give pool — no artificial cap
       const myTopBase = myPlayers
-        .filter((p: any) => !isBlockedSellDisposition(p.player_id))
-        .slice(0, 10);
+        .filter((p: any) => !isBlockedSellDisposition(p.player_id));
       const myPinnedPlayer = finderPinnedPlayerId && !isBlockedSellDisposition(finderPinnedPlayerId)
         ? myPlayers.find((p: any) => p.player_id === finderPinnedPlayerId)
         : null;
@@ -1220,11 +1216,15 @@ export default function TradeHub({
           const limit = POS_RANK_LIMITS[pos];
           const incoming = givePlayers.filter((p: any) => p.position === pos);
           if (incoming.length === 0) continue;
+          // Skip rank constraint for low-value depth pieces — bench swaps and handcuffs
+          // should never be blocked just because they don't crack the opponent's top-N
+          const impactIncoming = incoming.filter((p: any) => p.value >= 2000);
+          if (impactIncoming.length === 0) continue;
           const oppPosAfter = oppPlayersList
             .filter((p: any) => p.position === pos && !outgoingIds.has(p.player_id))
             .concat(incoming)
             .sort((a: any, b: any) => b.value - a.value);
-          const passes = incoming.every((pl: any) => {
+          const passes = impactIncoming.every((pl: any) => {
             const rank = oppPosAfter.findIndex((p: any) => p.player_id === pl.player_id);
             return rank < limit; // 0-indexed: rank 0…limit-1 = top N
           });
@@ -1425,13 +1425,42 @@ export default function TradeHub({
         };
       };
 
+      // ── NFL depth chart map (mirrors DataHub logic) ─────────────────────────
+      // Used throughout the finder & scoring for accurate starter/handcuff detection.
+      // Sorted: explicit depth_chart_order first, dynasty value descending as fallback.
+      const nflTeamDepth = new Map<string, Record<string, any[]>>();
+      Object.values(players as Record<string, any>).forEach((p: any) => {
+        if (!p.team || !["QB","RB","WR","TE"].includes(p.position)) return;
+        if ((p.status ?? "").toLowerCase() === "retired") return;
+        if (!nflTeamDepth.has(p.team)) nflTeamDepth.set(p.team, { QB: [], RB: [], WR: [], TE: [] });
+        nflTeamDepth.get(p.team)![p.position].push({ ...p, value: calcVal(p.player_id) });
+      });
+      nflTeamDepth.forEach((posMap) => {
+        Object.keys(posMap).forEach((pos) => {
+          posMap[pos].sort((a: any, b: any) => {
+            const oa = a.depth_chart_order ?? null;
+            const ob = b.depth_chart_order ?? null;
+            if (oa !== null && ob !== null) return oa - ob;
+            if (oa !== null) return -1;
+            if (ob !== null) return 1;
+            return b.value - a.value; // higher dynasty value = likely higher on depth chart
+          });
+        });
+      });
+      // Returns sorted depth index for a player (0=starter, 1=primary HC, 2=secondary HC…)
+      const getNFLDepthIdx = (team: string, pos: string, playerId: string): number | null => {
+        const group = nflTeamDepth.get(team)?.[pos] ?? [];
+        const idx = group.findIndex((p: any) => p.player_id === playerId);
+        return idx >= 0 ? idx : null;
+      };
+
       const results: TradeResult[] = [];
 
       for (const oppRoster of rosters.filter((r: any) => r.owner_id !== user?.user_id && (finderTargetOppRosterId === null || r.roster_id === finderTargetOppRosterId))) {
         const oppPlayers = rosterPlayers(oppRoster);
         const oppPicks = (allPicks as any[])
           .filter((p: any) => p.owner_id === oppRoster.roster_id)
-          .map((p: any) => ({ ...p, value: getStoredPickValue(pickFcValues, p) }))
+          .map((p: any) => ({ ...p, value: finderPickValue(p) }))
           .filter((p: any) => p.value > 0)
           .sort((a: any, b: any) => {
             const yearDiff = (draftYearPriority[a.season] ?? 999) - (draftYearPriority[b.season] ?? 999);
@@ -1441,11 +1470,10 @@ export default function TradeHub({
           })
           .slice(0, 8);
 
-        // Ensure target player (if on this roster) is always in the pool even if ranked 11+
+        // Full opponent roster is the receive pool — no artificial cap
         // Also exclude "Zero Interest" buy-disposition players unless explicitly targeted
         const oppTopBase = oppPlayers
-          .filter((p: any) => !isBlockedBuyDisposition(p.player_id))
-          .slice(0, 10);
+          .filter((p: any) => !isBlockedBuyDisposition(p.player_id));
         const targetPinnedOppPlayer = finderTargetPlayerId && !isBlockedBuyDisposition(finderTargetPlayerId)
           ? oppPlayers.find((p: any) => p.player_id === finderTargetPlayerId)
           : null;
@@ -1485,8 +1513,8 @@ export default function TradeHub({
             }
           }
 
-          for (let i = 0; i < Math.min(myTop.length, 8); i++) {
-            for (let j = i + 1; j < Math.min(myTop.length, 8); j++) {
+          for (let i = 0; i < Math.min(myTop.length, 14); i++) {
+            for (let j = i + 1; j < Math.min(myTop.length, 14); j++) {
               const mp1 = myTop[i], mp2 = myTop[j];
               if (isBlockedSellDisposition(mp1.player_id) || isBlockedSellDisposition(mp2.player_id)) continue;
               if (!packageOk([mp1, mp2])) continue;
@@ -1506,8 +1534,12 @@ export default function TradeHub({
           continue;
         }
 
-        const myCap = (base: number) => pinnedActive ? myTop.length : Math.min(myTop.length, base);
-        const oppCap = (base: number) => pinnedActive ? oppTop.length : Math.min(oppTop.length, base);
+        // When a player is pinned, extend the cap just enough to include that player's position
+        // in the sorted list — never blow open the entire roster (that causes C(n,4)^2 freezes).
+        const pinnedMyIdx = myPinnedPlayer ? myTop.findIndex((p: any) => p.player_id === myPinnedPlayer.player_id) : -1;
+        const pinnedOppIdx = targetPinnedOppPlayer ? oppTop.findIndex((p: any) => p.player_id === targetPinnedOppPlayer.player_id) : -1;
+        const myCap = (base: number) => Math.min(myTop.length, pinnedMyIdx >= 0 ? Math.min(Math.max(base, pinnedMyIdx + 1), 18) : base);
+        const oppCap = (base: number) => Math.min(oppTop.length, pinnedOppIdx >= 0 ? Math.min(Math.max(base, pinnedOppIdx + 1), 18) : base);
 
         // 1v1
         for (const mp of myTop) {
@@ -1526,8 +1558,8 @@ export default function TradeHub({
 
         // 1v2
         for (const mp of myTop) {
-          for (let i = 0; i < oppCap(9); i++) {
-            for (let j = i + 1; j < oppCap(9); j++) {
+          for (let i = 0; i < oppCap(18); i++) {
+            for (let j = i + 1; j < oppCap(18); j++) {
               const op1 = oppTop[i], op2 = oppTop[j];
               if (!isBalanced([mp.value], [op1.value, op2.value])) continue;
               if (!packageOk([op1, op2])) continue;
@@ -1546,9 +1578,9 @@ export default function TradeHub({
 
         // 1v3
         for (const mp of myTop) {
-          for (let i = 0; i < oppCap(8); i++) {
-            for (let j = i + 1; j < oppCap(8); j++) {
-              for (let k = j + 1; k < oppCap(8); k++) {
+          for (let i = 0; i < oppCap(14); i++) {
+            for (let j = i + 1; j < oppCap(14); j++) {
+              for (let k = j + 1; k < oppCap(14); k++) {
                 const op1 = oppTop[i], op2 = oppTop[j], op3 = oppTop[k];
                 if (!isBalanced([mp.value], [op1.value, op2.value, op3.value])) continue;
                 if (!packageOk([op1, op2, op3])) continue;
@@ -1568,10 +1600,10 @@ export default function TradeHub({
 
         // 1v4
         for (const mp of myTop) {
-          for (let i = 0; i < oppCap(7); i++) {
-            for (let j = i + 1; j < oppCap(7); j++) {
-              for (let k = j + 1; k < oppCap(7); k++) {
-                for (let l = k + 1; l < oppCap(7); l++) {
+          for (let i = 0; i < oppCap(10); i++) {
+            for (let j = i + 1; j < oppCap(10); j++) {
+              for (let k = j + 1; k < oppCap(10); k++) {
+                for (let l = k + 1; l < oppCap(10); l++) {
                   const op1 = oppTop[i], op2 = oppTop[j], op3 = oppTop[k], op4 = oppTop[l];
                   if (!isBalanced([mp.value], [op1.value, op2.value, op3.value, op4.value])) continue;
                   if (!packageOk([op1, op2, op3, op4])) continue;
@@ -1591,8 +1623,8 @@ export default function TradeHub({
         }
 
         // 2v1
-        for (let i = 0; i < myCap(9); i++) {
-          for (let j = i + 1; j < myCap(9); j++) {
+        for (let i = 0; i < myCap(18); i++) {
+          for (let j = i + 1; j < myCap(18); j++) {
             for (const op of oppTop) {
               const mp1 = myTop[i], mp2 = myTop[j];
               if (!isBalanced([mp1.value, mp2.value], [op.value])) continue;
@@ -1611,10 +1643,10 @@ export default function TradeHub({
         }
 
         // 2v2
-        for (let i = 0; i < myCap(8); i++) {
-          for (let j = i + 1; j < myCap(8); j++) {
-            for (let k = 0; k < oppCap(8); k++) {
-              for (let l = k + 1; l < oppCap(8); l++) {
+        for (let i = 0; i < myCap(14); i++) {
+          for (let j = i + 1; j < myCap(14); j++) {
+            for (let k = 0; k < oppCap(14); k++) {
+              for (let l = k + 1; l < oppCap(14); l++) {
                 const mp1 = myTop[i], mp2 = myTop[j];
                 const op1 = oppTop[k], op2 = oppTop[l];
                 if (!isBalanced([mp1.value, mp2.value], [op1.value, op2.value])) continue;
@@ -1634,11 +1666,11 @@ export default function TradeHub({
         }
 
         // 2v3
-        for (let i = 0; i < myCap(7); i++) {
-          for (let j = i + 1; j < myCap(7); j++) {
-            for (let k = 0; k < oppCap(7); k++) {
-              for (let l = k + 1; l < oppCap(7); l++) {
-                for (let m = l + 1; m < oppCap(7); m++) {
+        for (let i = 0; i < myCap(12); i++) {
+          for (let j = i + 1; j < myCap(12); j++) {
+            for (let k = 0; k < oppCap(12); k++) {
+              for (let l = k + 1; l < oppCap(12); l++) {
+                for (let m = l + 1; m < oppCap(12); m++) {
                   const mp1 = myTop[i], mp2 = myTop[j];
                   const op1 = oppTop[k], op2 = oppTop[l], op3 = oppTop[m];
                   if (!isBalanced([mp1.value, mp2.value], [op1.value, op2.value, op3.value])) continue;
@@ -1660,12 +1692,12 @@ export default function TradeHub({
         }
 
         // 2v4
-        for (let i = 0; i < myCap(7); i++) {
-          for (let j = i + 1; j < myCap(7); j++) {
-            for (let k = 0; k < oppCap(7); k++) {
-              for (let l = k + 1; l < oppCap(7); l++) {
-                for (let m = l + 1; m < oppCap(7); m++) {
-                  for (let n = m + 1; n < oppCap(7); n++) {
+        for (let i = 0; i < myCap(10); i++) {
+          for (let j = i + 1; j < myCap(10); j++) {
+            for (let k = 0; k < oppCap(10); k++) {
+              for (let l = k + 1; l < oppCap(10); l++) {
+                for (let m = l + 1; m < oppCap(10); m++) {
+                  for (let n = m + 1; n < oppCap(10); n++) {
                     const mp1 = myTop[i], mp2 = myTop[j];
                     const op1 = oppTop[k], op2 = oppTop[l], op3 = oppTop[m], op4 = oppTop[n];
                     if (!isBalanced([mp1.value, mp2.value], [op1.value, op2.value, op3.value, op4.value])) continue;
@@ -1688,15 +1720,15 @@ export default function TradeHub({
         }
 
         // 3v3
-        for (let i = 0; i < myCap(7); i++) {
-          for (let j = i + 1; j < myCap(7); j++) {
-            for (let k = j + 1; k < myCap(7); k++) {
+        for (let i = 0; i < myCap(10); i++) {
+          for (let j = i + 1; j < myCap(10); j++) {
+            for (let k = j + 1; k < myCap(10); k++) {
               const mp1 = myTop[i], mp2 = myTop[j], mp3 = myTop[k];
               if (!packageOk([mp1, mp2, mp3])) continue;
               if (!qbSafe([mp1, mp2, mp3])) continue;
-              for (let a = 0; a < oppCap(7); a++) {
-                for (let b = a + 1; b < oppCap(7); b++) {
-                  for (let c = b + 1; c < oppCap(7); c++) {
+              for (let a = 0; a < oppCap(10); a++) {
+                for (let b = a + 1; b < oppCap(10); b++) {
+                  for (let c = b + 1; c < oppCap(10); c++) {
                     const op1 = oppTop[a], op2 = oppTop[b], op3 = oppTop[c];
                     if (!isBalanced([mp1.value, mp2.value, mp3.value], [op1.value, op2.value, op3.value])) continue;
                     if (!packageOk([op1, op2, op3])) continue;
@@ -1715,16 +1747,16 @@ export default function TradeHub({
         }
 
         // 3v4
-        for (let i = 0; i < myCap(6); i++) {
-          for (let j = i + 1; j < myCap(6); j++) {
-            for (let k = j + 1; k < myCap(6); k++) {
+        for (let i = 0; i < myCap(8); i++) {
+          for (let j = i + 1; j < myCap(8); j++) {
+            for (let k = j + 1; k < myCap(8); k++) {
               const mp1 = myTop[i], mp2 = myTop[j], mp3 = myTop[k];
               if (!packageOk([mp1, mp2, mp3])) continue;
               if (!qbSafe([mp1, mp2, mp3])) continue;
-              for (let a = 0; a < oppCap(6); a++) {
-                for (let b = a + 1; b < oppCap(6); b++) {
-                  for (let c = b + 1; c < oppCap(6); c++) {
-                    for (let d = c + 1; d < oppCap(6); d++) {
+              for (let a = 0; a < oppCap(8); a++) {
+                for (let b = a + 1; b < oppCap(8); b++) {
+                  for (let c = b + 1; c < oppCap(8); c++) {
+                    for (let d = c + 1; d < oppCap(8); d++) {
                       const op1 = oppTop[a], op2 = oppTop[b], op3 = oppTop[c], op4 = oppTop[d];
                       if (!isBalanced([mp1.value, mp2.value, mp3.value], [op1.value, op2.value, op3.value, op4.value])) continue;
                       if (!packageOk([op1, op2, op3, op4])) continue;
@@ -1745,17 +1777,17 @@ export default function TradeHub({
         }
 
         // 4v4
-        for (let i = 0; i < myCap(6); i++) {
-          for (let j = i + 1; j < myCap(6); j++) {
-            for (let k = j + 1; k < myCap(6); k++) {
-              for (let l = k + 1; l < myCap(6); l++) {
+        for (let i = 0; i < myCap(8); i++) {
+          for (let j = i + 1; j < myCap(8); j++) {
+            for (let k = j + 1; k < myCap(8); k++) {
+              for (let l = k + 1; l < myCap(8); l++) {
                 const mp1 = myTop[i], mp2 = myTop[j], mp3 = myTop[k], mp4 = myTop[l];
                 if (!packageOk([mp1, mp2, mp3, mp4])) continue;
                 if (!qbSafe([mp1, mp2, mp3, mp4])) continue;
-                for (let a = 0; a < oppCap(6); a++) {
-                  for (let b = a + 1; b < oppCap(6); b++) {
-                    for (let c = b + 1; c < oppCap(6); c++) {
-                      for (let d = c + 1; d < oppCap(6); d++) {
+                for (let a = 0; a < oppCap(8); a++) {
+                  for (let b = a + 1; b < oppCap(8); b++) {
+                    for (let c = b + 1; c < oppCap(8); c++) {
+                      for (let d = c + 1; d < oppCap(8); d++) {
                         const op1 = oppTop[a], op2 = oppTop[b], op3 = oppTop[c], op4 = oppTop[d];
                         if (!isBalanced([mp1.value, mp2.value, mp3.value, mp4.value], [op1.value, op2.value, op3.value, op4.value])) continue;
                         if (!packageOk([op1, op2, op3, op4])) continue;
@@ -1946,14 +1978,35 @@ export default function TradeHub({
       const seen = new Set<string>();
       const playerCount: Record<string, number> = {};
       const oppCount: Record<string, number> = {};
-      // Seeded shuffle so Refresh button produces a new random set
-      const shuffled = results
+      // Hard block: every given player is a true HC RB going to someone who doesn't own the starter.
+      const isWrongOwnerHCPackage = (r: TradeResult) => {
+        if (r.give.length === 0) return false;
+        return r.give.every((gp: any) => {
+          if (gp.position !== "RB" || gp.value >= 1400) return false;
+          const gpData = (players as any)?.[gp.player_id];
+          if (!gpData?.team) return false;
+          const gpIdx = getNFLDepthIdx(gpData.team, "RB", gp.player_id);
+          if (gpIdx === null || gpIdx === 0) return false;
+          const starter = nflTeamDepth.get(gpData.team)?.RB?.[0];
+          const oppRoster = rosters.find((ros: any) => ros.roster_id === r.oppRosterId);
+          const oppRosterPlayers = oppRoster ? rosterPlayers(oppRoster) : [];
+          return !starter || !oppRosterPlayers.some((op: any) => op.player_id === starter.player_id);
+        });
+      };
+
+      // Pre-filter: apply all hard blocks except the direction guardrail
+      const preGuardrail = results
         .filter((r) => isFinite(r.score))
         .filter((r) => !r.give.some((p: any) => isBlockedSellDisposition(p.player_id)))
         .filter((r) => !r.receive.some((p: any) => isBlockedBuyDisposition(p.player_id)))
         .filter((r) => !pinnedPlayer || r.give.some((p: any) => p.player_id === pinnedPlayer.player_id))
         .filter((r) => !finderTargetPlayerId || r.receive.some((p: any) => p.player_id === finderTargetPlayerId))
-        .filter((r) => !failsDirectionGuardrail(r))
+        .filter((r) => !isWrongOwnerHCPackage(r));
+      // Only apply direction guardrail if at least one result survives it — prevents empty results
+      const hasGuardrailPassing = preGuardrail.some((r) => !failsDirectionGuardrail(r));
+      // Seeded shuffle so Refresh button produces a new random set
+      const shuffled = preGuardrail
+        .filter((r) => !hasGuardrailPassing || !failsDirectionGuardrail(r))
         .map((r) => {
           const lineupSafety = getTradeLineupSafety(r);
           const partnerProfile = leagueMateProfileByRosterId.get(Number(r.oppRosterId));
@@ -1997,7 +2050,95 @@ export default function TradeHub({
             if (buyLowReceived > 0 && r.net >= 0)   ds += buyLowReceived * 5;  // getting them cheap, perfect
             return ds;
           })();
-          const strategyScore = r.score + getDirectionTradeScore(r) + lineupSafety.score + partnerFitScore + dispositionScore;
+          // ── Opponent direction score ─────────────────────────────────────
+          // Reward trades where what the opponent RECEIVES fits their team's direction.
+          // Rebuilders want picks + youth; contenders want redraft production now.
+          // This is the biggest lever for real-world acceptance rate.
+          const oppDirectionScore = (() => {
+            const oppPlayoffOdds = selectedLeagueSimulation?.rowByRosterId?.get(Number(r.oppRosterId))?.playoffOdds ?? 50;
+            const oppIsTanking    = oppPlayoffOdds < 40;
+            const oppIsContending = oppPlayoffOdds >= 65;
+            let ods = 0;
+            if (oppIsTanking) {
+              // Rebuilder loves picks and young players
+              ods += r.givePicks.length * 3;
+              const youngGiven = r.give.filter((p: any) => p.age && p.age <= 25).length;
+              const oldGiven   = r.give.filter((p: any) => p.age && p.age >= 29).length;
+              ods += youngGiven * 3;
+              ods -= oldGiven * 3;   // veterans don't help a tank
+              // Bonus if they get to keep their own picks
+              if (r.receivePicks.length === 0) ods += 2;
+            }
+            if (oppIsContending) {
+              // Contender wants production — penalise picks-only trades
+              const oppReceivesRedraft = r.give.reduce((s: number, p: any) => s + (redraftValues?.[p.player_id] ?? 0), 0);
+              const oppGivesRedraft    = r.receive.reduce((s: number, p: any) => s + (redraftValues?.[p.player_id] ?? 0), 0);
+              if (oppReceivesRedraft > oppGivesRedraft) ods += 3;
+              if (r.give.length === 0 && r.givePicks.length > 0) ods -= 3; // picks-only for contender
+            }
+            return ods;
+          })();
+
+          // ── Simple trade bonus ────────────────────────────────────────────
+          // Prefer minor tweaks (1v1 player swaps, bench deals) over mega-trades.
+          // Fewer total assets = higher bonus so small clean trades surface first.
+          const totalAssets = r.give.length + r.receive.length + r.givePicks.length + r.receivePicks.length;
+          const simpleTradeBonus = totalAssets <= 2 ? 5 : totalAssets <= 4 ? 3 : totalAssets <= 6 ? 1 : 0;
+
+          // ── Handcuff awareness (RB) — depth-chart aware ─────────────────
+          // Uses the same nflTeamDepth map as DataHub so starter/HC roles are consistent.
+          // Players with dynasty value ≥ 1400 have standalone value and are NOT treated as
+          // handcuffs — no bonus or penalty applies to them regardless of depth position.
+          // True handcuffs (< 1400) scale by depth: idx 1 = full, idx 2 = half, idx 3+ = quarter.
+          const HC_VALUE_THRESHOLD = 1400;
+          const handcuffBonus = (() => {
+            let hb = 0;
+            const oppRosterForHandcuff = rosters.find((ros: any) => ros.roster_id === r.oppRosterId);
+            const oppRosterPlayers = oppRosterForHandcuff ? rosterPlayers(oppRosterForHandcuff) : [];
+
+            for (const gp of r.give) {
+              if (gp.position !== "RB") continue;
+              const gpData = (players as any)?.[gp.player_id];
+              if (!gpData?.team) continue;
+              const gpIdx = getNFLDepthIdx(gpData.team, "RB", gp.player_id);
+              if (gpIdx === null) continue;
+
+              if (gpIdx === 0) {
+                // Starter — bonus if opponent also owns the primary backup (symbiotic pair)
+                const rb2 = nflTeamDepth.get(gpData.team)?.RB?.[1];
+                if (rb2 && oppRosterPlayers.some((op: any) => op.player_id === rb2.player_id)) hb += 4;
+              } else if (gp.value < HC_VALUE_THRESHOLD) {
+                // True handcuff (no standalone value) — apply owner-match bonus/penalty
+                const scale = gpIdx === 1 ? 1.0 : gpIdx === 2 ? 0.5 : 0.25;
+                const starter = nflTeamDepth.get(gpData.team)?.RB?.[0];
+                const oppOwnsStarter = !!starter && oppRosterPlayers.some((op: any) => op.player_id === starter.player_id);
+                if (oppOwnsStarter) {
+                  hb += Math.round(6 * scale);  // sending HC to right owner — elevated interest
+                } else {
+                  hb -= Math.round(30 * scale);  // sending HC to wrong owner — heavily penalised
+                }
+              }
+              // value ≥ 1400 at depth > 0: standalone player, skip HC logic entirely
+            }
+
+            for (const rp of r.receive) {
+              if (rp.position !== "RB") continue;
+              const rpData = (players as any)?.[rp.player_id];
+              if (!rpData?.team) continue;
+              const rpIdx = getNFLDepthIdx(rpData.team, "RB", rp.player_id);
+              if (rpIdx === null || rpIdx === 0) continue; // receiving a starter — no HC bonus
+              if (rp.value >= HC_VALUE_THRESHOLD) continue; // standalone value — not a true HC
+              // Receiving a true handcuff — bonus if I own the starter, scaled by depth
+              const scale = rpIdx === 1 ? 1.0 : rpIdx === 2 ? 0.5 : 0.25;
+              const starter = nflTeamDepth.get(rpData.team)?.RB?.[0];
+              const iOwnStarter = !!starter && myPlayers.some((mp: any) => mp.player_id === starter.player_id);
+              if (iOwnStarter) hb += Math.round(4 * scale);
+            }
+
+            return hb;
+          })();
+
+          const strategyScore = r.score + getDirectionTradeScore(r) + lineupSafety.score + partnerFitScore + dispositionScore + oppDirectionScore + simpleTradeBonus + handcuffBonus;
           return {
             r,
             lineupSafety,

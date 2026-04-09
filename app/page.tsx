@@ -120,7 +120,7 @@ const [activityTransactions, setActivityTransactions] = useState<any[]>([]);
 const [loadingActivity, setLoadingActivity] = useState(false);
 const [leagueWeeklyMatchups, setLeagueWeeklyMatchups] = useState<Record<string, any[]>>({});
 const [loadingLeagueWeeklyMatchups, setLoadingLeagueWeeklyMatchups] = useState(false);
-const [dataHubTab, setDataHubTab] = useState<"RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "PICK_VALUES" | "LEAGUEMATES">("RANKINGS");
+const [dataHubTab, setDataHubTab] = useState<"RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "PICK_VALUES" | "LEAGUEMATES" | "DEPTH_CHARTS">("RANKINGS");
 const [leagueMateStats, setLeagueMateStats] = useState<any[]>([]);
 const [leagueMateStatsLoaded, setLeagueMateStatsLoaded] = useState(false);
 const [loadingLeagueMateStats, setLoadingLeagueMateStats] = useState(false);
@@ -1832,11 +1832,17 @@ const loadRoster = async (league: any) => {
     if (match) match.owner_id = tp.owner_id;
   });
 
-  // ── Step 5: My picks (after trades applied) ──────────────────────────────
-  const myPicks = tempPicks.filter((p) => p.owner_id === myRoster.roster_id);
-
   // ── Step 6: Assign draft slots ───────────────────────────────────────────
   const currentDraft = draftsData.find((d: any) => d.season === CURRENT_YEAR);
+
+  // Trim picks to actual draft round count so 3-round leagues never see round-4 picks
+  const leagueRounds: number = Number(currentDraft?.settings?.rounds) || ROUNDS.length;
+  if (leagueRounds < ROUNDS.length) {
+    tempPicks = tempPicks.filter((p: any) => Number(p.round) <= leagueRounds);
+  }
+
+  // ── Step 5: My picks (after trades applied and rounds trimmed) ───────────
+  const myPicks = tempPicks.filter((p) => p.owner_id === myRoster.roster_id);
   const order = currentDraft?.draft_order || {};
   setSelectedLeagueDraftHasOccurred(currentDraft?.status !== "pre_draft");
   const totalDraftTeams = allRosters.length || Number(currentDraft?.settings?.teams) || 0;
@@ -3051,20 +3057,40 @@ const getTeamSummary = () => {
 
   // Combines dynasty rank, redraft rank, simulation playoff odds, and core age into one profile.
   // This is the authoritative direction — use this everywhere instead of raw selectedLeagueDirection.
+  // Returns null while waiting for consistent data — consumers must show a loading state.
   const selectedLeagueDirectionAdjusted = useMemo(() => {
-    if (!selectedLeagueDirection) return null;
+    if (!selectedLeagueDirection || !selectedLeague?.league_id) return null;
     const myRosterId = rosters.find((r: any) => r.owner_id === user?.user_id)?.roster_id;
+    if (!myRosterId) return null;
+
+    // Guard against stale simulation data from a previously selected league.
+    // The sim recomputes when selectedLeague changes, but it may lag by one cycle.
+    // If the sim exists but doesn't contain all current league roster IDs it belongs
+    // to the old league — return null and wait for the fresh sim to arrive.
+    if (selectedLeagueSimulation) {
+      const allCurrentIds = rosters.map((r: any) => Number(r.roster_id));
+      const simMatchesLeague = allCurrentIds.every(
+        (id) => selectedLeagueSimulation.rowByRosterId?.has(id)
+      );
+      if (!simMatchesLeague) return null;
+    }
+
     const mySimRow = selectedLeagueSimulation?.rowByRosterId?.get(Number(myRosterId));
-    const playoffOdds = mySimRow?.playoffOdds ?? 0;
-    const adjustedBucket = getAdjustedDirectionBucket(selectedLeagueDirection.bucket, selectedLeagueDirection, playoffOdds, !!mySimRow);
+    const hasSimData = !!mySimRow;
+    // Use neutral 50 as the arithmetic default — getAdjustedDirectionBucket ignores
+    // playoffOdds entirely when hasSimData is false, so the value doesn't matter.
+    const playoffOdds = mySimRow?.playoffOdds ?? 50;
+    const adjustedBucket = getAdjustedDirectionBucket(selectedLeagueDirection.bucket, selectedLeagueDirection, playoffOdds, hasSimData);
     return {
       ...selectedLeagueDirection,
       bucket: adjustedBucket,
       bucketColor: getBucketColor(adjustedBucket),
       rawBucket: selectedLeagueDirection.bucket,
-      playoffOdds,
+      // Expose null when sim data isn't available so consumers know not to trust the odds
+      playoffOdds: hasSimData ? playoffOdds : null,
+      hasSimData,
     };
-  }, [selectedLeagueDirection, selectedLeagueSimulation, rosters, user?.user_id]);
+  }, [selectedLeague?.league_id, selectedLeagueDirection, selectedLeagueSimulation, rosters, user?.user_id]);
 
   const selectedLeagueDynamicPickValues = useMemo(() => {
     const leagueId = selectedLeague?.league_id;
@@ -5114,7 +5140,13 @@ const myPlayerSet = new Set<string>(roster?.players || []);
         </div>
       </div>
 
-      <div className={mainTab === "DRAFT" || mainTab === "TRADE_HUB" || mainTab === "MANAGEMENT_HUB" || mainTab === "LEAGUES" || mainTab === "ALERTS" || mainTab === "GAMEDAY_HUB" ? "" : "max-w-3xl mx-auto p-6"}>
+      <div className={
+        mainTab === "DRAFT" || mainTab === "TRADE_HUB" || mainTab === "MANAGEMENT_HUB" || mainTab === "LEAGUES" || mainTab === "ALERTS" || mainTab === "GAMEDAY_HUB"
+          ? ""
+          : (mainTab === "DATA_HUB" && dataHubTab === "DEPTH_CHARTS")
+            ? "w-full px-6 py-6"
+            : "max-w-3xl mx-auto p-6"
+      }>
 {mainTab === "DASHBOARD" && (
   <>
     <>

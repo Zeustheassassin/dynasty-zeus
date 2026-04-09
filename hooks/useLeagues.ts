@@ -132,10 +132,16 @@ export function useLeagues({ user, players, onLeagueLoaded }: UseLeaguesOptions)
       if (match) match.owner_id = tp.owner_id;
     });
 
-    const myPicks = tempPicks.filter((p) => p.owner_id === myRoster.roster_id);
-
     // Assign draft slots
     const currentDraft = (draftsData as any[]).find((d: any) => d.season === CURRENT_YEAR);
+
+    // Trim picks to actual draft round count (e.g. 3-round leagues should not have round-4 picks)
+    const leagueRounds: number = Number(currentDraft?.settings?.rounds) || ROUNDS.length;
+    if (leagueRounds < ROUNDS.length) {
+      tempPicks = tempPicks.filter((p) => Number(p.round) <= leagueRounds);
+    }
+
+    const myPicks = tempPicks.filter((p) => p.owner_id === myRoster.roster_id);
     const order: Record<string, number> = currentDraft?.draft_order || {};
     setSelectedLeagueDraftHasOccurred(currentDraft?.status !== "pre_draft");
     const totalDraftTeams = allRosters.length || Number(currentDraft?.settings?.teams) || 0;

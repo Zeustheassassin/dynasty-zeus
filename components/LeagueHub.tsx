@@ -212,7 +212,7 @@ export default function LeagueHub({
   setPlayerProfileId, setCalcOpponentRosterId, setMainTab, setTradeHubSection,
 }: LeagueHubProps) {
   return (
-          <div className="max-w-5xl mx-auto px-4 py-6">
+          <div className={`mx-auto px-4 py-6 ${leagueHubTab === "DRAFT_BOARD" ? "w-full max-w-full" : "max-w-5xl"}`}>
           <>
             {/* Sub-tab nav */}
             <div className="mb-6 rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
@@ -1967,7 +1967,7 @@ const starters = starterSlots
               );
 
               const myRosterId = rosters.find((r: any) => r.owner_id === user?.user_id)?.roster_id;
-              const mySlots = (allPicks as any[]).filter((p: any) => Number(p.roster_id ?? p.owner_id ?? 0) === Number(myRosterId) && p.slot).map((p: any) => p.slot as string);
+              const mySlots = (allPicks as any[]).filter((p: any) => Number(p.roster_id ?? p.owner_id ?? 0) === Number(myRosterId) && p.slot && /^\d+\.\d+$/.test(String(p.slot))).map((p: any) => p.slot as string);
 
               // Post-draft projection: players user has selected + predictions for remaining my slots
               const projectedMyPicks: string[] = [];
@@ -2036,7 +2036,7 @@ const starters = starterSlots
                           rosterToName[Number(r.roster_id)] = (users as any)[r.owner_id] || `Team ${r.roster_id}`;
                         });
                         return (
-                          <div className="overflow-x-auto">
+                          <div className="overflow-x-auto lg:overflow-x-visible">
                             <div className="flex items-center gap-4 mb-3 text-[10px] text-gray-500">
                               <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-sm bg-blue-900 border border-blue-600"/>My Slots (click to set)</span>
                               <span className="flex items-center gap-1 italic text-gray-600">Italic = predicted</span>
@@ -2044,7 +2044,7 @@ const starters = starterSlots
                               <span className="flex items-center gap-1"><span className="text-green-400 font-bold">VALUE</span> = &gt;5 after ADP</span>
                             </div>
                             <div
-                              className="inline-grid min-w-max gap-y-1.5 gap-x-1.5"
+                              className="grid w-full gap-y-1.5 gap-x-1.5"
                               style={{ gridTemplateColumns: `repeat(${rosters.length}, minmax(9rem, 1fr))` }}
                             >
                               {Array.from({ length: rosters.length }, (_, i) => i + 1).map((slot) => {
@@ -2059,7 +2059,7 @@ const starters = starterSlots
                                   </button>
                                 );
                               })}
-                              {ROUNDS.flatMap((round) =>
+                              {Array.from({ length: Number(draftSettings?.settings?.rounds) || 4 }, (_, i) => i + 1).flatMap((round) =>
                                 Array.from({ length: rosters.length }, (_, i) => i + 1).map((slotNum) => {
                                   const slotStr = `${round}.${String(slotNum).padStart(2, "0")}`;
                                   const slotOwner = slotOwnerMap[slotStr];
