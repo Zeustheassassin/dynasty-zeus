@@ -174,9 +174,48 @@ export default function DraftHub({
   const [historyData, setHistoryData]         = useState<any[]>([]);
   const [historyLoading, setHistoryLoading]   = useState(false);
   const [historyLoaded, setHistoryLoaded]     = useState(false);
-  const [historyTab, setHistoryTab]           = useState<"LEAGUE" | "CONSENSUS" | "MY_PICKS">("LEAGUE");
+  const [historyTab, setHistoryTab]           = useState<"LEAGUE" | "CONSENSUS" | "MY_PICKS" | "GRADES">("LEAGUE");
   const [selectedHistoryYear, setSelectedHistoryYear]         = useState("ALL");
   const [myPicksSort, setMyPicksSort] = useState<{ col: "times" | "avgPick" | "value"; dir: "asc" | "desc" }>({ col: "times", dir: "desc" });
+
+  // ── Compiled network consensus state ─────────────────────────────────────
+  const [consensusMeta, setConsensusMeta] = useState<Record<string, {
+    draftCount: number; leagueCount: number; connectedUserCount: number; compiledAt: string;
+  }>>({});
+  const [consensusCache, setConsensusCache] = useState<Record<string, any[]>>({});
+  const [loadingCacheYear, setLoadingCacheYear] = useState<string | null>(null);
+  const [compiling, setCompiling] = useState(false);
+  const [compileLog, setCompileLog] = useState("");
+  const [compileProgress, setCompileProgress] = useState(0);
+  const [showCompilePanel, setShowCompilePanel] = useState(false);
+  const [compileSelectedYears, setCompileSelectedYears] = useState<Set<number>>(() => {
+    const cur = new Date().getFullYear();
+    // Only include completed seasons — current year excluded until after the NFL Draft
+    return new Set(Array.from({ length: cur - 2020 }, (_, i) => 2020 + i));
+  });
+
+  // ── Player grade annotations (Hit / Neutral / Bust) ─────────────────────
+  // Stored in localStorage as { "2024_player_id": "hit" | "neutral" | "bust" }
+  const [playerGrades, setPlayerGrades] = useState<Record<string, "hit" | "neutral" | "bust">>({});
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("consensusPlayerGrades");
+      if (saved) setPlayerGrades(JSON.parse(saved));
+    } catch {}
+  }, []);
+
+  const setGrade = (year: string, playerId: string, grade: "hit" | "neutral" | "bust") => {
+    setPlayerGrades((prev) => {
+      const key  = `${year}_${playerId}`;
+      const next = { ...prev };
+      // Clicking the active grade toggles it off
+      if (next[key] === grade) delete next[key];
+      else next[key] = grade;
+      try { localStorage.setItem("consensusPlayerGrades", JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
 
   // ── Load notes from localStorage on mount ────────────────────────────────
   useEffect(() => {
@@ -284,13 +323,174 @@ export default function DraftHub({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftHubSection, historyLoaded, leagues.length]);
 
-  // Auto-select the most recent year once history data loads
+  // Auto-select the most recent year once history or compiled meta data loads
   useEffect(() => {
-    if (historyData.length > 0 && selectedHistoryYear === "ALL") {
-      const years = Array.from(new Set(historyData.map((d: any) => d.season))).sort().reverse() as string[];
-      if (years.length > 0) setSelectedHistoryYear(years[0]);
+    if (selectedHistoryYear !== "ALL") return;
+    const allYears = Array.from(new Set([
+      ...historyData.map((d: any) => d.season),
+      ...Object.keys(consensusMeta),
+    ])).sort().reverse() as string[];
+    if (allYears.length > 0) setSelectedHistoryYear(allYears[0]);
+  }, [historyData.length, consensusMeta]); // eslint-disable-line
+
+  // ── Load consensus meta from Supabase on login ──────────────────────────
+  useEffect(() => {
+    if (!supabaseUser) return;
+    supabase
+      .from("consensus_draft_meta")
+      .select("year, total_drafts, total_leagues, connected_user_count, compiled_at")
+      .eq("user_id", supabaseUser.id)
+      .then(({ data }: { data: any }) => {
+        if (!data) return;
+        const meta: typeof consensusMeta = {};
+        data.forEach((row: any) => {
+          meta[String(row.year)] = {
+            draftCount:         row.total_drafts,
+            leagueCount:        row.total_leagues,
+            connectedUserCount: row.connected_user_count,
+            compiledAt:         row.compiled_at,
+          };
+        });
+        setConsensusMeta(meta);
+      });
+  }, [supabaseUser?.id]); // eslint-disable-line
+
+  // ── When GRADES tab opens, load ALL compiled years so every graded player has slot data ─
+  useEffect(() => {
+    if (historyTab !== "GRADES" || !supabaseUser) return;
+    const yearsToLoad = Object.keys(consensusMeta).filter((yr) => consensusCache[yr] === undefined);
+    yearsToLoad.forEach((year) => {
+      supabase
+        .from("consensus_draft_cache" as any)
+        .select("player_id, player_name, position, avg_pick_no")
+        .eq("user_id", supabaseUser.id)
+        .eq("year", parseInt(year, 10))
+        .then(({ data }: { data: any }) => {
+          setConsensusCache((prev) => ({ ...prev, [year]: data ?? [] }));
+        });
+    });
+  }, [historyTab, supabaseUser?.id]); // eslint-disable-line
+
+  // ── Load cached consensus rows from Supabase when viewing a compiled year ─
+  useEffect(() => {
+    if (!supabaseUser || historyTab !== "CONSENSUS") return;
+    if (!selectedHistoryYear || selectedHistoryYear === "ALL") return;
+    if (!consensusMeta[selectedHistoryYear]) return;
+    if (consensusCache[selectedHistoryYear] !== undefined) return; // already loaded
+
+    setLoadingCacheYear(selectedHistoryYear);
+    supabase
+      .from("consensus_draft_cache")
+      .select("player_id, player_name, position, team, avg_pick_no, draft_count")
+      .eq("user_id", supabaseUser.id)
+      .eq("year", parseInt(selectedHistoryYear, 10))
+      .order("avg_pick_no", { ascending: true })
+      .then(({ data }: { data: any }) => {
+        setConsensusCache((prev) => ({ ...prev, [selectedHistoryYear]: data ?? [] }));
+        setLoadingCacheYear(null);
+      });
+  }, [supabaseUser?.id, historyTab, selectedHistoryYear, consensusMeta]); // eslint-disable-line
+
+  // ── Streaming compilation ────────────────────────────────────────────────
+  const runCompile = async (years: number[]) => {
+    if (!user?.user_id || !supabaseUser) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) return;
+
+    setCompiling(true);
+    setCompileLog("Starting compilation…");
+    setCompileProgress(0);
+
+    try {
+      const res = await fetch("/api/compile-consensus", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sleeperUserId: user.user_id,
+          accessToken:   session.access_token,
+          years,
+        }),
+      });
+
+      if (!res.ok || !res.body) {
+        setCompileLog("Failed to start compilation — check that you are logged in.");
+        setCompiling(false);
+        return;
+      }
+
+      const reader  = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer    = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const event = JSON.parse(line);
+            if (event.type === "status" || event.type === "done" || event.type === "error") {
+              if (event.message)  setCompileLog(event.message);
+              if (event.progress !== undefined) setCompileProgress(event.progress);
+            }
+            if (event.type === "year_done") {
+              setConsensusMeta((prev) => ({
+                ...prev,
+                [String(event.year)]: {
+                  draftCount:         event.draftCount,
+                  leagueCount:        event.leagueCount,
+                  connectedUserCount: event.connectedUserCount ?? 0,
+                  compiledAt:         new Date().toISOString(),
+                },
+              }));
+              // Evict stale cache so it reloads from Supabase
+              setConsensusCache((prev) => {
+                const next = { ...prev };
+                delete next[String(event.year)];
+                return next;
+              });
+            }
+          } catch { /* malformed line — skip */ }
+        }
+      }
+    } catch (err: any) {
+      setCompileLog(`Error: ${err?.message ?? "Unknown error"}`);
     }
-  }, [historyData.length]); // eslint-disable-line
+
+    setCompiling(false);
+    setCompileProgress(100);
+  };
+
+  // ── Remove a single player from compiled data for a year ────────────────
+  const removeCompiledPlayer = async (year: string, playerId: string) => {
+    if (!supabaseUser) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabase.from("consensus_draft_cache" as any) as any)
+      .delete()
+      .eq("user_id", supabaseUser.id)
+      .eq("year", parseInt(year, 10))
+      .eq("player_id", playerId);
+    setConsensusCache((prev) => ({
+      ...prev,
+      [year]: (prev[year] ?? []).filter((r: any) => r.player_id !== playerId),
+    }));
+  };
+
+  // ── Clear all data for a specific compiled year ──────────────────────────
+  const clearYear = async (year: number) => {
+    if (!supabaseUser) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabase.from("consensus_draft_cache" as any) as any)
+      .delete().eq("user_id", supabaseUser.id).eq("year", year);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabase.from("consensus_draft_meta" as any) as any)
+      .delete().eq("user_id", supabaseUser.id).eq("year", year);
+    setConsensusMeta((prev) => { const n = { ...prev }; delete n[String(year)]; return n; });
+    setConsensusCache((prev) => { const n = { ...prev }; delete n[String(year)]; return n; });
+  };
 
   // ── Tier helpers ─────────────────────────────────────────────────────────
   const syncTiersToSupabase = (tiers: Record<string, number>) => {
@@ -325,7 +525,10 @@ export default function DraftHub({
   };
 
   // ── History computed values ───────────────────────────────────────────────
-  const availableYears = Array.from(new Set(historyData.map((d: any) => d.season))).sort().reverse() as string[];
+  const availableYears = Array.from(new Set([
+    ...historyData.map((d: any) => d.season),
+    ...Object.keys(consensusMeta),
+  ])).sort().reverse() as string[];
 
   const filteredDrafts = selectedHistoryYear === "ALL"
     ? historyData
@@ -362,6 +565,55 @@ export default function DraftHub({
     return Array.from(map.values())
       .map(e => ({ ...e, avgPickNo: e.picks.reduce((s: number, p: number) => s + p, 0) / e.picks.length, timesDrafted: e.picks.length }))
       .sort((a, b) => b.timesDrafted - a.timesDrafted || a.avgPickNo - b.avgPickNo);
+  })();
+
+  // ── Pick slot grade report ────────────────────────────────────────────────
+  const gradeReport = (() => {
+    const slotMap = new Map<string, {
+      hit: number; neutral: number; bust: number;
+      players: { name: string; position: string; year: string; grade: string; avgPickNo: number }[];
+    }>();
+
+    Object.entries(playerGrades).forEach(([key, grade]) => {
+      const sep      = key.indexOf("_");
+      const year     = key.substring(0, sep);
+      const playerId = key.substring(sep + 1);
+      const cacheRow = (consensusCache[year] ?? []).find((r: any) => r.player_id === playerId);
+      if (!cacheRow) return; // year not loaded yet — skip
+
+      const slot = toPickSlot(cacheRow.avg_pick_no);
+      if (!slotMap.has(slot)) slotMap.set(slot, { hit: 0, neutral: 0, bust: 0, players: [] });
+      const entry = slotMap.get(slot)!;
+      entry[grade as "hit" | "neutral" | "bust"]++;
+      entry.players.push({
+        name:      cacheRow.player_name,
+        position:  cacheRow.position,
+        year,
+        grade,
+        avgPickNo: cacheRow.avg_pick_no,
+      });
+    });
+
+    return Array.from(slotMap.entries())
+      .map(([slot, data]) => {
+        const total = data.hit + data.neutral + data.bust;
+        return {
+          slot,
+          hit:      data.hit,
+          neutral:  data.neutral,
+          bust:     data.bust,
+          total,
+          hitRate:  total ? data.hit     / total : 0,
+          neutRate: total ? data.neutral / total : 0,
+          bustRate: total ? data.bust    / total : 0,
+          players:  [...data.players].sort((a, b) => a.avgPickNo - b.avgPickNo),
+        };
+      })
+      .sort((a, b) => {
+        const [ar, as_] = a.slot.split(".").map(Number);
+        const [br, bs_] = b.slot.split(".").map(Number);
+        return (ar - br) || (as_ - bs_);
+      });
   })();
 
   // ── Derived ──────────────────────────────────────────────────────────────
@@ -984,7 +1236,7 @@ export default function DraftHub({
           )}
 
           {/* Content */}
-          {!historyLoading && filteredDrafts.length > 0 && (
+          {!historyLoading && (filteredDrafts.length > 0 || !!consensusMeta[selectedHistoryYear]) && (
             <>
               {/* Sub-tabs */}
               <div className="flex gap-1 bg-gray-800/60 rounded-xl p-1 mb-5 w-fit">
@@ -992,6 +1244,7 @@ export default function DraftHub({
                   { key: "LEAGUE",    label: "League Board" },
                   { key: "CONSENSUS", label: "Consensus Board" },
                   { key: "MY_PICKS",  label: "My Draft Picks" },
+                  { key: "GRADES",    label: "Pick Slot Grades" },
                 ] as const).map((t) => (
                   <button
                     key={t.key}
@@ -1053,38 +1306,278 @@ export default function DraftHub({
               )}
 
               {/* ── Consensus Board ── */}
-              {historyTab === "CONSENSUS" && (
-                <div className="rounded-2xl border border-gray-800 bg-gray-900/60 overflow-hidden">
-                  <div className="px-4 py-3 border-b border-gray-800">
-                    <div className="text-sm font-semibold text-white">Consensus Draft Board</div>
-                    <div className="text-xs text-gray-400 mt-0.5">
-                      Players ranked by average pick position in {selectedHistoryYear} — {filteredDrafts.length} draft{filteredDrafts.length !== 1 ? "s" : ""}.
-                    </div>
-                  </div>
-                  <div className="px-4 py-2 border-b border-gray-800/60 grid grid-cols-[2rem_3rem_1fr_5rem_4rem_6rem] gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                    <span>#</span><span>Pos</span><span>Player</span><span>Avg Pick</span><span>Drafts</span><span className="text-right">≈ Pick Val</span>
-                  </div>
-                  <div className="divide-y divide-gray-800/40">
-                    {consensusList.map((p: any, i: number) => {
-                      const { label: equivLabel, pickNo: equivPickNo } = closestPickEquiv(p.value, pickFcValues);
-                      const color = pickEquivColor(equivPickNo, Math.round(p.avgPickNo));
-                      return (
-                        <div key={p.player_id} className="grid grid-cols-[2rem_3rem_1fr_5rem_4rem_6rem] gap-2 items-center px-4 py-1.5">
-                          <span className="text-xs text-gray-500">{i + 1}</span>
-                          <span className={`text-[10px] font-bold ${posColor[p.position] || "text-gray-400"}`}>{p.position}</span>
-                          <div className="min-w-0 flex items-center gap-2">
-                            <span className="text-sm font-medium text-white truncate">{p.name}</span>
-                            {p.team && <span className="text-[10px] text-gray-500 shrink-0">{p.team}</span>}
+              {historyTab === "CONSENSUS" && (() => {
+                const hasCachedRows  = Array.isArray(consensusCache[selectedHistoryYear]) && consensusCache[selectedHistoryYear].length > 0;
+                const hasMeta        = !!consensusMeta[selectedHistoryYear];
+                const isLoadingCache = loadingCacheYear === selectedHistoryYear;
+                const meta           = consensusMeta[selectedHistoryYear];
+
+                // Minimum draft-count threshold: 5% of total drafts found for this year
+                const totalDraftsForYear = hasCachedRows
+                  ? (meta?.draftCount ?? 0)
+                  : filteredDrafts.length;
+                const minDrafts = Math.max(1, Math.ceil(totalDraftsForYear * 0.08));
+
+                // Build the display list: compiled network data first, local fallback
+                // For compiled rows, fall back to the loaded players map for position/team
+                // if the stored metadata was empty at draft time (common for 2024/2025 picks)
+                const displayList: any[] = (hasCachedRows
+                  ? consensusCache[selectedHistoryYear].map((row: any) => {
+                      const fullPlayer = (players as any)?.[row.player_id];
+                      return {
+                        player_id:  row.player_id,
+                        name:       row.player_name || fullPlayer?.full_name || "",
+                        position:   row.position    || fullPlayer?.position  || "",
+                        team:       row.team        || fullPlayer?.team      || "",
+                        avgPickNo:  row.avg_pick_no,
+                        draftCount: row.draft_count,
+                        value:      calcFcValues[row.player_id] ?? 0,
+                      };
+                    })
+                  : consensusList
+                ).filter((p: any) =>
+                  p.draftCount >= minDrafts &&
+                  ["QB", "RB", "WR", "TE", "FB"].includes(p.position)
+                );
+
+                const draftCount  = hasCachedRows ? (meta?.draftCount ?? 0) : filteredDrafts.length;
+                const sourceLabel = hasCachedRows
+                  ? `${draftCount} rookie draft${draftCount !== 1 ? "s" : ""} · ${meta?.leagueCount ?? 0} leagues · ${meta?.connectedUserCount ?? 0} connected users`
+                  : `${filteredDrafts.length} draft${filteredDrafts.length !== 1 ? "s" : ""} in your leagues only`;
+
+                // Exclude current calendar year — NFL Draft hasn't happened yet
+                const YEAR_RANGE = Array.from({ length: new Date().getFullYear() - 2020 }, (_, i) => 2020 + i);
+                // All years that have ANY compiled data (including bad years like 2026)
+                const ALL_COMPILED_YEARS = Object.keys(consensusMeta).map(Number).sort().reverse();
+
+                return (
+                  <div>
+                    {/* ── Compile Panel ─────────────────────────────── */}
+                    <div className="rounded-xl border border-gray-700 bg-gray-800/40 p-4 mb-4">
+                      <div className="flex items-start justify-between gap-3 flex-wrap">
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold text-white">Network Consensus</div>
+                          <div className="text-xs text-gray-400 mt-0.5">
+                            {hasMeta
+                              ? `${meta!.draftCount} rookie drafts · ${meta!.leagueCount} leagues · last compiled ${new Date(meta!.compiledAt).toLocaleDateString()}`
+                              : supabaseUser
+                                ? `No compiled data for ${selectedHistoryYear} yet.`
+                                : "Log in to compile a network consensus board."}
                           </div>
-                          <span className="text-xs font-semibold text-white">{toPickSlot(p.avgPickNo)}</span>
-                          <span className="text-xs text-gray-400">{p.draftCount}x</span>
-                          <span className={`text-xs font-semibold text-right ${color}`}>{equivLabel}</span>
                         </div>
-                      );
-                    })}
+                        <div className="flex items-center gap-2 shrink-0">
+                          {supabaseUser && !compiling && (
+                            <button
+                              onClick={() => setShowCompilePanel((v) => !v)}
+                              className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded-lg transition font-medium"
+                            >
+                              {showCompilePanel ? "Hide" : hasMeta ? "Recompile" : "Compile Now"}
+                            </button>
+                          )}
+                          {compiling && (
+                            <div className="flex items-center gap-1.5 text-xs text-blue-400">
+                              <svg className="animate-spin w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                              </svg>
+                              Compiling…
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Year selector + launch */}
+                      {showCompilePanel && !compiling && (
+                        <div className="mt-3 border-t border-gray-700 pt-3">
+                          <div className="text-xs text-gray-400 mb-2">
+                            Select years to compile. Existing data for each selected year will be replaced.
+                          </div>
+                          <div className="flex flex-wrap gap-1.5 mb-3">
+                            {YEAR_RANGE.map((yr) => {
+                              const yrMeta = consensusMeta[String(yr)];
+                              const sel    = compileSelectedYears.has(yr);
+                              return (
+                                <button
+                                  key={yr}
+                                  onClick={() => setCompileSelectedYears((prev) => {
+                                    const next = new Set(prev);
+                                    next.has(yr) ? next.delete(yr) : next.add(yr);
+                                    return next;
+                                  })}
+                                  className={`text-xs px-2.5 py-1 rounded-lg border transition flex items-center gap-1 ${
+                                    sel
+                                      ? "border-blue-600 bg-blue-900/30 text-blue-300"
+                                      : "border-gray-700 bg-gray-800 text-gray-400"
+                                  }`}
+                                >
+                                  {yr}
+                                  {yrMeta && (
+                                    <span className="text-[9px] text-green-400 font-semibold">✓{yrMeta.draftCount}d</span>
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <button
+                              onClick={() => {
+                                const years = Array.from(compileSelectedYears).sort();
+                                if (!years.length) return;
+                                setShowCompilePanel(false);
+                                runCompile(years);
+                              }}
+                              disabled={compileSelectedYears.size === 0}
+                              className="text-xs bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white px-4 py-1.5 rounded-lg transition font-semibold"
+                            >
+                              Compile {compileSelectedYears.size} year{compileSelectedYears.size !== 1 ? "s" : ""}
+                            </button>
+                            <button
+                              onClick={() => setCompileSelectedYears(new Set(YEAR_RANGE))}
+                              className="text-xs text-gray-400 hover:text-white transition"
+                            >
+                              Select all
+                            </button>
+                            <button
+                              onClick={() => setCompileSelectedYears(new Set())}
+                              className="text-xs text-gray-400 hover:text-white transition"
+                            >
+                              Clear
+                            </button>
+                          </div>
+
+                          {/* Delete buttons — shown for every year with stored data */}
+                          {ALL_COMPILED_YEARS.length > 0 && (
+                            <div className="mt-3 pt-3 border-t border-gray-700/60">
+                              <div className="text-xs text-gray-500 mb-2">Delete stored data for a year:</div>
+                              <div className="flex flex-wrap gap-1.5">
+                                {ALL_COMPILED_YEARS.map((yr) => (
+                                  <button
+                                    key={yr}
+                                    onClick={() => clearYear(yr)}
+                                    className="text-[10px] px-2 py-0.5 rounded border border-red-900/60 bg-red-950/30 text-red-400 hover:bg-red-900/50 transition"
+                                  >
+                                    Delete {yr}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Progress bar + log */}
+                      {compiling && (
+                        <div className="mt-3">
+                          <div className="h-1.5 bg-gray-700 rounded-full overflow-hidden mb-1.5">
+                            <div
+                              className="h-full bg-blue-500 rounded-full transition-all duration-300"
+                              style={{ width: `${compileProgress}%` }}
+                            />
+                          </div>
+                          <div className="text-[11px] text-gray-400 truncate">{compileLog}</div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* ── Board ───────────────────────────────────────── */}
+                    {isLoadingCache ? (
+                      <div className="flex items-center gap-3 text-sm text-blue-400 py-6">
+                        <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                        </svg>
+                        Loading compiled consensus…
+                      </div>
+                    ) : displayList.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-gray-700 bg-gray-900/40 p-6 text-sm text-gray-400">
+                        No draft data for {selectedHistoryYear}.{" "}
+                        {supabaseUser
+                          ? 'Click "Compile Now" above to build a network consensus board.'
+                          : "Log in to compile a network consensus board."}
+                      </div>
+                    ) : (
+                      <div className="rounded-2xl border border-gray-800 bg-gray-900/60 overflow-hidden">
+                        <div className="px-4 py-3 border-b border-gray-800 flex items-start justify-between gap-2 flex-wrap">
+                          <div>
+                            <div className="text-sm font-semibold text-white">
+                              {selectedHistoryYear} Consensus Draft Board
+                            </div>
+                            <div className="text-xs text-gray-400 mt-0.5">
+                              {displayList.length} players ranked by avg pick · {sourceLabel}
+                            </div>
+                          </div>
+                          {hasCachedRows && (
+                            <span className="text-[10px] bg-green-900/40 border border-green-800/60 text-green-400 px-2 py-0.5 rounded-full font-semibold shrink-0">
+                              Network Data
+                            </span>
+                          )}
+                        </div>
+                        <div className="px-4 py-2 border-b border-gray-800/60 grid grid-cols-[2rem_3rem_1fr_5rem_4rem_6rem] gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                          <span>#</span><span>Pos</span><span>Player</span><span>Avg Pick</span><span>Drafts</span><span className="text-right">≈ Pick Val</span>
+                        </div>
+                        <div className="divide-y divide-gray-800/40">
+                          {displayList.map((p: any, i: number) => {
+                            const { label: equivLabel, pickNo: equivPickNo } = closestPickEquiv(p.value, pickFcValues);
+                            const color  = pickEquivColor(equivPickNo, Math.round(p.avgPickNo));
+                            const grade  = playerGrades[`${selectedHistoryYear}_${p.player_id}`];
+                            const rowBg  = grade === "hit"     ? "bg-green-950/25"
+                                         : grade === "bust"    ? "bg-red-950/25"
+                                         : grade === "neutral" ? "bg-gray-800/30"
+                                         : "";
+                            return (
+                              <div key={p.player_id} className={`group grid grid-cols-[2rem_3rem_1fr_5rem_4rem_6rem] gap-2 items-center px-4 py-1.5 ${rowBg}`}>
+                                <span className="text-xs text-gray-500">{i + 1}</span>
+                                <span className={`text-[10px] font-bold ${posColor[p.position] || "text-gray-400"}`}>{p.position}</span>
+                                <div className="min-w-0 flex items-center gap-1.5">
+                                  <span className="text-sm font-medium text-white truncate">{p.name}</span>
+                                  {p.team && <span className="text-[10px] text-gray-500 shrink-0">{p.team}</span>}
+                                  {/* Remove from compiled data */}
+                                  {hasCachedRows && supabaseUser && (
+                                    <button
+                                      title="Remove from compiled data"
+                                      onClick={(e) => { e.stopPropagation(); removeCompiledPlayer(selectedHistoryYear, p.player_id); }}
+                                      className="opacity-0 group-hover:opacity-100 text-[9px] text-gray-600 hover:text-red-400 transition shrink-0 leading-none"
+                                    >
+                                      ✕
+                                    </button>
+                                  )}
+                                  {/* Hit / Neutral / Bust grade buttons */}
+                                  <div className="flex items-center gap-0.5 shrink-0 ml-0.5">
+                                    {(["hit", "neutral", "bust"] as const).map((g) => {
+                                      const active = grade === g;
+                                      const activeCls =
+                                        g === "hit"     ? "border-green-600 bg-green-800/70 text-green-300"
+                                        : g === "neutral" ? "border-gray-500 bg-gray-700 text-gray-200"
+                                        :                   "border-red-600 bg-red-800/70 text-red-300";
+                                      return (
+                                        <button
+                                          key={g}
+                                          title={g.charAt(0).toUpperCase() + g.slice(1)}
+                                          onClick={(e) => { e.stopPropagation(); setGrade(selectedHistoryYear, p.player_id, g); }}
+                                          className={`text-[9px] font-bold px-1 py-0.5 rounded border transition ${
+                                            active
+                                              ? activeCls
+                                              : "border-gray-800 text-gray-700 hover:border-gray-600 hover:text-gray-500 bg-transparent"
+                                          }`}
+                                        >
+                                          {g === "hit" ? "H" : g === "neutral" ? "N" : "B"}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                                <span className="text-xs font-semibold text-white">{toPickSlot(p.avgPickNo)}</span>
+                                <span className="text-xs text-gray-400">{p.draftCount}x</span>
+                                <span className={`text-xs font-semibold text-right ${color}`}>{equivLabel}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* ── My Draft Picks ── */}
               {historyTab === "MY_PICKS" && (
@@ -1147,6 +1640,69 @@ export default function DraftHub({
                   </div>
                 )
               )}
+              {/* ── Pick Slot Grades ── */}
+              {historyTab === "GRADES" && (() => {
+                if (gradeReport.length === 0) {
+                  return (
+                    <div className="rounded-xl border border-dashed border-gray-700 bg-gray-900/40 p-6 text-sm text-gray-400">
+                      No grades recorded yet. Use the H / N / B buttons on the Consensus Board to grade players.
+                    </div>
+                  );
+                }
+                return (
+                  <div className="space-y-1">
+                    {/* Header */}
+                    <div className="grid grid-cols-[4rem_1fr_4rem] gap-2 px-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-gray-500">
+                      <span>Slot</span>
+                      <span>Hit / Neutral / Bust</span>
+                      <span className="text-right">Players</span>
+                    </div>
+                    {gradeReport.map((row) => (
+                      <details key={row.slot} className="group rounded-xl border border-gray-800 bg-gray-900/50 overflow-hidden">
+                        <summary className="grid grid-cols-[4rem_1fr_4rem] gap-2 items-center px-3 py-2.5 cursor-pointer list-none select-none hover:bg-gray-800/40 transition">
+                          {/* Slot label */}
+                          <span className="text-sm font-bold text-white">{row.slot}</span>
+
+                          {/* Stacked bar */}
+                          <div className="flex flex-col gap-1">
+                            <div className="flex h-2 rounded-full overflow-hidden bg-gray-700/50">
+                              {row.hitRate  > 0 && <div className="bg-green-500 transition-all" style={{ width: `${row.hitRate  * 100}%` }} />}
+                              {row.neutRate > 0 && <div className="bg-gray-500  transition-all" style={{ width: `${row.neutRate * 100}%` }} />}
+                              {row.bustRate > 0 && <div className="bg-red-500   transition-all" style={{ width: `${row.bustRate * 100}%` }} />}
+                            </div>
+                            <div className="flex gap-3 text-[10px]">
+                              {row.hit      > 0 && <span className="text-green-400 font-semibold">{Math.round(row.hitRate  * 100)}% H ({row.hit})</span>}
+                              {row.neutral  > 0 && <span className="text-gray-400  font-semibold">{Math.round(row.neutRate * 100)}% N ({row.neutral})</span>}
+                              {row.bust     > 0 && <span className="text-red-400   font-semibold">{Math.round(row.bustRate * 100)}% B ({row.bust})</span>}
+                            </div>
+                          </div>
+
+                          {/* Total count */}
+                          <span className="text-xs text-gray-400 text-right">{row.total}</span>
+                        </summary>
+
+                        {/* Expanded player list */}
+                        <div className="border-t border-gray-800 divide-y divide-gray-800/60">
+                          {row.players.map((p, i) => {
+                            const posColor: Record<string, string> = { QB: "text-red-400", RB: "text-green-400", WR: "text-blue-400", TE: "text-yellow-400", FB: "text-orange-400" };
+                            const gradeColor = p.grade === "hit" ? "text-green-400" : p.grade === "bust" ? "text-red-400" : "text-gray-400";
+                            const gradeLabel = p.grade === "hit" ? "H" : p.grade === "bust" ? "B" : "N";
+                            return (
+                              <div key={i} className="flex items-center gap-3 px-3 py-2">
+                                <span className={`text-[10px] font-bold w-7 ${posColor[p.position] ?? "text-gray-400"}`}>{p.position}</span>
+                                <span className="text-sm text-white flex-1 truncate">{p.name}</span>
+                                <span className="text-xs text-gray-500">{p.year}</span>
+                                <span className={`text-xs font-bold w-4 text-right ${gradeColor}`}>{gradeLabel}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </details>
+                    ))}
+                  </div>
+                );
+              })()}
+
             </>
           )}
         </div>

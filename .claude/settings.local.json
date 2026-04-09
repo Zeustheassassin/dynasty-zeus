@@ -48,7 +48,8 @@
       "Bash(awk 'NR >= 8193' /c/Users/bstefely.NPCSEALANTS/dynastyzeus-app/app/page.tsx)",
       "Bash(python3 -)",
       "Bash(wc -l app/page.tsx hooks/*.ts components/*.tsx lib/*.ts)",
-      "Bash(awk 'NR>=2350 && NR<=2558' app/page.tsx)"
+      "Bash(awk 'NR>=2350 && NR<=2558' app/page.tsx)",
+      "Bash(npm run:*)"
     ]
   }
 }

@@ -128,3 +128,37 @@ drop policy if exists "alerts_self" on alerts;
 create policy "alerts_self" on alerts for all
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
+
+-- ── consensus_draft_cache (per-player aggregated picks per user/year) ────────
+create table if not exists consensus_draft_cache (
+  user_id uuid references auth.users(id) on delete cascade not null,
+  year integer not null,
+  player_id text not null,
+  player_name text not null default '',
+  position text not null default '',
+  team text not null default '',
+  avg_pick_no real not null,
+  draft_count integer not null,
+  primary key (user_id, year, player_id)
+);
+alter table consensus_draft_cache enable row level security;
+drop policy if exists "consensus_cache_self" on consensus_draft_cache;
+create policy "consensus_cache_self" on consensus_draft_cache for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+-- ── consensus_draft_meta (compilation run metadata per user/year) ─────────────
+create table if not exists consensus_draft_meta (
+  user_id uuid references auth.users(id) on delete cascade not null,
+  year integer not null,
+  total_drafts integer not null default 0,
+  total_leagues integer not null default 0,
+  connected_user_count integer not null default 0,
+  compiled_at timestamptz not null default now(),
+  primary key (user_id, year)
+);
+alter table consensus_draft_meta enable row level security;
+drop policy if exists "consensus_meta_self" on consensus_draft_meta;
+create policy "consensus_meta_self" on consensus_draft_meta for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
