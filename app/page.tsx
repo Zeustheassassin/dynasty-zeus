@@ -793,14 +793,13 @@ useEffect(() => {
   }
 }, [mainTab, leagueHubTab, selectedLeague?.league_id, rosters.length]);
 
-// Load leaguemate trade alerts once rosters + user display names are ready.
-// Uses Object.keys(users).length as the readiness signal since users is set
-// right after rosters during league selection.
+// Load leaguemate trade alerts once rosters + user display names + players are ready.
+// players must be loaded so player IDs in trade.adds can be resolved to full_name.
 useEffect(() => {
-  if (!rosters.length || !Object.keys(users).length || !user?.user_id) return;
+  if (!rosters.length || !Object.keys(users).length || !user?.user_id || !Object.keys(players).length) return;
   loadLeaguemateTradeAlerts();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [rosters.length, Object.keys(users).length]);
+}, [rosters.length, Object.keys(users).length, Object.keys(players).length]);
 
 // Auto-load data needed by the player profile panel whenever it opens
 useEffect(() => {
@@ -2093,7 +2092,7 @@ const loadGamedayMatchups = async (leagueId: string, week: number) => {
 const tradeAlertLoadedRef = useRef(false);
 const loadLeaguemateTradeAlerts = async () => {
   if (tradeAlertLoadedRef.current) return; // once per session
-  if (!rosters.length || !user?.user_id) return;
+  if (!rosters.length || !user?.user_id || !Object.keys(players).length) return;
   tradeAlertLoadedRef.current = true;
 
   const fourteenDaysAgo = Date.now() - 14 * 24 * 60 * 60 * 1000;
@@ -2179,14 +2178,27 @@ const loadLeaguemateTradeAlerts = async () => {
               .map(([pid]) => (players as any)?.[pid]?.full_name || pid)
               .filter(Boolean);
 
-            const pickCount = (trade.draft_picks || []).filter((p: any) =>
-              p.owner_id !== ownerRoster.roster_id
-            ).length;
-            const picksNote = pickCount > 0
-              ? ` + ${pickCount} draft pick${pickCount > 1 ? "s" : ""}`
-              : "";
+            // Label each pick the same way as Trade Hub: slotted picks show "2026 1.04",
+            // future picks show "2027 Rd 1". Picks moving TO this owner are "received picks",
+            // picks moving AWAY are "sent picks".
+            const labelPick = (p: any) => {
+              const isSlotted = p.slot && String(p.slot).includes(".");
+              return isSlotted ? `${p.season} ${p.slot}` : `${p.season} Rd ${p.round}`;
+            };
+            const picksReceived = (trade.draft_picks || [])
+              .filter((p: any) => p.owner_id === ownerRoster.roster_id)
+              .map(labelPick);
+            const picksSent = (trade.draft_picks || [])
+              .filter((p: any) => p.previous_owner_id === ownerRoster.roster_id)
+              .map(labelPick);
 
-            if (!acquired.length && !sent.length) return; // pick-only, skip
+            if (!acquired.length && !sent.length && !picksReceived.length && !picksSent.length) return;
+
+            const acquiredAll = [...acquired, ...picksReceived];
+            const sentAll = [...sent, ...picksSent];
+
+            // skip if truly nothing meaningful (e.g. waiver-budget only)
+            if (!acquiredAll.length && !sentAll.length) return;
 
             const leagueName = league.name || `League`;
             const tradeTs = trade.status_updated || trade.created || Date.now();
@@ -2197,13 +2209,13 @@ const loadLeaguemateTradeAlerts = async () => {
               source: "internal" as const,
               severity: "medium" as const,
               title: `${ownerName} made a trade — ${leagueName}`,
-              detail: acquired.length
-                ? `${ownerName} received ${acquired.join(", ")}${sent.length ? `, sent ${sent.join(", ")}` : ""}${picksNote} in ${leagueName}.`
-                : `${ownerName} sent ${sent.join(", ")}${picksNote} in ${leagueName}.`,
+              detail: acquiredAll.length
+                ? `${ownerName} received ${acquiredAll.join(", ")}${sentAll.length ? `, sent ${sentAll.join(", ")}` : ""} in ${leagueName}.`
+                : `${ownerName} sent ${sentAll.join(", ")} in ${leagueName}.`,
               actionable: true,
               timestamp: tradeTs,
               leagueId: league.league_id,
-              payload: { ownerId, ownerName, leagueName, acquired, sent, pickCount },
+              payload: { ownerId, ownerName, leagueName, acquired: acquiredAll, sent: sentAll },
             });
           });
         } catch {}

@@ -470,8 +470,8 @@ export default function GamedayHub({
                       {p.team && <span className="text-[10px] text-gray-500 shrink-0">{p.team}</span>}
                       <span className={`text-[10px] font-semibold shrink-0 ${isStarting ? "text-green-400" : "text-gray-500"}`}>
                         {isStarting
-                          ? `Starting ${data.starters.length}/${totalLeagues}`
-                          : `Bench ${data.count}/${totalLeagues}`}
+                          ? `Starting ${data.starters.length}/${data.leagues.length}`
+                          : `Owned ${data.count}`}
                       </span>
                     </div>
                     {(isStarting || data.leagues.length > 0) && (

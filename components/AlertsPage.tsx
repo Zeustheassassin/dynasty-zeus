@@ -69,6 +69,17 @@ const POS_COLOR: Record<string, string> = {
   TE: "text-yellow-400",
 };
 
+// Replaces any bare numeric Sleeper player IDs remaining in a detail string
+// with the player's full_name from the players dictionary.
+// This is a safety net for alerts generated before the players dictionary was loaded.
+function resolvePlayerIdsInDetail(detail: string, players: Record<string, any>): string {
+  // Sleeper player IDs are numeric strings, 1–5 digits, that appear as standalone tokens
+  return detail.replace(/\b(\d{1,5})\b/g, (match) => {
+    const p = players[match];
+    return p?.full_name ?? match;
+  });
+}
+
 function injuryStatusStyle(player: any) {
   const s = (player.injury_status || player.status || "").toLowerCase();
   if (/ir|pup/.test(s))
@@ -347,7 +358,11 @@ export default function AlertsPage({
                         </span>
                       </div>
                       <div className="mt-2 text-sm font-semibold text-white">{alert.title}</div>
-                      <div className="mt-1 text-sm text-slate-300">{alert.detail}</div>
+                      <div className="mt-1 text-sm text-slate-300">
+                        {alert.category === "league"
+                          ? resolvePlayerIdsInDetail(alert.detail, players)
+                          : alert.detail}
+                      </div>
                     </div>
                     <button
                       type="button"
@@ -467,6 +482,13 @@ export default function AlertsPage({
                             {showBye && (
                               <span className="text-[10px] font-semibold border border-purple-700 bg-purple-900/30 text-purple-300 px-2 py-0.5 rounded-lg">
                                 Bye Wk {byeWeek}
+                              </span>
+                            )}
+                            {leagues.length > 0 && (
+                              <span className="text-[10px] font-semibold border border-slate-600 bg-slate-800/60 text-slate-300 px-2 py-0.5 rounded-lg whitespace-nowrap">
+                                {startingLeagues.length > 0
+                                  ? `Starting ${startingLeagues.length}/${leagues.length}`
+                                  : `Owned ${leagues.length}`}
                               </span>
                             )}
                             <span className={`text-[10px] font-semibold border px-2 py-0.5 rounded-lg ${statusCls}`}>
