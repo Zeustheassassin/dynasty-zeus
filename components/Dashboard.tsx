@@ -56,7 +56,7 @@ const navCardRows = [
   ],
   [
     {
-      title: "Alerts",
+      title: "Alert Hub",
       tab: "ALERTS",
       image: "https://images.pexels.com/photos/128457/pexels-photo-128457.jpeg?auto=compress&cs=tinysrgb&w=800",
       overlay: "from-red-950/70 via-slate-900/60 to-slate-950/80",

@@ -195,15 +195,48 @@ export default function DraftHub({
   });
 
   // ── Player grade annotations (Hit / Neutral / Bust) ─────────────────────
-  // Stored in localStorage as { "2024_player_id": "hit" | "neutral" | "bust" }
+  // Supabase-backed (consensus_player_grades table), localStorage as fallback/cache
   const [playerGrades, setPlayerGrades] = useState<Record<string, "hit" | "neutral" | "bust">>({});
 
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem("consensusPlayerGrades");
-      if (saved) setPlayerGrades(JSON.parse(saved));
-    } catch {}
-  }, []);
+    if (!supabaseUser) {
+      // Not logged in — load from localStorage only
+      try {
+        const saved = localStorage.getItem("consensusPlayerGrades");
+        if (saved) setPlayerGrades(JSON.parse(saved));
+      } catch {}
+      return;
+    }
+    // Logged in — Supabase first, localStorage fallback
+    (supabase.from("consensus_player_grades" as any) as any)
+      .select("grades")
+      .eq("user_id", supabaseUser.id)
+      .single()
+      .then(({ data }: { data: any }) => {
+        if (data?.grades && typeof data.grades === "object") {
+          setPlayerGrades(data.grades);
+          try { localStorage.setItem("consensusPlayerGrades", JSON.stringify(data.grades)); } catch {}
+        } else {
+          // No Supabase row yet — seed from localStorage if present
+          try {
+            const saved = localStorage.getItem("consensusPlayerGrades");
+            if (saved) setPlayerGrades(JSON.parse(saved));
+          } catch {}
+        }
+      });
+  }, [supabaseUser?.id]); // eslint-disable-line
+
+  const syncGradesToSupabase = (grades: Record<string, string>) => {
+    if (!supabaseUser) return;
+    (supabase.from("consensus_player_grades" as any) as any)
+      .upsert(
+        { user_id: supabaseUser.id, grades, updated_at: new Date().toISOString() },
+        { onConflict: "user_id" }
+      )
+      .then(({ error }: { error: any }) => {
+        if (error) console.error("grade sync failed:", error.message);
+      });
+  };
 
   const setGrade = (year: string, playerId: string, grade: "hit" | "neutral" | "bust") => {
     setPlayerGrades((prev) => {
@@ -213,6 +246,7 @@ export default function DraftHub({
       if (next[key] === grade) delete next[key];
       else next[key] = grade;
       try { localStorage.setItem("consensusPlayerGrades", JSON.stringify(next)); } catch {}
+      syncGradesToSupabase(next);
       return next;
     });
   };
@@ -333,9 +367,13 @@ export default function DraftHub({
     if (allYears.length > 0) setSelectedHistoryYear(allYears[0]);
   }, [historyData.length, consensusMeta]); // eslint-disable-line
 
-  // ── Load consensus meta from Supabase on login ──────────────────────────
+  // ── Load consensus meta from Supabase on login or when HISTORY tab opens ──
   useEffect(() => {
     if (!supabaseUser) return;
+    // Re-fetch whenever we enter HISTORY so stale-on-reload is impossible.
+    // Skip if we already have data and aren't actively on the history section
+    // (avoids redundant fetches on every tab switch away from HISTORY).
+    if (draftHubSection !== "HISTORY" && Object.keys(consensusMeta).length > 0) return;
     supabase
       .from("consensus_draft_meta")
       .select("year, total_drafts, total_leagues, connected_user_count, compiled_at")
@@ -353,7 +391,7 @@ export default function DraftHub({
         });
         setConsensusMeta(meta);
       });
-  }, [supabaseUser?.id]); // eslint-disable-line
+  }, [supabaseUser?.id, draftHubSection]); // eslint-disable-line
 
   // ── When GRADES tab opens, load ALL compiled years so every graded player has slot data ─
   useEffect(() => {
@@ -1199,7 +1237,7 @@ export default function DraftHub({
           DRAFT HISTORY
          ══════════════════════════════════════════════════════ */}
       {draftHubSection === "HISTORY" && (
-        <div className="max-w-3xl mx-auto">
+        <div className="max-w-3xl lg:max-w-5xl mx-auto">
           {/* Header + year filter */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
             <div>
@@ -1649,7 +1687,83 @@ export default function DraftHub({
                     </div>
                   );
                 }
+
+                // ── Summary table ──────────────────────────────────────────
+                const SLOT_GROUPS = [
+                  { label: "Early 1st", round: 1, min: 1,  max: 4  },
+                  { label: "Mid 1st",   round: 1, min: 5,  max: 8  },
+                  { label: "Late 1st",  round: 1, min: 9,  max: 12 },
+                  { label: "Early 2nd", round: 2, min: 1,  max: 4  },
+                  { label: "Mid 2nd",   round: 2, min: 5,  max: 8  },
+                  { label: "Late 2nd",  round: 2, min: 9,  max: 12 },
+                  { label: "Early 3rd", round: 3, min: 1,  max: 4  },
+                  { label: "Mid 3rd",   round: 3, min: 5,  max: 8  },
+                  { label: "Late 3rd",  round: 3, min: 9,  max: 12 },
+                  { label: "4th Round", round: 4, min: 1,  max: 12 },
+                  { label: "5th+/Waiv", round: 5, min: 1,  max: 999 },
+                ];
+                const summaryGroups = SLOT_GROUPS.map(({ label, round, min, max }) => {
+                  const rows = gradeReport.filter((row) => {
+                    const [r, s] = row.slot.split(".").map(Number);
+                    return r === round && s >= min && s <= max;
+                  });
+                  const hit     = rows.reduce((s, r) => s + r.hit,     0);
+                  const neutral = rows.reduce((s, r) => s + r.neutral, 0);
+                  const bust    = rows.reduce((s, r) => s + r.bust,    0);
+                  const total   = hit + neutral + bust;
+                  return { label, hit, neutral, bust, total };
+                }).filter((g) => g.total > 0);
+
                 return (
+                  <div className="space-y-4">
+                    {/* ── Hit/Neutral/Bust summary table ── */}
+                    {summaryGroups.length > 0 && (
+                      <div className="rounded-2xl border border-gray-800 bg-gray-900/60 overflow-hidden">
+                        <div className="px-4 py-3 border-b border-gray-800">
+                          <div className="text-sm font-semibold text-white">Grade Summary by Pick Slot</div>
+                          <div className="text-xs text-gray-400 mt-0.5">Hit / Neutral / Miss rates from your H N B grades</div>
+                        </div>
+                        <div className="overflow-x-auto lg:overflow-x-visible">
+                          <table className="w-full text-xs border-collapse min-w-max lg:min-w-0">
+                            <thead>
+                              <tr className="border-b border-gray-800">
+                                <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 w-16 sticky left-0 bg-gray-900/60"></th>
+                                {summaryGroups.map((g) => (
+                                  <th key={g.label} className="px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-wide text-gray-400 whitespace-nowrap">
+                                    {g.label}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(["hit", "neutral", "bust"] as const).map((grade) => {
+                                const labelText  = grade === "hit" ? "Hit" : grade === "neutral" ? "Neutral" : "Miss";
+                                const labelColor = grade === "hit" ? "text-green-400" : grade === "neutral" ? "text-gray-400" : "text-red-400";
+                                return (
+                                  <tr key={grade} className="border-b border-gray-800/50 last:border-0">
+                                    <td className={`px-3 py-2 font-bold text-[11px] sticky left-0 bg-gray-900/60 ${labelColor}`}>{labelText}</td>
+                                    {summaryGroups.map((g) => {
+                                      const pct = g.total ? Math.round((g[grade] / g.total) * 100) : 0;
+                                      const color = grade === "hit"
+                                        ? pct >= 50 ? "text-green-300" : pct >= 30 ? "text-green-500" : "text-green-700"
+                                        : grade === "bust"
+                                        ? pct >= 60 ? "text-red-600" : pct >= 40 ? "text-red-400" : "text-red-300"
+                                        : "text-gray-400";
+                                      return (
+                                        <td key={g.label} className={`px-2 py-2 text-center font-semibold ${color}`}>
+                                          {pct}%
+                                        </td>
+                                      );
+                                    })}
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
                   <div className="space-y-1">
                     {/* Header */}
                     <div className="grid grid-cols-[4rem_1fr_4rem] gap-2 px-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-gray-500">
@@ -1699,6 +1813,7 @@ export default function DraftHub({
                         </div>
                       </details>
                     ))}
+                  </div>
                   </div>
                 );
               })()}

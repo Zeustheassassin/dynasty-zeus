@@ -723,7 +723,14 @@ useEffect(() => {
   loadPlayers();
 }, []);
 
-// Load league-specific FC values whenever the calculator or finder tab is active and a league is selected
+// Load league-specific FC values as soon as Trade Hub is opened — don't wait for sub-tab
+useEffect(() => {
+  if (mainTab === "TRADE_HUB" && selectedLeague?.league_id) {
+    loadCalcValues(selectedLeague.league_id);
+  }
+}, [mainTab, selectedLeague?.league_id]);
+
+// Also reload if the user switches sub-tabs within Trade Hub (redundant but keeps the guard intact)
 useEffect(() => {
   if ((tradeHubSection === "CALCULATOR" || tradeHubSection === "FINDER" || tradeHubSection === "RECOMMENDATIONS") && selectedLeague?.league_id) {
     loadCalcValues(selectedLeague.league_id);
@@ -1093,8 +1100,10 @@ useEffect(() => {
 
           const tradeLeagueResults = await Promise.all(
             dynastyLeagues.map(async (league: any) => {
-              const [leagueRosters, t1, t2, draftsData] = await Promise.all([
+              // Fetch week 0 (full offseason) + weeks 1-2 to cover current year activity
+              const [leagueRosters, t0, t1, t2, draftsData] = await Promise.all([
                 fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`).then((r) => r.json()).catch(() => []),
+                fetch(`https://api.sleeper.app/v1/league/${league.league_id}/transactions/0`).then((r) => r.json()).catch(() => []),
                 fetch(`https://api.sleeper.app/v1/league/${league.league_id}/transactions/1`).then((r) => r.json()).catch(() => []),
                 fetch(`https://api.sleeper.app/v1/league/${league.league_id}/transactions/2`).then((r) => r.json()).catch(() => []),
                 fetch(`https://api.sleeper.app/v1/league/${league.league_id}/drafts`).then((r) => r.json()).catch(() => []),
@@ -1102,7 +1111,11 @@ useEffect(() => {
               const ownerRoster = (Array.isArray(leagueRosters) ? leagueRosters : []).find((roster: any) => String(roster.owner_id) === ownerId) || null;
               return {
                 ownerRoster,
-                trades: [...(Array.isArray(t1) ? t1 : []), ...(Array.isArray(t2) ? t2 : [])],
+                trades: [
+                  ...(Array.isArray(t0) ? t0 : []),
+                  ...(Array.isArray(t1) ? t1 : []),
+                  ...(Array.isArray(t2) ? t2 : []),
+                ],
                 draftsData: Array.isArray(draftsData) ? draftsData : [],
               };
             })
@@ -2366,6 +2379,28 @@ const loadUserTrades = async (targetUserId: string) => {
         const myRoster = rostersData.find((r: any) => r.owner_id === targetUserId);
         if (!myRoster) return;
 
+        // Build per-league slot lookup: "season-round-roster_id" → "2026 1.07" label
+        // Uses this league's own draft order — so roster_ids never bleed across leagues
+        const currentDraft = (Array.isArray(draftsData) ? draftsData : [])
+          .find((d: any) => d.season === CURRENT_YEAR);
+        const draftOrder = currentDraft?.draft_order || {};
+        const numTeams = (Array.isArray(rostersData) ? rostersData : []).length
+          || Number(currentDraft?.settings?.teams) || 0;
+        const rosterToOwner: Record<number, string> = {};
+        (Array.isArray(rostersData) ? rostersData : []).forEach((r: any) => {
+          rosterToOwner[r.roster_id] = r.owner_id;
+        });
+
+        const slotLabel = (season: string, round: number, rosterId: number): string => {
+          if (String(season) === CURRENT_YEAR && currentDraft) {
+            const userId = rosterToOwner[rosterId];
+            const baseSlot = Number(draftOrder[String(userId)] || 0);
+            const s = getDraftRoundSlot(currentDraft, round, baseSlot, numTeams);
+            if (s) return `${season} ${round}.${String(s).padStart(2, "0")}`;
+          }
+          return `${season} Rd ${round}`;
+        };
+
         // Startup drafts have many rounds (15-25); rookie drafts have 4-5
         const startupDraft = (Array.isArray(draftsData) ? draftsData : [])
           .filter((d: any) => (d.settings?.rounds ?? 0) > 6)
@@ -2387,8 +2422,14 @@ const loadUserTrades = async (targetUserId: string) => {
           );
 
         trades.forEach((trade: any) => {
+          // Resolve pick slots using this league's draft order — never the selected league's data
+          const resolvedDraftPicks = (trade.draft_picks || []).map((p: any) => ({
+            ...p,
+            resolvedSlot: slotLabel(String(p.season), Number(p.round), Number(p.roster_id)),
+          }));
           allTrades.push({
             ...trade,
+            draft_picks: resolvedDraftPicks,
             leagueName: league.name,
             leagueId: league.league_id,
             myRosterId: myRoster.roster_id,
@@ -3397,6 +3438,7 @@ const getTeamSummary = () => {
         return a.ownerName.localeCompare(b.ownerName);
       });
   }, [selectedLeague?.league_id, rosters, user?.user_id, selectedLeagueSimulation, selectedLeagueDirection, selectedLeagueMateProfilesView]);
+
   const tradeRecommendationCards = useMemo(() => {
     if (!selectedLeague || !rosters.length || !user?.user_id || !selectedLeagueDirection) return [];
 
@@ -5051,7 +5093,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
                 { id: "DRAFT", label: "Draft Hub" },
                 { id: "TRADE_HUB", label: "Trade Hub" },
                 { id: "GAMEDAY_HUB", label: "Gameday Hub" },
-                { id: "ALERTS", label: "Alerts" },
+                { id: "ALERTS", label: "Alert Hub" },
                 { id: "MANAGEMENT_HUB", label: "Management Hub" },
               ].map((tab) => (
                 <button

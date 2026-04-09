@@ -93,6 +93,7 @@ interface TradeHubProps {
   tradeHubData: any[] | null;
   loadingTradeHub: boolean;
   tradeHubUserId: string | null;
+
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
@@ -2040,7 +2041,22 @@ export default function TradeHub({
         <div className="space-y-4">
           {/* ── Player pin search ── */}
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 space-y-2">
-            {finderDirectionProfile && (
+            {loadingCalcValues ? (
+              <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-3 animate-pulse">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 space-y-2">
+                    <div className="h-2.5 w-28 rounded bg-gray-700" />
+                    <div className="h-4 w-3/4 rounded bg-gray-700" />
+                  </div>
+                  <div className="h-5 w-20 rounded-full bg-gray-700" />
+                </div>
+                <div className="mt-3 flex gap-2">
+                  <div className="h-6 w-36 rounded-full bg-gray-700" />
+                  <div className="h-6 w-44 rounded-full bg-gray-700" />
+                  <div className="h-6 w-32 rounded-full bg-gray-700" />
+                </div>
+              </div>
+            ) : finderDirectionProfile ? (
               <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-3">
                 <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
                   <div>
@@ -2075,7 +2091,7 @@ export default function TradeHub({
                   </div>
                 )}
               </div>
-            )}
+            ) : null}
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Find trades involving a specific player</p>
             <div className="flex items-center justify-between gap-3 rounded-lg bg-gray-800/70 px-3 py-2">
               <div>
@@ -2327,12 +2343,12 @@ export default function TradeHub({
                         {partnerProfile.tradePreferenceLabel}
                       </span>
                     )}
-                    {partnerProfile.repeatedPlayers.slice(0, 2).map((player: any) => (
+                    {(partnerProfile?.repeatedPlayers || []).slice(0, 2).map((player: any) => (
                       <span key={player.playerId} className="rounded-full border border-cyan-800 bg-cyan-950/30 px-2 py-0.5 text-[10px] text-cyan-200">
                         Likes {player.name}
                       </span>
                     ))}
-                    {partnerProfile?.acquiredPlayers?.slice(0, 1).map((player: any) => (
+                    {(partnerProfile?.acquiredPlayers || []).slice(0, 1).map((player: any) => (
                       <span key={`recent-${player.playerId}`} className="rounded-full border border-emerald-800 bg-emerald-950/30 px-2 py-0.5 text-[10px] text-emerald-200">
                         Recently Bought {player.name}
                       </span>
@@ -2837,18 +2853,7 @@ export default function TradeHub({
 
     {/* ── Trade Log ── */}
     {tradeHubSection === "TRADE_LOG" && (() => {
-      const logPickLabel = (p: any) => {
-        if (String(p.season) === CURRENT_YEAR) {
-          const match = (allPicks as any[]).find(
-            (ap) =>
-              String(ap.season) === String(p.season) &&
-              Number(ap.round) === Number(p.round) &&
-              Number(ap.roster_id) === Number(p.roster_id)
-          );
-          if (match?.slot?.includes(".")) return `${p.season} ${match.slot}`;
-        }
-        return `${p.season} Rd ${p.round}`;
-      };
+      const logPickLabel = (p: any) => p.resolvedSlot ?? `${p.season} Rd ${p.round}`;
 
       return (
         <div className="space-y-4">
@@ -2893,9 +2898,11 @@ export default function TradeHub({
                 return { name: p?.full_name || "Unknown", pos: p?.position || "", val: calcFcValues[pid] ?? 0 };
               });
 
-            const logPickVal = (p: any) =>
-              selectedLeagueDynamicPickValues[`${p.season}-${p.round}-${p.roster_id}`]?.expectedValue
-              ?? getStoredPickValue(pickFcValues, p);
+            const logPickVal = (p: any) => {
+              // Extract slot like "1.07" from resolvedSlot "2026 1.07" so pickFcValues can do a slot-specific lookup
+              const slotPart = p.resolvedSlot?.match(/(\d+\.\d+)$/)?.[1];
+              return getStoredPickValue(pickFcValues, slotPart ? { ...p, slot: slotPart } : p);
+            };
 
             const picksReceived = (trade.draft_picks || [])
               .filter((p: any) => p.owner_id === myRosterId)
