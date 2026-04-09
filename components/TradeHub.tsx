@@ -1,5 +1,5 @@
 "use client";
-import React from "react";
+import React, { useState } from "react";
 import {
   getStoredPickValue,
   getLeagueDirectionBucket,
@@ -8,6 +8,7 @@ import {
   CURRENT_YEAR,
   formatRelativeDate,
 } from "../lib/helpers";
+import type { TradeAttempt, TradeAttemptStatus, TradeAttemptAsset, TradeAttemptPick } from "../lib/types";
 
 const BASE_YEAR_TH = new Date().getFullYear();
 const YEARS = Array.from({ length: 3 }, (_, index) => String(BASE_YEAR_TH + index));
@@ -15,8 +16,8 @@ const YEARS = Array.from({ length: 3 }, (_, index) => String(BASE_YEAR_TH + inde
 // ── Props ──────────────────────────────────────────────────────────────────
 interface TradeHubProps {
   // Tab state
-  tradeHubSection: "CALCULATOR" | "FINDER" | "RECOMMENDATIONS" | "TRADE_LOG";
-  setTradeHubSection: (section: "CALCULATOR" | "FINDER" | "RECOMMENDATIONS" | "TRADE_LOG") => void;
+  tradeHubSection: "CALCULATOR" | "FINDER" | "RECOMMENDATIONS" | "TRADE_LOG" | "ATTEMPTS";
+  setTradeHubSection: (section: "CALCULATOR" | "FINDER" | "RECOMMENDATIONS" | "TRADE_LOG" | "ATTEMPTS") => void;
 
   // League / roster state
   leagues: any[];
@@ -94,6 +95,14 @@ interface TradeHubProps {
   loadingTradeHub: boolean;
   tradeHubUserId: string | null;
 
+  // Trade attempts
+  tradeAttempts: TradeAttempt[];
+  loadingTradeAttempts: boolean;
+  tradeAttemptsLeagueId: string | null;
+  onMarkAttempted: (attempt: Omit<TradeAttempt, "id" | "user_id" | "attempted_at" | "resolved_at">) => Promise<void>;
+  onUpdateAttemptStatus: (id: string, status: TradeAttemptStatus, counterDetails?: string) => Promise<void>;
+  onDeleteAttempt: (id: string) => Promise<void>;
+  onLoadTradeAttempts: (leagueId: string) => Promise<void>;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
@@ -118,7 +127,18 @@ export default function TradeHub({
   setPlayerProfileId, loadUserExposure, loadUserTrades,
   historicalSnapshot,
   tradeHubData, loadingTradeHub, tradeHubUserId,
+  tradeAttempts, loadingTradeAttempts, tradeAttemptsLeagueId,
+  onMarkAttempted, onUpdateAttemptStatus, onDeleteAttempt, onLoadTradeAttempts,
 }: TradeHubProps) {
+  // Local UI state for the Attempts tab
+  const [counterInputs, setCounterInputs] = useState<Record<string, string>>({});
+  const [showCounterInput, setShowCounterInput] = useState<string | null>(null);
+  // Fingerprints of trades marked this session (so the button turns into a checkmark immediately)
+  const [sessionMarked, setSessionMarked] = useState<Set<string>>(new Set());
+
+  const buildTradeFingerprint = (leagueId: string, partnerRosterId: number | string, givePids: string[], receiveIds: string[]) =>
+    `${leagueId}|${partnerRosterId}|${[...givePids].sort().join(",")}|${[...receiveIds].sort().join(",")}`;
+
   return (
     <>
   <div className="max-w-4xl mx-auto p-6">
@@ -170,6 +190,26 @@ export default function TradeHub({
         }`}
       >
         Trade Log
+      </button>
+      <button
+        onClick={() => {
+          if (selectedLeague?.league_id && tradeAttemptsLeagueId !== selectedLeague.league_id) {
+            onLoadTradeAttempts(selectedLeague.league_id);
+          }
+          setTradeHubSection("ATTEMPTS");
+        }}
+        className={`pb-2 px-1 text-sm font-semibold transition whitespace-nowrap ${
+          tradeHubSection === "ATTEMPTS"
+            ? "border-b-2 border-orange-400 text-orange-400"
+            : "text-gray-400 hover:text-white"
+        }`}
+      >
+        Attempted Trades
+        {tradeAttempts.filter(a => a.league_id === selectedLeague?.league_id && a.status === "PENDING").length > 0 && (
+          <span className="ml-1.5 inline-flex items-center justify-center w-4 h-4 rounded-full bg-orange-500 text-white text-[9px] font-bold">
+            {tradeAttempts.filter(a => a.league_id === selectedLeague?.league_id && a.status === "PENDING").length}
+          </span>
+        )}
       </button>
       </div>
     </div>
@@ -547,12 +587,77 @@ export default function TradeHub({
                     </span>
                   )}
                 </div>
-                <button
-                  onClick={() => { setCalcGive([]); setCalcReceive([]); setCalcGivePicks([]); setCalcReceivePicks([]); }}
-                  className="text-xs text-gray-600 hover:text-gray-300 transition"
-                >
-                  Clear trade
-                </button>
+                <div className="flex items-center gap-3">
+                  {calcOpponentRosterId != null && (calcGive.length > 0 || calcGivePicks.length > 0) && (calcReceive.length > 0 || calcReceivePicks.length > 0) && selectedLeague && (() => {
+                    const calcFp = buildTradeFingerprint(
+                      selectedLeague.league_id,
+                      calcOpponentRosterId,
+                      calcGive,
+                      calcReceive,
+                    );
+                    const alreadyMarked = sessionMarked.has(calcFp);
+                    const buildCalcPayload = (direction: "ME" | "THEM") => {
+                      const oppRosterForCalc = rosters.find((r: any) => r.roster_id === calcOpponentRosterId);
+                      const oppName = (users as any)[oppRosterForCalc?.owner_id] || `Team ${calcOpponentRosterId}`;
+                      return {
+                        league_id: selectedLeague.league_id,
+                        partner_roster_id: calcOpponentRosterId,
+                        partner_name: oppName,
+                        give_players: calcGive.map((id: string) => {
+                          const p = (players as any)[id];
+                          return { player_id: id, name: p?.full_name || id, position: p?.position || "", value: calcVal(id) } as TradeAttemptAsset;
+                        }),
+                        give_picks: calcGivePicks.map((k: string) => {
+                          const pick = (allPicks as any[]).find((p: any) => pickKey(p) === k);
+                          return { key: k, label: pick ? pickLabel(pick) : k, value: getPickValue(k) } as TradeAttemptPick;
+                        }),
+                        receive_players: calcReceive.map((id: string) => {
+                          const p = (players as any)[id];
+                          return { player_id: id, name: p?.full_name || id, position: p?.position || "", value: calcVal(id) } as TradeAttemptAsset;
+                        }),
+                        receive_picks: calcReceivePicks.map((k: string) => {
+                          const pick = (allPicks as any[]).find((p: any) => pickKey(p) === k);
+                          return { key: k, label: pick ? pickLabel(pick) : k, value: getPickValue(k) } as TradeAttemptPick;
+                        }),
+                        source: "CALCULATOR" as const,
+                        initiated_by: direction,
+                        status: "PENDING" as const,
+                        counter_details: null,
+                      };
+                    };
+                    if (alreadyMarked) {
+                      return <span className="text-xs text-green-400 font-semibold">✓ Recorded</span>;
+                    }
+                    return (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={async () => {
+                            await onMarkAttempted(buildCalcPayload("ME"));
+                            setSessionMarked((prev) => new Set([...prev, calcFp]));
+                          }}
+                          className="text-xs font-semibold px-3 py-1 rounded-lg border border-orange-700 text-orange-400 hover:border-orange-500 hover:text-orange-300 transition"
+                        >
+                          I Sent This
+                        </button>
+                        <button
+                          onClick={async () => {
+                            await onMarkAttempted(buildCalcPayload("THEM"));
+                            setSessionMarked((prev) => new Set([...prev, calcFp]));
+                          }}
+                          className="text-xs font-semibold px-3 py-1 rounded-lg border border-indigo-700 text-indigo-400 hover:border-indigo-500 hover:text-indigo-300 transition"
+                        >
+                          They Sent This
+                        </button>
+                      </div>
+                    );
+                  })()}
+                  <button
+                    onClick={() => { setCalcGive([]); setCalcReceive([]); setCalcGivePicks([]); setCalcReceivePicks([]); }}
+                    className="text-xs text-gray-600 hover:text-gray-300 transition"
+                  >
+                    Clear trade
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -2135,7 +2240,84 @@ export default function TradeHub({
             return hb;
           })();
 
-          const strategyScore = r.score + getDirectionTradeScore(r) + lineupSafety.score + partnerFitScore + dispositionScore + oppDirectionScore + simpleTradeBonus + handcuffBonus;
+          // ── Attempt intelligence score ────────────────────────────────────
+          // Mines the trade_attempts history for this league/opponent to surface
+          // two distinct signals:
+          //
+          //   THEM-initiated trades  → reveals what they want to SELL (their give_players)
+          //                            and what they're TARGETING from my roster (their receive_players).
+          //                            A declined-by-me or pending offer from them is strong sell intent —
+          //                            it doesn't mean they've given up, just that the value wasn't right.
+          //
+          //   ME-initiated trades    → reveals which players I'm willing to shop (my give_players)
+          //                            and the direction I'm building toward (my receive_players).
+          //                            Even if they declined, those are still MY stated intentions.
+          //
+          // Scoring philosophy:
+          //   • Their sell intent on a receive player   → big boost (they want to move it, deal is likely)
+          //   • Their buy intent on a give player       → big boost (they've literally asked for this)
+          //   • My own shop history on a give player    → small boost (confirms my direction)
+          //   • My own target history on a receive      → medium boost (I've been chasing this)
+          //   • Receiving a player they're BUYING (not selling) → penalty (they won't part with it)
+          //   Recency: attempts within 14 days are full weight; 14–56 days are half weight.
+          const attemptIntelScore = (() => {
+            if (!selectedLeague?.league_id || tradeAttempts.length === 0) return 0;
+            const now = Date.now();
+            const FULL_WINDOW  = 14 * 24 * 60 * 60 * 1000; // 14 days → full weight
+            const HALF_WINDOW  = 56 * 24 * 60 * 60 * 1000; // 56 days → half weight, beyond = ignore
+            const weight = (iso: string) => {
+              const age = now - new Date(iso).getTime();
+              if (age <= FULL_WINDOW) return 1.0;
+              if (age <= HALF_WINDOW) return 0.5;
+              return 0;
+            };
+
+            const oppAttempts = tradeAttempts.filter(
+              (a) => a.league_id === selectedLeague.league_id &&
+                     Number(a.partner_roster_id) === Number(r.oppRosterId)
+            );
+            if (oppAttempts.length === 0) return 0;
+
+            // Weighted signal sets
+            const theirSellWeight   = new Map<string, number>(); // they offered → sell intent
+            const theirBuyWeight    = new Map<string, number>(); // they wanted from me → buy intent
+            const myShopWeight      = new Map<string, number>(); // I offered → my shop intent
+            const myTargetWeight    = new Map<string, number>(); // I wanted → my build direction
+
+            for (const a of oppAttempts) {
+              const w = weight(a.attempted_at);
+              if (w === 0) continue;
+              if (a.initiated_by === "THEM") {
+                for (const p of a.give_players)    theirSellWeight.set(p.player_id,  (theirSellWeight.get(p.player_id)  ?? 0) + w);
+                for (const p of a.receive_players) theirBuyWeight.set(p.player_id,   (theirBuyWeight.get(p.player_id)   ?? 0) + w);
+              } else {
+                for (const p of a.give_players)    myShopWeight.set(p.player_id,     (myShopWeight.get(p.player_id)     ?? 0) + w);
+                for (const p of a.receive_players) myTargetWeight.set(p.player_id,   (myTargetWeight.get(p.player_id)   ?? 0) + w);
+              }
+            }
+
+            let ais = 0;
+
+            for (const rp of (r.receive ?? [])) {
+              const sellW = theirSellWeight.get(rp.player_id) ?? 0;
+              const buyW  = theirBuyWeight.get(rp.player_id)  ?? 0;
+              if (sellW > 0) ais += 7 * sellW;  // they've been trying to move this → very receptive
+              if (buyW  > 0) ais -= 6 * buyW;   // they've been ACQUIRING this → won't part with it
+              const targetW = myTargetWeight.get(rp.player_id) ?? 0;
+              if (targetW > 0) ais += 5 * targetW; // I've been chasing this player
+            }
+
+            for (const gp of (r.give ?? [])) {
+              const buyW  = theirBuyWeight.get(gp.player_id)  ?? 0;
+              if (buyW  > 0) ais += 9 * buyW;   // they've specifically asked for this from me → strongest signal
+              const shopW = myShopWeight.get(gp.player_id)    ?? 0;
+              if (shopW > 0) ais += 3 * shopW;  // confirms my own stated sell direction
+            }
+
+            return ais;
+          })();
+
+          const strategyScore = r.score + getDirectionTradeScore(r) + lineupSafety.score + partnerFitScore + dispositionScore + oppDirectionScore + simpleTradeBonus + handcuffBonus + attemptIntelScore;
           return {
             r,
             lineupSafety,
@@ -2393,7 +2575,56 @@ export default function TradeHub({
               }
             </p>
           )}
-          {top15.map((trade: TradeResult, idx: number) => {
+          {/* Build set of recently-attempted trade fingerprints for suppression (28-day window) */}
+          {(() => {
+            const TWENTY_EIGHT_DAYS = 28 * 24 * 60 * 60 * 1000;
+            const recentFingerprints = new Set(
+              tradeAttempts
+                .filter((a) => a.league_id === selectedLeague?.league_id && Date.now() - new Date(a.attempted_at).getTime() < TWENTY_EIGHT_DAYS)
+                .map((a) => buildTradeFingerprint(
+                  a.league_id,
+                  a.partner_roster_id,
+                  [...a.give_players.map((p) => p.player_id), ...a.give_picks.map((p) => p.key)],
+                  [...a.receive_players.map((p) => p.player_id), ...a.receive_picks.map((p) => p.key)],
+                ))
+            );
+            const suppressedCount = top15.filter((trade: TradeResult) => {
+              const fp = buildTradeFingerprint(
+                selectedLeague?.league_id ?? "",
+                trade.oppRosterId,
+                [...trade.give.map((p: any) => p.player_id), ...trade.givePicks.map((p: any) => finderPickKey(p))],
+                [...trade.receive.map((p: any) => p.player_id), ...trade.receivePicks.map((p: any) => finderPickKey(p))],
+              );
+              return recentFingerprints.has(fp);
+            }).length;
+            return suppressedCount > 0 ? (
+              <p className="text-xs text-gray-500 italic">
+                {suppressedCount} recently-offered trade{suppressedCount > 1 ? "s" : ""} hidden (28-day window).
+              </p>
+            ) : null;
+          })()}
+          {top15
+            .filter((trade: TradeResult) => {
+              const fp = buildTradeFingerprint(
+                selectedLeague?.league_id ?? "",
+                trade.oppRosterId,
+                [...trade.give.map((p: any) => p.player_id), ...trade.givePicks.map((p: any) => finderPickKey(p))],
+                [...trade.receive.map((p: any) => p.player_id), ...trade.receivePicks.map((p: any) => finderPickKey(p))],
+              );
+              const TWENTY_EIGHT_DAYS = 28 * 24 * 60 * 60 * 1000;
+              const recentFingerprints = new Set(
+                tradeAttempts
+                  .filter((a) => a.league_id === selectedLeague?.league_id && Date.now() - new Date(a.attempted_at).getTime() < TWENTY_EIGHT_DAYS)
+                  .map((a) => buildTradeFingerprint(
+                    a.league_id,
+                    a.partner_roster_id,
+                    [...a.give_players.map((p) => p.player_id), ...a.give_picks.map((p) => p.key)],
+                    [...a.receive_players.map((p) => p.player_id), ...a.receive_picks.map((p) => p.key)],
+                  ))
+              );
+              return !recentFingerprints.has(fp);
+            })
+            .map((trade: TradeResult, idx: number) => {
             const partnerProfile = leagueMateProfileByRosterId.get(Number(trade.oppRosterId));
             const tradeIntent = getTradeIntent(trade);
 
@@ -2425,7 +2656,29 @@ export default function TradeHub({
               if (outPicks.length > 0 && incPicks.length === 0 && !iAmTankingFinder) factors.push({ label: "Giving up draft capital", positive: false });
               if (incPicks.length > 0 && iAmTankingFinder) factors.push({ label: "Accumulating picks", positive: true });
               if (partnerProfile?.fitLabel) factors.push({ label: `Partner fit: ${partnerProfile.fitLabel}`, positive: partnerProfile.fitScore > 0 });
-              return factors.slice(0, 5);
+              // Attempt intel factors — derived from trade history with this owner
+              if (selectedLeague?.league_id && tradeAttempts.length > 0) {
+                const oppPastAttempts = tradeAttempts.filter(
+                  (a) => a.league_id === selectedLeague.league_id && Number(a.partner_roster_id) === Number(trade.oppRosterId)
+                );
+                if (oppPastAttempts.length > 0) {
+                  const theirSellIds = new Set(oppPastAttempts.filter(a => a.initiated_by === "THEM").flatMap(a => a.give_players.map(p => p.player_id)));
+                  const theirBuyIds  = new Set(oppPastAttempts.filter(a => a.initiated_by === "THEM").flatMap(a => a.receive_players.map(p => p.player_id)));
+                  const myShopIds    = new Set(oppPastAttempts.filter(a => a.initiated_by === "ME").flatMap(a => a.give_players.map(p => p.player_id)));
+                  const myTargetIds  = new Set(oppPastAttempts.filter(a => a.initiated_by === "ME").flatMap(a => a.receive_players.map(p => p.player_id)));
+                  const receiveMatchesSell   = inc.filter((p: any) => theirSellIds.has(p.player_id));
+                  const giveMatchesBuySignal = out.filter((p: any) => theirBuyIds.has(p.player_id));
+                  const receiveIsTheirTarget = inc.filter((p: any) => theirBuyIds.has(p.player_id));
+                  const giveMatchesMyShop    = out.filter((p: any) => myShopIds.has(p.player_id));
+                  const receiveMatchesMyTarget = inc.filter((p: any) => myTargetIds.has(p.player_id));
+                  if (receiveMatchesSell.length > 0) factors.push({ label: `${receiveMatchesSell.map((p: any) => p.full_name.split(" ")[1]).join(", ")} — they've tried to sell this`, positive: true });
+                  if (giveMatchesBuySignal.length > 0) factors.push({ label: `${giveMatchesBuySignal.map((p: any) => p.full_name.split(" ")[1]).join(", ")} — they've asked for this`, positive: true });
+                  if (receiveIsTheirTarget.length > 0) factors.push({ label: `${receiveIsTheirTarget.map((p: any) => p.full_name.split(" ")[1]).join(", ")} — they've been acquiring this`, positive: false });
+                  if (giveMatchesMyShop.length > 0) factors.push({ label: `${giveMatchesMyShop.map((p: any) => p.full_name.split(" ")[1]).join(", ")} — aligns with your sell history`, positive: true });
+                  if (receiveMatchesMyTarget.length > 0) factors.push({ label: `${receiveMatchesMyTarget.map((p: any) => p.full_name.split(" ")[1]).join(", ")} — you've been targeting this`, positive: true });
+                }
+              }
+              return factors.slice(0, 6);
             })();
             const giveVals = [...trade.give.map((p: any) => p.value), ...trade.givePicks.map((p: any) => p.value)];
             const receiveVals = [...trade.receive.map((p: any) => p.value), ...trade.receivePicks.map((p: any) => p.value)];
@@ -2580,22 +2833,57 @@ export default function TradeHub({
                   </details>
                 )}
 
-                {/* Send to Calculator */}
-                <button
-                  onClick={() => {
-                    setCalcOpponentRosterId(trade.oppRosterId);
-                    setCalcGive(trade.give.map((p: any) => p.player_id));
-                    setCalcReceive(trade.receive.map((p: any) => p.player_id));
-                    setCalcGivePicks(trade.givePicks.map((p: any) => finderPickKey(p)));
-                    setCalcReceivePicks(trade.receivePicks.map((p: any) => finderPickKey(p)));
-                    setCalcSearchA("");
-                    setCalcSearchB("");
-                    setTradeHubSection("CALCULATOR");
-                  }}
-                  className="mt-3 w-full text-xs text-gray-500 hover:text-blue-400 border border-gray-700 hover:border-blue-500 rounded-lg py-1.5 transition"
-                >
-                  Open in Trade Calculator →
-                </button>
+                {/* Actions row */}
+                <div className="mt-3 flex gap-2">
+                  <button
+                    onClick={() => {
+                      setCalcOpponentRosterId(trade.oppRosterId);
+                      setCalcGive(trade.give.map((p: any) => p.player_id));
+                      setCalcReceive(trade.receive.map((p: any) => p.player_id));
+                      setCalcGivePicks(trade.givePicks.map((p: any) => finderPickKey(p)));
+                      setCalcReceivePicks(trade.receivePicks.map((p: any) => finderPickKey(p)));
+                      setCalcSearchA("");
+                      setCalcSearchB("");
+                      setTradeHubSection("CALCULATOR");
+                    }}
+                    className="flex-1 text-xs text-gray-500 hover:text-blue-400 border border-gray-700 hover:border-blue-500 rounded-lg py-1.5 transition"
+                  >
+                    Open in Calculator →
+                  </button>
+                  {selectedLeague && (() => {
+                    const fp = buildTradeFingerprint(
+                      selectedLeague.league_id,
+                      trade.oppRosterId,
+                      [...trade.give.map((p: any) => p.player_id), ...trade.givePicks.map((p: any) => finderPickKey(p))],
+                      [...trade.receive.map((p: any) => p.player_id), ...trade.receivePicks.map((p: any) => finderPickKey(p))],
+                    );
+                    const alreadyMarked = sessionMarked.has(fp);
+                    return (
+                      <button
+                        disabled={alreadyMarked}
+                        onClick={async () => {
+                          await onMarkAttempted({
+                            league_id: selectedLeague.league_id,
+                            partner_roster_id: trade.oppRosterId,
+                            partner_name: trade.oppName,
+                            give_players: trade.give.map((p: any) => ({ player_id: p.player_id, name: p.full_name, position: p.position, value: p.value }) as TradeAttemptAsset),
+                            give_picks: trade.givePicks.map((p: any) => ({ key: finderPickKey(p), label: finderPickLabel(p), value: p.value }) as TradeAttemptPick),
+                            receive_players: trade.receive.map((p: any) => ({ player_id: p.player_id, name: p.full_name, position: p.position, value: p.value }) as TradeAttemptAsset),
+                            receive_picks: trade.receivePicks.map((p: any) => ({ key: finderPickKey(p), label: finderPickLabel(p), value: p.value }) as TradeAttemptPick),
+                            source: "FINDER",
+                            initiated_by: "ME",
+                            status: "PENDING",
+                            counter_details: null,
+                          });
+                          setSessionMarked((prev) => new Set([...prev, fp]));
+                        }}
+                        className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition shrink-0 ${alreadyMarked ? "border-green-700 text-green-400 cursor-default" : "border-orange-700 text-orange-400 hover:border-orange-500"}`}
+                      >
+                        {alreadyMarked ? "✓ Offered" : "Mark Attempted"}
+                      </button>
+                    );
+                  })()}
+                </div>
               </div>
             );
           })}
@@ -2901,6 +3189,35 @@ export default function TradeHub({
                         <div className="mt-2 text-right text-[11px] text-gray-500">Total {t.receiveVal.toLocaleString()}</div>
                       </div>
                     </div>
+                    {selectedLeague && (() => {
+                      const trendFp = buildTradeFingerprint(selectedLeague.league_id, rosters.find((r: any) => (users as any)[r.owner_id] === t.partnerName)?.roster_id ?? 0, [t.giveId], [t.receiveId]);
+                      const alreadyMarked = sessionMarked.has(trendFp);
+                      return (
+                        <button
+                          disabled={alreadyMarked}
+                          onClick={async () => {
+                            const partnerRosterId = rosters.find((r: any) => (users as any)[r.owner_id] === t.partnerName)?.roster_id ?? 0;
+                            await onMarkAttempted({
+                              league_id: selectedLeague.league_id,
+                              partner_roster_id: partnerRosterId,
+                              partner_name: t.partnerName,
+                              give_players: [{ player_id: t.giveId, name: giveP.full_name, position: giveP.position, value: t.giveVal }] as TradeAttemptAsset[],
+                              give_picks: [],
+                              receive_players: [{ player_id: t.receiveId, name: recvP.full_name, position: recvP.position, value: t.receiveVal }] as TradeAttemptAsset[],
+                              receive_picks: [],
+                              source: "RECOMMENDATIONS",
+                              initiated_by: "ME",
+                              status: "PENDING",
+                              counter_details: null,
+                            });
+                            setSessionMarked((prev) => new Set([...prev, trendFp]));
+                          }}
+                          className={`mt-3 w-full text-xs font-semibold px-3 py-1.5 rounded-lg border transition ${alreadyMarked ? "border-green-700 text-green-400 cursor-default" : "border-orange-700 text-orange-400 hover:border-orange-500"}`}
+                        >
+                          {alreadyMarked ? "✓ Offered" : "Mark Attempted"}
+                        </button>
+                      );
+                    })()}
                   </div>
                 );
               })}
@@ -2983,6 +3300,48 @@ export default function TradeHub({
                   ))}
                 </div>
               </div>
+              {selectedLeague && (() => {
+                const partnerRosterId = rosters.find((r: any) => (users as any)[r.owner_id] === card.partnerName)?.roster_id ?? 0;
+                const givePlayerIds = (card.give || []).filter((a: any) => a.player_id).map((a: any) => a.player_id);
+                const recvPlayerIds = (card.receive || []).filter((a: any) => a.player_id).map((a: any) => a.player_id);
+                const cardFp = buildTradeFingerprint(selectedLeague.league_id, partnerRosterId, givePlayerIds, recvPlayerIds);
+                const alreadyMarked = sessionMarked.has(cardFp);
+                return (
+                  <button
+                    disabled={alreadyMarked}
+                    onClick={async () => {
+                      const serializeAssets = (assets: any[]) => {
+                        const givePlayers: TradeAttemptAsset[] = [];
+                        const givePicks: TradeAttemptPick[] = [];
+                        for (const a of assets) {
+                          if (a.player_id) givePlayers.push({ player_id: a.player_id, name: a.full_name || a.name || "", position: a.position || "", value: a.dynValue ?? a.value ?? 0 });
+                          else if (a.season) givePicks.push({ key: `${a.season}-${a.round}-${a.roster_id}`, label: a.slot ? `${a.season} ${a.slot}` : `${a.season} Rd ${a.round}`, value: a.expectedValue ?? 0 });
+                        }
+                        return { players: givePlayers, picks: givePicks };
+                      };
+                      const giveData = serializeAssets(card.give || []);
+                      const recvData = serializeAssets(card.receive || []);
+                      await onMarkAttempted({
+                        league_id: selectedLeague.league_id,
+                        partner_roster_id: partnerRosterId,
+                        partner_name: card.partnerName,
+                        give_players: giveData.players,
+                        give_picks: giveData.picks,
+                        receive_players: recvData.players,
+                        receive_picks: recvData.picks,
+                        source: "RECOMMENDATIONS",
+                        initiated_by: "ME",
+                        status: "PENDING",
+                        counter_details: null,
+                      });
+                      setSessionMarked((prev) => new Set([...prev, cardFp]));
+                    }}
+                    className={`mt-3 w-full text-xs font-semibold px-3 py-1.5 rounded-lg border transition ${alreadyMarked ? "border-green-700 text-green-400 cursor-default" : "border-orange-700 text-orange-400 hover:border-orange-500"}`}
+                  >
+                    {alreadyMarked ? "✓ Offered" : "Mark Attempted"}
+                  </button>
+                );
+              })()}
             </div>
           ))}
         </div>
@@ -3101,6 +3460,223 @@ export default function TradeHub({
                       {allReceived.length === 0 && <p className="text-xs text-gray-600">—</p>}
                     </div>
                   </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    })()}
+
+    {/* ── Attempted Trades ── */}
+    {tradeHubSection === "ATTEMPTS" && (() => {
+      if (!selectedLeague) return (
+        <p className="text-gray-400 text-sm">Select a league from the dropdown above to view attempted trades.</p>
+      );
+
+      const statusConfig: Record<string, { label: string; color: string; border: string }> = {
+        PENDING:     { label: "Pending",     color: "text-yellow-300", border: "border-yellow-700 bg-yellow-950/20" },
+        ACCEPTED:    { label: "Accepted",    color: "text-green-300",  border: "border-green-700 bg-green-950/20"  },
+        DECLINED:    { label: "Declined",    color: "text-red-300",    border: "border-red-700 bg-red-950/20"      },
+        COUNTERED:   { label: "Countered",   color: "text-orange-300", border: "border-orange-700 bg-orange-950/20"},
+        NO_RESPONSE: { label: "No Response", color: "text-gray-400",   border: "border-gray-600 bg-gray-800/40"   },
+      };
+
+      const leagueAttempts = tradeAttempts
+        .filter((a) => a.league_id === selectedLeague.league_id)
+        .sort((a, b) => new Date(b.attempted_at).getTime() - new Date(a.attempted_at).getTime());
+
+      const formatDate = (iso: string | null) => {
+        if (!iso) return null;
+        return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+      };
+
+      return (
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Attempted Trades</div>
+            <div className="mt-1 text-sm text-gray-200">
+              Track trades you&apos;ve offered in <strong className="text-gray-100">{selectedLeague.name}</strong>. Mark outcomes to suppress duplicate suggestions and build owner profiles.
+            </div>
+          </div>
+
+          {loadingTradeAttempts && <p className="text-sm text-gray-400">Loading…</p>}
+
+          {!loadingTradeAttempts && tradeAttemptsLeagueId !== selectedLeague.league_id && (
+            <button
+              onClick={() => onLoadTradeAttempts(selectedLeague.league_id)}
+              className="w-full rounded-xl border border-orange-700 bg-orange-950/20 py-3 text-sm font-medium text-orange-300 hover:border-orange-500 transition"
+            >
+              Load Attempted Trades for {selectedLeague.name}
+            </button>
+          )}
+
+          {!loadingTradeAttempts && tradeAttemptsLeagueId === selectedLeague.league_id && leagueAttempts.length === 0 && (
+            <p className="text-sm text-gray-400">No attempted trades recorded for {selectedLeague.name} yet. Use &quot;Mark Attempted&quot; on any trade card in the Finder, Calculator, or Recommendations.</p>
+          )}
+
+          {!loadingTradeAttempts && leagueAttempts.map((attempt) => {
+            const sc = statusConfig[attempt.status] ?? statusConfig.PENDING;
+            const isShowingCounter = showCounterInput === attempt.id;
+
+            return (
+              <div key={attempt.id} className="rounded-2xl border border-gray-800 bg-gray-900 p-4">
+                {/* Header */}
+                <div className="flex flex-wrap items-center gap-2 mb-3">
+                  <span className="text-sm font-semibold text-blue-300">{attempt.partner_name}</span>
+                  <span className="rounded-full border border-gray-700 bg-gray-800 px-2 py-0.5 text-[10px] font-semibold text-gray-400 uppercase">
+                    {attempt.source}
+                  </span>
+                  {attempt.initiated_by === "THEM" ? (
+                    <span className="rounded-full border border-indigo-700 bg-indigo-950/30 px-2 py-0.5 text-[10px] font-semibold text-indigo-300">
+                      Sent by Them
+                    </span>
+                  ) : (
+                    <span className="rounded-full border border-orange-800 bg-orange-950/20 px-2 py-0.5 text-[10px] font-semibold text-orange-400">
+                      Sent by Me
+                    </span>
+                  )}
+                  <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${sc.border} ${sc.color}`}>
+                    {sc.label}
+                  </span>
+                  <div className="ml-auto flex flex-col items-end text-[10px] text-gray-500">
+                    <span>{attempt.initiated_by === "THEM" ? "Received" : "Offered"} {formatDate(attempt.attempted_at)}</span>
+                    {attempt.resolved_at && attempt.status !== "PENDING" && (
+                      <span className={sc.color}>{sc.label} {formatDate(attempt.resolved_at)}</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Trade columns */}
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <div>
+                    <div className="text-[10px] font-bold uppercase tracking-widest text-red-400 mb-1.5">You Gave</div>
+                    <div className="space-y-1">
+                      {attempt.give_players.map((p) => (
+                        <div key={p.player_id} className="flex items-center justify-between rounded-lg bg-gray-800 px-2 py-1.5">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-xs text-white truncate">{p.name}</span>
+                            <span className="text-[10px] text-gray-500 shrink-0 uppercase">{p.position}</span>
+                          </div>
+                          {p.value > 0 && <span className="text-[10px] font-mono text-gray-400 shrink-0 ml-1">{p.value.toLocaleString()}</span>}
+                        </div>
+                      ))}
+                      {attempt.give_picks.map((pk) => (
+                        <div key={pk.key} className="flex items-center justify-between rounded-lg bg-gray-800 px-2 py-1.5">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-xs text-white truncate">{pk.label}</span>
+                            <span className="text-[10px] text-gray-500 shrink-0">PICK</span>
+                          </div>
+                          {pk.value > 0 && <span className="text-[10px] font-mono text-gray-400 shrink-0 ml-1">{pk.value.toLocaleString()}</span>}
+                        </div>
+                      ))}
+                      {attempt.give_players.length === 0 && attempt.give_picks.length === 0 && <p className="text-xs text-gray-600">—</p>}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-bold uppercase tracking-widest text-green-400 mb-1.5">You Wanted</div>
+                    <div className="space-y-1">
+                      {attempt.receive_players.map((p) => (
+                        <div key={p.player_id} className="flex items-center justify-between rounded-lg bg-gray-800 px-2 py-1.5">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-xs text-white truncate">{p.name}</span>
+                            <span className="text-[10px] text-gray-500 shrink-0 uppercase">{p.position}</span>
+                          </div>
+                          {p.value > 0 && <span className="text-[10px] font-mono text-gray-400 shrink-0 ml-1">{p.value.toLocaleString()}</span>}
+                        </div>
+                      ))}
+                      {attempt.receive_picks.map((pk) => (
+                        <div key={pk.key} className="flex items-center justify-between rounded-lg bg-gray-800 px-2 py-1.5">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-xs text-white truncate">{pk.label}</span>
+                            <span className="text-[10px] text-gray-500 shrink-0">PICK</span>
+                          </div>
+                          {pk.value > 0 && <span className="text-[10px] font-mono text-gray-400 shrink-0 ml-1">{pk.value.toLocaleString()}</span>}
+                        </div>
+                      ))}
+                      {attempt.receive_players.length === 0 && attempt.receive_picks.length === 0 && <p className="text-xs text-gray-600">—</p>}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Counter details display */}
+                {attempt.status === "COUNTERED" && attempt.counter_details && !isShowingCounter && (
+                  <div className="mb-3 rounded-lg border border-orange-800 bg-orange-950/20 px-3 py-2">
+                    <div className="text-[10px] font-semibold uppercase tracking-wide text-orange-400 mb-1">Their Counter</div>
+                    <p className="text-xs text-gray-300">{attempt.counter_details}</p>
+                    <button onClick={() => { setShowCounterInput(attempt.id); setCounterInputs((prev) => ({ ...prev, [attempt.id]: attempt.counter_details ?? "" })); }} className="mt-1 text-[10px] text-orange-400 hover:text-orange-300 transition">Edit</button>
+                  </div>
+                )}
+                {attempt.status === "DECLINED" && (
+                  <p className="mb-3 text-[11px] text-gray-500 italic">
+                    Note: A decline often means the valuation was off, not that the owner isn&apos;t interested in the player. Consider adjusting the package and trying again.
+                  </p>
+                )}
+
+                {/* Counter input form */}
+                {isShowingCounter && (
+                  <div className="mb-3 space-y-2">
+                    <textarea
+                      value={counterInputs[attempt.id] ?? ""}
+                      onChange={(e) => setCounterInputs((prev) => ({ ...prev, [attempt.id]: e.target.value }))}
+                      placeholder="Describe what they countered with (e.g. they wanted Player X instead of Player Y)…"
+                      rows={3}
+                      className="w-full bg-gray-800 border border-orange-700 rounded-lg px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-orange-500 resize-none"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={async () => {
+                          await onUpdateAttemptStatus(attempt.id, "COUNTERED", counterInputs[attempt.id] ?? "");
+                          setShowCounterInput(null);
+                        }}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-orange-700 text-orange-300 hover:border-orange-500 transition"
+                      >
+                        Save Counter
+                      </button>
+                      <button
+                        onClick={() => setShowCounterInput(null)}
+                        className="text-xs text-gray-500 hover:text-gray-300 transition"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Status buttons */}
+                <div className="flex flex-wrap gap-2 mt-1">
+                  {(["ACCEPTED", "DECLINED", "COUNTERED", "NO_RESPONSE"] as TradeAttemptStatus[]).map((s) => {
+                    const cfg = statusConfig[s];
+                    const isActive = attempt.status === s;
+                    return (
+                      <button
+                        key={s}
+                        onClick={async () => {
+                          if (s === "COUNTERED") {
+                            setShowCounterInput(attempt.id);
+                            setCounterInputs((prev) => ({ ...prev, [attempt.id]: attempt.counter_details ?? "" }));
+                            if (attempt.status !== "COUNTERED") await onUpdateAttemptStatus(attempt.id, "COUNTERED");
+                          } else {
+                            setShowCounterInput(null);
+                            await onUpdateAttemptStatus(attempt.id, s);
+                          }
+                        }}
+                        className={`text-[11px] font-semibold px-3 py-1 rounded-full border transition ${
+                          isActive
+                            ? `${cfg.border} ${cfg.color} ring-1 ring-current`
+                            : "border-gray-700 text-gray-500 hover:border-gray-500 hover:text-gray-300"
+                        }`}
+                      >
+                        {cfg.label}
+                      </button>
+                    );
+                  })}
+                  <button
+                    onClick={() => onDeleteAttempt(attempt.id)}
+                    className="ml-auto text-[11px] text-gray-600 hover:text-red-400 transition"
+                  >
+                    Delete
+                  </button>
                 </div>
               </div>
             );

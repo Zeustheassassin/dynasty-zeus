@@ -195,3 +195,48 @@ drop trigger if exists alerts_set_updated_at on public.alerts;
 create trigger alerts_set_updated_at
   before update on public.alerts
   for each row execute function public.notes_updated_at();
+
+-- Trade attempts tracker
+-- Records trades that were offered (from Finder, Calculator, or Recommendations)
+-- and tracks their outcome. Used to suppress duplicate suggestions and profile owners.
+create table if not exists public.trade_attempts (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  league_id text not null,
+  partner_roster_id integer not null,
+  partner_name text not null default '',
+  give_players jsonb not null default '[]'::jsonb,
+  give_picks jsonb not null default '[]'::jsonb,
+  receive_players jsonb not null default '[]'::jsonb,
+  receive_picks jsonb not null default '[]'::jsonb,
+  source text not null default 'FINDER',
+  initiated_by text not null default 'ME',
+  status text not null default 'PENDING',
+  counter_details text,
+  attempted_at timestamptz not null default now(),
+  resolved_at timestamptz
+);
+
+alter table public.trade_attempts enable row level security;
+
+drop policy if exists "users can select own trade attempts" on public.trade_attempts;
+drop policy if exists "users can insert own trade attempts" on public.trade_attempts;
+drop policy if exists "users can update own trade attempts" on public.trade_attempts;
+drop policy if exists "users can delete own trade attempts" on public.trade_attempts;
+
+create policy "users can select own trade attempts"
+  on public.trade_attempts for select
+  using (auth.uid() = user_id);
+
+create policy "users can insert own trade attempts"
+  on public.trade_attempts for insert
+  with check (auth.uid() = user_id);
+
+create policy "users can update own trade attempts"
+  on public.trade_attempts for update
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+create policy "users can delete own trade attempts"
+  on public.trade_attempts for delete
+  using (auth.uid() = user_id);

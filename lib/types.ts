@@ -447,3 +447,40 @@ export interface ProjSource {
   tier: 1 | 2;
   weight: number;
 }
+
+// ── Trade attempts ────────────────────────────────────────────
+
+export type TradeAttemptStatus = "PENDING" | "ACCEPTED" | "DECLINED" | "COUNTERED" | "NO_RESPONSE";
+export type TradeAttemptSource = "FINDER" | "CALCULATOR" | "RECOMMENDATIONS";
+export type TradeAttemptDirection = "ME" | "THEM";
+
+export interface TradeAttemptAsset {
+  player_id: string;
+  name: string;
+  position: string;
+  value: number;
+}
+
+export interface TradeAttemptPick {
+  key: string;
+  label: string;
+  value: number;
+}
+
+export interface TradeAttempt {
+  id: string;
+  user_id: string;
+  league_id: string;
+  partner_roster_id: number;
+  partner_name: string;
+  give_players: TradeAttemptAsset[];
+  give_picks: TradeAttemptPick[];
+  receive_players: TradeAttemptAsset[];
+  receive_picks: TradeAttemptPick[];
+  source: TradeAttemptSource;
+  initiated_by: TradeAttemptDirection;
+  status: TradeAttemptStatus;
+  counter_details: string | null;
+  attempted_at: string;
+  resolved_at: string | null;
+}

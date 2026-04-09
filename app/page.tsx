@@ -29,7 +29,7 @@ import {
 } from "../lib/helpers";
 import { PROJ_SOURCES, useProjections } from "../hooks/useProjections";
 import { useSleeperUser } from "../hooks/useSleeperUser";
-import type { ProjSourceId, LeagueHubTab, AlertsCenterItem, WatchlistEntry } from "../lib/types";
+import type { ProjSourceId, LeagueHubTab, AlertsCenterItem, WatchlistEntry, TradeAttempt, TradeAttemptStatus } from "../lib/types";
 
 // -------------------------
 // MODULE-LEVEL CONSTANTS (page-specific)
@@ -76,7 +76,10 @@ const [selectedLeagueDraftHasOccurred, setSelectedLeagueDraftHasOccurred] = useS
 const [tradeHubUserId, setTradeHubUserId] = useState<string | null>(null);
 const [tradeHubData, setTradeHubData] = useState<any[] | null>(null);
 const [loadingTradeHub, setLoadingTradeHub] = useState(false);
-const [tradeHubSection, setTradeHubSection] = useState<"CALCULATOR" | "FINDER" | "RECOMMENDATIONS" | "TRADE_LOG">("CALCULATOR");
+const [tradeAttempts, setTradeAttempts] = useState<TradeAttempt[]>([]);
+const [tradeAttemptsLeagueId, setTradeAttemptsLeagueId] = useState<string | null>(null);
+const [loadingTradeAttempts, setLoadingTradeAttempts] = useState(false);
+const [tradeHubSection, setTradeHubSection] = useState<"CALCULATOR" | "FINDER" | "RECOMMENDATIONS" | "TRADE_LOG" | "ATTEMPTS">("CALCULATOR");
 const [finderSeed, setFinderSeed] = useState(() => Math.random());
 const [finderDraftCapitalMode, setFinderDraftCapitalMode] = useState(false);
 const [leagueHubTab, setLeagueHubTab] = useState<LeagueHubTab>("OVERVIEW");
@@ -734,6 +737,10 @@ useEffect(() => {
 useEffect(() => {
   if ((tradeHubSection === "CALCULATOR" || tradeHubSection === "FINDER" || tradeHubSection === "RECOMMENDATIONS") && selectedLeague?.league_id) {
     loadCalcValues(selectedLeague.league_id);
+  }
+  // Auto-load attempts when switching to ATTEMPTS tab
+  if (tradeHubSection === "ATTEMPTS" && selectedLeague?.league_id && supabaseUser && tradeAttemptsLeagueId !== selectedLeague.league_id) {
+    loadTradeAttempts(selectedLeague.league_id);
   }
 }, [tradeHubSection, selectedLeague?.league_id]);
 
@@ -2450,6 +2457,70 @@ const loadUserTrades = async (targetUserId: string) => {
     console.error("Trade hub error:", err);
   } finally {
     setLoadingTradeHub(false);
+  }
+};
+
+const loadTradeAttempts = async (leagueId: string) => {
+  if (!supabaseUser) return;
+  setLoadingTradeAttempts(true);
+  setTradeAttemptsLeagueId(leagueId);
+  try {
+    const { data, error } = await supabase
+      .from("trade_attempts")
+      .select("*")
+      .eq("user_id", supabaseUser.id)
+      .eq("league_id", leagueId)
+      .order("attempted_at", { ascending: false });
+    if (!error && data) setTradeAttempts(data as TradeAttempt[]);
+  } finally {
+    setLoadingTradeAttempts(false);
+  }
+};
+
+const markTradeAttempted = async (attempt: Omit<TradeAttempt, "id" | "user_id" | "attempted_at" | "resolved_at">) => {
+  if (!supabaseUser) return;
+  const { data, error } = await supabase
+    .from("trade_attempts")
+    .insert({ ...attempt, user_id: supabaseUser.id })
+    .select()
+    .single();
+  if (!error && data) {
+    setTradeAttempts((prev) => [data as TradeAttempt, ...prev]);
+  }
+};
+
+const updateAttemptStatus = async (id: string, status: TradeAttemptStatus, counterDetails?: string) => {
+  if (!supabaseUser) return;
+  const update: Record<string, unknown> = {
+    status,
+    resolved_at: status !== "PENDING" ? new Date().toISOString() : null,
+  };
+  if (counterDetails !== undefined) update.counter_details = counterDetails;
+  const { error } = await supabase
+    .from("trade_attempts")
+    .update(update)
+    .eq("id", id)
+    .eq("user_id", supabaseUser.id);
+  if (!error) {
+    setTradeAttempts((prev) =>
+      prev.map((a) =>
+        a.id === id
+          ? { ...a, status, counter_details: counterDetails ?? a.counter_details, resolved_at: update.resolved_at as string | null }
+          : a
+      )
+    );
+  }
+};
+
+const deleteAttempt = async (id: string) => {
+  if (!supabaseUser) return;
+  const { error } = await supabase
+    .from("trade_attempts")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", supabaseUser.id);
+  if (!error) {
+    setTradeAttempts((prev) => prev.filter((a) => a.id !== id));
   }
 };
 
@@ -5500,6 +5571,13 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     tradeHubData={tradeHubData}
     loadingTradeHub={loadingTradeHub}
     tradeHubUserId={tradeHubUserId}
+    tradeAttempts={tradeAttempts}
+    loadingTradeAttempts={loadingTradeAttempts}
+    tradeAttemptsLeagueId={tradeAttemptsLeagueId}
+    onMarkAttempted={markTradeAttempted}
+    onUpdateAttemptStatus={updateAttemptStatus}
+    onDeleteAttempt={deleteAttempt}
+    onLoadTradeAttempts={loadTradeAttempts}
   />
 )}
 
