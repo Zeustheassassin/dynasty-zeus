@@ -803,13 +803,10 @@ export default function TradeHub({
       // At this point selectedLeagueDirectionAdjusted is guaranteed non-null (loading gate above).
       const finderDirectionProfile = selectedLeagueDirectionAdjusted;
       const finderDirection = finderDirectionProfile.bucket;
-      // Playoff odds from the sim — null means sim hasn't run yet (offseason / first load).
-      const myFinderPlayoffOdds = (finderDirectionProfile as any).playoffOdds as number | null;
-      // iAmTankingFinder: if sim data exists use real odds; otherwise derive from the bucket
-      // so we never default to "tanking" just because the sim hasn't loaded yet.
-      const iAmTankingFinder = myFinderPlayoffOdds !== null
-        ? myFinderPlayoffOdds < 50
-        : ["Rebuilder", "Blow Up", "Hopeless"].includes(finderDirection);
+      // Sim is now required before selectedLeagueDirectionAdjusted resolves — playoffOdds
+      // is always a real number by the time we reach here (loading gate above blocks otherwise).
+      const myFinderPlayoffOdds = (finderDirectionProfile as any).playoffOdds as number;
+      const iAmTankingFinder = myFinderPlayoffOdds < 50;
       const draftCapitalMode = finderDraftCapitalMode;
       const priorityDraftYear = String(
         Number(CURRENT_YEAR) + (selectedLeagueDraftHasOccurred ? 1 : 0)

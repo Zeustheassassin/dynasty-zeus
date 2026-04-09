@@ -2681,6 +2681,16 @@ const getTeamSummary = () => {
     if (!selectedLeague || !rosters.length || !user?.user_id) return null;
     const myRosterId = rosters.find((r: any) => r.owner_id === user.user_id)?.roster_id;
     if (!myRosterId) return null;
+
+    // Guard: allPicks updates after rosters on league switch — if any picks exist but none
+    // belong to the current league's rosters, data is mid-update; return null and wait.
+    const leagueRosterIds = new Set(rosters.map((r: any) => Number(r.roster_id)));
+    if ((allPicks as any[]).length > 0 && !(allPicks as any[]).some((p: any) => leagueRosterIds.has(Number(p.roster_id)))) return null;
+
+    // Guard: player values must be loaded before profile is meaningful.
+    // calcFcValues is populated async; an empty map produces nonsense direction output.
+    if (!Object.keys(calcFcValues).length) return null;
+
     return getRosterDirectionProfile({
       rosterId: myRosterId,
       rosters,
@@ -3063,34 +3073,50 @@ const getTeamSummary = () => {
     const myRosterId = rosters.find((r: any) => r.owner_id === user?.user_id)?.roster_id;
     if (!myRosterId) return null;
 
-    // Guard against stale simulation data from a previously selected league.
-    // The sim recomputes when selectedLeague changes, but it may lag by one cycle.
-    // If the sim exists but doesn't contain all current league roster IDs it belongs
-    // to the old league — return null and wait for the fresh sim to arrive.
-    if (selectedLeagueSimulation) {
-      const allCurrentIds = rosters.map((r: any) => Number(r.roster_id));
-      const simMatchesLeague = allCurrentIds.every(
-        (id) => selectedLeagueSimulation.rowByRosterId?.has(id)
-      );
-      if (!simMatchesLeague) return null;
+    // PRIORITY: use the committed (user-saved) sim — it's what the League Hub displays
+    // and is stable across renders. The live sim recomputes with a random seed each session
+    // and can diverge significantly (e.g. 1.7% committed → 40% live), causing wrong direction.
+    const committedRows = committedSimsByLeague[selectedLeague.league_id];
+    const committedMyRow = committedRows ? committedRows[Number(myRosterId)] : null;
+
+    if (committedMyRow) {
+      // We have a stable committed sim — use it unconditionally.
+      const playoffOdds = Number(committedMyRow.playoffOdds ?? 50);
+      const adjustedBucket = getAdjustedDirectionBucket(selectedLeagueDirection.bucket, selectedLeagueDirection, playoffOdds, true);
+      return {
+        ...selectedLeagueDirection,
+        bucket: adjustedBucket,
+        bucketColor: getBucketColor(adjustedBucket),
+        rawBucket: selectedLeagueDirection.bucket,
+        playoffOdds,
+        hasSimData: true,
+      };
     }
 
-    const mySimRow = selectedLeagueSimulation?.rowByRosterId?.get(Number(myRosterId));
-    const hasSimData = !!mySimRow;
-    // Use neutral 50 as the arithmetic default — getAdjustedDirectionBucket ignores
-    // playoffOdds entirely when hasSimData is false, so the value doesn't matter.
-    const playoffOdds = mySimRow?.playoffOdds ?? 50;
-    const adjustedBucket = getAdjustedDirectionBucket(selectedLeagueDirection.bucket, selectedLeagueDirection, playoffOdds, hasSimData);
+    // No committed sim yet — fall back to the live sim but guard carefully:
+    // live sim recomputes every render and may not match the current league yet.
+    if (!selectedLeagueSimulation) return null;
+
+    const allCurrentIds = rosters.map((r: any) => Number(r.roster_id));
+    const simMatchesLeague = allCurrentIds.every(
+      (id) => selectedLeagueSimulation.rowByRosterId?.has(id)
+    );
+    if (!simMatchesLeague) return null;
+
+    const mySimRow = selectedLeagueSimulation.rowByRosterId.get(Number(myRosterId));
+    if (!mySimRow) return null;
+
+    const playoffOdds = Number(mySimRow.playoffOdds);
+    const adjustedBucket = getAdjustedDirectionBucket(selectedLeagueDirection.bucket, selectedLeagueDirection, playoffOdds, true);
     return {
       ...selectedLeagueDirection,
       bucket: adjustedBucket,
       bucketColor: getBucketColor(adjustedBucket),
       rawBucket: selectedLeagueDirection.bucket,
-      // Expose null when sim data isn't available so consumers know not to trust the odds
-      playoffOdds: hasSimData ? playoffOdds : null,
-      hasSimData,
+      playoffOdds,
+      hasSimData: true,
     };
-  }, [selectedLeague?.league_id, selectedLeagueDirection, selectedLeagueSimulation, rosters, user?.user_id]);
+  }, [selectedLeague?.league_id, selectedLeagueDirection, selectedLeagueSimulation, committedSimsByLeague, rosters, user?.user_id]);
 
   const selectedLeagueDynamicPickValues = useMemo(() => {
     const leagueId = selectedLeague?.league_id;
