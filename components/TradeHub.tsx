@@ -1998,7 +1998,7 @@ export default function TradeHub({
         // Disposition guards: skip "Zero Interest" receives and "Not Willing to Trade" gives.
         const FINDER_LOTTERY_CEILING = 700;
         const myLotteryFinderPicks = myFinderPicks.filter((p: any) =>
-          Number(p.round) >= 3
+          Number(p.round) >= 3 && Number(p.value || 0) > 0
         );
         const oppLotteryPlayers = oppPlayers.filter((p: any) => {
           if (isBlockedBuyDisposition(p.player_id)) return false;
@@ -2011,18 +2011,22 @@ export default function TradeHub({
           return true;
         });
         for (const lp of oppLotteryPlayers) {
-          for (const myPick of myLotteryFinderPicks) {
-            if (playerDispositions[myPick.player_id]?.sell === "Not Willing to Trade") continue;
-            const ratio = lp.value / Math.max(myPick.value, 1);
-            if (ratio < 0.25 || ratio > 2.0) continue;
-            results.push({
-              give: [], receive: [lp], givePicks: [myPick], receivePicks: [],
-              oppName, oppRosterId: oppRoster.roster_id,
-              score: posScore([], [lp]) * 0.6, // softer posScore weight for lottery
-              net: lp.value - myPick.value,
-              format: "Lottery",
-            });
-          }
+          // Pick the single closest-value pick per player so dedup never discards the better one
+          const bestPick = myLotteryFinderPicks
+            .filter((p: any) => {
+              if (playerDispositions[p.player_id]?.sell === "Not Willing to Trade") return false;
+              const ratio = lp.value / Math.max(p.value, 1);
+              return ratio >= 0.25 && ratio <= 2.0;
+            })
+            .sort((a: any, b: any) => Math.abs(a.value - lp.value) - Math.abs(b.value - lp.value))[0];
+          if (!bestPick) continue;
+          results.push({
+            give: [], receive: [lp], givePicks: [bestPick], receivePicks: [],
+            oppName, oppRosterId: oppRoster.roster_id,
+            score: posScore([], [lp]) * 0.6,
+            net: lp.value - bestPick.value,
+            format: "Lottery",
+          });
         }
       }
 
@@ -2947,7 +2951,8 @@ export default function TradeHub({
         const myRoster = rosters.find((r: any) => r.owner_id === user?.user_id);
         const mySet = new Set<string>(myRoster?.players ?? []);
         const partnerRosters = rosters.filter((r: any) => r.owner_id && r.owner_id !== user?.user_id);
-        const MIN_VAL = 1500;
+        const MIN_VAL = 500;
+        const MAX_VAL = 4000;
         const R_MIN = 0.72, R_MAX = 1.35;
         const usedGA = new Set<string>(), usedRA = new Set<string>();
         const usedGB = new Set<string>(), usedRB = new Set<string>();
@@ -2955,7 +2960,7 @@ export default function TradeHub({
         // Sell Window: give my −5%+ fallers → receive ANY fair-value player from the partner
         const mySell = [...mySet]
           .map((id) => ({ id, pct: tMap.get(id) ?? 0, val: calcFcValues[id] ?? 0 }))
-          .filter((x) => x.pct <= -5 && x.val >= MIN_VAL)
+          .filter((x) => x.pct <= -5 && x.val >= MIN_VAL && x.val <= MAX_VAL)
           .sort((a, b) => a.pct - b.pct);
 
         outerSell: for (const mine of mySell) {
@@ -2966,7 +2971,7 @@ export default function TradeHub({
             // Any partner player at fair value — no trend filter, sorted by closest value
             const cands = ((pr.players ?? []) as string[])
               .map((id) => ({ id, pct: tMap.get(id) ?? 0, val: calcFcValues[id] ?? 0 }))
-              .filter((x) => x.val >= MIN_VAL && !usedRA.has(x.id))
+              .filter((x) => x.val >= MIN_VAL && x.val <= MAX_VAL && !usedRA.has(x.id))
               .sort((a, b) => Math.abs(a.val - mine.val) - Math.abs(b.val - mine.val));
             for (const theirs of cands) {
               const ratio = mine.val / theirs.val;
@@ -2988,14 +2993,14 @@ export default function TradeHub({
         // Buy Window: target partner's +5%+ rising players → give ANY of my fair-value roster players
         const myGivePool = [...mySet]
           .map((id) => ({ id, pct: tMap.get(id) ?? 0, val: calcFcValues[id] ?? 0 }))
-          .filter((x) => x.val >= MIN_VAL);
+          .filter((x) => x.val >= MIN_VAL && x.val <= MAX_VAL);
 
         outerBuy: for (const pr of partnerRosters) {
           if (trendTrades.filter((t) => t.type === "buy-window").length >= 5) break;
           const partnerRising = ((pr.players ?? []) as string[])
             .filter((id) => !mySet.has(id))
             .map((id) => ({ id, pct: tMap.get(id) ?? 0, val: calcFcValues[id] ?? 0 }))
-            .filter((x) => x.pct >= 5 && x.val >= MIN_VAL && !usedRB.has(x.id))
+            .filter((x) => x.pct >= 5 && x.val >= MIN_VAL && x.val <= MAX_VAL && !usedRB.has(x.id))
             .sort((a, b) => b.pct - a.pct);
           for (const theirs of partnerRising) {
             if (trendTrades.filter((t) => t.type === "buy-window").length >= 5) break outerBuy;
@@ -3484,7 +3489,12 @@ export default function TradeHub({
 
       const leagueAttempts = tradeAttempts
         .filter((a) => a.league_id === selectedLeague.league_id)
-        .sort((a, b) => new Date(b.attempted_at).getTime() - new Date(a.attempted_at).getTime());
+        .sort((a, b) => {
+          const aPending = a.status === "PENDING" ? 0 : 1;
+          const bPending = b.status === "PENDING" ? 0 : 1;
+          if (aPending !== bPending) return aPending - bPending;
+          return new Date(b.attempted_at).getTime() - new Date(a.attempted_at).getTime();
+        });
 
       const formatDate = (iso: string | null) => {
         if (!iso) return null;

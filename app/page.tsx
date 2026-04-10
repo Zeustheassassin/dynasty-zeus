@@ -79,6 +79,7 @@ const [loadingTradeHub, setLoadingTradeHub] = useState(false);
 const [tradeAttempts, setTradeAttempts] = useState<TradeAttempt[]>([]);
 const [tradeAttemptsLeagueId, setTradeAttemptsLeagueId] = useState<string | null>(null);
 const [loadingTradeAttempts, setLoadingTradeAttempts] = useState(false);
+const [allTradeAttempts, setAllTradeAttempts] = useState<TradeAttempt[]>([]);
 const [tradeHubSection, setTradeHubSection] = useState<"CALCULATOR" | "FINDER" | "RECOMMENDATIONS" | "TRADE_LOG" | "ATTEMPTS">("CALCULATOR");
 const [finderSeed, setFinderSeed] = useState(() => Math.random());
 const [finderDraftCapitalMode, setFinderDraftCapitalMode] = useState(false);
@@ -566,6 +567,15 @@ useEffect(() => {
       }
     });
 }, [supabaseUser]);
+
+useEffect(() => {
+  if (!supabaseUser) { setAllTradeAttempts([]); return; }
+  supabase
+    .from("trade_attempts")
+    .select("id, league_id, status")
+    .eq("user_id", supabaseUser.id)
+    .then(({ data }) => { if (data) setAllTradeAttempts(data as TradeAttempt[]); });
+}, [supabaseUser?.id]);
 
 const signUp = async () => {
   setSupabaseError("");
@@ -2498,6 +2508,7 @@ const markTradeAttempted = async (attempt: Omit<TradeAttempt, "id" | "user_id" |
     .single();
   if (!error && data) {
     setTradeAttempts((prev) => [data as TradeAttempt, ...prev]);
+    setAllTradeAttempts((prev) => [{ id: (data as TradeAttempt).id, league_id: (data as TradeAttempt).league_id, status: (data as TradeAttempt).status } as TradeAttempt, ...prev]);
   }
 };
 
@@ -2521,6 +2532,9 @@ const updateAttemptStatus = async (id: string, status: TradeAttemptStatus, count
           : a
       )
     );
+    setAllTradeAttempts((prev) =>
+      prev.map((a) => a.id === id ? { ...a, status } : a)
+    );
   }
 };
 
@@ -2533,6 +2547,7 @@ const deleteAttempt = async (id: string) => {
     .eq("user_id", supabaseUser.id);
   if (!error) {
     setTradeAttempts((prev) => prev.filter((a) => a.id !== id));
+    setAllTradeAttempts((prev) => prev.filter((a) => a.id !== id));
   }
 };
 
@@ -4060,7 +4075,7 @@ const getTeamSummary = () => {
       // Dispositions: skip "Zero Interest" receive targets; boost "Buy Low" targets.
       const LOTTERY_CEILING = 700;
       const roundOrd = (r: number) => r === 1 ? "1st" : r === 2 ? "2nd" : r === 3 ? "3rd" : `${r}th`;
-      const myLotteryPicks = myPicksDetailed.filter((p: any) => Number(p.round) >= 3);
+      const myLotteryPicks = myPicksDetailed.filter((p: any) => Number(p.round) >= 3 && assetValue(p) > 0);
       if (myLotteryPicks.length > 0) {
         partnerPlayers
           .filter((p: any) => {
@@ -4078,12 +4093,16 @@ const getTeamSummary = () => {
           .forEach((target: any) => {
             const targetVal = Number(target.dynValue || 0);
             const bestPick = myLotteryPicks
+              .filter((p: any) => {
+                const pv = assetValue(p);
+                const ratio = targetVal / Math.max(pv, 1);
+                return ratio >= 0.35 && ratio <= 1.6;
+              })
               .map((p: any) => ({ ...p, diff: Math.abs(assetValue(p) - targetVal) }))
               .sort((a: any, b: any) => a.diff - b.diff)[0];
             if (!bestPick) return;
             const pickVal = assetValue(bestPick);
             if (pickVal <= 0 || targetVal <= 0) return;
-            if (targetVal / pickVal < 0.3 || targetVal / pickVal > 1.8) return;
             const dispBonus = playerDispositions[target.player_id]?.buy === "Buy Low" ? 3
               : playerDispositions[target.player_id]?.buy === "Buy at Market" ? 1 : 0;
             candidateCards.push({
@@ -4110,19 +4129,74 @@ const getTeamSummary = () => {
           });
       }
 
+      // ── Fallback: guarantee a card for every partner ─────────────────────
+      // When the filtered pools produce nothing, find the closest fair 1-for-1
+      // from the full rosters (no position/age/profile restrictions).
+      if (candidateCards.length === 0) {
+        const fallbackMine = myPlayersDetailed
+          .filter((p: any) => p.dynValue >= 500 && !isBlockedSellDisposition(p.player_id));
+        const fallbackTheirs = partnerPlayers
+          .filter((p: any) => p.dynValue >= 500 && !isBlockedBuyDisposition(p.player_id));
+        let bestPair: { mine: any; theirs: any; diff: number } | null = null;
+        for (const mine of fallbackMine) {
+          for (const theirs of fallbackTheirs) {
+            const ratio = mine.dynValue / Math.max(theirs.dynValue, 1);
+            if (ratio < 0.78 || ratio > 1.28) continue;
+            const diff = Math.abs(mine.dynValue - theirs.dynValue);
+            if (!bestPair || diff < bestPair.diff) bestPair = { mine, theirs, diff };
+          }
+        }
+        if (bestPair) {
+          const give = [bestPair.mine];
+          const receive = [bestPair.theirs];
+          const giveTotal = Math.round(assetValue(bestPair.mine));
+          const receiveTotal = Math.round(assetValue(bestPair.theirs));
+          const text = getCandidateText("Value Rebalance", partner, give, receive);
+          candidateCards.push({
+            archetype: "Value Rebalance",
+            partnerName: partner.ownerName,
+            fitLabel: partner.fitLabel,
+            give,
+            receive,
+            whyYou: text.whyYou,
+            whyThem: text.whyThem,
+            summary: text.summary,
+            partnerPlayoffOdds: partner.playoffOdds,
+            partnerTitleOdds: partner.titleOdds,
+            partnerRankScore: partner.rankScore,
+            recommendationScore: Math.round(partner.rankScore * 0.3 + 2),
+            giveTotal,
+            receiveTotal,
+            packageDelta: receiveTotal - giveTotal,
+            bestApproach: partner.bestApproach,
+            negotiationNotes: partner.negotiationNotes || [],
+            openingOffer: `A simple swap — test the waters with a casual offer to see if they're open to a roster rebalance.`,
+          });
+        }
+      }
+
       const bestCard = candidateCards
         .sort((a: any, b: any) => b.recommendationScore - a.recommendationScore)[0];
       if (bestCard) recommendations.push(bestCard);
     });
 
-    return recommendations
+    const base = recommendations
       .filter(Boolean)
       .filter((card: any) =>
         !card.give.some((asset: any) => !asset?.season && isBlockedSellDisposition(asset?.player_id)) &&
         !card.receive.some((asset: any) => !asset?.season && isBlockedBuyDisposition(asset?.player_id))
       )
-      .sort((a: any, b: any) => b.recommendationScore - a.recommendationScore)
-      .slice(0, sortedPartners.length || 12);
+      .filter((card: any) =>
+        !card.give.some((asset: any) => asset?.season && String(asset.season) > CURRENT_YEAR)
+      )
+      .sort((a: any, b: any) => b.recommendationScore - a.recommendationScore);
+
+    const lowImpact = base.filter((card: any) =>
+      card.giveTotal >= 500 && card.giveTotal <= 4000 &&
+      card.receiveTotal >= 500 && card.receiveTotal <= 4000
+    );
+
+    return (lowImpact.length > 0 ? lowImpact : base).slice(0, sortedPartners.length || 12);
   }, [
     selectedLeague?.league_id,
     rosters,
@@ -5306,6 +5380,8 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             players={players}
             injuryReportPlayers={injuryReportPlayers}
             currentNFLWeek={nflState?.season_type === "regular" ? Number(nflState?.week || 0) : 0}
+            allTradeAttempts={allTradeAttempts}
+            allLeagues={leagues}
           />
         )}
         {/* LEAGUE HUB */}

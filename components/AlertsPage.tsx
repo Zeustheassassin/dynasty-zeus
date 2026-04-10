@@ -54,6 +54,8 @@ type AlertsPageProps = {
   players: Record<string, any>;
   injuryReportPlayers: InjuryReportPlayer[];
   currentNFLWeek: number;
+  allTradeAttempts: { id: string; league_id: string; status: string }[];
+  allLeagues: { league_id: string; name: string }[];
 };
 
 const severityStyles = {
@@ -259,6 +261,8 @@ export default function AlertsPage({
   players,
   injuryReportPlayers,
   currentNFLWeek,
+  allTradeAttempts,
+  allLeagues,
 }: AlertsPageProps) {
   const [feedTab, setFeedTab] = useState<"alerts" | "transactions" | "waivers" | "injury">("alerts");
   const [expandedInjuryId, setExpandedInjuryId] = useState<string | null>(null);
@@ -318,6 +322,35 @@ export default function AlertsPage({
           </div>
         </div>
       </div>
+
+      {(() => {
+        const openByLeague = allLeagues
+          .map((lg) => ({
+            name: lg.name,
+            count: allTradeAttempts.filter(
+              (a) => a.league_id === lg.league_id && a.status === "PENDING"
+            ).length,
+          }))
+          .filter((entry) => entry.count > 0)
+          .sort((a, b) => b.count - a.count);
+        if (openByLeague.length === 0) return null;
+        return (
+          <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-5">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Open Trades</div>
+            <h2 className="mt-1 text-lg font-semibold text-white">Pending across all leagues</h2>
+            <div className="mt-3 divide-y divide-slate-800">
+              {openByLeague.map((entry) => (
+                <div key={entry.name} className="flex items-center justify-between py-2">
+                  <span className="text-sm text-slate-200">{entry.name}</span>
+                  <span className="rounded-full border border-yellow-700 bg-yellow-950/30 px-2.5 py-0.5 text-xs font-semibold text-yellow-300">
+                    {entry.count} open
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.85fr)]">
         {/* ── Left: Feed tabs ── */}
