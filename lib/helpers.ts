@@ -17,9 +17,9 @@ export const normalizeProjName = (n: string) =>
 // -------------------------
 // PURE HELPER FUNCTIONS
 // -------------------------
-export const getLineupSettings = (league: any) => {
+export const getLineupSettings = (league: { roster_positions?: string[] } | null | undefined) => {
   const positions = league?.roster_positions || [];
-  const counts: any = {};
+  const counts: Record<string, number> = {};
   positions.forEach((pos: string) => {
     if (pos === "BN" || pos === "IR" || pos === "TAXI") return;
     counts[pos] = (counts[pos] || 0) + 1;
@@ -31,7 +31,7 @@ export const getLineupSettings = (league: any) => {
     .join(" • ");
 };
 
-export const STANDARD_SCORING: any = {
+export const STANDARD_SCORING: Record<string, number> = {
   pass_yd: 0.04, pass_td: 4, pass_int: -2, pass_first_down: 0,
   pass_cmp: 0, pass_inc: 0, pass_attempt: 0, pass_sack: 0,
   pass_sack_yd: 0, pass_pick_six: 0, bonus_pass_yd_40: 0,
@@ -40,8 +40,8 @@ export const STANDARD_SCORING: any = {
   rec_2pt: 2, rush_2pt: 2, pass_2pt: 2,
 };
 
-export const getNonStandardRules = (scoring: any) => {
-  const changes: any[] = [];
+export const getNonStandardRules = (scoring: Record<string, number>) => {
+  const changes: Array<{ key: string; value: number }> = [];
   Object.keys(scoring || {}).forEach((key) => {
     const value = scoring[key];
     const standard = STANDARD_SCORING[key];
@@ -70,7 +70,7 @@ export const formatRule = (key: string) => {
   return labels[key] || key.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
 };
 
-export const groupRules = (rules: any[]) => ({
+export const groupRules = (rules: Array<{ key: string; value: number }>) => ({
   Passing: rules.filter((r) =>
     r.key.startsWith("pass") || r.key === "pass_int_td" ||
     r.key === "pass_cmp" || r.key === "pass_attempt" || r.key === "pass_sack"

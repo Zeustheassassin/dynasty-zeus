@@ -1,6 +1,7 @@
 "use client";
 import React, { useState, useEffect } from "react";
 import { supabase } from "../lib/supabaseclient";
+import { usePlayers } from "../lib/PlayersContext";
 
 // ── Module-level constants ─────────────────────────────────────────────────
 const ROOKIE_YEAR = String(new Date().getFullYear());
@@ -91,7 +92,7 @@ function toPickSlot(avgPickNo: number, teamSize = 12): string {
 
 function valueGrade(val: number): { label: string; cls: string } {
   if (val >= 6000) return { label: "Elite",      cls: "text-yellow-400 bg-yellow-900/30 border-yellow-700/50" };
-  if (val >= 3500) return { label: "Solid",      cls: "text-green-400  bg-green-900/30  border-green-700/50"  };
+  if (val >= 3500) return { label: "Starter",    cls: "text-green-400  bg-green-900/30  border-green-700/50"  };
   if (val >= 1500) return { label: "Developing", cls: "text-blue-400   bg-blue-900/30   border-blue-700/50"   };
   if (val >= 500)  return { label: "Fringe",     cls: "text-orange-400 bg-orange-900/30 border-orange-700/50" };
   return               { label: "Bust",       cls: "text-red-400   bg-red-900/30    border-red-700/50"    };
@@ -119,7 +120,6 @@ interface DraftHubProps {
   draftPicks: any[];
   draftOrder: any;
   allPicks: any[];
-  players: any;
 
   rookies: any[];
   rookieSearch: string;
@@ -147,13 +147,13 @@ interface DraftHubProps {
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
-export default function DraftHub({
+function DraftHub({
   draftHubSection, setDraftHubSection,
   myDraftSlotPicks, setMyDraftSlotPicks,
   draftSlotEditing, setDraftSlotEditing,
   draftSlotSearchQuery, setDraftSlotSearchQuery,
   selectedLeague, rosters, user, users, supabaseUser,
-  draftSettings, draftPicks, draftOrder, allPicks, players,
+  draftSettings, draftPicks, draftOrder, allPicks,
   rookies, rookieSearch, setRookieSearch,
   dragIndex, setDragIndex, tempRanks, setTempRanks,
   draftedPlayerIds, predictedDraftPicks, topAvailableRookies,
@@ -161,6 +161,7 @@ export default function DraftHub({
   loadingDraftRefresh,
   leagues, calcFcValues, pickFcValues, fcNameValues,
 }: DraftHubProps) {
+  const players = usePlayers();
 
   // ── Internal state ───────────────────────────────────────────────────────
   // Tier labels: { playerId: tierNumber 1-15 }
@@ -169,6 +170,9 @@ export default function DraftHub({
   // Player notes: { playerId: noteText }
   const [playerNotes, setPlayerNotes] = useState<Record<string, string>>({});
   const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null);
+
+  // Big Board position filter
+  const [posFilter, setPosFilter] = useState<string | null>(null);
 
   // Historical draft review
   const [historyData, setHistoryData]         = useState<any[]>([]);
@@ -861,13 +865,13 @@ export default function DraftHub({
                         <div className="text-center w-full text-gray-400 italic whitespace-normal break-words leading-tight text-[10px]">{prediction.name}</div>
                         <div className={`text-[9px] ${posColor[prediction.position] || "text-gray-500"} opacity-70`}>{prediction.position}</div>
                         <div className="text-[9px] text-gray-500 italic truncate w-full text-center">{rosterToName[Number(pick.owner_id)] || slotStr}</div>
-                        {isMySlot && <div className="text-[8px] text-blue-500">tap to set</div>}
+                        {isMySlot && <div className="text-[8px] text-blue-500">click to set</div>}
                       </>
                     ) : (
                       <>
                         <div className="text-gray-600 font-semibold text-[10px]">{pick.slot}</div>
                         <div className="text-[9px] text-gray-600 truncate w-full text-center">{rosterToName[Number(pick.owner_id)] || ""}</div>
-                        {isMySlot && <div className="text-[8px] text-blue-500">tap to set</div>}
+                        {isMySlot && <div className="text-[8px] text-blue-500">click to set</div>}
                       </>
                     )}
 
@@ -936,12 +940,11 @@ export default function DraftHub({
         <div className="mt-8">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h2 className="text-lg font-semibold">Top 10 Available From Your Big Board</h2>
+              <h2 className="text-lg font-semibold">Top Available Rookies From Your Big Board</h2>
               <p className="text-sm text-gray-400">
                 Automatically removes players after they are drafted in this Sleeper draft.
               </p>
             </div>
-            <div className="text-xs text-gray-500">{topAvailableRookies.length} shown</div>
           </div>
           {!rookies.length ? (
             <div className="text-gray-400 text-sm">Your rookie board is still loading from Sleeper.</div>
@@ -1015,7 +1018,7 @@ export default function DraftHub({
             );
           })()}
 
-          <div className="flex items-center gap-3 mb-3">
+          <div className="flex items-center gap-3 mb-2">
             <input
               type="text"
               placeholder="Search rookies..."
@@ -1028,30 +1031,70 @@ export default function DraftHub({
             )}
           </div>
 
+          {/* ±N vs FC legend */}
+          <div className="flex items-center gap-1 text-[10px] text-gray-600 mb-2 px-0.5">
+            <span>±N vs FC rank:</span>
+            <span className="text-green-500 font-semibold">+N</span>
+            <span>you rank higher ·</span>
+            <span className="text-red-500 font-semibold">−N</span>
+            <span>you rank lower than FantasyCalc</span>
+          </div>
+
+          {/* Position filter pills */}
+          <div className="flex items-center gap-1.5 mb-3">
+            {(["QB", "RB", "WR", "TE"] as const).map((pos) => (
+              <button
+                key={pos}
+                onClick={() => setPosFilter((prev) => prev === pos ? null : pos)}
+                className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition ${
+                  posFilter === pos
+                    ? posBadge[pos] + " border-transparent"
+                    : "border-gray-700 text-gray-500 hover:text-white"
+                }`}
+              >
+                {pos}
+              </button>
+            ))}
+            {posFilter && (
+              <button
+                onClick={() => setPosFilter(null)}
+                className="text-[10px] text-gray-500 hover:text-white transition ml-1"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+
           <div className="space-y-0.5">
             {(() => {
               // FC value: fuzzy name lookup (catches 1-2 char spelling diffs like Jeremiyah/Jeremiah)
               const fcVal = (r: any): number => fuzzyFcLookup(r.name, fcNameValues) || r.fcValue || 0;
+
+              // Stable key: player_id when available, else normalized name fallback.
+              // Prevents players without a Sleeper player_id (pre-draft rookies) from
+              // all sharing the same null key and overwriting each other in the rank maps.
+              const rookieKey = (r: any): string => r.player_id || `name:${normalizeRookieName(r.name)}`;
 
               // Build FantasyCalc rank lookup (sort rookies by FC value desc)
               const fcRanks: Record<string, number> = {};
               [...rookies]
                 .filter((r: any) => fcVal(r) > 0)
                 .sort((a: any, b: any) => fcVal(b) - fcVal(a))
-                .forEach((r: any, i: number) => { fcRanks[r.player_id] = i + 1; });
+                .forEach((r: any, i: number) => { fcRanks[rookieKey(r)] = i + 1; });
 
               // User's rank among only FC-valued players (board order, no-value players skipped)
               const userFcRanks: Record<string, number> = {};
               rookies
                 .filter((r: any) => fcVal(r) > 0)
-                .forEach((r: any, i: number) => { userFcRanks[r.player_id] = i + 1; });
+                .forEach((r: any, i: number) => { userFcRanks[rookieKey(r)] = i + 1; });
 
               return rookies
                 .map((p: any, originalIndex: number) => ({ p, originalIndex }))
                 .filter(({ p }) =>
                   p.name &&
                   p.name !== "Player Invalid" &&
-                  p.name.toLowerCase().includes(rookieSearch.toLowerCase())
+                  p.name.toLowerCase().includes(rookieSearch.toLowerCase()) &&
+                  (!posFilter || p.position === posFilter)
                 )
                 .map(({ p, originalIndex }, displayIndex, arr) => {
                   const tierKey  = p.player_id || `name:${p.name}`;
@@ -1063,12 +1106,15 @@ export default function DraftHub({
                   const prevTier = prevTierKey !== null ? tierLabels[prevTierKey] : undefined;
                   const showDivider = !rookieSearch && displayIndex > 0 && myTier !== prevTier;
 
-                  const fcRank   = fcRanks[p.player_id];
-                  const userRank = userFcRanks[p.player_id];
+                  const fcRank   = fcRanks[rookieKey(p)];
+                  const userRank = userFcRanks[rookieKey(p)];
                   // positive = you rank higher than FC, negative = you rank lower
                   const gap = fcRank !== undefined && userRank !== undefined
                     ? fcRank - userRank
                     : null;
+
+                  const playerDynVal = fcVal(p);
+                  const isTaken = draftedPlayerIds.has(String(p.player_id));
 
                 return (
                   <div key={p.player_id || originalIndex}>
@@ -1095,7 +1141,7 @@ export default function DraftHub({
                           setDragIndex(null);
                         }
                       }}
-                      className="flex items-center justify-between bg-gray-800/70 px-3 py-1.5 rounded-lg text-sm cursor-move hover:bg-gray-700/70 transition"
+                      className={`flex items-center justify-between bg-gray-800/70 px-3 py-1.5 rounded-lg text-sm cursor-move hover:bg-gray-700/70 transition${isTaken ? " opacity-40" : ""}`}
                     >
                       {/* Left: rank + name + pos */}
                       <div className="flex gap-3 items-center min-w-0">
@@ -1123,12 +1169,18 @@ export default function DraftHub({
                             {p.position}
                           </span>
                           {p.team && <span className="text-[10px] text-gray-500 shrink-0">{p.team}</span>}
+                          {playerDynVal > 0 && <span className="text-[10px] text-gray-400 font-mono shrink-0">{playerDynVal.toLocaleString()}</span>}
                         </div>
                       </div>
 
                       {/* Right: gap + note + tier */}
                       <div className="flex items-center gap-2 shrink-0 ml-2">
-                        {gap !== null && gap !== 0 && (
+                        {isTaken && <span className="text-[9px] font-bold text-gray-500 border border-gray-700 px-1 py-0.5 rounded leading-none">TAKEN</span>}
+                        {gap === null ? (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded text-gray-400 bg-gray-700/60 border border-gray-600/40" title="Not ranked by FantasyCalc">NR</span>
+                        ) : gap === 0 ? (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded text-gray-400 bg-gray-800/40" title="Same rank as FantasyCalc">Even</span>
+                        ) : (
                           <span
                             className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
                               gap > 0 ? "text-green-400 bg-green-900/20" : "text-red-400 bg-red-900/20"
@@ -1216,6 +1268,7 @@ export default function DraftHub({
                           </div>
                           <div className="text-[10px] text-gray-600 mb-1">Pick {overallPick}</div>
                           <div className={`text-sm font-semibold ${
+                            value > 6000 ? "text-emerald-400" :
                             value > 4000 ? "text-green-400" :
                             value > 2000 ? "text-yellow-400" :
                             value > 500  ? "text-orange-400" : "text-gray-500"
@@ -1315,6 +1368,8 @@ export default function DraftHub({
                         {currentLeagueDraft.picks.map((pick: any) => {
                           const { label, cls } = valueGrade(pick.value);
                           const isMine = pick.pickedByUserId === user?.user_id;
+                          const { label: equivLabel, pickNo: equivPickNo } = closestPickEquiv(pick.value, pickFcValues);
+                          const equivColor = pickEquivColor(equivPickNo, pick.pickNo);
                           return (
                             <div key={pick.slot} className={`flex items-center gap-2 px-4 py-1.5 ${isMine ? "bg-blue-950/20" : ""}`}>
                               <span className="text-[11px] font-bold text-gray-500 w-8 shrink-0">{pick.slot}</span>
@@ -1329,6 +1384,9 @@ export default function DraftHub({
                                   {pick.value > 0 ? pick.value.toLocaleString() : "—"}
                                 </span>
                                 <span className={`text-[9px] font-semibold border px-1.5 py-0.5 rounded ${cls}`}>{label}</span>
+                                {equivLabel !== "—" && (
+                                  <span className={`text-[9px] font-semibold ${equivColor}`}>≈{equivLabel}</span>
+                                )}
                               </div>
                             </div>
                           );
@@ -1628,7 +1686,7 @@ export default function DraftHub({
                     <div className="px-4 py-3 border-b border-gray-800">
                       <div className="text-sm font-semibold text-white">Your Draft Picks</div>
                       <div className="text-xs text-gray-400 mt-0.5">
-                        {myPicksList.length} unique players · {filteredDrafts.length} total draft{filteredDrafts.length !== 1 ? "s" : ""} in {selectedHistoryYear}
+                        {myPicksList.length} unique players · {filteredDrafts.length} total draft{filteredDrafts.length !== 1 ? "s" : ""} {selectedHistoryYear === "ALL" ? "across all years" : `in ${selectedHistoryYear}`}
                       </div>
                     </div>
                     {(() => {
@@ -1737,7 +1795,7 @@ export default function DraftHub({
                             </thead>
                             <tbody>
                               {(["hit", "neutral", "bust"] as const).map((grade) => {
-                                const labelText  = grade === "hit" ? "Hit" : grade === "neutral" ? "Neutral" : "Miss";
+                                const labelText  = grade === "hit" ? "Hit" : grade === "neutral" ? "Neutral" : "Bust";
                                 const labelColor = grade === "hit" ? "text-green-400" : grade === "neutral" ? "text-gray-400" : "text-red-400";
                                 return (
                                   <tr key={grade} className="border-b border-gray-800/50 last:border-0">
@@ -1825,3 +1883,5 @@ export default function DraftHub({
     </div>
   );
 }
+
+export default React.memo(DraftHub);

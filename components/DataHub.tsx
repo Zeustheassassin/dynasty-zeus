@@ -1,5 +1,6 @@
 "use client";
 import React from "react";
+import { usePlayers } from "../lib/PlayersContext";
 
 // ── Module-level constants (mirrors page.tsx) ──────────────────────────────
 const CURRENT_YEAR = String(new Date().getFullYear());
@@ -33,7 +34,6 @@ interface DataHubProps {
   dataHubTab: DataHubTabId;
   setDataHubTab: (tab: DataHubTabId) => void;
 
-  players: any;
   shares: Record<string, any>;
 
   // Dynasty/Redraft rankings
@@ -89,6 +89,7 @@ interface DataHubProps {
 
   // Value trends
   historicalSnapshot: { players: Record<string, any>; recorded_at: string } | null;
+  onSaveSnapshot: () => Promise<void>;
 }
 
 // ── Disposition colour helpers ─────────────────────────────────────────────
@@ -125,9 +126,8 @@ const ageColor = (age: number | undefined, pos: string) => {
 };
 
 // ── Component ──────────────────────────────────────────────────────────────
-export default function DataHub({
+function DataHub({
   dataHubTab, setDataHubTab,
-  players,
   shares,
   calcFcValues, dynastyRankPos, setDynastyRankPos, loadingCalcValues,
   playerDispositions, savePlayerDisposition, setPlayerProfileId,
@@ -141,8 +141,9 @@ export default function DataHub({
   loadingLeagueMateStats, setLoadingLeagueMateStats,
   leagueMateSearch, setLeagueMateSearch, leagueMateSort, setLeagueMateSort,
   loadUserExposure, selectedUserId, externalShares, loadingShares,
-  historicalSnapshot,
+  historicalSnapshot, onSaveSnapshot,
 }: DataHubProps) {
+  const players = usePlayers();
 
   // ── Local UI state ─────────────────────────────────────────────────────────
   const [rankView, setRankView] = React.useState<"DYNASTY" | "REDRAFT" | "COMPARE">("DYNASTY");
@@ -154,6 +155,8 @@ export default function DataHub({
   const [expandedMateId, setExpandedMateId] = React.useState<string | null>(null);
   const [trendThreshold, setTrendThreshold] = React.useState(10);
   const [trendPos, setTrendPos] = React.useState("ALL");
+  const [savingSnapshot, setSavingSnapshot] = React.useState(false);
+  const [snapshotSavedAt, setSnapshotSavedAt] = React.useState<number | null>(null);
   const [depthPos, setDepthPos] = React.useState<"QB" | "RB" | "WR" | "TE">("QB");
   const [depthTeamSearch, setDepthTeamSearch] = React.useState("");
   const [depthShowOwnedOnly, setDepthShowOwnedOnly] = React.useState(false);
@@ -346,25 +349,41 @@ export default function DataHub({
                 const dyn = fcVal(p.player_id);
                 const red = rdVal(p.player_id);
                 const gap = dyn - red;
+                const gapPct = dyn > 0 ? (gap / dyn) * 100 : 0;
                 const displayVal = rankView === "REDRAFT" ? red : dyn;
+                const isOwned = (shares[p.player_id]?.count ?? 0) > 0;
+                // A2: trend delta — only meaningful for dynasty view against the dynasty snapshot
+                const snapDynVal = rankView === "DYNASTY" ? Number(historicalSnapshot?.players[p.player_id]?.value ?? 0) : 0;
+                const trendPct = snapDynVal > 0 && dyn > 0 ? ((dyn - snapDynVal) / snapDynVal) * 100 : null;
                 return (
                   <div key={p.player_id} className="flex items-center gap-2 bg-gray-800/70 hover:bg-gray-800 rounded-lg px-2 py-1.5 transition">
                     <span className="text-[10px] text-gray-600 w-5 text-right shrink-0">{idx + 1}</span>
                     <span className={`text-[10px] font-bold w-6 shrink-0 ${POS_COLOR[p.position] ?? "text-gray-400"}`}>{p.position}</span>
-                    <span className="text-xs text-white flex-1 truncate min-w-0 flex items-center gap-1">
-                      {p.full_name}{injuryBadge(p.injury_status)}
+                    {/* A1: owned indicator dot */}
+                    <span className="text-xs flex-1 truncate min-w-0 flex items-center gap-1">
+                      {isOwned && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" title="On your roster" />}
+                      <span className={isOwned ? "text-blue-200" : "text-white"}>{p.full_name}</span>
+                      {injuryBadge(p.injury_status)}
                     </span>
                     <span className={`text-[10px] font-mono w-7 text-center shrink-0 ${ageColor(p.age, p.position)}`}>{p.age || "—"}</span>
                     {rankView === "COMPARE" ? (
                       <>
                         <span className="text-[10px] text-gray-300 font-mono w-14 text-right shrink-0">{dyn.toLocaleString()}</span>
                         <span className="text-[10px] text-gray-500 font-mono w-14 text-right shrink-0">{red > 0 ? red.toLocaleString() : "—"}</span>
-                        <span className={`text-[10px] font-mono w-12 text-right shrink-0 ${gap > 800 ? "text-green-400" : gap < -200 ? "text-red-400" : "text-gray-500"}`}>
+                        <span className={`text-[10px] font-mono w-12 text-right shrink-0 ${gapPct > 15 ? "text-green-400" : gapPct < -10 ? "text-red-400" : "text-gray-500"}`}>
                           {red > 0 ? `${gap > 0 ? "+" : ""}${gap.toLocaleString()}` : "—"}
                         </span>
                       </>
                     ) : (
-                      <span className="text-[10px] text-gray-400 font-mono w-14 text-right shrink-0">{displayVal.toLocaleString()}</span>
+                      /* A2: show value + tiny trend delta in dynasty view */
+                      <span className="flex flex-col items-end w-14 shrink-0">
+                        <span className="text-[10px] text-gray-400 font-mono">{displayVal.toLocaleString()}</span>
+                        {trendPct !== null && (
+                          <span className={`text-[8px] font-semibold leading-none ${trendPct > 0 ? "text-green-500" : "text-red-500"}`}>
+                            {trendPct > 0 ? "+" : ""}{trendPct.toFixed(1)}%
+                          </span>
+                        )}
+                      </span>
                     )}
                     <select
                       value={disp.sell}
@@ -393,7 +412,9 @@ export default function DataHub({
                 );
               })}
               {ranked.length === 0 && !loadingCalcValues && !loadingRedraft && (
-                <p className="text-gray-400 text-sm">No data yet. Select a league to load values.</p>
+                <p className="text-gray-400 text-sm">
+                  {Object.keys(calcFcValues).length === 0 ? "Load a league to populate player values." : "No players match your filter."}
+                </p>
               )}
             </div>
           </>
@@ -421,6 +442,7 @@ export default function DataHub({
         const ageDays = Math.floor(ageMs / (1000 * 60 * 60 * 24));
         const ageHours = Math.floor(ageMs / (1000 * 60 * 60));
         const ageLabel = ageDays >= 2 ? `${ageDays} days ago` : ageDays === 1 ? "yesterday" : `${ageHours}h ago`;
+        const isStaleSnapshot = ageDays >= 7;
 
         type TrendRow = {
           playerId: string;
@@ -627,7 +649,7 @@ export default function DataHub({
             <div className={`rounded-2xl border px-4 py-3 transition ${isSell ? "bg-red-950/10 border-red-900/30 hover:bg-red-950/20" : "bg-green-950/10 border-green-900/30 hover:bg-green-950/20"}`}>
               <div className="flex items-center gap-2 mb-2.5">
                 <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-md ${isSell ? "bg-red-900/50 text-red-300" : "bg-green-900/50 text-green-300"}`}>
-                  {isSell ? "📉 Sell Window Trade" : "📈 Buy Window Trade"}
+                  {isSell ? "Sell Window" : "Buy Window"}
                 </span>
                 <span className="text-[11px] text-gray-500 ml-auto shrink-0">w/ {t.partnerName}</span>
               </div>
@@ -655,7 +677,9 @@ export default function DataHub({
                   <div className="text-[10px] text-gray-500 mt-0.5">{t.receiveTeam || "—"} · Age {t.receiveAge || "—"}</div>
                   <div className="flex items-center gap-2 mt-1.5">
                     <span className="text-[11px] text-gray-400 font-mono">{t.receiveVal.toLocaleString()}</span>
-                    <span className="text-[11px] font-bold text-green-400">+{t.receivePct.toFixed(1)}%</span>
+                    <span className={`text-[11px] font-bold ${t.receivePct >= 0 ? "text-green-400" : "text-red-400"}`}>
+                      {t.receivePct > 0 ? "+" : ""}{t.receivePct.toFixed(1)}%
+                    </span>
                   </div>
                 </div>
               </div>
@@ -701,11 +725,25 @@ export default function DataHub({
             </div>
 
             {/* Snapshot age banner */}
-            <div className="flex items-center gap-2 mb-5 rounded-xl border border-gray-800 bg-gray-900/60 px-4 py-2.5">
-              <span className="text-[11px] text-gray-500">Comparing current values against snapshot from</span>
-              <span className="text-[11px] font-semibold text-gray-300">{ageLabel}</span>
+            <div className={`flex flex-wrap items-center gap-2 mb-5 rounded-xl border px-4 py-2.5 ${isStaleSnapshot ? "border-amber-700/50 bg-amber-950/20" : "border-gray-800 bg-gray-900/60"}`}>
+              <span className={`text-[11px] ${isStaleSnapshot ? "text-amber-400" : "text-gray-500"}`}>Comparing current values against snapshot from</span>
+              <span className={`text-[11px] font-semibold ${isStaleSnapshot ? "text-amber-300" : "text-gray-300"}`}>{ageLabel}</span>
               <span className="text-[11px] text-gray-600">({snapshotDate.toLocaleDateString()})</span>
-              <span className="ml-auto text-[10px] text-gray-600">{Object.keys(snap.players).length} players tracked</span>
+              {isStaleSnapshot && <span className="text-[10px] text-amber-500 font-semibold">· snapshot may be stale</span>}
+              <span className="text-[10px] text-gray-600">{Object.keys(snap.players).length} players tracked</span>
+              <button
+                type="button"
+                disabled={savingSnapshot}
+                onClick={async () => {
+                  setSavingSnapshot(true);
+                  await onSaveSnapshot();
+                  setSavingSnapshot(false);
+                  setSnapshotSavedAt(Date.now());
+                }}
+                className="ml-auto text-[10px] font-semibold border rounded-lg px-2.5 py-1 transition disabled:opacity-50 border-gray-700 text-gray-400 hover:text-white hover:border-gray-500"
+              >
+                {savingSnapshot ? "Saving…" : snapshotSavedAt ? "✓ Snapshot Saved" : "Take Snapshot Now"}
+              </button>
             </div>
 
             {/* Column headers */}
@@ -772,7 +810,7 @@ export default function DataHub({
                   <div className="flex items-center gap-2 mb-3">
                     <span className="text-sm font-bold text-red-400">Sell Window Trades</span>
                     <span className="rounded-full bg-red-950/50 border border-red-900/50 px-2 py-0.5 text-[10px] font-semibold text-red-400">{sellWindowTrades.length}</span>
-                    <span className="text-[11px] text-gray-500">Give your −5%+ fallers · receive partners&apos; +20%+ risers</span>
+                    <span className="text-[11px] text-gray-500">Give your −5%+ fallers · receive fair-value assets from league mates</span>
                   </div>
                   {sellWindowTrades.length === 0 ? (
                     <p className="text-sm text-gray-600 px-1">
@@ -790,7 +828,7 @@ export default function DataHub({
                   <div className="flex items-center gap-2 mb-3">
                     <span className="text-sm font-bold text-green-400">Buy Window Trades</span>
                     <span className="rounded-full bg-green-950/50 border border-green-900/50 px-2 py-0.5 text-[10px] font-semibold text-green-400">{buyWindowTrades.length}</span>
-                    <span className="text-[11px] text-gray-500">Give your +20%+ peaked assets · receive partners&apos; +5%+ early risers</span>
+                    <span className="text-[11px] text-gray-500">Target partners&apos; +5%+ early risers · give your closest fair-value asset in return</span>
                   </div>
                   {buyWindowTrades.length === 0 ? (
                     <p className="text-sm text-gray-600 px-1">
@@ -832,7 +870,7 @@ export default function DataHub({
                   }}
                   className="bg-gray-800 border border-gray-700 text-sm text-white rounded-lg px-2 py-1 focus:outline-none focus:border-blue-500"
                 >
-                  <option value={0}>Full Season</option>
+                  <option value={0}>Full Season Projection</option>
                   {Array.from({ length: 18 }, (_, i) => i + 1).map((w) => (
                     <option key={w} value={w}>Week {w}</option>
                   ))}
@@ -911,21 +949,28 @@ export default function DataHub({
                   <span className="w-7 shrink-0">Pos</span>
                   <span className="flex-1">Player</span>
                   <span className="w-10 text-right shrink-0">FPTS</span>
+                  <span className="hidden sm:block w-14 text-right shrink-0">Dyn</span>
                   <span className="w-10 text-right shrink-0 pr-1">Srcs</span>
                 </div>
                 <div className="space-y-1">
-                  {visible.map((p, idx) => (
-                    <div key={p.sleeperId} className="flex items-center gap-3 bg-gray-800 rounded-lg px-3 py-2">
-                      <span className="text-xs text-gray-500 w-6 text-right shrink-0">{idx + 1}</span>
-                      <span className={`text-[10px] font-bold w-7 shrink-0 ${POS_COLOR[p.position] ?? "text-gray-400"}`}>{p.position}</span>
-                      <span className="text-sm text-white flex-1 truncate">{p.full_name}</span>
-                      {p.team && <span className="text-[10px] text-gray-500 shrink-0">{p.team}</span>}
-                      <span className="text-xs text-gray-300 font-mono w-10 text-right shrink-0">{p.fpts.toFixed(1)}</span>
-                      <span className="text-[10px] text-gray-600 w-10 text-right shrink-0 pr-1">
-                        {p.sources.length}/{PROJ_SOURCES.length}
-                      </span>
-                    </div>
-                  ))}
+                  {visible.map((p, idx) => {
+                    const dynVal = calcFcValues[p.sleeperId] ?? 0;
+                    return (
+                      <div key={p.sleeperId} className="flex items-center gap-3 bg-gray-800 rounded-lg px-3 py-2">
+                        <span className="text-xs text-gray-500 w-6 text-right shrink-0">{idx + 1}</span>
+                        <span className={`text-[10px] font-bold w-7 shrink-0 ${POS_COLOR[p.position] ?? "text-gray-400"}`}>{p.position}</span>
+                        <span className="text-sm text-white flex-1 truncate">{p.full_name}</span>
+                        {p.team && <span className="text-[10px] text-gray-500 shrink-0">{p.team}</span>}
+                        <span className="text-xs text-gray-300 font-mono w-10 text-right shrink-0">{p.fpts.toFixed(1)}</span>
+                        <span className={`hidden sm:block text-[10px] font-mono w-14 text-right shrink-0 ${dynVal > 0 ? "text-gray-400" : "text-gray-700"}`}>
+                          {dynVal > 0 ? dynVal.toLocaleString() : "—"}
+                        </span>
+                        <span className="text-[10px] text-gray-600 w-10 text-right shrink-0 pr-1">
+                          {p.sources.length}/{PROJ_SOURCES.length}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
               </>
             )}
@@ -972,11 +1017,16 @@ export default function DataHub({
                       <div className="flex flex-wrap gap-1.5">
                         {[...entry.picks]
                           .sort((a: any, b: any) => a.season !== b.season ? a.season - b.season : a.round - b.round)
-                          .map((pick: any, i: number) => (
-                            <span key={i} className="text-[10px] font-semibold px-2 py-1 rounded-lg bg-blue-900/30 border border-blue-800/50 text-blue-300">
-                              {pick.season} R{pick.round}
-                            </span>
-                          ))}
+                          .map((pick: any, i: number) => {
+                            const yi = PICK_YEARS.indexOf(String(pick.season));
+                            const stdVal = yi >= 0 ? (STANDARD_PICK_VALUES[`${pick.round}-${yi}`] ?? null) : null;
+                            return (
+                              <span key={i} className="flex flex-col items-center text-center px-2 py-1 rounded-lg bg-blue-900/30 border border-blue-800/50">
+                                <span className="text-[10px] font-semibold text-blue-300">{pick.season} R{pick.round}</span>
+                                {stdVal && <span className="text-[8px] text-blue-500 font-mono leading-tight">~{stdVal.toLocaleString()}</span>}
+                              </span>
+                            );
+                          })}
                       </div>
                     </div>
                   ))}
@@ -1367,7 +1417,7 @@ export default function DataHub({
                     : "border-gray-700 text-gray-400 hover:text-white"
                 }`}
               >
-                My Teams Only
+                Owned Players Only
               </button>
               {/* Legend */}
               <div className="flex items-center gap-3 ml-auto text-[10px] text-gray-500 flex-wrap">
@@ -1452,3 +1502,5 @@ export default function DataHub({
     </>
   );
 }
+
+export default React.memo(DataHub);

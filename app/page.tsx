@@ -1,13 +1,17 @@
 "use client";
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import dynamic from "next/dynamic";
+// Small hubs — loaded synchronously (minimal bundle cost)
 import Dashboard from "../components/Dashboard";
 import AlertsPage from "../components/AlertsPage";
 import ManagementHub from "../components/ManagementHub";
 import GamedayHub from "../components/GamedayHub";
-import DraftHub from "../components/DraftHub";
-import DataHub from "../components/DataHub";
-import LeagueHub, { LEAGUE_HUB_GROUPS } from "../components/LeagueHub";
-import TradeHub from "../components/TradeHub";
+// Large hubs — code-split so they only load when the user navigates to them
+const DraftHub = dynamic(() => import("../components/DraftHub"), { ssr: false });
+const DataHub = dynamic(() => import("../components/DataHub"), { ssr: false });
+const LeagueHub = dynamic(() => import("../components/LeagueHub"), { ssr: false });
+const TradeHub = dynamic(() => import("../components/TradeHub"), { ssr: false });
+import { LEAGUE_HUB_GROUPS } from "../lib/leagueHubGroups";
 import { supabase } from "../lib/supabaseclient";
 import {
   CURRENT_YEAR, YEARS, ROUNDS,
@@ -29,6 +33,7 @@ import {
 } from "../lib/helpers";
 import { PROJ_SOURCES, useProjections } from "../hooks/useProjections";
 import { useSleeperUser } from "../hooks/useSleeperUser";
+import { PlayersProvider } from "../lib/PlayersContext";
 import type { ProjSourceId, LeagueHubTab, AlertsCenterItem, WatchlistEntry, TradeAttempt, TradeAttemptStatus } from "../lib/types";
 
 // -------------------------
@@ -37,9 +42,28 @@ import type { ProjSourceId, LeagueHubTab, AlertsCenterItem, WatchlistEntry, Trad
 const ROOKIE_YEAR = CURRENT_YEAR;
 const ROOKIE_BOARD_POSITIONS = new Set(["QB", "RB", "WR", "TE"]);
 const ROOKIE_BOARD_VERSION = `${ROOKIE_YEAR}_sf_v5`;
+
+// Module-level in-memory player map cache — avoids re-fetching/re-parsing the 6MB Sleeper player
+// payload if loadPlayers is called more than once in the same browser session (e.g. strict-mode
+// double-invoke in dev, or a Sleeper reconnect event).
+let _playersInMemory: Record<string, any> | null = null;
+
+// Module-level Sleeper user cache — survives re-renders and league switches within the same session.
+// Keyed by owner_id (Sleeper user_id). Eliminates the N+1 user fetch when re-selecting a league
+// or when multiple leagues share owners (very common in multi-league setups).
+const _sleeperUserCache = new Map<string, any>();
+async function fetchSleeperUser(ownerId: string): Promise<any> {
+  if (_sleeperUserCache.has(ownerId)) return _sleeperUserCache.get(ownerId);
+  const data = await fetch(`https://api.sleeper.app/v1/user/${ownerId}`).then((r) => r.json());
+  if (data?.user_id) _sleeperUserCache.set(ownerId, data);
+  return data;
+}
 const ROOKIE_BOARD_RESET_KEY = `rookieBoardReset_${ROOKIE_BOARD_VERSION}`;
 const ROOKIE_BOARD_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vROmAn0k3A92okpYE7UeelIy0vYUMY0NFAGHrI52V68Zm8ff9aruDXB1E6u0hRNr2EHgr54_D7gMBti/pub?output=csv";
 const ROOKIE_BOARD_ADP_URL = `https://api.sleeper.app/projections/nfl/${ROOKIE_YEAR}?season_type=regular&position=QB&position=RB&position=WR&position=TE&order_by=adp_dynasty_2qb`;
+
+// Static — never changes, defined at module level so it's a stable reference in useMemo dep arrays
+const ROLE_PRIORITY: Record<string, number> = { starter: 0, bench: 1, taxi: 2 };
 
 export default function Home() {
 
@@ -168,8 +192,8 @@ const [calcGivePicks, setCalcGivePicks] = useState<string[]>([]);
 const [calcReceivePicks, setCalcReceivePicks] = useState<string[]>([]);
 const [calcSearchA, setCalcSearchA] = useState("");
 const [calcSearchB, setCalcSearchB] = useState("");
-  const [users, setUsers] = useState<any>({});
-  const [standings, setStandings] = useState<any[]>([]);
+const [users, setUsers] = useState<any>({});
+const [standings, setStandings] = useState<any[]>([]);
 
   const [mainTab, setMainTab] = useState("DASHBOARD");
 
@@ -382,27 +406,25 @@ const addWatchlistEntry = async (playerId: string) => {
   }
 };
 
-const dismissDashboardAlert = async (alertId: string) => {
-  const nextDismissed = Array.from(new Set([...dismissedAlertIds, alertId]));
+const dismissDashboardAlert = useCallback(async (alertId: string) => {
+  const sbUser = supabaseUserRef.current;
+  const scope = sbUser?.id || "guest";
+  const dismissedKey = `dismissedAlerts_v1_${scope}`;
+  const nextDismissed = Array.from(new Set([...latestDismissedAlertsRef.current, alertId]));
   setDismissedAlertIds(nextDismissed);
-  localStorage.setItem(dismissedAlertStorageKey, JSON.stringify(nextDismissed));
+  localStorage.setItem(dismissedKey, JSON.stringify(nextDismissed));
   setDashboardAlerts((prev) =>
     prev.map((alert) => alert.id === alertId ? { ...alert, dismissed: true } : alert)
   );
-  if (supabaseUser) {
+  if (sbUser) {
     await supabase
       .from("alerts")
       .upsert(
-        {
-          user_id: supabaseUser.id,
-          alert_id: alertId,
-          dismissed: true,
-          updated_at: new Date().toISOString(),
-        },
+        { user_id: sbUser.id, alert_id: alertId, dismissed: true, updated_at: new Date().toISOString() },
         { onConflict: "user_id,alert_id" }
       );
   }
-};
+}, []); // reads dismissedAlertIds via latestDismissedAlertsRef, supabaseUser via supabaseUserRef
 
 useEffect(() => {
   hydrateAlertStateFromLocal();
@@ -672,6 +694,12 @@ const deleteNote = async (id: string) => {
 // -------------------------
 useEffect(() => {
   const loadPlayers = async () => {
+    // Fast path: already loaded this session — skip localStorage and network entirely
+    if (_playersInMemory) {
+      setPlayers(_playersInMemory);
+      return;
+    }
+
     const cached = localStorage.getItem("playersCache");
     const cachedAt = localStorage.getItem("playersCacheAt");
     const ONE_DAY = 24 * 60 * 60 * 1000;
@@ -686,6 +714,7 @@ useEffect(() => {
         "fantasy_positions" in cacheSample;
 
       if (hasRookieFields) {
+        _playersInMemory = parsedCache;
         setPlayers(parsedCache);
         // Still load pick values even when players come from cache
         fetchFantasyCalcValues(2).then(({ pickValues }) => setPickFcValues(pickValues)).catch(() => {});
@@ -730,6 +759,7 @@ useEffect(() => {
     } catch {
       // localStorage full — skip caching, app still works fine
     }
+    _playersInMemory = data;
     setPlayers(data);
   };
 
@@ -1833,11 +1863,7 @@ const loadRoster = async (league: any) => {
   const [tradedPicksData, draftsData, userResults] = await Promise.all([
     fetch(`https://api.sleeper.app/v1/league/${league.league_id}/traded_picks`).then((r) => r.json()),
     fetch(`https://api.sleeper.app/v1/league/${league.league_id}/drafts`).then((r) => r.json()).catch(() => []),
-    Promise.all(
-      allRosters.map((r: any) =>
-        fetch(`https://api.sleeper.app/v1/user/${r.owner_id}`).then((r) => r.json())
-      )
-    ),
+    Promise.all(allRosters.map((r: any) => fetchSleeperUser(r.owner_id))),
   ]);
 
   // ── Step 4: Apply traded picks ───────────────────────────────────────────
@@ -2143,8 +2169,8 @@ const loadLeaguemateTradeAlerts = async () => {
 
       await Promise.all(dynastyLeagues.map(async (league: any) => {
         try {
-          // Fetch rosters + recent transactions (weeks 0-2 cover all offseason activity)
-          const [leagueRosters, txn0, txn1, txn2] = await Promise.all([
+          // Fetch rosters + recent transactions (weeks 0-2 cover all offseason activity) + drafts for slot resolution
+          const [leagueRosters, txn0, txn1, txn2, draftsData] = await Promise.all([
             fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`)
               .then((r) => r.json()).catch(() => []),
             fetch(`https://api.sleeper.app/v1/league/${league.league_id}/transactions/0`)
@@ -2153,11 +2179,32 @@ const loadLeaguemateTradeAlerts = async () => {
               .then((r) => r.json()).catch(() => []),
             fetch(`https://api.sleeper.app/v1/league/${league.league_id}/transactions/2`)
               .then((r) => r.json()).catch(() => []),
+            fetch(`https://api.sleeper.app/v1/league/${league.league_id}/drafts`)
+              .then((r) => r.json()).catch(() => []),
           ]);
 
           const ownerRoster = (Array.isArray(leagueRosters) ? leagueRosters : [])
             .find((r: any) => String(r.owner_id) === ownerId);
           if (!ownerRoster) return;
+
+          // Build slot resolver for this league's current-year draft
+          const currentDraftForAlert = (Array.isArray(draftsData) ? draftsData : [])
+            .find((d: any) => String(d.season) === CURRENT_YEAR);
+          const alertDraftOrder: Record<string, number> = currentDraftForAlert?.draft_order ?? {};
+          const alertNumTeams: number = (Array.isArray(leagueRosters) ? leagueRosters : []).length || 0;
+          const alertRosterToOwner: Record<number, string> = {};
+          (Array.isArray(leagueRosters) ? leagueRosters : []).forEach((r: any) => {
+            alertRosterToOwner[r.roster_id] = r.owner_id;
+          });
+          const labelPick = (p: any) => {
+            if (String(p.season) === CURRENT_YEAR && currentDraftForAlert) {
+              const userId = alertRosterToOwner[p.roster_id];
+              const baseSlot = Number(alertDraftOrder[String(userId)] ?? 0);
+              const s = getDraftRoundSlot(currentDraftForAlert, Number(p.round), baseSlot, alertNumTeams);
+              if (s) return `${p.season} ${p.round}.${String(s).padStart(2, "0")}`;
+            }
+            return `${p.season} Rd ${p.round}`;
+          };
 
           const allTxns = [
             ...(Array.isArray(txn0) ? txn0 : []),
@@ -2187,14 +2234,6 @@ const loadLeaguemateTradeAlerts = async () => {
               .filter(([, rid]) => rid !== ownerRoster.roster_id)
               .map(([pid]) => (players as any)?.[pid]?.full_name || pid)
               .filter(Boolean);
-
-            // Label each pick the same way as Trade Hub: slotted picks show "2026 1.04",
-            // future picks show "2027 Rd 1". Picks moving TO this owner are "received picks",
-            // picks moving AWAY are "sent picks".
-            const labelPick = (p: any) => {
-              const isSlotted = p.slot && String(p.slot).includes(".");
-              return isSlotted ? `${p.season} ${p.slot}` : `${p.season} Rd ${p.round}`;
-            };
             const picksReceived = (trade.draft_picks || [])
               .filter((p: any) => p.owner_id === ownerRoster.roster_id)
               .map(labelPick);
@@ -2352,29 +2391,59 @@ const loadRedraftValues = async () => {
   }
 };
 
-const savePlayerNote = async (playerId: string, note: string) => {
-  const updated = { ...playerNotes, [playerId]: note };
-  setPlayerNotes(updated);
-  try { localStorage.setItem("playerNotes_v1", JSON.stringify(updated)); } catch {}
-  if (supabaseUser) {
+const savePlayerNote = useCallback(async (playerId: string, note: string) => {
+  setPlayerNotes((prev) => {
+    const updated = { ...prev, [playerId]: note };
+    try { localStorage.setItem("playerNotes_v1", JSON.stringify(updated)); } catch {}
+    return updated;
+  });
+  const sbUser = supabaseUserRef.current;
+  if (sbUser) {
     supabase.from("player_notes").upsert(
-      { user_id: supabaseUser.id, player_id: playerId, note, updated_at: new Date().toISOString() },
+      { user_id: sbUser.id, player_id: playerId, note, updated_at: new Date().toISOString() },
       { onConflict: "user_id,player_id" }
     ).then(() => {});
   }
+}, []); // reads supabaseUser via ref; uses functional setState — no deps needed
+
+// Manual snapshot save — callable from the Data Hub button.
+// Builds from the current calcFcValues + players state and upserts to Supabase.
+const saveSnapshotNow = async () => {
+  if (!supabaseUser) return;
+  const snap: Record<string, any> = {};
+  Object.entries(calcFcValues as Record<string, number>).forEach(([playerId, value]) => {
+    if (value <= 0) return;
+    const p = (players as any)?.[playerId];
+    if (!p || !["QB", "RB", "WR", "TE"].includes(p.position)) return;
+    snap[playerId] = { full_name: p.full_name, value, team: p.team || "" };
+  });
+  if (Object.keys(snap).length === 0) return; // values not loaded yet
+  const recordedAt = new Date().toISOString();
+  await supabase
+    .from("player_value_snapshots")
+    .upsert(
+      { user_id: supabaseUser.id, snapshot: snap, recorded_at: recordedAt },
+      { onConflict: "user_id" }
+    );
+  const newSnap = { players: snap, recorded_at: recordedAt };
+  historicalSnapshotRef.current = newSnap;
+  setHistoricalSnapshot(newSnap);
 };
 
-const savePlayerDisposition = async (playerId: string, sell: string, buy: string) => {
-  const updated = { ...playerDispositions, [playerId]: { sell, buy } };
-  setPlayerDispositions(updated);
-  try { localStorage.setItem("playerDispositions_v1", JSON.stringify(updated)); } catch {}
-  if (supabaseUser) {
+const savePlayerDisposition = useCallback(async (playerId: string, sell: string, buy: string) => {
+  setPlayerDispositions((prev) => {
+    const updated = { ...prev, [playerId]: { sell, buy } };
+    try { localStorage.setItem("playerDispositions_v1", JSON.stringify(updated)); } catch {}
+    return updated;
+  });
+  const sbUser = supabaseUserRef.current;
+  if (sbUser) {
     supabase.from("player_dispositions").upsert(
-      { user_id: supabaseUser.id, player_id: playerId, sell, buy, updated_at: new Date().toISOString() },
+      { user_id: sbUser.id, player_id: playerId, sell, buy, updated_at: new Date().toISOString() },
       { onConflict: "user_id,player_id" }
     ).then(() => {});
   }
-};
+}, []); // reads supabaseUser via ref; uses functional setState — no deps needed
 
 const loadUserTrades = async (targetUserId: string) => {
   setTradeHubUserId(targetUserId);
@@ -2560,8 +2629,6 @@ const deleteAttempt = async (id: string) => {
     return "bench";
   };
 
-  const rolePriority: any = { starter: 0, bench: 1, taxi: 2 };
-
   const groupPlayers = () => {
     if (!roster || !players) return {};
     const grouped: any = { QB: [], RB: [], WR: [], TE: [] };
@@ -2579,7 +2646,7 @@ const deleteAttempt = async (id: string) => {
     Object.keys(grouped).forEach((pos) => {
       grouped[pos].sort(
         (a: any, b: any) =>
-          rolePriority[a.role] - rolePriority[b.role]
+          ROLE_PRIORITY[a.role] - ROLE_PRIORITY[b.role]
       );
     });
 
@@ -2588,15 +2655,16 @@ const deleteAttempt = async (id: string) => {
 
   const grouped = useMemo(() => groupPlayers(), [roster, players]);
 
-  const filteredPlayers = grouped[activeTab]
-  ?.filter((p: any) =>
-    p.full_name?.toLowerCase().includes(search.toLowerCase())
-  )
-  ?.sort((a: any, b: any) => {
-    const roleDiff = rolePriority[a.role] - rolePriority[b.role];
-    if (roleDiff !== 0) return roleDiff;
-    return (b.value || 0) - (a.value || 0);
-  });
+  const filteredPlayers = useMemo(() =>
+    (grouped[activeTab] || [])
+      .filter((p: any) => p.full_name?.toLowerCase().includes(search.toLowerCase()))
+      .sort((a: any, b: any) => {
+        const roleDiff = ROLE_PRIORITY[a.role] - ROLE_PRIORITY[b.role];
+        if (roleDiff !== 0) return roleDiff;
+        return (b.value || 0) - (a.value || 0);
+      }),
+    [grouped, activeTab, search]
+  );
 
 const getTeamSummary = () => {
   if (!roster || !players) return null;
@@ -4997,12 +5065,13 @@ const getTeamSummary = () => {
 
     if (!alertBootstrapRef.current) {
       alertBootstrapRef.current = true;
-      // Save daily snapshot to Supabase if it's missing or > 24h old.
-      // This becomes the stable baseline for all future value-change alerts.
+      // Auto-save snapshot to Supabase if it's missing or > 6 days old.
+      // FC values don't shift meaningfully day-to-day; 6-day cadence gives a useful trend window.
+      // Users can also manually take a snapshot from the Data Hub → Value Trends tab.
       const snapshotAge = historicalSnapshotRef.current
         ? Date.now() - new Date(historicalSnapshotRef.current.recorded_at).getTime()
         : Infinity;
-      if (supabaseUser && snapshotAge > 24 * 60 * 60 * 1000) {
+      if (supabaseUser && snapshotAge > 6 * 24 * 60 * 60 * 1000) {
         const recordedAt = new Date().toISOString();
         const fullSnap = buildFullSnapshot();
         supabase
@@ -5199,7 +5268,7 @@ const moveToRank = (fromIndex: number, toRank: number) => {
 // -------------------------
 const myPlayerSet = new Set<string>(roster?.players || []);
   return (
-    <>
+    <PlayersProvider players={players}>
       {/* Login overlay — lives outside <main> so no stacking context interferes */}
       {!supabaseUser && (
         <div
@@ -5254,11 +5323,22 @@ const myPlayerSet = new Set<string>(roster?.players || []);
           <div className="flex items-center px-3 py-2 gap-4 shrink-0">
           <h1 className="text-base font-bold shrink-0">DynastyZeus</h1>
           <div className="flex items-center gap-2 min-w-0">
-            {user && (
-              <span className="text-xs text-gray-400 truncate hidden sm:inline max-w-[100px]">
-                {user.display_name}
-              </span>
-            )}
+            {/* Unified auth status — shows both Supabase account and Sleeper connection */}
+            <div className="hidden sm:flex items-center gap-1.5 text-xs">
+              {/* DynastyZeus account */}
+              <span
+                className={`w-1.5 h-1.5 rounded-full shrink-0 ${supabaseUser ? "bg-green-400" : "bg-red-500"}`}
+                title={supabaseUser ? `Signed in as ${supabaseUser.email}` : "Not signed in"}
+              />
+              {/* Sleeper connection */}
+              <span
+                className={`w-1.5 h-1.5 rounded-full shrink-0 ${user ? "bg-blue-400" : "bg-gray-600"}`}
+                title={user ? `Sleeper: ${user.display_name}` : "Sleeper not connected"}
+              />
+              {user && (
+                <span className="text-gray-400 truncate max-w-[80px]">{user.display_name}</span>
+              )}
+            </div>
             {user && (
               <button onClick={disconnectSleeper} className="px-2 py-1 text-xs bg-gray-700 rounded hover:bg-gray-600 shrink-0">
                 Disconnect
@@ -5392,7 +5472,6 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             activeLeagueHubGroup={activeLeagueHubGroup}
             leagues={leagues}
             user={user}
-            players={players}
             rosters={rosters}
             standings={standings}
             users={users}
@@ -5449,7 +5528,6 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             draftSlotSearchQuery={draftSlotSearchQuery}
             setDraftSlotSearchQuery={setDraftSlotSearchQuery}
             draftHubSection={draftHubSection}
-            setDraftHubSection={setDraftHubSection}
             nflState={nflState}
             supabaseUser={supabaseUser}
             leagueSearch={leagueSearch}
@@ -5468,6 +5546,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             loadUserExposure={loadUserExposure}
             loadDraftScout={loadDraftScout}
             saveLeagueNote={saveLeagueNote}
+            onSaveSim={saveSimulationToSupabase}
             handleRunAllSims={handleRunAllSims}
             refreshDraftBoard={refreshDraftBoard}
             setPlayerProfileId={setPlayerProfileId}
@@ -5508,7 +5587,6 @@ const myPlayerSet = new Set<string>(roster?.players || []);
           <DataHub
             dataHubTab={dataHubTab}
             setDataHubTab={setDataHubTab}
-            players={players}
             shares={shares}
             calcFcValues={calcFcValues}
             dynastyRankPos={dynastyRankPos}
@@ -5553,6 +5631,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             externalShares={externalShares}
             loadingShares={loadingShares}
             historicalSnapshot={historicalSnapshot}
+            onSaveSnapshot={saveSnapshotNow}
           />
         )}
 {mainTab === "DRAFT" && (
@@ -5574,7 +5653,6 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     draftPicks={draftPicks}
     draftOrder={draftOrder}
     allPicks={allPicks}
-    players={players}
     rookies={rookies}
     rookieSearch={rookieSearch}
     setRookieSearch={setRookieSearch}
@@ -5605,7 +5683,6 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     setTradeHubSection={setTradeHubSection}
     leagues={leagues}
     user={user}
-    players={players}
     rosters={rosters}
     users={users}
     selectedLeague={selectedLeague}
@@ -5666,6 +5743,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     onUpdateAttemptStatus={updateAttemptStatus}
     onDeleteAttempt={deleteAttempt}
     onLoadTradeAttempts={loadTradeAttempts}
+    onRefreshDirection={() => { if (selectedLeague) loadRoster(selectedLeague); }}
   />
 )}
 
@@ -6091,7 +6169,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
       </>
       </div>
     </main>
-    </>
+    </PlayersProvider>
   );
 }
 

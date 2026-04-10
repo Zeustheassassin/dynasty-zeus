@@ -17,52 +17,12 @@ import {
   CURRENT_YEAR, YEARS, ROUNDS,
 } from "../lib/helpers";
 import { LeagueHubTab } from "../lib/types";
+import { LEAGUE_HUB_GROUPS } from "../lib/leagueHubGroups";
 import { supabase } from "../lib/supabaseclient";
+import { usePlayers } from "../lib/PlayersContext";
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const ROOKIE_YEAR = CURRENT_YEAR;
-
-export const LEAGUE_HUB_GROUPS: Array<{
-  id: string;
-  label: string;
-  tabs: Array<{ id: LeagueHubTab; label: string }>;
-}> = [
-  {
-    id: "SUMMARY",
-    label: "Summary",
-    tabs: [
-      { id: "OVERVIEW", label: "League Overview" },
-      { id: "SIMULATOR", label: "Season Simulator" },
-      { id: "LEAGUE_MATES", label: "League Mates" },
-      { id: "POWER_RANKINGS", label: "Power Rankings" },
-      { id: "STANDINGS", label: "Standings" },
-    ],
-  },
-  {
-    id: "ROSTERS",
-    label: "Rosters",
-    tabs: [
-      { id: "ROSTERS", label: "Rosters & Rules" },
-      { id: "OPP_ROSTERS", label: "Opponent Rosters" },
-      { id: "STARTERS", label: "Suggested Starters" },
-    ],
-  },
-  {
-    id: "NOTES",
-    label: "Notes",
-    tabs: [
-      { id: "NOTES", label: "League Notes" },
-      { id: "ACTIVITY", label: "Activity Feed" },
-    ],
-  },
-  {
-    id: "DRAFT_TOOLS",
-    label: "Draft",
-    tabs: [
-      { id: "DRAFT_BOARD", label: "Draft Board" },
-    ],
-  },
-];
 
 const getStarterSlots = (roster: any, league: any) => {
   if (!roster?.starters || !league?.roster_positions) return [];
@@ -82,7 +42,6 @@ interface LeagueHubProps {
   // League / roster state
   leagues: any[];
   user: any;
-  players: Record<string, any>;
   rosters: any[];
   standings: any[];
   users: Record<string, any>;
@@ -155,7 +114,6 @@ interface LeagueHubProps {
   draftSlotSearchQuery: string;
   setDraftSlotSearchQuery: (q: string) => void;
   draftHubSection: "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES";
-  setDraftHubSection: (section: "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES") => void;
   nflState: any;
 
   // Auth
@@ -180,6 +138,7 @@ interface LeagueHubProps {
   loadUserExposure: (ownerId: string) => void;
   loadDraftScout: (userId: string) => void;
   saveLeagueNote: (leagueId: string, text: string) => void;
+  onSaveSim: (leagueId: string, rows: any[]) => void;
   handleRunAllSims: () => void;
   refreshDraftBoard: () => Promise<void>;
   setPlayerProfileId: (id: string | null) => void;
@@ -189,9 +148,9 @@ interface LeagueHubProps {
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
-export default function LeagueHub({
+function LeagueHub({
   leagueHubTab, setLeagueHubTab, activeLeagueHubGroup,
-  leagues, user, players, rosters, standings, users, selectedLeague, setSelectedLeague,
+  leagues, user, rosters, standings, users, selectedLeague, setSelectedLeague,
   roster, picks, allPicks, pickFcValues, calcFcValues, redraftValues,
   committedSimsByLeague, leagueSimCache, simQueue, simProgress,
   loadingLeagueMateIntel, loadingCrossLeagueMateIntel, loadingActivity, loadingLeagueWeeklyMatchups,
@@ -203,14 +162,32 @@ export default function LeagueHub({
   prSortKey, setPrSortKey, prSortAsc, setPrSortAsc, prPopup, setPrPopup,
   projectionData, draftPicks, draftOrder, draftSettings, myDraftSlotPicks, setMyDraftSlotPicks,
   draftSlotEditing, setDraftSlotEditing, draftSlotSearchQuery, setDraftSlotSearchQuery,
-  draftHubSection, setDraftHubSection, nflState,
+  draftHubSection, nflState,
   supabaseUser,
   leagueSearch, setLeagueSearch, filteredPlayers, freeAgents, loadingCalcValues,
   predictedDraftPicks, loadingDraftRefresh, rookies, draftedPlayerIds,
   loadRoster, loadLeagueOverview, loadRedraftValues, loadUserTrades, loadUserExposure, loadDraftScout,
-  saveLeagueNote, handleRunAllSims, refreshDraftBoard,
+  saveLeagueNote, onSaveSim, handleRunAllSims, refreshDraftBoard,
   setPlayerProfileId, setCalcOpponentRosterId, setMainTab, setTradeHubSection,
 }: LeagueHubProps) {
+  const players = usePlayers();
+  const [lastNoteSavedAt, setLastNoteSavedAt] = React.useState<number | null>(null);
+  const [leagueMateIntelLoadedAt, setLeagueMateIntelLoadedAt] = React.useState<number | null>(null);
+  const [simSavedAt, setSimSavedAt] = React.useState<number | null>(null);
+
+  // Reset sim-saved confirmation when the active league changes
+  React.useEffect(() => { setSimSavedAt(null); }, [selectedLeague?.league_id]);
+
+  // Record when league-mate intel finishes loading
+  const prevIntelLoading = React.useRef(false);
+  React.useEffect(() => {
+    const isLoading = loadingLeagueMateIntel || loadingCrossLeagueMateIntel;
+    if (prevIntelLoading.current && !isLoading && selectedLeagueMateProfilesView.length > 0) {
+      setLeagueMateIntelLoadedAt(Date.now());
+    }
+    prevIntelLoading.current = isLoading;
+  }, [loadingLeagueMateIntel, loadingCrossLeagueMateIntel, selectedLeagueMateProfilesView.length]);
+
   return (
           <div className={`mx-auto px-4 py-6 ${leagueHubTab === "DRAFT_BOARD" ? "w-full max-w-full" : "max-w-5xl"}`}>
           <>
@@ -234,25 +211,23 @@ export default function LeagueHub({
                   );
                 })}
               </div>
-              <div className="mx-auto mt-4 max-w-md">
-                <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-gray-500">
-                  Current View
-                </label>
-                <select
-                  value={leagueHubTab}
-                  onChange={(e) => setLeagueHubTab(e.target.value as LeagueHubTab)}
-                  className="w-full rounded-xl border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                >
+              {activeLeagueHubGroup.tabs.length > 1 && (
+                <div className="mt-3 flex flex-wrap justify-center gap-1.5">
                   {activeLeagueHubGroup.tabs.map((tab) => (
-                    <option key={tab.id} value={tab.id}>
+                    <button
+                      key={tab.id}
+                      onClick={() => setLeagueHubTab(tab.id)}
+                      className={`rounded-full px-3 py-1 text-xs font-semibold transition border ${
+                        leagueHubTab === tab.id
+                          ? "bg-blue-700/50 text-blue-200 border-blue-600"
+                          : "bg-gray-800 text-gray-500 border-transparent hover:text-gray-300"
+                      }`}
+                    >
                       {tab.label}
-                    </option>
+                    </button>
                   ))}
-                </select>
-                <div className="mt-2 text-center text-[11px] text-gray-500">
-                  {activeLeagueHubGroup.tabs.map((tab) => tab.label).join(" • ")}
                 </div>
-              </div>
+              )}
             </div>
 
             {/* ── League Overview ── */}
@@ -324,7 +299,6 @@ export default function LeagueHub({
 
               return (
                 <div className="space-y-2">
-                  {loadingLeagueOverview && <p className="text-xs text-blue-400 mb-2">Loading…</p>}
                   <div className="overflow-x-auto pb-1">
                     <div className="min-w-[780px] space-y-2">
                       {/* Run All Sims button + progress bar */}
@@ -388,7 +362,12 @@ export default function LeagueHub({
                                 )}
                               </div>
                             ) : (
-                              <span className="text-[10px] text-gray-600">visit league</span>
+                              <button
+                                className="text-[10px] text-blue-500 hover:text-blue-400 transition underline-offset-2 hover:underline"
+                                onClick={() => { loadRoster(row.league); setLeagueHubTab("SIMULATOR"); }}
+                              >
+                                run sim →
+                              </button>
                             )}
                           </div>
                         </div>
@@ -410,7 +389,12 @@ export default function LeagueHub({
                 return <p className="text-sm text-gray-500">Select a league from Rosters &amp; Rules first to view the simulator.</p>;
               }
               if (!selectedLeagueSimulation) {
-                return <p className="text-sm text-blue-400">Building simulator snapshot...</p>;
+                return (
+                  <p className="text-sm text-blue-400">
+                    Building simulator snapshot…{" "}
+                    <span className="text-gray-600 text-xs">(if this persists, reload the league from Rosters &amp; Rules)</span>
+                  </p>
+                );
               }
 
               const myRosterId = rosters.find((entry: any) => entry.owner_id === user?.user_id)?.roster_id;
@@ -426,12 +410,23 @@ export default function LeagueHub({
                             : "In-season mode blends real results, current schedule, and Monte Carlo rest-of-season sims for projected standings and playoff odds."}
                         </div>
                       </div>
-                      <div className="text-[11px] text-gray-500">
-                        {selectedLeagueSimulation.simulationMode === "offseason"
-                          ? `${selectedLeagueSimulation.simCount} sims - ${selectedLeagueSimulation.regularSeasonWeeks}-week baseline`
-                          : loadingLeagueWeeklyMatchups
-                          ? "Loading weekly matchup history..."
-                          : `Week ${selectedLeagueSimulation.currentWeek} - ${selectedLeagueSimulation.weeksPlayed} completed weeks - ${selectedLeagueSimulation.simCount} sims`}
+                      <div className="flex flex-col items-end gap-1.5">
+                        <div className="text-[11px] text-gray-500">
+                          {selectedLeagueSimulation.simulationMode === "offseason"
+                            ? `${selectedLeagueSimulation.simCount} sims - ${selectedLeagueSimulation.regularSeasonWeeks}-week baseline`
+                            : loadingLeagueWeeklyMatchups
+                            ? "Loading weekly matchup history..."
+                            : `Week ${selectedLeagueSimulation.currentWeek} - ${selectedLeagueSimulation.weeksPlayed} completed weeks - ${selectedLeagueSimulation.simCount} sims`}
+                        </div>
+                        <button
+                          onClick={() => {
+                            onSaveSim(selectedLeague.league_id, selectedLeagueSimulation.rows);
+                            setSimSavedAt(Date.now());
+                          }}
+                          className="text-[11px] font-semibold px-3 py-1 rounded-full border border-blue-600 text-blue-400 hover:bg-blue-900/40 transition whitespace-nowrap"
+                        >
+                          {simSavedAt ? "✓ Saved" : "Save Sim"}
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -1103,8 +1098,15 @@ const starters = starterSlots
                           Static roster profiles, recent trade behavior, and trade-partner fit for <strong className="text-gray-100">{selectedLeague.name}</strong>.
                         </div>
                       </div>
-                      <div className="text-[11px] text-gray-500">
-                        {loadingLeagueMateIntel || loadingCrossLeagueMateIntel ? "Refreshing trade behavior and all-league tendencies..." : supabaseUser ? "Supabase cache enabled" : "Browser-only until you log in"}
+                      <div className="text-[11px] text-gray-500 text-right">
+                        {loadingLeagueMateIntel || loadingCrossLeagueMateIntel
+                          ? "Refreshing trade behavior and all-league tendencies..."
+                          : supabaseUser ? "Supabase cache enabled" : "Browser-only until you log in"}
+                        {leagueMateIntelLoadedAt && !loadingLeagueMateIntel && !loadingCrossLeagueMateIntel && (
+                          <div className="text-[10px] text-gray-600 mt-0.5">
+                            Updated {new Date(leagueMateIntelLoadedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1475,12 +1477,12 @@ const starters = starterSlots
             {leagueHubTab === "STANDINGS" && (
               selectedLeague && roster ? (
                 <div className="bg-gray-900 border border-gray-700 rounded-xl p-5 shadow-md">
-                  <h3 className="text-sm font-semibold text-gray-200 mb-1">{selectedLeague.name} — Standings</h3>
-                  <p className="text-xs text-gray-500 mb-4">Select a league from Rosters &amp; Rules to view its standings.</p>
+                  <h3 className="text-sm font-semibold text-gray-200 mb-4">{selectedLeague.name} — Standings</h3>
                   {standings.map((team: any, index: number) => {
                     const isMe = team.roster_id === roster.roster_id;
-                    const playoffTeams = selectedLeague?.settings?.playoff_teams || Math.ceil(rosters.length / 2);
+                    const playoffTeams = selectedLeague?.settings?.playoff_teams || Math.min(Math.ceil(rosters.length / 2), 6);
                     const isCutLine = index === playoffTeams - 1;
+                    const efficiency = team.max_pf > 0 ? Math.round((team.fpts / team.max_pf) * 100) : null;
                     return (
                       <div key={team.roster_id}>
                         <div className={`flex justify-between p-2 rounded mb-1 ${isMe ? "bg-blue-800/40" : "bg-gray-800"}`}>
@@ -1489,7 +1491,7 @@ const starters = starterSlots
                             <span>{users[team.owner_id] || "Team"}</span>
                           </div>
                           <div className="text-xs text-gray-400">
-                            {team.wins}-{team.losses}{team.ties ? `-${team.ties}` : ""} • {Math.round(team.fpts)} pts • Max {Math.round(team.max_pf)}
+                            {team.wins}-{team.losses}{team.ties ? `-${team.ties}` : ""} • {Math.round(team.fpts)} pts • Max {Math.round(team.max_pf)}{efficiency !== null ? <span className={`ml-1.5 ${efficiency >= 85 ? "text-green-500" : efficiency >= 70 ? "text-gray-400" : "text-red-500"}`}>({efficiency}% eff)</span> : null}
                           </div>
                         </div>
                         {isCutLine && <div className="border-t border-yellow-500 my-2 text-center text-xs text-yellow-400">Playoff Cut Line</div>}
@@ -1509,7 +1511,7 @@ const starters = starterSlots
               );
               const week = nflState?.week;
               const season = nflState?.season;
-              const isInSeason = season && week && week >= 1 && week <= 17;
+              const isInSeason = nflState?.season_type === "regular";
               const projectionBySleeperId = new Map(
                 projectionData.map((row: any) => [String(row.sleeperId), row])
               );
@@ -1678,20 +1680,29 @@ const starters = starterSlots
                       </div>
                     )}
                   </div>
-                  {lineup.map(({ slot, player, score }, i) => (
-                    <div key={i} className={`flex items-center gap-3 border rounded-xl px-3 py-2 ${posColor[slot] ?? "bg-gray-800 border-gray-700"}`}>
-                      <span className="text-[10px] font-bold uppercase w-16 shrink-0 text-gray-300">{slot.replace("_"," ")}</span>
-                      {player ? (
-                        <>
-                          <span className="text-sm text-white flex-1 font-medium">{player.full_name}</span>
-                          <span className="text-[10px] text-gray-400 shrink-0">{player.team}</span>
-                          <span className="text-xs font-mono text-gray-300 shrink-0">{score > 0 ? score.toFixed(1) : "—"}</span>
-                        </>
-                      ) : (
-                        <span className="text-sm text-gray-600 italic">Empty</span>
-                      )}
-                    </div>
-                  ))}
+                  {lineup.map(({ slot, player, score }, i) => {
+                    const statusStr = player?.status ? String(player.status).toLowerCase() : "";
+                    const isOut = /out|inactive|suspended|covid|nfi|pup/.test(statusStr);
+                    const isDoubtful = statusStr === "doubtful";
+                    const isQuestionable = statusStr === "questionable";
+                    return (
+                      <div key={i} className={`flex items-center gap-3 border rounded-xl px-3 py-2 ${posColor[slot] ?? "bg-gray-800 border-gray-700"}`}>
+                        <span className="text-[10px] font-bold uppercase w-16 shrink-0 text-gray-300">{slot.replace("_"," ")}</span>
+                        {player ? (
+                          <>
+                            <span className="text-sm text-white flex-1 font-medium">{player.full_name}</span>
+                            {isOut && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-red-900/60 text-red-400 border border-red-700 shrink-0">OUT</span>}
+                            {isDoubtful && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-orange-900/60 text-orange-400 border border-orange-700 shrink-0">D</span>}
+                            {isQuestionable && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-yellow-900/60 text-yellow-400 border border-yellow-700 shrink-0">Q</span>}
+                            <span className="text-[10px] text-gray-400 shrink-0">{player.team}</span>
+                            <span className="text-xs font-mono text-gray-300 shrink-0">{score > 0 ? score.toFixed(1) : "—"}</span>
+                          </>
+                        ) : (
+                          <span className="text-sm text-gray-600 italic">Empty</span>
+                        )}
+                      </div>
+                    );
+                  })}
                   <div className="grid gap-3 pt-2 md:grid-cols-2">
                     <div className="bg-gray-900 border border-gray-800 rounded-xl p-3">
                       <div className="flex items-center justify-between mb-2">
@@ -1767,9 +1778,11 @@ const starters = starterSlots
                     className="w-full h-96 bg-gray-900 border border-gray-700 rounded-xl p-4 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 resize-none"
                     placeholder={`Jot down thoughts, trade ideas, waiver targets for ${noteLeague.name}…`}
                     value={leagueNotes[noteLeague.league_id] ?? ""}
-                    onChange={(e) => saveLeagueNote(noteLeague.league_id, e.target.value)}
+                    onChange={(e) => { saveLeagueNote(noteLeague.league_id, e.target.value); setLastNoteSavedAt(Date.now()); }}
                   />
-                  <p className="text-[10px] text-gray-600">{supabaseUser ? "Notes sync across your devices." : "Notes save to this browser only."}</p>
+                  <p className="text-[10px] text-gray-600">
+                    {lastNoteSavedAt ? <span className="text-green-600">✓ Saved just now{supabaseUser ? " · syncing across devices" : ""}</span> : supabaseUser ? "Notes sync across your devices." : "Notes save to this browser only."}
+                  </p>
                 </div>
               );
             })()}
@@ -1803,8 +1816,11 @@ const starters = starterSlots
                 const wrTotal  = playerList.filter((p: any) => p.position === "WR").reduce((s: number, p: any) => s + p.dynVal, 0);
                 const teTotal  = playerList.filter((p: any) => p.position === "TE").reduce((s: number, p: any) => s + p.dynVal, 0);
 
-                return { roster_id: r.roster_id, ownerId, ownerName, playerList, dynTotal, redTotal, qbTotal, rbTotal, wrTotal, teTotal };
+                return { roster_id: r.roster_id, ownerId, ownerName, playerList, pickVal, dynTotal, redTotal, qbTotal, rbTotal, wrTotal, teTotal };
               });
+
+              const prRosterToName: Record<number, string> = {};
+              rosters.forEach((r: any) => { prRosterToName[Number(r.roster_id)] = (users as any)[r.owner_id] || `Team ${r.roster_id}`; });
 
               const rankMap = (key: "dynTotal"|"redTotal"|"qbTotal"|"rbTotal"|"wrTotal"|"teTotal") => {
                 const sorted = [...prRows].sort((a, b) => b[key] - a[key]);
@@ -1819,7 +1835,6 @@ const starters = starterSlots
               const teRanks  = rankMap("teTotal");
 
               const n = prRows.length;
-              const ordinal = (r: number) => r === 1 ? "1st" : r === 2 ? "2nd" : r === 3 ? "3rd" : `${r}th`;
               const pillColor = (r: number) => {
                 const top3rd = Math.ceil(n / 3);
                 const bot3rd = n - Math.floor(n / 3) + 1;
@@ -1898,7 +1913,7 @@ const starters = starterSlots
                             <>
                               <p className="text-[10px] text-gray-600 uppercase tracking-wider pt-1 pb-0.5 pl-1">Picks</p>
                               {(allPicks as any[]).filter((p: any) => p.owner_id === prPopup.rosterId).map((p: any, i: number) => {
-                                const via = p.roster_id !== p.owner_id ? ` (via Team ${p.roster_id})` : "";
+                                const via = p.roster_id !== p.owner_id ? ` (via ${prRosterToName[p.roster_id] || `Team ${p.roster_id}`})` : "";
                                 const label = p.slot && String(p.slot).includes(".") ? `${p.season} ${p.slot}` : `${p.season} Rd ${p.round}`;
                                 const val = getStoredPickValue(pickFcValues, p);
                                 return (
@@ -1933,6 +1948,7 @@ const starters = starterSlots
                             <SortTh col="rbTotal" label="RB" />
                             <SortTh col="wrTotal" label="WR" />
                             <SortTh col="teTotal" label="TE" />
+                            <th className="text-center pb-2 px-2 text-gray-600">Picks</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1948,7 +1964,8 @@ const starters = starterSlots
                                 <td className="text-center px-2 py-2.5"><RankPill r={qbRanks[row.roster_id]} rosterId={row.roster_id} col="QB" /></td>
                                 <td className="text-center px-2 py-2.5"><RankPill r={rbRanks[row.roster_id]} rosterId={row.roster_id} col="RB" /></td>
                                 <td className="text-center px-2 py-2.5"><RankPill r={wrRanks[row.roster_id]} rosterId={row.roster_id} col="WR" /></td>
-                                <td className="text-center px-2 py-2.5 rounded-r-xl"><RankPill r={teRanks[row.roster_id]} rosterId={row.roster_id} col="TE" /></td>
+                                <td className="text-center px-2 py-2.5"><RankPill r={teRanks[row.roster_id]} rosterId={row.roster_id} col="TE" /></td>
+                                <td className="text-center px-2 py-2.5 rounded-r-xl text-xs text-gray-400 font-mono">{row.pickVal > 0 ? row.pickVal.toLocaleString() : <span className="text-gray-700">—</span>}</td>
                               </tr>
                             );
                           })}
@@ -1990,6 +2007,7 @@ const starters = starterSlots
                       {Object.keys(myDraftSlotPicks).length > 0 && (
                         <button
                           onClick={() => {
+                            if (!window.confirm("Clear all your draft picks? This cannot be undone.")) return;
                             setMyDraftSlotPicks({});
                             if (selectedLeague?.league_id) {
                               localStorage.removeItem(`draftPicks_${selectedLeague.league_id}_${ROOKIE_YEAR}`);
@@ -2072,8 +2090,8 @@ const starters = starterSlots
                                   const overallPick = (round - 1) * rosters.length + slotNum;
                                   const isReach = userOverride && typeof userOverride.adp === "number" && overallPick < userOverride.adp - 8;
                                   // REACH/VALUE for AI-predicted user slots — compare pick position to player's consensus pool rank
-                                  const predReach = isMySlot && prediction && prediction.poolRank > 0 && overallPick < (prediction.poolRank ?? 999) - 7;
-                                  const predValue = isMySlot && prediction && prediction.poolRank > 0 && overallPick > (prediction.poolRank ?? 0) + 4;
+                                  const predReach = isMySlot && prediction && prediction.poolRank > 0 && overallPick < (prediction.poolRank ?? 999) - 8;
+                                  const predValue = isMySlot && prediction && prediction.poolRank > 0 && overallPick > (prediction.poolRank ?? 0) + 5;
                                   const isEditing = draftSlotEditing === slotStr;
                                   return (
                                     <div key={slotStr}
@@ -2202,11 +2220,11 @@ const starters = starterSlots
                 return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
               };
 
-              const txns = activityTransactions.filter((t: any) => {
-                const hasPlayers = Object.keys(t.adds || {}).length > 0 || Object.keys(t.drops || {}).length > 0;
-                const hasTradeParts = (t.draft_picks || []).length > 0 || Object.keys(t.adds || {}).length > 0;
-                return hasPlayers || hasTradeParts;
-              });
+              const txns = activityTransactions.filter((t: any) =>
+                Object.keys(t.adds || {}).length > 0 ||
+                Object.keys(t.drops || {}).length > 0 ||
+                (t.draft_picks || []).length > 0
+              );
 
               if (!txns.length) return (
                 <div className="text-center py-10 text-gray-500 text-sm">
@@ -2342,3 +2360,5 @@ const starters = starterSlots
           </div>
   );
 }
+
+export default React.memo(LeagueHub);

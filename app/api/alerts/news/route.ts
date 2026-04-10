@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 
-export const dynamic = "force-dynamic";
+// Revalidate every 30 seconds — batches concurrent requests instead of hitting ESPN on every call
+export const revalidate = 30;
 
 const normalizeName = (value: string) =>
   String(value || "")
@@ -19,7 +20,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const res = await fetch("https://site.api.espn.com/apis/site/v2/sports/football/nfl/news", {
-      cache: "no-store",
+      next: { revalidate: 30 },
       headers: {
         Accept: "application/json",
       },

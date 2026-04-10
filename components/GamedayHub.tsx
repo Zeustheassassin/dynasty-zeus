@@ -90,9 +90,8 @@ export default function GamedayHub({
     (slot: string) => !["BN", "IR", "TAXI"].includes(slot)
   );
 
-  const selectedMatchup = selectedGamedayMatchup;
-  const teamA = selectedMatchup?.teams?.[0] || null;
-  const teamB = selectedMatchup?.teams?.[1] || null;
+  const teamA = selectedGamedayMatchup?.teams?.[0] || null;
+  const teamB = selectedGamedayMatchup?.teams?.[1] || null;
 
   const renderPlayerCell = (row: any, side: "left" | "right") => {
     if (!row?.player) {
@@ -112,9 +111,10 @@ export default function GamedayHub({
           {row.player.full_name}
         </button>
         <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px] text-gray-500">
-          <span className={`${side === "right" ? "ml-auto" : ""}`}>
+          <span className={`${POS_COLOR[row.player.position] ?? "text-gray-500"} ${side === "right" ? "ml-auto" : ""}`}>
             {row.player.position} • {row.player.team || "-"}
           </span>
+          {injuryBadge(row.player.injury_status)}
           <span className={`rounded-full border px-1.5 py-0.5 ${getKickoffStateClasses(row.gameState)}`}>
             {row.gameState}
           </span>
@@ -135,10 +135,10 @@ export default function GamedayHub({
           <div>
             <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Gameday Hub</div>
             <div className="mt-1 text-sm text-gray-200">
-              Official Sleeper matchup totals for the current week, with projected remaining points layered on from your existing player projection system.
+              Official Sleeper matchup totals for the current week, with projected remaining points for each lineup slot.
             </div>
             <div className="mt-2 text-[11px] text-gray-500">
-              Player status badges use kickoff windows: upcoming before kickoff, live for roughly six hours after kickoff, then final.
+              Player status badges reflect kickoff windows: upcoming, live, or final.
             </div>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -219,7 +219,7 @@ export default function GamedayHub({
                     key={card.matchupId}
                     onClick={() => setSelectedGamedayMatchupId(card.matchupId)}
                     className={`rounded-2xl border p-4 text-left transition ${
-                      selectedMatchup?.matchupId === card.matchupId
+                      selectedGamedayMatchup?.matchupId === card.matchupId
                         ? "border-blue-500 bg-blue-500/10"
                         : "border-gray-800 bg-gray-900/60 hover:border-gray-700"
                     }`}
@@ -231,7 +231,7 @@ export default function GamedayHub({
                       <div className="text-[11px] text-gray-600">
                         {card.teams.reduce((total: number, team: any) => total + team.liveStarters, 0) > 0
                           ? "Games in progress"
-                          : "Snapshot"}
+                          : "No live games"}
                       </div>
                     </div>
                     <div className="space-y-3">
@@ -241,7 +241,11 @@ export default function GamedayHub({
                             <div className="min-w-0">
                               <div className="truncate text-sm font-semibold text-white">{team.ownerName}</div>
                               <div className="mt-1 text-[11px] text-gray-500">
-                                {team.finishedStarters} final • {team.liveStarters} live • {team.upcomingStarters} upcoming
+                                {[
+                                  team.finishedStarters > 0 && `${team.finishedStarters} final`,
+                                  team.liveStarters > 0 && `${team.liveStarters} live`,
+                                  team.upcomingStarters > 0 && `${team.upcomingStarters} upcoming`,
+                                ].filter(Boolean).join(" • ") || "—"}
                               </div>
                             </div>
                             <div className="text-right">
@@ -259,8 +263,15 @@ export default function GamedayHub({
                 ))}
               </div>
 
+              {/* Empty selection prompt */}
+              {!selectedGamedayMatchup && (
+                <div className="rounded-2xl border border-gray-800 bg-gray-900/60 p-4 text-sm text-gray-500">
+                  Select a matchup above to see the slot-by-slot breakdown.
+                </div>
+              )}
+
               {/* Detailed matchup view */}
-              {selectedMatchup && teamA && teamB && (
+              {selectedGamedayMatchup && teamA && teamB && (
                 <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
                   <div className="flex flex-col gap-3 border-b border-gray-800 pb-4 lg:flex-row lg:items-start lg:justify-between">
                     <div>
@@ -300,7 +311,7 @@ export default function GamedayHub({
 
                       return (
                         <div
-                          key={`${selectedMatchup.matchupId}-${slot}-${index}`}
+                          key={`${selectedGamedayMatchup.matchupId}-${slot}-${index}`}
                           className="grid grid-cols-[minmax(0,1fr)_88px_minmax(0,1fr)_78px] gap-3 items-center rounded-xl border border-gray-800 bg-gray-950/50 px-3 py-3"
                         >
                           {renderPlayerCell(leftRow, "left")}
@@ -327,11 +338,11 @@ export default function GamedayHub({
                   <div className="mt-4 grid gap-3 lg:grid-cols-2">
                     {[teamA, teamB].map((team: any) => (
                       <div
-                        key={`${selectedMatchup.matchupId}-${team.rosterId}`}
+                        key={`${selectedGamedayMatchup.matchupId}-${team.rosterId}`}
                         className="rounded-xl border border-gray-800 bg-gray-950/50 p-3"
                       >
-                        <div className="text-sm font-semibold text-white">{team.ownerName} bench + taxi</div>
-                        <details className="mt-3 group" open={false}>
+                        <div className="text-sm font-semibold text-white">{team.ownerName} — Bench & Taxi</div>
+                        <details className="mt-3 group">
                           <summary className="cursor-pointer list-none text-xs font-semibold text-blue-300 group-open:text-blue-200">
                             Bench ({team.benchRows.length})
                           </summary>
@@ -343,12 +354,15 @@ export default function GamedayHub({
                                 key={`${team.rosterId}-bench-${row.playerId}`}
                                 className="flex items-center justify-between gap-3 rounded-lg border border-gray-800 bg-gray-900/60 px-3 py-2"
                               >
-                                <button
-                                  onClick={() => setPlayerProfileId(row.playerId)}
-                                  className="min-w-0 truncate text-xs font-medium text-white hover:text-blue-400 transition"
-                                >
-                                  {row.player.full_name}
-                                </button>
+                                <div className="flex items-center gap-1 min-w-0">
+                                  <button
+                                    onClick={() => setPlayerProfileId(row.playerId)}
+                                    className="min-w-0 truncate text-xs font-medium text-white hover:text-blue-400 transition"
+                                  >
+                                    {row.player.full_name}
+                                  </button>
+                                  {injuryBadge(row.player.injury_status)}
+                                </div>
                                 <div className="shrink-0 text-right text-[11px] text-gray-500">
                                   {row.actualPoints.toFixed(1)} now • {row.remainingProjection.toFixed(1)} left
                                 </div>
@@ -368,12 +382,15 @@ export default function GamedayHub({
                                 key={`${team.rosterId}-taxi-${row.playerId}`}
                                 className="flex items-center justify-between gap-3 rounded-lg border border-gray-800 bg-gray-900/60 px-3 py-2"
                               >
-                                <button
-                                  onClick={() => setPlayerProfileId(row.playerId)}
-                                  className="min-w-0 truncate text-xs font-medium text-white hover:text-blue-400 transition"
-                                >
-                                  {row.player.full_name}
-                                </button>
+                                <div className="flex items-center gap-1 min-w-0">
+                                  <button
+                                    onClick={() => setPlayerProfileId(row.playerId)}
+                                    className="min-w-0 truncate text-xs font-medium text-white hover:text-blue-400 transition"
+                                  >
+                                    {row.player.full_name}
+                                  </button>
+                                  {injuryBadge(row.player.injury_status)}
+                                </div>
                                 <div className="shrink-0 text-right text-[11px] text-gray-500">
                                   {row.actualPoints.toFixed(1)} now • {row.remainingProjection.toFixed(1)} left
                                 </div>

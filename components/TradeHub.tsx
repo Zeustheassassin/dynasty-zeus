@@ -9,6 +9,7 @@ import {
   formatRelativeDate,
 } from "../lib/helpers";
 import type { TradeAttempt, TradeAttemptStatus, TradeAttemptAsset, TradeAttemptPick } from "../lib/types";
+import { usePlayers } from "../lib/PlayersContext";
 
 const BASE_YEAR_TH = new Date().getFullYear();
 const YEARS = Array.from({ length: 3 }, (_, index) => String(BASE_YEAR_TH + index));
@@ -22,7 +23,6 @@ interface TradeHubProps {
   // League / roster state
   leagues: any[];
   user: any;
-  players: Record<string, any>;
   rosters: any[];
   users: Record<string, any>;
   selectedLeague: any;
@@ -103,12 +103,13 @@ interface TradeHubProps {
   onUpdateAttemptStatus: (id: string, status: TradeAttemptStatus, counterDetails?: string) => Promise<void>;
   onDeleteAttempt: (id: string) => Promise<void>;
   onLoadTradeAttempts: (leagueId: string) => Promise<void>;
+  onRefreshDirection: () => void;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
-export default function TradeHub({
+function TradeHub({
   tradeHubSection, setTradeHubSection,
-  leagues, user, players, rosters, users, selectedLeague, allPicks,
+  leagues, user, rosters, users, selectedLeague, allPicks,
   pickFcValues, calcFcValues, redraftValues, selectedLeagueDynamicPickValues,
   selectedLeagueDirection, selectedLeagueDirectionAdjusted, selectedLeagueSimulation,
   calcOpponentRosterId, setCalcOpponentRosterId,
@@ -129,12 +130,19 @@ export default function TradeHub({
   tradeHubData, loadingTradeHub, tradeHubUserId,
   tradeAttempts, loadingTradeAttempts, tradeAttemptsLeagueId,
   onMarkAttempted, onUpdateAttemptStatus, onDeleteAttempt, onLoadTradeAttempts,
+  onRefreshDirection,
 }: TradeHubProps) {
+  const players = usePlayers();
   // Local UI state for the Attempts tab
   const [counterInputs, setCounterInputs] = useState<Record<string, string>>({});
   const [showCounterInput, setShowCounterInput] = useState<string | null>(null);
   // Fingerprints of trades marked this session (so the button turns into a checkmark immediately)
   const [sessionMarked, setSessionMarked] = useState<Set<string>>(new Set());
+  // Direction refresh state
+  const [directionRefreshing, setDirectionRefreshing] = useState(false);
+  React.useEffect(() => {
+    if (directionRefreshing && selectedLeagueDirectionAdjusted) setDirectionRefreshing(false);
+  }, [directionRefreshing, selectedLeagueDirectionAdjusted]);
 
   const buildTradeFingerprint = (leagueId: string, partnerRosterId: number | string, givePids: string[], receiveIds: string[]) =>
     `${leagueId}|${partnerRosterId}|${[...givePids].sort().join(",")}|${[...receiveIds].sort().join(",")}`;
@@ -767,7 +775,7 @@ export default function TradeHub({
               return (
                 <div className="mt-4 flex justify-center">
                   <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5 w-full max-w-md">
-                    <h3 className="text-sm font-semibold text-gray-200 mb-3">Players To Equalize Trade</h3>
+                    <h3 className="text-sm font-semibold text-gray-200 mb-3">Equalize the Trade</h3>
                     <div className="flex justify-end gap-6 text-[11px] text-gray-500 mb-1 pr-9">
                       <span>Age</span>
                       <span>Value</span>
@@ -1998,7 +2006,7 @@ export default function TradeHub({
         // Disposition guards: skip "Zero Interest" receives and "Not Willing to Trade" gives.
         const FINDER_LOTTERY_CEILING = 700;
         const myLotteryFinderPicks = myFinderPicks.filter((p: any) =>
-          Number(p.round) >= 3 && Number(p.value || 0) > 0
+          Number(p.round) >= 3 && Number(p.value || 0) > 0 && Number(p.value || 0) < FINDER_LOTTERY_CEILING
         );
         const oppLotteryPlayers = oppPlayers.filter((p: any) => {
           if (isBlockedBuyDisposition(p.player_id)) return false;
@@ -2016,7 +2024,7 @@ export default function TradeHub({
             .filter((p: any) => {
               if (playerDispositions[p.player_id]?.sell === "Not Willing to Trade") return false;
               const ratio = lp.value / Math.max(p.value, 1);
-              return ratio >= 0.25 && ratio <= 2.0;
+              return ratio >= 0.5 && ratio <= 2.0;
             })
             .sort((a: any, b: any) => Math.abs(a.value - lp.value) - Math.abs(b.value - lp.value))[0];
           if (!bestPick) continue;
@@ -2361,6 +2369,18 @@ export default function TradeHub({
         }, [])
         .slice(0, 15);
 
+      const TWENTY_EIGHT_DAYS = 28 * 24 * 60 * 60 * 1000;
+      const recentFingerprints = new Set(
+        tradeAttempts
+          .filter((a) => a.league_id === selectedLeague?.league_id && Date.now() - new Date(a.attempted_at).getTime() < TWENTY_EIGHT_DAYS)
+          .map((a) => buildTradeFingerprint(
+            a.league_id,
+            a.partner_roster_id,
+            [...a.give_players.map((p) => p.player_id), ...a.give_picks.map((p) => p.key)],
+            [...a.receive_players.map((p) => p.player_id), ...a.receive_picks.map((p) => p.key)],
+          ))
+      );
+
       return (
         <div className="space-y-4">
           {/* ── Player pin search ── */}
@@ -2384,7 +2404,25 @@ export default function TradeHub({
               <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-3">
                 <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
                   <div>
-                    <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Direction Engine</div>
+                    <div className="flex items-center gap-2">
+                      <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Direction Engine</div>
+                      <button
+                        type="button"
+                        onClick={() => { setDirectionRefreshing(true); onRefreshDirection(); }}
+                        disabled={directionRefreshing}
+                        title="Reload direction data"
+                        className="text-gray-600 hover:text-gray-400 transition disabled:opacity-40"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          viewBox="0 0 16 16"
+                          fill="currentColor"
+                          className={`w-3 h-3 ${directionRefreshing ? "animate-spin" : ""}`}
+                        >
+                          <path fillRule="evenodd" d="M13.836 2.477a.75.75 0 0 1 .75.75v3.182a.75.75 0 0 1-.75.75h-3.182a.75.75 0 0 1 0-1.5h1.37l-.84-.841a4.5 4.5 0 0 0-7.08 1.196.75.75 0 1 1-1.31-.734 6 6 0 0 1 9.44-1.595l.842.841V3.227a.75.75 0 0 1 .75-.75Zm-.911 7.5A.75.75 0 0 1 13.199 11a6 6 0 0 1-9.44 1.595l-.842-.841v1.017a.75.75 0 0 1-1.5 0V9.591a.75.75 0 0 1 .75-.75H5.35a.75.75 0 0 1 0 1.5H3.98l.84.841a4.5 4.5 0 0 0 7.08-1.196.75.75 0 0 1 1.025-.009Z" clipRule="evenodd" />
+                        </svg>
+                      </button>
+                    </div>
                     <div className="mt-1 text-sm text-gray-200">{finderDirectionProfile.summary}</div>
                   </div>
                   <span className={`inline-flex text-[10px] font-semibold px-2 py-1 rounded-full border self-start ${finderDirectionProfile.bucketColor}`}>
@@ -2579,19 +2617,7 @@ export default function TradeHub({
               }
             </p>
           )}
-          {/* Build set of recently-attempted trade fingerprints for suppression (28-day window) */}
           {(() => {
-            const TWENTY_EIGHT_DAYS = 28 * 24 * 60 * 60 * 1000;
-            const recentFingerprints = new Set(
-              tradeAttempts
-                .filter((a) => a.league_id === selectedLeague?.league_id && Date.now() - new Date(a.attempted_at).getTime() < TWENTY_EIGHT_DAYS)
-                .map((a) => buildTradeFingerprint(
-                  a.league_id,
-                  a.partner_roster_id,
-                  [...a.give_players.map((p) => p.player_id), ...a.give_picks.map((p) => p.key)],
-                  [...a.receive_players.map((p) => p.player_id), ...a.receive_picks.map((p) => p.key)],
-                ))
-            );
             const suppressedCount = top15.filter((trade: TradeResult) => {
               const fp = buildTradeFingerprint(
                 selectedLeague?.league_id ?? "",
@@ -2614,17 +2640,6 @@ export default function TradeHub({
                 trade.oppRosterId,
                 [...trade.give.map((p: any) => p.player_id), ...trade.givePicks.map((p: any) => finderPickKey(p))],
                 [...trade.receive.map((p: any) => p.player_id), ...trade.receivePicks.map((p: any) => finderPickKey(p))],
-              );
-              const TWENTY_EIGHT_DAYS = 28 * 24 * 60 * 60 * 1000;
-              const recentFingerprints = new Set(
-                tradeAttempts
-                  .filter((a) => a.league_id === selectedLeague?.league_id && Date.now() - new Date(a.attempted_at).getTime() < TWENTY_EIGHT_DAYS)
-                  .map((a) => buildTradeFingerprint(
-                    a.league_id,
-                    a.partner_roster_id,
-                    [...a.give_players.map((p) => p.player_id), ...a.give_picks.map((p) => p.key)],
-                    [...a.receive_players.map((p) => p.player_id), ...a.receive_picks.map((p) => p.key)],
-                  ))
               );
               return !recentFingerprints.has(fp);
             })
@@ -2759,9 +2774,12 @@ export default function TradeHub({
                         <div key={p.player_id} className="flex items-center justify-between bg-gray-800 rounded-lg px-2 py-1.5">
                           <div className="flex items-center gap-1.5 min-w-0">
                             <button onClick={() => setPlayerProfileId(p.player_id)} className="text-xs text-white hover:text-blue-400 transition truncate text-left">{p.full_name}</button>
-                            <span className="text-[10px] text-gray-500 shrink-0">{p.position}</span>
+                            <span className="text-[10px] text-gray-500 shrink-0">{p.position}{p.team ? ` · ${p.team}` : ""}</span>
                           </div>
-                          <span className="text-xs text-gray-400 font-mono shrink-0 ml-1">{p.value.toLocaleString()}</span>
+                          <div className="flex items-center gap-1.5 shrink-0 ml-1">
+                            {p.age && <span className="text-[10px] text-gray-500">Age {p.age}</span>}
+                            <span className="text-xs text-gray-400 font-mono">{p.value.toLocaleString()}</span>
+                          </div>
                         </div>
                       ))}
                       {trade.givePicks.map((p: any) => (
@@ -2789,9 +2807,12 @@ export default function TradeHub({
                         <div key={p.player_id} className="flex items-center justify-between bg-gray-800 rounded-lg px-2 py-1.5">
                           <div className="flex items-center gap-1.5 min-w-0">
                             <button onClick={() => setPlayerProfileId(p.player_id)} className="text-xs text-white hover:text-blue-400 transition truncate text-left">{p.full_name}</button>
-                            <span className="text-[10px] text-gray-500 shrink-0">{p.position}</span>
+                            <span className="text-[10px] text-gray-500 shrink-0">{p.position}{p.team ? ` · ${p.team}` : ""}</span>
                           </div>
-                          <span className="text-xs text-gray-400 font-mono shrink-0 ml-1">{p.value.toLocaleString()}</span>
+                          <div className="flex items-center gap-1.5 shrink-0 ml-1">
+                            {p.age && <span className="text-[10px] text-gray-500">Age {p.age}</span>}
+                            <span className="text-xs text-gray-400 font-mono">{p.value.toLocaleString()}</span>
+                          </div>
                         </div>
                       ))}
                       {trade.receivePicks.map((p: any) => (
@@ -2883,7 +2904,7 @@ export default function TradeHub({
                         }}
                         className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition shrink-0 ${alreadyMarked ? "border-green-700 text-green-400 cursor-default" : "border-orange-700 text-orange-400 hover:border-orange-500"}`}
                       >
-                        {alreadyMarked ? "✓ Offered" : "Mark Attempted"}
+                        {alreadyMarked ? "✓ Offered" : "I Sent This"}
                       </button>
                     );
                   })()}
@@ -3028,9 +3049,9 @@ export default function TradeHub({
       return (
         <div className="space-y-4">
           <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Advanced Trade Recommendations</div>
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Trade Recommendations</div>
             <div className="mt-1 text-sm text-gray-200">
-              These recommendations now stack partner ranking, simulated team outlook, and pick-value distributions into concrete trade paths and opening angles.
+              Concrete trade paths built from partner rankings, playoff simulations, and pick-value distributions — with opening angles and negotiation context for each.
             </div>
           </div>
 
@@ -3152,7 +3173,7 @@ export default function TradeHub({
                       <div>
                         <div className="flex flex-wrap items-center gap-2">
                           <span className={`text-sm font-semibold ${isSell ? "text-red-300" : "text-green-300"}`}>
-                            {isSell ? "📉 Sell Window Trade" : "📈 Buy Window Trade"}
+                            {isSell ? "Sell Window Trade" : "Buy Window Trade"}
                           </span>
                           <span className="rounded-full border border-blue-700 bg-blue-950/40 px-2 py-0.5 text-[10px] font-semibold text-blue-300">
                             {t.partnerName}
@@ -3176,7 +3197,7 @@ export default function TradeHub({
                           </div>
                         </div>
                         <div className="rounded-lg border border-gray-800 bg-gray-950/60 px-3 py-2">
-                          <div className="text-[10px] uppercase tracking-wide text-gray-500">Recv Trend</div>
+                          <div className="text-[10px] uppercase tracking-wide text-gray-500">Receive Trend</div>
                           <div className="mt-1 text-sm font-semibold text-green-300">+{t.receivePct.toFixed(1)}%</div>
                         </div>
                       </div>
@@ -3374,7 +3395,7 @@ export default function TradeHub({
             <p className="text-sm text-gray-400">No trades found in the past 30 days.</p>
           )}
 
-          {!loadingTradeHub && (!tradeHubData || tradeHubUserId !== user?.user_id) && !loadingTradeHub && (
+          {!loadingTradeHub && (!tradeHubData || tradeHubUserId !== user?.user_id) && (
             <button
               onClick={() => { if (user?.user_id) loadUserTrades(user.user_id); }}
               className="w-full rounded-xl border border-blue-700 bg-blue-950/30 py-3 text-sm font-medium text-blue-300 hover:border-blue-500 transition"
@@ -3421,10 +3442,29 @@ export default function TradeHub({
             const recvTotal = allReceived.reduce((s, x) => s + x.val, 0);
             const net = recvTotal - giveTotal;
 
+            const partnerRosterIds = new Set<number>();
+            Object.values(trade.adds || {}).forEach((rid: any) => {
+              if (Number(rid) !== Number(myRosterId)) partnerRosterIds.add(Number(rid));
+            });
+            (trade.draft_picks || []).forEach((p: any) => {
+              if (p.previous_owner_id && Number(p.previous_owner_id) !== Number(myRosterId)) partnerRosterIds.add(Number(p.previous_owner_id));
+              if (p.owner_id && Number(p.owner_id) !== Number(myRosterId)) partnerRosterIds.add(Number(p.owner_id));
+            });
+            const partnerLabel = [...partnerRosterIds]
+              .map((rid) => {
+                const r = rosters.find((r: any) => Number(r.roster_id) === rid);
+                return r ? ((users as any)[r.owner_id] || null) : null;
+              })
+              .filter(Boolean)
+              .join(", ") || null;
+
             return (
               <div key={i} className="rounded-2xl border border-gray-800 bg-gray-900 p-4">
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-semibold text-blue-400 uppercase tracking-wide">{trade.leagueName}</span>
+                  <div>
+                    <span className="text-xs font-semibold text-blue-400 uppercase tracking-wide">{trade.leagueName}</span>
+                    {partnerLabel && <span className="text-xs text-gray-400 ml-2">with {partnerLabel}</span>}
+                  </div>
                   <div className="flex items-center gap-2">
                     {giveTotal > 0 && recvTotal > 0 && (
                       <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${Math.abs(net) <= 300 ? "bg-yellow-900 text-yellow-300" : net > 0 ? "bg-green-900 text-green-300" : "bg-red-900 text-red-300"}`}>
@@ -3560,7 +3600,7 @@ export default function TradeHub({
                 {/* Trade columns */}
                 <div className="grid grid-cols-2 gap-3 mb-3">
                   <div>
-                    <div className="text-[10px] font-bold uppercase tracking-widest text-red-400 mb-1.5">You Gave</div>
+                    <div className="text-[10px] font-bold uppercase tracking-widest text-red-400 mb-1.5">You Give</div>
                     <div className="space-y-1">
                       {attempt.give_players.map((p) => (
                         <div key={p.player_id} className="flex items-center justify-between rounded-lg bg-gray-800 px-2 py-1.5">
@@ -3584,7 +3624,7 @@ export default function TradeHub({
                     </div>
                   </div>
                   <div>
-                    <div className="text-[10px] font-bold uppercase tracking-widest text-green-400 mb-1.5">You Wanted</div>
+                    <div className="text-[10px] font-bold uppercase tracking-widest text-green-400 mb-1.5">You Receive</div>
                     <div className="space-y-1">
                       {attempt.receive_players.map((p) => (
                         <div key={p.player_id} className="flex items-center justify-between rounded-lg bg-gray-800 px-2 py-1.5">
@@ -3616,11 +3656,6 @@ export default function TradeHub({
                     <p className="text-xs text-gray-300">{attempt.counter_details}</p>
                     <button onClick={() => { setShowCounterInput(attempt.id); setCounterInputs((prev) => ({ ...prev, [attempt.id]: attempt.counter_details ?? "" })); }} className="mt-1 text-[10px] text-orange-400 hover:text-orange-300 transition">Edit</button>
                   </div>
-                )}
-                {attempt.status === "DECLINED" && (
-                  <p className="mb-3 text-[11px] text-gray-500 italic">
-                    Note: A decline often means the valuation was off, not that the owner isn&apos;t interested in the player. Consider adjusting the package and trying again.
-                  </p>
                 )}
 
                 {/* Counter input form */}
@@ -3682,7 +3717,7 @@ export default function TradeHub({
                     );
                   })}
                   <button
-                    onClick={() => onDeleteAttempt(attempt.id)}
+                    onClick={() => { if (window.confirm("Delete this trade attempt? This cannot be undone.")) onDeleteAttempt(attempt.id); }}
                     className="ml-auto text-[11px] text-gray-600 hover:text-red-400 transition"
                   >
                     Delete
@@ -3699,3 +3734,5 @@ export default function TradeHub({
     </>
   );
 }
+
+export default React.memo(TradeHub);

@@ -1,11 +1,6 @@
 "use client";
 import { useState } from "react";
-import { CURRENT_YEAR } from "../lib/helpers";
-import { getDraftRoundSlot } from "../lib/helpers";
-
-const BASE_YEAR = new Date().getFullYear();
-const YEARS = Array.from({ length: 3 }, (_, i) => String(BASE_YEAR + i));
-const ROUNDS = [1, 2, 3, 4];
+import { CURRENT_YEAR, YEARS, ROUNDS, getDraftRoundSlot } from "../lib/helpers";
 
 interface UseLeaguesOptions {
   /** The currently connected Sleeper user. */
@@ -93,12 +88,11 @@ export function useLeagues({ user, players, onLeagueLoaded }: UseLeaguesOptions)
     if (!myRoster) return;
     setRoster(myRoster);
 
-    setFreeAgents(
-      Object.values(players)
-        .filter((p: any) => p && !rosteredIds.has(String(p.player_id)))
-        .sort((a: any, b: any) => (b.value || 0) - (a.value || 0))
-        .slice(0, 20)
-    );
+    const freeAgentsList = Object.values(players)
+      .filter((p: any) => p && !rosteredIds.has(String(p.player_id)))
+      .sort((a: any, b: any) => (b.value || 0) - (a.value || 0))
+      .slice(0, 20);
+    setFreeAgents(freeAgentsList);
 
     // Build initial (pre-trade) picks
     let tempPicks: any[] = [];
@@ -209,10 +203,7 @@ export function useLeagues({ user, players, onLeagueLoaded }: UseLeaguesOptions)
       allPicks: tempPicks,
       standings: builtStandings,
       users: userMap,
-      freeAgents: Object.values(players)
-        .filter((p: any) => p && !rosteredIds.has(String(p.player_id)))
-        .sort((a: any, b: any) => (b.value || 0) - (a.value || 0))
-        .slice(0, 20),
+      freeAgents: freeAgentsList,
       draftId: currentDraft?.draft_id || null,
       draftPicks: loadedDraftPicks,
       draftOrder: order,
