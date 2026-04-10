@@ -94,6 +94,7 @@ export interface SleeperPlayer {
   college: string | null;
   height: string | null;
   weight: string | null;
+  value?: number;
 }
 
 export interface SleeperMatchup {
