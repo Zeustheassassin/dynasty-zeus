@@ -104,6 +104,7 @@ interface TradeHubProps {
   onDeleteAttempt: (id: string) => Promise<void>;
   onLoadTradeAttempts: (leagueId: string) => Promise<void>;
   onRefreshDirection: () => void;
+  buyLowPlayerIds: string[];
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
@@ -131,6 +132,7 @@ function TradeHub({
   tradeAttempts, loadingTradeAttempts, tradeAttemptsLeagueId,
   onMarkAttempted, onUpdateAttemptStatus, onDeleteAttempt, onLoadTradeAttempts,
   onRefreshDirection,
+  buyLowPlayerIds,
 }: TradeHubProps) {
   const players = usePlayers();
   // Local UI state for the Attempts tab
@@ -2400,7 +2402,16 @@ function TradeHub({
           return a.sort - b.sort;
         })
         .map(({ r }) => r);
+      // ── Build the standard top-15 ────────────────────────────────────────
+      const buyLowSet = new Set(buyLowPlayerIds);
+      const addToSlots = (acc: any[], r: any, allIds: string[], key: string) => {
+        seen.add(key);
+        allIds.forEach((pid) => { playerCount[pid] = (playerCount[pid] || 0) + 1; });
+        oppCount[String(r.oppRosterId)] = (oppCount[String(r.oppRosterId)] || 0) + 1;
+        acc.push(r);
+      };
       const top15 = shuffled.reduce((acc: any[], r) => {
+          if (acc.length >= 15) return acc;
           const allIds = [
             ...r.give.map((p: any) => `player-${p.player_id}`),
             ...r.receive.map((p: any) => `player-${p.player_id}`),
@@ -2410,25 +2421,53 @@ function TradeHub({
           const key = [...allIds].sort().join(",");
           if (seen.has(key)) return acc;
           if (acc.some((existing: any) => areTradesTooSimilar(existing, r))) return acc;
-          // Per-player and per-opponent appearance caps are lifted when the user has pinned a
-          // specific player to shop or locked in a specific owner to trade with — in those
-          // focused modes, all matching results should surface rather than being capped at 4.
           const isPlayerPinned = !!finderPinnedPlayerId;
           const isOwnerPinned = !!finderTargetOppRosterId;
           const oppKey = String(r.oppRosterId);
           if (!isPlayerPinned && !isOwnerPinned) {
-            // Each player may appear in at most 4 shown trades (pinned player is exempt)
             if (allIds.some((pid) => pid !== `player-${finderPinnedPlayerId}` && (playerCount[pid] || 0) >= 4)) return acc;
-            // Each opponent may appear in at most 4 shown trades
             if ((oppCount[oppKey] || 0) >= 4) return acc;
           }
-          seen.add(key);
-          allIds.forEach((pid) => { playerCount[pid] = (playerCount[pid] || 0) + 1; });
-          oppCount[oppKey] = (oppCount[oppKey] || 0) + 1;
-          acc.push(r);
-          return acc.length >= 15 ? acc : acc;
+          addToSlots(acc, r, allIds, key);
+          return acc;
+        }, []);
+
+      // ── 5 bonus buy-low slots ─────────────────────────────────────────────
+      // Trades where you receive a player ranked in the buy-low list.
+      // ── Buy-low slots: 1-for-1 only ──────────────────────────────────────
+      // You give exactly one asset (a single pick OR a single non-buy-low player)
+      // and receive exactly one buy-low target player. No multi-piece packages.
+      const buyLowSlots = shuffled.reduce((acc: any[], r) => {
+          if (acc.length >= 5) return acc;
+
+          // Strict 1-for-1: one asset given, one player received
+          const totalGiven    = r.give.length + r.givePicks.length;
+          const totalReceived = r.receive.length + r.receivePicks.length;
+          if (totalGiven !== 1 || totalReceived !== 1) return acc;
+
+          // The one received asset must be a buy-low player
+          if (r.receive.length !== 1 || !buyLowSet.has(r.receive[0].player_id)) return acc;
+
+          // The one given asset must be either:
+          //   a) a single pick, OR
+          //   b) a single player who is NOT on the buy-low list
+          if (r.give.length === 1 && buyLowSet.has(r.give[0].player_id)) return acc;
+
+          const allIds = [
+            ...r.give.map((p: any) => `player-${p.player_id}`),
+            ...r.receive.map((p: any) => `player-${p.player_id}`),
+            ...r.givePicks.map((p: any) => `pick-${finderPickKey(p)}`),
+            ...r.receivePicks.map((p: any) => `pick-${finderPickKey(p)}`),
+          ];
+          const key = [...allIds].sort().join(",");
+          if (seen.has(key)) return acc;
+          if (acc.some((existing: any) => areTradesTooSimilar(existing, r))) return acc;
+          addToSlots(acc, r, allIds, key);
+          return acc;
         }, [])
-        .slice(0, 15);
+        .map((r: any) => ({ ...r, isBuyLow: true }));
+
+      const allTrades = [...top15, ...buyLowSlots];
 
       const TWENTY_EIGHT_DAYS = 28 * 24 * 60 * 60 * 1000;
       const recentFingerprints = new Set(
@@ -2695,7 +2734,7 @@ function TradeHub({
               Refresh
             </button>
           </div>
-          {top15.length === 0 && (
+          {allTrades.length === 0 && (
             <p className="text-gray-400 text-sm">
               {pinnedPlayer
                 ? `No balanced trades found involving ${pinnedPlayer.full_name}. Try a different player or hit Refresh.`
@@ -2706,7 +2745,7 @@ function TradeHub({
             </p>
           )}
           {(() => {
-            const suppressedCount = top15.filter((trade: TradeResult) => {
+            const suppressedCount = allTrades.filter((trade: TradeResult) => {
               const fp = buildTradeFingerprint(
                 selectedLeague?.league_id ?? "",
                 trade.oppRosterId,
@@ -2721,8 +2760,8 @@ function TradeHub({
               </p>
             ) : null;
           })()}
-          {top15
-            .filter((trade: TradeResult) => {
+          {allTrades
+            .filter((trade: any) => {
               const fp = buildTradeFingerprint(
                 selectedLeague?.league_id ?? "",
                 trade.oppRosterId,
@@ -2731,7 +2770,7 @@ function TradeHub({
               );
               return !recentFingerprints.has(fp);
             })
-            .map((trade: TradeResult, idx: number) => {
+            .map((trade: any, idx: number) => {
             const partnerProfile = leagueMateProfileByRosterId.get(Number(trade.oppRosterId));
             const tradeIntent = getTradeIntent(trade);
 
@@ -2814,6 +2853,11 @@ function TradeHub({
                     <span className="rounded-full border border-violet-800 bg-violet-950/30 px-2 py-0.5 text-[10px] font-semibold text-violet-300">
                       {tradeIntent.label}
                     </span>
+                    {trade.isBuyLow && (
+                      <span className="rounded-full border border-green-700 bg-green-950/40 px-2 py-0.5 text-[10px] font-semibold text-green-300">
+                        Buy Low Target
+                      </span>
+                    )}
                     {partnerProfile?.fitLabel && (
                       <span className="rounded-full border border-cyan-800 bg-cyan-950/30 px-2 py-0.5 text-[10px] font-semibold text-cyan-300">
                         {partnerProfile.fitLabel}

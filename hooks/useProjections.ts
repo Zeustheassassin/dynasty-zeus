@@ -28,7 +28,7 @@ export function useProjections(players: Record<string, any>) {
   const [projectionLoaded, setProjectionLoaded] = useState(false);
   const [projectionUsesSeasonFallback, setProjectionUsesSeasonFallback] = useState(false);
 
-  const loadProjections = async (week: number | "season") => {
+  const loadProjections = async (week: number | "season", extraSources: string[] = []) => {
     setLoadingProjections(true);
     const statusMap: Record<string, boolean> = {};
     const now = new Date();
@@ -138,6 +138,8 @@ export function useProjections(players: Record<string, any>) {
         const posParams = "position[]=QB&position[]=RB&position[]=WR&position[]=TE";
 
         // Source 1: Sleeper/RotoWire
+        // Sleeper is always included. When it's the only active source the consensus
+        // math still works correctly because totalWeight equals sleeperWeight for every row.
         try {
           const sleeperWeight = PROJ_SOURCES.find((s) => s.id === "sleeper")!.weight;
           let sleeperData: any[] = [];
@@ -165,37 +167,44 @@ export function useProjections(players: Record<string, any>) {
           statusMap["sleeper"] = true;
         } catch { statusMap["sleeper"] = false; }
 
-        // Source 2: FantasyPros
-        try {
-          const weekParam = week === "season" ? "draft" : String(week);
-          const data: Array<{ name: string; position: string; fpts: number }> =
-            await fetch(`/api/projections/fantasypros?week=${weekParam}`).then((r) => r.json());
-          const src = PROJ_SOURCES.find((s) => s.id === "fantasypros")!;
-          data.forEach((item) => {
-            if (item.fpts <= 0) return;
-            const key = normalizeProjName(item.name);
-            const sleeperId = nameIndex.get(key);
-            if (!sleeperId) return;
-            addRow(sleeperId, item.fpts, src.id, src.weight);
-          });
-          statusMap["fantasypros"] = true;
-        } catch { statusMap["fantasypros"] = false; }
+        // Source 2: FantasyPros — opt-in only; user must explicitly enable it after
+        // verifying the link shows the correct year. During offseason their ?week=draft
+        // endpoint has no year parameter and returns prior-season data.
+        if (extraSources.includes("fantasypros")) {
+          try {
+            const weekParam = week === "season" ? "draft" : String(week);
+            const data: Array<{ name: string; position: string; fpts: number }> =
+              await fetch(`/api/projections/fantasypros?week=${weekParam}`).then((r) => r.json());
+            const src = PROJ_SOURCES.find((s) => s.id === "fantasypros")!;
+            data.forEach((item) => {
+              if (item.fpts <= 0) return;
+              const key = normalizeProjName(item.name);
+              const sleeperId = nameIndex.get(key);
+              if (!sleeperId) return;
+              addRow(sleeperId, item.fpts, src.id, src.weight);
+            });
+            statusMap["fantasypros"] = true;
+          } catch { statusMap["fantasypros"] = false; }
+        }
 
-        // Source 3: numberFire
-        try {
-          const weekParam = week === "season" ? "0" : String(week);
-          const data: Array<{ name: string; position: string; fpts: number }> =
-            await fetch(`/api/projections/numberfire?week=${weekParam}`).then((r) => r.json());
-          const src = PROJ_SOURCES.find((s) => s.id === "numberfire")!;
-          data.forEach((item) => {
-            if (item.fpts <= 0) return;
-            const key = normalizeProjName(item.name);
-            const sleeperId = nameIndex.get(key);
-            if (!sleeperId) return;
-            addRow(sleeperId, item.fpts, src.id, src.weight);
-          });
-          statusMap["numberfire"] = true;
-        } catch { statusMap["numberfire"] = false; }
+        // Source 3: numberFire — opt-in only for the same reason; YEARLY returns prior-season
+        // data until FanDuel publishes updated preseason projections.
+        if (extraSources.includes("numberfire")) {
+          try {
+            const weekParam = week === "season" ? "0" : String(week);
+            const data: Array<{ name: string; position: string; fpts: number }> =
+              await fetch(`/api/projections/numberfire?week=${weekParam}`).then((r) => r.json());
+            const src = PROJ_SOURCES.find((s) => s.id === "numberfire")!;
+            data.forEach((item) => {
+              if (item.fpts <= 0) return;
+              const key = normalizeProjName(item.name);
+              const sleeperId = nameIndex.get(key);
+              if (!sleeperId) return;
+              addRow(sleeperId, item.fpts, src.id, src.weight);
+            });
+            statusMap["numberfire"] = true;
+          } catch { statusMap["numberfire"] = false; }
+        }
 
         setProjectionUsesSeasonFallback(false);
       }

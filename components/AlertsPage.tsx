@@ -56,6 +56,7 @@ type AlertsPageProps = {
   currentNFLWeek: number;
   allTradeAttempts: { id: string; league_id: string; status: string }[];
   allLeagues: { league_id: string; name: string }[];
+  onNavigateToAttempts: (leagueId: string) => void;
 };
 
 const severityStyles = {
@@ -263,6 +264,7 @@ export default function AlertsPage({
   currentNFLWeek,
   allTradeAttempts,
   allLeagues,
+  onNavigateToAttempts,
 }: AlertsPageProps) {
   const [feedTab, setFeedTab] = useState<"alerts" | "transactions" | "waivers" | "injury">("alerts");
   const [expandedInjuryId, setExpandedInjuryId] = useState<string | null>(null);
@@ -326,6 +328,7 @@ export default function AlertsPage({
       {(() => {
         const openByLeague = allLeagues
           .map((lg) => ({
+            leagueId: lg.league_id,
             name: lg.name,
             count: allTradeAttempts.filter(
               (a) => a.league_id === lg.league_id && a.status === "PENDING"
@@ -340,12 +343,16 @@ export default function AlertsPage({
             <h2 className="mt-1 text-lg font-semibold text-white">Pending across all leagues</h2>
             <div className="mt-3 divide-y divide-slate-800">
               {openByLeague.map((entry) => (
-                <div key={entry.name} className="flex items-center justify-between py-2">
-                  <span className="text-sm text-slate-200">{entry.name}</span>
-                  <span className="rounded-full border border-yellow-700 bg-yellow-950/30 px-2.5 py-0.5 text-xs font-semibold text-yellow-300">
-                    {entry.count} open
+                <button
+                  key={entry.leagueId}
+                  onClick={() => onNavigateToAttempts(entry.leagueId)}
+                  className="w-full flex items-center justify-between py-2 text-left group hover:bg-slate-800/40 rounded-lg px-2 -mx-2 transition"
+                >
+                  <span className="text-sm text-slate-200 group-hover:text-white transition">{entry.name}</span>
+                  <span className="rounded-full border border-yellow-700 bg-yellow-950/30 px-2.5 py-0.5 text-xs font-semibold text-yellow-300 group-hover:border-yellow-500 transition">
+                    {entry.count} open →
                   </span>
-                </div>
+                </button>
               ))}
             </div>
           </div>

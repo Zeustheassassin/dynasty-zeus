@@ -148,7 +148,7 @@ const [activityTransactions, setActivityTransactions] = useState<any[]>([]);
 const [loadingActivity, setLoadingActivity] = useState(false);
 const [leagueWeeklyMatchups, setLeagueWeeklyMatchups] = useState<Record<string, any[]>>({});
 const [loadingLeagueWeeklyMatchups, setLoadingLeagueWeeklyMatchups] = useState(false);
-const [dataHubTab, setDataHubTab] = useState<"RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "PICK_VALUES" | "LEAGUEMATES" | "DEPTH_CHARTS">("RANKINGS");
+const [dataHubTab, setDataHubTab] = useState<"RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "PICK_VALUES" | "LEAGUEMATES" | "DEPTH_CHARTS" | "BUY_LOW">("RANKINGS");
 const [leagueMateStats, setLeagueMateStats] = useState<any[]>([]);
 const [leagueMateStatsLoaded, setLeagueMateStatsLoaded] = useState(false);
 const [loadingLeagueMateStats, setLoadingLeagueMateStats] = useState(false);
@@ -3587,6 +3587,51 @@ const getTeamSummary = () => {
     () => new Map(selectedLeagueMateProfilesView.map((profile: any) => [Number(profile.rosterId), profile])),
     [selectedLeagueMateProfilesView]
   );
+  // ── Buy Low player IDs (shared with Trade Finder) ─────────────────────────
+  // Same formula as DataHub Buy Low tab. Top 30 IDs ordered by score descending,
+  // only players with real projection data (not redraft fallback).
+  const buyLowPlayerIds = useMemo<string[]>(() => {
+    if (!players || Object.keys(calcFcValues).length === 0) return [];
+    const projById = new Map<string, number>(
+      projectionData.map((r: any) => [String(r.sleeperId), Number(r.fpts || 0)])
+    );
+    const MIN_DYN_VAL: Record<string, number> = { QB: 500, RB: 350, WR: 350, TE: 350 };
+    const getAgeMult = (age: number, pos: string): number => {
+      if (!age) return 0.8;
+      if (pos === "QB") return age <= 25 ? 1.5 : age <= 28 ? 1.2 : age <= 31 ? 0.85 : 0.5;
+      if (pos === "RB") return age <= 22 ? 1.6 : age <= 24 ? 1.3 : age <= 26 ? 0.9 : 0.4;
+      if (pos === "WR") return age <= 24 ? 1.5 : age <= 27 ? 1.2 : age <= 30 ? 0.85 : 0.5;
+      return age <= 25 ? 1.5 : age <= 27 ? 1.2 : age <= 30 ? 0.85 : 0.5;
+    };
+    const rows: { player_id: string; score: number }[] = [];
+    for (const pos of ["QB", "RB", "WR", "TE"] as const) {
+      const minVal = MIN_DYN_VAL[pos];
+      const pool = Object.values(players as Record<string, any>)
+        .filter((p: any) => p.position === pos && (calcFcValues[p.player_id] ?? 0) >= minVal && projById.has(p.player_id))
+        .map((p: any) => ({ player_id: p.player_id, age: Number(p.age || 0), dynVal: calcFcValues[p.player_id] ?? 0, projFpts: projById.get(p.player_id)! }));
+      if (pool.length < 2) continue;
+      const dynSorted  = [...pool].sort((a, b) => b.dynVal - a.dynVal);
+      const projSorted = [...pool].sort((a, b) => b.projFpts - a.projFpts);
+      const dynRankMap  = new Map(dynSorted.map((p, i) => [p.player_id, i + 1]));
+      const projRankMap = new Map(projSorted.map((p, i) => [p.player_id, i + 1]));
+      const n = pool.length;
+      for (const p of pool) {
+        const dynRank = dynRankMap.get(p.player_id)!;
+        const projRank = projRankMap.get(p.player_id)!;
+        const gap = dynRank - projRank;
+        if (gap <= 0) continue;
+        const projPctile = (n - projRank) / Math.max(n - 1, 1);
+        rows.push({ player_id: p.player_id, score: (gap / n) * getAgeMult(p.age, pos) * (0.55 + 0.45 * projPctile) });
+      }
+    }
+    const maxRaw = Math.max(...rows.map(r => r.score), 0.001);
+    return rows
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 30)
+      .filter(r => r.score / maxRaw >= 0.15) // only meaningful buy lows (≥15% of top score)
+      .map(r => r.player_id);
+  }, [players, calcFcValues, redraftValues, projectionData]);
+
   const tradePartnerRankings = useMemo(() => {
     if (!selectedLeague || !rosters.length || !user?.user_id || !selectedLeagueSimulation || !selectedLeagueDirection) return [];
 
@@ -5091,20 +5136,21 @@ const getTeamSummary = () => {
 
     // Post-bootstrap: if calcFcValues just loaded and the saved snapshot is too small, expand it.
     // This handles the case where the snapshot was taken before dynasty values were loaded.
-    if (supabaseUser) {
-      const existingCount = Object.keys(historicalSnapshotRef.current?.players ?? {}).length;
+    // IMPORTANT: preserve the original recorded_at so this expansion never resets the 6-day clock.
+    if (supabaseUser && historicalSnapshotRef.current) {
+      const existingCount = Object.keys(historicalSnapshotRef.current.players ?? {}).length;
       const calcCount = Object.values(calcFcValues as Record<string, number>).filter(v => v > 0).length;
       if (calcCount > 100 && calcCount > existingCount + 50) {
-        const recordedAt = new Date().toISOString();
+        const originalRecordedAt = historicalSnapshotRef.current.recorded_at;
         const fullSnap = buildFullSnapshot();
         supabase
           .from("player_value_snapshots")
           .upsert(
-            { user_id: supabaseUser.id, snapshot: fullSnap, recorded_at: recordedAt },
+            { user_id: supabaseUser.id, snapshot: fullSnap, recorded_at: originalRecordedAt },
             { onConflict: "user_id" }
           )
           .then(() => {
-            const snap = { players: fullSnap, recorded_at: recordedAt };
+            const snap = { players: fullSnap, recorded_at: originalRecordedAt };
             historicalSnapshotRef.current = snap;
             setHistoricalSnapshot(snap);
           });
@@ -5462,6 +5508,15 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             currentNFLWeek={nflState?.season_type === "regular" ? Number(nflState?.week || 0) : 0}
             allTradeAttempts={allTradeAttempts}
             allLeagues={leagues}
+            onNavigateToAttempts={(leagueId) => {
+              const league = leagues.find((l: any) => l.league_id === leagueId);
+              if (league) {
+                loadRoster(league);
+                setTradeHubSection("ATTEMPTS");
+                setMainTab("TRADE_HUB");
+                loadTradeAttempts(leagueId);
+              }
+            }}
           />
         )}
         {/* LEAGUE HUB */}
@@ -5744,6 +5799,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     onDeleteAttempt={deleteAttempt}
     onLoadTradeAttempts={loadTradeAttempts}
     onRefreshDirection={() => { if (selectedLeague) loadRoster(selectedLeague); }}
+    buyLowPlayerIds={buyLowPlayerIds}
   />
 )}
 
