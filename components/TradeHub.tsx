@@ -140,6 +140,8 @@ function TradeHub({
   const [sessionMarked, setSessionMarked] = useState<Set<string>>(new Set());
   // Direction refresh state
   const [directionRefreshing, setDirectionRefreshing] = useState(false);
+  // Tier Down mode: filter finder to trades where you trade down at a position and collect adders
+  const [finderTierDownPos, setFinderTierDownPos] = useState<"QB" | "RB" | "WR" | "TE" | null>(null);
   React.useEffect(() => {
     if (directionRefreshing && selectedLeagueDirectionAdjusted) setDirectionRefreshing(false);
   }, [directionRefreshing, selectedLeagueDirectionAdjusted]);
@@ -2108,6 +2110,23 @@ function TradeHub({
         });
       };
 
+      // Positional rank lists for Tier Down quality gates (ranked by dynasty value, desc).
+      // Used to enforce that both the given and received player are meaningful starters —
+      // not handcuffs or late-bench players — when Tier Down mode is active.
+      const tierDownPosRankings: Record<string, string[]> = {};
+      if (finderTierDownPos) {
+        for (const pos of ["QB", "RB", "WR", "TE"] as const) {
+          tierDownPosRankings[pos] = Object.values(players as Record<string, any>)
+            .filter((p: any) => p.position === pos && Number(p.value || 0) > 0)
+            .sort((a: any, b: any) => b.value - a.value)
+            .map((p: any) => p.player_id);
+        }
+      }
+      // Give-side rank cap: the player you're trading away must be a meaningful starter.
+      // Receive-side rank cap: the player coming back must still be a real starter (not a scrub).
+      const TIER_DOWN_GIVE_RANK:    Record<string, number> = { QB: 14, RB: 16, WR: 20, TE:  8 };
+      const TIER_DOWN_RECEIVE_RANK: Record<string, number> = { QB: 24, RB: 32, WR: 40, TE: 14 };
+
       // Pre-filter: apply all hard blocks except the direction guardrail
       const preGuardrail = results
         .filter((r) => isFinite(r.score))
@@ -2115,12 +2134,47 @@ function TradeHub({
         .filter((r) => !r.receive.some((p: any) => isBlockedBuyDisposition(p.player_id)))
         .filter((r) => !pinnedPlayer || r.give.some((p: any) => p.player_id === pinnedPlayer.player_id))
         .filter((r) => !finderTargetPlayerId || r.receive.some((p: any) => p.player_id === finderTargetPlayerId))
-        .filter((r) => !isWrongOwnerHCPackage(r));
-      // Only apply direction guardrail if at least one result survives it — prevents empty results
-      const hasGuardrailPassing = preGuardrail.some((r) => !failsDirectionGuardrail(r));
+        .filter((r) => !isWrongOwnerHCPackage(r))
+        .filter((r) => {
+          // Tier Down filter: give a high-end starter at the position, receive a lower starter
+          // at that same position, with adders to balance. Both players must be within the
+          // quality thresholds — no scrub-for-scrub or garbage-player-plus-picks trades.
+          if (!finderTierDownPos) return true;
+          const pos = finderTierDownPos;
+          const posRanking = tierDownPosRankings[pos] ?? [];
+          const giveRankCap    = TIER_DOWN_GIVE_RANK[pos];
+          const receiveRankCap = TIER_DOWN_RECEIVE_RANK[pos];
+
+          // Keep deals compact — 1-for-2, 1-for-3, 2-for-2 style only. No mega packages.
+          if (r.give.length > 2 || r.receive.length > 3) return false;
+
+          const givenAtPos    = r.give.filter((p: any) => p.position === pos);
+          const receivedAtPos = r.receive.filter((p: any) => p.position === pos);
+          if (givenAtPos.length === 0 || receivedAtPos.length === 0) return false;
+
+          const maxGivenVal    = Math.max(...givenAtPos.map((p: any) => p.value));
+          const maxReceivedVal = Math.max(...receivedAtPos.map((p: any) => p.value));
+          if (maxReceivedVal >= maxGivenVal) return false;
+
+          // Best given player must rank within the give cap (e.g. top-14 QB)
+          const bestGiven   = givenAtPos.reduce((a: any, b: any) => b.value > a.value ? b : a);
+          const giveRank    = posRanking.indexOf(bestGiven.player_id) + 1; // 1-indexed, 0 = not found
+          if (giveRank === 0 || giveRank > giveRankCap) return false;
+
+          // Best received player must rank within the receive cap (e.g. top-24 QB) — no scrubs
+          const bestReceived  = receivedAtPos.reduce((a: any, b: any) => b.value > a.value ? b : a);
+          const receiveRank   = posRanking.indexOf(bestReceived.player_id) + 1;
+          if (receiveRank === 0 || receiveRank > receiveRankCap) return false;
+
+          return true;
+        });
+      // Only apply direction guardrail if at least one result survives it — prevents empty results.
+      // Tier Down mode bypasses the guardrail entirely: the user intentionally selected a
+      // direction that may run counter to their team's bucket (trading down at a position).
+      const hasGuardrailPassing = !finderTierDownPos && preGuardrail.some((r) => !failsDirectionGuardrail(r));
       // Seeded shuffle so Refresh button produces a new random set
       const shuffled = preGuardrail
-        .filter((r) => !hasGuardrailPassing || !failsDirectionGuardrail(r))
+        .filter((r) => !!finderTierDownPos || !hasGuardrailPassing || !failsDirectionGuardrail(r))
         .map((r) => {
           const lineupSafety = getTradeLineupSafety(r);
           const partnerProfile = leagueMateProfileByRosterId.get(Number(r.oppRosterId));
@@ -2356,11 +2410,18 @@ function TradeHub({
           const key = [...allIds].sort().join(",");
           if (seen.has(key)) return acc;
           if (acc.some((existing: any) => areTradesTooSimilar(existing, r))) return acc;
-          // Each player may appear in at most 4 shown trades (pinned player is exempt)
-          if (allIds.some((pid) => pid !== `player-${finderPinnedPlayerId}` && (playerCount[pid] || 0) >= 4)) return acc;
-          // Each opponent may appear in at most 4 shown trades
+          // Per-player and per-opponent appearance caps are lifted when the user has pinned a
+          // specific player to shop or locked in a specific owner to trade with — in those
+          // focused modes, all matching results should surface rather than being capped at 4.
+          const isPlayerPinned = !!finderPinnedPlayerId;
+          const isOwnerPinned = !!finderTargetOppRosterId;
           const oppKey = String(r.oppRosterId);
-          if ((oppCount[oppKey] || 0) >= 4) return acc;
+          if (!isPlayerPinned && !isOwnerPinned) {
+            // Each player may appear in at most 4 shown trades (pinned player is exempt)
+            if (allIds.some((pid) => pid !== `player-${finderPinnedPlayerId}` && (playerCount[pid] || 0) >= 4)) return acc;
+            // Each opponent may appear in at most 4 shown trades
+            if ((oppCount[oppKey] || 0) >= 4) return acc;
+          }
           seen.add(key);
           allIds.forEach((pid) => { playerCount[pid] = (playerCount[pid] || 0) + 1; });
           oppCount[oppKey] = (oppCount[oppKey] || 0) + 1;
@@ -2476,6 +2537,33 @@ function TradeHub({
                   }`}
                 />
               </button>
+            </div>
+            {/* ── Tier Down Mode ── */}
+            <div className="flex items-center justify-between gap-3 rounded-lg bg-gray-800/70 px-3 py-2">
+              <div className="min-w-0">
+                <div className="text-sm font-medium text-white">Tier Down</div>
+                <div className="text-[11px] text-gray-400">
+                  {finderTierDownPos
+                    ? `Showing trades where you give a ${finderTierDownPos} and receive a cheaper ${finderTierDownPos} + adders.`
+                    : "Trade down at a position and collect picks or extra players as adders."}
+                </div>
+              </div>
+              <div className="flex gap-1.5 shrink-0">
+                {(["QB", "RB", "WR", "TE"] as const).map((pos) => (
+                  <button
+                    key={pos}
+                    type="button"
+                    onClick={() => setFinderTierDownPos(finderTierDownPos === pos ? null : pos)}
+                    className={`px-2 py-1 rounded text-xs font-bold transition ${
+                      finderTierDownPos === pos
+                        ? "bg-purple-600 border border-purple-400 text-white"
+                        : "bg-gray-700 border border-gray-600 text-gray-300 hover:border-gray-400 hover:text-white"
+                    }`}
+                  >
+                    {pos}
+                  </button>
+                ))}
+              </div>
             </div>
             {pinnedPlayer ? (
               <div className="flex items-center justify-between bg-gray-800 rounded-lg px-3 py-2">
