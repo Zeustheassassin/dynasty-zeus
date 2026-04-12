@@ -146,6 +146,8 @@ function TradeHub({
   const [finderTierDownPos, setFinderTierDownPos] = useState<"QB" | "RB" | "WR" | "TE" | null>(null);
   // Tank Mode: removes user-side restrictions (QB minimums, package limits, direction guardrail)
   const [finderTankMode, setFinderTankMode] = useState(false);
+  // Attempted Trades owner search
+  const [attemptsOwnerSearch, setAttemptsOwnerSearch] = useState("");
   // Session set of trade transaction IDs logged from the Trade Log tab
   const [tradeLogLogged, setTradeLogLogged] = useState<Set<string>>(new Set());
   React.useEffect(() => {
@@ -3732,6 +3734,7 @@ function TradeHub({
 
       const leagueAttempts = tradeAttempts
         .filter((a) => a.league_id === selectedLeague.league_id)
+        .filter((a) => !attemptsOwnerSearch.trim() || a.partner_name.toLowerCase().includes(attemptsOwnerSearch.toLowerCase()))
         .sort((a, b) => {
           const aPending = a.status === "PENDING" ? 0 : 1;
           const bPending = b.status === "PENDING" ? 0 : 1;
@@ -3750,6 +3753,15 @@ function TradeHub({
             <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Attempted Trades</div>
             <div className="mt-1 text-sm text-gray-200">
               Track trades you&apos;ve offered in <strong className="text-gray-100">{selectedLeague.name}</strong>. Mark outcomes to suppress duplicate suggestions and build owner profiles.
+            </div>
+            <div className="mt-3">
+              <input
+                type="text"
+                value={attemptsOwnerSearch}
+                onChange={(e) => setAttemptsOwnerSearch(e.target.value)}
+                placeholder="Search by owner…"
+                className="w-full rounded-lg bg-gray-800 border border-gray-700 px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500"
+              />
             </div>
           </div>
 
