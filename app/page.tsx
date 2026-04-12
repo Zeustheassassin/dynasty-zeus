@@ -2469,7 +2469,7 @@ const loadUserTrades = async (targetUserId: string) => {
     // 2. For each league fetch rosters + transactions rounds 1 & 2 + drafts in parallel
     await Promise.all(
       dynastyLeagues.map(async (league: any) => {
-        const [rostersData, t1, t2, draftsData] = await Promise.all([
+        const [rostersData, t1, t2, draftsData, leagueUsersData] = await Promise.all([
           fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`)
             .then((r) => r.json()).catch(() => []),
           fetch(`https://api.sleeper.app/v1/league/${league.league_id}/transactions/1`)
@@ -2477,6 +2477,8 @@ const loadUserTrades = async (targetUserId: string) => {
           fetch(`https://api.sleeper.app/v1/league/${league.league_id}/transactions/2`)
             .then((r) => r.json()).catch(() => []),
           fetch(`https://api.sleeper.app/v1/league/${league.league_id}/drafts`)
+            .then((r) => r.json()).catch(() => []),
+          fetch(`https://api.sleeper.app/v1/league/${league.league_id}/users`)
             .then((r) => r.json()).catch(() => []),
         ]);
 
@@ -2493,6 +2495,17 @@ const loadUserTrades = async (targetUserId: string) => {
         const rosterToOwner: Record<number, string> = {};
         (Array.isArray(rostersData) ? rostersData : []).forEach((r: any) => {
           rosterToOwner[r.roster_id] = r.owner_id;
+        });
+
+        // roster_id → display name using this league's own user list
+        const ownerIdToName: Record<string, string> = {};
+        (Array.isArray(leagueUsersData) ? leagueUsersData : []).forEach((u: any) => {
+          ownerIdToName[u.user_id] = u.display_name || u.metadata?.team_name || u.user_id;
+        });
+        const rosterToName: Record<number, string> = {};
+        Object.entries(rosterToOwner).forEach(([rosterId, ownerId]) => {
+          const name = ownerIdToName[ownerId];
+          if (name) rosterToName[Number(rosterId)] = name;
         });
 
         const slotLabel = (season: string, round: number, rosterId: number): string => {
@@ -2537,6 +2550,8 @@ const loadUserTrades = async (targetUserId: string) => {
             leagueName: league.name,
             leagueId: league.league_id,
             myRosterId: myRoster.roster_id,
+            rosterToOwner,
+            rosterToName,
           });
         });
       })

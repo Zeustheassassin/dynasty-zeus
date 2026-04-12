@@ -144,6 +144,10 @@ function TradeHub({
   const [directionRefreshing, setDirectionRefreshing] = useState(false);
   // Tier Down mode: filter finder to trades where you trade down at a position and collect adders
   const [finderTierDownPos, setFinderTierDownPos] = useState<"QB" | "RB" | "WR" | "TE" | null>(null);
+  // Tank Mode: removes user-side restrictions (QB minimums, package limits, direction guardrail)
+  const [finderTankMode, setFinderTankMode] = useState(false);
+  // Session set of trade transaction IDs logged from the Trade Log tab
+  const [tradeLogLogged, setTradeLogLogged] = useState<Set<string>>(new Set());
   React.useEffect(() => {
     if (directionRefreshing && selectedLeagueDirectionAdjusted) setDirectionRefreshing(false);
   }, [directionRefreshing, selectedLeagueDirectionAdjusted]);
@@ -1302,8 +1306,10 @@ function TradeHub({
         (p: any) => p.position === "QB" && p.value >= top32QBFloor
       );
 
-      // Returns true if giving these players still leaves ≥3 top-32 QBs on my roster
+      // Returns true if giving these players still leaves ≥3 top-32 QBs on my roster.
+      // Bypassed in Tank Mode — user explicitly chose to shed QB depth.
       const qbSafe = (givePlayers: any[]) => {
+        if (finderTankMode) return true;
         const qbsGiven = givePlayers.filter((p: any) => p.position === "QB" && p.value >= top32QBFloor).length;
         return myTop32QBs.length - qbsGiven >= 3;
       };
@@ -1353,6 +1359,8 @@ function TradeHub({
         const tes = pkg.filter((p: any) => p.position === "TE").length;
         return qbs <= 1 && tes <= 1;
       };
+      // User-side package check — bypassed in Tank Mode so the user can give 2+ QBs/TEs
+      const myPkgOk = (pkg: any[]) => finderTankMode || packageOk(pkg);
 
       type TradeResult = {
         give: any[]; receive: any[];
@@ -1631,7 +1639,7 @@ function TradeHub({
             for (let j = i + 1; j < Math.min(myTop.length, 14); j++) {
               const mp1 = myTop[i], mp2 = myTop[j];
               if (isBlockedSellDisposition(mp1.player_id) || isBlockedSellDisposition(mp2.player_id)) continue;
-              if (!packageOk([mp1, mp2])) continue;
+              if (!myPkgOk([mp1, mp2])) continue;
               if (!qbSafe([mp1, mp2])) continue;
               if (!oppReceiveOk(oppPlayers, [mp1, mp2], [])) continue;
               for (const pick of oppPicks) {
@@ -1742,7 +1750,7 @@ function TradeHub({
             for (const op of oppTop) {
               const mp1 = myTop[i], mp2 = myTop[j];
               if (!isBalanced([mp1.value, mp2.value], [op.value])) continue;
-              if (!packageOk([mp1, mp2])) continue;
+              if (!myPkgOk([mp1, mp2])) continue;
               if (!qbSafe([mp1, mp2])) continue;
               if (!oppQbSafe(oppPlayers, [op])) continue;
               if (!oppReceiveOk(oppPlayers, [mp1, mp2], [op])) continue;
@@ -1764,7 +1772,7 @@ function TradeHub({
                 const mp1 = myTop[i], mp2 = myTop[j];
                 const op1 = oppTop[k], op2 = oppTop[l];
                 if (!isBalanced([mp1.value, mp2.value], [op1.value, op2.value])) continue;
-                if (!packageOk([mp1, mp2])) continue;
+                if (!myPkgOk([mp1, mp2])) continue;
                 if (!packageOk([op1, op2])) continue;
                 if (!qbSafe([mp1, mp2])) continue;
                 if (!oppQbSafe(oppPlayers, [op1, op2])) continue;
@@ -1788,7 +1796,7 @@ function TradeHub({
                   const mp1 = myTop[i], mp2 = myTop[j];
                   const op1 = oppTop[k], op2 = oppTop[l], op3 = oppTop[m];
                   if (!isBalanced([mp1.value, mp2.value], [op1.value, op2.value, op3.value])) continue;
-                  if (!packageOk([mp1, mp2])) continue;
+                  if (!myPkgOk([mp1, mp2])) continue;
                   if (!packageOk([op1, op2, op3])) continue;
                   if (!qbSafe([mp1, mp2])) continue;
                   if (!oppQbSafe(oppPlayers, [op1, op2, op3])) continue;
@@ -1815,7 +1823,7 @@ function TradeHub({
                     const mp1 = myTop[i], mp2 = myTop[j];
                     const op1 = oppTop[k], op2 = oppTop[l], op3 = oppTop[m], op4 = oppTop[n];
                     if (!isBalanced([mp1.value, mp2.value], [op1.value, op2.value, op3.value, op4.value])) continue;
-                    if (!packageOk([mp1, mp2])) continue;
+                    if (!myPkgOk([mp1, mp2])) continue;
                     if (!packageOk([op1, op2, op3, op4])) continue;
                     if (!qbSafe([mp1, mp2])) continue;
                     if (!oppQbSafe(oppPlayers, [op1, op2, op3, op4])) continue;
@@ -1838,7 +1846,7 @@ function TradeHub({
           for (let j = i + 1; j < myCap(10); j++) {
             for (let k = j + 1; k < myCap(10); k++) {
               const mp1 = myTop[i], mp2 = myTop[j], mp3 = myTop[k];
-              if (!packageOk([mp1, mp2, mp3])) continue;
+              if (!myPkgOk([mp1, mp2, mp3])) continue;
               if (!qbSafe([mp1, mp2, mp3])) continue;
               for (let a = 0; a < oppCap(10); a++) {
                 for (let b = a + 1; b < oppCap(10); b++) {
@@ -1865,7 +1873,7 @@ function TradeHub({
           for (let j = i + 1; j < myCap(8); j++) {
             for (let k = j + 1; k < myCap(8); k++) {
               const mp1 = myTop[i], mp2 = myTop[j], mp3 = myTop[k];
-              if (!packageOk([mp1, mp2, mp3])) continue;
+              if (!myPkgOk([mp1, mp2, mp3])) continue;
               if (!qbSafe([mp1, mp2, mp3])) continue;
               for (let a = 0; a < oppCap(8); a++) {
                 for (let b = a + 1; b < oppCap(8); b++) {
@@ -1896,7 +1904,7 @@ function TradeHub({
             for (let k = j + 1; k < myCap(8); k++) {
               for (let l = k + 1; l < myCap(8); l++) {
                 const mp1 = myTop[i], mp2 = myTop[j], mp3 = myTop[k], mp4 = myTop[l];
-                if (!packageOk([mp1, mp2, mp3, mp4])) continue;
+                if (!myPkgOk([mp1, mp2, mp3, mp4])) continue;
                 if (!qbSafe([mp1, mp2, mp3, mp4])) continue;
                 for (let a = 0; a < oppCap(8); a++) {
                   for (let b = a + 1; b < oppCap(8); b++) {
@@ -1946,7 +1954,7 @@ function TradeHub({
         for (let i = 0; i < Math.min(myTop.length, 7); i++) {
           for (let j = i + 1; j < Math.min(myTop.length, 7); j++) {
             const mp1 = myTop[i], mp2 = myTop[j];
-            if (!packageOk([mp1, mp2])) continue;
+            if (!myPkgOk([mp1, mp2])) continue;
             if (!qbSafe([mp1, mp2])) continue;
             for (const myPick of myEqualizerPicks) {
               for (const op of oppTop) {
@@ -2137,6 +2145,8 @@ function TradeHub({
         .filter((r) => !pinnedPlayer || r.give.some((p: any) => p.player_id === pinnedPlayer.player_id))
         .filter((r) => !finderTargetPlayerId || r.receive.some((p: any) => p.player_id === finderTargetPlayerId))
         .filter((r) => !isWrongOwnerHCPackage(r))
+        // Tank Mode: every received player must be a young prospect — picks-only receive is always ok
+        .filter((r) => !finderTankMode || r.receive.every((p: any) => isFutureInsulationAsset(p)))
         .filter((r) => {
           // Tier Down filter: give a high-end starter at the position, receive a lower starter
           // at that same position, with adders to balance. Both players must be within the
@@ -2171,12 +2181,11 @@ function TradeHub({
           return true;
         });
       // Only apply direction guardrail if at least one result survives it — prevents empty results.
-      // Tier Down mode bypasses the guardrail entirely: the user intentionally selected a
-      // direction that may run counter to their team's bucket (trading down at a position).
-      const hasGuardrailPassing = !finderTierDownPos && preGuardrail.some((r) => !failsDirectionGuardrail(r));
+      // Tier Down mode and Tank Mode both bypass the guardrail entirely.
+      const hasGuardrailPassing = !finderTierDownPos && !finderTankMode && preGuardrail.some((r) => !failsDirectionGuardrail(r));
       // Seeded shuffle so Refresh button produces a new random set
       const shuffled = preGuardrail
-        .filter((r) => !!finderTierDownPos || !hasGuardrailPassing || !failsDirectionGuardrail(r))
+        .filter((r) => !!finderTierDownPos || finderTankMode || !hasGuardrailPassing || !failsDirectionGuardrail(r))
         .map((r) => {
           const lineupSafety = getTradeLineupSafety(r);
           const partnerProfile = leagueMateProfileByRosterId.get(Number(r.oppRosterId));
@@ -2395,7 +2404,10 @@ function TradeHub({
             sort: Math.abs(Math.sin(finderSeed * (results.indexOf(r) + 1)) * 10000) % 1,
           };
         })
-        .filter(({ lineupSafety }) => lineupSafety.valid)
+        .filter(({ lineupSafety }) => finderTankMode
+          ? (lineupSafety.myValid && lineupSafety.oppValid)
+          : lineupSafety.valid
+        )
         .sort((a, b) => {
           if (a.bucketPriority !== b.bucketPriority) return a.bucketPriority - b.bucketPriority;
           if (b.strategyScore !== a.strategyScore) return b.strategyScore - a.strategyScore;
@@ -2573,6 +2585,31 @@ function TradeHub({
                 <span
                   className={`inline-block h-5 w-5 rounded-full bg-white transition ${
                     finderDraftCapitalMode ? "translate-x-6" : "translate-x-1"
+                  }`}
+                />
+              </button>
+            </div>
+            {/* ── Tank Mode ── */}
+            <div className={`flex items-center justify-between gap-3 rounded-lg px-3 py-2 border ${finderTankMode ? "bg-red-950/30 border-red-700" : "bg-gray-800/70 border-transparent"}`}>
+              <div>
+                <div className="text-sm font-medium text-white">Tank Mode</div>
+                <div className="text-[11px] text-gray-400">
+                  {finderTankMode
+                    ? "All your-side restrictions removed. Opponent restrictions still apply."
+                    : "Remove your QB minimums, package limits, and direction guardrail. Opponent restrictions stay on."}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFinderTankMode((prev) => !prev)}
+                aria-pressed={finderTankMode}
+                className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full border transition ${
+                  finderTankMode ? "border-red-500 bg-red-600/80" : "border-gray-700 bg-gray-700"
+                }`}
+              >
+                <span
+                  className={`inline-block h-5 w-5 rounded-full bg-white transition ${
+                    finderTankMode ? "translate-x-6" : "translate-x-1"
                   }`}
                 />
               </button>
@@ -3543,14 +3580,14 @@ function TradeHub({
               .filter(([, rid]) => rid === myRosterId)
               .map(([pid]) => {
                 const p = (players as any)[pid];
-                return { name: p?.full_name || "Unknown", pos: p?.position || "", val: calcFcValues[pid] ?? 0 };
+                return { player_id: pid, name: p?.full_name || "Unknown", pos: p?.position || "", val: calcFcValues[pid] ?? 0 };
               });
 
             const given = Object.entries(trade.adds || {})
               .filter(([, rid]) => rid !== myRosterId)
               .map(([pid]) => {
                 const p = (players as any)[pid];
-                return { name: p?.full_name || "Unknown", pos: p?.position || "", val: calcFcValues[pid] ?? 0 };
+                return { player_id: pid, name: p?.full_name || "Unknown", pos: p?.position || "", val: calcFcValues[pid] ?? 0 };
               });
 
             const logPickVal = (p: any) => {
@@ -3583,10 +3620,7 @@ function TradeHub({
               if (p.owner_id && Number(p.owner_id) !== Number(myRosterId)) partnerRosterIds.add(Number(p.owner_id));
             });
             const partnerLabel = [...partnerRosterIds]
-              .map((rid) => {
-                const r = rosters.find((r: any) => Number(r.roster_id) === rid);
-                return r ? ((users as any)[r.owner_id] || null) : null;
-              })
+              .map((rid) => (trade.rosterToName ?? {})[rid] ?? null)
               .filter(Boolean)
               .join(", ") || null;
 
@@ -3638,6 +3672,43 @@ function TradeHub({
                     </div>
                   </div>
                 </div>
+                {/* ── Log as Accepted ── */}
+                {(() => {
+                  const txKey = trade.transaction_id ? String(trade.transaction_id) : String(i);
+                  const alreadyLogged = tradeLogLogged.has(txKey);
+                  const firstPartnerRosterId = [...partnerRosterIds][0] ?? 0;
+                  return (
+                    <div className="mt-3 flex justify-end">
+                      <button
+                        type="button"
+                        disabled={alreadyLogged}
+                        onClick={async () => {
+                          await onMarkAttempted({
+                            league_id: trade.leagueId,
+                            partner_roster_id: firstPartnerRosterId,
+                            partner_name: partnerLabel || "Unknown",
+                            give_players: given.map((g: any) => ({ player_id: g.player_id, name: g.name, position: g.pos, value: g.val })),
+                            give_picks: picksGiven.map((p: any) => ({ key: p.name, label: p.name, value: p.val })),
+                            receive_players: received.map((r: any) => ({ player_id: r.player_id, name: r.name, position: r.pos, value: r.val })),
+                            receive_picks: picksReceived.map((p: any) => ({ key: p.name, label: p.name, value: p.val })),
+                            source: "FINDER",
+                            initiated_by: "ME",
+                            status: "ACCEPTED",
+                            counter_details: null,
+                          });
+                          setTradeLogLogged((prev) => new Set([...prev, txKey]));
+                        }}
+                        className={`text-xs font-medium px-3 py-1.5 rounded-lg transition ${
+                          alreadyLogged
+                            ? "bg-green-900/40 text-green-400 border border-green-700 cursor-default"
+                            : "bg-gray-800 text-gray-300 border border-gray-600 hover:border-blue-500 hover:text-blue-300"
+                        }`}
+                      >
+                        {alreadyLogged ? "✓ Logged in Attempts" : "Log in Attempted Trades"}
+                      </button>
+                    </div>
+                  );
+                })()}
               </div>
             );
           })}
