@@ -80,6 +80,7 @@ export default function Home() {
   const [supabaseMessage, setSupabaseMessage] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [selectedLeague, setSelectedLeague] = useState<any>(null);
   const [roster, setRoster] = useState<any>(null);
   const [rosters, setRosters] = useState<any[]>([]);
@@ -727,6 +728,7 @@ const signIn = async () => {
       setSupabaseMessage(`Welcome back, ${data.user.email || email}.`);
       // Don't manually set supabaseUser here — onAuthStateChange fires and sets it,
       // and the useEffect([supabaseUser]) will load all persisted data once state updates.
+      setShowLoginPassword(false);
       setLoginPassword("");
     } else {
       setSupabaseError("Sign-in failed — no user returned. Check your credentials or confirm your email.");
@@ -786,6 +788,7 @@ const signOut = async () => {
   setLoginPassword("");
   setLoginLoading(false);
   setResetLoading(false);
+  setShowLoginPassword(false);
   setSupabaseError("");
   setSupabaseMessage("");
   rookieBoardSupabaseLoaded.current = false;
@@ -5500,19 +5503,28 @@ const myPlayerSet = new Set<string>(roster?.players || []);
                   if (supabaseError) setSupabaseError("");
                 }}
               />
-              <input
-                id="password"
-                name="password"
-                className="w-full p-2.5 rounded-lg bg-gray-800 border border-gray-700 text-sm focus:outline-none focus:border-blue-500"
-                type="password"
-                placeholder="Password"
-                autoComplete="current-password"
-                value={loginPassword}
-                onChange={(e) => {
-                  setLoginPassword(e.target.value);
-                  if (supabaseError) setSupabaseError("");
-                }}
-              />
+              <div className="relative">
+                <input
+                  id="password"
+                  name="password"
+                  className="w-full p-2.5 pr-20 rounded-lg bg-gray-800 border border-gray-700 text-sm focus:outline-none focus:border-blue-500"
+                  type={showLoginPassword ? "text" : "password"}
+                  placeholder="Password"
+                  autoComplete="current-password"
+                  value={loginPassword}
+                  onChange={(e) => {
+                    setLoginPassword(e.target.value);
+                    if (supabaseError) setSupabaseError("");
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowLoginPassword((prev) => !prev)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400 hover:text-white transition"
+                >
+                  {showLoginPassword ? "Hide" : "Show"}
+                </button>
+              </div>
               <button
                 type="submit"
                 disabled={loginLoading}
