@@ -839,9 +839,7 @@ export const getCrossLeagueTradeBehaviorFit = ({ myProfile, crossLeagueIntel }: 
 };
 
 export const fetchFantasyCalcValues = async (numQbs = 1): Promise<{ playerValues: Record<string, number>; pickValues: Record<string, number> }> => {
-  const res = await fetch(
-    `https://api.fantasycalc.com/values/current?isDynasty=true&numQbs=${numQbs}&numTeams=12&ppr=1`
-  );
+  const res = await fetch(`/api/fc-values?numQbs=${numQbs}`);
   const data = await res.json();
   const playerValues: Record<string, number> = {};
   const slotPickValues: Record<string, number[]> = {};

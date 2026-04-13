@@ -59,7 +59,6 @@ async function fetchSleeperUser(ownerId: string): Promise<any> {
   return data;
 }
 const ROOKIE_BOARD_RESET_KEY = `rookieBoardReset_${ROOKIE_BOARD_VERSION}`;
-const ROOKIE_BOARD_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vROmAn0k3A92okpYE7UeelIy0vYUMY0NFAGHrI52V68Zm8ff9aruDXB1E6u0hRNr2EHgr54_D7gMBti/pub?output=csv";
 const ROOKIE_BOARD_ADP_URL = `https://api.sleeper.app/projections/nfl/${ROOKIE_YEAR}?season_type=regular&position=QB&position=RB&position=WR&position=TE&order_by=adp_dynasty_2qb`;
 
 // Static — never changes, defined at module level so it's a stable reference in useMemo dep arrays
@@ -768,6 +767,8 @@ useEffect(() => {
     // Fast path: already loaded this session — skip localStorage and network entirely
     if (_playersInMemory) {
       setPlayers(_playersInMemory);
+      // nflState is React state and resets on remount — reload it from the cached route
+      fetch('/api/nfl-state').then(r => r.json()).then(setNflState).catch(() => {});
       return;
     }
 
@@ -787,45 +788,27 @@ useEffect(() => {
       if (hasRookieFields) {
         _playersInMemory = parsedCache;
         setPlayers(parsedCache);
-        // Still load pick values even when players come from cache
+        // Still load pick values and nflState even when players come from cache
         fetchFantasyCalcValues(2).then(({ pickValues }) => setPickFcValues(pickValues)).catch(() => {});
+        fetch('/api/nfl-state').then(r => r.json()).then(setNflState).catch(() => {});
         return;
       }
     }
 
-    const res = await fetch("https://api.sleeper.app/v1/players/nfl");
-    const data = await res.json();
+    // /api/players returns pre-slimmed players + nflState, both server-cached
+    const { players: data, nflState: fetchedNflState } = await fetch("/api/players").then(r => r.json());
+    setNflState(fetchedNflState);
 
     const { playerValues: fcValues, pickValues } = await fetchFantasyCalcValues(2);
     setPickFcValues(pickValues);
 
+    // Merge FC dynasty values into the player map
     Object.keys(data).forEach((id) => {
-      if (fcValues[id]) {
-        data[id].value = fcValues[id];
-      }
-    });
-
-    // Slim down to only the fields we use before caching — full payload exceeds localStorage quota
-    const slim: any = {};
-    Object.keys(data).forEach((id) => {
-      const p = data[id];
-      slim[id] = {
-        player_id: p.player_id,
-        full_name: p.full_name,
-        position: p.position,
-        team: p.team,
-        age: p.age,
-        value: p.value,
-        years_exp: p.years_exp,
-        search_rank: p.search_rank,
-        fantasy_positions: p.fantasy_positions,
-        active: p.active,
-        status: p.status,
-      };
+      if (fcValues[id]) data[id].value = fcValues[id];
     });
 
     try {
-      localStorage.setItem("playersCache", JSON.stringify(slim));
+      localStorage.setItem("playersCache", JSON.stringify(data));
       localStorage.setItem("playersCacheAt", String(Date.now()));
     } catch {
       // localStorage full — skip caching, app still works fine
@@ -1446,7 +1429,7 @@ useEffect(() => {
 const loadRookieBoard = async () => {
     // 1. Fetch sheet, Sleeper ADP (for metadata), and FC Superflex (2QB) raw data in parallel
     const [sheetText, adpResponse, fcRaw] = await Promise.all([
-      fetch(ROOKIE_BOARD_SHEET_URL).then((res) => res.text()),
+      fetch('/api/rookie-board-sheet').then((res) => res.text()),
       fetch(ROOKIE_BOARD_ADP_URL).then((res) => res.json()).catch(() => []),
       fetch(`https://api.fantasycalc.com/values/current?isDynasty=true&numQbs=2&numTeams=12&ppr=1`)
         .then((res) => res.json()).catch(() => []),
@@ -1894,11 +1877,37 @@ const loadRoster = async (league: any) => {
 
   setSelectedLeague(league);
 
-  // ── Step 1: Rosters (everything else depends on this) ────────────────────
-  const rostersRes = await fetch(
-    `https://api.sleeper.app/v1/league/${league.league_id}/rosters`
-  );
-  const allRosters = await rostersRes.json();
+  // ── Step 1: Rosters, traded picks, and drafts — from cache or network ────
+  // Cache key is per-league; TTL is 2 hours (short enough to stay fresh during
+  // trade season, long enough to avoid redundant fetches when switching leagues)
+  const LEAGUE_CACHE_TTL = 2 * 60 * 60 * 1000;
+  const leagueCacheKey = `leagueData_${league.league_id}`;
+  let cacheHit = false;
+  let allRosters: any[] = [];
+  let tradedPicksData: any[] = [];
+  let draftsData: any[] = [];
+  const leagueCached = localStorage.getItem(leagueCacheKey);
+  if (leagueCached) {
+    try {
+      const { data, cachedAt } = JSON.parse(leagueCached);
+      if (Date.now() - cachedAt < LEAGUE_CACHE_TTL) {
+        allRosters     = data.allRosters;
+        tradedPicksData = data.tradedPicksData;
+        draftsData      = data.draftsData;
+        cacheHit = true;
+      }
+    } catch { /* invalid cache — fall through to network */ }
+  }
+  if (!cacheHit) {
+    [allRosters, tradedPicksData, draftsData] = await Promise.all([
+      fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`).then((r) => r.json()),
+      fetch(`https://api.sleeper.app/v1/league/${league.league_id}/traded_picks`).then((r) => r.json()),
+      fetch(`https://api.sleeper.app/v1/league/${league.league_id}/drafts`).then((r) => r.json()).catch(() => []),
+    ]);
+    try {
+      localStorage.setItem(leagueCacheKey, JSON.stringify({ data: { allRosters, tradedPicksData, draftsData }, cachedAt: Date.now() }));
+    } catch { /* localStorage quota exceeded — skip caching */ }
+  }
   setRosters(allRosters);
 
   // ── Step 2: Synchronous work derived from rosters ────────────────────────
@@ -1930,12 +1939,8 @@ const loadRoster = async (league: any) => {
     });
   });
 
-  // ── Step 3: Traded picks, draft order, and user names — all in parallel ──
-  const [tradedPicksData, draftsData, userResults] = await Promise.all([
-    fetch(`https://api.sleeper.app/v1/league/${league.league_id}/traded_picks`).then((r) => r.json()),
-    fetch(`https://api.sleeper.app/v1/league/${league.league_id}/drafts`).then((r) => r.json()).catch(() => []),
-    Promise.all(allRosters.map((r: any) => fetchSleeperUser(r.owner_id))),
-  ]);
+  // ── Step 3: User names — fetchSleeperUser has its own module-level cache ──
+  const userResults = await Promise.all(allRosters.map((r: any) => fetchSleeperUser(r.owner_id)));
 
   // ── Step 4: Apply traded picks ───────────────────────────────────────────
   tradedPicksData.forEach((tp: any) => {
@@ -2174,7 +2179,7 @@ const loadCalcValues = async (leagueId: string) => {
 const loadNflState = async () => {
   if (nflState) return;
   try {
-    const data = await fetch('https://api.sleeper.app/v1/state/nfl').then(r => r.json());
+    const data = await fetch('/api/nfl-state').then(r => r.json());
     setNflState(data);
   } catch { /* silently fail */ }
 };
@@ -4898,10 +4903,7 @@ const getTeamSummary = () => {
     setLoadingTransactions(true);
     const run = async () => {
       try {
-        // Get current NFL week/leg to know which weeks to fetch
-        const nflState = await fetch("https://api.sleeper.app/v1/state/nfl")
-          .then((r) => r.json())
-          .catch(() => null);
+        // Get current NFL week/leg to know which weeks to fetch (nflState loaded on mount)
         const curWeek = Math.max(1, Math.min(18, nflState?.leg ?? nflState?.week ?? 1));
         const weeks = [curWeek, curWeek - 1, curWeek - 2, curWeek - 3].filter((w) => w >= 1);
 
