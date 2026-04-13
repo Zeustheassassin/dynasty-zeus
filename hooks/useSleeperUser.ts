@@ -31,6 +31,9 @@ export function useSleeperUser({ onLeaguesLoaded, onDisconnect }: UseSleeperUser
   const [username, setUsername] = useState("");
   const [user, setUser] = useState<any>(null);
   const [leagues, setLeagues] = useState<any[]>([]);
+  const [connectLoading, setConnectLoading] = useState(false);
+  const [connectError, setConnectError] = useState("");
+  const [connectSuccess, setConnectSuccess] = useState("");
 
   // Hydrate from localStorage on mount
   useEffect(() => {
@@ -39,6 +42,7 @@ export function useSleeperUser({ onLeaguesLoaded, onDisconnect }: UseSleeperUser
     try {
       const parsed = JSON.parse(saved);
       setUser(parsed);
+      setUsername(parsed.display_name || parsed.username || "");
       fetch(`https://api.sleeper.app/v1/user/${parsed.user_id}/leagues/nfl/${CURRENT_YEAR}`)
         .then((res) => res.json())
         .then((data: any[]) => {
@@ -51,23 +55,55 @@ export function useSleeperUser({ onLeaguesLoaded, onDisconnect }: UseSleeperUser
   }, []);
 
   const connectSleeper = async () => {
-    const res = await fetch(`https://api.sleeper.app/v1/user/${username}`);
-    const data = await res.json();
-    setUser(data);
-    localStorage.setItem("sleeperUser", JSON.stringify(data));
+    const trimmedUsername = username.trim();
+    if (!trimmedUsername) {
+      setConnectError("Enter your Sleeper username first.");
+      setConnectSuccess("");
+      return;
+    }
 
-    const leaguesRes = await fetch(
-      `https://api.sleeper.app/v1/user/${data.user_id}/leagues/nfl/${CURRENT_YEAR}`
-    );
-    const leaguesData: any[] = await leaguesRes.json();
-    const filtered = leaguesData.filter(isDynastyLeague);
-    setLeagues(filtered);
-    onLeaguesLoaded?.(filtered);
+    setConnectLoading(true);
+    setConnectError("");
+    setConnectSuccess("");
+
+    try {
+      const res = await fetch(`https://api.sleeper.app/v1/user/${trimmedUsername}`);
+      const data = await res.json();
+
+      if (!res.ok || !data?.user_id) {
+        setConnectError("Sleeper username not found. Double-check the spelling and try again.");
+        setLeagues([]);
+        return;
+      }
+
+      setUser(data);
+      setUsername(data.display_name || data.username || trimmedUsername);
+      localStorage.setItem("sleeperUser", JSON.stringify(data));
+
+      const leaguesRes = await fetch(
+        `https://api.sleeper.app/v1/user/${data.user_id}/leagues/nfl/${CURRENT_YEAR}`
+      );
+      const leaguesData = await leaguesRes.json();
+      const filtered = Array.isArray(leaguesData) ? leaguesData.filter(isDynastyLeague) : [];
+      setLeagues(filtered);
+      setConnectSuccess(
+        filtered.length > 0
+          ? `Connected to Sleeper as ${data.display_name || data.username}.`
+          : `Connected as ${data.display_name || data.username}, but no dynasty leagues were found for ${CURRENT_YEAR}.`
+      );
+      onLeaguesLoaded?.(filtered);
+    } catch {
+      setConnectError("Could not reach Sleeper right now. Check your connection and try again.");
+    } finally {
+      setConnectLoading(false);
+    }
   };
 
   const disconnectSleeper = () => {
     setUser(null);
     setLeagues([]);
+    setConnectError("");
+    setConnectSuccess("");
     localStorage.removeItem("sleeperUser");
     onDisconnect?.();
   };
@@ -79,6 +115,9 @@ export function useSleeperUser({ onLeaguesLoaded, onDisconnect }: UseSleeperUser
     setUser,
     leagues,
     setLeagues,
+    connectLoading,
+    connectError,
+    connectSuccess,
     connectSleeper,
     disconnectSleeper,
   };

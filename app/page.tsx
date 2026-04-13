@@ -63,6 +63,7 @@ const ROOKIE_BOARD_ADP_URL = `https://api.sleeper.app/projections/nfl/${ROOKIE_Y
 
 // Static — never changes, defined at module level so it's a stable reference in useMemo dep arrays
 const ROLE_PRIORITY: Record<string, number> = { starter: 0, bench: 1, taxi: 2 };
+const LAST_LOGIN_EMAIL_KEY = "lastLoginEmail";
 
 export default function Home() {
 
@@ -76,7 +77,9 @@ export default function Home() {
   const [noteTitle, setNoteTitle] = useState("");
   const [noteBody, setNoteBody] = useState("");
   const [supabaseError, setSupabaseError] = useState("");
+  const [supabaseMessage, setSupabaseMessage] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
   const [selectedLeague, setSelectedLeague] = useState<any>(null);
   const [roster, setRoster] = useState<any>(null);
   const [rosters, setRosters] = useState<any[]>([]);
@@ -271,6 +274,9 @@ const [standings, setStandings] = useState<any[]>([]);
     username, setUsername,
     user, setUser,
     leagues, setLeagues,
+    connectLoading,
+    connectError,
+    connectSuccess,
     connectSleeper,
     disconnectSleeper,
   } = useSleeperUser({
@@ -359,6 +365,13 @@ const latestDismissedAlertsRef = useRef<string[]>([]);
 
 useEffect(() => { latestAlertsRef.current = dashboardAlerts; }, [dashboardAlerts]);
 useEffect(() => { latestDismissedAlertsRef.current = dismissedAlertIds; }, [dismissedAlertIds]);
+
+useEffect(() => {
+  try {
+    const rememberedEmail = localStorage.getItem(LAST_LOGIN_EMAIL_KEY);
+    if (rememberedEmail) setLoginEmail(rememberedEmail);
+  } catch {}
+}, []);
 
 const refreshSupabaseUser = async () => {
   const { data } = await supabase.auth.getUser();
@@ -503,6 +516,10 @@ useEffect(() => {
 // Load all Supabase-persisted user data whenever the logged-in user changes
 useEffect(() => {
   if (!supabaseUser) return;
+  setSupabaseMessage("");
+  try {
+    if (supabaseUser.email) localStorage.setItem(LAST_LOGIN_EMAIL_KEY, supabaseUser.email);
+  } catch {}
   // 1. Title/body note cards
   loadNotes();
   // 2. League notes (per-league textarea)
@@ -671,16 +688,30 @@ useEffect(() => {
 
 const signUp = async () => {
   setSupabaseError("");
-  const { error } = await supabase.auth.signUp({ email: loginEmail, password: loginPassword });
-  if (error) setSupabaseError(error.message);
+  setSupabaseMessage("");
+  setLoginLoading(true);
+  try {
+    const email = loginEmail.trim();
+    const { error } = await supabase.auth.signUp({ email, password: loginPassword });
+    if (error) {
+      setSupabaseError(error.message);
+      return;
+    }
+    try { localStorage.setItem(LAST_LOGIN_EMAIL_KEY, email); } catch {}
+    setSupabaseMessage("Account created. Check your email for a confirmation link, then sign in.");
+  } finally {
+    setLoginLoading(false);
+  }
 };
 
 const signIn = async () => {
   setSupabaseError("");
+  setSupabaseMessage("");
   setLoginLoading(true);
   try {
+    const email = loginEmail.trim();
     const signInPromise = supabase.auth.signInWithPassword({
-      email: loginEmail.trim(),
+      email,
       password: loginPassword,
     });
     const timeoutPromise = new Promise<never>((_, reject) =>
@@ -692,9 +723,10 @@ const signIn = async () => {
       return;
     }
     if (data?.user) {
+      try { localStorage.setItem(LAST_LOGIN_EMAIL_KEY, email); } catch {}
+      setSupabaseMessage(`Welcome back, ${data.user.email || email}.`);
       // Don't manually set supabaseUser here — onAuthStateChange fires and sets it,
       // and the useEffect([supabaseUser]) will load all persisted data once state updates.
-      setLoginEmail("");
       setLoginPassword("");
     } else {
       setSupabaseError("Sign-in failed — no user returned. Check your credentials or confirm your email.");
@@ -703,6 +735,30 @@ const signIn = async () => {
     setSupabaseError(err?.message || "Unexpected error — check your internet connection.");
   } finally {
     setLoginLoading(false);
+  }
+};
+
+const resetPassword = async () => {
+  setSupabaseError("");
+  setSupabaseMessage("");
+  const email = loginEmail.trim();
+  if (!email) {
+    setSupabaseError("Enter your email first, then use reset password.");
+    return;
+  }
+  setResetLoading(true);
+  try {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/`,
+    });
+    if (error) {
+      setSupabaseError(error.message);
+      return;
+    }
+    try { localStorage.setItem(LAST_LOGIN_EMAIL_KEY, email); } catch {}
+    setSupabaseMessage("Password reset email sent. Check your inbox and spam folder.");
+  } finally {
+    setResetLoading(false);
   }
 };
 
@@ -721,10 +777,17 @@ const signOut = async () => {
   setCommToolsLeagueId("");
   setCommToolsRosters([]);
   setCommToolsUsers({});
-  setLoginEmail("");
+  try {
+    const rememberedEmail = localStorage.getItem(LAST_LOGIN_EMAIL_KEY) || "";
+    setLoginEmail(rememberedEmail);
+  } catch {
+    setLoginEmail("");
+  }
   setLoginPassword("");
   setLoginLoading(false);
+  setResetLoading(false);
   setSupabaseError("");
+  setSupabaseMessage("");
   rookieBoardSupabaseLoaded.current = false;
   // Clear localStorage user-specific data so next user starts fresh
   localStorage.removeItem("leagueNotes");
@@ -5414,37 +5477,66 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             <h2 className="text-xl font-bold mb-1 text-center">DynastyZeus</h2>
             <p className="text-sm text-gray-400 text-center mb-6">Sign in to your account</p>
             {supabaseError && <div className="text-red-400 text-sm mb-3">{supabaseError}</div>}
-            <div className="space-y-3">
+            {supabaseMessage && <div className="text-emerald-400 text-sm mb-3">{supabaseMessage}</div>}
+            <form
+              className="space-y-3"
+              autoComplete="on"
+              onSubmit={(e) => {
+                e.preventDefault();
+                signIn();
+              }}
+            >
               <input
+                id="email"
+                name="email"
                 className="w-full p-2.5 rounded-lg bg-gray-800 border border-gray-700 text-sm focus:outline-none focus:border-blue-500"
                 placeholder="Email"
+                type="email"
+                autoComplete="username"
+                inputMode="email"
                 value={loginEmail}
-                onChange={(e) => setLoginEmail(e.target.value)}
+                onChange={(e) => {
+                  setLoginEmail(e.target.value);
+                  if (supabaseError) setSupabaseError("");
+                }}
               />
               <input
+                id="password"
+                name="password"
                 className="w-full p-2.5 rounded-lg bg-gray-800 border border-gray-700 text-sm focus:outline-none focus:border-blue-500"
                 type="password"
                 placeholder="Password"
+                autoComplete="current-password"
                 value={loginPassword}
-                onChange={(e) => setLoginPassword(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); signIn(); } }}
+                onChange={(e) => {
+                  setLoginPassword(e.target.value);
+                  if (supabaseError) setSupabaseError("");
+                }}
               />
               <button
-                type="button"
+                type="submit"
                 disabled={loginLoading}
                 className="w-full py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded-lg text-sm font-semibold transition"
-                onClick={(e) => { e.stopPropagation(); signIn(); }}
               >
                 {loginLoading ? "Signing in…" : "Sign In"}
               </button>
               <button
                 type="button"
-                className="w-full py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm font-semibold transition"
+                disabled={resetLoading || loginLoading}
+                className="w-full py-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-60 rounded-lg text-sm font-semibold transition"
+                onClick={(e) => { e.stopPropagation(); resetPassword(); }}
+              >
+                {resetLoading ? "Sending reset email..." : "Reset Password"}
+              </button>
+              <button
+                type="button"
+                disabled={loginLoading}
+                className="w-full py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-60 rounded-lg text-sm font-semibold transition"
                 onClick={(e) => { e.stopPropagation(); signUp(); }}
               >
-                Create Account
+                {loginLoading ? "Working..." : "Create Account"}
               </button>
-            </div>
+            </form>
           </div>
         </div>
       )}
@@ -5550,19 +5642,29 @@ const myPlayerSet = new Set<string>(roster?.players || []);
   <>
     <>
   {!user && (
-    <div className="flex gap-2 mb-6">
-      <input
-        className="p-2 rounded bg-gray-800 w-full"
-        placeholder="Enter Sleeper username"
-        value={username}
-        onChange={(e) => setUsername(e.target.value)}
-      />
-      <button
-        onClick={connectSleeper}
-        className="bg-blue-600 px-4 rounded"
-      >
-        Connect
-      </button>
+    <div className="mb-6">
+      <div className="flex gap-2">
+        <input
+          className="p-2 rounded bg-gray-800 w-full"
+          placeholder="Enter Sleeper username"
+          value={username}
+          onChange={(e) => {
+            setUsername(e.target.value);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !connectLoading) connectSleeper();
+          }}
+        />
+        <button
+          onClick={connectSleeper}
+          disabled={connectLoading}
+          className="bg-blue-600 px-4 rounded disabled:opacity-60"
+        >
+          {connectLoading ? "Connecting..." : "Connect"}
+        </button>
+      </div>
+      {connectError && <div className="mt-2 text-sm text-red-400">{connectError}</div>}
+      {!connectError && connectSuccess && <div className="mt-2 text-sm text-emerald-400">{connectSuccess}</div>}
     </div>
   )}
 
@@ -6397,5 +6499,4 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     </PlayersProvider>
   );
 }
-
 
