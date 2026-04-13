@@ -180,6 +180,17 @@ const [draftHubSection, setDraftHubSection] = useState<"BOARD" | "BIG_BOARD" | "
 const [prSortKey, setPrSortKey] = useState<"dynTotal"|"redTotal"|"qbTotal"|"rbTotal"|"wrTotal"|"teTotal">("dynTotal");
 const [prSortAsc, setPrSortAsc] = useState(false);
 const [prPopup, setPrPopup] = useState<{ rosterId: number; col: "dyn"|"red"|"QB"|"RB"|"WR"|"TE" } | null>(null);
+const [prMode, setPrMode] = useState<"full"|"starters"|"bench">("full");
+const [ignoredOwnerIds, setIgnoredOwnerIds] = useState<string[]>(() => {
+  try { return JSON.parse(localStorage.getItem("ignoredOwnerIds") || "[]"); } catch { return []; }
+});
+const toggleIgnoredOwner = (ownerId: string) => {
+  setIgnoredOwnerIds(prev => {
+    const next = prev.includes(ownerId) ? prev.filter(id => id !== ownerId) : [...prev, ownerId];
+    localStorage.setItem("ignoredOwnerIds", JSON.stringify(next));
+    return next;
+  });
+};
 const [pickFcValues, setPickFcValues] = useState<Record<string, number>>({});
 const [calcFcValues, setCalcFcValues] = useState<Record<string, number>>({});
 const [fcNameValues, setFcNameValues] = useState<Record<string, number>>({});
@@ -3876,6 +3887,8 @@ const getTeamSummary = () => {
         archetype,
         partnerName: partner.ownerName,
         fitLabel: partner.fitLabel,
+        partnerOwnerId: partner.ownerId,
+        partnerRosterId: partner.rosterId,
         give,
         receive,
         whyYou,
@@ -5587,6 +5600,10 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             setPrSortAsc={setPrSortAsc}
             prPopup={prPopup}
             setPrPopup={setPrPopup}
+            prMode={prMode}
+            setPrMode={setPrMode}
+            ignoredOwnerIds={ignoredOwnerIds}
+            toggleIgnoredOwner={toggleIgnoredOwner}
             projectionData={projectionData}
             draftPicks={draftPicks}
             draftOrder={draftOrder}
@@ -5815,6 +5832,8 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     onLoadTradeAttempts={loadTradeAttempts}
     onRefreshDirection={() => { if (selectedLeague) loadRoster(selectedLeague); }}
     buyLowPlayerIds={buyLowPlayerIds}
+    ignoredOwnerIds={ignoredOwnerIds}
+    toggleIgnoredOwner={toggleIgnoredOwner}
   />
 )}
 
@@ -5959,7 +5978,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
 )}
 
 {/* TRADE HUB MODAL — opponent trades only; own trades shown inline in Trade Log tab */}
-{tradeHubUserId && tradeHubUserId !== user?.user_id && (
+{tradeHubUserId && user && tradeHubUserId !== user.user_id && (
   <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
     <div className="bg-gray-900 p-6 rounded-xl w-[560px] max-h-[85vh] overflow-y-auto">
 

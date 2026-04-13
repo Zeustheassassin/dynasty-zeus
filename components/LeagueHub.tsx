@@ -101,6 +101,10 @@ interface LeagueHubProps {
   setPrSortAsc: React.Dispatch<React.SetStateAction<boolean>>;
   prPopup: { rosterId: number; col: "dyn" | "red" | "QB" | "RB" | "WR" | "TE" } | null;
   setPrPopup: (popup: { rosterId: number; col: "dyn" | "red" | "QB" | "RB" | "WR" | "TE" } | null) => void;
+  prMode: "full" | "starters" | "bench";
+  setPrMode: (mode: "full" | "starters" | "bench") => void;
+  ignoredOwnerIds: string[];
+  toggleIgnoredOwner: (ownerId: string) => void;
 
   // Draft state
   projectionData: any[];
@@ -159,7 +163,7 @@ function LeagueHub({
   teamSummary, selectedLeagueDirection, selectedLeagueDirectionAdjusted, selectedLeagueSimulation, selectedLeagueMateProfilesView,
   activeTab, setActiveTab, search, setSearch,
   oppRosterTab, setOppRosterTab, oppRosterOwnerId, setOppRosterOwnerId, oppRosterSearch, setOppRosterSearch,
-  prSortKey, setPrSortKey, prSortAsc, setPrSortAsc, prPopup, setPrPopup,
+  prSortKey, setPrSortKey, prSortAsc, setPrSortAsc, prPopup, setPrPopup, prMode, setPrMode,
   projectionData, draftPicks, draftOrder, draftSettings, myDraftSlotPicks, setMyDraftSlotPicks,
   draftSlotEditing, setDraftSlotEditing, draftSlotSearchQuery, setDraftSlotSearchQuery,
   draftHubSection, nflState,
@@ -169,6 +173,7 @@ function LeagueHub({
   loadRoster, loadLeagueOverview, loadRedraftValues, loadUserTrades, loadUserExposure, loadDraftScout,
   saveLeagueNote, onSaveSim, handleRunAllSims, refreshDraftBoard,
   setPlayerProfileId, setCalcOpponentRosterId, setMainTab, setTradeHubSection,
+  ignoredOwnerIds, toggleIgnoredOwner,
 }: LeagueHubProps) {
   const players = usePlayers();
   const [lastNoteSavedAt, setLastNoteSavedAt] = React.useState<number | null>(null);
@@ -1796,18 +1801,43 @@ const starters = starterSlots
 
               const calcVal = (id: string) => calcFcValues[id] ?? (players as any)[id]?.value ?? 0;
 
+              const rosterPositions: string[] = (selectedLeague as any)?.roster_positions || [];
+
+              // Project optimal starters given roster positions and player values
+              const projectStarterIds = (playerList: any[]): Set<string> => {
+                const starterSlots = rosterPositions.filter((s: string) => s !== "BN" && s !== "TAXI");
+                const available = [...playerList].sort((a: any, b: any) => b.dynVal - a.dynVal);
+                const starterIds = new Set<string>();
+                const pickBest = (eligible: string[]) => {
+                  const idx = available.findIndex((p: any) => eligible.includes(p.position));
+                  if (idx !== -1) { starterIds.add(available[idx].player_id); available.splice(idx, 1); }
+                };
+                starterSlots.filter((s: string) => ["QB","RB","WR","TE","K","DEF"].includes(s)).forEach((s: string) => pickBest([s]));
+                starterSlots.filter((s: string) => s === "WRRB_FLEX").forEach(() => pickBest(["WR","RB"]));
+                starterSlots.filter((s: string) => s === "FLEX").forEach(() => pickBest(["RB","WR","TE"]));
+                starterSlots.filter((s: string) => s === "SUPER_FLEX").forEach(() => pickBest(["QB","RB","WR","TE"]));
+                return starterIds;
+              };
+
               // Build all rosters with per-position dynasty totals + picks
               const prRows = rosters.map((r: any) => {
                 const ownerId = r.owner_id;
                 const ownerName = (users as any)[ownerId] || `Team ${r.roster_id}`;
-                const playerList = (r.players || []).map((id: string) => {
+                const allPlayerList = (r.players || []).map((id: string) => {
                   const p = (players as any)[id];
                   return p ? { ...p, dynVal: calcVal(id), redVal: redraftValues[id] || 0 } : null;
                 }).filter(Boolean);
 
-                const pickVal = (allPicks as any[])
-                  .filter((p: any) => p.owner_id === r.roster_id)
-                  .reduce((s: number, p: any) => s + getStoredPickValue(pickFcValues, p), 0);
+                const starterIds = projectStarterIds(allPlayerList);
+                const playerList = prMode === "starters"
+                  ? allPlayerList.filter((p: any) => starterIds.has(p.player_id))
+                  : prMode === "bench"
+                  ? allPlayerList.filter((p: any) => !starterIds.has(p.player_id))
+                  : allPlayerList;
+
+                const pickVal = prMode === "full"
+                  ? (allPicks as any[]).filter((p: any) => p.owner_id === r.roster_id).reduce((s: number, p: any) => s + getStoredPickValue(pickFcValues, p), 0)
+                  : 0;
 
                 const dynTotal = playerList.reduce((s: number, p: any) => s + p.dynVal, 0) + pickVal;
                 const redTotal = playerList.reduce((s: number, p: any) => s + p.redVal, 0);
@@ -1936,7 +1966,29 @@ const starters = starterSlots
                 <>
                   {popupContent}
                   <div className="space-y-3">
-                    <p className="text-xs text-gray-500">Power rankings for <strong className="text-gray-300">{selectedLeague.name}</strong>. Dynasty rank includes picks. Click any pill to see that team's roster. Click column headers to sort.</p>
+                    {/* Mode toggle */}
+                    <div className="flex items-center gap-1">
+                      {(["full","starters","bench"] as const).map((m) => {
+                        const labels = { full: "Full Team", starters: "Projected Starters", bench: "Projected Bench" };
+                        const active = prMode === m;
+                        return (
+                          <button
+                            key={m}
+                            onClick={() => setPrMode(m)}
+                            className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition ${active ? "bg-blue-600 border-blue-500 text-white" : "bg-gray-800/60 border-gray-700 text-gray-400 hover:text-white hover:border-gray-500"}`}
+                          >
+                            {labels[m]}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-xs text-gray-500">
+                      Power rankings for <strong className="text-gray-300">{selectedLeague.name}</strong>.{" "}
+                      {prMode === "full" && "Dynasty rank includes picks."}
+                      {prMode === "starters" && "Showing projected optimal starting lineup based on dynasty values."}
+                      {prMode === "bench" && "Showing projected bench (players outside the optimal starting lineup)."}
+                      {" "}Click any pill to see that team's roster. Click column headers to sort.
+                    </p>
                     <div className="overflow-x-auto pb-1">
                       <table className="min-w-full text-sm border-separate border-spacing-y-1">
                         <thead>
@@ -1948,24 +2000,38 @@ const starters = starterSlots
                             <SortTh col="rbTotal" label="RB" />
                             <SortTh col="wrTotal" label="WR" />
                             <SortTh col="teTotal" label="TE" />
-                            <th className="text-center pb-2 px-2 text-gray-600">Picks</th>
+                            {prMode === "full" && <th className="text-center pb-2 px-2 text-gray-600">Picks</th>}
                           </tr>
                         </thead>
                         <tbody>
                           {sortedRows.map((row) => {
                             const isMe = row.roster_id === myRosterId;
+                            const isIgnored = !isMe && ignoredOwnerIds.includes(row.ownerId);
                             return (
-                              <tr key={row.roster_id} className={`${isMe ? "bg-blue-900/20" : "bg-gray-900"}`}>
-                                <td className={`pl-3 pr-2 py-2.5 rounded-l-xl text-sm font-medium ${isMe ? "text-blue-300" : "text-white"}`}>
-                                  {row.ownerName}{isMe && <span className="ml-1.5 text-[10px] text-blue-500">(you)</span>}
+                              <tr key={row.roster_id} className={`group ${isMe ? "bg-blue-900/20" : isIgnored ? "bg-red-950/20" : "bg-gray-900"}`}>
+                                <td className={`pl-3 pr-2 py-2.5 rounded-l-xl text-sm font-medium ${isMe ? "text-blue-300" : isIgnored ? "text-red-400/70" : "text-white"}`}>
+                                  <div className="flex items-center gap-2">
+                                    <span>{row.ownerName}</span>
+                                    {isMe && <span className="text-[10px] text-blue-500">(you)</span>}
+                                    {isIgnored && <span className="text-[10px] text-red-500 font-normal">ignored</span>}
+                                    {!isMe && (
+                                      <button
+                                        onClick={() => toggleIgnoredOwner(row.ownerId)}
+                                        title={isIgnored ? "Remove from ignore list" : "Ignore this owner"}
+                                        className={`text-[11px] leading-none transition ${isIgnored ? "opacity-100 text-red-500 hover:text-red-300" : "opacity-0 group-hover:opacity-100 text-gray-600 hover:text-red-400"}`}
+                                      >
+                                        🚫
+                                      </button>
+                                    )}
+                                  </div>
                                 </td>
                                 <td className="text-center px-2 py-2.5"><RankPill r={dynRanks[row.roster_id]} rosterId={row.roster_id} col="dyn" /></td>
                                 <td className="text-center px-2 py-2.5"><RankPill r={redRanks[row.roster_id]} rosterId={row.roster_id} col="red" /></td>
                                 <td className="text-center px-2 py-2.5"><RankPill r={qbRanks[row.roster_id]} rosterId={row.roster_id} col="QB" /></td>
                                 <td className="text-center px-2 py-2.5"><RankPill r={rbRanks[row.roster_id]} rosterId={row.roster_id} col="RB" /></td>
                                 <td className="text-center px-2 py-2.5"><RankPill r={wrRanks[row.roster_id]} rosterId={row.roster_id} col="WR" /></td>
-                                <td className="text-center px-2 py-2.5"><RankPill r={teRanks[row.roster_id]} rosterId={row.roster_id} col="TE" /></td>
-                                <td className="text-center px-2 py-2.5 rounded-r-xl text-xs text-gray-400 font-mono">{row.pickVal > 0 ? row.pickVal.toLocaleString() : <span className="text-gray-700">—</span>}</td>
+                                <td className={`text-center px-2 py-2.5 ${prMode !== "full" ? "rounded-r-xl" : ""}`}><RankPill r={teRanks[row.roster_id]} rosterId={row.roster_id} col="TE" /></td>
+                                {prMode === "full" && <td className="text-center px-2 py-2.5 rounded-r-xl text-xs text-gray-400 font-mono">{row.pickVal > 0 ? row.pickVal.toLocaleString() : <span className="text-gray-700">—</span>}</td>}
                               </tr>
                             );
                           })}

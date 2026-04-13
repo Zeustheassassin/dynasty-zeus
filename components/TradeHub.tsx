@@ -105,6 +105,8 @@ interface TradeHubProps {
   onLoadTradeAttempts: (leagueId: string) => Promise<void>;
   onRefreshDirection: () => void;
   buyLowPlayerIds: string[];
+  ignoredOwnerIds: string[];
+  toggleIgnoredOwner: (ownerId: string) => void;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
@@ -133,6 +135,7 @@ function TradeHub({
   onMarkAttempted, onUpdateAttemptStatus, onDeleteAttempt, onLoadTradeAttempts,
   onRefreshDirection,
   buyLowPlayerIds,
+  ignoredOwnerIds, toggleIgnoredOwner,
 }: TradeHubProps) {
   const players = usePlayers();
   // Local UI state for the Attempts tab
@@ -392,11 +395,14 @@ function TradeHub({
                 <option value="">Select opponent...</option>
                 {rosters
                   .filter((r: any) => r.owner_id !== user?.user_id)
-                  .map((r: any) => (
-                    <option key={r.roster_id} value={r.roster_id}>
-                      {(users as any)[r.owner_id] || `Team ${r.roster_id}`}
-                    </option>
-                ))}
+                  .map((r: any) => {
+                    const isIgnored = ignoredOwnerIds.includes(r.owner_id);
+                    return (
+                      <option key={r.roster_id} value={r.roster_id}>
+                        {isIgnored ? "🚫 " : ""}{(users as any)[r.owner_id] || `Team ${r.roster_id}`}{isIgnored ? " (Ignored)" : ""}
+                      </option>
+                    );
+                  })}
               </select>
 
           {opponentRoster && (
@@ -414,9 +420,35 @@ function TradeHub({
               >
                 Recent Trades
               </button>
+
+              <button
+                onClick={() => toggleIgnoredOwner(opponentRoster.owner_id)}
+                className={`rounded-xl px-3 py-2 text-sm font-medium border transition whitespace-nowrap ${
+                  ignoredOwnerIds.includes(opponentRoster.owner_id)
+                    ? "bg-gray-800 border-gray-700 text-gray-500 hover:border-gray-600 hover:text-gray-400"
+                    : "bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-600 hover:text-gray-300"
+                }`}
+              >
+                {ignoredOwnerIds.includes(opponentRoster.owner_id) ? "Remove Ignore" : "Ignore Owner"}
+              </button>
             </>
           )}
             </div>
+
+            {/* Ignored owner warning banner */}
+            {opponentRoster && ignoredOwnerIds.includes(opponentRoster.owner_id) && (
+              <div className="mt-3 flex items-start gap-2 rounded-lg border border-gray-700 bg-gray-800/50 px-3 py-2.5">
+                <span className="text-gray-500 text-sm leading-none mt-0.5">🚫</span>
+                <div>
+                  <p className="text-sm font-medium text-gray-400">
+                    {(users as any)[opponentRoster.owner_id] || "This owner"} is on your ignore list
+                  </p>
+                  <p className="text-xs text-gray-600 mt-0.5">
+                    Excluded from Trade Finder and Recommendations. Click "Remove Ignore" above to re-enable.
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Two-column asset panels */}
@@ -1270,6 +1302,9 @@ function TradeHub({
 
       if (loadingCalcValues) return <p className="text-sm text-blue-400">Loading player values…</p>;
 
+      // ── Ignored owners notice ──
+      const ignoredInLeague = rosters.filter((r: any) => r.owner_id !== user?.user_id && ignoredOwnerIds.includes(r.owner_id));
+
       // ── Player search / pin UI ──
       const searchMatches = finderPlayerSearch.trim().length >= 2
         ? myPlayers.filter((p: any) =>
@@ -1580,7 +1615,7 @@ function TradeHub({
 
       const results: TradeResult[] = [];
 
-      for (const oppRoster of rosters.filter((r: any) => r.owner_id !== user?.user_id && (finderTargetOppRosterId === null || r.roster_id === finderTargetOppRosterId))) {
+      for (const oppRoster of rosters.filter((r: any) => r.owner_id !== user?.user_id && !ignoredOwnerIds.includes(r.owner_id) && (finderTargetOppRosterId === null || r.roster_id === finderTargetOppRosterId))) {
         const oppPlayers = rosterPlayers(oppRoster);
         const oppPicks = (allPicks as any[])
           .filter((p: any) => p.owner_id === oppRoster.roster_id)
@@ -2773,6 +2808,15 @@ function TradeHub({
               Refresh
             </button>
           </div>
+          {ignoredInLeague.length > 0 && (
+            <div className="flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-800/40 px-3 py-2 text-xs text-gray-500">
+              <span className="text-red-500">🚫</span>
+              {ignoredInLeague.length === 1
+                ? <span><strong className="text-gray-400">{(users as any)[ignoredInLeague[0].owner_id] || "1 owner"}</strong> is on your ignore list and excluded from results.</span>
+                : <span><strong className="text-gray-400">{ignoredInLeague.length} owners</strong> on your ignore list are excluded from results.</span>
+              }
+            </div>
+          )}
           {allTrades.length === 0 && (
             <p className="text-gray-400 text-sm">
               {pinnedPlayer
@@ -3142,7 +3186,7 @@ function TradeHub({
 
         const myRoster = rosters.find((r: any) => r.owner_id === user?.user_id);
         const mySet = new Set<string>(myRoster?.players ?? []);
-        const partnerRosters = rosters.filter((r: any) => r.owner_id && r.owner_id !== user?.user_id);
+        const partnerRosters = rosters.filter((r: any) => r.owner_id && r.owner_id !== user?.user_id && !ignoredOwnerIds.includes(r.owner_id));
         const MIN_VAL = 500;
         const MAX_VAL = 4000;
         const R_MIN = 0.72, R_MAX = 1.35;
@@ -3229,7 +3273,7 @@ function TradeHub({
           <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
             <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Partner Board</div>
             <div className="mt-3 grid gap-2 lg:grid-cols-2">
-              {tradePartnerRankings.slice(0, 6).map((partner: any) => (
+              {tradePartnerRankings.filter((p: any) => !ignoredOwnerIds.includes(p.ownerId)).slice(0, 6).map((partner: any) => (
                 <div key={partner.rosterId} className="rounded-xl border border-gray-800 bg-gray-950/60 p-3">
                   <div className="flex items-center justify-between gap-3">
                     <div>
@@ -3421,7 +3465,7 @@ function TradeHub({
             </>
           )}
 
-          {tradeRecommendationCards.map((card: any) => (
+          {tradeRecommendationCards.filter((card: any) => !ignoredOwnerIds.includes(card.partnerOwnerId)).map((card: any) => (
             <div key={`${card.archetype}-${card.partnerName}`} className="rounded-2xl border border-gray-800 bg-gray-900 p-5">
               <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
                 <div>
