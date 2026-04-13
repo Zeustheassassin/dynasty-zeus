@@ -95,6 +95,66 @@ const [draftSettings, setDraftSettings] = useState<any>(null);
 const [draftScoutUserId, setDraftScoutUserId] = useState<string | null>(null);
 const [draftScoutData, setDraftScoutData] = useState<any[] | null>(null);
 const [loadingDraftScout, setLoadingDraftScout] = useState(false);
+const draftScoutPatterns = useMemo(() => {
+  if (!draftScoutData?.length) return null;
+  const leaguesWithPicks = draftScoutData.filter((l: any) => l.picks.length > 0);
+  if (!leaguesWithPicks.length) return null;
+
+  const allPicksFlat = leaguesWithPicks.flatMap((l: any) => l.picks);
+  const total = allPicksFlat.length;
+  const n = leaguesWithPicks.length;
+
+  const posCounts: Record<string, number> = {};
+  allPicksFlat.forEach((p: any) => {
+    const pos = p.position || "?";
+    posCounts[pos] = (posCounts[pos] || 0) + 1;
+  });
+  const sortedPos = Object.entries(posCounts).sort((a, b) => b[1] - a[1]);
+
+  const roundBreakdown: Record<number, Record<string, number>> = {};
+  allPicksFlat.forEach((p: any) => {
+    if (!roundBreakdown[p.round]) roundBreakdown[p.round] = {};
+    const pos = p.position || "?";
+    roundBreakdown[p.round][pos] = (roundBreakdown[p.round][pos] || 0) + 1;
+  });
+
+  const firstPicks = leaguesWithPicks.map((l: any) => l.picks[0]).filter(Boolean);
+  const firstPickPos: Record<string, number> = {};
+  firstPicks.forEach((p: any) => {
+    const pos = p.position || "?";
+    firstPickPos[pos] = (firstPickPos[pos] || 0) + 1;
+  });
+  const topFirstPos = Object.entries(firstPickPos).sort((a, b) => b[1] - a[1])[0];
+
+  const tendencies: string[] = [];
+
+  if (topFirstPos && firstPicks.length >= 2) {
+    tendencies.push(`Opens with ${topFirstPos[0]} in ${topFirstPos[1]}/${firstPicks.length} leagues`);
+  }
+  if (sortedPos[0] && sortedPos[0][1] / total >= 0.4) {
+    tendencies.push(`${sortedPos[0][0]}-heavy drafter — ${Math.round(sortedPos[0][1] / total * 100)}% of all picks`);
+  }
+  const r1 = roundBreakdown[1];
+  if (r1) {
+    const r1Total = Object.values(r1).reduce((s: number, v: number) => s + v, 0);
+    const r1Top = Object.entries(r1).sort((a, b) => b[1] - a[1])[0];
+    if (r1Top && r1Top[1] >= 2) {
+      tendencies.push(`Favors ${r1Top[0]} in Round 1 (${r1Top[1]}/${r1Total})`);
+    }
+  }
+  const r1QB = roundBreakdown[1]?.QB || 0;
+  const r2QB = roundBreakdown[2]?.QB || 0;
+  if (r1QB > 0) tendencies.push(`QB in Round 1 (${r1QB} league${r1QB > 1 ? "s" : ""})`);
+  else if (r2QB > 0) tendencies.push(`Early QB — Round 2 (${r2QB} league${r2QB > 1 ? "s" : ""})`);
+  const r1TE = roundBreakdown[1]?.TE || 0;
+  const r2TE = roundBreakdown[2]?.TE || 0;
+  const r3TE = roundBreakdown[3]?.TE || 0;
+  if (r1TE > 0) tendencies.push(`TE aggressive — Round 1 (${r1TE} league${r1TE > 1 ? "s" : ""})`);
+  else if (r2TE > 0) tendencies.push(`TE in Round 2 (${r2TE} league${r2TE > 1 ? "s" : ""})`);
+  else if (!r3TE && posCounts.TE) tendencies.push(`TE devaluer — waits until Round 4+`);
+
+  return { sortedPos, roundBreakdown, tendencies, total, n };
+}, [draftScoutData]);
 const [loadingDraftRefresh, setLoadingDraftRefresh] = useState(false);
 const [selectedLeagueDraftHasOccurred, setSelectedLeagueDraftHasOccurred] = useState(false);
 const [tradeHubUserId, setTradeHubUserId] = useState<string | null>(null);
@@ -5915,57 +5975,130 @@ const myPlayerSet = new Set<string>(roster?.players || []);
 {/* DRAFT SCOUT MODAL */}
 {draftScoutUserId && (
   <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-    <div className="bg-gray-900 p-6 rounded-xl w-[520px] max-h-[80vh] overflow-y-auto">
+    <div className="bg-gray-900 p-6 rounded-xl w-[560px] max-h-[85vh] overflow-y-auto">
 
       <div className="text-lg font-bold mb-1">
         {users[draftScoutUserId]}'s {ROOKIE_YEAR} Rookie Drafts
       </div>
       <div className="text-xs text-gray-500 mb-4">
-        All leagues — click a team name in the header to scout them
+        All leagues — patterns based on completed/in-progress picks
       </div>
 
       {loadingDraftScout ? (
         <div className="text-sm text-gray-400">Loading draft history...</div>
       ) : !draftScoutData?.length ? (
         <div className="text-sm text-gray-400">No {ROOKIE_YEAR} drafts started yet.</div>
-      ) : (
-        draftScoutData.map((league: any, i: number) => (
-          <div key={i} className="mb-5">
-            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
-              {league.leagueName}
-            </div>
+      ) : (() => {
+        const posColor = (pos: string) =>
+          pos === "WR" ? "text-sky-300 bg-sky-900/40" :
+          pos === "RB" ? "text-green-300 bg-green-900/40" :
+          pos === "QB" ? "text-red-300 bg-red-900/40" :
+          pos === "TE" ? "text-yellow-300 bg-yellow-900/40" :
+          "text-gray-300 bg-gray-700/40";
+        const posText = (pos: string) =>
+          pos === "WR" ? "text-sky-300" :
+          pos === "RB" ? "text-green-300" :
+          pos === "QB" ? "text-red-300" :
+          pos === "TE" ? "text-yellow-300" :
+          "text-gray-400";
+        return (
+          <>
+            {/* Pattern Analysis Card */}
+            {draftScoutPatterns && (
+              <div className="bg-gray-800/70 rounded-lg p-4 mb-5 border border-gray-700">
+                <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
+                  Draft Tendencies — {draftScoutPatterns.n} league{draftScoutPatterns.n !== 1 ? "s" : ""} · {draftScoutPatterns.total} picks
+                </div>
 
-            {league.picks.length === 0 ? (
-              <div className="text-xs text-gray-500 italic">No picks made yet</div>
-            ) : (
-              league.picks.map((pick: any, j: number) => {
-                const name = pick.player?.full_name || pick.playerName || "Unknown";
-                const pos = pick.player?.position || pick.position || "—";
+                {draftScoutPatterns.tendencies.length > 0 && (
+                  <ul className="mb-4 space-y-1">
+                    {draftScoutPatterns.tendencies.map((t: string, i: number) => (
+                      <li key={i} className="flex items-start gap-1.5 text-xs text-gray-200">
+                        <span className="text-blue-400 mt-0.5 shrink-0">•</span>
+                        {t}
+                      </li>
+                    ))}
+                  </ul>
+                )}
 
-                return (
-                  <div
-                    key={j}
-                    className="flex items-center justify-between bg-gray-800 rounded px-3 py-1.5 mb-1 text-sm"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className={`text-[10px] px-2 py-0.5 rounded font-semibold ${
-                        pick.round === 1 ? "bg-yellow-900/50 text-yellow-300" :
-                        pick.round === 2 ? "bg-green-900/50 text-green-300" :
-                        pick.round === 3 ? "bg-blue-900/50 text-blue-300" :
-                                          "bg-orange-900/50 text-orange-300"
-                      }`}>
-                        {pick.slot}
+                <div className="mb-3">
+                  <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1.5">Overall Position Mix</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {draftScoutPatterns.sortedPos.map(([pos, count]: [string, number]) => (
+                      <span key={pos} className={`text-[11px] px-2 py-0.5 rounded font-semibold ${posColor(pos)}`}>
+                        {pos} {count} ({Math.round(count / draftScoutPatterns.total * 100)}%)
                       </span>
-                      <span className="font-medium">{name}</span>
-                    </div>
-                    <span className="text-xs text-gray-400">{pos}</span>
+                    ))}
                   </div>
-                );
-              })
+                </div>
+
+                <div>
+                  <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1.5">Round-by-Round</div>
+                  <div className="space-y-1.5">
+                    {Object.entries(draftScoutPatterns.roundBreakdown)
+                      .sort(([a], [b]) => Number(a) - Number(b))
+                      .map(([round, counts]: [string, any]) => (
+                        <div key={round} className="flex items-center gap-2">
+                          <span className={`text-[10px] w-10 text-center px-1.5 py-0.5 rounded font-semibold shrink-0 ${
+                            round === "1" ? "bg-yellow-900/50 text-yellow-300" :
+                            round === "2" ? "bg-green-900/50 text-green-300" :
+                            round === "3" ? "bg-blue-900/50 text-blue-300" :
+                                            "bg-orange-900/50 text-orange-300"
+                          }`}>Rd {round}</span>
+                          <div className="flex flex-wrap gap-1">
+                            {Object.entries(counts)
+                              .sort(([, a]: any, [, b]: any) => b - a)
+                              .map(([pos, cnt]: [string, any]) => (
+                                <span key={pos} className={`text-[10px] px-1.5 py-0.5 rounded ${posColor(pos)}`}>
+                                  {pos} ×{cnt}
+                                </span>
+                              ))}
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              </div>
             )}
-          </div>
-        ))
-      )}
+
+            {/* Per-league picks */}
+            {draftScoutData.map((league: any, i: number) => (
+              <div key={i} className="mb-5">
+                <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+                  {league.leagueName}
+                </div>
+                {league.picks.length === 0 ? (
+                  <div className="text-xs text-gray-500 italic">No picks made yet</div>
+                ) : (
+                  league.picks.map((pick: any, j: number) => {
+                    const name = pick.player?.full_name || pick.playerName || "Unknown";
+                    const pos = pick.player?.position || pick.position || "—";
+                    return (
+                      <div
+                        key={j}
+                        className="flex items-center justify-between bg-gray-800 rounded px-3 py-1.5 mb-1 text-sm"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[10px] px-2 py-0.5 rounded font-semibold ${
+                            pick.round === 1 ? "bg-yellow-900/50 text-yellow-300" :
+                            pick.round === 2 ? "bg-green-900/50 text-green-300" :
+                            pick.round === 3 ? "bg-blue-900/50 text-blue-300" :
+                                              "bg-orange-900/50 text-orange-300"
+                          }`}>
+                            {pick.slot}
+                          </span>
+                          <span className="font-medium">{name}</span>
+                        </div>
+                        <span className={`text-xs font-semibold ${posText(pos)}`}>{pos}</span>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            ))}
+          </>
+        );
+      })()}
 
       <button
         onClick={() => { setDraftScoutUserId(null); setDraftScoutData(null); }}

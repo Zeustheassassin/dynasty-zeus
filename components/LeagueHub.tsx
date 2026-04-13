@@ -2050,12 +2050,13 @@ const starters = starterSlots
               );
 
               const myRosterId = rosters.find((r: any) => r.owner_id === user?.user_id)?.roster_id;
-              const mySlots = (allPicks as any[]).filter((p: any) => Number(p.roster_id ?? p.owner_id ?? 0) === Number(myRosterId) && p.slot && /^\d+\.\d+$/.test(String(p.slot))).map((p: any) => p.slot as string);
+              const mySlots = (allPicks as any[]).filter((p: any) => Number(p.owner_id ?? 0) === Number(myRosterId) && p.slot && /^\d+\.\d+$/.test(String(p.slot))).map((p: any) => p.slot as string);
 
               // Post-draft projection: players user has selected + predictions for remaining my slots
               const projectedMyPicks: string[] = [];
               mySlots.forEach(slot => {
-                const pid = myDraftSlotPicks[slot] || predictedDraftPicks[slot]?.player_id;
+                const pred = predictedDraftPicks[slot];
+                const pid = myDraftSlotPicks[slot] || pred?.player_id || pred?.name;
                 if (pid) projectedMyPicks.push(pid);
               });
 
@@ -2240,7 +2241,7 @@ const starters = starterSlots
                           <p className="text-[10px] text-gray-500 mb-3">Based on your set picks + AI predictions for remaining slots. Save to Supabase automatically.</p>
                           <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
                             {projectedMyPicks.map((pid) => {
-                              const r = rookies.find((rk: any) => rk.player_id === pid);
+                              const r = rookies.find((rk: any) => rk.player_id === pid || rk.name === pid);
                               if (!r) return null;
                               const idx = rookies.indexOf(r);
                               const posColor: Record<string, string> = { QB: "text-red-400", RB: "text-green-400", WR: "text-blue-400", TE: "text-yellow-400" };
