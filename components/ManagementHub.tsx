@@ -26,8 +26,8 @@ interface ManagementHubProps {
   setMgmtHubTab: (tab: "LEAGUE_MGMT" | "COMMISSIONER_TOOLS") => void;
 
   leagues: any[];
-  leagueMgmtData: Record<string, Record<string, boolean>>;
-  setLeagueMgmtData: React.Dispatch<React.SetStateAction<Record<string, Record<string, boolean>>>>;
+  leagueMgmtData: Record<string, Record<string, any>>;
+  setLeagueMgmtData: React.Dispatch<React.SetStateAction<Record<string, Record<string, any>>>>;
 
   commPaymentsData: Record<string, Record<string, Record<string, boolean>>>;
   setCommPaymentsData: React.Dispatch<
@@ -67,12 +67,8 @@ export default function ManagementHub({
 
   // ── Handlers ─────────────────────────────────────────────────────────────
 
-  const toggleLeagueMgmt = async (leagueId: string, key: string) => {
+  const upsertLeagueMgmt = async (leagueId: string, updated: Record<string, any>) => {
     if (!supabaseUser) return;
-    const current = leagueMgmtData[leagueId] || {};
-    const newVal = !current[key];
-    const updated = { ...current, [key]: newVal };
-    setLeagueMgmtData((prev) => ({ ...prev, [leagueId]: updated }));
     await supabase.from("league_management").upsert(
       {
         user_id: supabaseUser.id,
@@ -84,10 +80,31 @@ export default function ManagementHub({
         commissioner: updated.commissioner ?? false,
         year_in_advance: updated.year_in_advance ?? false,
         picks_traded: updated.picks_traded ?? false,
+        amount: updated.amount ?? "",
         updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id,league_id" }
     );
+  };
+
+  const toggleLeagueMgmt = async (leagueId: string, key: string) => {
+    if (!supabaseUser) return;
+    const current = leagueMgmtData[leagueId] || {};
+    const updated = { ...current, [key]: !current[key] };
+    setLeagueMgmtData((prev) => ({ ...prev, [leagueId]: updated }));
+    await upsertLeagueMgmt(leagueId, updated);
+  };
+
+  const handleAmountChange = (leagueId: string, value: string) => {
+    setLeagueMgmtData((prev) => ({
+      ...prev,
+      [leagueId]: { ...(prev[leagueId] || {}), amount: value },
+    }));
+  };
+
+  const handleAmountBlur = async (leagueId: string) => {
+    const updated = leagueMgmtData[leagueId] || {};
+    await upsertLeagueMgmt(leagueId, updated);
   };
 
   const handleCommLeagueSelect = async (leagueId: string) => {
@@ -233,15 +250,17 @@ export default function ManagementHub({
                 <thead>
                   <tr>
                     <th className="text-left text-gray-400 font-medium py-2 px-3 border-b border-gray-700 min-w-[140px]"></th>
+                    <th className="text-center text-gray-400 font-semibold py-2 px-3 border-b border-gray-700 border-l border-gray-700"></th>
                     <th colSpan={4} className="text-center text-blue-400 font-semibold py-2 px-3 border-b border-gray-700 border-l border-gray-700">Paid</th>
                     <th colSpan={3} className="text-center text-purple-400 font-semibold py-2 px-3 border-b border-gray-700 border-l border-gray-700">Tools</th>
                   </tr>
                   <tr>
                     <th className="text-left text-gray-400 font-medium py-2 px-3 border-b border-gray-700"></th>
+                    <th className="text-center text-gray-300 font-medium py-2 px-3 border-b border-gray-700 border-l border-gray-700 min-w-[90px]">Amount</th>
                     {MGMT_COLS.map((col, ci) => (
                       <th
                         key={col.key}
-                        className={`text-center text-gray-300 font-medium py-2 px-3 border-b border-gray-700 ${ci === 4 ? "border-l border-gray-700" : ""}`}
+                        className={`text-center text-gray-300 font-medium py-2 px-3 border-b border-gray-700 ${ci === 0 ? "border-l border-gray-700" : ""} ${ci === 4 ? "border-l border-gray-700" : ""}`}
                       >
                         {col.label}
                       </th>
@@ -256,10 +275,23 @@ export default function ManagementHub({
                         <td className="py-2 px-3 text-white font-medium whitespace-nowrap border-r border-gray-800">
                           {league.name}
                         </td>
+                        <td className="text-center py-1.5 px-2 border-l border-gray-700">
+                          <div className="relative flex items-center">
+                            <span className="absolute left-2 text-gray-400 text-xs pointer-events-none">$</span>
+                            <input
+                              type="text"
+                              value={row.amount ?? ""}
+                              onChange={(e) => handleAmountChange(league.league_id, e.target.value)}
+                              onBlur={() => handleAmountBlur(league.league_id)}
+                              placeholder="0"
+                              className="w-20 pl-4 pr-2 py-1 text-xs text-white bg-gray-800 border border-gray-600 rounded focus:outline-none focus:border-blue-500 text-right"
+                            />
+                          </div>
+                        </td>
                         {MGMT_COLS.map((col, ci) => (
                           <td
                             key={col.key}
-                            className={`text-center py-2 px-3 ${ci === 4 ? "border-l border-gray-700" : ""}`}
+                            className={`text-center py-2 px-3 ${ci === 0 ? "border-l border-gray-700" : ""} ${ci === 4 ? "border-l border-gray-700" : ""}`}
                           >
                             <input
                               type="checkbox"

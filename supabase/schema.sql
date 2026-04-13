@@ -44,6 +44,7 @@ create table if not exists league_management (
   commissioner boolean not null default false,
   year_in_advance boolean not null default false,
   picks_traded boolean not null default false,
+  amount text not null default '',
   updated_at timestamptz not null default now(),
   unique(user_id, league_id)
 );

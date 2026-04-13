@@ -314,11 +314,11 @@ const [loadingTransactions, setLoadingTransactions] = useState(false);
 
 // ── MANAGEMENT HUB ────────────────────────────────────────────
 const [mgmtHubTab, setMgmtHubTab] = useState<"LEAGUE_MGMT" | "COMMISSIONER_TOOLS">("LEAGUE_MGMT");
-// leagueMgmtData: { [leagueId]: { paid_2026, paid_2027, paid_2028, paid_2029, commissioner, year_in_advance, picks_traded } }
+// leagueMgmtData: { [leagueId]: { paid_2026, paid_2027, paid_2028, paid_2029, commissioner, year_in_advance, picks_traded, amount } }
 const [oppRosterTab, setOppRosterTab] = useState("QB");
 const [oppRosterOwnerId, setOppRosterOwnerId] = useState<string>("");
 const [oppRosterSearch, setOppRosterSearch] = useState("");
-const [leagueMgmtData, setLeagueMgmtData] = useState<Record<string, Record<string, boolean>>>({});
+const [leagueMgmtData, setLeagueMgmtData] = useState<Record<string, Record<string, any>>>({});
 // commPaymentsData: { [leagueId]: { [ownerId]: { paid_2026, paid_2027, paid_2028, paid_2029 } } }
 const [commPaymentsData, setCommPaymentsData] = useState<Record<string, Record<string, Record<string, boolean>>>>({});
 const [commToolsLeagueId, setCommToolsLeagueId] = useState<string>("");
@@ -554,6 +554,7 @@ useEffect(() => {
             commissioner: row.commissioner,
             year_in_advance: row.year_in_advance,
             picks_traded: row.picks_traded,
+            amount: row.amount ?? "",
           };
         });
         setLeagueMgmtData(map);
