@@ -33,6 +33,7 @@ import {
 } from "../lib/helpers";
 import { PROJ_SOURCES, useProjections } from "../hooks/useProjections";
 import { useSleeperUser } from "../hooks/useSleeperUser";
+import { usePlayerStats } from "../hooks/usePlayerStats";
 import { PlayersProvider } from "../lib/PlayersContext";
 import type { ProjSourceId, LeagueHubTab, AlertsCenterItem, WatchlistEntry, TradeAttempt, TradeAttemptStatus } from "../lib/types";
 
@@ -233,6 +234,13 @@ const {
   projectionUsesSeasonFallback,
   loadProjections,
 } = useProjections(players);
+
+// Rolling snap% / target / carry stats from the last 4 weeks of Sleeper actuals.
+// Returns null during the off-season — TradeHub degrades gracefully when null.
+const nflStatsSeason = nflState?.season_type === "regular" ? (nflState?.season ?? null) : null;
+const nflStatsWeek   = nflState?.season_type === "regular" ? (nflState?.display_week ?? nflState?.week ?? null) : null;
+const { playerStats } = usePlayerStats(nflStatsSeason, nflStatsWeek);
+
 const [finderPlayerSearch, setFinderPlayerSearch] = useState("");
 const [finderPinnedPlayerId, setFinderPinnedPlayerId] = useState<string | null>(null);
 const [finderTargetOppRosterId, setFinderTargetOppRosterId] = useState<number | null>(null);
@@ -1875,18 +1883,13 @@ const getStarterSlots = (roster: any, league: any) => {
 
       const results = await Promise.all(
         leagues.map(async (league) => {
-          const res = await fetch(
-            `https://api.sleeper.app/v1/league/${league.league_id}/rosters`
-          );
-          const rosters = await res.json();
-
-          const myRoster = rosters.find(
-            (r: any) => r.owner_id === user.user_id
-          );
+          const { roster } = await fetch(
+            `/api/cross-league-rosters?sleeper_user_id=${encodeURIComponent(user.user_id)}&league_id=${encodeURIComponent(league.league_id)}`
+          ).then((r) => r.json()).catch(() => ({ roster: null }));
 
           return {
             leagueName: league.name,
-            roster: myRoster,
+            roster,
           };
         })
       );
@@ -6011,6 +6014,9 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     buyLowPlayerIds={buyLowPlayerIds}
     ignoredOwnerIds={ignoredOwnerIds}
     toggleIgnoredOwner={toggleIgnoredOwner}
+    nflState={nflState}
+    playerStats={playerStats}
+    crossLeagueExposure={shares}
   />
 )}
 

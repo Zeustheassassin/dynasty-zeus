@@ -107,6 +107,13 @@ interface TradeHubProps {
   buyLowPlayerIds: string[];
   ignoredOwnerIds: string[];
   toggleIgnoredOwner: (ownerId: string) => void;
+
+  // NFL season timing — optional, gracefully unused during off-season
+  nflState?: { week: number; season_type: string; season: string; display_week?: number } | null;
+  // Per-player rolling usage stats (targets, carries, snap%) — optional, available in-season only
+  playerStats?: Record<string, { avgTargets: number; avgCarries: number; snapPct: number; gamesPlayed: number; recentTargets?: number; recentCarries?: number; recentSnapPct?: number; targetTrend?: number; carryTrend?: number; snapTrend?: number }> | null;
+  // Cross-league ownership: player_id → { count: number } — from allLeagueData shares map
+  crossLeagueExposure?: Record<string, { count: number }> | null;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
@@ -136,6 +143,9 @@ function TradeHub({
   onRefreshDirection,
   buyLowPlayerIds,
   ignoredOwnerIds, toggleIgnoredOwner,
+  nflState,
+  playerStats,
+  crossLeagueExposure,
 }: TradeHubProps) {
   const players = usePlayers();
   // Local UI state for the Attempts tab
@@ -143,12 +153,32 @@ function TradeHub({
   const [showCounterInput, setShowCounterInput] = useState<string | null>(null);
   // Fingerprints of trades marked this session (so the button turns into a checkmark immediately)
   const [sessionMarked, setSessionMarked] = useState<Set<string>>(new Set());
+  // IDs auto-marked this session to avoid repeat async calls on re-renders
+  const autoMarkedRef = React.useRef<Set<string>>(new Set());
+  // Auto-mark stale PENDING attempts (>2 days old, ME-initiated) as NO_RESPONSE
+  React.useEffect(() => {
+    const TWO_DAYS = 2 * 24 * 60 * 60 * 1000;
+    const stale = tradeAttempts.filter(
+      (a) =>
+        a.status === "PENDING" &&
+        a.initiated_by === "ME" &&
+        Date.now() - new Date(a.attempted_at).getTime() > TWO_DAYS &&
+        !autoMarkedRef.current.has(a.id)
+    );
+    if (stale.length === 0) return;
+    stale.forEach((a) => {
+      autoMarkedRef.current.add(a.id);
+      onUpdateAttemptStatus(a.id, "NO_RESPONSE");
+    });
+  }, [tradeAttempts, onUpdateAttemptStatus]);
   // Direction refresh state
   const [directionRefreshing, setDirectionRefreshing] = useState(false);
   // Tier Down mode: filter finder to trades where you trade down at a position and collect adders
   const [finderTierDownPos, setFinderTierDownPos] = useState<"QB" | "RB" | "WR" | "TE" | null>(null);
   // Tank Mode: removes user-side restrictions (QB minimums, package limits, direction guardrail)
   const [finderTankMode, setFinderTankMode] = useState(false);
+  // Prefer Future Picks: in Draft Capital Mode, surface picks from future years first
+  const [finderPreferFuturePicks, setFinderPreferFuturePicks] = useState(false);
   // Attempted Trades owner search
   const [attemptsOwnerSearch, setAttemptsOwnerSearch] = useState("");
   // Session set of trade transaction IDs logged from the Trade Log tab
@@ -186,16 +216,6 @@ function TradeHub({
         }`}
       >
         Trade Finder
-      </button>
-      <button
-        onClick={() => setTradeHubSection("RECOMMENDATIONS")}
-        className={`pb-2 px-1 text-sm font-semibold transition ${
-          tradeHubSection === "RECOMMENDATIONS"
-            ? "border-b-2 border-blue-400 text-blue-400"
-            : "text-gray-400 hover:text-white"
-        }`}
-      >
-        Recommendations
       </button>
       <button
         onClick={() => {
@@ -474,12 +494,12 @@ function TradeHub({
                       playerId: p.player_id as string | undefined,
                       onAdd: () => setCalcGive((prev: string[]) => [...prev, p.player_id]),
                     })),
-                    ...myAvailPicks.map((p: any) => ({
+                    ...(calcSearchA.trim().length === 0 ? myAvailPicks.map((p: any) => ({
                       label: pickLabel(p),
                       value: pickInsight(p)?.expectedValue ?? getStoredPickValue(pickFcValues, p),
                       playerId: undefined as string | undefined,
                       onAdd: () => setCalcGivePicks((prev: string[]) => [...prev, pickKey(p)]),
-                    })),
+                    })) : []),
                   ].sort((a, b) => b.value - a.value);
                   if (items.length === 0) return <p className="text-xs text-gray-600">No assets available</p>;
                   return items.map((item) => assetRow(item.label, item.value, item.onAdd, item.playerId));
@@ -539,12 +559,12 @@ function TradeHub({
                         playerId: p.player_id as string | undefined,
                         onAdd: () => setCalcReceive((prev: string[]) => [...prev, p.player_id]),
                       })),
-                      ...theirAvailPicks.map((p: any) => ({
+                      ...(calcSearchB.trim().length === 0 ? theirAvailPicks.map((p: any) => ({
                         label: pickLabel(p),
                         value: pickInsight(p)?.expectedValue ?? getStoredPickValue(pickFcValues, p),
                         playerId: undefined as string | undefined,
                         onAdd: () => setCalcReceivePicks((prev: string[]) => [...prev, pickKey(p)]),
-                      })),
+                      })) : []),
                     ].sort((a, b) => b.value - a.value);
                     if (items.length === 0) return <p className="text-xs text-gray-600">No assets available</p>;
                     return items.map((item) => assetRow(item.label, item.value, item.onAdd, item.playerId));
@@ -1012,6 +1032,45 @@ function TradeHub({
         (["QB", "WR"].includes(player?.position) && Number(player?.age || 99) <= 25) ||
         (player?.position === "TE" && Number(player?.age || 99) <= 25) ||
         (player?.position === "RB" && Number(player?.age || 99) <= 23);
+      // Continuous 0.0–1.0 sell-urgency curve. 0 = hold forever, 1 = sell immediately.
+      // Position-specific cliffs: RB peaks at 26-27, WR/TE at 29-30, QB at 32-33.
+      const getAgeUrgency = (player: any): number => {
+        const age = Number(player?.age || 0);
+        if (age === 0) return 0;
+        const pos = player?.position;
+        if (pos === "RB") {
+          if (age <= 22) return 0;
+          if (age <= 24) return 0.15;
+          if (age <= 25) return 0.40;
+          if (age <= 26) return 0.70;
+          if (age <= 27) return 0.90;
+          return 1.0;
+        }
+        if (pos === "QB") {
+          if (age <= 26) return 0;
+          if (age <= 29) return 0.15;
+          if (age <= 31) return 0.40;
+          if (age <= 33) return 0.75;
+          return 1.0;
+        }
+        // WR / TE
+        if (age <= 24) return 0;
+        if (age <= 26) return 0.15;
+        if (age <= 28) return 0.35;
+        if (age <= 30) return 0.65;
+        if (age <= 31) return 0.85;
+        return 1.0;
+      };
+      // Complement: 0 = window closing now, 1 = prime years ahead.
+      const getFutureValue = (player: any): number => 1 - getAgeUrgency(player);
+      // "Years-to-positional-cliff" — used for team window scoring.
+      const yearsToCliff = (player: any): number => {
+        const age = Number(player?.age || 0);
+        if (age === 0) return 5;
+        const pos = player?.position;
+        const cliff = pos === "RB" ? 28 : pos === "QB" ? 35 : 32;
+        return Math.max(0, cliff - age);
+      };
       const isPremiumCurrentPick = (pick: any) =>
         String(pick?.season) === CURRENT_YEAR && String(pick?.slot || "").match(/^1\.(0[1-6]|[1-6])$/);
       const getDirectionTradeScore = (trade: TradeResult) => {
@@ -2220,14 +2279,162 @@ function TradeHub({
       // Only apply direction guardrail if at least one result survives it — prevents empty results.
       // Tier Down mode and Tank Mode both bypass the guardrail entirely.
       const hasGuardrailPassing = !finderTierDownPos && !finderTankMode && preGuardrail.some((r) => !failsDirectionGuardrail(r));
+      // Adjusted direction profile per opponent (uses tradePartnerRankings which has the fully
+      // adjusted bucket: dynasty rank + redraft rank + sim + age all combined).
+      const oppProfileByRosterId = new Map(
+        tradePartnerRankings.map((p: any) => [Number(p.rosterId), p])
+      );
+
+      // ── Roster concentration map ────────────────────────────────────────────
+      // For each opponent: topOneShare = top-player value / total position value.
+      // High topOneShare (>0.60) = "single star" at that position — they desperately
+      // need depth there and will be more receptive to receiving that positional help.
+      const rosterConcentrationMap = new Map<number, Record<string, number>>();
+      for (const rr of rosters.filter((rr: any) => rr.owner_id !== user?.user_id)) {
+        const rPlayers = rosterPlayers(rr);
+        const concMap: Record<string, number> = {};
+        for (const pos of ["QB", "RB", "WR", "TE"]) {
+          const posPlayers = rPlayers
+            .filter((p: any) => p.position === pos)
+            .sort((a: any, b: any) => b.value - a.value);
+          const total = posPlayers.reduce((s: number, p: any) => s + (p.value || 0), 0);
+          const top1 = posPlayers[0]?.value ?? 0;
+          concMap[pos] = total > 0 ? top1 / total : 0;
+        }
+        rosterConcentrationMap.set(Number(rr.roster_id), concMap);
+      }
+
+      // ── Team window compute helper ──────────────────────────────────────────
+      // Returns avg years until positional cliffs across the starting lineup.
+      // 0 = window closing; 8+ = decade of contention ahead.
+      const computeTeamWindow = (rosterPlayersList: any[]): number => {
+        const starters = [
+          ...rosterPlayersList.filter((p: any) => p.position === "QB").sort((a: any, b: any) => b.value - a.value).slice(0, 1),
+          ...rosterPlayersList.filter((p: any) => p.position === "RB").sort((a: any, b: any) => b.value - a.value).slice(0, 2),
+          ...rosterPlayersList.filter((p: any) => p.position === "WR").sort((a: any, b: any) => b.value - a.value).slice(0, 3),
+          ...rosterPlayersList.filter((p: any) => p.position === "TE").sort((a: any, b: any) => b.value - a.value).slice(0, 1),
+        ];
+        if (starters.length === 0) return 3;
+        return starters.reduce((s: number, p: any) => s + yearsToCliff(p), 0) / starters.length;
+      };
+      const myTeamWindow = computeTeamWindow(myPlayers);
+
+      // ── PENDING suppression map ──────────────────────────────────────────────
+      // For each opponent, track which player IDs appear in ME-initiated PENDING
+      // attempts. Suppress trades that re-ask for the same primary player.
+      const pendingGiveByOpp  = new Map<number, Set<string>>(); // players I've OFFERED to this opp
+      const pendingRecvByOpp  = new Map<number, Set<string>>(); // players I've REQUESTED from this opp
+      tradeAttempts
+        .filter((a) =>
+          a.league_id === selectedLeague?.league_id &&
+          a.status === "PENDING" &&
+          a.initiated_by === "ME"
+        )
+        .forEach((a) => {
+          const oppId = Number(a.partner_roster_id);
+          if (!pendingGiveByOpp.has(oppId)) pendingGiveByOpp.set(oppId, new Set());
+          if (!pendingRecvByOpp.has(oppId)) pendingRecvByOpp.set(oppId, new Set());
+          a.give_players.forEach((p) => pendingGiveByOpp.get(oppId)!.add(p.player_id));
+          a.receive_players.forEach((p) => pendingRecvByOpp.get(oppId)!.add(p.player_id));
+        });
+
+      // ── Format win-rate map from logged FINDER attempts ────────────────────
+      // Computes acceptance rate per trade format ("2v1", "1v1", etc.) using
+      // resolved attempts. ACCEPTED=1.0, COUNTERED=0.5, DECLINED/NO_RESPONSE=0.
+      // Requires ≥2 resolved attempts per format to be meaningful.
+      const formatWinRates = (() => {
+        const resolved = tradeAttempts.filter(
+          (a) => a.source === "FINDER" && a.initiated_by === "ME" && a.status !== "PENDING"
+        );
+        const scores = new Map<string, { score: number; count: number }>();
+        for (const a of resolved) {
+          const key = `${a.give_players.length + a.give_picks.length}v${a.receive_players.length + a.receive_picks.length}`;
+          const pts = a.status === "ACCEPTED" ? 1.0 : a.status === "COUNTERED" ? 0.5 : 0;
+          const entry = scores.get(key) ?? { score: 0, count: 0 };
+          scores.set(key, { score: entry.score + pts, count: entry.count + 1 });
+        }
+        const rates = new Map<string, number>();
+        scores.forEach(({ score, count }, key) => {
+          if (count >= 2) rates.set(key, score / count);
+        });
+        return rates;
+      })();
+
+      // ── Season timing context (computed once outside the per-trade map) ────
+      const nflWeek = nflState?.season_type === "regular"
+        ? (nflState?.display_week ?? nflState?.week ?? 0)
+        : 0;
+      const isTradeDeadlineWindow = nflWeek >= 10 && nflWeek <= 13;
+      const isEarlySeason         = nflWeek >= 1  && nflWeek <= 5;
+      const isLateSeasonPost      = nflWeek >= 14;
+
+      // ── Standings pressure map (computed once, used in standingsPressureScore) ──
+      // For each roster: how many games back are they from the last playoff spot,
+      // and how many regular-season weeks remain. Only meaningful during the season.
+      const playoffTeamCount   = selectedLeague?.settings?.playoff_teams ?? 6;
+      const playoffWeekStart   = selectedLeague?.settings?.playoff_week_start ?? 15;
+      const weeksRemaining     = nflWeek > 0 ? Math.max(0, (playoffWeekStart - 1) - nflWeek) : 0;
+
+      // Sort rosters by win total (ties = 0.5) descending
+      const sortedStandings = [...rosters]
+        .map((rr: any) => ({
+          rosterId: Number(rr.roster_id),
+          wins: (rr.settings?.wins ?? 0) + (rr.settings?.ties ?? 0) * 0.5,
+        }))
+        .sort((a, b) => b.wins - a.wins);
+      const lastPlayoffSpotWins = sortedStandings[playoffTeamCount - 1]?.wins ?? 0;
+      const standingsMap = new Map(sortedStandings.map((s, idx) => [s.rosterId, { ...s, playoffRank: idx + 1 }]));
+
+      // ── Known pick slot value helper ─────────────────────────────────────────
+      // A pick with a resolved slot ("1.03") is worth far more than an unresolved "Rd 1".
+      // Returns bonus (positive = premium above base pick value, negative = discount).
+      const getPickSlotBonus = (pick: any): number => {
+        const slot = String(pick?.slot ?? "");
+        if (!slot.includes(".")) return 0; // unresolved — no slot bonus
+        const slotNum = parseInt(slot.split(".")[1], 10);
+        if (isNaN(slotNum) || slotNum < 1) return 0;
+        const rd = Number(pick?.round ?? 1);
+        if (rd === 1) {
+          if (slotNum <= 2)  return 10;  // 1.01-1.02: generational pick premium
+          if (slotNum <= 4)  return 7;   // top-4
+          if (slotNum <= 6)  return 4;   // top-6
+          if (slotNum <= 9)  return 1;   // mid-first
+          if (slotNum <= 10) return 0;   // 1.10: roughly average
+          return -3;                     // 1.11-1.12: "lottery pick" inverse
+        }
+        if (rd === 2) {
+          if (slotNum <= 3)  return 4;
+          if (slotNum <= 6)  return 2;
+          return 0;
+        }
+        return 0; // 3rd+ rounds: slot rarely matters much
+      };
+
       // Seeded shuffle so Refresh button produces a new random set
       const shuffled = preGuardrail
         .filter((r) => !!finderTierDownPos || finderTankMode || !hasGuardrailPassing || !failsDirectionGuardrail(r))
+        // ── PENDING trade suppression ─────────────────────────────────────────
+        // If there's already a PENDING ME-initiated offer with this opponent that
+        // involves the same primary player (give OR receive), skip it — we've
+        // already asked. Resumes surfacing once the attempt is resolved.
+        .filter((r) => {
+          const pendingRecv = pendingRecvByOpp.get(Number(r.oppRosterId));
+          const pendingGive = pendingGiveByOpp.get(Number(r.oppRosterId));
+          if (!pendingRecv && !pendingGive) return true;
+          const topRecv = [...r.receive].sort((a: any, b: any) => b.value - a.value)[0];
+          if (topRecv && pendingRecv?.has(topRecv.player_id)) return false;
+          const topGive = [...r.give].sort((a: any, b: any) => b.value - a.value)[0];
+          if (topGive && pendingGive?.has(topGive.player_id)) return false;
+          return true;
+        })
         .map((r) => {
           const lineupSafety = getTradeLineupSafety(r);
           const partnerProfile = leagueMateProfileByRosterId.get(Number(r.oppRosterId));
           const bucketPriority = draftCapitalMode && r.receivePicks.length > 0
-            ? Math.min(...r.receivePicks.map((p: any) => draftYearPriority[p.season] ?? 999))
+            ? (finderPreferFuturePicks
+                // Prefer future: negate max priority so furthest-year picks sort first (most negative wins)
+                ? -(Math.max(...r.receivePicks.map((p: any) => draftYearPriority[p.season] ?? 0)))
+                : Math.min(...r.receivePicks.map((p: any) => draftYearPriority[p.season] ?? 999)))
             : 999;
           const partnerFitScore =
             (partnerProfile?.fitScore ?? 0) * 0.65 +
@@ -2267,39 +2474,218 @@ function TradeHub({
             return ds;
           })();
           // ── Opponent direction score ─────────────────────────────────────
-          // Reward trades where what the opponent RECEIVES fits their team's direction.
-          // Rebuilders want picks + youth; contenders want redraft production now.
-          // This is the biggest lever for real-world acceptance rate.
+          // Score how well what the opponent RECEIVES fits their actual team direction.
+          // Uses the fully adjusted bucket (dynasty rank + redraft + sim + age) from
+          // tradePartnerRankings so every direction tier gets proper coverage.
+          //
+          // From the opponent's perspective:
+          //   oppReceivesPlayers/Picks = r.give / r.givePicks  (what we send them)
+          //   oppGivesPlayers/Picks    = r.receive / r.receivePicks (what they send us)
           const oppDirectionScore = (() => {
-            const oppPlayoffOdds = selectedLeagueSimulation?.rowByRosterId?.get(Number(r.oppRosterId))?.playoffOdds ?? 50;
-            const oppIsTanking    = oppPlayoffOdds < 40;
-            const oppIsContending = oppPlayoffOdds >= 65;
+            const oppProfile     = oppProfileByRosterId.get(Number(r.oppRosterId));
+            const oppPlayoffOdds = oppProfile?.playoffOdds
+              ?? selectedLeagueSimulation?.rowByRosterId?.get(Number(r.oppRosterId))?.playoffOdds
+              ?? 50;
+            const oppBucket = oppProfile?.directionProfile?.bucket ?? "";
+
+            const oppReceivesPlayers = r.give;
+            const oppReceivesPicks   = r.givePicks;
+            const oppGivesPlayers    = r.receive;
+            const oppGivesPicks      = r.receivePicks;
+
+            // Classify opponent into meaningful tiers using both playoff odds and bucket
+            const oppIsHopeless   = oppPlayoffOdds < 30 || ["Blow Up", "Hopeless"].includes(oppBucket);
+            const oppIsRebuild    = !oppIsHopeless && (oppPlayoffOdds < 50 || oppBucket === "Rebuilder");
+            const oppIsElite      = oppPlayoffOdds >= 78 || ["Elite", "True Contender"].includes(oppBucket);
+            const oppIsContender  = !oppIsElite && (oppPlayoffOdds >= 65 || oppBucket === "Almost There");
+            const oppIsFading     = !oppIsHopeless && !oppIsRebuild && !oppIsElite && !oppIsContender
+                                    && (oppPlayoffOdds >= 50 || oppBucket === "Fading Contender");
+            // True middle: 45-65% odds, no extreme bucket
+
+            const oppReceivesRedraft = oppReceivesPlayers.reduce((s: number, p: any) => s + (redraftValues?.[p.player_id] ?? 0), 0);
+            const oppGivesRedraft    = oppGivesPlayers.reduce((s: number, p: any) => s + (redraftValues?.[p.player_id] ?? 0), 0);
+            const oppReceivesYoung   = oppReceivesPlayers.filter((p: any) => isFutureInsulationAsset(p)).length;
+            const oppReceivesVets    = oppReceivesPlayers.filter((p: any) => isOldProducerBuy(p)).length;
+            const oppGivesVets       = oppGivesPlayers.filter((p: any) => isOldProducerBuy(p)).length;
+            const oppGivesYoung      = oppGivesPlayers.filter((p: any) => isFutureInsulationAsset(p)).length;
+
+            // Round-aware pick scoring: 1st rounds are worth far more than 3rds to rebuild/hopeless
+            const pickRecvScore = (base1st: number, base2nd: number, baseLate: number) =>
+              oppReceivesPicks.reduce((s: number, p: any) => {
+                const rd = Number(p.round);
+                return s + (rd === 1 ? base1st : rd === 2 ? base2nd : baseLate);
+              }, 0);
+            const pickGiveScore = (base1st: number, base2nd: number, baseLate: number) =>
+              oppGivesPicks.reduce((s: number, p: any) => {
+                const rd = Number(p.round);
+                return s + (rd === 1 ? base1st : rd === 2 ? base2nd : baseLate);
+              }, 0);
+
             let ods = 0;
-            if (oppIsTanking) {
-              // Rebuilder loves picks and young players
-              ods += r.givePicks.length * 3;
-              const youngGiven = r.give.filter((p: any) => p.age && p.age <= 25).length;
-              const oldGiven   = r.give.filter((p: any) => p.age && p.age >= 29).length;
-              ods += youngGiven * 3;
-              ods -= oldGiven * 3;   // veterans don't help a tank
-              // Bonus if they get to keep their own picks
-              if (r.receivePicks.length === 0) ods += 2;
+
+            if (oppIsHopeless) {
+              // Blow Up / Hopeless: maximise future capital, get out of veteran contracts
+              ods += pickRecvScore(16, 10, 6);       // 1st picks are gold to a tanker
+              ods += oppReceivesYoung * 9;
+              ods -= oppReceivesVets * 10;
+              ods += oppGivesVets * 8;
+              ods -= pickGiveScore(12, 8, 4);        // giving up a 1st to tank is catastrophic
+              ods -= oppGivesYoung * 8;
+              // Hard mismatch: sending them only veterans when they're blowing up
+              if (oppReceivesVets > 0 && oppReceivesPicks.length === 0 && oppReceivesYoung === 0) ods -= 12;
+
+            } else if (oppIsRebuild) {
+              // Rebuilder: wants picks and youth, happy to move floor production
+              ods += pickRecvScore(12, 7, 4);        // 1st rounds > 3rds for rebuilders
+              ods += oppReceivesYoung * 7;
+              ods -= oppReceivesVets * 7;
+              ods += oppGivesVets * 5;
+              ods -= pickGiveScore(8, 5, 2);
+              ods -= oppGivesYoung * 5;
+              if (oppReceivesVets > 0 && oppReceivesPicks.length === 0 && oppReceivesYoung === 0) ods -= 9;
+
+            } else if (oppIsElite) {
+              // Elite / True Contender: wants production NOW — picks are worthless to them
+              const netRedraft = oppReceivesRedraft - oppGivesRedraft;
+              ods += Math.min(netRedraft / 40, 12);
+              ods -= pickRecvScore(12, 8, 5);        // even 1st picks feel abstract to a contender
+              ods -= pickGiveScore(4, 3, 2);
+              ods += oppReceivesVets * 5;
+              ods -= oppReceivesYoung * 6;
+              // Hard mismatch: sending picks to a contender
+              if (oppReceivesPlayers.length === 0 && oppReceivesPicks.length > 0) ods -= 14;
+
+            } else if (oppIsContender) {
+              // Almost There: wants positional upgrades, tolerates minor pick cost
+              const netRedraft = oppReceivesRedraft - oppGivesRedraft;
+              ods += Math.min(netRedraft / 50, 8);
+              ods -= pickRecvScore(8, 5, 3);
+              ods -= oppReceivesYoung * 3;
+              ods += oppReceivesVets * 4;
+              if (oppReceivesPlayers.length === 0 && oppReceivesPicks.length > 0) ods -= 10;
+
+            } else if (oppIsFading) {
+              // Fading Contender: leaning on current production for one more run
+              const netRedraft = oppReceivesRedraft - oppGivesRedraft;
+              ods += Math.min(netRedraft / 55, 6);
+              ods -= pickRecvScore(6, 4, 2);
+              ods += oppReceivesVets * 2;
+              ods -= oppGivesVets * 3;
+
+            } else {
+              // True middle: balanced, mild preference for current production
+              const netRedraft = oppReceivesRedraft - oppGivesRedraft;
+              ods += Math.min(netRedraft / 70, 4);
+              ods -= pickRecvScore(4, 2, 1);
+              ods += oppReceivesYoung * 2;
             }
-            if (oppIsContending) {
-              // Contender wants production — penalise picks-only trades
-              const oppReceivesRedraft = r.give.reduce((s: number, p: any) => s + (redraftValues?.[p.player_id] ?? 0), 0);
-              const oppGivesRedraft    = r.receive.reduce((s: number, p: any) => s + (redraftValues?.[p.player_id] ?? 0), 0);
-              if (oppReceivesRedraft > oppGivesRedraft) ods += 3;
-              if (r.give.length === 0 && r.givePicks.length > 0) ods -= 3; // picks-only for contender
+
+            // Universal bonus: opponent keeps their own picks (less to give up = easier yes)
+            if (oppGivesPicks.length === 0 && (oppIsRebuild || oppIsHopeless)) ods += 3;
+
+            // ── Opponent positional need targeting ────────────────────────────
+            // Score how well what we're sending them addresses their SPECIFIC
+            // roster weaknesses (not just their general direction tier).
+            // A contender who is dead-last at WR will jump at a WR deal.
+            const oppPosRanks = (oppProfile?.directionProfile?.positionRanks ?? []) as Array<{ pos: string; rank: number }>;
+            const oppConc = rosterConcentrationMap.get(Number(r.oppRosterId)) ?? {};
+            if (oppPosRanks.length > 0) {
+              const oppWeakPos = new Set(
+                oppPosRanks
+                  .filter((pr: any) => pr.rank >= Math.ceil(numTeams * 0.6))
+                  .map((pr: any) => pr.pos)
+              );
+              const oppStrongPos = new Set(
+                oppPosRanks
+                  .filter((pr: any) => pr.rank <= Math.ceil(numTeams * 0.3))
+                  .map((pr: any) => pr.pos)
+              );
+              // Sending them a player at their weakest position = they need this.
+              // Extra bonus when they have a single-star concentration (top player dominates the group
+              // and they desperately need another contributor to not be a one-injury disaster).
+              oppReceivesPlayers
+                .filter((p: any) => oppWeakPos.has(p.position) && p.value >= 1500)
+                .forEach((p: any) => {
+                  const conc = oppConc[p.position] ?? 0;
+                  ods += 7 + (conc > 0.65 ? 4 : conc > 0.50 ? 2 : 0);
+                });
+              // Sending them depth at a position they're already stacked at = low interest
+              const surplusGiven = oppReceivesPlayers.filter(
+                (p: any) => oppStrongPos.has(p.position) && p.value >= 2000
+              ).length;
+              ods -= surplusGiven * 3;
+              // Asking them to give up their strongest position = reluctance
+              const demandedStrength = oppGivesPlayers.filter(
+                (p: any) => oppStrongPos.has(p.position) && p.value >= 2000
+              ).length;
+              ods -= demandedStrength * 4;
             }
+
+            // ── SuperFlex QB gap detection ─────────────────────────────────────
+            // In SF leagues, QB depth is the most critical positional need.
+            // If opponent is bottom-half at QB in a SF league, sending them a QB
+            // is a massive deal; asking for their QB (already scarce) is a non-starter.
+            if (hasSuperFlex && oppPosRanks.length > 0) {
+              const oppQBRank = oppPosRanks.find((pr: any) => pr.pos === "QB")?.rank ?? numTeams;
+              if (oppQBRank >= Math.ceil(numTeams * 0.5)) {
+                const qbsReceived = oppReceivesPlayers.filter((p: any) => p.position === "QB").length;
+                if (qbsReceived > 0) ods += 9;
+                const qbsDemanded = oppGivesPlayers.filter((p: any) => p.position === "QB").length;
+                if (qbsDemanded > 0) ods -= 8;
+              }
+            }
+
+            // ── Injury replacement targeting ──────────────────────────────────
+            // If the opponent has a meaningful starter on IR/Out, they have an
+            // urgent positional hole. Sending a replacement at that exact position
+            // is the highest-acceptance scenario — it solves an active, visible crisis.
+            {
+              const oppRosterForInjury = rosters.find((ros: any) => Number(ros.roster_id) === Number(r.oppRosterId));
+              if (oppRosterForInjury) {
+                const oppAllPlayers = rosterPlayers(oppRosterForInjury);
+                const playersMapLocal = players as Record<string, any>;
+                const injStatuses = new Set(["ir", "out", "dnr", "pup"]);
+                const injuredPositions = new Set<string>();
+                oppAllPlayers.forEach((p: any) => {
+                  const inj = (playersMapLocal[p.player_id]?.injury_status ?? "").toLowerCase();
+                  // Only flag meaningful starters (value ≥ 2000) — ignore bench/handcuff injuries
+                  if (injStatuses.has(inj) && (p.value ?? 0) >= 2000) {
+                    injuredPositions.add(p.position);
+                  }
+                });
+                if (injuredPositions.size > 0) {
+                  // We're sending a capable replacement to their injured position
+                  const emergencyFills = oppReceivesPlayers.filter(
+                    (p: any) => injuredPositions.has(p.position) && (p.value ?? 0) >= 1500
+                  ).length;
+                  ods += emergencyFills * 11;  // emergency fill = strongest possible acceptance signal
+                  // Asking them to give away their replacement at an injured position = very reluctant
+                  const takingReplacement = oppGivesPlayers.filter(
+                    (p: any) => injuredPositions.has(p.position) && (p.value ?? 0) >= 1500
+                  ).length;
+                  ods -= takingReplacement * 7;
+                }
+              }
+            }
+
             return ods;
           })();
 
-          // ── Simple trade bonus ────────────────────────────────────────────
-          // Prefer minor tweaks (1v1 player swaps, bench deals) over mega-trades.
-          // Fewer total assets = higher bonus so small clean trades surface first.
-          const totalAssets = r.give.length + r.receive.length + r.givePicks.length + r.receivePicks.length;
-          const simpleTradeBonus = totalAssets <= 2 ? 5 : totalAssets <= 4 ? 3 : totalAssets <= 6 ? 1 : 0;
+          // ── Format preference score ───────────────────────────────────────
+          // Strongly prefer 1v1, 2v1, 1v2, and 2v2 trades over larger packages.
+          // Scores taper off sharply as total piece count rises above 4.
+          const formatBonus = (() => {
+            const totalGive = r.give.length + r.givePicks.length;
+            const totalRecv = r.receive.length + r.receivePicks.length;
+            const total = totalGive + totalRecv;
+            if (total === 2) return 8;            // 1v1 — cleanest possible trade
+            if (total === 3) return 6;            // 2v1 or 1v2
+            if (totalGive === 2 && totalRecv === 2) return 5; // 2v2
+            if (total === 4) return 3;            // 1v3, 3v1 (less common but passable)
+            if (total === 5) return 0;            // 2v3, 3v2
+            if (total === 6) return -3;           // 3v3, 2v4
+            return -7;                            // 4+ piece mega-trades
+          })();
 
           // ── Handcuff awareness (RB) — depth-chart aware ─────────────────
           // Uses the same nflTeamDepth map as DataHub so starter/HC roles are consistent.
@@ -2352,6 +2738,26 @@ function TradeHub({
             }
 
             return hb;
+          })();
+
+          // ── Balance penalty (soft) ────────────────────────────────────────
+          // Trades further from even are progressively less desirable.
+          // ±150 net = -3, ±300 = ~-8.5, ±450 = ~-15.6, ±600 = ~-24.
+          // Not a hard cap — compelling strategic trades can still surface.
+          const balancePenalty = -Math.pow(Math.abs(r.net) / 150, 1.5) * 3;
+
+          // ── Future pick bonus (Draft Capital Mode) ────────────────────────
+          // When "Prefer Future Picks" is on, reward picks from future years
+          // and penalize picks from the current year.
+          const futurePickBonus = (() => {
+            if (!draftCapitalMode || !finderPreferFuturePicks || r.receivePicks.length === 0) return 0;
+            const currentYear = Number(CURRENT_YEAR);
+            return r.receivePicks.reduce((s: number, p: any) => {
+              const yr = Number(p.season);
+              if (yr === currentYear) return s - 4;
+              if (yr === currentYear + 1) return s + 5;
+              return s + 7; // 2+ years out
+            }, 0);
           })();
 
           // ── Attempt intelligence score ────────────────────────────────────
@@ -2431,7 +2837,380 @@ function TradeHub({
             return ais;
           })();
 
-          const strategyScore = r.score + getDirectionTradeScore(r) + lineupSafety.score + partnerFitScore + dispositionScore + oppDirectionScore + simpleTradeBonus + handcuffBonus + attemptIntelScore;
+          // ── Market intelligence score ─────────────────────────────────────
+          // Value trend momentum: reward selling declining assets and buying rising
+          // ones. Penalise buying into falling players. Injury awareness: flag IR/Out
+          // players as low-acceptance (opponent unlikely to want them) or buy-low
+          // targets when receiving from the opponent.
+          const marketIntelScore = (() => {
+            let mis = 0;
+            const playersMap = players as Record<string, any>;
+            const injuredStatuses = new Set(["ir", "out", "dnr", "pup", "nfi"]);
+
+            // ── Value trend (give side) ────────────────────────────────────
+            for (const gp of r.give) {
+              const snapVal = historicalSnapshot?.players?.[gp.player_id]?.value;
+              if (snapVal && snapVal > 50 && gp.value > 50) {
+                const pct = (gp.value - snapVal) / snapVal;
+                if (pct <= -0.08) mis += 5;       // heavy faller — sell now before more decay
+                else if (pct <= -0.04) mis += 3;   // mild faller
+                else if (pct >= 0.10) mis += 4;    // sell-high: capitalise on peak value
+                else if (pct >= 0.06) mis += 2;    // mild sell-high window
+              }
+              // Injury penalty: opponent less likely to accept IR/Out players
+              const inj = (playersMap[gp.player_id]?.injury_status ?? "").toLowerCase();
+              if (injuredStatuses.has(inj)) mis -= 4;
+              // Years-experience longevity signal: 7+ years = extra decline risk
+              const exp = Number(playersMap[gp.player_id]?.years_exp ?? -1);
+              if (exp >= 7 && gp.value >= 1500) mis += 2;  // sell before the year 8-9 cliff
+              // Amplify urgency for aging high-value assets using continuous curve
+              const urgency = getAgeUrgency(gp);
+              if (urgency >= 0.70 && gp.value >= 2000) mis += Math.round(urgency * 3);
+            }
+
+            // ── Value trend (receive side) ─────────────────────────────────
+            for (const rp of r.receive) {
+              const snapVal = historicalSnapshot?.players?.[rp.player_id]?.value;
+              if (snapVal && snapVal > 50 && rp.value > 50) {
+                const pct = (rp.value - snapVal) / snapVal;
+                if (pct >= 0.10) mis += 5;         // buying a surging player — catch the upside
+                else if (pct >= 0.06) mis += 3;    // steady riser
+                else if (pct <= -0.08) mis -= 5;   // heavy faller — catching a falling knife
+                else if (pct <= -0.04) mis -= 3;   // mild faller — caution
+              }
+              // Injury buy-low: receiving an IR player at still-elevated dynasty value
+              const inj = (playersMap[rp.player_id]?.injury_status ?? "").toLowerCase();
+              if (injuredStatuses.has(inj) && rp.value >= 2500) mis += 3; // buy-low window
+              else if (injuredStatuses.has(inj)) mis -= 2; // low-value injured = avoid
+            }
+
+            return mis;
+          })();
+
+          // ── Archetype win-rate bonus ──────────────────────────────────────
+          // Surfaces trade formats you've historically been able to close.
+          // Penalises formats that have consistently stalled or been declined.
+          // Requires ≥2 resolved FINDER attempts per format to kick in.
+          const archetypeWinRateBonus = (() => {
+            const key = `${r.give.length + r.givePicks.length}v${r.receive.length + r.receivePicks.length}`;
+            const rate = formatWinRates.get(key);
+            if (rate === undefined) return 0;
+            if (rate >= 0.75) return 5;
+            if (rate >= 0.55) return 3;
+            if (rate >= 0.35) return 0;
+            if (rate >= 0.15) return -3;
+            return -5;
+          })();
+
+          // ── Season timing bonus ───────────────────────────────────────────
+          // Amplifies contender urgency at the trade deadline, rewards buy-low
+          // grabs in early season, and pushes rebuilders toward pick-stacking
+          // late in the year. No-ops during the off-season (nflWeek === 0).
+          const seasonTimingBonus = (() => {
+            if (nflWeek === 0) return 0;
+            let stb = 0;
+            const isContenderish = !iAmTankingFinder && ["Elite", "True Contender", "Almost There", "Fading Contender"].includes(finderDirection);
+            const isRebuilder = iAmTankingFinder || ["Rebuilder", "Blow Up", "Hopeless"].includes(finderDirection);
+            const buyLowSet = new Set(buyLowPlayerIds);
+
+            if (isTradeDeadlineWindow) {
+              // Weeks 10-13: contenders are most willing to overpay; rebuilders should capitalise
+              if (isContenderish) stb += 4;
+              if (isRebuilder) stb += r.give.filter((p: any) => isOldProducerBuy(p)).length * 3;
+              // Opponent contenders are desperate too
+              const oppBucketDeadline = oppProfileByRosterId.get(Number(r.oppRosterId))?.directionProfile?.bucket ?? "";
+              if (["Elite", "True Contender", "Almost There"].includes(oppBucketDeadline)) stb += 3;
+            }
+
+            if (isEarlySeason) {
+              // Weeks 1-5: buy-low on slow starters before the market reacts
+              stb += r.receive.filter((p: any) => buyLowSet.has(p.player_id)).length * 3;
+              // Sell early hot-starters before value peaks (up 8%+ since snapshot)
+              stb += r.give.filter((p: any) => {
+                const snap = historicalSnapshot?.players?.[p.player_id]?.value;
+                return snap && snap > 50 && p.value > snap * 1.08;
+              }).length * 2;
+            }
+
+            if (isLateSeasonPost) {
+              // Weeks 14+: rebuilders should stack picks for the off-season haul
+              if (isRebuilder) stb += r.receivePicks.length * 2;
+              // Giving picks late when tanking is counter-productive
+              if (iAmTankingFinder && r.givePicks.length > 0) stb -= r.givePicks.length * 3;
+            }
+
+            return stb;
+          })();
+
+          // ── Usage signal score ────────────────────────────────────────────
+          // Uses rolling snap%, target share, and carry rates from the last 4
+          // weeks of Sleeper actuals. Also uses 2-week recent trend vs. baseline
+          // to detect collapsing/surging usage before the market reacts.
+          // Off-season: always returns 0 (no data available).
+          const usageSignalScore = (() => {
+            if (!playerStats) return 0;
+            let uss = 0;
+
+            for (const gp of r.give) {
+              const u = playerStats[gp.player_id];
+              if (!u || u.gamesPlayed < 2) continue;
+              // Baseline signals (4-week avg)
+              if ((gp.position === "WR" || gp.position === "TE") && u.avgTargets >= 8) uss -= 4;
+              if ((gp.position === "WR" || gp.position === "TE") && u.avgTargets <= 3 && gp.value >= 2000) uss += 4;
+              if (gp.position === "RB" && u.avgCarries >= 15) uss -= 4;
+              if (gp.position === "RB" && u.avgCarries <= 5 && gp.value >= 2000) uss += 4;
+              if (u.snapPct < 0.20 && gp.value >= 2000) uss += 5;
+              else if (u.snapPct < 0.40 && gp.value >= 3000) uss += 3;
+              // Trend signals: sell before market catches up to declining usage
+              const gpTT = u.targetTrend ?? 0, gpCT = u.carryTrend ?? 0, gpST = u.snapTrend ?? 0;
+              if ((gp.position === "WR" || gp.position === "TE") && gpTT <= -3) uss += 4;
+              if ((gp.position === "WR" || gp.position === "TE") && gpTT >= 3) uss -= 3;
+              if (gp.position === "RB" && gpCT <= -4) uss += 3;
+              if (gp.position === "RB" && gpCT >= 4) uss -= 3;
+              if (gpST <= -0.15 && gp.value >= 2000) uss += 3;
+            }
+
+            for (const rp of r.receive) {
+              const u = playerStats[rp.player_id];
+              if (!u || u.gamesPlayed < 2) continue;
+              // Baseline signals
+              if ((rp.position === "WR" || rp.position === "TE") && u.avgTargets >= 8) uss += 4;
+              if ((rp.position === "WR" || rp.position === "TE") && u.avgTargets <= 3 && rp.value >= 2000) uss -= 4;
+              if (rp.position === "RB" && u.avgCarries >= 15) uss += 4;
+              if (rp.position === "RB" && u.avgCarries <= 5 && rp.value >= 2000) uss -= 4;
+              if (u.snapPct < 0.20 && rp.value >= 3000) uss += 5;
+              // Trend signals: buy surging usage before market reacts
+              const rpTT = u.targetTrend ?? 0, rpCT = u.carryTrend ?? 0, rpST = u.snapTrend ?? 0;
+              if ((rp.position === "WR" || rp.position === "TE") && rpTT >= 3) uss += 4;
+              if ((rp.position === "WR" || rp.position === "TE") && rpTT <= -3) uss -= 3;
+              if (rp.position === "RB" && rpCT >= 4) uss += 3;
+              if (rp.position === "RB" && rpCT <= -4) uss -= 3;
+              if (rpST >= 0.15 && rp.value >= 1500) uss += 3;
+            }
+
+            return uss;
+          })();
+
+          // ── Team window score ─────────────────────────────────────────────
+          // Factors in how many "contending years" each side has left based on
+          // average starter age. Short-window teams (cliffs approaching) should
+          // be buying current production and selling future picks; long-window
+          // teams should be building dynasty assets.
+          const teamWindowBonus = (() => {
+            let twb = 0;
+            const isContenderish = !iAmTankingFinder && ["Elite", "True Contender", "Almost There", "Fading Contender"].includes(finderDirection);
+            const isRebuilder = iAmTankingFinder || ["Rebuilder", "Blow Up", "Hopeless"].includes(finderDirection);
+
+            // My window signals
+            if (myTeamWindow < 2.5) {
+              // Imminent cliff — every trade should be maximising NOW
+              twb += r.receive.filter((p: any) => isOldProducerBuy(p)).length * 4;
+              twb -= r.receive.filter((p: any) => isFutureInsulationAsset(p)).length * 3;
+              twb -= r.receivePicks.length * 2;
+              twb += r.give.filter((p: any) => getFutureValue(p) >= 0.7).length * 2; // ok to move young pieces
+            } else if (myTeamWindow > 5.5 && isRebuilder) {
+              // Long window ahead — protect youth and accumulate future picks
+              twb += r.receive.filter((p: any) => isFutureInsulationAsset(p)).length * 3;
+              twb += r.receivePicks.filter((p: any) => Number(p.round) === 1).length * 3;
+              twb -= r.give.filter((p: any) => isFutureInsulationAsset(p)).length * 3;
+            } else if (myTeamWindow >= 2.5 && myTeamWindow <= 4.5 && isContenderish) {
+              // Sweet spot: peak contention window — reward positional upgrades
+              twb += r.receive.filter((p: any) => getAgeUrgency(p) >= 0.40 && getAgeUrgency(p) < 0.80).length * 2;
+            }
+
+            // Opponent window alignment bonus
+            const oppRosterForWindow = rosters.find((ros: any) => ros.roster_id === r.oppRosterId);
+            if (oppRosterForWindow) {
+              const oppWin = computeTeamWindow(rosterPlayers(oppRosterForWindow));
+              // They have a short window and we're sending them current production = aligns perfectly
+              if (oppWin < 2.5 && oppDirectionScore > 0) twb += 2;
+              // They have a long window but we're sending them old vets = misaligned
+              if (oppWin > 5.5 && r.give.filter((p: any) => isOldProducerBuy(p)).length > 0) twb -= 2;
+            }
+
+            return twb;
+          })();
+
+          // ── Starter vs bench quality detection ───────────────────────────
+          // Rewards trades where you're sending a bench piece and receiving a
+          // player who immediately starts on your roster, or upgrades a weak
+          // starter slot. Penalises giving away a starter for a bench piece.
+          const starterQualityBonus = (() => {
+            let sqb = 0;
+            for (const gp of r.give) {
+              const myPosGroup = myPlayers
+                .filter((p: any) => p.position === gp.position)
+                .sort((a: any, b: any) => b.value - a.value);
+              const giveRank = myPosGroup.findIndex((p: any) => p.player_id === gp.player_id) + 1;
+              const slots = starterCounts[gp.position] || 0;
+              if (giveRank > 0 && giveRank > slots) sqb += 3;   // giving a bench player = we retain starters
+              if (giveRank > 0 && giveRank === 1) sqb -= 3;      // giving away our best at pos = costly
+            }
+            const myPlayersAfterTrade = buildPostTradePlayers(myRoster, r.give, r.receive);
+            for (const rp of r.receive) {
+              const posAfterTrade = myPlayersAfterTrade
+                .filter((p: any) => p.position === rp.position)
+                .sort((a: any, b: any) => b.value - a.value);
+              const recvRank = posAfterTrade.findIndex((p: any) => p.player_id === rp.player_id) + 1;
+              const slots = starterCounts[rp.position] || 0;
+              if (recvRank > 0 && recvRank <= slots) sqb += 4;   // immediate starter on my team
+              // Extra if it directly upgrades a weak starter slot (replacing someone ranked bottom-half)
+              const displacedPlayer = posAfterTrade[recvRank];  // player bumped out of lineup
+              if (displacedPlayer && recvRank > 0 && recvRank <= slots) {
+                const myPre = myPlayers.filter((p: any) => p.position === rp.position).sort((a: any, b: any) => b.value - a.value);
+                const weakBenchmark = myPre[slots - 1]?.value ?? 0; // current weakest starter
+                if (rp.value > weakBenchmark * 1.15) sqb += 2;  // meaningful upgrade, not just lateral
+              }
+            }
+            return sqb;
+          })();
+
+          // ── Active trader bonus ───────────────────────────────────────────
+          // Opponents who are actively engaged (recent THEM-initiated attempts,
+          // or many logged interactions) are more likely to respond and deal.
+          // Uses trade_attempts data as an engagement proxy — no new API needed.
+          const activeTraderBonus = (() => {
+            if (tradeAttempts.length === 0) return 0;
+            const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
+            const now = Date.now();
+            const oppId = Number(r.oppRosterId);
+            const oppRecentAttempts = tradeAttempts.filter(
+              (a) =>
+                a.league_id === selectedLeague?.league_id &&
+                Number(a.partner_roster_id) === oppId &&
+                now - new Date(a.attempted_at).getTime() < THIRTY_DAYS
+            );
+            // THEM-initiated attempts = they are actively trying to make deals
+            const theirInitiated = oppRecentAttempts.filter((a) => a.initiated_by === "THEM").length;
+            // Total engagement (any attempts) = relationship exists, dialogue is open
+            const totalEngagement = oppRecentAttempts.length;
+            let atb = 0;
+            if (theirInitiated >= 2) atb += 5;  // highly active seller/buyer — very likely to engage
+            else if (theirInitiated === 1) atb += 3;
+            if (totalEngagement >= 3) atb += 2;  // active trade relationship, they respond
+            // If they've ACCEPTED a past trade from us, they're a proven deal-maker
+            const pastAccepted = oppRecentAttempts.filter((a) => a.status === "ACCEPTED").length;
+            if (pastAccepted > 0) atb += 3;
+            // If they've DECLINED everything, slight penalty (low deal probability)
+            const allDeclined = oppRecentAttempts.length > 0 &&
+              oppRecentAttempts.every((a) => a.status === "DECLINED" || a.status === "NO_RESPONSE");
+            if (allDeclined && oppRecentAttempts.length >= 2) atb -= 4;
+            return atb;
+          })();
+
+          // ── Cross-league exposure bonus ───────────────────────────────────
+          // Players you own in 3+ leagues represent concentrated portfolio risk.
+          // Slightly favors trading them to diversify across your dynasty holdings.
+          // Players owned in only 1 league (this one) have no special signal.
+          const exposureBonus = (() => {
+            if (!crossLeagueExposure) return 0;
+            let eb = 0;
+            for (const gp of r.give) {
+              const count = crossLeagueExposure[gp.player_id]?.count ?? 1;
+              if (count >= 4) eb += 4;       // 4+ leagues: high concentration — diversify
+              else if (count >= 3) eb += 2;  // 3 leagues: moderate concentration
+            }
+            for (const rp of r.receive) {
+              const count = crossLeagueExposure[rp.player_id]?.count ?? 0;
+              if (count === 0) eb += 2;  // acquiring someone you don't own elsewhere = diversification gain
+              if (count >= 4) eb -= 3;   // buying someone you're already overexposed to
+            }
+            return eb;
+          })();
+
+          // ── Standings pressure score ──────────────────────────────────────
+          // How close the opponent is to the playoff bubble + how much time is
+          // left changes their psychology dramatically.
+          //   Desperate (1-2 games back, ≤5 weeks left):  win-now trades get big boost
+          //   Comfortable (in playoffs by 2+):             less urgency, harder to move
+          //   Eliminated (3+ back late season):            flips to rebuild mode
+          // Off-season / week 0: always returns 0.
+          const standingsPressureScore = (() => {
+            if (nflWeek === 0 || weeksRemaining <= 0) return 0;
+            const oppStanding = standingsMap.get(Number(r.oppRosterId));
+            if (!oppStanding) return 0;
+            const gamesBack = Math.max(0, lastPlayoffSpotWins - oppStanding.wins);
+            const inPlayoffs = oppStanding.playoffRank <= playoffTeamCount;
+            let sps = 0;
+
+            // Opponent in desperation zone: close to bubble with limited time
+            const isDesperate = !inPlayoffs && gamesBack <= 2 && weeksRemaining <= 5;
+            const isEliminated = !inPlayoffs && (gamesBack > weeksRemaining || gamesBack >= 4);
+            const isComfortableLeader = inPlayoffs && (oppStanding.wins - lastPlayoffSpotWins) >= 2;
+
+            if (isDesperate) {
+              // They'll overpay for wins — great time to send current production
+              const oppReceivesPlayers = r.give;
+              const oppReceivesRedraft = oppReceivesPlayers.reduce(
+                (s: number, p: any) => s + (redraftValues?.[p.player_id] ?? 0), 0
+              );
+              sps += Math.min(oppReceivesRedraft / 60, 8);  // the more production we send, the better
+              sps += oppReceivesPlayers.filter((p: any) => isOldProducerBuy(p)).length * 3;
+              sps -= r.givePicks.length * 2;  // asking for picks in a desperation trade = friction
+            } else if (isEliminated) {
+              // They've mentally moved to next year — send picks and youth
+              sps += r.givePicks.filter((p: any) => Number(p.round) === 1).length * 4;
+              sps += r.give.filter((p: any) => isFutureInsulationAsset(p)).length * 3;
+              sps -= r.give.filter((p: any) => isOldProducerBuy(p)).length * 4;
+            } else if (isComfortableLeader) {
+              // Sitting pretty — they don't NEED to deal, slight friction on all trades
+              sps -= 2;
+            }
+
+            return sps;
+          })();
+
+          // ── Pick slot premium score ───────────────────────────────────────
+          // A resolved-slot pick (e.g. "1.03") is worth dramatically more than
+          // an unresolved "1st round pick." This score amplifies the value gap
+          // for both sides: bonus for receiving top slots, penalty for giving them.
+          const pickSlotScore = (() => {
+            let pss = 0;
+            for (const rp of r.receivePicks) pss += getPickSlotBonus(rp);
+            for (const gp of r.givePicks)    pss -= getPickSlotBonus(gp);  // cost of giving premium slot
+            return pss;
+          })();
+
+          // ── Sell-high confirmation window ─────────────────────────────────
+          // The clearest sell-high signal: dynasty value is UP from the historical
+          // snapshot AND recent usage is TRENDING DOWN. The market still sees the
+          // old peak; the on-field reality has already shifted. This combination
+          // is stronger than either signal alone — it's the ideal exit window.
+          const sellHighConfirmScore = (() => {
+            if (!historicalSnapshot || !playerStats) return 0;
+            let shc = 0;
+            for (const gp of r.give) {
+              const snapVal = historicalSnapshot.players?.[gp.player_id]?.value;
+              if (!snapVal || snapVal <= 50 || gp.value <= 50) continue;
+              const pct = (gp.value - snapVal) / snapVal;
+              if (pct < 0.06) continue; // value isn't elevated enough to call a peak
+              const u = playerStats[gp.player_id];
+              if (!u || u.gamesPlayed < 2) continue;
+              const usageFalling =
+                ((gp.position === "WR" || gp.position === "TE") && (u.targetTrend ?? 0) <= -2) ||
+                (gp.position === "RB" && (u.carryTrend ?? 0) <= -3) ||
+                ((u.snapTrend ?? 0) <= -0.12);
+              if (pct >= 0.10 && usageFalling) shc += 6;  // peak confirmed: value up 10%+ + falling usage
+              else if (pct >= 0.06 && usageFalling) shc += 4;  // good exit window
+              else if (pct >= 0.10) shc += 2;  // value up but usage not confirmed falling yet
+            }
+            // Receive side: penalise buying into the same pattern in reverse
+            for (const rp of r.receive) {
+              const snapVal = historicalSnapshot.players?.[rp.player_id]?.value;
+              if (!snapVal || snapVal <= 50 || rp.value <= 50) continue;
+              const pct = (rp.value - snapVal) / snapVal;
+              if (pct < 0.06) continue;
+              const u = playerStats[rp.player_id];
+              if (!u || u.gamesPlayed < 2) continue;
+              const usageFalling =
+                ((rp.position === "WR" || rp.position === "TE") && (u.targetTrend ?? 0) <= -2) ||
+                (rp.position === "RB" && (u.carryTrend ?? 0) <= -3);
+              if (pct >= 0.08 && usageFalling) shc -= 5;  // buying someone else's sell-high target
+            }
+            return shc;
+          })();
+
+          const strategyScore = r.score + getDirectionTradeScore(r) + lineupSafety.score + partnerFitScore + dispositionScore + oppDirectionScore + formatBonus + balancePenalty + futurePickBonus + handcuffBonus + attemptIntelScore + marketIntelScore + archetypeWinRateBonus + seasonTimingBonus + usageSignalScore + teamWindowBonus + starterQualityBonus + activeTraderBonus + exposureBonus + standingsPressureScore + pickSlotScore + sellHighConfirmScore;
           return {
             r,
             lineupSafety,
@@ -2626,6 +3405,31 @@ function TradeHub({
                 />
               </button>
             </div>
+            {/* ── Prefer Future Picks (Draft Capital Mode only) ── */}
+            {finderDraftCapitalMode && (
+              <div className="flex items-center justify-between gap-3 rounded-lg bg-gray-800/70 px-3 py-2">
+                <div>
+                  <div className="text-sm font-medium text-white">Prefer Future Picks</div>
+                  <div className="text-[11px] text-gray-400">
+                    Prioritize {Number(CURRENT_YEAR) + 1}+ picks over {CURRENT_YEAR} picks.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setFinderPreferFuturePicks((prev) => !prev)}
+                  aria-pressed={finderPreferFuturePicks}
+                  className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full border transition ${
+                    finderPreferFuturePicks ? "border-blue-500 bg-blue-600/80" : "border-gray-700 bg-gray-700"
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-5 w-5 rounded-full bg-white transition ${
+                      finderPreferFuturePicks ? "translate-x-6" : "translate-x-1"
+                    }`}
+                  />
+                </button>
+              </div>
+            )}
             {/* ── Tank Mode ── */}
             <div className={`flex items-center justify-between gap-3 rounded-lg px-3 py-2 border ${finderTankMode ? "bg-red-950/30 border-red-700" : "bg-gray-800/70 border-transparent"}`}>
               <div>
@@ -3131,464 +3935,6 @@ function TradeHub({
       );
     })()}
 
-    {tradeHubSection === "RECOMMENDATIONS" && (() => {
-      if (!selectedLeague) return (
-        <p className="text-gray-400 text-sm">Select a league from the dropdown above to view recommendations.</p>
-      );
-      if (tradeRecommendationCards.length === 0) return (
-        <p className="text-gray-400 text-sm">Recommendations are still building. Load a league and values first, then come back here.</p>
-      );
-
-      const renderAsset = (asset: any) => {
-        if (!asset) return null;
-        if ("expectedValue" in asset && asset.season) {
-          const isSlotted = asset.slot && String(asset.slot).includes(".");
-          const pickTitle = isSlotted
-            ? `${asset.season} ${asset.slot}`
-            : `${asset.season} Rd ${asset.round}${asset.expectedSlot != null ? ` · Predicted Slot ${asset.expectedSlot}` : ""}`;
-          return (
-            <div key={`${asset.season}-${asset.round}-${asset.roster_id}`} className="flex items-center justify-between rounded-lg bg-gray-800 px-3 py-2">
-              <div className="min-w-0">
-                <div className="truncate text-sm text-white">{pickTitle}</div>
-                <div className="text-[11px] text-gray-500">{asset.label}</div>
-              </div>
-              <div className="text-xs font-mono text-blue-300">{asset.expectedValue.toLocaleString()}</div>
-            </div>
-          );
-        }
-        return (
-          <div key={asset.player_id} className="flex items-center justify-between rounded-lg bg-gray-800 px-3 py-2">
-            <div className="min-w-0">
-              <div className="truncate text-sm text-white">{asset.full_name}</div>
-              <div className="text-[11px] text-gray-500">{asset.position} • {asset.team || "FA"}</div>
-            </div>
-            <div className="text-xs font-mono text-gray-300">{(asset.dynValue ?? asset.value ?? 0).toLocaleString()}</div>
-          </div>
-        );
-      };
-
-      // ── Trend-based trade suggestions ──────────────────────────────────────
-      const trendTrades: Array<{
-        type: "sell-window" | "buy-window";
-        giveId: string; receiveId: string;
-        giveVal: number; receiveVal: number;
-        givePct: number; receivePct: number;
-        partnerName: string;
-      }> = [];
-
-      if (historicalSnapshot) {
-        const tMap = new Map<string, number>();
-        Object.entries(historicalSnapshot.players).forEach(([pid, sd]: [string, any]) => {
-          const cv = calcFcValues[pid] ?? 0;
-          const sv = Number(sd.value ?? 0);
-          if (sv > 0 && cv > 0) tMap.set(pid, ((cv - sv) / sv) * 100);
-        });
-
-        const myRoster = rosters.find((r: any) => r.owner_id === user?.user_id);
-        const mySet = new Set<string>(myRoster?.players ?? []);
-        const partnerRosters = rosters.filter((r: any) => r.owner_id && r.owner_id !== user?.user_id && !ignoredOwnerIds.includes(r.owner_id));
-        const MIN_VAL = 500;
-        const MAX_VAL = 4000;
-        const R_MIN = 0.72, R_MAX = 1.35;
-        const usedGA = new Set<string>(), usedRA = new Set<string>();
-        const usedGB = new Set<string>(), usedRB = new Set<string>();
-
-        // Sell Window: give my −5%+ fallers → receive ANY fair-value player from the partner
-        const mySell = [...mySet]
-          .map((id) => ({ id, pct: tMap.get(id) ?? 0, val: calcFcValues[id] ?? 0 }))
-          .filter((x) => x.pct <= -5 && x.val >= MIN_VAL && x.val <= MAX_VAL)
-          .sort((a, b) => a.pct - b.pct);
-
-        outerSell: for (const mine of mySell) {
-          if (trendTrades.filter((t) => t.type === "sell-window").length >= 5) break;
-          if (usedGA.has(mine.id)) continue;
-          for (const pr of partnerRosters) {
-            if (trendTrades.filter((t) => t.type === "sell-window").length >= 5) break outerSell;
-            // Any partner player at fair value — no trend filter, sorted by closest value
-            const cands = ((pr.players ?? []) as string[])
-              .map((id) => ({ id, pct: tMap.get(id) ?? 0, val: calcFcValues[id] ?? 0 }))
-              .filter((x) => x.val >= MIN_VAL && x.val <= MAX_VAL && !usedRA.has(x.id))
-              .sort((a, b) => Math.abs(a.val - mine.val) - Math.abs(b.val - mine.val));
-            for (const theirs of cands) {
-              const ratio = mine.val / theirs.val;
-              if (ratio < R_MIN || ratio > R_MAX) continue;
-              if (!players[mine.id] || !players[theirs.id]) continue;
-              usedGA.add(mine.id); usedRA.add(theirs.id);
-              trendTrades.push({
-                type: "sell-window",
-                giveId: mine.id, receiveId: theirs.id,
-                giveVal: mine.val, receiveVal: theirs.val,
-                givePct: mine.pct, receivePct: theirs.pct,
-                partnerName: users[pr.owner_id] || `Team ${pr.roster_id}`,
-              });
-              break;
-            }
-          }
-        }
-
-        // Buy Window: target partner's +5%+ rising players → give ANY of my fair-value roster players
-        const myGivePool = [...mySet]
-          .map((id) => ({ id, pct: tMap.get(id) ?? 0, val: calcFcValues[id] ?? 0 }))
-          .filter((x) => x.val >= MIN_VAL && x.val <= MAX_VAL);
-
-        outerBuy: for (const pr of partnerRosters) {
-          if (trendTrades.filter((t) => t.type === "buy-window").length >= 5) break;
-          const partnerRising = ((pr.players ?? []) as string[])
-            .filter((id) => !mySet.has(id))
-            .map((id) => ({ id, pct: tMap.get(id) ?? 0, val: calcFcValues[id] ?? 0 }))
-            .filter((x) => x.pct >= 5 && x.val >= MIN_VAL && x.val <= MAX_VAL && !usedRB.has(x.id))
-            .sort((a, b) => b.pct - a.pct);
-          for (const theirs of partnerRising) {
-            if (trendTrades.filter((t) => t.type === "buy-window").length >= 5) break outerBuy;
-            const giveCand = myGivePool
-              .filter((x) => !usedGB.has(x.id))
-              .sort((a, b) => Math.abs(a.val - theirs.val) - Math.abs(b.val - theirs.val))
-              .find((x) => { const r = x.val / theirs.val; return r >= R_MIN && r <= R_MAX; });
-            if (!giveCand) continue;
-            if (!players[giveCand.id] || !players[theirs.id]) continue;
-            usedGB.add(giveCand.id); usedRB.add(theirs.id);
-            trendTrades.push({
-              type: "buy-window",
-              giveId: giveCand.id, receiveId: theirs.id,
-              giveVal: giveCand.val, receiveVal: theirs.val,
-              givePct: giveCand.pct, receivePct: theirs.pct,
-              partnerName: users[pr.owner_id] || `Team ${pr.roster_id}`,
-            });
-          }
-        }
-      }
-
-      const sellTrades = trendTrades.filter((t) => t.type === "sell-window");
-      const buyTrades  = trendTrades.filter((t) => t.type === "buy-window");
-
-      return (
-        <div className="space-y-4">
-          <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Trade Recommendations</div>
-            <div className="mt-1 text-sm text-gray-200">
-              Concrete trade paths built from partner rankings, playoff simulations, and pick-value distributions — with opening angles and negotiation context for each.
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Partner Board</div>
-            <div className="mt-3 grid gap-2 lg:grid-cols-2">
-              {tradePartnerRankings.filter((p: any) => !ignoredOwnerIds.includes(p.ownerId)).slice(0, 6).map((partner: any) => (
-                <div key={partner.rosterId} className="rounded-xl border border-gray-800 bg-gray-950/60 p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-semibold text-white">{partner.ownerName}</div>
-                      <div className="text-[11px] text-gray-500">{partner.fitLabel} • {partner.bestApproach}</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-sm font-semibold text-blue-300">{partner.rankScore}</div>
-                      <div className="text-[10px] uppercase tracking-wide text-gray-500">Partner Score</div>
-                    </div>
-                  </div>
-                  <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-gray-300">
-                    <span className="rounded-full border border-gray-700 bg-gray-900 px-2 py-0.5">Playoffs {Math.round(partner.playoffOdds || 0)}%</span>
-                    <span className="rounded-full border border-gray-700 bg-gray-900 px-2 py-0.5">Title {Math.round(partner.titleOdds || 0)}%</span>
-                    <span className="rounded-full border border-gray-700 bg-gray-900 px-2 py-0.5">Finish {partner.finishRange}</span>
-                    <span className="rounded-full border border-gray-700 bg-gray-900 px-2 py-0.5">1.01 {Math.round(partner.oneOhOneOdds || 0)}%</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* ── Value Movers panel ── */}
-          {historicalSnapshot && (() => {
-            const myRosterSnap = rosters.find((r: any) => r.owner_id === user?.user_id);
-            const myIds: string[] = myRosterSnap?.players ?? [];
-            const movers = myIds
-              .map((id) => {
-                const sv = Number(historicalSnapshot.players[id]?.value ?? 0);
-                const cv = calcFcValues[id] ?? 0;
-                if (sv <= 0 || cv <= 0) return null;
-                const pct = ((cv - sv) / sv) * 100;
-                const p = (players as any)[id];
-                return p ? { id, name: p.full_name, position: p.position, pct, cv } : null;
-              })
-              .filter((x): x is NonNullable<typeof x> => x !== null && Math.abs(x.pct) >= 5)
-              .sort((a, b) => b.pct - a.pct);
-            if (movers.length === 0) return null;
-            const risers = movers.filter((m) => m.pct >= 5);
-            const fallers = movers.filter((m) => m.pct <= -5);
-            return (
-              <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Value Movers — Your Roster</div>
-                <div className="mt-1 text-xs text-gray-500">
-                  Players on your roster that have moved ≥5% since your last snapshot ({new Date(historicalSnapshot.recorded_at).toLocaleDateString()}).
-                </div>
-                <div className="mt-3 grid gap-3 md:grid-cols-2">
-                  {risers.length > 0 && (
-                    <div>
-                      <div className="text-[10px] font-bold uppercase tracking-widest text-green-400 mb-2">Risers — Buy Window</div>
-                      <div className="space-y-1">
-                        {risers.slice(0, 5).map((m) => (
-                          <div key={m.id} className="flex items-center justify-between rounded-lg bg-gray-800 px-3 py-2">
-                            <div className="min-w-0">
-                              <span className="text-sm text-white truncate">{m.name}</span>
-                              <span className="ml-2 text-[10px] text-gray-500 uppercase">{m.position}</span>
-                            </div>
-                            <div className="flex items-center gap-2 shrink-0">
-                              <span className="text-xs font-mono text-gray-400">{m.cv.toLocaleString()}</span>
-                              <span className="text-xs font-semibold text-green-400">+{m.pct.toFixed(1)}%</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {fallers.length > 0 && (
-                    <div>
-                      <div className="text-[10px] font-bold uppercase tracking-widest text-red-400 mb-2">Fallers — Sell Window</div>
-                      <div className="space-y-1">
-                        {fallers.slice(-5).reverse().map((m) => (
-                          <div key={m.id} className="flex items-center justify-between rounded-lg bg-gray-800 px-3 py-2">
-                            <div className="min-w-0">
-                              <span className="text-sm text-white truncate">{m.name}</span>
-                              <span className="ml-2 text-[10px] text-gray-500 uppercase">{m.position}</span>
-                            </div>
-                            <div className="flex items-center gap-2 shrink-0">
-                              <span className="text-xs font-mono text-gray-400">{m.cv.toLocaleString()}</span>
-                              <span className="text-xs font-semibold text-red-400">{m.pct.toFixed(1)}%</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* ── Trend-based trade suggestions ── */}
-          {(sellTrades.length > 0 || buyTrades.length > 0) && (
-            <>
-              <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Value Trend Trades</div>
-                <div className="mt-1 text-sm text-gray-200">
-                  Signal-driven suggestions from your Value Trends snapshot. Sell Window trades offload your falling assets (−5%+) for any fair-value player in the league. Buy Window trades target your league mates&apos; early risers (+5%+) using any of your matching roster assets.
-                </div>
-              </div>
-
-              {[...sellTrades, ...buyTrades].map((t) => {
-                const isSell = t.type === "sell-window";
-                const giveP  = players[t.giveId];
-                const recvP  = players[t.receiveId];
-                if (!giveP || !recvP) return null;
-                const giveAsset = { player_id: t.giveId, full_name: giveP.full_name, position: giveP.position, team: giveP.team, dynValue: t.giveVal };
-                const recvAsset = { player_id: t.receiveId, full_name: recvP.full_name, position: recvP.position, team: recvP.team, dynValue: t.receiveVal };
-                const lastName = (p: any) => p?.full_name?.split(" ").slice(1).join(" ") || p?.full_name || "";
-                return (
-                  <div key={`trend-${t.giveId}-${t.receiveId}`} className={`rounded-2xl border p-5 ${isSell ? "border-red-900/40 bg-red-950/10" : "border-green-900/40 bg-green-950/10"}`}>
-                    <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                      <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className={`text-sm font-semibold ${isSell ? "text-red-300" : "text-green-300"}`}>
-                            {isSell ? "Sell Window Trade" : "Buy Window Trade"}
-                          </span>
-                          <span className="rounded-full border border-blue-700 bg-blue-950/40 px-2 py-0.5 text-[10px] font-semibold text-blue-300">
-                            {t.partnerName}
-                          </span>
-                          <span className="rounded-full border border-gray-700 bg-gray-950/60 px-2 py-0.5 text-[10px] font-semibold text-gray-300">
-                            Value Trend Signal
-                          </span>
-                        </div>
-                        <div className="mt-2 text-sm text-gray-300">
-                          {isSell
-                            ? `Sell ${lastName(giveP)} while down ${Math.abs(t.givePct).toFixed(0)}% and get fair value back in ${lastName(recvP)}${t.receivePct >= 5 ? ` (up ${t.receivePct.toFixed(0)}%)` : ""} before the asset drops further.`
-                            : `${lastName(recvP)} is up ${t.receivePct.toFixed(0)}% — buy in now using ${lastName(giveP)}${t.givePct >= 10 ? ` (up ${t.givePct.toFixed(0)}%, sell high)` : ""} before the market catches on.`
-                          }
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2 text-center md:min-w-[200px]">
-                        <div className="rounded-lg border border-gray-800 bg-gray-950/60 px-3 py-2">
-                          <div className="text-[10px] uppercase tracking-wide text-gray-500">Give Trend</div>
-                          <div className={`mt-1 text-sm font-semibold ${t.givePct < 0 ? "text-red-300" : "text-green-300"}`}>
-                            {t.givePct > 0 ? "+" : ""}{t.givePct.toFixed(1)}%
-                          </div>
-                        </div>
-                        <div className="rounded-lg border border-gray-800 bg-gray-950/60 px-3 py-2">
-                          <div className="text-[10px] uppercase tracking-wide text-gray-500">Receive Trend</div>
-                          <div className="mt-1 text-sm font-semibold text-green-300">+{t.receivePct.toFixed(1)}%</div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 grid gap-4 md:grid-cols-2">
-                      <div>
-                        <div className="mb-2 text-[10px] font-bold uppercase tracking-widest text-red-400">You Give</div>
-                        <div className="space-y-2">{renderAsset(giveAsset)}</div>
-                        <div className="mt-2 text-right text-[11px] text-gray-500">Total {t.giveVal.toLocaleString()}</div>
-                      </div>
-                      <div>
-                        <div className="mb-2 text-[10px] font-bold uppercase tracking-widest text-green-400">You Receive</div>
-                        <div className="space-y-2">{renderAsset(recvAsset)}</div>
-                        <div className="mt-2 text-right text-[11px] text-gray-500">Total {t.receiveVal.toLocaleString()}</div>
-                      </div>
-                    </div>
-                    {selectedLeague && (() => {
-                      const trendFp = buildTradeFingerprint(selectedLeague.league_id, rosters.find((r: any) => (users as any)[r.owner_id] === t.partnerName)?.roster_id ?? 0, [t.giveId], [t.receiveId]);
-                      const alreadyMarked = sessionMarked.has(trendFp);
-                      return (
-                        <button
-                          disabled={alreadyMarked}
-                          onClick={async () => {
-                            const partnerRosterId = rosters.find((r: any) => (users as any)[r.owner_id] === t.partnerName)?.roster_id ?? 0;
-                            await onMarkAttempted({
-                              league_id: selectedLeague.league_id,
-                              partner_roster_id: partnerRosterId,
-                              partner_name: t.partnerName,
-                              give_players: [{ player_id: t.giveId, name: giveP.full_name, position: giveP.position, value: t.giveVal }] as TradeAttemptAsset[],
-                              give_picks: [],
-                              receive_players: [{ player_id: t.receiveId, name: recvP.full_name, position: recvP.position, value: t.receiveVal }] as TradeAttemptAsset[],
-                              receive_picks: [],
-                              source: "RECOMMENDATIONS",
-                              initiated_by: "ME",
-                              status: "PENDING",
-                              counter_details: null,
-                            });
-                            setSessionMarked((prev) => new Set([...prev, trendFp]));
-                          }}
-                          className={`mt-3 w-full text-xs font-semibold px-3 py-1.5 rounded-lg border transition ${alreadyMarked ? "border-green-700 text-green-400 cursor-default" : "border-orange-700 text-orange-400 hover:border-orange-500"}`}
-                        >
-                          {alreadyMarked ? "✓ Offered" : "Mark Attempted"}
-                        </button>
-                      );
-                    })()}
-                  </div>
-                );
-              })}
-            </>
-          )}
-
-          {tradeRecommendationCards.filter((card: any) => !ignoredOwnerIds.includes(card.partnerOwnerId)).map((card: any) => (
-            <div key={`${card.archetype}-${card.partnerName}`} className="rounded-2xl border border-gray-800 bg-gray-900 p-5">
-              <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-semibold text-white">{card.archetype}</span>
-                    <span className="rounded-full border border-blue-700 bg-blue-950/40 px-2 py-0.5 text-[10px] font-semibold text-blue-300">
-                      {card.partnerName}
-                    </span>
-                    <span className="rounded-full border border-gray-700 bg-gray-950/60 px-2 py-0.5 text-[10px] font-semibold text-gray-300">
-                      {card.fitLabel}
-                    </span>
-                    <span className="rounded-full border border-emerald-700 bg-emerald-950/30 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
-                      Score {card.recommendationScore}
-                    </span>
-                  </div>
-                  <div className="mt-2 text-sm text-gray-300">{card.summary}</div>
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-center md:min-w-[220px]">
-                  <div className="rounded-lg border border-gray-800 bg-gray-950/60 px-3 py-2">
-                    <div className="text-[10px] uppercase tracking-wide text-gray-500">Partner Playoffs</div>
-                    <div className="mt-1 text-sm font-semibold text-white">{Math.round(card.partnerPlayoffOdds || 0)}%</div>
-                  </div>
-                  <div className="rounded-lg border border-gray-800 bg-gray-950/60 px-3 py-2">
-                    <div className="text-[10px] uppercase tracking-wide text-gray-500">Package Delta</div>
-                    <div className={`mt-1 text-sm font-semibold ${card.packageDelta >= 0 ? "text-green-300" : "text-red-300"}`}>
-                      {card.packageDelta > 0 ? "+" : ""}{card.packageDelta.toLocaleString()}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-4 grid gap-4 md:grid-cols-2">
-                <div>
-                  <div className="mb-2 text-[10px] font-bold uppercase tracking-widest text-red-400">You Give</div>
-                  <div className="space-y-2">
-                    {card.give.map((asset: any) => renderAsset(asset))}
-                  </div>
-                  <div className="mt-2 text-right text-[11px] text-gray-500">Total {card.giveTotal.toLocaleString()}</div>
-                </div>
-                <div>
-                  <div className="mb-2 text-[10px] font-bold uppercase tracking-widest text-green-400">You Receive</div>
-                  <div className="space-y-2">
-                    {card.receive.map((asset: any) => renderAsset(asset))}
-                  </div>
-                  <div className="mt-2 text-right text-[11px] text-gray-500">Total {card.receiveTotal.toLocaleString()}</div>
-                </div>
-              </div>
-
-              <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-3">
-                  <div className="text-[10px] uppercase tracking-wide text-blue-400">Why You Do It</div>
-                  <div className="mt-1 text-xs text-gray-300">{card.whyYou}</div>
-                </div>
-                <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-3">
-                  <div className="text-[10px] uppercase tracking-wide text-orange-400">Why They Might</div>
-                  <div className="mt-1 text-xs text-gray-300">{card.whyThem}</div>
-                </div>
-                <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-3">
-                  <div className="text-[10px] uppercase tracking-wide text-violet-400">Best Approach</div>
-                  <div className="mt-1 text-xs text-gray-300">{card.bestApproach}</div>
-                </div>
-                <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-3">
-                  <div className="text-[10px] uppercase tracking-wide text-cyan-400">Opening Offer</div>
-                  <div className="mt-1 text-xs text-gray-300">{card.openingOffer}</div>
-                </div>
-              </div>
-
-              <div className="mt-3 rounded-xl border border-gray-800 bg-gray-950/60 p-3">
-                <div className="text-[10px] uppercase tracking-wide text-gray-500">Negotiation Notes</div>
-                <div className="mt-2 space-y-1">
-                  {(card.negotiationNotes || []).map((note: string) => (
-                    <div key={note} className="text-xs text-gray-300">{note}</div>
-                  ))}
-                </div>
-              </div>
-              {selectedLeague && (() => {
-                const partnerRosterId = rosters.find((r: any) => (users as any)[r.owner_id] === card.partnerName)?.roster_id ?? 0;
-                const givePlayerIds = (card.give || []).filter((a: any) => a.player_id).map((a: any) => a.player_id);
-                const recvPlayerIds = (card.receive || []).filter((a: any) => a.player_id).map((a: any) => a.player_id);
-                const cardFp = buildTradeFingerprint(selectedLeague.league_id, partnerRosterId, givePlayerIds, recvPlayerIds);
-                const alreadyMarked = sessionMarked.has(cardFp);
-                return (
-                  <button
-                    disabled={alreadyMarked}
-                    onClick={async () => {
-                      const serializeAssets = (assets: any[]) => {
-                        const givePlayers: TradeAttemptAsset[] = [];
-                        const givePicks: TradeAttemptPick[] = [];
-                        for (const a of assets) {
-                          if (a.player_id) givePlayers.push({ player_id: a.player_id, name: a.full_name || a.name || "", position: a.position || "", value: a.dynValue ?? a.value ?? 0 });
-                          else if (a.season) givePicks.push({ key: `${a.season}-${a.round}-${a.roster_id}`, label: a.slot ? `${a.season} ${a.slot}` : `${a.season} Rd ${a.round}`, value: a.expectedValue ?? 0 });
-                        }
-                        return { players: givePlayers, picks: givePicks };
-                      };
-                      const giveData = serializeAssets(card.give || []);
-                      const recvData = serializeAssets(card.receive || []);
-                      await onMarkAttempted({
-                        league_id: selectedLeague.league_id,
-                        partner_roster_id: partnerRosterId,
-                        partner_name: card.partnerName,
-                        give_players: giveData.players,
-                        give_picks: giveData.picks,
-                        receive_players: recvData.players,
-                        receive_picks: recvData.picks,
-                        source: "RECOMMENDATIONS",
-                        initiated_by: "ME",
-                        status: "PENDING",
-                        counter_details: null,
-                      });
-                      setSessionMarked((prev) => new Set([...prev, cardFp]));
-                    }}
-                    className={`mt-3 w-full text-xs font-semibold px-3 py-1.5 rounded-lg border transition ${alreadyMarked ? "border-green-700 text-green-400 cursor-default" : "border-orange-700 text-orange-400 hover:border-orange-500"}`}
-                  >
-                    {alreadyMarked ? "✓ Offered" : "Mark Attempted"}
-                  </button>
-                );
-              })()}
-            </div>
-          ))}
-        </div>
-      );
-    })()}
-
     {/* ── Trade Log ── */}
     {tradeHubSection === "TRADE_LOG" && (() => {
       const logPickLabel = (p: any) => p.resolvedSlot ?? `${p.season} Rd ${p.round}`;
@@ -3821,7 +4167,7 @@ function TradeHub({
           )}
 
           {!loadingTradeAttempts && tradeAttemptsLeagueId === selectedLeague.league_id && leagueAttempts.length === 0 && (
-            <p className="text-sm text-gray-400">No attempted trades recorded for {selectedLeague.name} yet. Use &quot;Mark Attempted&quot; on any trade card in the Finder, Calculator, or Recommendations.</p>
+            <p className="text-sm text-gray-400">No attempted trades recorded for {selectedLeague.name} yet. Use &quot;Mark Attempted&quot; on any trade card in the Finder or Calculator.</p>
           )}
 
           {!loadingTradeAttempts && leagueAttempts.map((attempt) => {
