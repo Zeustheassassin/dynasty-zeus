@@ -5,7 +5,10 @@ import { usePlayers } from "../lib/PlayersContext";
 
 // ── Module-level constants ─────────────────────────────────────────────────
 const ROOKIE_YEAR = String(new Date().getFullYear());
-const ROUNDS = [1, 2, 3, 4];
+// Upper bound for the draft grid — supports up to 6-round rookie drafts.
+// The board trims this to the league's actual round count via activeRounds.
+const MAX_ROUNDS = 6;
+const ROUNDS = Array.from({ length: MAX_ROUNDS }, (_, i) => i + 1);
 
 const normalizeRookieName = (name: string) =>
   (name || "")
@@ -734,6 +737,14 @@ function DraftHub({
 
       {draftHubSection === "BOARD" && draftSettings && (
         <div className="overflow-x-auto">
+          {/* Derive actual round count from draft settings; fall back to 4 */}
+          {(() => {
+          const activeRounds = ROUNDS.slice(
+            0,
+            Number(draftSettings?.settings?.rounds ?? draftSettings?.rounds ?? 4)
+          );
+          return (
+          <>
           {/* Legend */}
           <div className="flex items-center gap-4 mb-3 text-[10px] text-gray-500 flex-wrap">
             <span className="flex items-center gap-1">
@@ -749,7 +760,7 @@ function DraftHub({
           {draftPicks.length > 0 && (
             <div className="mb-4 p-3 bg-gray-800/50 rounded-xl">
               <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-2">
-                Positions Drafted — {draftPicks.length} of {(rosters.length || 12) * ROUNDS.length} picks made
+                Positions Drafted — {draftPicks.length} of {(rosters.length || 12) * activeRounds.length} picks made
               </div>
               <div className="flex flex-wrap gap-2">
                 {(["QB", "RB", "WR", "TE"] as const).map((pos) => {
@@ -774,7 +785,8 @@ function DraftHub({
             </div>
           )}
 
-          {/* Draft grid */}
+          {/* Draft grid — centered when content fits; scrollable when it overflows */}
+          <div className="flex justify-center">
           <div
             className="inline-grid min-w-max gap-y-2"
             style={{ gridTemplateColumns: `repeat(${rosters.length}, minmax(9rem, 1fr))` }}
@@ -798,8 +810,8 @@ function DraftHub({
               );
             })}
 
-            {/* Pick cells — unchanged */}
-            {ROUNDS.flatMap((round) => {
+            {/* Pick cells — respects league's actual round count via activeRounds */}
+            {activeRounds.flatMap((round) => {
               const roundPicks = Array.from({ length: rosters.length }, (_, i) => {
                 const slot = `${round}.${String(i + 1).padStart(2, "0")}`;
                 const pick = allPicks.find((p: any) => p.slot === slot);
@@ -932,6 +944,8 @@ function DraftHub({
               });
             })}
           </div>
+          </div>{/* /centering flex wrapper */}
+          </> ); })()}
         </div>
       )}
 
@@ -1248,7 +1262,8 @@ function DraftHub({
           {Object.keys(pickFcValues).length === 0 ? (
             <div className="text-gray-400 text-sm">Pick values are loading…</div>
           ) : (
-            ROUNDS.map((round) => {
+            // Use actual draft round count if available, fall back to 4
+            ROUNDS.slice(0, Number(draftSettings?.settings?.rounds ?? draftSettings?.rounds ?? 4)).map((round) => {
               const numSlots = rosters.length || 12;
               return (
                 <div key={round} className="mb-6">

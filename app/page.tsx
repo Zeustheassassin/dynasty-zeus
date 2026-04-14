@@ -6,11 +6,24 @@ import Dashboard from "../components/Dashboard";
 import AlertsPage from "../components/AlertsPage";
 import ManagementHub from "../components/ManagementHub";
 import GamedayHub from "../components/GamedayHub";
+// ── Hub loading skeleton ───────────────────────────────────────────────────
+// Shown while the code-split chunk downloads. Keeps the layout stable and
+// avoids the blank-flash that would otherwise appear on first navigation.
+function HubSkeleton() {
+  return (
+    <div className="max-w-6xl mx-auto px-4 py-6 space-y-4 animate-pulse">
+      <div className="h-16 rounded-2xl bg-gray-800/60" />
+      <div className="h-10 rounded-xl bg-gray-800/40 w-1/3" />
+      <div className="h-64 rounded-2xl bg-gray-800/30" />
+    </div>
+  );
+}
+
 // Large hubs — code-split so they only load when the user navigates to them
-const DraftHub = dynamic(() => import("../components/DraftHub"), { ssr: false });
-const DataHub = dynamic(() => import("../components/DataHub"), { ssr: false });
-const LeagueHub = dynamic(() => import("../components/LeagueHub"), { ssr: false });
-const TradeHub = dynamic(() => import("../components/TradeHub"), { ssr: false });
+const DraftHub = dynamic(() => import("../components/DraftHub"), { ssr: false, loading: HubSkeleton });
+const DataHub = dynamic(() => import("../components/DataHub"), { ssr: false, loading: HubSkeleton });
+const LeagueHub = dynamic(() => import("../components/LeagueHub"), { ssr: false, loading: HubSkeleton });
+const TradeHub = dynamic(() => import("../components/TradeHub"), { ssr: false, loading: HubSkeleton });
 import { LEAGUE_HUB_GROUPS } from "../lib/leagueHubGroups";
 import { supabase } from "../lib/supabaseclient";
 import {
@@ -29,38 +42,27 @@ import {
   getLeagueMateMotivation, getTradePartnerFitLabel, getTradePartnerFit,
   getCrossLeaguePreferenceFit, getCrossLeagueTradeBehaviorFit,
   fetchFantasyCalcValues, formatRelativeDate, normalizeRookieName,
-  buildSleeperRookieBoard,
 } from "../lib/helpers";
 import { PROJ_SOURCES, useProjections } from "../hooks/useProjections";
 import { useSleeperUser } from "../hooks/useSleeperUser";
 import { usePlayerStats } from "../hooks/usePlayerStats";
+import { useManagementState } from "../hooks/useManagementState";
+import { useRookieBoardState, ROOKIE_YEAR, ROOKIE_BOARD_VERSION, ROOKIE_BOARD_RESET_KEY } from "../hooks/useRookieBoardState";
 import { PlayersProvider } from "../lib/PlayersContext";
+import { fetchSleeperUser } from "../lib/sleeperUserCache";
 import type { ProjSourceId, LeagueHubTab, AlertsCenterItem, WatchlistEntry, TradeAttempt, TradeAttemptStatus } from "../lib/types";
 
 // -------------------------
 // MODULE-LEVEL CONSTANTS (page-specific)
 // -------------------------
-const ROOKIE_YEAR = CURRENT_YEAR;
-const ROOKIE_BOARD_POSITIONS = new Set(["QB", "RB", "WR", "TE"]);
-const ROOKIE_BOARD_VERSION = `${ROOKIE_YEAR}_sf_v5`;
+// ROOKIE_YEAR, ROOKIE_BOARD_VERSION, ROOKIE_BOARD_RESET_KEY imported from useRookieBoardState
 
 // Module-level in-memory player map cache — avoids re-fetching/re-parsing the 6MB Sleeper player
 // payload if loadPlayers is called more than once in the same browser session (e.g. strict-mode
 // double-invoke in dev, or a Sleeper reconnect event).
 let _playersInMemory: Record<string, any> | null = null;
 
-// Module-level Sleeper user cache — survives re-renders and league switches within the same session.
-// Keyed by owner_id (Sleeper user_id). Eliminates the N+1 user fetch when re-selecting a league
-// or when multiple leagues share owners (very common in multi-league setups).
-const _sleeperUserCache = new Map<string, any>();
-async function fetchSleeperUser(ownerId: string): Promise<any> {
-  if (_sleeperUserCache.has(ownerId)) return _sleeperUserCache.get(ownerId);
-  const data = await fetch(`https://api.sleeper.app/v1/user/${ownerId}`).then((r) => r.json());
-  if (data?.user_id) _sleeperUserCache.set(ownerId, data);
-  return data;
-}
-const ROOKIE_BOARD_RESET_KEY = `rookieBoardReset_${ROOKIE_BOARD_VERSION}`;
-const ROOKIE_BOARD_ADP_URL = `https://api.sleeper.app/projections/nfl/${ROOKIE_YEAR}?season_type=regular&position=QB&position=RB&position=WR&position=TE&order_by=adp_dynasty_2qb`;
+// fetchSleeperUser imported from lib/sleeperUserCache (shared with useLeagues)
 
 // Static — never changes, defined at module level so it's a stable reference in useMemo dep arrays
 const ROLE_PRIORITY: Record<string, number> = { starter: 0, bench: 1, taxi: 2 };
@@ -170,7 +172,6 @@ const [loadingTradeAttempts, setLoadingTradeAttempts] = useState(false);
 const [allTradeAttempts, setAllTradeAttempts] = useState<TradeAttempt[]>([]);
 const [tradeHubSection, setTradeHubSection] = useState<"CALCULATOR" | "FINDER" | "RECOMMENDATIONS" | "TRADE_LOG" | "ATTEMPTS">("CALCULATOR");
 const [finderSeed, setFinderSeed] = useState(() => Math.random());
-const [finderDraftCapitalMode, setFinderDraftCapitalMode] = useState(false);
 const [leagueHubTab, setLeagueHubTab] = useState<LeagueHubTab>("OVERVIEW");
 const [leagueOverviewData, setLeagueOverviewData] = useState<Record<string, any>>({});
 const [loadingLeagueOverview, setLoadingLeagueOverview] = useState(false);
@@ -208,6 +209,11 @@ const [playerNotes, setPlayerNotes] = useState<Record<string, string>>(() => {
 const [playerDispositions, setPlayerDispositions] = useState<Record<string, { sell: string; buy: string }>>(() => {
   try { return JSON.parse(localStorage.getItem("playerDispositions_v1") || "{}"); } catch { return {}; }
 });
+// Per-league player tags: CORE = Do Not Sell, WANT_TO_TRADE = actively shopping
+// Shape: Record<leagueId, Record<playerId, "CORE" | "WANT_TO_TRADE">>
+const [leaguePlayerTags, setLeaguePlayerTags] = useState<Record<string, Record<string, "CORE" | "WANT_TO_TRADE">>>(() => {
+  try { return JSON.parse(localStorage.getItem("leaguePlayerTags_v1") || "{}"); } catch { return {}; }
+});
 const [activityTransactions, setActivityTransactions] = useState<any[]>([]);
 const [loadingActivity, setLoadingActivity] = useState(false);
 const [leagueWeeklyMatchups, setLeagueWeeklyMatchups] = useState<Record<string, any[]>>({});
@@ -241,10 +247,8 @@ const nflStatsSeason = nflState?.season_type === "regular" ? (nflState?.season ?
 const nflStatsWeek   = nflState?.season_type === "regular" ? (nflState?.display_week ?? nflState?.week ?? null) : null;
 const { playerStats } = usePlayerStats(nflStatsSeason, nflStatsWeek);
 
-const [finderPlayerSearch, setFinderPlayerSearch] = useState("");
 const [finderPinnedPlayerId, setFinderPinnedPlayerId] = useState<string | null>(null);
 const [finderTargetOppRosterId, setFinderTargetOppRosterId] = useState<number | null>(null);
-const [finderTargetPlayerSearch, setFinderTargetPlayerSearch] = useState("");
 const [finderTargetPlayerId, setFinderTargetPlayerId] = useState<string | null>(null);
 
 const [draftHubSection, setDraftHubSection] = useState<"BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES">("BOARD");
@@ -264,7 +268,6 @@ const toggleIgnoredOwner = (ownerId: string) => {
 };
 const [pickFcValues, setPickFcValues] = useState<Record<string, number>>({});
 const [calcFcValues, setCalcFcValues] = useState<Record<string, number>>({});
-const [fcNameValues, setFcNameValues] = useState<Record<string, number>>({});
 const [loadingCalcValues, setLoadingCalcValues] = useState(false);
 const [calcValuesLeagueId, setCalcValuesLeagueId] = useState<string | null>(null);
 const [calcOpponentRosterId, setCalcOpponentRosterId] = useState<number | null>(null);
@@ -302,14 +305,10 @@ const [standings, setStandings] = useState<any[]>([]);
   const [shareSearch, setShareSearch] = useState("");
   const [sharePosition, setSharePosition] = useState("ALL");
   const [freeAgents, setFreeAgents] = useState<any[]>([]);
-  const [rookies, setRookies] = useState<any[]>([]);
-  const [dragIndex, setDragIndex] = useState<number | null>(null);
-  const [rookieSearch, setRookieSearch] = useState("");
   const [userCache, setUserCache] = useState<any>({});
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
 const [externalShares, setExternalShares] = useState<any>(null);
 const [loadingShares, setLoadingShares] = useState(false);
-const [tempRanks, setTempRanks] = useState<{ [key: number]: string }>({});
 const [dashboardAlerts, setDashboardAlerts] = useState<AlertsCenterItem[]>([]);
 const [dismissedAlertIds, setDismissedAlertIds] = useState<string[]>([]);
 const [watchlistEntries, setWatchlistEntries] = useState<WatchlistEntry[]>([]);
@@ -321,43 +320,35 @@ const [leagueTransactions, setLeagueTransactions] = useState<any[]>([]);
 const [loadingTransactions, setLoadingTransactions] = useState(false);
 
 // ── MANAGEMENT HUB ────────────────────────────────────────────
-const [mgmtHubTab, setMgmtHubTab] = useState<"LEAGUE_MGMT" | "COMMISSIONER_TOOLS">("LEAGUE_MGMT");
-// leagueMgmtData: { [leagueId]: { paid_2026, paid_2027, paid_2028, paid_2029, commissioner, year_in_advance, picks_traded, amount } }
+const {
+  mgmtHubTab, setMgmtHubTab,
+  leagueMgmtData, setLeagueMgmtData,
+  commPaymentsData, setCommPaymentsData,
+  commToolsLeagueId, setCommToolsLeagueId,
+  commToolsRosters, setCommToolsRosters,
+  commToolsUsers, setCommToolsUsers,
+  loadingCommToolsRosters, setLoadingCommToolsRosters,
+} = useManagementState(supabaseUser);
+
+// ── ROOKIE BOARD ───────────────────────────────────────────────
+const {
+  rookies, setRookies,
+  dragIndex, setDragIndex,
+  rookieSearch, setRookieSearch,
+  tempRanks, setTempRanks,
+  fcNameValues,
+  handleRankChange,
+} = useRookieBoardState(supabaseUser);
+
 const [oppRosterTab, setOppRosterTab] = useState("QB");
 const [oppRosterOwnerId, setOppRosterOwnerId] = useState<string>("");
 const [oppRosterSearch, setOppRosterSearch] = useState("");
-const [leagueMgmtData, setLeagueMgmtData] = useState<Record<string, Record<string, any>>>({});
-// commPaymentsData: { [leagueId]: { [ownerId]: { paid_2026, paid_2027, paid_2028, paid_2029 } } }
-const [commPaymentsData, setCommPaymentsData] = useState<Record<string, Record<string, Record<string, boolean>>>>({});
-const [commToolsLeagueId, setCommToolsLeagueId] = useState<string>("");
-const [commToolsRosters, setCommToolsRosters] = useState<any[]>([]);
-const [commToolsUsers, setCommToolsUsers] = useState<Record<string, any>>({});
-const [loadingCommToolsRosters, setLoadingCommToolsRosters] = useState(false);
 
-// 🔥 BUILD FULL DRAFT BOARD (MATCHES PILLS)
 
-const handleRankChange = (currentIndex: number, newRank: string) => {
-  const rank = parseInt(newRank);
-  
-  if (!rank || rank < 1 || rank > rookies.length) return;
-
-  const updated = [...rookies];
-  const [moved] = updated.splice(currentIndex, 1);
-
-  updated.splice(rank - 1, 0, moved);
-
-  setRookies(updated);
-};
- 
-
-// Ref so the rookie-board save effect can read the current user
-// without adding supabaseUser as a dependency (which would cause it
-// to fire on login and overwrite Supabase with stale localStorage data).
+// Stable ref so alert save effects can read the current user without
+// declaring supabaseUser as a dependency (avoids unintended re-fires on login).
 const supabaseUserRef = useRef<any>(null);
 useEffect(() => { supabaseUserRef.current = supabaseUser; }, [supabaseUser]);
-// Flag: once Supabase has provided the authoritative board, prevent
-// the sheet/ADP load effect from overwriting it with localStorage data.
-const rookieBoardSupabaseLoaded = useRef(false);
 const alertStoreScope = supabaseUser?.id || "guest";
 const watchlistStorageKey = `watchlists_v1_${alertStoreScope}`;
 const alertStorageKey = `alerts_v1_${alertStoreScope}`;
@@ -545,50 +536,8 @@ useEffect(() => {
       }
     });
   // Rookie board is handled by the loadRookieBoard effect (depends on supabaseUser)
-  // 3. League management checkboxes
-  supabase
-    .from("league_management")
-    .select("*")
-    .eq("user_id", supabaseUser.id)
-    .then(({ data }) => {
-      if (data && data.length > 0) {
-        const map: Record<string, Record<string, boolean>> = {};
-        data.forEach((row: any) => {
-          map[row.league_id] = {
-            paid_2026: row.paid_2026,
-            paid_2027: row.paid_2027,
-            paid_2028: row.paid_2028,
-            paid_2029: row.paid_2029,
-            commissioner: row.commissioner,
-            year_in_advance: row.year_in_advance,
-            picks_traded: row.picks_traded,
-            amount: row.amount ?? "",
-          };
-        });
-        setLeagueMgmtData(map);
-      }
-    });
-  // 4. Commissioner payments
-  supabase
-    .from("commissioner_payments")
-    .select("*")
-    .eq("user_id", supabaseUser.id)
-    .then(({ data }) => {
-      if (data && data.length > 0) {
-        const map: Record<string, Record<string, Record<string, boolean>>> = {};
-        data.forEach((row: any) => {
-          if (!map[row.league_id]) map[row.league_id] = {};
-          map[row.league_id][row.owner_id] = {
-            paid_2026: row.paid_2026,
-            paid_2027: row.paid_2027,
-            paid_2028: row.paid_2028,
-            paid_2029: row.paid_2029,
-          };
-        });
-        setCommPaymentsData(map);
-      }
-    });
-  // 5. Watchlists
+  // 3. League management + commissioner payments are loaded by useManagementState hook
+  // 4. Watchlists
   supabase
     .from("watchlists")
     .select("*")
@@ -681,6 +630,29 @@ useEffect(() => {
         setPlayerDispositions((prev) => {
           const merged = { ...prev, ...map };
           try { localStorage.setItem("playerDispositions_v1", JSON.stringify(merged)); } catch {}
+          return merged;
+        });
+      }
+    });
+  // 9. Per-league player tags (CORE = Do Not Sell, WANT_TO_TRADE = actively shopping)
+  supabase
+    .from("league_player_tags")
+    .select("league_id, player_id, tag")
+    .eq("user_id", supabaseUser.id)
+    .then(({ data }) => {
+      if (data && data.length > 0) {
+        const map: Record<string, Record<string, "CORE" | "WANT_TO_TRADE">> = {};
+        data.forEach((row: any) => {
+          const lid = String(row.league_id);
+          if (!map[lid]) map[lid] = {};
+          map[lid][String(row.player_id)] = row.tag as "CORE" | "WANT_TO_TRADE";
+        });
+        setLeaguePlayerTags((prev) => {
+          const merged: Record<string, Record<string, "CORE" | "WANT_TO_TRADE">> = {};
+          for (const lid of new Set([...Object.keys(prev), ...Object.keys(map)])) {
+            merged[lid] = { ...(prev[lid] ?? {}), ...(map[lid] ?? {}) };
+          }
+          try { localStorage.setItem("leaguePlayerTags_v1", JSON.stringify(merged)); } catch {}
           return merged;
         });
       }
@@ -800,7 +772,6 @@ const signOut = async () => {
   setShowLoginPassword(false);
   setSupabaseError("");
   setSupabaseMessage("");
-  rookieBoardSupabaseLoaded.current = false;
   // Clear localStorage user-specific data so next user starts fresh
   localStorage.removeItem("leagueNotes");
   localStorage.removeItem(`rookieBoard_${ROOKIE_BOARD_VERSION}`);
@@ -895,10 +866,13 @@ useEffect(() => {
   loadPlayers();
 }, []);
 
-// Load league-specific FC values as soon as Trade Hub is opened — don't wait for sub-tab
+// Load league-specific FC values and redraft values as soon as Trade Hub is opened.
+// redraftValues powers the redraft-rank half of the direction bucket — if it's empty
+// when the direction memo fires it produces a garbage bucket (usually "Purgatory").
 useEffect(() => {
   if (mainTab === "TRADE_HUB" && selectedLeague?.league_id) {
     loadCalcValues(selectedLeague.league_id);
+    loadRedraftValues();
   }
 }, [mainTab, selectedLeague?.league_id]);
 
@@ -1481,236 +1455,7 @@ useEffect(() => {
   }
 }, [mainTab, dataHubTab]);
 
-useEffect(() => {
-  if (rookies.length > 0) {
-    localStorage.setItem(`rookieBoard_${ROOKIE_BOARD_VERSION}`, JSON.stringify(rookies));
-    const user = supabaseUserRef.current;
-    if (user) {
-      // Save just the ordered names — small payload, easy to apply to any canonical board
-      const orderedNames = rookies.map((r: any) => r.name);
-      supabase.from("rookie_board").upsert(
-        { user_id: user.id, year: ROOKIE_BOARD_VERSION, players: orderedNames, updated_at: new Date().toISOString() },
-        { onConflict: "user_id,year" }
-      ).then(({ error }: { error: any }) => {
-        if (error) console.error("rookie_board save failed:", error.message, error.code);
-      });
-    }
-  }
-}, [rookies]); // intentionally omits supabaseUser — use ref to avoid overwriting Supabase on login
-// Single effect handles all rookie board loading.
-// Runs on mount AND whenever supabaseUser changes (login/logout).
-// Order of preference: Supabase (if logged in) > localStorage > ADP default.
-useEffect(() => {
-const loadRookieBoard = async () => {
-    // 1. Fetch sheet, Sleeper ADP (for metadata), and FC Superflex (2QB) raw data in parallel
-    const [sheetText, adpResponse, fcRaw] = await Promise.all([
-      fetch('/api/rookie-board-sheet').then((res) => res.text()),
-      fetch(ROOKIE_BOARD_ADP_URL).then((res) => res.json()).catch(() => []),
-      fetch(`https://api.fantasycalc.com/values/current?isDynasty=true&numQbs=2&numTeams=12&ppr=1`)
-        .then((res) => res.json()).catch(() => []),
-    ]);
-
-    // Build name → FC value map and sleeperId → FC value map
-    const fcByName = new Map<string, number>();
-    const fcBySleeperId = new Map<string, number>();
-
-    if (Array.isArray(fcRaw)) {
-      fcRaw.forEach((entry: any) => {
-        if (entry.player?.position === "PICK") return;
-        const fullName = entry.player?.name || `${entry.player?.firstName || ""} ${entry.player?.lastName || ""}`.trim();
-        if (fullName && typeof entry.value === "number") {
-          fcByName.set(normalizeRookieName(fullName), entry.value);
-        }
-        const sid = entry.player?.sleeperId;
-        if (sid && typeof entry.value === "number") {
-          fcBySleeperId.set(String(sid), entry.value);
-        }
-      });
-      setFcNameValues(Object.fromEntries(fcByName));
-    }
-
-    const sheetPlayers = sheetText
-      .split("\n")
-      .slice(1)
-      .map((row) => {
-        const cols = row.split(",");
-        return {
-          name: cols[0]?.replace(/"/g, "").trim(),
-          position: cols[1]?.replace(/"/g, "").trim(),
-        };
-      })
-      .filter((player) => player.name && player.name !== "Player Invalid");
-
-    // Sleeper ADP only used for player_id, position, team metadata — NOT for sort order
-    const adpByName = new Map<string, any>();
-    adpResponse
-      .filter((entry: any) =>
-        entry?.player &&
-        entry?.stats &&
-        entry.player.first_name !== "Player" &&
-        ROOKIE_BOARD_POSITIONS.has(entry.player.position) &&
-        typeof entry.stats.adp_dynasty_2qb === "number"
-      )
-      .forEach((entry: any) => {
-        const playerName = `${entry.player.first_name} ${entry.player.last_name}`.trim();
-        const normalizedName = normalizeRookieName(playerName);
-        if (!normalizedName || adpByName.has(normalizedName)) return;
-        adpByName.set(normalizedName, {
-          player_id: String(entry.player_id),
-          name: playerName,
-          position: entry.player.position,
-          team: entry.player.team || "",
-          adp: entry.stats.adp_dynasty_2qb,
-        });
-      });
-
-    const canonicalBoard = sheetPlayers
-      .map((player) => {
-        const norm = normalizeRookieName(player.name);
-        const adpPlayer = adpByName.get(norm);
-        return {
-          player_id: adpPlayer?.player_id || null,
-          name: adpPlayer?.name || player.name,
-          position: adpPlayer?.position || player.position,
-          team: adpPlayer?.team || "",
-          adp: typeof adpPlayer?.adp === "number" ? adpPlayer.adp : Number.MAX_SAFE_INTEGER,
-          // Match FC value: name first, then Sleeper ID fallback
-          fcValue: fcByName.get(norm)
-            ?? fcByName.get(normalizeRookieName(adpPlayer?.name || ""))
-            ?? (adpPlayer?.player_id ? (fcBySleeperId.get(adpPlayer.player_id) ?? 0) : 0),
-        };
-      })
-      // Sort by FantasyCalc Superflex dynasty value (descending). Falls back to Sleeper ADP then name.
-      .sort((a, b) => {
-        if (b.fcValue !== a.fcValue) return b.fcValue - a.fcValue;
-        if (a.adp !== b.adp) return a.adp - b.adp;
-        return a.name.localeCompare(b.name);
-      });
-
-    // 2. Try Supabase for saved order (if logged in) — isolated try/catch so a network
-    //    error here doesn't abort the whole function and leave rookies state stale.
-    if (supabaseUser) {
-      try {
-        const { data, error } = await supabase
-          .from("rookie_board")
-          .select("players")
-          .eq("user_id", supabaseUser.id)
-          .eq("year", ROOKIE_BOARD_VERSION)
-          .single();
-        if (!error && data?.players && Array.isArray(data.players) && data.players.length > 0) {
-          const orderMap = new Map<string, number>(
-            (data.players as string[]).map((name, i) => [normalizeRookieName(name), i])
-          );
-          const ordered = [...canonicalBoard].sort((a, b) => {
-            const ia = orderMap.get(normalizeRookieName(a.name)) ?? 9999;
-            const ib = orderMap.get(normalizeRookieName(b.name)) ?? 9999;
-            if (ia !== ib) return ia - ib;
-            if (b.fcValue !== a.fcValue) return b.fcValue - a.fcValue;
-            return a.adp - b.adp;
-          });
-          localStorage.setItem(`rookieBoard_${ROOKIE_BOARD_VERSION}`, JSON.stringify(ordered));
-          setRookies(ordered);
-          return;
-        }
-      } catch {
-        // Supabase unreachable — fall through to localStorage / FC default
-      }
-    }
-
-    // 3. Fall back to localStorage order
-    const saved = localStorage.getItem(`rookieBoard_${ROOKIE_BOARD_VERSION}`);
-    const hasReset = localStorage.getItem(ROOKIE_BOARD_RESET_KEY) === "true";
-
-    if (!hasReset || !saved) {
-      setRookies(canonicalBoard);
-      localStorage.setItem(`rookieBoard_${ROOKIE_BOARD_VERSION}`, JSON.stringify(canonicalBoard));
-      localStorage.setItem(ROOKIE_BOARD_RESET_KEY, "true");
-      return;
-    }
-
-    const savedNames: string[] = JSON.parse(saved).map((p: any) =>
-      typeof p === "string" ? p : p.name
-    );
-    const canonicalNames = new Set(canonicalBoard.map((p) => normalizeRookieName(p.name)));
-    const validSaved = savedNames.filter((n) => canonicalNames.has(normalizeRookieName(n)));
-    const orderMap = new Map(validSaved.map((name, i) => [normalizeRookieName(name), i]));
-    const merged = [...canonicalBoard].sort((a, b) => {
-      const ia = orderMap.get(normalizeRookieName(a.name)) ?? 9999;
-      const ib = orderMap.get(normalizeRookieName(b.name)) ?? 9999;
-      if (ia !== ib) return ia - ib;
-      // New players not in saved order: sort by FC value then ADP
-      if (b.fcValue !== a.fcValue) return b.fcValue - a.fcValue;
-      return a.adp - b.adp;
-    });
-
-    localStorage.setItem(`rookieBoard_${ROOKIE_BOARD_VERSION}`, JSON.stringify(merged));
-    setRookies(merged);
-  };
-
-  loadRookieBoard().catch(() => {});
-}, [supabaseUser?.id]); // use ID not object — prevents re-runs when auth refreshes recreate the user object
-useEffect(() => {
-  return;
-  if (Object.keys(players).length === 0) return;
-
-  const sleeperBoard = buildSleeperRookieBoard(players);
-  const hasReset = localStorage.getItem(ROOKIE_BOARD_RESET_KEY) === "true";
-
-  if (!hasReset) {
-    setRookies(sleeperBoard);
-    localStorage.setItem(`rookieBoard_${ROOKIE_BOARD_VERSION}`, JSON.stringify(sleeperBoard));
-    localStorage.setItem(ROOKIE_BOARD_RESET_KEY, "true");
-    return;
-  }
-
-  const saved = localStorage.getItem(`rookieBoard_${ROOKIE_BOARD_VERSION}`);
-
-  if (!saved) {
-    setRookies(sleeperBoard);
-    return;
-  }
-
-  const savedData = JSON.parse(saved || "[]");
-  const savedById: any = {};
-  const savedByName: any = {};
-
-  savedData.forEach((player: any) => {
-    if (player?.name === "Player Invalid") return;
-    if (player?.player_id) {
-      savedById[String(player.player_id)] = player;
-    }
-    if (player?.name) {
-      savedByName[player.name] = player;
-    }
-  });
-
-  const merged = sleeperBoard.map((player: any) => {
-    const savedPlayer = savedById[player.player_id] || savedByName[player.name];
-    return savedPlayer ? { ...player, ...savedPlayer, ...player } : player;
-  });
-
-  merged.sort((a: any, b: any) => {
-    const savedIndexA = savedData.findIndex((player: any) =>
-      String(player?.player_id || "") === a.player_id || player?.name === a.name
-    );
-    const savedIndexB = savedData.findIndex((player: any) =>
-      String(player?.player_id || "") === b.player_id || player?.name === b.name
-    );
-
-    if (savedIndexA === -1 && savedIndexB === -1) {
-      const rankA = typeof a.search_rank === "number" ? a.search_rank : Number.MAX_SAFE_INTEGER;
-      const rankB = typeof b.search_rank === "number" ? b.search_rank : Number.MAX_SAFE_INTEGER;
-      return rankA - rankB;
-    }
-
-    if (savedIndexA === -1) return 1;
-    if (savedIndexB === -1) return -1;
-    return savedIndexA - savedIndexB;
-  });
-
-  localStorage.setItem(`rookieBoard_${ROOKIE_BOARD_VERSION}`, JSON.stringify(merged));
-  setRookies(merged);
-}, [players]);
+// Rookie board save + load effects live in useRookieBoardState (extracted hook).
 const refreshDraftBoard = async () => {
   if (!selectedLeague) return;
   setLoadingDraftRefresh(true);
@@ -1723,7 +1468,7 @@ const refreshDraftBoard = async () => {
     if (!currentDraft) return;
     setDraftId(currentDraft.draft_id);
     setDraftOrder(currentDraft.draft_order || currentDraft.slot_to_roster_id || {});
-    setDraftSettings(currentDraft.settings);
+    setDraftSettings(currentDraft); // full object — consistent with useLeagues.ts
     setSelectedLeagueDraftHasOccurred(currentDraft.status !== "pre_draft");
     const picksRes = await fetch(
       `https://api.sleeper.app/v1/draft/${currentDraft.draft_id}/picks`
@@ -2000,10 +1745,12 @@ const loadRoster = async (league: any) => {
       .slice(0, 20)
   );
 
+  const MAX_SUPPORTED_ROUNDS = 6;
+  const ALL_ROUNDS = Array.from({ length: MAX_SUPPORTED_ROUNDS }, (_, i) => i + 1);
   let tempPicks: any[] = [];
   YEARS.forEach((year) => {
     allRosters.forEach((r: any) => {
-      ROUNDS.forEach((round) => {
+      ALL_ROUNDS.forEach((round) => {
         tempPicks.push({ season: year, round, roster_id: r.roster_id, owner_id: r.roster_id });
       });
     });
@@ -2023,11 +1770,13 @@ const loadRoster = async (league: any) => {
   // ── Step 6: Assign draft slots ───────────────────────────────────────────
   const currentDraft = draftsData.find((d: any) => d.season === CURRENT_YEAR);
 
-  // Trim picks to actual draft round count so 3-round leagues never see round-4 picks
-  const leagueRounds: number = Number(currentDraft?.settings?.rounds) || ROUNDS.length;
-  if (leagueRounds < ROUNDS.length) {
-    tempPicks = tempPicks.filter((p: any) => Number(p.round) <= leagueRounds);
-  }
+  // Trim to the league's actual round count (check both settings.rounds and top-level rounds)
+  const settingsRounds = Number(currentDraft?.settings?.rounds ?? currentDraft?.rounds) || 0;
+  const tradedMaxRound = (tradedPicksData as any[]).reduce(
+    (max: number, tp: any) => Math.max(max, Number(tp.round) || 0), 0
+  );
+  const leagueRounds: number = Math.max(settingsRounds, tradedMaxRound, ROUNDS.length);
+  tempPicks = tempPicks.filter((p: any) => Number(p.round) <= leagueRounds);
 
   // ── Step 5: My picks (after trades applied and rounds trimmed) ───────────
   const myPicks = tempPicks.filter((p) => p.owner_id === myRoster.roster_id);
@@ -2591,6 +2340,45 @@ const savePlayerDisposition = useCallback(async (playerId: string, sell: string,
   }
 }, []); // reads supabaseUser via ref; uses functional setState — no deps needed
 
+// Toggle a per-league player tag. Cycling: untagged → CORE → WANT_TO_TRADE → untagged.
+// Passing a specific tag forces that tag (or removes it if already set).
+const handleToggleLeaguePlayerTag = useCallback((
+  leagueId: string,
+  playerId: string,
+  forceTag?: "CORE" | "WANT_TO_TRADE"
+) => {
+  const sbUser = supabaseUserRef.current;
+  setLeaguePlayerTags((prev) => {
+    const leagueTags = prev[leagueId] ?? {};
+    const current = leagueTags[playerId];
+    let next: "CORE" | "WANT_TO_TRADE" | undefined;
+    if (forceTag !== undefined) {
+      next = current === forceTag ? undefined : forceTag;
+    } else {
+      next = current === undefined ? "CORE" : current === "CORE" ? "WANT_TO_TRADE" : undefined;
+    }
+    const updatedLeague = { ...leagueTags };
+    if (next === undefined) delete updatedLeague[playerId];
+    else updatedLeague[playerId] = next;
+    const updated = { ...prev, [leagueId]: updatedLeague };
+    try { localStorage.setItem("leaguePlayerTags_v1", JSON.stringify(updated)); } catch {}
+    // Supabase sync
+    if (sbUser) {
+      if (next === undefined) {
+        supabase.from("league_player_tags").delete()
+          .eq("user_id", sbUser.id).eq("league_id", leagueId).eq("player_id", playerId)
+          .then(() => {});
+      } else {
+        supabase.from("league_player_tags")
+          .upsert({ user_id: sbUser.id, league_id: leagueId, player_id: playerId, tag: next },
+                  { onConflict: "user_id,league_id,player_id" })
+          .then(() => {});
+      }
+    }
+    return updated;
+  });
+}, []);
+
 const loadUserTrades = async (targetUserId: string) => {
   setTradeHubUserId(targetUserId);
   setTradeHubData(null);
@@ -3014,9 +2802,11 @@ const getTeamSummary = () => {
     const leagueRosterIds = new Set(rosters.map((r: any) => Number(r.roster_id)));
     if ((allPicks as any[]).length > 0 && !(allPicks as any[]).some((p: any) => leagueRosterIds.has(Number(p.roster_id)))) return null;
 
-    // Guard: player values must be loaded before profile is meaningful.
-    // calcFcValues is populated async; an empty map produces nonsense direction output.
+    // Guard: both value maps must be loaded before profile is meaningful.
+    // An empty map produces nonsense direction output — redraftValues drives the
+    // redraft-rank half of the bucket; calcFcValues drives the dynasty-rank half.
     if (!Object.keys(calcFcValues).length) return null;
+    if (!Object.keys(redraftValues).length) return null;
 
     return getRosterDirectionProfile({
       rosterId: myRosterId,
@@ -3094,12 +2884,69 @@ const getTeamSummary = () => {
       const seasonProjection = projectionIsSeason
         ? rawLineupScore
         : Number(rosterEntry?.settings?.fpts_max || 0) + (Math.max(regularSeasonWeeks - Math.max(currentWeek - 1, 0), 0) * rawLineupScore);
+
+      // ── Player-level boom/bust volatility multiplier ───────────────────────
+      // Aggregates per-player variance signals across the starting lineup to
+      // produce a team-level stdDev multiplier. Two signals are used:
+      //
+      //  1. Dynasty-to-redraft value ratio — a player with dynasty >> redraft is
+      //     an upside/youth asset (volatile). A veteran whose redraft ≈ dynasty is
+      //     a consistent floor producer. Captures boom-bust BEFORE the season starts.
+      //
+      //  2. In-season target/carry share (from playerStats, if available) —
+      //     primary signal once the season is underway. A WR with 9 tgt/game in
+      //     his current role reads consistent regardless of career history.
+      //     Automatically adapts to new environments, OC changes, role shifts, etc.
+      //
+      // The multiplier is clamped to [0.75, 1.35] to prevent extreme values.
+      // Once the historical calibration block accumulates 6+ weeks of real scores,
+      // it replaces this stdDev entirely — so this primarily matters early season
+      // and offseason when no observed variance is yet available.
+      const startingPlayers = lineup.filter((s: any) => s.player).map((s: any) => s.player);
+      const teamVolatilityMultiplier = (() => {
+        if (startingPlayers.length === 0) return 1.0;
+        const posBase: Record<string, number> = { QB: 0.75, RB: 0.88, WR: 1.05, TE: 0.90 };
+        let wVolSum = 0;
+        let wSum = 0;
+        startingPlayers.forEach((player: any) => {
+          const dynVal = (calcFcValues as any)[player.player_id] ?? (players as any)[player.player_id]?.value ?? 0;
+          const redVal = (redraftValues as any)[player.player_id] ?? 0;
+          const base = posBase[player.position] ?? 1.0;
+
+          // Ratio signal: dynasty >> redraft → upside/youth → boom-bust
+          const ratio = redVal > 100 ? dynVal / redVal : 1.0;
+          const ratioMod = ratio > 2.5 ? 1.22 : ratio > 1.8 ? 1.12 : ratio > 1.3 ? 1.05 : ratio < 0.7 ? 0.90 : 1.0;
+
+          // Usage signal: high volume = consistent floor, low volume = boom-bust
+          // Reads from current-season playerStats so it reflects actual current role
+          const stats = (playerStats as any)?.[player.player_id];
+          let usageMod = 1.0;
+          if (stats && (stats.gamesPlayed ?? 0) >= 2) {
+            const pos = player.position;
+            if (pos === "WR" || pos === "TE") {
+              const tgt = stats.avgTargets ?? 0;
+              usageMod = tgt >= 8 ? 0.87 : tgt >= 5 ? 0.94 : tgt >= 3 ? 1.05 : 1.18;
+            } else if (pos === "RB") {
+              const touch = (stats.avgCarries ?? 0) + (stats.avgTargets ?? 0);
+              usageMod = touch >= 15 ? 0.82 : touch >= 10 ? 0.91 : touch >= 6 ? 1.0 : 1.14;
+            }
+          }
+
+          const vol = base * ratioMod * usageMod;
+          const weight = Math.max(dynVal, 200); // weight by dynasty value; floor prevents zeros
+          wVolSum += vol * weight;
+          wSum += weight;
+        });
+        const raw = wSum > 0 ? wVolSum / wSum : 1.0;
+        return Math.max(0.75, Math.min(1.35, raw));
+      })();
+
       return {
         lineupScore: weeklyLineupScore,
         benchDepth: weeklyBenchDepth,
         projectedMaxPf: Math.round(seasonProjection * 10) / 10,
         powerScore: Math.round((weeklyLineupScore + weeklyBenchDepth * 0.35) * 10) / 10,
-        weeklyStdDev: Math.max(8, weeklyLineupScore * 0.16 + weeklyBenchDepth * 0.08),
+        weeklyStdDev: Math.max(8, (weeklyLineupScore * 0.16 + weeklyBenchDepth * 0.08) * teamVolatilityMultiplier),
       };
     };
 
@@ -3148,12 +2995,88 @@ const getTeamSummary = () => {
       };
     });
 
+    // ── Historical scoring calibration ────────────────────────────────────────
+    // Three upgrades over the baseline projection-only model:
+    //
+    //  1. Blend actual recent average into lineupScore — corrects for rosters that
+    //     systematically over/under-perform their projections (injuries, breakouts).
+    //     Recent weeks (last 4) are weighted 2× to capture current roster health.
+    //
+    //  2. Replace the fixed-formula weeklyStdDev with observed score variance —
+    //     some teams are consistent, others boom/bust; actual history knows which.
+    //
+    //  3. Calibrate score floor to the league's real 10th-percentile weekly score
+    //     instead of the hardcoded 40 pts.
+    //
+    // All three gracefully fall back to the existing formula when in-season data
+    // is unavailable (offseason / fewer than 2 weeks played).
+
+    const teamActualScores = new Map<number, number[]>();
+    if (currentWeek > 0) {
+      weeklyHistory
+        .filter((w) => w.week < currentWeek)
+        .forEach((w) => {
+          (w.matchups || []).forEach((entry: any) => {
+            const pts = Number(entry?.points ?? 0);
+            if (!entry?.roster_id || pts === 0) return;
+            const rid = Number(entry.roster_id);
+            if (!teamActualScores.has(rid)) teamActualScores.set(rid, []);
+            teamActualScores.get(rid)!.push(pts);
+          });
+        });
+
+      // rowByRosterId holds references to the same row objects — mutating them here
+      // propagates automatically into the map, so playMatch sees the updated values.
+      rows.forEach((row) => {
+        const scores = teamActualScores.get(row.rosterId);
+        if (!scores || scores.length < 2) return;
+
+        // Weight last 4 weeks 2× to reflect recent roster health / usage trends
+        const recentN = Math.min(4, scores.length);
+        const weights = scores.map((_, i) => (i >= scores.length - recentN ? 2 : 1));
+        const totalWeight = weights.reduce((s, w) => s + w, 0);
+        const weightedMean = scores.reduce((s, v, i) => s + v * weights[i], 0) / totalWeight;
+        const wVariance = scores.reduce((s, v, i) => s + weights[i] * (v - weightedMean) ** 2, 0) / totalWeight;
+        const historicalStdDev = Math.max(6, Math.sqrt(wVariance));
+
+        // Blend actual average into lineupScore (rises 40%→65% as sample grows).
+        // Keeps projections dominant early, defers to reality as the season matures.
+        if (scores.length >= 4) {
+          const histWeight = Math.min(0.65, 0.40 + (scores.length - 4) * 0.0625);
+          row.lineupScore = row.lineupScore * (1 - histWeight) + weightedMean * histWeight;
+        }
+
+        // Replace formula stdDev with observed variance; blend conservatively for small samples.
+        // 3 weeks → 25% historical, 4 → 50%, 5 → 75%, 6+ → 100% historical.
+        const formulaStdDev = row.weeklyStdDev;
+        if (scores.length >= 6) {
+          row.weeklyStdDev = historicalStdDev;
+        } else if (scores.length >= 3) {
+          const blend = (scores.length - 2) / 4;
+          row.weeklyStdDev = formulaStdDev * (1 - blend) + historicalStdDev * blend;
+        }
+
+        // Recalculate powerScore so rankings reflect the updated lineupScore
+        row.powerScore = Math.round((row.lineupScore + row.benchDepth * 0.35) * 10) / 10;
+      });
+    }
+
+    // Score floor: league 10th-percentile actual score replaces the hardcoded 40.
+    // Prevents the sim from generating scores that no team in this league actually hits.
+    let scoreFloor = 40;
+    if (currentWeek > 0) {
+      const allActual = [...teamActualScores.values()].flat().sort((a, b) => a - b);
+      if (allActual.length >= 10) {
+        scoreFloor = Math.max(30, Math.round(allActual[Math.floor(allActual.length * 0.10)]));
+      }
+    }
+
     const playMatch = (aRosterId: number, bRosterId: number, rng: () => number) => {
       const aRow = rowByRosterId.get(aRosterId);
       const bRow = rowByRosterId.get(bRosterId);
       if (!aRow || !bRow) return { winner: aRosterId, loser: bRosterId, aPoints: 0, bPoints: 0 };
-      const aPoints = Math.max(40, aRow.lineupScore + randomNormal(rng) * aRow.weeklyStdDev);
-      const bPoints = Math.max(40, bRow.lineupScore + randomNormal(rng) * bRow.weeklyStdDev);
+      const aPoints = Math.max(scoreFloor, aRow.lineupScore + randomNormal(rng) * aRow.weeklyStdDev);
+      const bPoints = Math.max(scoreFloor, bRow.lineupScore + randomNormal(rng) * bRow.weeklyStdDev);
       if (aPoints === bPoints) {
         return rng() < 0.5
           ? { winner: aRosterId, loser: bRosterId, aPoints, bPoints }
@@ -3386,6 +3309,7 @@ const getTeamSummary = () => {
     projectionWeek,
     players,
     redraftValues,
+    calcFcValues,
     leagueWeeklyMatchups,
     standings,
     users,
@@ -3819,8 +3743,8 @@ const getTeamSummary = () => {
         );
         const partnerAdjustedProfile = { ...partner.directionProfile, bucket: partnerAdjustedBucket };
         const partnerBuckets = getProfilePosBuckets(partnerAdjustedProfile);
-        const isSeller = partnerPlayoffOdds < 50 || ["Rebuilder", "Blow Up", "Hopeless"].includes(partnerAdjustedBucket);
-        const isBuyer = partnerPlayoffOdds >= 55 || ["Elite", "True Contender", "Almost There"].includes(partnerAdjustedBucket);
+        const isSeller = partnerPlayoffOdds < 50 || ["Rebuilder", "Stranded", "Fading Out", "Hopeless"].includes(partnerAdjustedBucket);
+        const isBuyer = partnerPlayoffOdds >= 55 || ["Elite", "True Contender", "Almost There", "Window Closing"].includes(partnerAdjustedBucket);
         const bestApproach =
           isSeller ? `Buy ${weakPos}` :
           isBuyer && partnerBuckets.weak.includes(strongPos) ? `Sell ${strongPos}` :
@@ -4100,14 +4024,14 @@ const getTeamSummary = () => {
       let myScore = 0;
       let theirScore = 0;
 
-      if (["Rebuilder", "Blow Up", "Hopeless"].includes(myProfile.bucket)) {
+      if (["Rebuilder", "Stranded", "Fading Out", "Hopeless"].includes(myProfile.bucket)) {
         myScore += givePlayers.filter((player: any) => isAgingAsset(player)).length * 8;
         myScore += givePlayers.filter((player: any) => isFloorFiller(player) && !isAgingAsset(player)).length * 5;
         myScore += receivePlayers.filter((player: any) => isYoungInsulation(player)).length * 8;
         myScore += receivePicks.length * 7;
         myScore -= receivePlayers.filter((player: any) => isAgingAsset(player)).length * 16;
         myScore -= receivePlayers.filter((player: any) => isFloorFiller(player) && !isAgingAsset(player)).length * 10;
-      } else if (["Elite", "True Contender", "Almost There"].includes(myProfile.bucket)) {
+      } else if (["Elite", "True Contender", "Almost There", "Window Closing"].includes(myProfile.bucket)) {
         myScore += receivePlayers.filter((player: any) => weakPositions.has(player.position)).length * 8;
         myScore += receivePlayers.reduce((sum: number, player: any) => sum + (player.redValue || 0), 0) / 350;
         myScore -= receivePicks.length * 3;
@@ -4163,7 +4087,7 @@ const getTeamSummary = () => {
       const givesPremiumCurrentPick = givePicks.some((pick: any) => String(pick.season) === CURRENT_YEAR && Number(pick.round) === 1);
       const receivesPremiumCurrentPick = receivePicks.some((pick: any) => String(pick.season) === CURRENT_YEAR && Number(pick.round) === 1);
 
-      if (["Rebuilder", "Blow Up", "Hopeless"].includes(myProfile.bucket)) {
+      if (["Rebuilder", "Stranded", "Fading Out", "Hopeless"].includes(myProfile.bucket)) {
         if (incomingAging > 0) return false;
         if (givesPremiumCurrentPick && incomingYoung === 0 && receivePicks.length === 0) return false;
         if (receivePlayers.some((player: any) => player.position === "RB" && Number(player.age || 99) >= 24)) return false;
@@ -4172,7 +4096,7 @@ const getTeamSummary = () => {
       // Tanking teams (below 50% playoff odds) in non-rebuild buckets must follow the same discipline.
       // Buying points is actively harmful — it ruins your draft slot without adding championship upside.
       // The ONLY valid acquisitions are: young upside shots, future picks, draft capital.
-      if (iAmTanking && !["Rebuilder", "Blow Up", "Hopeless"].includes(myProfile.bucket)) {
+      if (iAmTanking && !["Rebuilder", "Stranded", "Fading Out", "Hopeless"].includes(myProfile.bucket)) {
         // Never take on aging assets regardless of position need
         if (incomingAging > 0) return false;
         // Never take on floor fillers unless also getting picks — you'd just win extra games
@@ -4185,7 +4109,7 @@ const getTeamSummary = () => {
         if (receivePlayers.some((p: any) => p.position === "RB" && Number(p.age || 99) >= 24)) return false;
       }
 
-      if (["Elite", "True Contender", "Almost There"].includes(myProfile.bucket)) {
+      if (["Elite", "True Contender", "Almost There", "Window Closing"].includes(myProfile.bucket)) {
         if (receive.length > 0 && receivePlayers.length === 0) return false;
         if (receivePlayers.length > 0 && receivePlayers.every((player: any) => isYoungInsulation(player)) && receivePicks.length > 0 && givePlayers.length > 0) {
           return false;
@@ -4610,8 +4534,8 @@ const getTeamSummary = () => {
     if (!draftSettings || !rosters.length || !rookies.length || !selectedLeague) return {};
 
     const numTeams = rosters.length;
-    const numRounds: number = draftSettings.rounds || 4;
-    const isSnake = (draftSettings.type || "snake") !== "linear";
+    const numRounds: number = draftSettings?.settings?.rounds ?? draftSettings?.rounds ?? 4;
+    const isSnake = ((draftSettings?.settings?.type ?? draftSettings?.type) || "snake") !== "linear";
     const myRosterId = rosters.find((r: any) => r.owner_id === user?.user_id)?.roster_id;
 
     // Strip Jr./Sr./II/III suffixes before collapsing to alpha-only so names from
@@ -5973,14 +5897,10 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     setCalcReceivePicks={setCalcReceivePicks}
     finderSeed={finderSeed}
     setFinderSeed={setFinderSeed}
-    finderPlayerSearch={finderPlayerSearch}
-    setFinderPlayerSearch={setFinderPlayerSearch}
     finderPinnedPlayerId={finderPinnedPlayerId}
     setFinderPinnedPlayerId={setFinderPinnedPlayerId}
     finderTargetOppRosterId={finderTargetOppRosterId}
     setFinderTargetOppRosterId={setFinderTargetOppRosterId}
-    finderTargetPlayerSearch={finderTargetPlayerSearch}
-    setFinderTargetPlayerSearch={setFinderTargetPlayerSearch}
     finderTargetPlayerId={finderTargetPlayerId}
     setFinderTargetPlayerId={setFinderTargetPlayerId}
     selectedLeagueDraftHasOccurred={selectedLeagueDraftHasOccurred}
@@ -5990,8 +5910,8 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     calcSearchB={calcSearchB}
     setCalcSearchB={setCalcSearchB}
     playerDispositions={playerDispositions}
-    finderDraftCapitalMode={finderDraftCapitalMode}
-    setFinderDraftCapitalMode={setFinderDraftCapitalMode}
+    leaguePlayerTags={leaguePlayerTags}
+    onToggleLeaguePlayerTag={handleToggleLeaguePlayerTag}
     leagueMateProfileByRosterId={leagueMateProfileByRosterId}
     selectedLeagueMateProfilesView={selectedLeagueMateProfilesView}
     tradeRecommendationCards={tradeRecommendationCards}
@@ -6010,7 +5930,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     onUpdateAttemptStatus={updateAttemptStatus}
     onDeleteAttempt={deleteAttempt}
     onLoadTradeAttempts={loadTradeAttempts}
-    onRefreshDirection={() => { if (selectedLeague) loadRoster(selectedLeague); }}
+    onRefreshDirection={() => { if (selectedLeague) { loadRedraftValues(); loadRoster(selectedLeague); } }}
     buyLowPlayerIds={buyLowPlayerIds}
     ignoredOwnerIds={ignoredOwnerIds}
     toggleIgnoredOwner={toggleIgnoredOwner}

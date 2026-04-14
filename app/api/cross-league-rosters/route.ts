@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '../../../lib/supabaseclient';
-
-// 6-hour TTL: rosters change with trades and waiver claims
-const ROSTER_TTL_MS = 6 * 60 * 60 * 1000;
+import { SLEEPER_BASE_URL, CROSS_LEAGUE_ROSTERS_TTL_MS } from '../../../lib/constants';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
@@ -22,7 +20,7 @@ export async function GET(req: NextRequest) {
       .eq('league_id', leagueId)
       .single();
 
-    if (cached && Date.now() - new Date(cached.cached_at).getTime() < ROSTER_TTL_MS) {
+    if (cached && Date.now() - new Date(cached.cached_at).getTime() < CROSS_LEAGUE_ROSTERS_TTL_MS) {
       return NextResponse.json({ roster: cached.roster });
     }
   } catch { /* cache miss */ }
@@ -30,19 +28,21 @@ export async function GET(req: NextRequest) {
   // ── 2. Fetch from Sleeper ────────────────────────────────
   try {
     const rosters: any[] = await fetch(
-      `https://api.sleeper.app/v1/league/${leagueId}/rosters`
+      `${SLEEPER_BASE_URL}/league/${leagueId}/rosters`
     ).then((r) => r.json());
 
     const myRoster = rosters.find((r) => r.owner_id === sleeperUserId) ?? null;
 
-    // ── 3. Write to Supabase cache (fire-and-forget) ───────
+    // ── 3. Write to Supabase cache (non-blocking, errors logged) ──
     if (myRoster) {
       supabase.from('cross_league_rosters_cache').upsert({
         sleeper_user_id: sleeperUserId,
         league_id: leagueId,
         roster: myRoster,
         cached_at: new Date().toISOString(),
-      }).then(() => {});
+      }).then(({ error }) => {
+        if (error) console.error('[cross-league-rosters] cache write failed:', error.message);
+      });
     }
 
     return NextResponse.json({ roster: myRoster });

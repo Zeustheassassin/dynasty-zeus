@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { NUMBERFIRE_GQL_URL, FANTASYPROS_REVALIDATE_S } from '../../../../lib/constants';
 
 // numberFire projections are now served via FanDuel Research's GraphQL API.
 // No authentication required. All skill positions returned in one call.
-const GQL_ENDPOINT = 'https://fdresearch-api.fanduel.com/graphql';
 
 const GQL_QUERY = `
   query GetProjections($input: ProjectionsInput!) {
@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
   const projectionType = isSeason ? 'YEARLY' : 'WEEKLY';
 
   try {
-    const res = await fetch(GQL_ENDPOINT, {
+    const res = await fetch(NUMBERFIRE_GQL_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
           },
         },
       }),
-      next: { revalidate: 3600 },
+      next: { revalidate: FANTASYPROS_REVALIDATE_S },
     });
 
     if (!res.ok) return NextResponse.json([]);

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { FANTASYPROS_BASE_URL, FANTASYPROS_REVALIDATE_S } from '../../../../lib/constants';
 
 const POSITIONS = ['qb', 'rb', 'wr', 'te'] as const;
 
@@ -52,7 +53,7 @@ export async function GET(req: NextRequest) {
       try {
         // PPR scoring for all positions. TE premium (extra 0.5/rec) is applied
         // in the client after combining sources, using the rec stat from Sleeper.
-        const url = `https://www.fantasypros.com/nfl/projections/${pos}.php?week=${week}&scoring=PPR`;
+        const url = `${FANTASYPROS_BASE_URL}/nfl/projections/${pos}.php?week=${week}&scoring=PPR`;
         const res = await fetch(url, {
           headers: {
             'User-Agent':
@@ -62,7 +63,7 @@ export async function GET(req: NextRequest) {
             Referer: 'https://www.fantasypros.com/',
           },
           // Cache for 1 hour server-side — projections don't change minute-to-minute
-          next: { revalidate: 3600 },
+          next: { revalidate: FANTASYPROS_REVALIDATE_S },
         });
 
         if (!res.ok) return;

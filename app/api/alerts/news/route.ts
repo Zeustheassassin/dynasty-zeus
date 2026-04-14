@@ -1,6 +1,8 @@
 import type { NextRequest } from "next/server";
+import { ESPN_NFL_NEWS_URL, ESPN_NEWS_REVALIDATE_S } from "../../../../lib/constants";
 
 // Revalidate every 30 seconds — batches concurrent requests instead of hitting ESPN on every call
+// NOTE: This must be a static literal (not an import) for Next.js segment config to work.
 export const revalidate = 30;
 
 const normalizeName = (value: string) =>
@@ -19,8 +21,8 @@ export async function GET(request: NextRequest) {
     .slice(0, 12);
 
   try {
-    const res = await fetch("https://site.api.espn.com/apis/site/v2/sports/football/nfl/news", {
-      next: { revalidate: 30 },
+    const res = await fetch(ESPN_NFL_NEWS_URL, {
+      next: { revalidate: ESPN_NEWS_REVALIDATE_S },
       headers: {
         Accept: "application/json",
       },

@@ -1,9 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '../../../../lib/supabaseclient';
-
-// Completed weeks' stats never change after the week ends.
-// Use a 7-day TTL as a conservative safety margin.
-const STATS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+import { SLEEPER_BASE_URL, SLEEPER_STATS_TTL_MS } from '../../../../lib/constants';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
@@ -23,7 +20,7 @@ export async function GET(req: NextRequest) {
       .eq('week', week)
       .single();
 
-    if (cached && Date.now() - new Date(cached.cached_at).getTime() < STATS_TTL_MS) {
+    if (cached && Date.now() - new Date(cached.cached_at).getTime() < SLEEPER_STATS_TTL_MS) {
       return NextResponse.json(cached.data);
     }
   } catch { /* cache miss */ }
@@ -31,17 +28,19 @@ export async function GET(req: NextRequest) {
   // ── 2. Fetch from Sleeper ────────────────────────────────
   try {
     const res = await fetch(
-      `https://api.sleeper.app/v1/stats/nfl/${season}/${week}?season_type=regular`
+      `${SLEEPER_BASE_URL}/stats/nfl/${season}/${week}?season_type=regular`
     );
     const data = res.ok ? await res.json() : {};
 
-    // ── 3. Write to Supabase cache (fire-and-forget) ───────
+    // ── 3. Write to Supabase cache (non-blocking, errors logged) ──
     supabase.from('sleeper_stats_cache').upsert({
       season,
       week,
       data: data ?? {},
       cached_at: new Date().toISOString(),
-    }).then(() => {});
+    }).then(({ error }) => {
+      if (error) console.error('[sleeper-weekly] cache write failed:', error.message);
+    });
 
     return NextResponse.json(data ?? {});
   } catch {

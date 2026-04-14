@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { CURRENT_YEAR, YEARS, ROUNDS, getDraftRoundSlot } from "../lib/helpers";
+import { fetchSleeperUser } from "../lib/sleeperUserCache";
 
 interface UseLeaguesOptions {
   /** The currently connected Sleeper user. */
@@ -94,26 +95,29 @@ export function useLeagues({ user, players, onLeagueLoaded }: UseLeaguesOptions)
       .slice(0, 20);
     setFreeAgents(freeAgentsList);
 
-    // Build initial (pre-trade) picks
+    // Step 2: Traded picks, drafts, and user names — all in parallel.
+    // fetchSleeperUser uses a module-level cache so re-selecting a league or
+    // switching between leagues that share owners avoids redundant network hits.
+    const [tradedPicksData, draftsData, userResults] = await Promise.all([
+      fetch(`https://api.sleeper.app/v1/league/${league.league_id}/traded_picks`).then((r) => r.json()),
+      fetch(`https://api.sleeper.app/v1/league/${league.league_id}/drafts`).then((r) => r.json()).catch(() => []),
+      Promise.all(allRosters.map((r: any) => fetchSleeperUser(r.owner_id))),
+    ]);
+
+    // Build initial (pre-trade) picks for all rounds up to MAX_SUPPORTED (6).
+    // We trim below once we know the actual round count from draft settings.
+    // Starting large and trimming down preserves all original slot-assignment
+    // logic that already works for rounds 1-4.
+    const MAX_SUPPORTED_ROUNDS = 6;
+    const ALL_ROUNDS = Array.from({ length: MAX_SUPPORTED_ROUNDS }, (_, i) => i + 1);
     let tempPicks: any[] = [];
     YEARS.forEach((year) => {
       allRosters.forEach((r: any) => {
-        ROUNDS.forEach((round) => {
+        ALL_ROUNDS.forEach((round) => {
           tempPicks.push({ season: year, round, roster_id: r.roster_id, owner_id: r.roster_id });
         });
       });
     });
-
-    // Step 2: Traded picks, drafts, and user names — all in parallel
-    const [tradedPicksData, draftsData, userResults] = await Promise.all([
-      fetch(`https://api.sleeper.app/v1/league/${league.league_id}/traded_picks`).then((r) => r.json()),
-      fetch(`https://api.sleeper.app/v1/league/${league.league_id}/drafts`).then((r) => r.json()).catch(() => []),
-      Promise.all(
-        allRosters.map((r: any) =>
-          fetch(`https://api.sleeper.app/v1/user/${r.owner_id}`).then((res) => res.json())
-        )
-      ),
-    ]);
 
     // Apply traded picks
     tradedPicksData.forEach((tp: any) => {
@@ -129,11 +133,15 @@ export function useLeagues({ user, players, onLeagueLoaded }: UseLeaguesOptions)
     // Assign draft slots
     const currentDraft = (draftsData as any[]).find((d: any) => d.season === CURRENT_YEAR);
 
-    // Trim picks to actual draft round count (e.g. 3-round leagues should not have round-4 picks)
-    const leagueRounds: number = Number(currentDraft?.settings?.rounds) || ROUNDS.length;
-    if (leagueRounds < ROUNDS.length) {
-      tempPicks = tempPicks.filter((p) => Number(p.round) <= leagueRounds);
-    }
+    // Trim to the league's actual round count.
+    // Sleeper draft objects sometimes put `rounds` at the top level, sometimes under
+    // `settings` — check both, same as DraftHub's own round detection does.
+    const settingsRounds = Number(currentDraft?.settings?.rounds ?? currentDraft?.rounds) || 0;
+    const tradedMaxRound = (tradedPicksData as any[]).reduce(
+      (max: number, tp: any) => Math.max(max, Number(tp.round) || 0), 0
+    );
+    const leagueRounds = Math.max(settingsRounds, tradedMaxRound, ROUNDS.length);
+    tempPicks = tempPicks.filter((p) => Number(p.round) <= leagueRounds);
 
     const myPicks = tempPicks.filter((p) => p.owner_id === myRoster.roster_id);
     const order: Record<string, number> = currentDraft?.draft_order || {};

@@ -1,14 +1,22 @@
 import { NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import {
+  SLEEPER_BASE_URL,
+  COMPILE_CONCURRENCY,
+  COMPILE_PICKS_CONCURRENCY,
+  SLEEPER_REQUEST_TIMEOUT_MS,
+  SLEEPER_PLAYERS_TIMEOUT_MS,
+  getCompilationYearRange,
+} from "../../../lib/constants";
 
 // Allow up to 5 minutes for large networks (Vercel Pro/Enterprise)
 export const maxDuration = 300;
 
-const SLEEPER_BASE        = "https://api.sleeper.app/v1";
-const CONCURRENCY         = 15;  // league/user expansion — moderate load
-const PICKS_CONCURRENCY   = 8;   // pick fetching — reduced to avoid Sleeper rate limits
-const REQUEST_TIMEOUT_MS  = 15_000;
-const PLAYERS_TIMEOUT_MS  = 45_000; // Sleeper players.nfl is ~5 MB
+const SLEEPER_BASE        = SLEEPER_BASE_URL;
+const CONCURRENCY         = COMPILE_CONCURRENCY;
+const PICKS_CONCURRENCY   = COMPILE_PICKS_CONCURRENCY;
+const REQUEST_TIMEOUT_MS  = SLEEPER_REQUEST_TIMEOUT_MS;
+const PLAYERS_TIMEOUT_MS  = SLEEPER_PLAYERS_TIMEOUT_MS;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -376,12 +384,13 @@ export async function POST(req: NextRequest) {
     return new Response("Missing required params: sleeperUserId, accessToken, years[]", { status: 400 });
   }
 
-  // Validate year range
+  // Validate year range — anchored dynamically so no code change needed each year
+  const { min: YEAR_MIN, max: YEAR_MAX } = getCompilationYearRange();
   const validYears = years.filter(
-    (y) => typeof y === "number" && Number.isInteger(y) && y >= 2020 && y <= 2035
+    (y) => typeof y === "number" && Number.isInteger(y) && y >= YEAR_MIN && y <= YEAR_MAX
   );
   if (validYears.length === 0) {
-    return new Response("No valid years (must be 2020–2035)", { status: 400 });
+    return new Response(`No valid years (must be ${YEAR_MIN}–${YEAR_MAX})`, { status: 400 });
   }
 
   // Build an authenticated Supabase client using the caller's access token

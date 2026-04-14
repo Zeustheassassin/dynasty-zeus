@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '../../../lib/supabaseclient';
-
-// 24-hour cache: FC values update at most once a day
-const FC_TTL_MS = 24 * 60 * 60 * 1000;
+import { FANTASYCALC_BASE_URL, FC_VALUES_TTL_MS } from '../../../lib/constants';
 
 export async function GET(req: NextRequest) {
   const numQbs = parseInt(req.nextUrl.searchParams.get('numQbs') ?? '2', 10);
@@ -15,7 +13,7 @@ export async function GET(req: NextRequest) {
       .eq('num_qbs', numQbs)
       .single();
 
-    if (cached && Date.now() - new Date(cached.cached_at).getTime() < FC_TTL_MS) {
+    if (cached && Date.now() - new Date(cached.cached_at).getTime() < FC_VALUES_TTL_MS) {
       return NextResponse.json(cached.data);
     }
   } catch { /* cache miss — proceed to fetch */ }
@@ -23,17 +21,19 @@ export async function GET(req: NextRequest) {
   // ── 2. Fetch from FantasyCalc ────────────────────────────
   try {
     const res = await fetch(
-      `https://api.fantasycalc.com/values/current?isDynasty=true&numQbs=${numQbs}&numTeams=12&ppr=1`
+      `${FANTASYCALC_BASE_URL}/values/current?isDynasty=true&numQbs=${numQbs}&numTeams=12&ppr=1`
     );
     if (!res.ok) return NextResponse.json([]);
     const data = await res.json();
 
-    // ── 3. Write to Supabase cache (fire-and-forget) ───────
+    // ── 3. Write to Supabase cache (non-blocking, errors logged) ──
     supabase.from('fc_values_cache').upsert({
       num_qbs: numQbs,
       data,
       cached_at: new Date().toISOString(),
-    }).then(() => {});
+    }).then(({ error }) => {
+      if (error) console.error('[fc-values] cache write failed:', error.message);
+    });
 
     return NextResponse.json(data);
   } catch {

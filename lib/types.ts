@@ -277,12 +277,13 @@ export type StrategicBucket =
   | "Elite"
   | "True Contender"
   | "Almost There"
-  | "Rebuilder"
   | "Fading Contender"
+  | "Window Closing"
   | "Purgatory"
-  | "Blow Up"
-  | "Hopeless"
-  | "Mixed Identity";
+  | "Rebuilder"
+  | "Stranded"
+  | "Fading Out"
+  | "Hopeless";
 
 export interface RosterDirectionProfile {
   bucket: StrategicBucket;
@@ -417,15 +418,19 @@ export interface GamedayMatchup {
 }
 
 // ── Management hub ───────────────────────────────────────────
+//
+// Payment year columns (paid_2026, paid_2027, …) are stored as
+// individual boolean columns in Supabase. The column list grows
+// via migration 002 and beyond. To avoid updating this type each
+// year, LeagueMgmtRow uses an index signature for `paid_*` keys.
 
 export interface LeagueMgmtRow {
-  paid_2026: boolean;
-  paid_2027: boolean;
-  paid_2028: boolean;
-  paid_2029: boolean;
+  /** Dynamic payment year keys: paid_2026, paid_2027, … */
+  [paidYear: `paid_${number}`]: boolean | undefined;
   commissioner: boolean;
   year_in_advance: boolean;
   picks_traded: boolean;
+  amount?: string;
 }
 
 export type LeagueMgmtData = Record<string, LeagueMgmtRow>;
@@ -434,7 +439,7 @@ export type CommPaymentsData = Record<
   string, // league_id
   Record<
     string, // owner_id
-    { paid_2026: boolean; paid_2027: boolean; paid_2028: boolean; paid_2029: boolean }
+    Record<string, boolean> // { paid_2026: true, paid_2027: false, … }
   >
 >;
 

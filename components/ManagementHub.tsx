@@ -1,23 +1,23 @@
 "use client";
-import React from "react";
+import React, { useState } from "react";
 import { supabase } from "../lib/supabaseclient";
+import { SLEEPER_BASE_URL, getPaymentYears } from "../lib/constants";
 
-// ── Column definitions ─────────────────────────────────────────────────────
+// ── Column definitions (generated dynamically from current year) ───────────
+// Window: [currentYear - 1 ... currentYear + 3] — auto-advances each year.
+// Adding DB columns for new years is handled in migration 002.
+const PAYMENT_YEARS = getPaymentYears();
+
+const PAID_YEAR_COLS = PAYMENT_YEARS.map((year) => ({
+  key: `paid_${year}`,
+  label: String(year),
+}));
+
 const MGMT_COLS: { key: string; label: string }[] = [
-  { key: "paid_2026", label: "2026" },
-  { key: "paid_2027", label: "2027" },
-  { key: "paid_2028", label: "2028" },
-  { key: "paid_2029", label: "2029" },
+  ...PAID_YEAR_COLS,
   { key: "commissioner", label: "Commissioner" },
   { key: "year_in_advance", label: "Year in Advance" },
   { key: "picks_traded", label: "Picks Traded" },
-];
-
-const PAID_COLS = [
-  { key: "paid_2026", label: "Paid 2026" },
-  { key: "paid_2027", label: "Paid 2027" },
-  { key: "paid_2028", label: "Paid 2028" },
-  { key: "paid_2029", label: "Paid 2029" },
 ];
 
 // ── Props ──────────────────────────────────────────────────────────────────
@@ -65,18 +65,28 @@ export default function ManagementHub({
   supabaseUser,
 }: ManagementHubProps) {
 
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+
+  /** Build the payment year fields for an upsert from an arbitrary row object. */
+  const buildPaymentFields = (row: Record<string, any>): Record<string, boolean> => {
+    const fields: Record<string, boolean> = {};
+    PAYMENT_YEARS.forEach((year) => {
+      fields[`paid_${year}`] = row[`paid_${year}`] ?? false;
+    });
+    return fields;
+  };
+
   // ── Handlers ─────────────────────────────────────────────────────────────
 
   const upsertLeagueMgmt = async (leagueId: string, updated: Record<string, any>) => {
     if (!supabaseUser) return;
-    await supabase.from("league_management").upsert(
+    const { error } = await supabase.from("league_management").upsert(
       {
         user_id: supabaseUser.id,
         league_id: leagueId,
-        paid_2026: updated.paid_2026 ?? false,
-        paid_2027: updated.paid_2027 ?? false,
-        paid_2028: updated.paid_2028 ?? false,
-        paid_2029: updated.paid_2029 ?? false,
+        ...buildPaymentFields(updated),
         commissioner: updated.commissioner ?? false,
         year_in_advance: updated.year_in_advance ?? false,
         picks_traded: updated.picks_traded ?? false,
@@ -85,6 +95,11 @@ export default function ManagementHub({
       },
       { onConflict: "user_id,league_id" }
     );
+    if (error) {
+      console.error("[ManagementHub] league_management upsert failed:", error.message);
+      setSaveError("Save failed — check your connection and try again.");
+      setTimeout(() => setSaveError(null), 4000);
+    }
   };
 
   const toggleLeagueMgmt = async (leagueId: string, key: string) => {
@@ -115,8 +130,8 @@ export default function ManagementHub({
     setLoadingCommToolsRosters(true);
     try {
       const [rostersRes, usersRes] = await Promise.all([
-        fetch(`https://api.sleeper.app/v1/league/${leagueId}/rosters`),
-        fetch(`https://api.sleeper.app/v1/league/${leagueId}/users`),
+        fetch(`${SLEEPER_BASE_URL}/league/${leagueId}/rosters`),
+        fetch(`${SLEEPER_BASE_URL}/league/${leagueId}/users`),
       ]);
       const rostersData = await rostersRes.json();
       const usersData = await usersRes.json();
@@ -139,19 +154,21 @@ export default function ManagementHub({
       ...prev,
       [leagueId]: { ...(prev[leagueId] || {}), [ownerId]: updated },
     }));
-    await supabase.from("commissioner_payments").upsert(
+    const { error } = await supabase.from("commissioner_payments").upsert(
       {
         user_id: supabaseUser.id,
         league_id: leagueId,
         owner_id: ownerId,
-        paid_2026: updated.paid_2026 ?? false,
-        paid_2027: updated.paid_2027 ?? false,
-        paid_2028: updated.paid_2028 ?? false,
-        paid_2029: updated.paid_2029 ?? false,
+        ...buildPaymentFields(updated),
         updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id,league_id,owner_id" }
     );
+    if (error) {
+      console.error("[ManagementHub] commissioner_payments upsert failed:", error.message);
+      setSaveError("Save failed — check your connection and try again.");
+      setTimeout(() => setSaveError(null), 4000);
+    }
   };
 
   const toggleAllCommPayments = async (leagueId: string, key: string, toValue: boolean) => {
@@ -169,8 +186,8 @@ export default function ManagementHub({
       return { ...prev, [leagueId]: leagueData };
     });
 
-    // Persist each owner — include all paid fields so the upsert is complete
-    await Promise.all(
+    // Persist each owner — build payment fields dynamically so new years are included automatically
+    const results = await Promise.all(
       ownerIds.map((ownerId) => {
         const existing = (commPaymentsData[leagueId] || {})[ownerId] || {};
         const updated = { ...existing, [key]: toValue };
@@ -179,16 +196,20 @@ export default function ManagementHub({
             user_id: supabaseUser.id,
             league_id: leagueId,
             owner_id: ownerId,
-            paid_2026: updated.paid_2026 ?? false,
-            paid_2027: updated.paid_2027 ?? false,
-            paid_2028: updated.paid_2028 ?? false,
-            paid_2029: updated.paid_2029 ?? false,
+            ...buildPaymentFields(updated),
             updated_at: new Date().toISOString(),
           },
           { onConflict: "user_id,league_id,owner_id" }
         );
       })
     );
+
+    const failed = results.filter((r) => r.error);
+    if (failed.length > 0) {
+      console.error(`[ManagementHub] ${failed.length} commissioner_payments bulk upserts failed`);
+      setSaveError("Some saves failed — check your connection and try again.");
+      setTimeout(() => setSaveError(null), 4000);
+    }
   };
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -214,6 +235,13 @@ export default function ManagementHub({
           )}
         </div>
       </div>
+
+      {/* Save error banner */}
+      {saveError && (
+        <div className="rounded-xl border border-red-700 bg-red-900/40 px-4 py-2 text-xs text-red-300">
+          {saveError}
+        </div>
+      )}
 
       {/* Sub-tab nav */}
       <div className="flex gap-1 bg-gray-800/60 rounded-xl p-1">
@@ -251,7 +279,7 @@ export default function ManagementHub({
                   <tr>
                     <th className="text-left text-gray-400 font-medium py-2 px-3 border-b border-gray-700 min-w-[140px]"></th>
                     <th className="text-center text-gray-400 font-semibold py-2 px-3 border-b border-gray-700 border-l border-gray-700"></th>
-                    <th colSpan={4} className="text-center text-blue-400 font-semibold py-2 px-3 border-b border-gray-700 border-l border-gray-700">Paid</th>
+                    <th colSpan={PAID_YEAR_COLS.length} className="text-center text-blue-400 font-semibold py-2 px-3 border-b border-gray-700 border-l border-gray-700">Paid</th>
                     <th colSpan={3} className="text-center text-purple-400 font-semibold py-2 px-3 border-b border-gray-700 border-l border-gray-700">Tools</th>
                   </tr>
                   <tr>
@@ -260,7 +288,7 @@ export default function ManagementHub({
                     {MGMT_COLS.map((col, ci) => (
                       <th
                         key={col.key}
-                        className={`text-center text-gray-300 font-medium py-2 px-3 border-b border-gray-700 ${ci === 0 ? "border-l border-gray-700" : ""} ${ci === 4 ? "border-l border-gray-700" : ""}`}
+                        className={`text-center text-gray-300 font-medium py-2 px-3 border-b border-gray-700 ${ci === 0 ? "border-l border-gray-700" : ""} ${ci === PAID_YEAR_COLS.length ? "border-l border-gray-700" : ""}`}
                       >
                         {col.label}
                       </th>
@@ -291,7 +319,7 @@ export default function ManagementHub({
                         {MGMT_COLS.map((col, ci) => (
                           <td
                             key={col.key}
-                            className={`text-center py-2 px-3 ${ci === 0 ? "border-l border-gray-700" : ""} ${ci === 4 ? "border-l border-gray-700" : ""}`}
+                            className={`text-center py-2 px-3 ${ci === 0 ? "border-l border-gray-700" : ""} ${ci === PAID_YEAR_COLS.length ? "border-l border-gray-700" : ""}`}
                           >
                             <input
                               type="checkbox"
@@ -354,7 +382,7 @@ export default function ManagementHub({
                         <thead>
                           <tr>
                             <th className="text-left text-gray-400 font-medium py-2 px-3 border-b border-gray-700 min-w-[160px]">Owner</th>
-                            {PAID_COLS.map((col) => {
+                            {PAID_YEAR_COLS.map((col) => {
                               const paidCount = commToolsRosters.filter(
                                 (r: any) => r.owner_id && (commPaymentsData[commToolsLeagueId] || {})[r.owner_id]?.[col.key]
                               ).length;
@@ -389,7 +417,7 @@ export default function ManagementHub({
                                 <td className="py-2 px-3 text-white font-medium whitespace-nowrap border-r border-gray-800">
                                   {displayName}
                                 </td>
-                                {PAID_COLS.map((col) => (
+                                {PAID_YEAR_COLS.map((col) => (
                                   <td key={col.key} className="text-center py-2 px-3">
                                     <input
                                       type="checkbox"

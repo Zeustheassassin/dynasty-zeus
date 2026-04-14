@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { SLEEPER_BASE_URL, PLAYERS_REVALIDATE_S, NFL_STATE_REVALIDATE_S } from '../../../lib/constants';
 
 // Proxies the Sleeper player map + NFL state with server-side caching.
 // Slims the player map server-side so clients download ~500 KB instead of ~5 MB raw.
@@ -6,8 +7,8 @@ import { NextResponse } from 'next/server';
 export async function GET() {
   try {
     const [playersRes, stateRes] = await Promise.all([
-      fetch('https://api.sleeper.app/v1/players/nfl', { next: { revalidate: 86400 } }),
-      fetch('https://api.sleeper.app/v1/state/nfl',   { next: { revalidate: 3600  } }),
+      fetch(`${SLEEPER_BASE_URL}/players/nfl`, { next: { revalidate: PLAYERS_REVALIDATE_S } }),
+      fetch(`${SLEEPER_BASE_URL}/state/nfl`,   { next: { revalidate: NFL_STATE_REVALIDATE_S } }),
     ]);
 
     const rawPlayers = await playersRes.json();

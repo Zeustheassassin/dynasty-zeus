@@ -179,6 +179,43 @@ function LeagueHub({
   const [lastNoteSavedAt, setLastNoteSavedAt] = React.useState<number | null>(null);
   const [leagueMateIntelLoadedAt, setLeagueMateIntelLoadedAt] = React.useState<number | null>(null);
   const [simSavedAt, setSimSavedAt] = React.useState<number | null>(null);
+  const [refreshingRosters, setRefreshingRosters] = React.useState(false);
+  const [rosterRefreshProgress, setRosterRefreshProgress] = React.useState<{ done: number; total: number } | null>(null);
+
+  const handleRefreshAllRosters = React.useCallback(async () => {
+    setRefreshingRosters(true);
+    const total = leagues.length;
+    setRosterRefreshProgress({ done: 0, total });
+    // Bust the localStorage cache for every league upfront
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith("leagueData_")) keysToRemove.push(key);
+    }
+    keysToRemove.forEach((k) => localStorage.removeItem(k));
+    // Re-fetch all leagues in parallel; increment progress as each one lands
+    await Promise.all(
+      leagues.map((league: any) =>
+        Promise.all([
+          fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`).then((r) => r.json()),
+          fetch(`https://api.sleeper.app/v1/league/${league.league_id}/traded_picks`).then((r) => r.json()),
+          fetch(`https://api.sleeper.app/v1/league/${league.league_id}/drafts`).then((r) => r.json()).catch(() => []),
+        ]).then(([allRosters, tradedPicksData, draftsData]) => {
+          try {
+            localStorage.setItem(
+              `leagueData_${league.league_id}`,
+              JSON.stringify({ data: { allRosters, tradedPicksData, draftsData }, cachedAt: Date.now() })
+            );
+          } catch { /* quota exceeded — skip */ }
+          setRosterRefreshProgress((prev) => prev ? { done: prev.done + 1, total: prev.total } : null);
+        })
+      )
+    );
+    // Reload the currently selected league so the UI reflects fresh data
+    if (selectedLeague) await loadRoster(selectedLeague);
+    setRefreshingRosters(false);
+    setTimeout(() => setRosterRefreshProgress(null), 3000);
+  }, [leagues, selectedLeague, loadRoster]);
 
   // Reset sim-saved confirmation when the active league changes
   React.useEffect(() => { setSimSavedAt(null); }, [selectedLeague?.league_id]);
@@ -240,18 +277,18 @@ function LeagueHub({
               if (loadingLeagueOverview) return <p className="text-sm text-blue-400">Loading league data…</p>;
               if (!leagues.length) return <p className="text-sm text-gray-500">No leagues found.</p>;
 
-              // User-defined ordering: Purgatory = undecided crossroads (above Almost There/Rebuilder).
-              // Fading Contender = still has current success. Almost There = committed rebuild trajectory.
+              // Ordering: contenders → transition → sellers/rebuilders
               const bucketOrder: Record<string, number> = {
                 Elite: 0,
                 "True Contender": 1,
-                "Fading Contender": 2,
-                Purgatory: 3,
-                "Almost There": 4,
-                Rebuilder: 5,
-                "Blow Up": 6,
-                Hopeless: 7,
-                "Mixed Identity": 8,
+                "Almost There": 2,
+                "Fading Contender": 3,
+                "Window Closing": 4,
+                Purgatory: 5,
+                Rebuilder: 6,
+                Stranded: 7,
+                "Fading Out": 8,
+                Hopeless: 9,
               };
 
               // Build per-league dynasty + redraft values for every team
@@ -306,7 +343,7 @@ function LeagueHub({
                 <div className="space-y-2">
                   <div className="overflow-x-auto pb-1">
                     <div className="min-w-[780px] space-y-2">
-                      {/* Run All Sims button + progress bar */}
+                      {/* Run All Sims button + Refresh Rosters + progress bar */}
                       <div className="flex items-center gap-3 pb-1">
                         <button
                           onClick={handleRunAllSims}
@@ -314,6 +351,17 @@ function LeagueHub({
                           className="text-[11px] font-semibold px-3 py-1 rounded-full border border-blue-600 text-blue-400 hover:bg-blue-900/40 transition disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
                         >
                           {simQueue.length > 0 ? "Simulating…" : "Run All Sims"}
+                        </button>
+                        <button
+                          onClick={handleRefreshAllRosters}
+                          disabled={refreshingRosters}
+                          title="Clear roster cache and re-fetch all leagues from Sleeper"
+                          className="flex items-center gap-1 text-[11px] font-semibold px-3 py-1 rounded-full border border-gray-600 text-gray-400 hover:border-gray-400 hover:text-gray-200 transition disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className={`w-3 h-3 ${refreshingRosters ? "animate-spin" : ""}`}>
+                            <path fillRule="evenodd" d="M13.836 2.477a.75.75 0 0 1 .75.75v3.182a.75.75 0 0 1-.75.75h-3.182a.75.75 0 0 1 0-1.5h1.37l-.84-.841a4.5 4.5 0 0 0-7.08 1.196.75.75 0 1 1-1.31-.734 6 6 0 0 1 9.44-1.595l.842.841V3.227a.75.75 0 0 1 .75-.75Zm-.911 7.5A.75.75 0 0 1 13.199 11a6 6 0 0 1-9.44 1.595l-.842-.841v1.017a.75.75 0 0 1-1.5 0V9.591a.75.75 0 0 1 .75-.75H5.35a.75.75 0 0 1 0 1.5H3.98l.84.841a4.5 4.5 0 0 0 7.08-1.196.75.75 0 0 1 1.025-.009Z" clipRule="evenodd" />
+                          </svg>
+                          {refreshingRosters ? "Refreshing…" : "Refresh Rosters"}
                         </button>
                         {simProgress && (
                           <div className="flex-1 flex items-center gap-2 min-w-0">
@@ -327,6 +375,21 @@ function LeagueHub({
                               {simProgress.done === simProgress.total
                                 ? `Done — ${simProgress.total} leagues updated`
                                 : `${simProgress.done} / ${simProgress.total}`}
+                            </span>
+                          </div>
+                        )}
+                        {rosterRefreshProgress && (
+                          <div className="flex-1 flex items-center gap-2 min-w-0">
+                            <div className="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-gray-400 rounded-full transition-all duration-300"
+                                style={{ width: `${(rosterRefreshProgress.done / rosterRefreshProgress.total) * 100}%` }}
+                              />
+                            </div>
+                            <span className="text-[10px] text-gray-400 whitespace-nowrap">
+                              {rosterRefreshProgress.done === rosterRefreshProgress.total
+                                ? `Done — ${rosterRefreshProgress.total} leagues refreshed`
+                                : `${rosterRefreshProgress.done} / ${rosterRefreshProgress.total} leagues`}
                             </span>
                           </div>
                         )}
