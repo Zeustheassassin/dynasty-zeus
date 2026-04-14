@@ -2672,19 +2672,18 @@ function TradeHub({
           })();
 
           // ── Format preference score ───────────────────────────────────────
-          // Strongly prefer 1v1, 2v1, 1v2, and 2v2 trades over larger packages.
-          // Scores taper off sharply as total piece count rises above 4.
+          // Strongly prefer 1v1, 2v1, 1v2, and 2v2. Penalty rises steeply beyond that.
+          // 2v3/2v4/3v3/3v4/4v4 are no longer generated — these values cover 1v3 and 1v4 only.
           const formatBonus = (() => {
             const totalGive = r.give.length + r.givePicks.length;
             const totalRecv = r.receive.length + r.receivePicks.length;
             const total = totalGive + totalRecv;
-            if (total === 2) return 8;            // 1v1 — cleanest possible trade
-            if (total === 3) return 6;            // 2v1 or 1v2
-            if (totalGive === 2 && totalRecv === 2) return 5; // 2v2
-            if (total === 4) return 3;            // 1v3, 3v1 (less common but passable)
-            if (total === 5) return 0;            // 2v3, 3v2
-            if (total === 6) return -3;           // 3v3, 2v4
-            return -7;                            // 4+ piece mega-trades
+            if (total === 2) return 12;           // 1v1 — cleanest possible trade
+            if (total === 3) return 9;            // 2v1 or 1v2
+            if (totalGive === 2 && totalRecv === 2) return 7; // 2v2 — still clean
+            if (total === 4) return -2;           // 1v3 — only surfaces for exceptional deals
+            if (total === 5) return -10;          // 1v4 — very rare, must be outstanding
+            return -18;                           // anything larger (shouldn't exist)
           })();
 
           // ── Handcuff awareness (RB) — depth-chart aware ─────────────────
@@ -3238,6 +3237,10 @@ function TradeHub({
         oppCount[String(r.oppRosterId)] = (oppCount[String(r.oppRosterId)] || 0) + 1;
         acc.push(r);
       };
+      // Complex trades = 5+ total pieces across both sides (e.g. 2v3, 3v3, 3v4, 4v4).
+      // Cap these at 2 slots out of the 15 shown — they should exist but never dominate.
+      const MAX_COMPLEX_TRADES = 2;
+      let complexTradeCount = 0;
       const top15 = shuffled.reduce((acc: any[], r) => {
           if (acc.length >= 15) return acc;
           const allIds = [
@@ -3255,6 +3258,12 @@ function TradeHub({
           if (!isPlayerPinned && !isOwnerPinned) {
             if (allIds.some((pid) => pid !== `player-${finderPinnedPlayerId}` && (playerCount[pid] || 0) >= 4)) return acc;
             if ((oppCount[oppKey] || 0) >= 4) return acc;
+          }
+          // Hard cap on complex (5+ piece) trades — they earn at most 2 of 15 slots
+          const totalPieces = r.give.length + r.receive.length + r.givePicks.length + r.receivePicks.length;
+          if (totalPieces >= 5) {
+            if (complexTradeCount >= MAX_COMPLEX_TRADES) return acc;
+            complexTradeCount++;
           }
           addToSlots(acc, r, allIds, key);
           return acc;
