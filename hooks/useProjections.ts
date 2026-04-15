@@ -1,6 +1,17 @@
 "use client";
 import { useState } from "react";
 import { normalizeProjName, getProjectionKickoffAt } from "../lib/helpers";
+import type { SleeperPlayer, ProjectionRow } from "../lib/types";
+
+/** Raw item shape returned by Sleeper's projections API endpoints. */
+interface SleeperRawProjectionItem {
+  player_id?: string | number;
+  player?: { position?: string; first_name?: string; last_name?: string };
+  stats?: Record<string, number>;
+  game?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  [key: string]: unknown;
+}
 
 // ── Projection sources (weights sum to 1.0) ────────────────────────────────
 export const PROJ_SOURCES = [
@@ -18,8 +29,8 @@ export type ProjSourceId = typeof PROJ_SOURCES[number]["id"];
  * Pass the current `players` map from Sleeper so the hook can build its
  * name → sleeperId index.
  */
-export function useProjections(players: Record<string, any>) {
-  const [projectionData, setProjectionData] = useState<any[]>([]);
+export function useProjections(players: Record<string, SleeperPlayer>) {
+  const [projectionData, setProjectionData] = useState<ProjectionRow[]>([]);
   const [loadingProjections, setLoadingProjections] = useState(false);
   const [projectionWeek, setProjectionWeek] = useState(1);
   const [projectionSeasonYear, setProjectionSeasonYear] = useState<number | null>(null);
@@ -39,7 +50,7 @@ export function useProjections(players: Record<string, any>) {
     setProjectionSeasonYear(currentNflYear);
 
     // Compute PPR fantasy points from a Sleeper stats object.
-    const calcSleeperPPR = (stats: any, pos: string): number => {
+    const calcSleeperPPR = (stats: Record<string, number> | undefined, pos: string): number => {
       if (!stats) return 0;
       const stored = stats.pts_ppr ?? 0;
       if (stored > 0) return stored;
@@ -59,7 +70,7 @@ export function useProjections(players: Record<string, any>) {
     try {
       // Build name→sleeperId lookup
       const nameIndex = new Map<string, string>();
-      Object.values(players).forEach((p: any) => {
+      Object.values(players).forEach((p: SleeperPlayer) => {
         if (!["QB", "RB", "WR", "TE"].includes(p.position)) return;
         const full = normalizeProjName(p.full_name ?? "");
         if (full) nameIndex.set(full, p.player_id);
@@ -77,8 +88,8 @@ export function useProjections(players: Record<string, any>) {
         kickoffAt: number | null;
       }>();
 
-      const getKickoffAt = (row: any): number | null => {
-        const direct = getProjectionKickoffAt(row);
+      const getKickoffAt = (row: SleeperRawProjectionItem): number | null => {
+        const direct = getProjectionKickoffAt(row as Record<string, unknown>);
         if (direct) return direct;
         const candidates = [
           row?.game?.kickoffAt, row?.game?.kickoff_at,
@@ -119,9 +130,9 @@ export function useProjections(players: Record<string, any>) {
                 .catch(() => [])
             )
           );
-          const seasonRaw: any[] = posResults.flat();
+          const seasonRaw: SleeperRawProjectionItem[] = posResults.flat();
           if (seasonRaw.length > 0) {
-            seasonRaw.forEach((item: any) => {
+            seasonRaw.forEach((item: SleeperRawProjectionItem) => {
               const pos: string = item.player?.position ?? "";
               if (!["QB", "RB", "WR", "TE"].includes(pos) || !item.player_id) return;
               const seasonFpts = calcSleeperPPR(item.stats, pos);
@@ -142,10 +153,10 @@ export function useProjections(players: Record<string, any>) {
         // math still works correctly because totalWeight equals sleeperWeight for every row.
         try {
           const sleeperWeight = PROJ_SOURCES.find((s) => s.id === "sleeper")!.weight;
-          let sleeperData: any[] = [];
+          let sleeperData: SleeperRawProjectionItem[] = [];
           if (week === "season") {
             const curUrl = `https://api.sleeper.app/projections/nfl/${currentNflYear}?season_type=regular&${posParams}`;
-            let data: any[] = await fetch(curUrl).then((r) => r.json());
+            let data: SleeperRawProjectionItem[] = await fetch(curUrl).then((r) => r.json());
             if (!Array.isArray(data) || data.length === 0) {
               const prevUrl = `https://api.sleeper.app/projections/nfl/${currentNflYear - 1}?season_type=regular&${posParams}`;
               data = await fetch(prevUrl).then((r) => r.json());
@@ -154,10 +165,10 @@ export function useProjections(players: Record<string, any>) {
             sleeperData = Array.isArray(data) ? data : [];
           } else {
             const url = `https://api.sleeper.app/projections/nfl/${currentNflYear}/${week}?season_type=regular&${posParams}`;
-            const data: any[] = await fetch(url).then((r) => r.json());
+            const data: SleeperRawProjectionItem[] = await fetch(url).then((r) => r.json());
             sleeperData = Array.isArray(data) ? data : [];
           }
-          sleeperData.forEach((item: any) => {
+          sleeperData.forEach((item: SleeperRawProjectionItem) => {
             const pos: string = item.player?.position ?? "";
             if (!["QB", "RB", "WR", "TE"].includes(pos) || !item.player_id) return;
             const fpts = calcSleeperPPR(item.stats, pos);
@@ -210,7 +221,7 @@ export function useProjections(players: Record<string, any>) {
       }
 
       // Build final consensus list
-      const rows: any[] = [];
+      const rows: ProjectionRow[] = [];
       sourceRows.forEach((row, sleeperId) => {
         const p = players[sleeperId];
         if (!p) return;
@@ -221,7 +232,7 @@ export function useProjections(players: Record<string, any>) {
           sleeperId,
           full_name: p.full_name,
           position: p.position,
-          team: p.team,
+          team: p.team ?? null,
           fpts: Math.round(consensusFpts * 10) / 10,
           sources: row.sources,
           kickoffAt: row.kickoffAt,

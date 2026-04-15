@@ -1,7 +1,9 @@
 "use client";
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { supabase } from "../lib/supabaseclient";
 import { SLEEPER_BASE_URL, getPaymentYears } from "../lib/constants";
+import type { LeagueMgmtData, CommPaymentsData, SleeperLeague, SleeperRoster, SleeperUser } from "../lib/types";
+import { useAuth } from "../lib/AuthContext";
 
 // ── Column definitions (generated dynamically from current year) ───────────
 // Window: [currentYear - 1 ... currentYear + 3] — auto-advances each year.
@@ -25,28 +27,25 @@ interface ManagementHubProps {
   mgmtHubTab: "LEAGUE_MGMT" | "COMMISSIONER_TOOLS";
   setMgmtHubTab: (tab: "LEAGUE_MGMT" | "COMMISSIONER_TOOLS") => void;
 
-  leagues: any[];
-  leagueMgmtData: Record<string, Record<string, any>>;
-  setLeagueMgmtData: React.Dispatch<React.SetStateAction<Record<string, Record<string, any>>>>;
+  leagues: SleeperLeague[];
+  leagueMgmtData: LeagueMgmtData;
+  setLeagueMgmtData: React.Dispatch<React.SetStateAction<LeagueMgmtData>>;
 
-  commPaymentsData: Record<string, Record<string, Record<string, boolean>>>;
-  setCommPaymentsData: React.Dispatch<
-    React.SetStateAction<Record<string, Record<string, Record<string, boolean>>>>
-  >;
+  commPaymentsData: CommPaymentsData;
+  setCommPaymentsData: React.Dispatch<React.SetStateAction<CommPaymentsData>>;
   commToolsLeagueId: string;
   setCommToolsLeagueId: (id: string) => void;
-  commToolsRosters: any[];
-  setCommToolsRosters: (rosters: any[]) => void;
-  commToolsUsers: Record<string, any>;
-  setCommToolsUsers: (users: Record<string, any>) => void;
+  commToolsRosters: SleeperRoster[];
+  setCommToolsRosters: (rosters: SleeperRoster[]) => void;
+  commToolsUsers: Record<string, SleeperUser>;
+  setCommToolsUsers: (users: Record<string, SleeperUser>) => void;
   loadingCommToolsRosters: boolean;
   setLoadingCommToolsRosters: (loading: boolean) => void;
 
-  supabaseUser: any;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
-export default function ManagementHub({
+function ManagementHub({
   mgmtHubTab,
   setMgmtHubTab,
   leagues,
@@ -62,10 +61,22 @@ export default function ManagementHub({
   setCommToolsUsers,
   loadingCommToolsRosters,
   setLoadingCommToolsRosters,
-  supabaseUser,
 }: ManagementHubProps) {
+  const { supabaseUser } = useAuth();
 
   const [saveError, setSaveError] = useState<string | null>(null);
+  const saveErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clear any pending error timer on unmount to prevent setState-after-unmount.
+  useEffect(() => () => {
+    if (saveErrorTimerRef.current !== null) clearTimeout(saveErrorTimerRef.current);
+  }, []);
+
+  const showSaveError = (msg: string) => {
+    setSaveError(msg);
+    if (saveErrorTimerRef.current !== null) clearTimeout(saveErrorTimerRef.current);
+    saveErrorTimerRef.current = setTimeout(() => setSaveError(null), 4000);
+  };
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -97,15 +108,15 @@ export default function ManagementHub({
     );
     if (error) {
       console.error("[ManagementHub] league_management upsert failed:", error.message);
-      setSaveError("Save failed — check your connection and try again.");
-      setTimeout(() => setSaveError(null), 4000);
+      showSaveError("Save failed — check your connection and try again.");
     }
   };
 
   const toggleLeagueMgmt = async (leagueId: string, key: string) => {
     if (!supabaseUser) return;
     const current = leagueMgmtData[leagueId] || {};
-    const updated = { ...current, [key]: !current[key] };
+    const currentAsMap = current as unknown as Record<string, unknown>;
+    const updated = { ...current, [key]: !currentAsMap[key] };
     setLeagueMgmtData((prev) => ({ ...prev, [leagueId]: updated }));
     await upsertLeagueMgmt(leagueId, updated);
   };
@@ -136,8 +147,8 @@ export default function ManagementHub({
       const rostersData = await rostersRes.json();
       const usersData = await usersRes.json();
       setCommToolsRosters(rostersData || []);
-      const userMap: Record<string, any> = {};
-      (usersData || []).forEach((u: any) => { userMap[u.user_id] = u; });
+      const userMap: Record<string, SleeperUser> = {};
+      (usersData || []).forEach((u: SleeperUser) => { userMap[u.user_id] = u; });
       setCommToolsUsers(userMap);
     } finally {
       setLoadingCommToolsRosters(false);
@@ -166,8 +177,7 @@ export default function ManagementHub({
     );
     if (error) {
       console.error("[ManagementHub] commissioner_payments upsert failed:", error.message);
-      setSaveError("Save failed — check your connection and try again.");
-      setTimeout(() => setSaveError(null), 4000);
+      showSaveError("Save failed — check your connection and try again.");
     }
   };
 
@@ -207,8 +217,7 @@ export default function ManagementHub({
     const failed = results.filter((r) => r.error);
     if (failed.length > 0) {
       console.error(`[ManagementHub] ${failed.length} commissioner_payments bulk upserts failed`);
-      setSaveError("Some saves failed — check your connection and try again.");
-      setTimeout(() => setSaveError(null), 4000);
+      showSaveError("Some saves failed — check your connection and try again.");
     }
   };
 
@@ -323,7 +332,7 @@ export default function ManagementHub({
                           >
                             <input
                               type="checkbox"
-                              checked={!!row[col.key]}
+                              checked={!!(row as unknown as Record<string, unknown>)[col.key]}
                               onChange={() => toggleLeagueMgmt(league.league_id, col.key)}
                               className="w-4 h-4 accent-blue-500 cursor-pointer"
                             />
@@ -444,3 +453,5 @@ export default function ManagementHub({
     </div>
   );
 }
+
+export default React.memo(ManagementHub);

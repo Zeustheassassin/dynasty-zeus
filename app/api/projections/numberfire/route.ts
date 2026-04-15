@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { NUMBERFIRE_GQL_URL, FANTASYPROS_REVALIDATE_S } from '../../../../lib/constants';
+import { checkRateLimit } from '../../../../lib/rateLimit';
 
 // numberFire projections are now served via FanDuel Research's GraphQL API.
 // No authentication required. All skill positions returned in one call.
@@ -18,9 +19,20 @@ const GQL_QUERY = `
 `;
 
 export async function GET(req: NextRequest) {
+  const rl = checkRateLimit(req, 20, 60_000, 'numberfire');
+  if (!rl.allowed) return rl.response;
+
   const { searchParams } = new URL(req.url);
-  // week=draft or week=0 → season/yearly; any other value → weekly
-  const week = searchParams.get('week') ?? 'draft';
+  // week=draft or week=0 → season/yearly; week=1-18 → specific week
+  const rawWeek = searchParams.get('week') ?? 'draft';
+  // Validate: only "draft", "0", or integers 1–18 are valid
+  if (rawWeek !== 'draft' && rawWeek !== '0') {
+    const weekNum = parseInt(rawWeek, 10);
+    if (isNaN(weekNum) || weekNum < 1 || weekNum > 18) {
+      return NextResponse.json([]);
+    }
+  }
+  const week = rawWeek;
   const isSeason = week === 'draft' || week === '0';
 
   // PPR type for full PPR base scoring; TE premium applied below via receptions.
@@ -52,22 +64,29 @@ export async function GET(req: NextRequest) {
 
     if (!res.ok) return NextResponse.json([]);
 
+    interface NfProjection {
+      player?: { name?: string; position?: string };
+      team?: { abbreviation?: string };
+      fantasy?: number;
+      receptions?: number;
+    }
+
     const json = await res.json();
-    const raw: any[] = json?.data?.getProjections ?? [];
+    const raw: NfProjection[] = json?.data?.getProjections ?? [];
 
     const results = raw
-      .filter((p: any) => {
+      .filter((p) => {
         const pos: string = p.player?.position ?? '';
-        return ['QB', 'RB', 'WR', 'TE'].includes(pos) && p.fantasy > 0;
+        return ['QB', 'RB', 'WR', 'TE'].includes(pos) && (p.fantasy ?? 0) > 0;
       })
-      .map((p: any) => {
-        const pos: string = p.player.position;
+      .map((p) => {
+        const pos: string = p.player?.position ?? '';
         const baseFpts: number = p.fantasy ?? 0;
         // Apply 0.5 TE premium: TEs earn an extra 0.5 pts per reception on top
         // of the PPR base so that the scoring matches the app's TEP format exactly.
         const tePremium: number = pos === 'TE' ? (p.receptions ?? 0) * 0.5 : 0;
         return {
-          name: p.player.name as string,
+          name: p.player?.name ?? '',
           position: pos,
           fpts: baseFpts + tePremium,
         };

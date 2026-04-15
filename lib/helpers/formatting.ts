@@ -24,4 +24,5 @@ export const normalizeRookieName = (name: string) =>
     .trim();
 
 /** Stub — Sleeper ADP rookie board builder (not yet implemented). */
-export const buildSleeperRookieBoard = (_playerMap: any) => [];
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export const buildSleeperRookieBoard = (_playerMap: Record<string, unknown>) => [];

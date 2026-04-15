@@ -9,17 +9,38 @@ import {
   getBucketColor,
   getAdjustedDirectionBucket,
   ordinal,
-  sum,
   getProjectionKickoffAt,
   getLineupSlotEligiblePositions,
   rebalanceLineupForKickoffWindows,
   getRosterDirectionProfile,
-  CURRENT_YEAR, YEARS, ROUNDS,
+  CURRENT_YEAR, YEARS,
 } from "../lib/helpers";
-import { LeagueHubTab } from "../lib/types";
+import type {
+  LeagueHubTab,
+  SleeperLeague,
+  SleeperPlayer,
+  SleeperRoster,
+  SleeperDraft,
+  SleeperDraftPick,
+  SleeperTradedPick,
+  SleeperTransaction,
+  SleeperNFLState,
+  SleeperUser,
+  RookieBoardPlayer,
+  ProjectionRow,
+  RosterDirectionProfile,
+  CommittedSimsByLeague,
+  CachedSimRow,
+  LeagueOverviewEntry,
+  LineupCoachRow,
+  LeagueSimulation,
+  SimulationTeamRow,
+} from "../lib/types";
 import { LEAGUE_HUB_GROUPS } from "../lib/leagueHubGroups";
 import { supabase } from "../lib/supabaseclient";
 import { usePlayers } from "../lib/PlayersContext";
+import { useAuth } from "../lib/AuthContext";
+import StandingsTab from "./league/StandingsTab";
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const ROOKIE_YEAR = CURRENT_YEAR;
@@ -32,6 +53,32 @@ const getStarterSlots = (roster: any, league: any) => {
   }));
 };
 
+// ── Local supporting types ─────────────────────────────────────────────────
+
+interface StandingRow { roster_id: number; wins: number; losses: number; ties: number; fpts: number; max_pf: number; owner_id: string; }
+
+
+type AnnotatedTransaction = SleeperTransaction & {
+  leagueName: string;
+  leagueId: string;
+  rosterOwnerMap: Record<number, string>;
+};
+
+interface TeamSummary {
+  summary: Record<string, number>;
+  pickSummary: Record<string, number>;
+}
+
+interface PredictedPick {
+  name: string;
+  position: string;
+  team: string;
+  adp: number;
+  player_id: string | null | undefined;
+  boardRank: number;
+  poolRank: number;
+}
+
 // ── Props ──────────────────────────────────────────────────────────────────
 interface LeagueHubProps {
   // Tab state
@@ -40,23 +87,23 @@ interface LeagueHubProps {
   activeLeagueHubGroup: { id: string; label: string; tabs: Array<{ id: LeagueHubTab; label: string }> };
 
   // League / roster state
-  leagues: any[];
-  user: any;
-  rosters: any[];
-  standings: any[];
-  users: Record<string, any>;
-  selectedLeague: any;
-  setSelectedLeague: (league: any) => void;
-  roster: any;
-  picks: any[];
-  allPicks: any[];
+  leagues: SleeperLeague[];
+  user: SleeperUser | null;
+  rosters: SleeperRoster[];
+  standings: StandingRow[];
+  users: Record<string, string>;
+  selectedLeague: SleeperLeague | null;
+  setSelectedLeague: (league: SleeperLeague | null) => void;
+  roster: SleeperRoster | null;
+  picks: SleeperTradedPick[];
+  allPicks: SleeperTradedPick[];
   pickFcValues: Record<string, number>;
   calcFcValues: Record<string, number>;
   redraftValues: Record<string, number>;
 
   // Sim state
-  committedSimsByLeague: Record<string, any>;
-  leagueSimCache: Record<string, any>;
+  committedSimsByLeague: CommittedSimsByLeague;
+  leagueSimCache: Record<string, Record<number, CachedSimRow>>;
   simQueue: string[];
   simProgress: { done: number; total: number } | null;
 
@@ -68,19 +115,19 @@ interface LeagueHubProps {
 
   // Notes / activity
   leagueNotes: Record<string, string>;
-  activityTransactions: any[];
+  activityTransactions: AnnotatedTransaction[];
 
   // League overview
-  leagueOverviewData: Record<string, any>;
+  leagueOverviewData: Record<string, LeagueOverviewEntry>;
   loadingLeagueOverview: boolean;
   leagueOverviewLoaded: boolean;
 
   // Computed
-  teamSummary: any;
-  selectedLeagueDirection: any;
-  selectedLeagueDirectionAdjusted: any;
-  selectedLeagueSimulation: any;
-  selectedLeagueMateProfilesView: any[];
+  teamSummary: TeamSummary | null;
+  selectedLeagueDirection: RosterDirectionProfile | null;
+  selectedLeagueDirectionAdjusted: RosterDirectionProfile | null;
+  selectedLeagueSimulation: LeagueSimulation | null;
+  selectedLeagueMateProfilesView: unknown[];
 
   // Roster view state
   activeTab: string;
@@ -107,10 +154,10 @@ interface LeagueHubProps {
   toggleIgnoredOwner: (ownerId: string) => void;
 
   // Draft state
-  projectionData: any[];
-  draftPicks: any[];
+  projectionData: ProjectionRow[];
+  draftPicks: SleeperDraftPick[];
   draftOrder: Record<string, number>;
-  draftSettings: any;
+  draftSettings: SleeperDraft | null;
   myDraftSlotPicks: Record<string, string>;
   setMyDraftSlotPicks: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   draftSlotEditing: string | null;
@@ -118,31 +165,28 @@ interface LeagueHubProps {
   draftSlotSearchQuery: string;
   setDraftSlotSearchQuery: (q: string) => void;
   draftHubSection: "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES";
-  nflState: any;
-
-  // Auth
-  supabaseUser: any;
+  nflState: SleeperNFLState | null;
 
   // Additional state
   leagueSearch: string;
   setLeagueSearch: (s: string) => void;
-  filteredPlayers: any[] | undefined;
-  freeAgents: any[];
+  filteredPlayers: SleeperPlayer[] | undefined;
+  freeAgents: SleeperPlayer[];
   loadingCalcValues: boolean;
-  predictedDraftPicks: Record<string, any>;
+  predictedDraftPicks: Record<string, PredictedPick>;
   loadingDraftRefresh: boolean;
-  rookies: any[];
+  rookies: RookieBoardPlayer[];
   draftedPlayerIds: Set<string>;
 
   // Functions
-  loadRoster: (league: any) => void;
+  loadRoster: (league: SleeperLeague) => void;
   loadLeagueOverview: () => void;
   loadRedraftValues: () => void;
   loadUserTrades: (ownerId: string) => void;
   loadUserExposure: (ownerId: string) => void;
   loadDraftScout: (userId: string) => void;
   saveLeagueNote: (leagueId: string, text: string) => void;
-  onSaveSim: (leagueId: string, rows: any[]) => void;
+  onSaveSim: (leagueId: string, rows: SimulationTeamRow[]) => void;
   handleRunAllSims: () => void;
   refreshDraftBoard: () => Promise<void>;
   setPlayerProfileId: (id: string | null) => void;
@@ -167,7 +211,6 @@ function LeagueHub({
   projectionData, draftPicks, draftOrder, draftSettings, myDraftSlotPicks, setMyDraftSlotPicks,
   draftSlotEditing, setDraftSlotEditing, draftSlotSearchQuery, setDraftSlotSearchQuery,
   draftHubSection, nflState,
-  supabaseUser,
   leagueSearch, setLeagueSearch, filteredPlayers, freeAgents, loadingCalcValues,
   predictedDraftPicks, loadingDraftRefresh, rookies, draftedPlayerIds,
   loadRoster, loadLeagueOverview, loadRedraftValues, loadUserTrades, loadUserExposure, loadDraftScout,
@@ -176,6 +219,7 @@ function LeagueHub({
   ignoredOwnerIds, toggleIgnoredOwner,
 }: LeagueHubProps) {
   const players = usePlayers();
+  const { supabaseUser } = useAuth();
   const [lastNoteSavedAt, setLastNoteSavedAt] = React.useState<number | null>(null);
   const [leagueMateIntelLoadedAt, setLeagueMateIntelLoadedAt] = React.useState<number | null>(null);
   const [simSavedAt, setSimSavedAt] = React.useState<number | null>(null);
@@ -214,7 +258,8 @@ function LeagueHub({
     // Reload the currently selected league so the UI reflects fresh data
     if (selectedLeague) await loadRoster(selectedLeague);
     setRefreshingRosters(false);
-    setTimeout(() => setRosterRefreshProgress(null), 3000);
+    const t = setTimeout(() => setRosterRefreshProgress(null), 3000);
+    return () => clearTimeout(t);
   }, [leagues, selectedLeague, loadRoster]);
 
   // Reset sim-saved confirmation when the active league changes
@@ -313,11 +358,11 @@ function LeagueHub({
                 // in-memory by saveSimulationToSupabase and persisted in localStorage.
                 // leagueSimCache (Supabase) is secondary and can be stale after auth refreshes.
                 const committedRow = committedSimsByLeague[league.league_id]?.[Number(myRosterId)];
-                const cachedSim = committedRow ?? leagueSimCache[league.league_id]?.[Number(myRosterId)];
-                const playoffOdds = committedRow?.playoffOdds ?? cachedSim?.playoff_odds ?? 0;
-                const hasCachedSim = !!(committedRow ?? cachedSim);
-                const simAge = cachedSim?.computed_at
-                  ? Math.round((Date.now() - new Date(cachedSim.computed_at).getTime()) / (1000 * 60 * 60))
+                const cachedSimRow = leagueSimCache[league.league_id]?.[Number(myRosterId)];
+                const playoffOdds = committedRow?.playoffOdds ?? cachedSimRow?.playoff_odds ?? 0;
+                const hasCachedSim = !!(committedRow ?? cachedSimRow);
+                const simAge = cachedSimRow?.computed_at
+                  ? Math.round((Date.now() - new Date(cachedSimRow.computed_at).getTime()) / (1000 * 60 * 60))
                   : null;
                 const adjBucket = getAdjustedDirectionBucket(profile.bucket, profile, playoffOdds, hasCachedSim);
                 const adjColor = getBucketColor(adjBucket);
@@ -963,7 +1008,7 @@ const starters = starterSlots
   <div className="mt-6 bg-gray-900 border border-gray-700 rounded-lg p-4">
     <div className="flex justify-between mb-3">
       <div className="font-semibold text-sm text-purple-400">
-        TAXI {roster.taxi.length} TOTAL
+        TAXI {roster.taxi?.length ?? 0} TOTAL
       </div>
       <div className="text-xs text-gray-400">
         TOTAL TAXI VAL{" "}
@@ -1124,7 +1169,7 @@ const starters = starterSlots
       Top Free Agents (by Value)
     </div>
 
-    {freeAgents.map((p: any, i: number) => (
+    {freeAgents.map((p: any) => (
       <div
         key={p.player_id}
         className="flex justify-between items-center bg-gray-800/70 px-3 py-1.5 rounded-lg mb-1 text-sm"
@@ -1154,7 +1199,7 @@ const starters = starterSlots
                 return <p className="text-sm text-gray-500">Select a league from Rosters &amp; Rules first to view league-mate intelligence.</p>;
               }
 
-              const bestPartnerRosterId = selectedLeagueMateProfilesView[0]?.rosterId;
+              const bestPartnerRosterId = (selectedLeagueMateProfilesView[0] as any)?.rosterId;
 
               return (
                 <div className="space-y-4">
@@ -1543,33 +1588,13 @@ const starters = starterSlots
 
             {/* ── Standings ── */}
             {leagueHubTab === "STANDINGS" && (
-              selectedLeague && roster ? (
-                <div className="bg-gray-900 border border-gray-700 rounded-xl p-5 shadow-md">
-                  <h3 className="text-sm font-semibold text-gray-200 mb-4">{selectedLeague.name} — Standings</h3>
-                  {standings.map((team: any, index: number) => {
-                    const isMe = team.roster_id === roster.roster_id;
-                    const playoffTeams = selectedLeague?.settings?.playoff_teams || Math.min(Math.ceil(rosters.length / 2), 6);
-                    const isCutLine = index === playoffTeams - 1;
-                    const efficiency = team.max_pf > 0 ? Math.round((team.fpts / team.max_pf) * 100) : null;
-                    return (
-                      <div key={team.roster_id}>
-                        <div className={`flex justify-between p-2 rounded mb-1 ${isMe ? "bg-blue-800/40" : "bg-gray-800"}`}>
-                          <div className="text-sm">
-                            {index + 1}.{" "}
-                            <span>{users[team.owner_id] || "Team"}</span>
-                          </div>
-                          <div className="text-xs text-gray-400">
-                            {team.wins}-{team.losses}{team.ties ? `-${team.ties}` : ""} • {Math.round(team.fpts)} pts • Max {Math.round(team.max_pf)}{efficiency !== null ? <span className={`ml-1.5 ${efficiency >= 85 ? "text-green-500" : efficiency >= 70 ? "text-gray-400" : "text-red-500"}`}>({efficiency}% eff)</span> : null}
-                          </div>
-                        </div>
-                        {isCutLine && <div className="border-t border-yellow-500 my-2 text-center text-xs text-yellow-400">Playoff Cut Line</div>}
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <p className="text-sm text-gray-500">Select a league from Rosters &amp; Rules first to see its standings.</p>
-              )
+              <StandingsTab
+                selectedLeague={selectedLeague}
+                roster={roster}
+                standings={standings}
+                totalRosters={rosters.length}
+                users={users}
+              />
             )}
 
             {/* ── Suggested Starters ── */}
@@ -1578,7 +1603,6 @@ const starters = starterSlots
                 <p className="text-sm text-gray-500">Select a league from Rosters &amp; Rules first.</p>
               );
               const week = nflState?.week;
-              const season = nflState?.season;
               const isInSeason = nflState?.season_type === "regular";
               const projectionBySleeperId = new Map(
                 projectionData.map((row: any) => [String(row.sleeperId), row])
@@ -1604,7 +1628,7 @@ const starters = starterSlots
               const myPlayerIds: string[] = roster.players ?? [];
               const taxiIds = new Set<string>((roster.taxi ?? []).map((id: any) => String(id)));
               const used = new Set<string>();
-              const initialLineup: Array<{ slot: string; player: any; score: number; kickoffAt: number | null }> = [];
+              const initialLineup: LineupCoachRow[] = [];
               const currentStarterRows = positions.map((slot: string, index: number) => {
                 const starterId = String(roster?.starters?.[index] || "");
                 const starterPlayer = starterId ? (players as any)[starterId] : null;
@@ -2369,7 +2393,6 @@ const starters = starterSlots
                   </p>
                   {txns.map((t: any, idx: number) => {
                     const isWaiver = t.type === "waiver";
-                    const isFreeAgent = t.type === "free_agent";
                     const isTrade = t.type === "trade";
                     const adds = Object.entries(t.adds || {}) as [string, number][];
                     const drops = Object.entries(t.drops || {}) as [string, number][];

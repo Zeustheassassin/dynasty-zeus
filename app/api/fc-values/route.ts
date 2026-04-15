@@ -1,9 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '../../../lib/supabaseclient';
 import { FANTASYCALC_BASE_URL, FC_VALUES_TTL_MS } from '../../../lib/constants';
+import { checkRateLimit } from '../../../lib/rateLimit';
 
 export async function GET(req: NextRequest) {
-  const numQbs = parseInt(req.nextUrl.searchParams.get('numQbs') ?? '2', 10);
+  const rl = checkRateLimit(req, 30, 60_000, 'fc-values');
+  if (!rl.allowed) return rl.response;
+
+  const numQbsRaw = parseInt(req.nextUrl.searchParams.get('numQbs') ?? '2', 10);
+  // Only 1QB and 2QB formats are valid FantasyCalc endpoints
+  if (!Number.isInteger(numQbsRaw) || numQbsRaw < 1 || numQbsRaw > 2) {
+    return NextResponse.json({ error: 'numQbs must be 1 or 2' }, { status: 400 });
+  }
+  const numQbs = numQbsRaw;
 
   // ── 1. Check Supabase cache ──────────────────────────────
   try {

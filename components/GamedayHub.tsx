@@ -1,5 +1,6 @@
 "use client";
 import React from "react";
+import type { SleeperLeague, SleeperPlayer, GamedayMatchup, GamedayTeamView } from "../lib/types";
 
 // ── Helpers (module-level, same logic as page.tsx) ─────────────────────────
 const getKickoffStateClasses = (state: string) => {
@@ -30,17 +31,19 @@ const injuryBadge = (status: string | null | undefined) => {
 };
 
 // ── Props ──────────────────────────────────────────────────────────────────
+interface ShareEntry { count: number; leagues: string[]; starters: string[] }
+
 interface GamedayHubProps {
   // League selection
-  selectedLeague: any;
-  leagues: any[];
-  loadRoster: (league: any) => void;
+  selectedLeague: SleeperLeague | null;
+  leagues: SleeperLeague[];
+  loadRoster: (league: SleeperLeague) => void;
 
   // Gameday state
   gamedayWeek: number;
-  gamedayMatchupCards: any[];
+  gamedayMatchupCards: GamedayMatchup[];
   loadingGamedayMatchups: boolean;
-  selectedGamedayMatchup: any;
+  selectedGamedayMatchup: GamedayMatchup | null;
   setSelectedGamedayMatchupId: (id: number | null) => void;
 
   // Actions
@@ -53,17 +56,18 @@ interface GamedayHubProps {
   setPlayerProfileId: (id: string | null) => void;
 
   // Ownership (moved from Data Hub for gameday roster checks)
-  shares: Record<string, any>;
+  shares: Record<string, ShareEntry>;
   totalLeagues: number;
+  loadingShares: boolean;
   shareSearch: string;
   setShareSearch: (s: string) => void;
   sharePosition: string;
   setSharePosition: (pos: string) => void;
-  players: any;
+  players: Record<string, SleeperPlayer>;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
-export default function GamedayHub({
+function GamedayHub({
   selectedLeague,
   leagues,
   loadRoster,
@@ -78,7 +82,8 @@ export default function GamedayHub({
   loadProjections,
   setPlayerProfileId,
   shares,
-  totalLeagues,
+  totalLeagues: _totalLeagues,
+  loadingShares,
   shareSearch,
   setShareSearch,
   sharePosition,
@@ -90,8 +95,8 @@ export default function GamedayHub({
     (slot: string) => !["BN", "IR", "TAXI"].includes(slot)
   );
 
-  const teamA = selectedGamedayMatchup?.teams?.[0] || null;
-  const teamB = selectedGamedayMatchup?.teams?.[1] || null;
+  const teamA: GamedayTeamView | null = selectedGamedayMatchup?.teams?.[0] ?? null;
+  const teamB: GamedayTeamView | null = selectedGamedayMatchup?.teams?.[1] ?? null;
 
   const renderPlayerCell = (row: any, side: "left" | "right") => {
     if (!row?.player) {
@@ -434,8 +439,13 @@ export default function GamedayHub({
           </div>
         </div>
 
-        {Object.keys(shares).length === 0 ? (
-          <p className="text-sm text-gray-500">No league data loaded. Load your leagues to see ownership.</p>
+        {loadingShares ? (
+          <div className="flex items-center gap-2 text-sm text-gray-500 py-2">
+            <div className="w-4 h-4 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
+            Loading cross-league roster data…
+          </div>
+        ) : Object.keys(shares).length === 0 ? (
+          <p className="text-sm text-gray-500">Connect your Sleeper account to see cross-league ownership.</p>
         ) : (() => {
           const INJURY_PRIORITY: Record<string, number> = { IR: 0, O: 1, D: 2, Q: 3 };
           const rows = Object.entries(shares)
@@ -514,3 +524,5 @@ export default function GamedayHub({
     </div>
   );
 }
+
+export default React.memo(GamedayHub);

@@ -6,6 +6,7 @@ import Dashboard from "../components/Dashboard";
 import AlertsPage from "../components/AlertsPage";
 import ManagementHub from "../components/ManagementHub";
 import GamedayHub from "../components/GamedayHub";
+import ErrorBoundary from "../components/ErrorBoundary";
 // ── Hub loading skeleton ───────────────────────────────────────────────────
 // Shown while the code-split chunk downloads. Keeps the layout stable and
 // avoids the blank-flash that would otherwise appear on first navigation.
@@ -26,31 +27,40 @@ const LeagueHub = dynamic(() => import("../components/LeagueHub"), { ssr: false,
 const TradeHub = dynamic(() => import("../components/TradeHub"), { ssr: false, loading: HubSkeleton });
 import { LEAGUE_HUB_GROUPS } from "../lib/leagueHubGroups";
 import { supabase } from "../lib/supabaseclient";
+import type { User as SupabaseUser } from "@supabase/auth-js";
 import {
   CURRENT_YEAR, YEARS, ROUNDS,
-  normalizeProjName, getLineupSettings, STANDARD_SCORING,
-  getNonStandardRules, formatRule, groupRules,
-  getPickValueKey, getStoredPickValue, isSnakeDraft, getDraftRoundSlot,
-  getLeagueDirectionBucket, getBucketColor, computeWindowScore, getAdjustedDirectionBucket,
-  ordinal, average, clamp, sum, logisticWinProb,
+  getStoredPickValue, getDraftRoundSlot,
+  getBucketColor, getAdjustedDirectionBucket,
+  average, sum, logisticWinProb,
   createSeededRandom, randomNormal, buildRoundRobinSchedule,
-  percentileFromCounts, rankAgainstLeague,
-  FLEX_ELIGIBLE_POSITIONS, SUPER_FLEX_ELIGIBLE_POSITIONS,
-  getProjectionKickoffAt, getKickoffState, getKickoffStateClasses,
-  formatKickoffTime, getLineupSlotEligiblePositions, rebalanceLineupForKickoffWindows,
+  percentileFromCounts,
+  getProjectionKickoffAt, getKickoffState,
+  formatKickoffTime,
   getRosterDirectionProfile, getProfilePosBuckets,
   getLeagueMateMotivation, getTradePartnerFitLabel, getTradePartnerFit,
   getCrossLeaguePreferenceFit, getCrossLeagueTradeBehaviorFit,
-  fetchFantasyCalcValues, formatRelativeDate, normalizeRookieName,
+  fetchFantasyCalcValues, formatRelativeDate,
 } from "../lib/helpers";
-import { PROJ_SOURCES, useProjections } from "../hooks/useProjections";
+import { useProjections } from "../hooks/useProjections";
 import { useSleeperUser } from "../hooks/useSleeperUser";
 import { usePlayerStats } from "../hooks/usePlayerStats";
 import { useManagementState } from "../hooks/useManagementState";
 import { useRookieBoardState, ROOKIE_YEAR, ROOKIE_BOARD_VERSION, ROOKIE_BOARD_RESET_KEY } from "../hooks/useRookieBoardState";
+import { useAlerts } from "../hooks/useAlerts";
 import { PlayersProvider } from "../lib/PlayersContext";
+import { AuthProvider } from "../lib/AuthContext";
+import { LeagueProvider } from "../lib/LeagueContext";
+import { RosterProvider } from "../lib/RosterContext";
 import { fetchSleeperUser } from "../lib/sleeperUserCache";
-import type { ProjSourceId, LeagueHubTab, AlertsCenterItem, WatchlistEntry, TradeAttempt, TradeAttemptStatus } from "../lib/types";
+import type {
+  LeagueHubTab, AlertsCenterItem, TradeAttempt, TradeAttemptStatus,
+  SleeperPlayer, SleeperLeague, SleeperRoster,
+  SleeperDraft, SleeperDraftPick, SleeperNFLState, SleeperTransaction, GamedayMatchup, GamedayTeamView,
+  CommittedSimsByLeague, CachedSimRow, CrossLeagueIntel, SleeperMatchup,
+  AugmentedPick, LeagueOverviewEntry, LeagueMateStatEntry,
+  HistoricalSnapshot, LeagueMateView, LeagueSimulation, SimulationTeamRow,
+} from "../lib/types";
 
 // -------------------------
 // MODULE-LEVEL CONSTANTS (page-specific)
@@ -60,9 +70,21 @@ import type { ProjSourceId, LeagueHubTab, AlertsCenterItem, WatchlistEntry, Trad
 // Module-level in-memory player map cache — avoids re-fetching/re-parsing the 6MB Sleeper player
 // payload if loadPlayers is called more than once in the same browser session (e.g. strict-mode
 // double-invoke in dev, or a Sleeper reconnect event).
-let _playersInMemory: Record<string, any> | null = null;
+let _playersInMemory: Record<string, SleeperPlayer> | null = null;
 
 // fetchSleeperUser imported from lib/sleeperUserCache (shared with useLeagues)
+
+// ── Page-local interfaces (shapes that don't warrant a lib/types entry) ──────
+interface Note { id: string; user_id: string; title: string; body: string; updated_at: string; }
+interface StandingRow { roster_id: number; wins: number; losses: number; ties: number; fpts: number; max_pf: number; owner_id: string; }
+interface ExposureEntry { playerId: string; count: number; percent: number; }
+interface ExposureData { players: ExposureEntry[]; leagueCount: number; }
+interface DraftScoutPick { round: number; player: SleeperPlayer | null; playerName: string | null; position: string | null; }
+interface DraftScoutLeague { leagueName: string; picks: DraftScoutPick[]; }
+// AugmentedPick is now exported from lib/types.ts
+type AnnotatedTransaction = SleeperTransaction & { leagueName: string; leagueId: string; rosterOwnerMap: Record<number, string>; };
+type AnnotatedTrade = SleeperTransaction & { leagueName: string; leagueId: string; myRosterId: number; rosterToOwner: Record<number, string>; rosterToName: Record<number, string>; };
+interface TradeIntelEntry { tradeCount30d: number; bought: Record<string, number>; picksIn: number; picksOut: number; lastTradeAt: string | null; }
 
 // Static — never changes, defined at module level so it's a stable reference in useMemo dep arrays
 const ROLE_PRIORITY: Record<string, number> = { starter: 0, bench: 1, taxi: 2 };
@@ -73,60 +95,58 @@ export default function Home() {
   // -------------------------
   // CORE STATE
   // -------------------------
-  const [supabaseUser, setSupabaseUser] = useState<any>(null);
+  const [supabaseUser, setSupabaseUser] = useState<SupabaseUser | null>(null);
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
-  const [notes, setNotes] = useState<any[]>([]);
-  const [noteTitle, setNoteTitle] = useState("");
-  const [noteBody, setNoteBody] = useState("");
+  const [, setNotes] = useState<Note[]>([]);
   const [supabaseError, setSupabaseError] = useState("");
   const [supabaseMessage, setSupabaseMessage] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
   const [showLoginPassword, setShowLoginPassword] = useState(false);
-  const [selectedLeague, setSelectedLeague] = useState<any>(null);
-  const [roster, setRoster] = useState<any>(null);
-  const [rosters, setRosters] = useState<any[]>([]);
-  const [players, setPlayers] = useState<any>({});
+  const [selectedLeague, setSelectedLeague] = useState<SleeperLeague | null>(null);
+  const [roster, setRoster] = useState<SleeperRoster | null>(null);
+  const [rosters, setRosters] = useState<SleeperRoster[]>([]);
+  const [players, setPlayers] = useState<Record<string, SleeperPlayer>>({});
   const [activeTab, setActiveTab] = useState("QB");
   const [search, setSearch] = useState("");
   const [leagueSearch, setLeagueSearch] = useState("");
 
-  const [picks, setPicks] = useState<any[]>([]);
-  const [allPicks, setAllPicks] = useState<any[]>([]);
-  const [draftId, setDraftId] = useState<string | null>(null);
-const [draftPicks, setDraftPicks] = useState<any[]>([]);
-const [draftOrder, setDraftOrder] = useState<any>({});
-const [draftSettings, setDraftSettings] = useState<any>(null);
+  const [picks, setPicks] = useState<AugmentedPick[]>([]);
+  const [allPicks, setAllPicks] = useState<AugmentedPick[]>([]);
+  const [, setDraftId] = useState<string | null>(null);
+const [draftPicks, setDraftPicks] = useState<SleeperDraftPick[]>([]);
+const [draftOrder, setDraftOrder] = useState<Record<string, number>>({});
+const [draftSettings, setDraftSettings] = useState<SleeperDraft | null>(null);
 const [draftScoutUserId, setDraftScoutUserId] = useState<string | null>(null);
-const [draftScoutData, setDraftScoutData] = useState<any[] | null>(null);
+const [draftScoutData, setDraftScoutData] = useState<DraftScoutLeague[] | null>(null);
 const [loadingDraftScout, setLoadingDraftScout] = useState(false);
 const draftScoutPatterns = useMemo(() => {
   if (!draftScoutData?.length) return null;
-  const leaguesWithPicks = draftScoutData.filter((l: any) => l.picks.length > 0);
+  const leaguesWithPicks = draftScoutData.filter((l) => l.picks.length > 0);
   if (!leaguesWithPicks.length) return null;
 
-  const allPicksFlat = leaguesWithPicks.flatMap((l: any) => l.picks);
+  const allPicksFlat = leaguesWithPicks.flatMap((l) => l.picks);
   const total = allPicksFlat.length;
   const n = leaguesWithPicks.length;
 
   const posCounts: Record<string, number> = {};
-  allPicksFlat.forEach((p: any) => {
+  allPicksFlat.forEach((p) => {
     const pos = p.position || "?";
     posCounts[pos] = (posCounts[pos] || 0) + 1;
   });
   const sortedPos = Object.entries(posCounts).sort((a, b) => b[1] - a[1]);
 
   const roundBreakdown: Record<number, Record<string, number>> = {};
-  allPicksFlat.forEach((p: any) => {
+  allPicksFlat.forEach((p) => {
     if (!roundBreakdown[p.round]) roundBreakdown[p.round] = {};
     const pos = p.position || "?";
     roundBreakdown[p.round][pos] = (roundBreakdown[p.round][pos] || 0) + 1;
   });
 
-  const firstPicks = leaguesWithPicks.map((l: any) => l.picks[0]).filter(Boolean);
+  const firstPicks = leaguesWithPicks.map((l) => l.picks[0]).filter(Boolean);
   const firstPickPos: Record<string, number> = {};
-  firstPicks.forEach((p: any) => {
+  firstPicks.forEach((p) => {
     const pos = p.position || "?";
     firstPickPos[pos] = (firstPickPos[pos] || 0) + 1;
   });
@@ -164,7 +184,7 @@ const draftScoutPatterns = useMemo(() => {
 const [loadingDraftRefresh, setLoadingDraftRefresh] = useState(false);
 const [selectedLeagueDraftHasOccurred, setSelectedLeagueDraftHasOccurred] = useState(false);
 const [tradeHubUserId, setTradeHubUserId] = useState<string | null>(null);
-const [tradeHubData, setTradeHubData] = useState<any[] | null>(null);
+const [tradeHubData, setTradeHubData] = useState<AnnotatedTrade[] | null>(null);
 const [loadingTradeHub, setLoadingTradeHub] = useState(false);
 const [tradeAttempts, setTradeAttempts] = useState<TradeAttempt[]>([]);
 const [tradeAttemptsLeagueId, setTradeAttemptsLeagueId] = useState<string | null>(null);
@@ -173,10 +193,10 @@ const [allTradeAttempts, setAllTradeAttempts] = useState<TradeAttempt[]>([]);
 const [tradeHubSection, setTradeHubSection] = useState<"CALCULATOR" | "FINDER" | "RECOMMENDATIONS" | "TRADE_LOG" | "ATTEMPTS">("CALCULATOR");
 const [finderSeed, setFinderSeed] = useState(() => Math.random());
 const [leagueHubTab, setLeagueHubTab] = useState<LeagueHubTab>("OVERVIEW");
-const [leagueOverviewData, setLeagueOverviewData] = useState<Record<string, any>>({});
+const [leagueOverviewData, setLeagueOverviewData] = useState<Record<string, LeagueOverviewEntry>>({});
 const [loadingLeagueOverview, setLoadingLeagueOverview] = useState(false);
 const [leagueOverviewLoaded, setLeagueOverviewLoaded] = useState(false);
-const [leagueSimCache, setLeagueSimCache] = useState<Record<string, Record<number, any>>>({});
+const [leagueSimCache, setLeagueSimCache] = useState<Record<string, Record<number, CachedSimRow>>>({});
 const [readyLeagueId, setReadyLeagueId] = useState<string | null>(null);
 const [simQueue, setSimQueue] = useState<string[]>([]);
 const [simProgress, setSimProgress] = useState<{ done: number; total: number } | null>(null);
@@ -184,7 +204,7 @@ const [simProgress, setSimProgress] = useState<{ done: number; total: number } |
 const [simSalt, setSimSalt] = useState<number>(() => Math.floor(Math.random() * 1_000_000));
 // Frozen sim rows committed at button-click time — keyed league_id → rosterId → sim row.
 // Persisted in localStorage so values survive page reloads without re-running sims.
-const [committedSimsByLeague, setCommittedSimsByLeague] = useState<Record<string, Record<number, any>>>(() => {
+const [committedSimsByLeague, setCommittedSimsByLeague] = useState<CommittedSimsByLeague>(() => {
   try { return JSON.parse(localStorage.getItem("committedSimRows_v2") || "{}"); } catch { return {}; }
 });
 const [myDraftSlotPicks, setMyDraftSlotPicks] = useState<Record<string, string>>({}); // slot → player_id override
@@ -192,14 +212,14 @@ const [draftSlotEditing, setDraftSlotEditing] = useState<string | null>(null); /
 const [draftSlotSearchQuery, setDraftSlotSearchQuery] = useState("");
 // userId → { QB: 0.15, RB: 0.30, WR: 0.45, TE: 0.10 } — historical pick tendencies per owner
 const [ownerDraftTendencies, setOwnerDraftTendencies] = useState<Record<string, Record<string, number>>>({});
-const [leagueMateTradeIntel, setLeagueMateTradeIntel] = useState<Record<string, any>>({});
+const [leagueMateTradeIntel, setLeagueMateTradeIntel] = useState<Record<string, TradeIntelEntry>>({});
 const [loadingLeagueMateIntel, setLoadingLeagueMateIntel] = useState(false);
-const [crossLeagueMateIntel, setCrossLeagueMateIntel] = useState<Record<string, any>>({});
+const [crossLeagueMateIntel, setCrossLeagueMateIntel] = useState<Record<string, CrossLeagueIntel>>({});
 const [loadingCrossLeagueMateIntel, setLoadingCrossLeagueMateIntel] = useState(false);
-const [leagueMateProfileCache, setLeagueMateProfileCache] = useState<Record<string, any[]>>({});
+const [leagueMateProfileCache, setLeagueMateProfileCache] = useState<Record<string, LeagueMateView[]>>({});
 const [leagueNotes, setLeagueNotes] = useState<Record<string, string>>({});
-const [nflState, setNflState] = useState<any>(null);
-const [gamedayMatchups, setGamedayMatchups] = useState<any[]>([]);
+const [nflState, setNflState] = useState<SleeperNFLState | null>(null);
+const [gamedayMatchups, setGamedayMatchups] = useState<SleeperMatchup[]>([]);
 const [loadingGamedayMatchups, setLoadingGamedayMatchups] = useState(false);
 const [selectedGamedayMatchupId, setSelectedGamedayMatchupId] = useState<number | null>(null);
 const [playerProfileId, setPlayerProfileId] = useState<string | null>(null);
@@ -214,12 +234,12 @@ const [playerDispositions, setPlayerDispositions] = useState<Record<string, { se
 const [leaguePlayerTags, setLeaguePlayerTags] = useState<Record<string, Record<string, "CORE" | "WANT_TO_TRADE">>>(() => {
   try { return JSON.parse(localStorage.getItem("leaguePlayerTags_v1") || "{}"); } catch { return {}; }
 });
-const [activityTransactions, setActivityTransactions] = useState<any[]>([]);
+const [activityTransactions, setActivityTransactions] = useState<AnnotatedTransaction[]>([]);
 const [loadingActivity, setLoadingActivity] = useState(false);
-const [leagueWeeklyMatchups, setLeagueWeeklyMatchups] = useState<Record<string, any[]>>({});
+const [leagueWeeklyMatchups, setLeagueWeeklyMatchups] = useState<Record<string, { week: number; matchups: SleeperMatchup[] }[]>>({});
 const [loadingLeagueWeeklyMatchups, setLoadingLeagueWeeklyMatchups] = useState(false);
 const [dataHubTab, setDataHubTab] = useState<"RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "PICK_VALUES" | "LEAGUEMATES" | "DEPTH_CHARTS" | "BUY_LOW">("RANKINGS");
-const [leagueMateStats, setLeagueMateStats] = useState<any[]>([]);
+const [leagueMateStats, setLeagueMateStats] = useState<LeagueMateStatEntry[]>([]);
 const [leagueMateStatsLoaded, setLeagueMateStatsLoaded] = useState(false);
 const [loadingLeagueMateStats, setLoadingLeagueMateStats] = useState(false);
 const [leagueMateSort, setLeagueMateSort] = useState<"name" | "total" | "bestball" | "shared">("total");
@@ -228,7 +248,6 @@ const [dynastyRankPos, setDynastyRankPos] = useState("ALL");
 const [redraftValues, setRedraftValues] = useState<Record<string, number>>({});
 const [loadingRedraft, setLoadingRedraft] = useState(false);
 const [redraftLoaded, setRedraftLoaded] = useState(false);
-const [redraftRankPos, setRedraftRankPos] = useState("ALL");
 const {
   projectionData, setProjectionData,
   loadingProjections,
@@ -277,15 +296,15 @@ const [calcGivePicks, setCalcGivePicks] = useState<string[]>([]);
 const [calcReceivePicks, setCalcReceivePicks] = useState<string[]>([]);
 const [calcSearchA, setCalcSearchA] = useState("");
 const [calcSearchB, setCalcSearchB] = useState("");
-const [users, setUsers] = useState<any>({});
-const [standings, setStandings] = useState<any[]>([]);
+const [users, setUsers] = useState<Record<string, string>>({});
+const [standings, setStandings] = useState<StandingRow[]>([]);
 
   const [mainTab, setMainTab] = useState("DASHBOARD");
 
   const {
     username, setUsername,
-    user, setUser,
-    leagues, setLeagues,
+    user,
+    leagues,
     connectLoading,
     connectError,
     connectSuccess,
@@ -301,19 +320,29 @@ const [standings, setStandings] = useState<any[]>([]);
     },
   });
 
-  const [allLeagueData, setAllLeagueData] = useState<any[]>([]);
+  const [allLeagueData, setAllLeagueData] = useState<{ leagueName: string; roster: SleeperRoster | null }[]>([]);
+  const [loadingAllLeagueData, setLoadingAllLeagueData] = useState(false);
   const [shareSearch, setShareSearch] = useState("");
   const [sharePosition, setSharePosition] = useState("ALL");
-  const [freeAgents, setFreeAgents] = useState<any[]>([]);
-  const [userCache, setUserCache] = useState<any>({});
+  const [freeAgents, setFreeAgents] = useState<SleeperPlayer[]>([]);
+  const [userCache, setUserCache] = useState<Record<string, ExposureData>>({});
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
-const [externalShares, setExternalShares] = useState<any>(null);
+const [externalShares, setExternalShares] = useState<ExposureData | null>(null);
 const [loadingShares, setLoadingShares] = useState(false);
-const [dashboardAlerts, setDashboardAlerts] = useState<AlertsCenterItem[]>([]);
-const [dismissedAlertIds, setDismissedAlertIds] = useState<string[]>([]);
-const [watchlistEntries, setWatchlistEntries] = useState<WatchlistEntry[]>([]);
+// ── ALERTS / WATCHLIST ─────────────────────────────────────────
+const {
+  dashboardAlerts, setDashboardAlerts,
+  dismissedAlertIds, setDismissedAlertIds,
+  watchlistEntries, setWatchlistEntries,
+  mergeDashboardAlerts,
+  dismissAlert: dismissDashboardAlert,
+  alertStoreScope,
+  watchlistStorageKey,
+  alertStorageKey,
+  dismissedAlertStorageKey,
+} = useAlerts({ supabaseUser, players });
 const [loadingExternalAlerts, setLoadingExternalAlerts] = useState(false);
-const [leagueTransactions, setLeagueTransactions] = useState<any[]>([]);
+const [leagueTransactions, setLeagueTransactions] = useState<AnnotatedTransaction[]>([]);
 const [loadingTransactions, setLoadingTransactions] = useState(false);
 
 // ── MANAGEMENT HUB ────────────────────────────────────────────
@@ -344,24 +373,18 @@ const [oppRosterSearch, setOppRosterSearch] = useState("");
 
 // Stable ref so alert save effects can read the current user without
 // declaring supabaseUser as a dependency (avoids unintended re-fires on login).
-const supabaseUserRef = useRef<any>(null);
+const supabaseUserRef = useRef<typeof supabaseUser>(null);
 useEffect(() => { supabaseUserRef.current = supabaseUser; }, [supabaseUser]);
-const alertStoreScope = supabaseUser?.id || "guest";
-const watchlistStorageKey = `watchlists_v1_${alertStoreScope}`;
-const alertStorageKey = `alerts_v1_${alertStoreScope}`;
+// alertSnapshotStorageKey is separate from the useAlerts hook — it tracks the daily
+// player value baseline used for gaining/falling alerts, not the alert list itself.
 const alertSnapshotStorageKey = `alertSnapshots_v1_${alertStoreScope}`;
-const dismissedAlertStorageKey = `dismissedAlerts_v1_${alertStoreScope}`;
 const alertBootstrapRef = useRef(false);
 // Stable daily baseline for value-change alerts — loaded from Supabase, NOT localStorage.
-// Separating this from the per-session localStorage snapshot prevents false "gaining/falling"
-// alerts caused by FC API inconsistencies or stale cross-session snapshots.
-const historicalSnapshotRef = useRef<{ players: Record<string, any>; recorded_at: string } | null>(null);
-const [historicalSnapshot, setHistoricalSnapshot] = useState<{ players: Record<string, any>; recorded_at: string } | null>(null);
+const historicalSnapshotRef = useRef<HistoricalSnapshot | null>(null);
+const [historicalSnapshot, setHistoricalSnapshot] = useState<HistoricalSnapshot | null>(null);
 const latestAlertsRef = useRef<AlertsCenterItem[]>([]);
-const latestDismissedAlertsRef = useRef<string[]>([]);
 
 useEffect(() => { latestAlertsRef.current = dashboardAlerts; }, [dashboardAlerts]);
-useEffect(() => { latestDismissedAlertsRef.current = dismissedAlertIds; }, [dismissedAlertIds]);
 
 useEffect(() => {
   try {
@@ -372,7 +395,6 @@ useEffect(() => {
 
 const refreshSupabaseUser = async () => {
   const { data } = await supabase.auth.getUser();
-  console.log("refreshSupabaseUser", data.user ? data.user.email : "null");
   setSupabaseUser(data.user);
   if (!data.user) {
     setNotes([]);
@@ -400,66 +422,6 @@ const loadNotes = async () => {
   else setNotes(data ?? []);
 };
 
-const hydrateAlertStateFromLocal = () => {
-  try {
-    const storedWatchlists = localStorage.getItem(watchlistStorageKey);
-    if (storedWatchlists) setWatchlistEntries(JSON.parse(storedWatchlists));
-  } catch {}
-
-  try {
-    const storedAlerts = localStorage.getItem(alertStorageKey);
-    if (storedAlerts) setDashboardAlerts(JSON.parse(storedAlerts));
-  } catch {}
-
-  try {
-    const storedDismissed = localStorage.getItem(dismissedAlertStorageKey);
-    if (storedDismissed) setDismissedAlertIds(JSON.parse(storedDismissed));
-  } catch {}
-};
-
-const mergeDashboardAlerts = (incoming: AlertsCenterItem[]) => {
-  if (!incoming.length) return;
-  setDashboardAlerts((prev) => {
-    const merged = new Map<string, AlertsCenterItem>();
-    [...prev, ...incoming].forEach((alert) => {
-      const existing = merged.get(alert.id);
-      merged.set(alert.id, {
-        ...existing,
-        ...alert,
-        dismissed: alert.dismissed ?? existing?.dismissed ?? false,
-      });
-    });
-    return [...merged.values()]
-      .sort((a, b) => b.timestamp - a.timestamp)
-      .slice(0, 80);
-  });
-};
-
-
-const dismissDashboardAlert = useCallback(async (alertId: string) => {
-  const sbUser = supabaseUserRef.current;
-  const scope = sbUser?.id || "guest";
-  const dismissedKey = `dismissedAlerts_v1_${scope}`;
-  const nextDismissed = Array.from(new Set([...latestDismissedAlertsRef.current, alertId]));
-  setDismissedAlertIds(nextDismissed);
-  localStorage.setItem(dismissedKey, JSON.stringify(nextDismissed));
-  setDashboardAlerts((prev) =>
-    prev.map((alert) => alert.id === alertId ? { ...alert, dismissed: true } : alert)
-  );
-  if (sbUser) {
-    await supabase
-      .from("alerts")
-      .upsert(
-        { user_id: sbUser.id, alert_id: alertId, dismissed: true, updated_at: new Date().toISOString() },
-        { onConflict: "user_id,alert_id" }
-      );
-  }
-}, []); // reads dismissedAlertIds via latestDismissedAlertsRef, supabaseUser via supabaseUserRef
-
-useEffect(() => {
-  hydrateAlertStateFromLocal();
-}, [watchlistStorageKey, alertStorageKey, dismissedAlertStorageKey]);
-
 // Load all Supabase-persisted user data whenever the logged-in user changes
 useEffect(() => {
   if (!supabaseUser) return;
@@ -477,65 +439,14 @@ useEffect(() => {
     .then(({ data }) => {
       if (data && data.length > 0) {
         const map: Record<string, string> = {};
-        data.forEach((row: any) => { map[row.league_id] = row.content; });
+        data.forEach((row: { league_id: string; content: string }) => { map[row.league_id] = row.content; });
         setLeagueNotes(map);
         localStorage.setItem("leagueNotes", JSON.stringify(map));
       }
     });
   // Rookie board is handled by the loadRookieBoard effect (depends on supabaseUser)
   // 3. League management + commissioner payments are loaded by useManagementState hook
-  // 4. Watchlists
-  supabase
-    .from("watchlists")
-    .select("*")
-    .eq("user_id", supabaseUser.id)
-    .order("updated_at", { ascending: false })
-    .then(({ data, error }) => {
-      if (error || !data) return;
-      const rows = data.map((row: any) => ({
-        player_id: String(row.player_id),
-        label: row.label,
-        threshold_up: Number(row.threshold_up || 250),
-        threshold_down: Number(row.threshold_down || 250),
-        league_id: row.league_id || null,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-      }));
-      setWatchlistEntries(rows);
-      localStorage.setItem(watchlistStorageKey, JSON.stringify(rows));
-    });
-  // 6. Alerts cache / dismissed state
-  supabase
-    .from("alerts")
-    .select("*")
-    .eq("user_id", supabaseUser.id)
-    .order("updated_at", { ascending: false })
-    .limit(80)
-    .then(({ data, error }) => {
-      if (error || !data) return;
-      const rows = data.map((row: any) => ({
-        id: row.alert_id,
-        category: row.category || "watchlist",
-        source: row.source || "internal",
-        severity: row.severity || "low",
-        title: row.title || "Saved alert",
-        detail: row.detail || "",
-        actionable: row.actionable !== false,
-        timestamp: Number(new Date(row.updated_at || row.created_at || Date.now())),
-        playerId: row.player_id || null,
-        leagueId: row.league_id || null,
-        link: row.payload?.link || null,
-        payload: row.payload || {},
-        dismissed: !!row.dismissed,
-      })) as AlertsCenterItem[];
-      setDashboardAlerts(rows);
-      setDismissedAlertIds(rows.filter((row) => row.dismissed).map((row) => row.id));
-      localStorage.setItem(alertStorageKey, JSON.stringify(rows));
-      localStorage.setItem(
-        dismissedAlertStorageKey,
-        JSON.stringify(rows.filter((row) => row.dismissed).map((row) => row.id))
-      );
-    });
+  // 4. Watchlists + alerts are loaded by the useAlerts hook (depends on supabaseUser)
   // 7. Daily player value snapshot — stable baseline for climbing/falling alerts
   supabase
     .from("player_value_snapshots")
@@ -557,7 +468,7 @@ useEffect(() => {
     .then(({ data }) => {
       if (data && data.length > 0) {
         const map: Record<string, string> = {};
-        data.forEach((row: any) => { map[String(row.player_id)] = row.note; });
+        data.forEach((row: { player_id: string; note: string }) => { map[String(row.player_id)] = row.note; });
         setPlayerNotes((prev) => {
           const merged = { ...prev, ...map };
           try { localStorage.setItem("playerNotes_v1", JSON.stringify(merged)); } catch {}
@@ -573,7 +484,7 @@ useEffect(() => {
     .then(({ data }) => {
       if (data && data.length > 0) {
         const map: Record<string, { sell: string; buy: string }> = {};
-        data.forEach((row: any) => { map[String(row.player_id)] = { sell: row.sell, buy: row.buy }; });
+        data.forEach((row: { player_id: string; sell: string; buy: string }) => { map[String(row.player_id)] = { sell: row.sell, buy: row.buy }; });
         setPlayerDispositions((prev) => {
           const merged = { ...prev, ...map };
           try { localStorage.setItem("playerDispositions_v1", JSON.stringify(merged)); } catch {}
@@ -589,7 +500,7 @@ useEffect(() => {
     .then(({ data }) => {
       if (data && data.length > 0) {
         const map: Record<string, Record<string, "CORE" | "WANT_TO_TRADE">> = {};
-        data.forEach((row: any) => {
+        data.forEach((row: { league_id: string; player_id: string; tag: string }) => {
           const lid = String(row.league_id);
           if (!map[lid]) map[lid] = {};
           map[lid][String(row.player_id)] = row.tag as "CORE" | "WANT_TO_TRADE";
@@ -643,10 +554,18 @@ const signIn = async () => {
       email,
       password: loginPassword,
     });
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("Request timed out — check your internet or Supabase project status.")), 10000)
-    );
-    const { data, error } = await Promise.race([signInPromise, timeoutPromise]);
+    let timeoutId: ReturnType<typeof setTimeout>;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(
+        () => reject(new Error("Request timed out — check your internet or Supabase project status.")),
+        10000
+      );
+    });
+    const result = await Promise.race([
+      signInPromise.then((r) => { clearTimeout(timeoutId); return r; }),
+      timeoutPromise,
+    ]);
+    const { data, error } = result;
     if (error) {
       setSupabaseError(error.message || error.name || "Sign-in failed. Check your credentials.");
       return;
@@ -661,8 +580,8 @@ const signIn = async () => {
     } else {
       setSupabaseError("Sign-in failed — no user returned. Check your credentials or confirm your email.");
     }
-  } catch (err: any) {
-    setSupabaseError(err?.message || "Unexpected error — check your internet connection.");
+  } catch (err: unknown) {
+    setSupabaseError((err as { message?: string })?.message || "Unexpected error — check your internet connection.");
   } finally {
     setLoginLoading(false);
   }
@@ -731,47 +650,35 @@ const signOut = async () => {
   disconnectSleeper();
 };
 
-const createNote = async () => {
-  if (!supabaseUser || !noteTitle.trim()) return;
-  const { error } = await supabase.from("notes").insert([{
-    user_id: supabaseUser.id,
-    title: noteTitle,
-    body: noteBody,
-  }]);
-  if (error) setSupabaseError(error.message);
-  else { setNoteTitle(""); setNoteBody(""); loadNotes(); }
-};
-
-const deleteNote = async (id: string) => {
-  const { error } = await supabase
-    .from("notes")
-    .delete()
-    .eq("id", id)
-    .eq("user_id", supabaseUser.id);
-  if (error) setSupabaseError(error.message);
-  else loadNotes();
-};
-
 // -------------------------
 // LOAD PLAYERS
 // -------------------------
 useEffect(() => {
+  const controller = new AbortController();
+  const { signal } = controller;
+
   const loadPlayers = async () => {
     // Fast path: already loaded this session — skip localStorage and network entirely
     if (_playersInMemory) {
       setPlayers(_playersInMemory);
       // nflState is React state and resets on remount — reload it from the cached route
-      fetch('/api/nfl-state').then(r => r.json()).then(setNflState).catch(() => {});
+      fetch('/api/nfl-state', { signal })
+        .then(r => r.json()).then((s) => { if (!signal.aborted) setNflState(s); }).catch(() => {});
       return;
     }
 
-    const cached = localStorage.getItem("playersCache");
-    const cachedAt = localStorage.getItem("playersCacheAt");
+    let cached: string | null = null;
+    let cachedAt: string | null = null;
+    try {
+      cached = localStorage.getItem("playersCache");
+      cachedAt = localStorage.getItem("playersCacheAt");
+    } catch { /* private browsing or quota — skip cache */ }
     const ONE_DAY = 24 * 60 * 60 * 1000;
 
     if (cached && cachedAt && Date.now() - Number(cachedAt) < ONE_DAY) {
-      const parsedCache = JSON.parse(cached);
-      const cacheSample = Object.values(parsedCache).find((player: any) => player && typeof player === "object") as any;
+      let parsedCache: Record<string, SleeperPlayer>;
+      try { parsedCache = JSON.parse(cached); } catch { parsedCache = {}; }
+      const cacheSample = Object.values(parsedCache).find((player) => player && typeof player === "object") as Record<string, unknown> | undefined;
       const hasRookieFields =
         cacheSample &&
         "years_exp" in cacheSample &&
@@ -782,14 +689,17 @@ useEffect(() => {
         _playersInMemory = parsedCache;
         setPlayers(parsedCache);
         // Still load pick values and nflState even when players come from cache
-        fetchFantasyCalcValues(2).then(({ pickValues }) => setPickFcValues(pickValues)).catch(() => {});
-        fetch('/api/nfl-state').then(r => r.json()).then(setNflState).catch(() => {});
+        fetchFantasyCalcValues(2).then(({ pickValues }) => { if (!signal.aborted) setPickFcValues(pickValues); }).catch(() => {});
+        fetch('/api/nfl-state', { signal })
+          .then(r => r.json()).then((s) => { if (!signal.aborted) setNflState(s); }).catch(() => {});
         return;
       }
     }
 
     // /api/players returns pre-slimmed players + nflState, both server-cached
-    const { players: data, nflState: fetchedNflState } = await fetch("/api/players").then(r => r.json());
+    const res = await fetch("/api/players", { signal });
+    if (signal.aborted) return;
+    const { players: data, nflState: fetchedNflState } = await res.json();
     setNflState(fetchedNflState);
 
     const { playerValues: fcValues, pickValues } = await fetchFantasyCalcValues(2);
@@ -810,7 +720,8 @@ useEffect(() => {
     setPlayers(data);
   };
 
-  loadPlayers();
+  loadPlayers().catch((err) => { if (!controller.signal.aborted) console.error('[loadPlayers]', err); });
+  return () => controller.abort();
 }, []);
 
 // Load league-specific FC values and redraft values as soon as Trade Hub is opened.
@@ -852,7 +763,9 @@ useEffect(() => {
     loadNflState();
     loadRedraftValues();
   }
-}, [mainTab, leagueHubTab, leagues.length]);
+  // leagueOverviewLoaded guards against duplicate calls; leagues.length triggers when leagues first load
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [mainTab, leagueHubTab, leagueOverviewLoaded, leagues.length]);
 
 useEffect(() => {
   if (mainTab === "LEAGUES" && leagueHubTab === "STARTERS") {
@@ -883,13 +796,18 @@ useEffect(() => {
   }
 }, [mainTab, leagueHubTab, selectedLeague?.league_id, rosters.length]);
 
+// Stable counts for dep arrays — Object.keys() creates a new array on every render,
+// which defeats useMemo/useEffect deps. These are plain numbers and safe to compare.
+const usersCount   = useMemo(() => Object.keys(users).length,   [users]);
+const playersCount = useMemo(() => Object.keys(players).length, [players]);
+
 // Load leaguemate trade alerts once rosters + user display names + players are ready.
 // players must be loaded so player IDs in trade.adds can be resolved to full_name.
 useEffect(() => {
-  if (!rosters.length || !Object.keys(users).length || !user?.user_id || !Object.keys(players).length) return;
+  if (!rosters.length || !usersCount || !user?.user_id || !playersCount) return;
   loadLeaguemateTradeAlerts();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [rosters.length, Object.keys(users).length, Object.keys(players).length]);
+}, [rosters.length, usersCount, playersCount]);
 
 // Auto-load data needed by the player profile panel whenever it opens
 useEffect(() => {
@@ -940,6 +858,12 @@ useEffect(() => {
   }
 
   loadGamedayMatchups(selectedLeague.league_id, currentWeek);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // projectionWeek/projectionLoaded omitted intentionally: adding them would
+  // create a reload loop (effect sets projectionWeek → dep changes → re-runs).
+  // loadProjections/loadGamedayMatchups omitted because they are not useCallback-
+  // wrapped; adding them would re-run on every render. The nflState deps above
+  // are sufficient to trigger this effect at the right times.
 }, [mainTab, selectedLeague?.league_id, nflState?.week, nflState?.season_type]);
 
 useEffect(() => {
@@ -1517,7 +1441,9 @@ const loadOwnerTendencies = async () => {
               .forEach((p: any) => {
                 collected.push({ round: Number(p.round), position: String(p.metadata.position) });
               });
-          } catch {}
+          } catch (err) {
+            console.warn('[loadDraftScout] draft picks fetch error:', err);
+          }
         }));
 
         if (collected.length >= 3) { foundSeason = year; break; }
@@ -1545,7 +1471,9 @@ const loadOwnerTendencies = async () => {
         pick_count: collected.length,
         updated_at: new Date().toISOString(),
       });
-    } catch {}
+    } catch (err) {
+      console.warn('[loadDraftScout] owner tendencies error for', userId, err);
+    }
   }));
 
   // ── 3. Persist newly fetched data so next load hits cache ────────────────
@@ -1558,14 +1486,6 @@ const loadOwnerTendencies = async () => {
   setOwnerDraftTendencies(tendencies);
 };
 
-const getStarterSlots = (roster: any, league: any) => {
-  if (!roster?.starters || !league?.roster_positions) return [];
-
-  return roster.starters.map((playerId: string, i: number) => ({
-    playerId,
-    slot: league.roster_positions[i], // QB, RB, FLEX, etc
-  }));
-};
   // -------------------------
   // LOAD ALL LEAGUES FOR SHARES
   // -------------------------
@@ -1573,33 +1493,34 @@ const getStarterSlots = (roster: any, league: any) => {
     const loadAll = async () => {
       if (!user || !leagues.length) return;
 
-      const results = await Promise.all(
-        leagues.map(async (league) => {
-          const { roster } = await fetch(
-            `/api/cross-league-rosters?sleeper_user_id=${encodeURIComponent(user.user_id)}&league_id=${encodeURIComponent(league.league_id)}`
-          ).then((r) => r.json()).catch(() => ({ roster: null }));
+      setLoadingAllLeagueData(true);
+      try {
+        const results = await Promise.all(
+          leagues.map(async (league) => {
+            const { roster } = await fetch(
+              `/api/cross-league-rosters?sleeper_user_id=${encodeURIComponent(user.user_id)}&league_id=${encodeURIComponent(league.league_id)}`
+            ).then((r) => r.json()).catch(() => ({ roster: null }));
 
-          return {
-            leagueName: league.name,
-            roster,
-          };
-        })
-      );
+            return {
+              leagueName: league.name,
+              roster,
+            };
+          })
+        );
 
-      setAllLeagueData(results);
+        setAllLeagueData(results);
+
         const savedLeague = localStorage.getItem("selectedLeague");
-
-  if (savedLeague) {
-    const parsedLeague = JSON.parse(savedLeague);
-
-    const match = leagues.find(
-      (l: any) => l.league_id === parsedLeague.league_id
-    );
-
-    if (match) {
-      loadRoster(match);
-    }
-  }
+        if (savedLeague) {
+          try {
+            const parsedLeague = JSON.parse(savedLeague);
+            const match = leagues.find((l: any) => l.league_id === parsedLeague.league_id);
+            if (match) loadRoster(match);
+          } catch { /* ignore corrupt localStorage */ }
+        }
+      } finally {
+        setLoadingAllLeagueData(false);
+      }
     };
 
     loadAll();
@@ -1681,7 +1602,7 @@ const loadRoster = async (league: any) => {
   const rosterToUser: any = {};
   allRosters.forEach((r: any) => { rosterToUser[r.roster_id] = r.owner_id; });
 
-  const myRoster = allRosters.find((r: any) => r.owner_id === user.user_id);
+  const myRoster = allRosters.find((r: any) => r.owner_id === user?.user_id);
   if (!myRoster) { setReadyLeagueId(league.league_id); return; }
   setRoster(myRoster);
 
@@ -1935,8 +1856,8 @@ const loadCalcValues = async (leagueId: string) => {
     });
     setCalcFcValues(vals);
     setCalcValuesLeagueId(leagueId);
-  } catch {
-    // fall back to generic player values silently
+  } catch (err) {
+    console.error('[loadCalcValues] failed:', err);
   } finally {
     setLoadingCalcValues(false);
   }
@@ -1947,7 +1868,9 @@ const loadNflState = async () => {
   try {
     const data = await fetch('/api/nfl-state').then(r => r.json());
     setNflState(data);
-  } catch { /* silently fail */ }
+  } catch (err) {
+    console.error('[loadNflState] failed:', err);
+  }
 };
 
 const loadGamedayMatchups = async (leagueId: string, week: number) => {
@@ -2109,9 +2032,13 @@ const loadLeaguemateTradeAlerts = async () => {
               payload: { ownerId, ownerName, leagueName, acquired: acquiredAll, sent: sentAll },
             });
           });
-        } catch {}
+        } catch (err) {
+          console.warn('[loadTradeAlerts] league processing error:', err);
+        }
       }));
-    } catch {}
+    } catch (err) {
+      console.warn('[loadTradeAlerts] transaction fetch error:', err);
+    }
   }));
 
   if (tradeAlerts.length) {
@@ -2135,8 +2062,9 @@ const loadActivity = async (leagueId: string) => {
     const all = results.flat().filter((t: any) => t && t.status === "complete");
     all.sort((a: any, b: any) => (b.status_updated || b.created || 0) - (a.status_updated || a.created || 0));
     setActivityTransactions(all.slice(0, 150));
-  } catch { /* silently fail */ }
-  finally { setLoadingActivity(false); }
+  } catch (err) {
+    console.error('[loadUserTrades/activity] failed:', err);
+  } finally { setLoadingActivity(false); }
 };
 
 const loadLeagueOverview = async () => {
@@ -2197,7 +2125,10 @@ const loadLeagueOverview = async () => {
           });
 
           return { league, rosters: rostersData, picks: tempPicks, userMap: leagueUserMap };
-        } catch { return null; }
+        } catch (err) {
+          console.warn('[loadLeagueOverview] league fetch error:', err);
+          return null;
+        }
       })
     );
     const byLeague: Record<string, any> = {};
@@ -2206,6 +2137,8 @@ const loadLeagueOverview = async () => {
     });
     setLeagueOverviewData(byLeague);
     setLeagueOverviewLoaded(true);
+  } catch (err) {
+    console.error('[loadLeagueOverview] failed:', err);
   } finally {
     setLoadingLeagueOverview(false);
   }
@@ -2226,8 +2159,8 @@ const loadRedraftValues = async () => {
     });
     setRedraftValues(vals);
     setRedraftLoaded(true);
-  } catch {
-    // silently fail
+  } catch (err) {
+    console.error('[loadRedraftValues] failed:', err);
   } finally {
     setLoadingRedraft(false);
   }
@@ -2601,7 +2534,7 @@ const getTeamSummary = () => {
     const rawWeek = Number(nflState?.week || 0);
     return nflState?.season_type === "regular" && rawWeek > 0 ? rawWeek : 0;
   }, [nflState?.week, nflState?.season_type]);
-  const gamedayMatchupCards = useMemo(() => {
+  const gamedayMatchupCards = useMemo((): GamedayMatchup[] => {
     if (!selectedLeague || !rosters.length || !gamedayWeek) return [];
 
     const starterSlots = (selectedLeague?.roster_positions || []).filter(
@@ -2717,11 +2650,11 @@ const getTeamSummary = () => {
 
         return {
           matchupId,
-          teams,
+          teams: teams as GamedayTeamView[],
           sortKickoff,
         };
       })
-      .sort((a: any, b: any) => {
+      .sort((a, b) => {
         if (a.sortKickoff !== b.sortKickoff) return a.sortKickoff - b.sortKickoff;
         return a.matchupId - b.matchupId;
       });
@@ -2765,14 +2698,14 @@ const getTeamSummary = () => {
       dynastyValueForPlayer: (id: string) => calcFcValues[id] ?? (players as any)?.[id]?.value ?? 0,
     });
   }, [selectedLeague?.league_id, rosters, allPicks, players, pickFcValues, redraftValues, calcFcValues, user?.user_id]);
-  const selectedLeagueSimulation = useMemo(() => {
+  const selectedLeagueSimulation = useMemo((): LeagueSimulation | null => {
     if (!selectedLeague || !rosters.length) return null;
 
     const leagueId = selectedLeague.league_id;
     const nflWeek = Number(nflState?.week || 0);
     const isRegularSeason = nflState?.season_type === "regular" && nflWeek > 0;
     const currentWeek = isRegularSeason ? nflWeek : 0;
-    const simulationMode = currentWeek > 0 ? "in_season" : "offseason";
+    const simulationMode = (currentWeek > 0 ? "in_season" : "offseason") as "in_season" | "offseason";
     const regularSeasonWeeks = Math.max(1, Number(selectedLeague?.settings?.playoff_week_start || 15) - 1);
     const playoffTeams = Number(selectedLeague?.settings?.playoff_teams || Math.ceil(rosters.length / 2));
     const byeTeams = playoffTeams >= 6 ? 2 : playoffTeams === 5 ? 1 : 0;
@@ -3138,7 +3071,7 @@ const getTeamSummary = () => {
             bRow.currentOpponent = aRow.ownerName;
           }
           return matchup;
-        }).filter(Boolean);
+        }).filter((m): m is NonNullable<typeof m> => m !== null);
         return { week: week.week, source: week.source, matchups };
       });
 
@@ -3322,10 +3255,8 @@ const getTeamSummary = () => {
     // Always prefer the live sim for the currently selected league — it's always current.
     // Fall back to the frozen committed snapshot only when the live sim lacks the row
     // (shouldn't happen for the selected league, but keeps the fallback path safe).
-    const frozenRows = committedSimsByLeague[leagueId];
-    const getProjection = (rosterId: number) =>
-      selectedLeagueSimulation.rowByRosterId.get(rosterId)
-        ?? (frozenRows ? frozenRows[rosterId] : undefined);
+    const getProjection = (rosterId: number): SimulationTeamRow | undefined =>
+      selectedLeagueSimulation.rowByRosterId.get(rosterId);
 
     const totalTeams = rosters.length || 12;
     const slots = Array.from({ length: totalTeams }, (_, idx) => idx + 1);
@@ -3486,7 +3417,7 @@ const getTeamSummary = () => {
       })
     ) as Record<string, any>;
   }, [selectedLeague?.league_id, committedSimsByLeague, selectedLeagueSimulation, allPicks, pickFcValues, rosters.length]);
-  const selectedLeagueMateProfiles = useMemo(() => {
+  const selectedLeagueMateProfiles = useMemo((): LeagueMateView[] => {
     if (!selectedLeague || !rosters.length || !user?.user_id) return [];
 
     const dynastyValueForPlayer = (id: string) => calcFcValues[id] ?? (players as any)?.[id]?.value ?? 0;
@@ -3600,12 +3531,12 @@ const getTeamSummary = () => {
           crossLeagueTradeCount30d: ownerCrossLeagueIntel?.crossLeagueTradeCount30d || 0,
         };
       })
-      .filter(Boolean)
+      .filter((v) => v !== null)
       .sort((a: any, b: any) => {
         if (b.fitScore !== a.fitScore) return b.fitScore - a.fitScore;
         if (b.tradeCount30d !== a.tradeCount30d) return b.tradeCount30d - a.tradeCount30d;
         return a.ownerName.localeCompare(b.ownerName);
-      });
+      }) as LeagueMateView[];
   }, [selectedLeague?.league_id, rosters, user?.user_id, allPicks, players, pickFcValues, redraftValues, calcFcValues, leagueMateTradeIntel, users, crossLeagueMateIntel]);
   const selectedLeagueMateProfilesView =
     selectedLeagueMateProfiles.length > 0
@@ -3742,7 +3673,6 @@ const getTeamSummary = () => {
 
     // Use the fully adjusted profile — dynasty rank + redraft rank + sim + age all combined
     const myProfile = selectedLeagueDirectionAdjusted ?? selectedLeagueDirection;
-    const myBuckets = getProfilePosBuckets(myProfile);
     const myPlayoffOdds = (myProfile as any)?.playoffOdds ?? (selectedLeagueSimulation?.rowByRosterId?.get(Number(myRoster.roster_id))?.playoffOdds ?? 0);
     // A team below 50% to make playoffs should NEVER be buying points.
     // Winning 2 extra games moves you from 1.02 to 1.05 pick without any championship upside.
@@ -3780,8 +3710,6 @@ const getTeamSummary = () => {
       })
       .sort((a: any, b: any) => b.expectedValue - a.expectedValue);
 
-    const strongPos = myBuckets.strong[0] || myProfile?.positionRanks?.sort((a: any, b: any) => a.rank - b.rank)?.[0]?.pos || "WR";
-    const weakPos = myBuckets.weak[0] || myProfile?.positionRanks?.sort((a: any, b: any) => b.rank - a.rank)?.[0]?.pos || "RB";
     const teamCount = rosters.length || 12;
     const weakPositions = new Set(
       (myProfile?.positionRanks || [])
@@ -3793,18 +3721,6 @@ const getTeamSummary = () => {
         .filter((entry: any) => entry.rank <= Math.max(2, Math.ceil(teamCount / 3)))
         .map((entry: any) => entry.pos)
     );
-    const agingSellCandidate = [...myPlayersDetailed]
-      .filter((player: any) =>
-        (player.position === "RB" && Number(player.age || 0) >= 25) ||
-        (player.position === "QB" && Number(player.age || 0) >= 29) ||
-        (["WR", "TE"].includes(player.position) && Number(player.age || 0) >= 28)
-      )
-      .sort((a: any, b: any) => (b.redValue - b.dynValue) - (a.redValue - a.dynValue))[0];
-    const depthPieces = [...myPlayersDetailed]
-      .filter((player: any) => player.position === strongPos)
-      .sort((a: any, b: any) => a.dynValue - b.dynValue)
-      .slice(0, 3);
-
     const recommendations: any[] = [];
     const sortedPartners = [...tradePartnerRankings];
     const isBlockedSellDisposition = (playerId?: string | null) =>
@@ -4078,8 +3994,7 @@ const getTeamSummary = () => {
 
       return true;
     };
-    const getCandidateText = (archetype: string, partner: any, give: any[], receive: any[]) => {
-      const givePlayers = give.filter((asset: any) => !asset?.season);
+    const getCandidateText = (archetype: string, partner: any, _give: any[], receive: any[]) => {
       const receivePlayers = receive.filter((asset: any) => !asset?.season);
       const receivePicks = receive.filter((asset: any) => !!asset?.season);
       if (archetype === "Draft Capital") {
@@ -4814,18 +4729,6 @@ const getTeamSummary = () => {
     return result.sort((a, b) => severityOrder(a.player) - severityOrder(b.player));
   }, [allLeagueData, dashboardOwnedPlayers, watchlistEntries, players]);
 
-  useEffect(() => {
-    localStorage.setItem(watchlistStorageKey, JSON.stringify(watchlistEntries));
-  }, [watchlistEntries, watchlistStorageKey]);
-
-  useEffect(() => {
-    localStorage.setItem(alertStorageKey, JSON.stringify(dashboardAlerts));
-  }, [dashboardAlerts, alertStorageKey]);
-
-  useEffect(() => {
-    localStorage.setItem(dismissedAlertStorageKey, JSON.stringify(dismissedAlertIds));
-  }, [dismissedAlertIds, dismissedAlertStorageKey]);
-
   // ── League transactions feed ──────────────────────────────────────────────
   useEffect(() => {
     if (!leagues.length || !user?.user_id) return;
@@ -5319,21 +5222,15 @@ const getTeamSummary = () => {
   updated.splice(toIndex, 0, moved);
   setRookies(updated);
 };
-const moveToRank = (fromIndex: number, toRank: number) => {
-  const toIndex = Math.max(0, Math.min(rookies.length - 1, toRank - 1));
-
-  const updated = [...rookies];
-  const [moved] = updated.splice(fromIndex, 1);
-  updated.splice(toIndex, 0, moved);
-
-  setRookies(updated);
-};
 // -------------------------
 // MY CURRENT LEAGUE PLAYER SET
 // -------------------------
 const myPlayerSet = new Set<string>(roster?.players || []);
   return (
+    <AuthProvider supabaseUser={supabaseUser}>
     <PlayersProvider players={players}>
+    <LeagueProvider selectedLeague={selectedLeague} rosters={rosters} users={users}>
+    <RosterProvider myRoster={roster}>
       {/* Login overlay — lives outside <main> so no stacking context interferes */}
       {!supabaseUser && (
         <div
@@ -5577,6 +5474,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
         )}
         {/* LEAGUE HUB */}
         {mainTab === "LEAGUES" && (
+          <ErrorBoundary label="League Hub">
           <LeagueHub
             leagueHubTab={leagueHubTab}
             setLeagueHubTab={setLeagueHubTab}
@@ -5644,7 +5542,6 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             setDraftSlotSearchQuery={setDraftSlotSearchQuery}
             draftHubSection={draftHubSection}
             nflState={nflState}
-            supabaseUser={supabaseUser}
             leagueSearch={leagueSearch}
             setLeagueSearch={setLeagueSearch}
             filteredPlayers={filteredPlayers}
@@ -5669,9 +5566,11 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             setMainTab={setMainTab}
             setTradeHubSection={setTradeHubSection}
           />
+          </ErrorBoundary>
         )}
 
         {mainTab === "GAMEDAY_HUB" && (
+          <ErrorBoundary label="Gameday Hub">
           <GamedayHub
             selectedLeague={selectedLeague}
             leagues={leagues}
@@ -5688,17 +5587,20 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             setPlayerProfileId={setPlayerProfileId}
             shares={shares}
             totalLeagues={totalLeagues}
+            loadingShares={loadingAllLeagueData}
             shareSearch={shareSearch}
             setShareSearch={setShareSearch}
             sharePosition={sharePosition}
             setSharePosition={setSharePosition}
             players={players}
           />
+          </ErrorBoundary>
         )}
 
 
         {/* DATA HUB TAB */}
         {mainTab === "DATA_HUB" && (
+          <ErrorBoundary label="Data Hub">
           <DataHub
             dataHubTab={dataHubTab}
             setDataHubTab={setDataHubTab}
@@ -5748,8 +5650,10 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             historicalSnapshot={historicalSnapshot}
             onSaveSnapshot={saveSnapshotNow}
           />
+          </ErrorBoundary>
         )}
 {mainTab === "DRAFT" && (
+  <ErrorBoundary label="Draft Hub">
   <DraftHub
     draftHubSection={draftHubSection}
     setDraftHubSection={setDraftHubSection}
@@ -5763,7 +5667,6 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     rosters={rosters}
     user={user}
     users={users}
-    supabaseUser={supabaseUser}
     draftSettings={draftSettings}
     draftPicks={draftPicks}
     draftOrder={draftOrder}
@@ -5788,11 +5691,13 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     pickFcValues={pickFcValues}
     fcNameValues={fcNameValues}
   />
+  </ErrorBoundary>
 )}
 
       </div>
 {/* ── TRADE HUB TAB ────────────────────────────────────────────────── */}
 {mainTab === "TRADE_HUB" && (
+  <ErrorBoundary label="Trade Hub">
   <TradeHub
     tradeHubSection={tradeHubSection}
     setTradeHubSection={setTradeHubSection}
@@ -5862,6 +5767,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     playerStats={playerStats}
     crossLeagueExposure={shares}
   />
+  </ErrorBoundary>
 )}
 
       {selectedUserId && (
@@ -5919,6 +5825,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
 
 {/* ── MANAGEMENT HUB TAB ──────────────────────────────────────────── */}
 {mainTab === "MANAGEMENT_HUB" && (
+  <ErrorBoundary label="Management Hub">
   <ManagementHub
     mgmtHubTab={mgmtHubTab}
     setMgmtHubTab={setMgmtHubTab}
@@ -5935,8 +5842,8 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     setCommToolsUsers={setCommToolsUsers}
     loadingCommToolsRosters={loadingCommToolsRosters}
     setLoadingCommToolsRosters={setLoadingCommToolsRosters}
-    supabaseUser={supabaseUser}
   />
+  </ErrorBoundary>
 )}
 
 {/* DRAFT SCOUT MODAL */}
@@ -6359,7 +6266,10 @@ const myPlayerSet = new Set<string>(roster?.players || []);
       </>
       </div>
     </main>
+    </RosterProvider>
+    </LeagueProvider>
     </PlayersProvider>
+    </AuthProvider>
   );
 }
 

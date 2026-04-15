@@ -5,10 +5,30 @@
 
 import { CURRENT_YEAR } from "./season";
 
+/** Minimal pick shape needed for value key generation (subset of SleeperTradedPick). */
+interface PickLike {
+  season?: string | number;
+  round?: number;
+  slot?: string;
+}
+
+/** Minimal draft shape needed for snake detection (Sleeper's schema is inconsistent across endpoints). */
+interface DraftLike {
+  type?: string;
+  settings?: { type?: string; draft_type?: string; [key: string]: unknown };
+  metadata?: { type?: string; draft_type?: string; [key: string]: unknown };
+}
+
+/** FantasyCalc value entry from the /api/fc-values response. */
+interface FcEntry {
+  player?: { position?: string; name?: string; sleeperId?: string | number };
+  value?: number;
+}
+
 /** Returns the FantasyCalc pick key for a traded/owned pick.
  *  Current-year picks with known slots use slot format ("2026-1.06");
  *  future picks or unknown slots use round format ("2027-1"). */
-export const getPickValueKey = (pick: any): string => {
+export const getPickValueKey = (pick: PickLike): string => {
   if (
     pick?.season === CURRENT_YEAR &&
     pick?.slot &&
@@ -23,7 +43,7 @@ export const getPickValueKey = (pick: any): string => {
  *  from the specific slot key to the round key if needed. */
 export const getStoredPickValue = (
   pickValues: Record<string, number>,
-  pick: any
+  pick: PickLike
 ): number =>
   pickValues[getPickValueKey(pick)] ??
   pickValues[`${pick?.season}-${pick?.round}`] ??
@@ -31,7 +51,7 @@ export const getStoredPickValue = (
 
 /** Returns true when the draft type is identified as a snake draft
  *  (checks multiple field locations since Sleeper's schema is inconsistent). */
-export const isSnakeDraft = (draft: any): boolean => {
+export const isSnakeDraft = (draft: DraftLike): boolean => {
   const typeCandidates = [
     draft?.type,
     draft?.settings?.type,
@@ -48,7 +68,7 @@ export const isSnakeDraft = (draft: any): boolean => {
 /** Calculates the draft slot position for a team in a given round,
  *  reversing direction in even rounds for snake drafts. */
 export const getDraftRoundSlot = (
-  draft: any,
+  draft: DraftLike,
   round: number,
   baseSlot: number,
   totalTeams: number
@@ -71,7 +91,9 @@ export const fetchFantasyCalcValues = async (
   const pickBuckets: Record<string, number[]>     = {};
   const pickRoundValues: Record<string, number>   = {};
 
-  data.forEach((entry: any) => {
+  data.forEach((entry: FcEntry) => {
+    if (typeof entry.value !== "number" || entry.value <= 0) return;
+    const value = entry.value;
     if (entry.player?.position === "PICK") {
       // Specific slot — e.g. "2026 Pick 1.04"
       const slotMatch = entry.player.name?.match(/^(\d{4}) Pick (\d+)\.(\d{1,2})$/);
@@ -79,19 +101,19 @@ export const fetchFantasyCalcValues = async (
         const roundKey = `${slotMatch[1]}-${slotMatch[2]}`;
         const slotKey  = `${slotMatch[1]}-${slotMatch[2]}.${slotMatch[3].padStart(2, "0")}`;
         if (!slotPickValues[slotKey]) slotPickValues[slotKey] = [];
-        slotPickValues[slotKey].push(entry.value);
+        slotPickValues[slotKey].push(value);
         if (!pickBuckets[roundKey]) pickBuckets[roundKey] = [];
-        pickBuckets[roundKey].push(entry.value);
+        pickBuckets[roundKey].push(value);
         return;
       }
       // Future round — e.g. "2027 1st"
       const roundMatch = entry.player.name?.match(/^(\d{4})\s+(\d+)(?:st|nd|rd|th)$/);
       if (roundMatch) {
-        pickRoundValues[`${roundMatch[1]}-${roundMatch[2]}`] = entry.value;
+        pickRoundValues[`${roundMatch[1]}-${roundMatch[2]}`] = value;
       }
     } else {
       const sleeperId = entry.player?.sleeperId;
-      if (sleeperId) playerValues[String(sleeperId)] = entry.value;
+      if (sleeperId) playerValues[String(sleeperId)] = value;
     }
   });
 

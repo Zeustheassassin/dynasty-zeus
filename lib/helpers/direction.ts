@@ -6,6 +6,36 @@
 import { CURRENT_YEAR } from "./season";
 import { average, ordinal, rankAgainstLeague } from "./math";
 import { getStoredPickValue } from "./picks";
+import type { RosterDirectionProfile, CrossLeagueIntel, StrategicBucket } from "../types";
+
+/** Minimal player shape needed inside getRosterDirectionProfile. */
+interface DirectionPlayer {
+  player_id?: string;
+  position?: string;
+  age?: number | null;
+  dynValue?: number;
+  redValue?: number;
+}
+
+/** Minimal pick shape needed for pick-value aggregation in direction profile. */
+interface PickLike {
+  season?: string | number;
+  round?: number;
+  owner_id?: string | number;
+  slot?: string;
+}
+
+/** Minimal roster shape needed for direction profile computation. */
+interface RosterLike {
+  roster_id?: number;
+  players?: string[];
+  settings?: {
+    wins?: number;
+    losses?: number;
+    fpts?: number;
+    fpts_max?: number;
+  };
+}
 
 // ── Bucket classification ─────────────────────────────────────
 
@@ -28,7 +58,7 @@ import { getStoredPickValue } from "./picks";
  *
  * Elite is the sub-case where BOTH ranks land in the top-20%.
  */
-export const getLeagueDirectionBucket = (dynRank: number, redRank: number, leagueSize = 12) => {
+export const getLeagueDirectionBucket = (dynRank: number, redRank: number, leagueSize = 12): { bucket: StrategicBucket; bucketColor: string } => {
   const n     = leagueSize;
   const top20 = Math.ceil(n * 0.20);
   const top33 = Math.ceil(n * 0.33);
@@ -86,7 +116,7 @@ export const getBucketColor = (bucket: string): string => {
 
 /** Composite window score: positive = window open/widening, negative = closing.
  *  Combines core age relative to dynasty prime, young builders, and aging vets. */
-export const computeWindowScore = (profile: any): number => {
+export const computeWindowScore = (profile: Pick<RosterDirectionProfile, "coreAge" | "youngCoreCount" | "oldCoreCount"> | null | undefined): number => {
   const coreAge        = Number(profile?.coreAge        || 0);
   const youngCoreCount = Number(profile?.youngCoreCount || 0);
   const oldCoreCount   = Number(profile?.oldCoreCount   || 0);
@@ -104,10 +134,10 @@ export const computeWindowScore = (profile: any): number => {
  *  + playoff simulation pressure. Single source of truth for strategic label. */
 export const getAdjustedDirectionBucket = (
   rawBucket: string,
-  profile: any,
+  profile: Pick<RosterDirectionProfile, "coreAge" | "youngCoreCount" | "oldCoreCount"> | null | undefined,
   playoffOdds: number,
   hasSimData = false
-): string => {
+): StrategicBucket => {
   if (!rawBucket) return "Fading Out";
 
   const windowScore     = computeWindowScore(profile);
@@ -115,7 +145,7 @@ export const getAdjustedDirectionBucket = (
   const composite       = windowScore + playoffPressure;
   const youngCoreCount  = Number(profile?.youngCoreCount || 0);
 
-  let result: string;
+  let result: StrategicBucket;
   switch (rawBucket) {
     case "Elite":
       if (composite < -4)       result = "Fading Contender";
@@ -180,7 +210,7 @@ export const getAdjustedDirectionBucket = (
       break;
 
     default:
-      result = rawBucket;
+      result = (rawBucket as StrategicBucket) || "Fading Out";
   }
 
   // Hard playoff-odds floors — sim data overrides gradient when not a contender.
@@ -211,29 +241,38 @@ export const getRosterDirectionProfile = ({
   pickValues,
   redraftValues,
   dynastyValueForPlayer,
-}: any) => {
+}: {
+  rosterId: number;
+  rosters: RosterLike[];
+  ownedPicks: PickLike[];
+  players: Record<string, DirectionPlayer>;
+  pickValues: Record<string, number>;
+  redraftValues: Record<string, number>;
+  dynastyValueForPlayer: (id: string) => number;
+}) => {
   if (!rosterId || !rosters?.length) return null;
 
-  const targetRoster = rosters.find((r: any) => Number(r.roster_id) === Number(rosterId));
+  const targetRoster = rosters.find((r: RosterLike) => Number(r.roster_id) === Number(rosterId));
   if (!targetRoster) return null;
 
   const positions = ["QB", "RB", "WR", "TE"];
   const n         = rosters.length;
-  const pickList  = (ownedPicks || []).filter((pick: any) => Number(pick.owner_id) === Number(rosterId));
-  const firstRounders         = pickList.filter((pick: any) => Number(pick.round) === 1);
-  const currentYearFirsts     = firstRounders.filter((pick: any) => String(pick.season) === CURRENT_YEAR);
-  const premiumCurrentFirsts  = currentYearFirsts.filter((pick: any) => {
+  const pickList  = (ownedPicks || []).filter((pick: PickLike) => Number(pick.owner_id) === Number(rosterId));
+  const firstRounders         = pickList.filter((pick: PickLike) => Number(pick.round) === 1);
+  const currentYearFirsts     = firstRounders.filter((pick: PickLike) => String(pick.season) === CURRENT_YEAR);
+  const premiumCurrentFirsts  = currentYearFirsts.filter((pick: PickLike) => {
     const slot = String(pick.slot || "");
     if (!slot.includes(".")) return false;
     const [, rawPick] = slot.split(".");
     return Number(rawPick) > 0 && Number(rawPick) <= 6;
   });
-  const futureFirsts = firstRounders.filter((pick: any) => String(pick.season) !== CURRENT_YEAR);
+  const futureFirsts = firstRounders.filter((pick: PickLike) => String(pick.season) !== CURRENT_YEAR);
   const pickTotal    = pickList.reduce(
-    (s: number, pick: any) => s + getStoredPickValue(pickValues, pick),
+    (s: number, pick: PickLike) => s + getStoredPickValue(pickValues, pick),
     0
   );
 
+  type EnrichedPlayer = DirectionPlayer & { dynValue: number; redValue: number };
   const rosterPlayers = (targetRoster.players || [])
     .map((id: string) => {
       const player = players?.[id];
@@ -241,26 +280,26 @@ export const getRosterDirectionProfile = ({
         ? { ...player, dynValue: dynastyValueForPlayer(id), redValue: redraftValues?.[id] || 0 }
         : null;
     })
-    .filter(Boolean);
+    .filter((p): p is EnrichedPlayer => p !== null);
 
-  const skillPlayers   = rosterPlayers.filter((p: any) => positions.includes(p.position));
+  const skillPlayers   = rosterPlayers.filter((p) => positions.includes(p.position ?? ""));
   const topDynastyCore = [...skillPlayers]
-    .sort((a: any, b: any) => b.dynValue - a.dynValue)
+    .sort((a, b) => b.dynValue - a.dynValue)
     .slice(0, 8);
 
-  const coreAge      = average(topDynastyCore.map((p: any) => Number(p.age)).filter(Boolean));
-  const oldCoreCount = topDynastyCore.filter((p: any) => {
+  const coreAge      = average(topDynastyCore.map((p) => Number(p.age)).filter(Boolean));
+  const oldCoreCount = topDynastyCore.filter((p) => {
     if (!p.age) return false;
     if (p.position === "QB") return p.age >= 30;
     if (p.position === "RB") return p.age >= 26;
     return p.age >= 29;
   }).length;
   const youngCoreCount = topDynastyCore.filter(
-    (p: any) => Number(p.age) > 0 && Number(p.age) <= 24
+    (p) => Number(p.age) > 0 && Number(p.age) <= 24
   ).length;
 
   const rosterDynVal = rosters
-    .map((roster: any) => ({
+    .map((roster: RosterLike) => ({
       roster_id: roster.roster_id,
       val:
         (roster.players || []).reduce(
@@ -268,45 +307,45 @@ export const getRosterDirectionProfile = ({
           0
         ) +
         (ownedPicks || [])
-          .filter((pick: any) => Number(pick.owner_id) === Number(roster.roster_id))
-          .reduce((s: number, pick: any) => s + getStoredPickValue(pickValues, pick), 0),
+          .filter((pick: PickLike) => Number(pick.owner_id) === Number(roster.roster_id))
+          .reduce((s: number, pick: PickLike) => s + getStoredPickValue(pickValues, pick), 0),
     }))
-    .sort((a: any, b: any) => b.val - a.val);
+    .sort((a, b) => b.val - a.val);
 
   const rosterRedVal = rosters
-    .map((roster: any) => ({
+    .map((roster: RosterLike) => ({
       roster_id: roster.roster_id,
       val: (roster.players || []).reduce(
         (s: number, id: string) => s + (redraftValues?.[id] || 0),
         0
       ),
     }))
-    .sort((a: any, b: any) => b.val - a.val);
+    .sort((a, b) => b.val - a.val);
 
-  const standingsSorted = [...rosters].sort((a: any, b: any) => {
+  const standingsSorted = [...rosters].sort((a: RosterLike, b: RosterLike) => {
     const aw = a.settings?.wins || 0;
     const bw = b.settings?.wins || 0;
     return bw !== aw ? bw - aw : (b.settings?.fpts || 0) - (a.settings?.fpts || 0);
   });
   const maxPfSorted = [...rosters].sort(
-    (a: any, b: any) => (b.settings?.fpts_max || 0) - (a.settings?.fpts_max || 0)
+    (a: RosterLike, b: RosterLike) => (b.settings?.fpts_max || 0) - (a.settings?.fpts_max || 0)
   );
 
-  const dynRank   = rosterDynVal.findIndex((r: any) => Number(r.roster_id) === Number(rosterId)) + 1;
-  const redRank   = rosterRedVal.findIndex((r: any) => Number(r.roster_id) === Number(rosterId)) + 1;
-  const standRank = standingsSorted.findIndex((r: any) => Number(r.roster_id) === Number(rosterId)) + 1;
-  const maxPfRank = maxPfSorted.findIndex((r: any) => Number(r.roster_id) === Number(rosterId)) + 1;
+  const dynRank   = rosterDynVal.findIndex((r) => Number(r.roster_id) === Number(rosterId)) + 1;
+  const redRank   = rosterRedVal.findIndex((r) => Number(r.roster_id) === Number(rosterId)) + 1;
+  const standRank = standingsSorted.findIndex((r: RosterLike) => Number(r.roster_id) === Number(rosterId)) + 1;
+  const maxPfRank = maxPfSorted.findIndex((r: RosterLike) => Number(r.roster_id) === Number(rosterId)) + 1;
   const { bucket, bucketColor } = getLeagueDirectionBucket(dynRank, redRank, n);
 
   const positionTotals = positions.reduce((acc: Record<string, number>, pos) => {
     acc[pos] = skillPlayers
-      .filter((p: any) => p.position === pos)
-      .reduce((s: number, p: any) => s + p.dynValue, 0);
+      .filter((p) => p.position === pos)
+      .reduce((s: number, p) => s + p.dynValue, 0);
     return acc;
   }, {});
 
   const positionRanks = positions.map((pos) => {
-    const leagueTotals = rosters.map((roster: any) =>
+    const leagueTotals = rosters.map((roster: RosterLike) =>
       (roster.players || []).reduce((s: number, id: string) => {
         const player = players?.[id];
         if (!player || player.position !== pos) return s;
@@ -346,7 +385,7 @@ export const getRosterDirectionProfile = ({
       ? (
           ["RB", "WR", "TE", "QB"].find((pos) =>
             topDynastyCore.some(
-              (p: any) =>
+              (p) =>
                 p.position === pos &&
                 ((pos === "RB" && Number(p.age) >= 26) ||
                  (pos === "QB" && Number(p.age) >= 30) ||
@@ -477,25 +516,25 @@ export const getRosterDirectionProfile = ({
 
 /** Returns { strong, weak } position arrays for a given profile,
  *  used by trade fit scoring. */
-export const getProfilePosBuckets = (profile: any) => {
+export const getProfilePosBuckets = (profile: RosterDirectionProfile | null | undefined) => {
   const positions     = profile?.positionRanks || [];
   const n             = profile?.n || 12;
   const strongThreshold = Math.max(2, Math.ceil(n / 3));
   const weakThreshold   = Math.max(strongThreshold + 1, n - 2);
   return {
     strong: positions
-      .filter((e: any) => e.rank <= strongThreshold)
-      .map((e: any) => e.pos),
+      .filter((e) => e.rank <= strongThreshold)
+      .map((e) => e.pos),
     weak: positions
-      .filter((e: any) => e.rank >= weakThreshold)
-      .map((e: any) => e.pos),
+      .filter((e) => e.rank >= weakThreshold)
+      .map((e) => e.pos),
   };
 };
 
 // ── Trade fit ─────────────────────────────────────────────────
 
 /** Short text label for a numeric trade fit score. */
-export const getLeagueMateMotivation = (profile: any, tradeCount30d: number): string => {
+export const getLeagueMateMotivation = (profile: RosterDirectionProfile | null | undefined, tradeCount30d: number): string => {
   if (!profile) return "No clear read yet.";
   const activeTrader = tradeCount30d >= 2 ? " Active trader lately." : "";
   switch (profile.bucket) {
@@ -530,7 +569,7 @@ export const getTradePartnerFitLabel = (fitScore: number): string => {
 
 /** Scores how well two rosters fit as trade partners based on position overlap
  *  and strategic bucket alignment. */
-export const getTradePartnerFit = ({ myProfile, oppProfile, tradeCount30d }: any) => {
+export const getTradePartnerFit = ({ myProfile, oppProfile, tradeCount30d }: { myProfile: RosterDirectionProfile | null | undefined; oppProfile: RosterDirectionProfile | null | undefined; tradeCount30d: number }) => {
   if (!myProfile || !oppProfile) {
     return { fitScore: 0, fitLabel: "Neutral Fit", fitReasons: [] as string[] };
   }
@@ -591,7 +630,7 @@ export const getTradePartnerFit = ({ myProfile, oppProfile, tradeCount30d }: any
 
 /** Cross-league position preference fit — how well the partner's
  *  roster-building pattern across all their leagues aligns with yours. */
-export const getCrossLeaguePreferenceFit = ({ myProfile, crossLeagueIntel }: any) => {
+export const getCrossLeaguePreferenceFit = ({ myProfile, crossLeagueIntel }: { myProfile: RosterDirectionProfile | null | undefined; crossLeagueIntel: CrossLeagueIntel | null | undefined }) => {
   if (!myProfile || !crossLeagueIntel || (crossLeagueIntel.totalDynastyLeagues || 0) < 2) {
     return { fitScore: 0, fitReasons: [] as string[] };
   }
@@ -631,7 +670,7 @@ export const getCrossLeaguePreferenceFit = ({ myProfile, crossLeagueIntel }: any
 
 /** Cross-league trade behavior fit — how well the partner's actual
  *  trade history across leagues aligns with what you can offer. */
-export const getCrossLeagueTradeBehaviorFit = ({ myProfile, crossLeagueIntel }: any) => {
+export const getCrossLeagueTradeBehaviorFit = ({ myProfile, crossLeagueIntel }: { myProfile: RosterDirectionProfile | null | undefined; crossLeagueIntel: CrossLeagueIntel | null | undefined }) => {
   if (
     !myProfile ||
     !crossLeagueIntel ||

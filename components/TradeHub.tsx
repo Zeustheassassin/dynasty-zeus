@@ -2,13 +2,15 @@
 import React, { useState, useMemo, useDeferredValue, startTransition } from "react";
 import {
   getStoredPickValue,
-  getLeagueDirectionBucket,
-  average,
-  sum,
   CURRENT_YEAR,
   formatRelativeDate,
 } from "../lib/helpers";
-import type { TradeAttempt, TradeAttemptStatus, TradeAttemptAsset, TradeAttemptPick, SleeperPlayer } from "../lib/types";
+import type {
+  TradeAttempt, TradeAttemptStatus, TradeAttemptAsset, TradeAttemptPick,
+  SleeperPlayer, SleeperLeague, SleeperRoster, SleeperUser,
+  AugmentedPick, DynamicPickValue, RosterDirectionProfile,
+  LeagueSimulation, LeagueMateView, TradePartnerRanking, HistoricalSnapshot,
+} from "../lib/types";
 import { usePlayers } from "../lib/PlayersContext";
 
 const BASE_YEAR_TH = new Date().getFullYear();
@@ -21,21 +23,21 @@ interface TradeHubProps {
   setTradeHubSection: (section: "CALCULATOR" | "FINDER" | "RECOMMENDATIONS" | "TRADE_LOG" | "ATTEMPTS") => void;
 
   // League / roster state
-  leagues: any[];
-  user: any;
-  rosters: any[];
-  users: Record<string, any>;
-  selectedLeague: any;
-  allPicks: any[];
+  leagues: SleeperLeague[];
+  user: SleeperUser | null;
+  rosters: SleeperRoster[];
+  users: Record<string, string>;
+  selectedLeague: SleeperLeague | null;
+  allPicks: AugmentedPick[];
   pickFcValues: Record<string, number>;
   calcFcValues: Record<string, number>;
   redraftValues: Record<string, number>;
-  selectedLeagueDynamicPickValues: Record<string, any>;
+  selectedLeagueDynamicPickValues: Record<string, DynamicPickValue>;
 
   // Computed direction / sim
-  selectedLeagueDirection: any;
-  selectedLeagueDirectionAdjusted: any;
-  selectedLeagueSimulation: any;
+  selectedLeagueDirection: RosterDirectionProfile | null;
+  selectedLeagueDirectionAdjusted: RosterDirectionProfile | null;
+  selectedLeagueSimulation: LeagueSimulation | null;
 
   // Trade calculator state
   calcOpponentRosterId: number | null;
@@ -73,10 +75,10 @@ interface TradeHubProps {
   onToggleLeaguePlayerTag: (leagueId: string, playerId: string, forceTag?: "CORE" | "WANT_TO_TRADE") => void;
 
   // Computed
-  leagueMateProfileByRosterId: Map<number, any>;
-  selectedLeagueMateProfilesView: any[];
-  tradeRecommendationCards: any[];
-  tradePartnerRankings: any[];
+  leagueMateProfileByRosterId: Map<number, LeagueMateView>;
+  selectedLeagueMateProfilesView: LeagueMateView[];
+  tradeRecommendationCards: unknown[];
+  tradePartnerRankings: TradePartnerRanking[];
 
   // Functions
   setPlayerProfileId: (id: string | null) => void;
@@ -84,10 +86,10 @@ interface TradeHubProps {
   loadUserTrades: (ownerId: string) => void;
 
   // Value trends
-  historicalSnapshot: { players: Record<string, any>; recorded_at: string } | null;
+  historicalSnapshot: HistoricalSnapshot | null;
 
   // Trade log
-  tradeHubData: any[] | null;
+  tradeHubData: unknown[] | null;
   loadingTradeHub: boolean;
   tradeHubUserId: string | null;
 
@@ -165,9 +167,9 @@ function FinderSearchInput({
 // ── Component ──────────────────────────────────────────────────────────────
 function TradeHub({
   tradeHubSection, setTradeHubSection,
-  leagues, user, rosters, users, selectedLeague, allPicks,
+  leagues: _leagues, user, rosters, users, selectedLeague, allPicks,
   pickFcValues, calcFcValues, redraftValues, selectedLeagueDynamicPickValues,
-  selectedLeagueDirection, selectedLeagueDirectionAdjusted, selectedLeagueSimulation,
+  selectedLeagueDirection: _selectedLeagueDirection, selectedLeagueDirectionAdjusted, selectedLeagueSimulation,
   calcOpponentRosterId, setCalcOpponentRosterId,
   calcGive, setCalcGive, calcReceive, setCalcReceive,
   calcGivePicks, setCalcGivePicks, calcReceivePicks, setCalcReceivePicks,
@@ -179,7 +181,7 @@ function TradeHub({
   loadingCalcValues, calcSearchA, setCalcSearchA, calcSearchB, setCalcSearchB,
   playerDispositions, leaguePlayerTags, onToggleLeaguePlayerTag, projectionData,
   leagueMateProfileByRosterId, selectedLeagueMateProfilesView,
-  tradeRecommendationCards, tradePartnerRankings,
+  tradeRecommendationCards: _tradeRecommendationCards, tradePartnerRankings,
   setPlayerProfileId, loadUserExposure, loadUserTrades,
   historicalSnapshot,
   tradeHubData, loadingTradeHub, tradeHubUserId,
@@ -225,28 +227,6 @@ function TradeHub({
     });
     return map;
   }, [rosters, players, calcFcValues]);
-
-  // Dynasty and redraft roster rankings — used to compute dynRank/redRank for every team.
-  // Only rebuilds when rosters, pick values, or player values change.
-  const finderRosterRankings = useMemo(() => {
-    const dynVal = (rosters as any[]).map((r) => ({
-      roster_id: r.roster_id,
-      val:
-        (finderRosterPlayersMap.get(r.roster_id) ?? []).reduce((s: number, p: any) => s + p.value, 0) +
-        (allPicks as any[])
-          .filter((p: any) => p.owner_id === r.roster_id)
-          .reduce((s: number, p: any) =>
-            s + (selectedLeagueDynamicPickValues[`${p.season}-${p.round}-${p.roster_id}`]?.expectedValue
-              ?? getStoredPickValue(pickFcValues, p)), 0),
-    })).sort((a, b) => b.val - a.val);
-
-    const redVal = (rosters as any[]).map((r) => ({
-      roster_id: r.roster_id,
-      val: (r.players || []).reduce((s: number, id: string) => s + ((redraftValues as Record<string, number>)[id] || 0), 0),
-    })).sort((a, b) => b.val - a.val);
-
-    return { dynVal, redVal };
-  }, [rosters, finderRosterPlayersMap, allPicks, selectedLeagueDynamicPickValues, pickFcValues, redraftValues]);
 
   // ── Deferred computation inputs ─────────────────────────────────────────
   // useDeferredValue tells React: "use the old value during urgent renders,
@@ -639,7 +619,7 @@ function TradeHub({
             {/* Your assets */}
             <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
               <div className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-3">
-                Your Assets — {(users as any)[user?.user_id] || "You"}
+                Your Assets — {user?.user_id ? (users[user.user_id] || "You") : "You"}
               </div>
               <input
                 type="text"
@@ -831,7 +811,7 @@ function TradeHub({
                     const alreadyMarked = sessionMarked.has(calcFp);
                     const buildCalcPayload = (direction: "ME" | "THEM") => {
                       const oppRosterForCalc = rosters.find((r: any) => r.roster_id === calcOpponentRosterId);
-                      const oppName = (users as any)[oppRosterForCalc?.owner_id] || `Team ${calcOpponentRosterId}`;
+                      const oppName = (oppRosterForCalc?.owner_id ? users[oppRosterForCalc.owner_id] : null) || `Team ${calcOpponentRosterId}`;
                       return {
                         league_id: selectedLeague.league_id,
                         partner_roster_id: calcOpponentRosterId,
@@ -1056,7 +1036,6 @@ function TradeHub({
         </div>
       );
 
-      const calcVal = (id: string) => calcFcValues[id] ?? (players as any)[id]?.value ?? 0;
       const finderPickKey = (p: any) => `${p.season}-${p.round}-${p.roster_id}`;
       const finderPickLabel = (p: any) => {
         const via = p.roster_id !== p.owner_id ? ` (via ${users[p.roster_id] || `Team ${p.roster_id}`})` : "";
@@ -1128,10 +1107,6 @@ function TradeHub({
         !!playerId && leaguePlayerTags[selectedLeague?.league_id]?.[playerId] === "WANT_TO_TRADE";
       const myT = posTotals(myPlayers);
       // Read from component-level useMemo — only rebuilds on league switch / value refresh
-      const rosterDynVal = finderRosterRankings.dynVal;
-      const rosterRedVal = finderRosterRankings.redVal;
-      const dynRank = myRoster ? rosterDynVal.findIndex((r) => r.roster_id === myRoster.roster_id) + 1 : 0;
-      const redRank = myRoster ? rosterRedVal.findIndex((r) => r.roster_id === myRoster.roster_id) + 1 : 0;
       // Single source of truth: the fully adjusted profile (dynasty + redraft + sim + age).
       // At this point selectedLeagueDirectionAdjusted is guaranteed non-null (loading gate above).
       const finderDirectionProfile = selectedLeagueDirectionAdjusted;
@@ -1515,7 +1490,6 @@ function TradeHub({
         ? [...myTopBase.slice(0, 9), myPinnedPlayer].filter(Boolean)
         : myTopBase;
       // When either give or receive player is pinned, relax loop caps so rarer combos surface
-      const pinnedActive = !!(deferredPinnedPlayerId || deferredTargetPlayerId);
 
 
       // League-wide positional totals for every team (used for ranking)
@@ -4158,7 +4132,7 @@ function TradeHub({
                     {tradeIntent.detail}
                   </div>
                 )}
-                {(partnerProfile?.repeatedPlayers?.length > 0 || partnerProfile?.acquiredPlayers?.length > 0 || partnerProfile?.tradePreferenceLabel) && (
+                {((partnerProfile?.repeatedPlayers?.length ?? 0) > 0 || (partnerProfile?.acquiredPlayers?.length ?? 0) > 0 || partnerProfile?.tradePreferenceLabel) && (
                   <div className="mb-3 flex flex-wrap gap-2">
                     {partnerProfile?.tradePreferenceLabel && (
                       <span className="rounded-full border border-amber-800 bg-amber-950/20 px-2 py-0.5 text-[10px] text-amber-200">
@@ -4741,7 +4715,7 @@ function TradeHub({
                   const renderColumn = (
                     side: "give" | "receive",
                     label: string,
-                    headerColor: string,
+                    _headerColor: string,
                     availPlayers: any[],
                     availPicks: TradeAttemptPick[],
                   ) => {

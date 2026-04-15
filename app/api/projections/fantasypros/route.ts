@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { FANTASYPROS_BASE_URL, FANTASYPROS_REVALIDATE_S } from '../../../../lib/constants';
+import { checkRateLimit } from '../../../../lib/rateLimit';
 
 const POSITIONS = ['qb', 'rb', 'wr', 'te'] as const;
 
@@ -42,9 +43,18 @@ function parseFPProjections(
 }
 
 export async function GET(req: NextRequest) {
+  const rl = checkRateLimit(req, 20, 60_000, 'fantasypros');
+  if (!rl.allowed) return rl.response;
+
   const { searchParams } = new URL(req.url);
   // week=draft → full-season projections; week=1-18 → specific week
-  const week = searchParams.get('week') ?? 'draft';
+  const rawWeek = searchParams.get('week') ?? 'draft';
+  // Validate: only "draft" or an integer 1–18 are valid
+  const weekNum = rawWeek === 'draft' ? null : parseInt(rawWeek, 10);
+  if (rawWeek !== 'draft' && (isNaN(weekNum!) || weekNum! < 1 || weekNum! > 18)) {
+    return NextResponse.json([]);
+  }
+  const week = rawWeek;
 
   const allProjections: Array<{ name: string; position: string; fpts: number }> = [];
 

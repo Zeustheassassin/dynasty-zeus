@@ -1,6 +1,9 @@
 "use client";
 import React from "react";
 import { usePlayers } from "../lib/PlayersContext";
+import type {
+  SleeperLeague, SleeperRoster, SleeperUser, AugmentedPick, ProjectionRow, LeagueMateStatEntry, DynamicPickValue, HistoricalSnapshot,
+} from "../lib/types";
 
 // ── Module-level constants (mirrors page.tsx) ──────────────────────────────
 const CURRENT_YEAR = String(new Date().getFullYear());
@@ -26,6 +29,13 @@ const POS_COLOR: Record<string, string> = {
   TE: "text-yellow-400",
 };
 
+// ── Local types ─────────────────────────────────────────────────────────────
+
+interface ShareEntry { count: number; leagues: string[]; starters: string[] }
+
+interface ExposureEntry { playerId: string; count: number; percent: number }
+interface ExposureData { players: ExposureEntry[]; leagueCount: number }
+
 // ── Props ──────────────────────────────────────────────────────────────────
 type DataHubTabId = "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "PICK_VALUES" | "LEAGUEMATES" | "DEPTH_CHARTS" | "BUY_LOW";
 
@@ -34,7 +44,7 @@ interface DataHubProps {
   dataHubTab: DataHubTabId;
   setDataHubTab: (tab: DataHubTabId) => void;
 
-  shares: Record<string, any>;
+  shares: Record<string, ShareEntry>;
 
   // Dynasty/Redraft rankings
   calcFcValues: Record<string, number>;
@@ -48,8 +58,8 @@ interface DataHubProps {
   loadingRedraft: boolean;
 
   // Projections tab
-  projectionData: any[];
-  setProjectionData: React.Dispatch<React.SetStateAction<any[]>>;
+  projectionData: ProjectionRow[];
+  setProjectionData: React.Dispatch<React.SetStateAction<ProjectionRow[]>>;
   projectionPosFilter: string;
   setProjectionPosFilter: (pos: string) => void;
   projectionWeek: number;
@@ -62,17 +72,17 @@ interface DataHubProps {
   projectionUsesSeasonFallback: boolean;
 
   // Pick values tab
-  allPicks: any[];
-  selectedLeague: any;
-  rosters: any[];
-  users: any;
-  selectedLeagueDynamicPickValues: Record<string, any>;
+  allPicks: AugmentedPick[];
+  selectedLeague: SleeperLeague | null;
+  rosters: SleeperRoster[];
+  users: Record<string, string>;
+  selectedLeagueDynamicPickValues: Record<string, DynamicPickValue>;
 
   // League mate stats tab
-  leagues: any[];
-  user: any;
-  leagueMateStats: any[];
-  setLeagueMateStats: (stats: any[]) => void;
+  leagues: SleeperLeague[];
+  user: SleeperUser | null;
+  leagueMateStats: LeagueMateStatEntry[];
+  setLeagueMateStats: (stats: LeagueMateStatEntry[]) => void;
   leagueMateStatsLoaded: boolean;
   setLeagueMateStatsLoaded: (loaded: boolean) => void;
   loadingLeagueMateStats: boolean;
@@ -84,11 +94,11 @@ interface DataHubProps {
   // League mate exposure drill-down
   loadUserExposure: (userId: string) => void;
   selectedUserId: string | null;
-  externalShares: any;
+  externalShares: ExposureData | null;
   loadingShares: boolean;
 
   // Value trends
-  historicalSnapshot: { players: Record<string, any>; recorded_at: string } | null;
+  historicalSnapshot: HistoricalSnapshot | null;
   onSaveSnapshot: () => Promise<void>;
 }
 
@@ -140,7 +150,7 @@ function DataHub({
   leagueMateStats, setLeagueMateStats, leagueMateStatsLoaded, setLeagueMateStatsLoaded,
   loadingLeagueMateStats, setLoadingLeagueMateStats,
   leagueMateSearch, setLeagueMateSearch, leagueMateSort, setLeagueMateSort,
-  loadUserExposure, selectedUserId, externalShares, loadingShares,
+  loadUserExposure, selectedUserId: _selectedUserId, externalShares, loadingShares,
   historicalSnapshot, onSaveSnapshot,
 }: DataHubProps) {
   const players = usePlayers();
@@ -1304,7 +1314,7 @@ function DataHub({
                       <tbody>
                         {sorted.map((owner, i) => {
                           const isExpanded = expandedMateId === owner.userId;
-                          const ownerExposure = isExpanded ? (externalShares ?? {}) : null;
+                          const ownerExposure: ExposureData | null = isExpanded ? (externalShares ?? null) : null;
                           return (
                             <React.Fragment key={owner.userId}>
                               <tr
@@ -1333,13 +1343,13 @@ function DataHub({
                                   <td colSpan={4} className="px-4 pb-3 pt-1">
                                     {loadingShares ? (
                                       <p className="text-xs text-blue-400 py-2">Loading exposure…</p>
-                                    ) : ownerExposure?.players?.length > 0 ? (
+                                    ) : ownerExposure !== null && ownerExposure.players.length > 0 ? (
                                       <div>
                                         <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">
                                           Top Owned Players · {ownerExposure.leagueCount} league{ownerExposure.leagueCount !== 1 ? "s" : ""}
                                         </p>
                                         <div className="grid grid-cols-2 md:grid-cols-3 gap-1.5">
-                                          {(ownerExposure.players as Array<{ playerId: string; count: number; percent: number }>).map((entry) => {
+                                          {ownerExposure.players.map((entry) => {
                                             const p = players[entry.playerId];
                                             if (!p) return null;
                                             return (

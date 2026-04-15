@@ -1,15 +1,16 @@
 "use client";
 import { useState, useEffect } from "react";
 import { CURRENT_YEAR } from "../lib/helpers";
+import type { SleeperUser, SleeperLeague } from "../lib/types";
 
 // Sleeper dynasty league filter — same criteria used everywhere in the app.
-const isDynastyLeague = (l: any) =>
+const isDynastyLeague = (l: SleeperLeague) =>
   ((l.settings?.taxi_slots ?? 0) > 0 || (l.roster_positions?.length ?? 0) > 20) &&
-  (l.settings?.best_ball ?? 0) === 0;
+  ((l.settings as unknown as Record<string, number>)?.best_ball ?? 0) === 0;
 
 interface UseSleeperUserOptions {
   /** Called after leagues are loaded (connect or initial hydration). */
-  onLeaguesLoaded?: (leagues: any[]) => void;
+  onLeaguesLoaded?: (leagues: SleeperLeague[]) => void;
   /** Called after the core disconnect (clear user/leagues/localStorage) so callers can clear dependent state. */
   onDisconnect?: () => void;
 }
@@ -29,26 +30,35 @@ interface UseSleeperUserOptions {
  */
 export function useSleeperUser({ onLeaguesLoaded, onDisconnect }: UseSleeperUserOptions = {}) {
   const [username, setUsername] = useState("");
-  const [user, setUser] = useState<any>(null);
-  const [leagues, setLeagues] = useState<any[]>([]);
+  const [user, setUser] = useState<SleeperUser | null>(null);
+  const [leagues, setLeagues] = useState<SleeperLeague[]>([]);
   const [connectLoading, setConnectLoading] = useState(false);
   const [connectError, setConnectError] = useState("");
   const [connectSuccess, setConnectSuccess] = useState("");
 
   // Hydrate from localStorage on mount
   useEffect(() => {
-    const saved = localStorage.getItem("sleeperUser");
+    let saved: string | null = null;
+    try { saved = localStorage.getItem("sleeperUser"); } catch { return; }
     if (!saved) return;
     try {
-      const parsed = JSON.parse(saved);
+      const parsed: SleeperUser = JSON.parse(saved);
       setUser(parsed);
       setUsername(parsed.display_name || parsed.username || "");
       fetch(`https://api.sleeper.app/v1/user/${parsed.user_id}/leagues/nfl/${CURRENT_YEAR}`)
-        .then((res) => res.json())
-        .then((data: any[]) => {
-          const filtered = data.filter(isDynastyLeague);
+        .then((res) => {
+          if (!res.ok) throw new Error(`Sleeper returned ${res.status}`);
+          return res.json() as Promise<SleeperLeague[]>;
+        })
+        .then((data) => {
+          const filtered = Array.isArray(data) ? data.filter(isDynastyLeague) : [];
           setLeagues(filtered);
           onLeaguesLoaded?.(filtered);
+        })
+        .catch(() => {
+          // Sleeper may be unreachable — keep the user object but show empty leagues.
+          // The user can manually reconnect when the service is back.
+          setLeagues([]);
         });
     } catch { /* ignore corrupt localStorage */ }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -68,7 +78,7 @@ export function useSleeperUser({ onLeaguesLoaded, onDisconnect }: UseSleeperUser
 
     try {
       const res = await fetch(`https://api.sleeper.app/v1/user/${trimmedUsername}`);
-      const data = await res.json();
+      const data: SleeperUser = await res.json();
 
       if (!res.ok || !data?.user_id) {
         setConnectError("Sleeper username not found. Double-check the spelling and try again.");
@@ -83,7 +93,7 @@ export function useSleeperUser({ onLeaguesLoaded, onDisconnect }: UseSleeperUser
       const leaguesRes = await fetch(
         `https://api.sleeper.app/v1/user/${data.user_id}/leagues/nfl/${CURRENT_YEAR}`
       );
-      const leaguesData = await leaguesRes.json();
+      const leaguesData: SleeperLeague[] = await leaguesRes.json();
       const filtered = Array.isArray(leaguesData) ? leaguesData.filter(isDynastyLeague) : [];
       setLeagues(filtered);
       setConnectSuccess(
@@ -104,7 +114,7 @@ export function useSleeperUser({ onLeaguesLoaded, onDisconnect }: UseSleeperUser
     setLeagues([]);
     setConnectError("");
     setConnectSuccess("");
-    localStorage.removeItem("sleeperUser");
+    try { localStorage.removeItem("sleeperUser"); } catch { /* private browsing */ }
     onDisconnect?.();
   };
 

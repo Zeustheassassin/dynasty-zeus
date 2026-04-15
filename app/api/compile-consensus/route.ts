@@ -1,5 +1,7 @@
 import { NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { checkRateLimit } from "../../../lib/rateLimit";
+import { apiError } from "../../../lib/apiHelpers";
 import {
   SLEEPER_BASE_URL,
   COMPILE_CONCURRENCY,
@@ -17,6 +19,46 @@ const CONCURRENCY         = COMPILE_CONCURRENCY;
 const PICKS_CONCURRENCY   = COMPILE_PICKS_CONCURRENCY;
 const REQUEST_TIMEOUT_MS  = SLEEPER_REQUEST_TIMEOUT_MS;
 const PLAYERS_TIMEOUT_MS  = SLEEPER_PLAYERS_TIMEOUT_MS;
+
+// ── Local types for Sleeper API responses ─────────────────────────────────────
+
+interface SleeperLeagueBasic {
+  league_id: string;
+  settings?: { taxi_slots?: number; best_ball?: number };
+  roster_positions?: string[];
+}
+
+interface SleeperRosterBasic {
+  roster_id: number;
+  owner_id?: string;
+  players?: string[];
+}
+
+interface SleeperDraftBasic {
+  draft_id: string;
+  season: string;
+  status: string;
+  settings?: { rounds?: number; teams?: number };
+}
+
+interface SleeperPickBasic {
+  player_id?: string;
+  pick_no?: number;
+  metadata?: {
+    first_name?: string;
+    last_name?: string;
+    position?: string;
+    team?: string;
+    years_exp?: string | number | null;
+  };
+}
+
+interface SleeperPlayerBasic {
+  first_name?: string;
+  last_name?: string;
+  position?: string;
+  team?: string;
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -67,19 +109,19 @@ async function withConcurrency<T>(
   }
 }
 
-function isDynastyLeague(l: any): boolean {
+function isDynastyLeague(l: SleeperLeagueBasic): boolean {
   return (
     ((l.settings?.taxi_slots ?? 0) > 0 || (l.roster_positions?.length ?? 0) > 20) &&
     (l.settings?.best_ball ?? 0) === 0
   );
 }
 
-function isSuperflex(l: any): boolean {
+function isSuperflex(l: SleeperLeagueBasic): boolean {
   return Array.isArray(l.roster_positions) && l.roster_positions.includes("SUPER_FLEX");
 }
 
 const IDP_POSITIONS = new Set(["DB", "DL", "LB", "IDP_FLEX", "DE", "DT", "CB", "S"]);
-function hasIDP(l: any): boolean {
+function hasIDP(l: SleeperLeagueBasic): boolean {
   return Array.isArray(l.roster_positions) &&
     l.roster_positions.some((pos: string) => IDP_POSITIONS.has(pos));
 }
@@ -90,8 +132,10 @@ async function compileDrafts(
   sleeperUserId: string,
   years: number[],
   authUserId: string,
+  // The client is created at runtime without a schema type — `any` avoids the
+  // "never" overload errors that Supabase emits for untyped table names.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabaseClient: any,
+  supabaseClient: ReturnType<typeof createClient<any>>,
   emit: (event: object) => void
 ): Promise<void> {
 
@@ -103,17 +147,17 @@ async function compileDrafts(
 
   await Promise.all(
     years.map(async (year) => {
-      const leagues = await safeFetch<any[]>(`${SLEEPER_BASE}/user/${sleeperUserId}/leagues/nfl/${year}`);
+      const leagues = await safeFetch<SleeperLeagueBasic[]>(`${SLEEPER_BASE}/user/${sleeperUserId}/leagues/nfl/${year}`);
       if (!Array.isArray(leagues)) return;
       const dynLeagues = leagues.filter(isDynastyLeague).filter(isSuperflex).filter((l) => !hasIDP(l));
-      userLeagueIdsByYear[year] = dynLeagues.map((l: any) => l.league_id);
+      userLeagueIdsByYear[year] = dynLeagues.map((l: SleeperLeagueBasic) => l.league_id);
 
       // Fetch rosters in parallel to gather owner IDs
       await Promise.all(
-        dynLeagues.map(async (league: any) => {
-          const rosters = await safeFetch<any[]>(`${SLEEPER_BASE}/league/${league.league_id}/rosters`);
+        dynLeagues.map(async (league: SleeperLeagueBasic) => {
+          const rosters = await safeFetch<SleeperRosterBasic[]>(`${SLEEPER_BASE}/league/${league.league_id}/rosters`);
           if (!Array.isArray(rosters)) return;
-          rosters.forEach((r: any) => {
+          rosters.forEach((r: SleeperRosterBasic) => {
             if (r.owner_id && String(r.owner_id) !== String(sleeperUserId)) {
               connectedUserIds.add(String(r.owner_id));
             }
@@ -142,9 +186,9 @@ async function compileDrafts(
   await withConcurrency(
     userYearPairs,
     async ([uid, yr]) => {
-      const leagues = await safeFetch<any[]>(`${SLEEPER_BASE}/user/${uid}/leagues/nfl/${yr}`);
+      const leagues = await safeFetch<SleeperLeagueBasic[]>(`${SLEEPER_BASE}/user/${uid}/leagues/nfl/${yr}`);
       if (Array.isArray(leagues)) {
-        leagues.filter(isDynastyLeague).filter(isSuperflex).filter((l) => !hasIDP(l)).forEach((l: any) => allLeagueIds.add(l.league_id));
+        leagues.filter(isDynastyLeague).filter(isSuperflex).filter((l) => !hasIDP(l)).forEach((l: SleeperLeagueBasic) => allLeagueIds.add(l.league_id));
       }
       pairsDone++;
       if (pairsDone % 50 === 0 || pairsDone === userYearPairs.length) {
@@ -174,10 +218,10 @@ async function compileDrafts(
   await withConcurrency(
     leagueIdArray,
     async (leagueId) => {
-      const drafts = await safeFetch<any[]>(`${SLEEPER_BASE}/league/${leagueId}/drafts`);
+      const drafts = await safeFetch<SleeperDraftBasic[]>(`${SLEEPER_BASE}/league/${leagueId}/drafts`);
       if (Array.isArray(drafts)) {
         const currentYear = new Date().getFullYear();
-        drafts.forEach((d: any) => {
+        drafts.forEach((d: SleeperDraftBasic) => {
           const season = parseInt(String(d.season), 10);
           if (!years.includes(season)) return;
           // Never compile the current calendar year — the NFL Draft hasn't happened yet
@@ -214,7 +258,7 @@ async function compileDrafts(
   // Many 2024/2025 picks have no metadata.first_name/last_name because the player was added
   // to Sleeper's database after the dynasty draft was held. Without this fallback those picks
   // are silently skipped, causing the compiled draft count to be correct but the player list empty.
-  const sleeperPlayers = await safeFetch<Record<string, any>>(
+  const sleeperPlayers = await safeFetch<Record<string, SleeperPlayerBasic>>(
     `${SLEEPER_BASE}/players/nfl`,
     PLAYERS_TIMEOUT_MS
   ) ?? {};
@@ -265,11 +309,11 @@ async function compileDrafts(
     await withConcurrency(
       draftIds,
       async (draftId) => {
-        const picks = await safeFetch<any[]>(`${SLEEPER_BASE}/draft/${draftId}/picks`);
+        const picks = await safeFetch<SleeperPickBasic[]>(`${SLEEPER_BASE}/draft/${draftId}/picks`);
         if (!Array.isArray(picks)) { draftsFailed++; return; }
         draftsOk++;
 
-        picks.forEach((pick: any) => {
+        picks.forEach((pick: SleeperPickBasic) => {
           if (!pick.player_id || !pick.pick_no) return;
 
           // Filter out veterans — only count players who were rookies (years_exp === 0)
@@ -331,19 +375,15 @@ async function compileDrafts(
       .eq("year", year);
 
     // Insert in batches of 200 to stay under Supabase request size limits
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const cacheTable = supabaseClient.from("consensus_draft_cache" as any);
     for (let i = 0; i < rows.length; i += 200) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { error } = await (cacheTable as any).insert(rows.slice(i, i + 200));
+      const { error } = await supabaseClient.from("consensus_draft_cache").insert(rows.slice(i, i + 200));
       if (error) {
-        emit({ type: "status", message: `Warning: save error for ${year} batch ${i}: ${(error as any).message}`, progress: 85 });
+        emit({ type: "status", message: `Warning: save error for ${year} batch ${i}: ${error.message}`, progress: 85 });
       }
     }
 
     // Save/update metadata for this year
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (supabaseClient.from("consensus_draft_meta" as any) as any).upsert(
+    await supabaseClient.from("consensus_draft_meta").upsert(
       {
         user_id:              authUserId,
         year,
@@ -371,17 +411,26 @@ async function compileDrafts(
 // ── Route handler ─────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
+  // Compile is very expensive — strict rate limit: 5 compilations per 10 minutes per IP
+  const rl = checkRateLimit(req, 5, 10 * 60_000, 'compile-consensus');
+  if (!rl.allowed) return rl.response;
+
   let body: { sleeperUserId?: string; accessToken?: string; years?: number[] };
   try {
     body = await req.json();
   } catch {
-    return new Response("Bad JSON in request body", { status: 400 });
+    return apiError("Bad JSON in request body", 400, "INVALID_JSON");
   }
 
   const { sleeperUserId, accessToken, years } = body;
 
   if (!sleeperUserId || !accessToken || !Array.isArray(years) || years.length === 0) {
-    return new Response("Missing required params: sleeperUserId, accessToken, years[]", { status: 400 });
+    return apiError("Missing required params: sleeperUserId, accessToken, years[]", 400, "MISSING_PARAMS");
+  }
+
+  // Guard against absurdly large arrays before filtering (issue #40)
+  if (years.length > 20) {
+    return apiError("years array must contain at most 20 entries", 400, "YEARS_TOO_MANY");
   }
 
   // Validate year range — anchored dynamically so no code change needed each year
@@ -390,7 +439,7 @@ export async function POST(req: NextRequest) {
     (y) => typeof y === "number" && Number.isInteger(y) && y >= YEAR_MIN && y <= YEAR_MAX
   );
   if (validYears.length === 0) {
-    return new Response(`No valid years (must be ${YEAR_MIN}–${YEAR_MAX})`, { status: 400 });
+    return apiError(`No valid years. Must be integers between ${YEAR_MIN} and ${YEAR_MAX}`, 400, "INVALID_YEARS");
   }
 
   // Build an authenticated Supabase client using the caller's access token
@@ -404,7 +453,7 @@ export async function POST(req: NextRequest) {
   // Verify the token is valid and get the auth user ID
   const { data: { user: authUser } } = await supabaseClient.auth.getUser();
   if (!authUser) {
-    return new Response("Unauthorized — invalid or expired access token", { status: 401 });
+    return apiError("Unauthorized — invalid or expired access token", 401, "UNAUTHORIZED");
   }
 
   const encoder = new TextEncoder();
@@ -421,8 +470,8 @@ export async function POST(req: NextRequest) {
 
       try {
         await compileDrafts(sleeperUserId, validYears, authUser.id, supabaseClient, emit);
-      } catch (err: any) {
-        emit({ type: "error", message: err?.message ?? "Unknown compilation error" });
+      } catch (err: unknown) {
+        emit({ type: "error", message: err instanceof Error ? err.message : "Unknown compilation error" });
       } finally {
         controller.close();
       }

@@ -17,7 +17,8 @@ export interface PlayerUsage {
 }
 
 // Module-level cache — survives re-renders, cleared on page reload
-const statsCache: Record<string, Record<string, any>> = {};
+// Values are Sleeper weekly stat fields (all numeric, some null).
+const statsCache: Record<string, Record<string, Record<string, number | null>>> = {};
 
 /**
  * Fetches the last `lookback` completed weeks of Sleeper actuals for the
@@ -36,9 +37,11 @@ export function usePlayerStats(
   const [loadingStats, setLoadingStats] = useState(false);
 
   useEffect(() => {
-    // Off-season or not enough data yet
+    // Off-season or not enough data yet — clear state and bail.
+    // Synchronous setState in effect is intentional: clearing derived state
+    // when input conditions are not met is the correct React pattern here.
     if (!season || !currentWeek || currentWeek < 2) {
-      setPlayerStats(null);
+      setPlayerStats(null); // eslint-disable-line react-hooks/set-state-in-effect
       return;
     }
 
@@ -71,8 +74,7 @@ export function usePlayerStats(
       for (const w of weeks) {
         const isRecent = recentWeeks.includes(w);
         const weekData = statsCache[`${season}-${w}`] ?? {};
-        for (const [pid, raw] of Object.entries(weekData as Record<string, any>)) {
-          const s = raw as any;
+        for (const [pid, s] of Object.entries(weekData as Record<string, Record<string, number | null>>)) {
           const snaps: number = s.off_snp ?? 0;
           const teamSnaps: number = s.tm_off_snp ?? 0;
           const targets: number = s.rec_tgt ?? 0;

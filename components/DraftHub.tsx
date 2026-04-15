@@ -2,9 +2,11 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "../lib/supabaseclient";
 import { usePlayers } from "../lib/PlayersContext";
+import { useAuth } from "../lib/AuthContext";
+import PickValuesTab from "./draft/PickValuesTab";
+import { CURRENT_YEAR as ROOKIE_YEAR } from "../lib/helpers";
 
 // ── Module-level constants ─────────────────────────────────────────────────
-const ROOKIE_YEAR = String(new Date().getFullYear());
 // Upper bound for the draft grid — supports up to 6-round rookie drafts.
 // The board trims this to the league's actual round count via activeRounds.
 const MAX_ROUNDS = 6;
@@ -117,7 +119,6 @@ interface DraftHubProps {
   rosters: any[];
   user: any;
   users: any;
-  supabaseUser: any;
 
   draftSettings: any;
   draftPicks: any[];
@@ -155,7 +156,7 @@ function DraftHub({
   myDraftSlotPicks, setMyDraftSlotPicks,
   draftSlotEditing, setDraftSlotEditing,
   draftSlotSearchQuery, setDraftSlotSearchQuery,
-  selectedLeague, rosters, user, users, supabaseUser,
+  selectedLeague, rosters, user, users,
   draftSettings, draftPicks, draftOrder, allPicks,
   rookies, rookieSearch, setRookieSearch,
   dragIndex, setDragIndex, tempRanks, setTempRanks,
@@ -165,6 +166,7 @@ function DraftHub({
   leagues, calcFcValues, pickFcValues, fcNameValues,
 }: DraftHubProps) {
   const players = usePlayers();
+  const { supabaseUser } = useAuth();
 
   // ── Internal state ───────────────────────────────────────────────────────
   // Tier labels: { playerId: tierNumber 1-15 }
@@ -1250,55 +1252,13 @@ function DraftHub({
           PICK VALUES
          ══════════════════════════════════════════════════════ */}
       {draftHubSection === "PICK_VALUES" && (
-        <div className="max-w-2xl mx-auto">
-          <div className="mb-5">
-            <h2 className="text-lg font-semibold">{ROOKIE_YEAR} Rookie Draft Pick Values</h2>
-            <p className="text-sm text-gray-400 mt-1">
-              Dynasty superflex values from FantasyCalc.
-              {allPicks.length > 0 && " Your picks are highlighted in blue."}
-            </p>
-          </div>
-
-          {Object.keys(pickFcValues).length === 0 ? (
-            <div className="text-gray-400 text-sm">Pick values are loading…</div>
-          ) : (
-            // Use actual draft round count if available, fall back to 4
-            ROUNDS.slice(0, Number(draftSettings?.settings?.rounds ?? draftSettings?.rounds ?? 4)).map((round) => {
-              const numSlots = rosters.length || 12;
-              return (
-                <div key={round} className="mb-6">
-                  <div className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">Round {round}</div>
-                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
-                    {Array.from({ length: numSlots }, (_, i) => {
-                      const slot = i + 1;
-                      const slotStr = `${round}.${String(slot).padStart(2, "0")}`;
-                      const value = pickFcValues[`${ROOKIE_YEAR}-${slotStr}`] ?? pickFcValues[`${ROOKIE_YEAR}-${round}`] ?? 0;
-                      const overallPick = (round - 1) * numSlots + slot;
-                      const isMyPick = allPicks.some((p: any) => p.slot === slotStr && String(p.owner_id) === String(myRosterId));
-                      return (
-                        <div key={slotStr} className={`rounded-xl border px-3 py-2.5 ${isMyPick ? "border-blue-600 bg-blue-950/30" : "border-gray-700 bg-gray-800"}`}>
-                          <div className="flex items-center justify-between gap-1 mb-0.5">
-                            <span className={`text-xs font-bold ${isMyPick ? "text-blue-300" : "text-gray-300"}`}>{slotStr}</span>
-                            {isMyPick && <span className="text-[9px] text-blue-400 font-bold">YOURS</span>}
-                          </div>
-                          <div className="text-[10px] text-gray-600 mb-1">Pick {overallPick}</div>
-                          <div className={`text-sm font-semibold ${
-                            value > 6000 ? "text-emerald-400" :
-                            value > 4000 ? "text-green-400" :
-                            value > 2000 ? "text-yellow-400" :
-                            value > 500  ? "text-orange-400" : "text-gray-500"
-                          }`}>
-                            {value > 0 ? value.toLocaleString() : "—"}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
+        <PickValuesTab
+          pickFcValues={pickFcValues}
+          allPicks={allPicks}
+          draftSettings={draftSettings}
+          numSlots={rosters.length || 12}
+          myRosterId={myRosterId}
+        />
       )}
 
       {/* ══════════════════════════════════════════════════════

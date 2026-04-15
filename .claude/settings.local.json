@@ -52,7 +52,8 @@
       "Bash(npm run:*)",
       "Bash(wc -l \"c:/Users/bstefely.NPCSEALANTS/dynastyzeus-app/components/\"*.tsx)",
       "Bash(grep -v \"^\\\\s*//\")",
-      "WebFetch(domain:images.unsplash.com)"
+      "WebFetch(domain:images.unsplash.com)",
+      "Bash(npx eslint *)"
     ]
   }
 }

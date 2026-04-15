@@ -2,6 +2,7 @@
 // Lineup slot helpers — position eligibility and kickoff-window
 // rebalancing for the Gameday Hub lineup optimiser.
 // ============================================================
+import type { LineupCoachRow } from "../types";
 
 /** Positions that can fill a FLEX slot. */
 export const FLEX_ELIGIBLE_POSITIONS = ["RB", "WR", "TE"];
@@ -38,7 +39,7 @@ export const getLineupSlotEligiblePositions = (slot: string) => {
  *  locked positional slots from FLEX / SUPER_FLEX where eligible.
  *  No-ops when kickoff data is unavailable. */
 export const rebalanceLineupForKickoffWindows = (
-  lineup: Array<{ slot: string; player: any; score: number; kickoffAt: number | null }>,
+  lineup: LineupCoachRow[],
   hasKickoffData: boolean
 ) => {
   if (!hasKickoffData) return lineup;

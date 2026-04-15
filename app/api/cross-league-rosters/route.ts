@@ -1,14 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '../../../lib/supabaseclient';
 import { SLEEPER_BASE_URL, CROSS_LEAGUE_ROSTERS_TTL_MS } from '../../../lib/constants';
+import { checkRateLimit } from '../../../lib/rateLimit';
 
 export async function GET(req: NextRequest) {
+  const rl = checkRateLimit(req, 60, 60_000, 'cross-league-rosters');
+  if (!rl.allowed) return rl.response;
+
   const { searchParams } = req.nextUrl;
   const sleeperUserId = searchParams.get('sleeper_user_id');
   const leagueId = searchParams.get('league_id');
 
-  if (!sleeperUserId || !leagueId) {
-    return NextResponse.json({ roster: null }, { status: 400 });
+  // Validate: Sleeper IDs are Discord-style snowflakes — numeric strings up to 20 digits.
+  // (64-bit unsigned integers have at most 20 decimal digits; 19 is common for recent IDs.)
+  const ID_RE = /^\d{1,20}$/;
+  if (!sleeperUserId || !leagueId || !ID_RE.test(sleeperUserId) || !ID_RE.test(leagueId)) {
+    return NextResponse.json({ error: 'Invalid sleeper_user_id or league_id', roster: null }, { status: 400 });
   }
 
   // ── 1. Check Supabase cache ──────────────────────────────
@@ -27,9 +34,10 @@ export async function GET(req: NextRequest) {
 
   // ── 2. Fetch from Sleeper ────────────────────────────────
   try {
-    const rosters: any[] = await fetch(
-      `${SLEEPER_BASE_URL}/league/${leagueId}/rosters`
-    ).then((r) => r.json());
+    interface SleeperRosterBasic { owner_id: string; [key: string]: unknown }
+    const res = await fetch(`${SLEEPER_BASE_URL}/league/${leagueId}/rosters`);
+    if (!res.ok) return NextResponse.json({ roster: null }, { status: 502 });
+    const rosters: SleeperRosterBasic[] = await res.json();
 
     const myRoster = rosters.find((r) => r.owner_id === sleeperUserId) ?? null;
 

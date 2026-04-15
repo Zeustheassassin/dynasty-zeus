@@ -24,6 +24,10 @@
 .DS_Store
 *.pem
 
+# large local bundles / codex artifacts
+.codex-*.js
+.codex-*.json
+
 # debug
 npm-debug.log*
 yarn-debug.log*

@@ -74,6 +74,7 @@ export interface SleeperRosterSettings {
   total_moves?: number;
   waiver_position?: number;
   waiver_budget_used?: number;
+  team_name?: string;
 }
 
 export interface SleeperPlayer {
@@ -138,6 +139,8 @@ export interface SleeperDraft {
   updated: number;
   start_time: number;
   last_picked: number;
+  /** Top-level rounds field returned by some Sleeper endpoints (also in settings.rounds). */
+  rounds?: number;
   last_message_id: string | null;
   slot_to_roster_id: Record<string, number>;
   draft_order: Record<string, number> | null;
@@ -166,6 +169,10 @@ export interface SleeperDraft {
     player_type: number;
     enforce_position_limits?: number;
     nomination_timer?: number;
+    /** Draft type override returned by some Sleeper endpoints (e.g. "snake", "linear"). */
+    type?: string;
+    /** Alias for type, found in Sleeper metadata and some settings objects. */
+    draft_type?: string;
   };
 }
 
@@ -226,6 +233,17 @@ export interface ProjectionSourceWeightedEntry {
   position: string;
   fpts: number;
   sourceCount: number;
+}
+
+/** Consensus projection row as returned by useProjections.projectionData */
+export interface ProjectionRow {
+  sleeperId: string;
+  full_name: string;
+  position: string;
+  team: string | null;
+  fpts: number;
+  sources: string[];
+  kickoffAt: number | null;
 }
 
 export interface FantasyCalcPlayerValue {
@@ -331,6 +349,13 @@ export interface TradePartnerFit {
   fitReasons: string[];
 }
 
+export interface CrossLeagueIntelPlayer {
+  playerId: string;
+  count: number;
+  name: string;
+  position: string;
+}
+
 export interface CrossLeagueIntel {
   totalDynastyLeagues: number;
   preferredPositions: string[];
@@ -340,6 +365,29 @@ export interface CrossLeagueIntel {
   tradePreferredPositions: string[];
   youngQbWrBuyRate: number;
   veteranRbBuyRate: number;
+  // Extended fields populated by the cross-league intel loader
+  ownedPositionCounts?: Record<string, number>;
+  repeatedPlayers?: (CrossLeagueIntelPlayer | null)[];
+  acquiredPlayers?: (CrossLeagueIntelPlayer | null)[];
+  averageAgeAllLeagues?: number;
+  crossLeaguePickBuys30d?: number;
+  crossLeaguePickSells30d?: number;
+  preferenceLabel?: string;
+  tradePreferenceLabel?: string;
+  crossLeagueSummary?: string;
+  crossLeagueTradeSummary?: string;
+}
+
+// ── League overview ──────────────────────────────────────────
+
+/** A pick with an optional slot label and current owner override (set by loadLeagueOverview) */
+export type AugmentedPick = SleeperTradedPick & { slot?: string; owner_id?: number };
+
+export interface LeagueOverviewEntry {
+  league: SleeperLeague;
+  rosters: SleeperRoster[];
+  picks: AugmentedPick[];
+  userMap: Record<string, string>;
 }
 
 // ── League hub ───────────────────────────────────────────────
@@ -374,6 +422,18 @@ export interface CommittedSimsByLeague {
   [leagueId: string]: Record<number, SimRow>;
 }
 
+/** Supabase-persisted sim row (snake_case columns from league_simulations table) */
+export interface CachedSimRow {
+  league_id: string;
+  roster_id: number;
+  playoff_odds: number;
+  title_odds: number;
+  expected_wins: number;
+  avg_finish: number;
+  finish_range: string | null;
+  computed_at: string | null;
+}
+
 // ── Draft hub ────────────────────────────────────────────────
 
 export interface RookiePlayer {
@@ -388,33 +448,223 @@ export interface RookiePlayer {
   source?: string;
 }
 
+/** A player row on the custom rookie big board (useRookieBoardState) */
+export interface RookieBoardPlayer {
+  player_id: string | null;
+  name: string;
+  position: string;
+  team: string;
+  adp: number;
+  fcValue: number;
+}
+
 // ── Gameday hub ──────────────────────────────────────────────
 
-export interface GamedayLineupRow {
+/** Row shape used by the LeagueHub lineup-coach optimizer (score-based). */
+export interface LineupCoachRow {
   slot: string;
   player: SleeperPlayer | null;
+  /** Projection/redraft score used for optimizer ranking. */
   score: number;
   kickoffAt: number | null;
 }
 
+export interface GamedayLineupRow {
+  slot: string;
+  playerId: string;
+  player: SleeperPlayer | null;
+  actualPoints: number;
+  remainingProjection: number;
+  kickoffAt: number | null;
+  kickoffLabel: string;
+  gameState: string;
+}
+
+export interface GamedayReserveRow {
+  playerId: string;
+  player: SleeperPlayer | null;
+  actualPoints: number;
+  remainingProjection: number;
+  kickoffAt: number | null;
+  kickoffLabel: string;
+  gameState: string;
+}
+
+export interface GamedayTeamView {
+  rosterId: number;
+  ownerId: string;
+  ownerName: string;
+  actualPoints: number;
+  remainingProjection: number;
+  projectedFinal: number;
+  finishedStarters: number;
+  liveStarters: number;
+  upcomingStarters: number;
+  totalStarters: number;
+  starterRows: GamedayLineupRow[];
+  benchRows: GamedayReserveRow[];
+  taxiRows: GamedayReserveRow[];
+}
+
 export interface GamedayMatchup {
   matchupId: number;
-  teamA: {
-    rosterId: number;
-    ownerId: string;
-    displayName: string;
-    totalProjected: number;
-    totalActual: number;
-    lineup: GamedayLineupRow[];
-  };
-  teamB: {
-    rosterId: number;
-    ownerId: string;
-    displayName: string;
-    totalProjected: number;
-    totalActual: number;
-    lineup: GamedayLineupRow[];
-  };
+  teams: GamedayTeamView[];
+  sortKickoff: number;
+}
+
+// ── Data hub ─────────────────────────────────────────────────
+
+export interface LeagueMateStatEntry {
+  userId: string;
+  displayName: string;
+  totalLeagues: number;
+  bestBallLeagues: number;
+  sharedLeagues: number;
+}
+
+// ── Trade hub ────────────────────────────────────────────────
+
+export interface DynamicPickValue {
+  bucket: string;
+  label: string;
+  expectedValue: number;
+  expectedSlot: number;
+  floorValue: number;
+  ceilingValue: number;
+  probabilities: { early: number; mid: number; late: number };
+  likelySlots: number[];
+}
+
+export interface SimulationUpcomingGame {
+  week: number;
+  opponentRosterId: number;
+  opponentName: string;
+  winProb: number;
+  projectedPoints: number;
+  source: string;
+}
+
+export interface SimulationTeamRow {
+  rosterId: number;
+  ownerId: string;
+  ownerName: string;
+  actualWins: number;
+  actualLosses: number;
+  pointsFor: number;
+  maxPf: number;
+  lineupScore: number;
+  benchDepth: number;
+  projectedMaxPf: number;
+  powerScore: number;
+  weeklyStdDev: number;
+  expectedWins: number;
+  avgFinish: number;
+  projectedFinish: number;
+  finishRange: string;
+  playoffOdds: number;
+  byeOdds: number;
+  titleOdds: number;
+  oneOhOneOdds: number;
+  luckScore: number;
+  allPlayWins: number;
+  allPlayExpectedWins: number;
+  finishProbabilities: number[];
+  slotProbabilities: number[];
+  upcomingSchedule: SimulationUpcomingGame[];
+  currentOpponent?: string;
+  currentWeekWinProb?: number;
+}
+
+export interface SimulationWeekMatchup {
+  week: number;
+  source: string;
+  aRosterId: number;
+  aName: string;
+  aWinProb: number;
+  aProjected: number;
+  bRosterId: number;
+  bName: string;
+  bWinProb: number;
+  bProjected: number;
+}
+
+export interface SimulationDisplayWeek {
+  week: number;
+  source: string;
+  matchups: SimulationWeekMatchup[];
+}
+
+export interface LeagueSimulation {
+  currentWeek: number;
+  simulationMode: "in_season" | "offseason";
+  regularSeasonWeeks: number;
+  playoffTeams: number;
+  byeTeams: number;
+  weeksPlayed: number;
+  simCount: number;
+  rows: SimulationTeamRow[];
+  weeklyMatchups: SimulationDisplayWeek[];
+  rowByRosterId: Map<number, SimulationTeamRow>;
+}
+
+export interface PlayerValueSnapshotEntry {
+  full_name: string;
+  status: string;
+  team: string;
+  value: number;
+  active: boolean;
+  shareCount: number;
+}
+
+export interface HistoricalSnapshot {
+  players: Record<string, PlayerValueSnapshotEntry>;
+  recorded_at: string;
+}
+
+/** Enriched league mate profile with trade intelligence and fit scores. */
+export interface LeagueMateView {
+  rosterId: number;
+  ownerId: string;
+  ownerName: string;
+  directionProfile: RosterDirectionProfile;
+  tradeCount30d: number;
+  picksIn30d: number;
+  picksOut30d: number;
+  lastTradeAt: string | null;
+  recentBuyLabel: string;
+  buildBiasLabel: string;
+  strongestPos: string;
+  secondPos: string;
+  motivation: string;
+  fitScore: number;
+  fitLabel: string;
+  fitReasons: string[];
+  baseFitReasons: string[];
+  crossLeagueFitReasons: string[];
+  crossLeagueSummary: string;
+  crossLeagueTradeSummary: string;
+  preferenceLabel: string;
+  tradePreferenceLabel: string;
+  preferredPositions: string[];
+  tradePreferredPositions: string[];
+  repeatedPlayers: CrossLeagueIntelPlayer[];
+  acquiredPlayers: CrossLeagueIntelPlayer[];
+  totalDynastyLeagues: number;
+  averageAgeAllLeagues: number;
+  crossLeagueTradeCount30d: number;
+}
+
+/** LeagueMateView extended with simulation-based ranking fields. */
+export interface TradePartnerRanking extends LeagueMateView {
+  playoffOdds: number;
+  titleOdds: number;
+  finishRange: string;
+  oneOhOneOdds: number;
+  bestApproach: string;
+  rankScore: number;
+  negotiationNotes: string[];
+  isSeller: boolean;
+  isBuyer: boolean;
 }
 
 // ── Management hub ───────────────────────────────────────────

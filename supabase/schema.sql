@@ -297,6 +297,9 @@ create policy "draft_board_picks_self" on draft_board_picks for all
 -- ── owner_tendencies (cached per-owner positional draft rates) ─
 -- Keyed by Sleeper owner_user_id (text), not auth.users uuid.
 -- Not tied to auth so owner data can be shared across users who league together.
+-- INTENTIONAL DESIGN: open read + write for all authenticated users because
+-- tendencies are non-PII aggregate stats computed from public Sleeper data and
+-- shared cross-league. DELETE is explicitly blocked to prevent data vandalism.
 create table if not exists owner_tendencies (
   id uuid primary key default gen_random_uuid(),
   owner_user_id text not null,
@@ -308,13 +311,20 @@ create table if not exists owner_tendencies (
 alter table owner_tendencies enable row level security;
 drop policy if exists "owner_tendencies_open_read" on owner_tendencies;
 drop policy if exists "owner_tendencies_open_write" on owner_tendencies;
+drop policy if exists "owner_tendencies_open_update" on owner_tendencies;
+drop policy if exists "owner_tendencies_no_delete" on owner_tendencies;
 -- Readable by all authenticated users (tendencies are not PII)
 create policy "owner_tendencies_open_read" on owner_tendencies for select
   using (auth.role() = 'authenticated');
+-- Any authenticated user may insert or update tendency rows (shared aggregate data)
 create policy "owner_tendencies_open_write" on owner_tendencies for insert
   with check (auth.role() = 'authenticated');
 create policy "owner_tendencies_open_update" on owner_tendencies for update
-  using (auth.role() = 'authenticated');
+  using (auth.role() = 'authenticated')
+  with check (auth.role() = 'authenticated');
+-- DELETE is explicitly blocked — no authenticated user may delete tendency rows
+create policy "owner_tendencies_no_delete" on owner_tendencies for delete
+  using (false);
 
 -- ── consensus_player_grades (hit/neutral/bust grades per player) ─
 -- Stored in a single jsonb blob keyed by "{year}_{player_id}"

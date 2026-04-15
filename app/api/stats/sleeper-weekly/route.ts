@@ -1,14 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '../../../../lib/supabaseclient';
 import { SLEEPER_BASE_URL, SLEEPER_STATS_TTL_MS } from '../../../../lib/constants';
+import { checkRateLimit } from '../../../../lib/rateLimit';
+import { apiError, parseIntParam } from '../../../../lib/apiHelpers';
 
 export async function GET(req: NextRequest) {
+  const rl = checkRateLimit(req, 30, 60_000, 'sleeper-weekly');
+  if (!rl.allowed) return rl.response;
+
   const { searchParams } = req.nextUrl;
   const season = searchParams.get('season');
-  const week = parseInt(searchParams.get('week') ?? '0', 10);
+  const week = parseIntParam(searchParams.get('week'), 1, 18);
 
-  if (!season || !week) {
-    return NextResponse.json({}, { status: 400 });
+  if (!season || !/^\d{4}$/.test(season)) {
+    return apiError('season must be a 4-digit year', 400, 'INVALID_SEASON');
+  }
+  const seasonYear = parseInt(season, 10);
+  if (seasonYear < 2015 || seasonYear > 2040) {
+    return apiError('season must be between 2015 and 2040', 400, 'INVALID_SEASON');
+  }
+  if (week === null) {
+    return apiError('week must be an integer between 1 and 18', 400, 'INVALID_WEEK');
   }
 
   // ── 1. Check Supabase cache ──────────────────────────────

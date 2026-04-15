@@ -1,18 +1,17 @@
 "use client";
 import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabaseclient";
+import type { LeagueMgmtData, CommPaymentsData, SleeperRoster, SleeperUser } from "../lib/types";
 
 export type MgmtHubTab = "LEAGUE_MGMT" | "COMMISSIONER_TOOLS";
 
-export function useManagementState(supabaseUser: any) {
+export function useManagementState(supabaseUser: { id: string } | null) {
   const [mgmtHubTab, setMgmtHubTab] = useState<MgmtHubTab>("LEAGUE_MGMT");
-  // { [leagueId]: { paid_YYYY: boolean, commissioner, year_in_advance, picks_traded, amount } }
-  const [leagueMgmtData, setLeagueMgmtData] = useState<Record<string, Record<string, any>>>({});
-  // { [leagueId]: { [ownerId]: { paid_YYYY: boolean } } }
-  const [commPaymentsData, setCommPaymentsData] = useState<Record<string, Record<string, Record<string, boolean>>>>({});
+  const [leagueMgmtData, setLeagueMgmtData] = useState<LeagueMgmtData>({});
+  const [commPaymentsData, setCommPaymentsData] = useState<CommPaymentsData>({});
   const [commToolsLeagueId, setCommToolsLeagueId] = useState<string>("");
-  const [commToolsRosters, setCommToolsRosters] = useState<any[]>([]);
-  const [commToolsUsers, setCommToolsUsers] = useState<Record<string, any>>({});
+  const [commToolsRosters, setCommToolsRosters] = useState<SleeperRoster[]>([]);
+  const [commToolsUsers, setCommToolsUsers] = useState<Record<string, SleeperUser>>({});
   const [loadingCommToolsRosters, setLoadingCommToolsRosters] = useState(false);
 
   useEffect(() => {
@@ -23,22 +22,29 @@ export function useManagementState(supabaseUser: any) {
       .from("league_management")
       .select("*")
       .eq("user_id", supabaseUser.id)
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        if (error) {
+          console.error("[useManagementState] league_management load failed:", error.message);
+          return;
+        }
         if (data && data.length > 0) {
-          const map: Record<string, Record<string, any>> = {};
-          data.forEach((row: any) => {
+          const map: LeagueMgmtData = {};
+          data.forEach((row: Record<string, unknown>) => {
             // Read all paid_YYYY keys dynamically so new year columns
             // added via migration are picked up without code changes.
-            const paymentFields: Record<string, boolean> = {};
+            const paymentFields: Record<`paid_${number}`, boolean> = {};
             Object.keys(row).forEach((k) => {
-              if (k.startsWith("paid_")) paymentFields[k] = row[k];
+              if (k.startsWith("paid_")) {
+                (paymentFields as Record<string, boolean>)[k] = Boolean(row[k]);
+              }
             });
-            map[row.league_id] = {
+            const leagueId = String(row.league_id);
+            map[leagueId] = {
               ...paymentFields,
-              commissioner: row.commissioner,
-              year_in_advance: row.year_in_advance,
-              picks_traded: row.picks_traded,
-              amount: row.amount ?? "",
+              commissioner: Boolean(row.commissioner),
+              year_in_advance: Boolean(row.year_in_advance),
+              picks_traded: Boolean(row.picks_traded),
+              amount: typeof row.amount === "string" ? row.amount : "",
             };
           });
           setLeagueMgmtData(map);
@@ -50,17 +56,23 @@ export function useManagementState(supabaseUser: any) {
       .from("commissioner_payments")
       .select("*")
       .eq("user_id", supabaseUser.id)
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        if (error) {
+          console.error("[useManagementState] commissioner_payments load failed:", error.message);
+          return;
+        }
         if (data && data.length > 0) {
-          const map: Record<string, Record<string, Record<string, boolean>>> = {};
-          data.forEach((row: any) => {
-            if (!map[row.league_id]) map[row.league_id] = {};
+          const map: CommPaymentsData = {};
+          data.forEach((row: Record<string, unknown>) => {
+            const leagueId = String(row.league_id);
+            const ownerId = String(row.owner_id);
+            if (!map[leagueId]) map[leagueId] = {};
             // Read all paid_YYYY keys dynamically — matches ManagementHub's approach.
             const payments: Record<string, boolean> = {};
             Object.keys(row).forEach((k) => {
-              if (k.startsWith("paid_")) payments[k] = row[k];
+              if (k.startsWith("paid_")) payments[k] = Boolean(row[k]);
             });
-            map[row.league_id][row.owner_id] = payments;
+            map[leagueId][ownerId] = payments;
           });
           setCommPaymentsData(map);
         }

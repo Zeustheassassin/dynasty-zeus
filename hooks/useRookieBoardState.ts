@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "../lib/supabaseclient";
 import { CURRENT_YEAR, normalizeRookieName } from "../lib/helpers";
+import type { RookieBoardPlayer } from "../lib/types";
 
 // ── Constants (exported so page.tsx logout handler can clear the right keys) ──
 export const ROOKIE_YEAR = CURRENT_YEAR;
@@ -12,8 +13,8 @@ const ROOKIE_BOARD_ADP_URL =
   `https://api.sleeper.app/projections/nfl/${ROOKIE_YEAR}?season_type=regular` +
   `&position=QB&position=RB&position=WR&position=TE&order_by=adp_dynasty_2qb`;
 
-export function useRookieBoardState(supabaseUser: any) {
-  const [rookies, setRookies] = useState<any[]>([]);
+export function useRookieBoardState(supabaseUser: { id: string } | null) {
+  const [rookies, setRookies] = useState<RookieBoardPlayer[]>([]);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [rookieSearch, setRookieSearch] = useState("");
   const [tempRanks, setTempRanks] = useState<{ [key: number]: string }>({});
@@ -21,14 +22,14 @@ export function useRookieBoardState(supabaseUser: any) {
 
   // Stable ref so the save-effect can read the current user without declaring
   // supabaseUser as a dependency (which would overwrite Supabase data on login).
-  const supabaseUserRef = useRef<any>(null);
+  const supabaseUserRef = useRef<{ id: string } | null>(null);
   useEffect(() => { supabaseUserRef.current = supabaseUser; }, [supabaseUser]);
 
   /** Moves a rookie to a new rank position by dragging or typing. */
   const handleRankChange = (currentIndex: number, newRank: string) => {
-    const rank = parseInt(newRank);
+    const rank = parseInt(newRank, 10);
     if (!rank || rank < 1 || rank > rookies.length) return;
-    const updated = [...rookies];
+    const updated: RookieBoardPlayer[] = [...rookies];
     const [moved] = updated.splice(currentIndex, 1);
     updated.splice(rank - 1, 0, moved);
     setRookies(updated);
@@ -41,11 +42,11 @@ export function useRookieBoardState(supabaseUser: any) {
       localStorage.setItem(`rookieBoard_${ROOKIE_BOARD_VERSION}`, JSON.stringify(rookies));
       const user = supabaseUserRef.current;
       if (user) {
-        const orderedNames = rookies.map((r: any) => r.name);
+        const orderedNames = rookies.map((r) => r.name);
         supabase.from("rookie_board").upsert(
           { user_id: user.id, year: ROOKIE_BOARD_VERSION, players: orderedNames, updated_at: new Date().toISOString() },
           { onConflict: "user_id,year" }
-        ).then(({ error }: { error: any }) => {
+        ).then(({ error }: { error: { message: string; code?: string } | null }) => {
           if (error) console.error("rookie_board save failed:", error.message, error.code);
         });
       }
@@ -70,7 +71,7 @@ export function useRookieBoardState(supabaseUser: any) {
       const fcBySleeperId = new Map<string, number>();
 
       if (Array.isArray(fcRaw)) {
-        fcRaw.forEach((entry: any) => {
+        fcRaw.forEach((entry: { player?: { position?: string; name?: string; firstName?: string; lastName?: string; sleeperId?: string | number }; value?: number }) => {
           if (entry.player?.position === "PICK") return;
           const fullName = entry.player?.name || `${entry.player?.firstName || ""} ${entry.player?.lastName || ""}`.trim();
           if (fullName && typeof entry.value === "number") {
@@ -96,26 +97,39 @@ export function useRookieBoardState(supabaseUser: any) {
         })
         .filter((player) => player.name && player.name !== "Player Invalid");
 
+      interface SleeperAdpEntry {
+        player_id?: string | number;
+        player?: { first_name?: string; last_name?: string; position?: string; team?: string };
+        stats?: { adp_dynasty_2qb?: number };
+      }
+      interface AdpPlayerInfo {
+        player_id: string;
+        name: string;
+        position: string;
+        team: string;
+        adp: number;
+      }
       // Sleeper ADP only used for player_id, position, team metadata — NOT for sort order
-      const adpByName = new Map<string, any>();
+      const adpByName = new Map<string, AdpPlayerInfo>();
       adpResponse
-        .filter((entry: any) =>
+        .filter((entry: SleeperAdpEntry) =>
           entry?.player &&
           entry?.stats &&
           entry.player.first_name !== "Player" &&
-          ROOKIE_BOARD_POSITIONS.has(entry.player.position) &&
+          ROOKIE_BOARD_POSITIONS.has(entry.player.position ?? "") &&
           typeof entry.stats.adp_dynasty_2qb === "number"
         )
-        .forEach((entry: any) => {
-          const playerName = `${entry.player.first_name} ${entry.player.last_name}`.trim();
+        .forEach((entry: SleeperAdpEntry) => {
+          if (!entry.player || !entry.stats) return;
+          const playerName = `${entry.player.first_name ?? ""} ${entry.player.last_name ?? ""}`.trim();
           const normalizedName = normalizeRookieName(playerName);
           if (!normalizedName || adpByName.has(normalizedName)) return;
           adpByName.set(normalizedName, {
             player_id: String(entry.player_id),
             name: playerName,
-            position: entry.player.position,
-            team: entry.player.team || "",
-            adp: entry.stats.adp_dynasty_2qb,
+            position: entry.player.position ?? "",
+            team: entry.player.team ?? "",
+            adp: entry.stats.adp_dynasty_2qb ?? 0,
           });
         });
 
@@ -183,7 +197,7 @@ export function useRookieBoardState(supabaseUser: any) {
         return;
       }
 
-      const savedNames: string[] = JSON.parse(saved).map((p: any) =>
+      const savedNames: string[] = JSON.parse(saved).map((p: string | { name: string }) =>
         typeof p === "string" ? p : p.name
       );
       const canonicalNames = new Set(canonicalBoard.map((p) => normalizeRookieName(p.name)));
@@ -203,7 +217,8 @@ export function useRookieBoardState(supabaseUser: any) {
     };
 
     loadRookieBoard().catch(() => {});
-  }, [supabaseUser?.id]); // use ID not object — prevents re-runs when auth refreshes recreate the user object
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supabaseUser?.id]); // intentional: use ID not object — prevents re-runs when auth refreshes recreate the user object
 
   return {
     rookies,

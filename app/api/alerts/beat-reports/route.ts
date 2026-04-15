@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { PFT_RSS_URL, CBS_NFL_RSS_URL, BEAT_REPORTS_REVALIDATE_S } from "../../../../lib/constants";
+import { checkRateLimit } from "../../../../lib/rateLimit";
 
 export const revalidate = BEAT_REPORTS_REVALIDATE_S;
 
@@ -89,6 +90,9 @@ function isTransactionItem(title: string, summary: string): boolean {
 }
 
 export async function GET(request: NextRequest) {
+  const rl = checkRateLimit(request, 15, 60_000, 'beat-reports');
+  if (!rl.allowed) return rl.response;
+
   const playersParam = request.nextUrl.searchParams.get("players") || "";
   const filterParam = request.nextUrl.searchParams.get("filter") || "";
   const onlyTransactions = filterParam === "transactions";

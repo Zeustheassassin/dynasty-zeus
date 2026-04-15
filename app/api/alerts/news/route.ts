@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { ESPN_NFL_NEWS_URL, ESPN_NEWS_REVALIDATE_S } from "../../../../lib/constants";
+import { checkRateLimit } from "../../../../lib/rateLimit";
 
 // Revalidate every 30 seconds — batches concurrent requests instead of hitting ESPN on every call
 // NOTE: This must be a static literal (not an import) for Next.js segment config to work.
@@ -13,6 +14,9 @@ const normalizeName = (value: string) =>
     .trim();
 
 export async function GET(request: NextRequest) {
+  const rl = checkRateLimit(request, 15, 60_000, 'news');
+  if (!rl.allowed) return rl.response;
+
   const playersParam = request.nextUrl.searchParams.get("players") || "";
   const trackedPlayers = playersParam
     .split("|")
@@ -27,11 +31,23 @@ export async function GET(request: NextRequest) {
         Accept: "application/json",
       },
     });
-    const data = await res.json();
+    if (!res.ok) return Response.json({ items: [] });
+    const data = await res.json() as { articles?: unknown[] };
     const articles = Array.isArray(data?.articles) ? data.articles : [];
 
-    const items = articles
-      .map((article: any, index: number) => {
+    interface EspnArticle {
+      id?: string | number;
+      headline?: string;
+      description?: string;
+      story?: string;
+      published?: string;
+      lastModified?: string;
+      links?: { web?: { href?: string } };
+      link?: string;
+    }
+
+    const items = (articles as EspnArticle[])
+      .map((article, index: number) => {
         const title = String(article?.headline || "");
         const summary = String(article?.description || article?.story || "");
         const body = normalizeName(`${title} ${summary}`);
@@ -47,7 +63,7 @@ export async function GET(request: NextRequest) {
           impact: matchedPlayers.length > 0,
         };
       })
-      .filter((item: any) => item.title && (item.impact || trackedPlayers.length === 0))
+      .filter((item) => item.title && (item.impact || trackedPlayers.length === 0))
       .slice(0, 12);
 
     return Response.json({ items });

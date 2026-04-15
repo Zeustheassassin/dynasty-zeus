@@ -215,7 +215,7 @@ function TxCard({ tx, players }: { tx: any; players: Record<string, any> }) {
 export default function AlertsPage({
   alerts,
   actionableAlerts,
-  watchlistEntries,
+  watchlistEntries: _watchlistEntries,
   onDismissAlert,
   loadingExternalAlerts,
   leagueTransactions,

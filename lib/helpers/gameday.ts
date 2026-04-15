@@ -5,7 +5,7 @@
 
 /** Extracts a kickoff timestamp (ms) from a raw Sleeper projection object,
  *  trying multiple field name variants returned by different API versions. */
-export const getProjectionKickoffAt = (projection: any): number | null => {
+export const getProjectionKickoffAt = (projection: Record<string, unknown>): number | null => {
   const rawCandidates = [
     projection?.kickoffAt,
     projection?.kickoff_at,
