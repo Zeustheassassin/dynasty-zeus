@@ -298,14 +298,14 @@ export default function AlertsPage({
   const totalByePlayers = byeWeekNumbers.reduce((s, w) => s + byeGroups[w].length, 0);
 
   const marketAlerts = alerts.filter(
-    (a) => (a.category === "market" || a.category === "watchlist") && (a.payload as any)?.direction
+    (a) => (a.category === "market" || a.category === "watchlist") && a.payload?.["direction"]
   );
   const gainers = [...marketAlerts]
-    .filter((a) => (a.payload as any)?.direction === "up")
-    .sort((a, b) => ((b.payload as any)?.delta ?? 0) - ((a.payload as any)?.delta ?? 0));
+    .filter((a) => a.payload?.["direction"] === "up")
+    .sort((a, b) => ((b.payload?.["delta"] as number ?? 0) - (a.payload?.["delta"] as number ?? 0)));
   const fallers = [...marketAlerts]
-    .filter((a) => (a.payload as any)?.direction === "down")
-    .sort((a, b) => ((a.payload as any)?.delta ?? 0) - ((b.payload as any)?.delta ?? 0));
+    .filter((a) => a.payload?.["direction"] === "down")
+    .sort((a, b) => ((a.payload?.["delta"] as number ?? 0) - (b.payload?.["delta"] as number ?? 0)));
 
   const TABS = [
     { key: "alerts", label: `Alerts${alerts.length > 0 ? ` (${alerts.length})` : ""}` },
@@ -818,7 +818,7 @@ export default function AlertsPage({
                           No gainers detected.
                         </div>
                       ) : gainers.map((alert) => {
-                        const delta = (alert.payload as any)?.delta as number ?? 0;
+                        const delta = (alert.payload?.["delta"] as number | undefined) ?? 0;
                         return (
                           <div key={alert.id} className="rounded-2xl border border-emerald-800/40 bg-emerald-950/10 p-3">
                             <div className="flex items-center justify-between gap-2">
@@ -853,7 +853,7 @@ export default function AlertsPage({
                           No fallers detected.
                         </div>
                       ) : fallers.map((alert) => {
-                        const delta = Math.abs((alert.payload as any)?.delta as number ?? 0);
+                        const delta = Math.abs((alert.payload?.["delta"] as number | undefined) ?? 0);
                         return (
                           <div key={alert.id} className="rounded-2xl border border-red-800/40 bg-red-950/10 p-3">
                             <div className="flex items-center justify-between gap-2">

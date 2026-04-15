@@ -2441,7 +2441,7 @@ const starters = starterSlots
                                           </button>
                                         ) : null;
                                       })}
-                                      {gotPicks.map((pk: any, i: number) => (
+                                      {gotPicks.map((pk, i) => (
                                         <p key={i} className="text-xs text-gray-400">{pk.season} Rd {pk.round}</p>
                                       ))}
                                     </div>
@@ -2457,7 +2457,7 @@ const starters = starterSlots
                                           </button>
                                         ) : null;
                                       })}
-                                      {gavePicks.map((pk: any, i: number) => (
+                                      {gavePicks.map((pk, i) => (
                                         <p key={i} className="text-xs text-gray-600 line-through">{pk.season} Rd {pk.round}</p>
                                       ))}
                                     </div>

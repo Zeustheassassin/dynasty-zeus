@@ -335,7 +335,7 @@ function DraftHub({
       return;
     }
     // Logged in — Supabase first, localStorage fallback
-    (supabase.from("consensus_player_grades" as any) as any)
+    supabase.from("consensus_player_grades")
       .select("grades")
       .eq("user_id", supabaseUser.id)
       .single()
@@ -355,7 +355,7 @@ function DraftHub({
 
   const syncGradesToSupabase = (grades: Record<string, string>) => {
     if (!supabaseUser) return;
-    (supabase.from("consensus_player_grades" as any) as any)
+    supabase.from("consensus_player_grades")
       .upsert(
         { user_id: supabaseUser.id, grades, updated_at: new Date().toISOString() },
         { onConflict: "user_id" }
@@ -633,7 +633,7 @@ function DraftHub({
   const removeCompiledPlayer = async (year: string, playerId: string) => {
     if (!supabaseUser) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (supabase.from("consensus_draft_cache" as any) as any)
+    await supabase.from("consensus_draft_cache")
       .delete()
       .eq("user_id", supabaseUser.id)
       .eq("year", parseInt(year, 10))
@@ -648,10 +648,10 @@ function DraftHub({
   const clearYear = async (year: number) => {
     if (!supabaseUser) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (supabase.from("consensus_draft_cache" as any) as any)
+    await supabase.from("consensus_draft_cache")
       .delete().eq("user_id", supabaseUser.id).eq("year", year);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (supabase.from("consensus_draft_meta" as any) as any)
+    await supabase.from("consensus_draft_meta")
       .delete().eq("user_id", supabaseUser.id).eq("year", year);
     setConsensusMeta((prev) => { const n = { ...prev }; delete n[String(year)]; return n; });
     setConsensusCache((prev) => { const n = { ...prev }; delete n[String(year)]; return n; });

@@ -106,7 +106,7 @@ export function useCrossLeagueMateIntel({
 
             rosterResults.filter(Boolean).forEach((ownerRoster: any) => {
               (ownerRoster.players || []).forEach((playerId: string) => {
-                const player = (players as any)?.[playerId];
+                const player = players[playerId];
                 if (!player || !["QB", "RB", "WR", "TE"].includes(player.position)) return;
                 ownedPlayerCounts[playerId] = (ownedPlayerCounts[playerId] || 0) + 1;
                 ownedPositionCounts[player.position] = (ownedPositionCounts[player.position] || 0) + 1;
@@ -137,7 +137,7 @@ export function useCrossLeagueMateIntel({
 
                   Object.entries(trade.adds || {}).forEach(([playerId, rosterId]: any) => {
                     if (Number(rosterId) !== Number(ownerRoster.roster_id)) return;
-                    const player = (players as any)?.[playerId];
+                    const player = players[playerId];
                     if (!player || !["QB", "RB", "WR", "TE"].includes(player.position)) return;
                     acquiredPositionCounts[player.position] = (acquiredPositionCounts[player.position] || 0) + 1;
                     acquiredPlayerCounts[String(playerId)] = (acquiredPlayerCounts[String(playerId)] || 0) + 1;
@@ -163,7 +163,7 @@ export function useCrossLeagueMateIntel({
               .map(([pos]) => pos);
             const repeatedPlayers = Object.entries(ownedPlayerCounts)
               .map(([playerId, count]) => {
-                const player = (players as any)?.[playerId];
+                const player = players[playerId];
                 return player ? { playerId, count, name: player.full_name, position: player.position } : null;
               })
               .filter(Boolean)
@@ -171,7 +171,7 @@ export function useCrossLeagueMateIntel({
               .slice(0, 3);
             const acquiredPlayers = Object.entries(acquiredPlayerCounts)
               .map(([playerId, count]) => {
-                const player = (players as any)?.[playerId];
+                const player = players[playerId];
                 return player ? { playerId, count, name: player.full_name, position: player.position } : null;
               })
               .filter(Boolean)
