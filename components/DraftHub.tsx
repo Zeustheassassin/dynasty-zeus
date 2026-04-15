@@ -785,11 +785,11 @@ function DraftHub({
             </div>
           )}
 
-          {/* Draft grid — centered when content fits; scrollable when it overflows */}
-          <div className="flex justify-center">
+          {/* Draft grid — fills available width on desktop; horizontally scrollable on mobile */}
+          <div className="w-full">
           <div
-            className="inline-grid min-w-max gap-y-2"
-            style={{ gridTemplateColumns: `repeat(${rosters.length}, minmax(9rem, 1fr))` }}
+            className="grid w-full gap-y-2 gap-x-1"
+            style={{ gridTemplateColumns: `repeat(${rosters.length}, minmax(4rem, 1fr))` }}
           >
             {/* Team headers */}
             {Array.from({ length: rosters.length }, (_, i) => i + 1).map((slot) => {

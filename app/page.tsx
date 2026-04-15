@@ -312,9 +312,6 @@ const [loadingShares, setLoadingShares] = useState(false);
 const [dashboardAlerts, setDashboardAlerts] = useState<AlertsCenterItem[]>([]);
 const [dismissedAlertIds, setDismissedAlertIds] = useState<string[]>([]);
 const [watchlistEntries, setWatchlistEntries] = useState<WatchlistEntry[]>([]);
-const [watchlistSearch, setWatchlistSearch] = useState("");
-const [watchThresholdUp, setWatchThresholdUp] = useState("250");
-const [watchThresholdDown, setWatchThresholdDown] = useState("250");
 const [loadingExternalAlerts, setLoadingExternalAlerts] = useState(false);
 const [leagueTransactions, setLeagueTransactions] = useState<any[]>([]);
 const [loadingTransactions, setLoadingTransactions] = useState(false);
@@ -438,56 +435,6 @@ const mergeDashboardAlerts = (incoming: AlertsCenterItem[]) => {
   });
 };
 
-const removeWatchlistEntry = async (playerId: string) => {
-  const nextEntries = watchlistEntries.filter((entry) => entry.player_id !== playerId);
-  setWatchlistEntries(nextEntries);
-  localStorage.setItem(watchlistStorageKey, JSON.stringify(nextEntries));
-  if (supabaseUser) {
-    await supabase
-      .from("watchlists")
-      .delete()
-      .eq("user_id", supabaseUser.id)
-      .eq("player_id", playerId);
-  }
-};
-
-const addWatchlistEntry = async (playerId: string) => {
-  const player = (players as any)?.[playerId];
-  if (!player?.full_name) return;
-
-  const thresholdUp = Math.max(25, Number(watchThresholdUp) || 250);
-  const thresholdDown = Math.max(25, Number(watchThresholdDown) || 250);
-  const nextEntry: WatchlistEntry = {
-    player_id: String(playerId),
-    label: player.full_name,
-    threshold_up: thresholdUp,
-    threshold_down: thresholdDown,
-    league_id: selectedLeague?.league_id || null,
-    updated_at: new Date().toISOString(),
-    created_at: new Date().toISOString(),
-  };
-  const nextEntries = [
-    nextEntry,
-    ...watchlistEntries.filter((entry) => entry.player_id !== nextEntry.player_id),
-  ].slice(0, 40);
-  setWatchlistEntries(nextEntries);
-  localStorage.setItem(watchlistStorageKey, JSON.stringify(nextEntries));
-  setWatchlistSearch("");
-  if (supabaseUser) {
-    await supabase.from("watchlists").upsert(
-      {
-        user_id: supabaseUser.id,
-        player_id: nextEntry.player_id,
-        label: nextEntry.label,
-        threshold_up: nextEntry.threshold_up,
-        threshold_down: nextEntry.threshold_down,
-        league_id: nextEntry.league_id,
-        updated_at: nextEntry.updated_at,
-      },
-      { onConflict: "user_id,player_id" }
-    );
-  }
-};
 
 const dismissDashboardAlert = useCallback(async (alertId: string) => {
   const sbUser = supabaseUserRef.current;
@@ -4808,18 +4755,6 @@ const getTeamSummary = () => {
     });
   }, [allLeagueData, players]);
 
-  const watchlistSearchResults = useMemo(() => {
-    const normalizedQuery = watchlistSearch.trim().toLowerCase();
-    if (!normalizedQuery || Object.keys(players || {}).length === 0) return [];
-    return Object.values(players as Record<string, any>)
-      .filter((player: any) =>
-        player?.full_name &&
-        ["QB", "RB", "WR", "TE"].includes(player.position) &&
-        player.full_name.toLowerCase().includes(normalizedQuery)
-      )
-      .sort((a: any, b: any) => (b.value || 0) - (a.value || 0))
-      .slice(0, 8);
-  }, [watchlistSearch, players]);
 
   // Injury report: all owned + watchlisted players, sorted worst status first
   const injuryReportPlayers = useMemo(() => {
@@ -5063,8 +4998,8 @@ const getTeamSummary = () => {
         if (historical && historical.value > 0) {
           const delta = Number(snapshot.value || 0) - Number(historical.value || 0);
           const watch = watchlistEntries.find((entry) => entry.player_id === playerId);
-          const upThreshold = Number(watch?.threshold_up || 300);
-          const downThreshold = Number(watch?.threshold_down || 300);
+          const upThreshold = Number(watch?.threshold_up || 250);
+          const downThreshold = Number(watch?.threshold_down || 250);
           if (delta >= upThreshold) {
             incomingAlerts.push({
               id: `market-up-${playerId}-${snapshot.value}`,
@@ -5272,7 +5207,7 @@ const getTeamSummary = () => {
           source: "external" as const,
           severity: (item.impact || item.playerNames?.length > 0) ? "medium" as const : "low" as const,
           title: item.title || "Player news",
-          detail: item.summary || item.matchedPlayers?.join(", ") || "External update matched one of your tracked names.",
+          detail: item.summary || item.playerNames?.join(", ") || "External update matched one of your tracked names.",
           actionable: !!item.playerNames?.length,
           timestamp: Number(new Date(item.published || Date.now())),
           link: item.link || null,
@@ -5315,7 +5250,7 @@ const getTeamSummary = () => {
           severity: weeksOut === 1 ? "medium" : "low",
           title: `${player.full_name} bye ${weeksOut === 1 ? "next week" : "in 2 weeks"}`,
           detail: `${player.full_name} (${player.team || "?"}) is on bye in Week ${byeWeek}. Plan your lineup.`,
-          actionable: true,
+          actionable: weeksOut === 1,
           timestamp: Date.now(),
           playerId,
           teamLabel: player.team || null,
@@ -5610,8 +5545,6 @@ const myPlayerSet = new Set<string>(roster?.players || []);
 
   <Dashboard
     username={user?.display_name || ""}
-    leagues={leagues}
-    onSelectLeague={loadRoster}
     onNavigate={setMainTab}
   />
 </>
@@ -5622,16 +5555,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             alerts={visibleDashboardAlerts}
             actionableAlerts={actionableDashboardAlerts}
             watchlistEntries={watchlistEntries}
-            watchlistSearch={watchlistSearch}
-            onWatchlistSearchChange={setWatchlistSearch}
-            watchlistSearchResults={watchlistSearchResults}
-            onAddWatchlist={addWatchlistEntry}
-            onRemoveWatchlist={removeWatchlistEntry}
             onDismissAlert={dismissDashboardAlert}
-            watchThresholdUp={watchThresholdUp}
-            watchThresholdDown={watchThresholdDown}
-            onWatchThresholdUpChange={setWatchThresholdUp}
-            onWatchThresholdDownChange={setWatchThresholdDown}
             loadingExternalAlerts={loadingExternalAlerts}
             leagueTransactions={leagueTransactions}
             loadingTransactions={loadingTransactions}

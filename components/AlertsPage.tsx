@@ -1,30 +1,9 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import type { AlertsCenterItem, WatchlistEntry } from "../lib/types";
 
-type DashboardAlert = {
-  id: string;
-  category: string;
-  source: string;
-  severity: "high" | "medium" | "low";
-  title: string;
-  detail: string;
-  link?: string | null;
-  teamLabel?: string | null;
-};
-
-type WatchlistEntry = {
-  player_id: string;
-  label: string;
-  threshold_up: number;
-  threshold_down: number;
-};
-
-type SearchPlayer = {
-  player_id: string;
-  full_name: string;
-  position: string;
-  team?: string;
-};
+// Canonical alert type — shared with page.tsx via lib/types.ts
+type DashboardAlert = AlertsCenterItem;
 
 type InjuryReportPlayer = {
   player: any;
@@ -38,16 +17,7 @@ type AlertsPageProps = {
   alerts: DashboardAlert[];
   actionableAlerts: DashboardAlert[];
   watchlistEntries: WatchlistEntry[];
-  watchlistSearch: string;
-  onWatchlistSearchChange: (value: string) => void;
-  watchlistSearchResults: SearchPlayer[];
-  onAddWatchlist: (playerId: string) => void;
-  onRemoveWatchlist: (playerId: string) => void;
   onDismissAlert: (alertId: string) => void;
-  watchThresholdUp: string;
-  watchThresholdDown: string;
-  onWatchThresholdUpChange: (value: string) => void;
-  onWatchThresholdDownChange: (value: string) => void;
   loadingExternalAlerts: boolean;
   leagueTransactions: any[];
   loadingTransactions: boolean;
@@ -246,16 +216,7 @@ export default function AlertsPage({
   alerts,
   actionableAlerts,
   watchlistEntries,
-  watchlistSearch,
-  onWatchlistSearchChange,
-  watchlistSearchResults,
-  onAddWatchlist,
-  onRemoveWatchlist,
   onDismissAlert,
-  watchThresholdUp,
-  watchThresholdDown,
-  onWatchThresholdUpChange,
-  onWatchThresholdDownChange,
   loadingExternalAlerts,
   leagueTransactions,
   loadingTransactions,
@@ -266,8 +227,49 @@ export default function AlertsPage({
   allLeagues,
   onNavigateToAttempts,
 }: AlertsPageProps) {
-  const [feedTab, setFeedTab] = useState<"alerts" | "transactions" | "waivers" | "injury">("alerts");
+  const [feedTab, setFeedTab] = useState<"alerts" | "transactions" | "waivers" | "injury" | "news" | "beat" | "byes" | "wire" | "movers">("alerts");
   const [expandedInjuryId, setExpandedInjuryId] = useState<string | null>(null);
+  const [newsItems, setNewsItems] = useState<any[]>([]);
+  const [loadingNews, setLoadingNews] = useState(false);
+  const [beatItems, setBeatItems] = useState<any[]>([]);
+  const [loadingBeat, setLoadingBeat] = useState(false);
+  const [wireItems, setWireItems] = useState<any[]>([]);
+  const [loadingWire, setLoadingWire] = useState(false);
+
+  useEffect(() => {
+    if (feedTab !== "news") return;
+    setLoadingNews(true);
+    fetch("/api/alerts/news")
+      .then((r) => r.json())
+      .then((data) => setNewsItems(data.items ?? []))
+      .catch(() => setNewsItems([]))
+      .finally(() => setLoadingNews(false));
+  }, [feedTab]);
+
+  useEffect(() => {
+    if (feedTab !== "beat") return;
+    setLoadingBeat(true);
+    const ownedNames = Object.values(players)
+      .filter((p: any) => p?.full_name)
+      .map((p: any) => p.full_name as string)
+      .slice(0, 100);
+    const q = ownedNames.join("|");
+    fetch(`/api/alerts/beat-reports${q ? `?players=${encodeURIComponent(q)}` : ""}`)
+      .then((r) => r.json())
+      .then((data) => setBeatItems(data.items ?? []))
+      .catch(() => setBeatItems([]))
+      .finally(() => setLoadingBeat(false));
+  }, [feedTab, players]);
+
+  useEffect(() => {
+    if (feedTab !== "wire") return;
+    setLoadingWire(true);
+    fetch("/api/alerts/beat-reports?filter=transactions")
+      .then((r) => r.json())
+      .then((data) => setWireItems(data.items ?? []))
+      .catch(() => setWireItems([]))
+      .finally(() => setLoadingWire(false));
+  }, [feedTab]);
 
   const tradeActivity = leagueTransactions.filter((tx) => tx.type === "trade");
   const waiverActivity = leagueTransactions.filter(
@@ -279,11 +281,42 @@ export default function AlertsPage({
     return /ir|pup|out|doubtful|questionable|suspended|inactive/.test(s);
   }).length;
 
+  // ── Bye week grouping ─────────────────────────────────────────
+  const byeGroups: Record<number, InjuryReportPlayer[]> = {};
+  if (currentNFLWeek > 0) {
+    injuryReportPlayers.forEach((entry) => {
+      const bye = Number(entry.player.bye_week || 0);
+      if (bye >= currentNFLWeek && bye <= currentNFLWeek + 2) {
+        if (!byeGroups[bye]) byeGroups[bye] = [];
+        byeGroups[bye].push(entry);
+      }
+    });
+  }
+  const byeWeekNumbers = Object.keys(byeGroups)
+    .map(Number)
+    .sort((a, b) => a - b);
+  const totalByePlayers = byeWeekNumbers.reduce((s, w) => s + byeGroups[w].length, 0);
+
+  const marketAlerts = alerts.filter(
+    (a) => (a.category === "market" || a.category === "watchlist") && (a.payload as any)?.direction
+  );
+  const gainers = [...marketAlerts]
+    .filter((a) => (a.payload as any)?.direction === "up")
+    .sort((a, b) => ((b.payload as any)?.delta ?? 0) - ((a.payload as any)?.delta ?? 0));
+  const fallers = [...marketAlerts]
+    .filter((a) => (a.payload as any)?.direction === "down")
+    .sort((a, b) => ((a.payload as any)?.delta ?? 0) - ((b.payload as any)?.delta ?? 0));
+
   const TABS = [
     { key: "alerts", label: `Alerts${alerts.length > 0 ? ` (${alerts.length})` : ""}` },
     { key: "transactions", label: `Trades${tradeActivity.length > 0 ? ` (${tradeActivity.length})` : ""}` },
     { key: "waivers", label: `Waivers${waiverActivity.length > 0 ? ` (${waiverActivity.length})` : ""}` },
     { key: "injury", label: `Injury Report${injuredCount > 0 ? ` (${injuredCount})` : ""}` },
+    { key: "news", label: "NFL News" },
+    { key: "beat", label: "Beat Reports" },
+    { key: "wire", label: "Transaction Wire" },
+    { key: "byes", label: `Bye Watch${totalByePlayers > 0 ? ` (${totalByePlayers})` : ""}` },
+    { key: "movers", label: `Value Movers${marketAlerts.length > 0 ? ` (${marketAlerts.length})` : ""}` },
   ] as const;
 
   return (
@@ -359,8 +392,8 @@ export default function AlertsPage({
         );
       })()}
 
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.85fr)]">
-        {/* ── Left: Feed tabs ── */}
+      <div>
+        {/* ── Feed tabs ── */}
         <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-5">
           {/* Tab toggle */}
           <div className="flex flex-wrap gap-1 bg-slate-800/60 rounded-xl p-1 mb-4">
@@ -486,6 +519,363 @@ export default function AlertsPage({
                   {waiverActivity.map((tx: any) => (
                     <TxCard key={`${tx.leagueId}-${tx.transaction_id}`} tx={tx} players={players} />
                   ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── NFL News tab ── */}
+          {feedTab === "news" && (
+            <div>
+              {loadingNews ? (
+                <p className="text-sm text-blue-400 py-4">Loading NFL news…</p>
+              ) : newsItems.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-6 text-sm text-slate-400">
+                  No news articles available right now. Check back soon.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {newsItems.map((item: any) => {
+                    const pub = item.published ? new Date(item.published) : null;
+                    const timeAgo = pub ? relTime(pub.getTime()) : null;
+                    return (
+                      <div
+                        key={item.id}
+                        className={`rounded-2xl border p-4 ${item.playerNames?.length > 0 ? "border-blue-800/50 bg-blue-950/10" : "border-slate-800 bg-slate-900/40"}`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            {item.playerNames?.length > 0 && (
+                              <div className="flex flex-wrap gap-1 mb-2">
+                                {item.playerNames.map((name: string) => (
+                                  <span key={name} className="text-[10px] font-semibold bg-blue-900/50 text-blue-300 border border-blue-700/50 px-2 py-0.5 rounded-lg">
+                                    {name}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                            <div className="text-sm font-semibold text-white leading-snug">{item.title}</div>
+                            {item.summary && (
+                              <div className="mt-1 text-xs text-slate-400 line-clamp-2">{item.summary}</div>
+                            )}
+                          </div>
+                          {timeAgo && (
+                            <span className="text-[11px] text-slate-500 shrink-0">{timeAgo}</span>
+                          )}
+                        </div>
+                        {item.link && (
+                          <a
+                            href={item.link}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="mt-2 inline-block text-xs text-blue-400 hover:text-blue-300 transition"
+                          >
+                            Read full article →
+                          </a>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Beat Reports tab ── */}
+          {feedTab === "beat" && (
+            <div>
+              {loadingBeat ? (
+                <p className="text-sm text-blue-400 py-4">Loading beat writer reports…</p>
+              ) : beatItems.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-6 text-sm text-slate-400">
+                  No beat writer reports available right now. Sources: Pro Football Talk, CBS Sports.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {/* Source legend */}
+                  <div className="flex items-center gap-3 text-[10px] text-slate-500 flex-wrap pb-1">
+                    <span className="flex items-center gap-1">
+                      <span className="inline-block w-2 h-2 rounded-full bg-orange-500" />
+                      Pro Football Talk
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="inline-block w-2 h-2 rounded-full bg-blue-500" />
+                      CBS Sports
+                    </span>
+                    <span className="ml-auto italic">Owned players highlighted</span>
+                  </div>
+
+                  {beatItems.map((item: any) => {
+                    const pub = item.published ? new Date(item.published) : null;
+                    const timeAgo = pub && !isNaN(pub.getTime()) ? relTime(pub.getTime()) : null;
+                    const isPFT = item.source === "pft";
+                    const borderCls = item.impact
+                      ? "border-amber-700/50 bg-amber-950/10"
+                      : "border-slate-800 bg-slate-900/40";
+                    const sourceDot = isPFT
+                      ? "bg-orange-500"
+                      : "bg-blue-500";
+                    return (
+                      <div key={item.id} className={`rounded-2xl border p-4 ${borderCls}`}>
+                        <div className="flex items-start gap-3">
+                          <span className={`mt-1.5 shrink-0 inline-block w-2 h-2 rounded-full ${sourceDot}`} title={item.sourceLabel} />
+                          <div className="min-w-0 flex-1">
+                            {/* Owned player badges */}
+                            {item.playerNames?.length > 0 && (
+                              <div className="flex flex-wrap gap-1 mb-1.5">
+                                {item.playerNames.map((name: string) => (
+                                  <span key={name} className="text-[10px] font-semibold bg-amber-900/50 text-amber-300 border border-amber-700/50 px-2 py-0.5 rounded-lg">
+                                    {name}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                            <div className="text-sm font-semibold text-white leading-snug">{item.title}</div>
+                            {item.summary && (
+                              <div className="mt-1 text-xs text-slate-400 line-clamp-3">{item.summary}</div>
+                            )}
+                            <div className="mt-2 flex items-center gap-3 flex-wrap">
+                              {item.author && (
+                                <span className="text-[10px] font-semibold text-slate-400">{item.author}</span>
+                              )}
+                              <span className="text-[10px] text-slate-600">{item.sourceLabel}</span>
+                              {timeAgo && (
+                                <span className="text-[10px] text-slate-600 ml-auto">{timeAgo}</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        {item.link && (
+                          <a
+                            href={item.link}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="mt-2 ml-5 inline-block text-xs text-blue-400 hover:text-blue-300 transition"
+                          >
+                            Read full article →
+                          </a>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Transaction Wire tab ── */}
+          {feedTab === "wire" && (
+            <div>
+              <p className="text-[11px] text-slate-500 mb-3">
+                Real NFL moves — cuts, signings, IR designations, extensions, and suspensions — filtered from beat writer feeds.
+              </p>
+              {loadingWire ? (
+                <p className="text-sm text-blue-400 py-4">Loading transaction wire…</p>
+              ) : wireItems.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-6 text-sm text-slate-400">
+                  No transactions detected right now. Check back during the season when roster moves are frequent.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {wireItems.map((item: any) => {
+                    const pub = item.published ? new Date(item.published) : null;
+                    const timeAgo = pub && !isNaN(pub.getTime()) ? relTime(pub.getTime()) : null;
+                    const isPFT = item.source === "pft";
+                    return (
+                      <div key={item.id} className="rounded-2xl border border-slate-800 bg-slate-900/40 p-3.5">
+                        <div className="flex items-start gap-2.5">
+                          <span
+                            className={`mt-1.5 shrink-0 w-2 h-2 rounded-full ${isPFT ? "bg-orange-500" : "bg-blue-500"}`}
+                            title={item.sourceLabel}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="text-sm font-semibold text-white leading-snug">{item.title}</div>
+                            {item.summary && (
+                              <div className="mt-0.5 text-xs text-slate-400 line-clamp-2">{item.summary}</div>
+                            )}
+                            <div className="mt-1.5 flex items-center gap-3 flex-wrap">
+                              {item.author && (
+                                <span className="text-[10px] font-semibold text-slate-400">{item.author}</span>
+                              )}
+                              <span className="text-[10px] text-slate-600">{item.sourceLabel}</span>
+                              {timeAgo && <span className="text-[10px] text-slate-600 ml-auto">{timeAgo}</span>}
+                            </div>
+                          </div>
+                        </div>
+                        {item.link && (
+                          <a
+                            href={item.link}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="mt-1.5 ml-[18px] inline-block text-xs text-blue-400 hover:text-blue-300 transition"
+                          >
+                            Full story →
+                          </a>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Bye Watch tab ── */}
+          {feedTab === "byes" && (
+            <div>
+              {currentNFLWeek === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-6 text-sm text-slate-400">
+                  Bye watch is active during the regular season. Check back in September.
+                </div>
+              ) : byeWeekNumbers.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-6 text-sm text-slate-400">
+                  No owned players on bye in the next 3 weeks. You&apos;re in the clear.
+                </div>
+              ) : (
+                <div className="space-y-5">
+                  {byeWeekNumbers.map((week) => {
+                    const offset = week - currentNFLWeek;
+                    const label =
+                      offset === 0 ? "This Week" :
+                      offset === 1 ? "Next Week" :
+                      "2 Weeks Out";
+                    const urgency =
+                      offset === 0 ? "border-red-700/60 bg-red-950/10 text-red-300" :
+                      offset === 1 ? "border-amber-700/60 bg-amber-950/10 text-amber-300" :
+                      "border-slate-700 bg-slate-900/40 text-slate-400";
+                    const players = byeGroups[week];
+                    // Group players by position for quick scanning
+                    const byPos: Record<string, InjuryReportPlayer[]> = {};
+                    players.forEach((entry) => {
+                      const pos = entry.player.position || "?";
+                      if (!byPos[pos]) byPos[pos] = [];
+                      byPos[pos].push(entry);
+                    });
+                    return (
+                      <div key={week} className={`rounded-2xl border p-4 ${urgency.split(" ").slice(0, 2).join(" ")}`}>
+                        <div className="flex items-center gap-3 mb-3">
+                          <span className={`text-[10px] font-bold uppercase tracking-[0.2em] ${urgency.split(" ")[2]}`}>
+                            {label}
+                          </span>
+                          <span className="text-sm font-semibold text-white">Week {week} Bye</span>
+                          <span className="ml-auto text-[11px] text-slate-500">{players.length} player{players.length !== 1 ? "s" : ""}</span>
+                        </div>
+                        <div className="space-y-2">
+                          {(["QB", "RB", "WR", "TE"] as const)
+                            .filter((pos) => byPos[pos]?.length > 0)
+                            .map((pos) => (
+                              <div key={pos} className="flex items-start gap-2">
+                                <span className={`text-[10px] font-bold w-7 shrink-0 pt-0.5 ${POS_COLOR[pos] ?? "text-slate-400"}`}>{pos}</span>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {byPos[pos].map(({ player, playerId, leagues, startingLeagues }) => (
+                                    <span
+                                      key={playerId}
+                                      className={`text-xs px-2.5 py-1 rounded-xl border ${
+                                        startingLeagues.length > 0
+                                          ? "border-emerald-700/60 bg-emerald-950/30 text-emerald-200"
+                                          : "border-slate-700 bg-slate-800/50 text-slate-300"
+                                      }`}
+                                      title={`${leagues.length} league${leagues.length !== 1 ? "s" : ""}${startingLeagues.length > 0 ? ` — starting in ${startingLeagues.length}` : ""}`}
+                                    >
+                                      {player.full_name}
+                                      {startingLeagues.length > 0 && (
+                                        <span className="ml-1 text-[9px] text-emerald-400">★{startingLeagues.length}</span>
+                                      )}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <p className="text-[11px] text-slate-600 text-center">
+                    Green highlight = currently in a starting lineup · ★ = number of leagues starting
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Value Movers tab ── */}
+          {feedTab === "movers" && (
+            <div>
+              {marketAlerts.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-6 text-sm text-slate-400">
+                  No significant value movement detected yet. Value movers appear once players cross your threshold in either direction.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Gainers */}
+                  <div>
+                    <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-emerald-400 mb-2">
+                      Gaining Value ({gainers.length})
+                    </div>
+                    <div className="space-y-2">
+                      {gainers.length === 0 ? (
+                        <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-4 text-xs text-slate-500">
+                          No gainers detected.
+                        </div>
+                      ) : gainers.map((alert) => {
+                        const delta = (alert.payload as any)?.delta as number ?? 0;
+                        return (
+                          <div key={alert.id} className="rounded-2xl border border-emerald-800/40 bg-emerald-950/10 p-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="min-w-0">
+                                <div className="text-sm font-semibold text-white truncate">{alert.title.replace(" is climbing", "")}</div>
+                                {alert.teamLabel && (
+                                  <div className="text-[10px] text-slate-500">{alert.teamLabel}</div>
+                                )}
+                              </div>
+                              <div className="shrink-0 text-right">
+                                <div className="text-sm font-bold text-emerald-400">+{delta.toLocaleString()}</div>
+                                <div className="text-[10px] text-slate-500">dynasty pts</div>
+                              </div>
+                            </div>
+                            {alert.severity === "high" && (
+                              <div className="mt-1.5 text-[10px] font-semibold text-emerald-300 uppercase tracking-wider">Major spike</div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Fallers */}
+                  <div>
+                    <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-red-400 mb-2">
+                      Losing Value ({fallers.length})
+                    </div>
+                    <div className="space-y-2">
+                      {fallers.length === 0 ? (
+                        <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-4 text-xs text-slate-500">
+                          No fallers detected.
+                        </div>
+                      ) : fallers.map((alert) => {
+                        const delta = Math.abs((alert.payload as any)?.delta as number ?? 0);
+                        return (
+                          <div key={alert.id} className="rounded-2xl border border-red-800/40 bg-red-950/10 p-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="min-w-0">
+                                <div className="text-sm font-semibold text-white truncate">{alert.title.replace(" is falling", "")}</div>
+                                {alert.teamLabel && (
+                                  <div className="text-[10px] text-slate-500">{alert.teamLabel}</div>
+                                )}
+                              </div>
+                              <div className="shrink-0 text-right">
+                                <div className="text-sm font-bold text-red-400">-{delta.toLocaleString()}</div>
+                                <div className="text-[10px] text-slate-500">dynasty pts</div>
+                              </div>
+                            </div>
+                            {alert.severity === "high" && (
+                              <div className="mt-1.5 text-[10px] font-semibold text-red-300 uppercase tracking-wider">Major drop</div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -620,98 +1010,6 @@ export default function AlertsPage({
           )}
         </div>
 
-        {/* ── Right: Watchlists ── */}
-        <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-5">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">
-            Watchlists
-          </div>
-          <h2 className="mt-2 text-2xl font-semibold text-white">Track your swings</h2>
-          <p className="mt-1 text-sm text-slate-400">
-            Add players and alert thresholds for market spikes, drops, and matching news.
-          </p>
-
-          <div className="mt-4 grid grid-cols-2 gap-3">
-            <label className="rounded-2xl border border-slate-800 bg-slate-950/60 p-3">
-              <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Spike threshold</div>
-              <input
-                value={watchThresholdUp}
-                onChange={(e) => onWatchThresholdUpChange(e.target.value)}
-                className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-              />
-              <div className="mt-1 text-[10px] text-slate-600">dynasty pts</div>
-            </label>
-            <label className="rounded-2xl border border-slate-800 bg-slate-950/60 p-3">
-              <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Drop threshold</div>
-              <input
-                value={watchThresholdDown}
-                onChange={(e) => onWatchThresholdDownChange(e.target.value)}
-                className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-              />
-              <div className="mt-1 text-[10px] text-slate-600">dynasty pts</div>
-            </label>
-          </div>
-
-          <input
-            className="mt-4 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500"
-            placeholder="Search a player to watch..."
-            value={watchlistSearch}
-            onChange={(e) => onWatchlistSearchChange(e.target.value)}
-          />
-
-          {watchlistSearchResults.length > 0 && (
-            <div className="mt-3 space-y-2">
-              {watchlistSearchResults.map((player) => (
-                <div
-                  key={player.player_id}
-                  className="flex items-center justify-between gap-3 rounded-2xl border border-slate-800 bg-slate-950/60 px-3 py-2"
-                >
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-medium text-white">{player.full_name}</div>
-                    <div className="text-xs text-slate-400">
-                      {player.position}{player.team ? ` · ${player.team}` : ""}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => onAddWatchlist(String(player.player_id))}
-                    className="rounded-full border border-blue-700 bg-blue-950/40 px-3 py-1.5 text-xs font-semibold text-blue-200 transition hover:border-blue-500"
-                  >
-                    Watch
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="mt-4 space-y-2">
-            {watchlistEntries.map((entry) => (
-              <div
-                key={entry.player_id}
-                className="flex items-center justify-between gap-3 rounded-2xl border border-slate-800 bg-slate-950/60 px-3 py-3"
-              >
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium text-white">{entry.label}</div>
-                  <div className="text-xs text-slate-400">
-                    +{entry.threshold_up} / {entry.threshold_down}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => onRemoveWatchlist(entry.player_id)}
-                  className="rounded-full border border-slate-700 px-3 py-1.5 text-xs text-slate-300 transition hover:border-red-500 hover:text-red-300"
-                >
-                  Remove
-                </button>
-              </div>
-            ))}
-
-            {watchlistEntries.length === 0 && (
-              <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-950/40 p-4 text-sm text-slate-400">
-                No watchlist entries yet. Add a player above and the alert feed will start tracking them.
-              </div>
-            )}
-          </div>
-        </div>
       </div>
     </div>
   );

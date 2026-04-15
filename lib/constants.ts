@@ -54,6 +54,16 @@ export const ROOKIE_BOARD_REVALIDATE_S = 21600;
 /** ESPN news — refreshed every 30 seconds (near-realtime) */
 export const ESPN_NEWS_REVALIDATE_S = 30;
 
+// ── Beat Writer RSS Feeds ─────────────────────────────────────
+/** Pro Football Talk (NBC Sports) — Mike Florio, Charean Williams, Josh Alper */
+export const PFT_RSS_URL = "https://www.nbcsports.com/profootballtalk.rss";
+
+/** CBS Sports NFL news feed */
+export const CBS_NFL_RSS_URL = "https://www.cbssports.com/rss/headlines/nfl/";
+
+/** Beat writer feeds revalidate every 5 minutes */
+export const BEAT_REPORTS_REVALIDATE_S = 300;
+
 // ── Year / season config ──────────────────────────────────────
 /** How many past years of payment tracking to include (0 = current year only, auto-advances each Jan 1) */
 export const PAYMENT_YEARS_PAST = 0;

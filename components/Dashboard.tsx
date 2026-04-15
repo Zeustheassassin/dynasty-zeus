@@ -1,15 +1,7 @@
-import { useState, useMemo, useEffect } from "react";
 import { motion } from "framer-motion";
-
-type LeagueCard = {
-  league_id: string;
-  name: string;
-};
 
 type DashboardProps = {
   username: string;
-  leagues: LeagueCard[];
-  onSelectLeague: (league: LeagueCard) => void;
   onNavigate: (tab: string) => void;
 };
 
@@ -66,26 +58,9 @@ const navCardRows = [
 
 export default function Dashboard({
   username,
-  leagues,
-  onSelectLeague,
   onNavigate,
 }: DashboardProps) {
   const isConnected = !!username;
-  const [search, setSearch] = useState("");
-  const [recentLeagues, setRecentLeagues] = useState<LeagueCard[]>([]);
-
-  useEffect(() => {
-    const stored = localStorage.getItem("recentLeagues");
-    if (stored) {
-      setRecentLeagues(JSON.parse(stored));
-    }
-  }, []);
-
-  const filteredLeagues = useMemo(() => {
-    return leagues
-      .filter((l) => l.name.toLowerCase().includes(search.toLowerCase()))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [search, leagues]);
 
   return (
     <div className="min-h-screen bg-slate-950 p-6 text-white">
@@ -143,65 +118,9 @@ export default function Dashboard({
         ))}
       </div>
 
-      {isConnected && (
-        <div className="mb-12">
-          <h2 className="mb-4 text-xl font-semibold text-slate-300">Recently Viewed Leagues</h2>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {recentLeagues.map((league) => (
-              <motion.div
-                key={league.league_id}
-                whileHover={{ scale: 1.02 }}
-                onClick={() => {
-                  onSelectLeague(league);
-                  onNavigate("LEAGUES");
-                }}
-                className="cursor-pointer rounded-2xl border border-slate-800 bg-slate-900 p-4 hover:bg-slate-800"
-              >
-                <p className="font-medium">{league.name}</p>
-              </motion.div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {!isConnected && (
         <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 text-sm text-slate-400">
           Sign in and connect Sleeper to activate your league workspace and alerts page.
-        </div>
-      )}
-
-      {isConnected && (
-        <div className="rounded-3xl border border-slate-800 bg-slate-900/60 p-5">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">League Search</div>
-              <div className="mt-1 text-sm text-slate-400">Jump straight into a league from the dashboard.</div>
-            </div>
-            <div className="text-xs text-slate-500">{filteredLeagues.length} matches</div>
-          </div>
-          <input
-            className="mt-4 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white focus:border-blue-500 focus:outline-none"
-            placeholder="Search leagues..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          {search && (
-            <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
-              {filteredLeagues.slice(0, 6).map((league) => (
-                <button
-                  key={league.league_id}
-                  type="button"
-                  onClick={() => {
-                    onSelectLeague(league);
-                    onNavigate("LEAGUES");
-                  }}
-                  className="rounded-2xl border border-slate-800 bg-slate-950/70 px-4 py-3 text-left text-sm text-white transition hover:border-blue-500"
-                >
-                  {league.name}
-                </button>
-              ))}
-            </div>
-          )}
         </div>
       )}
     </div>

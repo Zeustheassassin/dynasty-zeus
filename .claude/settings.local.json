@@ -51,7 +51,8 @@
       "Bash(awk 'NR>=2350 && NR<=2558' app/page.tsx)",
       "Bash(npm run:*)",
       "Bash(wc -l \"c:/Users/bstefely.NPCSEALANTS/dynastyzeus-app/components/\"*.tsx)",
-      "Bash(grep -v \"^\\\\s*//\")"
+      "Bash(grep -v \"^\\\\s*//\")",
+      "WebFetch(domain:images.unsplash.com)"
     ]
   }
 }
