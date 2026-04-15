@@ -1,8 +1,10 @@
 import type { NextRequest } from "next/server";
-import { PFT_RSS_URL, CBS_NFL_RSS_URL, BEAT_REPORTS_REVALIDATE_S } from "../../../../lib/constants";
+import { PFT_RSS_URL, CBS_NFL_RSS_URL } from "../../../../lib/constants";
 import { checkRateLimit } from "../../../../lib/rateLimit";
 
-export const revalidate = BEAT_REPORTS_REVALIDATE_S;
+// Must be a static literal — Next.js cannot statically analyze variable imports.
+// Keep in sync with BEAT_REPORTS_REVALIDATE_S in lib/constants.ts (currently 300).
+export const revalidate = 300;
 
 export type BeatReportItem = {
   id: string;
@@ -104,11 +106,11 @@ export async function GET(request: NextRequest) {
 
   const fetches = await Promise.allSettled([
     fetch(PFT_RSS_URL, {
-      next: { revalidate: BEAT_REPORTS_REVALIDATE_S },
+      next: { revalidate: 300 },
       headers: { Accept: "application/rss+xml, application/xml, text/xml, */*" },
     }),
     fetch(CBS_NFL_RSS_URL, {
-      next: { revalidate: BEAT_REPORTS_REVALIDATE_S },
+      next: { revalidate: 300 },
       headers: { Accept: "application/rss+xml, application/xml, text/xml, */*" },
     }),
   ]);
