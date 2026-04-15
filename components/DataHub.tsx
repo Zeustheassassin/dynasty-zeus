@@ -1,8 +1,9 @@
 "use client";
 import React from "react";
 import { usePlayers } from "../lib/PlayersContext";
+import { useLeague } from "../lib/LeagueContext";
 import type {
-  SleeperLeague, SleeperRoster, SleeperUser, AugmentedPick, ProjectionRow, LeagueMateStatEntry, DynamicPickValue, HistoricalSnapshot,
+  SleeperLeague, SleeperUser, SleeperPlayer, AugmentedPick, ProjectionRow, LeagueMateStatEntry, DynamicPickValue, HistoricalSnapshot,
 } from "../lib/types";
 
 // ── Module-level constants (mirrors page.tsx) ──────────────────────────────
@@ -35,6 +36,11 @@ interface ShareEntry { count: number; leagues: string[]; starters: string[] }
 
 interface ExposureEntry { playerId: string; count: number; percent: number }
 interface ExposureData { players: ExposureEntry[]; leagueCount: number }
+
+interface CrossLeaguePick { season: string; round: number; roster_id: number; owner_id: number }
+interface FetchedRoster { owner_id?: string | null; roster_id?: number; players?: string[]; taxi?: string[] }
+interface FetchedUser { user_id?: string; display_name?: string }
+interface ExternalLeague { settings?: { best_ball?: number } }
 
 // ── Props ──────────────────────────────────────────────────────────────────
 type DataHubTabId = "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "PICK_VALUES" | "LEAGUEMATES" | "DEPTH_CHARTS" | "BUY_LOW";
@@ -73,9 +79,6 @@ interface DataHubProps {
 
   // Pick values tab
   allPicks: AugmentedPick[];
-  selectedLeague: SleeperLeague | null;
-  rosters: SleeperRoster[];
-  users: Record<string, string>;
   selectedLeagueDynamicPickValues: Record<string, DynamicPickValue>;
 
   // League mate stats tab
@@ -145,7 +148,7 @@ function DataHub({
   projectionData, setProjectionData, projectionPosFilter, setProjectionPosFilter,
   projectionWeek, setProjectionWeek, setProjectionLoaded, loadProjections,
   projectionSeasonYear, projectionSourceStatus, loadingProjections, projectionUsesSeasonFallback,
-  allPicks, selectedLeague, rosters, users, selectedLeagueDynamicPickValues,
+  allPicks, selectedLeagueDynamicPickValues,
   leagues, user,
   leagueMateStats, setLeagueMateStats, leagueMateStatsLoaded, setLeagueMateStatsLoaded,
   loadingLeagueMateStats, setLoadingLeagueMateStats,
@@ -154,12 +157,13 @@ function DataHub({
   historicalSnapshot, onSaveSnapshot,
 }: DataHubProps) {
   const players = usePlayers();
+  const { selectedLeague, rosters, users } = useLeague();
 
   // ── Local UI state ─────────────────────────────────────────────────────────
   const [rankView, setRankView] = React.useState<"DYNASTY" | "REDRAFT" | "COMPARE">("DYNASTY");
   const [rankSearch, setRankSearch] = React.useState("");
   const [projRosterOnly, setProjRosterOnly] = React.useState(false);
-  const [crossLeaguePicks, setCrossLeaguePicks] = React.useState<{leagueName: string; picks: any[]}[]>([]);
+  const [crossLeaguePicks, setCrossLeaguePicks] = React.useState<{leagueName: string; picks: CrossLeaguePick[]}[]>([]);
   const [loadingCrossLeaguePicks, setLoadingCrossLeaguePicks] = React.useState(false);
   const [crossLeaguePicksLoaded, setCrossLeaguePicksLoaded] = React.useState(false);
   const [expandedMateId, setExpandedMateId] = React.useState<string | null>(null);
@@ -179,12 +183,12 @@ function DataHub({
     setLoadingLeagueMateStats(true);
     try {
       const myLeagueData = await Promise.all(
-        leagues.map(async (league: any) => {
+        leagues.map(async (league) => {
           const [rostersRes, leagueUsersRes] = await Promise.all([
             fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`).then(r => r.json()).catch(() => []),
             fetch(`https://api.sleeper.app/v1/league/${league.league_id}/users`).then(r => r.json()).catch(() => []),
           ]);
-          return { league, rosters: rostersRes, leagueUsers: leagueUsersRes };
+          return { league, rosters: rostersRes as FetchedRoster[], leagueUsers: leagueUsersRes as FetchedUser[] };
         })
       );
 
@@ -193,10 +197,10 @@ function DataHub({
       const allOwnerIds = new Set<string>();
 
       myLeagueData.forEach(({ rosters: lr, leagueUsers }) => {
-        (leagueUsers as any[]).forEach((u: any) => {
+        leagueUsers.forEach((u) => {
           if (u?.user_id && u?.display_name) displayNameMap[u.user_id] = u.display_name;
         });
-        (lr as any[]).forEach((r: any) => {
+        lr.forEach((r) => {
           if (!r.owner_id || r.owner_id === user.user_id) return;
           allOwnerIds.add(r.owner_id);
           sharedLeaguesCount[r.owner_id] = (sharedLeaguesCount[r.owner_id] || 0) + 1;
@@ -204,7 +208,7 @@ function DataHub({
       });
 
       const ownerStats = await Promise.all([...allOwnerIds].map(async (ownerId) => {
-        const theirLeagues: any[] = await fetch(`https://api.sleeper.app/v1/user/${ownerId}/leagues/nfl/${CURRENT_YEAR}`)
+        const theirLeagues: ExternalLeague[] = await fetch(`https://api.sleeper.app/v1/user/${ownerId}/leagues/nfl/${CURRENT_YEAR}`)
           .then(r => r.json())
           .then(d => Array.isArray(d) ? d : [])
           .catch(() => []);
@@ -212,8 +216,8 @@ function DataHub({
         return {
           userId: ownerId,
           displayName: displayNameMap[ownerId] || users[ownerId] || ownerId,
-          totalLeagues: theirLeagues.filter((l: any) => (l.settings?.best_ball ?? 0) === 0).length,
-          bestBallLeagues: theirLeagues.filter((l: any) => (l.settings?.best_ball ?? 0) !== 0).length,
+          totalLeagues: theirLeagues.filter((l) => (l.settings?.best_ball ?? 0) === 0).length,
+          bestBallLeagues: theirLeagues.filter((l) => (l.settings?.best_ball ?? 0) !== 0).length,
           sharedLeagues: sharedLeaguesCount[ownerId] || 0,
         };
       }));
@@ -231,22 +235,23 @@ function DataHub({
     setLoadingCrossLeaguePicks(true);
     try {
       const results = await Promise.all(
-        leagues.map(async (league: any) => {
+        leagues.map(async (league) => {
           const [rostersData, tradedPicksData] = await Promise.all([
             fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`).then(r => r.json()).catch(() => []),
             fetch(`https://api.sleeper.app/v1/league/${league.league_id}/traded_picks`).then(r => r.json()).catch(() => []),
           ]);
-          const myRoster = (rostersData as any[]).find((r: any) => r.owner_id === user.user_id);
+          const fetchedRosters = rostersData as FetchedRoster[];
+          const myRoster = fetchedRosters.find((r) => r.owner_id === user.user_id);
           if (!myRoster) return null;
-          const tempPicks: any[] = [];
+          const tempPicks: CrossLeaguePick[] = [];
           PICK_YEARS.forEach((year) => {
-            (rostersData as any[]).forEach((r: any) => {
+            fetchedRosters.forEach((r) => {
               PICK_ROUNDS.forEach((round) => {
-                tempPicks.push({ season: year, round, roster_id: r.roster_id, owner_id: r.roster_id });
+                tempPicks.push({ season: year, round, roster_id: r.roster_id ?? 0, owner_id: r.roster_id ?? 0 });
               });
             });
           });
-          (tradedPicksData as any[]).forEach((tp: any) => {
+          (tradedPicksData as CrossLeaguePick[]).forEach((tp) => {
             const match = tempPicks.find(p => p.season === tp.season && p.round === tp.round && p.roster_id === tp.roster_id);
             if (match) match.owner_id = tp.owner_id;
           });
@@ -254,7 +259,7 @@ function DataHub({
           return myPicks.length > 0 ? { leagueName: league.name, picks: myPicks } : null;
         })
       );
-      setCrossLeaguePicks(results.filter(Boolean) as any[]);
+      setCrossLeaguePicks(results.filter((r): r is { leagueName: string; picks: CrossLeaguePick[] } => r !== null));
       setCrossLeaguePicksLoaded(true);
     } finally {
       setLoadingCrossLeaguePicks(false);
@@ -295,12 +300,12 @@ function DataHub({
       {dataHubTab === "RANKINGS" && (() => {
         const fcVal = (id: string) => calcFcValues[id] ?? 0;
         const rdVal = (id: string) => redraftValues[id] ?? 0;
-        const ranked = Object.values(players as Record<string, any>)
-          .filter((p: any) => ["QB", "RB", "WR", "TE"].includes(p.position))
-          .filter((p: any) => rankView === "REDRAFT" ? rdVal(p.player_id) > 0 : fcVal(p.player_id) > 0)
-          .filter((p: any) => dynastyRankPos === "ALL" || p.position === dynastyRankPos)
-          .filter((p: any) => !rankSearch.trim() || p.full_name?.toLowerCase().includes(rankSearch.trim().toLowerCase()))
-          .sort((a: any, b: any) => rankView === "REDRAFT"
+        const ranked = Object.values(players)
+          .filter((p) => ["QB", "RB", "WR", "TE"].includes(p.position))
+          .filter((p) => rankView === "REDRAFT" ? rdVal(p.player_id) > 0 : fcVal(p.player_id) > 0)
+          .filter((p) => dynastyRankPos === "ALL" || p.position === dynastyRankPos)
+          .filter((p) => !rankSearch.trim() || p.full_name?.toLowerCase().includes(rankSearch.trim().toLowerCase()))
+          .sort((a, b) => rankView === "REDRAFT"
             ? rdVal(b.player_id) - rdVal(a.player_id)
             : fcVal(b.player_id) - fcVal(a.player_id));
 
@@ -359,7 +364,7 @@ function DataHub({
               <span className="w-4 shrink-0" />
             </div>
             <div className="space-y-0.5">
-              {ranked.map((p: any, idx: number) => {
+              {ranked.map((p, idx) => {
                 const disp = playerDispositions[p.player_id] ?? { sell: "Neutral", buy: "Neutral" };
                 const dyn = fcVal(p.player_id);
                 const red = rdVal(p.player_id);
@@ -380,7 +385,7 @@ function DataHub({
                       <span className={isOwned ? "text-blue-200" : "text-white"}>{p.full_name}</span>
                       {injuryBadge(p.injury_status)}
                     </span>
-                    <span className={`text-[10px] font-mono w-7 text-center shrink-0 ${ageColor(p.age, p.position)}`}>{p.age || "—"}</span>
+                    <span className={`text-[10px] font-mono w-7 text-center shrink-0 ${ageColor(p.age ?? undefined, p.position)}`}>{p.age || "—"}</span>
                     {rankView === "COMPARE" ? (
                       <>
                         <span className="text-[10px] text-gray-300 font-mono w-14 text-right shrink-0">{dyn.toLocaleString()}</span>
@@ -534,16 +539,16 @@ function DataHub({
         // ── Trade suggestion computation ──────────────────────────────────────
         // Build an unfiltered trend map (all positions, fixed 5%/20% thresholds)
         const trendMap = new Map<string, number>();
-        Object.entries(snap.players).forEach(([pid, snapData]: [string, any]) => {
+        Object.entries(snap.players).forEach(([pid, snapData]) => {
           const cv = calcFcValues[pid] ?? 0;
           const sv = Number(snapData.value ?? 0);
           if (sv > 0 && cv > 0) trendMap.set(pid, ((cv - sv) / sv) * 100);
         });
 
-        const myRoster = (rosters as any[]).find((r: any) => r.owner_id === user?.user_id);
+        const myRoster = rosters.find((r) => r.owner_id === user?.user_id);
         const myPlayerSet = new Set<string>(myRoster?.players ?? []);
-        const partnerRosters = (rosters as any[]).filter(
-          (r: any) => r.owner_id && r.owner_id !== user?.user_id
+        const partnerRosters = rosters.filter(
+          (r) => r.owner_id && r.owner_id !== user?.user_id
         );
 
         const MIN_TRADE_VAL = 1500;
@@ -585,8 +590,8 @@ function DataHub({
               for (const theirs of partnerCands) {
                 const ratio = mine.val / theirs.val;
                 if (ratio < RATIO_MIN || ratio > RATIO_MAX) continue;
-                const myP = (players as any)[mine.id];
-                const theirP = (players as any)[theirs.id];
+                const myP = players[mine.id];
+                const theirP = players[theirs.id];
                 if (!myP || !theirP) continue;
                 usedGiveA.add(mine.id);
                 usedRecvA.add(theirs.id);
@@ -595,10 +600,10 @@ function DataHub({
                   giveId: mine.id, receiveId: theirs.id,
                   giveVal: mine.val, receiveVal: theirs.val,
                   givePct: mine.pct, receivePct: theirs.pct,
-                  partnerName: (users as any)[partnerRoster.owner_id] || `Team ${partnerRoster.roster_id}`,
+                  partnerName: users[partnerRoster.owner_id] || `Team ${partnerRoster.roster_id}`,
                   givePos: myP.position, receivePos: theirP.position,
-                  giveAge: myP.age, receiveAge: theirP.age,
-                  giveTeam: myP.team, receiveTeam: theirP.team,
+                  giveAge: myP.age ?? undefined, receiveAge: theirP.age ?? undefined,
+                  giveTeam: myP.team ?? undefined, receiveTeam: theirP.team ?? undefined,
                 });
                 break;
               }
@@ -636,8 +641,8 @@ function DataHub({
                   return ratio >= RATIO_MIN && ratio <= RATIO_MAX;
                 });
               if (!giveCand) continue;
-              const myP = (players as any)[giveCand.id];
-              const theirP = (players as any)[theirs.id];
+              const myP = players[giveCand.id];
+              const theirP = players[theirs.id];
               if (!myP || !theirP) continue;
               usedGiveB.add(giveCand.id);
               usedRecvB.add(theirs.id);
@@ -646,10 +651,10 @@ function DataHub({
                 giveId: giveCand.id, receiveId: theirs.id,
                 giveVal: giveCand.val, receiveVal: theirs.val,
                 givePct: giveCand.pct, receivePct: theirs.pct,
-                partnerName: (users as any)[partnerRoster.owner_id] || `Team ${partnerRoster.roster_id}`,
+                partnerName: users[partnerRoster.owner_id] || `Team ${partnerRoster.roster_id}`,
                 givePos: myP.position, receivePos: theirP.position,
-                giveAge: myP.age, receiveAge: theirP.age,
-                giveTeam: myP.team, receiveTeam: theirP.team,
+                giveAge: myP.age ?? undefined, receiveAge: theirP.age ?? undefined,
+                giveTeam: myP.team ?? undefined, receiveTeam: theirP.team ?? undefined,
               });
             }
           }
@@ -657,8 +662,8 @@ function DataHub({
 
         const TradeSuggCard = ({ t }: { t: TradeSugg }) => {
           const isSell = t.type === "sell-window";
-          const giveP = (players as any)[t.giveId];
-          const receiveP = (players as any)[t.receiveId];
+          const giveP = players[t.giveId];
+          const receiveP = players[t.receiveId];
           const lastName = (full: string | undefined) => full?.split(" ").slice(1).join(" ") || full || "";
           return (
             <div className={`rounded-2xl border px-4 py-3 transition ${isSell ? "bg-red-950/10 border-red-900/30 hover:bg-red-950/20" : "bg-green-950/10 border-green-900/30 hover:bg-green-950/20"}`}>
@@ -863,7 +868,7 @@ function DataHub({
 
       {/* ── PLAYER PROJECTIONS ── */}
       {dataHubTab === "PROJECTIONS" && (() => {
-        const myRoster = (rosters as any[]).find((r: any) => r.owner_id === user?.user_id);
+        const myRoster = rosters.find((r) => r.owner_id === user?.user_id);
         const myPlayerSet = new Set<string>(myRoster?.players ?? []);
         const visible = projectionData
           .filter((p) => projectionPosFilter === "ALL" || p.position === projectionPosFilter)
@@ -1083,13 +1088,13 @@ function DataHub({
                 <p className="text-sm text-gray-500">No future picks found across your leagues.</p>
               ) : (
                 <div className="space-y-3">
-                  {crossLeaguePicks.map((entry: any) => (
+                  {crossLeaguePicks.map((entry) => (
                     <div key={entry.leagueName} className="rounded-xl border border-gray-800 bg-gray-900/60 p-3">
                       <div className="text-xs font-semibold text-gray-300 mb-2">{entry.leagueName}</div>
                       <div className="flex flex-wrap gap-1.5">
                         {[...entry.picks]
-                          .sort((a: any, b: any) => a.season !== b.season ? a.season - b.season : a.round - b.round)
-                          .map((pick: any, i: number) => {
+                          .sort((a, b) => a.season !== b.season ? Number(a.season) - Number(b.season) : a.round - b.round)
+                          .map((pick, i) => {
                             const yi = PICK_YEARS.indexOf(String(pick.season));
                             const stdVal = yi >= 0 ? (STANDARD_PICK_VALUES[`${pick.round}-${yi}`] ?? null) : null;
                             return (
@@ -1144,8 +1149,8 @@ function DataHub({
           );
         }
 
-        const pickRows = (allPicks as any[])
-          .map((pick: any) => {
+        const pickRows = allPicks
+          .map((pick) => {
             const key = `${pick.season}-${pick.round}-${pick.roster_id}`;
             const dynamic = selectedLeagueDynamicPickValues[key];
             const ownerName = users[pick.owner_id] || `Team ${pick.owner_id}`;
@@ -1155,7 +1160,7 @@ function DataHub({
               : `${pick.season} Rd ${pick.round}`;
             return { ...pick, key, ownerName, issuerName, pickLabel, dynamic };
           })
-          .sort((a: any, b: any) => (b.dynamic?.expectedValue ?? 0) - (a.dynamic?.expectedValue ?? 0));
+          .sort((a, b) => (b.dynamic?.expectedValue ?? 0) - (a.dynamic?.expectedValue ?? 0));
 
         return (
           <div className="space-y-4">
@@ -1167,7 +1172,7 @@ function DataHub({
             </div>
 
             <div className="space-y-2">
-              {pickRows.map((pick: any) => {
+              {pickRows.map((pick) => {
                 const dynamic = pick.dynamic;
                 if (!dynamic) return null;
                 return (
@@ -1210,7 +1215,7 @@ function DataHub({
                         <div className="text-[10px] uppercase tracking-wide text-gray-500">Most Likely Slots</div>
                         <div className="mt-1 text-xs text-gray-300">
                           {(dynamic.likelySlots || []).length > 0
-                            ? dynamic.likelySlots.map((slotRow: any) => `${slotRow.slot} (${Math.round((slotRow.probability || 0) * 100)}%)`).join(" | ")
+                            ? dynamic.likelySlots.map((slotRow) => `${slotRow.slot} (${Math.round((slotRow.probability || 0) * 100)}%)`).join(" | ")
                             : "No slot spread"}
                         </div>
                       </div>
@@ -1386,7 +1391,7 @@ function DataHub({
       {dataHubTab === "DEPTH_CHARTS" && (() => {
         // Build owned player set across all rosters in the selected league (or all leagues)
         const ownedIds = new Set<string>(
-          rosters.flatMap((r: any) => [
+          rosters.flatMap((r) => [
             ...(r.players ?? []),
             ...(r.taxi ?? []),
           ])
@@ -1396,8 +1401,8 @@ function DataHub({
         // Include every player with a team assignment — never gate on status or
         // depth_chart_order being populated, as Sleeper frequently leaves those null
         // for rostered players (e.g. practice squad, IR, late additions).
-        const teamMap = new Map<string, Record<string, any[]>>();
-        Object.values(players as Record<string, any>).forEach((p: any) => {
+        const teamMap = new Map<string, Record<string, SleeperPlayer[]>>();
+        Object.values(players).forEach((p) => {
           if (!p.team || !["QB", "RB", "WR", "TE"].includes(p.position)) return;
           // Only skip truly non-roster entries
           const status = (p.status ?? "").toLowerCase();
@@ -1410,7 +1415,7 @@ function DataHub({
         //   2. Fallback: dynasty value descending (higher value = more likely the starter)
         teamMap.forEach((posMap) => {
           Object.keys(posMap).forEach((pos) => {
-            posMap[pos].sort((a: any, b: any) => {
+            posMap[pos].sort((a, b) => {
               const oa = a.depth_chart_order ?? null;
               const ob = b.depth_chart_order ?? null;
               if (oa !== null && ob !== null) return oa - ob;
@@ -1431,7 +1436,7 @@ function DataHub({
           }
           if (depthShowOwnedOnly) {
             const posGroup = teamMap.get(team)?.[depthPos] ?? [];
-            return posGroup.some((p: any) => ownedIds.has(p.player_id));
+            return posGroup.some((p) => ownedIds.has(p.player_id));
           }
           return true;
         });
@@ -1440,9 +1445,9 @@ function DataHub({
         // index 0 = Starter, index 1 = Handcuff — BUT only if value < 1400.
         // At 1400+ the player has standalone dynasty value and is not a true handcuff.
         const HC_VALUE_THRESHOLD = 1400;
-        const getDepthRole = (team: string, player: any): "STARTER" | "HANDCUFF" | null => {
+        const getDepthRole = (team: string, player: SleeperPlayer): "STARTER" | "HANDCUFF" | null => {
           const group = teamMap.get(team)?.[depthPos] ?? [];
-          const idx = group.findIndex((p: any) => p.player_id === player.player_id);
+          const idx = group.findIndex((p) => p.player_id === player.player_id);
           if (idx === 0) return "STARTER";
           const val = calcFcValues[player.player_id] ?? 0;
           if (idx === 1 && val < HC_VALUE_THRESHOLD) return "HANDCUFF";
@@ -1504,7 +1509,7 @@ function DataHub({
               {filteredTeams.map((team) => {
                 const posGroup = teamMap.get(team)?.[depthPos] ?? [];
                 if (posGroup.length === 0) return null;
-                const hasOwned = posGroup.some((p: any) => ownedIds.has(p.player_id));
+                const hasOwned = posGroup.some((p) => ownedIds.has(p.player_id));
                 return (
                   <div
                     key={team}
@@ -1521,7 +1526,7 @@ function DataHub({
                     </div>
                     {/* Player rows */}
                     <div className="divide-y divide-gray-800/40">
-                      {posGroup.slice(0, depthPos === "WR" ? 5 : 4).map((p: any, rowIdx: number) => {
+                      {posGroup.slice(0, depthPos === "WR" ? 5 : 4).map((p, rowIdx) => {
                         const isOwned = ownedIds.has(p.player_id);
                         const role = getDepthRole(team, p);
                         const val = calcFcValues[p.player_id] ?? 0;
@@ -1546,7 +1551,7 @@ function DataHub({
                               {role === "HANDCUFF" && <span className="text-[9px] font-bold px-1 rounded bg-amber-900/60 text-amber-300 shrink-0">HC</span>}
                             </div>
                             {/* Age */}
-                            <span className={`text-[10px] shrink-0 ${ageColor(p.age, p.position)}`}>
+                            <span className={`text-[10px] shrink-0 ${ageColor(p.age ?? undefined, p.position)}`}>
                               {p.age ?? "—"}
                             </span>
                             {/* Value */}
@@ -1609,7 +1614,7 @@ function DataHub({
         const MIN_DYN_VAL: Record<string, number> = { QB: 500, RB: 350, WR: 350, TE: 350 };
 
         const projBySleeperID = new Map<string, number>(
-          projectionData.map((r: any) => [String(r.sleeperId), Number(r.fpts || 0)])
+          projectionData.map((r) => [String(r.sleeperId), Number(r.fpts || 0)])
         );
         const projectionsLoaded = projectionData.length > 0;
 
@@ -1621,9 +1626,9 @@ function DataHub({
 
         for (const pos of ["QB", "RB", "WR", "TE"] as const) {
           const minVal = MIN_DYN_VAL[pos];
-          const pool = Object.values(players as Record<string, any>)
-            .filter((p: any) => p.position === pos && (calcFcValues[p.player_id] ?? 0) >= minVal)
-            .map((p: any) => {
+          const pool = Object.values(players)
+            .filter((p) => p.position === pos && (calcFcValues[p.player_id] ?? 0) >= minVal)
+            .map((p) => {
               const hasFpts = projBySleeperID.has(p.player_id);
               const projFpts = hasFpts
                 ? projBySleeperID.get(p.player_id)!

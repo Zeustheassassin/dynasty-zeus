@@ -12,6 +12,7 @@ import type {
   LeagueSimulation, LeagueMateView, TradePartnerRanking, HistoricalSnapshot,
 } from "../lib/types";
 import { usePlayers } from "../lib/PlayersContext";
+import { useLeague } from "../lib/LeagueContext";
 
 const BASE_YEAR_TH = new Date().getFullYear();
 const YEARS = Array.from({ length: 3 }, (_, index) => String(BASE_YEAR_TH + index));
@@ -25,9 +26,6 @@ interface TradeHubProps {
   // League / roster state
   leagues: SleeperLeague[];
   user: SleeperUser | null;
-  rosters: SleeperRoster[];
-  users: Record<string, string>;
-  selectedLeague: SleeperLeague | null;
   allPicks: AugmentedPick[];
   pickFcValues: Record<string, number>;
   calcFcValues: Record<string, number>;
@@ -116,6 +114,10 @@ interface TradeHubProps {
   crossLeagueExposure?: Record<string, { count: number }> | null;
 }
 
+// ── Local types ────────────────────────────────────────────────────────────
+/** A SleeperPlayer enriched with a concrete dynasty value for display in search results. */
+type PlayerWithValue = SleeperPlayer & { value: number };
+
 // ── Isolated search-input components ───────────────────────────────────────
 // These manage their own local inputValue so typing never causes the
 // parent TradeHub (and its expensive trade-computation IIFE) to re-render.
@@ -126,13 +128,13 @@ function FinderSearchInput({
   onSelect,
   placeholder = "Search your roster…",
 }: {
-  players: any[];
+  players: PlayerWithValue[];
   onSelect: (playerId: string) => void;
   placeholder?: string;
 }) {
   const [inputValue, setInputValue] = React.useState("");
   const matches = inputValue.trim().length >= 2
-    ? players.filter((p: any) => p.full_name.toLowerCase().includes(inputValue.toLowerCase())).slice(0, 6)
+    ? players.filter((p) => p.full_name.toLowerCase().includes(inputValue.toLowerCase())).slice(0, 6)
     : [];
   return (
     <div className="relative">
@@ -145,7 +147,7 @@ function FinderSearchInput({
       />
       {matches.length > 0 && (
         <div className="absolute z-10 top-full mt-1 w-full bg-gray-800 border border-gray-700 rounded-lg overflow-hidden shadow-xl">
-          {matches.map((p: any) => (
+          {matches.map((p) => (
             <button
               key={p.player_id}
               onClick={() => { setInputValue(""); onSelect(p.player_id); }}
@@ -167,7 +169,7 @@ function FinderSearchInput({
 // ── Component ──────────────────────────────────────────────────────────────
 function TradeHub({
   tradeHubSection, setTradeHubSection,
-  leagues: _leagues, user, rosters, users, selectedLeague, allPicks,
+  leagues: _leagues, user, allPicks,
   pickFcValues, calcFcValues, redraftValues, selectedLeagueDynamicPickValues,
   selectedLeagueDirection: _selectedLeagueDirection, selectedLeagueDirectionAdjusted, selectedLeagueSimulation,
   calcOpponentRosterId, setCalcOpponentRosterId,
@@ -195,6 +197,7 @@ function TradeHub({
   crossLeagueExposure,
 }: TradeHubProps) {
   const players = usePlayers();
+  const { selectedLeague, rosters, users } = useLeague();
 
   // ── Finder pre-computations ─────────────────────────────────────────────
   // These are memoized at component level so they survive re-renders caused
@@ -214,15 +217,15 @@ function TradeHub({
   // Only rebuilds when rosters, players, or calcFcValues change (league switch / value refresh).
   // The IIFE reads from this Map instead of re-filtering on every render.
   const finderRosterPlayersMap = useMemo(() => {
-    const calcVal = (id: string) => (calcFcValues as Record<string, number>)[id] ?? (players as any)[id]?.value ?? 0;
-    const map = new Map<number, any[]>();
-    (rosters as any[]).forEach((roster) => {
+    const calcVal = (id: string) => (calcFcValues as Record<string, number>)[id] ?? players[id]?.value ?? 0;
+    const map = new Map<number, PlayerWithValue[]>();
+    rosters.forEach((roster) => {
       map.set(
         roster.roster_id,
         (roster?.players || [])
-          .map((id: string) => { const p = (players as any)[id]; return p ? { ...p, value: calcVal(id) } : null; })
-          .filter((p: any) => p && ["QB", "RB", "WR", "TE"].includes(p.position) && p.value > 0)
-          .sort((a: any, b: any) => b.value - a.value)
+          .map((id: string): PlayerWithValue | null => { const p = players[id]; return p ? { ...p, value: calcVal(id) } : null; })
+          .filter((p): p is PlayerWithValue => !!p && ["QB", "RB", "WR", "TE"].includes(p.position) && p.value > 0)
+          .sort((a, b) => b.value - a.value)
       );
     });
     return map;
@@ -242,8 +245,8 @@ function TradeHub({
   // ── My roster player list (passed as prop to FinderSearchInput) ──────────
   // Rebuilt only when the roster or value map changes — not on every render.
   const finderMyRosterPlayers = useMemo(() => {
-    const myRoster = (rosters as any[]).find((r: any) => r.owner_id === user?.user_id);
-    return finderRosterPlayersMap.get(myRoster?.roster_id) ?? [];
+    const myRoster = rosters.find((r) => r.owner_id === user?.user_id);
+    return myRoster ? finderRosterPlayersMap.get(myRoster.roster_id) ?? [] : [];
   }, [rosters, user, finderRosterPlayersMap]);
 
   // Local UI state for the Attempts tab
@@ -298,11 +301,11 @@ function TradeHub({
   // NFL depth chart map — sorted by depth_chart_order then dynasty value.
   const nflTeamDepth = useMemo(() => {
     const map = new Map<string, Record<string, any[]>>();
-    Object.values(players as Record<string, any>).forEach((p: any) => {
+    Object.values(players).forEach((p) => {
       if (!p.team || !["QB","RB","WR","TE"].includes(p.position)) return;
       if ((p.status ?? "").toLowerCase() === "retired") return;
       if (!map.has(p.team)) map.set(p.team, { QB: [], RB: [], WR: [], TE: [] });
-      map.get(p.team)![p.position].push({ ...p, value: calcFcValues[p.player_id] ?? (players as any)[p.player_id]?.value ?? 0 });
+      map.get(p.team)![p.position].push({ ...p, value: calcFcValues[p.player_id] ?? players[p.player_id]?.value ?? 0 });
     });
     map.forEach((posMap) => {
       Object.keys(posMap).forEach((pos) => {
@@ -321,9 +324,9 @@ function TradeHub({
 
   // Top-32 QB value floor — used by QB safety gates throughout the finder.
   const allQBsSorted = useMemo(() =>
-    Object.values(players as Record<string, any>)
+    Object.values(players)
       .filter((p: any) => p.position === "QB")
-      .map((p: any) => calcFcValues[p.player_id] ?? (players as any)[p.player_id]?.value ?? 0)
+      .map((p: any) => calcFcValues[p.player_id] ?? players[p.player_id]?.value ?? 0)
       .filter((v) => v > 0)
       .sort((a, b) => b - a),
     [players, calcFcValues]
@@ -401,48 +404,48 @@ function TradeHub({
     {/* ── Trade Calculator ── */}
     {tradeHubSection === "CALCULATOR" && (() => {
       const rosterToUser: Record<number, string> = {};
-      rosters.forEach((r: any) => { rosterToUser[r.roster_id] = r.owner_id; });
+      rosters.forEach((r) => { rosterToUser[r.roster_id] = r.owner_id; });
 
-      const myRoster = rosters.find((r: any) => r.owner_id === user?.user_id);
+      const myRoster = rosters.find((r) => r.owner_id === user?.user_id);
       const opponentRoster = calcOpponentRosterId != null
-        ? rosters.find((r: any) => r.roster_id === calcOpponentRosterId)
+        ? rosters.find((r) => r.roster_id === calcOpponentRosterId)
         : null;
 
       // League-specific value lookup (falls back to generic if not yet loaded)
       const calcVal = (id: string) =>
-        calcFcValues[id] ?? (players as any)[id]?.value ?? 0;
+        calcFcValues[id] ?? players[id]?.value ?? 0;
 
       // Player lists (excluding already-traded items), sorted by league-specific value
       const myAvailPlayers = (myRoster?.players || [] as string[])
-        .map((id: string) => (players as any)[id])
+        .map((id: string) => players[id])
         .filter((p: any) => p && ["QB","RB","WR","TE"].includes(p.position))
         .sort((a: any, b: any) => calcVal(b.player_id) - calcVal(a.player_id))
         .filter((p: any) => !calcGive.includes(p.player_id));
 
       const theirAvailPlayers = (opponentRoster?.players || [] as string[])
-        .map((id: string) => (players as any)[id])
+        .map((id: string) => players[id])
         .filter((p: any) => p && ["QB","RB","WR","TE"].includes(p.position))
         .sort((a: any, b: any) => calcVal(b.player_id) - calcVal(a.player_id))
         .filter((p: any) => !calcReceive.includes(p.player_id));
 
       // Pick lists (excluding already-added picks)
-      const pickKey = (p: any) => `${p.season}-${p.round}-${p.roster_id}`;
-      const myAvailPicks = (allPicks as any[]).filter(
+      const pickKey = (p: AugmentedPick) => `${p.season}-${p.round}-${p.roster_id}`;
+      const myAvailPicks = allPicks.filter(
         (p: any) => p.owner_id === myRoster?.roster_id && !calcGivePicks.includes(pickKey(p))
       );
-      const theirAvailPicks = (allPicks as any[]).filter(
+      const theirAvailPicks = allPicks.filter(
         (p: any) => p.owner_id === opponentRoster?.roster_id && !calcReceivePicks.includes(pickKey(p))
       );
-      const pickInsight = (pick: any) => selectedLeagueDynamicPickValues[pickKey(pick)];
+      const pickInsight = (pick: AugmentedPick) => selectedLeagueDynamicPickValues[pickKey(pick)];
 
       const getPickValue = (key: string) => {
-        const pick = (allPicks as any[]).find((p: any) => pickKey(p) === key);
+        const pick = allPicks.find((p) => pickKey(p) === key);
         if (!pick) return 0;
         return pickInsight(pick)?.expectedValue ?? getStoredPickValue(pickFcValues, pick);
       };
-      const pickLabel = (p: any) => {
+      const pickLabel = (p: AugmentedPick) => {
         const origOwnerUserId = rosterToUser[p.roster_id];
-        const origName = (users as any)[origOwnerUserId] || `Team ${p.roster_id}`;
+        const origName = users[origOwnerUserId] || `Team ${p.roster_id}`;
         const via = p.roster_id !== p.owner_id ? ` (via ${origName})` : "";
         const dynamic = pickInsight(p);
         // For current year, slot is "1.04" format; for future years slot is just the round number
@@ -494,9 +497,9 @@ function TradeHub({
       const verdict = Math.abs(net) <= 300 ? "EVEN" : net > 0 ? "YOU WIN" : "YOU LOSE";
       const verdictColor = verdict === "EVEN" ? "text-yellow-400" : verdict === "YOU WIN" ? "text-green-400" : "text-red-400";
 
-      const filterPlayers = (list: any[], search: string) =>
+      const filterPlayers = (list: SleeperPlayer[], search: string) =>
         search.trim().length >= 1
-          ? list.filter((p: any) => p.full_name?.toLowerCase().includes(search.toLowerCase()))
+          ? list.filter((p) => p.full_name?.toLowerCase().includes(search.toLowerCase()))
           : list;
 
       // Asset row component (inline) — playerId optional to enable profile panel
@@ -562,7 +565,7 @@ function TradeHub({
                     const isIgnored = ignoredOwnerIds.includes(r.owner_id);
                     return (
                       <option key={r.roster_id} value={r.roster_id}>
-                        {isIgnored ? "🚫 " : ""}{(users as any)[r.owner_id] || `Team ${r.roster_id}`}{isIgnored ? " (Ignored)" : ""}
+                        {isIgnored ? "🚫 " : ""}{users[r.owner_id] || `Team ${r.roster_id}`}{isIgnored ? " (Ignored)" : ""}
                       </option>
                     );
                   })}
@@ -604,7 +607,7 @@ function TradeHub({
                 <span className="text-gray-500 text-sm leading-none mt-0.5">🚫</span>
                 <div>
                   <p className="text-sm font-medium text-gray-400">
-                    {(users as any)[opponentRoster.owner_id] || "This owner"} is on your ignore list
+                    {users[opponentRoster.owner_id] || "This owner"} is on your ignore list
                   </p>
                   <p className="text-xs text-gray-600 mt-0.5">
                     Excluded from Trade Finder and Recommendations. Click "Remove Ignore" above to re-enable.
@@ -654,7 +657,7 @@ function TradeHub({
             <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
               <div className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-3">
                 {opponentRoster
-                  ? `${(users as any)[opponentRoster.owner_id] || "Opponent"}'s Assets`
+                  ? `${users[opponentRoster.owner_id] || "Opponent"}'s Assets`
                   : "Their Assets"}
               </div>
               <input
@@ -674,7 +677,7 @@ function TradeHub({
                     .filter((r: any) => r.owner_id !== user?.user_id)
                     .flatMap((r: any) =>
                       (r.players || []).map((id: string) => {
-                        const p = (players as any)[id];
+                        const p = players[id];
                         return p ? { ...p, _rosterId: r.roster_id } : null;
                       })
                     )
@@ -728,7 +731,7 @@ function TradeHub({
                     <p className="text-xs text-gray-600">Click assets above to add</p>
                   )}
                   {calcGive.map((id: string) => {
-                    const p = (players as any)[id];
+                    const p = players[id];
                     return tradeRow(
                       `${p?.full_name ?? id} (${p?.position})`,
                       calcVal(id),
@@ -736,7 +739,7 @@ function TradeHub({
                     );
                   })}
                   {calcGivePicks.map((k: string) => {
-                    const pick = (allPicks as any[]).find((p: any) => pickKey(p) === k);
+                    const pick = allPicks.find((p) => pickKey(p) === k);
                     const label = pick ? pickLabel(pick) : k;
                     return tradeRow(label, getPickValue(k),
                       () => setCalcGivePicks((prev) => prev.filter((x) => x !== k)));
@@ -762,7 +765,7 @@ function TradeHub({
                     <p className="text-xs text-gray-600">Click assets above to add</p>
                   )}
                   {calcReceive.map((id: string) => {
-                    const p = (players as any)[id];
+                    const p = players[id];
                     return tradeRow(
                       `${p?.full_name ?? id} (${p?.position})`,
                       calcVal(id),
@@ -770,7 +773,7 @@ function TradeHub({
                     );
                   })}
                   {calcReceivePicks.map((k: string) => {
-                    const pick = (allPicks as any[]).find((p: any) => pickKey(p) === k);
+                    const pick = allPicks.find((p) => pickKey(p) === k);
                     const label = pick ? pickLabel(pick) : k;
                     return tradeRow(label, getPickValue(k),
                       () => setCalcReceivePicks((prev) => prev.filter((x) => x !== k)));
@@ -810,26 +813,26 @@ function TradeHub({
                     );
                     const alreadyMarked = sessionMarked.has(calcFp);
                     const buildCalcPayload = (direction: "ME" | "THEM") => {
-                      const oppRosterForCalc = rosters.find((r: any) => r.roster_id === calcOpponentRosterId);
+                      const oppRosterForCalc = rosters.find((r) => r.roster_id === calcOpponentRosterId);
                       const oppName = (oppRosterForCalc?.owner_id ? users[oppRosterForCalc.owner_id] : null) || `Team ${calcOpponentRosterId}`;
                       return {
                         league_id: selectedLeague.league_id,
                         partner_roster_id: calcOpponentRosterId,
                         partner_name: oppName,
                         give_players: calcGive.map((id: string) => {
-                          const p = (players as any)[id];
+                          const p = players[id];
                           return { player_id: id, name: p?.full_name || id, position: p?.position || "", value: calcVal(id) } as TradeAttemptAsset;
                         }),
                         give_picks: calcGivePicks.map((k: string) => {
-                          const pick = (allPicks as any[]).find((p: any) => pickKey(p) === k);
+                          const pick = allPicks.find((p) => pickKey(p) === k);
                           return { key: k, label: pick ? pickLabel(pick) : k, value: getPickValue(k) } as TradeAttemptPick;
                         }),
                         receive_players: calcReceive.map((id: string) => {
-                          const p = (players as any)[id];
+                          const p = players[id];
                           return { player_id: id, name: p?.full_name || id, position: p?.position || "", value: calcVal(id) } as TradeAttemptAsset;
                         }),
                         receive_picks: calcReceivePicks.map((k: string) => {
-                          const pick = (allPicks as any[]).find((p: any) => pickKey(p) === k);
+                          const pick = allPicks.find((p) => pickKey(p) === k);
                           return { key: k, label: pick ? pickLabel(pick) : k, value: getPickValue(k) } as TradeAttemptPick;
                         }),
                         source: "CALCULATOR" as const,
@@ -880,14 +883,14 @@ function TradeHub({
             const calcPosTotals = (playerIds: string[]) => {
               const t: Record<string, number> = { QB: 0, RB: 0, WR: 0, TE: 0 };
               playerIds.forEach((id) => {
-                const p = (players as any)[id];
+                const p = players[id];
                 if (p && ["QB","RB","WR","TE"].includes(p.position)) {
                   t[p.position] = (t[p.position] || 0) + calcVal(id);
                 }
               });
               return t;
             };
-            const allTeamsCalcPos = rosters.map((r: any) => calcPosTotals(r.players || []));
+            const allTeamsCalcPos = rosters.map((r) => calcPosTotals(r.players || []));
             const calcLeagueRank = (pos: string, total: number) => {
               const sorted = allTeamsCalcPos.map((t) => t[pos] || 0).sort((a, b) => b - a);
               let rank = 1;
@@ -897,11 +900,11 @@ function TradeHub({
             const preT = calcPosTotals(myRoster?.players || []);
             const postT = { ...preT };
             calcGive.forEach((id) => {
-              const p = (players as any)[id];
+              const p = players[id];
               if (p && postT[p.position] !== undefined) postT[p.position] = Math.max(0, postT[p.position] - calcVal(id));
             });
             calcReceive.forEach((id) => {
-              const p = (players as any)[id];
+              const p = players[id];
               if (p && postT[p.position] !== undefined) postT[p.position] = (postT[p.position] || 0) + calcVal(id);
             });
             const positions = ["QB", "RB", "WR", "TE"] as const;
@@ -1036,8 +1039,8 @@ function TradeHub({
         </div>
       );
 
-      const finderPickKey = (p: any) => `${p.season}-${p.round}-${p.roster_id}`;
-      const finderPickLabel = (p: any) => {
+      const finderPickKey = (p: AugmentedPick) => `${p.season}-${p.round}-${p.roster_id}`;
+      const finderPickLabel = (p: AugmentedPick) => {
         const via = p.roster_id !== p.owner_id ? ` (via ${users[p.roster_id] || `Team ${p.roster_id}`})` : "";
         const isSlotted = p.slot && String(p.slot).includes(".");
         const slotLabel = isSlotted
@@ -1051,12 +1054,12 @@ function TradeHub({
       };
 
       // Build roster player list with values — reads from pre-computed Map (O(1) lookup)
-      const rosterPlayers = (roster: any) => finderRosterPlayersMap.get(roster?.roster_id) ?? [];
+      const rosterPlayers = (roster: SleeperRoster | null | undefined) => roster ? finderRosterPlayersMap.get(roster.roster_id) ?? [] : [];
 
       // Position totals for a player list
-      const posTotals = (plist: any[]) => {
+      const posTotals = (plist: Array<{ position: string; value: number }>) => {
         const t: Record<string, number> = { QB: 0, RB: 0, WR: 0, TE: 0 };
-        plist.forEach((p: any) => { t[p.position] = (t[p.position] || 0) + p.value; });
+        plist.forEach((p) => { t[p.position] = (t[p.position] || 0) + p.value; });
         return t;
       };
 
@@ -1094,7 +1097,7 @@ function TradeHub({
         return true;
       };
 
-      const myRoster = rosters.find((r: any) => r.owner_id === user?.user_id);
+      const myRoster = rosters.find((r) => r.owner_id === user?.user_id);
       const myPlayers = rosterPlayers(myRoster);
       const isBlockedSellDisposition = (playerId?: string | null) =>
         !!playerId && (
@@ -1166,12 +1169,12 @@ function TradeHub({
         orderedDraftYears.map((year, idx) => [year, idx])
       ) as Record<string, number>;
       const numTeams = rosters.length;
-      const finderPickValue = (p: any) => selectedLeagueDynamicPickValues[`${p.season}-${p.round}-${p.roster_id}`]?.expectedValue ?? getStoredPickValue(pickFcValues, p);
-      const myFinderPicks = (allPicks as any[])
-        .filter((p: any) => p.owner_id === myRoster?.roster_id)
-        .map((p: any) => ({ ...p, value: finderPickValue(p) }))
-        .filter((p: any) => p.value > 0)
-        .sort((a: any, b: any) => {
+      const finderPickValue = (p: AugmentedPick) => selectedLeagueDynamicPickValues[`${p.season}-${p.round}-${p.roster_id}`]?.expectedValue ?? getStoredPickValue(pickFcValues, p);
+      const myFinderPicks = allPicks
+        .filter((p) => p.owner_id === myRoster?.roster_id)
+        .map((p) => ({ ...p, value: finderPickValue(p) }))
+        .filter((p) => p.value > 0)
+        .sort((a, b) => {
           const yearDiff = (draftYearPriority[a.season] ?? 999) - (draftYearPriority[b.season] ?? 999);
           if (yearDiff !== 0) return yearDiff;
           if (a.round !== b.round) return a.round - b.round;
@@ -1189,24 +1192,24 @@ function TradeHub({
           .filter((entry: any) => entry.rank <= Math.max(2, Math.ceil(numTeams / 3)))
           .map((entry: any) => entry.pos)
       );
-      const isAgingAsset = (player: any) =>
+      const isAgingAsset = (player: SleeperPlayer) =>
         Number(player?.age || 0) >= (ageCutoffByPos[player?.position] || 29);
-      const isOldProducerBuy = (player: any) => {
+      const isOldProducerBuy = (player: SleeperPlayer) => {
         const age = Number(player?.age || 0);
         if (player?.position === "RB") return age >= 25;
         if (player?.position === "QB") return age >= 31;
         if (player?.position === "WR" || player?.position === "TE") return age >= 29;
         return age >= 29;
       };
-      const isYoungBuildingBlock = (player: any) =>
+      const isYoungBuildingBlock = (player: SleeperPlayer) =>
         ["QB", "WR"].includes(player?.position) && Number(player?.age || 99) <= 24;
-      const isFutureInsulationAsset = (player: any) =>
+      const isFutureInsulationAsset = (player: SleeperPlayer) =>
         (["QB", "WR"].includes(player?.position) && Number(player?.age || 99) <= 25) ||
         (player?.position === "TE" && Number(player?.age || 99) <= 25) ||
         (player?.position === "RB" && Number(player?.age || 99) <= 23);
       // Continuous 0.0–1.0 sell-urgency curve. 0 = hold forever, 1 = sell immediately.
       // Position-specific cliffs: RB peaks at 26-27, WR/TE at 29-30, QB at 32-33.
-      const getAgeUrgency = (player: any): number => {
+      const getAgeUrgency = (player: SleeperPlayer): number => {
         const age = Number(player?.age || 0);
         if (age === 0) return 0;
         const pos = player?.position;
@@ -1234,16 +1237,16 @@ function TradeHub({
         return 1.0;
       };
       // Complement: 0 = window closing now, 1 = prime years ahead.
-      const getFutureValue = (player: any): number => 1 - getAgeUrgency(player);
+      const getFutureValue = (player: SleeperPlayer): number => 1 - getAgeUrgency(player);
       // "Years-to-positional-cliff" — used for team window scoring.
-      const yearsToCliff = (player: any): number => {
+      const yearsToCliff = (player: SleeperPlayer): number => {
         const age = Number(player?.age || 0);
         if (age === 0) return 5;
         const pos = player?.position;
         const cliff = pos === "RB" ? 28 : pos === "QB" ? 35 : 32;
         return Math.max(0, cliff - age);
       };
-      const isPremiumCurrentPick = (pick: any) =>
+      const isPremiumCurrentPick = (pick: AugmentedPick) =>
         String(pick?.season) === CURRENT_YEAR && String(pick?.slot || "").match(/^1\.(0[1-6]|[1-6])$/);
       const getDirectionTradeScore = (trade: TradeResult) => {
         const outgoingPlayers = trade.give || [];
@@ -1465,7 +1468,7 @@ function TradeHub({
           const outgoingPicksGuard = trade.givePicks || [];
           if (outgoingPicksGuard.length > 0 && incomingPlayers.length > 0) {
             const incomingAllYoung = incomingPlayers.every((p: any) => isFutureInsulationAsset(p));
-            const myTotalPickCount = (allPicks as any[]).filter(
+            const myTotalPickCount = allPicks.filter(
               (p: any) => Number(p.owner_id) === Number(myRoster?.roster_id)
             ).length;
             const hasExcessPicks = myTotalPickCount >= 8;
@@ -1493,7 +1496,7 @@ function TradeHub({
 
 
       // League-wide positional totals for every team (used for ranking)
-      const allTeamPosTotals = rosters.map((r: any) => posTotals(rosterPlayers(r)));
+      const allTeamPosTotals = rosters.map((r) => posTotals(rosterPlayers(r)));
 
       // Rank user (1 = best) at a given position given their total at that position
       const leagueRank = (pos: string, total: number) => {
@@ -1533,7 +1536,7 @@ function TradeHub({
       if (loadingCalcValues) return <p className="text-sm text-blue-400">Loading player values…</p>;
 
       // ── Ignored owners notice ──
-      const ignoredInLeague = rosters.filter((r: any) => r.owner_id !== user?.user_id && ignoredOwnerIds.includes(r.owner_id));
+      const ignoredInLeague = rosters.filter((r) => r.owner_id !== user?.user_id && ignoredOwnerIds.includes(r.owner_id));
 
       // ── Player search / pin UI ──
       // Search inputs are now isolated components — typing never causes this IIFE to run.
@@ -1544,7 +1547,7 @@ function TradeHub({
         : null;
 
       // Opponent roster(s) for target player search
-      const finderOppRostersFiltered = rosters.filter((r: any) =>
+      const finderOppRostersFiltered = rosters.filter((r) =>
         r.owner_id !== user?.user_id &&
         (deferredTargetOppRosterId === null || r.roster_id === deferredTargetOppRosterId)
       );
@@ -1634,7 +1637,7 @@ function TradeHub({
       const hasSuperFlex = (starterCounts.SUPER_FLEX || 0) > 0;
       const hasFlex = (starterCounts.FLEX || 0) > 0;
       const rosterById = new Map(
-        rosters.map((r: any) => [Number(r.roster_id), r])
+        rosters.map((r) => [Number(r.roster_id), r])
       );
       const playerTradeScore = (player: any) =>
         (redraftValues[player?.player_id] ?? 0) * 2 + (player?.value ?? 0);
@@ -1643,7 +1646,7 @@ function TradeHub({
         const giveIds = new Set(givePlayers.map((p: any) => p.player_id));
         return [
           ...(baseRoster?.players || [])
-            .map((id: string) => (players as any)[id])
+            .map((id: string) => players[id])
             .filter((p: any) => p && !giveIds.has(p.player_id)),
           ...receivePlayers,
         ].filter((p: any) => p && ["QB", "RB", "WR", "TE"].includes(p.position));
@@ -1811,9 +1814,9 @@ function TradeHub({
 
       const results: TradeResult[] = [];
 
-      for (const oppRoster of rosters.filter((r: any) => r.owner_id !== user?.user_id && !ignoredOwnerIds.includes(r.owner_id) && (deferredTargetOppRosterId === null || r.roster_id === deferredTargetOppRosterId))) {
+      for (const oppRoster of rosters.filter((r) => r.owner_id !== user?.user_id && !ignoredOwnerIds.includes(r.owner_id) && (deferredTargetOppRosterId === null || r.roster_id === deferredTargetOppRosterId))) {
         const oppPlayers = rosterPlayers(oppRoster);
-        const oppPicks = (allPicks as any[])
+        const oppPicks = allPicks
           .filter((p: any) => p.owner_id === oppRoster.roster_id)
           .map((p: any) => ({ ...p, value: finderPickValue(p) }))
           .filter((p: any) => p.value > 0)
@@ -1835,7 +1838,7 @@ function TradeHub({
         const oppTop = targetPinnedOppPlayer && !oppTopBase.some((p: any) => p.player_id === targetPinnedOppPlayer.player_id)
           ? [...oppTopBase.slice(0, 9), targetPinnedOppPlayer].filter(Boolean)
           : oppTopBase;
-        const oppName = (users as any)[oppRoster.owner_id] || `Team ${oppRoster.roster_id}`;
+        const oppName = users[oppRoster.owner_id] || `Team ${oppRoster.roster_id}`;
 
         if (draftCapitalMode) {
           for (const mp of myTop) {
@@ -2386,7 +2389,7 @@ function TradeHub({
         (selectedLeague?.settings?.taxi_slots ?? 0) +
         (selectedLeague?.settings?.reserve_slots ?? 0);
       const currentOwnedPlayers = (myRoster?.players || []).length;
-      const upcomingDraftPickCount = (allPicks as any[]).filter(
+      const upcomingDraftPickCount = allPicks.filter(
         (p: any) =>
           Number(p.owner_id) === Number(myRoster?.roster_id) &&
           String(p.season) === priorityDraftYear
@@ -2395,7 +2398,7 @@ function TradeHub({
       // A player below this floor has less value than the cheapest asset anyone is drafting,
       // making them candidates for a cut. We don't use "my worst pick" because even a
       // last-rounder in your league is a real asset; the league-wide floor is the true dead zone.
-      const allLeagueUpcomingPickValues = (allPicks as any[])
+      const allLeagueUpcomingPickValues = allPicks
         .filter((p: any) => String(p.season) === priorityDraftYear)
         .map((p: any) => finderPickValue(p))
         .filter((v: number) => v > 0);
@@ -2457,7 +2460,7 @@ function TradeHub({
       const hasBadSameTeamCombo = (side: any[]): boolean => {
         const byTeam = new Map<string, any[]>();
         for (const p of side) {
-          const team = (players as any)[p.player_id]?.team;
+          const team = players[p.player_id]?.team;
           if (!team) continue;
           if (!byTeam.has(team)) byTeam.set(team, []);
           byTeam.get(team)!.push(p);
@@ -3882,11 +3885,11 @@ function TradeHub({
                 .filter((r: any) => r.owner_id !== user?.user_id)
                 .slice()
                 .sort((a: any, b: any) =>
-                  ((users as any)[a.owner_id] || "").localeCompare((users as any)[b.owner_id] || "")
+                  (users[a.owner_id] || "").localeCompare(users[b.owner_id] || "")
                 )
                 .map((r: any) => (
                   <option key={r.roster_id} value={r.roster_id}>
-                    {(users as any)[r.owner_id] || `Team ${r.roster_id}`}
+                    {users[r.owner_id] || `Team ${r.roster_id}`}
                   </option>
                 ))}
             </select>
@@ -3936,7 +3939,7 @@ function TradeHub({
             <div className="flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-800/40 px-3 py-2 text-xs text-gray-500">
               <span className="text-red-500">🚫</span>
               {ignoredInLeague.length === 1
-                ? <span><strong className="text-gray-400">{(users as any)[ignoredInLeague[0].owner_id] || "1 owner"}</strong> is on your ignore list and excluded from results.</span>
+                ? <span><strong className="text-gray-400">{users[ignoredInLeague[0].owner_id] || "1 owner"}</strong> is on your ignore list and excluded from results.</span>
                 : <span><strong className="text-gray-400">{ignoredInLeague.length} owners</strong> on your ignore list are excluded from results.</span>
               }
             </div>
@@ -4363,14 +4366,14 @@ function TradeHub({
             const received = Object.entries(trade.adds || {})
               .filter(([, rid]) => rid === myRosterId)
               .map(([pid]) => {
-                const p = (players as any)[pid];
+                const p = players[pid];
                 return { player_id: pid, name: p?.full_name || "Unknown", pos: p?.position || "", val: calcFcValues[pid] ?? 0 };
               });
 
             const given = Object.entries(trade.adds || {})
               .filter(([, rid]) => rid !== myRosterId)
               .map(([pid]) => {
-                const p = (players as any)[pid];
+                const p = players[pid];
                 return { player_id: pid, name: p?.full_name || "Unknown", pos: p?.position || "", val: calcFcValues[pid] ?? 0 };
               });
 
@@ -4655,27 +4658,27 @@ function TradeHub({
                     setCounterDrafts((prev) => ({ ...prev, [attempt.id]: { ...draft, ...updates } }));
 
                   // ── Roster data for each side ───────────────────────────────
-                  const oppRoster = rosters.find((r: any) => Number(r.roster_id) === Number(attempt.partner_roster_id));
-                  const myRosterC = rosters.find((r: any) => r.owner_id === user?.user_id);
+                  const oppRoster = rosters.find((r) => Number(r.roster_id) === Number(attempt.partner_roster_id));
+                  const myRosterC = rosters.find((r) => r.owner_id === user?.user_id);
                   const SKILL_POS = ["QB", "RB", "WR", "TE"];
-                  const calcValC = (id: string) => calcFcValues[id] ?? (players as any)[id]?.value ?? 0;
+                  const calcValC = (id: string) => calcFcValues[id] ?? players[id]?.value ?? 0;
 
                   const buildRosterAssets = (roster: any) =>
                     (roster?.players ?? [])
-                      .map((id: string) => (players as any)[id])
+                      .map((id: string) => players[id])
                       .filter((p: any) => p && SKILL_POS.includes(p.position))
                       .sort((a: any, b: any) => calcValC(b.player_id) - calcValC(a.player_id));
 
                   const buildPickAssets = (roster: any): TradeAttemptPick[] =>
-                    (allPicks as any[])
+                    allPicks
                       .filter((p: any) => Number(p.owner_id) === Number(roster?.roster_id))
                       .map((p: any) => {
                         const val = selectedLeagueDynamicPickValues[`${p.season}-${p.round}-${p.roster_id}`]?.expectedValue
                           ?? getStoredPickValue(pickFcValues, p);
                         const origOwner = p.roster_id !== p.owner_id
-                          ? rosters.find((r: any) => Number(r.roster_id) === Number(p.roster_id))
+                          ? rosters.find((r) => Number(r.roster_id) === Number(p.roster_id))
                           : null;
-                        const origName = origOwner ? ((users as any)[origOwner.owner_id] || `Team ${p.roster_id}`) : null;
+                        const origName = origOwner ? (users[origOwner.owner_id] || `Team ${p.roster_id}`) : null;
                         const via = origName ? ` (via ${origName})` : "";
                         const isSlotted = p.slot && String(p.slot).includes(".");
                         const label = isSlotted ? `${p.season} ${p.slot}${via}` : `${p.season} Rd ${p.round}${via}`;

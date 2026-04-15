@@ -81,17 +81,17 @@ function ManagementHub({
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   /** Build the payment year fields for an upsert from an arbitrary row object. */
-  const buildPaymentFields = (row: Record<string, any>): Record<string, boolean> => {
+  const buildPaymentFields = (row: Record<string, boolean | string | undefined>): Record<string, boolean> => {
     const fields: Record<string, boolean> = {};
     PAYMENT_YEARS.forEach((year) => {
-      fields[`paid_${year}`] = row[`paid_${year}`] ?? false;
+      fields[`paid_${year}`] = !!(row[`paid_${year}`] ?? false);
     });
     return fields;
   };
 
   // ── Handlers ─────────────────────────────────────────────────────────────
 
-  const upsertLeagueMgmt = async (leagueId: string, updated: Record<string, any>) => {
+  const upsertLeagueMgmt = async (leagueId: string, updated: Record<string, boolean | string | undefined>) => {
     if (!supabaseUser) return;
     const { error } = await supabase.from("league_management").upsert(
       {
@@ -130,7 +130,7 @@ function ManagementHub({
 
   const handleAmountBlur = async (leagueId: string) => {
     const updated = leagueMgmtData[leagueId] || {};
-    await upsertLeagueMgmt(leagueId, updated);
+    await upsertLeagueMgmt(leagueId, updated as unknown as Record<string, boolean | string | undefined>);
   };
 
   const handleCommLeagueSelect = async (leagueId: string) => {
@@ -184,8 +184,8 @@ function ManagementHub({
   const toggleAllCommPayments = async (leagueId: string, key: string, toValue: boolean) => {
     if (!supabaseUser) return;
     const ownerIds = commToolsRosters
-      .filter((r: any) => r.owner_id)
-      .map((r: any) => r.owner_id as string);
+      .filter((r) => r.owner_id)
+      .map((r) => r.owner_id as string);
 
     // Optimistic update
     setCommPaymentsData((prev) => {
@@ -223,7 +223,7 @@ function ManagementHub({
 
   // ── Render ────────────────────────────────────────────────────────────────
 
-  const commLeagues = leagues.filter((l: any) => !!leagueMgmtData[l.league_id]?.commissioner);
+  const commLeagues = leagues.filter((l) => !!leagueMgmtData[l.league_id]?.commissioner);
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-6 space-y-5">
@@ -305,7 +305,7 @@ function ManagementHub({
                   </tr>
                 </thead>
                 <tbody>
-                  {leagues.map((league: any, idx: number) => {
+                  {leagues.map((league, idx) => {
                     const row = leagueMgmtData[league.league_id] || {};
                     return (
                       <tr key={league.league_id} className={idx % 2 === 0 ? "bg-slate-900" : "bg-slate-950"}>
@@ -372,7 +372,7 @@ function ManagementHub({
                   className="rounded-xl border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
                 >
                   <option value="">Select a league</option>
-                  {commLeagues.map((l: any) => (
+                  {commLeagues.map((l) => (
                     <option key={l.league_id} value={l.league_id}>{l.name}</option>
                   ))}
                 </select>
@@ -384,7 +384,7 @@ function ManagementHub({
                 ) : commToolsRosters.length === 0 ? (
                   <div className="text-sm text-gray-400">No roster data found.</div>
                 ) : (() => {
-                  const totalOwners = commToolsRosters.filter((r: any) => r.owner_id).length;
+                  const totalOwners = commToolsRosters.filter((r) => r.owner_id).length;
                   return (
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm border-collapse">
@@ -393,7 +393,7 @@ function ManagementHub({
                             <th className="text-left text-gray-400 font-medium py-2 px-3 border-b border-gray-700 min-w-[160px]">Owner</th>
                             {PAID_YEAR_COLS.map((col) => {
                               const paidCount = commToolsRosters.filter(
-                                (r: any) => r.owner_id && (commPaymentsData[commToolsLeagueId] || {})[r.owner_id]?.[col.key]
+                                (r) => r.owner_id && (commPaymentsData[commToolsLeagueId] || {})[r.owner_id]?.[col.key]
                               ).length;
                               const allPaid = totalOwners > 0 && paidCount === totalOwners;
                               return (
@@ -415,7 +415,7 @@ function ManagementHub({
                           </tr>
                         </thead>
                         <tbody>
-                          {commToolsRosters.map((roster: any, idx: number) => {
+                          {commToolsRosters.map((roster, idx) => {
                             const ownerId = roster.owner_id;
                             if (!ownerId) return null;
                             const ownerUser = commToolsUsers[ownerId];

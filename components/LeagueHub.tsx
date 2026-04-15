@@ -20,6 +20,7 @@ import type {
   SleeperLeague,
   SleeperPlayer,
   SleeperRoster,
+  AugmentedPick,
   SleeperDraft,
   SleeperDraftPick,
   SleeperTradedPick,
@@ -32,6 +33,7 @@ import type {
   CommittedSimsByLeague,
   CachedSimRow,
   LeagueOverviewEntry,
+  LeagueMateView,
   LineupCoachRow,
   LeagueSimulation,
   SimulationTeamRow,
@@ -40,12 +42,14 @@ import { LEAGUE_HUB_GROUPS } from "../lib/leagueHubGroups";
 import { supabase } from "../lib/supabaseclient";
 import { usePlayers } from "../lib/PlayersContext";
 import { useAuth } from "../lib/AuthContext";
+import { useLeague } from "../lib/LeagueContext";
+import { useMyRoster } from "../lib/RosterContext";
 import StandingsTab from "./league/StandingsTab";
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const ROOKIE_YEAR = CURRENT_YEAR;
 
-const getStarterSlots = (roster: any, league: any) => {
+const getStarterSlots = (roster: SleeperRoster, league: SleeperLeague) => {
   if (!roster?.starters || !league?.roster_positions) return [];
   return roster.starters.map((playerId: string, i: number) => ({
     playerId,
@@ -89,12 +93,8 @@ interface LeagueHubProps {
   // League / roster state
   leagues: SleeperLeague[];
   user: SleeperUser | null;
-  rosters: SleeperRoster[];
   standings: StandingRow[];
-  users: Record<string, string>;
-  selectedLeague: SleeperLeague | null;
   setSelectedLeague: (league: SleeperLeague | null) => void;
-  roster: SleeperRoster | null;
   picks: SleeperTradedPick[];
   allPicks: SleeperTradedPick[];
   pickFcValues: Record<string, number>;
@@ -127,7 +127,7 @@ interface LeagueHubProps {
   selectedLeagueDirection: RosterDirectionProfile | null;
   selectedLeagueDirectionAdjusted: RosterDirectionProfile | null;
   selectedLeagueSimulation: LeagueSimulation | null;
-  selectedLeagueMateProfilesView: unknown[];
+  selectedLeagueMateProfilesView: LeagueMateView[];
 
   // Roster view state
   activeTab: string;
@@ -198,8 +198,8 @@ interface LeagueHubProps {
 // ── Component ──────────────────────────────────────────────────────────────
 function LeagueHub({
   leagueHubTab, setLeagueHubTab, activeLeagueHubGroup,
-  leagues, user, rosters, standings, users, selectedLeague, setSelectedLeague,
-  roster, picks, allPicks, pickFcValues, calcFcValues, redraftValues,
+  leagues, user, standings, setSelectedLeague,
+  picks, allPicks, pickFcValues, calcFcValues, redraftValues,
   committedSimsByLeague, leagueSimCache, simQueue, simProgress,
   loadingLeagueMateIntel, loadingCrossLeagueMateIntel, loadingActivity, loadingLeagueWeeklyMatchups,
   leagueNotes, activityTransactions,
@@ -220,6 +220,8 @@ function LeagueHub({
 }: LeagueHubProps) {
   const players = usePlayers();
   const { supabaseUser } = useAuth();
+  const { selectedLeague, rosters, users } = useLeague();
+  const { myRoster: roster } = useMyRoster();
   const [lastNoteSavedAt, setLastNoteSavedAt] = React.useState<number | null>(null);
   const [leagueMateIntelLoadedAt, setLeagueMateIntelLoadedAt] = React.useState<number | null>(null);
   const [simSavedAt, setSimSavedAt] = React.useState<number | null>(null);
@@ -239,7 +241,7 @@ function LeagueHub({
     keysToRemove.forEach((k) => localStorage.removeItem(k));
     // Re-fetch all leagues in parallel; increment progress as each one lands
     await Promise.all(
-      leagues.map((league: any) =>
+      leagues.map((league) =>
         Promise.all([
           fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`).then((r) => r.json()),
           fetch(`https://api.sleeper.app/v1/league/${league.league_id}/traded_picks`).then((r) => r.json()),
@@ -337,12 +339,12 @@ function LeagueHub({
               };
 
               // Build per-league dynasty + redraft values for every team
-              const leagueRows = leagues.map((league: any) => {
+              const leagueRows = leagues.map((league) => {
                 const entry = leagueOverviewData[league.league_id];
                 if (!entry) return null;
-                const lr: any[] = entry.rosters;
-                const ownedPicks: any[] = entry.picks || [];
-                const myRosterId = lr.find((r: any) => r.owner_id === user?.user_id)?.roster_id;
+                const lr: SleeperRoster[] = entry.rosters;
+                const ownedPicks: AugmentedPick[] = entry.picks || [];
+                const myRosterId = lr.find((r) => r.owner_id === user?.user_id)?.roster_id;
                 if (!myRosterId) return null;
                 const profile = getRosterDirectionProfile({
                   rosterId: myRosterId,
@@ -351,7 +353,7 @@ function LeagueHub({
                   players,
                   pickValues: pickFcValues,
                   redraftValues,
-                  dynastyValueForPlayer: (id: string) => calcFcValues[id] ?? (players as any)[id]?.value ?? 0,
+                  dynastyValueForPlayer: (id: string) => calcFcValues[id] ?? players[id]?.value ?? 0,
                 });
                 if (!profile) return null;
                 // committedSimsByLeague is the source of truth — updated synchronously
@@ -376,7 +378,7 @@ function LeagueHub({
                   hasCachedSim,
                   simAge,
                 };
-              }).filter(Boolean).sort((a: any, b: any) => {
+              }).filter((x): x is NonNullable<typeof x> => x !== null).sort((a, b) => {
                 const bucketDiff = (bucketOrder[a.bucket] ?? 999) - (bucketOrder[b.bucket] ?? 999);
                 if (bucketDiff !== 0) return bucketDiff;
                 if (a.dynRank !== b.dynRank) return a.dynRank - b.dynRank;
@@ -449,7 +451,7 @@ function LeagueHub({
                         <span className="text-center">MaxPF</span>
                         <span className="text-center">Playoff%</span>
                       </div>
-                      {leagueRows.map((row: any) => (
+                      {leagueRows.map((row) => (
                         <div key={row.league.league_id} className={`grid grid-cols-[minmax(220px,1.4fr)_minmax(190px,1.15fr)_72px_72px_72px_72px_72px] gap-2 items-center bg-gray-900 border rounded-xl px-3 py-2.5 transition-colors ${simQueue[0] === row.league.league_id ? "border-blue-700" : "border-gray-800"}`}>
                           <button className="min-w-0 text-sm text-white font-medium text-left truncate hover:text-blue-400 transition" onClick={() => { loadRoster(row.league); setLeagueHubTab("ROSTERS"); }}>
                             {row.league.name}
@@ -510,7 +512,7 @@ function LeagueHub({
                 );
               }
 
-              const myRosterId = rosters.find((entry: any) => entry.owner_id === user?.user_id)?.roster_id;
+              const myRosterId = rosters.find((entry) => entry.owner_id === user?.user_id)?.roster_id;
               return (
                 <div className="space-y-4">
                   <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
@@ -559,7 +561,7 @@ function LeagueHub({
                         <span className="text-center">1.01</span>
                         <span className="text-center">{selectedLeagueSimulation.simulationMode === "offseason" ? "Avg Matchup" : "This Week"}</span>
                       </div>
-                      {selectedLeagueSimulation.rows.map((row: any) => {
+                      {selectedLeagueSimulation.rows.map((row) => {
                         const isMe = Number(row.rosterId) === Number(myRosterId);
                         return (
                           <div key={row.rosterId} className={`grid grid-cols-[minmax(180px,1.45fr)_78px_108px_88px_92px_92px_88px_82px_96px_92px_110px] gap-2 items-center rounded-xl border px-3 py-3 ${isMe ? "border-blue-700 bg-blue-950/20" : "border-gray-800 bg-gray-900"}`}>
@@ -584,7 +586,7 @@ function LeagueHub({
                             <div className="text-center text-sm text-amber-300">{Math.round(row.titleOdds)}%</div>
                             <div className="text-center text-sm text-rose-300">{Math.round(row.oneOhOneOdds || 0)}%</div>
                             <div className="text-center text-xs text-gray-300">
-                              {row.currentOpponent ? `${Math.round(row.currentWeekWinProb * 100)}% vs ${row.currentOpponent}` : `${Math.round(row.avgWinProb * 100)}% avg`}
+                              {row.currentOpponent ? `${Math.round((row.currentWeekWinProb ?? 0) * 100)}% vs ${row.currentOpponent}` : `${Math.round((row.avgWinProb ?? 0) * 100)}% avg`}
                             </div>
                           </div>
                         );
@@ -605,14 +607,14 @@ function LeagueHub({
                         </div>
                       </div>
                       <div className="mt-4 grid gap-3 lg:grid-cols-2">
-                        {selectedLeagueSimulation.weeklyMatchups.slice(0, 4).map((week: any) => (
+                        {selectedLeagueSimulation.weeklyMatchups.slice(0, 4).map((week) => (
                           <div key={week.week} className="rounded-xl border border-gray-800 bg-gray-950/60 p-3">
                             <div className="flex items-center justify-between">
                               <div className="text-xs font-semibold text-white">Week {week.week}</div>
                               <div className="text-[10px] uppercase tracking-wide text-gray-500">{week.source}</div>
                             </div>
                             <div className="mt-2 space-y-1.5">
-                              {week.matchups?.slice(0, 6).map((matchup: any, idx: number) => (
+                              {week.matchups?.slice(0, 6).map((matchup, idx) => (
                                 <div key={`${week.week}-${idx}`} className="flex items-center justify-between rounded-lg bg-gray-800/80 px-3 py-2 text-xs">
                                   <div className="min-w-0 text-gray-200">
                                     <span className="font-medium text-white">{matchup.aName}</span>
@@ -620,7 +622,7 @@ function LeagueHub({
                                     <span className="font-medium text-white">{matchup.bName}</span>
                                   </div>
                                   <div className="shrink-0 text-right text-gray-400">
-                                    {Math.round((matchup.winProb || 0) * 100)}% • {Math.round(matchup.projectedPoints || 0)}
+                                    {Math.round((matchup.aWinProb || 0) * 100)}% • {Math.round(matchup.aProjected || 0)}
                                   </div>
                                 </div>
                               ))}
@@ -652,11 +654,11 @@ function LeagueHub({
     />
 
     {leagues
-      .filter((l: any) =>
+      .filter((l) =>
         l.name.toLowerCase().includes(leagueSearch.toLowerCase())
       )
-      .sort((a: any, b: any) => a.name.localeCompare(b.name))
-      .map((l: any) => (
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((l) => (
         <div
   key={l.league_id}
   onClick={() => loadRoster(l)}
@@ -709,8 +711,8 @@ function LeagueHub({
                         <span className={`inline-flex text-[10px] font-semibold px-2 py-1 rounded-full border ${dir.bucketColor}`}>
                           {dir.bucket}
                         </span>
-                        {(dir as any).rawBucket && (dir as any).rawBucket !== dir.bucket && (
-                          <span className="text-[10px] text-gray-500">({(dir as any).rawBucket} by assets)</span>
+                        {dir.rawBucket && dir.rawBucket !== dir.bucket && (
+                          <span className="text-[10px] text-gray-500">({dir.rawBucket} by assets)</span>
                         )}
                       </div>
                     </div>
@@ -790,7 +792,7 @@ function LeagueHub({
 
   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">  {/* 👈 ADD THIS */}
 
-    {items.map((rule: any, i: number) => (
+    {items.map((rule, i) => (
       <div
         key={i}
         className="flex justify-between items-center bg-yellow-200/10 border border-yellow-500/20 rounded px-2 py-1.5"
@@ -879,8 +881,8 @@ function LeagueHub({
       {activeTab}
     </div>
 
-    {filteredPlayers?.map((p: any) => {
-      const colors: any = {
+    {filteredPlayers?.map((p) => {
+      const colors: Record<string, string> = {
         starter: "bg-green-800/60",
         bench: "bg-blue-800/40",
         taxi: "bg-purple-800/60",
@@ -889,14 +891,14 @@ function LeagueHub({
       return (
         <div
           key={p.player_id}
-          className={`flex items-center justify-between px-3 py-1.5 mb-1 rounded text-sm ${colors[p.role]}`}
+          className={`flex items-center justify-between px-3 py-1.5 mb-1 rounded text-sm ${colors[p.role ?? ""]}`}
         >
           {/* LEFT */}
           <div className="flex items-center gap-2 truncate">
             <span className="font-medium">{p.full_name}</span>
             <span className="text-xs text-gray-400">{p.team}</span>
             <span className="text-xs text-gray-500">
-              {p.role.toUpperCase()}
+              {(p.role ?? "").toUpperCase()}
             </span>
           </div>
 
@@ -921,30 +923,30 @@ function LeagueHub({
   const starterIds = new Set(roster?.starters || []);
 
   const allPlayers = (roster?.players || []).filter(
-    (id: any) => !taxiIds.has(id)
+    (id) => !taxiIds.has(id)
   );
 
   const starterSlots = getStarterSlots(roster, selectedLeague);
 
 const starters = starterSlots
-  .map((s: any) => ({
+  .map((s) => ({
     ...players[s.playerId],
     slot: s.slot,
   }))
-  .filter((p: any) => p && p.position === pos);
+  .filter((p) => p && p.position === pos);
 
   const bench = allPlayers
-  .filter((id: any) => !starterIds.has(id))
-  .map((id: any) => players[id])
-  .filter((p: any) => p && p.position === pos)
-  .sort((a: any, b: any) => (b.value || 0) - (a.value || 0));
+  .filter((id) => !starterIds.has(id))
+  .map((id) => players[id])
+  .filter((p) => p && p.position === pos)
+  .sort((a, b) => ((b?.value || 0) - (a?.value || 0)));
 
   const playersByPos = [...starters, ...bench].sort(
-    (a: any, b: any) => (b.value || 0) - (a.value || 0)
+    (a, b) => ((b?.value || 0) - (a?.value || 0))
   );
 
   const totalVal = playersByPos.reduce(
-    (sum: number, p: any) => sum + (p.value || 0),
+    (sum: number, p) => sum + (p?.value || 0),
     0
   );
 
@@ -964,7 +966,7 @@ const starters = starterSlots
       </div>
 
       {/* STARTERS */}
-      {starters.map((p: any, i: number) => (
+      {starters.map((p, i) => (
         <div
           key={`s-${i}`}
           className="flex justify-between items-center bg-green-900/30 border border-green-700 rounded p-2 mb-2"
@@ -983,7 +985,7 @@ const starters = starterSlots
       ))}
 
       {/* BENCH */}
-      {bench.map((p: any, i: number) => (
+      {bench.map((p, i) => (
         <div
           key={`b-${i}`}
           className="flex justify-between items-center bg-blue-900/30 border border-blue-700 rounded p-2 mb-2"
@@ -1013,13 +1015,13 @@ const starters = starterSlots
       <div className="text-xs text-gray-400">
         TOTAL TAXI VAL{" "}
         {(roster.taxi || [])
-          .map((id: any) => players[id])
-          .filter((p: any) => p)
-          .reduce((sum: number, p: any) => sum + (p.value || 0), 0)}
+          .map((id) => players[id])
+          .filter((p) => p)
+          .reduce((sum: number, p) => sum + (p?.value || 0), 0)}
       </div>
     </div>
 
-    {(roster.taxi || []).map((id: any, i: number) => {
+    {(roster.taxi || []).map((id, i) => {
       const p = players[id];
       if (!p) return null;
 
@@ -1047,11 +1049,8 @@ const starters = starterSlots
 <div className="mt-6">
   {YEARS.map((year) => {
     const yearPicks = picks
-      .filter((p: any) => p.season === year)
-      .sort((a: any, b: any) => {
-        if (a.round !== b.round) return a.round - b.round;
-        return (a.pick_no || 0) - (b.pick_no || 0);
-      });
+      .filter((p) => p.season === year)
+      .sort((a, b) => a.round - b.round);
 
     if (!yearPicks.length) return null;
 
@@ -1067,7 +1066,7 @@ const starters = starterSlots
         </div>
 
         <div className="flex flex-wrap gap-2">
-          {yearPicks.map((pick: any, i: number) => {
+          {yearPicks.map((pick, i) => {
             const ownerName =
               users[pick.roster_id] ||
               users[pick.owner_id] ||
@@ -1169,7 +1168,7 @@ const starters = starterSlots
       Top Free Agents (by Value)
     </div>
 
-    {freeAgents.map((p: any) => (
+    {freeAgents.map((p) => (
       <div
         key={p.player_id}
         className="flex justify-between items-center bg-gray-800/70 px-3 py-1.5 rounded-lg mb-1 text-sm"
@@ -1199,7 +1198,7 @@ const starters = starterSlots
                 return <p className="text-sm text-gray-500">Select a league from Rosters &amp; Rules first to view league-mate intelligence.</p>;
               }
 
-              const bestPartnerRosterId = (selectedLeagueMateProfilesView[0] as any)?.rosterId;
+              const bestPartnerRosterId = selectedLeagueMateProfilesView[0]?.rosterId;
 
               return (
                 <div className="space-y-4">
@@ -1227,7 +1226,7 @@ const starters = starterSlots
                   {selectedLeagueMateProfilesView.length === 0 ? (
                     <p className="text-sm text-gray-500">No league-mate profiles available yet.</p>
                   ) : (
-                    selectedLeagueMateProfilesView.map((mate: any) => {
+                    selectedLeagueMateProfilesView.map((mate) => {
                       const mateSimRow = selectedLeagueSimulation?.rowByRosterId?.get(Number(mate.rosterId));
                       const matePlayoffOdds = mateSimRow?.playoffOdds ?? 0;
                       const mateAdjBucket = getAdjustedDirectionBucket(
@@ -1333,12 +1332,12 @@ const starters = starterSlots
                                 Trades For {pos}
                               </span>
                             ))}
-                            {mate.repeatedPlayers?.slice(0, 3).map((player: any) => (
+                            {mate.repeatedPlayers?.slice(0, 3).map((player) => (
                               <span key={player.playerId} className="rounded-full border border-cyan-800 bg-cyan-950/30 px-3 py-1 text-[11px] text-cyan-200">
                                 Likes {player.name}
                               </span>
                             ))}
-                            {mate.acquiredPlayers?.slice(0, 2).map((player: any) => (
+                            {mate.acquiredPlayers?.slice(0, 2).map((player) => (
                               <span key={`acquired-${player.playerId}`} className="rounded-full border border-emerald-800 bg-emerald-950/30 px-3 py-1 text-[11px] text-emerald-200">
                                 Recently Bought {player.name}
                               </span>
@@ -1380,10 +1379,10 @@ const starters = starterSlots
                 <p className="text-sm text-gray-500">Select a league from Rosters &amp; Rules first to view opponent rosters.</p>
               );
 
-              const oppRolePriority: any = { starter: 0, bench: 1, taxi: 2 };
+              const oppRolePriority: Record<string, number> = { starter: 0, bench: 1, taxi: 2 };
 
               // Build opponent roster from selected owner
-              const oppRoster = rosters.find((r: any) => r.owner_id === oppRosterOwnerId);
+              const oppRoster = rosters.find((r) => r.owner_id === oppRosterOwnerId);
               const oppPlayerIds: string[] = oppRoster?.players || [];
               const oppTaxiIds = new Set<string>(oppRoster?.taxi || []);
               const oppStarterIds = new Set<string>(oppRoster?.starters || []);
@@ -1394,23 +1393,23 @@ const starters = starterSlots
                 return "bench";
               };
 
-              const oppGrouped: Record<string, any[]> = { QB: [], RB: [], WR: [], TE: [] };
+              const oppGrouped: Record<string, Array<SleeperPlayer & { role: string }>> = { QB: [], RB: [], WR: [], TE: [] };
               oppPlayerIds.forEach((id) => {
                 const p = players[id];
                 if (!p || !oppGrouped[p.position]) return;
                 oppGrouped[p.position].push({ ...p, role: getOppRole(id) });
               });
               Object.keys(oppGrouped).forEach((pos) => {
-                oppGrouped[pos].sort((a: any, b: any) => {
+                oppGrouped[pos].sort((a, b) => {
                   const rd = oppRolePriority[a.role] - oppRolePriority[b.role];
                   return rd !== 0 ? rd : (b.value || 0) - (a.value || 0);
                 });
               });
 
               const oppFilteredPlayers = (["QB","RB","WR","TE"].includes(oppRosterTab) ? oppGrouped[oppRosterTab] : [])
-                ?.filter((p: any) => p.full_name?.toLowerCase().includes(oppRosterSearch.toLowerCase()));
+                ?.filter((p) => p.full_name?.toLowerCase().includes(oppRosterSearch.toLowerCase()));
 
-              const oppPicksForOwner = allPicks.filter((p: any) => p.owner_id === oppRoster?.roster_id);
+              const oppPicksForOwner = allPicks.filter((p) => p.owner_id === oppRoster?.roster_id);
 
               const roleColors: Record<string, string> = {
                 starter: "bg-green-800/60",
@@ -1430,8 +1429,8 @@ const starters = starterSlots
                     >
                       <option value="">— select an owner —</option>
                       {rosters
-                        .filter((r: any) => r.owner_id && r.owner_id !== user?.user_id)
-                        .map((r: any) => (
+                        .filter((r) => r.owner_id && r.owner_id !== user?.user_id)
+                        .map((r) => (
                           <option key={r.roster_id} value={r.owner_id}>
                             {users[r.owner_id] || r.owner_id}
                           </option>
@@ -1472,7 +1471,7 @@ const starters = starterSlots
                       {["QB","RB","WR","TE"].includes(oppRosterTab) && (
                         <div className="bg-gray-900 border border-gray-700 rounded-xl p-4">
                           <div className="text-sm font-semibold mb-3 text-gray-300">{oppRosterTab}</div>
-                          {oppFilteredPlayers?.map((p: any) => (
+                          {oppFilteredPlayers?.map((p) => (
                             <div key={p.player_id} className={`flex items-center justify-between px-3 py-1.5 mb-1 rounded text-sm ${roleColors[p.role]}`}>
                               <div className="flex items-center gap-2 truncate">
                                 <span className="font-medium">{p.full_name}</span>
@@ -1493,16 +1492,16 @@ const starters = starterSlots
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           {["QB","RB","WR","TE"].map((pos) => {
                             const posPlayers = oppGrouped[pos];
-                            const starters = posPlayers.filter((p: any) => p.role === "starter");
-                            const bench = posPlayers.filter((p: any) => p.role === "bench");
-                            const totalVal = posPlayers.reduce((s: number, p: any) => s + (p.value || 0), 0);
+                            const starters = posPlayers.filter((p) => p.role === "starter");
+                            const bench = posPlayers.filter((p) => p.role === "bench");
+                            const totalVal = posPlayers.reduce((s: number, p) => s + (p.value || 0), 0);
                             return (
                               <div key={pos} className="bg-gray-900 border border-gray-700 rounded-lg p-4">
                                 <div className="flex justify-between mb-3">
                                   <div className="font-semibold text-sm">{pos} {posPlayers.length} TOTAL</div>
                                   <div className="text-xs text-gray-400">TOTAL {pos} VAL {totalVal}</div>
                                 </div>
-                                {starters.map((p: any, i: number) => (
+                                {starters.map((p, i) => (
                                   <div key={`s-${i}`} className="flex justify-between items-center bg-green-900/30 border border-green-700 rounded p-2 mb-2">
                                     <div className="flex items-center gap-2">
                                       <div className="text-xs px-2 py-1 rounded bg-green-700">STARTER</div>
@@ -1511,7 +1510,7 @@ const starters = starterSlots
                                     <div className="text-xs text-gray-300">VAL {p.value || 0}</div>
                                   </div>
                                 ))}
-                                {bench.map((p: any, i: number) => (
+                                {bench.map((p, i) => (
                                   <div key={`b-${i}`} className="flex justify-between items-center bg-blue-900/30 border border-blue-700 rounded p-2 mb-2">
                                     <div className="flex items-center gap-2">
                                       <div className="text-xs px-2 py-1 rounded bg-blue-700">{pos}{starters.length + i + 1}</div>
@@ -1550,14 +1549,14 @@ const starters = starterSlots
                         <div className="mt-2">
                           {YEARS.map((year) => {
                             const yearPicks = oppPicksForOwner
-                              .filter((p: any) => p.season === year)
-                              .sort((a: any, b: any) => a.round !== b.round ? a.round - b.round : (a.pick_no || 0) - (b.pick_no || 0));
+                              .filter((p) => p.season === year)
+                              .sort((a, b) => a.round - b.round);
                             if (!yearPicks.length) return null;
                             return (
                               <div key={year} className="mb-4 bg-gray-900 border border-gray-700 rounded-lg p-4">
                                 <div className="font-semibold text-sm mb-2">{year} Picks — {yearPicks.length} TOTAL</div>
                                 <div className="flex flex-wrap gap-2">
-                                  {yearPicks.map((pick: any, i: number) => {
+                                  {yearPicks.map((pick, i) => {
                                     const label = pick.season === CURRENT_YEAR ? pick.slot : `${pick.round}${["th","st","nd","rd"][pick.round] || "th"}`;
                                     const originalOwner = users[pick.roster_id] || "";
                                     return (
@@ -1605,9 +1604,9 @@ const starters = starterSlots
               const week = nflState?.week;
               const isInSeason = nflState?.season_type === "regular";
               const projectionBySleeperId = new Map(
-                projectionData.map((row: any) => [String(row.sleeperId), row])
+                projectionData.map((row) => [String(row.sleeperId), row])
               );
-              const hasKickoffData = projectionData.some((row: any) => getProjectionKickoffAt(row));
+              const hasKickoffData = projectionData.some((row) => getProjectionKickoffAt(row as unknown as Record<string, unknown>));
 
               // Score function: uses projections if in-season, redraft values otherwise
               const playerScore = (id: string) => {
@@ -1621,17 +1620,17 @@ const starters = starterSlots
               const playerKickoffAt = (id: string) => {
                 if (!isInSeason) return null;
                 const proj = projectionBySleeperId.get(String(id));
-                return getProjectionKickoffAt(proj);
+                return proj ? getProjectionKickoffAt(proj as unknown as Record<string, unknown>) : null;
               };
 
               const positions: string[] = selectedLeague.roster_positions?.filter((p: string) => !["BN","IR","TAXI"].includes(p)) ?? [];
               const myPlayerIds: string[] = roster.players ?? [];
-              const taxiIds = new Set<string>((roster.taxi ?? []).map((id: any) => String(id)));
+              const taxiIds = new Set<string>((roster.taxi ?? []).map((id) => String(id)));
               const used = new Set<string>();
               const initialLineup: LineupCoachRow[] = [];
               const currentStarterRows = positions.map((slot: string, index: number) => {
                 const starterId = String(roster?.starters?.[index] || "");
-                const starterPlayer = starterId ? (players as any)[starterId] : null;
+                const starterPlayer = starterId ? players[starterId] : null;
                 return {
                   slot,
                   player: starterPlayer,
@@ -1645,7 +1644,7 @@ const starters = starterSlots
                 const eligible = getLineupSlotEligiblePositions(slot);
                 const best = myPlayerIds
                   .filter(id => !used.has(id))
-                  .map(id => ({ id, p: (players as any)[id] }))
+                  .map(id => ({ id, p: players[id] }))
                   .filter(({ p }) => p && eligible.includes(p.position))
                   .sort((a, b) => playerScore(b.id) - playerScore(a.id))[0];
                 if (best) {
@@ -1660,15 +1659,15 @@ const starters = starterSlots
 
               const benchPlayers = myPlayerIds
                 .filter((id) => !used.has(id) && !taxiIds.has(String(id)))
-                .map((id) => (players as any)[id])
-                .filter((p: any) => p)
-                .sort((a: any, b: any) => playerScore(b.player_id) - playerScore(a.player_id));
+                .map((id) => players[id])
+                .filter((p): p is SleeperPlayer => !!p)
+                .sort((a, b) => playerScore(b.player_id) - playerScore(a.player_id));
 
               const taxiPlayers = myPlayerIds
                 .filter((id) => taxiIds.has(String(id)))
-                .map((id) => (players as any)[id])
-                .filter((p: any) => p)
-                .sort((a: any, b: any) => playerScore(b.player_id) - playerScore(a.player_id));
+                .map((id) => players[id])
+                .filter((p): p is SleeperPlayer => !!p)
+                .sort((a, b) => playerScore(b.player_id) - playerScore(a.player_id));
 
               const lineupCoachNotes = lineup
                 .map(({ slot, player, score }, index) => {
@@ -1705,8 +1704,8 @@ const starters = starterSlots
                 })
                 .filter(Boolean) as Array<{
                   slot: string;
-                  suggested: any;
-                  current: any;
+                  suggested: SleeperPlayer;
+                  current: SleeperPlayer | null | undefined;
                   delta: number;
                   reason: string;
                 }>;
@@ -1805,7 +1804,7 @@ const starters = starterSlots
                         {benchPlayers.length === 0 ? (
                           <p className="text-xs text-gray-600 italic">No bench players</p>
                         ) : (
-                          benchPlayers.map((player: any) => {
+                          benchPlayers.map((player) => {
                             const score = playerScore(player.player_id);
                             return (
                               <div key={player.player_id} className="flex items-center gap-2 rounded-lg bg-gray-800/80 px-3 py-1.5">
@@ -1828,7 +1827,7 @@ const starters = starterSlots
                         {taxiPlayers.length === 0 ? (
                           <p className="text-xs text-gray-600 italic">No taxi players</p>
                         ) : (
-                          taxiPlayers.map((player: any) => {
+                          taxiPlayers.map((player) => {
                             const score = playerScore(player.player_id);
                             return (
                               <div key={player.player_id} className="flex items-center gap-2 rounded-lg bg-gray-800/80 px-3 py-1.5">
@@ -1859,11 +1858,11 @@ const starters = starterSlots
                       className="bg-gray-800 border border-gray-700 text-sm text-white rounded-lg px-2 py-1 focus:outline-none focus:border-blue-500"
                       value={noteLeague.league_id}
                       onChange={(e) => {
-                        const l = leagues.find((lg: any) => lg.league_id === e.target.value);
+                        const l = leagues.find((lg) => lg.league_id === e.target.value);
                         if (l) setSelectedLeague(l);
                       }}
                     >
-                      {leagues.map((lg: any) => <option key={lg.league_id} value={lg.league_id}>{lg.name}</option>)}
+                      {leagues.map((lg) => <option key={lg.league_id} value={lg.league_id}>{lg.name}</option>)}
                     </select>
                   </div>
                   <textarea
@@ -1886,58 +1885,59 @@ const starters = starterSlots
               );
               if (loadingCalcValues) return <p className="text-sm text-blue-400">Loading player values…</p>;
 
-              const calcVal = (id: string) => calcFcValues[id] ?? (players as any)[id]?.value ?? 0;
+              const calcVal = (id: string) => calcFcValues[id] ?? players[id]?.value ?? 0;
 
-              const rosterPositions: string[] = (selectedLeague as any)?.roster_positions || [];
+              const rosterPositions: string[] = selectedLeague.roster_positions || [];
 
               // Project optimal starters given roster positions and player values
-              const projectStarterIds = (playerList: any[]): Set<string> => {
-                const starterSlots = rosterPositions.filter((s: string) => s !== "BN" && s !== "TAXI");
-                const available = [...playerList].sort((a: any, b: any) => b.dynVal - a.dynVal);
+              type PRPlayer = SleeperPlayer & { dynVal: number; redVal: number };
+              const projectStarterIds = (playerList: PRPlayer[]): Set<string> => {
+                const starterSlots = rosterPositions.filter((s) => s !== "BN" && s !== "TAXI");
+                const available = [...playerList].sort((a, b) => b.dynVal - a.dynVal);
                 const starterIds = new Set<string>();
                 const pickBest = (eligible: string[]) => {
-                  const idx = available.findIndex((p: any) => eligible.includes(p.position));
+                  const idx = available.findIndex((p) => eligible.includes(p.position));
                   if (idx !== -1) { starterIds.add(available[idx].player_id); available.splice(idx, 1); }
                 };
-                starterSlots.filter((s: string) => ["QB","RB","WR","TE","K","DEF"].includes(s)).forEach((s: string) => pickBest([s]));
-                starterSlots.filter((s: string) => s === "WRRB_FLEX").forEach(() => pickBest(["WR","RB"]));
-                starterSlots.filter((s: string) => s === "FLEX").forEach(() => pickBest(["RB","WR","TE"]));
-                starterSlots.filter((s: string) => s === "SUPER_FLEX").forEach(() => pickBest(["QB","RB","WR","TE"]));
+                starterSlots.filter((s) => ["QB","RB","WR","TE","K","DEF"].includes(s)).forEach((s) => pickBest([s]));
+                starterSlots.filter((s) => s === "WRRB_FLEX").forEach(() => pickBest(["WR","RB"]));
+                starterSlots.filter((s) => s === "FLEX").forEach(() => pickBest(["RB","WR","TE"]));
+                starterSlots.filter((s) => s === "SUPER_FLEX").forEach(() => pickBest(["QB","RB","WR","TE"]));
                 return starterIds;
               };
 
               // Build all rosters with per-position dynasty totals + picks
-              const prRows = rosters.map((r: any) => {
+              const prRows = rosters.map((r) => {
                 const ownerId = r.owner_id;
-                const ownerName = (users as any)[ownerId] || `Team ${r.roster_id}`;
+                const ownerName = users[ownerId] || `Team ${r.roster_id}`;
                 const allPlayerList = (r.players || []).map((id: string) => {
-                  const p = (players as any)[id];
+                  const p = players[id];
                   return p ? { ...p, dynVal: calcVal(id), redVal: redraftValues[id] || 0 } : null;
-                }).filter(Boolean);
+                }).filter((p): p is PRPlayer => !!p);
 
                 const starterIds = projectStarterIds(allPlayerList);
                 const playerList = prMode === "starters"
-                  ? allPlayerList.filter((p: any) => starterIds.has(p.player_id))
+                  ? allPlayerList.filter((p) => starterIds.has(p.player_id))
                   : prMode === "bench"
-                  ? allPlayerList.filter((p: any) => !starterIds.has(p.player_id))
+                  ? allPlayerList.filter((p) => !starterIds.has(p.player_id))
                   : allPlayerList;
 
                 const pickVal = prMode === "full"
-                  ? (allPicks as any[]).filter((p: any) => p.owner_id === r.roster_id).reduce((s: number, p: any) => s + getStoredPickValue(pickFcValues, p), 0)
+                  ? allPicks.filter((p) => p.owner_id === r.roster_id).reduce((s: number, p) => s + getStoredPickValue(pickFcValues, p), 0)
                   : 0;
 
-                const dynTotal = playerList.reduce((s: number, p: any) => s + p.dynVal, 0) + pickVal;
-                const redTotal = playerList.reduce((s: number, p: any) => s + p.redVal, 0);
-                const qbTotal  = playerList.filter((p: any) => p.position === "QB").reduce((s: number, p: any) => s + p.dynVal, 0);
-                const rbTotal  = playerList.filter((p: any) => p.position === "RB").reduce((s: number, p: any) => s + p.dynVal, 0);
-                const wrTotal  = playerList.filter((p: any) => p.position === "WR").reduce((s: number, p: any) => s + p.dynVal, 0);
-                const teTotal  = playerList.filter((p: any) => p.position === "TE").reduce((s: number, p: any) => s + p.dynVal, 0);
+                const dynTotal = playerList.reduce((s: number, p) => s + p.dynVal, 0) + pickVal;
+                const redTotal = playerList.reduce((s: number, p) => s + p.redVal, 0);
+                const qbTotal  = playerList.filter((p) => p.position === "QB").reduce((s: number, p) => s + p.dynVal, 0);
+                const rbTotal  = playerList.filter((p) => p.position === "RB").reduce((s: number, p) => s + p.dynVal, 0);
+                const wrTotal  = playerList.filter((p) => p.position === "WR").reduce((s: number, p) => s + p.dynVal, 0);
+                const teTotal  = playerList.filter((p) => p.position === "TE").reduce((s: number, p) => s + p.dynVal, 0);
 
                 return { roster_id: r.roster_id, ownerId, ownerName, playerList, pickVal, dynTotal, redTotal, qbTotal, rbTotal, wrTotal, teTotal };
               });
 
               const prRosterToName: Record<number, string> = {};
-              rosters.forEach((r: any) => { prRosterToName[Number(r.roster_id)] = (users as any)[r.owner_id] || `Team ${r.roster_id}`; });
+              rosters.forEach((r) => { prRosterToName[Number(r.roster_id)] = users[r.owner_id] || `Team ${r.roster_id}`; });
 
               const rankMap = (key: "dynTotal"|"redTotal"|"qbTotal"|"rbTotal"|"wrTotal"|"teTotal") => {
                 const sorted = [...prRows].sort((a, b) => b[key] - a[key]);
@@ -2205,7 +2205,7 @@ const starters = starterSlots
                         // roster_id → display name map for cell owner rows
                         const rosterToName: Record<number, string> = {};
                         (rosters as any[]).forEach((r: any) => {
-                          rosterToName[Number(r.roster_id)] = (users as any)[r.owner_id] || `Team ${r.roster_id}`;
+                          rosterToName[Number(r.roster_id)] = users[r.owner_id] || `Team ${r.roster_id}`;
                         });
                         return (
                           <div className="overflow-x-auto lg:overflow-x-visible">
@@ -2237,7 +2237,7 @@ const starters = starterSlots
                                   const slotOwner = slotOwnerMap[slotStr];
                                   const isMySlot = slotOwner === Number(myRosterId);
                                   const playerPick = draftPicks.find((dp: any) => dp.round === round && Number(dp.roster_id ?? dp.picked_by) === slotOwner);
-                                  const actualPlayer = playerPick ? (players as any)[playerPick.player_id] : null;
+                                  const actualPlayer = playerPick ? players[playerPick.player_id] : null;
                                   const userOverrideId = myDraftSlotPicks[slotStr];
                                   const userOverride = userOverrideId ? rookies.find((r: any) => r.player_id === userOverrideId || r.name === userOverrideId) : null;
                                   const prediction = !actualPlayer && !userOverrideId ? predictedDraftPicks[slotStr] : null;
@@ -2365,7 +2365,7 @@ const starters = starterSlots
               rosters.forEach((r: any) => { rosterToUser[r.roster_id] = r.owner_id; });
               const ownerName = (rosterId: number) => {
                 const uid = rosterToUser[rosterId];
-                return (users as any)[uid] || `Team ${rosterId}`;
+                return users[uid] || `Team ${rosterId}`;
               };
 
               const fmtTs = (ts: number) => {
@@ -2434,7 +2434,7 @@ const starters = starterSlots
                                     <div className="mb-1">
                                       <p className="text-[10px] text-green-500 uppercase font-bold mb-0.5">Received</p>
                                       {got.map(pid => {
-                                        const p = (players as any)[pid];
+                                        const p = players[pid];
                                         return p ? (
                                           <button key={pid} onClick={() => setPlayerProfileId(pid)} className="block text-xs text-white hover:text-blue-400 transition text-left">
                                             {p.full_name} <span className="text-gray-500">{p.position}</span>
@@ -2450,7 +2450,7 @@ const starters = starterSlots
                                     <div>
                                       <p className="text-[10px] text-red-400 uppercase font-bold mb-0.5">Gave</p>
                                       {gave.map(pid => {
-                                        const p = (players as any)[pid];
+                                        const p = players[pid];
                                         return p ? (
                                           <button key={pid} onClick={() => setPlayerProfileId(pid)} className="block text-xs text-gray-400 hover:text-blue-400 transition text-left line-through">
                                             {p.full_name} <span className="text-gray-600">{p.position}</span>
@@ -2476,7 +2476,7 @@ const starters = starterSlots
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border shrink-0 mt-0.5 ${typeColor}`}>{typeLabel}</span>
                         <div className="min-w-0 flex-1">
                           {adds.map(([pid, rid]) => {
-                            const p = (players as any)[pid];
+                            const p = players[pid];
                             return p ? (
                               <div key={pid} className="flex items-center gap-1.5 text-xs">
                                 <span className="text-green-400 font-bold">+</span>
@@ -2489,7 +2489,7 @@ const starters = starterSlots
                             ) : null;
                           })}
                           {drops.map(([pid, rid]) => {
-                            const p = (players as any)[pid];
+                            const p = players[pid];
                             return p ? (
                               <div key={pid} className="flex items-center gap-1.5 text-xs">
                                 <span className="text-red-400 font-bold">−</span>

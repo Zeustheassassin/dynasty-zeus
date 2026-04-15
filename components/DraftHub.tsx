@@ -3,8 +3,13 @@ import React, { useState, useEffect } from "react";
 import { supabase } from "../lib/supabaseclient";
 import { usePlayers } from "../lib/PlayersContext";
 import { useAuth } from "../lib/AuthContext";
+import { useLeague } from "../lib/LeagueContext";
 import PickValuesTab from "./draft/PickValuesTab";
 import { CURRENT_YEAR as ROOKIE_YEAR } from "../lib/helpers";
+import type {
+  SleeperLeague, SleeperUser, SleeperDraft, SleeperDraftPick,
+  AugmentedPick, RookieBoardPlayer, PredictedPick,
+} from "../lib/types";
 
 // ── Module-level constants ─────────────────────────────────────────────────
 // Upper bound for the draft grid — supports up to 6-round rookie drafts.
@@ -103,6 +108,64 @@ function valueGrade(val: number): { label: string; cls: string } {
   return               { label: "Bust",       cls: "text-red-400   bg-red-900/30    border-red-700/50"    };
 }
 
+// ── Local draft-history types ──────────────────────────────────────────────
+/** A single pick in a historical rookie draft. */
+interface HistoryDraftPick {
+  slot: string;
+  pickNo: number;
+  player_id: string;
+  name: string;
+  position: string;
+  team: string;
+  value: number;
+  pickedByUserId: string | null;
+}
+
+/** One historical draft entry assembled from the Sleeper API. */
+interface HistoryDraftEntry {
+  leagueName: string;
+  leagueId: string;
+  season: string;
+  draftId: string;
+  picks: HistoryDraftPick[];
+}
+
+/** Minimal Sleeper draft shape from the /league/:id/drafts endpoint. */
+interface SleeperDraftBasic {
+  draft_id: string;
+  status: string;
+  season: string;
+  settings?: { rounds?: number };
+  rounds?: number;
+}
+
+/** Minimal pick shape from the /draft/:id/picks endpoint. */
+interface SleeperPickBasic {
+  player_id: string;
+  round: number;
+  draft_slot: number;
+  pick_no: number;
+  picked_by: string | null;
+  metadata?: { first_name?: string; last_name?: string; position?: string; team?: string };
+}
+
+/** A row from the consensus_draft_cache Supabase table. */
+interface ConsensusCacheRow {
+  player_id: string;
+  player_name: string;
+  position: string;
+  team: string;
+  avg_pick_no: number;
+  draft_count: number;
+}
+
+/** A single cell in the draft board grid — either a real pick or an empty-slot placeholder. */
+interface GridPick {
+  slot: string;
+  owner_id: number | null;
+  roster_id: number | null;
+}
+
 // ── Props ──────────────────────────────────────────────────────────────────
 interface DraftHubProps {
   draftHubSection: "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES";
@@ -115,17 +178,14 @@ interface DraftHubProps {
   draftSlotSearchQuery: string;
   setDraftSlotSearchQuery: (query: string) => void;
 
-  selectedLeague: any;
-  rosters: any[];
-  user: any;
-  users: any;
+  user: SleeperUser | null;
 
-  draftSettings: any;
-  draftPicks: any[];
-  draftOrder: any;
-  allPicks: any[];
+  draftSettings: SleeperDraft | null;
+  draftPicks: SleeperDraftPick[];
+  draftOrder: Record<string, number>;
+  allPicks: AugmentedPick[];
 
-  rookies: any[];
+  rookies: RookieBoardPlayer[];
   rookieSearch: string;
   setRookieSearch: (s: string) => void;
   dragIndex: number | null;
@@ -134,8 +194,8 @@ interface DraftHubProps {
   setTempRanks: React.Dispatch<React.SetStateAction<Record<number, string>>>;
 
   draftedPlayerIds: Set<string>;
-  predictedDraftPicks: Record<string, any>;
-  topAvailableRookies: any[];
+  predictedDraftPicks: Record<string, PredictedPick>;
+  topAvailableRookies: RookieBoardPlayer[];
 
   refreshDraftBoard: () => void;
   loadDraftScout: (userId: string) => void;
@@ -144,7 +204,7 @@ interface DraftHubProps {
   loadingDraftRefresh: boolean;
 
   // New props for new features
-  leagues: any[];
+  leagues: SleeperLeague[];
   calcFcValues: Record<string, number>;
   pickFcValues: Record<string, number>;
   fcNameValues: Record<string, number>;
@@ -156,7 +216,7 @@ function DraftHub({
   myDraftSlotPicks, setMyDraftSlotPicks,
   draftSlotEditing, setDraftSlotEditing,
   draftSlotSearchQuery, setDraftSlotSearchQuery,
-  selectedLeague, rosters, user, users,
+  user,
   draftSettings, draftPicks, draftOrder, allPicks,
   rookies, rookieSearch, setRookieSearch,
   dragIndex, setDragIndex, tempRanks, setTempRanks,
@@ -167,6 +227,7 @@ function DraftHub({
 }: DraftHubProps) {
   const players = usePlayers();
   const { supabaseUser } = useAuth();
+  const { selectedLeague, rosters, users } = useLeague();
 
   // ── Internal state ───────────────────────────────────────────────────────
   // Tier labels: { playerId: tierNumber 1-15 }
@@ -180,7 +241,7 @@ function DraftHub({
   const [posFilter, setPosFilter] = useState<string | null>(null);
 
   // Historical draft review
-  const [historyData, setHistoryData]         = useState<any[]>([]);
+  const [historyData, setHistoryData]         = useState<HistoryDraftEntry[]>([]);
   const [historyLoading, setHistoryLoading]   = useState(false);
   const [historyLoaded, setHistoryLoaded]     = useState(false);
   const [historyTab, setHistoryTab]           = useState<"LEAGUE" | "CONSENSUS" | "MY_PICKS" | "GRADES">("LEAGUE");
@@ -191,7 +252,7 @@ function DraftHub({
   const [consensusMeta, setConsensusMeta] = useState<Record<string, {
     draftCount: number; leagueCount: number; connectedUserCount: number; compiledAt: string;
   }>>({});
-  const [consensusCache, setConsensusCache] = useState<Record<string, any[]>>({});
+  const [consensusCache, setConsensusCache] = useState<Record<string, ConsensusCacheRow[]>>({});
   const [loadingCacheYear, setLoadingCacheYear] = useState<string | null>(null);
   const [compiling, setCompiling] = useState(false);
   const [compileLog, setCompileLog] = useState("");
@@ -221,9 +282,9 @@ function DraftHub({
       .select("grades")
       .eq("user_id", supabaseUser.id)
       .single()
-      .then(({ data }: { data: any }) => {
+      .then(({ data }: { data: { grades: Record<string, string> } | null }) => {
         if (data?.grades && typeof data.grades === "object") {
-          setPlayerGrades(data.grades);
+          setPlayerGrades(data.grades as Record<string, "hit" | "neutral" | "bust">);
           try { localStorage.setItem("consensusPlayerGrades", JSON.stringify(data.grades)); } catch {}
         } else {
           // No Supabase row yet — seed from localStorage if present
@@ -242,7 +303,7 @@ function DraftHub({
         { user_id: supabaseUser.id, grades, updated_at: new Date().toISOString() },
         { onConflict: "user_id" }
       )
-      .then(({ error }: { error: any }) => {
+      .then(({ error }: { error: { message: string } | null }) => {
         if (error) console.error("grade sync failed:", error.message);
       });
   };
@@ -306,9 +367,9 @@ function DraftHub({
     setHistoryLoading(true);
 
     const load = async () => {
-      const results: any[] = [];
+      const results: HistoryDraftEntry[] = [];
 
-      await Promise.all(leagues.map(async (league: any) => {
+      await Promise.all(leagues.map(async (league) => {
         // Follow previous_league_id chain up to 3 years back
         const toCheck: Array<{ id: string; name: string }> = [];
         let prevId: string | null = league.previous_league_id ?? null;
@@ -324,19 +385,19 @@ function DraftHub({
 
         await Promise.all(toCheck.map(async ({ id: leagueId, name: leagueName }) => {
           try {
-            const drafts = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/drafts`).then(r => r.json());
+            const drafts: SleeperDraftBasic[] = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/drafts`).then(r => r.json());
             if (!Array.isArray(drafts)) return;
-            const rookieDrafts = drafts.filter((d: any) =>
+            const rookieDrafts = drafts.filter((d) =>
               d.status === "complete" &&
               (d.settings?.rounds ?? d.rounds ?? 99) <= 6 &&
               d.season !== ROOKIE_YEAR
             );
-            await Promise.all(rookieDrafts.map(async (draft: any) => {
+            await Promise.all(rookieDrafts.map(async (draft) => {
               try {
-                const picks = await fetch(`https://api.sleeper.app/v1/draft/${draft.draft_id}/picks`).then(r => r.json());
+                const picks: SleeperPickBasic[] = await fetch(`https://api.sleeper.app/v1/draft/${draft.draft_id}/picks`).then(r => r.json());
                 if (!Array.isArray(picks)) return;
-                const processed = picks.map((pick: any) => {
-                  const p = (players as any)[pick.player_id];
+                const processed: HistoryDraftPick[] = picks.map((pick) => {
+                  const p = players[pick.player_id];
                   const val = calcFcValues[pick.player_id] ?? p?.value ?? 0;
                   return {
                     slot: `${pick.round}.${String(pick.draft_slot).padStart(2, "0")}`,
@@ -348,7 +409,7 @@ function DraftHub({
                     value: val,
                     pickedByUserId: pick.picked_by || null,
                   };
-                }).sort((a: any, b: any) => a.pickNo - b.pickNo);
+                }).sort((a, b) => a.pickNo - b.pickNo);
                 results.push({ leagueName, leagueId, season: draft.season, draftId: draft.draft_id, picks: processed });
               } catch {}
             }));
@@ -370,7 +431,7 @@ function DraftHub({
   useEffect(() => {
     if (selectedHistoryYear !== "ALL") return;
     const allYears = Array.from(new Set([
-      ...historyData.map((d: any) => d.season),
+      ...historyData.map((d) => d.season),
       ...Object.keys(consensusMeta),
     ])).sort().reverse() as string[];
     if (allYears.length > 0) setSelectedHistoryYear(allYears[0]);
@@ -387,10 +448,10 @@ function DraftHub({
       .from("consensus_draft_meta")
       .select("year, total_drafts, total_leagues, connected_user_count, compiled_at")
       .eq("user_id", supabaseUser.id)
-      .then(({ data }: { data: any }) => {
+      .then(({ data }) => {
         if (!data) return;
         const meta: typeof consensusMeta = {};
-        data.forEach((row: any) => {
+        (data as Array<{ year: number; total_drafts: number; total_leagues: number; connected_user_count: number; compiled_at: string }>).forEach((row) => {
           meta[String(row.year)] = {
             draftCount:         row.total_drafts,
             leagueCount:        row.total_leagues,
@@ -412,8 +473,8 @@ function DraftHub({
         .select("player_id, player_name, position, avg_pick_no")
         .eq("user_id", supabaseUser.id)
         .eq("year", parseInt(year, 10))
-        .then(({ data }: { data: any }) => {
-          setConsensusCache((prev) => ({ ...prev, [year]: data ?? [] }));
+        .then(({ data }) => {
+          setConsensusCache((prev) => ({ ...prev, [year]: (data ?? []) as ConsensusCacheRow[] }));
         });
     });
   }, [historyTab, supabaseUser?.id]); // eslint-disable-line
@@ -432,8 +493,8 @@ function DraftHub({
       .eq("user_id", supabaseUser.id)
       .eq("year", parseInt(selectedHistoryYear, 10))
       .order("avg_pick_no", { ascending: true })
-      .then(({ data }: { data: any }) => {
-        setConsensusCache((prev) => ({ ...prev, [selectedHistoryYear]: data ?? [] }));
+      .then(({ data }) => {
+        setConsensusCache((prev) => ({ ...prev, [selectedHistoryYear]: (data ?? []) as ConsensusCacheRow[] }));
         setLoadingCacheYear(null);
       });
   }, [supabaseUser?.id, historyTab, selectedHistoryYear, consensusMeta]); // eslint-disable-line
@@ -503,8 +564,8 @@ function DraftHub({
           } catch { /* malformed line — skip */ }
         }
       }
-    } catch (err: any) {
-      setCompileLog(`Error: ${err?.message ?? "Unknown error"}`);
+    } catch (err) {
+      setCompileLog(`Error: ${(err as Error)?.message ?? "Unknown error"}`);
     }
 
     setCompiling(false);
@@ -522,7 +583,7 @@ function DraftHub({
       .eq("player_id", playerId);
     setConsensusCache((prev) => ({
       ...prev,
-      [year]: (prev[year] ?? []).filter((r: any) => r.player_id !== playerId),
+      [year]: (prev[year] ?? []).filter((r) => r.player_id !== playerId),
     }));
   };
 
@@ -545,7 +606,7 @@ function DraftHub({
     supabase.from("rookie_board_tiers").upsert(
       { user_id: supabaseUser.id, year: ROOKIE_YEAR, tiers, updated_at: new Date().toISOString() },
       { onConflict: "user_id,year" }
-    ).then(({ error }: { error: any }) => {
+    ).then(({ error }) => {
       if (error) console.error("tier sync failed:", error.message);
     });
   };
@@ -573,20 +634,21 @@ function DraftHub({
 
   // ── History computed values ───────────────────────────────────────────────
   const availableYears = Array.from(new Set([
-    ...historyData.map((d: any) => d.season),
+    ...historyData.map((d) => d.season),
     ...Object.keys(consensusMeta),
   ])).sort().reverse() as string[];
 
   const filteredDrafts = selectedHistoryYear === "ALL"
     ? historyData
-    : historyData.filter((d: any) => d.season === selectedHistoryYear);
+    : historyData.filter((d) => d.season === selectedHistoryYear);
 
-  const currentLeagueDraft = filteredDrafts.find((d: any) => d.leagueName === selectedLeague?.name) ?? null;
-  const allFilteredPicks: any[] = filteredDrafts.flatMap((d: any) => d.picks);
+  const currentLeagueDraft = filteredDrafts.find((d) => d.leagueName === selectedLeague?.name) ?? null;
+  const allFilteredPicks: HistoryDraftPick[] = filteredDrafts.flatMap((d) => d.picks);
 
   const consensusList = (() => {
-    const map = new Map<string, any>();
-    allFilteredPicks.forEach((pick: any) => {
+    interface PickAcc extends HistoryDraftPick { picks: number[]; slots: string[]; draftCount?: number; avgPickNo?: number; }
+    const map = new Map<string, PickAcc>();
+    allFilteredPicks.forEach((pick) => {
       if (!pick.player_id || pick.name === "Unknown") return;
       if (!map.has(pick.player_id)) map.set(pick.player_id, { ...pick, picks: [], slots: [] });
       const e = map.get(pick.player_id)!;
@@ -600,8 +662,9 @@ function DraftHub({
   })();
 
   const myPicksList = (() => {
-    const map = new Map<string, any>();
-    allFilteredPicks.filter((p: any) => p.pickedByUserId === user?.user_id).forEach((pick: any) => {
+    interface MyPickAcc extends HistoryDraftPick { picks: number[]; slots: string[]; timesDrafted?: number; avgPickNo?: number; }
+    const map = new Map<string, MyPickAcc>();
+    allFilteredPicks.filter((p) => p.pickedByUserId === user?.user_id).forEach((pick) => {
       if (!pick.player_id || pick.name === "Unknown") return;
       if (!map.has(pick.player_id)) map.set(pick.player_id, { ...pick, picks: [], slots: [] });
       const e = map.get(pick.player_id)!;
@@ -625,7 +688,7 @@ function DraftHub({
       const sep      = key.indexOf("_");
       const year     = key.substring(0, sep);
       const playerId = key.substring(sep + 1);
-      const cacheRow = (consensusCache[year] ?? []).find((r: any) => r.player_id === playerId);
+      const cacheRow = (consensusCache[year] ?? []).find((r) => r.player_id === playerId);
       if (!cacheRow) return; // year not loaded yet — skip
 
       const slot = toPickSlot(cacheRow.avg_pick_no);
@@ -664,10 +727,10 @@ function DraftHub({
   })();
 
   // ── Derived ──────────────────────────────────────────────────────────────
-  const myRosterId = rosters.find((r: any) => r.owner_id === user?.user_id)?.roster_id;
+  const myRosterId = rosters.find((r) => r.owner_id === user?.user_id)?.roster_id;
   const rosterToName: Record<number, string> = {};
-  (rosters as any[]).forEach((r: any) => {
-    rosterToName[Number(r.roster_id)] = (users as any)[r.owner_id] || `Team ${r.roster_id}`;
+  rosters.forEach((r) => {
+    rosterToName[Number(r.roster_id)] = users[r.owner_id] || `Team ${r.roster_id}`;
   });
 
   const TABS = [
@@ -766,8 +829,8 @@ function DraftHub({
               </div>
               <div className="flex flex-wrap gap-2">
                 {(["QB", "RB", "WR", "TE"] as const).map((pos) => {
-                  const taken = draftPicks.filter((dp: any) => (players as any)[dp.player_id]?.position === pos).length;
-                  const avail = rookies.filter((r: any) => r.position === pos && !draftedPlayerIds.has(String(r.player_id))).length;
+                  const taken = draftPicks.filter((dp) => players[dp.player_id]?.position === pos).length;
+                  const avail = rookies.filter((r) => r.position === pos && !draftedPlayerIds.has(String(r.player_id))).length;
                   const pctTaken = draftPicks.length > 0 ? Math.round((taken / draftPicks.length) * 100) : 0;
                   const barColors: Record<string, string> = { QB: "bg-red-500", RB: "bg-green-500", WR: "bg-blue-500", TE: "bg-yellow-500" };
                   return (
@@ -798,7 +861,7 @@ function DraftHub({
               const userId = Object.keys(draftOrder).find((uid) => draftOrder[uid] === slot);
               const teamName = (userId && users[userId]) || `Team ${slot}`;
               const r1slot = `1.${String(slot).padStart(2, "0")}`;
-              const r1pick = allPicks.find((p: any) => p.slot === r1slot);
+              const r1pick = allPicks.find((p) => p.slot === r1slot);
               const isMe = r1pick && String(r1pick.owner_id) === String(myRosterId);
               return (
                 <button
@@ -814,22 +877,22 @@ function DraftHub({
 
             {/* Pick cells — respects league's actual round count via activeRounds */}
             {activeRounds.flatMap((round) => {
-              const roundPicks = Array.from({ length: rosters.length }, (_, i) => {
+              const roundPicks: GridPick[] = Array.from({ length: rosters.length }, (_, i) => {
                 const slot = `${round}.${String(i + 1).padStart(2, "0")}`;
-                const pick = allPicks.find((p: any) => p.slot === slot);
-                return pick || { slot, owner_id: null, roster_id: null };
+                const pick = allPicks.find((p) => p.slot === slot);
+                return pick ? { slot: pick.slot ?? slot, owner_id: pick.owner_id ?? null, roster_id: pick.roster_id } : { slot, owner_id: null, roster_id: null };
               });
 
-              return roundPicks.map((pick: any, i: number) => {
-                const slotStr = pick.slot as string;
+              return roundPicks.map((pick, i) => {
+                const slotStr = pick.slot;
                 const playerPick = draftPicks.find(
-                  (dp: any) => dp.round === round && dp.roster_id === pick.owner_id
+                  (dp) => dp.round === round && dp.roster_id === pick.owner_id
                 );
-                const actualPlayer = playerPick ? (players as any)[playerPick.player_id] : null;
+                const actualPlayer = playerPick ? players[playerPick.player_id] : null;
                 const isMySlot = pick.owner_id && String(pick.owner_id) === String(myRosterId);
                 const userOverrideId = myDraftSlotPicks[slotStr];
                 const userOverride = userOverrideId
-                  ? rookies.find((r: any) => r.player_id === userOverrideId || r.name === userOverrideId)
+                  ? rookies.find((r) => r.player_id === userOverrideId || r.name === userOverrideId)
                   : null;
                 const prediction = !actualPlayer && !userOverrideId ? predictedDraftPicks[slotStr] : null;
                 const overallPick = (round - 1) * rosters.length + (i + 1);
@@ -903,15 +966,15 @@ function DraftHub({
                           onChange={(e) => setDraftSlotSearchQuery(e.target.value)}
                         />
                         <div className="max-h-44 overflow-y-auto space-y-0.5">
-                          {rookies
-                            .map((r: any, idx: number) => ({ ...r, boardRank: idx + 1 }))
-                            .filter((r: any) => r.name && (!draftSlotSearchQuery || r.name.toLowerCase().includes(draftSlotSearchQuery.toLowerCase())))
-                            .filter((r: any) =>
+                          {(rookies
+                            .map((r, idx) => ({ ...r, boardRank: idx + 1 })) as Array<RookieBoardPlayer & { boardRank: number }>)
+                            .filter((r) => r.name && (!draftSlotSearchQuery || r.name.toLowerCase().includes(draftSlotSearchQuery.toLowerCase())))
+                            .filter((r) =>
                               !draftedPlayerIds.has(String(r.player_id)) &&
                               !Object.entries(myDraftSlotPicks).some(([s, pid]) => s !== slotStr && pid === r.player_id)
                             )
                             .slice(0, 15)
-                            .map((r: any) => {
+                            .map((r) => {
                               const reachAmt = typeof r.adp === "number" ? Math.round(overallPick - r.adp) : null;
                               return (
                                 <button
@@ -968,7 +1031,7 @@ function DraftHub({
             <div className="text-gray-400 text-sm">No ranked rookies are currently available.</div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {topAvailableRookies.map((player: any) => (
+              {topAvailableRookies.map((player) => (
                 <div
                   key={player.player_id || `${normalizeRookieName(player.name)}-${player.boardRank}`}
                   className="bg-gray-900 border border-gray-800 rounded-xl px-4 py-3"
@@ -998,7 +1061,7 @@ function DraftHub({
 
           {/* Note popup overlay */}
           {expandedNoteId && (() => {
-            const np = rookies.find((r: any) => r.player_id === expandedNoteId);
+            const np = rookies.find((r) => r.player_id === expandedNoteId);
             return (
               <div
                 className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
@@ -1084,28 +1147,28 @@ function DraftHub({
           <div className="space-y-0.5">
             {(() => {
               // FC value: fuzzy name lookup (catches 1-2 char spelling diffs like Jeremiyah/Jeremiah)
-              const fcVal = (r: any): number => fuzzyFcLookup(r.name, fcNameValues) || r.fcValue || 0;
+              const fcVal = (r: RookieBoardPlayer): number => fuzzyFcLookup(r.name, fcNameValues) || r.fcValue || 0;
 
               // Stable key: player_id when available, else normalized name fallback.
               // Prevents players without a Sleeper player_id (pre-draft rookies) from
               // all sharing the same null key and overwriting each other in the rank maps.
-              const rookieKey = (r: any): string => r.player_id || `name:${normalizeRookieName(r.name)}`;
+              const rookieKey = (r: RookieBoardPlayer): string => r.player_id || `name:${normalizeRookieName(r.name)}`;
 
               // Build FantasyCalc rank lookup (sort rookies by FC value desc)
               const fcRanks: Record<string, number> = {};
               [...rookies]
-                .filter((r: any) => fcVal(r) > 0)
-                .sort((a: any, b: any) => fcVal(b) - fcVal(a))
-                .forEach((r: any, i: number) => { fcRanks[rookieKey(r)] = i + 1; });
+                .filter((r) => fcVal(r) > 0)
+                .sort((a, b) => fcVal(b) - fcVal(a))
+                .forEach((r, i) => { fcRanks[rookieKey(r)] = i + 1; });
 
               // User's rank among only FC-valued players (board order, no-value players skipped)
               const userFcRanks: Record<string, number> = {};
               rookies
-                .filter((r: any) => fcVal(r) > 0)
-                .forEach((r: any, i: number) => { userFcRanks[rookieKey(r)] = i + 1; });
+                .filter((r) => fcVal(r) > 0)
+                .forEach((r, i) => { userFcRanks[rookieKey(r)] = i + 1; });
 
               return rookies
-                .map((p: any, originalIndex: number) => ({ p, originalIndex }))
+                .map((p, originalIndex) => ({ p, originalIndex }))
                 .filter(({ p }) =>
                   p.name &&
                   p.name !== "Player Invalid" &&
@@ -1117,9 +1180,9 @@ function DraftHub({
                   const prevTierKey = displayIndex > 0
                     ? (arr[displayIndex - 1].p.player_id || `name:${arr[displayIndex - 1].p.name}`)
                     : null;
-                  const hasNote = !!(playerNotes[p.player_id] || "").trim();
+                  const hasNote = !!(playerNotes[p.player_id || ""] || "").trim();
                   const myTier  = tierLabels[tierKey];
-                  const prevTier = prevTierKey !== null ? tierLabels[prevTierKey] : undefined;
+                  const prevTier = prevTierKey ? tierLabels[prevTierKey] : undefined;
                   const showDivider = !rookieSearch && displayIndex > 0 && myTier !== prevTier;
 
                   const fcRank   = fcRanks[rookieKey(p)];
@@ -1340,7 +1403,7 @@ function DraftHub({
                         </div>
                       </div>
                       <div className="divide-y divide-gray-800/40">
-                        {currentLeagueDraft.picks.map((pick: any) => {
+                        {currentLeagueDraft.picks.map((pick) => {
                           const { label, cls } = valueGrade(pick.value);
                           const isMine = pick.pickedByUserId === user?.user_id;
                           const { label: equivLabel, pickNo: equivPickNo } = closestPickEquiv(pick.value, pickFcValues);
@@ -1392,9 +1455,10 @@ function DraftHub({
                 // Build the display list: compiled network data first, local fallback
                 // For compiled rows, fall back to the loaded players map for position/team
                 // if the stored metadata was empty at draft time (common for 2024/2025 picks)
-                const displayList: any[] = (hasCachedRows
-                  ? consensusCache[selectedHistoryYear].map((row: any) => {
-                      const fullPlayer = (players as any)?.[row.player_id];
+                interface DisplayListEntry { player_id: string; name: string; position: string; team: string; avgPickNo: number; draftCount: number; value: number; }
+                const displayList: DisplayListEntry[] = (hasCachedRows
+                  ? consensusCache[selectedHistoryYear].map((row) => {
+                      const fullPlayer = players[row.player_id];
                       return {
                         player_id:  row.player_id,
                         name:       row.player_name || fullPlayer?.full_name || "",
@@ -1406,7 +1470,7 @@ function DraftHub({
                       };
                     })
                   : consensusList
-                ).filter((p: any) =>
+                ).filter((p) =>
                   p.draftCount >= minDrafts &&
                   ["QB", "RB", "WR", "TE", "FB"].includes(p.position)
                 );
@@ -1587,7 +1651,7 @@ function DraftHub({
                           <span>#</span><span>Pos</span><span>Player</span><span>Avg Pick</span><span>Drafts</span><span className="text-right">≈ Pick Val</span>
                         </div>
                         <div className="divide-y divide-gray-800/40">
-                          {displayList.map((p: any, i: number) => {
+                          {displayList.map((p, i) => {
                             const { label: equivLabel, pickNo: equivPickNo } = closestPickEquiv(p.value, pickFcValues);
                             const color  = pickEquivColor(equivPickNo, Math.round(p.avgPickNo));
                             const grade  = playerGrades[`${selectedHistoryYear}_${p.player_id}`];
@@ -1674,7 +1738,7 @@ function DraftHub({
                       };
                       const arrow = (col: "times" | "avgPick" | "value") =>
                         myPicksSort.col === col ? (myPicksSort.dir === "desc" ? " ↓" : " ↑") : "";
-                      const sorted = [...myPicksList].sort((a: any, b: any) => {
+                      const sorted = [...myPicksList].sort((a, b) => {
                         const { col, dir } = myPicksSort;
                         const val = col === "times" ? a.timesDrafted - b.timesDrafted
                                   : col === "avgPick" ? a.avgPickNo - b.avgPickNo
@@ -1691,7 +1755,7 @@ function DraftHub({
                             <button onClick={() => toggleSort("value")} className="text-right hover:text-white transition w-full">≈ Pick Val{arrow("value")}</button>
                           </div>
                           <div className="divide-y divide-gray-800/40">
-                            {sorted.map((p: any) => {
+                            {sorted.map((p) => {
                               const { label: equivLabel, pickNo: equivPickNo } = closestPickEquiv(p.value, pickFcValues);
                               const color = pickEquivColor(equivPickNo, Math.round(p.avgPickNo));
                               return (

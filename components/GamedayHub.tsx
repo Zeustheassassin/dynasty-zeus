@@ -1,6 +1,7 @@
 "use client";
 import React from "react";
-import type { SleeperLeague, SleeperPlayer, GamedayMatchup, GamedayTeamView } from "../lib/types";
+import type { SleeperLeague, SleeperPlayer, GamedayMatchup, GamedayTeamView, GamedayLineupRow } from "../lib/types";
+import { useLeague } from "../lib/LeagueContext";
 
 // ── Helpers (module-level, same logic as page.tsx) ─────────────────────────
 const getKickoffStateClasses = (state: string) => {
@@ -35,7 +36,6 @@ interface ShareEntry { count: number; leagues: string[]; starters: string[] }
 
 interface GamedayHubProps {
   // League selection
-  selectedLeague: SleeperLeague | null;
   leagues: SleeperLeague[];
   loadRoster: (league: SleeperLeague) => void;
 
@@ -68,7 +68,6 @@ interface GamedayHubProps {
 
 // ── Component ──────────────────────────────────────────────────────────────
 function GamedayHub({
-  selectedLeague,
   leagues,
   loadRoster,
   gamedayWeek,
@@ -90,6 +89,7 @@ function GamedayHub({
   setSharePosition,
   players,
 }: GamedayHubProps) {
+  const { selectedLeague } = useLeague();
 
   const starterSlots = (selectedLeague?.roster_positions || []).filter(
     (slot: string) => !["BN", "IR", "TAXI"].includes(slot)
@@ -98,7 +98,7 @@ function GamedayHub({
   const teamA: GamedayTeamView | null = selectedGamedayMatchup?.teams?.[0] ?? null;
   const teamB: GamedayTeamView | null = selectedGamedayMatchup?.teams?.[1] ?? null;
 
-  const renderPlayerCell = (row: any, side: "left" | "right") => {
+  const renderPlayerCell = (row: GamedayLineupRow | undefined, side: "left" | "right") => {
     if (!row?.player) {
       return (
         <div className={`text-xs text-gray-600 ${side === "right" ? "text-right" : ""}`}>
@@ -110,7 +110,7 @@ function GamedayHub({
     return (
       <div className={`min-w-0 ${side === "right" ? "text-right" : ""}`}>
         <button
-          onClick={() => setPlayerProfileId(row.player.player_id)}
+          onClick={() => setPlayerProfileId(row.player!.player_id)}
           className="block w-full truncate text-sm font-medium text-white hover:text-blue-400 transition"
         >
           {row.player.full_name}
@@ -150,13 +150,13 @@ function GamedayHub({
             <select
               value={selectedLeague?.league_id || ""}
               onChange={(e) => {
-                const nextLeague = leagues.find((league: any) => league.league_id === e.target.value);
+                const nextLeague = leagues.find((league) => league.league_id === e.target.value);
                 if (nextLeague) loadRoster(nextLeague);
               }}
               className="rounded-xl border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
             >
               <option value="">Select a league</option>
-              {leagues.map((league: any) => (
+              {leagues.map((league) => (
                 <option key={league.league_id} value={league.league_id}>
                   {league.name}
                 </option>
@@ -219,7 +219,7 @@ function GamedayHub({
             <>
               {/* Matchup cards grid */}
               <div className="grid gap-3 lg:grid-cols-2">
-                {gamedayMatchupCards.map((card: any) => (
+                {gamedayMatchupCards.map((card) => (
                   <button
                     key={card.matchupId}
                     onClick={() => setSelectedGamedayMatchupId(card.matchupId)}
@@ -234,13 +234,13 @@ function GamedayHub({
                         Matchup {card.matchupId}
                       </div>
                       <div className="text-[11px] text-gray-600">
-                        {card.teams.reduce((total: number, team: any) => total + team.liveStarters, 0) > 0
+                        {card.teams.reduce((total: number, team: GamedayTeamView) => total + team.liveStarters, 0) > 0
                           ? "Games in progress"
                           : "No live games"}
                       </div>
                     </div>
                     <div className="space-y-3">
-                      {card.teams.map((team: any) => (
+                      {card.teams.map((team) => (
                         <div key={team.rosterId} className="rounded-xl border border-gray-800 bg-gray-950/60 px-3 py-2.5">
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
@@ -289,7 +289,7 @@ function GamedayHub({
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-3 text-right">
-                      {[teamA, teamB].map((team: any) => (
+                      {[teamA, teamB].map((team) => (
                         <div key={team.rosterId} className="rounded-xl border border-gray-800 bg-gray-950/60 px-3 py-2">
                           <div className="text-xs text-gray-500">{team.ownerName}</div>
                           <div className="mt-1 text-xl font-semibold text-white">{team.actualPoints.toFixed(1)}</div>
@@ -341,7 +341,7 @@ function GamedayHub({
 
                   {/* Bench + taxi */}
                   <div className="mt-4 grid gap-3 lg:grid-cols-2">
-                    {[teamA, teamB].map((team: any) => (
+                    {([teamA, teamB] as GamedayTeamView[]).map((team) => (
                       <div
                         key={`${selectedGamedayMatchup.matchupId}-${team.rosterId}`}
                         className="rounded-xl border border-gray-800 bg-gray-950/50 p-3"
@@ -354,7 +354,7 @@ function GamedayHub({
                           <div className="mt-2 space-y-2">
                             {team.benchRows.length === 0 ? (
                               <div className="text-xs text-gray-600">No bench players loaded.</div>
-                            ) : team.benchRows.map((row: any) => (
+                            ) : team.benchRows.map((row) => (
                               <div
                                 key={`${team.rosterId}-bench-${row.playerId}`}
                                 className="flex items-center justify-between gap-3 rounded-lg border border-gray-800 bg-gray-900/60 px-3 py-2"
@@ -364,9 +364,9 @@ function GamedayHub({
                                     onClick={() => setPlayerProfileId(row.playerId)}
                                     className="min-w-0 truncate text-xs font-medium text-white hover:text-blue-400 transition"
                                   >
-                                    {row.player.full_name}
+                                    {row.player?.full_name}
                                   </button>
-                                  {injuryBadge(row.player.injury_status)}
+                                  {injuryBadge(row.player?.injury_status)}
                                 </div>
                                 <div className="shrink-0 text-right text-[11px] text-gray-500">
                                   {row.actualPoints.toFixed(1)} now • {row.remainingProjection.toFixed(1)} left
@@ -382,7 +382,7 @@ function GamedayHub({
                           <div className="mt-2 space-y-2">
                             {team.taxiRows.length === 0 ? (
                               <div className="text-xs text-gray-600">No taxi players loaded.</div>
-                            ) : team.taxiRows.map((row: any) => (
+                            ) : team.taxiRows.map((row) => (
                               <div
                                 key={`${team.rosterId}-taxi-${row.playerId}`}
                                 className="flex items-center justify-between gap-3 rounded-lg border border-gray-800 bg-gray-900/60 px-3 py-2"
@@ -392,9 +392,9 @@ function GamedayHub({
                                     onClick={() => setPlayerProfileId(row.playerId)}
                                     className="min-w-0 truncate text-xs font-medium text-white hover:text-blue-400 transition"
                                   >
-                                    {row.player.full_name}
+                                    {row.player?.full_name}
                                   </button>
-                                  {injuryBadge(row.player.injury_status)}
+                                  {injuryBadge(row.player?.injury_status)}
                                 </div>
                                 <div className="shrink-0 text-right text-[11px] text-gray-500">
                                   {row.actualPoints.toFixed(1)} now • {row.remainingProjection.toFixed(1)} left
@@ -450,15 +450,15 @@ function GamedayHub({
           const INJURY_PRIORITY: Record<string, number> = { IR: 0, O: 1, D: 2, Q: 3 };
           const rows = Object.entries(shares)
             .filter(([playerId]) => {
-              const p = (players as any)[playerId];
+              const p = players[playerId];
               if (!p) return false;
               if (sharePosition !== "ALL" && p.position !== sharePosition) return false;
               if (shareSearch && !p.full_name?.toLowerCase().includes(shareSearch.toLowerCase())) return false;
               return true;
             })
-            .sort((a: any, b: any) => {
+            .sort((a, b) => {
               const aData = a[1]; const bData = b[1];
-              const aP = (players as any)[a[0]]; const bP = (players as any)[b[0]];
+              const aP = players[a[0]]; const bP = players[b[0]];
               const aStatus = (aP?.injury_status || "").toUpperCase();
               const bStatus = (bP?.injury_status || "").toUpperCase();
               const aPrio = INJURY_PRIORITY[aStatus] ?? 10;
@@ -473,8 +473,8 @@ function GamedayHub({
 
           return (
             <div className="space-y-1.5">
-              {rows.map(([playerId, data]: any) => {
-                const p = (players as any)[playerId];
+              {rows.map(([playerId, data]) => {
+                const p = players[playerId];
                 if (!p) return null;
                 const statusUpper = (p.injury_status || "").toUpperCase();
                 const isCritical = ["IR", "O"].includes(statusUpper);

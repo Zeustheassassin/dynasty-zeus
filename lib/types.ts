@@ -88,8 +88,10 @@ export interface SleeperPlayer {
   years_exp: number | null;
   status: string;
   injury_status: string | null;
+  role?: string;
   number: number | null;
   depth_chart_position: number | null;
+  depth_chart_order?: number | null;
   search_rank: number | null;
   fantasy_positions: string[];
   college: string | null;
@@ -305,6 +307,7 @@ export type StrategicBucket =
 
 export interface RosterDirectionProfile {
   bucket: StrategicBucket;
+  rawBucket?: StrategicBucket;
   bucketColor: string;
   dynRank: number;
   redRank: number;
@@ -456,6 +459,7 @@ export interface RookieBoardPlayer {
   team: string;
   adp: number;
   fcValue: number;
+  boardRank?: number;
 }
 
 // ── Gameday hub ──────────────────────────────────────────────
@@ -531,8 +535,12 @@ export interface DynamicPickValue {
   expectedSlot: number;
   floorValue: number;
   ceilingValue: number;
+  finishRange?: string;
+  issuerName?: string;
+  issuerPlayoffOdds?: number;
+  bandValues?: Record<string, number>;
   probabilities: { early: number; mid: number; late: number };
-  likelySlots: number[];
+  likelySlots: Array<{ slot: number; probability: number }>;
 }
 
 export interface SimulationUpcomingGame {
@@ -567,7 +575,9 @@ export interface SimulationTeamRow {
   oneOhOneOdds: number;
   luckScore: number;
   allPlayWins: number;
+  allPlayLosses?: number;
   allPlayExpectedWins: number;
+  avgWinProb?: number;
   finishProbabilities: number[];
   slotProbabilities: number[];
   upcomingSchedule: SimulationUpcomingGame[];
@@ -665,6 +675,19 @@ export interface TradePartnerRanking extends LeagueMateView {
   negotiationNotes: string[];
   isSeller: boolean;
   isBuyer: boolean;
+}
+
+// ── Draft hub — predicted pick shape ─────────────────────────
+
+/** A predicted pick entry used by the draft board grid (page.tsx → DraftHub). */
+export interface PredictedPick {
+  name: string;
+  position: string;
+  team: string;
+  adp: number;
+  player_id: string | null | undefined;
+  boardRank: number;
+  poolRank: number;
 }
 
 // ── Management hub ───────────────────────────────────────────
