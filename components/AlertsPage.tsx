@@ -1,12 +1,40 @@
 "use client";
 import { useState, useEffect } from "react";
-import type { AlertsCenterItem, WatchlistEntry } from "../lib/types";
+import type { AlertsCenterItem, WatchlistEntry, SleeperPlayer, SleeperTransaction, SleeperTradedPick } from "../lib/types";
 
 // Canonical alert type — shared with page.tsx via lib/types.ts
 type DashboardAlert = AlertsCenterItem;
 
+type LeagueTransaction = SleeperTransaction & {
+  leagueName: string;
+  leagueId: string;
+  rosterOwnerMap: Record<number, string>;
+};
+
+interface NewsItem {
+  id: string;
+  title: string;
+  summary?: string;
+  link?: string;
+  published?: string;
+  playerNames?: string[];
+}
+
+interface BeatItem {
+  id: string;
+  title: string;
+  summary?: string;
+  link?: string;
+  published?: string;
+  playerNames?: string[];
+  author?: string;
+  source?: string;
+  sourceLabel?: string;
+  impact?: boolean;
+}
+
 type InjuryReportPlayer = {
-  player: any;
+  player: SleeperPlayer;
   playerId: string;
   leagues: string[];
   startingLeagues: string[];
@@ -19,9 +47,9 @@ type AlertsPageProps = {
   watchlistEntries: WatchlistEntry[];
   onDismissAlert: (alertId: string) => void;
   loadingExternalAlerts: boolean;
-  leagueTransactions: any[];
+  leagueTransactions: LeagueTransaction[];
   loadingTransactions: boolean;
-  players: Record<string, any>;
+  players: Record<string, SleeperPlayer>;
   injuryReportPlayers: InjuryReportPlayer[];
   currentNFLWeek: number;
   allTradeAttempts: { id: string; league_id: string; status: string }[];
@@ -45,7 +73,7 @@ const POS_COLOR: Record<string, string> = {
 // Replaces any bare numeric Sleeper player IDs remaining in a detail string
 // with the player's full_name from the players dictionary.
 // This is a safety net for alerts generated before the players dictionary was loaded.
-function resolvePlayerIdsInDetail(detail: string, players: Record<string, any>): string {
+function resolvePlayerIdsInDetail(detail: string, players: Record<string, SleeperPlayer>): string {
   // Sleeper player IDs are numeric strings, 1–5 digits, that appear as standalone tokens
   return detail.replace(/\b(\d{1,5})\b/g, (match) => {
     const p = players[match];
@@ -53,7 +81,7 @@ function resolvePlayerIdsInDetail(detail: string, players: Record<string, any>):
   });
 }
 
-function injuryStatusStyle(player: any) {
+function injuryStatusStyle(player: SleeperPlayer) {
   const s = (player.injury_status || player.status || "").toLowerCase();
   if (/ir|pup/.test(s))
     return { cls: "bg-red-900/60 text-red-300 border-red-700", label: player.injury_status || player.status };
@@ -77,12 +105,12 @@ function relTime(ts: number): string {
   return `${d}d ago`;
 }
 
-function TxCard({ tx, players }: { tx: any; players: Record<string, any> }) {
+function TxCard({ tx, players }: { tx: LeagueTransaction; players: Record<string, SleeperPlayer> }) {
   const type: string = tx.type;
   const isTrade = type === "trade";
   const adds: Record<string, number> = tx.adds ?? {};
   const drops: Record<string, number> = tx.drops ?? {};
-  const picks: any[] = tx.draft_picks ?? [];
+  const picks: SleeperTradedPick[] = tx.draft_picks ?? [];
   const rosterOwnerMap: Record<number, string> = tx.rosterOwnerMap ?? {};
 
   const hasAdds = Object.keys(adds).length > 0;
@@ -124,7 +152,7 @@ function TxCard({ tx, players }: { tx: any; players: Record<string, any> }) {
     );
   };
 
-  const PickPill = ({ pick }: { pick: any }) => {
+  const PickPill = ({ pick }: { pick: SleeperTradedPick }) => {
     const slotLabel = pick.slot && String(pick.slot).includes(".")
       ? `${pick.season} ${pick.slot}`
       : `${pick.season} Rd ${pick.round}`;
@@ -141,12 +169,12 @@ function TxCard({ tx, players }: { tx: any; players: Record<string, any> }) {
   };
 
   if (isTrade) {
-    const sides: Record<number, { players: string[]; picks: any[] }> = {};
+    const sides: Record<number, { players: string[]; picks: SleeperTradedPick[] }> = {};
     Object.entries(adds).forEach(([playerId, rosterId]) => {
       if (!sides[rosterId]) sides[rosterId] = { players: [], picks: [] };
       sides[rosterId].players.push(playerId);
     });
-    picks.forEach((pick: any) => {
+    picks.forEach((pick) => {
       const rosterId = pick.owner_id;
       if (!sides[rosterId]) sides[rosterId] = { players: [], picks: [] };
       sides[rosterId].picks.push(pick);
@@ -229,11 +257,11 @@ export default function AlertsPage({
 }: AlertsPageProps) {
   const [feedTab, setFeedTab] = useState<"alerts" | "transactions" | "waivers" | "injury" | "news" | "beat" | "byes" | "wire" | "movers">("alerts");
   const [expandedInjuryId, setExpandedInjuryId] = useState<string | null>(null);
-  const [newsItems, setNewsItems] = useState<any[]>([]);
+  const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
   const [loadingNews, setLoadingNews] = useState(false);
-  const [beatItems, setBeatItems] = useState<any[]>([]);
+  const [beatItems, setBeatItems] = useState<BeatItem[]>([]);
   const [loadingBeat, setLoadingBeat] = useState(false);
-  const [wireItems, setWireItems] = useState<any[]>([]);
+  const [wireItems, setWireItems] = useState<BeatItem[]>([]);
   const [loadingWire, setLoadingWire] = useState(false);
 
   useEffect(() => {
@@ -250,8 +278,8 @@ export default function AlertsPage({
     if (feedTab !== "beat") return;
     setLoadingBeat(true);
     const ownedNames = Object.values(players)
-      .filter((p: any) => p?.full_name)
-      .map((p: any) => p.full_name as string)
+      .filter((p) => p?.full_name)
+      .map((p) => p.full_name)
       .slice(0, 100);
     const q = ownedNames.join("|");
     fetch(`/api/alerts/beat-reports${q ? `?players=${encodeURIComponent(q)}` : ""}`)
@@ -497,7 +525,7 @@ export default function AlertsPage({
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {tradeActivity.map((tx: any) => (
+                  {tradeActivity.map((tx) => (
                     <TxCard key={`${tx.leagueId}-${tx.transaction_id}`} tx={tx} players={players} />
                   ))}
                 </div>
@@ -516,7 +544,7 @@ export default function AlertsPage({
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {waiverActivity.map((tx: any) => (
+                  {waiverActivity.map((tx) => (
                     <TxCard key={`${tx.leagueId}-${tx.transaction_id}`} tx={tx} players={players} />
                   ))}
                 </div>
@@ -535,17 +563,17 @@ export default function AlertsPage({
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {newsItems.map((item: any) => {
+                  {newsItems.map((item) => {
                     const pub = item.published ? new Date(item.published) : null;
                     const timeAgo = pub ? relTime(pub.getTime()) : null;
                     return (
                       <div
                         key={item.id}
-                        className={`rounded-2xl border p-4 ${item.playerNames?.length > 0 ? "border-blue-800/50 bg-blue-950/10" : "border-slate-800 bg-slate-900/40"}`}
+                        className={`rounded-2xl border p-4 ${item.playerNames && item.playerNames.length > 0 ? "border-blue-800/50 bg-blue-950/10" : "border-slate-800 bg-slate-900/40"}`}
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0 flex-1">
-                            {item.playerNames?.length > 0 && (
+                            {item.playerNames && item.playerNames.length > 0 && (
                               <div className="flex flex-wrap gap-1 mb-2">
                                 {item.playerNames.map((name: string) => (
                                   <span key={name} className="text-[10px] font-semibold bg-blue-900/50 text-blue-300 border border-blue-700/50 px-2 py-0.5 rounded-lg">
@@ -605,7 +633,7 @@ export default function AlertsPage({
                     <span className="ml-auto italic">Owned players highlighted</span>
                   </div>
 
-                  {beatItems.map((item: any) => {
+                  {beatItems.map((item) => {
                     const pub = item.published ? new Date(item.published) : null;
                     const timeAgo = pub && !isNaN(pub.getTime()) ? relTime(pub.getTime()) : null;
                     const isPFT = item.source === "pft";
@@ -621,7 +649,7 @@ export default function AlertsPage({
                           <span className={`mt-1.5 shrink-0 inline-block w-2 h-2 rounded-full ${sourceDot}`} title={item.sourceLabel} />
                           <div className="min-w-0 flex-1">
                             {/* Owned player badges */}
-                            {item.playerNames?.length > 0 && (
+                            {item.playerNames && item.playerNames.length > 0 && (
                               <div className="flex flex-wrap gap-1 mb-1.5">
                                 {item.playerNames.map((name: string) => (
                                   <span key={name} className="text-[10px] font-semibold bg-amber-900/50 text-amber-300 border border-amber-700/50 px-2 py-0.5 rounded-lg">
@@ -677,7 +705,7 @@ export default function AlertsPage({
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {wireItems.map((item: any) => {
+                  {wireItems.map((item) => {
                     const pub = item.published ? new Date(item.published) : null;
                     const timeAgo = pub && !isNaN(pub.getTime()) ? relTime(pub.getTime()) : null;
                     const isPFT = item.source === "pft";

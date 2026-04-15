@@ -39,6 +39,7 @@ export interface SleeperLeagueSettings {
   num_teams: number;
   max_keepers?: number;
   type?: number; // 0 = redraft, 2 = dynasty
+  best_ball?: number; // 1 = best ball league
   waiver_type?: number;
   waiver_budget?: number;
   waiver_day_of_week?: number;

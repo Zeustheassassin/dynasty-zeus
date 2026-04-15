@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { CURRENT_YEAR } from "../lib/helpers";
+import type { SleeperLeague, SleeperRoster } from "../lib/types";
 
 interface ExposureEntry { playerId: string; count: number; percent: number; }
 export interface ExposureData { players: ExposureEntry[]; leagueCount: number; }
@@ -24,23 +25,23 @@ export function useUserExposure() {
       const leaguesRes = await fetch(
         `https://api.sleeper.app/v1/user/${userId}/leagues/nfl/${CURRENT_YEAR}`
       );
-      const leagues = await leaguesRes.json();
+      const leagues = (await leaguesRes.json()) as SleeperLeague[];
 
       const rosterResults = await Promise.all(
-        leagues.map(async (league: any) => {
+        leagues.map(async (league) => {
           const res = await fetch(
             `https://api.sleeper.app/v1/league/${league.league_id}/rosters`
           );
-          const rosters = await res.json();
-          return rosters.find((r: any) => r.owner_id === userId);
+          const rosters = (await res.json()) as SleeperRoster[];
+          return rosters.find((r) => r.owner_id === userId);
         })
       );
 
-      const validRosters = rosterResults.filter(Boolean);
+      const validRosters = rosterResults.filter((r): r is SleeperRoster => r !== undefined);
       const leagueCount = validRosters.length;
 
       const map: Record<string, number> = {};
-      validRosters.forEach((r: any) => {
+      validRosters.forEach((r) => {
         r.players?.forEach((id: string) => {
           if (!map[id]) map[id] = 0;
           map[id]++;

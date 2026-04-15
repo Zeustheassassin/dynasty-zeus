@@ -22,7 +22,7 @@ export default function PickValuesTab({
   myRosterId,
 }: PickValuesTabProps) {
   const roundCount = Number(
-    (draftSettings as any)?.settings?.rounds ?? (draftSettings as any)?.rounds ?? 4
+    draftSettings?.settings?.rounds ?? draftSettings?.rounds ?? 4
   );
 
   return (
@@ -53,7 +53,7 @@ export default function PickValuesTab({
                     0;
                   const overallPick = (round - 1) * slots + slot;
                   const isMyPick = allPicks.some(
-                    (p: any) => p.slot === slotStr && String(p.owner_id) === String(myRosterId)
+                    (p) => p.slot === slotStr && String(p.owner_id) === String(myRosterId)
                   );
                   return (
                     <div

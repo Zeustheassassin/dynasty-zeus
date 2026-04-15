@@ -59,11 +59,11 @@ import { fetchSleeperUser } from "../lib/sleeperUserCache";
 import type {
   LeagueHubTab, AlertsCenterItem, TradeAttempt, TradeAttemptStatus,
   SleeperPlayer, SleeperLeague, SleeperRoster, SleeperTradedPick,
-  SleeperDraft, SleeperDraftPick, SleeperNFLState, SleeperTransaction, GamedayMatchup, GamedayTeamView,
-  CommittedSimsByLeague, CachedSimRow, SleeperMatchup,
+  SleeperDraft, SleeperDraftPick, SleeperNFLState, SleeperTransaction, SleeperUser, GamedayMatchup, GamedayTeamView,
+  CommittedSimsByLeague, CachedSimRow, SimRow, SleeperMatchup,
   AugmentedPick, LeagueOverviewEntry, LeagueMateStatEntry,
   HistoricalSnapshot, LeagueMateView, LeagueSimulation, SimulationTeamRow,
-  RosterDirectionProfile,
+  RosterDirectionProfile, DynamicPickValue, RookieBoardPlayer,
 } from "../lib/types";
 
 // -------------------------
@@ -81,11 +81,15 @@ let _playersInMemory: Record<string, SleeperPlayer> | null = null;
 // ── Page-local interfaces (shapes that don't warrant a lib/types entry) ──────
 interface Note { id: string; user_id: string; title: string; body: string; updated_at: string; }
 interface StandingRow { roster_id: number; wins: number; losses: number; ties: number; fpts: number; max_pf: number; owner_id: string; }
-interface DraftScoutPick { round: number; player: SleeperPlayer | null; playerName: string | null; position: string | null; }
+interface DraftScoutPick { round: number; slot?: string; player: SleeperPlayer | null; playerName: string | null; position: string | null; }
 interface DraftScoutLeague { leagueName: string; picks: DraftScoutPick[]; }
 // AugmentedPick is now exported from lib/types.ts
 type AnnotatedTransaction = SleeperTransaction & { leagueName: string; leagueId: string; rosterOwnerMap: Record<number, string>; };
-interface TradeIntelEntry { tradeCount30d: number; bought: Record<string, number>; picksIn: number; picksOut: number; lastTradeAt: string | null; }
+interface TradeIntelEntry { tradeCount30d: number; bought: Record<string, number>; picksIn: number; picksOut: number; lastTradeAt: number | null; }
+interface OwnedPlayerEntry { player_id: string; player?: SleeperPlayer; leagues: string[]; shareCount: number; }
+interface AllLeagueDataEntry { leagueName?: string; roster: import("../lib/types").SleeperRoster | null; }
+interface PlayerSnapshot { full_name: string; status: string; team: string; value: number; active: boolean; shareCount: number; }
+interface NewsItem { id?: string; link?: string; title?: string; impact?: unknown; playerNames?: string[]; summary?: string; published?: string | number; }
 
 // Static — never changes, defined at module level so it's a stable reference in useMemo dep arrays
 const ROLE_PRIORITY: Record<string, number> = { starter: 0, bench: 1, taxi: 2 };
@@ -933,12 +937,12 @@ useEffect(() => {
     setLoadingLeagueMateIntel(true);
     try {
       const [t1, t2] = await Promise.all([
-        fetch(`https://api.sleeper.app/v1/league/${selectedLeague.league_id}/transactions/1`).then((r) => r.json()).catch(() => []),
-        fetch(`https://api.sleeper.app/v1/league/${selectedLeague.league_id}/transactions/2`).then((r) => r.json()).catch(() => []),
+        fetch(`https://api.sleeper.app/v1/league/${selectedLeague.league_id}/transactions/1`).then((r) => r.json() as Promise<SleeperTransaction[]>).catch(() => [] as SleeperTransaction[]),
+        fetch(`https://api.sleeper.app/v1/league/${selectedLeague.league_id}/transactions/2`).then((r) => r.json() as Promise<SleeperTransaction[]>).catch(() => [] as SleeperTransaction[]),
       ]);
 
       const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
-      const rosterStats: Record<string, any> = {};
+      const rosterStats: Record<string, TradeIntelEntry> = {};
       const ensureRoster = (rosterId: number | string) => {
         const key = String(rosterId);
         if (!rosterStats[key]) {
@@ -954,22 +958,22 @@ useEffect(() => {
       };
 
       [...(Array.isArray(t1) ? t1 : []), ...(Array.isArray(t2) ? t2 : [])]
-        .filter((trade: any) => trade?.type === "trade" && trade?.status === "complete" && Number(trade?.created || 0) >= thirtyDaysAgo)
-        .forEach((trade: any) => {
+        .filter((trade) => trade?.type === "trade" && trade?.status === "complete" && Number(trade?.created || 0) >= thirtyDaysAgo)
+        .forEach((trade) => {
           (trade.roster_ids || []).forEach((rosterId: number) => {
             const entry = ensureRoster(rosterId);
             entry.tradeCount30d += 1;
             entry.lastTradeAt = Math.max(entry.lastTradeAt || 0, Number(trade.created || 0));
           });
 
-          Object.entries(trade.adds || {}).forEach(([playerId, rosterId]: any) => {
+          (Object.entries(trade.adds || {}) as [string, number][]).forEach(([playerId, rosterId]) => {
             const pos = players[playerId]?.position;
             if (!["QB", "RB", "WR", "TE"].includes(pos)) return;
             const entry = ensureRoster(rosterId);
             entry.bought[pos] = (entry.bought[pos] || 0) + 1;
           });
 
-          (trade.draft_picks || []).forEach((pick: any) => {
+          (trade.draft_picks || []).forEach((pick) => {
             if (pick?.owner_id != null) ensureRoster(pick.owner_id).picksIn += 1;
             if (pick?.previous_owner_id != null) ensureRoster(pick.previous_owner_id).picksOut += 1;
           });
@@ -1014,16 +1018,16 @@ useEffect(() => {
     .eq("user_id", supabaseUser.id)
     .then(({ data }) => {
       if (!data?.length) return;
-      const byLeague: Record<string, Record<number, any>> = {};
-      data.forEach((row: any) => {
+      const byLeague: Record<string, Record<number, CachedSimRow>> = {};
+      data.forEach((row) => {
         if (!byLeague[row.league_id]) byLeague[row.league_id] = {};
         byLeague[row.league_id][Number(row.roster_id)] = row;
       });
       setLeagueSimCache(prev => {
-        const merged: Record<string, Record<number, any>> = { ...byLeague };
+        const merged: Record<string, Record<number, CachedSimRow>> = { ...byLeague };
         // For any entry already in memory with a newer timestamp, keep the in-memory value.
         Object.entries(prev).forEach(([lid, rosterMap]) => {
-          Object.entries(rosterMap as Record<string, any>).forEach(([rid, memRow]: [string, any]) => {
+          Object.entries(rosterMap).forEach(([rid, memRow]: [string, CachedSimRow]) => {
             const dbRow = merged[lid]?.[Number(rid)];
             const memTime = memRow?.computed_at ? new Date(memRow.computed_at).getTime() : 0;
             const dbTime = dbRow?.computed_at ? new Date(dbRow.computed_at).getTime() : 0;
@@ -1060,7 +1064,7 @@ useEffect(() => {
     .then(({ data }) => {
       if (!data?.length) return;
       const picks: Record<string, string> = {};
-      data.forEach((row: any) => { picks[row.pick_slot] = row.player_id; });
+      data.forEach((row) => { picks[row.pick_slot] = row.player_id; });
       setMyDraftSlotPicks(picks);
       localStorage.setItem(lsKey, JSON.stringify(picks));
     });
@@ -1151,8 +1155,8 @@ const loadOwnerTendencies = async () => {
   if (!rosters.length) return;
   const PREV_YEAR = String(Number(ROOKIE_YEAR) - 1);
   const ownerUserIds: string[] = rosters
-    .map((r: any) => r.owner_id)
-    .filter((uid: string) => uid && uid !== user?.user_id);
+    .map((r) => r.owner_id)
+    .filter((uid) => uid && uid !== user?.user_id);
   if (!ownerUserIds.length) return;
 
   const tendencies: Record<string, Record<string, number>> = {};
@@ -1167,7 +1171,7 @@ const loadOwnerTendencies = async () => {
   // Build a map: userId → best cached row
   // Prefer ROOKIE_YEAR over PREV_YEAR; within same season prefer most recent
   const cacheMap: Record<string, { rates: Record<string, number>; updated_at: string; season: string }> = {};
-  (cached ?? []).forEach((row: any) => {
+  (cached ?? []).forEach((row) => {
     const existing = cacheMap[row.owner_user_id];
     const rowBetter =
       !existing ||
@@ -1194,7 +1198,7 @@ const loadOwnerTendencies = async () => {
   if (!needsFetch.length) { setOwnerDraftTendencies(tendencies); return; }
 
   // ── 2. Fetch from Sleeper for owners without a fresh cache entry ─────────
-  const newRows: any[] = [];
+  const newRows: Array<{ owner_user_id: string; season: string; rates: Record<string, number>; pick_count: number; updated_at: string }> = [];
 
   await Promise.all(needsFetch.map(async (userId: string) => {
     try {
@@ -1208,22 +1212,22 @@ const loadOwnerTendencies = async () => {
         if (!Array.isArray(leagues)) continue;
 
         // No cap — scan all leagues for the most accurate picture
-        await Promise.all(leagues.map(async (league: any) => {
+        await Promise.all(leagues.map(async (league) => {
           try {
             const draftsRes = await fetch(`https://api.sleeper.app/v1/league/${league.league_id}/drafts`);
-            const drafts = await draftsRes.json();
-            const rookieDraft = (drafts as any[]).find(
-              (d: any) =>
+            const drafts = (await draftsRes.json()) as SleeperDraft[];
+            const rookieDraft = drafts.find(
+              (d) =>
                 d.season === year &&
                 d.status === "complete" &&
                 (d.settings?.rounds ?? 99) <= 5
             );
             if (!rookieDraft) return;
             const picksRes = await fetch(`https://api.sleeper.app/v1/draft/${rookieDraft.draft_id}/picks`);
-            const picks = await picksRes.json();
-            (picks as any[])
-              .filter((p: any) => p.picked_by === userId && p.metadata?.position)
-              .forEach((p: any) => {
+            const picks = (await picksRes.json()) as SleeperDraftPick[];
+            picks
+              .filter((p) => p.picked_by === userId && p.metadata?.position)
+              .forEach((p) => {
                 collected.push({ round: Number(p.round), position: String(p.metadata.position) });
               });
           } catch (err) {
@@ -1299,7 +1303,7 @@ const loadOwnerTendencies = async () => {
         if (savedLeague) {
           try {
             const parsedLeague = JSON.parse(savedLeague);
-            const match = leagues.find((l: any) => l.league_id === parsedLeague.league_id);
+            const match = leagues.find((l) => l.league_id === parsedLeague.league_id);
             if (match) loadRoster(match);
           } catch { /* ignore corrupt localStorage */ }
         }
@@ -1380,40 +1384,40 @@ const loadRoster = async (league: SleeperLeague) => {
 
   // ── Step 2: Synchronous work derived from rosters ────────────────────────
   const rosteredIds = new Set<string>();
-  allRosters.forEach((r: any) => {
+  allRosters.forEach((r) => {
     (r.players || []).forEach((p: string) => rosteredIds.add(p));
   });
 
-  const rosterToUser: any = {};
-  allRosters.forEach((r: any) => { rosterToUser[r.roster_id] = r.owner_id; });
+  const rosterToUser: Record<number, string> = {};
+  allRosters.forEach((r) => { rosterToUser[r.roster_id] = r.owner_id; });
 
-  const myRoster = allRosters.find((r: any) => r.owner_id === user?.user_id);
+  const myRoster = allRosters.find((r) => r.owner_id === user?.user_id);
   if (!myRoster) { setReadyLeagueId(league.league_id); return; }
   setRoster(myRoster);
 
   setFreeAgents(
     Object.values(players || {})
-      .filter((p: any) => p && !rosteredIds.has(String(p.player_id)))
-      .sort((a: any, b: any) => (b.value || 0) - (a.value || 0))
+      .filter((p) => p && !rosteredIds.has(String(p.player_id)))
+      .sort((a, b) => (b.value || 0) - (a.value || 0))
       .slice(0, 20)
   );
 
   const MAX_SUPPORTED_ROUNDS = 6;
   const ALL_ROUNDS = Array.from({ length: MAX_SUPPORTED_ROUNDS }, (_, i) => i + 1);
-  let tempPicks: any[] = [];
+  let tempPicks: AugmentedPick[] = [];
   YEARS.forEach((year) => {
-    allRosters.forEach((r: any) => {
+    allRosters.forEach((r) => {
       ALL_ROUNDS.forEach((round) => {
-        tempPicks.push({ season: year, round, roster_id: r.roster_id, owner_id: r.roster_id });
+        tempPicks.push({ season: year, round, roster_id: r.roster_id, owner_id: r.roster_id, previous_owner_id: r.roster_id });
       });
     });
   });
 
   // ── Step 3: User names — fetchSleeperUser has its own module-level cache ──
-  const userResults = await Promise.all(allRosters.map((r: any) => fetchSleeperUser(r.owner_id)));
+  const userResults = await Promise.all(allRosters.map((r) => fetchSleeperUser(r.owner_id)));
 
   // ── Step 4: Apply traded picks ───────────────────────────────────────────
-  tradedPicksData.forEach((tp: any) => {
+  tradedPicksData.forEach((tp) => {
     const match = tempPicks.find(
       (p) => p.season === tp.season && p.round === tp.round && p.roster_id === tp.roster_id
     );
@@ -1421,7 +1425,7 @@ const loadRoster = async (league: SleeperLeague) => {
   });
 
   // ── Step 6: Assign draft slots ───────────────────────────────────────────
-  const currentDraft = draftsData.find((d: any) => d.season === CURRENT_YEAR);
+  const currentDraft = draftsData.find((d) => d.season === CURRENT_YEAR);
 
   // Trim to the league's actual round count (check both settings.rounds and top-level rounds)
   const settingsRounds = Number(currentDraft?.settings?.rounds ?? currentDraft?.rounds) || 0;
@@ -1429,7 +1433,7 @@ const loadRoster = async (league: SleeperLeague) => {
     (max, tp) => Math.max(max, Number(tp.round) || 0), 0
   );
   const leagueRounds: number = Math.max(settingsRounds, tradedMaxRound, ROUNDS.length);
-  tempPicks = tempPicks.filter((p: any) => Number(p.round) <= leagueRounds);
+  tempPicks = tempPicks.filter((p) => Number(p.round) <= leagueRounds);
 
   // ── Step 5: My picks (after trades applied and rounds trimmed) ───────────
   const myPicks = tempPicks.filter((p) => p.owner_id === myRoster.roster_id);
@@ -1437,7 +1441,7 @@ const loadRoster = async (league: SleeperLeague) => {
   setSelectedLeagueDraftHasOccurred(currentDraft?.status !== "pre_draft");
   const totalDraftTeams = allRosters.length || Number(currentDraft?.settings?.teams) || 0;
 
-  tempPicks.forEach((pick: any) => {
+  tempPicks.forEach((pick) => {
     if (pick.season === CURRENT_YEAR) {
       const userId = rosterToUser[pick.roster_id];
       const baseSlot = Number(order[String(userId)] || 0);
@@ -1452,18 +1456,18 @@ const loadRoster = async (league: SleeperLeague) => {
 
   setAllPicks(tempPicks);
   setPicks(
-    myPicks.sort((a: any, b: any) => {
-      if (a.season !== b.season) return a.season - b.season;
+    myPicks.sort((a, b) => {
+      if (a.season !== b.season) return Number(a.season) - Number(b.season);
       if (a.round !== b.round) return a.round - b.round;
-      const aSlot = parseInt(a.slot?.split(".")[1] || 0);
-      const bSlot = parseInt(b.slot?.split(".")[1] || 0);
+      const aSlot = parseInt(a.slot?.split(".")[1] ?? "0", 10);
+      const bSlot = parseInt(b.slot?.split(".")[1] ?? "0", 10);
       return aSlot - bSlot;
     })
   );
 
   // ── Step 7: Apply user names ─────────────────────────────────────────────
-  const userMap: any = {};
-  allRosters.forEach((r: any, i: number) => {
+  const userMap: Record<string | number, string> = {};
+  allRosters.forEach((r, i: number) => {
     const u = userResults[i];
     if (u) {
       userMap[r.roster_id] = u.display_name;
@@ -1475,7 +1479,7 @@ const loadRoster = async (league: SleeperLeague) => {
   // ── Step 8: Standings ────────────────────────────────────────────────────
   setStandings(
     allRosters
-      .map((r: any) => ({
+      .map((r) => ({
         roster_id: r.roster_id,
         wins: r.settings?.wins || 0,
         losses: r.settings?.losses || 0,
@@ -1484,7 +1488,7 @@ const loadRoster = async (league: SleeperLeague) => {
         max_pf: r.settings?.fpts_max || 0,
         owner_id: r.owner_id,
       }))
-      .sort((a: any, b: any) =>
+      .sort((a, b) =>
         b.wins !== a.wins ? b.wins - a.wins : b.fpts - a.fpts
       )
   );
@@ -1501,11 +1505,11 @@ const loadDraftScout = async (userId: string) => {
     const leaguesRes = await fetch(
       `https://api.sleeper.app/v1/user/${userId}/leagues/nfl/${CURRENT_YEAR}`
     );
-    const leagues = await leaguesRes.json();
+    const leagues = (await leaguesRes.json()) as SleeperLeague[];
 
     // 2. For each league, fetch drafts + picks in parallel
     const results = await Promise.all(
-      leagues.map(async (league: any) => {
+      leagues.map(async (league) => {
         const draftsRes = await fetch(
           `https://api.sleeper.app/v1/league/${league.league_id}/drafts`
         );
@@ -1514,7 +1518,7 @@ const loadDraftScout = async (userId: string) => {
         // Find a rookie-only draft: current year, started, and ≤5 rounds
         // Startup drafts cover full rosters (15–25+ rounds) so this reliably excludes them
         const rookieDraft = drafts.find(
-          (d: any) =>
+          (d: SleeperDraft) =>
             d.season === CURRENT_YEAR &&
             d.status !== "pre_draft" &&
             (d.settings?.rounds ?? 99) <= 5
@@ -1528,9 +1532,9 @@ const loadDraftScout = async (userId: string) => {
 
         // Only this user's picks
         const myPicks = allPicks
-          .filter((p: any) => p.picked_by === userId)
-          .sort((a: any, b: any) => a.pick_no - b.pick_no)
-          .map((p: any) => ({
+          .filter((p: SleeperDraftPick) => p.picked_by === userId)
+          .sort((a: SleeperDraftPick, b: SleeperDraftPick) => a.pick_no - b.pick_no)
+          .map((p: SleeperDraftPick) => ({
             slot: `${p.round}.${String(p.draft_slot).padStart(2, "0")}`,
             round: p.round,
             player: players[p.player_id] || null,
@@ -1544,7 +1548,7 @@ const loadDraftScout = async (userId: string) => {
       })
     );
 
-    setDraftScoutData(results.filter(Boolean));
+    setDraftScoutData(results.filter((r): r is DraftScoutLeague => r !== null));
   } catch (err) {
     console.error("Draft scout error:", err);
   } finally {
@@ -1561,7 +1565,7 @@ const loadCalcValues = async (leagueId: string) => {
     );
     const data = await res.json();
     const vals: Record<string, number> = {};
-    data.forEach((entry: any) => {
+    data.forEach((entry: { player?: { sleeperId?: string }; value: number }) => {
       const sleeperId = entry.player?.sleeperId;
       if (sleeperId) vals[String(sleeperId)] = entry.value;
     });
@@ -1619,12 +1623,12 @@ const loadLeaguemateTradeAlerts = async () => {
       .select("alert_id")
       .eq("user_id", supabaseUser.id)
       .like("alert_id", "trade-%");
-    (data ?? []).forEach((row: any) => seenFromDb.add(row.alert_id));
+    (data ?? []).forEach((row) => seenFromDb.add(row.alert_id));
   }
 
   const leaguemateOwnerIds = rosters
-    .map((r: any) => r.owner_id)
-    .filter((uid: string) => uid && uid !== user.user_id);
+    .map((r) => r.owner_id)
+    .filter((uid) => uid && uid !== user.user_id);
   if (!leaguemateOwnerIds.length) return;
 
   const tradeAlerts: AlertsCenterItem[] = [];
@@ -1638,41 +1642,41 @@ const loadLeaguemateTradeAlerts = async () => {
       const ownerLeagues = await leaguesRes.json();
       if (!Array.isArray(ownerLeagues)) return;
 
-      const dynastyLeagues = ownerLeagues.filter((league: any) =>
+      const dynastyLeagues = (ownerLeagues as SleeperLeague[]).filter((league) =>
         ((league.settings?.taxi_slots ?? 0) > 0 || (league.roster_positions?.length ?? 0) > 20) &&
         (league.settings?.best_ball ?? 0) === 0
       );
 
-      await Promise.all(dynastyLeagues.map(async (league: any) => {
+      await Promise.all(dynastyLeagues.map(async (league) => {
         try {
           // Fetch rosters + recent transactions (weeks 0-2 cover all offseason activity) + drafts for slot resolution
           const [leagueRosters, txn0, txn1, txn2, draftsData] = await Promise.all([
             fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`)
-              .then((r) => r.json()).catch(() => []),
+              .then((r) => r.json() as Promise<SleeperRoster[]>).catch(() => [] as SleeperRoster[]),
             fetch(`https://api.sleeper.app/v1/league/${league.league_id}/transactions/0`)
-              .then((r) => r.json()).catch(() => []),
+              .then((r) => r.json() as Promise<SleeperTransaction[]>).catch(() => [] as SleeperTransaction[]),
             fetch(`https://api.sleeper.app/v1/league/${league.league_id}/transactions/1`)
-              .then((r) => r.json()).catch(() => []),
+              .then((r) => r.json() as Promise<SleeperTransaction[]>).catch(() => [] as SleeperTransaction[]),
             fetch(`https://api.sleeper.app/v1/league/${league.league_id}/transactions/2`)
-              .then((r) => r.json()).catch(() => []),
+              .then((r) => r.json() as Promise<SleeperTransaction[]>).catch(() => [] as SleeperTransaction[]),
             fetch(`https://api.sleeper.app/v1/league/${league.league_id}/drafts`)
-              .then((r) => r.json()).catch(() => []),
+              .then((r) => r.json() as Promise<SleeperDraft[]>).catch(() => [] as SleeperDraft[]),
           ]);
 
           const ownerRoster = (Array.isArray(leagueRosters) ? leagueRosters : [])
-            .find((r: any) => String(r.owner_id) === ownerId);
+            .find((r) => String(r.owner_id) === ownerId);
           if (!ownerRoster) return;
 
           // Build slot resolver for this league's current-year draft
           const currentDraftForAlert = (Array.isArray(draftsData) ? draftsData : [])
-            .find((d: any) => String(d.season) === CURRENT_YEAR);
+            .find((d) => String(d.season) === CURRENT_YEAR);
           const alertDraftOrder: Record<string, number> = currentDraftForAlert?.draft_order ?? {};
           const alertNumTeams: number = (Array.isArray(leagueRosters) ? leagueRosters : []).length || 0;
           const alertRosterToOwner: Record<number, string> = {};
-          (Array.isArray(leagueRosters) ? leagueRosters : []).forEach((r: any) => {
+          (Array.isArray(leagueRosters) ? leagueRosters : []).forEach((r) => {
             alertRosterToOwner[r.roster_id] = r.owner_id;
           });
-          const labelPick = (p: any) => {
+          const labelPick = (p: SleeperTradedPick) => {
             if (String(p.season) === CURRENT_YEAR && currentDraftForAlert) {
               const userId = alertRosterToOwner[p.roster_id];
               const baseSlot = Number(alertDraftOrder[String(userId)] ?? 0);
@@ -1688,14 +1692,14 @@ const loadLeaguemateTradeAlerts = async () => {
             ...(Array.isArray(txn2) ? txn2 : []),
           ];
 
-          const recentTrades = allTxns.filter((t: any) =>
+          const recentTrades = allTxns.filter((t) =>
             t.type === "trade" &&
             t.status === "complete" &&
-            (t.status_updated || t.created || 0) > fourteenDaysAgo &&
+            (t.updated || t.created || 0) > fourteenDaysAgo &&
             (t.roster_ids || []).includes(ownerRoster.roster_id)
           );
 
-          recentTrades.forEach((trade: any) => {
+          recentTrades.forEach((trade) => {
             const alertId = `trade-${trade.transaction_id}-${ownerId}`;
             if (existingIds.has(alertId) || seenFromDb.has(alertId)) return;
 
@@ -1711,10 +1715,10 @@ const loadLeaguemateTradeAlerts = async () => {
               .map(([pid]) => players[pid]?.full_name || pid)
               .filter(Boolean);
             const picksReceived = (trade.draft_picks || [])
-              .filter((p: any) => p.owner_id === ownerRoster.roster_id)
+              .filter((p) => p.owner_id === ownerRoster.roster_id)
               .map(labelPick);
             const picksSent = (trade.draft_picks || [])
-              .filter((p: any) => p.previous_owner_id === ownerRoster.roster_id)
+              .filter((p) => p.previous_owner_id === ownerRoster.roster_id)
               .map(labelPick);
 
             if (!acquired.length && !sent.length && !picksReceived.length && !picksSent.length) return;
@@ -1726,7 +1730,7 @@ const loadLeaguemateTradeAlerts = async () => {
             if (!acquiredAll.length && !sentAll.length) return;
 
             const leagueName = league.name || `League`;
-            const tradeTs = trade.status_updated || trade.created || Date.now();
+            const tradeTs = trade.updated || trade.created || Date.now();
 
             tradeAlerts.push({
               id: alertId,
@@ -1770,9 +1774,9 @@ const loadActivity = async (leagueId: string) => {
           .catch(() => [])
       )
     );
-    const all = results.flat().filter((t: any) => t && t.status === "complete");
-    all.sort((a: any, b: any) => (b.status_updated || b.created || 0) - (a.status_updated || a.created || 0));
-    setActivityTransactions(all.slice(0, 150));
+    const all = results.flat().filter((t) => t && t.status === "complete");
+    all.sort((a, b) => (b.updated || b.created || 0) - (a.updated || a.created || 0));
+    setActivityTransactions(all.slice(0, 150) as AnnotatedTransaction[]);
   } catch (err) {
     console.error('[loadUserTrades/activity] failed:', err);
   } finally { setLoadingActivity(false); }
@@ -1784,23 +1788,23 @@ const loadLeagueOverview = async () => {
   try {
     // Fetch all rosters, traded picks, and drafts for every league in parallel
     const results = await Promise.all(
-      leagues.map(async (league: any) => {
+      leagues.map(async (league) => {
         try {
           const [rostersData, tradedPicksData, draftsData, usersData] = await Promise.all([
-            fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`).then(r => r.json()),
-            fetch(`https://api.sleeper.app/v1/league/${league.league_id}/traded_picks`).then(r => r.json()).catch(() => []),
-            fetch(`https://api.sleeper.app/v1/league/${league.league_id}/drafts`).then(r => r.json()).catch(() => []),
-            fetch(`https://api.sleeper.app/v1/league/${league.league_id}/users`).then(r => r.json()).catch(() => []),
+            fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`).then(r => r.json() as Promise<SleeperRoster[]>),
+            fetch(`https://api.sleeper.app/v1/league/${league.league_id}/traded_picks`).then(r => r.json() as Promise<SleeperTradedPick[]>).catch(() => [] as SleeperTradedPick[]),
+            fetch(`https://api.sleeper.app/v1/league/${league.league_id}/drafts`).then(r => r.json() as Promise<SleeperDraft[]>).catch(() => [] as SleeperDraft[]),
+            fetch(`https://api.sleeper.app/v1/league/${league.league_id}/users`).then(r => r.json() as Promise<SleeperUser[]>).catch(() => [] as SleeperUser[]),
           ]);
           // Build userId → display_name map for this league
           const leagueUserMap: Record<string, string> = {};
-          (usersData || []).forEach((u: any) => {
+          (usersData || []).forEach((u) => {
             leagueUserMap[u.user_id] = u.display_name || u.username || u.metadata?.team_name || `Team`;
           });
 
-          const tempPicks: any[] = [];
+          const tempPicks: AugmentedPick[] = [];
           const rosterToUser: Record<string, string> = {};
-          rostersData.forEach((r: any) => {
+          rostersData.forEach((r) => {
             rosterToUser[String(r.roster_id)] = r.owner_id;
             YEARS.forEach((year) => {
               ROUNDS.forEach((round) => {
@@ -1809,22 +1813,23 @@ const loadLeagueOverview = async () => {
                   round,
                   roster_id: r.roster_id,
                   owner_id: r.roster_id,
+                  previous_owner_id: r.roster_id,
                 });
               });
             });
           });
 
-          tradedPicksData.forEach((tp: any) => {
+          tradedPicksData.forEach((tp) => {
             const match = tempPicks.find(
               (p) => p.season === tp.season && p.round === tp.round && p.roster_id === tp.roster_id
             );
             if (match) match.owner_id = tp.owner_id;
           });
 
-          const currentDraft = draftsData.find((d: any) => d.season === CURRENT_YEAR);
+          const currentDraft = draftsData.find((d) => d.season === CURRENT_YEAR);
           const order = currentDraft?.draft_order || {};
           const totalDraftTeams = rostersData.length || Number(currentDraft?.settings?.teams) || 0;
-          tempPicks.forEach((pick: any) => {
+          tempPicks.forEach((pick) => {
             if (pick.season === CURRENT_YEAR) {
               const userId = rosterToUser[String(pick.roster_id)];
               const baseSlot = Number(order[String(userId)] || 0);
@@ -1842,8 +1847,8 @@ const loadLeagueOverview = async () => {
         }
       })
     );
-    const byLeague: Record<string, any> = {};
-    results.filter(Boolean).forEach(({ league, rosters: lr, picks, userMap }: any) => {
+    const byLeague: Record<string, LeagueOverviewEntry> = {};
+    results.filter((r): r is NonNullable<typeof r> => r !== null).forEach(({ league, rosters: lr, picks, userMap }) => {
       byLeague[league.league_id] = { league, rosters: lr, picks, userMap };
     });
     setLeagueOverviewData(byLeague);
@@ -1864,7 +1869,7 @@ const loadRedraftValues = async () => {
     );
     const data = await res.json();
     const vals: Record<string, number> = {};
-    data.forEach((entry: any) => {
+    data.forEach((entry: { player?: { sleeperId?: string }; value: number }) => {
       const sleeperId = entry.player?.sleeperId;
       if (sleeperId) vals[String(sleeperId)] = entry.value;
     });
@@ -1896,12 +1901,12 @@ const savePlayerNote = useCallback(async (playerId: string, note: string) => {
 // Builds from the current calcFcValues + players state and upserts to Supabase.
 const saveSnapshotNow = async () => {
   if (!supabaseUser) return;
-  const snap: Record<string, any> = {};
+  const snap: Record<string, { full_name: string; value: number; team: string; status: string; active: boolean; shareCount: number }> = {};
   Object.entries(calcFcValues as Record<string, number>).forEach(([playerId, value]) => {
     if (value <= 0) return;
     const p = players[playerId];
     if (!p || !["QB", "RB", "WR", "TE"].includes(p.position)) return;
-    snap[playerId] = { full_name: p.full_name, value, team: p.team || "" };
+    snap[playerId] = { full_name: p.full_name, value, team: p.team || "", status: p.status, active: p.active, shareCount: 0 };
   });
   if (Object.keys(snap).length === 0) return; // values not loaded yet
   const recordedAt = new Date().toISOString();
@@ -2051,7 +2056,7 @@ const deleteAttempt = async (id: string) => {
 
   const groupPlayers = () => {
     if (!roster || !players) return {};
-    const grouped: any = { QB: [], RB: [], WR: [], TE: [] };
+    const grouped: Record<string, Array<SleeperPlayer & { role: string }>> = { QB: [], RB: [], WR: [], TE: [] };
 
     roster.players?.forEach((id: string) => {
       const p = players[id];
@@ -2065,7 +2070,7 @@ const deleteAttempt = async (id: string) => {
 
     Object.keys(grouped).forEach((pos) => {
       grouped[pos].sort(
-        (a: any, b: any) =>
+        (a, b) =>
           ROLE_PRIORITY[a.role] - ROLE_PRIORITY[b.role]
       );
     });
@@ -2077,8 +2082,8 @@ const deleteAttempt = async (id: string) => {
 
   const filteredPlayers = useMemo(() =>
     (grouped[activeTab] || [])
-      .filter((p: any) => p.full_name?.toLowerCase().includes(search.toLowerCase()))
-      .sort((a: any, b: any) => {
+      .filter((p) => p.full_name?.toLowerCase().includes(search.toLowerCase()))
+      .sort((a, b) => {
         const roleDiff = ROLE_PRIORITY[a.role] - ROLE_PRIORITY[b.role];
         if (roleDiff !== 0) return roleDiff;
         return (b.value || 0) - (a.value || 0);
@@ -2089,7 +2094,7 @@ const deleteAttempt = async (id: string) => {
 const getTeamSummary = () => {
   if (!roster || !players) return null;
 
-  const summary: any = {
+  const summary: Record<string, number> = {
     QB: 0,
     RB: 0,
     WR: 0,
@@ -2111,7 +2116,7 @@ const getTeamSummary = () => {
     return acc;
   }, {});
 
-  picks.forEach((p: any) => {
+  picks.forEach((p) => {
     if (pickSummary[p.season] !== undefined) {
       pickSummary[p.season]++;
     }
@@ -2131,31 +2136,31 @@ const getTeamSummary = () => {
     const starterSlots = (selectedLeague?.roster_positions || []).filter(
       (slot: string) => !["BN", "IR", "TAXI"].includes(slot)
     );
-    const rosterMap = new Map(rosters.map((entry: any) => [Number(entry.roster_id), entry]));
+    const rosterMap = new Map(rosters.map((entry) => [Number(entry.roster_id), entry]));
     const projectionByPlayerId = new Map(
-      projectionData.map((row: any) => [String(row.sleeperId), row])
+      projectionData.map((row) => [String(row.sleeperId), row])
     );
-    const matchupMap = new Map<number, any[]>();
+    const matchupMap = new Map<number, SleeperMatchup[]>();
 
-    gamedayMatchups.forEach((entry: any) => {
+    gamedayMatchups.forEach((entry) => {
       const matchupId = Number(entry?.matchup_id || 0);
       if (!matchupId) return;
       if (!matchupMap.has(matchupId)) matchupMap.set(matchupId, []);
       matchupMap.get(matchupId)?.push(entry);
     });
 
-    const buildTeamView = (entry: any) => {
+    const buildTeamView = (entry: SleeperMatchup) => {
       const rosterId = Number(entry?.roster_id || 0);
       const rosterEntry = rosterMap.get(rosterId);
       const starterIds = Array.isArray(entry?.starters) && entry.starters.length > 0
-        ? entry.starters.map((id: any) => String(id || ""))
-        : (rosterEntry?.starters || []).map((id: any) => String(id || ""));
+        ? entry.starters.map((id) => String(id || ""))
+        : (rosterEntry?.starters || []).map((id) => String(id || ""));
       const playerPoints = entry?.players_points || {};
       const starterRows = starterSlots.map((slot: string, index: number) => {
         const playerId = starterIds[index] ? String(starterIds[index]) : "";
         const player = playerId ? players[playerId] : null;
         const projection = playerId ? projectionByPlayerId.get(playerId) : null;
-        const kickoffAt = getProjectionKickoffAt(projection);
+        const kickoffAt = getProjectionKickoffAt(projection as unknown as Record<string, unknown>);
         const actualPoints = Number(playerId ? playerPoints[playerId] ?? entry?.starters_points?.[index] ?? 0 : 0);
         const gameState = getKickoffState(kickoffAt);
         const remainingProjection = gameState === "Upcoming"
@@ -2176,12 +2181,12 @@ const getTeamSummary = () => {
         };
       });
 
-      const starterIdSet = new Set(starterRows.map((row: any) => row.playerId).filter(Boolean));
-      const taxiIdSet = new Set((rosterEntry?.taxi || []).map((id: any) => String(id)));
+      const starterIdSet = new Set(starterRows.map((row) => row.playerId).filter(Boolean));
+      const taxiIdSet = new Set((rosterEntry?.taxi || []).map((id) => String(id)));
       const buildReserveRow = (playerId: string) => {
         const player = players[playerId];
         const projection = projectionByPlayerId.get(String(playerId));
-        const kickoffAt = getProjectionKickoffAt(projection);
+        const kickoffAt = getProjectionKickoffAt(projection as unknown as Record<string, unknown>);
         const actualPoints = Number(playerPoints[playerId] ?? 0);
         const gameState = getKickoffState(kickoffAt);
         const remainingProjection = gameState === "Upcoming"
@@ -2201,29 +2206,30 @@ const getTeamSummary = () => {
       };
 
       const benchRows = (rosterEntry?.players || [])
-        .map((id: any) => String(id))
+        .map((id) => String(id))
         .filter((playerId: string) => !starterIdSet.has(playerId) && !taxiIdSet.has(playerId))
         .map(buildReserveRow)
-        .filter((row: any) => row.player)
-        .sort((a: any, b: any) => (b.remainingProjection + b.actualPoints) - (a.remainingProjection + a.actualPoints));
+        .filter((row) => row.player)
+        .sort((a, b) => (b.remainingProjection + b.actualPoints) - (a.remainingProjection + a.actualPoints));
 
       const taxiRows = (rosterEntry?.taxi || [])
-        .map((id: any) => String(id))
+        .map((id) => String(id))
         .map(buildReserveRow)
-        .filter((row: any) => row.player)
-        .sort((a: any, b: any) => (b.remainingProjection + b.actualPoints) - (a.remainingProjection + a.actualPoints));
+        .filter((row) => row.player)
+        .sort((a, b) => (b.remainingProjection + b.actualPoints) - (a.remainingProjection + a.actualPoints));
 
+      const ownerId = rosterEntry?.owner_id ?? "";
       return {
         rosterId,
-        ownerId: rosterEntry?.owner_id,
-        ownerName: users[rosterEntry?.owner_id] || users[rosterId] || `Team ${rosterId}`,
+        ownerId,
+        ownerName: users[ownerId] || users[rosterId] || `Team ${rosterId}`,
         actualPoints: Number(entry?.points || 0),
-        remainingProjection: Math.round(sum(starterRows.map((row: any) => row.remainingProjection)) * 10) / 10,
-        projectedFinal: Math.round((Number(entry?.points || 0) + sum(starterRows.map((row: any) => row.remainingProjection))) * 10) / 10,
-        finishedStarters: starterRows.filter((row: any) => row.gameState === "Final" && row.playerId).length,
-        liveStarters: starterRows.filter((row: any) => row.gameState === "Live" && row.playerId).length,
-        upcomingStarters: starterRows.filter((row: any) => row.gameState === "Upcoming" && row.playerId).length,
-        totalStarters: starterRows.filter((row: any) => row.playerId).length,
+        remainingProjection: Math.round(sum(starterRows.map((row) => row.remainingProjection)) * 10) / 10,
+        projectedFinal: Math.round((Number(entry?.points || 0) + sum(starterRows.map((row) => row.remainingProjection))) * 10) / 10,
+        finishedStarters: starterRows.filter((row) => row.gameState === "Final" && row.playerId).length,
+        liveStarters: starterRows.filter((row) => row.gameState === "Live" && row.playerId).length,
+        upcomingStarters: starterRows.filter((row) => row.gameState === "Upcoming" && row.playerId).length,
+        totalStarters: starterRows.filter((row) => row.playerId).length,
         starterRows,
         benchRows,
         taxiRows,
@@ -2234,10 +2240,10 @@ const getTeamSummary = () => {
       .map(([matchupId, entries]) => {
         const teams = entries
           .map((entry) => buildTeamView(entry))
-          .sort((a: any, b: any) => b.actualPoints - a.actualPoints);
+          .sort((a, b) => b.actualPoints - a.actualPoints);
         const sortKickoff = teams
-          .flatMap((team: any) => team.starterRows.map((row: any) => row.kickoffAt).filter(Boolean))
-          .sort((a: number, b: number) => a - b)[0] || Number.MAX_SAFE_INTEGER;
+          .flatMap((team) => team.starterRows.map((row) => row.kickoffAt).filter((k): k is number => k !== null))
+          .sort((a, b) => a - b)[0] || Number.MAX_SAFE_INTEGER;
 
         return {
           matchupId,
@@ -2251,7 +2257,7 @@ const getTeamSummary = () => {
       });
   }, [selectedLeague?.league_id, selectedLeague?.roster_positions, rosters, gamedayMatchups, gamedayWeek, players, projectionData, users]);
   const selectedGamedayMatchup = useMemo(
-    () => gamedayMatchupCards.find((card: any) => card.matchupId === selectedGamedayMatchupId) || gamedayMatchupCards[0] || null,
+    () => gamedayMatchupCards.find((card) => card.matchupId === selectedGamedayMatchupId) || gamedayMatchupCards[0] || null,
     [gamedayMatchupCards, selectedGamedayMatchupId]
   );
   useEffect(() => {
@@ -2259,19 +2265,19 @@ const getTeamSummary = () => {
       setSelectedGamedayMatchupId(null);
       return;
     }
-    if (!gamedayMatchupCards.some((card: any) => card.matchupId === selectedGamedayMatchupId)) {
+    if (!gamedayMatchupCards.some((card) => card.matchupId === selectedGamedayMatchupId)) {
       setSelectedGamedayMatchupId(gamedayMatchupCards[0].matchupId);
     }
   }, [gamedayMatchupCards, selectedGamedayMatchupId]);
   const selectedLeagueDirection = useMemo((): RosterDirectionProfile | null => {
     if (!selectedLeague || !rosters.length || !user?.user_id) return null;
-    const myRosterId = rosters.find((r: any) => r.owner_id === user.user_id)?.roster_id;
+    const myRosterId = rosters.find((r) => r.owner_id === user.user_id)?.roster_id;
     if (!myRosterId) return null;
 
     // Guard: allPicks updates after rosters on league switch — if any picks exist but none
     // belong to the current league's rosters, data is mid-update; return null and wait.
-    const leagueRosterIds = new Set(rosters.map((r: any) => Number(r.roster_id)));
-    if (allPicks.length > 0 && !allPicks.some((p: any) => leagueRosterIds.has(Number(p.roster_id)))) return null;
+    const leagueRosterIds = new Set(rosters.map((r) => Number(r.roster_id)));
+    if (allPicks.length > 0 && !allPicks.some((p) => leagueRosterIds.has(Number(p.roster_id)))) return null;
 
     // Guard: both value maps must be loaded before profile is meaningful.
     // An empty map produces nonsense direction output — redraftValues drives the
@@ -2301,9 +2307,9 @@ const getTeamSummary = () => {
     const playoffTeams = Number(selectedLeague?.settings?.playoff_teams || Math.ceil(rosters.length / 2));
     const byeTeams = playoffTeams >= 6 ? 2 : playoffTeams === 5 ? 1 : 0;
     const simCount = simulationMode === "offseason" ? 350 : 250;
-    const weeklyHistory = (leagueWeeklyMatchups[leagueId] || []) as Array<{ week: number; matchups: any[] }>;
+    const weeklyHistory = (leagueWeeklyMatchups[leagueId] || []) as Array<{ week: number; matchups: SleeperMatchup[] }>;
     const projectionMap = new Map(
-      ((projectionWeek === 0 || projectionWeek === currentWeek) ? projectionData : []).map((row: any) => [String(row.sleeperId), Number(row.fpts || 0)])
+      ((projectionWeek === 0 || projectionWeek === currentWeek) ? projectionData : []).map((row) => [String(row.sleeperId), Number(row.fpts || 0)])
     );
     const lineupSlots = (selectedLeague?.roster_positions || []).filter(
       (slot: string) => !["BN", "IR", "TAXI"].includes(slot)
@@ -2319,20 +2325,20 @@ const getTeamSummary = () => {
       return (redraftValues[playerId] ?? 0) / 250;
     };
 
-    const buildLineupStrength = (rosterEntry: any) => {
+    const buildLineupStrength = (rosterEntry: SleeperRoster) => {
       const available = (rosterEntry?.players || [])
         .map((id: string) => players[id])
-        .filter((player: any) => player && ["QB", "RB", "WR", "TE"].includes(player.position))
-        .map((player: any) => ({
+        .filter((player): player is SleeperPlayer & { score: number } => !!(player && ["QB", "RB", "WR", "TE"].includes(player.position)))
+        .map((player) => ({
           ...player,
           score: scorePlayer(player.player_id),
         }))
-        .sort((a: any, b: any) => b.score - a.score);
+        .sort((a, b) => b.score - a.score);
 
       const used = new Set<string>();
-      const lineup: any[] = [];
+      const lineup: Array<{ slot: string; player: (SleeperPlayer & { score: number }) | null; score: number }> = [];
       const claimBest = (eligible: string[], slot: string) => {
-        const next = available.find((player: any) => !used.has(player.player_id) && eligible.includes(player.position));
+        const next = available.find((player) => !used.has(player.player_id) && eligible.includes(player.position));
         if (!next) {
           lineup.push({ slot, player: null, score: 0 });
           return;
@@ -2347,9 +2353,9 @@ const getTeamSummary = () => {
         return claimBest([slot], slot);
       });
 
-      const bench = available.filter((player: any) => !used.has(player.player_id));
+      const bench = available.filter((player) => !used.has(player.player_id));
       const rawLineupScore = sum(lineup.map((slot) => slot.score || 0));
-      const rawBenchDepth = sum(bench.slice(0, 5).map((player: any) => player.score || 0));
+      const rawBenchDepth = sum(bench.slice(0, 5).map((player) => player.score || 0));
       const weeklyLineupScore = rawLineupScore / (projectionIsSeason ? regularSeasonWeeks : 1);
       const weeklyBenchDepth = rawBenchDepth / (projectionIsSeason ? regularSeasonWeeks : 1);
       const seasonProjection = projectionIsSeason
@@ -2373,13 +2379,13 @@ const getTeamSummary = () => {
       // Once the historical calibration block accumulates 6+ weeks of real scores,
       // it replaces this stdDev entirely — so this primarily matters early season
       // and offseason when no observed variance is yet available.
-      const startingPlayers = lineup.filter((s: any) => s.player).map((s: any) => s.player);
+      const startingPlayers = lineup.filter((s) => s.player).map((s) => s.player!);
       const teamVolatilityMultiplier = (() => {
         if (startingPlayers.length === 0) return 1.0;
         const posBase: Record<string, number> = { QB: 0.75, RB: 0.88, WR: 1.05, TE: 0.90 };
         let wVolSum = 0;
         let wSum = 0;
-        startingPlayers.forEach((player: any) => {
+        startingPlayers.forEach((player) => {
           const dynVal = calcFcValues[player.player_id] ?? players[player.player_id]?.value ?? 0;
           const redVal = redraftValues[player.player_id] ?? 0;
           const base = posBase[player.position] ?? 1.0;
@@ -2421,9 +2427,9 @@ const getTeamSummary = () => {
       };
     };
 
-    const rows: any[] = rosters.map((rosterEntry: any) => {
+    const rows: SimulationTeamRow[] = rosters.map((rosterEntry) => {
       const strength = buildLineupStrength(rosterEntry);
-      const standing = standings.find((entry: any) => Number(entry.roster_id) === Number(rosterEntry.roster_id));
+      const standing = standings.find((entry) => Number(entry.roster_id) === Number(rosterEntry.roster_id));
       const ownerName = users[rosterEntry.owner_id] || `Team ${rosterEntry.roster_id}`;
       return {
         rosterId: Number(rosterEntry.roster_id),
@@ -2434,7 +2440,26 @@ const getTeamSummary = () => {
         pointsFor: Number(standing?.fpts || rosterEntry.settings?.fpts || 0),
         maxPf: Number(standing?.max_pf || rosterEntry.settings?.fpts_max || 0),
         ...strength,
-      };
+        // Fields populated by later mutation passes
+        expectedWins: 0,
+        avgFinish: 0,
+        projectedFinish: 0,
+        finishRange: "",
+        playoffOdds: 0,
+        byeOdds: 0,
+        titleOdds: 0,
+        oneOhOneOdds: 0,
+        luckScore: 0,
+        allPlayWins: 0,
+        allPlayLosses: 0,
+        allPlayExpectedWins: 0,
+        avgWinProb: 0,
+        currentWeekWinProb: 0,
+        currentOpponent: undefined,
+        finishProbabilities: [],
+        slotProbabilities: [],
+        upcomingSchedule: [],
+      } satisfies SimulationTeamRow;
     });
 
     const rowByRosterId = new Map(rows.map((row) => [row.rosterId, row]));
@@ -2444,8 +2469,8 @@ const getTeamSummary = () => {
     weeklyHistory.forEach((week) => {
       const grouped = new Map<number, number[]>();
       (week.matchups || [])
-        .filter((entry: any) => entry?.matchup_id && entry?.roster_id)
-        .forEach((entry: any) => {
+        .filter((entry) => entry?.matchup_id && entry?.roster_id)
+        .forEach((entry) => {
           const matchupId = Number(entry.matchup_id);
           if (!grouped.has(matchupId)) grouped.set(matchupId, []);
           grouped.get(matchupId)?.push(Number(entry.roster_id));
@@ -2487,7 +2512,7 @@ const getTeamSummary = () => {
       weeklyHistory
         .filter((w) => w.week < currentWeek)
         .forEach((w) => {
-          (w.matchups || []).forEach((entry: any) => {
+          (w.matchups || []).forEach((entry) => {
             const pts = Number(entry?.points ?? 0);
             if (!entry?.roster_id || pts === 0) return;
             const rid = Number(entry.roster_id);
@@ -2595,24 +2620,24 @@ const getTeamSummary = () => {
         ? average(others.map((other) => logisticWinProb(row.powerScore, other.powerScore, 14) * 100)) / 100
         : 0.5;
       row.currentWeekWinProb = row.avgWinProb;
-      row.currentOpponent = null;
+      row.currentOpponent = undefined;
       row.allPlayWins = 0;
       row.allPlayLosses = 0;
-      row.upcomingSchedule = [] as any[];
+      row.upcomingSchedule = [];
     });
 
     if (currentWeek > 0) {
       weeklyHistory
         .filter((week) => week.week < currentWeek)
         .forEach((week) => {
-          const scored = (week.matchups || []).filter((matchup: any) => matchup?.roster_id);
-          scored.forEach((entry: any) => {
+          const scored = (week.matchups || []).filter((matchup) => matchup?.roster_id);
+          scored.forEach((entry) => {
             const row = rowByRosterId.get(Number(entry.roster_id));
             if (!row) return;
-            const wins = scored.filter((other: any) => Number(other.roster_id) !== Number(entry.roster_id) && Number(entry.points || 0) > Number(other.points || 0)).length;
-            const losses = scored.filter((other: any) => Number(other.roster_id) !== Number(entry.roster_id) && Number(entry.points || 0) < Number(other.points || 0)).length;
+            const wins = scored.filter((other) => Number(other.roster_id) !== Number(entry.roster_id) && Number(entry.points || 0) > Number(other.points || 0)).length;
+            const losses = scored.filter((other) => Number(other.roster_id) !== Number(entry.roster_id) && Number(entry.points || 0) < Number(other.points || 0)).length;
             row.allPlayWins += wins;
-            row.allPlayLosses += losses;
+            row.allPlayLosses = (row.allPlayLosses ?? 0) + losses;
           });
         });
     }
@@ -2675,7 +2700,7 @@ const getTeamSummary = () => {
         byeCount: 0,
         titleCount: 0,
       }])
-    ) as Record<number, any>;
+    ) as Record<number, { winsSum: number; finishCounts: number[]; slotCounts: number[]; playoffCount: number; byeCount: number; titleCount: number }>;
 
     const leagueSeed = String(leagueId).split("").reduce((acc, char, idx) => acc + char.charCodeAt(0) * (idx + 1), 0) + simSalt;
     const simStartWeek = currentWeek > 0 ? currentWeek : 1;
@@ -2749,7 +2774,7 @@ const getTeamSummary = () => {
       row.upcomingSchedule = row.upcomingSchedule.slice(0, 4);
     });
 
-    const ranked = [...rows].sort((a: any, b: any) => {
+    const ranked = [...rows].sort((a, b) => {
       if (b.playoffOdds !== a.playoffOdds) return b.playoffOdds - a.playoffOdds;
       if (b.titleOdds !== a.titleOdds) return b.titleOdds - a.titleOdds;
       if (b.expectedWins !== a.expectedWins) return b.expectedWins - a.expectedWins;
@@ -2792,7 +2817,7 @@ const getTeamSummary = () => {
   // Returns null while waiting for consistent data — consumers must show a loading state.
   const selectedLeagueDirectionAdjusted = useMemo(() => {
     if (!selectedLeagueDirection || !selectedLeague?.league_id) return null;
-    const myRosterId = rosters.find((r: any) => r.owner_id === user?.user_id)?.roster_id;
+    const myRosterId = rosters.find((r) => r.owner_id === user?.user_id)?.roster_id;
     if (!myRosterId) return null;
 
     // PRIORITY: use the committed (user-saved) sim — it's what the League Hub displays
@@ -2819,7 +2844,7 @@ const getTeamSummary = () => {
     // live sim recomputes every render and may not match the current league yet.
     if (!selectedLeagueSimulation) return null;
 
-    const allCurrentIds = rosters.map((r: any) => Number(r.roster_id));
+    const allCurrentIds = rosters.map((r) => Number(r.roster_id));
     const simMatchesLeague = allCurrentIds.every(
       (id) => selectedLeagueSimulation.rowByRosterId?.has(id)
     );
@@ -2842,7 +2867,7 @@ const getTeamSummary = () => {
 
   const selectedLeagueDynamicPickValues = useMemo(() => {
     const leagueId = selectedLeague?.league_id;
-    if (!leagueId || !selectedLeagueSimulation) return {} as Record<string, any>;
+    if (!leagueId || !selectedLeagueSimulation) return {} as Record<string, DynamicPickValue>;
     // Always prefer the live sim for the currently selected league — it's always current.
     // Fall back to the frozen committed snapshot only when the live sim lacks the row
     // (shouldn't happen for the selected league, but keeps the fallback path safe).
@@ -2855,7 +2880,7 @@ const getTeamSummary = () => {
     // Rank-based slot assignment: sort all rosters by their mean expected slot
     // (worst team = lowest mean slot = gets slot 1, best = slot N).
     const rosterRankSlot = (() => {
-      const entries = rosters.map((r: any) => {
+      const entries = rosters.map((r) => {
         const proj = getProjection(Number(r.roster_id));
         const rawSlots = slots.map((slot: number) => proj?.slotProbabilities?.[slot] ?? (1 / totalTeams));
         const slotTotal = sum(rawSlots) || 1;
@@ -2888,7 +2913,7 @@ const getTeamSummary = () => {
     };
 
     return Object.fromEntries(
-      allPicks.map((pick: any) => {
+      allPicks.map((pick) => {
         const key = `${pick.season}-${pick.round}-${pick.roster_id}`;
         const rosterProjection = getProjection(Number(pick.roster_id));
         const fallback = getStoredPickValue(pickFcValues, pick);
@@ -2963,7 +2988,7 @@ const getTeamSummary = () => {
           .map((probability, idx) => ({ slot: idx + 1, probability }))
           .sort((a, b) => b.probability - a.probability)
           .slice(0, 3);
-        const bestBucket = (Object.entries(bucketProbabilities).sort((a: any, b: any) => b[1] - a[1])[0]?.[0] || "mid") as "early" | "mid" | "late";
+        const bestBucket = (Object.entries(bucketProbabilities).sort((a, b) => b[1] - a[1])[0]?.[0] || "mid") as "early" | "mid" | "late";
         // Derive finish range directly from slotProbabilities so it is always
         // consistent with expectedSlot and expectedValue — never stale.
         // slot k+1 is given to the team finishing (totalTeams - k)th, so
@@ -3006,13 +3031,13 @@ const getTeamSummary = () => {
           })(),
         }];
       })
-    ) as Record<string, any>;
+    ) as Record<string, DynamicPickValue>;
   }, [selectedLeague?.league_id, committedSimsByLeague, selectedLeagueSimulation, allPicks, pickFcValues, rosters.length]);
   const selectedLeagueMateProfiles = useMemo((): LeagueMateView[] => {
     if (!selectedLeague || !rosters.length || !user?.user_id) return [];
 
     const dynastyValueForPlayer = (id: string) => calcFcValues[id] ?? players[id]?.value ?? 0;
-    const myRoster = rosters.find((r: any) => r.owner_id === user.user_id);
+    const myRoster = rosters.find((r) => r.owner_id === user.user_id);
     if (!myRoster) return [];
 
     const myProfile = getRosterDirectionProfile({
@@ -3026,8 +3051,8 @@ const getTeamSummary = () => {
     });
 
     return rosters
-      .filter((r: any) => r.owner_id && r.owner_id !== user.user_id)
-      .map((r: any) => {
+      .filter((r) => r.owner_id && r.owner_id !== user.user_id)
+      .map((r) => {
         const directionProfile = getRosterDirectionProfile({
           rosterId: r.roster_id,
           rosters,
@@ -3049,14 +3074,14 @@ const getTeamSummary = () => {
                 }
               : null;
           })
-          .filter(Boolean)
-          .filter((player: any) => ["QB", "RB", "WR", "TE"].includes(player.position));
+          .filter((p): p is SleeperPlayer & { dynValue: number } => p !== null)
+          .filter((player) => ["QB", "RB", "WR", "TE"].includes(player.position));
 
         const posValueTotals = ["QB", "RB", "WR", "TE"].map((pos) => ({
           pos,
           total: rosterPlayers
-            .filter((player: any) => player.position === pos)
-            .reduce((sum: number, player: any) => sum + (player.dynValue || 0), 0),
+            .filter((player) => player.position === pos)
+            .reduce((sum: number, player) => sum + (player.dynValue || 0), 0),
         })).sort((a, b) => b.total - a.total);
 
         const tradeIntel = leagueMateTradeIntel[String(r.roster_id)] || {
@@ -3068,7 +3093,7 @@ const getTeamSummary = () => {
         };
         const recentBuy = Object.entries(tradeIntel.bought || {}) as Array<[string, number]>;
         const recentBuyTop = [...recentBuy]
-          .sort((a: any, b: any) => b[1] - a[1])[0];
+          .sort((a, b) => b[1] - a[1])[0];
         const fit = getTradePartnerFit({
           myProfile,
           oppProfile: directionProfile,
@@ -3123,10 +3148,10 @@ const getTeamSummary = () => {
         };
       })
       .filter((v) => v !== null)
-      .sort((a: any, b: any) => {
-        if (b.fitScore !== a.fitScore) return b.fitScore - a.fitScore;
-        if (b.tradeCount30d !== a.tradeCount30d) return b.tradeCount30d - a.tradeCount30d;
-        return a.ownerName.localeCompare(b.ownerName);
+      .sort((a, b) => {
+        if (b!.fitScore !== a!.fitScore) return b!.fitScore - a!.fitScore;
+        if (b!.tradeCount30d !== a!.tradeCount30d) return b!.tradeCount30d - a!.tradeCount30d;
+        return a!.ownerName.localeCompare(b!.ownerName);
       }) as LeagueMateView[];
   }, [selectedLeague?.league_id, rosters, user?.user_id, allPicks, players, pickFcValues, redraftValues, calcFcValues, leagueMateTradeIntel, users, crossLeagueMateIntel]);
   const selectedLeagueMateProfilesView =
@@ -3138,7 +3163,7 @@ const getTeamSummary = () => {
     [leagueHubTab]
   );
   const leagueMateProfileByRosterId = useMemo(
-    () => new Map(selectedLeagueMateProfilesView.map((profile: any) => [Number(profile.rosterId), profile])),
+    () => new Map(selectedLeagueMateProfilesView.map((profile) => [Number(profile.rosterId), profile])),
     [selectedLeagueMateProfilesView]
   );
   // ── Buy Low player IDs (shared with Trade Finder) ─────────────────────────
@@ -3147,7 +3172,7 @@ const getTeamSummary = () => {
   const buyLowPlayerIds = useMemo<string[]>(() => {
     if (!players || Object.keys(calcFcValues).length === 0) return [];
     const projById = new Map<string, number>(
-      projectionData.map((r: any) => [String(r.sleeperId), Number(r.fpts || 0)])
+      projectionData.map((r) => [String(r.sleeperId), Number(r.fpts || 0)])
     );
     const MIN_DYN_VAL: Record<string, number> = { QB: 500, RB: 350, WR: 350, TE: 350 };
     const getAgeMult = (age: number, pos: string): number => {
@@ -3160,9 +3185,9 @@ const getTeamSummary = () => {
     const rows: { player_id: string; score: number }[] = [];
     for (const pos of ["QB", "RB", "WR", "TE"] as const) {
       const minVal = MIN_DYN_VAL[pos];
-      const pool = Object.values(players as Record<string, any>)
-        .filter((p: any) => p.position === pos && (calcFcValues[p.player_id] ?? 0) >= minVal && projById.has(p.player_id))
-        .map((p: any) => ({ player_id: p.player_id, age: Number(p.age || 0), dynVal: calcFcValues[p.player_id] ?? 0, projFpts: projById.get(p.player_id)! }));
+      const pool = Object.values(players)
+        .filter((p) => p.position === pos && (calcFcValues[p.player_id] ?? 0) >= minVal && projById.has(p.player_id))
+        .map((p) => ({ player_id: p.player_id, age: Number(p.age || 0), dynVal: calcFcValues[p.player_id] ?? 0, projFpts: projById.get(p.player_id)! }));
       if (pool.length < 2) continue;
       const dynSorted  = [...pool].sort((a, b) => b.dynVal - a.dynVal);
       const projSorted = [...pool].sort((a, b) => b.projFpts - a.projFpts);
@@ -3189,18 +3214,18 @@ const getTeamSummary = () => {
   const tradePartnerRankings = useMemo(() => {
     if (!selectedLeague || !rosters.length || !user?.user_id || !selectedLeagueSimulation || !selectedLeagueDirection) return [];
 
-    const myRoster = rosters.find((entry: any) => entry.owner_id === user.user_id);
+    const myRoster = rosters.find((entry) => entry.owner_id === user.user_id);
     if (!myRoster) return [];
 
     const mySimRow = selectedLeagueSimulation.rowByRosterId.get(Number(myRoster.roster_id));
     // Use the fully adjusted profile (dynasty + redraft + sim + age) as the source of truth
     const myEffectiveProfile = selectedLeagueDirectionAdjusted ?? selectedLeagueDirection;
     const myBuckets = getProfilePosBuckets(myEffectiveProfile);
-    const strongPos = myBuckets.strong[0] || myEffectiveProfile.positionRanks?.sort((a: any, b: any) => a.rank - b.rank)?.[0]?.pos || "WR";
-    const weakPos = myBuckets.weak[0] || myEffectiveProfile.positionRanks?.sort((a: any, b: any) => b.rank - a.rank)?.[0]?.pos || "RB";
+    const strongPos = myBuckets.strong[0] || myEffectiveProfile.positionRanks?.sort((a, b) => a.rank - b.rank)?.[0]?.pos || "WR";
+    const weakPos = myBuckets.weak[0] || myEffectiveProfile.positionRanks?.sort((a, b) => b.rank - a.rank)?.[0]?.pos || "RB";
 
     return selectedLeagueMateProfilesView
-      .map((partner: any) => {
+      .map((partner) => {
         const simRow = selectedLeagueSimulation.rowByRosterId.get(Number(partner.rosterId));
         const partnerPlayoffOdds = simRow?.playoffOdds ?? 0;
         // Apply the same three-factor adjustment to each partner's bucket
@@ -3249,17 +3274,71 @@ const getTeamSummary = () => {
           isBuyer,
         };
       })
-      .sort((a: any, b: any) => {
+      .sort((a, b) => {
         if (b.rankScore !== a.rankScore) return b.rankScore - a.rankScore;
         if (b.fitScore !== a.fitScore) return b.fitScore - a.fitScore;
         return a.ownerName.localeCompare(b.ownerName);
       });
   }, [selectedLeague?.league_id, rosters, user?.user_id, selectedLeagueSimulation, selectedLeagueDirection, selectedLeagueMateProfilesView]);
 
+  // Local types for the trade recommendation engine.
+  type TradePartner = LeagueMateView & {
+    rankScore: number;
+    playoffOdds: number;
+    titleOdds: number;
+    bestApproach: string;
+    negotiationNotes: string[];
+    isSeller: boolean;
+    isBuyer: boolean;
+    directionProfile: RosterDirectionProfile;
+  };
+  // Local type for a trade recommendation card (the object pushed into candidateCards / recommendations).
+  type TradeCard = {
+    archetype: string;
+    partnerName: string;
+    fitLabel: string;
+    partnerOwnerId?: string;
+    partnerRosterId?: number;
+    give: TradeAsset[];
+    receive: TradeAsset[];
+    whyYou: string;
+    whyThem: string;
+    summary: string;
+    partnerPlayoffOdds: number;
+    partnerTitleOdds: number;
+    partnerRankScore: number;
+    recommendationScore: number;
+    giveTotal: number;
+    receiveTotal: number;
+    packageDelta: number;
+    bestApproach: string;
+    negotiationNotes: string[];
+    openingOffer: string;
+    isLottery?: boolean;
+  };
+  // Local type for trade assets — covers both player-like and pick-like objects in give/receive arrays.
+  type TradeAsset = {
+    player_id?: string;
+    season?: string;
+    round?: number;
+    roster_id?: number;
+    owner_id?: number;
+    dynValue?: number;
+    redValue?: number;
+    expectedValue?: number;
+    expectedSlot?: number | null;
+    label?: string;
+    dynamic?: DynamicPickValue;
+    value?: number;
+    age?: number | null;
+    position?: string;
+    full_name?: string;
+    diff?: number;
+  };
   const tradeRecommendationCards = useMemo(() => {
     if (!selectedLeague || !rosters.length || !user?.user_id || !selectedLeagueDirection) return [];
 
-    const myRoster = rosters.find((entry: any) => entry.owner_id === user.user_id);
+    const myRoster = rosters.find((entry) => entry.owner_id === user.user_id);
     if (!myRoster) return [];
 
     // Use the fully adjusted profile — dynasty rank + redraft rank + sim + age all combined
@@ -3272,7 +3351,7 @@ const getTeamSummary = () => {
     const iAmContending = myPlayoffOdds >= 50;
     const dynValueForPlayer = (id: string) => calcFcValues[id] ?? players[id]?.value ?? 0;
     const playerListForRoster = (rosterId: number) => {
-      const rosterEntry = rosters.find((entry: any) => Number(entry.roster_id) === Number(rosterId));
+      const rosterEntry = rosters.find((entry) => Number(entry.roster_id) === Number(rosterId));
       return (rosterEntry?.players || [])
         .map((id: string) => {
           const player = players[id];
@@ -3287,8 +3366,8 @@ const getTeamSummary = () => {
     };
     const myPlayersDetailed = playerListForRoster(myRoster.roster_id);
     const myPicksDetailed = allPicks
-      .filter((pick: any) => Number(pick.owner_id) === Number(myRoster.roster_id))
-      .map((pick: any) => {
+      .filter((pick) => Number(pick.owner_id) === Number(myRoster.roster_id))
+      .map((pick) => {
         const key = `${pick.season}-${pick.round}-${pick.roster_id}`;
         const dynamic = selectedLeagueDynamicPickValues[key];
         return {
@@ -3299,34 +3378,34 @@ const getTeamSummary = () => {
           expectedSlot: dynamic?.expectedSlot ?? null,
         };
       })
-      .sort((a: any, b: any) => b.expectedValue - a.expectedValue);
+      .sort((a, b) => b.expectedValue - a.expectedValue);
 
     const teamCount = rosters.length || 12;
     const weakPositions = new Set(
       (myProfile?.positionRanks || [])
-        .filter((entry: any) => entry.rank >= Math.max(4, teamCount - 2))
-        .map((entry: any) => entry.pos)
+        .filter((entry) => entry.rank >= Math.max(4, teamCount - 2))
+        .map((entry) => entry.pos)
     );
     const strongPositions = new Set(
       (myProfile?.positionRanks || [])
-        .filter((entry: any) => entry.rank <= Math.max(2, Math.ceil(teamCount / 3)))
-        .map((entry: any) => entry.pos)
+        .filter((entry) => entry.rank <= Math.max(2, Math.ceil(teamCount / 3)))
+        .map((entry) => entry.pos)
     );
-    const recommendations: any[] = [];
+    const recommendations: TradeCard[] = [];
     const sortedPartners = [...tradePartnerRankings];
     const isBlockedSellDisposition = (playerId?: string | null) =>
       !!playerId && playerDispositions[playerId]?.sell === "Not Willing to Trade";
     const isBlockedBuyDisposition = (playerId?: string | null) =>
       !!playerId && ["Zero Interest", "Skip"].includes(playerDispositions[playerId]?.buy || "");
-    const assetValue = (asset: any) => asset?.expectedValue ?? asset?.dynValue ?? asset?.value ?? 0;
+    const assetValue = (asset: TradeAsset) => asset?.expectedValue ?? asset?.dynValue ?? asset?.value ?? 0;
     const meaningfulPlayerThreshold = 350;
     const fairDeltaLimit = (total: number) => Math.max(250, Math.min(900, Math.round(total * 0.16)));
     // Waiver credit: same formula as trade calculator & trade finder (0.42× extra asset value, capped)
     const calcWaiverCredit = (extras: number[]) =>
       extras.reduce((s, v, i) => s + Math.min(Math.round(v * 0.42), i === 0 ? 550 : 750), 0);
-    const isFairPackage = (give: any[], receive: any[]) => {
-      const giveVals = give.map((a: any) => assetValue(a)).sort((a, b) => b - a);
-      const receiveVals = receive.map((a: any) => assetValue(a)).sort((a, b) => b - a);
+    const isFairPackage = (give: TradeAsset[], receive: TradeAsset[]) => {
+      const giveVals = give.map((a) => assetValue(a)).sort((a, b) => b - a);
+      const receiveVals = receive.map((a) => assetValue(a)).sort((a, b) => b - a);
       const rawGive = Math.round(giveVals.reduce((s, v) => s + v, 0));
       const rawReceive = Math.round(receiveVals.reduce((s, v) => s + v, 0));
       if (rawGive <= 0 || rawReceive <= 0) return false;
@@ -3343,19 +3422,19 @@ const getTeamSummary = () => {
       const ratio = receiveAdj / Math.max(giveAdj, 1);
       return delta <= fairDeltaLimit(Math.max(giveAdj, receiveAdj)) && ratio >= 0.78 && ratio <= 1.22;
     };
-    const chooseClosestPackage = (packages: any[][], targetValue: number, opts?: { minValue?: number; maxValue?: number }) => {
+    const chooseClosestPackage = (packages: TradeAsset[][], targetValue: number, opts?: { minValue?: number; maxValue?: number }) => {
       const minValue = opts?.minValue ?? Math.max(400, Math.round(targetValue * 0.78));
       const maxValue = opts?.maxValue ?? Math.round(targetValue * 1.22);
       return packages
         .map((pkg) => ({
           assets: pkg,
-          total: Math.round(sum(pkg.map((asset: any) => assetValue(asset)))),
+          total: Math.round(sum(pkg.map((asset) => assetValue(asset)))),
         }))
         .filter((entry) => entry.total >= minValue && entry.total <= maxValue)
         .sort((a, b) => Math.abs(a.total - targetValue) - Math.abs(b.total - targetValue))[0] || null;
     };
-    const twoAssetCombos = (assets: any[]) => {
-      const combos: any[][] = [];
+    const twoAssetCombos = (assets: TradeAsset[]) => {
+      const combos: TradeAsset[][] = [];
       for (let i = 0; i < assets.length; i++) {
         for (let j = i + 1; j < assets.length; j++) {
           combos.push([assets[i], assets[j]]);
@@ -3371,9 +3450,9 @@ const getTeamSummary = () => {
       whyYou,
       whyThem,
       summary,
-    }: any) => {
-      const giveValsAdj = give.map((a: any) => assetValue(a)).sort((a: number, b: number) => b - a);
-      const receiveValsAdj = receive.map((a: any) => assetValue(a)).sort((a: number, b: number) => b - a);
+    }: { archetype: string; partner: TradePartner; give: TradeAsset[]; receive: TradeAsset[]; whyYou: string; whyThem: string; summary: string }) => {
+      const giveValsAdj = give.map((a) => assetValue(a)).sort((a: number, b: number) => b - a);
+      const receiveValsAdj = receive.map((a) => assetValue(a)).sort((a: number, b: number) => b - a);
       const giveTotal = Math.round(giveValsAdj.reduce((s: number, v: number) => s + v, 0));
       const receiveTotal = Math.round(receiveValsAdj.reduce((s: number, v: number) => s + v, 0));
       const assetDiffCard = giveValsAdj.length - receiveValsAdj.length;
@@ -3385,11 +3464,11 @@ const getTeamSummary = () => {
       const giveTotalAdj = giveTotal + (assetDiffCard < 0 ? waiverAdjCard : 0);
       const receiveTotalAdj = receiveTotal + (assetDiffCard > 0 ? waiverAdjCard : 0);
       const packageDelta = receiveTotalAdj - giveTotalAdj;
-      if (give.some((asset: any) => !asset?.season && isBlockedSellDisposition(asset?.player_id))) return null;
-      if (receive.some((asset: any) => !asset?.season && isBlockedBuyDisposition(asset?.player_id))) return null;
+      if (give.some((asset) => !asset?.season && isBlockedSellDisposition(asset?.player_id))) return null;
+      if (receive.some((asset) => !asset?.season && isBlockedBuyDisposition(asset?.player_id))) return null;
       if (!isFairPackage(give, receive)) return null;
-      if (give.some((asset: any) => asset?.dynValue != null && asset.dynValue < meaningfulPlayerThreshold && !asset?.season)) return null;
-      if (receive.some((asset: any) => asset?.dynValue != null && asset.dynValue < meaningfulPlayerThreshold && !asset?.season)) return null;
+      if (give.some((asset) => asset?.dynValue != null && asset.dynValue < meaningfulPlayerThreshold && !asset?.season)) return null;
+      if (receive.some((asset) => asset?.dynValue != null && asset.dynValue < meaningfulPlayerThreshold && !asset?.season)) return null;
       const archetypeBonus = archetype === "Draft Capital" ? 5 : archetype === "Tier Up" ? 4 : archetype === "Buy Low" ? 3 : 2;
       const recommendationScore = Math.round(
         partner.rankScore +
@@ -3420,24 +3499,24 @@ const getTeamSummary = () => {
       };
     };
 
-    const isAgingAsset = (player: any) =>
+    const isAgingAsset = (player: TradeAsset) =>
       (player.position === "RB" && Number(player.age || 0) >= 25) ||
       (player.position === "QB" && Number(player.age || 0) >= 29) ||
-      (["WR", "TE"].includes(player.position) && Number(player.age || 0) >= 28);
-    const isYoungInsulation = (player: any) =>
-      (["QB", "WR"].includes(player.position) && Number(player.age || 99) <= 25) ||
+      (["WR", "TE"].includes(player.position ?? "") && Number(player.age || 0) >= 28);
+    const isYoungInsulation = (player: TradeAsset) =>
+      (["QB", "WR"].includes(player.position ?? "") && Number(player.age || 99) <= 25) ||
       (player.position === "TE" && Number(player.age || 99) <= 25) ||
       (player.position === "RB" && Number(player.age || 99) <= 23);
     // A floor filler wins you games now but adds no dynasty upside — dangerous for tanking teams
     // because it moves you from 1.02 to 1.05 pick without any realistic championship path.
-    const isFloorFiller = (player: any) =>
+    const isFloorFiller = (player: TradeAsset) =>
       (player.position === "RB" && Number(player.age || 0) >= 24) ||
       (player.position === "QB" && Number(player.age || 0) >= 28) ||
-      (["WR", "TE"].includes(player.position) && Number(player.age || 0) >= 27);
+      (["WR", "TE"].includes(player.position ?? "") && Number(player.age || 0) >= 27);
     const getPickPackage = (rosterId: number) =>
       allPicks
-        .filter((pick: any) => Number(pick.owner_id) === Number(rosterId))
-        .map((pick: any) => {
+        .filter((pick) => Number(pick.owner_id) === Number(rosterId))
+        .map((pick) => {
           const dynKey = `${pick.season}-${pick.round}-${pick.roster_id}`;
           const dyn = selectedLeagueDynamicPickValues[dynKey];
           return {
@@ -3447,104 +3526,104 @@ const getTeamSummary = () => {
             expectedSlot: dyn?.expectedSlot ?? null,
           };
         })
-        .filter((pick: any) => pick.expectedValue > 0)
-        .sort((a: any, b: any) => b.expectedValue - a.expectedValue)
+        .filter((pick) => pick.expectedValue > 0)
+        .sort((a, b) => b.expectedValue - a.expectedValue)
         .slice(0, 6);
-    const comboPackages = (assets: any[], maxItems = 2) => {
-      const singles = assets.map((asset: any) => [asset]);
+    const comboPackages = (assets: TradeAsset[], maxItems = 2) => {
+      const singles = assets.map((asset) => [asset]);
       if (maxItems <= 1) return singles;
       return [...singles, ...twoAssetCombos(assets)];
     };
-    const classifyArchetype = (give: any[], receive: any[], partner: any) => {
-      const givePlayers = give.filter((asset: any) => !asset?.season);
-      const receivePlayers = receive.filter((asset: any) => !asset?.season);
-      const givePicks = give.filter((asset: any) => !!asset?.season);
-      const receivePicks = receive.filter((asset: any) => !!asset?.season);
-      if (receivePicks.length > 0 && givePlayers.some((player: any) => isAgingAsset(player))) return "Sell High";
+    const classifyArchetype = (give: TradeAsset[], receive: TradeAsset[], partner: TradePartner) => {
+      const givePlayers = give.filter((asset) => !asset?.season);
+      const receivePlayers = receive.filter((asset) => !asset?.season);
+      const givePicks = give.filter((asset) => !!asset?.season);
+      const receivePicks = receive.filter((asset) => !!asset?.season);
+      if (receivePicks.length > 0 && givePlayers.some((player) => isAgingAsset(player))) return "Sell High";
       // Tanking teams trading floor fillers for picks = Draft Capital accumulation
-      if (iAmTanking && receivePicks.length > 0 && givePlayers.some((player: any) => isFloorFiller(player))) return "Draft Capital";
-      if (givePicks.length > 0 && receivePlayers.some((player: any) => weakPositions.has(player.position))) return "Buy Low";
+      if (iAmTanking && receivePicks.length > 0 && givePlayers.some((player) => isFloorFiller(player))) return "Draft Capital";
+      if (givePicks.length > 0 && receivePlayers.some((player) => weakPositions.has(player.position ?? ""))) return "Buy Low";
       if (give.length > receive.length && receivePlayers.length === 1) return "2-for-1";
-      if (give.length >= 2 && receivePlayers.length === 1 && receivePlayers[0]?.dynValue > Math.max(...givePlayers.map((player: any) => player.dynValue || 0), 0)) return "Tier Up";
+      if (give.length >= 2 && receivePlayers.length === 1 && (receivePlayers[0]?.dynValue ?? 0) > Math.max(...givePlayers.map((player) => player.dynValue || 0), 0)) return "Tier Up";
       if (partner?.isSeller) return "Insulation Buy";
       return "Value Rebalance";
     };
-    const scoreRecommendationFit = (give: any[], receive: any[], partner: any) => {
-      const givePlayers = give.filter((asset: any) => !asset?.season);
-      const receivePlayers = receive.filter((asset: any) => !asset?.season);
-      const givePicks = give.filter((asset: any) => !!asset?.season);
-      const receivePicks = receive.filter((asset: any) => !!asset?.season);
+    const scoreRecommendationFit = (give: TradeAsset[], receive: TradeAsset[], partner: TradePartner) => {
+      const givePlayers = give.filter((asset) => !asset?.season);
+      const receivePlayers = receive.filter((asset) => !asset?.season);
+      const givePicks = give.filter((asset) => !!asset?.season);
+      const receivePicks = receive.filter((asset) => !!asset?.season);
       const partnerBuckets = getProfilePosBuckets(partner.directionProfile);
       let myScore = 0;
       let theirScore = 0;
 
       if (["Rebuilder", "Stranded", "Fading Out", "Hopeless"].includes(myProfile.bucket)) {
-        myScore += givePlayers.filter((player: any) => isAgingAsset(player)).length * 8;
-        myScore += givePlayers.filter((player: any) => isFloorFiller(player) && !isAgingAsset(player)).length * 5;
-        myScore += receivePlayers.filter((player: any) => isYoungInsulation(player)).length * 8;
+        myScore += givePlayers.filter((player) => isAgingAsset(player)).length * 8;
+        myScore += givePlayers.filter((player) => isFloorFiller(player) && !isAgingAsset(player)).length * 5;
+        myScore += receivePlayers.filter((player) => isYoungInsulation(player)).length * 8;
         myScore += receivePicks.length * 7;
-        myScore -= receivePlayers.filter((player: any) => isAgingAsset(player)).length * 16;
-        myScore -= receivePlayers.filter((player: any) => isFloorFiller(player) && !isAgingAsset(player)).length * 10;
+        myScore -= receivePlayers.filter((player) => isAgingAsset(player)).length * 16;
+        myScore -= receivePlayers.filter((player) => isFloorFiller(player) && !isAgingAsset(player)).length * 10;
       } else if (["Elite", "True Contender", "Almost There", "Window Closing"].includes(myProfile.bucket)) {
-        myScore += receivePlayers.filter((player: any) => weakPositions.has(player.position)).length * 8;
-        myScore += receivePlayers.reduce((sum: number, player: any) => sum + (player.redValue || 0), 0) / 350;
+        myScore += receivePlayers.filter((player) => weakPositions.has(player.position ?? "")).length * 8;
+        myScore += receivePlayers.reduce((sum: number, player) => sum + (player.redValue || 0), 0) / 350;
         myScore -= receivePicks.length * 3;
         // RBs injure at the highest rate and are hardest to replace off waivers.
         // Contending teams should value RB depth even when RB is already a "strong" position.
-        myScore += receivePlayers.filter((player: any) =>
+        myScore += receivePlayers.filter((player) =>
           player.position === "RB" && Number(player.age || 0) >= 22 && Number(player.age || 0) <= 26
         ).length * 5;
       } else if (iAmTanking) {
         // Purgatory/Fading teams below 50% playoff odds — buying points is COUNTERPRODUCTIVE.
         // Going from 4-9 to 6-7 moves the 1.02 to 1.05 without any playoff upside.
         // Only valid moves: sell floor fillers, accumulate picks, target young upside shots.
-        myScore += givePlayers.filter((player: any) => isFloorFiller(player)).length * 7;
-        myScore += givePlayers.filter((player: any) => isAgingAsset(player)).length * 8;
-        myScore += receivePlayers.filter((player: any) => isYoungInsulation(player)).length * 9;
+        myScore += givePlayers.filter((player) => isFloorFiller(player)).length * 7;
+        myScore += givePlayers.filter((player) => isAgingAsset(player)).length * 8;
+        myScore += receivePlayers.filter((player) => isYoungInsulation(player)).length * 9;
         myScore += receivePicks.length * 10;
-        myScore -= receivePlayers.filter((player: any) => isFloorFiller(player)).length * 16;
-        myScore -= receivePlayers.filter((player: any) => isAgingAsset(player)).length * 20;
+        myScore -= receivePlayers.filter((player) => isFloorFiller(player)).length * 16;
+        myScore -= receivePlayers.filter((player) => isAgingAsset(player)).length * 20;
         // Filling a weak position with a floor player is exactly wrong — hurts draft slot
-        myScore -= receivePlayers.filter((player: any) => weakPositions.has(player.position) && isFloorFiller(player)).length * 8;
+        myScore -= receivePlayers.filter((player) => weakPositions.has(player.position ?? "") && isFloorFiller(player)).length * 8;
       } else {
         // True middle — realistic playoff path, balanced approach
-        myScore += receivePlayers.filter((player: any) => weakPositions.has(player.position)).length * 6;
-        myScore += receivePlayers.filter((player: any) => isYoungInsulation(player)).length * 4;
+        myScore += receivePlayers.filter((player) => weakPositions.has(player.position ?? "")).length * 6;
+        myScore += receivePlayers.filter((player) => isYoungInsulation(player)).length * 4;
         myScore += receivePicks.length * 3;
       }
 
       if (partner.isBuyer) {
-        theirScore += givePlayers.filter((player: any) => partnerBuckets.weak.includes(player.position)).length * 8;
-        theirScore += givePlayers.reduce((sum: number, player: any) => sum + (player.redValue || 0), 0) / 350;
+        theirScore += givePlayers.filter((player) => partnerBuckets.weak.includes(player.position ?? "")).length * 8;
+        theirScore += givePlayers.reduce((sum: number, player) => sum + (player.redValue || 0), 0) / 350;
         theirScore -= receivePicks.length * 2;
       } else if (partner.isSeller) {
         theirScore += givePicks.length * 7;
-        theirScore += givePlayers.filter((player: any) => isYoungInsulation(player)).length * 7;
-        theirScore += receivePlayers.filter((player: any) => isAgingAsset(player)).length * 6;
-        theirScore -= givePlayers.filter((player: any) => isAgingAsset(player)).length * 6;
+        theirScore += givePlayers.filter((player) => isYoungInsulation(player)).length * 7;
+        theirScore += receivePlayers.filter((player) => isAgingAsset(player)).length * 6;
+        theirScore -= givePlayers.filter((player) => isAgingAsset(player)).length * 6;
       } else {
-        theirScore += givePlayers.filter((player: any) => partnerBuckets.weak.includes(player.position)).length * 5;
+        theirScore += givePlayers.filter((player) => partnerBuckets.weak.includes(player.position ?? "")).length * 5;
         theirScore += givePicks.length * 3;
       }
 
       return { myScore, theirScore };
     };
-    const passesRecommendationGuard = (give: any[], receive: any[], partner: any) => {
-      const givePlayers = give.filter((asset: any) => !asset?.season);
-      const receivePlayers = receive.filter((asset: any) => !asset?.season);
-      const givePicks = give.filter((asset: any) => !!asset?.season);
-      const receivePicks = receive.filter((asset: any) => !!asset?.season);
+    const passesRecommendationGuard = (give: TradeAsset[], receive: TradeAsset[], partner: TradePartner) => {
+      const givePlayers = give.filter((asset) => !asset?.season);
+      const receivePlayers = receive.filter((asset) => !asset?.season);
+      const givePicks = give.filter((asset) => !!asset?.season);
+      const receivePicks = receive.filter((asset) => !!asset?.season);
       const partnerBuckets = getProfilePosBuckets(partner.directionProfile);
-      const incomingAging = receivePlayers.filter((player: any) => isAgingAsset(player)).length;
-      const incomingYoung = receivePlayers.filter((player: any) => isYoungInsulation(player)).length;
-      const outgoingAging = givePlayers.filter((player: any) => isAgingAsset(player)).length;
-      const givesPremiumCurrentPick = givePicks.some((pick: any) => String(pick.season) === CURRENT_YEAR && Number(pick.round) === 1);
-      const receivesPremiumCurrentPick = receivePicks.some((pick: any) => String(pick.season) === CURRENT_YEAR && Number(pick.round) === 1);
+      const incomingAging = receivePlayers.filter((player) => isAgingAsset(player)).length;
+      const incomingYoung = receivePlayers.filter((player) => isYoungInsulation(player)).length;
+      const outgoingAging = givePlayers.filter((player) => isAgingAsset(player)).length;
+      const givesPremiumCurrentPick = givePicks.some((pick) => String(pick.season) === CURRENT_YEAR && Number(pick.round) === 1);
+      const receivesPremiumCurrentPick = receivePicks.some((pick) => String(pick.season) === CURRENT_YEAR && Number(pick.round) === 1);
 
       if (["Rebuilder", "Stranded", "Fading Out", "Hopeless"].includes(myProfile.bucket)) {
         if (incomingAging > 0) return false;
         if (givesPremiumCurrentPick && incomingYoung === 0 && receivePicks.length === 0) return false;
-        if (receivePlayers.some((player: any) => player.position === "RB" && Number(player.age || 99) >= 24)) return false;
+        if (receivePlayers.some((player) => player.position === "RB" && Number(player.age || 99) >= 24)) return false;
       }
 
       // Tanking teams (below 50% playoff odds) in non-rebuild buckets must follow the same discipline.
@@ -3554,40 +3633,40 @@ const getTeamSummary = () => {
         // Never take on aging assets regardless of position need
         if (incomingAging > 0) return false;
         // Never take on floor fillers unless also getting picks — you'd just win extra games
-        if (receivePlayers.some((p: any) => isFloorFiller(p)) && receivePicks.length === 0 && incomingYoung === 0) return false;
+        if (receivePlayers.some((p) => isFloorFiller(p)) && receivePicks.length === 0 && incomingYoung === 0) return false;
         // Must receive picks or young upside — point fillers without future capital are vetoed
-        if (receivePlayers.length > 0 && receivePlayers.every((p: any) => !isYoungInsulation(p)) && receivePicks.length === 0) return false;
+        if (receivePlayers.length > 0 && receivePlayers.every((p) => !isYoungInsulation(p)) && receivePicks.length === 0) return false;
         // Guard premium current picks — should only move them for meaningful future capital
         if (givesPremiumCurrentPick && incomingYoung === 0 && receivePicks.length === 0) return false;
         // Older RBs are the most dangerous floor-fillers: they win games now, crater fast
-        if (receivePlayers.some((p: any) => p.position === "RB" && Number(p.age || 99) >= 24)) return false;
+        if (receivePlayers.some((p) => p.position === "RB" && Number(p.age || 99) >= 24)) return false;
       }
 
       if (["Elite", "True Contender", "Almost There", "Window Closing"].includes(myProfile.bucket)) {
         if (receive.length > 0 && receivePlayers.length === 0) return false;
-        if (receivePlayers.length > 0 && receivePlayers.every((player: any) => isYoungInsulation(player)) && receivePicks.length > 0 && givePlayers.length > 0) {
+        if (receivePlayers.length > 0 && receivePlayers.every((player) => isYoungInsulation(player)) && receivePicks.length > 0 && givePlayers.length > 0) {
           return false;
         }
       }
 
       if (partner.isBuyer) {
-        const pointsComingToPartner = givePlayers.reduce((sum: number, player: any) => sum + (player.redValue || 0), 0);
+        const pointsComingToPartner = givePlayers.reduce((sum: number, player) => sum + (player.redValue || 0), 0);
         if (pointsComingToPartner <= 0 && givePicks.length > 0) return false;
-        if (partnerBuckets.weak.length > 0 && !givePlayers.some((player: any) => partnerBuckets.weak.includes(player.position)) && pointsComingToPartner < 1000) {
+        if (partnerBuckets.weak.length > 0 && !givePlayers.some((player) => partnerBuckets.weak.includes(player.position ?? "")) && pointsComingToPartner < 1000) {
           return false;
         }
       }
 
       if (partner.isSeller) {
-        if (outgoingAging > 0 && givePicks.length === 0 && givePlayers.filter((player: any) => isYoungInsulation(player)).length === 0) return false;
+        if (outgoingAging > 0 && givePicks.length === 0 && givePlayers.filter((player) => isYoungInsulation(player)).length === 0) return false;
         if (receivesPremiumCurrentPick && partner.playoffOdds > 55) return false;
       }
 
       return true;
     };
-    const getCandidateText = (archetype: string, partner: any, _give: any[], receive: any[]) => {
-      const receivePlayers = receive.filter((asset: any) => !asset?.season);
-      const receivePicks = receive.filter((asset: any) => !!asset?.season);
+    const getCandidateText = (archetype: string, partner: TradePartner, _give: TradeAsset[], receive: TradeAsset[]) => {
+      const receivePlayers = receive.filter((asset) => !asset?.season);
+      const receivePicks = receive.filter((asset) => !!asset?.season);
       if (archetype === "Draft Capital") {
         return {
           whyYou: `At ${Math.round(myPlayoffOdds)}% to make the playoffs, buying points is counterproductive — getting marginally better moves you from a 1.02 to a 1.05 without any realistic championship path. Converting this floor player into picks preserves your draft slot and maximizes the only real lever you have.`,
@@ -3625,13 +3704,13 @@ const getTeamSummary = () => {
       };
     };
 
-    sortedPartners.forEach((partner: any) => {
+    sortedPartners.forEach((partner) => {
       const partnerPlayers = playerListForRoster(Number(partner.rosterId));
       const partnerPicks = getPickPackage(Number(partner.rosterId));
       const partnerBuckets = getProfilePosBuckets(partner.directionProfile);
 
       const myOfferPlayers = myPlayersDetailed
-        .filter((player: any) => {
+        .filter((player) => {
           const disp = playerDispositions[player.player_id];
           if (isBlockedSellDisposition(player.player_id)) return false;
           // Never offer players I've explicitly tagged as "buy" — I want them
@@ -3649,7 +3728,7 @@ const getTeamSummary = () => {
             )
           );
         })
-        .sort((a: any, b: any) => {
+        .sort((a, b) => {
           // Sell-tagged players sort first so they're prioritized in combo generation
           const aIsSell = playerDispositions[a.player_id]?.sell ? 1 : 0;
           const bIsSell = playerDispositions[b.player_id]?.sell ? 1 : 0;
@@ -3660,7 +3739,7 @@ const getTeamSummary = () => {
       const myOfferPicks = myPicksDetailed.slice(0, 5);
 
       const partnerTradeablePlayers = partnerPlayers
-        .filter((player: any) =>
+        .filter((player) =>
           !isBlockedBuyDisposition(player.player_id) &&
           player.dynValue >= meaningfulPlayerThreshold &&
           (
@@ -3673,7 +3752,7 @@ const getTeamSummary = () => {
             (partner.isBuyer && partnerBuckets.strong.includes(player.position))
           )
         )
-        .sort((a: any, b: any) => {
+        .sort((a, b) => {
           // Buy-tagged players sort first
           const aIsBuy = playerDispositions[a.player_id]?.buy ? 1 : 0;
           const bIsBuy = playerDispositions[b.player_id]?.buy ? 1 : 0;
@@ -3684,10 +3763,10 @@ const getTeamSummary = () => {
 
       const givePackages = comboPackages([...myOfferPlayers, ...myOfferPicks], 2).slice(0, 45);
       const receivePackages = comboPackages([...partnerTradeablePlayers, ...partnerPicks], 2).slice(0, 45);
-      const candidateCards: any[] = [];
+      const candidateCards: TradeCard[] = [];
       const tryBuildCandidates = (minimumFit: number, bandFloor: number, bandCeil: number) => {
-        givePackages.forEach((givePkg: any[]) => {
-          const giveTotal = Math.round(sum(givePkg.map((asset: any) => assetValue(asset))));
+        givePackages.forEach((givePkg) => {
+          const giveTotal = Math.round(sum(givePkg.map((asset) => assetValue(asset))));
           if (giveTotal < meaningfulPlayerThreshold) return;
           const matchedReceive = chooseClosestPackage(receivePackages, giveTotal, {
             minValue: Math.round(giveTotal * bandFloor),
@@ -3728,10 +3807,10 @@ const getTeamSummary = () => {
       // Dispositions: skip "Zero Interest" receive targets; boost "Buy Low" targets.
       const LOTTERY_CEILING = 700;
       const roundOrd = (r: number) => r === 1 ? "1st" : r === 2 ? "2nd" : r === 3 ? "3rd" : `${r}th`;
-      const myLotteryPicks = myPicksDetailed.filter((p: any) => Number(p.round) >= 3 && assetValue(p) > 0);
+      const myLotteryPicks = myPicksDetailed.filter((p) => Number(p.round) >= 3 && assetValue(p) > 0);
       if (myLotteryPicks.length > 0) {
         partnerPlayers
-          .filter((p: any) => {
+          .filter((p) => {
             if (playerDispositions[p.player_id]?.buy === "Zero Interest") return false;
             const age = Number(p.age || 99);
             const val = Number(p.dynValue || 0);
@@ -3741,18 +3820,18 @@ const getTeamSummary = () => {
             if (["WR", "TE"].includes(p.position) && age > 27) return false;
             return true;
           })
-          .sort((a: any, b: any) => b.dynValue - a.dynValue)
+          .sort((a, b) => b.dynValue - a.dynValue)
           .slice(0, 3)
-          .forEach((target: any) => {
+          .forEach((target) => {
             const targetVal = Number(target.dynValue || 0);
             const bestPick = myLotteryPicks
-              .filter((p: any) => {
+              .filter((p) => {
                 const pv = assetValue(p);
                 const ratio = targetVal / Math.max(pv, 1);
                 return ratio >= 0.35 && ratio <= 1.6;
               })
-              .map((p: any) => ({ ...p, diff: Math.abs(assetValue(p) - targetVal) }))
-              .sort((a: any, b: any) => a.diff - b.diff)[0];
+              .map((p) => ({ ...p, diff: Math.abs(assetValue(p) - targetVal) }))
+              .sort((a, b) => a.diff - b.diff)[0];
             if (!bestPick) return;
             const pickVal = assetValue(bestPick);
             if (pickVal <= 0 || targetVal <= 0) return;
@@ -3787,10 +3866,11 @@ const getTeamSummary = () => {
       // from the full rosters (no position/age/profile restrictions).
       if (candidateCards.length === 0) {
         const fallbackMine = myPlayersDetailed
-          .filter((p: any) => p.dynValue >= 500 && !isBlockedSellDisposition(p.player_id));
+          .filter((p) => p.dynValue >= 500 && !isBlockedSellDisposition(p.player_id));
         const fallbackTheirs = partnerPlayers
-          .filter((p: any) => p.dynValue >= 500 && !isBlockedBuyDisposition(p.player_id));
-        let bestPair: { mine: any; theirs: any; diff: number } | null = null;
+          .filter((p) => p.dynValue >= 500 && !isBlockedBuyDisposition(p.player_id));
+        type PlayerDetailed = ReturnType<typeof playerListForRoster>[number];
+        let bestPair: { mine: PlayerDetailed; theirs: PlayerDetailed; diff: number } | null = null;
         for (const mine of fallbackMine) {
           for (const theirs of fallbackTheirs) {
             const ratio = mine.dynValue / Math.max(theirs.dynValue, 1);
@@ -3829,22 +3909,22 @@ const getTeamSummary = () => {
       }
 
       const bestCard = candidateCards
-        .sort((a: any, b: any) => b.recommendationScore - a.recommendationScore)[0];
+        .sort((a, b) => b.recommendationScore - a.recommendationScore)[0];
       if (bestCard) recommendations.push(bestCard);
     });
 
     const base = recommendations
       .filter(Boolean)
-      .filter((card: any) =>
-        !card.give.some((asset: any) => !asset?.season && isBlockedSellDisposition(asset?.player_id)) &&
-        !card.receive.some((asset: any) => !asset?.season && isBlockedBuyDisposition(asset?.player_id))
+      .filter((card) =>
+        !card.give.some((asset) => !asset?.season && isBlockedSellDisposition(asset?.player_id)) &&
+        !card.receive.some((asset) => !asset?.season && isBlockedBuyDisposition(asset?.player_id))
       )
-      .filter((card: any) =>
-        !card.give.some((asset: any) => asset?.season && String(asset.season) > CURRENT_YEAR)
+      .filter((card) =>
+        !card.give.some((asset) => asset?.season && String(asset.season) > CURRENT_YEAR)
       )
-      .sort((a: any, b: any) => b.recommendationScore - a.recommendationScore);
+      .sort((a, b) => b.recommendationScore - a.recommendationScore);
 
-    const lowImpact = base.filter((card: any) =>
+    const lowImpact = base.filter((card) =>
       card.giveTotal >= 500 && card.giveTotal <= 4000 &&
       card.receiveTotal >= 500 && card.receiveTotal <= 4000
     );
@@ -3882,12 +3962,12 @@ const getTeamSummary = () => {
   // Save simulation results to Supabase on demand and freeze a local snapshot for
   // pick valuations. The frozen snapshot (localStorage + state) is the source of truth
   // for pick values — it never drifts between sim runs.
-  const saveSimulationToSupabase = (leagueId: string, simRows: any[]) => {
+  const saveSimulationToSupabase = (leagueId: string, simRows: SimulationTeamRow[]) => {
     const now = new Date().toISOString();
     // Always update local state and localStorage — these are the source of truth
     // for pick valuations and must work even when Supabase auth is unavailable.
     const newEntries = Object.fromEntries(
-      simRows.map((row: any) => [row.rosterId, {
+      simRows.map((row) => [row.rosterId, {
         league_id: leagueId,
         roster_id: row.rosterId,
         playoff_odds: row.playoffOdds ?? 0,
@@ -3899,14 +3979,14 @@ const getTeamSummary = () => {
       }])
     );
     setLeagueSimCache((prev) => ({ ...prev, [leagueId]: newEntries }));
-    const frozenRows = Object.fromEntries(
-      simRows.map((row: any) => [row.rosterId, {
-        slotProbabilities: row.slotProbabilities ?? [],
-        projectedFinish: row.projectedFinish ?? 0,
-        finishRange: row.finishRange ?? "",
-        ownerName: row.ownerName ?? "",
+    const frozenRows: Record<number, SimRow> = Object.fromEntries(
+      simRows.map((row) => [row.rosterId, {
+        rosterId: row.rosterId,
+        wins: row.actualWins ?? 0,
+        losses: row.actualLosses ?? 0,
+        ties: 0,
+        pointsFor: row.pointsFor ?? 0,
         playoffOdds: row.playoffOdds ?? 0,
-        computed_at: now,
       }])
     );
     setCommittedSimsByLeague((prev) => {
@@ -3916,7 +3996,7 @@ const getTeamSummary = () => {
     });
     // Write to Supabase only when authenticated.
     if (supabaseUser) {
-      const rows = simRows.map((row: any) => ({
+      const rows = simRows.map((row) => ({
         user_id: supabaseUser.id,
         league_id: leagueId,
         roster_id: row.rosterId,
@@ -3955,7 +4035,7 @@ const getTeamSummary = () => {
     setSimProgress((prev) => prev ? { ...prev, done: prev.done + 1 } : null);
 
     if (remaining.length > 0) {
-      const nextLeague = leagues.find((l: any) => l.league_id === remaining[0]);
+      const nextLeague = leagues.find((l) => l.league_id === remaining[0]);
       if (nextLeague) loadRoster(nextLeague);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -3963,16 +4043,16 @@ const getTeamSummary = () => {
 
   const handleRunAllSims = () => {
     if (!leagues.length) return;
-    const leagueIds = leagues.map((l: any) => l.league_id);
+    const leagueIds = leagues.map((l) => l.league_id);
     setSimProgress({ done: 0, total: leagueIds.length });
     setReadyLeagueId(null); // clear so the effect can't fire with stale data
     setSimSalt(Math.floor(Math.random() * 1_000_000)); // new salt → different sim results each run
     setSimQueue(leagueIds);
-    const first = leagues.find((l: any) => l.league_id === leagueIds[0]);
+    const first = leagues.find((l) => l.league_id === leagueIds[0]);
     if (first) loadRoster(first); // always reload to guarantee fresh data
   };
   const draftedPlayerIds = useMemo(
-    () => new Set(draftPicks.map((pick: any) => String(pick.player_id)).filter(Boolean)),
+    () => new Set(draftPicks.map((pick) => String(pick.player_id)).filter(Boolean)),
     [draftPicks]
   );
 
@@ -3989,7 +4069,7 @@ const getTeamSummary = () => {
     const numTeams = rosters.length;
     const numRounds: number = draftSettings?.settings?.rounds ?? draftSettings?.rounds ?? 4;
     const isSnake = ((draftSettings?.settings?.type ?? draftSettings?.type) || "snake") !== "linear";
-    const myRosterId = rosters.find((r: any) => r.owner_id === user?.user_id)?.roster_id;
+    const myRosterId = rosters.find((r) => r.owner_id === user?.user_id)?.roster_id;
 
     // Strip Jr./Sr./II/III suffixes before collapsing to alpha-only so names from
     // Sleeper ("Omar Cooper") and FantasyCalc ("Omar Cooper Jr.") still match.
@@ -4000,7 +4080,7 @@ const getTeamSummary = () => {
 
     // rosterId → userId map — needed to look up owner tendencies
     const rosterToUserId: Record<number, string> = {};
-    rosters.forEach((r: any) => { rosterToUserId[Number(r.roster_id)] = r.owner_id; });
+    rosters.forEach((r) => { rosterToUserId[Number(r.roster_id)] = r.owner_id; });
 
     // Average positional distribution across all dynasty rookie drafts (baseline)
     const leagueAvgRate: Record<string, number> = { QB: 0.12, RB: 0.28, WR: 0.48, TE: 0.12 };
@@ -4022,14 +4102,14 @@ const getTeamSummary = () => {
     // Build name→dynasty value map from Sleeper players dict + FC values
     // Needed because rookies use FC player_ids which may differ from Sleeper player_ids
     const valueByNormName: Record<string, number> = {};
-    Object.entries(players).forEach(([id, p]: [string, any]) => {
-      const val = calcFcValues[id] ?? (p as any).value ?? 0;
-      if (val > 0 && (p as any).full_name) {
-        const key = normName((p as any).full_name);
+    Object.entries(players).forEach(([id, p]: [string, SleeperPlayer]) => {
+      const val = calcFcValues[id] ?? p.value ?? 0;
+      if (val > 0 && p.full_name) {
+        const key = normName(p.full_name);
         if (!valueByNormName[key] || val > valueByNormName[key]) valueByNormName[key] = val;
       }
     });
-    const getRookieValue = (r: any): number =>
+    const getRookieValue = (r: RookieBoardPlayer): number =>
       (r.player_id ? (calcFcValues[r.player_id] ?? 0) : 0) || valueByNormName[normName(r.name)] || 0;
 
     // Unified player pool for non-user picks.
@@ -4040,7 +4120,7 @@ const getTeamSummary = () => {
     // This prevents ADP name-matching failures (e.g. Love at MAX_SAFE_INTEGER adp)
     // from burying high-value players — their FC value pulls them back to the top.
     const fullPool = [...rookies]
-      .map((r: any, boardIdx: number) => {
+      .map((r: RookieBoardPlayer, boardIdx: number) => {
         const dynVal = getRookieValue(r);
         const hasAdp = typeof r.adp === "number" && r.adp < 9999;
         let sortKey: number;
@@ -4058,29 +4138,29 @@ const getTeamSummary = () => {
         }
         return { ...r, _sortKey: sortKey };
       })
-      .sort((a: any, b: any) => a._sortKey - b._sortKey);
+      .sort((a, b) => a._sortKey - b._sortKey);
 
     // User's personal board order for their own slots
     const boardSorted = [...rookies];
 
     // slot → current owner_id (after trades), from allPicks
     const slotOwnerMap = new Map<string, number>();
-    allPicks.forEach((p: any) => {
+    allPicks.forEach((p) => {
       if (p.slot && p.owner_id) slotOwnerMap.set(String(p.slot), Number(p.owner_id));
     });
 
     // Detect actual picks by pick_no — reliable regardless of slot/roster resolution
     const filledPickNos = new Set<number>(
-      draftPicks.map((dp: any) => Number(dp.pick_no)).filter(Boolean)
+      draftPicks.map((dp) => Number(dp.pick_no)).filter(Boolean)
     );
-    const pickByNo = new Map<number, any>();
-    draftPicks.forEach((dp: any) => { if (dp.pick_no) pickByNo.set(Number(dp.pick_no), dp); });
+    const pickByNo = new Map<number, SleeperDraftPick>();
+    draftPicks.forEach((dp) => { if (dp.pick_no) pickByNo.set(Number(dp.pick_no), dp); });
 
     // My slots across all rounds
     const mySlots = new Set<string>(
       allPicks
-        .filter((p: any) => String(p.owner_id) === String(myRosterId) && p.slot)
-        .map((p: any) => String(p.slot))
+        .filter((p: AugmentedPick) => String(p.owner_id) === String(myRosterId) && p.slot)
+        .map((p: AugmentedPick) => String(p.slot))
     );
 
     // League starter targets for positional need calculation
@@ -4107,10 +4187,10 @@ const getTeamSummary = () => {
       if (!rosterId) return 1;
       const needCap     = round === 1 ? 1.08 : round === 2 ? 1.22 : round === 3 ? 1.38 : 1.55;
       const surplusMult = round === 1 ? 0.95 : round === 2 ? 0.88 : round === 3 ? 0.82 : 0.75;
-      const roster = rosters.find((r: any) => Number(r.roster_id) === rosterId);
+      const roster = rosters.find((r) => Number(r.roster_id) === rosterId);
       const existing = ((roster?.players || []) as string[])
         .map((id: string) => players[id]).filter(Boolean)
-        .filter((p: any) => p.position === pos).length;
+        .filter((p: SleeperPlayer) => p.position === pos).length;
       const target = posTarget[pos] ?? 1;
       const simmed = (simCounts[rosterId] || {})[pos] || 0;
       const deficit = target - existing - simmed;
@@ -4125,27 +4205,27 @@ const getTeamSummary = () => {
       ...Object.values(myDraftSlotPicks),
     ]);
     const usedNames = new Set<string>();
-    draftPicks.forEach((dp: any) => {
+    draftPicks.forEach((dp) => {
       const p = players[dp.player_id];
       if (p?.full_name) usedNames.add(normName(p.full_name));
     });
     Object.values(myDraftSlotPicks).forEach((pid) => {
-      const r = rookies.find((rk: any) => rk.player_id === pid || rk.name === pid);
+      const r = rookies.find((rk: RookieBoardPlayer) => rk.player_id === pid || rk.name === pid);
       if (r?.name) usedNames.add(normName(r.name));
     });
 
-    const isUsed = (r: any) => {
+    const isUsed = (r: RookieBoardPlayer) => {
       if (r.player_id && usedIds.has(String(r.player_id))) return true;
       if (r.name && usedNames.has(normName(r.name))) return true;
       return false;
     };
-    const markUsed = (r: any) => {
+    const markUsed = (r: RookieBoardPlayer) => {
       if (r.player_id) usedIds.add(String(r.player_id));
       if (r.name) usedNames.add(normName(r.name));
     };
 
     const simCounts: Record<number, Record<string, number>> = {};
-    rosters.forEach((r: any) => { simCounts[Number(r.roster_id)] = {}; });
+    rosters.forEach((r) => { simCounts[Number(r.roster_id)] = {}; });
 
     const predictions: Record<string, { name: string; position: string; team: string; adp: number; player_id: string | null; boardRank: number; poolRank: number }> = {};
 
@@ -4179,7 +4259,7 @@ const getTeamSummary = () => {
         // User override for their own picks
         if (myDraftSlotPicks[slotStr]) {
           const oid = myDraftSlotPicks[slotStr];
-          const ov = rookies.find((r: any) => r.player_id === oid || r.name === oid);
+          const ov = rookies.find((r: RookieBoardPlayer) => r.player_id === oid || r.name === oid);
           if (ov) {
             predictions[slotStr] = { name: ov.name, position: ov.position, team: ov.team || "", adp: ov.adp ?? 999, player_id: ov.player_id, boardRank: rookies.indexOf(ov) + 1, poolRank: 0 };
             if (rosterId) { simCounts[rosterId] = simCounts[rosterId] || {}; simCounts[rosterId][ov.position] = (simCounts[rosterId][ov.position] || 0) + 1; }
@@ -4193,8 +4273,8 @@ const getTeamSummary = () => {
         const rankSource = isMySlot ? boardSorted : fullPool;
 
         const best = rankSource
-          .filter((r: any) => !isUsed(r))
-          .map((r: any, rankIdx: number) => {
+          .filter((r: RookieBoardPlayer) => !isUsed(r))
+          .map((r: RookieBoardPlayer, rankIdx: number) => {
             const baseScore = 1000 / (rankIdx + 1);
             const nm = needMult(rosterId, r.position, simCounts, round);
             // Dynasty value bonus: FC value differences within same ADP tier
@@ -4205,15 +4285,15 @@ const getTeamSummary = () => {
             const tm = isMySlot ? 1 : tendencyMult(rosterId, r.position);
             return { ...r, score: baseScore * nm * tm * (1 + valBonus) };
           })
-          .sort((a: any, b: any) => b.score - a.score)[0];
+          .sort((a, b) => b.score - a.score)[0];
 
         if (best) {
-          const boardRank = rookies.findIndex((r: any) => (r.player_id && r.player_id === best.player_id) || normName(r.name) === normName(best.name)) + 1;
+          const boardRank = rookies.findIndex((r: RookieBoardPlayer) => (r.player_id && r.player_id === best.player_id) || normName(r.name) === normName(best.name)) + 1;
           // poolRank = player's position in consensus dynasty-value pool (1 = most valuable).
           // Used to flag REACH/VALUE on user's predicted slots:
           //   overallPick << poolRank → reaching ahead of consensus
           //   overallPick >> poolRank → getting value relative to consensus
-          const poolRank = fullPool.findIndex((r: any) => (r.player_id && r.player_id === best.player_id) || normName(r.name) === normName(best.name)) + 1 || 999;
+          const poolRank = fullPool.findIndex((r: RookieBoardPlayer) => (r.player_id && r.player_id === best.player_id) || normName(r.name) === normName(best.name)) + 1 || 999;
           predictions[slotStr] = { name: best.name, position: best.position, team: best.team || "", adp: best.adp ?? 999, player_id: best.player_id, boardRank, poolRank };
           markUsed(best);
           if (rosterId) { simCounts[rosterId] = simCounts[rosterId] || {}; simCounts[rosterId][best.position] = (simCounts[rosterId][best.position] || 0) + 1; }
@@ -4231,13 +4311,13 @@ const getTeamSummary = () => {
           ...player,
           boardRank: index + 1,
         }))
-        .filter((player: any) => !draftedPlayerIds.has(String(player.player_id)))
+        .filter((player: RookieBoardPlayer & { boardRank: number }) => !draftedPlayerIds.has(String(player.player_id)))
         .slice(0, 10),
     [rookies, draftedPlayerIds]
   );
   const dashboardOwnedPlayers = useMemo(() => {
-    const map = new Map<string, any>();
-    allLeagueData.forEach((entry: any) => {
+    const map = new Map<string, OwnedPlayerEntry>();
+    allLeagueData.forEach((entry: AllLeagueDataEntry) => {
       (entry?.roster?.players || []).forEach((playerId: string) => {
         const player = players[playerId];
         if (!player?.full_name) return;
@@ -4266,7 +4346,7 @@ const getTeamSummary = () => {
   const injuryReportPlayers = useMemo(() => {
     // Build starting lineup map: playerId -> league names where they're a starter
     const startingMap = new Map<string, string[]>();
-    allLeagueData.forEach((entry: any) => {
+    allLeagueData.forEach((entry) => {
       (entry?.roster?.starters || []).forEach((playerId: string) => {
         if (!playerId || playerId === "0") return;
         const existing = startingMap.get(String(playerId)) || [];
@@ -4278,9 +4358,9 @@ const getTeamSummary = () => {
     });
 
     const seen = new Set<string>();
-    const result: Array<{ player: any; playerId: string; leagues: string[]; startingLeagues: string[]; isWatchlisted: boolean }> = [];
+    const result: Array<{ player: SleeperPlayer; playerId: string; leagues: string[]; startingLeagues: string[]; isWatchlisted: boolean }> = [];
 
-    dashboardOwnedPlayers.forEach((entry: any) => {
+    dashboardOwnedPlayers.forEach((entry) => {
       if (seen.has(entry.player_id)) return;
       const player = players[entry.player_id];
       if (!player?.full_name || !["QB", "RB", "WR", "TE"].includes(player.position)) return;
@@ -4308,7 +4388,7 @@ const getTeamSummary = () => {
       });
     });
 
-    const severityOrder = (p: any) => {
+    const severityOrder = (p: SleeperPlayer) => {
       const s = (p.injury_status || p.status || "").toLowerCase();
       if (/ir|pup/.test(s)) return 0;
       if (/out|suspended|inactive/.test(s)) return 1;
@@ -4331,7 +4411,7 @@ const getTeamSummary = () => {
         const weeks = [curWeek, curWeek - 1, curWeek - 2, curWeek - 3].filter((w) => w >= 1);
 
         const results = await Promise.all(
-          leagues.map(async (league: any) => {
+          leagues.map(async (league) => {
             const [txArrays, usersData, rostersData, draftsData] = await Promise.all([
               Promise.all(
                 weeks.map((w) =>
@@ -4355,27 +4435,27 @@ const getTeamSummary = () => {
             const rosterOwnerMap: Record<number, string> = {};
             // Build roster_id → user_id map for slot computation
             const rosterToUser: Record<number, string> = {};
-            (rostersData as any[]).forEach((r: any) => {
-              const u = (usersData as any[]).find((u: any) => u.user_id === r.owner_id);
+            (rostersData as SleeperRoster[]).forEach((r) => {
+              const u = (usersData as SleeperUser[]).find((u) => u.user_id === r.owner_id);
               rosterOwnerMap[r.roster_id] = u?.display_name || u?.username || `Team ${r.roster_id}`;
               if (r.owner_id) rosterToUser[r.roster_id] = String(r.owner_id);
             });
 
             // Draft order for slot computation (current year only)
-            const currentDraft = (Array.isArray(draftsData) ? draftsData : [])
-              .find((d: any) => d.season === CURRENT_YEAR);
+            const currentDraft = (Array.isArray(draftsData) ? draftsData as SleeperDraft[] : [])
+              .find((d) => d.season === CURRENT_YEAR);
             const draftOrder: Record<string, number> = currentDraft?.draft_order ?? {};
-            const totalTeams: number = (rostersData as any[]).length || 0;
+            const totalTeams: number = (rostersData as SleeperRoster[]).length || 0;
 
             // Annotate each pick in every transaction with its computed slot string
-            const annotatedTxs = (txArrays.flat() as any[])
-              .filter((tx: any) => tx.status === "complete" && tx.type !== "waiver_failed")
-              .map((tx: any) => ({
+            const annotatedTxs = (txArrays.flat() as SleeperTransaction[])
+              .filter((tx) => tx.status === "complete" && tx.type !== "waiver_failed")
+              .map((tx) => ({
                 ...tx,
                 leagueName: league.name,
                 leagueId: league.league_id,
                 rosterOwnerMap,
-                draft_picks: (tx.draft_picks ?? []).map((pick: any) => {
+                draft_picks: (tx.draft_picks ?? []).map((pick) => {
                   if (pick.season === CURRENT_YEAR) {
                     const userId = rosterToUser[pick.roster_id];
                     const baseSlot = Number(draftOrder[String(userId)] ?? 0);
@@ -4398,7 +4478,7 @@ const getTeamSummary = () => {
         setLeagueTransactions(
           results
             .flat()
-            .sort((a: any, b: any) => (b.created || 0) - (a.created || 0))
+            .sort((a, b) => (b.created || 0) - (a.created || 0))
             .slice(0, 200)
         );
       } finally {
@@ -4435,7 +4515,7 @@ const getTeamSummary = () => {
 
   useEffect(() => {
     const trackedPlayers = [
-      ...dashboardOwnedPlayers.map((entry: any) => ({
+      ...dashboardOwnedPlayers.map((entry) => ({
         playerId: String(entry.player_id),
         player: players[entry.player_id],
         watch: watchlistEntries.find((watch) => watch.player_id === String(entry.player_id)) || null,
@@ -4443,7 +4523,7 @@ const getTeamSummary = () => {
         leagues: entry.leagues || [],
       })),
       ...watchlistEntries
-        .filter((entry) => !dashboardOwnedPlayers.some((owned: any) => owned.player_id === entry.player_id))
+        .filter((entry) => !dashboardOwnedPlayers.some((owned) => owned.player_id === entry.player_id))
         .map((entry) => ({
           playerId: entry.player_id,
           player: players[entry.player_id],
@@ -4455,7 +4535,7 @@ const getTeamSummary = () => {
 
     if (!trackedPlayers.length) return;
 
-    let savedSnapshots: any = {};
+    let savedSnapshots: { players?: Record<string, PlayerSnapshot> } = {};
     try {
       savedSnapshots = JSON.parse(localStorage.getItem(alertSnapshotStorageKey) || "{}");
     } catch {
@@ -4486,7 +4566,7 @@ const getTeamSummary = () => {
     const baselineAge = historicalBase ? Date.now() - new Date(historicalBase.recorded_at).getTime() : 0;
     const baselineReady = !!historicalBase && baselineAge >= 12 * 60 * 60 * 1000;
 
-    Object.entries(nextPlayerSnapshot).forEach(([playerId, snapshot]: any) => {
+    Object.entries(nextPlayerSnapshot).forEach(([playerId, snapshot]) => {
       if (baselineReady) {
         const historical = historicalBase!.players[playerId];
         if (historical && historical.value > 0) {
@@ -4551,18 +4631,18 @@ const getTeamSummary = () => {
         if (/out|doubtful|ir|suspended|inactive/i.test(nextStatus)) {
           const injuredPlayer = players[playerId];
           if (injuredPlayer?.team && injuredPlayer?.position) {
-            const backups = Object.entries(players as Record<string, any>)
-              .filter(([pid, p]: [string, any]) =>
+            const backups = Object.entries(players)
+              .filter(([pid, p]) =>
                 pid !== playerId &&
                 p?.team === injuredPlayer.team &&
                 p?.position === injuredPlayer.position &&
                 p?.depth_chart_position != null &&
                 !/out|ir|suspended|inactive/i.test((p.injury_status || p.status || "").toLowerCase())
               )
-              .sort(([, a]: any, [, b]: any) => (a.depth_chart_position ?? 99) - (b.depth_chart_position ?? 99));
+              .sort(([, a], [, b]) => (a.depth_chart_position ?? 99) - (b.depth_chart_position ?? 99));
 
             if (backups.length > 0) {
-              const [backupId, backup]: any = backups[0];
+              const [backupId, backup] = backups[0];
               incomingAlerts.push({
                 id: `opp-${playerId}-${backupId}`,
                 category: "market",
@@ -4607,14 +4687,14 @@ const getTeamSummary = () => {
     // Build a comprehensive snapshot: all QB/RB/WR/TE with calcFcValues, merged with owned-player data.
     // This is used for Value Trends so it covers the full player universe, not just owned players.
     const buildFullSnapshot = () => {
-      const snap: Record<string, any> = { ...nextPlayerSnapshot };
+      const snap: Record<string, PlayerSnapshot> = { ...nextPlayerSnapshot };
       const calcEntries = Object.entries(calcFcValues as Record<string, number>).filter(([, v]) => v > 0);
       if (calcEntries.length > 50) {
         calcEntries.forEach(([playerId, value]) => {
           const p = players[playerId];
           if (!p || !["QB", "RB", "WR", "TE"].includes(p.position)) return;
           if (!snap[playerId]) {
-            snap[playerId] = { full_name: p.full_name, value, team: p.team || "" };
+            snap[playerId] = { full_name: p.full_name, value, team: p.team || "", status: String(p.status || ""), active: p.active !== false, shareCount: 0 };
           }
         });
       }
@@ -4683,7 +4763,7 @@ const getTeamSummary = () => {
 
   useEffect(() => {
     const trackedNames = [
-      ...dashboardOwnedPlayers.slice(0, 8).map((entry: any) => players[entry.player_id]?.full_name),
+      ...dashboardOwnedPlayers.slice(0, 8).map((entry) => players[entry.player_id]?.full_name),
       ...watchlistEntries.slice(0, 8).map((entry) => entry.label),
     ].filter(Boolean);
     const uniqueNames = Array.from(new Set(trackedNames)).slice(0, 10);
@@ -4695,11 +4775,11 @@ const getTeamSummary = () => {
       .then((res) => res.json())
       .then((data) => {
         if (cancelled || !Array.isArray(data?.items)) return;
-        const items = data.items.slice(0, 8).map((item: any) => ({
+        const items = data.items.slice(0, 8).map((item: NewsItem) => ({
           id: `news-${String(item.id || item.link || item.title).replace(/[^a-zA-Z0-9_-]/g, "")}`,
           category: "news" as const,
           source: "external" as const,
-          severity: (item.impact || item.playerNames?.length > 0) ? "medium" as const : "low" as const,
+          severity: (item.impact || (item.playerNames?.length ?? 0) > 0) ? "medium" as const : "low" as const,
           title: item.title || "Player news",
           detail: item.summary || item.playerNames?.join(", ") || "External update matched one of your tracked names.",
           actionable: !!item.playerNames?.length,
@@ -4727,7 +4807,7 @@ const getTeamSummary = () => {
     const seen = new Set<string>();
     const alerts: AlertsCenterItem[] = [];
 
-    [...dashboardOwnedPlayers.map((e: any) => String(e.player_id)), ...watchlistEntries.map((e) => e.player_id)]
+    [...dashboardOwnedPlayers.map((e) => String(e.player_id)), ...watchlistEntries.map((e) => e.player_id)]
       .forEach((playerId) => {
         if (seen.has(playerId)) return;
         seen.add(playerId);
@@ -4939,7 +5019,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
               <select
                 value={selectedLeague?.league_id || ""}
                 onChange={(e) => {
-                  const league = leagues.find((l: any) => l.league_id === e.target.value);
+                  const league = leagues.find((l) => l.league_id === e.target.value);
                   if (league) {
                     loadRoster(league);
                     if (mainTab === "DASHBOARD") setMainTab("LEAGUES");
@@ -4949,7 +5029,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
                 className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs max-w-[120px] truncate"
               >
                 <option value="">Select League</option>
-                {leagues.map((l: any) => (
+                {leagues.map((l) => (
                   <option key={l.league_id} value={l.league_id}>{l.name}</option>
                 ))}
               </select>
@@ -5053,7 +5133,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             allTradeAttempts={allTradeAttempts}
             allLeagues={leagues}
             onNavigateToAttempts={(leagueId) => {
-              const league = leagues.find((l: any) => l.league_id === leagueId);
+              const league = leagues.find((l) => l.league_id === leagueId);
               if (league) {
                 loadRoster(league);
                 setTradeHubSection("ATTEMPTS");
@@ -5360,7 +5440,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
           Loading exposure...
         </div>
       ) : (
-        externalShares?.players?.map((entry: any) => {
+        externalShares?.players?.map((entry) => {
   const p = players[entry.playerId];
   if (!p) return null;
 
@@ -5488,7 +5568,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
                   <div className="space-y-1.5">
                     {Object.entries(draftScoutPatterns.roundBreakdown)
                       .sort(([a], [b]) => Number(a) - Number(b))
-                      .map(([round, counts]: [string, any]) => (
+                      .map(([round, counts]: [string, Record<string, number>]) => (
                         <div key={round} className="flex items-center gap-2">
                           <span className={`text-[10px] w-10 text-center px-1.5 py-0.5 rounded font-semibold shrink-0 ${
                             round === "1" ? "bg-yellow-900/50 text-yellow-300" :
@@ -5498,8 +5578,8 @@ const myPlayerSet = new Set<string>(roster?.players || []);
                           }`}>Rd {round}</span>
                           <div className="flex flex-wrap gap-1">
                             {Object.entries(counts)
-                              .sort(([, a]: any, [, b]: any) => b - a)
-                              .map(([pos, cnt]: [string, any]) => (
+                              .sort(([, a]: [string, number], [, b]: [string, number]) => b - a)
+                              .map(([pos, cnt]: [string, number]) => (
                                 <span key={pos} className={`text-[10px] px-1.5 py-0.5 rounded ${posColor(pos)}`}>
                                   {pos} ×{cnt}
                                 </span>
@@ -5513,7 +5593,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             )}
 
             {/* Per-league picks */}
-            {draftScoutData.map((league: any, i: number) => (
+            {draftScoutData.map((league, i) => (
               <div key={i} className="mb-5">
                 <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
                   {league.leagueName}
@@ -5521,7 +5601,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
                 {league.picks.length === 0 ? (
                   <div className="text-xs text-gray-500 italic">No picks made yet</div>
                 ) : (
-                  league.picks.map((pick: any, j: number) => {
+                  league.picks.map((pick, j) => {
                     const name = pick.player?.full_name || pick.playerName || "Unknown";
                     const pos = pick.player?.position || pick.position || "—";
                     return (
@@ -5578,7 +5658,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
       ) : !tradeHubData?.length ? (
         <div className="text-sm text-gray-400">No trades found in the past 30 days.</div>
       ) : (
-        tradeHubData.map((trade: any, i: number) => {
+        tradeHubData.map((trade, i) => {
           const myRosterId = trade.myRosterId;
 
           // Players received
@@ -5592,7 +5672,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             .map(([pid]) => players[pid]?.full_name || "Unknown Player");
 
           // Resolve actual draft slot (e.g. "2026 1.04") from allPicks when available
-          const pickLabel = (p: any) => {
+          const pickLabel = (p: SleeperTradedPick) => {
             if (String(p.season) === CURRENT_YEAR) {
               const match = allPicks.find(
                 (ap) =>
@@ -5607,11 +5687,11 @@ const myPlayerSet = new Set<string>(roster?.players || []);
 
           // Picks received / given
           const picksReceived = (trade.draft_picks || [])
-            .filter((p: any) => p.owner_id === myRosterId)
+            .filter((p) => p.owner_id === myRosterId)
             .map(pickLabel);
 
           const picksGiven = (trade.draft_picks || [])
-            .filter((p: any) => p.previous_owner_id === myRosterId)
+            .filter((p) => p.previous_owner_id === myRosterId)
             .map(pickLabel);
 
           const allReceived = [...received, ...picksReceived];
@@ -5690,16 +5770,16 @@ const myPlayerSet = new Set<string>(roster?.players || []);
 
         // Which leaguemates own this player
         const ownersInSelectedLeague = rosters
-          .filter((r: any) => (r.players || []).includes(playerProfileId))
-          .map((r: any) => users[r.owner_id] || `Team ${r.roster_id}`);
+          .filter((r) => (r.players || []).includes(playerProfileId))
+          .map((r) => users[r.owner_id] || `Team ${r.roster_id}`);
 
         // Cross-league ownership from overview data (uses per-league user map fetched during loadLeagueOverview)
         const crossLeagueOwners: { leagueName: string; owner: string }[] = [];
-        Object.entries(leagueOverviewData).forEach(([lid, entry]: [string, any]) => {
-          const lg = leagues.find((l: any) => l.league_id === lid);
+        Object.entries(leagueOverviewData).forEach(([lid, entry]: [string, LeagueOverviewEntry]) => {
+          const lg = leagues.find((l) => l.league_id === lid);
           if (!lg) return;
           const leagueUserMap: Record<string, string> = entry.userMap || {};
-          (entry.rosters || []).forEach((r: any) => {
+          (entry.rosters || []).forEach((r) => {
             if ((r.players || []).includes(playerProfileId)) {
               const ownerName = leagueUserMap[r.owner_id] || users[r.owner_id] || `Team ${r.roster_id}`;
               crossLeagueOwners.push({ leagueName: lg.name, owner: ownerName });
