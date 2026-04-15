@@ -1,5 +1,6 @@
 "use client";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { supabase } from "../lib/supabaseclient";
 import { usePlayers } from "../lib/PlayersContext";
 import { useAuth } from "../lib/AuthContext";
@@ -23,6 +24,11 @@ const normalizeRookieName = (name: string) =>
     .replace(/\b(jr|sr|ii|iii|iv|v)\b\.?/gi, "")
     .replace(/[^a-z]/g, "")
     .trim();
+
+// Stable key for a rookie board player — uses player_id when available so that
+// pre-draft players (no Sleeper ID yet) don't all collapse onto the same null key.
+const rookieKey = (r: { player_id?: string | null; name: string }): string =>
+  r.player_id || `name:${normalizeRookieName(r.name)}`;
 
 const posColor: Record<string, string> = {
   QB: "text-red-400",
@@ -239,6 +245,57 @@ function DraftHub({
 
   // Big Board position filter
   const [posFilter, setPosFilter] = useState<string | null>(null);
+
+  // ── Big Board derived / memoized values ──────────────────────────────────
+  // fcVal: stable callback so fcRanks/userFcRanks only recompute when fcNameValues changes.
+  const fcVal = useCallback(
+    (r: RookieBoardPlayer): number => fuzzyFcLookup(r.name, fcNameValues) || r.fcValue || 0,
+    [fcNameValues],
+  );
+
+  // FantasyCalc consensus ranks (sorted by FC value desc).
+  const fcRanks = useMemo<Record<string, number>>(() => {
+    const ranks: Record<string, number> = {};
+    [...rookies]
+      .filter((r) => fcVal(r) > 0)
+      .sort((a, b) => fcVal(b) - fcVal(a))
+      .forEach((r, i) => { ranks[rookieKey(r)] = i + 1; });
+    return ranks;
+  }, [rookies, fcVal]);
+
+  // User's board rank (board order, only FC-valued players counted).
+  const userFcRanks = useMemo<Record<string, number>>(() => {
+    const ranks: Record<string, number> = {};
+    rookies
+      .filter((r) => fcVal(r) > 0)
+      .forEach((r, i) => { ranks[rookieKey(r)] = i + 1; });
+    return ranks;
+  }, [rookies, fcVal]);
+
+  // Filtered + indexed slice of the board (search + position filter).
+  const filteredRookies = useMemo(
+    () =>
+      rookies
+        .map((p, originalIndex) => ({ p, originalIndex }))
+        .filter(
+          ({ p }) =>
+            p.name &&
+            p.name !== "Player Invalid" &&
+            p.name.toLowerCase().includes(rookieSearch.toLowerCase()) &&
+            (!posFilter || p.position === posFilter),
+        ),
+    [rookies, rookieSearch, posFilter],
+  );
+
+  // Scroll container ref for the virtualized big board list.
+  const bigBoardParentRef = useRef<HTMLDivElement>(null);
+
+  const bigBoardVirtualizer = useVirtualizer({
+    count: filteredRookies.length,
+    getScrollElement: () => bigBoardParentRef.current,
+    estimateSize: () => 44,
+    overscan: 8,
+  });
 
   // Historical draft review
   const [historyData, setHistoryData]         = useState<HistoryDraftEntry[]>([]);
@@ -1144,60 +1201,56 @@ function DraftHub({
             )}
           </div>
 
-          <div className="space-y-0.5">
-            {(() => {
-              // FC value: fuzzy name lookup (catches 1-2 char spelling diffs like Jeremiyah/Jeremiah)
-              const fcVal = (r: RookieBoardPlayer): number => fuzzyFcLookup(r.name, fcNameValues) || r.fcValue || 0;
+          {/* Virtualized player list — only renders the ~15 visible rows at any time */}
+          <div
+            ref={bigBoardParentRef}
+            className="overflow-auto"
+            style={{ height: "600px" }}
+          >
+            <div
+              style={{
+                height: `${bigBoardVirtualizer.getTotalSize()}px`,
+                width: "100%",
+                position: "relative",
+              }}
+            >
+              {bigBoardVirtualizer.getVirtualItems().map((virtualItem) => {
+                const { p, originalIndex } = filteredRookies[virtualItem.index];
+                const displayIndex = virtualItem.index;
+                const prevEntry = displayIndex > 0 ? filteredRookies[displayIndex - 1] : null;
 
-              // Stable key: player_id when available, else normalized name fallback.
-              // Prevents players without a Sleeper player_id (pre-draft rookies) from
-              // all sharing the same null key and overwriting each other in the rank maps.
-              const rookieKey = (r: RookieBoardPlayer): string => r.player_id || `name:${normalizeRookieName(r.name)}`;
+                const tierKey     = p.player_id || `name:${p.name}`;
+                const prevTierKey = prevEntry
+                  ? (prevEntry.p.player_id || `name:${prevEntry.p.name}`)
+                  : null;
+                const hasNote  = !!(playerNotes[p.player_id || ""] || "").trim();
+                const myTier   = tierLabels[tierKey];
+                const prevTier = prevTierKey ? tierLabels[prevTierKey] : undefined;
+                const showDivider = !rookieSearch && displayIndex > 0 && myTier !== prevTier;
 
-              // Build FantasyCalc rank lookup (sort rookies by FC value desc)
-              const fcRanks: Record<string, number> = {};
-              [...rookies]
-                .filter((r) => fcVal(r) > 0)
-                .sort((a, b) => fcVal(b) - fcVal(a))
-                .forEach((r, i) => { fcRanks[rookieKey(r)] = i + 1; });
+                const fcRank   = fcRanks[rookieKey(p)];
+                const userRank = userFcRanks[rookieKey(p)];
+                // positive = you rank higher than FC, negative = you rank lower
+                const gap = fcRank !== undefined && userRank !== undefined
+                  ? fcRank - userRank
+                  : null;
 
-              // User's rank among only FC-valued players (board order, no-value players skipped)
-              const userFcRanks: Record<string, number> = {};
-              rookies
-                .filter((r) => fcVal(r) > 0)
-                .forEach((r, i) => { userFcRanks[rookieKey(r)] = i + 1; });
-
-              return rookies
-                .map((p, originalIndex) => ({ p, originalIndex }))
-                .filter(({ p }) =>
-                  p.name &&
-                  p.name !== "Player Invalid" &&
-                  p.name.toLowerCase().includes(rookieSearch.toLowerCase()) &&
-                  (!posFilter || p.position === posFilter)
-                )
-                .map(({ p, originalIndex }, displayIndex, arr) => {
-                  const tierKey  = p.player_id || `name:${p.name}`;
-                  const prevTierKey = displayIndex > 0
-                    ? (arr[displayIndex - 1].p.player_id || `name:${arr[displayIndex - 1].p.name}`)
-                    : null;
-                  const hasNote = !!(playerNotes[p.player_id || ""] || "").trim();
-                  const myTier  = tierLabels[tierKey];
-                  const prevTier = prevTierKey ? tierLabels[prevTierKey] : undefined;
-                  const showDivider = !rookieSearch && displayIndex > 0 && myTier !== prevTier;
-
-                  const fcRank   = fcRanks[rookieKey(p)];
-                  const userRank = userFcRanks[rookieKey(p)];
-                  // positive = you rank higher than FC, negative = you rank lower
-                  const gap = fcRank !== undefined && userRank !== undefined
-                    ? fcRank - userRank
-                    : null;
-
-                  const playerDynVal = fcVal(p);
-                  const isTaken = draftedPlayerIds.has(String(p.player_id));
+                const playerDynVal = fcVal(p);
+                const isTaken = draftedPlayerIds.has(String(p.player_id));
 
                 return (
-                  <div key={p.player_id || originalIndex}>
-
+                  <div
+                    key={virtualItem.key}
+                    data-index={virtualItem.index}
+                    ref={bigBoardVirtualizer.measureElement}
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      transform: `translateY(${virtualItem.start}px)`,
+                    }}
+                  >
                     {/* Tier divider line between groups */}
                     {showDivider && (
                       <div className="flex items-center gap-3 my-2 px-1">
@@ -1220,7 +1273,7 @@ function DraftHub({
                           setDragIndex(null);
                         }
                       }}
-                      className={`flex items-center justify-between bg-gray-800/70 px-3 py-1.5 rounded-lg text-sm cursor-move hover:bg-gray-700/70 transition${isTaken ? " opacity-40" : ""}`}
+                      className={`flex items-center justify-between bg-gray-800/70 px-3 py-1.5 mb-0.5 rounded-lg text-sm cursor-move hover:bg-gray-700/70 transition${isTaken ? " opacity-40" : ""}`}
                     >
                       {/* Left: rank + name + pos */}
                       <div className="flex gap-3 items-center min-w-0">
@@ -1305,8 +1358,8 @@ function DraftHub({
                     </div>
                   </div>
                 );
-              });
-            })()}
+              })}
+            </div>
           </div>
         </div>
       )}

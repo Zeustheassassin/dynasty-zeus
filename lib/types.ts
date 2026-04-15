@@ -205,6 +205,8 @@ export interface SleeperTradedPick {
   previous_owner_id: number;
   owner_id: number;
   slot?: string;
+  pick_no?: number;
+  resolvedSlot?: string;
 }
 
 export interface SleeperNFLState {
@@ -327,6 +329,7 @@ export interface RosterDirectionProfile {
   firstRounders: number;
   premiumCurrentFirsts: number;
   futureFirsts: number;
+  playoffOdds?: number;
 }
 
 export interface LeagueMateProfile {

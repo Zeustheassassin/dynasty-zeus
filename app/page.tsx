@@ -48,6 +48,9 @@ import { usePlayerStats } from "../hooks/usePlayerStats";
 import { useManagementState } from "../hooks/useManagementState";
 import { useRookieBoardState, ROOKIE_YEAR, ROOKIE_BOARD_VERSION, ROOKIE_BOARD_RESET_KEY } from "../hooks/useRookieBoardState";
 import { useAlerts } from "../hooks/useAlerts";
+import { useUserExposure } from "../hooks/useUserExposure";
+import { useUserTrades } from "../hooks/useUserTrades";
+import { useCrossLeagueMateIntel } from "../hooks/useCrossLeagueMateIntel";
 import { PlayersProvider } from "../lib/PlayersContext";
 import { AuthProvider } from "../lib/AuthContext";
 import { LeagueProvider } from "../lib/LeagueContext";
@@ -57,9 +60,10 @@ import type {
   LeagueHubTab, AlertsCenterItem, TradeAttempt, TradeAttemptStatus,
   SleeperPlayer, SleeperLeague, SleeperRoster,
   SleeperDraft, SleeperDraftPick, SleeperNFLState, SleeperTransaction, GamedayMatchup, GamedayTeamView,
-  CommittedSimsByLeague, CachedSimRow, CrossLeagueIntel, SleeperMatchup,
+  CommittedSimsByLeague, CachedSimRow, SleeperMatchup,
   AugmentedPick, LeagueOverviewEntry, LeagueMateStatEntry,
   HistoricalSnapshot, LeagueMateView, LeagueSimulation, SimulationTeamRow,
+  RosterDirectionProfile,
 } from "../lib/types";
 
 // -------------------------
@@ -77,13 +81,10 @@ let _playersInMemory: Record<string, SleeperPlayer> | null = null;
 // ── Page-local interfaces (shapes that don't warrant a lib/types entry) ──────
 interface Note { id: string; user_id: string; title: string; body: string; updated_at: string; }
 interface StandingRow { roster_id: number; wins: number; losses: number; ties: number; fpts: number; max_pf: number; owner_id: string; }
-interface ExposureEntry { playerId: string; count: number; percent: number; }
-interface ExposureData { players: ExposureEntry[]; leagueCount: number; }
 interface DraftScoutPick { round: number; player: SleeperPlayer | null; playerName: string | null; position: string | null; }
 interface DraftScoutLeague { leagueName: string; picks: DraftScoutPick[]; }
 // AugmentedPick is now exported from lib/types.ts
 type AnnotatedTransaction = SleeperTransaction & { leagueName: string; leagueId: string; rosterOwnerMap: Record<number, string>; };
-type AnnotatedTrade = SleeperTransaction & { leagueName: string; leagueId: string; myRosterId: number; rosterToOwner: Record<number, string>; rosterToName: Record<number, string>; };
 interface TradeIntelEntry { tradeCount30d: number; bought: Record<string, number>; picksIn: number; picksOut: number; lastTradeAt: string | null; }
 
 // Static — never changes, defined at module level so it's a stable reference in useMemo dep arrays
@@ -183,9 +184,12 @@ const draftScoutPatterns = useMemo(() => {
 }, [draftScoutData]);
 const [loadingDraftRefresh, setLoadingDraftRefresh] = useState(false);
 const [selectedLeagueDraftHasOccurred, setSelectedLeagueDraftHasOccurred] = useState(false);
-const [tradeHubUserId, setTradeHubUserId] = useState<string | null>(null);
-const [tradeHubData, setTradeHubData] = useState<AnnotatedTrade[] | null>(null);
-const [loadingTradeHub, setLoadingTradeHub] = useState(false);
+const {
+  tradeHubUserId, setTradeHubUserId,
+  tradeHubData, setTradeHubData,
+  loadingTradeHub,
+  loadUserTrades,
+} = useUserTrades();
 const [tradeAttempts, setTradeAttempts] = useState<TradeAttempt[]>([]);
 const [tradeAttemptsLeagueId, setTradeAttemptsLeagueId] = useState<string | null>(null);
 const [loadingTradeAttempts, setLoadingTradeAttempts] = useState(false);
@@ -214,8 +218,6 @@ const [draftSlotSearchQuery, setDraftSlotSearchQuery] = useState("");
 const [ownerDraftTendencies, setOwnerDraftTendencies] = useState<Record<string, Record<string, number>>>({});
 const [leagueMateTradeIntel, setLeagueMateTradeIntel] = useState<Record<string, TradeIntelEntry>>({});
 const [loadingLeagueMateIntel, setLoadingLeagueMateIntel] = useState(false);
-const [crossLeagueMateIntel, setCrossLeagueMateIntel] = useState<Record<string, CrossLeagueIntel>>({});
-const [loadingCrossLeagueMateIntel, setLoadingCrossLeagueMateIntel] = useState(false);
 const [leagueMateProfileCache, setLeagueMateProfileCache] = useState<Record<string, LeagueMateView[]>>({});
 const [leagueNotes, setLeagueNotes] = useState<Record<string, string>>({});
 const [nflState, setNflState] = useState<SleeperNFLState | null>(null);
@@ -325,10 +327,12 @@ const [standings, setStandings] = useState<StandingRow[]>([]);
   const [shareSearch, setShareSearch] = useState("");
   const [sharePosition, setSharePosition] = useState("ALL");
   const [freeAgents, setFreeAgents] = useState<SleeperPlayer[]>([]);
-  const [userCache, setUserCache] = useState<Record<string, ExposureData>>({});
-  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
-const [externalShares, setExternalShares] = useState<ExposureData | null>(null);
-const [loadingShares, setLoadingShares] = useState(false);
+const {
+  selectedUserId, setSelectedUserId,
+  externalShares,
+  loadingShares,
+  loadUserExposure,
+} = useUserExposure();
 // ── ALERTS / WATCHLIST ─────────────────────────────────────────
 const {
   dashboardAlerts, setDashboardAlerts,
@@ -341,6 +345,15 @@ const {
   alertStorageKey,
   dismissedAlertStorageKey,
 } = useAlerts({ supabaseUser, players });
+const { crossLeagueMateIntel, loadingCrossLeagueMateIntel } = useCrossLeagueMateIntel({
+  leagueId: selectedLeague?.league_id,
+  rosters,
+  userId: user?.user_id,
+  players,
+  mainTab,
+  leagueHubTab,
+  tradeHubSection,
+});
 const [loadingExternalAlerts, setLoadingExternalAlerts] = useState(false);
 const [leagueTransactions, setLeagueTransactions] = useState<AnnotatedTransaction[]>([]);
 const [loadingTransactions, setLoadingTransactions] = useState(false);
@@ -1073,234 +1086,6 @@ useEffect(() => {
     .then(() => {}); // table may not exist yet — localStorage handles persistence
 }, [supabaseUser?.id, selectedLeague?.league_id, myDraftSlotPicks]);
 
-useEffect(() => {
-  const shouldLoadCrossLeagueIntel =
-    !!selectedLeague?.league_id &&
-    !!rosters.length &&
-    !!user?.user_id &&
-    !!Object.keys(players || {}).length &&
-    (
-      (mainTab === "LEAGUES" && leagueHubTab === "LEAGUE_MATES") ||
-      (mainTab === "TRADE_HUB" && (tradeHubSection === "FINDER" || tradeHubSection === "RECOMMENDATIONS"))
-    );
-
-  if (!shouldLoadCrossLeagueIntel) return;
-
-  const ownerIds = rosters
-    .filter((r: any) => r.owner_id && r.owner_id !== user?.user_id)
-    .map((r: any) => String(r.owner_id));
-  const missingOwnerIds = ownerIds.filter((ownerId) => !crossLeagueMateIntel[ownerId]);
-  if (missingOwnerIds.length === 0) return;
-
-  let cancelled = false;
-
-  const loadCrossLeagueMateIntel = async () => {
-    setLoadingCrossLeagueMateIntel(true);
-    try {
-      const entries = await Promise.all(
-        missingOwnerIds.map(async (ownerId) => {
-          const ownerLeagues = await fetch(`https://api.sleeper.app/v1/user/${ownerId}/leagues/nfl/${CURRENT_YEAR}`)
-            .then((r) => r.json())
-            .then((data) => Array.isArray(data) ? data : [])
-            .catch(() => []);
-
-          const dynastyLeagues = ownerLeagues.filter((league: any) =>
-            ((league.settings?.taxi_slots ?? 0) > 0 || (league.roster_positions?.length ?? 0) > 20) &&
-            (league.settings?.best_ball ?? 0) === 0
-          );
-
-          const rosterResults = await Promise.all(
-            dynastyLeagues.map(async (league: any) => {
-              const leagueRosters = await fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`)
-                .then((r) => r.json())
-                .catch(() => []);
-              return (Array.isArray(leagueRosters) ? leagueRosters : []).find((roster: any) => String(roster.owner_id) === ownerId) || null;
-            })
-          );
-
-          const tradeLeagueResults = await Promise.all(
-            dynastyLeagues.map(async (league: any) => {
-              // Fetch week 0 (full offseason) + weeks 1-2 to cover current year activity
-              const [leagueRosters, t0, t1, t2, draftsData] = await Promise.all([
-                fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`).then((r) => r.json()).catch(() => []),
-                fetch(`https://api.sleeper.app/v1/league/${league.league_id}/transactions/0`).then((r) => r.json()).catch(() => []),
-                fetch(`https://api.sleeper.app/v1/league/${league.league_id}/transactions/1`).then((r) => r.json()).catch(() => []),
-                fetch(`https://api.sleeper.app/v1/league/${league.league_id}/transactions/2`).then((r) => r.json()).catch(() => []),
-                fetch(`https://api.sleeper.app/v1/league/${league.league_id}/drafts`).then((r) => r.json()).catch(() => []),
-              ]);
-              const ownerRoster = (Array.isArray(leagueRosters) ? leagueRosters : []).find((roster: any) => String(roster.owner_id) === ownerId) || null;
-              return {
-                ownerRoster,
-                trades: [
-                  ...(Array.isArray(t0) ? t0 : []),
-                  ...(Array.isArray(t1) ? t1 : []),
-                  ...(Array.isArray(t2) ? t2 : []),
-                ],
-                draftsData: Array.isArray(draftsData) ? draftsData : [],
-              };
-            })
-          );
-
-          const ownedPlayerCounts: Record<string, number> = {};
-          const ownedPositionCounts: Record<string, number> = { QB: 0, RB: 0, WR: 0, TE: 0 };
-          const allSkillPlayers: any[] = [];
-          const acquiredPositionCounts: Record<string, number> = { QB: 0, RB: 0, WR: 0, TE: 0 };
-          const acquiredPlayerCounts: Record<string, number> = {};
-          let crossLeagueTradeCount30d = 0;
-          let crossLeaguePickBuys30d = 0;
-          let crossLeaguePickSells30d = 0;
-          let youngQbWrBuys = 0;
-          let veteranRbBuys = 0;
-          let totalSkillBuys = 0;
-
-          rosterResults.filter(Boolean).forEach((ownerRoster: any) => {
-            (ownerRoster.players || []).forEach((playerId: string) => {
-              const player = (players as any)?.[playerId];
-              if (!player || !["QB", "RB", "WR", "TE"].includes(player.position)) return;
-              ownedPlayerCounts[playerId] = (ownedPlayerCounts[playerId] || 0) + 1;
-              ownedPositionCounts[player.position] = (ownedPositionCounts[player.position] || 0) + 1;
-              allSkillPlayers.push(player);
-            });
-          });
-
-          const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
-          tradeLeagueResults.forEach(({ ownerRoster, trades, draftsData }: any) => {
-            if (!ownerRoster) return;
-            const startupDraft = draftsData
-              .filter((d: any) => (d.settings?.rounds ?? 0) > 6)
-              .sort((a: any, b: any) => (b.settings?.rounds ?? 0) - (a.settings?.rounds ?? 0))[0];
-            const startupStart = startupDraft?.start_time ?? 0;
-            const startupEnd = startupDraft?.last_picked
-              ?? (startupStart ? startupStart + 60 * 24 * 60 * 60 * 1000 : 0);
-
-            trades
-              .filter((trade: any) =>
-                trade?.type === "trade" &&
-                trade?.status === "complete" &&
-                Number(trade?.created || 0) >= thirtyDaysAgo &&
-                (trade.roster_ids || []).includes(ownerRoster.roster_id) &&
-                !(startupStart > 0 && trade.created >= startupStart && trade.created <= startupEnd)
-              )
-              .forEach((trade: any) => {
-                crossLeagueTradeCount30d += 1;
-
-                Object.entries(trade.adds || {}).forEach(([playerId, rosterId]: any) => {
-                  if (Number(rosterId) !== Number(ownerRoster.roster_id)) return;
-                  const player = (players as any)?.[playerId];
-                  if (!player || !["QB", "RB", "WR", "TE"].includes(player.position)) return;
-                  acquiredPositionCounts[player.position] = (acquiredPositionCounts[player.position] || 0) + 1;
-                  acquiredPlayerCounts[String(playerId)] = (acquiredPlayerCounts[String(playerId)] || 0) + 1;
-                  totalSkillBuys += 1;
-                  if (["QB", "WR"].includes(player.position) && Number(player.age || 99) <= 24) youngQbWrBuys += 1;
-                  if (player.position === "RB" && Number(player.age || 0) >= 26) veteranRbBuys += 1;
-                });
-
-                (trade.draft_picks || []).forEach((pick: any) => {
-                  if (Number(pick?.owner_id) === Number(ownerRoster.roster_id)) crossLeaguePickBuys30d += 1;
-                  if (Number(pick?.previous_owner_id) === Number(ownerRoster.roster_id)) crossLeaguePickSells30d += 1;
-                });
-              });
-          });
-
-          const totalSkillPlayers = allSkillPlayers.length || 1;
-          const sortedPositions = Object.entries(ownedPositionCounts)
-            .sort((a: any, b: any) => b[1] - a[1])
-            .map(([pos]) => pos);
-          const tradePreferredPositions = Object.entries(acquiredPositionCounts)
-            .filter(([, count]: any) => count > 0)
-            .sort((a: any, b: any) => b[1] - a[1])
-            .map(([pos]) => pos);
-          const repeatedPlayers = Object.entries(ownedPlayerCounts)
-            .map(([playerId, count]) => {
-              const player = (players as any)?.[playerId];
-              return player ? { playerId, count, name: player.full_name, position: player.position } : null;
-            })
-            .filter(Boolean)
-            .sort((a: any, b: any) => b.count - a.count || a.name.localeCompare(b.name))
-            .slice(0, 3);
-          const acquiredPlayers = Object.entries(acquiredPlayerCounts)
-            .map(([playerId, count]) => {
-              const player = (players as any)?.[playerId];
-              return player ? { playerId, count, name: player.full_name, position: player.position } : null;
-            })
-            .filter(Boolean)
-            .sort((a: any, b: any) => b.count - a.count || a.name.localeCompare(b.name))
-            .slice(0, 3);
-          const averageAgeAllLeagues = average(
-            allSkillPlayers.map((player: any) => Number(player.age)).filter(Boolean)
-          );
-          const youngQbWrRate = allSkillPlayers.filter((player: any) =>
-            ["QB", "WR"].includes(player.position) && Number(player.age || 99) <= 24
-          ).length / totalSkillPlayers;
-          const veteranRbRate = allSkillPlayers.filter((player: any) =>
-            player.position === "RB" && Number(player.age || 0) >= 26
-          ).length / totalSkillPlayers;
-          const youngQbWrBuyRate = totalSkillBuys > 0 ? youngQbWrBuys / totalSkillBuys : 0;
-          const veteranRbBuyRate = totalSkillBuys > 0 ? veteranRbBuys / totalSkillBuys : 0;
-          const topPos = sortedPositions[0] || "WR";
-          const secondPos = sortedPositions[1] || "QB";
-          const preferenceLabel =
-            youngQbWrRate >= 0.22 ? "Youth-skewed investor" :
-            veteranRbRate >= 0.12 ? "Veteran production buyer" :
-            `${topPos}-leaning portfolio`;
-          const tradePreferenceLabel =
-            crossLeagueTradeCount30d === 0 ? "No meaningful 30d trade history" :
-            youngQbWrBuyRate >= 0.2 ? "Actively buying young QB/WR insulation" :
-            veteranRbBuyRate >= 0.15 ? "Actively buying veteran RB points" :
-            tradePreferredPositions[0] ? `Recent ${tradePreferredPositions[0]} buyer` :
-            "Recent cross-league trade activity";
-          const repeatedNames = repeatedPlayers.filter((player: any) => player.count >= 2).map((player: any) => player.name);
-          const crossLeagueSummary = repeatedNames.length > 0
-            ? `Across ${dynastyLeagues.length} dynasty leagues, leans ${topPos}/${secondPos} and repeatedly holds ${repeatedNames.join(", ")}.`
-            : `Across ${dynastyLeagues.length} dynasty leagues, leans ${topPos}/${secondPos} with an average skill-player age of ${averageAgeAllLeagues || "-"}.`;
-          const acquiredNames = acquiredPlayers.filter((player: any) => player.count >= 2).map((player: any) => player.name);
-          const crossLeagueTradeSummary =
-            crossLeagueTradeCount30d === 0
-              ? "No strong cross-league trade tendency in the last 30 days."
-              : acquiredNames.length > 0
-              ? `Over the last 30 days, they made ${crossLeagueTradeCount30d} cross-league trades and kept buying ${acquiredNames.join(", ")}.`
-              : `Over the last 30 days, they made ${crossLeagueTradeCount30d} cross-league trades, leaning ${tradePreferredPositions.slice(0, 2).join("/") || "best-player"} while moving picks ${crossLeaguePickBuys30d}-${crossLeaguePickSells30d}.`;
-
-          return [
-            ownerId,
-            {
-              totalDynastyLeagues: dynastyLeagues.length,
-              ownedPositionCounts,
-              preferredPositions: sortedPositions.slice(0, 2),
-              repeatedPlayers,
-              averageAgeAllLeagues,
-              youngQbWrRate,
-              veteranRbRate,
-              tradePreferredPositions: tradePreferredPositions.slice(0, 2),
-              acquiredPlayers,
-              crossLeagueTradeCount30d,
-              crossLeaguePickBuys30d,
-              crossLeaguePickSells30d,
-              youngQbWrBuyRate,
-              veteranRbBuyRate,
-              preferenceLabel,
-              tradePreferenceLabel,
-              crossLeagueSummary,
-              crossLeagueTradeSummary,
-            },
-          ] as const;
-        })
-      );
-
-      if (!cancelled) {
-        setCrossLeagueMateIntel((prev) => ({
-          ...prev,
-          ...Object.fromEntries(entries),
-        }));
-      }
-    } finally {
-      if (!cancelled) setLoadingCrossLeagueMateIntel(false);
-    }
-  };
-
-  loadCrossLeagueMateIntel();
-  return () => { cancelled = true; };
-}, [selectedLeague?.league_id, rosters, user?.user_id, players, mainTab, leagueHubTab, tradeHubSection, crossLeagueMateIntel]);
 
 // League notes — load from localStorage on mount (fast), then override with Supabase on login
 useEffect(() => {
@@ -1704,80 +1489,6 @@ const loadRoster = async (league: any) => {
       )
   );
   setReadyLeagueId(league.league_id);
-};
-const loadUserExposure = async (userId: string) => {
-  // ✅ CACHE CHECK (PUT THIS FIRST)
-if (userCache[userId]) {
-  setExternalShares(userCache[userId]);
-  setSelectedUserId(userId);
-  return;
-}
-  try {
-    setLoadingShares(true);
-    setSelectedUserId(userId);
-
-    // 1. Fetch leagues
-    const leaguesRes = await fetch(
-      `https://api.sleeper.app/v1/user/${userId}/leagues/nfl/${CURRENT_YEAR}`
-    );
-    const leagues = await leaguesRes.json();
-
-    // 2. Fetch rosters for each league
-    const rosterResults = await Promise.all(
-      leagues.map(async (league: any) => {
-        const res = await fetch(
-          `https://api.sleeper.app/v1/league/${league.league_id}/rosters`
-        );
-        const rosters = await res.json();
-
-        return rosters.find((r: any) => r.owner_id === userId);
-      })
-    );
-
-    const validRosters = rosterResults.filter(Boolean);
-    const leagueCount = validRosters.length;
-
-    // 3. Build player count map
-    const map: any = {};
-
-    validRosters.forEach((r: any) => {
-      r.players?.forEach((id: string) => {
-        if (!map[id]) map[id] = 0;
-        map[id]++;
-      });
-    });
-
-    // 4. Sort + take top 15
-    const topPlayers = Object.entries(map)
-  .sort((a: any, b: any) => b[1] - a[1])
-  .slice(0, 15)
-  .map(([playerId, count]: any) => ({
-    playerId,
-    count,
-    percent: leagueCount
-      ? Math.round((count / leagueCount) * 100)
-      : 0,
-  }));
-
-// ✅ SAVE TO STATE
-setExternalShares({
-  players: topPlayers,
-  leagueCount,
-});
-
-// ✅ SAVE TO CACHE
-setUserCache((prev: any) => ({
-  ...prev,
-  [userId]: {
-  players: topPlayers,
-  leagueCount,
-},
-}));
-  } catch (err) {
-    console.error("Error loading user exposure:", err);
-  } finally {
-    setLoadingShares(false);
-  }
 };
 
 const loadDraftScout = async (userId: string) => {
@@ -2259,126 +1970,6 @@ const handleToggleLeaguePlayerTag = useCallback((
   });
 }, []);
 
-const loadUserTrades = async (targetUserId: string) => {
-  setTradeHubUserId(targetUserId);
-  setTradeHubData(null);
-  setLoadingTradeHub(true);
-
-  try {
-    // 1. All 2026 dynasty leagues for this user
-    const leaguesRes = await fetch(
-      `https://api.sleeper.app/v1/user/${targetUserId}/leagues/nfl/${CURRENT_YEAR}`
-    );
-    const allLeagues = await leaguesRes.json();
-
-    const dynastyLeagues = allLeagues.filter((l: any) =>
-      ((l.settings?.taxi_slots ?? 0) > 0 ||
-        (l.roster_positions?.length ?? 0) > 20) &&
-      (l.settings?.best_ball ?? 0) === 0
-    );
-
-    const oneMonthAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
-    const allTrades: any[] = [];
-
-    // 2. For each league fetch rosters + transactions rounds 1 & 2 + drafts in parallel
-    await Promise.all(
-      dynastyLeagues.map(async (league: any) => {
-        const [rostersData, t1, t2, draftsData, leagueUsersData] = await Promise.all([
-          fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`)
-            .then((r) => r.json()).catch(() => []),
-          fetch(`https://api.sleeper.app/v1/league/${league.league_id}/transactions/1`)
-            .then((r) => r.json()).catch(() => []),
-          fetch(`https://api.sleeper.app/v1/league/${league.league_id}/transactions/2`)
-            .then((r) => r.json()).catch(() => []),
-          fetch(`https://api.sleeper.app/v1/league/${league.league_id}/drafts`)
-            .then((r) => r.json()).catch(() => []),
-          fetch(`https://api.sleeper.app/v1/league/${league.league_id}/users`)
-            .then((r) => r.json()).catch(() => []),
-        ]);
-
-        const myRoster = rostersData.find((r: any) => r.owner_id === targetUserId);
-        if (!myRoster) return;
-
-        // Build per-league slot lookup: "season-round-roster_id" → "2026 1.07" label
-        // Uses this league's own draft order — so roster_ids never bleed across leagues
-        const currentDraft = (Array.isArray(draftsData) ? draftsData : [])
-          .find((d: any) => d.season === CURRENT_YEAR);
-        const draftOrder = currentDraft?.draft_order || {};
-        const numTeams = (Array.isArray(rostersData) ? rostersData : []).length
-          || Number(currentDraft?.settings?.teams) || 0;
-        const rosterToOwner: Record<number, string> = {};
-        (Array.isArray(rostersData) ? rostersData : []).forEach((r: any) => {
-          rosterToOwner[r.roster_id] = r.owner_id;
-        });
-
-        // roster_id → display name using this league's own user list
-        const ownerIdToName: Record<string, string> = {};
-        (Array.isArray(leagueUsersData) ? leagueUsersData : []).forEach((u: any) => {
-          ownerIdToName[u.user_id] = u.display_name || u.metadata?.team_name || u.user_id;
-        });
-        const rosterToName: Record<number, string> = {};
-        Object.entries(rosterToOwner).forEach(([rosterId, ownerId]) => {
-          const name = ownerIdToName[ownerId];
-          if (name) rosterToName[Number(rosterId)] = name;
-        });
-
-        const slotLabel = (season: string, round: number, rosterId: number): string => {
-          if (String(season) === CURRENT_YEAR && currentDraft) {
-            const userId = rosterToOwner[rosterId];
-            const baseSlot = Number(draftOrder[String(userId)] || 0);
-            const s = getDraftRoundSlot(currentDraft, round, baseSlot, numTeams);
-            if (s) return `${season} ${round}.${String(s).padStart(2, "0")}`;
-          }
-          return `${season} Rd ${round}`;
-        };
-
-        // Startup drafts have many rounds (15-25); rookie drafts have 4-5
-        const startupDraft = (Array.isArray(draftsData) ? draftsData : [])
-          .filter((d: any) => (d.settings?.rounds ?? 0) > 6)
-          .sort((a: any, b: any) => (b.settings?.rounds ?? 0) - (a.settings?.rounds ?? 0))[0];
-
-        const startupStart: number = startupDraft?.start_time ?? 0;
-        // last_picked = timestamp of final pick; fall back to start + 60 days
-        const startupEnd: number = startupDraft?.last_picked
-          ?? (startupStart ? startupStart + 60 * 24 * 60 * 60 * 1000 : 0);
-
-        const trades = [...(Array.isArray(t1) ? t1 : []), ...(Array.isArray(t2) ? t2 : [])]
-          .filter((t: any) =>
-            t.type === "trade" &&
-            t.status === "complete" &&
-            t.created > oneMonthAgo &&
-            (t.roster_ids || []).includes(myRoster.roster_id) &&
-            // Exclude trades made during the startup draft window
-            !(startupStart > 0 && t.created >= startupStart && t.created <= startupEnd)
-          );
-
-        trades.forEach((trade: any) => {
-          // Resolve pick slots using this league's draft order — never the selected league's data
-          const resolvedDraftPicks = (trade.draft_picks || []).map((p: any) => ({
-            ...p,
-            resolvedSlot: slotLabel(String(p.season), Number(p.round), Number(p.roster_id)),
-          }));
-          allTrades.push({
-            ...trade,
-            draft_picks: resolvedDraftPicks,
-            leagueName: league.name,
-            leagueId: league.league_id,
-            myRosterId: myRoster.roster_id,
-            rosterToOwner,
-            rosterToName,
-          });
-        });
-      })
-    );
-
-    allTrades.sort((a: any, b: any) => b.created - a.created);
-    setTradeHubData(allTrades.slice(0, 15));
-  } catch (err) {
-    console.error("Trade hub error:", err);
-  } finally {
-    setLoadingTradeHub(false);
-  }
-};
 
 const loadTradeAttempts = async (leagueId: string) => {
   if (!supabaseUser) return;
@@ -2672,7 +2263,7 @@ const getTeamSummary = () => {
       setSelectedGamedayMatchupId(gamedayMatchupCards[0].matchupId);
     }
   }, [gamedayMatchupCards, selectedGamedayMatchupId]);
-  const selectedLeagueDirection = useMemo(() => {
+  const selectedLeagueDirection = useMemo((): RosterDirectionProfile | null => {
     if (!selectedLeague || !rosters.length || !user?.user_id) return null;
     const myRosterId = rosters.find((r: any) => r.owner_id === user.user_id)?.roster_id;
     if (!myRosterId) return null;
@@ -3673,7 +3264,7 @@ const getTeamSummary = () => {
 
     // Use the fully adjusted profile — dynasty rank + redraft rank + sim + age all combined
     const myProfile = selectedLeagueDirectionAdjusted ?? selectedLeagueDirection;
-    const myPlayoffOdds = (myProfile as any)?.playoffOdds ?? (selectedLeagueSimulation?.rowByRosterId?.get(Number(myRoster.roster_id))?.playoffOdds ?? 0);
+    const myPlayoffOdds = myProfile?.playoffOdds ?? (selectedLeagueSimulation?.rowByRosterId?.get(Number(myRoster.roster_id))?.playoffOdds ?? 0);
     // A team below 50% to make playoffs should NEVER be buying points.
     // Winning 2 extra games moves you from 1.02 to 1.05 pick without any championship upside.
     // The only valid strategy is accumulating draft capital and young upside shots.

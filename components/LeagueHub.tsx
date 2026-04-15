@@ -1111,8 +1111,8 @@ const starters = starterSlots
 
     {YEARS.map((year) => {
       const yearPicks = picks
-        .filter((p: any) => p.season === year)
-        .sort((a: any, b: any) => {
+        .filter((p) => p.season === year)
+        .sort((a, b) => {
           if (a.round !== b.round) return a.round - b.round;
           return (a.pick_no || 0) - (b.pick_no || 0);
         });
@@ -1124,7 +1124,7 @@ const starters = starterSlots
           <div className="text-sm font-bold mb-2">{year}</div>
 
           <div className="flex flex-wrap gap-2">
-  {yearPicks.map((pick: any, i: number) => {
+  {yearPicks.map((pick, i) => {
     const ownerName =
       users[pick.roster_id] ||
       users[pick.owner_id] ||
@@ -1960,7 +1960,7 @@ const starters = starterSlots
                 return "bg-gray-800/60 text-gray-400 border-gray-700";
               };
 
-              const myRosterId = rosters.find((r: any) => r.owner_id === user?.user_id)?.roster_id;
+              const myRosterId = rosters.find((r) => r.owner_id === user?.user_id)?.roster_id;
 
               const sortedRows = [...prRows].sort((a, b) => {
                 const diff = b[prSortKey] - a[prSortKey];
@@ -1994,14 +1994,14 @@ const starters = starterSlots
                 const popRow = prRows.find(r => r.roster_id === prPopup.rosterId);
                 if (popRow) {
                   const col = prPopup.col;
-                  let popPlayers: any[] = [];
+                  let popPlayers: PRPlayer[] = [];
                   if (col === "dyn" || col === "red") {
                     popPlayers = [...popRow.playerList].sort((a, b) =>
                       col === "dyn" ? b.dynVal - a.dynVal : b.redVal - a.redVal
                     );
                   } else {
-                    popPlayers = popRow.playerList.filter((p: any) => p.position === col)
-                      .sort((a: any, b: any) => b.dynVal - a.dynVal);
+                    popPlayers = popRow.playerList.filter((p) => p.position === col)
+                      .sort((a, b) => b.dynVal - a.dynVal);
                   }
                   const colLabel = col === "dyn" ? "Dynasty" : col === "red" ? "Redraft" : col;
                   popupContent = (
@@ -2015,7 +2015,7 @@ const starters = starterSlots
                           <button onClick={() => setPrPopup(null)} className="text-gray-500 hover:text-white text-lg leading-none">✕</button>
                         </div>
                         <div className="space-y-1">
-                          {popPlayers.map((p: any) => (
+                          {popPlayers.map((p) => (
                             <div key={p.player_id} className="flex items-center justify-between bg-gray-800 rounded-lg px-2 py-1.5">
                               <div className="flex items-center gap-1.5 min-w-0">
                                 <button onClick={() => { setPrPopup(null); setPlayerProfileId(p.player_id); }} className="text-xs text-white hover:text-blue-400 transition truncate text-left">{p.full_name}</button>
@@ -2026,10 +2026,10 @@ const starters = starterSlots
                               </span>
                             </div>
                           ))}
-                          {(col === "dyn") && (allPicks as any[]).filter((p: any) => p.owner_id === prPopup.rosterId).length > 0 && (
+                          {(col === "dyn") && allPicks.filter((p) => p.owner_id === prPopup.rosterId).length > 0 && (
                             <>
                               <p className="text-[10px] text-gray-600 uppercase tracking-wider pt-1 pb-0.5 pl-1">Picks</p>
-                              {(allPicks as any[]).filter((p: any) => p.owner_id === prPopup.rosterId).map((p: any, i: number) => {
+                              {allPicks.filter((p) => p.owner_id === prPopup.rosterId).map((p, i) => {
                                 const via = p.roster_id !== p.owner_id ? ` (via ${prRosterToName[p.roster_id] || `Team ${p.roster_id}`})` : "";
                                 const label = p.slot && String(p.slot).includes(".") ? `${p.season} ${p.slot}` : `${p.season} Rd ${p.round}`;
                                 const val = getStoredPickValue(pickFcValues, p);
@@ -2136,8 +2136,8 @@ const starters = starterSlots
                 <p className="text-sm text-gray-500">Select a league first to view the draft board.</p>
               );
 
-              const myRosterId = rosters.find((r: any) => r.owner_id === user?.user_id)?.roster_id;
-              const mySlots = (allPicks as any[]).filter((p: any) => Number(p.owner_id ?? 0) === Number(myRosterId) && p.slot && /^\d+\.\d+$/.test(String(p.slot))).map((p: any) => p.slot as string);
+              const myRosterId = rosters.find((r) => r.owner_id === user?.user_id)?.roster_id;
+              const mySlots = allPicks.filter((p) => Number(p.owner_id ?? 0) === Number(myRosterId) && p.slot && /^\d+\.\d+$/.test(String(p.slot))).map((p) => p.slot as string);
 
               // Post-draft projection: players user has selected + predictions for remaining my slots
               const projectedMyPicks: string[] = [];
@@ -2200,11 +2200,11 @@ const starters = starterSlots
                       {/* Draft grid */}
                       {draftHubSection === "BOARD" && draftSettings && (() => {
                         const slotOwnerMap: Record<string, number> = {};
-                        (allPicks as any[]).forEach((p: any) => { if (p.slot) slotOwnerMap[p.slot] = Number(p.owner_id ?? p.roster_id ?? 0); });
+                        allPicks.forEach((p) => { if (p.slot) slotOwnerMap[p.slot] = Number(p.owner_id ?? p.roster_id ?? 0); });
                         const posColor: Record<string, string> = { QB: "text-red-400", RB: "text-green-400", WR: "text-blue-400", TE: "text-yellow-400" };
                         // roster_id → display name map for cell owner rows
                         const rosterToName: Record<number, string> = {};
-                        (rosters as any[]).forEach((r: any) => {
+                        rosters.forEach((r) => {
                           rosterToName[Number(r.roster_id)] = users[r.owner_id] || `Team ${r.roster_id}`;
                         });
                         return (
@@ -2236,10 +2236,10 @@ const starters = starterSlots
                                   const slotStr = `${round}.${String(slotNum).padStart(2, "0")}`;
                                   const slotOwner = slotOwnerMap[slotStr];
                                   const isMySlot = slotOwner === Number(myRosterId);
-                                  const playerPick = draftPicks.find((dp: any) => dp.round === round && Number(dp.roster_id ?? dp.picked_by) === slotOwner);
+                                  const playerPick = draftPicks.find((dp) => dp.round === round && Number(dp.roster_id ?? dp.picked_by) === slotOwner);
                                   const actualPlayer = playerPick ? players[playerPick.player_id] : null;
                                   const userOverrideId = myDraftSlotPicks[slotStr];
-                                  const userOverride = userOverrideId ? rookies.find((r: any) => r.player_id === userOverrideId || r.name === userOverrideId) : null;
+                                  const userOverride = userOverrideId ? rookies.find((r) => r.player_id === userOverrideId || r.name === userOverrideId) : null;
                                   const prediction = !actualPlayer && !userOverrideId ? predictedDraftPicks[slotStr] : null;
                                   const overallPick = (round - 1) * rosters.length + slotNum;
                                   const isReach = userOverride && typeof userOverride.adp === "number" && overallPick < userOverride.adp - 8;
@@ -2289,11 +2289,11 @@ const starters = starterSlots
                                         <div className="absolute top-full left-0 z-50 w-64 bg-gray-900 border border-blue-600 rounded-xl shadow-2xl p-2 mt-1" onClick={(e) => e.stopPropagation()}>
                                           <input autoFocus className="w-full bg-gray-800 text-white text-xs rounded px-2 py-1 mb-2 border border-gray-700 focus:outline-none focus:border-blue-500" placeholder="Search rookie…" value={draftSlotSearchQuery} onChange={(e) => setDraftSlotSearchQuery(e.target.value)} />
                                           <div className="max-h-44 overflow-y-auto space-y-0.5">
-                                            {rookies.map((r: any, idx: number) => ({...r, boardRank: idx + 1}))
-                                              .filter((r: any) => r.name && (!draftSlotSearchQuery || r.name.toLowerCase().includes(draftSlotSearchQuery.toLowerCase())))
-                                              .filter((r: any) => !Array.from(draftedPlayerIds).includes(String(r.player_id)) && !Object.entries(myDraftSlotPicks).some(([s, pid]) => s !== slotStr && (pid === r.player_id || pid === r.name)))
+                                            {rookies.map((r, idx) => ({...r, boardRank: idx + 1}))
+                                              .filter((r) => r.name && (!draftSlotSearchQuery || r.name.toLowerCase().includes(draftSlotSearchQuery.toLowerCase())))
+                                              .filter((r) => !Array.from(draftedPlayerIds).includes(String(r.player_id)) && !Object.entries(myDraftSlotPicks).some(([s, pid]) => s !== slotStr && (pid === r.player_id || pid === r.name)))
                                               .slice(0, 15)
-                                              .map((r: any) => {
+                                              .map((r) => {
                                                 const pickNum = (round - 1) * rosters.length + slotNum;
                                                 const reachAmt = typeof r.adp === "number" ? Math.round(pickNum - r.adp) : null;
                                                 return (
@@ -2328,7 +2328,7 @@ const starters = starterSlots
                           <p className="text-[10px] text-gray-500 mb-3">Based on your set picks + AI predictions for remaining slots. Save to Supabase automatically.</p>
                           <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
                             {projectedMyPicks.map((pid) => {
-                              const r = rookies.find((rk: any) => rk.player_id === pid || rk.name === pid);
+                              const r = rookies.find((rk) => rk.player_id === pid || rk.name === pid);
                               if (!r) return null;
                               const idx = rookies.indexOf(r);
                               const posColor: Record<string, string> = { QB: "text-red-400", RB: "text-green-400", WR: "text-blue-400", TE: "text-yellow-400" };
@@ -2362,7 +2362,7 @@ const starters = starterSlots
               if (loadingActivity) return <p className="text-sm text-blue-400">Loading transactions…</p>;
 
               const rosterToUser: Record<number, string> = {};
-              rosters.forEach((r: any) => { rosterToUser[r.roster_id] = r.owner_id; });
+              rosters.forEach((r) => { rosterToUser[r.roster_id] = r.owner_id; });
               const ownerName = (rosterId: number) => {
                 const uid = rosterToUser[rosterId];
                 return users[uid] || `Team ${rosterId}`;
@@ -2374,7 +2374,7 @@ const starters = starterSlots
                 return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
               };
 
-              const txns = activityTransactions.filter((t: any) =>
+              const txns = activityTransactions.filter((t) =>
                 Object.keys(t.adds || {}).length > 0 ||
                 Object.keys(t.drops || {}).length > 0 ||
                 (t.draft_picks || []).length > 0
@@ -2391,12 +2391,12 @@ const starters = starterSlots
                   <p className="text-xs text-gray-500 mb-3">
                     Recent transactions for <strong className="text-gray-300">{selectedLeague.name}</strong>. Click any player name to view their profile.
                   </p>
-                  {txns.map((t: any, idx: number) => {
+                  {txns.map((t, idx) => {
                     const isWaiver = t.type === "waiver";
                     const isTrade = t.type === "trade";
                     const adds = Object.entries(t.adds || {}) as [string, number][];
                     const drops = Object.entries(t.drops || {}) as [string, number][];
-                    const picks = (t.draft_picks || []) as any[];
+                    const picks = t.draft_picks || [];
 
                     const typeLabel = isTrade ? "Trade" : isWaiver ? "Waiver" : "Free Agent";
                     const typeColor = isTrade
@@ -2418,15 +2418,15 @@ const starters = starterSlots
                           <div className="flex items-center justify-between mb-3">
                             <div className="flex items-center gap-2">
                               <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${typeColor}`}>{typeLabel}</span>
-                              <span className="text-xs text-gray-500">{fmtTs(t.status_updated || t.created)}</span>
+                              <span className="text-xs text-gray-500">{fmtTs(t.updated || t.created)}</span>
                             </div>
                           </div>
                           <div className={`grid gap-3`} style={{ gridTemplateColumns: `repeat(${Math.min(rosterIds.length, 3)}, 1fr)` }}>
                             {rosterIds.map((rid) => {
                               const got = adds.filter(([, r]) => r === rid).map(([pid]) => pid);
                               const gave = drops.filter(([, r]) => r === rid).map(([pid]) => pid);
-                              const gotPicks = picks.filter((p: any) => p.owner_id === rid);
-                              const gavePicks = picks.filter((p: any) => p.previous_owner_id === rid);
+                              const gotPicks = picks.filter((p) => p.owner_id === rid);
+                              const gavePicks = picks.filter((p) => p.previous_owner_id === rid);
                               return (
                                 <div key={rid}>
                                   <p className="text-xs font-semibold text-blue-300 mb-1">{ownerName(rid)}</p>
@@ -2501,7 +2501,7 @@ const starters = starterSlots
                             ) : null;
                           })}
                         </div>
-                        <span className="text-[10px] text-gray-600 shrink-0 mt-0.5">{fmtTs(t.status_updated || t.created)}</span>
+                        <span className="text-[10px] text-gray-600 shrink-0 mt-0.5">{fmtTs(t.updated || t.created)}</span>
                       </div>
                     );
                   })}
