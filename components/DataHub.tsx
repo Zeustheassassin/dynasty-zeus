@@ -3,7 +3,7 @@ import React from "react";
 import { usePlayers } from "../lib/PlayersContext";
 import { useLeague } from "../lib/LeagueContext";
 import type {
-  SleeperLeague, SleeperUser, SleeperPlayer, AugmentedPick, ProjectionRow, LeagueMateStatEntry, DynamicPickValue, HistoricalSnapshot,
+  SleeperLeague, SleeperUser, SleeperPlayer, AugmentedPick, ProjectionRow, LeagueMateStatEntry, DynamicPickValue, HistoricalSnapshot, PlayerValueSnapshotEntry,
 } from "../lib/types";
 
 // ── Module-level constants (mirrors page.tsx) ──────────────────────────────
@@ -479,13 +479,13 @@ function DataHub({
         };
 
         const allTrends: TrendRow[] = [];
-        Object.entries(snap.players).forEach(([playerId, snapData]: [string, any]) => {
+        Object.entries(snap.players).forEach(([playerId, snapData]: [string, PlayerValueSnapshotEntry]) => {
           const currentVal = calcFcValues[playerId] ?? 0;
           const snapVal = Number(snapData.value ?? 0);
           if (snapVal <= 0 || currentVal <= 0) return;
           const delta = currentVal - snapVal;
           const pct = (delta / snapVal) * 100;
-          const p = (players as Record<string, any>)[playerId];
+          const p = players[playerId];
           if (!p || !["QB", "RB", "WR", "TE"].includes(p.position)) return;
           if (trendPos !== "ALL" && p.position !== trendPos) return;
           allTrends.push({
@@ -499,7 +499,7 @@ function DataHub({
             snapVal,
             delta,
             pct,
-            owned: (shares as Record<string, any>)[playerId]?.count ?? 0,
+            owned: shares[playerId]?.count ?? 0,
           });
         });
 

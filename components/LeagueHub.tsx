@@ -2074,7 +2074,7 @@ const starters = starterSlots
                       {prMode === "full" && "Dynasty rank includes picks."}
                       {prMode === "starters" && "Showing projected optimal starting lineup based on dynasty values."}
                       {prMode === "bench" && "Showing projected bench (players outside the optimal starting lineup)."}
-                      {" "}Click any pill to see that team's roster. Click column headers to sort.
+                      {" "}Click any pill to see that team&apos;s roster. Click column headers to sort.
                     </p>
                     <div className="overflow-x-auto pb-1">
                       <table className="min-w-full text-sm border-separate border-spacing-y-1">

@@ -526,7 +526,7 @@ function DraftHub({
     const yearsToLoad = Object.keys(consensusMeta).filter((yr) => consensusCache[yr] === undefined);
     yearsToLoad.forEach((year) => {
       supabase
-        .from("consensus_draft_cache" as any)
+        .from("consensus_draft_cache")
         .select("player_id, player_name, position, avg_pick_no")
         .eq("user_id", supabaseUser.id)
         .eq("year", parseInt(year, 10))

@@ -5432,7 +5432,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     <div className="bg-gray-900 p-6 rounded w-96">
 
       <div className="text-lg font-bold mb-4">
-        {users[selectedUserId]}'s Top Owned Players
+        {users[selectedUserId]}&apos;s Top Owned Players
       </div>
 
       {loadingShares ? (
@@ -5509,7 +5509,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     <div className="bg-gray-900 p-6 rounded-xl w-[560px] max-h-[85vh] overflow-y-auto">
 
       <div className="text-lg font-bold mb-1">
-        {users[draftScoutUserId]}'s {ROOKIE_YEAR} Rookie Drafts
+        {users[draftScoutUserId]}&apos;s {ROOKIE_YEAR} Rookie Drafts
       </div>
       <div className="text-xs text-gray-500 mb-4">
         All leagues — patterns based on completed/in-progress picks
@@ -5647,7 +5647,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     <div className="bg-gray-900 p-6 rounded-xl w-[560px] max-h-[85vh] overflow-y-auto">
 
       <div className="text-lg font-bold mb-1">
-        {users[tradeHubUserId] || "Manager"}'s Recent Trades
+        {users[tradeHubUserId] || "Manager"}&apos;s Recent Trades
       </div>
       <div className="text-xs text-gray-500 mb-5">
         Past 30 days · All dynasty leagues · Up to 15 trades
