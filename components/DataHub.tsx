@@ -1094,11 +1094,11 @@ function DataHub({
                       <div className="flex flex-wrap gap-1.5">
                         {[...entry.picks]
                           .sort((a, b) => a.season !== b.season ? Number(a.season) - Number(b.season) : a.round - b.round)
-                          .map((pick, i) => {
+                          .map((pick) => {
                             const yi = PICK_YEARS.indexOf(String(pick.season));
                             const stdVal = yi >= 0 ? (STANDARD_PICK_VALUES[`${pick.round}-${yi}`] ?? null) : null;
                             return (
-                              <span key={i} className="flex flex-col items-center text-center px-2 py-1 rounded-lg bg-blue-900/30 border border-blue-800/50">
+                              <span key={`${pick.season}-${pick.round}-${pick.roster_id}`} className="flex flex-col items-center text-center px-2 py-1 rounded-lg bg-blue-900/30 border border-blue-800/50">
                                 <span className="text-[10px] font-semibold text-blue-300">{pick.season} R{pick.round}</span>
                                 {stdVal && <span className="text-[8px] text-blue-500 font-mono leading-tight">~{stdVal.toLocaleString()}</span>}
                               </span>

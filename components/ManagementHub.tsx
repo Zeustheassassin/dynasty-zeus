@@ -1,6 +1,9 @@
 "use client";
 import React, { useState, useRef, useEffect } from "react";
 import { supabase } from "../lib/supabaseclient";
+import { logger } from "../lib/logger";
+
+const log = logger("components/ManagementHub");
 import { SLEEPER_BASE_URL, getPaymentYears } from "../lib/constants";
 import type { LeagueMgmtData, CommPaymentsData, SleeperLeague, SleeperRoster, SleeperUser } from "../lib/types";
 import { useAuth } from "../lib/AuthContext";
@@ -107,7 +110,7 @@ function ManagementHub({
       { onConflict: "user_id,league_id" }
     );
     if (error) {
-      console.error("[ManagementHub] league_management upsert failed:", error.message);
+      log.error("league_management upsert failed", { err: error.message });
       showSaveError("Save failed — check your connection and try again.");
     }
   };
@@ -176,7 +179,7 @@ function ManagementHub({
       { onConflict: "user_id,league_id,owner_id" }
     );
     if (error) {
-      console.error("[ManagementHub] commissioner_payments upsert failed:", error.message);
+      log.error("commissioner_payments upsert failed", { err: error.message });
       showSaveError("Save failed — check your connection and try again.");
     }
   };
@@ -216,7 +219,7 @@ function ManagementHub({
 
     const failed = results.filter((r) => r.error);
     if (failed.length > 0) {
-      console.error(`[ManagementHub] ${failed.length} commissioner_payments bulk upserts failed`);
+      log.error("commissioner_payments bulk upserts failed", { count: failed.length });
       showSaveError("Some saves failed — check your connection and try again.");
     }
   };

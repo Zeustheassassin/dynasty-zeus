@@ -2,8 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '../../../lib/supabaseclient';
 import { SLEEPER_BASE_URL, CROSS_LEAGUE_ROSTERS_TTL_MS } from '../../../lib/constants';
 import { checkRateLimit } from '../../../lib/rateLimit';
+import { logger } from '../../../lib/logger';
+import { withRetry } from '../../../lib/withRetry';
 
-export async function GET(req: NextRequest) {
+const log = logger('api/cross-league-rosters');
+
+export async function GET(req: NextRequest): Promise<NextResponse> {
   const rl = checkRateLimit(req, 60, 60_000, 'cross-league-rosters');
   if (!rl.allowed) return rl.response;
 
@@ -41,16 +45,16 @@ export async function GET(req: NextRequest) {
 
     const myRoster = rosters.find((r) => r.owner_id === sleeperUserId) ?? null;
 
-    // ── 3. Write to Supabase cache (non-blocking, errors logged) ──
+    // ── 3. Write to Supabase cache (non-blocking, retries up to 3x) ──
     if (myRoster) {
-      supabase.from('cross_league_rosters_cache').upsert({
-        sleeper_user_id: sleeperUserId,
-        league_id: leagueId,
-        roster: myRoster,
-        cached_at: new Date().toISOString(),
-      }).then(({ error }) => {
-        if (error) console.error('[cross-league-rosters] cache write failed:', error.message);
-      });
+      withRetry(() =>
+        supabase.from('cross_league_rosters_cache').upsert({
+          sleeper_user_id: sleeperUserId,
+          league_id: leagueId,
+          roster: myRoster,
+          cached_at: new Date().toISOString(),
+        }).then(({ error }) => { if (error) throw error; })
+      ).catch((err: unknown) => log.error('cache write failed after retries', { err: String(err) }));
     }
 
     return NextResponse.json({ roster: myRoster });

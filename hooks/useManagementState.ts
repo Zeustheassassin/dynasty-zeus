@@ -1,11 +1,31 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, type Dispatch, type SetStateAction } from "react";
 import { supabase } from "../lib/supabaseclient";
+import { logger } from "../lib/logger";
 import type { LeagueMgmtData, CommPaymentsData, SleeperRoster, SleeperUser } from "../lib/types";
+
+const log = logger("hooks/useManagementState");
 
 export type MgmtHubTab = "LEAGUE_MGMT" | "COMMISSIONER_TOOLS";
 
-export function useManagementState(supabaseUser: { id: string } | null) {
+export interface UseManagementStateReturn {
+  mgmtHubTab: MgmtHubTab;
+  setMgmtHubTab: Dispatch<SetStateAction<MgmtHubTab>>;
+  leagueMgmtData: LeagueMgmtData;
+  setLeagueMgmtData: Dispatch<SetStateAction<LeagueMgmtData>>;
+  commPaymentsData: CommPaymentsData;
+  setCommPaymentsData: Dispatch<SetStateAction<CommPaymentsData>>;
+  commToolsLeagueId: string;
+  setCommToolsLeagueId: Dispatch<SetStateAction<string>>;
+  commToolsRosters: SleeperRoster[];
+  setCommToolsRosters: Dispatch<SetStateAction<SleeperRoster[]>>;
+  commToolsUsers: Record<string, SleeperUser>;
+  setCommToolsUsers: Dispatch<SetStateAction<Record<string, SleeperUser>>>;
+  loadingCommToolsRosters: boolean;
+  setLoadingCommToolsRosters: Dispatch<SetStateAction<boolean>>;
+}
+
+export function useManagementState(supabaseUser: { id: string } | null): UseManagementStateReturn {
   const [mgmtHubTab, setMgmtHubTab] = useState<MgmtHubTab>("LEAGUE_MGMT");
   const [leagueMgmtData, setLeagueMgmtData] = useState<LeagueMgmtData>({});
   const [commPaymentsData, setCommPaymentsData] = useState<CommPaymentsData>({});
@@ -17,14 +37,17 @@ export function useManagementState(supabaseUser: { id: string } | null) {
   useEffect(() => {
     if (!supabaseUser) return;
 
+    let cancelled = false;
+
     // League management checkboxes
     supabase
       .from("league_management")
       .select("*")
       .eq("user_id", supabaseUser.id)
       .then(({ data, error }) => {
+        if (cancelled) return;
         if (error) {
-          console.error("[useManagementState] league_management load failed:", error.message);
+          log.error("league_management load failed", { err: error.message });
           return;
         }
         if (data && data.length > 0) {
@@ -57,8 +80,9 @@ export function useManagementState(supabaseUser: { id: string } | null) {
       .select("*")
       .eq("user_id", supabaseUser.id)
       .then(({ data, error }) => {
+        if (cancelled) return;
         if (error) {
-          console.error("[useManagementState] commissioner_payments load failed:", error.message);
+          log.error("commissioner_payments load failed", { err: error.message });
           return;
         }
         if (data && data.length > 0) {
@@ -77,6 +101,8 @@ export function useManagementState(supabaseUser: { id: string } | null) {
           setCommPaymentsData(map);
         }
       });
+
+    return () => { cancelled = true; };
   }, [supabaseUser]);
 
   return {

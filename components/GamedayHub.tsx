@@ -316,7 +316,7 @@ function GamedayHub({
 
                       return (
                         <div
-                          key={`${selectedGamedayMatchup.matchupId}-${slot}-${index}`}
+                          key={`${selectedGamedayMatchup.matchupId}-${index}`}
                           className="grid grid-cols-[minmax(0,1fr)_88px_minmax(0,1fr)_78px] gap-3 items-center rounded-xl border border-gray-800 bg-gray-950/50 px-3 py-3"
                         >
                           {renderPlayerCell(leftRow, "left")}

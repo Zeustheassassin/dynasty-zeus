@@ -13,7 +13,7 @@ const normalizeName = (value: string) =>
     .replace(/\s+/g, " ")
     .trim();
 
-export async function GET(request: NextRequest) {
+export async function GET(request: NextRequest): Promise<Response> {
   const rl = checkRateLimit(request, 15, 60_000, 'news');
   if (!rl.allowed) return rl.response;
 

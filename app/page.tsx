@@ -27,6 +27,9 @@ const LeagueHub = dynamic(() => import("../components/LeagueHub"), { ssr: false,
 const TradeHub = dynamic(() => import("../components/TradeHub"), { ssr: false, loading: HubSkeleton });
 import { LEAGUE_HUB_GROUPS } from "../lib/leagueHubGroups";
 import { supabase } from "../lib/supabaseclient";
+import { logger } from "../lib/logger";
+
+const log = logger("app/page");
 import type { User as SupabaseUser } from "@supabase/auth-js";
 import {
   CURRENT_YEAR, YEARS, ROUNDS,
@@ -41,6 +44,7 @@ import {
   getLeagueMateMotivation, getTradePartnerFitLabel, getTradePartnerFit,
   getCrossLeaguePreferenceFit, getCrossLeagueTradeBehaviorFit,
   fetchFantasyCalcValues, formatRelativeDate,
+  computeScoringMultipliers,
 } from "../lib/helpers";
 import { useProjections } from "../hooks/useProjections";
 import { useSleeperUser } from "../hooks/useSleeperUser";
@@ -264,7 +268,7 @@ const {
   projectionLoaded, setProjectionLoaded,
   projectionUsesSeasonFallback,
   loadProjections,
-} = useProjections(players);
+} = useProjections(players, selectedLeague?.scoring_settings ?? null);
 
 // Rolling snap% / target / carry stats from the last 4 weeks of Sleeper actuals.
 // Returns null during the off-season — TradeHub degrades gracefully when null.
@@ -442,6 +446,7 @@ const loadNotes = async () => {
 // Load all Supabase-persisted user data whenever the logged-in user changes
 useEffect(() => {
   if (!supabaseUser) return;
+  let cancelled = false;
   setSupabaseMessage("");
   try {
     if (supabaseUser.email) localStorage.setItem(LAST_LOGIN_EMAIL_KEY, supabaseUser.email);
@@ -454,6 +459,7 @@ useEffect(() => {
     .select("league_id, content")
     .eq("user_id", supabaseUser.id)
     .then(({ data }) => {
+      if (cancelled) return;
       if (data && data.length > 0) {
         const map: Record<string, string> = {};
         data.forEach((row: { league_id: string; content: string }) => { map[row.league_id] = row.content; });
@@ -471,6 +477,7 @@ useEffect(() => {
     .eq("user_id", supabaseUser.id)
     .single()
     .then(({ data }) => {
+      if (cancelled) return;
       if (data?.snapshot) {
         const snap = { players: data.snapshot, recorded_at: data.recorded_at };
         historicalSnapshotRef.current = snap;
@@ -483,6 +490,7 @@ useEffect(() => {
     .select("player_id, note")
     .eq("user_id", supabaseUser.id)
     .then(({ data }) => {
+      if (cancelled) return;
       if (data && data.length > 0) {
         const map: Record<string, string> = {};
         data.forEach((row: { player_id: string; note: string }) => { map[String(row.player_id)] = row.note; });
@@ -499,6 +507,7 @@ useEffect(() => {
     .select("player_id, sell, buy")
     .eq("user_id", supabaseUser.id)
     .then(({ data }) => {
+      if (cancelled) return;
       if (data && data.length > 0) {
         const map: Record<string, { sell: string; buy: string }> = {};
         data.forEach((row: { player_id: string; sell: string; buy: string }) => { map[String(row.player_id)] = { sell: row.sell, buy: row.buy }; });
@@ -515,6 +524,7 @@ useEffect(() => {
     .select("league_id, player_id, tag")
     .eq("user_id", supabaseUser.id)
     .then(({ data }) => {
+      if (cancelled) return;
       if (data && data.length > 0) {
         const map: Record<string, Record<string, "CORE" | "WANT_TO_TRADE">> = {};
         data.forEach((row: { league_id: string; player_id: string; tag: string }) => {
@@ -532,15 +542,18 @@ useEffect(() => {
         });
       }
     });
+  return () => { cancelled = true; };
 }, [supabaseUser]);
 
 useEffect(() => {
   if (!supabaseUser) { setAllTradeAttempts([]); return; }
+  let cancelled = false;
   supabase
     .from("trade_attempts")
     .select("id, league_id, status")
     .eq("user_id", supabaseUser.id)
-    .then(({ data }) => { if (data) setAllTradeAttempts(data as TradeAttempt[]); });
+    .then(({ data }) => { if (!cancelled && data) setAllTradeAttempts(data as TradeAttempt[]); });
+  return () => { cancelled = true; };
 }, [supabaseUser?.id]);
 
 const signUp = async () => {
@@ -737,7 +750,7 @@ useEffect(() => {
     setPlayers(data);
   };
 
-  loadPlayers().catch((err) => { if (!controller.signal.aborted) console.error('[loadPlayers]', err); });
+  loadPlayers().catch((err) => { if (!controller.signal.aborted) log.error('loadPlayers failed', { err: String(err) }); });
   return () => controller.abort();
 }, []);
 
@@ -1087,7 +1100,7 @@ useEffect(() => {
   supabase
     .from("draft_board_picks")
     .upsert(rows, { onConflict: "user_id,league_id,season,pick_slot" })
-    .then(() => {}); // table may not exist yet — localStorage handles persistence
+    .then(() => {}, (err: unknown) => log.error("draft_board_picks upsert failed", { err: String(err) }));
 }, [supabaseUser?.id, selectedLeague?.league_id, myDraftSlotPicks]);
 
 
@@ -1102,10 +1115,14 @@ const saveLeagueNote = async (leagueId: string, text: string) => {
   setLeagueNotes(updated);
   localStorage.setItem("leagueNotes", JSON.stringify(updated));
   if (supabaseUser) {
-    await supabase.from("league_notes").upsert(
-      { user_id: supabaseUser.id, league_id: leagueId, content: text, updated_at: new Date().toISOString() },
-      { onConflict: "user_id,league_id" }
-    );
+    try {
+      await supabase.from("league_notes").upsert(
+        { user_id: supabaseUser.id, league_id: leagueId, content: text, updated_at: new Date().toISOString() },
+        { onConflict: "user_id,league_id" }
+      );
+    } catch (err: unknown) {
+      log.error("league_notes upsert failed", { err: String(err) });
+    }
   }
 };
 
@@ -1136,7 +1153,7 @@ const refreshDraftBoard = async () => {
     const picks = await picksRes.json();
     setDraftPicks(picks);
   } catch (err) {
-    console.warn("Draft refresh failed");
+    log.warn("draft refresh failed", { err: String(err) });
   } finally {
     setLoadingDraftRefresh(false);
   }
@@ -1231,7 +1248,7 @@ const loadOwnerTendencies = async () => {
                 collected.push({ round: Number(p.round), position: String(p.metadata.position) });
               });
           } catch (err) {
-            console.warn('[loadDraftScout] draft picks fetch error:', err);
+            log.warn('loadDraftScout draft picks fetch error', { err: String(err) });
           }
         }));
 
@@ -1261,7 +1278,7 @@ const loadOwnerTendencies = async () => {
         updated_at: new Date().toISOString(),
       });
     } catch (err) {
-      console.warn('[loadDraftScout] owner tendencies error for', userId, err);
+      log.warn('loadDraftScout owner tendencies error', { userId, err: String(err) });
     }
   }));
 
@@ -1269,7 +1286,7 @@ const loadOwnerTendencies = async () => {
   if (newRows.length) {
     supabase.from("owner_tendencies")
       .upsert(newRows, { onConflict: "owner_user_id,season" })
-      .then(() => {});
+      .then(() => {}, (err: unknown) => log.error("owner_tendencies upsert failed", { err: String(err) }));
   }
 
   setOwnerDraftTendencies(tendencies);
@@ -1550,7 +1567,7 @@ const loadDraftScout = async (userId: string) => {
 
     setDraftScoutData(results.filter((r): r is DraftScoutLeague => r !== null));
   } catch (err) {
-    console.error("Draft scout error:", err);
+    log.error("draft scout error", { err: String(err) });
   } finally {
     setLoadingDraftScout(false);
   }
@@ -1572,7 +1589,7 @@ const loadCalcValues = async (leagueId: string) => {
     setCalcFcValues(vals);
     setCalcValuesLeagueId(leagueId);
   } catch (err) {
-    console.error('[loadCalcValues] failed:', err);
+    log.error('loadCalcValues failed', { err: String(err) });
   } finally {
     setLoadingCalcValues(false);
   }
@@ -1584,7 +1601,7 @@ const loadNflState = async () => {
     const data = await fetch('/api/nfl-state').then(r => r.json());
     setNflState(data);
   } catch (err) {
-    console.error('[loadNflState] failed:', err);
+    log.error('loadNflState failed', { err: String(err) });
   }
 };
 
@@ -1748,11 +1765,11 @@ const loadLeaguemateTradeAlerts = async () => {
             });
           });
         } catch (err) {
-          console.warn('[loadTradeAlerts] league processing error:', err);
+          log.warn('loadTradeAlerts league processing error', { err: String(err) });
         }
       }));
     } catch (err) {
-      console.warn('[loadTradeAlerts] transaction fetch error:', err);
+      log.warn('loadTradeAlerts transaction fetch error', { err: String(err) });
     }
   }));
 
@@ -1778,7 +1795,7 @@ const loadActivity = async (leagueId: string) => {
     all.sort((a, b) => (b.updated || b.created || 0) - (a.updated || a.created || 0));
     setActivityTransactions(all.slice(0, 150) as AnnotatedTransaction[]);
   } catch (err) {
-    console.error('[loadUserTrades/activity] failed:', err);
+    log.error('loadActivity failed', { err: String(err) });
   } finally { setLoadingActivity(false); }
 };
 
@@ -1842,7 +1859,7 @@ const loadLeagueOverview = async () => {
 
           return { league, rosters: rostersData, picks: tempPicks, userMap: leagueUserMap };
         } catch (err) {
-          console.warn('[loadLeagueOverview] league fetch error:', err);
+          log.warn('loadLeagueOverview league fetch error', { err: String(err) });
           return null;
         }
       })
@@ -1854,7 +1871,7 @@ const loadLeagueOverview = async () => {
     setLeagueOverviewData(byLeague);
     setLeagueOverviewLoaded(true);
   } catch (err) {
-    console.error('[loadLeagueOverview] failed:', err);
+    log.error('loadLeagueOverview failed', { err: String(err) });
   } finally {
     setLoadingLeagueOverview(false);
   }
@@ -1876,7 +1893,7 @@ const loadRedraftValues = async () => {
     setRedraftValues(vals);
     setRedraftLoaded(true);
   } catch (err) {
-    console.error('[loadRedraftValues] failed:', err);
+    log.error('loadRedraftValues failed', { err: String(err) });
   } finally {
     setLoadingRedraft(false);
   }
@@ -1893,7 +1910,7 @@ const savePlayerNote = useCallback(async (playerId: string, note: string) => {
     supabase.from("player_notes").upsert(
       { user_id: sbUser.id, player_id: playerId, note, updated_at: new Date().toISOString() },
       { onConflict: "user_id,player_id" }
-    ).then(() => {});
+    ).then(() => {}, (err: unknown) => log.error("player_notes upsert failed", { err: String(err) }));
   }
 }, []); // reads supabaseUser via ref; uses functional setState — no deps needed
 
@@ -1910,12 +1927,16 @@ const saveSnapshotNow = async () => {
   });
   if (Object.keys(snap).length === 0) return; // values not loaded yet
   const recordedAt = new Date().toISOString();
-  await supabase
-    .from("player_value_snapshots")
-    .upsert(
-      { user_id: supabaseUser.id, snapshot: snap, recorded_at: recordedAt },
-      { onConflict: "user_id" }
-    );
+  try {
+    await supabase
+      .from("player_value_snapshots")
+      .upsert(
+        { user_id: supabaseUser.id, snapshot: snap, recorded_at: recordedAt },
+        { onConflict: "user_id" }
+      );
+  } catch (err: unknown) {
+    log.error("player_value_snapshots upsert failed", { err: String(err) });
+  }
   const newSnap = { players: snap, recorded_at: recordedAt };
   historicalSnapshotRef.current = newSnap;
   setHistoricalSnapshot(newSnap);
@@ -1932,7 +1953,7 @@ const savePlayerDisposition = useCallback(async (playerId: string, sell: string,
     supabase.from("player_dispositions").upsert(
       { user_id: sbUser.id, player_id: playerId, sell, buy, updated_at: new Date().toISOString() },
       { onConflict: "user_id,player_id" }
-    ).then(() => {});
+    ).then(() => {}, (err: unknown) => log.error("player_dispositions upsert failed", { err: String(err) }));
   }
 }, []); // reads supabaseUser via ref; uses functional setState — no deps needed
 
@@ -1963,12 +1984,12 @@ const handleToggleLeaguePlayerTag = useCallback((
       if (next === undefined) {
         supabase.from("league_player_tags").delete()
           .eq("user_id", sbUser.id).eq("league_id", leagueId).eq("player_id", playerId)
-          .then(() => {});
+          .then(() => {}, (err: unknown) => log.error("league_player_tags delete failed", { err: String(err) }));
       } else {
         supabase.from("league_player_tags")
           .upsert({ user_id: sbUser.id, league_id: leagueId, player_id: playerId, tag: next },
                   { onConflict: "user_id,league_id,player_id" })
-          .then(() => {});
+          .then(() => {}, (err: unknown) => log.error("league_player_tags upsert failed", { err: String(err) }));
       }
     }
     return updated;
@@ -2269,6 +2290,25 @@ const getTeamSummary = () => {
       setSelectedGamedayMatchupId(gamedayMatchupCards[0].matchupId);
     }
   }, [gamedayMatchupCards, selectedGamedayMatchupId]);
+  // ── League-adjusted FC dynasty values (Tier 3 scoring) ──────────────────
+  // Scales raw FantasyCalc values by per-position multipliers derived from the
+  // selected league's scoring settings vs. the FC baseline (full PPR, 4pt TDs,
+  // no TEP). Falls back to raw calcFcValues when no league is selected.
+  // Used by TradeHub and LeagueHub (absolute dynasty rankings in DataHub and
+  // DraftHub always use raw calcFcValues).
+  const leagueAdjustedFcValues = useMemo((): Record<string, number> => {
+    const scoring = selectedLeague?.scoring_settings;
+    if (!scoring || Object.keys(calcFcValues).length === 0) return calcFcValues;
+    const multipliers = computeScoringMultipliers(scoring);
+    const adjusted: Record<string, number> = {};
+    for (const [id, value] of Object.entries(calcFcValues)) {
+      const pos = players[id]?.position ?? "";
+      const mult = multipliers[pos] ?? 1;
+      adjusted[id] = Math.round(value * mult);
+    }
+    return adjusted;
+  }, [selectedLeague?.scoring_settings, calcFcValues, players]);
+
   const selectedLeagueDirection = useMemo((): RosterDirectionProfile | null => {
     if (!selectedLeague || !rosters.length || !user?.user_id) return null;
     const myRosterId = rosters.find((r) => r.owner_id === user.user_id)?.roster_id;
@@ -2281,8 +2321,8 @@ const getTeamSummary = () => {
 
     // Guard: both value maps must be loaded before profile is meaningful.
     // An empty map produces nonsense direction output — redraftValues drives the
-    // redraft-rank half of the bucket; calcFcValues drives the dynasty-rank half.
-    if (!Object.keys(calcFcValues).length) return null;
+    // redraft-rank half of the bucket; leagueAdjustedFcValues drives the dynasty-rank half.
+    if (!Object.keys(leagueAdjustedFcValues).length) return null;
     if (!Object.keys(redraftValues).length) return null;
 
     return getRosterDirectionProfile({
@@ -2292,9 +2332,9 @@ const getTeamSummary = () => {
       players,
       pickValues: pickFcValues,
       redraftValues,
-      dynastyValueForPlayer: (id: string) => calcFcValues[id] ?? players[id]?.value ?? 0,
+      dynastyValueForPlayer: (id: string) => leagueAdjustedFcValues[id] ?? players[id]?.value ?? 0,
     });
-  }, [selectedLeague?.league_id, rosters, allPicks, players, pickFcValues, redraftValues, calcFcValues, user?.user_id]);
+  }, [selectedLeague?.league_id, rosters, allPicks, players, pickFcValues, redraftValues, leagueAdjustedFcValues, user?.user_id]);
   const selectedLeagueSimulation = useMemo((): LeagueSimulation | null => {
     if (!selectedLeague || !rosters.length) return null;
 
@@ -2386,7 +2426,7 @@ const getTeamSummary = () => {
         let wVolSum = 0;
         let wSum = 0;
         startingPlayers.forEach((player) => {
-          const dynVal = calcFcValues[player.player_id] ?? players[player.player_id]?.value ?? 0;
+          const dynVal = leagueAdjustedFcValues[player.player_id] ?? players[player.player_id]?.value ?? 0;
           const redVal = redraftValues[player.player_id] ?? 0;
           const base = posBase[player.position] ?? 1.0;
 
@@ -2805,7 +2845,7 @@ const getTeamSummary = () => {
     projectionWeek,
     players,
     redraftValues,
-    calcFcValues,
+    leagueAdjustedFcValues,
     leagueWeeklyMatchups,
     standings,
     users,
@@ -3036,7 +3076,7 @@ const getTeamSummary = () => {
   const selectedLeagueMateProfiles = useMemo((): LeagueMateView[] => {
     if (!selectedLeague || !rosters.length || !user?.user_id) return [];
 
-    const dynastyValueForPlayer = (id: string) => calcFcValues[id] ?? players[id]?.value ?? 0;
+    const dynastyValueForPlayer = (id: string) => leagueAdjustedFcValues[id] ?? players[id]?.value ?? 0;
     const myRoster = rosters.find((r) => r.owner_id === user.user_id);
     if (!myRoster) return [];
 
@@ -3153,7 +3193,7 @@ const getTeamSummary = () => {
         if (b!.tradeCount30d !== a!.tradeCount30d) return b!.tradeCount30d - a!.tradeCount30d;
         return a!.ownerName.localeCompare(b!.ownerName);
       }) as LeagueMateView[];
-  }, [selectedLeague?.league_id, rosters, user?.user_id, allPicks, players, pickFcValues, redraftValues, calcFcValues, leagueMateTradeIntel, users, crossLeagueMateIntel]);
+  }, [selectedLeague?.league_id, rosters, user?.user_id, allPicks, players, pickFcValues, redraftValues, leagueAdjustedFcValues, leagueMateTradeIntel, users, crossLeagueMateIntel]);
   const selectedLeagueMateProfilesView =
     selectedLeagueMateProfiles.length > 0
       ? selectedLeagueMateProfiles
@@ -3170,7 +3210,7 @@ const getTeamSummary = () => {
   // Same formula as DataHub Buy Low tab. Top 30 IDs ordered by score descending,
   // only players with real projection data (not redraft fallback).
   const buyLowPlayerIds = useMemo<string[]>(() => {
-    if (!players || Object.keys(calcFcValues).length === 0) return [];
+    if (!players || Object.keys(leagueAdjustedFcValues).length === 0) return [];
     const projById = new Map<string, number>(
       projectionData.map((r) => [String(r.sleeperId), Number(r.fpts || 0)])
     );
@@ -3186,8 +3226,8 @@ const getTeamSummary = () => {
     for (const pos of ["QB", "RB", "WR", "TE"] as const) {
       const minVal = MIN_DYN_VAL[pos];
       const pool = Object.values(players)
-        .filter((p) => p.position === pos && (calcFcValues[p.player_id] ?? 0) >= minVal && projById.has(p.player_id))
-        .map((p) => ({ player_id: p.player_id, age: Number(p.age || 0), dynVal: calcFcValues[p.player_id] ?? 0, projFpts: projById.get(p.player_id)! }));
+        .filter((p) => p.position === pos && (leagueAdjustedFcValues[p.player_id] ?? 0) >= minVal && projById.has(p.player_id))
+        .map((p) => ({ player_id: p.player_id, age: Number(p.age || 0), dynVal: leagueAdjustedFcValues[p.player_id] ?? 0, projFpts: projById.get(p.player_id)! }));
       if (pool.length < 2) continue;
       const dynSorted  = [...pool].sort((a, b) => b.dynVal - a.dynVal);
       const projSorted = [...pool].sort((a, b) => b.projFpts - a.projFpts);
@@ -3209,7 +3249,7 @@ const getTeamSummary = () => {
       .slice(0, 30)
       .filter(r => r.score / maxRaw >= 0.15) // only meaningful buy lows (≥15% of top score)
       .map(r => r.player_id);
-  }, [players, calcFcValues, redraftValues, projectionData]);
+  }, [players, leagueAdjustedFcValues, redraftValues, projectionData]);
 
   const tradePartnerRankings = useMemo(() => {
     if (!selectedLeague || !rosters.length || !user?.user_id || !selectedLeagueSimulation || !selectedLeagueDirection) return [];
@@ -3349,7 +3389,7 @@ const getTeamSummary = () => {
     // The only valid strategy is accumulating draft capital and young upside shots.
     const iAmTanking = myPlayoffOdds < 50;
     const iAmContending = myPlayoffOdds >= 50;
-    const dynValueForPlayer = (id: string) => calcFcValues[id] ?? players[id]?.value ?? 0;
+    const dynValueForPlayer = (id: string) => leagueAdjustedFcValues[id] ?? players[id]?.value ?? 0;
     const playerListForRoster = (rosterId: number) => {
       const rosterEntry = rosters.find((entry) => Number(entry.roster_id) === Number(rosterId));
       return (rosterEntry?.players || [])
@@ -3937,7 +3977,7 @@ const getTeamSummary = () => {
     selectedLeagueDirection,
     selectedLeagueDirectionAdjusted,
     selectedLeagueSimulation,
-    calcFcValues,
+    leagueAdjustedFcValues,
     players,
     redraftValues,
     allPicks,
@@ -3956,7 +3996,7 @@ const getTeamSummary = () => {
         updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id,league_id" }
-    ).then(() => {});
+    ).then(() => {}, (err: unknown) => log.error("leaguemate_profiles upsert failed", { err: String(err) }));
   }, [supabaseUser?.id, selectedLeague?.league_id, selectedLeagueMateProfiles]);
 
   // Save simulation results to Supabase on demand and freeze a local snapshot for
@@ -4010,7 +4050,7 @@ const getTeamSummary = () => {
       supabase
         .from("league_simulations")
         .upsert(rows, { onConflict: "user_id,league_id,roster_id" })
-        .then(() => {});
+        .then(() => {}, (err: unknown) => log.error("league_simulations upsert failed", { err: String(err) }));
     }
   };
 
@@ -4103,14 +4143,14 @@ const getTeamSummary = () => {
     // Needed because rookies use FC player_ids which may differ from Sleeper player_ids
     const valueByNormName: Record<string, number> = {};
     Object.entries(players).forEach(([id, p]: [string, SleeperPlayer]) => {
-      const val = calcFcValues[id] ?? p.value ?? 0;
+      const val = leagueAdjustedFcValues[id] ?? p.value ?? 0;
       if (val > 0 && p.full_name) {
         const key = normName(p.full_name);
         if (!valueByNormName[key] || val > valueByNormName[key]) valueByNormName[key] = val;
       }
     });
     const getRookieValue = (r: RookieBoardPlayer): number =>
-      (r.player_id ? (calcFcValues[r.player_id] ?? 0) : 0) || valueByNormName[normName(r.name)] || 0;
+      (r.player_id ? (leagueAdjustedFcValues[r.player_id] ?? 0) : 0) || valueByNormName[normName(r.name)] || 0;
 
     // Unified player pool for non-user picks.
     // Sort key uses BOTH dynasty value (FC) and ADP so the right signal always wins:
@@ -4302,7 +4342,7 @@ const getTeamSummary = () => {
     }
 
     return predictions;
-  }, [draftSettings, rosters, rookies, draftPicks, draftedPlayerIds, myDraftSlotPicks, allPicks, selectedLeague, players, calcFcValues, ownerDraftTendencies, user?.user_id]);
+  }, [draftSettings, rosters, rookies, draftPicks, draftedPlayerIds, myDraftSlotPicks, allPicks, selectedLeague, players, leagueAdjustedFcValues, ownerDraftTendencies, user?.user_id]);
 
   const topAvailableRookies = useMemo(
     () =>
@@ -4510,10 +4550,11 @@ const getTeamSummary = () => {
       },
       updated_at: new Date(alert.timestamp || Date.now()).toISOString(),
     }));
-    supabase.from("alerts").upsert(payload, { onConflict: "user_id,alert_id" }).then(() => {});
+    supabase.from("alerts").upsert(payload, { onConflict: "user_id,alert_id" }).then(() => {}, (err: unknown) => log.error("alerts bulk upsert failed", { err: String(err) }));
   }, [supabaseUser?.id, dashboardAlerts, dismissedAlertIds]);
 
   useEffect(() => {
+    let cancelled = false;
     const trackedPlayers = [
       ...dashboardOwnedPlayers.map((entry) => ({
         playerId: String(entry.player_id),
@@ -4719,12 +4760,13 @@ const getTeamSummary = () => {
             { onConflict: "user_id" }
           )
           .then(() => {
+            if (cancelled) return;
             const snap = { players: fullSnap, recorded_at: recordedAt };
             historicalSnapshotRef.current = snap;
             setHistoricalSnapshot(snap);
           });
       }
-      return;
+      return () => { cancelled = true; };
     }
 
     // Post-bootstrap: if calcFcValues just loaded and the saved snapshot is too small, expand it.
@@ -4743,6 +4785,7 @@ const getTeamSummary = () => {
             { onConflict: "user_id" }
           )
           .then(() => {
+            if (cancelled) return;
             const snap = { players: fullSnap, recorded_at: originalRecordedAt };
             historicalSnapshotRef.current = snap;
             setHistoricalSnapshot(snap);
@@ -4751,6 +4794,7 @@ const getTeamSummary = () => {
     }
 
     mergeDashboardAlerts(incomingAlerts);
+    return () => { cancelled = true; };
   }, [
     dashboardOwnedPlayers,
     watchlistEntries,
@@ -5119,6 +5163,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
   </>
 )}
         {mainTab === "ALERTS" && (
+          <ErrorBoundary label="Alerts Hub">
           <AlertsPage
             alerts={visibleDashboardAlerts}
             actionableAlerts={actionableDashboardAlerts}
@@ -5142,6 +5187,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
               }
             }}
           />
+          </ErrorBoundary>
         )}
         {/* LEAGUE HUB */}
         {mainTab === "LEAGUES" && (
@@ -5157,7 +5203,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             picks={picks}
             allPicks={allPicks}
             pickFcValues={pickFcValues}
-            calcFcValues={calcFcValues}
+            calcFcValues={leagueAdjustedFcValues}
             redraftValues={redraftValues}
             committedSimsByLeague={committedSimsByLeague}
             leagueSimCache={leagueSimCache}
@@ -5271,7 +5317,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             dataHubTab={dataHubTab}
             setDataHubTab={setDataHubTab}
             shares={shares}
-            calcFcValues={calcFcValues}
+            calcFcValues={leagueAdjustedFcValues}
             dynastyRankPos={dynastyRankPos}
             setDynastyRankPos={setDynastyRankPos}
             loadingCalcValues={loadingCalcValues}
@@ -5347,7 +5393,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     handleRankChange={handleRankChange}
     loadingDraftRefresh={loadingDraftRefresh}
     leagues={leagues}
-    calcFcValues={calcFcValues}
+    calcFcValues={leagueAdjustedFcValues}
     pickFcValues={pickFcValues}
     fcNameValues={fcNameValues}
   />
@@ -5365,7 +5411,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     user={user}
     allPicks={allPicks}
     pickFcValues={pickFcValues}
-    calcFcValues={calcFcValues}
+    calcFcValues={leagueAdjustedFcValues}
     redraftValues={redraftValues}
     selectedLeagueDynamicPickValues={selectedLeagueDynamicPickValues}
     selectedLeagueDirection={selectedLeagueDirection}
@@ -5593,8 +5639,8 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             )}
 
             {/* Per-league picks */}
-            {draftScoutData.map((league, i) => (
-              <div key={i} className="mb-5">
+            {draftScoutData.map((league) => (
+              <div key={league.leagueName} className="mb-5">
                 <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
                   {league.leagueName}
                 </div>
@@ -5658,7 +5704,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
       ) : !tradeHubData?.length ? (
         <div className="text-sm text-gray-400">No trades found in the past 30 days.</div>
       ) : (
-        tradeHubData.map((trade, i) => {
+        tradeHubData.map((trade) => {
           const myRosterId = trade.myRosterId;
 
           // Players received
@@ -5698,7 +5744,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
           const allGiven = [...given, ...picksGiven];
 
           return (
-            <div key={i} className="bg-gray-800 rounded-xl p-4 mb-3">
+            <div key={trade.transaction_id} className="bg-gray-800 rounded-xl p-4 mb-3">
 
               {/* Header */}
               <div className="flex justify-between items-center mb-3">

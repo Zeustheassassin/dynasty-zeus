@@ -1,12 +1,24 @@
 "use client";
-import { useState } from "react";
+import { useState, type Dispatch, type SetStateAction } from "react";
 import { CURRENT_YEAR } from "../lib/helpers";
+import { logger } from "../lib/logger";
 import type { SleeperLeague, SleeperRoster } from "../lib/types";
+
+const log = logger("hooks/useUserExposure");
 
 interface ExposureEntry { playerId: string; count: number; percent: number; }
 export interface ExposureData { players: ExposureEntry[]; leagueCount: number; }
 
-export function useUserExposure() {
+export interface UseUserExposureReturn {
+  userCache: Record<string, ExposureData>;
+  selectedUserId: string | null;
+  setSelectedUserId: Dispatch<SetStateAction<string | null>>;
+  externalShares: ExposureData | null;
+  loadingShares: boolean;
+  loadUserExposure: (userId: string) => Promise<void>;
+}
+
+export function useUserExposure(): UseUserExposureReturn {
   const [userCache, setUserCache] = useState<Record<string, ExposureData>>({});
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [externalShares, setExternalShares] = useState<ExposureData | null>(null);
@@ -61,7 +73,7 @@ export function useUserExposure() {
       setExternalShares(result);
       setUserCache((prev) => ({ ...prev, [userId]: result }));
     } catch (err) {
-      console.error("Error loading user exposure:", err);
+      log.error("error loading user exposure", { err: String(err) });
     } finally {
       setLoadingShares(false);
     }

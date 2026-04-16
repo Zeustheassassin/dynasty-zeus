@@ -42,7 +42,7 @@ function parseFPProjections(
   return results;
 }
 
-export async function GET(req: NextRequest) {
+export async function GET(req: NextRequest): Promise<NextResponse> {
   const rl = checkRateLimit(req, 20, 60_000, 'fantasypros');
   if (!rl.allowed) return rl.response;
 

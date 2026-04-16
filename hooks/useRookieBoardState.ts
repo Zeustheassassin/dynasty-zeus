@@ -1,8 +1,11 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 import { supabase } from "../lib/supabaseclient";
 import { CURRENT_YEAR, normalizeRookieName } from "../lib/helpers";
+import { logger } from "../lib/logger";
 import type { RookieBoardPlayer } from "../lib/types";
+
+const log = logger("hooks/useRookieBoardState");
 
 // ── Constants (exported so page.tsx logout handler can clear the right keys) ──
 export const ROOKIE_YEAR = CURRENT_YEAR;
@@ -13,7 +16,20 @@ const ROOKIE_BOARD_ADP_URL =
   `https://api.sleeper.app/projections/nfl/${ROOKIE_YEAR}?season_type=regular` +
   `&position=QB&position=RB&position=WR&position=TE&order_by=adp_dynasty_2qb`;
 
-export function useRookieBoardState(supabaseUser: { id: string } | null) {
+export interface UseRookieBoardStateReturn {
+  rookies: RookieBoardPlayer[];
+  setRookies: Dispatch<SetStateAction<RookieBoardPlayer[]>>;
+  dragIndex: number | null;
+  setDragIndex: Dispatch<SetStateAction<number | null>>;
+  rookieSearch: string;
+  setRookieSearch: Dispatch<SetStateAction<string>>;
+  tempRanks: { [key: number]: string };
+  setTempRanks: Dispatch<SetStateAction<{ [key: number]: string }>>;
+  fcNameValues: Record<string, number>;
+  handleRankChange: (currentIndex: number, newRank: string) => void;
+}
+
+export function useRookieBoardState(supabaseUser: { id: string } | null): UseRookieBoardStateReturn {
   const [rookies, setRookies] = useState<RookieBoardPlayer[]>([]);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [rookieSearch, setRookieSearch] = useState("");
@@ -47,7 +63,7 @@ export function useRookieBoardState(supabaseUser: { id: string } | null) {
           { user_id: user.id, year: ROOKIE_BOARD_VERSION, players: orderedNames, updated_at: new Date().toISOString() },
           { onConflict: "user_id,year" }
         ).then(({ error }: { error: { message: string; code?: string } | null }) => {
-          if (error) console.error("rookie_board save failed:", error.message, error.code);
+          if (error) log.error("rookie_board save failed", { err: error.message, code: error.code });
         });
       }
     }
@@ -57,12 +73,15 @@ export function useRookieBoardState(supabaseUser: { id: string } | null) {
   // Runs on mount AND whenever supabaseUser.id changes (login / logout).
   // Priority: Supabase (if logged in) > localStorage > FC default.
   useEffect(() => {
+    const controller = new AbortController();
+    const { signal } = controller;
+
     const loadRookieBoard = async () => {
       // 1. Fetch sheet, Sleeper ADP (for metadata), and FC Superflex (2QB) raw data in parallel
       const [sheetText, adpResponse, fcRaw] = await Promise.all([
-        fetch('/api/rookie-board-sheet').then((res) => res.text()),
-        fetch(ROOKIE_BOARD_ADP_URL).then((res) => res.json()).catch(() => []),
-        fetch(`https://api.fantasycalc.com/values/current?isDynasty=true&numQbs=2&numTeams=12&ppr=1`)
+        fetch('/api/rookie-board-sheet', { signal }).then((res) => res.text()),
+        fetch(ROOKIE_BOARD_ADP_URL, { signal }).then((res) => res.json()).catch(() => []),
+        fetch(`https://api.fantasycalc.com/values/current?isDynasty=true&numQbs=2&numTeams=12&ppr=1`, { signal })
           .then((res) => res.json()).catch(() => []),
       ]);
 
@@ -217,6 +236,7 @@ export function useRookieBoardState(supabaseUser: { id: string } | null) {
     };
 
     loadRookieBoard().catch(() => {});
+    return () => { controller.abort(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabaseUser?.id]); // intentional: use ID not object — prevents re-runs when auth refreshes recreate the user object
 

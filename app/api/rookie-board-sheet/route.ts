@@ -6,7 +6,7 @@ import { checkRateLimit } from '../../../lib/rateLimit';
 // Proxies the crowdsourced rookie board Google Sheet with a 6-hour server cache.
 // Google Sheets CSV exports can be slow (500ms–2s); this ensures only one upstream
 // request per 6-hour window regardless of how many clients load the rookie board.
-export async function GET(request: NextRequest) {
+export async function GET(request: NextRequest): Promise<NextResponse> {
   const rl = checkRateLimit(request, 20, 60_000, 'rookie-board');
   if (!rl.allowed) return rl.response;
   try {

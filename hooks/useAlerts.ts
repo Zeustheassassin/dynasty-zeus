@@ -1,7 +1,10 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 import { supabase } from "../lib/supabaseclient";
+import { logger } from "../lib/logger";
 import type { AlertsCenterItem, WatchlistEntry } from "../lib/types";
+
+const log = logger("hooks/useAlerts");
 
 /**
  * useAlerts
@@ -29,7 +32,24 @@ interface UseAlertsOptions {
   players: Record<string, { player_id: string; full_name?: string; position?: string; team?: string | null }>;
 }
 
-export function useAlerts({ supabaseUser, players }: UseAlertsOptions) {
+export interface UseAlertsReturn {
+  dashboardAlerts: AlertsCenterItem[];
+  setDashboardAlerts: Dispatch<SetStateAction<AlertsCenterItem[]>>;
+  dismissedAlertIds: string[];
+  setDismissedAlertIds: Dispatch<SetStateAction<string[]>>;
+  watchlistEntries: WatchlistEntry[];
+  setWatchlistEntries: Dispatch<SetStateAction<WatchlistEntry[]>>;
+  mergeDashboardAlerts: (incoming: AlertsCenterItem[]) => void;
+  dismissAlert: (alertId: string) => void;
+  addWatchlistEntry: (playerId: string) => Promise<void>;
+  removeWatchlistEntry: (playerId: string) => Promise<void>;
+  alertStoreScope: string;
+  watchlistStorageKey: string;
+  alertStorageKey: string;
+  dismissedAlertStorageKey: string;
+}
+
+export function useAlerts({ supabaseUser, players }: UseAlertsOptions): UseAlertsReturn {
   const alertStoreScope = supabaseUser?.id || "guest";
   const watchlistStorageKey = `watchlists_v1_${alertStoreScope}`;
   const alertStorageKey = `alerts_v1_${alertStoreScope}`;
@@ -160,7 +180,7 @@ export function useAlerts({ supabaseUser, players }: UseAlertsOptions) {
           { user_id: supabaseUser.id, alert_id: alertId, dismissed: true, updated_at: new Date().toISOString() },
           { onConflict: "user_id,alert_id" }
         )
-        .then(() => {});
+        .then(() => {}, (err: unknown) => log.error("alert dismiss upsert failed", { err: String(err) }));
     }
   };
 
@@ -169,11 +189,15 @@ export function useAlerts({ supabaseUser, players }: UseAlertsOptions) {
     setWatchlistEntries(nextEntries);
     localStorage.setItem(watchlistStorageKey, JSON.stringify(nextEntries));
     if (supabaseUser) {
-      await supabase
-        .from("watchlists")
-        .delete()
-        .eq("user_id", supabaseUser.id)
-        .eq("player_id", playerId);
+      try {
+        await supabase
+          .from("watchlists")
+          .delete()
+          .eq("user_id", supabaseUser.id)
+          .eq("player_id", playerId);
+      } catch (err: unknown) {
+        log.error("watchlist delete failed", { err: String(err) });
+      }
     }
   };
 
@@ -192,18 +216,22 @@ export function useAlerts({ supabaseUser, players }: UseAlertsOptions) {
     setWatchlistEntries(nextEntries);
     localStorage.setItem(watchlistStorageKey, JSON.stringify(nextEntries));
     if (supabaseUser) {
-      await supabase
-        .from("watchlists")
-        .upsert(
-          {
-            user_id: supabaseUser.id,
-            player_id: playerId,
-            label: entry.label,
-            threshold_up: entry.threshold_up,
-            threshold_down: entry.threshold_down,
-          },
-          { onConflict: "user_id,player_id" }
-        );
+      try {
+        await supabase
+          .from("watchlists")
+          .upsert(
+            {
+              user_id: supabaseUser.id,
+              player_id: playerId,
+              label: entry.label,
+              threshold_up: entry.threshold_up,
+              threshold_down: entry.threshold_down,
+            },
+            { onConflict: "user_id,player_id" }
+          );
+      } catch (err: unknown) {
+        log.error("watchlist upsert failed", { err: String(err) });
+      }
     }
   };
 

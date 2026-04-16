@@ -1,6 +1,7 @@
 "use client";
-import { useState } from "react";
+import { useState, type Dispatch, type SetStateAction } from "react";
 import { normalizeProjName, getProjectionKickoffAt } from "../lib/helpers";
+import { computeLeagueFpts, DEFAULT_SCORING } from "../lib/helpers/scoring";
 import type { SleeperPlayer, ProjectionRow } from "../lib/types";
 
 /** Raw item shape returned by Sleeper's projections API endpoints. */
@@ -22,14 +23,36 @@ export const PROJ_SOURCES = [
 export type ProjSourceId = typeof PROJ_SOURCES[number]["id"];
 
 // ── Hook ────────────────────────────────────────────────────────────────────
+
+export interface UseProjectionsReturn {
+  projectionData: ProjectionRow[];
+  setProjectionData: Dispatch<SetStateAction<ProjectionRow[]>>;
+  loadingProjections: boolean;
+  projectionWeek: number;
+  setProjectionWeek: Dispatch<SetStateAction<number>>;
+  projectionSeasonYear: number | null;
+  projectionPosFilter: string;
+  setProjectionPosFilter: Dispatch<SetStateAction<string>>;
+  projectionSourceStatus: Record<string, boolean>;
+  projectionLoaded: boolean;
+  setProjectionLoaded: Dispatch<SetStateAction<boolean>>;
+  projectionUsesSeasonFallback: boolean;
+  loadProjections: (week: number | "season", extraSources?: string[]) => Promise<void>;
+}
+
 /**
  * useProjections
  *
  * Manages all projection-related state and the loadProjections action.
  * Pass the current `players` map from Sleeper so the hook can build its
- * name → sleeperId index.
+ * name → sleeperId index, and optionally pass `leagueScoringSettings` from
+ * the selected league so projections reflect that league's exact scoring rules.
+ * Falls back to DEFAULT_SCORING (full PPR, 4pt TDs, 0.5 TEP) when null.
  */
-export function useProjections(players: Record<string, SleeperPlayer>) {
+export function useProjections(
+  players: Record<string, SleeperPlayer>,
+  leagueScoringSettings: Record<string, number> | null
+): UseProjectionsReturn {
   const [projectionData, setProjectionData] = useState<ProjectionRow[]>([]);
   const [loadingProjections, setLoadingProjections] = useState(false);
   const [projectionWeek, setProjectionWeek] = useState(1);
@@ -49,22 +72,22 @@ export function useProjections(players: Record<string, SleeperPlayer>) {
     let resolvedProjectionYear = currentNflYear;
     setProjectionSeasonYear(currentNflYear);
 
-    // Compute PPR fantasy points from a Sleeper stats object.
-    const calcSleeperPPR = (stats: Record<string, number> | undefined, pos: string): number => {
+    // Use the selected league's scoring settings, or fall back to DEFAULT_SCORING.
+    // Always use raw stat fields — never pts_ppr — so the formula is fully controlled.
+    const activeScoring = leagueScoringSettings ?? DEFAULT_SCORING;
+
+    // Compute league-specific fpts from raw Sleeper stat fields.
+    const calcFpts = (stats: Record<string, number> | undefined, pos: string): number => {
       if (!stats) return 0;
-      const stored = stats.pts_ppr ?? 0;
-      if (stored > 0) return stored;
-      return (
-        (stats.pass_yd ?? 0) * 0.04 +
-        (stats.pass_td ?? 0) * 4 +
-        (stats.pass_int ?? 0) * -2 +
-        (stats.rush_yd ?? 0) * 0.1 +
-        (stats.rush_td ?? 0) * 6 +
-        (stats.rec ?? 0) * 1 +
-        (stats.rec_yd ?? 0) * 0.1 +
-        (stats.rec_td ?? 0) * 6 +
-        (pos === "TE" ? (stats.rec ?? 0) * 0.5 : 0)
-      );
+      return computeLeagueFpts(stats as Record<string, number | null | undefined>, activeScoring, pos);
+    };
+
+    // Compute default (full PPR, 4pt TDs, 0.5 TEP) fpts for the same stats.
+    // Used to build a per-player scaling ratio applied to FantasyPros/numberFire
+    // projections, which return a single fpts number with no raw stats breakdown.
+    const calcDefaultFpts = (stats: Record<string, number> | undefined, pos: string): number => {
+      if (!stats) return 0;
+      return computeLeagueFpts(stats as Record<string, number | null | undefined>, DEFAULT_SCORING, pos);
     };
 
     try {
@@ -87,6 +110,11 @@ export function useProjections(players: Record<string, SleeperPlayer>) {
         sources: string[];
         kickoffAt: number | null;
       }>();
+
+      // Per-player scaling ratio: leagueFpts / defaultFpts derived from Sleeper raw stats.
+      // Applied to FantasyPros/numberFire projections (which return a single fpts number
+      // with no raw stat breakdown) to approximate league-specific scoring for those sources.
+      const scalingRatios = new Map<string, number>();
 
       const getKickoffAt = (row: SleeperRawProjectionItem): number | null => {
         const direct = getProjectionKickoffAt(row as Record<string, unknown>);
@@ -135,9 +163,12 @@ export function useProjections(players: Record<string, SleeperPlayer>) {
             seasonRaw.forEach((item: SleeperRawProjectionItem) => {
               const pos: string = item.player?.position ?? "";
               if (!["QB", "RB", "WR", "TE"].includes(pos) || !item.player_id) return;
-              const seasonFpts = calcSleeperPPR(item.stats, pos);
-              if (seasonFpts <= 0) return;
-              addRow(String(item.player_id), seasonFpts / 17, "sleeper", 1.0);
+              const leagueFpts = calcFpts(item.stats as Record<string, number> | undefined, pos);
+              if (leagueFpts <= 0) return;
+              addRow(String(item.player_id), leagueFpts / 17, "sleeper", 1.0);
+              // Build per-player scaling ratio for FantasyPros/numberFire adjustment
+              const defaultFpts = calcDefaultFpts(item.stats as Record<string, number> | undefined, pos);
+              if (defaultFpts > 0) scalingRatios.set(String(item.player_id), leagueFpts / defaultFpts);
             });
             statusMap["sleeper"] = true;
             usingSeasonFallback = true;
@@ -171,9 +202,12 @@ export function useProjections(players: Record<string, SleeperPlayer>) {
           sleeperData.forEach((item: SleeperRawProjectionItem) => {
             const pos: string = item.player?.position ?? "";
             if (!["QB", "RB", "WR", "TE"].includes(pos) || !item.player_id) return;
-            const fpts = calcSleeperPPR(item.stats, pos);
-            if (fpts <= 0) return;
-            addRow(String(item.player_id), fpts, "sleeper", sleeperWeight, getKickoffAt(item));
+            const leagueFpts = calcFpts(item.stats as Record<string, number> | undefined, pos);
+            if (leagueFpts <= 0) return;
+            addRow(String(item.player_id), leagueFpts, "sleeper", sleeperWeight, getKickoffAt(item));
+            // Build per-player scaling ratio for FantasyPros/numberFire adjustment
+            const defaultFpts = calcDefaultFpts(item.stats as Record<string, number> | undefined, pos);
+            if (defaultFpts > 0) scalingRatios.set(String(item.player_id), leagueFpts / defaultFpts);
           });
           statusMap["sleeper"] = true;
         } catch { statusMap["sleeper"] = false; }
@@ -192,7 +226,10 @@ export function useProjections(players: Record<string, SleeperPlayer>) {
               const key = normalizeProjName(item.name);
               const sleeperId = nameIndex.get(key);
               if (!sleeperId) return;
-              addRow(sleeperId, item.fpts, src.id, src.weight);
+              // Scale by per-player ratio derived from Sleeper's raw stats so this
+              // source reflects the league's scoring rather than standard PPR.
+              const ratio = scalingRatios.get(sleeperId) ?? 1;
+              addRow(sleeperId, item.fpts * ratio, src.id, src.weight);
             });
             statusMap["fantasypros"] = true;
           } catch { statusMap["fantasypros"] = false; }
@@ -211,7 +248,9 @@ export function useProjections(players: Record<string, SleeperPlayer>) {
               const key = normalizeProjName(item.name);
               const sleeperId = nameIndex.get(key);
               if (!sleeperId) return;
-              addRow(sleeperId, item.fpts, src.id, src.weight);
+              // Same scaling applied as FantasyPros — approximate league scoring adjustment.
+              const ratio = scalingRatios.get(sleeperId) ?? 1;
+              addRow(sleeperId, item.fpts * ratio, src.id, src.weight);
             });
             statusMap["numberfire"] = true;
           } catch { statusMap["numberfire"] = false; }

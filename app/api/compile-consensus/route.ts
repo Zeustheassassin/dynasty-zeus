@@ -410,7 +410,7 @@ async function compileDrafts(
 
 // ── Route handler ─────────────────────────────────────────────────────────────
 
-export async function POST(req: NextRequest) {
+export async function POST(req: NextRequest): Promise<Response> {
   // Compile is very expensive — strict rate limit: 5 compilations per 10 minutes per IP
   const rl = checkRateLimit(req, 5, 10 * 60_000, 'compile-consensus');
   if (!rl.allowed) return rl.response;

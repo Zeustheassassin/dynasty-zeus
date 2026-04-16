@@ -1,3 +1,4 @@
+"use client";
 import { motion } from "framer-motion";
 
 type DashboardProps = {
@@ -82,14 +83,18 @@ export default function Dashboard({
             }
           >
             {row.map((item) => (
-              <motion.div
+              <motion.button
                 key={item.tab}
+                type="button"
+                aria-label={item.title}
+                aria-disabled={!isConnected}
+                tabIndex={isConnected ? 0 : -1}
                 onClick={() => {
                   if (!isConnected) return;
                   onNavigate(item.tab);
                 }}
                 whileHover={isConnected ? { scale: 1.03 } : {}}
-                className={`relative h-44 w-full overflow-hidden rounded-3xl border border-slate-800 transition ${
+                className={`relative h-44 w-full overflow-hidden rounded-3xl border border-slate-800 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 ${
                   row.length === 1 ? "justify-self-center md:col-span-2 md:max-w-[320px] xl:col-span-1 xl:col-start-2" : ""
                 } ${
                   isConnected ? "cursor-pointer" : "cursor-not-allowed opacity-40"
@@ -97,7 +102,8 @@ export default function Dashboard({
               >
                 <img
                   src={item.image}
-                  alt={item.title}
+                  alt=""
+                  aria-hidden="true"
                   className="absolute inset-0 h-full w-full object-cover"
                   loading="lazy"
                 />
@@ -112,7 +118,7 @@ export default function Dashboard({
                     <p className="mt-1 text-xs text-slate-300">Connect to unlock</p>
                   )}
                 </div>
-              </motion.div>
+              </motion.button>
             ))}
           </div>
         ))}

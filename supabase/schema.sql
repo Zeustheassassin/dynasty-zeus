@@ -353,3 +353,19 @@ drop policy if exists "rookie_board_tiers_self" on rookie_board_tiers;
 create policy "rookie_board_tiers_self" on rookie_board_tiers for all
   using (auth.uid()::text = user_id::text)
   with check (auth.uid()::text = user_id::text);
+
+-- ── league_player_tags (CORE / WANT_TO_TRADE tags per league per player) ─
+create table if not exists league_player_tags (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users(id) on delete cascade not null,
+  league_id text not null,
+  player_id text not null,
+  tag text not null,
+  updated_at timestamptz not null default now(),
+  unique(user_id, league_id, player_id)
+);
+alter table league_player_tags enable row level security;
+drop policy if exists "league_player_tags_self" on league_player_tags;
+create policy "league_player_tags_self" on league_player_tags for all
+  using (auth.uid()::text = user_id::text)
+  with check (auth.uid()::text = user_id::text);

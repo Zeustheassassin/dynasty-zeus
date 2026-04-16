@@ -2,6 +2,9 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { supabase } from "../lib/supabaseclient";
+import { logger } from "../lib/logger";
+
+const log = logger("components/DraftHub");
 import { usePlayers } from "../lib/PlayersContext";
 import { useAuth } from "../lib/AuthContext";
 import { useLeague } from "../lib/LeagueContext";
@@ -361,7 +364,7 @@ function DraftHub({
         { onConflict: "user_id" }
       )
       .then(({ error }: { error: { message: string } | null }) => {
-        if (error) console.error("grade sync failed:", error.message);
+        if (error) log.error("grade sync failed", { err: error.message });
       });
   };
 
@@ -664,7 +667,7 @@ function DraftHub({
       { user_id: supabaseUser.id, year: ROOKIE_YEAR, tiers, updated_at: new Date().toISOString() },
       { onConflict: "user_id,year" }
     ).then(({ error }) => {
-      if (error) console.error("tier sync failed:", error.message);
+      if (error) log.error("tier sync failed", { err: error.message });
     });
   };
 
@@ -1125,15 +1128,20 @@ function DraftHub({
                 onClick={() => setExpandedNoteId(null)}
               >
                 <div
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="note-popup-title"
+                  tabIndex={-1}
+                  onKeyDown={(e) => { if (e.key === 'Escape') setExpandedNoteId(null); }}
                   className="bg-gray-900 border border-gray-700 rounded-2xl p-5 w-full max-w-md mx-4 shadow-2xl"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="flex items-center justify-between mb-3">
                     <div>
-                      <div className="text-sm font-semibold text-white">{np?.name}</div>
+                      <div id="note-popup-title" className="text-sm font-semibold text-white">{np?.name}</div>
                       <div className="text-xs text-gray-500">{np?.position}{np?.team ? ` · ${np.team}` : ""}</div>
                     </div>
-                    <button onClick={() => setExpandedNoteId(null)} className="text-gray-500 hover:text-white text-lg leading-none">✕</button>
+                    <button aria-label="Close note editor" onClick={() => setExpandedNoteId(null)} className="text-gray-500 hover:text-white text-lg leading-none">✕</button>
                   </div>
                   <textarea
                     autoFocus
@@ -1402,7 +1410,7 @@ function DraftHub({
           {/* Loading */}
           {historyLoading && (
             <div className="flex items-center gap-3 text-sm text-blue-400 py-8">
-              <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+              <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
               </svg>
@@ -1564,7 +1572,7 @@ function DraftHub({
                           )}
                           {compiling && (
                             <div className="flex items-center gap-1.5 text-xs text-blue-400">
-                              <svg className="animate-spin w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none">
+                              <svg className="animate-spin w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
                               </svg>
@@ -1670,7 +1678,7 @@ function DraftHub({
                     {/* ── Board ───────────────────────────────────────── */}
                     {isLoadingCache ? (
                       <div className="flex items-center gap-3 text-sm text-blue-400 py-6">
-                        <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                        <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
                         </svg>
@@ -1947,12 +1955,12 @@ function DraftHub({
 
                         {/* Expanded player list */}
                         <div className="border-t border-gray-800 divide-y divide-gray-800/60">
-                          {row.players.map((p, i) => {
+                          {row.players.map((p) => {
                             const posColor: Record<string, string> = { QB: "text-red-400", RB: "text-green-400", WR: "text-blue-400", TE: "text-yellow-400", FB: "text-orange-400" };
                             const gradeColor = p.grade === "hit" ? "text-green-400" : p.grade === "bust" ? "text-red-400" : "text-gray-400";
                             const gradeLabel = p.grade === "hit" ? "H" : p.grade === "bust" ? "B" : "N";
                             return (
-                              <div key={i} className="flex items-center gap-3 px-3 py-2">
+                              <div key={`${p.year}-${p.name}`} className="flex items-center gap-3 px-3 py-2">
                                 <span className={`text-[10px] font-bold w-7 ${posColor[p.position] ?? "text-gray-400"}`}>{p.position}</span>
                                 <span className="text-sm text-white flex-1 truncate">{p.name}</span>
                                 <span className="text-xs text-gray-500">{p.year}</span>

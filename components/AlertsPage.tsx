@@ -196,7 +196,7 @@ function TxCard({ tx, players }: { tx: LeagueTransaction; players: Record<string
                 <div className="text-[10px] font-semibold text-slate-400 mb-1">{ownerName} receives</div>
                 <div className="flex flex-wrap gap-1.5">
                   {side.players.map((pid) => <PlayerPill key={pid} playerId={pid} />)}
-                  {side.picks.map((pick, i) => <PickPill key={i} pick={pick} />)}
+                  {side.picks.map((pick) => <PickPill key={`${pick.season}-${pick.round}-${pick.roster_id}-${pick.owner_id}`} pick={pick} />)}
                 </div>
               </div>
             );

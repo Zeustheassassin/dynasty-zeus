@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, type Dispatch, type SetStateAction } from "react";
 import { CURRENT_YEAR } from "../lib/helpers";
 import type { SleeperUser, SleeperLeague } from "../lib/types";
 
@@ -15,6 +15,20 @@ interface UseSleeperUserOptions {
   onDisconnect?: () => void;
 }
 
+export interface UseSleeperUserReturn {
+  username: string;
+  setUsername: Dispatch<SetStateAction<string>>;
+  user: SleeperUser | null;
+  setUser: Dispatch<SetStateAction<SleeperUser | null>>;
+  leagues: SleeperLeague[];
+  setLeagues: Dispatch<SetStateAction<SleeperLeague[]>>;
+  connectLoading: boolean;
+  connectError: string;
+  connectSuccess: string;
+  connectSleeper: () => Promise<void>;
+  disconnectSleeper: () => void;
+}
+
 /**
  * useSleeperUser
  *
@@ -28,7 +42,7 @@ interface UseSleeperUserOptions {
  *     onLeaguesLoaded: (l) => { ... },
  *   });
  */
-export function useSleeperUser({ onLeaguesLoaded, onDisconnect }: UseSleeperUserOptions = {}) {
+export function useSleeperUser({ onLeaguesLoaded, onDisconnect }: UseSleeperUserOptions = {}): UseSleeperUserReturn {
   const [username, setUsername] = useState("");
   const [user, setUser] = useState<SleeperUser | null>(null);
   const [leagues, setLeagues] = useState<SleeperLeague[]>([]);
@@ -38,6 +52,9 @@ export function useSleeperUser({ onLeaguesLoaded, onDisconnect }: UseSleeperUser
 
   // Hydrate from localStorage on mount
   useEffect(() => {
+    const controller = new AbortController();
+    const { signal } = controller;
+
     let saved: string | null = null;
     try { saved = localStorage.getItem("sleeperUser"); } catch { return; }
     if (!saved) return;
@@ -45,22 +62,26 @@ export function useSleeperUser({ onLeaguesLoaded, onDisconnect }: UseSleeperUser
       const parsed: SleeperUser = JSON.parse(saved);
       setUser(parsed);
       setUsername(parsed.display_name || parsed.username || "");
-      fetch(`https://api.sleeper.app/v1/user/${parsed.user_id}/leagues/nfl/${CURRENT_YEAR}`)
+      fetch(`https://api.sleeper.app/v1/user/${parsed.user_id}/leagues/nfl/${CURRENT_YEAR}`, { signal })
         .then((res) => {
           if (!res.ok) throw new Error(`Sleeper returned ${res.status}`);
           return res.json() as Promise<SleeperLeague[]>;
         })
         .then((data) => {
+          if (signal.aborted) return;
           const filtered = Array.isArray(data) ? data.filter(isDynastyLeague) : [];
           setLeagues(filtered);
           onLeaguesLoaded?.(filtered);
         })
         .catch(() => {
+          if (signal.aborted) return;
           // Sleeper may be unreachable — keep the user object but show empty leagues.
           // The user can manually reconnect when the service is back.
           setLeagues([]);
         });
     } catch { /* ignore corrupt localStorage */ }
+
+    return () => { controller.abort(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -3,8 +3,12 @@ import { supabase } from '../../../../lib/supabaseclient';
 import { SLEEPER_BASE_URL, SLEEPER_STATS_TTL_MS } from '../../../../lib/constants';
 import { checkRateLimit } from '../../../../lib/rateLimit';
 import { apiError, parseIntParam } from '../../../../lib/apiHelpers';
+import { logger } from '../../../../lib/logger';
+import { withRetry } from '../../../../lib/withRetry';
 
-export async function GET(req: NextRequest) {
+const log = logger('api/stats/sleeper-weekly');
+
+export async function GET(req: NextRequest): Promise<NextResponse> {
   const rl = checkRateLimit(req, 30, 60_000, 'sleeper-weekly');
   if (!rl.allowed) return rl.response;
 
@@ -44,15 +48,15 @@ export async function GET(req: NextRequest) {
     );
     const data = res.ok ? await res.json() : {};
 
-    // ── 3. Write to Supabase cache (non-blocking, errors logged) ──
-    supabase.from('sleeper_stats_cache').upsert({
-      season,
-      week,
-      data: data ?? {},
-      cached_at: new Date().toISOString(),
-    }).then(({ error }) => {
-      if (error) console.error('[sleeper-weekly] cache write failed:', error.message);
-    });
+    // ── 3. Write to Supabase cache (non-blocking, retries up to 3x) ──
+    withRetry(() =>
+      supabase.from('sleeper_stats_cache').upsert({
+        season,
+        week,
+        data: data ?? {},
+        cached_at: new Date().toISOString(),
+      }).then(({ error }) => { if (error) throw error; })
+    ).catch((err: unknown) => log.error('cache write failed after retries', { err: String(err) }));
 
     return NextResponse.json(data ?? {});
   } catch {

@@ -405,7 +405,7 @@ function LeagueHub({
                           title="Clear roster cache and re-fetch all leagues from Sleeper"
                           className="flex items-center gap-1 text-[11px] font-semibold px-3 py-1 rounded-full border border-gray-600 text-gray-400 hover:border-gray-400 hover:text-gray-200 transition disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
                         >
-                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className={`w-3 h-3 ${refreshingRosters ? "animate-spin" : ""}`}>
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className={`w-3 h-3 ${refreshingRosters ? "animate-spin" : ""}`}>
                             <path fillRule="evenodd" d="M13.836 2.477a.75.75 0 0 1 .75.75v3.182a.75.75 0 0 1-.75.75h-3.182a.75.75 0 0 1 0-1.5h1.37l-.84-.841a4.5 4.5 0 0 0-7.08 1.196.75.75 0 1 1-1.31-.734 6 6 0 0 1 9.44-1.595l.842.841V3.227a.75.75 0 0 1 .75-.75Zm-.911 7.5A.75.75 0 0 1 13.199 11a6 6 0 0 1-9.44 1.595l-.842-.841v1.017a.75.75 0 0 1-1.5 0V9.591a.75.75 0 0 1 .75-.75H5.35a.75.75 0 0 1 0 1.5H3.98l.84.841a4.5 4.5 0 0 0 7.08-1.196.75.75 0 0 1 1.025-.009Z" clipRule="evenodd" />
                           </svg>
                           {refreshingRosters ? "Refreshing…" : "Refresh Rosters"}
@@ -792,9 +792,9 @@ function LeagueHub({
 
   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">  {/* 👈 ADD THIS */}
 
-    {items.map((rule, i) => (
+    {items.map((rule) => (
       <div
-        key={i}
+        key={rule.key}
         className="flex justify-between items-center bg-yellow-200/10 border border-yellow-500/20 rounded px-2 py-1.5"
       >
         <span className="text-yellow-300 text-xs">
@@ -1027,7 +1027,7 @@ const starters = starterSlots
 
       return (
         <div
-          key={i}
+          key={id}
           className="flex justify-between items-center bg-gray-800 rounded p-2 mb-2"
         >
           <div className="flex items-center gap-2">
@@ -1066,7 +1066,7 @@ const starters = starterSlots
         </div>
 
         <div className="flex flex-wrap gap-2">
-          {yearPicks.map((pick, i) => {
+          {yearPicks.map((pick) => {
             const ownerName =
               users[pick.roster_id] ||
               users[pick.owner_id] ||
@@ -1081,7 +1081,7 @@ const starters = starterSlots
 
             return (
               <div
-                key={i}
+                key={`${pick.season}-${pick.round}-${pick.roster_id}-${pick.owner_id}`}
                 className={`px-3 py-1 rounded-full text-xs border ${
                   pick.round === 1
                     ? "bg-yellow-900/40 border-yellow-600 text-yellow-300"
@@ -1124,7 +1124,7 @@ const starters = starterSlots
           <div className="text-sm font-bold mb-2">{year}</div>
 
           <div className="flex flex-wrap gap-2">
-  {yearPicks.map((pick, i) => {
+  {yearPicks.map((pick) => {
     const ownerName =
       users[pick.roster_id] ||
       users[pick.owner_id] ||
@@ -1137,7 +1137,7 @@ const starters = starterSlots
 
     return (
   <div
-    key={i}
+    key={`${pick.season}-${pick.round}-${pick.roster_id}-${pick.owner_id}`}
     className={`px-3 py-1 rounded-full text-xs border flex items-center gap-1 ${
       pick.round === 1
         ? "bg-yellow-900/40 border-yellow-600 text-yellow-300"
@@ -1530,7 +1530,7 @@ const starters = starterSlots
                                 const p = players[id];
                                 if (!p) return null;
                                 return (
-                                  <div key={i} className="flex justify-between items-center bg-purple-900/30 border border-purple-700 rounded p-2 mb-2">
+                                  <div key={id} className="flex justify-between items-center bg-purple-900/30 border border-purple-700 rounded p-2 mb-2">
                                     <div className="flex items-center gap-2">
                                       <div className="text-xs px-2 py-1 rounded bg-purple-700">TX{i+1}</div>
                                       <div>{p.full_name}</div>
@@ -1556,11 +1556,11 @@ const starters = starterSlots
                               <div key={year} className="mb-4 bg-gray-900 border border-gray-700 rounded-lg p-4">
                                 <div className="font-semibold text-sm mb-2">{year} Picks — {yearPicks.length} TOTAL</div>
                                 <div className="flex flex-wrap gap-2">
-                                  {yearPicks.map((pick, i) => {
+                                  {yearPicks.map((pick) => {
                                     const label = pick.season === CURRENT_YEAR ? pick.slot : `${pick.round}${["th","st","nd","rd"][pick.round] || "th"}`;
                                     const originalOwner = users[pick.roster_id] || "";
                                     return (
-                                      <div key={i} className={`px-3 py-1 rounded-full text-xs border flex items-center gap-1 ${
+                                      <div key={`${pick.season}-${pick.round}-${pick.roster_id}-${pick.owner_id}`} className={`px-3 py-1 rounded-full text-xs border flex items-center gap-1 ${
                                         pick.round === 1 ? "bg-yellow-900/40 border-yellow-600 text-yellow-300"
                                         : pick.round === 2 ? "bg-green-900/40 border-green-600 text-green-300"
                                         : pick.round === 3 ? "bg-blue-900/40 border-blue-600 text-blue-300"
@@ -1771,13 +1771,13 @@ const starters = starterSlots
                       </div>
                     )}
                   </div>
-                  {lineup.map(({ slot, player, score }, i) => {
+                  {lineup.map(({ slot, player, score }) => {
                     const statusStr = player?.status ? String(player.status).toLowerCase() : "";
                     const isOut = /out|inactive|suspended|covid|nfi|pup/.test(statusStr);
                     const isDoubtful = statusStr === "doubtful";
                     const isQuestionable = statusStr === "questionable";
                     return (
-                      <div key={i} className={`flex items-center gap-3 border rounded-xl px-3 py-2 ${posColor[slot] ?? "bg-gray-800 border-gray-700"}`}>
+                      <div key={slot} className={`flex items-center gap-3 border rounded-xl px-3 py-2 ${posColor[slot] ?? "bg-gray-800 border-gray-700"}`}>
                         <span className="text-[10px] font-bold uppercase w-16 shrink-0 text-gray-300">{slot.replace("_"," ")}</span>
                         {player ? (
                           <>
@@ -2006,13 +2006,13 @@ const starters = starterSlots
                   const colLabel = col === "dyn" ? "Dynasty" : col === "red" ? "Redraft" : col;
                   popupContent = (
                     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={() => setPrPopup(null)}>
-                      <div className="bg-gray-900 border border-gray-700 rounded-2xl p-5 w-80 max-h-[80vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
+                      <div role="dialog" aria-modal="true" aria-labelledby="pr-popup-title" tabIndex={-1} onKeyDown={(e) => { if (e.key === 'Escape') setPrPopup(null); }} className="bg-gray-900 border border-gray-700 rounded-2xl p-5 w-80 max-h-[80vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center justify-between mb-3">
                           <div>
                             <p className="text-xs text-gray-500 uppercase tracking-wider">{colLabel} Roster</p>
-                            <p className="text-sm font-semibold text-white">{popRow.ownerName}</p>
+                            <p id="pr-popup-title" className="text-sm font-semibold text-white">{popRow.ownerName}</p>
                           </div>
-                          <button onClick={() => setPrPopup(null)} className="text-gray-500 hover:text-white text-lg leading-none">✕</button>
+                          <button aria-label="Close roster popup" onClick={() => setPrPopup(null)} className="text-gray-500 hover:text-white text-lg leading-none">✕</button>
                         </div>
                         <div className="space-y-1">
                           {popPlayers.map((p) => (
@@ -2029,12 +2029,12 @@ const starters = starterSlots
                           {(col === "dyn") && allPicks.filter((p) => p.owner_id === prPopup.rosterId).length > 0 && (
                             <>
                               <p className="text-[10px] text-gray-600 uppercase tracking-wider pt-1 pb-0.5 pl-1">Picks</p>
-                              {allPicks.filter((p) => p.owner_id === prPopup.rosterId).map((p, i) => {
+                              {allPicks.filter((p) => p.owner_id === prPopup.rosterId).map((p) => {
                                 const via = p.roster_id !== p.owner_id ? ` (via ${prRosterToName[p.roster_id] || `Team ${p.roster_id}`})` : "";
                                 const label = p.slot && String(p.slot).includes(".") ? `${p.season} ${p.slot}` : `${p.season} Rd ${p.round}`;
                                 const val = getStoredPickValue(pickFcValues, p);
                                 return (
-                                  <div key={i} className="flex items-center justify-between bg-gray-800 rounded-lg px-2 py-1.5">
+                                  <div key={`${p.season}-${p.round}-${p.roster_id}`} className="flex items-center justify-between bg-gray-800 rounded-lg px-2 py-1.5">
                                     <span className="text-xs text-white truncate">{label}{via}</span>
                                     <span className="text-xs text-gray-400 font-mono shrink-0 ml-2">{val.toLocaleString()}</span>
                                   </div>
@@ -2441,8 +2441,8 @@ const starters = starterSlots
                                           </button>
                                         ) : null;
                                       })}
-                                      {gotPicks.map((pk, i) => (
-                                        <p key={i} className="text-xs text-gray-400">{pk.season} Rd {pk.round}</p>
+                                      {gotPicks.map((pk) => (
+                                        <p key={`${pk.season}-${pk.round}-${pk.roster_id}`} className="text-xs text-gray-400">{pk.season} Rd {pk.round}</p>
                                       ))}
                                     </div>
                                   )}
@@ -2457,8 +2457,8 @@ const starters = starterSlots
                                           </button>
                                         ) : null;
                                       })}
-                                      {gavePicks.map((pk, i) => (
-                                        <p key={i} className="text-xs text-gray-600 line-through">{pk.season} Rd {pk.round}</p>
+                                      {gavePicks.map((pk) => (
+                                        <p key={`${pk.season}-${pk.round}-${pk.roster_id}`} className="text-xs text-gray-600 line-through">{pk.season} Rd {pk.round}</p>
                                       ))}
                                     </div>
                                   )}

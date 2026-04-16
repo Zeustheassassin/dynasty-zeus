@@ -91,7 +91,7 @@ function isTransactionItem(title: string, summary: string): boolean {
   return TRANSACTION_KEYWORDS.some((kw) => text.includes(kw));
 }
 
-export async function GET(request: NextRequest) {
+export async function GET(request: NextRequest): Promise<Response> {
   const rl = checkRateLimit(request, 15, 60_000, 'beat-reports');
   if (!rl.allowed) return rl.response;
 

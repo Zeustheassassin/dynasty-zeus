@@ -1,7 +1,10 @@
 "use client";
-import { useState } from "react";
+import { useState, type Dispatch, type SetStateAction } from "react";
 import { CURRENT_YEAR, getDraftRoundSlot } from "../lib/helpers";
+import { logger } from "../lib/logger";
 import type { SleeperTransaction, SleeperLeague, SleeperRoster, SleeperDraft, SleeperUser, SleeperTradedPick } from "../lib/types";
+
+const log = logger("hooks/useUserTrades");
 
 export type AnnotatedTrade = SleeperTransaction & {
   leagueName: string;
@@ -11,7 +14,16 @@ export type AnnotatedTrade = SleeperTransaction & {
   rosterToName: Record<number, string>;
 };
 
-export function useUserTrades() {
+export interface UseUserTradesReturn {
+  tradeHubUserId: string | null;
+  setTradeHubUserId: Dispatch<SetStateAction<string | null>>;
+  tradeHubData: AnnotatedTrade[] | null;
+  setTradeHubData: Dispatch<SetStateAction<AnnotatedTrade[] | null>>;
+  loadingTradeHub: boolean;
+  loadUserTrades: (targetUserId: string) => Promise<void>;
+}
+
+export function useUserTrades(): UseUserTradesReturn {
   const [tradeHubUserId, setTradeHubUserId] = useState<string | null>(null);
   const [tradeHubData, setTradeHubData] = useState<AnnotatedTrade[] | null>(null);
   const [loadingTradeHub, setLoadingTradeHub] = useState(false);
@@ -121,7 +133,7 @@ export function useUserTrades() {
       allTrades.sort((a, b) => b.created - a.created);
       setTradeHubData(allTrades.slice(0, 15));
     } catch (err) {
-      console.error("Trade hub error:", err);
+      log.error("trade hub fetch failed", { err: String(err) });
     } finally {
       setLoadingTradeHub(false);
     }

@@ -28,11 +28,16 @@ const statsCache: Record<string, Record<string, Record<string, number | null>>> 
  * Returns null during the off-season or when data isn't ready yet.
  * All fetches are fire-and-forget; the component works fine without them.
  */
+export interface UsePlayerStatsReturn {
+  playerStats: Record<string, PlayerUsage> | null;
+  loadingStats: boolean;
+}
+
 export function usePlayerStats(
   season: string | null,
   currentWeek: number | null,   // must be > 0 during regular season
   lookback = 4
-): { playerStats: Record<string, PlayerUsage> | null; loadingStats: boolean } {
+): UsePlayerStatsReturn {
   const [playerStats, setPlayerStats] = useState<Record<string, PlayerUsage> | null>(null);
   const [loadingStats, setLoadingStats] = useState(false);
 
@@ -140,17 +145,23 @@ export function usePlayerStats(
     }
 
     setLoadingStats(true);
+    const controller = new AbortController();
+    const { signal } = controller;
+
     Promise.all(
       uncached.map((w) =>
-        fetch(`/api/stats/sleeper-weekly?season=${season}&week=${w}`)
+        fetch(`/api/stats/sleeper-weekly?season=${season}&week=${w}`, { signal })
           .then((r) => (r.ok ? r.json() : {}))
           .then((data) => { statsCache[`${season}-${w}`] = data ?? {}; })
           .catch(() => { statsCache[`${season}-${w}`] = {}; })
       )
     ).then(() => {
+      if (signal.aborted) return;
       aggregate();
       setLoadingStats(false);
     });
+
+    return () => { controller.abort(); };
   }, [season, currentWeek, lookback]);
 
   return { playerStats, loadingStats };

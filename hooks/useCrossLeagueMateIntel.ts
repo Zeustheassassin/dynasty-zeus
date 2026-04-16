@@ -3,6 +3,11 @@ import { useState, useEffect } from "react";
 import { CURRENT_YEAR, average } from "../lib/helpers";
 import type { CrossLeagueIntel, CrossLeagueIntelPlayer, SleeperRoster, SleeperPlayer, SleeperLeague, SleeperTransaction, SleeperDraft, LeagueHubTab } from "../lib/types";
 
+export interface UseCrossLeagueMateIntelReturn {
+  crossLeagueMateIntel: Record<string, CrossLeagueIntel>;
+  loadingCrossLeagueMateIntel: boolean;
+}
+
 interface UseCrossLeagueMateIntelOptions {
   leagueId: string | null | undefined;
   rosters: SleeperRoster[];
@@ -21,7 +26,7 @@ export function useCrossLeagueMateIntel({
   mainTab,
   leagueHubTab,
   tradeHubSection,
-}: UseCrossLeagueMateIntelOptions) {
+}: UseCrossLeagueMateIntelOptions): UseCrossLeagueMateIntelReturn {
   const [crossLeagueMateIntel, setCrossLeagueMateIntel] = useState<Record<string, CrossLeagueIntel>>({});
   const [loadingCrossLeagueMateIntel, setLoadingCrossLeagueMateIntel] = useState(false);
 
@@ -44,6 +49,8 @@ export function useCrossLeagueMateIntel({
     const missingOwnerIds = ownerIds.filter((ownerId) => !crossLeagueMateIntel[ownerId]);
     if (missingOwnerIds.length === 0) return;
 
+    const controller = new AbortController();
+    const { signal } = controller;
     let cancelled = false;
 
     const loadCrossLeagueMateIntel = async () => {
@@ -51,7 +58,7 @@ export function useCrossLeagueMateIntel({
       try {
         const entries = await Promise.all(
           missingOwnerIds.map(async (ownerId) => {
-            const ownerLeagues = await fetch(`https://api.sleeper.app/v1/user/${ownerId}/leagues/nfl/${CURRENT_YEAR}`)
+            const ownerLeagues = await fetch(`https://api.sleeper.app/v1/user/${ownerId}/leagues/nfl/${CURRENT_YEAR}`, { signal })
               .then((r) => r.json() as Promise<SleeperLeague[]>)
               .then((data) => Array.isArray(data) ? data : [])
               .catch((): SleeperLeague[] => []);
@@ -63,7 +70,7 @@ export function useCrossLeagueMateIntel({
 
             const rosterResults = await Promise.all(
               dynastyLeagues.map(async (league) => {
-                const leagueRosters = await fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`)
+                const leagueRosters = await fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`, { signal })
                   .then((r) => r.json() as Promise<SleeperRoster[]>)
                   .catch((): SleeperRoster[] => []);
                 return (Array.isArray(leagueRosters) ? leagueRosters : []).find((roster) => String(roster.owner_id) === ownerId) || null;
@@ -73,11 +80,11 @@ export function useCrossLeagueMateIntel({
             const tradeLeagueResults = await Promise.all(
               dynastyLeagues.map(async (league) => {
                 const [leagueRosters, t0, t1, t2, draftsData] = await Promise.all([
-                  fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`).then((r) => r.json() as Promise<SleeperRoster[]>).catch((): SleeperRoster[] => []),
-                  fetch(`https://api.sleeper.app/v1/league/${league.league_id}/transactions/0`).then((r) => r.json() as Promise<SleeperTransaction[]>).catch((): SleeperTransaction[] => []),
-                  fetch(`https://api.sleeper.app/v1/league/${league.league_id}/transactions/1`).then((r) => r.json() as Promise<SleeperTransaction[]>).catch((): SleeperTransaction[] => []),
-                  fetch(`https://api.sleeper.app/v1/league/${league.league_id}/transactions/2`).then((r) => r.json() as Promise<SleeperTransaction[]>).catch((): SleeperTransaction[] => []),
-                  fetch(`https://api.sleeper.app/v1/league/${league.league_id}/drafts`).then((r) => r.json() as Promise<SleeperDraft[]>).catch((): SleeperDraft[] => []),
+                  fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`, { signal }).then((r) => r.json() as Promise<SleeperRoster[]>).catch((): SleeperRoster[] => []),
+                  fetch(`https://api.sleeper.app/v1/league/${league.league_id}/transactions/0`, { signal }).then((r) => r.json() as Promise<SleeperTransaction[]>).catch((): SleeperTransaction[] => []),
+                  fetch(`https://api.sleeper.app/v1/league/${league.league_id}/transactions/1`, { signal }).then((r) => r.json() as Promise<SleeperTransaction[]>).catch((): SleeperTransaction[] => []),
+                  fetch(`https://api.sleeper.app/v1/league/${league.league_id}/transactions/2`, { signal }).then((r) => r.json() as Promise<SleeperTransaction[]>).catch((): SleeperTransaction[] => []),
+                  fetch(`https://api.sleeper.app/v1/league/${league.league_id}/drafts`, { signal }).then((r) => r.json() as Promise<SleeperDraft[]>).catch((): SleeperDraft[] => []),
                 ]);
                 const ownerRoster = (Array.isArray(leagueRosters) ? leagueRosters : []).find((roster) => String(roster.owner_id) === ownerId) || null;
                 return {
@@ -250,7 +257,7 @@ export function useCrossLeagueMateIntel({
     };
 
     loadCrossLeagueMateIntel();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; controller.abort(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leagueId, rosters, userId, players, mainTab, leagueHubTab, tradeHubSection, crossLeagueMateIntel]);
 

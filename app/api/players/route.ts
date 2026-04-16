@@ -9,7 +9,7 @@ const log = logger('api/players');
 // Proxies the Sleeper player map + NFL state with server-side caching.
 // Slims the player map server-side so clients download ~500 KB instead of ~5 MB raw.
 // Players cached 24 hours, NFL state cached 1 hour.
-export async function GET(request: NextRequest) {
+export async function GET(request: NextRequest): Promise<NextResponse> {
   const rl = checkRateLimit(request, 10, 60_000, 'players');
   if (!rl.allowed) return rl.response;
   try {
