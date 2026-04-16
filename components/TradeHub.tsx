@@ -175,6 +175,18 @@ function FinderSearchInput({
   );
 }
 
+/** Returns the ordinal suffix for a number: 1→"st", 2→"nd", 3→"rd", 4+→"th". */
+const ordinalSuffix = (n: number): string => {
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 13) return "th";
+  switch (n % 10) {
+    case 1: return "st";
+    case 2: return "nd";
+    case 3: return "rd";
+    default: return "th";
+  }
+};
+
 // ── Component ──────────────────────────────────────────────────────────────
 function TradeHub({
   tradeHubSection, setTradeHubSection,
@@ -261,6 +273,29 @@ function TradeHub({
     return myRoster ? finderRosterPlayersMap.get(myRoster.roster_id) ?? [] : [];
   }, [rosters, user, finderRosterPlayersMap]);
 
+  // Per-team positional totals (dynasty value) used for before/after rank display on trade cards.
+  const posTeamTotals = useMemo(() => {
+    const POSITIONS = ["QB", "RB", "WR", "TE"] as const;
+    return rosters.map((r) => {
+      const players = finderRosterPlayersMap.get(r.roster_id) ?? [];
+      const totals: Record<string, number> = { QB: 0, RB: 0, WR: 0, TE: 0 };
+      players.forEach((p) => { if (POSITIONS.includes(p.position as typeof POSITIONS[number])) totals[p.position] += p.value; });
+      return { rosterId: r.roster_id, totals };
+    });
+  }, [rosters, finderRosterPlayersMap]);
+
+  /** Returns the league rank (1 = best) for a given position total, optionally overriding one team's total. */
+  const computePosRank = (pos: string, rosterId: number, overrideTotal?: number): number => {
+    const vals = posTeamTotals.map((t) =>
+      t.rosterId === rosterId && overrideTotal !== undefined ? overrideTotal : (t.totals[pos] ?? 0)
+    ).sort((a, b) => b - a);
+    const myVal = overrideTotal !== undefined ? overrideTotal
+      : (posTeamTotals.find((t) => t.rosterId === rosterId)?.totals[pos] ?? 0);
+    let rank = 1;
+    for (const v of vals) { if (myVal >= v) break; rank++; }
+    return rank;
+  };
+
   // Local UI state for the Attempts tab
   const [showCounterInput, setShowCounterInput] = useState<string | null>(null);
   // Counter trade builder state — keyed by attempt.id
@@ -302,6 +337,8 @@ function TradeHub({
   const [marketPosFilter, setMarketPosFilter] = useState<"ALL" | "QB" | "RB" | "WR" | "TE">("ALL");
   // Session set of trade transaction IDs logged from the Trade Log tab
   const [tradeLogLogged, setTradeLogLogged] = useState<Set<string>>(new Set());
+  // Roster preview popup: roster_id of the opponent whose roster to show (null = closed)
+  const [viewRosterRosterId, setViewRosterRosterId] = useState<number | null>(null);
 
   // Search inputs are now self-contained (FinderSearchInput component above) and do
   // NOT store text in TradeHub state — typing never triggers a TradeHub re-render.
@@ -538,18 +575,23 @@ function TradeHub({
         return sorted.slice(0, dropsNeeded).reduce((s, v) => s + v, 0);
       };
 
-      // Net player change (picks excluded)
-      const calcMyNetPlayerGain    = calcReceive.length - calcGive.length;
-      const calcOppNetPlayerGain   = calcGive.length   - calcReceive.length;
-      const myDropCostCalc         = calcRosterDropCost(myRoster,       calcMyNetPlayerGain);
-      const oppDropCostCalc        = calcRosterDropCost(opponentRoster, calcOppNetPlayerGain);
+      // Drop cost goes on the lighter side (fewer current players).
+      // If you receive more: you drop → adder on give side (computed from your roster).
+      // If you give more: opponent drops → adder on receive side (computed from their roster).
+      const calcMyNetPlayerGain = calcReceive.length - calcGive.length;
+      const myDropCostCalc  = calcMyNetPlayerGain > 0
+        ? calcRosterDropCost(myRoster, calcMyNetPlayerGain)
+        : 0;
+      const oppDropCostCalc = calcMyNetPlayerGain < 0
+        ? calcRosterDropCost(opponentRoster, -calcMyNetPlayerGain)
+        : 0;
 
-      // Star premium: "two 5s ≠ a 10" — but pick-aware.
-      // 1st round picks are considered stars → 25% scale (minor penalty only).
-      // Round-based star discount: 1st round picks are stars (tiny penalty), 4th round picks
-      // are "useless" equalizers (large penalty). Pure player trades use 12%.
-      // Higher rounds get a higher threshold too — the star's premium kicks in sooner.
-      const calcStarDiscountDisplay = (() => {
+      // Star discount — bidirectional greedy pairing.
+      // Pair assets by index (both sides sorted descending). At each position:
+      //   give[i] > recv[i] → give has the star → discount fires on RECEIVE (lesser side)
+      //   recv[i] > give[i] → receive has the star → discount fires on GIVE (lesser side)
+      // Only compares actual pairs (min length) — quantity imbalance is handled by drop cost.
+      const calcStarDiscounts = (() => {
         const allGiveVals = [
           ...calcGive.map((id: string) => calcVal(id)),
           ...calcGivePicks.map((k: string) => getPickValue(k)),
@@ -558,38 +600,50 @@ function TradeHub({
           ...calcReceive.map((id: string) => calcVal(id)),
           ...calcReceivePicks.map((k: string) => getPickValue(k)),
         ];
-        if (allGiveVals.length < 2 && allRecvVals.length < 2) return 0;
-        if (allGiveVals.length === 0 || allRecvVals.length === 0) return 0;
-        const topGive    = Math.max(...allGiveVals);
-        const topReceive = Math.max(...allRecvVals);
-        // Per-round params: best (lowest) pick round on each side determines discount intensity
+        if (allGiveVals.length === 0 || allRecvVals.length === 0) return { onReceive: 0, onGive: 0 };
+        const globalTop = Math.max(...allGiveVals, ...allRecvVals);
         const pickParams = (keys: string[]): { threshold: number; maxPct: number } => {
           if (keys.length === 0) return { threshold: 0.78, maxPct: 0.12 };
           const best = Math.min(...keys.map((k: string) => Math.floor(Number(k.split("-")[1]))));
-          if (best === 1) return { threshold: 0.78, maxPct: 0.0125 }; // 1sts = stars, tiny discount
-          if (best === 2) return { threshold: 0.83, maxPct: 0.09  }; // 2nds = moderate
-          if (best === 3) return { threshold: 0.87, maxPct: 0.14  }; // 3rds = meaningful
-          return              { threshold: 0.91, maxPct: 0.20  }; // 4ths = useless, large discount
+          if (best === 1) {
+            const bestVal = Math.max(...keys.filter((k: string) => Math.floor(Number(k.split("-")[1])) === 1).map((k: string) => getPickValue(k)));
+            if (bestVal >= globalTop * 0.97) return { threshold: 0.78, maxPct: 0.12 };
+            return { threshold: 0.78, maxPct: 0.0125 };
+          }
+          if (best === 2) return { threshold: 0.83, maxPct: 0.09 };
+          if (best === 3) return { threshold: 0.87, maxPct: 0.14 };
+          return              { threshold: 0.91, maxPct: 0.20 };
         };
-        const recvParams = pickParams(calcReceivePicks);
-        const giveParams = pickParams(calcGivePicks);
-        let discount = 0;
-        if (topGive >= 2000 && allRecvVals.length >= 2) {
-          const ratio = topReceive / topGive;
-          if (ratio < recvParams.threshold)
-            discount -= Math.round(Math.min((recvParams.threshold - ratio) / 0.25, 1.0) * topGive * recvParams.maxPct);
+        // Params for the lesser side (the side receiving the penalty)
+        const recvParams = pickParams(calcReceivePicks); // when give dominates → receive is lesser
+        const giveParams = pickParams(calcGivePicks);    // when receive dominates → give is lesser
+        const giveSorted = [...allGiveVals].sort((a, b) => b - a);
+        const recvSorted = [...allRecvVals].sort((a, b) => b - a);
+        let onReceive = 0;
+        let onGive = 0;
+        const pairs = Math.min(giveSorted.length, recvSorted.length);
+        for (let i = 0; i < pairs; i++) {
+          const gv = giveSorted[i];
+          const rv = recvSorted[i];
+          if (gv > rv && gv >= 2000) {
+            const ratio = rv / gv;
+            if (ratio < recvParams.threshold)
+              onReceive -= Math.round(Math.min((recvParams.threshold - ratio) / 0.25, 1.0) * gv * recvParams.maxPct);
+          } else if (rv > gv && rv >= 2000) {
+            const ratio = gv / rv;
+            if (ratio < giveParams.threshold)
+              onGive -= Math.round(Math.min((giveParams.threshold - ratio) / 0.25, 1.0) * rv * giveParams.maxPct);
+          }
         }
-        if (topReceive >= 2000 && allGiveVals.length >= 2) {
-          const ratio = topGive / topReceive;
-          if (ratio < giveParams.threshold)
-            discount -= Math.round(Math.min((giveParams.threshold - ratio) / 0.25, 1.0) * topReceive * giveParams.maxPct);
-        }
-        return discount;
+        return { onReceive, onGive };
       })();
+      const calcStarOnReceive = calcStarDiscounts.onReceive;
+      const calcStarOnGive    = calcStarDiscounts.onGive;
 
-      // Adjusted totals: my receive is reduced by my drop cost + star discount
-      const totalGiveAdj    = totalGive;
-      const totalReceiveAdj = Math.max(0, totalReceive - myDropCostCalc + calcStarDiscountDisplay);
+      // Adjusted totals: drop cost adds to give (you're effectively giving your dropped players too)
+      // Drop cost on lighter side; star discount on lesser-asset side
+      const totalGiveAdj    = totalGive    + myDropCostCalc  + calcStarOnGive;
+      const totalReceiveAdj = Math.max(0, totalReceive + oppDropCostCalc + calcStarOnReceive);
 
       const net = totalReceiveAdj - totalGiveAdj;
       const verdict = Math.abs(net) <= 300 ? "EVEN" : net > 0 ? "YOU WIN" : "YOU LOSE";
@@ -843,10 +897,16 @@ function TradeHub({
                       () => setCalcGivePicks((prev) => prev.filter((x) => x !== k)));
                   })}
                 </div>
-                {oppDropCostCalc > 0 && (
+                {myDropCostCalc > 0 && (
                   <div className="flex items-center justify-between px-3 py-1.5 bg-gray-800 rounded-lg">
-                    <span className="text-xs text-amber-400 italic">Opp Drop Cost</span>
-                    <span className="text-xs text-amber-400 font-mono">−{oppDropCostCalc.toLocaleString()}</span>
+                    <span className="text-xs text-amber-400 italic">Your Drop Cost</span>
+                    <span className="text-xs text-amber-400 font-mono">+{myDropCostCalc.toLocaleString()}</span>
+                  </div>
+                )}
+                {calcStarOnGive < 0 && (
+                  <div className="flex items-center justify-between px-3 py-1.5 bg-gray-800 rounded-lg">
+                    <span className="text-xs text-violet-400 italic">Star Discount</span>
+                    <span className="text-xs text-violet-400 font-mono">{calcStarOnGive.toLocaleString()}</span>
                   </div>
                 )}
                 <div className="mt-3 pt-2 border-t border-gray-700 flex justify-between items-center">
@@ -877,16 +937,16 @@ function TradeHub({
                       () => setCalcReceivePicks((prev) => prev.filter((x) => x !== k)));
                   })}
                 </div>
-                {myDropCostCalc > 0 && (
+                {oppDropCostCalc > 0 && (
                   <div className="flex items-center justify-between px-3 py-1.5 bg-gray-800 rounded-lg">
-                    <span className="text-xs text-amber-400 italic">Your Drop Cost</span>
-                    <span className="text-xs text-amber-400 font-mono">−{myDropCostCalc.toLocaleString()}</span>
+                    <span className="text-xs text-amber-400 italic">Their Drop Cost</span>
+                    <span className="text-xs text-amber-400 font-mono">+{oppDropCostCalc.toLocaleString()}</span>
                   </div>
                 )}
-                {calcStarDiscountDisplay < 0 && (
+                {calcStarOnReceive < 0 && (
                   <div className="flex items-center justify-between px-3 py-1.5 bg-gray-800 rounded-lg">
                     <span className="text-xs text-violet-400 italic">Star Discount</span>
-                    <span className="text-xs text-violet-400 font-mono">{calcStarDiscountDisplay.toLocaleString()}</span>
+                    <span className="text-xs text-violet-400 font-mono">{calcStarOnReceive.toLocaleString()}</span>
                   </div>
                 )}
                 <div className="mt-3 pt-2 border-t border-gray-700 flex justify-between items-center">
@@ -1720,13 +1780,6 @@ function TradeHub({
         return oppTop32QBs.length - qbsGiven >= 3;
       };
 
-      // Any QB/WR/TE the opponent receives must rank within the positional threshold
-      // on their roster post-trade. Prevents dumping low-end players on teams that
-      // already have better depth at that spot.
-      //   QB  → must be top 3  (they need a real starter)
-      //   WR  → must be top 5  (starter/flex quality)
-      //   TE  → must be top 2  (positional scarcity)
-      const POS_RANK_LIMITS: Record<string, number> = { QB: 3, WR: 5, TE: 2 };
       const oppReceiveOk = (oppPlayersList: PlayerWithValue[], givePlayers: PlayerWithValue[], receivePlayers: PlayerWithValue[]) => {
         const outgoingIds = new Set(receivePlayers.map((p) => p.player_id));
         for (const pos of ["QB", "WR", "TE"] as const) {
@@ -1746,6 +1799,38 @@ function TradeHub({
             return rank < limit; // 0-indexed: rank 0…limit-1 = top N
           });
           if (!passes) return false;
+        }
+        return true;
+      };
+
+      // Hard direction filter — applied at generation time alongside oppReceiveOk.
+      // Blocks structurally implausible trades before they reach scoring.
+      // Rules:
+      //   1. A tanking team (< 30% playoff odds) will not trade away a 1st-round pick
+      //      in exchange for only veterans and no picks/youth in return.
+      //   2. A clear contender (≥ 65% playoff odds) will not give up players for only picks.
+      const oppDirOk = (
+        oppRosterId: number,
+        givePlayers: PlayerWithValue[],   // what we send them
+        givePicks: PickWithValue[],
+        receivePlayers: PlayerWithValue[], // what they send us
+        receivePicks: PickWithValue[]
+      ): boolean => {
+        const oppOdds = selectedLeagueSimulation?.rowByRosterId?.get(Number(oppRosterId))?.playoffOdds ?? 50;
+        // Tanker giving a 1st for pure vets — they need picks, not aging players
+        if (oppOdds < 30) {
+          const givingFirstRound = givePicks.some((p) => Number(p.round) === 1);
+          const receivingOnlyVets = givePlayers.length > 0
+            && givePlayers.every((p) => isOldProducerBuy(p))
+            && receivePicks.length === 0
+            && receivePlayers.filter((p) => isFutureInsulationAsset(p)).length === 0;
+          if (givingFirstRound && receivingOnlyVets) return false;
+        }
+        // Contender giving away their own players for only the user's picks — they should be buying
+        // production to win now, not selling contributors for future capital (that's rebuilder behavior).
+        // "receivePlayers" = players the opponent gives us; "givePlayers" = players we send them.
+        if (oppOdds >= 65 && receivePlayers.length > 0 && givePlayers.length === 0 && receivePicks.length === 0) {
+          return false;
         }
         return true;
       };
@@ -1777,6 +1862,10 @@ function TradeHub({
       }, {});
       const hasSuperFlex = (starterCounts.SUPER_FLEX || 0) > 0;
       const hasFlex = (starterCounts.FLEX || 0) > 0;
+      // QB receiving limit: QB must rank in the opponent's top 3 at the position.
+      // Whether it's an acceptable deal given their actual depth is handled by the
+      // QB depth-rank penalty in oppDirectionScore (scaled by giveQualityFactor).
+      const POS_RANK_LIMITS: Record<string, number> = { QB: 3, WR: 5, TE: 2 };
       const rosterById = new Map(
         rosters.map((r) => [Number(r.roster_id), r])
       );
@@ -2615,7 +2704,10 @@ function TradeHub({
         // unless it's a QB stack (QB+WR, QB+TE) or an RB+his handcuff pair.
         .filter((r) => !hasBadSameTeamCombo(r.give) && !hasBadSameTeamCombo(r.receive))
         // Tank Mode: every received player must be a young prospect — picks-only receive is always ok
-        .filter((r) => !finderTankMode || r.receive.every((p) => isFutureInsulationAsset(p)));
+        .filter((r) => !finderTankMode || r.receive.every((p) => isFutureInsulationAsset(p)))
+        // Direction hard filter: blocks structurally implausible trades regardless of strategy score
+        // (e.g. a tanker giving up their 2027 Rd 1 for aging veterans)
+        .filter((r) => oppDirOk(r.oppRosterId, r.give, r.givePicks, r.receive, r.receivePicks));
       // Only apply direction guardrail if at least one result survives it — prevents empty results.
       // Tank Mode bypasses the guardrail entirely.
       const hasGuardrailPassing = !finderTankMode && preGuardrail.some((r) => !failsDirectionGuardrail(r));
@@ -3002,6 +3094,44 @@ function TradeHub({
               }
             }
 
+            // ── QB depth-rank gate ─────────────────────────────────────────────
+            // Nobody gives up a starter-quality player for a QB who can't beat out
+            // the QBs they already have. Check by VALUE RANK, not roster count —
+            // a team with 10 bench flyers at QB still won't want a QB3 by value.
+            // SF leagues start 2 QBs (QB + SF slot), so QB3 = first non-starter.
+            // Standard leagues start 1 QB, so QB2 = first non-starter.
+            {
+              const oppRosterForQB = rosters.find((ros) => Number(ros.roster_id) === Number(r.oppRosterId));
+              const oppQBValuesSorted = (oppRosterForQB?.players ?? [])
+                .filter((pid) => players[pid]?.position === "QB")
+                .map((pid) => calcFcValues[pid] ?? 0)
+                .filter((v) => v > 0)
+                .sort((a, b) => b - a);
+              // How many of the opponent's current QBs are worth MORE than the QB we're sending?
+              const qbStartingSlots = hasSuperFlex ? 2 : 1;
+              // How valuable is the asset they're giving up? A WR6 bench flyer costs them
+              // nothing meaningful; their WR2 starter is real sacrifice.
+              const oppGiveTopValue = Math.max(
+                0,
+                ...oppGivesPlayers.map((p) => p.value),
+                ...oppGivesPicks.map((p) => p.value)
+              );
+              // Scale from 0 (giving nothing of value) → 1.0 (giving a clear starter, ≥2500)
+              const giveQualityFactor = Math.min(1.0, oppGiveTopValue / 2500);
+              oppReceivesPlayers.filter((p) => p.position === "QB").forEach((qb) => {
+                const qbsAbove = oppQBValuesSorted.filter((v) => v > qb.value).length;
+                if (qbsAbove >= qbStartingSlots) {
+                  // QB would be their depth rank (qbsAbove + 1) — clearly non-starting.
+                  // Penalty is modulated by give quality: giving a WR6 (400 value) barely
+                  // penalises; giving their WR2 starter (3600+) gets the full hit.
+                  // Penalty scales steeply with give quality: giving a WR2 for a depth QB
+                  // is a near-disqualifier; giving a bench WR6 is a minor drag.
+                  const depthExcess = qbsAbove - qbStartingSlots + 1;
+                  ods -= Math.round(qb.value * 0.50 * depthExcess * giveQualityFactor);
+                }
+              });
+            }
+
             // ── Injury replacement targeting ──────────────────────────────────
             // If the opponent has a meaningful starter on IR/Out, they have an
             // urgent positional hole. Sending a replacement at that exact position
@@ -3107,12 +3237,6 @@ function TradeHub({
             return hb;
           })();
 
-          // ── Balance penalty (soft) ────────────────────────────────────────
-          // Trades further from even are progressively less desirable.
-          // ±150 net = -3, ±300 = ~-8.5, ±450 = ~-15.6, ±600 = ~-24.
-          // Not a hard cap — compelling strategic trades can still surface.
-          const balancePenalty = -Math.pow(Math.abs(r.net) / 150, 1.5) * 3;
-
           // ── Star premium / asset concentration penalty ────────────────────
           // "Two 5-dollar bills do not equal a 20-dollar bill" in dynasty —
           // BUT only for pure player trades. Picks ARE the star equivalent
@@ -3124,14 +3248,20 @@ function TradeHub({
             if (allGiveVals.length === 0 || allReceiveVals.length === 0) return 0;
             const topGive    = Math.max(...allGiveVals);
             const topReceive = Math.max(...allReceiveVals);
-            // Per-round scoring params aligned with display formula
-            const pickScoreParams = (picks: Array<{ round: number | string }>): { threshold: number; scale: number } => {
+            // Per-round scoring params aligned with display formula.
+            // Exception: 1st round pick that IS the most valuable asset gets full star treatment.
+            const spsGlobalTop = Math.max(...allGiveVals, ...allReceiveVals);
+            const pickScoreParams = (picks: Array<{ round: number | string; value: number }>): { threshold: number; scale: number } => {
               if (picks.length === 0) return { threshold: 0.78, scale: 1.0 };
               const best = Math.min(...picks.map((p) => Number(p.round)));
-              if (best === 1) return { threshold: 0.78, scale: 0.10 }; // 1sts = stars, tiny penalty
-              if (best === 2) return { threshold: 0.83, scale: 0.75 }; // 2nds = moderate
-              if (best === 3) return { threshold: 0.87, scale: 1.00 }; // 3rds = meaningful
-              return              { threshold: 0.91, scale: 1.50 }; // 4ths = useless, large penalty
+              if (best === 1) {
+                const bestFirstVal = Math.max(...picks.filter((p) => Number(p.round) === 1).map((p) => p.value));
+                if (bestFirstVal >= spsGlobalTop * 0.97) return { threshold: 0.78, scale: 1.0 }; // 1st IS the star
+                return { threshold: 0.78, scale: 0.10 }; // 1st alongside a bigger star
+              }
+              if (best === 2) return { threshold: 0.83, scale: 0.75 };
+              if (best === 3) return { threshold: 0.87, scale: 1.00 };
+              return              { threshold: 0.91, scale: 1.50 };
             };
             const recvParams = pickScoreParams(r.receivePicks);
             const giveParams = pickScoreParams(r.givePicks);
@@ -3146,6 +3276,13 @@ function TradeHub({
             }
             return sps;
           })();
+
+          // ── Balance penalty (original formula, kept simple) ───────────────
+          // Trades further from even are progressively less desirable.
+          // ±150 net = -3, ±300 = ~-8.5, ±450 = ~-15.6, ±600 = ~-24.
+          // Note: r.net is raw and does NOT include star discount or fragmentation.
+          // The real effective value is enforced via the render-phase re-sort below.
+          const balancePenalty = -Math.pow(Math.abs(r.net) / 150, 1.5) * 3;
 
           // ── Future pick bonus (Draft Capital Mode) ────────────────────────
           // When "Prefer Future Picks" is on, reward picks from future years
@@ -3885,13 +4022,17 @@ function TradeHub({
           ? (lineupSafety.myValid && lineupSafety.oppValid)
           : lineupSafety.valid
         )
+        // Minimum quality gate: drop trades that score net-negative overall.
+        // This prevents force-filling the list with bad trades when pinning a player
+        // limits good options — better to show 5 great trades than 12 mediocre ones.
+        .filter(({ strategyScore }) => strategyScore > 0)
         .sort((a, b) => {
           if (a.bucketPriority !== b.bucketPriority) return a.bucketPriority - b.bucketPriority;
           if (b.strategyScore !== a.strategyScore) return b.strategyScore - a.strategyScore;
           return a.sort - b.sort;
         })
         .map(({ r }) => r);
-      // ── Build the standard top-15 ────────────────────────────────────────
+      // ── Build the standard top-12 ────────────────────────────────────────
       const buyLowSet = new Set(buyLowPlayerIds);
       const addToSlots = (acc: TradeResult[], r: TradeResult, allIds: string[], key: string) => {
         seen.add(key);
@@ -3900,11 +4041,11 @@ function TradeHub({
         acc.push(r);
       };
       // Complex trades = 5+ total pieces across both sides (e.g. 2v3, 3v3, 3v4, 4v4).
-      // Cap these at 2 slots out of the 15 shown — they should exist but never dominate.
+      // Cap these at 2 slots out of the 12 shown — they should exist but never dominate.
       const MAX_COMPLEX_TRADES = 2;
       let complexTradeCount = 0;
       const top15 = shuffled.reduce((acc: TradeResult[], r) => {
-          if (acc.length >= 15) return acc;
+          if (acc.length >= 12) return acc;
           const allIds = [
             ...r.give.map((p) => `player-${p.player_id}`),
             ...r.receive.map((p) => `player-${p.player_id}`),
@@ -4283,7 +4424,51 @@ function TradeHub({
               );
               return !recentFingerprints.has(fp);
             })
-            .map((trade, idx) => {
+            .map((trade) => {
+              // Compute approximate badge net (same logic as adjustedCardNet in card render)
+              // so we can sort by proximity to the north star before displaying.
+              const gVals = [...trade.give.map((p) => p.value), ...trade.givePicks.map((p) => p.value)];
+              const rVals = [...trade.receive.map((p) => p.value), ...trade.receivePicks.map((p) => p.value)];
+              const gSum  = gVals.reduce((s, v) => s + v, 0);
+              const rSum  = rVals.reduce((s, v) => s + v, 0);
+              // Star discount — bidirectional greedy pairing (mirrors card render exactly).
+              const approxPickParams = (picks: { round?: number | string }[]): { thr: number; pct: number } => {
+                if (picks.length === 0) return { thr: 0.78, pct: 0.12 };
+                const rd = Math.min(...picks.map((p) => Number(p.round)));
+                if (rd === 1) return { thr: 0.78, pct: 0.0125 };
+                if (rd === 2) return { thr: 0.83, pct: 0.09 };
+                if (rd === 3) return { thr: 0.87, pct: 0.14 };
+                return             { thr: 0.91, pct: 0.20 };
+              };
+              const rp = approxPickParams(trade.receivePicks); // lesser when give dominates
+              const gp = approxPickParams(trade.givePicks);    // lesser when receive dominates
+              const gSorted = [...gVals].sort((a, b) => b - a);
+              const rSorted = [...rVals].sort((a, b) => b - a);
+              let starOnReceive = 0;
+              let starOnGive = 0;
+              const approxPairs = Math.min(gSorted.length, rSorted.length);
+              for (let i = 0; i < approxPairs; i++) {
+                const gv = gSorted[i];
+                const rv = rSorted[i];
+                if (gv > rv && gv >= 2000) {
+                  const ratio = rv / gv;
+                  if (ratio < rp.thr) starOnReceive -= Math.round(Math.min((rp.thr - ratio) / 0.25, 1) * gv * rp.pct);
+                } else if (rv > gv && rv >= 2000) {
+                  const ratio = gv / rv;
+                  if (ratio < gp.thr) starOnGive -= Math.round(Math.min((gp.thr - ratio) / 0.25, 1) * rv * gp.pct);
+                }
+              }
+              // Drop cost: lighter side (fewer current players) gets the adder
+              const approxNetPlayerGain = trade.receive.length - trade.give.length;
+              const approxMyDropCost  = approxNetPlayerGain > 0 ? calcDropCost(myRoster?.roster_id ?? 0, approxNetPlayerGain) : 0;
+              const approxOppDropCost = approxNetPlayerGain < 0 ? calcDropCost(trade.oppRosterId, -approxNetPlayerGain) : 0;
+              // approxBadge = receiveAdj - giveAdj
+              const approxBadge = (rSum + approxOppDropCost + starOnReceive) - (gSum + approxMyDropCost + starOnGive);
+              return { trade, approxBadge };
+            })
+            // North-star sort: trades closest to 52/48 (slightly positive badge) rank first
+            .sort((a, b) => Math.abs(a.approxBadge) - Math.abs(b.approxBadge))
+            .map(({ trade }: { trade: typeof allTrades[number]; approxBadge: number }, idx) => {
             const partnerProfile = leagueMateProfileByRosterId.get(Number(trade.oppRosterId));
             const tradeIntent = getTradeIntent(trade);
 
@@ -4369,44 +4554,79 @@ function TradeHub({
             const receiveVals = [...trade.receive.map((p) => p.value), ...trade.receivePicks.map((p) => p.value)];
             const giveTotal = giveVals.reduce((s: number, v: number) => s + v, 0);
             const receiveTotal = receiveVals.reduce((s: number, v: number) => s + v, 0);
-            // Drop cost: only players consume roster spots (picks excluded)
+            // Drop cost: lighter side (fewer current players) gets the adder.
             const cardMyNetPlayerGain = trade.receive.length - trade.give.length;
-            const cardMyDropCost = calcDropCost(myRoster?.roster_id ?? 0, cardMyNetPlayerGain);
-            // Star premium discount — round-based, direct FC value units.
-            // 1sts = stars (tiny), 4ths = useless (large). No picks = 12%.
-            const cardStarDiscountDisplay = (() => {
+            const cardMyDropCost  = cardMyNetPlayerGain > 0
+              ? calcDropCost(myRoster?.roster_id ?? 0, cardMyNetPlayerGain)
+              : 0;
+            const cardOppDropCost = cardMyNetPlayerGain < 0
+              ? calcDropCost(trade.oppRosterId, -cardMyNetPlayerGain)
+              : 0;
+            // Star discount — bidirectional greedy pairing.
+            // Only compares actual pairs (min length). At each pair:
+            //   give[i] > recv[i] → give has star → discount on RECEIVE
+            //   recv[i] > give[i] → receive has star → discount on GIVE
+            const cardStarDiscounts = (() => {
               const allGiveVals = [...trade.give.map((p) => p.value), ...trade.givePicks.map((p) => p.value)];
               const allRecvVals = [...trade.receive.map((p) => p.value), ...trade.receivePicks.map((p) => p.value)];
-              if (allGiveVals.length === 0 || allRecvVals.length === 0) return 0;
-              const topGive    = Math.max(...allGiveVals);
-              const topReceive = Math.max(...allRecvVals);
-              const pickParams = (picks: Array<{ round: number | string }>): { threshold: number; maxPct: number } => {
+              if (allGiveVals.length === 0 || allRecvVals.length === 0) return { onReceive: 0, onGive: 0 };
+              const globalTop = Math.max(...allGiveVals, ...allRecvVals);
+              const pickParams = (picks: Array<{ round: number | string; value: number }>): { threshold: number; maxPct: number } => {
                 if (picks.length === 0) return { threshold: 0.78, maxPct: 0.12 };
                 const best = Math.min(...picks.map((p) => Number(p.round)));
-                if (best === 1) return { threshold: 0.78, maxPct: 0.0125 };
-                if (best === 2) return { threshold: 0.83, maxPct: 0.09  };
-                if (best === 3) return { threshold: 0.87, maxPct: 0.14  };
-                return              { threshold: 0.91, maxPct: 0.20  };
+                if (best === 1) {
+                  const bestVal = Math.max(...picks.filter((p) => Number(p.round) === 1).map((p) => p.value));
+                  if (bestVal >= globalTop * 0.97) return { threshold: 0.78, maxPct: 0.12 };
+                  return { threshold: 0.78, maxPct: 0.0125 };
+                }
+                if (best === 2) return { threshold: 0.83, maxPct: 0.09 };
+                if (best === 3) return { threshold: 0.87, maxPct: 0.14 };
+                return              { threshold: 0.91, maxPct: 0.20 };
               };
-              const recvParams = pickParams(trade.receivePicks);
-              const giveParams = pickParams(trade.givePicks);
-              let discount = 0;
-              if (topGive >= 2000 && allRecvVals.length >= 2) {
-                const ratio = topReceive / topGive;
-                if (ratio < recvParams.threshold)
-                  discount -= Math.round(Math.min((recvParams.threshold - ratio) / 0.25, 1.0) * topGive * recvParams.maxPct);
+              const recvParams = pickParams(trade.receivePicks); // lesser side when give dominates
+              const giveParams = pickParams(trade.givePicks);    // lesser side when receive dominates
+              const giveSorted = [...allGiveVals].sort((a, b) => b - a);
+              const recvSorted = [...allRecvVals].sort((a, b) => b - a);
+              let onReceive = 0;
+              let onGive = 0;
+              const pairs = Math.min(giveSorted.length, recvSorted.length);
+              for (let i = 0; i < pairs; i++) {
+                const gv = giveSorted[i];
+                const rv = recvSorted[i];
+                if (gv > rv && gv >= 2000) {
+                  const ratio = rv / gv;
+                  if (ratio < recvParams.threshold)
+                    onReceive -= Math.round(Math.min((recvParams.threshold - ratio) / 0.25, 1.0) * gv * recvParams.maxPct);
+                } else if (rv > gv && rv >= 2000) {
+                  const ratio = gv / rv;
+                  if (ratio < giveParams.threshold)
+                    onGive -= Math.round(Math.min((giveParams.threshold - ratio) / 0.25, 1.0) * rv * giveParams.maxPct);
+                }
               }
-              if (topReceive >= 2000 && allGiveVals.length >= 2) {
-                const ratio = topGive / topReceive;
-                if (ratio < giveParams.threshold)
-                  discount -= Math.round(Math.min((giveParams.threshold - ratio) / 0.25, 1.0) * topReceive * giveParams.maxPct);
-              }
-              return discount;
+              return { onReceive, onGive };
             })();
-            const giveTotalAdj = giveTotal;
-            const receiveTotalAdj = Math.max(0, receiveTotal - cardMyDropCost + cardStarDiscountDisplay);
-            const netDisplay = Math.abs(trade.net);
+            const cardStarOnReceive = cardStarDiscounts.onReceive;
+            const cardStarOnGive    = cardStarDiscounts.onGive;
+            // Adjusted totals: drop cost on lighter side; star discount on lesser-asset side
+            const giveTotalAdj    = giveTotal    + cardMyDropCost  + cardStarOnGive;
+            const receiveTotalAdj = Math.max(0, receiveTotal + cardOppDropCost + cardStarOnReceive);
+            // Use adjusted net (post drop-cost + star discount + frag discount) for badge
+            const adjustedCardNet = receiveTotalAdj - giveTotalAdj;
+            const netDisplay = Math.abs(adjustedCardNet);
             const isEven = netDisplay <= 100;
+            // Opponent standings snapshot from simulation
+            const oppSimRow = selectedLeagueSimulation?.rowByRosterId?.get(Number(trade.oppRosterId));
+            const oppProjFinish   = oppSimRow ? Math.round(oppSimRow.projectedFinish) : null;
+            const oppPlayoffOdds  = oppSimRow ? Math.round(oppSimRow.playoffOdds)     : null;
+            const playoffCutline  = selectedLeagueSimulation?.playoffTeams ?? 6;
+            const oppNearBubble   = oppProjFinish !== null && (oppProjFinish === playoffCutline || oppProjFinish === playoffCutline + 1);
+            const oppInPlayoffs   = oppProjFinish !== null && oppProjFinish <= playoffCutline;
+            const oppStandingsBadgeColor = oppInPlayoffs
+              ? "border-green-700 bg-green-950/30 text-green-300"
+              : oppNearBubble
+                ? "border-yellow-700 bg-yellow-950/30 text-yellow-300"
+                : "border-gray-700 bg-gray-800/30 text-gray-400";
+
             return (
               <div key={idx} className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
                 {/* Header */}
@@ -4414,7 +4634,17 @@ function TradeHub({
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">{trade.format}</span>
                     <span className="text-xs text-gray-500">with</span>
-                    <span className="text-sm font-semibold text-blue-300">{trade.oppName}</span>
+                    <button
+                      onClick={() => setViewRosterRosterId(trade.oppRosterId)}
+                      className="text-sm font-semibold text-blue-300 hover:text-blue-200 hover:underline transition"
+                    >
+                      {trade.oppName}
+                    </button>
+                    {oppProjFinish !== null && oppPlayoffOdds !== null && (
+                      <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${oppStandingsBadgeColor}`}>
+                        {oppInPlayoffs ? "In Playoffs" : oppNearBubble ? "Playoff Bubble" : `~${oppProjFinish}${ordinalSuffix(oppProjFinish)}`} · {oppPlayoffOdds}%
+                      </span>
+                    )}
                     <span className="rounded-full border border-violet-800 bg-violet-950/30 px-2 py-0.5 text-[10px] font-semibold text-violet-300">
                       {tradeIntent.label}
                     </span>
@@ -4429,8 +4659,8 @@ function TradeHub({
                       </span>
                     )}
                   </div>
-                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${isEven ? "bg-yellow-900 text-yellow-300" : trade.net > 0 ? "bg-green-900 text-green-300" : "bg-red-900 text-red-300"}`}>
-                    {isEven ? "EVEN" : trade.net > 0 ? `+${netDisplay.toLocaleString()}` : `-${netDisplay.toLocaleString()}`}
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${isEven ? "bg-yellow-900 text-yellow-300" : adjustedCardNet > 0 ? "bg-green-900 text-green-300" : "bg-red-900 text-red-300"}`}>
+                    {isEven ? "EVEN" : adjustedCardNet > 0 ? `+${netDisplay.toLocaleString()}` : `-${netDisplay.toLocaleString()}`}
                   </span>
                 </div>
                 {partnerProfile?.fitReasons?.[0] && (
@@ -4462,6 +4692,64 @@ function TradeHub({
                     ))}
                   </div>
                 )}
+                {/* Position ranks before → after trade, both teams */}
+                {(() => {
+                  const myRosterId  = myRoster?.roster_id ?? 0;
+                  const oppRosterId = Number(trade.oppRosterId);
+                  if (!myRosterId || !oppRosterId) return null;
+                  const positions = ["QB", "RB", "WR", "TE"] as const;
+
+                  // Delta in positional value from this trade (players only — picks have no position)
+                  const delta: Record<string, number> = { QB: 0, RB: 0, WR: 0, TE: 0 };
+                  trade.give.forEach((p) => { if (delta[p.position] !== undefined) delta[p.position] -= p.value; });
+                  trade.receive.forEach((p) => { if (delta[p.position] !== undefined) delta[p.position] += p.value; });
+
+                  const myBase  = posTeamTotals.find((t) => t.rosterId === myRosterId)?.totals  ?? {};
+                  const oppBase = posTeamTotals.find((t) => t.rosterId === oppRosterId)?.totals ?? {};
+
+                  const rankColor = (rank: number) => {
+                    if (rank <= 3) return "text-green-400";
+                    if (rank >= numTeams - 2) return "text-red-400";
+                    return "text-gray-400";
+                  };
+
+                  const rows = positions.map((pos) => {
+                    const myBefore  = computePosRank(pos, myRosterId);
+                    const myAfter   = computePosRank(pos, myRosterId,  (myBase[pos]  ?? 0) + delta[pos]);
+                    const oppBefore = computePosRank(pos, oppRosterId);
+                    const oppAfter  = computePosRank(pos, oppRosterId, (oppBase[pos] ?? 0) - delta[pos]);
+                    const myChanged  = myBefore  !== myAfter;
+                    const oppChanged = oppBefore !== oppAfter;
+                    if (!myChanged && !oppChanged) return null;
+                    const arrow = (before: number, after: number) =>
+                      before > after ? <span className="text-green-400">↑</span>
+                      : before < after ? <span className="text-red-400">↓</span>
+                      : null;
+                    return (
+                      <div key={pos} className="flex items-center gap-3 text-[9px]">
+                        <span className="text-gray-500 w-6">{pos}</span>
+                        <span className="text-gray-600 w-8 shrink-0">You:</span>
+                        <span className={`font-mono ${rankColor(myBefore)}`}>#{myBefore}</span>
+                        <span className="text-gray-600">→</span>
+                        <span className={`font-mono ${rankColor(myAfter)}`}>#{myAfter}</span>
+                        {arrow(myBefore, myAfter)}
+                        <span className="text-gray-700 mx-1">|</span>
+                        <span className="text-gray-600 w-10 shrink-0">Them:</span>
+                        <span className={`font-mono ${rankColor(oppBefore)}`}>#{oppBefore}</span>
+                        <span className="text-gray-600">→</span>
+                        <span className={`font-mono ${rankColor(oppAfter)}`}>#{oppAfter}</span>
+                        {arrow(oppBefore, oppAfter)}
+                      </div>
+                    );
+                  }).filter(Boolean);
+
+                  if (rows.length === 0) return null;
+                  return (
+                    <div className="mb-3 bg-gray-800/50 rounded-lg px-3 py-2 space-y-0.5">
+                      {rows}
+                    </div>
+                  );
+                })()}
                 {/* Trade columns */}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -4519,6 +4807,18 @@ function TradeHub({
                           <span className="text-xs text-gray-400 font-mono shrink-0 ml-1">{p.value.toLocaleString()}</span>
                         </div>
                       ))}
+                      {cardMyDropCost > 0 && (
+                        <div className="flex items-center justify-between px-2 py-1">
+                          <span className="text-[10px] text-amber-500 italic">Your Drop Cost</span>
+                          <span className="text-[10px] text-amber-400 font-mono">+{cardMyDropCost.toLocaleString()}</span>
+                        </div>
+                      )}
+                      {cardStarOnGive < 0 && (
+                        <div className="flex items-center justify-between px-2 py-1">
+                          <span className="text-[10px] text-violet-400 italic">Star Discount</span>
+                          <span className="text-[10px] text-violet-400 font-mono">{cardStarOnGive.toLocaleString()}</span>
+                        </div>
+                      )}
                       <div className="text-[10px] text-gray-600 text-right pr-1">Total: {giveTotalAdj.toLocaleString()}</div>
                     </div>
                   </div>
@@ -4552,16 +4852,16 @@ function TradeHub({
                           <span className="text-xs text-gray-400 font-mono shrink-0 ml-1">{p.value.toLocaleString()}</span>
                         </div>
                       ))}
-                      {cardMyDropCost > 0 && (
+                      {cardOppDropCost > 0 && (
                         <div className="flex items-center justify-between px-2 py-1">
-                          <span className="text-[10px] text-amber-500 italic">Your Drop Cost</span>
-                          <span className="text-[10px] text-amber-400 font-mono">−{cardMyDropCost.toLocaleString()}</span>
+                          <span className="text-[10px] text-amber-500 italic">Their Drop Cost</span>
+                          <span className="text-[10px] text-amber-400 font-mono">+{cardOppDropCost.toLocaleString()}</span>
                         </div>
                       )}
-                      {cardStarDiscountDisplay < 0 && (
+                      {cardStarOnReceive < 0 && (
                         <div className="flex items-center justify-between px-2 py-1">
                           <span className="text-[10px] text-violet-400 italic">Star Discount</span>
-                          <span className="text-[10px] text-violet-400 font-mono">{cardStarDiscountDisplay.toLocaleString()}</span>
+                          <span className="text-[10px] text-violet-400 font-mono">{cardStarOnReceive.toLocaleString()}</span>
                         </div>
                       )}
                       <div className="text-[10px] text-gray-600 text-right pr-1">Total: {receiveTotalAdj.toLocaleString()}</div>
@@ -5469,6 +5769,77 @@ function TradeHub({
     })()}
 
   </div>
+
+  {/* Roster Preview Modal — triggered by clicking an opponent name in Trade Finder */}
+  {viewRosterRosterId !== null && (() => {
+    const roster = rosters.find((r) => r.roster_id === viewRosterRosterId);
+    const ownerName = roster ? (users[roster.owner_id] || `Team ${roster.roster_id}`) : `Team ${viewRosterRosterId}`;
+    const posOrder: Record<string, number> = { QB: 0, RB: 1, WR: 2, TE: 3 };
+    const rosterPlayers = (roster?.players ?? [])
+      .map((pid) => ({ pid, p: players[pid], val: calcFcValues[pid] ?? 0 }))
+      .sort((a, b) => {
+        const pa = posOrder[a.p?.position ?? ""] ?? 4;
+        const pb = posOrder[b.p?.position ?? ""] ?? 4;
+        return pa !== pb ? pa - pb : b.val - a.val;
+      });
+    return (
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${ownerName}'s roster`}
+        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        onClick={() => setViewRosterRosterId(null)}
+      >
+        <div className="absolute inset-0 bg-black/70" aria-hidden="true" />
+        <div
+          className="relative bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-md max-h-[80vh] flex flex-col shadow-2xl"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
+            <div>
+              <div className="text-base font-bold text-white">{ownerName}</div>
+              <div className="text-xs text-gray-500 mt-0.5">{rosterPlayers.length} players</div>
+            </div>
+            <button
+              onClick={() => setViewRosterRosterId(null)}
+              className="text-gray-500 hover:text-white transition text-lg leading-none"
+              aria-label="Close roster"
+            >
+              ✕
+            </button>
+          </div>
+          {/* Player list */}
+          <div className="overflow-y-auto flex-1 px-4 py-3 space-y-1">
+            {rosterPlayers.length === 0 && (
+              <p className="text-xs text-gray-500 text-center py-4">No players found</p>
+            )}
+            {rosterPlayers.map(({ pid, p, val }) => (
+              <div key={pid} className="flex items-center justify-between rounded-lg bg-gray-800 px-3 py-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <button
+                    onClick={() => setPlayerProfileId(pid)}
+                    className="text-sm text-white hover:text-blue-400 transition truncate text-left"
+                  >
+                    {p?.full_name ?? pid}
+                  </button>
+                  {p && (
+                    <span className="text-[11px] text-gray-500 shrink-0">
+                      {p.position}{p.team ? ` · ${p.team}` : ""}
+                    </span>
+                  )}
+                  {p?.age && <span className="text-[11px] text-gray-600 shrink-0">Age {p.age}</span>}
+                </div>
+                <span className="text-xs text-gray-400 font-mono shrink-0 ml-2">
+                  {val > 0 ? val.toLocaleString() : "—"}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  })()}
     </>
   );
 }
