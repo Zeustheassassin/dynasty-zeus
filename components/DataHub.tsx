@@ -468,8 +468,8 @@ function DataHub({
           playerId: string;
           full_name: string;
           position: string;
-          age?: number;
-          injury_status?: string;
+          age?: number | null;
+          injury_status?: string | null;
           team?: string;
           currentVal: number;
           snapVal: number;

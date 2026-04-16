@@ -614,7 +614,7 @@ function TradeHub({
                     {users[opponentRoster.owner_id] || "This owner"} is on your ignore list
                   </p>
                   <p className="text-xs text-gray-600 mt-0.5">
-                    Excluded from Trade Finder and Recommendations. Click "Remove Ignore" above to re-enable.
+                    Excluded from Trade Finder and Recommendations. Click &quot;Remove Ignore&quot; above to re-enable.
                   </p>
                 </div>
               </div>
@@ -1020,7 +1020,7 @@ function TradeHub({
             })()}
 
           <p className="text-[10px] text-gray-700 mt-3">
-            Pick values shown as averages for that round. Waiver adjustment approximated at 42% of extra assets' value when sides have unequal player counts.
+            Pick values shown as averages for that round. Waiver adjustment approximated at 42% of extra assets&apos; value when sides have unequal player counts.
           </p>
         </div>
       );
@@ -3086,7 +3086,7 @@ function TradeHub({
           // targets when receiving from the opponent.
           const marketIntelScore = (() => {
             let mis = 0;
-            const playersMap = players as Record<string, any>;
+            const playersMap = players;
             const injuredStatuses = new Set(["ir", "out", "dnr", "pup", "nfi"]);
 
             // ── Value trend (give side) ────────────────────────────────────
