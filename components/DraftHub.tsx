@@ -1413,7 +1413,7 @@ function DraftHub({
           {/* Empty */}
           {!historyLoading && historyLoaded && historyData.length === 0 && (
             <div className="rounded-xl border border-dashed border-gray-700 bg-gray-900/40 p-6 text-sm text-gray-400">
-              No completed rookie drafts found in your leagues' history. This may be your leagues' first season.
+              No completed rookie drafts found in your leagues&apos; history. This may be your leagues&apos; first season.
             </div>
           )}
 

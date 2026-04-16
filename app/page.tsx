@@ -1616,7 +1616,7 @@ const loadLeaguemateTradeAlerts = async () => {
   // Get already-known trade alert IDs so we don't duplicate
   const existingIds = new Set(latestAlertsRef.current.map((a) => a.id));
   // Also check Supabase for IDs the user has already seen / dismissed
-  let seenFromDb = new Set<string>();
+  const seenFromDb = new Set<string>();
   if (supabaseUser) {
     const { data } = await supabase
       .from("alerts")

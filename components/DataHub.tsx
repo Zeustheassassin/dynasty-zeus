@@ -523,7 +523,7 @@ function DataHub({
             <span className="text-xs text-white flex-1 min-w-0 truncate flex items-center gap-1">
               {row.full_name}{injuryBadge(row.injury_status)}
             </span>
-            <span className={`text-[10px] font-mono w-7 text-center shrink-0 ${ageColor(row.age, row.position)}`}>{row.age || "—"}</span>
+            <span className={`text-[10px] font-mono w-7 text-center shrink-0 ${ageColor(row.age ?? undefined, row.position)}`}>{row.age || "—"}</span>
             {row.team && <span className="hidden md:block text-[10px] text-gray-500 w-8 shrink-0">{row.team}</span>}
             <span className="text-[10px] text-gray-400 font-mono w-14 text-right shrink-0">{row.currentVal.toLocaleString()}</span>
             <span className="text-[10px] text-gray-600 font-mono w-14 text-right shrink-0 hidden sm:block">{row.snapVal.toLocaleString()}</span>
