@@ -45,6 +45,7 @@ import {
   getCrossLeaguePreferenceFit, getCrossLeagueTradeBehaviorFit,
   fetchFantasyCalcValues, formatRelativeDate,
   computeScoringMultipliers,
+  generateGmBriefing,
 } from "../lib/helpers";
 import { useProjections } from "../hooks/useProjections";
 import { useSleeperUser } from "../hooks/useSleeperUser";
@@ -68,6 +69,7 @@ import type {
   AugmentedPick, LeagueOverviewEntry, LeagueMateStatEntry,
   HistoricalSnapshot, LeagueMateView, LeagueSimulation, SimulationTeamRow,
   RosterDirectionProfile, DynamicPickValue, RookieBoardPlayer, FcTrendEntry,
+  GmBriefing,
 } from "../lib/types";
 
 // -------------------------
@@ -794,6 +796,11 @@ useEffect(() => {
   if (mainTab === "LEAGUES" && leagueHubTab === "OVERVIEW" && !leagueOverviewLoaded) {
     loadLeagueOverview();
     loadNflState();
+    loadRedraftValues();
+  }
+  // Also load overview when Alerts tab opens so GM Briefing has cross-league data.
+  if (mainTab === "ALERTS" && !leagueOverviewLoaded && leagues.length > 0) {
+    loadLeagueOverview();
     loadRedraftValues();
   }
   // leagueOverviewLoaded guards against duplicate calls; leagues.length triggers when leagues first load
@@ -4014,6 +4021,46 @@ const getTeamSummary = () => {
     ).then(() => {}, (err: unknown) => log.error("leaguemate_profiles upsert failed", { err: String(err) }));
   }, [supabaseUser?.id, selectedLeague?.league_id, selectedLeagueMateProfiles]);
 
+  // GM briefings for the Alerts Hub — one card per league the user is in.
+  // Uses leagueOverviewData (loaded for all leagues) so this is cross-league, not just the selected league.
+  const allRosterBriefings = useMemo((): GmBriefing[] => {
+    if (!user?.user_id || Object.keys(leagueOverviewData).length === 0) return [];
+    if (Object.keys(calcFcValues).length === 0 || Object.keys(redraftValues).length === 0) return [];
+
+    const urgencyOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+    const dynastyValueForPlayer = (id: string) => calcFcValues[id] ?? players[id]?.value ?? 0;
+    const briefings: GmBriefing[] = [];
+
+    for (const [, entry] of Object.entries(leagueOverviewData)) {
+      const { league, rosters: leagueRosters, picks: leaguePicks } = entry;
+      const myRoster = leagueRosters.find((r) => r.owner_id === user.user_id);
+      if (!myRoster) continue;
+
+      const profile = getRosterDirectionProfile({
+        rosterId: myRoster.roster_id,
+        rosters: leagueRosters,
+        ownedPicks: leaguePicks,
+        players,
+        pickValues: pickFcValues,
+        redraftValues,
+        dynastyValueForPlayer,
+      });
+      if (!profile) continue;
+
+      briefings.push(generateGmBriefing({
+        rosterId: myRoster.roster_id,
+        leagueName: league.name,
+        ownerName: user.display_name || "You",
+        isMyTeam: true,
+        profile,
+        rosterPlayerIds: myRoster.players ?? [],
+        trendData: fcTrendData,
+      }));
+    }
+
+    return briefings.sort((a, b) => urgencyOrder[a.urgency] - urgencyOrder[b.urgency]);
+  }, [leagueOverviewData, user, calcFcValues, redraftValues, players, pickFcValues, fcTrendData]);
+
   // Save simulation results to Supabase on demand and freeze a local snapshot for
   // pick valuations. The frozen snapshot (localStorage + state) is the source of truth
   // for pick values — it never drifts between sim runs.
@@ -5192,6 +5239,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             currentNFLWeek={nflState?.season_type === "regular" ? Number(nflState?.week || 0) : 0}
             allTradeAttempts={allTradeAttempts}
             allLeagues={leagues}
+            rosterBriefings={allRosterBriefings}
             onNavigateToAttempts={(leagueId) => {
               const league = leagues.find((l) => l.league_id === leagueId);
               if (league) {

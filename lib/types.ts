@@ -279,6 +279,26 @@ export interface FcTrendEntry {
   tradeFrequency: number; // fraction of trades this player appears in
 }
 
+// ── GM Briefing — per-team weekly recommendations ─────────────
+
+export type GmUrgency = "critical" | "high" | "medium" | "low";
+
+export interface GmBriefing {
+  rosterId: number;
+  leagueName: string;
+  ownerName: string;
+  isMyTeam: boolean;
+  urgency: GmUrgency;
+  urgencyLabel: string;
+  bucket: string;
+  bucketColor: string;
+  headline: string;
+  writeup: string;
+  bullets: string[];
+  fallingPlayers: { name: string; pos: string; delta: number }[];
+  risingPlayers: { name: string; pos: string; delta: number }[];
+}
+
 // ── Alert / watchlist shapes ─────────────────────────────────
 
 export type AlertsCenterCategory = "market" | "status" | "league" | "watchlist" | "news";

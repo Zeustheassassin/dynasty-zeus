@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import type { AlertsCenterItem, WatchlistEntry, SleeperPlayer, SleeperTransaction, SleeperTradedPick } from "../lib/types";
+import type { AlertsCenterItem, WatchlistEntry, SleeperPlayer, SleeperTransaction, SleeperTradedPick, GmBriefing } from "../lib/types";
 
 // Canonical alert type — shared with page.tsx via lib/types.ts
 type DashboardAlert = AlertsCenterItem;
@@ -54,6 +54,7 @@ type AlertsPageProps = {
   currentNFLWeek: number;
   allTradeAttempts: { id: string; league_id: string; status: string }[];
   allLeagues: { league_id: string; name: string }[];
+  rosterBriefings?: GmBriefing[];
   onNavigateToAttempts: (leagueId: string) => void;
 };
 
@@ -253,9 +254,10 @@ export default function AlertsPage({
   currentNFLWeek,
   allTradeAttempts,
   allLeagues,
+  rosterBriefings,
   onNavigateToAttempts,
 }: AlertsPageProps) {
-  const [feedTab, setFeedTab] = useState<"alerts" | "transactions" | "waivers" | "injury" | "news" | "beat" | "byes" | "wire" | "movers">("alerts");
+  const [feedTab, setFeedTab] = useState<"alerts" | "transactions" | "waivers" | "injury" | "news" | "beat" | "byes" | "wire" | "movers" | "briefing">("alerts");
   const [expandedInjuryId, setExpandedInjuryId] = useState<string | null>(null);
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
   const [loadingNews, setLoadingNews] = useState(false);
@@ -348,6 +350,7 @@ export default function AlertsPage({
     { key: "wire", label: "Transaction Wire" },
     { key: "byes", label: `Bye Watch${totalByePlayers > 0 ? ` (${totalByePlayers})` : ""}` },
     { key: "movers", label: `Value Movers${marketAlerts.length > 0 ? ` (${marketAlerts.length})` : ""}` },
+    { key: "briefing", label: `GM Briefing${rosterBriefings && rosterBriefings.length > 0 ? ` (${rosterBriefings.length})` : ""}` },
   ] as const;
 
   return (
@@ -908,6 +911,92 @@ export default function AlertsPage({
                     </div>
                   </div>
                 </div>
+              )}
+            </div>
+          )}
+
+          {/* ── GM Briefing tab ── */}
+          {feedTab === "briefing" && (
+            <div className="space-y-3">
+              {!rosterBriefings || rosterBriefings.length === 0 ? (
+                <div className="rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-8 text-center text-sm text-slate-500">
+                  Load your leagues to see your GM briefings across all leagues.
+                </div>
+              ) : (
+                rosterBriefings.map((b) => {
+                  const urgencyStyle =
+                    b.urgency === "critical" ? "border-red-700/60 bg-red-950/30" :
+                    b.urgency === "high"     ? "border-amber-700/60 bg-amber-950/20" :
+                    b.urgency === "medium"   ? "border-slate-700 bg-slate-900/60" :
+                                              "border-slate-800 bg-slate-950/40";
+
+                  const urgencyBadge =
+                    b.urgency === "critical" ? "border-red-700 bg-red-900/50 text-red-300" :
+                    b.urgency === "high"     ? "border-amber-700 bg-amber-900/40 text-amber-300" :
+                    b.urgency === "medium"   ? "border-slate-600 bg-slate-800/60 text-slate-300" :
+                                              "border-slate-700 bg-slate-900/40 text-slate-400";
+
+                  return (
+                    <div key={`${b.rosterId}-${b.leagueName}`} className={`rounded-2xl border px-4 py-3.5 space-y-2.5 ${urgencyStyle}`}>
+                      {/* Header row */}
+                      <div className="flex items-start justify-between gap-3 flex-wrap">
+                        <div className="flex items-center gap-2 flex-wrap min-w-0">
+                          <span className="text-sm font-semibold text-white truncate">{b.leagueName}</span>
+                          <span className={`text-[10px] font-semibold border px-2 py-0.5 rounded-lg shrink-0 ${b.bucketColor}`}>
+                            {b.bucket}
+                          </span>
+                        </div>
+                        <span className={`text-[10px] font-bold uppercase tracking-wider border px-2.5 py-1 rounded-xl shrink-0 ${urgencyBadge}`}>
+                          {b.urgencyLabel}
+                        </span>
+                      </div>
+
+                      {/* Headline */}
+                      <p className="text-sm font-medium text-white leading-snug">{b.headline}</p>
+
+                      {/* Writeup */}
+                      <p className="text-xs text-slate-300 leading-relaxed">{b.writeup}</p>
+
+                      {/* Action bullets */}
+                      {b.bullets.length > 0 && (
+                        <ul className="space-y-1">
+                          {b.bullets.map((bullet, i) => (
+                            <li key={i} className="flex items-start gap-2 text-xs text-slate-400">
+                              <span className="mt-0.5 shrink-0 text-slate-600">•</span>
+                              <span>{bullet}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+
+                      {/* Player trend pills */}
+                      {(b.fallingPlayers.length > 0 || b.risingPlayers.length > 0) && (
+                        <div className="flex flex-wrap gap-1.5 pt-0.5">
+                          {b.fallingPlayers.map((p) => (
+                            <span
+                              key={p.name}
+                              className="inline-flex items-center gap-1 border border-red-800/60 bg-red-950/40 text-red-300 text-[10px] font-medium px-2 py-0.5 rounded-lg"
+                            >
+                              <span className="text-red-500">↓</span>
+                              <span>{p.name}</span>
+                              <span className="text-red-500/70">{p.delta.toLocaleString()}</span>
+                            </span>
+                          ))}
+                          {b.risingPlayers.map((p) => (
+                            <span
+                              key={p.name}
+                              className="inline-flex items-center gap-1 border border-emerald-800/60 bg-emerald-950/40 text-emerald-300 text-[10px] font-medium px-2 py-0.5 rounded-lg"
+                            >
+                              <span className="text-emerald-500">↑</span>
+                              <span>{p.name}</span>
+                              <span className="text-emerald-500/70">+{p.delta.toLocaleString()}</span>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
               )}
             </div>
           )}
