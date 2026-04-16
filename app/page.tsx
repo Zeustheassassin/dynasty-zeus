@@ -67,7 +67,7 @@ import type {
   CommittedSimsByLeague, CachedSimRow, SimRow, SleeperMatchup,
   AugmentedPick, LeagueOverviewEntry, LeagueMateStatEntry,
   HistoricalSnapshot, LeagueMateView, LeagueSimulation, SimulationTeamRow,
-  RosterDirectionProfile, DynamicPickValue, RookieBoardPlayer,
+  RosterDirectionProfile, DynamicPickValue, RookieBoardPlayer, FcTrendEntry,
 } from "../lib/types";
 
 // -------------------------
@@ -202,7 +202,7 @@ const [tradeAttempts, setTradeAttempts] = useState<TradeAttempt[]>([]);
 const [tradeAttemptsLeagueId, setTradeAttemptsLeagueId] = useState<string | null>(null);
 const [loadingTradeAttempts, setLoadingTradeAttempts] = useState(false);
 const [allTradeAttempts, setAllTradeAttempts] = useState<TradeAttempt[]>([]);
-const [tradeHubSection, setTradeHubSection] = useState<"CALCULATOR" | "FINDER" | "RECOMMENDATIONS" | "TRADE_LOG" | "ATTEMPTS">("CALCULATOR");
+const [tradeHubSection, setTradeHubSection] = useState<"CALCULATOR" | "FINDER" | "RECOMMENDATIONS" | "TRADE_LOG" | "ATTEMPTS" | "MARKET">("CALCULATOR");
 const [finderSeed, setFinderSeed] = useState(() => Math.random());
 const [leagueHubTab, setLeagueHubTab] = useState<LeagueHubTab>("OVERVIEW");
 const [leagueOverviewData, setLeagueOverviewData] = useState<Record<string, LeagueOverviewEntry>>({});
@@ -297,6 +297,8 @@ const toggleIgnoredOwner = (ownerId: string) => {
 };
 const [pickFcValues, setPickFcValues] = useState<Record<string, number>>({});
 const [calcFcValues, setCalcFcValues] = useState<Record<string, number>>({});
+const [fcTrendData, setFcTrendData] = useState<FcTrendEntry[]>([]);
+const [loadingFcTrends, setLoadingFcTrends] = useState(false);
 const [loadingCalcValues, setLoadingCalcValues] = useState(false);
 const [calcValuesLeagueId, setCalcValuesLeagueId] = useState<string | null>(null);
 const [calcOpponentRosterId, setCalcOpponentRosterId] = useState<number | null>(null);
@@ -719,7 +721,7 @@ useEffect(() => {
         _playersInMemory = parsedCache;
         setPlayers(parsedCache);
         // Still load pick values and nflState even when players come from cache
-        fetchFantasyCalcValues(2).then(({ pickValues }) => { if (!signal.aborted) setPickFcValues(pickValues); }).catch(() => {});
+        fetchFantasyCalcValues(2).then(({ pickValues, trendData }) => { if (!signal.aborted) { setPickFcValues(pickValues); setFcTrendData(trendData); } }).catch(() => {});
         fetch('/api/nfl-state', { signal })
           .then(r => r.json()).then((s) => { if (!signal.aborted) setNflState(s); }).catch(() => {});
         return;
@@ -732,8 +734,9 @@ useEffect(() => {
     const { players: data, nflState: fetchedNflState } = await res.json();
     setNflState(fetchedNflState);
 
-    const { playerValues: fcValues, pickValues } = await fetchFantasyCalcValues(2);
+    const { playerValues: fcValues, pickValues, trendData } = await fetchFantasyCalcValues(2);
     setPickFcValues(pickValues);
+    setFcTrendData(trendData);
 
     // Merge FC dynasty values into the player map
     Object.keys(data).forEach((id) => {
@@ -1592,6 +1595,18 @@ const loadCalcValues = async (leagueId: string) => {
     log.error('loadCalcValues failed', { err: String(err) });
   } finally {
     setLoadingCalcValues(false);
+  }
+};
+
+const refreshFcTrends = async () => {
+  setLoadingFcTrends(true);
+  try {
+    const { trendData } = await fetchFantasyCalcValues(2);
+    setFcTrendData(trendData);
+  } catch (err) {
+    log.error('refreshFcTrends failed', { err: String(err) });
+  } finally {
+    setLoadingFcTrends(false);
   }
 };
 
@@ -5469,6 +5484,9 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     nflState={nflState}
     playerStats={playerStats}
     crossLeagueExposure={shares}
+    fcTrendData={fcTrendData}
+    loadingFcTrends={loadingFcTrends}
+    onRefreshFcTrends={refreshFcTrends}
   />
   </ErrorBoundary>
 )}

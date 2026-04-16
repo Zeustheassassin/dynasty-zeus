@@ -267,6 +267,18 @@ export interface FantasyCalcPickValue {
   value: number;
 }
 
+/** A single player's market movement entry extracted from the FC /values/current response. */
+export interface FcTrendEntry {
+  sleeperId: string;
+  name: string;
+  position: string;
+  team: string;
+  value: number;          // dynasty value
+  redraftValue: number;
+  trend30Day: number;     // raw value point change over 30 days
+  tradeFrequency: number; // fraction of trades this player appears in
+}
+
 // ── Alert / watchlist shapes ─────────────────────────────────
 
 export type AlertsCenterCategory = "market" | "status" | "league" | "watchlist" | "news";

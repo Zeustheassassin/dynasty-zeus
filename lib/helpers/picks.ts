@@ -21,8 +21,11 @@ interface DraftLike {
 
 /** FantasyCalc value entry from the /api/fc-values response. */
 interface FcEntry {
-  player?: { position?: string; name?: string; sleeperId?: string | number };
+  player?: { position?: string; name?: string; sleeperId?: string | number; maybeTeam?: string };
   value?: number;
+  redraftValue?: number;
+  trend30Day?: number;
+  maybeTradeFrequency?: number;
 }
 
 /** Returns the FantasyCalc pick key for a traded/owned pick.
@@ -79,10 +82,12 @@ export const getDraftRoundSlot = (
 };
 
 /** Fetches dynasty values from the /api/fc-values proxy and normalises
- *  them into separate player and pick value maps keyed by Sleeper ID. */
+ *  them into separate player and pick value maps keyed by Sleeper ID.
+ *  Also returns raw trendData (trend30Day, tradeFrequency, redraftValue)
+ *  for the market trends view — these are raw FC values, never league-adjusted. */
 export const fetchFantasyCalcValues = async (
   numQbs = 1
-): Promise<{ playerValues: Record<string, number>; pickValues: Record<string, number> }> => {
+): Promise<{ playerValues: Record<string, number>; pickValues: Record<string, number>; trendData: import("../types").FcTrendEntry[] }> => {
   const res = await fetch(`/api/fc-values?numQbs=${numQbs}`);
   const data = await res.json();
 
@@ -90,6 +95,9 @@ export const fetchFantasyCalcValues = async (
   const slotPickValues: Record<string, number[]> = {};
   const pickBuckets: Record<string, number[]>     = {};
   const pickRoundValues: Record<string, number>   = {};
+  const trendData: import("../types").FcTrendEntry[] = [];
+
+  const SKILL_POSITIONS = new Set(["QB", "RB", "WR", "TE"]);
 
   data.forEach((entry: FcEntry) => {
     if (typeof entry.value !== "number" || entry.value <= 0) return;
@@ -113,7 +121,23 @@ export const fetchFantasyCalcValues = async (
       }
     } else {
       const sleeperId = entry.player?.sleeperId;
-      if (sleeperId) playerValues[String(sleeperId)] = value;
+      if (sleeperId) {
+        playerValues[String(sleeperId)] = value;
+        // Collect market trend data for skill positions only
+        const pos = entry.player?.position ?? "";
+        if (SKILL_POSITIONS.has(pos)) {
+          trendData.push({
+            sleeperId: String(sleeperId),
+            name: entry.player?.name ?? "",
+            position: pos,
+            team: entry.player?.maybeTeam ?? "",
+            value,
+            redraftValue: entry.redraftValue ?? 0,
+            trend30Day: entry.trend30Day ?? 0,
+            tradeFrequency: entry.maybeTradeFrequency ?? 0,
+          });
+        }
+      }
     }
   });
 
@@ -153,5 +177,5 @@ export const fetchFantasyCalcValues = async (
     });
   }
 
-  return { playerValues, pickValues };
+  return { playerValues, pickValues, trendData };
 };
