@@ -5777,10 +5777,18 @@ const myPlayerSet = new Set<string>(roster?.players || []);
 )}
 
       {selectedUserId && (
-  <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-    <div className="bg-gray-900 p-6 rounded w-96">
+  <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={() => setSelectedUserId(null)}>
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="exposure-modal-title"
+      tabIndex={-1}
+      onKeyDown={(e) => { if (e.key === "Escape") setSelectedUserId(null); }}
+      className="bg-gray-900 p-6 rounded w-96"
+      onClick={(e) => e.stopPropagation()}
+    >
 
-      <div className="text-lg font-bold mb-4">
+      <div id="exposure-modal-title" className="text-lg font-bold mb-4">
         {users[selectedUserId]}&apos;s Top Owned Players
       </div>
 
@@ -5821,6 +5829,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
 
       <button
         onClick={() => setSelectedUserId(null)}
+        aria-label="Close exposure modal"
         className="mt-4 w-full bg-blue-600 p-2 rounded"
       >
         Close
@@ -5854,10 +5863,18 @@ const myPlayerSet = new Set<string>(roster?.players || []);
 
 {/* DRAFT SCOUT MODAL */}
 {draftScoutUserId && (
-  <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-    <div className="bg-gray-900 p-6 rounded-xl w-[560px] max-h-[85vh] overflow-y-auto">
+  <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={() => { setDraftScoutUserId(null); setDraftScoutData(null); }}>
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="draft-scout-modal-title"
+      tabIndex={-1}
+      onKeyDown={(e) => { if (e.key === "Escape") { setDraftScoutUserId(null); setDraftScoutData(null); } }}
+      className="bg-gray-900 p-6 rounded-xl w-[560px] max-h-[85vh] overflow-y-auto"
+      onClick={(e) => e.stopPropagation()}
+    >
 
-      <div className="text-lg font-bold mb-1">
+      <div id="draft-scout-modal-title" className="text-lg font-bold mb-1">
         {users[draftScoutUserId]}&apos;s {ROOKIE_YEAR} Rookie Drafts
       </div>
       <div className="text-xs text-gray-500 mb-4">
@@ -5893,7 +5910,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
                 {draftScoutPatterns.tendencies.length > 0 && (
                   <ul className="mb-4 space-y-1">
                     {draftScoutPatterns.tendencies.map((t: string, i: number) => (
-                      <li key={i} className="flex items-start gap-1.5 text-xs text-gray-200">
+                      <li key={t || i} className="flex items-start gap-1.5 text-xs text-gray-200">
                         <span className="text-blue-400 mt-0.5 shrink-0">•</span>
                         {t}
                       </li>
@@ -5955,7 +5972,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
                     const pos = pick.player?.position || pick.position || "—";
                     return (
                       <div
-                        key={j}
+                        key={pick.slot ?? j}
                         className="flex items-center justify-between bg-gray-800 rounded px-3 py-1.5 mb-1 text-sm"
                       >
                         <div className="flex items-center gap-2">
@@ -5982,6 +5999,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
 
       <button
         onClick={() => { setDraftScoutUserId(null); setDraftScoutData(null); }}
+        aria-label="Close draft scout modal"
         className="mt-2 w-full bg-blue-600 p-2 rounded text-sm"
       >
         Close
@@ -5992,10 +6010,18 @@ const myPlayerSet = new Set<string>(roster?.players || []);
 
 {/* TRADE HUB MODAL — opponent trades only; own trades shown inline in Trade Log tab */}
 {tradeHubUserId && user && tradeHubUserId !== user.user_id && (
-  <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-    <div className="bg-gray-900 p-6 rounded-xl w-[560px] max-h-[85vh] overflow-y-auto">
+  <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={() => { setTradeHubUserId(null); setTradeHubData(null); }}>
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="trade-hub-modal-title"
+      tabIndex={-1}
+      onKeyDown={(e) => { if (e.key === "Escape") { setTradeHubUserId(null); setTradeHubData(null); } }}
+      className="bg-gray-900 p-6 rounded-xl w-[560px] max-h-[85vh] overflow-y-auto"
+      onClick={(e) => e.stopPropagation()}
+    >
 
-      <div className="text-lg font-bold mb-1">
+      <div id="trade-hub-modal-title" className="text-lg font-bold mb-1">
         {users[tradeHubUserId] || "Manager"}&apos;s Recent Trades
       </div>
       <div className="text-xs text-gray-500 mb-5">
@@ -6067,7 +6093,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
                     Received
                   </div>
                   {allReceived.length ? allReceived.map((item, j) => (
-                    <div key={j} className="text-sm text-white py-0.5">{item}</div>
+                    <div key={item || j} className="text-sm text-white py-0.5">{item}</div>
                   )) : (
                     <div className="text-xs text-gray-500 italic">Nothing</div>
                   )}
@@ -6079,7 +6105,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
                     Gave
                   </div>
                   {allGiven.length ? allGiven.map((item, j) => (
-                    <div key={j} className="text-sm text-white py-0.5">{item}</div>
+                    <div key={item || j} className="text-sm text-white py-0.5">{item}</div>
                   )) : (
                     <div className="text-xs text-gray-500 italic">Nothing</div>
                   )}
@@ -6093,6 +6119,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
 
       <button
         onClick={() => { setTradeHubUserId(null); setTradeHubData(null); }}
+        aria-label="Close trades modal"
         className="mt-2 w-full bg-blue-600 p-2 rounded text-sm"
       >
         Close
@@ -6143,22 +6170,30 @@ const myPlayerSet = new Set<string>(roster?.players || []);
           <>
             {/* Backdrop */}
             <div
+              aria-hidden="true"
               className="fixed inset-0 bg-black/50 z-40"
               onClick={() => setPlayerProfileId(null)}
             />
             {/* Panel */}
-            <div className="fixed top-0 right-0 h-full w-full max-w-sm bg-gray-950 border-l border-gray-800 z-50 flex flex-col shadow-2xl overflow-y-auto">
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="player-profile-title"
+              tabIndex={-1}
+              onKeyDown={(e) => { if (e.key === "Escape") setPlayerProfileId(null); }}
+              className="fixed top-0 right-0 h-full w-full max-w-sm bg-gray-950 border-l border-gray-800 z-50 flex flex-col shadow-2xl overflow-y-auto"
+            >
               {/* Header */}
               <div className="flex items-start justify-between p-5 border-b border-gray-800">
                 <div>
-                  <h2 className="text-lg font-bold text-white">{p.full_name}</h2>
+                  <h2 id="player-profile-title" className="text-lg font-bold text-white">{p.full_name}</h2>
                   <div className="flex items-center gap-2 mt-1">
                     <span className="text-xs text-gray-400">{p.position}</span>
                     {p.team && <span className="text-xs text-gray-500">· {p.team}</span>}
                     {p.age && <span className="text-xs text-gray-500">· Age {p.age}</span>}
                   </div>
                 </div>
-                <button onClick={() => setPlayerProfileId(null)} className="text-gray-500 hover:text-white text-xl leading-none mt-1">✕</button>
+                <button onClick={() => setPlayerProfileId(null)} aria-label="Close player profile" className="text-gray-500 hover:text-white text-xl leading-none mt-1">✕</button>
               </div>
 
               <div className="p-5 space-y-5 flex-1">
@@ -6191,7 +6226,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
                       Owned in {selectedLeague?.name || "Selected League"}
                     </p>
                     {ownersInSelectedLeague.map((name, i) => (
-                      <p key={i} className="text-sm text-white">{name}</p>
+                      <p key={name || i} className="text-sm text-white">{name}</p>
                     ))}
                   </div>
                 )}
@@ -6201,7 +6236,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
                     <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Cross-League Ownership</p>
                     <div className="space-y-1">
                       {crossLeagueOwners.map((entry, i) => (
-                        <div key={i} className="flex items-baseline justify-between text-xs">
+                        <div key={`${entry.owner}-${entry.leagueName}` || i} className="flex items-baseline justify-between text-xs">
                           <span className="text-white truncate mr-2">{entry.owner}</span>
                           <span className="text-gray-500 shrink-0">{entry.leagueName}</span>
                         </div>

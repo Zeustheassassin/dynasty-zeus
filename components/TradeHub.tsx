@@ -5052,7 +5052,7 @@ function TradeHub({
                     <div className="text-[10px] font-bold uppercase tracking-widest text-red-400 mb-1.5">You Gave</div>
                     <div className="space-y-1">
                       {allGiven.map((item, j) => (
-                        <div key={j} className="flex items-center justify-between rounded-lg bg-gray-800 px-2 py-1.5">
+                        <div key={`${item.name}-${j}`} className="flex items-center justify-between rounded-lg bg-gray-800 px-2 py-1.5">
                           <div className="flex items-center gap-1.5 min-w-0">
                             <span className="text-xs text-white truncate">{item.name}</span>
                             <span className="text-[10px] text-gray-500 shrink-0 uppercase">{item.pos}</span>
@@ -5067,7 +5067,7 @@ function TradeHub({
                     <div className="text-[10px] font-bold uppercase tracking-widest text-green-400 mb-1.5">You Received</div>
                     <div className="space-y-1">
                       {allReceived.map((item, j) => (
-                        <div key={j} className="flex items-center justify-between rounded-lg bg-gray-800 px-2 py-1.5">
+                        <div key={`${item.name}-${j}`} className="flex items-center justify-between rounded-lg bg-gray-800 px-2 py-1.5">
                           <div className="flex items-center gap-1.5 min-w-0">
                             <span className="text-xs text-white truncate">{item.name}</span>
                             <span className="text-[10px] text-gray-500 shrink-0 uppercase">{item.pos}</span>

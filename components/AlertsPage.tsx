@@ -929,7 +929,7 @@ export default function AlertsPage({
                     disabled={refreshingBriefing}
                     className="flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-xs font-medium text-slate-300 hover:border-slate-600 hover:bg-slate-700/60 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" className={`h-3 w-3 ${refreshingBriefing ? "animate-spin" : ""}`} viewBox="0 0 20 20" fill="currentColor">
+                    <svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" className={`h-3 w-3 ${refreshingBriefing ? "animate-spin" : ""}`} viewBox="0 0 20 20" fill="currentColor">
                       <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
                     </svg>
                     {refreshingBriefing ? "Refreshing..." : "Refresh"}
@@ -979,7 +979,7 @@ export default function AlertsPage({
                       {b.bullets.length > 0 && (
                         <ul className="space-y-1">
                           {b.bullets.map((bullet, i) => (
-                            <li key={i} className="flex items-start gap-2 text-xs text-slate-400">
+                            <li key={bullet || i} className="flex items-start gap-2 text-xs text-slate-400">
                               <span className="mt-0.5 shrink-0 text-slate-600">•</span>
                               <span>{bullet}</span>
                             </li>
