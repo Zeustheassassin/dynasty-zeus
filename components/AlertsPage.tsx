@@ -55,6 +55,7 @@ type AlertsPageProps = {
   allTradeAttempts: { id: string; league_id: string; status: string }[];
   allLeagues: { league_id: string; name: string }[];
   rosterBriefings?: GmBriefing[];
+  onRefreshBriefings?: () => Promise<void>;
   onNavigateToAttempts: (leagueId: string) => void;
 };
 
@@ -255,9 +256,10 @@ export default function AlertsPage({
   allTradeAttempts,
   allLeagues,
   rosterBriefings,
+  onRefreshBriefings,
   onNavigateToAttempts,
 }: AlertsPageProps) {
-  const [feedTab, setFeedTab] = useState<"alerts" | "transactions" | "waivers" | "injury" | "news" | "beat" | "byes" | "wire" | "movers" | "briefing">("alerts");
+  const [feedTab, setFeedTab] = useState<"alerts" | "transactions" | "waivers" | "injury" | "news" | "beat" | "wire" | "briefing">("briefing");
   const [expandedInjuryId, setExpandedInjuryId] = useState<string | null>(null);
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
   const [loadingNews, setLoadingNews] = useState(false);
@@ -265,6 +267,7 @@ export default function AlertsPage({
   const [loadingBeat, setLoadingBeat] = useState(false);
   const [wireItems, setWireItems] = useState<BeatItem[]>([]);
   const [loadingWire, setLoadingWire] = useState(false);
+  const [refreshingBriefing, setRefreshingBriefing] = useState(false);
 
   useEffect(() => {
     if (feedTab !== "news") return;
@@ -328,7 +331,6 @@ export default function AlertsPage({
   const byeWeekNumbers = Object.keys(byeGroups)
     .map(Number)
     .sort((a, b) => a - b);
-  const totalByePlayers = byeWeekNumbers.reduce((s, w) => s + byeGroups[w].length, 0);
 
   const marketAlerts = alerts.filter(
     (a) => (a.category === "market" || a.category === "watchlist") && a.payload?.["direction"]
@@ -341,16 +343,14 @@ export default function AlertsPage({
     .sort((a, b) => ((a.payload?.["delta"] as number ?? 0) - (b.payload?.["delta"] as number ?? 0)));
 
   const TABS = [
-    { key: "alerts", label: `Alerts${alerts.length > 0 ? ` (${alerts.length})` : ""}` },
+    { key: "briefing", label: `GM Briefing${rosterBriefings && rosterBriefings.length > 0 ? ` (${rosterBriefings.length})` : ""}` },
     { key: "transactions", label: `Trades${tradeActivity.length > 0 ? ` (${tradeActivity.length})` : ""}` },
     { key: "waivers", label: `Waivers${waiverActivity.length > 0 ? ` (${waiverActivity.length})` : ""}` },
     { key: "injury", label: `Injury Report${injuredCount > 0 ? ` (${injuredCount})` : ""}` },
+    { key: "alerts", label: `Alerts${alerts.length > 0 ? ` (${alerts.length})` : ""}` },
     { key: "news", label: "NFL News" },
     { key: "beat", label: "Beat Reports" },
     { key: "wire", label: "Transaction Wire" },
-    { key: "byes", label: `Bye Watch${totalByePlayers > 0 ? ` (${totalByePlayers})` : ""}` },
-    { key: "movers", label: `Value Movers${marketAlerts.length > 0 ? ` (${marketAlerts.length})` : ""}` },
-    { key: "briefing", label: `GM Briefing${rosterBriefings && rosterBriefings.length > 0 ? ` (${rosterBriefings.length})` : ""}` },
   ] as const;
 
   return (
@@ -754,8 +754,8 @@ export default function AlertsPage({
             </div>
           )}
 
-          {/* ── Bye Watch tab ── */}
-          {feedTab === "byes" && (
+          {/* ── Bye Watch tab (removed from nav, kept for potential future use) ── */}
+          {(feedTab as string) === "byes" && (
             <div>
               {currentNFLWeek === 0 ? (
                 <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-6 text-sm text-slate-400">
@@ -832,8 +832,8 @@ export default function AlertsPage({
             </div>
           )}
 
-          {/* ── Value Movers tab ── */}
-          {feedTab === "movers" && (
+          {/* ── Value Movers tab (removed from nav, kept for potential future use) ── */}
+          {(feedTab as string) === "movers" && (
             <div>
               {marketAlerts.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-6 text-sm text-slate-400">
@@ -918,6 +918,24 @@ export default function AlertsPage({
           {/* ── GM Briefing tab ── */}
           {feedTab === "briefing" && (
             <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-slate-500">AI-generated briefings based on current league data</span>
+                {onRefreshBriefings && (
+                  <button
+                    onClick={async () => {
+                      setRefreshingBriefing(true);
+                      try { await onRefreshBriefings(); } finally { setRefreshingBriefing(false); }
+                    }}
+                    disabled={refreshingBriefing}
+                    className="flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-xs font-medium text-slate-300 hover:border-slate-600 hover:bg-slate-700/60 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className={`h-3 w-3 ${refreshingBriefing ? "animate-spin" : ""}`} viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+                    </svg>
+                    {refreshingBriefing ? "Refreshing..." : "Refresh"}
+                  </button>
+                )}
+              </div>
               {!rosterBriefings || rosterBriefings.length === 0 ? (
                 <div className="rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-8 text-center text-sm text-slate-500">
                   Load your leagues to see your GM briefings across all leagues.

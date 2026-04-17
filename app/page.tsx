@@ -212,6 +212,7 @@ const [loadingLeagueOverview, setLoadingLeagueOverview] = useState(false);
 const [leagueOverviewLoaded, setLeagueOverviewLoaded] = useState(false);
 const [leagueSimCache, setLeagueSimCache] = useState<Record<string, Record<number, CachedSimRow>>>({});
 const [readyLeagueId, setReadyLeagueId] = useState<string | null>(null);
+const [briefingRefreshKey, setBriefingRefreshKey] = useState(0);
 const [simQueue, setSimQueue] = useState<string[]>([]);
 const [simProgress, setSimProgress] = useState<{ done: number; total: number } | null>(null);
 // Random salt included in the sim seed so each Run All Sims call produces slightly different results.
@@ -2350,6 +2351,9 @@ const getTeamSummary = () => {
 
   const selectedLeagueDirection = useMemo((): RosterDirectionProfile | null => {
     if (!selectedLeague || !rosters.length || !user?.user_id) return null;
+    // Guard: loadRoster sets selectedLeague synchronously but rosters/allPicks update async.
+    // Prevent direction recompute with mismatched state until all data has landed.
+    if (readyLeagueId !== selectedLeague.league_id) return null;
     const myRosterId = rosters.find((r) => r.owner_id === user.user_id)?.roster_id;
     if (!myRosterId) return null;
 
@@ -2373,7 +2377,116 @@ const getTeamSummary = () => {
       redraftValues: leagueAdjustedRedraftValues,
       dynastyValueForPlayer: (id: string) => leagueAdjustedFcValues[id] ?? players[id]?.value ?? 0,
     });
-  }, [selectedLeague?.league_id, rosters, allPicks, players, pickFcValues, leagueAdjustedRedraftValues, leagueAdjustedFcValues, user?.user_id]);
+  }, [selectedLeague?.league_id, readyLeagueId, rosters, allPicks, players, pickFcValues, leagueAdjustedRedraftValues, leagueAdjustedFcValues, user?.user_id]);
+
+  // ── Projected rookies per roster for the season simulator ────────────────
+  // Runs a simplified BPA draft sim to project which rookie lands on each
+  // team. Only active in offseason mode — in-season, rookies are already on
+  // Sleeper rosters. Every team is covered, not just the user's, so the
+  // simulator reflects the full offseason landscape for all owners.
+  //
+  // Uses the same pool-ordering logic as predictedDraftPicks (dynasty FC value
+  // primary, ADP secondary) but without user overrides or tendency multipliers
+  // so the projection is neutral across all teams.
+  const projectedRookiesByRoster = useMemo((): Map<number, Array<{ id: string; position: string; nflTeam: string | null; score: number }>> => {
+    const empty = new Map<number, Array<{ id: string; position: string; nflTeam: string | null; score: number }>>();
+    if (!selectedLeague || !rosters.length || !rookies.length) return empty;
+    const isOffseason = !(nflState?.season_type === "regular" && Number(nflState?.week || 0) > 0);
+    if (!isOffseason) return empty;
+
+    // Guard: allPicks updates after rosters on league switch. If picks exist but
+    // none belong to the current league's rosters, data is mid-update — bail and
+    // wait for the next render rather than crashing on a stale owner_id lookup.
+    const leagueRosterIds = new Set(rosters.map((r) => Number(r.roster_id)));
+    if (allPicks.length > 0 && !allPicks.some((p) => leagueRosterIds.has(Number(p.owner_id)))) return empty;
+
+    const numTeams = rosters.length;
+    const numRounds = Number(draftSettings?.settings?.rounds ?? draftSettings?.rounds ?? 4);
+    const isSnake = ((draftSettings?.settings?.type ?? draftSettings?.type) || "snake") !== "linear";
+
+    const normName = (s: string) =>
+      s.toLowerCase()
+        .replace(/\s+jr\.?$|\s+sr\.?$|\s+ii$|\s+iii$|\s+iv$/i, "")
+        .replace(/[^a-z]/g, "");
+
+    const valueByNormName: Record<string, number> = {};
+    (Object.entries(players) as [string, SleeperPlayer][]).forEach(([id, p]) => {
+      const val = leagueAdjustedFcValues[id] ?? p.value ?? 0;
+      if (val > 0 && p.full_name) {
+        const key = normName(p.full_name);
+        if (!valueByNormName[key] || val > valueByNormName[key]) valueByNormName[key] = val;
+      }
+    });
+
+    const getRookieValue = (r: RookieBoardPlayer): number =>
+      (r.player_id ? (leagueAdjustedFcValues[r.player_id] ?? 0) : 0) || valueByNormName[normName(r.name)] || 0;
+
+    const pool = [...rookies]
+      .map((r: RookieBoardPlayer, idx: number) => {
+        const val = getRookieValue(r);
+        const hasAdp = typeof r.adp === "number" && r.adp < 9999;
+        const sortKey = val > 0
+          ? -val + (hasAdp ? r.adp * 0.01 : 0)
+          : hasAdp ? 50000 + r.adp : 200000 + idx;
+        return { ...r, _sortKey: sortKey };
+      })
+      .sort((a, b) => a._sortKey - b._sortKey);
+
+    const slotOwnerMap = new Map<string, number>();
+    allPicks.forEach((p) => {
+      if (p.slot && p.owner_id) slotOwnerMap.set(String(p.slot), Number(p.owner_id));
+    });
+
+    const usedIds = new Set<string>();
+    const usedNames = new Set<string>();
+    const result = new Map<number, Array<{ id: string; position: string; nflTeam: string | null; score: number }>>();
+    rosters.forEach((r) => result.set(Number(r.roster_id), []));
+
+    for (let round = 1; round <= numRounds; round++) {
+      const slotOrder = isSnake && round % 2 === 0
+        ? Array.from({ length: numTeams }, (_, i) => numTeams - i)
+        : Array.from({ length: numTeams }, (_, i) => i + 1);
+
+      for (let pickIdx = 0; pickIdx < numTeams; pickIdx++) {
+        const slotNum = slotOrder[pickIdx];
+        const slotStr = `${round}.${String(slotNum).padStart(2, "0")}`;
+        const rosterId = slotOwnerMap.get(slotStr);
+        if (!rosterId) continue;
+
+        const best = pool.find((r) => {
+          if (!["QB", "RB", "WR", "TE"].includes(r.position)) return false;
+          if (r.player_id && usedIds.has(r.player_id)) return false;
+          if (r.name && usedNames.has(normName(r.name))) return false;
+          return true;
+        });
+        if (!best) continue;
+
+        if (best.player_id) usedIds.add(best.player_id);
+        if (best.name) usedNames.add(normName(best.name));
+
+        const val = getRookieValue(best);
+        const syntheticId = best.player_id ?? `rookie_${normName(best.name)}`;
+        result.get(rosterId)?.push({
+          id: syntheticId,
+          position: best.position,
+          nflTeam: best.team || null,
+          score: val > 0 ? val / 425 : 0,
+        });
+      }
+    }
+    return result;
+  }, [
+    selectedLeague?.league_id,
+    nflState?.season_type,
+    nflState?.week,
+    draftSettings,
+    rosters,
+    rookies,
+    allPicks,
+    players,
+    leagueAdjustedFcValues,
+  ]);
+
   const selectedLeagueSimulation = useMemo((): LeagueSimulation | null => {
     if (!selectedLeague || !rosters.length) return null;
 
@@ -2401,40 +2514,83 @@ const getTeamSummary = () => {
     const scorePlayer = (playerId: string) => {
       const projected = projectionMap.get(String(playerId));
       if (typeof projected === "number" && projected > 0) return projected;
-      return (leagueAdjustedRedraftValues[playerId] ?? 0) / 250;
+      const redraftVal = leagueAdjustedRedraftValues[playerId] ?? 0;
+      if (redraftVal > 0) return redraftVal / 250;
+      // Freshly-drafted rookies land on rosters with no projection data yet
+      // and no redraft history. Use dynasty FC value as a weekly estimate
+      // until true projection data becomes available.
+      const p = players[playerId] as SleeperPlayer | undefined;
+      if (p?.years_exp === 0) {
+        const fcVal = leagueAdjustedFcValues[playerId] ?? 0;
+        if (fcVal > 0) return fcVal / 425;
+      }
+      return 0;
     };
 
-    const buildLineupStrength = (rosterEntry: SleeperRoster) => {
-      const available = (rosterEntry?.players || [])
-        .map((id: string) => players[id])
-        .filter((player): player is SleeperPlayer & { score: number } => !!(player && ["QB", "RB", "WR", "TE"].includes(player.position)))
-        .map((player) => ({
-          ...player,
-          score: scorePlayer(player.player_id),
-        }))
-        .sort((a, b) => b.score - a.score);
+    // ── Shared pool type used throughout the sim ──────────────────────────────
+    type PoolPlayer = { id: string; position: string; nflTeam: string | null; score: number };
 
+    // ── NFL bye week infrastructure ───────────────────────────────────────────
+    // Sleeper sets bye_week on players during the season. All players on the
+    // same NFL team share the same bye_week value, satisfying the "same team =
+    // same bye" invariant naturally. For offseason when bye weeks aren't
+    // published yet, a deterministic team-name hash distributes 32 teams across
+    // weeks 5–14 so the same team always gets the same week across all sims.
+    const teamByeWeekMap = new Map<string, number>();
+    (Object.values(players) as SleeperPlayer[]).forEach((p) => {
+      if (p.team && p.bye_week) teamByeWeekMap.set(p.team, p.bye_week);
+    });
+
+    const getPlayerByeWeek = (playerId: string, nflTeam: string | null): number => {
+      const explicit = (players[playerId] as SleeperPlayer | undefined)?.bye_week;
+      if (explicit) return explicit;
+      if (nflTeam && teamByeWeekMap.has(nflTeam)) return teamByeWeekMap.get(nflTeam)!;
+      if (nflTeam) {
+        const hash = nflTeam.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
+        return 5 + (hash % 10);
+      }
+      return 0;
+    };
+
+    // ── Optimal lineup picker — shared by display stats and per-week sim ──────
+    // Returns both the score and the set of player IDs used as starters so
+    // callers can compute bench depth without a second pass.
+    const pickBestStarters = (pool: PoolPlayer[], unavailableIds: Set<string>): { score: number; used: Set<string> } => {
+      const avail = [...pool].filter((p) => !unavailableIds.has(p.id)).sort((a, b) => b.score - a.score);
       const used = new Set<string>();
-      const lineup: Array<{ slot: string; player: (SleeperPlayer & { score: number }) | null; score: number }> = [];
-      const claimBest = (eligible: string[], slot: string) => {
-        const next = available.find((player) => !used.has(player.player_id) && eligible.includes(player.position));
-        if (!next) {
-          lineup.push({ slot, player: null, score: 0 });
-          return;
-        }
-        used.add(next.player_id);
-        lineup.push({ slot, player: next, score: next.score });
-      };
-
+      let score = 0;
       lineupSlots.forEach((slot: string) => {
-        if (slot === "FLEX") return claimBest(["RB", "WR", "TE"], slot);
-        if (slot === "SUPER_FLEX") return claimBest(["QB", "RB", "WR", "TE"], slot);
-        return claimBest([slot], slot);
+        const eligible = slot === "FLEX" ? ["RB", "WR", "TE"] : slot === "SUPER_FLEX" ? ["QB", "RB", "WR", "TE"] : [slot];
+        const next = avail.find((p) => !used.has(p.id) && eligible.includes(p.position));
+        if (next) { used.add(next.id); score += next.score; }
       });
+      return { score, used };
+    };
 
-      const bench = available.filter((player) => !used.has(player.player_id));
-      const rawLineupScore = sum(lineup.map((slot) => slot.score || 0));
-      const rawBenchDepth = sum(bench.slice(0, 5).map((player) => player.score || 0));
+    // ── Per-roster player pools ───────────────────────────────────────────────
+    // In offseason mode, projected draft picks are appended so that rookie
+    // additions affect every team's lineup strength and depth, not just the
+    // user's. In-season rookies are already on Sleeper rosters.
+    const rosterPoolMap = new Map<number, PoolPlayer[]>();
+    rosters.forEach((rEntry) => {
+      const existing: PoolPlayer[] = ((rEntry?.players || []) as string[])
+        .map((id: string) => {
+          const p = players[id] as SleeperPlayer | undefined;
+          if (!p || !["QB", "RB", "WR", "TE"].includes(p.position)) return null;
+          return { id, position: p.position, nflTeam: p.team, score: scorePlayer(id) } as PoolPlayer;
+        })
+        .filter((p): p is PoolPlayer => p !== null);
+      const rookieExtras: PoolPlayer[] = simulationMode === "offseason"
+        ? (projectedRookiesByRoster.get(Number(rEntry.roster_id)) || [])
+        : [];
+      rosterPoolMap.set(Number(rEntry.roster_id), [...existing, ...rookieExtras]);
+    });
+
+    // ── Lineup strength for display (powerScore, projectedMaxPf, stdDev) ─────
+    const buildLineupStrength = (rosterEntry: SleeperRoster, pool: PoolPlayer[]) => {
+      const { score: rawLineupScore, used } = pickBestStarters(pool, new Set());
+      const bench = pool.filter((p) => !used.has(p.id));
+      const rawBenchDepth = bench.slice(0, 5).reduce((s, p) => s + p.score, 0);
       const weeklyLineupScore = rawLineupScore / (projectionIsSeason ? regularSeasonWeeks : 1);
       const weeklyBenchDepth = rawBenchDepth / (projectionIsSeason ? regularSeasonWeeks : 1);
       const seasonProjection = projectionIsSeason
@@ -2458,38 +2614,36 @@ const getTeamSummary = () => {
       // Once the historical calibration block accumulates 6+ weeks of real scores,
       // it replaces this stdDev entirely — so this primarily matters early season
       // and offseason when no observed variance is yet available.
-      const startingPlayers = lineup.filter((s) => s.player).map((s) => s.player!);
       const teamVolatilityMultiplier = (() => {
-        if (startingPlayers.length === 0) return 1.0;
+        const starters = pool.filter((p) => used.has(p.id) && players[p.id]);
+        if (starters.length === 0) return 1.0;
         const posBase: Record<string, number> = { QB: 0.75, RB: 0.88, WR: 1.05, TE: 0.90 };
         let wVolSum = 0;
         let wSum = 0;
-        startingPlayers.forEach((player) => {
-          const dynVal = leagueAdjustedFcValues[player.player_id] ?? players[player.player_id]?.value ?? 0;
-          const redVal = leagueAdjustedRedraftValues[player.player_id] ?? 0;
-          const base = posBase[player.position] ?? 1.0;
+        starters.forEach((sp) => {
+          const dynVal = leagueAdjustedFcValues[sp.id] ?? (players[sp.id] as SleeperPlayer | undefined)?.value ?? 0;
+          const redVal = leagueAdjustedRedraftValues[sp.id] ?? 0;
+          const base = posBase[sp.position] ?? 1.0;
 
           // Ratio signal: dynasty >> redraft → upside/youth → boom-bust
           const ratio = redVal > 100 ? dynVal / redVal : 1.0;
           const ratioMod = ratio > 2.5 ? 1.22 : ratio > 1.8 ? 1.12 : ratio > 1.3 ? 1.05 : ratio < 0.7 ? 0.90 : 1.0;
 
           // Usage signal: high volume = consistent floor, low volume = boom-bust
-          // Reads from current-season playerStats so it reflects actual current role
-          const stats = playerStats?.[player.player_id];
+          const stats = playerStats?.[sp.id];
           let usageMod = 1.0;
           if (stats && (stats.gamesPlayed ?? 0) >= 2) {
-            const pos = player.position;
-            if (pos === "WR" || pos === "TE") {
+            if (sp.position === "WR" || sp.position === "TE") {
               const tgt = stats.avgTargets ?? 0;
               usageMod = tgt >= 8 ? 0.87 : tgt >= 5 ? 0.94 : tgt >= 3 ? 1.05 : 1.18;
-            } else if (pos === "RB") {
+            } else if (sp.position === "RB") {
               const touch = (stats.avgCarries ?? 0) + (stats.avgTargets ?? 0);
               usageMod = touch >= 15 ? 0.82 : touch >= 10 ? 0.91 : touch >= 6 ? 1.0 : 1.14;
             }
           }
 
           const vol = base * ratioMod * usageMod;
-          const weight = Math.max(dynVal, 200); // weight by dynasty value; floor prevents zeros
+          const weight = Math.max(dynVal > 0 ? dynVal : 200, 200);
           wVolSum += vol * weight;
           wSum += weight;
         });
@@ -2507,7 +2661,8 @@ const getTeamSummary = () => {
     };
 
     const rows: SimulationTeamRow[] = rosters.map((rosterEntry) => {
-      const strength = buildLineupStrength(rosterEntry);
+      const pool = rosterPoolMap.get(Number(rosterEntry.roster_id)) || [];
+      const strength = buildLineupStrength(rosterEntry, pool);
       const standing = standings.find((entry) => Number(entry.roster_id) === Number(rosterEntry.roster_id));
       const ownerName = users[rosterEntry.owner_id] || `Team ${rosterEntry.roster_id}`;
       return {
@@ -2646,12 +2801,62 @@ const getTeamSummary = () => {
       }
     }
 
-    const playMatch = (aRosterId: number, bRosterId: number, rng: () => number) => {
+    // ── Per-team base lineup scores (full pool, no unavailability) ───────────
+    // Denominator for the weekly ratio so that historical calibration in
+    // row.lineupScore is preserved while depth effects scale correctly.
+    // Rookies are included in both numerator and denominator so their value
+    // contribution is consistent across all teams.
+    const rosterBaseScore = new Map<number, number>();
+    rows.forEach((row) => {
+      const pool = rosterPoolMap.get(row.rosterId) || [];
+      const { score } = pickBestStarters(pool, new Set());
+      rosterBaseScore.set(row.rosterId, score > 0 ? score : 1);
+    });
+
+    // ── Per-week match scorer with bye weeks and injury variance ──────────────
+    // simWeek = the NFL/fantasy week number (1–14 regular season).
+    // Pass simWeek = 0 for playoff rounds to skip bye/injury effects.
+    //
+    // For each player in the pool:
+    //   - If their NFL team's bye falls on simWeek they sit (same-team invariant).
+    //   - Otherwise a 6.5% weekly injury probability removes them from consideration
+    //     (≈ 1 missed game per player per 14-week season in expectation).
+    //
+    // The weekly score is expressed as a ratio against the full-strength baseline
+    // so that the historically-calibrated row.lineupScore is respected even as
+    // depth determines how much each team suffers from unavailability.
+    //
+    // stdDev is scaled by 0.82 because bye/injury variance is now explicit
+    // rather than embedded in the noise term.
+    const playMatch = (aRosterId: number, bRosterId: number, simWeek: number, rng: () => number) => {
       const aRow = rowByRosterId.get(aRosterId);
       const bRow = rowByRosterId.get(bRosterId);
       if (!aRow || !bRow) return { winner: aRosterId, loser: bRosterId, aPoints: 0, bPoints: 0 };
-      const aPoints = Math.max(scoreFloor, aRow.lineupScore + randomNormal(rng) * aRow.weeklyStdDev);
-      const bPoints = Math.max(scoreFloor, bRow.lineupScore + randomNormal(rng) * bRow.weeklyStdDev);
+
+      const computeScore = (rosterId: number, row: SimulationTeamRow): number => {
+        const pool = rosterPoolMap.get(rosterId) || [];
+        if (simWeek > 0 && pool.length > 0) {
+          const unavail = new Set<string>();
+          pool.forEach((p) => {
+            const byeWk = getPlayerByeWeek(p.id, p.nflTeam);
+            if (byeWk > 0 && byeWk === simWeek) {
+              unavail.add(p.id);
+            } else if (rng() < 0.065) {
+              unavail.add(p.id);
+            }
+          });
+          const weekRaw = pickBestStarters(pool, unavail).score;
+          const baseRaw = rosterBaseScore.get(rosterId) || weekRaw;
+          const weeklyRaw = weekRaw / (projectionIsSeason ? regularSeasonWeeks : 1);
+          const baseWeekly = baseRaw / (projectionIsSeason ? regularSeasonWeeks : 1);
+          const ratio = baseWeekly > 0 ? Math.max(0.35, Math.min(1.0, weeklyRaw / baseWeekly)) : 1.0;
+          return Math.max(scoreFloor, row.lineupScore * ratio + randomNormal(rng) * row.weeklyStdDev * 0.82);
+        }
+        return Math.max(scoreFloor, row.lineupScore + randomNormal(rng) * row.weeklyStdDev);
+      };
+
+      const aPoints = computeScore(aRosterId, aRow);
+      const bPoints = computeScore(bRosterId, bRow);
       if (aPoints === bPoints) {
         return rng() < 0.5
           ? { winner: aRosterId, loser: bRosterId, aPoints, bPoints }
@@ -2675,7 +2880,7 @@ const getTeamSummary = () => {
         while (openingRound.length >= 2) {
           const high = openingRound.shift()!;
           const low = openingRound.pop()!;
-          winners.push(playMatch(high, low, rng).winner);
+          winners.push(playMatch(high, low, 0, rng).winner);
         }
         roundTeams = [...byes, ...winners].sort((a, b) => seededIndex(seededIds, a) - seededIndex(seededIds, b));
       }
@@ -2686,7 +2891,7 @@ const getTeamSummary = () => {
         while (roundSeeds.length >= 2) {
           const high = roundSeeds.shift()!;
           const low = roundSeeds.pop()!;
-          winners.push(playMatch(high, low, rng).winner);
+          winners.push(playMatch(high, low, 0, rng).winner);
         }
         roundTeams = winners.sort((a, b) => seededIndex(seededIds, a) - seededIndex(seededIds, b));
       }
@@ -2792,7 +2997,7 @@ const getTeamSummary = () => {
         .filter((week) => week.week >= simStartWeek)
         .forEach((week) => {
           week.pairs.forEach(([aRosterId, bRosterId]) => {
-            const result = playMatch(aRosterId, bRosterId, rng);
+            const result = playMatch(aRosterId, bRosterId, week.week, rng);
             pointMap.set(aRosterId, (pointMap.get(aRosterId) || 0) + result.aPoints);
             pointMap.set(bRosterId, (pointMap.get(bRosterId) || 0) + result.bPoints);
             winMap.set(result.winner, (winMap.get(result.winner) || 0) + 1);
@@ -2889,6 +3094,7 @@ const getTeamSummary = () => {
     standings,
     users,
     simSalt,
+    projectedRookiesByRoster,
   ]);
 
   // Combines dynasty rank, redraft rank, simulation playoff odds, and core age into one profile.
@@ -4064,19 +4270,29 @@ const getTeamSummary = () => {
       });
       if (!profile) continue;
 
+      // Match League Overview: apply sim-adjusted bucket so briefing and overview agree.
+      const committedRow = committedSimsByLeague[league.league_id]?.[Number(myRoster.roster_id)];
+      const cachedRow = leagueSimCache[league.league_id]?.[Number(myRoster.roster_id)];
+      const playoffOdds = committedRow?.playoffOdds ?? cachedRow?.playoff_odds ?? 0;
+      const hasCachedSim = !!(committedRow ?? cachedRow);
+      const adjBucket = getAdjustedDirectionBucket(profile.bucket, profile, playoffOdds, hasCachedSim);
+      const adjProfile = adjBucket !== profile.bucket
+        ? { ...profile, bucket: adjBucket, bucketColor: getBucketColor(adjBucket) }
+        : profile;
+
       briefings.push(generateGmBriefing({
         rosterId: myRoster.roster_id,
         leagueName: league.name,
         ownerName: user.display_name || "You",
         isMyTeam: true,
-        profile,
+        profile: adjProfile,
         rosterPlayerIds: myRoster.players ?? [],
         trendData: fcTrendData,
       }));
     }
 
     return briefings.sort((a, b) => urgencyOrder[a.urgency] - urgencyOrder[b.urgency]);
-  }, [leagueOverviewData, user, calcFcValues, redraftValues, players, pickFcValues, fcTrendData]);
+  }, [leagueOverviewData, user, calcFcValues, redraftValues, players, pickFcValues, fcTrendData, briefingRefreshKey, committedSimsByLeague, leagueSimCache]);
 
   // Save simulation results to Supabase on demand and freeze a local snapshot for
   // pick valuations. The frozen snapshot (localStorage + state) is the source of truth
@@ -5260,6 +5476,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             allTradeAttempts={allTradeAttempts}
             allLeagues={leagues}
             rosterBriefings={allRosterBriefings}
+            onRefreshBriefings={async () => { await loadLeagueOverview(); setBriefingRefreshKey((k) => k + 1); }}
             onNavigateToAttempts={(leagueId) => {
               const league = leagues.find((l) => l.league_id === leagueId);
               if (league) {
