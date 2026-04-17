@@ -2332,6 +2332,22 @@ const getTeamSummary = () => {
     return adjusted;
   }, [selectedLeague?.scoring_settings, calcFcValues, players]);
 
+  // ── League-adjusted redraft values ───────────────────────────────────────
+  // Applies the same per-position scoring multipliers to raw redraft values
+  // so they're consistent with the league-adjusted dynasty values above.
+  const leagueAdjustedRedraftValues = useMemo((): Record<string, number> => {
+    const scoring = selectedLeague?.scoring_settings;
+    if (!scoring || Object.keys(redraftValues).length === 0) return redraftValues;
+    const multipliers = computeScoringMultipliers(scoring);
+    const adjusted: Record<string, number> = {};
+    for (const [id, value] of Object.entries(redraftValues)) {
+      const pos = players[id]?.position ?? "";
+      const mult = multipliers[pos] ?? 1;
+      adjusted[id] = Math.round(value * mult);
+    }
+    return adjusted;
+  }, [selectedLeague?.scoring_settings, redraftValues, players]);
+
   const selectedLeagueDirection = useMemo((): RosterDirectionProfile | null => {
     if (!selectedLeague || !rosters.length || !user?.user_id) return null;
     const myRosterId = rosters.find((r) => r.owner_id === user.user_id)?.roster_id;
@@ -2343,10 +2359,10 @@ const getTeamSummary = () => {
     if (allPicks.length > 0 && !allPicks.some((p) => leagueRosterIds.has(Number(p.roster_id)))) return null;
 
     // Guard: both value maps must be loaded before profile is meaningful.
-    // An empty map produces nonsense direction output — redraftValues drives the
+    // An empty map produces nonsense direction output — leagueAdjustedRedraftValues drives the
     // redraft-rank half of the bucket; leagueAdjustedFcValues drives the dynasty-rank half.
     if (!Object.keys(leagueAdjustedFcValues).length) return null;
-    if (!Object.keys(redraftValues).length) return null;
+    if (!Object.keys(leagueAdjustedRedraftValues).length) return null;
 
     return getRosterDirectionProfile({
       rosterId: myRosterId,
@@ -2354,10 +2370,10 @@ const getTeamSummary = () => {
       ownedPicks: allPicks,
       players,
       pickValues: pickFcValues,
-      redraftValues,
+      redraftValues: leagueAdjustedRedraftValues,
       dynastyValueForPlayer: (id: string) => leagueAdjustedFcValues[id] ?? players[id]?.value ?? 0,
     });
-  }, [selectedLeague?.league_id, rosters, allPicks, players, pickFcValues, redraftValues, leagueAdjustedFcValues, user?.user_id]);
+  }, [selectedLeague?.league_id, rosters, allPicks, players, pickFcValues, leagueAdjustedRedraftValues, leagueAdjustedFcValues, user?.user_id]);
   const selectedLeagueSimulation = useMemo((): LeagueSimulation | null => {
     if (!selectedLeague || !rosters.length) return null;
 
@@ -2385,7 +2401,7 @@ const getTeamSummary = () => {
     const scorePlayer = (playerId: string) => {
       const projected = projectionMap.get(String(playerId));
       if (typeof projected === "number" && projected > 0) return projected;
-      return (redraftValues[playerId] ?? 0) / 250;
+      return (leagueAdjustedRedraftValues[playerId] ?? 0) / 250;
     };
 
     const buildLineupStrength = (rosterEntry: SleeperRoster) => {
@@ -2450,7 +2466,7 @@ const getTeamSummary = () => {
         let wSum = 0;
         startingPlayers.forEach((player) => {
           const dynVal = leagueAdjustedFcValues[player.player_id] ?? players[player.player_id]?.value ?? 0;
-          const redVal = redraftValues[player.player_id] ?? 0;
+          const redVal = leagueAdjustedRedraftValues[player.player_id] ?? 0;
           const base = posBase[player.position] ?? 1.0;
 
           // Ratio signal: dynasty >> redraft → upside/youth → boom-bust
@@ -2867,7 +2883,7 @@ const getTeamSummary = () => {
     projectionData,
     projectionWeek,
     players,
-    redraftValues,
+    leagueAdjustedRedraftValues,
     leagueAdjustedFcValues,
     leagueWeeklyMatchups,
     standings,
@@ -3109,7 +3125,7 @@ const getTeamSummary = () => {
       ownedPicks: allPicks,
       players,
       pickValues: pickFcValues,
-      redraftValues,
+      redraftValues: leagueAdjustedRedraftValues,
       dynastyValueForPlayer,
     });
 
@@ -3122,7 +3138,7 @@ const getTeamSummary = () => {
           ownedPicks: allPicks,
           players,
           pickValues: pickFcValues,
-          redraftValues,
+          redraftValues: leagueAdjustedRedraftValues,
           dynastyValueForPlayer,
         });
         if (!directionProfile) return null;
@@ -3216,7 +3232,7 @@ const getTeamSummary = () => {
         if (b!.tradeCount30d !== a!.tradeCount30d) return b!.tradeCount30d - a!.tradeCount30d;
         return a!.ownerName.localeCompare(b!.ownerName);
       }) as LeagueMateView[];
-  }, [selectedLeague?.league_id, rosters, user?.user_id, allPicks, players, pickFcValues, redraftValues, leagueAdjustedFcValues, leagueMateTradeIntel, users, crossLeagueMateIntel]);
+  }, [selectedLeague?.league_id, rosters, user?.user_id, allPicks, players, pickFcValues, leagueAdjustedRedraftValues, leagueAdjustedFcValues, leagueMateTradeIntel, users, crossLeagueMateIntel]);
   const selectedLeagueMateProfilesView =
     selectedLeagueMateProfiles.length > 0
       ? selectedLeagueMateProfiles
@@ -3272,7 +3288,7 @@ const getTeamSummary = () => {
       .slice(0, 30)
       .filter(r => r.score / maxRaw >= 0.15) // only meaningful buy lows (≥15% of top score)
       .map(r => r.player_id);
-  }, [players, leagueAdjustedFcValues, redraftValues, projectionData]);
+  }, [players, leagueAdjustedFcValues, projectionData]);
 
   const tradePartnerRankings = useMemo(() => {
     if (!selectedLeague || !rosters.length || !user?.user_id || !selectedLeagueSimulation || !selectedLeagueDirection) return [];
@@ -3421,7 +3437,7 @@ const getTeamSummary = () => {
           return player ? {
             ...player,
             dynValue: dynValueForPlayer(id),
-            redValue: redraftValues[id] ?? 0,
+            redValue: leagueAdjustedRedraftValues[id] ?? 0,
           } : null;
         })
         .filter((p): p is NonNullable<typeof p> => p !== null)
@@ -5271,7 +5287,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             allPicks={allPicks}
             pickFcValues={pickFcValues}
             calcFcValues={leagueAdjustedFcValues}
-            redraftValues={redraftValues}
+            redraftValues={leagueAdjustedRedraftValues}
             committedSimsByLeague={committedSimsByLeague}
             leagueSimCache={leagueSimCache}
             simQueue={simQueue}
@@ -5391,7 +5407,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             playerDispositions={playerDispositions}
             savePlayerDisposition={savePlayerDisposition}
             setPlayerProfileId={setPlayerProfileId}
-            redraftValues={redraftValues}
+            redraftValues={leagueAdjustedRedraftValues}
             loadingRedraft={loadingRedraft}
             projectionData={projectionData}
             setProjectionData={setProjectionData}
@@ -5479,7 +5495,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     allPicks={allPicks}
     pickFcValues={pickFcValues}
     calcFcValues={leagueAdjustedFcValues}
-    redraftValues={redraftValues}
+    redraftValues={leagueAdjustedRedraftValues}
     selectedLeagueDynamicPickValues={selectedLeagueDynamicPickValues}
     selectedLeagueDirection={selectedLeagueDirection}
     selectedLeagueDirectionAdjusted={selectedLeagueDirectionAdjusted}
@@ -5873,7 +5889,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
         const p = players[playerProfileId];
         if (!p) return null;
         const dynVal = calcFcValues[playerProfileId] ?? p.value ?? 0;
-        const redVal = redraftValues[playerProfileId] ?? 0;
+        const redVal = leagueAdjustedRedraftValues[playerProfileId] ?? 0;
         const injuryStatus = p.injury_status || p.status;
         const injuryNote = [p.injury_body_part, p.injury_notes].filter(Boolean).join(" — ");
         const practiceDesc = p.practice_description || p.practice_participation || "";
