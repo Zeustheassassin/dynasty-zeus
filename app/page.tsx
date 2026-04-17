@@ -1937,14 +1937,15 @@ const savePlayerNote = useCallback(async (playerId: string, note: string) => {
 }, []); // reads supabaseUser via ref; uses functional setState — no deps needed
 
 // Manual snapshot save — callable from the Data Hub button.
-// Builds from the current calcFcValues + players state and upserts to Supabase.
+// Uses generic FC values (players[id].value) rather than league-adjusted calcFcValues so that
+// scoring rule changes don't create artificial trend movement.
 const saveSnapshotNow = async () => {
   if (!supabaseUser) return;
   const snap: Record<string, { full_name: string; value: number; team: string; status: string; active: boolean; shareCount: number }> = {};
-  Object.entries(calcFcValues as Record<string, number>).forEach(([playerId, value]) => {
-    if (value <= 0) return;
-    const p = players[playerId];
+  Object.entries(players).forEach(([playerId, p]) => {
     if (!p || !["QB", "RB", "WR", "TE"].includes(p.position)) return;
+    const value = p.value ?? 0;
+    if (value <= 0) return;
     snap[playerId] = { full_name: p.full_name, value, team: p.team || "", status: p.status, active: p.active, shareCount: 0 };
   });
   if (Object.keys(snap).length === 0) return; // values not loaded yet
@@ -4648,7 +4649,8 @@ const getTeamSummary = () => {
     const nextPlayerSnapshot = Object.fromEntries(
       trackedPlayers.map((entry) => {
         const player = entry.player;
-        const value = Number(calcFcValues[entry.playerId] ?? player?.value ?? 0);
+        // Use generic FC value (player.value) — league-adjusted calcFcValues would create false trends on rule changes.
+        const value = Number(player?.value ?? 0);
         return [entry.playerId, {
           full_name: player.full_name,
           status: String(player.status || ""),
@@ -4787,17 +4789,19 @@ const getTeamSummary = () => {
 
     localStorage.setItem(alertSnapshotStorageKey, JSON.stringify(nextSnapshots));
 
-    // Build a comprehensive snapshot: all QB/RB/WR/TE with calcFcValues, merged with owned-player data.
-    // This is used for Value Trends so it covers the full player universe, not just owned players.
+    // Build a comprehensive snapshot: all QB/RB/WR/TE using generic FC values (players[id].value).
+    // Generic values are used instead of league-adjusted calcFcValues so scoring rule changes
+    // don't create artificial trend movement. calcEntries is still used as a load gate (confirms
+    // FC data is available) but the stored value comes from players[id].value.
     const buildFullSnapshot = () => {
       const snap: Record<string, PlayerSnapshot> = { ...nextPlayerSnapshot };
       const calcEntries = Object.entries(calcFcValues as Record<string, number>).filter(([, v]) => v > 0);
       if (calcEntries.length > 50) {
-        calcEntries.forEach(([playerId, value]) => {
+        calcEntries.forEach(([playerId]) => {
           const p = players[playerId];
           if (!p || !["QB", "RB", "WR", "TE"].includes(p.position)) return;
           if (!snap[playerId]) {
-            snap[playerId] = { full_name: p.full_name, value, team: p.team || "", status: String(p.status || ""), active: p.active !== false, shareCount: 0 };
+            snap[playerId] = { full_name: p.full_name, value: p.value ?? 0, team: p.team || "", status: String(p.status || ""), active: p.active !== false, shareCount: 0 };
           }
         });
       }

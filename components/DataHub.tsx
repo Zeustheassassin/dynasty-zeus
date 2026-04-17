@@ -480,7 +480,7 @@ function DataHub({
 
         const allTrends: TrendRow[] = [];
         Object.entries(snap.players).forEach(([playerId, snapData]: [string, PlayerValueSnapshotEntry]) => {
-          const currentVal = calcFcValues[playerId] ?? 0;
+          const currentVal = players[playerId]?.value ?? 0;
           const snapVal = Number(snapData.value ?? 0);
           if (snapVal <= 0 || currentVal <= 0) return;
           const delta = currentVal - snapVal;
@@ -540,7 +540,7 @@ function DataHub({
         // Build an unfiltered trend map (all positions, fixed 5%/20% thresholds)
         const trendMap = new Map<string, number>();
         Object.entries(snap.players).forEach(([pid, snapData]) => {
-          const cv = calcFcValues[pid] ?? 0;
+          const cv = players[pid]?.value ?? 0;
           const sv = Number(snapData.value ?? 0);
           if (sv > 0 && cv > 0) trendMap.set(pid, ((cv - sv) / sv) * 100);
         });
