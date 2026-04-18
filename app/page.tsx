@@ -25,6 +25,7 @@ const DraftHub = dynamic(() => import("../components/DraftHub"), { ssr: false, l
 const DataHub = dynamic(() => import("../components/DataHub"), { ssr: false, loading: HubSkeleton });
 const LeagueHub = dynamic(() => import("../components/LeagueHub"), { ssr: false, loading: HubSkeleton });
 const TradeHub = dynamic(() => import("../components/TradeHub"), { ssr: false, loading: HubSkeleton });
+const ScoutingHub = dynamic(() => import("../components/ScoutingHub"), { ssr: false, loading: HubSkeleton });
 import { LEAGUE_HUB_GROUPS } from "../lib/leagueHubGroups";
 import { supabase } from "../lib/supabaseclient";
 import { logger } from "../lib/logger";
@@ -5397,6 +5398,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
                 { id: "GAMEDAY_HUB", label: "Gameday Hub" },
                 { id: "ALERTS", label: "Alert Hub" },
                 { id: "MANAGEMENT_HUB", label: "Management Hub" },
+                { id: "SCOUTING_HUB", label: "Scouting Hub" },
               ].map((tab) => (
                 <button
                   key={tab.id}
@@ -5417,7 +5419,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
       </div>
 
       <div className={
-        mainTab === "DRAFT" || mainTab === "TRADE_HUB" || mainTab === "MANAGEMENT_HUB" || mainTab === "LEAGUES" || mainTab === "ALERTS" || mainTab === "GAMEDAY_HUB"
+        mainTab === "DRAFT" || mainTab === "TRADE_HUB" || mainTab === "MANAGEMENT_HUB" || mainTab === "LEAGUES" || mainTab === "ALERTS" || mainTab === "GAMEDAY_HUB" || mainTab === "SCOUTING_HUB"
           ? ""
           : (mainTab === "DATA_HUB" && dataHubTab === "DEPTH_CHARTS")
             ? "w-full px-6 py-6"
@@ -5858,6 +5860,13 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     loadingCommToolsRosters={loadingCommToolsRosters}
     setLoadingCommToolsRosters={setLoadingCommToolsRosters}
   />
+  </ErrorBoundary>
+)}
+
+{/* ── SCOUTING HUB TAB ──────────────────────────────────────────── */}
+{mainTab === "SCOUTING_HUB" && (
+  <ErrorBoundary label="Scouting Hub">
+    <ScoutingHub />
   </ErrorBoundary>
 )}
 

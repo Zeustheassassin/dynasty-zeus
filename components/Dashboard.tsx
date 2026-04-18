@@ -54,6 +54,12 @@ const navCardRows = [
       image: "https://images.pexels.com/photos/128457/pexels-photo-128457.jpeg?auto=compress&cs=tinysrgb&w=800",
       overlay: "from-red-950/70 via-slate-900/60 to-slate-950/80",
     },
+    {
+      title: "Scouting Hub",
+      tab: "SCOUTING_HUB",
+      image: "https://images.pexels.com/photos/1618200/pexels-photo-1618200.jpeg?auto=compress&cs=tinysrgb&w=800",
+      overlay: "from-purple-950/70 via-slate-900/60 to-slate-950/80",
+    },
   ],
 ] as const;
 
@@ -76,11 +82,7 @@ export default function Dashboard({
         {navCardRows.map((row, rowIndex) => (
           <div
             key={`dashboard-row-${rowIndex}`}
-            className={
-              row.length === 1
-                ? "grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3"
-                : "grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3"
-            }
+            className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3"
           >
             {row.map((item) => (
               <motion.button
@@ -95,8 +97,6 @@ export default function Dashboard({
                 }}
                 whileHover={isConnected ? { scale: 1.03 } : {}}
                 className={`relative h-44 w-full overflow-hidden rounded-3xl border border-slate-800 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 ${
-                  row.length === 1 ? "justify-self-center md:col-span-2 md:max-w-[320px] xl:col-span-1 xl:col-start-2" : ""
-                } ${
                   isConnected ? "cursor-pointer" : "cursor-not-allowed opacity-40"
                 }`}
               >

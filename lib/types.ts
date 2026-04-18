@@ -805,3 +805,101 @@ export interface TradeAttempt {
   attempted_at: string;
   resolved_at: string | null;
 }
+
+
+// ── Scouting Hub ──────────────────────────────────────────────
+
+export type ChartingDecision = "fully_charted" | "partial_chart" | "charting" | "pending" | "not_charting";
+export type RouteType =
+  | "nine" | "post" | "dig" | "curl" | "slant" | "screen"
+  | "flat" | "comeback" | "out" | "corner" | "other";
+export type Alignment = "left" | "right" | "slot" | "backfield";
+export type CoverageType = "man" | "zone" | "double" | "press" | "";
+
+export interface Prospect {
+  id: string;
+  user_id: string;
+  name: string;
+  school: string;
+  conference: string;
+  position: string;
+  draft_class_year: number;
+  height: string;
+  weight: number | null;
+  birthday: string | null;
+  personal_rank: number | null;
+  pff_rank: number | null;
+  mock_draft_rank: number | null;
+  drafttek_rank: number | null;
+  pfn_rank: number | null;
+  should_play: string;
+  will_play_pre: string;
+  will_play_post: string;
+  charting_decision: ChartingDecision;
+  charting_notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ScoutingGame {
+  id: string;
+  user_id: string;
+  prospect_id: string;
+  season_year: number;
+  opponent: string;
+  game_slot: number;
+  game_type: string;
+  watch_date: string | null;
+  notes: string;
+  created_at: string;
+  summary_targets: number | null;
+  summary_catches: number | null;
+  summary_drops: number | null;
+  summary_contested: number | null;
+  summary_contested_catches: number | null;
+}
+
+export interface RoutePlay {
+  id: string;
+  user_id: string;
+  game_id: string;
+  route_type: RouteType;
+  alignment: Alignment;
+  on_line: boolean;
+  coverage: CoverageType;
+  was_open: boolean;
+  targeted: boolean;
+  success: boolean | null;
+  contested: boolean;
+  yards: number | null;
+  play_notes: string;
+  created_at: string;
+}
+
+export interface RouteStat { count: number; open: number; targets: number; catches: number }
+export interface CoverageStat { count: number; open: number; catches: number }
+
+export interface ProspectWithStats extends Prospect {
+  total_routes: number;
+  total_games: number;
+  targets: number;
+  catches: number;
+  drops: number;
+  contested: number;
+  contested_catches: number;
+  total_yards: number;
+  success_rate: number | null;
+  target_rate: number | null;
+  avg_ypc: number | null;
+  pct_left: number | null;
+  pct_right: number | null;
+  pct_slot: number | null;
+  pct_backfield: number | null;
+  pct_on_line: number | null;
+  adj_success_above_exp: number | null;
+  avg_external_rank: number | null;
+  depth_behind_los: number;
+  depth_on_los: number;
+  route_stats: Partial<Record<RouteType, RouteStat>>;
+  coverage_stats: Record<"man" | "zone" | "double" | "press", CoverageStat>;
+}
