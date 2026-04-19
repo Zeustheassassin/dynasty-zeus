@@ -1,11 +1,20 @@
 "use client";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import dynamic from "next/dynamic";
-import type { Prospect, ProspectWithStats } from "../../../lib/types";
+import type { Prospect, ProspectWithStats, ChartingDecision } from "../../../lib/types";
 
+const QBChartingBoard  = dynamic(() => import("./QBChartingBoard"),   { ssr: false });
 const ProspectRosterSheet = dynamic(() => import("../ProspectRosterSheet"), { ssr: false });
 
 const QB_NFL_ROLES = ["Franchise QB", "Starter", "Bridge", "Backup", ""];
+
+const DECISION_DOT: Record<ChartingDecision, string> = {
+  fully_charted: "bg-green-500",
+  partial_chart: "bg-blue-400",
+  charting:      "bg-yellow-400",
+  pending:       "bg-orange-400",
+  not_charting:  "bg-red-500",
+};
 
 export interface QBHubProps {
   prospectsWithStats: ProspectWithStats[];
@@ -17,14 +26,87 @@ export interface QBHubProps {
 }
 
 type HubView = "list" | "roster";
+type SortKey = "personal_rank" | "name" | "school" | "draft_class_year";
 
 export default function QBHub({
   prospectsWithStats,
+  loading,
+  onAddProspect,
   onDataChanged,
+  draftYearFilter,
+  setDraftYearFilter,
 }: QBHubProps) {
-  const [hubView, setHubView] = useState<HubView>("list");
+  const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
+  const [hubView, setHubView]   = useState<HubView>("list");
+  const [sortKey, setSortKey]   = useState<SortKey>("personal_rank");
+  const [sortDir, setSortDir]   = useState<"asc" | "desc">("asc");
+  const [showAdd, setShowAdd]   = useState(false);
+  const [newProspect, setNewProspect] = useState({
+    name: "", school: "", conference: "", draft_class_year: 2026,
+    position: "QB", personal_rank: "" as string | number,
+  });
+  const [addError, setAddError] = useState<string | null>(null);
 
-  const qbProspects = prospectsWithStats.filter((p) => p.position === "QB");
+  const qbProspects = useMemo(
+    () => prospectsWithStats.filter((p) => p.position === "QB"),
+    [prospectsWithStats],
+  );
+
+  const filtered = useMemo(() => {
+    const base = draftYearFilter ? qbProspects.filter((p) => p.draft_class_year === draftYearFilter) : qbProspects;
+    return [...base].sort((a, b) => {
+      let av: string | number = 0, bv: string | number = 0;
+      if (sortKey === "personal_rank") { av = a.personal_rank ?? 9999; bv = b.personal_rank ?? 9999; }
+      else if (sortKey === "name")     { av = a.name ?? ""; bv = b.name ?? ""; }
+      else if (sortKey === "school")   { av = a.school ?? ""; bv = b.school ?? ""; }
+      else if (sortKey === "draft_class_year") { av = a.draft_class_year ?? 9999; bv = b.draft_class_year ?? 9999; }
+      const cmp = typeof av === "string" ? av.localeCompare(bv as string) : (av as number) - (bv as number);
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  }, [qbProspects, draftYearFilter, sortKey, sortDir]);
+
+  const draftYears = useMemo(
+    () => [...new Set(qbProspects.map((p) => p.draft_class_year).filter(Boolean))].sort() as number[],
+    [qbProspects],
+  );
+
+  function toggleSort(k: SortKey) {
+    if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortKey(k); setSortDir("asc"); }
+  }
+
+  async function addProspect() {
+    if (!newProspect.name.trim() || !newProspect.school.trim()) {
+      setAddError("Name and school are required.");
+      return;
+    }
+    setAddError(null);
+    await onAddProspect({
+      name: newProspect.name.trim(),
+      school: newProspect.school.trim(),
+      conference: newProspect.conference.trim(),
+      draft_class_year: newProspect.draft_class_year,
+      position: "QB",
+      personal_rank: newProspect.personal_rank !== "" ? Number(newProspect.personal_rank) : null,
+      height: "", weight: null, birthday: null,
+      should_play: "", will_play_pre: "", will_play_post: "",
+      charting_decision: "pending",
+      charting_notes: "",
+      pff_rank: null, mock_draft_rank: null, drafttek_rank: null, pfn_rank: null,
+    });
+    setNewProspect({ name: "", school: "", conference: "", draft_class_year: 2026, position: "QB", personal_rank: "" });
+    setShowAdd(false);
+  }
+
+  if (selectedProspect) {
+    return (
+      <QBChartingBoard
+        prospect={selectedProspect}
+        onBack={() => { setSelectedProspect(null); onDataChanged(); }}
+        onDataChanged={onDataChanged}
+      />
+    );
+  }
 
   return (
     <div>
@@ -44,12 +126,115 @@ export default function QBHub({
       </div>
 
       {hubView === "list" && (
-        <div className="flex flex-col items-center justify-center py-20 gap-3 text-center">
-          <div className="text-5xl font-black text-gray-700">QB</div>
-          <div className="text-gray-400 text-base font-medium">Scouting system coming soon</div>
-          <div className="text-gray-600 text-sm max-w-sm">
-            QB charting, passing analytics, accuracy tracking, and Big Board integration will be built here.
+        <div>
+          {/* Toolbar */}
+          <div className="flex flex-wrap items-center gap-2 mb-4">
+            <div className="flex gap-1 flex-wrap">
+              {(["personal_rank", "name", "school", "draft_class_year"] as SortKey[]).map((k) => {
+                const labels: Record<SortKey, string> = { personal_rank: "Rank", name: "Name", school: "School", draft_class_year: "Class" };
+                return (
+                  <button key={k} onClick={() => toggleSort(k)}
+                    className={`px-3 py-1 rounded text-xs font-medium transition ${
+                      sortKey === k ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                    }`}>
+                    {labels[k]} {sortKey === k ? (sortDir === "asc" ? "↑" : "↓") : ""}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex gap-1 flex-wrap ml-auto">
+              {draftYears.map((y) => (
+                <button key={y} onClick={() => setDraftYearFilter(draftYearFilter === y ? null : y)}
+                  className={`px-3 py-1 rounded text-xs font-medium transition ${draftYearFilter === y ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                  {y}
+                </button>
+              ))}
+              <button onClick={() => setShowAdd((s) => !s)}
+                className="px-3 py-1 bg-blue-700 hover:bg-blue-600 text-white rounded text-xs font-medium transition">
+                + Add QB
+              </button>
+            </div>
           </div>
+
+          {/* Add form */}
+          {showAdd && (
+            <div className="mb-4 p-4 bg-gray-900 border border-gray-700 rounded-lg">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+                <input className="px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500"
+                  placeholder="Name *" value={newProspect.name} onChange={(e) => setNewProspect((n) => ({ ...n, name: e.target.value }))} />
+                <input className="px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500"
+                  placeholder="School *" value={newProspect.school} onChange={(e) => setNewProspect((n) => ({ ...n, school: e.target.value }))} />
+                <input className="px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500"
+                  placeholder="Conference" value={newProspect.conference} onChange={(e) => setNewProspect((n) => ({ ...n, conference: e.target.value }))} />
+                <input type="number" className="px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500"
+                  placeholder="Personal Rank" value={newProspect.personal_rank}
+                  onChange={(e) => setNewProspect((n) => ({ ...n, personal_rank: e.target.value }))} />
+                <select className="px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
+                  value={newProspect.draft_class_year} onChange={(e) => setNewProspect((n) => ({ ...n, draft_class_year: Number(e.target.value) }))}>
+                  {[2026, 2027, 2028, 2029].map((y) => <option key={y}>{y}</option>)}
+                </select>
+              </div>
+              {addError && <p className="text-red-400 text-xs mb-2">{addError}</p>}
+              <div className="flex gap-2">
+                <button onClick={addProspect}
+                  className="px-4 py-1.5 bg-blue-700 hover:bg-blue-600 text-white text-sm rounded transition font-medium">
+                  Add
+                </button>
+                <button onClick={() => setShowAdd(false)}
+                  className="px-4 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm rounded transition">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {loading ? (
+            <div className="text-gray-500 text-sm text-center py-12">Loading…</div>
+          ) : filtered.length === 0 ? (
+            <div className="text-gray-500 text-sm text-center py-12">
+              No QB prospects found. Click &quot;+ Add QB&quot; to add one.
+            </div>
+          ) : (
+            <div className="space-y-1">
+              {filtered.map((p) => (
+                <div
+                  key={p.id}
+                  className="flex items-center gap-3 px-4 py-3 bg-gray-900 border border-gray-800 rounded-lg hover:border-gray-600 cursor-pointer transition"
+                  onClick={() => setSelectedProspect(p)}
+                >
+                  {/* Rank */}
+                  <div className="w-8 text-center flex-shrink-0">
+                    {p.personal_rank ? (
+                      <span className="text-sm font-bold text-blue-400">#{p.personal_rank}</span>
+                    ) : (
+                      <span className="text-gray-700 text-xs">—</span>
+                    )}
+                  </div>
+
+                  {/* Charting status dot */}
+                  <div className={`w-2 h-2 rounded-full flex-shrink-0 ${DECISION_DOT[p.charting_decision ?? "pending"]}`} />
+
+                  {/* Name + school */}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-semibold text-white truncate">{p.name}</div>
+                    <div className="text-xs text-gray-400 truncate">
+                      {p.school}{p.conference ? ` · ${p.conference}` : ""}
+                    </div>
+                  </div>
+
+                  {/* Class */}
+                  <div className="text-xs text-blue-400 flex-shrink-0">{p.draft_class_year}</div>
+
+                  {/* Games charted */}
+                  <div className="text-xs text-gray-500 flex-shrink-0 w-16 text-right">
+                    {p.total_games > 0 ? `${p.total_games} game${p.total_games !== 1 ? "s" : ""}` : "—"}
+                  </div>
+
+                  <div className="text-gray-600 text-sm flex-shrink-0">›</div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

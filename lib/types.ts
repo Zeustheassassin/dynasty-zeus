@@ -873,6 +873,7 @@ export interface RoutePlay {
   contested: boolean;
   yards: number | null;
   play_notes: string;
+  no_route_run: boolean;
   created_at: string;
 }
 
@@ -881,7 +882,7 @@ export interface CoverageStat { count: number; open: number; catches: number }
 
 // ── RB Scouting ─────────────────────────────────────────────
 export type RBFormation = "gun" | "pistol" | "under_center";
-export type RBRunType   = "outside_man_gap" | "inside_man_gap" | "outside_zone" | "inside_zone" | "pass_block";
+export type RBRunType   = "outside_man_gap" | "inside_man_gap" | "outside_zone" | "inside_zone" | "pass_block" | "route";
 
 export interface RBPlay {
   id: string;
@@ -896,10 +897,38 @@ export interface RBPlay {
   explosive_play: boolean;
   run_stuff: boolean;
   play_notes: string | null;
+  aligned_as_wr: boolean;
+  targeted: boolean;
+  created_at: string;
+}
+
+// ── QB Scouting ─────────────────────────────────────────────
+export type QBSnapPosition = "shotgun" | "pistol" | "under_center";
+export type QBPlayType     = "run" | "rpo" | "pass";
+export type QBTiming       = "first_option" | "second_option" | "checkdown" | "scramble";
+export type QBAccuracy     = "high" | "low" | "on_target" | "in_front" | "behind";
+export type QBDepthZone    =
+  | "deep_left"  | "deep_center"  | "deep_right"
+  | "mid_left"   | "mid_center"   | "mid_right"
+  | "short_left" | "short_center" | "short_right";
+
+export interface QBPlay {
+  id: string;
+  user_id: string;
+  game_id: string;
+  snap_position: QBSnapPosition;
+  play_type: QBPlayType;
+  timing: QBTiming | null;
+  accuracy: QBAccuracy | null;
+  depth_zone: QBDepthZone | null;
+  route_type: RouteType | null;
+  coverage: "man" | "zone" | null;
+  play_notes: string | null;
   created_at: string;
 }
 
 export interface ProspectWithStats extends Prospect {
+  total_snaps: number;
   total_routes: number;
   total_games: number;
   targets: number;

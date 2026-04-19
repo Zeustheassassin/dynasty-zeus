@@ -65,6 +65,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
   const [playError, setPlayError] = useState<string | null>(null);
 
   // Route play form
+  const [noRouteRun, setNoRouteRun] = useState(false);
   const [routeType, setRouteType] = useState<RouteType>("curl");
   const [alignment, setAlignment] = useState<Alignment>("right");
   const [onLine, setOnLine] = useState(true);
@@ -151,7 +152,9 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
 
   // Aggregate stats across all games
   const stats = useMemo(() => {
-    const total = plays.length;
+    const routePlays = plays.filter((p) => !p.no_route_run);
+    const totalSnaps = plays.length;
+    const totalRoutes = routePlays.length;
 
     // For games with stored summary totals (imported), use those; otherwise compute from plays
     let tgt = 0, ctch = 0, drops = 0, contested = 0, contestedCatches = 0;
@@ -163,7 +166,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
         contested += g.summary_contested ?? 0;
         contestedCatches += g.summary_contested_catches ?? 0;
       } else {
-        const gPlays = plays.filter((p) => p.game_id === g.id);
+        const gPlays = routePlays.filter((p) => p.game_id === g.id);
         tgt += gPlays.filter((p) => p.targeted).length;
         ctch += gPlays.filter((p) => p.targeted && p.success).length;
         drops += gPlays.filter((p) => p.targeted && p.success === false).length;
@@ -171,20 +174,21 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
         contestedCatches += gPlays.filter((p) => p.contested && p.success === true).length;
       }
     }
+    // Alignment % from all snaps
     const leftN = plays.filter((p) => p.alignment === "left").length;
     const rightN = plays.filter((p) => p.alignment === "right").length;
     const slotN = plays.filter((p) => p.alignment === "slot").length;
     const bfN = plays.filter((p) => p.alignment === "backfield").length;
     const onLineN = plays.filter((p) => p.on_line).length;
 
-    const totalOpen = plays.filter((p) => p.was_open).length;
+    const totalOpen = routePlays.filter((p) => p.was_open).length;
     const routeCounts: Partial<Record<RouteType, number>> = {};
-    for (const p of plays) routeCounts[p.route_type] = (routeCounts[p.route_type] ?? 0) + 1;
+    for (const p of routePlays) routeCounts[p.route_type] = (routeCounts[p.route_type] ?? 0) + 1;
 
     // Per-route stats — success rate = was_open / count (SRVC, not catch rate)
     const routeStats: Partial<Record<RouteType, { count: number; open: number; targets: number; catches: number; successRate: string | null }>> = {};
     for (const rt of ROUTE_TYPES) {
-      const rtPlays = plays.filter((p) => p.route_type === rt);
+      const rtPlays = routePlays.filter((p) => p.route_type === rt);
       if (rtPlays.length === 0) continue;
       const rtOpen = rtPlays.filter((p) => p.was_open).length;
       const rtTgt = rtPlays.filter((p) => p.targeted).length;
@@ -200,7 +204,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
 
     // Per-coverage stats — success rate = was_open / count (SRVC)
     const cvgStats = (["man", "zone", "double", "press"] as const).map((cvg) => {
-      const cvgPlays = plays.filter((p) => p.coverage === cvg);
+      const cvgPlays = routePlays.filter((p) => p.coverage === cvg);
       const cvgOpen = cvgPlays.filter((p) => p.was_open).length;
       const cvgTgt = cvgPlays.filter((p) => p.targeted).length;
       const cvgCtch = cvgPlays.filter((p) => p.targeted && p.success).length;
@@ -214,18 +218,20 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
       };
     }).filter((c) => c.count > 0);
 
-    const pct = (n: number) => (total > 0 ? ((n / total) * 100).toFixed(1) : null);
-    // Overall success rate = open rate (SRVC), catch rate shown separately
-    const openRate = total > 0 ? ((totalOpen / total) * 100).toFixed(1) : null;
+    const snapPct = (n: number) => (totalSnaps > 0 ? ((n / totalSnaps) * 100).toFixed(1) : null);
+    const routePct = (n: number) => (totalRoutes > 0 ? ((n / totalRoutes) * 100).toFixed(1) : null);
+    const openRate = totalRoutes > 0 ? ((totalOpen / totalRoutes) * 100).toFixed(1) : null;
     const catchRate = tgt > 0 ? ((ctch / tgt) * 100).toFixed(1) : null;
     return {
-      total, targets: tgt, catches: ctch, drops, contested, contestedCatches,
+      totalSnaps, totalRoutes,
+      total: totalRoutes,  // keep for backwards compat with any remaining refs
+      targets: tgt, catches: ctch, drops, contested, contestedCatches,
       openRate, catchRate,
-      successRate: openRate,  // "Success Rate" label = SRVC open rate
-      targetRate: pct(tgt),
-      pctLeft: pct(leftN), pctRight: pct(rightN), pctSlot: pct(slotN), pctBf: pct(bfN),
-      pctOnLine: pct(onLineN),
-      pctOffLine: total > 0 ? (((total - onLineN) / total) * 100).toFixed(1) : null,
+      successRate: openRate,
+      targetRate: routePct(tgt),
+      pctLeft: snapPct(leftN), pctRight: snapPct(rightN), pctSlot: snapPct(slotN), pctBf: snapPct(bfN),
+      pctOnLine: snapPct(onLineN),
+      pctOffLine: totalSnaps > 0 ? (((totalSnaps - onLineN) / totalSnaps) * 100).toFixed(1) : null,
       adjSuccessAboveExp: tgt > 0 ? (((ctch / tgt) - 0.55) * 100).toFixed(2) : null,
       routeCounts,
       routeStats,
@@ -235,13 +241,16 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
 
   // Per-game stats
   const gameStats = useMemo(() => {
-    const map: Record<string, { routes: number; targets: number; catches: number; yards: number }> = {};
+    const map: Record<string, { snaps: number; routes: number; targets: number; catches: number; yards: number }> = {};
     for (const p of plays) {
-      if (!map[p.game_id]) map[p.game_id] = { routes: 0, targets: 0, catches: 0, yards: 0 };
-      map[p.game_id].routes++;
-      if (p.targeted) map[p.game_id].targets++;
-      if (p.targeted && p.success) map[p.game_id].catches++;
-      if (p.yards) map[p.game_id].yards += p.yards;
+      if (!map[p.game_id]) map[p.game_id] = { snaps: 0, routes: 0, targets: 0, catches: 0, yards: 0 };
+      map[p.game_id].snaps++;
+      if (!p.no_route_run) {
+        map[p.game_id].routes++;
+        if (p.targeted) map[p.game_id].targets++;
+        if (p.targeted && p.success) map[p.game_id].catches++;
+        if (p.yards) map[p.game_id].yards += p.yards;
+      }
     }
     return map;
   }, [plays]);
@@ -296,15 +305,16 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
       .insert({
         user_id: user.id,
         game_id: selectedGameId,
-        route_type: routeType,
+        no_route_run: noRouteRun,
+        route_type: noRouteRun ? "other" : routeType,
         alignment,
         on_line: onLine,
-        coverage,
-        was_open: wasOpen,
-        targeted,
-        success: targeted ? playSuccess : null,
-        contested: targeted ? contested : false,
-        yards: targeted && yards ? parseInt(yards, 10) : null,
+        coverage: noRouteRun ? "" : coverage,
+        was_open: noRouteRun ? false : wasOpen,
+        targeted: noRouteRun ? false : targeted,
+        success: (!noRouteRun && targeted) ? playSuccess : null,
+        contested: (!noRouteRun && targeted) ? contested : false,
+        yards: (!noRouteRun && targeted && yards) ? parseInt(yards, 10) : null,
         play_notes: playNotes,
       })
       .select()
@@ -324,7 +334,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
     setSavingPlay(false);
   }
 
-  async function handleBulkImport(parsedPlays: { route_type: RouteType; alignment: Alignment; on_line: boolean; targeted: boolean; success: boolean | null; yards: number | null; play_notes: string }[]) {
+  async function handleBulkImport(parsedPlays: { route_type: RouteType; alignment: Alignment; on_line: boolean; targeted: boolean; success: boolean | null; yards: number | null; play_notes: string; no_route_run?: boolean }[]) {
     if (!selectedGameId) return;
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
@@ -338,7 +348,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
   }
 
   async function handleSummaryImport(
-    reconstructedPlays: { route_type: RouteType; alignment: Alignment; on_line: boolean; coverage: string; targeted: boolean; success: boolean | null; contested: boolean; yards: number | null; play_notes: string }[],
+    reconstructedPlays: { route_type: RouteType; alignment: Alignment; on_line: boolean; coverage: string; targeted: boolean; success: boolean | null; contested: boolean; yards: number | null; play_notes: string; no_route_run: boolean }[],
     totals: import("../SummaryGameImport").SummaryTotals,
   ) {
     if (!selectedGameId) return;
@@ -425,8 +435,8 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
           </p>
         </div>
         <div className="flex-shrink-0 text-right text-xs text-gray-500">
-          <div>{stats.total} routes · {games.length} games</div>
-          {stats.successRate && <div className="text-green-400">{stats.successRate}% success</div>}
+          <div>{stats.totalSnaps} snaps · {stats.totalRoutes} routes · {games.length} games</div>
+          {stats.successRate && <div className="text-green-400">{stats.successRate}% open</div>}
         </div>
         <button
           onClick={() => setEditBio((e) => !e)}
@@ -546,9 +556,10 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
           ) : (
             <>
               {/* Key stats row */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
                 {[
-                  { label: "Routes", value: stats.total, color: "text-blue-400" },
+                  { label: "Snaps", value: stats.totalSnaps, color: "text-gray-300" },
+                  { label: "Routes", value: stats.totalRoutes, color: "text-blue-400" },
                   { label: "Games", value: games.length, color: "text-gray-300" },
                   { label: "Targets", value: stats.targets, color: "text-yellow-400" },
                   { label: "Catches", value: stats.catches, color: "text-green-400" },
@@ -578,7 +589,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                 <div className="p-3 bg-gray-900 rounded-lg border border-gray-800">
                   <div className="text-xs text-gray-500 mb-1">Target Rate</div>
                   <div className="text-xl font-bold text-yellow-400">{stats.targetRate ? `${stats.targetRate}%` : "—"}</div>
-                  <div className="text-xs text-gray-600 mt-0.5">{stats.targets} / {stats.total} routes</div>
+                  <div className="text-xs text-gray-600 mt-0.5">{stats.targets} / {stats.totalRoutes} routes</div>
                 </div>
               </div>
 
@@ -887,7 +898,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                 <div className="flex items-center justify-between">
                   <div className="text-sm font-medium text-gray-300">
                     Logging: <span className="text-white">{selectedGame.season_year} vs {selectedGame.opponent}</span>
-                    <span className="ml-2 text-blue-400 text-xs">{gamePlays.length} routes</span>
+                    <span className="ml-2 text-gray-400 text-xs">{gamePlays.length} snaps · {gamePlays.filter((p) => !p.no_route_run).length} routes</span>
                   </div>
                   <div className="flex gap-2">
                     <button
@@ -905,8 +916,27 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                   </div>
                 </div>
 
-                {/* Route type selector */}
+                {/* No Route Run toggle */}
                 <div>
+                  <button
+                    onClick={() => setNoRouteRun((v) => !v)}
+                    className={`w-full py-2 rounded text-sm font-semibold transition ${
+                      noRouteRun
+                        ? "bg-amber-700 text-white ring-2 ring-amber-500"
+                        : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                    }`}
+                  >
+                    {noRouteRun ? "✓ No Route Run (Aligned Only — run play / blocking)" : "No Route Run"}
+                  </button>
+                  {noRouteRun && (
+                    <p className="text-xs text-amber-400/70 mt-1">
+                      Counts as a snap on field. Only alignment and line are recorded.
+                    </p>
+                  )}
+                </div>
+
+                {/* Route type selector — hidden when no-route-run */}
+                {!noRouteRun && <div>
                   <div className="text-xs text-gray-500 mb-2">Route Type</div>
                   <div className="flex flex-wrap gap-1.5">
                     {ROUTE_TYPES.map((rt) => (
@@ -921,7 +951,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                       </button>
                     ))}
                   </div>
-                </div>
+                </div>}
 
                 {/* Alignment + Line + Coverage */}
                 <div className="flex flex-wrap gap-4">
@@ -958,7 +988,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                       </button>
                     </div>
                   </div>
-                  <div>
+                  {!noRouteRun && <div>
                     <div className="text-xs text-gray-500 mb-2">Coverage</div>
                     <div className="flex gap-1.5">
                       {COVERAGES.map((cv) => (
@@ -973,8 +1003,8 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                         </button>
                       ))}
                     </div>
-                  </div>
-                  <div>
+                  </div>}
+                  {!noRouteRun && <div>
                     <div className="text-xs text-gray-500 mb-2">Got Open?</div>
                     <div className="flex gap-1.5">
                       <button
@@ -990,8 +1020,8 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                         No
                       </button>
                     </div>
-                  </div>
-                  <div>
+                  </div>}
+                  {!noRouteRun && <div>
                     <div className="text-xs text-gray-500 mb-2">Targeted?</div>
                     <div className="flex gap-1.5">
                       <button
@@ -1007,11 +1037,11 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                         No
                       </button>
                     </div>
-                  </div>
+                  </div>}
                 </div>
 
                 {/* Targeted outcome */}
-                {targeted && (
+                {!noRouteRun && targeted && (
                   <div className="flex flex-wrap gap-4 p-3 bg-gray-900/60 rounded-lg border border-gray-800">
                     <div>
                       <div className="text-xs text-gray-500 mb-2">Outcome</div>
@@ -1072,7 +1102,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                   />
                   <button
                     onClick={logPlay}
-                    disabled={savingPlay || (targeted && playSuccess === null)}
+                    disabled={savingPlay || (!noRouteRun && targeted && playSuccess === null)}
                     className="px-5 py-2 bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white text-sm rounded font-medium transition"
                   >
                     {savingPlay ? "…" : "Log Play"}
@@ -1093,10 +1123,13 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                           className="flex items-center gap-2 px-3 py-1.5 bg-gray-900 rounded text-xs"
                         >
                           <span className="text-gray-500 w-5 flex-shrink-0">{gamePlays.length - i}</span>
-                          <span className="text-white capitalize font-medium">{pl.route_type}</span>
+                          {pl.no_route_run
+                            ? <span className="text-amber-500 font-medium">aligned</span>
+                            : <span className="text-white capitalize font-medium">{pl.route_type}</span>
+                          }
                           <span className="text-gray-500 uppercase text-xs">{pl.alignment[0]}</span>
                           <span className="text-gray-600">{pl.on_line ? "OL" : "Off"}</span>
-                          {pl.targeted ? (
+                          {!pl.no_route_run && (pl.targeted ? (
                             pl.success ? (
                               <span className="text-green-400">✓ {pl.yards ?? 0}yds</span>
                             ) : (
@@ -1104,7 +1137,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                             )
                           ) : (
                             <span className="text-gray-600">—</span>
-                          )}
+                          ))}
                           {pl.play_notes && <span className="text-gray-500 truncate">{pl.play_notes}</span>}
                           <button
                             onClick={() => deletePlay(pl.id)}

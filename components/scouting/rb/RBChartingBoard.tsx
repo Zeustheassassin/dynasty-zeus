@@ -141,6 +141,9 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
   const [brokenTackle, setBrokenTackle] = useState(false);
   const [explosivePlay, setExplosivePlay] = useState(false);
   const [runStuff, setRunStuff] = useState(false);
+  // Route-play specific
+  const [alignedAsWr, setAlignedAsWr] = useState(false);
+  const [rbTargeted, setRbTargeted] = useState(false);
   const [playNotes, setPlayNotes] = useState("");
   const [savingPlay, setSavingPlay] = useState(false);
   const [playError, setPlayError] = useState<string | null>(null);
@@ -207,12 +210,13 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
   const stats = useMemo(() => {
     const pct = (n: number, d: number) => (d > 0 ? parseFloat(((n / d) * 100).toFixed(1)) : null);
 
-    const runPlays = plays.filter((p) => p.run_type !== "pass_block");
+    const runPlays = plays.filter((p) => p.run_type !== "pass_block" && p.run_type !== "route");
+    const routeRuns = plays.filter((p) => p.run_type === "route");
     const runAttempts = runPlays.length;
 
-    // Formation breakdown (all plays)
+    // Formation breakdown (run + pass block only, not route plays)
     const formationStats = (["gun", "pistol", "under_center"] as RBFormation[]).reduce((acc, f) => {
-      const fp = plays.filter((p) => p.formation === f);
+      const fp = plays.filter((p) => p.formation === f && p.run_type !== "route");
       const suc = fp.filter((p) => p.success === true).length;
       acc[f] = { attempts: fp.length, successes: suc, successPct: pct(suc, fp.length) };
       return acc;
@@ -232,10 +236,19 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     const explosivePlay = runPlays.filter((p) => p.explosive_play).length;
     const runStuff      = runPlays.filter((p) => p.run_stuff).length;
 
+    // Route run stats
+    const routeTargets  = routeRuns.filter((p) => p.targeted).length;
+    const routeCatches  = routeRuns.filter((p) => p.targeted && p.success === true).length;
+    const routeDrops    = routeRuns.filter((p) => p.targeted && p.success === false).length;
+
     return {
       totalPlays: plays.length,
       runAttempts,
       passBlockAttempts: passBlock.attempts,
+      routeAttempts: routeRuns.length,
+      routeTargets,
+      routeCatches,
+      routeDrops,
       formationStats,
       runTypes: { outsideManGap, insideManGap, outsideZone, insideZone, passBlock },
       manGap,
@@ -293,20 +306,31 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     setBrokenTackle(false);
     setExplosivePlay(false);
     setRunStuff(false);
+    setAlignedAsWr(false);
+    setRbTargeted(false);
     setPlayNotes("");
   }
 
   async function logPlay() {
-    if (!selectedGameId || success === null) return;
+    if (!selectedGameId) return;
+    const isRoute = runType === "route";
+    // For route plays: success=null if not targeted; for run/block plays, success is required
+    if (!isRoute && success === null) return;
     setPlayError(null);
     setSavingPlay(true);
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setPlayError("Not logged in."); setSavingPlay(false); return; }
     const { data, error } = await supabase.from("rb_plays").insert({
       user_id: user.id, game_id: selectedGameId,
-      formation, run_type: runType, success,
-      loaded_box: loadedBox, unblocked_defender: unblockedDefender,
-      broken_tackle: brokenTackle, explosive_play: explosivePlay, run_stuff: runStuff,
+      formation, run_type: runType,
+      success: isRoute ? (rbTargeted ? success : null) : success,
+      targeted: isRoute ? rbTargeted : false,
+      aligned_as_wr: isRoute ? alignedAsWr : false,
+      loaded_box: isRoute ? false : loadedBox,
+      unblocked_defender: isRoute ? false : unblockedDefender,
+      broken_tackle: isRoute ? false : brokenTackle,
+      explosive_play: isRoute ? false : explosivePlay,
+      run_stuff: isRoute ? false : runStuff,
       play_notes: playNotes || null,
     }).select().single();
     if (error) { setPlayError(error.message); }
@@ -373,7 +397,7 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
         </div>
         <div className="flex-shrink-0 text-right text-xs text-gray-500">
           <div>{stats.totalPlays} plays · {games.length} games</div>
-          <div className="text-green-400">{stats.runAttempts} run att</div>
+          <div className="text-green-400">{stats.runAttempts} runs · {stats.routeAttempts} routes</div>
         </div>
         <button onClick={() => setEditBio((e) => !e)} className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm rounded transition flex-shrink-0">
           {editBio ? "Close" : "Edit Bio"}
@@ -459,11 +483,14 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
           ) : (
             <>
               {/* Summary cards */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
                 {[
                   { label: "Total Plays",    value: stats.totalPlays,       color: "text-blue-400" },
                   { label: "Run Attempts",   value: stats.runAttempts,      color: "text-green-400" },
                   { label: "Pass Blocks",    value: stats.passBlockAttempts,color: "text-purple-400" },
+                  { label: "Routes",         value: stats.routeAttempts,    color: "text-blue-300" },
+                  { label: "Tgts",           value: stats.routeTargets,     color: "text-yellow-400" },
+                  { label: "Catches",        value: stats.routeCatches,     color: "text-green-300" },
                   { label: "Games",          value: games.length,           color: "text-gray-300" },
                 ].map((s) => (
                   <div key={s.label} className="p-3 bg-gray-900 rounded-lg border border-gray-800">
@@ -699,64 +726,121 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                       className={`w-full py-2 rounded text-sm font-medium transition ${runType === "pass_block" ? "bg-purple-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
                       Pass Block Attempt
                     </button>
-                  </div>
-                </div>
-
-                {/* Context toggles */}
-                <div className="flex flex-wrap gap-3">
-                  <div>
-                    <div className="text-xs text-gray-500 mb-2">Loaded Box?</div>
-                    <div className="flex gap-1.5">
-                      <button onClick={() => setLoadedBox(true)} className={`px-3 h-9 rounded text-xs font-medium transition ${loadedBox ? "bg-teal-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>Yes</button>
-                      <button onClick={() => setLoadedBox(false)} className={`px-3 h-9 rounded text-xs font-medium transition ${!loadedBox ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>No</button>
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-gray-500 mb-2">Unblocked Defender?</div>
-                    <div className="flex gap-1.5">
-                      <button onClick={() => setUnblockedDefender(true)} className={`px-3 h-9 rounded text-xs font-medium transition ${unblockedDefender ? "bg-orange-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>Yes</button>
-                      <button onClick={() => setUnblockedDefender(false)} className={`px-3 h-9 rounded text-xs font-medium transition ${!unblockedDefender ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>No</button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Success / Fail */}
-                <div>
-                  <div className="text-xs text-gray-500 mb-2">Result</div>
-                  <div className="flex gap-3">
-                    <button onClick={() => setSuccess(true)}
-                      className={`flex-1 py-3 rounded-lg text-sm font-bold transition ${success === true ? "bg-green-600 text-white ring-2 ring-green-400" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
-                      ✓ SUCCESS
-                    </button>
-                    <button onClick={() => setSuccess(false)}
-                      className={`flex-1 py-3 rounded-lg text-sm font-bold transition ${success === false ? "bg-red-600 text-white ring-2 ring-red-400" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
-                      ✗ FAIL
+                    {/* Route run */}
+                    <button onClick={() => { setRunType("route"); setSuccess(null); }}
+                      className={`w-full py-2 rounded text-sm font-medium transition ${runType === "route" ? "bg-blue-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                      Route Run
                     </button>
                   </div>
                 </div>
 
-                {/* Post-play flags */}
-                <div>
-                  <div className="text-xs text-gray-500 mb-2">Play Flags <span className="text-gray-700">(select if yes)</span></div>
-                  <div className="flex gap-2">
-                    {[
-                      { label: "Broken Tackle", val: brokenTackle, set: setBrokenTackle, color: "bg-yellow-700" },
-                      { label: "Explosive Play", val: explosivePlay, set: setExplosivePlay, color: "bg-green-800" },
-                      { label: "Run Stuff", val: runStuff, set: setRunStuff, color: "bg-red-800" },
-                    ].map(({ label, val, set, color }) => (
-                      <button key={label} onClick={() => set(!val)}
-                        className={`flex-1 py-2 rounded text-xs font-medium transition ${val ? `${color} text-white` : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
-                        {label}
-                      </button>
-                    ))}
+                {/* Route play UI */}
+                {runType === "route" ? (
+                  <div className="space-y-3 p-3 bg-gray-900/60 rounded-lg border border-blue-900/50">
+                    <div className="text-xs text-blue-400 font-medium">Route Run Options</div>
+                    <div className="flex flex-wrap gap-4">
+                      <div>
+                        <div className="text-xs text-gray-500 mb-2">Aligned at Snap</div>
+                        <div className="flex gap-1.5">
+                          <button onClick={() => setAlignedAsWr(false)}
+                            className={`px-3 h-9 rounded text-xs font-medium transition ${!alignedAsWr ? "bg-green-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                            RB
+                          </button>
+                          <button onClick={() => setAlignedAsWr(true)}
+                            className={`px-3 h-9 rounded text-xs font-medium transition ${alignedAsWr ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                            WR Split Out
+                          </button>
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-gray-500 mb-2">Targeted?</div>
+                        <div className="flex gap-1.5">
+                          <button onClick={() => setRbTargeted(true)}
+                            className={`px-3 h-9 rounded text-xs font-medium transition ${rbTargeted ? "bg-yellow-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                            Yes
+                          </button>
+                          <button onClick={() => { setRbTargeted(false); setSuccess(null); }}
+                            className={`px-3 h-9 rounded text-xs font-medium transition ${!rbTargeted ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                            No
+                          </button>
+                        </div>
+                      </div>
+                      {rbTargeted && (
+                        <div>
+                          <div className="text-xs text-gray-500 mb-2">Outcome</div>
+                          <div className="flex gap-1.5">
+                            <button onClick={() => setSuccess(true)}
+                              className={`px-4 h-9 rounded text-xs font-bold transition ${success === true ? "bg-green-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                              Caught ✓
+                            </button>
+                            <button onClick={() => setSuccess(false)}
+                              className={`px-4 h-9 rounded text-xs font-bold transition ${success === false ? "bg-red-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                              Drop ✗
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <>
+                    {/* Context toggles — run/block plays only */}
+                    <div className="flex flex-wrap gap-3">
+                      <div>
+                        <div className="text-xs text-gray-500 mb-2">Loaded Box?</div>
+                        <div className="flex gap-1.5">
+                          <button onClick={() => setLoadedBox(true)} className={`px-3 h-9 rounded text-xs font-medium transition ${loadedBox ? "bg-teal-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>Yes</button>
+                          <button onClick={() => setLoadedBox(false)} className={`px-3 h-9 rounded text-xs font-medium transition ${!loadedBox ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>No</button>
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-gray-500 mb-2">Unblocked Defender?</div>
+                        <div className="flex gap-1.5">
+                          <button onClick={() => setUnblockedDefender(true)} className={`px-3 h-9 rounded text-xs font-medium transition ${unblockedDefender ? "bg-orange-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>Yes</button>
+                          <button onClick={() => setUnblockedDefender(false)} className={`px-3 h-9 rounded text-xs font-medium transition ${!unblockedDefender ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>No</button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Success / Fail */}
+                    <div>
+                      <div className="text-xs text-gray-500 mb-2">Result</div>
+                      <div className="flex gap-3">
+                        <button onClick={() => setSuccess(true)}
+                          className={`flex-1 py-3 rounded-lg text-sm font-bold transition ${success === true ? "bg-green-600 text-white ring-2 ring-green-400" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                          ✓ SUCCESS
+                        </button>
+                        <button onClick={() => setSuccess(false)}
+                          className={`flex-1 py-3 rounded-lg text-sm font-bold transition ${success === false ? "bg-red-600 text-white ring-2 ring-red-400" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                          ✗ FAIL
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Post-play flags */}
+                    <div>
+                      <div className="text-xs text-gray-500 mb-2">Play Flags <span className="text-gray-700">(select if yes)</span></div>
+                      <div className="flex gap-2">
+                        {[
+                          { label: "Broken Tackle", val: brokenTackle, set: setBrokenTackle, color: "bg-yellow-700" },
+                          { label: "Explosive Play", val: explosivePlay, set: setExplosivePlay, color: "bg-green-800" },
+                          { label: "Run Stuff", val: runStuff, set: setRunStuff, color: "bg-red-800" },
+                        ].map(({ label, val, set, color }) => (
+                          <button key={label} onClick={() => set(!val)}
+                            className={`flex-1 py-2 rounded text-xs font-medium transition ${val ? `${color} text-white` : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
 
                 {/* Notes + log */}
                 <div className="flex gap-2">
                   <input className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-green-500"
                     placeholder="Play note (optional)" value={playNotes} onChange={(e) => setPlayNotes(e.target.value)} />
-                  <button onClick={logPlay} disabled={savingPlay || success === null}
+                  <button onClick={logPlay} disabled={savingPlay || (runType !== "route" && success === null) || (runType === "route" && rbTargeted && success === null)}
                     className="px-5 py-2 bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white text-sm rounded font-medium transition">
                     {savingPlay ? "…" : "Log Play"}
                   </button>
@@ -771,20 +855,34 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                       {[...gamePlays].reverse().map((pl, i) => {
                         const rtLabel: Record<RBRunType, string> = {
                           outside_man_gap: "OG", inside_man_gap: "IG",
-                          outside_zone: "OZ", inside_zone: "IZ", pass_block: "PB",
+                          outside_zone: "OZ", inside_zone: "IZ", pass_block: "PB", route: "Route",
                         };
                         const fLabel: Record<RBFormation, string> = { gun: "Gun", pistol: "Pst", under_center: "UC" };
+                        const isRoute = pl.run_type === "route";
                         return (
                           <div key={pl.id} className="flex items-center gap-2 px-3 py-1.5 bg-gray-900 rounded text-xs">
                             <span className="text-gray-500 w-5 flex-shrink-0">{gamePlays.length - i}</span>
                             <span className="text-gray-400">{fLabel[pl.formation]}</span>
-                            <span className="text-white font-medium">{rtLabel[pl.run_type]}</span>
-                            {pl.loaded_box && <span className="text-teal-400">LB</span>}
-                            {pl.unblocked_defender && <span className="text-orange-400">UB</span>}
-                            <span className={pl.success ? "text-green-400" : "text-red-400"}>{pl.success ? "✓" : "✗"}</span>
-                            {pl.broken_tackle && <span className="text-yellow-400">BT</span>}
-                            {pl.explosive_play && <span className="text-green-300">EXP</span>}
-                            {pl.run_stuff && <span className="text-red-300">STF</span>}
+                            <span className={`font-medium ${isRoute ? "text-blue-400" : "text-white"}`}>{rtLabel[pl.run_type]}</span>
+                            {isRoute ? (
+                              <>
+                                {pl.aligned_as_wr && <span className="text-blue-300">WR</span>}
+                                {pl.targeted
+                                  ? pl.success === true ? <span className="text-green-400">✓</span>
+                                    : pl.success === false ? <span className="text-red-400">Drop</span>
+                                    : null
+                                  : <span className="text-gray-600">—</span>}
+                              </>
+                            ) : (
+                              <>
+                                {pl.loaded_box && <span className="text-teal-400">LB</span>}
+                                {pl.unblocked_defender && <span className="text-orange-400">UB</span>}
+                                <span className={pl.success ? "text-green-400" : "text-red-400"}>{pl.success ? "✓" : "✗"}</span>
+                                {pl.broken_tackle && <span className="text-yellow-400">BT</span>}
+                                {pl.explosive_play && <span className="text-green-300">EXP</span>}
+                                {pl.run_stuff && <span className="text-red-300">STF</span>}
+                              </>
+                            )}
                             {pl.play_notes && <span className="text-gray-500 truncate">{pl.play_notes}</span>}
                             <button onClick={() => deletePlay(pl.id)} className="ml-auto text-gray-700 hover:text-red-400 flex-shrink-0">✕</button>
                           </div>
@@ -816,13 +914,15 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                     <th className="pb-2 pr-4">Type</th>
                     <th className="pb-2 pr-4 text-right">Plays</th>
                     <th className="pb-2 pr-4 text-right">Run Att</th>
+                    <th className="pb-2 pr-4 text-right">Routes</th>
                     <th className="pb-2 text-right">Suc%</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-900">
                   {games.map((g) => {
                     const gPlays = plays.filter((p) => p.game_id === g.id);
-                    const runs = gPlays.filter((p) => p.run_type !== "pass_block");
+                    const runs = gPlays.filter((p) => p.run_type !== "pass_block" && p.run_type !== "route");
+                    const routes = gPlays.filter((p) => p.run_type === "route");
                     const suc = runs.filter((p) => p.success === true).length;
                     const sucPct = runs.length > 0 ? ((suc / runs.length) * 100).toFixed(0) : null;
                     return (
@@ -832,6 +932,9 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                         <td className="py-2 pr-4 text-gray-400 capitalize">{g.game_type}</td>
                         <td className="py-2 pr-4 text-right text-blue-400">{gPlays.length}</td>
                         <td className="py-2 pr-4 text-right text-green-400">{runs.length}</td>
+                        {routes.length > 0
+                          ? <td className="py-2 pr-4 text-right text-blue-300">{routes.length} routes</td>
+                          : <td className="py-2 pr-4 text-right text-gray-700">—</td>}
                         <td className={`py-2 text-right font-medium ${sucPct !== null ? (parseInt(sucPct) >= 55 ? "text-green-400" : parseInt(sucPct) >= 40 ? "text-yellow-400" : "text-red-400") : "text-gray-600"}`}>
                           {sucPct !== null ? `${sucPct}%` : "—"}
                         </td>

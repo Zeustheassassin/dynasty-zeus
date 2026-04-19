@@ -10,6 +10,7 @@ interface ParsedPlay {
   success: boolean | null;
   yards: number | null;
   play_notes: string;
+  no_route_run: boolean;
   valid: boolean;
   raw: string;
   error?: string;
@@ -20,6 +21,9 @@ interface Props {
   onImport: (plays: Omit<ParsedPlay, "valid" | "raw" | "error">[]) => Promise<void>;
   onCancel: () => void;
 }
+
+// Route keywords that mean "aligned on field but no route run" (run play, blocking snap, etc.)
+const NRR_KEYWORDS = new Set(["nrr", "aligned", "align", "snap", "noroute", "no route", "no_route", "block", "blk", "run"]);
 
 const ROUTE_MAP: Record<string, RouteType> = {
   nine: "nine", "9": "nine", go: "nine", fly: "nine", streak: "nine",
@@ -48,12 +52,24 @@ function parseBool(v: string): boolean {
 
 function parsePlay(row: string[]): ParsedPlay {
   const raw = row.join("\t");
-  if (row.length < 2) return { route_type: "other", alignment: "right", on_line: true, targeted: false, success: null, yards: null, play_notes: "", valid: false, raw, error: "Too few columns" };
+  if (row.length < 2) return { route_type: "other", alignment: "right", on_line: true, targeted: false, success: null, yards: null, play_notes: "", no_route_run: false, valid: false, raw, error: "Too few columns" };
 
   const col = (i: number) => (row[i] ?? "").trim();
 
   // Column order: Route | Alignment | On Line | Targeted | Success | Yards | Notes
-  const routeRaw = col(0).toLowerCase();
+  const routeRaw = col(0).toLowerCase().replace(/\s+/g, " ").trim();
+  const no_route_run = NRR_KEYWORDS.has(routeRaw);
+
+  if (no_route_run) {
+    const alignRaw = col(1).toLowerCase();
+    const alignment: Alignment = ALIGN_MAP[alignRaw] ?? "right";
+    const alignValid = !!ALIGN_MAP[alignRaw];
+    const on_line = col(2) === "" ? true : parseBool(col(2));
+    const play_notes = col(3) ?? "";
+    const error = !alignValid ? `Unknown alignment "${col(1)}"` : undefined;
+    return { route_type: "other", alignment, on_line, targeted: false, success: null, yards: null, play_notes, no_route_run: true, valid: !error, raw, error };
+  }
+
   const route_type: RouteType = ROUTE_MAP[routeRaw] ?? "other";
   const routeValid = !!ROUTE_MAP[routeRaw];
 
@@ -71,7 +87,7 @@ function parsePlay(row: string[]): ParsedPlay {
 
   const error = !routeValid ? `Unknown route "${col(0)}"` : !alignValid ? `Unknown alignment "${col(1)}"` : undefined;
 
-  return { route_type, alignment, on_line, targeted, success, yards, play_notes, valid: !error, raw, error };
+  return { route_type, alignment, on_line, targeted, success, yards, play_notes, no_route_run: false, valid: !error, raw, error };
 }
 
 function parseInput(text: string): ParsedPlay[] {
@@ -89,8 +105,10 @@ function parseInput(text: string): ParsedPlay[] {
 }
 
 const EXAMPLE = `curl\tR\tY\tY\tY\t12
+nrr\tL\tY\t\t\t\tRun play aligned left
 dig\tS\tN\tN
 post\tL\tY\tY\tN
+nrr\tR\tN\t\t\t\tBlocking snap
 slant\tR\tY\tY\tY\t8\tGood separation`;
 
 export default function BulkGameImport({ gameLabel, onImport, onCancel }: Props) {
@@ -153,9 +171,9 @@ export default function BulkGameImport({ gameLabel, onImport, onCancel }: Props)
           ))}
         </div>
         <div className="text-gray-500 space-y-0.5">
-          <div><span className="text-gray-300">Route:</span> curl, dig, post, corner, go, screen, slant, out, cross, wheel, flat, hitch, comeback, seam, other (or first letter)</div>
+          <div><span className="text-gray-300">Route:</span> curl, dig, post, corner, go, screen, slant, out, flat, comeback, other — or use <span className="text-amber-300 font-medium">nrr</span> / aligned / snap / run / block for alignment-only snaps (no route run)</div>
           <div><span className="text-gray-300">Alignment:</span> L / R / S / B (or Left / Right / Slot / Backfield)</div>
-          <div><span className="text-gray-300">Booleans:</span> Y or N &nbsp;·&nbsp; Leave Success blank if not targeted</div>
+          <div><span className="text-gray-300">Booleans:</span> Y or N &nbsp;·&nbsp; Leave Success blank if not targeted &nbsp;·&nbsp; For NRR rows columns 4–7 are ignored</div>
         </div>
         <div className="mt-2 text-gray-600">Example (tab-separated, same as Google Sheets copy):</div>
         <pre className="mt-1 text-gray-500 font-mono text-xs overflow-x-auto whitespace-pre">{EXAMPLE}</pre>
@@ -190,6 +208,9 @@ export default function BulkGameImport({ gameLabel, onImport, onCancel }: Props)
           <div className="flex items-center gap-3 mb-2">
             <span className="text-xs text-gray-400">{plays.length} rows parsed</span>
             {validCount > 0 && <span className="text-xs text-green-400">✓ {validCount} valid</span>}
+            {plays.filter((p) => p.valid && p.no_route_run).length > 0 && (
+              <span className="text-xs text-amber-400">{plays.filter((p) => p.valid && p.no_route_run).length} aligned snaps</span>
+            )}
             {invalidCount > 0 && <span className="text-xs text-red-400">✗ {invalidCount} with errors</span>}
           </div>
           <div className="max-h-56 overflow-y-auto border border-gray-800 rounded">
@@ -211,7 +232,11 @@ export default function BulkGameImport({ gameLabel, onImport, onCancel }: Props)
                 {plays.map((pl, i) => (
                   <tr key={i} className={pl.valid ? "bg-gray-950" : "bg-red-950/30"}>
                     <td className="px-2 py-1 text-gray-600">{i + 1}</td>
-                    <td className="px-2 py-1 text-white capitalize">{pl.route_type}</td>
+                    <td className="px-2 py-1">
+                      {pl.no_route_run
+                        ? <span className="text-amber-400 font-medium">aligned</span>
+                        : <span className="text-white capitalize">{pl.route_type}</span>}
+                    </td>
                     <td className="px-2 py-1 text-gray-300 capitalize">{pl.alignment[0].toUpperCase()}</td>
                     <td className="px-2 py-1 text-gray-400">{pl.on_line ? "On" : "Off"}</td>
                     <td className="px-2 py-1">{pl.targeted ? <span className="text-yellow-400">Y</span> : <span className="text-gray-600">N</span>}</td>

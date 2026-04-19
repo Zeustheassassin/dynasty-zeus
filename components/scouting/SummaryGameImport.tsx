@@ -13,6 +13,7 @@ interface ReconstructedPlay {
   contested: boolean;
   yards: number | null;
   play_notes: string;
+  no_route_run: boolean;
 }
 
 interface GameSummary {
@@ -182,78 +183,81 @@ function parseSummary(text: string): GameSummary | null {
 }
 
 function reconstructPlays(s: GameSummary): ReconstructedPlay[] {
-  const plays: ReconstructedPlay[] = [];
-
-  // Build flat list of plays by route type
+  // Route plays
+  const routePlays: ReconstructedPlay[] = [];
   for (const [rt, count] of Object.entries(s.routeCounts) as [RouteType, number][]) {
     for (let i = 0; i < (count ?? 0); i++) {
-      plays.push({
-        route_type: rt,
-        alignment: "right",
-        on_line: true,
-        coverage: "",
-        was_open: false,
-        targeted: false,
-        success: null,
-        contested: false,
-        yards: null,
-        play_notes: "",
+      routePlays.push({
+        route_type: rt, alignment: "right", on_line: true,
+        coverage: "", was_open: false, targeted: false,
+        success: null, contested: false, yards: null, play_notes: "",
+        no_route_run: false,
       });
     }
   }
 
-  const total = plays.length;
-  if (total === 0) return plays;
+  // NRR plays — alignment-only snaps (run plays, blocking, etc.)
+  // totalSnaps includes both route runs and NRR; the difference fills with NRR plays
+  const nrrCount = Math.max(0, s.totalSnaps - routePlays.length);
+  const nrrPlays: ReconstructedPlay[] = Array.from({ length: nrrCount }, () => ({
+    route_type: "other" as RouteType, alignment: "right" as Alignment, on_line: true,
+    coverage: "" as CoverageType, was_open: false, targeted: false,
+    success: null, contested: false, yards: null, play_notes: "",
+    no_route_run: true,
+  }));
 
-  // Assign coverage sequentially: man, zone, press, double
+  // Combine all snaps for alignment + on_line assignment
+  const allPlays = [...routePlays, ...nrrPlays];
+  const totalSnaps = allPlays.length;
+  if (totalSnaps === 0) return allPlays;
+
+  // Assign coverage to route plays only (sequentially)
   const coveragePool: CoverageType[] = [
     ...Array(s.coverageMan).fill("man" as CoverageType),
     ...Array(s.coverageZone).fill("zone" as CoverageType),
     ...Array(s.coveragePress).fill("press" as CoverageType),
     ...Array(s.coverageDouble).fill("double" as CoverageType),
   ];
-  // Fill any remainder (rounding diff) with ""
-  for (let i = 0; i < total; i++) {
-    plays[i].coverage = coveragePool[i] ?? "";
+  for (let i = 0; i < routePlays.length; i++) {
+    routePlays[i].coverage = coveragePool[i] ?? "";
   }
 
-  // Assign alignment proportionally from snap counts
+  // Assign alignment across ALL snaps using the sheet's exact snap counts
   const snapTotal = s.alignRight + s.alignLeft + s.alignSlot + s.alignBackfield;
   if (snapTotal > 0) {
-    const rightCount = Math.round((s.alignRight / snapTotal) * total);
-    const leftCount = Math.round((s.alignLeft / snapTotal) * total);
-    const slotCount = Math.round((s.alignSlot / snapTotal) * total);
-    // remainder goes to backfield
+    const rightCount = Math.round((s.alignRight / snapTotal) * totalSnaps);
+    const leftCount = Math.round((s.alignLeft / snapTotal) * totalSnaps);
+    const slotCount = Math.round((s.alignSlot / snapTotal) * totalSnaps);
     const alignPool: Alignment[] = [
       ...Array(rightCount).fill("right" as Alignment),
       ...Array(leftCount).fill("left" as Alignment),
       ...Array(slotCount).fill("slot" as Alignment),
-      ...Array(Math.max(0, total - rightCount - leftCount - slotCount)).fill("backfield" as Alignment),
+      ...Array(Math.max(0, totalSnaps - rightCount - leftCount - slotCount)).fill("backfield" as Alignment),
     ];
-    for (let i = 0; i < total; i++) plays[i].alignment = alignPool[i] ?? "right";
+    for (let i = 0; i < totalSnaps; i++) allPlays[i].alignment = alignPool[i] ?? "right";
   }
 
-  // Assign on_line proportionally from snap depth data
+  // Assign on_line across ALL snaps proportionally from depth data
   if (s.totalSnaps > 0 && s.behindLOS > 0) {
-    const offLineCount = Math.max(0, Math.round((s.behindLOS / s.totalSnaps) * total));
-    for (let i = 0; i < offLineCount && i < total; i++) plays[i].on_line = false;
+    const offLineCount = Math.max(0, Math.round((s.behindLOS / s.totalSnaps) * totalSnaps));
+    for (let i = 0; i < offLineCount && i < totalSnaps; i++) allPlays[i].on_line = false;
   }
 
-  // Assign was_open from route timesOpen (factual from spreadsheet)
+  // Assign was_open to route plays only from timesOpen data
   const routePlayIndicesForOpen: Partial<Record<RouteType, number[]>> = {};
-  for (let i = 0; i < plays.length; i++) {
-    const rt = plays[i].route_type;
+  for (let i = 0; i < routePlays.length; i++) {
+    const rt = routePlays[i].route_type;
     if (!routePlayIndicesForOpen[rt]) routePlayIndicesForOpen[rt] = [];
     routePlayIndicesForOpen[rt]!.push(i);
   }
   for (const [rt, openCount] of Object.entries(s.routeTimesOpen) as [RouteType, number][]) {
     const indices = routePlayIndicesForOpen[rt] ?? [];
     for (let k = 0; k < openCount && k < indices.length; k++) {
-      plays[indices[k]].was_open = true;
+      routePlays[indices[k]].was_open = true;
     }
   }
 
-  return plays;
+  return allPlays;
 }
 
 export default function SummaryGameImport({ gameLabel, onImport, onCancel }: Props) {
@@ -289,10 +293,12 @@ export default function SummaryGameImport({ gameLabel, onImport, onCancel }: Pro
 
   if (done && summary) {
     const plays = reconstructPlays(summary);
+    const routeCount = plays.filter((p) => !p.no_route_run).length;
+    const snapCount = plays.length;
     return (
       <div className="p-6 bg-gray-900 border border-gray-700 rounded-lg text-center">
         <div className="text-green-400 text-2xl mb-2">✓</div>
-        <div className="text-white font-medium mb-1">Imported {plays.length} plays</div>
+        <div className="text-white font-medium mb-1">{snapCount} snaps imported ({routeCount} routes · {snapCount - routeCount} alignment-only)</div>
         <div className="text-gray-400 text-sm mb-4">for {gameLabel}</div>
         <button onClick={onCancel} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded transition">Done</button>
       </div>
@@ -345,7 +351,10 @@ export default function SummaryGameImport({ gameLabel, onImport, onCancel }: Pro
       {/* Preview */}
       {summary && (
         <div className="p-3 bg-gray-900 border border-gray-700 rounded-lg text-xs space-y-3">
-          <div className="text-gray-300 font-medium">Detected — {plays.length} plays to reconstruct</div>
+          <div className="text-gray-300 font-medium">
+            Detected — {plays.length} snaps total
+            ({plays.filter((p) => !p.no_route_run).length} routes · <span className="text-amber-400">{plays.filter((p) => p.no_route_run).length} alignment-only</span>)
+          </div>
           <div className="grid grid-cols-3 gap-3">
             {/* Routes */}
             <div>
@@ -388,7 +397,7 @@ export default function SummaryGameImport({ gameLabel, onImport, onCancel }: Pro
           disabled={importing || !summary || plays.length === 0}
           className="px-5 py-2 bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white text-sm rounded font-medium transition"
         >
-          {importing ? "Importing…" : summary ? `Import ${plays.length} Plays` : "Paste data above"}
+          {importing ? "Importing…" : summary ? `Import ${plays.length} Snaps (${plays.filter((p) => !p.no_route_run).length} routes)` : "Paste data above"}
         </button>
         <button onClick={onCancel} className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm rounded transition">Cancel</button>
       </div>

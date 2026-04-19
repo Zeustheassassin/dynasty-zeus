@@ -89,13 +89,14 @@ export default function ScoutingHub() {
       "nine", "post", "dig", "curl", "slant", "screen", "flat", "comeback", "out", "corner", "other",
     ];
 
-    // League-wide open rates from ALL plays (used for SAE calculation)
+    // League-wide open rates from route runs only (no_route_run=false), used for SAE calculation
     const leagueRoute: Partial<Record<RoutePlay["route_type"], { open: number; count: number }>> = {};
     const leagueCvg: Record<string, { open: number; count: number }> = {
       man: { open: 0, count: 0 }, zone: { open: 0, count: 0 },
       double: { open: 0, count: 0 }, press: { open: 0, count: 0 },
     };
     for (const pl of plays) {
+      if (pl.no_route_run) continue;
       if (!leagueRoute[pl.route_type]) leagueRoute[pl.route_type] = { open: 0, count: 0 };
       leagueRoute[pl.route_type]!.count++;
       if (pl.was_open) leagueRoute[pl.route_type]!.open++;
@@ -107,9 +108,12 @@ export default function ScoutingHub() {
 
     return prospects.map((p) => {
       const gameIds = new Set(gamesByProspect[p.id] ?? []);
+      // pPlays = all logged snaps; routePlays = only plays where a route was run
       const pPlays = plays.filter((pl) => gameIds.has(pl.game_id));
+      const routePlays = pPlays.filter((pl) => !pl.no_route_run);
 
-      const total = pPlays.length;
+      const totalSnaps = pPlays.length;
+      const totalRoutes = routePlays.length;
       const prospectGames = games.filter((g) => gameIds.has(g.id));
 
       // Use stored summary totals for imported games; compute from plays for charted games
@@ -122,7 +126,7 @@ export default function ScoutingHub() {
           contested += g.summary_contested ?? 0;
           contested_catches += g.summary_contested_catches ?? 0;
         } else {
-          const gPlays = plays.filter((pl) => pl.game_id === g.id);
+          const gPlays = routePlays.filter((pl) => pl.game_id === g.id);
           tgt += gPlays.filter((pl) => pl.targeted).length;
           ctch += gPlays.filter((pl) => pl.targeted && pl.success).length;
           drops += gPlays.filter((pl) => pl.targeted && pl.success === false).length;
@@ -130,13 +134,15 @@ export default function ScoutingHub() {
           contested_catches += gPlays.filter((pl) => pl.contested && pl.success === true).length;
         }
       }
-      const yds = pPlays.reduce((s, pl) => s + (pl.yards ?? 0), 0);
+      const yds = routePlays.reduce((s, pl) => s + (pl.yards ?? 0), 0);
+      // Alignment % — out of total snaps (player is aligned on every snap)
       const leftN = pPlays.filter((pl) => pl.alignment === "left").length;
       const rightN = pPlays.filter((pl) => pl.alignment === "right").length;
       const slotN = pPlays.filter((pl) => pl.alignment === "slot").length;
       const bfN = pPlays.filter((pl) => pl.alignment === "backfield").length;
 
-      const pct = (n: number) => (total > 0 ? parseFloat(((n / total) * 100).toFixed(1)) : null);
+      const snapPct = (n: number) => (totalSnaps > 0 ? parseFloat(((n / totalSnaps) * 100).toFixed(1)) : null);
+      const routePct = (n: number) => (totalRoutes > 0 ? parseFloat(((n / totalRoutes) * 100).toFixed(1)) : null);
 
       const extRanks = [p.pff_rank, p.mock_draft_rank, p.drafttek_rank, p.pfn_rank].filter(
         (r): r is number => r !== null && r !== undefined
@@ -144,7 +150,7 @@ export default function ScoutingHub() {
 
       const route_stats: ProspectWithStats["route_stats"] = {};
       for (const rt of ROUTE_TYPES) {
-        const rtPlays = pPlays.filter((pl) => pl.route_type === rt);
+        const rtPlays = routePlays.filter((pl) => pl.route_type === rt);
         if (rtPlays.length > 0) {
           route_stats[rt] = {
             count: rtPlays.length,
@@ -156,7 +162,7 @@ export default function ScoutingHub() {
       }
 
       const cvg = (type: "man" | "zone" | "double" | "press") => {
-        const cvgPlays = pPlays.filter((pl) => pl.coverage === type);
+        const cvgPlays = routePlays.filter((pl) => pl.coverage === type);
         return {
           count: cvgPlays.length,
           open: cvgPlays.filter((pl) => pl.was_open).length,
@@ -166,7 +172,8 @@ export default function ScoutingHub() {
 
       return {
         ...p,
-        total_routes: total,
+        total_snaps: totalSnaps,
+        total_routes: totalRoutes,
         total_games: gameIds.size,
         targets: tgt,
         catches: ctch,
@@ -174,34 +181,34 @@ export default function ScoutingHub() {
         contested,
         contested_catches,
         total_yards: yds,
-        // Suc% = open rate (SRVC), not catch rate
-        success_rate: total > 0 ? parseFloat(((pPlays.filter((pl) => pl.was_open).length / total) * 100).toFixed(1)) : null,
-        target_rate: pct(tgt),
+        // Suc% = open rate (SRVC) based on route runs only
+        success_rate: totalRoutes > 0 ? parseFloat(((routePlays.filter((pl) => pl.was_open).length / totalRoutes) * 100).toFixed(1)) : null,
+        target_rate: routePct(tgt),
         avg_ypc: ctch > 0 ? parseFloat((yds / ctch).toFixed(1)) : null,
-        pct_left: pct(leftN),
-        pct_right: pct(rightN),
-        pct_slot: pct(slotN),
-        pct_backfield: pct(bfN),
-        pct_on_line: pct(pPlays.filter((pl) => pl.on_line).length),
+        pct_left: snapPct(leftN),
+        pct_right: snapPct(rightN),
+        pct_slot: snapPct(slotN),
+        pct_backfield: snapPct(bfN),
+        pct_on_line: snapPct(pPlays.filter((pl) => pl.on_line).length),
         adj_success_above_exp: (() => {
-          if (total === 0) return null;
-          const actualOpen = pPlays.filter((pl) => pl.was_open).length / total;
+          if (totalRoutes === 0) return null;
+          const actualOpen = routePlays.filter((pl) => pl.was_open).length / totalRoutes;
           let expRoute = 0, routeW = 0;
           for (const rt of ROUTE_TYPES) {
-            const rtCount = pPlays.filter((pl) => pl.route_type === rt).length;
+            const rtCount = routePlays.filter((pl) => pl.route_type === rt).length;
             const lg = leagueRoute[rt];
             if (rtCount > 0 && lg && lg.count > 0) {
-              expRoute += (rtCount / total) * (lg.open / lg.count);
-              routeW += rtCount / total;
+              expRoute += (rtCount / totalRoutes) * (lg.open / lg.count);
+              routeW += rtCount / totalRoutes;
             }
           }
           let expCvg = 0, cvgW = 0;
           for (const cvgType of ["man", "zone", "double", "press"] as const) {
-            const cvgCount = pPlays.filter((pl) => pl.coverage === cvgType).length;
+            const cvgCount = routePlays.filter((pl) => pl.coverage === cvgType).length;
             const lg = leagueCvg[cvgType];
             if (cvgCount > 0 && lg.count > 0) {
-              expCvg += (cvgCount / total) * (lg.open / lg.count);
-              cvgW += cvgCount / total;
+              expCvg += (cvgCount / totalRoutes) * (lg.open / lg.count);
+              cvgW += cvgCount / totalRoutes;
             }
           }
           let combined: number | null = null;
@@ -214,16 +221,16 @@ export default function ScoutingHub() {
           extRanks.length > 0
             ? parseFloat((extRanks.reduce((s, r) => s + r, 0) / extRanks.length).toFixed(1))
             : null,
-        depth_behind_los: pPlays.filter((pl) => !pl.on_line).length,
-        depth_on_los: pPlays.filter((pl) => pl.on_line).length,
+        depth_behind_los: routePlays.filter((pl) => !pl.on_line).length,
+        depth_on_los: routePlays.filter((pl) => pl.on_line).length,
         route_stats,
         coverage_stats: { man: cvg("man"), zone: cvg("zone"), double: cvg("double"), press: cvg("press") },
-        // Alignment open rates — only from manually-charted plays (games without stored summary totals)
+        // Alignment open rates — only from manually-charted route runs (not NRR, not summary imports)
         ...(() => {
           const chartedIds = new Set(
             prospectGames.filter((g) => g.summary_targets == null).map((g) => g.id)
           );
-          const cp = pPlays.filter((pl) => chartedIds.has(pl.game_id));
+          const cp = routePlays.filter((pl) => chartedIds.has(pl.game_id));
           const alignOpen = (align: string, onLine?: boolean): number | null => {
             let filtered = cp.filter((pl) => pl.alignment === align);
             if (onLine === true) filtered = filtered.filter((pl) => pl.on_line);
