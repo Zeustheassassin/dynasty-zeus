@@ -1,6 +1,6 @@
 "use client";
 import { useMemo } from "react";
-import type { ProspectWithStats, RouteType } from "../../lib/types";
+import type { ProspectWithStats, RouteType } from "../../../lib/types";
 
 const ROUTE_TYPES: RouteType[] = [
   "nine", "post", "dig", "curl", "slant", "screen", "other", "flat", "comeback", "corner", "out",
@@ -127,15 +127,106 @@ function CardHeader({ title, prospect }: { title: string; prospect: ProspectWith
   );
 }
 
+type AlignKey =
+  | "slot" | "slot_on" | "slot_off"
+  | "right" | "right_on" | "right_off"
+  | "left" | "left_on" | "left_off"
+  | "backfield";
+
+const ALIGN_LABEL: Record<AlignKey, string> = {
+  slot: "SLOT", slot_on: "SLT ON", slot_off: "SLT OFF",
+  right: "RIGHT", right_on: "RT ON", right_off: "RT OFF",
+  left: "LEFT", left_on: "LT ON", left_off: "LT OFF",
+  backfield: "BF",
+};
+
+const ALIGN_ANGLE_DEG: Record<AlignKey, number> = {
+  left: 165, left_on: 145, left_off: 185,
+  slot: 90, slot_on: 115, slot_off: 65,
+  right: 15, right_on: 35, right_off: -5,
+  backfield: -90,
+};
+
+function getAlignValue(p: ProspectWithStats, k: AlignKey): number | null {
+  switch (k) {
+    case "slot":      return p.open_pct_slot;
+    case "slot_on":   return p.open_pct_slot_on_line;
+    case "slot_off":  return p.open_pct_slot_off_line;
+    case "right":     return p.open_pct_right;
+    case "right_on":  return p.open_pct_right_on_line;
+    case "right_off": return p.open_pct_right_off_line;
+    case "left":      return p.open_pct_left;
+    case "left_on":   return p.open_pct_left_on_line;
+    case "left_off":  return p.open_pct_left_off_line;
+    case "backfield": return p.open_pct_backfield;
+  }
+}
+
+const ALL_ALIGN_KEYS: AlignKey[] = [
+  "left", "left_on", "left_off",
+  "slot", "slot_on", "slot_off",
+  "right", "right_on", "right_off",
+  "backfield",
+];
+
+interface AlignSpoke { key: AlignKey; valuePct: number; tier: Tier; hasData: boolean; }
+
+function AlignChartSVG({ spokes }: { spokes: AlignSpoke[] }) {
+  const maxPct = 100;
+  return (
+    <svg viewBox="0 0 400 400" className="w-full">
+      {[0.33, 0.66, 1].map((f) => (
+        <circle key={f} cx={CX} cy={CY} r={R * f} fill="none" stroke="#1f2937" strokeWidth={1} />
+      ))}
+      <circle cx={CX} cy={CY} r={5} fill="#e5e7eb" />
+      {spokes.map(({ key, valuePct, tier, hasData }) => {
+        const deg = ALIGN_ANGLE_DEG[key];
+        const rad = toRad(deg);
+        const cosA = Math.cos(rad);
+        const sinA = Math.sin(rad);
+        const len = hasData && maxPct > 0 ? Math.max(22, (valuePct / maxPct) * R) : 0;
+        const ex = CX + cosA * len;
+        const ey = CY - sinA * len;
+        const hLen = 10, hW = 5;
+        const bx = ex - cosA * hLen; const by = ey + sinA * hLen;
+        const pAx = bx + sinA * hW; const pAy = by + cosA * hW;
+        const pBx = bx - sinA * hW; const pBy = by - cosA * hW;
+        const lx = CX + cosA * L_DIST;
+        const ly = CY - sinA * L_DIST;
+        const anchor: "start" | "middle" | "end" =
+          cosA > 0.15 ? "start" : cosA < -0.15 ? "end" : "middle";
+        const color = TIER_COLOR[tier];
+        return (
+          <g key={key}>
+            {hasData && len > 0 && (
+              <>
+                <line x1={CX} y1={CY} x2={ex} y2={ey} stroke={color} strokeWidth={3.5} strokeLinecap="round" />
+                <polygon points={`${ex},${ey} ${pAx},${pAy} ${pBx},${pBy}`} fill={color} />
+              </>
+            )}
+            <text x={lx} y={ly - 6} textAnchor={anchor} fill="#9ca3af" fontSize={8.5} fontWeight="700" letterSpacing="0.08em">
+              {ALIGN_LABEL[key]}
+            </text>
+            <text x={lx} y={ly + 6} textAnchor={anchor} fill={hasData ? color : "#4b5563"} fontSize={9.5} fontWeight="800">
+              {hasData ? `${valuePct.toFixed(1)}%` : "—"}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 interface Props {
   prospect: ProspectWithStats;
   allProspects: ProspectWithStats[];
 }
 
 export default function PlayerCharts({ prospect, allProspects }: Props) {
-  const { successSpokes, pctSpokes, pctMax } = useMemo(() => {
+  const { successSpokes, pctSpokes, pctMax, alignSpokes, hasAlignData } = useMemo(() => {
     const sucDist: Partial<Record<RouteType, number[]>> = {};
     const pctDist: Partial<Record<RouteType, number[]>> = {};
+    const alignDist: Partial<Record<AlignKey, number[]>> = {};
 
     for (const p of allProspects) {
       if (p.total_routes === 0) continue;
@@ -144,6 +235,10 @@ export default function PlayerCharts({ prospect, allProspects }: Props) {
         if (!rs || rs.count < MIN_ROUTES_FOR_TIER) continue;
         (sucDist[rt] ??= []).push((rs.open / rs.count) * 100);
         (pctDist[rt] ??= []).push((rs.count / p.total_routes) * 100);
+      }
+      for (const k of ALL_ALIGN_KEYS) {
+        const v = getAlignValue(p, k);
+        if (v !== null) (alignDist[k] ??= []).push(v);
       }
     }
 
@@ -172,7 +267,17 @@ export default function PlayerCharts({ prospect, allProspects }: Props) {
 
     const pctMax = Math.max(...pctSpokes.filter((s) => s.hasData).map((s) => s.valuePct), 1);
 
-    return { successSpokes, pctSpokes, pctMax };
+    const alignSpokes: AlignSpoke[] = ALL_ALIGN_KEYS.map((key) => {
+      const v = getAlignValue(prospect, key);
+      const hasData = v !== null;
+      const valuePct = hasData ? v! : 0;
+      const tier: Tier = hasData ? computeTier(valuePct, alignDist[key] ?? []) : "none";
+      return { key, valuePct, tier, hasData };
+    });
+
+    const hasAlignData = alignSpokes.some((s) => s.hasData);
+
+    return { successSpokes, pctSpokes, pctMax, alignSpokes, hasAlignData };
   }, [prospect, allProspects]);
 
   if (prospect.total_routes === 0) {
@@ -196,6 +301,12 @@ export default function PlayerCharts({ prospect, allProspects }: Props) {
           <CardHeader title="Route Percentage" prospect={prospect} />
           <ChartSVG spokes={pctSpokes} maxPct={pctMax} />
         </div>
+        {hasAlignData && (
+          <div className="bg-gray-950 border border-gray-700 rounded-xl overflow-hidden w-full sm:w-[370px]">
+            <CardHeader title="Open% by Alignment" prospect={prospect} />
+            <AlignChartSVG spokes={alignSpokes} />
+          </div>
+        )}
       </div>
 
       <div className="flex flex-wrap justify-center gap-6 text-xs text-gray-400">

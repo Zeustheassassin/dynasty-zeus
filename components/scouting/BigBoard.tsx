@@ -15,7 +15,11 @@ type SortKey =
   | "cvg_man" | "cvg_man_catch" | "cvg_zone" | "cvg_zone_catch"
   | "cvg_double" | "cvg_double_catch" | "cvg_press" | "cvg_press_catch"
   | `rt_${RouteType}_count` | `rt_${RouteType}_targets` | `rt_${RouteType}_catches` | `rt_${RouteType}_rate`
-  | "cvg_man_rate" | "cvg_zone_rate" | "cvg_press_rate";
+  | "cvg_man_rate" | "cvg_zone_rate" | "cvg_press_rate"
+  | "open_pct_slot" | "open_pct_slot_on" | "open_pct_slot_off"
+  | "open_pct_right" | "open_pct_right_on" | "open_pct_right_off"
+  | "open_pct_left" | "open_pct_left_on" | "open_pct_left_off"
+  | "open_pct_backfield";
 
 interface Props {
   prospects: ProspectWithStats[];
@@ -73,6 +77,16 @@ function getSortValue(p: ProspectWithStats, key: SortKey): number | string {
   if (key === "cvg_man_rate") { const s = p.coverage_stats.man; return s.count > 0 ? s.open / s.count : -BIG; }
   if (key === "cvg_zone_rate") { const s = p.coverage_stats.zone; return s.count > 0 ? s.open / s.count : -BIG; }
   if (key === "cvg_press_rate") { const s = p.coverage_stats.press; return s.count > 0 ? s.open / s.count : -BIG; }
+  if (key === "open_pct_slot") return p.open_pct_slot ?? -BIG;
+  if (key === "open_pct_slot_on") return p.open_pct_slot_on_line ?? -BIG;
+  if (key === "open_pct_slot_off") return p.open_pct_slot_off_line ?? -BIG;
+  if (key === "open_pct_right") return p.open_pct_right ?? -BIG;
+  if (key === "open_pct_right_on") return p.open_pct_right_on_line ?? -BIG;
+  if (key === "open_pct_right_off") return p.open_pct_right_off_line ?? -BIG;
+  if (key === "open_pct_left") return p.open_pct_left ?? -BIG;
+  if (key === "open_pct_left_on") return p.open_pct_left_on_line ?? -BIG;
+  if (key === "open_pct_left_off") return p.open_pct_left_off_line ?? -BIG;
+  if (key === "open_pct_backfield") return p.open_pct_backfield ?? -BIG;
   if (key.startsWith("rt_")) {
     const parts = key.split("_");
     const stat = parts[parts.length - 1] as "count" | "targets" | "catches" | "rate";
@@ -256,6 +270,7 @@ export default function BigBoard({
                 <th colSpan={17} className="px-2 py-1 text-center text-green-900 font-medium border-r border-gray-800">Metrics</th>
                 <th colSpan={3} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">Depth</th>
                 <th colSpan={4} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">Aligned</th>
+                <th colSpan={10} className="px-2 py-1 text-center text-teal-900 font-medium border-r border-gray-800">Align Open%</th>
                 <th colSpan={8} className="px-2 py-1 text-center text-orange-900 font-medium border-r border-gray-800">
                   Coverage — Att / Catch
                 </th>
@@ -305,6 +320,17 @@ export default function BigBoard({
                 {th("LWR", "pct_left")}
                 {th("Slot", "pct_slot")}
                 {th("BF", "pct_backfield", "border-r border-gray-800")}
+                {/* Alignment Open% */}
+                {th("Slot", "open_pct_slot", "border-l border-gray-800 text-teal-400")}
+                {th("Slot-On", "open_pct_slot_on", "text-teal-300")}
+                {th("Slot-Off", "open_pct_slot_off", "text-teal-300")}
+                {th("Right", "open_pct_right", "text-teal-400")}
+                {th("R-On", "open_pct_right_on", "text-teal-300")}
+                {th("R-Off", "open_pct_right_off", "text-teal-300")}
+                {th("Left", "open_pct_left", "text-teal-400")}
+                {th("L-On", "open_pct_left_on", "text-teal-300")}
+                {th("L-Off", "open_pct_left_off", "text-teal-300")}
+                {th("BF%", "open_pct_backfield", "text-teal-400 border-r border-gray-800")}
                 {/* Coverage */}
                 {th("Man", "cvg_man", "border-l border-gray-800 text-orange-500")}
                 {th("ManC", "cvg_man_catch", "text-orange-300")}
@@ -422,6 +448,18 @@ export default function BigBoard({
                     <td className={`${tdBase} text-gray-400`}>{p.pct_left != null ? `${Math.round((p.pct_left / 100) * p.total_routes)}` : "—"}</td>
                     <td className={`${tdBase} text-gray-400`}>{p.pct_slot != null ? `${Math.round((p.pct_slot / 100) * p.total_routes)}` : "—"}</td>
                     <td className={`${tdBase} text-gray-400 border-r border-gray-800`}>{p.pct_backfield != null ? `${Math.round((p.pct_backfield / 100) * p.total_routes)}` : "—"}</td>
+
+                    {/* Alignment Open% — charted plays only */}
+                    <td className={`${tdBase} text-teal-400 border-l border-gray-800`}>{pct(p.open_pct_slot)}</td>
+                    <td className={`${tdBase} text-teal-300`}>{pct(p.open_pct_slot_on_line)}</td>
+                    <td className={`${tdBase} text-teal-300`}>{pct(p.open_pct_slot_off_line)}</td>
+                    <td className={`${tdBase} text-teal-400`}>{pct(p.open_pct_right)}</td>
+                    <td className={`${tdBase} text-teal-300`}>{pct(p.open_pct_right_on_line)}</td>
+                    <td className={`${tdBase} text-teal-300`}>{pct(p.open_pct_right_off_line)}</td>
+                    <td className={`${tdBase} text-teal-400`}>{pct(p.open_pct_left)}</td>
+                    <td className={`${tdBase} text-teal-300`}>{pct(p.open_pct_left_on_line)}</td>
+                    <td className={`${tdBase} text-teal-300`}>{pct(p.open_pct_left_off_line)}</td>
+                    <td className={`${tdBase} text-teal-400 border-r border-gray-800`}>{pct(p.open_pct_backfield)}</td>
 
                     {/* Coverage */}
                     <td className={`${tdBase} text-orange-400 border-l border-gray-800`}>{n(p.coverage_stats.man.count) === "0" ? "—" : n(p.coverage_stats.man.count)}</td>

@@ -12,21 +12,24 @@ import type {
 
 const log = logger("ScoutingHub");
 
-const ProspectList = dynamic(() => import("./scouting/ProspectList"), { ssr: false });
+const WRHub = dynamic(() => import("./scouting/wr/WRHub"), { ssr: false });
+const RBHub = dynamic(() => import("./scouting/rb/RBHub"), { ssr: false });
+const QBHub = dynamic(() => import("./scouting/qb/QBHub"), { ssr: false });
+const TEHub = dynamic(() => import("./scouting/te/TEHub"), { ssr: false });
 const BigBoard = dynamic(() => import("./scouting/BigBoard"), { ssr: false });
 const GamesLog = dynamic(() => import("./scouting/GamesLog"), { ssr: false });
-const PlayerChartingBoard = dynamic(() => import("./scouting/PlayerChartingBoard"), { ssr: false });
 
 type HubTab = "prospects" | "big_board" | "games_log";
+type PositionTab = "WR" | "RB" | "QB" | "TE";
 
 export default function ScoutingHub() {
   const [tab, setTab] = useState<HubTab>("prospects");
+  const [positionTab, setPositionTab] = useState<PositionTab>("WR");
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [games, setGames] = useState<ScoutingGame[]>([]);
   const [plays, setPlays] = useState<RoutePlay[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
-  const [draftYearFilter, setDraftYearFilter] = useState<number | null>(2026);
+  const [draftYearFilter, setDraftYearFilter] = useState<number | null>(null);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -183,7 +186,6 @@ export default function ScoutingHub() {
         adj_success_above_exp: (() => {
           if (total === 0) return null;
           const actualOpen = pPlays.filter((pl) => pl.was_open).length / total;
-          // Expected open rate from route distribution vs league averages
           let expRoute = 0, routeW = 0;
           for (const rt of ROUTE_TYPES) {
             const rtCount = pPlays.filter((pl) => pl.route_type === rt).length;
@@ -193,7 +195,6 @@ export default function ScoutingHub() {
               routeW += rtCount / total;
             }
           }
-          // Expected open rate from coverage distribution vs league averages
           let expCvg = 0, cvgW = 0;
           for (const cvgType of ["man", "zone", "double", "press"] as const) {
             const cvgCount = pPlays.filter((pl) => pl.coverage === cvgType).length;
@@ -217,6 +218,33 @@ export default function ScoutingHub() {
         depth_on_los: pPlays.filter((pl) => pl.on_line).length,
         route_stats,
         coverage_stats: { man: cvg("man"), zone: cvg("zone"), double: cvg("double"), press: cvg("press") },
+        // Alignment open rates — only from manually-charted plays (games without stored summary totals)
+        ...(() => {
+          const chartedIds = new Set(
+            prospectGames.filter((g) => g.summary_targets == null).map((g) => g.id)
+          );
+          const cp = pPlays.filter((pl) => chartedIds.has(pl.game_id));
+          const alignOpen = (align: string, onLine?: boolean): number | null => {
+            let filtered = cp.filter((pl) => pl.alignment === align);
+            if (onLine === true) filtered = filtered.filter((pl) => pl.on_line);
+            if (onLine === false) filtered = filtered.filter((pl) => !pl.on_line);
+            return filtered.length > 0
+              ? parseFloat(((filtered.filter((pl) => pl.was_open).length / filtered.length) * 100).toFixed(1))
+              : null;
+          };
+          return {
+            open_pct_slot: alignOpen("slot"),
+            open_pct_slot_on_line: alignOpen("slot", true),
+            open_pct_slot_off_line: alignOpen("slot", false),
+            open_pct_right: alignOpen("right"),
+            open_pct_right_on_line: alignOpen("right", true),
+            open_pct_right_off_line: alignOpen("right", false),
+            open_pct_left: alignOpen("left"),
+            open_pct_left_on_line: alignOpen("left", true),
+            open_pct_left_off_line: alignOpen("left", false),
+            open_pct_backfield: alignOpen("backfield"),
+          };
+        })(),
       };
     });
   }, [prospects, games, plays]);
@@ -235,22 +263,18 @@ export default function ScoutingHub() {
 
   async function handleUpdateRank(id: string, targetRank: number) {
     const clamp = Math.max(1, targetRank);
-
-    // Sort all currently-ranked prospects (excluding the mover), then insert mover at the target slot
-    const rankedOthers = prospects
-      .filter((p) => p.personal_rank != null && p.id !== id)
-      .sort((a, b) => (a.personal_rank ?? 0) - (b.personal_rank ?? 0));
     const mover = prospects.find((p) => p.id === id);
     if (!mover) return;
 
+    // Rankings are per draft class year — only shift others in the same year
+    const rankedOthers = prospects
+      .filter((p) => p.personal_rank != null && p.id !== id && p.draft_class_year === mover.draft_class_year)
+      .sort((a, b) => (a.personal_rank ?? 0) - (b.personal_rank ?? 0));
+
     rankedOthers.splice(Math.min(clamp - 1, rankedOthers.length), 0, mover);
 
-    // Reassign contiguous ranks 1..n
     const rankMap = new Map<string, number>(rankedOthers.map((p, i) => [p.id, i + 1]));
-
-    // Only persist rows whose rank actually changed
     const changed = rankedOthers.filter((p) => p.personal_rank !== rankMap.get(p.id));
-
     setProspects((prev) => prev.map((p) => rankMap.has(p.id) ? { ...p, personal_rank: rankMap.get(p.id)! } : p));
 
     await Promise.all(
@@ -260,24 +284,26 @@ export default function ScoutingHub() {
     );
   }
 
-  function handleSelectProspect(p: Prospect) {
-    setSelectedProspect(p);
-    setTab("prospects");
-  }
-
-  function handleBack() {
-    setSelectedProspect(null);
-    loadAll();
-  }
-
-  const tabs: { key: HubTab; label: string }[] = [
+  const hubTabs: { key: HubTab; label: string }[] = [
     { key: "prospects", label: "Prospects" },
     { key: "big_board", label: "Big Board" },
     { key: "games_log", label: "Games Charted" },
   ];
 
+  const positionTabs: PositionTab[] = ["QB", "RB", "WR", "TE"];
+
   const charted = prospectsWithStats.filter((p) => p.total_routes > 0).length;
-  const declared = prospectsWithStats.filter((p) => p.charting_decision === "pending").length;
+  const pending = prospectsWithStats.filter((p) => p.charting_decision === "pending").length;
+
+  // Shared props for all position hubs
+  const hubProps = {
+    prospectsWithStats,
+    loading,
+    onAddProspect: handleAddProspect,
+    onDataChanged: loadAll,
+    draftYearFilter,
+    setDraftYearFilter,
+  };
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
@@ -290,82 +316,78 @@ export default function ScoutingHub() {
               <p className="text-sm text-gray-400 mt-0.5">
                 {prospectsWithStats.length} prospects ·{" "}
                 <span className="text-green-400">{charted} charted</span> ·{" "}
-                <span className="text-yellow-400">{declared} declared</span> ·{" "}
+                <span className="text-yellow-400">{pending} pending</span> ·{" "}
                 {games.length} games · {plays.length} routes logged
               </p>
             </div>
-            {selectedProspect && (
-              <button
-                onClick={handleBack}
-                className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm rounded transition"
-              >
-                ← All Prospects
-              </button>
-            )}
           </div>
 
-          {/* Tab bar — only show when not on a player board */}
-          {!selectedProspect && (
-            <div className="flex gap-1 mt-4 border-b border-gray-800 -mb-px">
-              {tabs.map((t) => (
-                <button
-                  key={t.key}
-                  onClick={() => setTab(t.key)}
-                  className={`px-5 py-2 text-sm font-medium border-b-2 transition whitespace-nowrap ${
-                    tab === t.key
-                      ? "border-blue-500 text-blue-400"
-                      : "border-transparent text-gray-400 hover:text-white"
-                  }`}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-          )}
+          {/* Main tab bar */}
+          <div className="flex gap-1 mt-4 border-b border-gray-800 -mb-px">
+            {hubTabs.map((t) => (
+              <button
+                key={t.key}
+                onClick={() => setTab(t.key)}
+                className={`px-5 py-2 text-sm font-medium border-b-2 transition whitespace-nowrap ${
+                  tab === t.key
+                    ? "border-blue-500 text-blue-400"
+                    : "border-transparent text-gray-400 hover:text-white"
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
       {/* Content */}
       <div className="max-w-7xl mx-auto px-4 py-6">
-        {selectedProspect ? (
-          <PlayerChartingBoard
-            prospect={selectedProspect}
-            onBack={handleBack}
-            onDataChanged={loadAll}
-            allProspects={prospectsWithStats}
-          />
-        ) : (
+        {tab === "prospects" && (
           <>
-            {tab === "prospects" && (
-              <ProspectList
-                prospects={prospectsWithStats}
-                loading={loading}
-                onSelectProspect={handleSelectProspect}
-                onAddProspect={handleAddProspect}
-                draftYearFilter={draftYearFilter}
-                setDraftYearFilter={setDraftYearFilter}
-              />
-            )}
-            {tab === "big_board" && (
-              <BigBoard
-                prospects={prospectsWithStats}
-                loading={loading}
-                onSelectProspect={handleSelectProspect}
-                onUpdateRank={handleUpdateRank}
-                draftYearFilter={draftYearFilter}
-                setDraftYearFilter={setDraftYearFilter}
-              />
-            )}
-            {tab === "games_log" && (
-              <GamesLog
-                games={games}
-                plays={plays}
-                prospects={prospectsWithStats}
-                loading={loading}
-                onSelectProspect={handleSelectProspect}
-              />
-            )}
+            {/* Position sub-tabs */}
+            <div className="flex gap-1 mb-5 border-b border-gray-800">
+              {positionTabs.map((pos) => (
+                <button
+                  key={pos}
+                  onClick={() => setPositionTab(pos)}
+                  className={`px-5 py-2 text-sm font-medium border-b-2 transition whitespace-nowrap ${
+                    positionTab === pos
+                      ? "border-blue-500 text-blue-400"
+                      : "border-transparent text-gray-400 hover:text-white"
+                  }`}
+                >
+                  {pos}
+                </button>
+              ))}
+            </div>
+
+            {positionTab === "WR" && <WRHub {...hubProps} />}
+            {positionTab === "RB" && <RBHub {...hubProps} />}
+            {positionTab === "QB" && <QBHub {...hubProps} />}
+            {positionTab === "TE" && <TEHub {...hubProps} />}
           </>
+        )}
+
+        {tab === "big_board" && (
+          <BigBoard
+            prospects={prospectsWithStats}
+            loading={loading}
+            onSelectProspect={(p) => { setPositionTab(p.position as PositionTab); setTab("prospects"); }}
+            onUpdateRank={handleUpdateRank}
+            draftYearFilter={draftYearFilter}
+            setDraftYearFilter={setDraftYearFilter}
+          />
+        )}
+
+        {tab === "games_log" && (
+          <GamesLog
+            games={games}
+            plays={plays}
+            prospects={prospectsWithStats}
+            loading={loading}
+            onSelectProspect={(p) => { setPositionTab(p.position as PositionTab); setTab("prospects"); }}
+          />
         )}
       </div>
     </div>

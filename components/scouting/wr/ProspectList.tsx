@@ -1,6 +1,6 @@
 "use client";
 import { useState, useMemo } from "react";
-import type { Prospect, ProspectWithStats, ChartingDecision } from "../../lib/types";
+import type { Prospect, ProspectWithStats, ChartingDecision } from "../../../lib/types";
 
 type SortKey = "personal_rank" | "name" | "school" | "total_routes" | "draft_class_year";
 

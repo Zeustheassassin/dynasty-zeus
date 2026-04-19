@@ -879,6 +879,26 @@ export interface RoutePlay {
 export interface RouteStat { count: number; open: number; targets: number; catches: number }
 export interface CoverageStat { count: number; open: number; catches: number }
 
+// ── RB Scouting ─────────────────────────────────────────────
+export type RBFormation = "gun" | "pistol" | "under_center";
+export type RBRunType   = "outside_man_gap" | "inside_man_gap" | "outside_zone" | "inside_zone" | "pass_block";
+
+export interface RBPlay {
+  id: string;
+  user_id: string;
+  game_id: string;
+  formation: RBFormation;
+  run_type: RBRunType;
+  success: boolean | null;
+  loaded_box: boolean;
+  unblocked_defender: boolean;
+  broken_tackle: boolean;
+  explosive_play: boolean;
+  run_stuff: boolean;
+  play_notes: string | null;
+  created_at: string;
+}
+
 export interface ProspectWithStats extends Prospect {
   total_routes: number;
   total_games: number;
@@ -902,4 +922,14 @@ export interface ProspectWithStats extends Prospect {
   depth_on_los: number;
   route_stats: Partial<Record<RouteType, RouteStat>>;
   coverage_stats: Record<"man" | "zone" | "double" | "press", CoverageStat>;
+  open_pct_slot: number | null;
+  open_pct_slot_on_line: number | null;
+  open_pct_slot_off_line: number | null;
+  open_pct_right: number | null;
+  open_pct_right_on_line: number | null;
+  open_pct_right_off_line: number | null;
+  open_pct_left: number | null;
+  open_pct_left_on_line: number | null;
+  open_pct_left_off_line: number | null;
+  open_pct_backfield: number | null;
 }

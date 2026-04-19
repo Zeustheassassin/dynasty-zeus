@@ -1,8 +1,8 @@
 "use client";
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { supabase } from "../../lib/supabaseclient";
-import BulkGameImport from "./BulkGameImport";
-import SummaryGameImport from "./SummaryGameImport";
+import { supabase } from "../../../lib/supabaseclient";
+import BulkGameImport from "../BulkGameImport";
+import SummaryGameImport from "../SummaryGameImport";
 import PlayerCharts from "./PlayerCharts";
 import type {
   Prospect,
@@ -12,7 +12,7 @@ import type {
   RouteType,
   Alignment,
   ChartingDecision,
-} from "../../lib/types";
+} from "../../../lib/types";
 
 const ROUTE_TYPES: RouteType[] = [
   "nine", "post", "dig", "curl", "slant", "screen", "flat", "comeback", "out", "corner", "other",
@@ -39,7 +39,7 @@ const CHARTING_DECISIONS: { value: ChartingDecision; label: string }[] = [
   { value: "not_charting",  label: "Not Charting" },
 ];
 
-type BoardTab = "overview" | "chart" | "games" | "rankings" | "charts";
+type BoardTab = "overview" | "chart" | "games" | "charts";
 
 interface Props {
   prospect: Prospect;
@@ -81,6 +81,10 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
   const [editBio, setEditBio] = useState(false);
   const [bio, setBio] = useState<Partial<Prospect>>({});
   const [savingBio, setSavingBio] = useState(false);
+
+  // Notes summary
+  const [notesSummary, setNotesSummary] = useState<string | null>(null);
+  const [loadingNotesSummary, setLoadingNotesSummary] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -125,19 +129,15 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
       birthday: prospect.birthday,
       draft_class_year: prospect.draft_class_year,
       personal_rank: prospect.personal_rank,
-      pff_rank: prospect.pff_rank,
-      mock_draft_rank: prospect.mock_draft_rank,
-      drafttek_rank: prospect.drafttek_rank,
-      pfn_rank: prospect.pfn_rank,
       should_play: prospect.should_play,
       will_play_pre: prospect.will_play_pre,
       will_play_post: prospect.will_play_post,
       charting_decision: prospect.charting_decision,
       charting_notes: prospect.charting_notes,
     });
+    setNotesSummary(null);
   }, [prospect.id, load, prospect.height, prospect.weight, prospect.birthday,
-    prospect.draft_class_year, prospect.personal_rank, prospect.pff_rank,
-    prospect.mock_draft_rank, prospect.drafttek_rank, prospect.pfn_rank,
+    prospect.draft_class_year, prospect.personal_rank,
     prospect.should_play, prospect.will_play_pre, prospect.will_play_post,
     prospect.charting_decision, prospect.charting_notes]);
 
@@ -339,7 +339,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
 
   async function handleSummaryImport(
     reconstructedPlays: { route_type: RouteType; alignment: Alignment; on_line: boolean; coverage: string; targeted: boolean; success: boolean | null; contested: boolean; yards: number | null; play_notes: string }[],
-    totals: import("./SummaryGameImport").SummaryTotals,
+    totals: import("../SummaryGameImport").SummaryTotals,
   ) {
     if (!selectedGameId) return;
     const { data: { user } } = await supabase.auth.getUser();
@@ -380,21 +380,28 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
     onDataChanged();
   }
 
-  const externalRanks = [
-    prospect.pff_rank,
-    prospect.mock_draft_rank,
-    prospect.drafttek_rank,
-    prospect.pfn_rank,
-  ].filter((r): r is number => r !== null && r !== undefined);
-  const avgExtRank = externalRanks.length > 0
-    ? (externalRanks.reduce((s, r) => s + r, 0) / externalRanks.length).toFixed(1)
-    : null;
+  async function generateNotesSummary() {
+    const notes = plays.map((p) => p.play_notes).filter((n) => n && n.trim());
+    if (notes.length === 0) return;
+    setLoadingNotesSummary(true);
+    try {
+      const res = await fetch("/api/scouting/notes-summary", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ notes, totalPlays: plays.length, position: prospect.position }),
+      });
+      const { summary, error } = await res.json() as { summary?: string; error?: string };
+      setNotesSummary(summary ?? error ?? "Failed to generate summary.");
+    } catch {
+      setNotesSummary("Failed to generate summary.");
+    }
+    setLoadingNotesSummary(false);
+  }
 
   const tabs: { key: BoardTab; label: string }[] = [
     { key: "overview", label: "Overview" },
     { key: "chart", label: "Chart Game" },
     { key: "games", label: "Games" },
-    { key: "rankings", label: "Rankings" },
     { key: "charts", label: "Charts" },
   ];
 
@@ -435,147 +442,78 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
             <div>
               <label className="block text-xs text-gray-500 mb-1">Height</label>
-              <input
-                className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
-                placeholder='6&apos;2"'
-                value={bio.height ?? ""}
-                onChange={(e) => setBio((b) => ({ ...b, height: e.target.value }))}
-              />
+              <input className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
+                placeholder='6&apos;2"' value={bio.height ?? ""}
+                onChange={(e) => setBio((b) => ({ ...b, height: e.target.value }))} />
             </div>
             <div>
               <label className="block text-xs text-gray-500 mb-1">Weight (lbs)</label>
-              <input
-                type="number"
-                className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
-                placeholder="205"
-                value={bio.weight ?? ""}
-                onChange={(e) => setBio((b) => ({ ...b, weight: e.target.value ? Number(e.target.value) : null }))}
-              />
+              <input type="number" className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
+                placeholder="205" value={bio.weight ?? ""}
+                onChange={(e) => setBio((b) => ({ ...b, weight: e.target.value ? Number(e.target.value) : null }))} />
             </div>
             <div>
               <label className="block text-xs text-gray-500 mb-1">Birthday</label>
-              <input
-                type="date"
-                className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
+              <input type="date" className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
                 value={bio.birthday ?? ""}
-                onChange={(e) => setBio((b) => ({ ...b, birthday: e.target.value || null }))}
-              />
+                onChange={(e) => setBio((b) => ({ ...b, birthday: e.target.value || null }))} />
             </div>
             <div>
               <label className="block text-xs text-gray-500 mb-1">Draft Class Year</label>
-              <select
-                className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
+              <select className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
                 value={bio.draft_class_year ?? 2026}
-                onChange={(e) => setBio((b) => ({ ...b, draft_class_year: Number(e.target.value) }))}
-              >
+                onChange={(e) => setBio((b) => ({ ...b, draft_class_year: Number(e.target.value) }))}>
                 {[2026, 2027, 2028, 2029].map((y) => <option key={y}>{y}</option>)}
               </select>
             </div>
             <div>
               <label className="block text-xs text-gray-500 mb-1">Personal Rank</label>
-              <input
-                type="number"
-                className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
-                placeholder="1"
-                value={bio.personal_rank ?? ""}
-                onChange={(e) => setBio((b) => ({ ...b, personal_rank: e.target.value ? Number(e.target.value) : null }))}
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">PFF Rank</label>
-              <input
-                type="number"
-                className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
-                placeholder=""
-                value={bio.pff_rank ?? ""}
-                onChange={(e) => setBio((b) => ({ ...b, pff_rank: e.target.value ? Number(e.target.value) : null }))}
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Mock Draft Rank</label>
-              <input
-                type="number"
-                className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
-                placeholder=""
-                value={bio.mock_draft_rank ?? ""}
-                onChange={(e) => setBio((b) => ({ ...b, mock_draft_rank: e.target.value ? Number(e.target.value) : null }))}
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">DraftTek Rank</label>
-              <input
-                type="number"
-                className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
-                placeholder=""
-                value={bio.drafttek_rank ?? ""}
-                onChange={(e) => setBio((b) => ({ ...b, drafttek_rank: e.target.value ? Number(e.target.value) : null }))}
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">PFN Rank</label>
-              <input
-                type="number"
-                className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
-                placeholder=""
-                value={bio.pfn_rank ?? ""}
-                onChange={(e) => setBio((b) => ({ ...b, pfn_rank: e.target.value ? Number(e.target.value) : null }))}
-              />
+              <input type="number" className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
+                placeholder="1" value={bio.personal_rank ?? ""}
+                onChange={(e) => setBio((b) => ({ ...b, personal_rank: e.target.value ? Number(e.target.value) : null }))} />
             </div>
             <div>
               <label className="block text-xs text-gray-500 mb-1">Should Play</label>
-              <select
-                className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
+              <select className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
                 value={bio.should_play ?? ""}
-                onChange={(e) => setBio((b) => ({ ...b, should_play: e.target.value }))}
-              >
+                onChange={(e) => setBio((b) => ({ ...b, should_play: e.target.value }))}>
                 {NFL_ROLES.map((r) => <option key={r} value={r}>{r || "—"}</option>)}
               </select>
             </div>
             <div>
               <label className="block text-xs text-gray-500 mb-1">Will Play (Pre)</label>
-              <select
-                className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
+              <select className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
                 value={bio.will_play_pre ?? ""}
-                onChange={(e) => setBio((b) => ({ ...b, will_play_pre: e.target.value }))}
-              >
+                onChange={(e) => setBio((b) => ({ ...b, will_play_pre: e.target.value }))}>
                 {NFL_ROLES.map((r) => <option key={r} value={r}>{r || "—"}</option>)}
               </select>
             </div>
             <div>
               <label className="block text-xs text-gray-500 mb-1">Will Play (Post)</label>
-              <select
-                className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
+              <select className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
                 value={bio.will_play_post ?? ""}
-                onChange={(e) => setBio((b) => ({ ...b, will_play_post: e.target.value }))}
-              >
+                onChange={(e) => setBio((b) => ({ ...b, will_play_post: e.target.value }))}>
                 {NFL_ROLES.map((r) => <option key={r} value={r}>{r || "—"}</option>)}
               </select>
             </div>
             <div>
               <label className="block text-xs text-gray-500 mb-1">Charting Status</label>
-              <select
-                className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
+              <select className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
                 value={bio.charting_decision ?? "pending"}
-                onChange={(e) => setBio((b) => ({ ...b, charting_decision: e.target.value as ChartingDecision }))}
-              >
+                onChange={(e) => setBio((b) => ({ ...b, charting_decision: e.target.value as ChartingDecision }))}>
                 {CHARTING_DECISIONS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
               </select>
             </div>
           </div>
           <div className="mb-3">
             <label className="block text-xs text-gray-500 mb-1">Charting Notes</label>
-            <textarea
-              rows={2}
+            <textarea rows={2}
               className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500 resize-none"
               value={bio.charting_notes ?? ""}
-              onChange={(e) => setBio((b) => ({ ...b, charting_notes: e.target.value }))}
-            />
+              onChange={(e) => setBio((b) => ({ ...b, charting_notes: e.target.value }))} />
           </div>
-          <button
-            onClick={saveBio}
-            disabled={savingBio}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm rounded font-medium transition"
-          >
+          <button onClick={saveBio} disabled={savingBio}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm rounded font-medium transition">
             {savingBio ? "Saving…" : "Save"}
           </button>
         </div>
@@ -715,31 +653,74 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
               )}
 
               {/* Alignment breakdown */}
-              <div className="p-4 bg-gray-900 rounded-lg border border-gray-800">
-                <div className="text-xs text-gray-500 mb-3">Alignment & Depth</div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
-                  {[
-                    { label: "LWR (Left)", value: stats.pctLeft },
-                    { label: "RWR (Right)", value: stats.pctRight },
-                    { label: "Slot", value: stats.pctSlot },
-                    { label: "Backfield", value: stats.pctBf },
-                  ].map((a) => (
-                    <div key={a.label}>
-                      <div className="text-xs text-gray-500 mb-1">{a.label}</div>
-                      <div className="text-sm font-semibold text-white">{a.value ? `${a.value}%` : "—"}</div>
-                      {a.value && (
-                        <div className="mt-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
-                          <div className="h-full bg-blue-500 rounded-full" style={{ width: `${a.value}%` }} />
+              {(() => {
+                const pws = allProspects.find((p) => p.id === prospect.id);
+                const openRows: { label: string; total: number | null; onLine: number | null; offLine: number | null }[] = [
+                  { label: "Slot",      total: pws?.open_pct_slot  ?? null, onLine: pws?.open_pct_slot_on_line  ?? null, offLine: pws?.open_pct_slot_off_line  ?? null },
+                  { label: "Right",     total: pws?.open_pct_right ?? null, onLine: pws?.open_pct_right_on_line ?? null, offLine: pws?.open_pct_right_off_line ?? null },
+                  { label: "Left",      total: pws?.open_pct_left  ?? null, onLine: pws?.open_pct_left_on_line  ?? null, offLine: pws?.open_pct_left_off_line  ?? null },
+                  { label: "Backfield", total: pws?.open_pct_backfield ?? null, onLine: null, offLine: null },
+                ];
+                const hasAnyOpen = openRows.some((r) => r.total !== null);
+                return (
+                  <div className="p-4 bg-gray-900 rounded-lg border border-gray-800">
+                    <div className="text-xs text-gray-500 mb-3">Alignment & Depth</div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+                      {[
+                        { label: "LWR (Left)", value: stats.pctLeft },
+                        { label: "RWR (Right)", value: stats.pctRight },
+                        { label: "Slot", value: stats.pctSlot },
+                        { label: "Backfield", value: stats.pctBf },
+                      ].map((a) => (
+                        <div key={a.label}>
+                          <div className="text-xs text-gray-500 mb-1">{a.label}</div>
+                          <div className="text-sm font-semibold text-white">{a.value ? `${a.value}%` : "—"}</div>
+                          {a.value && (
+                            <div className="mt-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                              <div className="h-full bg-blue-500 rounded-full" style={{ width: `${a.value}%` }} />
+                            </div>
+                          )}
                         </div>
-                      )}
+                      ))}
                     </div>
-                  ))}
-                </div>
-                <div className="grid grid-cols-2 gap-3 border-t border-gray-800 pt-3">
-                  <div><div className="text-xs text-gray-500">On the Line</div><div className="text-sm font-semibold text-white">{stats.pctOnLine ? `${stats.pctOnLine}%` : "—"}</div></div>
-                  <div><div className="text-xs text-gray-500">Off the Line</div><div className="text-sm font-semibold text-white">{stats.pctOffLine ? `${stats.pctOffLine}%` : "—"}</div></div>
-                </div>
-              </div>
+                    <div className="grid grid-cols-2 gap-3 border-t border-gray-800 pt-3">
+                      <div><div className="text-xs text-gray-500">On the Line</div><div className="text-sm font-semibold text-white">{stats.pctOnLine ? `${stats.pctOnLine}%` : "—"}</div></div>
+                      <div><div className="text-xs text-gray-500">Off the Line</div><div className="text-sm font-semibold text-white">{stats.pctOffLine ? `${stats.pctOffLine}%` : "—"}</div></div>
+                    </div>
+                    {hasAnyOpen && (
+                      <div className="mt-4 border-t border-gray-800 pt-3">
+                        <div className="text-xs text-gray-500 mb-2">Open% by Alignment <span className="text-gray-700">(charted plays only)</span></div>
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="text-gray-600">
+                              <th className="text-left pb-1.5 font-medium">Alignment</th>
+                              <th className="text-right pb-1.5 font-medium">Total</th>
+                              <th className="text-right pb-1.5 font-medium">On Line</th>
+                              <th className="text-right pb-1.5 font-medium">Off Line</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-800">
+                            {openRows.map((r) => (
+                              <tr key={r.label}>
+                                <td className="py-1.5 text-gray-400">{r.label}</td>
+                                <td className="py-1.5 text-right font-semibold" style={{ color: r.total !== null ? (r.total >= 55 ? "#4ade80" : r.total >= 40 ? "#facc15" : "#f87171") : "#4b5563" }}>
+                                  {r.total !== null ? `${r.total}%` : "—"}
+                                </td>
+                                <td className="py-1.5 text-right text-gray-400">
+                                  {r.onLine !== null ? `${r.onLine}%` : "—"}
+                                </td>
+                                <td className="py-1.5 text-right text-gray-400">
+                                  {r.offLine !== null ? `${r.offLine}%` : "—"}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Game notes */}
               {games.some((g) => g.notes?.trim()) && (
@@ -753,6 +734,30 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* Play Notes AI Summary */}
+              {plays.some((p) => p.play_notes?.trim()) && (
+                <div className="p-4 bg-gray-900 rounded-lg border border-gray-800">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-sm font-medium text-white">Play Notes Summary</span>
+                    <button
+                      onClick={generateNotesSummary}
+                      disabled={loadingNotesSummary}
+                      className="px-3 py-1.5 bg-blue-700 hover:bg-blue-600 disabled:opacity-50 text-white text-xs rounded transition"
+                    >
+                      {loadingNotesSummary ? "Analyzing…" : notesSummary ? "Regenerate" : "Generate Summary"}
+                    </button>
+                  </div>
+                  {notesSummary ? (
+                    <p className="text-sm text-gray-300 leading-relaxed">{notesSummary}</p>
+                  ) : (
+                    <p className="text-xs text-gray-600">
+                      {plays.filter((p) => p.play_notes?.trim()).length} of {plays.length} routes have notes.
+                      Click Generate to analyze patterns with AI.
+                    </p>
+                  )}
                 </div>
               )}
             </>
@@ -1172,66 +1177,6 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
         </div>
       )}
 
-      {/* ── RANKINGS ── */}
-      {tab === "rankings" && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* External ranks */}
-          <div className="p-4 bg-gray-900 border border-gray-800 rounded-lg">
-            <div className="text-xs text-gray-500 mb-3">External Rankings</div>
-            <div className="space-y-2">
-              {[
-                { label: "Personal Rank", value: prospect.personal_rank, key: "personal_rank" as keyof Prospect },
-                { label: "PFF", value: prospect.pff_rank, key: "pff_rank" as keyof Prospect },
-                { label: "Mock Draft", value: prospect.mock_draft_rank, key: "mock_draft_rank" as keyof Prospect },
-                { label: "DraftTek", value: prospect.drafttek_rank, key: "drafttek_rank" as keyof Prospect },
-                { label: "Pro Football Network", value: prospect.pfn_rank, key: "pfn_rank" as keyof Prospect },
-              ].map((r) => (
-                <div key={r.label} className="flex items-center justify-between">
-                  <span className="text-sm text-gray-400">{r.label}</span>
-                  <span className="text-sm font-semibold text-white">{r.value ? `#${r.value}` : "—"}</span>
-                </div>
-              ))}
-              <div className="border-t border-gray-800 pt-2 flex items-center justify-between">
-                <span className="text-sm text-gray-400">Avg External Rank</span>
-                <span className="text-sm font-bold text-yellow-400">{avgExtRank ? `#${avgExtRank}` : "—"}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Role projections + bio */}
-          <div className="p-4 bg-gray-900 border border-gray-800 rounded-lg">
-            <div className="text-xs text-gray-500 mb-3">Physical &amp; Role</div>
-            <div className="space-y-2">
-              {[
-                { label: "Height", value: prospect.height || "—" },
-                { label: "Weight", value: prospect.weight ? `${prospect.weight} lbs` : "—" },
-                { label: "Birthday", value: prospect.birthday ?? "—" },
-                { label: "Draft Class", value: `${prospect.draft_class_year}` },
-                { label: "Should Play", value: prospect.should_play || "—" },
-                { label: "Will Play (Pre-Draft)", value: prospect.will_play_pre || "—" },
-                { label: "Will Play (Post-Draft)", value: prospect.will_play_post || "—" },
-              ].map((r) => (
-                <div key={r.label} className="flex items-center justify-between">
-                  <span className="text-sm text-gray-400">{r.label}</span>
-                  <span className="text-sm text-white">{r.value}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Charting notes */}
-          {prospect.charting_notes && (
-            <div className="md:col-span-2 p-4 bg-gray-900 border border-gray-800 rounded-lg">
-              <div className="text-xs text-gray-500 mb-2">Scouting Notes</div>
-              <p className="text-sm text-gray-300 whitespace-pre-wrap">{prospect.charting_notes}</p>
-            </div>
-          )}
-
-          <div className="md:col-span-2 text-xs text-gray-600 text-center">
-            Edit ranks and role projections via the &quot;Edit Bio&quot; button above.
-          </div>
-        </div>
-      )}
 
       {/* ── CHARTS ── */}
       {tab === "charts" && (() => {
