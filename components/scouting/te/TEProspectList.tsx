@@ -49,7 +49,7 @@ const DECISION_LABEL: Record<ChartingDecision, string> = {
   not_charting: "Not Charting",
 };
 
-export default function RBProspectList({
+export default function TEProspectList({
   prospects,
   gameCountByProspect,
   loading,
@@ -104,7 +104,7 @@ export default function RBProspectList({
       name: form.name.trim(),
       school: form.school.trim(),
       conference: form.conference.trim(),
-      position: "RB",
+      position: "TE",
       draft_class_year: form.draft_class_year,
       height: "", weight: null, birthday: null,
       personal_rank: null, pff_rank: null, mock_draft_rank: null,
@@ -175,7 +175,7 @@ export default function RBProspectList({
       {loading ? (
         <div className="text-gray-500 text-sm py-10 text-center">Loading prospects…</div>
       ) : filtered.length === 0 ? (
-        <div className="text-gray-500 text-sm py-10 text-center">No RB prospects yet. Click &quot;Add Prospect&quot; to get started.</div>
+        <div className="text-gray-500 text-sm py-10 text-center">No TE prospects yet. Click &quot;Add Prospect&quot; to get started.</div>
       ) : (
         <div className="space-y-1">
           {filtered.map((p) => {

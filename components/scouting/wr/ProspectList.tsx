@@ -1,5 +1,6 @@
 "use client";
 import { useState, useMemo } from "react";
+import { supabase } from "../../../lib/supabaseclient";
 import type { Prospect, ProspectWithStats, ChartingDecision } from "../../../lib/types";
 
 type SortKey = "personal_rank" | "name" | "school" | "total_routes" | "draft_class_year";
@@ -26,6 +27,7 @@ interface Props {
   loading: boolean;
   onSelectProspect: (p: Prospect) => void;
   onAddProspect: (data: Omit<Prospect, "id" | "user_id" | "created_at" | "updated_at">) => Promise<void>;
+  onDataChanged: () => void;
   draftYearFilter: number | null;
   setDraftYearFilter: (y: number | null) => void;
 }
@@ -51,10 +53,12 @@ export default function ProspectList({
   loading,
   onSelectProspect,
   onAddProspect,
+  onDataChanged,
   draftYearFilter,
   setDraftYearFilter,
 }: Props) {
   const [showAdd, setShowAdd] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("personal_rank");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [saving, setSaving] = useState(false);
@@ -93,6 +97,12 @@ export default function ProspectList({
   function toggleSort(k: SortKey) {
     if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else { setSortKey(k); setSortDir("asc"); }
+  }
+
+  async function deleteProspect(id: string) {
+    await supabase.from("prospects").delete().eq("id", id);
+    setConfirmDeleteId(null);
+    onDataChanged();
   }
 
   async function handleAdd() {
@@ -235,10 +245,10 @@ export default function ProspectList({
       ) : (
         <div className="space-y-1">
           {filtered.map((p) => (
-            <button
+            <div
               key={p.id}
-              onClick={() => onSelectProspect(p)}
-              className="w-full flex items-center gap-3 px-4 py-3 bg-gray-900 hover:bg-gray-800 border border-gray-800 hover:border-gray-600 rounded-lg transition text-left group"
+              onClick={() => { setConfirmDeleteId(null); onSelectProspect(p); }}
+              className="w-full flex items-center gap-3 px-4 py-3 bg-gray-900 hover:bg-gray-800 border border-gray-800 hover:border-gray-600 rounded-lg transition text-left group cursor-pointer"
             >
               <span
                 className={`flex-shrink-0 w-2.5 h-2.5 rounded-full ${DECISION_DOT[p.charting_decision]}`}
@@ -259,8 +269,23 @@ export default function ProspectList({
                 )}
                 <span className="text-xs text-gray-700">{p.draft_class_year}</span>
                 <span className="text-gray-600 group-hover:text-gray-300 text-xs">›</span>
+                {confirmDeleteId === p.id ? (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); deleteProspect(p.id); }}
+                    className="px-2 py-1 bg-red-700 hover:bg-red-600 text-white text-xs rounded transition flex-shrink-0"
+                  >
+                    Delete?
+                  </button>
+                ) : (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(p.id); }}
+                    className="text-gray-700 hover:text-red-400 text-xs px-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition"
+                  >
+                    ✕
+                  </button>
+                )}
               </div>
-            </button>
+            </div>
           ))}
         </div>
       )}

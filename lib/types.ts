@@ -927,6 +927,35 @@ export interface QBPlay {
   created_at: string;
 }
 
+// ── TE Scouting ─────────────────────────────────────────────
+export type TELocation    = "left" | "right" | "backfield";
+export type TEPositioning = "wide" | "slot" | "inline" | "full_back" | "running_back";
+export type TEPlayType    = "run_block" | "pass_block" | "route_run";
+export type TEBlockType   = "movement" | "inline";
+export type TECoverage    = "man" | "zone" | "press" | "double";
+
+export interface TEPlay {
+  id: string;
+  user_id: string;
+  game_id: string;
+  location: TELocation;
+  positioning: TEPositioning;
+  play_type: TEPlayType;
+  block_type: TEBlockType | null;
+  block_success: boolean | null;
+  coverage: TECoverage | null;
+  route_type: RouteType | null;
+  was_open: boolean | null;
+  targeted: boolean | null;
+  caught: boolean | null;
+  dropped: boolean | null;
+  contested_target: boolean | null;
+  contested_catch: boolean | null;
+  broken_tackle: boolean;
+  play_notes: string | null;
+  created_at: string;
+}
+
 export interface ProspectWithStats extends Prospect {
   total_snaps: number;
   total_routes: number;

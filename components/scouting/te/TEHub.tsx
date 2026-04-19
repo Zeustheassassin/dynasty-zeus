@@ -1,8 +1,10 @@
 "use client";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import dynamic from "next/dynamic";
 import type { Prospect, ProspectWithStats } from "../../../lib/types";
 
+const TEProspectList    = dynamic(() => import("./TEProspectList"), { ssr: false });
+const TEChartingBoard   = dynamic(() => import("./TEChartingBoard"), { ssr: false });
 const ProspectRosterSheet = dynamic(() => import("../ProspectRosterSheet"), { ssr: false });
 
 const TE_NFL_ROLES = [
@@ -22,11 +24,31 @@ type HubView = "list" | "roster";
 
 export default function TEHub({
   prospectsWithStats,
+  loading,
+  onAddProspect,
   onDataChanged,
+  draftYearFilter,
+  setDraftYearFilter,
 }: TEHubProps) {
+  const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
   const [hubView, setHubView] = useState<HubView>("list");
 
   const teProspects = prospectsWithStats.filter((p) => p.position === "TE");
+
+  const gameCountByProspect = useMemo<Record<string, number>>(
+    () => Object.fromEntries(teProspects.map((p) => [p.id, p.total_games ?? 0])),
+    [teProspects]
+  );
+
+  if (selectedProspect) {
+    return (
+      <TEChartingBoard
+        prospect={selectedProspect}
+        onBack={() => { setSelectedProspect(null); onDataChanged(); }}
+        onDataChanged={onDataChanged}
+      />
+    );
+  }
 
   return (
     <div>
@@ -37,7 +59,7 @@ export default function TEHub({
             key={v}
             onClick={() => { if (v === "list" && hubView === "roster") onDataChanged(); setHubView(v); }}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition whitespace-nowrap ${
-              hubView === v ? "border-blue-500 text-blue-400" : "border-transparent text-gray-400 hover:text-white"
+              hubView === v ? "border-green-500 text-green-400" : "border-transparent text-gray-400 hover:text-white"
             }`}
           >
             {v === "list" ? "Prospects" : "Prospect Data"}
@@ -46,13 +68,16 @@ export default function TEHub({
       </div>
 
       {hubView === "list" && (
-        <div className="flex flex-col items-center justify-center py-20 gap-3 text-center">
-          <div className="text-5xl font-black text-gray-700">TE</div>
-          <div className="text-gray-400 text-base font-medium">Scouting system coming soon</div>
-          <div className="text-gray-600 text-sm max-w-sm">
-            TE charting, route tree analytics, blocking grades, and Big Board integration will be built here.
-          </div>
-        </div>
+        <TEProspectList
+          prospects={teProspects}
+          gameCountByProspect={gameCountByProspect}
+          loading={loading}
+          onSelectProspect={setSelectedProspect}
+          onAddProspect={onAddProspect}
+          onDataChanged={onDataChanged}
+          draftYearFilter={draftYearFilter}
+          setDraftYearFilter={setDraftYearFilter}
+        />
       )}
 
       {hubView === "roster" && (

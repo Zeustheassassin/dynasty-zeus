@@ -74,6 +74,7 @@ export default function RBHub({
           loading={loading}
           onSelectProspect={setSelectedProspect}
           onAddProspect={onAddProspect}
+          onDataChanged={onDataChanged}
           draftYearFilter={draftYearFilter}
           setDraftYearFilter={setDraftYearFilter}
         />

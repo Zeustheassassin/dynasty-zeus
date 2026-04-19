@@ -1,6 +1,7 @@
 "use client";
 import { useState, useMemo } from "react";
 import dynamic from "next/dynamic";
+import { supabase } from "../../../lib/supabaseclient";
 import type { Prospect, ProspectWithStats, ChartingDecision } from "../../../lib/types";
 
 const QBChartingBoard  = dynamic(() => import("./QBChartingBoard"),   { ssr: false });
@@ -46,6 +47,7 @@ export default function QBHub({
     position: "QB", personal_rank: "" as string | number,
   });
   const [addError, setAddError] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const qbProspects = useMemo(
     () => prospectsWithStats.filter((p) => p.position === "QB"),
@@ -73,6 +75,12 @@ export default function QBHub({
   function toggleSort(k: SortKey) {
     if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else { setSortKey(k); setSortDir("asc"); }
+  }
+
+  async function deleteProspect(id: string) {
+    await supabase.from("prospects").delete().eq("id", id);
+    setConfirmDeleteId(null);
+    onDataChanged();
   }
 
   async function addProspect() {
@@ -199,38 +207,31 @@ export default function QBHub({
               {filtered.map((p) => (
                 <div
                   key={p.id}
-                  className="flex items-center gap-3 px-4 py-3 bg-gray-900 border border-gray-800 rounded-lg hover:border-gray-600 cursor-pointer transition"
-                  onClick={() => setSelectedProspect(p)}
+                  className="w-full flex items-center gap-3 px-4 py-3 bg-gray-900 hover:bg-gray-800 border border-gray-800 hover:border-gray-600 rounded-lg transition text-left group cursor-pointer"
+                  onClick={() => { setConfirmDeleteId(null); setSelectedProspect(p); }}
                 >
-                  {/* Rank */}
-                  <div className="w-8 text-center flex-shrink-0">
-                    {p.personal_rank ? (
-                      <span className="text-sm font-bold text-blue-400">#{p.personal_rank}</span>
+                  <span className={`flex-shrink-0 w-2.5 h-2.5 rounded-full ${DECISION_DOT[p.charting_decision ?? "pending"]}`} title={p.charting_decision} />
+                  <span className="text-sm font-medium text-white min-w-0 truncate">{p.name}</span>
+                  <span className="text-xs text-gray-400 truncate hidden sm:block">
+                    {p.school}{p.conference ? ` · ${p.conference}` : ""}
+                  </span>
+                  <div className="ml-auto flex items-center gap-3 flex-shrink-0">
+                    {p.total_games > 0 && <span className="text-xs text-blue-400">{p.total_games}G</span>}
+                    {p.personal_rank && <span className="text-xs text-gray-500">#{p.personal_rank}</span>}
+                    <span className="text-xs text-gray-700">{p.draft_class_year}</span>
+                    <span className="text-gray-600 group-hover:text-gray-300 text-xs">›</span>
+                    {confirmDeleteId === p.id ? (
+                      <button onClick={(e) => { e.stopPropagation(); deleteProspect(p.id); }}
+                        className="px-2 py-1 bg-red-700 hover:bg-red-600 text-white text-xs rounded transition flex-shrink-0">
+                        Delete?
+                      </button>
                     ) : (
-                      <span className="text-gray-700 text-xs">—</span>
+                      <button onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(p.id); }}
+                        className="text-gray-700 hover:text-red-400 text-xs px-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition">
+                        ✕
+                      </button>
                     )}
                   </div>
-
-                  {/* Charting status dot */}
-                  <div className={`w-2 h-2 rounded-full flex-shrink-0 ${DECISION_DOT[p.charting_decision ?? "pending"]}`} />
-
-                  {/* Name + school */}
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-semibold text-white truncate">{p.name}</div>
-                    <div className="text-xs text-gray-400 truncate">
-                      {p.school}{p.conference ? ` · ${p.conference}` : ""}
-                    </div>
-                  </div>
-
-                  {/* Class */}
-                  <div className="text-xs text-blue-400 flex-shrink-0">{p.draft_class_year}</div>
-
-                  {/* Games charted */}
-                  <div className="text-xs text-gray-500 flex-shrink-0 w-16 text-right">
-                    {p.total_games > 0 ? `${p.total_games} game${p.total_games !== 1 ? "s" : ""}` : "—"}
-                  </div>
-
-                  <div className="text-gray-600 text-sm flex-shrink-0">›</div>
                 </div>
               ))}
             </div>
