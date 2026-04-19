@@ -4,6 +4,21 @@ import type { ScoutingGame, ProspectWithStats, RoutePlay } from "../../lib/types
 
 type SortKey = "player" | "school" | "season_year" | "opponent" | "game_type" | "routes" | "targets" | "catches" | "man_pct" | "zone_pct";
 
+function Th({ label, k, sortKey, sortDir, onToggle }: {
+  label: string; k: SortKey; sortKey: SortKey; sortDir: "asc" | "desc";
+  onToggle: (k: SortKey) => void;
+}) {
+  const active = sortKey === k;
+  return (
+    <th
+      className={`px-3 py-2 text-left text-xs whitespace-nowrap cursor-pointer hover:text-white transition ${active ? "text-blue-400" : "text-gray-500"}`}
+      onClick={() => onToggle(k)}
+    >
+      {label}{active ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
+    </th>
+  );
+}
+
 interface Props {
   games: ScoutingGame[];
   plays: RoutePlay[];
@@ -101,18 +116,6 @@ export default function GamesLog({ games, plays, prospects, loading, onSelectPro
     else { setSortKey(k); setSortDir("asc"); }
   }
 
-  function Th({ label, k }: { label: string; k: SortKey }) {
-    const active = sortKey === k;
-    return (
-      <th
-        className={`px-3 py-2 text-left text-xs whitespace-nowrap cursor-pointer hover:text-white transition ${active ? "text-blue-400" : "text-gray-500"}`}
-        onClick={() => toggleSort(k)}
-      >
-        {label}{active ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
-      </th>
-    );
-  }
-
   const totalRoutes = rows.reduce((s, g) => s + (gameStats[g.id]?.routes ?? 0), 0);
   const totalTargets = rows.reduce((s, g) => s + (gameStats[g.id]?.targets ?? 0), 0);
   const totalCatches = rows.reduce((s, g) => s + (gameStats[g.id]?.catches ?? 0), 0);
@@ -151,16 +154,16 @@ export default function GamesLog({ games, plays, prospects, loading, onSelectPro
           <table className="w-full text-sm border-collapse">
             <thead>
               <tr className="border-b border-gray-800">
-                <Th label="Player" k="player" />
-                <Th label="School" k="school" />
-                <Th label="Season" k="season_year" />
-                <Th label="Opponent" k="opponent" />
-                <Th label="Type" k="game_type" />
-                <Th label="Routes" k="routes" />
-                <Th label="Targets" k="targets" />
-                <Th label="Catches" k="catches" />
-                <Th label="Man%" k="man_pct" />
-                <Th label="Zone%" k="zone_pct" />
+                <Th label="Player" k="player" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
+                <Th label="School" k="school" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
+                <Th label="Season" k="season_year" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
+                <Th label="Opponent" k="opponent" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
+                <Th label="Type" k="game_type" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
+                <Th label="Routes" k="routes" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
+                <Th label="Targets" k="targets" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
+                <Th label="Catches" k="catches" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
+                <Th label="Man%" k="man_pct" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
+                <Th label="Zone%" k="zone_pct" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-900">

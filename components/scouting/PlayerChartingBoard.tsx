@@ -117,6 +117,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
   }, [prospect.id]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
     setBio({
       height: prospect.height,
@@ -141,6 +142,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
     prospect.charting_decision, prospect.charting_notes]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!selectedGameId && games.length > 0) setSelectedGameId(games[0].id);
   }, [games, selectedGameId]);
 
@@ -229,7 +231,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
       routeStats,
       cvgStats,
     };
-  }, [plays]);
+  }, [plays, games]);
 
   // Per-game stats
   const gameStats = useMemo(() => {

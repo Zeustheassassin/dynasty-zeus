@@ -4,6 +4,23 @@ import type { Prospect, ProspectWithStats, ChartingDecision } from "../../lib/ty
 
 type SortKey = "personal_rank" | "name" | "school" | "total_routes" | "draft_class_year";
 
+function SortBtn({ label, k, sortKey, sortDir, onToggle }: {
+  label: string; k: SortKey; sortKey: SortKey; sortDir: "asc" | "desc";
+  onToggle: (k: SortKey) => void;
+}) {
+  const active = sortKey === k;
+  return (
+    <button
+      onClick={() => onToggle(k)}
+      className={`px-3 py-1 rounded text-xs font-medium transition ${
+        active ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+      }`}
+    >
+      {label} {active ? (sortDir === "asc" ? "↑" : "↓") : ""}
+    </button>
+  );
+}
+
 interface Props {
   prospects: ProspectWithStats[];
   loading: boolean;
@@ -106,19 +123,6 @@ export default function ProspectList({
     setSaving(false);
   }
 
-  function SortBtn({ label, k }: { label: string; k: SortKey }) {
-    const active = sortKey === k;
-    return (
-      <button
-        onClick={() => toggleSort(k)}
-        className={`px-3 py-1 rounded text-xs font-medium transition ${
-          active ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"
-        }`}
-      >
-        {label} {active ? (sortDir === "asc" ? "↑" : "↓") : ""}
-      </button>
-    );
-  }
 
   return (
     <div>
@@ -155,11 +159,11 @@ export default function ProspectList({
       {/* Sort controls */}
       <div className="flex flex-wrap gap-2 mb-4">
         <span className="text-xs text-gray-500 self-center">Sort:</span>
-        <SortBtn label="Rank" k="personal_rank" />
-        <SortBtn label="Name" k="name" />
-        <SortBtn label="School" k="school" />
-        <SortBtn label="Routes" k="total_routes" />
-        <SortBtn label="Draft Yr" k="draft_class_year" />
+        <SortBtn label="Rank" k="personal_rank" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
+        <SortBtn label="Name" k="name" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
+        <SortBtn label="School" k="school" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
+        <SortBtn label="Routes" k="total_routes" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
+        <SortBtn label="Draft Yr" k="draft_class_year" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
       </div>
 
       {/* Add prospect form */}
