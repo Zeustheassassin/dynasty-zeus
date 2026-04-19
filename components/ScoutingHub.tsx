@@ -332,6 +332,7 @@ export default function ScoutingHub() {
             prospect={selectedProspect}
             onBack={handleBack}
             onDataChanged={loadAll}
+            allProspects={prospectsWithStats}
           />
         ) : (
           <>

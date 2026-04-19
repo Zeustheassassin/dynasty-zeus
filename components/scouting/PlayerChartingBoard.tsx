@@ -3,8 +3,10 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "../../lib/supabaseclient";
 import BulkGameImport from "./BulkGameImport";
 import SummaryGameImport from "./SummaryGameImport";
+import PlayerCharts from "./PlayerCharts";
 import type {
   Prospect,
+  ProspectWithStats,
   ScoutingGame,
   RoutePlay,
   RouteType,
@@ -37,15 +39,16 @@ const CHARTING_DECISIONS: { value: ChartingDecision; label: string }[] = [
   { value: "not_charting",  label: "Not Charting" },
 ];
 
-type BoardTab = "overview" | "chart" | "games" | "rankings";
+type BoardTab = "overview" | "chart" | "games" | "rankings" | "charts";
 
 interface Props {
   prospect: Prospect;
   onBack: () => void;
   onDataChanged: () => void;
+  allProspects: ProspectWithStats[];
 }
 
-export default function PlayerChartingBoard({ prospect, onBack, onDataChanged }: Props) {
+export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, allProspects }: Props) {
   const [tab, setTab] = useState<BoardTab>("overview");
   const [games, setGames] = useState<ScoutingGame[]>([]);
   const [plays, setPlays] = useState<RoutePlay[]>([]);
@@ -390,6 +393,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged }:
     { key: "chart", label: "Chart Game" },
     { key: "games", label: "Games" },
     { key: "rankings", label: "Rankings" },
+    { key: "charts", label: "Charts" },
   ];
 
   return (
@@ -1226,6 +1230,17 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged }:
           </div>
         </div>
       )}
+
+      {/* ── CHARTS ── */}
+      {tab === "charts" && (() => {
+        const current = allProspects.find((p) => p.id === prospect.id);
+        if (!current) return (
+          <div className="text-gray-500 text-sm text-center py-12">
+            Loading prospect data…
+          </div>
+        );
+        return <PlayerCharts prospect={current} allProspects={allProspects} />;
+      })()}
     </div>
   );
 }
