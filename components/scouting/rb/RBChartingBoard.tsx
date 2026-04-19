@@ -82,6 +82,37 @@ function mergeRunTypeStats(a: RunTypeStat, b: RunTypeStat): RunTypeStat {
   };
 }
 
+function StatRow({ label, s, indent }: { label: string; s: RunTypeStat; indent?: boolean }) {
+  const successColor = s.successPct !== null
+    ? s.successPct >= 55 ? "text-green-400" : s.successPct >= 40 ? "text-yellow-400" : "text-red-400"
+    : "text-gray-600";
+  return (
+    <tr className="border-b border-gray-800/60 hover:bg-gray-800/30">
+      <td className={`py-2 pr-2 text-sm font-medium ${indent ? "pl-5 text-gray-400 text-xs" : "text-white"}`}>
+        {indent && <span className="text-gray-600 mr-1">↳</span>}{label}
+      </td>
+      <td className="py-2 px-2 text-right text-sm text-blue-400">{s.attempts || "—"}</td>
+      <td className={`py-2 px-2 text-right text-sm font-semibold ${successColor}`}>
+        {s.successPct !== null ? `${s.successPct}%` : "—"}
+      </td>
+      <td className="py-2 px-2 text-right text-xs text-gray-400">
+        {s.loadedBox > 0 ? `${s.loadedBox}` : "—"}
+        {s.loadedBoxPct !== null && <span className="text-gray-600 ml-1">({s.loadedBoxPct}%)</span>}
+      </td>
+      <td className={`py-2 px-2 text-right text-xs font-medium ${s.loadedBoxSuccessPct !== null ? (s.loadedBoxSuccessPct >= 50 ? "text-green-400" : "text-red-400") : "text-gray-600"}`}>
+        {s.loadedBoxSuccessPct !== null ? `${s.loadedBoxSuccessPct}%` : "—"}
+      </td>
+      <td className="py-2 px-2 text-right text-xs text-gray-400">
+        {s.unblocked > 0 ? `${s.unblocked}` : "—"}
+        {s.unblockedPct !== null && <span className="text-gray-600 ml-1">({s.unblockedPct}%)</span>}
+      </td>
+      <td className={`py-2 pl-2 text-right text-xs font-medium ${s.unblockedSuccessPct !== null ? (s.unblockedSuccessPct >= 50 ? "text-green-400" : "text-red-400") : "text-gray-600"}`}>
+        {s.unblockedSuccessPct !== null ? `${s.unblockedSuccessPct}%` : "—"}
+      </td>
+    </tr>
+  );
+}
+
 interface Props {
   prospect: Prospect;
   onBack: () => void;
@@ -324,38 +355,6 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     { key: "chart",    label: "Chart Game" },
     { key: "games",    label: "Games" },
   ];
-
-  // ── Run type stats table row helper ──────────────────────────
-  function StatRow({ label, s, indent }: { label: string; s: RunTypeStat; indent?: boolean }) {
-    const successColor = s.successPct !== null
-      ? s.successPct >= 55 ? "text-green-400" : s.successPct >= 40 ? "text-yellow-400" : "text-red-400"
-      : "text-gray-600";
-    return (
-      <tr className="border-b border-gray-800/60 hover:bg-gray-800/30">
-        <td className={`py-2 pr-2 text-sm font-medium ${indent ? "pl-5 text-gray-400 text-xs" : "text-white"}`}>
-          {indent && <span className="text-gray-600 mr-1">↳</span>}{label}
-        </td>
-        <td className="py-2 px-2 text-right text-sm text-blue-400">{s.attempts || "—"}</td>
-        <td className={`py-2 px-2 text-right text-sm font-semibold ${successColor}`}>
-          {s.successPct !== null ? `${s.successPct}%` : "—"}
-        </td>
-        <td className="py-2 px-2 text-right text-xs text-gray-400">
-          {s.loadedBox > 0 ? `${s.loadedBox}` : "—"}
-          {s.loadedBoxPct !== null && <span className="text-gray-600 ml-1">({s.loadedBoxPct}%)</span>}
-        </td>
-        <td className={`py-2 px-2 text-right text-xs font-medium ${s.loadedBoxSuccessPct !== null ? (s.loadedBoxSuccessPct >= 50 ? "text-green-400" : "text-red-400") : "text-gray-600"}`}>
-          {s.loadedBoxSuccessPct !== null ? `${s.loadedBoxSuccessPct}%` : "—"}
-        </td>
-        <td className="py-2 px-2 text-right text-xs text-gray-400">
-          {s.unblocked > 0 ? `${s.unblocked}` : "—"}
-          {s.unblockedPct !== null && <span className="text-gray-600 ml-1">({s.unblockedPct}%)</span>}
-        </td>
-        <td className={`py-2 pl-2 text-right text-xs font-medium ${s.unblockedSuccessPct !== null ? (s.unblockedSuccessPct >= 50 ? "text-green-400" : "text-red-400") : "text-gray-600"}`}>
-          {s.unblockedSuccessPct !== null ? `${s.unblockedSuccessPct}%` : "—"}
-        </td>
-      </tr>
-    );
-  }
 
   return (
     <div className="flex flex-col gap-4">
