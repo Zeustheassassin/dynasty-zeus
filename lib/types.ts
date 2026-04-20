@@ -838,6 +838,10 @@ export interface Prospect {
   will_play_post: string;
   charting_decision: ChartingDecision;
   charting_notes: string;
+  draft_round: number | null;
+  draft_pick: number | null;
+  draft_team: string | null;
+  synopsis: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -906,12 +910,16 @@ export interface RBPlay {
 // ── QB Scouting ─────────────────────────────────────────────
 export type QBSnapPosition = "shotgun" | "pistol" | "under_center";
 export type QBPlayType     = "run" | "rpo" | "pass";
-export type QBTiming       = "first_option" | "second_option" | "checkdown" | "scramble" | "sack" | "throw_away";
+export type QBTiming       = "first_option" | "second_option" | "checkdown" | "scramble" | "sack" | "throw_away" | "extended_play";
 export type QBAccuracy     = "high" | "low" | "on_target" | "in_front" | "behind";
 export type QBDepthZone    =
   | "deep_left"  | "deep_center"  | "deep_right"
   | "mid_left"   | "mid_center"   | "mid_right"
   | "short_left" | "short_center" | "short_right";
+
+export type QBCompletion = "caught" | "incomplete" | "interception";
+export type QBIntType    = "bad_throw" | "bad_decision" | "fifty_fifty" | "tipped";
+export type QBTargetPos  = "rb" | "wr" | "te";
 
 export interface QBPlay {
   id: string;
@@ -921,6 +929,9 @@ export interface QBPlay {
   play_type: QBPlayType;
   timing: QBTiming | null;
   accuracy: QBAccuracy | null;
+  completion: QBCompletion | null;
+  int_type: QBIntType | null;
+  target_pos: QBTargetPos | null;
   depth_zone: QBDepthZone | null;
   route_type: RouteType | null;
   coverage: "man" | "zone" | null;

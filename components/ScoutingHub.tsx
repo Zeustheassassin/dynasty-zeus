@@ -8,6 +8,9 @@ import type {
   ProspectWithStats,
   ScoutingGame,
   RoutePlay,
+  RBPlay,
+  QBPlay,
+  TEPlay,
 } from "../lib/types";
 
 const log = logger("ScoutingHub");
@@ -18,8 +21,9 @@ const QBHub = dynamic(() => import("./scouting/qb/QBHub"), { ssr: false });
 const TEHub = dynamic(() => import("./scouting/te/TEHub"), { ssr: false });
 const BigBoard = dynamic(() => import("./scouting/BigBoard"), { ssr: false });
 const GamesLog = dynamic(() => import("./scouting/GamesLog"), { ssr: false });
+const AnalysisHub = dynamic(() => import("./scouting/stats/AnalysisHub"), { ssr: false });
 
-type HubTab = "prospects" | "big_board" | "games_log";
+type HubTab = "prospects" | "big_board" | "games_log" | "analysis";
 type PositionTab = "WR" | "RB" | "QB" | "TE";
 
 export default function ScoutingHub() {
@@ -28,6 +32,9 @@ export default function ScoutingHub() {
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [games, setGames] = useState<ScoutingGame[]>([]);
   const [plays, setPlays] = useState<RoutePlay[]>([]);
+  const [rbPlays, setRbPlays] = useState<RBPlay[]>([]);
+  const [qbPlays, setQbPlays] = useState<QBPlay[]>([]);
+  const [tePlays, setTePlays] = useState<TEPlay[]>([]);
   const [loading, setLoading] = useState(true);
   const [draftYearFilter, setDraftYearFilter] = useState<number | null>(null);
 
@@ -48,23 +55,40 @@ export default function ScoutingHub() {
 
       if (gList.length > 0) {
         const gameIds = gList.map((g) => g.id);
-        const allPlays: RoutePlay[] = [];
         const PAGE = 1000;
-        let from = 0;
-        while (true) {
-          const { data, error } = await supabase
-            .from("route_plays")
-            .select("*")
-            .in("game_id", gameIds)
-            .range(from, from + PAGE - 1);
-          if (error) { log.error("plays load", { msg: error.message }); break; }
-          allPlays.push(...(data ?? []));
-          if (!data || data.length < PAGE) break;
-          from += PAGE;
+
+        async function paginateTable<T>(table: string): Promise<T[]> {
+          const all: T[] = [];
+          let from = 0;
+          while (true) {
+            const { data, error } = await supabase
+              .from(table)
+              .select("*")
+              .in("game_id", gameIds)
+              .range(from, from + PAGE - 1);
+            if (error) { log.error(`${table} load`, { msg: error.message }); break; }
+            all.push(...((data ?? []) as T[]));
+            if (!data || data.length < PAGE) break;
+            from += PAGE;
+          }
+          return all;
         }
-        setPlays(allPlays);
+
+        const [allRoutePlays, allRbPlays, allQbPlays, allTePlays] = await Promise.all([
+          paginateTable<RoutePlay>("route_plays"),
+          paginateTable<RBPlay>("rb_plays"),
+          paginateTable<QBPlay>("qb_plays"),
+          paginateTable<TEPlay>("te_plays"),
+        ]);
+        setPlays(allRoutePlays);
+        setRbPlays(allRbPlays);
+        setQbPlays(allQbPlays);
+        setTePlays(allTePlays);
       } else {
         setPlays([]);
+        setRbPlays([]);
+        setQbPlays([]);
+        setTePlays([]);
       }
     } catch (e) {
       log.error("loadAll", { msg: String(e) });
@@ -328,6 +352,7 @@ export default function ScoutingHub() {
     { key: "prospects", label: "Prospects" },
     { key: "big_board", label: "Big Board" },
     { key: "games_log", label: "Games Charted" },
+    { key: "analysis",  label: "Analysis" },
   ];
 
   const positionTabs: PositionTab[] = ["QB", "RB", "WR", "TE"];
@@ -357,7 +382,7 @@ export default function ScoutingHub() {
                 {prospectsWithStats.length} prospects ·{" "}
                 <span className="text-green-400">{charted} charted</span> ·{" "}
                 <span className="text-yellow-400">{pending} pending</span> ·{" "}
-                {games.length} games · {plays.length} routes logged
+                {games.length} games · {plays.length} snaps logged
               </p>
             </div>
           </div>
@@ -428,6 +453,20 @@ export default function ScoutingHub() {
             prospects={prospectsWithStats}
             loading={loading}
             onSelectProspect={(p) => { setPositionTab(p.position as PositionTab); setTab("prospects"); }}
+          />
+        )}
+
+        {tab === "analysis" && (
+          <AnalysisHub
+            prospects={prospects}
+            prospectsWithStats={prospectsWithStats}
+            games={games}
+            rbPlays={rbPlays}
+            qbPlays={qbPlays}
+            tePlays={tePlays}
+            loading={loading}
+            draftYearFilter={draftYearFilter}
+            setDraftYearFilter={setDraftYearFilter}
           />
         )}
       </div>

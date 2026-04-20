@@ -122,6 +122,7 @@ export default function ProspectList({
       mock_draft_rank: null,
       drafttek_rank: null,
       pfn_rank: null,
+      draft_round: null, draft_pick: null, draft_team: null, synopsis: null,
       should_play: "",
       will_play_pre: "",
       will_play_post: "",

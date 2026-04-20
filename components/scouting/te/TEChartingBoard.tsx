@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "../../../lib/supabaseclient";
+import PlayerSynopsisCard from "../PlayerSynopsisCard";
 import type {
   Prospect,
   ScoutingGame,
@@ -135,6 +136,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged }: Pro
       should_play: prospect.should_play, will_play_pre: prospect.will_play_pre,
       will_play_post: prospect.will_play_post, charting_decision: prospect.charting_decision,
       charting_notes: prospect.charting_notes,
+      draft_round: prospect.draft_round, draft_pick: prospect.draft_pick, draft_team: prospect.draft_team,
     });
     setNotesSummary(null);
   }, [prospect.id, load, prospect.height, prospect.weight, prospect.birthday,
@@ -403,7 +405,14 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged }: Pro
           ← Back
         </button>
         <div className="flex-1 min-w-0">
-          <h2 className="text-xl font-bold text-white truncate">{prospect.name}</h2>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="text-xl font-bold text-white truncate">{prospect.name}</h2>
+            {prospect.draft_round && (
+              <span className="px-2 py-0.5 bg-yellow-600/20 border border-yellow-600/40 rounded text-xs font-semibold text-yellow-400">
+                Rd {prospect.draft_round}{prospect.draft_pick ? `, Pick ${prospect.draft_pick}` : ""}{prospect.draft_team ? ` · ${prospect.draft_team}` : ""}
+              </span>
+            )}
+          </div>
           <p className="text-sm text-gray-400">
             TE · {prospect.school}
             {prospect.conference && ` · ${prospect.conference}`}
@@ -468,6 +477,29 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged }: Pro
             <label className="block text-xs text-gray-500 mb-1">Charting Notes</label>
             <textarea rows={2} className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-green-500 resize-none"
               value={bio.charting_notes ?? ""} onChange={(e) => setBio((b) => ({ ...b, charting_notes: e.target.value }))} />
+          </div>
+          <div className="grid grid-cols-3 gap-3 mb-3">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Draft Round</label>
+              <input type="number" min={1} max={7} placeholder="e.g. 1"
+                className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-green-500"
+                value={bio.draft_round ?? ""}
+                onChange={(e) => setBio((b) => ({ ...b, draft_round: e.target.value ? Number(e.target.value) : null }))} />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Draft Pick #</label>
+              <input type="number" min={1} placeholder="e.g. 14"
+                className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-green-500"
+                value={bio.draft_pick ?? ""}
+                onChange={(e) => setBio((b) => ({ ...b, draft_pick: e.target.value ? Number(e.target.value) : null }))} />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Draft Team</label>
+              <input type="text" placeholder="e.g. NYG"
+                className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-green-500"
+                value={bio.draft_team ?? ""}
+                onChange={(e) => setBio((b) => ({ ...b, draft_team: e.target.value || null }))} />
+            </div>
           </div>
           <button onClick={saveBio} disabled={savingBio} className="px-4 py-2 bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white text-sm rounded font-medium transition">
             {savingBio ? "Saving…" : "Save"}
@@ -722,6 +754,15 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged }: Pro
                   )}
                 </div>
               )}
+
+              {/* Notes Summary */}
+              <PlayerSynopsisCard
+                prospectId={prospect.id}
+                prospectName={prospect.name}
+                position="TE"
+                totalPlays={stats.totalPlays}
+                notes={plays.map((p) => p.play_notes).filter((n): n is string => !!(n?.trim()))}
+              />
             </>
           )}
         </div>

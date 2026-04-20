@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "../../../lib/supabaseclient";
+import PlayerSynopsisCard from "../PlayerSynopsisCard";
 import type {
   Prospect,
   ScoutingGame,
@@ -9,6 +10,9 @@ import type {
   QBPlayType,
   QBTiming,
   QBAccuracy,
+  QBCompletion,
+  QBIntType,
+  QBTargetPos,
   QBDepthZone,
   RouteType,
   ChartingDecision,
@@ -30,6 +34,7 @@ const TIMINGS: { key: QBTiming; label: string }[] = [
   { key: "first_option",  label: "1st Option" },
   { key: "second_option", label: "2nd Option" },
   { key: "checkdown",     label: "Check Down" },
+  { key: "extended_play", label: "Extended Play" },
   { key: "scramble",      label: "Scramble" },
   { key: "sack",          label: "Sack" },
   { key: "throw_away",    label: "Throw Away" },
@@ -104,7 +109,7 @@ function onTargetColor(p: number | null): string {
 // Short display labels for the play log
 const SNAP_SHORT: Record<QBSnapPosition, string> = { shotgun: "SG", pistol: "PS", under_center: "UC" };
 const PLAY_SHORT: Record<QBPlayType, string>     = { run: "RUN", rpo: "RPO", pass: "PASS" };
-const TIMING_SHORT: Record<QBTiming, string>     = { first_option: "1st", second_option: "2nd", checkdown: "CK", scramble: "SCR", sack: "SCK", throw_away: "TA" };
+const TIMING_SHORT: Record<QBTiming, string>     = { first_option: "1st", second_option: "2nd", checkdown: "CK", extended_play: "EXT", scramble: "SCR", sack: "SCK", throw_away: "TA" };
 const ACC_SHORT: Record<QBAccuracy, string>      = { on_target: "OT", high: "HI", low: "LO", in_front: "IF", behind: "BH" };
 const DEPTH_SHORT: Record<QBDepthZone, string>   = {
   deep_left: "DL", deep_center: "DC", deep_right: "DR",
@@ -126,16 +131,20 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
   const [gameError, setGameError]     = useState<string | null>(null);
 
   // Play form
-  const [snapPos, setSnapPos]     = useState<QBSnapPosition>("shotgun");
-  const [playType, setPlayType]   = useState<QBPlayType>("pass");
-  const [timing, setTiming]       = useState<QBTiming | null>(null);
-  const [accuracy, setAccuracy]   = useState<QBAccuracy | null>(null);
-  const [depthZone, setDepthZone] = useState<QBDepthZone | null>(null);
+  const [snapPos, setSnapPos]       = useState<QBSnapPosition>("shotgun");
+  const [playType, setPlayType]     = useState<QBPlayType>("pass");
+  const [timing, setTiming]         = useState<QBTiming | null>(null);
+  const [accuracy, setAccuracy]     = useState<QBAccuracy | null>(null);
+  const [completion, setCompletion] = useState<QBCompletion | null>(null);
+  const [intType, setIntType]       = useState<QBIntType | null>(null);
+  const [targetPos, setTargetPos]   = useState<QBTargetPos | null>(null);
+  const [depthZone, setDepthZone]   = useState<QBDepthZone | null>(null);
   const [routeType, setRouteType] = useState<RouteType | null>(null);
   const [coverage, setCoverage]   = useState<"man" | "zone" | null>(null);
-  const [playNotes, setPlayNotes] = useState("");
-  const [savingPlay, setSavingPlay] = useState(false);
-  const [playError, setPlayError]   = useState<string | null>(null);
+  const [playNotes, setPlayNotes]       = useState("");
+  const [savingPlay, setSavingPlay]     = useState(false);
+  const [playError, setPlayError]       = useState<string | null>(null);
+  const [editingPlayId, setEditingPlayId] = useState<string | null>(null);
 
   // Bio edit
   const [editBio, setEditBio]   = useState(false);
@@ -185,6 +194,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
       should_play: prospect.should_play, will_play_pre: prospect.will_play_pre,
       will_play_post: prospect.will_play_post, charting_decision: prospect.charting_decision,
       charting_notes: prospect.charting_notes,
+      draft_round: prospect.draft_round, draft_pick: prospect.draft_pick, draft_team: prospect.draft_team,
     });
   }, [prospect.id, load, prospect.height, prospect.weight, prospect.birthday,
     prospect.draft_class_year, prospect.personal_rank,
@@ -231,6 +241,19 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
       return acc;
     }, {} as Record<QBAccuracy, number>);
     const onTargetPct = pct(accCounts.on_target, thrownPlays.length);
+    const compTracked   = thrownPlays.filter((p) => p.completion !== null).length;
+    const caughtPlays   = thrownPlays.filter((p) => p.completion === "caught").length;
+    const incompletePlays = thrownPlays.filter((p) => p.completion === "incomplete").length;
+    const intPlays      = thrownPlays.filter((p) => p.completion === "interception").length;
+    const catchPct      = pct(caughtPlays, compTracked);
+    const intPct        = pct(intPlays, compTracked);
+    // INT type breakdown
+    const intTypeCounts: Record<QBIntType, number> = {
+      bad_throw: thrownPlays.filter((p) => p.int_type === "bad_throw").length,
+      bad_decision: thrownPlays.filter((p) => p.int_type === "bad_decision").length,
+      fifty_fifty: thrownPlays.filter((p) => p.int_type === "fifty_fifty").length,
+      tipped: thrownPlays.filter((p) => p.int_type === "tipped").length,
+    };
 
     // Depth zone stats (count + on-target%)
     type ZoneStat = { count: number; onTarget: number; onTargetPct: number | null };
@@ -272,6 +295,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
       totalPlays, runPlays: runPlays.length, passRpo: passRpoPlays.length,
       thrown: thrownPlays.length, scrambles: scramblePlays.length,
       snapCounts, typeCounts, timingCounts, accCounts, onTargetPct,
+      compTracked, caughtPlays, incompletePlays, intPlays, catchPct, intPct, intTypeCounts,
       zoneStats, routeStats, cvgStats,
     };
   }, [plays]);
@@ -284,18 +308,40 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
   }, [plays]);
 
   function resetForm() {
+    setEditingPlayId(null);
     setTiming(null);
     setAccuracy(null);
+    setCompletion(null);
+    setIntType(null);
+    setTargetPos(null);
     setDepthZone(null);
     setRouteType(null);
     setCoverage(null);
     setPlayNotes("");
   }
 
+  function startEditPlay(pl: QBPlay) {
+    setEditingPlayId(pl.id);
+    setSnapPos(pl.snap_position);
+    setPlayType(pl.play_type);
+    setTiming(pl.timing);
+    setAccuracy(pl.accuracy);
+    setCompletion(pl.completion);
+    setIntType(pl.int_type);
+    setTargetPos(pl.target_pos);
+    setDepthZone(pl.depth_zone);
+    setRouteType(pl.route_type);
+    setCoverage(pl.coverage);
+    setPlayNotes(pl.play_notes ?? "");
+  }
+
   function handlePlayTypeChange(pt: QBPlayType) {
     setPlayType(pt);
     setTiming(null);
     setAccuracy(null);
+    setCompletion(null);
+    setIntType(null);
+    setTargetPos(null);
     setDepthZone(null);
     setRouteType(null);
     setCoverage(null);
@@ -306,11 +352,14 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     const autoLog: QBTiming[] = ["sack", "throw_away"];
     if (noThrowTimings.includes(t)) {
       setAccuracy(null);
+      setCompletion(null);
+      setIntType(null);
+      setTargetPos(null);
       setDepthZone(null);
       setRouteType(null);
       setCoverage(null);
     }
-    if (autoLog.includes(t)) {
+    if (autoLog.includes(t) && !editingPlayId) {
       logPlayWithTiming(t);
     }
   }
@@ -358,7 +407,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
       snap_position: snapPos,
       play_type: playType,
       timing: timingOverride,
-      accuracy: null, depth_zone: null, route_type: null, coverage: null,
+      accuracy: null, completion: null, int_type: null, target_pos: null, depth_zone: null, route_type: null, coverage: null,
       play_notes: playNotes || null,
     }).select().single();
     if (error) { setPlayError(error.message); }
@@ -382,8 +431,11 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
       snap_position: snapPos,
       play_type: playType,
       timing:     isPass  ? timing    : null,
-      accuracy:   isThrow ? accuracy  : null,
-      depth_zone: isThrow ? depthZone : null,
+      accuracy:   isThrow ? accuracy   : null,
+      completion: isThrow ? completion : null,
+      int_type:   isThrow ? intType    : null,
+      target_pos: isThrow ? targetPos  : null,
+      depth_zone: isThrow ? depthZone  : null,
       route_type: isThrow ? routeType : null,
       coverage:   isThrow ? coverage  : null,
       play_notes: playNotes || null,
@@ -398,7 +450,36 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     setSavingPlay(false);
   }
 
+  async function saveEditedPlay() {
+    if (!editingPlayId || !canLog) return;
+    setPlayError(null);
+    setSavingPlay(true);
+    const isPass = needPassFields;
+    const isThrow = needThrowFields;
+    const { data, error } = await supabase.from("qb_plays").update({
+      snap_position: snapPos,
+      play_type: playType,
+      timing:     isPass  ? timing     : null,
+      accuracy:   isThrow ? accuracy   : null,
+      completion: isThrow ? completion : null,
+      int_type:   isThrow ? intType    : null,
+      target_pos: isThrow ? targetPos  : null,
+      depth_zone: isThrow ? depthZone  : null,
+      route_type: isThrow ? routeType  : null,
+      coverage:   isThrow ? coverage   : null,
+      play_notes: playNotes || null,
+    }).eq("id", editingPlayId).select().single();
+    if (error) { setPlayError(error.message); }
+    else if (data) {
+      setPlays((prev) => prev.map((p) => p.id === editingPlayId ? (data as QBPlay) : p));
+      resetForm();
+      onDataChanged();
+    }
+    setSavingPlay(false);
+  }
+
   async function deletePlay(id: string) {
+    if (editingPlayId === id) resetForm();
     await supabase.from("qb_plays").delete().eq("id", id);
     setPlays((prev) => prev.filter((p) => p.id !== id));
     onDataChanged();
@@ -426,7 +507,14 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
           ← Back
         </button>
         <div className="flex-1 min-w-0">
-          <h2 className="text-xl font-bold text-white truncate">{prospect.name}</h2>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="text-xl font-bold text-white truncate">{prospect.name}</h2>
+            {prospect.draft_round && (
+              <span className="px-2 py-0.5 bg-yellow-600/20 border border-yellow-600/40 rounded text-xs font-semibold text-yellow-400">
+                Rd {prospect.draft_round}{prospect.draft_pick ? `, Pick ${prospect.draft_pick}` : ""}{prospect.draft_team ? ` · ${prospect.draft_team}` : ""}
+              </span>
+            )}
+          </div>
           <p className="text-sm text-gray-400">
             QB · {prospect.school}
             {prospect.conference && ` · ${prospect.conference}`}
@@ -496,6 +584,29 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
             <textarea rows={2}
               className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500 resize-none"
               value={bio.charting_notes ?? ""} onChange={(e) => setBio((b) => ({ ...b, charting_notes: e.target.value }))} />
+          </div>
+          <div className="grid grid-cols-3 gap-3 mb-3">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Draft Round</label>
+              <input type="number" min={1} max={7} placeholder="e.g. 1"
+                className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
+                value={bio.draft_round ?? ""}
+                onChange={(e) => setBio((b) => ({ ...b, draft_round: e.target.value ? Number(e.target.value) : null }))} />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Draft Pick #</label>
+              <input type="number" min={1} placeholder="e.g. 14"
+                className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
+                value={bio.draft_pick ?? ""}
+                onChange={(e) => setBio((b) => ({ ...b, draft_pick: e.target.value ? Number(e.target.value) : null }))} />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Draft Team</label>
+              <input type="text" placeholder="e.g. NYG"
+                className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
+                value={bio.draft_team ?? ""}
+                onChange={(e) => setBio((b) => ({ ...b, draft_team: e.target.value || null }))} />
+            </div>
           </div>
           <button onClick={saveBio} disabled={savingBio}
             className="px-4 py-2 bg-blue-700 hover:bg-blue-600 disabled:opacity-50 text-white text-sm rounded font-medium transition">
@@ -612,14 +723,26 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                 </div>
               )}
 
-              {/* Accuracy */}
+              {/* Accuracy + Catch% */}
               {stats.thrown > 0 && (
                 <div className="p-4 bg-gray-900 rounded-lg border border-gray-800">
-                  <div className="text-xs text-gray-500 mb-3">
-                    Accuracy <span className="text-gray-700">({stats.thrown} throws)</span>
+                  <div className="text-xs text-gray-500 mb-3 flex flex-wrap items-center gap-3">
+                    <span>Accuracy <span className="text-gray-700">({stats.thrown} throws)</span></span>
                     {stats.onTargetPct !== null && (
-                      <span className={`ml-2 font-semibold ${onTargetColor(stats.onTargetPct)}`}>
+                      <span className={`font-semibold ${onTargetColor(stats.onTargetPct)}`}>
                         {stats.onTargetPct}% on target
+                      </span>
+                    )}
+                    {stats.compTracked > 0 && (
+                      <span className={`font-semibold ${stats.catchPct !== null && stats.catchPct >= 60 ? "text-green-400" : stats.catchPct !== null && stats.catchPct >= 50 ? "text-yellow-400" : "text-red-400"}`}>
+                        {fmtPct(stats.catchPct)} catch rate
+                        <span className="text-gray-600 font-normal ml-1">({stats.compTracked} tracked)</span>
+                      </span>
+                    )}
+                    {stats.intPlays > 0 && (
+                      <span className="font-semibold text-red-400">
+                        {stats.intPlays} INT{stats.intPlays !== 1 ? "s" : ""}
+                        {stats.intPct !== null && <span className="text-red-400/70 font-normal ml-1">({stats.intPct}%)</span>}
                       </span>
                     )}
                   </div>
@@ -637,6 +760,46 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                       );
                     })}
                   </div>
+                  {stats.compTracked > 0 && (
+                    <div className="mt-3 space-y-2">
+                      <div className="flex gap-3">
+                        <div className="flex-1 p-2.5 bg-green-900/20 border border-green-800/40 rounded-lg flex items-center justify-between">
+                          <span className="text-xs text-gray-400">Caught</span>
+                          <span className="text-sm font-bold text-green-400">{stats.caughtPlays} <span className="text-xs font-normal text-gray-500">/ {stats.compTracked}</span></span>
+                        </div>
+                        <div className="flex-1 p-2.5 bg-gray-800/50 rounded-lg flex items-center justify-between">
+                          <span className="text-xs text-gray-400">Incomplete</span>
+                          <span className="text-sm font-bold text-gray-300">{stats.incompletePlays}</span>
+                        </div>
+                        <div className="flex-1 p-2.5 bg-red-900/20 border border-red-800/40 rounded-lg flex items-center justify-between">
+                          <span className="text-xs text-gray-400">INT</span>
+                          <span className="text-sm font-bold text-red-400">{stats.intPlays}</span>
+                        </div>
+                        <div className="flex-1 p-2.5 bg-gray-800/50 rounded-lg flex items-center justify-between">
+                          <span className="text-xs text-gray-400">Catch%</span>
+                          <span className={`text-sm font-bold ${onTargetColor(stats.catchPct)}`}>{fmtPct(stats.catchPct)}</span>
+                        </div>
+                      </div>
+                      {stats.intPlays > 0 && (
+                        <div className="flex gap-2">
+                          {([
+                            { key: "bad_throw",    label: "Bad Throw" },
+                            { key: "bad_decision", label: "Bad Decision" },
+                            { key: "fifty_fifty",  label: "50/50 Ball" },
+                            { key: "tipped",       label: "Tipped Ball" },
+                          ] as { key: QBIntType; label: string }[]).map(({ key, label }) => {
+                            const n = stats.intTypeCounts[key];
+                            return (
+                              <div key={key} className="flex-1 p-2 bg-orange-900/20 border border-orange-800/30 rounded text-center">
+                                <div className="text-xs text-gray-500 mb-0.5">{label}</div>
+                                <div className="text-sm font-bold text-orange-300">{n || "—"}</div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -763,6 +926,15 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                   </div>
                 </div>
               )}
+
+              {/* Notes Summary */}
+              <PlayerSynopsisCard
+                prospectId={prospect.id}
+                prospectName={prospect.name}
+                position="QB"
+                totalPlays={stats.totalPlays}
+                notes={plays.map((p) => p.play_notes).filter((n): n is string => !!(n?.trim()))}
+              />
             </>
           )}
         </div>
@@ -894,6 +1066,73 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                       </div>
                     </div>
 
+                    {/* Completion */}
+                    <div>
+                      <div className="text-xs text-gray-500 mb-2">Result</div>
+                      <div className="flex gap-2 flex-wrap">
+                        {([
+                          { key: "caught",       label: "Caught",       cls: "bg-green-600" },
+                          { key: "incomplete",   label: "Incomplete",   cls: "bg-gray-600" },
+                          { key: "interception", label: "Interception", cls: "bg-red-700" },
+                        ] as { key: QBCompletion; label: string; cls: string }[]).map(({ key, label, cls }) => (
+                          <button
+                            key={key}
+                            onClick={() => {
+                              setCompletion((c) => c === key ? null : key);
+                              if (key !== "interception") setIntType(null);
+                            }}
+                            className={`px-5 py-2 rounded text-sm font-semibold transition ${
+                              completion === key ? `${cls} text-white` : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                      {/* INT sub-type */}
+                      {completion === "interception" && (
+                        <div className="mt-3">
+                          <div className="text-xs text-gray-500 mb-2">INT Type</div>
+                          <div className="flex gap-2 flex-wrap">
+                            {([
+                              { key: "bad_throw",    label: "Bad Throw" },
+                              { key: "bad_decision", label: "Bad Decision" },
+                              { key: "fifty_fifty",  label: "50/50 Ball" },
+                              { key: "tipped",       label: "Tipped Ball" },
+                            ] as { key: QBIntType; label: string }[]).map(({ key, label }) => (
+                              <button
+                                key={key}
+                                onClick={() => setIntType((t) => t === key ? null : key)}
+                                className={`px-4 py-1.5 rounded text-xs font-medium transition ${
+                                  intType === key ? "bg-orange-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                                }`}
+                              >
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Target Position */}
+                    <div>
+                      <div className="text-xs text-gray-500 mb-2">Target Position</div>
+                      <div className="flex gap-2">
+                        {(["rb", "wr", "te"] as QBTargetPos[]).map((pos) => (
+                          <button
+                            key={pos}
+                            onClick={() => setTargetPos((p) => p === pos ? null : pos)}
+                            className={`px-6 py-2 rounded text-sm font-semibold uppercase transition ${
+                              targetPos === pos ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                            }`}
+                          >
+                            {pos.toUpperCase()}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
                     {/* Depth / Location 3×3 grid */}
                     <div>
                       <div className="text-xs text-gray-500 mb-2">Depth / Location</div>
@@ -956,14 +1195,32 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                   </div>
                 )}
 
-                {/* Notes + Log */}
+                {/* Notes + Log / Save */}
+                {editingPlayId && (
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-900/30 border border-yellow-700/50 rounded text-xs text-yellow-300">
+                    <span>✎</span>
+                    <span>Editing play — make changes above then save</span>
+                    <button onClick={resetForm} className="ml-auto text-yellow-400 hover:text-white transition">Cancel</button>
+                  </div>
+                )}
                 <div className="flex gap-2">
-                  <input className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500"
-                    placeholder="Play note (optional)" value={playNotes} onChange={(e) => setPlayNotes(e.target.value)} />
-                  <button onClick={logPlay} disabled={!canLog}
-                    className="px-5 py-2 bg-green-700 hover:bg-green-600 disabled:opacity-40 text-white text-sm rounded font-medium transition">
-                    {savingPlay ? "…" : "Log Play"}
-                  </button>
+                  <input
+                    className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500"
+                    placeholder="Play note (optional)"
+                    value={playNotes}
+                    onChange={(e) => setPlayNotes(e.target.value)}
+                  />
+                  {editingPlayId ? (
+                    <button onClick={saveEditedPlay} disabled={!canLog}
+                      className="px-5 py-2 bg-yellow-600 hover:bg-yellow-500 disabled:opacity-40 text-white text-sm rounded font-medium transition whitespace-nowrap">
+                      {savingPlay ? "…" : "Save Edit"}
+                    </button>
+                  ) : (
+                    <button onClick={logPlay} disabled={!canLog}
+                      className="px-5 py-2 bg-green-700 hover:bg-green-600 disabled:opacity-40 text-white text-sm rounded font-medium transition whitespace-nowrap">
+                      {savingPlay ? "…" : "Log Play"}
+                    </button>
+                  )}
                 </div>
                 {playError && <p className="text-red-400 text-xs">{playError}</p>}
 
@@ -973,7 +1230,11 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                     <div className="text-xs text-gray-500 mb-2">Plays This Game ({gamePlays.length})</div>
                     <div className="max-h-56 overflow-y-auto space-y-1 pr-1">
                       {[...gamePlays].reverse().map((pl, i) => (
-                        <div key={pl.id} className="flex items-center gap-2 px-3 py-1.5 bg-gray-900 rounded text-xs">
+                        <div key={pl.id} className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs transition ${
+                          editingPlayId === pl.id
+                            ? "bg-yellow-900/40 border border-yellow-700/60"
+                            : "bg-gray-900 border border-transparent"
+                        }`}>
                           <span className="text-gray-500 w-5 flex-shrink-0">{gamePlays.length - i}</span>
                           <span className="text-gray-500 font-medium">{SNAP_SHORT[pl.snap_position]}</span>
                           <span className={`font-bold ${pl.play_type === "run" ? "text-green-400" : pl.play_type === "rpo" ? "text-yellow-400" : "text-blue-400"}`}>
@@ -989,11 +1250,31 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                               {ACC_SHORT[pl.accuracy]}
                             </span>
                           )}
+                          {pl.target_pos && <span className="text-cyan-400 font-semibold uppercase">{pl.target_pos}</span>}
+                          {pl.completion === "caught"       && <span className="text-green-400 font-bold">C</span>}
+                          {pl.completion === "incomplete"   && <span className="text-gray-400 font-bold">INC</span>}
+                          {pl.completion === "interception" && (
+                            <span className="text-red-400 font-bold">
+                              INT{pl.int_type ? ` (${pl.int_type === "bad_throw" ? "BT" : pl.int_type === "bad_decision" ? "BD" : pl.int_type === "fifty_fifty" ? "50" : "TP"})` : ""}
+                            </span>
+                          )}
                           {pl.depth_zone && <span className="text-blue-300">{DEPTH_SHORT[pl.depth_zone]}</span>}
                           {pl.route_type && <span className="text-gray-300 capitalize">{pl.route_type}</span>}
                           {pl.coverage && <span className="text-purple-400 capitalize">{pl.coverage}</span>}
                           {pl.play_notes && <span className="text-gray-500 truncate">{pl.play_notes}</span>}
-                          <button onClick={() => deletePlay(pl.id)} className="ml-auto text-gray-700 hover:text-red-400 flex-shrink-0">✕</button>
+                          <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
+                            <button
+                              onClick={() => editingPlayId === pl.id ? resetForm() : startEditPlay(pl)}
+                              className={`px-2 py-0.5 rounded text-xs transition ${
+                                editingPlayId === pl.id
+                                  ? "text-yellow-400 hover:text-white"
+                                  : "text-gray-600 hover:text-yellow-400"
+                              }`}
+                            >
+                              ✎
+                            </button>
+                            <button onClick={() => deletePlay(pl.id)} className="text-gray-600 hover:text-red-400">✕</button>
+                          </div>
                         </div>
                       ))}
                     </div>
