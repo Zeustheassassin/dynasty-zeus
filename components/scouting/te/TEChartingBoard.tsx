@@ -93,6 +93,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged }: Pro
   const [playNotes, setPlayNotes] = useState("");
   const [savingPlay, setSavingPlay] = useState(false);
   const [playError, setPlayError] = useState<string | null>(null);
+  const [editingPlayId, setEditingPlayId] = useState<string | null>(null);
 
   // Bio edit
   const [editBio, setEditBio] = useState(false);
@@ -306,6 +307,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged }: Pro
   }
 
   function resetPlayForm() {
+    setEditingPlayId(null);
     setBlockType(null);
     setBlockSuccess(null);
     setCoverage(null);
@@ -317,6 +319,60 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged }: Pro
     setContestedCatch(null);
     setBrokenTackle(false);
     setPlayNotes("");
+  }
+
+  function startEditPlay(pl: TEPlay) {
+    setEditingPlayId(pl.id);
+    setLocation(pl.location);
+    setPositioning(pl.positioning);
+    setPlayType(pl.play_type);
+    setBlockType(pl.block_type ?? null);
+    setBlockSuccess(pl.block_success ?? null);
+    setCoverage(pl.coverage ?? null);
+    setRouteType(pl.route_type ?? null);
+    setWasOpen(pl.was_open ?? null);
+    setTargeted(pl.targeted ?? null);
+    setTargetOutcome(
+      pl.targeted
+        ? pl.caught ? "caught" : pl.dropped ? "dropped" : "incomplete"
+        : null
+    );
+    setContestedTarget(pl.contested_target ?? null);
+    setContestedCatch(pl.contested_catch ?? null);
+    setBrokenTackle(pl.broken_tackle ?? false);
+    setPlayNotes(pl.play_notes ?? "");
+  }
+
+  async function saveEditedPlay() {
+    if (!editingPlayId || !canLog) return;
+    setPlayError(null);
+    setSavingPlay(true);
+    const isBlock = playType === "run_block" || playType === "pass_block";
+    const isTargeted = !isBlock && targeted === true;
+    const { data, error } = await supabase.from("te_plays").update({
+      location,
+      positioning,
+      play_type: playType,
+      block_type: isBlock ? blockType : null,
+      block_success: isBlock ? blockSuccess : null,
+      coverage: isBlock ? null : coverage,
+      route_type: isBlock ? null : routeType,
+      was_open: isBlock ? null : wasOpen,
+      targeted: isBlock ? null : targeted,
+      caught: isTargeted ? targetOutcome === "caught" : null,
+      dropped: isTargeted ? targetOutcome === "dropped" : null,
+      contested_target: isTargeted ? contestedTarget : null,
+      contested_catch: isTargeted && contestedTarget ? contestedCatch : null,
+      broken_tackle: isTargeted && targetOutcome === "caught" ? brokenTackle : false,
+      play_notes: playNotes || null,
+    }).eq("id", editingPlayId).select().single();
+    if (error) { setPlayError(error.message); }
+    else if (data) {
+      setPlays((prev) => prev.map((p) => p.id === editingPlayId ? (data as TEPlay) : p));
+      resetPlayForm();
+      onDataChanged();
+    }
+    setSavingPlay(false);
   }
 
   async function logPlay() {
@@ -359,6 +415,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged }: Pro
   }
 
   async function deletePlay(id: string) {
+    if (editingPlayId === id) resetPlayForm();
     await supabase.from("te_plays").delete().eq("id", id);
     setPlays((prev) => prev.filter((p) => p.id !== id));
     onDataChanged();
@@ -1037,13 +1094,27 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged }: Pro
                 )}
 
                 {/* Notes + log */}
+                {editingPlayId && (
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-900/30 border border-yellow-700/50 rounded text-xs text-yellow-300">
+                    <span>✎</span>
+                    <span>Editing play — make changes above then save</span>
+                    <button onClick={resetPlayForm} className="ml-auto text-yellow-400 hover:text-white transition">Cancel</button>
+                  </div>
+                )}
                 <div className="flex gap-2">
                   <input className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-green-500"
                     placeholder="Play note (optional)" value={playNotes} onChange={(e) => setPlayNotes(e.target.value)} />
-                  <button onClick={logPlay} disabled={savingPlay || !canLog}
-                    className="px-5 py-2 bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white text-sm rounded font-medium transition">
-                    {savingPlay ? "…" : "Log Play"}
-                  </button>
+                  {editingPlayId ? (
+                    <button onClick={saveEditedPlay} disabled={savingPlay || !canLog}
+                      className="px-5 py-2 bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 text-white text-sm rounded font-medium transition whitespace-nowrap">
+                      {savingPlay ? "…" : "Save Edit"}
+                    </button>
+                  ) : (
+                    <button onClick={logPlay} disabled={savingPlay || !canLog}
+                      className="px-5 py-2 bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white text-sm rounded font-medium transition">
+                      {savingPlay ? "…" : "Log Play"}
+                    </button>
+                  )}
                 </div>
                 {playError && <p className="text-red-400 text-xs">{playError}</p>}
 
@@ -1061,7 +1132,11 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged }: Pro
                         };
                         const locLabel: Record<TELocation, string> = { left: "L", right: "R", backfield: "BF" };
                         return (
-                          <div key={pl.id} className="flex items-center gap-2 px-3 py-1.5 bg-gray-900 rounded text-xs">
+                          <div key={pl.id} className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs transition ${
+                            editingPlayId === pl.id
+                              ? "bg-yellow-900/40 border border-yellow-700/60"
+                              : "bg-gray-900 border border-transparent"
+                          }`}>
                             <span className="text-gray-500 w-5 flex-shrink-0">{gamePlays.length - i}</span>
                             <span className="text-gray-400">{locLabel[pl.location]}</span>
                             <span className="text-gray-500">{posLabel[pl.positioning]}</span>
@@ -1086,7 +1161,13 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged }: Pro
                             )}
                             {pl.broken_tackle && <span className="text-yellow-400">BT</span>}
                             {pl.play_notes && <span className="text-gray-500 truncate">{pl.play_notes}</span>}
-                            <button onClick={() => deletePlay(pl.id)} className="ml-auto text-gray-700 hover:text-red-400 flex-shrink-0">✕</button>
+                            <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
+                              <button
+                                onClick={() => editingPlayId === pl.id ? resetPlayForm() : startEditPlay(pl)}
+                                className={`px-2 py-0.5 rounded text-xs transition ${editingPlayId === pl.id ? "text-yellow-400 hover:text-white" : "text-gray-600 hover:text-yellow-400"}`}
+                              >✎</button>
+                              <button onClick={() => deletePlay(pl.id)} className="text-gray-700 hover:text-red-400">✕</button>
+                            </div>
                           </div>
                         );
                       })}

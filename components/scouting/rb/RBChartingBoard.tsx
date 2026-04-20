@@ -145,9 +145,11 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
   // Route-play specific
   const [alignedAsWr, setAlignedAsWr] = useState(false);
   const [rbTargeted, setRbTargeted] = useState(false);
+  const [rbOutcome, setRbOutcome] = useState<"caught" | "drop" | "incomplete" | null>(null);
   const [playNotes, setPlayNotes] = useState("");
   const [savingPlay, setSavingPlay] = useState(false);
   const [playError, setPlayError] = useState<string | null>(null);
+  const [editingPlayId, setEditingPlayId] = useState<string | null>(null);
 
   // Bio edit
   const [editBio, setEditBio] = useState(false);
@@ -302,6 +304,9 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
   }
 
   function resetPlayForm() {
+    setEditingPlayId(null);
+    setFormation("gun");
+    setRunType("outside_zone");
     setSuccess(null);
     setLoadedBox(false);
     setUnblockedDefender(false);
@@ -310,6 +315,7 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     setRunStuff(false);
     setAlignedAsWr(false);
     setRbTargeted(false);
+    setRbOutcome(null);
     setPlayNotes("");
   }
 
@@ -325,7 +331,7 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     const { data, error } = await supabase.from("rb_plays").insert({
       user_id: user.id, game_id: selectedGameId,
       formation, run_type: runType,
-      success: isRoute ? (rbTargeted ? success : null) : success,
+      success: isRoute ? (rbTargeted ? (rbOutcome === "caught" ? true : rbOutcome === "drop" ? false : null) : null) : success,
       targeted: isRoute ? rbTargeted : false,
       aligned_as_wr: isRoute ? alignedAsWr : false,
       loaded_box: isRoute ? false : loadedBox,
@@ -344,7 +350,55 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     setSavingPlay(false);
   }
 
+  function startEditPlay(pl: RBPlay) {
+    setEditingPlayId(pl.id);
+    setFormation(pl.formation);
+    setRunType(pl.run_type);
+    setSuccess(pl.run_type !== "route" ? pl.success : null);
+    setLoadedBox(pl.loaded_box ?? false);
+    setUnblockedDefender(pl.unblocked_defender ?? false);
+    setBrokenTackle(pl.broken_tackle ?? false);
+    setExplosivePlay(pl.explosive_play ?? false);
+    setRunStuff(pl.run_stuff ?? false);
+    setAlignedAsWr(pl.aligned_as_wr ?? false);
+    setRbTargeted(pl.targeted ?? false);
+    setRbOutcome(
+      pl.run_type === "route" && pl.targeted
+        ? pl.success === true ? "caught" : pl.success === false ? "drop" : "incomplete"
+        : null
+    );
+    setPlayNotes(pl.play_notes ?? "");
+  }
+
+  async function saveEditedPlay() {
+    if (!editingPlayId) return;
+    const isRoute = runType === "route";
+    if (!isRoute && success === null) return;
+    setPlayError(null);
+    setSavingPlay(true);
+    const { data, error } = await supabase.from("rb_plays").update({
+      formation, run_type: runType,
+      success: isRoute ? (rbTargeted ? (rbOutcome === "caught" ? true : rbOutcome === "drop" ? false : null) : null) : success,
+      targeted: isRoute ? rbTargeted : false,
+      aligned_as_wr: isRoute ? alignedAsWr : false,
+      loaded_box: isRoute ? false : loadedBox,
+      unblocked_defender: isRoute ? false : unblockedDefender,
+      broken_tackle: isRoute ? false : brokenTackle,
+      explosive_play: isRoute ? false : explosivePlay,
+      run_stuff: isRoute ? false : runStuff,
+      play_notes: playNotes || null,
+    }).eq("id", editingPlayId).select().single();
+    if (error) { setPlayError(error.message); }
+    else if (data) {
+      setPlays((prev) => prev.map((p) => p.id === editingPlayId ? (data as RBPlay) : p));
+      resetPlayForm();
+      onDataChanged();
+    }
+    setSavingPlay(false);
+  }
+
   async function deletePlay(id: string) {
+    if (editingPlayId === id) resetPlayForm();
     await supabase.from("rb_plays").delete().eq("id", id);
     setPlays((prev) => prev.filter((p) => p.id !== id));
     onDataChanged();
@@ -768,7 +822,7 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                       Pass Block Attempt
                     </button>
                     {/* Route run */}
-                    <button onClick={() => { setRunType("route"); setSuccess(null); }}
+                    <button onClick={() => { setRunType("route"); setSuccess(null); setRbOutcome(null); }}
                       className={`w-full py-2 rounded text-sm font-medium transition ${runType === "route" ? "bg-blue-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
                       Route Run
                     </button>
@@ -800,7 +854,7 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                             className={`px-3 h-9 rounded text-xs font-medium transition ${rbTargeted ? "bg-yellow-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
                             Yes
                           </button>
-                          <button onClick={() => { setRbTargeted(false); setSuccess(null); }}
+                          <button onClick={() => { setRbTargeted(false); setRbOutcome(null); }}
                             className={`px-3 h-9 rounded text-xs font-medium transition ${!rbTargeted ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
                             No
                           </button>
@@ -810,13 +864,17 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                         <div>
                           <div className="text-xs text-gray-500 mb-2">Outcome</div>
                           <div className="flex gap-1.5">
-                            <button onClick={() => setSuccess(true)}
-                              className={`px-4 h-9 rounded text-xs font-bold transition ${success === true ? "bg-green-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                            <button onClick={() => setRbOutcome("caught")}
+                              className={`px-4 h-9 rounded text-xs font-bold transition ${rbOutcome === "caught" ? "bg-green-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
                               Caught ✓
                             </button>
-                            <button onClick={() => setSuccess(false)}
-                              className={`px-4 h-9 rounded text-xs font-bold transition ${success === false ? "bg-red-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                            <button onClick={() => setRbOutcome("drop")}
+                              className={`px-4 h-9 rounded text-xs font-bold transition ${rbOutcome === "drop" ? "bg-red-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
                               Drop ✗
+                            </button>
+                            <button onClick={() => setRbOutcome("incomplete")}
+                              className={`px-4 h-9 rounded text-xs font-bold transition ${rbOutcome === "incomplete" ? "bg-gray-500 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                              Incomplete
                             </button>
                           </div>
                         </div>
@@ -878,13 +936,29 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                 )}
 
                 {/* Notes + log */}
+                {editingPlayId && (
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-900/30 border border-yellow-700/50 rounded text-xs text-yellow-300">
+                    <span>✎</span>
+                    <span>Editing play — make changes above then save</span>
+                    <button onClick={resetPlayForm} className="ml-auto text-yellow-400 hover:text-white transition">Cancel</button>
+                  </div>
+                )}
                 <div className="flex gap-2">
                   <input className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-green-500"
                     placeholder="Play note (optional)" value={playNotes} onChange={(e) => setPlayNotes(e.target.value)} />
-                  <button onClick={logPlay} disabled={savingPlay || (runType !== "route" && success === null) || (runType === "route" && rbTargeted && success === null)}
-                    className="px-5 py-2 bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white text-sm rounded font-medium transition">
-                    {savingPlay ? "…" : "Log Play"}
-                  </button>
+                  {editingPlayId ? (
+                    <button onClick={saveEditedPlay}
+                      disabled={savingPlay || (runType !== "route" && success === null) || (runType === "route" && rbTargeted && rbOutcome === null)}
+                      className="px-5 py-2 bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 text-white text-sm rounded font-medium transition whitespace-nowrap">
+                      {savingPlay ? "…" : "Save Edit"}
+                    </button>
+                  ) : (
+                    <button onClick={logPlay}
+                      disabled={savingPlay || (runType !== "route" && success === null) || (runType === "route" && rbTargeted && rbOutcome === null)}
+                      className="px-5 py-2 bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white text-sm rounded font-medium transition">
+                      {savingPlay ? "…" : "Log Play"}
+                    </button>
+                  )}
                 </div>
                 {playError && <p className="text-red-400 text-xs">{playError}</p>}
 
@@ -901,7 +975,11 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                         const fLabel: Record<RBFormation, string> = { gun: "Gun", pistol: "Pst", under_center: "UC" };
                         const isRoute = pl.run_type === "route";
                         return (
-                          <div key={pl.id} className="flex items-center gap-2 px-3 py-1.5 bg-gray-900 rounded text-xs">
+                          <div key={pl.id} className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs transition ${
+                            editingPlayId === pl.id
+                              ? "bg-yellow-900/40 border border-yellow-700/60"
+                              : "bg-gray-900 border border-transparent"
+                          }`}>
                             <span className="text-gray-500 w-5 flex-shrink-0">{gamePlays.length - i}</span>
                             <span className="text-gray-400">{fLabel[pl.formation]}</span>
                             <span className={`font-medium ${isRoute ? "text-blue-400" : "text-white"}`}>{rtLabel[pl.run_type]}</span>
@@ -911,7 +989,7 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                                 {pl.targeted
                                   ? pl.success === true ? <span className="text-green-400">✓</span>
                                     : pl.success === false ? <span className="text-red-400">Drop</span>
-                                    : null
+                                    : <span className="text-gray-400">Inc</span>
                                   : <span className="text-gray-600">—</span>}
                               </>
                             ) : (
@@ -925,7 +1003,13 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                               </>
                             )}
                             {pl.play_notes && <span className="text-gray-500 truncate">{pl.play_notes}</span>}
-                            <button onClick={() => deletePlay(pl.id)} className="ml-auto text-gray-700 hover:text-red-400 flex-shrink-0">✕</button>
+                            <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
+                              <button
+                                onClick={() => editingPlayId === pl.id ? resetPlayForm() : startEditPlay(pl)}
+                                className={`px-2 py-0.5 rounded text-xs transition ${editingPlayId === pl.id ? "text-yellow-400 hover:text-white" : "text-gray-600 hover:text-yellow-400"}`}
+                              >✎</button>
+                              <button onClick={() => deletePlay(pl.id)} className="text-gray-700 hover:text-red-400">✕</button>
+                            </div>
                           </div>
                         );
                       })}

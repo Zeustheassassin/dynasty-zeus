@@ -73,8 +73,9 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
   const [coverage, setCoverage] = useState("");
   const [wasOpen, setWasOpen] = useState(false);
   const [targeted, setTargeted] = useState(false);
-  const [playSuccess, setPlaySuccess] = useState<boolean | null>(null);
+  const [playOutcome, setPlayOutcome] = useState<"caught" | "drop" | "incomplete" | null>(null);
   const [contested, setContested] = useState(false);
+  const [editingPlayId, setEditingPlayId] = useState<string | null>(null);
   const [yards, setYards] = useState("");
   const [playNotes, setPlayNotes] = useState("");
   const [savingPlay, setSavingPlay] = useState(false);
@@ -314,9 +315,9 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
         coverage: noRouteRun ? "" : coverage,
         was_open: noRouteRun ? false : wasOpen,
         targeted: noRouteRun ? false : targeted,
-        success: (!noRouteRun && targeted) ? playSuccess : null,
+        success: (!noRouteRun && targeted) ? (playOutcome === "caught" ? true : playOutcome === "drop" ? false : null) : null,
         contested: (!noRouteRun && targeted) ? contested : false,
-        yards: (!noRouteRun && targeted && yards) ? parseInt(yards, 10) : null,
+        yards: (!noRouteRun && targeted && playOutcome === "caught" && yards) ? parseInt(yards, 10) : null,
         play_notes: playNotes,
       })
       .select()
@@ -327,7 +328,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
       setPlays((prev) => [...prev, data as RoutePlay]);
       setWasOpen(false);
       setTargeted(false);
-      setPlaySuccess(null);
+      setPlayOutcome(null);
       setContested(false);
       setYards("");
       setPlayNotes("");
@@ -375,7 +376,73 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
     setShowSummaryImport(false);
   }
 
+  function resetForm() {
+    setEditingPlayId(null);
+    setNoRouteRun(false);
+    setRouteType("curl");
+    setAlignment("right");
+    setOnLine(true);
+    setCoverage("");
+    setWasOpen(false);
+    setTargeted(false);
+    setPlayOutcome(null);
+    setContested(false);
+    setYards("");
+    setPlayNotes("");
+  }
+
+  function startEditPlay(pl: RoutePlay) {
+    setEditingPlayId(pl.id);
+    setNoRouteRun(pl.no_route_run);
+    setRouteType(pl.route_type);
+    setAlignment(pl.alignment);
+    setOnLine(pl.on_line);
+    setCoverage(pl.coverage ?? "");
+    setWasOpen(pl.was_open);
+    setTargeted(pl.targeted);
+    setPlayOutcome(
+      pl.targeted
+        ? pl.success === true ? "caught" : pl.success === false ? "drop" : "incomplete"
+        : null
+    );
+    setContested(pl.contested ?? false);
+    setYards(pl.yards != null ? String(pl.yards) : "");
+    setPlayNotes(pl.play_notes ?? "");
+  }
+
+  async function saveEditedPlay() {
+    if (!editingPlayId) return;
+    setPlayError(null);
+    setSavingPlay(true);
+    const { data, error } = await supabase
+      .from("route_plays")
+      .update({
+        no_route_run: noRouteRun,
+        route_type: noRouteRun ? "other" : routeType,
+        alignment,
+        on_line: onLine,
+        coverage: noRouteRun ? "" : coverage,
+        was_open: noRouteRun ? false : wasOpen,
+        targeted: noRouteRun ? false : targeted,
+        success: (!noRouteRun && targeted) ? (playOutcome === "caught" ? true : playOutcome === "drop" ? false : null) : null,
+        contested: (!noRouteRun && targeted) ? contested : false,
+        yards: (!noRouteRun && targeted && playOutcome === "caught" && yards) ? parseInt(yards, 10) : null,
+        play_notes: playNotes,
+      })
+      .eq("id", editingPlayId)
+      .select()
+      .single();
+    if (error) { setPlayError(error.message); }
+    else if (data) {
+      setPlays((prev) => prev.map((p) => p.id === editingPlayId ? (data as RoutePlay) : p));
+      resetForm();
+      onDataChanged();
+    }
+    setSavingPlay(false);
+  }
+
   async function deletePlay(id: string) {
+    if (editingPlayId === id) resetForm();
     await supabase.from("route_plays").delete().eq("id", id);
     setPlays((prev) => prev.filter((p) => p.id !== id));
     onDataChanged();
@@ -1072,7 +1139,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                         Yes
                       </button>
                       <button
-                        onClick={() => { setTargeted(false); setPlaySuccess(null); setContested(false); setYards(""); }}
+                        onClick={() => { setTargeted(false); setPlayOutcome(null); setContested(false); setYards(""); }}
                         className={`px-3 h-10 rounded text-xs font-medium transition ${!targeted ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}
                       >
                         No
@@ -1088,16 +1155,22 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                       <div className="text-xs text-gray-500 mb-2">Outcome</div>
                       <div className="flex gap-1.5">
                         <button
-                          onClick={() => setPlaySuccess(true)}
-                          className={`px-4 h-10 rounded text-xs font-bold transition ${playSuccess === true ? "bg-green-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}
+                          onClick={() => setPlayOutcome("caught")}
+                          className={`px-4 h-10 rounded text-xs font-bold transition ${playOutcome === "caught" ? "bg-green-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}
                         >
                           Caught ✓
                         </button>
                         <button
-                          onClick={() => { setPlaySuccess(false); }}
-                          className={`px-4 h-10 rounded text-xs font-bold transition ${playSuccess === false ? "bg-red-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}
+                          onClick={() => { setPlayOutcome("drop"); setYards(""); }}
+                          className={`px-4 h-10 rounded text-xs font-bold transition ${playOutcome === "drop" ? "bg-red-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}
                         >
                           Drop ✗
+                        </button>
+                        <button
+                          onClick={() => { setPlayOutcome("incomplete"); setYards(""); }}
+                          className={`px-4 h-10 rounded text-xs font-bold transition ${playOutcome === "incomplete" ? "bg-gray-500 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}
+                        >
+                          Incomplete
                         </button>
                       </div>
                     </div>
@@ -1118,7 +1191,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                         </button>
                       </div>
                     </div>
-                    {playSuccess === true && (
+                    {playOutcome === "caught" && (
                       <div>
                         <div className="text-xs text-gray-500 mb-2">Yards</div>
                         <input
@@ -1134,6 +1207,13 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                 )}
 
                 {/* Notes + log button */}
+                {editingPlayId && (
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-900/30 border border-yellow-700/50 rounded text-xs text-yellow-300">
+                    <span>✎</span>
+                    <span>Editing play — make changes above then save</span>
+                    <button onClick={resetForm} className="ml-auto text-yellow-400 hover:text-white transition">Cancel</button>
+                  </div>
+                )}
                 <div className="flex gap-2">
                   <input
                     className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500"
@@ -1141,13 +1221,23 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                     value={playNotes}
                     onChange={(e) => setPlayNotes(e.target.value)}
                   />
-                  <button
-                    onClick={logPlay}
-                    disabled={savingPlay || (!noRouteRun && targeted && playSuccess === null)}
-                    className="px-5 py-2 bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white text-sm rounded font-medium transition"
-                  >
-                    {savingPlay ? "…" : "Log Play"}
-                  </button>
+                  {editingPlayId ? (
+                    <button
+                      onClick={saveEditedPlay}
+                      disabled={savingPlay || (!noRouteRun && targeted && playOutcome === null)}
+                      className="px-5 py-2 bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 text-white text-sm rounded font-medium transition whitespace-nowrap"
+                    >
+                      {savingPlay ? "…" : "Save Edit"}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={logPlay}
+                      disabled={savingPlay || (!noRouteRun && targeted && playOutcome === null)}
+                      className="px-5 py-2 bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white text-sm rounded font-medium transition"
+                    >
+                      {savingPlay ? "…" : "Log Play"}
+                    </button>
+                  )}
                 </div>
                 {playError && (
                   <p className="text-red-400 text-xs">{playError}</p>
@@ -1161,7 +1251,11 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                       {[...gamePlays].reverse().map((pl, i) => (
                         <div
                           key={pl.id}
-                          className="flex items-center gap-2 px-3 py-1.5 bg-gray-900 rounded text-xs"
+                          className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs transition ${
+                            editingPlayId === pl.id
+                              ? "bg-yellow-900/40 border border-yellow-700/60"
+                              : "bg-gray-900 border border-transparent"
+                          }`}
                         >
                           <span className="text-gray-500 w-5 flex-shrink-0">{gamePlays.length - i}</span>
                           {pl.no_route_run
@@ -1171,21 +1265,35 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                           <span className="text-gray-500 uppercase text-xs">{pl.alignment[0]}</span>
                           <span className="text-gray-600">{pl.on_line ? "OL" : "Off"}</span>
                           {!pl.no_route_run && (pl.targeted ? (
-                            pl.success ? (
+                            pl.success === true ? (
                               <span className="text-green-400">✓ {pl.yards ?? 0}yds</span>
-                            ) : (
+                            ) : pl.success === false ? (
                               <span className="text-red-400">✗</span>
+                            ) : (
+                              <span className="text-gray-400">inc</span>
                             )
                           ) : (
                             <span className="text-gray-600">—</span>
                           ))}
                           {pl.play_notes && <span className="text-gray-500 truncate">{pl.play_notes}</span>}
-                          <button
-                            onClick={() => deletePlay(pl.id)}
-                            className="ml-auto text-gray-700 hover:text-red-400 flex-shrink-0"
-                          >
-                            ✕
-                          </button>
+                          <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
+                            <button
+                              onClick={() => editingPlayId === pl.id ? resetForm() : startEditPlay(pl)}
+                              className={`px-2 py-0.5 rounded text-xs transition ${
+                                editingPlayId === pl.id
+                                  ? "text-yellow-400 hover:text-white"
+                                  : "text-gray-600 hover:text-yellow-400"
+                              }`}
+                            >
+                              ✎
+                            </button>
+                            <button
+                              onClick={() => deletePlay(pl.id)}
+                              className="text-gray-700 hover:text-red-400"
+                            >
+                              ✕
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
