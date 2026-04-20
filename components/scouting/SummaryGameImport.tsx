@@ -183,21 +183,118 @@ function parseSummary(text: string): GameSummary | null {
 }
 
 function reconstructPlays(s: GameSummary): ReconstructedPlay[] {
-  // Route plays
-  const routePlays: ReconstructedPlay[] = [];
-  for (const [rt, count] of Object.entries(s.routeCounts) as [RouteType, number][]) {
-    for (let i = 0; i < (count ?? 0); i++) {
-      routePlays.push({
-        route_type: rt, alignment: "right", on_line: true,
-        coverage: "", was_open: false, targeted: false,
-        success: null, contested: false, yards: null, play_notes: "",
-        no_route_run: false,
-      });
+  type CovKey = "man" | "zone" | "press" | "double";
+  const COV_KEYS: CovKey[] = ["man", "zone", "press", "double"];
+
+  const covCount: Record<CovKey, number> = {
+    man: s.coverageMan, zone: s.coverageZone,
+    press: s.coveragePress, double: s.coverageDouble,
+  };
+  const covOpen: Record<CovKey, number> = {
+    man: s.coverageManSuccess, zone: s.coverageZoneSuccess,
+    press: s.coveragePressSuccess, double: s.coverageDoubleSuccess,
+  };
+  const totalCovRoutes = COV_KEYS.reduce((a, k) => a + covCount[k], 0);
+
+  const routeEntries = Object.entries(s.routeCounts) as [RouteType, number][];
+
+  // Step 1: Compute cell_count[rt][cov] — distribute each route type's plays
+  //         across coverages proportionally to the coverage route counts.
+  //         Use floor + largest-remainder to guarantee sum == count exactly.
+  const cellCount: Partial<Record<RouteType, Record<CovKey, number>>> = {};
+  for (const [rt, count] of routeEntries) {
+    cellCount[rt] = { man: 0, zone: 0, press: 0, double: 0 };
+    const fracs1: Record<CovKey, number> = { man: 0, zone: 0, press: 0, double: 0 };
+    let used = 0;
+    for (const cov of COV_KEYS) {
+      const exact = totalCovRoutes > 0 ? count * covCount[cov] / totalCovRoutes : 0;
+      cellCount[rt]![cov] = Math.floor(exact);
+      fracs1[cov] = exact - Math.floor(exact);
+      used += cellCount[rt]![cov];
+    }
+    let rem1 = count - used;
+    for (const cov of ([...COV_KEYS].sort((a, b) => fracs1[b] - fracs1[a]))) {
+      if (rem1 <= 0) break;
+      cellCount[rt]![cov]++;
+      rem1--;
     }
   }
 
-  // NRR plays — alignment-only snaps (run plays, blocking, etc.)
-  // totalSnaps includes both route runs and NRR; the difference fills with NRR plays
+  // Step 2: Solve the transportation problem for cell_open[rt][cov].
+  //   Supply[rt] = routeTimesOpen[rt]  (must satisfy route-breakdown open counts)
+  //   Demand[cov] = covOpen[cov]        (must satisfy coverage-breakdown open counts)
+  //   Capacity[rt][cov] = cellCount[rt][cov]
+  //
+  //   Greedy: process route types sorted by open-rate desc (most constrained first),
+  //   within each row distribute to coverages proportional to remaining demand,
+  //   capped by capacity.
+  const supply: Partial<Record<RouteType, number>> = {};
+  for (const [rt] of routeEntries) supply[rt] = s.routeTimesOpen[rt] ?? 0;
+  const demand: Record<CovKey, number> = { ...covOpen };
+
+  const cellOpen: Partial<Record<RouteType, Record<CovKey, number>>> = {};
+  for (const [rt] of routeEntries) cellOpen[rt] = { man: 0, zone: 0, press: 0, double: 0 };
+
+  // Sort routes by open rate descending so high-open-rate routes get served first
+  const sortedRts = [...routeEntries].sort(([rt1, n1], [rt2, n2]) => {
+    const r1 = n1 > 0 ? (supply[rt1] ?? 0) / n1 : 0;
+    const r2 = n2 > 0 ? (supply[rt2] ?? 0) / n2 : 0;
+    return r2 - r1;
+  });
+
+  for (const [rt] of sortedRts) {
+    let rem = supply[rt] ?? 0;
+    if (rem <= 0) continue;
+
+    // Two passes: first allocate proportional to remaining demand, then fill leftovers
+    const totalDem = COV_KEYS.reduce((a, k) => a + demand[k], 0);
+
+    // Pass 1: floor-based proportional allocation — guarantees allocTotal <= rem
+    const allocs: Record<CovKey, number> = { man: 0, zone: 0, press: 0, double: 0 };
+    const fracs2: Record<CovKey, number> = { man: 0, zone: 0, press: 0, double: 0 };
+    if (totalDem > 0) {
+      for (const cov of COV_KEYS) {
+        const exact = Math.min(rem * demand[cov] / totalDem, cellCount[rt]![cov], demand[cov]);
+        allocs[cov] = Math.floor(exact);
+        fracs2[cov] = exact - Math.floor(exact);
+      }
+    }
+
+    // Pass 2: distribute remainder via largest-remainder — fills exactly rem if capacity allows
+    let allocTotal = COV_KEYS.reduce((a, k) => a + allocs[k], 0);
+    let allocRem = rem - allocTotal;
+    for (const cov of ([...COV_KEYS].sort((a, b) => fracs2[b] - fracs2[a]))) {
+      if (allocRem <= 0) break;
+      const canAdd = Math.min(cellCount[rt]![cov] - allocs[cov], demand[cov] - allocs[cov]);
+      if (canAdd > 0) {
+        const add = Math.min(canAdd, allocRem);
+        allocs[cov] += add;
+        allocRem -= add;
+      }
+    }
+
+    for (const cov of COV_KEYS) {
+      cellOpen[rt]![cov] = allocs[cov];
+      demand[cov] = Math.max(0, demand[cov] - allocs[cov]);
+    }
+  }
+
+  // Step 3: Build route plays directly from cells — open plays first, then not-open.
+  //         This means coverage and was_open are set correctly by construction.
+  const routePlays: ReconstructedPlay[] = [];
+  for (const [rt, count] of routeEntries) {
+    for (const cov of COV_KEYS) {
+      const total = cellCount[rt]![cov];
+      const open  = Math.min(cellOpen[rt]![cov], total);
+      for (let i = 0; i < open;  i++) routePlays.push({ route_type: rt, alignment: "right", on_line: true, coverage: cov, was_open: true,  targeted: false, success: null, contested: false, yards: null, play_notes: "", no_route_run: false });
+      for (let i = open; i < total; i++) routePlays.push({ route_type: rt, alignment: "right", on_line: true, coverage: cov, was_open: false, targeted: false, success: null, contested: false, yards: null, play_notes: "", no_route_run: false });
+    }
+    // Plays that didn't get a coverage slot (only happens if totalCovRoutes < totalRoutes)
+    const covAssigned = COV_KEYS.reduce((a, k) => a + (cellCount[rt]![k] ?? 0), 0);
+    for (let i = covAssigned; i < count; i++) routePlays.push({ route_type: rt, alignment: "right", on_line: true, coverage: "", was_open: false, targeted: false, success: null, contested: false, yards: null, play_notes: "", no_route_run: false });
+  }
+
+  // NRR plays (alignment-only snaps)
   const nrrCount = Math.max(0, s.totalSnaps - routePlays.length);
   const nrrPlays: ReconstructedPlay[] = Array.from({ length: nrrCount }, () => ({
     route_type: "other" as RouteType, alignment: "right" as Alignment, on_line: true,
@@ -206,55 +303,29 @@ function reconstructPlays(s: GameSummary): ReconstructedPlay[] {
     no_route_run: true,
   }));
 
-  // Combine all snaps for alignment + on_line assignment
   const allPlays = [...routePlays, ...nrrPlays];
   const totalSnaps = allPlays.length;
   if (totalSnaps === 0) return allPlays;
 
-  // Assign coverage to route plays only (sequentially)
-  const coveragePool: CoverageType[] = [
-    ...Array(s.coverageMan).fill("man" as CoverageType),
-    ...Array(s.coverageZone).fill("zone" as CoverageType),
-    ...Array(s.coveragePress).fill("press" as CoverageType),
-    ...Array(s.coverageDouble).fill("double" as CoverageType),
-  ];
-  for (let i = 0; i < routePlays.length; i++) {
-    routePlays[i].coverage = coveragePool[i] ?? "";
-  }
-
-  // Assign alignment across ALL snaps using the sheet's exact snap counts
+  // Assign alignment across ALL snaps proportionally
   const snapTotal = s.alignRight + s.alignLeft + s.alignSlot + s.alignBackfield;
   if (snapTotal > 0) {
     const rightCount = Math.round((s.alignRight / snapTotal) * totalSnaps);
-    const leftCount = Math.round((s.alignLeft / snapTotal) * totalSnaps);
-    const slotCount = Math.round((s.alignSlot / snapTotal) * totalSnaps);
+    const leftCount  = Math.round((s.alignLeft  / snapTotal) * totalSnaps);
+    const slotCount  = Math.round((s.alignSlot  / snapTotal) * totalSnaps);
     const alignPool: Alignment[] = [
       ...Array(rightCount).fill("right" as Alignment),
-      ...Array(leftCount).fill("left" as Alignment),
-      ...Array(slotCount).fill("slot" as Alignment),
+      ...Array(leftCount).fill("left"  as Alignment),
+      ...Array(slotCount).fill("slot"  as Alignment),
       ...Array(Math.max(0, totalSnaps - rightCount - leftCount - slotCount)).fill("backfield" as Alignment),
     ];
     for (let i = 0; i < totalSnaps; i++) allPlays[i].alignment = alignPool[i] ?? "right";
   }
 
-  // Assign on_line across ALL snaps proportionally from depth data
+  // Assign on_line proportionally from depth data
   if (s.totalSnaps > 0 && s.behindLOS > 0) {
     const offLineCount = Math.max(0, Math.round((s.behindLOS / s.totalSnaps) * totalSnaps));
     for (let i = 0; i < offLineCount && i < totalSnaps; i++) allPlays[i].on_line = false;
-  }
-
-  // Assign was_open to route plays only from timesOpen data
-  const routePlayIndicesForOpen: Partial<Record<RouteType, number[]>> = {};
-  for (let i = 0; i < routePlays.length; i++) {
-    const rt = routePlays[i].route_type;
-    if (!routePlayIndicesForOpen[rt]) routePlayIndicesForOpen[rt] = [];
-    routePlayIndicesForOpen[rt]!.push(i);
-  }
-  for (const [rt, openCount] of Object.entries(s.routeTimesOpen) as [RouteType, number][]) {
-    const indices = routePlayIndicesForOpen[rt] ?? [];
-    for (let k = 0; k < openCount && k < indices.length; k++) {
-      routePlays[indices[k]].was_open = true;
-    }
   }
 
   return allPlays;
