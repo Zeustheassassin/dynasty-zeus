@@ -126,7 +126,7 @@ export default function ProspectList({
       will_play_pre: "",
       will_play_post: "",
       charting_decision: "pending",
-      charting_notes: "",
+      charting_notes: "", overall_rank: null,
     });
     setForm({ name: "", school: "", conference: "", position: "WR", draft_class_year: 2026 });
     setShowAdd(false);

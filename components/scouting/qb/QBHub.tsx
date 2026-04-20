@@ -99,7 +99,7 @@ export default function QBHub({
       height: "", weight: null, birthday: null,
       should_play: "", will_play_pre: "", will_play_post: "",
       charting_decision: "pending",
-      charting_notes: "",
+      charting_notes: "", overall_rank: null,
       pff_rank: null, mock_draft_rank: null, drafttek_rank: null, pfn_rank: null,
     });
     setNewProspect({ name: "", school: "", conference: "", draft_class_year: 2026, position: "QB", personal_rank: "" });

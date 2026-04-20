@@ -110,7 +110,7 @@ export default function TEProspectList({
       personal_rank: null, pff_rank: null, mock_draft_rank: null,
       drafttek_rank: null, pfn_rank: null,
       should_play: "", will_play_pre: "", will_play_post: "",
-      charting_decision: "pending", charting_notes: "",
+      charting_decision: "pending", charting_notes: "", overall_rank: null,
     });
     setForm({ name: "", school: "", conference: "", draft_class_year: 2026 });
     setShowAdd(false);

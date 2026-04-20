@@ -148,15 +148,22 @@ export default function ScoutingHub() {
         (r): r is number => r !== null && r !== undefined
       );
 
+      // True only if this prospect has plays with was_open or success explicitly tracked.
+      // was_open defaults to false (not null) for old plays, so we check for at least one true.
+      // success is nullable; we check for at least one non-null targeted play.
+      const has_charted_open_data =
+        routePlays.some((pl) => pl.was_open) ||
+        routePlays.some((pl) => pl.targeted && pl.success !== null);
+
       const route_stats: ProspectWithStats["route_stats"] = {};
       for (const rt of ROUTE_TYPES) {
         const rtPlays = routePlays.filter((pl) => pl.route_type === rt);
         if (rtPlays.length > 0) {
           route_stats[rt] = {
             count: rtPlays.length,
-            open: rtPlays.filter((pl) => pl.was_open).length,
+            open: has_charted_open_data ? rtPlays.filter((pl) => pl.was_open).length : 0,
             targets: rtPlays.filter((pl) => pl.targeted).length,
-            catches: rtPlays.filter((pl) => pl.targeted && pl.success).length,
+            catches: has_charted_open_data ? rtPlays.filter((pl) => pl.targeted && pl.success).length : -1,
           };
         }
       }
@@ -165,8 +172,8 @@ export default function ScoutingHub() {
         const cvgPlays = routePlays.filter((pl) => pl.coverage === type);
         return {
           count: cvgPlays.length,
-          open: cvgPlays.filter((pl) => pl.was_open).length,
-          catches: cvgPlays.filter((pl) => pl.targeted && pl.success).length,
+          open: has_charted_open_data ? cvgPlays.filter((pl) => pl.was_open).length : 0,
+          catches: has_charted_open_data ? cvgPlays.filter((pl) => pl.targeted && pl.success).length : -1,
         };
       };
 
@@ -181,8 +188,8 @@ export default function ScoutingHub() {
         contested,
         contested_catches,
         total_yards: yds,
-        // Suc% = open rate (SRVC) based on route runs only
-        success_rate: totalRoutes > 0 ? parseFloat(((routePlays.filter((pl) => pl.was_open).length / totalRoutes) * 100).toFixed(1)) : null,
+        // Suc% = open rate (SRVC) based on route runs only; suppress for prospects w/o was_open tracking
+        success_rate: has_charted_open_data && totalRoutes > 0 ? parseFloat(((routePlays.filter((pl) => pl.was_open).length / totalRoutes) * 100).toFixed(1)) : null,
         target_rate: routePct(tgt),
         avg_ypc: ctch > 0 ? parseFloat((yds / ctch).toFixed(1)) : null,
         pct_left: snapPct(leftN),
@@ -191,7 +198,7 @@ export default function ScoutingHub() {
         pct_backfield: snapPct(bfN),
         pct_on_line: snapPct(pPlays.filter((pl) => pl.on_line).length),
         adj_success_above_exp: (() => {
-          if (totalRoutes === 0) return null;
+          if (!has_charted_open_data || totalRoutes === 0) return null;
           const actualOpen = routePlays.filter((pl) => pl.was_open).length / totalRoutes;
           let expRoute = 0, routeW = 0;
           for (const rt of ROUTE_TYPES) {
@@ -223,6 +230,7 @@ export default function ScoutingHub() {
             : null,
         depth_behind_los: routePlays.filter((pl) => !pl.on_line).length,
         depth_on_los: routePlays.filter((pl) => pl.on_line).length,
+        has_charted_open_data,
         route_stats,
         coverage_stats: { man: cvg("man"), zone: cvg("zone"), double: cvg("double"), press: cvg("press") },
         // Alignment open rates — only from manually-charted route runs (not NRR, not summary imports)
@@ -268,14 +276,16 @@ export default function ScoutingHub() {
     if (inserted) setProspects((prev) => [...prev, inserted as Prospect]);
   }
 
+  // Position rank: #1 WR, #1 QB, etc. — scoped to same position + draft class
   async function handleUpdateRank(id: string, targetRank: number) {
     const clamp = Math.max(1, targetRank);
     const mover = prospects.find((p) => p.id === id);
     if (!mover) return;
 
-    // Rankings are per draft class year — only shift others in the same year
     const rankedOthers = prospects
-      .filter((p) => p.personal_rank != null && p.id !== id && p.draft_class_year === mover.draft_class_year)
+      .filter((p) => p.personal_rank != null && p.id !== id
+        && p.draft_class_year === mover.draft_class_year
+        && p.position === mover.position)
       .sort((a, b) => (a.personal_rank ?? 0) - (b.personal_rank ?? 0));
 
     rankedOthers.splice(Math.min(clamp - 1, rankedOthers.length), 0, mover);
@@ -287,6 +297,29 @@ export default function ScoutingHub() {
     await Promise.all(
       changed.map((p) =>
         supabase.from("prospects").update({ personal_rank: rankMap.get(p.id), updated_at: new Date().toISOString() }).eq("id", p.id)
+      )
+    );
+  }
+
+  // Overall rank: #1 across all positions within a draft class
+  async function handleUpdateOverallRank(id: string, targetRank: number) {
+    const clamp = Math.max(1, targetRank);
+    const mover = prospects.find((p) => p.id === id);
+    if (!mover) return;
+
+    const rankedOthers = prospects
+      .filter((p) => p.overall_rank != null && p.id !== id && p.draft_class_year === mover.draft_class_year)
+      .sort((a, b) => (a.overall_rank ?? 0) - (b.overall_rank ?? 0));
+
+    rankedOthers.splice(Math.min(clamp - 1, rankedOthers.length), 0, mover);
+
+    const rankMap = new Map<string, number>(rankedOthers.map((p, i) => [p.id, i + 1]));
+    const changed = rankedOthers.filter((p) => p.overall_rank !== rankMap.get(p.id));
+    setProspects((prev) => prev.map((p) => rankMap.has(p.id) ? { ...p, overall_rank: rankMap.get(p.id)! } : p));
+
+    await Promise.all(
+      changed.map((p) =>
+        supabase.from("prospects").update({ overall_rank: rankMap.get(p.id), updated_at: new Date().toISOString() }).eq("id", p.id)
       )
     );
   }
@@ -382,6 +415,7 @@ export default function ScoutingHub() {
             loading={loading}
             onSelectProspect={(p) => { setPositionTab(p.position as PositionTab); setTab("prospects"); }}
             onUpdateRank={handleUpdateRank}
+            onUpdateOverallRank={handleUpdateOverallRank}
             draftYearFilter={draftYearFilter}
             setDraftYearFilter={setDraftYearFilter}
           />

@@ -6,8 +6,10 @@ const ROUTE_TYPES: RouteType[] = [
   "nine", "post", "dig", "curl", "slant", "screen", "flat", "comeback", "out", "corner", "other",
 ];
 
+type BoardTab = "all" | "QB" | "RB" | "WR" | "TE";
+
 type SortKey =
-  | "personal_rank" | "name" | "school" | "draft_class_year" | "height" | "weight"
+  | "personal_rank" | "overall_rank" | "name" | "school" | "conference" | "draft_class_year" | "height" | "weight" | "age" | "position"
   | "total_routes" | "total_games" | "targets" | "catches" | "drops" | "contested" | "contested_catches"
   | "success_rate" | "target_rate" | "adj_success_above_exp"
   | "pct_left" | "pct_right" | "pct_slot" | "pct_backfield"
@@ -19,13 +21,15 @@ type SortKey =
   | "open_pct_slot" | "open_pct_slot_on" | "open_pct_slot_off"
   | "open_pct_right" | "open_pct_right_on" | "open_pct_right_off"
   | "open_pct_left" | "open_pct_left_on" | "open_pct_left_off"
-  | "open_pct_backfield";
+  | "open_pct_backfield"
+;
 
 interface Props {
   prospects: ProspectWithStats[];
   loading: boolean;
   onSelectProspect: (p: Prospect) => void;
   onUpdateRank: (id: string, rank: number) => Promise<void>;
+  onUpdateOverallRank: (id: string, rank: number) => Promise<void>;
   draftYearFilter: number | null;
   setDraftYearFilter: (y: number | null) => void;
 }
@@ -40,15 +44,28 @@ function sae(v: number | null | undefined): string {
   if (v == null) return "—";
   return `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
 }
+function computeAge(birthday: string | null | undefined): number | null {
+  if (!birthday) return null;
+  const b = new Date(birthday);
+  if (isNaN(b.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - b.getFullYear();
+  if (today < new Date(today.getFullYear(), b.getMonth(), b.getDate())) age--;
+  return age;
+}
 
 function getSortValue(p: ProspectWithStats, key: SortKey): number | string {
   const BIG = 99999;
   if (key === "personal_rank") return p.personal_rank ?? BIG;
+  if (key === "overall_rank") return p.overall_rank ?? BIG;
   if (key === "name") return p.name;
   if (key === "school") return p.school;
+  if (key === "conference") return p.conference ?? "";
+  if (key === "position") return p.position;
   if (key === "draft_class_year") return p.draft_class_year;
   if (key === "height") return p.height || "ZZZ";
   if (key === "weight") return p.weight ?? BIG;
+  if (key === "age") return computeAge(p.birthday) ?? BIG;
   if (key === "total_routes") return p.total_routes;
   if (key === "total_games") return p.total_games;
   if (key === "targets") return p.targets;
@@ -102,10 +119,13 @@ export default function BigBoard({
   loading,
   onSelectProspect,
   onUpdateRank,
+  onUpdateOverallRank,
   draftYearFilter,
   setDraftYearFilter,
 }: Props) {
-  const [sortKey, setSortKey] = useState<SortKey>("personal_rank");
+  const [boardTab, setBoardTab] = useState<BoardTab>("all");
+  // All board sorts by overall_rank; position boards sort by personal_rank
+  const [sortKey, setSortKey] = useState<SortKey>("overall_rank");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [search, setSearch] = useState("");
 
@@ -127,6 +147,7 @@ export default function BigBoard({
 
   const sorted = useMemo(() => {
     let list = prospects;
+    if (boardTab !== "all") list = list.filter((p) => p.position === boardTab);
     if (draftYearFilter) list = list.filter((p) => p.draft_class_year === draftYearFilter);
     if (search.trim()) {
       const q = search.toLowerCase();
@@ -141,7 +162,7 @@ export default function BigBoard({
         ? String(va).localeCompare(String(vb))
         : String(vb).localeCompare(String(va));
     });
-  }, [prospects, draftYearFilter, search, sortKey, sortDir]);
+  }, [prospects, boardTab, draftYearFilter, search, sortKey, sortDir]);
 
   useEffect(() => {
     const table = tableScrollRef.current;
@@ -174,29 +195,6 @@ export default function BigBoard({
     );
   }
 
-  async function commitRank(id: string) {
-    const nr = parseInt(rankInput, 10);
-    if (!rankInput || isNaN(nr) || nr < 1) { setEditingRankId(null); return; }
-    setSavingRankId(id);
-    await onUpdateRank(id, nr);
-    setSavingRankId(null);
-    setEditingRankId(null);
-  }
-
-  async function handleDrop(targetId: string) {
-    if (!draggingId || draggingId === targetId) { setDraggingId(null); setDragOverId(null); return; }
-    const draggedP = prospects.find((p) => p.id === draggingId);
-    const targetP = prospects.find((p) => p.id === targetId);
-    if (!draggedP || !targetP) return;
-    setSavingRankId(draggingId);
-    await onUpdateRank(draggingId, targetP.personal_rank ?? dragRankRef.current ?? 1);
-    setSavingRankId(null);
-    setDraggingId(null);
-    setDragOverId(null);
-  }
-
-  const tdBase = "px-1.5 py-1.5 text-center whitespace-nowrap text-xs";
-
   function stickyTh(label: string, key: SortKey, leftPx: number, widthPx: number) {
     const active = sortKey === key;
     return (
@@ -213,8 +211,404 @@ export default function BigBoard({
     );
   }
 
+  const rankUpdater = boardTab === "all" ? onUpdateOverallRank : onUpdateRank;
+  const rankField = (p: ProspectWithStats) => boardTab === "all" ? p.overall_rank : p.personal_rank;
+
+  async function commitRank(id: string) {
+    const nr = parseInt(rankInput, 10);
+    if (!rankInput || isNaN(nr) || nr < 1) { setEditingRankId(null); return; }
+    setSavingRankId(id);
+    await rankUpdater(id, nr);
+    setSavingRankId(null);
+    setEditingRankId(null);
+  }
+
+  async function handleDrop(targetId: string) {
+    if (!draggingId || draggingId === targetId) { setDraggingId(null); setDragOverId(null); return; }
+    const draggedP = prospects.find((p) => p.id === draggingId);
+    const targetP = prospects.find((p) => p.id === targetId);
+    if (!draggedP || !targetP) return;
+    setSavingRankId(draggingId);
+    await rankUpdater(draggingId, rankField(targetP) ?? dragRankRef.current ?? 1);
+    setSavingRankId(null);
+    setDraggingId(null);
+    setDragOverId(null);
+  }
+
+  const tdBase = "px-1.5 py-1.5 text-center whitespace-nowrap text-xs";
+
+  // Shared sticky row cells (drag handle + rank + name)
+  function stickyRowCells(p: ProspectWithStats, _i: number) {
+    const isSaving = savingRankId === p.id;
+    const rank = rankField(p);
+    return (
+      <>
+        <td className="sticky left-0 z-10 bg-gray-950 px-1 text-gray-700 cursor-grab active:cursor-grabbing text-center w-6"
+          onClick={(e) => e.stopPropagation()}>⠿</td>
+        <td style={{ left: 24, minWidth: 44, width: 44 }}
+          className="sticky z-10 bg-gray-950 border-r border-gray-800 text-center"
+          onClick={(e) => { e.stopPropagation(); setEditingRankId(p.id); setRankInput(rank ? `${rank}` : ""); }}>
+          {editingRankId === p.id ? (
+            <input autoFocus type="number" min={1}
+              className="w-10 px-0.5 py-0.5 bg-gray-800 border border-blue-500 rounded text-yellow-400 font-bold text-xs focus:outline-none text-center"
+              value={rankInput}
+              onChange={(e) => setRankInput(e.target.value)}
+              onBlur={() => commitRank(p.id)}
+              onKeyDown={(e) => { if (e.key === "Enter") commitRank(p.id); if (e.key === "Escape") setEditingRankId(null); }}
+              onClick={(e) => e.stopPropagation()} />
+          ) : (
+            <span className={`cursor-text hover:bg-gray-800 px-1 rounded text-yellow-400 font-bold ${isSaving ? "animate-pulse" : ""}`}>
+              {rank ? `#${rank}` : "—"}
+            </span>
+          )}
+        </td>
+        <td style={{ left: 68, minWidth: 140, width: 140 }}
+          className="sticky z-10 bg-gray-950 border-r border-gray-800 px-1.5 py-1.5 text-white font-medium whitespace-nowrap">
+          {p.name}
+        </td>
+      </>
+    );
+  }
+
+  function rowProps(p: ProspectWithStats, i: number) {
+    const isDragging = draggingId === p.id;
+    const isDragOver = dragOverId === p.id;
+    const rowBg = isDragOver ? "bg-blue-900/30" : i % 2 === 0 ? "bg-gray-950" : "bg-gray-900/30";
+    return {
+      draggable: true,
+      onDragStart: () => { setDraggingId(p.id); dragRankRef.current = rankField(p) ?? i + 1; },
+      onDragOver: (e: React.DragEvent) => { e.preventDefault(); setDragOverId(p.id); },
+      onDragLeave: () => setDragOverId(null),
+      onDrop: () => handleDrop(p.id),
+      onDragEnd: () => { setDraggingId(null); setDragOverId(null); },
+      onClick: () => onSelectProspect(p),
+      className: `cursor-pointer transition hover:bg-gray-800/60 ${isDragging ? "opacity-40" : ""} ${isDragOver ? "border-t-2 border-blue-500" : ""} ${rowBg}`,
+    };
+  }
+
+  const scrollWrapper = (tableNode: React.ReactNode) => (
+    <>
+      <div
+        ref={topScrollRef}
+        className="overflow-x-auto [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-track]:bg-gray-900 [&::-webkit-scrollbar-thumb]:bg-gray-600 [&::-webkit-scrollbar-thumb]:rounded hover:[&::-webkit-scrollbar-thumb]:bg-gray-400"
+        onScroll={() => { if (tableScrollRef.current) tableScrollRef.current.scrollLeft = topScrollRef.current!.scrollLeft; }}
+      >
+        <div ref={topSpacerRef} style={{ height: 1 }} />
+      </div>
+      <div
+        ref={tableScrollRef}
+        className="overflow-x-auto rounded border border-gray-800 [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-track]:bg-gray-900 [&::-webkit-scrollbar-thumb]:bg-gray-600 [&::-webkit-scrollbar-thumb]:rounded hover:[&::-webkit-scrollbar-thumb]:bg-gray-400"
+        onScroll={() => { if (topScrollRef.current) topScrollRef.current.scrollLeft = tableScrollRef.current!.scrollLeft; }}
+      >
+        {tableNode}
+      </div>
+    </>
+  );
+
+  // ── All board ──────────────────────────────────────────────
+  function renderAllTable() {
+    return scrollWrapper(
+      <table className="text-xs border-collapse" style={{ minWidth: "max-content" }}>
+        <thead>
+          <tr className="border-b border-gray-700 bg-gray-950">
+            <th className="sticky left-0 z-20 bg-gray-950 w-6" />
+            <th style={{ left: 24, minWidth: 44 }} className="sticky z-20 bg-gray-950" />
+            <th style={{ left: 68, minWidth: 140 }} className="sticky z-20 bg-gray-950 border-r border-gray-800" />
+            <th colSpan={1} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">Pos Rank</th>
+            <th colSpan={6} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">Identity</th>
+          </tr>
+          <tr className="border-b border-gray-800 bg-gray-950">
+            <th className="sticky left-0 z-20 bg-gray-950 w-6 text-gray-700 text-center px-1">⠿</th>
+            {stickyTh("OVR", "overall_rank", 24, 44)}
+            {stickyTh("Name", "name", 68, 140)}
+            {th("PosRk", "personal_rank", "border-l border-r border-gray-800 text-gray-400")}
+            {th("Pos", "position", "border-l border-gray-800")}
+            {th("School", "school")}
+            {th("Yr", "draft_class_year")}
+            {th("Age", "age")}
+            {th("Ht", "height")}
+            {th("Wt", "weight", "border-r border-gray-800")}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-900">
+          {sorted.map((p, i) => {
+            const age = computeAge(p.birthday);
+            const POSITION_COLORS: Record<string, string> = {
+              QB: "text-blue-400", RB: "text-green-400", WR: "text-yellow-400", TE: "text-orange-400",
+            };
+            return (
+              <tr key={p.id} {...rowProps(p, i)}>
+                {stickyRowCells(p, i)}
+                <td className={`${tdBase} text-gray-500 border-l border-r border-gray-800`}>{p.personal_rank ? `#${p.personal_rank}` : "—"}</td>
+                <td className={`${tdBase} font-semibold border-l border-gray-800 ${POSITION_COLORS[p.position] ?? "text-gray-400"}`}>{p.position}</td>
+                <td className={`${tdBase} text-gray-400`}>{p.school}</td>
+                <td className={`${tdBase} text-gray-400`}>{p.draft_class_year}</td>
+                <td className={`${tdBase} text-gray-400`}>{age ?? "—"}</td>
+                <td className={`${tdBase} text-gray-400`}>{p.height || "—"}</td>
+                <td className={`${tdBase} text-gray-400 border-r border-gray-800`}>{p.weight ?? "—"}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    );
+  }
+
+  // ── Position stub board (QB / RB / TE) ────────────────────
+  function renderPositionStubTable(pos: "QB" | "RB" | "TE") {
+    const accentColor = pos === "QB" ? "text-blue-400" : pos === "RB" ? "text-green-400" : "text-orange-400";
+    return scrollWrapper(
+      <table className="text-xs border-collapse" style={{ minWidth: "max-content" }}>
+        <thead>
+          <tr className="border-b border-gray-700 bg-gray-950">
+            <th className="sticky left-0 z-20 bg-gray-950 w-6" />
+            <th style={{ left: 24, minWidth: 44 }} className="sticky z-20 bg-gray-950" />
+            <th style={{ left: 68, minWidth: 140 }} className="sticky z-20 bg-gray-950 border-r border-gray-800" />
+            <th colSpan={1} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">OVR</th>
+            <th colSpan={6} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">Identity</th>
+            <th colSpan={1} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">Scouting</th>
+          </tr>
+          <tr className="border-b border-gray-800 bg-gray-950">
+            <th className="sticky left-0 z-20 bg-gray-950 w-6 text-gray-700 text-center px-1">⠿</th>
+            {stickyTh("POS", "personal_rank", 24, 44)}
+            {stickyTh("Name", "name", 68, 140)}
+            {th("OVR", "overall_rank", "border-l border-r border-gray-800 text-gray-400")}
+            {th("School", "school", "border-l border-gray-800")}
+            {th("Yr", "draft_class_year")}
+            {th("Age", "age")}
+            {th("Ht", "height")}
+            {th("Wt", "weight")}
+            {th("Conf", "conference", "border-r border-gray-800")}
+            {th("Games", "total_games", `border-l border-gray-800 border-r border-gray-800 ${accentColor}`)}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-900">
+          {sorted.map((p, i) => {
+            const age = computeAge(p.birthday);
+            return (
+              <tr key={p.id} {...rowProps(p, i)}>
+                {stickyRowCells(p, i)}
+                <td className={`${tdBase} text-gray-500 border-l border-r border-gray-800`}>{p.overall_rank ? `#${p.overall_rank}` : "—"}</td>
+                <td className={`${tdBase} text-gray-400 border-l border-gray-800`}>{p.school}</td>
+                <td className={`${tdBase} text-gray-400`}>{p.draft_class_year}</td>
+                <td className={`${tdBase} text-gray-400`}>{age ?? "—"}</td>
+                <td className={`${tdBase} text-gray-400`}>{p.height || "—"}</td>
+                <td className={`${tdBase} text-gray-400`}>{p.weight ?? "—"}</td>
+                <td className={`${tdBase} text-gray-500 border-r border-gray-800`}>{p.conference || "—"}</td>
+                <td className={`${tdBase} border-l border-r border-gray-800 font-medium ${accentColor}`}>{p.total_games || "—"}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    );
+  }
+
+  // ── WR board (full stats) ──────────────────────────────────
+  function renderWRTable() {
+    return scrollWrapper(
+      <table className="text-xs border-collapse" style={{ minWidth: "max-content" }}>
+        <thead>
+          <tr className="border-b border-gray-700 bg-gray-950">
+            <th className="sticky left-0 z-20 bg-gray-950 w-6" />
+            <th style={{ left: 24, minWidth: 44 }} className="sticky z-20 bg-gray-950" />
+            <th style={{ left: 68, minWidth: 140 }} className="sticky z-20 bg-gray-950 border-r border-gray-800" />
+            <th colSpan={1} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">OVR</th>
+            <th colSpan={4} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">Identity</th>
+            <th colSpan={2} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">Totals</th>
+            <th colSpan={5} className="px-2 py-1 text-center text-yellow-900 font-medium border-r border-gray-800">Targets</th>
+            <th colSpan={17} className="px-2 py-1 text-center text-green-900 font-medium border-r border-gray-800">Metrics</th>
+            <th colSpan={3} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">Depth</th>
+            <th colSpan={8} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">Aligned</th>
+            <th colSpan={10} className="px-2 py-1 text-center text-teal-900 font-medium border-r border-gray-800">Align Open%</th>
+            <th colSpan={8} className="px-2 py-1 text-center text-orange-900 font-medium border-r border-gray-800">
+              Coverage — Att / Catch
+            </th>
+            <th colSpan={ROUTE_TYPES.length * 2} className="px-2 py-1 text-center text-blue-900 font-medium border-r border-gray-800">
+              Routes by Type — Att / Catch
+            </th>
+          </tr>
+          <tr className="border-b border-gray-800 bg-gray-950">
+            <th className="sticky left-0 z-20 bg-gray-950 w-6 text-gray-700 text-center px-1">⠿</th>
+            {stickyTh("POS", "personal_rank", 24, 44)}
+            {stickyTh("Name", "name", 68, 140)}
+            {th("OVR", "overall_rank", "border-l border-r border-gray-800 text-gray-400")}
+            {th("School", "school", "border-l border-gray-800")}
+            {th("Yr", "draft_class_year")}
+            {th("Ht", "height")}
+            {th("Wt", "weight", "border-r border-gray-800")}
+            {th("Games", "total_games", "border-l border-gray-800")}
+            {th("Routes", "total_routes", "border-r border-gray-800")}
+            {th("Tgt", "targets", "border-l border-gray-800 text-yellow-500")}
+            {th("Rec", "catches", "text-green-400")}
+            {th("Drops", "drops", "text-red-400")}
+            {th("Cont", "contested", "text-purple-400")}
+            {th("ContC", "contested_catches", "text-purple-300 border-r border-gray-800")}
+            {th("Tgt%", "target_rate", "border-l border-gray-800")}
+            {th("Suc%", "success_rate", "text-green-300")}
+            {th("SAE%", "adj_success_above_exp")}
+            {th("Man%", "cvg_man_rate", "text-orange-400")}
+            {th("Zone%", "cvg_zone_rate", "text-orange-400")}
+            {th("Press%", "cvg_press_rate", "text-orange-400")}
+            {ROUTE_TYPES.map((rt, i) => (
+              <th key={`rt_${rt}_rate`} onClick={() => toggleSort(`rt_${rt}_rate`)}
+                className={`px-1.5 py-1.5 text-center whitespace-nowrap cursor-pointer hover:text-white transition select-none capitalize ${i === ROUTE_TYPES.length - 1 ? "border-r border-gray-800" : ""} ${sortKey === `rt_${rt}_rate` ? "text-green-400" : "text-green-800"}`}>
+                {rt}{sortKey === `rt_${rt}_rate` ? (sortDir === "asc" ? "↑" : "↓") : ""}%
+              </th>
+            ))}
+            {th("BehindLOS", "depth_behind_los", "border-l border-gray-800")}
+            {th("OnLOS", "depth_on_los")}
+            {th("Snaps", "total_snaps", "border-r border-gray-800")}
+            {th("RWR", "pct_right")}
+            <th key="pct_right_pct" onClick={() => toggleSort("pct_right")} className={`px-1.5 py-1.5 text-center whitespace-nowrap cursor-pointer hover:text-white transition select-none text-gray-400 ${sortKey === "pct_right" ? "text-blue-400" : ""}`}>Right%{sortKey === "pct_right" ? (sortDir === "asc" ? "↑" : "↓") : ""}</th>
+            {th("LWR", "pct_left")}
+            <th key="pct_left_pct" onClick={() => toggleSort("pct_left")} className={`px-1.5 py-1.5 text-center whitespace-nowrap cursor-pointer hover:text-white transition select-none text-gray-400 ${sortKey === "pct_left" ? "text-blue-400" : ""}`}>Left%{sortKey === "pct_left" ? (sortDir === "asc" ? "↑" : "↓") : ""}</th>
+            {th("Slot", "pct_slot")}
+            <th key="pct_slot_pct" onClick={() => toggleSort("pct_slot")} className={`px-1.5 py-1.5 text-center whitespace-nowrap cursor-pointer hover:text-white transition select-none text-gray-400 ${sortKey === "pct_slot" ? "text-blue-400" : ""}`}>Slot%{sortKey === "pct_slot" ? (sortDir === "asc" ? "↑" : "↓") : ""}</th>
+            {th("BF", "pct_backfield")}
+            <th key="pct_backfield_pct" onClick={() => toggleSort("pct_backfield")} className={`px-1.5 py-1.5 text-center whitespace-nowrap cursor-pointer hover:text-white transition select-none text-gray-400 border-r border-gray-800 ${sortKey === "pct_backfield" ? "text-blue-400" : ""}`}>BF%{sortKey === "pct_backfield" ? (sortDir === "asc" ? "↑" : "↓") : ""}</th>
+            {th("Slot", "open_pct_slot", "border-l border-gray-800 text-teal-400")}
+            {th("Slot-On", "open_pct_slot_on", "text-teal-300")}
+            {th("Slot-Off", "open_pct_slot_off", "text-teal-300")}
+            {th("Right", "open_pct_right", "text-teal-400")}
+            {th("R-On", "open_pct_right_on", "text-teal-300")}
+            {th("R-Off", "open_pct_right_off", "text-teal-300")}
+            {th("Left", "open_pct_left", "text-teal-400")}
+            {th("L-On", "open_pct_left_on", "text-teal-300")}
+            {th("L-Off", "open_pct_left_off", "text-teal-300")}
+            {th("BF%", "open_pct_backfield", "text-teal-400 border-r border-gray-800")}
+            {th("Man", "cvg_man", "border-l border-gray-800 text-orange-500")}
+            {th("ManC", "cvg_man_catch", "text-orange-300")}
+            {th("Zone", "cvg_zone", "text-orange-500")}
+            {th("ZoneC", "cvg_zone_catch", "text-orange-300")}
+            {th("Dbl", "cvg_double", "text-orange-500")}
+            {th("DblC", "cvg_double_catch", "text-orange-300")}
+            {th("Press", "cvg_press", "text-orange-500")}
+            {th("PressC", "cvg_press_catch", "text-orange-300 border-r border-gray-800")}
+            {ROUTE_TYPES.map((rt, i) => [
+              <th key={`rt_${rt}_count`} onClick={() => toggleSort(`rt_${rt}_count`)}
+                className={`px-1.5 py-1.5 text-center whitespace-nowrap cursor-pointer hover:text-white transition select-none capitalize ${i === 0 ? "border-l border-gray-800" : ""} ${sortKey === `rt_${rt}_count` ? "text-blue-400" : "text-blue-700"}`}>
+                {rt}{sortKey === `rt_${rt}_count` ? (sortDir === "asc" ? "↑" : "↓") : ""}
+              </th>,
+              <th key={`rt_${rt}_catches`} onClick={() => toggleSort(`rt_${rt}_catches`)}
+                className={`px-1.5 py-1.5 text-center whitespace-nowrap cursor-pointer hover:text-white transition select-none border-r border-gray-800 ${sortKey === `rt_${rt}_catches` ? "text-green-400" : "text-blue-900"}`}>
+                Rec{sortKey === `rt_${rt}_catches` ? (sortDir === "asc" ? "↑" : "↓") : ""}
+              </th>,
+            ])}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-900">
+          {sorted.map((p, i) => {
+            const saeVal = p.adj_success_above_exp;
+            return (
+              <tr key={p.id} {...rowProps(p, i)}>
+                {stickyRowCells(p, i)}
+                <td className={`${tdBase} text-gray-500 border-l border-r border-gray-800`}>{p.overall_rank ? `#${p.overall_rank}` : "—"}</td>
+                <td className={`${tdBase} text-gray-400 border-l border-gray-800`}>{p.school}</td>
+                <td className={`${tdBase} text-gray-400`}>{p.draft_class_year}</td>
+                <td className={`${tdBase} text-gray-400`}>{p.height || "—"}</td>
+                <td className={`${tdBase} text-gray-400 border-r border-gray-800`}>{p.weight ?? "—"}</td>
+                <td className={`${tdBase} text-gray-400 border-l border-gray-800`}>{p.total_games}</td>
+                <td className={`${tdBase} text-blue-400 font-medium border-r border-gray-800`}>{p.total_routes}</td>
+                <td className={`${tdBase} text-yellow-400 border-l border-gray-800 font-medium`}>{p.targets || "—"}</td>
+                <td className={`${tdBase} text-green-400 font-medium`}>{p.catches || "—"}</td>
+                <td className={`${tdBase} text-red-400`}>{p.drops || "—"}</td>
+                <td className={`${tdBase} text-purple-400`}>{p.contested || "—"}</td>
+                <td className={`${tdBase} text-purple-300 border-r border-gray-800`}>{p.contested_catches || "—"}</td>
+                <td className={`${tdBase} text-gray-300 border-l border-gray-800`}>{pct(p.target_rate)}</td>
+                <td className={`${tdBase} text-green-300`}>{pct(p.success_rate)}</td>
+                <td className={`${tdBase} font-medium ${saeVal == null ? "text-gray-500" : saeVal >= 0 ? "text-green-400" : "text-red-400"}`}>
+                  {sae(saeVal)}
+                </td>
+                <td className={`${tdBase} text-orange-400`}>{p.coverage_stats.man.count > 0 ? `${Math.round((p.coverage_stats.man.open / p.coverage_stats.man.count) * 100)}%` : "—"}</td>
+                <td className={`${tdBase} text-orange-400`}>{p.coverage_stats.zone.count > 0 ? `${Math.round((p.coverage_stats.zone.open / p.coverage_stats.zone.count) * 100)}%` : "—"}</td>
+                <td className={`${tdBase} text-orange-400`}>{p.coverage_stats.press.count > 0 ? `${Math.round((p.coverage_stats.press.open / p.coverage_stats.press.count) * 100)}%` : "—"}</td>
+                {ROUTE_TYPES.map((rt, ri) => {
+                  const rs = p.route_stats[rt];
+                  return (
+                    <td key={`rt_${rt}_rate`} className={`${tdBase} text-green-700 ${ri === ROUTE_TYPES.length - 1 ? "border-r border-gray-800" : ""}`}>
+                      {rs && rs.count > 0 ? `${Math.round((rs.open / rs.count) * 100)}%` : "—"}
+                    </td>
+                  );
+                })}
+                <td className={`${tdBase} text-gray-400 border-l border-gray-800`}>{p.depth_behind_los || "—"}</td>
+                <td className={`${tdBase} text-gray-400`}>{p.depth_on_los || "—"}</td>
+                <td className={`${tdBase} text-gray-500 border-r border-gray-800`}>{p.total_routes || "—"}</td>
+                <td className={`${tdBase} text-gray-400`}>{p.pct_right != null ? `${Math.round((p.pct_right / 100) * p.total_routes)}` : "—"}</td>
+                <td className={`${tdBase} text-gray-500`}>{pct(p.pct_right)}</td>
+                <td className={`${tdBase} text-gray-400`}>{p.pct_left != null ? `${Math.round((p.pct_left / 100) * p.total_routes)}` : "—"}</td>
+                <td className={`${tdBase} text-gray-500`}>{pct(p.pct_left)}</td>
+                <td className={`${tdBase} text-gray-400`}>{p.pct_slot != null ? `${Math.round((p.pct_slot / 100) * p.total_routes)}` : "—"}</td>
+                <td className={`${tdBase} text-gray-500`}>{pct(p.pct_slot)}</td>
+                <td className={`${tdBase} text-gray-400`}>{p.pct_backfield != null ? `${Math.round((p.pct_backfield / 100) * p.total_routes)}` : "—"}</td>
+                <td className={`${tdBase} text-gray-500 border-r border-gray-800`}>{pct(p.pct_backfield)}</td>
+                <td className={`${tdBase} text-teal-400 border-l border-gray-800`}>{pct(p.open_pct_slot)}</td>
+                <td className={`${tdBase} text-teal-300`}>{pct(p.open_pct_slot_on_line)}</td>
+                <td className={`${tdBase} text-teal-300`}>{pct(p.open_pct_slot_off_line)}</td>
+                <td className={`${tdBase} text-teal-400`}>{pct(p.open_pct_right)}</td>
+                <td className={`${tdBase} text-teal-300`}>{pct(p.open_pct_right_on_line)}</td>
+                <td className={`${tdBase} text-teal-300`}>{pct(p.open_pct_right_off_line)}</td>
+                <td className={`${tdBase} text-teal-400`}>{pct(p.open_pct_left)}</td>
+                <td className={`${tdBase} text-teal-300`}>{pct(p.open_pct_left_on_line)}</td>
+                <td className={`${tdBase} text-teal-300`}>{pct(p.open_pct_left_off_line)}</td>
+                <td className={`${tdBase} text-teal-400 border-r border-gray-800`}>{pct(p.open_pct_backfield)}</td>
+                <td className={`${tdBase} text-orange-400 border-l border-gray-800`}>{p.coverage_stats.man.count > 0 ? p.coverage_stats.man.count : "—"}</td>
+                <td className={`${tdBase} text-orange-200`}>{p.coverage_stats.man.count > 0 && p.coverage_stats.man.catches !== -1 ? n(p.coverage_stats.man.catches) : "—"}</td>
+                <td className={`${tdBase} text-orange-400`}>{p.coverage_stats.zone.count > 0 ? p.coverage_stats.zone.count : "—"}</td>
+                <td className={`${tdBase} text-orange-200`}>{p.coverage_stats.zone.count > 0 && p.coverage_stats.zone.catches !== -1 ? n(p.coverage_stats.zone.catches) : "—"}</td>
+                <td className={`${tdBase} text-orange-400`}>{p.coverage_stats.double.count > 0 ? p.coverage_stats.double.count : "—"}</td>
+                <td className={`${tdBase} text-orange-200`}>{p.coverage_stats.double.count > 0 && p.coverage_stats.double.catches !== -1 ? n(p.coverage_stats.double.catches) : "—"}</td>
+                <td className={`${tdBase} text-orange-400`}>{p.coverage_stats.press.count > 0 ? p.coverage_stats.press.count : "—"}</td>
+                <td className={`${tdBase} text-orange-200 border-r border-gray-800`}>{p.coverage_stats.press.count > 0 && p.coverage_stats.press.catches !== -1 ? n(p.coverage_stats.press.catches) : "—"}</td>
+                {ROUTE_TYPES.map((rt, ri) => {
+                  const rs = p.route_stats[rt];
+                  return [
+                    <td key={`rt_${rt}_count`} className={`${tdBase} ${ri === 0 ? "border-l border-gray-800" : ""} text-gray-300`}>
+                      {rs?.count ?? "—"}
+                    </td>,
+                    <td key={`rt_${rt}_catches`} className={`${tdBase} text-green-300 border-r border-gray-800`}>
+                      {rs == null || rs.catches === -1 ? "—" : rs.catches}
+                    </td>,
+                  ];
+                })}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    );
+  }
+
+  const BOARD_TABS: { key: BoardTab; label: string; accent: string }[] = [
+    { key: "all",  label: "All",  accent: "border-gray-400 text-gray-300" },
+    { key: "QB",   label: "QB",   accent: "border-blue-500 text-blue-400" },
+    { key: "RB",   label: "RB",   accent: "border-green-500 text-green-400" },
+    { key: "WR",   label: "WR",   accent: "border-yellow-500 text-yellow-400" },
+    { key: "TE",   label: "TE",   accent: "border-orange-500 text-orange-400" },
+  ];
+
   return (
     <div>
+      {/* Position board tabs */}
+      <div className="flex gap-1 mb-4 border-b border-gray-800">
+        {BOARD_TABS.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => { setBoardTab(t.key); setSortKey(t.key === "all" ? "overall_rank" : "personal_rank"); setSortDir("asc"); }}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition whitespace-nowrap ${
+              boardTab === t.key ? t.accent : "border-transparent text-gray-400 hover:text-white"
+            }`}
+          >
+            {t.label}
+            {t.key !== "all" && (
+              <span className="ml-1.5 text-xs text-gray-600">
+                {prospects.filter((p) => p.position === t.key).length}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <input
@@ -243,252 +637,11 @@ export default function BigBoard({
         <div className="text-gray-500 text-sm text-center py-12">No prospects match your filters.</div>
       ) : (
         <>
-        <div
-          ref={topScrollRef}
-          className="overflow-x-auto [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-track]:bg-gray-900 [&::-webkit-scrollbar-thumb]:bg-gray-600 [&::-webkit-scrollbar-thumb]:rounded hover:[&::-webkit-scrollbar-thumb]:bg-gray-400"
-          onScroll={() => { if (tableScrollRef.current) tableScrollRef.current.scrollLeft = topScrollRef.current!.scrollLeft; }}
-        >
-          <div ref={topSpacerRef} style={{ height: 1 }} />
-        </div>
-        <div
-          ref={tableScrollRef}
-          className="overflow-x-auto rounded border border-gray-800 [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-track]:bg-gray-900 [&::-webkit-scrollbar-thumb]:bg-gray-600 [&::-webkit-scrollbar-thumb]:rounded hover:[&::-webkit-scrollbar-thumb]:bg-gray-400"
-          onScroll={() => { if (topScrollRef.current) topScrollRef.current.scrollLeft = tableScrollRef.current!.scrollLeft; }}
-        >
-          <table className="text-xs border-collapse" style={{ minWidth: "max-content" }}>
-            <thead>
-              {/* Group header row */}
-              <tr className="border-b border-gray-700 bg-gray-950">
-                {/* Sticky spacers */}
-                <th className="sticky left-0 z-20 bg-gray-950 w-6" />
-                <th style={{ left: 24, minWidth: 44 }} className="sticky z-20 bg-gray-950" />
-                <th style={{ left: 68, minWidth: 140 }} className="sticky z-20 bg-gray-950 border-r border-gray-800" />
-                {/* Group labels */}
-                <th colSpan={4} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">Identity</th>
-                <th colSpan={2} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">Totals</th>
-                <th colSpan={5} className="px-2 py-1 text-center text-yellow-900 font-medium border-r border-gray-800">Targets</th>
-                <th colSpan={17} className="px-2 py-1 text-center text-green-900 font-medium border-r border-gray-800">Metrics</th>
-                <th colSpan={3} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">Depth</th>
-                <th colSpan={4} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">Aligned</th>
-                <th colSpan={10} className="px-2 py-1 text-center text-teal-900 font-medium border-r border-gray-800">Align Open%</th>
-                <th colSpan={8} className="px-2 py-1 text-center text-orange-900 font-medium border-r border-gray-800">
-                  Coverage — Att / Catch
-                </th>
-                <th colSpan={ROUTE_TYPES.length * 2} className="px-2 py-1 text-center text-blue-900 font-medium border-r border-gray-800">
-                  Routes by Type — Att / Catch
-                </th>
-              </tr>
-              {/* Column header row */}
-              <tr className="border-b border-gray-800 bg-gray-950">
-                {/* Sticky: drag handle, rank, name */}
-                <th className="sticky left-0 z-20 bg-gray-950 w-6 text-gray-700 text-center px-1">⠿</th>
-                {stickyTh("#", "personal_rank", 24, 44)}
-                {stickyTh("Name", "name", 68, 140)}
-                {/* Identity */}
-                {th("School", "school", "border-l border-gray-800")}
-                {th("Yr", "draft_class_year")}
-                {th("Ht", "height")}
-                {th("Wt", "weight", "border-r border-gray-800")}
-                {/* Totals */}
-                {th("Games", "total_games", "border-l border-gray-800")}
-                {th("Routes", "total_routes", "border-r border-gray-800")}
-                {/* Targets */}
-                {th("Tgt", "targets", "border-l border-gray-800 text-yellow-500")}
-                {th("Rec", "catches", "text-green-400")}
-                {th("Drops", "drops", "text-red-400")}
-                {th("Cont", "contested", "text-purple-400")}
-                {th("ContC", "contested_catches", "text-purple-300 border-r border-gray-800")}
-                {/* Metrics */}
-                {th("Tgt%", "target_rate", "border-l border-gray-800")}
-                {th("Suc%", "success_rate", "text-green-300")}
-                {th("SAE%", "adj_success_above_exp")}
-                {th("Man%", "cvg_man_rate", "text-orange-400")}
-                {th("Zone%", "cvg_zone_rate", "text-orange-400")}
-                {th("Press%", "cvg_press_rate", "text-orange-400")}
-                {ROUTE_TYPES.map((rt, i) => (
-                  <th key={`rt_${rt}_rate`} onClick={() => toggleSort(`rt_${rt}_rate`)}
-                    className={`px-1.5 py-1.5 text-center whitespace-nowrap cursor-pointer hover:text-white transition select-none capitalize ${i === ROUTE_TYPES.length - 1 ? "border-r border-gray-800" : ""} ${sortKey === `rt_${rt}_rate` ? "text-green-400" : "text-green-800"}`}>
-                    {rt}{sortKey === `rt_${rt}_rate` ? (sortDir === "asc" ? "↑" : "↓") : ""}%
-                  </th>
-                ))}
-                {/* Depth */}
-                {th("BehindLOS", "depth_behind_los", "border-l border-gray-800")}
-                {th("OnLOS", "depth_on_los")}
-                {th("Snaps", "total_snaps", "border-r border-gray-800")}
-                {/* Alignment */}
-                {th("RWR", "pct_right")}
-                {th("LWR", "pct_left")}
-                {th("Slot", "pct_slot")}
-                {th("BF", "pct_backfield", "border-r border-gray-800")}
-                {/* Alignment Open% */}
-                {th("Slot", "open_pct_slot", "border-l border-gray-800 text-teal-400")}
-                {th("Slot-On", "open_pct_slot_on", "text-teal-300")}
-                {th("Slot-Off", "open_pct_slot_off", "text-teal-300")}
-                {th("Right", "open_pct_right", "text-teal-400")}
-                {th("R-On", "open_pct_right_on", "text-teal-300")}
-                {th("R-Off", "open_pct_right_off", "text-teal-300")}
-                {th("Left", "open_pct_left", "text-teal-400")}
-                {th("L-On", "open_pct_left_on", "text-teal-300")}
-                {th("L-Off", "open_pct_left_off", "text-teal-300")}
-                {th("BF%", "open_pct_backfield", "text-teal-400 border-r border-gray-800")}
-                {/* Coverage */}
-                {th("Man", "cvg_man", "border-l border-gray-800 text-orange-500")}
-                {th("ManC", "cvg_man_catch", "text-orange-300")}
-                {th("Zone", "cvg_zone", "text-orange-500")}
-                {th("ZoneC", "cvg_zone_catch", "text-orange-300")}
-                {th("Dbl", "cvg_double", "text-orange-500")}
-                {th("DblC", "cvg_double_catch", "text-orange-300")}
-                {th("Press", "cvg_press", "text-orange-500")}
-                {th("PressC", "cvg_press_catch", "text-orange-300 border-r border-gray-800")}
-                {/* Per route type */}
-                {ROUTE_TYPES.map((rt, i) => [
-                  <th key={`rt_${rt}_count`} onClick={() => toggleSort(`rt_${rt}_count`)}
-                    className={`px-1.5 py-1.5 text-center whitespace-nowrap cursor-pointer hover:text-white transition select-none capitalize ${i === 0 ? "border-l border-gray-800" : ""} ${sortKey === `rt_${rt}_count` ? "text-blue-400" : "text-blue-700"}`}>
-                    {rt}{sortKey === `rt_${rt}_count` ? (sortDir === "asc" ? "↑" : "↓") : ""}
-                  </th>,
-                  <th key={`rt_${rt}_catches`} onClick={() => toggleSort(`rt_${rt}_catches`)}
-                    className={`px-1.5 py-1.5 text-center whitespace-nowrap cursor-pointer hover:text-white transition select-none border-r border-gray-800 ${sortKey === `rt_${rt}_catches` ? "text-green-400" : "text-blue-900"}`}>
-                    Rec{sortKey === `rt_${rt}_catches` ? (sortDir === "asc" ? "↑" : "↓") : ""}
-                  </th>,
-                ])}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-900">
-              {sorted.map((p, i) => {
-                const isDragging = draggingId === p.id;
-                const isDragOver = dragOverId === p.id;
-                const isSaving = savingRankId === p.id;
-                const rowBg = isDragOver ? "bg-blue-900/30" : i % 2 === 0 ? "bg-gray-950" : "bg-gray-900/30";
-                const saeVal = p.adj_success_above_exp;
-
-                return (
-                  <tr
-                    key={p.id}
-                    draggable
-                    onDragStart={() => { setDraggingId(p.id); dragRankRef.current = p.personal_rank ?? i + 1; }}
-                    onDragOver={(e) => { e.preventDefault(); setDragOverId(p.id); }}
-                    onDragLeave={() => setDragOverId(null)}
-                    onDrop={() => handleDrop(p.id)}
-                    onDragEnd={() => { setDraggingId(null); setDragOverId(null); }}
-                    onClick={() => onSelectProspect(p)}
-                    className={`cursor-pointer transition hover:bg-gray-800/60 ${isDragging ? "opacity-40" : ""} ${isDragOver ? "border-t-2 border-blue-500" : ""} ${rowBg}`}
-                  >
-                    {/* Sticky: drag handle */}
-                    <td className="sticky left-0 z-10 bg-inherit px-1 text-gray-700 cursor-grab active:cursor-grabbing text-center w-6"
-                      onClick={(e) => e.stopPropagation()}>⠿</td>
-
-                    {/* Sticky: rank */}
-                    <td style={{ left: 24, minWidth: 44, width: 44 }}
-                      className="sticky z-10 bg-inherit border-r border-gray-800 text-center"
-                      onClick={(e) => { e.stopPropagation(); setEditingRankId(p.id); setRankInput(p.personal_rank ? `${p.personal_rank}` : ""); }}>
-                      {editingRankId === p.id ? (
-                        <input autoFocus type="number" min={1}
-                          className="w-10 px-0.5 py-0.5 bg-gray-800 border border-blue-500 rounded text-yellow-400 font-bold text-xs focus:outline-none text-center"
-                          value={rankInput}
-                          onChange={(e) => setRankInput(e.target.value)}
-                          onBlur={() => commitRank(p.id)}
-                          onKeyDown={(e) => { if (e.key === "Enter") commitRank(p.id); if (e.key === "Escape") setEditingRankId(null); }}
-                          onClick={(e) => e.stopPropagation()} />
-                      ) : (
-                        <span className={`cursor-text hover:bg-gray-800 px-1 rounded text-yellow-400 font-bold ${isSaving ? "animate-pulse" : ""}`}>
-                          {p.personal_rank ? `#${p.personal_rank}` : "—"}
-                        </span>
-                      )}
-                    </td>
-
-                    {/* Sticky: name */}
-                    <td style={{ left: 68, minWidth: 140, width: 140 }}
-                      className="sticky z-10 bg-inherit border-r border-gray-800 px-1.5 py-1.5 text-white font-medium whitespace-nowrap">
-                      {p.name}
-                    </td>
-
-                    {/* Identity */}
-                    <td className={`${tdBase} text-gray-400 border-l border-gray-800`}>{p.school}</td>
-                    <td className={`${tdBase} text-gray-400`}>{p.draft_class_year}</td>
-                    <td className={`${tdBase} text-gray-400`}>{p.height || "—"}</td>
-                    <td className={`${tdBase} text-gray-400 border-r border-gray-800`}>{p.weight ?? "—"}</td>
-
-                    {/* Totals */}
-                    <td className={`${tdBase} text-gray-400 border-l border-gray-800`}>{p.total_games}</td>
-                    <td className={`${tdBase} text-blue-400 font-medium border-r border-gray-800`}>{p.total_routes}</td>
-
-                    {/* Targets */}
-                    <td className={`${tdBase} text-yellow-400 border-l border-gray-800 font-medium`}>{p.targets || "—"}</td>
-                    <td className={`${tdBase} text-green-400 font-medium`}>{p.catches || "—"}</td>
-                    <td className={`${tdBase} text-red-400`}>{p.drops || "—"}</td>
-                    <td className={`${tdBase} text-purple-400`}>{p.contested || "—"}</td>
-                    <td className={`${tdBase} text-purple-300 border-r border-gray-800`}>{p.contested_catches || "—"}</td>
-
-                    {/* Metrics */}
-                    <td className={`${tdBase} text-gray-300 border-l border-gray-800`}>{pct(p.target_rate)}</td>
-                    <td className={`${tdBase} text-green-300`}>{pct(p.success_rate)}</td>
-                    <td className={`${tdBase} font-medium ${saeVal == null ? "text-gray-500" : saeVal >= 0 ? "text-green-400" : "text-red-400"}`}>
-                      {sae(saeVal)}
-                    </td>
-                    <td className={`${tdBase} text-orange-400`}>{p.coverage_stats.man.count > 0 ? `${Math.round((p.coverage_stats.man.open / p.coverage_stats.man.count) * 100)}%` : "—"}</td>
-                    <td className={`${tdBase} text-orange-400`}>{p.coverage_stats.zone.count > 0 ? `${Math.round((p.coverage_stats.zone.open / p.coverage_stats.zone.count) * 100)}%` : "—"}</td>
-                    <td className={`${tdBase} text-orange-400`}>{p.coverage_stats.press.count > 0 ? `${Math.round((p.coverage_stats.press.open / p.coverage_stats.press.count) * 100)}%` : "—"}</td>
-                    {ROUTE_TYPES.map((rt, ri) => {
-                      const rs = p.route_stats[rt];
-                      const rate = rs && rs.count > 0 ? `${Math.round((rs.open / rs.count) * 100)}%` : "—";
-                      return (
-                        <td key={`rt_${rt}_rate`} className={`${tdBase} text-green-700 ${ri === ROUTE_TYPES.length - 1 ? "border-r border-gray-800" : ""}`}>
-                          {rate}
-                        </td>
-                      );
-                    })}
-
-                    {/* Depth */}
-                    <td className={`${tdBase} text-gray-400 border-l border-gray-800`}>{p.depth_behind_los || "—"}</td>
-                    <td className={`${tdBase} text-gray-400`}>{p.depth_on_los || "—"}</td>
-                    <td className={`${tdBase} text-gray-500 border-r border-gray-800`}>{p.total_routes || "—"}</td>
-
-                    {/* Alignment — show counts */}
-                    <td className={`${tdBase} text-gray-400`}>{p.pct_right != null ? `${Math.round((p.pct_right / 100) * p.total_routes)}` : "—"}</td>
-                    <td className={`${tdBase} text-gray-400`}>{p.pct_left != null ? `${Math.round((p.pct_left / 100) * p.total_routes)}` : "—"}</td>
-                    <td className={`${tdBase} text-gray-400`}>{p.pct_slot != null ? `${Math.round((p.pct_slot / 100) * p.total_routes)}` : "—"}</td>
-                    <td className={`${tdBase} text-gray-400 border-r border-gray-800`}>{p.pct_backfield != null ? `${Math.round((p.pct_backfield / 100) * p.total_routes)}` : "—"}</td>
-
-                    {/* Alignment Open% — charted plays only */}
-                    <td className={`${tdBase} text-teal-400 border-l border-gray-800`}>{pct(p.open_pct_slot)}</td>
-                    <td className={`${tdBase} text-teal-300`}>{pct(p.open_pct_slot_on_line)}</td>
-                    <td className={`${tdBase} text-teal-300`}>{pct(p.open_pct_slot_off_line)}</td>
-                    <td className={`${tdBase} text-teal-400`}>{pct(p.open_pct_right)}</td>
-                    <td className={`${tdBase} text-teal-300`}>{pct(p.open_pct_right_on_line)}</td>
-                    <td className={`${tdBase} text-teal-300`}>{pct(p.open_pct_right_off_line)}</td>
-                    <td className={`${tdBase} text-teal-400`}>{pct(p.open_pct_left)}</td>
-                    <td className={`${tdBase} text-teal-300`}>{pct(p.open_pct_left_on_line)}</td>
-                    <td className={`${tdBase} text-teal-300`}>{pct(p.open_pct_left_off_line)}</td>
-                    <td className={`${tdBase} text-teal-400 border-r border-gray-800`}>{pct(p.open_pct_backfield)}</td>
-
-                    {/* Coverage */}
-                    <td className={`${tdBase} text-orange-400 border-l border-gray-800`}>{n(p.coverage_stats.man.count) === "0" ? "—" : n(p.coverage_stats.man.count)}</td>
-                    <td className={`${tdBase} text-orange-200`}>{p.coverage_stats.man.count > 0 ? n(p.coverage_stats.man.catches) : "—"}</td>
-                    <td className={`${tdBase} text-orange-400`}>{n(p.coverage_stats.zone.count) === "0" ? "—" : n(p.coverage_stats.zone.count)}</td>
-                    <td className={`${tdBase} text-orange-200`}>{p.coverage_stats.zone.count > 0 ? n(p.coverage_stats.zone.catches) : "—"}</td>
-                    <td className={`${tdBase} text-orange-400`}>{n(p.coverage_stats.double.count) === "0" ? "—" : n(p.coverage_stats.double.count)}</td>
-                    <td className={`${tdBase} text-orange-200`}>{p.coverage_stats.double.count > 0 ? n(p.coverage_stats.double.catches) : "—"}</td>
-                    <td className={`${tdBase} text-orange-400`}>{n(p.coverage_stats.press.count) === "0" ? "—" : n(p.coverage_stats.press.count)}</td>
-                    <td className={`${tdBase} text-orange-200 border-r border-gray-800`}>{p.coverage_stats.press.count > 0 ? n(p.coverage_stats.press.catches) : "—"}</td>
-
-                    {/* Per route type */}
-                    {ROUTE_TYPES.map((rt, ri) => {
-                      const rs = p.route_stats[rt];
-                      return [
-                        <td key={`rt_${rt}_count`} className={`${tdBase} ${ri === 0 ? "border-l border-gray-800" : ""} text-gray-300`}>
-                          {rs?.count ?? "—"}
-                        </td>,
-                        <td key={`rt_${rt}_catches`} className={`${tdBase} text-green-300 border-r border-gray-800`}>
-                          {rs?.catches != null && rs.catches > 0 ? rs.catches : rs?.count != null ? "0" : "—"}
-                        </td>,
-                      ];
-                    })}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+          {boardTab === "all" && renderAllTable()}
+          {boardTab === "QB"  && renderPositionStubTable("QB")}
+          {boardTab === "RB"  && renderPositionStubTable("RB")}
+          {boardTab === "WR"  && renderWRTable()}
+          {boardTab === "TE"  && renderPositionStubTable("TE")}
         </>
       )}
     </div>

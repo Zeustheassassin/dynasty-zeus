@@ -31,6 +31,8 @@ const TIMINGS: { key: QBTiming; label: string }[] = [
   { key: "second_option", label: "2nd Option" },
   { key: "checkdown",     label: "Check Down" },
   { key: "scramble",      label: "Scramble" },
+  { key: "sack",          label: "Sack" },
+  { key: "throw_away",    label: "Throw Away" },
 ];
 
 const ACCURACIES: { key: QBAccuracy; label: string; active: string }[] = [
@@ -102,7 +104,7 @@ function onTargetColor(p: number | null): string {
 // Short display labels for the play log
 const SNAP_SHORT: Record<QBSnapPosition, string> = { shotgun: "SG", pistol: "PS", under_center: "UC" };
 const PLAY_SHORT: Record<QBPlayType, string>     = { run: "RUN", rpo: "RPO", pass: "PASS" };
-const TIMING_SHORT: Record<QBTiming, string>     = { first_option: "1st", second_option: "2nd", checkdown: "CK", scramble: "SCR" };
+const TIMING_SHORT: Record<QBTiming, string>     = { first_option: "1st", second_option: "2nd", checkdown: "CK", scramble: "SCR", sack: "SCK", throw_away: "TA" };
 const ACC_SHORT: Record<QBAccuracy, string>      = { on_target: "OT", high: "HI", low: "LO", in_front: "IF", behind: "BH" };
 const DEPTH_SHORT: Record<QBDepthZone, string>   = {
   deep_left: "DL", deep_center: "DC", deep_right: "DR",
@@ -141,7 +143,8 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
   const [savingBio, setSavingBio] = useState(false);
 
   const needPassFields = playType === "rpo" || playType === "pass";
-  const needThrowFields = needPassFields && timing !== null && timing !== "scramble";
+  const noThrowTimings: QBTiming[] = ["scramble", "sack", "throw_away"];
+  const needThrowFields = needPassFields && timing !== null && !noThrowTimings.includes(timing);
   const canLog =
     !savingPlay &&
     selectedGameId !== null &&
@@ -201,7 +204,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     const totalPlays    = plays.length;
     const runPlays      = plays.filter((p) => p.play_type === "run");
     const passRpoPlays  = plays.filter((p) => p.play_type !== "run");
-    const thrownPlays   = passRpoPlays.filter((p) => p.timing !== "scramble");
+    const thrownPlays   = passRpoPlays.filter((p) => p.timing !== "scramble" && p.timing !== "sack" && p.timing !== "throw_away");
     const scramblePlays = passRpoPlays.filter((p) => p.timing === "scramble");
 
     // Snap position counts
@@ -217,7 +220,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     }, {} as Record<QBPlayType, number>);
 
     // Timing counts (of pass+rpo plays)
-    const timingCounts = (["first_option", "second_option", "checkdown", "scramble"] as QBTiming[]).reduce((acc, t) => {
+    const timingCounts = (["first_option", "second_option", "checkdown", "scramble", "sack", "throw_away"] as QBTiming[]).reduce((acc, t) => {
       acc[t] = passRpoPlays.filter((p) => p.timing === t).length;
       return acc;
     }, {} as Record<QBTiming, number>);
@@ -300,11 +303,15 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
 
   function handleTimingChange(t: QBTiming) {
     setTiming(t);
-    if (t === "scramble") {
+    const autoLog: QBTiming[] = ["sack", "throw_away"];
+    if (noThrowTimings.includes(t)) {
       setAccuracy(null);
       setDepthZone(null);
       setRouteType(null);
       setCoverage(null);
+    }
+    if (autoLog.includes(t)) {
+      logPlayWithTiming(t);
     }
   }
 
@@ -337,6 +344,26 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     setPlays((prev) => prev.filter((p) => p.game_id !== id));
     if (selectedGameId === id) setSelectedGameId(games.find((g) => g.id !== id)?.id ?? null);
     onDataChanged();
+  }
+
+  async function logPlayWithTiming(timingOverride: QBTiming) {
+    if (!selectedGameId || savingPlay) return;
+    setPlayError(null);
+    setSavingPlay(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { setPlayError("Not logged in."); setSavingPlay(false); return; }
+    const { data, error } = await supabase.from("qb_plays").insert({
+      user_id: user.id,
+      game_id: selectedGameId,
+      snap_position: snapPos,
+      play_type: playType,
+      timing: timingOverride,
+      accuracy: null, depth_zone: null, route_type: null, coverage: null,
+      play_notes: playNotes || null,
+    }).select().single();
+    if (error) { setPlayError(error.message); }
+    else if (data) { setPlays((prev) => [...prev, data as QBPlay]); resetForm(); onDataChanged(); }
+    setSavingPlay(false);
   }
 
   async function logPlay() {
@@ -572,7 +599,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                     {TIMINGS.map(({ key, label }) => {
                       const n = stats.timingCounts[key];
                       const p2 = pct(n, stats.passRpo);
-                      const color = key === "scramble" ? "text-orange-400" : "text-blue-300";
+                      const color = key === "sack" ? "text-red-400" : key === "throw_away" ? "text-yellow-400" : key === "scramble" ? "text-orange-400" : "text-blue-300";
                       return (
                         <div key={key} className="p-3 bg-gray-800/50 rounded-lg text-center">
                           <div className="text-xs text-gray-500 mb-1">{label}</div>

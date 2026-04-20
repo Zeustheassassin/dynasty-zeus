@@ -828,6 +828,7 @@ export interface Prospect {
   weight: number | null;
   birthday: string | null;
   personal_rank: number | null;
+  overall_rank: number | null;
   pff_rank: number | null;
   mock_draft_rank: number | null;
   drafttek_rank: number | null;
@@ -905,7 +906,7 @@ export interface RBPlay {
 // ── QB Scouting ─────────────────────────────────────────────
 export type QBSnapPosition = "shotgun" | "pistol" | "under_center";
 export type QBPlayType     = "run" | "rpo" | "pass";
-export type QBTiming       = "first_option" | "second_option" | "checkdown" | "scramble";
+export type QBTiming       = "first_option" | "second_option" | "checkdown" | "scramble" | "sack" | "throw_away";
 export type QBAccuracy     = "high" | "low" | "on_target" | "in_front" | "behind";
 export type QBDepthZone    =
   | "deep_left"  | "deep_center"  | "deep_right"
@@ -990,4 +991,5 @@ export interface ProspectWithStats extends Prospect {
   open_pct_left_on_line: number | null;
   open_pct_left_off_line: number | null;
   open_pct_backfield: number | null;
+  has_charted_open_data: boolean;
 }
