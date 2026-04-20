@@ -213,7 +213,6 @@ const [loadingLeagueOverview, setLoadingLeagueOverview] = useState(false);
 const [leagueOverviewLoaded, setLeagueOverviewLoaded] = useState(false);
 const [leagueSimCache, setLeagueSimCache] = useState<Record<string, Record<number, CachedSimRow>>>({});
 const [readyLeagueId, setReadyLeagueId] = useState<string | null>(null);
-const [briefingRefreshKey, setBriefingRefreshKey] = useState(0);
 const [simQueue, setSimQueue] = useState<string[]>([]);
 const [simProgress, setSimProgress] = useState<{ done: number; total: number } | null>(null);
 // Random salt included in the sim seed so each Run All Sims call produces slightly different results.
@@ -4245,8 +4244,28 @@ const getTeamSummary = () => {
     ).then(() => {}, (err: unknown) => log.error("leaguemate_profiles upsert failed", { err: String(err) }));
   }, [supabaseUser?.id, selectedLeague?.league_id, selectedLeagueMateProfiles]);
 
+  // Saved AI briefings from Supabase — keyed by "${leagueId}-${rosterId}".
+  const [savedAiBriefings, setSavedAiBriefings] = useState<Record<string, GmBriefing>>({});
+
+  // Load saved AI briefings from Supabase when user logs in.
+  useEffect(() => {
+    if (!supabaseUser?.id) return;
+    supabase
+      .from("gm_briefings")
+      .select("league_id, roster_id, briefing, generated_at")
+      .eq("user_id", supabaseUser.id)
+      .then(({ data }) => {
+        if (!data) return;
+        const byKey: Record<string, GmBriefing> = {};
+        for (const row of data as { league_id: string; roster_id: number; briefing: GmBriefing; generated_at: string }[]) {
+          byKey[`${row.league_id}-${row.roster_id}`] = { ...row.briefing, generatedAt: row.generated_at };
+        }
+        setSavedAiBriefings(byKey);
+      }, (err: unknown) => log.error("gm_briefings load failed", { err: String(err) }));
+  }, [supabaseUser?.id]);
+
   // GM briefings for the Alerts Hub — one card per league the user is in.
-  // Uses leagueOverviewData (loaded for all leagues) so this is cross-league, not just the selected league.
+  // Prefers saved AI briefings; falls back to rule-based for un-refreshed teams.
   const allRosterBriefings = useMemo((): GmBriefing[] => {
     if (!user?.user_id || Object.keys(leagueOverviewData).length === 0) return [];
     if (Object.keys(calcFcValues).length === 0 || Object.keys(redraftValues).length === 0) return [];
@@ -4259,6 +4278,11 @@ const getTeamSummary = () => {
       const { league, rosters: leagueRosters, picks: leaguePicks } = entry;
       const myRoster = leagueRosters.find((r) => r.owner_id === user.user_id);
       if (!myRoster) continue;
+
+      // Return saved AI briefing for this team if available.
+      const savedKey = `${league.league_id}-${myRoster.roster_id}`;
+      const saved = savedAiBriefings[savedKey];
+      if (saved) { briefings.push(saved); continue; }
 
       const profile = getRosterDirectionProfile({
         rosterId: myRoster.roster_id,
@@ -4283,6 +4307,7 @@ const getTeamSummary = () => {
 
       briefings.push(generateGmBriefing({
         rosterId: myRoster.roster_id,
+        leagueId: league.league_id,
         leagueName: league.name,
         ownerName: user.display_name || "You",
         isMyTeam: true,
@@ -4293,7 +4318,175 @@ const getTeamSummary = () => {
     }
 
     return briefings.sort((a, b) => urgencyOrder[a.urgency] - urgencyOrder[b.urgency]);
-  }, [leagueOverviewData, user, calcFcValues, redraftValues, players, pickFcValues, fcTrendData, briefingRefreshKey, committedSimsByLeague, leagueSimCache]);
+  }, [leagueOverviewData, user, calcFcValues, redraftValues, players, pickFcValues, fcTrendData, committedSimsByLeague, leagueSimCache, savedAiBriefings]);
+
+  // Per-team AI briefing refresh — gathers context and calls the API route.
+  const refreshBriefingForTeam = useCallback(async (rosterId: number, leagueId: string) => {
+    if (!supabaseUser?.id || !user?.user_id) return;
+    const entry = leagueOverviewData[leagueId];
+    if (!entry) return;
+
+    const { league, rosters: leagueRosters, picks: leaguePicks, userMap } = entry;
+    const myRoster = leagueRosters.find((r) => r.roster_id === rosterId);
+    if (!myRoster) return;
+
+    const dynastyValueForPlayer = (id: string) => calcFcValues[id] ?? players[id]?.value ?? 0;
+    const profile = getRosterDirectionProfile({
+      rosterId,
+      rosters: leagueRosters,
+      ownedPicks: leaguePicks,
+      players,
+      pickValues: pickFcValues,
+      redraftValues,
+      dynastyValueForPlayer,
+    });
+    if (!profile) return;
+
+    const committedRow = committedSimsByLeague[leagueId]?.[rosterId];
+    const cachedRow = leagueSimCache[leagueId]?.[rosterId];
+    const playoffOdds = committedRow?.playoffOdds ?? cachedRow?.playoff_odds ?? 0;
+    const hasCachedSim = !!(committedRow ?? cachedRow);
+    const adjBucket = getAdjustedDirectionBucket(profile.bucket, profile, playoffOdds, hasCachedSim);
+    const adjProfile = adjBucket !== profile.bucket
+      ? { ...profile, bucket: adjBucket, bucketColor: getBucketColor(adjBucket) }
+      : profile;
+
+    // Build roster player list sorted by dynasty value descending.
+    const SKILL_POSITIONS = new Set(["QB", "RB", "WR", "TE"]);
+    const trendByPlayerId = new Map(fcTrendData.map((t) => [t.sleeperId, t]));
+    const rosterPlayers = (myRoster.players ?? [])
+      .map((id: string) => {
+        const p = players[id];
+        if (!p || !SKILL_POSITIONS.has(p.position)) return null;
+        const trend = trendByPlayerId.get(id);
+        return {
+          name: p.full_name ?? id,
+          position: p.position,
+          age: p.age ?? null,
+          dynastyValue: dynastyValueForPlayer(id),
+          redraftValue: redraftValues[id] ?? 0,
+          trend30Day: trend?.trend30Day ?? null,
+        };
+      })
+      .filter((p): p is NonNullable<typeof p> => p !== null)
+      .sort((a, b) => b.dynastyValue - a.dynastyValue);
+
+    // Market movers for this roster.
+    const rosterTrends = (myRoster.players ?? [])
+      .map((id: string) => trendByPlayerId.get(id))
+      .filter((t): t is (typeof fcTrendData)[number] => t != null && SKILL_POSITIONS.has(t.position));
+    const falling = rosterTrends.filter((t) => t.trend30Day <= -200)
+      .sort((a, b) => a.trend30Day - b.trend30Day).slice(0, 3)
+      .map((t) => ({ name: t.name, pos: t.position, delta: t.trend30Day }));
+    const rising = rosterTrends.filter((t) => t.trend30Day >= 250)
+      .sort((a, b) => b.trend30Day - a.trend30Day).slice(0, 2)
+      .map((t) => ({ name: t.name, pos: t.position, delta: t.trend30Day }));
+
+    // Standings rank for this roster.
+    const sorted = [...leagueRosters]
+      .filter((r) => r.owner_id)
+      .sort((a, b) => {
+        const wa = (a.settings?.wins ?? 0), wb = (b.settings?.wins ?? 0);
+        const fa = (a.settings?.fpts ?? 0), fb = (b.settings?.fpts ?? 0);
+        return wb !== wa ? wb - wa : fb - fa;
+      });
+    const standingsRank = sorted.findIndex((r) => r.roster_id === rosterId) + 1;
+
+    // Trade partners — other rosters with basic bucket context.
+    const tradePartners = leagueRosters
+      .filter((r) => r.owner_id && r.owner_id !== user.user_id)
+      .map((r) => {
+        const p = getRosterDirectionProfile({
+          rosterId: r.roster_id,
+          rosters: leagueRosters,
+          ownedPicks: leaguePicks,
+          players,
+          pickValues: pickFcValues,
+          redraftValues,
+          dynastyValueForPlayer,
+        });
+        if (!p) return null;
+        const isSeller = ["Window Closing", "Fading Contender", "Stranded", "Fading Out"].includes(p.bucket);
+        const isBuyer  = ["Rebuilder", "Almost There"].includes(p.bucket);
+        const strongestPos = p.positionRanks?.[0]?.pos ?? "WR";
+        return {
+          ownerName: userMap[r.owner_id ?? ""] ?? "Unknown",
+          bucket: p.bucket,
+          motivation: isSeller ? "Sell aging assets" : isBuyer ? "Buy for future" : "Neutral",
+          strongestPos,
+          isSeller,
+          isBuyer,
+        };
+      })
+      .filter((tp): tp is NonNullable<typeof tp> => tp !== null)
+      .slice(0, 6);
+
+    const context = {
+      leagueName: league.name,
+      leagueSize: leagueRosters.filter((r) => r.owner_id).length,
+      myTeam: {
+        wins: myRoster.settings?.wins ?? 0,
+        losses: myRoster.settings?.losses ?? 0,
+        ties: myRoster.settings?.ties ?? 0,
+        standingsRank,
+        waiverPosition: myRoster.settings?.waiver_position ?? 0,
+        players: rosterPlayers,
+      },
+      profile: {
+        bucket: adjProfile.bucket,
+        bucketColor: adjProfile.bucketColor,
+        dynRank: adjProfile.dynRank,
+        redRank: adjProfile.redRank,
+        totalTeams: adjProfile.n,
+        coreAge: adjProfile.coreAge,
+        youngCoreCount: adjProfile.youngCoreCount,
+        oldCoreCount: adjProfile.oldCoreCount,
+        firstRounders: adjProfile.firstRounders,
+        futureFirsts: adjProfile.futureFirsts,
+        pickTotal: adjProfile.pickTotal,
+        playoffOdds,
+        positionRanks: adjProfile.positionRanks ?? [],
+        actions: adjProfile.actions ?? [],
+      },
+      marketMovers: { falling, rising },
+      tradePartners,
+    };
+
+    const res = await fetch("/api/gm-briefing", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        userId: supabaseUser.id,
+        leagueId,
+        rosterId,
+        leagueName: league.name,
+        context,
+      }),
+    });
+
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => "(no body)");
+      log.error("gm-briefing API error", { status: res.status, body: errBody });
+      return;
+    }
+
+    const { briefing } = (await res.json()) as { briefing: GmBriefing };
+
+    // Persist to Supabase.
+    supabase.from("gm_briefings").upsert(
+      {
+        user_id: supabaseUser.id,
+        league_id: leagueId,
+        roster_id: rosterId,
+        briefing,
+        generated_at: briefing.generatedAt ?? new Date().toISOString(),
+      },
+      { onConflict: "user_id,league_id,roster_id" }
+    ).then(() => {}, (err: unknown) => log.error("gm_briefings upsert failed", { err: String(err) }));
+
+    // Update local state immediately so UI reflects the new briefing.
+    setSavedAiBriefings((prev) => ({ ...prev, [`${leagueId}-${rosterId}`]: briefing }));
+  }, [supabaseUser?.id, user?.user_id, leagueOverviewData, calcFcValues, players, pickFcValues, redraftValues, fcTrendData, committedSimsByLeague, leagueSimCache]);
 
   // Save simulation results to Supabase on demand and freeze a local snapshot for
   // pick valuations. The frozen snapshot (localStorage + state) is the source of truth
@@ -5478,7 +5671,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             allTradeAttempts={allTradeAttempts}
             allLeagues={leagues}
             rosterBriefings={allRosterBriefings}
-            onRefreshBriefings={async () => { await loadLeagueOverview(); setBriefingRefreshKey((k) => k + 1); }}
+            onRefreshBriefing={refreshBriefingForTeam}
             onNavigateToAttempts={(leagueId) => {
               const league = leagues.find((l) => l.league_id === leagueId);
               if (league) {

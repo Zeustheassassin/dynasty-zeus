@@ -162,6 +162,7 @@ function buildWriteup(
 
 export function generateGmBriefing({
   rosterId,
+  leagueId,
   leagueName,
   ownerName,
   isMyTeam,
@@ -170,6 +171,7 @@ export function generateGmBriefing({
   trendData,
 }: {
   rosterId: number;
+  leagueId: string;
   leagueName: string;
   ownerName: string;
   isMyTeam: boolean;
@@ -204,6 +206,7 @@ export function generateGmBriefing({
 
   return {
     rosterId,
+    leagueId,
     leagueName,
     ownerName,
     isMyTeam,

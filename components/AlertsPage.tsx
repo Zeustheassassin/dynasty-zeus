@@ -55,7 +55,7 @@ type AlertsPageProps = {
   allTradeAttempts: { id: string; league_id: string; status: string }[];
   allLeagues: { league_id: string; name: string }[];
   rosterBriefings?: GmBriefing[];
-  onRefreshBriefings?: () => Promise<void>;
+  onRefreshBriefing?: (rosterId: number, leagueId: string) => Promise<void>;
   onNavigateToAttempts: (leagueId: string) => void;
 };
 
@@ -256,7 +256,7 @@ export default function AlertsPage({
   allTradeAttempts,
   allLeagues,
   rosterBriefings,
-  onRefreshBriefings,
+  onRefreshBriefing,
   onNavigateToAttempts,
 }: AlertsPageProps) {
   const [feedTab, setFeedTab] = useState<"alerts" | "transactions" | "waivers" | "injury" | "news" | "beat" | "wire" | "briefing">("briefing");
@@ -267,7 +267,7 @@ export default function AlertsPage({
   const [loadingBeat, setLoadingBeat] = useState(false);
   const [wireItems, setWireItems] = useState<BeatItem[]>([]);
   const [loadingWire, setLoadingWire] = useState(false);
-  const [refreshingBriefing, setRefreshingBriefing] = useState(false);
+  const [refreshingBriefingKey, setRefreshingBriefingKey] = useState<string | null>(null);
 
   useEffect(() => {
     if (feedTab !== "news") return;
@@ -919,22 +919,7 @@ export default function AlertsPage({
           {feedTab === "briefing" && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-500">AI-generated briefings based on current league data</span>
-                {onRefreshBriefings && (
-                  <button
-                    onClick={async () => {
-                      setRefreshingBriefing(true);
-                      try { await onRefreshBriefings(); } finally { setRefreshingBriefing(false); }
-                    }}
-                    disabled={refreshingBriefing}
-                    className="flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-xs font-medium text-slate-300 hover:border-slate-600 hover:bg-slate-700/60 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" className={`h-3 w-3 ${refreshingBriefing ? "animate-spin" : ""}`} viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
-                    </svg>
-                    {refreshingBriefing ? "Refreshing..." : "Refresh"}
-                  </button>
-                )}
+                <span className="text-xs text-slate-500">AI-powered briefings — click ↻ on any team to refresh</span>
               </div>
               {!rosterBriefings || rosterBriefings.length === 0 ? (
                 <div className="rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-8 text-center text-sm text-slate-500">
@@ -942,6 +927,9 @@ export default function AlertsPage({
                 </div>
               ) : (
                 rosterBriefings.map((b) => {
+                  const cardKey = `${b.leagueId}-${b.rosterId}`;
+                  const isRefreshing = refreshingBriefingKey === cardKey;
+
                   const urgencyStyle =
                     b.urgency === "critical" ? "border-red-700/60 bg-red-950/30" :
                     b.urgency === "high"     ? "border-amber-700/60 bg-amber-950/20" :
@@ -954,8 +942,21 @@ export default function AlertsPage({
                     b.urgency === "medium"   ? "border-slate-600 bg-slate-800/60 text-slate-300" :
                                               "border-slate-700 bg-slate-900/40 text-slate-400";
 
+                  const timestampLabel = b.generatedAt
+                    ? (() => {
+                        const diffMs = Date.now() - new Date(b.generatedAt).getTime();
+                        const diffMin = Math.floor(diffMs / 60000);
+                        const diffHr  = Math.floor(diffMin / 60);
+                        const diffDay = Math.floor(diffHr / 24);
+                        if (diffMin < 2)  return "just now";
+                        if (diffMin < 60) return `${diffMin}m ago`;
+                        if (diffHr  < 24) return `${diffHr}h ago`;
+                        return `${diffDay}d ago`;
+                      })()
+                    : null;
+
                   return (
-                    <div key={`${b.rosterId}-${b.leagueName}`} className={`rounded-2xl border px-4 py-3.5 space-y-2.5 ${urgencyStyle}`}>
+                    <div key={cardKey} className={`rounded-2xl border px-4 py-3.5 space-y-2.5 ${urgencyStyle}`}>
                       {/* Header row */}
                       <div className="flex items-start justify-between gap-3 flex-wrap">
                         <div className="flex items-center gap-2 flex-wrap min-w-0">
@@ -963,10 +964,31 @@ export default function AlertsPage({
                           <span className={`text-[10px] font-semibold border px-2 py-0.5 rounded-lg shrink-0 ${b.bucketColor}`}>
                             {b.bucket}
                           </span>
+                          {b.isAi && (
+                            <span className="text-[10px] font-medium border border-violet-700/50 bg-violet-950/40 text-violet-300 px-1.5 py-0.5 rounded-md shrink-0">AI</span>
+                          )}
                         </div>
-                        <span className={`text-[10px] font-bold uppercase tracking-wider border px-2.5 py-1 rounded-xl shrink-0 ${urgencyBadge}`}>
-                          {b.urgencyLabel}
-                        </span>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className={`text-[10px] font-bold uppercase tracking-wider border px-2.5 py-1 rounded-xl ${urgencyBadge}`}>
+                            {b.urgencyLabel}
+                          </span>
+                          {onRefreshBriefing && (
+                            <button
+                              onClick={async () => {
+                                setRefreshingBriefingKey(cardKey);
+                                try { await onRefreshBriefing(b.rosterId, b.leagueId); }
+                                finally { setRefreshingBriefingKey(null); }
+                              }}
+                              disabled={isRefreshing}
+                              title="Refresh AI briefing"
+                              className="flex items-center justify-center w-6 h-6 rounded-lg border border-slate-700 bg-slate-800/60 text-slate-400 hover:border-slate-500 hover:bg-slate-700/60 hover:text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" className={`h-3 w-3 ${isRefreshing ? "animate-spin" : ""}`} viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+                              </svg>
+                            </button>
+                          )}
+                        </div>
                       </div>
 
                       {/* Headline */}
@@ -1011,6 +1033,11 @@ export default function AlertsPage({
                             </span>
                           ))}
                         </div>
+                      )}
+
+                      {/* Timestamp */}
+                      {timestampLabel && (
+                        <div className="text-[10px] text-slate-600 pt-0.5">Updated {timestampLabel}</div>
                       )}
                     </div>
                   );

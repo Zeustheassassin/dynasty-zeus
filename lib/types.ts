@@ -285,6 +285,7 @@ export type GmUrgency = "critical" | "high" | "medium" | "low";
 
 export interface GmBriefing {
   rosterId: number;
+  leagueId: string;
   leagueName: string;
   ownerName: string;
   isMyTeam: boolean;
@@ -297,6 +298,8 @@ export interface GmBriefing {
   bullets: string[];
   fallingPlayers: { name: string; pos: string; delta: number }[];
   risingPlayers: { name: string; pos: string; delta: number }[];
+  generatedAt?: string | null;
+  isAi?: boolean;
 }
 
 // ── Alert / watchlist shapes ─────────────────────────────────
