@@ -243,7 +243,7 @@ function reconstructPlays(s: GameSummary): ReconstructedPlay[] {
   });
 
   for (const [rt] of sortedRts) {
-    let rem = supply[rt] ?? 0;
+    const rem = supply[rt] ?? 0;
     if (rem <= 0) continue;
 
     // Two passes: first allocate proportional to remaining demand, then fill leftovers
@@ -261,7 +261,7 @@ function reconstructPlays(s: GameSummary): ReconstructedPlay[] {
     }
 
     // Pass 2: distribute remainder via largest-remainder — fills exactly rem if capacity allows
-    let allocTotal = COV_KEYS.reduce((a, k) => a + allocs[k], 0);
+    const allocTotal = COV_KEYS.reduce((a, k) => a + allocs[k], 0);
     let allocRem = rem - allocTotal;
     for (const cov of ([...COV_KEYS].sort((a, b) => fracs2[b] - fracs2[a]))) {
       if (allocRem <= 0) break;
