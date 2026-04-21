@@ -55,7 +55,7 @@ type AlertsPageProps = {
   allTradeAttempts: { id: string; league_id: string; status: string }[];
   allLeagues: { league_id: string; name: string }[];
   rosterBriefings?: GmBriefing[];
-  onRefreshBriefing?: (rosterId: number, leagueId: string) => Promise<void>;
+  onRefreshBriefing?: (rosterId: number, leagueId: string, recentNews: { title: string; playerNames?: string[] }[]) => Promise<void>;
   onNavigateToAttempts: (leagueId: string) => void;
 };
 
@@ -926,7 +926,8 @@ export default function AlertsPage({
                   Load your leagues to see your GM briefings across all leagues.
                 </div>
               ) : (
-                rosterBriefings.map((b) => {
+                <>
+                {rosterBriefings.map((b) => {
                   const cardKey = `${b.leagueId}-${b.rosterId}`;
                   const isRefreshing = refreshingBriefingKey === cardKey;
 
@@ -976,7 +977,9 @@ export default function AlertsPage({
                             <button
                               onClick={async () => {
                                 setRefreshingBriefingKey(cardKey);
-                                try { await onRefreshBriefing(b.rosterId, b.leagueId); }
+                                const newsPool = [...newsItems, ...beatItems, ...wireItems]
+                                  .map((n) => ({ title: n.title, playerNames: n.playerNames }));
+                                try { await onRefreshBriefing(b.rosterId, b.leagueId, newsPool); }
                                 finally { setRefreshingBriefingKey(null); }
                               }}
                               disabled={isRefreshing}
@@ -1041,7 +1044,35 @@ export default function AlertsPage({
                       )}
                     </div>
                   );
-                })
+                })}
+
+                {/* League last-updated footer */}
+                <div className="rounded-2xl border border-slate-800/60 bg-slate-900/40 px-4 py-3">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500 mb-2">Last updated by league</div>
+                  <div className="divide-y divide-slate-800/60">
+                    {rosterBriefings.map((b) => {
+                      const ts = b.generatedAt ? new Date(b.generatedAt) : null;
+                      let label = "Never";
+                      if (ts && !isNaN(ts.getTime())) {
+                        const diffMs = Date.now() - ts.getTime();
+                        const diffMin = Math.floor(diffMs / 60000);
+                        const diffHr  = Math.floor(diffMin / 60);
+                        const diffDay = Math.floor(diffHr / 24);
+                        if (diffMin < 2)  label = "just now";
+                        else if (diffMin < 60) label = `${diffMin}m ago`;
+                        else if (diffHr < 24)  label = `${diffHr}h ago`;
+                        else label = `${diffDay}d ago`;
+                      }
+                      return (
+                        <div key={`${b.leagueId}-${b.rosterId}`} className="flex items-center justify-between py-1.5 gap-3">
+                          <span className="text-xs text-slate-300 truncate">{b.leagueName}</span>
+                          <span className={`text-[11px] shrink-0 ${b.generatedAt ? "text-slate-500" : "text-slate-700"}`}>{label}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                </>
               )}
             </div>
           )}

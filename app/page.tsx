@@ -4321,7 +4321,7 @@ const getTeamSummary = () => {
   }, [leagueOverviewData, user, calcFcValues, redraftValues, players, pickFcValues, fcTrendData, committedSimsByLeague, leagueSimCache, savedAiBriefings]);
 
   // Per-team AI briefing refresh — gathers context and calls the API route.
-  const refreshBriefingForTeam = useCallback(async (rosterId: number, leagueId: string) => {
+  const refreshBriefingForTeam = useCallback(async (rosterId: number, leagueId: string, recentNews: { title: string; playerNames?: string[] }[] = []) => {
     if (!supabaseUser?.id || !user?.user_id) return;
     const entry = leagueOverviewData[leagueId];
     if (!entry) return;
@@ -4354,18 +4354,37 @@ const getTeamSummary = () => {
     // Build roster player list sorted by dynasty value descending.
     const SKILL_POSITIONS = new Set(["QB", "RB", "WR", "TE"]);
     const trendByPlayerId = new Map(fcTrendData.map((t) => [t.sleeperId, t]));
+
+    // Fetch player tags for this league so Claude knows CORE / WANT_TO_TRADE intent.
+    const tagMap: Record<string, string> = {};
+    if (supabaseUser?.id) {
+      const { data: tagRows } = await supabase
+        .from("league_player_tags")
+        .select("player_id, tag")
+        .eq("user_id", supabaseUser.id)
+        .eq("league_id", leagueId);
+      for (const row of (tagRows ?? []) as { player_id: string; tag: string }[]) {
+        tagMap[row.player_id] = row.tag;
+      }
+    }
+
     const rosterPlayers = (myRoster.players ?? [])
       .map((id: string) => {
         const p = players[id];
         if (!p || !SKILL_POSITIONS.has(p.position)) return null;
         const trend = trendByPlayerId.get(id);
+        const injuryStatus = p.injury_status || p.status || null;
+        const tag = tagMap[id] ?? null;
         return {
           name: p.full_name ?? id,
           position: p.position,
+          nflTeam: p.team || "FA",
           age: p.age ?? null,
           dynastyValue: dynastyValueForPlayer(id),
           redraftValue: redraftValues[id] ?? 0,
           trend30Day: trend?.trend30Day ?? null,
+          injuryStatus: injuryStatus === "Active" ? null : injuryStatus,
+          tag,
         };
       })
       .filter((p): p is NonNullable<typeof p> => p !== null)
@@ -4392,7 +4411,7 @@ const getTeamSummary = () => {
       });
     const standingsRank = sorted.findIndex((r) => r.roster_id === rosterId) + 1;
 
-    // Trade partners — other rosters with basic bucket context.
+    // Trade partners — other rosters with bucket, motivation, and top players.
     const tradePartners = leagueRosters
       .filter((r) => r.owner_id && r.owner_id !== user.user_id)
       .map((r) => {
@@ -4408,22 +4427,93 @@ const getTeamSummary = () => {
         if (!p) return null;
         const isSeller = ["Window Closing", "Fading Contender", "Stranded", "Fading Out"].includes(p.bucket);
         const isBuyer  = ["Rebuilder", "Almost There"].includes(p.bucket);
-        const strongestPos = p.positionRanks?.[0]?.pos ?? "WR";
+        const sortedPos = [...(p.positionRanks ?? [])].sort((a, b) => a.rank - b.rank);
+        const strongestPos = sortedPos[0]?.pos ?? "WR";
+        const weakPositions = sortedPos.filter((pr) => pr.rank > pr.total * 0.6).map((pr) => pr.pos);
+        const topPlayers = (r.players ?? [])
+          .map((id: string) => {
+            const pl = players[id];
+            if (!pl || !SKILL_POSITIONS.has(pl.position)) return null;
+            return { name: pl.full_name ?? id, position: pl.position, dynastyValue: dynastyValueForPlayer(id) };
+          })
+          .filter((pl): pl is NonNullable<typeof pl> => pl !== null)
+          .sort((a, b) => b.dynastyValue - a.dynastyValue)
+          .slice(0, 5);
         return {
           ownerName: userMap[r.owner_id ?? ""] ?? "Unknown",
           bucket: p.bucket,
           motivation: isSeller ? "Sell aging assets" : isBuyer ? "Buy for future" : "Neutral",
           strongestPos,
+          weakPositions,
           isSeller,
           isBuyer,
+          topPlayers,
         };
       })
       .filter((tp): tp is NonNullable<typeof tp> => tp !== null)
-      .slice(0, 6);
+      .slice(0, 8);
+
+    const rosterPositions: string[] = league.roster_positions ?? [];
+    const isSuperflex = rosterPositions.includes("SUPER_FLEX");
+
+    // Summarise starting lineup slots so Claude knows what positions are required.
+    const starterSlotCounts: Record<string, number> = {};
+    for (const pos of rosterPositions) {
+      if (pos === "BN") continue;
+      starterSlotCounts[pos] = (starterSlotCounts[pos] ?? 0) + 1;
+    }
+
+    // Pick inventory broken down by year and round.
+    const myPicks = leaguePicks.filter((p) => p.owner_id === myRoster.roster_id);
+    const picksByYear: Record<string, string[]> = {};
+    for (const pick of myPicks) {
+      const yr = pick.season ?? "unknown";
+      if (!picksByYear[yr]) picksByYear[yr] = [];
+      picksByYear[yr].push(`R${pick.round}`);
+    }
+    const pickInventory = Object.entries(picksByYear)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([yr, rounds]) => {
+        const sorted = [...rounds].sort();
+        return `${yr}: ${sorted.join(", ")}`;
+      });
+
+    // Filter live news to headlines mentioning any player on this roster.
+    const rosterNames = new Set(
+      rosterPlayers.map((p) => p.name.toLowerCase())
+    );
+    const filteredNews = recentNews
+      .filter((n) =>
+        n.playerNames?.some((name) => rosterNames.has(name.toLowerCase())) ||
+        rosterPlayers.some((p) => n.title.toLowerCase().includes(p.name.toLowerCase().split(" ").pop() ?? ""))
+      )
+      .slice(0, 8)
+      .map((n) => n.title);
+
+    // Scoring highlights — extract the most strategically relevant settings.
+    const scoring = league.scoring_settings ?? {};
+    const pprLevel = (scoring["rec"] ?? 0) as number;
+    const tepBonus = (scoring["bonus_rec_te"] ?? scoring["rec_te"] ?? 0) as number;
+    const scoringHighlights = [
+      pprLevel === 1 ? "Full PPR" : pprLevel === 0.5 ? "Half PPR" : pprLevel === 0 ? "Standard (0 PPR)" : `${pprLevel} PPR`,
+      tepBonus > 0 ? `TE premium (+${tepBonus}/rec)` : null,
+      (scoring["pass_td"] ?? 4) !== 4 ? `${scoring["pass_td"]} pts/pass TD` : null,
+      (scoring["bonus_rush_rec_yd"] ?? 0) > 0 ? "Milestone yardage bonuses" : null,
+    ].filter(Boolean).join(", ");
+
+    const titleOdds = cachedRow?.title_odds ?? 0;
+    const finishRange = cachedRow?.finish_range ?? "";
 
     const context = {
       leagueName: league.name,
       leagueSize: leagueRosters.filter((r) => r.owner_id).length,
+      isSuperflex,
+      rosterPositions,
+      starterSlotCounts,
+      pickInventory,
+      currentYear: new Date().getFullYear(),
+      scoringHighlights,
+      recentNews: filteredNews,
       myTeam: {
         wins: myRoster.settings?.wins ?? 0,
         losses: myRoster.settings?.losses ?? 0,
@@ -4445,6 +4535,8 @@ const getTeamSummary = () => {
         futureFirsts: adjProfile.futureFirsts,
         pickTotal: adjProfile.pickTotal,
         playoffOdds,
+        titleOdds,
+        finishRange,
         positionRanks: adjProfile.positionRanks ?? [],
         actions: adjProfile.actions ?? [],
       },
@@ -4466,6 +4558,7 @@ const getTeamSummary = () => {
 
     if (!res.ok) {
       const errBody = await res.text().catch(() => "(no body)");
+      console.error("[gm-briefing] API error", res.status, errBody);
       log.error("gm-briefing API error", { status: res.status, body: errBody });
       return;
     }
