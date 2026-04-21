@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import type { Prospect, ProspectWithStats } from "../../../lib/types";
 
@@ -19,6 +19,8 @@ export interface WRHubProps {
   onDataChanged: () => void;
   draftYearFilter: number | null;
   setDraftYearFilter: (y: number | null) => void;
+  navigateToProspect?: Prospect | null;
+  onNavigated?: () => void;
 }
 
 type HubView = "list" | "roster";
@@ -30,8 +32,17 @@ export default function WRHub({
   onDataChanged,
   draftYearFilter,
   setDraftYearFilter,
+  navigateToProspect,
+  onNavigated,
 }: WRHubProps) {
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
+
+  useEffect(() => {
+    if (navigateToProspect) {
+      setSelectedProspect(navigateToProspect);
+      onNavigated?.();
+    }
+  }, [navigateToProspect, onNavigated]);
   const [hubView, setHubView] = useState<HubView>("list");
 
   const wrProspects = prospectsWithStats.filter((p) => p.position === "WR");

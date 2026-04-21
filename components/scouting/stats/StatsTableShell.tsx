@@ -26,6 +26,7 @@ interface Props {
   defaultSortDir?: "asc" | "desc";
   loading?: boolean;
   draftYearFilter?: number | null;
+  onNameClick?: (id: string) => void;
 }
 
 function fmtVal(val: number | string | null, f?: ColDef["fmt"]): string {
@@ -43,7 +44,7 @@ function fmtVal(val: number | string | null, f?: ColDef["fmt"]): string {
 }
 
 export default function StatsTableShell({
-  cols, rows, defaultSortKey, defaultSortDir = "desc", loading, draftYearFilter,
+  cols, rows, defaultSortKey, defaultSortDir = "desc", loading, draftYearFilter, onNameClick,
 }: Props) {
   const firstDataCol = cols.find((c) => !c.sticky);
   const [sortKey, setSortKey] = useState(defaultSortKey ?? firstDataCol?.key ?? "");
@@ -110,13 +111,13 @@ export default function StatsTableShell({
     }
   }
 
-  // Per-column min/max for percentile coloring (from filtered rows)
+  // Per-column min/max for span calculation — always from ALL rows so span is stable
   const colRange = useMemo(() => {
     const r: Record<string, { min: number; max: number }> = {};
     for (const c of cols) {
       if (!c.colorDir) continue;
       let min = Infinity, max = -Infinity;
-      for (const row of filtered) {
+      for (const row of rows) {
         const v = row[c.key];
         if (typeof v === "number" && !isNaN(v)) {
           if (v < min) min = v;
@@ -126,8 +127,7 @@ export default function StatsTableShell({
       if (min !== Infinity) r[c.key] = { min, max };
     }
     return r;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cols, filtered]);
+  }, [cols, rows]);
 
   // League totals/averages — always computed from ALL rows (true league baseline)
   const leagueTotals = useMemo(() => {
@@ -150,13 +150,14 @@ export default function StatsTableShell({
   function cellColor(c: ColDef, val: number | string | null): string {
     if (!c.colorDir || typeof val !== "number" || isNaN(val)) return "";
     const range = colRange[c.key];
-    if (!range || range.max === range.min) return "";
-    const p = (val - range.min) / (range.max - range.min);
-    const score = c.colorDir === 1 ? p : 1 - p;
-    if (score >= 0.75) return "text-green-400";
-    if (score >= 0.55) return "text-emerald-300";
-    if (score <= 0.25) return "text-red-400";
-    if (score <= 0.45) return "text-red-300";
+    const avg = leagueTotals[c.key];
+    if (!range || range.max === range.min || typeof avg !== "number") return "";
+    const span = range.max - range.min;
+    const delta = ((val - avg) / span) * c.colorDir;
+    if (delta >= 0.2) return "text-green-400";
+    if (delta >= 0.05) return "text-emerald-300";
+    if (delta <= -0.2) return "text-red-400";
+    if (delta <= -0.05) return "text-red-300";
     return "text-gray-200";
   }
 
@@ -285,7 +286,14 @@ export default function StatsTableShell({
                         groupSepClass(c.key),
                       ].join(" ")}
                     >
-                      {display}
+                      {c.sticky && onNameClick ? (
+                        <button
+                          onClick={() => onNameClick(row.id)}
+                          className="text-left hover:text-blue-400 transition-colors"
+                        >
+                          {display}
+                        </button>
+                      ) : display}
                     </td>
                   );
                 })}

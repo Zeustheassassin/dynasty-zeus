@@ -9,6 +9,7 @@ interface Props {
   qbPlays: QBPlay[];
   loading?: boolean;
   draftYearFilter?: number | null;
+  onSelectProspect?: (p: Prospect) => void;
 }
 
 const DEPTH_ZONES: QBDepthZone[] = [
@@ -84,7 +85,8 @@ function onTgtPct(plays: QBPlay[]): number | null {
   return pct(rated.filter((p) => p.accuracy === "on_target").length, rated.length);
 }
 
-export default function QBStatsTable({ prospects, games, qbPlays, loading, draftYearFilter }: Props) {
+export default function QBStatsTable({ prospects, games, qbPlays, loading, draftYearFilter, onSelectProspect }: Props) {
+  const prospectMap = useMemo(() => new Map(prospects.map((p) => [p.id, p])), [prospects]);
   const rows = useMemo((): StatRow[] => {
     const gameToProspect = new Map<string, string>();
     for (const g of games) gameToProspect.set(g.id, g.prospect_id);
@@ -220,6 +222,7 @@ export default function QBStatsTable({ prospects, games, qbPlays, loading, draft
       defaultSortDir="desc"
       loading={loading}
       draftYearFilter={draftYearFilter}
+      onNameClick={onSelectProspect ? (id) => { const p = prospectMap.get(id); if (p) onSelectProspect(p); } : undefined}
     />
   );
 }

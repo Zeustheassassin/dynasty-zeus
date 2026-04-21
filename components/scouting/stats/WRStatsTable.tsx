@@ -1,12 +1,13 @@
 "use client";
 import { useMemo } from "react";
 import StatsTableShell, { StatRow, ColDef } from "./StatsTableShell";
-import type { ProspectWithStats } from "../../../lib/types";
+import type { Prospect, ProspectWithStats } from "../../../lib/types";
 
 interface Props {
   prospectsWithStats: ProspectWithStats[];
   loading?: boolean;
   draftYearFilter?: number | null;
+  onSelectProspect?: (p: Prospect) => void;
 }
 
 const ROUTE_LABELS: Record<string, string> = {
@@ -82,7 +83,8 @@ function cvgOpenPct(p: ProspectWithStats, cvg: "man" | "zone" | "double" | "pres
   return parseFloat(((s.open / s.count) * 100).toFixed(1));
 }
 
-export default function WRStatsTable({ prospectsWithStats, loading, draftYearFilter }: Props) {
+export default function WRStatsTable({ prospectsWithStats, loading, draftYearFilter, onSelectProspect }: Props) {
+  const prospectMap = useMemo(() => new Map(prospectsWithStats.map((p) => [p.id, p])), [prospectsWithStats]);
   const rows = useMemo((): StatRow[] =>
     prospectsWithStats
       .filter((p) => p.position === "WR")
@@ -150,6 +152,7 @@ export default function WRStatsTable({ prospectsWithStats, loading, draftYearFil
       defaultSortDir="desc"
       loading={loading}
       draftYearFilter={draftYearFilter}
+      onNameClick={onSelectProspect ? (id) => { const p = prospectMap.get(id); if (p) onSelectProspect(p); } : undefined}
     />
   );
 }

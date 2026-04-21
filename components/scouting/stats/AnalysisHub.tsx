@@ -20,6 +20,7 @@ interface Props {
   loading: boolean;
   draftYearFilter: number | null;
   setDraftYearFilter: (y: number | null) => void;
+  onSelectProspect?: (p: Prospect) => void;
 }
 
 const POSITION_DESCRIPTIONS: Record<PositionTab, string> = {
@@ -29,7 +30,7 @@ const POSITION_DESCRIPTIONS: Record<PositionTab, string> = {
   TE: "TE-SAE · Open% by positioning, location & coverage · Blocking success",
 };
 
-export default function AnalysisHub({ prospects, prospectsWithStats, games, rbPlays, qbPlays, tePlays, loading, draftYearFilter, setDraftYearFilter }: Props) {
+export default function AnalysisHub({ prospects, prospectsWithStats, games, rbPlays, qbPlays, tePlays, loading, draftYearFilter, setDraftYearFilter, onSelectProspect }: Props) {
   const [posTab, setPosTab] = useState<PositionTab>("WR");
 
   const DRAFT_YEARS = [2026, 2027];
@@ -92,6 +93,7 @@ export default function AnalysisHub({ prospects, prospectsWithStats, games, rbPl
           prospectsWithStats={prospectsWithStats}
           loading={loading}
           draftYearFilter={draftYearFilter}
+          onSelectProspect={onSelectProspect}
         />
       )}
       {posTab === "RB" && (
@@ -101,6 +103,7 @@ export default function AnalysisHub({ prospects, prospectsWithStats, games, rbPl
           rbPlays={rbPlays}
           loading={loading}
           draftYearFilter={draftYearFilter}
+          onSelectProspect={onSelectProspect}
         />
       )}
       {posTab === "QB" && (
@@ -110,6 +113,7 @@ export default function AnalysisHub({ prospects, prospectsWithStats, games, rbPl
           qbPlays={qbPlays}
           loading={loading}
           draftYearFilter={draftYearFilter}
+          onSelectProspect={onSelectProspect}
         />
       )}
       {posTab === "TE" && (
@@ -119,6 +123,7 @@ export default function AnalysisHub({ prospects, prospectsWithStats, games, rbPl
           tePlays={tePlays}
           loading={loading}
           draftYearFilter={draftYearFilter}
+          onSelectProspect={onSelectProspect}
         />
       )}
     </div>

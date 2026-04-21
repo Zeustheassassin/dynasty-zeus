@@ -86,8 +86,6 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
   const [savingBio, setSavingBio] = useState(false);
 
   // Notes summary
-  const [notesSummary, setNotesSummary] = useState<string | null>(null);
-  const [loadingNotesSummary, setLoadingNotesSummary] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -139,7 +137,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
       charting_notes: prospect.charting_notes,
       draft_round: prospect.draft_round, draft_pick: prospect.draft_pick, draft_team: prospect.draft_team,
     });
-    setNotesSummary(null);
+
   }, [prospect.id, load, prospect.height, prospect.weight, prospect.birthday,
     prospect.draft_class_year, prospect.personal_rank,
     prospect.should_play, prospect.will_play_pre, prospect.will_play_post,
@@ -459,23 +457,6 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
     onDataChanged();
   }
 
-  async function generateNotesSummary() {
-    const notes = plays.map((p) => p.play_notes).filter((n) => n && n.trim());
-    if (notes.length === 0) return;
-    setLoadingNotesSummary(true);
-    try {
-      const res = await fetch("/api/scouting/notes-summary", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ notes, totalPlays: plays.length, position: prospect.position }),
-      });
-      const { summary, error } = await res.json() as { summary?: string; error?: string };
-      setNotesSummary(summary ?? error ?? "Failed to generate summary.");
-    } catch {
-      setNotesSummary("Failed to generate summary.");
-    }
-    setLoadingNotesSummary(false);
-  }
 
   const tabs: { key: BoardTab; label: string }[] = [
     { key: "overview", label: "Overview" },
@@ -765,11 +746,16 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
               {/* Alignment breakdown */}
               {(() => {
                 const pws = allProspects.find((p) => p.id === prospect.id);
-                const openRows: { label: string; total: number | null; onLine: number | null; offLine: number | null }[] = [
-                  { label: "Slot",      total: pws?.open_pct_slot  ?? null, onLine: pws?.open_pct_slot_on_line  ?? null, offLine: pws?.open_pct_slot_off_line  ?? null },
-                  { label: "Right",     total: pws?.open_pct_right ?? null, onLine: pws?.open_pct_right_on_line ?? null, offLine: pws?.open_pct_right_off_line ?? null },
-                  { label: "Left",      total: pws?.open_pct_left  ?? null, onLine: pws?.open_pct_left_on_line  ?? null, offLine: pws?.open_pct_left_off_line  ?? null },
-                  { label: "Backfield", total: pws?.open_pct_backfield ?? null, onLine: null, offLine: null },
+                const chartedPlays = plays.filter((p) => !p.no_route_run);
+                function alignCounts(al: string, lineFilter?: boolean) {
+                  const subset = chartedPlays.filter((p) => p.alignment === al && (lineFilter === undefined || p.on_line === lineFilter));
+                  return { routes: subset.length, open: subset.filter((p) => p.was_open).length };
+                }
+                const openRows = [
+                  { label: "Slot",      bfOnly: false, total: pws?.open_pct_slot  ?? null, onLinePct: pws?.open_pct_slot_on_line  ?? null, offLinePct: pws?.open_pct_slot_off_line  ?? null, onLine: alignCounts("slot", true),  offLine: alignCounts("slot", false),  all: alignCounts("slot")  },
+                  { label: "Right",     bfOnly: false, total: pws?.open_pct_right ?? null, onLinePct: pws?.open_pct_right_on_line ?? null, offLinePct: pws?.open_pct_right_off_line ?? null, onLine: alignCounts("right", true), offLine: alignCounts("right", false), all: alignCounts("right") },
+                  { label: "Left",      bfOnly: false, total: pws?.open_pct_left  ?? null, onLinePct: pws?.open_pct_left_on_line  ?? null, offLinePct: pws?.open_pct_left_off_line  ?? null, onLine: alignCounts("left", true),  offLine: alignCounts("left", false),  all: alignCounts("left")  },
+                  { label: "Backfield", bfOnly: true,  total: pws?.open_pct_backfield ?? null, onLinePct: null, offLinePct: null,                                                              onLine: { routes: 0, open: 0 },    offLine: { routes: 0, open: 0 },      all: alignCounts("backfield") },
                 ];
                 const hasAnyOpen = openRows.some((r) => r.total !== null);
                 return (
@@ -799,33 +785,41 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                     </div>
                     {hasAnyOpen && (
                       <div className="mt-4 border-t border-gray-800 pt-3">
-                        <div className="text-xs text-gray-500 mb-2">Open% by Alignment <span className="text-gray-700">(charted plays only)</span></div>
-                        <table className="w-full text-xs">
-                          <thead>
-                            <tr className="text-gray-600">
-                              <th className="text-left pb-1.5 font-medium">Alignment</th>
-                              <th className="text-right pb-1.5 font-medium">Total</th>
-                              <th className="text-right pb-1.5 font-medium">On Line</th>
-                              <th className="text-right pb-1.5 font-medium">Off Line</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-800">
-                            {openRows.map((r) => (
-                              <tr key={r.label}>
-                                <td className="py-1.5 text-gray-400">{r.label}</td>
-                                <td className="py-1.5 text-right font-semibold" style={{ color: r.total !== null ? (r.total >= 55 ? "#4ade80" : r.total >= 40 ? "#facc15" : "#f87171") : "#4b5563" }}>
-                                  {r.total !== null ? `${r.total}%` : "—"}
-                                </td>
-                                <td className="py-1.5 text-right text-gray-400">
-                                  {r.onLine !== null ? `${r.onLine}%` : "—"}
-                                </td>
-                                <td className="py-1.5 text-right text-gray-400">
-                                  {r.offLine !== null ? `${r.offLine}%` : "—"}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                        <div className="text-xs text-gray-500 mb-3">Open% by Alignment <span className="text-gray-700">(charted plays only)</span></div>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                          {openRows.map((r) => (
+                            <div key={r.label} className="p-3 bg-gray-800/50 rounded-lg">
+                              <div className="text-xs text-orange-400 font-medium mb-2">{r.label}</div>
+                              <div className="space-y-1 text-xs">
+                                {r.bfOnly ? (
+                                  <>
+                                    <div className="flex justify-between"><span className="text-gray-500">Routes</span><span className="text-gray-300">{r.all.routes || "—"}</span></div>
+                                    <div className="flex justify-between"><span className="text-gray-500">Times Open</span><span className="text-green-300">{r.all.open || "—"}</span></div>
+                                    <div className="flex justify-between border-t border-gray-700 pt-1">
+                                      <span className="text-gray-500">Open%</span>
+                                      <span className={`font-medium ${r.total !== null ? (r.total >= 55 ? "text-green-400" : r.total >= 40 ? "text-yellow-400" : "text-red-400") : "text-gray-600"}`}>{r.total !== null ? `${r.total}%` : "—"}</span>
+                                    </div>
+                                  </>
+                                ) : (
+                                  <>
+                                    <div className="flex justify-between"><span className="text-gray-400 font-medium">On Line Routes</span><span className="text-gray-300">{r.onLine.routes || "—"}</span></div>
+                                    <div className="flex justify-between"><span className="text-gray-500">Times Open</span><span className="text-green-300">{r.onLine.open || "—"}</span></div>
+                                    <div className="flex justify-between border-t border-gray-700 pt-1 mb-2">
+                                      <span className="text-gray-500">Open%</span>
+                                      <span className={`font-medium ${r.onLinePct !== null ? (r.onLinePct >= 55 ? "text-green-400" : r.onLinePct >= 40 ? "text-yellow-400" : "text-red-400") : "text-gray-600"}`}>{r.onLinePct !== null ? `${r.onLinePct}%` : "—"}</span>
+                                    </div>
+                                    <div className="flex justify-between"><span className="text-gray-400 font-medium">Off Line Routes</span><span className="text-gray-300">{r.offLine.routes || "—"}</span></div>
+                                    <div className="flex justify-between"><span className="text-gray-500">Times Open</span><span className="text-green-300">{r.offLine.open || "—"}</span></div>
+                                    <div className="flex justify-between border-t border-gray-700 pt-1">
+                                      <span className="text-gray-500">Open%</span>
+                                      <span className={`font-medium ${r.offLinePct !== null ? (r.offLinePct >= 55 ? "text-green-400" : r.offLinePct >= 40 ? "text-yellow-400" : "text-red-400") : "text-gray-600"}`}>{r.offLinePct !== null ? `${r.offLinePct}%` : "—"}</span>
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -844,30 +838,6 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                       </div>
                     ))}
                   </div>
-                </div>
-              )}
-
-              {/* Play Notes AI Summary */}
-              {plays.some((p) => p.play_notes?.trim()) && (
-                <div className="p-4 bg-gray-900 rounded-lg border border-gray-800">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-sm font-medium text-white">Play Notes Summary</span>
-                    <button
-                      onClick={generateNotesSummary}
-                      disabled={loadingNotesSummary}
-                      className="px-3 py-1.5 bg-blue-700 hover:bg-blue-600 disabled:opacity-50 text-white text-xs rounded transition"
-                    >
-                      {loadingNotesSummary ? "Analyzing…" : notesSummary ? "Regenerate" : "Generate Summary"}
-                    </button>
-                  </div>
-                  {notesSummary ? (
-                    <p className="text-sm text-gray-300 leading-relaxed">{notesSummary}</p>
-                  ) : (
-                    <p className="text-xs text-gray-600">
-                      {plays.filter((p) => p.play_notes?.trim()).length} of {plays.length} routes have notes.
-                      Click Generate to analyze patterns with AI.
-                    </p>
-                  )}
                 </div>
               )}
 

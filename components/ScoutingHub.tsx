@@ -29,6 +29,7 @@ type PositionTab = "WR" | "RB" | "QB" | "TE";
 export default function ScoutingHub() {
   const [tab, setTab] = useState<HubTab>("prospects");
   const [positionTab, setPositionTab] = useState<PositionTab>("WR");
+  const [pendingProspect, setPendingProspect] = useState<Prospect | null>(null);
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [games, setGames] = useState<ScoutingGame[]>([]);
   const [plays, setPlays] = useState<RoutePlay[]>([]);
@@ -357,8 +358,33 @@ export default function ScoutingHub() {
 
   const positionTabs: PositionTab[] = ["QB", "RB", "WR", "TE"];
 
-  const charted = prospectsWithStats.filter((p) => p.total_routes > 0).length;
-  const pending = prospectsWithStats.filter((p) => p.charting_decision === "pending").length;
+  const POSITIONS: PositionTab[] = ["QB", "RB", "WR", "TE"];
+
+  const headerBreakdown = useMemo(() => {
+    const playCountsByGame: Record<string, number> = {};
+    const allPlays = [...plays, ...rbPlays, ...qbPlays, ...tePlays];
+    for (const pl of allPlays) {
+      playCountsByGame[pl.game_id] = (playCountsByGame[pl.game_id] ?? 0) + 1;
+    }
+    const years = [...new Set(prospectsWithStats.map((p) => p.draft_class_year))].sort();
+    return years.map((year) => ({
+      year,
+      positions: POSITIONS.map((pos) => {
+        const group = prospectsWithStats.filter((p) => p.draft_class_year === year && p.position === pos);
+        const groupIds = new Set(group.map((p) => p.id));
+        const groupGames = games.filter((g) => groupIds.has(g.prospect_id));
+        const snaps = groupGames.reduce((s, g) => s + (playCountsByGame[g.id] ?? 0), 0);
+        return {
+          pos,
+          prospects: group.length,
+          charted: group.filter((p) => p.total_games > 0).length,
+          pending: group.filter((p) => p.charting_decision === "pending").length,
+          games: groupGames.length,
+          snaps,
+        };
+      }).filter((r) => r.prospects > 0),
+    }));
+  }, [prospectsWithStats, games, plays, rbPlays, qbPlays, tePlays]);
 
   // Shared props for all position hubs
   const hubProps = {
@@ -368,6 +394,8 @@ export default function ScoutingHub() {
     onDataChanged: loadAll,
     draftYearFilter,
     setDraftYearFilter,
+    navigateToProspect: pendingProspect,
+    onNavigated: () => setPendingProspect(null),
   };
 
   return (
@@ -378,12 +406,27 @@ export default function ScoutingHub() {
           <div className="flex items-start justify-between flex-wrap gap-2">
             <div>
               <h1 className="text-2xl font-bold text-white">Scouting Hub</h1>
-              <p className="text-sm text-gray-400 mt-0.5">
-                {prospectsWithStats.length} prospects ·{" "}
-                <span className="text-green-400">{charted} charted</span> ·{" "}
-                <span className="text-yellow-400">{pending} pending</span> ·{" "}
-                {games.length} games · {plays.length} snaps logged
-              </p>
+              <div className="mt-1.5 space-y-1">
+                {headerBreakdown.map(({ year, positions }) => (
+                  <div key={year} className="flex flex-wrap items-baseline gap-x-4 gap-y-0.5 text-xs">
+                    <span className="text-blue-400 font-semibold w-10 shrink-0">{year}</span>
+                    {positions.map((r) => (
+                      <span key={r.pos} className="text-gray-400">
+                        <span className="text-gray-300 font-medium">{r.pos}</span>
+                        {": "}
+                        {r.prospects} prospects
+                        {" · "}
+                        <span className="text-green-400">{r.charted} charted</span>
+                        {r.pending > 0 && <> · <span className="text-yellow-400">{r.pending} pending</span></>}
+                        {" · "}
+                        {r.games} games
+                        {" · "}
+                        {r.snaps.toLocaleString()} snaps
+                      </span>
+                    ))}
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
 
@@ -467,6 +510,11 @@ export default function ScoutingHub() {
             loading={loading}
             draftYearFilter={draftYearFilter}
             setDraftYearFilter={setDraftYearFilter}
+            onSelectProspect={(p) => {
+              setPendingProspect(p);
+              setPositionTab(p.position as PositionTab);
+              setTab("prospects");
+            }}
           />
         )}
       </div>

@@ -9,6 +9,7 @@ interface Props {
   rbPlays: RBPlay[];
   loading?: boolean;
   draftYearFilter?: number | null;
+  onSelectProspect?: (p: Prospect) => void;
 }
 
 const RUN_TYPES: RBRunType[] = ["outside_zone", "inside_zone", "outside_man_gap", "inside_man_gap"];
@@ -78,7 +79,8 @@ function pct(n: number, d: number): number | null {
   return parseFloat(((n / d) * 100).toFixed(1));
 }
 
-export default function RBStatsTable({ prospects, games, rbPlays, loading, draftYearFilter }: Props) {
+export default function RBStatsTable({ prospects, games, rbPlays, loading, draftYearFilter, onSelectProspect }: Props) {
+  const prospectMap = useMemo(() => new Map(prospects.map((p) => [p.id, p])), [prospects]);
   const rows = useMemo((): StatRow[] => {
     // Build game → prospect map
     const gameToProspect = new Map<string, string>();
@@ -212,6 +214,7 @@ export default function RBStatsTable({ prospects, games, rbPlays, loading, draft
       defaultSortDir="desc"
       loading={loading}
       draftYearFilter={draftYearFilter}
+      onNameClick={onSelectProspect ? (id) => { const p = prospectMap.get(id); if (p) onSelectProspect(p); } : undefined}
     />
   );
 }

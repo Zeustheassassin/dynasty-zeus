@@ -1,5 +1,5 @@
 "use client";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { supabase } from "../../../lib/supabaseclient";
 import type { Prospect, ProspectWithStats, ChartingDecision } from "../../../lib/types";
@@ -24,6 +24,8 @@ export interface QBHubProps {
   onDataChanged: () => void;
   draftYearFilter: number | null;
   setDraftYearFilter: (y: number | null) => void;
+  navigateToProspect?: Prospect | null;
+  onNavigated?: () => void;
 }
 
 type HubView = "list" | "roster";
@@ -36,8 +38,17 @@ export default function QBHub({
   onDataChanged,
   draftYearFilter,
   setDraftYearFilter,
+  navigateToProspect,
+  onNavigated,
 }: QBHubProps) {
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
+
+  useEffect(() => {
+    if (navigateToProspect) {
+      setSelectedProspect(navigateToProspect);
+      onNavigated?.();
+    }
+  }, [navigateToProspect, onNavigated]);
   const [hubView, setHubView]   = useState<HubView>("list");
   const [sortKey, setSortKey]   = useState<SortKey>("personal_rank");
   const [sortDir, setSortDir]   = useState<"asc" | "desc">("asc");

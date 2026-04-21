@@ -9,6 +9,7 @@ interface Props {
   tePlays: TEPlay[];
   loading?: boolean;
   draftYearFilter?: number | null;
+  onSelectProspect?: (p: Prospect) => void;
 }
 
 const POSITIONINGS: TEPositioning[] = ["wide", "slot", "inline", "full_back", "running_back"];
@@ -101,7 +102,8 @@ function blkSuccPct(plays: TEPlay[], filter: (p: TEPlay) => boolean): number | n
   return pct(sub.filter((p) => p.block_success === true).length, sub.length);
 }
 
-export default function TEStatsTable({ prospects, games, tePlays, loading, draftYearFilter }: Props) {
+export default function TEStatsTable({ prospects, games, tePlays, loading, draftYearFilter, onSelectProspect }: Props) {
+  const prospectMap = useMemo(() => new Map(prospects.map((p) => [p.id, p])), [prospects]);
   const rows = useMemo((): StatRow[] => {
     const gameToProspect = new Map<string, string>();
     for (const g of games) gameToProspect.set(g.id, g.prospect_id);
@@ -238,6 +240,7 @@ export default function TEStatsTable({ prospects, games, tePlays, loading, draft
       defaultSortDir="desc"
       loading={loading}
       draftYearFilter={draftYearFilter}
+      onNameClick={onSelectProspect ? (id) => { const p = prospectMap.get(id); if (p) onSelectProspect(p); } : undefined}
     />
   );
 }
