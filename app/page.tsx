@@ -1261,7 +1261,7 @@ const loadOwnerTendencies = async () => {
   // -------------------------
 // LOAD LEAGUE 
 // -------------------------
-const loadRoster = async (league: SleeperLeague) => {
+const loadRoster = useCallback(async (league: SleeperLeague) => {
 
   // ── Save recent league ───────────────────────────────────────────────────
   const stored = localStorage.getItem("recentLeagues");
@@ -1417,7 +1417,7 @@ const loadRoster = async (league: SleeperLeague) => {
       )
   );
   setReadyLeagueId(league.league_id);
-};
+}, [user, players]);
 
 const refreshFcTrends = async () => {
   setLoadingFcTrends(true);

@@ -126,6 +126,7 @@ export default function BulkGameImport({ gameLabel, onImport, onCancel }: Props)
     const valid = plays.filter((p) => p.valid);
     if (!valid.length) return;
     setImporting(true);
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     await onImport(valid.map(({ valid: _v, raw: _r, error: _e, ...rest }) => rest));
     setImporting(false);
     setDone(true);

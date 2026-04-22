@@ -81,7 +81,6 @@ function GamedayHub({
   loadProjections,
   setPlayerProfileId,
   shares,
-  totalLeagues: _totalLeagues,
   loadingShares,
   shareSearch,
   setShareSearch,

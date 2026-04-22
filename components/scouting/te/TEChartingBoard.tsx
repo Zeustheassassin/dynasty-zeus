@@ -143,7 +143,8 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged }: Pro
   }, [prospect.id, load, prospect.height, prospect.weight, prospect.birthday,
     prospect.draft_class_year, prospect.personal_rank,
     prospect.should_play, prospect.will_play_pre, prospect.will_play_post,
-    prospect.charting_decision, prospect.charting_notes]);
+    prospect.charting_decision, prospect.charting_notes,
+    prospect.draft_round, prospect.draft_pick, prospect.draft_team]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect

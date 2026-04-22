@@ -152,7 +152,7 @@ function DataHub({
   leagueMateStats, setLeagueMateStats, leagueMateStatsLoaded, setLeagueMateStatsLoaded,
   loadingLeagueMateStats, setLoadingLeagueMateStats,
   leagueMateSearch, setLeagueMateSearch, leagueMateSort, setLeagueMateSort,
-  loadUserExposure, selectedUserId: _selectedUserId, externalShares, loadingShares,
+  loadUserExposure, externalShares, loadingShares,
   historicalSnapshot, onSaveSnapshot,
 }: DataHubProps) {
   const players = usePlayers();

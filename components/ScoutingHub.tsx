@@ -26,6 +26,8 @@ const AnalysisHub = dynamic(() => import("./scouting/stats/AnalysisHub"), { ssr:
 type HubTab = "prospects" | "big_board" | "games_log" | "analysis";
 type PositionTab = "WR" | "RB" | "QB" | "TE";
 
+const POSITIONS: PositionTab[] = ["QB", "RB", "WR", "TE"];
+
 export default function ScoutingHub() {
   const [tab, setTab] = useState<HubTab>("prospects");
   const [positionTab, setPositionTab] = useState<PositionTab>("WR");
@@ -357,8 +359,6 @@ export default function ScoutingHub() {
   ];
 
   const positionTabs: PositionTab[] = ["QB", "RB", "WR", "TE"];
-
-  const POSITIONS: PositionTab[] = ["QB", "RB", "WR", "TE"];
 
   const headerBreakdown = useMemo(() => {
     const playCountsByGame: Record<string, number> = {};

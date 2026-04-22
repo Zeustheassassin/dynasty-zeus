@@ -238,7 +238,7 @@ export default function BigBoard({
   const tdBase = "px-1.5 py-1.5 text-center whitespace-nowrap text-xs";
 
   // Shared sticky row cells (drag handle + rank + name)
-  function stickyRowCells(p: ProspectWithStats, _i: number) {
+  function stickyRowCells(p: ProspectWithStats) {
     const isSaving = savingRankId === p.id;
     const rank = rankField(p);
     return (

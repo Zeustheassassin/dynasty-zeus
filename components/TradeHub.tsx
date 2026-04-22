@@ -182,7 +182,7 @@ const ordinalSuffix = (n: number): string => {
 // ── Component ──────────────────────────────────────────────────────────────
 function TradeHub({
   tradeHubSection, setTradeHubSection,
-  leagues: _leagues, user, allPicks,
+  user, allPicks,
   calcOpponentRosterId, setCalcOpponentRosterId,
   calcGive, setCalcGive, calcReceive, setCalcReceive,
   calcGivePicks, setCalcGivePicks, calcReceivePicks, setCalcReceivePicks,
@@ -194,7 +194,7 @@ function TradeHub({
   loadingCalcValues, calcSearchA, setCalcSearchA, calcSearchB, setCalcSearchB,
   playerDispositions, leaguePlayerTags, onToggleLeaguePlayerTag, projectionData,
   leagueMateProfileByRosterId, selectedLeagueMateProfilesView,
-  tradeRecommendationCards: _tradeRecommendationCards, tradePartnerRankings,
+  tradePartnerRankings,
   setPlayerProfileId, loadUserExposure, loadUserTrades,
   historicalSnapshot,
   tradeHubData, loadingTradeHub, tradeHubUserId,
@@ -216,7 +216,6 @@ function TradeHub({
     leagueAdjustedFcValues: calcFcValues,
     leagueAdjustedRedraftValues: redraftValues,
     pickFcValues,
-    selectedLeagueDirection: _selectedLeagueDirection,
     selectedLeagueDirectionAdjusted,
     selectedLeagueSimulation,
     selectedLeagueDynamicPickValues,
