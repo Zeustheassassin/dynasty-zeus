@@ -19,7 +19,7 @@ const GQL_QUERY = `
 `;
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const rl = checkRateLimit(req, 20, 60_000, 'numberfire');
+  const rl = await checkRateLimit(req, 20, 60_000, 'numberfire');
   if (!rl.allowed) return rl.response;
 
   const { searchParams } = new URL(req.url);

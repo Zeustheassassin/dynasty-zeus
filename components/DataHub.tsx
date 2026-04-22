@@ -1,9 +1,11 @@
 "use client";
 import React from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { usePlayers } from "../lib/PlayersContext";
 import { useLeague } from "../lib/LeagueContext";
+import { useValues } from "../lib/ValuesContext";
 import type {
-  SleeperLeague, SleeperUser, SleeperPlayer, AugmentedPick, ProjectionRow, LeagueMateStatEntry, DynamicPickValue, HistoricalSnapshot, PlayerValueSnapshotEntry,
+  SleeperLeague, SleeperUser, SleeperPlayer, AugmentedPick, ProjectionRow, LeagueMateStatEntry, HistoricalSnapshot, PlayerValueSnapshotEntry,
 } from "../lib/types";
 
 // ── Module-level constants (mirrors page.tsx) ──────────────────────────────
@@ -53,14 +55,12 @@ interface DataHubProps {
   shares: Record<string, ShareEntry>;
 
   // Dynasty/Redraft rankings
-  calcFcValues: Record<string, number>;
   dynastyRankPos: string;
   setDynastyRankPos: (pos: string) => void;
   loadingCalcValues: boolean;
   playerDispositions: Record<string, { sell: string; buy: string }>;
   savePlayerDisposition: (playerId: string, sell: string, buy: string) => void;
   setPlayerProfileId: (id: string | null) => void;
-  redraftValues: Record<string, number>;
   loadingRedraft: boolean;
 
   // Projections tab
@@ -79,7 +79,6 @@ interface DataHubProps {
 
   // Pick values tab
   allPicks: AugmentedPick[];
-  selectedLeagueDynamicPickValues: Record<string, DynamicPickValue>;
 
   // League mate stats tab
   leagues: SleeperLeague[];
@@ -142,13 +141,13 @@ const ageColor = (age: number | undefined, pos: string) => {
 function DataHub({
   dataHubTab, setDataHubTab,
   shares,
-  calcFcValues, dynastyRankPos, setDynastyRankPos, loadingCalcValues,
+  dynastyRankPos, setDynastyRankPos, loadingCalcValues,
   playerDispositions, savePlayerDisposition, setPlayerProfileId,
-  redraftValues, loadingRedraft,
+  loadingRedraft,
   projectionData, setProjectionData, projectionPosFilter, setProjectionPosFilter,
   projectionWeek, setProjectionWeek, setProjectionLoaded, loadProjections,
   projectionSeasonYear, projectionSourceStatus, loadingProjections, projectionUsesSeasonFallback,
-  allPicks, selectedLeagueDynamicPickValues,
+  allPicks,
   leagues, user,
   leagueMateStats, setLeagueMateStats, leagueMateStatsLoaded, setLeagueMateStatsLoaded,
   loadingLeagueMateStats, setLoadingLeagueMateStats,
@@ -158,6 +157,11 @@ function DataHub({
 }: DataHubProps) {
   const players = usePlayers();
   const { selectedLeague, rosters, users } = useLeague();
+  const {
+    leagueAdjustedFcValues: calcFcValues,
+    leagueAdjustedRedraftValues: redraftValues,
+    selectedLeagueDynamicPickValues,
+  } = useValues();
 
   // ── Local UI state ─────────────────────────────────────────────────────────
   const [rankView, setRankView] = React.useState<"DYNASTY" | "REDRAFT" | "COMPARE">("DYNASTY");
@@ -266,6 +270,39 @@ function DataHub({
     }
   };
 
+  // ── Rankings virtualizer ──────────────────────────────────────────────────
+  const _fcVal = React.useCallback((id: string) => calcFcValues[id] ?? 0, [calcFcValues]);
+  const _rdVal = React.useCallback((id: string) => redraftValues[id] ?? 0, [redraftValues]);
+
+  const ranked = React.useMemo(
+    () =>
+      Object.values(players)
+        .filter((p) => ["QB", "RB", "WR", "TE"].includes(p.position))
+        .filter((p) =>
+          rankView === "REDRAFT" ? _rdVal(p.player_id) > 0 : _fcVal(p.player_id) > 0
+        )
+        .filter((p) => dynastyRankPos === "ALL" || p.position === dynastyRankPos)
+        .filter(
+          (p) =>
+            !rankSearch.trim() ||
+            p.full_name?.toLowerCase().includes(rankSearch.trim().toLowerCase())
+        )
+        .sort((a, b) =>
+          rankView === "REDRAFT"
+            ? _rdVal(b.player_id) - _rdVal(a.player_id)
+            : _fcVal(b.player_id) - _fcVal(a.player_id)
+        ),
+    [players, rankView, dynastyRankPos, rankSearch, _fcVal, _rdVal]
+  );
+
+  const ranksParentRef = React.useRef<HTMLDivElement>(null);
+  const ranksVirtualizer = useVirtualizer({
+    count: ranked.length,
+    getScrollElement: () => ranksParentRef.current,
+    estimateSize: () => 36,
+    overscan: 8,
+  });
+
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <>
@@ -298,16 +335,8 @@ function DataHub({
 
       {/* ── PLAYER RANKINGS ── */}
       {dataHubTab === "RANKINGS" && (() => {
-        const fcVal = (id: string) => calcFcValues[id] ?? 0;
-        const rdVal = (id: string) => redraftValues[id] ?? 0;
-        const ranked = Object.values(players)
-          .filter((p) => ["QB", "RB", "WR", "TE"].includes(p.position))
-          .filter((p) => rankView === "REDRAFT" ? rdVal(p.player_id) > 0 : fcVal(p.player_id) > 0)
-          .filter((p) => dynastyRankPos === "ALL" || p.position === dynastyRankPos)
-          .filter((p) => !rankSearch.trim() || p.full_name?.toLowerCase().includes(rankSearch.trim().toLowerCase()))
-          .sort((a, b) => rankView === "REDRAFT"
-            ? rdVal(b.player_id) - rdVal(a.player_id)
-            : fcVal(b.player_id) - fcVal(a.player_id));
+        const fcVal = _fcVal;
+        const rdVal = _rdVal;
 
         return (
           <>
@@ -363,79 +392,94 @@ function DataHub({
               <span className="w-20 text-center text-[10px] text-gray-600 uppercase tracking-wider shrink-0">Buy</span>
               <span className="w-4 shrink-0" />
             </div>
-            <div className="space-y-0.5">
-              {ranked.map((p, idx) => {
-                const disp = playerDispositions[p.player_id] ?? { sell: "Neutral", buy: "Neutral" };
-                const dyn = fcVal(p.player_id);
-                const red = rdVal(p.player_id);
-                const gap = dyn - red;
-                const gapPct = dyn > 0 ? (gap / dyn) * 100 : 0;
-                const displayVal = rankView === "REDRAFT" ? red : dyn;
-                const isOwned = (shares[p.player_id]?.count ?? 0) > 0;
-                // A2: trend delta — only meaningful for dynasty view against the dynasty snapshot
-                const snapDynVal = rankView === "DYNASTY" ? Number(historicalSnapshot?.players[p.player_id]?.value ?? 0) : 0;
-                const trendPct = snapDynVal > 0 && dyn > 0 ? ((dyn - snapDynVal) / snapDynVal) * 100 : null;
-                return (
-                  <div key={p.player_id} className="flex items-center gap-2 bg-gray-800/70 hover:bg-gray-800 rounded-lg px-2 py-1.5 transition">
-                    <span className="text-[10px] text-gray-600 w-5 text-right shrink-0">{idx + 1}</span>
-                    <span className={`text-[10px] font-bold w-6 shrink-0 ${POS_COLOR[p.position] ?? "text-gray-400"}`}>{p.position}</span>
-                    {/* A1: owned indicator dot */}
-                    <span className="text-xs flex-1 truncate min-w-0 flex items-center gap-1">
-                      {isOwned && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" title="On your roster" />}
-                      <span className={isOwned ? "text-blue-200" : "text-white"}>{p.full_name}</span>
-                      {injuryBadge(p.injury_status)}
-                    </span>
-                    <span className={`text-[10px] font-mono w-7 text-center shrink-0 ${ageColor(p.age ?? undefined, p.position)}`}>{p.age || "—"}</span>
-                    {rankView === "COMPARE" ? (
-                      <>
-                        <span className="text-[10px] text-gray-300 font-mono w-14 text-right shrink-0">{dyn.toLocaleString()}</span>
-                        <span className="text-[10px] text-gray-500 font-mono w-14 text-right shrink-0">{red > 0 ? red.toLocaleString() : "—"}</span>
-                        <span className={`text-[10px] font-mono w-12 text-right shrink-0 ${gapPct > 15 ? "text-green-400" : gapPct < -10 ? "text-red-400" : "text-gray-500"}`}>
-                          {red > 0 ? `${gap > 0 ? "+" : ""}${gap.toLocaleString()}` : "—"}
-                        </span>
-                      </>
-                    ) : (
-                      /* A2: show value + tiny trend delta in dynasty view */
-                      <span className="flex flex-col items-end w-14 shrink-0">
-                        <span className="text-[10px] text-gray-400 font-mono">{displayVal.toLocaleString()}</span>
-                        {trendPct !== null && (
-                          <span className={`text-[8px] font-semibold leading-none ${trendPct > 0 ? "text-green-500" : "text-red-500"}`}>
-                            {trendPct > 0 ? "+" : ""}{trendPct.toFixed(1)}%
-                          </span>
-                        )}
+            {ranked.length === 0 && !loadingCalcValues && !loadingRedraft && (
+              <p className="text-gray-400 text-sm">
+                {Object.keys(calcFcValues).length === 0 ? "Load a league to populate player values." : "No players match your filter."}
+              </p>
+            )}
+            <div
+              ref={ranksParentRef}
+              className="overflow-y-auto"
+              style={{ height: "600px" }}
+            >
+              <div style={{ height: ranksVirtualizer.getTotalSize(), position: "relative" }}>
+                {ranksVirtualizer.getVirtualItems().map((vRow) => {
+                  const p = ranked[vRow.index];
+                  const idx = vRow.index;
+                  const disp = playerDispositions[p.player_id] ?? { sell: "Neutral", buy: "Neutral" };
+                  const dyn = fcVal(p.player_id);
+                  const red = rdVal(p.player_id);
+                  const gap = dyn - red;
+                  const gapPct = dyn > 0 ? (gap / dyn) * 100 : 0;
+                  const displayVal = rankView === "REDRAFT" ? red : dyn;
+                  const isOwned = (shares[p.player_id]?.count ?? 0) > 0;
+                  const snapDynVal = rankView === "DYNASTY" ? Number(historicalSnapshot?.players[p.player_id]?.value ?? 0) : 0;
+                  const trendPct = snapDynVal > 0 && dyn > 0 ? ((dyn - snapDynVal) / snapDynVal) * 100 : null;
+                  return (
+                    <div
+                      key={p.player_id}
+                      style={{
+                        position: "absolute",
+                        top: vRow.start,
+                        left: 0,
+                        right: 0,
+                        height: vRow.size,
+                      }}
+                      className="flex items-center gap-2 bg-gray-800/70 hover:bg-gray-800 rounded-lg px-2 py-1.5 transition"
+                    >
+                      <span className="text-[10px] text-gray-600 w-5 text-right shrink-0">{idx + 1}</span>
+                      <span className={`text-[10px] font-bold w-6 shrink-0 ${POS_COLOR[p.position] ?? "text-gray-400"}`}>{p.position}</span>
+                      <span className="text-xs flex-1 truncate min-w-0 flex items-center gap-1">
+                        {isOwned && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" title="On your roster" />}
+                        <span className={isOwned ? "text-blue-200" : "text-white"}>{p.full_name}</span>
+                        {injuryBadge(p.injury_status)}
                       </span>
-                    )}
-                    <select
-                      value={disp.sell}
-                      onChange={(e) => savePlayerDisposition(p.player_id, e.target.value, disp.buy)}
-                      className={`w-20 bg-gray-900 border border-gray-700 rounded px-1 py-0.5 text-[10px] shrink-0 focus:outline-none focus:border-blue-500 ${sellColor(disp.sell)}`}
-                    >
-                      <option value="Not Willing to Trade">No Trade</option>
-                      <option value="Will Trade but Higher than Market">↑ Price</option>
-                      <option value="Neutral">Neutral</option>
-                      <option value="Lower than Market">↓ Price</option>
-                      <option value="Trade at All Costs">Must Go</option>
-                    </select>
-                    <select
-                      value={disp.buy}
-                      onChange={(e) => savePlayerDisposition(p.player_id, disp.sell, e.target.value)}
-                      className={`w-20 bg-gray-900 border border-gray-700 rounded px-1 py-0.5 text-[10px] shrink-0 focus:outline-none focus:border-blue-500 ${buyColor(disp.buy)}`}
-                    >
-                      <option value="Buy Over Market">Pay Up</option>
-                      <option value="Buy at Market">At Mkt</option>
-                      <option value="Neutral">Neutral</option>
-                      <option value="Buy Low">Buy Low</option>
-                      <option value="Zero Interest">Skip</option>
-                    </select>
-                    <button onClick={() => setPlayerProfileId(p.player_id)} className="text-gray-600 hover:text-blue-400 text-xs transition shrink-0 w-4" title="View profile">ⓘ</button>
-                  </div>
-                );
-              })}
-              {ranked.length === 0 && !loadingCalcValues && !loadingRedraft && (
-                <p className="text-gray-400 text-sm">
-                  {Object.keys(calcFcValues).length === 0 ? "Load a league to populate player values." : "No players match your filter."}
-                </p>
-              )}
+                      <span className={`text-[10px] font-mono w-7 text-center shrink-0 ${ageColor(p.age ?? undefined, p.position)}`}>{p.age || "—"}</span>
+                      {rankView === "COMPARE" ? (
+                        <>
+                          <span className="text-[10px] text-gray-300 font-mono w-14 text-right shrink-0">{dyn.toLocaleString()}</span>
+                          <span className="text-[10px] text-gray-500 font-mono w-14 text-right shrink-0">{red > 0 ? red.toLocaleString() : "—"}</span>
+                          <span className={`text-[10px] font-mono w-12 text-right shrink-0 ${gapPct > 15 ? "text-green-400" : gapPct < -10 ? "text-red-400" : "text-gray-500"}`}>
+                            {red > 0 ? `${gap > 0 ? "+" : ""}${gap.toLocaleString()}` : "—"}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="flex flex-col items-end w-14 shrink-0">
+                          <span className="text-[10px] text-gray-400 font-mono">{displayVal.toLocaleString()}</span>
+                          {trendPct !== null && (
+                            <span className={`text-[8px] font-semibold leading-none ${trendPct > 0 ? "text-green-500" : "text-red-500"}`}>
+                              {trendPct > 0 ? "+" : ""}{trendPct.toFixed(1)}%
+                            </span>
+                          )}
+                        </span>
+                      )}
+                      <select
+                        value={disp.sell}
+                        onChange={(e) => savePlayerDisposition(p.player_id, e.target.value, disp.buy)}
+                        className={`w-20 bg-gray-900 border border-gray-700 rounded px-1 py-0.5 text-[10px] shrink-0 focus:outline-none focus:border-blue-500 ${sellColor(disp.sell)}`}
+                      >
+                        <option value="Not Willing to Trade">No Trade</option>
+                        <option value="Will Trade but Higher than Market">↑ Price</option>
+                        <option value="Neutral">Neutral</option>
+                        <option value="Lower than Market">↓ Price</option>
+                        <option value="Trade at All Costs">Must Go</option>
+                      </select>
+                      <select
+                        value={disp.buy}
+                        onChange={(e) => savePlayerDisposition(p.player_id, disp.sell, e.target.value)}
+                        className={`w-20 bg-gray-900 border border-gray-700 rounded px-1 py-0.5 text-[10px] shrink-0 focus:outline-none focus:border-blue-500 ${buyColor(disp.buy)}`}
+                      >
+                        <option value="Buy Over Market">Pay Up</option>
+                        <option value="Buy at Market">At Mkt</option>
+                        <option value="Neutral">Neutral</option>
+                        <option value="Buy Low">Buy Low</option>
+                        <option value="Zero Interest">Skip</option>
+                      </select>
+                      <button onClick={() => setPlayerProfileId(p.player_id)} className="text-gray-600 hover:text-blue-400 text-xs transition shrink-0 w-4" title="View profile">ⓘ</button>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </>
         );

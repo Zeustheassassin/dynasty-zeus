@@ -57,13 +57,19 @@ import { useAlerts } from "../hooks/useAlerts";
 import { useUserExposure } from "../hooks/useUserExposure";
 import { useUserTrades } from "../hooks/useUserTrades";
 import { useCrossLeagueMateIntel } from "../hooks/useCrossLeagueMateIntel";
+import { useTradeAttempts } from "../hooks/useTradeAttempts";
+import { useCalcValues } from "../hooks/useCalcValues";
+import { useLeagueMateIntel } from "../hooks/useLeagueMateIntel";
+import { useDraftScout } from "../hooks/useDraftScout";
+import { useLeagueOverview } from "../hooks/useLeagueOverview";
 import { PlayersProvider } from "../lib/PlayersContext";
 import { AuthProvider } from "../lib/AuthContext";
 import { LeagueProvider } from "../lib/LeagueContext";
+import { ValuesProvider } from "../lib/ValuesContext";
 import { RosterProvider } from "../lib/RosterContext";
 import { fetchSleeperUser } from "../lib/sleeperUserCache";
 import type {
-  LeagueHubTab, AlertsCenterItem, TradeAttempt, TradeAttemptStatus,
+  LeagueHubTab, AlertsCenterItem,
   SleeperPlayer, SleeperLeague, SleeperRoster, SleeperTradedPick,
   SleeperDraft, SleeperDraftPick, SleeperNFLState, SleeperTransaction, SleeperUser, GamedayMatchup, GamedayTeamView,
   CommittedSimsByLeague, CachedSimRow, SimRow, SleeperMatchup,
@@ -88,11 +94,8 @@ let _playersInMemory: Record<string, SleeperPlayer> | null = null;
 // ── Page-local interfaces (shapes that don't warrant a lib/types entry) ──────
 interface Note { id: string; user_id: string; title: string; body: string; updated_at: string; }
 interface StandingRow { roster_id: number; wins: number; losses: number; ties: number; fpts: number; max_pf: number; owner_id: string; }
-interface DraftScoutPick { round: number; slot?: string; player: SleeperPlayer | null; playerName: string | null; position: string | null; }
-interface DraftScoutLeague { leagueName: string; picks: DraftScoutPick[]; }
 // AugmentedPick is now exported from lib/types.ts
 type AnnotatedTransaction = SleeperTransaction & { leagueName: string; leagueId: string; rosterOwnerMap: Record<number, string>; };
-interface TradeIntelEntry { tradeCount30d: number; bought: Record<string, number>; picksIn: number; picksOut: number; lastTradeAt: number | null; }
 interface OwnedPlayerEntry { player_id: string; player?: SleeperPlayer; leagues: string[]; shareCount: number; }
 interface AllLeagueDataEntry { leagueName?: string; roster: import("../lib/types").SleeperRoster | null; }
 interface PlayerSnapshot { full_name: string; status: string; team: string; value: number; active: boolean; shareCount: number; }
@@ -130,69 +133,14 @@ export default function Home() {
 const [draftPicks, setDraftPicks] = useState<SleeperDraftPick[]>([]);
 const [draftOrder, setDraftOrder] = useState<Record<string, number>>({});
 const [draftSettings, setDraftSettings] = useState<SleeperDraft | null>(null);
-const [draftScoutUserId, setDraftScoutUserId] = useState<string | null>(null);
-const [draftScoutData, setDraftScoutData] = useState<DraftScoutLeague[] | null>(null);
-const [loadingDraftScout, setLoadingDraftScout] = useState(false);
-const draftScoutPatterns = useMemo(() => {
-  if (!draftScoutData?.length) return null;
-  const leaguesWithPicks = draftScoutData.filter((l) => l.picks.length > 0);
-  if (!leaguesWithPicks.length) return null;
-
-  const allPicksFlat = leaguesWithPicks.flatMap((l) => l.picks);
-  const total = allPicksFlat.length;
-  const n = leaguesWithPicks.length;
-
-  const posCounts: Record<string, number> = {};
-  allPicksFlat.forEach((p) => {
-    const pos = p.position || "?";
-    posCounts[pos] = (posCounts[pos] || 0) + 1;
-  });
-  const sortedPos = Object.entries(posCounts).sort((a, b) => b[1] - a[1]);
-
-  const roundBreakdown: Record<number, Record<string, number>> = {};
-  allPicksFlat.forEach((p) => {
-    if (!roundBreakdown[p.round]) roundBreakdown[p.round] = {};
-    const pos = p.position || "?";
-    roundBreakdown[p.round][pos] = (roundBreakdown[p.round][pos] || 0) + 1;
-  });
-
-  const firstPicks = leaguesWithPicks.map((l) => l.picks[0]).filter(Boolean);
-  const firstPickPos: Record<string, number> = {};
-  firstPicks.forEach((p) => {
-    const pos = p.position || "?";
-    firstPickPos[pos] = (firstPickPos[pos] || 0) + 1;
-  });
-  const topFirstPos = Object.entries(firstPickPos).sort((a, b) => b[1] - a[1])[0];
-
-  const tendencies: string[] = [];
-
-  if (topFirstPos && firstPicks.length >= 2) {
-    tendencies.push(`Opens with ${topFirstPos[0]} in ${topFirstPos[1]}/${firstPicks.length} leagues`);
-  }
-  if (sortedPos[0] && sortedPos[0][1] / total >= 0.4) {
-    tendencies.push(`${sortedPos[0][0]}-heavy drafter — ${Math.round(sortedPos[0][1] / total * 100)}% of all picks`);
-  }
-  const r1 = roundBreakdown[1];
-  if (r1) {
-    const r1Total = Object.values(r1).reduce((s: number, v: number) => s + v, 0);
-    const r1Top = Object.entries(r1).sort((a, b) => b[1] - a[1])[0];
-    if (r1Top && r1Top[1] >= 2) {
-      tendencies.push(`Favors ${r1Top[0]} in Round 1 (${r1Top[1]}/${r1Total})`);
-    }
-  }
-  const r1QB = roundBreakdown[1]?.QB || 0;
-  const r2QB = roundBreakdown[2]?.QB || 0;
-  if (r1QB > 0) tendencies.push(`QB in Round 1 (${r1QB} league${r1QB > 1 ? "s" : ""})`);
-  else if (r2QB > 0) tendencies.push(`Early QB — Round 2 (${r2QB} league${r2QB > 1 ? "s" : ""})`);
-  const r1TE = roundBreakdown[1]?.TE || 0;
-  const r2TE = roundBreakdown[2]?.TE || 0;
-  const r3TE = roundBreakdown[3]?.TE || 0;
-  if (r1TE > 0) tendencies.push(`TE aggressive — Round 1 (${r1TE} league${r1TE > 1 ? "s" : ""})`);
-  else if (r2TE > 0) tendencies.push(`TE in Round 2 (${r2TE} league${r2TE > 1 ? "s" : ""})`);
-  else if (!r3TE && posCounts.TE) tendencies.push(`TE devaluer — waits until Round 4+`);
-
-  return { sortedPos, roundBreakdown, tendencies, total, n };
-}, [draftScoutData]);
+const {
+  draftScoutUserId,
+  draftScoutData,
+  loadingDraftScout,
+  draftScoutPatterns,
+  loadDraftScout,
+  clearDraftScout,
+} = useDraftScout(players);
 const [loadingDraftRefresh, setLoadingDraftRefresh] = useState(false);
 const [selectedLeagueDraftHasOccurred, setSelectedLeagueDraftHasOccurred] = useState(false);
 const {
@@ -201,16 +149,13 @@ const {
   loadingTradeHub,
   loadUserTrades,
 } = useUserTrades();
-const [tradeAttempts, setTradeAttempts] = useState<TradeAttempt[]>([]);
-const [tradeAttemptsLeagueId, setTradeAttemptsLeagueId] = useState<string | null>(null);
-const [loadingTradeAttempts, setLoadingTradeAttempts] = useState(false);
-const [allTradeAttempts, setAllTradeAttempts] = useState<TradeAttempt[]>([]);
+const {
+  tradeAttempts, tradeAttemptsLeagueId, loadingTradeAttempts, allTradeAttempts,
+  loadTradeAttempts, markTradeAttempted, updateAttemptStatus, deleteAttempt,
+} = useTradeAttempts(supabaseUser);
 const [tradeHubSection, setTradeHubSection] = useState<"CALCULATOR" | "FINDER" | "RECOMMENDATIONS" | "TRADE_LOG" | "ATTEMPTS" | "MARKET">("CALCULATOR");
 const [finderSeed, setFinderSeed] = useState(() => Math.random());
 const [leagueHubTab, setLeagueHubTab] = useState<LeagueHubTab>("OVERVIEW");
-const [leagueOverviewData, setLeagueOverviewData] = useState<Record<string, LeagueOverviewEntry>>({});
-const [loadingLeagueOverview, setLoadingLeagueOverview] = useState(false);
-const [leagueOverviewLoaded, setLeagueOverviewLoaded] = useState(false);
 const [leagueSimCache, setLeagueSimCache] = useState<Record<string, Record<number, CachedSimRow>>>({});
 const [readyLeagueId, setReadyLeagueId] = useState<string | null>(null);
 const [simQueue, setSimQueue] = useState<string[]>([]);
@@ -227,8 +172,7 @@ const [draftSlotEditing, setDraftSlotEditing] = useState<string | null>(null); /
 const [draftSlotSearchQuery, setDraftSlotSearchQuery] = useState("");
 // userId → { QB: 0.15, RB: 0.30, WR: 0.45, TE: 0.10 } — historical pick tendencies per owner
 const [ownerDraftTendencies, setOwnerDraftTendencies] = useState<Record<string, Record<string, number>>>({});
-const [leagueMateTradeIntel, setLeagueMateTradeIntel] = useState<Record<string, TradeIntelEntry>>({});
-const [loadingLeagueMateIntel, setLoadingLeagueMateIntel] = useState(false);
+const { leagueMateTradeIntel, loadingLeagueMateIntel } = useLeagueMateIntel(selectedLeague, rosters, players);
 const [leagueMateProfileCache, setLeagueMateProfileCache] = useState<Record<string, LeagueMateView[]>>({});
 const [leagueNotes, setLeagueNotes] = useState<Record<string, string>>({});
 const [nflState, setNflState] = useState<SleeperNFLState | null>(null);
@@ -258,9 +202,14 @@ const [loadingLeagueMateStats, setLoadingLeagueMateStats] = useState(false);
 const [leagueMateSort, setLeagueMateSort] = useState<"name" | "total" | "bestball" | "shared">("total");
 const [leagueMateSearch, setLeagueMateSearch] = useState("");
 const [dynastyRankPos, setDynastyRankPos] = useState("ALL");
-const [redraftValues, setRedraftValues] = useState<Record<string, number>>({});
-const [loadingRedraft, setLoadingRedraft] = useState(false);
-const [redraftLoaded, setRedraftLoaded] = useState(false);
+const {
+  calcFcValues,
+  loadingCalcValues,
+  redraftValues,
+  loadingRedraft,
+  loadCalcValues,
+  loadRedraftValues,
+} = useCalcValues();
 const {
   projectionData, setProjectionData,
   loadingProjections,
@@ -291,19 +240,16 @@ const [prMode, setPrMode] = useState<"full"|"starters"|"bench">("full");
 const [ignoredOwnerIds, setIgnoredOwnerIds] = useState<string[]>(() => {
   try { return JSON.parse(localStorage.getItem("ignoredOwnerIds") || "[]"); } catch { return []; }
 });
-const toggleIgnoredOwner = (ownerId: string) => {
+const toggleIgnoredOwner = useCallback((ownerId: string) => {
   setIgnoredOwnerIds(prev => {
     const next = prev.includes(ownerId) ? prev.filter(id => id !== ownerId) : [...prev, ownerId];
     localStorage.setItem("ignoredOwnerIds", JSON.stringify(next));
     return next;
   });
-};
+}, []);
 const [pickFcValues, setPickFcValues] = useState<Record<string, number>>({});
-const [calcFcValues, setCalcFcValues] = useState<Record<string, number>>({});
 const [fcTrendData, setFcTrendData] = useState<FcTrendEntry[]>([]);
 const [loadingFcTrends, setLoadingFcTrends] = useState(false);
-const [loadingCalcValues, setLoadingCalcValues] = useState(false);
-const [calcValuesLeagueId, setCalcValuesLeagueId] = useState<string | null>(null);
 const [calcOpponentRosterId, setCalcOpponentRosterId] = useState<number | null>(null);
 const [calcGive, setCalcGive] = useState<string[]>([]);
 const [calcReceive, setCalcReceive] = useState<string[]>([]);
@@ -334,6 +280,18 @@ const [standings, setStandings] = useState<StandingRow[]>([]);
       setMainTab("DASHBOARD");
     },
   });
+
+  const {
+    leagueOverviewData,
+    loadingLeagueOverview,
+    leagueOverviewLoaded,
+    loadLeagueOverview,
+  } = useLeagueOverview(leagues, user);
+
+  const leaguesRef2 = useRef(leagues);
+  const selectedLeagueRef = useRef(selectedLeague);
+  useEffect(() => { leaguesRef2.current = leagues; }, [leagues]);
+  useEffect(() => { selectedLeagueRef.current = selectedLeague; }, [selectedLeague]);
 
   const [allLeagueData, setAllLeagueData] = useState<{ leagueName: string; roster: SleeperRoster | null }[]>([]);
   const [loadingAllLeagueData, setLoadingAllLeagueData] = useState(false);
@@ -548,18 +506,8 @@ useEffect(() => {
       }
     });
   return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadNotes not in useCallback; adding would re-run on every render
 }, [supabaseUser]);
-
-useEffect(() => {
-  if (!supabaseUser) { setAllTradeAttempts([]); return; }
-  let cancelled = false;
-  supabase
-    .from("trade_attempts")
-    .select("id, league_id, status")
-    .eq("user_id", supabaseUser.id)
-    .then(({ data }) => { if (!cancelled && data) setAllTradeAttempts(data as TradeAttempt[]); });
-  return () => { cancelled = true; };
-}, [supabaseUser?.id]);
 
 const signUp = async () => {
   setSupabaseError("");
@@ -768,6 +716,7 @@ useEffect(() => {
     loadCalcValues(selectedLeague.league_id);
     loadRedraftValues();
   }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadCalcValues/loadRedraftValues not in useCallback
 }, [mainTab, selectedLeague?.league_id]);
 
 // Also reload if the user switches sub-tabs within Trade Hub (redundant but keeps the guard intact)
@@ -779,18 +728,21 @@ useEffect(() => {
   if (tradeHubSection === "ATTEMPTS" && selectedLeague?.league_id && supabaseUser && tradeAttemptsLeagueId !== selectedLeague.league_id) {
     loadTradeAttempts(selectedLeague.league_id);
   }
-}, [tradeHubSection, selectedLeague?.league_id]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadCalcValues/loadTradeAttempts not in useCallback
+}, [tradeHubSection, selectedLeague?.league_id, supabaseUser, tradeAttemptsLeagueId]);
 
 useEffect(() => {
   if (mainTab === "DATA_HUB" && dataHubTab === "RANKINGS" && selectedLeague?.league_id) {
     loadCalcValues(selectedLeague.league_id);
   }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadCalcValues not in useCallback
 }, [mainTab, dataHubTab, selectedLeague?.league_id]);
 
 useEffect(() => {
   if (mainTab === "DATA_HUB" && dataHubTab === "RANKINGS") {
     loadRedraftValues();
   }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadRedraftValues not in useCallback
 }, [mainTab, dataHubTab]);
 
 useEffect(() => {
@@ -813,6 +765,7 @@ useEffect(() => {
     loadNflState();
     if (selectedLeague?.league_id) loadCalcValues(selectedLeague.league_id);
   }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadNflState/loadCalcValues not in useCallback
 }, [mainTab, leagueHubTab, selectedLeague?.league_id]);
 
 useEffect(() => {
@@ -820,6 +773,7 @@ useEffect(() => {
     loadCalcValues(selectedLeague.league_id);
     loadRedraftValues();
   }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadCalcValues/loadRedraftValues not in useCallback
 }, [mainTab, leagueHubTab, selectedLeague?.league_id]);
 
 useEffect(() => {
@@ -835,6 +789,7 @@ useEffect(() => {
     // Load owner tendencies in the background — non-blocking
     if (rosters.length) loadOwnerTendencies();
   }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- refreshDraftBoard/loadOwnerTendencies not in useCallback
 }, [mainTab, leagueHubTab, selectedLeague?.league_id, rosters.length]);
 
 // Stable counts for dep arrays — Object.keys() creates a new array on every render,
@@ -855,7 +810,8 @@ useEffect(() => {
   if (!playerProfileId) return;
   if (Object.keys(redraftValues).length === 0) loadRedraftValues();
   if (!leagueOverviewLoaded && leagues.length > 0 && user) loadLeagueOverview();
-}, [playerProfileId, leagues.length, user?.user_id]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadRedraftValues/loadLeagueOverview not in useCallback
+}, [playerProfileId, leagues.length, user, leagueOverviewLoaded, redraftValues]);
 
 useEffect(() => {
   if (mainTab === "LEAGUES" && (leagueHubTab === "SIMULATOR" || leagueHubTab === "OVERVIEW")) {
@@ -871,11 +827,13 @@ useEffect(() => {
       loadProjections(simulatorProjectionWeek === 0 ? "season" : simulatorProjectionWeek);
     }
   }
-}, [mainTab, leagueHubTab, selectedLeague?.league_id, nflState?.week, nflState?.season_type]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadNflState/loadProjections/loadRedraftValues not in useCallback; projectionWeek/projectionLoaded guards prevent loops
+}, [mainTab, leagueHubTab, selectedLeague?.league_id, nflState?.week, nflState?.season_type, projectionWeek, projectionLoaded]);
 
 useEffect(() => {
   if (mainTab !== "GAMEDAY_HUB") return;
   loadNflState();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadNflState not in useCallback
 }, [mainTab]);
 
 useEffect(() => {
@@ -899,12 +857,9 @@ useEffect(() => {
   }
 
   loadGamedayMatchups(selectedLeague.league_id, currentWeek);
+  // projectionWeek/projectionLoaded omitted intentionally: adding them would create a reload loop.
+  // loadProjections/loadGamedayMatchups omitted: not in useCallback; nflState deps trigger this effect.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  // projectionWeek/projectionLoaded omitted intentionally: adding them would
-  // create a reload loop (effect sets projectionWeek → dep changes → re-runs).
-  // loadProjections/loadGamedayMatchups omitted because they are not useCallback-
-  // wrapped; adding them would re-run on every render. The nflState deps above
-  // are sufficient to trigger this effect at the right times.
 }, [mainTab, selectedLeague?.league_id, nflState?.week, nflState?.season_type]);
 
 useEffect(() => {
@@ -949,69 +904,6 @@ useEffect(() => {
   return () => { cancelled = true; };
 }, [mainTab, leagueHubTab, selectedLeague?.league_id, selectedLeague?.settings?.playoff_week_start, nflState?.week, nflState?.season_type, leagueWeeklyMatchups]);
 
-useEffect(() => {
-  if (!selectedLeague?.league_id || !rosters.length || !Object.keys(players || {}).length) {
-    setLeagueMateTradeIntel({});
-    return;
-  }
-
-  let cancelled = false;
-
-  const loadLeagueMateIntel = async () => {
-    setLoadingLeagueMateIntel(true);
-    try {
-      const [t1, t2] = await Promise.all([
-        fetch(`https://api.sleeper.app/v1/league/${selectedLeague.league_id}/transactions/1`).then((r) => r.json() as Promise<SleeperTransaction[]>).catch(() => [] as SleeperTransaction[]),
-        fetch(`https://api.sleeper.app/v1/league/${selectedLeague.league_id}/transactions/2`).then((r) => r.json() as Promise<SleeperTransaction[]>).catch(() => [] as SleeperTransaction[]),
-      ]);
-
-      const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
-      const rosterStats: Record<string, TradeIntelEntry> = {};
-      const ensureRoster = (rosterId: number | string) => {
-        const key = String(rosterId);
-        if (!rosterStats[key]) {
-          rosterStats[key] = {
-            tradeCount30d: 0,
-            bought: { QB: 0, RB: 0, WR: 0, TE: 0 },
-            picksIn: 0,
-            picksOut: 0,
-            lastTradeAt: null,
-          };
-        }
-        return rosterStats[key];
-      };
-
-      [...(Array.isArray(t1) ? t1 : []), ...(Array.isArray(t2) ? t2 : [])]
-        .filter((trade) => trade?.type === "trade" && trade?.status === "complete" && Number(trade?.created || 0) >= thirtyDaysAgo)
-        .forEach((trade) => {
-          (trade.roster_ids || []).forEach((rosterId: number) => {
-            const entry = ensureRoster(rosterId);
-            entry.tradeCount30d += 1;
-            entry.lastTradeAt = Math.max(entry.lastTradeAt || 0, Number(trade.created || 0));
-          });
-
-          (Object.entries(trade.adds || {}) as [string, number][]).forEach(([playerId, rosterId]) => {
-            const pos = players[playerId]?.position;
-            if (!["QB", "RB", "WR", "TE"].includes(pos)) return;
-            const entry = ensureRoster(rosterId);
-            entry.bought[pos] = (entry.bought[pos] || 0) + 1;
-          });
-
-          (trade.draft_picks || []).forEach((pick) => {
-            if (pick?.owner_id != null) ensureRoster(pick.owner_id).picksIn += 1;
-            if (pick?.previous_owner_id != null) ensureRoster(pick.previous_owner_id).picksOut += 1;
-          });
-        });
-
-      if (!cancelled) setLeagueMateTradeIntel(rosterStats);
-    } finally {
-      if (!cancelled) setLoadingLeagueMateIntel(false);
-    }
-  };
-
-  loadLeagueMateIntel();
-  return () => { cancelled = true; };
-}, [selectedLeague?.league_id, rosters, players]);
 
 useEffect(() => {
   if (!supabaseUser || !selectedLeague?.league_id) return;
@@ -1028,7 +920,7 @@ useEffect(() => {
         [selectedLeague.league_id]: data.profiles,
       }));
     });
-}, [supabaseUser?.id, selectedLeague?.league_id]);
+}, [supabaseUser, selectedLeague?.league_id]);
 
 // Load cached simulation results from Supabase for the League Overview playoff% column.
 // Uses a MERGE strategy: if in-memory data has a newer computed_at than the DB row,
@@ -1064,7 +956,7 @@ useEffect(() => {
         return merged;
       });
     });
-}, [supabaseUser?.id]);
+}, [supabaseUser]);
 
 // Load saved draft slot picks — localStorage first (instant), Supabase as source-of-truth if available
 useEffect(() => {
@@ -1092,7 +984,7 @@ useEffect(() => {
       setMyDraftSlotPicks(picks);
       localStorage.setItem(lsKey, JSON.stringify(picks));
     });
-}, [supabaseUser?.id, selectedLeague?.league_id]);
+}, [supabaseUser, selectedLeague?.league_id]);
 
 // Save draft slot picks — localStorage immediately, Supabase async (best-effort)
 useEffect(() => {
@@ -1112,13 +1004,13 @@ useEffect(() => {
     .from("draft_board_picks")
     .upsert(rows, { onConflict: "user_id,league_id,season,pick_slot" })
     .then(() => {}, (err: unknown) => log.error("draft_board_picks upsert failed", { err: String(err) }));
-}, [supabaseUser?.id, selectedLeague?.league_id, myDraftSlotPicks]);
+}, [supabaseUser, selectedLeague?.league_id, myDraftSlotPicks]);
 
 
 // League notes — load from localStorage on mount (fast), then override with Supabase on login
 useEffect(() => {
   const saved = localStorage.getItem("leagueNotes");
-  if (saved) setLeagueNotes(JSON.parse(saved));
+  if (saved) { try { setLeagueNotes(JSON.parse(saved)); } catch { /* ignore corrupt cache */ } }
 }, []);
 
 const saveLeagueNote = async (leagueId: string, text: string) => {
@@ -1141,7 +1033,8 @@ useEffect(() => {
   if (mainTab === "DATA_HUB" && dataHubTab === "PROJECTIONS" && !projectionLoaded) {
     loadProjections(projectionWeek === 0 ? 'season' : projectionWeek);
   }
-}, [mainTab, dataHubTab]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadProjections not in useCallback
+}, [mainTab, dataHubTab, projectionLoaded, projectionWeek]);
 
 // Rookie board save + load effects live in useRookieBoardState (extracted hook).
 const refreshDraftBoard = async () => {
@@ -1173,6 +1066,7 @@ const refreshDraftBoard = async () => {
 useEffect(() => {
   if (!selectedLeague || mainTab !== "DRAFT" || draftHubSection !== "BOARD") return;
   refreshDraftBoard();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- refreshDraftBoard not in useCallback
 }, [selectedLeague, mainTab, draftHubSection]);
 
 // Load historical rookie draft tendencies for every owner in the current league.
@@ -1341,6 +1235,7 @@ const loadOwnerTendencies = async () => {
     };
 
     loadAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- loadRoster not in useCallback
   }, [user, leagues]);
 
   // -------------------------
@@ -1370,7 +1265,8 @@ const loadRoster = async (league: SleeperLeague) => {
 
   // ── Save recent league ───────────────────────────────────────────────────
   const stored = localStorage.getItem("recentLeagues");
-  let recents: { league_id: string; name: string }[] = stored ? JSON.parse(stored) : [];
+  let recents: { league_id: string; name: string }[] = [];
+  if (stored) { try { recents = JSON.parse(stored); } catch { /* ignore corrupt cache */ } }
   recents = recents.filter((l) => l.league_id !== league.league_id);
   recents.unshift({ league_id: league.league_id, name: league.name });
   localStorage.setItem("recentLeagues", JSON.stringify(recents.slice(0, 5)));
@@ -1521,89 +1417,6 @@ const loadRoster = async (league: SleeperLeague) => {
       )
   );
   setReadyLeagueId(league.league_id);
-};
-
-const loadDraftScout = async (userId: string) => {
-  setDraftScoutUserId(userId);
-  setDraftScoutData(null);
-  setLoadingDraftScout(true);
-
-  try {
-    // 1. All 2026 leagues for this user
-    const leaguesRes = await fetch(
-      `https://api.sleeper.app/v1/user/${userId}/leagues/nfl/${CURRENT_YEAR}`
-    );
-    const leagues = (await leaguesRes.json()) as SleeperLeague[];
-
-    // 2. For each league, fetch drafts + picks in parallel
-    const results = await Promise.all(
-      leagues.map(async (league) => {
-        const draftsRes = await fetch(
-          `https://api.sleeper.app/v1/league/${league.league_id}/drafts`
-        );
-        const drafts = await draftsRes.json();
-
-        // Find a rookie-only draft: current year, started, and ≤5 rounds
-        // Startup drafts cover full rosters (15–25+ rounds) so this reliably excludes them
-        const rookieDraft = drafts.find(
-          (d: SleeperDraft) =>
-            d.season === CURRENT_YEAR &&
-            d.status !== "pre_draft" &&
-            (d.settings?.rounds ?? 99) <= 5
-        );
-        if (!rookieDraft) return null;
-
-        const picksRes = await fetch(
-          `https://api.sleeper.app/v1/draft/${rookieDraft.draft_id}/picks`
-        );
-        const allPicks = await picksRes.json();
-
-        // Only this user's picks
-        const myPicks = allPicks
-          .filter((p: SleeperDraftPick) => p.picked_by === userId)
-          .sort((a: SleeperDraftPick, b: SleeperDraftPick) => a.pick_no - b.pick_no)
-          .map((p: SleeperDraftPick) => ({
-            slot: `${p.round}.${String(p.draft_slot).padStart(2, "0")}`,
-            round: p.round,
-            player: players[p.player_id] || null,
-            playerName: p.metadata?.first_name
-              ? `${p.metadata.first_name} ${p.metadata.last_name}`
-              : null,
-            position: p.metadata?.position || null,
-          }));
-
-        return { leagueName: league.name, picks: myPicks };
-      })
-    );
-
-    setDraftScoutData(results.filter((r): r is DraftScoutLeague => r !== null));
-  } catch (err) {
-    log.error("draft scout error", { err: String(err) });
-  } finally {
-    setLoadingDraftScout(false);
-  }
-};
-
-const loadCalcValues = async (leagueId: string) => {
-  if (calcValuesLeagueId === leagueId) return; // already loaded for this league
-  setLoadingCalcValues(true);
-  try {
-    const res = await fetch(
-      `https://api.fantasycalc.com/values/current?leagueId=${leagueId}&site=sleeper`
-    );
-    const data = await res.json();
-    const vals: Record<string, number> = {};
-    data.forEach((entry: { player?: { sleeperId?: string }; value: number }) => {
-      const sleeperId = entry.player?.sleeperId;
-      if (sleeperId) vals[String(sleeperId)] = entry.value;
-    });
-    setCalcFcValues(vals);
-    setCalcValuesLeagueId(leagueId);
-  } catch (err) {
-    log.error('loadCalcValues failed', { err: String(err) });
-  } finally {
-    setLoadingCalcValues(false);
-  }
 };
 
 const refreshFcTrends = async () => {
@@ -1822,106 +1635,6 @@ const loadActivity = async (leagueId: string) => {
   } finally { setLoadingActivity(false); }
 };
 
-const loadLeagueOverview = async () => {
-  if (!leagues.length || !user) return;
-  setLoadingLeagueOverview(true);
-  try {
-    // Fetch all rosters, traded picks, and drafts for every league in parallel
-    const results = await Promise.all(
-      leagues.map(async (league) => {
-        try {
-          const [rostersData, tradedPicksData, draftsData, usersData] = await Promise.all([
-            fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`).then(r => r.json() as Promise<SleeperRoster[]>),
-            fetch(`https://api.sleeper.app/v1/league/${league.league_id}/traded_picks`).then(r => r.json() as Promise<SleeperTradedPick[]>).catch(() => [] as SleeperTradedPick[]),
-            fetch(`https://api.sleeper.app/v1/league/${league.league_id}/drafts`).then(r => r.json() as Promise<SleeperDraft[]>).catch(() => [] as SleeperDraft[]),
-            fetch(`https://api.sleeper.app/v1/league/${league.league_id}/users`).then(r => r.json() as Promise<SleeperUser[]>).catch(() => [] as SleeperUser[]),
-          ]);
-          // Build userId → display_name map for this league
-          const leagueUserMap: Record<string, string> = {};
-          (usersData || []).forEach((u) => {
-            leagueUserMap[u.user_id] = u.display_name || u.username || u.metadata?.team_name || `Team`;
-          });
-
-          const tempPicks: AugmentedPick[] = [];
-          const rosterToUser: Record<string, string> = {};
-          rostersData.forEach((r) => {
-            rosterToUser[String(r.roster_id)] = r.owner_id;
-            YEARS.forEach((year) => {
-              ROUNDS.forEach((round) => {
-                tempPicks.push({
-                  season: year,
-                  round,
-                  roster_id: r.roster_id,
-                  owner_id: r.roster_id,
-                  previous_owner_id: r.roster_id,
-                });
-              });
-            });
-          });
-
-          tradedPicksData.forEach((tp) => {
-            const match = tempPicks.find(
-              (p) => p.season === tp.season && p.round === tp.round && p.roster_id === tp.roster_id
-            );
-            if (match) match.owner_id = tp.owner_id;
-          });
-
-          const currentDraft = draftsData.find((d) => d.season === CURRENT_YEAR);
-          const order = currentDraft?.draft_order || {};
-          const totalDraftTeams = rostersData.length || Number(currentDraft?.settings?.teams) || 0;
-          tempPicks.forEach((pick) => {
-            if (pick.season === CURRENT_YEAR) {
-              const userId = rosterToUser[String(pick.roster_id)];
-              const baseSlot = Number(order[String(userId)] || 0);
-              const slot = getDraftRoundSlot(currentDraft ?? {}, Number(pick.round), baseSlot, totalDraftTeams);
-              pick.slot = slot
-                ? `${pick.round}.${String(slot).padStart(2, "0")}`
-                : `${pick.round}`;
-            }
-          });
-
-          return { league, rosters: rostersData, picks: tempPicks, userMap: leagueUserMap };
-        } catch (err) {
-          log.warn('loadLeagueOverview league fetch error', { err: String(err) });
-          return null;
-        }
-      })
-    );
-    const byLeague: Record<string, LeagueOverviewEntry> = {};
-    results.filter((r): r is NonNullable<typeof r> => r !== null).forEach(({ league, rosters: lr, picks, userMap }) => {
-      byLeague[league.league_id] = { league, rosters: lr, picks, userMap };
-    });
-    setLeagueOverviewData(byLeague);
-    setLeagueOverviewLoaded(true);
-  } catch (err) {
-    log.error('loadLeagueOverview failed', { err: String(err) });
-  } finally {
-    setLoadingLeagueOverview(false);
-  }
-};
-
-const loadRedraftValues = async () => {
-  if (redraftLoaded) return;
-  setLoadingRedraft(true);
-  try {
-    const res = await fetch(
-      `https://api.fantasycalc.com/values/current?isDynasty=false&numQbs=2`
-    );
-    const data = await res.json();
-    const vals: Record<string, number> = {};
-    data.forEach((entry: { player?: { sleeperId?: string }; value: number }) => {
-      const sleeperId = entry.player?.sleeperId;
-      if (sleeperId) vals[String(sleeperId)] = entry.value;
-    });
-    setRedraftValues(vals);
-    setRedraftLoaded(true);
-  } catch (err) {
-    log.error('loadRedraftValues failed', { err: String(err) });
-  } finally {
-    setLoadingRedraft(false);
-  }
-};
-
 const savePlayerNote = useCallback(async (playerId: string, note: string) => {
   setPlayerNotes((prev) => {
     const updated = { ...prev, [playerId]: note };
@@ -2021,75 +1734,6 @@ const handleToggleLeaguePlayerTag = useCallback((
 }, []);
 
 
-const loadTradeAttempts = async (leagueId: string) => {
-  if (!supabaseUser) return;
-  setLoadingTradeAttempts(true);
-  setTradeAttemptsLeagueId(leagueId);
-  try {
-    const { data, error } = await supabase
-      .from("trade_attempts")
-      .select("*")
-      .eq("user_id", supabaseUser.id)
-      .eq("league_id", leagueId)
-      .order("attempted_at", { ascending: false });
-    if (!error && data) setTradeAttempts(data as TradeAttempt[]);
-  } finally {
-    setLoadingTradeAttempts(false);
-  }
-};
-
-const markTradeAttempted = async (attempt: Omit<TradeAttempt, "id" | "user_id" | "attempted_at" | "resolved_at">) => {
-  if (!supabaseUser) return;
-  const { data, error } = await supabase
-    .from("trade_attempts")
-    .insert({ ...attempt, user_id: supabaseUser.id })
-    .select()
-    .single();
-  if (!error && data) {
-    setTradeAttempts((prev) => [data as TradeAttempt, ...prev]);
-    setAllTradeAttempts((prev) => [{ id: (data as TradeAttempt).id, league_id: (data as TradeAttempt).league_id, status: (data as TradeAttempt).status } as TradeAttempt, ...prev]);
-  }
-};
-
-const updateAttemptStatus = async (id: string, status: TradeAttemptStatus, counterDetails?: string) => {
-  if (!supabaseUser) return;
-  const update: Record<string, unknown> = {
-    status,
-    resolved_at: status !== "PENDING" ? new Date().toISOString() : null,
-  };
-  if (counterDetails !== undefined) update.counter_details = counterDetails;
-  const { error } = await supabase
-    .from("trade_attempts")
-    .update(update)
-    .eq("id", id)
-    .eq("user_id", supabaseUser.id);
-  if (!error) {
-    setTradeAttempts((prev) =>
-      prev.map((a) =>
-        a.id === id
-          ? { ...a, status, counter_details: counterDetails ?? a.counter_details, resolved_at: update.resolved_at as string | null }
-          : a
-      )
-    );
-    setAllTradeAttempts((prev) =>
-      prev.map((a) => a.id === id ? { ...a, status } : a)
-    );
-  }
-};
-
-const deleteAttempt = async (id: string) => {
-  if (!supabaseUser) return;
-  const { error } = await supabase
-    .from("trade_attempts")
-    .delete()
-    .eq("id", id)
-    .eq("user_id", supabaseUser.id);
-  if (!error) {
-    setTradeAttempts((prev) => prev.filter((a) => a.id !== id));
-    setAllTradeAttempts((prev) => prev.filter((a) => a.id !== id));
-  }
-};
-
   // -------------------------
   // PLAYER LOGIC
   // -------------------------
@@ -2123,6 +1767,7 @@ const deleteAttempt = async (id: string) => {
     return grouped;
   };
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- groupPlayers not in useCallback; roster/players cover its deps
   const grouped = useMemo(() => groupPlayers(), [roster, players]);
 
   const filteredPlayers = useMemo(() =>
@@ -2170,6 +1815,7 @@ const getTeamSummary = () => {
   return { summary, pickSummary };
 };
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- getTeamSummary not in useCallback; roster/players/picks cover its deps
   const teamSummary = useMemo(() => getTeamSummary(), [roster, players, picks]);
   const gamedayWeek = useMemo(() => {
     const rawWeek = Number(nflState?.week || 0);
@@ -2205,7 +1851,7 @@ const getTeamSummary = () => {
         const playerId = starterIds[index] ? String(starterIds[index]) : "";
         const player = playerId ? players[playerId] : null;
         const projection = playerId ? projectionByPlayerId.get(playerId) : null;
-        const kickoffAt = getProjectionKickoffAt(projection as unknown as Record<string, unknown>);
+        const kickoffAt = getProjectionKickoffAt(projection);
         const actualPoints = Number(playerId ? playerPoints[playerId] ?? entry?.starters_points?.[index] ?? 0 : 0);
         const gameState = getKickoffState(kickoffAt);
         const remainingProjection = gameState === "Upcoming"
@@ -2231,7 +1877,7 @@ const getTeamSummary = () => {
       const buildReserveRow = (playerId: string) => {
         const player = players[playerId];
         const projection = projectionByPlayerId.get(String(playerId));
-        const kickoffAt = getProjectionKickoffAt(projection as unknown as Record<string, unknown>);
+        const kickoffAt = getProjectionKickoffAt(projection);
         const actualPoints = Number(playerPoints[playerId] ?? 0);
         const gameState = getKickoffState(kickoffAt);
         const remainingProjection = gameState === "Upcoming"
@@ -2300,7 +1946,7 @@ const getTeamSummary = () => {
         if (a.sortKickoff !== b.sortKickoff) return a.sortKickoff - b.sortKickoff;
         return a.matchupId - b.matchupId;
       });
-  }, [selectedLeague?.league_id, selectedLeague?.roster_positions, rosters, gamedayMatchups, gamedayWeek, players, projectionData, users]);
+  }, [selectedLeague, rosters, gamedayMatchups, gamedayWeek, players, projectionData, users]);
   const selectedGamedayMatchup = useMemo(
     () => gamedayMatchupCards.find((card) => card.matchupId === selectedGamedayMatchupId) || gamedayMatchupCards[0] || null,
     [gamedayMatchupCards, selectedGamedayMatchupId]
@@ -2377,7 +2023,7 @@ const getTeamSummary = () => {
       redraftValues: leagueAdjustedRedraftValues,
       dynastyValueForPlayer: (id: string) => leagueAdjustedFcValues[id] ?? players[id]?.value ?? 0,
     });
-  }, [selectedLeague?.league_id, readyLeagueId, rosters, allPicks, players, pickFcValues, leagueAdjustedRedraftValues, leagueAdjustedFcValues, user?.user_id]);
+  }, [selectedLeague, readyLeagueId, rosters, allPicks, players, pickFcValues, leagueAdjustedRedraftValues, leagueAdjustedFcValues, user?.user_id]);
 
   // ── Projected rookies per roster for the season simulator ────────────────
   // Runs a simplified BPA draft sim to project which rookie lands on each
@@ -2476,7 +2122,7 @@ const getTeamSummary = () => {
     }
     return result;
   }, [
-    selectedLeague?.league_id,
+    selectedLeague,
     nflState?.season_type,
     nflState?.week,
     draftSettings,
@@ -3078,16 +2724,14 @@ const getTeamSummary = () => {
       rowByRosterId: new Map(ranked.map((row) => [row.rosterId, row])),
     };
   }, [
-    selectedLeague?.league_id,
-    selectedLeague?.settings?.playoff_week_start,
-    selectedLeague?.settings?.playoff_teams,
-    selectedLeague?.roster_positions,
+    selectedLeague,
     rosters,
     nflState?.week,
     nflState?.season_type,
     projectionData,
     projectionWeek,
     players,
+    playerStats,
     leagueAdjustedRedraftValues,
     leagueAdjustedFcValues,
     leagueWeeklyMatchups,
@@ -3317,7 +2961,7 @@ const getTeamSummary = () => {
         }];
       })
     ) as Record<string, DynamicPickValue>;
-  }, [selectedLeague?.league_id, committedSimsByLeague, selectedLeagueSimulation, allPicks, pickFcValues, rosters.length]);
+  }, [selectedLeague?.league_id, selectedLeague?.settings?.playoff_teams, selectedLeagueSimulation, allPicks, pickFcValues, rosters]);
   const selectedLeagueMateProfiles = useMemo((): LeagueMateView[] => {
     if (!selectedLeague || !rosters.length || !user?.user_id) return [];
 
@@ -3434,15 +3078,19 @@ const getTeamSummary = () => {
       })
       .filter((v) => v !== null)
       .sort((a, b) => {
-        if (b!.fitScore !== a!.fitScore) return b!.fitScore - a!.fitScore;
-        if (b!.tradeCount30d !== a!.tradeCount30d) return b!.tradeCount30d - a!.tradeCount30d;
-        return a!.ownerName.localeCompare(b!.ownerName);
+        if (!a || !b) return 0;
+        if (b.fitScore !== a.fitScore) return b.fitScore - a.fitScore;
+        if (b.tradeCount30d !== a.tradeCount30d) return b.tradeCount30d - a.tradeCount30d;
+        return a.ownerName.localeCompare(b.ownerName);
       }) as LeagueMateView[];
-  }, [selectedLeague?.league_id, rosters, user?.user_id, allPicks, players, pickFcValues, leagueAdjustedRedraftValues, leagueAdjustedFcValues, leagueMateTradeIntel, users, crossLeagueMateIntel]);
-  const selectedLeagueMateProfilesView =
-    selectedLeagueMateProfiles.length > 0
-      ? selectedLeagueMateProfiles
-      : (selectedLeague?.league_id ? leagueMateProfileCache[selectedLeague.league_id] || [] : []);
+  }, [selectedLeague, rosters, user?.user_id, allPicks, players, pickFcValues, leagueAdjustedRedraftValues, leagueAdjustedFcValues, leagueMateTradeIntel, users, crossLeagueMateIntel]);
+  const selectedLeagueMateProfilesView = useMemo(
+    () =>
+      selectedLeagueMateProfiles.length > 0
+        ? selectedLeagueMateProfiles
+        : (selectedLeague?.league_id ? leagueMateProfileCache[selectedLeague.league_id] ?? [] : []),
+    [selectedLeagueMateProfiles, selectedLeague?.league_id, leagueMateProfileCache]
+  );
   const activeLeagueHubGroup = useMemo(
     () => LEAGUE_HUB_GROUPS.find((group) => group.tabs.some((tab) => tab.id === leagueHubTab)) || LEAGUE_HUB_GROUPS[0],
     [leagueHubTab]
@@ -3564,7 +3212,7 @@ const getTeamSummary = () => {
         if (b.fitScore !== a.fitScore) return b.fitScore - a.fitScore;
         return a.ownerName.localeCompare(b.ownerName);
       });
-  }, [selectedLeague?.league_id, rosters, user?.user_id, selectedLeagueSimulation, selectedLeagueDirection, selectedLeagueMateProfilesView]);
+  }, [selectedLeague, rosters, user?.user_id, selectedLeagueSimulation, selectedLeagueDirection, selectedLeagueDirectionAdjusted, selectedLeagueMateProfilesView]);
 
   // Local types for the trade recommendation engine.
   type TradePartner = LeagueMateView & {
@@ -4216,15 +3864,15 @@ const getTeamSummary = () => {
 
     return (lowImpact.length > 0 ? lowImpact : base).slice(0, sortedPartners.length || 12);
   }, [
-    selectedLeague?.league_id,
+    selectedLeague,
     rosters,
     user?.user_id,
     selectedLeagueDirection,
     selectedLeagueDirectionAdjusted,
     selectedLeagueSimulation,
     leagueAdjustedFcValues,
+    leagueAdjustedRedraftValues,
     players,
-    redraftValues,
     allPicks,
     selectedLeagueDynamicPickValues,
     pickFcValues,
@@ -4242,7 +3890,7 @@ const getTeamSummary = () => {
       },
       { onConflict: "user_id,league_id" }
     ).then(() => {}, (err: unknown) => log.error("leaguemate_profiles upsert failed", { err: String(err) }));
-  }, [supabaseUser?.id, selectedLeague?.league_id, selectedLeagueMateProfiles]);
+  }, [supabaseUser, selectedLeague?.league_id, selectedLeagueMateProfiles]);
 
   // Saved AI briefings from Supabase — keyed by "${leagueId}-${rosterId}".
   const [savedAiBriefings, setSavedAiBriefings] = useState<Record<string, GmBriefing>>({});
@@ -4558,7 +4206,6 @@ const getTeamSummary = () => {
 
     if (!res.ok) {
       const errBody = await res.text().catch(() => "(no body)");
-      console.error("[gm-briefing] API error", res.status, errBody);
       log.error("gm-briefing API error", { status: res.status, body: errBody });
       return;
     }
@@ -5133,7 +4780,7 @@ const getTeamSummary = () => {
       updated_at: new Date(alert.timestamp || Date.now()).toISOString(),
     }));
     supabase.from("alerts").upsert(payload, { onConflict: "user_id,alert_id" }).then(() => {}, (err: unknown) => log.error("alerts bulk upsert failed", { err: String(err) }));
-  }, [supabaseUser?.id, dashboardAlerts, dismissedAlertIds]);
+  }, [supabaseUser, dashboardAlerts, dismissedAlertIds]);
 
   useEffect(() => {
     let cancelled = false;
@@ -5192,7 +4839,7 @@ const getTeamSummary = () => {
 
     Object.entries(nextPlayerSnapshot).forEach(([playerId, snapshot]) => {
       if (baselineReady) {
-        const historical = historicalBase!.players[playerId];
+        const historical = historicalBase?.players[playerId];
         if (historical && historical.value > 0) {
           const delta = Number(snapshot.value || 0) - Number(historical.value || 0);
           const watch = watchlistEntries.find((entry) => entry.player_id === playerId);
@@ -5380,6 +5027,7 @@ const getTeamSummary = () => {
 
     mergeDashboardAlerts(incomingAlerts);
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mergeDashboardAlerts not in useCallback
   }, [
     dashboardOwnedPlayers,
     watchlistEntries,
@@ -5388,6 +5036,7 @@ const getTeamSummary = () => {
     selectedLeague?.league_id,
     selectedLeagueMateProfilesView,
     alertSnapshotStorageKey,
+    supabaseUser,
   ]);
 
   useEffect(() => {
@@ -5424,6 +5073,7 @@ const getTeamSummary = () => {
       });
 
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mergeDashboardAlerts not in useCallback
   }, [dashboardOwnedPlayers, watchlistEntries, players]);
 
   // ── Bye week alerts ───────────────────────────────────────────────────────
@@ -5522,6 +5172,21 @@ const getTeamSummary = () => {
   updated.splice(toIndex, 0, moved);
   setRookies(updated);
 };
+const onNavigateToAttempts = useCallback((leagueId: string) => {
+  const league = leaguesRef2.current.find((l) => l.league_id === leagueId);
+  if (league) {
+    loadRoster(league);
+    setTradeHubSection("ATTEMPTS");
+    setMainTab("TRADE_HUB");
+    loadTradeAttempts(leagueId);
+  }
+}, [loadRoster, loadTradeAttempts]);
+
+const onRefreshDirection = useCallback(() => {
+  const league = selectedLeagueRef.current;
+  if (league) { loadRedraftValues(); loadRoster(league); }
+}, [loadRedraftValues, loadRoster]);
+
 // -------------------------
 // MY CURRENT LEAGUE PLAYER SET
 // -------------------------
@@ -5530,6 +5195,16 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     <AuthProvider supabaseUser={supabaseUser}>
     <PlayersProvider players={players}>
     <LeagueProvider selectedLeague={selectedLeague} rosters={rosters} users={users}>
+    <ValuesProvider
+      leagueAdjustedFcValues={leagueAdjustedFcValues}
+      leagueAdjustedRedraftValues={leagueAdjustedRedraftValues}
+      pickFcValues={pickFcValues}
+      fcNameValues={fcNameValues}
+      selectedLeagueDirection={selectedLeagueDirection}
+      selectedLeagueDirectionAdjusted={selectedLeagueDirectionAdjusted}
+      selectedLeagueSimulation={selectedLeagueSimulation}
+      selectedLeagueDynamicPickValues={selectedLeagueDynamicPickValues}
+    >
     <RosterProvider myRoster={roster}>
       {/* Login overlay — lives outside <main> so no stacking context interferes */}
       {!supabaseUser && (
@@ -5612,7 +5287,8 @@ const myPlayerSet = new Set<string>(roster?.players || []);
           </div>
         </div>
       )}
-    <main className="min-h-screen bg-gray-950 text-white">
+    <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-[99999] focus:px-4 focus:py-2 focus:bg-blue-600 focus:text-white focus:rounded focus:text-sm">Skip to main content</a>
+    <main id="main-content" className="min-h-screen bg-gray-950 text-white">
       {/* App content — always rendered but non-interactive when not signed in */}
       <div className={!supabaseUser ? "pointer-events-none select-none opacity-40" : ""}>
       <>
@@ -5765,15 +5441,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             allLeagues={leagues}
             rosterBriefings={allRosterBriefings}
             onRefreshBriefing={refreshBriefingForTeam}
-            onNavigateToAttempts={(leagueId) => {
-              const league = leagues.find((l) => l.league_id === leagueId);
-              if (league) {
-                loadRoster(league);
-                setTradeHubSection("ATTEMPTS");
-                setMainTab("TRADE_HUB");
-                loadTradeAttempts(leagueId);
-              }
-            }}
+            onNavigateToAttempts={onNavigateToAttempts}
           />
           </ErrorBoundary>
         )}
@@ -5790,9 +5458,6 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             setSelectedLeague={setSelectedLeague}
             picks={picks}
             allPicks={allPicks}
-            pickFcValues={pickFcValues}
-            calcFcValues={leagueAdjustedFcValues}
-            redraftValues={leagueAdjustedRedraftValues}
             committedSimsByLeague={committedSimsByLeague}
             leagueSimCache={leagueSimCache}
             simQueue={simQueue}
@@ -5807,9 +5472,6 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             loadingLeagueOverview={loadingLeagueOverview}
             leagueOverviewLoaded={leagueOverviewLoaded}
             teamSummary={teamSummary}
-            selectedLeagueDirection={selectedLeagueDirection}
-            selectedLeagueDirectionAdjusted={selectedLeagueDirectionAdjusted}
-            selectedLeagueSimulation={selectedLeagueSimulation}
             selectedLeagueMateProfilesView={selectedLeagueMateProfilesView}
             activeTab={activeTab}
             setActiveTab={setActiveTab}
@@ -5905,14 +5567,12 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             dataHubTab={dataHubTab}
             setDataHubTab={setDataHubTab}
             shares={shares}
-            calcFcValues={leagueAdjustedFcValues}
             dynastyRankPos={dynastyRankPos}
             setDynastyRankPos={setDynastyRankPos}
             loadingCalcValues={loadingCalcValues}
             playerDispositions={playerDispositions}
             savePlayerDisposition={savePlayerDisposition}
             setPlayerProfileId={setPlayerProfileId}
-            redraftValues={leagueAdjustedRedraftValues}
             loadingRedraft={loadingRedraft}
             projectionData={projectionData}
             setProjectionData={setProjectionData}
@@ -5927,7 +5587,6 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             loadingProjections={loadingProjections}
             projectionUsesSeasonFallback={projectionUsesSeasonFallback}
             allPicks={allPicks}
-            selectedLeagueDynamicPickValues={selectedLeagueDynamicPickValues}
             leagues={leagues}
             user={user}
             leagueMateStats={leagueMateStats}
@@ -5981,9 +5640,6 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     handleRankChange={handleRankChange}
     loadingDraftRefresh={loadingDraftRefresh}
     leagues={leagues}
-    calcFcValues={leagueAdjustedFcValues}
-    pickFcValues={pickFcValues}
-    fcNameValues={fcNameValues}
   />
   </ErrorBoundary>
 )}
@@ -5998,13 +5654,6 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     leagues={leagues}
     user={user}
     allPicks={allPicks}
-    pickFcValues={pickFcValues}
-    calcFcValues={leagueAdjustedFcValues}
-    redraftValues={leagueAdjustedRedraftValues}
-    selectedLeagueDynamicPickValues={selectedLeagueDynamicPickValues}
-    selectedLeagueDirection={selectedLeagueDirection}
-    selectedLeagueDirectionAdjusted={selectedLeagueDirectionAdjusted}
-    selectedLeagueSimulation={selectedLeagueSimulation}
     calcOpponentRosterId={calcOpponentRosterId}
     setCalcOpponentRosterId={setCalcOpponentRosterId}
     calcGive={calcGive}
@@ -6050,7 +5699,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     onUpdateAttemptStatus={updateAttemptStatus}
     onDeleteAttempt={deleteAttempt}
     onLoadTradeAttempts={loadTradeAttempts}
-    onRefreshDirection={() => { if (selectedLeague) { loadRedraftValues(); loadRoster(selectedLeague); } }}
+    onRefreshDirection={onRefreshDirection}
     buyLowPlayerIds={buyLowPlayerIds}
     ignoredOwnerIds={ignoredOwnerIds}
     toggleIgnoredOwner={toggleIgnoredOwner}
@@ -6158,13 +5807,13 @@ const myPlayerSet = new Set<string>(roster?.players || []);
 
 {/* DRAFT SCOUT MODAL */}
 {draftScoutUserId && (
-  <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={() => { setDraftScoutUserId(null); setDraftScoutData(null); }}>
+  <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={clearDraftScout}>
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="draft-scout-modal-title"
       tabIndex={-1}
-      onKeyDown={(e) => { if (e.key === "Escape") { setDraftScoutUserId(null); setDraftScoutData(null); } }}
+      onKeyDown={(e) => { if (e.key === "Escape") clearDraftScout(); }}
       className="bg-gray-900 p-6 rounded-xl w-[560px] max-h-[85vh] overflow-y-auto"
       onClick={(e) => e.stopPropagation()}
     >
@@ -6262,12 +5911,12 @@ const myPlayerSet = new Set<string>(roster?.players || []);
                 {league.picks.length === 0 ? (
                   <div className="text-xs text-gray-500 italic">No picks made yet</div>
                 ) : (
-                  league.picks.map((pick, j) => {
+                  league.picks.map((pick) => {
                     const name = pick.player?.full_name || pick.playerName || "Unknown";
                     const pos = pick.player?.position || pick.position || "—";
                     return (
                       <div
-                        key={pick.slot ?? j}
+                        key={pick.slot ?? `${pick.round}-${name}`}
                         className="flex items-center justify-between bg-gray-800 rounded px-3 py-1.5 mb-1 text-sm"
                       >
                         <div className="flex items-center gap-2">
@@ -6293,7 +5942,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
       })()}
 
       <button
-        onClick={() => { setDraftScoutUserId(null); setDraftScoutData(null); }}
+        onClick={clearDraftScout}
         aria-label="Close draft scout modal"
         className="mt-2 w-full bg-blue-600 p-2 rounded text-sm"
       >
@@ -6387,8 +6036,8 @@ const myPlayerSet = new Set<string>(roster?.players || []);
                   <div className="text-[10px] text-green-400 font-semibold uppercase mb-1">
                     Received
                   </div>
-                  {allReceived.length ? allReceived.map((item, j) => (
-                    <div key={item || j} className="text-sm text-white py-0.5">{item}</div>
+                  {allReceived.length ? allReceived.map((item) => (
+                    <div key={item} className="text-sm text-white py-0.5">{item}</div>
                   )) : (
                     <div className="text-xs text-gray-500 italic">Nothing</div>
                   )}
@@ -6399,8 +6048,8 @@ const myPlayerSet = new Set<string>(roster?.players || []);
                   <div className="text-[10px] text-red-400 font-semibold uppercase mb-1">
                     Gave
                   </div>
-                  {allGiven.length ? allGiven.map((item, j) => (
-                    <div key={item || j} className="text-sm text-white py-0.5">{item}</div>
+                  {allGiven.length ? allGiven.map((item) => (
+                    <div key={item} className="text-sm text-white py-0.5">{item}</div>
                   )) : (
                     <div className="text-xs text-gray-500 italic">Nothing</div>
                   )}
@@ -6520,8 +6169,8 @@ const myPlayerSet = new Set<string>(roster?.players || []);
                     <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">
                       Owned in {selectedLeague?.name || "Selected League"}
                     </p>
-                    {ownersInSelectedLeague.map((name, i) => (
-                      <p key={name || i} className="text-sm text-white">{name}</p>
+                    {ownersInSelectedLeague.map((name) => (
+                      <p key={name} className="text-sm text-white">{name}</p>
                     ))}
                   </div>
                 )}
@@ -6530,8 +6179,8 @@ const myPlayerSet = new Set<string>(roster?.players || []);
                   <div className="bg-gray-900 rounded-xl p-3 border border-gray-800">
                     <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Cross-League Ownership</p>
                     <div className="space-y-1">
-                      {crossLeagueOwners.map((entry, i) => (
-                        <div key={`${entry.owner}-${entry.leagueName}` || i} className="flex items-baseline justify-between text-xs">
+                      {crossLeagueOwners.map((entry) => (
+                        <div key={`${entry.owner}-${entry.leagueName}`} className="flex items-baseline justify-between text-xs">
                           <span className="text-white truncate mr-2">{entry.owner}</span>
                           <span className="text-gray-500 shrink-0">{entry.leagueName}</span>
                         </div>
@@ -6603,6 +6252,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
       </div>
     </main>
     </RosterProvider>
+    </ValuesProvider>
     </LeagueProvider>
     </PlayersProvider>
     </AuthProvider>

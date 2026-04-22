@@ -8,6 +8,7 @@ const log = logger("components/DraftHub");
 import { usePlayers } from "../lib/PlayersContext";
 import { useAuth } from "../lib/AuthContext";
 import { useLeague } from "../lib/LeagueContext";
+import { useValues } from "../lib/ValuesContext";
 import PickValuesTab from "./draft/PickValuesTab";
 import { CURRENT_YEAR as ROOKIE_YEAR } from "../lib/helpers";
 import type {
@@ -214,9 +215,6 @@ interface DraftHubProps {
 
   // New props for new features
   leagues: SleeperLeague[];
-  calcFcValues: Record<string, number>;
-  pickFcValues: Record<string, number>;
-  fcNameValues: Record<string, number>;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
@@ -232,11 +230,16 @@ function DraftHub({
   draftedPlayerIds, predictedDraftPicks, topAvailableRookies,
   refreshDraftBoard, loadDraftScout, movePlayer, handleRankChange,
   loadingDraftRefresh,
-  leagues, calcFcValues, pickFcValues, fcNameValues,
+  leagues,
 }: DraftHubProps) {
   const players = usePlayers();
   const { supabaseUser } = useAuth();
   const { selectedLeague, rosters, users } = useLeague();
+  const {
+    leagueAdjustedFcValues: calcFcValues,
+    pickFcValues,
+    fcNameValues,
+  } = useValues();
 
   // ── Internal state ───────────────────────────────────────────────────────
   // Tier labels: { playerId: tierNumber 1-15 }

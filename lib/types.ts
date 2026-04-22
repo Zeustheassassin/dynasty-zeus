@@ -743,8 +743,8 @@ export interface PredictedPick {
 // year, LeagueMgmtRow uses an index signature for `paid_*` keys.
 
 export interface LeagueMgmtRow {
-  /** Dynamic payment year keys: paid_2026, paid_2027, … */
-  [paidYear: `paid_${number}`]: boolean | undefined;
+  /** Covers paid_2026, paid_2027, … and all other dynamic keys */
+  [key: string]: boolean | string | undefined;
   commissioner: boolean;
   year_in_advance: boolean;
   picks_traded: boolean;

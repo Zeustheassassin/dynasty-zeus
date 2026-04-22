@@ -8,13 +8,14 @@ import {
 import type {
   TradeAttempt, TradeAttemptStatus, TradeAttemptAsset, TradeAttemptPick,
   SleeperPlayer, SleeperLeague, SleeperRoster, SleeperUser,
-  AugmentedPick, DynamicPickValue, RosterDirectionProfile,
-  LeagueSimulation, LeagueMateView, TradePartnerRanking, HistoricalSnapshot,
+  AugmentedPick,
+  LeagueMateView, TradePartnerRanking, HistoricalSnapshot,
   SleeperTradedPick, FcTrendEntry,
 } from "../lib/types";
 import type { AnnotatedTrade } from "../hooks/useUserTrades";
 import { usePlayers } from "../lib/PlayersContext";
 import { useLeague } from "../lib/LeagueContext";
+import { useValues } from "../lib/ValuesContext";
 
 const BASE_YEAR_TH = new Date().getFullYear();
 const YEARS = Array.from({ length: 3 }, (_, index) => String(BASE_YEAR_TH + index));
@@ -29,15 +30,6 @@ interface TradeHubProps {
   leagues: SleeperLeague[];
   user: SleeperUser | null;
   allPicks: AugmentedPick[];
-  pickFcValues: Record<string, number>;
-  calcFcValues: Record<string, number>;
-  redraftValues: Record<string, number>;
-  selectedLeagueDynamicPickValues: Record<string, DynamicPickValue>;
-
-  // Computed direction / sim
-  selectedLeagueDirection: RosterDirectionProfile | null;
-  selectedLeagueDirectionAdjusted: RosterDirectionProfile | null;
-  selectedLeagueSimulation: LeagueSimulation | null;
 
   // Trade calculator state
   calcOpponentRosterId: number | null;
@@ -191,8 +183,6 @@ const ordinalSuffix = (n: number): string => {
 function TradeHub({
   tradeHubSection, setTradeHubSection,
   leagues: _leagues, user, allPicks,
-  pickFcValues, calcFcValues, redraftValues, selectedLeagueDynamicPickValues,
-  selectedLeagueDirection: _selectedLeagueDirection, selectedLeagueDirectionAdjusted, selectedLeagueSimulation,
   calcOpponentRosterId, setCalcOpponentRosterId,
   calcGive, setCalcGive, calcReceive, setCalcReceive,
   calcGivePicks, setCalcGivePicks, calcReceivePicks, setCalcReceivePicks,
@@ -222,6 +212,15 @@ function TradeHub({
 }: TradeHubProps) {
   const players = usePlayers();
   const { selectedLeague, rosters, users } = useLeague();
+  const {
+    leagueAdjustedFcValues: calcFcValues,
+    leagueAdjustedRedraftValues: redraftValues,
+    pickFcValues,
+    selectedLeagueDirection: _selectedLeagueDirection,
+    selectedLeagueDirectionAdjusted,
+    selectedLeagueSimulation,
+    selectedLeagueDynamicPickValues,
+  } = useValues();
 
   // ── Finder pre-computations ─────────────────────────────────────────────
   // These are memoized at component level so they survive re-renders caused
@@ -5051,8 +5050,8 @@ function TradeHub({
                   <div>
                     <div className="text-[10px] font-bold uppercase tracking-widest text-red-400 mb-1.5">You Gave</div>
                     <div className="space-y-1">
-                      {allGiven.map((item, j) => (
-                        <div key={`${item.name}-${j}`} className="flex items-center justify-between rounded-lg bg-gray-800 px-2 py-1.5">
+                      {allGiven.map((item) => (
+                        <div key={item.name} className="flex items-center justify-between rounded-lg bg-gray-800 px-2 py-1.5">
                           <div className="flex items-center gap-1.5 min-w-0">
                             <span className="text-xs text-white truncate">{item.name}</span>
                             <span className="text-[10px] text-gray-500 shrink-0 uppercase">{item.pos}</span>
@@ -5066,8 +5065,8 @@ function TradeHub({
                   <div>
                     <div className="text-[10px] font-bold uppercase tracking-widest text-green-400 mb-1.5">You Received</div>
                     <div className="space-y-1">
-                      {allReceived.map((item, j) => (
-                        <div key={`${item.name}-${j}`} className="flex items-center justify-between rounded-lg bg-gray-800 px-2 py-1.5">
+                      {allReceived.map((item) => (
+                        <div key={item.name} className="flex items-center justify-between rounded-lg bg-gray-800 px-2 py-1.5">
                           <div className="flex items-center gap-1.5 min-w-0">
                             <span className="text-xs text-white truncate">{item.name}</span>
                             <span className="text-[10px] text-gray-500 shrink-0 uppercase">{item.pos}</span>

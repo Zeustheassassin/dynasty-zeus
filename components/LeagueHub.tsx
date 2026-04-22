@@ -29,13 +29,11 @@ import type {
   SleeperUser,
   RookieBoardPlayer,
   ProjectionRow,
-  RosterDirectionProfile,
   CommittedSimsByLeague,
   CachedSimRow,
   LeagueOverviewEntry,
   LeagueMateView,
   LineupCoachRow,
-  LeagueSimulation,
   SimulationTeamRow,
 } from "../lib/types";
 import { LEAGUE_HUB_GROUPS } from "../lib/leagueHubGroups";
@@ -43,6 +41,7 @@ import { supabase } from "../lib/supabaseclient";
 import { usePlayers } from "../lib/PlayersContext";
 import { useAuth } from "../lib/AuthContext";
 import { useLeague } from "../lib/LeagueContext";
+import { useValues } from "../lib/ValuesContext";
 import { useMyRoster } from "../lib/RosterContext";
 import StandingsTab from "./league/StandingsTab";
 
@@ -97,9 +96,6 @@ interface LeagueHubProps {
   setSelectedLeague: (league: SleeperLeague | null) => void;
   picks: SleeperTradedPick[];
   allPicks: SleeperTradedPick[];
-  pickFcValues: Record<string, number>;
-  calcFcValues: Record<string, number>;
-  redraftValues: Record<string, number>;
 
   // Sim state
   committedSimsByLeague: CommittedSimsByLeague;
@@ -124,9 +120,6 @@ interface LeagueHubProps {
 
   // Computed
   teamSummary: TeamSummary | null;
-  selectedLeagueDirection: RosterDirectionProfile | null;
-  selectedLeagueDirectionAdjusted: RosterDirectionProfile | null;
-  selectedLeagueSimulation: LeagueSimulation | null;
   selectedLeagueMateProfilesView: LeagueMateView[];
 
   // Roster view state
@@ -199,12 +192,12 @@ interface LeagueHubProps {
 function LeagueHub({
   leagueHubTab, setLeagueHubTab, activeLeagueHubGroup,
   leagues, user, standings, setSelectedLeague,
-  picks, allPicks, pickFcValues, calcFcValues, redraftValues,
+  picks, allPicks,
   committedSimsByLeague, leagueSimCache, simQueue, simProgress,
   loadingLeagueMateIntel, loadingCrossLeagueMateIntel, loadingActivity, loadingLeagueWeeklyMatchups,
   leagueNotes, activityTransactions,
   leagueOverviewData, loadingLeagueOverview, leagueOverviewLoaded,
-  teamSummary, selectedLeagueDirection, selectedLeagueDirectionAdjusted, selectedLeagueSimulation, selectedLeagueMateProfilesView,
+  teamSummary, selectedLeagueMateProfilesView,
   activeTab, setActiveTab, search, setSearch,
   oppRosterTab, setOppRosterTab, oppRosterOwnerId, setOppRosterOwnerId, oppRosterSearch, setOppRosterSearch,
   prSortKey, setPrSortKey, prSortAsc, setPrSortAsc, prPopup, setPrPopup, prMode, setPrMode,
@@ -222,6 +215,14 @@ function LeagueHub({
   const { supabaseUser } = useAuth();
   const { selectedLeague, rosters, users } = useLeague();
   const { myRoster: roster } = useMyRoster();
+  const {
+    leagueAdjustedFcValues: calcFcValues,
+    leagueAdjustedRedraftValues: redraftValues,
+    pickFcValues,
+    selectedLeagueDirection,
+    selectedLeagueDirectionAdjusted,
+    selectedLeagueSimulation,
+  } = useValues();
   const [lastNoteSavedAt, setLastNoteSavedAt] = React.useState<number | null>(null);
   const [leagueMateIntelLoadedAt, setLeagueMateIntelLoadedAt] = React.useState<number | null>(null);
   const [simSavedAt, setSimSavedAt] = React.useState<number | null>(null);
@@ -243,8 +244,8 @@ function LeagueHub({
     await Promise.all(
       leagues.map((league) =>
         Promise.all([
-          fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`).then((r) => r.json()),
-          fetch(`https://api.sleeper.app/v1/league/${league.league_id}/traded_picks`).then((r) => r.json()),
+          fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`).then((r) => r.json()).catch(() => []),
+          fetch(`https://api.sleeper.app/v1/league/${league.league_id}/traded_picks`).then((r) => r.json()).catch(() => []),
           fetch(`https://api.sleeper.app/v1/league/${league.league_id}/drafts`).then((r) => r.json()).catch(() => []),
         ]).then(([allRosters, tradedPicksData, draftsData]) => {
           try {
@@ -1606,7 +1607,7 @@ const starters = starterSlots
               const projectionBySleeperId = new Map(
                 projectionData.map((row) => [String(row.sleeperId), row])
               );
-              const hasKickoffData = projectionData.some((row) => getProjectionKickoffAt(row as unknown as Record<string, unknown>));
+              const hasKickoffData = projectionData.some((row) => getProjectionKickoffAt(row));
 
               // Score function: uses projections if in-season, redraft values otherwise
               const playerScore = (id: string) => {
@@ -1620,7 +1621,7 @@ const starters = starterSlots
               const playerKickoffAt = (id: string) => {
                 if (!isInSeason) return null;
                 const proj = projectionBySleeperId.get(String(id));
-                return proj ? getProjectionKickoffAt(proj as unknown as Record<string, unknown>) : null;
+                return proj ? getProjectionKickoffAt(proj) : null;
               };
 
               const positions: string[] = selectedLeague.roster_positions?.filter((p: string) => !["BN","IR","TAXI"].includes(p)) ?? [];

@@ -368,11 +368,14 @@ async function compileDrafts(
       .sort((a, b) => a.avg_pick_no - b.avg_pick_no);
 
     // Delete old data for this user+year, then insert fresh rows
-    await supabaseClient
+    const { error: deleteError } = await supabaseClient
       .from("consensus_draft_cache")
       .delete()
       .eq("user_id", authUserId)
       .eq("year", year);
+    if (deleteError) {
+      emit({ type: "status", message: `Warning: could not clear old cache for ${year}: ${deleteError.message}`, progress: 70 });
+    }
 
     // Insert in batches of 200 to stay under Supabase request size limits
     for (let i = 0; i < rows.length; i += 200) {
@@ -383,7 +386,7 @@ async function compileDrafts(
     }
 
     // Save/update metadata for this year
-    await supabaseClient.from("consensus_draft_meta").upsert(
+    const { error: metaError } = await supabaseClient.from("consensus_draft_meta").upsert(
       {
         user_id:              authUserId,
         year,
@@ -394,6 +397,9 @@ async function compileDrafts(
       },
       { onConflict: "user_id,year" }
     );
+    if (metaError) {
+      emit({ type: "status", message: `Warning: metadata save failed for ${year}: ${metaError.message}`, progress: 90 });
+    }
 
     emit({
       type: "year_done",
@@ -412,7 +418,7 @@ async function compileDrafts(
 
 export async function POST(req: NextRequest): Promise<Response> {
   // Compile is very expensive — strict rate limit: 5 compilations per 10 minutes per IP
-  const rl = checkRateLimit(req, 5, 10 * 60_000, 'compile-consensus');
+  const rl = await checkRateLimit(req, 5, 10 * 60_000, 'compile-consensus');
   if (!rl.allowed) return rl.response;
 
   let body: { sleeperUserId?: string; accessToken?: string; years?: number[] };

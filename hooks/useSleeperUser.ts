@@ -6,7 +6,7 @@ import type { SleeperUser, SleeperLeague } from "../lib/types";
 // Sleeper dynasty league filter — same criteria used everywhere in the app.
 const isDynastyLeague = (l: SleeperLeague) =>
   ((l.settings?.taxi_slots ?? 0) > 0 || (l.roster_positions?.length ?? 0) > 20) &&
-  ((l.settings as unknown as Record<string, number>)?.best_ball ?? 0) === 0;
+  (l.settings?.best_ball ?? 0) === 0;
 
 interface UseSleeperUserOptions {
   /** Called after leagues are loaded (connect or initial hydration). */

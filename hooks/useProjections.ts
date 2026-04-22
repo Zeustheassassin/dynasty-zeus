@@ -1,5 +1,5 @@
 "use client";
-import { useState, type Dispatch, type SetStateAction } from "react";
+import { useState, useRef, type Dispatch, type SetStateAction } from "react";
 import { normalizeProjName, getProjectionKickoffAt } from "../lib/helpers";
 import { computeLeagueFpts, DEFAULT_SCORING } from "../lib/helpers/scoring";
 import type { SleeperPlayer, ProjectionRow } from "../lib/types";
@@ -62,7 +62,12 @@ export function useProjections(
   const [projectionLoaded, setProjectionLoaded] = useState(false);
   const [projectionUsesSeasonFallback, setProjectionUsesSeasonFallback] = useState(false);
 
+  // Monotonic counter: if a newer call starts before the previous one finishes,
+  // the older result is discarded so it can never overwrite fresher data.
+  const requestIdRef = useRef(0);
+
   const loadProjections = async (week: number | "season", extraSources: string[] = []) => {
+    const requestId = ++requestIdRef.current;
     setLoadingProjections(true);
     const statusMap: Record<string, boolean> = {};
     const now = new Date();
@@ -117,7 +122,7 @@ export function useProjections(
       const scalingRatios = new Map<string, number>();
 
       const getKickoffAt = (row: SleeperRawProjectionItem): number | null => {
-        const direct = getProjectionKickoffAt(row as Record<string, unknown>);
+        const direct = getProjectionKickoffAt(row);
         if (direct) return direct;
         const candidates = [
           row?.game?.kickoffAt, row?.game?.kickoff_at,
@@ -278,12 +283,13 @@ export function useProjections(
         });
       });
       rows.sort((a, b) => b.fpts - a.fpts);
+      if (requestId !== requestIdRef.current) return; // superseded by a newer call
       setProjectionData(rows);
       setProjectionSeasonYear(resolvedProjectionYear);
       setProjectionSourceStatus(statusMap);
       setProjectionLoaded(true);
     } finally {
-      setLoadingProjections(false);
+      if (requestId === requestIdRef.current) setLoadingProjections(false);
     }
   };
 

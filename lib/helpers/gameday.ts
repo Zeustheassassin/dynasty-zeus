@@ -3,16 +3,26 @@
 // Used by GamedayHub to determine game state and display times.
 // ============================================================
 
+interface KickoffSource {
+  kickoffAt?: unknown;
+  kickoff_at?: unknown;
+  gameTime?: unknown;
+  game_time?: unknown;
+  startTime?: unknown;
+  start_time?: unknown;
+}
+
 /** Extracts a kickoff timestamp (ms) from a raw Sleeper projection object,
  *  trying multiple field name variants returned by different API versions. */
-export const getProjectionKickoffAt = (projection: Record<string, unknown>): number | null => {
+export const getProjectionKickoffAt = (projection: KickoffSource | Record<string, unknown> | null | undefined): number | null => {
+  if (!projection) return null;
   const rawCandidates = [
-    projection?.kickoffAt,
-    projection?.kickoff_at,
-    projection?.gameTime,
-    projection?.game_time,
-    projection?.startTime,
-    projection?.start_time,
+    projection.kickoffAt,
+    projection.kickoff_at,
+    projection.gameTime,
+    projection.game_time,
+    projection.startTime,
+    projection.start_time,
   ];
   const parsed = rawCandidates
     .map((value) => Number(value))

@@ -9,7 +9,7 @@ import { withRetry } from '../../../../lib/withRetry';
 const log = logger('api/stats/sleeper-weekly');
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const rl = checkRateLimit(req, 30, 60_000, 'sleeper-weekly');
+  const rl = await checkRateLimit(req, 30, 60_000, 'sleeper-weekly');
   if (!rl.allowed) return rl.response;
 
   const { searchParams } = req.nextUrl;

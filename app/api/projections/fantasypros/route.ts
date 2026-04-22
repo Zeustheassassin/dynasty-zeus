@@ -43,7 +43,7 @@ function parseFPProjections(
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const rl = checkRateLimit(req, 20, 60_000, 'fantasypros');
+  const rl = await checkRateLimit(req, 20, 60_000, 'fantasypros');
   if (!rl.allowed) return rl.response;
 
   const { searchParams } = new URL(req.url);

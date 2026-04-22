@@ -14,7 +14,7 @@ const normalizeName = (value: string) =>
     .trim();
 
 export async function GET(request: NextRequest): Promise<Response> {
-  const rl = checkRateLimit(request, 15, 60_000, 'news');
+  const rl = await checkRateLimit(request, 15, 60_000, 'news');
   if (!rl.allowed) return rl.response;
 
   const playersParam = request.nextUrl.searchParams.get("players") || "";

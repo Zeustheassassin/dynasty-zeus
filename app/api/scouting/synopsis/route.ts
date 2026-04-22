@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { checkRateLimit } from "../../../../lib/rateLimit";
 
 export const maxDuration = 30;
 
 export async function POST(req: NextRequest) {
+  const rl = await checkRateLimit(req, 10, 60_000, "scouting-synopsis");
+  if (!rl.allowed) return rl.response;
+
   const { prospectName, position, totalPlays, notes } =
     (await req.json()) as {
       prospectName: string;

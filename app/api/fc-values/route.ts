@@ -8,7 +8,7 @@ import { withRetry } from '../../../lib/withRetry';
 const log = logger('api/fc-values');
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const rl = checkRateLimit(req, 30, 60_000, 'fc-values');
+  const rl = await checkRateLimit(req, 30, 60_000, 'fc-values');
   if (!rl.allowed) return rl.response;
 
   const numQbsRaw = parseInt(req.nextUrl.searchParams.get('numQbs') ?? '2', 10);

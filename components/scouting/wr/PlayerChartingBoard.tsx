@@ -1,6 +1,9 @@
 "use client";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "../../../lib/supabaseclient";
+import { logger } from "../../../lib/logger";
+
+const log = logger("scouting/PlayerChartingBoard");
 import PlayerSynopsisCard from "../PlayerSynopsisCard";
 import BulkGameImport from "../BulkGameImport";
 import SummaryGameImport from "../SummaryGameImport";
@@ -369,7 +372,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
     if (!error && data) {
       setPlays((prev) => [...prev, ...(data as RoutePlay[])]);
     }
-    if (gErr) console.error("summary totals save", gErr.message);
+    if (gErr) log.error("summary totals save", { err: gErr.message });
     onDataChanged();
     setShowSummaryImport(false);
   }

@@ -22,7 +22,3 @@ export const normalizeRookieName = (name: string) =>
     .replace(/\b(jr|sr|ii|iii|iv|v)\b\.?/gi, "")
     .replace(/[^a-z]/g, "")
     .trim();
-
-/** Stub — Sleeper ADP rookie board builder (not yet implemented). */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export const buildSleeperRookieBoard = (_playerMap: Record<string, unknown>) => [];

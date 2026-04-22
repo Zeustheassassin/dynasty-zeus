@@ -118,8 +118,7 @@ function ManagementHub({
   const toggleLeagueMgmt = async (leagueId: string, key: string) => {
     if (!supabaseUser) return;
     const current = leagueMgmtData[leagueId] || {};
-    const currentAsMap = current as unknown as Record<string, unknown>;
-    const updated = { ...current, [key]: !currentAsMap[key] };
+    const updated = { ...current, [key]: !current[key] };
     setLeagueMgmtData((prev) => ({ ...prev, [leagueId]: updated }));
     await upsertLeagueMgmt(leagueId, updated);
   };
@@ -133,7 +132,7 @@ function ManagementHub({
 
   const handleAmountBlur = async (leagueId: string) => {
     const updated = leagueMgmtData[leagueId] || {};
-    await upsertLeagueMgmt(leagueId, updated as unknown as Record<string, boolean | string | undefined>);
+    await upsertLeagueMgmt(leagueId, updated);
   };
 
   const handleCommLeagueSelect = async (leagueId: string) => {
@@ -335,7 +334,7 @@ function ManagementHub({
                           >
                             <input
                               type="checkbox"
-                              checked={!!(row as unknown as Record<string, unknown>)[col.key]}
+                              checked={!!row[col.key]}
                               onChange={() => toggleLeagueMgmt(league.league_id, col.key)}
                               className="w-4 h-4 accent-blue-500 cursor-pointer"
                             />

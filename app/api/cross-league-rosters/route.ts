@@ -8,7 +8,7 @@ import { withRetry } from '../../../lib/withRetry';
 const log = logger('api/cross-league-rosters');
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const rl = checkRateLimit(req, 60, 60_000, 'cross-league-rosters');
+  const rl = await checkRateLimit(req, 60, 60_000, 'cross-league-rosters');
   if (!rl.allowed) return rl.response;
 
   const { searchParams } = req.nextUrl;

@@ -1,5 +1,4 @@
 "use client";
-import { motion } from "framer-motion";
 
 type DashboardProps = {
   username: string;
@@ -85,7 +84,7 @@ export default function Dashboard({
             className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3"
           >
             {row.map((item) => (
-              <motion.button
+              <button
                 key={item.tab}
                 type="button"
                 aria-label={item.title}
@@ -95,9 +94,10 @@ export default function Dashboard({
                   if (!isConnected) return;
                   onNavigate(item.tab);
                 }}
-                whileHover={isConnected ? { scale: 1.03 } : {}}
-                className={`relative h-44 w-full overflow-hidden rounded-3xl border border-slate-800 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 ${
-                  isConnected ? "cursor-pointer" : "cursor-not-allowed opacity-40"
+                className={`relative h-44 w-full overflow-hidden rounded-3xl border border-slate-800 text-left transition-transform duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 ${
+                  isConnected
+                    ? "cursor-pointer hover:scale-[1.03]"
+                    : "cursor-not-allowed opacity-40"
                 }`}
               >
                 <img
@@ -118,7 +118,7 @@ export default function Dashboard({
                     <p className="mt-1 text-xs text-slate-300">Connect to unlock</p>
                   )}
                 </div>
-              </motion.button>
+              </button>
             ))}
           </div>
         ))}

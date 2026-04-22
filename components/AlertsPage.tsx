@@ -1003,8 +1003,8 @@ export default function AlertsPage({
                       {/* Action bullets */}
                       {b.bullets.length > 0 && (
                         <ul className="space-y-1">
-                          {b.bullets.map((bullet, i) => (
-                            <li key={bullet || i} className="flex items-start gap-2 text-xs text-slate-400">
+                          {b.bullets.map((bullet) => (
+                            <li key={bullet} className="flex items-start gap-2 text-xs text-slate-400">
                               <span className="mt-0.5 shrink-0 text-slate-600">•</span>
                               <span>{bullet}</span>
                             </li>

@@ -1,4 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { checkRateLimit } from "../../../lib/rateLimit";
+import { logger } from "../../../lib/logger";
+
+const log = logger("api/gm-briefing");
 
 export const maxDuration = 60;
 
@@ -217,6 +221,9 @@ ${ctx.recentNews.map((h, i) => `  ${i + 1}. ${h}`).join("\n")}` : ""}`;
 }
 
 export async function POST(req: NextRequest) {
+  const rl = await checkRateLimit(req, 5, 10 * 60_000, "gm-briefing");
+  if (!rl.allowed) return rl.response;
+
   let userId = "", leagueId = "", rosterId = 0, leagueName = "", context: BriefingContext | null = null;
   try {
     const body = (await req.json()) as RequestBody;
@@ -226,7 +233,7 @@ export async function POST(req: NextRequest) {
     leagueName = body.leagueName;
     context = body.context;
   } catch (e) {
-    console.error("[gm-briefing] Failed to parse request body:", e);
+    log.error("Failed to parse request body", { err: String(e) });
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 
@@ -248,7 +255,7 @@ export async function POST(req: NextRequest) {
   try {
     prompt = buildPrompt(context!);
   } catch (e) {
-    console.error("[gm-briefing] buildPrompt threw:", e);
+    log.error("buildPrompt threw", { err: String(e) });
     return NextResponse.json({ error: `buildPrompt error: ${String(e)}` }, { status: 500 });
   }
 
@@ -268,13 +275,13 @@ export async function POST(req: NextRequest) {
       }),
     });
   } catch (e) {
-    console.error("[gm-briefing] Anthropic fetch threw:", e);
+    log.error("Anthropic fetch threw", { err: String(e) });
     return NextResponse.json({ error: `Network error: ${String(e)}` }, { status: 500 });
   }
 
   if (!res.ok) {
     const err = await res.text();
-    console.error("[gm-briefing] Anthropic returned", res.status, err);
+    log.error("Anthropic returned error", { anthropicStatus: res.status, err });
     return NextResponse.json({ error: err, anthropicStatus: res.status }, { status: 500 });
   }
 
