@@ -258,7 +258,6 @@ export function useCrossLeagueMateIntel({
 
     loadCrossLeagueMateIntel();
     return () => { cancelled = true; controller.abort(); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leagueId, rosters, userId, players, mainTab, leagueHubTab, tradeHubSection, crossLeagueMateIntel]);
 
   return { crossLeagueMateIntel, loadingCrossLeagueMateIntel };

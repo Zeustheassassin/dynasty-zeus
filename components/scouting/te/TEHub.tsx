@@ -1,5 +1,5 @@
 "use client";
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, startTransition } from "react";
 import dynamic from "next/dynamic";
 import type { Prospect, ProspectWithStats } from "../../../lib/types";
 
@@ -38,7 +38,7 @@ export default function TEHub({
 
   useEffect(() => {
     if (navigateToProspect) {
-      setSelectedProspect(navigateToProspect);
+      startTransition(() => { setSelectedProspect(navigateToProspect); });
       onNavigated?.();
     }
   }, [navigateToProspect, onNavigated]);

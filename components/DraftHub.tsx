@@ -638,7 +638,6 @@ function DraftHub({
   // ── Remove a single player from compiled data for a year ────────────────
   const removeCompiledPlayer = async (year: string, playerId: string) => {
     if (!supabaseUser) return;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await supabase.from("consensus_draft_cache")
       .delete()
       .eq("user_id", supabaseUser.id)
@@ -653,10 +652,8 @@ function DraftHub({
   // ── Clear all data for a specific compiled year ──────────────────────────
   const clearYear = async (year: number) => {
     if (!supabaseUser) return;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await supabase.from("consensus_draft_cache")
       .delete().eq("user_id", supabaseUser.id).eq("year", year);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await supabase.from("consensus_draft_meta")
       .delete().eq("user_id", supabaseUser.id).eq("year", year);
     setConsensusMeta((prev) => { const n = { ...prev }; delete n[String(year)]; return n; });
@@ -1600,7 +1597,7 @@ function DraftHub({
                                   key={yr}
                                   onClick={() => setCompileSelectedYears((prev) => {
                                     const next = new Set(prev);
-                                    next.has(yr) ? next.delete(yr) : next.add(yr);
+                                    if (next.has(yr)) next.delete(yr); else next.add(yr);
                                     return next;
                                   })}
                                   className={`text-xs px-2.5 py-1 rounded-lg border transition flex items-center gap-1 ${

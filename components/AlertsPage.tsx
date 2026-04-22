@@ -245,7 +245,6 @@ function TxCard({ tx, players }: { tx: LeagueTransaction; players: Record<string
 export default function AlertsPage({
   alerts,
   actionableAlerts,
-  watchlistEntries: _watchlistEntries,
   onDismissAlert,
   loadingExternalAlerts,
   leagueTransactions,
@@ -271,7 +270,6 @@ export default function AlertsPage({
 
   useEffect(() => {
     if (feedTab !== "news") return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadingNews(true);
     fetch("/api/alerts/news")
       .then((r) => r.json())
@@ -282,7 +280,6 @@ export default function AlertsPage({
 
   useEffect(() => {
     if (feedTab !== "beat") return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadingBeat(true);
     const ownedNames = Object.values(players)
       .filter((p) => p?.full_name)
@@ -298,7 +295,6 @@ export default function AlertsPage({
 
   useEffect(() => {
     if (feedTab !== "wire") return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadingWire(true);
     fetch("/api/alerts/beat-reports?filter=transactions")
       .then((r) => r.json())

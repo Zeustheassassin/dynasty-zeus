@@ -28,7 +28,6 @@ function emit(level: LogLevel, context: string, msg: string, extra?: Record<stri
   try {
     if (IS_PROD) {
       const entry: LogEntry = { ts: new Date().toISOString(), level, context, msg, ...extra };
-      // eslint-disable-next-line no-console
       console[level === "debug" ? "log" : level](JSON.stringify(entry));
     } else {
       const prefix = `[${context}]`;
@@ -36,7 +35,7 @@ function emit(level: LogLevel, context: string, msg: string, extra?: Record<stri
                : level === "warn"  ? console.warn
                : level === "debug" ? console.debug
                : console.log;
-      extra ? fn(prefix, msg, extra) : fn(prefix, msg);
+      if (extra) fn(prefix, msg, extra); else fn(prefix, msg);
     }
   } catch {
     // Logging must never crash the caller

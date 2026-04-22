@@ -1,5 +1,5 @@
 "use client";
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, startTransition } from "react";
 import dynamic from "next/dynamic";
 import { supabase } from "../../../lib/supabaseclient";
 import type { Prospect, ProspectWithStats, ChartingDecision } from "../../../lib/types";
@@ -45,7 +45,7 @@ export default function QBHub({
 
   useEffect(() => {
     if (navigateToProspect) {
-      setSelectedProspect(navigateToProspect);
+      startTransition(() => { setSelectedProspect(navigateToProspect); });
       onNavigated?.();
     }
   }, [navigateToProspect, onNavigated]);
