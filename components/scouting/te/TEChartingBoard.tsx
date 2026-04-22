@@ -80,7 +80,8 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged }: Pro
   const [playError, setPlayError]             = useState<string | null>(null);
   const [editingPlayId, setEditingPlayId]     = useState<string | null>(null);
 
-  const [notesSummary, setNotesSummary]               = useState<string | null>(null);
+  const [notesSummaryData, setNotesSummaryData] = useState<{ pid: string; text: string } | null>(null);
+  const notesSummary = notesSummaryData?.pid === prospect.id ? notesSummaryData.text : null;
   const [loadingNotesSummary, setLoadingNotesSummary] = useState(false);
 
   const cs = useChartingState(prospect, {
@@ -92,15 +93,11 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged }: Pro
           onAddGame, onDeleteGame, onToggleEditBio, onBioChange, onSaveBio } = cs;
 
   useEffect(() => {
-    if (games.length === 0) { setPlays([]); return; }
+    if (games.length === 0) return;
     const ids = games.map((g) => g.id);
     supabase.from("te_plays").select("*").in("game_id", ids).order("created_at")
       .then(({ data }) => setPlays((data ?? []) as TEPlay[]));
   }, [games]);
-
-  useEffect(() => {
-    setNotesSummary(null);
-  }, [prospect.id]);
 
   const gamePlays = useMemo(
     () => plays.filter((p) => p.game_id === selectedGameId),
@@ -289,8 +286,8 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged }: Pro
         body: JSON.stringify({ notes, totalPlays: plays.length, position: "TE" }),
       });
       const { summary, error } = await res.json() as { summary?: string; error?: string };
-      setNotesSummary(summary ?? error ?? "Failed to generate summary.");
-    } catch { setNotesSummary("Failed to generate summary."); }
+      setNotesSummaryData({ pid: prospect.id, text: summary ?? error ?? "Failed to generate summary." });
+    } catch { setNotesSummaryData({ pid: prospect.id, text: "Failed to generate summary." }); }
     setLoadingNotesSummary(false);
   }
 

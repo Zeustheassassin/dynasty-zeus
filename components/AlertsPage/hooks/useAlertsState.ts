@@ -21,7 +21,7 @@ export function useAlertsState({
   rosterBriefings,
   players,
 }: Params) {
-  const [feedTab, setFeedTab] = useState<FeedTabKey>("briefing");
+  const [feedTab, setFeedTabRaw] = useState<FeedTabKey>("briefing");
   const [expandedInjuryId, setExpandedInjuryId] = useState<string | null>(null);
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
   const [loadingNews, setLoadingNews] = useState(false);
@@ -30,9 +30,15 @@ export function useAlertsState({
   const [wireItems, setWireItems] = useState<BeatItem[]>([]);
   const [loadingWire, setLoadingWire] = useState(false);
 
+  const setFeedTab = (tab: FeedTabKey) => {
+    setFeedTabRaw(tab);
+    if (tab === "news") setLoadingNews(true);
+    else if (tab === "beat") setLoadingBeat(true);
+    else if (tab === "wire") setLoadingWire(true);
+  };
+
   useEffect(() => {
     if (feedTab !== "news") return;
-    setLoadingNews(true);
     fetch("/api/alerts/news")
       .then((r) => r.json())
       .then((data) => setNewsItems(data.items ?? []))
@@ -42,7 +48,6 @@ export function useAlertsState({
 
   useEffect(() => {
     if (feedTab !== "beat") return;
-    setLoadingBeat(true);
     const ownedNames = Object.values(players)
       .filter((p) => p?.full_name)
       .map((p) => p.full_name)
@@ -57,7 +62,6 @@ export function useAlertsState({
 
   useEffect(() => {
     if (feedTab !== "wire") return;
-    setLoadingWire(true);
     fetch("/api/alerts/beat-reports?filter=transactions")
       .then((r) => r.json())
       .then((data) => setWireItems(data.items ?? []))

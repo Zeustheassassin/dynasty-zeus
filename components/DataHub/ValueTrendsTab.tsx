@@ -23,8 +23,19 @@ export default function ValueTrendsTab({ historicalSnapshot, onSaveSnapshot, sha
   const [trendPos, setTrendPos] = React.useState("ALL");
   const [savingSnapshot, setSavingSnapshot] = React.useState(false);
   const [snapshotSavedAt, setSnapshotSavedAt] = React.useState<number | null>(null);
+  const [mountedAt] = React.useState(() => Date.now());
 
   const snap = historicalSnapshot;
+  const snapshotDate = snap ? new Date(snap.recorded_at) : null;
+  const { ageLabel, isStaleSnapshot } = React.useMemo(() => {
+    if (!snap) return { ageLabel: "", isStaleSnapshot: false };
+    const ageMs = mountedAt - new Date(snap.recorded_at).getTime();
+    const ageDays = Math.floor(ageMs / (1000 * 60 * 60 * 24));
+    const ageHours = Math.floor(ageMs / (1000 * 60 * 60));
+    const ageLabel = ageDays >= 2 ? `${ageDays} days ago` : ageDays === 1 ? "yesterday" : `${ageHours}h ago`;
+    return { ageLabel, isStaleSnapshot: ageDays >= 7 };
+  }, [snap, mountedAt]);
+
   if (!snap) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
@@ -36,13 +47,6 @@ export default function ValueTrendsTab({ historicalSnapshot, onSaveSnapshot, sha
       </div>
     );
   }
-
-  const snapshotDate = new Date(snap.recorded_at);
-  const ageMs = Date.now() - snapshotDate.getTime();
-  const ageDays = Math.floor(ageMs / (1000 * 60 * 60 * 24));
-  const ageHours = Math.floor(ageMs / (1000 * 60 * 60));
-  const ageLabel = ageDays >= 2 ? `${ageDays} days ago` : ageDays === 1 ? "yesterday" : `${ageHours}h ago`;
-  const isStaleSnapshot = ageDays >= 7;
 
   type TrendRow = {
     playerId: string;
@@ -322,7 +326,7 @@ export default function ValueTrendsTab({ historicalSnapshot, onSaveSnapshot, sha
       <div className={`flex flex-wrap items-center gap-2 mb-5 rounded-xl border px-4 py-2.5 ${isStaleSnapshot ? "border-amber-700/50 bg-amber-950/20" : "border-gray-800 bg-gray-900/60"}`}>
         <span className={`text-[11px] ${isStaleSnapshot ? "text-amber-400" : "text-gray-500"}`}>Comparing current values against snapshot from</span>
         <span className={`text-[11px] font-semibold ${isStaleSnapshot ? "text-amber-300" : "text-gray-300"}`}>{ageLabel}</span>
-        <span className="text-[11px] text-gray-600">({snapshotDate.toLocaleDateString()})</span>
+        <span className="text-[11px] text-gray-600">({snapshotDate?.toLocaleDateString()})</span>
         {isStaleSnapshot && <span className="text-[10px] text-amber-500 font-semibold">· snapshot may be stale</span>}
         <span className="text-[10px] text-gray-600">{Object.keys(snap.players).length} players tracked</span>
         <button

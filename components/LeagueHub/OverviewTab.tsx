@@ -58,6 +58,7 @@ export default function OverviewTab({
   } = useValues();
   const [refreshingRosters, setRefreshingRosters] = React.useState(false);
   const [rosterRefreshProgress, setRosterRefreshProgress] = React.useState<{ done: number; total: number } | null>(null);
+  const [mountedAt] = React.useState(() => Date.now());
 
   const handleRefreshAllRosters = React.useCallback(async () => {
     setRefreshingRosters(true);
@@ -92,23 +93,20 @@ export default function OverviewTab({
     return () => clearTimeout(t);
   }, [leagues, selectedLeague, loadRoster]);
 
-  if (loadingLeagueOverview) return <p className="text-sm text-blue-400">Loading league data…</p>;
-  if (!leagues.length) return <p className="text-sm text-gray-500">No leagues found.</p>;
-
-  const bucketOrder: Record<string, number> = {
-    Elite: 0,
-    "True Contender": 1,
-    "Almost There": 2,
-    "Fading Contender": 3,
-    "Window Closing": 4,
-    Purgatory: 5,
-    Rebuilder: 6,
-    Stranded: 7,
-    "Fading Out": 8,
-    Hopeless: 9,
-  };
-
-  const leagueRows = leagues.map((league) => {
+  const leagueRows = React.useMemo(() => {
+    const bucketOrder: Record<string, number> = {
+      Elite: 0,
+      "True Contender": 1,
+      "Almost There": 2,
+      "Fading Contender": 3,
+      "Window Closing": 4,
+      Purgatory: 5,
+      Rebuilder: 6,
+      Stranded: 7,
+      "Fading Out": 8,
+      Hopeless: 9,
+    };
+    return leagues.map((league) => {
     const entry = leagueOverviewData[league.league_id];
     if (!entry) return null;
     const lr = entry.rosters;
@@ -130,7 +128,7 @@ export default function OverviewTab({
     const playoffOdds = committedRow?.playoffOdds ?? cachedSimRow?.playoff_odds ?? 0;
     const hasCachedSim = !!(committedRow ?? cachedSimRow);
     const simAge = cachedSimRow?.computed_at
-      ? Math.round((Date.now() - new Date(cachedSimRow.computed_at).getTime()) / (1000 * 60 * 60))
+      ? Math.round((mountedAt - new Date(cachedSimRow.computed_at).getTime()) / (1000 * 60 * 60))
       : null;
     const adjBucket = getAdjustedDirectionBucket(profile.bucket, profile, playoffOdds, hasCachedSim);
     const adjColor = getBucketColor(adjBucket);
@@ -151,6 +149,10 @@ export default function OverviewTab({
     if (a.dynRank !== b.dynRank) return a.dynRank - b.dynRank;
     return a.league.name.localeCompare(b.league.name);
   });
+  }, [leagues, leagueOverviewData, user, calcFcValues, redraftValues, pickFcValues, players, committedSimsByLeague, leagueSimCache, mountedAt]);
+
+  if (loadingLeagueOverview) return <p className="text-sm text-blue-400">Loading league data…</p>;
+  if (!leagues.length) return <p className="text-sm text-gray-500">No leagues found.</p>;
 
   return (
     <div className="space-y-2">

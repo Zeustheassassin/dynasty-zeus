@@ -32,7 +32,7 @@ export default function LeaguematesTab({
   loadingLeagueMateStats, setLoadingLeagueMateStats,
   leagueMateSearch, setLeagueMateSearch,
   leagueMateSort, setLeagueMateSort,
-  loadUserExposure, selectedUserId: _selectedUserId,
+  loadUserExposure,
   externalShares, loadingShares,
   leagues, user,
 }: LeaguematesTabProps) {

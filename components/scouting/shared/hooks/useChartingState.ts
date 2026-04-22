@@ -38,7 +38,6 @@ export function useChartingState(prospect: Prospect, options: Options) {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadGames();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setBio({
       height: prospect.height, weight: prospect.weight, birthday: prospect.birthday,
       draft_class_year: prospect.draft_class_year, personal_rank: prospect.personal_rank,

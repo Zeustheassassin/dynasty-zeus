@@ -85,7 +85,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
           onAddGame, onDeleteGame, onToggleEditBio, onBioChange, onSaveBio } = cs;
 
   useEffect(() => {
-    if (games.length === 0) { setPlays([]); return; }
+    if (games.length === 0) return;
     const ids = games.map((g) => g.id);
     (async () => {
       const allPlays: RoutePlay[] = [];

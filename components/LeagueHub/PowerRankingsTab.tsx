@@ -6,16 +6,62 @@ import { useLeague } from "../../lib/LeagueContext";
 import { useValues } from "../../lib/ValuesContext";
 import type { SleeperUser, SleeperTradedPick, SleeperPlayer } from "../../lib/types";
 
+type PrSortKey = "dynTotal" | "redTotal" | "qbTotal" | "rbTotal" | "wrTotal" | "teTotal";
+type PrColKey = "dyn" | "red" | "QB" | "RB" | "WR" | "TE";
+
+function SortTh({ col, label, prSortKey, prSortAsc, setPrSortKey, setPrSortAsc }: {
+  col: PrSortKey;
+  label: string;
+  prSortKey: PrSortKey;
+  prSortAsc: boolean;
+  setPrSortKey: (key: PrSortKey) => void;
+  setPrSortAsc: React.Dispatch<React.SetStateAction<boolean>>;
+}) {
+  const active = prSortKey === col;
+  return (
+    <th
+      className="text-center pb-2 px-2 cursor-pointer select-none hover:text-white transition"
+      onClick={() => { if (active) setPrSortAsc(v => !v); else { setPrSortKey(col); setPrSortAsc(false); } }}
+    >
+      {label}{active ? (prSortAsc ? " ↑" : " ↓") : ""}
+    </th>
+  );
+}
+
+function RankPill({ r, rosterId, col, teamCount, setPrPopup }: {
+  r: number;
+  rosterId: number;
+  col: PrColKey;
+  teamCount: number;
+  setPrPopup: (popup: { rosterId: number; col: PrColKey } | null) => void;
+}) {
+  const top3rd = Math.ceil(teamCount / 3);
+  const bot3rd = teamCount - Math.floor(teamCount / 3) + 1;
+  const color = r <= top3rd
+    ? "bg-green-900/40 text-green-400 border-green-700"
+    : r >= bot3rd
+    ? "bg-red-900/40 text-red-400 border-red-700"
+    : "bg-gray-800/60 text-gray-400 border-gray-700";
+  return (
+    <button
+      onClick={() => setPrPopup({ rosterId, col })}
+      className={`inline-block text-[11px] font-bold px-2 py-0.5 rounded-full border transition hover:opacity-80 cursor-pointer ${color}`}
+    >
+      {ordinal(r)}
+    </button>
+  );
+}
+
 interface PowerRankingsTabProps {
   user: SleeperUser | null;
   allPicks: SleeperTradedPick[];
   loadingCalcValues: boolean;
-  prSortKey: "dynTotal" | "redTotal" | "qbTotal" | "rbTotal" | "wrTotal" | "teTotal";
-  setPrSortKey: (key: "dynTotal" | "redTotal" | "qbTotal" | "rbTotal" | "wrTotal" | "teTotal") => void;
+  prSortKey: PrSortKey;
+  setPrSortKey: (key: PrSortKey) => void;
   prSortAsc: boolean;
   setPrSortAsc: React.Dispatch<React.SetStateAction<boolean>>;
-  prPopup: { rosterId: number; col: "dyn" | "red" | "QB" | "RB" | "WR" | "TE" } | null;
-  setPrPopup: (popup: { rosterId: number; col: "dyn" | "red" | "QB" | "RB" | "WR" | "TE" } | null) => void;
+  prPopup: { rosterId: number; col: PrColKey } | null;
+  setPrPopup: (popup: { rosterId: number; col: PrColKey } | null) => void;
   prMode: "full" | "starters" | "bench";
   setPrMode: (mode: "full" | "starters" | "bench") => void;
   ignoredOwnerIds: string[];
@@ -116,41 +162,12 @@ export default function PowerRankingsTab({
   const teRanks  = rankMap("teTotal");
 
   const n = prRows.length;
-  const pillColor = (r: number) => {
-    const top3rd = Math.ceil(n / 3);
-    const bot3rd = n - Math.floor(n / 3) + 1;
-    if (r <= top3rd) return "bg-green-900/40 text-green-400 border-green-700";
-    if (r >= bot3rd) return "bg-red-900/40 text-red-400 border-red-700";
-    return "bg-gray-800/60 text-gray-400 border-gray-700";
-  };
-
   const myRosterId = rosters.find((r) => r.owner_id === user?.user_id)?.roster_id;
 
   const sortedRows = [...prRows].sort((a, b) => {
     const diff = b[prSortKey] - a[prSortKey];
     return prSortAsc ? -diff : diff;
   });
-
-  const SortTh = ({ col, label }: { col: typeof prSortKey; label: string }) => {
-    const active = prSortKey === col;
-    return (
-      <th
-        className="text-center pb-2 px-2 cursor-pointer select-none hover:text-white transition"
-        onClick={() => { if (active) setPrSortAsc(v => !v); else { setPrSortKey(col); setPrSortAsc(false); } }}
-      >
-        {label}{active ? (prSortAsc ? " ↑" : " ↓") : ""}
-      </th>
-    );
-  };
-
-  const RankPill = ({ r, rosterId, col }: { r: number; rosterId: number; col: "dyn"|"red"|"QB"|"RB"|"WR"|"TE" }) => (
-    <button
-      onClick={() => setPrPopup({ rosterId, col })}
-      className={`inline-block text-[11px] font-bold px-2 py-0.5 rounded-full border transition hover:opacity-80 cursor-pointer ${pillColor(r)}`}
-    >
-      {ordinal(r)}
-    </button>
-  );
 
   let popupContent: React.ReactNode = null;
   if (prPopup) {
@@ -243,12 +260,12 @@ export default function PowerRankingsTab({
             <thead>
               <tr className="text-[10px] font-bold uppercase tracking-widest text-gray-600">
                 <th className="text-left pl-3 pb-2 pr-2">Owner</th>
-                <SortTh col="dynTotal" label="Dynasty" />
-                <SortTh col="redTotal" label="Redraft" />
-                <SortTh col="qbTotal" label="QB" />
-                <SortTh col="rbTotal" label="RB" />
-                <SortTh col="wrTotal" label="WR" />
-                <SortTh col="teTotal" label="TE" />
+                <SortTh col="dynTotal" label="Dynasty" prSortKey={prSortKey} prSortAsc={prSortAsc} setPrSortKey={setPrSortKey} setPrSortAsc={setPrSortAsc} />
+                <SortTh col="redTotal" label="Redraft" prSortKey={prSortKey} prSortAsc={prSortAsc} setPrSortKey={setPrSortKey} setPrSortAsc={setPrSortAsc} />
+                <SortTh col="qbTotal" label="QB" prSortKey={prSortKey} prSortAsc={prSortAsc} setPrSortKey={setPrSortKey} setPrSortAsc={setPrSortAsc} />
+                <SortTh col="rbTotal" label="RB" prSortKey={prSortKey} prSortAsc={prSortAsc} setPrSortKey={setPrSortKey} setPrSortAsc={setPrSortAsc} />
+                <SortTh col="wrTotal" label="WR" prSortKey={prSortKey} prSortAsc={prSortAsc} setPrSortKey={setPrSortKey} setPrSortAsc={setPrSortAsc} />
+                <SortTh col="teTotal" label="TE" prSortKey={prSortKey} prSortAsc={prSortAsc} setPrSortKey={setPrSortKey} setPrSortAsc={setPrSortAsc} />
                 {prMode === "full" && <th className="text-center pb-2 px-2 text-gray-600">Picks</th>}
               </tr>
             </thead>
@@ -274,12 +291,12 @@ export default function PowerRankingsTab({
                         )}
                       </div>
                     </td>
-                    <td className="text-center px-2 py-2.5"><RankPill r={dynRanks[row.roster_id]} rosterId={row.roster_id} col="dyn" /></td>
-                    <td className="text-center px-2 py-2.5"><RankPill r={redRanks[row.roster_id]} rosterId={row.roster_id} col="red" /></td>
-                    <td className="text-center px-2 py-2.5"><RankPill r={qbRanks[row.roster_id]} rosterId={row.roster_id} col="QB" /></td>
-                    <td className="text-center px-2 py-2.5"><RankPill r={rbRanks[row.roster_id]} rosterId={row.roster_id} col="RB" /></td>
-                    <td className="text-center px-2 py-2.5"><RankPill r={wrRanks[row.roster_id]} rosterId={row.roster_id} col="WR" /></td>
-                    <td className={`text-center px-2 py-2.5 ${prMode !== "full" ? "rounded-r-xl" : ""}`}><RankPill r={teRanks[row.roster_id]} rosterId={row.roster_id} col="TE" /></td>
+                    <td className="text-center px-2 py-2.5"><RankPill r={dynRanks[row.roster_id]} rosterId={row.roster_id} col="dyn" teamCount={n} setPrPopup={setPrPopup} /></td>
+                    <td className="text-center px-2 py-2.5"><RankPill r={redRanks[row.roster_id]} rosterId={row.roster_id} col="red" teamCount={n} setPrPopup={setPrPopup} /></td>
+                    <td className="text-center px-2 py-2.5"><RankPill r={qbRanks[row.roster_id]} rosterId={row.roster_id} col="QB" teamCount={n} setPrPopup={setPrPopup} /></td>
+                    <td className="text-center px-2 py-2.5"><RankPill r={rbRanks[row.roster_id]} rosterId={row.roster_id} col="RB" teamCount={n} setPrPopup={setPrPopup} /></td>
+                    <td className="text-center px-2 py-2.5"><RankPill r={wrRanks[row.roster_id]} rosterId={row.roster_id} col="WR" teamCount={n} setPrPopup={setPrPopup} /></td>
+                    <td className={`text-center px-2 py-2.5 ${prMode !== "full" ? "rounded-r-xl" : ""}`}><RankPill r={teRanks[row.roster_id]} rosterId={row.roster_id} col="TE" teamCount={n} setPrPopup={setPrPopup} /></td>
                     {prMode === "full" && <td className="text-center px-2 py-2.5 rounded-r-xl text-xs text-gray-400 font-mono">{row.pickVal > 0 ? row.pickVal.toLocaleString() : <span className="text-gray-700">—</span>}</td>}
                   </tr>
                 );
