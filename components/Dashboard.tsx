@@ -1,4 +1,5 @@
 "use client";
+import Image from "next/image";
 
 type DashboardProps = {
   username: string;
@@ -100,11 +101,13 @@ export default function Dashboard({
                     : "cursor-not-allowed opacity-40"
                 }`}
               >
-                <img
+                <Image
                   src={item.image}
                   alt=""
                   aria-hidden="true"
-                  className="absolute inset-0 h-full w-full object-cover"
+                  className="object-cover"
+                  fill
+                  sizes="(max-width: 768px) 100vw, 33vw"
                   loading="lazy"
                 />
                 <div className={`absolute inset-0 bg-gradient-to-b ${item.overlay}`} />
