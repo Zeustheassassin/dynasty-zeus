@@ -169,6 +169,8 @@ export function generateGmBriefing({
   profile,
   rosterPlayerIds,
   trendData,
+  players,
+  pickCount,
 }: {
   rosterId: number;
   leagueId: string;
@@ -178,10 +180,41 @@ export function generateGmBriefing({
   profile: RosterDirectionProfile;
   rosterPlayerIds: string[];
   trendData: FcTrendEntry[];
+  players?: Record<string, { position: string; age?: number | null }>;
+  pickCount?: number;
 }): GmBriefing {
   const trendByPlayerId = new Map<string, FcTrendEntry>(
     trendData.map((t) => [t.sleeperId, t])
   );
+
+  // Per-position counts and avg ages from the players map when available.
+  let rosterSnapshot: string | undefined;
+  if (players) {
+    const POS_ORDER = ["QB", "RB", "WR", "TE"];
+    const counts: Record<string, number> = {};
+    const ageSum: Record<string, number> = {};
+    const ageCnt: Record<string, number> = {};
+    for (const id of rosterPlayerIds) {
+      const p = players[id];
+      if (!p || !SKILL_POSITIONS.has(p.position)) continue;
+      counts[p.position] = (counts[p.position] ?? 0) + 1;
+      if (p.age != null) {
+        ageSum[p.position] = (ageSum[p.position] ?? 0) + p.age;
+        ageCnt[p.position] = (ageCnt[p.position] ?? 0) + 1;
+      }
+    }
+    const posStr = POS_ORDER.filter((pos) => counts[pos])
+      .map((pos) => {
+        const avgAge = ageCnt[pos] ? (ageSum[pos] / ageCnt[pos]).toFixed(1) : null;
+        return `${pos} ×${counts[pos]}${avgAge ? ` (avg ${avgAge}y)` : ""}`;
+      })
+      .join("  |  ");
+    const totalPicks = pickCount ?? 0;
+    const pickStr = totalPicks > 0
+      ? `${totalPicks} pick${totalPicks !== 1 ? "s" : ""} (${profile.firstRounders} R1)`
+      : "no picks";
+    rosterSnapshot = posStr ? `${posStr}  |  ${pickStr}` : pickStr;
+  }
 
   const rosterTrends = rosterPlayerIds
     .map((id) => trendByPlayerId.get(id))
@@ -219,5 +252,7 @@ export function generateGmBriefing({
     bullets,
     fallingPlayers,
     risingPlayers,
+    rosterSnapshot,
+    generatedAt: new Date().toISOString(),
   };
 }

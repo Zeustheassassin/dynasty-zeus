@@ -1,0 +1,221 @@
+"use client";
+import type { Dispatch, SetStateAction } from "react";
+import type { HistoryDraftEntry, ConsensusCacheRow } from "../shared";
+import { posColor, closestPickEquiv, pickEquivColor, toPickSlot } from "../shared";
+import ConsensusCompiler from "./ConsensusCompiler";
+
+type ConsensusMeta = Record<string, {
+  draftCount: number;
+  leagueCount: number;
+  connectedUserCount: number;
+  compiledAt: string;
+}>;
+
+interface ConsensusBoardEntry {
+  player_id: string;
+  name: string;
+  position: string;
+  team: string;
+  avgPickNo: number;
+  draftCount: number;
+  value: number;
+}
+
+interface ConsensusTabProps {
+  selectedHistoryYear: string;
+  supabaseUser: { id: string } | null;
+  consensusMeta: ConsensusMeta;
+  consensusCache: Record<string, ConsensusCacheRow[]>;
+  loadingCacheYear: string | null;
+  compiling: boolean;
+  compileLog: string;
+  compileProgress: number;
+  showCompilePanel: boolean;
+  setShowCompilePanel: Dispatch<SetStateAction<boolean>>;
+  compileSelectedYears: Set<number>;
+  setCompileSelectedYears: Dispatch<SetStateAction<Set<number>>>;
+  playerGrades: Record<string, "hit" | "neutral" | "bust">;
+  filteredDrafts: HistoryDraftEntry[];
+  consensusList: ConsensusBoardEntry[];
+  players: Record<string, { full_name?: string | null; position?: string | null; team?: string | null }>;
+  pickFcValues: Record<string, number>;
+  calcFcValues: Record<string, number>;
+  runCompile: (years: number[]) => Promise<void>;
+  removeCompiledPlayer: (year: string, playerId: string) => Promise<void>;
+  clearYear: (year: number) => Promise<void>;
+  setGrade: (year: string, playerId: string, grade: "hit" | "neutral" | "bust") => void;
+}
+
+export default function ConsensusTab({
+  selectedHistoryYear,
+  supabaseUser,
+  consensusMeta,
+  consensusCache,
+  loadingCacheYear,
+  compiling,
+  compileLog,
+  compileProgress,
+  showCompilePanel,
+  setShowCompilePanel,
+  compileSelectedYears,
+  setCompileSelectedYears,
+  playerGrades,
+  filteredDrafts,
+  consensusList,
+  players,
+  pickFcValues,
+  calcFcValues,
+  runCompile,
+  removeCompiledPlayer,
+  clearYear,
+  setGrade,
+}: ConsensusTabProps) {
+  const hasCachedRows  = Array.isArray(consensusCache[selectedHistoryYear]) && consensusCache[selectedHistoryYear].length > 0;
+  const isLoadingCache = loadingCacheYear === selectedHistoryYear;
+  const meta           = consensusMeta[selectedHistoryYear];
+
+  const totalDraftsForYear = hasCachedRows
+    ? (meta?.draftCount ?? 0)
+    : filteredDrafts.length;
+  const minDrafts = Math.max(1, Math.ceil(totalDraftsForYear * 0.08));
+
+  interface DisplayListEntry { player_id: string; name: string; position: string; team: string; avgPickNo: number; draftCount: number; value: number; }
+  const displayList: DisplayListEntry[] = (hasCachedRows
+    ? consensusCache[selectedHistoryYear].map((row) => {
+        const fullPlayer = players[row.player_id];
+        return {
+          player_id:  row.player_id,
+          name:       row.player_name || fullPlayer?.full_name || "",
+          position:   row.position    || fullPlayer?.position  || "",
+          team:       row.team        || fullPlayer?.team      || "",
+          avgPickNo:  row.avg_pick_no,
+          draftCount: row.draft_count,
+          value:      calcFcValues[row.player_id] ?? 0,
+        };
+      })
+    : consensusList
+  ).filter((p) =>
+    p.draftCount >= minDrafts &&
+    ["QB", "RB", "WR", "TE", "FB"].includes(p.position)
+  );
+
+  const draftCount  = hasCachedRows ? (meta?.draftCount ?? 0) : filteredDrafts.length;
+  const sourceLabel = hasCachedRows
+    ? `${draftCount} rookie draft${draftCount !== 1 ? "s" : ""} · ${meta?.leagueCount ?? 0} leagues · ${meta?.connectedUserCount ?? 0} connected users`
+    : `${filteredDrafts.length} draft${filteredDrafts.length !== 1 ? "s" : ""} in your leagues only`;
+
+  return (
+    <div>
+      {/* ── Compile Panel ── */}
+      <ConsensusCompiler
+        selectedHistoryYear={selectedHistoryYear}
+        supabaseUser={supabaseUser}
+        consensusMeta={consensusMeta}
+        compiling={compiling}
+        compileLog={compileLog}
+        compileProgress={compileProgress}
+        showCompilePanel={showCompilePanel}
+        setShowCompilePanel={setShowCompilePanel}
+        compileSelectedYears={compileSelectedYears}
+        setCompileSelectedYears={setCompileSelectedYears}
+        runCompile={runCompile}
+        clearYear={clearYear}
+      />
+
+      {/* ── Board ── */}
+      {isLoadingCache ? (
+        <div className="flex items-center gap-3 text-sm text-blue-400 py-6">
+          <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+          </svg>
+          Loading compiled consensus…
+        </div>
+      ) : displayList.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-gray-700 bg-gray-900/40 p-6 text-sm text-gray-400">
+          No draft data for {selectedHistoryYear}.{" "}
+          {supabaseUser
+            ? 'Click "Compile Now" above to build a network consensus board.'
+            : "Log in to compile a network consensus board."}
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-gray-800 bg-gray-900/60 overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-800 flex items-start justify-between gap-2 flex-wrap">
+            <div>
+              <div className="text-sm font-semibold text-white">
+                {selectedHistoryYear} Consensus Draft Board
+              </div>
+              <div className="text-xs text-gray-400 mt-0.5">
+                {displayList.length} players ranked by avg pick · {sourceLabel}
+              </div>
+            </div>
+            {hasCachedRows && (
+              <span className="text-[10px] bg-green-900/40 border border-green-800/60 text-green-400 px-2 py-0.5 rounded-full font-semibold shrink-0">
+                Network Data
+              </span>
+            )}
+          </div>
+          <div className="px-4 py-2 border-b border-gray-800/60 grid grid-cols-[2rem_3rem_1fr_5rem_4rem_6rem] gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+            <span>#</span><span>Pos</span><span>Player</span><span>Avg Pick</span><span>Drafts</span><span className="text-right">≈ Pick Val</span>
+          </div>
+          <div className="divide-y divide-gray-800/40">
+            {displayList.map((p, i) => {
+              const { label: equivLabel, pickNo: equivPickNo } = closestPickEquiv(p.value, pickFcValues);
+              const color  = pickEquivColor(equivPickNo, Math.round(p.avgPickNo));
+              const grade  = playerGrades[`${selectedHistoryYear}_${p.player_id}`];
+              const rowBg  = grade === "hit"     ? "bg-green-950/25"
+                           : grade === "bust"    ? "bg-red-950/25"
+                           : grade === "neutral" ? "bg-gray-800/30"
+                           : "";
+              return (
+                <div key={p.player_id} className={`group grid grid-cols-[2rem_3rem_1fr_5rem_4rem_6rem] gap-2 items-center px-4 py-1.5 ${rowBg}`}>
+                  <span className="text-xs text-gray-500">{i + 1}</span>
+                  <span className={`text-[10px] font-bold ${posColor[p.position] || "text-gray-400"}`}>{p.position}</span>
+                  <div className="min-w-0 flex items-center gap-1.5">
+                    <span className="text-sm font-medium text-white truncate">{p.name}</span>
+                    {p.team && <span className="text-[10px] text-gray-500 shrink-0">{p.team}</span>}
+                    {hasCachedRows && supabaseUser && (
+                      <button
+                        title="Remove from compiled data"
+                        onClick={(e) => { e.stopPropagation(); removeCompiledPlayer(selectedHistoryYear, p.player_id); }}
+                        className="opacity-0 group-hover:opacity-100 text-[9px] text-gray-600 hover:text-red-400 transition shrink-0 leading-none"
+                      >
+                        ✕
+                      </button>
+                    )}
+                    <div className="flex items-center gap-0.5 shrink-0 ml-0.5">
+                      {(["hit", "neutral", "bust"] as const).map((g) => {
+                        const active = grade === g;
+                        const activeCls =
+                          g === "hit"     ? "border-green-600 bg-green-800/70 text-green-300"
+                          : g === "neutral" ? "border-gray-500 bg-gray-700 text-gray-200"
+                          :                   "border-red-600 bg-red-800/70 text-red-300";
+                        return (
+                          <button
+                            key={g}
+                            title={g.charAt(0).toUpperCase() + g.slice(1)}
+                            onClick={(e) => { e.stopPropagation(); setGrade(selectedHistoryYear, p.player_id, g); }}
+                            className={`text-[9px] font-bold px-1 py-0.5 rounded border transition ${
+                              active
+                                ? activeCls
+                                : "border-gray-800 text-gray-700 hover:border-gray-600 hover:text-gray-500 bg-transparent"
+                            }`}
+                          >
+                            {g === "hit" ? "H" : g === "neutral" ? "N" : "B"}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <span className="text-xs font-semibold text-white">{toPickSlot(p.avgPickNo)}</span>
+                  <span className="text-xs text-gray-400">{p.draftCount}x</span>
+                  <span className={`text-xs font-semibold text-right ${color}`}>{equivLabel}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

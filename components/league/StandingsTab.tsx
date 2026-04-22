@@ -1,7 +1,8 @@
 "use client";
 // ── StandingsTab ──────────────────────────────────────────────────────────────
 // Displays the win-loss standings for the selected league with playoff cut line.
-import type { SleeperLeague, SleeperRoster } from "../../lib/types";
+import { useLeague } from "../../lib/LeagueContext";
+import { useMyRoster } from "../../lib/RosterContext";
 
 interface StandingRow {
   roster_id: number;
@@ -14,20 +15,13 @@ interface StandingRow {
 }
 
 interface StandingsTabProps {
-  selectedLeague: SleeperLeague | null;
-  roster: SleeperRoster | null;
   standings: StandingRow[];
-  totalRosters: number;
-  users: Record<string, string>;
 }
 
-export default function StandingsTab({
-  selectedLeague,
-  roster,
-  standings,
-  totalRosters,
-  users,
-}: StandingsTabProps) {
+export default function StandingsTab({ standings }: StandingsTabProps) {
+  const { selectedLeague, rosters, users } = useLeague();
+  const { myRoster: roster } = useMyRoster();
+
   if (!selectedLeague || !roster) {
     return (
       <p className="text-sm text-gray-500">
@@ -37,7 +31,7 @@ export default function StandingsTab({
   }
 
   const playoffTeams =
-    selectedLeague.settings?.playoff_teams ?? Math.min(Math.ceil(totalRosters / 2), 6);
+    selectedLeague.settings?.playoff_teams ?? Math.min(Math.ceil(rosters.length / 2), 6);
 
   return (
     <div className="bg-gray-900 border border-gray-700 rounded-xl p-5 shadow-md">

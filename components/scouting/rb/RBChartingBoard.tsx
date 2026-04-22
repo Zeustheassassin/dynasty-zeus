@@ -1,15 +1,16 @@
 "use client";
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../../../lib/supabaseclient";
 import PlayerSynopsisCard from "../PlayerSynopsisCard";
+import ChartingBoard from "../shared/ChartingBoard";
+import type { ChartingBoardConfig } from "../shared/ChartingBoard";
+import { useChartingState } from "../shared/hooks/useChartingState";
 import type {
   Prospect,
-  ScoutingGame,
   RBPlay,
   RBFormation,
   RBRunType,
   RBRouteType,
-  ChartingDecision,
 } from "../../../lib/types";
 
 const FORMATIONS: { key: RBFormation; label: string }[] = [
@@ -18,19 +19,13 @@ const FORMATIONS: { key: RBFormation; label: string }[] = [
   { key: "under_center", label: "Under Center" },
 ];
 
-const GAME_TYPES = ["regular", "bowl", "playoff", "scrimmage"];
-
 const NFL_ROLES = ["Bellcow", "1A/1B", "Lead Back", "Receiving Back", "Change-of-Pace", "Committee", ""];
 
-const CHARTING_DECISIONS: { value: ChartingDecision; label: string }[] = [
-  { value: "fully_charted", label: "Fully Charted" },
-  { value: "partial_chart", label: "Partial Chart" },
-  { value: "charting",      label: "Charting" },
-  { value: "pending",       label: "Pending" },
-  { value: "not_charting",  label: "Not Charting" },
-];
-
-type BoardTab = "overview" | "chart" | "games";
+const RB_CONFIG: ChartingBoardConfig = {
+  positionLabel: "RB",
+  accentColor: "green",
+  nflRoles: NFL_ROLES,
+};
 
 interface RunTypeStat {
   attempts: number;
@@ -122,96 +117,46 @@ interface Props {
 }
 
 export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Props) {
-  const [tab, setTab] = useState<BoardTab>("overview");
-  const [games, setGames] = useState<ScoutingGame[]>([]);
-  const [plays, setPlays] = useState<RBPlay[]>([]);
-  const [selectedGameId, setSelectedGameId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  // Add game form
-  const [showAddGame, setShowAddGame] = useState(false);
-  const [newGame, setNewGame] = useState({ year: 2025, opponent: "", type: "regular" });
-  const [savingGame, setSavingGame] = useState(false);
-  const [gameError, setGameError] = useState<string | null>(null);
-
-  // Play logger form
-  const [formation, setFormation] = useState<RBFormation>("gun");
-  const [runType, setRunType] = useState<RBRunType>("outside_zone");
-  const [success, setSuccess] = useState<boolean | null>(null);
-  const [loadedBox, setLoadedBox] = useState(false);
+  // Position-specific play state
+  const [plays, setPlays]                         = useState<RBPlay[]>([]);
+  const [formation, setFormation]                 = useState<RBFormation>("gun");
+  const [runType, setRunType]                     = useState<RBRunType>("outside_zone");
+  const [success, setSuccess]                     = useState<boolean | null>(null);
+  const [loadedBox, setLoadedBox]                 = useState(false);
   const [unblockedDefender, setUnblockedDefender] = useState(false);
-  const [brokenTackle, setBrokenTackle] = useState(false);
-  const [explosivePlay, setExplosivePlay] = useState(false);
-  const [runStuff, setRunStuff] = useState(false);
-  // Route-play specific
-  const [alignedAsWr, setAlignedAsWr] = useState(false);
-  const [rbRouteType, setRbRouteType] = useState<RBRouteType | null>(null);
-  const [rbWasOpen, setRbWasOpen] = useState(false);
-  const [rbTargeted, setRbTargeted] = useState(false);
-  const [rbOutcome, setRbOutcome] = useState<"caught" | "drop" | "incomplete" | null>(null);
-  const [playNotes, setPlayNotes] = useState("");
-  const [savingPlay, setSavingPlay] = useState(false);
-  const [playError, setPlayError] = useState<string | null>(null);
-  const [editingPlayId, setEditingPlayId] = useState<string | null>(null);
-
-  // Bio edit
-  const [editBio, setEditBio] = useState(false);
-  const [bio, setBio] = useState<Partial<Prospect>>({});
-  const [savingBio, setSavingBio] = useState(false);
-
-  // Notes summary
-  const [notesSummary, setNotesSummary] = useState<string | null>(null);
+  const [brokenTackle, setBrokenTackle]           = useState(false);
+  const [explosivePlay, setExplosivePlay]         = useState(false);
+  const [runStuff, setRunStuff]                   = useState(false);
+  const [alignedAsWr, setAlignedAsWr]             = useState(false);
+  const [rbRouteType, setRbRouteType]             = useState<RBRouteType | null>(null);
+  const [rbWasOpen, setRbWasOpen]                 = useState(false);
+  const [rbTargeted, setRbTargeted]               = useState(false);
+  const [rbOutcome, setRbOutcome]                 = useState<"caught" | "drop" | "incomplete" | null>(null);
+  const [playNotes, setPlayNotes]                 = useState("");
+  const [savingPlay, setSavingPlay]               = useState(false);
+  const [playError, setPlayError]                 = useState<string | null>(null);
+  const [editingPlayId, setEditingPlayId]         = useState<string | null>(null);
+  const [notesSummary, setNotesSummary]           = useState<string | null>(null);
   const [loadingNotesSummary, setLoadingNotesSummary] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    const { data: gData } = await supabase
-      .from("scouting_games")
-      .select("*")
-      .eq("prospect_id", prospect.id)
-      .order("season_year", { ascending: false })
-      .order("game_slot");
-    const gList: ScoutingGame[] = gData ?? [];
-    setGames(gList);
+  // Shared state via hook
+  const cs = useChartingState(prospect, {
+    onDataChanged,
+    onDeleteGamePlays: (id) => setPlays((p) => p.filter((pl) => pl.game_id !== id)),
+  });
+  const { tab, games, selectedGameId, loading, showAddGame, newGame, savingGame, gameError,
+          editBio, bio, savingBio,
+          onTabChange, onSelectGame, onToggleAddGame, onNewGameChange,
+          onAddGame, onDeleteGame, onToggleEditBio, onBioChange, onSaveBio } = cs;
 
-    if (gList.length > 0) {
-      const gameIds = gList.map((g) => g.id);
-      const { data: pData } = await supabase
-        .from("rb_plays")
-        .select("*")
-        .in("game_id", gameIds)
-        .order("created_at");
-      setPlays((pData ?? []) as RBPlay[]);
-    } else {
-      setPlays([]);
-    }
-    setLoading(false);
-  }, [prospect.id]);
-
+  // Load plays when games change
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    load();
-    setBio({
-      height: prospect.height, weight: prospect.weight, birthday: prospect.birthday,
-      draft_class_year: prospect.draft_class_year, personal_rank: prospect.personal_rank,
-      should_play: prospect.should_play, will_play_pre: prospect.will_play_pre,
-      will_play_post: prospect.will_play_post, charting_decision: prospect.charting_decision,
-      charting_notes: prospect.charting_notes,
-      draft_round: prospect.draft_round, draft_pick: prospect.draft_pick, draft_team: prospect.draft_team,
-    });
-    setNotesSummary(null);
-  }, [prospect.id, load, prospect.height, prospect.weight, prospect.birthday,
-    prospect.draft_class_year, prospect.personal_rank,
-    prospect.should_play, prospect.will_play_pre, prospect.will_play_post,
-    prospect.charting_decision, prospect.charting_notes,
-    prospect.draft_round, prospect.draft_pick, prospect.draft_team]);
+    if (games.length === 0) return;
+    const ids = games.map((g) => g.id);
+    supabase.from("rb_plays").select("*").in("game_id", ids).order("created_at")
+      .then(({ data }) => setPlays((data ?? []) as RBPlay[]));
+  }, [games]);
 
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (!selectedGameId && games.length > 0) setSelectedGameId(games[0].id);
-  }, [games, selectedGameId]);
-
-  const selectedGame = games.find((g) => g.id === selectedGameId);
   const gamePlays = useMemo(() => plays.filter((p) => p.game_id === selectedGameId), [plays, selectedGameId]);
 
   // ── Aggregate stats ───────────────────────────────────────────
@@ -294,37 +239,6 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     for (const p of plays) map[p.game_id] = (map[p.game_id] ?? 0) + 1;
     return map;
   }, [plays]);
-
-  async function addGame() {
-    if (!newGame.opponent.trim()) return;
-    setGameError(null);
-    setSavingGame(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setGameError("Not logged in."); setSavingGame(false); return; }
-    const slot = games.filter((g) => g.season_year === newGame.year).length + 1;
-    const { data, error } = await supabase.from("scouting_games").insert({
-      user_id: user.id, prospect_id: prospect.id,
-      season_year: newGame.year, opponent: newGame.opponent.trim(),
-      game_slot: slot, game_type: newGame.type,
-    }).select().single();
-    if (error) { setGameError(error.message); }
-    else if (data) {
-      setGames((prev) => [...prev, data as ScoutingGame]);
-      setSelectedGameId(data.id as string);
-      setNewGame((n) => ({ ...n, opponent: "" }));
-      setShowAddGame(false);
-      onDataChanged();
-    }
-    setSavingGame(false);
-  }
-
-  async function deleteGame(id: string) {
-    await supabase.from("scouting_games").delete().eq("id", id);
-    setGames((prev) => prev.filter((g) => g.id !== id));
-    setPlays((prev) => prev.filter((p) => p.game_id !== id));
-    if (selectedGameId === id) setSelectedGameId(games.find((g) => g.id !== id)?.id ?? null);
-    onDataChanged();
-  }
 
   function resetPlayForm() {
     setEditingPlayId(null);
@@ -439,14 +353,6 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     onDataChanged();
   }
 
-  async function saveBio() {
-    setSavingBio(true);
-    await supabase.from("prospects").update({ ...bio, updated_at: new Date().toISOString() }).eq("id", prospect.id);
-    setSavingBio(false);
-    setEditBio(false);
-    onDataChanged();
-  }
-
   async function generateNotesSummary() {
     const notes = plays.map((p) => p.play_notes).filter((n) => n && n.trim());
     if (notes.length === 0) return;
@@ -465,135 +371,32 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     setLoadingNotesSummary(false);
   }
 
-  const tabs: { key: BoardTab; label: string }[] = [
+  const tabs = [
     { key: "overview", label: "Overview" },
     { key: "chart",    label: "Chart Game" },
     { key: "games",    label: "Games" },
   ];
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* Header */}
-      <div className="flex items-start gap-3">
-        <button onClick={onBack} className="mt-0.5 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm rounded transition flex-shrink-0">
-          ← Back
-        </button>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h2 className="text-xl font-bold text-white truncate">{prospect.name}</h2>
-            {prospect.draft_round && (
-              <span className="px-2 py-0.5 bg-yellow-600/20 border border-yellow-600/40 rounded text-xs font-semibold text-yellow-400">
-                Rd {prospect.draft_round}{prospect.draft_pick ? `, Pick ${prospect.draft_pick}` : ""}{prospect.draft_team ? ` · ${prospect.draft_team}` : ""}
-              </span>
-            )}
-          </div>
-          <p className="text-sm text-gray-400">
-            RB · {prospect.school}
-            {prospect.conference && ` · ${prospect.conference}`}
-            {" · "}<span className="text-green-400">{prospect.draft_class_year} Class</span>
-          </p>
-        </div>
-        <div className="flex-shrink-0 text-right text-xs text-gray-500">
+    <ChartingBoard
+      prospect={prospect}
+      config={RB_CONFIG}
+      tabs={tabs}
+      gamePlayCounts={gamePlayCounts}
+      tab={tab} games={games} selectedGameId={selectedGameId} loading={loading}
+      showAddGame={showAddGame} newGame={newGame} savingGame={savingGame} gameError={gameError}
+      editBio={editBio} bio={bio} savingBio={savingBio}
+      onBack={onBack}
+      onTabChange={onTabChange} onSelectGame={onSelectGame} onToggleAddGame={onToggleAddGame}
+      onNewGameChange={onNewGameChange} onAddGame={onAddGame} onDeleteGame={onDeleteGame}
+      onToggleEditBio={onToggleEditBio} onBioChange={onBioChange} onSaveBio={onSaveBio}
+      renderHeaderStats={() => (
+        <>
           <div>{stats.totalPlays} plays · {games.length} games</div>
           <div className="text-green-400">{stats.runAttempts} runs · {stats.routeAttempts} routes</div>
-        </div>
-        <button onClick={() => setEditBio((e) => !e)} className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm rounded transition flex-shrink-0">
-          {editBio ? "Close" : "Edit Bio"}
-        </button>
-      </div>
-
-      {/* Bio edit panel */}
-      {editBio && (
-        <div className="p-4 bg-gray-900 border border-gray-700 rounded-lg">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
-            {[
-              { label: "Height",        key: "height" as const,        type: "text",   placeholder: '6\'0"' },
-              { label: "Weight (lbs)",  key: "weight" as const,        type: "number", placeholder: "210" },
-              { label: "Birthday",      key: "birthday" as const,      type: "date",   placeholder: "" },
-              { label: "Personal Rank", key: "personal_rank" as const, type: "number", placeholder: "1" },
-            ].map((f) => (
-              <div key={f.key}>
-                <label className="block text-xs text-gray-500 mb-1">{f.label}</label>
-                <input type={f.type} placeholder={f.placeholder}
-                  className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-green-500"
-                  value={(bio[f.key] as string | number | null | undefined) ?? ""}
-                  onChange={(e) => setBio((b) => ({ ...b, [f.key]: f.type === "number" ? (e.target.value ? Number(e.target.value) : null) : (e.target.value || null) }))}
-                />
-              </div>
-            ))}
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Draft Class Year</label>
-              <select className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-green-500"
-                value={bio.draft_class_year ?? 2026} onChange={(e) => setBio((b) => ({ ...b, draft_class_year: Number(e.target.value) }))}>
-                {[2026, 2027, 2028, 2029].map((y) => <option key={y}>{y}</option>)}
-              </select>
-            </div>
-            {(["should_play", "will_play_pre", "will_play_post"] as const).map((k) => (
-              <div key={k}>
-                <label className="block text-xs text-gray-500 mb-1">
-                  {k === "should_play" ? "Should Play" : k === "will_play_pre" ? "Will Play (Pre)" : "Will Play (Post)"}
-                </label>
-                <select className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-green-500"
-                  value={bio[k] ?? ""} onChange={(e) => setBio((b) => ({ ...b, [k]: e.target.value }))}>
-                  {NFL_ROLES.map((r) => <option key={r} value={r}>{r || "—"}</option>)}
-                </select>
-              </div>
-            ))}
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Charting Status</label>
-              <select className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-green-500"
-                value={bio.charting_decision ?? "pending"} onChange={(e) => setBio((b) => ({ ...b, charting_decision: e.target.value as ChartingDecision }))}>
-                {CHARTING_DECISIONS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
-              </select>
-            </div>
-          </div>
-          <div className="mb-3">
-            <label className="block text-xs text-gray-500 mb-1">Charting Notes</label>
-            <textarea rows={2} className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-green-500 resize-none"
-              value={bio.charting_notes ?? ""} onChange={(e) => setBio((b) => ({ ...b, charting_notes: e.target.value }))} />
-          </div>
-          <div className="grid grid-cols-3 gap-3 mb-3">
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Draft Round</label>
-              <input type="number" min={1} max={7} placeholder="e.g. 1"
-                className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-green-500"
-                value={bio.draft_round ?? ""}
-                onChange={(e) => setBio((b) => ({ ...b, draft_round: e.target.value ? Number(e.target.value) : null }))} />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Draft Pick #</label>
-              <input type="number" min={1} placeholder="e.g. 14"
-                className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-green-500"
-                value={bio.draft_pick ?? ""}
-                onChange={(e) => setBio((b) => ({ ...b, draft_pick: e.target.value ? Number(e.target.value) : null }))} />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Draft Team</label>
-              <input type="text" placeholder="e.g. NYG"
-                className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-green-500"
-                value={bio.draft_team ?? ""}
-                onChange={(e) => setBio((b) => ({ ...b, draft_team: e.target.value || null }))} />
-            </div>
-          </div>
-          <button onClick={saveBio} disabled={savingBio} className="px-4 py-2 bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white text-sm rounded font-medium transition">
-            {savingBio ? "Saving…" : "Save"}
-          </button>
-        </div>
+        </>
       )}
-
-      {/* Tabs */}
-      <div className="flex gap-1 border-b border-gray-800">
-        {tabs.map((t) => (
-          <button key={t.key} onClick={() => setTab(t.key)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition whitespace-nowrap ${
-              tab === t.key ? "border-green-500 text-green-400" : "border-transparent text-gray-400 hover:text-white"
-            }`}
-          >{t.label}</button>
-        ))}
-      </div>
-
-      {/* ── OVERVIEW ── */}
-      {tab === "overview" && (
+      renderOverview={() => (
         <div className="space-y-5">
           {loading ? (
             <div className="text-gray-500 text-sm text-center py-8">Loading…</div>
@@ -800,386 +603,326 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
           )}
         </div>
       )}
-
-      {/* ── CHART GAME ── */}
-      {tab === "chart" && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* Game list */}
-          <div className="md:col-span-1">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-medium text-gray-300">Games ({games.length})</span>
-              <button onClick={() => setShowAddGame((s) => !s)} className="px-2 py-1 bg-green-700 hover:bg-green-600 text-white text-xs rounded transition">+ Add</button>
+      renderPlayLogger={(sg) => (
+        !sg ? (
+          <div className="text-gray-500 text-sm text-center py-12">Select or add a game to start logging plays.</div>
+        ) : (
+          <div className="space-y-4">
+            <div className="text-sm font-medium text-gray-300">
+              Logging: <span className="text-white">{sg.season_year} vs {sg.opponent}</span>
+              <span className="ml-2 text-green-400 text-xs">{gamePlays.length} plays</span>
             </div>
-            {showAddGame && (
-              <div className="mb-3 p-3 bg-gray-900 border border-gray-700 rounded-lg space-y-2">
-                <select className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm"
-                  value={newGame.year} onChange={(e) => setNewGame((n) => ({ ...n, year: Number(e.target.value) }))}>
-                  {[2023, 2024, 2025, 2026].map((y) => <option key={y}>{y}</option>)}
-                </select>
-                <input className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500"
-                  placeholder="Opponent" value={newGame.opponent} onChange={(e) => setNewGame((n) => ({ ...n, opponent: e.target.value }))} />
-                <select className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm"
-                  value={newGame.type} onChange={(e) => setNewGame((n) => ({ ...n, type: e.target.value }))}>
-                  {GAME_TYPES.map((t) => <option key={t}>{t}</option>)}
-                </select>
-                <div className="flex gap-2">
-                  <button onClick={addGame} disabled={savingGame || !newGame.opponent.trim()}
-                    className="flex-1 py-1.5 bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white text-sm rounded transition">
-                    {savingGame ? "…" : "Add Game"}
+
+            {/* Formation */}
+            <div>
+              <div className="text-xs text-gray-500 mb-2">Formation</div>
+              <div className="flex gap-2">
+                {FORMATIONS.map((f) => (
+                  <button key={f.key} onClick={() => setFormation(f.key)}
+                    className={`px-4 py-2 rounded text-sm font-medium transition ${formation === f.key ? "bg-green-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                    {f.label}
                   </button>
-                  <button onClick={() => setShowAddGame(false)} className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm rounded transition">✕</button>
-                </div>
-                {gameError && <p className="text-red-400 text-xs">{gameError}</p>}
+                ))}
               </div>
-            )}
-            <div className="space-y-1">
-              {loading ? (
-                <div className="text-gray-500 text-xs py-4 text-center">Loading…</div>
-              ) : games.length === 0 ? (
-                <div className="text-gray-500 text-xs py-4 text-center">No games added yet.</div>
-              ) : (
-                games.map((g) => (
-                  <div key={g.id}
-                    className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer border transition ${selectedGameId === g.id ? "bg-green-900/30 border-green-700" : "bg-gray-900 border-gray-800 hover:border-gray-600"}`}
-                    onClick={() => setSelectedGameId(g.id)}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="text-xs font-medium text-white truncate">{g.season_year} {g.opponent}</div>
-                      <div className="text-xs text-gray-500 capitalize">{g.game_type}</div>
-                    </div>
-                    <div className="text-xs text-green-400 flex-shrink-0">{gamePlayCounts[g.id] ?? 0}pl</div>
-                    <button onClick={(e) => { e.stopPropagation(); deleteGame(g.id); }} className="text-gray-600 hover:text-red-400 text-xs px-1 flex-shrink-0">✕</button>
-                  </div>
-                ))
-              )}
             </div>
-          </div>
 
-          {/* Play logger */}
-          <div className="md:col-span-2">
-            {!selectedGame ? (
-              <div className="text-gray-500 text-sm text-center py-12">Select or add a game to start logging plays.</div>
-            ) : (
-              <div className="space-y-4">
-                <div className="text-sm font-medium text-gray-300">
-                  Logging: <span className="text-white">{selectedGame.season_year} vs {selectedGame.opponent}</span>
-                  <span className="ml-2 text-green-400 text-xs">{gamePlays.length} plays</span>
-                </div>
-
-                {/* Formation */}
-                <div>
-                  <div className="text-xs text-gray-500 mb-2">Formation</div>
+            {/* Run Type */}
+            <div>
+              <div className="text-xs text-gray-500 mb-2">Run Type</div>
+              <div className="space-y-2">
+                {/* Man Gap group */}
+                <div className="p-2 bg-gray-900 border border-gray-800 rounded-lg">
+                  <div className="text-xs text-gray-600 mb-1.5 font-medium uppercase tracking-wider">Man Gap</div>
                   <div className="flex gap-2">
-                    {FORMATIONS.map((f) => (
-                      <button key={f.key} onClick={() => setFormation(f.key)}
-                        className={`px-4 py-2 rounded text-sm font-medium transition ${formation === f.key ? "bg-green-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
-                        {f.label}
+                    {(["outside_man_gap", "inside_man_gap"] as RBRunType[]).map((rt) => (
+                      <button key={rt} onClick={() => setRunType(rt)}
+                        className={`flex-1 py-2 rounded text-xs font-medium transition ${runType === rt ? "bg-green-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        {rt === "outside_man_gap" ? "Outside" : "Inside"}
                       </button>
                     ))}
                   </div>
                 </div>
-
-                {/* Run Type */}
-                <div>
-                  <div className="text-xs text-gray-500 mb-2">Run Type</div>
-                  <div className="space-y-2">
-                    {/* Man Gap group */}
-                    <div className="p-2 bg-gray-900 border border-gray-800 rounded-lg">
-                      <div className="text-xs text-gray-600 mb-1.5 font-medium uppercase tracking-wider">Man Gap</div>
-                      <div className="flex gap-2">
-                        {(["outside_man_gap", "inside_man_gap"] as RBRunType[]).map((rt) => (
-                          <button key={rt} onClick={() => setRunType(rt)}
-                            className={`flex-1 py-2 rounded text-xs font-medium transition ${runType === rt ? "bg-green-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
-                            {rt === "outside_man_gap" ? "Outside" : "Inside"}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    {/* Zone group */}
-                    <div className="p-2 bg-gray-900 border border-gray-800 rounded-lg">
-                      <div className="text-xs text-gray-600 mb-1.5 font-medium uppercase tracking-wider">Zone Attempt</div>
-                      <div className="flex gap-2">
-                        {(["outside_zone", "inside_zone"] as RBRunType[]).map((rt) => (
-                          <button key={rt} onClick={() => setRunType(rt)}
-                            className={`flex-1 py-2 rounded text-xs font-medium transition ${runType === rt ? "bg-green-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
-                            {rt === "outside_zone" ? "Outside" : "Inside"}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    {/* Pass block / Run block / Decoy */}
-                    <div className="flex gap-2">
-                      <button onClick={() => setRunType("pass_block")}
-                        className={`flex-1 py-2 rounded text-sm font-medium transition ${runType === "pass_block" ? "bg-purple-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
-                        Pass Block
+                {/* Zone group */}
+                <div className="p-2 bg-gray-900 border border-gray-800 rounded-lg">
+                  <div className="text-xs text-gray-600 mb-1.5 font-medium uppercase tracking-wider">Zone Attempt</div>
+                  <div className="flex gap-2">
+                    {(["outside_zone", "inside_zone"] as RBRunType[]).map((rt) => (
+                      <button key={rt} onClick={() => setRunType(rt)}
+                        className={`flex-1 py-2 rounded text-xs font-medium transition ${runType === rt ? "bg-green-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        {rt === "outside_zone" ? "Outside" : "Inside"}
                       </button>
-                      <button onClick={() => setRunType("run_block")}
-                        className={`flex-1 py-2 rounded text-sm font-medium transition ${runType === "run_block" ? "bg-orange-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
-                        Run Block
-                      </button>
-                      <button onClick={() => setRunType("decoy")}
-                        className={`flex-1 py-2 rounded text-sm font-medium transition ${runType === "decoy" ? "bg-yellow-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
-                        Decoy
-                      </button>
-                    </div>
-                    {/* Route run */}
-                    <button onClick={() => { setRunType("route"); setSuccess(null); setRbOutcome(null); }}
-                      className={`w-full py-2 rounded text-sm font-medium transition ${runType === "route" ? "bg-blue-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
-                      Route Run
-                    </button>
+                    ))}
                   </div>
                 </div>
-
-                {/* Route play UI */}
-                {runType === "route" ? (
-                  <div className="space-y-3 p-3 bg-gray-900/60 rounded-lg border border-blue-900/50">
-                    <div className="text-xs text-blue-400 font-medium">Route Run Options</div>
-                    <div className="flex flex-wrap gap-4">
-                      {/* Route Type */}
-                      <div className="w-full">
-                        <div className="text-xs text-gray-500 mb-2">Route Type</div>
-                        <div className="flex gap-2">
-                          {([
-                            { key: "mid_curl" as RBRouteType, label: "Mid Curl" },
-                            { key: "flats" as RBRouteType, label: "Flats" },
-                            { key: "big_boy_route" as RBRouteType, label: "Big Boy Route" },
-                          ]).map(({ key, label }) => (
-                            <button key={key} onClick={() => setRbRouteType(rbRouteType === key ? null : key)}
-                              className={`flex-1 py-2 rounded text-xs font-medium transition ${rbRouteType === key ? "bg-blue-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
-                              {label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-gray-500 mb-2">Aligned at Snap</div>
-                        <div className="flex gap-1.5">
-                          <button onClick={() => setAlignedAsWr(false)}
-                            className={`px-3 h-9 rounded text-xs font-medium transition ${!alignedAsWr ? "bg-green-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
-                            RB
-                          </button>
-                          <button onClick={() => setAlignedAsWr(true)}
-                            className={`px-3 h-9 rounded text-xs font-medium transition ${alignedAsWr ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
-                            WR Split Out
-                          </button>
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-gray-500 mb-2">Targeted?</div>
-                        <div className="flex gap-1.5">
-                          <button onClick={() => setRbTargeted(true)}
-                            className={`px-3 h-9 rounded text-xs font-medium transition ${rbTargeted ? "bg-yellow-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
-                            Yes
-                          </button>
-                          <button onClick={() => { setRbTargeted(false); setRbOutcome(null); }}
-                            className={`px-3 h-9 rounded text-xs font-medium transition ${!rbTargeted ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
-                            No
-                          </button>
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-gray-500 mb-2">Open on Play?</div>
-                        <div className="flex gap-1.5">
-                          <button onClick={() => setRbWasOpen(true)}
-                            className={`px-3 h-9 rounded text-xs font-medium transition ${rbWasOpen ? "bg-green-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
-                            Yes
-                          </button>
-                          <button onClick={() => setRbWasOpen(false)}
-                            className={`px-3 h-9 rounded text-xs font-medium transition ${!rbWasOpen ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
-                            No
-                          </button>
-                        </div>
-                      </div>
-                      {rbTargeted && (
-                        <div>
-                          <div className="text-xs text-gray-500 mb-2">Outcome</div>
-                          <div className="flex gap-1.5">
-                            <button onClick={() => setRbOutcome("caught")}
-                              className={`px-4 h-9 rounded text-xs font-bold transition ${rbOutcome === "caught" ? "bg-green-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
-                              Caught ✓
-                            </button>
-                            <button onClick={() => setRbOutcome("drop")}
-                              className={`px-4 h-9 rounded text-xs font-bold transition ${rbOutcome === "drop" ? "bg-red-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
-                              Drop ✗
-                            </button>
-                            <button onClick={() => setRbOutcome("incomplete")}
-                              className={`px-4 h-9 rounded text-xs font-bold transition ${rbOutcome === "incomplete" ? "bg-gray-500 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
-                              Incomplete
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ) : runType === "pass_block" || runType === "run_block" ? (
-                  /* Pass Block / Run Block — Success/Fail only */
-                  <div>
-                    <div className="text-xs text-gray-500 mb-2">Result</div>
-                    <div className="flex gap-3">
-                      <button onClick={() => setSuccess(true)}
-                        className={`flex-1 py-3 rounded-lg text-sm font-bold transition ${success === true ? "bg-green-600 text-white ring-2 ring-green-400" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
-                        ✓ SUCCESS
-                      </button>
-                      <button onClick={() => setSuccess(false)}
-                        className={`flex-1 py-3 rounded-lg text-sm font-bold transition ${success === false ? "bg-red-600 text-white ring-2 ring-red-400" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
-                        ✗ FAIL
-                      </button>
-                    </div>
-                  </div>
-                ) : runType === "decoy" ? (
-                  <div className="p-3 bg-gray-900/60 rounded-lg border border-gray-700/50 text-xs text-gray-500">
-                    Decoy — no additional options. Click Log Play to record.
-                  </div>
-                ) : (
-                  <>
-                    {/* Context toggles — run plays only */}
-                    <div className="flex flex-wrap gap-3">
-                      <div>
-                        <div className="text-xs text-gray-500 mb-2">Loaded Box?</div>
-                        <div className="flex gap-1.5">
-                          <button onClick={() => setLoadedBox(true)} className={`px-3 h-9 rounded text-xs font-medium transition ${loadedBox ? "bg-teal-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>Yes</button>
-                          <button onClick={() => setLoadedBox(false)} className={`px-3 h-9 rounded text-xs font-medium transition ${!loadedBox ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>No</button>
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-gray-500 mb-2">Unblocked Defender?</div>
-                        <div className="flex gap-1.5">
-                          <button onClick={() => setUnblockedDefender(true)} className={`px-3 h-9 rounded text-xs font-medium transition ${unblockedDefender ? "bg-orange-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>Yes</button>
-                          <button onClick={() => setUnblockedDefender(false)} className={`px-3 h-9 rounded text-xs font-medium transition ${!unblockedDefender ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>No</button>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Success / Fail */}
-                    <div>
-                      <div className="text-xs text-gray-500 mb-2">Result</div>
-                      <div className="flex gap-3">
-                        <button onClick={() => setSuccess(true)}
-                          className={`flex-1 py-3 rounded-lg text-sm font-bold transition ${success === true ? "bg-green-600 text-white ring-2 ring-green-400" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
-                          ✓ SUCCESS
-                        </button>
-                        <button onClick={() => setSuccess(false)}
-                          className={`flex-1 py-3 rounded-lg text-sm font-bold transition ${success === false ? "bg-red-600 text-white ring-2 ring-red-400" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
-                          ✗ FAIL
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Post-play flags */}
-                    <div>
-                      <div className="text-xs text-gray-500 mb-2">Play Flags <span className="text-gray-700">(select if yes)</span></div>
-                      <div className="flex gap-2">
-                        {[
-                          { label: "Broken Tackle", val: brokenTackle, set: setBrokenTackle, color: "bg-yellow-700" },
-                          { label: "Explosive Play", val: explosivePlay, set: setExplosivePlay, color: "bg-green-800" },
-                          { label: "Run Stuff", val: runStuff, set: setRunStuff, color: "bg-red-800" },
-                        ].map(({ label, val, set, color }) => (
-                          <button key={label} onClick={() => set(!val)}
-                            className={`flex-1 py-2 rounded text-xs font-medium transition ${val ? `${color} text-white` : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </>
-                )}
-
-                {/* Notes + log */}
-                {editingPlayId && (
-                  <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-900/30 border border-yellow-700/50 rounded text-xs text-yellow-300">
-                    <span>✎</span>
-                    <span>Editing play — make changes above then save</span>
-                    <button onClick={resetPlayForm} className="ml-auto text-yellow-400 hover:text-white transition">Cancel</button>
-                  </div>
-                )}
+                {/* Pass block / Run block / Decoy */}
                 <div className="flex gap-2">
-                  <input className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-green-500"
-                    placeholder="Play note (optional)" value={playNotes} onChange={(e) => setPlayNotes(e.target.value)} />
-                  {editingPlayId ? (
-                    <button onClick={saveEditedPlay}
-                      disabled={savingPlay || (runType !== "route" && runType !== "decoy" && success === null) || (runType === "route" && rbTargeted && rbOutcome === null)}
-                      className="px-5 py-2 bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 text-white text-sm rounded font-medium transition whitespace-nowrap">
-                      {savingPlay ? "…" : "Save Edit"}
-                    </button>
-                  ) : (
-                    <button onClick={logPlay}
-                      disabled={savingPlay || (runType !== "route" && runType !== "decoy" && success === null) || (runType === "route" && rbTargeted && rbOutcome === null)}
-                      className="px-5 py-2 bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white text-sm rounded font-medium transition">
-                      {savingPlay ? "…" : "Log Play"}
-                    </button>
+                  <button onClick={() => setRunType("pass_block")}
+                    className={`flex-1 py-2 rounded text-sm font-medium transition ${runType === "pass_block" ? "bg-purple-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                    Pass Block
+                  </button>
+                  <button onClick={() => setRunType("run_block")}
+                    className={`flex-1 py-2 rounded text-sm font-medium transition ${runType === "run_block" ? "bg-orange-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                    Run Block
+                  </button>
+                  <button onClick={() => setRunType("decoy")}
+                    className={`flex-1 py-2 rounded text-sm font-medium transition ${runType === "decoy" ? "bg-yellow-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                    Decoy
+                  </button>
+                </div>
+                {/* Route run */}
+                <button onClick={() => { setRunType("route"); setSuccess(null); setRbOutcome(null); }}
+                  className={`w-full py-2 rounded text-sm font-medium transition ${runType === "route" ? "bg-blue-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                  Route Run
+                </button>
+              </div>
+            </div>
+
+            {/* Route play UI */}
+            {runType === "route" ? (
+              <div className="space-y-3 p-3 bg-gray-900/60 rounded-lg border border-blue-900/50">
+                <div className="text-xs text-blue-400 font-medium">Route Run Options</div>
+                <div className="flex flex-wrap gap-4">
+                  {/* Route Type */}
+                  <div className="w-full">
+                    <div className="text-xs text-gray-500 mb-2">Route Type</div>
+                    <div className="flex gap-2">
+                      {([
+                        { key: "mid_curl" as RBRouteType, label: "Mid Curl" },
+                        { key: "flats" as RBRouteType, label: "Flats" },
+                        { key: "big_boy_route" as RBRouteType, label: "Big Boy Route" },
+                      ]).map(({ key, label }) => (
+                        <button key={key} onClick={() => setRbRouteType(rbRouteType === key ? null : key)}
+                          className={`flex-1 py-2 rounded text-xs font-medium transition ${rbRouteType === key ? "bg-blue-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-gray-500 mb-2">Aligned at Snap</div>
+                    <div className="flex gap-1.5">
+                      <button onClick={() => setAlignedAsWr(false)}
+                        className={`px-3 h-9 rounded text-xs font-medium transition ${!alignedAsWr ? "bg-green-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        RB
+                      </button>
+                      <button onClick={() => setAlignedAsWr(true)}
+                        className={`px-3 h-9 rounded text-xs font-medium transition ${alignedAsWr ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        WR Split Out
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-gray-500 mb-2">Targeted?</div>
+                    <div className="flex gap-1.5">
+                      <button onClick={() => setRbTargeted(true)}
+                        className={`px-3 h-9 rounded text-xs font-medium transition ${rbTargeted ? "bg-yellow-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        Yes
+                      </button>
+                      <button onClick={() => { setRbTargeted(false); setRbOutcome(null); }}
+                        className={`px-3 h-9 rounded text-xs font-medium transition ${!rbTargeted ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        No
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-gray-500 mb-2">Open on Play?</div>
+                    <div className="flex gap-1.5">
+                      <button onClick={() => setRbWasOpen(true)}
+                        className={`px-3 h-9 rounded text-xs font-medium transition ${rbWasOpen ? "bg-green-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        Yes
+                      </button>
+                      <button onClick={() => setRbWasOpen(false)}
+                        className={`px-3 h-9 rounded text-xs font-medium transition ${!rbWasOpen ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        No
+                      </button>
+                    </div>
+                  </div>
+                  {rbTargeted && (
+                    <div>
+                      <div className="text-xs text-gray-500 mb-2">Outcome</div>
+                      <div className="flex gap-1.5">
+                        <button onClick={() => setRbOutcome("caught")}
+                          className={`px-4 h-9 rounded text-xs font-bold transition ${rbOutcome === "caught" ? "bg-green-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                          Caught ✓
+                        </button>
+                        <button onClick={() => setRbOutcome("drop")}
+                          className={`px-4 h-9 rounded text-xs font-bold transition ${rbOutcome === "drop" ? "bg-red-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                          Drop ✗
+                        </button>
+                        <button onClick={() => setRbOutcome("incomplete")}
+                          className={`px-4 h-9 rounded text-xs font-bold transition ${rbOutcome === "incomplete" ? "bg-gray-500 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                          Incomplete
+                        </button>
+                      </div>
+                    </div>
                   )}
                 </div>
-                {playError && <p className="text-red-400 text-xs">{playError}</p>}
-
-                {/* Recent plays */}
-                {gamePlays.length > 0 && (
+              </div>
+            ) : runType === "pass_block" || runType === "run_block" ? (
+              /* Pass Block / Run Block — Success/Fail only */
+              <div>
+                <div className="text-xs text-gray-500 mb-2">Result</div>
+                <div className="flex gap-3">
+                  <button onClick={() => setSuccess(true)}
+                    className={`flex-1 py-3 rounded-lg text-sm font-bold transition ${success === true ? "bg-green-600 text-white ring-2 ring-green-400" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                    ✓ SUCCESS
+                  </button>
+                  <button onClick={() => setSuccess(false)}
+                    className={`flex-1 py-3 rounded-lg text-sm font-bold transition ${success === false ? "bg-red-600 text-white ring-2 ring-red-400" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                    ✗ FAIL
+                  </button>
+                </div>
+              </div>
+            ) : runType === "decoy" ? (
+              <div className="p-3 bg-gray-900/60 rounded-lg border border-gray-700/50 text-xs text-gray-500">
+                Decoy — no additional options. Click Log Play to record.
+              </div>
+            ) : (
+              <>
+                {/* Context toggles — run plays only */}
+                <div className="flex flex-wrap gap-3">
                   <div>
-                    <div className="text-xs text-gray-500 mb-2">Plays This Game ({gamePlays.length})</div>
-                    <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
-                      {[...gamePlays].reverse().map((pl, i) => {
-                        const rtLabel: Record<RBRunType, string> = {
-                          outside_man_gap: "OG", inside_man_gap: "IG",
-                          outside_zone: "OZ", inside_zone: "IZ",
-                          pass_block: "PB", run_block: "RB", decoy: "DCY", route: "Route",
-                        };
-                        const fLabel: Record<RBFormation, string> = { gun: "Gun", pistol: "Pst", under_center: "UC" };
-                        const isRoute = pl.run_type === "route";
-                        return (
-                          <div key={pl.id} className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs transition ${
-                            editingPlayId === pl.id
-                              ? "bg-yellow-900/40 border border-yellow-700/60"
-                              : "bg-gray-900 border border-transparent"
-                          }`}>
-                            <span className="text-gray-500 w-5 flex-shrink-0">{gamePlays.length - i}</span>
-                            <span className="text-gray-400">{fLabel[pl.formation]}</span>
-                            <span className={`font-medium ${isRoute ? "text-blue-400" : "text-white"}`}>{rtLabel[pl.run_type]}</span>
-                            {isRoute ? (
-                              <>
-                                {pl.route_type && (
-                                  <span className="text-blue-300 text-[10px]">
-                                    {pl.route_type === "mid_curl" ? "Curl" : pl.route_type === "flats" ? "Flat" : "BBR"}
-                                  </span>
-                                )}
-                                {pl.aligned_as_wr && <span className="text-blue-300">WR</span>}
-                                {pl.was_open && <span className="text-green-300">Open</span>}
-                                {pl.targeted
-                                  ? pl.success === true ? <span className="text-green-400">✓</span>
-                                    : pl.success === false ? <span className="text-red-400">Drop</span>
-                                    : <span className="text-gray-400">Inc</span>
-                                  : <span className="text-gray-600">—</span>}
-                              </>
-                            ) : (
-                              <>
-                                {pl.loaded_box && <span className="text-teal-400">LB</span>}
-                                {pl.unblocked_defender && <span className="text-orange-400">UB</span>}
-                                <span className={pl.success ? "text-green-400" : "text-red-400"}>{pl.success ? "✓" : "✗"}</span>
-                                {pl.broken_tackle && <span className="text-yellow-400">BT</span>}
-                                {pl.explosive_play && <span className="text-green-300">EXP</span>}
-                                {pl.run_stuff && <span className="text-red-300">STF</span>}
-                              </>
-                            )}
-                            {pl.play_notes && <span className="text-gray-500 truncate">{pl.play_notes}</span>}
-                            <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
-                              <button
-                                onClick={() => editingPlayId === pl.id ? resetPlayForm() : startEditPlay(pl)}
-                                className={`px-2 py-0.5 rounded text-xs transition ${editingPlayId === pl.id ? "text-yellow-400 hover:text-white" : "text-gray-600 hover:text-yellow-400"}`}
-                              >✎</button>
-                              <button onClick={() => deletePlay(pl.id)} className="text-gray-700 hover:text-red-400">✕</button>
-                            </div>
-                          </div>
-                        );
-                      })}
+                    <div className="text-xs text-gray-500 mb-2">Loaded Box?</div>
+                    <div className="flex gap-1.5">
+                      <button onClick={() => setLoadedBox(true)} className={`px-3 h-9 rounded text-xs font-medium transition ${loadedBox ? "bg-teal-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>Yes</button>
+                      <button onClick={() => setLoadedBox(false)} className={`px-3 h-9 rounded text-xs font-medium transition ${!loadedBox ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>No</button>
                     </div>
                   </div>
-                )}
+                  <div>
+                    <div className="text-xs text-gray-500 mb-2">Unblocked Defender?</div>
+                    <div className="flex gap-1.5">
+                      <button onClick={() => setUnblockedDefender(true)} className={`px-3 h-9 rounded text-xs font-medium transition ${unblockedDefender ? "bg-orange-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>Yes</button>
+                      <button onClick={() => setUnblockedDefender(false)} className={`px-3 h-9 rounded text-xs font-medium transition ${!unblockedDefender ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>No</button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Success / Fail */}
+                <div>
+                  <div className="text-xs text-gray-500 mb-2">Result</div>
+                  <div className="flex gap-3">
+                    <button onClick={() => setSuccess(true)}
+                      className={`flex-1 py-3 rounded-lg text-sm font-bold transition ${success === true ? "bg-green-600 text-white ring-2 ring-green-400" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                      ✓ SUCCESS
+                    </button>
+                    <button onClick={() => setSuccess(false)}
+                      className={`flex-1 py-3 rounded-lg text-sm font-bold transition ${success === false ? "bg-red-600 text-white ring-2 ring-red-400" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                      ✗ FAIL
+                    </button>
+                  </div>
+                </div>
+
+                {/* Post-play flags */}
+                <div>
+                  <div className="text-xs text-gray-500 mb-2">Play Flags <span className="text-gray-700">(select if yes)</span></div>
+                  <div className="flex gap-2">
+                    {[
+                      { label: "Broken Tackle", val: brokenTackle, set: setBrokenTackle, color: "bg-yellow-700" },
+                      { label: "Explosive Play", val: explosivePlay, set: setExplosivePlay, color: "bg-green-800" },
+                      { label: "Run Stuff", val: runStuff, set: setRunStuff, color: "bg-red-800" },
+                    ].map(({ label, val, set, color }) => (
+                      <button key={label} onClick={() => set(!val)}
+                        className={`flex-1 py-2 rounded text-xs font-medium transition ${val ? `${color} text-white` : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Notes + log */}
+            {editingPlayId && (
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-900/30 border border-yellow-700/50 rounded text-xs text-yellow-300">
+                <span>✎</span>
+                <span>Editing play — make changes above then save</span>
+                <button onClick={resetPlayForm} className="ml-auto text-yellow-400 hover:text-white transition">Cancel</button>
+              </div>
+            )}
+            <div className="flex gap-2">
+              <input className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-green-500"
+                placeholder="Play note (optional)" value={playNotes} onChange={(e) => setPlayNotes(e.target.value)} />
+              {editingPlayId ? (
+                <button onClick={saveEditedPlay}
+                  disabled={savingPlay || (runType !== "route" && runType !== "decoy" && success === null) || (runType === "route" && rbTargeted && rbOutcome === null)}
+                  className="px-5 py-2 bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 text-white text-sm rounded font-medium transition whitespace-nowrap">
+                  {savingPlay ? "…" : "Save Edit"}
+                </button>
+              ) : (
+                <button onClick={logPlay}
+                  disabled={savingPlay || (runType !== "route" && runType !== "decoy" && success === null) || (runType === "route" && rbTargeted && rbOutcome === null)}
+                  className="px-5 py-2 bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white text-sm rounded font-medium transition">
+                  {savingPlay ? "…" : "Log Play"}
+                </button>
+              )}
+            </div>
+            {playError && <p className="text-red-400 text-xs">{playError}</p>}
+
+            {/* Recent plays */}
+            {gamePlays.length > 0 && (
+              <div>
+                <div className="text-xs text-gray-500 mb-2">Plays This Game ({gamePlays.length})</div>
+                <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
+                  {[...gamePlays].reverse().map((pl, i) => {
+                    const rtLabel: Record<RBRunType, string> = {
+                      outside_man_gap: "OG", inside_man_gap: "IG",
+                      outside_zone: "OZ", inside_zone: "IZ",
+                      pass_block: "PB", run_block: "RB", decoy: "DCY", route: "Route",
+                    };
+                    const fLabel: Record<RBFormation, string> = { gun: "Gun", pistol: "Pst", under_center: "UC" };
+                    const isRoute = pl.run_type === "route";
+                    return (
+                      <div key={pl.id} className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs transition ${
+                        editingPlayId === pl.id
+                          ? "bg-yellow-900/40 border border-yellow-700/60"
+                          : "bg-gray-900 border border-transparent"
+                      }`}>
+                        <span className="text-gray-500 w-5 flex-shrink-0">{gamePlays.length - i}</span>
+                        <span className="text-gray-400">{fLabel[pl.formation]}</span>
+                        <span className={`font-medium ${isRoute ? "text-blue-400" : "text-white"}`}>{rtLabel[pl.run_type]}</span>
+                        {isRoute ? (
+                          <>
+                            {pl.route_type && (
+                              <span className="text-blue-300 text-[10px]">
+                                {pl.route_type === "mid_curl" ? "Curl" : pl.route_type === "flats" ? "Flat" : "BBR"}
+                              </span>
+                            )}
+                            {pl.aligned_as_wr && <span className="text-blue-300">WR</span>}
+                            {pl.was_open && <span className="text-green-300">Open</span>}
+                            {pl.targeted
+                              ? pl.success === true ? <span className="text-green-400">✓</span>
+                                : pl.success === false ? <span className="text-red-400">Drop</span>
+                                : <span className="text-gray-400">Inc</span>
+                              : <span className="text-gray-600">—</span>}
+                          </>
+                        ) : (
+                          <>
+                            {pl.loaded_box && <span className="text-teal-400">LB</span>}
+                            {pl.unblocked_defender && <span className="text-orange-400">UB</span>}
+                            <span className={pl.success ? "text-green-400" : "text-red-400"}>{pl.success ? "✓" : "✗"}</span>
+                            {pl.broken_tackle && <span className="text-yellow-400">BT</span>}
+                            {pl.explosive_play && <span className="text-green-300">EXP</span>}
+                            {pl.run_stuff && <span className="text-red-300">STF</span>}
+                          </>
+                        )}
+                        {pl.play_notes && <span className="text-gray-500 truncate">{pl.play_notes}</span>}
+                        <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
+                          <button
+                            onClick={() => editingPlayId === pl.id ? resetPlayForm() : startEditPlay(pl)}
+                            className={`px-2 py-0.5 rounded text-xs transition ${editingPlayId === pl.id ? "text-yellow-400 hover:text-white" : "text-gray-600 hover:text-yellow-400"}`}
+                          >✎</button>
+                          <button onClick={() => deletePlay(pl.id)} className="text-gray-700 hover:text-red-400">✕</button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>
-        </div>
+        )
       )}
-
-      {/* ── GAMES ── */}
-      {tab === "games" && (
+      renderGamesTable={() => (
         <div>
           {loading ? (
             <div className="text-gray-500 text-sm text-center py-8">Loading…</div>
@@ -1236,7 +979,6 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
           )}
         </div>
       )}
-
-    </div>
+    />
   );
 }

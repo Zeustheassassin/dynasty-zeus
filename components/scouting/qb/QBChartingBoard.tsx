@@ -1,10 +1,12 @@
 "use client";
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../../../lib/supabaseclient";
 import PlayerSynopsisCard from "../PlayerSynopsisCard";
+import ChartingBoard from "../shared/ChartingBoard";
+import type { ChartingBoardConfig } from "../shared/ChartingBoard";
+import { useChartingState } from "../shared/hooks/useChartingState";
 import type {
   Prospect,
-  ScoutingGame,
   QBPlay,
   QBSnapPosition,
   QBPlayType,
@@ -15,8 +17,9 @@ import type {
   QBTargetPos,
   QBDepthZone,
   RouteType,
-  ChartingDecision,
 } from "../../../lib/types";
+import { ROUTE_TYPES } from "../shared/chartingConstants";
+import { pct, fmtPct } from "../shared/chartingTypes";
 
 const SNAP_POSITIONS: { key: QBSnapPosition; label: string }[] = [
   { key: "shotgun",      label: "Shotgun" },
@@ -48,10 +51,6 @@ const ACCURACIES: { key: QBAccuracy; label: string; active: string }[] = [
   { key: "behind",    label: "Behind",    active: "bg-orange-700" },
 ];
 
-const QB_ROUTE_TYPES: RouteType[] = [
-  "nine", "post", "dig", "curl", "slant", "screen", "flat", "comeback", "out", "corner", "other",
-];
-
 // 3×3 depth-zone grid layout: [depth label, loc label, key]
 const DEPTH_ROWS: { label: string; short: string; depths: { loc: string; key: QBDepthZone }[] }[] = [
   { label: "20+ (Deep)", short: "D", depths: [
@@ -71,32 +70,18 @@ const DEPTH_ROWS: { label: string; short: string; depths: { loc: string; key: QB
   ]},
 ];
 
-const GAME_TYPES = ["regular", "bowl", "playoff", "scrimmage"];
-
 const QB_NFL_ROLES = ["Franchise QB", "Starter", "Bridge", "Backup", ""];
 
-const CHARTING_DECISIONS: { value: ChartingDecision; label: string }[] = [
-  { value: "fully_charted", label: "Fully Charted" },
-  { value: "partial_chart", label: "Partial Chart" },
-  { value: "charting",      label: "Charting" },
-  { value: "pending",       label: "Pending" },
-  { value: "not_charting",  label: "Not Charting" },
-];
-
-type BoardTab = "overview" | "chart" | "games";
+const QB_CONFIG: ChartingBoardConfig = {
+  positionLabel: "QB",
+  accentColor: "blue",
+  nflRoles: QB_NFL_ROLES,
+};
 
 interface Props {
   prospect: Prospect;
   onBack: () => void;
   onDataChanged: () => void;
-}
-
-function pct(n: number, d: number): number | null {
-  return d > 0 ? parseFloat(((n / d) * 100).toFixed(1)) : null;
-}
-
-function fmtPct(n: number | null): string {
-  return n !== null ? `${n}%` : "—";
 }
 
 function onTargetColor(p: number | null): string {
@@ -118,96 +103,41 @@ const DEPTH_SHORT: Record<QBDepthZone, string>   = {
 };
 
 export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Props) {
-  const [tab, setTab]                       = useState<BoardTab>("overview");
-  const [games, setGames]                   = useState<ScoutingGame[]>([]);
+  // Position-specific play state
   const [plays, setPlays]                   = useState<QBPlay[]>([]);
-  const [selectedGameId, setSelectedGameId] = useState<string | null>(null);
-  const [loading, setLoading]               = useState(true);
+  const [snapPos, setSnapPos]               = useState<QBSnapPosition>("shotgun");
+  const [playType, setPlayType]             = useState<QBPlayType>("pass");
+  const [timing, setTiming]                 = useState<QBTiming | null>(null);
+  const [accuracy, setAccuracy]             = useState<QBAccuracy | null>(null);
+  const [completion, setCompletion]         = useState<QBCompletion | null>(null);
+  const [intType, setIntType]               = useState<QBIntType | null>(null);
+  const [targetPos, setTargetPos]           = useState<QBTargetPos | null>(null);
+  const [depthZone, setDepthZone]           = useState<QBDepthZone | null>(null);
+  const [routeType, setRouteType]           = useState<RouteType | null>(null);
+  const [coverage, setCoverage]             = useState<"man" | "zone" | null>(null);
+  const [playNotes, setPlayNotes]           = useState("");
+  const [savingPlay, setSavingPlay]         = useState(false);
+  const [playError, setPlayError]           = useState<string | null>(null);
+  const [editingPlayId, setEditingPlayId]   = useState<string | null>(null);
 
-  // Add game form
-  const [showAddGame, setShowAddGame] = useState(false);
-  const [newGame, setNewGame]         = useState({ year: 2025, opponent: "", type: "regular" });
-  const [savingGame, setSavingGame]   = useState(false);
-  const [gameError, setGameError]     = useState<string | null>(null);
+  // Shared state via hook
+  const cs = useChartingState(prospect, {
+    onDataChanged,
+    onDeleteGamePlays: (id) => setPlays((p) => p.filter((pl) => pl.game_id !== id)),
+  });
+  const { tab, games, selectedGameId, loading, showAddGame, newGame, savingGame, gameError,
+          editBio, bio, savingBio,
+          onTabChange, onSelectGame, onToggleAddGame, onNewGameChange,
+          onAddGame, onDeleteGame, onToggleEditBio, onBioChange, onSaveBio } = cs;
 
-  // Play form
-  const [snapPos, setSnapPos]       = useState<QBSnapPosition>("shotgun");
-  const [playType, setPlayType]     = useState<QBPlayType>("pass");
-  const [timing, setTiming]         = useState<QBTiming | null>(null);
-  const [accuracy, setAccuracy]     = useState<QBAccuracy | null>(null);
-  const [completion, setCompletion] = useState<QBCompletion | null>(null);
-  const [intType, setIntType]       = useState<QBIntType | null>(null);
-  const [targetPos, setTargetPos]   = useState<QBTargetPos | null>(null);
-  const [depthZone, setDepthZone]   = useState<QBDepthZone | null>(null);
-  const [routeType, setRouteType] = useState<RouteType | null>(null);
-  const [coverage, setCoverage]   = useState<"man" | "zone" | null>(null);
-  const [playNotes, setPlayNotes]       = useState("");
-  const [savingPlay, setSavingPlay]     = useState(false);
-  const [playError, setPlayError]       = useState<string | null>(null);
-  const [editingPlayId, setEditingPlayId] = useState<string | null>(null);
-
-  // Bio edit
-  const [editBio, setEditBio]   = useState(false);
-  const [bio, setBio]           = useState<Partial<Prospect>>({});
-  const [savingBio, setSavingBio] = useState(false);
-
-  const needPassFields = playType === "rpo" || playType === "pass";
-  const noThrowTimings: QBTiming[] = ["scramble", "sack", "throw_away"];
-  const needThrowFields = needPassFields && timing !== null && !noThrowTimings.includes(timing);
-  const canLog =
-    !savingPlay &&
-    selectedGameId !== null &&
-    (!needPassFields || timing !== null) &&
-    (!needThrowFields || (accuracy !== null && depthZone !== null && routeType !== null && coverage !== null));
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    const { data: gData } = await supabase
-      .from("scouting_games")
-      .select("*")
-      .eq("prospect_id", prospect.id)
-      .order("season_year", { ascending: false })
-      .order("game_slot");
-    const gList: ScoutingGame[] = gData ?? [];
-    setGames(gList);
-
-    if (gList.length > 0) {
-      const gameIds = gList.map((g) => g.id);
-      const { data: pData } = await supabase
-        .from("qb_plays")
-        .select("*")
-        .in("game_id", gameIds)
-        .order("created_at");
-      setPlays((pData ?? []) as QBPlay[]);
-    } else {
-      setPlays([]);
-    }
-    setLoading(false);
-  }, [prospect.id]);
-
+  // Load plays when games change
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    load();
-    setBio({
-      height: prospect.height, weight: prospect.weight, birthday: prospect.birthday,
-      draft_class_year: prospect.draft_class_year, personal_rank: prospect.personal_rank,
-      should_play: prospect.should_play, will_play_pre: prospect.will_play_pre,
-      will_play_post: prospect.will_play_post, charting_decision: prospect.charting_decision,
-      charting_notes: prospect.charting_notes,
-      draft_round: prospect.draft_round, draft_pick: prospect.draft_pick, draft_team: prospect.draft_team,
-    });
-  }, [prospect.id, load, prospect.height, prospect.weight, prospect.birthday,
-    prospect.draft_class_year, prospect.personal_rank,
-    prospect.should_play, prospect.will_play_pre, prospect.will_play_post,
-    prospect.charting_decision, prospect.charting_notes,
-    prospect.draft_round, prospect.draft_pick, prospect.draft_team]);
+    if (games.length === 0) return;
+    const ids = games.map((g) => g.id);
+    supabase.from("qb_plays").select("*").in("game_id", ids).order("created_at")
+      .then(({ data }) => setPlays((data ?? []) as QBPlay[]));
+  }, [games]);
 
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (!selectedGameId && games.length > 0) setSelectedGameId(games[0].id);
-  }, [games, selectedGameId]);
-
-  const selectedGame = games.find((g) => g.id === selectedGameId);
   const gamePlays    = useMemo(() => plays.filter((p) => p.game_id === selectedGameId), [plays, selectedGameId]);
 
   // ── Aggregate stats ──────────────────────────────────────────
@@ -269,7 +199,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     // Route type stats: attempts + on-target by man/zone
     type RouteStat = { total: number; onTarget: number; man: number; manOT: number; zone: number; zoneOT: number };
     const routeStats: Partial<Record<RouteType, RouteStat>> = {};
-    for (const rt of QB_ROUTE_TYPES) {
+    for (const rt of ROUTE_TYPES) {
       const rp = thrownPlays.filter((p) => p.route_type === rt);
       if (rp.length === 0) continue;
       const manP  = rp.filter((p) => p.coverage === "man");
@@ -307,6 +237,15 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     for (const p of plays) map[p.game_id] = (map[p.game_id] ?? 0) + 1;
     return map;
   }, [plays]);
+
+  const needPassFields = playType === "rpo" || playType === "pass";
+  const noThrowTimings: QBTiming[] = ["scramble", "sack", "throw_away"];
+  const needThrowFields = needPassFields && timing !== null && !noThrowTimings.includes(timing);
+  const canLog =
+    !savingPlay &&
+    selectedGameId !== null &&
+    (!needPassFields || timing !== null) &&
+    (!needThrowFields || (accuracy !== null && depthZone !== null && routeType !== null && coverage !== null));
 
   function resetForm() {
     setEditingPlayId(null);
@@ -363,37 +302,6 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     if (autoLog.includes(t) && !editingPlayId) {
       logPlayWithTiming(t);
     }
-  }
-
-  async function addGame() {
-    if (!newGame.opponent.trim()) return;
-    setGameError(null);
-    setSavingGame(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setGameError("Not logged in."); setSavingGame(false); return; }
-    const slot = games.filter((g) => g.season_year === newGame.year).length + 1;
-    const { data, error } = await supabase.from("scouting_games").insert({
-      user_id: user.id, prospect_id: prospect.id,
-      season_year: newGame.year, opponent: newGame.opponent.trim(),
-      game_slot: slot, game_type: newGame.type,
-    }).select().single();
-    if (error) { setGameError(error.message); }
-    else if (data) {
-      setGames((prev) => [...prev, data as ScoutingGame]);
-      setSelectedGameId(data.id as string);
-      setNewGame((n) => ({ ...n, opponent: "" }));
-      setShowAddGame(false);
-      onDataChanged();
-    }
-    setSavingGame(false);
-  }
-
-  async function deleteGame(id: string) {
-    await supabase.from("scouting_games").delete().eq("id", id);
-    setGames((prev) => prev.filter((g) => g.id !== id));
-    setPlays((prev) => prev.filter((p) => p.game_id !== id));
-    if (selectedGameId === id) setSelectedGameId(games.find((g) => g.id !== id)?.id ?? null);
-    onDataChanged();
   }
 
   async function logPlayWithTiming(timingOverride: QBTiming) {
@@ -472,7 +380,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     }).eq("id", editingPlayId).select().single();
     if (error) { setPlayError(error.message); }
     else if (data) {
-      setPlays((prev) => prev.map((p) => p.id === editingPlayId ? (data as QBPlay) : p));
+      setPlays((prev) => prev.map((p) => p.id === editingPlayId ? data as QBPlay : p));
       resetForm();
       onDataChanged();
     }
@@ -486,149 +394,36 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     onDataChanged();
   }
 
-  async function saveBio() {
-    setSavingBio(true);
-    await supabase.from("prospects").update({ ...bio, updated_at: new Date().toISOString() }).eq("id", prospect.id);
-    setSavingBio(false);
-    setEditBio(false);
-    onDataChanged();
-  }
-
-  const tabs: { key: BoardTab; label: string }[] = [
+  const tabs = [
     { key: "overview", label: "Overview" },
     { key: "chart",    label: "Chart Game" },
     { key: "games",    label: "Games" },
   ];
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* Header */}
-      <div className="flex items-start gap-3">
-        <button onClick={onBack} className="mt-0.5 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm rounded transition flex-shrink-0">
-          ← Back
-        </button>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h2 className="text-xl font-bold text-white truncate">{prospect.name}</h2>
-            {prospect.draft_round && (
-              <span className="px-2 py-0.5 bg-yellow-600/20 border border-yellow-600/40 rounded text-xs font-semibold text-yellow-400">
-                Rd {prospect.draft_round}{prospect.draft_pick ? `, Pick ${prospect.draft_pick}` : ""}{prospect.draft_team ? ` · ${prospect.draft_team}` : ""}
-              </span>
-            )}
-          </div>
-          <p className="text-sm text-gray-400">
-            QB · {prospect.school}
-            {prospect.conference && ` · ${prospect.conference}`}
-            {" · "}<span className="text-blue-400">{prospect.draft_class_year} Class</span>
-          </p>
-        </div>
-        <div className="flex-shrink-0 text-right text-xs text-gray-500">
+    <ChartingBoard
+      prospect={prospect}
+      config={QB_CONFIG}
+      tabs={tabs}
+      gamePlayCounts={gamePlayCounts}
+      tab={tab} games={games} selectedGameId={selectedGameId} loading={loading}
+      showAddGame={showAddGame} newGame={newGame} savingGame={savingGame} gameError={gameError}
+      editBio={editBio} bio={bio} savingBio={savingBio}
+      onBack={onBack}
+      onTabChange={onTabChange} onSelectGame={onSelectGame} onToggleAddGame={onToggleAddGame}
+      onNewGameChange={onNewGameChange} onAddGame={onAddGame} onDeleteGame={onDeleteGame}
+      onToggleEditBio={onToggleEditBio} onBioChange={onBioChange} onSaveBio={onSaveBio}
+      renderHeaderStats={() => (
+        <>
           <div>{stats.totalPlays} plays · {games.length} games</div>
           {stats.onTargetPct !== null && (
             <div className={onTargetColor(stats.onTargetPct)}>
               {stats.onTargetPct}% on target
             </div>
           )}
-        </div>
-        <button onClick={() => setEditBio((e) => !e)} className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm rounded transition flex-shrink-0">
-          {editBio ? "Close" : "Edit Bio"}
-        </button>
-      </div>
-
-      {/* Bio edit panel */}
-      {editBio && (
-        <div className="p-4 bg-gray-900 border border-gray-700 rounded-lg">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
-            {([
-              { label: "Height",        key: "height" as const,        type: "text",   placeholder: '6\'4"' },
-              { label: "Weight (lbs)",  key: "weight" as const,        type: "number", placeholder: "220" },
-              { label: "Birthday",      key: "birthday" as const,      type: "date",   placeholder: "" },
-              { label: "Personal Rank", key: "personal_rank" as const, type: "number", placeholder: "1" },
-            ] as const).map((f) => (
-              <div key={f.key}>
-                <label className="block text-xs text-gray-500 mb-1">{f.label}</label>
-                <input type={f.type} placeholder={f.placeholder}
-                  className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
-                  value={(bio[f.key] as string | number | null | undefined) ?? ""}
-                  onChange={(e) => setBio((b) => ({ ...b, [f.key]: f.type === "number" ? (e.target.value ? Number(e.target.value) : null) : (e.target.value || null) }))}
-                />
-              </div>
-            ))}
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Draft Class Year</label>
-              <select className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
-                value={bio.draft_class_year ?? 2026} onChange={(e) => setBio((b) => ({ ...b, draft_class_year: Number(e.target.value) }))}>
-                {[2026, 2027, 2028, 2029].map((y) => <option key={y}>{y}</option>)}
-              </select>
-            </div>
-            {(["should_play", "will_play_pre", "will_play_post"] as const).map((k) => (
-              <div key={k}>
-                <label className="block text-xs text-gray-500 mb-1">
-                  {k === "should_play" ? "Should Play" : k === "will_play_pre" ? "Will Play (Pre)" : "Will Play (Post)"}
-                </label>
-                <select className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
-                  value={bio[k] ?? ""} onChange={(e) => setBio((b) => ({ ...b, [k]: e.target.value }))}>
-                  {QB_NFL_ROLES.map((r) => <option key={r} value={r}>{r || "—"}</option>)}
-                </select>
-              </div>
-            ))}
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Charting Status</label>
-              <select className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
-                value={bio.charting_decision ?? "pending"} onChange={(e) => setBio((b) => ({ ...b, charting_decision: e.target.value as ChartingDecision }))}>
-                {CHARTING_DECISIONS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
-              </select>
-            </div>
-          </div>
-          <div className="mb-3">
-            <label className="block text-xs text-gray-500 mb-1">Charting Notes</label>
-            <textarea rows={2}
-              className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500 resize-none"
-              value={bio.charting_notes ?? ""} onChange={(e) => setBio((b) => ({ ...b, charting_notes: e.target.value }))} />
-          </div>
-          <div className="grid grid-cols-3 gap-3 mb-3">
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Draft Round</label>
-              <input type="number" min={1} max={7} placeholder="e.g. 1"
-                className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
-                value={bio.draft_round ?? ""}
-                onChange={(e) => setBio((b) => ({ ...b, draft_round: e.target.value ? Number(e.target.value) : null }))} />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Draft Pick #</label>
-              <input type="number" min={1} placeholder="e.g. 14"
-                className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
-                value={bio.draft_pick ?? ""}
-                onChange={(e) => setBio((b) => ({ ...b, draft_pick: e.target.value ? Number(e.target.value) : null }))} />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Draft Team</label>
-              <input type="text" placeholder="e.g. NYG"
-                className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
-                value={bio.draft_team ?? ""}
-                onChange={(e) => setBio((b) => ({ ...b, draft_team: e.target.value || null }))} />
-            </div>
-          </div>
-          <button onClick={saveBio} disabled={savingBio}
-            className="px-4 py-2 bg-blue-700 hover:bg-blue-600 disabled:opacity-50 text-white text-sm rounded font-medium transition">
-            {savingBio ? "Saving…" : "Save"}
-          </button>
-        </div>
+        </>
       )}
-
-      {/* Tabs */}
-      <div className="flex gap-1 border-b border-gray-800">
-        {tabs.map((t) => (
-          <button key={t.key} onClick={() => setTab(t.key)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition whitespace-nowrap ${
-              tab === t.key ? "border-blue-500 text-blue-400" : "border-transparent text-gray-400 hover:text-white"
-            }`}
-          >{t.label}</button>
-        ))}
-      </div>
-
-      {/* ── OVERVIEW ── */}
-      {tab === "overview" && (
+      renderOverview={() => (
         <div className="space-y-5">
           {loading ? (
             <div className="text-gray-500 text-sm text-center py-8">Loading…</div>
@@ -865,7 +660,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-800/60">
-                        {QB_ROUTE_TYPES
+                        {ROUTE_TYPES
                           .filter((rt) => stats.routeStats[rt])
                           .sort((a, b) => (stats.routeStats[b]?.total ?? 0) - (stats.routeStats[a]?.total ?? 0))
                           .map((rt) => {
@@ -940,355 +735,295 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
           )}
         </div>
       )}
-
-      {/* ── CHART GAME ── */}
-      {tab === "chart" && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* Game list */}
-          <div className="md:col-span-1">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-medium text-gray-300">Games ({games.length})</span>
-              <button onClick={() => setShowAddGame((s) => !s)} className="px-2 py-1 bg-blue-700 hover:bg-blue-600 text-white text-xs rounded transition">+ Add</button>
+      renderPlayLogger={(sg) => (
+        !sg ? (
+          <div className="text-gray-500 text-sm text-center py-12">Select or add a game to start logging plays.</div>
+        ) : (
+          <div className="space-y-4">
+            <div className="text-sm font-medium text-gray-300">
+              Logging: <span className="text-white">{sg.season_year} vs {sg.opponent}</span>
+              <span className="ml-2 text-blue-400 text-xs">{gamePlays.length} plays</span>
             </div>
-            {showAddGame && (
-              <div className="mb-3 p-3 bg-gray-900 border border-gray-700 rounded-lg space-y-2">
-                <select className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm"
-                  value={newGame.year} onChange={(e) => setNewGame((n) => ({ ...n, year: Number(e.target.value) }))}>
-                  {[2023, 2024, 2025, 2026].map((y) => <option key={y}>{y}</option>)}
-                </select>
-                <input className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500"
-                  placeholder="Opponent" value={newGame.opponent} onChange={(e) => setNewGame((n) => ({ ...n, opponent: e.target.value }))} />
-                <select className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm"
-                  value={newGame.type} onChange={(e) => setNewGame((n) => ({ ...n, type: e.target.value }))}>
-                  {GAME_TYPES.map((t) => <option key={t}>{t}</option>)}
-                </select>
-                <div className="flex gap-2">
-                  <button onClick={addGame} disabled={savingGame || !newGame.opponent.trim()}
-                    className="flex-1 py-1.5 bg-blue-700 hover:bg-blue-600 disabled:opacity-50 text-white text-sm rounded transition">
-                    {savingGame ? "…" : "Add Game"}
+
+            {/* 1. Snap Position */}
+            <div>
+              <div className="text-xs text-gray-500 mb-2">Snap Position</div>
+              <div className="flex gap-2">
+                {SNAP_POSITIONS.map(({ key, label }) => (
+                  <button key={key} onClick={() => setSnapPos(key)}
+                    className={`flex-1 py-2 rounded text-sm font-medium transition ${snapPos === key ? "bg-blue-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                    {label}
                   </button>
-                  <button onClick={() => setShowAddGame(false)} className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm rounded transition">✕</button>
+                ))}
+              </div>
+            </div>
+
+            {/* 2. Play Type */}
+            <div>
+              <div className="text-xs text-gray-500 mb-2">Play Type</div>
+              <div className="flex gap-2">
+                {PLAY_TYPES.map(({ key, label, color }) => (
+                  <button key={key} onClick={() => handlePlayTypeChange(key)}
+                    className={`flex-1 py-2 rounded text-sm font-bold transition ${playType === key ? `${color} text-white` : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 3. Timing — only for RPO / Pass */}
+            {needPassFields && (
+              <div>
+                <div className="text-xs text-gray-500 mb-2">Timing</div>
+                <div className="flex flex-wrap gap-2">
+                  {TIMINGS.map(({ key, label }) => (
+                    <button key={key} onClick={() => handleTimingChange(key)}
+                      className={`px-4 py-2 rounded text-sm font-medium transition ${
+                        timing === key
+                          ? key === "scramble" ? "bg-orange-600 text-white" : "bg-blue-600 text-white"
+                          : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                      }`}>
+                      {label}
+                    </button>
+                  ))}
                 </div>
-                {gameError && <p className="text-red-400 text-xs">{gameError}</p>}
               </div>
             )}
-            <div className="space-y-1">
-              {loading ? (
-                <div className="text-gray-500 text-xs py-4 text-center">Loading…</div>
-              ) : games.length === 0 ? (
-                <div className="text-gray-500 text-xs py-4 text-center">No games added yet.</div>
-              ) : (
-                games.map((g) => (
-                  <div key={g.id}
-                    className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer border transition ${selectedGameId === g.id ? "bg-blue-900/30 border-blue-700" : "bg-gray-900 border-gray-800 hover:border-gray-600"}`}
-                    onClick={() => setSelectedGameId(g.id)}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="text-xs font-medium text-white truncate">{g.season_year} {g.opponent}</div>
-                      <div className="text-xs text-gray-500 capitalize">{g.game_type}</div>
-                    </div>
-                    <div className="text-xs text-blue-400 flex-shrink-0">{gamePlayCounts[g.id] ?? 0}pl</div>
-                    <button onClick={(e) => { e.stopPropagation(); deleteGame(g.id); }} className="text-gray-600 hover:text-red-400 text-xs px-1 flex-shrink-0">✕</button>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
 
-          {/* Play logger */}
-          <div className="md:col-span-2">
-            {!selectedGame ? (
-              <div className="text-gray-500 text-sm text-center py-12">Select or add a game to start logging plays.</div>
-            ) : (
-              <div className="space-y-4">
-                <div className="text-sm font-medium text-gray-300">
-                  Logging: <span className="text-white">{selectedGame.season_year} vs {selectedGame.opponent}</span>
-                  <span className="ml-2 text-blue-400 text-xs">{gamePlays.length} plays</span>
-                </div>
-
-                {/* 1. Snap Position */}
+            {/* 4-7. Throw details — only when timing is set and not scramble */}
+            {needThrowFields && (
+              <div className="space-y-4 p-4 bg-gray-900/60 rounded-lg border border-blue-900/40">
+                {/* Accuracy */}
                 <div>
-                  <div className="text-xs text-gray-500 mb-2">Snap Position</div>
-                  <div className="flex gap-2">
-                    {SNAP_POSITIONS.map(({ key, label }) => (
-                      <button key={key} onClick={() => setSnapPos(key)}
-                        className={`flex-1 py-2 rounded text-sm font-medium transition ${snapPos === key ? "bg-blue-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                  <div className="text-xs text-gray-500 mb-2">Accuracy</div>
+                  <div className="flex flex-wrap gap-2">
+                    {ACCURACIES.map(({ key, label, active }) => (
+                      <button key={key} onClick={() => setAccuracy((a) => a === key ? null : key)}
+                        className={`px-4 py-2 rounded text-sm font-medium transition ${accuracy === key ? `${active} text-white` : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
                         {label}
                       </button>
                     ))}
                   </div>
                 </div>
 
-                {/* 2. Play Type */}
+                {/* Completion */}
                 <div>
-                  <div className="text-xs text-gray-500 mb-2">Play Type</div>
-                  <div className="flex gap-2">
-                    {PLAY_TYPES.map(({ key, label, color }) => (
-                      <button key={key} onClick={() => handlePlayTypeChange(key)}
-                        className={`flex-1 py-2 rounded text-sm font-bold transition ${playType === key ? `${color} text-white` : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                  <div className="text-xs text-gray-500 mb-2">Result</div>
+                  <div className="flex gap-2 flex-wrap">
+                    {([
+                      { key: "caught",       label: "Caught",       cls: "bg-green-600" },
+                      { key: "incomplete",   label: "Incomplete",   cls: "bg-gray-600" },
+                      { key: "interception", label: "Interception", cls: "bg-red-700" },
+                    ] as { key: QBCompletion; label: string; cls: string }[]).map(({ key, label, cls }) => (
+                      <button
+                        key={key}
+                        onClick={() => {
+                          setCompletion((c) => c === key ? null : key);
+                          if (key !== "interception") setIntType(null);
+                        }}
+                        className={`px-5 py-2 rounded text-sm font-semibold transition ${
+                          completion === key ? `${cls} text-white` : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                        }`}
+                      >
                         {label}
                       </button>
                     ))}
                   </div>
-                </div>
-
-                {/* 3. Timing — only for RPO / Pass */}
-                {needPassFields && (
-                  <div>
-                    <div className="text-xs text-gray-500 mb-2">Timing</div>
-                    <div className="flex flex-wrap gap-2">
-                      {TIMINGS.map(({ key, label }) => (
-                        <button key={key} onClick={() => handleTimingChange(key)}
-                          className={`px-4 py-2 rounded text-sm font-medium transition ${
-                            timing === key
-                              ? key === "scramble" ? "bg-orange-600 text-white" : "bg-blue-600 text-white"
-                              : "bg-gray-800 text-gray-400 hover:bg-gray-700"
-                          }`}>
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* 4-7. Throw details — only when timing is set and not scramble */}
-                {needThrowFields && (
-                  <div className="space-y-4 p-4 bg-gray-900/60 rounded-lg border border-blue-900/40">
-                    {/* Accuracy */}
-                    <div>
-                      <div className="text-xs text-gray-500 mb-2">Accuracy</div>
-                      <div className="flex flex-wrap gap-2">
-                        {ACCURACIES.map(({ key, label, active }) => (
-                          <button key={key} onClick={() => setAccuracy((a) => a === key ? null : key)}
-                            className={`px-4 py-2 rounded text-sm font-medium transition ${accuracy === key ? `${active} text-white` : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Completion */}
-                    <div>
-                      <div className="text-xs text-gray-500 mb-2">Result</div>
+                  {/* INT sub-type */}
+                  {completion === "interception" && (
+                    <div className="mt-3">
+                      <div className="text-xs text-gray-500 mb-2">INT Type</div>
                       <div className="flex gap-2 flex-wrap">
                         {([
-                          { key: "caught",       label: "Caught",       cls: "bg-green-600" },
-                          { key: "incomplete",   label: "Incomplete",   cls: "bg-gray-600" },
-                          { key: "interception", label: "Interception", cls: "bg-red-700" },
-                        ] as { key: QBCompletion; label: string; cls: string }[]).map(({ key, label, cls }) => (
+                          { key: "bad_throw",    label: "Bad Throw" },
+                          { key: "bad_decision", label: "Bad Decision" },
+                          { key: "fifty_fifty",  label: "50/50 Ball" },
+                          { key: "tipped",       label: "Tipped Ball" },
+                        ] as { key: QBIntType; label: string }[]).map(({ key, label }) => (
                           <button
                             key={key}
-                            onClick={() => {
-                              setCompletion((c) => c === key ? null : key);
-                              if (key !== "interception") setIntType(null);
-                            }}
-                            className={`px-5 py-2 rounded text-sm font-semibold transition ${
-                              completion === key ? `${cls} text-white` : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                            onClick={() => setIntType((t) => t === key ? null : key)}
+                            className={`px-4 py-1.5 rounded text-xs font-medium transition ${
+                              intType === key ? "bg-orange-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"
                             }`}
                           >
                             {label}
                           </button>
                         ))}
                       </div>
-                      {/* INT sub-type */}
-                      {completion === "interception" && (
-                        <div className="mt-3">
-                          <div className="text-xs text-gray-500 mb-2">INT Type</div>
-                          <div className="flex gap-2 flex-wrap">
-                            {([
-                              { key: "bad_throw",    label: "Bad Throw" },
-                              { key: "bad_decision", label: "Bad Decision" },
-                              { key: "fifty_fifty",  label: "50/50 Ball" },
-                              { key: "tipped",       label: "Tipped Ball" },
-                            ] as { key: QBIntType; label: string }[]).map(({ key, label }) => (
-                              <button
-                                key={key}
-                                onClick={() => setIntType((t) => t === key ? null : key)}
-                                className={`px-4 py-1.5 rounded text-xs font-medium transition ${
-                                  intType === key ? "bg-orange-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"
-                                }`}
-                              >
-                                {label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
                     </div>
-
-                    {/* Target Position */}
-                    <div>
-                      <div className="text-xs text-gray-500 mb-2">Target Position</div>
-                      <div className="flex gap-2">
-                        {(["rb", "wr", "te"] as QBTargetPos[]).map((pos) => (
-                          <button
-                            key={pos}
-                            onClick={() => setTargetPos((p) => p === pos ? null : pos)}
-                            className={`px-6 py-2 rounded text-sm font-semibold uppercase transition ${
-                              targetPos === pos ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"
-                            }`}
-                          >
-                            {pos.toUpperCase()}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Depth / Location 3×3 grid */}
-                    <div>
-                      <div className="text-xs text-gray-500 mb-2">Depth / Location</div>
-                      <table className="text-xs">
-                        <thead>
-                          <tr>
-                            <th className="pr-2 pb-1 text-gray-700 font-normal text-left" />
-                            {["Left", "Center", "Right"].map((l) => (
-                              <th key={l} className="px-1 pb-1 text-gray-500 font-medium text-center">{l}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {DEPTH_ROWS.map(({ label, depths }) => (
-                            <tr key={label}>
-                              <td className="pr-2 py-1 text-gray-500 whitespace-nowrap text-right">{label}</td>
-                              {depths.map(({ key, loc }) => (
-                                <td key={key} className="px-1 py-1">
-                                  <button
-                                    onClick={() => setDepthZone((d) => d === key ? null : key)}
-                                    className={`w-full py-2 px-3 rounded text-xs font-medium transition whitespace-nowrap ${
-                                      depthZone === key ? "bg-blue-600 text-white ring-1 ring-blue-400" : "bg-gray-800 text-gray-400 hover:bg-gray-700"
-                                    }`}
-                                  >
-                                    {loc}
-                                  </button>
-                                </td>
-                              ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-
-                    {/* Route Type */}
-                    <div>
-                      <div className="text-xs text-gray-500 mb-2">Route Type</div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {QB_ROUTE_TYPES.map((rt) => (
-                          <button key={rt} onClick={() => setRouteType((r) => r === rt ? null : rt)}
-                            className={`px-3 py-1.5 rounded text-xs font-medium capitalize transition ${routeType === rt ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
-                            {rt}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Coverage */}
-                    <div>
-                      <div className="text-xs text-gray-500 mb-2">Coverage</div>
-                      <div className="flex gap-2">
-                        {(["man", "zone"] as const).map((cvg) => (
-                          <button key={cvg} onClick={() => setCoverage((c) => c === cvg ? null : cvg)}
-                            className={`px-6 py-2 rounded text-sm font-medium capitalize transition ${coverage === cvg ? "bg-purple-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
-                            {cvg}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Notes + Log / Save */}
-                {editingPlayId && (
-                  <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-900/30 border border-yellow-700/50 rounded text-xs text-yellow-300">
-                    <span>✎</span>
-                    <span>Editing play — make changes above then save</span>
-                    <button onClick={resetForm} className="ml-auto text-yellow-400 hover:text-white transition">Cancel</button>
-                  </div>
-                )}
-                <div className="flex gap-2">
-                  <input
-                    className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500"
-                    placeholder="Play note (optional)"
-                    value={playNotes}
-                    onChange={(e) => setPlayNotes(e.target.value)}
-                  />
-                  {editingPlayId ? (
-                    <button onClick={saveEditedPlay} disabled={!canLog}
-                      className="px-5 py-2 bg-yellow-600 hover:bg-yellow-500 disabled:opacity-40 text-white text-sm rounded font-medium transition whitespace-nowrap">
-                      {savingPlay ? "…" : "Save Edit"}
-                    </button>
-                  ) : (
-                    <button onClick={logPlay} disabled={!canLog}
-                      className="px-5 py-2 bg-green-700 hover:bg-green-600 disabled:opacity-40 text-white text-sm rounded font-medium transition whitespace-nowrap">
-                      {savingPlay ? "…" : "Log Play"}
-                    </button>
                   )}
                 </div>
-                {playError && <p className="text-red-400 text-xs">{playError}</p>}
 
-                {/* Logged plays for this game */}
-                {gamePlays.length > 0 && (
-                  <div>
-                    <div className="text-xs text-gray-500 mb-2">Plays This Game ({gamePlays.length})</div>
-                    <div className="max-h-56 overflow-y-auto space-y-1 pr-1">
-                      {[...gamePlays].reverse().map((pl, i) => (
-                        <div key={pl.id} className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs transition ${
-                          editingPlayId === pl.id
-                            ? "bg-yellow-900/40 border border-yellow-700/60"
-                            : "bg-gray-900 border border-transparent"
-                        }`}>
-                          <span className="text-gray-500 w-5 flex-shrink-0">{gamePlays.length - i}</span>
-                          <span className="text-gray-500 font-medium">{SNAP_SHORT[pl.snap_position]}</span>
-                          <span className={`font-bold ${pl.play_type === "run" ? "text-green-400" : pl.play_type === "rpo" ? "text-yellow-400" : "text-blue-400"}`}>
-                            {PLAY_SHORT[pl.play_type]}
-                          </span>
-                          {pl.timing && (
-                            <span className={pl.timing === "scramble" ? "text-orange-400" : "text-gray-400"}>
-                              {TIMING_SHORT[pl.timing]}
-                            </span>
-                          )}
-                          {pl.accuracy && (
-                            <span className={pl.accuracy === "on_target" ? "text-green-400" : "text-red-400"}>
-                              {ACC_SHORT[pl.accuracy]}
-                            </span>
-                          )}
-                          {pl.target_pos && <span className="text-cyan-400 font-semibold uppercase">{pl.target_pos}</span>}
-                          {pl.completion === "caught"       && <span className="text-green-400 font-bold">C</span>}
-                          {pl.completion === "incomplete"   && <span className="text-gray-400 font-bold">INC</span>}
-                          {pl.completion === "interception" && (
-                            <span className="text-red-400 font-bold">
-                              INT{pl.int_type ? ` (${pl.int_type === "bad_throw" ? "BT" : pl.int_type === "bad_decision" ? "BD" : pl.int_type === "fifty_fifty" ? "50" : "TP"})` : ""}
-                            </span>
-                          )}
-                          {pl.depth_zone && <span className="text-blue-300">{DEPTH_SHORT[pl.depth_zone]}</span>}
-                          {pl.route_type && <span className="text-gray-300 capitalize">{pl.route_type}</span>}
-                          {pl.coverage && <span className="text-purple-400 capitalize">{pl.coverage}</span>}
-                          {pl.play_notes && <span className="text-gray-500 truncate">{pl.play_notes}</span>}
-                          <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
-                            <button
-                              onClick={() => editingPlayId === pl.id ? resetForm() : startEditPlay(pl)}
-                              className={`px-2 py-0.5 rounded text-xs transition ${
-                                editingPlayId === pl.id
-                                  ? "text-yellow-400 hover:text-white"
-                                  : "text-gray-600 hover:text-yellow-400"
-                              }`}
-                            >
-                              ✎
-                            </button>
-                            <button onClick={() => deletePlay(pl.id)} className="text-gray-600 hover:text-red-400">✕</button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                {/* Target Position */}
+                <div>
+                  <div className="text-xs text-gray-500 mb-2">Target Position</div>
+                  <div className="flex gap-2">
+                    {(["rb", "wr", "te"] as QBTargetPos[]).map((pos) => (
+                      <button
+                        key={pos}
+                        onClick={() => setTargetPos((p) => p === pos ? null : pos)}
+                        className={`px-6 py-2 rounded text-sm font-semibold uppercase transition ${
+                          targetPos === pos ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                        }`}
+                      >
+                        {pos.toUpperCase()}
+                      </button>
+                    ))}
                   </div>
-                )}
+                </div>
+
+                {/* Depth / Location 3×3 grid */}
+                <div>
+                  <div className="text-xs text-gray-500 mb-2">Depth / Location</div>
+                  <table className="text-xs">
+                    <thead>
+                      <tr>
+                        <th className="pr-2 pb-1 text-gray-700 font-normal text-left" />
+                        {["Left", "Center", "Right"].map((l) => (
+                          <th key={l} className="px-1 pb-1 text-gray-500 font-medium text-center">{l}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {DEPTH_ROWS.map(({ label, depths }) => (
+                        <tr key={label}>
+                          <td className="pr-2 py-1 text-gray-500 whitespace-nowrap text-right">{label}</td>
+                          {depths.map(({ key, loc }) => (
+                            <td key={key} className="px-1 py-1">
+                              <button
+                                onClick={() => setDepthZone((d) => d === key ? null : key)}
+                                className={`w-full py-2 px-3 rounded text-xs font-medium transition whitespace-nowrap ${
+                                  depthZone === key ? "bg-blue-600 text-white ring-1 ring-blue-400" : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                                }`}
+                              >
+                                {loc}
+                              </button>
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Route Type */}
+                <div>
+                  <div className="text-xs text-gray-500 mb-2">Route Type</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {ROUTE_TYPES.map((rt) => (
+                      <button key={rt} onClick={() => setRouteType((r) => r === rt ? null : rt)}
+                        className={`px-3 py-1.5 rounded text-xs font-medium capitalize transition ${routeType === rt ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        {rt}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Coverage */}
+                <div>
+                  <div className="text-xs text-gray-500 mb-2">Coverage</div>
+                  <div className="flex gap-2">
+                    {(["man", "zone"] as const).map((cvg) => (
+                      <button key={cvg} onClick={() => setCoverage((c) => c === cvg ? null : cvg)}
+                        className={`px-6 py-2 rounded text-sm font-medium capitalize transition ${coverage === cvg ? "bg-purple-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        {cvg}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Notes + Log / Save */}
+            {editingPlayId && (
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-900/30 border border-yellow-700/50 rounded text-xs text-yellow-300">
+                <span>✎</span>
+                <span>Editing play — make changes above then save</span>
+                <button onClick={resetForm} className="ml-auto text-yellow-400 hover:text-white transition">Cancel</button>
+              </div>
+            )}
+            <div className="flex gap-2">
+              <input
+                className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500"
+                placeholder="Play note (optional)"
+                value={playNotes}
+                onChange={(e) => setPlayNotes(e.target.value)}
+              />
+              {editingPlayId ? (
+                <button onClick={saveEditedPlay} disabled={!canLog}
+                  className="px-5 py-2 bg-yellow-600 hover:bg-yellow-500 disabled:opacity-40 text-white text-sm rounded font-medium transition whitespace-nowrap">
+                  {savingPlay ? "…" : "Save Edit"}
+                </button>
+              ) : (
+                <button onClick={logPlay} disabled={!canLog}
+                  className="px-5 py-2 bg-green-700 hover:bg-green-600 disabled:opacity-40 text-white text-sm rounded font-medium transition whitespace-nowrap">
+                  {savingPlay ? "…" : "Log Play"}
+                </button>
+              )}
+            </div>
+            {playError && <p className="text-red-400 text-xs">{playError}</p>}
+
+            {/* Logged plays for this game */}
+            {gamePlays.length > 0 && (
+              <div>
+                <div className="text-xs text-gray-500 mb-2">Plays This Game ({gamePlays.length})</div>
+                <div className="max-h-56 overflow-y-auto space-y-1 pr-1">
+                  {[...gamePlays].reverse().map((pl, i) => (
+                    <div key={pl.id} className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs transition ${
+                      editingPlayId === pl.id
+                        ? "bg-yellow-900/40 border border-yellow-700/60"
+                        : "bg-gray-900 border border-transparent"
+                    }`}>
+                      <span className="text-gray-500 w-5 flex-shrink-0">{gamePlays.length - i}</span>
+                      <span className="text-gray-500 font-medium">{SNAP_SHORT[pl.snap_position]}</span>
+                      <span className={`font-bold ${pl.play_type === "run" ? "text-green-400" : pl.play_type === "rpo" ? "text-yellow-400" : "text-blue-400"}`}>
+                        {PLAY_SHORT[pl.play_type]}
+                      </span>
+                      {pl.timing && (
+                        <span className={pl.timing === "scramble" ? "text-orange-400" : "text-gray-400"}>
+                          {TIMING_SHORT[pl.timing]}
+                        </span>
+                      )}
+                      {pl.accuracy && (
+                        <span className={pl.accuracy === "on_target" ? "text-green-400" : "text-red-400"}>
+                          {ACC_SHORT[pl.accuracy]}
+                        </span>
+                      )}
+                      {pl.target_pos && <span className="text-cyan-400 font-semibold uppercase">{pl.target_pos}</span>}
+                      {pl.completion === "caught"       && <span className="text-green-400 font-bold">C</span>}
+                      {pl.completion === "incomplete"   && <span className="text-gray-400 font-bold">INC</span>}
+                      {pl.completion === "interception" && (
+                        <span className="text-red-400 font-bold">
+                          INT{pl.int_type ? ` (${pl.int_type === "bad_throw" ? "BT" : pl.int_type === "bad_decision" ? "BD" : pl.int_type === "fifty_fifty" ? "50" : "TP"})` : ""}
+                        </span>
+                      )}
+                      {pl.depth_zone && <span className="text-blue-300">{DEPTH_SHORT[pl.depth_zone]}</span>}
+                      {pl.route_type && <span className="text-gray-300 capitalize">{pl.route_type}</span>}
+                      {pl.coverage && <span className="text-purple-400 capitalize">{pl.coverage}</span>}
+                      {pl.play_notes && <span className="text-gray-500 truncate">{pl.play_notes}</span>}
+                      <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
+                        <button
+                          onClick={() => editingPlayId === pl.id ? resetForm() : startEditPlay(pl)}
+                          className={`px-2 py-0.5 rounded text-xs transition ${
+                            editingPlayId === pl.id
+                              ? "text-yellow-400 hover:text-white"
+                              : "text-gray-600 hover:text-yellow-400"
+                          }`}
+                        >
+                          ✎
+                        </button>
+                        <button onClick={() => deletePlay(pl.id)} className="text-gray-600 hover:text-red-400">✕</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
-        </div>
+        )
       )}
-
-      {/* ── GAMES ── */}
-      {tab === "games" && (
+      renderGamesTable={() => (
         <div>
           {loading ? (
             <div className="text-gray-500 text-sm text-center py-8">Loading…</div>
@@ -1342,6 +1077,6 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
           )}
         </div>
       )}
-    </div>
+    />
   );
 }

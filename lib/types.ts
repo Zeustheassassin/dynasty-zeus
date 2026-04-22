@@ -298,8 +298,8 @@ export interface GmBriefing {
   bullets: string[];
   fallingPlayers: { name: string; pos: string; delta: number }[];
   risingPlayers: { name: string; pos: string; delta: number }[];
+  rosterSnapshot?: string;
   generatedAt?: string | null;
-  isAi?: boolean;
 }
 
 // ── Alert / watchlist shapes ─────────────────────────────────

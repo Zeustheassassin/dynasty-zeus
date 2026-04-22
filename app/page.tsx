@@ -101,8 +101,6 @@ interface AllLeagueDataEntry { leagueName?: string; roster: import("../lib/types
 interface PlayerSnapshot { full_name: string; status: string; team: string; value: number; active: boolean; shareCount: number; }
 interface NewsItem { id?: string; link?: string; title?: string; impact?: unknown; playerNames?: string[]; summary?: string; published?: string | number; }
 
-// Static — never changes, defined at module level so it's a stable reference in useMemo dep arrays
-const ROLE_PRIORITY: Record<string, number> = { starter: 0, bench: 1, taxi: 2 };
 const LAST_LOGIN_EMAIL_KEY = "lastLoginEmail";
 
 export default function Home() {
@@ -123,9 +121,6 @@ export default function Home() {
   const [roster, setRoster] = useState<SleeperRoster | null>(null);
   const [rosters, setRosters] = useState<SleeperRoster[]>([]);
   const [players, setPlayers] = useState<Record<string, SleeperPlayer>>({});
-  const [activeTab, setActiveTab] = useState("QB");
-  const [search, setSearch] = useState("");
-  const [leagueSearch, setLeagueSearch] = useState("");
 
   const [picks, setPicks] = useState<AugmentedPick[]>([]);
   const [allPicks, setAllPicks] = useState<AugmentedPick[]>([]);
@@ -233,10 +228,6 @@ const [finderTargetOppRosterId, setFinderTargetOppRosterId] = useState<number | 
 const [finderTargetPlayerId, setFinderTargetPlayerId] = useState<string | null>(null);
 
 const [draftHubSection, setDraftHubSection] = useState<"BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES">("BOARD");
-const [prSortKey, setPrSortKey] = useState<"dynTotal"|"redTotal"|"qbTotal"|"rbTotal"|"wrTotal"|"teTotal">("dynTotal");
-const [prSortAsc, setPrSortAsc] = useState(false);
-const [prPopup, setPrPopup] = useState<{ rosterId: number; col: "dyn"|"red"|"QB"|"RB"|"WR"|"TE" } | null>(null);
-const [prMode, setPrMode] = useState<"full"|"starters"|"bench">("full");
 const [ignoredOwnerIds, setIgnoredOwnerIds] = useState<string[]>(() => {
   try { return JSON.parse(localStorage.getItem("ignoredOwnerIds") || "[]"); } catch { return []; }
 });
@@ -350,9 +341,6 @@ const {
   handleRankChange,
 } = useRookieBoardState(supabaseUser);
 
-const [oppRosterTab, setOppRosterTab] = useState("QB");
-const [oppRosterOwnerId, setOppRosterOwnerId] = useState<string>("");
-const [oppRosterSearch, setOppRosterSearch] = useState("");
 
 
 // Stable ref so alert save effects can read the current user without
@@ -1734,52 +1722,6 @@ const handleToggleLeaguePlayerTag = useCallback((
 }, []);
 
 
-  // -------------------------
-  // PLAYER LOGIC
-  // -------------------------
-  const getPlayerRole = (id: string) => {
-    if (roster?.starters?.includes(id)) return "starter";
-    if (roster?.taxi?.includes(id)) return "taxi";
-    return "bench";
-  };
-
-  const groupPlayers = () => {
-    if (!roster || !players) return {};
-    const grouped: Record<string, Array<SleeperPlayer & { role: string }>> = { QB: [], RB: [], WR: [], TE: [] };
-
-    roster.players?.forEach((id: string) => {
-      const p = players[id];
-      if (!p) return;
-
-      grouped[p.position]?.push({
-        ...p,
-        role: getPlayerRole(id),
-      });
-    });
-
-    Object.keys(grouped).forEach((pos) => {
-      grouped[pos].sort(
-        (a, b) =>
-          ROLE_PRIORITY[a.role] - ROLE_PRIORITY[b.role]
-      );
-    });
-
-    return grouped;
-  };
-
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- groupPlayers not in useCallback; roster/players cover its deps
-  const grouped = useMemo(() => groupPlayers(), [roster, players]);
-
-  const filteredPlayers = useMemo(() =>
-    (grouped[activeTab] || [])
-      .filter((p) => p.full_name?.toLowerCase().includes(search.toLowerCase()))
-      .sort((a, b) => {
-        const roleDiff = ROLE_PRIORITY[a.role] - ROLE_PRIORITY[b.role];
-        if (roleDiff !== 0) return roleDiff;
-        return (b.value || 0) - (a.value || 0);
-      }),
-    [grouped, activeTab, search]
-  );
 
 const getTeamSummary = () => {
   if (!roster || !players) return null;
@@ -3892,28 +3834,7 @@ const getTeamSummary = () => {
     ).then(() => {}, (err: unknown) => log.error("leaguemate_profiles upsert failed", { err: String(err) }));
   }, [supabaseUser, selectedLeague?.league_id, selectedLeagueMateProfiles]);
 
-  // Saved AI briefings from Supabase — keyed by "${leagueId}-${rosterId}".
-  const [savedAiBriefings, setSavedAiBriefings] = useState<Record<string, GmBriefing>>({});
-
-  // Load saved AI briefings from Supabase when user logs in.
-  useEffect(() => {
-    if (!supabaseUser?.id) return;
-    supabase
-      .from("gm_briefings")
-      .select("league_id, roster_id, briefing, generated_at")
-      .eq("user_id", supabaseUser.id)
-      .then(({ data }) => {
-        if (!data) return;
-        const byKey: Record<string, GmBriefing> = {};
-        for (const row of data as { league_id: string; roster_id: number; briefing: GmBriefing; generated_at: string }[]) {
-          byKey[`${row.league_id}-${row.roster_id}`] = { ...row.briefing, generatedAt: row.generated_at };
-        }
-        setSavedAiBriefings(byKey);
-      }, (err: unknown) => log.error("gm_briefings load failed", { err: String(err) }));
-  }, [supabaseUser?.id]);
-
   // GM briefings for the Alerts Hub — one card per league the user is in.
-  // Prefers saved AI briefings; falls back to rule-based for un-refreshed teams.
   const allRosterBriefings = useMemo((): GmBriefing[] => {
     if (!user?.user_id || Object.keys(leagueOverviewData).length === 0) return [];
     if (Object.keys(calcFcValues).length === 0 || Object.keys(redraftValues).length === 0) return [];
@@ -3926,11 +3847,6 @@ const getTeamSummary = () => {
       const { league, rosters: leagueRosters, picks: leaguePicks } = entry;
       const myRoster = leagueRosters.find((r) => r.owner_id === user.user_id);
       if (!myRoster) continue;
-
-      // Return saved AI briefing for this team if available.
-      const savedKey = `${league.league_id}-${myRoster.roster_id}`;
-      const saved = savedAiBriefings[savedKey];
-      if (saved) { briefings.push(saved); continue; }
 
       const profile = getRosterDirectionProfile({
         rosterId: myRoster.roster_id,
@@ -3953,6 +3869,7 @@ const getTeamSummary = () => {
         ? { ...profile, bucket: adjBucket, bucketColor: getBucketColor(adjBucket) }
         : profile;
 
+      const myPickCount = leaguePicks.filter((p) => p.owner_id === myRoster.roster_id).length;
       briefings.push(generateGmBriefing({
         rosterId: myRoster.roster_id,
         leagueId: league.league_id,
@@ -3962,271 +3879,13 @@ const getTeamSummary = () => {
         profile: adjProfile,
         rosterPlayerIds: myRoster.players ?? [],
         trendData: fcTrendData,
+        players,
+        pickCount: myPickCount,
       }));
     }
 
     return briefings.sort((a, b) => urgencyOrder[a.urgency] - urgencyOrder[b.urgency]);
-  }, [leagueOverviewData, user, calcFcValues, redraftValues, players, pickFcValues, fcTrendData, committedSimsByLeague, leagueSimCache, savedAiBriefings]);
-
-  // Per-team AI briefing refresh — gathers context and calls the API route.
-  const refreshBriefingForTeam = useCallback(async (rosterId: number, leagueId: string, recentNews: { title: string; playerNames?: string[] }[] = []) => {
-    if (!supabaseUser?.id || !user?.user_id) return;
-    const entry = leagueOverviewData[leagueId];
-    if (!entry) return;
-
-    const { league, rosters: leagueRosters, picks: leaguePicks, userMap } = entry;
-    const myRoster = leagueRosters.find((r) => r.roster_id === rosterId);
-    if (!myRoster) return;
-
-    const dynastyValueForPlayer = (id: string) => calcFcValues[id] ?? players[id]?.value ?? 0;
-    const profile = getRosterDirectionProfile({
-      rosterId,
-      rosters: leagueRosters,
-      ownedPicks: leaguePicks,
-      players,
-      pickValues: pickFcValues,
-      redraftValues,
-      dynastyValueForPlayer,
-    });
-    if (!profile) return;
-
-    const committedRow = committedSimsByLeague[leagueId]?.[rosterId];
-    const cachedRow = leagueSimCache[leagueId]?.[rosterId];
-    const playoffOdds = committedRow?.playoffOdds ?? cachedRow?.playoff_odds ?? 0;
-    const hasCachedSim = !!(committedRow ?? cachedRow);
-    const adjBucket = getAdjustedDirectionBucket(profile.bucket, profile, playoffOdds, hasCachedSim);
-    const adjProfile = adjBucket !== profile.bucket
-      ? { ...profile, bucket: adjBucket, bucketColor: getBucketColor(adjBucket) }
-      : profile;
-
-    // Build roster player list sorted by dynasty value descending.
-    const SKILL_POSITIONS = new Set(["QB", "RB", "WR", "TE"]);
-    const trendByPlayerId = new Map(fcTrendData.map((t) => [t.sleeperId, t]));
-
-    // Fetch player tags for this league so Claude knows CORE / WANT_TO_TRADE intent.
-    const tagMap: Record<string, string> = {};
-    if (supabaseUser?.id) {
-      const { data: tagRows } = await supabase
-        .from("league_player_tags")
-        .select("player_id, tag")
-        .eq("user_id", supabaseUser.id)
-        .eq("league_id", leagueId);
-      for (const row of (tagRows ?? []) as { player_id: string; tag: string }[]) {
-        tagMap[row.player_id] = row.tag;
-      }
-    }
-
-    const rosterPlayers = (myRoster.players ?? [])
-      .map((id: string) => {
-        const p = players[id];
-        if (!p || !SKILL_POSITIONS.has(p.position)) return null;
-        const trend = trendByPlayerId.get(id);
-        const injuryStatus = p.injury_status || p.status || null;
-        const tag = tagMap[id] ?? null;
-        return {
-          name: p.full_name ?? id,
-          position: p.position,
-          nflTeam: p.team || "FA",
-          age: p.age ?? null,
-          dynastyValue: dynastyValueForPlayer(id),
-          redraftValue: redraftValues[id] ?? 0,
-          trend30Day: trend?.trend30Day ?? null,
-          injuryStatus: injuryStatus === "Active" ? null : injuryStatus,
-          tag,
-        };
-      })
-      .filter((p): p is NonNullable<typeof p> => p !== null)
-      .sort((a, b) => b.dynastyValue - a.dynastyValue);
-
-    // Market movers for this roster.
-    const rosterTrends = (myRoster.players ?? [])
-      .map((id: string) => trendByPlayerId.get(id))
-      .filter((t): t is (typeof fcTrendData)[number] => t != null && SKILL_POSITIONS.has(t.position));
-    const falling = rosterTrends.filter((t) => t.trend30Day <= -200)
-      .sort((a, b) => a.trend30Day - b.trend30Day).slice(0, 3)
-      .map((t) => ({ name: t.name, pos: t.position, delta: t.trend30Day }));
-    const rising = rosterTrends.filter((t) => t.trend30Day >= 250)
-      .sort((a, b) => b.trend30Day - a.trend30Day).slice(0, 2)
-      .map((t) => ({ name: t.name, pos: t.position, delta: t.trend30Day }));
-
-    // Standings rank for this roster.
-    const sorted = [...leagueRosters]
-      .filter((r) => r.owner_id)
-      .sort((a, b) => {
-        const wa = (a.settings?.wins ?? 0), wb = (b.settings?.wins ?? 0);
-        const fa = (a.settings?.fpts ?? 0), fb = (b.settings?.fpts ?? 0);
-        return wb !== wa ? wb - wa : fb - fa;
-      });
-    const standingsRank = sorted.findIndex((r) => r.roster_id === rosterId) + 1;
-
-    // Trade partners — other rosters with bucket, motivation, and top players.
-    const tradePartners = leagueRosters
-      .filter((r) => r.owner_id && r.owner_id !== user.user_id)
-      .map((r) => {
-        const p = getRosterDirectionProfile({
-          rosterId: r.roster_id,
-          rosters: leagueRosters,
-          ownedPicks: leaguePicks,
-          players,
-          pickValues: pickFcValues,
-          redraftValues,
-          dynastyValueForPlayer,
-        });
-        if (!p) return null;
-        const isSeller = ["Window Closing", "Fading Contender", "Stranded", "Fading Out"].includes(p.bucket);
-        const isBuyer  = ["Rebuilder", "Almost There"].includes(p.bucket);
-        const sortedPos = [...(p.positionRanks ?? [])].sort((a, b) => a.rank - b.rank);
-        const strongestPos = sortedPos[0]?.pos ?? "WR";
-        const weakPositions = sortedPos.filter((pr) => pr.rank > pr.total * 0.6).map((pr) => pr.pos);
-        const topPlayers = (r.players ?? [])
-          .map((id: string) => {
-            const pl = players[id];
-            if (!pl || !SKILL_POSITIONS.has(pl.position)) return null;
-            return { name: pl.full_name ?? id, position: pl.position, dynastyValue: dynastyValueForPlayer(id) };
-          })
-          .filter((pl): pl is NonNullable<typeof pl> => pl !== null)
-          .sort((a, b) => b.dynastyValue - a.dynastyValue)
-          .slice(0, 5);
-        return {
-          ownerName: userMap[r.owner_id ?? ""] ?? "Unknown",
-          bucket: p.bucket,
-          motivation: isSeller ? "Sell aging assets" : isBuyer ? "Buy for future" : "Neutral",
-          strongestPos,
-          weakPositions,
-          isSeller,
-          isBuyer,
-          topPlayers,
-        };
-      })
-      .filter((tp): tp is NonNullable<typeof tp> => tp !== null)
-      .slice(0, 8);
-
-    const rosterPositions: string[] = league.roster_positions ?? [];
-    const isSuperflex = rosterPositions.includes("SUPER_FLEX");
-
-    // Summarise starting lineup slots so Claude knows what positions are required.
-    const starterSlotCounts: Record<string, number> = {};
-    for (const pos of rosterPositions) {
-      if (pos === "BN") continue;
-      starterSlotCounts[pos] = (starterSlotCounts[pos] ?? 0) + 1;
-    }
-
-    // Pick inventory broken down by year and round.
-    const myPicks = leaguePicks.filter((p) => p.owner_id === myRoster.roster_id);
-    const picksByYear: Record<string, string[]> = {};
-    for (const pick of myPicks) {
-      const yr = pick.season ?? "unknown";
-      if (!picksByYear[yr]) picksByYear[yr] = [];
-      picksByYear[yr].push(`R${pick.round}`);
-    }
-    const pickInventory = Object.entries(picksByYear)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([yr, rounds]) => {
-        const sorted = [...rounds].sort();
-        return `${yr}: ${sorted.join(", ")}`;
-      });
-
-    // Filter live news to headlines mentioning any player on this roster.
-    const rosterNames = new Set(
-      rosterPlayers.map((p) => p.name.toLowerCase())
-    );
-    const filteredNews = recentNews
-      .filter((n) =>
-        n.playerNames?.some((name) => rosterNames.has(name.toLowerCase())) ||
-        rosterPlayers.some((p) => n.title.toLowerCase().includes(p.name.toLowerCase().split(" ").pop() ?? ""))
-      )
-      .slice(0, 8)
-      .map((n) => n.title);
-
-    // Scoring highlights — extract the most strategically relevant settings.
-    const scoring = league.scoring_settings ?? {};
-    const pprLevel = (scoring["rec"] ?? 0) as number;
-    const tepBonus = (scoring["bonus_rec_te"] ?? scoring["rec_te"] ?? 0) as number;
-    const scoringHighlights = [
-      pprLevel === 1 ? "Full PPR" : pprLevel === 0.5 ? "Half PPR" : pprLevel === 0 ? "Standard (0 PPR)" : `${pprLevel} PPR`,
-      tepBonus > 0 ? `TE premium (+${tepBonus}/rec)` : null,
-      (scoring["pass_td"] ?? 4) !== 4 ? `${scoring["pass_td"]} pts/pass TD` : null,
-      (scoring["bonus_rush_rec_yd"] ?? 0) > 0 ? "Milestone yardage bonuses" : null,
-    ].filter(Boolean).join(", ");
-
-    const titleOdds = cachedRow?.title_odds ?? 0;
-    const finishRange = cachedRow?.finish_range ?? "";
-
-    const context = {
-      leagueName: league.name,
-      leagueSize: leagueRosters.filter((r) => r.owner_id).length,
-      isSuperflex,
-      rosterPositions,
-      starterSlotCounts,
-      pickInventory,
-      currentYear: new Date().getFullYear(),
-      scoringHighlights,
-      recentNews: filteredNews,
-      myTeam: {
-        wins: myRoster.settings?.wins ?? 0,
-        losses: myRoster.settings?.losses ?? 0,
-        ties: myRoster.settings?.ties ?? 0,
-        standingsRank,
-        waiverPosition: myRoster.settings?.waiver_position ?? 0,
-        players: rosterPlayers,
-      },
-      profile: {
-        bucket: adjProfile.bucket,
-        bucketColor: adjProfile.bucketColor,
-        dynRank: adjProfile.dynRank,
-        redRank: adjProfile.redRank,
-        totalTeams: adjProfile.n,
-        coreAge: adjProfile.coreAge,
-        youngCoreCount: adjProfile.youngCoreCount,
-        oldCoreCount: adjProfile.oldCoreCount,
-        firstRounders: adjProfile.firstRounders,
-        futureFirsts: adjProfile.futureFirsts,
-        pickTotal: adjProfile.pickTotal,
-        playoffOdds,
-        titleOdds,
-        finishRange,
-        positionRanks: adjProfile.positionRanks ?? [],
-        actions: adjProfile.actions ?? [],
-      },
-      marketMovers: { falling, rising },
-      tradePartners,
-    };
-
-    const res = await fetch("/api/gm-briefing", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        userId: supabaseUser.id,
-        leagueId,
-        rosterId,
-        leagueName: league.name,
-        context,
-      }),
-    });
-
-    if (!res.ok) {
-      const errBody = await res.text().catch(() => "(no body)");
-      log.error("gm-briefing API error", { status: res.status, body: errBody });
-      return;
-    }
-
-    const { briefing } = (await res.json()) as { briefing: GmBriefing };
-
-    // Persist to Supabase.
-    supabase.from("gm_briefings").upsert(
-      {
-        user_id: supabaseUser.id,
-        league_id: leagueId,
-        roster_id: rosterId,
-        briefing,
-        generated_at: briefing.generatedAt ?? new Date().toISOString(),
-      },
-      { onConflict: "user_id,league_id,roster_id" }
-    ).then(() => {}, (err: unknown) => log.error("gm_briefings upsert failed", { err: String(err) }));
-
-    // Update local state immediately so UI reflects the new briefing.
-    setSavedAiBriefings((prev) => ({ ...prev, [`${leagueId}-${rosterId}`]: briefing }));
-  }, [supabaseUser?.id, user?.user_id, leagueOverviewData, calcFcValues, players, pickFcValues, redraftValues, fcTrendData, committedSimsByLeague, leagueSimCache]);
+  }, [leagueOverviewData, user, calcFcValues, redraftValues, players, pickFcValues, fcTrendData, committedSimsByLeague, leagueSimCache]);
 
   // Save simulation results to Supabase on demand and freeze a local snapshot for
   // pick valuations. The frozen snapshot (localStorage + state) is the source of truth
@@ -5440,7 +5099,8 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             allTradeAttempts={allTradeAttempts}
             allLeagues={leagues}
             rosterBriefings={allRosterBriefings}
-            onRefreshBriefing={refreshBriefingForTeam}
+            onRefreshLeagueData={loadLeagueOverview}
+            loadingLeagueOverview={loadingLeagueOverview}
             onNavigateToAttempts={onNavigateToAttempts}
           />
           </ErrorBoundary>
@@ -5473,24 +5133,6 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             leagueOverviewLoaded={leagueOverviewLoaded}
             teamSummary={teamSummary}
             selectedLeagueMateProfilesView={selectedLeagueMateProfilesView}
-            activeTab={activeTab}
-            setActiveTab={setActiveTab}
-            search={search}
-            setSearch={setSearch}
-            oppRosterTab={oppRosterTab}
-            setOppRosterTab={setOppRosterTab}
-            oppRosterOwnerId={oppRosterOwnerId}
-            setOppRosterOwnerId={setOppRosterOwnerId}
-            oppRosterSearch={oppRosterSearch}
-            setOppRosterSearch={setOppRosterSearch}
-            prSortKey={prSortKey}
-            setPrSortKey={setPrSortKey}
-            prSortAsc={prSortAsc}
-            setPrSortAsc={setPrSortAsc}
-            prPopup={prPopup}
-            setPrPopup={setPrPopup}
-            prMode={prMode}
-            setPrMode={setPrMode}
             ignoredOwnerIds={ignoredOwnerIds}
             toggleIgnoredOwner={toggleIgnoredOwner}
             projectionData={projectionData}
@@ -5505,9 +5147,6 @@ const myPlayerSet = new Set<string>(roster?.players || []);
             setDraftSlotSearchQuery={setDraftSlotSearchQuery}
             draftHubSection={draftHubSection}
             nflState={nflState}
-            leagueSearch={leagueSearch}
-            setLeagueSearch={setLeagueSearch}
-            filteredPlayers={filteredPlayers}
             freeAgents={freeAgents}
             loadingCalcValues={loadingCalcValues}
             predictedDraftPicks={predictedDraftPicks}
