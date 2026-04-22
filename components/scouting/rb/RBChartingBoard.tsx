@@ -8,6 +8,7 @@ import type {
   RBPlay,
   RBFormation,
   RBRunType,
+  RBRouteType,
   ChartingDecision,
 } from "../../../lib/types";
 
@@ -144,6 +145,8 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
   const [runStuff, setRunStuff] = useState(false);
   // Route-play specific
   const [alignedAsWr, setAlignedAsWr] = useState(false);
+  const [rbRouteType, setRbRouteType] = useState<RBRouteType | null>(null);
+  const [rbWasOpen, setRbWasOpen] = useState(false);
   const [rbTargeted, setRbTargeted] = useState(false);
   const [rbOutcome, setRbOutcome] = useState<"caught" | "drop" | "incomplete" | null>(null);
   const [playNotes, setPlayNotes] = useState("");
@@ -215,13 +218,13 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
   const stats = useMemo(() => {
     const pct = (n: number, d: number) => (d > 0 ? parseFloat(((n / d) * 100).toFixed(1)) : null);
 
-    const runPlays = plays.filter((p) => p.run_type !== "pass_block" && p.run_type !== "route");
+    const runPlays = plays.filter((p) => p.run_type !== "pass_block" && p.run_type !== "run_block" && p.run_type !== "decoy" && p.run_type !== "route");
     const routeRuns = plays.filter((p) => p.run_type === "route");
     const runAttempts = runPlays.length;
 
-    // Formation breakdown (run + pass block only, not route plays)
+    // Formation breakdown (run plays only, not block/decoy/route plays)
     const formationStats = (["gun", "pistol", "under_center"] as RBFormation[]).reduce((acc, f) => {
-      const fp = plays.filter((p) => p.formation === f && p.run_type !== "route");
+      const fp = plays.filter((p) => p.formation === f && p.run_type !== "route" && p.run_type !== "pass_block" && p.run_type !== "run_block" && p.run_type !== "decoy");
       const suc = fp.filter((p) => p.success === true).length;
       acc[f] = { attempts: fp.length, successes: suc, successPct: pct(suc, fp.length) };
       return acc;
@@ -233,6 +236,8 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     const outsideZone   = computeRunTypeStat(plays.filter((p) => p.run_type === "outside_zone"));
     const insideZone    = computeRunTypeStat(plays.filter((p) => p.run_type === "inside_zone"));
     const passBlock     = computeRunTypeStat(plays.filter((p) => p.run_type === "pass_block"));
+    const runBlock      = computeRunTypeStat(plays.filter((p) => p.run_type === "run_block"));
+    const decoyPlays    = plays.filter((p) => p.run_type === "decoy");
     const manGap        = mergeRunTypeStats(outsideManGap, insideManGap);
     const zoneAttempt   = mergeRunTypeStats(outsideZone, insideZone);
 
@@ -245,17 +250,34 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     const routeTargets  = routeRuns.filter((p) => p.targeted).length;
     const routeCatches  = routeRuns.filter((p) => p.targeted && p.success === true).length;
     const routeDrops    = routeRuns.filter((p) => p.targeted && p.success === false).length;
+    const routeOpen     = routeRuns.filter((p) => p.was_open).length;
+
+    // Route type breakdown
+    const routeByType = (["mid_curl", "flats", "big_boy_route"] as RBRouteType[]).reduce((acc, rt) => {
+      const rp = routeRuns.filter((p) => p.route_type === rt);
+      acc[rt] = {
+        routes:  rp.length,
+        open:    rp.filter((p) => p.was_open).length,
+        targets: rp.filter((p) => p.targeted).length,
+        catches: rp.filter((p) => p.targeted && p.success === true).length,
+      };
+      return acc;
+    }, {} as Record<RBRouteType, { routes: number; open: number; targets: number; catches: number }>);
 
     return {
       totalPlays: plays.length,
       runAttempts,
       passBlockAttempts: passBlock.attempts,
+      runBlockAttempts: runBlock.attempts,
+      decoyAttempts: decoyPlays.length,
       routeAttempts: routeRuns.length,
       routeTargets,
       routeCatches,
       routeDrops,
+      routeOpen,
+      routeByType,
       formationStats,
-      runTypes: { outsideManGap, insideManGap, outsideZone, insideZone, passBlock },
+      runTypes: { outsideManGap, insideManGap, outsideZone, insideZone, passBlock, runBlock },
       manGap,
       zoneAttempt,
       flags: {
@@ -315,6 +337,8 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     setExplosivePlay(false);
     setRunStuff(false);
     setAlignedAsWr(false);
+    setRbRouteType(null);
+    setRbWasOpen(false);
     setRbTargeted(false);
     setRbOutcome(null);
     setPlayNotes("");
@@ -323,8 +347,10 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
   async function logPlay() {
     if (!selectedGameId) return;
     const isRoute = runType === "route";
-    // For route plays: success=null if not targeted; for run/block plays, success is required
-    if (!isRoute && success === null) return;
+    const isDecoy = runType === "decoy";
+    const isBlockPlay = runType === "pass_block" || runType === "run_block";
+    // decoy needs no success; everything else does
+    if (!isRoute && !isDecoy && success === null) return;
     setPlayError(null);
     setSavingPlay(true);
     const { data: { user } } = await supabase.auth.getUser();
@@ -332,14 +358,16 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     const { data, error } = await supabase.from("rb_plays").insert({
       user_id: user.id, game_id: selectedGameId,
       formation, run_type: runType,
-      success: isRoute ? (rbTargeted ? (rbOutcome === "caught" ? true : rbOutcome === "drop" ? false : null) : null) : success,
+      success: isRoute ? (rbTargeted ? (rbOutcome === "caught" ? true : rbOutcome === "drop" ? false : null) : null) : isDecoy ? null : success,
       targeted: isRoute ? rbTargeted : false,
       aligned_as_wr: isRoute ? alignedAsWr : false,
-      loaded_box: isRoute ? false : loadedBox,
-      unblocked_defender: isRoute ? false : unblockedDefender,
-      broken_tackle: isRoute ? false : brokenTackle,
-      explosive_play: isRoute ? false : explosivePlay,
-      run_stuff: isRoute ? false : runStuff,
+      route_type: isRoute ? (rbRouteType ?? null) : null,
+      was_open: isRoute ? rbWasOpen : false,
+      loaded_box: (isRoute || isBlockPlay || isDecoy) ? false : loadedBox,
+      unblocked_defender: (isRoute || isBlockPlay || isDecoy) ? false : unblockedDefender,
+      broken_tackle: (isRoute || isBlockPlay || isDecoy) ? false : brokenTackle,
+      explosive_play: (isRoute || isBlockPlay || isDecoy) ? false : explosivePlay,
+      run_stuff: (isRoute || isBlockPlay || isDecoy) ? false : runStuff,
       play_notes: playNotes || null,
     }).select().single();
     if (error) { setPlayError(error.message); }
@@ -362,6 +390,8 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     setExplosivePlay(pl.explosive_play ?? false);
     setRunStuff(pl.run_stuff ?? false);
     setAlignedAsWr(pl.aligned_as_wr ?? false);
+    setRbRouteType(pl.route_type ?? null);
+    setRbWasOpen(pl.was_open ?? false);
     setRbTargeted(pl.targeted ?? false);
     setRbOutcome(
       pl.run_type === "route" && pl.targeted
@@ -374,19 +404,23 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
   async function saveEditedPlay() {
     if (!editingPlayId) return;
     const isRoute = runType === "route";
-    if (!isRoute && success === null) return;
+    const isDecoy = runType === "decoy";
+    const isBlockPlay = runType === "pass_block" || runType === "run_block";
+    if (!isRoute && !isDecoy && success === null) return;
     setPlayError(null);
     setSavingPlay(true);
     const { data, error } = await supabase.from("rb_plays").update({
       formation, run_type: runType,
-      success: isRoute ? (rbTargeted ? (rbOutcome === "caught" ? true : rbOutcome === "drop" ? false : null) : null) : success,
+      success: isRoute ? (rbTargeted ? (rbOutcome === "caught" ? true : rbOutcome === "drop" ? false : null) : null) : isDecoy ? null : success,
       targeted: isRoute ? rbTargeted : false,
       aligned_as_wr: isRoute ? alignedAsWr : false,
-      loaded_box: isRoute ? false : loadedBox,
-      unblocked_defender: isRoute ? false : unblockedDefender,
-      broken_tackle: isRoute ? false : brokenTackle,
-      explosive_play: isRoute ? false : explosivePlay,
-      run_stuff: isRoute ? false : runStuff,
+      route_type: isRoute ? (rbRouteType ?? null) : null,
+      was_open: isRoute ? rbWasOpen : false,
+      loaded_box: (isRoute || isBlockPlay || isDecoy) ? false : loadedBox,
+      unblocked_defender: (isRoute || isBlockPlay || isDecoy) ? false : unblockedDefender,
+      broken_tackle: (isRoute || isBlockPlay || isDecoy) ? false : brokenTackle,
+      explosive_play: (isRoute || isBlockPlay || isDecoy) ? false : explosivePlay,
+      run_stuff: (isRoute || isBlockPlay || isDecoy) ? false : runStuff,
       play_notes: playNotes || null,
     }).eq("id", editingPlayId).select().single();
     if (error) { setPlayError(error.message); }
@@ -570,15 +604,18 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
           ) : (
             <>
               {/* Summary cards */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                 {[
-                  { label: "Total Plays",    value: stats.totalPlays,       color: "text-blue-400" },
-                  { label: "Run Attempts",   value: stats.runAttempts,      color: "text-green-400" },
-                  { label: "Pass Blocks",    value: stats.passBlockAttempts,color: "text-purple-400" },
-                  { label: "Routes",         value: stats.routeAttempts,    color: "text-blue-300" },
-                  { label: "Tgts",           value: stats.routeTargets,     color: "text-yellow-400" },
-                  { label: "Catches",        value: stats.routeCatches,     color: "text-green-300" },
-                  { label: "Games",          value: games.length,           color: "text-gray-300" },
+                  { label: "Total Plays",  value: stats.totalPlays,        color: "text-blue-400" },
+                  { label: "Run Attempts", value: stats.runAttempts,       color: "text-green-400" },
+                  { label: "Pass Block",   value: stats.passBlockAttempts, color: "text-purple-400" },
+                  { label: "Run Block",    value: stats.runBlockAttempts,  color: "text-orange-400" },
+                  { label: "Decoy",        value: stats.decoyAttempts,     color: "text-yellow-500" },
+                  { label: "Routes",       value: stats.routeAttempts,     color: "text-blue-300" },
+                  { label: "Open",         value: stats.routeOpen,         color: "text-green-300" },
+                  { label: "Targeted",     value: stats.routeTargets,      color: "text-yellow-400" },
+                  { label: "Catches",      value: stats.routeCatches,      color: "text-green-400" },
+                  { label: "Games",        value: games.length,            color: "text-gray-300" },
                 ].map((s) => (
                   <div key={s.label} className="p-3 bg-gray-900 rounded-lg border border-gray-800">
                     <div className="text-xs text-gray-500 mb-1">{s.label}</div>
@@ -644,6 +681,7 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                       <StatRow label="Outside Zone"    s={stats.runTypes.outsideZone} indent />
                       <StatRow label="Inside Zone"     s={stats.runTypes.insideZone}  indent />
                       <StatRow label="Pass Block"      s={stats.runTypes.passBlock} />
+                      <StatRow label="Run Block"       s={stats.runTypes.runBlock} />
                     </tbody>
                   </table>
                   <div className="mt-2 flex gap-4 text-[10px] text-gray-600">
@@ -653,6 +691,58 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                   </div>
                 </div>
               </div>
+
+              {/* Route Type Breakdown */}
+              {stats.routeAttempts > 0 && (
+                <div className="p-4 bg-gray-900 rounded-lg border border-gray-800">
+                  <div className="text-xs text-gray-500 mb-3">Route Type Breakdown</div>
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-800 text-xs text-gray-600">
+                        <th className="text-left pb-1.5 pr-2">Route</th>
+                        <th className="text-right pb-1.5 px-2">Routes</th>
+                        <th className="text-right pb-1.5 px-2 text-green-600">Open</th>
+                        <th className="text-right pb-1.5 px-2 text-yellow-600">Targeted</th>
+                        <th className="text-right pb-1.5 pl-2 text-blue-400">Catches</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-800/60">
+                      {([
+                        { key: "mid_curl" as RBRouteType, label: "Mid Curl" },
+                        { key: "flats" as RBRouteType, label: "Flats" },
+                        { key: "big_boy_route" as RBRouteType, label: "Big Boy Route" },
+                      ]).map(({ key, label }) => {
+                        const r = stats.routeByType[key];
+                        const catchPct = r.targets > 0 ? ((r.catches / r.targets) * 100).toFixed(0) : null;
+                        return (
+                          <tr key={key} className="hover:bg-gray-800/30">
+                            <td className="py-2 pr-2 text-sm font-medium text-white">{label}</td>
+                            <td className="py-2 px-2 text-right text-sm text-blue-400">{r.routes || "—"}</td>
+                            <td className="py-2 px-2 text-right text-sm text-green-400">{r.open > 0 ? r.open : "—"}</td>
+                            <td className="py-2 px-2 text-right text-sm text-yellow-400">{r.targets > 0 ? r.targets : "—"}</td>
+                            <td className="py-2 pl-2 text-right text-sm">
+                              {r.catches > 0 ? (
+                                <span className="text-blue-400 font-semibold">
+                                  {r.catches}
+                                  {catchPct !== null && <span className="text-gray-500 font-normal ml-1">({catchPct}%)</span>}
+                                </span>
+                              ) : "—"}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {/* Total row */}
+                      <tr className="border-t border-gray-700 text-xs text-gray-500 font-medium">
+                        <td className="pt-2 pr-2">Total</td>
+                        <td className="pt-2 px-2 text-right text-blue-400">{stats.routeAttempts}</td>
+                        <td className="pt-2 px-2 text-right text-green-400">{stats.routeOpen > 0 ? stats.routeOpen : "—"}</td>
+                        <td className="pt-2 px-2 text-right text-yellow-400">{stats.routeTargets > 0 ? stats.routeTargets : "—"}</td>
+                        <td className="pt-2 pl-2 text-right text-blue-400">{stats.routeCatches > 0 ? stats.routeCatches : "—"}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              )}
 
               {/* Play outcome flags */}
               {stats.runAttempts > 0 && (
@@ -817,11 +907,21 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                         ))}
                       </div>
                     </div>
-                    {/* Pass block */}
-                    <button onClick={() => setRunType("pass_block")}
-                      className={`w-full py-2 rounded text-sm font-medium transition ${runType === "pass_block" ? "bg-purple-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
-                      Pass Block Attempt
-                    </button>
+                    {/* Pass block / Run block / Decoy */}
+                    <div className="flex gap-2">
+                      <button onClick={() => setRunType("pass_block")}
+                        className={`flex-1 py-2 rounded text-sm font-medium transition ${runType === "pass_block" ? "bg-purple-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        Pass Block
+                      </button>
+                      <button onClick={() => setRunType("run_block")}
+                        className={`flex-1 py-2 rounded text-sm font-medium transition ${runType === "run_block" ? "bg-orange-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        Run Block
+                      </button>
+                      <button onClick={() => setRunType("decoy")}
+                        className={`flex-1 py-2 rounded text-sm font-medium transition ${runType === "decoy" ? "bg-yellow-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        Decoy
+                      </button>
+                    </div>
                     {/* Route run */}
                     <button onClick={() => { setRunType("route"); setSuccess(null); setRbOutcome(null); }}
                       className={`w-full py-2 rounded text-sm font-medium transition ${runType === "route" ? "bg-blue-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
@@ -835,6 +935,22 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                   <div className="space-y-3 p-3 bg-gray-900/60 rounded-lg border border-blue-900/50">
                     <div className="text-xs text-blue-400 font-medium">Route Run Options</div>
                     <div className="flex flex-wrap gap-4">
+                      {/* Route Type */}
+                      <div className="w-full">
+                        <div className="text-xs text-gray-500 mb-2">Route Type</div>
+                        <div className="flex gap-2">
+                          {([
+                            { key: "mid_curl" as RBRouteType, label: "Mid Curl" },
+                            { key: "flats" as RBRouteType, label: "Flats" },
+                            { key: "big_boy_route" as RBRouteType, label: "Big Boy Route" },
+                          ]).map(({ key, label }) => (
+                            <button key={key} onClick={() => setRbRouteType(rbRouteType === key ? null : key)}
+                              className={`flex-1 py-2 rounded text-xs font-medium transition ${rbRouteType === key ? "bg-blue-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                       <div>
                         <div className="text-xs text-gray-500 mb-2">Aligned at Snap</div>
                         <div className="flex gap-1.5">
@@ -861,6 +977,19 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                           </button>
                         </div>
                       </div>
+                      <div>
+                        <div className="text-xs text-gray-500 mb-2">Open on Play?</div>
+                        <div className="flex gap-1.5">
+                          <button onClick={() => setRbWasOpen(true)}
+                            className={`px-3 h-9 rounded text-xs font-medium transition ${rbWasOpen ? "bg-green-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                            Yes
+                          </button>
+                          <button onClick={() => setRbWasOpen(false)}
+                            className={`px-3 h-9 rounded text-xs font-medium transition ${!rbWasOpen ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                            No
+                          </button>
+                        </div>
+                      </div>
                       {rbTargeted && (
                         <div>
                           <div className="text-xs text-gray-500 mb-2">Outcome</div>
@@ -882,9 +1011,28 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                       )}
                     </div>
                   </div>
+                ) : runType === "pass_block" || runType === "run_block" ? (
+                  /* Pass Block / Run Block — Success/Fail only */
+                  <div>
+                    <div className="text-xs text-gray-500 mb-2">Result</div>
+                    <div className="flex gap-3">
+                      <button onClick={() => setSuccess(true)}
+                        className={`flex-1 py-3 rounded-lg text-sm font-bold transition ${success === true ? "bg-green-600 text-white ring-2 ring-green-400" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        ✓ SUCCESS
+                      </button>
+                      <button onClick={() => setSuccess(false)}
+                        className={`flex-1 py-3 rounded-lg text-sm font-bold transition ${success === false ? "bg-red-600 text-white ring-2 ring-red-400" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        ✗ FAIL
+                      </button>
+                    </div>
+                  </div>
+                ) : runType === "decoy" ? (
+                  <div className="p-3 bg-gray-900/60 rounded-lg border border-gray-700/50 text-xs text-gray-500">
+                    Decoy — no additional options. Click Log Play to record.
+                  </div>
                 ) : (
                   <>
-                    {/* Context toggles — run/block plays only */}
+                    {/* Context toggles — run plays only */}
                     <div className="flex flex-wrap gap-3">
                       <div>
                         <div className="text-xs text-gray-500 mb-2">Loaded Box?</div>
@@ -949,13 +1097,13 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                     placeholder="Play note (optional)" value={playNotes} onChange={(e) => setPlayNotes(e.target.value)} />
                   {editingPlayId ? (
                     <button onClick={saveEditedPlay}
-                      disabled={savingPlay || (runType !== "route" && success === null) || (runType === "route" && rbTargeted && rbOutcome === null)}
+                      disabled={savingPlay || (runType !== "route" && runType !== "decoy" && success === null) || (runType === "route" && rbTargeted && rbOutcome === null)}
                       className="px-5 py-2 bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 text-white text-sm rounded font-medium transition whitespace-nowrap">
                       {savingPlay ? "…" : "Save Edit"}
                     </button>
                   ) : (
                     <button onClick={logPlay}
-                      disabled={savingPlay || (runType !== "route" && success === null) || (runType === "route" && rbTargeted && rbOutcome === null)}
+                      disabled={savingPlay || (runType !== "route" && runType !== "decoy" && success === null) || (runType === "route" && rbTargeted && rbOutcome === null)}
                       className="px-5 py-2 bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white text-sm rounded font-medium transition">
                       {savingPlay ? "…" : "Log Play"}
                     </button>
@@ -971,7 +1119,8 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                       {[...gamePlays].reverse().map((pl, i) => {
                         const rtLabel: Record<RBRunType, string> = {
                           outside_man_gap: "OG", inside_man_gap: "IG",
-                          outside_zone: "OZ", inside_zone: "IZ", pass_block: "PB", route: "Route",
+                          outside_zone: "OZ", inside_zone: "IZ",
+                          pass_block: "PB", run_block: "RB", decoy: "DCY", route: "Route",
                         };
                         const fLabel: Record<RBFormation, string> = { gun: "Gun", pistol: "Pst", under_center: "UC" };
                         const isRoute = pl.run_type === "route";
@@ -986,7 +1135,13 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                             <span className={`font-medium ${isRoute ? "text-blue-400" : "text-white"}`}>{rtLabel[pl.run_type]}</span>
                             {isRoute ? (
                               <>
+                                {pl.route_type && (
+                                  <span className="text-blue-300 text-[10px]">
+                                    {pl.route_type === "mid_curl" ? "Curl" : pl.route_type === "flats" ? "Flat" : "BBR"}
+                                  </span>
+                                )}
                                 {pl.aligned_as_wr && <span className="text-blue-300">WR</span>}
+                                {pl.was_open && <span className="text-green-300">Open</span>}
                                 {pl.targeted
                                   ? pl.success === true ? <span className="text-green-400">✓</span>
                                     : pl.success === false ? <span className="text-red-400">Drop</span>

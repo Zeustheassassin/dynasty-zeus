@@ -50,11 +50,18 @@ const COLS: ColDef[] = [
   { key: "unblk_succ",    label: "Unblk%",  group: "Box Situations", fmt: "pct", colorDir: 1, width: 62, tooltip: "Success% with unblocked defender" },
   { key: "loaded_n",      label: "Ldd#",    group: "Box Situations", fmt: "count", width: 50 },
   { key: "unblk_n",       label: "Unblk#",  group: "Box Situations", fmt: "count", width: 56 },
+  // Blocking
+  { key: "pb_succ",  label: "PB%",   group: "Blocking", fmt: "pct",   colorDir: 1,  width: 52, tooltip: "Pass Block success%" },
+  { key: "rb_succ",  label: "RB%",   group: "Blocking", fmt: "pct",   colorDir: 1,  width: 52, tooltip: "Run Block success%" },
+  { key: "pb_n",     label: "PB#",   group: "Blocking", fmt: "count",               width: 48, tooltip: "Pass Block attempts" },
+  { key: "rb_n",     label: "RB#",   group: "Blocking", fmt: "count",               width: 48, tooltip: "Run Block attempts" },
+  { key: "decoy_n",  label: "Decoy", group: "Blocking", fmt: "count",               width: 52, tooltip: "Decoy plays" },
   // Receiving
   { key: "rec_routes",  label: "Routes",  group: "Receiving", fmt: "count", width: 58 },
   { key: "rec_tgts",    label: "Tgts",    group: "Receiving", fmt: "count", width: 48 },
   { key: "rec_tgt_pct", label: "Tgt%",    group: "Receiving", fmt: "pct", colorDir: 1, width: 54 },
   { key: "rec_catch_pct",label: "Catch%", group: "Receiving", fmt: "pct", colorDir: 1, width: 60 },
+  { key: "rec_open_pct", label: "Open%",  group: "Receiving", fmt: "pct", colorDir: 1, width: 58, tooltip: "% of routes where RB was open" },
   { key: "wr_aligned_pct",label: "WR%",  group: "Receiving", fmt: "pct", colorDir: 1, width: 52, tooltip: "% of snaps aligned as WR" },
   // Raw
   { key: "raw_snaps",      label: "Snaps",    group: "Raw", fmt: "count", width: 52 },
@@ -150,9 +157,13 @@ export default function RBStatsTable({ prospects, games, rbPlays, loading, draft
         const omg = runPlays.filter((pl) => pl.run_type === "outside_man_gap");
         const img = runPlays.filter((pl) => pl.run_type === "inside_man_gap");
 
-        const recTgts = routePlays.filter((pl) => pl.targeted).length;
-        const recCatches = 0; // RBPlay doesn't track catch outcome directly; use targeted+success workaround not available
-        const wrAligned = pPlays.filter((pl) => pl.aligned_as_wr).length;
+        const passBlockPlays = pPlays.filter((pl) => pl.run_type === "pass_block");
+        const runBlockPlays  = pPlays.filter((pl) => pl.run_type === "run_block");
+        const decoyPlays     = pPlays.filter((pl) => pl.run_type === "decoy");
+        const recTgts    = routePlays.filter((pl) => pl.targeted).length;
+        const recCatches = routePlays.filter((pl) => pl.targeted && pl.success === true).length;
+        const recOpen    = routePlays.filter((pl) => pl.was_open).length;
+        const wrAligned  = pPlays.filter((pl) => pl.aligned_as_wr).length;
 
         return {
           id: p.id,
@@ -188,11 +199,18 @@ export default function RBStatsTable({ prospects, games, rbPlays, loading, draft
           unblk_succ:    succPct(runPlays, (pl) => pl.unblocked_defender),
           loaded_n: runPlays.filter((pl) => pl.loaded_box).length,
           unblk_n:  runPlays.filter((pl) => pl.unblocked_defender).length,
+          // Blocking
+          pb_succ:  succPct(passBlockPlays, () => true),
+          rb_succ:  succPct(runBlockPlays,  () => true),
+          pb_n:     passBlockPlays.length,
+          rb_n:     runBlockPlays.length,
+          decoy_n:  decoyPlays.length,
           // Receiving
-          rec_routes:   routePlays.length,
-          rec_tgts:     recTgts,
-          rec_tgt_pct:  pct(recTgts, routePlays.length),
-          rec_catch_pct: recCatches, // placeholder — not tracked in RBPlay
+          rec_routes:    routePlays.length,
+          rec_tgts:      recTgts,
+          rec_tgt_pct:   pct(recTgts, routePlays.length),
+          rec_catch_pct: pct(recCatches, recTgts),
+          rec_open_pct:  pct(recOpen, routePlays.length),
           wr_aligned_pct: pct(wrAligned, pPlays.length),
           // Raw
           raw_snaps:     pPlays.length,

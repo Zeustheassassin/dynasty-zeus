@@ -889,8 +889,9 @@ export interface RouteStat { count: number; open: number; targets: number; catch
 export interface CoverageStat { count: number; open: number; catches: number }
 
 // ── RB Scouting ─────────────────────────────────────────────
-export type RBFormation = "gun" | "pistol" | "under_center";
-export type RBRunType   = "outside_man_gap" | "inside_man_gap" | "outside_zone" | "inside_zone" | "pass_block" | "route";
+export type RBFormation  = "gun" | "pistol" | "under_center";
+export type RBRunType    = "outside_man_gap" | "inside_man_gap" | "outside_zone" | "inside_zone" | "pass_block" | "run_block" | "decoy" | "route";
+export type RBRouteType  = "mid_curl" | "flats" | "big_boy_route";
 
 export interface RBPlay {
   id: string;
@@ -907,6 +908,8 @@ export interface RBPlay {
   play_notes: string | null;
   aligned_as_wr: boolean;
   targeted: boolean;
+  route_type: RBRouteType | null;
+  was_open: boolean | null;
   created_at: string;
 }
 
