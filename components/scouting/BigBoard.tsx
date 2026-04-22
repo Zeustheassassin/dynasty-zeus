@@ -338,7 +338,7 @@ export default function BigBoard({
             };
             return (
               <tr key={p.id} {...rowProps(p, i)}>
-                {stickyRowCells(p, i)}
+                {stickyRowCells(p)}
                 <td className={`${tdBase} text-gray-500 border-l border-r border-gray-800`}>{p.personal_rank ? `#${p.personal_rank}` : "—"}</td>
                 <td className={`${tdBase} font-semibold border-l border-gray-800 ${POSITION_COLORS[p.position] ?? "text-gray-400"}`}>{p.position}</td>
                 <td className={`${tdBase} text-gray-400`}>{p.school}</td>
@@ -387,7 +387,7 @@ export default function BigBoard({
             const age = computeAge(p.birthday);
             return (
               <tr key={p.id} {...rowProps(p, i)}>
-                {stickyRowCells(p, i)}
+                {stickyRowCells(p)}
                 <td className={`${tdBase} text-gray-500 border-l border-r border-gray-800`}>{p.overall_rank ? `#${p.overall_rank}` : "—"}</td>
                 <td className={`${tdBase} text-gray-400 border-l border-gray-800`}>{p.school}</td>
                 <td className={`${tdBase} text-gray-400`}>{p.draft_class_year}</td>
@@ -502,7 +502,7 @@ export default function BigBoard({
             const saeVal = p.adj_success_above_exp;
             return (
               <tr key={p.id} {...rowProps(p, i)}>
-                {stickyRowCells(p, i)}
+                {stickyRowCells(p)}
                 <td className={`${tdBase} text-gray-500 border-l border-r border-gray-800`}>{p.overall_rank ? `#${p.overall_rank}` : "—"}</td>
                 <td className={`${tdBase} text-gray-400 border-l border-gray-800`}>{p.school}</td>
                 <td className={`${tdBase} text-gray-400`}>{p.draft_class_year}</td>
