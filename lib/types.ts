@@ -461,6 +461,16 @@ export type LeagueHubTab =
 
 // ── Simulator shapes ─────────────────────────────────────────
 
+export interface StandingRow {
+  roster_id: number;
+  wins: number;
+  losses: number;
+  ties: number;
+  fpts: number;
+  max_pf: number;
+  owner_id: string;
+}
+
 export interface SimRow {
   rosterId: number;
   wins: number;
