@@ -4,6 +4,7 @@ import { usePlayers } from "../../lib/PlayersContext";
 import { useAuth } from "../../lib/AuthContext";
 import { useLeague } from "../../lib/LeagueContext";
 import { CURRENT_YEAR as ROOKIE_YEAR } from "../../lib/helpers";
+import { removeLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 import type {
   SleeperUser, SleeperDraft, SleeperDraftPick,
   AugmentedPick, RookieBoardPlayer, PredictedPick,
@@ -63,7 +64,7 @@ export default function LiveDraftBoard({
             onClick={() => {
               setMyDraftSlotPicks({});
               if (selectedLeague?.league_id) {
-                localStorage.removeItem(`draftPicks_${selectedLeague.league_id}_${ROOKIE_YEAR}`);
+                removeLocalStorageItem(`draftPicks_${selectedLeague.league_id}_${ROOKIE_YEAR}`);
                 if (supabaseUser) {
                   supabase.from("draft_board_picks").delete()
                     .eq("user_id", supabaseUser.id)

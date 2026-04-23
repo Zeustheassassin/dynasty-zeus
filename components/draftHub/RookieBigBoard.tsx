@@ -9,6 +9,7 @@ import { useAuth } from "../../lib/AuthContext";
 import { useValues } from "../../lib/ValuesContext";
 import type { RookieBoardPlayer } from "../../lib/types";
 import { posBadge, rookieKey, fuzzyFcLookup } from "./shared";
+import { getLocalStorageItem, setLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 
 const log = logger("components/draftHub/RookieBigBoard");
 
@@ -84,10 +85,8 @@ export default function RookieBigBoard({
   });
 
   useEffect(() => {
-    try {
-      const n = localStorage.getItem(`draftNotes_${ROOKIE_YEAR}`);
-      if (n) setPlayerNotes(JSON.parse(n));
-    } catch {}
+    const notes = getLocalStorageItem<Record<string, string> | null>(`draftNotes_${ROOKIE_YEAR}`, null);
+    if (notes) setPlayerNotes(notes);
   }, []);
 
   useEffect(() => {
@@ -102,19 +101,16 @@ export default function RookieBigBoard({
             .single();
           if (!error && data?.tiers && typeof data.tiers === "object") {
             setTierLabels(data.tiers as Record<string, number>);
-            localStorage.setItem(`draftTiersV2_${ROOKIE_YEAR}`, JSON.stringify(data.tiers));
+            setLocalStorageItem(`draftTiersV2_${ROOKIE_YEAR}`, data.tiers);
             return;
           }
         } catch {}
       }
-      try {
-        const t = localStorage.getItem(`draftTiersV2_${ROOKIE_YEAR}`);
-        if (t) {
-          const parsed = JSON.parse(t);
-          delete parsed["null"];
-          setTierLabels(parsed);
-        }
-      } catch {}
+      const tiers = getLocalStorageItem<Record<string, number> | null>(`draftTiersV2_${ROOKIE_YEAR}`, null);
+      if (tiers) {
+        delete tiers["null"];
+        setTierLabels(tiers);
+      }
     };
     load();
   }, [supabaseUser]);
@@ -132,7 +128,7 @@ export default function RookieBigBoard({
   const saveTier = (playerId: string, tierNum: number) => {
     const next = { ...tierLabels, [playerId]: tierNum };
     setTierLabels(next);
-    localStorage.setItem(`draftTiersV2_${ROOKIE_YEAR}`, JSON.stringify(next));
+    setLocalStorageItem(`draftTiersV2_${ROOKIE_YEAR}`, next);
     syncTiersToSupabase(next);
   };
 
@@ -140,14 +136,14 @@ export default function RookieBigBoard({
     const next = { ...tierLabels };
     delete next[playerId];
     setTierLabels(next);
-    localStorage.setItem(`draftTiersV2_${ROOKIE_YEAR}`, JSON.stringify(next));
+    setLocalStorageItem(`draftTiersV2_${ROOKIE_YEAR}`, next);
     syncTiersToSupabase(next);
   };
 
   const saveNote = (playerId: string, text: string) => {
     const next = { ...playerNotes, [playerId]: text };
     setPlayerNotes(next);
-    localStorage.setItem(`draftNotes_${ROOKIE_YEAR}`, JSON.stringify(next));
+    setLocalStorageItem(`draftNotes_${ROOKIE_YEAR}`, next);
   };
 
   return (

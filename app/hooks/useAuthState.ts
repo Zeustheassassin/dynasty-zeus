@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../../lib/supabaseclient";
 import type { User as SupabaseUser } from "@supabase/auth-js";
+import { getLocalStorageItem, setLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 
 export interface Note { id: string; user_id: string; title: string; body: string; updated_at: string; }
 export const LAST_LOGIN_EMAIL_KEY = "lastLoginEmail";
@@ -18,10 +19,8 @@ export function useAuthState() {
   const [showLoginPassword, setShowLoginPassword] = useState(false);
 
   useEffect(() => {
-    try {
-      const rememberedEmail = localStorage.getItem(LAST_LOGIN_EMAIL_KEY);
-      if (rememberedEmail) setLoginEmail(rememberedEmail);
-    } catch {}
+    const rememberedEmail = getLocalStorageItem(LAST_LOGIN_EMAIL_KEY, "");
+    if (rememberedEmail) setLoginEmail(rememberedEmail);
   }, []);
 
   useEffect(() => {
@@ -59,7 +58,7 @@ export function useAuthState() {
         setSupabaseError(error.message);
         return;
       }
-      try { localStorage.setItem(LAST_LOGIN_EMAIL_KEY, email); } catch {}
+      setLocalStorageItem(LAST_LOGIN_EMAIL_KEY, email);
       setSupabaseMessage("Account created. Check your email for a confirmation link, then sign in.");
     } finally {
       setLoginLoading(false);
@@ -93,7 +92,7 @@ export function useAuthState() {
         return;
       }
       if (data?.user) {
-        try { localStorage.setItem(LAST_LOGIN_EMAIL_KEY, email); } catch {}
+        setLocalStorageItem(LAST_LOGIN_EMAIL_KEY, email);
         setSupabaseMessage(`Welcome back, ${data.user.email || email}.`);
         // Don't manually set supabaseUser here — onAuthStateChange fires and sets it,
         // and the useEffect([supabaseUser]) will load all persisted data once state updates.
@@ -126,7 +125,7 @@ export function useAuthState() {
         setSupabaseError(error.message);
         return;
       }
-      try { localStorage.setItem(LAST_LOGIN_EMAIL_KEY, email); } catch {}
+      setLocalStorageItem(LAST_LOGIN_EMAIL_KEY, email);
       setSupabaseMessage("Password reset email sent. Check your inbox and spam folder.");
     } finally {
       setResetLoading(false);

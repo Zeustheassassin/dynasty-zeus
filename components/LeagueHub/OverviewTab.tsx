@@ -15,6 +15,7 @@ import type {
   LeagueHubTab,
 } from "../../lib/types";
 import type { CommittedSimsByLeague, CachedSimRow, LeagueOverviewEntry } from "../../lib/types";
+import { setLocalStorageItem, removeLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 
 interface OverviewTabProps {
   leagues: SleeperLeague[];
@@ -69,7 +70,7 @@ function OverviewTab({
       const key = localStorage.key(i);
       if (key?.startsWith("leagueData_")) keysToRemove.push(key);
     }
-    keysToRemove.forEach((k) => localStorage.removeItem(k));
+    keysToRemove.forEach((k) => removeLocalStorageItem(k));
     await Promise.all(
       leagues.map((league) =>
         Promise.all([
@@ -77,12 +78,10 @@ function OverviewTab({
           fetch(`https://api.sleeper.app/v1/league/${league.league_id}/traded_picks`).then((r) => r.json()).catch(() => []),
           fetch(`https://api.sleeper.app/v1/league/${league.league_id}/drafts`).then((r) => r.json()).catch(() => []),
         ]).then(([allRosters, tradedPicksData, draftsData]) => {
-          try {
-            localStorage.setItem(
-              `leagueData_${league.league_id}`,
-              JSON.stringify({ data: { allRosters, tradedPicksData, draftsData }, cachedAt: Date.now() })
-            );
-          } catch { /* quota exceeded — skip */ }
+          setLocalStorageItem(
+            `leagueData_${league.league_id}`,
+            { data: { allRosters, tradedPicksData, draftsData }, cachedAt: Date.now() }
+          );
           setRosterRefreshProgress((prev) => prev ? { done: prev.done + 1, total: prev.total } : null);
         })
       )

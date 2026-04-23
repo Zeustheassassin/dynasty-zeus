@@ -38,6 +38,7 @@ import { useLeagueMateIntel } from "../../hooks/useLeagueMateIntel";
 import { useDraftScout } from "../../hooks/useDraftScout";
 import { useLeagueOverview } from "../../hooks/useLeagueOverview";
 import { fetchSleeperUser } from "../../lib/sleeperUserCache";
+import { getLocalStorageItem, setLocalStorageItem, removeLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 import type {
   AlertsCenterItem,
   SleeperPlayer, SleeperLeague, SleeperRoster, SleeperTradedPick,
@@ -142,9 +143,9 @@ const [simProgress, setSimProgress] = useState<{ done: number; total: number } |
 const [simSalt, setSimSalt] = useState<number>(() => Math.floor(Math.random() * 1_000_000));
 // Frozen sim rows committed at button-click time — keyed league_id → rosterId → sim row.
 // Persisted in localStorage so values survive page reloads without re-running sims.
-const [committedSimsByLeague, setCommittedSimsByLeague] = useState<CommittedSimsByLeague>(() => {
-  try { return JSON.parse(localStorage.getItem("committedSimRows_v2") || "{}"); } catch { return {}; }
-});
+const [committedSimsByLeague, setCommittedSimsByLeague] = useState<CommittedSimsByLeague>(() =>
+  getLocalStorageItem<CommittedSimsByLeague>("committedSimRows_v2", {})
+);
 const [myDraftSlotPicks, setMyDraftSlotPicks] = useState<Record<string, string>>({}); // slot → player_id override
 const [draftSlotEditing, setDraftSlotEditing] = useState<string | null>(null); // slot currently open for edit
 const [draftSlotSearchQuery, setDraftSlotSearchQuery] = useState("");
@@ -158,17 +159,17 @@ const [gamedayMatchups, setGamedayMatchups] = useState<SleeperMatchup[]>([]);
 const [loadingGamedayMatchups, setLoadingGamedayMatchups] = useState(false);
 const [selectedGamedayMatchupId, setSelectedGamedayMatchupId] = useState<number | null>(null);
 const [playerProfileId, setPlayerProfileId] = useState<string | null>(null);
-const [playerNotes, setPlayerNotes] = useState<Record<string, string>>(() => {
-  try { return JSON.parse(localStorage.getItem("playerNotes_v1") || "{}"); } catch { return {}; }
-});
-const [playerDispositions, setPlayerDispositions] = useState<Record<string, { sell: string; buy: string }>>(() => {
-  try { return JSON.parse(localStorage.getItem("playerDispositions_v1") || "{}"); } catch { return {}; }
-});
+const [playerNotes, setPlayerNotes] = useState<Record<string, string>>(() =>
+  getLocalStorageItem<Record<string, string>>("playerNotes_v1", {})
+);
+const [playerDispositions, setPlayerDispositions] = useState<Record<string, { sell: string; buy: string }>>(() =>
+  getLocalStorageItem<Record<string, { sell: string; buy: string }>>("playerDispositions_v1", {})
+);
 // Per-league player tags: CORE = Do Not Sell, WANT_TO_TRADE = actively shopping
 // Shape: Record<leagueId, Record<playerId, "CORE" | "WANT_TO_TRADE">>
-const [leaguePlayerTags, setLeaguePlayerTags] = useState<Record<string, Record<string, "CORE" | "WANT_TO_TRADE">>>(() => {
-  try { return JSON.parse(localStorage.getItem("leaguePlayerTags_v1") || "{}"); } catch { return {}; }
-});
+const [leaguePlayerTags, setLeaguePlayerTags] = useState<Record<string, Record<string, "CORE" | "WANT_TO_TRADE">>>(() =>
+  getLocalStorageItem<Record<string, Record<string, "CORE" | "WANT_TO_TRADE">>>("leaguePlayerTags_v1", {})
+);
 const [activityTransactions, setActivityTransactions] = useState<AnnotatedTransaction[]>([]);
 const [loadingActivity, setLoadingActivity] = useState(false);
 const [leagueWeeklyMatchups, setLeagueWeeklyMatchups] = useState<Record<string, { week: number; matchups: SleeperMatchup[] }[]>>({});
@@ -199,13 +200,13 @@ const nflStatsSeason = nflState?.season_type === "regular" ? (nflState?.season ?
 const nflStatsWeek   = nflState?.season_type === "regular" ? (nflState?.display_week ?? nflState?.week ?? null) : null;
 const { playerStats } = usePlayerStats(nflStatsSeason, nflStatsWeek);
 
-const [ignoredOwnerIds, setIgnoredOwnerIds] = useState<string[]>(() => {
-  try { return JSON.parse(localStorage.getItem("ignoredOwnerIds") || "[]"); } catch { return []; }
-});
+const [ignoredOwnerIds, setIgnoredOwnerIds] = useState<string[]>(() =>
+  getLocalStorageItem<string[]>("ignoredOwnerIds", [])
+);
 const toggleIgnoredOwner = useCallback((ownerId: string) => {
   setIgnoredOwnerIds(prev => {
     const next = prev.includes(ownerId) ? prev.filter(id => id !== ownerId) : [...prev, ownerId];
-    localStorage.setItem("ignoredOwnerIds", JSON.stringify(next));
+    setLocalStorageItem("ignoredOwnerIds", next);
     return next;
   });
 }, []);
@@ -328,7 +329,7 @@ useEffect(() => {
   let cancelled = false;
   setSupabaseMessage("");
   try {
-    if (supabaseUser.email) localStorage.setItem(LAST_LOGIN_EMAIL_KEY, supabaseUser.email);
+    if (supabaseUser.email) setLocalStorageItem(LAST_LOGIN_EMAIL_KEY, supabaseUser.email);
   } catch {}
   // 1. Title/body note cards
   loadNotes();
@@ -343,7 +344,7 @@ useEffect(() => {
         const map: Record<string, string> = {};
         data.forEach((row: { league_id: string; content: string }) => { map[row.league_id] = row.content; });
         setLeagueNotes(map);
-        localStorage.setItem("leagueNotes", JSON.stringify(map));
+        setLocalStorageItem("leagueNotes", map);
       }
     });
   // Rookie board is handled by the loadRookieBoard effect (depends on supabaseUser)
@@ -375,7 +376,7 @@ useEffect(() => {
         data.forEach((row: { player_id: string; note: string }) => { map[String(row.player_id)] = row.note; });
         setPlayerNotes((prev) => {
           const merged = { ...prev, ...map };
-          try { localStorage.setItem("playerNotes_v1", JSON.stringify(merged)); } catch {}
+          setLocalStorageItem("playerNotes_v1", merged);
           return merged;
         });
       }
@@ -392,7 +393,7 @@ useEffect(() => {
         data.forEach((row: { player_id: string; sell: string; buy: string }) => { map[String(row.player_id)] = { sell: row.sell, buy: row.buy }; });
         setPlayerDispositions((prev) => {
           const merged = { ...prev, ...map };
-          try { localStorage.setItem("playerDispositions_v1", JSON.stringify(merged)); } catch {}
+          setLocalStorageItem("playerDispositions_v1", merged);
           return merged;
         });
       }
@@ -416,7 +417,7 @@ useEffect(() => {
           for (const lid of new Set([...Object.keys(prev), ...Object.keys(map)])) {
             merged[lid] = { ...(prev[lid] ?? {}), ...(map[lid] ?? {}) };
           }
-          try { localStorage.setItem("leaguePlayerTags_v1", JSON.stringify(merged)); } catch {}
+          setLocalStorageItem("leaguePlayerTags_v1", merged);
           return merged;
         });
       }
@@ -439,12 +440,7 @@ const signOut = async () => {
   setCommToolsLeagueId("");
   setCommToolsRosters([]);
   setCommToolsUsers({});
-  try {
-    const rememberedEmail = localStorage.getItem(LAST_LOGIN_EMAIL_KEY) || "";
-    setLoginEmail(rememberedEmail);
-  } catch {
-    setLoginEmail("");
-  }
+  setLoginEmail(getLocalStorageItem(LAST_LOGIN_EMAIL_KEY, ""));
   setLoginPassword("");
   setLoginLoading(false);
   setResetLoading(false);
@@ -452,13 +448,13 @@ const signOut = async () => {
   setSupabaseError("");
   setSupabaseMessage("");
   // Clear localStorage user-specific data so next user starts fresh
-  localStorage.removeItem("leagueNotes");
-  localStorage.removeItem(`rookieBoard_${ROOKIE_BOARD_VERSION}`);
-  localStorage.removeItem(ROOKIE_BOARD_RESET_KEY);
-  localStorage.removeItem(watchlistStorageKey);
-  localStorage.removeItem(alertStorageKey);
-  localStorage.removeItem(alertSnapshotStorageKey);
-  localStorage.removeItem(dismissedAlertStorageKey);
+  removeLocalStorageItem("leagueNotes");
+  removeLocalStorageItem(`rookieBoard_${ROOKIE_BOARD_VERSION}`);
+  removeLocalStorageItem(ROOKIE_BOARD_RESET_KEY);
+  removeLocalStorageItem(watchlistStorageKey);
+  removeLocalStorageItem(alertStorageKey);
+  removeLocalStorageItem(alertSnapshotStorageKey);
+  removeLocalStorageItem(dismissedAlertStorageKey);
   // Disconnect Sleeper so the app returns fully to the logged-out state
   disconnectSleeper();
 };
@@ -480,17 +476,12 @@ useEffect(() => {
       return;
     }
 
-    let cached: string | null = null;
-    let cachedAt: string | null = null;
-    try {
-      cached = localStorage.getItem("playersCache");
-      cachedAt = localStorage.getItem("playersCacheAt");
-    } catch { /* private browsing or quota — skip cache */ }
+    const cached = getLocalStorageItem<Record<string, SleeperPlayer> | null>("playersCache", null);
+    const cachedAt = getLocalStorageItem<number>("playersCacheAt", 0);
     const ONE_DAY = 24 * 60 * 60 * 1000;
 
-    if (cached && cachedAt && Date.now() - Number(cachedAt) < ONE_DAY) {
-      let parsedCache: Record<string, SleeperPlayer>;
-      try { parsedCache = JSON.parse(cached); } catch { parsedCache = {}; }
+    if (cached && cachedAt && Date.now() - cachedAt < ONE_DAY) {
+      const parsedCache = cached;
       const cacheSample = Object.values(parsedCache).find((player) => player && typeof player === "object") as Record<string, unknown> | undefined;
       const hasRookieFields =
         cacheSample &&
@@ -524,12 +515,8 @@ useEffect(() => {
       if (fcValues[id]) data[id].value = fcValues[id];
     });
 
-    try {
-      localStorage.setItem("playersCache", JSON.stringify(data));
-      localStorage.setItem("playersCacheAt", String(Date.now()));
-    } catch {
-      // localStorage full — skip caching, app still works fine
-    }
+    setLocalStorageItem("playersCache", data);
+    setLocalStorageItem("playersCacheAt", Date.now());
     _playersInMemory = data;
     setPlayers(data);
   };
@@ -853,10 +840,8 @@ useEffect(() => {
   setMyDraftSlotPicks({});
   const lsKey = `draftPicks_${selectedLeague.league_id}_${ROOKIE_YEAR}`;
   // Restore this league's picks from localStorage immediately
-  const saved = localStorage.getItem(lsKey);
-  if (saved) {
-    try { setMyDraftSlotPicks(JSON.parse(saved)); } catch {}
-  }
+  const saved = getLocalStorageItem<Record<string, string> | null>(lsKey, null);
+  if (saved) setMyDraftSlotPicks(saved);
   // Then try Supabase as authoritative source (overwrites localStorage if data exists)
   if (!supabaseUser) return;
   supabase
@@ -870,7 +855,7 @@ useEffect(() => {
       const picks: Record<string, string> = {};
       data.forEach((row) => { picks[row.pick_slot] = row.player_id; });
       setMyDraftSlotPicks(picks);
-      localStorage.setItem(lsKey, JSON.stringify(picks));
+      setLocalStorageItem(lsKey, picks);
     });
 }, [supabaseUser, selectedLeague?.league_id]);
 
@@ -878,7 +863,7 @@ useEffect(() => {
 useEffect(() => {
   if (!selectedLeague?.league_id || !Object.keys(myDraftSlotPicks).length) return;
   const lsKey = `draftPicks_${selectedLeague.league_id}_${ROOKIE_YEAR}`;
-  localStorage.setItem(lsKey, JSON.stringify(myDraftSlotPicks));
+  setLocalStorageItem(lsKey, myDraftSlotPicks);
   if (!supabaseUser) return;
   const rows = Object.entries(myDraftSlotPicks).map(([pick_slot, player_id]) => ({
     user_id: supabaseUser.id,
@@ -897,14 +882,14 @@ useEffect(() => {
 
 // League notes — load from localStorage on mount (fast), then override with Supabase on login
 useEffect(() => {
-  const saved = localStorage.getItem("leagueNotes");
-  if (saved) { try { setLeagueNotes(JSON.parse(saved)); } catch { /* ignore corrupt cache */ } }
+  const saved = getLocalStorageItem<Record<string, string> | null>("leagueNotes", null);
+  if (saved) setLeagueNotes(saved);
 }, []);
 
 const saveLeagueNote = async (leagueId: string, text: string) => {
   const updated = { ...leagueNotes, [leagueId]: text };
   setLeagueNotes(updated);
-  localStorage.setItem("leagueNotes", JSON.stringify(updated));
+  setLocalStorageItem("leagueNotes", updated);
   if (supabaseUser) {
     try {
       await supabase.from("league_notes").upsert(
@@ -1083,13 +1068,10 @@ loadOwnerTendenciesRef.current = loadOwnerTendencies;
 
         setAllLeagueData(results);
 
-        const savedLeague = localStorage.getItem("selectedLeague");
+        const savedLeague = getLocalStorageItem<{ league_id: string } | null>("selectedLeague", null);
         if (savedLeague) {
-          try {
-            const parsedLeague = JSON.parse(savedLeague);
-            const match = leagues.find((l) => l.league_id === parsedLeague.league_id);
-            if (match) loadRosterRef.current?.(match);
-          } catch { /* ignore corrupt localStorage */ }
+          const match = leagues.find((l) => l.league_id === savedLeague.league_id);
+          if (match) loadRosterRef.current?.(match);
         }
       } finally {
         setLoadingAllLeagueData(false);
@@ -1125,12 +1107,10 @@ loadOwnerTendenciesRef.current = loadOwnerTendencies;
 const loadRoster = useCallback(async (league: SleeperLeague) => {
 
   // ── Save recent league ───────────────────────────────────────────────────
-  const stored = localStorage.getItem("recentLeagues");
-  let recents: { league_id: string; name: string }[] = [];
-  if (stored) { try { recents = JSON.parse(stored); } catch { /* ignore corrupt cache */ } }
+  let recents = getLocalStorageItem<{ league_id: string; name: string }[]>("recentLeagues", []);
   recents = recents.filter((l) => l.league_id !== league.league_id);
   recents.unshift({ league_id: league.league_id, name: league.name });
-  localStorage.setItem("recentLeagues", JSON.stringify(recents.slice(0, 5)));
+  setLocalStorageItem("recentLeagues", recents.slice(0, 5));
 
   setSelectedLeague(league);
 
@@ -1143,17 +1123,13 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
   let allRosters: SleeperRoster[] = [];
   let tradedPicksData: SleeperTradedPick[] = [];
   let draftsData: SleeperDraft[] = [];
-  const leagueCached = localStorage.getItem(leagueCacheKey);
-  if (leagueCached) {
-    try {
-      const { data, cachedAt } = JSON.parse(leagueCached);
-      if (Date.now() - cachedAt < LEAGUE_CACHE_TTL) {
-        allRosters     = data.allRosters;
-        tradedPicksData = data.tradedPicksData;
-        draftsData      = data.draftsData;
-        cacheHit = true;
-      }
-    } catch { /* invalid cache — fall through to network */ }
+  type LeagueCache = { data: { allRosters: SleeperRoster[]; tradedPicksData: SleeperTradedPick[]; draftsData: SleeperDraft[] }; cachedAt: number };
+  const leagueCached = getLocalStorageItem<LeagueCache | null>(leagueCacheKey, null);
+  if (leagueCached && Date.now() - leagueCached.cachedAt < LEAGUE_CACHE_TTL) {
+    allRosters      = leagueCached.data.allRosters;
+    tradedPicksData = leagueCached.data.tradedPicksData;
+    draftsData      = leagueCached.data.draftsData;
+    cacheHit = true;
   }
   if (!cacheHit) {
     [allRosters, tradedPicksData, draftsData] = await Promise.all([
@@ -1161,9 +1137,7 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
       fetch(`https://api.sleeper.app/v1/league/${league.league_id}/traded_picks`).then((r) => r.json()),
       fetch(`https://api.sleeper.app/v1/league/${league.league_id}/drafts`).then((r) => r.json()).catch(() => []),
     ]);
-    try {
-      localStorage.setItem(leagueCacheKey, JSON.stringify({ data: { allRosters, tradedPicksData, draftsData }, cachedAt: Date.now() }));
-    } catch { /* localStorage quota exceeded — skip caching */ }
+    setLocalStorageItem(leagueCacheKey, { data: { allRosters, tradedPicksData, draftsData }, cachedAt: Date.now() });
   }
   setRosters(allRosters);
 
@@ -1457,7 +1431,7 @@ loadLeaguemateTradeAlertsRef.current = loadLeaguemateTradeAlerts;
 const savePlayerNote = useCallback(async (playerId: string, note: string) => {
   setPlayerNotes((prev) => {
     const updated = { ...prev, [playerId]: note };
-    try { localStorage.setItem("playerNotes_v1", JSON.stringify(updated)); } catch {}
+    setLocalStorageItem("playerNotes_v1", updated);
     return updated;
   });
   const sbUser = supabaseUserRef.current;
@@ -1501,7 +1475,7 @@ const saveSnapshotNow = async () => {
 const savePlayerDisposition = useCallback(async (playerId: string, sell: string, buy: string) => {
   setPlayerDispositions((prev) => {
     const updated = { ...prev, [playerId]: { sell, buy } };
-    try { localStorage.setItem("playerDispositions_v1", JSON.stringify(updated)); } catch {}
+    setLocalStorageItem("playerDispositions_v1", updated);
     return updated;
   });
   const sbUser = supabaseUserRef.current;
@@ -1534,7 +1508,7 @@ const handleToggleLeaguePlayerTag = useCallback((
     if (next === undefined) delete updatedLeague[playerId];
     else updatedLeague[playerId] = next;
     const updated = { ...prev, [leagueId]: updatedLeague };
-    try { localStorage.setItem("leaguePlayerTags_v1", JSON.stringify(updated)); } catch {}
+    setLocalStorageItem("leaguePlayerTags_v1", updated);
     // Supabase sync
     if (sbUser) {
       if (next === undefined) {
@@ -3749,7 +3723,7 @@ const getTeamSummary = useCallback(() => {
     );
     setCommittedSimsByLeague((prev) => {
       const next = { ...prev, [leagueId]: frozenRows };
-      try { localStorage.setItem("committedSimRows_v2", JSON.stringify(next)); } catch {}
+      setLocalStorageItem("committedSimRows_v2", next);
       return next;
     });
     // Write to Supabase only when authenticated.
@@ -4292,12 +4266,7 @@ const getTeamSummary = useCallback(() => {
 
     if (!trackedPlayers.length) return;
 
-    let savedSnapshots: { players?: Record<string, PlayerSnapshot> } = {};
-    try {
-      savedSnapshots = JSON.parse(localStorage.getItem(alertSnapshotStorageKey) || "{}");
-    } catch {
-      savedSnapshots = {};
-    }
+    const savedSnapshots = getLocalStorageItem<{ players?: Record<string, PlayerSnapshot> }>(alertSnapshotStorageKey, {});
 
     const nextPlayerSnapshot = Object.fromEntries(
       trackedPlayers.map((entry) => {
@@ -4440,7 +4409,7 @@ const getTeamSummary = useCallback(() => {
       players: nextPlayerSnapshot,
     };
 
-    localStorage.setItem(alertSnapshotStorageKey, JSON.stringify(nextSnapshots));
+    setLocalStorageItem(alertSnapshotStorageKey, nextSnapshots);
 
     // Build a comprehensive snapshot: all QB/RB/WR/TE using generic FC values (players[id].value).
     // Generic values are used instead of league-adjusted calcFcValues so scoring rule changes

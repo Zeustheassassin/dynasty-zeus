@@ -1,6 +1,7 @@
 "use client";
 import React from "react";
 import { CURRENT_YEAR } from "../../lib/helpers";
+import { removeLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 import { useAuth } from "../../lib/AuthContext";
 import { useLeague } from "../../lib/LeagueContext";
 import { usePlayers } from "../../lib/PlayersContext";
@@ -92,7 +93,7 @@ function DraftBoardTab({
                 if (!window.confirm("Clear all your draft picks? This cannot be undone.")) return;
                 setMyDraftSlotPicks({});
                 if (selectedLeague?.league_id) {
-                  localStorage.removeItem(`draftPicks_${selectedLeague.league_id}_${ROOKIE_YEAR}`);
+                  removeLocalStorageItem(`draftPicks_${selectedLeague.league_id}_${ROOKIE_YEAR}`);
                   if (supabaseUser) {
                     supabase
                       .from("draft_board_picks")

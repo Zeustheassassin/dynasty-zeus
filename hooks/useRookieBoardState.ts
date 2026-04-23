@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, type Dispatch, type SetStateAction } from 
 import { supabase } from "../lib/supabaseclient";
 import { CURRENT_YEAR, normalizeRookieName } from "../lib/helpers";
 import { logger } from "../lib/logger";
+import { getLocalStorageItem, setLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 import type { RookieBoardPlayer } from "../lib/types";
 
 const log = logger("hooks/useRookieBoardState");
@@ -46,7 +47,7 @@ export function useRookieBoardState(supabaseUser: { id: string } | null): UseRoo
   // Uses ref for supabaseUser to avoid triggering on login.
   useEffect(() => {
     if (rookies.length > 0) {
-      localStorage.setItem(`rookieBoard_${ROOKIE_BOARD_VERSION}`, JSON.stringify(rookies));
+      setLocalStorageItem(`rookieBoard_${ROOKIE_BOARD_VERSION}`, rookies);
       const user = supabaseUserRef.current;
       if (user) {
         const orderedNames = rookies.map((r) => r.name);
@@ -188,7 +189,7 @@ export function useRookieBoardState(supabaseUser: { id: string } | null): UseRoo
               if (b.fcValue !== a.fcValue) return b.fcValue - a.fcValue;
               return a.adp - b.adp;
             });
-            localStorage.setItem(`rookieBoard_${ROOKIE_BOARD_VERSION}`, JSON.stringify(ordered));
+            setLocalStorageItem(`rookieBoard_${ROOKIE_BOARD_VERSION}`, ordered);
             setRookies(ordered);
             return;
           }
@@ -198,17 +199,17 @@ export function useRookieBoardState(supabaseUser: { id: string } | null): UseRoo
       }
 
       // 3. Fall back to localStorage order
-      const saved = localStorage.getItem(`rookieBoard_${ROOKIE_BOARD_VERSION}`);
-      const hasReset = localStorage.getItem(ROOKIE_BOARD_RESET_KEY) === "true";
+      const saved = getLocalStorageItem<RookieBoardPlayer[] | null>(`rookieBoard_${ROOKIE_BOARD_VERSION}`, null);
+      const hasReset = getLocalStorageItem<boolean>(ROOKIE_BOARD_RESET_KEY, false);
 
       if (!hasReset || !saved) {
         setRookies(canonicalBoard);
-        localStorage.setItem(`rookieBoard_${ROOKIE_BOARD_VERSION}`, JSON.stringify(canonicalBoard));
-        localStorage.setItem(ROOKIE_BOARD_RESET_KEY, "true");
+        setLocalStorageItem(`rookieBoard_${ROOKIE_BOARD_VERSION}`, canonicalBoard);
+        setLocalStorageItem(ROOKIE_BOARD_RESET_KEY, true);
         return;
       }
 
-      const savedNames: string[] = JSON.parse(saved).map((p: string | { name: string }) =>
+      const savedNames: string[] = saved.map((p: RookieBoardPlayer | string) =>
         typeof p === "string" ? p : p.name
       );
       const canonicalNames = new Set(canonicalBoard.map((p) => normalizeRookieName(p.name)));
@@ -223,7 +224,7 @@ export function useRookieBoardState(supabaseUser: { id: string } | null): UseRoo
         return a.adp - b.adp;
       });
 
-      localStorage.setItem(`rookieBoard_${ROOKIE_BOARD_VERSION}`, JSON.stringify(merged));
+      setLocalStorageItem(`rookieBoard_${ROOKIE_BOARD_VERSION}`, merged);
       setRookies(merged);
     };
 

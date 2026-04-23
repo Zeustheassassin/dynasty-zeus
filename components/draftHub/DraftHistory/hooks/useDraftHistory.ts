@@ -12,6 +12,7 @@ import type {
   HistoryDraftPick, HistoryDraftEntry, SleeperDraftBasic,
   SleeperPickBasic, ConsensusCacheRow,
 } from "../../shared";
+import { getLocalStorageItem, setLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 
 const log = logger("components/draftHub/DraftHistory");
 
@@ -154,10 +155,8 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
   useEffect(() => {
     if (!supabaseUser) {
       void (async () => {
-        try {
-          const saved = localStorage.getItem("consensusPlayerGrades");
-          if (saved) setPlayerGrades(JSON.parse(saved));
-        } catch {}
+        const saved = getLocalStorageItem<Record<string, "hit" | "neutral" | "bust"> | null>("consensusPlayerGrades", null);
+        if (saved) setPlayerGrades(saved);
       })();
       return;
     }
@@ -168,12 +167,10 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
       .then(({ data }: { data: { grades: Record<string, string> } | null }) => {
         if (data?.grades && typeof data.grades === "object") {
           setPlayerGrades(data.grades as Record<string, "hit" | "neutral" | "bust">);
-          try { localStorage.setItem("consensusPlayerGrades", JSON.stringify(data.grades)); } catch {}
+          setLocalStorageItem("consensusPlayerGrades", data.grades);
         } else {
-          try {
-            const saved = localStorage.getItem("consensusPlayerGrades");
-            if (saved) setPlayerGrades(JSON.parse(saved));
-          } catch {}
+          const saved = getLocalStorageItem<Record<string, "hit" | "neutral" | "bust"> | null>("consensusPlayerGrades", null);
+          if (saved) setPlayerGrades(saved);
         }
       });
   }, [supabaseUser?.id]); // eslint-disable-line
@@ -234,7 +231,7 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
       const next = { ...prev };
       if (next[key] === grade) delete next[key];
       else next[key] = grade;
-      try { localStorage.setItem("consensusPlayerGrades", JSON.stringify(next)); } catch {}
+      setLocalStorageItem("consensusPlayerGrades", next);
       syncGradesToSupabase(next);
       return next;
     });

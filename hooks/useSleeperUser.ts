@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 import { CURRENT_YEAR } from "../lib/helpers";
 import type { SleeperUser, SleeperLeague } from "../lib/types";
+import { getLocalStorageItem, setLocalStorageItem, removeLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 
 // Sleeper dynasty league filter — same criteria used everywhere in the app.
 const isDynastyLeague = (l: SleeperLeague) =>
@@ -58,11 +59,9 @@ export function useSleeperUser({ onLeaguesLoaded, onDisconnect }: UseSleeperUser
     const controller = new AbortController();
     const { signal } = controller;
 
-    let saved: string | null = null;
-    try { saved = localStorage.getItem("sleeperUser"); } catch { return; }
-    if (!saved) return;
+    const parsed = getLocalStorageItem<SleeperUser | null>("sleeperUser", null);
+    if (!parsed) return;
     try {
-      const parsed: SleeperUser = JSON.parse(saved);
       setUser(parsed);
       setUsername(parsed.display_name || parsed.username || "");
       fetch(`https://api.sleeper.app/v1/user/${parsed.user_id}/leagues/nfl/${CURRENT_YEAR}`, { signal })
@@ -111,7 +110,7 @@ export function useSleeperUser({ onLeaguesLoaded, onDisconnect }: UseSleeperUser
 
       setUser(data);
       setUsername(data.display_name || data.username || trimmedUsername);
-      localStorage.setItem("sleeperUser", JSON.stringify(data));
+      setLocalStorageItem("sleeperUser", data);
 
       const leaguesRes = await fetch(
         `https://api.sleeper.app/v1/user/${data.user_id}/leagues/nfl/${CURRENT_YEAR}`
@@ -137,7 +136,7 @@ export function useSleeperUser({ onLeaguesLoaded, onDisconnect }: UseSleeperUser
     setLeagues([]);
     setConnectError("");
     setConnectSuccess("");
-    try { localStorage.removeItem("sleeperUser"); } catch { /* private browsing */ }
+    removeLocalStorageItem("sleeperUser");
     onDisconnect?.();
   };
 

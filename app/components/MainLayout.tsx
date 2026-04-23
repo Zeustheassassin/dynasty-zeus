@@ -1,6 +1,7 @@
 "use client";
 import type { User as SupabaseUser } from "@supabase/auth-js";
 import type { SleeperUser, SleeperLeague } from "../../lib/types";
+import { setLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 
 interface MainLayoutProps {
   supabaseUser: SupabaseUser | null;
@@ -70,7 +71,7 @@ export function MainLayout({
                           if (league) {
                             loadRoster(league);
                             if (mainTab === "DASHBOARD") setMainTab("LEAGUES");
-                            localStorage.setItem("selectedLeague", JSON.stringify(league));
+                            setLocalStorageItem("selectedLeague", league);
                           }
                         }}
                         className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs max-w-[120px] truncate"

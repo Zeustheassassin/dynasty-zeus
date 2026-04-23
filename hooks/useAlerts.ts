@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, useCallback, type Dispatch, type SetStateA
 import { supabase } from "../lib/supabaseclient";
 import { logger } from "../lib/logger";
 import type { AlertsCenterItem, WatchlistEntry } from "../lib/types";
+import { getLocalStorageItem, setLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 
 const log = logger("hooks/useAlerts");
 
@@ -70,18 +71,12 @@ export function useAlerts({ supabaseUser, players }: UseAlertsOptions): UseAlert
   // exception to the set-state-in-effect rule for external-store hydration.
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(watchlistStorageKey);
-      if (stored) setWatchlistEntries(JSON.parse(stored));
-    } catch { /* ignore parse errors */ }
-    try {
-      const stored = localStorage.getItem(alertStorageKey);
-      if (stored) setDashboardAlerts(JSON.parse(stored));
-    } catch { /* ignore parse errors */ }
-    try {
-      const stored = localStorage.getItem(dismissedAlertStorageKey);
-      if (stored) setDismissedAlertIds(JSON.parse(stored));
-    } catch { /* ignore parse errors */ }
+    const watchlist = getLocalStorageItem<WatchlistEntry[] | null>(watchlistStorageKey, null);
+    if (watchlist) setWatchlistEntries(watchlist);
+    const alerts = getLocalStorageItem<AlertsCenterItem[] | null>(alertStorageKey, null);
+    if (alerts) setDashboardAlerts(alerts);
+    const dismissed = getLocalStorageItem<string[] | null>(dismissedAlertStorageKey, null);
+    if (dismissed) setDismissedAlertIds(dismissed);
   }, [watchlistStorageKey, alertStorageKey, dismissedAlertStorageKey]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
@@ -97,7 +92,7 @@ export function useAlerts({ supabaseUser, players }: UseAlertsOptions): UseAlert
       .then(({ data }: { data: WatchlistEntry[] | null }) => {
         if (data && data.length > 0) {
           setWatchlistEntries(data);
-          localStorage.setItem(watchlistStorageKey, JSON.stringify(data));
+          setLocalStorageItem(watchlistStorageKey, data);
         }
       });
 
@@ -141,8 +136,8 @@ export function useAlerts({ supabaseUser, players }: UseAlertsOptions): UseAlert
           const dismissed = rows.filter((r) => r.dismissed).map((r) => r.id);
           setDashboardAlerts(rows);
           setDismissedAlertIds(dismissed);
-          localStorage.setItem(alertStorageKey, JSON.stringify(rows));
-          localStorage.setItem(dismissedAlertStorageKey, JSON.stringify(dismissed));
+          setLocalStorageItem(alertStorageKey, rows);
+          setLocalStorageItem(dismissedAlertStorageKey, dismissed);
         }
       });
   }, [supabaseUser, watchlistStorageKey, alertStorageKey, dismissedAlertStorageKey]);
@@ -168,7 +163,7 @@ export function useAlerts({ supabaseUser, players }: UseAlertsOptions): UseAlert
   const dismissAlert = (alertId: string) => {
     const nextDismissed = Array.from(new Set([...latestDismissedRef.current, alertId]));
     setDismissedAlertIds(nextDismissed);
-    localStorage.setItem(dismissedAlertStorageKey, JSON.stringify(nextDismissed));
+    setLocalStorageItem(dismissedAlertStorageKey, nextDismissed);
     setDashboardAlerts((prev) =>
       prev.map((alert) => alert.id === alertId ? { ...alert, dismissed: true } : alert)
     );
@@ -187,7 +182,7 @@ export function useAlerts({ supabaseUser, players }: UseAlertsOptions): UseAlert
   const removeWatchlistEntry = async (playerId: string) => {
     const nextEntries = watchlistEntries.filter((e) => e.player_id !== playerId);
     setWatchlistEntries(nextEntries);
-    localStorage.setItem(watchlistStorageKey, JSON.stringify(nextEntries));
+    setLocalStorageItem(watchlistStorageKey, nextEntries);
     if (supabaseUser) {
       try {
         await supabase
@@ -214,7 +209,7 @@ export function useAlerts({ supabaseUser, players }: UseAlertsOptions): UseAlert
     };
     const nextEntries = [...watchlistEntries, entry];
     setWatchlistEntries(nextEntries);
-    localStorage.setItem(watchlistStorageKey, JSON.stringify(nextEntries));
+    setLocalStorageItem(watchlistStorageKey, nextEntries);
     if (supabaseUser) {
       try {
         await supabase
