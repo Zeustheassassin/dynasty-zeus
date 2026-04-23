@@ -12,7 +12,7 @@ export function useHubRouting() {
     "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "PICK_VALUES" | "LEAGUEMATES" | "DEPTH_CHARTS" | "BUY_LOW"
   >("RANKINGS");
   const [draftHubSection, setDraftHubSection] = useState<
-    "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES"
+    "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL_BOARDS"
   >("BOARD");
 
   return {

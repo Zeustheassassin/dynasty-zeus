@@ -169,8 +169,8 @@ interface HubRouterProps {
   saveSnapshotNow: () => Promise<void>;
 
   // Draft Hub
-  draftHubSection: "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES";
-  setDraftHubSection: (s: "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES") => void;
+  draftHubSection: "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL_BOARDS";
+  setDraftHubSection: (s: "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL_BOARDS") => void;
   myDraftSlotPicks: Record<string, string>;
   setMyDraftSlotPicks: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   draftSlotEditing: string | null;

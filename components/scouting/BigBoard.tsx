@@ -1,6 +1,9 @@
 "use client";
 import { useState, useMemo, useRef, useEffect } from "react";
 import type { ProspectWithStats, Prospect, RouteType } from "../../lib/types";
+import { getLocalStorageItem, setLocalStorageItem } from "@/lib/hooks/useLocalStorage";
+
+type NflDraftEntry = { team: string; round: number | null; pick: number | null };
 
 const ROUTE_TYPES: RouteType[] = [
   "nine", "post", "dig", "curl", "slant", "screen", "flat", "comeback", "out", "corner", "other",
@@ -133,6 +136,14 @@ export default function BigBoard({
   const [rankInput, setRankInput] = useState("");
   const [savingRankId, setSavingRankId] = useState<string | null>(null);
 
+  const [nflDraftInfo, setNflDraftInfo] = useState<Record<string, NflDraftEntry>>(() =>
+    getLocalStorageItem<Record<string, NflDraftEntry>>("nflDraftInfo", {})
+  );
+  const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
+  const [draftEditTeam, setDraftEditTeam] = useState("");
+  const [draftEditRound, setDraftEditRound] = useState("");
+  const [draftEditPick, setDraftEditPick] = useState("");
+
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const dragRankRef = useRef<number | null>(null);
@@ -221,6 +232,93 @@ export default function BigBoard({
     await rankUpdater(id, nr);
     setSavingRankId(null);
     setEditingRankId(null);
+  }
+
+  function openDraftEdit(id: string) {
+    const info = nflDraftInfo[id];
+    setDraftEditTeam(info?.team ?? "");
+    setDraftEditRound(info?.round != null ? String(info.round) : "");
+    setDraftEditPick(info?.pick != null ? String(info.pick) : "");
+    setEditingDraftId(id);
+  }
+
+  function commitDraftEdit(id: string, team: string, round: string, pick: string) {
+    const t = team.trim().toUpperCase().slice(0, 3);
+    const rd = parseInt(round, 10);
+    const pk = parseInt(pick, 10);
+    const updated = { ...nflDraftInfo };
+    if (!t && isNaN(rd) && isNaN(pk)) {
+      delete updated[id];
+    } else {
+      updated[id] = { team: t, round: isNaN(rd) ? null : rd, pick: isNaN(pk) ? null : pk };
+    }
+    setNflDraftInfo(updated);
+    setLocalStorageItem("nflDraftInfo", updated);
+    setEditingDraftId(null);
+  }
+
+  function draftCell(p: ProspectWithStats) {
+    const info = nflDraftInfo[p.id];
+    const isEditing = editingDraftId === p.id;
+    const hasInfo = info?.team || info?.round != null || info?.pick != null;
+
+    if (isEditing) {
+      let localTeam = draftEditTeam;
+      let localRound = draftEditRound;
+      let localPick = draftEditPick;
+      return (
+        <td className="px-1.5 py-1 text-center whitespace-nowrap border-r border-gray-800" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="flex items-center gap-1 justify-center"
+            onBlur={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node))
+                commitDraftEdit(p.id, localTeam, localRound, localPick);
+            }}
+          >
+            <input
+              autoFocus
+              placeholder="TM"
+              maxLength={3}
+              className="w-9 px-1 py-0.5 bg-gray-800 border border-indigo-500 rounded text-white text-xs focus:outline-none text-center uppercase"
+              defaultValue={draftEditTeam}
+              onChange={(e) => { localTeam = e.target.value.toUpperCase(); setDraftEditTeam(localTeam); }}
+              onKeyDown={(e) => { if (e.key === "Enter") commitDraftEdit(p.id, localTeam, localRound, localPick); if (e.key === "Escape") setEditingDraftId(null); }}
+            />
+            <input
+              placeholder="Rd"
+              type="number" min={1} max={7}
+              className="w-7 px-0.5 py-0.5 bg-gray-800 border border-indigo-500 rounded text-white text-xs focus:outline-none text-center"
+              defaultValue={draftEditRound}
+              onChange={(e) => { localRound = e.target.value; setDraftEditRound(localRound); }}
+              onKeyDown={(e) => { if (e.key === "Enter") commitDraftEdit(p.id, localTeam, localRound, localPick); if (e.key === "Escape") setEditingDraftId(null); }}
+            />
+            <input
+              placeholder="#"
+              type="number" min={1}
+              className="w-9 px-0.5 py-0.5 bg-gray-800 border border-indigo-500 rounded text-white text-xs focus:outline-none text-center"
+              defaultValue={draftEditPick}
+              onChange={(e) => { localPick = e.target.value; setDraftEditPick(localPick); }}
+              onKeyDown={(e) => { if (e.key === "Enter") commitDraftEdit(p.id, localTeam, localRound, localPick); if (e.key === "Escape") setEditingDraftId(null); }}
+            />
+          </div>
+        </td>
+      );
+    }
+
+    return (
+      <td
+        className="px-1.5 py-1 text-center whitespace-nowrap text-xs border-r border-gray-800 cursor-pointer"
+        onClick={(e) => { e.stopPropagation(); openDraftEdit(p.id); }}
+      >
+        {hasInfo ? (
+          <span className="px-1.5 py-0.5 rounded bg-indigo-900/50 text-indigo-300 font-medium border border-indigo-700/50">
+            {[info.team || null, info.round != null ? `R${info.round}` : null, info.pick != null ? `#${info.pick}` : null].filter(Boolean).join(" · ")}
+          </span>
+        ) : (
+          <span className="text-gray-700 hover:text-gray-500 transition select-none">＋</span>
+        )}
+      </td>
+    );
   }
 
   async function handleDrop(targetId: string) {
@@ -314,6 +412,7 @@ export default function BigBoard({
             <th className="sticky left-0 z-20 bg-gray-950 w-6" />
             <th style={{ left: 24, minWidth: 44 }} className="sticky z-20 bg-gray-950" />
             <th style={{ left: 68, minWidth: 140 }} className="sticky z-20 bg-gray-950 border-r border-gray-800" />
+            <th colSpan={1} className="px-2 py-1 text-center text-indigo-900 font-medium border-r border-gray-800">NFL Draft</th>
             <th colSpan={1} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">Pos Rank</th>
             <th colSpan={6} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">Identity</th>
           </tr>
@@ -321,6 +420,7 @@ export default function BigBoard({
             <th className="sticky left-0 z-20 bg-gray-950 w-6 text-gray-700 text-center px-1">⠿</th>
             {stickyTh("OVR", "overall_rank", 24, 44)}
             {stickyTh("Name", "name", 68, 140)}
+            <th className="px-1.5 py-1.5 text-center text-indigo-700 whitespace-nowrap text-xs border-r border-gray-800 select-none">NFL Draft</th>
             {th("PosRk", "personal_rank", "border-l border-r border-gray-800 text-gray-400")}
             {th("Pos", "position", "border-l border-gray-800")}
             {th("School", "school")}
@@ -339,6 +439,7 @@ export default function BigBoard({
             return (
               <tr key={p.id} {...rowProps(p, i)}>
                 {stickyRowCells(p)}
+                {draftCell(p)}
                 <td className={`${tdBase} text-gray-500 border-l border-r border-gray-800`}>{p.personal_rank ? `#${p.personal_rank}` : "—"}</td>
                 <td className={`${tdBase} font-semibold border-l border-gray-800 ${POSITION_COLORS[p.position] ?? "text-gray-400"}`}>{p.position}</td>
                 <td className={`${tdBase} text-gray-400`}>{p.school}</td>
@@ -364,6 +465,7 @@ export default function BigBoard({
             <th className="sticky left-0 z-20 bg-gray-950 w-6" />
             <th style={{ left: 24, minWidth: 44 }} className="sticky z-20 bg-gray-950" />
             <th style={{ left: 68, minWidth: 140 }} className="sticky z-20 bg-gray-950 border-r border-gray-800" />
+            <th colSpan={1} className="px-2 py-1 text-center text-indigo-900 font-medium border-r border-gray-800">NFL Draft</th>
             <th colSpan={1} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">OVR</th>
             <th colSpan={6} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">Identity</th>
             <th colSpan={1} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">Scouting</th>
@@ -372,6 +474,7 @@ export default function BigBoard({
             <th className="sticky left-0 z-20 bg-gray-950 w-6 text-gray-700 text-center px-1">⠿</th>
             {stickyTh("POS", "personal_rank", 24, 44)}
             {stickyTh("Name", "name", 68, 140)}
+            <th className="px-1.5 py-1.5 text-center text-indigo-700 whitespace-nowrap text-xs border-r border-gray-800 select-none">NFL Draft</th>
             {th("OVR", "overall_rank", "border-l border-r border-gray-800 text-gray-400")}
             {th("School", "school", "border-l border-gray-800")}
             {th("Yr", "draft_class_year")}
@@ -388,6 +491,7 @@ export default function BigBoard({
             return (
               <tr key={p.id} {...rowProps(p, i)}>
                 {stickyRowCells(p)}
+                {draftCell(p)}
                 <td className={`${tdBase} text-gray-500 border-l border-r border-gray-800`}>{p.overall_rank ? `#${p.overall_rank}` : "—"}</td>
                 <td className={`${tdBase} text-gray-400 border-l border-gray-800`}>{p.school}</td>
                 <td className={`${tdBase} text-gray-400`}>{p.draft_class_year}</td>
@@ -413,6 +517,7 @@ export default function BigBoard({
             <th className="sticky left-0 z-20 bg-gray-950 w-6" />
             <th style={{ left: 24, minWidth: 44 }} className="sticky z-20 bg-gray-950" />
             <th style={{ left: 68, minWidth: 140 }} className="sticky z-20 bg-gray-950 border-r border-gray-800" />
+            <th colSpan={1} className="px-2 py-1 text-center text-indigo-900 font-medium border-r border-gray-800">NFL Draft</th>
             <th colSpan={1} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">OVR</th>
             <th colSpan={4} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">Identity</th>
             <th colSpan={2} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">Totals</th>
@@ -432,6 +537,7 @@ export default function BigBoard({
             <th className="sticky left-0 z-20 bg-gray-950 w-6 text-gray-700 text-center px-1">⠿</th>
             {stickyTh("POS", "personal_rank", 24, 44)}
             {stickyTh("Name", "name", 68, 140)}
+            <th className="px-1.5 py-1.5 text-center text-indigo-700 whitespace-nowrap text-xs border-r border-gray-800 select-none">NFL Draft</th>
             {th("OVR", "overall_rank", "border-l border-r border-gray-800 text-gray-400")}
             {th("School", "school", "border-l border-gray-800")}
             {th("Yr", "draft_class_year")}
@@ -503,6 +609,7 @@ export default function BigBoard({
             return (
               <tr key={p.id} {...rowProps(p, i)}>
                 {stickyRowCells(p)}
+                {draftCell(p)}
                 <td className={`${tdBase} text-gray-500 border-l border-r border-gray-800`}>{p.overall_rank ? `#${p.overall_rank}` : "—"}</td>
                 <td className={`${tdBase} text-gray-400 border-l border-gray-800`}>{p.school}</td>
                 <td className={`${tdBase} text-gray-400`}>{p.draft_class_year}</td>

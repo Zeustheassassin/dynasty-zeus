@@ -10,12 +10,15 @@ import type {
 import DraftHistory from "./draftHub/DraftHistory";
 import LiveDraftBoard from "./draftHub/LiveDraftBoard";
 import RookieBigBoard from "./draftHub/RookieBigBoard";
+import HistoricalBigBoards from "./draftHub/HistoricalBigBoards";
 
 
 // ── Props ──────────────────────────────────────────────────────────────────
+type DraftSection = "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL_BOARDS";
+
 interface DraftHubProps {
-  draftHubSection: "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES";
-  setDraftHubSection: (s: "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES") => void;
+  draftHubSection: DraftSection;
+  setDraftHubSection: (s: DraftSection) => void;
 
   myDraftSlotPicks: Record<string, string>;
   setMyDraftSlotPicks: React.Dispatch<React.SetStateAction<Record<string, string>>>;
@@ -68,12 +71,13 @@ function DraftHub({
 
   const myRosterId = rosters.find((r) => r.owner_id === user?.user_id)?.roster_id;
 
-  const TABS = [
-    { key: "BOARD",       label: "Live Draft Board" },
-    { key: "BIG_BOARD",   label: "Rookie Big Board" },
-    { key: "PICK_VALUES", label: "Pick Values" },
-    { key: "HISTORY",     label: "Draft History" },
-  ] as const;
+  const TABS: { key: DraftSection; label: string }[] = [
+    { key: "BOARD",            label: "Live Draft Board" },
+    { key: "BIG_BOARD",        label: "Rookie Big Board" },
+    { key: "PICK_VALUES",      label: "Pick Values" },
+    { key: "HISTORY",          label: "Draft History" },
+    { key: "HISTORICAL_BOARDS", label: "Historical Boards" },
+  ];
 
   return (
     <div className="p-4">
@@ -158,6 +162,13 @@ function DraftHub({
          ══════════════════════════════════════════════════════ */}
       {draftHubSection === "HISTORY" && (
         <DraftHistory leagues={leagues} user={user} />
+      )}
+
+      {/* ══════════════════════════════════════════════════════
+          HISTORICAL BIG BOARDS
+         ══════════════════════════════════════════════════════ */}
+      {draftHubSection === "HISTORICAL_BOARDS" && (
+        <HistoricalBigBoards />
       )}
     </div>
   );

@@ -13,6 +13,8 @@ import { getLocalStorageItem, setLocalStorageItem } from "@/lib/hooks/useLocalSt
 
 const log = logger("components/draftHub/RookieBigBoard");
 
+type NflDraftEntry = { team: string; round: number | null; pick: number | null };
+
 interface RookieBigBoardProps {
   rookies: RookieBoardPlayer[];
   rookieSearch: string;
@@ -38,6 +40,19 @@ export default function RookieBigBoard({
   const [playerNotes, setPlayerNotes]       = useState<Record<string, string>>({});
   const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null);
   const [posFilter, setPosFilter]           = useState<string | null>(null);
+
+  const [nflDraftInfo, setNflDraftInfo] = useState<Record<string, NflDraftEntry>>(() =>
+    getLocalStorageItem<Record<string, NflDraftEntry>>("nflDraftInfo", {})
+  );
+  const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
+  const [draftTeam, setDraftTeam]   = useState("");
+  const [draftRound, setDraftRound] = useState("");
+  const [draftPick, setDraftPick]   = useState("");
+
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [snapshotName, setSnapshotName]   = useState("");
+  const [saving, setSaving]               = useState(false);
+  const [saveSuccess, setSaveSuccess]     = useState(false);
 
   const fcVal = useCallback(
     (r: RookieBoardPlayer): number => fuzzyFcLookup(r.name, fcNameValues) || r.fcValue || 0,
@@ -147,8 +162,114 @@ export default function RookieBigBoard({
     setLocalStorageItem(`draftNotes_${ROOKIE_YEAR}`, next);
   };
 
+  async function saveSnapshot() {
+    if (!supabaseUser || !snapshotName.trim()) return;
+    setSaving(true);
+    const snapshotData = rookies.map((p, i) => {
+      const key = p.player_id || `name:${p.name}`;
+      return {
+        player_id: p.player_id ?? null,
+        name: p.name,
+        position: p.position,
+        team: p.team ?? null,
+        rank: i + 1,
+        tier: tierLabels[key] ?? null,
+        fc_value: fcVal(p),
+        nfl_draft: nflDraftInfo[key] ?? null,
+      };
+    });
+    const { error } = await supabase
+      .from("big_board_snapshots")
+      .upsert(
+        { user_id: supabaseUser.id, name: snapshotName.trim(), snapshot_data: snapshotData, saved_at: new Date().toISOString() },
+        { onConflict: "user_id,name" }
+      );
+    setSaving(false);
+    if (error) {
+      log.error("snapshot save failed", { err: error.message });
+    } else {
+      setSaveSuccess(true);
+      setTimeout(() => { setSaveSuccess(false); setShowSaveModal(false); setSnapshotName(""); }, 1000);
+    }
+  }
+
+  function openDraftEdit(id: string) {
+    const info = nflDraftInfo[id];
+    setDraftTeam(info?.team ?? "");
+    setDraftRound(info?.round != null ? String(info.round) : "");
+    setDraftPick(info?.pick != null ? String(info.pick) : "");
+    setEditingDraftId(id);
+  }
+
+  function commitDraftEdit(id: string, team: string, round: string, pick: string) {
+    const t  = team.trim().toUpperCase().slice(0, 3);
+    const rd = parseInt(round, 10);
+    const pk = parseInt(pick, 10);
+    const updated = { ...nflDraftInfo };
+    if (!t && isNaN(rd) && isNaN(pk)) {
+      delete updated[id];
+    } else {
+      updated[id] = { team: t, round: isNaN(rd) ? null : rd, pick: isNaN(pk) ? null : pk };
+    }
+    setNflDraftInfo(updated);
+    setLocalStorageItem("nflDraftInfo", updated);
+    setEditingDraftId(null);
+  }
+
   return (
     <div className="max-w-3xl mx-auto">
+
+      {/* Save Board modal */}
+      {showSaveModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => { if (!saving) setShowSaveModal(false); }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="save-board-title"
+            tabIndex={-1}
+            onKeyDown={(e) => { if (e.key === "Escape" && !saving) setShowSaveModal(false); }}
+            className="bg-gray-900 border border-gray-700 rounded-2xl p-5 w-full max-w-sm mx-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="save-board-title" className="text-white font-semibold text-sm mb-1">Save Big Board Snapshot</h2>
+            <p className="text-gray-500 text-xs mb-4">
+              Give this snapshot a name. Saving with the same name overwrites the previous version.
+            </p>
+            <input
+              autoFocus
+              type="text"
+              placeholder="e.g. 2026 Pre-Draft"
+              value={snapshotName}
+              onChange={(e) => setSnapshotName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") saveSnapshot(); }}
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:border-indigo-500 mb-4"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowSaveModal(false)}
+                disabled={saving}
+                className="px-4 py-1.5 text-sm text-gray-400 hover:text-white transition disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveSnapshot}
+                disabled={saving || !snapshotName.trim()}
+                className={`px-4 py-1.5 text-sm font-semibold rounded-lg transition disabled:opacity-50 ${
+                  saveSuccess
+                    ? "bg-green-600 text-white"
+                    : "bg-indigo-600 hover:bg-indigo-500 text-white"
+                }`}
+              >
+                {saveSuccess ? "Saved ✓" : saving ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Note popup overlay */}
       {expandedNoteId && (() => {
@@ -203,6 +324,14 @@ export default function RookieBigBoard({
         />
         {rookieSearch && (
           <span className="text-[11px] text-gray-500">Tiers hidden while searching</span>
+        )}
+        {supabaseUser && (
+          <button
+            onClick={() => setShowSaveModal(true)}
+            className="px-3 py-1.5 text-xs font-semibold bg-indigo-700 hover:bg-indigo-600 text-white rounded-lg transition shrink-0"
+          >
+            Save Board
+          </button>
         )}
       </div>
 
@@ -300,8 +429,8 @@ export default function RookieBigBoard({
                 )}
 
                 <div
-                  draggable
-                  onDragStart={() => setDragIndex(originalIndex)}
+                  draggable={editingDraftId !== tierKey}
+                  onDragStart={() => { if (editingDraftId !== tierKey) setDragIndex(originalIndex); }}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={() => {
                     if (dragIndex !== null) {
@@ -337,6 +466,68 @@ export default function RookieBigBoard({
                       </span>
                       {p.team && <span className="text-[10px] text-gray-500 shrink-0">{p.team}</span>}
                       {playerDynVal > 0 && <span className="text-[10px] text-gray-400 font-mono shrink-0">{playerDynVal.toLocaleString()}</span>}
+                      {/* NFL Draft tag */}
+                      {editingDraftId === tierKey ? (
+                        <div
+                          className="flex items-center gap-1"
+                          onBlur={(e) => {
+                            if (!e.currentTarget.contains(e.relatedTarget as Node))
+                              commitDraftEdit(tierKey, draftTeam, draftRound, draftPick);
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          onMouseDown={(e) => e.stopPropagation()}
+                        >
+                          <input
+                            autoFocus
+                            placeholder="TM"
+                            maxLength={3}
+                            className="w-9 px-1 py-0.5 bg-gray-900 border border-indigo-500 rounded text-white text-[10px] focus:outline-none text-center uppercase"
+                            value={draftTeam}
+                            onChange={(e) => setDraftTeam(e.target.value.toUpperCase())}
+                            onKeyDown={(e) => { if (e.key === "Enter") commitDraftEdit(tierKey, draftTeam, draftRound, draftPick); if (e.key === "Escape") setEditingDraftId(null); }}
+                          />
+                          <input
+                            placeholder="Rd"
+                            type="number" min={1} max={7}
+                            className="w-7 px-0.5 py-0.5 bg-gray-900 border border-indigo-500 rounded text-white text-[10px] focus:outline-none text-center"
+                            value={draftRound}
+                            onChange={(e) => setDraftRound(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter") commitDraftEdit(tierKey, draftTeam, draftRound, draftPick); if (e.key === "Escape") setEditingDraftId(null); }}
+                          />
+                          <input
+                            placeholder="#"
+                            type="number" min={1}
+                            className="w-9 px-0.5 py-0.5 bg-gray-900 border border-indigo-500 rounded text-white text-[10px] focus:outline-none text-center"
+                            value={draftPick}
+                            onChange={(e) => setDraftPick(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter") commitDraftEdit(tierKey, draftTeam, draftRound, draftPick); if (e.key === "Escape") setEditingDraftId(null); }}
+                          />
+                        </div>
+                      ) : (() => {
+                        const info = nflDraftInfo[tierKey];
+                        const hasInfo = info?.team || info?.round != null || info?.pick != null;
+                        const label = hasInfo
+                          ? [info.team || null, info.round != null ? `R${info.round}` : null, info.pick != null ? `#${info.pick}` : null].filter(Boolean).join(" · ")
+                          : null;
+                        return (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); openDraftEdit(tierKey); }}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            className="shrink-0"
+                            title={hasInfo ? "Edit NFL draft slot" : "Add NFL draft slot"}
+                          >
+                            {label ? (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-900/50 text-indigo-300 font-medium border border-indigo-700/50">
+                                {label}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded border border-dashed border-gray-600 text-gray-500 hover:border-indigo-500 hover:text-indigo-400 transition font-medium">
+                                + NFL
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })()}
                     </div>
                   </div>
 
