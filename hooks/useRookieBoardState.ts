@@ -168,12 +168,13 @@ export function useRookieBoardState(supabaseUser: { id: string } | null): UseRoo
 
       // 2. Try Supabase for saved order (if logged in) — isolated try/catch so a network
       //    error here doesn't abort the whole function and leave rookies state stale.
-      if (supabaseUser) {
+      const currentUser = supabaseUserRef.current;
+      if (currentUser) {
         try {
           const { data, error } = await supabase
             .from("rookie_board")
             .select("players")
-            .eq("user_id", supabaseUser.id)
+            .eq("user_id", currentUser.id)
             .eq("year", ROOKIE_BOARD_VERSION)
             .single();
           if (!error && data?.players && Array.isArray(data.players) && data.players.length > 0) {
@@ -228,8 +229,7 @@ export function useRookieBoardState(supabaseUser: { id: string } | null): UseRoo
 
     loadRookieBoard().catch(() => {});
     return () => { controller.abort(); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [supabaseUser?.id]); // intentional: use ID not object — prevents re-runs when auth refreshes recreate the user object
+  }, [supabaseUser?.id]);
 
   return {
     rookies,

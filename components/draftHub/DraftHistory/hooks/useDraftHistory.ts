@@ -113,8 +113,7 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
     };
 
     load();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [historyLoaded, leagues.length]);
+  }, [historyLoaded, leagues, players, calcFcValues]);
 
   // Auto-select the most recent year once history or compiled meta data loads
   useEffect(() => {

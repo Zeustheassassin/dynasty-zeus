@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef, type Dispatch, type SetStateAction } from "react";
+import { useState, useEffect, useRef, useCallback, type Dispatch, type SetStateAction } from "react";
 import { supabase } from "../lib/supabaseclient";
 import { logger } from "../lib/logger";
 import type { AlertsCenterItem, WatchlistEntry } from "../lib/types";
@@ -145,9 +145,9 @@ export function useAlerts({ supabaseUser, players }: UseAlertsOptions): UseAlert
           localStorage.setItem(dismissedAlertStorageKey, JSON.stringify(dismissed));
         }
       });
-  }, [supabaseUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [supabaseUser, watchlistStorageKey, alertStorageKey, dismissedAlertStorageKey]);
 
-  const mergeDashboardAlerts = (incoming: AlertsCenterItem[]) => {
+  const mergeDashboardAlerts = useCallback((incoming: AlertsCenterItem[]) => {
     if (!incoming.length) return;
     setDashboardAlerts((prev) => {
       const merged = new Map<string, AlertsCenterItem>();
@@ -163,7 +163,7 @@ export function useAlerts({ supabaseUser, players }: UseAlertsOptions): UseAlert
         .sort((a, b) => b.timestamp - a.timestamp)
         .slice(0, 80);
     });
-  };
+  }, []);
 
   const dismissAlert = (alertId: string) => {
     const nextDismissed = Array.from(new Set([...latestDismissedRef.current, alertId]));

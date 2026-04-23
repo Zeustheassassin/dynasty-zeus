@@ -117,7 +117,7 @@ export default function RookieBigBoard({
       } catch {}
     };
     load();
-  }, [supabaseUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [supabaseUser]);
 
   const syncTiersToSupabase = (tiers: Record<string, number>) => {
     if (!supabaseUser) return;

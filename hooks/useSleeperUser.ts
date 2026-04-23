@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, type Dispatch, type SetStateAction } from "react";
+import { useState, useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 import { CURRENT_YEAR } from "../lib/helpers";
 import type { SleeperUser, SleeperLeague } from "../lib/types";
 
@@ -50,6 +50,9 @@ export function useSleeperUser({ onLeaguesLoaded, onDisconnect }: UseSleeperUser
   const [connectError, setConnectError] = useState("");
   const [connectSuccess, setConnectSuccess] = useState("");
 
+  const onLeaguesLoadedRef = useRef(onLeaguesLoaded);
+  onLeaguesLoadedRef.current = onLeaguesLoaded;
+
   // Hydrate from localStorage on mount
   useEffect(() => {
     const controller = new AbortController();
@@ -71,7 +74,7 @@ export function useSleeperUser({ onLeaguesLoaded, onDisconnect }: UseSleeperUser
           if (signal.aborted) return;
           const filtered = Array.isArray(data) ? data.filter(isDynastyLeague) : [];
           setLeagues(filtered);
-          onLeaguesLoaded?.(filtered);
+          onLeaguesLoadedRef.current?.(filtered);
         })
         .catch(() => {
           if (signal.aborted) return;
@@ -82,7 +85,6 @@ export function useSleeperUser({ onLeaguesLoaded, onDisconnect }: UseSleeperUser
     } catch { /* ignore corrupt localStorage */ }
 
     return () => { controller.abort(); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const connectSleeper = async () => {

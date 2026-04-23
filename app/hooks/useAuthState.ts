@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../../lib/supabaseclient";
 import type { User as SupabaseUser } from "@supabase/auth-js";
 
@@ -24,24 +24,20 @@ export function useAuthState() {
     } catch {}
   }, []);
 
-  const refreshSupabaseUser = async () => {
-    const { data } = await supabase.auth.getUser();
-    setSupabaseUser(data.user);
-    if (!data.user) setNotes([]);
-  };
-
   useEffect(() => {
-    refreshSupabaseUser();
+    supabase.auth.getUser().then(({ data }) => {
+      setSupabaseUser(data.user);
+      if (!data.user) setNotes([]);
+    });
     const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
       // Use session directly — avoids a second async getUser() call that races with signOut state
       setSupabaseUser(session?.user ?? null);
       if (!session?.user) setNotes([]);
     });
     return () => subscription?.subscription?.unsubscribe?.();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const loadNotes = async () => {
+  const loadNotes = useCallback(async () => {
     if (!supabaseUser) { setNotes([]); return; }
     const { data, error } = await supabase
       .from("notes")
@@ -50,7 +46,7 @@ export function useAuthState() {
       .order("updated_at", { ascending: false });
     if (error) setSupabaseError(error.message);
     else setNotes(data ?? []);
-  };
+  }, [supabaseUser]);
 
   const signUp = async () => {
     setSupabaseError("");

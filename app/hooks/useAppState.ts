@@ -315,6 +315,10 @@ const alertBootstrapRef = useRef(false);
 const historicalSnapshotRef = useRef<HistoricalSnapshot | null>(null);
 const [historicalSnapshot, setHistoricalSnapshot] = useState<HistoricalSnapshot | null>(null);
 const latestAlertsRef = useRef<AlertsCenterItem[]>([]);
+// Refs for useCallback functions defined later in the file — avoids TDZ in dep arrays.
+const loadOwnerTendenciesRef = useRef<(() => Promise<void>) | null>(null);
+const loadRosterRef = useRef<((league: SleeperLeague) => Promise<void>) | null>(null);
+const loadLeaguemateTradeAlertsRef = useRef<(() => Promise<void>) | null>(null);
 
 useEffect(() => { latestAlertsRef.current = dashboardAlerts; }, [dashboardAlerts]);
 
@@ -418,8 +422,7 @@ useEffect(() => {
       }
     });
   return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadNotes not in useCallback; adding would re-run on every render
-}, [supabaseUser]);
+}, [supabaseUser, loadNotes]);
 
 const signOut = async () => {
   await supabase.auth.signOut();
@@ -666,9 +669,8 @@ useEffect(() => {
   if (mainTab === "LEAGUES" && leagueHubTab === "DRAFT_BOARD" && selectedLeague?.league_id) {
     refreshDraftBoard();
     // Load owner tendencies in the background — non-blocking
-    if (rosters.length) loadOwnerTendencies();
+    if (rosters.length) loadOwnerTendenciesRef.current?.();
   }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadOwnerTendencies in useCallback([rosters,user]) but defined later in file
 }, [mainTab, leagueHubTab, selectedLeague?.league_id, rosters.length, refreshDraftBoard]);
 
 // Stable counts for dep arrays — Object.keys() creates a new array on every render,
@@ -680,9 +682,8 @@ const playersCount = useMemo(() => Object.keys(players).length, [players]);
 // players must be loaded so player IDs in trade.adds can be resolved to full_name.
 useEffect(() => {
   if (!rosters.length || !usersCount || !user?.user_id || !playersCount) return;
-  loadLeaguemateTradeAlerts();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [rosters.length, usersCount, playersCount]);
+  loadLeaguemateTradeAlertsRef.current?.();
+}, [rosters.length, usersCount, user?.user_id, playersCount]);
 
 // Auto-load data needed by the player profile panel whenever it opens
 useEffect(() => {
@@ -713,6 +714,19 @@ useEffect(() => {
   loadNflState();
 }, [mainTab, loadNflState]);
 
+const loadGamedayMatchups = useCallback(async (leagueId: string, week: number) => {
+  if (!leagueId || !week) return;
+  setLoadingGamedayMatchups(true);
+  try {
+    const data = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/matchups/${week}`)
+      .then((r) => r.json())
+      .catch(() => []);
+    setGamedayMatchups(Array.isArray(data) ? data : []);
+  } finally {
+    setLoadingGamedayMatchups(false);
+  }
+}, []);
+
 useEffect(() => {
   const isRegularSeason = nflState?.season_type === "regular" && Number(nflState?.week || 0) > 0;
   const currentWeek = isRegularSeason ? Number(nflState?.week) : 0;
@@ -734,10 +748,7 @@ useEffect(() => {
   }
 
   loadGamedayMatchups(selectedLeague.league_id, currentWeek);
-  // projectionWeek/projectionLoaded omitted intentionally: adding them would create a reload loop.
-  // loadProjections/loadGamedayMatchups omitted: not in useCallback; nflState deps trigger this effect.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [mainTab, selectedLeague?.league_id, nflState?.week, nflState?.season_type]);
+}, [mainTab, selectedLeague?.league_id, nflState?.week, nflState?.season_type, projectionWeek, projectionLoaded, loadProjections, loadGamedayMatchups]);
 
 useEffect(() => {
   const leagueId = selectedLeague?.league_id;
@@ -1046,6 +1057,7 @@ const loadOwnerTendencies = useCallback(async () => {
 
   setOwnerDraftTendencies(tendencies);
 }, [rosters, user]);
+loadOwnerTendenciesRef.current = loadOwnerTendencies;
 
   // -------------------------
   // LOAD ALL LEAGUES FOR SHARES
@@ -1076,7 +1088,7 @@ const loadOwnerTendencies = useCallback(async () => {
           try {
             const parsedLeague = JSON.parse(savedLeague);
             const match = leagues.find((l) => l.league_id === parsedLeague.league_id);
-            if (match) loadRoster(match);
+            if (match) loadRosterRef.current?.(match);
           } catch { /* ignore corrupt localStorage */ }
         }
       } finally {
@@ -1085,7 +1097,6 @@ const loadOwnerTendencies = useCallback(async () => {
     };
 
     loadAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- loadRoster in useCallback([user,players]) but defined later in file
   }, [user, leagues]);
 
   // -------------------------
@@ -1268,6 +1279,7 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
   );
   setReadyLeagueId(league.league_id);
 }, [user, players]);
+loadRosterRef.current = loadRoster;
 
 const refreshFcTrends = async () => {
   setLoadingFcTrends(true);
@@ -1278,19 +1290,6 @@ const refreshFcTrends = async () => {
     log.error('refreshFcTrends failed', { err: String(err) });
   } finally {
     setLoadingFcTrends(false);
-  }
-};
-
-const loadGamedayMatchups = async (leagueId: string, week: number) => {
-  if (!leagueId || !week) return;
-  setLoadingGamedayMatchups(true);
-  try {
-    const data = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/matchups/${week}`)
-      .then((r) => r.json())
-      .catch(() => []);
-    setGamedayMatchups(Array.isArray(data) ? data : []);
-  } finally {
-    setLoadingGamedayMatchups(false);
   }
 };
 
@@ -1453,6 +1452,7 @@ const loadLeaguemateTradeAlerts = async () => {
     mergeDashboardAlerts(tradeAlerts);
   }
 };
+loadLeaguemateTradeAlertsRef.current = loadLeaguemateTradeAlerts;
 
 const savePlayerNote = useCallback(async (playerId: string, note: string) => {
   setPlayerNotes((prev) => {
@@ -3720,7 +3720,7 @@ const getTeamSummary = useCallback(() => {
   // Save simulation results to Supabase on demand and freeze a local snapshot for
   // pick valuations. The frozen snapshot (localStorage + state) is the source of truth
   // for pick values — it never drifts between sim runs.
-  const saveSimulationToSupabase = (leagueId: string, simRows: SimulationTeamRow[]) => {
+  const saveSimulationToSupabase = useCallback((leagueId: string, simRows: SimulationTeamRow[]) => {
     const now = new Date().toISOString();
     // Always update local state and localStorage — these are the source of truth
     // for pick valuations and must work even when Supabase auth is unavailable.
@@ -3770,7 +3770,7 @@ const getTeamSummary = useCallback(() => {
         .upsert(rows, { onConflict: "user_id,league_id,roster_id" })
         .then(() => {}, (err: unknown) => log.error("league_simulations upsert failed", { err: String(err) }));
     }
-  };
+  }, [supabaseUser]);
 
   // Queue state machine: when the front of the queue is ready (loadRoster finished),
   // save the sim, advance the queue, and start loading the next league.
@@ -3796,8 +3796,7 @@ const getTeamSummary = useCallback(() => {
       const nextLeague = leagues.find((l) => l.league_id === remaining[0]);
       if (nextLeague) loadRoster(nextLeague);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [simQueue, readyLeagueId, selectedLeagueSimulation, selectedLeague?.league_id]);
+  }, [simQueue, readyLeagueId, selectedLeagueSimulation, selectedLeague?.league_id, leagues, saveSimulationToSupabase, loadRoster]);
 
   const handleRunAllSims = () => {
     if (!leagues.length) return;
@@ -4244,8 +4243,7 @@ const getTeamSummary = useCallback(() => {
       }
     };
     run();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leagues.length, user?.user_id]);
+  }, [leagues, user?.user_id, nflState?.leg, nflState?.week]);
 
   useEffect(() => {
     if (!supabaseUser || !dashboardAlerts.length) return;
@@ -4516,7 +4514,6 @@ const getTeamSummary = useCallback(() => {
 
     mergeDashboardAlerts(incomingAlerts);
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mergeDashboardAlerts not in useCallback
   }, [
     dashboardOwnedPlayers,
     watchlistEntries,
@@ -4526,6 +4523,7 @@ const getTeamSummary = useCallback(() => {
     selectedLeagueMateProfilesView,
     alertSnapshotStorageKey,
     supabaseUser,
+    mergeDashboardAlerts,
   ]);
 
   useEffect(() => {
@@ -4562,8 +4560,7 @@ const getTeamSummary = useCallback(() => {
       });
 
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mergeDashboardAlerts not in useCallback
-  }, [dashboardOwnedPlayers, watchlistEntries, players]);
+  }, [dashboardOwnedPlayers, watchlistEntries, players, mergeDashboardAlerts]);
 
   // ── Bye week alerts ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -4601,8 +4598,7 @@ const getTeamSummary = useCallback(() => {
       });
 
     if (alerts.length) mergeDashboardAlerts(alerts);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nflState?.week, nflState?.season_type, dashboardOwnedPlayers, watchlistEntries, players]);
+  }, [nflState?.week, nflState?.season_type, dashboardOwnedPlayers, watchlistEntries, players, mergeDashboardAlerts]);
 
   // ── Available player alerts (watchlist player recently dropped) ──────────
   useEffect(() => {
@@ -4637,8 +4633,7 @@ const getTeamSummary = useCallback(() => {
       });
 
     if (alerts.length) mergeDashboardAlerts(alerts);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leagueTransactions, watchlistEntries]);
+  }, [leagueTransactions, watchlistEntries, players, mergeDashboardAlerts]);
 
   const visibleDashboardAlerts = useMemo(
     () =>
