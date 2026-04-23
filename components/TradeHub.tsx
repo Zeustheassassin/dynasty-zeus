@@ -26,28 +26,8 @@ interface TradeHubProps {
   allPicks: AugmentedPick[];
   calcOpponentRosterId: number | null;
   setCalcOpponentRosterId: (id: number | null) => void;
-  calcGive: string[];
-  setCalcGive: React.Dispatch<React.SetStateAction<string[]>>;
-  calcReceive: string[];
-  setCalcReceive: React.Dispatch<React.SetStateAction<string[]>>;
-  calcGivePicks: string[];
-  setCalcGivePicks: React.Dispatch<React.SetStateAction<string[]>>;
-  calcReceivePicks: string[];
-  setCalcReceivePicks: React.Dispatch<React.SetStateAction<string[]>>;
-  finderSeed: number;
-  setFinderSeed: React.Dispatch<React.SetStateAction<number>>;
-  finderPinnedPlayerId: string | null;
-  setFinderPinnedPlayerId: (id: string | null) => void;
-  finderTargetOppRosterId: number | null;
-  setFinderTargetOppRosterId: (id: number | null) => void;
-  finderTargetPlayerId: string | null;
-  setFinderTargetPlayerId: (id: string | null) => void;
   selectedLeagueDraftHasOccurred: boolean;
   loadingCalcValues: boolean;
-  calcSearchA: string;
-  setCalcSearchA: (s: string) => void;
-  calcSearchB: string;
-  setCalcSearchB: (s: string) => void;
   playerDispositions: Record<string, { sell: string; buy: string }>;
   leaguePlayerTags: Record<string, Record<string, "CORE" | "WANT_TO_TRADE">>;
   onToggleLeaguePlayerTag: (leagueId: string, playerId: string, forceTag?: "CORE" | "WANT_TO_TRADE") => void;
@@ -86,14 +66,8 @@ function TradeHub({
   tradeHubSection, setTradeHubSection,
   user, allPicks,
   calcOpponentRosterId, setCalcOpponentRosterId,
-  calcGive, setCalcGive, calcReceive, setCalcReceive,
-  calcGivePicks, setCalcGivePicks, calcReceivePicks, setCalcReceivePicks,
-  finderSeed, setFinderSeed,
-  finderPinnedPlayerId, setFinderPinnedPlayerId,
-  finderTargetOppRosterId, setFinderTargetOppRosterId,
-  finderTargetPlayerId, setFinderTargetPlayerId,
   selectedLeagueDraftHasOccurred,
-  loadingCalcValues, calcSearchA, setCalcSearchA, calcSearchB, setCalcSearchB,
+  loadingCalcValues,
   playerDispositions, leaguePlayerTags, onToggleLeaguePlayerTag, projectionData,
   leagueMateProfileByRosterId, selectedLeagueMateProfilesView,
   tradePartnerRankings,
@@ -115,6 +89,16 @@ function TradeHub({
   const players = usePlayers();
   const { selectedLeague, rosters, users } = useLeague();
   const { leagueAdjustedFcValues: calcFcValues } = useValues();
+  const [calcGive, setCalcGive] = useState<string[]>([]);
+  const [calcReceive, setCalcReceive] = useState<string[]>([]);
+  const [calcGivePicks, setCalcGivePicks] = useState<string[]>([]);
+  const [calcReceivePicks, setCalcReceivePicks] = useState<string[]>([]);
+  const [calcSearchA, setCalcSearchA] = useState("");
+  const [calcSearchB, setCalcSearchB] = useState("");
+  const [finderSeed, setFinderSeed] = useState(() => Math.random());
+  const [finderPinnedPlayerId, setFinderPinnedPlayerId] = useState<string | null>(null);
+  const [finderTargetOppRosterId, setFinderTargetOppRosterId] = useState<number | null>(null);
+  const [finderTargetPlayerId, setFinderTargetPlayerId] = useState<string | null>(null);
 
   const [sessionMarked, setSessionMarked] = useState<Set<string>>(new Set());
   const autoMarkedRef = useRef<Set<string>>(new Set());

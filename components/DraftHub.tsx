@@ -1,5 +1,5 @@
 "use client";
-import React from "react";
+import React, { useState } from "react";
 import { useLeague } from "../lib/LeagueContext";
 import { useValues } from "../lib/ValuesContext";
 import PickValuesTab from "./draft/PickValuesTab";
@@ -32,12 +32,6 @@ interface DraftHubProps {
   allPicks: AugmentedPick[];
 
   rookies: RookieBoardPlayer[];
-  rookieSearch: string;
-  setRookieSearch: (s: string) => void;
-  dragIndex: number | null;
-  setDragIndex: (i: number | null) => void;
-  tempRanks: Record<number, string>;
-  setTempRanks: React.Dispatch<React.SetStateAction<Record<number, string>>>;
 
   draftedPlayerIds: Set<string>;
   predictedDraftPicks: Record<string, PredictedPick>;
@@ -60,8 +54,7 @@ function DraftHub({
   draftSlotSearchQuery, setDraftSlotSearchQuery,
   user,
   draftSettings, draftPicks, draftOrder, allPicks,
-  rookies, rookieSearch, setRookieSearch,
-  dragIndex, setDragIndex, tempRanks, setTempRanks,
+  rookies,
   draftedPlayerIds, predictedDraftPicks, topAvailableRookies,
   refreshDraftBoard, loadDraftScout, movePlayer, handleRankChange,
   loadingDraftRefresh,
@@ -69,6 +62,9 @@ function DraftHub({
 }: DraftHubProps) {
   const { rosters } = useLeague();
   const { pickFcValues } = useValues();
+  const [rookieSearch, setRookieSearch] = useState("");
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [tempRanks, setTempRanks] = useState<Record<number, string>>({});
 
   const myRosterId = rosters.find((r) => r.owner_id === user?.user_id)?.roster_id;
 

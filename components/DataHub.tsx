@@ -1,5 +1,5 @@
 "use client";
-import React from "react";
+import React, { useState } from "react";
 import type {
   SleeperLeague, SleeperUser, AugmentedPick, ProjectionRow, LeagueMateStatEntry, HistoricalSnapshot,
 } from "../lib/types";
@@ -23,8 +23,6 @@ interface DataHubProps {
   shares: Record<string, ShareEntry>;
 
   // Dynasty/Redraft rankings
-  dynastyRankPos: string;
-  setDynastyRankPos: (pos: string) => void;
   loadingCalcValues: boolean;
   playerDispositions: Record<string, { sell: string; buy: string }>;
   savePlayerDisposition: (playerId: string, sell: string, buy: string) => void;
@@ -51,16 +49,6 @@ interface DataHubProps {
   // League mate stats tab
   leagues: SleeperLeague[];
   user: SleeperUser | null;
-  leagueMateStats: LeagueMateStatEntry[];
-  setLeagueMateStats: (stats: LeagueMateStatEntry[]) => void;
-  leagueMateStatsLoaded: boolean;
-  setLeagueMateStatsLoaded: (loaded: boolean) => void;
-  loadingLeagueMateStats: boolean;
-  setLoadingLeagueMateStats: (loading: boolean) => void;
-  leagueMateSearch: string;
-  setLeagueMateSearch: (s: string) => void;
-  leagueMateSort: "name" | "total" | "bestball" | "shared";
-  setLeagueMateSort: (sort: "name" | "total" | "bestball" | "shared") => void;
   // League mate exposure drill-down
   loadUserExposure: (userId: string) => void;
   selectedUserId: string | null;
@@ -76,7 +64,7 @@ interface DataHubProps {
 function DataHub({
   dataHubTab, setDataHubTab,
   shares,
-  dynastyRankPos, setDynastyRankPos, loadingCalcValues,
+  loadingCalcValues,
   playerDispositions, savePlayerDisposition, setPlayerProfileId,
   loadingRedraft,
   projectionData, setProjectionData, projectionPosFilter, setProjectionPosFilter,
@@ -84,12 +72,15 @@ function DataHub({
   projectionSeasonYear, projectionSourceStatus, loadingProjections, projectionUsesSeasonFallback,
   allPicks,
   leagues, user,
-  leagueMateStats, setLeagueMateStats, leagueMateStatsLoaded, setLeagueMateStatsLoaded,
-  loadingLeagueMateStats, setLoadingLeagueMateStats,
-  leagueMateSearch, setLeagueMateSearch, leagueMateSort, setLeagueMateSort,
   loadUserExposure, selectedUserId, externalShares, loadingShares,
   historicalSnapshot, onSaveSnapshot,
 }: DataHubProps) {
+  const [dynastyRankPos, setDynastyRankPos] = useState("ALL");
+  const [leagueMateStats, setLeagueMateStats] = useState<LeagueMateStatEntry[]>([]);
+  const [leagueMateStatsLoaded, setLeagueMateStatsLoaded] = useState(false);
+  const [loadingLeagueMateStats, setLoadingLeagueMateStats] = useState(false);
+  const [leagueMateSearch, setLeagueMateSearch] = useState("");
+  const [leagueMateSort, setLeagueMateSort] = useState<"name" | "total" | "bestball" | "shared">("total");
   return (
     <>
       {/* Sub-tab nav */}

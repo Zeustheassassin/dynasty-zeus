@@ -47,7 +47,7 @@ import type {
   SleeperPlayer, SleeperLeague, SleeperRoster, SleeperTradedPick,
   SleeperDraft, SleeperDraftPick, SleeperNFLState, SleeperTransaction, SleeperUser, GamedayMatchup, GamedayTeamView,
   CommittedSimsByLeague, CachedSimRow, SimRow, SleeperMatchup,
-  AugmentedPick, LeagueMateStatEntry,
+  AugmentedPick,
   HistoricalSnapshot, LeagueMateView, LeagueSimulation, SimulationTeamRow,
   RosterDirectionProfile, DynamicPickValue, RookieBoardPlayer, FcTrendEntry,
   GmBriefing,
@@ -138,7 +138,6 @@ const {
   tradeAttempts, tradeAttemptsLeagueId, loadingTradeAttempts, allTradeAttempts,
   loadTradeAttempts, markTradeAttempted, updateAttemptStatus, deleteAttempt,
 } = useTradeAttempts(supabaseUser);
-const [finderSeed, setFinderSeed] = useState(() => Math.random());
 const [leagueSimCache, setLeagueSimCache] = useState<Record<string, Record<number, CachedSimRow>>>({});
 const [readyLeagueId, setReadyLeagueId] = useState<string | null>(null);
 const [simQueue, setSimQueue] = useState<string[]>([]);
@@ -178,12 +177,6 @@ const [activityTransactions, setActivityTransactions] = useState<AnnotatedTransa
 const [loadingActivity, setLoadingActivity] = useState(false);
 const [leagueWeeklyMatchups, setLeagueWeeklyMatchups] = useState<Record<string, { week: number; matchups: SleeperMatchup[] }[]>>({});
 const [loadingLeagueWeeklyMatchups, setLoadingLeagueWeeklyMatchups] = useState(false);
-const [leagueMateStats, setLeagueMateStats] = useState<LeagueMateStatEntry[]>([]);
-const [leagueMateStatsLoaded, setLeagueMateStatsLoaded] = useState(false);
-const [loadingLeagueMateStats, setLoadingLeagueMateStats] = useState(false);
-const [leagueMateSort, setLeagueMateSort] = useState<"name" | "total" | "bestball" | "shared">("total");
-const [leagueMateSearch, setLeagueMateSearch] = useState("");
-const [dynastyRankPos, setDynastyRankPos] = useState("ALL");
 const {
   calcFcValues,
   loadingCalcValues,
@@ -210,10 +203,6 @@ const nflStatsSeason = nflState?.season_type === "regular" ? (nflState?.season ?
 const nflStatsWeek   = nflState?.season_type === "regular" ? (nflState?.display_week ?? nflState?.week ?? null) : null;
 const { playerStats } = usePlayerStats(nflStatsSeason, nflStatsWeek);
 
-const [finderPinnedPlayerId, setFinderPinnedPlayerId] = useState<string | null>(null);
-const [finderTargetOppRosterId, setFinderTargetOppRosterId] = useState<number | null>(null);
-const [finderTargetPlayerId, setFinderTargetPlayerId] = useState<string | null>(null);
-
 const [ignoredOwnerIds, setIgnoredOwnerIds] = useState<string[]>(() => {
   try { return JSON.parse(localStorage.getItem("ignoredOwnerIds") || "[]"); } catch { return []; }
 });
@@ -228,12 +217,6 @@ const [pickFcValues, setPickFcValues] = useState<Record<string, number>>({});
 const [fcTrendData, setFcTrendData] = useState<FcTrendEntry[]>([]);
 const [loadingFcTrends, setLoadingFcTrends] = useState(false);
 const [calcOpponentRosterId, setCalcOpponentRosterId] = useState<number | null>(null);
-const [calcGive, setCalcGive] = useState<string[]>([]);
-const [calcReceive, setCalcReceive] = useState<string[]>([]);
-const [calcGivePicks, setCalcGivePicks] = useState<string[]>([]);
-const [calcReceivePicks, setCalcReceivePicks] = useState<string[]>([]);
-const [calcSearchA, setCalcSearchA] = useState("");
-const [calcSearchB, setCalcSearchB] = useState("");
 const [users, setUsers] = useState<Record<string, string>>({});
 const [standings, setStandings] = useState<StandingRow[]>([]);
 
@@ -318,9 +301,6 @@ const {
 // ── ROOKIE BOARD ───────────────────────────────────────────────
 const {
   rookies, setRookies,
-  dragIndex, setDragIndex,
-  rookieSearch, setRookieSearch,
-  tempRanks, setTempRanks,
   fcNameValues,
   handleRankChange,
 } = useRookieBoardState(supabaseUser);
@@ -4846,8 +4826,6 @@ const myPlayerSet = new Set<string>(roster?.players || []);
         sharePosition={sharePosition}
         setSharePosition={setSharePosition}
         setDataHubTab={setDataHubTab}
-        dynastyRankPos={dynastyRankPos}
-        setDynastyRankPos={setDynastyRankPos}
         playerDispositions={playerDispositions}
         savePlayerDisposition={savePlayerDisposition}
         loadingRedraft={loadingRedraft}
@@ -4860,16 +4838,6 @@ const myPlayerSet = new Set<string>(roster?.players || []);
         projectionSourceStatus={projectionSourceStatus}
         loadingProjections={loadingProjections}
         projectionUsesSeasonFallback={projectionUsesSeasonFallback}
-        leagueMateStats={leagueMateStats}
-        setLeagueMateStats={setLeagueMateStats}
-        leagueMateStatsLoaded={leagueMateStatsLoaded}
-        setLeagueMateStatsLoaded={setLeagueMateStatsLoaded}
-        loadingLeagueMateStats={loadingLeagueMateStats}
-        setLoadingLeagueMateStats={setLoadingLeagueMateStats}
-        leagueMateSearch={leagueMateSearch}
-        setLeagueMateSearch={setLeagueMateSearch}
-        leagueMateSort={leagueMateSort}
-        setLeagueMateSort={setLeagueMateSort}
         selectedUserId={selectedUserId}
         setSelectedUserId={setSelectedUserId}
         externalShares={externalShares}
@@ -4888,38 +4856,12 @@ const myPlayerSet = new Set<string>(roster?.players || []);
         draftPicks={draftPicks}
         draftOrder={draftOrder}
         predictedDraftPicks={predictedDraftPicks}
-        rookieSearch={rookieSearch}
-        setRookieSearch={setRookieSearch}
-        dragIndex={dragIndex}
-        setDragIndex={setDragIndex}
-        tempRanks={tempRanks}
-        setTempRanks={setTempRanks}
         topAvailableRookies={topAvailableRookies}
         movePlayer={movePlayer}
         handleRankChange={handleRankChange}
         tradeHubSection={tradeHubSection}
         calcOpponentRosterId={calcOpponentRosterId}
-        calcGive={calcGive}
-        setCalcGive={setCalcGive}
-        calcReceive={calcReceive}
-        setCalcReceive={setCalcReceive}
-        calcGivePicks={calcGivePicks}
-        setCalcGivePicks={setCalcGivePicks}
-        calcReceivePicks={calcReceivePicks}
-        setCalcReceivePicks={setCalcReceivePicks}
-        finderSeed={finderSeed}
-        setFinderSeed={setFinderSeed}
-        finderPinnedPlayerId={finderPinnedPlayerId}
-        setFinderPinnedPlayerId={setFinderPinnedPlayerId}
-        finderTargetOppRosterId={finderTargetOppRosterId}
-        setFinderTargetOppRosterId={setFinderTargetOppRosterId}
-        finderTargetPlayerId={finderTargetPlayerId}
-        setFinderTargetPlayerId={setFinderTargetPlayerId}
         selectedLeagueDraftHasOccurred={selectedLeagueDraftHasOccurred}
-        calcSearchA={calcSearchA}
-        setCalcSearchA={setCalcSearchA}
-        calcSearchB={calcSearchB}
-        setCalcSearchB={setCalcSearchB}
         leaguePlayerTags={leaguePlayerTags}
         handleToggleLeaguePlayerTag={handleToggleLeaguePlayerTag}
         leagueMateProfileByRosterId={leagueMateProfileByRosterId}

@@ -11,7 +11,7 @@ import { ROOKIE_YEAR } from "../../hooks/useRookieBoardState";
 import type {
   SleeperPlayer, SleeperLeague, SleeperRoster, SleeperTradedPick,
   SleeperNFLState, SleeperUser, SleeperDraft, SleeperDraftPick,
-  AugmentedPick, LeagueOverviewEntry, LeagueMateStatEntry, HistoricalSnapshot,
+  AugmentedPick, LeagueOverviewEntry, HistoricalSnapshot,
   LeagueMateView, CommittedSimsByLeague, CachedSimRow, RookieBoardPlayer,
   GamedayMatchup, WatchlistEntry, GmBriefing,
   TradeAttempt, TradeAttemptStatus, FcTrendEntry, PredictedPick,
@@ -154,8 +154,6 @@ interface HubRouterProps {
 
   // Data Hub
   setDataHubTab: (tab: DataHubTabId) => void;
-  dynastyRankPos: string;
-  setDynastyRankPos: (pos: string) => void;
   playerDispositions: Record<string, { sell: string; buy: string }>;
   savePlayerDisposition: (playerId: string, sell: string, buy: string) => void;
   loadingRedraft: boolean;
@@ -168,16 +166,6 @@ interface HubRouterProps {
   projectionSourceStatus: Record<string, boolean>;
   loadingProjections: boolean;
   projectionUsesSeasonFallback: boolean;
-  leagueMateStats: LeagueMateStatEntry[];
-  setLeagueMateStats: (stats: LeagueMateStatEntry[]) => void;
-  leagueMateStatsLoaded: boolean;
-  setLeagueMateStatsLoaded: (loaded: boolean) => void;
-  loadingLeagueMateStats: boolean;
-  setLoadingLeagueMateStats: (loading: boolean) => void;
-  leagueMateSearch: string;
-  setLeagueMateSearch: (s: string) => void;
-  leagueMateSort: "name" | "total" | "bestball" | "shared";
-  setLeagueMateSort: (sort: "name" | "total" | "bestball" | "shared") => void;
   selectedUserId: string | null;
   setSelectedUserId: (id: string | null) => void;
   externalShares: ExposureData | null;
@@ -198,12 +186,6 @@ interface HubRouterProps {
   draftPicks: SleeperDraftPick[];
   draftOrder: Record<string, number>;
   predictedDraftPicks: Record<string, PredictedPick>;
-  rookieSearch: string;
-  setRookieSearch: (s: string) => void;
-  dragIndex: number | null;
-  setDragIndex: (i: number | null) => void;
-  tempRanks: Record<number, string>;
-  setTempRanks: React.Dispatch<React.SetStateAction<Record<number, string>>>;
   topAvailableRookies: RookieBoardPlayer[];
   movePlayer: (fromIndex: number, toIndex: number) => void;
   handleRankChange: (currentIndex: number, newRank: string) => void;
@@ -211,27 +193,7 @@ interface HubRouterProps {
   // Trade Hub
   tradeHubSection: "CALCULATOR" | "FINDER" | "RECOMMENDATIONS" | "TRADE_LOG" | "ATTEMPTS" | "MARKET";
   calcOpponentRosterId: number | null;
-  calcGive: string[];
-  setCalcGive: React.Dispatch<React.SetStateAction<string[]>>;
-  calcReceive: string[];
-  setCalcReceive: React.Dispatch<React.SetStateAction<string[]>>;
-  calcGivePicks: string[];
-  setCalcGivePicks: React.Dispatch<React.SetStateAction<string[]>>;
-  calcReceivePicks: string[];
-  setCalcReceivePicks: React.Dispatch<React.SetStateAction<string[]>>;
-  finderSeed: number;
-  setFinderSeed: React.Dispatch<React.SetStateAction<number>>;
-  finderPinnedPlayerId: string | null;
-  setFinderPinnedPlayerId: (id: string | null) => void;
-  finderTargetOppRosterId: number | null;
-  setFinderTargetOppRosterId: (id: number | null) => void;
-  finderTargetPlayerId: string | null;
-  setFinderTargetPlayerId: (id: string | null) => void;
   selectedLeagueDraftHasOccurred: boolean;
-  calcSearchA: string;
-  setCalcSearchA: (s: string) => void;
-  calcSearchB: string;
-  setCalcSearchB: (s: string) => void;
   leaguePlayerTags: Record<string, Record<string, "CORE" | "WANT_TO_TRADE">>;
   handleToggleLeaguePlayerTag: (leagueId: string, playerId: string, forceTag?: "CORE" | "WANT_TO_TRADE") => void;
   leagueMateProfileByRosterId: Map<number, LeagueMateView>;
@@ -313,26 +275,17 @@ export function HubRouter({
   setSelectedGamedayMatchupId, loadGamedayMatchups,
   setProjectionWeek, setProjectionLoaded, loadProjections,
   shares, totalLeagues, loadingAllLeagueData, shareSearch, setShareSearch, sharePosition, setSharePosition,
-  setDataHubTab, dynastyRankPos, setDynastyRankPos,
+  setDataHubTab,
   playerDispositions, savePlayerDisposition, loadingRedraft,
   projectionData, setProjectionData, projectionPosFilter, setProjectionPosFilter,
   projectionWeek, projectionSeasonYear, projectionSourceStatus, loadingProjections, projectionUsesSeasonFallback,
-  leagueMateStats, setLeagueMateStats, leagueMateStatsLoaded, setLeagueMateStatsLoaded,
-  loadingLeagueMateStats, setLoadingLeagueMateStats,
-  leagueMateSearch, setLeagueMateSearch, leagueMateSort, setLeagueMateSort,
   selectedUserId, setSelectedUserId, externalShares, loadingShares, historicalSnapshot, saveSnapshotNow,
   draftHubSection, setDraftHubSection, myDraftSlotPicks, setMyDraftSlotPicks,
   draftSlotEditing, setDraftSlotEditing, draftSlotSearchQuery, setDraftSlotSearchQuery,
   draftSettings, draftPicks, draftOrder, predictedDraftPicks,
-  rookieSearch, setRookieSearch, dragIndex, setDragIndex, tempRanks, setTempRanks,
   topAvailableRookies, movePlayer, handleRankChange,
   tradeHubSection, calcOpponentRosterId,
-  calcGive, setCalcGive, calcReceive, setCalcReceive,
-  calcGivePicks, setCalcGivePicks, calcReceivePicks, setCalcReceivePicks,
-  finderSeed, setFinderSeed, finderPinnedPlayerId, setFinderPinnedPlayerId,
-  finderTargetOppRosterId, setFinderTargetOppRosterId,
-  finderTargetPlayerId, setFinderTargetPlayerId,
-  selectedLeagueDraftHasOccurred, calcSearchA, setCalcSearchA, calcSearchB, setCalcSearchB,
+  selectedLeagueDraftHasOccurred,
   leaguePlayerTags, handleToggleLeaguePlayerTag, leagueMateProfileByRosterId,
   tradeRecommendationCards, tradePartnerRankings,
   tradeHubData, loadingTradeHub, tradeHubUserId, setTradeHubUserId, setTradeHubData,
@@ -517,8 +470,6 @@ export function HubRouter({
             dataHubTab={dataHubTab}
             setDataHubTab={setDataHubTab}
             shares={shares}
-            dynastyRankPos={dynastyRankPos}
-            setDynastyRankPos={setDynastyRankPos}
             loadingCalcValues={loadingCalcValues}
             playerDispositions={playerDispositions}
             savePlayerDisposition={savePlayerDisposition}
@@ -539,16 +490,6 @@ export function HubRouter({
             allPicks={allPicks}
             leagues={leagues}
             user={user}
-            leagueMateStats={leagueMateStats}
-            setLeagueMateStats={setLeagueMateStats}
-            leagueMateStatsLoaded={leagueMateStatsLoaded}
-            setLeagueMateStatsLoaded={setLeagueMateStatsLoaded}
-            loadingLeagueMateStats={loadingLeagueMateStats}
-            setLoadingLeagueMateStats={setLoadingLeagueMateStats}
-            leagueMateSearch={leagueMateSearch}
-            setLeagueMateSearch={setLeagueMateSearch}
-            leagueMateSort={leagueMateSort}
-            setLeagueMateSort={setLeagueMateSort}
             loadUserExposure={loadUserExposure}
             selectedUserId={selectedUserId}
             externalShares={externalShares}
@@ -575,12 +516,6 @@ export function HubRouter({
     draftOrder={draftOrder}
     allPicks={allPicks}
     rookies={rookies}
-    rookieSearch={rookieSearch}
-    setRookieSearch={setRookieSearch}
-    dragIndex={dragIndex}
-    setDragIndex={setDragIndex}
-    tempRanks={tempRanks}
-    setTempRanks={setTempRanks}
     draftedPlayerIds={draftedPlayerIds}
     predictedDraftPicks={predictedDraftPicks}
     topAvailableRookies={topAvailableRookies}
@@ -606,28 +541,8 @@ export function HubRouter({
     allPicks={allPicks}
     calcOpponentRosterId={calcOpponentRosterId}
     setCalcOpponentRosterId={setCalcOpponentRosterId}
-    calcGive={calcGive}
-    setCalcGive={setCalcGive}
-    calcReceive={calcReceive}
-    setCalcReceive={setCalcReceive}
-    calcGivePicks={calcGivePicks}
-    setCalcGivePicks={setCalcGivePicks}
-    calcReceivePicks={calcReceivePicks}
-    setCalcReceivePicks={setCalcReceivePicks}
-    finderSeed={finderSeed}
-    setFinderSeed={setFinderSeed}
-    finderPinnedPlayerId={finderPinnedPlayerId}
-    setFinderPinnedPlayerId={setFinderPinnedPlayerId}
-    finderTargetOppRosterId={finderTargetOppRosterId}
-    setFinderTargetOppRosterId={setFinderTargetOppRosterId}
-    finderTargetPlayerId={finderTargetPlayerId}
-    setFinderTargetPlayerId={setFinderTargetPlayerId}
     selectedLeagueDraftHasOccurred={selectedLeagueDraftHasOccurred}
     loadingCalcValues={loadingCalcValues}
-    calcSearchA={calcSearchA}
-    setCalcSearchA={setCalcSearchA}
-    calcSearchB={calcSearchB}
-    setCalcSearchB={setCalcSearchB}
     playerDispositions={playerDispositions}
     leaguePlayerTags={leaguePlayerTags}
     onToggleLeaguePlayerTag={handleToggleLeaguePlayerTag}

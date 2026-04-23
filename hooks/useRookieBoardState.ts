@@ -19,21 +19,12 @@ const ROOKIE_BOARD_ADP_URL =
 export interface UseRookieBoardStateReturn {
   rookies: RookieBoardPlayer[];
   setRookies: Dispatch<SetStateAction<RookieBoardPlayer[]>>;
-  dragIndex: number | null;
-  setDragIndex: Dispatch<SetStateAction<number | null>>;
-  rookieSearch: string;
-  setRookieSearch: Dispatch<SetStateAction<string>>;
-  tempRanks: { [key: number]: string };
-  setTempRanks: Dispatch<SetStateAction<{ [key: number]: string }>>;
   fcNameValues: Record<string, number>;
   handleRankChange: (currentIndex: number, newRank: string) => void;
 }
 
 export function useRookieBoardState(supabaseUser: { id: string } | null): UseRookieBoardStateReturn {
   const [rookies, setRookies] = useState<RookieBoardPlayer[]>([]);
-  const [dragIndex, setDragIndex] = useState<number | null>(null);
-  const [rookieSearch, setRookieSearch] = useState("");
-  const [tempRanks, setTempRanks] = useState<{ [key: number]: string }>({});
   const [fcNameValues, setFcNameValues] = useState<Record<string, number>>({});
 
   // Stable ref so the save-effect can read the current user without declaring
@@ -243,12 +234,6 @@ export function useRookieBoardState(supabaseUser: { id: string } | null): UseRoo
   return {
     rookies,
     setRookies,
-    dragIndex,
-    setDragIndex,
-    rookieSearch,
-    setRookieSearch,
-    tempRanks,
-    setTempRanks,
     fcNameValues,
     handleRankChange,
   };
