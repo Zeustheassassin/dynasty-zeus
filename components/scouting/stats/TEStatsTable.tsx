@@ -30,7 +30,7 @@ const COLS: ColDef[] = [
   { key: "routes",  label: "Routes", group: "Identity", fmt: "count", width: 58 },
   { key: "blocks",  label: "Blocks", group: "Identity", fmt: "count", width: 58 },
   // Advanced
-  { key: "te_sae",     label: "TE-SAE",  group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 70, tooltip: "Open Rate Above Expected — vs league avg adjusted for positioning & coverage mix" },
+  { key: "te_sae",     label: "TE-SAE",  group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 70, tooltip: "Open Rate Above Expected — vs league avg adjusted for positioning & coverage mix", leagueOverride: 0 },
   { key: "open_pct",   label: "Open%",   group: "Advanced", fmt: "pct",       colorDir: 1,  width: 62 },
   { key: "tgt_pct",    label: "Tgt%",    group: "Advanced", fmt: "pct",       colorDir: 1,  width: 58 },
   { key: "catch_pct",  label: "Catch%",  group: "Advanced", fmt: "pct",       colorDir: 1,  width: 62 },
@@ -153,7 +153,7 @@ export default function TEStatsTable({ prospects, games, tePlays, loading, draft
 
         // TE-SAE
         let te_sae: number | null = null;
-        if (ratedRoutes.length >= 20) {
+        if (ratedRoutes.length >= 15) {
           const actual = ratedRoutes.filter((pl) => pl.was_open).length / ratedRoutes.length;
           let expPos = 0, posW = 0;
           for (const pos of POSITIONINGS) {
@@ -167,10 +167,12 @@ export default function TEStatsTable({ prospects, games, tePlays, loading, draft
             const lg = lgCvg[cvg];
             if (cN > 0 && lg && lg.n > 0) { expCvg += (cN / ratedRoutes.length) * (lg.open / lg.n); cvgW += cN / ratedRoutes.length; }
           }
+          const normPos = posW > 0 ? expPos / posW : null;
+          const normCvg = cvgW > 0 ? expCvg / cvgW : null;
           let combined: number | null = null;
-          if (posW > 0 && cvgW > 0) combined = (expPos + expCvg) / 2;
-          else if (posW > 0) combined = expPos;
-          else if (cvgW > 0) combined = expCvg;
+          if (normPos != null && normCvg != null) combined = (normPos + normCvg) / 2;
+          else if (normPos != null) combined = normPos;
+          else if (normCvg != null) combined = normCvg;
           if (combined != null) te_sae = parseFloat(((actual - combined) * 100).toFixed(2));
         }
 

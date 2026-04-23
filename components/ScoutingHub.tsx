@@ -225,7 +225,7 @@ export default function ScoutingHub() {
         pct_backfield: snapPct(bfN),
         pct_on_line: snapPct(pPlays.filter((pl) => pl.on_line).length),
         adj_success_above_exp: (() => {
-          if (!has_charted_open_data || totalRoutes === 0) return null;
+          if (!has_charted_open_data || totalRoutes < 15) return null;
           const actualOpen = routePlays.filter((pl) => pl.was_open).length / totalRoutes;
           let expRoute = 0, routeW = 0;
           for (const rt of ROUTE_TYPES) {
@@ -245,10 +245,12 @@ export default function ScoutingHub() {
               cvgW += cvgCount / totalRoutes;
             }
           }
+          const normRoute = routeW > 0 ? expRoute / routeW : null;
+          const normCvg = cvgW > 0 ? expCvg / cvgW : null;
           let combined: number | null = null;
-          if (routeW > 0 && cvgW > 0) combined = (expRoute + expCvg) / 2;
-          else if (routeW > 0) combined = expRoute;
-          else if (cvgW > 0) combined = expCvg;
+          if (normRoute != null && normCvg != null) combined = (normRoute + normCvg) / 2;
+          else if (normRoute != null) combined = normRoute;
+          else if (normCvg != null) combined = normCvg;
           return combined != null ? parseFloat(((actualOpen - combined) * 100).toFixed(2)) : null;
         })(),
         avg_external_rank:

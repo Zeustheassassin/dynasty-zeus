@@ -23,7 +23,7 @@ const COLS: ColDef[] = [
   { key: "snaps",  label: "Snaps",   group: "Identity", fmt: "count", width: 52 },
   { key: "routes", label: "Routes",  group: "Identity", fmt: "count", width: 58 },
   // Advanced
-  { key: "sae",      label: "SAE",    group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 62, tooltip: "Success (Open) Rate Above Expected — vs league avg adjusted for route mix & coverage" },
+  { key: "sae",      label: "SAE",    group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 62, tooltip: "Success (Open) Rate Above Expected — vs league avg adjusted for route mix & coverage", leagueOverride: 0 },
   { key: "open_pct", label: "Open%",  group: "Advanced", fmt: "pct",       colorDir: 1,  width: 62, tooltip: "% of routes where player was open" },
   { key: "tgt_pct",  label: "Tgt%",   group: "Advanced", fmt: "pct",       colorDir: 1,  width: 58, tooltip: "Targets per route run" },
   { key: "catch_pct",label: "Catch%", group: "Advanced", fmt: "pct",       colorDir: 1,  width: 62, tooltip: "Catches per target" },

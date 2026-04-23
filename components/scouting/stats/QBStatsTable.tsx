@@ -27,7 +27,7 @@ const COLS: ColDef[] = [
   { key: "snaps",   label: "Snaps",   group: "Identity", fmt: "count", width: 52 },
   { key: "passes",  label: "Pass",    group: "Identity", fmt: "count", width: 50 },
   // Advanced
-  { key: "aae",        label: "AAE",      group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 62, tooltip: "Accuracy Above Expected — on-target% vs league avg adjusted for depth zone & coverage mix" },
+  { key: "aae",        label: "AAE",      group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 62, tooltip: "Accuracy Above Expected — on-target% vs league avg adjusted for depth zone & coverage mix", leagueOverride: 0 },
   { key: "on_tgt_pct", label: "OnTgt%",   group: "Advanced", fmt: "pct",       colorDir: 1,  width: 66, tooltip: "% of pass attempts graded on-target (accuracy rated)" },
   { key: "pass_pct",   label: "Pass%",    group: "Advanced", fmt: "pct",       colorDir: 1,  width: 58, tooltip: "% of snaps that are pass plays" },
   { key: "run_pct",    label: "Run%",     group: "Advanced", fmt: "pct",       width: 54 },
@@ -129,7 +129,7 @@ export default function QBStatsTable({ prospects, games, qbPlays, loading, draft
 
         // AAE
         let aae: number | null = null;
-        if (ratedPasses.length >= 20) {
+        if (ratedPasses.length >= 15) {
           const actual = ratedPasses.filter((pl) => pl.accuracy === "on_target").length / ratedPasses.length;
           let expDepth = 0, dW = 0;
           for (const dz of DEPTH_ZONES) {
@@ -143,10 +143,12 @@ export default function QBStatsTable({ prospects, games, qbPlays, loading, draft
             const lg = lgCvg[cvg];
             if (cN > 0 && lg.n > 0) { expCvg += (cN / ratedPasses.length) * (lg.ot / lg.n); cW += cN / ratedPasses.length; }
           }
+          const normDepth = dW > 0 ? expDepth / dW : null;
+          const normCvg = cW > 0 ? expCvg / cW : null;
           let combined: number | null = null;
-          if (dW > 0 && cW > 0) combined = (expDepth + expCvg) / 2;
-          else if (dW > 0) combined = expDepth;
-          else if (cW > 0) combined = expCvg;
+          if (normDepth != null && normCvg != null) combined = (normDepth + normCvg) / 2;
+          else if (normDepth != null) combined = normDepth;
+          else if (normCvg != null) combined = normCvg;
           if (combined != null) aae = parseFloat(((actual - combined) * 100).toFixed(2));
         }
 

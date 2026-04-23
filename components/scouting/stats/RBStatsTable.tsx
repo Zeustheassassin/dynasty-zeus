@@ -23,7 +23,7 @@ const COLS: ColDef[] = [
   { key: "snaps",   label: "Snaps",  group: "Identity", fmt: "count", width: 52 },
   { key: "runs",    label: "Runs",   group: "Identity", fmt: "count", width: 48 },
   // Advanced
-  { key: "srae",         label: "SRAE",     group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 66, tooltip: "Success Rate Above Expected — vs league avg adjusted for formation and box mix" },
+  { key: "srae",         label: "SRAE",     group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 66, tooltip: "Success Rate Above Expected — vs league avg adjusted for formation and box mix", leagueOverride: 0 },
   { key: "succ_pct",     label: "Succ%",    group: "Advanced", fmt: "pct",       colorDir: 1,  width: 60, tooltip: "Success rate on all rushing attempts" },
   { key: "explosive_pct",label: "Expl%",    group: "Advanced", fmt: "pct",       colorDir: 1,  width: 58, tooltip: "Explosive play rate (run_type flagged explosive)" },
   { key: "stuff_pct",    label: "Stuff%",   group: "Advanced", fmt: "pct",       colorDir: -1, width: 56, tooltip: "Run stuff rate (stopped at or behind LOS)" },
@@ -132,7 +132,7 @@ export default function RBStatsTable({ prospects, games, rbPlays, loading, draft
 
         // SRAE
         let srae: number | null = null;
-        if (knownRuns.length >= 20) {
+        if (knownRuns.length >= 15) {
           const actual = knownRuns.filter((pl) => pl.success).length / knownRuns.length;
           let expFm = 0, fmW = 0;
           for (const fm of FORMATIONS) {
@@ -145,10 +145,12 @@ export default function RBStatsTable({ prospects, games, rbPlays, loading, draft
           let expBox = 0, boxW = 0;
           if (loadedN > 0 && lgBox.loaded.n > 0) { expBox += (loadedN / knownRuns.length) * (lgBox.loaded.s / lgBox.loaded.n); boxW += loadedN / knownRuns.length; }
           if (unloadedN > 0 && lgBox.unloaded.n > 0) { expBox += (unloadedN / knownRuns.length) * (lgBox.unloaded.s / lgBox.unloaded.n); boxW += unloadedN / knownRuns.length; }
+          const normFm = fmW > 0 ? expFm / fmW : null;
+          const normBox = boxW > 0 ? expBox / boxW : null;
           let combined: number | null = null;
-          if (fmW > 0 && boxW > 0) combined = (expFm + expBox) / 2;
-          else if (fmW > 0) combined = expFm;
-          else if (boxW > 0) combined = expBox;
+          if (normFm != null && normBox != null) combined = (normFm + normBox) / 2;
+          else if (normFm != null) combined = normFm;
+          else if (normBox != null) combined = normBox;
           if (combined != null) srae = parseFloat(((actual - combined) * 100).toFixed(2));
         }
 

@@ -17,6 +17,8 @@ export interface ColDef {
   /** 1 = higher is better, -1 = lower is better, 0/undefined = no color */
   colorDir?: 1 | -1;
   tooltip?: string;
+  /** Fixed value to show in the League footer row instead of the computed mean/total */
+  leagueOverride?: number;
 }
 
 interface Props {
@@ -135,6 +137,7 @@ export default function StatsTableShell({
     for (const c of cols) {
       if (c.fmt === "yr" || c.fmt === "name" || c.sticky) { result[c.key] = null; continue; }
       const vals = rows.map((r) => r[c.key]).filter((v): v is number => typeof v === "number" && !isNaN(v));
+      if (c.leagueOverride !== undefined) { result[c.key] = c.leagueOverride; continue; }
       if (vals.length === 0) { result[c.key] = null; continue; }
       if (c.fmt === "count") {
         // Raw count columns: show total
