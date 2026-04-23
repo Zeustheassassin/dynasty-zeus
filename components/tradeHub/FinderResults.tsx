@@ -143,9 +143,9 @@ export default function FinderResults({
           {suppressedCount} recently-offered trade{suppressedCount > 1 ? "s" : ""} hidden (28-day window).
         </p>
       )}
-      {visibleTrades.map(({ trade }, idx) => (
+      {visibleTrades.map(({ trade }) => (
         <TradeCard
-          key={idx}
+          key={buildTradeFingerprint(leagueId, trade.oppRosterId, [...trade.give.map((p) => p.player_id), ...trade.givePicks.map((p) => finderPickKey(p))], [...trade.receive.map((p) => p.player_id), ...trade.receivePicks.map((p) => finderPickKey(p))])}
           trade={trade}
           leagueId={leagueId}
           myRoster={myRoster}

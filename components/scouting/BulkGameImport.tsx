@@ -231,7 +231,7 @@ export default function BulkGameImport({ gameLabel, onImport, onCancel }: Props)
               </thead>
               <tbody className="divide-y divide-gray-900">
                 {plays.map((pl, i) => (
-                  <tr key={i} className={pl.valid ? "bg-gray-950" : "bg-red-950/30"}>
+                  <tr key={pl.raw} className={pl.valid ? "bg-gray-950" : "bg-red-950/30"}>
                     <td className="px-2 py-1 text-gray-600">{i + 1}</td>
                     <td className="px-2 py-1">
                       {pl.no_route_run
