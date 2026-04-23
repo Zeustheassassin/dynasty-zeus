@@ -535,6 +535,65 @@ useEffect(() => {
   return () => controller.abort();
 }, []);
 
+const nflStateRef = useRef(nflState);
+useEffect(() => { nflStateRef.current = nflState; }, [nflState]);
+
+const loadNflState = useCallback(async () => {
+  if (nflStateRef.current) return;
+  try {
+    const data = await fetch('/api/nfl-state').then(r => r.json());
+    setNflState(data);
+  } catch (err) {
+    log.error('loadNflState failed', { err: String(err) });
+  }
+}, []);
+
+const loadActivity = useCallback(async (leagueId: string) => {
+  if (!leagueId) return;
+  setLoadingActivity(true);
+  try {
+    const weeks = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
+    const results = await Promise.all(
+      weeks.map(w =>
+        fetch(`https://api.sleeper.app/v1/league/${leagueId}/transactions/${w}`)
+          .then(r => r.json())
+          .catch(() => [])
+      )
+    );
+    const all = results.flat().filter((t) => t && t.status === "complete");
+    all.sort((a, b) => (b.updated || b.created || 0) - (a.updated || a.created || 0));
+    setActivityTransactions(all.slice(0, 150) as AnnotatedTransaction[]);
+  } catch (err) {
+    log.error('loadActivity failed', { err: String(err) });
+  } finally { setLoadingActivity(false); }
+}, []);
+
+const refreshDraftBoard = useCallback(async () => {
+  if (!selectedLeagueRef.current) return;
+  setLoadingDraftRefresh(true);
+  try {
+    const draftsRes = await fetch(
+      `https://api.sleeper.app/v1/league/${selectedLeagueRef.current.league_id}/drafts`
+    );
+    const drafts = await draftsRes.json();
+    const currentDraft = drafts[0];
+    if (!currentDraft) return;
+    setDraftId(currentDraft.draft_id);
+    setDraftOrder(currentDraft.draft_order || currentDraft.slot_to_roster_id || {});
+    setDraftSettings(currentDraft); // full object — consistent with useLeagues.ts
+    setSelectedLeagueDraftHasOccurred(currentDraft.status !== "pre_draft");
+    const picksRes = await fetch(
+      `https://api.sleeper.app/v1/draft/${currentDraft.draft_id}/picks`
+    );
+    const picks = await picksRes.json();
+    setDraftPicks(picks);
+  } catch (err) {
+    log.warn("draft refresh failed", { err: String(err) });
+  } finally {
+    setLoadingDraftRefresh(false);
+  }
+}, []);
+
 // Load league-specific FC values and redraft values as soon as Trade Hub is opened.
 // redraftValues powers the redraft-rank half of the direction bucket — if it's empty
 // when the direction memo fires it produces a garbage bucket (usually "Purgatory").
@@ -543,8 +602,7 @@ useEffect(() => {
     loadCalcValues(selectedLeague.league_id);
     loadRedraftValues();
   }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadCalcValues/loadRedraftValues not in useCallback
-}, [mainTab, selectedLeague?.league_id]);
+}, [mainTab, selectedLeague?.league_id, loadCalcValues, loadRedraftValues]);
 
 // Also reload if the user switches sub-tabs within Trade Hub (redundant but keeps the guard intact)
 useEffect(() => {
@@ -555,22 +613,19 @@ useEffect(() => {
   if (tradeHubSection === "ATTEMPTS" && selectedLeague?.league_id && supabaseUser && tradeAttemptsLeagueId !== selectedLeague.league_id) {
     loadTradeAttempts(selectedLeague.league_id);
   }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadCalcValues/loadTradeAttempts not in useCallback
-}, [tradeHubSection, selectedLeague?.league_id, supabaseUser, tradeAttemptsLeagueId]);
+}, [tradeHubSection, selectedLeague?.league_id, supabaseUser, tradeAttemptsLeagueId, loadCalcValues, loadTradeAttempts]);
 
 useEffect(() => {
   if (mainTab === "DATA_HUB" && dataHubTab === "RANKINGS" && selectedLeague?.league_id) {
     loadCalcValues(selectedLeague.league_id);
   }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadCalcValues not in useCallback
-}, [mainTab, dataHubTab, selectedLeague?.league_id]);
+}, [mainTab, dataHubTab, selectedLeague?.league_id, loadCalcValues]);
 
 useEffect(() => {
   if (mainTab === "DATA_HUB" && dataHubTab === "RANKINGS") {
     loadRedraftValues();
   }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadRedraftValues not in useCallback
-}, [mainTab, dataHubTab]);
+}, [mainTab, dataHubTab, loadRedraftValues]);
 
 useEffect(() => {
   if (mainTab === "LEAGUES" && leagueHubTab === "OVERVIEW" && !leagueOverviewLoaded) {
@@ -584,31 +639,28 @@ useEffect(() => {
     loadRedraftValues();
   }
   // leagueOverviewLoaded guards against duplicate calls; leagues.length triggers when leagues first load
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [mainTab, leagueHubTab, leagueOverviewLoaded, leagues.length]);
+}, [mainTab, leagueHubTab, leagueOverviewLoaded, leagues.length, loadLeagueOverview, loadNflState, loadRedraftValues]);
 
 useEffect(() => {
   if (mainTab === "LEAGUES" && leagueHubTab === "STARTERS") {
     loadNflState();
     if (selectedLeague?.league_id) loadCalcValues(selectedLeague.league_id);
   }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadNflState/loadCalcValues not in useCallback
-}, [mainTab, leagueHubTab, selectedLeague?.league_id]);
+}, [mainTab, leagueHubTab, selectedLeague?.league_id, loadCalcValues, loadNflState]);
 
 useEffect(() => {
   if (mainTab === "LEAGUES" && leagueHubTab === "POWER_RANKINGS" && selectedLeague?.league_id) {
     loadCalcValues(selectedLeague.league_id);
     loadRedraftValues();
   }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadCalcValues/loadRedraftValues not in useCallback
-}, [mainTab, leagueHubTab, selectedLeague?.league_id]);
+}, [mainTab, leagueHubTab, selectedLeague?.league_id, loadCalcValues, loadRedraftValues]);
 
 useEffect(() => {
   if (mainTab === "LEAGUES" && leagueHubTab === "ACTIVITY" && selectedLeague?.league_id) {
     setActivityTransactions([]);
     loadActivity(selectedLeague.league_id);
   }
-}, [mainTab, leagueHubTab, selectedLeague?.league_id]);
+}, [mainTab, leagueHubTab, selectedLeague?.league_id, loadActivity]);
 
 useEffect(() => {
   if (mainTab === "LEAGUES" && leagueHubTab === "DRAFT_BOARD" && selectedLeague?.league_id) {
@@ -616,8 +668,8 @@ useEffect(() => {
     // Load owner tendencies in the background — non-blocking
     if (rosters.length) loadOwnerTendencies();
   }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- refreshDraftBoard/loadOwnerTendencies not in useCallback
-}, [mainTab, leagueHubTab, selectedLeague?.league_id, rosters.length]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadOwnerTendencies in useCallback([rosters,user]) but defined later in file
+}, [mainTab, leagueHubTab, selectedLeague?.league_id, rosters.length, refreshDraftBoard]);
 
 // Stable counts for dep arrays — Object.keys() creates a new array on every render,
 // which defeats useMemo/useEffect deps. These are plain numbers and safe to compare.
@@ -637,8 +689,7 @@ useEffect(() => {
   if (!playerProfileId) return;
   if (Object.keys(redraftValues).length === 0) loadRedraftValues();
   if (!leagueOverviewLoaded && leagues.length > 0 && user) loadLeagueOverview();
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadRedraftValues/loadLeagueOverview not in useCallback
-}, [playerProfileId, leagues.length, user, leagueOverviewLoaded, redraftValues]);
+}, [playerProfileId, leagues.length, user, leagueOverviewLoaded, redraftValues, loadRedraftValues, loadLeagueOverview]);
 
 useEffect(() => {
   if (mainTab === "LEAGUES" && (leagueHubTab === "SIMULATOR" || leagueHubTab === "OVERVIEW")) {
@@ -654,14 +705,13 @@ useEffect(() => {
       loadProjections(simulatorProjectionWeek === 0 ? "season" : simulatorProjectionWeek);
     }
   }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadNflState/loadProjections/loadRedraftValues not in useCallback; projectionWeek/projectionLoaded guards prevent loops
-}, [mainTab, leagueHubTab, selectedLeague?.league_id, nflState?.week, nflState?.season_type, projectionWeek, projectionLoaded]);
+  // projectionWeek/projectionLoaded are in deps and set inside this effect; the conditional guards prevent loops
+}, [mainTab, leagueHubTab, selectedLeague?.league_id, nflState?.week, nflState?.season_type, projectionWeek, projectionLoaded, loadRedraftValues, loadProjections, loadNflState]);
 
 useEffect(() => {
   if (mainTab !== "GAMEDAY_HUB") return;
   loadNflState();
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadNflState not in useCallback
-}, [mainTab]);
+}, [mainTab, loadNflState]);
 
 useEffect(() => {
   const isRegularSeason = nflState?.season_type === "regular" && Number(nflState?.week || 0) > 0;
@@ -860,47 +910,20 @@ useEffect(() => {
   if (mainTab === "DATA_HUB" && dataHubTab === "PROJECTIONS" && !projectionLoaded) {
     loadProjections(projectionWeek === 0 ? 'season' : projectionWeek);
   }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadProjections not in useCallback
-}, [mainTab, dataHubTab, projectionLoaded, projectionWeek]);
+}, [mainTab, dataHubTab, projectionLoaded, projectionWeek, loadProjections]);
 
 // Rookie board save + load effects live in useRookieBoardState (extracted hook).
-const refreshDraftBoard = async () => {
-  if (!selectedLeague) return;
-  setLoadingDraftRefresh(true);
-  try {
-    const draftsRes = await fetch(
-      `https://api.sleeper.app/v1/league/${selectedLeague.league_id}/drafts`
-    );
-    const drafts = await draftsRes.json();
-    const currentDraft = drafts[0];
-    if (!currentDraft) return;
-    setDraftId(currentDraft.draft_id);
-    setDraftOrder(currentDraft.draft_order || currentDraft.slot_to_roster_id || {});
-    setDraftSettings(currentDraft); // full object — consistent with useLeagues.ts
-    setSelectedLeagueDraftHasOccurred(currentDraft.status !== "pre_draft");
-    const picksRes = await fetch(
-      `https://api.sleeper.app/v1/draft/${currentDraft.draft_id}/picks`
-    );
-    const picks = await picksRes.json();
-    setDraftPicks(picks);
-  } catch (err) {
-    log.warn("draft refresh failed", { err: String(err) });
-  } finally {
-    setLoadingDraftRefresh(false);
-  }
-};
 
 useEffect(() => {
   if (!selectedLeague || mainTab !== "DRAFT" || draftHubSection !== "BOARD") return;
   refreshDraftBoard();
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- refreshDraftBoard not in useCallback
-}, [selectedLeague, mainTab, draftHubSection]);
+}, [selectedLeague, mainTab, draftHubSection, refreshDraftBoard]);
 
 // Load historical rookie draft tendencies for every owner in the current league.
 // Uses the PREVIOUS year's completed rookie drafts (≤5 rounds) so data is available
 // Prefers current ROOKIE_YEAR completed drafts; falls back to prior year if none exist yet.
 // Automatically uses the right year once current-year drafts start completing.
-const loadOwnerTendencies = async () => {
+const loadOwnerTendencies = useCallback(async () => {
   if (!rosters.length) return;
   const PREV_YEAR = String(Number(ROOKIE_YEAR) - 1);
   const ownerUserIds: string[] = rosters
@@ -1022,7 +1045,7 @@ const loadOwnerTendencies = async () => {
   }
 
   setOwnerDraftTendencies(tendencies);
-};
+}, [rosters, user]);
 
   // -------------------------
   // LOAD ALL LEAGUES FOR SHARES
@@ -1062,7 +1085,7 @@ const loadOwnerTendencies = async () => {
     };
 
     loadAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- loadRoster not in useCallback
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- loadRoster in useCallback([user,players]) but defined later in file
   }, [user, leagues]);
 
   // -------------------------
@@ -1258,16 +1281,6 @@ const refreshFcTrends = async () => {
   }
 };
 
-const loadNflState = async () => {
-  if (nflState) return;
-  try {
-    const data = await fetch('/api/nfl-state').then(r => r.json());
-    setNflState(data);
-  } catch (err) {
-    log.error('loadNflState failed', { err: String(err) });
-  }
-};
-
 const loadGamedayMatchups = async (leagueId: string, week: number) => {
   if (!leagueId || !week) return;
   setLoadingGamedayMatchups(true);
@@ -1441,27 +1454,6 @@ const loadLeaguemateTradeAlerts = async () => {
   }
 };
 
-const loadActivity = async (leagueId: string) => {
-  if (!leagueId) return;
-  setLoadingActivity(true);
-  try {
-    // Fetch the last 6 weeks of transactions in parallel
-    const weeks = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
-    const results = await Promise.all(
-      weeks.map(w =>
-        fetch(`https://api.sleeper.app/v1/league/${leagueId}/transactions/${w}`)
-          .then(r => r.json())
-          .catch(() => [])
-      )
-    );
-    const all = results.flat().filter((t) => t && t.status === "complete");
-    all.sort((a, b) => (b.updated || b.created || 0) - (a.updated || a.created || 0));
-    setActivityTransactions(all.slice(0, 150) as AnnotatedTransaction[]);
-  } catch (err) {
-    log.error('loadActivity failed', { err: String(err) });
-  } finally { setLoadingActivity(false); }
-};
-
 const savePlayerNote = useCallback(async (playerId: string, note: string) => {
   setPlayerNotes((prev) => {
     const updated = { ...prev, [playerId]: note };
@@ -1562,7 +1554,7 @@ const handleToggleLeaguePlayerTag = useCallback((
 
 
 
-const getTeamSummary = () => {
+const getTeamSummary = useCallback(() => {
   if (!roster || !players) return null;
 
   const summary: Record<string, number> = {
@@ -1594,10 +1586,9 @@ const getTeamSummary = () => {
   });
 
   return { summary, pickSummary };
-};
+}, [roster, players, picks]);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- getTeamSummary not in useCallback; roster/players/picks cover its deps
-  const teamSummary = useMemo(() => getTeamSummary(), [roster, players, picks]);
+  const teamSummary = useMemo(() => getTeamSummary(), [getTeamSummary]);
   const gamedayWeek = useMemo(() => {
     const rawWeek = Number(nflState?.week || 0);
     return nflState?.season_type === "regular" && rawWeek > 0 ? rawWeek : 0;

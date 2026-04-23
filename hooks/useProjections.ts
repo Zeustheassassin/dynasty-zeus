@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef, type Dispatch, type SetStateAction } from "react";
+import { useState, useRef, useCallback, type Dispatch, type SetStateAction } from "react";
 import { normalizeProjName, getProjectionKickoffAt } from "../lib/helpers";
 import { computeLeagueFpts, DEFAULT_SCORING } from "../lib/helpers/scoring";
 import type { SleeperPlayer, ProjectionRow } from "../lib/types";
@@ -66,7 +66,7 @@ export function useProjections(
   // the older result is discarded so it can never overwrite fresher data.
   const requestIdRef = useRef(0);
 
-  const loadProjections = async (week: number | "season", extraSources: string[] = []) => {
+  const loadProjections = useCallback(async (week: number | "season", extraSources: string[] = []) => {
     const requestId = ++requestIdRef.current;
     setLoadingProjections(true);
     const statusMap: Record<string, boolean> = {};
@@ -291,7 +291,7 @@ export function useProjections(
     } finally {
       if (requestId === requestIdRef.current) setLoadingProjections(false);
     }
-  };
+  }, [players, leagueScoringSettings]);
 
   return {
     projectionData,
