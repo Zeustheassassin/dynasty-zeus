@@ -19,7 +19,7 @@ interface PickValuesTabProps {
   user: SleeperUser | null;
 }
 
-export default function PickValuesTab({ allPicks, leagues, user }: PickValuesTabProps) {
+function PickValuesTab({ allPicks, leagues, user }: PickValuesTabProps) {
   const { selectedLeague, rosters, users } = useLeague();
   const { selectedLeagueDynamicPickValues } = useValues();
 
@@ -248,3 +248,4 @@ export default function PickValuesTab({ allPicks, leagues, user }: PickValuesTab
   );
 }
 
+export default React.memo(PickValuesTab);

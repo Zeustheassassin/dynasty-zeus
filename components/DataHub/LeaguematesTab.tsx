@@ -26,7 +26,7 @@ interface LeaguematesTabProps {
   user: SleeperUser | null;
 }
 
-export default function LeaguematesTab({
+function LeaguematesTab({
   leagueMateStats, setLeagueMateStats,
   leagueMateStatsLoaded, setLeagueMateStatsLoaded,
   loadingLeagueMateStats, setLoadingLeagueMateStats,
@@ -233,3 +233,5 @@ export default function LeaguematesTab({
     </div>
   );
 }
+
+export default React.memo(LeaguematesTab);

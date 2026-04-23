@@ -19,7 +19,7 @@ interface RankingsTabProps {
   historicalSnapshot: HistoricalSnapshot | null;
 }
 
-export default function RankingsTab({
+function RankingsTab({
   dynastyRankPos, setDynastyRankPos,
   loadingCalcValues, loadingRedraft,
   playerDispositions, savePlayerDisposition, setPlayerProfileId,
@@ -210,3 +210,5 @@ export default function RankingsTab({
     </>
   );
 }
+
+export default React.memo(RankingsTab);

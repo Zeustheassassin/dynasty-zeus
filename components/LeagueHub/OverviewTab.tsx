@@ -33,7 +33,7 @@ interface OverviewTabProps {
   handleRunAllSims: () => void;
 }
 
-export default function OverviewTab({
+function OverviewTab({
   leagues,
   user,
   leagueOverviewData,
@@ -263,3 +263,5 @@ export default function OverviewTab({
     </div>
   );
 }
+
+export default React.memo(OverviewTab);

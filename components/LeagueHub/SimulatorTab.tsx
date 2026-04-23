@@ -11,7 +11,7 @@ interface SimulatorTabProps {
   onSaveSim: (leagueId: string, rows: SimulationTeamRow[]) => void;
 }
 
-export default function SimulatorTab({
+function SimulatorTab({
   user,
   loadingLeagueWeeklyMatchups,
   onSaveSim,
@@ -157,3 +157,5 @@ export default function SimulatorTab({
     </div>
   );
 }
+
+export default React.memo(SimulatorTab);

@@ -69,7 +69,7 @@ interface PowerRankingsTabProps {
   setPlayerProfileId: (id: string | null) => void;
 }
 
-export default function PowerRankingsTab({
+function PowerRankingsTab({
   user,
   allPicks,
   loadingCalcValues,
@@ -308,3 +308,5 @@ export default function PowerRankingsTab({
     </>
   );
 }
+
+export default React.memo(PowerRankingsTab);

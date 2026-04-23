@@ -1,4 +1,5 @@
 "use client";
+import { memo } from "react";
 import type { InjuryReportPlayer } from "./alertsPageHelpers";
 import { POS_COLOR, injuryStatusStyle } from "./alertsPageHelpers";
 
@@ -9,7 +10,7 @@ type InjuryTabProps = {
   setExpandedInjuryId: (id: string | null) => void;
 };
 
-export default function InjuryTab({ injuryReportPlayers, currentNFLWeek, expandedInjuryId, setExpandedInjuryId }: InjuryTabProps) {
+function InjuryTab({ injuryReportPlayers, currentNFLWeek, expandedInjuryId, setExpandedInjuryId }: InjuryTabProps) {
   return (
     <div>
       {injuryReportPlayers.length === 0 ? (
@@ -135,3 +136,5 @@ export default function InjuryTab({ injuryReportPlayers, currentNFLWeek, expande
     </div>
   );
 }
+
+export default memo(InjuryTab);

@@ -1,4 +1,5 @@
 "use client";
+import { memo } from "react";
 import type { NewsItem } from "./alertsPageHelpers";
 import { relTime } from "./alertsPageHelpers";
 
@@ -7,7 +8,7 @@ type NewsTabProps = {
   loadingNews: boolean;
 };
 
-export default function NewsTab({ newsItems, loadingNews }: NewsTabProps) {
+function NewsTab({ newsItems, loadingNews }: NewsTabProps) {
   return (
     <div>
       {loadingNews ? (
@@ -64,3 +65,5 @@ export default function NewsTab({ newsItems, loadingNews }: NewsTabProps) {
     </div>
   );
 }
+
+export default memo(NewsTab);

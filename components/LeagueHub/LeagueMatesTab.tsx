@@ -17,7 +17,7 @@ interface LeagueMatesTabProps {
   setTradeHubSection: (section: "CALCULATOR" | "FINDER" | "RECOMMENDATIONS") => void;
 }
 
-export default function LeagueMatesTab({
+function LeagueMatesTab({
   selectedLeagueMateProfilesView,
   loadingLeagueMateIntel,
   loadingCrossLeagueMateIntel,
@@ -219,3 +219,5 @@ export default function LeagueMatesTab({
     </div>
   );
 }
+
+export default React.memo(LeagueMatesTab);

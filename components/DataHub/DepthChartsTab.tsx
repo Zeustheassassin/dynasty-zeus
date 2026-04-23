@@ -6,7 +6,7 @@ import { useValues } from "../../lib/ValuesContext";
 import type { SleeperPlayer } from "../../lib/types";
 import { injuryBadge, ageColor } from "./dataHubHelpers";
 
-export default function DepthChartsTab() {
+function DepthChartsTab() {
   const players = usePlayers();
   const { rosters } = useLeague();
   const { leagueAdjustedFcValues: calcFcValues } = useValues();
@@ -202,3 +202,5 @@ export default function DepthChartsTab() {
     </div>
   );
 }
+
+export default React.memo(DepthChartsTab);

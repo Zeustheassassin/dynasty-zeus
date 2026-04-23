@@ -1,4 +1,5 @@
 "use client";
+import { memo } from "react";
 import type { BeatItem } from "./alertsPageHelpers";
 import { relTime } from "./alertsPageHelpers";
 
@@ -7,7 +8,7 @@ type WireTabProps = {
   loadingWire: boolean;
 };
 
-export default function WireTab({ wireItems, loadingWire }: WireTabProps) {
+function WireTab({ wireItems, loadingWire }: WireTabProps) {
   return (
     <div>
       <p className="text-[11px] text-slate-500 mb-3">
@@ -64,3 +65,5 @@ export default function WireTab({ wireItems, loadingWire }: WireTabProps) {
     </div>
   );
 }
+
+export default memo(WireTab);

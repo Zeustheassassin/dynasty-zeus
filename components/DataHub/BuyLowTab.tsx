@@ -10,7 +10,7 @@ interface BuyLowTabProps {
   setPlayerProfileId: (id: string | null) => void;
 }
 
-export default function BuyLowTab({ projectionData, setPlayerProfileId }: BuyLowTabProps) {
+function BuyLowTab({ projectionData, setPlayerProfileId }: BuyLowTabProps) {
   const players = usePlayers();
   const { leagueAdjustedFcValues: calcFcValues, leagueAdjustedRedraftValues: redraftValues } = useValues();
 
@@ -241,3 +241,5 @@ export default function BuyLowTab({ projectionData, setPlayerProfileId }: BuyLow
     </>
   );
 }
+
+export default React.memo(BuyLowTab);

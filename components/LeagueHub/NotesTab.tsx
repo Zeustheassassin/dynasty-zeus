@@ -11,7 +11,7 @@ interface NotesTabProps {
   setSelectedLeague: (league: SleeperLeague | null) => void;
 }
 
-export default function NotesTab({
+function NotesTab({
   leagues,
   leagueNotes,
   saveLeagueNote,
@@ -51,3 +51,5 @@ export default function NotesTab({
     </div>
   );
 }
+
+export default React.memo(NotesTab);

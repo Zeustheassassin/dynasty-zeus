@@ -1,4 +1,5 @@
 "use client";
+import { memo } from "react";
 import type { GmBriefing } from "../../lib/types";
 
 type BriefingTabProps = {
@@ -7,7 +8,7 @@ type BriefingTabProps = {
   loadingLeagueOverview?: boolean;
 };
 
-export default function BriefingTab({ rosterBriefings, onRefreshLeagueData, loadingLeagueOverview }: BriefingTabProps) {
+function BriefingTab({ rosterBriefings, onRefreshLeagueData, loadingLeagueOverview }: BriefingTabProps) {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
@@ -129,3 +130,5 @@ export default function BriefingTab({ rosterBriefings, onRefreshLeagueData, load
     </div>
   );
 }
+
+export default memo(BriefingTab);

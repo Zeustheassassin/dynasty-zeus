@@ -37,7 +37,7 @@ interface DraftBoardTabProps {
   loadDraftScout: (userId: string) => void;
 }
 
-export default function DraftBoardTab({
+function DraftBoardTab({
   user,
   allPicks,
   draftPicks,
@@ -277,3 +277,5 @@ export default function DraftBoardTab({
     </div>
   );
 }
+
+export default React.memo(DraftBoardTab);

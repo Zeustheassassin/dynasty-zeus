@@ -14,7 +14,7 @@ interface ValueTrendsTabProps {
   user: SleeperUser | null;
 }
 
-export default function ValueTrendsTab({ historicalSnapshot, onSaveSnapshot, shares, user }: ValueTrendsTabProps) {
+function ValueTrendsTab({ historicalSnapshot, onSaveSnapshot, shares, user }: ValueTrendsTabProps) {
   const players = usePlayers();
   const { rosters, users } = useLeague();
   const { leagueAdjustedFcValues: calcFcValues } = useValues();
@@ -443,3 +443,5 @@ export default function ValueTrendsTab({ historicalSnapshot, onSaveSnapshot, sha
     </>
   );
 }
+
+export default React.memo(ValueTrendsTab);

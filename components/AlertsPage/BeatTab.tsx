@@ -1,4 +1,5 @@
 "use client";
+import { memo } from "react";
 import type { BeatItem } from "./alertsPageHelpers";
 import { relTime } from "./alertsPageHelpers";
 
@@ -7,7 +8,7 @@ type BeatTabProps = {
   loadingBeat: boolean;
 };
 
-export default function BeatTab({ beatItems, loadingBeat }: BeatTabProps) {
+function BeatTab({ beatItems, loadingBeat }: BeatTabProps) {
   return (
     <div>
       {loadingBeat ? (
@@ -85,3 +86,5 @@ export default function BeatTab({ beatItems, loadingBeat }: BeatTabProps) {
     </div>
   );
 }
+
+export default memo(BeatTab);

@@ -1,4 +1,5 @@
 "use client";
+import { memo } from "react";
 import type { SleeperPlayer } from "../../lib/types";
 import type { DashboardAlert } from "./alertsPageHelpers";
 import { severityStyles, resolvePlayerIdsInDetail } from "./alertsPageHelpers";
@@ -11,7 +12,7 @@ type FeedTabProps = {
   players: Record<string, SleeperPlayer>;
 };
 
-export default function FeedTab({ alerts, actionableAlerts, onDismissAlert, loadingExternalAlerts, players }: FeedTabProps) {
+function FeedTab({ alerts, actionableAlerts, onDismissAlert, loadingExternalAlerts, players }: FeedTabProps) {
   return (
     <div className="grid gap-3">
       {loadingExternalAlerts && (
@@ -85,3 +86,5 @@ export default function FeedTab({ alerts, actionableAlerts, onDismissAlert, load
     </div>
   );
 }
+
+export default memo(FeedTab);

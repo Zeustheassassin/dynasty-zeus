@@ -1,4 +1,5 @@
 "use client";
+import { memo } from "react";
 import {
   getProjectionKickoffAt,
   getLineupSlotEligiblePositions,
@@ -15,7 +16,7 @@ interface StartersTabProps {
   nflState: SleeperNFLState | null;
 }
 
-export default function StartersTab({ projectionData, nflState }: StartersTabProps) {
+function StartersTab({ projectionData, nflState }: StartersTabProps) {
   const players = usePlayers();
   const { selectedLeague } = useLeague();
   const { myRoster: roster } = useMyRoster();
@@ -267,3 +268,5 @@ export default function StartersTab({ projectionData, nflState }: StartersTabPro
     </div>
   );
 }
+
+export default memo(StartersTab);

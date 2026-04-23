@@ -1,4 +1,5 @@
 "use client";
+import { memo } from "react";
 import { usePlayers } from "../../lib/PlayersContext";
 import { useLeague } from "../../lib/LeagueContext";
 import type { AnnotatedTransaction } from "./leagueHubTypes";
@@ -9,7 +10,7 @@ interface ActivityTabProps {
   setPlayerProfileId: (id: string | null) => void;
 }
 
-export default function ActivityTab({
+function ActivityTab({
   activityTransactions,
   loadingActivity,
   setPlayerProfileId,
@@ -167,3 +168,5 @@ export default function ActivityTab({
     </div>
   );
 }
+
+export default memo(ActivityTab);

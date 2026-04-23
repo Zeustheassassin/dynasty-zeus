@@ -27,7 +27,7 @@ interface ProjectionsTabProps {
   user: SleeperUser | null;
 }
 
-export default function ProjectionsTab({
+function ProjectionsTab({
   projectionData, setProjectionData,
   projectionPosFilter, setProjectionPosFilter,
   projectionWeek, setProjectionWeek,
@@ -226,3 +226,5 @@ export default function ProjectionsTab({
     </>
   );
 }
+
+export default React.memo(ProjectionsTab);

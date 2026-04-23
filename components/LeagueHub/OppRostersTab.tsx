@@ -1,4 +1,5 @@
 "use client";
+import { memo } from "react";
 import { usePlayers } from "../../lib/PlayersContext";
 import { useLeague } from "../../lib/LeagueContext";
 import { CURRENT_YEAR, YEARS } from "../../lib/helpers";
@@ -15,7 +16,7 @@ interface OppRostersTabProps {
   setOppRosterSearch: (s: string) => void;
 }
 
-export default function OppRostersTab({
+function OppRostersTab({
   user,
   allPicks,
   oppRosterTab,
@@ -230,3 +231,5 @@ export default function OppRostersTab({
     </div>
   );
 }
+
+export default memo(OppRostersTab);

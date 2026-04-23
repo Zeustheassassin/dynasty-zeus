@@ -1,5 +1,5 @@
 "use client";
-import { useMemo } from "react";
+import { useMemo, memo } from "react";
 import {
   getLineupSettings,
   getNonStandardRules,
@@ -42,7 +42,7 @@ interface RostersTabProps {
   loadRoster: (league: SleeperLeague) => void;
 }
 
-export default function RostersTab({
+function RostersTab({
   leagues,
   user,
   picks,
@@ -450,3 +450,5 @@ export default function RostersTab({
     </>
   );
 }
+
+export default memo(RostersTab);
