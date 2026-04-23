@@ -56,6 +56,7 @@ function RankingsTab({
   );
 
   const ranksParentRef = React.useRef<HTMLDivElement>(null);
+  // eslint-disable-next-line react-hooks/incompatible-library
   const ranksVirtualizer = useVirtualizer({
     count: ranked.length,
     getScrollElement: () => ranksParentRef.current,

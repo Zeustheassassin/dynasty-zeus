@@ -77,6 +77,7 @@ export default function RookieBigBoard({
 
   const bigBoardParentRef = useRef<HTMLDivElement>(null);
 
+  // eslint-disable-next-line react-hooks/incompatible-library
   const bigBoardVirtualizer = useVirtualizer({
     count: filteredRookies.length,
     getScrollElement: () => bigBoardParentRef.current,

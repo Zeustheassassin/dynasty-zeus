@@ -114,10 +114,10 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
   // Load saved draft slot picks — localStorage first (instant), Supabase as source-of-truth if available
   useEffect(() => {
     if (!selectedLeague?.league_id) return;
-    setMyDraftSlotPicks({});
     const lsKey = `draftPicks_${selectedLeague.league_id}_${ROOKIE_YEAR}`;
     const saved = getLocalStorageItem<Record<string, string> | null>(lsKey, null);
-    if (saved) setMyDraftSlotPicks(saved);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reading external localStorage source for this league; async Supabase overwrites below
+    setMyDraftSlotPicks(saved ?? {});
     if (!supabaseUser) return;
     supabase
       .from("draft_board_picks")
@@ -733,6 +733,7 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
       selectedLeagueSimulation?.rows?.length &&
       selectedLeague?.league_id === leagueId
     ) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- state machine: sim result must be committed synchronously before queue advances
       saveSimulationToSupabase(leagueId, selectedLeagueSimulation.rows);
     }
 

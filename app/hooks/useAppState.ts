@@ -408,7 +408,7 @@ useEffect(() => {
       }
     });
   return () => { cancelled = true; };
-}, [supabaseUser, loadNotes, setSupabaseMessage]);
+}, [supabaseUser, loadNotes, setSupabaseMessage, setLeagueNotes, setLeaguePlayerTags, setPlayerDispositions, setPlayerNotes]);
 
 const signOut = async () => {
   await supabase.auth.signOut();
@@ -508,7 +508,7 @@ useEffect(() => {
 
   loadPlayers().catch((err) => { if (!controller.signal.aborted) log.error('loadPlayers failed', { err: String(err) }); });
   return () => controller.abort();
-}, []);
+}, [setNflState]);
 
 
 const refreshDraftBoard = useCallback(async () => {
@@ -603,7 +603,7 @@ useEffect(() => {
     setActivityTransactions([]);
     loadActivity(selectedLeague.league_id);
   }
-}, [mainTab, leagueHubTab, selectedLeague?.league_id, loadActivity]);
+}, [mainTab, leagueHubTab, selectedLeague?.league_id, loadActivity, setActivityTransactions]);
 
 useEffect(() => {
   if (mainTab === "LEAGUES" && leagueHubTab === "DRAFT_BOARD" && selectedLeague?.league_id) {
@@ -676,7 +676,7 @@ useEffect(() => {
   }
 
   loadGamedayMatchups(selectedLeague.league_id, currentWeek);
-}, [mainTab, selectedLeague?.league_id, nflState?.week, nflState?.season_type, projectionWeek, projectionLoaded, loadProjections, loadGamedayMatchups, setProjectionLoaded, setProjectionWeek]);
+}, [mainTab, selectedLeague?.league_id, nflState?.week, nflState?.season_type, projectionWeek, projectionLoaded, loadProjections, loadGamedayMatchups, setProjectionLoaded, setProjectionWeek, setGamedayMatchups, setSelectedGamedayMatchupId]);
 
 useEffect(() => {
   const leagueId = selectedLeague?.league_id;
@@ -718,7 +718,7 @@ useEffect(() => {
 
   loadLeagueWeeklyHistory();
   return () => { cancelled = true; };
-}, [mainTab, leagueHubTab, selectedLeague?.league_id, selectedLeague?.settings?.playoff_week_start, nflState?.week, nflState?.season_type, leagueWeeklyMatchups]);
+}, [mainTab, leagueHubTab, selectedLeague?.league_id, selectedLeague?.settings?.playoff_week_start, nflState?.week, nflState?.season_type, leagueWeeklyMatchups, setLeagueWeeklyMatchups, setLoadingLeagueWeeklyMatchups]);
 
 
 useEffect(() => {
@@ -962,6 +962,7 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
       )
   );
   setReadyLeagueId(league.league_id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- setReadyLeagueId is a stable setter; TDZ prevents adding to deps (useSimulatorState is called after this callback)
 }, [user, players]);
 loadRosterRef.current = loadRoster;
 
@@ -1347,7 +1348,7 @@ const getTeamSummary = useCallback(() => {
     if (!gamedayMatchupCards.some((card) => card.matchupId === selectedGamedayMatchupId)) {
       setSelectedGamedayMatchupId(gamedayMatchupCards[0].matchupId);
     }
-  }, [gamedayMatchupCards, selectedGamedayMatchupId]);
+  }, [gamedayMatchupCards, selectedGamedayMatchupId, setSelectedGamedayMatchupId]);
   // ── League-adjusted FC dynasty values (Tier 3 scoring) ──────────────────
   // Scales raw FantasyCalc values by per-position multipliers derived from the
   // selected league's scoring settings vs. the FC baseline (full PPR, 4pt TDs,

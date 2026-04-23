@@ -8,7 +8,9 @@ import { getLocalStorageItem, setLocalStorageItem } from "@/lib/hooks/useLocalSt
 const log = logger("app/hooks/usePlayerAnnotations");
 
 export function usePlayerAnnotations(supabaseUser: SupabaseUser | null) {
-  const [leagueNotes, setLeagueNotes] = useState<Record<string, string>>({});
+  const [leagueNotes, setLeagueNotes] = useState<Record<string, string>>(
+    () => getLocalStorageItem<Record<string, string> | null>("leagueNotes", null) ?? {}
+  );
   const [playerProfileId, setPlayerProfileId] = useState<string | null>(null);
   const [playerNotes, setPlayerNotes] = useState<Record<string, string>>(() =>
     getLocalStorageItem<Record<string, string>>("playerNotes_v1", {})
@@ -26,12 +28,6 @@ export function usePlayerAnnotations(supabaseUser: SupabaseUser | null) {
   // Ref so useCallback closures always read the latest supabaseUser without stale captures
   const supabaseUserRef = useRef<SupabaseUser | null>(null);
   useEffect(() => { supabaseUserRef.current = supabaseUser; }, [supabaseUser]);
-
-  // Load league notes from localStorage on mount; Supabase overrides on login (via setLeagueNotes)
-  useEffect(() => {
-    const saved = getLocalStorageItem<Record<string, string> | null>("leagueNotes", null);
-    if (saved) setLeagueNotes(saved);
-  }, []);
 
   const toggleIgnoredOwner = useCallback((ownerId: string) => {
     setIgnoredOwnerIds(prev => {
