@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "../../lib/supabaseclient";
 import { logger } from "../../lib/logger";
@@ -78,6 +78,9 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
   const [myDraftSlotPicks, setMyDraftSlotPicks] = useState<Record<string, string>>({});
   const [draftSlotEditing, setDraftSlotEditing] = useState<string | null>(null);
   const [draftSlotSearchQuery, setDraftSlotSearchQuery] = useState("");
+  // Always reflects the current league — read in save effect via ref so league switches don't trigger saves with stale picks
+  const draftLeagueRef = useRef(selectedLeague?.league_id);
+  draftLeagueRef.current = selectedLeague?.league_id;
 
   // Load persisted sim results from Supabase on login; keep in-memory values if newer
   useEffect(() => {
@@ -114,6 +117,7 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
   // Load saved draft slot picks — localStorage first (instant), Supabase as source-of-truth if available
   useEffect(() => {
     if (!selectedLeague?.league_id) return;
+    let cancelled = false;
     const lsKey = `draftPicks_${selectedLeague.league_id}_${ROOKIE_YEAR}`;
     const saved = getLocalStorageItem<Record<string, string> | null>(lsKey, null);
     // eslint-disable-next-line react-hooks/set-state-in-effect -- reading external localStorage source for this league; async Supabase overwrites below
@@ -126,23 +130,28 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
       .eq("league_id", selectedLeague.league_id)
       .eq("season", ROOKIE_YEAR)
       .then(({ data }) => {
+        if (cancelled) return;
         if (!data?.length) return;
         const picks: Record<string, string> = {};
         data.forEach((row) => { picks[row.pick_slot] = row.player_id; });
         setMyDraftSlotPicks(picks);
         setLocalStorageItem(lsKey, picks);
       });
+    return () => { cancelled = true; };
   }, [supabaseUser, selectedLeague?.league_id]);
 
   // Save draft slot picks — localStorage immediately, Supabase async (best-effort)
+  // Uses draftLeagueRef (not selectedLeague in deps) so a league switch doesn't trigger a save
+  // with the outgoing league's picks written under the incoming league's ID.
   useEffect(() => {
-    if (!selectedLeague?.league_id || !Object.keys(myDraftSlotPicks).length) return;
-    const lsKey = `draftPicks_${selectedLeague.league_id}_${ROOKIE_YEAR}`;
+    const leagueId = draftLeagueRef.current;
+    if (!leagueId || !Object.keys(myDraftSlotPicks).length) return;
+    const lsKey = `draftPicks_${leagueId}_${ROOKIE_YEAR}`;
     setLocalStorageItem(lsKey, myDraftSlotPicks);
     if (!supabaseUser) return;
     const rows = Object.entries(myDraftSlotPicks).map(([pick_slot, player_id]) => ({
       user_id: supabaseUser.id,
-      league_id: selectedLeague.league_id,
+      league_id: leagueId,
       season: ROOKIE_YEAR,
       pick_slot,
       player_id,
@@ -152,7 +161,8 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
       .from("draft_board_picks")
       .upsert(rows, { onConflict: "user_id,league_id,season,pick_slot" })
       .then(() => {}, (err: unknown) => log.error("draft_board_picks upsert failed", { err: String(err) }));
-  }, [supabaseUser, selectedLeague?.league_id, myDraftSlotPicks]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- selectedLeague?.league_id intentionally omitted; read via ref to prevent stale-pick writes on league switch
+  }, [supabaseUser, myDraftSlotPicks]);
 
   const selectedLeagueSimulation = useMemo((): LeagueSimulation | null => {
     if (!selectedLeague || !rosters.length) return null;
