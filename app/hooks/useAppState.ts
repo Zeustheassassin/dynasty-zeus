@@ -422,7 +422,7 @@ useEffect(() => {
       }
     });
   return () => { cancelled = true; };
-}, [supabaseUser, loadNotes]);
+}, [supabaseUser, loadNotes, setSupabaseMessage]);
 
 const signOut = async () => {
   await supabase.auth.signOut();
@@ -707,7 +707,7 @@ useEffect(() => {
     }
   }
   // projectionWeek/projectionLoaded are in deps and set inside this effect; the conditional guards prevent loops
-}, [mainTab, leagueHubTab, selectedLeague?.league_id, nflState?.week, nflState?.season_type, projectionWeek, projectionLoaded, loadRedraftValues, loadProjections, loadNflState]);
+}, [mainTab, leagueHubTab, selectedLeague?.league_id, nflState?.week, nflState?.season_type, projectionWeek, projectionLoaded, loadRedraftValues, loadProjections, loadNflState, setProjectionLoaded, setProjectionWeek]);
 
 useEffect(() => {
   if (mainTab !== "GAMEDAY_HUB") return;
@@ -748,7 +748,7 @@ useEffect(() => {
   }
 
   loadGamedayMatchups(selectedLeague.league_id, currentWeek);
-}, [mainTab, selectedLeague?.league_id, nflState?.week, nflState?.season_type, projectionWeek, projectionLoaded, loadProjections, loadGamedayMatchups]);
+}, [mainTab, selectedLeague?.league_id, nflState?.week, nflState?.season_type, projectionWeek, projectionLoaded, loadProjections, loadGamedayMatchups, setProjectionLoaded, setProjectionWeek]);
 
 useEffect(() => {
   const leagueId = selectedLeague?.league_id;
@@ -4598,7 +4598,7 @@ const getTeamSummary = useCallback(() => {
       });
 
     if (alerts.length) mergeDashboardAlerts(alerts);
-  }, [nflState?.week, nflState?.season_type, dashboardOwnedPlayers, watchlistEntries, players, mergeDashboardAlerts]);
+  }, [nflState?.week, nflState?.season_type, nflState?.season, dashboardOwnedPlayers, watchlistEntries, players, mergeDashboardAlerts]);
 
   // ── Available player alerts (watchlist player recently dropped) ──────────
   useEffect(() => {
@@ -4664,7 +4664,7 @@ const onNavigateToAttempts = useCallback((leagueId: string) => {
     setMainTab("TRADE_HUB");
     loadTradeAttempts(leagueId);
   }
-}, [loadRoster, loadTradeAttempts]);
+}, [loadRoster, loadTradeAttempts, setMainTab, setTradeHubSection]);
 
 const onRefreshDirection = useCallback(() => {
   const league = selectedLeagueRef.current;

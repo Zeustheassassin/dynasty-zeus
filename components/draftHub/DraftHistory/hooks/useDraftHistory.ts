@@ -54,9 +54,9 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
   // Load historical draft data when HISTORY tab first opens
   useEffect(() => {
     if (historyLoaded || !leagues.length) return;
-    setHistoryLoading(true);
 
     const load = async () => {
+      setHistoryLoading(true);
       const results: HistoryDraftEntry[] = [];
 
       await Promise.all(leagues.map(async (league) => {
@@ -117,12 +117,14 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
 
   // Auto-select the most recent year once history or compiled meta data loads
   useEffect(() => {
-    if (selectedHistoryYear !== "ALL") return;
-    const allYears = Array.from(new Set([
-      ...historyData.map((d) => d.season),
-      ...Object.keys(consensusMeta),
-    ])).sort().reverse() as string[];
-    if (allYears.length > 0) setSelectedHistoryYear(allYears[0]);
+    void (async () => {
+      if (selectedHistoryYear !== "ALL") return;
+      const allYears = Array.from(new Set([
+        ...historyData.map((d) => d.season),
+        ...Object.keys(consensusMeta),
+      ])).sort().reverse() as string[];
+      if (allYears.length > 0) setSelectedHistoryYear(allYears[0]);
+    })();
   }, [historyData.length, consensusMeta]); // eslint-disable-line
 
   // Load consensus meta from Supabase
@@ -151,10 +153,12 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
   // Load player grades from Supabase (localStorage fallback)
   useEffect(() => {
     if (!supabaseUser) {
-      try {
-        const saved = localStorage.getItem("consensusPlayerGrades");
-        if (saved) setPlayerGrades(JSON.parse(saved));
-      } catch {}
+      void (async () => {
+        try {
+          const saved = localStorage.getItem("consensusPlayerGrades");
+          if (saved) setPlayerGrades(JSON.parse(saved));
+        } catch {}
+      })();
       return;
     }
     supabase.from("consensus_player_grades")
@@ -181,17 +185,17 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
     if (!consensusMeta[selectedHistoryYear]) return;
     if (consensusCache[selectedHistoryYear] !== undefined) return;
 
-    setLoadingCacheYear(selectedHistoryYear);
-    supabase
-      .from("consensus_draft_cache")
-      .select("player_id, player_name, position, team, avg_pick_no, draft_count")
-      .eq("user_id", supabaseUser.id)
-      .eq("year", parseInt(selectedHistoryYear, 10))
-      .order("avg_pick_no", { ascending: true })
-      .then(({ data }) => {
-        setConsensusCache((prev) => ({ ...prev, [selectedHistoryYear]: (data ?? []) as ConsensusCacheRow[] }));
-        setLoadingCacheYear(null);
-      });
+    void (async () => {
+      setLoadingCacheYear(selectedHistoryYear);
+      const { data } = await supabase
+        .from("consensus_draft_cache")
+        .select("player_id, player_name, position, team, avg_pick_no, draft_count")
+        .eq("user_id", supabaseUser.id)
+        .eq("year", parseInt(selectedHistoryYear, 10))
+        .order("avg_pick_no", { ascending: true });
+      setConsensusCache((prev) => ({ ...prev, [selectedHistoryYear]: (data ?? []) as ConsensusCacheRow[] }));
+      setLoadingCacheYear(null);
+    })();
   }, [supabaseUser?.id, historyTab, selectedHistoryYear, consensusMeta]); // eslint-disable-line
 
   // When GRADES tab opens, load ALL compiled years so every graded player has slot data
