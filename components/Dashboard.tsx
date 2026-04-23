@@ -57,7 +57,7 @@ const navCardRows = [
     {
       title: "Scouting Hub",
       tab: "SCOUTING_HUB",
-      image: "https://images.pexels.com/photos/1618200/pexels-photo-1618200.jpeg?auto=compress&cs=tinysrgb&w=800",
+      image: "https://images.pexels.com/photos/4700756/pexels-photo-4700756.jpeg?auto=compress&cs=tinysrgb&w=800",
       overlay: "from-purple-950/70 via-slate-900/60 to-slate-950/80",
     },
   ],
