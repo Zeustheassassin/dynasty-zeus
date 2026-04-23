@@ -18,54 +18,12 @@ import { usePlayers } from "../../lib/PlayersContext";
 import { useLeague } from "../../lib/LeagueContext";
 import { useValues } from "../../lib/ValuesContext";
 import { createScoringFactors } from "./hooks/useScoringFactors";
+import { FinderSearchInput } from "./FinderSearch";
+import { FinderDirectionPanel } from "./FinderDirectionPanel";
 
 // â”€â”€ Local types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 type PlayerWithValue = SleeperPlayer & { value: number };
 type PickWithValue = AugmentedPick & { value: number };
-
-// â”€â”€ Isolated search-input component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-function FinderSearchInput({
-  players,
-  onSelect,
-  placeholder = "Search your rosterâ€¦",
-}: {
-  players: PlayerWithValue[];
-  onSelect: (playerId: string) => void;
-  placeholder?: string;
-}) {
-  const [inputValue, setInputValue] = React.useState("");
-  const matches = inputValue.trim().length >= 2
-    ? players.filter((p) => p.full_name.toLowerCase().includes(inputValue.toLowerCase())).slice(0, 6)
-    : [];
-  return (
-    <div className="relative">
-      <input
-        type="text"
-        value={inputValue}
-        onChange={(e) => setInputValue(e.target.value)}
-        placeholder={placeholder}
-        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
-      />
-      {matches.length > 0 && (
-        <div className="absolute z-10 top-full mt-1 w-full bg-gray-800 border border-gray-700 rounded-lg overflow-hidden shadow-xl">
-          {matches.map((p) => (
-            <button
-              key={p.player_id}
-              onClick={() => { setInputValue(""); onSelect(p.player_id); }}
-              className="w-full flex items-center justify-between px-3 py-2 hover:bg-gray-700 transition text-left"
-            >
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-white">{p.full_name}</span>
-                <span className="text-[10px] text-gray-500 uppercase">{p.position}</span>
-              </div>
-              <span className="text-xs text-gray-400 font-mono">{p.value.toLocaleString()}</span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 const ordinalSuffix = (n: number): string => {
   const mod100 = n % 100;
@@ -2809,123 +2767,21 @@ function TradeFinder({
         <div className="space-y-4">
           {/* ΓöÇΓöÇ Player pin search ΓöÇΓöÇ */}
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 space-y-2">
-            {loadingCalcValues ? (
-              <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-3 animate-pulse">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex-1 space-y-2">
-                    <div className="h-2.5 w-28 rounded bg-gray-700" />
-                    <div className="h-4 w-3/4 rounded bg-gray-700" />
-                  </div>
-                  <div className="h-5 w-20 rounded-full bg-gray-700" />
-                </div>
-                <div className="mt-3 flex gap-2">
-                  <div className="h-6 w-36 rounded-full bg-gray-700" />
-                  <div className="h-6 w-44 rounded-full bg-gray-700" />
-                  <div className="h-6 w-32 rounded-full bg-gray-700" />
-                </div>
-              </div>
-            ) : finderDirectionProfile ? (
-              <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-3">
-                <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Direction Engine</div>
-                      <button
-                        type="button"
-                        onClick={() => { setDirectionRefreshing(true); onRefreshDirection(); }}
-                        disabled={directionRefreshing}
-                        title="Reload direction data"
-                        className="text-gray-600 hover:text-gray-400 transition disabled:opacity-40"
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          viewBox="0 0 16 16"
-                          fill="currentColor"
-                          aria-hidden="true"
-                          className={`w-3 h-3 ${directionRefreshing ? "animate-spin" : ""}`}
-                        >
-                          <path fillRule="evenodd" d="M13.836 2.477a.75.75 0 0 1 .75.75v3.182a.75.75 0 0 1-.75.75h-3.182a.75.75 0 0 1 0-1.5h1.37l-.84-.841a4.5 4.5 0 0 0-7.08 1.196.75.75 0 1 1-1.31-.734 6 6 0 0 1 9.44-1.595l.842.841V3.227a.75.75 0 0 1 .75-.75Zm-.911 7.5A.75.75 0 0 1 13.199 11a6 6 0 0 1-9.44 1.595l-.842-.841v1.017a.75.75 0 0 1-1.5 0V9.591a.75.75 0 0 1 .75-.75H5.35a.75.75 0 0 1 0 1.5H3.98l.84.841a4.5 4.5 0 0 0 7.08-1.196.75.75 0 0 1 1.025-.009Z" clipRule="evenodd" />
-                        </svg>
-                      </button>
-                    </div>
-                    <div className="mt-1 text-sm text-gray-200">{finderDirectionProfile.summary}</div>
-                  </div>
-                  <div className="flex flex-col items-end gap-1 self-start">
-                    <span className={`inline-flex text-[10px] font-semibold px-2 py-1 rounded-full border ${finderDirectionProfile.bucketColor}`}>
-                      {finderDirectionProfile.bucket}
-                    </span>
-                    {finderDirectionProfile.rawBucket &&
-                     finderDirectionProfile.rawBucket !== finderDirectionProfile.bucket && (
-                      <span className="text-[9px] text-gray-500 whitespace-nowrap">
-                        base: {finderDirectionProfile.rawBucket} ΓåÆ age + sim adjusted
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {finderDirectionProfile.actions.map((action: string) => (
-                    <span key={action} className="rounded-full border border-blue-800 bg-blue-950/40 px-3 py-1 text-[11px] text-blue-200">
-                      {action}
-                    </span>
-                  ))}
-                </div>
-                {selectedLeagueMateProfilesView.length > 0 && (
-                  <div className="mt-3">
-                    <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Best Partner Targets</div>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {selectedLeagueMateProfilesView.slice(0, 3).map((mate) => (
-                        <button
-                          key={mate.rosterId}
-                          onClick={() => setFinderTargetOppRosterId(Number(mate.rosterId))}
-                          className="rounded-full border border-cyan-800 bg-cyan-950/30 px-3 py-1 text-[11px] text-cyan-200 transition hover:border-cyan-500"
-                        >
-                          {mate.ownerName} ΓÇó {mate.fitLabel}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            ) : null}
-            {/* ΓöÇΓöÇ Auto-Strategy Panel ΓöÇΓöÇ */}
-            {finderDirectionProfile && (
-              <div className="rounded-lg bg-gray-800/50 border border-gray-700/60 px-3 py-2">
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-2">Auto-Strategy</div>
-                <div className="flex flex-wrap gap-2">
-                  <span className={`text-[11px] px-2.5 py-0.5 rounded-full border font-medium ${
-                    isChampionshipPush
-                      ? "border-yellow-600 bg-yellow-900/30 text-yellow-300"
-                      : finderTankMode
-                        ? "border-red-700 bg-red-950/30 text-red-300"
-                        : draftCapitalMode
-                          ? "border-indigo-700 bg-indigo-950/30 text-indigo-300"
-                          : "border-green-700 bg-green-950/30 text-green-300"
-                  }`}>
-                    {autoStrategyLabel}
-                  </span>
-                  {draftCapitalMode && (
-                    <span className="text-[11px] px-2.5 py-0.5 rounded-full border border-blue-800 bg-blue-950/30 text-blue-300">
-                      Pick trades included
-                    </span>
-                  )}
-                  {finderPreferFuturePicks && (
-                    <span className="text-[11px] px-2.5 py-0.5 rounded-full border border-purple-800 bg-purple-950/30 text-purple-300">
-                      Future picks preferred
-                    </span>
-                  )}
-                  {finderTankMode && (
-                    <span className="text-[11px] px-2.5 py-0.5 rounded-full border border-red-800 bg-red-950/30 text-red-300">
-                      Package limits lifted
-                    </span>
-                  )}
-                  {rosterOverflow > 0 && (
-                    <span className="text-[11px] px-2.5 py-0.5 rounded-full border border-yellow-800 bg-yellow-950/30 text-yellow-300">
-                      Roster pressure +{rosterOverflow} over cap
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
+            <FinderDirectionPanel
+              loadingCalcValues={loadingCalcValues}
+              finderDirectionProfile={finderDirectionProfile}
+              directionRefreshing={directionRefreshing}
+              setDirectionRefreshing={setDirectionRefreshing}
+              onRefreshDirection={onRefreshDirection}
+              selectedLeagueMateProfilesView={selectedLeagueMateProfilesView}
+              setFinderTargetOppRosterId={setFinderTargetOppRosterId}
+              isChampionshipPush={isChampionshipPush}
+              finderTankMode={finderTankMode}
+              draftCapitalMode={draftCapitalMode}
+              autoStrategyLabel={autoStrategyLabel}
+              finderPreferFuturePicks={finderPreferFuturePicks}
+              rosterOverflow={rosterOverflow}
+            />
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Find trades involving a specific player</p>
             {pinnedPlayer ? (
               <div className="flex items-center justify-between bg-gray-800 rounded-lg px-3 py-2">
