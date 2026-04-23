@@ -29,7 +29,7 @@ interface DraftBoardTabProps {
   setDraftSlotEditing: (slot: string | null) => void;
   draftSlotSearchQuery: string;
   setDraftSlotSearchQuery: (q: string) => void;
-  draftHubSection: "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES";
+  draftHubSection: "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL_BOARDS";
   predictedDraftPicks: Record<string, PredictedPick>;
   loadingDraftRefresh: boolean;
   rookies: RookieBoardPlayer[];

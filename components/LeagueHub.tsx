@@ -87,7 +87,7 @@ interface LeagueHubProps {
   setDraftSlotEditing: (slot: string | null) => void;
   draftSlotSearchQuery: string;
   setDraftSlotSearchQuery: (q: string) => void;
-  draftHubSection: "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES";
+  draftHubSection: "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL_BOARDS";
   nflState: SleeperNFLState | null;
 
   // Additional state
