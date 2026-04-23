@@ -1,0 +1,25 @@
+"use client";
+import { useState } from "react";
+import type { LeagueHubTab } from "../../lib/types";
+
+export function useHubRouting() {
+  const [mainTab, setMainTab] = useState("DASHBOARD");
+  const [tradeHubSection, setTradeHubSection] = useState<
+    "CALCULATOR" | "FINDER" | "RECOMMENDATIONS" | "TRADE_LOG" | "ATTEMPTS" | "MARKET"
+  >("CALCULATOR");
+  const [leagueHubTab, setLeagueHubTab] = useState<LeagueHubTab>("OVERVIEW");
+  const [dataHubTab, setDataHubTab] = useState<
+    "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "PICK_VALUES" | "LEAGUEMATES" | "DEPTH_CHARTS" | "BUY_LOW"
+  >("RANKINGS");
+  const [draftHubSection, setDraftHubSection] = useState<
+    "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES"
+  >("BOARD");
+
+  return {
+    mainTab, setMainTab,
+    tradeHubSection, setTradeHubSection,
+    leagueHubTab, setLeagueHubTab,
+    dataHubTab, setDataHubTab,
+    draftHubSection, setDraftHubSection,
+  };
+}

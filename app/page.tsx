@@ -31,7 +31,9 @@ import { supabase } from "../lib/supabaseclient";
 import { logger } from "../lib/logger";
 
 const log = logger("app/page");
-import type { User as SupabaseUser } from "@supabase/auth-js";
+import { useAuthState, LAST_LOGIN_EMAIL_KEY } from "./hooks/useAuthState";
+import { useHubRouting } from "./hooks/useHubRouting";
+import { AuthSection } from "./components/AuthSection";
 import {
   CURRENT_YEAR, YEARS, ROUNDS,
   getStoredPickValue, getDraftRoundSlot,
@@ -62,14 +64,10 @@ import { useCalcValues } from "../hooks/useCalcValues";
 import { useLeagueMateIntel } from "../hooks/useLeagueMateIntel";
 import { useDraftScout } from "../hooks/useDraftScout";
 import { useLeagueOverview } from "../hooks/useLeagueOverview";
-import { PlayersProvider } from "../lib/PlayersContext";
-import { AuthProvider } from "../lib/AuthContext";
-import { LeagueProvider } from "../lib/LeagueContext";
-import { ValuesProvider } from "../lib/ValuesContext";
-import { RosterProvider } from "../lib/RosterContext";
+import { AppProviders } from "./providers/AppProviders";
 import { fetchSleeperUser } from "../lib/sleeperUserCache";
 import type {
-  LeagueHubTab, AlertsCenterItem,
+  AlertsCenterItem,
   SleeperPlayer, SleeperLeague, SleeperRoster, SleeperTradedPick,
   SleeperDraft, SleeperDraftPick, SleeperNFLState, SleeperTransaction, SleeperUser, GamedayMatchup, GamedayTeamView,
   CommittedSimsByLeague, CachedSimRow, SimRow, SleeperMatchup,
@@ -92,7 +90,6 @@ let _playersInMemory: Record<string, SleeperPlayer> | null = null;
 // fetchSleeperUser imported from lib/sleeperUserCache (shared with useLeagues)
 
 // ── Page-local interfaces (shapes that don't warrant a lib/types entry) ──────
-interface Note { id: string; user_id: string; title: string; body: string; updated_at: string; }
 interface StandingRow { roster_id: number; wins: number; losses: number; ties: number; fpts: number; max_pf: number; owner_id: string; }
 // AugmentedPick is now exported from lib/types.ts
 type AnnotatedTransaction = SleeperTransaction & { leagueName: string; leagueId: string; rosterOwnerMap: Record<number, string>; };
@@ -101,22 +98,39 @@ interface AllLeagueDataEntry { leagueName?: string; roster: import("../lib/types
 interface PlayerSnapshot { full_name: string; status: string; team: string; value: number; active: boolean; shareCount: number; }
 interface NewsItem { id?: string; link?: string; title?: string; impact?: unknown; playerNames?: string[]; summary?: string; published?: string | number; }
 
-const LAST_LOGIN_EMAIL_KEY = "lastLoginEmail";
-
 export default function Home() {
+
+  // -------------------------
+  // AUTH STATE
+  // -------------------------
+  const {
+    supabaseUser, setSupabaseUser,
+    loginEmail, setLoginEmail,
+    loginPassword, setLoginPassword,
+    setNotes,
+    supabaseError, setSupabaseError,
+    supabaseMessage, setSupabaseMessage,
+    loginLoading, setLoginLoading,
+    resetLoading, setResetLoading,
+    showLoginPassword, setShowLoginPassword,
+    loadNotes,
+    signUp, signIn, resetPassword,
+  } = useAuthState();
+
+  // -------------------------
+  // HUB ROUTING STATE
+  // -------------------------
+  const {
+    mainTab, setMainTab,
+    tradeHubSection, setTradeHubSection,
+    leagueHubTab, setLeagueHubTab,
+    dataHubTab, setDataHubTab,
+    draftHubSection, setDraftHubSection,
+  } = useHubRouting();
 
   // -------------------------
   // CORE STATE
   // -------------------------
-  const [supabaseUser, setSupabaseUser] = useState<SupabaseUser | null>(null);
-  const [loginEmail, setLoginEmail] = useState("");
-  const [loginPassword, setLoginPassword] = useState("");
-  const [, setNotes] = useState<Note[]>([]);
-  const [supabaseError, setSupabaseError] = useState("");
-  const [supabaseMessage, setSupabaseMessage] = useState("");
-  const [loginLoading, setLoginLoading] = useState(false);
-  const [resetLoading, setResetLoading] = useState(false);
-  const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [selectedLeague, setSelectedLeague] = useState<SleeperLeague | null>(null);
   const [roster, setRoster] = useState<SleeperRoster | null>(null);
   const [rosters, setRosters] = useState<SleeperRoster[]>([]);
@@ -148,9 +162,7 @@ const {
   tradeAttempts, tradeAttemptsLeagueId, loadingTradeAttempts, allTradeAttempts,
   loadTradeAttempts, markTradeAttempted, updateAttemptStatus, deleteAttempt,
 } = useTradeAttempts(supabaseUser);
-const [tradeHubSection, setTradeHubSection] = useState<"CALCULATOR" | "FINDER" | "RECOMMENDATIONS" | "TRADE_LOG" | "ATTEMPTS" | "MARKET">("CALCULATOR");
 const [finderSeed, setFinderSeed] = useState(() => Math.random());
-const [leagueHubTab, setLeagueHubTab] = useState<LeagueHubTab>("OVERVIEW");
 const [leagueSimCache, setLeagueSimCache] = useState<Record<string, Record<number, CachedSimRow>>>({});
 const [readyLeagueId, setReadyLeagueId] = useState<string | null>(null);
 const [simQueue, setSimQueue] = useState<string[]>([]);
@@ -190,7 +202,6 @@ const [activityTransactions, setActivityTransactions] = useState<AnnotatedTransa
 const [loadingActivity, setLoadingActivity] = useState(false);
 const [leagueWeeklyMatchups, setLeagueWeeklyMatchups] = useState<Record<string, { week: number; matchups: SleeperMatchup[] }[]>>({});
 const [loadingLeagueWeeklyMatchups, setLoadingLeagueWeeklyMatchups] = useState(false);
-const [dataHubTab, setDataHubTab] = useState<"RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "PICK_VALUES" | "LEAGUEMATES" | "DEPTH_CHARTS" | "BUY_LOW">("RANKINGS");
 const [leagueMateStats, setLeagueMateStats] = useState<LeagueMateStatEntry[]>([]);
 const [leagueMateStatsLoaded, setLeagueMateStatsLoaded] = useState(false);
 const [loadingLeagueMateStats, setLoadingLeagueMateStats] = useState(false);
@@ -227,7 +238,6 @@ const [finderPinnedPlayerId, setFinderPinnedPlayerId] = useState<string | null>(
 const [finderTargetOppRosterId, setFinderTargetOppRosterId] = useState<number | null>(null);
 const [finderTargetPlayerId, setFinderTargetPlayerId] = useState<string | null>(null);
 
-const [draftHubSection, setDraftHubSection] = useState<"BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES">("BOARD");
 const [ignoredOwnerIds, setIgnoredOwnerIds] = useState<string[]>(() => {
   try { return JSON.parse(localStorage.getItem("ignoredOwnerIds") || "[]"); } catch { return []; }
 });
@@ -250,8 +260,6 @@ const [calcSearchA, setCalcSearchA] = useState("");
 const [calcSearchB, setCalcSearchB] = useState("");
 const [users, setUsers] = useState<Record<string, string>>({});
 const [standings, setStandings] = useState<StandingRow[]>([]);
-
-  const [mainTab, setMainTab] = useState("DASHBOARD");
 
   const {
     username, setUsername,
@@ -358,42 +366,6 @@ const latestAlertsRef = useRef<AlertsCenterItem[]>([]);
 
 useEffect(() => { latestAlertsRef.current = dashboardAlerts; }, [dashboardAlerts]);
 
-useEffect(() => {
-  try {
-    const rememberedEmail = localStorage.getItem(LAST_LOGIN_EMAIL_KEY);
-    if (rememberedEmail) setLoginEmail(rememberedEmail);
-  } catch {}
-}, []);
-
-const refreshSupabaseUser = async () => {
-  const { data } = await supabase.auth.getUser();
-  setSupabaseUser(data.user);
-  if (!data.user) {
-    setNotes([]);
-  }
-};
-
-useEffect(() => {
-  refreshSupabaseUser();
-  const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
-    // Use session directly — avoids a second async getUser() call that races with signOut state
-    setSupabaseUser(session?.user ?? null);
-    if (!session?.user) setNotes([]);
-  });
-  return () => subscription?.subscription?.unsubscribe?.();
-}, []);
-
-const loadNotes = async () => {
-  if (!supabaseUser) { setNotes([]); return; }
-  const { data, error } = await supabase
-    .from("notes")
-    .select("*")
-    .eq("user_id", supabaseUser.id)
-    .order("updated_at", { ascending: false });
-  if (error) setSupabaseError(error.message);
-  else setNotes(data ?? []);
-};
-
 // Load all Supabase-persisted user data whenever the logged-in user changes
 useEffect(() => {
   if (!supabaseUser) return;
@@ -496,91 +468,6 @@ useEffect(() => {
   return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps -- loadNotes not in useCallback; adding would re-run on every render
 }, [supabaseUser]);
-
-const signUp = async () => {
-  setSupabaseError("");
-  setSupabaseMessage("");
-  setLoginLoading(true);
-  try {
-    const email = loginEmail.trim();
-    const { error } = await supabase.auth.signUp({ email, password: loginPassword });
-    if (error) {
-      setSupabaseError(error.message);
-      return;
-    }
-    try { localStorage.setItem(LAST_LOGIN_EMAIL_KEY, email); } catch {}
-    setSupabaseMessage("Account created. Check your email for a confirmation link, then sign in.");
-  } finally {
-    setLoginLoading(false);
-  }
-};
-
-const signIn = async () => {
-  setSupabaseError("");
-  setSupabaseMessage("");
-  setLoginLoading(true);
-  try {
-    const email = loginEmail.trim();
-    const signInPromise = supabase.auth.signInWithPassword({
-      email,
-      password: loginPassword,
-    });
-    let timeoutId: ReturnType<typeof setTimeout>;
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timeoutId = setTimeout(
-        () => reject(new Error("Request timed out — check your internet or Supabase project status.")),
-        10000
-      );
-    });
-    const result = await Promise.race([
-      signInPromise.then((r) => { clearTimeout(timeoutId); return r; }),
-      timeoutPromise,
-    ]);
-    const { data, error } = result;
-    if (error) {
-      setSupabaseError(error.message || error.name || "Sign-in failed. Check your credentials.");
-      return;
-    }
-    if (data?.user) {
-      try { localStorage.setItem(LAST_LOGIN_EMAIL_KEY, email); } catch {}
-      setSupabaseMessage(`Welcome back, ${data.user.email || email}.`);
-      // Don't manually set supabaseUser here — onAuthStateChange fires and sets it,
-      // and the useEffect([supabaseUser]) will load all persisted data once state updates.
-      setShowLoginPassword(false);
-      setLoginPassword("");
-    } else {
-      setSupabaseError("Sign-in failed — no user returned. Check your credentials or confirm your email.");
-    }
-  } catch (err: unknown) {
-    setSupabaseError((err as { message?: string })?.message || "Unexpected error — check your internet connection.");
-  } finally {
-    setLoginLoading(false);
-  }
-};
-
-const resetPassword = async () => {
-  setSupabaseError("");
-  setSupabaseMessage("");
-  const email = loginEmail.trim();
-  if (!email) {
-    setSupabaseError("Enter your email first, then use reset password.");
-    return;
-  }
-  setResetLoading(true);
-  try {
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/`,
-    });
-    if (error) {
-      setSupabaseError(error.message);
-      return;
-    }
-    try { localStorage.setItem(LAST_LOGIN_EMAIL_KEY, email); } catch {}
-    setSupabaseMessage("Password reset email sent. Check your inbox and spam folder.");
-  } finally {
-    setResetLoading(false);
-  }
-};
 
 const signOut = async () => {
   await supabase.auth.signOut();
@@ -4851,10 +4738,12 @@ const onRefreshDirection = useCallback(() => {
 // -------------------------
 const myPlayerSet = new Set<string>(roster?.players || []);
   return (
-    <AuthProvider supabaseUser={supabaseUser}>
-    <PlayersProvider players={players}>
-    <LeagueProvider selectedLeague={selectedLeague} rosters={rosters} users={users}>
-    <ValuesProvider
+    <AppProviders
+      supabaseUser={supabaseUser}
+      players={players}
+      selectedLeague={selectedLeague}
+      rosters={rosters}
+      users={users}
       leagueAdjustedFcValues={leagueAdjustedFcValues}
       leagueAdjustedRedraftValues={leagueAdjustedRedraftValues}
       pickFcValues={pickFcValues}
@@ -4863,89 +4752,26 @@ const myPlayerSet = new Set<string>(roster?.players || []);
       selectedLeagueDirectionAdjusted={selectedLeagueDirectionAdjusted}
       selectedLeagueSimulation={selectedLeagueSimulation}
       selectedLeagueDynamicPickValues={selectedLeagueDynamicPickValues}
+      myRoster={roster}
     >
-    <RosterProvider myRoster={roster}>
       {/* Login overlay — lives outside <main> so no stacking context interferes */}
-      {!supabaseUser && (
-        <div
-          style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
-        >
-          <div className="bg-gray-900 border border-gray-700 rounded-2xl p-8 w-full max-w-sm shadow-2xl" style={{ position: "relative", zIndex: 10000 }}>
-            <h2 className="text-xl font-bold mb-1 text-center">DynastyZeus</h2>
-            <p className="text-sm text-gray-400 text-center mb-6">Sign in to your account</p>
-            {supabaseError && <div className="text-red-400 text-sm mb-3">{supabaseError}</div>}
-            {supabaseMessage && <div className="text-emerald-400 text-sm mb-3">{supabaseMessage}</div>}
-            <form
-              className="space-y-3"
-              autoComplete="on"
-              onSubmit={(e) => {
-                e.preventDefault();
-                signIn();
-              }}
-            >
-              <input
-                id="email"
-                name="email"
-                className="w-full p-2.5 rounded-lg bg-gray-800 border border-gray-700 text-sm focus:outline-none focus:border-blue-500"
-                placeholder="Email"
-                type="email"
-                autoComplete="username"
-                inputMode="email"
-                value={loginEmail}
-                onChange={(e) => {
-                  setLoginEmail(e.target.value);
-                  if (supabaseError) setSupabaseError("");
-                }}
-              />
-              <div className="relative">
-                <input
-                  id="password"
-                  name="password"
-                  className="w-full p-2.5 pr-20 rounded-lg bg-gray-800 border border-gray-700 text-sm focus:outline-none focus:border-blue-500"
-                  type={showLoginPassword ? "text" : "password"}
-                  placeholder="Password"
-                  autoComplete="current-password"
-                  value={loginPassword}
-                  onChange={(e) => {
-                    setLoginPassword(e.target.value);
-                    if (supabaseError) setSupabaseError("");
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowLoginPassword((prev) => !prev)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400 hover:text-white transition"
-                >
-                  {showLoginPassword ? "Hide" : "Show"}
-                </button>
-              </div>
-              <button
-                type="submit"
-                disabled={loginLoading}
-                className="w-full py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded-lg text-sm font-semibold transition"
-              >
-                {loginLoading ? "Signing in…" : "Sign In"}
-              </button>
-              <button
-                type="button"
-                disabled={resetLoading || loginLoading}
-                className="w-full py-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-60 rounded-lg text-sm font-semibold transition"
-                onClick={(e) => { e.stopPropagation(); resetPassword(); }}
-              >
-                {resetLoading ? "Sending reset email..." : "Reset Password"}
-              </button>
-              <button
-                type="button"
-                disabled={loginLoading}
-                className="w-full py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-60 rounded-lg text-sm font-semibold transition"
-                onClick={(e) => { e.stopPropagation(); signUp(); }}
-              >
-                {loginLoading ? "Working..." : "Create Account"}
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
+      <AuthSection
+        supabaseUser={supabaseUser}
+        loginEmail={loginEmail}
+        setLoginEmail={setLoginEmail}
+        loginPassword={loginPassword}
+        setLoginPassword={setLoginPassword}
+        supabaseError={supabaseError}
+        setSupabaseError={setSupabaseError}
+        supabaseMessage={supabaseMessage}
+        loginLoading={loginLoading}
+        resetLoading={resetLoading}
+        showLoginPassword={showLoginPassword}
+        setShowLoginPassword={setShowLoginPassword}
+        signIn={signIn}
+        signUp={signUp}
+        resetPassword={resetPassword}
+      />
     <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-[99999] focus:px-4 focus:py-2 focus:bg-blue-600 focus:text-white focus:rounded focus:text-sm">Skip to main content</a>
     <main id="main-content" className="min-h-screen bg-gray-950 text-white">
       {/* App content — always rendered but non-interactive when not signed in */}
@@ -5890,11 +5716,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
       </>
       </div>
     </main>
-    </RosterProvider>
-    </ValuesProvider>
-    </LeagueProvider>
-    </PlayersProvider>
-    </AuthProvider>
+    </AppProviders>
   );
 }
 
