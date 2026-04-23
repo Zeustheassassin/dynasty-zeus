@@ -5,8 +5,6 @@ import {
   CURRENT_YEAR,
 } from "../../lib/helpers";
 
-const BASE_YEAR_TF = new Date().getFullYear();
-const YEARS = Array.from({ length: 3 }, (_, i) => String(BASE_YEAR_TF + i));
 import type {
   TradeAttempt, TradeAttemptAsset, TradeAttemptPick,
   SleeperPlayer, SleeperRoster, SleeperUser,
@@ -20,21 +18,17 @@ import { useValues } from "../../lib/ValuesContext";
 import { createScoringFactors } from "./hooks/useScoringFactors";
 import { FinderSearchInput } from "./FinderSearch";
 import { FinderDirectionPanel } from "./FinderDirectionPanel";
+import {
+  isAgingAsset, isOldProducerBuy, isYoungBuildingBlock, isFutureInsulationAsset,
+  getAgeUrgency, getFutureValue, isPremiumCurrentPick,
+  packageOk, posTotals, isBalanced, computeTeamWindow, getPickSlotBonus,
+} from "./FinderScoring";
+import { finderPickKey } from "./finderUtils";
+import type { TradeResult } from "./finderTypes";
+import { YEARS, ordinalSuffix, buildTradeFingerprint } from "./shared";
+import type { PlayerWithValue, PickWithValue } from "./shared";
 
 // â”€â”€ Local types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-type PlayerWithValue = SleeperPlayer & { value: number };
-type PickWithValue = AugmentedPick & { value: number };
-
-const ordinalSuffix = (n: number): string => {
-  const mod100 = n % 100;
-  if (mod100 >= 11 && mod100 <= 13) return "th";
-  switch (n % 10) {
-    case 1: return "st";
-    case 2: return "nd";
-    case 3: return "rd";
-    default: return "th";
-  }
-};
 
 // â”€â”€ Props â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 interface TradeFinderProps {
@@ -237,8 +231,6 @@ function TradeFinder({
   );
   const top32QBFloor = allQBsSorted[31] ?? 0;
 
-  const buildTradeFingerprint = (leagueId: string, partnerRosterId: number | string, givePids: string[], receiveIds: string[]) =>
-    `${leagueId}|${partnerRosterId}|${[...givePids].sort().join(",")}|${[...receiveIds].sort().join(",")}`;
 
   return (() => {
       if (!selectedLeague) return (
@@ -256,7 +248,6 @@ function TradeFinder({
         </div>
       );
 
-      const finderPickKey = (p: AugmentedPick) => `${p.season}-${p.round}-${p.roster_id}`;
       const finderPickLabel = (p: AugmentedPick) => {
         const via = p.roster_id !== p.owner_id ? ` (via ${users[p.roster_id] || `Team ${p.roster_id}`})` : "";
         const isSlotted = p.slot && String(p.slot).includes(".");
@@ -275,27 +266,6 @@ function TradeFinder({
       // Build roster player list with values ΓÇö reads from pre-computed Map (O(1) lookup)
       const rosterPlayers = (roster: SleeperRoster | null | undefined) => roster ? finderRosterPlayersMap.get(roster.roster_id) ?? [] : [];
 
-      // Position totals for a player list
-      const posTotals = (plist: Array<{ position: string; value: number }>) => {
-        const t: Record<string, number> = { QB: 0, RB: 0, WR: 0, TE: 0 };
-        plist.forEach((p) => { t[p.position] = (t[p.position] || 0) + p.value; });
-        return t;
-      };
-
-      // Waiver adj ΓÇö kept ONLY for isBalanced gate (generation filter)
-      const tradeWaiverAdj = (giveVals: number[], receiveVals: number[]) => {
-        const diff = giveVals.length - receiveVals.length;
-        if (diff === 0) return 0;
-        const capAdj = (extras: number[]) =>
-          extras.reduce((s, v, i) => s + Math.min(Math.round(v * 0.42), i === 0 ? 550 : 750), 0);
-        if (diff > 0) {
-          const sg = [...giveVals].sort((a, b) => b - a);
-          return capAdj(sg.slice(receiveVals.length));
-        } else {
-          const sr = [...receiveVals].sort((a, b) => b - a);
-          return capAdj(sr.slice(giveVals.length));
-        }
-      };
 
       // Roster-aware drop cost — replaces flat waiver adjustment for net calculations.
       // Only PLAYERS consume roster spots; picks do not.
@@ -311,25 +281,6 @@ function TradeFinder({
         if (dropsNeeded === 0) return 0;
         const sorted = (roster.players ?? []).map((pid) => calcFcValues[pid] ?? 0).sort((a, b) => a - b);
         return sorted.slice(0, dropsNeeded).reduce((s, v) => s + v, 0);
-      };
-
-      // Check if a trade is value-balanced after waiver adjustment.
-      // Two-part gate:
-      //   1. Absolute cap: gap must be ≤600 — protects large-value trades from wild swings.
-      //   2. Ratio cap: the lower side must be ≥70% of the higher side — prevents small-value
-      //      trades from being wildly one-sided (e.g. 470 vs 976 is 48%, far too lopsided).
-      //      On a 10k package a 600-pt gap is ~6%; on a 500 vs 976 deal it's basically free money.
-      const isBalanced = (giveVals: number[], receiveVals: number[]) => {
-        const gTotal = giveVals.reduce((s, v) => s + v, 0);
-        const rTotal = receiveVals.reduce((s, v) => s + v, 0);
-        const diff = giveVals.length - receiveVals.length;
-        const adjG = gTotal + (diff < 0 ? tradeWaiverAdj(giveVals, receiveVals) : 0);
-        const adjR = rTotal + (diff > 0 ? tradeWaiverAdj(giveVals, receiveVals) : 0);
-        if (Math.abs(adjR - adjG) > 600) return false;
-        const higher = Math.max(adjG, adjR);
-        const lower  = Math.min(adjG, adjR);
-        if (higher > 0 && lower / higher < 0.85) return false;
-        return true;
       };
 
       const myRoster = rosters.find((r) => r.owner_id === user?.user_id);
@@ -420,74 +371,6 @@ function TradeFinder({
           return b.value - a.value;
         })
         .slice(0, 6);
-      const ageCutoffByPos: Record<string, number> = { QB: 30, RB: 26, WR: 29, TE: 29 };
-      const weakPositions = new Set(
-        (finderDirectionProfile?.positionRanks || [])
-          .filter((entry) => entry.rank >= Math.max(4, numTeams - 2))
-          .map((entry) => entry.pos)
-      );
-      const strongPositions = new Set(
-        (finderDirectionProfile?.positionRanks || [])
-          .filter((entry) => entry.rank <= Math.max(2, Math.ceil(numTeams / 3)))
-          .map((entry) => entry.pos)
-      );
-      const isAgingAsset = (player: SleeperPlayer) =>
-        Number(player?.age || 0) >= (ageCutoffByPos[player?.position] || 29);
-      const isOldProducerBuy = (player: SleeperPlayer) => {
-        const age = Number(player?.age || 0);
-        if (player?.position === "RB") return age >= 25;
-        if (player?.position === "QB") return age >= 31;
-        if (player?.position === "WR" || player?.position === "TE") return age >= 29;
-        return age >= 29;
-      };
-      const isYoungBuildingBlock = (player: SleeperPlayer) =>
-        ["QB", "WR"].includes(player?.position) && Number(player?.age || 99) <= 24;
-      const isFutureInsulationAsset = (player: SleeperPlayer) =>
-        (["QB", "WR"].includes(player?.position) && Number(player?.age || 99) <= 25) ||
-        (player?.position === "TE" && Number(player?.age || 99) <= 25) ||
-        (player?.position === "RB" && Number(player?.age || 99) <= 23);
-      // Continuous 0.0–1.0 sell-urgency curve. 0 = hold forever, 1 = sell immediately.
-      // Position-specific cliffs: RB peaks at 26-27, WR/TE at 29-30, QB at 32-33.
-      const getAgeUrgency = (player: SleeperPlayer): number => {
-        const age = Number(player?.age || 0);
-        if (age === 0) return 0;
-        const pos = player?.position;
-        if (pos === "RB") {
-          if (age <= 22) return 0;
-          if (age <= 24) return 0.15;
-          if (age <= 25) return 0.40;
-          if (age <= 26) return 0.70;
-          if (age <= 27) return 0.90;
-          return 1.0;
-        }
-        if (pos === "QB") {
-          if (age <= 26) return 0;
-          if (age <= 29) return 0.15;
-          if (age <= 31) return 0.40;
-          if (age <= 33) return 0.75;
-          return 1.0;
-        }
-        // WR / TE
-        if (age <= 24) return 0;
-        if (age <= 26) return 0.15;
-        if (age <= 28) return 0.35;
-        if (age <= 30) return 0.65;
-        if (age <= 31) return 0.85;
-        return 1.0;
-      };
-      // Complement: 0 = window closing now, 1 = prime years ahead.
-      const getFutureValue = (player: SleeperPlayer): number => 1 - getAgeUrgency(player);
-      // "Years-to-positional-cliff" — used for team window scoring.
-      const yearsToCliff = (player: SleeperPlayer): number => {
-        const age = Number(player?.age || 0);
-        if (age === 0) return 5;
-        const pos = player?.position;
-        const cliff = pos === "RB" ? 28 : pos === "QB" ? 35 : 32;
-        return Math.max(0, cliff - age);
-      };
-      const isPremiumCurrentPick = (pick: AugmentedPick) =>
-        String(pick?.season) === CURRENT_YEAR && String(pick?.slot || "").match(/^1\.(0[1-6]|[1-6])$/);
-
       const allTeamPosTotals = rosters.map((r) => posTotals(rosterPlayers(r)));
       const starterSlots = (selectedLeague?.roster_positions || []).filter(
         (slot: string) => !["BN", "IR", "TAXI"].includes(slot)
@@ -499,6 +382,16 @@ function TradeFinder({
       const hasSuperFlex = (starterCounts.SUPER_FLEX || 0) > 0;
       const hasFlex = (starterCounts.FLEX || 0) > 0;
       const rosterById = new Map(rosters.map((r) => [Number(r.roster_id), r]));
+      const weakPositions = new Set(
+        (finderDirectionProfile?.positionRanks || [])
+          .filter((entry) => entry.rank >= Math.max(4, numTeams - 2))
+          .map((entry) => entry.pos)
+      );
+      const strongPositions = new Set(
+        (finderDirectionProfile?.positionRanks || [])
+          .filter((entry) => entry.rank <= Math.max(2, Math.ceil(numTeams / 3)))
+          .map((entry) => entry.pos)
+      );
 
       const {
         getTradeLineupSafety,
@@ -655,23 +548,9 @@ function TradeFinder({
         return true;
       };
 
-      // No package (give or receive) may contain 2+ QBs or 2+ TEs
-      const packageOk = (pkg: PlayerWithValue[]) => {
-        const qbs = pkg.filter((p) => p.position === "QB").length;
-        const tes = pkg.filter((p) => p.position === "TE").length;
-        return qbs <= 1 && tes <= 1;
-      };
       // User-side package check — bypassed in Tank Mode so the user can give 2+ QBs/TEs
       const myPkgOk = (pkg: PlayerWithValue[]) => finderTankMode || packageOk(pkg);
 
-      type TradeResult = {
-        give: PlayerWithValue[]; receive: PlayerWithValue[];
-        givePicks: PickWithValue[]; receivePicks: PickWithValue[];
-        oppName: string; oppRosterId: number;
-        score: number; net: number; format: string;
-        draftCapital?: boolean;
-        isBuyLow?: boolean;
-      };
       // QB receiving limit: QB must rank in the opponent's top 3 at the position.
       // Whether it's an acceptable deal given their actual depth is handled by the
       // QB depth-rank penalty in oppDirectionScore (scaled by giveQualityFactor).
@@ -1378,19 +1257,6 @@ function TradeFinder({
         rosterConcentrationMap.set(Number(rr.roster_id), concMap);
       }
 
-      // ── Team window compute helper ──────────────────────────────────────────
-      // Returns avg years until positional cliffs across the starting lineup.
-      // 0 = window closing; 8+ = decade of contention ahead.
-      const computeTeamWindow = (rosterPlayersList: PlayerWithValue[]): number => {
-        const starters = [
-          ...rosterPlayersList.filter((p) => p.position === "QB").sort((a, b) => b.value - a.value).slice(0, 1),
-          ...rosterPlayersList.filter((p) => p.position === "RB").sort((a, b) => b.value - a.value).slice(0, 2),
-          ...rosterPlayersList.filter((p) => p.position === "WR").sort((a, b) => b.value - a.value).slice(0, 3),
-          ...rosterPlayersList.filter((p) => p.position === "TE").sort((a, b) => b.value - a.value).slice(0, 1),
-        ];
-        if (starters.length === 0) return 3;
-        return starters.reduce((s: number, p) => s + yearsToCliff(p), 0) / starters.length;
-      };
       const myTeamWindow = computeTeamWindow(myPlayers);
 
       // ── PENDING suppression map ──────────────────────────────────────────────
@@ -1485,31 +1351,6 @@ function TradeFinder({
         .sort((a, b) => b.wins - a.wins);
       const lastPlayoffSpotWins = sortedStandings[playoffTeamCount - 1]?.wins ?? 0;
       const standingsMap = new Map(sortedStandings.map((s, idx) => [s.rosterId, { ...s, playoffRank: idx + 1 }]));
-
-      // ── Known pick slot value helper ─────────────────────────────────────────
-      // A pick with a resolved slot ("1.03") is worth far more than an unresolved "Rd 1".
-      // Returns bonus (positive = premium above base pick value, negative = discount).
-      const getPickSlotBonus = (pick: PickWithValue): number => {
-        const slot = String(pick?.slot ?? "");
-        if (!slot.includes(".")) return 0; // unresolved — no slot bonus
-        const slotNum = parseInt(slot.split(".")[1], 10);
-        if (isNaN(slotNum) || slotNum < 1) return 0;
-        const rd = Number(pick?.round ?? 1);
-        if (rd === 1) {
-          if (slotNum <= 2)  return 10;  // 1.01-1.02: generational pick premium
-          if (slotNum <= 4)  return 7;   // top-4
-          if (slotNum <= 6)  return 4;   // top-6
-          if (slotNum <= 9)  return 1;   // mid-first
-          if (slotNum <= 10) return 0;   // 1.10: roughly average
-          return -3;                     // 1.11-1.12: "lottery pick" inverse
-        }
-        if (rd === 2) {
-          if (slotNum <= 3)  return 4;
-          if (slotNum <= 6)  return 2;
-          return 0;
-        }
-        return 0; // 3rd+ rounds: slot rarely matters much
-      };
 
       // Seeded shuffle so Refresh button produces a new random set
       const shuffled = preGuardrail
