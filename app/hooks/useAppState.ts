@@ -37,13 +37,17 @@ import { useCalcValues } from "../../hooks/useCalcValues";
 import { useLeagueMateIntel } from "../../hooks/useLeagueMateIntel";
 import { useDraftScout } from "../../hooks/useDraftScout";
 import { useLeagueOverview } from "../../hooks/useLeagueOverview";
+import { useNflState } from "./useNflState";
+import { useGamedayState } from "./useGamedayState";
+import { useActivityState } from "./useActivityState";
+import { usePlayerAnnotations } from "./usePlayerAnnotations";
 import { fetchSleeperUser } from "../../lib/sleeperUserCache";
 import { getLocalStorageItem, setLocalStorageItem, removeLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 import type {
   AlertsCenterItem,
   SleeperPlayer, SleeperLeague, SleeperRoster, SleeperTradedPick,
-  SleeperDraft, SleeperDraftPick, SleeperNFLState, SleeperTransaction, SleeperUser, GamedayMatchup, GamedayTeamView,
-  CommittedSimsByLeague, CachedSimRow, SimRow, SleeperMatchup,
+  SleeperDraft, SleeperDraftPick, SleeperTransaction, SleeperUser, GamedayMatchup, GamedayTeamView,
+  CommittedSimsByLeague, CachedSimRow, SimRow, SleeperMatchup, AnnotatedTransaction,
   AugmentedPick,
   HistoricalSnapshot, LeagueMateView, LeagueSimulation, SimulationTeamRow,
   RosterDirectionProfile, DynamicPickValue, RookieBoardPlayer, FcTrendEntry,
@@ -64,8 +68,7 @@ let _playersInMemory: Record<string, SleeperPlayer> | null = null;
 
 // ── Page-local interfaces (shapes that don't warrant a lib/types entry) ──────
 interface StandingRow { roster_id: number; wins: number; losses: number; ties: number; fpts: number; max_pf: number; owner_id: string; }
-// AugmentedPick is now exported from lib/types.ts
-type AnnotatedTransaction = SleeperTransaction & { leagueName: string; leagueId: string; rosterOwnerMap: Record<number, string>; };
+// AugmentedPick and AnnotatedTransaction are exported from lib/types.ts
 interface OwnedPlayerEntry { player_id: string; player?: SleeperPlayer; leagues: string[]; shareCount: number; }
 interface AllLeagueDataEntry { leagueName?: string; roster: import("../../lib/types").SleeperRoster | null; }
 interface PlayerSnapshot { full_name: string; status: string; team: string; value: number; active: boolean; shareCount: number; }
@@ -89,6 +92,20 @@ export function useAppState() {
     loadNotes,
     signUp, signIn, resetPassword,
   } = useAuthState();
+
+  const {
+    leagueNotes, setLeagueNotes,
+    playerProfileId, setPlayerProfileId,
+    playerNotes, setPlayerNotes,
+    playerDispositions, setPlayerDispositions,
+    leaguePlayerTags, setLeaguePlayerTags,
+    ignoredOwnerIds,
+    toggleIgnoredOwner,
+    saveLeagueNote,
+    savePlayerNote,
+    savePlayerDisposition,
+    handleToggleLeaguePlayerTag,
+  } = usePlayerAnnotations(supabaseUser);
 
   // -------------------------
   // HUB ROUTING STATE
@@ -149,31 +166,15 @@ const [committedSimsByLeague, setCommittedSimsByLeague] = useState<CommittedSims
 const [myDraftSlotPicks, setMyDraftSlotPicks] = useState<Record<string, string>>({}); // slot → player_id override
 const [draftSlotEditing, setDraftSlotEditing] = useState<string | null>(null); // slot currently open for edit
 const [draftSlotSearchQuery, setDraftSlotSearchQuery] = useState("");
-// userId → { QB: 0.15, RB: 0.30, WR: 0.45, TE: 0.10 } — historical pick tendencies per owner
-const [ownerDraftTendencies, setOwnerDraftTendencies] = useState<Record<string, Record<string, number>>>({});
 const { leagueMateTradeIntel, loadingLeagueMateIntel } = useLeagueMateIntel(selectedLeague, rosters, players);
 const [leagueMateProfileCache, setLeagueMateProfileCache] = useState<Record<string, LeagueMateView[]>>({});
-const [leagueNotes, setLeagueNotes] = useState<Record<string, string>>({});
-const [nflState, setNflState] = useState<SleeperNFLState | null>(null);
-const [gamedayMatchups, setGamedayMatchups] = useState<SleeperMatchup[]>([]);
-const [loadingGamedayMatchups, setLoadingGamedayMatchups] = useState(false);
-const [selectedGamedayMatchupId, setSelectedGamedayMatchupId] = useState<number | null>(null);
-const [playerProfileId, setPlayerProfileId] = useState<string | null>(null);
-const [playerNotes, setPlayerNotes] = useState<Record<string, string>>(() =>
-  getLocalStorageItem<Record<string, string>>("playerNotes_v1", {})
-);
-const [playerDispositions, setPlayerDispositions] = useState<Record<string, { sell: string; buy: string }>>(() =>
-  getLocalStorageItem<Record<string, { sell: string; buy: string }>>("playerDispositions_v1", {})
-);
-// Per-league player tags: CORE = Do Not Sell, WANT_TO_TRADE = actively shopping
-// Shape: Record<leagueId, Record<playerId, "CORE" | "WANT_TO_TRADE">>
-const [leaguePlayerTags, setLeaguePlayerTags] = useState<Record<string, Record<string, "CORE" | "WANT_TO_TRADE">>>(() =>
-  getLocalStorageItem<Record<string, Record<string, "CORE" | "WANT_TO_TRADE">>>("leaguePlayerTags_v1", {})
-);
-const [activityTransactions, setActivityTransactions] = useState<AnnotatedTransaction[]>([]);
-const [loadingActivity, setLoadingActivity] = useState(false);
-const [leagueWeeklyMatchups, setLeagueWeeklyMatchups] = useState<Record<string, { week: number; matchups: SleeperMatchup[] }[]>>({});
-const [loadingLeagueWeeklyMatchups, setLoadingLeagueWeeklyMatchups] = useState(false);
+const { nflState, setNflState, loadNflState } = useNflState();
+const {
+  gamedayMatchups, setGamedayMatchups,
+  loadingGamedayMatchups,
+  selectedGamedayMatchupId, setSelectedGamedayMatchupId,
+  loadGamedayMatchups,
+} = useGamedayState();
 const {
   calcFcValues,
   loadingCalcValues,
@@ -200,16 +201,6 @@ const nflStatsSeason = nflState?.season_type === "regular" ? (nflState?.season ?
 const nflStatsWeek   = nflState?.season_type === "regular" ? (nflState?.display_week ?? nflState?.week ?? null) : null;
 const { playerStats } = usePlayerStats(nflStatsSeason, nflStatsWeek);
 
-const [ignoredOwnerIds, setIgnoredOwnerIds] = useState<string[]>(() =>
-  getLocalStorageItem<string[]>("ignoredOwnerIds", [])
-);
-const toggleIgnoredOwner = useCallback((ownerId: string) => {
-  setIgnoredOwnerIds(prev => {
-    const next = prev.includes(ownerId) ? prev.filter(id => id !== ownerId) : [...prev, ownerId];
-    setLocalStorageItem("ignoredOwnerIds", next);
-    return next;
-  });
-}, []);
 const [pickFcValues, setPickFcValues] = useState<Record<string, number>>({});
 const [fcTrendData, setFcTrendData] = useState<FcTrendEntry[]>([]);
 const [loadingFcTrends, setLoadingFcTrends] = useState(false);
@@ -242,6 +233,16 @@ const [standings, setStandings] = useState<StandingRow[]>([]);
     leagueOverviewLoaded,
     loadLeagueOverview,
   } = useLeagueOverview(leagues, user);
+
+  const {
+    activityTransactions, setActivityTransactions,
+    loadingActivity,
+    leagueWeeklyMatchups, setLeagueWeeklyMatchups,
+    loadingLeagueWeeklyMatchups, setLoadingLeagueWeeklyMatchups,
+    ownerDraftTendencies,
+    loadActivity,
+    loadOwnerTendencies,
+  } = useActivityState(rosters, user);
 
   const leaguesRef2 = useRef(leagues);
   const selectedLeagueRef = useRef(selectedLeague);
@@ -304,10 +305,6 @@ const {
 
 
 
-// Stable ref so alert save effects can read the current user without
-// declaring supabaseUser as a dependency (avoids unintended re-fires on login).
-const supabaseUserRef = useRef<typeof supabaseUser>(null);
-useEffect(() => { supabaseUserRef.current = supabaseUser; }, [supabaseUser]);
 // alertSnapshotStorageKey is separate from the useAlerts hook — it tracks the daily
 // player value baseline used for gaining/falling alerts, not the alert list itself.
 const alertSnapshotStorageKey = `alertSnapshots_v1_${alertStoreScope}`;
@@ -317,7 +314,6 @@ const historicalSnapshotRef = useRef<HistoricalSnapshot | null>(null);
 const [historicalSnapshot, setHistoricalSnapshot] = useState<HistoricalSnapshot | null>(null);
 const latestAlertsRef = useRef<AlertsCenterItem[]>([]);
 // Refs for useCallback functions defined later in the file — avoids TDZ in dep arrays.
-const loadOwnerTendenciesRef = useRef<(() => Promise<void>) | null>(null);
 const loadRosterRef = useRef<((league: SleeperLeague) => Promise<void>) | null>(null);
 const loadLeaguemateTradeAlertsRef = useRef<(() => Promise<void>) | null>(null);
 
@@ -525,38 +521,6 @@ useEffect(() => {
   return () => controller.abort();
 }, []);
 
-const nflStateRef = useRef(nflState);
-useEffect(() => { nflStateRef.current = nflState; }, [nflState]);
-
-const loadNflState = useCallback(async () => {
-  if (nflStateRef.current) return;
-  try {
-    const data = await fetch('/api/nfl-state').then(r => r.json());
-    setNflState(data);
-  } catch (err) {
-    log.error('loadNflState failed', { err: String(err) });
-  }
-}, []);
-
-const loadActivity = useCallback(async (leagueId: string) => {
-  if (!leagueId) return;
-  setLoadingActivity(true);
-  try {
-    const weeks = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
-    const results = await Promise.all(
-      weeks.map(w =>
-        fetch(`https://api.sleeper.app/v1/league/${leagueId}/transactions/${w}`)
-          .then(r => r.json())
-          .catch(() => [])
-      )
-    );
-    const all = results.flat().filter((t) => t && t.status === "complete");
-    all.sort((a, b) => (b.updated || b.created || 0) - (a.updated || a.created || 0));
-    setActivityTransactions(all.slice(0, 150) as AnnotatedTransaction[]);
-  } catch (err) {
-    log.error('loadActivity failed', { err: String(err) });
-  } finally { setLoadingActivity(false); }
-}, []);
 
 const refreshDraftBoard = useCallback(async () => {
   if (!selectedLeagueRef.current) return;
@@ -656,9 +620,9 @@ useEffect(() => {
   if (mainTab === "LEAGUES" && leagueHubTab === "DRAFT_BOARD" && selectedLeague?.league_id) {
     refreshDraftBoard();
     // Load owner tendencies in the background — non-blocking
-    if (rosters.length) loadOwnerTendenciesRef.current?.();
+    if (rosters.length) loadOwnerTendencies();
   }
-}, [mainTab, leagueHubTab, selectedLeague?.league_id, rosters.length, refreshDraftBoard]);
+}, [mainTab, leagueHubTab, selectedLeague?.league_id, rosters.length, refreshDraftBoard, loadOwnerTendencies]);
 
 // Stable counts for dep arrays — Object.keys() creates a new array on every render,
 // which defeats useMemo/useEffect deps. These are plain numbers and safe to compare.
@@ -701,18 +665,6 @@ useEffect(() => {
   loadNflState();
 }, [mainTab, loadNflState]);
 
-const loadGamedayMatchups = useCallback(async (leagueId: string, week: number) => {
-  if (!leagueId || !week) return;
-  setLoadingGamedayMatchups(true);
-  try {
-    const data = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/matchups/${week}`)
-      .then((r) => r.json())
-      .catch(() => []);
-    setGamedayMatchups(Array.isArray(data) ? data : []);
-  } finally {
-    setLoadingGamedayMatchups(false);
-  }
-}, []);
 
 useEffect(() => {
   const isRegularSeason = nflState?.season_type === "regular" && Number(nflState?.week || 0) > 0;
@@ -880,28 +832,6 @@ useEffect(() => {
 }, [supabaseUser, selectedLeague?.league_id, myDraftSlotPicks]);
 
 
-// League notes — load from localStorage on mount (fast), then override with Supabase on login
-useEffect(() => {
-  const saved = getLocalStorageItem<Record<string, string> | null>("leagueNotes", null);
-  if (saved) setLeagueNotes(saved);
-}, []);
-
-const saveLeagueNote = async (leagueId: string, text: string) => {
-  const updated = { ...leagueNotes, [leagueId]: text };
-  setLeagueNotes(updated);
-  setLocalStorageItem("leagueNotes", updated);
-  if (supabaseUser) {
-    try {
-      await supabase.from("league_notes").upsert(
-        { user_id: supabaseUser.id, league_id: leagueId, content: text, updated_at: new Date().toISOString() },
-        { onConflict: "user_id,league_id" }
-      );
-    } catch (err: unknown) {
-      log.error("league_notes upsert failed", { err: String(err) });
-    }
-  }
-};
-
 useEffect(() => {
   if (mainTab === "DATA_HUB" && dataHubTab === "PROJECTIONS" && !projectionLoaded) {
     loadProjections(projectionWeek === 0 ? 'season' : projectionWeek);
@@ -914,135 +844,6 @@ useEffect(() => {
   if (!selectedLeague || mainTab !== "DRAFT" || draftHubSection !== "BOARD") return;
   refreshDraftBoard();
 }, [selectedLeague, mainTab, draftHubSection, refreshDraftBoard]);
-
-// Load historical rookie draft tendencies for every owner in the current league.
-// Uses the PREVIOUS year's completed rookie drafts (≤5 rounds) so data is available
-// Prefers current ROOKIE_YEAR completed drafts; falls back to prior year if none exist yet.
-// Automatically uses the right year once current-year drafts start completing.
-const loadOwnerTendencies = useCallback(async () => {
-  if (!rosters.length) return;
-  const PREV_YEAR = String(Number(ROOKIE_YEAR) - 1);
-  const ownerUserIds: string[] = rosters
-    .map((r) => r.owner_id)
-    .filter((uid) => uid && uid !== user?.user_id);
-  if (!ownerUserIds.length) return;
-
-  const tendencies: Record<string, Record<string, number>> = {};
-
-  // ── 1. Pull everything we already have from Supabase cache ──────────────
-  const { data: cached } = await supabase
-    .from("owner_tendencies")
-    .select("owner_user_id, season, rates, updated_at")
-    .in("owner_user_id", ownerUserIds)
-    .in("season", [ROOKIE_YEAR, PREV_YEAR]);
-
-  // Build a map: userId → best cached row
-  // Prefer ROOKIE_YEAR over PREV_YEAR; within same season prefer most recent
-  const cacheMap: Record<string, { rates: Record<string, number>; updated_at: string; season: string }> = {};
-  (cached ?? []).forEach((row) => {
-    const existing = cacheMap[row.owner_user_id];
-    const rowBetter =
-      !existing ||
-      (row.season === ROOKIE_YEAR && existing.season !== ROOKIE_YEAR) ||
-      (row.season === existing.season && row.updated_at > existing.updated_at);
-    if (rowBetter) cacheMap[row.owner_user_id] = { rates: row.rates, updated_at: row.updated_at, season: row.season };
-  });
-
-  // Prior-year cache never expires (those drafts are done).
-  // Current-year cache is good for 24 h while drafts are still rolling in.
-  const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-  const now = Date.now();
-
-  const needsFetch: string[] = [];
-  ownerUserIds.forEach((userId) => {
-    const c = cacheMap[userId];
-    if (c) {
-      const fresh = c.season === PREV_YEAR || (now - new Date(c.updated_at).getTime()) < CACHE_TTL_MS;
-      if (fresh) { tendencies[userId] = c.rates; return; }
-    }
-    needsFetch.push(userId);
-  });
-
-  if (!needsFetch.length) { setOwnerDraftTendencies(tendencies); return; }
-
-  // ── 2. Fetch from Sleeper for owners without a fresh cache entry ─────────
-  const newRows: Array<{ owner_user_id: string; season: string; rates: Record<string, number>; pick_count: number; updated_at: string }> = [];
-
-  await Promise.all(needsFetch.map(async (userId: string) => {
-    try {
-      const yearsToTry = [ROOKIE_YEAR, PREV_YEAR];
-      const collected: { round: number; position: string }[] = [];
-      let foundSeason = PREV_YEAR;
-
-      for (const year of yearsToTry) {
-        const leaguesRes = await fetch(`https://api.sleeper.app/v1/user/${userId}/leagues/nfl/${year}`);
-        const leagues = await leaguesRes.json();
-        if (!Array.isArray(leagues)) continue;
-
-        // No cap — scan all leagues for the most accurate picture
-        await Promise.all(leagues.map(async (league) => {
-          try {
-            const draftsRes = await fetch(`https://api.sleeper.app/v1/league/${league.league_id}/drafts`);
-            const drafts = (await draftsRes.json()) as SleeperDraft[];
-            const rookieDraft = drafts.find(
-              (d) =>
-                d.season === year &&
-                d.status === "complete" &&
-                (d.settings?.rounds ?? 99) <= 5
-            );
-            if (!rookieDraft) return;
-            const picksRes = await fetch(`https://api.sleeper.app/v1/draft/${rookieDraft.draft_id}/picks`);
-            const picks = (await picksRes.json()) as SleeperDraftPick[];
-            picks
-              .filter((p) => p.picked_by === userId && p.metadata?.position)
-              .forEach((p) => {
-                collected.push({ round: Number(p.round), position: String(p.metadata.position) });
-              });
-          } catch (err) {
-            log.warn('loadDraftScout draft picks fetch error', { err: String(err) });
-          }
-        }));
-
-        if (collected.length >= 3) { foundSeason = year; break; }
-      }
-
-      if (collected.length < 3) return; // not enough history to be meaningful
-
-      // Weight: R1 = 3×, R2 = 2×, later = 1× (early picks are most deliberate)
-      const weighted: Record<string, number> = {};
-      let totalWeight = 0;
-      collected.forEach(({ round, position }) => {
-        const w = round === 1 ? 3 : round === 2 ? 2 : 1;
-        weighted[position] = (weighted[position] || 0) + w;
-        totalWeight += w;
-      });
-
-      const rates: Record<string, number> = {};
-      Object.keys(weighted).forEach((pos) => { rates[pos] = weighted[pos] / totalWeight; });
-
-      tendencies[userId] = rates;
-      newRows.push({
-        owner_user_id: userId,
-        season: foundSeason,
-        rates,
-        pick_count: collected.length,
-        updated_at: new Date().toISOString(),
-      });
-    } catch (err) {
-      log.warn('loadDraftScout owner tendencies error', { userId, err: String(err) });
-    }
-  }));
-
-  // ── 3. Persist newly fetched data so next load hits cache ────────────────
-  if (newRows.length) {
-    supabase.from("owner_tendencies")
-      .upsert(newRows, { onConflict: "owner_user_id,season" })
-      .then(() => {}, (err: unknown) => log.error("owner_tendencies upsert failed", { err: String(err) }));
-  }
-
-  setOwnerDraftTendencies(tendencies);
-}, [rosters, user]);
-loadOwnerTendenciesRef.current = loadOwnerTendencies;
 
   // -------------------------
   // LOAD ALL LEAGUES FOR SHARES
@@ -1428,21 +1229,6 @@ const loadLeaguemateTradeAlerts = async () => {
 };
 loadLeaguemateTradeAlertsRef.current = loadLeaguemateTradeAlerts;
 
-const savePlayerNote = useCallback(async (playerId: string, note: string) => {
-  setPlayerNotes((prev) => {
-    const updated = { ...prev, [playerId]: note };
-    setLocalStorageItem("playerNotes_v1", updated);
-    return updated;
-  });
-  const sbUser = supabaseUserRef.current;
-  if (sbUser) {
-    supabase.from("player_notes").upsert(
-      { user_id: sbUser.id, player_id: playerId, note, updated_at: new Date().toISOString() },
-      { onConflict: "user_id,player_id" }
-    ).then(() => {}, (err: unknown) => log.error("player_notes upsert failed", { err: String(err) }));
-  }
-}, []); // reads supabaseUser via ref; uses functional setState — no deps needed
-
 // Manual snapshot save — callable from the Data Hub button.
 // Uses generic FC values (players[id].value) rather than league-adjusted calcFcValues so that
 // scoring rule changes don't create artificial trend movement.
@@ -1472,59 +1258,6 @@ const saveSnapshotNow = async () => {
   setHistoricalSnapshot(newSnap);
 };
 
-const savePlayerDisposition = useCallback(async (playerId: string, sell: string, buy: string) => {
-  setPlayerDispositions((prev) => {
-    const updated = { ...prev, [playerId]: { sell, buy } };
-    setLocalStorageItem("playerDispositions_v1", updated);
-    return updated;
-  });
-  const sbUser = supabaseUserRef.current;
-  if (sbUser) {
-    supabase.from("player_dispositions").upsert(
-      { user_id: sbUser.id, player_id: playerId, sell, buy, updated_at: new Date().toISOString() },
-      { onConflict: "user_id,player_id" }
-    ).then(() => {}, (err: unknown) => log.error("player_dispositions upsert failed", { err: String(err) }));
-  }
-}, []); // reads supabaseUser via ref; uses functional setState — no deps needed
-
-// Toggle a per-league player tag. Cycling: untagged → CORE → WANT_TO_TRADE → untagged.
-// Passing a specific tag forces that tag (or removes it if already set).
-const handleToggleLeaguePlayerTag = useCallback((
-  leagueId: string,
-  playerId: string,
-  forceTag?: "CORE" | "WANT_TO_TRADE"
-) => {
-  const sbUser = supabaseUserRef.current;
-  setLeaguePlayerTags((prev) => {
-    const leagueTags = prev[leagueId] ?? {};
-    const current = leagueTags[playerId];
-    let next: "CORE" | "WANT_TO_TRADE" | undefined;
-    if (forceTag !== undefined) {
-      next = current === forceTag ? undefined : forceTag;
-    } else {
-      next = current === undefined ? "CORE" : current === "CORE" ? "WANT_TO_TRADE" : undefined;
-    }
-    const updatedLeague = { ...leagueTags };
-    if (next === undefined) delete updatedLeague[playerId];
-    else updatedLeague[playerId] = next;
-    const updated = { ...prev, [leagueId]: updatedLeague };
-    setLocalStorageItem("leaguePlayerTags_v1", updated);
-    // Supabase sync
-    if (sbUser) {
-      if (next === undefined) {
-        supabase.from("league_player_tags").delete()
-          .eq("user_id", sbUser.id).eq("league_id", leagueId).eq("player_id", playerId)
-          .then(() => {}, (err: unknown) => log.error("league_player_tags delete failed", { err: String(err) }));
-      } else {
-        supabase.from("league_player_tags")
-          .upsert({ user_id: sbUser.id, league_id: leagueId, player_id: playerId, tag: next },
-                  { onConflict: "user_id,league_id,player_id" })
-          .then(() => {}, (err: unknown) => log.error("league_player_tags upsert failed", { err: String(err) }));
-      }
-    }
-    return updated;
-  });
-}, []);
 
 
 

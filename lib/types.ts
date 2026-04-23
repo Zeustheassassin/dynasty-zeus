@@ -136,6 +136,12 @@ export interface SleeperTransaction {
   consenter_ids: number[];
 }
 
+export type AnnotatedTransaction = SleeperTransaction & {
+  leagueName: string;
+  leagueId: string;
+  rosterOwnerMap: Record<number, string>;
+};
+
 export interface SleeperDraft {
   draft_id: string;
   league_id: string;
