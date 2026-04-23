@@ -80,7 +80,11 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
   const [draftSlotSearchQuery, setDraftSlotSearchQuery] = useState("");
   // Always reflects the current league — read in save effect via ref so league switches don't trigger saves with stale picks
   const draftLeagueRef = useRef(selectedLeague?.league_id);
-  draftLeagueRef.current = selectedLeague?.league_id;
+  // Sync ref inside an effect (not during render) — must be declared before load/save effects
+  // so React runs it first and the save effect always sees the current league ID.
+  useEffect(() => {
+    draftLeagueRef.current = selectedLeague?.league_id;
+  }, [selectedLeague?.league_id]);
 
   // Load persisted sim results from Supabase on login; keep in-memory values if newer
   useEffect(() => {
@@ -161,7 +165,6 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
       .from("draft_board_picks")
       .upsert(rows, { onConflict: "user_id,league_id,season,pick_slot" })
       .then(() => {}, (err: unknown) => log.error("draft_board_picks upsert failed", { err: String(err) }));
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- selectedLeague?.league_id intentionally omitted; read via ref to prevent stale-pick writes on league switch
   }, [supabaseUser, myDraftSlotPicks]);
 
   const selectedLeagueSimulation = useMemo((): LeagueSimulation | null => {

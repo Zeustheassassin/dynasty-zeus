@@ -33,7 +33,7 @@ export default function HistoricalBigBoards() {
   const [posFilter, setPosFilter] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!supabaseUser) { setLoading(false); return; }
+    if (!supabaseUser) return;
     supabase
       .from("big_board_snapshots")
       .select("id,name,saved_at,snapshot_data")
@@ -70,6 +70,7 @@ export default function HistoricalBigBoards() {
   if (loading) {
     return <div className="text-gray-500 text-center py-16 text-sm">Loading…</div>;
   }
+
 
   if (snapshots.length === 0) {
     return (
