@@ -1,6 +1,9 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../../../lib/supabaseclient";
+import { logger } from "../../../lib/logger";
+
+const log = logger("scouting/qb/QBChartingBoard");
 import PlayerSynopsisCard from "../PlayerSynopsisCard";
 import ChartingBoard from "../shared/ChartingBoard";
 import type { ChartingBoardConfig } from "../shared/ChartingBoard";
@@ -135,7 +138,10 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     if (games.length === 0) return;
     const ids = games.map((g) => g.id);
     supabase.from("qb_plays").select("*").in("game_id", ids).order("created_at")
-      .then(({ data }) => setPlays((data ?? []) as QBPlay[]));
+      .then(({ data, error }) => {
+        if (error) { log.error("qb_plays load failed", { err: error.message }); return; }
+        setPlays((data ?? []) as QBPlay[]);
+      });
   }, [games]);
 
   const gamePlays    = useMemo(() => plays.filter((p) => p.game_id === selectedGameId), [plays, selectedGameId]);

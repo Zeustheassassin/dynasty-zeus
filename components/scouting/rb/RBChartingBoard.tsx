@@ -1,10 +1,14 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../../../lib/supabaseclient";
+import { logger } from "../../../lib/logger";
+
+const log = logger("scouting/rb/RBChartingBoard");
 import PlayerSynopsisCard from "../PlayerSynopsisCard";
 import ChartingBoard from "../shared/ChartingBoard";
 import type { ChartingBoardConfig } from "../shared/ChartingBoard";
 import { useChartingState } from "../shared/hooks/useChartingState";
+import { pct } from "../shared/chartingTypes";
 import type {
   Prospect,
   RBPlay,
@@ -46,7 +50,6 @@ function computeRunTypeStat(plays: RBPlay[]): RunTypeStat {
   const successes = plays.filter((p) => p.success === true).length;
   const lb = plays.filter((p) => p.loaded_box);
   const ub = plays.filter((p) => p.unblocked_defender);
-  const pct = (n: number, d: number) => (d > 0 ? parseFloat(((n / d) * 100).toFixed(1)) : null);
   return {
     attempts,
     successes,
@@ -63,7 +66,6 @@ function computeRunTypeStat(plays: RBPlay[]): RunTypeStat {
 }
 
 function mergeRunTypeStats(a: RunTypeStat, b: RunTypeStat): RunTypeStat {
-  const pct = (n: number, d: number) => (d > 0 ? parseFloat(((n / d) * 100).toFixed(1)) : null);
   const attempts = a.attempts + b.attempts;
   const successes = a.successes + b.successes;
   const lb = a.loadedBox + b.loadedBox;
@@ -154,15 +156,16 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     if (games.length === 0) return;
     const ids = games.map((g) => g.id);
     supabase.from("rb_plays").select("*").in("game_id", ids).order("created_at")
-      .then(({ data }) => setPlays((data ?? []) as RBPlay[]));
+      .then(({ data, error }) => {
+        if (error) { log.error("rb_plays load failed", { err: error.message }); return; }
+        setPlays((data ?? []) as RBPlay[]);
+      });
   }, [games]);
 
   const gamePlays = useMemo(() => plays.filter((p) => p.game_id === selectedGameId), [plays, selectedGameId]);
 
   // ── Aggregate stats ───────────────────────────────────────────
   const stats = useMemo(() => {
-    const pct = (n: number, d: number) => (d > 0 ? parseFloat(((n / d) * 100).toFixed(1)) : null);
-
     const runPlays = plays.filter((p) => p.run_type !== "pass_block" && p.run_type !== "run_block" && p.run_type !== "decoy" && p.run_type !== "route");
     const routeRuns = plays.filter((p) => p.run_type === "route");
     const runAttempts = runPlays.length;

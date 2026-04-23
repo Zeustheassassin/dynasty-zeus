@@ -318,8 +318,9 @@ useEffect(() => {
     .from("league_notes")
     .select("league_id, content")
     .eq("user_id", supabaseUser.id)
-    .then(({ data }) => {
+    .then(({ data, error }) => {
       if (cancelled) return;
+      if (error) { log.error("league_notes load failed", { err: error.message }); return; }
       if (data && data.length > 0) {
         const map: Record<string, string> = {};
         data.forEach((row: { league_id: string; content: string }) => { map[row.league_id] = row.content; });
@@ -336,8 +337,9 @@ useEffect(() => {
     .select("snapshot, recorded_at")
     .eq("user_id", supabaseUser.id)
     .single()
-    .then(({ data }) => {
+    .then(({ data, error }) => {
       if (cancelled) return;
+      if (error) { log.error("player_value_snapshots load failed", { err: error.message }); return; }
       if (data?.snapshot) {
         const snap = { players: data.snapshot, recorded_at: data.recorded_at };
         historicalSnapshotRef.current = snap;
@@ -349,8 +351,9 @@ useEffect(() => {
     .from("player_notes")
     .select("player_id, note")
     .eq("user_id", supabaseUser.id)
-    .then(({ data }) => {
+    .then(({ data, error }) => {
       if (cancelled) return;
+      if (error) { log.error("player_notes load failed", { err: error.message }); return; }
       if (data && data.length > 0) {
         const map: Record<string, string> = {};
         data.forEach((row: { player_id: string; note: string }) => { map[String(row.player_id)] = row.note; });
@@ -366,8 +369,9 @@ useEffect(() => {
     .from("player_dispositions")
     .select("player_id, sell, buy")
     .eq("user_id", supabaseUser.id)
-    .then(({ data }) => {
+    .then(({ data, error }) => {
       if (cancelled) return;
+      if (error) { log.error("player_dispositions load failed", { err: error.message }); return; }
       if (data && data.length > 0) {
         const map: Record<string, { sell: string; buy: string }> = {};
         data.forEach((row: { player_id: string; sell: string; buy: string }) => { map[String(row.player_id)] = { sell: row.sell, buy: row.buy }; });
@@ -383,8 +387,9 @@ useEffect(() => {
     .from("league_player_tags")
     .select("league_id, player_id, tag")
     .eq("user_id", supabaseUser.id)
-    .then(({ data }) => {
+    .then(({ data, error }) => {
       if (cancelled) return;
+      if (error) { log.error("league_player_tags load failed", { err: error.message }); return; }
       if (data && data.length > 0) {
         const map: Record<string, Record<string, "CORE" | "WANT_TO_TRADE">> = {};
         data.forEach((row: { league_id: string; player_id: string; tag: string }) => {

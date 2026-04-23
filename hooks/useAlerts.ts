@@ -89,7 +89,8 @@ export function useAlerts({ supabaseUser, players }: UseAlertsOptions): UseAlert
       .from("watchlists")
       .select("player_id, label, threshold_up, threshold_down, league_id, updated_at")
       .eq("user_id", supabaseUser.id)
-      .then(({ data }: { data: WatchlistEntry[] | null }) => {
+      .then(({ data, error }: { data: WatchlistEntry[] | null; error: { message: string } | null }) => {
+        if (error) { log.error("watchlists load failed", { err: error.message }); return; }
         if (data && data.length > 0) {
           setWatchlistEntries(data);
           setLocalStorageItem(watchlistStorageKey, data);
@@ -103,7 +104,7 @@ export function useAlerts({ supabaseUser, players }: UseAlertsOptions): UseAlert
       .eq("user_id", supabaseUser.id)
       .order("updated_at", { ascending: false })
       .limit(80)
-      .then(({ data }: { data: Array<{
+      .then(({ data, error }: { data: Array<{
         alert_id: string;
         category: string;
         source: string;
@@ -116,7 +117,8 @@ export function useAlerts({ supabaseUser, players }: UseAlertsOptions): UseAlert
         league_id: string | null;
         payload: Record<string, unknown>;
         updated_at: string;
-      }> | null }) => {
+      }> | null; error: { message: string } | null }) => {
+        if (error) { log.error("alerts load failed", { err: error.message }); return; }
         if (data && data.length > 0) {
           const rows: AlertsCenterItem[] = data.map((row) => ({
             id: row.alert_id,

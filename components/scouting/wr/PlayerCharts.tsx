@@ -42,7 +42,7 @@ function toRad(deg: number) { return (deg * Math.PI) / 180; }
 
 function ChartSVG({ spokes, maxPct }: { spokes: Spoke[]; maxPct: number }) {
   return (
-    <svg viewBox="0 0 400 400" className="w-full">
+    <svg viewBox="0 0 400 400" className="w-full" aria-hidden="true">
       {/* Guide rings */}
       {[0.33, 0.66, 1].map((f) => (
         <circle key={f} cx={CX} cy={CY} r={R * f} fill="none" stroke="#1f2937" strokeWidth={1} />
@@ -174,7 +174,7 @@ interface AlignSpoke { key: AlignKey; valuePct: number; tier: Tier; hasData: boo
 function AlignChartSVG({ spokes }: { spokes: AlignSpoke[] }) {
   const maxPct = 100;
   return (
-    <svg viewBox="0 0 400 400" className="w-full">
+    <svg viewBox="0 0 400 400" className="w-full" aria-hidden="true">
       {[0.33, 0.66, 1].map((f) => (
         <circle key={f} cx={CX} cy={CY} r={R * f} fill="none" stroke="#1f2937" strokeWidth={1} />
       ))}

@@ -1,7 +1,10 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../../../../lib/supabaseclient";
+import { logger } from "../../../../lib/logger";
 import type { Prospect, ScoutingGame } from "../../../../lib/types";
+
+const log = logger("scouting/shared/useChartingState");
 
 interface Options {
   onDataChanged: () => void;
@@ -25,13 +28,14 @@ export function useChartingState(prospect: Prospect, options: Options) {
 
   const loadGames = useCallback(async () => {
     setLoading(true);
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("scouting_games")
       .select("*")
       .eq("prospect_id", prospect.id)
       .order("season_year", { ascending: false })
       .order("game_slot");
-    setGames((data ?? []) as ScoutingGame[]);
+    if (error) { log.error("scouting_games load failed", { err: error.message }); }
+    else { setGames((data ?? []) as ScoutingGame[]); }
     setLoading(false);
   }, [prospect.id]);
 

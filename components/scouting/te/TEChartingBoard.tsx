@@ -1,6 +1,9 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../../../lib/supabaseclient";
+import { logger } from "../../../lib/logger";
+
+const log = logger("scouting/te/TEChartingBoard");
 import PlayerSynopsisCard from "../PlayerSynopsisCard";
 import type {
   Prospect,
@@ -96,7 +99,10 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged }: Pro
     if (games.length === 0) return;
     const ids = games.map((g) => g.id);
     supabase.from("te_plays").select("*").in("game_id", ids).order("created_at")
-      .then(({ data }) => setPlays((data ?? []) as TEPlay[]));
+      .then(({ data, error }) => {
+        if (error) { log.error("te_plays load failed", { err: error.message }); return; }
+        setPlays((data ?? []) as TEPlay[]);
+      });
   }, [games]);
 
   const gamePlays = useMemo(
