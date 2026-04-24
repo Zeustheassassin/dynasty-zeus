@@ -92,6 +92,18 @@ export function useChartingState(prospect: Prospect, options: Options) {
     onDataChanged();
   }
 
+  async function updateGame(id: string, updates: Partial<Pick<ScoutingGame, "opponent" | "season_year" | "game_type">>) {
+    const cleaned: Partial<ScoutingGame> = {};
+    if (updates.opponent !== undefined) cleaned.opponent = updates.opponent.trim();
+    if (updates.season_year !== undefined) cleaned.season_year = updates.season_year;
+    if (updates.game_type !== undefined) cleaned.game_type = updates.game_type;
+    if (Object.keys(cleaned).length === 0) return;
+    const { error } = await supabase.from("scouting_games").update(cleaned).eq("id", id);
+    if (error) { log.error("scouting_games update failed", { err: error.message }); return; }
+    setGames((prev) => prev.map((g) => g.id === id ? { ...g, ...cleaned } as ScoutingGame : g));
+    onDataChanged();
+  }
+
   async function saveBio() {
     setSavingBio(true);
     await supabase.from("prospects").update({ ...bio, updated_at: new Date().toISOString() }).eq("id", prospect.id);
@@ -119,6 +131,7 @@ export function useChartingState(prospect: Prospect, options: Options) {
                         setNewGame((n) => ({ ...n, ...update })),
     onAddGame:        addGame,
     onDeleteGame:     deleteGame,
+    onUpdateGame:     updateGame,
     onToggleEditBio:  () => setEditBio((e) => !e),
     onBioChange:      (update: Partial<Prospect>) => setBio((b) => ({ ...b, ...update })),
     onSaveBio:        saveBio,

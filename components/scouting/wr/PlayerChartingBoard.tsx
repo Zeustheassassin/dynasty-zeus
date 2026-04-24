@@ -82,7 +82,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
   });
   const { tab, games, selectedGameId, loading, showAddGame, newGame, savingGame, gameError,
           editBio, bio, savingBio, onTabChange, onSelectGame, onToggleAddGame, onNewGameChange,
-          onAddGame, onDeleteGame, onToggleEditBio, onBioChange, onSaveBio } = cs;
+          onAddGame, onDeleteGame, onUpdateGame, onToggleEditBio, onBioChange, onSaveBio } = cs;
 
   useEffect(() => {
     if (games.length === 0) return;
@@ -300,7 +300,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
       showAddGame={showAddGame} newGame={newGame} savingGame={savingGame} gameError={gameError}
       editBio={editBio} bio={bio} savingBio={savingBio} onBack={onBack}
       onTabChange={onTabChange} onSelectGame={onSelectGame} onToggleAddGame={onToggleAddGame}
-      onNewGameChange={onNewGameChange} onAddGame={onAddGame} onDeleteGame={onDeleteGame}
+      onNewGameChange={onNewGameChange} onAddGame={onAddGame} onDeleteGame={onDeleteGame} onUpdateGame={onUpdateGame}
       onToggleEditBio={onToggleEditBio} onBioChange={onBioChange} onSaveBio={onSaveBio}
       renderGameBadge={(g) => {
         const gs = gameStats[g.id] ?? { routes: 0, targets: 0, catches: 0 };

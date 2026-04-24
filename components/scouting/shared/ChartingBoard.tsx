@@ -1,4 +1,5 @@
 "use client";
+import { useState } from "react";
 import type { Prospect, ScoutingGame, ChartingDecision } from "../../../lib/types";
 import { GAME_TYPES, CHARTING_DECISIONS } from "./chartingConstants";
 
@@ -33,6 +34,7 @@ export interface ChartingBoardProps {
   onNewGameChange: (update: Partial<{ year: number; opponent: string; type: string }>) => void;
   onAddGame: () => void;
   onDeleteGame: (id: string) => void;
+  onUpdateGame: (id: string, updates: Partial<{ opponent: string; season_year: number; game_type: string }>) => void | Promise<void>;
   onToggleEditBio: () => void;
   onBioChange: (update: Partial<Prospect>) => void;
   onSaveBio: () => void;
@@ -72,11 +74,28 @@ export default function ChartingBoard({
   showAddGame, newGame, savingGame, gameError,
   editBio, bio, savingBio,
   onBack, onTabChange, onSelectGame, onToggleAddGame, onNewGameChange,
-  onAddGame, onDeleteGame, onToggleEditBio, onBioChange, onSaveBio,
+  onAddGame, onDeleteGame, onUpdateGame, onToggleEditBio, onBioChange, onSaveBio,
   renderGameBadge, renderHeaderStats, renderOverview, renderPlayLogger, renderGamesTable, renderExtraTab,
 }: ChartingBoardProps) {
   const a = ACCENT[config.accentColor];
   const selectedGame = games.find((g) => g.id === selectedGameId) ?? null;
+
+  const [editingGameId, setEditingGameId] = useState<string | null>(null);
+  const [editGameOpponent, setEditGameOpponent] = useState("");
+  const [editGameYear, setEditGameYear] = useState<number>(2025);
+
+  function openGameEdit(g: ScoutingGame) {
+    setEditingGameId(g.id);
+    setEditGameOpponent(g.opponent);
+    setEditGameYear(g.season_year);
+  }
+
+  function commitGameEdit(id: string) {
+    const opp = editGameOpponent.trim();
+    if (!opp) { setEditingGameId(null); return; }
+    onUpdateGame(id, { opponent: opp, season_year: editGameYear });
+    setEditingGameId(null);
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -247,16 +266,44 @@ export default function ChartingBoard({
                     className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer border transition ${
                       selectedGameId === g.id ? a.gameSelected : "bg-gray-900 border-gray-800 hover:border-gray-600"
                     }`}
-                    onClick={() => onSelectGame(g.id)}
+                    onClick={() => editingGameId !== g.id && onSelectGame(g.id)}
                   >
                     <div className="flex-1 min-w-0">
-                      <div className="text-xs font-medium text-white truncate">{g.season_year} {g.opponent}</div>
-                      <div className="text-xs text-gray-500 capitalize">{g.game_type}</div>
+                      {editingGameId === g.id ? (
+                        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="number"
+                            min={1900}
+                            max={2100}
+                            value={editGameYear}
+                            onChange={(e) => setEditGameYear(parseInt(e.target.value, 10) || g.season_year)}
+                            onKeyDown={(e) => { if (e.key === "Enter") commitGameEdit(g.id); if (e.key === "Escape") setEditingGameId(null); }}
+                            className="w-14 px-1 py-0.5 bg-gray-800 border border-blue-500 rounded text-white text-xs focus:outline-none text-center"
+                          />
+                          <input
+                            autoFocus
+                            value={editGameOpponent}
+                            onChange={(e) => setEditGameOpponent(e.target.value)}
+                            onBlur={() => commitGameEdit(g.id)}
+                            onKeyDown={(e) => { if (e.key === "Enter") commitGameEdit(g.id); if (e.key === "Escape") setEditingGameId(null); }}
+                            className="flex-1 min-w-0 px-1.5 py-0.5 bg-gray-800 border border-blue-500 rounded text-white text-xs focus:outline-none"
+                          />
+                        </div>
+                      ) : (
+                        <>
+                          <div className="text-xs font-medium text-white truncate">{g.season_year} {g.opponent}</div>
+                          <div className="text-xs text-gray-500 capitalize">{g.game_type}</div>
+                        </>
+                      )}
                     </div>
                     {renderGameBadge
                       ? <div className="flex-shrink-0">{renderGameBadge(g)}</div>
                       : <div className={`text-xs ${a.playCount} flex-shrink-0`}>{gamePlayCounts[g.id] ?? 0}pl</div>
                     }
+                    {editingGameId !== g.id && (
+                      <button onClick={(e) => { e.stopPropagation(); openGameEdit(g); }}
+                        className="text-gray-600 hover:text-blue-400 text-xs px-1 flex-shrink-0" title="Edit game">✎</button>
+                    )}
                     <button onClick={(e) => { e.stopPropagation(); onDeleteGame(g.id); }}
                       className="text-gray-600 hover:text-red-400 text-xs px-1 flex-shrink-0">✕</button>
                   </div>
