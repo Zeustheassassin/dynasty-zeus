@@ -1024,5 +1024,17 @@ export interface ProspectWithStats extends Prospect {
   open_pct_left_on_line: number | null;
   open_pct_left_off_line: number | null;
   open_pct_backfield: number | null;
+  // Counts (denominators) for the open-rate splits above. Used for weighted league totals
+  // so the footer row is a true global rate, not a mean of per-player rates.
+  align_n_slot: number;
+  align_n_slot_on_line: number;
+  align_n_slot_off_line: number;
+  align_n_right: number;
+  align_n_right_on_line: number;
+  align_n_right_off_line: number;
+  align_n_left: number;
+  align_n_left_on_line: number;
+  align_n_left_off_line: number;
+  align_n_backfield: number;
   has_charted_open_data: boolean;
 }

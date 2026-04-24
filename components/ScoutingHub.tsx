@@ -268,14 +268,19 @@ export default function ScoutingHub() {
             prospectGames.filter((g) => g.summary_targets == null).map((g) => g.id)
           );
           const cp = routePlays.filter((pl) => chartedIds.has(pl.game_id));
-          const alignOpen = (align: string, onLine?: boolean): number | null => {
+          const alignFiltered = (align: string, onLine?: boolean) => {
             let filtered = cp.filter((pl) => pl.alignment === align);
             if (onLine === true) filtered = filtered.filter((pl) => pl.on_line);
             if (onLine === false) filtered = filtered.filter((pl) => !pl.on_line);
+            return filtered;
+          };
+          const alignOpen = (align: string, onLine?: boolean): number | null => {
+            const filtered = alignFiltered(align, onLine);
             return filtered.length > 0
               ? parseFloat(((filtered.filter((pl) => pl.was_open).length / filtered.length) * 100).toFixed(1))
               : null;
           };
+          const alignCount = (align: string, onLine?: boolean): number => alignFiltered(align, onLine).length;
           return {
             open_pct_slot: alignOpen("slot"),
             open_pct_slot_on_line: alignOpen("slot", true),
@@ -287,6 +292,16 @@ export default function ScoutingHub() {
             open_pct_left_on_line: alignOpen("left", true),
             open_pct_left_off_line: alignOpen("left", false),
             open_pct_backfield: alignOpen("backfield"),
+            align_n_slot: alignCount("slot"),
+            align_n_slot_on_line: alignCount("slot", true),
+            align_n_slot_off_line: alignCount("slot", false),
+            align_n_right: alignCount("right"),
+            align_n_right_on_line: alignCount("right", true),
+            align_n_right_off_line: alignCount("right", false),
+            align_n_left: alignCount("left"),
+            align_n_left_on_line: alignCount("left", true),
+            align_n_left_off_line: alignCount("left", false),
+            align_n_backfield: alignCount("backfield"),
           };
         })(),
       };

@@ -19,6 +19,10 @@ export interface ColDef {
   tooltip?: string;
   /** Fixed value to show in the League footer row instead of the computed mean/total */
   leagueOverride?: number;
+  /** For pct columns: row field name holding the denominator (e.g. number of attempts).
+   *  When set, the league total is sum(pct*weight) / sum(weight), not mean of percentages.
+   *  This produces a true global rate instead of average-of-averages. */
+  weightBy?: string;
 }
 
 interface Props {
@@ -136,14 +140,34 @@ export default function StatsTableShell({
     const result: Record<string, number | null> = {};
     for (const c of cols) {
       if (c.fmt === "yr" || c.fmt === "name" || c.sticky) { result[c.key] = null; continue; }
-      const vals = rows.map((r) => r[c.key]).filter((v): v is number => typeof v === "number" && !isNaN(v));
       if (c.leagueOverride !== undefined) { result[c.key] = c.leagueOverride; continue; }
+      // Weighted average for pct columns with a denominator: sum(pct*weight) / sum(weight).
+      // This gives a true global rate instead of the (wrong) mean of per-player percentages.
+      // Falls through to plain mean if the denominator field isn't on any row (e.g. data gap).
+      if (c.weightBy && c.fmt === "pct") {
+        let weightedSum = 0;
+        let totalWeight = 0;
+        for (const row of rows) {
+          const pct = row[c.key];
+          const weight = row[c.weightBy];
+          if (typeof pct === "number" && !isNaN(pct) && typeof weight === "number" && !isNaN(weight) && weight > 0) {
+            weightedSum += pct * weight;
+            totalWeight += weight;
+          }
+        }
+        if (totalWeight > 0) {
+          result[c.key] = parseFloat((weightedSum / totalWeight).toFixed(1));
+          continue;
+        }
+        // fall through to mean fallback
+      }
+      const vals = rows.map((r) => r[c.key]).filter((v): v is number => typeof v === "number" && !isNaN(v));
       if (vals.length === 0) { result[c.key] = null; continue; }
       if (c.fmt === "count") {
         // Raw count columns: show total
         result[c.key] = vals.reduce((s, v) => s + v, 0);
       } else {
-        // Pct / dec1 / plusMinus: show mean
+        // Pct / dec1 / plusMinus without a weightBy: fall back to mean
         result[c.key] = parseFloat((vals.reduce((s, v) => s + v, 0) / vals.length).toFixed(1));
       }
     }
