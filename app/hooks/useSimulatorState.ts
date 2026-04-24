@@ -80,6 +80,10 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
   const [draftSlotSearchQuery, setDraftSlotSearchQuery] = useState("");
   // Always reflects the current league — read in save effect via ref so league switches don't trigger saves with stale picks
   const draftLeagueRef = useRef(selectedLeague?.league_id);
+  // Tracks the last value loaded from (or saved to) Supabase, keyed by league_id. Save effect
+  // skips when current state matches the synced value — this prevents legacy localStorage data
+  // from being re-uploaded to Supabase on every page load (which kept undoing user resets).
+  const lastSyncedDraftPicksRef = useRef<string>("");
   // Sync ref inside an effect (not during render) — must be declared before load/save effects
   // so React runs it first and the save effect always sees the current league ID.
   useEffect(() => {
@@ -118,14 +122,18 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
       });
   }, [supabaseUser]);
 
-  // Load saved draft slot picks — localStorage first (instant), Supabase as source-of-truth if available
+  // Load saved draft slot picks — localStorage paint instantly, then Supabase is the source of truth.
+  // The Supabase result always overwrites local state and localStorage, even when empty, so a reset
+  // on one device propagates correctly. lastSyncedDraftPicksRef is set to the loaded value so the
+  // save effect can tell user-edits apart from system-loads.
   useEffect(() => {
     if (!selectedLeague?.league_id) return;
     let cancelled = false;
     const lsKey = `draftPicks_${selectedLeague.league_id}_${ROOKIE_YEAR}`;
-    const saved = getLocalStorageItem<Record<string, string> | null>(lsKey, null);
+    const saved = getLocalStorageItem<Record<string, string> | null>(lsKey, null) ?? {};
+    lastSyncedDraftPicksRef.current = JSON.stringify(saved);
     // eslint-disable-next-line react-hooks/set-state-in-effect -- reading external localStorage source for this league; async Supabase overwrites below
-    setMyDraftSlotPicks(saved ?? {});
+    setMyDraftSlotPicks(saved);
     if (!supabaseUser) return;
     supabase
       .from("draft_board_picks")
@@ -135,36 +143,58 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
       .eq("season", ROOKIE_YEAR)
       .then(({ data }) => {
         if (cancelled) return;
-        if (!data?.length) return;
         const picks: Record<string, string> = {};
-        data.forEach((row) => { picks[row.pick_slot] = row.player_id; });
+        (data ?? []).forEach((row) => { picks[row.pick_slot] = row.player_id; });
+        lastSyncedDraftPicksRef.current = JSON.stringify(picks);
         setMyDraftSlotPicks(picks);
         setLocalStorageItem(lsKey, picks);
       });
     return () => { cancelled = true; };
   }, [supabaseUser, selectedLeague?.league_id]);
 
-  // Save draft slot picks — localStorage immediately, Supabase async (best-effort)
-  // Uses draftLeagueRef (not selectedLeague in deps) so a league switch doesn't trigger a save
-  // with the outgoing league's picks written under the incoming league's ID.
+  // Save draft slot picks — localStorage + Supabase, only on actual user edits.
+  // - Uses draftLeagueRef (not selectedLeague in deps) so a league switch doesn't trigger a save
+  //   with the outgoing league's picks written under the incoming league's ID.
+  // - Skips when current state equals lastSyncedDraftPicksRef — that means the change came from a
+  //   load (LS or Supabase), not a user edit. This stops legacy localStorage data from being
+  //   re-uploaded to Supabase on every page open, which was undoing user resets.
+  // - Diffs against the synced state to detect removed slots and deletes their Supabase rows,
+  //   so cleanup (e.g. placeholder dropped because the slot was actually drafted) persists.
   useEffect(() => {
     const leagueId = draftLeagueRef.current;
-    if (!leagueId || !Object.keys(myDraftSlotPicks).length) return;
+    if (!leagueId) return;
+    const currentJson = JSON.stringify(myDraftSlotPicks);
+    if (currentJson === lastSyncedDraftPicksRef.current) return;
     const lsKey = `draftPicks_${leagueId}_${ROOKIE_YEAR}`;
     setLocalStorageItem(lsKey, myDraftSlotPicks);
+    const previousPicks = JSON.parse(lastSyncedDraftPicksRef.current || "{}") as Record<string, string>;
+    const removedSlots = Object.keys(previousPicks).filter((slot) => !(slot in myDraftSlotPicks));
+    lastSyncedDraftPicksRef.current = currentJson;
     if (!supabaseUser) return;
-    const rows = Object.entries(myDraftSlotPicks).map(([pick_slot, player_id]) => ({
-      user_id: supabaseUser.id,
-      league_id: leagueId,
-      season: ROOKIE_YEAR,
-      pick_slot,
-      player_id,
-      updated_at: new Date().toISOString(),
-    }));
-    supabase
-      .from("draft_board_picks")
-      .upsert(rows, { onConflict: "user_id,league_id,season,pick_slot" })
-      .then(() => {}, (err: unknown) => log.error("draft_board_picks upsert failed", { err: String(err) }));
+    if (removedSlots.length > 0) {
+      supabase
+        .from("draft_board_picks")
+        .delete()
+        .eq("user_id", supabaseUser.id)
+        .eq("league_id", leagueId)
+        .eq("season", ROOKIE_YEAR)
+        .in("pick_slot", removedSlots)
+        .then(() => {}, (err: unknown) => log.error("draft_board_picks delete failed", { err: String(err) }));
+    }
+    if (Object.keys(myDraftSlotPicks).length > 0) {
+      const rows = Object.entries(myDraftSlotPicks).map(([pick_slot, player_id]) => ({
+        user_id: supabaseUser.id,
+        league_id: leagueId,
+        season: ROOKIE_YEAR,
+        pick_slot,
+        player_id,
+        updated_at: new Date().toISOString(),
+      }));
+      supabase
+        .from("draft_board_picks")
+        .upsert(rows, { onConflict: "user_id,league_id,season,pick_slot" })
+        .then(() => {}, (err: unknown) => log.error("draft_board_picks upsert failed", { err: String(err) }));
+    }
   }, [supabaseUser, myDraftSlotPicks]);
 
   const selectedLeagueSimulation = useMemo((): LeagueSimulation | null => {

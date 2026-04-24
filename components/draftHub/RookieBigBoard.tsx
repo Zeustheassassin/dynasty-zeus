@@ -141,6 +141,38 @@ export default function RookieBigBoard({
     });
   };
 
+  const syncDraftInfoToSupabase = useCallback((info: Record<string, NflDraftEntry>) => {
+    if (!supabaseUser) return;
+    supabase.from("player_nfl_draft_info").upsert(
+      { user_id: supabaseUser.id, draft_info: info, updated_at: new Date().toISOString() },
+      { onConflict: "user_id" }
+    ).then(({ error }) => {
+      if (error) log.error("nfl draft info sync failed", { err: error.message });
+    });
+  }, [supabaseUser]);
+
+  // Load NFL draft info from Supabase when signed in; falls back to localStorage and uploads
+  // any local-only data on first sync so existing entries survive the migration.
+  useEffect(() => {
+    if (!supabaseUser) return;
+    supabase
+      .from("player_nfl_draft_info")
+      .select("draft_info")
+      .eq("user_id", supabaseUser.id)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (error) { log.error("nfl draft info load failed", { err: error.message }); return; }
+        const remote = (data?.draft_info ?? null) as Record<string, NflDraftEntry> | null;
+        if (remote && Object.keys(remote).length > 0) {
+          setNflDraftInfo(remote);
+          setLocalStorageItem("nflDraftInfo", remote);
+        } else {
+          const local = getLocalStorageItem<Record<string, NflDraftEntry>>("nflDraftInfo", {});
+          if (Object.keys(local).length > 0) syncDraftInfoToSupabase(local);
+        }
+      });
+  }, [supabaseUser, syncDraftInfoToSupabase]);
+
   const saveTier = (playerId: string, tierNum: number) => {
     const next = { ...tierLabels, [playerId]: tierNum };
     setTierLabels(next);
@@ -213,6 +245,7 @@ export default function RookieBigBoard({
     }
     setNflDraftInfo(updated);
     setLocalStorageItem("nflDraftInfo", updated);
+    syncDraftInfoToSupabase(updated);
     setEditingDraftId(null);
   }
 

@@ -1,4 +1,5 @@
 "use client";
+import { useEffect } from "react";
 import { supabase } from "../../lib/supabaseclient";
 import { usePlayers } from "../../lib/PlayersContext";
 import { useAuth } from "../../lib/AuthContext";
@@ -54,6 +55,33 @@ export default function LiveDraftBoard({
   rosters.forEach((r) => {
     rosterToName[Number(r.roster_id)] = users[r.owner_id] || `Team ${r.roster_id}`;
   });
+
+  // Auto-cleanup: drop placeholder picks for slots that now have actual draft picks,
+  // and drop placeholders whose player has been drafted elsewhere. Runs whenever the
+  // Sleeper draft data changes. The save effect persists the cleanup to Supabase.
+  useEffect(() => {
+    if (!Object.keys(myDraftSlotPicks).length) return;
+    setMyDraftSlotPicks((prev) => {
+      const cleaned: Record<string, string> = {};
+      let changed = false;
+      for (const [slot, playerId] of Object.entries(prev)) {
+        if (draftedPlayerIds.has(String(playerId))) { changed = true; continue; }
+        const m = slot.match(/^(\d+)\.(\d+)$/);
+        if (m) {
+          const round = Number(m[1]);
+          const slotNum = Number(m[2]);
+          const ownerSleeperId = Object.keys(draftOrder).find((uid) => draftOrder[uid] === slotNum);
+          const ownerRosterId = ownerSleeperId ? rosters.find((r) => r.owner_id === ownerSleeperId)?.roster_id : null;
+          if (ownerRosterId != null) {
+            const hasActualPick = draftPicks.some((dp) => dp.round === round && Number(dp.roster_id) === Number(ownerRosterId));
+            if (hasActualPick) { changed = true; continue; }
+          }
+        }
+        cleaned[slot] = playerId;
+      }
+      return changed ? cleaned : prev;
+    });
+  }, [draftPicks, draftedPlayerIds, draftOrder, rosters, myDraftSlotPicks, setMyDraftSlotPicks]);
 
   return (
     <>
