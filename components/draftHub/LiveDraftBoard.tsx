@@ -73,16 +73,17 @@ export default function LiveDraftBoard({
         if (m) {
           const round = Number(m[1]);
           const slotNum = Number(m[2]);
-          // Match by draft_slot (column), not roster_id — owners with multiple picks
-          // in the same round would otherwise have unrelated cells incorrectly cleared.
-          const hasActualPick = draftPicks.some((dp) => dp.round === round && dp.draft_slot === slotNum);
+          // Match by overall pick_no — placeholder slot 2.05 means "5th pick of round 2"
+          // (linear display), not "team at draft_slot 5's round-2 pick" which differs in snake.
+          const overallPickNo = (round - 1) * rosters.length + slotNum;
+          const hasActualPick = draftPicks.some((dp) => dp.pick_no === overallPickNo);
           if (hasActualPick) { changed = true; continue; }
         }
         cleaned[slot] = playerId;
       }
       return changed ? cleaned : prev;
     });
-  }, [draftPicks, draftedPlayerIds, myDraftSlotPicks, setMyDraftSlotPicks]);
+  }, [draftPicks, draftedPlayerIds, rosters, myDraftSlotPicks, setMyDraftSlotPicks]);
 
   return (
     <>
@@ -205,12 +206,12 @@ export default function LiveDraftBoard({
 
               return roundPicks.map((pick, i) => {
                 const slotStr = pick.slot;
-                // Match by draft_slot (column 1-12), not roster_id. When one owner holds multiple
-                // picks in the same round (via trades), matching by roster_id returns the same
-                // pick for every cell they own — making round 1 look fully drafted after pick 1.
-                const playerPick = draftPicks.find(
-                  (dp) => dp.round === round && dp.draft_slot === i + 1
-                );
+                // Match by overall pick_no so cells display in linear pick-number order
+                // regardless of snake vs linear draft format. In a snake draft, Sleeper's
+                // draft_slot reflects the team's permanent column — using it would push
+                // round-2 picks to the right side of the board (the user's complaint).
+                const overallPickNo = (round - 1) * rosters.length + (i + 1);
+                const playerPick = draftPicks.find((dp) => dp.pick_no === overallPickNo);
                 const actualPlayer = playerPick ? players[playerPick.player_id] : null;
                 const isMySlot = pick.owner_id && String(pick.owner_id) === String(myRosterId);
                 const userOverrideId = myDraftSlotPicks[slotStr];
