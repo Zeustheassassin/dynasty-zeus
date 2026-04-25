@@ -70,18 +70,16 @@ export default function LiveDraftBoard({
         if (m) {
           const round = Number(m[1]);
           const slotNum = Number(m[2]);
-          const ownerSleeperId = Object.keys(draftOrder).find((uid) => draftOrder[uid] === slotNum);
-          const ownerRosterId = ownerSleeperId ? rosters.find((r) => r.owner_id === ownerSleeperId)?.roster_id : null;
-          if (ownerRosterId != null) {
-            const hasActualPick = draftPicks.some((dp) => dp.round === round && Number(dp.roster_id) === Number(ownerRosterId));
-            if (hasActualPick) { changed = true; continue; }
-          }
+          // Match by draft_slot (column), not roster_id — owners with multiple picks
+          // in the same round would otherwise have unrelated cells incorrectly cleared.
+          const hasActualPick = draftPicks.some((dp) => dp.round === round && dp.draft_slot === slotNum);
+          if (hasActualPick) { changed = true; continue; }
         }
         cleaned[slot] = playerId;
       }
       return changed ? cleaned : prev;
     });
-  }, [draftPicks, draftedPlayerIds, draftOrder, rosters, myDraftSlotPicks, setMyDraftSlotPicks]);
+  }, [draftPicks, draftedPlayerIds, myDraftSlotPicks, setMyDraftSlotPicks]);
 
   return (
     <>
@@ -204,8 +202,11 @@ export default function LiveDraftBoard({
 
               return roundPicks.map((pick, i) => {
                 const slotStr = pick.slot;
+                // Match by draft_slot (column 1-12), not roster_id. When one owner holds multiple
+                // picks in the same round (via trades), matching by roster_id returns the same
+                // pick for every cell they own — making round 1 look fully drafted after pick 1.
                 const playerPick = draftPicks.find(
-                  (dp) => dp.round === round && dp.roster_id === pick.owner_id
+                  (dp) => dp.round === round && dp.draft_slot === i + 1
                 );
                 const actualPlayer = playerPick ? players[playerPick.player_id] : null;
                 const isMySlot = pick.owner_id && String(pick.owner_id) === String(myRosterId);
