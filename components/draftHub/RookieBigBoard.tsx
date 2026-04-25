@@ -8,7 +8,7 @@ import { CURRENT_YEAR as ROOKIE_YEAR } from "../../lib/helpers";
 import { useAuth } from "../../lib/AuthContext";
 import { useValues } from "../../lib/ValuesContext";
 import type { RookieBoardPlayer } from "../../lib/types";
-import { posBadge, rookieKey, fuzzyFcLookup } from "./shared";
+import { posBadge, rookieKey, fuzzyFcLookup, normalizeRookieName } from "./shared";
 import { getLocalStorageItem, setLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 
 const log = logger("components/draftHub/RookieBigBoard");
@@ -436,7 +436,11 @@ export default function RookieBigBoard({
               : null;
 
             const playerDynVal = fcVal(p);
-            const isTaken = draftedPlayerIds.has(String(p.player_id));
+            // Match by both player_id and normalized name — name-only rookies (e.g. unmatched
+            // FantasyCalc entries with no Sleeper player_id) would otherwise never show TAKEN
+            // when drafted by other teams.
+            const isTaken = (!!p.player_id && draftedPlayerIds.has(String(p.player_id)))
+              || (!!p.name && draftedPlayerIds.has(`name:${normalizeRookieName(p.name)}`));
 
             return (
               <div
