@@ -65,7 +65,10 @@ export default function LiveDraftBoard({
       const cleaned: Record<string, string> = {};
       let changed = false;
       for (const [slot, playerId] of Object.entries(prev)) {
+        // Placeholder values can be either a Sleeper player_id OR a raw name. Check both forms
+        // so name-only placeholders (e.g. unmatched FantasyCalc names) get cleaned when picked.
         if (draftedPlayerIds.has(String(playerId))) { changed = true; continue; }
+        if (draftedPlayerIds.has(`name:${normalizeRookieName(String(playerId))}`)) { changed = true; continue; }
         const m = slot.match(/^(\d+)\.(\d+)$/);
         if (m) {
           const round = Number(m[1]);

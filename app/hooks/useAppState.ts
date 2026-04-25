@@ -7,6 +7,7 @@ import { logger } from "../../lib/logger";
 const log = logger("app/page");
 import { useAuthState, LAST_LOGIN_EMAIL_KEY } from "./useAuthState";
 import { useHubRouting } from "./useHubRouting";
+import { normalizeRookieName } from "../../components/draftHub/shared";
 import {
   CURRENT_YEAR, YEARS, ROUNDS,
   getStoredPickValue, getDraftRoundSlot,
@@ -2757,10 +2758,18 @@ const getTeamSummary = useCallback(() => {
     return briefings.sort((a, b) => urgencyOrder[a.urgency] - urgencyOrder[b.urgency]);
   }, [leagueOverviewData, user, calcFcValues, redraftValues, players, pickFcValues, fcTrendData, committedSimsByLeague, leagueSimCache]);
 
-  const draftedPlayerIds = useMemo(
-    () => new Set(draftPicks.map((pick) => String(pick.player_id)).filter(Boolean)),
-    [draftPicks]
-  );
+  // Drafted players keyed by both Sleeper player_id AND `name:<normalized>` so the rookie
+  // board (which often contains name-only entries from FantasyCalc with no player_id)
+  // can be filtered by name when the ID match misses.
+  const draftedPlayerIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const pick of draftPicks) {
+      if (pick.player_id) set.add(String(pick.player_id));
+      const player = players[pick.player_id];
+      if (player?.full_name) set.add(`name:${normalizeRookieName(player.full_name)}`);
+    }
+    return set;
+  }, [draftPicks, players]);
 
   // ── Draft board prediction engine ─────────────────────────────────────────
   // Key design decisions:
@@ -3017,7 +3026,11 @@ const getTeamSummary = useCallback(() => {
           ...player,
           boardRank: index + 1,
         }))
-        .filter((player: RookieBoardPlayer & { boardRank: number }) => !draftedPlayerIds.has(String(player.player_id)))
+        .filter((player: RookieBoardPlayer & { boardRank: number }) => {
+          if (player.player_id && draftedPlayerIds.has(String(player.player_id))) return false;
+          if (player.name && draftedPlayerIds.has(`name:${normalizeRookieName(player.name)}`)) return false;
+          return true;
+        })
         .slice(0, 10),
     [rookies, draftedPlayerIds]
   );
