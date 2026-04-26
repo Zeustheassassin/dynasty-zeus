@@ -224,10 +224,17 @@ async function compileDrafts(
         drafts.forEach((d: SleeperDraftBasic) => {
           const season = parseInt(String(d.season), 10);
           if (!years.includes(season)) return;
-          // Never compile the current calendar year — the NFL Draft hasn't happened yet
-          // so any "complete" drafts are startup/veteran drafts, not rookie drafts
-          if (season >= currentYear) return;
-          if (d.status !== "complete") return;
+          // Past years: completed drafts only.
+          // Current year: also accept in-progress drafts so partial picks contribute to a
+          // rough live ADP signal. The ≤6-round filter + per-pick years_exp check below
+          // keep startup/veteran drafts and veterans out of the rookie consensus.
+          if (season < currentYear) {
+            if (d.status !== "complete") return;
+          } else if (season === currentYear) {
+            if (d.status !== "complete" && d.status !== "drafting" && d.status !== "paused") return;
+          } else {
+            return; // future years (shouldn't happen, but skip)
+          }
           // Rookie-only drafts have ≤6 rounds; skip startup/full-roster drafts
           const rounds = d.settings?.rounds ?? 99;
           if (rounds > 6) return;

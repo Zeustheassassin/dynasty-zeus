@@ -77,7 +77,12 @@ export default function ConsensusTab({
   const totalDraftsForYear = hasCachedRows
     ? (meta?.draftCount ?? 0)
     : filteredDrafts.length;
-  const minDrafts = Math.max(1, Math.ceil(totalDraftsForYear * 0.08));
+  // Past years require 8% of compiled drafts to surface a player. Current year drops to 3%
+  // because most drafts are still in progress and contribute fewer picks each — the 8% bar
+  // would over-filter and hide legitimate live ADP signal.
+  const isCurrentYear = selectedHistoryYear === String(new Date().getFullYear());
+  const minDraftsPct = isCurrentYear ? 0.03 : 0.08;
+  const minDrafts = Math.max(1, Math.ceil(totalDraftsForYear * minDraftsPct));
 
   interface DisplayListEntry { player_id: string; name: string; position: string; team: string; avgPickNo: number; draftCount: number; value: number; }
   const displayList: DisplayListEntry[] = (hasCachedRows
