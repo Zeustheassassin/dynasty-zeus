@@ -26,12 +26,18 @@ interface RookieBigBoardProps {
   draftedPlayerIds: Set<string>;
   movePlayer: (fromIndex: number, toIndex: number) => void;
   handleRankChange: (currentIndex: number, newRank: string) => void;
+  addRookie: (name: string, position: string) => void;
+  editRookieName: (originalName: string, newName: string) => void;
+  removeAddedRookie: (name: string) => void;
+  clearNameEdit: (originalName: string) => void;
+  rookieOverrides: { added: { name: string; position: string }[]; nameEdits: Record<string, string> };
 }
 
 export default function RookieBigBoard({
   rookies, rookieSearch, setRookieSearch,
   dragIndex, setDragIndex, tempRanks, setTempRanks,
   draftedPlayerIds, movePlayer, handleRankChange,
+  addRookie, editRookieName, removeAddedRookie, clearNameEdit, rookieOverrides,
 }: RookieBigBoardProps) {
   const { supabaseUser } = useAuth();
   const { fcNameValues } = useValues();
@@ -53,6 +59,31 @@ export default function RookieBigBoard({
   const [snapshotName, setSnapshotName]   = useState("");
   const [saving, setSaving]               = useState(false);
   const [saveSuccess, setSaveSuccess]     = useState(false);
+
+  // Add Rookie modal
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [addName, setAddName]           = useState("");
+  const [addPosition, setAddPosition]   = useState<"QB" | "RB" | "WR" | "TE">("WR");
+
+  // Inline rename per row
+  const [editingNameId, setEditingNameId] = useState<string | null>(null);
+  const [editName, setEditName]           = useState("");
+
+  function commitAddRookie() {
+    if (!addName.trim()) return;
+    addRookie(addName, addPosition);
+    setAddName("");
+    setAddPosition("WR");
+    setShowAddModal(false);
+  }
+
+  function commitNameEdit(originalName: string) {
+    editRookieName(originalName, editName);
+    setEditingNameId(null);
+  }
+
+  // Quick lookup so each row knows whether it's a user-added rookie (deletable) or just renamed.
+  const addedNameSet = new Set(rookieOverrides.added.map((a) => a.name.toLowerCase()));
 
   const fcVal = useCallback(
     (r: RookieBoardPlayer): number => fuzzyFcLookup(r.name, fcNameValues) || r.fcValue || 0,
@@ -252,6 +283,64 @@ export default function RookieBigBoard({
   return (
     <div className="max-w-3xl mx-auto">
 
+      {/* Add Rookie modal */}
+      {showAddModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => setShowAddModal(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="add-rookie-title"
+            tabIndex={-1}
+            onKeyDown={(e) => { if (e.key === "Escape") setShowAddModal(false); }}
+            className="bg-gray-900 border border-gray-700 rounded-2xl p-5 w-full max-w-sm mx-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="add-rookie-title" className="text-white font-semibold text-sm mb-1">Add Rookie</h2>
+            <p className="text-gray-500 text-xs mb-4">
+              Add a player who isn&apos;t in the upstream rookie list. Spelling matters — exact matches to Sleeper&apos;s player database get team / ADP / FC value automatically.
+            </p>
+            <input
+              autoFocus
+              type="text"
+              placeholder="Player name (e.g. Cam Skattebo)"
+              value={addName}
+              onChange={(e) => setAddName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") commitAddRookie(); }}
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:border-indigo-500 mb-3"
+            />
+            <div className="flex gap-1.5 mb-4">
+              {(["QB", "RB", "WR", "TE"] as const).map((pos) => (
+                <button
+                  key={pos}
+                  onClick={() => setAddPosition(pos)}
+                  className={`flex-1 px-2 py-1.5 text-xs font-bold rounded border transition ${
+                    addPosition === pos
+                      ? posBadge[pos] + " border-transparent"
+                      : "border-gray-700 text-gray-500 hover:text-white"
+                  }`}
+                >
+                  {pos}
+                </button>
+              ))}
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowAddModal(false)}
+                className="px-4 py-1.5 text-sm text-gray-400 hover:text-white transition"
+              >Cancel</button>
+              <button
+                onClick={commitAddRookie}
+                disabled={!addName.trim()}
+                className="px-4 py-1.5 text-sm font-semibold rounded-lg transition disabled:opacity-50 bg-indigo-600 hover:bg-indigo-500 text-white"
+              >Add</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Save Board modal */}
       {showSaveModal && (
         <div
@@ -358,6 +447,12 @@ export default function RookieBigBoard({
         {rookieSearch && (
           <span className="text-[11px] text-gray-500">Tiers hidden while searching</span>
         )}
+        <button
+          onClick={() => setShowAddModal(true)}
+          className="px-3 py-1.5 text-xs font-semibold bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition shrink-0"
+        >
+          + Add Rookie
+        </button>
         {supabaseUser && (
           <button
             onClick={() => setShowSaveModal(true)}
@@ -466,8 +561,8 @@ export default function RookieBigBoard({
                 )}
 
                 <div
-                  draggable={editingDraftId !== tierKey}
-                  onDragStart={() => { if (editingDraftId !== tierKey) setDragIndex(originalIndex); }}
+                  draggable={editingDraftId !== tierKey && editingNameId !== tierKey}
+                  onDragStart={() => { if (editingDraftId !== tierKey && editingNameId !== tierKey) setDragIndex(originalIndex); }}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={() => {
                     if (dragIndex !== null) {
@@ -497,7 +592,20 @@ export default function RookieBigBoard({
                       className="w-12 text-center bg-transparent text-gray-400 outline-none"
                     />
                     <div className="flex items-center gap-2 min-w-0">
-                      <span className="font-medium truncate">{p.name}</span>
+                      {editingNameId === tierKey ? (
+                        <input
+                          autoFocus
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          onBlur={() => commitNameEdit(p.name)}
+                          onKeyDown={(e) => { if (e.key === "Enter") commitNameEdit(p.name); if (e.key === "Escape") setEditingNameId(null); }}
+                          onClick={(e) => e.stopPropagation()}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          className="font-medium px-1.5 py-0.5 bg-gray-900 border border-blue-500 rounded text-white focus:outline-none min-w-0 flex-shrink"
+                        />
+                      ) : (
+                        <span className="font-medium truncate">{p.name}</span>
+                      )}
                       <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold shrink-0 ${posBadge[p.position] || "bg-gray-700 text-gray-400"}`}>
                         {p.position}
                       </span>
@@ -569,6 +677,35 @@ export default function RookieBigBoard({
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0 ml-2">
+                    {/* Edit name + (for renamed rookies) reset to upstream + (for user-added) delete */}
+                    {editingNameId !== tierKey && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setEditName(p.name); setEditingNameId(tierKey); }}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        className="text-gray-600 hover:text-blue-400 text-xs leading-none"
+                        title="Edit name"
+                      >✎</button>
+                    )}
+                    {editingNameId !== tierKey && Object.values(rookieOverrides.nameEdits).some((v) => v.toLowerCase() === p.name.toLowerCase()) && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const entry = Object.entries(rookieOverrides.nameEdits).find(([, v]) => v.toLowerCase() === p.name.toLowerCase());
+                          if (entry) clearNameEdit(entry[0]);
+                        }}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        className="text-gray-600 hover:text-yellow-400 text-xs leading-none"
+                        title="Reset to original sheet name"
+                      >↺</button>
+                    )}
+                    {addedNameSet.has(p.name.toLowerCase()) && editingNameId !== tierKey && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); if (window.confirm(`Remove ${p.name} from your rookie board?`)) removeAddedRookie(p.name); }}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        className="text-gray-600 hover:text-red-400 text-xs leading-none"
+                        title="Remove from board"
+                      >✕</button>
+                    )}
                     {isTaken && <span className="text-[9px] font-bold text-gray-500 border border-gray-700 px-1 py-0.5 rounded leading-none">TAKEN</span>}
                     {gap === null ? (
                       <span className="text-[10px] font-bold px-1.5 py-0.5 rounded text-gray-400 bg-gray-700/60 border border-gray-600/40" title="Not ranked by FantasyCalc">NR</span>

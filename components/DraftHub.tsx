@@ -44,6 +44,11 @@ interface DraftHubProps {
   loadDraftScout: (userId: string) => void;
   movePlayer: (fromIndex: number, toIndex: number) => void;
   handleRankChange: (currentIndex: number, newRank: string) => void;
+  addRookie: (name: string, position: string) => void;
+  editRookieName: (originalName: string, newName: string) => void;
+  removeAddedRookie: (name: string) => void;
+  clearNameEdit: (originalName: string) => void;
+  rookieOverrides: { added: { name: string; position: string }[]; nameEdits: Record<string, string> };
   loadingDraftRefresh: boolean;
 
   leagues: SleeperLeague[];
@@ -60,6 +65,7 @@ function DraftHub({
   rookies,
   draftedPlayerIds, predictedDraftPicks, topAvailableRookies,
   refreshDraftBoard, loadDraftScout, movePlayer, handleRankChange,
+  addRookie, editRookieName, removeAddedRookie, clearNameEdit, rookieOverrides,
   loadingDraftRefresh,
   leagues,
 }: DraftHubProps) {
@@ -141,6 +147,11 @@ function DraftHub({
           draftedPlayerIds={draftedPlayerIds}
           movePlayer={movePlayer}
           handleRankChange={handleRankChange}
+          addRookie={addRookie}
+          editRookieName={editRookieName}
+          removeAddedRookie={removeAddedRookie}
+          clearNameEdit={clearNameEdit}
+          rookieOverrides={rookieOverrides}
         />
       )}
 

@@ -13,6 +13,27 @@ export const ROOKIE_YEAR = CURRENT_YEAR;
 export const ROOKIE_BOARD_POSITIONS = new Set(["QB", "RB", "WR", "TE"]);
 export const ROOKIE_BOARD_VERSION = `${ROOKIE_YEAR}_sf_v5`;
 export const ROOKIE_BOARD_RESET_KEY = `rookieBoardReset_${ROOKIE_BOARD_VERSION}`;
+
+// Built-in name corrections for upstream sheet typos. Applied as a fallback when the user
+// hasn't set their own override for that name. User overrides (in rookie_board_overrides
+// table) take precedence over this list.
+const ROOKIE_NAME_CORRECTIONS: Record<string, string> = {
+  "max kalre": "Max Klare",
+};
+
+const ROOKIE_OVERRIDES_LS_KEY = `rookieBoardOverrides_${ROOKIE_BOARD_VERSION}`;
+
+export interface RookieAddition {
+  name: string;
+  position: string;
+}
+
+export interface UserRookieOverrides {
+  added: RookieAddition[];
+  nameEdits: Record<string, string>; // normalized old name → corrected name
+}
+
+const EMPTY_OVERRIDES: UserRookieOverrides = { added: [], nameEdits: {} };
 const ROOKIE_BOARD_ADP_URL =
   `https://api.sleeper.app/projections/nfl/${ROOKIE_YEAR}?season_type=regular` +
   `&position=QB&position=RB&position=WR&position=TE&order_by=adp_dynasty_2qb`;
@@ -22,16 +43,96 @@ export interface UseRookieBoardStateReturn {
   setRookies: Dispatch<SetStateAction<RookieBoardPlayer[]>>;
   fcNameValues: Record<string, number>;
   handleRankChange: (currentIndex: number, newRank: string) => void;
+  addRookie: (name: string, position: string) => void;
+  editRookieName: (originalName: string, newName: string) => void;
+  removeAddedRookie: (name: string) => void;
+  clearNameEdit: (originalName: string) => void;
+  rookieOverrides: UserRookieOverrides;
 }
 
 export function useRookieBoardState(supabaseUser: { id: string } | null): UseRookieBoardStateReturn {
   const [rookies, setRookies] = useState<RookieBoardPlayer[]>([]);
   const [fcNameValues, setFcNameValues] = useState<Record<string, number>>({});
+  const [rookieOverrides, setRookieOverrides] = useState<UserRookieOverrides>(() =>
+    getLocalStorageItem<UserRookieOverrides>(ROOKIE_OVERRIDES_LS_KEY, EMPTY_OVERRIDES)
+  );
 
   // Stable ref so the save-effect can read the current user without declaring
   // supabaseUser as a dependency (which would overwrite Supabase data on login).
   const supabaseUserRef = useRef<{ id: string } | null>(null);
   useEffect(() => { supabaseUserRef.current = supabaseUser; }, [supabaseUser]);
+
+  // Load user overrides (additions + name edits) from Supabase on login.
+  useEffect(() => {
+    if (!supabaseUser?.id) return;
+    supabase
+      .from("rookie_board_overrides")
+      .select("added,name_edits")
+      .eq("user_id", supabaseUser.id)
+      .eq("year", ROOKIE_BOARD_VERSION)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (error) { log.error("rookie_board_overrides load failed", { err: error.message }); return; }
+        if (!data) return;
+        const next: UserRookieOverrides = {
+          added: Array.isArray(data.added) ? (data.added as RookieAddition[]) : [],
+          nameEdits: (data.name_edits && typeof data.name_edits === "object")
+            ? (data.name_edits as Record<string, string>) : {},
+        };
+        setRookieOverrides(next);
+        setLocalStorageItem(ROOKIE_OVERRIDES_LS_KEY, next);
+      });
+  }, [supabaseUser?.id]);
+
+  // Persist override changes to localStorage + Supabase.
+  const saveOverrides = (next: UserRookieOverrides) => {
+    setRookieOverrides(next);
+    setLocalStorageItem(ROOKIE_OVERRIDES_LS_KEY, next);
+    const user = supabaseUserRef.current;
+    if (user) {
+      supabase.from("rookie_board_overrides").upsert(
+        {
+          user_id: user.id,
+          year: ROOKIE_BOARD_VERSION,
+          added: next.added,
+          name_edits: next.nameEdits,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id,year" }
+      ).then(({ error }) => {
+        if (error) log.error("rookie_board_overrides save failed", { err: error.message });
+      });
+    }
+  };
+
+  const addRookie = (name: string, position: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const norm = normalizeRookieName(trimmed);
+    if (rookieOverrides.added.some((a) => normalizeRookieName(a.name) === norm)) return;
+    saveOverrides({ ...rookieOverrides, added: [...rookieOverrides.added, { name: trimmed, position }] });
+  };
+
+  const editRookieName = (originalName: string, newName: string) => {
+    const trimmed = newName.trim();
+    if (!trimmed) return;
+    const normOld = normalizeRookieName(originalName);
+    if (normalizeRookieName(trimmed) === normOld) return; // no-op
+    saveOverrides({ ...rookieOverrides, nameEdits: { ...rookieOverrides.nameEdits, [normOld]: trimmed } });
+  };
+
+  const removeAddedRookie = (name: string) => {
+    const norm = normalizeRookieName(name);
+    saveOverrides({ ...rookieOverrides, added: rookieOverrides.added.filter((a) => normalizeRookieName(a.name) !== norm) });
+  };
+
+  const clearNameEdit = (originalName: string) => {
+    const norm = normalizeRookieName(originalName);
+    if (!(norm in rookieOverrides.nameEdits)) return;
+    const next = { ...rookieOverrides.nameEdits };
+    delete next[norm];
+    saveOverrides({ ...rookieOverrides, nameEdits: next });
+  };
 
   /** Moves a rookie to a new rank position by dragging or typing. */
   const handleRankChange = (currentIndex: number, newRank: string) => {
@@ -101,12 +202,24 @@ export function useRookieBoardState(supabaseUser: { id: string } | null): UseRoo
         .slice(1)
         .map((row) => {
           const cols = row.split(",");
+          const rawName = cols[0]?.replace(/"/g, "").trim() ?? "";
+          const norm = normalizeRookieName(rawName);
+          // User edit takes precedence over the built-in correction list.
+          const corrected = rookieOverrides.nameEdits[norm] ?? ROOKIE_NAME_CORRECTIONS[norm];
           return {
-            name: cols[0]?.replace(/"/g, "").trim(),
+            name: corrected ?? rawName,
             position: cols[1]?.replace(/"/g, "").trim(),
           };
         })
         .filter((player) => player.name && player.name !== "Player Invalid");
+
+      // Append user-added rookies that aren't already in the upstream sheet.
+      const sheetNameSet = new Set(sheetPlayers.map((p) => normalizeRookieName(p.name)));
+      for (const added of rookieOverrides.added) {
+        if (!sheetNameSet.has(normalizeRookieName(added.name))) {
+          sheetPlayers.push({ name: added.name, position: added.position });
+        }
+      }
 
       interface SleeperAdpEntry {
         player_id?: string | number;
@@ -230,12 +343,17 @@ export function useRookieBoardState(supabaseUser: { id: string } | null): UseRoo
 
     loadRookieBoard().catch(() => {});
     return () => { controller.abort(); };
-  }, [supabaseUser?.id]);
+  }, [supabaseUser?.id, rookieOverrides]);
 
   return {
     rookies,
     setRookies,
     fcNameValues,
     handleRankChange,
+    addRookie,
+    editRookieName,
+    removeAddedRookie,
+    clearNameEdit,
+    rookieOverrides,
   };
 }

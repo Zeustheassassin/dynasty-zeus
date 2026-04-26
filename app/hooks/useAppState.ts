@@ -286,6 +286,8 @@ const {
   rookies, setRookies,
   fcNameValues,
   handleRankChange,
+  addRookie, editRookieName, removeAddedRookie, clearNameEdit,
+  rookieOverrides,
 } = useRookieBoardState(supabaseUser);
 
 
@@ -3776,6 +3778,8 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     topAvailableRookies,
     movePlayer,
     handleRankChange,
+    addRookie, editRookieName, removeAddedRookie, clearNameEdit,
+    rookieOverrides,
     tradeHubSection,
     calcOpponentRosterId,
     selectedLeagueDraftHasOccurred,

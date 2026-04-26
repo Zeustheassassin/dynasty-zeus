@@ -184,6 +184,11 @@ interface HubRouterProps {
   topAvailableRookies: RookieBoardPlayer[];
   movePlayer: (fromIndex: number, toIndex: number) => void;
   handleRankChange: (currentIndex: number, newRank: string) => void;
+  addRookie: (name: string, position: string) => void;
+  editRookieName: (originalName: string, newName: string) => void;
+  removeAddedRookie: (name: string) => void;
+  clearNameEdit: (originalName: string) => void;
+  rookieOverrides: { added: { name: string; position: string }[]; nameEdits: Record<string, string> };
 
   // Trade Hub
   tradeHubSection: "CALCULATOR" | "FINDER" | "RECOMMENDATIONS" | "TRADE_LOG" | "ATTEMPTS" | "MARKET";
@@ -279,6 +284,7 @@ export function HubRouter({
   draftSlotEditing, setDraftSlotEditing, draftSlotSearchQuery, setDraftSlotSearchQuery,
   draftSettings, draftPicks, draftOrder, predictedDraftPicks,
   topAvailableRookies, movePlayer, handleRankChange,
+  addRookie, editRookieName, removeAddedRookie, clearNameEdit, rookieOverrides,
   tradeHubSection, calcOpponentRosterId,
   selectedLeagueDraftHasOccurred,
   leaguePlayerTags, handleToggleLeaguePlayerTag, leagueMateProfileByRosterId,
@@ -518,6 +524,11 @@ export function HubRouter({
     loadDraftScout={loadDraftScout}
     movePlayer={movePlayer}
     handleRankChange={handleRankChange}
+    addRookie={addRookie}
+    editRookieName={editRookieName}
+    removeAddedRookie={removeAddedRookie}
+    clearNameEdit={clearNameEdit}
+    rookieOverrides={rookieOverrides}
     loadingDraftRefresh={loadingDraftRefresh}
     leagues={leagues}
   />
