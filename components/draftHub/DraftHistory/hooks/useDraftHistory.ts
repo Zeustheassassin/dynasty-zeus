@@ -62,7 +62,10 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
       const results: HistoryDraftEntry[] = [];
 
       await Promise.all(leagues.map(async (league) => {
-        const toCheck: Array<{ id: string; name: string }> = [];
+        // Always include the current league so its in-progress / completed current-year draft appears.
+        const toCheck: Array<{ id: string; name: string }> = [
+          { id: league.league_id, name: league.name },
+        ];
         let prevId: string | null = league.previous_league_id ?? null;
         let depth = 0;
         while (prevId && depth < 3) {
