@@ -46,7 +46,8 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
   const [showCompilePanel, setShowCompilePanel] = useState(false);
   const [compileSelectedYears, setCompileSelectedYears] = useState<Set<number>>(() => {
     const cur = new Date().getFullYear();
-    return new Set(Array.from({ length: cur - 2020 }, (_, i) => 2020 + i));
+    // Include current year so in-progress drafts can be compiled for a rough live ADP read.
+    return new Set(Array.from({ length: cur - 2020 + 1 }, (_, i) => 2020 + i));
   });
   const [playerGrades, setPlayerGrades] = useState<Record<string, "hit" | "neutral" | "bust">>({});
 
@@ -77,11 +78,14 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
           try {
             const drafts: SleeperDraftBasic[] = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/drafts`).then(r => r.json());
             if (!Array.isArray(drafts)) return;
-            const rookieDrafts = drafts.filter((d) =>
-              d.status === "complete" &&
-              (d.settings?.rounds ?? d.rounds ?? 99) <= 6 &&
-              d.season !== ROOKIE_YEAR
-            );
+            const rookieDrafts = drafts.filter((d) => {
+              const rounds = d.settings?.rounds ?? d.rounds ?? 99;
+              if (rounds > 6) return false;
+              // Past years: only completed drafts.
+              if (d.season !== ROOKIE_YEAR) return d.status === "complete";
+              // Current year: include in-progress drafts so partial picks show as live ADP signal.
+              return d.status === "complete" || d.status === "drafting" || d.status === "paused";
+            });
             await Promise.all(rookieDrafts.map(async (draft) => {
               try {
                 const picks: SleeperPickBasic[] = await fetch(`https://api.sleeper.app/v1/draft/${draft.draft_id}/picks`).then(r => r.json());

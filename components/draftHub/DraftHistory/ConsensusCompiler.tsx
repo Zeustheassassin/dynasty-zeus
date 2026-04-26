@@ -39,7 +39,7 @@ export default function ConsensusCompiler({
 }: ConsensusCompilerProps) {
   const hasMeta          = !!consensusMeta[selectedHistoryYear];
   const meta             = consensusMeta[selectedHistoryYear];
-  const YEAR_RANGE       = Array.from({ length: new Date().getFullYear() - 2020 }, (_, i) => 2020 + i);
+  const YEAR_RANGE       = Array.from({ length: new Date().getFullYear() - 2020 + 1 }, (_, i) => 2020 + i);
   const ALL_COMPILED_YEARS = Object.keys(consensusMeta).map(Number).sort().reverse();
 
   return (
