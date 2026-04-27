@@ -1,6 +1,7 @@
 "use client";
 import { useMemo } from "react";
 import StatsTableShell, { StatRow, ColDef } from "./StatsTableShell";
+import { computeTEAboveExpected } from "../../../lib/scouting/aboveExpected";
 import type { Prospect, ScoutingGame, TEPlay, TEPositioning, TELocation, TECoverage } from "../../../lib/types";
 
 interface Props {
@@ -104,6 +105,7 @@ function blkSuccPct(plays: TEPlay[], filter: (p: TEPlay) => boolean): number | n
 
 export default function TEStatsTable({ prospects, games, tePlays, loading, draftYearFilter, onSelectProspect }: Props) {
   const prospectMap = useMemo(() => new Map(prospects.map((p) => [p.id, p])), [prospects]);
+  const teSaeMap = useMemo(() => computeTEAboveExpected(prospects, games, tePlays), [prospects, games, tePlays]);
   const rows = useMemo((): StatRow[] => {
     const gameToProspect = new Map<string, string>();
     for (const g of games) gameToProspect.set(g.id, g.prospect_id);
@@ -121,21 +123,6 @@ export default function TEStatsTable({ prospects, games, tePlays, loading, draft
       gamesByProspect.set(g.prospect_id, (gamesByProspect.get(g.prospect_id) ?? 0) + 1);
     }
 
-    // League-wide open rates for TE-SAE
-    const lgPos: Partial<Record<TEPositioning, { open: number; n: number }>> = {};
-    const lgCvg: Partial<Record<TECoverage, { open: number; n: number }>> = {};
-    for (const pl of tePlays) {
-      if (pl.play_type !== "route_run" || pl.was_open === null) continue;
-      if (!lgPos[pl.positioning]) lgPos[pl.positioning] = { open: 0, n: 0 };
-      lgPos[pl.positioning]!.n++;
-      if (pl.was_open) lgPos[pl.positioning]!.open++;
-      if (pl.coverage) {
-        if (!lgCvg[pl.coverage]) lgCvg[pl.coverage] = { open: 0, n: 0 };
-        lgCvg[pl.coverage]!.n++;
-        if (pl.was_open) lgCvg[pl.coverage]!.open++;
-      }
-    }
-
     return prospects
       .filter((p) => p.position === "TE")
       .map((p) => {
@@ -151,30 +138,7 @@ export default function TEStatsTable({ prospects, games, tePlays, loading, draft
         const yds = 0; // TEPlay has no yards field
         const btk = pPlays.filter((pl) => pl.broken_tackle).length;
 
-        // TE-SAE
-        let te_sae: number | null = null;
-        if (ratedRoutes.length >= 15) {
-          const actual = ratedRoutes.filter((pl) => pl.was_open).length / ratedRoutes.length;
-          let expPos = 0, posW = 0;
-          for (const pos of POSITIONINGS) {
-            const posN = ratedRoutes.filter((pl) => pl.positioning === pos).length;
-            const lg = lgPos[pos];
-            if (posN > 0 && lg && lg.n > 0) { expPos += (posN / ratedRoutes.length) * (lg.open / lg.n); posW += posN / ratedRoutes.length; }
-          }
-          let expCvg = 0, cvgW = 0;
-          for (const cvg of COVERAGES) {
-            const cN = ratedRoutes.filter((pl) => pl.coverage === cvg).length;
-            const lg = lgCvg[cvg];
-            if (cN > 0 && lg && lg.n > 0) { expCvg += (cN / ratedRoutes.length) * (lg.open / lg.n); cvgW += cN / ratedRoutes.length; }
-          }
-          const normPos = posW > 0 ? expPos / posW : null;
-          const normCvg = cvgW > 0 ? expCvg / cvgW : null;
-          let combined: number | null = null;
-          if (normPos != null && normCvg != null) combined = (normPos + normCvg) / 2;
-          else if (normPos != null) combined = normPos;
-          else if (normCvg != null) combined = normCvg;
-          if (combined != null) te_sae = parseFloat(((actual - combined) * 100).toFixed(2));
-        }
+        const te_sae = teSaeMap.get(p.id) ?? null;
 
         return {
           id: p.id,
@@ -253,7 +217,7 @@ export default function TEStatsTable({ prospects, games, tePlays, loading, draft
           ypc: yds,
         } satisfies StatRow;
       });
-  }, [prospects, games, tePlays]);
+  }, [prospects, games, tePlays, teSaeMap]);
 
   return (
     <StatsTableShell

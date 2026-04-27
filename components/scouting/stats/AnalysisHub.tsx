@@ -1,7 +1,8 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import type { Prospect, ProspectWithStats, ScoutingGame, RBPlay, QBPlay, TEPlay } from "../../../lib/types";
+import type { LoadPositionPlaysFn } from "../../ScoutingHub";
 
 const WRStatsTable = dynamic(() => import("./WRStatsTable"), { ssr: false });
 const RBStatsTable = dynamic(() => import("./RBStatsTable"), { ssr: false });
@@ -17,6 +18,7 @@ interface Props {
   rbPlays: RBPlay[];
   qbPlays: QBPlay[];
   tePlays: TEPlay[];
+  loadPositionPlays: LoadPositionPlaysFn;
   loading: boolean;
   draftYearFilter: number | null;
   setDraftYearFilter: (y: number | null) => void;
@@ -30,8 +32,20 @@ const POSITION_DESCRIPTIONS: Record<PositionTab, string> = {
   TE: "TE-SAE · Open% by positioning, location & coverage · Blocking success",
 };
 
-export default function AnalysisHub({ prospects, prospectsWithStats, games, rbPlays, qbPlays, tePlays, loading, draftYearFilter, setDraftYearFilter, onSelectProspect }: Props) {
+export default function AnalysisHub({
+  prospects, prospectsWithStats, games, rbPlays, qbPlays, tePlays,
+  loadPositionPlays, loading, draftYearFilter, setDraftYearFilter, onSelectProspect,
+}: Props) {
   const [posTab, setPosTab] = useState<PositionTab>("WR");
+
+  // Trigger lazy fetch when a non-WR tab is activated. The fetch lives on
+  // ScoutingHub now so its results are shared with GamesLog. Idempotent —
+  // calling for a position whose plays already loaded is a no-op.
+  useEffect(() => {
+    if (posTab === "RB" || posTab === "QB" || posTab === "TE") {
+      loadPositionPlays(posTab);
+    }
+  }, [posTab, loadPositionPlays]);
 
   const DRAFT_YEARS = [2026, 2027];
 

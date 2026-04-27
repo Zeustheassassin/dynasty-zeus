@@ -1,8 +1,21 @@
 "use client";
-import { useState, useMemo } from "react";
-import type { ScoutingGame, ProspectWithStats, RoutePlay } from "../../lib/types";
+import { useState, useEffect, useMemo } from "react";
+import type {
+  ScoutingGame,
+  Prospect,
+  ProspectWithStats,
+  RBPlay,
+  QBPlay,
+  TEPlay,
+} from "../../lib/types";
+import type { GameSnapStatsRow, LoadPositionPlaysFn } from "../ScoutingHub";
+import {
+  computeRBAboveExpected,
+  computeQBAboveExpected,
+  computeTEAboveExpected,
+} from "../../lib/scouting/aboveExpected";
 
-type SortKey = "player" | "school" | "season_year" | "opponent" | "game_type" | "routes" | "targets" | "catches" | "man_pct" | "zone_pct";
+type SortKey = "player" | "school" | "season_year" | "opponent" | "game_type" | "snaps" | "above_exp";
 
 function Th({ label, k, sortKey, sortDir, onToggle }: {
   label: string; k: SortKey; sortKey: SortKey; sortDir: "asc" | "desc";
@@ -21,17 +34,44 @@ function Th({ label, k, sortKey, sortDir, onToggle }: {
 
 interface Props {
   games: ScoutingGame[];
-  plays: RoutePlay[];
+  gameSnapStats: GameSnapStatsRow[];
   prospects: ProspectWithStats[];
+  rbPlays: RBPlay[];
+  qbPlays: QBPlay[];
+  tePlays: TEPlay[];
+  loadPositionPlays: LoadPositionPlaysFn;
   loading: boolean;
   onSelectProspect: (p: ProspectWithStats) => void;
 }
 
-export default function GamesLog({ games, plays, prospects, loading, onSelectProspect }: Props) {
+// Above Expected metric label per position. WR=SAE, RB=SRAE, QB=AAE, TE=TE-SAE.
+function aboveExpectedLabel(position: string | null | undefined): string {
+  switch (position) {
+    case "WR": return "SAE";
+    case "RB": return "SRAE";
+    case "QB": return "AAE";
+    case "TE": return "TE-SAE";
+    default: return "—";
+  }
+}
+
+export default function GamesLog({
+  games, gameSnapStats, prospects, rbPlays, qbPlays, tePlays,
+  loadPositionPlays, loading, onSelectProspect,
+}: Props) {
   const [sortKey, setSortKey] = useState<SortKey>("season_year");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [search, setSearch] = useState("");
   const [yearFilter, setYearFilter] = useState<number | null>(null);
+
+  // Trigger lazy fetches for all three non-WR positions when this tab
+  // mounts. Idempotent — if AnalysisHub already fetched them this session
+  // the calls no-op via the parent's cache check.
+  useEffect(() => {
+    loadPositionPlays("RB");
+    loadPositionPlays("QB");
+    loadPositionPlays("TE");
+  }, [loadPositionPlays]);
 
   const prospectMap = useMemo(() => {
     const m: Record<string, ProspectWithStats> = {};
@@ -39,32 +79,30 @@ export default function GamesLog({ games, plays, prospects, loading, onSelectPro
     return m;
   }, [prospects]);
 
-  const gameStats = useMemo(() => {
-    const playsByGame: Record<string, RoutePlay[]> = {};
-    for (const pl of plays) {
-      if (!playsByGame[pl.game_id]) playsByGame[pl.game_id] = [];
-      playsByGame[pl.game_id].push(pl);
-    }
-
-    const m: Record<string, { routes: number; targets: number; catches: number; manPct: number | null; zonePct: number | null }> = {};
-    for (const g of games) {
-      const gPlays = playsByGame[g.id] ?? [];
-      const routes = gPlays.length;
-
-      // Use stored summary totals when available, otherwise compute from plays
-      const targets = g.summary_targets ?? gPlays.filter((p) => p.targeted).length;
-      const catches = g.summary_catches ?? gPlays.filter((p) => p.targeted && p.success).length;
-
-      // Man% and Zone% = was_open rate per coverage (factual from plays)
-      const manPlays = gPlays.filter((p) => p.coverage === "man");
-      const zonePlays = gPlays.filter((p) => p.coverage === "zone");
-      const manPct = manPlays.length > 0 ? Math.round((manPlays.filter((p) => p.was_open).length / manPlays.length) * 100) : null;
-      const zonePct = zonePlays.length > 0 ? Math.round((zonePlays.filter((p) => p.was_open).length / zonePlays.length) * 100) : null;
-
-      m[g.id] = { routes, targets, catches, manPct, zonePct };
-    }
+  const snapsByGame = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const r of gameSnapStats) m[r.game_id] = r.snaps_charted;
     return m;
-  }, [plays, games]);
+  }, [gameSnapStats]);
+
+  // Above Expected per prospect — position-aware. WR comes from
+  // ProspectWithStats.adj_success_above_exp (already computed by the
+  // server-side aggregate path). RB/QB/TE come from the lazy-loaded raw
+  // plays (same math as the Analysis tab — see lib/scouting/aboveExpected.ts).
+  const aboveExpectedByProspect = useMemo(() => {
+    const m = new Map<string, number | null>();
+    const prospectList: Prospect[] = prospects;
+    for (const p of prospects) {
+      if (p.position === "WR") m.set(p.id, p.adj_success_above_exp ?? null);
+    }
+    const rb = computeRBAboveExpected(prospectList, games, rbPlays);
+    const qb = computeQBAboveExpected(prospectList, games, qbPlays);
+    const te = computeTEAboveExpected(prospectList, games, tePlays);
+    for (const [id, v] of rb) m.set(id, v);
+    for (const [id, v] of qb) m.set(id, v);
+    for (const [id, v] of te) m.set(id, v);
+    return m;
+  }, [prospects, games, rbPlays, qbPlays, tePlays]);
 
   const years = useMemo(() => {
     const s = new Set(games.map((g) => g.season_year));
@@ -86,10 +124,10 @@ export default function GamesLog({ games, plays, prospects, loading, onSelectPro
       });
     }
     list = [...list].sort((a, b) => {
-      const gsa = gameStats[a.id] ?? { routes: 0, targets: 0, catches: 0, manPct: null, zonePct: null };
-      const gsb = gameStats[b.id] ?? { routes: 0, targets: 0, catches: 0, manPct: null, zonePct: null };
       const pa = prospectMap[a.prospect_id];
       const pb = prospectMap[b.prospect_id];
+      const aeA = aboveExpectedByProspect.get(a.prospect_id);
+      const aeB = aboveExpectedByProspect.get(b.prospect_id);
 
       let va: string | number = 0;
       let vb: string | number = 0;
@@ -98,27 +136,31 @@ export default function GamesLog({ games, plays, prospects, loading, onSelectPro
       else if (sortKey === "season_year") { va = a.season_year; vb = b.season_year; }
       else if (sortKey === "opponent") { va = a.opponent; vb = b.opponent; }
       else if (sortKey === "game_type") { va = a.game_type; vb = b.game_type; }
-      else if (sortKey === "routes") { va = gsa.routes; vb = gsb.routes; }
-      else if (sortKey === "targets") { va = gsa.targets; vb = gsb.targets; }
-      else if (sortKey === "catches") { va = gsa.catches; vb = gsb.catches; }
-      else if (sortKey === "man_pct") { va = gsa.manPct ?? -1; vb = gsb.manPct ?? -1; }
-      else if (sortKey === "zone_pct") { va = gsa.zonePct ?? -1; vb = gsb.zonePct ?? -1; }
+      else if (sortKey === "snaps") { va = snapsByGame[a.id] ?? 0; vb = snapsByGame[b.id] ?? 0; }
+      // Sort prospects without an Above Expected value to the bottom by
+      // pushing them to -Infinity for desc sorts (and above values).
+      else if (sortKey === "above_exp") { va = aeA ?? Number.NEGATIVE_INFINITY; vb = aeB ?? Number.NEGATIVE_INFINITY; }
 
       if (typeof va === "string")
         return sortDir === "asc" ? va.localeCompare(vb as string) : (vb as string).localeCompare(va);
       return sortDir === "asc" ? va - (vb as number) : (vb as number) - va;
     });
     return list;
-  }, [games, yearFilter, search, sortKey, sortDir, gameStats, prospectMap]);
+  }, [games, yearFilter, search, sortKey, sortDir, snapsByGame, prospectMap, aboveExpectedByProspect]);
 
   function toggleSort(k: SortKey) {
     if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else { setSortKey(k); setSortDir("asc"); }
   }
 
-  const totalRoutes = rows.reduce((s, g) => s + (gameStats[g.id]?.routes ?? 0), 0);
-  const totalTargets = rows.reduce((s, g) => s + (gameStats[g.id]?.targets ?? 0), 0);
-  const totalCatches = rows.reduce((s, g) => s + (gameStats[g.id]?.catches ?? 0), 0);
+  const totalSnaps = rows.reduce((s, g) => s + (snapsByGame[g.id] ?? 0), 0);
+
+  function fmtAboveExpected(v: number | null | undefined): { text: string; color: string } {
+    if (v == null) return { text: "—", color: "text-gray-600" };
+    const sign = v > 0 ? "+" : "";
+    const color = v >= 2 ? "text-green-400" : v <= -2 ? "text-red-400" : "text-gray-300";
+    return { text: `${sign}${v.toFixed(1)}`, color };
+  }
 
   return (
     <div>
@@ -159,17 +201,16 @@ export default function GamesLog({ games, plays, prospects, loading, onSelectPro
                 <Th label="Season" k="season_year" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
                 <Th label="Opponent" k="opponent" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
                 <Th label="Type" k="game_type" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
-                <Th label="Routes" k="routes" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
-                <Th label="Targets" k="targets" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
-                <Th label="Catches" k="catches" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
-                <Th label="Man%" k="man_pct" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
-                <Th label="Zone%" k="zone_pct" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
+                <Th label="Snaps" k="snaps" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
+                <Th label="Above Exp." k="above_exp" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-900">
               {rows.map((g) => {
-                const gs = gameStats[g.id] ?? { routes: 0, targets: 0, catches: 0, manPct: null, zonePct: null };
                 const p = prospectMap[g.prospect_id];
+                const ae = aboveExpectedByProspect.get(g.prospect_id);
+                const aeFmt = fmtAboveExpected(ae);
+                const snaps = snapsByGame[g.id] ?? 0;
                 return (
                   <tr
                     key={g.id}
@@ -181,11 +222,13 @@ export default function GamesLog({ games, plays, prospects, loading, onSelectPro
                     <td className="px-3 py-2 text-gray-300">{g.season_year}</td>
                     <td className="px-3 py-2 text-gray-200 whitespace-nowrap">{g.opponent}</td>
                     <td className="px-3 py-2 text-gray-500 capitalize">{g.game_type}</td>
-                    <td className="px-3 py-2 text-blue-400 font-medium">{gs.routes}</td>
-                    <td className="px-3 py-2 text-yellow-400">{gs.targets}</td>
-                    <td className="px-3 py-2 text-green-400">{gs.catches}</td>
-                    <td className="px-3 py-2 text-orange-400">{gs.manPct != null ? `${gs.manPct}%` : "—"}</td>
-                    <td className="px-3 py-2 text-orange-400">{gs.zonePct != null ? `${gs.zonePct}%` : "—"}</td>
+                    <td className="px-3 py-2 text-blue-400 font-medium">{snaps}</td>
+                    <td className={`px-3 py-2 font-medium ${aeFmt.color}`}>
+                      {aeFmt.text}
+                      {ae != null && (
+                        <span className="ml-1 text-[10px] text-gray-500 font-normal">{aboveExpectedLabel(p?.position)}</span>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
@@ -193,10 +236,8 @@ export default function GamesLog({ games, plays, prospects, loading, onSelectPro
             <tfoot>
               <tr className="border-t border-gray-700 text-xs text-gray-500 font-medium">
                 <td colSpan={5} className="px-3 pt-2">Total ({rows.length} games)</td>
-                <td className="px-3 pt-2 text-blue-400">{totalRoutes}</td>
-                <td className="px-3 pt-2 text-yellow-400">{totalTargets}</td>
-                <td className="px-3 pt-2 text-green-400">{totalCatches}</td>
-                <td colSpan={2} className="px-3 pt-2" />
+                <td className="px-3 pt-2 text-blue-400">{totalSnaps}</td>
+                <td className="px-3 pt-2" />
               </tr>
             </tfoot>
           </table>

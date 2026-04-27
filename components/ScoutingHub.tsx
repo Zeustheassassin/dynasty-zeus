@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
 import { supabase } from "../lib/supabaseclient";
 import { logger } from "../lib/logger";
@@ -7,14 +7,53 @@ import type {
   Prospect,
   ProspectWithStats,
   ScoutingGame,
-  RoutePlay,
   RBPlay,
   QBPlay,
   TEPlay,
 } from "../lib/types";
-import { deriveChartingDecision } from "./scouting/shared/chartingConstants";
+import {
+  buildProspectsWithStats,
+  type ProspectRouteStatsRow,
+  type LeagueRouteBaselineRow,
+} from "../lib/scouting/aggregateMerge";
 
 const log = logger("ScoutingHub");
+
+export interface GameSnapStatsRow {
+  game_id: string;
+  prospect_id: string;
+  snaps_charted: number;
+}
+
+export type LazyPosition = "RB" | "QB" | "TE";
+export type LoadPositionPlaysFn = (pos: LazyPosition) => void;
+
+interface PosSnapsRow {
+  prospect_id: string;
+  total_snaps: number;
+}
+
+// Paginate a *_plays table by game_id IN (...) until exhausted. Used by
+// the lazy-fetch hook below — these are the same fetches that previously
+// ran inside AnalysisHub. Lifting them up so GamesLog can also share the
+// loaded data without each tab paying its own round-trip.
+async function fetchPlaysByGame<T>(
+  table: "rb_plays" | "qb_plays" | "te_plays",
+  gameIds: string[],
+): Promise<T[]> {
+  if (gameIds.length === 0) return [];
+  const PAGE = 1000;
+  const all: T[] = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase.from(table).select("*").in("game_id", gameIds).range(from, from + PAGE - 1);
+    if (error) { log.error(`${table} load`, { msg: error.message }); break; }
+    all.push(...((data ?? []) as T[]));
+    if (!data || data.length < PAGE) break;
+    from += PAGE;
+  }
+  return all;
+}
 
 const WRHub = dynamic(() => import("./scouting/wr/WRHub"), { ssr: false });
 const RBHub = dynamic(() => import("./scouting/rb/RBHub"), { ssr: false });
@@ -37,65 +76,69 @@ export default function ScoutingHub() {
   const [pendingProspect, setPendingProspect] = useState<Prospect | null>(null);
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [games, setGames] = useState<ScoutingGame[]>([]);
-  const [plays, setPlays] = useState<RoutePlay[]>([]);
+  const [routeStatsRows, setRouteStatsRows] = useState<ProspectRouteStatsRow[]>([]);
+  const [leagueBaselines, setLeagueBaselines] = useState<LeagueRouteBaselineRow[]>([]);
+  const [gameSnapStatsRows, setGameSnapStatsRows] = useState<GameSnapStatsRow[]>([]);
+  const [posSnapsRows, setPosSnapsRows] = useState<PosSnapsRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [draftYearFilter, setDraftYearFilter] = useState<number | null>(null);
+
+  // Lazy-loaded raw plays for RB/QB/TE. Triggered by AnalysisHub or
+  // GamesLog when they need the data — fetched at most once per parent
+  // reload (cache key = joined game ids string).
   const [rbPlays, setRbPlays] = useState<RBPlay[]>([]);
   const [qbPlays, setQbPlays] = useState<QBPlay[]>([]);
   const [tePlays, setTePlays] = useState<TEPlay[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [draftYearFilter, setDraftYearFilter] = useState<number | null>(null);
+  const fetchedPlaysRef = useRef<{ RB: string | null; QB: string | null; TE: string | null }>({ RB: null, QB: null, TE: null });
 
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [{ data: pData, error: pErr }, { data: gData, error: gErr }] = await Promise.all([
+      const [
+        { data: pData, error: pErr },
+        { data: gData, error: gErr },
+        { data: rsData, error: rsErr },
+        { data: lbData, error: lbErr },
+        { data: gssData, error: gssErr },
+        { data: rbStatsData, error: rbStatsErr },
+        { data: qbStatsData, error: qbStatsErr },
+        { data: teStatsData, error: teStatsErr },
+      ] = await Promise.all([
         supabase.from("prospects").select("*").order("personal_rank", { ascending: true, nullsFirst: false }),
         supabase.from("scouting_games").select("*").order("season_year", { ascending: false }),
+        supabase.from("prospect_route_stats").select("*"),
+        supabase.from("league_route_baselines").select("*"),
+        supabase.from("prospect_game_snap_stats").select("*"),
+        supabase.from("prospect_rb_stats").select("prospect_id,total_snaps"),
+        supabase.from("prospect_qb_stats").select("prospect_id,total_snaps"),
+        supabase.from("prospect_te_stats").select("prospect_id,total_snaps"),
       ]);
-      if (pErr) log.error("prospects load", { msg: pErr.message });
-      if (gErr) log.error("games load", { msg: gErr.message });
+      if (pErr) log.error("prospects load", { msg: pErr.message, code: pErr.code, details: pErr.details, hint: pErr.hint });
+      if (gErr) log.error("games load", { msg: gErr.message, code: gErr.code, details: gErr.details, hint: gErr.hint });
+      if (rsErr) log.error("prospect_route_stats load", { msg: rsErr.message, code: rsErr.code, details: rsErr.details, hint: rsErr.hint });
+      if (lbErr) log.error("league_route_baselines load", { msg: lbErr.message, code: lbErr.code, details: lbErr.details, hint: lbErr.hint });
+      if (gssErr) log.error("prospect_game_snap_stats load", { msg: gssErr.message, code: gssErr.code, details: gssErr.details, hint: gssErr.hint, raw: JSON.stringify(gssErr) });
+      if (rbStatsErr) log.error("prospect_rb_stats load", { msg: rbStatsErr.message });
+      if (qbStatsErr) log.error("prospect_qb_stats load", { msg: qbStatsErr.message });
+      if (teStatsErr) log.error("prospect_te_stats load", { msg: teStatsErr.message });
 
-      const pList: Prospect[] = pData ?? [];
-      const gList: ScoutingGame[] = gData ?? [];
-      setProspects(pList);
-      setGames(gList);
+      // Reset lazy-fetch cache so a parent reload re-fetches plays the
+      // next time AnalysisHub or GamesLog needs them.
+      fetchedPlaysRef.current = { RB: null, QB: null, TE: null };
+      setRbPlays([]);
+      setQbPlays([]);
+      setTePlays([]);
 
-      if (gList.length > 0) {
-        const gameIds = gList.map((g) => g.id);
-        const PAGE = 1000;
-
-        async function paginateTable<T>(table: string): Promise<T[]> {
-          const all: T[] = [];
-          let from = 0;
-          while (true) {
-            const { data, error } = await supabase
-              .from(table)
-              .select("*")
-              .in("game_id", gameIds)
-              .range(from, from + PAGE - 1);
-            if (error) { log.error(`${table} load`, { msg: error.message }); break; }
-            all.push(...((data ?? []) as T[]));
-            if (!data || data.length < PAGE) break;
-            from += PAGE;
-          }
-          return all;
-        }
-
-        const [allRoutePlays, allRbPlays, allQbPlays, allTePlays] = await Promise.all([
-          paginateTable<RoutePlay>("route_plays"),
-          paginateTable<RBPlay>("rb_plays"),
-          paginateTable<QBPlay>("qb_plays"),
-          paginateTable<TEPlay>("te_plays"),
-        ]);
-        setPlays(allRoutePlays);
-        setRbPlays(allRbPlays);
-        setQbPlays(allQbPlays);
-        setTePlays(allTePlays);
-      } else {
-        setPlays([]);
-        setRbPlays([]);
-        setQbPlays([]);
-        setTePlays([]);
-      }
+      setProspects((pData ?? []) as Prospect[]);
+      setGames((gData ?? []) as ScoutingGame[]);
+      setRouteStatsRows((rsData ?? []) as ProspectRouteStatsRow[]);
+      setLeagueBaselines((lbData ?? []) as LeagueRouteBaselineRow[]);
+      setGameSnapStatsRows((gssData ?? []) as GameSnapStatsRow[]);
+      setPosSnapsRows([
+        ...((rbStatsData ?? []) as PosSnapsRow[]),
+        ...((qbStatsData ?? []) as PosSnapsRow[]),
+        ...((teStatsData ?? []) as PosSnapsRow[]),
+      ]);
     } catch (e) {
       log.error("loadAll", { msg: String(e) });
     } finally {
@@ -107,210 +150,28 @@ export default function ScoutingHub() {
     loadAll();
   }, [loadAll]);
 
-  // Compute aggregate stats per prospect from plays
-  const prospectsWithStats = useMemo((): ProspectWithStats[] => {
-    const gamesByProspect: Record<string, string[]> = {};
-    for (const g of games) {
-      if (!gamesByProspect[g.prospect_id]) gamesByProspect[g.prospect_id] = [];
-      gamesByProspect[g.prospect_id].push(g.id);
-    }
+  // Lazy-fetch the raw plays for one position. Idempotent per parent
+  // reload — repeated calls with the same games no-op. Fetch results land
+  // via the .then() callback so this fn itself can be safely invoked from
+  // a child useEffect (no synchronous setState inside an effect body).
+  const gameIdsKey = games.map((g) => g.id).join(",");
+  const loadPositionPlays = useCallback<LoadPositionPlaysFn>((pos) => {
+    if (loading || games.length === 0) return;
+    if (fetchedPlaysRef.current[pos] === gameIdsKey) return;
+    fetchedPlaysRef.current[pos] = gameIdsKey;
+    const ids = games.map((g) => g.id);
+    if (pos === "RB") fetchPlaysByGame<RBPlay>("rb_plays", ids).then((rows) => { setRbPlays(rows); });
+    else if (pos === "QB") fetchPlaysByGame<QBPlay>("qb_plays", ids).then((rows) => { setQbPlays(rows); });
+    else if (pos === "TE") fetchPlaysByGame<TEPlay>("te_plays", ids).then((rows) => { setTePlays(rows); });
+  }, [loading, games, gameIdsKey]);
 
-    const ROUTE_TYPES: RoutePlay["route_type"][] = [
-      "nine", "post", "dig", "curl", "slant", "screen", "flat", "comeback", "out", "corner", "other",
-    ];
-
-    // League-wide open rates from route runs only (no_route_run=false), used for SAE calculation
-    const leagueRoute: Partial<Record<RoutePlay["route_type"], { open: number; count: number }>> = {};
-    const leagueCvg: Record<string, { open: number; count: number }> = {
-      man: { open: 0, count: 0 }, zone: { open: 0, count: 0 },
-      double: { open: 0, count: 0 }, press: { open: 0, count: 0 },
-    };
-    for (const pl of plays) {
-      if (pl.no_route_run) continue;
-      if (!leagueRoute[pl.route_type]) leagueRoute[pl.route_type] = { open: 0, count: 0 };
-      leagueRoute[pl.route_type]!.count++;
-      if (pl.was_open) leagueRoute[pl.route_type]!.open++;
-      if (pl.coverage === "man" || pl.coverage === "zone" || pl.coverage === "double" || pl.coverage === "press") {
-        leagueCvg[pl.coverage].count++;
-        if (pl.was_open) leagueCvg[pl.coverage].open++;
-      }
-    }
-
-    return prospects.map((p) => {
-      const gameIds = new Set(gamesByProspect[p.id] ?? []);
-      // pPlays = all logged snaps; routePlays = only plays where a route was run
-      const pPlays = plays.filter((pl) => gameIds.has(pl.game_id));
-      const routePlays = pPlays.filter((pl) => !pl.no_route_run);
-
-      const totalSnaps = pPlays.length;
-      const totalRoutes = routePlays.length;
-      const prospectGames = games.filter((g) => gameIds.has(g.id));
-
-      // Use stored summary totals for imported games; compute from plays for charted games
-      let tgt = 0, ctch = 0, drops = 0, contested = 0, contested_catches = 0;
-      for (const g of prospectGames) {
-        if (g.summary_targets != null) {
-          tgt += g.summary_targets;
-          ctch += g.summary_catches ?? 0;
-          drops += g.summary_drops ?? 0;
-          contested += g.summary_contested ?? 0;
-          contested_catches += g.summary_contested_catches ?? 0;
-        } else {
-          const gPlays = routePlays.filter((pl) => pl.game_id === g.id);
-          tgt += gPlays.filter((pl) => pl.targeted).length;
-          ctch += gPlays.filter((pl) => pl.targeted && pl.success).length;
-          drops += gPlays.filter((pl) => pl.targeted && pl.success === false).length;
-          contested += gPlays.filter((pl) => pl.contested).length;
-          contested_catches += gPlays.filter((pl) => pl.contested && pl.success === true).length;
-        }
-      }
-      const yds = routePlays.reduce((s, pl) => s + (pl.yards ?? 0), 0);
-      // Alignment % — out of total snaps (player is aligned on every snap)
-      const leftN = pPlays.filter((pl) => pl.alignment === "left").length;
-      const rightN = pPlays.filter((pl) => pl.alignment === "right").length;
-      const slotN = pPlays.filter((pl) => pl.alignment === "slot").length;
-      const bfN = pPlays.filter((pl) => pl.alignment === "backfield").length;
-
-      const snapPct = (n: number) => (totalSnaps > 0 ? parseFloat(((n / totalSnaps) * 100).toFixed(1)) : null);
-      const routePct = (n: number) => (totalRoutes > 0 ? parseFloat(((n / totalRoutes) * 100).toFixed(1)) : null);
-
-      const extRanks = [p.pff_rank, p.mock_draft_rank, p.drafttek_rank, p.pfn_rank].filter(
-        (r): r is number => r !== null && r !== undefined
-      );
-
-      // True only if this prospect has plays with was_open or success explicitly tracked.
-      // was_open defaults to false (not null) for old plays, so we check for at least one true.
-      // success is nullable; we check for at least one non-null targeted play.
-      const has_charted_open_data =
-        routePlays.some((pl) => pl.was_open) ||
-        routePlays.some((pl) => pl.targeted && pl.success !== null);
-
-      const route_stats: ProspectWithStats["route_stats"] = {};
-      for (const rt of ROUTE_TYPES) {
-        const rtPlays = routePlays.filter((pl) => pl.route_type === rt);
-        if (rtPlays.length > 0) {
-          route_stats[rt] = {
-            count: rtPlays.length,
-            open: has_charted_open_data ? rtPlays.filter((pl) => pl.was_open).length : 0,
-            targets: rtPlays.filter((pl) => pl.targeted).length,
-            catches: has_charted_open_data ? rtPlays.filter((pl) => pl.targeted && pl.success).length : -1,
-          };
-        }
-      }
-
-      const cvg = (type: "man" | "zone" | "double" | "press") => {
-        const cvgPlays = routePlays.filter((pl) => pl.coverage === type);
-        return {
-          count: cvgPlays.length,
-          open: has_charted_open_data ? cvgPlays.filter((pl) => pl.was_open).length : 0,
-          catches: has_charted_open_data ? cvgPlays.filter((pl) => pl.targeted && pl.success).length : -1,
-        };
-      };
-
-      return {
-        ...p,
-        charting_decision: deriveChartingDecision(p.charting_decision, gameIds.size),
-        total_snaps: totalSnaps,
-        total_routes: totalRoutes,
-        total_games: gameIds.size,
-        targets: tgt,
-        catches: ctch,
-        drops,
-        contested,
-        contested_catches,
-        total_yards: yds,
-        // Suc% = open rate (SRVC) based on route runs only; suppress for prospects w/o was_open tracking
-        success_rate: has_charted_open_data && totalRoutes > 0 ? parseFloat(((routePlays.filter((pl) => pl.was_open).length / totalRoutes) * 100).toFixed(1)) : null,
-        target_rate: routePct(tgt),
-        avg_ypc: ctch > 0 ? parseFloat((yds / ctch).toFixed(1)) : null,
-        pct_left: snapPct(leftN),
-        pct_right: snapPct(rightN),
-        pct_slot: snapPct(slotN),
-        pct_backfield: snapPct(bfN),
-        pct_on_line: snapPct(pPlays.filter((pl) => pl.on_line).length),
-        adj_success_above_exp: (() => {
-          if (!has_charted_open_data || totalRoutes < 15) return null;
-          const actualOpen = routePlays.filter((pl) => pl.was_open).length / totalRoutes;
-          let expRoute = 0, routeW = 0;
-          for (const rt of ROUTE_TYPES) {
-            const rtCount = routePlays.filter((pl) => pl.route_type === rt).length;
-            const lg = leagueRoute[rt];
-            if (rtCount > 0 && lg && lg.count > 0) {
-              expRoute += (rtCount / totalRoutes) * (lg.open / lg.count);
-              routeW += rtCount / totalRoutes;
-            }
-          }
-          let expCvg = 0, cvgW = 0;
-          for (const cvgType of ["man", "zone", "double", "press"] as const) {
-            const cvgCount = routePlays.filter((pl) => pl.coverage === cvgType).length;
-            const lg = leagueCvg[cvgType];
-            if (cvgCount > 0 && lg.count > 0) {
-              expCvg += (cvgCount / totalRoutes) * (lg.open / lg.count);
-              cvgW += cvgCount / totalRoutes;
-            }
-          }
-          const normRoute = routeW > 0 ? expRoute / routeW : null;
-          const normCvg = cvgW > 0 ? expCvg / cvgW : null;
-          let combined: number | null = null;
-          if (normRoute != null && normCvg != null) combined = (normRoute + normCvg) / 2;
-          else if (normRoute != null) combined = normRoute;
-          else if (normCvg != null) combined = normCvg;
-          return combined != null ? parseFloat(((actualOpen - combined) * 100).toFixed(2)) : null;
-        })(),
-        avg_external_rank:
-          extRanks.length > 0
-            ? parseFloat((extRanks.reduce((s, r) => s + r, 0) / extRanks.length).toFixed(1))
-            : null,
-        depth_behind_los: routePlays.filter((pl) => !pl.on_line).length,
-        depth_on_los: routePlays.filter((pl) => pl.on_line).length,
-        has_charted_open_data,
-        route_stats,
-        coverage_stats: { man: cvg("man"), zone: cvg("zone"), double: cvg("double"), press: cvg("press") },
-        // Alignment open rates — only from manually-charted route runs (not NRR, not summary imports)
-        ...(() => {
-          const chartedIds = new Set(
-            prospectGames.filter((g) => g.summary_targets == null).map((g) => g.id)
-          );
-          const cp = routePlays.filter((pl) => chartedIds.has(pl.game_id));
-          const alignFiltered = (align: string, onLine?: boolean) => {
-            let filtered = cp.filter((pl) => pl.alignment === align);
-            if (onLine === true) filtered = filtered.filter((pl) => pl.on_line);
-            if (onLine === false) filtered = filtered.filter((pl) => !pl.on_line);
-            return filtered;
-          };
-          const alignOpen = (align: string, onLine?: boolean): number | null => {
-            const filtered = alignFiltered(align, onLine);
-            return filtered.length > 0
-              ? parseFloat(((filtered.filter((pl) => pl.was_open).length / filtered.length) * 100).toFixed(1))
-              : null;
-          };
-          const alignCount = (align: string, onLine?: boolean): number => alignFiltered(align, onLine).length;
-          return {
-            open_pct_slot: alignOpen("slot"),
-            open_pct_slot_on_line: alignOpen("slot", true),
-            open_pct_slot_off_line: alignOpen("slot", false),
-            open_pct_right: alignOpen("right"),
-            open_pct_right_on_line: alignOpen("right", true),
-            open_pct_right_off_line: alignOpen("right", false),
-            open_pct_left: alignOpen("left"),
-            open_pct_left_on_line: alignOpen("left", true),
-            open_pct_left_off_line: alignOpen("left", false),
-            open_pct_backfield: alignOpen("backfield"),
-            align_n_slot: alignCount("slot"),
-            align_n_slot_on_line: alignCount("slot", true),
-            align_n_slot_off_line: alignCount("slot", false),
-            align_n_right: alignCount("right"),
-            align_n_right_on_line: alignCount("right", true),
-            align_n_right_off_line: alignCount("right", false),
-            align_n_left: alignCount("left"),
-            align_n_left_on_line: alignCount("left", true),
-            align_n_left_off_line: alignCount("left", false),
-            align_n_backfield: alignCount("backfield"),
-          };
-        })(),
-      };
-    });
-  }, [prospects, games, plays]);
+  // Server-aggregated path: merge view rows + league baselines into ProspectWithStats.
+  // Replaces the per-snap JS reduce.
+  const prospectsWithStats = useMemo(
+    (): ProspectWithStats[] =>
+      buildProspectsWithStats(prospects, routeStatsRows, leagueBaselines),
+    [prospects, routeStatsRows, leagueBaselines],
+  );
 
   async function handleAddProspect(data: Omit<Prospect, "id" | "user_id" | "created_at" | "updated_at">) {
     const { data: { user } } = await supabase.auth.getUser();
@@ -383,12 +244,21 @@ export default function ScoutingHub() {
 
   const positionTabs: PositionTab[] = ["QB", "RB", "WR", "TE"];
 
-  const headerBreakdown = useMemo(() => {
-    const playCountsByGame: Record<string, number> = {};
-    const allPlays = [...plays, ...rbPlays, ...qbPlays, ...tePlays];
-    for (const pl of allPlays) {
-      playCountsByGame[pl.game_id] = (playCountsByGame[pl.game_id] ?? 0) + 1;
+  // Snaps per prospect, sourced from the four prospect_*_stats views.
+  // WR uses prospect_route_stats.total_snaps (already on prospectsWithStats);
+  // RB/QB/TE come from the position-stub views fetched in loadAll.
+  const snapsByProspect = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const p of prospectsWithStats) {
+      if (p.total_snaps > 0) m.set(p.id, p.total_snaps);
     }
+    for (const r of posSnapsRows) {
+      if (r.total_snaps > 0) m.set(r.prospect_id, r.total_snaps);
+    }
+    return m;
+  }, [prospectsWithStats, posSnapsRows]);
+
+  const headerBreakdown = useMemo(() => {
     const years = [...new Set(prospectsWithStats.map((p) => p.draft_class_year))].sort();
     return years.map((year) => ({
       year,
@@ -396,7 +266,7 @@ export default function ScoutingHub() {
         const group = prospectsWithStats.filter((p) => p.draft_class_year === year && p.position === pos);
         const groupIds = new Set(group.map((p) => p.id));
         const groupGames = games.filter((g) => groupIds.has(g.prospect_id));
-        const snaps = groupGames.reduce((s, g) => s + (playCountsByGame[g.id] ?? 0), 0);
+        const snaps = group.reduce((s, p) => s + (snapsByProspect.get(p.id) ?? 0), 0);
         return {
           pos,
           prospects: group.length,
@@ -407,7 +277,7 @@ export default function ScoutingHub() {
         };
       }).filter((r) => r.prospects > 0),
     }));
-  }, [prospectsWithStats, games, plays, rbPlays, qbPlays, tePlays]);
+  }, [prospectsWithStats, games, snapsByProspect]);
 
   // Shared props for all position hubs
   const hubProps = {
@@ -515,8 +385,12 @@ export default function ScoutingHub() {
         {tab === "games_log" && (
           <GamesLog
             games={games}
-            plays={plays}
+            gameSnapStats={gameSnapStatsRows}
             prospects={prospectsWithStats}
+            rbPlays={rbPlays}
+            qbPlays={qbPlays}
+            tePlays={tePlays}
+            loadPositionPlays={loadPositionPlays}
             loading={loading}
             onSelectProspect={(p) => { setPositionTab(p.position as PositionTab); setTab("prospects"); }}
           />
@@ -530,6 +404,7 @@ export default function ScoutingHub() {
             rbPlays={rbPlays}
             qbPlays={qbPlays}
             tePlays={tePlays}
+            loadPositionPlays={loadPositionPlays}
             loading={loading}
             draftYearFilter={draftYearFilter}
             setDraftYearFilter={setDraftYearFilter}
