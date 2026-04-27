@@ -3,6 +3,8 @@ import { useState, useMemo, useEffect, startTransition } from "react";
 import dynamic from "next/dynamic";
 import { supabase } from "../../../lib/supabaseclient";
 import type { Prospect, ProspectWithStats, ChartingDecision } from "../../../lib/types";
+import { useRecruitIndex } from "../../../hooks/useRecruitIndex";
+import RecruitStarBadge from "../RecruitStarBadge";
 
 const QBChartingBoard  = dynamic(() => import("./QBChartingBoard"),   { ssr: false });
 const ProspectRosterSheet = dynamic(() => import("../ProspectRosterSheet"), { ssr: false });
@@ -41,6 +43,7 @@ export default function QBHub({
   navigateToProspect,
   onNavigated,
 }: QBHubProps) {
+  const { matchProspect } = useRecruitIndex();
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
 
   useEffect(() => {
@@ -228,6 +231,9 @@ export default function QBHub({
                     {p.school}{p.conference ? ` · ${p.conference}` : ""}
                   </span>
                   <div className="ml-auto flex items-center gap-3 flex-shrink-0">
+                    <span className="w-20 flex justify-center">
+                      <RecruitStarBadge recruit={matchProspect({ name: p.name, position: p.position, draft_class_year: p.draft_class_year })} />
+                    </span>
                     {p.total_games > 0 && <span className="text-xs text-blue-400">{p.total_games}G</span>}
                     {p.personal_rank && <span className="text-xs text-gray-500">#{p.personal_rank}</span>}
                     <span className="text-xs text-gray-700">{p.draft_class_year}</span>

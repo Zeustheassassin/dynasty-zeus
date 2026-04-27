@@ -2,6 +2,8 @@
 import { useState, useMemo } from "react";
 import { supabase } from "../../../lib/supabaseclient";
 import type { Prospect, ProspectWithStats, ChartingDecision } from "../../../lib/types";
+import { useRecruitIndex } from "../../../hooks/useRecruitIndex";
+import RecruitStarBadge from "../RecruitStarBadge";
 
 type SortKey = "personal_rank" | "name" | "school" | "draft_class_year";
 
@@ -59,6 +61,7 @@ export default function RBProspectList({
   draftYearFilter,
   setDraftYearFilter,
 }: Props) {
+  const { matchProspect } = useRecruitIndex();
   const [showAdd, setShowAdd] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("personal_rank");
@@ -189,6 +192,9 @@ export default function RBProspectList({
                 <span className="text-sm font-medium text-white min-w-0 truncate">{p.name}</span>
                 <span className="text-xs text-gray-400 truncate hidden sm:block">{p.school}</span>
                 <div className="ml-auto flex items-center gap-3 flex-shrink-0">
+                  <span className="w-20 flex justify-center">
+                    <RecruitStarBadge recruit={matchProspect({ name: p.name, position: p.position, draft_class_year: p.draft_class_year })} />
+                  </span>
                   {games > 0 && <span className="text-xs text-green-400">{games}G</span>}
                   {p.personal_rank && <span className="text-xs text-gray-500">#{p.personal_rank}</span>}
                   <span className="text-xs text-gray-700">{p.draft_class_year}</span>

@@ -22,8 +22,10 @@ const TEHub = dynamic(() => import("./scouting/te/TEHub"), { ssr: false });
 const BigBoard = dynamic(() => import("./scouting/BigBoard"), { ssr: false });
 const GamesLog = dynamic(() => import("./scouting/GamesLog"), { ssr: false });
 const AnalysisHub = dynamic(() => import("./scouting/stats/AnalysisHub"), { ssr: false });
+const RecruitsTab = dynamic(() => import("./scouting/RecruitsTab"), { ssr: false });
+const RecruitStatsTab = dynamic(() => import("./scouting/RecruitStatsTab"), { ssr: false });
 
-type HubTab = "prospects" | "big_board" | "games_log" | "analysis";
+type HubTab = "prospects" | "big_board" | "games_log" | "analysis" | "recruits" | "recruit_stats";
 type PositionTab = "WR" | "RB" | "QB" | "TE";
 
 const POSITIONS: PositionTab[] = ["QB", "RB", "WR", "TE"];
@@ -373,6 +375,8 @@ export default function ScoutingHub() {
     { key: "big_board", label: "Big Board" },
     { key: "games_log", label: "Games Charted" },
     { key: "analysis",  label: "Analysis" },
+    { key: "recruits",  label: "Recruits" },
+    { key: "recruit_stats", label: "Recruit Statistics" },
   ];
 
   const positionTabs: PositionTab[] = ["QB", "RB", "WR", "TE"];
@@ -533,6 +537,14 @@ export default function ScoutingHub() {
               setTab("prospects");
             }}
           />
+        )}
+
+        {tab === "recruits" && (
+          <RecruitsTab />
+        )}
+
+        {tab === "recruit_stats" && (
+          <RecruitStatsTab />
         )}
       </div>
     </div>
