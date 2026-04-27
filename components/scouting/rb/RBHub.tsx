@@ -95,6 +95,7 @@ export default function RBHub({
         <ProspectRosterSheet
           prospects={rbProspects}
           nflRoles={RB_NFL_ROLES}
+          onDataChanged={onDataChanged}
         />
       )}
     </div>

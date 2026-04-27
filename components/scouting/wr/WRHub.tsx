@@ -91,6 +91,7 @@ export default function WRHub({
         <ProspectRosterSheet
           prospects={wrProspects}
           nflRoles={WR_NFL_ROLES}
+          onDataChanged={onDataChanged}
         />
       )}
     </div>

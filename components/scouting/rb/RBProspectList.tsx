@@ -3,6 +3,7 @@ import { useState, useMemo } from "react";
 import { supabase } from "../../../lib/supabaseclient";
 import type { Prospect, ProspectWithStats, ChartingDecision } from "../../../lib/types";
 import { useRecruitIndex } from "../../../hooks/useRecruitIndex";
+import { lookupConference } from "../../../lib/scouting/schoolConferences";
 import RecruitStarBadge from "../RecruitStarBadge";
 
 type SortKey = "personal_rank" | "name" | "school" | "draft_class_year";
@@ -47,7 +48,7 @@ const DECISION_LABEL: Record<ChartingDecision, string> = {
   fully_charted: "Fully Charted",
   partial_chart: "Partial Chart",
   charting: "Charting",
-  pending: "Pending",
+  pending: "Undecided",
   not_charting: "Not Charting",
 };
 
@@ -101,7 +102,13 @@ export default function RBProspectList({
   }
 
   async function handleAdd() {
-    if (!form.name.trim()) return;
+    const trimmedName = form.name.trim();
+    if (!trimmedName) return;
+    const dup = prospects.find((p) => p.name.trim().toLowerCase() === trimmedName.toLowerCase());
+    if (dup) {
+      const detail = `${dup.school || "no school"}, class of ${dup.draft_class_year}`;
+      if (!window.confirm(`A RB prospect named "${dup.name}" already exists (${detail}). Add anyway?`)) return;
+    }
     setSaving(true);
     await onAddProspect({
       name: form.name.trim(),
@@ -157,7 +164,14 @@ export default function RBProspectList({
             <input className="col-span-2 md:col-span-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-green-500"
               placeholder="Player Name *" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
             <input className="px-3 py-2 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-green-500"
-              placeholder="School" value={form.school} onChange={(e) => setForm((f) => ({ ...f, school: e.target.value }))} />
+              placeholder="School" value={form.school}
+              onChange={(e) => setForm((f) => ({ ...f, school: e.target.value }))}
+              onBlur={() => {
+                if (form.conference.trim() === "") {
+                  const auto = lookupConference(form.school);
+                  if (auto) setForm((f) => ({ ...f, conference: auto }));
+                }
+              }} />
             <input className="px-3 py-2 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-green-500"
               placeholder="Conference" value={form.conference} onChange={(e) => setForm((f) => ({ ...f, conference: e.target.value }))} />
             <select className="px-3 py-2 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-green-500"

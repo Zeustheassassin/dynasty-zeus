@@ -12,6 +12,7 @@ import type {
   QBPlay,
   TEPlay,
 } from "../lib/types";
+import { deriveChartingDecision } from "./scouting/shared/chartingConstants";
 
 const log = logger("ScoutingHub");
 
@@ -208,6 +209,7 @@ export default function ScoutingHub() {
 
       return {
         ...p,
+        charting_decision: deriveChartingDecision(p.charting_decision, gameIds.size),
         total_snaps: totalSnaps,
         total_routes: totalRoutes,
         total_games: gameIds.size,
@@ -399,7 +401,7 @@ export default function ScoutingHub() {
           pos,
           prospects: group.length,
           charted: group.filter((p) => p.total_games > 0).length,
-          pending: group.filter((p) => p.charting_decision === "pending").length,
+          charting: group.filter((p) => p.total_games === 0 && p.charting_decision === "charting").length,
           games: groupGames.length,
           snaps,
         };
@@ -423,7 +425,7 @@ export default function ScoutingHub() {
     <div className="min-h-screen bg-slate-950 text-white">
       {/* Hub header */}
       <div className="border-b border-gray-800 bg-gray-950">
-        <div className="max-w-7xl mx-auto px-4 py-4">
+        <div className="px-4 py-4">
           <div className="flex items-start justify-between flex-wrap gap-2">
             <div>
               <h1 className="text-2xl font-bold text-white">Scouting Hub</h1>
@@ -438,7 +440,7 @@ export default function ScoutingHub() {
                         {r.prospects} prospects
                         {" · "}
                         <span className="text-green-400">{r.charted} charted</span>
-                        {r.pending > 0 && <> · <span className="text-yellow-400">{r.pending} pending</span></>}
+                        {r.charting > 0 && <> · <span className="text-yellow-400">{r.charting} charting</span></>}
                         {" · "}
                         {r.games} games
                         {" · "}
@@ -471,7 +473,7 @@ export default function ScoutingHub() {
       </div>
 
       {/* Content */}
-      <div className="max-w-7xl mx-auto px-4 py-6">
+      <div className="px-4 py-6">
         {tab === "prospects" && (
           <>
             {/* Position sub-tabs */}

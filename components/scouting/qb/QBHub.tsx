@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { supabase } from "../../../lib/supabaseclient";
 import type { Prospect, ProspectWithStats, ChartingDecision } from "../../../lib/types";
 import { useRecruitIndex } from "../../../hooks/useRecruitIndex";
+import { lookupConference } from "../../../lib/scouting/schoolConferences";
 import RecruitStarBadge from "../RecruitStarBadge";
 
 const QBChartingBoard  = dynamic(() => import("./QBChartingBoard"),   { ssr: false });
@@ -98,9 +99,15 @@ export default function QBHub({
   }
 
   async function addProspect() {
-    if (!newProspect.name.trim() || !newProspect.school.trim()) {
+    const trimmedName = newProspect.name.trim();
+    if (!trimmedName || !newProspect.school.trim()) {
       setAddError("Name and school are required.");
       return;
+    }
+    const dup = qbProspects.find((p) => p.name.trim().toLowerCase() === trimmedName.toLowerCase());
+    if (dup) {
+      const detail = `${dup.school || "no school"}, class of ${dup.draft_class_year}`;
+      if (!window.confirm(`A QB prospect named "${dup.name}" already exists (${detail}). Add anyway?`)) return;
     }
     setAddError(null);
     await onAddProspect({
@@ -150,33 +157,50 @@ export default function QBHub({
 
       {hubView === "list" && (
         <div>
-          {/* Toolbar */}
+          {/* Class filter + add button (matches WR/RB/TE layout) */}
           <div className="flex flex-wrap items-center gap-2 mb-4">
-            <div className="flex gap-1 flex-wrap">
-              {(["personal_rank", "name", "school", "draft_class_year"] as SortKey[]).map((k) => {
-                const labels: Record<SortKey, string> = { personal_rank: "Rank", name: "Name", school: "School", draft_class_year: "Class" };
-                return (
-                  <button key={k} onClick={() => toggleSort(k)}
-                    className={`px-3 py-1 rounded text-xs font-medium transition ${
-                      sortKey === k ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"
-                    }`}>
-                    {labels[k]} {sortKey === k ? (sortDir === "asc" ? "↑" : "↓") : ""}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="flex gap-1 flex-wrap ml-auto">
-              {draftYears.map((y) => (
-                <button key={y} onClick={() => setDraftYearFilter(draftYearFilter === y ? null : y)}
-                  className={`px-3 py-1 rounded text-xs font-medium transition ${draftYearFilter === y ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
-                  {y}
-                </button>
-              ))}
-              <button onClick={() => setShowAdd((s) => !s)}
-                className="px-3 py-1 bg-blue-700 hover:bg-blue-600 text-white rounded text-xs font-medium transition">
-                + Add QB
+            <span className="text-sm text-gray-400">Class:</span>
+            <button
+              onClick={() => setDraftYearFilter(null)}
+              className={`px-3 py-1 rounded text-xs font-medium transition ${
+                !draftYearFilter ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+              }`}
+            >
+              All
+            </button>
+            {draftYears.map((y) => (
+              <button
+                key={y}
+                onClick={() => setDraftYearFilter(y)}
+                className={`px-3 py-1 rounded text-xs font-medium transition ${
+                  draftYearFilter === y ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                }`}
+              >
+                {y}
               </button>
-            </div>
+            ))}
+            <button
+              onClick={() => setShowAdd((s) => !s)}
+              className="ml-auto px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded font-medium transition"
+            >
+              + Add Prospect
+            </button>
+          </div>
+
+          {/* Sort controls */}
+          <div className="flex flex-wrap gap-2 mb-4">
+            <span className="text-xs text-gray-500 self-center">Sort:</span>
+            {(["personal_rank", "name", "school", "draft_class_year"] as SortKey[]).map((k) => {
+              const labels: Record<SortKey, string> = { personal_rank: "Rank", name: "Name", school: "School", draft_class_year: "Draft Yr" };
+              return (
+                <button key={k} onClick={() => toggleSort(k)}
+                  className={`px-3 py-1 rounded text-xs font-medium transition ${
+                    sortKey === k ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                  }`}>
+                  {labels[k]} {sortKey === k ? (sortDir === "asc" ? "↑" : "↓") : ""}
+                </button>
+              );
+            })}
           </div>
 
           {/* Add form */}
@@ -186,7 +210,14 @@ export default function QBHub({
                 <input className="px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500"
                   placeholder="Name *" value={newProspect.name} onChange={(e) => setNewProspect((n) => ({ ...n, name: e.target.value }))} />
                 <input className="px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500"
-                  placeholder="School *" value={newProspect.school} onChange={(e) => setNewProspect((n) => ({ ...n, school: e.target.value }))} />
+                  placeholder="School *" value={newProspect.school}
+                  onChange={(e) => setNewProspect((n) => ({ ...n, school: e.target.value }))}
+                  onBlur={() => {
+                    if (newProspect.conference.trim() === "") {
+                      const auto = lookupConference(newProspect.school);
+                      if (auto) setNewProspect((n) => ({ ...n, conference: auto }));
+                    }
+                  }} />
                 <input className="px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500"
                   placeholder="Conference" value={newProspect.conference} onChange={(e) => setNewProspect((n) => ({ ...n, conference: e.target.value }))} />
                 <input type="number" className="px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500"
@@ -215,7 +246,7 @@ export default function QBHub({
             <div className="text-gray-500 text-sm text-center py-12">Loading…</div>
           ) : filtered.length === 0 ? (
             <div className="text-gray-500 text-sm text-center py-12">
-              No QB prospects found. Click &quot;+ Add QB&quot; to add one.
+              No QB prospects found. Click &quot;+ Add Prospect&quot; to add one.
             </div>
           ) : (
             <div className="space-y-1">
@@ -261,6 +292,7 @@ export default function QBHub({
         <ProspectRosterSheet
           prospects={qbProspects}
           nflRoles={QB_NFL_ROLES}
+          onDataChanged={onDataChanged}
         />
       )}
     </div>

@@ -95,6 +95,7 @@ export default function TEHub({
         <ProspectRosterSheet
           prospects={teProspects}
           nflRoles={TE_NFL_ROLES}
+          onDataChanged={onDataChanged}
         />
       )}
     </div>
