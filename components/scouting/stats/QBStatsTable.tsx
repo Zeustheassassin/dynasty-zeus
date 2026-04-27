@@ -1,6 +1,7 @@
 "use client";
 import { useMemo } from "react";
 import StatsTableShell, { StatRow, ColDef } from "./StatsTableShell";
+import { computeQBAboveExpected } from "../../../lib/scouting/aboveExpected";
 import type { Prospect, ScoutingGame, QBPlay, QBDepthZone, QBSnapPosition } from "../../../lib/types";
 
 interface Props {
@@ -87,6 +88,7 @@ function onTgtPct(plays: QBPlay[]): number | null {
 
 export default function QBStatsTable({ prospects, games, qbPlays, loading, draftYearFilter, onSelectProspect }: Props) {
   const prospectMap = useMemo(() => new Map(prospects.map((p) => [p.id, p])), [prospects]);
+  const aaeMap = useMemo(() => computeQBAboveExpected(prospects, games, qbPlays), [prospects, games, qbPlays]);
   const rows = useMemo((): StatRow[] => {
     const gameToProspect = new Map<string, string>();
     for (const g of games) gameToProspect.set(g.id, g.prospect_id);
@@ -104,22 +106,6 @@ export default function QBStatsTable({ prospects, games, qbPlays, loading, draft
       gamesByProspect.set(g.prospect_id, (gamesByProspect.get(g.prospect_id) ?? 0) + 1);
     }
 
-    // League-wide on-target rates per depth zone and coverage for AAE
-    const lgDepth: Partial<Record<QBDepthZone, { ot: number; n: number }>> = {};
-    const lgCvg: Record<"man" | "zone", { ot: number; n: number }> = { man: { ot: 0, n: 0 }, zone: { ot: 0, n: 0 } };
-    for (const pl of qbPlays) {
-      if (pl.play_type !== "pass" || pl.accuracy == null) continue;
-      if (pl.depth_zone) {
-        if (!lgDepth[pl.depth_zone]) lgDepth[pl.depth_zone] = { ot: 0, n: 0 };
-        lgDepth[pl.depth_zone]!.n++;
-        if (pl.accuracy === "on_target") lgDepth[pl.depth_zone]!.ot++;
-      }
-      if (pl.coverage === "man" || pl.coverage === "zone") {
-        lgCvg[pl.coverage].n++;
-        if (pl.accuracy === "on_target") lgCvg[pl.coverage].ot++;
-      }
-    }
-
     return prospects
       .filter((p) => p.position === "QB")
       .map((p) => {
@@ -127,30 +113,7 @@ export default function QBStatsTable({ prospects, games, qbPlays, loading, draft
         const passPlays = pPlays.filter((pl) => pl.play_type === "pass");
         const ratedPasses = passPlays.filter((pl) => pl.accuracy != null);
 
-        // AAE
-        let aae: number | null = null;
-        if (ratedPasses.length >= 15) {
-          const actual = ratedPasses.filter((pl) => pl.accuracy === "on_target").length / ratedPasses.length;
-          let expDepth = 0, dW = 0;
-          for (const dz of DEPTH_ZONES) {
-            const dzN = ratedPasses.filter((pl) => pl.depth_zone === dz).length;
-            const lg = lgDepth[dz];
-            if (dzN > 0 && lg && lg.n > 0) { expDepth += (dzN / ratedPasses.length) * (lg.ot / lg.n); dW += dzN / ratedPasses.length; }
-          }
-          let expCvg = 0, cW = 0;
-          for (const cvg of ["man", "zone"] as const) {
-            const cN = ratedPasses.filter((pl) => pl.coverage === cvg).length;
-            const lg = lgCvg[cvg];
-            if (cN > 0 && lg.n > 0) { expCvg += (cN / ratedPasses.length) * (lg.ot / lg.n); cW += cN / ratedPasses.length; }
-          }
-          const normDepth = dW > 0 ? expDepth / dW : null;
-          const normCvg = cW > 0 ? expCvg / cW : null;
-          let combined: number | null = null;
-          if (normDepth != null && normCvg != null) combined = (normDepth + normCvg) / 2;
-          else if (normDepth != null) combined = normDepth;
-          else if (normCvg != null) combined = normCvg;
-          if (combined != null) aae = parseFloat(((actual - combined) * 100).toFixed(2));
-        }
+        const aae = aaeMap.get(p.id) ?? null;
 
         const timingTotal = passPlays.filter((pl) => pl.timing != null).length;
 
@@ -228,7 +191,7 @@ export default function QBStatsTable({ prospects, games, qbPlays, loading, draft
           raw_scramble: passPlays.filter((pl) => pl.timing === "scramble").length,
         } satisfies StatRow;
       });
-  }, [prospects, games, qbPlays]);
+  }, [prospects, games, qbPlays, aaeMap]);
 
   return (
     <StatsTableShell

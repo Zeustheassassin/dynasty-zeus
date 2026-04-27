@@ -1,7 +1,8 @@
 "use client";
 import { useMemo } from "react";
 import StatsTableShell, { StatRow, ColDef } from "./StatsTableShell";
-import type { Prospect, ScoutingGame, RBPlay, RBFormation, RBRunType } from "../../../lib/types";
+import { computeRBAboveExpected } from "../../../lib/scouting/aboveExpected";
+import type { Prospect, ScoutingGame, RBPlay, RBRunType } from "../../../lib/types";
 
 interface Props {
   prospects: Prospect[];
@@ -13,7 +14,6 @@ interface Props {
 }
 
 const RUN_TYPES: RBRunType[] = ["outside_zone", "inside_zone", "outside_man_gap", "inside_man_gap"];
-const FORMATIONS: RBFormation[] = ["gun", "pistol", "under_center"];
 
 const COLS: ColDef[] = [
   // Identity
@@ -88,6 +88,7 @@ function pct(n: number, d: number): number | null {
 
 export default function RBStatsTable({ prospects, games, rbPlays, loading, draftYearFilter, onSelectProspect }: Props) {
   const prospectMap = useMemo(() => new Map(prospects.map((p) => [p.id, p])), [prospects]);
+  const sraeMap = useMemo(() => computeRBAboveExpected(prospects, games, rbPlays), [prospects, games, rbPlays]);
   const rows = useMemo((): StatRow[] => {
     // Build game → prospect map
     const gameToProspect = new Map<string, string>();
@@ -108,51 +109,14 @@ export default function RBStatsTable({ prospects, games, rbPlays, loading, draft
       gamesByProspect.set(g.prospect_id, (gamesByProspect.get(g.prospect_id) ?? 0) + 1);
     }
 
-    // League-wide success rates for SRAE
-    const lgFormation: Record<RBFormation, { s: number; n: number }> = {
-      gun: { s: 0, n: 0 }, pistol: { s: 0, n: 0 }, under_center: { s: 0, n: 0 },
-    };
-    const lgBox = { loaded: { s: 0, n: 0 }, unloaded: { s: 0, n: 0 } };
-    for (const pl of rbPlays) {
-      if (!RUN_TYPES.includes(pl.run_type as RBRunType)) continue;
-      if (pl.success === null) continue;
-      lgFormation[pl.formation].n++;
-      if (pl.success) lgFormation[pl.formation].s++;
-      if (pl.loaded_box) { lgBox.loaded.n++; if (pl.success) lgBox.loaded.s++; }
-      else { lgBox.unloaded.n++; if (pl.success) lgBox.unloaded.s++; }
-    }
-
     return prospects
       .filter((p) => p.position === "RB")
       .map((p) => {
         const pPlays = playsByProspect.get(p.id) ?? [];
         const runPlays = pPlays.filter((pl) => RUN_TYPES.includes(pl.run_type as RBRunType));
         const routePlays = pPlays.filter((pl) => pl.run_type === "route");
-        const knownRuns = runPlays.filter((pl) => pl.success !== null);
 
-        // SRAE
-        let srae: number | null = null;
-        if (knownRuns.length >= 15) {
-          const actual = knownRuns.filter((pl) => pl.success).length / knownRuns.length;
-          let expFm = 0, fmW = 0;
-          for (const fm of FORMATIONS) {
-            const fmN = runPlays.filter((pl) => pl.formation === fm && pl.success !== null).length;
-            const lg = lgFormation[fm];
-            if (fmN > 0 && lg.n > 0) { expFm += (fmN / knownRuns.length) * (lg.s / lg.n); fmW += fmN / knownRuns.length; }
-          }
-          const loadedN = runPlays.filter((pl) => pl.loaded_box && pl.success !== null).length;
-          const unloadedN = runPlays.filter((pl) => !pl.loaded_box && pl.success !== null).length;
-          let expBox = 0, boxW = 0;
-          if (loadedN > 0 && lgBox.loaded.n > 0) { expBox += (loadedN / knownRuns.length) * (lgBox.loaded.s / lgBox.loaded.n); boxW += loadedN / knownRuns.length; }
-          if (unloadedN > 0 && lgBox.unloaded.n > 0) { expBox += (unloadedN / knownRuns.length) * (lgBox.unloaded.s / lgBox.unloaded.n); boxW += unloadedN / knownRuns.length; }
-          const normFm = fmW > 0 ? expFm / fmW : null;
-          const normBox = boxW > 0 ? expBox / boxW : null;
-          let combined: number | null = null;
-          if (normFm != null && normBox != null) combined = (normFm + normBox) / 2;
-          else if (normFm != null) combined = normFm;
-          else if (normBox != null) combined = normBox;
-          if (combined != null) srae = parseFloat(((actual - combined) * 100).toFixed(2));
-        }
+        const srae = sraeMap.get(p.id) ?? null;
 
         const oz = runPlays.filter((pl) => pl.run_type === "outside_zone");
         const iz = runPlays.filter((pl) => pl.run_type === "inside_zone");
@@ -225,7 +189,7 @@ export default function RBStatsTable({ prospects, games, rbPlays, loading, draft
           raw_catches:   recCatches,
         } satisfies StatRow;
       });
-  }, [prospects, games, rbPlays]);
+  }, [prospects, games, rbPlays, sraeMap]);
 
   return (
     <StatsTableShell
