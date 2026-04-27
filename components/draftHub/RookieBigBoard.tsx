@@ -500,8 +500,7 @@ export default function RookieBigBoard({
       {/* Virtualized player list */}
       <div
         ref={bigBoardParentRef}
-        className="overflow-auto"
-        style={{ height: "600px" }}
+        className="overflow-auto min-h-[600px] h-[calc(100vh-260px)]"
       >
         <div
           style={{
