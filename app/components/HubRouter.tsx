@@ -118,7 +118,7 @@ interface HubRouterProps {
   draftedPlayerIds: Set<string>;
   loadRoster: (league: SleeperLeague) => void;
   loadRedraftValues: () => void;
-  loadUserTrades: (ownerId: string) => void;
+  loadUserTrades: (ownerId: string, bypass?: boolean) => void;
   loadUserExposure: (ownerId: string) => void;
   loadDraftScout: (userId: string) => void;
   saveLeagueNote: (leagueId: string, text: string) => void;

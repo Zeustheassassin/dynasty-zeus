@@ -11,7 +11,7 @@ interface TradeLogProps {
   loadingTradeHub: boolean;
   tradeHubUserId: string | null;
   user: SleeperUser | null;
-  loadUserTrades: (ownerId: string) => void;
+  loadUserTrades: (ownerId: string, bypass?: boolean) => void;
   onMarkAttempted: (attempt: Omit<TradeAttempt, "id" | "user_id" | "attempted_at" | "resolved_at">) => Promise<void>;
 }
 
@@ -23,17 +23,42 @@ function TradeLog({ tradeHubData, loadingTradeHub, tradeHubUserId, user, loadUse
 
   const logPickLabel = (p: SleeperTradedPick) => p.resolvedSlot ?? `${p.season} Rd ${p.round}`;
 
+  const isMyData = tradeHubUserId === user?.user_id && tradeHubData != null;
+  const showInitialLoad = loadingTradeHub && !isMyData;
+  const showRefreshIndicator = loadingTradeHub && isMyData;
+
   return (
     <div className="space-y-4">
       <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
-        <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Your Trade Log</div>
-        <div className="mt-1 text-sm text-gray-200">
-          Your trades from the past 30 days across all dynasty leagues.
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Your Trade Log</div>
+            <div className="mt-1 text-sm text-gray-200">
+              Your trades from the past 30 days across all dynasty leagues.
+            </div>
+          </div>
+          {isMyData && (
+            <button
+              onClick={() => { if (user?.user_id) loadUserTrades(user.user_id, true); }}
+              disabled={loadingTradeHub}
+              title="Bypass caches and re-fetch trades from Sleeper"
+              className="flex items-center gap-1 text-[11px] font-semibold px-3 py-1 rounded-full border border-gray-600 text-gray-400 hover:border-gray-400 hover:text-gray-200 transition disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className={`w-3 h-3 ${loadingTradeHub ? "animate-spin" : ""}`}>
+                <path fillRule="evenodd" d="M13.836 2.477a.75.75 0 0 1 .75.75v3.182a.75.75 0 0 1-.75.75h-3.182a.75.75 0 0 1 0-1.5h1.37l-.84-.841a4.5 4.5 0 0 0-7.08 1.196.75.75 0 1 1-1.31-.734 6 6 0 0 1 9.44-1.595l.842.841V3.227a.75.75 0 0 1 .75-.75Zm-.911 7.5A.75.75 0 0 1 13.199 11a6 6 0 0 1-9.44 1.595l-.842-.841v1.017a.75.75 0 0 1-1.5 0V9.591a.75.75 0 0 1 .75-.75H5.35a.75.75 0 0 1 0 1.5H3.98l.84.841a4.5 4.5 0 0 0 7.08-1.196.75.75 0 0 1 1.025-.009Z" clipRule="evenodd" />
+              </svg>
+              {loadingTradeHub ? "Refreshing…" : "Refresh"}
+            </button>
+          )}
         </div>
       </div>
 
-      {loadingTradeHub && (
+      {showInitialLoad && (
         <p className="text-sm text-gray-400">Loading your trades…</p>
+      )}
+
+      {showRefreshIndicator && (
+        <p className="text-xs text-gray-500">Refreshing from Sleeper…</p>
       )}
 
       {!loadingTradeHub && tradeHubUserId === user?.user_id && tradeHubData && tradeHubData.length === 0 && (
@@ -49,7 +74,7 @@ function TradeLog({ tradeHubData, loadingTradeHub, tradeHubUserId, user, loadUse
         </button>
       )}
 
-      {!loadingTradeHub && tradeHubUserId === user?.user_id && (tradeHubData ?? []).map((trade, i) => {
+      {tradeHubUserId === user?.user_id && (tradeHubData ?? []).map((trade, i) => {
         const myRosterId = trade.myRosterId;
 
         const received = Object.entries(trade.adds || {})

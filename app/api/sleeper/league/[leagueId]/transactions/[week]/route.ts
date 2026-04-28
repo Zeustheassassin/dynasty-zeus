@@ -22,9 +22,13 @@ export async function GET(
     return NextResponse.json({ error: 'Invalid week' }, { status: 400 });
   }
 
+  const bypass = req.nextUrl.searchParams.get('bypass') === '1';
   const upstream = `${SLEEPER_BASE_URL}/league/${leagueId}/transactions/${weekNum}`;
   try {
-    const res = await fetch(upstream, { next: { revalidate: SLEEPER_LEAGUE_TRANSACTIONS_REVALIDATE_S } });
+    const res = await fetch(
+      upstream,
+      bypass ? { cache: 'no-store' } : { next: { revalidate: SLEEPER_LEAGUE_TRANSACTIONS_REVALIDATE_S } },
+    );
     if (!res.ok) {
       log.error('upstream non-OK', { status: res.status, leagueId, week: weekNum });
       return NextResponse.json([], { status: 502 });

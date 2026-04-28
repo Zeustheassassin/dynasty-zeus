@@ -10,7 +10,7 @@ interface LeagueMatesTabProps {
   selectedLeagueMateProfilesView: LeagueMateView[];
   loadingLeagueMateIntel: boolean;
   loadingCrossLeagueMateIntel: boolean;
-  loadUserTrades: (ownerId: string) => void;
+  loadUserTrades: (ownerId: string, bypass?: boolean) => void;
   loadUserExposure: (ownerId: string) => void;
   setCalcOpponentRosterId: (id: number | null) => void;
   setMainTab: (tab: string) => void;

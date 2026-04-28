@@ -168,11 +168,13 @@ async function getLeagueMatchups(leagueId: string, week: number): Promise<Sleepe
 /** Fetch transactions for a single week. Returns [] on any error. */
 async function getLeagueTransactions(
   leagueId: string,
-  week: number
+  week: number,
+  bypass?: boolean,
 ): Promise<SleeperTransaction[]> {
   const result = await cachedGetOrNull<SleeperTransaction[]>(
     `${PROXY_BASE}/league/${encodeURIComponent(leagueId)}/transactions/${week}`,
     TTL.leagueTransactions,
+    bypass,
   );
   return result ?? [];
 }
@@ -180,9 +182,10 @@ async function getLeagueTransactions(
 /** Convenience: fetch multiple weeks of transactions in parallel. */
 async function getLeagueTransactionsMultiWeek(
   leagueId: string,
-  weeks: number[]
+  weeks: number[],
+  bypass?: boolean,
 ): Promise<SleeperTransaction[]> {
-  const results = await Promise.all(weeks.map((w) => getLeagueTransactions(leagueId, w)));
+  const results = await Promise.all(weeks.map((w) => getLeagueTransactions(leagueId, w, bypass)));
   return results.flat();
 }
 

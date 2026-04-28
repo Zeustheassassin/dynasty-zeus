@@ -21,7 +21,7 @@ export interface UseUserTradesReturn {
   tradeHubData: AnnotatedTrade[] | null;
   setTradeHubData: Dispatch<SetStateAction<AnnotatedTrade[] | null>>;
   loadingTradeHub: boolean;
-  loadUserTrades: (targetUserId: string) => Promise<void>;
+  loadUserTrades: (targetUserId: string, bypass?: boolean) => Promise<void>;
 }
 
 export function useUserTrades(): UseUserTradesReturn {
@@ -29,9 +29,10 @@ export function useUserTrades(): UseUserTradesReturn {
   const [tradeHubData, setTradeHubData] = useState<AnnotatedTrade[] | null>(null);
   const [loadingTradeHub, setLoadingTradeHub] = useState(false);
 
-  const loadUserTrades = async (targetUserId: string) => {
+  const loadUserTrades = async (targetUserId: string, bypass?: boolean) => {
     setTradeHubUserId(targetUserId);
-    setTradeHubData(null);
+    // Keep prior data visible on a same-user refresh; only clear when switching users.
+    if (!bypass) setTradeHubData(null);
     setLoadingTradeHub(true);
 
     try {
@@ -50,8 +51,8 @@ export function useUserTrades(): UseUserTradesReturn {
         dynastyLeagues.map(async (league) => {
           const [rostersData, t1, t2, draftsData, leagueUsersData] = await Promise.all([
             sleeperApi.getLeagueRosters(league.league_id).catch(() => [] as SleeperRoster[]),
-            sleeperApi.getLeagueTransactions(league.league_id, 1),
-            sleeperApi.getLeagueTransactions(league.league_id, 2),
+            sleeperApi.getLeagueTransactions(league.league_id, 1, bypass),
+            sleeperApi.getLeagueTransactions(league.league_id, 2, bypass),
             sleeperApi.getLeagueDrafts(league.league_id),
             sleeperApi.getLeagueUsers(league.league_id),
           ]);

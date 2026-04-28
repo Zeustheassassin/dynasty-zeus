@@ -37,7 +37,7 @@ interface TradeHubProps {
   tradePartnerRankings: TradePartnerRanking[];
   setPlayerProfileId: (id: string | null) => void;
   loadUserExposure: (ownerId: string) => void;
-  loadUserTrades: (ownerId: string) => void;
+  loadUserTrades: (ownerId: string, bypass?: boolean) => void;
   historicalSnapshot: HistoricalSnapshot | null;
   tradeHubData: AnnotatedTrade[] | null;
   loadingTradeHub: boolean;

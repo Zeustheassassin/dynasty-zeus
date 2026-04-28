@@ -103,7 +103,7 @@ interface LeagueHubProps {
   loadRoster: (league: SleeperLeague) => void;
   loadLeagueOverview: () => Promise<void>;
   loadRedraftValues: () => void;
-  loadUserTrades: (ownerId: string) => void;
+  loadUserTrades: (ownerId: string, bypass?: boolean) => void;
   loadUserExposure: (ownerId: string) => void;
   loadDraftScout: (userId: string) => void;
   saveLeagueNote: (leagueId: string, text: string) => void;

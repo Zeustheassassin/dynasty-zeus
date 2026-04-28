@@ -33,7 +33,7 @@ interface TradeCalculatorProps {
   onSessionMark: (fingerprint: string) => void;
   setPlayerProfileId: (id: string | null) => void;
   loadUserExposure: (ownerId: string) => void;
-  loadUserTrades: (ownerId: string) => void;
+  loadUserTrades: (ownerId: string, bypass?: boolean) => void;
   ignoredOwnerIds: string[];
   toggleIgnoredOwner: (ownerId: string) => void;
 }
