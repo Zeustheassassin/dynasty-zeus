@@ -1141,15 +1141,13 @@ const getTeamSummary = useCallback(() => {
     }
   });
 
-  const pickSummary = YEARS.reduce((acc: Record<string, number>, year) => {
-    acc[year] = 0;
-    return acc;
-  }, {});
-
+  // Derive year window from picks themselves — already correctly shifted by
+  // the pickYearWindow logic in loadRoster (drops completed-draft seasons,
+  // extends forward), so iterating YEARS here would miss the new far-year.
+  const pickSummary: Record<string, number> = {};
   picks.forEach((p) => {
-    if (pickSummary[p.season] !== undefined) {
-      pickSummary[p.season]++;
-    }
+    const year = String(p.season);
+    pickSummary[year] = (pickSummary[year] ?? 0) + 1;
   });
 
   return { summary, pickSummary };

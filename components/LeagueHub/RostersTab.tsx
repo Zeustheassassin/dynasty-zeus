@@ -7,7 +7,6 @@ import {
   groupRules,
   ordinal,
   CURRENT_YEAR,
-  YEARS,
 } from "../../lib/helpers";
 import { usePlayers } from "../../lib/PlayersContext";
 import { useLeague } from "../../lib/LeagueContext";
@@ -234,7 +233,7 @@ function RostersTab({
                     {pos}: {summary[pos]}
                   </div>
                 ))}
-                {Object.keys(pickSummary).map((year) => (
+                {Object.keys(pickSummary).sort().map((year) => (
                   <div key={year} className="px-3 py-1 bg-blue-900/40 rounded-full border border-blue-700">
                     {year} Picks: {pickSummary[year]}
                   </div>
@@ -355,7 +354,7 @@ function RostersTab({
                 </div>
               )}
               <div className="mt-6">
-                {YEARS.map((year) => {
+                {Array.from(new Set(picks.map((p) => String(p.season)))).sort().map((year) => {
                   const yearPicks = picks.filter((p) => p.season === year).sort((a, b) => a.round - b.round);
                   if (!yearPicks.length) return null;
                   return (
@@ -393,7 +392,7 @@ function RostersTab({
           )}
           {activeTab === "PICKS" && (
             <div className="mt-2">
-              {YEARS.map((year) => {
+              {Array.from(new Set(picks.map((p) => String(p.season)))).sort().map((year) => {
                 const yearPicks = picks
                   .filter((p) => p.season === year)
                   .sort((a, b) => {
