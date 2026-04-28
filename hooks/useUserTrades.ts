@@ -2,7 +2,8 @@
 import { useState, type Dispatch, type SetStateAction } from "react";
 import { CURRENT_YEAR, getDraftRoundSlot } from "../lib/helpers";
 import { logger } from "../lib/logger";
-import type { SleeperTransaction, SleeperLeague, SleeperRoster, SleeperDraft, SleeperUser, SleeperTradedPick } from "../lib/types";
+import { sleeperApi } from "../lib/sleeperApi";
+import type { SleeperTransaction, SleeperRoster, SleeperUser, SleeperTradedPick } from "../lib/types";
 
 const log = logger("hooks/useUserTrades");
 
@@ -34,10 +35,7 @@ export function useUserTrades(): UseUserTradesReturn {
     setLoadingTradeHub(true);
 
     try {
-      const leaguesRes = await fetch(
-        `https://api.sleeper.app/v1/user/${targetUserId}/leagues/nfl/${CURRENT_YEAR}`
-      );
-      const allLeagues = (await leaguesRes.json()) as SleeperLeague[];
+      const allLeagues = await sleeperApi.getUserLeagues(targetUserId, CURRENT_YEAR);
 
       const dynastyLeagues = allLeagues.filter((l) =>
         ((l.settings?.taxi_slots ?? 0) > 0 ||
@@ -51,14 +49,11 @@ export function useUserTrades(): UseUserTradesReturn {
       await Promise.all(
         dynastyLeagues.map(async (league) => {
           const [rostersData, t1, t2, draftsData, leagueUsersData] = await Promise.all([
-            fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`)
-              .then((r) => r.json() as Promise<SleeperRoster[]>).catch(() => [] as SleeperRoster[]),
-            fetch(`https://api.sleeper.app/v1/league/${league.league_id}/transactions/1`)
-              .then((r) => r.json() as Promise<SleeperTransaction[]>).catch(() => [] as SleeperTransaction[]),
-            fetch(`https://api.sleeper.app/v1/league/${league.league_id}/transactions/2`)
-              .then((r) => r.json() as Promise<SleeperTransaction[]>).catch(() => [] as SleeperTransaction[]),
-            fetch(`https://api.sleeper.app/v1/league/${league.league_id}/drafts`)
-              .then((r) => r.json() as Promise<SleeperDraft[]>).catch(() => [] as SleeperDraft[]),
+            sleeperApi.getLeagueRosters(league.league_id).catch(() => [] as SleeperRoster[]),
+            sleeperApi.getLeagueTransactions(league.league_id, 1),
+            sleeperApi.getLeagueTransactions(league.league_id, 2),
+            sleeperApi.getLeagueDrafts(league.league_id),
+            // No /api/sleeper/league/{id}/users proxy exists yet — keep direct
             fetch(`https://api.sleeper.app/v1/league/${league.league_id}/users`)
               .then((r) => r.json() as Promise<SleeperUser[]>).catch(() => [] as SleeperUser[]),
           ]);
@@ -66,13 +61,12 @@ export function useUserTrades(): UseUserTradesReturn {
           const myRoster = rostersData.find((r) => r.owner_id === targetUserId);
           if (!myRoster) return;
 
-          const currentDraft = (Array.isArray(draftsData) ? draftsData : [])
-            .find((d) => d.season === CURRENT_YEAR);
+          const currentDraft = draftsData.find((d) => d.season === CURRENT_YEAR);
           const draftOrder = currentDraft?.draft_order || {};
-          const numTeams = (Array.isArray(rostersData) ? rostersData : []).length
+          const numTeams = rostersData.length
             || Number(currentDraft?.settings?.teams) || 0;
           const rosterToOwner: Record<number, string> = {};
-          (Array.isArray(rostersData) ? rostersData : []).forEach((r) => {
+          rostersData.forEach((r) => {
             rosterToOwner[r.roster_id] = r.owner_id;
           });
 
@@ -96,14 +90,14 @@ export function useUserTrades(): UseUserTradesReturn {
             return `${season} Rd ${round}`;
           };
 
-          const startupDraft = (Array.isArray(draftsData) ? draftsData : [])
+          const startupDraft = draftsData
             .filter((d) => (d.settings?.rounds ?? 0) > 6)
             .sort((a, b) => (b.settings?.rounds ?? 0) - (a.settings?.rounds ?? 0))[0];
           const startupStart: number = startupDraft?.start_time ?? 0;
           const startupEnd: number = startupDraft?.last_picked
             ?? (startupStart ? startupStart + 60 * 24 * 60 * 60 * 1000 : 0);
 
-          const trades = [...(Array.isArray(t1) ? t1 : []), ...(Array.isArray(t2) ? t2 : [])]
+          const trades = [...t1, ...t2]
             .filter((t) =>
               t.type === "trade" &&
               t.status === "complete" &&

@@ -1,9 +1,10 @@
 "use client";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { logger } from "../lib/logger";
+import { sleeperApi } from "../lib/sleeperApi";
 import { CURRENT_YEAR, YEARS, ROUNDS, getDraftRoundSlot } from "../lib/helpers";
 import type {
-  SleeperLeague, SleeperRoster, SleeperTradedPick, SleeperDraft, SleeperUser,
+  SleeperLeague, SleeperUser,
   AugmentedPick, LeagueOverviewEntry,
 } from "../lib/types";
 
@@ -37,15 +38,10 @@ export function useLeagueOverview(
         currentLeagues.map(async (league) => {
           try {
             const [rostersData, tradedPicksData, draftsData, usersData] = await Promise.all([
-              fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`).then(
-                (r) => r.json() as Promise<SleeperRoster[]>
-              ),
-              fetch(`https://api.sleeper.app/v1/league/${league.league_id}/traded_picks`)
-                .then((r) => r.json() as Promise<SleeperTradedPick[]>)
-                .catch(() => [] as SleeperTradedPick[]),
-              fetch(`https://api.sleeper.app/v1/league/${league.league_id}/drafts`)
-                .then((r) => r.json() as Promise<SleeperDraft[]>)
-                .catch(() => [] as SleeperDraft[]),
+              sleeperApi.getLeagueRosters(league.league_id),
+              sleeperApi.getLeagueTradedPicks(league.league_id),
+              sleeperApi.getLeagueDrafts(league.league_id),
+              // No /api/sleeper/league/{id}/users proxy exists yet — keep direct
               fetch(`https://api.sleeper.app/v1/league/${league.league_id}/users`)
                 .then((r) => r.json() as Promise<SleeperUser[]>)
                 .catch(() => [] as SleeperUser[]),

@@ -2,7 +2,8 @@
 import { useState, type Dispatch, type SetStateAction } from "react";
 import { CURRENT_YEAR } from "../lib/helpers";
 import { logger } from "../lib/logger";
-import type { SleeperLeague, SleeperRoster } from "../lib/types";
+import { sleeperApi } from "../lib/sleeperApi";
+import type { SleeperRoster } from "../lib/types";
 
 const log = logger("hooks/useUserExposure");
 
@@ -34,17 +35,11 @@ export function useUserExposure(): UseUserExposureReturn {
       setLoadingShares(true);
       setSelectedUserId(userId);
 
-      const leaguesRes = await fetch(
-        `https://api.sleeper.app/v1/user/${userId}/leagues/nfl/${CURRENT_YEAR}`
-      );
-      const leagues = (await leaguesRes.json()) as SleeperLeague[];
+      const leagues = await sleeperApi.getUserLeagues(userId, CURRENT_YEAR);
 
       const rosterResults = await Promise.all(
         leagues.map(async (league) => {
-          const res = await fetch(
-            `https://api.sleeper.app/v1/league/${league.league_id}/rosters`
-          );
-          const rosters = (await res.json()) as SleeperRoster[];
+          const rosters = await sleeperApi.getLeagueRosters(league.league_id);
           return rosters.find((r) => r.owner_id === userId);
         })
       );

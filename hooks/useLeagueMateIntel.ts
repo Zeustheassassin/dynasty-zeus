@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
-import type { SleeperLeague, SleeperRoster, SleeperPlayer, SleeperTransaction } from "../lib/types";
+import { sleeperApi } from "../lib/sleeperApi";
+import type { SleeperLeague, SleeperRoster, SleeperPlayer } from "../lib/types";
 
 interface TradeIntelEntry {
   tradeCount30d: number;
@@ -30,12 +31,8 @@ export function useLeagueMateIntel(
       setLoadingLeagueMateIntel(true);
       try {
         const [t1, t2] = await Promise.all([
-          fetch(`https://api.sleeper.app/v1/league/${selectedLeague.league_id}/transactions/1`)
-            .then((r) => r.json() as Promise<SleeperTransaction[]>)
-            .catch(() => [] as SleeperTransaction[]),
-          fetch(`https://api.sleeper.app/v1/league/${selectedLeague.league_id}/transactions/2`)
-            .then((r) => r.json() as Promise<SleeperTransaction[]>)
-            .catch(() => [] as SleeperTransaction[]),
+          sleeperApi.getLeagueTransactions(selectedLeague.league_id, 1),
+          sleeperApi.getLeagueTransactions(selectedLeague.league_id, 2),
         ]);
 
         const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
@@ -54,7 +51,7 @@ export function useLeagueMateIntel(
           return rosterStats[key];
         };
 
-        [...(Array.isArray(t1) ? t1 : []), ...(Array.isArray(t2) ? t2 : [])]
+        [...t1, ...t2]
           .filter(
             (trade) =>
               trade?.type === "trade" &&

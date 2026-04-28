@@ -18,7 +18,7 @@ export async function GET(
   const { leagueId, week } = await ctx.params;
   if (!ID_RE.test(leagueId)) return NextResponse.json({ error: 'Invalid leagueId' }, { status: 400 });
   const weekNum = Number(week);
-  if (!Number.isInteger(weekNum) || weekNum < 1 || weekNum > 22) {
+  if (!Number.isInteger(weekNum) || weekNum < 0 || weekNum > 22) {
     return NextResponse.json({ error: 'Invalid week' }, { status: 400 });
   }
 

@@ -1,8 +1,9 @@
 "use client";
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { logger } from "../lib/logger";
+import { sleeperApi } from "../lib/sleeperApi";
 import { CURRENT_YEAR } from "../lib/helpers";
-import type { SleeperLeague, SleeperDraft, SleeperDraftPick, SleeperPlayer } from "../lib/types";
+import type { SleeperDraft, SleeperPlayer } from "../lib/types";
 
 const log = logger("hooks/useDraftScout");
 
@@ -97,18 +98,12 @@ export function useDraftScout(players: Record<string, SleeperPlayer>) {
     setLoadingDraftScout(true);
 
     try {
-      const leaguesRes = await fetch(
-        `https://api.sleeper.app/v1/user/${userId}/leagues/nfl/${CURRENT_YEAR}`
-      );
-      const leagues = (await leaguesRes.json()) as SleeperLeague[];
+      const leagues = await sleeperApi.getUserLeagues(userId, CURRENT_YEAR);
       const currentPlayers = playersRef.current;
 
       const results = await Promise.all(
         leagues.map(async (league) => {
-          const draftsRes = await fetch(
-            `https://api.sleeper.app/v1/league/${league.league_id}/drafts`
-          );
-          const drafts = await draftsRes.json();
+          const drafts = await sleeperApi.getLeagueDrafts(league.league_id);
 
           const rookieDraft = drafts.find(
             (d: SleeperDraft) =>
@@ -118,12 +113,9 @@ export function useDraftScout(players: Record<string, SleeperPlayer>) {
           );
           if (!rookieDraft) return null;
 
-          const picksRes = await fetch(
-            `https://api.sleeper.app/v1/draft/${rookieDraft.draft_id}/picks`
-          );
-          const allPicks = await picksRes.json();
+          const allPicks = await sleeperApi.getDraftPicks(rookieDraft.draft_id);
 
-          const myPicks = (allPicks as SleeperDraftPick[])
+          const myPicks = allPicks
             .filter((p) => p.picked_by === userId)
             .sort((a, b) => a.pick_no - b.pick_no)
             .map((p) => ({
