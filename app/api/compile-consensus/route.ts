@@ -2,11 +2,11 @@ import { NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { checkRateLimit } from "../../../lib/rateLimit";
 import { apiError } from "../../../lib/apiHelpers";
+import { safeFetch, withConcurrency } from "../../../lib/sleeperServer";
 import {
   SLEEPER_BASE_URL,
   COMPILE_CONCURRENCY,
   COMPILE_PICKS_CONCURRENCY,
-  SLEEPER_REQUEST_TIMEOUT_MS,
   SLEEPER_PLAYERS_TIMEOUT_MS,
   getCompilationYearRange,
 } from "../../../lib/constants";
@@ -17,7 +17,6 @@ export const maxDuration = 300;
 const SLEEPER_BASE        = SLEEPER_BASE_URL;
 const CONCURRENCY         = COMPILE_CONCURRENCY;
 const PICKS_CONCURRENCY   = COMPILE_PICKS_CONCURRENCY;
-const REQUEST_TIMEOUT_MS  = SLEEPER_REQUEST_TIMEOUT_MS;
 const PLAYERS_TIMEOUT_MS  = SLEEPER_PLAYERS_TIMEOUT_MS;
 
 // ── Local types for Sleeper API responses ─────────────────────────────────────
@@ -61,53 +60,6 @@ interface SleeperPlayerBasic {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-/**
- * Fetch with automatic retry on rate-limit (429) or transient network errors.
- * Uses exponential backoff: 600 ms, 1.2 s, 2.4 s between retries.
- */
-async function safeFetch<T>(url: string, timeoutMs = REQUEST_TIMEOUT_MS, retries = 3): Promise<T | null> {
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
-      if (res.status === 429) {
-        // Rate limited — back off before retrying
-        if (attempt < retries) {
-          await delay(600 * Math.pow(2, attempt));
-          continue;
-        }
-        return null;
-      }
-      if (!res.ok) return null;
-      return await res.json() as T;
-    } catch {
-      if (attempt < retries) {
-        await delay(400 * Math.pow(2, attempt));
-        continue;
-      }
-      return null;
-    }
-  }
-  return null;
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-/**
- * Runs `fn` over all `items` with at most `limit` concurrent operations.
- * Processes in strict batches so we don't flood the API with all requests at once.
- */
-async function withConcurrency<T>(
-  items: T[],
-  fn: (item: T) => Promise<void>,
-  limit: number
-): Promise<void> {
-  for (let i = 0; i < items.length; i += limit) {
-    await Promise.all(items.slice(i, i + limit).map(fn));
-  }
-}
 
 function isDynastyLeague(l: SleeperLeagueBasic): boolean {
   return (

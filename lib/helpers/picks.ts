@@ -177,5 +177,18 @@ export const fetchFantasyCalcValues = async (
     });
   }
 
+  // Mirror the latest published year forward by one. FantasyCalc publishes
+  // CURRENT_YEAR + 2 as its furthest future year; when a league's current
+  // rookie draft has completed, the pick-year window extends to CURRENT_YEAR + 3
+  // and those picks would otherwise have no value. Guard ensures FC values win
+  // if/when they start publishing the further-out year.
+  const latestFcYearPrefix = `${Number(CURRENT_YEAR) + 2}-`;
+  const mirrorYearPrefix   = `${Number(CURRENT_YEAR) + 3}-`;
+  Object.entries(pickValues).forEach(([key, val]) => {
+    if (!key.startsWith(latestFcYearPrefix)) return;
+    const mirroredKey = mirrorYearPrefix + key.slice(latestFcYearPrefix.length);
+    if (!(mirroredKey in pickValues)) pickValues[mirroredKey] = val;
+  });
+
   return { playerValues, pickValues, trendData };
 };

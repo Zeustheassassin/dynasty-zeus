@@ -414,6 +414,30 @@ useEffect(() => {
   return () => { cancelled = true; };
 }, [supabaseUser, loadNotes, setSupabaseMessage, setLeagueNotes, setLeaguePlayerTags, setPlayerDispositions, setPlayerNotes]);
 
+// Persist the (Supabase auth user → Sleeper user_id) mapping so the
+// server-side leaguemate-alerts cron knows which Sleeper account to scan.
+// Re-runs on Sleeper reconnect (user.user_id change) so a re-link is captured.
+useEffect(() => {
+  if (!supabaseUser || !user?.user_id) return;
+  let cancelled = false;
+  supabase
+    .from("user_sleeper_links")
+    .upsert(
+      {
+        user_id:          supabaseUser.id,
+        sleeper_user_id:  user.user_id,
+        sleeper_username: user.username || user.display_name || "",
+        updated_at:       new Date().toISOString(),
+      },
+      { onConflict: "user_id" }
+    )
+    .then(({ error }) => {
+      if (cancelled || !error) return;
+      log.error("user_sleeper_links upsert failed", { err: error.message });
+    });
+  return () => { cancelled = true; };
+}, [supabaseUser, user?.user_id, user?.username, user?.display_name]);
+
 const signOut = async () => {
   await supabase.auth.signOut();
   // onAuthStateChange will fire and set supabaseUser to null, but also set it
@@ -611,17 +635,18 @@ useEffect(() => {
   }
 }, [mainTab, leagueHubTab, selectedLeague?.league_id, rosters.length, refreshDraftBoard, loadOwnerTendencies]);
 
-// Stable counts for dep arrays — Object.keys() creates a new array on every render,
-// which defeats useMemo/useEffect deps. These are plain numbers and safe to compare.
+// Stable count for dep arrays — Object.keys() creates a new array on every
+// render, which defeats useMemo/useEffect deps. usersCount is a plain number
+// and safe to compare.
 const usersCount   = useMemo(() => Object.keys(users).length,   [users]);
-const playersCount = useMemo(() => Object.keys(players).length, [players]);
 
-// Load leaguemate trade alerts once rosters + user display names + players are ready.
-// players must be loaded so player IDs in trade.adds can be resolved to full_name.
+// Load leaguemate trade alerts once the user display-name map is ready.
+// Rows are produced by the server-side cron (app/api/cron/leaguemate-alerts);
+// we just read them and resolve owner IDs to display names via `users`.
 useEffect(() => {
-  if (!rosters.length || !usersCount || !user?.user_id || !playersCount) return;
+  if (!supabaseUser || !usersCount) return;
   loadLeaguemateTradeAlertsRef.current?.();
-}, [rosters.length, usersCount, user?.user_id, playersCount]);
+}, [supabaseUser, usersCount]);
 
 // Auto-load data needed by the player profile panel whenever it opens
 useEffect(() => {
@@ -869,8 +894,21 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
 
   const MAX_SUPPORTED_ROUNDS = 6;
   const ALL_ROUNDS = Array.from({ length: MAX_SUPPORTED_ROUNDS }, (_, i) => i + 1);
+
+  // Skip seasons whose draft is complete (those picks are spent); extend the
+  // window forward to keep it 3 years long.
+  const completedDraftSeasons = new Set(
+    draftsData.filter((d) => d?.status === "complete" && d?.season).map((d) => String(d.season))
+  );
+  const baseYearNum = Number(YEARS[0]);
+  const pickYearWindow: string[] = [];
+  for (let offset = 0; pickYearWindow.length < YEARS.length; offset++) {
+    const y = String(baseYearNum + offset);
+    if (!completedDraftSeasons.has(y)) pickYearWindow.push(y);
+  }
+
   let tempPicks: AugmentedPick[] = [];
-  YEARS.forEach((year) => {
+  pickYearWindow.forEach((year) => {
     allRosters.forEach((r) => {
       ALL_ROUNDS.forEach((round) => {
         tempPicks.push({ season: year, round, roster_id: r.roster_id, owner_id: r.roster_id, previous_owner_id: r.roster_id });
@@ -975,151 +1013,75 @@ const refreshFcTrends = async () => {
 };
 
 // ── Leaguemate trade alerts ──────────────────────────────────────────────────
-// Scans every dynasty league each leaguemate is in (not just shared leagues)
-// and surfaces trades from the last 14 days as feed alerts.
-// Seen trade IDs are cached in Supabase so repeat loads don't re-alert.
+// Reads pre-built trade alert rows from the Supabase `alerts` table. Rows are
+// produced by the server-side cron at app/api/cron/leaguemate-alerts which
+// scans every dynasty league each leaguemate is in (not just shared leagues)
+// and writes one row per leaguemate-trade observed in the last 14 days.
+// Owner display name is resolved at render-time from the local `users` map.
 const tradeAlertLoadedRef = useRef(false);
 const loadLeaguemateTradeAlerts = async () => {
   if (tradeAlertLoadedRef.current) return; // once per session
-  if (!rosters.length || !user?.user_id || !Object.keys(players).length) return;
+  if (!supabaseUser) return;
   tradeAlertLoadedRef.current = true;
 
-  const fourteenDaysAgo = Date.now() - 14 * 24 * 60 * 60 * 1000;
-
-  // Get already-known trade alert IDs so we don't duplicate
+  const fourteenDaysAgoIso = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
   const existingIds = new Set(latestAlertsRef.current.map((a) => a.id));
-  // Also check Supabase for IDs the user has already seen / dismissed
-  const seenFromDb = new Set<string>();
-  if (supabaseUser) {
-    const { data } = await supabase
-      .from("alerts")
-      .select("alert_id")
-      .eq("user_id", supabaseUser.id)
-      .like("alert_id", "trade-%");
-    (data ?? []).forEach((row) => seenFromDb.add(row.alert_id));
+
+  const { data, error } = await supabase
+    .from("alerts")
+    .select("alert_id, league_id, title, detail, actionable, payload, updated_at")
+    .eq("user_id", supabaseUser.id)
+    .like("alert_id", "trade-%")
+    .eq("dismissed", false)
+    .gte("updated_at", fourteenDaysAgoIso)
+    .order("updated_at", { ascending: false });
+
+  if (error) {
+    log.error("trade alerts load failed", { err: error.message });
+    return;
   }
 
-  const leaguemateOwnerIds = rosters
-    .map((r) => r.owner_id)
-    .filter((uid) => uid && uid !== user.user_id);
-  if (!leaguemateOwnerIds.length) return;
+  const rows = data ?? [];
+  if (!rows.length) return;
 
   const tradeAlerts: AlertsCenterItem[] = [];
+  for (const row of rows) {
+    if (existingIds.has(row.alert_id)) continue;
+    const payload = (row.payload ?? {}) as {
+      ownerId?: string;
+      leagueName?: string;
+      acquired?: unknown;
+      sent?: unknown;
+    };
+    const ownerId = typeof payload.ownerId === "string" ? payload.ownerId : "";
+    const ownerName = (ownerId && users[ownerId]) || "Leaguemate";
+    const leagueName = typeof payload.leagueName === "string" ? payload.leagueName : "League";
+    const acquired = Array.isArray(payload.acquired) ? (payload.acquired as string[]) : [];
+    const sent = Array.isArray(payload.sent) ? (payload.sent as string[]) : [];
 
-  await Promise.all(leaguemateOwnerIds.map(async (ownerId: string) => {
-    const ownerName = users[ownerId] || "Leaguemate";
-    try {
-      const ownerLeagues = await sleeperApi.getUserLeagues(ownerId, CURRENT_YEAR).catch(() => [] as SleeperLeague[]);
-      if (!ownerLeagues.length) return;
+    // The cron stores generic strings; rebuild here so the title carries the
+    // leaguemate's display name from the local users map (the cron has no
+    // such map without an extra Sleeper fetch per league).
+    const title = `${ownerName} made a trade — ${leagueName}`;
+    const detail = acquired.length
+      ? `${ownerName} received ${acquired.join(", ")}${sent.length ? `, sent ${sent.join(", ")}` : ""} in ${leagueName}.`
+      : sent.length
+        ? `${ownerName} sent ${sent.join(", ")} in ${leagueName}.`
+        : (row.detail ?? "");
 
-      const dynastyLeagues = ownerLeagues.filter((league) =>
-        ((league.settings?.taxi_slots ?? 0) > 0 || (league.roster_positions?.length ?? 0) > 20) &&
-        (league.settings?.best_ball ?? 0) === 0
-      );
-
-      await Promise.all(dynastyLeagues.map(async (league) => {
-        try {
-          // Fetch rosters + recent transactions (weeks 0-2 cover all offseason activity) + drafts for slot resolution
-          const [leagueRosters, txn0, txn1, txn2, draftsData] = await Promise.all([
-            sleeperApi.getLeagueRosters(league.league_id).catch(() => [] as SleeperRoster[]),
-            sleeperApi.getLeagueTransactions(league.league_id, 0),
-            sleeperApi.getLeagueTransactions(league.league_id, 1),
-            sleeperApi.getLeagueTransactions(league.league_id, 2),
-            sleeperApi.getLeagueDrafts(league.league_id),
-          ]);
-
-          const ownerRoster = (Array.isArray(leagueRosters) ? leagueRosters : [])
-            .find((r) => String(r.owner_id) === ownerId);
-          if (!ownerRoster) return;
-
-          // Build slot resolver for this league's current-year draft
-          const currentDraftForAlert = (Array.isArray(draftsData) ? draftsData : [])
-            .find((d) => String(d.season) === CURRENT_YEAR);
-          const alertDraftOrder: Record<string, number> = currentDraftForAlert?.draft_order ?? {};
-          const alertNumTeams: number = (Array.isArray(leagueRosters) ? leagueRosters : []).length || 0;
-          const alertRosterToOwner: Record<number, string> = {};
-          (Array.isArray(leagueRosters) ? leagueRosters : []).forEach((r) => {
-            alertRosterToOwner[r.roster_id] = r.owner_id;
-          });
-          const labelPick = (p: SleeperTradedPick) => {
-            if (String(p.season) === CURRENT_YEAR && currentDraftForAlert) {
-              const userId = alertRosterToOwner[p.roster_id];
-              const baseSlot = Number(alertDraftOrder[String(userId)] ?? 0);
-              const s = getDraftRoundSlot(currentDraftForAlert, Number(p.round), baseSlot, alertNumTeams);
-              if (s) return `${p.season} ${p.round}.${String(s).padStart(2, "0")}`;
-            }
-            return `${p.season} Rd ${p.round}`;
-          };
-
-          const allTxns = [
-            ...(Array.isArray(txn0) ? txn0 : []),
-            ...(Array.isArray(txn1) ? txn1 : []),
-            ...(Array.isArray(txn2) ? txn2 : []),
-          ];
-
-          const recentTrades = allTxns.filter((t) =>
-            t.type === "trade" &&
-            t.status === "complete" &&
-            (t.updated || t.created || 0) > fourteenDaysAgo &&
-            (t.roster_ids || []).includes(ownerRoster.roster_id)
-          );
-
-          recentTrades.forEach((trade) => {
-            const alertId = `trade-${trade.transaction_id}-${ownerId}`;
-            if (existingIds.has(alertId) || seenFromDb.has(alertId)) return;
-
-            // What did this owner receive?
-            const acquired = Object.entries(trade.adds || {})
-              .filter(([, rid]) => rid === ownerRoster.roster_id)
-              .map(([pid]) => players[pid]?.full_name || pid)
-              .filter(Boolean);
-
-            // What did this owner send?
-            const sent = Object.entries(trade.adds || {})
-              .filter(([, rid]) => rid !== ownerRoster.roster_id)
-              .map(([pid]) => players[pid]?.full_name || pid)
-              .filter(Boolean);
-            const picksReceived = (trade.draft_picks || [])
-              .filter((p) => p.owner_id === ownerRoster.roster_id)
-              .map(labelPick);
-            const picksSent = (trade.draft_picks || [])
-              .filter((p) => p.previous_owner_id === ownerRoster.roster_id)
-              .map(labelPick);
-
-            if (!acquired.length && !sent.length && !picksReceived.length && !picksSent.length) return;
-
-            const acquiredAll = [...acquired, ...picksReceived];
-            const sentAll = [...sent, ...picksSent];
-
-            // skip if truly nothing meaningful (e.g. waiver-budget only)
-            if (!acquiredAll.length && !sentAll.length) return;
-
-            const leagueName = league.name || `League`;
-            const tradeTs = trade.updated || trade.created || Date.now();
-
-            tradeAlerts.push({
-              id: alertId,
-              category: "league" as const,
-              source: "internal" as const,
-              severity: "medium" as const,
-              title: `${ownerName} made a trade — ${leagueName}`,
-              detail: acquiredAll.length
-                ? `${ownerName} received ${acquiredAll.join(", ")}${sentAll.length ? `, sent ${sentAll.join(", ")}` : ""} in ${leagueName}.`
-                : `${ownerName} sent ${sentAll.join(", ")} in ${leagueName}.`,
-              actionable: true,
-              timestamp: tradeTs,
-              leagueId: league.league_id,
-              payload: { ownerId, ownerName, leagueName, acquired: acquiredAll, sent: sentAll },
-            });
-          });
-        } catch (err) {
-          log.warn('loadTradeAlerts league processing error', { err: String(err) });
-        }
-      }));
-    } catch (err) {
-      log.warn('loadTradeAlerts transaction fetch error', { err: String(err) });
-    }
-  }));
+    tradeAlerts.push({
+      id: row.alert_id,
+      category: "league",
+      source: "internal",
+      severity: "medium",
+      title,
+      detail,
+      actionable: row.actionable ?? true,
+      timestamp: row.updated_at ? Date.parse(row.updated_at) : Date.now(),
+      leagueId: row.league_id ?? null,
+      payload: { ownerId, ownerName, leagueName, acquired, sent },
+    });
+  }
 
   if (tradeAlerts.length) {
     mergeDashboardAlerts(tradeAlerts);
