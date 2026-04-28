@@ -45,6 +45,27 @@ export const NFL_STATE_REVALIDATE_S = 3600;
 /** Sleeper player map — refreshed every 24 hours */
 export const PLAYERS_REVALIDATE_S = 86400;
 
+// ── Sleeper proxy revalidate windows (seconds) ────────────────
+// Server-side Next.js Data Cache TTLs for `/api/sleeper/*` routes.
+// Client-side TTLs (used with cachedFetch) live in lib/sleeperApi.ts
+// alongside the call sites in Stage M3.
+/** username → user_id mapping rarely changes */
+export const SLEEPER_USER_REVALIDATE_S = 3600;
+/** league list updates at draft / season change */
+export const SLEEPER_USER_LEAGUES_REVALIDATE_S = 1800;
+/** rosters change on trades / waivers */
+export const SLEEPER_LEAGUE_ROSTERS_REVALIDATE_S = 300;
+/** matchups update live during games */
+export const SLEEPER_LEAGUE_MATCHUPS_REVALIDATE_S = 300;
+/** transactions for a given week */
+export const SLEEPER_LEAGUE_TRANSACTIONS_REVALIDATE_S = 300;
+/** traded picks (past + future) */
+export const SLEEPER_LEAGUE_TRADED_PICKS_REVALIDATE_S = 1800;
+/** drafts associated with a league */
+export const SLEEPER_LEAGUE_DRAFTS_REVALIDATE_S = 3600;
+/** picks made in a draft — live drafts bypass cache client-side */
+export const SLEEPER_DRAFT_PICKS_REVALIDATE_S = 60;
+
 /** FantasyPros projections — refreshed every hour */
 export const FANTASYPROS_REVALIDATE_S = 3600;
 

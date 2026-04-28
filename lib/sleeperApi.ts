@@ -1,17 +1,29 @@
 // ============================================================
 // Sleeper API client
 // ============================================================
-// A single place for every Sleeper HTTP call so that URL changes,
-// error handling, and retries only need to be updated here.
+// Single chokepoint for every Sleeper HTTP call.
 //
-// All functions are async and return typed results.  They throw on
-// non-OK responses so callers can handle errors uniformly.
+// Routes through `/api/sleeper/*` proxies (server-side Next.js
+// Data Cache via `next: { revalidate }`) and adds a per-browser
+// localStorage TTL cache via `cachedFetch`. Repeat hub switches
+// inside the TTL window never hit the network.
+//
+// All functions are async and return typed results. `get*`
+// functions throw on non-OK responses; `getOrNull*` swallow errors
+// and return null / [] so callers can short-circuit cleanly.
+//
+// Live drafts: pass `bypassCache: true` to `getDraftPicks` so an
+// in-progress draft never serves stale picks from localStorage.
 //
 // Usage:
 //   import { sleeperApi } from "@/lib/sleeperApi";
 //   const user = await sleeperApi.getUserByUsername("john_doe");
 // ============================================================
 
+import { cachedFetch } from "./clientFetch";
+import {
+  SLEEPER_BASE_URL,
+} from "./constants";
 import type {
   SleeperUser,
   SleeperLeague,
@@ -24,27 +36,36 @@ import type {
   SleeperNFLState,
 } from "./types";
 
-const BASE = "https://api.sleeper.app/v1";
+// Proxy base — all routes mounted under app/api/sleeper/**
+const PROXY_BASE = "/api/sleeper";
+
+// ── Client-side TTLs (ms) ────────────────────────────────────
+// These pair with the server-side `SLEEPER_*_REVALIDATE_S`
+// constants in lib/constants.ts. The client TTL should always
+// be ≤ the server revalidate window to avoid serving data the
+// server has already discarded.
+const TTL = {
+  user:               3_600_000, //  60m  (server: 3600s)
+  userLeagues:          600_000, //  10m  (server: 1800s)
+  leagueRosters:        120_000, //   2m  (server:  300s)
+  leagueMatchups:        60_000, //   1m  (server:  300s)
+  leagueTransactions:   120_000, //   2m  (server:  300s)
+  leagueTradedPicks:    600_000, //  10m  (server: 1800s)
+  leagueDrafts:       1_800_000, //  30m  (server: 3600s)
+  draftPicks:            30_000, //  30s  (server:   60s)
+} as const;
 
 // ---------------------------------------------------------------------------
-// Internal helper — fetch + JSON parse with a descriptive error on failure
+// Internal helpers — wrap cachedFetch with the existing throw / null-on-error
+// contracts so callers don't need to change error-handling shape.
 // ---------------------------------------------------------------------------
-async function get<T>(url: string): Promise<T> {
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`Sleeper API error ${res.status} — ${url}`);
-  }
-  return res.json() as Promise<T>;
+async function cachedGet<T>(url: string, ttlMs: number, bypass?: boolean): Promise<T> {
+  return cachedFetch<T>(url, { ttlMs, bypass });
 }
 
-// ---------------------------------------------------------------------------
-// Helper — like get() but returns null instead of throwing (for optional calls)
-// ---------------------------------------------------------------------------
-async function getOrNull<T>(url: string): Promise<T | null> {
+async function cachedGetOrNull<T>(url: string, ttlMs: number): Promise<T | null> {
   try {
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    return res.json() as Promise<T>;
+    return await cachedFetch<T>(url, { ttlMs });
   } catch {
     return null;
   }
@@ -56,12 +77,18 @@ async function getOrNull<T>(url: string): Promise<T | null> {
 
 /** Fetch a Sleeper user by username. */
 async function getUserByUsername(username: string): Promise<SleeperUser> {
-  return get<SleeperUser>(`${BASE}/user/${encodeURIComponent(username)}`);
+  return cachedGet<SleeperUser>(
+    `${PROXY_BASE}/user/${encodeURIComponent(username)}`,
+    TTL.user,
+  );
 }
 
-/** Fetch a Sleeper user by user_id. */
+/** Fetch a Sleeper user by user_id. Sleeper accepts either username or user_id at the same path. */
 async function getUserById(userId: string): Promise<SleeperUser | null> {
-  return getOrNull<SleeperUser>(`${BASE}/user/${userId}`);
+  return cachedGetOrNull<SleeperUser>(
+    `${PROXY_BASE}/user/${encodeURIComponent(userId)}`,
+    TTL.user,
+  );
 }
 
 // ===========================================================================
@@ -70,7 +97,10 @@ async function getUserById(userId: string): Promise<SleeperUser | null> {
 
 /** Fetch all leagues for a user in a given NFL season year. */
 async function getUserLeagues(userId: string, year: string): Promise<SleeperLeague[]> {
-  return get<SleeperLeague[]>(`${BASE}/user/${userId}/leagues/nfl/${year}`);
+  return cachedGet<SleeperLeague[]>(
+    `${PROXY_BASE}/user-leagues/${encodeURIComponent(userId)}/${encodeURIComponent(year)}`,
+    TTL.userLeagues,
+  );
 }
 
 // ===========================================================================
@@ -79,16 +109,22 @@ async function getUserLeagues(userId: string, year: string): Promise<SleeperLeag
 
 /** Fetch all rosters in a league. */
 async function getLeagueRosters(leagueId: string): Promise<SleeperRoster[]> {
-  return get<SleeperRoster[]>(`${BASE}/league/${leagueId}/rosters`);
+  return cachedGet<SleeperRoster[]>(
+    `${PROXY_BASE}/league/${encodeURIComponent(leagueId)}/rosters`,
+    TTL.leagueRosters,
+  );
 }
 
 // ===========================================================================
 // MATCHUP endpoints
 // ===========================================================================
 
-/** Fetch all matchups for a given week (1-18). */
+/** Fetch all matchups for a given week (1-22). */
 async function getLeagueMatchups(leagueId: string, week: number): Promise<SleeperMatchup[]> {
-  return get<SleeperMatchup[]>(`${BASE}/league/${leagueId}/matchups/${week}`);
+  return cachedGet<SleeperMatchup[]>(
+    `${PROXY_BASE}/league/${encodeURIComponent(leagueId)}/matchups/${week}`,
+    TTL.leagueMatchups,
+  );
 }
 
 // ===========================================================================
@@ -100,8 +136,9 @@ async function getLeagueTransactions(
   leagueId: string,
   week: number
 ): Promise<SleeperTransaction[]> {
-  const result = await getOrNull<SleeperTransaction[]>(
-    `${BASE}/league/${leagueId}/transactions/${week}`
+  const result = await cachedGetOrNull<SleeperTransaction[]>(
+    `${PROXY_BASE}/league/${encodeURIComponent(leagueId)}/transactions/${week}`,
+    TTL.leagueTransactions,
   );
   return result ?? [];
 }
@@ -121,7 +158,10 @@ async function getLeagueTransactionsMultiWeek(
 
 /** Fetch all traded picks in a league (past + future). */
 async function getLeagueTradedPicks(leagueId: string): Promise<SleeperTradedPick[]> {
-  const result = await getOrNull<SleeperTradedPick[]>(`${BASE}/league/${leagueId}/traded_picks`);
+  const result = await cachedGetOrNull<SleeperTradedPick[]>(
+    `${PROXY_BASE}/league/${encodeURIComponent(leagueId)}/traded-picks`,
+    TTL.leagueTradedPicks,
+  );
   return result ?? [];
 }
 
@@ -131,40 +171,73 @@ async function getLeagueTradedPicks(leagueId: string): Promise<SleeperTradedPick
 
 /** Fetch all drafts associated with a league. */
 async function getLeagueDrafts(leagueId: string): Promise<SleeperDraft[]> {
-  const result = await getOrNull<SleeperDraft[]>(`${BASE}/league/${leagueId}/drafts`);
+  const result = await cachedGetOrNull<SleeperDraft[]>(
+    `${PROXY_BASE}/league/${encodeURIComponent(leagueId)}/drafts`,
+    TTL.leagueDrafts,
+  );
   return result ?? [];
 }
 
-/** Fetch all picks made in a draft. */
-async function getDraftPicks(draftId: string): Promise<SleeperDraftPick[]> {
-  const result = await getOrNull<SleeperDraftPick[]>(`${BASE}/draft/${draftId}/picks`);
-  return result ?? [];
+/**
+ * Fetch all picks made in a draft.
+ * Pass `bypassCache: true` for an in-progress draft so picks always
+ * come from the network (server cache is still 60s, which is acceptable).
+ */
+async function getDraftPicks(
+  draftId: string,
+  bypassCache = false,
+): Promise<SleeperDraftPick[]> {
+  try {
+    return await cachedGet<SleeperDraftPick[]>(
+      `${PROXY_BASE}/draft/${encodeURIComponent(draftId)}/picks`,
+      TTL.draftPicks,
+      bypassCache,
+    );
+  } catch {
+    return [];
+  }
 }
 
 // ===========================================================================
-// PLAYER endpoints
+// PLAYER / NFL STATE / ADP — outliers (no /api/sleeper/* proxy)
 // ===========================================================================
+// These three call paths are not part of the Phase M proxy set:
+//   • getAllPlayers / getNFLState — the shared `/api/players` proxy returns
+//     a slimmed combined `{ players, nflState }` shape; switching here would
+//     change the function signatures.
+//   • getRookieBoardADP — Sleeper's projections endpoint lives at a different
+//     host path and is hit on a separate cadence.
+// They keep the original direct-to-Sleeper fetch and stay outside the
+// browser cache layer for now. Revisit if/when proxies are added.
+
+async function get<T>(url: string): Promise<T> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Sleeper API error ${res.status} — ${url}`);
+  return res.json() as Promise<T>;
+}
+
+async function getOrNull<T>(url: string): Promise<T | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    return res.json() as Promise<T>;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Fetch the full NFL player map from Sleeper.
- * This is a heavy payload (~5 MB).  Cache it where possible.
+ * This is a heavy payload (~5 MB). Cache it where possible.
  */
 async function getAllPlayers(): Promise<Record<string, import("./types").SleeperPlayer>> {
-  return get<Record<string, import("./types").SleeperPlayer>>(`${BASE}/players/nfl`);
+  return get<Record<string, import("./types").SleeperPlayer>>(`${SLEEPER_BASE_URL}/players/nfl`);
 }
-
-// ===========================================================================
-// NFL STATE endpoint
-// ===========================================================================
 
 /** Fetch the current NFL week/season state. */
 async function getNFLState(): Promise<SleeperNFLState> {
-  return get<SleeperNFLState>(`${BASE}/state/nfl`);
+  return get<SleeperNFLState>(`${SLEEPER_BASE_URL}/state/nfl`);
 }
-
-// ===========================================================================
-// PROJECTIONS / ADP endpoint
-// ===========================================================================
 
 /**
  * Fetch dynasty ADP projections for a given season year.
@@ -172,7 +245,7 @@ async function getNFLState(): Promise<SleeperNFLState> {
  */
 async function getRookieBoardADP(year: string): Promise<Record<string, unknown>[]> {
   const url =
-    `https://api.sleeper.app/projections/nfl/${year}` +
+    `https://api.sleeper.app/projections/nfl/${encodeURIComponent(year)}` +
     `?season_type=regular&position=QB&position=RB&position=WR&position=TE&order_by=adp_dynasty_2qb`;
   const result = await getOrNull<Record<string, unknown>[]>(url);
   return result ?? [];
