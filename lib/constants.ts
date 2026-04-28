@@ -65,6 +65,10 @@ export const SLEEPER_LEAGUE_TRADED_PICKS_REVALIDATE_S = 1800;
 export const SLEEPER_LEAGUE_DRAFTS_REVALIDATE_S = 3600;
 /** picks made in a draft — live drafts bypass cache client-side */
 export const SLEEPER_DRAFT_PICKS_REVALIDATE_S = 60;
+/** league users (display names) — rarely change */
+export const SLEEPER_LEAGUE_USERS_REVALIDATE_S = 1800;
+/** single-league info (settings, previous_league_id) — only changes at season rollover */
+export const SLEEPER_LEAGUE_INFO_REVALIDATE_S = 3600;
 
 /** FantasyPros projections — refreshed every hour */
 export const FANTASYPROS_REVALIDATE_S = 3600;

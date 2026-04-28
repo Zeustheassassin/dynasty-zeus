@@ -3,7 +3,7 @@ import { useState, type Dispatch, type SetStateAction } from "react";
 import { CURRENT_YEAR, getDraftRoundSlot } from "../lib/helpers";
 import { logger } from "../lib/logger";
 import { sleeperApi } from "../lib/sleeperApi";
-import type { SleeperTransaction, SleeperRoster, SleeperUser, SleeperTradedPick } from "../lib/types";
+import type { SleeperTransaction, SleeperRoster, SleeperTradedPick } from "../lib/types";
 
 const log = logger("hooks/useUserTrades");
 
@@ -53,9 +53,7 @@ export function useUserTrades(): UseUserTradesReturn {
             sleeperApi.getLeagueTransactions(league.league_id, 1),
             sleeperApi.getLeagueTransactions(league.league_id, 2),
             sleeperApi.getLeagueDrafts(league.league_id),
-            // No /api/sleeper/league/{id}/users proxy exists yet — keep direct
-            fetch(`https://api.sleeper.app/v1/league/${league.league_id}/users`)
-              .then((r) => r.json() as Promise<SleeperUser[]>).catch(() => [] as SleeperUser[]),
+            sleeperApi.getLeagueUsers(league.league_id),
           ]);
 
           const myRoster = rostersData.find((r) => r.owner_id === targetUserId);

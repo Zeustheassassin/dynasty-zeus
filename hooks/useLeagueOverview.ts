@@ -4,7 +4,7 @@ import { logger } from "../lib/logger";
 import { sleeperApi } from "../lib/sleeperApi";
 import { CURRENT_YEAR, YEARS, ROUNDS, getDraftRoundSlot } from "../lib/helpers";
 import type {
-  SleeperLeague, SleeperUser,
+  SleeperLeague,
   AugmentedPick, LeagueOverviewEntry,
 } from "../lib/types";
 
@@ -41,10 +41,7 @@ export function useLeagueOverview(
               sleeperApi.getLeagueRosters(league.league_id),
               sleeperApi.getLeagueTradedPicks(league.league_id),
               sleeperApi.getLeagueDrafts(league.league_id),
-              // No /api/sleeper/league/{id}/users proxy exists yet — keep direct
-              fetch(`https://api.sleeper.app/v1/league/${league.league_id}/users`)
-                .then((r) => r.json() as Promise<SleeperUser[]>)
-                .catch(() => [] as SleeperUser[]),
+              sleeperApi.getLeagueUsers(league.league_id),
             ]);
 
             const leagueUserMap: Record<string, string> = {};

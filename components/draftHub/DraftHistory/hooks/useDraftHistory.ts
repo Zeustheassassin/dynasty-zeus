@@ -71,10 +71,9 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
         let depth = 0;
         while (prevId && depth < 3) {
           toCheck.push({ id: prevId, name: league.name });
-          try {
-            const pl = await fetch(`https://api.sleeper.app/v1/league/${prevId}`).then(r => r.json());
-            prevId = pl.previous_league_id ?? null;
-          } catch { break; }
+          const pl = await sleeperApi.getLeagueInfo(prevId);
+          if (!pl) break;
+          prevId = pl.previous_league_id ?? null;
           depth++;
         }
 

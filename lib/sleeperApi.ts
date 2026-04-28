@@ -53,6 +53,8 @@ const TTL = {
   leagueTradedPicks:    600_000, //  10m  (server: 1800s)
   leagueDrafts:       1_800_000, //  30m  (server: 3600s)
   draftPicks:            30_000, //  30s  (server:   60s)
+  leagueUsers:          600_000, //  10m  (server: 1800s)
+  leagueInfo:         1_800_000, //  30m  (server: 3600s)
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -112,6 +114,27 @@ async function getLeagueRosters(leagueId: string): Promise<SleeperRoster[]> {
   return cachedGet<SleeperRoster[]>(
     `${PROXY_BASE}/league/${encodeURIComponent(leagueId)}/rosters`,
     TTL.leagueRosters,
+  );
+}
+
+/** Fetch the league user list (display names, avatars, metadata). Returns [] on any error. */
+async function getLeagueUsers(leagueId: string): Promise<SleeperUser[]> {
+  const result = await cachedGetOrNull<SleeperUser[]>(
+    `${PROXY_BASE}/league/${encodeURIComponent(leagueId)}/users`,
+    TTL.leagueUsers,
+  );
+  return result ?? [];
+}
+
+/**
+ * Fetch the single-league info object (settings, previous_league_id, etc.).
+ * Returns null on upstream error or unknown league_id — callers walking the
+ * previous_league_id chain rely on null to terminate the loop.
+ */
+async function getLeagueInfo(leagueId: string): Promise<SleeperLeague | null> {
+  return cachedGetOrNull<SleeperLeague>(
+    `${PROXY_BASE}/league/${encodeURIComponent(leagueId)}`,
+    TTL.leagueInfo,
   );
 }
 
@@ -260,6 +283,8 @@ export const sleeperApi = {
   getUserById,
   getUserLeagues,
   getLeagueRosters,
+  getLeagueUsers,
+  getLeagueInfo,
   getLeagueMatchups,
   getLeagueTransactions,
   getLeagueTransactionsMultiWeek,

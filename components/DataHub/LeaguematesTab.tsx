@@ -49,8 +49,7 @@ function LeaguematesTab({
         leagues.map(async (league) => {
           const [rostersRes, leagueUsersRes] = await Promise.all([
             sleeperApi.getLeagueRosters(league.league_id).catch(() => [] as SleeperRoster[]),
-            // No /api/sleeper/league/[id]/users proxy in M2 set — kept as direct fetch (same pattern as M5/M6)
-            fetch(`https://api.sleeper.app/v1/league/${league.league_id}/users`).then(r => r.json()).catch(() => []),
+            sleeperApi.getLeagueUsers(league.league_id),
           ]);
           return { league, rosters: rostersRes as FetchedRoster[], leagueUsers: leagueUsersRes as FetchedUser[] };
         })

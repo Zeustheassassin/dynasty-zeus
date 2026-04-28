@@ -3122,10 +3122,7 @@ const getTeamSummary = useCallback(() => {
               Promise.all(
                 weeks.map((w) => sleeperApi.getLeagueTransactions(league.league_id, w))
               ),
-              // No /api/sleeper/league/[id]/users proxy in M2 set — kept as direct fetch.
-              fetch(`https://api.sleeper.app/v1/league/${league.league_id}/users`)
-                .then((r) => r.json())
-                .catch(() => []),
+              sleeperApi.getLeagueUsers(league.league_id),
               sleeperApi.getLeagueRosters(league.league_id).catch(() => [] as SleeperRoster[]),
               sleeperApi.getLeagueDrafts(league.league_id),
             ]);
