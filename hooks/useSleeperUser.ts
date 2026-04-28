@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 import { CURRENT_YEAR } from "../lib/helpers";
+import { sleeperApi } from "../lib/sleeperApi";
 import type { SleeperUser, SleeperLeague } from "../lib/types";
 import { getLocalStorageItem, setLocalStorageItem, removeLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 
@@ -56,34 +57,32 @@ export function useSleeperUser({ onLeaguesLoaded, onDisconnect }: UseSleeperUser
 
   // Hydrate from localStorage on mount
   useEffect(() => {
-    const controller = new AbortController();
-    const { signal } = controller;
-
     const parsed = getLocalStorageItem<SleeperUser | null>("sleeperUser", null);
     if (!parsed) return;
+
+    // sleeperApi routes through `/api/sleeper/*` with a localStorage TTL cache;
+    // it does not accept an AbortSignal, so unmount-safety uses a flag instead.
+    let cancelled = false;
     try {
       setUser(parsed);
       setUsername(parsed.display_name || parsed.username || "");
-      fetch(`https://api.sleeper.app/v1/user/${parsed.user_id}/leagues/nfl/${CURRENT_YEAR}`, { signal })
-        .then((res) => {
-          if (!res.ok) throw new Error(`Sleeper returned ${res.status}`);
-          return res.json() as Promise<SleeperLeague[]>;
-        })
+      sleeperApi
+        .getUserLeagues(parsed.user_id, CURRENT_YEAR)
         .then((data) => {
-          if (signal.aborted) return;
+          if (cancelled) return;
           const filtered = Array.isArray(data) ? data.filter(isDynastyLeague) : [];
           setLeagues(filtered);
           onLeaguesLoadedRef.current?.(filtered);
         })
         .catch(() => {
-          if (signal.aborted) return;
+          if (cancelled) return;
           // Sleeper may be unreachable — keep the user object but show empty leagues.
           // The user can manually reconnect when the service is back.
           setLeagues([]);
         });
     } catch { /* ignore corrupt localStorage */ }
 
-    return () => { controller.abort(); };
+    return () => { cancelled = true; };
   }, []);
 
   const connectSleeper = async () => {
@@ -99,10 +98,11 @@ export function useSleeperUser({ onLeaguesLoaded, onDisconnect }: UseSleeperUser
     setConnectSuccess("");
 
     try {
-      const res = await fetch(`https://api.sleeper.app/v1/user/${trimmedUsername}`);
-      const data: SleeperUser = await res.json();
+      // Sleeper returns 200 + null body for unknown usernames, so the proxy
+      // resolves with a falsy payload — `!data?.user_id` covers that case.
+      const data = (await sleeperApi.getUserByUsername(trimmedUsername)) as SleeperUser | null;
 
-      if (!res.ok || !data?.user_id) {
+      if (!data?.user_id) {
         setConnectError("Sleeper username not found. Double-check the spelling and try again.");
         setLeagues([]);
         return;
@@ -112,10 +112,7 @@ export function useSleeperUser({ onLeaguesLoaded, onDisconnect }: UseSleeperUser
       setUsername(data.display_name || data.username || trimmedUsername);
       setLocalStorageItem("sleeperUser", data);
 
-      const leaguesRes = await fetch(
-        `https://api.sleeper.app/v1/user/${data.user_id}/leagues/nfl/${CURRENT_YEAR}`
-      );
-      const leaguesData: SleeperLeague[] = await leaguesRes.json();
+      const leaguesData = await sleeperApi.getUserLeagues(data.user_id, CURRENT_YEAR);
       const filtered = Array.isArray(leaguesData) ? leaguesData.filter(isDynastyLeague) : [];
       setLeagues(filtered);
       setConnectSuccess(
