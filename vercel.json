@@ -4,6 +4,10 @@
     {
       "path": "/api/cron/leaguemate-alerts",
       "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/cron/league-transactions",
+      "schedule": "*/30 * * * *"
     }
   ]
 }

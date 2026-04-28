@@ -47,7 +47,7 @@ import { getLocalStorageItem, setLocalStorageItem, removeLocalStorageItem } from
 import type {
   AlertsCenterItem,
   SleeperPlayer, SleeperLeague, SleeperRoster, SleeperTradedPick,
-  SleeperDraft, SleeperDraftPick, SleeperTransaction, SleeperUser, GamedayMatchup, GamedayTeamView,
+  SleeperDraft, SleeperDraftPick, GamedayMatchup, GamedayTeamView,
   SleeperMatchup, AnnotatedTransaction,
   AugmentedPick,
   HistoricalSnapshot, LeagueMateView, SimulationTeamRow,
@@ -3069,82 +3069,37 @@ const getTeamSummary = useCallback(() => {
   }, [allLeagueData, dashboardOwnedPlayers, watchlistEntries, players]);
 
   // ── League transactions feed ──────────────────────────────────────────────
+  // Reads pre-annotated rows from league_transactions_cache. Rows are
+  // produced by the server-side cron at app/api/cron/league-transactions
+  // every 30 min, eliminating the ~240 Sleeper calls/cold-session this
+  // effect used to do client-side.
   useEffect(() => {
-    if (!leagues.length || !user?.user_id) return;
+    if (!supabaseUser) return;
+    let cancelled = false;
     setLoadingTransactions(true);
-    const run = async () => {
+    (async () => {
       try {
-        // Get current NFL week/leg to know which weeks to fetch (nflState loaded on mount)
-        const curWeek = Math.max(1, Math.min(18, nflState?.leg ?? nflState?.week ?? 1));
-        const weeks = [curWeek, curWeek - 1, curWeek - 2, curWeek - 3].filter((w) => w >= 1);
-
-        const results = await Promise.all(
-          leagues.map(async (league) => {
-            const [txArrays, usersData, rostersData, draftsData] = await Promise.all([
-              Promise.all(
-                weeks.map((w) => sleeperApi.getLeagueTransactions(league.league_id, w))
-              ),
-              sleeperApi.getLeagueUsers(league.league_id),
-              sleeperApi.getLeagueRosters(league.league_id).catch(() => [] as SleeperRoster[]),
-              sleeperApi.getLeagueDrafts(league.league_id),
-            ]);
-
-            // Build roster_id → display_name map for this league
-            const rosterOwnerMap: Record<number, string> = {};
-            // Build roster_id → user_id map for slot computation
-            const rosterToUser: Record<number, string> = {};
-            (rostersData as SleeperRoster[]).forEach((r) => {
-              const u = (usersData as SleeperUser[]).find((u) => u.user_id === r.owner_id);
-              rosterOwnerMap[r.roster_id] = u?.display_name || u?.username || `Team ${r.roster_id}`;
-              if (r.owner_id) rosterToUser[r.roster_id] = String(r.owner_id);
-            });
-
-            // Draft order for slot computation (current year only)
-            const currentDraft = (Array.isArray(draftsData) ? draftsData as SleeperDraft[] : [])
-              .find((d) => d.season === CURRENT_YEAR);
-            const draftOrder: Record<string, number> = currentDraft?.draft_order ?? {};
-            const totalTeams: number = (rostersData as SleeperRoster[]).length || 0;
-
-            // Annotate each pick in every transaction with its computed slot string
-            const annotatedTxs = (txArrays.flat() as SleeperTransaction[])
-              .filter((tx) => tx.status === "complete" && tx.type !== "waiver_failed")
-              .map((tx) => ({
-                ...tx,
-                leagueName: league.name,
-                leagueId: league.league_id,
-                rosterOwnerMap,
-                draft_picks: (tx.draft_picks ?? []).map((pick) => {
-                  if (pick.season === CURRENT_YEAR) {
-                    const userId = rosterToUser[pick.roster_id];
-                    const baseSlot = Number(draftOrder[String(userId)] ?? 0);
-                    const slot = getDraftRoundSlot(currentDraft ?? {}, Number(pick.round), baseSlot, totalTeams);
-                    return {
-                      ...pick,
-                      slot: slot
-                        ? `${pick.round}.${String(slot).padStart(2, "0")}`
-                        : `${pick.round}.${String(pick.roster_id).padStart(2, "0")}`,
-                    };
-                  }
-                  return { ...pick, slot: String(pick.round) };
-                }),
-              }));
-
-            return annotatedTxs;
-          })
+        const { data, error } = await supabase
+          .from("league_transactions_cache")
+          .select("payload")
+          .eq("user_id", supabaseUser.id)
+          .order("created", { ascending: false })
+          .limit(200);
+        if (cancelled) return;
+        if (error) {
+          log.error("league_transactions_cache load failed", { err: error.message });
+          return;
+        }
+        const txs = (data ?? []).map(
+          (r: { payload: unknown }) => r.payload as AnnotatedTransaction
         );
-
-        setLeagueTransactions(
-          results
-            .flat()
-            .sort((a, b) => (b.created || 0) - (a.created || 0))
-            .slice(0, 200)
-        );
+        setLeagueTransactions(txs);
       } finally {
-        setLoadingTransactions(false);
+        if (!cancelled) setLoadingTransactions(false);
       }
-    };
-    run();
-  }, [leagues, user?.user_id, nflState?.leg, nflState?.week]);
+    })();
+    return () => { cancelled = true; };
+  }, [supabaseUser]);
 
   useEffect(() => {
     if (!supabaseUser || !dashboardAlerts.length) return;

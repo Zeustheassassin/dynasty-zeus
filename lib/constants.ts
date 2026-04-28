@@ -53,12 +53,12 @@ export const PLAYERS_REVALIDATE_S = 86400;
 export const SLEEPER_USER_REVALIDATE_S = 3600;
 /** league list updates at draft / season change */
 export const SLEEPER_USER_LEAGUES_REVALIDATE_S = 1800;
-/** rosters change on trades / waivers */
-export const SLEEPER_LEAGUE_ROSTERS_REVALIDATE_S = 300;
-/** matchups update live during games */
+/** rosters change on trades / waivers — 10m balances freshness vs Sleeper load */
+export const SLEEPER_LEAGUE_ROSTERS_REVALIDATE_S = 600;
+/** matchups update live during games — keep short for in-game freshness */
 export const SLEEPER_LEAGUE_MATCHUPS_REVALIDATE_S = 300;
-/** transactions for a given week */
-export const SLEEPER_LEAGUE_TRANSACTIONS_REVALIDATE_S = 300;
+/** transactions for a given week — 15m is fine in offseason; consider lowering during regular-season game days */
+export const SLEEPER_LEAGUE_TRANSACTIONS_REVALIDATE_S = 900;
 /** traded picks (past + future) */
 export const SLEEPER_LEAGUE_TRADED_PICKS_REVALIDATE_S = 1800;
 /** drafts associated with a league */

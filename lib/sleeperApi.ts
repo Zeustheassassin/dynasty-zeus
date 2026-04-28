@@ -47,9 +47,9 @@ const PROXY_BASE = "/api/sleeper";
 const TTL = {
   user:               3_600_000, //  60m  (server: 3600s)
   userLeagues:          600_000, //  10m  (server: 1800s)
-  leagueRosters:        120_000, //   2m  (server:  300s)
+  leagueRosters:        300_000, //   5m  (server:  600s)
   leagueMatchups:        60_000, //   1m  (server:  300s)
-  leagueTransactions:   120_000, //   2m  (server:  300s)
+  leagueTransactions:   480_000, //   8m  (server:  900s)
   leagueTradedPicks:    600_000, //  10m  (server: 1800s)
   leagueDrafts:       1_800_000, //  30m  (server: 3600s)
   draftPicks:            30_000, //  30s  (server:   60s)
