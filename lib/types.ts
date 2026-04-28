@@ -751,6 +751,47 @@ export interface PredictedPick {
   poolRank: number;
 }
 
+// Pool-rank lookups used to flag REACH/VALUE on already-completed picks
+// (the same ordering that drives predictedDraftPicks for unfilled slots).
+export interface DraftPoolRanks {
+  byPlayerId: Record<string, number>;
+  byName:     Record<string, number>;
+}
+
+// Frozen snapshot of a completed Live Draft Board. Stored as a single row in
+// league_draft_snapshots (snapshot_data jsonb). Captures pool ranks at save
+// time so REACH/VALUE flags don't drift as consensus updates.
+export interface LeagueDraftSnapshotPick {
+  slot:           string;
+  pickNo:         number;
+  round:          number;
+  slotInRound:    number;
+  playerId:       string | null;
+  name:           string;
+  position:       string;
+  team:           string;
+  drafterUserId:  string | null;
+  drafterName:    string;
+  poolRank:       number;
+}
+
+export interface LeagueDraftSnapshotData {
+  leagueName: string;
+  leagueId:   string | null;
+  season:     string;
+  numTeams:   number;
+  numRounds:  number;
+  headers:    Array<{ slot: number; userId: string | null; username: string }>;
+  picks:      LeagueDraftSnapshotPick[];
+}
+
+export interface LeagueDraftSnapshot {
+  id:            string;
+  name:          string;
+  saved_at:      string;
+  snapshot_data: LeagueDraftSnapshotData;
+}
+
 // ── Management hub ───────────────────────────────────────────
 //
 // Payment year columns (paid_2026, paid_2027, …) are stored as

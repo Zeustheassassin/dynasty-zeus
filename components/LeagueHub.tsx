@@ -30,7 +30,7 @@ import NotesTab from "./LeagueHub/NotesTab";
 import PowerRankingsTab from "./LeagueHub/PowerRankingsTab";
 import DraftBoardTab from "./LeagueHub/DraftBoardTab";
 import ActivityTab from "./LeagueHub/ActivityTab";
-import type { StandingRow, AnnotatedTransaction, TeamSummary, PredictedPick } from "./LeagueHub/leagueHubTypes";
+import type { StandingRow, AnnotatedTransaction, TeamSummary, PredictedPick, DraftPoolRanks } from "./LeagueHub/leagueHubTypes";
 
 // ── Props ──────────────────────────────────────────────────────────────────
 interface LeagueHubProps {
@@ -87,13 +87,14 @@ interface LeagueHubProps {
   setDraftSlotEditing: (slot: string | null) => void;
   draftSlotSearchQuery: string;
   setDraftSlotSearchQuery: (q: string) => void;
-  draftHubSection: "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL_BOARDS";
+  draftHubSection: "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL_BOARDS" | "HISTORICAL_LEAGUE_DRAFTS";
   nflState: SleeperNFLState | null;
 
   // Additional state
   freeAgents: SleeperPlayer[];
   loadingCalcValues: boolean;
   predictedDraftPicks: Record<string, PredictedPick>;
+  draftPoolRanks: DraftPoolRanks;
   loadingDraftRefresh: boolean;
   rookies: RookieBoardPlayer[];
   draftedPlayerIds: Set<string>;
@@ -130,7 +131,7 @@ function LeagueHub({
   draftSlotEditing, setDraftSlotEditing, draftSlotSearchQuery, setDraftSlotSearchQuery,
   draftHubSection, nflState,
   freeAgents, loadingCalcValues,
-  predictedDraftPicks, loadingDraftRefresh, rookies, draftedPlayerIds,
+  predictedDraftPicks, draftPoolRanks, loadingDraftRefresh, rookies, draftedPlayerIds,
   loadRoster, loadLeagueOverview, loadRedraftValues, loadUserTrades, loadUserExposure, loadDraftScout,
   saveLeagueNote, onSaveSim, handleRunAllSims, refreshDraftBoard,
   setPlayerProfileId, setCalcOpponentRosterId, setMainTab, setTradeHubSection,
@@ -317,6 +318,7 @@ function LeagueHub({
             setDraftSlotSearchQuery={setDraftSlotSearchQuery}
             draftHubSection={draftHubSection}
             predictedDraftPicks={predictedDraftPicks}
+            draftPoolRanks={draftPoolRanks}
             loadingDraftRefresh={loadingDraftRefresh}
             rookies={rookies}
             draftedPlayerIds={draftedPlayerIds}

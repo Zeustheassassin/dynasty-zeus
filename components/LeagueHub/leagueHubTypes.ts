@@ -30,3 +30,8 @@ export interface PredictedPick {
   boardRank: number;
   poolRank: number;
 }
+
+export interface DraftPoolRanks {
+  byPlayerId: Record<string, number>;
+  byName:     Record<string, number>;
+}

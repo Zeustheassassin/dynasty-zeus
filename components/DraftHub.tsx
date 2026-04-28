@@ -5,16 +5,17 @@ import { useValues } from "../lib/ValuesContext";
 import PickValuesTab from "./draft/PickValuesTab";
 import type {
   SleeperLeague, SleeperUser, SleeperDraft, SleeperDraftPick,
-  AugmentedPick, RookieBoardPlayer, PredictedPick,
+  AugmentedPick, RookieBoardPlayer, PredictedPick, DraftPoolRanks,
 } from "../lib/types";
 import DraftHistory from "./draftHub/DraftHistory";
 import LiveDraftBoard from "./draftHub/LiveDraftBoard";
 import RookieBigBoard from "./draftHub/RookieBigBoard";
 import HistoricalBigBoards from "./draftHub/HistoricalBigBoards";
+import HistoricalLeagueDrafts from "./draftHub/HistoricalLeagueDrafts";
 
 
 // ── Props ──────────────────────────────────────────────────────────────────
-type DraftSection = "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL_BOARDS";
+type DraftSection = "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL_BOARDS" | "HISTORICAL_LEAGUE_DRAFTS";
 
 interface DraftHubProps {
   draftHubSection: DraftSection;
@@ -38,6 +39,7 @@ interface DraftHubProps {
 
   draftedPlayerIds: Set<string>;
   predictedDraftPicks: Record<string, PredictedPick>;
+  draftPoolRanks: DraftPoolRanks;
   topAvailableRookies: RookieBoardPlayer[];
 
   refreshDraftBoard: () => void;
@@ -63,7 +65,7 @@ function DraftHub({
   user,
   draftSettings, draftPicks, draftOrder, allPicks,
   rookies,
-  draftedPlayerIds, predictedDraftPicks, topAvailableRookies,
+  draftedPlayerIds, predictedDraftPicks, draftPoolRanks, topAvailableRookies,
   refreshDraftBoard, loadDraftScout, movePlayer, handleRankChange,
   addRookie, editRookieName, removeAddedRookie, clearNameEdit, rookieOverrides,
   loadingDraftRefresh,
@@ -78,11 +80,12 @@ function DraftHub({
   const myRosterId = rosters.find((r) => r.owner_id === user?.user_id)?.roster_id;
 
   const TABS: { key: DraftSection; label: string }[] = [
-    { key: "BOARD",            label: "Live Draft Board" },
-    { key: "BIG_BOARD",        label: "Rookie Big Board" },
-    { key: "PICK_VALUES",      label: "Pick Values" },
-    { key: "HISTORY",          label: "Draft History" },
-    { key: "HISTORICAL_BOARDS", label: "Historical Boards" },
+    { key: "BOARD",                    label: "Live Draft Board" },
+    { key: "BIG_BOARD",                label: "Rookie Big Board" },
+    { key: "PICK_VALUES",              label: "Pick Values" },
+    { key: "HISTORY",                  label: "Draft History" },
+    { key: "HISTORICAL_BOARDS",        label: "Historical Boards" },
+    { key: "HISTORICAL_LEAGUE_DRAFTS", label: "Historical League Drafts" },
   ];
 
   return (
@@ -125,6 +128,7 @@ function DraftHub({
           rookies={rookies}
           draftedPlayerIds={draftedPlayerIds}
           predictedDraftPicks={predictedDraftPicks}
+          draftPoolRanks={draftPoolRanks}
           topAvailableRookies={topAvailableRookies}
           refreshDraftBoard={refreshDraftBoard}
           loadDraftScout={loadDraftScout}
@@ -180,6 +184,13 @@ function DraftHub({
          ══════════════════════════════════════════════════════ */}
       {draftHubSection === "HISTORICAL_BOARDS" && (
         <HistoricalBigBoards />
+      )}
+
+      {/* ══════════════════════════════════════════════════════
+          HISTORICAL LEAGUE DRAFTS
+         ══════════════════════════════════════════════════════ */}
+      {draftHubSection === "HISTORICAL_LEAGUE_DRAFTS" && (
+        <HistoricalLeagueDrafts />
       )}
     </div>
   );

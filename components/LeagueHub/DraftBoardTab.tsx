@@ -13,7 +13,8 @@ import type {
   SleeperDraft,
   RookieBoardPlayer,
 } from "../../lib/types";
-import type { PredictedPick } from "./leagueHubTypes";
+import type { PredictedPick, DraftPoolRanks } from "./leagueHubTypes";
+import { normalizeRookieName } from "../draftHub/shared";
 
 const ROOKIE_YEAR = CURRENT_YEAR;
 
@@ -29,8 +30,9 @@ interface DraftBoardTabProps {
   setDraftSlotEditing: (slot: string | null) => void;
   draftSlotSearchQuery: string;
   setDraftSlotSearchQuery: (q: string) => void;
-  draftHubSection: "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL_BOARDS";
+  draftHubSection: "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL_BOARDS" | "HISTORICAL_LEAGUE_DRAFTS";
   predictedDraftPicks: Record<string, PredictedPick>;
+  draftPoolRanks: DraftPoolRanks;
   loadingDraftRefresh: boolean;
   rookies: RookieBoardPlayer[];
   draftedPlayerIds: Set<string>;
@@ -52,6 +54,7 @@ function DraftBoardTab({
   setDraftSlotSearchQuery,
   draftHubSection,
   predictedDraftPicks,
+  draftPoolRanks,
   loadingDraftRefresh,
   rookies,
   draftedPlayerIds,
@@ -172,6 +175,14 @@ function DraftBoardTab({
                       const isReach = userOverride && typeof userOverride.adp === "number" && overallPick < userOverride.adp - 8;
                       const predReach = isMySlot && prediction && prediction.poolRank > 0 && overallPick < (prediction.poolRank ?? 999) - 8;
                       const predValue = isMySlot && prediction && prediction.poolRank > 0 && overallPick > (prediction.poolRank ?? 0) + 5;
+                      // Actual-pick REACH/VALUE: every completed pick, compared to its pool rank.
+                      const actualPoolRank = actualPlayer
+                        ? (draftPoolRanks.byPlayerId[String(playerPick!.player_id)]
+                            ?? draftPoolRanks.byName[normalizeRookieName(actualPlayer.full_name || "")]
+                            ?? 0)
+                        : 0;
+                      const actualReach = !!actualPlayer && actualPoolRank > 0 && overallPick < actualPoolRank - 8;
+                      const actualValue = !!actualPlayer && actualPoolRank > 0 && overallPick > actualPoolRank + 5;
                       const isEditing = draftSlotEditing === slotStr;
                       return (
                         <div key={slotStr}
@@ -183,6 +194,8 @@ function DraftBoardTab({
                         >
                           {actualPlayer ? (
                             <>
+                              {actualReach && <span className="absolute top-0.5 left-1 text-[8px] font-bold text-orange-400">REACH</span>}
+                              {actualValue && <span className="absolute top-0.5 left-1 text-[8px] font-bold text-green-400">VALUE</span>}
                               <div className="text-center w-full text-white font-medium whitespace-normal break-words leading-tight text-[10px]">{actualPlayer.full_name}</div>
                               <div className={`text-[9px] ${posColor[actualPlayer.position] || "text-gray-400"}`}>{actualPlayer.position} · {actualPlayer.team}</div>
                               <div className="text-[9px] text-gray-400 truncate w-full text-center">{rosterToName[slotOwner] || slotStr}</div>

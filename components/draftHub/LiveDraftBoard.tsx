@@ -1,17 +1,21 @@
 "use client";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabaseclient";
 import { usePlayers } from "../../lib/PlayersContext";
 import { useAuth } from "../../lib/AuthContext";
 import { useLeague } from "../../lib/LeagueContext";
 import { CURRENT_YEAR as ROOKIE_YEAR } from "../../lib/helpers";
 import { removeLocalStorageItem } from "@/lib/hooks/useLocalStorage";
+import { logger } from "../../lib/logger";
 import type {
   SleeperUser, SleeperDraft, SleeperDraftPick,
-  AugmentedPick, RookieBoardPlayer, PredictedPick,
+  AugmentedPick, RookieBoardPlayer, PredictedPick, DraftPoolRanks,
+  LeagueDraftSnapshotData, LeagueDraftSnapshotPick,
 } from "../../lib/types";
 import { posColor, normalizeRookieName } from "./shared";
 import type { GridPick } from "./shared";
+
+const log = logger("LiveDraftBoard");
 
 const MAX_ROUNDS = 6;
 const ROUNDS = Array.from({ length: MAX_ROUNDS }, (_, i) => i + 1);
@@ -31,6 +35,7 @@ interface LiveDraftBoardProps {
   rookies: RookieBoardPlayer[];
   draftedPlayerIds: Set<string>;
   predictedDraftPicks: Record<string, PredictedPick>;
+  draftPoolRanks: DraftPoolRanks;
   topAvailableRookies: RookieBoardPlayer[];
   refreshDraftBoard: () => void;
   loadDraftScout: (userId: string) => void;
@@ -43,7 +48,7 @@ export default function LiveDraftBoard({
   draftSlotSearchQuery, setDraftSlotSearchQuery,
   user,
   draftSettings, draftPicks, draftOrder, allPicks,
-  rookies, draftedPlayerIds, predictedDraftPicks, topAvailableRookies,
+  rookies, draftedPlayerIds, predictedDraftPicks, draftPoolRanks, topAvailableRookies,
   refreshDraftBoard, loadDraftScout, loadingDraftRefresh,
 }: LiveDraftBoardProps) {
   const players = usePlayers();
@@ -55,6 +60,76 @@ export default function LiveDraftBoard({
   rosters.forEach((r) => {
     rosterToName[Number(r.roster_id)] = users[r.owner_id] || `Team ${r.roster_id}`;
   });
+
+  // Save Snapshot state — visible only when the live draft is complete.
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [snapshotName, setSnapshotName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const draftIsComplete = draftSettings?.status === "complete";
+
+  async function saveSnapshot() {
+    if (!supabaseUser || !snapshotName.trim() || !draftSettings) return;
+    setSaving(true);
+    const numTeams = rosters.length;
+    const numRounds = Number(draftSettings?.settings?.rounds ?? draftSettings?.rounds ?? 4);
+
+    const headers = Array.from({ length: numTeams }, (_, i) => i + 1).map((slot) => {
+      const userId = Object.keys(draftOrder).find((uid) => draftOrder[uid] === slot) ?? null;
+      return { slot, userId, username: (userId && users[userId]) || `Team ${slot}` };
+    });
+
+    const picks: LeagueDraftSnapshotPick[] = draftPicks
+      .filter((dp) => dp.pick_no && dp.player_id)
+      .map((dp) => {
+        const p = players[dp.player_id];
+        const round = Number(dp.round);
+        const slotInRound = ((Number(dp.pick_no) - 1) % numTeams) + 1;
+        const slot = `${round}.${String(slotInRound).padStart(2, "0")}`;
+        const poolRank =
+          draftPoolRanks.byPlayerId[String(dp.player_id)] ??
+          draftPoolRanks.byName[normalizeRookieName(p?.full_name || "")] ??
+          0;
+        return {
+          slot,
+          pickNo:        Number(dp.pick_no),
+          round,
+          slotInRound,
+          playerId:      String(dp.player_id),
+          name:          p?.full_name || "",
+          position:      p?.position || dp.metadata?.position || "",
+          team:          p?.team || dp.metadata?.team || "",
+          drafterUserId: dp.picked_by || null,
+          drafterName:   (dp.picked_by && users[dp.picked_by]) || "",
+          poolRank,
+        };
+      })
+      .sort((a, b) => a.pickNo - b.pickNo);
+
+    const snapshot_data: LeagueDraftSnapshotData = {
+      leagueName: selectedLeague?.name || "",
+      leagueId:   selectedLeague?.league_id || null,
+      season:     draftSettings.season || ROOKIE_YEAR,
+      numTeams,
+      numRounds,
+      headers,
+      picks,
+    };
+
+    const { error } = await supabase
+      .from("league_draft_snapshots")
+      .upsert(
+        { user_id: supabaseUser.id, name: snapshotName.trim(), snapshot_data, saved_at: new Date().toISOString() },
+        { onConflict: "user_id,name" }
+      );
+    setSaving(false);
+    if (error) {
+      log.error("league draft snapshot save failed", { err: error.message });
+    } else {
+      setSaveSuccess(true);
+      setTimeout(() => { setSaveSuccess(false); setShowSaveModal(false); setSnapshotName(""); }, 1000);
+    }
+  }
 
   // Auto-cleanup: drop placeholder picks for slots that now have actual draft picks,
   // and drop placeholders whose player has been drafted elsewhere. Runs whenever the
@@ -87,8 +162,68 @@ export default function LiveDraftBoard({
 
   return (
     <>
-      {/* Toolbar: Reset Picks + Refresh */}
+      {/* Save Snapshot modal — opened from the toolbar once the draft is complete. */}
+      {showSaveModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => { if (!saving) setShowSaveModal(false); }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="save-draft-snapshot-title"
+            tabIndex={-1}
+            onKeyDown={(e) => { if (e.key === "Escape" && !saving) setShowSaveModal(false); }}
+            className="bg-gray-900 border border-gray-700 rounded-2xl p-5 w-full max-w-sm mx-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="save-draft-snapshot-title" className="text-white font-semibold text-sm mb-1">Save Draft Snapshot</h2>
+            <p className="text-gray-500 text-xs mb-4">
+              Freezes the completed board (picks, drafters, REACH/VALUE flags) into the Historical League Drafts tab. Saving with the same name overwrites.
+            </p>
+            <input
+              autoFocus
+              type="text"
+              placeholder={`e.g. ${selectedLeague?.name || "League"} ${draftSettings?.season || ROOKIE_YEAR}`}
+              value={snapshotName}
+              onChange={(e) => setSnapshotName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") saveSnapshot(); }}
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:border-indigo-500 mb-4"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowSaveModal(false)}
+                disabled={saving}
+                className="px-4 py-1.5 text-sm text-gray-400 hover:text-white transition disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveSnapshot}
+                disabled={saving || !snapshotName.trim()}
+                className={`px-4 py-1.5 text-sm font-semibold rounded-lg transition disabled:opacity-50 ${
+                  saveSuccess
+                    ? "bg-green-600 text-white"
+                    : "bg-indigo-600 hover:bg-indigo-500 text-white"
+                }`}
+              >
+                {saveSuccess ? "Saved ✓" : saving ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toolbar: Reset Picks + Save Snapshot + Refresh */}
       <div className="flex justify-end gap-2 mb-3">
+        {draftIsComplete && supabaseUser && (
+          <button
+            onClick={() => setShowSaveModal(true)}
+            className="flex items-center gap-2 px-4 py-1.5 text-xs font-semibold bg-indigo-700 hover:bg-indigo-600 text-white rounded-lg transition"
+          >
+            💾 Save Snapshot
+          </button>
+        )}
         {Object.keys(myDraftSlotPicks).length > 0 && (
           <button
             onClick={() => {
@@ -223,6 +358,15 @@ export default function LiveDraftBoard({
                 const isReach = userOverride && typeof userOverride.adp === "number" && overallPick < userOverride.adp - 8;
                 const predReach = isMySlot && prediction && (prediction.poolRank ?? 0) > 0 && overallPick < (prediction.poolRank ?? 999) - 7;
                 const predValue = isMySlot && prediction && (prediction.poolRank ?? 0) > 0 && overallPick > (prediction.poolRank ?? 0) + 4;
+                // Actual-pick REACH/VALUE: compare overall pick to that player's pool rank.
+                // Applies to every completed pick (not just the user's own).
+                const actualPoolRank = actualPlayer
+                  ? (draftPoolRanks.byPlayerId[String(playerPick!.player_id)]
+                      ?? draftPoolRanks.byName[normalizeRookieName(actualPlayer.full_name || "")]
+                      ?? 0)
+                  : 0;
+                const actualReach = !!actualPlayer && actualPoolRank > 0 && overallPick < actualPoolRank - 7;
+                const actualValue = !!actualPlayer && actualPoolRank > 0 && overallPick > actualPoolRank + 4;
                 const isEditing = draftSlotEditing === slotStr;
 
                 return (
@@ -239,9 +383,17 @@ export default function LiveDraftBoard({
                   >
                     {actualPlayer ? (
                       <>
+                        {actualReach && <span className="absolute top-0.5 left-1 text-[8px] font-bold text-orange-400">REACH</span>}
+                        {actualValue && <span className="absolute top-0.5 left-1 text-[8px] font-bold text-green-400">VALUE</span>}
                         <div className="text-center w-full text-white font-medium whitespace-normal break-words leading-tight text-[10px]">{actualPlayer.full_name}</div>
                         <div className={`text-[9px] ${posColor[actualPlayer.position] || "text-gray-400"}`}>{actualPlayer.position} · {actualPlayer.team}</div>
-                        <div className="text-[9px] text-gray-400 truncate w-full text-center">{rosterToName[Number(pick.owner_id)] || slotStr}</div>
+                        <div className="text-[9px] text-gray-400 truncate w-full text-center">{
+                          /* Prefer original drafter from draftPicks (historical, survives pick window rollover); */
+                          /* fall back to current slot owner, then slot label as last resort. */
+                          (playerPick?.picked_by && users[playerPick.picked_by])
+                          || rosterToName[Number(pick.owner_id)]
+                          || slotStr
+                        }</div>
                       </>
                     ) : userOverride ? (
                       <>

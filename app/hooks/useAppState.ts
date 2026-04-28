@@ -190,6 +190,14 @@ const { playerStats } = usePlayerStats(nflStatsSeason, nflStatsWeek);
 const [pickFcValues, setPickFcValues] = useState<Record<string, number>>({});
 const [fcTrendData, setFcTrendData] = useState<FcTrendEntry[]>([]);
 const [loadingFcTrends, setLoadingFcTrends] = useState(false);
+
+// Network consensus draft data for the current rookie draft year.
+// Used by predictedDraftPicks to override FC-value ordering once the user has
+// compiled enough drafts (CONSENSUS_MIN_DRAFTS) for the current year.
+const [consensusCurrentYear, setConsensusCurrentYear] = useState<{
+  rows: Array<{ player_name: string; avg_pick_no: number }>;
+  draftCount: number;
+} | null>(null);
 const [calcOpponentRosterId, setCalcOpponentRosterId] = useState<number | null>(null);
 const [users, setUsers] = useState<Record<string, string>>({});
 const [standings, setStandings] = useState<StandingRow[]>([]);
@@ -413,6 +421,35 @@ useEffect(() => {
     });
   return () => { cancelled = true; };
 }, [supabaseUser, loadNotes, setSupabaseMessage, setLeagueNotes, setLeaguePlayerTags, setPlayerDispositions, setPlayerNotes]);
+
+// Load network consensus draft data for the current draft year. Drives
+// predictedDraftPicks once draftCount >= CONSENSUS_MIN_DRAFTS; until then
+// the original FC-value ordering remains authoritative.
+useEffect(() => {
+  if (!supabaseUser) return;
+  let cancelled = false;
+  (async () => {
+    const { data: meta } = await supabase
+      .from("consensus_draft_meta")
+      .select("total_drafts")
+      .eq("user_id", supabaseUser.id)
+      .eq("year", parseInt(CURRENT_YEAR, 10))
+      .single();
+    if (cancelled || !meta) { setConsensusCurrentYear(null); return; }
+    const { data: rows } = await supabase
+      .from("consensus_draft_cache")
+      .select("player_name, avg_pick_no")
+      .eq("user_id", supabaseUser.id)
+      .eq("year", parseInt(CURRENT_YEAR, 10))
+      .order("avg_pick_no", { ascending: true });
+    if (cancelled) return;
+    setConsensusCurrentYear({
+      rows: (rows ?? []) as Array<{ player_name: string; avg_pick_no: number }>,
+      draftCount: meta.total_drafts || 0,
+    });
+  })();
+  return () => { cancelled = true; };
+}, [supabaseUser]);
 
 // Persist the (Supabase auth user → Sleeper user_id) mapping so the
 // server-side leaguemate-alerts cron knows which Sleeper account to scan.
@@ -2725,8 +2762,14 @@ const getTeamSummary = useCallback(() => {
   // - User's slots: ranked by their personal big board
   // - Need multiplier capped at 1.20 — tiebreaker only, never overrides ADP tier
   // - allPicks.owner_id = current owner after trades (used for slot ownership)
-  const predictedDraftPicks = useMemo(() => {
-    if (!draftSettings || !rosters.length || !rookies.length || !selectedLeague) return {};
+  const draftPredictionEngine = useMemo<{
+    predictions: Record<string, { name: string; position: string; team: string; adp: number; player_id: string | null; boardRank: number; poolRank: number }>;
+    poolRankByPlayerId: Record<string, number>;
+    poolRankByName: Record<string, number>;
+  }>(() => {
+    if (!draftSettings || !rosters.length || !rookies.length || !selectedLeague) {
+      return { predictions: {}, poolRankByPlayerId: {}, poolRankByName: {} };
+    }
 
     const numTeams = rosters.length;
     const numRounds: number = draftSettings?.settings?.rounds ?? draftSettings?.rounds ?? 4;
@@ -2774,28 +2817,55 @@ const getTeamSummary = useCallback(() => {
     const getRookieValue = (r: RookieBoardPlayer): number =>
       (r.player_id ? (leagueAdjustedFcValues[r.player_id] ?? 0) : 0) || valueByNormName[normName(r.name)] || 0;
 
+    // Network consensus override: once the user's compiled rookie-draft sample is
+    // large enough (CONSENSUS_MIN_DRAFTS), use it as the primary ordering signal
+    // instead of FC values. FC keeps driving the tail past consensus coverage.
+    const CONSENSUS_MIN_DRAFTS = 500;
+    const consensusByNormName: Record<string, number> = {};
+    const consensusActive =
+      !!consensusCurrentYear && consensusCurrentYear.draftCount >= CONSENSUS_MIN_DRAFTS;
+    if (consensusActive) {
+      consensusCurrentYear!.rows.forEach((row) => {
+        if (row.player_name && row.avg_pick_no > 0) {
+          consensusByNormName[normName(row.player_name)] = row.avg_pick_no;
+        }
+      });
+    }
+    const getConsensusPick = (r: RookieBoardPlayer): number | undefined =>
+      consensusActive ? consensusByNormName[normName(r.name)] : undefined;
+
     // Unified player pool for non-user picks.
-    // Sort key uses BOTH dynasty value (FC) and ADP so the right signal always wins:
-    //   - Players with FC dynasty value → sort by value descending (higher = earlier pick)
-    //   - Players with ADP but no value → ADP ascending interpolated into value scale
-    //   - Players with neither → board rank tiebreaker at the very end
-    // This prevents ADP name-matching failures (e.g. Love at MAX_SAFE_INTEGER adp)
-    // from burying high-value players — their FC value pulls them back to the top.
+    // When consensus is active: rank consensus-listed players by avg_pick_no first,
+    // then fall back to FC value / ADP / board rank for the tail (rookies past the
+    // ~50-pick consensus coverage). When consensus is inactive: pure FC ordering as
+    // before (FC value primary, ADP fine-grained tiebreaker, board rank tail).
     const fullPool = [...rookies]
       .map((r: RookieBoardPlayer, boardIdx: number) => {
+        const consensusPick = getConsensusPick(r);
         const dynVal = getRookieValue(r);
         const hasAdp = typeof r.adp === "number" && r.adp < 9999;
         let sortKey: number;
-        if (dynVal > 0) {
-          // FC value is authoritative — higher value = lower sort key (earlier pick)
-          // Adjust by ADP within same value tier for fine-grained ordering
+        if (consensusActive && consensusPick !== undefined) {
+          // Bucket A: consensus-ranked. avg_pick_no is overall pick number (~1–60).
+          sortKey = consensusPick;
+        } else if (consensusActive) {
+          // Bucket B: tail fallback when consensus is active. Offset 1000 keeps all
+          // tail entries strictly after the consensus bucket.
+          if (dynVal > 0) {
+            // Higher dynVal → lower sortKey within tail (cap inversion at +999).
+            sortKey = 1000 + (10000 - Math.min(dynVal, 9999));
+          } else if (hasAdp) {
+            sortKey = 20000 + r.adp;
+          } else {
+            sortKey = 30000 + boardIdx;
+          }
+        } else if (dynVal > 0) {
+          // FC-primary mode (consensus inactive). Higher value = lower sort key.
           const adpAdj = hasAdp ? r.adp * 0.01 : 0;
-          sortKey = -dynVal + adpAdj;           // e.g. Love: -8000+0.19 = -7999.81 → top
+          sortKey = -dynVal + adpAdj;
         } else if (hasAdp) {
-          // No FC value, but has ADP → insert after value-ranked players
-          sortKey = 50000 + r.adp;             // e.g. WR ADP=50 → 50050, below FC players
+          sortKey = 50000 + r.adp;
         } else {
-          // No data at all — board rank tiebreaker
           sortKey = 200000 + boardIdx;
         }
         return { ...r, _sortKey: sortKey };
@@ -2939,9 +3009,12 @@ const getTeamSummary = useCallback(() => {
           .map((r: RookieBoardPlayer, rankIdx: number) => {
             const baseScore = 1000 / (rankIdx + 1);
             const nm = needMult(rosterId, r.position, simCounts, round);
-            // Dynasty value bonus: FC value differences within same ADP tier
+            // Dynasty value bonus: FC value differences within same ADP tier.
+            // Skip when consensus is the primary signal for this player — the
+            // consensus rank already encodes their expected ordering.
             const dynVal = getRookieValue(r);
-            const valBonus = dynVal > 0 ? Math.min(0.20, dynVal / 50000) : 0;
+            const consensusDriven = consensusActive && getConsensusPick(r) !== undefined;
+            const valBonus = consensusDriven ? 0 : (dynVal > 0 ? Math.min(0.20, dynVal / 50000) : 0);
             // Owner tendency: how much this owner historically drafts this position
             // Only applied to non-user slots; user's own slots use personal board order
             const tm = isMySlot ? 1 : tendencyMult(rosterId, r.position);
@@ -2963,8 +3036,25 @@ const getTeamSummary = useCallback(() => {
       }
     }
 
-    return predictions;
-  }, [draftSettings, rosters, rookies, draftPicks, draftedPlayerIds, myDraftSlotPicks, allPicks, selectedLeague, players, leagueAdjustedFcValues, ownerDraftTendencies, user?.user_id]);
+    // Pool rank lookups for any rookie in the pool (covers both predicted slots
+    // and already-completed picks). REACH/VALUE flagging on actual picks reads
+    // poolRankByPlayerId first, falling back to normalized name.
+    const poolRankByPlayerId: Record<string, number> = {};
+    const poolRankByName: Record<string, number> = {};
+    fullPool.forEach((r: RookieBoardPlayer, idx: number) => {
+      const rank = idx + 1;
+      if (r.player_id) poolRankByPlayerId[String(r.player_id)] = rank;
+      if (r.name) poolRankByName[normName(r.name)] = rank;
+    });
+
+    return { predictions, poolRankByPlayerId, poolRankByName };
+  }, [draftSettings, rosters, rookies, draftPicks, draftedPlayerIds, myDraftSlotPicks, allPicks, selectedLeague, players, leagueAdjustedFcValues, ownerDraftTendencies, user?.user_id, consensusCurrentYear]);
+
+  const predictedDraftPicks = draftPredictionEngine.predictions;
+  const draftPoolRanks = useMemo(
+    () => ({ byPlayerId: draftPredictionEngine.poolRankByPlayerId, byName: draftPredictionEngine.poolRankByName }),
+    [draftPredictionEngine]
+  );
 
   const topAvailableRookies = useMemo(
     () =>
@@ -3665,6 +3755,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     draftPicks,
     draftOrder,
     predictedDraftPicks,
+    draftPoolRanks,
     topAvailableRookies,
     movePlayer,
     handleRankChange,

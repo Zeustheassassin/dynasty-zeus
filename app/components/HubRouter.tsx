@@ -17,7 +17,7 @@ import type {
   AugmentedPick, LeagueOverviewEntry, HistoricalSnapshot,
   LeagueMateView, CommittedSimsByLeague, CachedSimRow, RookieBoardPlayer,
   GamedayMatchup, WatchlistEntry, GmBriefing,
-  TradeAttempt, TradeAttemptStatus, FcTrendEntry, PredictedPick,
+  TradeAttempt, TradeAttemptStatus, FcTrendEntry, PredictedPick, DraftPoolRanks,
   LeagueHubTab, ProjectionRow, SimulationTeamRow,
   LeagueMgmtData, CommPaymentsData, TradePartnerRanking,
 } from "../../lib/types";
@@ -169,8 +169,8 @@ interface HubRouterProps {
   saveSnapshotNow: () => Promise<void>;
 
   // Draft Hub
-  draftHubSection: "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL_BOARDS";
-  setDraftHubSection: (s: "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL_BOARDS") => void;
+  draftHubSection: "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL_BOARDS" | "HISTORICAL_LEAGUE_DRAFTS";
+  setDraftHubSection: (s: "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL_BOARDS" | "HISTORICAL_LEAGUE_DRAFTS") => void;
   myDraftSlotPicks: Record<string, string>;
   setMyDraftSlotPicks: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   draftSlotEditing: string | null;
@@ -181,6 +181,7 @@ interface HubRouterProps {
   draftPicks: SleeperDraftPick[];
   draftOrder: Record<string, number>;
   predictedDraftPicks: Record<string, PredictedPick>;
+  draftPoolRanks: DraftPoolRanks;
   topAvailableRookies: RookieBoardPlayer[];
   movePlayer: (fromIndex: number, toIndex: number) => void;
   handleRankChange: (currentIndex: number, newRank: string) => void;
@@ -282,7 +283,7 @@ export function HubRouter({
   selectedUserId, setSelectedUserId, externalShares, loadingShares, historicalSnapshot, saveSnapshotNow,
   draftHubSection, setDraftHubSection, myDraftSlotPicks, setMyDraftSlotPicks,
   draftSlotEditing, setDraftSlotEditing, draftSlotSearchQuery, setDraftSlotSearchQuery,
-  draftSettings, draftPicks, draftOrder, predictedDraftPicks,
+  draftSettings, draftPicks, draftOrder, predictedDraftPicks, draftPoolRanks,
   topAvailableRookies, movePlayer, handleRankChange,
   addRookie, editRookieName, removeAddedRookie, clearNameEdit, rookieOverrides,
   tradeHubSection, calcOpponentRosterId,
@@ -415,6 +416,7 @@ export function HubRouter({
             freeAgents={freeAgents}
             loadingCalcValues={loadingCalcValues}
             predictedDraftPicks={predictedDraftPicks}
+            draftPoolRanks={draftPoolRanks}
             loadingDraftRefresh={loadingDraftRefresh}
             rookies={rookies}
             draftedPlayerIds={draftedPlayerIds}
@@ -519,6 +521,7 @@ export function HubRouter({
     rookies={rookies}
     draftedPlayerIds={draftedPlayerIds}
     predictedDraftPicks={predictedDraftPicks}
+    draftPoolRanks={draftPoolRanks}
     topAvailableRookies={topAvailableRookies}
     refreshDraftBoard={refreshDraftBoard}
     loadDraftScout={loadDraftScout}
