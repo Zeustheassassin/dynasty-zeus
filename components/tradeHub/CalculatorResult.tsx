@@ -168,8 +168,8 @@ function CalculatorResult({
                 const calcFp = buildTradeFingerprint(
                   selectedLeague.league_id,
                   calcOpponentRosterId,
-                  calcGive,
-                  calcReceive,
+                  [...calcGive, ...calcGivePicks],
+                  [...calcReceive, ...calcReceivePicks],
                 );
                 const alreadyMarked = sessionMarked.has(calcFp);
                 const buildCalcPayload = (direction: "ME" | "THEM") => {
