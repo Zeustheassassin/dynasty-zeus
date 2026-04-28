@@ -18,9 +18,13 @@ export async function GET(
   const { leagueId } = await ctx.params;
   if (!ID_RE.test(leagueId)) return NextResponse.json({ error: 'Invalid leagueId' }, { status: 400 });
 
+  const bypass = req.nextUrl.searchParams.get('bypass') === '1';
   const upstream = `${SLEEPER_BASE_URL}/league/${leagueId}/users`;
   try {
-    const res = await fetch(upstream, { next: { revalidate: SLEEPER_LEAGUE_USERS_REVALIDATE_S } });
+    const res = await fetch(
+      upstream,
+      bypass ? { cache: 'no-store' } : { next: { revalidate: SLEEPER_LEAGUE_USERS_REVALIDATE_S } },
+    );
     if (!res.ok) {
       log.error('upstream non-OK', { status: res.status, leagueId });
       return NextResponse.json([], { status: 502 });

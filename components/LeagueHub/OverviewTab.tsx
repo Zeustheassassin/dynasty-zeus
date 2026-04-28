@@ -31,7 +31,7 @@ interface OverviewTabProps {
   simProgress: { done: number; total: number } | null;
   loadRoster: (league: SleeperLeague) => void;
   setLeagueHubTab: (tab: LeagueHubTab) => void;
-  loadLeagueOverview: () => void;
+  loadLeagueOverview: () => Promise<void>;
   loadRedraftValues: () => void;
   handleRunAllSims: () => void;
 }
@@ -67,18 +67,22 @@ function OverviewTab({
     setRefreshingRosters(true);
     const total = leagues.length;
     setRosterRefreshProgress({ done: 0, total });
+    // Clear both cache layers: leagueData_* (loadRoster's 2h cache) and
+    // sleeperCache:* (cachedFetch's 5m cache). The bypass: true flag below
+    // also forces the server proxy to skip its Next.js Data Cache.
     const keysToRemove: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
-      if (key?.startsWith("leagueData_")) keysToRemove.push(key);
+      if (key?.startsWith("leagueData_") || key?.startsWith("sleeperCache:")) keysToRemove.push(key);
     }
     keysToRemove.forEach((k) => removeLocalStorageItem(k));
     await Promise.all(
       leagues.map((league) =>
         Promise.all([
-          sleeperApi.getLeagueRosters(league.league_id).catch(() => [] as SleeperRoster[]),
-          sleeperApi.getLeagueTradedPicks(league.league_id),
-          sleeperApi.getLeagueDrafts(league.league_id),
+          sleeperApi.getLeagueRosters(league.league_id, true).catch(() => [] as SleeperRoster[]),
+          sleeperApi.getLeagueTradedPicks(league.league_id, true),
+          sleeperApi.getLeagueDrafts(league.league_id, true),
+          sleeperApi.getLeagueUsers(league.league_id, true),
         ]).then(([allRosters, tradedPicksData, draftsData]) => {
           setLocalStorageItem(
             `leagueData_${league.league_id}`,
@@ -88,11 +92,14 @@ function OverviewTab({
         })
       )
     );
+    // Rebuild the overview table state from the now-fresh cache. Without this,
+    // leagueOverviewData stays stale even though the underlying caches updated.
+    await loadLeagueOverview();
     if (selectedLeague) await loadRoster(selectedLeague);
     setRefreshingRosters(false);
     const t = setTimeout(() => setRosterRefreshProgress(null), 3000);
     return () => clearTimeout(t);
-  }, [leagues, selectedLeague, loadRoster]);
+  }, [leagues, selectedLeague, loadRoster, loadLeagueOverview]);
 
   const leagueRows = React.useMemo(() => {
     const bucketOrder: Record<string, number> = {
@@ -152,7 +159,7 @@ function OverviewTab({
   });
   }, [leagues, leagueOverviewData, user, calcFcValues, redraftValues, pickFcValues, players, committedSimsByLeague, leagueSimCache, mountedAt]);
 
-  if (loadingLeagueOverview) return <p className="text-sm text-blue-400">Loading league data…</p>;
+  if (loadingLeagueOverview && !leagueOverviewLoaded) return <p className="text-sm text-blue-400">Loading league data…</p>;
   if (!leagues.length) return <p className="text-sm text-gray-500">No leagues found.</p>;
 
   return (

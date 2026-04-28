@@ -86,7 +86,7 @@ interface HubRouterProps {
   injuryReportPlayers: InjuryReportPlayer[];
   allTradeAttempts: { id: string; league_id: string; status: string }[];
   allRosterBriefings: GmBriefing[];
-  loadLeagueOverview: () => void;
+  loadLeagueOverview: () => Promise<void>;
   loadingLeagueOverview: boolean;
   onNavigateToAttempts: (leagueId: string) => void;
 

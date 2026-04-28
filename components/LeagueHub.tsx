@@ -101,7 +101,7 @@ interface LeagueHubProps {
 
   // Functions
   loadRoster: (league: SleeperLeague) => void;
-  loadLeagueOverview: () => void;
+  loadLeagueOverview: () => Promise<void>;
   loadRedraftValues: () => void;
   loadUserTrades: (ownerId: string) => void;
   loadUserExposure: (ownerId: string) => void;

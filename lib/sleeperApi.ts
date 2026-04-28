@@ -62,15 +62,24 @@ const TTL = {
 // contracts so callers don't need to change error-handling shape.
 // ---------------------------------------------------------------------------
 async function cachedGet<T>(url: string, ttlMs: number, bypass?: boolean): Promise<T> {
-  return cachedFetch<T>(url, { ttlMs, bypass });
+  // When bypassing, append ?bypass=1 so the server proxy uses cache: 'no-store',
+  // but keep the unsuffixed URL as the cacheKey so the fresh result populates
+  // the same localStorage slot a non-bypass call would read from.
+  const fetchUrl = bypass ? appendBypassParam(url) : url;
+  return cachedFetch<T>(fetchUrl, { ttlMs, bypass, cacheKey: url });
 }
 
-async function cachedGetOrNull<T>(url: string, ttlMs: number): Promise<T | null> {
+async function cachedGetOrNull<T>(url: string, ttlMs: number, bypass?: boolean): Promise<T | null> {
+  const fetchUrl = bypass ? appendBypassParam(url) : url;
   try {
-    return await cachedFetch<T>(url, { ttlMs });
+    return await cachedFetch<T>(fetchUrl, { ttlMs, bypass, cacheKey: url });
   } catch {
     return null;
   }
+}
+
+function appendBypassParam(url: string): string {
+  return url.includes('?') ? `${url}&bypass=1` : `${url}?bypass=1`;
 }
 
 // ===========================================================================
@@ -109,19 +118,21 @@ async function getUserLeagues(userId: string, year: string): Promise<SleeperLeag
 // ROSTER endpoints
 // ===========================================================================
 
-/** Fetch all rosters in a league. */
-async function getLeagueRosters(leagueId: string): Promise<SleeperRoster[]> {
+/** Fetch all rosters in a league. Pass `bypass: true` to skip both client and server caches. */
+async function getLeagueRosters(leagueId: string, bypass?: boolean): Promise<SleeperRoster[]> {
   return cachedGet<SleeperRoster[]>(
     `${PROXY_BASE}/league/${encodeURIComponent(leagueId)}/rosters`,
     TTL.leagueRosters,
+    bypass,
   );
 }
 
 /** Fetch the league user list (display names, avatars, metadata). Returns [] on any error. */
-async function getLeagueUsers(leagueId: string): Promise<SleeperUser[]> {
+async function getLeagueUsers(leagueId: string, bypass?: boolean): Promise<SleeperUser[]> {
   const result = await cachedGetOrNull<SleeperUser[]>(
     `${PROXY_BASE}/league/${encodeURIComponent(leagueId)}/users`,
     TTL.leagueUsers,
+    bypass,
   );
   return result ?? [];
 }
@@ -180,10 +191,11 @@ async function getLeagueTransactionsMultiWeek(
 // ===========================================================================
 
 /** Fetch all traded picks in a league (past + future). */
-async function getLeagueTradedPicks(leagueId: string): Promise<SleeperTradedPick[]> {
+async function getLeagueTradedPicks(leagueId: string, bypass?: boolean): Promise<SleeperTradedPick[]> {
   const result = await cachedGetOrNull<SleeperTradedPick[]>(
     `${PROXY_BASE}/league/${encodeURIComponent(leagueId)}/traded-picks`,
     TTL.leagueTradedPicks,
+    bypass,
   );
   return result ?? [];
 }
@@ -193,10 +205,11 @@ async function getLeagueTradedPicks(leagueId: string): Promise<SleeperTradedPick
 // ===========================================================================
 
 /** Fetch all drafts associated with a league. */
-async function getLeagueDrafts(leagueId: string): Promise<SleeperDraft[]> {
+async function getLeagueDrafts(leagueId: string, bypass?: boolean): Promise<SleeperDraft[]> {
   const result = await cachedGetOrNull<SleeperDraft[]>(
     `${PROXY_BASE}/league/${encodeURIComponent(leagueId)}/drafts`,
     TTL.leagueDrafts,
+    bypass,
   );
   return result ?? [];
 }
