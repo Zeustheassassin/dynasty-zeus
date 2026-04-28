@@ -1,5 +1,6 @@
 "use client";
 import { useState, useCallback } from "react";
+import { sleeperApi } from "../../lib/sleeperApi";
 import type { SleeperMatchup } from "../../lib/types";
 
 export function useGamedayState() {
@@ -11,9 +12,7 @@ export function useGamedayState() {
     if (!leagueId || !week) return;
     setLoadingGamedayMatchups(true);
     try {
-      const data = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/matchups/${week}`)
-        .then((r) => r.json())
-        .catch(() => []);
+      const data = await sleeperApi.getLeagueMatchups(leagueId, week).catch(() => [] as SleeperMatchup[]);
       setGamedayMatchups(Array.isArray(data) ? data : []);
     } finally {
       setLoadingGamedayMatchups(false);

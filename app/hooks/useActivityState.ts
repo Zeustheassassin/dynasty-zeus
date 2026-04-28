@@ -2,9 +2,10 @@
 import { useState, useCallback } from "react";
 import { supabase } from "../../lib/supabaseclient";
 import { logger } from "../../lib/logger";
+import { sleeperApi } from "../../lib/sleeperApi";
 import { ROOKIE_YEAR } from "../../hooks/useRookieBoardState";
 import type {
-  SleeperRoster, SleeperUser, SleeperMatchup, SleeperDraft, SleeperDraftPick,
+  SleeperRoster, SleeperUser, SleeperMatchup, SleeperDraft,
   AnnotatedTransaction,
 } from "../../lib/types";
 
@@ -25,14 +26,8 @@ export function useActivityState(
     setLoadingActivity(true);
     try {
       const weeks = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
-      const results = await Promise.all(
-        weeks.map(w =>
-          fetch(`https://api.sleeper.app/v1/league/${leagueId}/transactions/${w}`)
-            .then(r => r.json())
-            .catch(() => [])
-        )
-      );
-      const all = results.flat().filter((t) => t && t.status === "complete");
+      const all = (await sleeperApi.getLeagueTransactionsMultiWeek(leagueId, weeks))
+        .filter((t) => t && t.status === "complete");
       all.sort((a, b) => (b.updated || b.created || 0) - (a.updated || a.created || 0));
       setActivityTransactions(all.slice(0, 150) as AnnotatedTransaction[]);
     } catch (err) {
@@ -98,15 +93,13 @@ export function useActivityState(
         let foundSeason = PREV_YEAR;
 
         for (const year of yearsToTry) {
-          const leaguesRes = await fetch(`https://api.sleeper.app/v1/user/${userId}/leagues/nfl/${year}`);
-          const leagues = await leaguesRes.json();
-          if (!Array.isArray(leagues)) continue;
+          const leagues = await sleeperApi.getUserLeagues(userId, year).catch(() => []);
+          if (!leagues.length) continue;
 
           // No cap — scan all leagues for the most accurate picture
           await Promise.all(leagues.map(async (league) => {
             try {
-              const draftsRes = await fetch(`https://api.sleeper.app/v1/league/${league.league_id}/drafts`);
-              const drafts = (await draftsRes.json()) as SleeperDraft[];
+              const drafts: SleeperDraft[] = await sleeperApi.getLeagueDrafts(league.league_id);
               const rookieDraft = drafts.find(
                 (d) =>
                   d.season === year &&
@@ -114,8 +107,7 @@ export function useActivityState(
                   (d.settings?.rounds ?? 99) <= 5
               );
               if (!rookieDraft) return;
-              const picksRes = await fetch(`https://api.sleeper.app/v1/draft/${rookieDraft.draft_id}/picks`);
-              const picks = (await picksRes.json()) as SleeperDraftPick[];
+              const picks = await sleeperApi.getDraftPicks(rookieDraft.draft_id);
               picks
                 .filter((p) => p.picked_by === userId && p.metadata?.position)
                 .forEach((p) => {

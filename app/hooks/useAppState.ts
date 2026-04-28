@@ -42,6 +42,7 @@ import { useActivityState } from "./useActivityState";
 import { usePlayerAnnotations } from "./usePlayerAnnotations";
 import { useSimulatorState } from "./useSimulatorState";
 import { fetchSleeperUser } from "../../lib/sleeperUserCache";
+import { sleeperApi } from "../../lib/sleeperApi";
 import { getLocalStorageItem, setLocalStorageItem, removeLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 import type {
   AlertsCenterItem,
@@ -518,20 +519,14 @@ const refreshDraftBoard = useCallback(async () => {
   if (!selectedLeagueRef.current) return;
   setLoadingDraftRefresh(true);
   try {
-    const draftsRes = await fetch(
-      `https://api.sleeper.app/v1/league/${selectedLeagueRef.current.league_id}/drafts`
-    );
-    const drafts = await draftsRes.json();
+    const drafts = await sleeperApi.getLeagueDrafts(selectedLeagueRef.current.league_id);
     const currentDraft = drafts[0];
     if (!currentDraft) return;
     setDraftId(currentDraft.draft_id);
     setDraftOrder(currentDraft.draft_order || currentDraft.slot_to_roster_id || {});
     setDraftSettings(currentDraft); // full object — consistent with useLeagues.ts
     setSelectedLeagueDraftHasOccurred(currentDraft.status !== "pre_draft");
-    const picksRes = await fetch(
-      `https://api.sleeper.app/v1/draft/${currentDraft.draft_id}/picks`
-    );
-    const picks = await picksRes.json();
+    const picks = await sleeperApi.getDraftPicks(currentDraft.draft_id, true);
     setDraftPicks(picks);
   } catch (err) {
     log.warn("draft refresh failed", { err: String(err) });
@@ -699,9 +694,7 @@ useEffect(() => {
       const weeks = Array.from({ length: regularSeasonWeeks }, (_, idx) => idx + 1);
       const results = await Promise.all(
         weeks.map(async (week) => {
-          const data = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/matchups/${week}`)
-            .then((r) => r.json())
-            .catch(() => []);
+          const data = await sleeperApi.getLeagueMatchups(leagueId, week).catch(() => [] as SleeperMatchup[]);
           return {
             week,
             matchups: Array.isArray(data) ? data : [],
@@ -846,9 +839,9 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
   }
   if (!cacheHit) {
     [allRosters, tradedPicksData, draftsData] = await Promise.all([
-      fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`).then((r) => r.json()),
-      fetch(`https://api.sleeper.app/v1/league/${league.league_id}/traded_picks`).then((r) => r.json()),
-      fetch(`https://api.sleeper.app/v1/league/${league.league_id}/drafts`).then((r) => r.json()).catch(() => []),
+      sleeperApi.getLeagueRosters(league.league_id),
+      sleeperApi.getLeagueTradedPicks(league.league_id),
+      sleeperApi.getLeagueDrafts(league.league_id),
     ]);
     setLocalStorageItem(leagueCacheKey, { data: { allRosters, tradedPicksData, draftsData }, cachedAt: Date.now() });
   }
@@ -1016,13 +1009,10 @@ const loadLeaguemateTradeAlerts = async () => {
   await Promise.all(leaguemateOwnerIds.map(async (ownerId: string) => {
     const ownerName = users[ownerId] || "Leaguemate";
     try {
-      const leaguesRes = await fetch(
-        `https://api.sleeper.app/v1/user/${ownerId}/leagues/nfl/${CURRENT_YEAR}`
-      );
-      const ownerLeagues = await leaguesRes.json();
-      if (!Array.isArray(ownerLeagues)) return;
+      const ownerLeagues = await sleeperApi.getUserLeagues(ownerId, CURRENT_YEAR).catch(() => [] as SleeperLeague[]);
+      if (!ownerLeagues.length) return;
 
-      const dynastyLeagues = (ownerLeagues as SleeperLeague[]).filter((league) =>
+      const dynastyLeagues = ownerLeagues.filter((league) =>
         ((league.settings?.taxi_slots ?? 0) > 0 || (league.roster_positions?.length ?? 0) > 20) &&
         (league.settings?.best_ball ?? 0) === 0
       );
@@ -1031,16 +1021,11 @@ const loadLeaguemateTradeAlerts = async () => {
         try {
           // Fetch rosters + recent transactions (weeks 0-2 cover all offseason activity) + drafts for slot resolution
           const [leagueRosters, txn0, txn1, txn2, draftsData] = await Promise.all([
-            fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`)
-              .then((r) => r.json() as Promise<SleeperRoster[]>).catch(() => [] as SleeperRoster[]),
-            fetch(`https://api.sleeper.app/v1/league/${league.league_id}/transactions/0`)
-              .then((r) => r.json() as Promise<SleeperTransaction[]>).catch(() => [] as SleeperTransaction[]),
-            fetch(`https://api.sleeper.app/v1/league/${league.league_id}/transactions/1`)
-              .then((r) => r.json() as Promise<SleeperTransaction[]>).catch(() => [] as SleeperTransaction[]),
-            fetch(`https://api.sleeper.app/v1/league/${league.league_id}/transactions/2`)
-              .then((r) => r.json() as Promise<SleeperTransaction[]>).catch(() => [] as SleeperTransaction[]),
-            fetch(`https://api.sleeper.app/v1/league/${league.league_id}/drafts`)
-              .then((r) => r.json() as Promise<SleeperDraft[]>).catch(() => [] as SleeperDraft[]),
+            sleeperApi.getLeagueRosters(league.league_id).catch(() => [] as SleeperRoster[]),
+            sleeperApi.getLeagueTransactions(league.league_id, 0),
+            sleeperApi.getLeagueTransactions(league.league_id, 1),
+            sleeperApi.getLeagueTransactions(league.league_id, 2),
+            sleeperApi.getLeagueDrafts(league.league_id),
           ]);
 
           const ownerRoster = (Array.isArray(leagueRosters) ? leagueRosters : [])
@@ -3135,21 +3120,14 @@ const getTeamSummary = useCallback(() => {
           leagues.map(async (league) => {
             const [txArrays, usersData, rostersData, draftsData] = await Promise.all([
               Promise.all(
-                weeks.map((w) =>
-                  fetch(`https://api.sleeper.app/v1/league/${league.league_id}/transactions/${w}`)
-                    .then((r) => r.json())
-                    .catch(() => [])
-                )
+                weeks.map((w) => sleeperApi.getLeagueTransactions(league.league_id, w))
               ),
+              // No /api/sleeper/league/[id]/users proxy in M2 set — kept as direct fetch.
               fetch(`https://api.sleeper.app/v1/league/${league.league_id}/users`)
                 .then((r) => r.json())
                 .catch(() => []),
-              fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`)
-                .then((r) => r.json())
-                .catch(() => []),
-              fetch(`https://api.sleeper.app/v1/league/${league.league_id}/drafts`)
-                .then((r) => r.json())
-                .catch(() => []),
+              sleeperApi.getLeagueRosters(league.league_id).catch(() => [] as SleeperRoster[]),
+              sleeperApi.getLeagueDrafts(league.league_id),
             ]);
 
             // Build roster_id → display_name map for this league

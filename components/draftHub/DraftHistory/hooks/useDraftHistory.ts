@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../../../../lib/supabaseclient";
 import { logger } from "../../../../lib/logger";
+import { sleeperApi } from "../../../../lib/sleeperApi";
 import { usePlayers } from "../../../../lib/PlayersContext";
 import { useAuth } from "../../../../lib/AuthContext";
 import { useLeague } from "../../../../lib/LeagueContext";
@@ -79,7 +80,7 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
 
         await Promise.all(toCheck.map(async ({ id: leagueId, name: leagueName }) => {
           try {
-            const drafts: SleeperDraftBasic[] = await fetch(`https://api.sleeper.app/v1/league/${leagueId}/drafts`).then(r => r.json());
+            const drafts: SleeperDraftBasic[] = await sleeperApi.getLeagueDrafts(leagueId);
             if (!Array.isArray(drafts)) return;
             const rookieDrafts = drafts.filter((d) => {
               const rounds = d.settings?.rounds ?? d.rounds ?? 99;
@@ -91,7 +92,7 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
             });
             await Promise.all(rookieDrafts.map(async (draft) => {
               try {
-                const picks: SleeperPickBasic[] = await fetch(`https://api.sleeper.app/v1/draft/${draft.draft_id}/picks`).then(r => r.json());
+                const picks: SleeperPickBasic[] = await sleeperApi.getDraftPicks(draft.draft_id);
                 if (!Array.isArray(picks)) return;
                 const processed: HistoryDraftPick[] = picks.map((pick) => {
                   const p = players[pick.player_id];

@@ -2,7 +2,8 @@
 import React from "react";
 import { useLeague } from "../../lib/LeagueContext";
 import { useValues } from "../../lib/ValuesContext";
-import type { SleeperLeague, SleeperUser, AugmentedPick } from "../../lib/types";
+import { sleeperApi } from "../../lib/sleeperApi";
+import type { SleeperLeague, SleeperRoster, SleeperUser, AugmentedPick } from "../../lib/types";
 import type { CrossLeaguePick, FetchedRoster } from "./dataHubTypes";
 
 const PICK_YEARS = Array.from({ length: 3 }, (_, i) => String(new Date().getFullYear() + i));
@@ -34,8 +35,8 @@ function PickValuesTab({ allPicks, leagues, user }: PickValuesTabProps) {
       const results = await Promise.all(
         leagues.map(async (league) => {
           const [rostersData, tradedPicksData] = await Promise.all([
-            fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`).then(r => r.json()).catch(() => []),
-            fetch(`https://api.sleeper.app/v1/league/${league.league_id}/traded_picks`).then(r => r.json()).catch(() => []),
+            sleeperApi.getLeagueRosters(league.league_id).catch(() => [] as SleeperRoster[]),
+            sleeperApi.getLeagueTradedPicks(league.league_id),
           ]);
           const fetchedRosters = rostersData as FetchedRoster[];
           const myRoster = fetchedRosters.find((r) => r.owner_id === user.user_id);

@@ -8,9 +8,11 @@ import {
 import { usePlayers } from "../../lib/PlayersContext";
 import { useLeague } from "../../lib/LeagueContext";
 import { useValues } from "../../lib/ValuesContext";
+import { sleeperApi } from "../../lib/sleeperApi";
 import type {
   SleeperLeague,
   SleeperUser,
+  SleeperRoster,
   AugmentedPick,
   LeagueHubTab,
 } from "../../lib/types";
@@ -74,9 +76,9 @@ function OverviewTab({
     await Promise.all(
       leagues.map((league) =>
         Promise.all([
-          fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`).then((r) => r.json()).catch(() => []),
-          fetch(`https://api.sleeper.app/v1/league/${league.league_id}/traded_picks`).then((r) => r.json()).catch(() => []),
-          fetch(`https://api.sleeper.app/v1/league/${league.league_id}/drafts`).then((r) => r.json()).catch(() => []),
+          sleeperApi.getLeagueRosters(league.league_id).catch(() => [] as SleeperRoster[]),
+          sleeperApi.getLeagueTradedPicks(league.league_id),
+          sleeperApi.getLeagueDrafts(league.league_id),
         ]).then(([allRosters, tradedPicksData, draftsData]) => {
           setLocalStorageItem(
             `leagueData_${league.league_id}`,

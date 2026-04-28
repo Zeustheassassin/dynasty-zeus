@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, type Dispatch, type SetStateAction } from 
 import { supabase } from "../lib/supabaseclient";
 import { CURRENT_YEAR, normalizeRookieName } from "../lib/helpers";
 import { logger } from "../lib/logger";
+import { sleeperApi } from "../lib/sleeperApi";
 import { getLocalStorageItem, setLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 import type { RookieBoardPlayer } from "../lib/types";
 
@@ -34,9 +35,6 @@ export interface UserRookieOverrides {
 }
 
 const EMPTY_OVERRIDES: UserRookieOverrides = { added: [], nameEdits: {} };
-const ROOKIE_BOARD_ADP_URL =
-  `https://api.sleeper.app/projections/nfl/${ROOKIE_YEAR}?season_type=regular` +
-  `&position=QB&position=RB&position=WR&position=TE&order_by=adp_dynasty_2qb`;
 
 export interface UseRookieBoardStateReturn {
   rookies: RookieBoardPlayer[];
@@ -173,7 +171,7 @@ export function useRookieBoardState(supabaseUser: { id: string } | null): UseRoo
       // 1. Fetch sheet, Sleeper ADP (for metadata), and FC Superflex (2QB) raw data in parallel
       const [sheetText, adpResponse, fcRaw] = await Promise.all([
         fetch('/api/rookie-board-sheet', { signal }).then((res) => res.text()),
-        fetch(ROOKIE_BOARD_ADP_URL, { signal }).then((res) => res.json()).catch(() => []),
+        sleeperApi.getRookieBoardADP(ROOKIE_YEAR).catch(() => []),
         fetch(`https://api.fantasycalc.com/values/current?isDynasty=true&numQbs=2&numTeams=12&ppr=1`, { signal })
           .then((res) => res.json()).catch(() => []),
       ]);
@@ -235,15 +233,15 @@ export function useRookieBoardState(supabaseUser: { id: string } | null): UseRoo
       }
       // Sleeper ADP only used for player_id, position, team metadata — NOT for sort order
       const adpByName = new Map<string, AdpPlayerInfo>();
-      adpResponse
-        .filter((entry: SleeperAdpEntry) =>
+      (adpResponse as unknown as SleeperAdpEntry[])
+        .filter((entry) =>
           entry?.player &&
           entry?.stats &&
           entry.player.first_name !== "Player" &&
           ROOKIE_BOARD_POSITIONS.has(entry.player.position ?? "") &&
           typeof entry.stats.adp_dynasty_2qb === "number"
         )
-        .forEach((entry: SleeperAdpEntry) => {
+        .forEach((entry) => {
           if (!entry.player || !entry.stats) return;
           const playerName = `${entry.player.first_name ?? ""} ${entry.player.last_name ?? ""}`.trim();
           const normalizedName = normalizeRookieName(playerName);

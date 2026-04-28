@@ -1,9 +1,10 @@
 "use client";
 import React from "react";
 import { usePlayers } from "../../lib/PlayersContext";
-import type { SleeperLeague, SleeperUser, LeagueMateStatEntry } from "../../lib/types";
+import { sleeperApi } from "../../lib/sleeperApi";
+import type { SleeperLeague, SleeperRoster, SleeperUser, LeagueMateStatEntry } from "../../lib/types";
 import { POS_COLOR } from "./dataHubHelpers";
-import type { ExposureData, FetchedRoster, FetchedUser, ExternalLeague } from "./dataHubTypes";
+import type { ExposureData, FetchedRoster, FetchedUser } from "./dataHubTypes";
 
 const CURRENT_YEAR = String(new Date().getFullYear());
 
@@ -47,7 +48,8 @@ function LeaguematesTab({
       const myLeagueData = await Promise.all(
         leagues.map(async (league) => {
           const [rostersRes, leagueUsersRes] = await Promise.all([
-            fetch(`https://api.sleeper.app/v1/league/${league.league_id}/rosters`).then(r => r.json()).catch(() => []),
+            sleeperApi.getLeagueRosters(league.league_id).catch(() => [] as SleeperRoster[]),
+            // No /api/sleeper/league/[id]/users proxy in M2 set — kept as direct fetch (same pattern as M5/M6)
             fetch(`https://api.sleeper.app/v1/league/${league.league_id}/users`).then(r => r.json()).catch(() => []),
           ]);
           return { league, rosters: rostersRes as FetchedRoster[], leagueUsers: leagueUsersRes as FetchedUser[] };
@@ -70,10 +72,9 @@ function LeaguematesTab({
       });
 
       const ownerStats = await Promise.all([...allOwnerIds].map(async (ownerId) => {
-        const theirLeagues: ExternalLeague[] = await fetch(`https://api.sleeper.app/v1/user/${ownerId}/leagues/nfl/${CURRENT_YEAR}`)
-          .then(r => r.json())
-          .then(d => Array.isArray(d) ? d : [])
-          .catch(() => []);
+        const theirLeagues = await sleeperApi
+          .getUserLeagues(ownerId, CURRENT_YEAR)
+          .catch(() => [] as SleeperLeague[]);
 
         return {
           userId: ownerId,
