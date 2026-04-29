@@ -296,12 +296,12 @@ export default function ScoutingHub() {
       {/* Hub header */}
       <div className="border-b border-gray-800 bg-gray-950">
         <div className="px-4 py-4">
-          <div className="flex items-start justify-between flex-wrap gap-2">
-            <div>
+          <div className="flex items-start justify-center flex-wrap gap-2">
+            <div className="text-center">
               <h1 className="text-2xl font-bold text-white">Scouting Hub</h1>
               <div className="mt-1.5 space-y-1">
                 {headerBreakdown.map(({ year, positions }) => (
-                  <div key={year} className="flex flex-wrap items-baseline gap-x-4 gap-y-0.5 text-xs">
+                  <div key={year} className="flex flex-wrap items-baseline justify-center gap-x-4 gap-y-0.5 text-xs">
                     <span className="text-blue-400 font-semibold w-10 shrink-0">{year}</span>
                     {positions.map((r) => (
                       <span key={r.pos} className="text-gray-400">
@@ -324,7 +324,7 @@ export default function ScoutingHub() {
           </div>
 
           {/* Main tab bar */}
-          <div className="flex gap-1 mt-4 border-b border-gray-800 -mb-px">
+          <div className="flex justify-center gap-1 mt-4 border-b border-gray-800 -mb-px">
             {hubTabs.map((t) => (
               <button
                 key={t.key}

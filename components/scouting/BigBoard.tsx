@@ -779,7 +779,7 @@ export default function BigBoard({
   return (
     <div>
       {/* Position board tabs */}
-      <div className="flex gap-1 mb-4 border-b border-gray-800">
+      <div className="flex justify-center gap-1 mb-4 border-b border-gray-800">
         {BOARD_TABS.map((t) => (
           <button
             key={t.key}
@@ -799,7 +799,7 @@ export default function BigBoard({
       </div>
 
       {/* Controls */}
-      <div className="flex flex-wrap items-center gap-2 mb-3">
+      <div className="flex flex-wrap items-center justify-center gap-2 mb-3">
         <input
           className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500 w-48"
           placeholder="Search name / school…"
@@ -816,9 +816,9 @@ export default function BigBoard({
             className={`px-3 py-1 rounded text-xs font-medium transition ${draftYearFilter === y ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}
           >{y}</button>
         ))}
-        <span className="ml-auto text-xs text-gray-500">{sorted.length} prospects · scroll right for full stats →</span>
+        <span className="text-xs text-gray-500">{sorted.length} prospects</span>
       </div>
-      <p className="text-xs text-gray-600 mb-2">Drag rows to reorder · Click rank to edit · Click any column header to sort</p>
+      <p className="text-xs text-gray-600 mb-2 text-center">Drag rows to reorder · Click rank to edit · Click any column header to sort</p>
 
       {loading ? (
         <div className="text-gray-500 text-sm text-center py-12">Loading…</div>
