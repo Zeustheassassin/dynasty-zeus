@@ -32,10 +32,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { safeFetch, withConcurrency } from "../../../../lib/sleeperServer";
 import { getDraftRoundSlot } from "../../../../lib/helpers/picks";
 import { CURRENT_YEAR } from "../../../../lib/helpers/season";
-import {
-  SLEEPER_BASE_URL,
-  SLEEPER_PLAYERS_TIMEOUT_MS,
-} from "../../../../lib/constants";
+import { SLEEPER_BASE_URL } from "../../../../lib/constants";
 import { logger } from "../../../../lib/logger";
 import type {
   SleeperLeague,
@@ -62,13 +59,6 @@ const TRADE_LOOKBACK_MS = 14 * 24 * 60 * 60 * 1000;
 // Offseason transactions are bucketed under weeks 0–2; week 0 alone misses
 // some leagues whose offseason resets land in week 1 or 2.
 const TRANSACTION_WEEKS = [0, 1, 2] as const;
-
-// Server-side player record only needs the bits used to label trade contents.
-interface SleeperPlayerBasic {
-  first_name?: string;
-  last_name?: string;
-  full_name?: string;
-}
 
 // Sleeper transactions can hash adds either by string or numeric roster_id.
 type AdHashEntry = [string, number | string];
@@ -97,27 +87,19 @@ function isDynastyLeague(l: SleeperLeague): boolean {
   );
 }
 
-function resolvePlayerName(
-  players: Record<string, SleeperPlayerBasic>,
-  pid: string
-): string {
-  const p = players[pid];
-  if (!p) return pid;
-  if (p.full_name) return p.full_name;
-  const first = (p.first_name ?? "").trim();
-  const last = (p.last_name ?? "").trim();
-  const name = `${first} ${last}`.trim();
-  return name || pid;
-}
-
 /**
  * Walks one registered user's leaguemates and collects net-new trade alerts.
  * Returns the number of rows inserted (after ON CONFLICT DO NOTHING).
+ *
+ * Player names are NOT resolved server-side — the cron writes raw player IDs
+ * into payload.acquiredPlayerIds / payload.sentPlayerIds and the FeedTab
+ * resolver renders names from the client's already-loaded players map. This
+ * skips a 5 MB /players/nfl fetch per cron run and ~50 MB of provisioned
+ * memory while the function holds it.
  */
 async function processUser(
   authUserId: string,
   sleeperUserId: string,
-  players: Record<string, SleeperPlayerBasic>,
   // Service-role client — cannot type the schema generically without a generated db.ts.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   supabase: SupabaseClient<any>
@@ -241,12 +223,12 @@ async function processUser(
           if (seenAlertIds.has(alertId)) continue;
 
           const addsEntries = Object.entries(trade.adds ?? {}) as AdHashEntry[];
-          const acquired = addsEntries
+          const acquiredPlayerIds = addsEntries
             .filter(([, rid]) => Number(rid) === ownerRoster.roster_id)
-            .map(([pid]) => resolvePlayerName(players, pid));
-          const sent = addsEntries
+            .map(([pid]) => pid);
+          const sentPlayerIds = addsEntries
             .filter(([, rid]) => Number(rid) !== ownerRoster.roster_id)
-            .map(([pid]) => resolvePlayerName(players, pid));
+            .map(([pid]) => pid);
           const picksReceived = (trade.draft_picks ?? [])
             .filter((p) => p.owner_id === ownerRoster.roster_id)
             .map(labelPick);
@@ -254,18 +236,23 @@ async function processUser(
             .filter((p) => p.previous_owner_id === ownerRoster.roster_id)
             .map(labelPick);
 
-          const acquiredAll = [...acquired, ...picksReceived];
-          const sentAll = [...sent, ...picksSent];
-          if (!acquiredAll.length && !sentAll.length) continue;
+          const hasAcquired = acquiredPlayerIds.length || picksReceived.length;
+          const hasSent = sentPlayerIds.length || picksSent.length;
+          if (!hasAcquired && !hasSent) continue;
 
           const leagueName = league.name || "League";
           // Same fallback chain as the client builder at useAppState.ts:1118.
           const ts = trade.updated || trade.created || Date.now();
 
-          // Owner display name isn't on the roster — pull from league users
-          // would add another fetch per league. The client used the league
-          // users map; without it the cron stores ownerId so the frontend can
-          // resolve the display name on render.
+          // Detail is a fallback rendering using raw player IDs as placeholders.
+          // FeedTab prefers payload.acquiredPlayerIds / sentPlayerIds and rebuilds
+          // the string with resolved names from the client's players map. This
+          // detail string is what gets displayed if the client lacks player data
+          // (e.g. server-rendered email digest later) and what older code paths
+          // can fall back to.
+          const acquiredAll = [...acquiredPlayerIds, ...picksReceived];
+          const sentAll = [...sentPlayerIds, ...picksSent];
+
           seenAlertIds.add(alertId);
           collected.push({
             user_id: authUserId,
@@ -274,9 +261,9 @@ async function processUser(
             source: "internal",
             severity: "medium",
             title: `Leaguemate trade — ${leagueName}`,
-            detail: acquiredAll.length
+            detail: hasAcquired
               ? `Received ${acquiredAll.join(", ")}${
-                  sentAll.length ? `, sent ${sentAll.join(", ")}` : ""
+                  hasSent ? `, sent ${sentAll.join(", ")}` : ""
                 } in ${leagueName}.`
               : `Sent ${sentAll.join(", ")} in ${leagueName}.`,
             actionable: true,
@@ -286,8 +273,10 @@ async function processUser(
             payload: {
               ownerId,
               leagueName,
-              acquired: acquiredAll,
-              sent: sentAll,
+              acquiredPlayerIds,
+              sentPlayerIds,
+              picksReceived,
+              picksSent,
             },
             updated_at: new Date(ts).toISOString(),
           });
@@ -362,14 +351,9 @@ export async function GET(req: NextRequest): Promise<Response> {
     );
   }
 
-  // One Sleeper player-map fetch covers the whole run — ~5 MB payload, so
-  // not something to repeat per user. Used only for resolving player IDs in
-  // trade.adds to readable names.
-  const players =
-    (await safeFetch<Record<string, SleeperPlayerBasic>>(
-      `${SLEEPER_BASE_URL}/players/nfl`,
-      SLEEPER_PLAYERS_TIMEOUT_MS
-    )) ?? {};
+  // The 5 MB /players/nfl fetch was removed: the cron now stores raw player
+  // IDs in payload.acquiredPlayerIds / sentPlayerIds and FeedTab resolves
+  // names from the client's already-loaded players map. See processUser docs.
 
   let usersProcessed = 0;
   let alertsInserted = 0;
@@ -378,7 +362,6 @@ export async function GET(req: NextRequest): Promise<Response> {
       alertsInserted += await processUser(
         link.user_id,
         link.sleeper_user_id,
-        players,
         supabase
       );
       usersProcessed++;

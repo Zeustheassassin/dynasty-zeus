@@ -2,7 +2,7 @@
 import { memo } from "react";
 import type { SleeperPlayer } from "../../lib/types";
 import type { DashboardAlert } from "./alertsPageHelpers";
-import { severityStyles, resolvePlayerIdsInDetail } from "./alertsPageHelpers";
+import { severityStyles, renderLeagueAlertDetail } from "./alertsPageHelpers";
 
 type FeedTabProps = {
   alerts: DashboardAlert[];
@@ -46,8 +46,8 @@ function FeedTab({ alerts, actionableAlerts, onDismissAlert, loadingExternalAler
               </div>
               <div className="mt-2 text-sm font-semibold text-white">{alert.title}</div>
               <div className="mt-1 text-sm text-slate-300">
-                {alert.category === "league" && alert.source !== "internal"
-                  ? resolvePlayerIdsInDetail(alert.detail, players)
+                {alert.category === "league"
+                  ? renderLeagueAlertDetail(alert, players)
                   : alert.detail}
               </div>
             </div>
