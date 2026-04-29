@@ -36,7 +36,10 @@ export function MainLayout({
         <div className={!supabaseUser ? "pointer-events-none select-none opacity-40" : ""}>
           <>
             {/* HEADER */}
-            <div className="sticky top-0 z-10 bg-gray-900 border-b border-gray-700">
+            {/* z-30 keeps the nav above sticky table cells (Big Board uses z-10/z-20 on
+                sticky left columns + headers); without this, those cells paint over the
+                nav as the page scrolls vertically. */}
+            <div className="sticky top-0 z-30 bg-gray-900 border-b border-gray-700">
               {/* Top bar */}
               <div className="flex overflow-x-auto scrollbar-none md:justify-center">
                 <div className="flex items-center px-3 py-2 gap-4 shrink-0">
