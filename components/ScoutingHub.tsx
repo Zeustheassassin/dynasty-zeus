@@ -379,6 +379,11 @@ export default function ScoutingHub() {
             onUpdateOverallRank={handleUpdateOverallRank}
             draftYearFilter={draftYearFilter}
             setDraftYearFilter={setDraftYearFilter}
+            games={games}
+            rbPlays={rbPlays}
+            qbPlays={qbPlays}
+            tePlays={tePlays}
+            loadPositionPlays={loadPositionPlays}
           />
         )}
 

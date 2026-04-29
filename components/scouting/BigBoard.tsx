@@ -1,9 +1,15 @@
 "use client";
 import { useState, useMemo, useRef, useEffect } from "react";
-import type { ProspectWithStats, Prospect, RouteType } from "../../lib/types";
+import type { ProspectWithStats, Prospect, RouteType, ScoutingGame, RBPlay, QBPlay, TEPlay } from "../../lib/types";
 import { getLocalStorageItem, setLocalStorageItem } from "@/lib/hooks/useLocalStorage";
+import {
+  computeRBAboveExpected,
+  computeQBAboveExpected,
+  computeTEAboveExpected,
+} from "../../lib/scouting/aboveExpected";
 
 type NflDraftEntry = { team: string; round: number | null; pick: number | null };
+type LoadPositionPlaysFn = (pos: "RB" | "QB" | "TE") => void;
 
 const ROUTE_TYPES: RouteType[] = [
   "nine", "post", "dig", "curl", "slant", "screen", "flat", "comeback", "out", "corner", "other",
@@ -14,7 +20,7 @@ type BoardTab = "all" | "QB" | "RB" | "WR" | "TE";
 type SortKey =
   | "personal_rank" | "overall_rank" | "name" | "school" | "conference" | "draft_class_year" | "height" | "weight" | "age" | "position"
   | "total_routes" | "total_games" | "targets" | "catches" | "drops" | "contested" | "contested_catches"
-  | "success_rate" | "target_rate" | "adj_success_above_exp"
+  | "success_rate" | "target_rate" | "adj_success_above_exp" | "above_expected"
   | "pct_left" | "pct_right" | "pct_slot" | "pct_backfield"
   | "depth_behind_los" | "depth_on_los" | "total_snaps"
   | "cvg_man" | "cvg_man_catch" | "cvg_zone" | "cvg_zone_catch"
@@ -35,6 +41,14 @@ interface Props {
   onUpdateOverallRank: (id: string, rank: number) => Promise<void>;
   draftYearFilter: number | null;
   setDraftYearFilter: (y: number | null) => void;
+  // Raw plays + games are lazy-loaded by ScoutingHub. The board triggers
+  // load via loadPositionPlays on mount and uses the resulting plays to
+  // compute the unified Above-Expected metric (AAE / SRAE / SAE / TE-SAE).
+  games: ScoutingGame[];
+  rbPlays: RBPlay[];
+  qbPlays: QBPlay[];
+  tePlays: TEPlay[];
+  loadPositionPlays: LoadPositionPlaysFn;
 }
 
 function n(v: number | null | undefined): string {
@@ -57,11 +71,16 @@ function computeAge(birthday: string | null | undefined): number | null {
   return age;
 }
 
-function getSortValue(p: ProspectWithStats, key: SortKey): number | string {
+function getSortValue(
+  p: ProspectWithStats,
+  key: SortKey,
+  aboveExpMap?: Map<string, number | null>,
+): number | string {
   const BIG = 99999;
   if (key === "personal_rank") return p.personal_rank ?? BIG;
   if (key === "overall_rank") return p.overall_rank ?? BIG;
   if (key === "name") return p.name;
+  if (key === "above_expected") return aboveExpMap?.get(p.id) ?? -BIG;
   if (key === "school") return p.school;
   if (key === "conference") return p.conference ?? "";
   if (key === "position") return p.position;
@@ -125,7 +144,38 @@ export default function BigBoard({
   onUpdateOverallRank,
   draftYearFilter,
   setDraftYearFilter,
+  games,
+  rbPlays,
+  qbPlays,
+  tePlays,
+  loadPositionPlays,
 }: Props) {
+  // Trigger lazy load of all three position plays the first time the
+  // board renders. ScoutingHub no-ops if a position is already loaded
+  // for the current games key, so this is safe to call repeatedly.
+  useEffect(() => {
+    loadPositionPlays("RB");
+    loadPositionPlays("QB");
+    loadPositionPlays("TE");
+  }, [loadPositionPlays]);
+
+  // Unified Above-Expected map: AAE for QB, SRAE for RB, TE-SAE for TE,
+  // and the pre-aggregated WR adj_success_above_exp for WR. Returns null
+  // for any prospect under the per-position min-sample threshold.
+  const aboveExpectedMap = useMemo(() => {
+    const m = new Map<string, number | null>();
+    const rb = computeRBAboveExpected(prospects, games, rbPlays);
+    const qb = computeQBAboveExpected(prospects, games, qbPlays);
+    const te = computeTEAboveExpected(prospects, games, tePlays);
+    for (const [id, v] of rb) m.set(id, v);
+    for (const [id, v] of qb) m.set(id, v);
+    for (const [id, v] of te) m.set(id, v);
+    for (const p of prospects) {
+      if (p.position === "WR") m.set(p.id, p.adj_success_above_exp);
+    }
+    return m;
+  }, [prospects, games, rbPlays, qbPlays, tePlays]);
+
   const [boardTab, setBoardTab] = useState<BoardTab>("all");
   // All board sorts by overall_rank; position boards sort by personal_rank
   const [sortKey, setSortKey] = useState<SortKey>("overall_rank");
@@ -165,15 +215,15 @@ export default function BigBoard({
       list = list.filter((p) => p.name.toLowerCase().includes(q) || p.school.toLowerCase().includes(q));
     }
     return [...list].sort((a, b) => {
-      const va = getSortValue(a, sortKey);
-      const vb = getSortValue(b, sortKey);
+      const va = getSortValue(a, sortKey, aboveExpectedMap);
+      const vb = getSortValue(b, sortKey, aboveExpectedMap);
       if (typeof va === "number" && typeof vb === "number")
         return sortDir === "asc" ? va - vb : vb - va;
       return sortDir === "asc"
         ? String(va).localeCompare(String(vb))
         : String(vb).localeCompare(String(va));
     });
-  }, [prospects, boardTab, draftYearFilter, search, sortKey, sortDir]);
+  }, [prospects, boardTab, draftYearFilter, search, sortKey, sortDir, aboveExpectedMap]);
 
   useEffect(() => {
     const table = tableScrollRef.current;
@@ -213,12 +263,41 @@ export default function BigBoard({
         key={key}
         onClick={() => toggleSort(key)}
         style={{ left: leftPx, minWidth: widthPx, width: widthPx }}
-        className={`sticky z-20 bg-gray-950 px-1.5 py-1.5 text-left whitespace-nowrap cursor-pointer hover:text-white transition select-none border-r border-gray-800 ${
+        className={`sticky z-20 bg-gray-950 px-1.5 py-1.5 text-center whitespace-nowrap cursor-pointer hover:text-white transition select-none border-r border-gray-800 ${
           active ? "text-blue-400" : "text-gray-500"
         }`}
       >
         {label}{active ? (sortDir === "asc" ? "↑" : "↓") : ""}
       </th>
+    );
+  }
+
+  // ── Above-Expected cell renderer ──────────────────────────────
+  // Single column on the All board showing the position-appropriate
+  // metric: AAE for QB, SRAE for RB, SAE for WR, TE-SAE for TE.
+  // Color-coded green/red on sign; small grey tag identifies which
+  // metric the value represents.
+  const aboveExpectedLabel = (pos: string): string => {
+    if (pos === "QB") return "AAE";
+    if (pos === "RB") return "SRAE";
+    if (pos === "WR") return "SAE";
+    if (pos === "TE") return "TE-SAE";
+    return "";
+  };
+  function aboveExpectedCell(p: ProspectWithStats) {
+    const v = aboveExpectedMap.get(p.id);
+    if (v == null) {
+      return (
+        <td className={`${tdBase} text-gray-600 border-r border-gray-800`}>—</td>
+      );
+    }
+    const color = v >= 0 ? "text-green-400" : "text-red-400";
+    const sign = v >= 0 ? "+" : "";
+    return (
+      <td className={`${tdBase} border-r border-gray-800 ${color} font-medium`}>
+        {sign}{v.toFixed(1)}
+        <span className="ml-1 text-[10px] text-gray-500 font-normal">{aboveExpectedLabel(p.position)}</span>
+      </td>
     );
   }
 
@@ -361,7 +440,7 @@ export default function BigBoard({
           )}
         </td>
         <td style={{ left: 68, minWidth: 140, width: 140 }}
-          className="sticky z-10 bg-gray-950 border-r border-gray-800 px-1.5 py-1.5 text-white font-medium whitespace-nowrap">
+          className="sticky z-10 bg-gray-950 border-r border-gray-800 px-1.5 py-1.5 text-center text-white font-medium whitespace-nowrap">
           {p.name}
         </td>
       </>
@@ -385,7 +464,7 @@ export default function BigBoard({
   }
 
   const scrollWrapper = (tableNode: React.ReactNode) => (
-    <>
+    <div className="mx-auto w-fit max-w-full">
       <div
         ref={topScrollRef}
         className="overflow-x-auto [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-track]:bg-gray-900 [&::-webkit-scrollbar-thumb]:bg-gray-600 [&::-webkit-scrollbar-thumb]:rounded hover:[&::-webkit-scrollbar-thumb]:bg-gray-400"
@@ -400,7 +479,7 @@ export default function BigBoard({
       >
         {tableNode}
       </div>
-    </>
+    </div>
   );
 
   // ── All board ──────────────────────────────────────────────
@@ -415,6 +494,7 @@ export default function BigBoard({
             <th colSpan={1} className="px-2 py-1 text-center text-indigo-900 font-medium border-r border-gray-800">NFL Draft</th>
             <th colSpan={1} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">Pos Rank</th>
             <th colSpan={6} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">Identity</th>
+            <th colSpan={1} className="px-2 py-1 text-center text-green-900 font-medium border-r border-gray-800">Above Exp</th>
           </tr>
           <tr className="border-b border-gray-800 bg-gray-950">
             <th className="sticky left-0 z-20 bg-gray-950 w-6 text-gray-700 text-center px-1">⠿</th>
@@ -428,6 +508,7 @@ export default function BigBoard({
             {th("Age", "age")}
             {th("Ht", "height")}
             {th("Wt", "weight", "border-r border-gray-800")}
+            {th("AE", "above_expected", "border-l border-gray-800 border-r border-gray-800 text-green-700")}
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-900">
@@ -447,6 +528,7 @@ export default function BigBoard({
                 <td className={`${tdBase} text-gray-400`}>{age ?? "—"}</td>
                 <td className={`${tdBase} text-gray-400`}>{p.height || "—"}</td>
                 <td className={`${tdBase} text-gray-400 border-r border-gray-800`}>{p.weight ?? "—"}</td>
+                {aboveExpectedCell(p)}
               </tr>
             );
           })}
