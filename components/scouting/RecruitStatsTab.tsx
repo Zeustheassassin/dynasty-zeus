@@ -10,6 +10,16 @@ const log = logger("components/scouting/RecruitStatsTab");
 const POSITIONS = ["QB", "RB", "WR", "TE", "ATH"] as const;
 const STAR_TIERS = [5, 4] as const;
 
+// Older 247 classes (≤2020) used finer-grained position labels that the modern
+// data does not. Roll them up so QB and RB rows include those legacy buckets.
+//   DUAL (dual-threat QB), PRO (pro-style QB) → QB
+//   APB  (all-purpose back)                   → RB
+const POSITION_ALIASES: Record<string, string> = {
+  DUAL: "QB",
+  PRO:  "QB",
+  APB:  "RB",
+};
+
 const POSITION_COLORS: Record<string, string> = {
   QB:  "text-blue-400",
   RB:  "text-green-400",
@@ -81,13 +91,16 @@ export default function RecruitStatsTab() {
     return () => { cancelled = true; };
   }, []);
 
-  // Pivot stats into a [position][stars][year] lookup.
+  // Pivot stats into a [position][stars][year] lookup. Raw labels are rolled up
+  // via POSITION_ALIASES, so multiple source rows can land in the same bucket
+  // (e.g. DUAL + PRO → QB) and must be summed rather than assigned.
   const grid = useMemo(() => {
     const g: Record<string, Record<number, Record<number, number>>> = {};
     for (const row of stats) {
-      if (!g[row.position]) g[row.position] = {};
-      if (!g[row.position][row.stars]) g[row.position][row.stars] = {};
-      g[row.position][row.stars][row.year] = row.count;
+      const pos = POSITION_ALIASES[row.position] ?? row.position;
+      if (!g[pos]) g[pos] = {};
+      if (!g[pos][row.stars]) g[pos][row.stars] = {};
+      g[pos][row.stars][row.year] = (g[pos][row.stars][row.year] ?? 0) + row.count;
     }
     return g;
   }, [stats]);
