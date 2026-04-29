@@ -226,13 +226,23 @@ export default function StatsTableShell({
         <span className="text-xs text-gray-500">{sorted.length} player{sorted.length !== 1 ? "s" : ""}</span>
       </div>
 
-      {/* Top scrollbar */}
-      <div ref={topRef} className="overflow-x-auto" style={{ height: 10 }} aria-hidden="true">
+      {/* Top scrollbar — proxy that scrolls the middle table div via syncScroll.
+          Thin styling matches the bottom proxy so only one visual bar shows on
+          each side; the middle div hides its own native scrollbar below. */}
+      <div
+        ref={topRef}
+        className="overflow-x-auto [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-track]:bg-gray-900 [&::-webkit-scrollbar-thumb]:bg-gray-600 [&::-webkit-scrollbar-thumb]:rounded hover:[&::-webkit-scrollbar-thumb]:bg-gray-400"
+        aria-hidden="true"
+      >
         <div style={{ width: totalWidth, height: 1 }} />
       </div>
 
-      {/* Table */}
-      <div ref={midRef} className="overflow-x-auto">
+      {/* Table — native scrollbar hidden so the only visible bars are the
+          top + bottom proxies, all kept in sync. */}
+      <div
+        ref={midRef}
+        className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
         <table className="border-collapse text-xs" style={{ minWidth: totalWidth }}>
           <thead>
             {/* Group header row */}
@@ -367,8 +377,12 @@ export default function StatsTableShell({
         </table>
       </div>
 
-      {/* Bottom scrollbar */}
-      <div ref={botRef} className="overflow-x-auto" style={{ height: 10 }} aria-hidden="true">
+      {/* Bottom scrollbar — same thin styling as the top proxy. */}
+      <div
+        ref={botRef}
+        className="overflow-x-auto [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-track]:bg-gray-900 [&::-webkit-scrollbar-thumb]:bg-gray-600 [&::-webkit-scrollbar-thumb]:rounded hover:[&::-webkit-scrollbar-thumb]:bg-gray-400"
+        aria-hidden="true"
+      >
         <div style={{ width: totalWidth, height: 1 }} />
       </div>
     </div>
