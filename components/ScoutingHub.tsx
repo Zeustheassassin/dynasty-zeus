@@ -309,8 +309,8 @@ export default function ScoutingHub() {
                         {": "}
                         {r.prospects} prospects
                         {" · "}
-                        <span className="text-green-400">{r.fully} fully charted</span>
-                        {r.partial > 0 && <> · <span className="text-yellow-400">{r.partial} partially charted</span></>}
+                        <span className="text-green-400">{r.fully} FC</span>
+                        {r.partial > 0 && <> · <span className="text-yellow-400">{r.partial} PC</span></>}
                         {" · "}
                         {r.games} games
                         {" · "}
