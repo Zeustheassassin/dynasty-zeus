@@ -181,7 +181,7 @@ export function buildProspectsWithStats(
 
     return {
       ...p,
-      charting_decision: deriveChartingDecision(p.charting_decision, total_games),
+      charting_decision: deriveChartingDecision(p.charting_decision, total_games, p.position),
       total_snaps: v?.total_snaps ?? 0,
       total_routes: v?.total_routes ?? 0,
       total_games,
