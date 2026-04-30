@@ -270,8 +270,8 @@ export default function ScoutingHub() {
         return {
           pos,
           prospects: group.length,
-          charted: group.filter((p) => p.total_games > 0).length,
-          charting: group.filter((p) => p.total_games === 0 && p.charting_decision === "charting").length,
+          fully: group.filter((p) => p.charting_decision === "fully_charted").length,
+          partial: group.filter((p) => p.charting_decision === "partial_chart").length,
           games: groupGames.length,
           snaps,
         };
@@ -309,8 +309,8 @@ export default function ScoutingHub() {
                         {": "}
                         {r.prospects} prospects
                         {" · "}
-                        <span className="text-green-400">{r.charted} charted</span>
-                        {r.charting > 0 && <> · <span className="text-yellow-400">{r.charting} charting</span></>}
+                        <span className="text-green-400">{r.fully} fully charted</span>
+                        {r.partial > 0 && <> · <span className="text-yellow-400">{r.partial} partially charted</span></>}
                         {" · "}
                         {r.games} games
                         {" · "}
