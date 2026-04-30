@@ -16,20 +16,27 @@ export const ROUTE_TYPES: RouteType[] = [
 
 // Auto-promote within the charting → partial_chart → fully_charted chain.
 // Manual "pending" (Undecided) and "not_charting" are left alone, and we never demote.
-// Fully-charted thresholds: WR = 150 routes; RB = 6 games; QB/TE = 8 games.
+// Fully-charted thresholds:
+//   WR = 150 routes · TE = 120 routes · QB = 150 throws · RB = 6 games.
 export function deriveChartingDecision(
   stored: ChartingDecision,
   totalGames: number,
   position?: string,
   totalRoutes?: number,
+  totalThrows?: number,
 ): ChartingDecision {
   if (stored === "pending" || stored === "not_charting") return stored;
 
   if (position === "WR") {
     if ((totalRoutes ?? 0) >= 150) return "fully_charted";
+  } else if (position === "TE") {
+    if ((totalRoutes ?? 0) >= 120) return "fully_charted";
+  } else if (position === "QB") {
+    if ((totalThrows ?? 0) >= 150) return "fully_charted";
+  } else if (position === "RB") {
+    if (totalGames >= 6) return "fully_charted";
   } else {
-    const fullThreshold = position === "RB" ? 6 : 8;
-    if (totalGames >= fullThreshold) return "fully_charted";
+    if (totalGames >= 8) return "fully_charted";
   }
 
   if (totalGames >= 1 && stored === "charting") return "partial_chart";

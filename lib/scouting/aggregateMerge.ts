@@ -165,13 +165,22 @@ function avgExternalRank(p: Prospect): number | null {
   return parseFloat((ranks.reduce((s, r) => s + r, 0) / ranks.length).toFixed(1));
 }
 
+export interface ProspectThresholdCounts {
+  /** Per-prospect QB throw count (from prospect_qb_stats.total_throws) */
+  qbThrowsByProspect?: Map<string, number>;
+  /** Per-prospect TE route count (from prospect_te_stats.total_routes) */
+  teRoutesByProspect?: Map<string, number>;
+}
+
 export function buildProspectsWithStats(
   prospects: Prospect[],
   viewRows: ProspectRouteStatsRow[],
   baselineRows: LeagueRouteBaselineRow[],
+  thresholdCounts: ProspectThresholdCounts = {},
 ): ProspectWithStats[] {
   const byProspect = new Map(viewRows.map((r) => [r.prospect_id, r]));
   const baselines = indexBaselines(baselineRows);
+  const { qbThrowsByProspect, teRoutesByProspect } = thresholdCounts;
 
   return prospects.map((p) => {
     const v = byProspect.get(p.id);
@@ -179,9 +188,22 @@ export function buildProspectsWithStats(
     const total_games = v?.total_games ?? 0;
     const has_charted_open_data = v?.has_charted_open_data ?? false;
 
+    // Per-position threshold count for the "fully charted" auto-promote:
+    //   WR → routes from prospect_route_stats, TE → routes from te_plays,
+    //   QB → throws from qb_plays. RB falls through to the games-based path.
+    const wrRoutes = v?.total_routes ?? 0;
+    const teRoutes = teRoutesByProspect?.get(p.id) ?? 0;
+    const qbThrows = qbThrowsByProspect?.get(p.id) ?? 0;
+
     return {
       ...p,
-      charting_decision: deriveChartingDecision(p.charting_decision, total_games, p.position, v?.total_routes ?? 0),
+      charting_decision: deriveChartingDecision(
+        p.charting_decision,
+        total_games,
+        p.position,
+        p.position === "TE" ? teRoutes : wrRoutes,
+        qbThrows,
+      ),
       total_snaps: v?.total_snaps ?? 0,
       total_routes: v?.total_routes ?? 0,
       total_games,

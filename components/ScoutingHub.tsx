@@ -33,6 +33,18 @@ interface PosSnapsRow {
   total_snaps: number;
 }
 
+interface QbThresholdRow {
+  prospect_id: string;
+  total_snaps: number;
+  total_throws: number;
+}
+
+interface TeThresholdRow {
+  prospect_id: string;
+  total_snaps: number;
+  total_routes: number;
+}
+
 // Paginate a *_plays table by game_id IN (...) until exhausted. Used by
 // the lazy-fetch hook below — these are the same fetches that previously
 // ran inside AnalysisHub. Lifting them up so GamesLog can also share the
@@ -80,6 +92,8 @@ export default function ScoutingHub() {
   const [leagueBaselines, setLeagueBaselines] = useState<LeagueRouteBaselineRow[]>([]);
   const [gameSnapStatsRows, setGameSnapStatsRows] = useState<GameSnapStatsRow[]>([]);
   const [posSnapsRows, setPosSnapsRows] = useState<PosSnapsRow[]>([]);
+  const [qbThrowsByProspect, setQbThrowsByProspect] = useState<Map<string, number>>(new Map());
+  const [teRoutesByProspect, setTeRoutesByProspect] = useState<Map<string, number>>(new Map());
   const [loading, setLoading] = useState(true);
   const [draftYearFilter, setDraftYearFilter] = useState<number | null>(null);
 
@@ -110,8 +124,8 @@ export default function ScoutingHub() {
         supabase.from("league_route_baselines").select("*"),
         supabase.from("prospect_game_snap_stats").select("*"),
         supabase.from("prospect_rb_stats").select("prospect_id,total_snaps"),
-        supabase.from("prospect_qb_stats").select("prospect_id,total_snaps"),
-        supabase.from("prospect_te_stats").select("prospect_id,total_snaps"),
+        supabase.from("prospect_qb_stats").select("prospect_id,total_snaps,total_throws"),
+        supabase.from("prospect_te_stats").select("prospect_id,total_snaps,total_routes"),
       ]);
       if (pErr) log.error("prospects load", { msg: pErr.message, code: pErr.code, details: pErr.details, hint: pErr.hint });
       if (gErr) log.error("games load", { msg: gErr.message, code: gErr.code, details: gErr.details, hint: gErr.hint });
@@ -134,11 +148,15 @@ export default function ScoutingHub() {
       setRouteStatsRows((rsData ?? []) as ProspectRouteStatsRow[]);
       setLeagueBaselines((lbData ?? []) as LeagueRouteBaselineRow[]);
       setGameSnapStatsRows((gssData ?? []) as GameSnapStatsRow[]);
+      const qbRows = (qbStatsData ?? []) as QbThresholdRow[];
+      const teRows = (teStatsData ?? []) as TeThresholdRow[];
       setPosSnapsRows([
         ...((rbStatsData ?? []) as PosSnapsRow[]),
-        ...((qbStatsData ?? []) as PosSnapsRow[]),
-        ...((teStatsData ?? []) as PosSnapsRow[]),
+        ...qbRows.map(({ prospect_id, total_snaps }) => ({ prospect_id, total_snaps })),
+        ...teRows.map(({ prospect_id, total_snaps }) => ({ prospect_id, total_snaps })),
       ]);
+      setQbThrowsByProspect(new Map(qbRows.map((r) => [r.prospect_id, r.total_throws ?? 0])));
+      setTeRoutesByProspect(new Map(teRows.map((r) => [r.prospect_id, r.total_routes ?? 0])));
     } catch (e) {
       log.error("loadAll", { msg: String(e) });
     } finally {
@@ -169,8 +187,11 @@ export default function ScoutingHub() {
   // Replaces the per-snap JS reduce.
   const prospectsWithStats = useMemo(
     (): ProspectWithStats[] =>
-      buildProspectsWithStats(prospects, routeStatsRows, leagueBaselines),
-    [prospects, routeStatsRows, leagueBaselines],
+      buildProspectsWithStats(prospects, routeStatsRows, leagueBaselines, {
+        qbThrowsByProspect,
+        teRoutesByProspect,
+      }),
+    [prospects, routeStatsRows, leagueBaselines, qbThrowsByProspect, teRoutesByProspect],
   );
 
   async function handleAddProspect(data: Omit<Prospect, "id" | "user_id" | "created_at" | "updated_at">) {
