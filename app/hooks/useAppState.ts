@@ -1391,6 +1391,13 @@ const getTeamSummary = useCallback(() => {
     const isOffseason = !(nflState?.season_type === "regular" && Number(nflState?.week || 0) > 0);
     if (!isOffseason) return empty;
 
+    // Rookie draft complete → drafted rookies are now on Sleeper rosters;
+    // projecting again would double-count. The pickYearWindow logic also
+    // prevents this implicitly (current-year slots vanish from allPicks), but
+    // guard explicitly so the intent survives any future refactor of that chain.
+    const currentDraftRounds = Number(draftSettings?.settings?.rounds ?? draftSettings?.rounds ?? 99);
+    if (draftSettings?.status === "complete" && currentDraftRounds <= 6) return empty;
+
     // Guard: allPicks updates after rosters on league switch. If picks exist but
     // none belong to the current league's rosters, data is mid-update — bail and
     // wait for the next render rather than crashing on a stale owner_id lookup.
