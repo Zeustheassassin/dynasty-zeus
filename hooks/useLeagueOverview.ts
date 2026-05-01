@@ -50,11 +50,30 @@ export function useLeagueOverview(
                 u.display_name || u.username || u.metadata?.team_name || `Team`;
             });
 
+            // Skip seasons whose rookie draft is complete (those picks are
+            // spent); extend the window forward to keep it the same length.
+            // Startup drafts (>6 rounds) do not retire that year's rookie picks.
+            const completedDraftSeasons = new Set(
+              draftsData
+                .filter((d) => {
+                  if (d?.status !== "complete" || !d?.season) return false;
+                  const rounds = d.settings?.rounds ?? d.rounds ?? 99;
+                  return rounds <= 6;
+                })
+                .map((d) => String(d.season))
+            );
+            const baseYearNum = Number(YEARS[0]);
+            const pickYearWindow: string[] = [];
+            for (let offset = 0; pickYearWindow.length < YEARS.length; offset++) {
+              const y = String(baseYearNum + offset);
+              if (!completedDraftSeasons.has(y)) pickYearWindow.push(y);
+            }
+
             const tempPicks: AugmentedPick[] = [];
             const rosterToUser: Record<string, string> = {};
             rostersData.forEach((r) => {
               rosterToUser[String(r.roster_id)] = r.owner_id;
-              YEARS.forEach((year) => {
+              pickYearWindow.forEach((year) => {
                 ROUNDS.forEach((round) => {
                   tempPicks.push({
                     season: year,
