@@ -193,7 +193,25 @@ export default function StatsTableShell({
     else { setSortKey(key); setSortDir("desc"); }
   }
 
-  const totalWidth = cols.reduce((s, c) => s + (c.width ?? 72), 0);
+  const declaredWidth = cols.reduce((s, c) => s + (c.width ?? 72), 0);
+
+  // Cells use minWidth (soft), so content can push the table wider than the
+  // declared total. The top/bottom proxy scrollbars need the *actual* rendered
+  // width to scroll all the way to the last column, otherwise rightmost
+  // columns get clipped.
+  const [actualWidth, setActualWidth] = useState(declaredWidth);
+  useEffect(() => {
+    const el = midRef.current;
+    if (!el) return;
+    const update = () => setActualWidth(Math.max(el.scrollWidth, declaredWidth));
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    const tbl = el.querySelector("table");
+    if (tbl) ro.observe(tbl);
+    return () => ro.disconnect();
+  }, [declaredWidth, cols, rows]);
+  const totalWidth = actualWidth;
 
   // Group separator + alternating tint helpers
   function groupSepClass(key: string): string {
