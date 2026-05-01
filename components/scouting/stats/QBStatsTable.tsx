@@ -111,11 +111,15 @@ export default function QBStatsTable({ prospects, games, qbPlays, loading, draft
       .map((p) => {
         const pPlays = playsByProspect.get(p.id) ?? [];
         const passPlays = pPlays.filter((pl) => pl.play_type === "pass");
-        const ratedPasses = passPlays.filter((pl) => pl.accuracy != null);
+        // Accuracy/depth/coverage metrics include RPO throws — they're real pass
+        // attempts with accuracy ratings, and the per-prospect detail view counts
+        // them. Snap-distribution columns (Pass%, raw passes) stay pass-only.
+        const thrownPlays = pPlays.filter((pl) => pl.play_type !== "run");
+        const ratedPasses = thrownPlays.filter((pl) => pl.accuracy != null);
 
         const aae = aaeMap.get(p.id) ?? null;
 
-        const timingTotal = passPlays.filter((pl) => pl.timing != null).length;
+        const timingTotal = thrownPlays.filter((pl) => pl.timing != null).length;
 
         const depthOnTgt = (zones: QBDepthZone[]): number | null => {
           const sub = ratedPasses.filter((pl) => pl.depth_zone && zones.includes(pl.depth_zone));
@@ -168,12 +172,12 @@ export default function QBStatsTable({ prospects, games, qbPlays, loading, draft
           zone_n: ratedPasses.filter((pl) => pl.coverage === "zone").length,
           // Timing
           timing_n:   timingTotal,
-          t_first:    pct(passPlays.filter((pl) => pl.timing === "first_option").length,  timingTotal),
-          t_second:   pct(passPlays.filter((pl) => pl.timing === "second_option").length, timingTotal),
-          t_check:    pct(passPlays.filter((pl) => pl.timing === "checkdown").length,     timingTotal),
-          t_sack:     pct(passPlays.filter((pl) => pl.timing === "sack").length,          timingTotal),
-          t_scramble: pct(passPlays.filter((pl) => pl.timing === "scramble").length,      timingTotal),
-          t_away:     pct(passPlays.filter((pl) => pl.timing === "throw_away").length,    timingTotal),
+          t_first:    pct(thrownPlays.filter((pl) => pl.timing === "first_option").length,  timingTotal),
+          t_second:   pct(thrownPlays.filter((pl) => pl.timing === "second_option").length, timingTotal),
+          t_check:    pct(thrownPlays.filter((pl) => pl.timing === "checkdown").length,     timingTotal),
+          t_sack:     pct(thrownPlays.filter((pl) => pl.timing === "sack").length,          timingTotal),
+          t_scramble: pct(thrownPlays.filter((pl) => pl.timing === "scramble").length,      timingTotal),
+          t_away:     pct(thrownPlays.filter((pl) => pl.timing === "throw_away").length,    timingTotal),
           // Snap position
           ...Object.fromEntries(
             SNAP_POSITIONS.map((sp) => [

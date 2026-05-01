@@ -130,7 +130,10 @@ export function computeQBAboveExpected(
   const lgDepth: Partial<Record<QBDepthZone, { ot: number; n: number }>> = {};
   const lgCvg: Record<"man" | "zone", { ot: number; n: number }> = { man: { ot: 0, n: 0 }, zone: { ot: 0, n: 0 } };
   for (const pl of qbPlays) {
-    if (pl.play_type !== "pass" || pl.accuracy == null) continue;
+    // Include RPO throws — they're real pass attempts with accuracy ratings.
+    // Excluding them mismatched the per-prospect detail view and undercounted
+    // off-target throws that happened on RPO plays.
+    if (pl.play_type === "run" || pl.accuracy == null) continue;
     if (pl.depth_zone) {
       if (!lgDepth[pl.depth_zone]) lgDepth[pl.depth_zone] = { ot: 0, n: 0 };
       lgDepth[pl.depth_zone]!.n++;
@@ -145,8 +148,8 @@ export function computeQBAboveExpected(
   for (const p of prospects) {
     if (p.position !== "QB") continue;
     const pPlays = playsByProspect.get(p.id) ?? [];
-    const passPlays = pPlays.filter((pl) => pl.play_type === "pass");
-    const ratedPasses = passPlays.filter((pl) => pl.accuracy != null);
+    const thrownPlays = pPlays.filter((pl) => pl.play_type !== "run");
+    const ratedPasses = thrownPlays.filter((pl) => pl.accuracy != null);
     if (ratedPasses.length < MIN_SAMPLE) { out.set(p.id, null); continue; }
 
     const actual = ratedPasses.filter((pl) => pl.accuracy === "on_target").length / ratedPasses.length;
