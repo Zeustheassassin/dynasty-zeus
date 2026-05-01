@@ -282,15 +282,20 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
   }
 
   function handlePlayTypeChange(pt: QBPlayType) {
+    // Pass and RPO share the same downstream fields, so toggling between them
+    // preserves the bottom section. Only crossing the run boundary resets it.
+    const crossesRun = pt === "run" || playType === "run";
     setPlayType(pt);
-    setTiming(null);
-    setAccuracy(null);
-    setCompletion(null);
-    setIntType(null);
-    setTargetPos(null);
-    setDepthZone(null);
-    setRouteType(null);
-    setCoverage(null);
+    if (crossesRun) {
+      setTiming(null);
+      setAccuracy(null);
+      setCompletion(null);
+      setIntType(null);
+      setTargetPos(null);
+      setDepthZone(null);
+      setRouteType(null);
+      setCoverage(null);
+    }
   }
 
   function handleTimingChange(t: QBTiming) {
