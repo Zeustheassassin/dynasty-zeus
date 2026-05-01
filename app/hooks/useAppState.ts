@@ -932,10 +932,17 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
   const MAX_SUPPORTED_ROUNDS = 6;
   const ALL_ROUNDS = Array.from({ length: MAX_SUPPORTED_ROUNDS }, (_, i) => i + 1);
 
-  // Skip seasons whose draft is complete (those picks are spent); extend the
-  // window forward to keep it 3 years long.
+  // Skip seasons whose rookie draft is complete (those picks are spent); extend
+  // the window forward to keep it 3 years long. Startup drafts (>6 rounds) do
+  // not retire that year's rookie picks.
   const completedDraftSeasons = new Set(
-    draftsData.filter((d) => d?.status === "complete" && d?.season).map((d) => String(d.season))
+    draftsData
+      .filter((d) => {
+        if (d?.status !== "complete" || !d?.season) return false;
+        const rounds = d.settings?.rounds ?? d.rounds ?? 99;
+        return rounds <= 6;
+      })
+      .map((d) => String(d.season))
   );
   const baseYearNum = Number(YEARS[0]);
   const pickYearWindow: string[] = [];
