@@ -718,11 +718,21 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                         : <span className="text-white capitalize font-medium">{pl.route_type}</span>}
                       <span className="text-gray-500 uppercase text-xs">{pl.alignment[0]}</span>
                       <span className="text-gray-600">{pl.on_line ? "OL" : "Off"}</span>
+                      {!pl.no_route_run && pl.coverage && (
+                        <span className="text-purple-300 capitalize" title={`Coverage: ${pl.coverage}`}>
+                          {pl.coverage === "double" ? "Dbl" : pl.coverage === "press" ? "Prs" : pl.coverage}
+                        </span>
+                      )}
+                      {!pl.no_route_run && (
+                        <span className={pl.was_open ? "text-emerald-400" : "text-gray-600"} title={pl.was_open ? "Got open" : "Covered"}>
+                          {pl.was_open ? "Open" : "Cvrd"}
+                        </span>
+                      )}
                       {!pl.no_route_run && (pl.targeted ? (
-                        pl.success === true ? <span className="text-green-400">✓ {pl.yards ?? 0}yds</span>
-                          : pl.success === false ? <span className="text-red-400">✗</span>
-                          : <span className="text-gray-400">inc</span>
-                      ) : <span className="text-gray-600">—</span>)}
+                        pl.success === true ? <span className="text-green-400" title="Targeted: caught">Tgt ✓ {pl.yards ?? 0}yds</span>
+                          : pl.success === false ? <span className="text-red-400" title="Targeted: drop">Tgt ✗</span>
+                          : <span className="text-gray-400" title="Targeted: incomplete">Tgt inc</span>
+                      ) : <span className="text-gray-600" title="Not targeted">Not Tgt</span>)}
                       {pl.play_notes && <span className="text-gray-500 truncate">{pl.play_notes}</span>}
                       <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
                         <button onClick={() => editingPlayId === pl.id ? resetForm() : startEditPlay(pl)}
