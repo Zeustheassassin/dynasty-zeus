@@ -77,6 +77,13 @@ function routeOpenPct(p: ProspectWithStats, rt: string): number | null {
   return parseFloat(((s.open / s.count) * 100).toFixed(1));
 }
 
+// Minimum-sample thresholds for the analysis table. Tiny denominators surface
+// as eye-catching 0%/100% values that aren't meaningful — suppress them here
+// (the per-prospect profile page still shows the raw %).
+const MIN_MAN_ROUTES = 15;   // applied to combined man + press
+const MIN_ZONE_ROUTES = 15;
+const MIN_PRESS_ROUTES = 10;
+
 function cvgOpenPct(p: ProspectWithStats, cvg: "man" | "zone" | "double" | "press"): number | null {
   if (!p.has_charted_open_data) return null;
   // Press is a subtype of Man — combine press into man's numerator/denominator
@@ -86,11 +93,13 @@ function cvgOpenPct(p: ProspectWithStats, cvg: "man" | "zone" | "double" | "pres
     const m = p.coverage_stats.man;
     const pr = p.coverage_stats.press;
     const total = m.count + pr.count;
-    if (total === 0) return null;
+    if (total < MIN_MAN_ROUTES) return null;
     return parseFloat((((m.open + pr.open) / total) * 100).toFixed(1));
   }
   const s = p.coverage_stats[cvg];
   if (!s || s.count === 0) return null;
+  if (cvg === "zone" && s.count < MIN_ZONE_ROUTES) return null;
+  if (cvg === "press" && s.count < MIN_PRESS_ROUTES) return null;
   return parseFloat(((s.open / s.count) * 100).toFixed(1));
 }
 
