@@ -35,7 +35,6 @@ const QB_DEPTH_ZONES: QBDepthZone[] = [
 ];
 
 const TE_POSITIONINGS: TEPositioning[] = ["wide", "slot", "inline", "full_back", "running_back"];
-const TE_COVERAGES: TECoverage[] = ["man", "zone", "press", "double"];
 
 const MIN_SAMPLE = 15;
 
@@ -193,9 +192,11 @@ export function computeTEAboveExpected(
     lgPos[pl.positioning]!.n++;
     if (pl.was_open) lgPos[pl.positioning]!.open++;
     if (pl.coverage) {
-      if (!lgCvg[pl.coverage]) lgCvg[pl.coverage] = { open: 0, n: 0 };
-      lgCvg[pl.coverage]!.n++;
-      if (pl.was_open) lgCvg[pl.coverage]!.open++;
+      // Press folds into Man for TE-SAE bucketing.
+      const cvgKey: TECoverage = pl.coverage === "press" ? "man" : pl.coverage;
+      if (!lgCvg[cvgKey]) lgCvg[cvgKey] = { open: 0, n: 0 };
+      lgCvg[cvgKey]!.n++;
+      if (pl.was_open) lgCvg[cvgKey]!.open++;
     }
   }
 
@@ -215,8 +216,13 @@ export function computeTEAboveExpected(
       if (posN > 0 && lg && lg.n > 0) { expPos += (posN / ratedRoutes.length) * (lg.open / lg.n); posW += posN / ratedRoutes.length; }
     }
     let expCvg = 0, cvgW = 0;
-    for (const cvg of TE_COVERAGES) {
-      const cN = ratedRoutes.filter((pl) => pl.coverage === cvg).length;
+    // Press folds into Man — three mutually exclusive buckets keep the weighted
+    // average sound (no double-counting press routes).
+    const TE_SAE_COVERAGES: TECoverage[] = ["man", "zone", "double"];
+    for (const cvg of TE_SAE_COVERAGES) {
+      const cN = cvg === "man"
+        ? ratedRoutes.filter((pl) => pl.coverage === "man" || pl.coverage === "press").length
+        : ratedRoutes.filter((pl) => pl.coverage === cvg).length;
       const lg = lgCvg[cvg];
       if (cN > 0 && lg && lg.n > 0) { expCvg += (cN / ratedRoutes.length) * (lg.open / lg.n); cvgW += cN / ratedRoutes.length; }
     }

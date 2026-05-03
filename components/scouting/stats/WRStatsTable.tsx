@@ -78,8 +78,19 @@ function routeOpenPct(p: ProspectWithStats, rt: string): number | null {
 }
 
 function cvgOpenPct(p: ProspectWithStats, cvg: "man" | "zone" | "double" | "press"): number | null {
+  if (!p.has_charted_open_data) return null;
+  // Press is a subtype of Man — combine press into man's numerator/denominator
+  // for the % calc so Man% reflects all man-style coverage. Press% still uses
+  // press alone.
+  if (cvg === "man") {
+    const m = p.coverage_stats.man;
+    const pr = p.coverage_stats.press;
+    const total = m.count + pr.count;
+    if (total === 0) return null;
+    return parseFloat((((m.open + pr.open) / total) * 100).toFixed(1));
+  }
   const s = p.coverage_stats[cvg];
-  if (!s || s.count === 0 || !p.has_charted_open_data) return null;
+  if (!s || s.count === 0) return null;
   return parseFloat(((s.open / s.count) * 100).toFixed(1));
 }
 
@@ -107,8 +118,10 @@ export default function WRStatsTable({ prospectsWithStats, loading, draftYearFil
         cvg_zone_open: cvgOpenPct(p, "zone"),
         cvg_double_open: cvgOpenPct(p, "double"),
         cvg_press_open: cvgOpenPct(p, "press"),
-        // Hidden counts for weighted league totals
-        cvg_man_n: p.coverage_stats.man.count,
+        // Hidden counts for weighted league totals — Man weight includes press
+        // since the Man% calc combines them. Press weight stays press-only so
+        // its column remains its own metric.
+        cvg_man_n: p.coverage_stats.man.count + p.coverage_stats.press.count,
         cvg_zone_n: p.coverage_stats.zone.count,
         cvg_double_n: p.coverage_stats.double.count,
         cvg_press_n: p.coverage_stats.press.count,

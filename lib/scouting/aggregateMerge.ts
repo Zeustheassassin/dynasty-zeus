@@ -11,7 +11,10 @@ const ROUTE_TYPES: RouteType[] = [
   "nine", "post", "dig", "curl", "slant", "screen", "flat", "comeback", "out", "corner", "other",
 ];
 
-const COVERAGES: Array<"man" | "zone" | "double" | "press"> = ["man", "zone", "double", "press"];
+// SAE buckets: press is a subtype of man, so it folds into the man bucket for
+// the expected-rate math (and stays a display-only column elsewhere). Three
+// mutually exclusive buckets keep the weighted average mathematically sound.
+const SAE_COVERAGES: Array<"man" | "zone" | "double"> = ["man", "zone", "double"];
 
 export interface ProspectRouteStatsRow {
   prospect_id: string;
@@ -104,9 +107,21 @@ function computeSAE(
   }
 
   let expCvg = 0, cvgW = 0;
-  for (const cvgType of COVERAGES) {
-    const cvgCount = v.coverage_counts[cvgType] ?? 0;
-    const lg = baselines.coverage.get(cvgType);
+  for (const cvgType of SAE_COVERAGES) {
+    // Man bucket combines man + press for both player count and league baseline.
+    const cvgCount = cvgType === "man"
+      ? (v.coverage_counts["man"] ?? 0) + (v.coverage_counts["press"] ?? 0)
+      : (v.coverage_counts[cvgType] ?? 0);
+    let lg: { n: number; open: number } | undefined;
+    if (cvgType === "man") {
+      const m = baselines.coverage.get("man");
+      const pr = baselines.coverage.get("press");
+      const n = (m?.n ?? 0) + (pr?.n ?? 0);
+      const open = (m?.open ?? 0) + (pr?.open ?? 0);
+      if (n > 0) lg = { n, open };
+    } else {
+      lg = baselines.coverage.get(cvgType);
+    }
     if (cvgCount > 0 && lg && lg.n > 0) {
       expCvg += (cvgCount / v.total_routes) * (lg.open / lg.n);
       cvgW += cvgCount / v.total_routes;

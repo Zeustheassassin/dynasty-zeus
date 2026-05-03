@@ -137,7 +137,11 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged }: Pro
     }).filter((r) => r.attempts > 0);
 
     const coverageBreakdown = (["man", "zone", "press", "double"] as TECoverage[]).map((cov) => {
-      const cp   = routePlays.filter((p) => p.coverage === cov);
+      // Press is a subtype of Man — fold press routes into Man's bucket for the
+      // % calc. Press still appears separately. Total routes are unchanged.
+      const cp = cov === "man"
+        ? routePlays.filter((p) => p.coverage === "man" || p.coverage === "press")
+        : routePlays.filter((p) => p.coverage === cov);
       const tgt  = cp.filter((p) => p.targeted === true);
       const ctch = tgt.filter((p) => p.caught === true);
       const open = cp.filter((p) => p.was_open === true);

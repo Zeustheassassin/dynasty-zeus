@@ -147,7 +147,13 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
     }
 
     const cvgStats = (["man", "zone", "double", "press"] as const).map((cvg) => {
-      const cvgPlays = routePlays.filter((p) => p.coverage === cvg);
+      // Press is a subtype of Man — fold press routes into Man's count and
+      // open/target/catch totals so the Man% reflects all man-style coverage.
+      // Press still appears as its own bucket. Total route count is unchanged
+      // (press is counted once in routePlays.length).
+      const cvgPlays = cvg === "man"
+        ? routePlays.filter((p) => p.coverage === "man" || p.coverage === "press")
+        : routePlays.filter((p) => p.coverage === cvg);
       const cvgOpen  = cvgPlays.filter((p) => p.was_open).length;
       const cvgTgt   = cvgPlays.filter((p) => p.targeted).length;
       const cvgCtch  = cvgPlays.filter((p) => p.targeted && p.success).length;

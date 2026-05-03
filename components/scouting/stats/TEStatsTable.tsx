@@ -181,12 +181,27 @@ export default function TEStatsTable({ prospects, games, tePlays, loading, draft
           ...Object.fromEntries(
             LOCATIONS.map((loc) => [`loc_${loc}_rated_n`, ratedRoutes.filter((pl) => pl.location === loc).length])
           ),
-          // By coverage
+          // By coverage — Press is a subtype of Man, so press routes are added
+          // into Man's numerator/denominator for the % calc. Press still
+          // appears as its own column. Total routes are unchanged.
           ...Object.fromEntries(
-            COVERAGES.map((cvg) => [`cvg_${cvg}_open`, openPct(routePlays, (pl) => pl.coverage === cvg)])
+            COVERAGES.map((cvg) => [
+              `cvg_${cvg}_open`,
+              openPct(
+                routePlays,
+                cvg === "man"
+                  ? (pl) => pl.coverage === "man" || pl.coverage === "press"
+                  : (pl) => pl.coverage === cvg,
+              ),
+            ])
           ),
           ...Object.fromEntries(
-            COVERAGES.map((cvg) => [`cvg_${cvg}_rated_n`, ratedRoutes.filter((pl) => pl.coverage === cvg).length])
+            COVERAGES.map((cvg) => [
+              `cvg_${cvg}_rated_n`,
+              cvg === "man"
+                ? ratedRoutes.filter((pl) => pl.coverage === "man" || pl.coverage === "press").length
+                : ratedRoutes.filter((pl) => pl.coverage === cvg).length,
+            ])
           ),
           // By route
           ...Object.fromEntries(
