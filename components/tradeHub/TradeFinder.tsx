@@ -243,7 +243,7 @@ function TradeFinder({
       if (!selectedLeagueDirectionAdjusted) return (
         <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
           <div className="w-8 h-8 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
-          <p className="text-sm text-gray-400">Computing direction engineΓÇª</p>
+          <p className="text-sm text-gray-400">Computing direction engine…</p>
           <p className="text-xs text-gray-600">Analysing your roster, picks, and playoff simulation</p>
         </div>
       );
@@ -257,13 +257,13 @@ function TradeFinder({
         const expectedSlot = !isSlotted
           ? (selectedLeagueDynamicPickValues[`${p.season}-${p.round}-${p.roster_id}`]?.expectedSlot ?? null)
           : null;
-        // Only show predicted slot for current and next year ΓÇö 2+ years out is too speculative
+        // Only show predicted slot for current and next year — 2+ years out is too speculative
         const expectedSuffix = expectedSlot != null && Number(p.season) <= Number(CURRENT_YEAR) + 1
-          ? ` ┬╖ Predicted Slot ${expectedSlot}` : "";
+          ? ` · Predicted Slot ${expectedSlot}` : "";
         return `${slotLabel}${expectedSuffix}${via}`;
       };
 
-      // Build roster player list with values ΓÇö reads from pre-computed Map (O(1) lookup)
+      // Build roster player list with values — reads from pre-computed Map (O(1) lookup)
       const rosterPlayers = (roster: SleeperRoster | null | undefined) => roster ? finderRosterPlayersMap.get(roster.roster_id) ?? [] : [];
 
 
@@ -1076,7 +1076,7 @@ function TradeFinder({
 
       return (
         <div className="space-y-4">
-          {/* ΓöÇΓöÇ Player pin search ΓöÇΓöÇ */}
+          {/* ── Player pin search ── */}
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 space-y-2">
             <FinderDirectionPanel
               loadingCalcValues={loadingCalcValues}
@@ -1105,7 +1105,7 @@ function TradeFinder({
                   onClick={() => { setFinderPinnedPlayerId(null); }}
                   className="text-xs text-gray-500 hover:text-red-400 transition ml-3"
                 >
-                  Γ£ò Clear
+                  ✕ Clear
                 </button>
               </div>
             ) : (
@@ -1115,7 +1115,7 @@ function TradeFinder({
               />
             )}
 
-            {/* ΓöÇΓöÇ Owner filter dropdown ΓöÇΓöÇ */}
+            {/* ── Owner filter dropdown ── */}
             <select
               value={finderTargetOppRosterId ?? ""}
               onChange={(e) => {
@@ -1128,7 +1128,7 @@ function TradeFinder({
               }}
               className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
             >
-              <option value="">Trade with any ownerΓÇª</option>
+              <option value="">Trade with any owner…</option>
               {rosters
                 .filter((r) => r.owner_id !== user?.user_id)
                 .slice()
@@ -1142,7 +1142,7 @@ function TradeFinder({
                 ))}
             </select>
 
-            {/* ΓöÇΓöÇ Target player (want to receive) search ΓöÇΓöÇ */}
+            {/* ── Target player (want to receive) search ── */}
             {targetPinnedPlayer ? (
               <div className="flex items-center justify-between bg-gray-800 rounded-lg px-3 py-2">
                 <div className="flex items-center gap-2">
@@ -1155,7 +1155,7 @@ function TradeFinder({
                   onClick={() => startTransition(() => { setFinderTargetPlayerId(null); setFinderSeed(Math.random()); })}
                   className="text-xs text-gray-500 hover:text-red-400 transition ml-3"
                 >
-                  Γ£ò Clear
+                  ✕ Clear
                 </button>
               </div>
             ) : (
@@ -1163,7 +1163,7 @@ function TradeFinder({
                 key={`target-${deferredTargetOppRosterId ?? "all"}`}
                 players={allOppPlayers}
                 onSelect={(pid) => startTransition(() => { setFinderTargetPlayerId(pid); setFinderSeed(Math.random()); })}
-                placeholder={finderTargetOppRosterId ? "Search their roster for a player to receiveΓÇª" : "Search league for a player you want to receiveΓÇª"}
+                placeholder={finderTargetOppRosterId ? "Search their roster for a player to receive…" : "Search league for a player you want to receive…"}
               />
             )}
           </div>
@@ -1174,7 +1174,7 @@ function TradeFinder({
                 ? <>Trades involving <strong className="text-gray-300">{pinnedPlayer.full_name}</strong> for <strong className="text-gray-300">{selectedLeague.name}</strong>.</>
                 : <>Random trade suggestions for <strong className="text-gray-300">{selectedLeague.name}</strong>.</>
               }
-              {loadingCalcValues && <span className="ml-2 text-blue-400">Loading valuesΓÇª</span>}
+              {loadingCalcValues && <span className="ml-2 text-blue-400">Loading values…</span>}
             </p>
             <button
               onClick={() => startTransition(() => setFinderSeed(Math.random()))}
@@ -1192,7 +1192,7 @@ function TradeFinder({
               }
             </div>
           )}
-          {/* Tagged players strip ΓÇö Core (locked) and Shopping (want to move) */}
+          {/* Tagged players strip — Core (locked) and Shopping (want to move) */}
           {(() => {
             const leagueId = selectedLeague?.league_id ?? "";
             const leagueTags = leaguePlayerTags[leagueId] ?? {};
@@ -1204,7 +1204,7 @@ function TradeFinder({
               <div className="rounded-lg border border-gray-700 bg-gray-800/30 px-3 py-2 space-y-2">
                 {corePlayers.length > 0 && (
                   <div>
-                    <div className="text-[9px] font-bold uppercase tracking-widest text-emerald-500 mb-1">Core ΓÇö Do Not Sell</div>
+                    <div className="text-[9px] font-bold uppercase tracking-widest text-emerald-500 mb-1">Core — Do Not Sell</div>
                     <div className="flex flex-wrap gap-1.5">
                       {corePlayers.map(([pid]) => (
                         <button
@@ -1213,7 +1213,7 @@ function TradeFinder({
                           title="Click to remove Core tag"
                           className="flex items-center gap-1 rounded-full border border-emerald-800 bg-emerald-950/30 px-2 py-0.5 text-[10px] text-emerald-300 hover:border-red-600 hover:text-red-400 transition"
                         >
-                          ≡ƒöÆ {playerMap[pid]?.full_name ?? pid} <span className="text-emerald-600 hover:text-red-400 ml-0.5">Γ£ò</span>
+                          🔒 {playerMap[pid]?.full_name ?? pid} <span className="text-emerald-600 hover:text-red-400 ml-0.5">✕</span>
                         </button>
                       ))}
                     </div>
@@ -1221,7 +1221,7 @@ function TradeFinder({
                 )}
                 {shoppingPlayers.length > 0 && (
                   <div>
-                    <div className="text-[9px] font-bold uppercase tracking-widest text-orange-500 mb-1">Shopping ΓÇö Want to Move</div>
+                    <div className="text-[9px] font-bold uppercase tracking-widest text-orange-500 mb-1">Shopping — Want to Move</div>
                     <div className="flex flex-wrap gap-1.5">
                       {shoppingPlayers.map(([pid]) => (
                         <button
@@ -1230,7 +1230,7 @@ function TradeFinder({
                           title="Click to remove Shopping tag"
                           className="flex items-center gap-1 rounded-full border border-orange-800 bg-orange-950/30 px-2 py-0.5 text-[10px] text-orange-300 hover:border-red-600 hover:text-red-400 transition"
                         >
-                          ≡ƒöä {playerMap[pid]?.full_name ?? pid} <span className="text-orange-600 hover:text-red-400 ml-0.5">Γ£ò</span>
+                          🔄 {playerMap[pid]?.full_name ?? pid} <span className="text-orange-600 hover:text-red-400 ml-0.5">✕</span>
                         </button>
                       ))}
                     </div>

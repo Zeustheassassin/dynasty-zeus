@@ -325,11 +325,17 @@ export function runFinderPipeline(
     (selectedLeague?.settings?.taxi_slots ?? 0) +
     (selectedLeague?.settings?.reserve_slots ?? 0);
   const currentOwnedPlayers = (myRoster?.players || []).length;
-  const upcomingDraftPickCount = allPicks.filter(
-    (p) =>
-      Number(p.owner_id) === Number(myRoster?.roster_id) &&
-      String(p.season) === priorityDraftYear
-  ).length;
+  // Once the rookie draft is done, the priority year shifts to NEXT year and
+  // those picks are ~12 months away — too far to be a current roster-pressure
+  // signal. The "Roster pressure +X" badge should only fire when picks are
+  // imminent (i.e., before this year's draft).
+  const upcomingDraftPickCount = selectedLeagueDraftHasOccurred
+    ? 0
+    : allPicks.filter(
+        (p) =>
+          Number(p.owner_id) === Number(myRoster?.roster_id) &&
+          String(p.season) === priorityDraftYear
+      ).length;
   const allLeagueUpcomingPickValues = allPicks
     .filter((p) => String(p.season) === priorityDraftYear)
     .map((p) => finderPickValue(p))
