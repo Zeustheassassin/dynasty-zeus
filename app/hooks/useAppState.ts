@@ -537,7 +537,8 @@ useEffect(() => {
         cacheSample &&
         "years_exp" in cacheSample &&
         "search_rank" in cacheSample &&
-        "fantasy_positions" in cacheSample;
+        "fantasy_positions" in cacheSample &&
+        "injury_status" in cacheSample;
 
       if (hasRookieFields) {
         _playersInMemory = parsedCache;

@@ -37,8 +37,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       player_id: string; full_name: string; position: string; team: string | null;
       age: number | null; years_exp: number | null; search_rank: number | null;
       fantasy_positions: string[]; active: boolean; status: string;
+      injury_status: string | null;
     }
-    // Only keep the fields the app actually uses — strips ~90% of the payload
+    // Only keep the fields the app actually uses — strips ~90% of the payload.
+    // injury_status is needed by Gameday badges, alerts, and the Roster
+    // Overview's IR-eligible flag — without it those views silently miss
+    // every injury.
     const players: Record<string, SlimPlayer> = {};
     for (const id of Object.keys(rawPlayers)) {
       const p = rawPlayers[id];
@@ -54,6 +58,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         fantasy_positions: (p.fantasy_positions ?? []) as string[],
         active:            (p.active ?? false)  as boolean,
         status:            (p.status ?? '')     as string,
+        injury_status:     (p.injury_status ?? null) as string | null,
       };
     }
 
