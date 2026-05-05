@@ -303,19 +303,46 @@ function TradeFinder({
       // Sim is now required before selectedLeagueDirectionAdjusted resolves — playoffOdds
       // is always a real number by the time we reach here (loading gate above blocks otherwise).
       const myFinderPlayoffOdds = finderDirectionProfile.playoffOdds ?? 0;
-      const iAmTankingFinder = myFinderPlayoffOdds < 50;
+
+      // ── Stockpiled-rebuild detection ─────────────────────────────────────
+      // A team can be dynasty-elite (top of league) and already pick-rich while
+      // still having low playoff odds — that's a team poised to consolidate,
+      // not blow up. The smart move is tier-ups: trade depth into stars while
+      // staying young. They should NOT get "Full Rebuild" suggestions that
+      // chase even more picks.
+      const dynRank = finderDirectionProfile.dynRank ?? 999;
+      const totalTeams = finderDirectionProfile.n ?? rosters.length;
+      const dynastyStrong = totalTeams > 0 && dynRank <= Math.ceil(totalTeams * 0.33);
+      const ownedFirstsCount = allPicks.filter((p) =>
+        Number(p.owner_id) === Number(myRoster?.roster_id) &&
+        Number(p.round) === 1
+      ).length;
+      // Each team naturally has 1 first per year (3 across the 3-year window),
+      // so 5+ owned firsts means at least 2 acquired via trade — clear stockpile.
+      const pickRich = ownedFirstsCount >= 5;
+      const isStockpiledRebuild = dynastyStrong && pickRich;
 
       // ── Auto-strategy detection (replaces manual toggles) ────────────────
-      // Hard sell-side: playoff odds below 35% OR bottom-tier rebuild bucket.
-      // These teams need picks + youth — all user-side restrictions are lifted.
-      const isHardSellSide = myFinderPlayoffOdds < 35 ||
-        ["Stranded", "Fading Out", "Hopeless"].includes(finderDirection);
+      // "Full Rebuild" is reserved for genuinely no-hope situations: bottom-
+      // dynasty buckets where long-term and short-term are both bleak. The
+      // previous "playoff odds < 35%" trigger was firing for top-dynasty teams
+      // having a down year, which is the wrong signal for blow-it-up moves.
+      // Tank-mode scoring (in useScoringFactors) boosts pick acquisition.
+      // Disable for stockpiled teams so trade scoring doesn't keep pushing
+      // them toward more picks they don't need.
+      const iAmTankingFinder = myFinderPlayoffOdds < 50 && !isStockpiledRebuild;
+
+      const isHardSellSide = (
+        ["Stranded", "Fading Out", "Hopeless"].includes(finderDirection)
+      ) && !isStockpiledRebuild;
       // Draft capital mode: auto-enabled for any sell-side team so pick trades
       // are always part of the result pool alongside normal player swaps.
-      const draftCapitalMode = isHardSellSide || finderDirection === "Rebuilder";
+      // Suppressed for stockpiled teams so suggestions skew to player tier-ups.
+      const draftCapitalMode = (isHardSellSide || finderDirection === "Rebuilder") && !isStockpiledRebuild;
       // Prefer future picks when in a deep rebuild — pick position matters more
       // than current-year upside for teams rebuilding over 2+ year horizon.
-      const finderPreferFuturePicks = ["Stranded", "Fading Out", "Hopeless"].includes(finderDirection);
+      const finderPreferFuturePicks = ["Stranded", "Fading Out", "Hopeless"].includes(finderDirection)
+        && !isStockpiledRebuild;
       // Tank Mode: lift user-side package/QB constraints for hard sell-side teams.
       const finderTankMode = isHardSellSide;
       // Championship push: confirmed contender with locked/near-locked playoff odds.
@@ -327,17 +354,19 @@ function TradeFinder({
         ? "Championship Push"
         : finderDirection === "Window Closing"
           ? "Win-Now Window"
-          : isHardSellSide
-            ? "Full Rebuild"
-            : finderDirection === "Rebuilder"
-              ? "Rebuild Sell"
-              : iAmTankingFinder
-                ? "Soft Sell"
-                : ["Elite", "True Contender", "Almost There"].includes(finderDirection)
-                  ? "Contender Mode"
-                  : finderDirection === "Fading Contender"
-                    ? "Transition"
-                    : "Direction Mix";
+          : isStockpiledRebuild
+            ? "Consolidate"
+            : isHardSellSide
+              ? "Full Rebuild"
+              : finderDirection === "Rebuilder"
+                ? "Rebuild Sell"
+                : iAmTankingFinder
+                  ? "Soft Sell"
+                  : ["Elite", "True Contender", "Almost There"].includes(finderDirection)
+                    ? "Contender Mode"
+                    : finderDirection === "Fading Contender"
+                      ? "Transition"
+                      : "Direction Mix";
       const priorityDraftYear = String(
         Number(CURRENT_YEAR) + (selectedLeagueDraftHasOccurred ? 1 : 0)
       );
