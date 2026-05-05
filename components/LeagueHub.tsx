@@ -23,6 +23,7 @@ import StandingsTab from "./league/StandingsTab";
 import OverviewTab from "./LeagueHub/OverviewTab";
 import SimulatorTab from "./LeagueHub/SimulatorTab";
 import RostersTab from "./LeagueHub/RostersTab";
+import RosterOverviewTab from "./LeagueHub/RosterOverviewTab";
 import LeagueMatesTab from "./LeagueHub/LeagueMatesTab";
 import OppRostersTab from "./LeagueHub/OppRostersTab";
 import StartersTab from "./LeagueHub/StartersTab";
@@ -246,6 +247,19 @@ function LeagueHub({
             setCalcOpponentRosterId={setCalcOpponentRosterId}
             setMainTab={setMainTab}
             setTradeHubSection={setTradeHubSection}
+          />
+        )}
+
+        {leagueHubTab === "ROSTER_OVERVIEW" && (
+          <RosterOverviewTab
+            leagues={leagues}
+            user={user}
+            leagueOverviewData={leagueOverviewData}
+            loadingLeagueOverview={loadingLeagueOverview}
+            leagueOverviewLoaded={leagueOverviewLoaded}
+            loadLeagueOverview={loadLeagueOverview}
+            loadRoster={loadRoster}
+            setLeagueHubTab={setLeagueHubTab}
           />
         )}
 

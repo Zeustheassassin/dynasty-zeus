@@ -21,6 +21,7 @@ export const LEAGUE_HUB_GROUPS: Array<{
     label: "Rosters",
     tabs: [
       { id: "ROSTERS", label: "Rosters & Rules" },
+      { id: "ROSTER_OVERVIEW", label: "Roster Overview" },
       { id: "OPP_ROSTERS", label: "Opponent Rosters" },
       { id: "STARTERS", label: "Suggested Starters" },
     ],
