@@ -7,6 +7,21 @@ import type { SleeperUser, HistoricalSnapshot, PlayerValueSnapshotEntry } from "
 import { injuryBadge, ageColor } from "./dataHubHelpers";
 import type { ShareEntry } from "./dataHubTypes";
 
+const TREND_GRID = "grid grid-cols-[2rem_1fr_2.25rem_2.5rem_3.75rem_3.75rem_4rem_2.5rem] gap-2 items-center px-1";
+
+const TrendHeader = () => (
+  <div className={`${TREND_GRID} text-[10px] uppercase tracking-wide text-gray-500 mb-1`}>
+    <span></span>
+    <span>Player</span>
+    <span className="text-center">Age</span>
+    <span className="text-center">Team</span>
+    <span className="text-right">Now</span>
+    <span className="text-right">Then</span>
+    <span className="text-right">Δ %</span>
+    <span></span>
+  </div>
+);
+
 interface ValueTrendsTabProps {
   historicalSnapshot: HistoricalSnapshot | null;
   onSaveSnapshot: () => Promise<void>;
@@ -100,8 +115,6 @@ function ValueTrendsTab({ historicalSnapshot, onSaveSnapshot, shares, user }: Va
     .filter((r) => r.pct >= trendThreshold)
     .sort((a, b) => b.pct - a.pct);
 
-  const TREND_GRID = "grid grid-cols-[2rem_1fr_2.25rem_2.5rem_3.75rem_3.75rem_4rem_2.5rem] gap-2 items-center px-1";
-
   const TrendRow = ({ row, direction }: { row: TrendRow; direction: "up" | "down" }) => (
     <div className={`${TREND_GRID} text-xs py-0.5`}>
       <span className="text-[10px] uppercase text-gray-500">{row.position}</span>
@@ -116,19 +129,6 @@ function ValueTrendsTab({ historicalSnapshot, onSaveSnapshot, shares, user }: Va
         {direction === "up" ? "+" : ""}{row.pct.toFixed(1)}%
       </span>
       <span className="text-[10px] text-gray-500 text-right">{row.owned > 0 ? `${row.owned}×` : ""}</span>
-    </div>
-  );
-
-  const TrendHeader = () => (
-    <div className={`${TREND_GRID} text-[10px] uppercase tracking-wide text-gray-500 mb-1`}>
-      <span></span>
-      <span>Player</span>
-      <span className="text-center">Age</span>
-      <span className="text-center">Team</span>
-      <span className="text-right">Now</span>
-      <span className="text-right">Then</span>
-      <span className="text-right">Δ %</span>
-      <span></span>
     </div>
   );
 

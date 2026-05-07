@@ -37,17 +37,11 @@ export default function HistoricalLeagueDrafts() {
     [snapshots, selectedLeague?.league_id]
   );
 
-  // When the active league changes (or the filtered list changes), make sure
-  // the selected pill still belongs to this league.
-  useEffect(() => {
-    if (leagueSnapshots.length === 0) {
-      if (selectedId !== null) setSelectedId(null);
-      return;
-    }
-    if (!leagueSnapshots.some((s) => s.id === selectedId)) {
-      setSelectedId(leagueSnapshots[0].id);
-    }
-  }, [leagueSnapshots, selectedId]);
+  // Derive the active id from the filtered list so switching leagues falls
+  // back to the first snapshot of the new league without an effect.
+  const activeId = leagueSnapshots.some((s) => s.id === selectedId)
+    ? selectedId
+    : leagueSnapshots[0]?.id ?? null;
 
   async function deleteSnapshot(id: string) {
     setDeleting(id);
@@ -56,7 +50,7 @@ export default function HistoricalLeagueDrafts() {
     setDeleting(null);
   }
 
-  const selected = leagueSnapshots.find((s) => s.id === selectedId);
+  const selected = leagueSnapshots.find((s) => s.id === activeId);
 
   if (!supabaseUser) {
     return <div className="text-gray-500 text-center py-16 text-sm">Sign in to view saved drafts.</div>;
@@ -87,7 +81,7 @@ export default function HistoricalLeagueDrafts() {
             <button
               onClick={() => setSelectedId(s.id)}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                selectedId === s.id
+                activeId === s.id
                   ? "bg-indigo-600 text-white"
                   : "bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white"
               }`}
