@@ -1,7 +1,8 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../../lib/supabaseclient";
 import { useAuth } from "../../lib/AuthContext";
+import { useLeague } from "../../lib/LeagueContext";
 import { logger } from "../../lib/logger";
 import type { LeagueDraftSnapshot } from "../../lib/types";
 import { posColor } from "./shared";
@@ -10,6 +11,7 @@ const log = logger("HistoricalLeagueDrafts");
 
 export default function HistoricalLeagueDrafts() {
   const { supabaseUser } = useAuth();
+  const { selectedLeague } = useLeague();
   const [snapshots, setSnapshots] = useState<LeagueDraftSnapshot[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -26,21 +28,35 @@ export default function HistoricalLeagueDrafts() {
         if (error) { log.error("snapshot load failed", { err: error.message }); }
         const snaps = (data ?? []) as LeagueDraftSnapshot[];
         setSnapshots(snaps);
-        if (snaps.length > 0) setSelectedId(snaps[0].id);
         setLoading(false);
       });
   }, [supabaseUser]);
 
+  const leagueSnapshots = useMemo(
+    () => snapshots.filter((s) => s.snapshot_data.leagueId === selectedLeague?.league_id),
+    [snapshots, selectedLeague?.league_id]
+  );
+
+  // When the active league changes (or the filtered list changes), make sure
+  // the selected pill still belongs to this league.
+  useEffect(() => {
+    if (leagueSnapshots.length === 0) {
+      if (selectedId !== null) setSelectedId(null);
+      return;
+    }
+    if (!leagueSnapshots.some((s) => s.id === selectedId)) {
+      setSelectedId(leagueSnapshots[0].id);
+    }
+  }, [leagueSnapshots, selectedId]);
+
   async function deleteSnapshot(id: string) {
     setDeleting(id);
     await supabase.from("league_draft_snapshots").delete().eq("id", id);
-    const remaining = snapshots.filter((s) => s.id !== id);
-    setSnapshots(remaining);
+    setSnapshots((prev) => prev.filter((s) => s.id !== id));
     setDeleting(null);
-    if (selectedId === id) setSelectedId(remaining[0]?.id ?? null);
   }
 
-  const selected = snapshots.find((s) => s.id === selectedId);
+  const selected = leagueSnapshots.find((s) => s.id === selectedId);
 
   if (!supabaseUser) {
     return <div className="text-gray-500 text-center py-16 text-sm">Sign in to view saved drafts.</div>;
@@ -48,10 +64,13 @@ export default function HistoricalLeagueDrafts() {
   if (loading) {
     return <div className="text-gray-500 text-center py-16 text-sm">Loading…</div>;
   }
-  if (snapshots.length === 0) {
+  if (!selectedLeague) {
+    return <div className="text-gray-500 text-center py-16 text-sm">Select a league to view its saved drafts.</div>;
+  }
+  if (leagueSnapshots.length === 0) {
     return (
       <div className="text-center py-16">
-        <p className="text-gray-400 text-sm font-medium">No saved drafts yet.</p>
+        <p className="text-gray-400 text-sm font-medium">No saved drafts for {selectedLeague.name} yet.</p>
         <p className="text-gray-600 text-xs mt-1">
           Once a rookie draft completes, hit <span className="text-indigo-400 font-semibold">Save Snapshot</span> on the Live Draft Board to freeze it here.
         </p>
@@ -63,7 +82,7 @@ export default function HistoricalLeagueDrafts() {
     <div>
       {/* Snapshot selector pills */}
       <div className="flex flex-wrap gap-2 mb-5">
-        {snapshots.map((s) => (
+        {leagueSnapshots.map((s) => (
           <div key={s.id} className="flex items-center gap-1 group">
             <button
               onClick={() => setSelectedId(s.id)}
