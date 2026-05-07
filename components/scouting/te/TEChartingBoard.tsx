@@ -198,6 +198,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged }: Pro
 
   const canLog = useMemo(() => {
     if (!selectedGameId) return false;
+    if (playType === "decoy") return true;
     if (playType === "run_block" || playType === "pass_block") return blockType !== null && blockSuccess !== null;
     if (!coverage || !routeType || wasOpen === null || targeted === null) return false;
     if (targeted) {
@@ -237,12 +238,13 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged }: Pro
     if (!editingPlayId || !canLog) return;
     setPlayError(null); setSavingPlay(true);
     const isBlock    = playType === "run_block" || playType === "pass_block";
-    const isTargeted = !isBlock && targeted === true;
+    const isRoute    = playType === "route_run";
+    const isTargeted = isRoute && targeted === true;
     const { data, error } = await supabase.from("te_plays").update({
       location, positioning, play_type: playType,
       block_type: isBlock ? blockType : null, block_success: isBlock ? blockSuccess : null,
-      coverage: isBlock ? null : coverage, route_type: isBlock ? null : routeType,
-      was_open: isBlock ? null : wasOpen, targeted: isBlock ? null : targeted,
+      coverage: isRoute ? coverage : null, route_type: isRoute ? routeType : null,
+      was_open: isRoute ? wasOpen : null, targeted: isRoute ? targeted : null,
       caught: isTargeted ? targetOutcome === "caught" : null,
       dropped: isTargeted ? targetOutcome === "dropped" : null,
       contested_target: isTargeted ? contestedTarget : null,
@@ -261,13 +263,14 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged }: Pro
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setPlayError("Not logged in."); setSavingPlay(false); return; }
     const isBlock    = playType === "run_block" || playType === "pass_block";
-    const isTargeted = !isBlock && targeted === true;
+    const isRoute    = playType === "route_run";
+    const isTargeted = isRoute && targeted === true;
     const { data, error } = await supabase.from("te_plays").insert({
       user_id: user.id, game_id: selectedGameId,
       location, positioning, play_type: playType,
       block_type: isBlock ? blockType : null, block_success: isBlock ? blockSuccess : null,
-      coverage: isBlock ? null : coverage, route_type: isBlock ? null : routeType,
-      was_open: isBlock ? null : wasOpen, targeted: isBlock ? null : targeted,
+      coverage: isRoute ? coverage : null, route_type: isRoute ? routeType : null,
+      was_open: isRoute ? wasOpen : null, targeted: isRoute ? targeted : null,
       caught: isTargeted ? targetOutcome === "caught" : null,
       dropped: isTargeted ? targetOutcome === "dropped" : null,
       contested_target: isTargeted ? contestedTarget : null,
@@ -602,8 +605,23 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged }: Pro
                   className={`flex-1 py-2 rounded text-sm font-medium transition ${playType === "route_run" ? "bg-blue-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
                   Route Run
                 </button>
+                <button onClick={() => {
+                  setPlayType("decoy");
+                  setBlockType(null); setBlockSuccess(null);
+                  setCoverage(null); setRouteType(null); setWasOpen(null); setTargeted(null);
+                  setTargetOutcome(null); setContestedTarget(null); setContestedCatch(null); setBrokenTackle(false);
+                }}
+                  className={`flex-1 py-2 rounded text-sm font-medium transition ${playType === "decoy" ? "bg-yellow-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                  Decoy
+                </button>
               </div>
             </div>
+
+            {playType === "decoy" && (
+              <div className="p-3 bg-gray-900/60 rounded-lg border border-gray-700/50 text-xs text-gray-500">
+                Decoy — no additional options. Click Log Play to record.
+              </div>
+            )}
 
             {(playType === "run_block" || playType === "pass_block") && (
               <div className="space-y-3 p-3 bg-gray-900/60 rounded-lg border border-purple-900/50">
@@ -759,7 +777,8 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged }: Pro
                 <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
                   {[...gamePlays].reverse().map((pl, i) => {
                     const isBlock = pl.play_type === "run_block" || pl.play_type === "pass_block";
-                    const ptLabel = pl.play_type === "run_block" ? "RB" : pl.play_type === "pass_block" ? "PB" : "Route";
+                    const isDecoy = pl.play_type === "decoy";
+                    const ptLabel = pl.play_type === "run_block" ? "RB" : pl.play_type === "pass_block" ? "PB" : pl.play_type === "decoy" ? "Dcy" : "Route";
                     const posLabel: Record<TEPositioning, string> = { wide: "Wide", slot: "Slot", inline: "Inl", full_back: "FB", running_back: "RB-pos", wing_back: "WB" };
                     const locLabel: Record<TELocation, string>    = { left: "L", right: "R", backfield: "BF" };
                     return (
@@ -767,13 +786,13 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged }: Pro
                         <span className="text-gray-500 w-5 flex-shrink-0">{gamePlays.length - i}</span>
                         <span className="text-gray-400">{locLabel[pl.location]}</span>
                         <span className="text-gray-500">{posLabel[pl.positioning]}</span>
-                        <span className={`font-medium ${isBlock ? "text-purple-400" : "text-blue-400"}`}>{ptLabel}</span>
+                        <span className={`font-medium ${isBlock ? "text-purple-400" : isDecoy ? "text-yellow-400" : "text-blue-400"}`}>{ptLabel}</span>
                         {isBlock ? (
                           <>
                             {pl.block_type && <span className="text-gray-400">{pl.block_type === "movement" ? "Mov" : "Inl"}</span>}
                             <span className={pl.block_success ? "text-green-400" : "text-red-400"}>{pl.block_success ? "✓" : "✗"}</span>
                           </>
-                        ) : (
+                        ) : isDecoy ? null : (
                           <>
                             {pl.route_type && <span className="text-blue-300">{ROUTE_LABELS[pl.route_type]}</span>}
                             {pl.coverage && <span className="text-gray-500 capitalize">{pl.coverage}</span>}

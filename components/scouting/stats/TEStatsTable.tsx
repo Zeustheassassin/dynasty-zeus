@@ -78,6 +78,7 @@ const COLS: ColDef[] = [
   // Raw
   { key: "raw_routes",   label: "Routes", group: "Raw", fmt: "count", width: 58 },
   { key: "raw_blocks",   label: "Blocks", group: "Raw", fmt: "count", width: 58 },
+  { key: "raw_decoys",   label: "Decoys", group: "Raw", fmt: "count", width: 58 },
   { key: "raw_tgts",     label: "Tgts",   group: "Raw", fmt: "count", width: 48 },
   { key: "raw_catches",  label: "Catch",  group: "Raw", fmt: "count", width: 50 },
   { key: "raw_drops",    label: "Drops",  group: "Raw", fmt: "count", width: 50 },
@@ -130,6 +131,7 @@ export default function TEStatsTable({ prospects, games, tePlays, loading, draft
         const pPlays = playsByProspect.get(p.id) ?? [];
         const routePlays = pPlays.filter((pl) => pl.play_type === "route_run");
         const blockPlays = pPlays.filter((pl) => pl.play_type === "run_block" || pl.play_type === "pass_block");
+        const decoyPlays = pPlays.filter((pl) => pl.play_type === "decoy");
         const ratedRoutes = routePlays.filter((pl) => pl.was_open !== null);
         const tgts = routePlays.filter((pl) => pl.targeted === true);
         const catches = tgts.filter((pl) => pl.caught === true);
@@ -224,6 +226,7 @@ export default function TEStatsTable({ prospects, games, tePlays, loading, draft
           // Raw
           raw_routes:   routePlays.length,
           raw_blocks:   blockPlays.length,
+          raw_decoys:   decoyPlays.length,
           raw_tgts:     tgts.length,
           raw_catches:  catches.length,
           raw_drops:    drops.length,

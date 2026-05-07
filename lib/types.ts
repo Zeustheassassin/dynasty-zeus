@@ -982,7 +982,7 @@ export interface QBPlay {
 // ── TE Scouting ─────────────────────────────────────────────
 export type TELocation    = "left" | "right" | "backfield";
 export type TEPositioning = "wide" | "slot" | "inline" | "full_back" | "running_back" | "wing_back";
-export type TEPlayType    = "run_block" | "pass_block" | "route_run";
+export type TEPlayType    = "run_block" | "pass_block" | "route_run" | "decoy";
 export type TEBlockType   = "movement" | "inline";
 export type TECoverage    = "man" | "zone" | "press" | "double";
 
