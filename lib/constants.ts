@@ -18,10 +18,6 @@ export const FANTASYPROS_BASE_URL = "https://www.fantasypros.com";
 // ── numberFire (FanDuel Research GraphQL) ─────────────────────
 export const NUMBERFIRE_GQL_URL = "https://fdresearch-api.fanduel.com/graphql";
 
-// ── ESPN ──────────────────────────────────────────────────────
-export const ESPN_NFL_NEWS_URL =
-  "https://site.api.espn.com/apis/site/v2/sports/football/nfl/news";
-
 // ── Google Sheets (crowdsourced rookie board) ─────────────────
 // This URL is a published CSV export — safe to store in code (not a secret).
 // If the sheet is re-published or moved, update here only.
@@ -75,19 +71,6 @@ export const FANTASYPROS_REVALIDATE_S = 3600;
 
 /** Crowdsourced rookie board sheet — refreshed every 6 hours */
 export const ROOKIE_BOARD_REVALIDATE_S = 21600;
-
-/** ESPN news — refreshed every 30 seconds (near-realtime) */
-export const ESPN_NEWS_REVALIDATE_S = 30;
-
-// ── Beat Writer RSS Feeds ─────────────────────────────────────
-/** Pro Football Talk (NBC Sports) — Mike Florio, Charean Williams, Josh Alper */
-export const PFT_RSS_URL = "https://www.nbcsports.com/profootballtalk.rss";
-
-/** CBS Sports NFL news feed */
-export const CBS_NFL_RSS_URL = "https://www.cbssports.com/rss/headlines/nfl/";
-
-/** Beat writer feeds revalidate every 5 minutes */
-export const BEAT_REPORTS_REVALIDATE_S = 300;
 
 // ── Year / season config ──────────────────────────────────────
 /** How many past years of payment tracking to include (0 = current year only, auto-advances each Jan 1) */

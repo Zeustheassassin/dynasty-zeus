@@ -1,19 +1,19 @@
 "use client";
 import React, { useState } from "react";
 import type {
-  SleeperLeague, SleeperUser, AugmentedPick, ProjectionRow, LeagueMateStatEntry, HistoricalSnapshot,
+  SleeperLeague, SleeperUser, ProjectionRow, LeagueMateStatEntry, HistoricalSnapshot,
 } from "../lib/types";
 import type { ShareEntry, ExposureData } from "./DataHub/dataHubTypes";
 import RankingsTab from "./DataHub/RankingsTab";
 import ValueTrendsTab from "./DataHub/ValueTrendsTab";
 import ProjectionsTab from "./DataHub/ProjectionsTab";
-import PickValuesTab from "./DataHub/PickValuesTab";
 import LeaguematesTab from "./DataHub/LeaguematesTab";
 import DepthChartsTab from "./DataHub/DepthChartsTab";
 import BuyLowTab from "./DataHub/BuyLowTab";
+import MySharesTab from "./DataHub/MySharesTab";
 
 // ── Local types ─────────────────────────────────────────────────────────────
-type DataHubTabId = "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "PICK_VALUES" | "LEAGUEMATES" | "DEPTH_CHARTS" | "BUY_LOW";
+type DataHubTabId = "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "LEAGUEMATES" | "DEPTH_CHARTS" | "BUY_LOW" | "MY_SHARES";
 
 interface DataHubProps {
   // Navigation
@@ -43,9 +43,6 @@ interface DataHubProps {
   loadingProjections: boolean;
   projectionUsesSeasonFallback: boolean;
 
-  // Pick values tab
-  allPicks: AugmentedPick[];
-
   // League mate stats tab
   leagues: SleeperLeague[];
   user: SleeperUser | null;
@@ -70,7 +67,6 @@ function DataHub({
   projectionData, setProjectionData, projectionPosFilter, setProjectionPosFilter,
   projectionWeek, setProjectionWeek, setProjectionLoaded, loadProjections,
   projectionSeasonYear, projectionSourceStatus, loadingProjections, projectionUsesSeasonFallback,
-  allPicks,
   leagues, user,
   loadUserExposure, selectedUserId, externalShares, loadingShares,
   historicalSnapshot, onSaveSnapshot,
@@ -86,7 +82,7 @@ function DataHub({
       {/* Sub-tab nav */}
       <div className="flex justify-center border-b border-gray-800 mb-6">
         <div className="flex justify-center gap-1 sm:gap-3 lg:gap-5 text-center flex-wrap">
-          {(["RANKINGS", "VALUE_TRENDS", "PROJECTIONS", "PICK_VALUES", "LEAGUEMATES", "DEPTH_CHARTS", "BUY_LOW"] as const).map((tab) => (
+          {(["MY_SHARES", "RANKINGS", "VALUE_TRENDS", "BUY_LOW", "PROJECTIONS", "DEPTH_CHARTS", "LEAGUEMATES"] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setDataHubTab(tab)}
@@ -101,9 +97,9 @@ function DataHub({
               {tab === "RANKINGS" ? "Rankings" :
                tab === "VALUE_TRENDS" ? "Value Trends" :
                tab === "PROJECTIONS" ? "Projections" :
-               tab === "PICK_VALUES" ? "Pick Values" :
                tab === "LEAGUEMATES" ? "League Mates" :
                tab === "DEPTH_CHARTS" ? "Depth Charts" :
+               tab === "MY_SHARES" ? "My Shares" :
                "Buy Low"}
             </button>
           ))}
@@ -151,14 +147,6 @@ function DataHub({
         />
       )}
 
-      {dataHubTab === "PICK_VALUES" && (
-        <PickValuesTab
-          allPicks={allPicks}
-          leagues={leagues}
-          user={user}
-        />
-      )}
-
       {dataHubTab === "LEAGUEMATES" && (
         <LeaguematesTab
           leagueMateStats={leagueMateStats}
@@ -188,6 +176,8 @@ function DataHub({
           setPlayerProfileId={setPlayerProfileId}
         />
       )}
+
+      {dataHubTab === "MY_SHARES" && <MySharesTab shares={shares} />}
     </>
   );
 }

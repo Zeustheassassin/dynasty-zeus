@@ -162,61 +162,64 @@ function OverviewTab({
   if (loadingLeagueOverview && !leagueOverviewLoaded) return <p className="text-sm text-blue-400">Loading league data…</p>;
   if (!leagues.length) return <p className="text-sm text-gray-500">No leagues found.</p>;
 
+  const GRID = "grid grid-cols-[minmax(180px,1.4fr)_minmax(170px,1.1fr)_56px_56px_56px_56px_64px] gap-2 items-center px-1";
+
   return (
-    <div className="space-y-2">
-      <div className="overflow-x-auto pb-1">
-        <div className="min-w-[780px] space-y-2">
-          <div className="flex items-center gap-3 pb-1">
-            <button
-              onClick={handleRunAllSims}
-              disabled={simQueue.length > 0}
-              className="text-[11px] font-semibold px-3 py-1 rounded-full border border-blue-600 text-blue-400 hover:bg-blue-900/40 transition disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
-            >
-              {simQueue.length > 0 ? "Simulating…" : "Run All Sims"}
-            </button>
-            <button
-              onClick={handleRefreshAllRosters}
-              disabled={refreshingRosters}
-              title="Clear roster cache and re-fetch all leagues from Sleeper"
-              className="flex items-center gap-1 text-[11px] font-semibold px-3 py-1 rounded-full border border-gray-600 text-gray-400 hover:border-gray-400 hover:text-gray-200 transition disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className={`w-3 h-3 ${refreshingRosters ? "animate-spin" : ""}`}>
-                <path fillRule="evenodd" d="M13.836 2.477a.75.75 0 0 1 .75.75v3.182a.75.75 0 0 1-.75.75h-3.182a.75.75 0 0 1 0-1.5h1.37l-.84-.841a4.5 4.5 0 0 0-7.08 1.196.75.75 0 1 1-1.31-.734 6 6 0 0 1 9.44-1.595l.842.841V3.227a.75.75 0 0 1 .75-.75Zm-.911 7.5A.75.75 0 0 1 13.199 11a6 6 0 0 1-9.44 1.595l-.842-.841v1.017a.75.75 0 0 1-1.5 0V9.591a.75.75 0 0 1 .75-.75H5.35a.75.75 0 0 1 0 1.5H3.98l.84.841a4.5 4.5 0 0 0 7.08-1.196.75.75 0 0 1 1.025-.009Z" clipRule="evenodd" />
-              </svg>
-              {refreshingRosters ? "Refreshing…" : "Refresh Rosters"}
-            </button>
-            {simProgress && (
-              <div className="flex-1 flex items-center gap-2 min-w-0">
-                <div className="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-blue-500 rounded-full transition-all duration-300"
-                    style={{ width: `${(simProgress.done / simProgress.total) * 100}%` }}
-                  />
-                </div>
-                <span className="text-[10px] text-gray-400 whitespace-nowrap">
-                  {simProgress.done === simProgress.total
-                    ? `Done — ${simProgress.total} leagues updated`
-                    : `${simProgress.done} / ${simProgress.total}`}
-                </span>
-              </div>
-            )}
-            {rosterRefreshProgress && (
-              <div className="flex-1 flex items-center gap-2 min-w-0">
-                <div className="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-gray-400 rounded-full transition-all duration-300"
-                    style={{ width: `${(rosterRefreshProgress.done / rosterRefreshProgress.total) * 100}%` }}
-                  />
-                </div>
-                <span className="text-[10px] text-gray-400 whitespace-nowrap">
-                  {rosterRefreshProgress.done === rosterRefreshProgress.total
-                    ? `Done — ${rosterRefreshProgress.total} leagues refreshed`
-                    : `${rosterRefreshProgress.done} / ${rosterRefreshProgress.total} leagues`}
-                </span>
-              </div>
-            )}
+    <div className="space-y-3">
+      <div className="flex items-center gap-3 flex-wrap">
+        <button
+          onClick={handleRunAllSims}
+          disabled={simQueue.length > 0}
+          className="text-[11px] font-semibold px-3 py-1 rounded-full border border-blue-600 text-blue-400 hover:bg-blue-900/40 transition disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+        >
+          {simQueue.length > 0 ? "Simulating…" : "Run All Sims"}
+        </button>
+        <button
+          onClick={handleRefreshAllRosters}
+          disabled={refreshingRosters}
+          title="Clear roster cache and re-fetch all leagues from Sleeper"
+          className="flex items-center gap-1 text-[11px] font-semibold px-3 py-1 rounded-full border border-gray-600 text-gray-400 hover:border-gray-400 hover:text-gray-200 transition disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className={`w-3 h-3 ${refreshingRosters ? "animate-spin" : ""}`}>
+            <path fillRule="evenodd" d="M13.836 2.477a.75.75 0 0 1 .75.75v3.182a.75.75 0 0 1-.75.75h-3.182a.75.75 0 0 1 0-1.5h1.37l-.84-.841a4.5 4.5 0 0 0-7.08 1.196.75.75 0 1 1-1.31-.734 6 6 0 0 1 9.44-1.595l.842.841V3.227a.75.75 0 0 1 .75-.75Zm-.911 7.5A.75.75 0 0 1 13.199 11a6 6 0 0 1-9.44 1.595l-.842-.841v1.017a.75.75 0 0 1-1.5 0V9.591a.75.75 0 0 1 .75-.75H5.35a.75.75 0 0 1 0 1.5H3.98l.84.841a4.5 4.5 0 0 0 7.08-1.196.75.75 0 0 1 1.025-.009Z" clipRule="evenodd" />
+          </svg>
+          {refreshingRosters ? "Refreshing…" : "Refresh Rosters"}
+        </button>
+        {simProgress && (
+          <div className="flex-1 flex items-center gap-2 min-w-0">
+            <div className="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-blue-500 rounded-full transition-all duration-300"
+                style={{ width: `${(simProgress.done / simProgress.total) * 100}%` }}
+              />
+            </div>
+            <span className="text-[10px] text-gray-400 whitespace-nowrap">
+              {simProgress.done === simProgress.total
+                ? `Done — ${simProgress.total} leagues updated`
+                : `${simProgress.done} / ${simProgress.total}`}
+            </span>
           </div>
-          <div className="grid grid-cols-[minmax(220px,1.4fr)_minmax(150px,1fr)_72px_72px_72px_72px_72px] gap-2 px-3 pb-1 text-[10px] font-bold uppercase tracking-widest text-gray-600">
+        )}
+        {rosterRefreshProgress && (
+          <div className="flex-1 flex items-center gap-2 min-w-0">
+            <div className="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-gray-400 rounded-full transition-all duration-300"
+                style={{ width: `${(rosterRefreshProgress.done / rosterRefreshProgress.total) * 100}%` }}
+              />
+            </div>
+            <span className="text-[10px] text-gray-400 whitespace-nowrap">
+              {rosterRefreshProgress.done === rosterRefreshProgress.total
+                ? `Done — ${rosterRefreshProgress.total} leagues refreshed`
+                : `${rosterRefreshProgress.done} / ${rosterRefreshProgress.total} leagues`}
+            </span>
+          </div>
+        )}
+      </div>
+
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 overflow-x-auto">
+        <div className="min-w-[700px]">
+          <div className={`${GRID} text-[10px] uppercase tracking-wide text-gray-500 mb-1 pb-2 border-b border-gray-800`}>
             <span>League</span>
             <span>Direction</span>
             <span className="text-center">Dyn</span>
@@ -225,46 +228,55 @@ function OverviewTab({
             <span className="text-center">MaxPF</span>
             <span className="text-center">Playoff%</span>
           </div>
-          {leagueRows.map((row) => (
-            <div key={row.league.league_id} className={`grid grid-cols-[minmax(220px,1.4fr)_minmax(190px,1.15fr)_72px_72px_72px_72px_72px] gap-2 items-center bg-gray-900 border rounded-xl px-3 py-2.5 transition-colors ${simQueue[0] === row.league.league_id ? "border-blue-700" : "border-gray-800"}`}>
-              <button className="min-w-0 text-sm text-white font-medium text-left truncate hover:text-blue-400 transition" onClick={() => { loadRoster(row.league); setLeagueHubTab("ROSTERS"); }}>
-                {row.league.name}
-              </button>
-              <div className="min-w-0">
-                <span className={`inline-flex max-w-full text-[10px] font-semibold px-2 py-0.5 rounded-full border text-center truncate ${row.bucketColor}`}>{row.bucket}</span>
-                <div className="mt-1 text-[10px] text-gray-500 truncate">{row.shortAction}</div>
-              </div>
-              <span className="text-xs text-center text-gray-300">{row.dynRank}<span className="text-gray-600">/{row.n}</span></span>
-              <span className="text-xs text-center text-gray-300">{row.redRank}<span className="text-gray-600">/{row.n}</span></span>
-              <span className="text-xs text-center text-gray-300">{row.standRank}<span className="text-gray-600">/{row.n}</span></span>
-              <span className="text-xs text-center text-gray-300">{row.maxPfRank}<span className="text-gray-600">/{row.n}</span></span>
-              <div className="text-center">
-                {row.hasCachedSim ? (
-                  <div>
-                    <span className={`text-xs font-mono font-semibold ${row.playoffOdds >= 50 ? "text-green-400" : row.playoffOdds >= 25 ? "text-yellow-400" : "text-red-400"}`}>
-                      {row.playoffOdds}%
-                    </span>
-                    {row.simAge !== null && (
-                      <div className={`text-[10px] ${row.simAge > 48 ? "text-orange-500" : "text-gray-600"}`}>
-                        {row.simAge < 1 ? "just now" : row.simAge < 24 ? `${row.simAge}h ago` : `${Math.round(row.simAge / 24)}d ago`}
+          <div className="space-y-0.5">
+            {leagueRows.map((row) => (
+              <div
+                key={row.league.league_id}
+                className={`${GRID} text-xs py-1.5 rounded hover:bg-gray-800/40 transition ${simQueue[0] === row.league.league_id ? "ring-1 ring-blue-700/60" : ""}`}
+              >
+                <button
+                  className="min-w-0 text-sm text-gray-200 font-medium text-left truncate hover:text-blue-400 transition"
+                  onClick={() => { loadRoster(row.league); setLeagueHubTab("ROSTERS"); }}
+                >
+                  {row.league.name}
+                </button>
+                <div className="min-w-0">
+                  <span className={`inline-flex max-w-full text-[10px] font-semibold px-2 py-0.5 rounded-full border truncate ${row.bucketColor}`}>{row.bucket}</span>
+                  <div className="mt-0.5 text-[10px] text-gray-500 truncate">{row.shortAction}</div>
+                </div>
+                <span className="text-center text-gray-300">{row.dynRank}<span className="text-gray-600">/{row.n}</span></span>
+                <span className="text-center text-gray-300">{row.redRank}<span className="text-gray-600">/{row.n}</span></span>
+                <span className="text-center text-gray-300">{row.standRank}<span className="text-gray-600">/{row.n}</span></span>
+                <span className="text-center text-gray-300">{row.maxPfRank}<span className="text-gray-600">/{row.n}</span></span>
+                <div className="text-center">
+                  {row.hasCachedSim ? (
+                    <>
+                      <div className={`font-mono font-semibold ${row.playoffOdds >= 50 ? "text-emerald-400" : row.playoffOdds >= 25 ? "text-yellow-400" : "text-red-400"}`}>
+                        {row.playoffOdds}%
                       </div>
-                    )}
-                  </div>
-                ) : (
-                  <button
-                    className="text-[10px] text-blue-500 hover:text-blue-400 transition underline-offset-2 hover:underline"
-                    onClick={() => { loadRoster(row.league); setLeagueHubTab("SIMULATOR"); }}
-                  >
-                    run sim →
-                  </button>
-                )}
+                      {row.simAge !== null && (
+                        <div className={`text-[10px] ${row.simAge > 48 ? "text-orange-500" : "text-gray-600"}`}>
+                          {row.simAge < 1 ? "just now" : row.simAge < 24 ? `${row.simAge}h ago` : `${Math.round(row.simAge / 24)}d ago`}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <button
+                      className="text-[10px] text-blue-500 hover:text-blue-400 transition underline-offset-2 hover:underline"
+                      onClick={() => { loadRoster(row.league); setLeagueHubTab("SIMULATOR"); }}
+                    >
+                      run sim →
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       </div>
+
       {!leagueOverviewLoaded && !loadingLeagueOverview && (
-        <button onClick={() => { loadLeagueOverview(); loadRedraftValues(); }} className="text-xs text-blue-400 hover:text-blue-300 border border-blue-700 rounded-lg px-3 py-1.5 transition">
+        <button onClick={() => { loadLeagueOverview(); loadRedraftValues(); }} className="text-[10px] font-semibold border rounded-lg px-2.5 py-1 transition border-gray-700 text-gray-400 hover:text-white hover:border-gray-500">
           Load Overview
         </button>
       )}

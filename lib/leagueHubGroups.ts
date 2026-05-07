@@ -34,11 +34,4 @@ export const LEAGUE_HUB_GROUPS: Array<{
       { id: "ACTIVITY", label: "Activity Feed" },
     ],
   },
-  {
-    id: "DRAFT_TOOLS",
-    label: "Draft",
-    tabs: [
-      { id: "DRAFT_BOARD", label: "Draft Board" },
-    ],
-  },
 ];

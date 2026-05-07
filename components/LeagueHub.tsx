@@ -5,10 +5,7 @@ import type {
   SleeperLeague,
   SleeperUser,
   SleeperTradedPick,
-  SleeperDraft,
-  SleeperDraftPick,
   SleeperNFLState,
-  RookieBoardPlayer,
   ProjectionRow,
   CommittedSimsByLeague,
   CachedSimRow,
@@ -29,9 +26,8 @@ import OppRostersTab from "./LeagueHub/OppRostersTab";
 import StartersTab from "./LeagueHub/StartersTab";
 import NotesTab from "./LeagueHub/NotesTab";
 import PowerRankingsTab from "./LeagueHub/PowerRankingsTab";
-import DraftBoardTab from "./LeagueHub/DraftBoardTab";
 import ActivityTab from "./LeagueHub/ActivityTab";
-import type { StandingRow, AnnotatedTransaction, TeamSummary, PredictedPick, DraftPoolRanks } from "./LeagueHub/leagueHubTypes";
+import type { StandingRow, AnnotatedTransaction } from "./LeagueHub/leagueHubTypes";
 
 // ── Props ──────────────────────────────────────────────────────────────────
 interface LeagueHubProps {
@@ -70,35 +66,19 @@ interface LeagueHubProps {
   leagueOverviewLoaded: boolean;
 
   // Computed
-  teamSummary: TeamSummary | null;
   selectedLeagueMateProfilesView: LeagueMateView[];
 
   // Cross-hub shared state (stays in page.tsx)
   ignoredOwnerIds: string[];
   toggleIgnoredOwner: (ownerId: string) => void;
 
-  // Draft state
+  // Projections / season state (used by Starters tab)
   projectionData: ProjectionRow[];
-  draftPicks: SleeperDraftPick[];
-  draftOrder: Record<string, number>;
-  draftSettings: SleeperDraft | null;
-  myDraftSlotPicks: Record<string, string>;
-  setMyDraftSlotPicks: React.Dispatch<React.SetStateAction<Record<string, string>>>;
-  draftSlotEditing: string | null;
-  setDraftSlotEditing: (slot: string | null) => void;
-  draftSlotSearchQuery: string;
-  setDraftSlotSearchQuery: (q: string) => void;
-  draftHubSection: "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL_BOARDS" | "HISTORICAL_LEAGUE_DRAFTS";
   nflState: SleeperNFLState | null;
 
   // Additional state
   freeAgents: SleeperPlayer[];
   loadingCalcValues: boolean;
-  predictedDraftPicks: Record<string, PredictedPick>;
-  draftPoolRanks: DraftPoolRanks;
-  loadingDraftRefresh: boolean;
-  rookies: RookieBoardPlayer[];
-  draftedPlayerIds: Set<string>;
 
   // Functions
   loadRoster: (league: SleeperLeague) => void;
@@ -106,11 +86,9 @@ interface LeagueHubProps {
   loadRedraftValues: () => void;
   loadUserTrades: (ownerId: string, bypass?: boolean) => void;
   loadUserExposure: (ownerId: string) => void;
-  loadDraftScout: (userId: string) => void;
   saveLeagueNote: (leagueId: string, text: string) => void;
   onSaveSim: (leagueId: string, rows: SimulationTeamRow[]) => void;
   handleRunAllSims: () => void;
-  refreshDraftBoard: () => Promise<void>;
   setPlayerProfileId: (id: string | null) => void;
   setCalcOpponentRosterId: (id: number | null) => void;
   setMainTab: (tab: string) => void;
@@ -126,24 +104,17 @@ function LeagueHub({
   loadingLeagueMateIntel, loadingCrossLeagueMateIntel, loadingActivity, loadingLeagueWeeklyMatchups,
   leagueNotes, activityTransactions,
   leagueOverviewData, loadingLeagueOverview, leagueOverviewLoaded,
-  teamSummary, selectedLeagueMateProfilesView,
+  selectedLeagueMateProfilesView,
   ignoredOwnerIds, toggleIgnoredOwner,
-  projectionData, draftPicks, draftOrder, draftSettings, myDraftSlotPicks, setMyDraftSlotPicks,
-  draftSlotEditing, setDraftSlotEditing, draftSlotSearchQuery, setDraftSlotSearchQuery,
-  draftHubSection, nflState,
+  projectionData, nflState,
   freeAgents, loadingCalcValues,
-  predictedDraftPicks, draftPoolRanks, loadingDraftRefresh, rookies, draftedPlayerIds,
-  loadRoster, loadLeagueOverview, loadRedraftValues, loadUserTrades, loadUserExposure, loadDraftScout,
-  saveLeagueNote, onSaveSim, handleRunAllSims, refreshDraftBoard,
+  loadRoster, loadLeagueOverview, loadRedraftValues, loadUserTrades, loadUserExposure,
+  saveLeagueNote, onSaveSim, handleRunAllSims,
   setPlayerProfileId, setCalcOpponentRosterId, setMainTab, setTradeHubSection,
 }: LeagueHubProps) {
   const {
-    activeTab, setActiveTab,
-    search, setSearch,
     leagueSearch, setLeagueSearch,
-    oppRosterTab, setOppRosterTab,
     oppRosterOwnerId, setOppRosterOwnerId,
-    oppRosterSearch, setOppRosterSearch,
     prSortKey, setPrSortKey,
     prSortAsc, setPrSortAsc,
     prPopup, setPrPopup,
@@ -151,7 +122,7 @@ function LeagueHub({
   } = useLeagueTabState();
 
   return (
-    <div className={`mx-auto px-4 py-6 ${leagueHubTab === "DRAFT_BOARD" ? "w-full max-w-full" : "max-w-5xl"}`}>
+    <div className={`mx-auto px-4 py-6 ${leagueHubTab === "ROSTERS" || leagueHubTab === "OPP_ROSTERS" ? "max-w-7xl" : "max-w-5xl"}`}>
       <>
         {/* Sub-tab nav */}
         <div className="mb-6 rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
@@ -224,11 +195,6 @@ function LeagueHub({
             leagues={leagues}
             user={user}
             picks={picks}
-            teamSummary={teamSummary}
-            activeTab={activeTab}
-            setActiveTab={setActiveTab}
-            search={search}
-            setSearch={setSearch}
             leagueSearch={leagueSearch}
             setLeagueSearch={setLeagueSearch}
             freeAgents={freeAgents}
@@ -267,12 +233,8 @@ function LeagueHub({
           <OppRostersTab
             user={user}
             allPicks={allPicks}
-            oppRosterTab={oppRosterTab}
-            setOppRosterTab={setOppRosterTab}
             oppRosterOwnerId={oppRosterOwnerId}
             setOppRosterOwnerId={setOppRosterOwnerId}
-            oppRosterSearch={oppRosterSearch}
-            setOppRosterSearch={setOppRosterSearch}
           />
         )}
 
@@ -314,30 +276,6 @@ function LeagueHub({
             ignoredOwnerIds={ignoredOwnerIds}
             toggleIgnoredOwner={toggleIgnoredOwner}
             setPlayerProfileId={setPlayerProfileId}
-          />
-        )}
-
-        {leagueHubTab === "DRAFT_BOARD" && (
-          <DraftBoardTab
-            user={user}
-            allPicks={allPicks}
-            draftPicks={draftPicks}
-            draftOrder={draftOrder}
-            draftSettings={draftSettings}
-            myDraftSlotPicks={myDraftSlotPicks}
-            setMyDraftSlotPicks={setMyDraftSlotPicks}
-            draftSlotEditing={draftSlotEditing}
-            setDraftSlotEditing={setDraftSlotEditing}
-            draftSlotSearchQuery={draftSlotSearchQuery}
-            setDraftSlotSearchQuery={setDraftSlotSearchQuery}
-            draftHubSection={draftHubSection}
-            predictedDraftPicks={predictedDraftPicks}
-            draftPoolRanks={draftPoolRanks}
-            loadingDraftRefresh={loadingDraftRefresh}
-            rookies={rookies}
-            draftedPlayerIds={draftedPlayerIds}
-            refreshDraftBoard={refreshDraftBoard}
-            loadDraftScout={loadDraftScout}
           />
         )}
 

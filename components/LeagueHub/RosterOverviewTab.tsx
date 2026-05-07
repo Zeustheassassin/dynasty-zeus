@@ -135,81 +135,72 @@ function RosterOverviewTab({
     );
   }
 
+  const GRID = "grid grid-cols-[minmax(0,1fr)_5rem_4rem_4rem_5rem] gap-2 items-center px-1";
+
   return (
-    <div className="max-w-5xl mx-auto">
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h2 className="text-xl font-semibold text-slate-200">Roster Overview</h2>
-          <p className="text-xs text-gray-500 mt-1">
-            Active / IR / Taxi utilization across all your leagues, plus a flag for
-            IR-eligible players still on your active roster.
-          </p>
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-3">
+      <div className="border-b border-gray-800 pb-2 mb-2 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[11px] uppercase tracking-wide text-gray-500">Roster Overview</div>
+          <div className="mt-0.5 text-xs text-gray-200">
+            Active / IR / Taxi utilization across all your leagues, plus a flag for IR-eligible players still on your active roster.
+          </div>
         </div>
         <button
           onClick={() => loadLeagueOverview()}
           disabled={loadingLeagueOverview}
-          className="text-xs text-blue-400 hover:text-blue-300 border border-blue-700 rounded-lg px-3 py-1.5 transition disabled:opacity-50"
+          className="text-[10px] font-semibold border rounded-lg px-2.5 py-1 transition disabled:opacity-50 border-gray-700 text-gray-400 hover:text-white hover:border-gray-500 whitespace-nowrap"
         >
           {loadingLeagueOverview ? "Refreshing…" : "Refresh"}
         </button>
       </div>
 
       {!leagueOverviewLoaded && loadingLeagueOverview && rows.length === 0 ? (
-        <div className="text-sm text-gray-500 text-center py-12">Loading rosters…</div>
+        <div className="text-[11px] text-gray-600 italic py-2">Loading rosters…</div>
       ) : rows.length === 0 ? (
-        <div className="text-sm text-gray-500 text-center py-12">No rosters loaded yet.</div>
+        <div className="text-[11px] text-gray-600 italic py-2">No rosters loaded yet.</div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-gray-800">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-900/80 text-xs uppercase tracking-wide text-gray-500">
-              <tr>
-                <th className="text-left px-3 py-2">League</th>
-                <th className="text-right px-3 py-2">Active</th>
-                <th className="text-right px-3 py-2">IR</th>
-                <th className="text-right px-3 py-2">Taxi</th>
-                <th className="text-right px-3 py-2" title="IR-eligible players still on the active roster (could be moved to IR)">
-                  IR-Eligible
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-800/60">
-              {rows.map((row) => {
-                const hasIR = row.ir.cap > 0;
-                const hasTaxi = row.taxi.cap > 0;
-                return (
-                  <tr
-                    key={row.leagueId}
-                    onClick={() => {
-                      setLeagueHubTab("ROSTERS");
-                      loadRoster(row.league);
-                    }}
-                    className="hover:bg-gray-800/40 cursor-pointer transition"
-                  >
-                    <td className="px-3 py-2 font-medium text-white">
-                      {row.leagueName}
-                    </td>
-                    <td className={`px-3 py-2 text-right font-mono ${fillColor(row.active.filled, row.active.cap, row.active.cap > 0)}`}>
-                      {fillLabel(row.active.filled, row.active.cap, row.active.cap > 0)}
-                    </td>
-                    <td className={`px-3 py-2 text-right font-mono ${fillColor(row.ir.filled, row.ir.cap, hasIR)}`}>
-                      {fillLabel(row.ir.filled, row.ir.cap, hasIR)}
-                    </td>
-                    <td className={`px-3 py-2 text-right font-mono ${fillColor(row.taxi.filled, row.taxi.cap, hasTaxi)}`}>
-                      {fillLabel(row.taxi.filled, row.taxi.cap, hasTaxi)}
-                    </td>
-                    <td className={`px-3 py-2 text-right font-mono ${row.unflaggedInjuries > 0 ? "text-orange-300" : "text-gray-600"}`}>
-                      {row.unflaggedInjuries > 0 ? row.unflaggedInjuries : "—"}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <>
+          <div className={`${GRID} text-[10px] uppercase tracking-wide text-gray-500 mb-1`}>
+            <span>League</span>
+            <span className="text-right">Active</span>
+            <span className="text-right">IR</span>
+            <span className="text-right">Taxi</span>
+            <span className="text-right" title="IR-eligible players still on the active roster (could be moved to IR)">IR-Eligible</span>
+          </div>
+          <div className="space-y-0.5">
+            {rows.map((row) => {
+              const hasIR = row.ir.cap > 0;
+              const hasTaxi = row.taxi.cap > 0;
+              return (
+                <div
+                  key={row.leagueId}
+                  onClick={() => {
+                    setLeagueHubTab("ROSTERS");
+                    loadRoster(row.league);
+                  }}
+                  className={`${GRID} text-xs py-1 rounded cursor-pointer hover:bg-gray-800/40 transition`}
+                >
+                  <span className="text-gray-200 truncate">{row.leagueName}</span>
+                  <span className={`text-right font-mono ${fillColor(row.active.filled, row.active.cap, row.active.cap > 0)}`}>
+                    {fillLabel(row.active.filled, row.active.cap, row.active.cap > 0)}
+                  </span>
+                  <span className={`text-right font-mono ${fillColor(row.ir.filled, row.ir.cap, hasIR)}`}>
+                    {fillLabel(row.ir.filled, row.ir.cap, hasIR)}
+                  </span>
+                  <span className={`text-right font-mono ${fillColor(row.taxi.filled, row.taxi.cap, hasTaxi)}`}>
+                    {fillLabel(row.taxi.filled, row.taxi.cap, hasTaxi)}
+                  </span>
+                  <span className={`text-right font-mono ${row.unflaggedInjuries > 0 ? "text-orange-300" : "text-gray-600"}`}>
+                    {row.unflaggedInjuries > 0 ? row.unflaggedInjuries : "—"}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-[10px] text-gray-600 mt-2">Click any row to open that league&apos;s roster.</p>
+        </>
       )}
-      <p className="text-[11px] text-gray-600 mt-3">
-        Click any row to open that league&apos;s roster.
-      </p>
     </div>
   );
 }

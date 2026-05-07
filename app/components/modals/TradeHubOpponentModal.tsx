@@ -86,16 +86,16 @@ export function TradeHubOpponentModal({ tradeHubUserId, users, loadingTradeHub, 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <div className="text-[10px] text-green-400 font-semibold uppercase mb-1">Received</div>
-                    {allReceived.length ? allReceived.map((item) => (
-                      <div key={item} className="text-sm text-white py-0.5">{item}</div>
+                    {allReceived.length ? allReceived.map((item, idx) => (
+                      <div key={`${item}-${idx}`} className="text-sm text-white py-0.5">{item}</div>
                     )) : (
                       <div className="text-xs text-gray-500 italic">Nothing</div>
                     )}
                   </div>
                   <div>
                     <div className="text-[10px] text-red-400 font-semibold uppercase mb-1">Gave</div>
-                    {allGiven.length ? allGiven.map((item) => (
-                      <div key={item} className="text-sm text-white py-0.5">{item}</div>
+                    {allGiven.length ? allGiven.map((item, idx) => (
+                      <div key={`${item}-${idx}`} className="text-sm text-white py-0.5">{item}</div>
                     )) : (
                       <div className="text-xs text-gray-500 italic">Nothing</div>
                     )}

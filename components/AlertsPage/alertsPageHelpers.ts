@@ -8,28 +8,6 @@ export type LeagueTransaction = SleeperTransaction & {
   rosterOwnerMap: Record<number, string>;
 };
 
-export interface NewsItem {
-  id: string;
-  title: string;
-  summary?: string;
-  link?: string;
-  published?: string;
-  playerNames?: string[];
-}
-
-export interface BeatItem {
-  id: string;
-  title: string;
-  summary?: string;
-  link?: string;
-  published?: string;
-  playerNames?: string[];
-  author?: string;
-  source?: string;
-  sourceLabel?: string;
-  impact?: boolean;
-}
-
 export type InjuryReportPlayer = {
   player: SleeperPlayer;
   playerId: string;

@@ -20,7 +20,6 @@ import {
   getCrossLeaguePreferenceFit, getCrossLeagueTradeBehaviorFit,
   fetchFantasyCalcValues,
   computeScoringMultipliers,
-  generateGmBriefing,
 } from "../../lib/helpers";
 import { useProjections } from "../../hooks/useProjections";
 import { useSleeperUser } from "../../hooks/useSleeperUser";
@@ -52,7 +51,7 @@ import type {
   AugmentedPick,
   HistoricalSnapshot, LeagueMateView, SimulationTeamRow,
   RosterDirectionProfile, DynamicPickValue, RookieBoardPlayer, FcTrendEntry,
-  GmBriefing, StandingRow,
+  StandingRow,
 } from "../../lib/types";
 
 // -------------------------
@@ -72,7 +71,6 @@ let _playersInMemory: Record<string, SleeperPlayer> | null = null;
 interface OwnedPlayerEntry { player_id: string; player?: SleeperPlayer; leagues: string[]; shareCount: number; }
 interface AllLeagueDataEntry { leagueName?: string; roster: import("../../lib/types").SleeperRoster | null; }
 interface PlayerSnapshot { full_name: string; status: string; team: string; value: number; active: boolean; shareCount: number; }
-interface NewsItem { id?: string; link?: string; title?: string; impact?: unknown; playerNames?: string[]; summary?: string; published?: string | number; }
 
 export function useAppState() {
 
@@ -235,7 +233,6 @@ const [standings, setStandings] = useState<StandingRow[]>([]);
     loadingLeagueWeeklyMatchups, setLoadingLeagueWeeklyMatchups,
     ownerDraftTendencies,
     loadActivity,
-    loadOwnerTendencies,
   } = useActivityState(rosters, user);
 
   const leaguesRef2 = useRef(leagues);
@@ -275,7 +272,6 @@ const { crossLeagueMateIntel, loadingCrossLeagueMateIntel } = useCrossLeagueMate
   leagueHubTab,
   tradeHubSection,
 });
-const [loadingExternalAlerts, setLoadingExternalAlerts] = useState(false);
 const [leagueTransactions, setLeagueTransactions] = useState<AnnotatedTransaction[]>([]);
 const [loadingTransactions, setLoadingTransactions] = useState(false);
 
@@ -665,14 +661,6 @@ useEffect(() => {
   }
 }, [mainTab, leagueHubTab, selectedLeague?.league_id, loadActivity, setActivityTransactions]);
 
-useEffect(() => {
-  if (mainTab === "LEAGUES" && leagueHubTab === "DRAFT_BOARD" && selectedLeague?.league_id) {
-    refreshDraftBoard();
-    // Load owner tendencies in the background — non-blocking
-    if (rosters.length) loadOwnerTendencies();
-  }
-}, [mainTab, leagueHubTab, selectedLeague?.league_id, rosters.length, refreshDraftBoard, loadOwnerTendencies]);
-
 // Stable count for dep arrays — Object.keys() creates a new array on every
 // render, which defeats useMemo/useEffect deps. usersCount is a plain number
 // and safe to compare.
@@ -681,10 +669,12 @@ const usersCount   = useMemo(() => Object.keys(users).length,   [users]);
 // Load leaguemate trade alerts once the user display-name map is ready.
 // Rows are produced by the server-side cron (app/api/cron/leaguemate-alerts);
 // we just read them and resolve owner IDs to display names via `users`.
+// Waits for `leagues` so the loader can filter out any legacy DB rows whose
+// league_id isn't one the user is currently in.
 useEffect(() => {
-  if (!supabaseUser || !usersCount) return;
+  if (!supabaseUser || !usersCount || !leagues.length) return;
   loadLeaguemateTradeAlertsRef.current?.();
-}, [supabaseUser, usersCount]);
+}, [supabaseUser, usersCount, leagues.length]);
 
 // Auto-load data needed by the player profile panel whenever it opens
 useEffect(() => {
@@ -1060,9 +1050,10 @@ const refreshFcTrends = async () => {
 // ── Leaguemate trade alerts ──────────────────────────────────────────────────
 // Reads pre-built trade alert rows from the Supabase `alerts` table. Rows are
 // produced by the server-side cron at app/api/cron/leaguemate-alerts which
-// scans every dynasty league each leaguemate is in (not just shared leagues)
-// and writes one row per leaguemate-trade observed in the last 14 days.
+// scans the user's own dynasty leagues for recent trades.
 // Owner display name is resolved at render-time from the local `users` map.
+// Legacy rows from the prior cron (which scanned leaguemates' other leagues)
+// are filtered client-side via `myLeagueIds` so they no longer surface.
 const tradeAlertLoadedRef = useRef(false);
 const loadLeaguemateTradeAlerts = async () => {
   if (tradeAlertLoadedRef.current) return; // once per session
@@ -1071,6 +1062,7 @@ const loadLeaguemateTradeAlerts = async () => {
 
   const fourteenDaysAgoIso = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
   const existingIds = new Set(latestAlertsRef.current.map((a) => a.id));
+  const myLeagueIds = new Set(leagues.map((l) => l.league_id));
 
   const { data, error } = await supabase
     .from("alerts")
@@ -1092,6 +1084,7 @@ const loadLeaguemateTradeAlerts = async () => {
   const tradeAlerts: AlertsCenterItem[] = [];
   for (const row of rows) {
     if (existingIds.has(row.alert_id)) continue;
+    if (!row.league_id || !myLeagueIds.has(row.league_id)) continue;
     const payload = (row.payload ?? {}) as {
       ownerId?: string;
       leagueName?: string;
@@ -2704,59 +2697,6 @@ const getTeamSummary = useCallback(() => {
     ).then(() => {}, (err: unknown) => log.error("leaguemate_profiles upsert failed", { err: String(err) }));
   }, [supabaseUser, selectedLeague?.league_id, selectedLeagueMateProfiles]);
 
-  // GM briefings for the Alerts Hub — one card per league the user is in.
-  const allRosterBriefings = useMemo((): GmBriefing[] => {
-    if (!user?.user_id || Object.keys(leagueOverviewData).length === 0) return [];
-    if (Object.keys(calcFcValues).length === 0 || Object.keys(redraftValues).length === 0) return [];
-
-    const urgencyOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
-    const dynastyValueForPlayer = (id: string) => calcFcValues[id] ?? players[id]?.value ?? 0;
-    const briefings: GmBriefing[] = [];
-
-    for (const [, entry] of Object.entries(leagueOverviewData)) {
-      const { league, rosters: leagueRosters, picks: leaguePicks } = entry;
-      const myRoster = leagueRosters.find((r) => r.owner_id === user.user_id);
-      if (!myRoster) continue;
-
-      const profile = getRosterDirectionProfile({
-        rosterId: myRoster.roster_id,
-        rosters: leagueRosters,
-        ownedPicks: leaguePicks,
-        players,
-        pickValues: pickFcValues,
-        redraftValues,
-        dynastyValueForPlayer,
-      });
-      if (!profile) continue;
-
-      // Match League Overview: apply sim-adjusted bucket so briefing and overview agree.
-      const committedRow = committedSimsByLeague[league.league_id]?.[Number(myRoster.roster_id)];
-      const cachedRow = leagueSimCache[league.league_id]?.[Number(myRoster.roster_id)];
-      const playoffOdds = committedRow?.playoffOdds ?? cachedRow?.playoff_odds ?? 0;
-      const hasCachedSim = !!(committedRow ?? cachedRow);
-      const adjBucket = getAdjustedDirectionBucket(profile.bucket, profile, playoffOdds, hasCachedSim);
-      const adjProfile = adjBucket !== profile.bucket
-        ? { ...profile, bucket: adjBucket, bucketColor: getBucketColor(adjBucket) }
-        : profile;
-
-      const myPickCount = leaguePicks.filter((p) => p.owner_id === myRoster.roster_id).length;
-      briefings.push(generateGmBriefing({
-        rosterId: myRoster.roster_id,
-        leagueId: league.league_id,
-        leagueName: league.name,
-        ownerName: user.display_name || "You",
-        isMyTeam: true,
-        profile: adjProfile,
-        rosterPlayerIds: myRoster.players ?? [],
-        trendData: fcTrendData,
-        players,
-        pickCount: myPickCount,
-      }));
-    }
-
-    return briefings.sort((a, b) => urgencyOrder[a.urgency] - urgencyOrder[b.urgency]);
-  }, [leagueOverviewData, user, calcFcValues, redraftValues, players, pickFcValues, fcTrendData, committedSimsByLeague, leagueSimCache]);
-
   // Drafted players keyed by both Sleeper player_id AND `name:<normalized>` so the rookie
   // board (which often contains name-only entries from FantasyCalc with no player_id)
   // can be filtered by name when the ID match misses.
@@ -3480,42 +3420,6 @@ const getTeamSummary = useCallback(() => {
     mergeDashboardAlerts,
   ]);
 
-  useEffect(() => {
-    const trackedNames = [
-      ...dashboardOwnedPlayers.slice(0, 8).map((entry) => players[entry.player_id]?.full_name),
-      ...watchlistEntries.slice(0, 8).map((entry) => entry.label),
-    ].filter(Boolean);
-    const uniqueNames = Array.from(new Set(trackedNames)).slice(0, 10);
-    if (uniqueNames.length === 0) return;
-
-    let cancelled = false;
-    setLoadingExternalAlerts(true);
-    fetch(`/api/alerts/news?players=${encodeURIComponent(uniqueNames.join("|"))}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (cancelled || !Array.isArray(data?.items)) return;
-        const items = data.items.slice(0, 8).map((item: NewsItem) => ({
-          id: `news-${String(item.id || item.link || item.title).replace(/[^a-zA-Z0-9_-]/g, "")}`,
-          category: "news" as const,
-          source: "external" as const,
-          severity: (item.impact || (item.playerNames?.length ?? 0) > 0) ? "medium" as const : "low" as const,
-          title: item.title || "Player news",
-          detail: item.summary || item.playerNames?.join(", ") || "External update matched one of your tracked names.",
-          actionable: !!item.playerNames?.length,
-          timestamp: Number(new Date(item.published || Date.now())),
-          link: item.link || null,
-          payload: item,
-        }));
-        mergeDashboardAlerts(items);
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setLoadingExternalAlerts(false);
-      });
-
-    return () => { cancelled = true; };
-  }, [dashboardOwnedPlayers, watchlistEntries, players, mergeDashboardAlerts]);
-
   // ── Bye week alerts ───────────────────────────────────────────────────────
   useEffect(() => {
     if (nflState?.season_type !== "regular") return;
@@ -3688,12 +3592,10 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     actionableDashboardAlerts,
     watchlistEntries,
     dismissDashboardAlert,
-    loadingExternalAlerts,
     leagueTransactions,
     loadingTransactions,
     injuryReportPlayers,
     allTradeAttempts,
-    allRosterBriefings,
     loadLeagueOverview,
     loadingLeagueOverview,
     onNavigateToAttempts,

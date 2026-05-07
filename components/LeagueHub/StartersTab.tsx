@@ -92,35 +92,54 @@ function StartersTab({ projectionData, nflState }: StartersTabProps) {
     .filter((p): p is SleeperPlayer => !!p)
     .sort((a, b) => playerScore(b.player_id) - playerScore(a.player_id));
 
+  const currentStarterIds = new Set(
+    currentStarterRows
+      .map((r) => r.player?.player_id)
+      .filter((id): id is string => !!id)
+  );
+  const newStarterIds = new Set(
+    lineup
+      .map((r) => r.player?.player_id)
+      .filter((id): id is string => !!id)
+  );
+
+  // Players currently starting who are NOT in the optimized lineup — these go to the bench.
+  // Sort lowest-score first so they pair with the cheapest replacements first.
+  const benchedPool: SleeperPlayer[] = currentStarterRows
+    .map((r) => r.player)
+    .filter((p): p is SleeperPlayer => !!p && !newStarterIds.has(p.player_id))
+    .sort((a, b) => playerScore(a.player_id) - playerScore(b.player_id));
+
   const lineupCoachNotes = lineup
-    .map(({ slot, player, score }, index) => {
+    .map(({ slot, player, score }) => {
       if (!player?.player_id) return null;
-      const currentRow = currentStarterRows[index];
-      const currentPlayer = currentRow?.player;
-      if (currentPlayer?.player_id === player.player_id) return null;
-      const delta = score - (currentRow?.score || 0);
+      // Skip players who were already starting — their slot may have shifted (e.g.,
+      // FLEX 1 → FLEX 2) but that's an internal shuffle, not a real lineup change.
+      if (currentStarterIds.has(player.player_id)) return null;
+
+      const eligible = getLineupSlotEligiblePositions(slot);
+      let matchIdx = benchedPool.findIndex((p) => eligible.includes(p.position));
+      if (matchIdx === -1 && benchedPool.length > 0) matchIdx = 0;
+      const replaced = matchIdx >= 0 ? benchedPool.splice(matchIdx, 1)[0] : null;
+      const replacedScore = replaced ? playerScore(replaced.player_id) : 0;
+      const delta = score - replacedScore;
+
       const reasonParts = [
         delta > 0
           ? `${isInSeason ? "Projection" : "Redraft score"} improves by ${delta.toFixed(1)}`
           : `${isInSeason ? "Projection" : "Redraft score"} is safer for this slot`,
-        currentPlayer?.status && /out|doubtful|inactive|suspended/i.test(String(currentPlayer.status))
-          ? `${currentPlayer.full_name} is ${String(currentPlayer.status).toLowerCase()}`
+        replaced?.status && /out|doubtful|inactive|suspended/i.test(String(replaced.status))
+          ? `${replaced.full_name} is ${String(replaced.status).toLowerCase()}`
           : null,
         slot === "FLEX" || slot === "SUPER_FLEX"
           ? `${player.full_name} is the strongest remaining ${slot === "SUPER_FLEX" ? "flex-eligible" : "flex"} fit`
           : `${player.full_name} grades best at ${slot.replace("_", " ")}`,
-        isInSeason &&
-        hasKickoffData &&
-        currentRow?.slot !== slot &&
-        currentPlayer?.position === player.position
-          ? `${player.full_name} gets the earlier locked slot so later-game flexibility stays in ${currentRow.slot.replace("_", " ")}`
-          : null,
       ].filter(Boolean);
 
       return {
         slot,
         suggested: player,
-        current: currentPlayer,
+        current: replaced,
         delta,
         reason: reasonParts.join(" • "),
       };
@@ -128,7 +147,7 @@ function StartersTab({ projectionData, nflState }: StartersTabProps) {
     .filter(Boolean) as Array<{
       slot: string;
       suggested: SleeperPlayer;
-      current: SleeperPlayer | null | undefined;
+      current: SleeperPlayer | null;
       delta: number;
       reason: string;
     }>;
@@ -137,104 +156,104 @@ function StartersTab({ projectionData, nflState }: StartersTabProps) {
   const suggestedLineupScore = lineup.reduce((sum: number, row) => sum + (row.score || 0), 0);
   const lineupDelta = suggestedLineupScore - currentLineupScore;
 
-  const posColor: Record<string,string> = { QB:"bg-red-900/50 border-red-700", RB:"bg-green-900/50 border-green-700", WR:"bg-blue-900/50 border-blue-700", TE:"bg-yellow-900/50 border-yellow-700", FLEX:"bg-purple-900/50 border-purple-700", SUPER_FLEX:"bg-pink-900/50 border-pink-700" };
+  const renderStatusBadge = (status: string | null | undefined) => {
+    const s = status ? String(status).toLowerCase() : "";
+    if (/out|inactive|suspended|covid|nfi|pup/.test(s)) return <span className="text-[10px] font-semibold text-red-400 shrink-0">OUT</span>;
+    if (s === "doubtful") return <span className="text-[10px] font-semibold text-orange-400 shrink-0">D</span>;
+    if (s === "questionable") return <span className="text-[10px] font-semibold text-yellow-400 shrink-0">Q</span>;
+    return null;
+  };
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between mb-1">
-        <p className="text-xs text-gray-500">
-          {isInSeason
-            ? <>Week {week} starters based on <strong className="text-gray-300">consensus projections</strong></>
-            : <>Offseason starters based on <strong className="text-gray-300">redraft rankings</strong></>
-          }
-          {" — "}<span className="text-blue-400">{selectedLeague.name}</span>
-        </p>
-      </div>
-      <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
-        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-          <div>
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Lineup Coach</div>
-            <div className="mt-1 text-sm text-gray-200">
+      <p className="text-xs text-gray-500 mb-1">
+        {isInSeason
+          ? <>Week {week} starters based on <span className="text-gray-300 font-medium">consensus projections</span></>
+          : <>Offseason starters based on <span className="text-gray-300 font-medium">redraft rankings</span></>
+        }
+        {" — "}<span className="text-gray-300">{selectedLeague.name}</span>
+      </p>
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-3">
+        <div className="border-b border-gray-800 pb-2 mb-2 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-[11px] uppercase tracking-wide text-gray-500">Lineup Coach</div>
+            <div className="mt-0.5 text-xs text-gray-200">
               {lineupCoachNotes.length === 0
                 ? "Your current lineup already matches the coach recommendation."
                 : `The coach would make ${lineupCoachNotes.length} swap${lineupCoachNotes.length === 1 ? "" : "s"}${lineupDelta > 0 ? ` for roughly +${lineupDelta.toFixed(1)}` : ""}.`}
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-2 text-center md:min-w-[220px]">
-            <div className="rounded-lg border border-gray-800 bg-gray-950/60 px-3 py-2">
+          <div className="grid grid-cols-2 gap-x-4 text-right whitespace-nowrap">
+            <div>
               <div className="text-[10px] uppercase tracking-wide text-gray-500">Current</div>
-              <div className="mt-1 text-sm font-semibold text-white">{currentLineupScore.toFixed(1)}</div>
+              <div className="text-gray-200 font-medium text-xs">{currentLineupScore.toFixed(1)}</div>
             </div>
-            <div className="rounded-lg border border-gray-800 bg-gray-950/60 px-3 py-2">
+            <div>
               <div className="text-[10px] uppercase tracking-wide text-gray-500">Suggested</div>
-              <div className={`mt-1 text-sm font-semibold ${lineupDelta > 0 ? "text-green-300" : "text-white"}`}>
+              <div className={`font-medium text-xs ${lineupDelta > 0 ? "text-emerald-400" : "text-gray-200"}`}>
                 {suggestedLineupScore.toFixed(1)}
               </div>
             </div>
           </div>
         </div>
         {lineupCoachNotes.length > 0 && (
-          <div className="mt-4 grid gap-2">
+          <div className="space-y-2">
             {lineupCoachNotes.map((note) => (
-              <div key={`${note.slot}-${note.suggested.player_id}-${note.current?.player_id || "empty"}`} className="rounded-xl border border-gray-800 bg-gray-950/60 p-3">
-                <div className="flex flex-wrap items-center gap-2 text-sm">
-                  <span className="rounded-full border border-blue-800 bg-blue-950/40 px-2 py-0.5 text-[10px] font-semibold text-blue-300">
-                    {note.slot.replace("_", " ")}
-                  </span>
-                  <span className="text-white">{note.current?.full_name || "Empty slot"}</span>
-                  <span className="text-gray-500">→</span>
-                  <span className="font-semibold text-green-300">{note.suggested.full_name}</span>
-                  <span className={`text-xs font-mono ${note.delta > 0 ? "text-green-300" : "text-gray-400"}`}>
+              <div key={`${note.slot}-${note.suggested.player_id}-${note.current?.player_id || "empty"}`} className="text-xs">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[10px] uppercase tracking-wide text-gray-500 w-16 shrink-0">{note.slot.replace("_", " ")}</span>
+                  <span className="text-gray-200">{note.current?.full_name || "Empty slot"}</span>
+                  <span className="text-gray-600">→</span>
+                  <span className="text-gray-200 font-medium">{note.suggested.full_name}</span>
+                  <span className={`font-medium ${note.delta > 0 ? "text-emerald-400" : "text-gray-500"}`}>
                     {note.delta > 0 ? "+" : ""}{note.delta.toFixed(1)}
                   </span>
                 </div>
-                <div className="mt-1 text-xs text-gray-400">{note.reason}</div>
+                <div className="mt-0.5 text-[11px] text-gray-500 pl-[4.5rem]">{note.reason}</div>
               </div>
             ))}
           </div>
         )}
       </div>
-      {lineup.map(({ slot, player, score }) => {
-        const statusStr = player?.status ? String(player.status).toLowerCase() : "";
-        const isOut = /out|inactive|suspended|covid|nfi|pup/.test(statusStr);
-        const isDoubtful = statusStr === "doubtful";
-        const isQuestionable = statusStr === "questionable";
-        return (
-          <div key={slot} className={`flex items-center gap-3 border rounded-xl px-3 py-2 ${posColor[slot] ?? "bg-gray-800 border-gray-700"}`}>
-            <span className="text-[10px] font-bold uppercase w-16 shrink-0 text-gray-300">{slot.replace("_"," ")}</span>
-            {player ? (
-              <>
-                <span className="text-sm text-white flex-1 font-medium">{player.full_name}</span>
-                {isOut && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-red-900/60 text-red-400 border border-red-700 shrink-0">OUT</span>}
-                {isDoubtful && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-orange-900/60 text-orange-400 border border-orange-700 shrink-0">D</span>}
-                {isQuestionable && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-yellow-900/60 text-yellow-400 border border-yellow-700 shrink-0">Q</span>}
-                <span className="text-[10px] text-gray-400 shrink-0">{player.team}</span>
-                <span className="text-xs font-mono text-gray-300 shrink-0">{score > 0 ? score.toFixed(1) : "—"}</span>
-              </>
-            ) : (
-              <span className="text-sm text-gray-600 italic">Empty</span>
-            )}
-          </div>
-        );
-      })}
-      <div className="grid gap-3 pt-2 md:grid-cols-2">
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-3">
+        <div className="border-b border-gray-800 pb-2 mb-2">
+          <div className="text-[11px] uppercase tracking-wide text-gray-500">Suggested Lineup</div>
+        </div>
+        <div className="space-y-0.5">
+          {lineup.map(({ slot, player, score }, index) => (
+            <div key={`${slot}-${index}`} className="flex items-center gap-2 text-xs py-0.5">
+              <span className="text-[10px] uppercase tracking-wide text-gray-500 w-16 shrink-0">{slot.replace("_", " ")}</span>
+              {player ? (
+                <>
+                  <span className="text-gray-200 flex-1 truncate">{player.full_name}</span>
+                  {renderStatusBadge(player.status)}
+                  <span className="text-[10px] text-gray-500 shrink-0">{player.team}</span>
+                  <span className="text-emerald-400 font-medium shrink-0 w-12 text-right">{score > 0 ? score.toFixed(1) : "—"}</span>
+                </>
+              ) : (
+                <span className="text-gray-600 italic flex-1">Empty</span>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-3">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold uppercase tracking-widest text-gray-400">Bench</span>
-            <span className="text-[10px] text-gray-600">{benchPlayers.length}</span>
+          <div className="border-b border-gray-800 pb-2 mb-2">
+            <div className="text-xs text-gray-400">Bench: <span className="font-semibold text-emerald-400">{benchPlayers.length}</span></div>
           </div>
-          <div className="space-y-1.5">
+          <div className="space-y-0.5">
             {benchPlayers.length === 0 ? (
-              <p className="text-xs text-gray-600 italic">No bench players</p>
+              <div className="text-[11px] text-gray-600 italic">No bench players</div>
             ) : (
               benchPlayers.map((player) => {
                 const score = playerScore(player.player_id);
                 return (
-                  <div key={player.player_id} className="flex items-center gap-2 rounded-lg bg-gray-800/80 px-3 py-1.5">
-                    <span className="text-[10px] font-bold w-7 shrink-0 text-gray-400">{player.position}</span>
-                    <span className="text-sm text-white flex-1 truncate">{player.full_name}</span>
+                  <div key={player.player_id} className="flex items-center gap-2 text-xs py-0.5">
+                    <span className="text-[10px] uppercase text-gray-500 w-7 shrink-0">{player.position}</span>
+                    <span className="text-gray-200 flex-1 truncate">{player.full_name}</span>
                     <span className="text-[10px] text-gray-500 shrink-0">{player.team}</span>
-                    <span className="text-xs font-mono text-gray-300 shrink-0">{score > 0 ? score.toFixed(1) : "—"}</span>
+                    <span className="text-emerald-400 font-medium shrink-0 w-12 text-right">{score > 0 ? score.toFixed(1) : "—"}</span>
                   </div>
                 );
               })
@@ -242,22 +261,21 @@ function StartersTab({ projectionData, nflState }: StartersTabProps) {
           </div>
         </div>
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-3">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold uppercase tracking-widest text-gray-400">Taxi</span>
-            <span className="text-[10px] text-gray-600">{taxiPlayers.length}</span>
+          <div className="border-b border-gray-800 pb-2 mb-2">
+            <div className="text-xs text-gray-400">Taxi: <span className="font-semibold text-emerald-400">{taxiPlayers.length}</span></div>
           </div>
-          <div className="space-y-1.5">
+          <div className="space-y-0.5">
             {taxiPlayers.length === 0 ? (
-              <p className="text-xs text-gray-600 italic">No taxi players</p>
+              <div className="text-[11px] text-gray-600 italic">No taxi players</div>
             ) : (
               taxiPlayers.map((player) => {
                 const score = playerScore(player.player_id);
                 return (
-                  <div key={player.player_id} className="flex items-center gap-2 rounded-lg bg-gray-800/80 px-3 py-1.5">
-                    <span className="text-[10px] font-bold w-7 shrink-0 text-gray-400">{player.position}</span>
-                    <span className="text-sm text-white flex-1 truncate">{player.full_name}</span>
+                  <div key={player.player_id} className="flex items-center gap-2 text-xs py-0.5">
+                    <span className="text-[10px] uppercase text-gray-500 w-7 shrink-0">{player.position}</span>
+                    <span className="text-gray-200 flex-1 truncate">{player.full_name}</span>
                     <span className="text-[10px] text-gray-500 shrink-0">{player.team}</span>
-                    <span className="text-xs font-mono text-gray-300 shrink-0">{score > 0 ? score.toFixed(1) : "—"}</span>
+                    <span className="text-emerald-400 font-medium shrink-0 w-12 text-right">{score > 0 ? score.toFixed(1) : "—"}</span>
                   </div>
                 );
               })

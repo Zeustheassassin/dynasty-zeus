@@ -16,7 +16,7 @@ import type {
   SleeperNFLState, SleeperUser, SleeperDraft, SleeperDraftPick,
   AugmentedPick, LeagueOverviewEntry, HistoricalSnapshot,
   LeagueMateView, CommittedSimsByLeague, CachedSimRow, RookieBoardPlayer,
-  GamedayMatchup, WatchlistEntry, GmBriefing,
+  GamedayMatchup, WatchlistEntry,
   TradeAttempt, TradeAttemptStatus, FcTrendEntry, PredictedPick, DraftPoolRanks,
   LeagueHubTab, ProjectionRow, SimulationTeamRow,
   LeagueMgmtData, CommPaymentsData, TradePartnerRanking,
@@ -25,7 +25,7 @@ import type { AnnotatedTrade } from "../../hooks/useUserTrades";
 import type { DashboardAlert, LeagueTransaction, InjuryReportPlayer } from "../../components/AlertsPage/alertsPageHelpers";
 import type { ExposureData } from "../../hooks/useUserExposure";
 import type { DraftScoutLeague } from "../../hooks/useDraftScout";
-import type { StandingRow, AnnotatedTransaction, TeamSummary } from "../../components/LeagueHub/leagueHubTypes";
+import type { StandingRow, AnnotatedTransaction } from "../../components/LeagueHub/leagueHubTypes";
 import type { ShareEntry } from "../../components/DataHub/dataHubTypes";
 
 // ── Hub loading skeleton ───────────────────────────────────────────────────
@@ -46,7 +46,7 @@ const TradeHub = dynamic(() => import("../../components/TradeHub"), { ssr: false
 const ScoutingHub = dynamic(() => import("../../components/ScoutingHub"), { ssr: false, loading: HubSkeleton });
 
 // ── Local types ──────────────────────────────────────────────────────────────
-type DataHubTabId = "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "PICK_VALUES" | "LEAGUEMATES" | "DEPTH_CHARTS" | "BUY_LOW";
+type DataHubTabId = "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "LEAGUEMATES" | "DEPTH_CHARTS" | "BUY_LOW" | "MY_SHARES";
 
 // ── Props ────────────────────────────────────────────────────────────────────
 interface HubRouterProps {
@@ -80,12 +80,10 @@ interface HubRouterProps {
   actionableDashboardAlerts: DashboardAlert[];
   watchlistEntries: WatchlistEntry[];
   dismissDashboardAlert: (alertId: string) => void;
-  loadingExternalAlerts: boolean;
   leagueTransactions: LeagueTransaction[];
   loadingTransactions: boolean;
   injuryReportPlayers: InjuryReportPlayer[];
   allTradeAttempts: { id: string; league_id: string; status: string }[];
-  allRosterBriefings: GmBriefing[];
   loadLeagueOverview: () => Promise<void>;
   loadingLeagueOverview: boolean;
   onNavigateToAttempts: (leagueId: string) => void;
@@ -107,7 +105,6 @@ interface HubRouterProps {
   activityTransactions: AnnotatedTransaction[];
   leagueOverviewData: Record<string, LeagueOverviewEntry>;
   leagueOverviewLoaded: boolean;
-  teamSummary: TeamSummary | null;
   selectedLeagueMateProfilesView: LeagueMateView[];
   ignoredOwnerIds: string[];
   toggleIgnoredOwner: (ownerId: string) => void;
@@ -260,14 +257,14 @@ export function HubRouter({
   nflState, selectedLeague, setSelectedLeague,
   connectLoading, connectError, connectSuccess, connectSleeper,
   visibleDashboardAlerts, actionableDashboardAlerts, watchlistEntries,
-  dismissDashboardAlert, loadingExternalAlerts, leagueTransactions, loadingTransactions,
-  injuryReportPlayers, allTradeAttempts, allRosterBriefings,
+  dismissDashboardAlert, leagueTransactions, loadingTransactions,
+  injuryReportPlayers, allTradeAttempts,
   loadLeagueOverview, loadingLeagueOverview, onNavigateToAttempts,
   leagueHubTab, setLeagueHubTab, activeLeagueHubGroup, standings,
   committedSimsByLeague, leagueSimCache, simQueue, simProgress,
   loadingLeagueMateIntel, loadingCrossLeagueMateIntel, loadingActivity, loadingLeagueWeeklyMatchups,
   leagueNotes, activityTransactions, leagueOverviewData, leagueOverviewLoaded,
-  teamSummary, selectedLeagueMateProfilesView, ignoredOwnerIds, toggleIgnoredOwner,
+  selectedLeagueMateProfilesView, ignoredOwnerIds, toggleIgnoredOwner,
   freeAgents, loadingCalcValues, loadingDraftRefresh, rookies, draftedPlayerIds,
   loadRoster, loadRedraftValues, loadUserTrades, loadUserExposure, loadDraftScout,
   saveLeagueNote, saveSimulationToSupabase, handleRunAllSims, refreshDraftBoard,
@@ -356,7 +353,6 @@ export function HubRouter({
             actionableAlerts={actionableDashboardAlerts}
             watchlistEntries={watchlistEntries}
             onDismissAlert={dismissDashboardAlert}
-            loadingExternalAlerts={loadingExternalAlerts}
             leagueTransactions={leagueTransactions}
             loadingTransactions={loadingTransactions}
             players={players}
@@ -364,9 +360,6 @@ export function HubRouter({
             currentNFLWeek={nflState?.season_type === "regular" ? Number(nflState?.week || 0) : 0}
             allTradeAttempts={allTradeAttempts}
             allLeagues={leagues}
-            rosterBriefings={allRosterBriefings}
-            onRefreshLeagueData={loadLeagueOverview}
-            loadingLeagueOverview={loadingLeagueOverview}
             onNavigateToAttempts={onNavigateToAttempts}
           />
           </ErrorBoundary>
@@ -397,39 +390,21 @@ export function HubRouter({
             leagueOverviewData={leagueOverviewData}
             loadingLeagueOverview={loadingLeagueOverview}
             leagueOverviewLoaded={leagueOverviewLoaded}
-            teamSummary={teamSummary}
             selectedLeagueMateProfilesView={selectedLeagueMateProfilesView}
             ignoredOwnerIds={ignoredOwnerIds}
             toggleIgnoredOwner={toggleIgnoredOwner}
             projectionData={projectionData}
-            draftPicks={draftPicks}
-            draftOrder={draftOrder}
-            draftSettings={draftSettings}
-            myDraftSlotPicks={myDraftSlotPicks}
-            setMyDraftSlotPicks={setMyDraftSlotPicks}
-            draftSlotEditing={draftSlotEditing}
-            setDraftSlotEditing={setDraftSlotEditing}
-            draftSlotSearchQuery={draftSlotSearchQuery}
-            setDraftSlotSearchQuery={setDraftSlotSearchQuery}
-            draftHubSection={draftHubSection}
             nflState={nflState}
             freeAgents={freeAgents}
             loadingCalcValues={loadingCalcValues}
-            predictedDraftPicks={predictedDraftPicks}
-            draftPoolRanks={draftPoolRanks}
-            loadingDraftRefresh={loadingDraftRefresh}
-            rookies={rookies}
-            draftedPlayerIds={draftedPlayerIds}
             loadRoster={loadRoster}
             loadLeagueOverview={loadLeagueOverview}
             loadRedraftValues={loadRedraftValues}
             loadUserTrades={loadUserTrades}
             loadUserExposure={loadUserExposure}
-            loadDraftScout={loadDraftScout}
             saveLeagueNote={saveLeagueNote}
             onSaveSim={saveSimulationToSupabase}
             handleRunAllSims={handleRunAllSims}
-            refreshDraftBoard={refreshDraftBoard}
             setPlayerProfileId={setPlayerProfileId}
             setCalcOpponentRosterId={setCalcOpponentRosterId}
             setMainTab={setMainTab}
@@ -490,7 +465,6 @@ export function HubRouter({
             projectionSourceStatus={projectionSourceStatus}
             loadingProjections={loadingProjections}
             projectionUsesSeasonFallback={projectionUsesSeasonFallback}
-            allPicks={allPicks}
             leagues={leagues}
             user={user}
             loadUserExposure={loadUserExposure}

@@ -8,16 +8,12 @@ type FeedTabProps = {
   alerts: DashboardAlert[];
   actionableAlerts: DashboardAlert[];
   onDismissAlert: (alertId: string) => void;
-  loadingExternalAlerts: boolean;
   players: Record<string, SleeperPlayer>;
 };
 
-function FeedTab({ alerts, actionableAlerts, onDismissAlert, loadingExternalAlerts, players }: FeedTabProps) {
+function FeedTab({ alerts, actionableAlerts, onDismissAlert, players }: FeedTabProps) {
   return (
     <div className="grid gap-3">
-      {loadingExternalAlerts && (
-        <p className="text-xs text-blue-400 -mb-1">Refreshing alerts...</p>
-      )}
       {alerts.length > 1 && (
         <div className="flex justify-end -mb-1">
           <button

@@ -1,22 +1,17 @@
 "use client";
-import type { WatchlistEntry, SleeperPlayer, GmBriefing } from "../lib/types";
+import type { WatchlistEntry, SleeperPlayer } from "../lib/types";
 import type { DashboardAlert, LeagueTransaction, InjuryReportPlayer } from "./AlertsPage/alertsPageHelpers";
 import { POS_COLOR } from "./AlertsPage/alertsPageHelpers";
 import { useAlertsState } from "./AlertsPage/hooks/useAlertsState";
 import TxCard from "./AlertsPage/TxCard";
 import FeedTab from "./AlertsPage/FeedTab";
 import InjuryTab from "./AlertsPage/InjuryTab";
-import NewsTab from "./AlertsPage/NewsTab";
-import BeatTab from "./AlertsPage/BeatTab";
-import WireTab from "./AlertsPage/WireTab";
-import BriefingTab from "./AlertsPage/BriefingTab";
 
 type AlertsPageProps = {
   alerts: DashboardAlert[];
   actionableAlerts: DashboardAlert[];
   watchlistEntries: WatchlistEntry[];
   onDismissAlert: (alertId: string) => void;
-  loadingExternalAlerts: boolean;
   leagueTransactions: LeagueTransaction[];
   loadingTransactions: boolean;
   players: Record<string, SleeperPlayer>;
@@ -24,9 +19,6 @@ type AlertsPageProps = {
   currentNFLWeek: number;
   allTradeAttempts: { id: string; league_id: string; status: string }[];
   allLeagues: { league_id: string; name: string }[];
-  rosterBriefings?: GmBriefing[];
-  onRefreshLeagueData?: () => void;
-  loadingLeagueOverview?: boolean;
   onNavigateToAttempts: (leagueId: string) => void;
 };
 
@@ -34,7 +26,6 @@ export default function AlertsPage({
   alerts,
   actionableAlerts,
   onDismissAlert,
-  loadingExternalAlerts,
   leagueTransactions,
   loadingTransactions,
   players,
@@ -42,9 +33,6 @@ export default function AlertsPage({
   currentNFLWeek,
   allTradeAttempts,
   allLeagues,
-  rosterBriefings,
-  onRefreshLeagueData,
-  loadingLeagueOverview,
   onNavigateToAttempts,
 }: AlertsPageProps) {
   const {
@@ -52,12 +40,6 @@ export default function AlertsPage({
     setFeedTab,
     expandedInjuryId,
     setExpandedInjuryId,
-    newsItems,
-    loadingNews,
-    beatItems,
-    loadingBeat,
-    wireItems,
-    loadingWire,
     tradeActivity,
     waiverActivity,
     injuredCount,
@@ -72,8 +54,6 @@ export default function AlertsPage({
     injuryReportPlayers,
     currentNFLWeek,
     alerts,
-    rosterBriefings,
-    players,
   });
 
   return (
@@ -86,16 +66,14 @@ export default function AlertsPage({
             </div>
             <h1 className="mt-2 text-3xl font-semibold text-white">Actionable today</h1>
             <p className="mt-1 text-sm text-slate-400">
-              Internal changes, watchlist triggers, and matched news in one place.
+              Internal changes, watchlist triggers, and league activity in one place.
             </p>
           </div>
           <div className="flex gap-3 flex-wrap">
             <div className="rounded-2xl border border-blue-800/60 bg-blue-950/40 px-3 py-2 text-right">
               <div className="text-[11px] uppercase tracking-[0.18em] text-blue-300">Alerts</div>
               <div className="mt-1 text-lg font-semibold text-white">{alerts.length}</div>
-              <div className="text-xs text-slate-400">
-                {loadingExternalAlerts ? "Refreshing news..." : `${actionableAlerts.length} actionable now`}
-              </div>
+              <div className="text-xs text-slate-400">{actionableAlerts.length} actionable now</div>
             </div>
             <div className="rounded-2xl border border-slate-700 bg-slate-900/60 px-3 py-2 text-right">
               <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Trades</div>
@@ -172,7 +150,6 @@ export default function AlertsPage({
               alerts={alerts}
               actionableAlerts={actionableAlerts}
               onDismissAlert={onDismissAlert}
-              loadingExternalAlerts={loadingExternalAlerts}
               players={players}
             />
           )}
@@ -180,10 +157,10 @@ export default function AlertsPage({
           {feedTab === "transactions" && (
             <div>
               {loadingTransactions ? (
-                <p className="text-sm text-blue-400 py-4">Loading trades across all leagues…</p>
+                <p className="text-sm text-blue-400 py-4">Loading trades across your leagues…</p>
               ) : tradeActivity.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-6 text-sm text-slate-400">
-                  No recent trades found. Make sure your leagues are loaded.
+                  No recent trades found in your leagues.
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -211,18 +188,6 @@ export default function AlertsPage({
                 </div>
               )}
             </div>
-          )}
-
-          {feedTab === "news" && (
-            <NewsTab newsItems={newsItems} loadingNews={loadingNews} />
-          )}
-
-          {feedTab === "beat" && (
-            <BeatTab beatItems={beatItems} loadingBeat={loadingBeat} />
-          )}
-
-          {feedTab === "wire" && (
-            <WireTab wireItems={wireItems} loadingWire={loadingWire} />
           )}
 
           {/* hidden bye watch tab — kept for potential future use */}
@@ -381,14 +346,6 @@ export default function AlertsPage({
                 </div>
               )}
             </div>
-          )}
-
-          {feedTab === "briefing" && (
-            <BriefingTab
-              rosterBriefings={rosterBriefings}
-              onRefreshLeagueData={onRefreshLeagueData}
-              loadingLeagueOverview={loadingLeagueOverview}
-            />
           )}
 
           {feedTab === "injury" && (

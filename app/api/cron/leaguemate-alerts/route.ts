@@ -2,14 +2,20 @@
 // Cron — Leaguemate trade alerts
 // ============================================================
 // Runs on a Vercel cron schedule. For every registered user in
-// user_sleeper_links, walks the user's leaguemates → leaguemates'
-// dynasty leagues → recent transactions, then inserts net-new
-// trade-alert rows into the public.alerts table.
+// user_sleeper_links, walks the user's OWN dynasty leagues, finds
+// trades from the last 14 days, and inserts net-new trade-alert
+// rows into the public.alerts table — one row per non-user owner
+// involved in each trade.
 //
-// Replaces the client-side fan-out in app/hooks/useAppState.ts that
-// fired 1000+ Sleeper calls per session and tripped Sleeper's rate
-// limiter. The frontend now reads pre-built alerts from Supabase
-// (see Stage S3.5).
+// History:
+//   The original implementation also fanned out to leaguemates'
+//   *other* dynasty leagues, generating ~1000+ Sleeper requests per
+//   user per run and consistently tripping the 5-minute Vercel
+//   function timeout (see Vercel anomaly 2026-05-06). The user
+//   confirmed they only care about trades in leagues they're
+//   actually in, so the leaguemate fan-out was removed: O(L) calls
+//   instead of O(L × M × L'), where M is leaguemate count and L'
+//   is each leaguemate's own league count.
 //
 // Auth:
 //   Vercel cron sends `Authorization: Bearer ${CRON_SECRET}` when
@@ -20,11 +26,6 @@
 //   ignoreDuplicates=true) keyed on (user_id, alert_id). Repeat
 //   runs are no-ops for already-known trades; user dismiss state
 //   on existing rows is never overwritten.
-//
-// Throttling:
-//   safeFetch backs off on 429s; withConcurrency caps in-flight
-//   Sleeper requests at CONCURRENCY per batch. Users are processed
-//   sequentially so one slow user can't starve another.
 // ============================================================
 
 import { NextRequest, NextResponse } from "next/server";
@@ -44,16 +45,15 @@ import type {
 
 const log = logger("cron/leaguemate-alerts");
 
-// Allow up to 5 minutes — large user pools with many leaguemates can take a while.
-export const maxDuration = 300;
+// 60s is plenty now that the fan-out is gone — typical run scans
+// ~12 leagues × 5 endpoints = 60 Sleeper calls.
+export const maxDuration = 60;
 
-// Bounded concurrency for outgoing Sleeper requests within a single user's
-// fan-out. Keeps us well under Sleeper's ~1000 req/min ceiling even when
-// safeFetch retries land near the same window.
+// Bounded concurrency for outgoing Sleeper requests. Keeps us well
+// under Sleeper's ~1000 req/min ceiling even if safeFetch retries.
 const CONCURRENCY = 5;
 
-// Trade alerts surface trades from the last 14 days (matches the prior
-// client-side window in app/hooks/useAppState.ts:1007).
+// Trade alerts surface trades from the last 14 days.
 const TRADE_LOOKBACK_MS = 14 * 24 * 60 * 60 * 1000;
 
 // Offseason transactions are bucketed under weeks 0–2; week 0 alone misses
@@ -88,14 +88,17 @@ function isDynastyLeague(l: SleeperLeague): boolean {
 }
 
 /**
- * Walks one registered user's leaguemates and collects net-new trade alerts.
- * Returns the number of rows inserted (after ON CONFLICT DO NOTHING).
+ * Walks one registered user's own dynasty leagues and collects net-new trade
+ * alerts. Returns the number of rows inserted (after ON CONFLICT DO NOTHING).
  *
  * Player names are NOT resolved server-side — the cron writes raw player IDs
  * into payload.acquiredPlayerIds / payload.sentPlayerIds and the FeedTab
  * resolver renders names from the client's already-loaded players map. This
- * skips a 5 MB /players/nfl fetch per cron run and ~50 MB of provisioned
- * memory while the function holds it.
+ * skips a 5 MB /players/nfl fetch per cron run.
+ *
+ * One alert is emitted per non-user owner involved in each trade — so a
+ * two-team trade in a shared league produces one alert ("Bob made a trade")
+ * from the user's perspective. The user's own trades aren't duplicated.
  */
 async function processUser(
   authUserId: string,
@@ -104,7 +107,6 @@ async function processUser(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   supabase: SupabaseClient<any>
 ): Promise<number> {
-  // ── 1. The user's own dynasty leagues for the current year ─────────────────
   const userLeagues =
     (await safeFetch<SleeperLeague[]>(
       `${SLEEPER_BASE_URL}/user/${sleeperUserId}/leagues/nfl/${CURRENT_YEAR}`
@@ -112,113 +114,90 @@ async function processUser(
   const userDynastyLeagues = userLeagues.filter(isDynastyLeague);
   if (!userDynastyLeagues.length) return 0;
 
-  // ── 2. Gather leaguemate owner IDs across all the user's leagues ───────────
-  const leaguemateOwnerIds = new Set<string>();
-  await withConcurrency(
-    userDynastyLeagues,
-    async (league) => {
-      const rosters =
-        (await safeFetch<SleeperRoster[]>(
-          `${SLEEPER_BASE_URL}/league/${league.league_id}/rosters`
-        )) ?? [];
-      rosters.forEach((r) => {
-        if (r.owner_id && String(r.owner_id) !== String(sleeperUserId)) {
-          leaguemateOwnerIds.add(String(r.owner_id));
-        }
-      });
-    },
-    CONCURRENCY
-  );
-
-  if (!leaguemateOwnerIds.size) return 0;
-
-  // ── 3. For each leaguemate: walk their dynasty leagues and find trades ─────
-  // Sleeper transactions return updated/created as ms epoch — same shape the
-  // client builder at app/hooks/useAppState.ts:1083 assumes.
   const fourteenDaysAgo = Date.now() - TRADE_LOOKBACK_MS;
-
   const collected: AlertRow[] = [];
   const seenAlertIds = new Set<string>();
 
-  for (const ownerId of leaguemateOwnerIds) {
-    const ownerLeagues =
-      (await safeFetch<SleeperLeague[]>(
-        `${SLEEPER_BASE_URL}/user/${ownerId}/leagues/nfl/${CURRENT_YEAR}`
-      )) ?? [];
-    const ownerDynastyLeagues = ownerLeagues.filter(isDynastyLeague);
-    if (!ownerDynastyLeagues.length) continue;
+  await withConcurrency(
+    userDynastyLeagues,
+    async (league) => {
+      const [rosters, txn0, txn1, txn2, drafts] = await Promise.all([
+        safeFetch<SleeperRoster[]>(
+          `${SLEEPER_BASE_URL}/league/${league.league_id}/rosters`
+        ),
+        safeFetch<SleeperTransaction[]>(
+          `${SLEEPER_BASE_URL}/league/${league.league_id}/transactions/${TRANSACTION_WEEKS[0]}`
+        ),
+        safeFetch<SleeperTransaction[]>(
+          `${SLEEPER_BASE_URL}/league/${league.league_id}/transactions/${TRANSACTION_WEEKS[1]}`
+        ),
+        safeFetch<SleeperTransaction[]>(
+          `${SLEEPER_BASE_URL}/league/${league.league_id}/transactions/${TRANSACTION_WEEKS[2]}`
+        ),
+        safeFetch<SleeperDraft[]>(
+          `${SLEEPER_BASE_URL}/league/${league.league_id}/drafts`
+        ),
+      ]);
 
-    await withConcurrency(
-      ownerDynastyLeagues,
-      async (league) => {
-        const [rosters, txn0, txn1, txn2, drafts] = await Promise.all([
-          safeFetch<SleeperRoster[]>(
-            `${SLEEPER_BASE_URL}/league/${league.league_id}/rosters`
-          ),
-          safeFetch<SleeperTransaction[]>(
-            `${SLEEPER_BASE_URL}/league/${league.league_id}/transactions/${TRANSACTION_WEEKS[0]}`
-          ),
-          safeFetch<SleeperTransaction[]>(
-            `${SLEEPER_BASE_URL}/league/${league.league_id}/transactions/${TRANSACTION_WEEKS[1]}`
-          ),
-          safeFetch<SleeperTransaction[]>(
-            `${SLEEPER_BASE_URL}/league/${league.league_id}/transactions/${TRANSACTION_WEEKS[2]}`
-          ),
-          safeFetch<SleeperDraft[]>(
-            `${SLEEPER_BASE_URL}/league/${league.league_id}/drafts`
-          ),
-        ]);
+      if (!Array.isArray(rosters)) return;
 
-        if (!Array.isArray(rosters)) return;
-        const ownerRoster = rosters.find(
-          (r) => String(r.owner_id) === ownerId
-        );
-        if (!ownerRoster) return;
+      // Build slot resolver for current-year picks only — past/future picks
+      // fall back to "{season} Rd {round}" labelling.
+      const currentDraft =
+        (Array.isArray(drafts) ? drafts : []).find(
+          (d) => String(d.season) === CURRENT_YEAR
+        ) ?? null;
+      const draftOrder: Record<string, number> =
+        currentDraft?.draft_order ?? {};
+      const numTeams = rosters.length;
+      const rosterToOwner: Record<number, string> = {};
+      rosters.forEach((r) => {
+        if (r.owner_id) rosterToOwner[r.roster_id] = String(r.owner_id);
+      });
+      const labelPick = (p: SleeperTradedPick): string => {
+        if (String(p.season) === CURRENT_YEAR && currentDraft) {
+          const userId = rosterToOwner[p.roster_id];
+          const baseSlot = Number(draftOrder[String(userId)] ?? 0);
+          const slot = getDraftRoundSlot(
+            currentDraft,
+            Number(p.round),
+            baseSlot,
+            numTeams
+          );
+          if (slot)
+            return `${p.season} ${p.round}.${String(slot).padStart(2, "0")}`;
+        }
+        return `${p.season} Rd ${p.round}`;
+      };
 
-        // Build slot resolver for current-year picks only — past/future picks
-        // fall back to "{season} Rd {round}" labelling.
-        const currentDraft =
-          (Array.isArray(drafts) ? drafts : []).find(
-            (d) => String(d.season) === CURRENT_YEAR
-          ) ?? null;
-        const draftOrder: Record<string, number> =
-          currentDraft?.draft_order ?? {};
-        const numTeams = rosters.length;
-        const rosterToOwner: Record<number, string> = {};
-        rosters.forEach((r) => {
-          if (r.owner_id) rosterToOwner[r.roster_id] = String(r.owner_id);
-        });
-        const labelPick = (p: SleeperTradedPick): string => {
-          if (String(p.season) === CURRENT_YEAR && currentDraft) {
-            const userId = rosterToOwner[p.roster_id];
-            const baseSlot = Number(draftOrder[String(userId)] ?? 0);
-            const slot = getDraftRoundSlot(
-              currentDraft,
-              Number(p.round),
-              baseSlot,
-              numTeams
-            );
-            if (slot)
-              return `${p.season} ${p.round}.${String(slot).padStart(2, "0")}`;
-          }
-          return `${p.season} Rd ${p.round}`;
-        };
+      const allTxns = [
+        ...(Array.isArray(txn0) ? txn0 : []),
+        ...(Array.isArray(txn1) ? txn1 : []),
+        ...(Array.isArray(txn2) ? txn2 : []),
+      ];
 
-        const allTxns = [
-          ...(Array.isArray(txn0) ? txn0 : []),
-          ...(Array.isArray(txn1) ? txn1 : []),
-          ...(Array.isArray(txn2) ? txn2 : []),
-        ];
+      const recentTrades = allTxns.filter(
+        (t) =>
+          t.type === "trade" &&
+          t.status === "complete" &&
+          (t.updated || t.created || 0) > fourteenDaysAgo
+      );
 
-        const recentTrades = allTxns.filter(
-          (t) =>
-            t.type === "trade" &&
-            t.status === "complete" &&
-            (t.updated || t.created || 0) > fourteenDaysAgo &&
-            (t.roster_ids ?? []).includes(ownerRoster.roster_id)
-        );
+      const leagueName = league.name || "League";
 
-        for (const trade of recentTrades) {
+      for (const trade of recentTrades) {
+        // One alert per non-user owner involved in the trade.
+        const involvedRosterIds = trade.roster_ids ?? [];
+        const involvedOwnerIds = involvedRosterIds
+          .map((rid) => rosterToOwner[rid])
+          .filter((oid): oid is string => !!oid && oid !== String(sleeperUserId));
+
+        for (const ownerId of involvedOwnerIds) {
+          const ownerRoster = rosters.find(
+            (r) => String(r.owner_id) === ownerId
+          );
+          if (!ownerRoster) continue;
+
           const alertId = `trade-${trade.transaction_id}-${ownerId}`;
           if (seenAlertIds.has(alertId)) continue;
 
@@ -240,16 +219,7 @@ async function processUser(
           const hasSent = sentPlayerIds.length || picksSent.length;
           if (!hasAcquired && !hasSent) continue;
 
-          const leagueName = league.name || "League";
-          // Same fallback chain as the client builder at useAppState.ts:1118.
           const ts = trade.updated || trade.created || Date.now();
-
-          // Detail is a fallback rendering using raw player IDs as placeholders.
-          // FeedTab prefers payload.acquiredPlayerIds / sentPlayerIds and rebuilds
-          // the string with resolved names from the client's players map. This
-          // detail string is what gets displayed if the client lacks player data
-          // (e.g. server-rendered email digest later) and what older code paths
-          // can fall back to.
           const acquiredAll = [...acquiredPlayerIds, ...picksReceived];
           const sentAll = [...sentPlayerIds, ...picksSent];
 
@@ -281,10 +251,10 @@ async function processUser(
             updated_at: new Date(ts).toISOString(),
           });
         }
-      },
-      CONCURRENCY
-    );
-  }
+      }
+    },
+    CONCURRENCY
+  );
 
   if (!collected.length) return 0;
 
@@ -350,10 +320,6 @@ export async function GET(req: NextRequest): Promise<Response> {
       { status: 500 }
     );
   }
-
-  // The 5 MB /players/nfl fetch was removed: the cron now stores raw player
-  // IDs in payload.acquiredPlayerIds / sentPlayerIds and FeedTab resolves
-  // names from the client's already-loaded players map. See processUser docs.
 
   let usersProcessed = 0;
   let alertsInserted = 0;
