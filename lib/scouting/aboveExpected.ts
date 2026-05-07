@@ -34,7 +34,7 @@ const QB_DEPTH_ZONES: QBDepthZone[] = [
   "short_left","short_center","short_right",
 ];
 
-const TE_POSITIONINGS: TEPositioning[] = ["wide", "slot", "inline", "full_back", "running_back"];
+const TE_POSITIONINGS: TEPositioning[] = ["wide", "slot", "inline", "full_back", "running_back", "wing_back"];
 
 const MIN_SAMPLE = 15;
 

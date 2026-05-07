@@ -13,7 +13,7 @@ interface Props {
   onSelectProspect?: (p: Prospect) => void;
 }
 
-const POSITIONINGS: TEPositioning[] = ["wide", "slot", "inline", "full_back", "running_back"];
+const POSITIONINGS: TEPositioning[] = ["wide", "slot", "inline", "full_back", "running_back", "wing_back"];
 const LOCATIONS: TELocation[] = ["left", "right", "backfield"];
 const COVERAGES: TECoverage[] = ["man", "zone", "press", "double"];
 const ROUTE_TYPES = ["nine", "post", "dig", "curl", "slant", "screen", "flat", "comeback", "out", "corner", "other"] as const;
@@ -45,6 +45,7 @@ const COLS: ColDef[] = [
   { key: "pos_inln_open",  label: "Inln%",  group: "By Positioning", fmt: "pct", colorDir: 1, width: 58, tooltip: "Inline open%", weightBy: "pos_inln_rated_n" },
   { key: "pos_fb_open",    label: "FB%",    group: "By Positioning", fmt: "pct", colorDir: 1, width: 52, weightBy: "pos_fb_rated_n" },
   { key: "pos_rb_open",    label: "RB%",    group: "By Positioning", fmt: "pct", colorDir: 1, width: 52, weightBy: "pos_rb_rated_n" },
+  { key: "pos_wb_open",    label: "WB%",    group: "By Positioning", fmt: "pct", colorDir: 1, width: 52, weightBy: "pos_wb_rated_n" },
   { key: "pos_wide_n",  label: "Wide#",  group: "By Positioning", fmt: "count", width: 56 },
   { key: "pos_slot_n",  label: "Slot#",  group: "By Positioning", fmt: "count", width: 54 },
   { key: "pos_inln_n",  label: "Inln#",  group: "By Positioning", fmt: "count", width: 54 },
@@ -160,14 +161,14 @@ export default function TEStatsTable({ prospects, games, tePlays, loading, draft
           // By positioning
           ...Object.fromEntries(
             POSITIONINGS.map((pos) => {
-              const key = pos === "full_back" ? "fb" : pos === "running_back" ? "rb" : pos === "inline" ? "inln" : pos;
+              const key = pos === "full_back" ? "fb" : pos === "running_back" ? "rb" : pos === "wing_back" ? "wb" : pos === "inline" ? "inln" : pos;
               return [`pos_${key}_open`, openPct(routePlays, (pl) => pl.positioning === pos)];
             })
           ),
           // Hidden rated counts per positioning (matches openPct's filter — rated routes only)
           ...Object.fromEntries(
             POSITIONINGS.map((pos) => {
-              const key = pos === "full_back" ? "fb" : pos === "running_back" ? "rb" : pos === "inline" ? "inln" : pos;
+              const key = pos === "full_back" ? "fb" : pos === "running_back" ? "rb" : pos === "wing_back" ? "wb" : pos === "inline" ? "inln" : pos;
               return [`pos_${key}_rated_n`, ratedRoutes.filter((pl) => pl.positioning === pos).length];
             })
           ),

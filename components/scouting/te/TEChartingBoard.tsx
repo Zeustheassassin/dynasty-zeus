@@ -34,6 +34,7 @@ const POSITIONINGS: { key: TEPositioning; label: string }[] = [
   { key: "inline",       label: "Inline" },
   { key: "full_back",    label: "Full Back" },
   { key: "running_back", label: "Running Back" },
+  { key: "wing_back",    label: "Wing Back" },
 ];
 
 const ROUTE_LABELS: Record<RouteType, string> = {
@@ -759,7 +760,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged }: Pro
                   {[...gamePlays].reverse().map((pl, i) => {
                     const isBlock = pl.play_type === "run_block" || pl.play_type === "pass_block";
                     const ptLabel = pl.play_type === "run_block" ? "RB" : pl.play_type === "pass_block" ? "PB" : "Route";
-                    const posLabel: Record<TEPositioning, string> = { wide: "Wide", slot: "Slot", inline: "Inl", full_back: "FB", running_back: "RB-pos" };
+                    const posLabel: Record<TEPositioning, string> = { wide: "Wide", slot: "Slot", inline: "Inl", full_back: "FB", running_back: "RB-pos", wing_back: "WB" };
                     const locLabel: Record<TELocation, string>    = { left: "L", right: "R", backfield: "BF" };
                     return (
                       <div key={pl.id} className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs transition ${editingPlayId === pl.id ? "bg-yellow-900/40 border border-yellow-700/60" : "bg-gray-900 border border-transparent"}`}>
