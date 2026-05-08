@@ -220,7 +220,9 @@ export default function RBProspectList({
                     </button>
                   ) : (
                     <button onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(p.id); }}
-                      className="text-gray-700 hover:text-red-400 text-xs px-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition">
+                      className="text-gray-600 hover:text-red-400 text-xs px-1 flex-shrink-0 transition"
+                      title="Delete prospect"
+                      aria-label={`Delete ${p.name}`}>
                       ✕
                     </button>
                   )}
