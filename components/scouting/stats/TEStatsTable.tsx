@@ -1,7 +1,7 @@
 "use client";
 import { useMemo } from "react";
 import StatsTableShell, { StatRow, ColDef } from "./StatsTableShell";
-import { computeTEAboveExpected } from "../../../lib/scouting/aboveExpected";
+import { computeTERouteAboveExpected, computeTEBlockAboveExpected } from "../../../lib/scouting/aboveExpected";
 import type { Prospect, ScoutingGame, TEPlay, TEPositioning, TELocation, TECoverage } from "../../../lib/types";
 
 interface Props {
@@ -31,7 +31,8 @@ const COLS: ColDef[] = [
   { key: "routes",  label: "Routes", group: "Identity", fmt: "count", width: 58 },
   { key: "blocks",  label: "Blocks", group: "Identity", fmt: "count", width: 58 },
   // Advanced
-  { key: "te_sae",     label: "TE-SAE",  group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 70, tooltip: "Open Rate Above Expected — vs league avg adjusted for positioning & coverage mix", leagueOverride: 0 },
+  { key: "te_saer",    label: "TE-SAER", group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 76, tooltip: "Route SAE — Open Rate Above Expected, adjusted for positioning & coverage mix (15+ rated routes)", leagueOverride: 0 },
+  { key: "te_saeb",    label: "TE-SAEB", group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 76, tooltip: "Block SAE — Block Success Above Expected, adjusted for run/pass-block & movement/inline mix (15+ rated blocks)", leagueOverride: 0 },
   { key: "open_pct",   label: "Open%",   group: "Advanced", fmt: "pct",       colorDir: 1,  width: 62, weightBy: "rated_routes_n" },
   { key: "tgt_pct",    label: "Tgt%",    group: "Advanced", fmt: "pct",       colorDir: 1,  width: 58, weightBy: "routes" },
   { key: "catch_pct",  label: "Catch%",  group: "Advanced", fmt: "pct",       colorDir: 1,  width: 62, weightBy: "raw_tgts" },
@@ -107,7 +108,8 @@ function blkSuccPct(plays: TEPlay[], filter: (p: TEPlay) => boolean): number | n
 
 export default function TEStatsTable({ prospects, games, tePlays, loading, draftYearFilter, onSelectProspect }: Props) {
   const prospectMap = useMemo(() => new Map(prospects.map((p) => [p.id, p])), [prospects]);
-  const teSaeMap = useMemo(() => computeTEAboveExpected(prospects, games, tePlays), [prospects, games, tePlays]);
+  const teSaerMap = useMemo(() => computeTERouteAboveExpected(prospects, games, tePlays), [prospects, games, tePlays]);
+  const teSaebMap = useMemo(() => computeTEBlockAboveExpected(prospects, games, tePlays), [prospects, games, tePlays]);
   const rows = useMemo((): StatRow[] => {
     const gameToProspect = new Map<string, string>();
     for (const g of games) gameToProspect.set(g.id, g.prospect_id);
@@ -141,7 +143,8 @@ export default function TEStatsTable({ prospects, games, tePlays, loading, draft
         const yds = 0; // TEPlay has no yards field
         const btk = pPlays.filter((pl) => pl.broken_tackle).length;
 
-        const te_sae = teSaeMap.get(p.id) ?? null;
+        const te_saer = teSaerMap.get(p.id) ?? null;
+        const te_saeb = teSaebMap.get(p.id) ?? null;
 
         return {
           id: p.id,
@@ -152,7 +155,8 @@ export default function TEStatsTable({ prospects, games, tePlays, loading, draft
           routes: routePlays.length,
           blocks: blockPlays.length,
           rated_routes_n: ratedRoutes.length,
-          te_sae,
+          te_saer,
+          te_saeb,
           open_pct: pct(ratedRoutes.filter((pl) => pl.was_open).length, ratedRoutes.length),
           tgt_pct: pct(tgts.length, routePlays.length),
           catch_pct: pct(catches.length, tgts.length),
@@ -236,13 +240,13 @@ export default function TEStatsTable({ prospects, games, tePlays, loading, draft
           ypc: yds,
         } satisfies StatRow;
       });
-  }, [prospects, games, tePlays, teSaeMap]);
+  }, [prospects, games, tePlays, teSaerMap, teSaebMap]);
 
   return (
     <StatsTableShell
       cols={COLS}
       rows={rows}
-      defaultSortKey="te_sae"
+      defaultSortKey="te_saer"
       defaultSortDir="desc"
       loading={loading}
       draftYearFilter={draftYearFilter}

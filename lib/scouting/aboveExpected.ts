@@ -174,8 +174,11 @@ export function computeQBAboveExpected(
   return out;
 }
 
-// ── TE TE-SAE ────────────────────────────────────────────────────────────
-export function computeTEAboveExpected(
+// ── TE TE-SAER (route running) ───────────────────────────────────────────
+// Open Rate Above Expected. Adjusts a TE's open% on rated routes for the
+// situation mix across two dimensions: positioning (6 buckets) and coverage
+// (3 buckets — press folds into man).
+export function computeTERouteAboveExpected(
   prospects: Prospect[],
   games: ScoutingGame[],
   tePlays: TEPlay[],
@@ -192,7 +195,7 @@ export function computeTEAboveExpected(
     lgPos[pl.positioning]!.n++;
     if (pl.was_open) lgPos[pl.positioning]!.open++;
     if (pl.coverage) {
-      // Press folds into Man for TE-SAE bucketing.
+      // Press folds into Man for TE-SAER bucketing.
       const cvgKey: TECoverage = pl.coverage === "press" ? "man" : pl.coverage;
       if (!lgCvg[cvgKey]) lgCvg[cvgKey] = { open: 0, n: 0 };
       lgCvg[cvgKey]!.n++;
@@ -229,6 +232,86 @@ export function computeTEAboveExpected(
     const normPos = posW > 0 ? expPos / posW : null;
     const normCvg = cvgW > 0 ? expCvg / cvgW : null;
     const combined = combine(normPos, normCvg);
+    out.set(p.id, combined != null ? parseFloat(((actual - combined) * 100).toFixed(2)) : null);
+  }
+
+  return out;
+}
+
+// ── TE TE-SAEB (blocking) ────────────────────────────────────────────────
+// Block Success Above Expected. Adjusts a TE's overall block success rate
+// for the situation mix across two dimensions:
+//   1. play_type — run_block vs pass_block
+//   2. block_type — movement vs inline
+// Both run and pass blocks are included; plays missing block_type or
+// block_success are excluded from both the prospect's sample and the
+// league baseline. 15-block minimum sample.
+export function computeTEBlockAboveExpected(
+  prospects: Prospect[],
+  games: ScoutingGame[],
+  tePlays: TEPlay[],
+): Map<string, number | null> {
+  const out = new Map<string, number | null>();
+  const gameToProspect = buildGameToProspect(games);
+  const playsByProspect = buildPlaysByProspect(tePlays, gameToProspect);
+
+  const PLAY_TYPES = ["run_block", "pass_block"] as const;
+  const BLOCK_TYPES = ["movement", "inline"] as const;
+  type PT = (typeof PLAY_TYPES)[number];
+  type BT = (typeof BLOCK_TYPES)[number];
+
+  const lgPT: Record<PT, { s: number; n: number }> = {
+    run_block: { s: 0, n: 0 }, pass_block: { s: 0, n: 0 },
+  };
+  const lgBT: Record<BT, { s: number; n: number }> = {
+    movement: { s: 0, n: 0 }, inline: { s: 0, n: 0 },
+  };
+
+  for (const pl of tePlays) {
+    if (pl.play_type !== "run_block" && pl.play_type !== "pass_block") continue;
+    if (pl.block_success === null) continue;
+    if (pl.block_type === null) continue;
+    const pt = pl.play_type;
+    lgPT[pt].n++;
+    if (pl.block_success) lgPT[pt].s++;
+    lgBT[pl.block_type].n++;
+    if (pl.block_success) lgBT[pl.block_type].s++;
+  }
+
+  for (const p of prospects) {
+    if (p.position !== "TE") continue;
+    const pPlays = playsByProspect.get(p.id) ?? [];
+    const ratedBlocks = pPlays.filter(
+      (pl) =>
+        (pl.play_type === "run_block" || pl.play_type === "pass_block") &&
+        pl.block_success !== null &&
+        pl.block_type !== null,
+    );
+    if (ratedBlocks.length < MIN_SAMPLE) { out.set(p.id, null); continue; }
+
+    const actual = ratedBlocks.filter((pl) => pl.block_success).length / ratedBlocks.length;
+
+    let expPT = 0, ptW = 0;
+    for (const pt of PLAY_TYPES) {
+      const ptN = ratedBlocks.filter((pl) => pl.play_type === pt).length;
+      const lg = lgPT[pt];
+      if (ptN > 0 && lg.n > 0) {
+        expPT += (ptN / ratedBlocks.length) * (lg.s / lg.n);
+        ptW += ptN / ratedBlocks.length;
+      }
+    }
+    let expBT = 0, btW = 0;
+    for (const bt of BLOCK_TYPES) {
+      const btN = ratedBlocks.filter((pl) => pl.block_type === bt).length;
+      const lg = lgBT[bt];
+      if (btN > 0 && lg.n > 0) {
+        expBT += (btN / ratedBlocks.length) * (lg.s / lg.n);
+        btW += btN / ratedBlocks.length;
+      }
+    }
+    const normPT = ptW > 0 ? expPT / ptW : null;
+    const normBT = btW > 0 ? expBT / btW : null;
+    const combined = combine(normPT, normBT);
     out.set(p.id, combined != null ? parseFloat(((actual - combined) * 100).toFixed(2)) : null);
   }
 

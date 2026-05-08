@@ -12,7 +12,7 @@ import type { GameSnapStatsRow, LoadPositionPlaysFn } from "../ScoutingHub";
 import {
   computeRBAboveExpected,
   computeQBAboveExpected,
-  computeTEAboveExpected,
+  computeTERouteAboveExpected,
 } from "../../lib/scouting/aboveExpected";
 
 type SortKey = "player" | "school" | "season_year" | "opponent" | "game_type" | "snaps" | "above_exp";
@@ -44,13 +44,14 @@ interface Props {
   onSelectProspect: (p: ProspectWithStats) => void;
 }
 
-// Above Expected metric label per position. WR=SAE, RB=SRAE, QB=AAE, TE=TE-SAE.
+// Above Expected metric label per position. WR=SAE, RB=SRAE, QB=AAE, TE=TE-SAER
+// (route variant; TE-SAEB blocking lives only on the TE stats table).
 function aboveExpectedLabel(position: string | null | undefined): string {
   switch (position) {
     case "WR": return "SAE";
     case "RB": return "SRAE";
     case "QB": return "AAE";
-    case "TE": return "TE-SAE";
+    case "TE": return "TE-SAER";
     default: return "—";
   }
 }
@@ -97,7 +98,7 @@ export default function GamesLog({
     }
     const rb = computeRBAboveExpected(prospectList, games, rbPlays);
     const qb = computeQBAboveExpected(prospectList, games, qbPlays);
-    const te = computeTEAboveExpected(prospectList, games, tePlays);
+    const te = computeTERouteAboveExpected(prospectList, games, tePlays);
     for (const [id, v] of rb) m.set(id, v);
     for (const [id, v] of qb) m.set(id, v);
     for (const [id, v] of te) m.set(id, v);

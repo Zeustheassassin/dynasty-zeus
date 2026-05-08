@@ -29,7 +29,7 @@ const POSITION_DESCRIPTIONS: Record<PositionTab, string> = {
   WR: "SAE · Open% by route, alignment, coverage · Target & catch rates",
   RB: "SRAE · Success% by run type, formation & box situation · Receiving",
   QB: "AAE · Accuracy by depth zone & coverage · Decision timing breakdown",
-  TE: "TE-SAE · Open% by positioning, location & coverage · Blocking success",
+  TE: "TE-SAER · Open% by positioning, location & coverage · TE-SAEB · Block success above expected",
 };
 
 export default function AnalysisHub({

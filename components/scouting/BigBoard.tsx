@@ -5,7 +5,7 @@ import { getLocalStorageItem, setLocalStorageItem } from "@/lib/hooks/useLocalSt
 import {
   computeRBAboveExpected,
   computeQBAboveExpected,
-  computeTEAboveExpected,
+  computeTERouteAboveExpected,
 } from "../../lib/scouting/aboveExpected";
 
 type NflDraftEntry = { team: string; round: number | null; pick: number | null };
@@ -43,7 +43,7 @@ interface Props {
   setDraftYearFilter: (y: number | null) => void;
   // Raw plays + games are lazy-loaded by ScoutingHub. The board triggers
   // load via loadPositionPlays on mount and uses the resulting plays to
-  // compute the unified Above-Expected metric (AAE / SRAE / SAE / TE-SAE).
+  // compute the unified Above-Expected metric (AAE / SRAE / SAE / TE-SAER).
   games: ScoutingGame[];
   rbPlays: RBPlay[];
   qbPlays: QBPlay[];
@@ -159,14 +159,15 @@ export default function BigBoard({
     loadPositionPlays("TE");
   }, [loadPositionPlays]);
 
-  // Unified Above-Expected map: AAE for QB, SRAE for RB, TE-SAE for TE,
-  // and the pre-aggregated WR adj_success_above_exp for WR. Returns null
-  // for any prospect under the per-position min-sample threshold.
+  // Unified Above-Expected map: AAE for QB, SRAE for RB, TE-SAER for TE
+  // (route-running variant; TE-SAEB blocking lives only on the TE stats
+  // table), and the pre-aggregated WR adj_success_above_exp for WR.
+  // Returns null for any prospect under the per-position min-sample threshold.
   const aboveExpectedMap = useMemo(() => {
     const m = new Map<string, number | null>();
     const rb = computeRBAboveExpected(prospects, games, rbPlays);
     const qb = computeQBAboveExpected(prospects, games, qbPlays);
-    const te = computeTEAboveExpected(prospects, games, tePlays);
+    const te = computeTERouteAboveExpected(prospects, games, tePlays);
     for (const [id, v] of rb) m.set(id, v);
     for (const [id, v] of qb) m.set(id, v);
     for (const [id, v] of te) m.set(id, v);
@@ -274,14 +275,14 @@ export default function BigBoard({
 
   // ── Above-Expected cell renderer ──────────────────────────────
   // Single column on the All board showing the position-appropriate
-  // metric: AAE for QB, SRAE for RB, SAE for WR, TE-SAE for TE.
+  // metric: AAE for QB, SRAE for RB, SAE for WR, TE-SAER for TE.
   // Color-coded green/red on sign; small grey tag identifies which
   // metric the value represents.
   const aboveExpectedLabel = (pos: string): string => {
     if (pos === "QB") return "AAE";
     if (pos === "RB") return "SRAE";
     if (pos === "WR") return "SAE";
-    if (pos === "TE") return "TE-SAE";
+    if (pos === "TE") return "TE-SAER";
     return "";
   };
   function aboveExpectedCell(p: ProspectWithStats) {
