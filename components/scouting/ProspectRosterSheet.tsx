@@ -325,7 +325,14 @@ export default function ProspectRosterSheet({ prospects, nflRoles, onDataChanged
                 </button>
               </th>
               <th className={thShrink} style={shrinkStyle}>Charting</th>
-              <th className={thShrink} style={shrinkStyle}>Rank</th>
+              <th className={thShrink} style={shrinkStyle}>
+                <button
+                  onClick={() => toggleSort("personal_rank")}
+                  className="text-gray-500 hover:text-white transition"
+                >
+                  Rank{sortIndicator("personal_rank")}
+                </button>
+              </th>
               <th className={thShrink} style={shrinkStyle}>Should Play</th>
               {/* Notes — width 100% claims all remaining space, forcing other columns to shrink to content */}
               <th
