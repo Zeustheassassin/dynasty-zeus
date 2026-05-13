@@ -25,7 +25,7 @@ const COLS: ColDef[] = [
   // Advanced
   { key: "srae",         label: "SRAE",     group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 66, tooltip: "Success Rate Above Expected — vs league avg adjusted for formation and box mix", leagueOverride: 0 },
   { key: "succ_pct",     label: "Succ%",    group: "Advanced", fmt: "pct",       colorDir: 1,  width: 60, tooltip: "Success rate on all rushing attempts", weightBy: "runs" },
-  { key: "explosive_pct",label: "Expl%",    group: "Advanced", fmt: "pct",       colorDir: 1,  width: 58, tooltip: "Explosive play rate (run_type flagged explosive)", weightBy: "snaps" },
+  { key: "explosive_pct",label: "Expl%",    group: "Advanced", fmt: "pct",       colorDir: 1,  width: 58, tooltip: "Explosive play rate per rush attempt", weightBy: "runs" },
   { key: "stuff_pct",    label: "Stuff%",   group: "Advanced", fmt: "pct",       colorDir: -1, width: 56, tooltip: "Run stuff rate (stopped at or behind LOS)", weightBy: "runs" },
   { key: "btk_pct",      label: "BTkl%",    group: "Advanced", fmt: "pct",       colorDir: 1,  width: 58, tooltip: "Broken tackle rate per rush attempt", weightBy: "runs" },
   // By Run Type
@@ -140,7 +140,7 @@ export default function RBStatsTable({ prospects, games, rbPlays, loading, draft
           runs: runPlays.length,
           srae,
           succ_pct: succPct(runPlays, () => true),
-          explosive_pct: pct(pPlays.filter((pl) => pl.explosive_play).length, pPlays.length),
+          explosive_pct: pct(pPlays.filter((pl) => pl.explosive_play).length, runPlays.length),
           stuff_pct: pct(pPlays.filter((pl) => pl.run_stuff).length, runPlays.length),
           btk_pct: pct(pPlays.filter((pl) => pl.broken_tackle).length, runPlays.length),
           // By run type
