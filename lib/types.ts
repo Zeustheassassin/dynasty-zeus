@@ -951,7 +951,7 @@ export interface RBPlay {
 export type QBSnapPosition = "shotgun" | "pistol" | "under_center";
 export type QBPlayType     = "run" | "rpo" | "pass";
 export type QBTiming       = "first_option" | "second_option" | "checkdown" | "scramble" | "sack" | "throw_away" | "extended_play";
-export type QBAccuracy     = "high" | "low" | "on_target" | "in_front" | "behind";
+export type QBAccuracy     = "high" | "low" | "on_target" | "in_front" | "behind" | "tipped_ball";
 export type QBDepthZone    =
   | "deep_left"  | "deep_center"  | "deep_right"
   | "mid_left"   | "mid_center"   | "mid_right"

@@ -47,11 +47,12 @@ const TIMINGS: { key: QBTiming; label: string }[] = [
 ];
 
 const ACCURACIES: { key: QBAccuracy; label: string; active: string }[] = [
-  { key: "on_target", label: "On Target", active: "bg-green-600" },
-  { key: "high",      label: "High",      active: "bg-red-600" },
-  { key: "low",       label: "Low",       active: "bg-red-700" },
-  { key: "in_front",  label: "In Front",  active: "bg-orange-600" },
-  { key: "behind",    label: "Behind",    active: "bg-orange-700" },
+  { key: "on_target",   label: "On Target",   active: "bg-green-600" },
+  { key: "high",        label: "High",        active: "bg-red-600" },
+  { key: "low",         label: "Low",         active: "bg-red-700" },
+  { key: "in_front",    label: "In Front",    active: "bg-orange-600" },
+  { key: "behind",      label: "Behind",      active: "bg-orange-700" },
+  { key: "tipped_ball", label: "Tipped Ball", active: "bg-yellow-600" },
 ];
 
 // 3×3 depth-zone grid layout: [depth label, loc label, key]
@@ -98,7 +99,7 @@ function onTargetColor(p: number | null): string {
 const SNAP_SHORT: Record<QBSnapPosition, string> = { shotgun: "SG", pistol: "PS", under_center: "UC" };
 const PLAY_SHORT: Record<QBPlayType, string>     = { run: "RUN", rpo: "RPO", pass: "PASS" };
 const TIMING_SHORT: Record<QBTiming, string>     = { first_option: "1st", second_option: "2nd", checkdown: "CK", extended_play: "EXT", scramble: "SCR", sack: "SCK", throw_away: "TA" };
-const ACC_SHORT: Record<QBAccuracy, string>      = { on_target: "OT", high: "HI", low: "LO", in_front: "IF", behind: "BH" };
+const ACC_SHORT: Record<QBAccuracy, string>      = { on_target: "OT", high: "HI", low: "LO", in_front: "IF", behind: "BH", tipped_ball: "TIP" };
 const DEPTH_SHORT: Record<QBDepthZone, string>   = {
   deep_left: "DL", deep_center: "DC", deep_right: "DR",
   mid_left:  "ML", mid_center:  "MC", mid_right:  "MR",
@@ -152,6 +153,8 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     const runPlays      = plays.filter((p) => p.play_type === "run");
     const passRpoPlays  = plays.filter((p) => p.play_type !== "run");
     const thrownPlays   = passRpoPlays.filter((p) => p.timing !== "scramble" && p.timing !== "sack" && p.timing !== "throw_away");
+    // Tipped balls don't grade the QB — exclude from every accuracy denominator.
+    const gradedThrows  = thrownPlays.filter((p) => p.accuracy !== "tipped_ball");
     const scramblePlays = passRpoPlays.filter((p) => p.timing === "scramble");
 
     // Snap position counts
@@ -172,12 +175,12 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
       return acc;
     }, {} as Record<QBTiming, number>);
 
-    // Accuracy counts (of thrown plays)
-    const accCounts = (["on_target", "high", "low", "in_front", "behind"] as QBAccuracy[]).reduce((acc, a) => {
+    // Accuracy counts (of graded thrown plays — tipped balls excluded)
+    const accCounts = (["on_target", "high", "low", "in_front", "behind", "tipped_ball"] as QBAccuracy[]).reduce((acc, a) => {
       acc[a] = thrownPlays.filter((p) => p.accuracy === a).length;
       return acc;
     }, {} as Record<QBAccuracy, number>);
-    const onTargetPct = pct(accCounts.on_target, thrownPlays.length);
+    const onTargetPct = pct(accCounts.on_target, gradedThrows.length);
     const compTracked   = thrownPlays.filter((p) => p.completion !== null).length;
     const caughtPlays   = thrownPlays.filter((p) => p.completion === "caught").length;
     const incompletePlays = thrownPlays.filter((p) => p.completion === "incomplete").length;
@@ -195,7 +198,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     // Depth zone stats (count + on-target%)
     type ZoneStat = { count: number; onTarget: number; onTargetPct: number | null };
     const zoneStat = (key: QBDepthZone): ZoneStat => {
-      const zp = thrownPlays.filter((p) => p.depth_zone === key);
+      const zp = gradedThrows.filter((p) => p.depth_zone === key);
       const ot = zp.filter((p) => p.accuracy === "on_target").length;
       return { count: zp.length, onTarget: ot, onTargetPct: pct(ot, zp.length) };
     };
@@ -206,7 +209,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     type RouteStat = { total: number; onTarget: number; man: number; manOT: number; zone: number; zoneOT: number };
     const routeStats: Partial<Record<RouteType, RouteStat>> = {};
     for (const rt of ROUTE_TYPES) {
-      const rp = thrownPlays.filter((p) => p.route_type === rt);
+      const rp = gradedThrows.filter((p) => p.route_type === rt);
       if (rp.length === 0) continue;
       const manP  = rp.filter((p) => p.coverage === "man");
       const zoneP = rp.filter((p) => p.coverage === "zone");
@@ -221,8 +224,8 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     }
 
     // Coverage stats
-    const manP  = thrownPlays.filter((p) => p.coverage === "man");
-    const zoneP = thrownPlays.filter((p) => p.coverage === "zone");
+    const manP  = gradedThrows.filter((p) => p.coverage === "man");
+    const zoneP = gradedThrows.filter((p) => p.coverage === "zone");
     const cvgStats = {
       man:  { count: manP.length,  onTarget: manP.filter((p) => p.accuracy === "on_target").length },
       zone: { count: zoneP.length, onTarget: zoneP.filter((p) => p.accuracy === "on_target").length },
@@ -230,7 +233,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
 
     return {
       totalPlays, runPlays: runPlays.length, passRpo: passRpoPlays.length,
-      thrown: thrownPlays.length, scrambles: scramblePlays.length,
+      thrown: thrownPlays.length, graded: gradedThrows.length, scrambles: scramblePlays.length,
       snapCounts, typeCounts, timingCounts, accCounts, onTargetPct,
       compTracked, caughtPlays, incompletePlays, intPlays, catchPct, intPct, intTypeCounts,
       zoneStats, routeStats, cvgStats,
@@ -534,7 +537,12 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
               {stats.thrown > 0 && (
                 <div className="p-4 bg-gray-900 rounded-lg border border-gray-800">
                   <div className="text-xs text-gray-500 mb-3 flex flex-wrap items-center gap-3">
-                    <span>Accuracy <span className="text-gray-700">({stats.thrown} throws)</span></span>
+                    <span>
+                      Accuracy <span className="text-gray-700">({stats.graded} graded throws)</span>
+                      {stats.accCounts.tipped_ball > 0 && (
+                        <span className="text-yellow-500/80 ml-2">+ {stats.accCounts.tipped_ball} tipped</span>
+                      )}
+                    </span>
                     {stats.onTargetPct !== null && (
                       <span className={`font-semibold ${onTargetColor(stats.onTargetPct)}`}>
                         {stats.onTargetPct}% on target
@@ -554,9 +562,9 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                     )}
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-                    {ACCURACIES.map(({ key, label }) => {
+                    {ACCURACIES.filter(({ key }) => key !== "tipped_ball").map(({ key, label }) => {
                       const n = stats.accCounts[key];
-                      const p2 = pct(n, stats.thrown);
+                      const p2 = pct(n, stats.graded);
                       const color = key === "on_target" ? "text-green-400" : "text-red-400";
                       return (
                         <div key={key} className="p-3 bg-gray-800/50 rounded-lg text-center">
@@ -997,7 +1005,11 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                         </span>
                       )}
                       {pl.accuracy && (
-                        <span className={pl.accuracy === "on_target" ? "text-green-400" : "text-red-400"}>
+                        <span className={
+                          pl.accuracy === "on_target" ? "text-green-400"
+                          : pl.accuracy === "tipped_ball" ? "text-yellow-400"
+                          : "text-red-400"
+                        }>
                           {ACC_SHORT[pl.accuracy]}
                         </span>
                       )}
@@ -1057,8 +1069,9 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                   {games.map((g) => {
                     const gp       = plays.filter((p) => p.game_id === g.id);
                     const thrown   = gp.filter((p) => p.play_type !== "run" && p.timing !== "scramble");
-                    const onTgt    = thrown.filter((p) => p.accuracy === "on_target").length;
-                    const otPct    = pct(onTgt, thrown.length);
+                    const graded   = thrown.filter((p) => p.accuracy !== "tipped_ball");
+                    const onTgt    = graded.filter((p) => p.accuracy === "on_target").length;
+                    const otPct    = pct(onTgt, graded.length);
                     return (
                       <tr key={g.id} className="hover:bg-gray-900/50 transition">
                         <td className="py-2 pr-4 text-gray-300">{g.season_year}</td>
