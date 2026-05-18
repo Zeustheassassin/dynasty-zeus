@@ -134,6 +134,7 @@ export default function ChartingBoard({
         <div className="p-4 bg-gray-900 border border-gray-700 rounded-lg">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
             {([
+              { label: "School",        key: "school" as const,        type: "text",   placeholder: "Alabama" },
               { label: "Height",        key: "height" as const,        type: "text",   placeholder: '6\'4"' },
               { label: "Weight (lbs)",  key: "weight" as const,        type: "number", placeholder: "220" },
               { label: "Birthday",      key: "birthday" as const,      type: "date",   placeholder: "" },
@@ -144,7 +145,7 @@ export default function ChartingBoard({
                 <input type={f.type} placeholder={f.placeholder}
                   className={`w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none ${a.focusBorder}`}
                   value={(bio[f.key] as string | number | null | undefined) ?? ""}
-                  onChange={(e) => onBioChange({ [f.key]: f.type === "number" ? (e.target.value ? Number(e.target.value) : null) : (e.target.value || null) })}
+                  onChange={(e) => onBioChange({ [f.key]: f.type === "number" ? (e.target.value ? Number(e.target.value) : null) : (f.key === "school" ? e.target.value : (e.target.value || null)) })}
                 />
               </div>
             ))}
