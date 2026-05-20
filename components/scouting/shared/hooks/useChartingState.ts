@@ -43,6 +43,7 @@ export function useChartingState(prospect: Prospect, options: Options) {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadGames();
     setBio({
+      name: prospect.name,
       school: prospect.school,
       height: prospect.height, weight: prospect.weight, birthday: prospect.birthday,
       draft_class_year: prospect.draft_class_year, personal_rank: prospect.personal_rank,
@@ -51,7 +52,7 @@ export function useChartingState(prospect: Prospect, options: Options) {
       charting_notes: prospect.charting_notes,
       draft_round: prospect.draft_round, draft_pick: prospect.draft_pick, draft_team: prospect.draft_team,
     });
-  }, [loadGames, prospect.id, prospect.school, prospect.height, prospect.weight, prospect.birthday,
+  }, [loadGames, prospect.id, prospect.name, prospect.school, prospect.height, prospect.weight, prospect.birthday,
     prospect.draft_class_year, prospect.personal_rank,
     prospect.should_play, prospect.will_play_pre, prospect.will_play_post,
     prospect.charting_decision, prospect.charting_notes,
