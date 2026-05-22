@@ -304,12 +304,8 @@ const alertBootstrapRef = useRef(false);
 // Stable daily baseline for value-change alerts — loaded from Supabase, NOT localStorage.
 const historicalSnapshotRef = useRef<HistoricalSnapshot | null>(null);
 const [historicalSnapshot, setHistoricalSnapshot] = useState<HistoricalSnapshot | null>(null);
-const latestAlertsRef = useRef<AlertsCenterItem[]>([]);
 // Refs for useCallback functions defined later in the file — avoids TDZ in dep arrays.
 const loadRosterRef = useRef<((league: SleeperLeague) => Promise<void>) | null>(null);
-const loadLeaguemateTradeAlertsRef = useRef<(() => Promise<void>) | null>(null);
-
-useEffect(() => { latestAlertsRef.current = dashboardAlerts; }, [dashboardAlerts]);
 
 // Load all Supabase-persisted user data whenever the logged-in user changes
 useEffect(() => {
@@ -660,21 +656,6 @@ useEffect(() => {
     loadActivity(selectedLeague.league_id);
   }
 }, [mainTab, leagueHubTab, selectedLeague?.league_id, loadActivity, setActivityTransactions]);
-
-// Stable count for dep arrays — Object.keys() creates a new array on every
-// render, which defeats useMemo/useEffect deps. usersCount is a plain number
-// and safe to compare.
-const usersCount   = useMemo(() => Object.keys(users).length,   [users]);
-
-// Load leaguemate trade alerts once the user display-name map is ready.
-// Rows are produced by the server-side cron (app/api/cron/leaguemate-alerts);
-// we just read them and resolve owner IDs to display names via `users`.
-// Waits for `leagues` so the loader can filter out any legacy DB rows whose
-// league_id isn't one the user is currently in.
-useEffect(() => {
-  if (!supabaseUser || !usersCount || !leagues.length) return;
-  loadLeaguemateTradeAlertsRef.current?.();
-}, [supabaseUser, usersCount, leagues.length]);
 
 // Auto-load data needed by the player profile panel whenever it opens
 useEffect(() => {
@@ -1046,86 +1027,6 @@ const refreshFcTrends = async () => {
     setLoadingFcTrends(false);
   }
 };
-
-// ── Leaguemate trade alerts ──────────────────────────────────────────────────
-// Reads pre-built trade alert rows from the Supabase `alerts` table. Rows are
-// produced by the server-side cron at app/api/cron/leaguemate-alerts which
-// scans the user's own dynasty leagues for recent trades.
-// Owner display name is resolved at render-time from the local `users` map.
-// Legacy rows from the prior cron (which scanned leaguemates' other leagues)
-// are filtered client-side via `myLeagueIds` so they no longer surface.
-const tradeAlertLoadedRef = useRef(false);
-const loadLeaguemateTradeAlerts = async () => {
-  if (tradeAlertLoadedRef.current) return; // once per session
-  if (!supabaseUser) return;
-  tradeAlertLoadedRef.current = true;
-
-  const fourteenDaysAgoIso = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
-  const existingIds = new Set(latestAlertsRef.current.map((a) => a.id));
-  const myLeagueIds = new Set(leagues.map((l) => l.league_id));
-
-  const { data, error } = await supabase
-    .from("alerts")
-    .select("alert_id, league_id, title, detail, actionable, payload, updated_at")
-    .eq("user_id", supabaseUser.id)
-    .like("alert_id", "trade-%")
-    .eq("dismissed", false)
-    .gte("updated_at", fourteenDaysAgoIso)
-    .order("updated_at", { ascending: false });
-
-  if (error) {
-    log.error("trade alerts load failed", { err: error.message });
-    return;
-  }
-
-  const rows = data ?? [];
-  if (!rows.length) return;
-
-  const tradeAlerts: AlertsCenterItem[] = [];
-  for (const row of rows) {
-    if (existingIds.has(row.alert_id)) continue;
-    if (!row.league_id || !myLeagueIds.has(row.league_id)) continue;
-    const payload = (row.payload ?? {}) as {
-      ownerId?: string;
-      leagueName?: string;
-      acquired?: unknown;
-      sent?: unknown;
-    };
-    const ownerId = typeof payload.ownerId === "string" ? payload.ownerId : "";
-    const ownerName = (ownerId && users[ownerId]) || "Leaguemate";
-    const leagueName = typeof payload.leagueName === "string" ? payload.leagueName : "League";
-    const acquired = Array.isArray(payload.acquired) ? (payload.acquired as string[]) : [];
-    const sent = Array.isArray(payload.sent) ? (payload.sent as string[]) : [];
-
-    // The cron stores generic strings; rebuild here so the title carries the
-    // leaguemate's display name from the local users map (the cron has no
-    // such map without an extra Sleeper fetch per league).
-    const title = `${ownerName} made a trade — ${leagueName}`;
-    const detail = acquired.length
-      ? `${ownerName} received ${acquired.join(", ")}${sent.length ? `, sent ${sent.join(", ")}` : ""} in ${leagueName}.`
-      : sent.length
-        ? `${ownerName} sent ${sent.join(", ")} in ${leagueName}.`
-        : (row.detail ?? "");
-
-    tradeAlerts.push({
-      id: row.alert_id,
-      category: "league",
-      source: "internal",
-      severity: "medium",
-      title,
-      detail,
-      actionable: row.actionable ?? true,
-      timestamp: row.updated_at ? Date.parse(row.updated_at) : Date.now(),
-      leagueId: row.league_id ?? null,
-      payload: { ownerId, ownerName, leagueName, acquired, sent },
-    });
-  }
-
-  if (tradeAlerts.length) {
-    mergeDashboardAlerts(tradeAlerts);
-  }
-};
-loadLeaguemateTradeAlertsRef.current = loadLeaguemateTradeAlerts;
 
 // Manual snapshot save — callable from the Data Hub button.
 // Uses generic FC values (players[id].value) rather than league-adjusted calcFcValues so that
@@ -3492,6 +3393,51 @@ const getTeamSummary = useCallback(() => {
 
     if (alerts.length) mergeDashboardAlerts(alerts);
   }, [leagueTransactions, watchlistEntries, players, mergeDashboardAlerts]);
+
+  // ── Top-250 drop alerts (any top-250-by-FC-value player dropped in any league) ──
+  // Surfaces potential pickups even if the player isn't on the watchlist. Skips
+  // watchlist players — they're already handled by the effect above, and we don't
+  // want two alerts for the same drop event.
+  useEffect(() => {
+    if (!leagueTransactions.length) return;
+    const ranked = Object.entries(players)
+      .filter(([, p]) => (p?.value ?? 0) > 0)
+      .sort(([, a], [, b]) => (b.value ?? 0) - (a.value ?? 0));
+    if (ranked.length < 1) return;
+    const top250 = new Set(ranked.slice(0, 250).map(([id]) => id));
+    const watchlistSet = new Set(watchlistEntries.map((e) => e.player_id));
+
+    const alerts: AlertsCenterItem[] = [];
+    const seen = new Set<string>();
+
+    leagueTransactions
+      .filter((tx) => tx.type === "free_agent" || tx.type === "waiver")
+      .forEach((tx) => {
+        Object.keys(tx.drops || {}).forEach((pid) => {
+          if (!top250.has(pid) || watchlistSet.has(pid)) return;
+          const key = `${pid}-${tx.leagueId}-${tx.transaction_id}`;
+          if (seen.has(key)) return;
+          seen.add(key);
+          const player = players[pid];
+          alerts.push({
+            id: `top250-drop-${pid}-${tx.leagueId}-${tx.transaction_id}`,
+            category: "watchlist",
+            source: "internal",
+            severity: "high",
+            title: `${player?.full_name || pid} was dropped`,
+            detail: `Top-250 player ${player?.full_name || pid} was dropped in ${tx.leagueName}. They may be free to add.`,
+            actionable: true,
+            timestamp: tx.created || Date.now(),
+            playerId: pid,
+            leagueId: tx.leagueId,
+            teamLabel: player?.team || null,
+            payload: { transactionId: tx.transaction_id, leagueName: tx.leagueName, fcValue: player?.value ?? 0 },
+          });
+        });
+      });
+
+    if (alerts.length) mergeDashboardAlerts(alerts);
+  }, [leagueTransactions, players, watchlistEntries, mergeDashboardAlerts]);
 
   const visibleDashboardAlerts = useMemo(
     () =>
