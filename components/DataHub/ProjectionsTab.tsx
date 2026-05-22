@@ -31,7 +31,7 @@ function ProjectionsTab({
   projectionData, setProjectionData,
   projectionPosFilter, setProjectionPosFilter,
   projectionWeek, setProjectionWeek,
-  setProjectionLoaded, loadProjections,
+  loadProjections,
   projectionSeasonYear, projectionSourceStatus,
   loadingProjections, projectionUsesSeasonFallback,
   user,
@@ -58,7 +58,6 @@ function ProjectionsTab({
             onChange={(e) => {
               const w = Number(e.target.value);
               setProjectionWeek(w);
-              setProjectionLoaded(false);
               setProjectionData([]);
               loadProjections(w === 0 ? "season" : w, [...enabledExtraSources]);
             }}
@@ -99,7 +98,6 @@ function ProjectionsTab({
         </button>
         <button
           onClick={() => {
-            setProjectionLoaded(false);
             setProjectionData([]);
             loadProjections(projectionWeek === 0 ? "season" : projectionWeek, [...enabledExtraSources]);
           }}
@@ -141,7 +139,6 @@ function ProjectionsTab({
                       next.add(src.id);
                     }
                     setEnabledExtraSources(next);
-                    setProjectionLoaded(false);
                     setProjectionData([]);
                     loadProjections(
                       projectionWeek === 0 ? "season" : projectionWeek,
