@@ -2,7 +2,10 @@
 import { useState, useRef, useCallback, type Dispatch, type SetStateAction } from "react";
 import { normalizeProjName, getProjectionKickoffAt } from "../lib/helpers";
 import { computeLeagueFpts, DEFAULT_SCORING } from "../lib/helpers/scoring";
+import { useLocalStorage } from "../lib/hooks/useLocalStorage";
 import type { SleeperPlayer, ProjectionRow } from "../lib/types";
+
+const ENABLED_EXTRA_SOURCES_KEY = "dz.projections.enabledExtraSources";
 
 /** Raw item shape returned by Sleeper's projections API endpoints. */
 interface SleeperRawProjectionItem {
@@ -38,6 +41,8 @@ export interface UseProjectionsReturn {
   setProjectionLoaded: Dispatch<SetStateAction<boolean>>;
   projectionUsesSeasonFallback: boolean;
   loadProjections: (week: number | "season", extraSources?: string[]) => Promise<void>;
+  enabledExtraSources: string[];
+  toggleExtraSource: (id: string) => void;
 }
 
 /**
@@ -61,6 +66,27 @@ export function useProjections(
   const [projectionSourceStatus, setProjectionSourceStatus] = useState<Record<string, boolean>>({});
   const [projectionLoaded, setProjectionLoaded] = useState(false);
   const [projectionUsesSeasonFallback, setProjectionUsesSeasonFallback] = useState(false);
+
+  // Persisted across sessions so the user's chosen extra sources (FantasyPros,
+  // numberFire) survive page navigation and reloads. Sleeper is always on and
+  // never lives in this set.
+  const [enabledExtraSources, setEnabledExtraSources] = useLocalStorage<string[]>(
+    ENABLED_EXTRA_SOURCES_KEY,
+    []
+  );
+  const toggleExtraSource = useCallback(
+    (id: string) => {
+      const set = new Set(enabledExtraSources);
+      if (set.has(id)) set.delete(id);
+      else set.add(id);
+      setEnabledExtraSources([...set]);
+      // Force the auto-load effect to re-run with the new source set; clear
+      // current rows so users see a loading state instead of stale data.
+      setProjectionData([]);
+      setProjectionLoaded(false);
+    },
+    [enabledExtraSources, setEnabledExtraSources]
+  );
 
   // Monotonic counter: if a newer call starts before the previous one finishes,
   // the older result is discarded so it can never overwrite fresher data.
@@ -307,5 +333,7 @@ export function useProjections(
     setProjectionLoaded,
     projectionUsesSeasonFallback,
     loadProjections,
+    enabledExtraSources,
+    toggleExtraSource,
   };
 }

@@ -42,6 +42,8 @@ interface DataHubProps {
   projectionSourceStatus: Record<string, boolean>;
   loadingProjections: boolean;
   projectionUsesSeasonFallback: boolean;
+  enabledExtraSources: string[];
+  toggleExtraSource: (id: string) => void;
 
   // League mate stats tab
   leagues: SleeperLeague[];
@@ -67,6 +69,7 @@ function DataHub({
   projectionData, setProjectionData, projectionPosFilter, setProjectionPosFilter,
   projectionWeek, setProjectionWeek, setProjectionLoaded, loadProjections,
   projectionSeasonYear, projectionSourceStatus, loadingProjections, projectionUsesSeasonFallback,
+  enabledExtraSources, toggleExtraSource,
   leagues, user,
   loadUserExposure, selectedUserId, externalShares, loadingShares,
   historicalSnapshot, onSaveSnapshot,
@@ -143,6 +146,8 @@ function DataHub({
           projectionSourceStatus={projectionSourceStatus}
           loadingProjections={loadingProjections}
           projectionUsesSeasonFallback={projectionUsesSeasonFallback}
+          enabledExtraSources={enabledExtraSources}
+          toggleExtraSource={toggleExtraSource}
           user={user}
         />
       )}

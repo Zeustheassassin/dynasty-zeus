@@ -177,6 +177,8 @@ const {
   projectionLoaded, setProjectionLoaded,
   projectionUsesSeasonFallback,
   loadProjections,
+  enabledExtraSources,
+  toggleExtraSource,
 } = useProjections(players, selectedLeague?.scoring_settings ?? null);
 
 // Rolling snap% / target / carry stats from the last 4 weeks of Sleeper actuals.
@@ -673,13 +675,13 @@ useEffect(() => {
     if (projectionWeek !== simulatorProjectionWeek) {
       setProjectionWeek(simulatorProjectionWeek);
       setProjectionLoaded(false);
-      loadProjections(simulatorProjectionWeek === 0 ? "season" : simulatorProjectionWeek);
+      loadProjections(simulatorProjectionWeek === 0 ? "season" : simulatorProjectionWeek, enabledExtraSources);
     } else if (!projectionLoaded) {
-      loadProjections(simulatorProjectionWeek === 0 ? "season" : simulatorProjectionWeek);
+      loadProjections(simulatorProjectionWeek === 0 ? "season" : simulatorProjectionWeek, enabledExtraSources);
     }
   }
   // projectionWeek/projectionLoaded are in deps and set inside this effect; the conditional guards prevent loops
-}, [mainTab, leagueHubTab, selectedLeague?.league_id, nflState?.week, nflState?.season_type, projectionWeek, projectionLoaded, loadRedraftValues, loadProjections, loadNflState, setProjectionLoaded, setProjectionWeek]);
+}, [mainTab, leagueHubTab, selectedLeague?.league_id, nflState?.week, nflState?.season_type, projectionWeek, projectionLoaded, enabledExtraSources, loadRedraftValues, loadProjections, loadNflState, setProjectionLoaded, setProjectionWeek]);
 
 useEffect(() => {
   if (mainTab !== "GAMEDAY_HUB") return;
@@ -702,13 +704,13 @@ useEffect(() => {
   if (projectionWeek !== currentWeek) {
     setProjectionWeek(currentWeek);
     setProjectionLoaded(false);
-    loadProjections(currentWeek);
+    loadProjections(currentWeek, enabledExtraSources);
   } else if (!projectionLoaded) {
-    loadProjections(currentWeek);
+    loadProjections(currentWeek, enabledExtraSources);
   }
 
   loadGamedayMatchups(selectedLeague.league_id, currentWeek);
-}, [mainTab, selectedLeague?.league_id, nflState?.week, nflState?.season_type, projectionWeek, projectionLoaded, loadProjections, loadGamedayMatchups, setProjectionLoaded, setProjectionWeek, setGamedayMatchups, setSelectedGamedayMatchupId]);
+}, [mainTab, selectedLeague?.league_id, nflState?.week, nflState?.season_type, projectionWeek, projectionLoaded, enabledExtraSources, loadProjections, loadGamedayMatchups, setProjectionLoaded, setProjectionWeek, setGamedayMatchups, setSelectedGamedayMatchupId]);
 
 useEffect(() => {
   const leagueId = selectedLeague?.league_id;
@@ -773,9 +775,9 @@ useEffect(() => {
 
 useEffect(() => {
   if (mainTab === "DATA_HUB" && dataHubTab === "PROJECTIONS" && !projectionLoaded) {
-    loadProjections(projectionWeek === 0 ? 'season' : projectionWeek);
+    loadProjections(projectionWeek === 0 ? 'season' : projectionWeek, enabledExtraSources);
   }
-}, [mainTab, dataHubTab, projectionLoaded, projectionWeek, loadProjections]);
+}, [mainTab, dataHubTab, projectionLoaded, projectionWeek, enabledExtraSources, loadProjections]);
 
 // Rookie board save + load effects live in useRookieBoardState (extracted hook).
 
@@ -3605,6 +3607,8 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     projectionSourceStatus,
     loadingProjections,
     projectionUsesSeasonFallback,
+    enabledExtraSources,
+    toggleExtraSource,
     selectedUserId, setSelectedUserId,
     externalShares,
     loadingShares,

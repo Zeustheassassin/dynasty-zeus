@@ -158,6 +158,8 @@ interface HubRouterProps {
   projectionSourceStatus: Record<string, boolean>;
   loadingProjections: boolean;
   projectionUsesSeasonFallback: boolean;
+  enabledExtraSources: string[];
+  toggleExtraSource: (id: string) => void;
   selectedUserId: string | null;
   setSelectedUserId: (id: string | null) => void;
   externalShares: ExposureData | null;
@@ -277,6 +279,7 @@ export function HubRouter({
   playerDispositions, savePlayerDisposition, loadingRedraft,
   projectionData, setProjectionData, projectionPosFilter, setProjectionPosFilter,
   projectionWeek, projectionSeasonYear, projectionSourceStatus, loadingProjections, projectionUsesSeasonFallback,
+  enabledExtraSources, toggleExtraSource,
   selectedUserId, setSelectedUserId, externalShares, loadingShares, historicalSnapshot, saveSnapshotNow,
   draftHubSection, setDraftHubSection, myDraftSlotPicks, setMyDraftSlotPicks,
   draftSlotEditing, setDraftSlotEditing, draftSlotSearchQuery, setDraftSlotSearchQuery,
@@ -465,6 +468,8 @@ export function HubRouter({
             projectionSourceStatus={projectionSourceStatus}
             loadingProjections={loadingProjections}
             projectionUsesSeasonFallback={projectionUsesSeasonFallback}
+            enabledExtraSources={enabledExtraSources}
+            toggleExtraSource={toggleExtraSource}
             leagues={leagues}
             user={user}
             loadUserExposure={loadUserExposure}

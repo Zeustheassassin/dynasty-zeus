@@ -24,6 +24,8 @@ interface ProjectionsTabProps {
   projectionSourceStatus: Record<string, boolean>;
   loadingProjections: boolean;
   projectionUsesSeasonFallback: boolean;
+  enabledExtraSources: string[];
+  toggleExtraSource: (id: string) => void;
   user: SleeperUser | null;
 }
 
@@ -34,13 +36,14 @@ function ProjectionsTab({
   loadProjections,
   projectionSeasonYear, projectionSourceStatus,
   loadingProjections, projectionUsesSeasonFallback,
+  enabledExtraSources, toggleExtraSource,
   user,
 }: ProjectionsTabProps) {
   const { rosters } = useLeague();
   const { leagueAdjustedFcValues: calcFcValues } = useValues();
 
   const [projRosterOnly, setProjRosterOnly] = React.useState(false);
-  const [enabledExtraSources, setEnabledExtraSources] = React.useState<Set<string>>(new Set());
+  const enabledExtraSet = React.useMemo(() => new Set(enabledExtraSources), [enabledExtraSources]);
 
   const myRoster = rosters.find((r) => r.owner_id === user?.user_id);
   const myPlayerSet = new Set<string>(myRoster?.players ?? []);
@@ -59,7 +62,7 @@ function ProjectionsTab({
               const w = Number(e.target.value);
               setProjectionWeek(w);
               setProjectionData([]);
-              loadProjections(w === 0 ? "season" : w, [...enabledExtraSources]);
+              loadProjections(w === 0 ? "season" : w, enabledExtraSources);
             }}
             className="bg-gray-800 border border-gray-700 text-sm text-white rounded-lg px-2 py-1 focus:outline-none focus:border-blue-500"
           >
@@ -99,7 +102,7 @@ function ProjectionsTab({
         <button
           onClick={() => {
             setProjectionData([]);
-            loadProjections(projectionWeek === 0 ? "season" : projectionWeek, [...enabledExtraSources]);
+            loadProjections(projectionWeek === 0 ? "season" : projectionWeek, enabledExtraSources);
           }}
           className="ml-auto text-xs font-semibold text-blue-400 hover:text-blue-300 border border-blue-700 hover:border-blue-500 rounded-lg px-3 py-1.5 transition"
         >
@@ -112,7 +115,7 @@ function ProjectionsTab({
         {PROJ_SOURCES.map((src) => {
           const ok = projectionSourceStatus[src.id];
           const isSleeper = src.id === "sleeper";
-          const isEnabled = isSleeper || enabledExtraSources.has(src.id);
+          const isEnabled = isSleeper || enabledExtraSet.has(src.id);
           const verifyUrl =
             src.id === "fantasypros"
               ? `https://www.fantasypros.com/nfl/projections/qb.php?week=${projectionWeek === 0 ? "draft" : projectionWeek}&scoring=PPR`
@@ -131,20 +134,7 @@ function ProjectionsTab({
               ) : (
                 <button
                   type="button"
-                  onClick={() => {
-                    const next = new Set(enabledExtraSources);
-                    if (next.has(src.id)) {
-                      next.delete(src.id);
-                    } else {
-                      next.add(src.id);
-                    }
-                    setEnabledExtraSources(next);
-                    setProjectionData([]);
-                    loadProjections(
-                      projectionWeek === 0 ? "season" : projectionWeek,
-                      [...next]
-                    );
-                  }}
+                  onClick={() => toggleExtraSource(src.id)}
                   className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border transition ${
                     isEnabled
                       ? ok === true
