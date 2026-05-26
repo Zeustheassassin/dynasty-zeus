@@ -1,0 +1,14 @@
+-- ⚠️ DESTRUCTIVE: drops the prospects.synopsis column.
+--
+-- This column cached AI-generated player synopses produced by the now-deleted
+-- /api/scouting/synopsis route and rendered by PlayerSynopsisCard. As of
+-- commit 77d53f3 (Replace AI notes summaries with a plain numbered notes list)
+-- nothing in the codebase reads or writes this column.
+--
+-- Apply only AFTER the application code at commit 77d53f3 or later is live
+-- everywhere — if any old build is still running, attempts to write back to
+-- this column will hit a "column does not exist" error.
+--
+-- Per project policy (feedback_no_destructive_sql.md): this destructive
+-- migration was explicitly approved by the project owner on 2026-05-25.
+ALTER TABLE prospects DROP COLUMN IF EXISTS synopsis;
