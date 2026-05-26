@@ -19,6 +19,10 @@ import type {
   QBIntType,
   QBTargetPos,
   QBDepthZone,
+  QBPlatform,
+  QBPlatformSide,
+  QBPressure,
+  QBPressureHandling,
   RouteType,
 } from "../../../lib/types";
 import { ROUTE_TYPES } from "../shared/chartingConstants";
@@ -38,7 +42,7 @@ const PLAY_TYPES: { key: QBPlayType; label: string; color: string }[] = [
 
 const TIMINGS: { key: QBTiming; label: string }[] = [
   { key: "first_option",  label: "1st Option" },
-  { key: "second_option", label: "2nd Option" },
+  { key: "second_option", label: "2nd Option +" },
   { key: "checkdown",     label: "Check Down" },
   { key: "extended_play", label: "Extended Play" },
   { key: "scramble",      label: "Scramble" },
@@ -53,6 +57,30 @@ const ACCURACIES: { key: QBAccuracy; label: string; active: string }[] = [
   { key: "in_front",    label: "In Front",    active: "bg-orange-600" },
   { key: "behind",      label: "Behind",      active: "bg-orange-700" },
   { key: "tipped_ball", label: "Tipped Ball", active: "bg-yellow-600" },
+];
+
+const PLATFORMS: { key: QBPlatform; label: string }[] = [
+  { key: "on_platform",  label: "On Platform" },
+  { key: "off_platform", label: "Off Platform" },
+  { key: "on_the_run",   label: "On the Run" },
+];
+
+const PLATFORM_SIDES: { key: QBPlatformSide; label: string }[] = [
+  { key: "strong_side", label: "Strong Side" },
+  { key: "cross_body",  label: "Cross Body" },
+];
+
+const PRESSURES: { key: QBPressure; label: string; active: string }[] = [
+  { key: "clean",      label: "Clean Pocket",   active: "bg-emerald-700" },
+  { key: "mid",        label: "Mid Pressure",   active: "bg-amber-700" },
+  { key: "backside",   label: "Backside Pressure",  active: "bg-amber-700" },
+  { key: "front_side", label: "Front Side Pressure", active: "bg-amber-700" },
+];
+
+const PRESSURE_HANDLINGS: { key: QBPressureHandling; label: string }[] = [
+  { key: "step_up",          label: "Step Up" },
+  { key: "bail_front_side",  label: "Bail Front Side" },
+  { key: "bail_backside",    label: "Bail Backside" },
 ];
 
 // 3×3 depth-zone grid layout: [depth label, loc label, key]
@@ -98,7 +126,7 @@ function onTargetColor(p: number | null): string {
 // Short display labels for the play log
 const SNAP_SHORT: Record<QBSnapPosition, string> = { shotgun: "SG", pistol: "PS", under_center: "UC" };
 const PLAY_SHORT: Record<QBPlayType, string>     = { run: "RUN", rpo: "RPO", pass: "PASS" };
-const TIMING_SHORT: Record<QBTiming, string>     = { first_option: "1st", second_option: "2nd", checkdown: "CK", extended_play: "EXT", scramble: "SCR", sack: "SCK", throw_away: "TA" };
+const TIMING_SHORT: Record<QBTiming, string>     = { first_option: "1st", second_option: "2nd+", checkdown: "CK", extended_play: "EXT", scramble: "SCR", sack: "SCK", throw_away: "TA" };
 const ACC_SHORT: Record<QBAccuracy, string>      = { on_target: "OT", high: "HI", low: "LO", in_front: "IF", behind: "BH", tipped_ball: "TIP" };
 const DEPTH_SHORT: Record<QBDepthZone, string>   = {
   deep_left: "DL", deep_center: "DC", deep_right: "DR",
@@ -119,6 +147,10 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
   const [depthZone, setDepthZone]           = useState<QBDepthZone | null>(null);
   const [routeType, setRouteType]           = useState<RouteType | null>(null);
   const [coverage, setCoverage]             = useState<"man" | "zone" | null>(null);
+  const [platform, setPlatform]             = useState<QBPlatform | null>(null);
+  const [platformSide, setPlatformSide]     = useState<QBPlatformSide | null>(null);
+  const [pressure, setPressure]             = useState<QBPressure | null>(null);
+  const [pressureHandling, setPressureHandling] = useState<QBPressureHandling | null>(null);
   const [playNotes, setPlayNotes]           = useState("");
   const [savingPlay, setSavingPlay]         = useState(false);
   const [playError, setPlayError]           = useState<string | null>(null);
@@ -169,8 +201,10 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
       return acc;
     }, {} as Record<QBPlayType, number>);
 
-    // Timing counts (of pass+rpo plays)
-    const timingCounts = (["first_option", "second_option", "checkdown", "scramble", "sack", "throw_away"] as QBTiming[]).reduce((acc, t) => {
+    // Timing counts (of pass+rpo plays). Extended Play has accuracy data now,
+    // so include it — otherwise the Overview tab's Extended Play card renders
+    // as "NaN%" because the count is undefined.
+    const timingCounts = (["first_option", "second_option", "checkdown", "extended_play", "scramble", "sack", "throw_away"] as QBTiming[]).reduce((acc, t) => {
       acc[t] = passRpoPlays.filter((p) => p.timing === t).length;
       return acc;
     }, {} as Record<QBTiming, number>);
@@ -250,11 +284,24 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
   const needPassFields = playType === "rpo" || playType === "pass";
   const noThrowTimings: QBTiming[] = ["scramble", "sack", "throw_away"];
   const needThrowFields = needPassFields && timing !== null && !noThrowTimings.includes(timing);
+  // Pressure is required for every pass/rpo play once a timing is picked; Clean
+  // Pocket is one of the options, so charters must always declare the rush picture.
+  const needPressureFields = needPassFields && timing !== null;
+  // Handling sub-section is only required when there actually was pressure.
+  const needPressureHandling = needPressureFields && pressure !== null && pressure !== "clean";
+  // Platform applies only to plays that ended with a throw; sacks/scrambles/throw-aways
+  // don't have a meaningful platform read.
+  const needPlatformFields = needThrowFields;
+  const needPlatformSide = needPlatformFields && platform === "on_the_run";
   const canLog =
     !savingPlay &&
     selectedGameId !== null &&
     (!needPassFields || timing !== null) &&
-    (!needThrowFields || (accuracy !== null && depthZone !== null && routeType !== null && coverage !== null));
+    (!needThrowFields || (accuracy !== null && depthZone !== null && routeType !== null && coverage !== null)) &&
+    (!needPressureFields || pressure !== null) &&
+    (!needPressureHandling || pressureHandling !== null) &&
+    (!needPlatformFields || platform !== null) &&
+    (!needPlatformSide || platformSide !== null);
 
   function resetForm() {
     setEditingPlayId(null);
@@ -266,6 +313,10 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     setDepthZone(null);
     setRouteType(null);
     setCoverage(null);
+    setPlatform(null);
+    setPlatformSide(null);
+    setPressure(null);
+    setPressureHandling(null);
     setPlayNotes("");
   }
 
@@ -281,6 +332,10 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     setDepthZone(pl.depth_zone);
     setRouteType(pl.route_type);
     setCoverage(pl.coverage);
+    setPlatform(pl.platform);
+    setPlatformSide(pl.platform_side);
+    setPressure(pl.pressure);
+    setPressureHandling(pl.pressure_handling);
     setPlayNotes(pl.play_notes ?? "");
   }
 
@@ -298,12 +353,15 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
       setDepthZone(null);
       setRouteType(null);
       setCoverage(null);
+      setPlatform(null);
+      setPlatformSide(null);
+      setPressure(null);
+      setPressureHandling(null);
     }
   }
 
   function handleTimingChange(t: QBTiming) {
     setTiming(t);
-    const autoLog: QBTiming[] = ["sack", "throw_away"];
     if (noThrowTimings.includes(t)) {
       setAccuracy(null);
       setCompletion(null);
@@ -312,30 +370,24 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
       setDepthZone(null);
       setRouteType(null);
       setCoverage(null);
+      // Platform only applies to throws, so clear when we move into a non-throw timing.
+      setPlatform(null);
+      setPlatformSide(null);
     }
-    if (autoLog.includes(t) && !editingPlayId) {
-      logPlayWithTiming(t);
-    }
+    // Pressure is required for all timings — carry the previously-chosen value forward.
   }
 
-  async function logPlayWithTiming(timingOverride: QBTiming) {
-    if (!selectedGameId || savingPlay) return;
-    setPlayError(null);
-    setSavingPlay(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setPlayError("Not logged in."); setSavingPlay(false); return; }
-    const { data, error } = await supabase.from("qb_plays").insert({
-      user_id: user.id,
-      game_id: selectedGameId,
-      snap_position: snapPos,
-      play_type: playType,
-      timing: timingOverride,
-      accuracy: null, completion: null, int_type: null, target_pos: null, depth_zone: null, route_type: null, coverage: null,
-      play_notes: playNotes || null,
-    }).select().single();
-    if (error) { setPlayError(error.message); }
-    else if (data) { setPlays((prev) => [...prev, data as QBPlay]); resetForm(); onDataChanged(); }
-    setSavingPlay(false);
+  function handlePressureChange(p: QBPressure) {
+    setPressure((prev) => (prev === p ? null : p));
+    // Switching to (or unselecting) Clean Pocket implies no handling action; clear it
+    // so the DB CHECK constraint stays satisfied and the sub-section hides cleanly.
+    if (p === "clean" || pressure === p) setPressureHandling(null);
+  }
+
+  function handlePlatformChange(p: QBPlatform) {
+    setPlatform((prev) => (prev === p ? null : p));
+    // Any move away from "on_the_run" — or unselecting it — clears the side sub-pick.
+    if (p !== "on_the_run" || platform === p) setPlatformSide(null);
   }
 
   async function logPlay() {
@@ -361,6 +413,10 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
       depth_zone: isThrow ? depthZone  : null,
       route_type: isThrow ? routeType : null,
       coverage:   isThrow ? coverage  : null,
+      platform:           isThrow ? platform : null,
+      platform_side:      isThrow && platform === "on_the_run" ? platformSide : null,
+      pressure:           isPass  ? pressure : null,
+      pressure_handling:  isPass && pressure && pressure !== "clean" ? pressureHandling : null,
       play_notes: playNotes || null,
     }).select().single();
 
@@ -390,6 +446,10 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
       depth_zone: isThrow ? depthZone  : null,
       route_type: isThrow ? routeType  : null,
       coverage:   isThrow ? coverage   : null,
+      platform:           isThrow ? platform : null,
+      platform_side:      isThrow && platform === "on_the_run" ? platformSide : null,
+      pressure:           isPass  ? pressure : null,
+      pressure_handling:  isPass && pressure && pressure !== "clean" ? pressureHandling : null,
       play_notes: playNotes || null,
     }).eq("id", editingPlayId).select().single();
     if (error) { setPlayError(error.message); }
@@ -809,9 +869,65 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
               </div>
             )}
 
-            {/* 4-7. Throw details — only when timing is set and not scramble */}
+            {/* 4. Pressure — required for every pass/rpo timing */}
+            {needPressureFields && (
+              <div className="space-y-3 p-4 bg-gray-900/60 rounded-lg border border-amber-900/40">
+                <div>
+                  <div className="text-xs text-gray-500 mb-2">Pressure</div>
+                  <div className="flex flex-wrap gap-2">
+                    {PRESSURES.map(({ key, label, active }) => (
+                      <button key={key} onClick={() => handlePressureChange(key)}
+                        className={`px-4 py-2 rounded text-sm font-medium transition ${pressure === key ? `${active} text-white` : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {needPressureHandling && (
+                  <div>
+                    <div className="text-xs text-gray-500 mb-2">Pressure Handling</div>
+                    <div className="flex flex-wrap gap-2">
+                      {PRESSURE_HANDLINGS.map(({ key, label }) => (
+                        <button key={key} onClick={() => setPressureHandling((h) => h === key ? null : key)}
+                          className={`px-4 py-2 rounded text-sm font-medium transition ${pressureHandling === key ? "bg-amber-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 5-8. Throw details — only when timing is set and not scramble */}
             {needThrowFields && (
               <div className="space-y-4 p-4 bg-gray-900/60 rounded-lg border border-blue-900/40">
+                {/* Platform */}
+                <div>
+                  <div className="text-xs text-gray-500 mb-2">Platform</div>
+                  <div className="flex flex-wrap gap-2">
+                    {PLATFORMS.map(({ key, label }) => (
+                      <button key={key} onClick={() => handlePlatformChange(key)}
+                        className={`px-4 py-2 rounded text-sm font-medium transition ${platform === key ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {needPlatformSide && (
+                    <div className="mt-3">
+                      <div className="text-xs text-gray-500 mb-2">Run Direction</div>
+                      <div className="flex gap-2">
+                        {PLATFORM_SIDES.map(({ key, label }) => (
+                          <button key={key} onClick={() => setPlatformSide((s) => s === key ? null : key)}
+                            className={`px-4 py-1.5 rounded text-xs font-medium transition ${platformSide === key ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 {/* Accuracy */}
                 <div>
                   <div className="text-xs text-gray-500 mb-2">Accuracy</div>
@@ -1068,7 +1184,9 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                 <tbody className="divide-y divide-gray-900">
                   {games.map((g) => {
                     const gp       = plays.filter((p) => p.game_id === g.id);
-                    const thrown   = gp.filter((p) => p.play_type !== "run" && p.timing !== "scramble");
+                    // Match the aggregate `thrownPlays` filter — sacks and throw-aways
+                    // have null accuracy and would otherwise drag on-target% down.
+                    const thrown   = gp.filter((p) => p.play_type !== "run" && p.timing !== "scramble" && p.timing !== "sack" && p.timing !== "throw_away");
                     const graded   = thrown.filter((p) => p.accuracy !== "tipped_ball");
                     const onTgt    = graded.filter((p) => p.accuracy === "on_target").length;
                     const otPct    = pct(onTgt, graded.length);

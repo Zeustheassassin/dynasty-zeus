@@ -28,7 +28,7 @@ const COLS: ColDef[] = [
   { key: "snaps",   label: "Snaps",   group: "Identity", fmt: "count", width: 52 },
   { key: "passes",  label: "Pass",    group: "Identity", fmt: "count", width: 50 },
   // Advanced
-  { key: "aae",        label: "AAE",      group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 62, tooltip: "Accuracy Above Expected — on-target% vs league avg adjusted for depth zone & coverage mix", leagueOverride: 0 },
+  { key: "aae",        label: "AAE",      group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 62, tooltip: "Accuracy Above Expected — on-target% vs league avg adjusted for depth, coverage, timing, pressure, platform, pressure handling, and route type mix. Min 25 graded passes. Tipped balls excluded.", leagueOverride: 0 },
   { key: "on_tgt_pct", label: "OnTgt%",   group: "Advanced", fmt: "pct",       colorDir: 1,  width: 66, tooltip: "% of pass attempts graded on-target (accuracy rated)", weightBy: "rated_n" },
   { key: "pass_pct",   label: "Pass%",    group: "Advanced", fmt: "pct",       colorDir: 1,  width: 58, tooltip: "% of snaps that are pass plays", weightBy: "snaps" },
   { key: "run_pct",    label: "Run%",     group: "Advanced", fmt: "pct",       width: 54, weightBy: "snaps" },
@@ -56,8 +56,9 @@ const COLS: ColDef[] = [
   { key: "zone_on_tgt", label: "Zone%", group: "By Coverage", fmt: "pct", colorDir: 1, width: 60, tooltip: "On-target% vs zone coverage", weightBy: "zone_n" },
   // Timing
   { key: "t_first",    label: "1st%",  group: "Decision", fmt: "pct", colorDir: 1,  width: 54, tooltip: "% of passes thrown to first option", weightBy: "timing_n" },
-  { key: "t_second",   label: "2nd%",  group: "Decision", fmt: "pct", width: 54, weightBy: "timing_n" },
+  { key: "t_second",   label: "2nd+%", group: "Decision", fmt: "pct", width: 54, weightBy: "timing_n" },
   { key: "t_check",    label: "Chk%",  group: "Decision", fmt: "pct", width: 54, tooltip: "Checkdown rate", weightBy: "timing_n" },
+  { key: "t_extended", label: "Ext%",  group: "Decision", fmt: "pct", width: 54, tooltip: "Extended play rate (broken pocket, still threw)", weightBy: "timing_n" },
   { key: "t_sack",     label: "Sack%", group: "Decision", fmt: "pct", colorDir: -1, width: 58, weightBy: "timing_n" },
   { key: "t_scramble", label: "Scr%",  group: "Decision", fmt: "pct", width: 58, weightBy: "timing_n" },
   { key: "t_away",     label: "Away%", group: "Decision", fmt: "pct", width: 58, tooltip: "Throw away rate", weightBy: "timing_n" },
@@ -175,6 +176,7 @@ export default function QBStatsTable({ prospects, games, qbPlays, loading, draft
           t_first:    pct(thrownPlays.filter((pl) => pl.timing === "first_option").length,  timingTotal),
           t_second:   pct(thrownPlays.filter((pl) => pl.timing === "second_option").length, timingTotal),
           t_check:    pct(thrownPlays.filter((pl) => pl.timing === "checkdown").length,     timingTotal),
+          t_extended: pct(thrownPlays.filter((pl) => pl.timing === "extended_play").length, timingTotal),
           t_sack:     pct(thrownPlays.filter((pl) => pl.timing === "sack").length,          timingTotal),
           t_scramble: pct(thrownPlays.filter((pl) => pl.timing === "scramble").length,      timingTotal),
           t_away:     pct(thrownPlays.filter((pl) => pl.timing === "throw_away").length,    timingTotal),

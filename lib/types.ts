@@ -960,6 +960,10 @@ export type QBDepthZone    =
 export type QBCompletion = "caught" | "incomplete" | "interception";
 export type QBIntType    = "bad_throw" | "bad_decision" | "fifty_fifty" | "tipped";
 export type QBTargetPos  = "rb" | "wr" | "te";
+export type QBPlatform   = "on_platform" | "off_platform" | "on_the_run";
+export type QBPlatformSide = "strong_side" | "cross_body";
+export type QBPressure   = "clean" | "mid" | "backside" | "front_side";
+export type QBPressureHandling = "step_up" | "bail_front_side" | "bail_backside";
 
 export interface QBPlay {
   id: string;
@@ -975,6 +979,10 @@ export interface QBPlay {
   depth_zone: QBDepthZone | null;
   route_type: RouteType | null;
   coverage: "man" | "zone" | null;
+  platform: QBPlatform | null;
+  platform_side: QBPlatformSide | null;
+  pressure: QBPressure | null;
+  pressure_handling: QBPressureHandling | null;
   play_notes: string | null;
   created_at: string;
 }

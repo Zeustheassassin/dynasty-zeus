@@ -21,9 +21,15 @@ import type {
   RBFormation,
   RBRunType,
   QBDepthZone,
+  QBTiming,
+  QBPressure,
+  QBPlatform,
+  QBPressureHandling,
+  RouteType,
   TEPositioning,
   TECoverage,
 } from "../types";
+import { ROUTE_TYPES } from "../../components/scouting/shared/chartingConstants";
 
 const RB_RUN_TYPES: RBRunType[] = ["outside_zone", "inside_zone", "outside_man_gap", "inside_man_gap"];
 const RB_FORMATIONS: RBFormation[] = ["gun", "pistol", "under_center"];
@@ -33,14 +39,31 @@ const QB_DEPTH_ZONES: QBDepthZone[] = [
   "mid_left",  "mid_center",  "mid_right",
   "short_left","short_center","short_right",
 ];
+// Throw-result timings only — scramble/sack/throw_away leave accuracy null and
+// are already filtered out of AAE.
+const QB_TIMING_BUCKETS: QBTiming[] = ["first_option", "second_option", "checkdown", "extended_play"];
+const QB_PRESSURE_BUCKETS: QBPressure[] = ["clean", "mid", "backside", "front_side"];
+const QB_PLATFORM_BUCKETS: QBPlatform[] = ["on_platform", "off_platform", "on_the_run"];
+const QB_HANDLING_BUCKETS: QBPressureHandling[] = ["step_up", "bail_front_side", "bail_backside"];
 
 const TE_POSITIONINGS: TEPositioning[] = ["wide", "slot", "inline", "full_back", "running_back", "wing_back"];
 
 const MIN_SAMPLE = 15;
+// QB AAE samples 7 dimensions so each dimension's expected estimate is noisier
+// than the 2-dimension RB/TE versions — raise the minimum to compensate.
+const QB_MIN_SAMPLE = 25;
 
 function combine(a: number | null, b: number | null): number | null {
   if (a != null && b != null) return (a + b) / 2;
   return a ?? b;
+}
+
+// Average across an arbitrary list of per-dimension expecteds, skipping nulls.
+// Returns null only if every dimension is null (no comparable league data).
+function combineMany(values: (number | null)[]): number | null {
+  const real = values.filter((v): v is number => v != null);
+  if (!real.length) return null;
+  return real.reduce((a, b) => a + b, 0) / real.length;
 }
 
 function buildPlaysByProspect<T extends { game_id: string }>(
@@ -117,6 +140,22 @@ export function computeRBAboveExpected(
 }
 
 // ── QB AAE ───────────────────────────────────────────────────────────────
+// "Accuracy Above Expected" — actual on-target% minus an expected on-target%
+// computed from league baselines across seven situational dimensions:
+//   depth zone, coverage, timing, pressure, platform, pressure handling, route type.
+//
+// Per dimension, we compute a weighted-average expected on-target% using the
+// QB's distribution across that dimension's buckets and the league's on-target%
+// in each bucket. Dimensions whose values are NULL on a play don't contribute
+// for that play (older plays charted before Pressure / Platform / Handling
+// existed simply don't pull the metric toward 0). The seven per-dimension
+// estimates are then mean-averaged, ignoring nulls.
+//
+// Excluded from both numerator and denominator:
+//   - Run plays (no throw)
+//   - Plays with accuracy == null (sack / scramble / throw_away)
+//   - Tipped balls (consistent with the on-target% denominator in QBStatsTable —
+//     the intended trajectory is unknowable after a deflection)
 export function computeQBAboveExpected(
   prospects: Prospect[],
   games: ScoutingGame[],
@@ -126,48 +165,73 @@ export function computeQBAboveExpected(
   const gameToProspect = buildGameToProspect(games);
   const playsByProspect = buildPlaysByProspect(qbPlays, gameToProspect);
 
-  const lgDepth: Partial<Record<QBDepthZone, { ot: number; n: number }>> = {};
-  const lgCvg: Record<"man" | "zone", { ot: number; n: number }> = { man: { ot: 0, n: 0 }, zone: { ot: 0, n: 0 } };
-  for (const pl of qbPlays) {
+  const isGradedThrow = (pl: QBPlay) =>
     // Include RPO throws — they're real pass attempts with accuracy ratings.
-    // Excluding them mismatched the per-prospect detail view and undercounted
-    // off-target throws that happened on RPO plays.
-    if (pl.play_type === "run" || pl.accuracy == null) continue;
-    if (pl.depth_zone) {
-      if (!lgDepth[pl.depth_zone]) lgDepth[pl.depth_zone] = { ot: 0, n: 0 };
-      lgDepth[pl.depth_zone]!.n++;
-      if (pl.accuracy === "on_target") lgDepth[pl.depth_zone]!.ot++;
+    pl.play_type !== "run" && pl.accuracy != null && pl.accuracy !== "tipped_ball";
+
+  // ── League baselines (per bucket, per dimension) ──
+  const lgDepth:    Partial<Record<QBDepthZone,         { ot: number; n: number }>> = {};
+  const lgCvg:      Record<"man" | "zone",              { ot: number; n: number }>  = { man: { ot: 0, n: 0 }, zone: { ot: 0, n: 0 } };
+  const lgTiming:   Partial<Record<QBTiming,            { ot: number; n: number }>> = {};
+  const lgPressure: Partial<Record<QBPressure,          { ot: number; n: number }>> = {};
+  const lgPlatform: Partial<Record<QBPlatform,          { ot: number; n: number }>> = {};
+  const lgHandling: Partial<Record<QBPressureHandling,  { ot: number; n: number }>> = {};
+  const lgRoute:    Partial<Record<RouteType,           { ot: number; n: number }>> = {};
+
+  for (const pl of qbPlays) {
+    if (!isGradedThrow(pl)) continue;
+    const isOT = pl.accuracy === "on_target";
+    if (pl.depth_zone)                      { (lgDepth[pl.depth_zone]    ??= { ot: 0, n: 0 }).n++; if (isOT) lgDepth[pl.depth_zone]!.ot++; }
+    if (pl.coverage === "man" || pl.coverage === "zone") { lgCvg[pl.coverage].n++; if (isOT) lgCvg[pl.coverage].ot++; }
+    if (pl.timing)                          { (lgTiming[pl.timing]       ??= { ot: 0, n: 0 }).n++; if (isOT) lgTiming[pl.timing]!.ot++; }
+    if (pl.pressure)                        { (lgPressure[pl.pressure]   ??= { ot: 0, n: 0 }).n++; if (isOT) lgPressure[pl.pressure]!.ot++; }
+    if (pl.platform)                        { (lgPlatform[pl.platform]   ??= { ot: 0, n: 0 }).n++; if (isOT) lgPlatform[pl.platform]!.ot++; }
+    if (pl.pressure_handling)               { (lgHandling[pl.pressure_handling] ??= { ot: 0, n: 0 }).n++; if (isOT) lgHandling[pl.pressure_handling]!.ot++; }
+    if (pl.route_type)                      { (lgRoute[pl.route_type]    ??= { ot: 0, n: 0 }).n++; if (isOT) lgRoute[pl.route_type]!.ot++; }
+  }
+
+  // Weighted expected on-target% for one dimension. Weights are share of
+  // the QB's rated passes whose dimension value falls in each bucket; plays
+  // missing the dimension entirely have zero weight and don't contribute.
+  function expectedFor<K extends string>(
+    ratedPasses: QBPlay[],
+    bucketFn: (pl: QBPlay) => K | null | undefined,
+    league: Partial<Record<K, { ot: number; n: number }>>,
+    buckets: readonly K[],
+  ): number | null {
+    const total = ratedPasses.length;
+    if (!total) return null;
+    let exp = 0;
+    let weight = 0;
+    for (const b of buckets) {
+      const n = ratedPasses.filter((pl) => bucketFn(pl) === b).length;
+      const lg = league[b];
+      if (n > 0 && lg && lg.n > 0) {
+        const share = n / total;
+        exp += share * (lg.ot / lg.n);
+        weight += share;
+      }
     }
-    if (pl.coverage === "man" || pl.coverage === "zone") {
-      lgCvg[pl.coverage].n++;
-      if (pl.accuracy === "on_target") lgCvg[pl.coverage].ot++;
-    }
+    return weight > 0 ? exp / weight : null;
   }
 
   for (const p of prospects) {
     if (p.position !== "QB") continue;
     const pPlays = playsByProspect.get(p.id) ?? [];
-    const thrownPlays = pPlays.filter((pl) => pl.play_type !== "run");
-    const ratedPasses = thrownPlays.filter((pl) => pl.accuracy != null);
-    if (ratedPasses.length < MIN_SAMPLE) { out.set(p.id, null); continue; }
+    const ratedPasses = pPlays.filter(isGradedThrow);
+    if (ratedPasses.length < QB_MIN_SAMPLE) { out.set(p.id, null); continue; }
 
     const actual = ratedPasses.filter((pl) => pl.accuracy === "on_target").length / ratedPasses.length;
 
-    let expDepth = 0, dW = 0;
-    for (const dz of QB_DEPTH_ZONES) {
-      const dzN = ratedPasses.filter((pl) => pl.depth_zone === dz).length;
-      const lg = lgDepth[dz];
-      if (dzN > 0 && lg && lg.n > 0) { expDepth += (dzN / ratedPasses.length) * (lg.ot / lg.n); dW += dzN / ratedPasses.length; }
-    }
-    let expCvg = 0, cW = 0;
-    for (const cvg of ["man", "zone"] as const) {
-      const cN = ratedPasses.filter((pl) => pl.coverage === cvg).length;
-      const lg = lgCvg[cvg];
-      if (cN > 0 && lg.n > 0) { expCvg += (cN / ratedPasses.length) * (lg.ot / lg.n); cW += cN / ratedPasses.length; }
-    }
-    const normDepth = dW > 0 ? expDepth / dW : null;
-    const normCvg = cW > 0 ? expCvg / cW : null;
-    const combined = combine(normDepth, normCvg);
+    const expDepth    = expectedFor(ratedPasses, (pl) => pl.depth_zone,        lgDepth,    QB_DEPTH_ZONES);
+    const expCvg      = expectedFor(ratedPasses, (pl) => pl.coverage === "man" || pl.coverage === "zone" ? pl.coverage : null, lgCvg, ["man", "zone"] as const);
+    const expTiming   = expectedFor(ratedPasses, (pl) => pl.timing,            lgTiming,   QB_TIMING_BUCKETS);
+    const expPressure = expectedFor(ratedPasses, (pl) => pl.pressure,          lgPressure, QB_PRESSURE_BUCKETS);
+    const expPlatform = expectedFor(ratedPasses, (pl) => pl.platform,          lgPlatform, QB_PLATFORM_BUCKETS);
+    const expHandling = expectedFor(ratedPasses, (pl) => pl.pressure_handling, lgHandling, QB_HANDLING_BUCKETS);
+    const expRoute    = expectedFor(ratedPasses, (pl) => pl.route_type,        lgRoute,    ROUTE_TYPES);
+
+    const combined = combineMany([expDepth, expCvg, expTiming, expPressure, expPlatform, expHandling, expRoute]);
     out.set(p.id, combined != null ? parseFloat(((actual - combined) * 100).toFixed(2)) : null);
   }
 
