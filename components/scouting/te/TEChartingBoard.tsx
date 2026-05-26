@@ -4,7 +4,7 @@ import { supabase } from "../../../lib/supabaseclient";
 import { logger } from "../../../lib/logger";
 
 const log = logger("scouting/te/TEChartingBoard");
-import PlayerSynopsisCard from "../PlayerSynopsisCard";
+import PlayerNotesList from "../PlayerNotesList";
 import type {
   Prospect,
   TEPlay,
@@ -83,10 +83,6 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged }: Pro
   const [savingPlay, setSavingPlay]           = useState(false);
   const [playError, setPlayError]             = useState<string | null>(null);
   const [editingPlayId, setEditingPlayId]     = useState<string | null>(null);
-
-  const [notesSummaryData, setNotesSummaryData] = useState<{ pid: string; text: string } | null>(null);
-  const notesSummary = notesSummaryData?.pid === prospect.id ? notesSummaryData.text : null;
-  const [loadingNotesSummary, setLoadingNotesSummary] = useState(false);
 
   const cs = useChartingState(prospect, {
     onDataChanged,
@@ -288,21 +284,6 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged }: Pro
     await supabase.from("te_plays").delete().eq("id", id);
     setPlays((prev) => prev.filter((p) => p.id !== id));
     onDataChanged();
-  }
-
-  async function generateNotesSummary() {
-    const notes = plays.map((p) => p.play_notes).filter((n) => n && n.trim());
-    if (notes.length === 0) return;
-    setLoadingNotesSummary(true);
-    try {
-      const res = await fetch("/api/scouting/notes-summary", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ notes, totalPlays: plays.length, position: "TE" }),
-      });
-      const { summary, error } = await res.json() as { summary?: string; error?: string };
-      setNotesSummaryData({ pid: prospect.id, text: summary ?? error ?? "Failed to generate summary." });
-    } catch { setNotesSummaryData({ pid: prospect.id, text: "Failed to generate summary." }); }
-    setLoadingNotesSummary(false);
   }
 
   return (
@@ -525,30 +506,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged }: Pro
                 </div>
               )}
 
-              {plays.some((p) => p.play_notes?.trim()) && (
-                <div className="p-4 bg-gray-900 rounded-lg border border-gray-800">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-sm font-medium text-white">Play Notes Summary</span>
-                    <button onClick={generateNotesSummary} disabled={loadingNotesSummary}
-                      className="px-3 py-1.5 bg-green-800 hover:bg-green-700 disabled:opacity-50 text-white text-xs rounded transition">
-                      {loadingNotesSummary ? "Analyzing…" : notesSummary ? "Regenerate" : "Generate Summary"}
-                    </button>
-                  </div>
-                  {notesSummary ? (
-                    <p className="text-sm text-gray-300 leading-relaxed">{notesSummary}</p>
-                  ) : (
-                    <p className="text-xs text-gray-600">
-                      {plays.filter((p) => p.play_notes?.trim()).length} of {plays.length} plays have notes.
-                      Click Generate to analyze patterns with AI.
-                    </p>
-                  )}
-                </div>
-              )}
-
-              <PlayerSynopsisCard
-                prospectId={prospect.id}
-                prospectName={prospect.name}
-                position="TE"
+              <PlayerNotesList
                 totalPlays={stats.totalPlays}
                 notes={plays.map((p) => p.play_notes).filter((n): n is string => !!(n?.trim()))}
               />

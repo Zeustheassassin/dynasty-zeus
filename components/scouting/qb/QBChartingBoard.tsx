@@ -4,7 +4,7 @@ import { supabase } from "../../../lib/supabaseclient";
 import { logger } from "../../../lib/logger";
 
 const log = logger("scouting/qb/QBChartingBoard");
-import PlayerSynopsisCard from "../PlayerSynopsisCard";
+import PlayerNotesList from "../PlayerNotesList";
 import ChartingBoard from "../shared/ChartingBoard";
 import type { ChartingBoardConfig } from "../shared/ChartingBoard";
 import { useChartingState } from "../shared/hooks/useChartingState";
@@ -868,11 +868,8 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                 </div>
               )}
 
-              {/* Notes Summary */}
-              <PlayerSynopsisCard
-                prospectId={prospect.id}
-                prospectName={prospect.name}
-                position="QB"
+              {/* Play Notes */}
+              <PlayerNotesList
                 totalPlays={stats.totalPlays}
                 notes={plays.map((p) => p.play_notes).filter((n): n is string => !!(n?.trim()))}
               />

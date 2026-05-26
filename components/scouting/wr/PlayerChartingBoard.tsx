@@ -4,7 +4,7 @@ import { supabase } from "../../../lib/supabaseclient";
 import { logger } from "../../../lib/logger";
 
 const log = logger("scouting/PlayerChartingBoard");
-import PlayerSynopsisCard from "../PlayerSynopsisCard";
+import PlayerNotesList from "../PlayerNotesList";
 import BulkGameImport from "../BulkGameImport";
 import SummaryGameImport from "../SummaryGameImport";
 import PlayerCharts from "./PlayerCharts";
@@ -531,10 +531,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                 </div>
               )}
 
-              <PlayerSynopsisCard
-                prospectId={prospect.id}
-                prospectName={prospect.name}
-                position={prospect.position ?? "WR"}
+              <PlayerNotesList
                 totalPlays={stats.totalSnaps}
                 notes={plays.map((p) => p.play_notes).filter((n): n is string => !!(n?.trim()))}
               />

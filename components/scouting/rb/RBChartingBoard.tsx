@@ -4,7 +4,7 @@ import { supabase } from "../../../lib/supabaseclient";
 import { logger } from "../../../lib/logger";
 
 const log = logger("scouting/rb/RBChartingBoard");
-import PlayerSynopsisCard from "../PlayerSynopsisCard";
+import PlayerNotesList from "../PlayerNotesList";
 import ChartingBoard from "../shared/ChartingBoard";
 import type { ChartingBoardConfig } from "../shared/ChartingBoard";
 import { useChartingState } from "../shared/hooks/useChartingState";
@@ -138,8 +138,6 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
   const [savingPlay, setSavingPlay]               = useState(false);
   const [playError, setPlayError]                 = useState<string | null>(null);
   const [editingPlayId, setEditingPlayId]         = useState<string | null>(null);
-  const [notesSummary, setNotesSummary]           = useState<string | null>(null);
-  const [loadingNotesSummary, setLoadingNotesSummary] = useState(false);
 
   // Shared state via hook
   const cs = useChartingState(prospect, {
@@ -356,24 +354,6 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     onDataChanged();
   }
 
-  async function generateNotesSummary() {
-    const notes = plays.map((p) => p.play_notes).filter((n) => n && n.trim());
-    if (notes.length === 0) return;
-    setLoadingNotesSummary(true);
-    try {
-      const res = await fetch("/api/scouting/notes-summary", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ notes, totalPlays: plays.length, position: "RB" }),
-      });
-      const { summary, error } = await res.json() as { summary?: string; error?: string };
-      setNotesSummary(summary ?? error ?? "Failed to generate summary.");
-    } catch {
-      setNotesSummary("Failed to generate summary.");
-    }
-    setLoadingNotesSummary(false);
-  }
-
   const tabs = [
     { key: "overview", label: "Overview" },
     { key: "chart",    label: "Chart Game" },
@@ -570,35 +550,8 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                 </div>
               )}
 
-              {/* Play Notes AI Summary */}
-              {plays.some((p) => p.play_notes?.trim()) && (
-                <div className="p-4 bg-gray-900 rounded-lg border border-gray-800">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-sm font-medium text-white">Play Notes Summary</span>
-                    <button
-                      onClick={generateNotesSummary}
-                      disabled={loadingNotesSummary}
-                      className="px-3 py-1.5 bg-green-800 hover:bg-green-700 disabled:opacity-50 text-white text-xs rounded transition"
-                    >
-                      {loadingNotesSummary ? "Analyzing…" : notesSummary ? "Regenerate" : "Generate Summary"}
-                    </button>
-                  </div>
-                  {notesSummary ? (
-                    <p className="text-sm text-gray-300 leading-relaxed">{notesSummary}</p>
-                  ) : (
-                    <p className="text-xs text-gray-600">
-                      {plays.filter((p) => p.play_notes?.trim()).length} of {plays.length} plays have notes.
-                      Click Generate to analyze patterns with AI.
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {/* Notes Summary */}
-              <PlayerSynopsisCard
-                prospectId={prospect.id}
-                prospectName={prospect.name}
-                position="RB"
+              {/* Play Notes */}
+              <PlayerNotesList
                 totalPlays={stats.totalPlays}
                 notes={plays.map((p) => p.play_notes).filter((n): n is string => !!(n?.trim()))}
               />
