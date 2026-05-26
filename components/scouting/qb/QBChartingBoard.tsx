@@ -252,6 +252,27 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
       tipped: thrownPlays.filter((p) => p.int_type === "tipped").length,
     };
 
+    // Accuracy × depth tier — collapses the 9-zone grid into Short / Mid / Deep
+    // so the Overview panel can show miss patterns at a glance (e.g. "high on
+    // short" vs "behind on deep"). Tipped balls already excluded via gradedThrows.
+    type DepthTier = "short" | "mid" | "deep";
+    const tierOf = (z: QBDepthZone | null | undefined): DepthTier | null =>
+      !z ? null : z.startsWith("short_") ? "short" : z.startsWith("mid_") ? "mid" : "deep";
+    type ScoringAccuracy = Exclude<QBAccuracy, "tipped_ball">;
+    const SCORING_ACCURACIES: ScoringAccuracy[] = ["on_target", "high", "low", "in_front", "behind"];
+    const accByDepth = SCORING_ACCURACIES.reduce((acc, a) => {
+      acc[a] = { short: 0, mid: 0, deep: 0 };
+      return acc;
+    }, {} as Record<ScoringAccuracy, Record<DepthTier, number>>);
+    const depthTierTotals: Record<DepthTier, number> = { short: 0, mid: 0, deep: 0 };
+    for (const pl of gradedThrows) {
+      if (!pl.accuracy || pl.accuracy === "tipped_ball") continue;
+      const tier = tierOf(pl.depth_zone);
+      if (!tier) continue;
+      accByDepth[pl.accuracy][tier]++;
+      depthTierTotals[tier]++;
+    }
+
     // Depth zone stats (count + on-target%)
     type ZoneStat = { count: number; onTarget: number; onTargetPct: number | null };
     const zoneStat = (key: QBDepthZone): ZoneStat => {
@@ -293,6 +314,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
       thrown: thrownPlays.length, graded: gradedThrows.length, scrambles: scramblePlays.length,
       snapCounts, typeCounts, timingCounts, accCounts, onTargetPct,
       compTracked, caughtPlays, incompletePlays, intPlays, catchPct, intPct, intTypeCounts,
+      accByDepth, depthTierTotals,
       zoneStats, routeStats, cvgStats,
     };
   }, [plays]);
@@ -658,6 +680,56 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                       );
                     })}
                   </div>
+
+                  {/* Accuracy × depth-tier breakdown — surfaces "high on short" or
+                      "behind on deep" patterns the totals row collapses together. */}
+                  {(stats.depthTierTotals.short + stats.depthTierTotals.mid + stats.depthTierTotals.deep) > 0 && (
+                    <div className="mt-4 overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="text-gray-500">
+                            <th className="text-left font-medium pb-1.5 pr-3">By Depth</th>
+                            {(["short", "mid", "deep"] as const).map((tier) => (
+                              <th key={tier} className="text-right font-medium pb-1.5 pl-3">
+                                <span className="capitalize">{tier === "short" ? "Short (U10)" : tier === "mid" ? "Mid (10–20)" : "Deep (20+)"}</span>
+                                <span className="ml-1.5 text-gray-700 font-normal">{stats.depthTierTotals[tier]}</span>
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-800/60">
+                          {ACCURACIES.filter(({ key }) => key !== "tipped_ball").map(({ key, label }) => {
+                            const row = stats.accByDepth[key as Exclude<QBAccuracy, "tipped_ball">];
+                            const isOnTarget = key === "on_target";
+                            return (
+                              <tr key={key}>
+                                <td className={`py-1.5 pr-3 ${isOnTarget ? "text-green-400" : "text-gray-400"}`}>{label}</td>
+                                {(["short", "mid", "deep"] as const).map((tier) => {
+                                  const n = row[tier];
+                                  const denom = stats.depthTierTotals[tier];
+                                  const p2 = pct(n, denom);
+                                  const cellColor =
+                                    n === 0 ? "text-gray-700" :
+                                    isOnTarget ? "text-green-400" :
+                                    "text-red-400";
+                                  return (
+                                    <td key={tier} className={`py-1.5 pl-3 text-right font-mono ${cellColor}`}>
+                                      {n}
+                                      {n > 0 && (
+                                        <span className="text-gray-600 font-normal ml-1">({fmtPct(p2)})</span>
+                                      )}
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                      <p className="text-[10px] text-gray-600 mt-1.5">Percentages are within each depth tier — e.g., 30% high in &quot;Mid&quot; means 30% of mid-depth throws were high.</p>
+                    </div>
+                  )}
+
                   {stats.compTracked > 0 && (
                     <div className="mt-3 space-y-2">
                       <div className="flex gap-3">
