@@ -23,6 +23,7 @@ import type {
   QBPlatformSide,
   QBPressure,
   QBPressureHandling,
+  QBTouch,
   RouteType,
 } from "../../../lib/types";
 import { ROUTE_TYPES } from "../shared/chartingConstants";
@@ -156,6 +157,9 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
   const [platformSide, setPlatformSide]     = useState<QBPlatformSide | null>(null);
   const [pressure, setPressure]             = useState<QBPressure | null>(null);
   const [pressureHandling, setPressureHandling] = useState<QBPressureHandling | null>(null);
+  // Default "correct" so the charter only clicks when something's off — saves
+  // a click on every throw. Resets back to "correct" after each log.
+  const [touch, setTouch]                   = useState<QBTouch>("correct");
   const [playNotes, setPlayNotes]           = useState("");
   const [savingPlay, setSavingPlay]         = useState(false);
   const [playError, setPlayError]           = useState<string | null>(null);
@@ -252,6 +256,13 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
       tipped: thrownPlays.filter((p) => p.int_type === "tipped").length,
     };
 
+    // Touch tracking — share of graded throws marked as "correct" velocity / feel.
+    // Plays charted before migration 034 have touch=null and are ignored here
+    // (kept out of both numerator and denominator) so backfill happens gradually.
+    const touchTracked = gradedThrows.filter((p) => p.touch != null);
+    const touchCorrect = touchTracked.filter((p) => p.touch === "correct").length;
+    const touchPct = pct(touchCorrect, touchTracked.length);
+
     // Accuracy × depth tier — collapses the 9-zone grid into Short / Mid / Deep
     // so the Overview panel can show miss patterns at a glance (e.g. "high on
     // short" vs "behind on deep"). Tipped balls already excluded via gradedThrows.
@@ -314,6 +325,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
       thrown: thrownPlays.length, graded: gradedThrows.length, scrambles: scramblePlays.length,
       snapCounts, typeCounts, timingCounts, accCounts, onTargetPct,
       compTracked, caughtPlays, incompletePlays, intPlays, catchPct, intPct, intTypeCounts,
+      touchTracked: touchTracked.length, touchCorrect, touchPct,
       accByDepth, depthTierTotals,
       zoneStats, routeStats, cvgStats,
     };
@@ -362,6 +374,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     setPlatformSide(null);
     setPressure(null);
     setPressureHandling(null);
+    setTouch("correct");
     setPlayNotes("");
   }
 
@@ -381,6 +394,9 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     setPlatformSide(pl.platform_side);
     setPressure(pl.pressure);
     setPressureHandling(pl.pressure_handling);
+    // Backfill old NULLs to "correct" — same default behaviour as a new play —
+    // so editing an old row doesn't silently flip its touch reading once saved.
+    setTouch(pl.touch ?? "correct");
     setPlayNotes(pl.play_notes ?? "");
   }
 
@@ -462,6 +478,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
       platform_side:      isThrow && platform === "on_the_run" ? platformSide : null,
       pressure:           isPass  ? pressure : null,
       pressure_handling:  isPass && pressure && pressure !== "clean" ? pressureHandling : null,
+      touch:              isThrow ? touch : null,
       play_notes: playNotes || null,
     }).select().single();
 
@@ -495,6 +512,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
       platform_side:      isThrow && platform === "on_the_run" ? platformSide : null,
       pressure:           isPass  ? pressure : null,
       pressure_handling:  isPass && pressure && pressure !== "clean" ? pressureHandling : null,
+      touch:              isThrow ? touch : null,
       play_notes: playNotes || null,
     }).eq("id", editingPlayId).select().single();
     if (error) { setPlayError(error.message); }
@@ -657,6 +675,12 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                       <span className={`font-semibold ${stats.catchPct !== null && stats.catchPct >= 60 ? "text-green-400" : stats.catchPct !== null && stats.catchPct >= 50 ? "text-yellow-400" : "text-red-400"}`}>
                         {fmtPct(stats.catchPct)} catch rate
                         <span className="text-gray-600 font-normal ml-1">({stats.compTracked} tracked)</span>
+                      </span>
+                    )}
+                    {stats.touchTracked > 0 && (
+                      <span className={`font-semibold ${stats.touchPct !== null && stats.touchPct >= 80 ? "text-green-400" : stats.touchPct !== null && stats.touchPct >= 65 ? "text-yellow-400" : "text-red-400"}`}>
+                        {fmtPct(stats.touchPct)} touch
+                        <span className="text-gray-600 font-normal ml-1">({stats.touchCorrect}/{stats.touchTracked} correct)</span>
                       </span>
                     )}
                     {stats.intPlays > 0 && (
@@ -1070,6 +1094,23 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                     {ACCURACIES.map(({ key, label, active }) => (
                       <button key={key} onClick={() => setAccuracy((a) => a === key ? null : key)}
                         className={`px-4 py-2 rounded text-sm font-medium transition ${accuracy === key ? `${active} text-white` : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Touch — feathered vs fastball read. Defaults to "correct";
+                    flip to "incorrect" when the velocity didn't fit the throw. */}
+                <div>
+                  <div className="text-xs text-gray-500 mb-2">Touch</div>
+                  <div className="flex gap-2">
+                    {([
+                      { key: "correct",   label: "Correct",   cls: "bg-green-600" },
+                      { key: "incorrect", label: "Incorrect", cls: "bg-red-700" },
+                    ] as { key: QBTouch; label: string; cls: string }[]).map(({ key, label, cls }) => (
+                      <button key={key} onClick={() => setTouch(key)}
+                        className={`px-5 py-2 rounded text-sm font-medium transition ${touch === key ? `${cls} text-white` : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
                         {label}
                       </button>
                     ))}

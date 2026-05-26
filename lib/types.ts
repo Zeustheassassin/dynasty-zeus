@@ -964,6 +964,7 @@ export type QBPlatform   = "on_platform" | "off_platform" | "on_the_run";
 export type QBPlatformSide = "strong_side" | "cross_body";
 export type QBPressure   = "clean" | "mid" | "backside" | "front_side";
 export type QBPressureHandling = "step_up" | "bail_front_side" | "bail_backside";
+export type QBTouch      = "correct" | "incorrect";
 
 export interface QBPlay {
   id: string;
@@ -983,6 +984,7 @@ export interface QBPlay {
   platform_side: QBPlatformSide | null;
   pressure: QBPressure | null;
   pressure_handling: QBPressureHandling | null;
+  touch: QBTouch | null;
   play_notes: string | null;
   created_at: string;
 }
