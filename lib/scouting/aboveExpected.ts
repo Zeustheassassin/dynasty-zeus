@@ -156,6 +156,117 @@ export function computeRBAboveExpected(
 //   - Plays with accuracy == null (sack / scramble / throw_away)
 //   - Tipped balls (consistent with the on-target% denominator in QBStatsTable —
 //     the intended trajectory is unknowable after a deflection)
+const isQBGradedThrow = (pl: QBPlay) =>
+  // Include RPO throws — they're real pass attempts with accuracy ratings.
+  pl.play_type !== "run" && pl.accuracy != null && pl.accuracy !== "tipped_ball";
+
+type Bucketed<K extends string> = Partial<Record<K, { ot: number; n: number }>>;
+
+interface QBBaselines {
+  depth:    Bucketed<QBDepthZone>;
+  cvg:      Record<"man" | "zone", { ot: number; n: number }>;
+  timing:   Bucketed<QBTiming>;
+  pressure: Bucketed<QBPressure>;
+  platform: Bucketed<QBPlatform>;
+  handling: Bucketed<QBPressureHandling>;
+  route:    Bucketed<RouteType>;
+}
+
+function buildQBBaselines(leaguePlays: QBPlay[]): QBBaselines {
+  const b: QBBaselines = {
+    depth: {}, cvg: { man: { ot: 0, n: 0 }, zone: { ot: 0, n: 0 } },
+    timing: {}, pressure: {}, platform: {}, handling: {}, route: {},
+  };
+  for (const pl of leaguePlays) {
+    if (!isQBGradedThrow(pl)) continue;
+    const ot = pl.accuracy === "on_target";
+    if (pl.depth_zone)        { (b.depth[pl.depth_zone]   ??= { ot: 0, n: 0 }).n++; if (ot) b.depth[pl.depth_zone]!.ot++; }
+    if (pl.coverage === "man" || pl.coverage === "zone") { b.cvg[pl.coverage].n++; if (ot) b.cvg[pl.coverage].ot++; }
+    if (pl.timing)            { (b.timing[pl.timing]      ??= { ot: 0, n: 0 }).n++; if (ot) b.timing[pl.timing]!.ot++; }
+    if (pl.pressure)          { (b.pressure[pl.pressure]  ??= { ot: 0, n: 0 }).n++; if (ot) b.pressure[pl.pressure]!.ot++; }
+    if (pl.platform)          { (b.platform[pl.platform]  ??= { ot: 0, n: 0 }).n++; if (ot) b.platform[pl.platform]!.ot++; }
+    if (pl.pressure_handling) { (b.handling[pl.pressure_handling] ??= { ot: 0, n: 0 }).n++; if (ot) b.handling[pl.pressure_handling]!.ot++; }
+    if (pl.route_type)        { (b.route[pl.route_type]   ??= { ot: 0, n: 0 }).n++; if (ot) b.route[pl.route_type]!.ot++; }
+  }
+  return b;
+}
+
+// Weighted expected on-target% for one dimension + count of plays that
+// actually contributed (had the dimension filled and a matching league bucket).
+function expectedFor<K extends string>(
+  ratedPasses: QBPlay[],
+  bucketFn: (pl: QBPlay) => K | null | undefined,
+  league: Bucketed<K>,
+  buckets: readonly K[],
+): { expected: number | null; n: number } {
+  const total = ratedPasses.length;
+  if (!total) return { expected: null, n: 0 };
+  let exp = 0;
+  let weight = 0;
+  let filled = 0;
+  for (const b of buckets) {
+    const n = ratedPasses.filter((pl) => bucketFn(pl) === b).length;
+    const lg = league[b];
+    if (n > 0 && lg && lg.n > 0) {
+      const share = n / total;
+      exp += share * (lg.ot / lg.n);
+      weight += share;
+      filled += n;
+    }
+  }
+  return { expected: weight > 0 ? exp / weight : null, n: filled };
+}
+
+// Per-dimension AAE row: actual on-target% minus the dimension's expected,
+// in percentage points. `n` is how many of the QB's rated passes had this
+// dimension filled (a sample-size signal for the UI).
+export interface QBAAEDimRow {
+  key: "depth" | "coverage" | "timing" | "pressure" | "platform" | "handling" | "route";
+  label: string;
+  aae: number | null;
+  n: number;
+}
+
+export interface QBAAEBreakdown {
+  ratedPasses: number;        // total graded throws (denominator of actual on-target%)
+  actualOnTgtPct: number | null;
+  total: number | null;       // overall AAE (mean of non-null dim AAEs)
+  dims: QBAAEDimRow[];
+}
+
+function breakdownFor(ratedPasses: QBPlay[], baselines: QBBaselines): QBAAEBreakdown {
+  const denom = ratedPasses.length;
+  if (!denom) {
+    return { ratedPasses: 0, actualOnTgtPct: null, total: null, dims: [] };
+  }
+  const actual = ratedPasses.filter((pl) => pl.accuracy === "on_target").length / denom;
+
+  const rows: QBAAEDimRow[] = [
+    { key: "depth",    label: "Depth Zone",        ...toAaeRow(actual, expectedFor(ratedPasses, (pl) => pl.depth_zone,        baselines.depth,    QB_DEPTH_ZONES)) },
+    { key: "coverage", label: "Coverage",          ...toAaeRow(actual, expectedFor(ratedPasses, (pl) => pl.coverage === "man" || pl.coverage === "zone" ? pl.coverage : null, baselines.cvg, ["man", "zone"] as const)) },
+    { key: "timing",   label: "Timing",            ...toAaeRow(actual, expectedFor(ratedPasses, (pl) => pl.timing,            baselines.timing,   QB_TIMING_BUCKETS)) },
+    { key: "pressure", label: "Pressure",          ...toAaeRow(actual, expectedFor(ratedPasses, (pl) => pl.pressure,          baselines.pressure, QB_PRESSURE_BUCKETS)) },
+    { key: "platform", label: "Platform",          ...toAaeRow(actual, expectedFor(ratedPasses, (pl) => pl.platform,          baselines.platform, QB_PLATFORM_BUCKETS)) },
+    { key: "handling", label: "Pressure Handling", ...toAaeRow(actual, expectedFor(ratedPasses, (pl) => pl.pressure_handling, baselines.handling, QB_HANDLING_BUCKETS)) },
+    { key: "route",    label: "Route Type",        ...toAaeRow(actual, expectedFor(ratedPasses, (pl) => pl.route_type,        baselines.route,    ROUTE_TYPES)) },
+  ];
+
+  const totalRaw = combineMany(rows.map((r) => r.aae));
+  return {
+    ratedPasses: denom,
+    actualOnTgtPct: parseFloat((actual * 100).toFixed(2)),
+    total: totalRaw != null ? parseFloat(totalRaw.toFixed(2)) : null,
+    dims: rows,
+  };
+}
+
+function toAaeRow(actual: number, dim: { expected: number | null; n: number }): { aae: number | null; n: number } {
+  return {
+    aae: dim.expected != null ? parseFloat(((actual - dim.expected) * 100).toFixed(2)) : null,
+    n: dim.n,
+  };
+}
+
 export function computeQBAboveExpected(
   prospects: Prospect[],
   games: ScoutingGame[],
@@ -164,78 +275,29 @@ export function computeQBAboveExpected(
   const out = new Map<string, number | null>();
   const gameToProspect = buildGameToProspect(games);
   const playsByProspect = buildPlaysByProspect(qbPlays, gameToProspect);
-
-  const isGradedThrow = (pl: QBPlay) =>
-    // Include RPO throws — they're real pass attempts with accuracy ratings.
-    pl.play_type !== "run" && pl.accuracy != null && pl.accuracy !== "tipped_ball";
-
-  // ── League baselines (per bucket, per dimension) ──
-  const lgDepth:    Partial<Record<QBDepthZone,         { ot: number; n: number }>> = {};
-  const lgCvg:      Record<"man" | "zone",              { ot: number; n: number }>  = { man: { ot: 0, n: 0 }, zone: { ot: 0, n: 0 } };
-  const lgTiming:   Partial<Record<QBTiming,            { ot: number; n: number }>> = {};
-  const lgPressure: Partial<Record<QBPressure,          { ot: number; n: number }>> = {};
-  const lgPlatform: Partial<Record<QBPlatform,          { ot: number; n: number }>> = {};
-  const lgHandling: Partial<Record<QBPressureHandling,  { ot: number; n: number }>> = {};
-  const lgRoute:    Partial<Record<RouteType,           { ot: number; n: number }>> = {};
-
-  for (const pl of qbPlays) {
-    if (!isGradedThrow(pl)) continue;
-    const isOT = pl.accuracy === "on_target";
-    if (pl.depth_zone)                      { (lgDepth[pl.depth_zone]    ??= { ot: 0, n: 0 }).n++; if (isOT) lgDepth[pl.depth_zone]!.ot++; }
-    if (pl.coverage === "man" || pl.coverage === "zone") { lgCvg[pl.coverage].n++; if (isOT) lgCvg[pl.coverage].ot++; }
-    if (pl.timing)                          { (lgTiming[pl.timing]       ??= { ot: 0, n: 0 }).n++; if (isOT) lgTiming[pl.timing]!.ot++; }
-    if (pl.pressure)                        { (lgPressure[pl.pressure]   ??= { ot: 0, n: 0 }).n++; if (isOT) lgPressure[pl.pressure]!.ot++; }
-    if (pl.platform)                        { (lgPlatform[pl.platform]   ??= { ot: 0, n: 0 }).n++; if (isOT) lgPlatform[pl.platform]!.ot++; }
-    if (pl.pressure_handling)               { (lgHandling[pl.pressure_handling] ??= { ot: 0, n: 0 }).n++; if (isOT) lgHandling[pl.pressure_handling]!.ot++; }
-    if (pl.route_type)                      { (lgRoute[pl.route_type]    ??= { ot: 0, n: 0 }).n++; if (isOT) lgRoute[pl.route_type]!.ot++; }
-  }
-
-  // Weighted expected on-target% for one dimension. Weights are share of
-  // the QB's rated passes whose dimension value falls in each bucket; plays
-  // missing the dimension entirely have zero weight and don't contribute.
-  function expectedFor<K extends string>(
-    ratedPasses: QBPlay[],
-    bucketFn: (pl: QBPlay) => K | null | undefined,
-    league: Partial<Record<K, { ot: number; n: number }>>,
-    buckets: readonly K[],
-  ): number | null {
-    const total = ratedPasses.length;
-    if (!total) return null;
-    let exp = 0;
-    let weight = 0;
-    for (const b of buckets) {
-      const n = ratedPasses.filter((pl) => bucketFn(pl) === b).length;
-      const lg = league[b];
-      if (n > 0 && lg && lg.n > 0) {
-        const share = n / total;
-        exp += share * (lg.ot / lg.n);
-        weight += share;
-      }
-    }
-    return weight > 0 ? exp / weight : null;
-  }
+  const baselines = buildQBBaselines(qbPlays);
 
   for (const p of prospects) {
     if (p.position !== "QB") continue;
-    const pPlays = playsByProspect.get(p.id) ?? [];
-    const ratedPasses = pPlays.filter(isGradedThrow);
+    const ratedPasses = (playsByProspect.get(p.id) ?? []).filter(isQBGradedThrow);
     if (ratedPasses.length < QB_MIN_SAMPLE) { out.set(p.id, null); continue; }
-
-    const actual = ratedPasses.filter((pl) => pl.accuracy === "on_target").length / ratedPasses.length;
-
-    const expDepth    = expectedFor(ratedPasses, (pl) => pl.depth_zone,        lgDepth,    QB_DEPTH_ZONES);
-    const expCvg      = expectedFor(ratedPasses, (pl) => pl.coverage === "man" || pl.coverage === "zone" ? pl.coverage : null, lgCvg, ["man", "zone"] as const);
-    const expTiming   = expectedFor(ratedPasses, (pl) => pl.timing,            lgTiming,   QB_TIMING_BUCKETS);
-    const expPressure = expectedFor(ratedPasses, (pl) => pl.pressure,          lgPressure, QB_PRESSURE_BUCKETS);
-    const expPlatform = expectedFor(ratedPasses, (pl) => pl.platform,          lgPlatform, QB_PLATFORM_BUCKETS);
-    const expHandling = expectedFor(ratedPasses, (pl) => pl.pressure_handling, lgHandling, QB_HANDLING_BUCKETS);
-    const expRoute    = expectedFor(ratedPasses, (pl) => pl.route_type,        lgRoute,    ROUTE_TYPES);
-
-    const combined = combineMany([expDepth, expCvg, expTiming, expPressure, expPlatform, expHandling, expRoute]);
-    out.set(p.id, combined != null ? parseFloat(((actual - combined) * 100).toFixed(2)) : null);
+    out.set(p.id, breakdownFor(ratedPasses, baselines).total);
   }
 
   return out;
+}
+
+// Per-dimension AAE for a single prospect, given that prospect's plays and the
+// full league play set used to build baselines. Surfaces in the prospect
+// Overview panel; the aggregate `computeQBAboveExpected` calls the same guts
+// internally so the total line matches the table.
+export function computeQBAAEBreakdown(
+  prospectPlays: QBPlay[],
+  leaguePlays: QBPlay[],
+): QBAAEBreakdown {
+  const baselines = buildQBBaselines(leaguePlays);
+  const ratedPasses = prospectPlays.filter(isQBGradedThrow);
+  return breakdownFor(ratedPasses, baselines);
 }
 
 // ── TE TE-SAER (route running) ───────────────────────────────────────────

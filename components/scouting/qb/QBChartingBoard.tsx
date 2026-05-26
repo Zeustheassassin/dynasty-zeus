@@ -27,6 +27,7 @@ import type {
 } from "../../../lib/types";
 import { ROUTE_TYPES } from "../shared/chartingConstants";
 import { pct, fmtPct } from "../shared/chartingTypes";
+import { computeQBAAEBreakdown } from "../../../lib/scouting/aboveExpected";
 
 const SNAP_POSITIONS: { key: QBSnapPosition; label: string }[] = [
   { key: "shotgun",      label: "Shotgun" },
@@ -137,6 +138,10 @@ const DEPTH_SHORT: Record<QBDepthZone, string>   = {
 export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Props) {
   // Position-specific play state
   const [plays, setPlays]                   = useState<QBPlay[]>([]);
+  // League-wide QB plays (across all charted prospects) — used to build the
+  // baselines for the per-dimension AAE breakdown panel. Fetched once when
+  // the board mounts; small (~MB-scale at full league) and not in a hot path.
+  const [leaguePlays, setLeaguePlays]       = useState<QBPlay[]>([]);
   const [snapPos, setSnapPos]               = useState<QBSnapPosition>("shotgun");
   const [playType, setPlayType]             = useState<QBPlayType>("pass");
   const [timing, setTiming]                 = useState<QBTiming | null>(null);
@@ -177,7 +182,25 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
       });
   }, [games]);
 
+  // Load league-wide QB plays once for the AAE breakdown baselines. Refresh
+  // whenever this prospect's plays change so the QB's own contributions are
+  // up-to-date as the user backfills.
+  useEffect(() => {
+    supabase.from("qb_plays").select("*")
+      .then(({ data, error }) => {
+        if (error) { log.error("qb_plays league load failed", { err: error.message }); return; }
+        setLeaguePlays((data ?? []) as QBPlay[]);
+      });
+  }, [plays.length]);
+
   const gamePlays    = useMemo(() => plays.filter((p) => p.game_id === selectedGameId), [plays, selectedGameId]);
+
+  // Per-dimension AAE for this prospect, using full-league plays as the
+  // baseline. Same math as the aggregate AAE in QBStatsTable — the totals match.
+  const aaeBreakdown = useMemo(
+    () => computeQBAAEBreakdown(plays, leaguePlays),
+    [plays, leaguePlays],
+  );
 
   // ── Aggregate stats ──────────────────────────────────────────
   const stats = useMemo(() => {
@@ -675,6 +698,49 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                       )}
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* Per-Dimension AAE Breakdown */}
+              {stats.graded > 0 && (
+                <div className="p-4 bg-gray-900 rounded-lg border border-gray-800">
+                  <div className="text-xs text-gray-500 mb-3 flex flex-wrap items-baseline gap-3">
+                    <span>AAE Breakdown <span className="text-gray-700">— vs league baseline, by dimension</span></span>
+                    {aaeBreakdown.total !== null ? (
+                      <span className={`text-sm font-bold ${aaeBreakdown.total > 0 ? "text-green-400" : aaeBreakdown.total < 0 ? "text-red-400" : "text-gray-400"}`}>
+                        {aaeBreakdown.total > 0 ? "+" : ""}{aaeBreakdown.total.toFixed(2)} pp
+                      </span>
+                    ) : (
+                      <span className="text-xs text-gray-600">no comparable league data yet</span>
+                    )}
+                    <span className="text-xs text-gray-600 ml-auto">{aaeBreakdown.ratedPasses} graded throws</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                    {aaeBreakdown.dims.map(({ key, label, aae, n }) => {
+                      const isLowN = n > 0 && n < 5;
+                      const color =
+                        aae === null ? "text-gray-600" :
+                        aae > 0 ? "text-green-400" :
+                        aae < 0 ? "text-red-400" :
+                        "text-gray-400";
+                      return (
+                        <div key={key} className="p-3 bg-gray-800/50 rounded-lg flex items-baseline justify-between gap-2">
+                          <span className="text-xs text-gray-400">{label}</span>
+                          <div className="flex items-baseline gap-2">
+                            <span className={`text-sm font-bold ${color}`}>
+                              {aae === null ? "—" : `${aae > 0 ? "+" : ""}${aae.toFixed(1)} pp`}
+                            </span>
+                            <span className={`text-[10px] ${isLowN ? "text-yellow-500/70" : "text-gray-600"}`} title={isLowN ? "Low sample — interpret cautiously" : undefined}>
+                              {n}p
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[10px] text-gray-600 mt-3">
+                    Each dimension compares this QB&apos;s on-target% to the league baseline weighted by his mix in that dimension. Null (&quot;—&quot;) means no plays had that dimension filled, or no league plays exist yet for those buckets. The overall AAE up top is the mean of the non-null rows.
+                  </p>
                 </div>
               )}
 
