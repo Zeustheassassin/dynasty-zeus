@@ -72,6 +72,16 @@ const PLATFORM_SIDES: { key: QBPlatformSide; label: string }[] = [
   { key: "cross_body",  label: "Cross Body" },
 ];
 
+// 4-bucket platform breakdown used on the Overview panel. on_the_run is split
+// by platform_side; the schema only allows platform_side when platform=on_the_run.
+type PlatformBreakdownKey = "on_platform" | "off_platform" | "on_the_run_strong_side" | "on_the_run_cross_body";
+const PLATFORM_BREAKDOWN: { key: PlatformBreakdownKey; label: string }[] = [
+  { key: "on_platform",            label: "On Platform" },
+  { key: "off_platform",           label: "Off Platform" },
+  { key: "on_the_run_strong_side", label: "On the Run — Strong Side" },
+  { key: "on_the_run_cross_body",  label: "On the Run — Cross Body" },
+];
+
 const PRESSURES: { key: QBPressure; label: string; active: string }[] = [
   { key: "clean",      label: "Clean Pocket",   active: "bg-emerald-700" },
   { key: "mid",        label: "Mid Pressure",   active: "bg-amber-700" },
@@ -320,6 +330,53 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
       zone: { count: zoneP.length, onTarget: zoneP.filter((p) => p.accuracy === "on_target").length },
     };
 
+    // Platform breakdown — splits on_the_run into strong_side / cross_body so the
+    // Overview panel can surface footwork patterns. Plays charted before
+    // migration 032 have platform=null and don't fall into any bucket.
+    const platformBreakdown = PLATFORM_BREAKDOWN.reduce((acc, { key }) => {
+      acc[key] = { n: 0, ot: 0 };
+      return acc;
+    }, {} as Record<PlatformBreakdownKey, { n: number; ot: number }>);
+    for (const pl of gradedThrows) {
+      let k: PlatformBreakdownKey | null = null;
+      if (pl.platform === "on_platform")  k = "on_platform";
+      else if (pl.platform === "off_platform") k = "off_platform";
+      else if (pl.platform === "on_the_run") {
+        if (pl.platform_side === "strong_side") k = "on_the_run_strong_side";
+        else if (pl.platform_side === "cross_body")  k = "on_the_run_cross_body";
+      }
+      if (!k) continue;
+      platformBreakdown[k].n++;
+      if (pl.accuracy === "on_target") platformBreakdown[k].ot++;
+    }
+    const platformCharted = PLATFORM_BREAKDOWN.reduce((s, { key }) => s + platformBreakdown[key].n, 0);
+    const platformMissing = gradedThrows.length - platformCharted;
+
+    // Pressure breakdown — for each of the 4 pressure types, count total plays,
+    // outcomes (sack / throw-away / scramble), and on-target% among graded throws
+    // in that bucket. Denominator for share% is all pass/RPO plays. Plays
+    // charted before pressure existed have pressure=null and don't contribute.
+    const PRESSURE_KEYS = ["clean", "mid", "backside", "front_side"] as const;
+    type PressureKey = (typeof PRESSURE_KEYS)[number];
+    const pressureBreakdown = PRESSURE_KEYS.reduce((acc, k) => {
+      acc[k] = { total: 0, sacks: 0, throwAways: 0, scrambles: 0, gradedThrows: 0, onTarget: 0 };
+      return acc;
+    }, {} as Record<PressureKey, { total: number; sacks: number; throwAways: number; scrambles: number; gradedThrows: number; onTarget: number }>);
+    for (const pl of passRpoPlays) {
+      if (!pl.pressure) continue;
+      const b = pressureBreakdown[pl.pressure];
+      b.total++;
+      if (pl.timing === "sack") b.sacks++;
+      else if (pl.timing === "throw_away") b.throwAways++;
+      else if (pl.timing === "scramble") b.scrambles++;
+      else if (pl.accuracy != null && pl.accuracy !== "tipped_ball") {
+        b.gradedThrows++;
+        if (pl.accuracy === "on_target") b.onTarget++;
+      }
+    }
+    const pressureCharted = PRESSURE_KEYS.reduce((s, k) => s + pressureBreakdown[k].total, 0);
+    const pressureMissing = passRpoPlays.length - pressureCharted;
+
     return {
       totalPlays, runPlays: runPlays.length, passRpo: passRpoPlays.length,
       thrown: thrownPlays.length, graded: gradedThrows.length, scrambles: scramblePlays.length,
@@ -328,6 +385,8 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
       touchTracked: touchTracked.length, touchCorrect, touchPct,
       accByDepth, depthTierTotals,
       zoneStats, routeStats, cvgStats,
+      platformBreakdown, platformCharted, platformMissing,
+      pressureBreakdown, pressureCharted, pressureMissing,
     };
   }, [plays]);
 
@@ -794,6 +853,88 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                       )}
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* Platform breakdown — count + share of throws + on-target% per bucket */}
+              {stats.platformCharted > 0 && (
+                <div className="p-4 bg-gray-900 rounded-lg border border-gray-800">
+                  <div className="text-xs text-gray-500 mb-3 flex flex-wrap items-baseline gap-3">
+                    <span>
+                      Platform <span className="text-gray-700">({stats.platformCharted} of {stats.graded} graded throws charted)</span>
+                    </span>
+                    {stats.platformMissing > 0 && (
+                      <span className="text-yellow-500/70 text-[10px]">{stats.platformMissing} missing platform data</span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {PLATFORM_BREAKDOWN.map(({ key, label }) => {
+                      const b = stats.platformBreakdown[key];
+                      const sharePct = pct(b.n, stats.graded);
+                      const otPct = pct(b.ot, b.n);
+                      return (
+                        <div key={key} className="p-3 bg-gray-800/50 rounded-lg text-center">
+                          <div className="text-xs text-gray-500 mb-1">{label}</div>
+                          <div className="text-xl font-bold text-blue-300">{b.n}</div>
+                          <div className="text-xs text-gray-600 mt-0.5">{fmtPct(sharePct)} of throws</div>
+                          <div className={`text-xs font-semibold mt-1 ${onTargetColor(otPct)}`}>{fmtPct(otPct)} on target</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[10px] text-gray-600 mt-3">
+                    Share % uses all {stats.graded} graded throws as the denominator, so the four buckets may sum to less than 100% when older plays lack platform data. On-target % is within each bucket.
+                  </p>
+                </div>
+              )}
+
+              {/* Pressure breakdown — sacks / TAs / scrambles + on-target% per bucket */}
+              {stats.pressureCharted > 0 && (
+                <div className="p-4 bg-gray-900 rounded-lg border border-gray-800">
+                  <div className="text-xs text-gray-500 mb-3 flex flex-wrap items-baseline gap-3">
+                    <span>
+                      Pressure <span className="text-gray-700">({stats.pressureCharted} of {stats.passRpo} pass/RPO plays charted)</span>
+                    </span>
+                    {stats.pressureMissing > 0 && (
+                      <span className="text-yellow-500/70 text-[10px]">{stats.pressureMissing} missing pressure data</span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {PRESSURES.map(({ key, label }) => {
+                      const b = stats.pressureBreakdown[key];
+                      const sharePct = pct(b.total, stats.passRpo);
+                      const otPct = pct(b.onTarget, b.gradedThrows);
+                      const titleColor = key === "clean" ? "text-emerald-300" : "text-amber-300";
+                      return (
+                        <div key={key} className="p-3 bg-gray-800/50 rounded-lg">
+                          <div className="text-xs text-gray-500 mb-1 text-center">{label}</div>
+                          <div className={`text-xl font-bold text-center ${titleColor}`}>{b.total}</div>
+                          <div className="text-xs text-gray-600 mt-0.5 text-center">{fmtPct(sharePct)} of pass/RPO</div>
+                          <div className={`text-xs font-semibold mt-2 text-center ${onTargetColor(otPct)}`}>
+                            {fmtPct(otPct)} on target
+                            <span className="block text-gray-600 font-normal text-[10px]">({b.gradedThrows} graded)</span>
+                          </div>
+                          <div className="mt-2 pt-2 border-t border-gray-700/40 grid grid-cols-3 gap-1 text-[10px] text-center">
+                            <div>
+                              <div className="text-gray-500">Sacks</div>
+                              <div className="text-red-400 font-semibold">{b.sacks}</div>
+                            </div>
+                            <div>
+                              <div className="text-gray-500">T.A.</div>
+                              <div className="text-yellow-400 font-semibold">{b.throwAways}</div>
+                            </div>
+                            <div>
+                              <div className="text-gray-500">Scr.</div>
+                              <div className="text-orange-400 font-semibold">{b.scrambles}</div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[10px] text-gray-600 mt-3">
+                    Share % uses all {stats.passRpo} pass/RPO plays as the denominator. On-target % is within each pressure bucket, computed from graded throws only (sacks, throw-aways, scrambles, and tipped balls excluded).
+                  </p>
                 </div>
               )}
 
