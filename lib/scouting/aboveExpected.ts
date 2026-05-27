@@ -191,30 +191,41 @@ function buildQBBaselines(leaguePlays: QBPlay[]): QBBaselines {
   return b;
 }
 
-// Weighted expected on-target% for one dimension + count of plays that
-// actually contributed (had the dimension filled and a matching league bucket).
+// Weighted expected on-target% for one dimension AND the QB's actual on-target%
+// over the same subset of plays (those where the dimension is filled and the
+// league has a matching bucket). Comparing actual to expected on the same
+// subset keeps AAE Hd / Pr / Pl honest — pressure_handling is only logged on
+// pressured throws, so comparing all-throw accuracy against a pressured-only
+// baseline biases AAE positive league-wide.
 function expectedFor<K extends string>(
   ratedPasses: QBPlay[],
   bucketFn: (pl: QBPlay) => K | null | undefined,
   league: Bucketed<K>,
   buckets: readonly K[],
-): { expected: number | null; n: number } {
+): { expected: number | null; actual: number | null; n: number } {
   const total = ratedPasses.length;
-  if (!total) return { expected: null, n: 0 };
+  if (!total) return { expected: null, actual: null, n: 0 };
   let exp = 0;
   let weight = 0;
   let filled = 0;
+  let filledOnTgt = 0;
   for (const b of buckets) {
-    const n = ratedPasses.filter((pl) => bucketFn(pl) === b).length;
+    const inBucket = ratedPasses.filter((pl) => bucketFn(pl) === b);
+    const n = inBucket.length;
     const lg = league[b];
     if (n > 0 && lg && lg.n > 0) {
       const share = n / total;
       exp += share * (lg.ot / lg.n);
       weight += share;
       filled += n;
+      filledOnTgt += inBucket.filter((pl) => pl.accuracy === "on_target").length;
     }
   }
-  return { expected: weight > 0 ? exp / weight : null, n: filled };
+  return {
+    expected: weight > 0 ? exp / weight : null,
+    actual: filled > 0 ? filledOnTgt / filled : null,
+    n: filled,
+  };
 }
 
 // Per-dimension AAE row: actual on-target% minus the dimension's expected,
@@ -242,13 +253,13 @@ function breakdownFor(ratedPasses: QBPlay[], baselines: QBBaselines): QBAAEBreak
   const actual = ratedPasses.filter((pl) => pl.accuracy === "on_target").length / denom;
 
   const rows: QBAAEDimRow[] = [
-    { key: "depth",    label: "Depth Zone",        ...toAaeRow(actual, expectedFor(ratedPasses, (pl) => pl.depth_zone,        baselines.depth,    QB_DEPTH_ZONES)) },
-    { key: "coverage", label: "Coverage",          ...toAaeRow(actual, expectedFor(ratedPasses, (pl) => pl.coverage === "man" || pl.coverage === "zone" ? pl.coverage : null, baselines.cvg, ["man", "zone"] as const)) },
-    { key: "timing",   label: "Timing",            ...toAaeRow(actual, expectedFor(ratedPasses, (pl) => pl.timing,            baselines.timing,   QB_TIMING_BUCKETS)) },
-    { key: "pressure", label: "Pressure",          ...toAaeRow(actual, expectedFor(ratedPasses, (pl) => pl.pressure,          baselines.pressure, QB_PRESSURE_BUCKETS)) },
-    { key: "platform", label: "Platform",          ...toAaeRow(actual, expectedFor(ratedPasses, (pl) => pl.platform,          baselines.platform, QB_PLATFORM_BUCKETS)) },
-    { key: "handling", label: "Pressure Handling", ...toAaeRow(actual, expectedFor(ratedPasses, (pl) => pl.pressure_handling, baselines.handling, QB_HANDLING_BUCKETS)) },
-    { key: "route",    label: "Route Type",        ...toAaeRow(actual, expectedFor(ratedPasses, (pl) => pl.route_type,        baselines.route,    ROUTE_TYPES)) },
+    { key: "depth",    label: "Depth Zone",        ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.depth_zone,        baselines.depth,    QB_DEPTH_ZONES)) },
+    { key: "coverage", label: "Coverage",          ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.coverage === "man" || pl.coverage === "zone" ? pl.coverage : null, baselines.cvg, ["man", "zone"] as const)) },
+    { key: "timing",   label: "Timing",            ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.timing,            baselines.timing,   QB_TIMING_BUCKETS)) },
+    { key: "pressure", label: "Pressure",          ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.pressure,          baselines.pressure, QB_PRESSURE_BUCKETS)) },
+    { key: "platform", label: "Platform",          ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.platform,          baselines.platform, QB_PLATFORM_BUCKETS)) },
+    { key: "handling", label: "Pressure Handling", ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.pressure_handling, baselines.handling, QB_HANDLING_BUCKETS)) },
+    { key: "route",    label: "Route Type",        ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.route_type,        baselines.route,    ROUTE_TYPES)) },
   ];
 
   const totalRaw = combineMany(rows.map((r) => r.aae));
@@ -260,9 +271,11 @@ function breakdownFor(ratedPasses: QBPlay[], baselines: QBBaselines): QBAAEBreak
   };
 }
 
-function toAaeRow(actual: number, dim: { expected: number | null; n: number }): { aae: number | null; n: number } {
+function toAaeRow(dim: { expected: number | null; actual: number | null; n: number }): { aae: number | null; n: number } {
   return {
-    aae: dim.expected != null ? parseFloat(((actual - dim.expected) * 100).toFixed(2)) : null,
+    aae: dim.expected != null && dim.actual != null
+      ? parseFloat(((dim.actual - dim.expected) * 100).toFixed(2))
+      : null,
     n: dim.n,
   };
 }
