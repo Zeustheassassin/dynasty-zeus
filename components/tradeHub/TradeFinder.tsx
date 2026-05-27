@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 import React, { useState, useMemo, useDeferredValue, startTransition } from "react";
 import {
   getStoredPickValue,
@@ -181,7 +181,7 @@ function TradeFinder({
     if (directionRefreshing && selectedLeagueDirectionAdjusted) setDirectionRefreshing(false);
   }, [directionRefreshing, selectedLeagueDirectionAdjusted]);
 
-  // NFL depth chart map â€” sorted by depth_chart_order then dynasty value.
+  // NFL depth chart map — sorted by depth_chart_order then dynasty value.
   const nflTeamDepth = useMemo(() => {
     const map = new Map<string, Record<string, PlayerWithValue[]>>();
     Object.values(players).forEach((p) => {

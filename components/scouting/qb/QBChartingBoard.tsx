@@ -69,7 +69,7 @@ const DEPTH_SHORT: Record<QBDepthZone, string>   = {
 export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Props) {
   // Position-specific play state
   const [plays, setPlays]                   = useState<QBPlay[]>([]);
-  // League-wide QB plays (across all charted prospects) â€” used to build the
+  // League-wide QB plays (across all charted prospects) — used to build the
   // baselines for the per-dimension AAE breakdown panel. Fetched once when
   // the board mounts; small (~MB-scale at full league) and not in a hot path.
   const [leaguePlays, setLeaguePlays]       = useState<QBPlay[]>([]);
@@ -87,7 +87,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
   const [platformSide, setPlatformSide]     = useState<QBPlatformSide | null>(null);
   const [pressure, setPressure]             = useState<QBPressure | null>(null);
   const [pressureHandling, setPressureHandling] = useState<QBPressureHandling | null>(null);
-  // Default "correct" so the charter only clicks when something's off â€” saves
+  // Default "correct" so the charter only clicks when something's off — saves
   // a click on every throw. Resets back to "correct" after each log.
   const [touch, setTouch]                   = useState<QBTouch>("correct");
   const [playNotes, setPlayNotes]           = useState("");
@@ -207,7 +207,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     setPlatformSide(pl.platform_side);
     setPressure(pl.pressure);
     setPressureHandling(pl.pressure_handling);
-    // Backfill old NULLs to "correct" â€” same default behaviour as a new play â€”
+    // Backfill old NULLs to "correct" — same default behaviour as a new play —
     // so editing an old row doesn't silently flip its touch reading once saved.
     setTouch(pl.touch ?? "correct");
     setPlayNotes(pl.play_notes ?? "");
@@ -248,7 +248,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
       setPlatform(null);
       setPlatformSide(null);
     }
-    // Pressure is required for all timings â€” carry the previously-chosen value forward.
+    // Pressure is required for all timings — carry the previously-chosen value forward.
   }
 
   function handlePressureChange(p: QBPressure) {
@@ -260,7 +260,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
 
   function handlePlatformChange(p: QBPlatform) {
     setPlatform((prev) => (prev === p ? null : p));
-    // Any move away from "on_the_run" â€” or unselecting it â€” clears the side sub-pick.
+    // Any move away from "on_the_run" — or unselecting it — clears the side sub-pick.
     if (p !== "on_the_run" || platform === p) setPlatformSide(null);
   }
 
@@ -365,7 +365,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
       onToggleEditBio={onToggleEditBio} onBioChange={onBioChange} onSaveBio={onSaveBio}
       renderHeaderStats={() => (
         <>
-          <div>{headerStats.totalPlays} plays Â· {games.length} games</div>
+          <div>{headerStats.totalPlays} plays · {games.length} games</div>
           {headerStats.onTargetPct !== null && (
             <div className={onTargetColor(headerStats.onTargetPct)}>
               {headerStats.onTargetPct}% on target
@@ -417,7 +417,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
               </div>
             </div>
 
-            {/* 3. Timing â€” only for RPO / Pass */}
+            {/* 3. Timing — only for RPO / Pass */}
             {needPassFields && (
               <div>
                 <div className="text-xs text-gray-500 mb-2">Timing</div>
@@ -436,7 +436,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
               </div>
             )}
 
-            {/* 4. Pressure â€” required for every pass/rpo timing */}
+            {/* 4. Pressure — required for every pass/rpo timing */}
             {needPressureFields && (
               <div className="space-y-3 p-4 bg-gray-900/60 rounded-lg border border-amber-900/40">
                 <div>
@@ -466,7 +466,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
               </div>
             )}
 
-            {/* 5-8. Throw details â€” only when timing is set and not scramble */}
+            {/* 5-8. Throw details — only when timing is set and not scramble */}
             {needThrowFields && (
               <div className="space-y-4 p-4 bg-gray-900/60 rounded-lg border border-blue-900/40">
                 {/* Platform */}
@@ -508,7 +508,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                   </div>
                 </div>
 
-                {/* Touch â€” feathered vs fastball read. Defaults to "correct";
+                {/* Touch — feathered vs fastball read. Defaults to "correct";
                     flip to "incorrect" when the velocity didn't fit the throw. */}
                 <div>
                   <div className="text-xs text-gray-500 mb-2">Touch</div>
@@ -592,7 +592,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                   </div>
                 </div>
 
-                {/* Depth / Location 3Ã—3 grid */}
+                {/* Depth / Location 3×3 grid */}
                 <div>
                   <div className="text-xs text-gray-500 mb-2">Depth / Location</div>
                   <table className="text-xs">
@@ -657,8 +657,8 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
             {/* Notes + Log / Save */}
             {editingPlayId && (
               <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-900/30 border border-yellow-700/50 rounded text-xs text-yellow-300">
-                <span>âœŽ</span>
-                <span>Editing play â€” make changes above then save</span>
+                <span>✎</span>
+                <span>Editing play — make changes above then save</span>
                 <button onClick={resetForm} className="ml-auto text-yellow-400 hover:text-white transition">Cancel</button>
               </div>
             )}
@@ -672,12 +672,12 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
               {editingPlayId ? (
                 <button onClick={saveEditedPlay} disabled={!canLog}
                   className="px-5 py-2 bg-yellow-600 hover:bg-yellow-500 disabled:opacity-40 text-white text-sm rounded font-medium transition whitespace-nowrap">
-                  {savingPlay ? "â€¦" : "Save Edit"}
+                  {savingPlay ? "…" : "Save Edit"}
                 </button>
               ) : (
                 <button onClick={logPlay} disabled={!canLog}
                   className="px-5 py-2 bg-green-700 hover:bg-green-600 disabled:opacity-40 text-white text-sm rounded font-medium transition whitespace-nowrap">
-                  {savingPlay ? "â€¦" : "Log Play"}
+                  {savingPlay ? "…" : "Log Play"}
                 </button>
               )}
             </div>
@@ -734,9 +734,9 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                               : "text-gray-600 hover:text-yellow-400"
                           }`}
                         >
-                          âœŽ
+                          ✎
                         </button>
-                        <button onClick={() => deletePlay(pl.id)} className="text-gray-600 hover:text-red-400">âœ•</button>
+                        <button onClick={() => deletePlay(pl.id)} className="text-gray-600 hover:text-red-400">✕</button>
                       </div>
                     </div>
                   ))}
@@ -749,7 +749,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
       renderGamesTable={() => (
         <div>
           {loading ? (
-            <div className="text-gray-500 text-sm text-center py-8">Loadingâ€¦</div>
+            <div className="text-gray-500 text-sm text-center py-8">Loading…</div>
           ) : games.length === 0 ? (
             <div className="text-gray-500 text-sm text-center py-8">No games charted yet.</div>
           ) : (
@@ -768,7 +768,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                 <tbody className="divide-y divide-gray-900">
                   {games.map((g) => {
                     const gp       = plays.filter((p) => p.game_id === g.id);
-                    // Match the aggregate `thrownPlays` filter â€” sacks and throw-aways
+                    // Match the aggregate `thrownPlays` filter — sacks and throw-aways
                     // have null accuracy and would otherwise drag on-target% down.
                     const thrown   = gp.filter((p) => p.play_type !== "run" && p.timing !== "scramble" && p.timing !== "sack" && p.timing !== "throw_away");
                     const graded   = thrown.filter((p) => p.accuracy !== "tipped_ball");
