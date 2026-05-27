@@ -300,6 +300,31 @@ export function computeQBAAEBreakdown(
   return breakdownFor(ratedPasses, baselines);
 }
 
+// Bulk variant — builds baselines once and produces per-prospect breakdowns
+// for every QB. Used by the Analysis-tab stats table so each row can surface
+// per-dimension AAE columns without re-running the baseline scan per prospect.
+// Prospects under the QB_MIN_SAMPLE gate are omitted (consistent with the
+// overall AAE column hiding their value).
+export function computeQBAAEBreakdownMap(
+  prospects: Prospect[],
+  games: ScoutingGame[],
+  qbPlays: QBPlay[],
+): Map<string, QBAAEBreakdown> {
+  const out = new Map<string, QBAAEBreakdown>();
+  const gameToProspect = buildGameToProspect(games);
+  const playsByProspect = buildPlaysByProspect(qbPlays, gameToProspect);
+  const baselines = buildQBBaselines(qbPlays);
+
+  for (const p of prospects) {
+    if (p.position !== "QB") continue;
+    const ratedPasses = (playsByProspect.get(p.id) ?? []).filter(isQBGradedThrow);
+    if (ratedPasses.length < QB_MIN_SAMPLE) continue;
+    out.set(p.id, breakdownFor(ratedPasses, baselines));
+  }
+
+  return out;
+}
+
 // ── TE TE-SAER (route running) ───────────────────────────────────────────
 // Open Rate Above Expected. Adjusts a TE's open% on rated routes for the
 // situation mix across two dimensions: positioning (6 buckets) and coverage
