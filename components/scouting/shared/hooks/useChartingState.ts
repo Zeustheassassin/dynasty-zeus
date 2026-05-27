@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../../../../lib/supabaseclient";
 import { logger } from "../../../../lib/logger";
+import { BASE_YEAR } from "../../../../lib/helpers/season";
 import type { Prospect, ScoutingGame } from "../../../../lib/types";
 
 const log = logger("scouting/shared/useChartingState");
@@ -19,7 +20,7 @@ export function useChartingState(prospect: Prospect, options: Options) {
   const [selectedGameId, setSelectedGameId]   = useState<string | null>(null);
   const [loading, setLoading]                 = useState(true);
   const [showAddGame, setShowAddGame]         = useState(false);
-  const [newGame, setNewGame]                 = useState({ year: 2025, opponent: "", type: "regular" });
+  const [newGame, setNewGame]                 = useState({ year: BASE_YEAR, opponent: "", type: "regular" });
   const [savingGame, setSavingGame]           = useState(false);
   const [gameError, setGameError]             = useState<string | null>(null);
   const [editBio, setEditBio]                 = useState(false);

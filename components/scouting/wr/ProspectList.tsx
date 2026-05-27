@@ -4,6 +4,7 @@ import { supabase } from "../../../lib/supabaseclient";
 import type { Prospect, ProspectWithStats, ChartingDecision } from "../../../lib/types";
 import { useRecruitIndex } from "../../../hooks/useRecruitIndex";
 import { lookupConference } from "../../../lib/scouting/schoolConferences";
+import { BASE_YEAR, CLASS_YEARS } from "../../../lib/helpers/season";
 import RecruitStarBadge from "../RecruitStarBadge";
 
 type SortKey = "personal_rank" | "name" | "school" | "total_routes" | "draft_class_year";
@@ -71,7 +72,7 @@ export default function ProspectList({
     school: "",
     conference: "",
     position: "WR",
-    draft_class_year: 2026,
+    draft_class_year: BASE_YEAR,
   });
 
   const years = useMemo(() => {
@@ -139,7 +140,7 @@ export default function ProspectList({
       charting_decision: "pending",
       charting_notes: "", overall_rank: null,
     });
-    setForm({ name: "", school: "", conference: "", position: "WR", draft_class_year: 2026 });
+    setForm({ name: "", school: "", conference: "", position: "WR", draft_class_year: BASE_YEAR });
     setShowAdd(false);
     setSaving(false);
   }
@@ -229,7 +230,7 @@ export default function ProspectList({
               value={form.draft_class_year}
               onChange={(e) => setForm((f) => ({ ...f, draft_class_year: Number(e.target.value) }))}
             >
-              {[2026, 2027, 2028, 2029].map((y) => (
+              {CLASS_YEARS.map((y) => (
                 <option key={y}>{y}</option>
               ))}
             </select>

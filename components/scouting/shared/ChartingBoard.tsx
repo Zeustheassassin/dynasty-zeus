@@ -2,6 +2,7 @@
 import { useState } from "react";
 import type { Prospect, ScoutingGame, ChartingDecision } from "../../../lib/types";
 import { GAME_TYPES, CHARTING_DECISIONS } from "./chartingConstants";
+import { BASE_YEAR, FILM_YEARS, classYearOptionsWith } from "../../../lib/helpers/season";
 
 export interface ChartingBoardConfig {
   positionLabel: string;
@@ -82,7 +83,7 @@ export default function ChartingBoard({
 
   const [editingGameId, setEditingGameId] = useState<string | null>(null);
   const [editGameOpponent, setEditGameOpponent] = useState("");
-  const [editGameYear, setEditGameYear] = useState<number>(2025);
+  const [editGameYear, setEditGameYear] = useState<number>(BASE_YEAR);
 
   function openGameEdit(g: ScoutingGame) {
     setEditingGameId(g.id);
@@ -153,8 +154,8 @@ export default function ChartingBoard({
             <div>
               <label className="block text-xs text-gray-500 mb-1">Draft Class Year</label>
               <select className={`w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none ${a.focusBorder}`}
-                value={bio.draft_class_year ?? 2026} onChange={(e) => onBioChange({ draft_class_year: Number(e.target.value) })}>
-                {[2026, 2027, 2028, 2029].map((y) => <option key={y}>{y}</option>)}
+                value={bio.draft_class_year ?? BASE_YEAR} onChange={(e) => onBioChange({ draft_class_year: Number(e.target.value) })}>
+                {classYearOptionsWith(bio.draft_class_year).map((y) => <option key={y}>{y}</option>)}
               </select>
             </div>
             {(["should_play", "will_play_pre", "will_play_post"] as const).map((k) => (
@@ -239,7 +240,7 @@ export default function ChartingBoard({
               <div className="mb-3 p-3 bg-gray-900 border border-gray-700 rounded-lg space-y-2">
                 <select className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm"
                   value={newGame.year} onChange={(e) => onNewGameChange({ year: Number(e.target.value) })}>
-                  {[2023, 2024, 2025, 2026].map((y) => <option key={y}>{y}</option>)}
+                  {FILM_YEARS.map((y) => <option key={y}>{y}</option>)}
                 </select>
                 <input className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500"
                   placeholder="Opponent" value={newGame.opponent} onChange={(e) => onNewGameChange({ opponent: e.target.value })} />

@@ -5,6 +5,7 @@ import { supabase } from "../../../lib/supabaseclient";
 import type { Prospect, ProspectWithStats, ChartingDecision } from "../../../lib/types";
 import { useRecruitIndex } from "../../../hooks/useRecruitIndex";
 import { lookupConference } from "../../../lib/scouting/schoolConferences";
+import { BASE_YEAR, CLASS_YEARS } from "../../../lib/helpers/season";
 import RecruitStarBadge from "../RecruitStarBadge";
 
 const QBChartingBoard  = dynamic(() => import("./QBChartingBoard"),   { ssr: false });
@@ -58,7 +59,7 @@ export default function QBHub({
   const [sortDir, setSortDir]   = useState<"asc" | "desc">("asc");
   const [showAdd, setShowAdd]   = useState(false);
   const [newProspect, setNewProspect] = useState({
-    name: "", school: "", conference: "", draft_class_year: 2026,
+    name: "", school: "", conference: "", draft_class_year: BASE_YEAR,
     position: "QB", personal_rank: "" as string | number,
   });
   const [addError, setAddError] = useState<string | null>(null);
@@ -124,7 +125,7 @@ export default function QBHub({
       pff_rank: null, mock_draft_rank: null, drafttek_rank: null, pfn_rank: null,
       draft_round: null, draft_pick: null, draft_team: null, synopsis: null,
     });
-    setNewProspect({ name: "", school: "", conference: "", draft_class_year: 2026, position: "QB", personal_rank: "" });
+    setNewProspect({ name: "", school: "", conference: "", draft_class_year: BASE_YEAR, position: "QB", personal_rank: "" });
     setShowAdd(false);
   }
 
@@ -225,7 +226,7 @@ export default function QBHub({
                   onChange={(e) => setNewProspect((n) => ({ ...n, personal_rank: e.target.value }))} />
                 <select className="px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
                   value={newProspect.draft_class_year} onChange={(e) => setNewProspect((n) => ({ ...n, draft_class_year: Number(e.target.value) }))}>
-                  {[2026, 2027, 2028, 2029].map((y) => <option key={y}>{y}</option>)}
+                  {CLASS_YEARS.map((y) => <option key={y}>{y}</option>)}
                 </select>
               </div>
               {addError && <p className="text-red-400 text-xs mb-2">{addError}</p>}

@@ -2,6 +2,7 @@
 import { useMemo, useState } from "react";
 import { supabase } from "../../lib/supabaseclient";
 import { lookupConference } from "../../lib/scouting/schoolConferences";
+import { classYearOptionsWith } from "../../lib/helpers/season";
 import type { ProspectWithStats, ChartingDecision } from "../../lib/types";
 
 const CHARTING_DECISIONS: { value: ChartingDecision; label: string }[] = [
@@ -125,7 +126,7 @@ function RosterRow({ p, nflRoles, sizes }: RosterRowProps) {
             setLocal((l) => ({ ...l, draft_class_year: v }));
             saveFields({ draft_class_year: v });
           }}>
-          {[2026, 2027, 2028, 2029].map((y) => <option key={y}>{y}</option>)}
+          {classYearOptionsWith(local.draft_class_year).map((y) => <option key={y}>{y}</option>)}
         </select>
       </td>
 

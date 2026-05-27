@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import dynamic from "next/dynamic";
 import type { Prospect, ProspectWithStats, ScoutingGame, RBPlay, QBPlay, TEPlay } from "../../../lib/types";
 import type { LoadPositionPlaysFn } from "../../ScoutingHub";
@@ -47,7 +47,14 @@ export default function AnalysisHub({
     }
   }, [posTab, loadPositionPlays]);
 
-  const DRAFT_YEARS = [2026, 2027];
+  // Derive class-year filter chips from the prospects actually loaded so the
+  // list auto-grows each year as new classes are added (and historical classes
+  // remain selectable as long as their prospects are still on file).
+  const DRAFT_YEARS = useMemo(() => {
+    const years = new Set<number>();
+    for (const p of prospects) if (p.draft_class_year) years.add(p.draft_class_year);
+    return [...years].sort((a, b) => a - b);
+  }, [prospects]);
 
   return (
     <div>

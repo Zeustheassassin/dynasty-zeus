@@ -13,7 +13,12 @@
 --
 -- NOTE: The app generates payment year columns dynamically from
 -- the current year window (see lib/constants.ts → getPaymentYears).
--- When you approach 2033, run migration 003 to add 2034–2037.
+-- The window is [currentYear … currentYear + 3], so the latest
+-- column the app will write to equals currentYear + 3. With this
+-- migration the highest provisioned column is paid_2033, which
+-- covers app use through calendar year 2030 (writes 2030..2033).
+-- Before Jan 1 2031 you MUST run migration 003 to add paid_2034
+-- and beyond, or new payment writes will fail.
 -- ============================================================
 
 

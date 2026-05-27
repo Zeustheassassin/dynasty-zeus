@@ -80,6 +80,23 @@ export const PAYMENT_YEARS_PAST = 0;
 export const PAYMENT_YEARS_FUTURE = 3;
 
 /**
+ * Highest `paid_<year>` column currently provisioned in the database.
+ * Migration 002 added paid_2030 – paid_2033 on top of paid_2026 – paid_2029
+ * from migration 001/006.
+ *
+ * MIGRATION 003 REMINDER — when `currentYear + PAYMENT_YEARS_FUTURE` exceeds
+ * this value, you must run a new migration adding paid_<next>..paid_<next+3>
+ * (mirror migration 002, bump the years) AND bump this constant. The app
+ * logs a console.warn whenever the window touches or passes the ceiling.
+ *
+ * Current ceiling: 2033 → safe through calendar year 2030. Run migration
+ * 003 before Jan 1 2031.
+ */
+export const MAX_PROVISIONED_PAYMENT_YEAR = 2033;
+
+let _paymentCeilingWarned = false;
+
+/**
  * Returns the full range of payment years shown in ManagementHub.
  * Rolling window: [currentYear - PAST, ..., currentYear + FUTURE]
  * This drives both the UI column generation and the DB upsert payload.
@@ -89,6 +106,21 @@ export function getPaymentYears(): number[] {
   const years: number[] = [];
   for (let y = current - PAYMENT_YEARS_PAST; y <= current + PAYMENT_YEARS_FUTURE; y++) {
     years.push(y);
+  }
+  const highestNeeded = current + PAYMENT_YEARS_FUTURE;
+  if (highestNeeded >= MAX_PROVISIONED_PAYMENT_YEAR && !_paymentCeilingWarned) {
+    _paymentCeilingWarned = true;
+    const overflow = highestNeeded > MAX_PROVISIONED_PAYMENT_YEAR;
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[dynastyzeus] Payment-year window reached the provisioned ceiling.\n` +
+      `  highest column the app will write to: paid_${highestNeeded}\n` +
+      `  highest column provisioned in DB:     paid_${MAX_PROVISIONED_PAYMENT_YEAR}\n` +
+      (overflow
+        ? `  STATUS: OVERFLOW — writes to paid_${highestNeeded} will fail. Run migration 003 NOW.\n`
+        : `  STATUS: At ceiling — run migration 003 before Jan 1 ${current + 1} to add paid_${MAX_PROVISIONED_PAYMENT_YEAR + 1}..paid_${MAX_PROVISIONED_PAYMENT_YEAR + 4}.\n`) +
+      `  See supabase/migrations/002_extended_years_and_cleanup.sql and bump MAX_PROVISIONED_PAYMENT_YEAR in lib/constants.ts.`
+    );
   }
   return years;
 }

@@ -4,6 +4,7 @@ import { supabase } from "../../../lib/supabaseclient";
 import type { Prospect, ProspectWithStats, ChartingDecision } from "../../../lib/types";
 import { useRecruitIndex } from "../../../hooks/useRecruitIndex";
 import { lookupConference } from "../../../lib/scouting/schoolConferences";
+import { BASE_YEAR, CLASS_YEARS } from "../../../lib/helpers/season";
 import RecruitStarBadge from "../RecruitStarBadge";
 
 type SortKey = "personal_rank" | "name" | "school" | "draft_class_year";
@@ -68,7 +69,7 @@ export default function RBProspectList({
   const [sortKey, setSortKey] = useState<SortKey>("personal_rank");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ name: "", school: "", conference: "", draft_class_year: 2026 });
+  const [form, setForm] = useState({ name: "", school: "", conference: "", draft_class_year: BASE_YEAR });
 
   const years = useMemo(() => {
     const s = new Set(prospects.map((p) => p.draft_class_year));
@@ -123,7 +124,7 @@ export default function RBProspectList({
       should_play: "", will_play_pre: "", will_play_post: "",
       charting_decision: "pending", charting_notes: "", overall_rank: null,
     });
-    setForm({ name: "", school: "", conference: "", draft_class_year: 2026 });
+    setForm({ name: "", school: "", conference: "", draft_class_year: BASE_YEAR });
     setShowAdd(false);
     setSaving(false);
   }
@@ -176,7 +177,7 @@ export default function RBProspectList({
               placeholder="Conference" value={form.conference} onChange={(e) => setForm((f) => ({ ...f, conference: e.target.value }))} />
             <select className="px-3 py-2 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-green-500"
               value={form.draft_class_year} onChange={(e) => setForm((f) => ({ ...f, draft_class_year: Number(e.target.value) }))}>
-              {[2026, 2027, 2028, 2029].map((y) => <option key={y}>{y}</option>)}
+              {CLASS_YEARS.map((y) => <option key={y}>{y}</option>)}
             </select>
           </div>
           <div className="flex gap-2">

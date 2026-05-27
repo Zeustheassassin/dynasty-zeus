@@ -363,7 +363,7 @@ export default function RookieBigBoard({
             <input
               autoFocus
               type="text"
-              placeholder="e.g. 2026 Pre-Draft"
+              placeholder={`e.g. ${ROOKIE_YEAR} Pre-Draft`}
               value={snapshotName}
               onChange={(e) => setSnapshotName(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") saveSnapshot(); }}

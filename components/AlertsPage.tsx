@@ -195,7 +195,7 @@ export default function AlertsPage({
             <div>
               {currentNFLWeek === 0 ? (
                 <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-6 text-sm text-slate-400">
-                  Bye watch is active during the regular season. Check back in September.
+                  Bye watch is active during the regular season. Check back once the NFL season begins.
                 </div>
               ) : byeWeekNumbers.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-6 text-sm text-slate-400">
