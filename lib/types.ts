@@ -878,7 +878,6 @@ export interface Prospect {
   draft_round: number | null;
   draft_pick: number | null;
   draft_team: string | null;
-  synopsis: string | null;
   created_at: string;
   updated_at: string;
 }

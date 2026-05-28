@@ -123,7 +123,7 @@ export default function QBHub({
       charting_decision: "pending",
       charting_notes: "", overall_rank: null,
       pff_rank: null, mock_draft_rank: null, drafttek_rank: null, pfn_rank: null,
-      draft_round: null, draft_pick: null, draft_team: null, synopsis: null,
+      draft_round: null, draft_pick: null, draft_team: null,
     });
     setNewProspect({ name: "", school: "", conference: "", draft_class_year: BASE_YEAR, position: "QB", personal_rank: "" });
     setShowAdd(false);
