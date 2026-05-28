@@ -58,14 +58,6 @@ function combine(a: number | null, b: number | null): number | null {
   return a ?? b;
 }
 
-// Average across an arbitrary list of per-dimension expecteds, skipping nulls.
-// Returns null only if every dimension is null (no comparable league data).
-function combineMany(values: (number | null)[]): number | null {
-  const real = values.filter((v): v is number => v != null);
-  if (!real.length) return null;
-  return real.reduce((a, b) => a + b, 0) / real.length;
-}
-
 function buildPlaysByProspect<T extends { game_id: string }>(
   plays: T[],
   gameToProspect: Map<string, string>,
@@ -191,6 +183,34 @@ function buildQBBaselines(leaguePlays: QBPlay[]): QBBaselines {
   return b;
 }
 
+// Per-play expected on-target% — the mean of league bucket rates across every
+// dimension that's filled on the play. Skips a dim when its bucket is null on
+// this play or the league has no data for that bucket. Returns null only if
+// none of the seven dims yield a comparable league rate (essentially never on
+// a graded throw, since depth_zone is filled on every charted throw).
+//
+// This is the engine of the overall AAE calculation: comparing the QB's actual
+// on-target% against the mean of these per-play expecteds avoids the double-
+// counting that arises from averaging seven correlated per-dimension AAEs. A
+// broken-pocket throw, for example, gets one low expected (the mean of the
+// pressure / platform / handling / timing bucket rates, plus depth / coverage /
+// route) instead of being penalized four separate times.
+function expectedForPlay(pl: QBPlay, baselines: QBBaselines): number | null {
+  const rates: number[] = [];
+  const push = (lg: { ot: number; n: number } | undefined) => {
+    if (lg && lg.n > 0) rates.push(lg.ot / lg.n);
+  };
+  if (pl.depth_zone) push(baselines.depth[pl.depth_zone]);
+  if (pl.coverage === "man" || pl.coverage === "zone") push(baselines.cvg[pl.coverage]);
+  if (pl.timing) push(baselines.timing[pl.timing]);
+  if (pl.pressure) push(baselines.pressure[pl.pressure]);
+  if (pl.platform) push(baselines.platform[pl.platform]);
+  if (pl.pressure_handling) push(baselines.handling[pl.pressure_handling]);
+  if (pl.route_type) push(baselines.route[pl.route_type]);
+  if (!rates.length) return null;
+  return rates.reduce((a, b) => a + b, 0) / rates.length;
+}
+
 // Weighted expected on-target% for one dimension AND the QB's actual on-target%
 // over the same subset of plays (those where the dimension is filled and the
 // league has a matching bucket). Comparing actual to expected on the same
@@ -241,7 +261,7 @@ export interface QBAAEDimRow {
 export interface QBAAEBreakdown {
   ratedPasses: number;        // total graded throws (denominator of actual on-target%)
   actualOnTgtPct: number | null;
-  total: number | null;       // overall AAE (mean of non-null dim AAEs)
+  total: number | null;       // overall AAE — actual on-target% minus mean per-play expected
   dims: QBAAEDimRow[];
 }
 
@@ -262,11 +282,28 @@ function breakdownFor(ratedPasses: QBPlay[], baselines: QBBaselines): QBAAEBreak
     { key: "route",    label: "Route Type",        ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.route_type,        baselines.route,    ROUTE_TYPES)) },
   ];
 
-  const totalRaw = combineMany(rows.map((r) => r.aae));
+  // Overall AAE: per-play expected vs. actual on-target% on the same play
+  // subset. This is intentionally NOT the mean of the per-dim AAEs above —
+  // averaging correlated dim AAEs double-counts skill (e.g. broken-pocket
+  // throws penalize all four pressure-cluster dims). See expectedForPlay.
+  let sumExpected = 0;
+  let sumOnTgt = 0;
+  let nContrib = 0;
+  for (const pl of ratedPasses) {
+    const exp = expectedForPlay(pl, baselines);
+    if (exp == null) continue;
+    sumExpected += exp;
+    if (pl.accuracy === "on_target") sumOnTgt++;
+    nContrib++;
+  }
+  const total = nContrib > 0
+    ? parseFloat((((sumOnTgt - sumExpected) / nContrib) * 100).toFixed(2))
+    : null;
+
   return {
     ratedPasses: denom,
     actualOnTgtPct: parseFloat((actual * 100).toFixed(2)),
-    total: totalRaw != null ? parseFloat(totalRaw.toFixed(2)) : null,
+    total,
     dims: rows,
   };
 }
