@@ -19,9 +19,9 @@ export interface ColDef {
   tooltip?: string;
   /** Fixed value to show in the League footer row instead of the computed mean/total */
   leagueOverride?: number;
-  /** For pct columns: row field name holding the denominator (e.g. number of attempts).
-   *  When set, the league total is sum(pct*weight) / sum(weight), not mean of percentages.
-   *  This produces a true global rate instead of average-of-averages. */
+  /** For pct / plusMinus columns: row field name holding the denominator (e.g. number of attempts).
+   *  When set, the league total is sum(value*weight) / sum(weight), not mean of values.
+   *  This produces a true global rate / play-weighted mean instead of average-of-averages. */
   weightBy?: string;
 }
 
@@ -141,10 +141,12 @@ export default function StatsTableShell({
     for (const c of cols) {
       if (c.fmt === "yr" || c.fmt === "name" || c.sticky) { result[c.key] = null; continue; }
       if (c.leagueOverride !== undefined) { result[c.key] = c.leagueOverride; continue; }
-      // Weighted average for pct columns with a denominator: sum(pct*weight) / sum(weight).
-      // This gives a true global rate instead of the (wrong) mean of per-player percentages.
-      // Falls through to plain mean if the denominator field isn't on any row (e.g. data gap).
-      if (c.weightBy && c.fmt === "pct") {
+      // Weighted average for pct / plusMinus columns with a denominator:
+      // sum(value*weight) / sum(weight). For pct columns this gives a true global
+      // rate; for plusMinus (AAE) columns it gives the play-weighted league mean,
+      // which the math guarantees ≈ 0 when every QB's plays feed the baseline.
+      // Falls through to plain mean if the denominator field isn't on any row.
+      if (c.weightBy && (c.fmt === "pct" || c.fmt === "plusMinus")) {
         let weightedSum = 0;
         let totalWeight = 0;
         for (const row of rows) {
