@@ -273,7 +273,15 @@ export default function ChartingBoard({
                   >
                     <div className="flex-1 min-w-0">
                       {editingGameId === g.id ? (
-                        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                        <div
+                          className="flex items-center gap-1"
+                          onClick={(e) => e.stopPropagation()}
+                          onBlur={(e) => {
+                            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                              commitGameEdit(g.id);
+                            }
+                          }}
+                        >
                           <input
                             type="number"
                             min={1900}
@@ -287,7 +295,6 @@ export default function ChartingBoard({
                             autoFocus
                             value={editGameOpponent}
                             onChange={(e) => setEditGameOpponent(e.target.value)}
-                            onBlur={() => commitGameEdit(g.id)}
                             onKeyDown={(e) => { if (e.key === "Enter") commitGameEdit(g.id); if (e.key === "Escape") setEditingGameId(null); }}
                             className="flex-1 min-w-0 px-1.5 py-0.5 bg-gray-800 border border-blue-500 rounded text-white text-xs focus:outline-none"
                           />
