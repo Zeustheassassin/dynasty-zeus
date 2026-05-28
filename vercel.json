@@ -2,10 +2,6 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "crons": [
     {
-      "path": "/api/cron/leaguemate-alerts",
-      "schedule": "0 */2 * * *"
-    },
-    {
       "path": "/api/cron/league-transactions",
       "schedule": "0 */2 * * *"
     }

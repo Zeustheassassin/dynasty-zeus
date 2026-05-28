@@ -150,7 +150,6 @@ export default function AlertsPage({
               alerts={alerts}
               actionableAlerts={actionableAlerts}
               onDismissAlert={onDismissAlert}
-              players={players}
             />
           )}
 

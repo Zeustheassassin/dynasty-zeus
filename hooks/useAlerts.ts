@@ -97,11 +97,15 @@ export function useAlerts({ supabaseUser, players }: UseAlertsOptions): UseAlert
         }
       });
 
-    // Alerts — shape matches AlertsCenterItem; use alert_id as id, updated_at as timestamp
+    // Alerts — shape matches AlertsCenterItem; use alert_id as id, updated_at as timestamp.
+    // Excludes legacy `trade-*` rows: the leaguemate-alerts cron that wrote them was
+    // retired, and the same trade activity is now surfaced under the Trades tab via
+    // the league-transactions cache instead of duplicating it in the Alerts feed.
     supabase
       .from("alerts")
       .select("alert_id, category, source, severity, title, detail, actionable, dismissed, player_id, league_id, payload, updated_at")
       .eq("user_id", supabaseUser.id)
+      .not("alert_id", "like", "trade-%")
       .order("updated_at", { ascending: false })
       .limit(80)
       .then(({ data, error }: { data: Array<{

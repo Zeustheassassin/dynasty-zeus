@@ -446,7 +446,7 @@ useEffect(() => {
 }, [supabaseUser]);
 
 // Persist the (Supabase auth user → Sleeper user_id) mapping so the
-// server-side leaguemate-alerts cron knows which Sleeper account to scan.
+// server-side league-transactions cron knows which Sleeper account to scan.
 // Re-runs on Sleeper reconnect (user.user_id change) so a re-link is captured.
 useEffect(() => {
   if (!supabaseUser || !user?.user_id) return;

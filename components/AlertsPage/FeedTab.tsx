@@ -1,17 +1,15 @@
 "use client";
 import { memo } from "react";
-import type { SleeperPlayer } from "../../lib/types";
 import type { DashboardAlert } from "./alertsPageHelpers";
-import { severityStyles, renderLeagueAlertDetail } from "./alertsPageHelpers";
+import { severityStyles } from "./alertsPageHelpers";
 
 type FeedTabProps = {
   alerts: DashboardAlert[];
   actionableAlerts: DashboardAlert[];
   onDismissAlert: (alertId: string) => void;
-  players: Record<string, SleeperPlayer>;
 };
 
-function FeedTab({ alerts, actionableAlerts, onDismissAlert, players }: FeedTabProps) {
+function FeedTab({ alerts, actionableAlerts, onDismissAlert }: FeedTabProps) {
   return (
     <div className="grid gap-3">
       {alerts.length > 1 && (
@@ -41,11 +39,7 @@ function FeedTab({ alerts, actionableAlerts, onDismissAlert, players }: FeedTabP
                 </span>
               </div>
               <div className="mt-2 text-sm font-semibold text-white">{alert.title}</div>
-              <div className="mt-1 text-sm text-slate-300">
-                {alert.category === "league"
-                  ? renderLeagueAlertDetail(alert, players)
-                  : alert.detail}
-              </div>
+              <div className="mt-1 text-sm text-slate-300">{alert.detail}</div>
             </div>
             <button
               type="button"

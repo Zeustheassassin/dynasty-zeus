@@ -29,63 +29,6 @@ export const POS_COLOR: Record<string, string> = {
   TE: "text-yellow-400",
 };
 
-export function resolvePlayerIdsInDetail(detail: string, players: Record<string, SleeperPlayer>): string {
-  return detail.replace(/\b(\d{1,5})\b/g, (match) => {
-    const p = players[match];
-    return p?.full_name ?? match;
-  });
-}
-
-/**
- * Renders the body text of a league trade alert.
- *
- * The leaguemate-alerts cron stores raw player IDs in payload.acquiredPlayerIds
- * / sentPlayerIds (skipping a 5 MB /players/nfl fetch per cron run). This helper
- * resolves those IDs using the client's already-loaded players map. For older
- * rows or non-internal league sources without structured IDs, falls back to
- * regex-resolving any digit runs in alert.detail.
- */
-export function renderLeagueAlertDetail(
-  alert: AlertsCenterItem,
-  players: Record<string, SleeperPlayer>
-): string {
-  const payload = alert.payload as Record<string, unknown> | undefined;
-  const acquiredIds = Array.isArray(payload?.acquiredPlayerIds)
-    ? (payload.acquiredPlayerIds as string[])
-    : null;
-  const sentIds = Array.isArray(payload?.sentPlayerIds)
-    ? (payload.sentPlayerIds as string[])
-    : null;
-
-  if (acquiredIds || sentIds) {
-    const picksReceived = Array.isArray(payload?.picksReceived)
-      ? (payload.picksReceived as string[])
-      : [];
-    const picksSent = Array.isArray(payload?.picksSent)
-      ? (payload.picksSent as string[])
-      : [];
-    const leagueName =
-      typeof payload?.leagueName === "string" ? payload.leagueName : "League";
-
-    const resolveName = (pid: string): string =>
-      players[pid]?.full_name ?? pid;
-
-    const acquiredAll = [...(acquiredIds ?? []).map(resolveName), ...picksReceived];
-    const sentAll = [...(sentIds ?? []).map(resolveName), ...picksSent];
-
-    if (acquiredAll.length) {
-      return sentAll.length
-        ? `Received ${acquiredAll.join(", ")}, sent ${sentAll.join(", ")} in ${leagueName}.`
-        : `Received ${acquiredAll.join(", ")} in ${leagueName}.`;
-    }
-    if (sentAll.length) {
-      return `Sent ${sentAll.join(", ")} in ${leagueName}.`;
-    }
-  }
-
-  return resolvePlayerIdsInDetail(alert.detail, players);
-}
-
 export function injuryStatusStyle(player: SleeperPlayer) {
   const s = (player.injury_status || player.status || "").toLowerCase();
   if (/ir|pup/.test(s))
