@@ -118,7 +118,7 @@ dynastyzeus-app/
 | Hub | Purpose | Where to look |
 |---|---|---|
 | **Dashboard** | Landing screen, Sleeper username connect, navigation tiles. | [components/Dashboard.tsx](components/Dashboard.tsx) |
-| **Alerts** | Trade alerts, league transactions, injury reports, watchlist. | [components/AlertsPage/](components/AlertsPage/) |
+| **Alerts** | Watchlist-driven value/status alerts, top-250-drop alerts, league transactions (Trades / Waivers tabs from `league_transactions_cache`), injury reports. | [components/AlertsPage/](components/AlertsPage/) |
 | **League Hub** | Per-league standings, rosters, sims, league mate intel, notes, activity, power rankings, simulator. | [components/LeagueHub/](components/LeagueHub/) |
 | **Draft Hub** | Live draft board, rookie big board, draft history, pick values, historical drafts. | [components/DraftHub.tsx](components/DraftHub.tsx) + [components/draftHub/](components/draftHub/) |
 | **Data Hub** | Cross-league rankings, value trends, projections, league-mate exposure, depth charts, buy-low, my shares. | [components/DataHub/](components/DataHub/) |
@@ -172,14 +172,15 @@ Everything user-generated. See [§7](#7-supabase-database).
 ## 7. Supabase (database)
 
 ### 7.1 Structure
-The complete schema lives in [supabase/schema.sql](supabase/schema.sql) — this is the snapshot you would run to spin up a brand-new project. Incremental changes are in [supabase/migrations/](supabase/migrations/) numbered `001_…` through `033_…` (and growing). **Apply them in order.**
+The complete schema lives in [supabase/schema.sql](supabase/schema.sql) — this is the snapshot you would run to spin up a brand-new project. Incremental changes are in [supabase/migrations/](supabase/migrations/) numbered `001_…` through `035_…` (and growing). **Apply them in order.**
 
 Key table categories:
-- **User content:** `notes`, `league_notes`, `league_management`, `comm_payments`, `player_notes`, `player_dispositions`, `league_player_tags`, `trade_attempts`, `dashboard_alerts_dismissed`, `watchlist`, `big_board_snapshots`, `rookie_board_overrides`
-- **Caching tables:** `cache_*` (Sleeper response cache), `fc_values`, `fc_value_trends`
-- **Scouting:** `prospects`, `prospect_games`, `route_plays`, `qb_plays`, `rb_plays`, `te_plays`, `wr_plays`, `gm_briefings`, plus aggregate views (`scouting_game_route_stats`, `scouting_game_snap_stats`)
+- **User content:** `notes`, `league_notes`, `league_management`, `commissioner_payments`, `player_notes`, `player_dispositions`, `trade_attempts`, `alerts`, `watchlists`, `big_board_snapshots`, `rookie_board_overrides`, `player_value_snapshots`, `leaguemate_profiles`
+- **Server-side cron support:** `user_sleeper_links` (Supabase user → Sleeper user_id mapping; consumed by the league-transactions cron), `league_transactions_cache` (per-user transaction feed, refreshed every 2h)
+- **Caching tables:** `cross_league_rosters_cache`, `sleeper_stats_cache`, `fc_values_cache`, plus aggregate views
+- **Scouting:** `prospects`, `scouting_games`, `qb_plays`, `rb_plays`, `te_plays`, `wr_plays`, plus aggregate views (`scouting_game_route_stats`, `scouting_game_snap_stats`). `qb_plays` was expanded in migrations 031–034 to add tipped-ball accuracy, platform/pressure/handling charting, and touch logging — see [§5 / Scouting Hub](#5-the-hubs--what-each-major-screen-does).
 - **NFL/recruit reference:** `player_nfl_draft_info`, `recruits`, plus `recruits_position_stars_view`
-- **Simulator:** `league_simulations`, sim cache rows
+- **Simulator:** `league_simulations`, `league_draft_snapshots`, sim cache rows
 
 ### 7.2 Row Level Security (RLS)
 **Every user-facing table has RLS enabled** with a policy like:
@@ -207,14 +208,15 @@ To restore: `psql "<SUPABASE_DB_URL>" -f dz-YYYY-MM-DD-HHmm.sql`
 
 ## 8. Cron jobs (Vercel)
 
-Configured in [vercel.json](vercel.json). Both run every 2 hours.
+Configured in [vercel.json](vercel.json). Currently one cron, running every 2 hours.
 
 | Path | Purpose |
 |---|---|
-| `/api/cron/leaguemate-alerts` | Scans recent trades across all users' leagues, generates alerts for each user about transactions involving their league-mates. |
-| `/api/cron/league-transactions` | Refreshes the league transaction cache so the Alerts hub has fresh data without the user manually triggering it. |
+| `/api/cron/league-transactions` | Refreshes per-user league transaction cache in Supabase (`league_transactions_cache`) so the Trades / Waivers tabs of the Alerts hub render from cached rows instead of fanning out to Sleeper on every page load. |
 
-Both are protected by a `CRON_SECRET` header check — Vercel injects the secret automatically. The implementations are at [app/api/cron/leaguemate-alerts/route.ts](app/api/cron/leaguemate-alerts/route.ts) and [app/api/cron/league-transactions/route.ts](app/api/cron/league-transactions/route.ts).
+Protected by a `CRON_SECRET` header check — Vercel injects the secret automatically. Implementation at [app/api/cron/league-transactions/route.ts](app/api/cron/league-transactions/route.ts).
+
+> **Retired:** an earlier `/api/cron/leaguemate-alerts` cron wrote one row per leaguemate trade into the `alerts` table, which the Alerts feed then rendered as "X made a trade." It was retired in May 2026 because the same trades are already visible under the Trades tab; the duplication was noise. The route file is gone, the schedule was removed from `vercel.json`, and the client read in `hooks/useAlerts.ts` filters out any leftover `trade-*` rows still sitting in `alerts`.
 
 ---
 
@@ -334,6 +336,7 @@ git push              # triggers Vercel deploy
 - **No mobile-first layout for several hubs.** Desktop is the primary target; mobile works but isn't optimized.
 - **Single page application with one URL.** Tab state lives in React state, not the URL. Browser back/forward does not navigate between hubs.
 - **No AI integration.** Earlier versions used Anthropic's API to auto-summarize scouting notes; that path was removed and replaced with a plain numbered list of play notes on each prospect's Overview tab.
+- **No leaguemate trade alerts in the Alerts feed.** An earlier cron wrote one row per leaguemate trade into the `alerts` table, surfacing every league-wide trade as a notification. It was noise — the same trades already show under the Trades tab via the league-transactions cache. Removed in May 2026; see [§8](#8-cron-jobs-vercel) for the trail.
 
 ---
 
@@ -358,11 +361,10 @@ Browser
 
 Vercel Cron (server-side, no browser)
   │
-  ├─ every 2h  ──▶  /api/cron/leaguemate-alerts
-  │                  └─ scans Sleeper transactions, writes alerts to Supabase
-  │
   └─ every 2h  ──▶  /api/cron/league-transactions
-                     └─ refreshes transaction cache in Supabase
+                     └─ refreshes league_transactions_cache in Supabase
+                        (reads user_sleeper_links to know which Sleeper
+                        account belongs to each Supabase user)
 ```
 
 ---
