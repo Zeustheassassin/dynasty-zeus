@@ -37,7 +37,9 @@ const COLS: ColDef[] = [
     tooltip: "Accuracy Above Expected — overall (mean of non-null dimension rows). Min 25 graded passes.",
     weightBy: "rated_n" },
 
-  // Per-dimension AAE (the same 7 dims as the Overview panel's AAE Breakdown).
+  // Per-dimension AAE (the same 6 dims as the Overview panel's AAE Breakdown).
+  // Pressure Handling has no standalone AAE row — it's folded into the Pressure
+  // cluster, though it still feeds the overall AAE total. See aboveExpected.ts.
   // Each weights the league row by the QB's count of dim-filled plays — same
   // subset used to compute that QB's per-dim AAE — so the math identity holds.
   { key: "aae_dpth", label: "AAE Dp", group: "AAE Breakdown", fmt: "plusMinus", colorDir: 1, width: 70, tooltip: "AAE — Depth Zone", weightBy: "aae_dpth_n" },
@@ -45,7 +47,6 @@ const COLS: ColDef[] = [
   { key: "aae_tmg",  label: "AAE Tm", group: "AAE Breakdown", fmt: "plusMinus", colorDir: 1, width: 70, tooltip: "AAE — Timing",     weightBy: "aae_tmg_n" },
   { key: "aae_prs",  label: "AAE Pr", group: "AAE Breakdown", fmt: "plusMinus", colorDir: 1, width: 70, tooltip: "AAE — Pressure",   weightBy: "aae_prs_n" },
   { key: "aae_plt",  label: "AAE Pl", group: "AAE Breakdown", fmt: "plusMinus", colorDir: 1, width: 70, tooltip: "AAE — Platform",   weightBy: "aae_plt_n" },
-  { key: "aae_hdl",  label: "AAE Hd", group: "AAE Breakdown", fmt: "plusMinus", colorDir: 1, width: 70, tooltip: "AAE — Pressure Handling", weightBy: "aae_hdl_n" },
   { key: "aae_rte",  label: "AAE Rt", group: "AAE Breakdown", fmt: "plusMinus", colorDir: 1, width: 70, tooltip: "AAE — Route Type", weightBy: "aae_rte_n" },
 
   // Accuracy bucket distribution
@@ -264,7 +265,6 @@ export default function QBStatsTable({ prospects, games, qbPlays, loading, draft
           aae_tmg:  dimAAE(p.id, "timing"),
           aae_prs:  dimAAE(p.id, "pressure"),
           aae_plt:  dimAAE(p.id, "platform"),
-          aae_hdl:  dimAAE(p.id, "handling"),
           aae_rte:  dimAAE(p.id, "route"),
 
           // Per-dim play counts — league-footer weights (see ColDef.weightBy).
@@ -273,7 +273,6 @@ export default function QBStatsTable({ prospects, games, qbPlays, loading, draft
           aae_tmg_n:  dimN(p.id, "timing"),
           aae_prs_n:  dimN(p.id, "pressure"),
           aae_plt_n:  dimN(p.id, "platform"),
-          aae_hdl_n:  dimN(p.id, "handling"),
           aae_rte_n:  dimN(p.id, "route"),
 
           // Accuracy

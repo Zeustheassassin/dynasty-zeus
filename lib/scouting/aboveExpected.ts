@@ -44,7 +44,6 @@ const QB_DEPTH_ZONES: QBDepthZone[] = [
 const QB_TIMING_BUCKETS: QBTiming[] = ["first_option", "second_option", "checkdown", "extended_play"];
 const QB_PRESSURE_BUCKETS: QBPressure[] = ["clean", "mid", "backside", "front_side"];
 const QB_PLATFORM_BUCKETS: QBPlatform[] = ["on_platform", "off_platform", "on_the_run"];
-const QB_HANDLING_BUCKETS: QBPressureHandling[] = ["step_up", "bail_front_side", "bail_backside"];
 
 const TE_POSITIONINGS: TEPositioning[] = ["wide", "slot", "inline", "full_back", "running_back", "wing_back"];
 
@@ -252,7 +251,7 @@ function expectedFor<K extends string>(
 // in percentage points. `n` is how many of the QB's rated passes had this
 // dimension filled (a sample-size signal for the UI).
 export interface QBAAEDimRow {
-  key: "depth" | "coverage" | "timing" | "pressure" | "platform" | "handling" | "route";
+  key: "depth" | "coverage" | "timing" | "pressure" | "platform" | "route";
   label: string;
   aae: number | null;
   n: number;
@@ -278,7 +277,9 @@ function breakdownFor(ratedPasses: QBPlay[], baselines: QBBaselines): QBAAEBreak
     { key: "timing",   label: "Timing",            ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.timing,            baselines.timing,   QB_TIMING_BUCKETS)) },
     { key: "pressure", label: "Pressure",          ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.pressure,          baselines.pressure, QB_PRESSURE_BUCKETS)) },
     { key: "platform", label: "Platform",          ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.platform,          baselines.platform, QB_PLATFORM_BUCKETS)) },
-    { key: "handling", label: "Pressure Handling", ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.pressure_handling, baselines.handling, QB_HANDLING_BUCKETS)) },
+    // Pressure Handling has no standalone AAE row by design — it's folded into
+    // the Pressure cluster. pressure_handling still feeds the overall AAE total
+    // via expectedForPlay; see the baselines.handling push there.
     { key: "route",    label: "Route Type",        ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.route_type,        baselines.route,    ROUTE_TYPES)) },
   ];
 
