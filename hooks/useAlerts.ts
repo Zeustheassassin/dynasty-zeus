@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef, useCallback, type Dispatch, type SetStateAction } from "react";
+import { useState, useEffect, useRef, useCallback, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import { supabase } from "../lib/supabaseclient";
 import { logger } from "../lib/logger";
 import type { AlertsCenterItem, WatchlistEntry } from "../lib/types";
@@ -44,6 +44,14 @@ export interface UseAlertsReturn {
   dismissAlert: (alertId: string) => void;
   addWatchlistEntry: (playerId: string) => Promise<void>;
   removeWatchlistEntry: (playerId: string) => Promise<void>;
+  /**
+   * IDs of alerts already persisted in Supabase (seeded from the localStorage
+   * and DB hydration paths, extended on each successful upsert). The bulk-persist
+   * effect skips these so loaded alerts are never re-UPDATEd — the
+   * `alerts_set_updated_at` trigger would otherwise re-stamp `updated_at = now()`
+   * every session, keeping stale rows perpetually in the recency window.
+   */
+  persistedAlertIdsRef: MutableRefObject<Set<string>>;
   alertStoreScope: string;
   watchlistStorageKey: string;
   alertStorageKey: string;
@@ -63,6 +71,9 @@ export function useAlerts({ supabaseUser, players }: UseAlertsOptions): UseAlert
   const latestDismissedRef = useRef<string[]>([]);
   useEffect(() => { latestDismissedRef.current = dismissedAlertIds; }, [dismissedAlertIds]);
 
+  // Alerts already persisted in Supabase — see UseAlertsReturn.persistedAlertIdsRef.
+  const persistedAlertIdsRef = useRef<Set<string>>(new Set());
+
   // Hydrate from localStorage whenever the scope keys change (login/logout).
   // Synchronous setState here is intentional: we read a snapshot from an external
   // store (localStorage) and apply it as the initial value when the user scope changes.
@@ -71,10 +82,17 @@ export function useAlerts({ supabaseUser, players }: UseAlertsOptions): UseAlert
   // exception to the set-state-in-effect rule for external-store hydration.
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
+    // Scope changed (login/logout) — drop the previous user's persisted-id set
+    // so we never carry one account's alert IDs into another's.
+    persistedAlertIdsRef.current = new Set();
     const watchlist = getLocalStorageItem<WatchlistEntry[] | null>(watchlistStorageKey, null);
     if (watchlist) setWatchlistEntries(watchlist);
     const alerts = getLocalStorageItem<AlertsCenterItem[] | null>(alertStorageKey, null);
-    if (alerts) setDashboardAlerts(alerts);
+    if (alerts) {
+      setDashboardAlerts(alerts);
+      // These mirror DB rows, so they're already persisted — don't re-upsert them.
+      alerts.forEach((a) => persistedAlertIdsRef.current.add(a.id));
+    }
     const dismissed = getLocalStorageItem<string[] | null>(dismissedAlertStorageKey, null);
     if (dismissed) setDismissedAlertIds(dismissed);
   }, [watchlistStorageKey, alertStorageKey, dismissedAlertStorageKey]);
@@ -142,6 +160,9 @@ export function useAlerts({ supabaseUser, players }: UseAlertsOptions): UseAlert
           const dismissed = rows.filter((r) => r.dismissed).map((r) => r.id);
           setDashboardAlerts(rows);
           setDismissedAlertIds(dismissed);
+          // Loaded straight from the alerts table — already persisted, so the
+          // bulk-persist effect must not re-UPDATE (and thus re-stamp) them.
+          rows.forEach((r) => persistedAlertIdsRef.current.add(r.id));
           setLocalStorageItem(alertStorageKey, rows);
           setLocalStorageItem(dismissedAlertStorageKey, dismissed);
         }
@@ -182,6 +203,8 @@ export function useAlerts({ supabaseUser, players }: UseAlertsOptions): UseAlert
           { onConflict: "user_id,alert_id" }
         )
         .then(() => {}, (err: unknown) => log.error("alert dismiss upsert failed", { err: String(err) }));
+      // The row now exists in the DB — keep the bulk-persist effect from touching it.
+      persistedAlertIdsRef.current.add(alertId);
     }
   };
 
@@ -247,6 +270,7 @@ export function useAlerts({ supabaseUser, players }: UseAlertsOptions): UseAlert
     dismissAlert,
     addWatchlistEntry,
     removeWatchlistEntry,
+    persistedAlertIdsRef,
     alertStoreScope,
     watchlistStorageKey,
     alertStorageKey,

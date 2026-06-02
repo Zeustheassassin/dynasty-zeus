@@ -260,6 +260,7 @@ const {
   watchlistEntries, setWatchlistEntries,
   mergeDashboardAlerts,
   dismissAlert: dismissDashboardAlert,
+  persistedAlertIdsRef,
   alertStoreScope,
   watchlistStorageKey,
   alertStorageKey,
@@ -3059,7 +3060,16 @@ const getTeamSummary = useCallback(() => {
 
   useEffect(() => {
     if (!supabaseUser || !dashboardAlerts.length) return;
-    const payload = dashboardAlerts.slice(0, 80).map((alert) => ({
+    // Persist only alerts that aren't already in the DB. Re-upserting loaded
+    // alerts would fire the `alerts_set_updated_at` trigger, re-stamping
+    // updated_at = now() every session and keeping stale rows perpetually in
+    // the 80-row recency window (the source of the "ghost league" alerts).
+    // Dismissals are persisted separately by dismissDashboardAlert.
+    const toPersist = dashboardAlerts
+      .filter((alert) => !persistedAlertIdsRef.current.has(alert.id))
+      .slice(0, 80);
+    if (!toPersist.length) return;
+    const payload = toPersist.map((alert) => ({
       user_id: supabaseUser.id,
       alert_id: alert.id,
       category: alert.category,
@@ -3078,8 +3088,11 @@ const getTeamSummary = useCallback(() => {
       },
       updated_at: new Date(alert.timestamp || Date.now()).toISOString(),
     }));
-    supabase.from("alerts").upsert(payload, { onConflict: "user_id,alert_id" }).then(() => {}, (err: unknown) => log.error("alerts bulk upsert failed", { err: String(err) }));
-  }, [supabaseUser, dashboardAlerts, dismissedAlertIds]);
+    supabase.from("alerts").upsert(payload, { onConflict: "user_id,alert_id" }).then(
+      () => { toPersist.forEach((alert) => persistedAlertIdsRef.current.add(alert.id)); },
+      (err: unknown) => log.error("alerts bulk upsert failed", { err: String(err) })
+    );
+  }, [supabaseUser, dashboardAlerts, dismissedAlertIds, persistedAlertIdsRef]);
 
   useEffect(() => {
     let cancelled = false;
