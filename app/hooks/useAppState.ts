@@ -20,6 +20,7 @@ import {
   getCrossLeaguePreferenceFit, getCrossLeagueTradeBehaviorFit,
   fetchFantasyCalcValues,
   computeScoringMultipliers,
+  getLeagueNumQbs,
 } from "../../lib/helpers";
 import { projectRookiesByRoster } from "../../lib/helpers/rookieProjection";
 import { useProjections } from "../../hooks/useProjections";
@@ -621,15 +622,23 @@ useEffect(() => {
   return () => { stopTimer(); document.removeEventListener("visibilitychange", onVisibilityChange); };
 }, [mainTab, draftHubSection, draftSettings?.status, refreshDraftBoard]);
 
+// Keep redraft values matched to the selected league's QB format (superflex=2 vs
+// single-QB=1) so the redraft-rank half of the direction bucket is format-correct.
+// Superflex leagues resolve to numQbs=2 (unchanged); the load is guarded so this is
+// a no-op when the format hasn't changed.
+useEffect(() => {
+  if (selectedLeague) loadRedraftValues(getLeagueNumQbs(selectedLeague));
+}, [selectedLeague, loadRedraftValues]);
+
 // Load league-specific FC values and redraft values as soon as Trade Hub is opened.
 // redraftValues powers the redraft-rank half of the direction bucket — if it's empty
 // when the direction memo fires it produces a garbage bucket (usually "Purgatory").
 useEffect(() => {
   if (mainTab === "TRADE_HUB" && selectedLeague?.league_id) {
     loadCalcValues(selectedLeague.league_id);
-    loadRedraftValues();
+    loadRedraftValues(getLeagueNumQbs(selectedLeague));
   }
-}, [mainTab, selectedLeague?.league_id, loadCalcValues, loadRedraftValues]);
+}, [mainTab, selectedLeague?.league_id, selectedLeague, loadCalcValues, loadRedraftValues]);
 
 // Also reload if the user switches sub-tabs within Trade Hub (redundant but keeps the guard intact)
 useEffect(() => {

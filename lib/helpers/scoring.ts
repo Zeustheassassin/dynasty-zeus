@@ -82,6 +82,24 @@ export function computeLeagueFpts(
 }
 
 /**
+ * Derives the FantasyCalc `num_qbs` parameter from a league's roster positions.
+ * Superflex / 2-QB leagues embed a QB premium (num_qbs=2); single-QB leagues use 1.
+ * Defaults to 2 (superflex) when roster_positions are unknown — this app is
+ * superflex-first and several base value fetches run before a league is selected.
+ */
+export function getLeagueNumQbs(
+  league: { roster_positions?: string[] | null } | null | undefined,
+): number {
+  const positions = league?.roster_positions;
+  // Unknown / not-yet-loaded roster → superflex default (2). Only flip to 1 when we
+  // can positively confirm a single-QB league, so superflex values never regress.
+  if (!positions || positions.length === 0) return 2;
+  const qbSlots = positions.filter((p) => p === "QB").length;
+  const hasSuperFlex = positions.includes("SUPER_FLEX");
+  return hasSuperFlex || qbSlots >= 2 ? 2 : 1;
+}
+
+/**
  * Computes per-position dynasty value multipliers based on how a league's
  * scoring deviates from the FC baseline (FC_BASELINE_SCORING).
  *

@@ -8,7 +8,25 @@ import {
   getNonStandardRules,
   formatRule,
   groupRules,
+  getLeagueNumQbs,
 } from "@/lib/helpers/scoring";
+
+describe("getLeagueNumQbs", () => {
+  it("returns 2 for a SUPER_FLEX league", () => {
+    expect(getLeagueNumQbs({ roster_positions: ["QB", "RB", "WR", "TE", "SUPER_FLEX"] })).toBe(2);
+  });
+  it("returns 2 for a 2-QB league", () => {
+    expect(getLeagueNumQbs({ roster_positions: ["QB", "QB", "RB", "WR", "TE"] })).toBe(2);
+  });
+  it("returns 1 for a single-QB league", () => {
+    expect(getLeagueNumQbs({ roster_positions: ["QB", "RB", "WR", "TE", "FLEX"] })).toBe(1);
+  });
+  it("defaults to 2 (superflex) when roster_positions are unknown", () => {
+    expect(getLeagueNumQbs(null)).toBe(2);
+    expect(getLeagueNumQbs({})).toBe(2);
+    expect(getLeagueNumQbs({ roster_positions: null })).toBe(2);
+  });
+});
 
 // ── normalizeProjName ────────────────────────────────────────────────────────
 

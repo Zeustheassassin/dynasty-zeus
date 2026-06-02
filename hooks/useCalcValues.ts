@@ -22,6 +22,10 @@ export function useCalcValues() {
   useEffect(() => { redraftLoadedRef.current = redraftLoaded; }, [redraftLoaded]);
   // Monotonic guard so a slow fetch for one league can't overwrite a newer league's values.
   const calcSeq = useRef(0);
+  // Track which num_qbs format the redraft values were loaded for, so a league
+  // switch between superflex (2) and single-QB (1) refetches instead of serving
+  // the wrong-format values. Superflex stays at 2 (unchanged behaviour).
+  const redraftNumQbsRef = useRef<number>(2);
 
   const loadCalcValues = useCallback(async (leagueId: string) => {
     if (calcValuesLeagueIdRef.current === leagueId) return;
@@ -50,13 +54,15 @@ export function useCalcValues() {
     }
   }, []);
 
-  const loadRedraftValues = useCallback(async () => {
-    if (redraftLoadedRef.current) return;
+  const loadRedraftValues = useCallback(async (numQbs: number = redraftNumQbsRef.current) => {
+    // Already loaded for this format → nothing to do (no-arg refresh callers reuse
+    // the last-loaded format, so they don't thrash).
+    if (redraftLoadedRef.current && redraftNumQbsRef.current === numQbs) return;
     setLoadingRedraft(true);
     setRedraftError(null);
     try {
       const res = await fetch(
-        `${FANTASYCALC_BASE_URL}/values/current?isDynasty=false&numQbs=2`
+        `${FANTASYCALC_BASE_URL}/values/current?isDynasty=false&numQbs=${numQbs}`
       );
       if (!res.ok) throw new Error(`FantasyCalc ${res.status}`);
       const data = await res.json();
@@ -67,6 +73,7 @@ export function useCalcValues() {
       });
       setRedraftValues(vals);
       setRedraftLoaded(true);
+      redraftNumQbsRef.current = numQbs;
     } catch (err) {
       log.error("loadRedraftValues failed", { err: String(err) });
       setRedraftError("Couldn't load redraft values from FantasyCalc.");
