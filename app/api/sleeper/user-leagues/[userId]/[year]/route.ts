@@ -25,11 +25,11 @@ export async function GET(
     const res = await fetch(upstream, { next: { revalidate: SLEEPER_USER_LEAGUES_REVALIDATE_S } });
     if (!res.ok) {
       log.error('upstream non-OK', { status: res.status, userId, year });
-      return NextResponse.json([], { status: 502 });
+      return NextResponse.json({ error: "Upstream Sleeper request failed" }, { status: 502 });
     }
     return NextResponse.json(await res.json());
   } catch (err) {
     log.error('fetch failed', { error: String(err) });
-    return NextResponse.json([], { status: 502 });
+    return NextResponse.json({ error: "Upstream Sleeper request failed" }, { status: 502 });
   }
 }

@@ -146,12 +146,20 @@ function ManagementHub({
         fetch(`${SLEEPER_BASE_URL}/league/${leagueId}/rosters`),
         fetch(`${SLEEPER_BASE_URL}/league/${leagueId}/users`),
       ]);
+      if (!rostersRes.ok || !usersRes.ok) {
+        throw new Error(`Sleeper ${rostersRes.status}/${usersRes.status}`);
+      }
       const rostersData = await rostersRes.json();
       const usersData = await usersRes.json();
       setCommToolsRosters(rostersData || []);
       const userMap: Record<string, SleeperUser> = {};
       (usersData || []).forEach((u: SleeperUser) => { userMap[u.user_id] = u; });
       setCommToolsUsers(userMap);
+    } catch (err) {
+      // Without this, a fetch failure left rosters empty and rendered the same
+      // "No roster data found." state as a genuinely empty league.
+      log.error("commissioner tools league fetch failed", { err: String(err) });
+      showSaveError("Couldn't load league rosters — check your connection and try again.");
     } finally {
       setLoadingCommToolsRosters(false);
     }

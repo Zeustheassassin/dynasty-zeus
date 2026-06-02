@@ -395,7 +395,7 @@ export default function RookieBigBoard({
 
       {/* Note popup overlay */}
       {expandedNoteId && (() => {
-        const np = rookies.find((r) => r.player_id === expandedNoteId);
+        const np = rookies.find((r) => rookieKey(r) === expandedNoteId);
         return (
           <div
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
@@ -518,7 +518,7 @@ export default function RookieBigBoard({
             const prevTierKey = prevEntry
               ? (prevEntry.p.player_id || `name:${prevEntry.p.name}`)
               : null;
-            const hasNote  = !!(playerNotes[p.player_id || ""] || "").trim();
+            const hasNote  = !!(playerNotes[rookieKey(p)] || "").trim();
             const myTier   = tierLabels[tierKey];
             const prevTier = prevTierKey ? tierLabels[prevTierKey] : undefined;
             const showDivider = !rookieSearch && displayIndex > 0 && myTier !== prevTier;
@@ -722,7 +722,7 @@ export default function RookieBigBoard({
                     )}
 
                     <button
-                      onClick={(e) => { e.stopPropagation(); setExpandedNoteId(p.player_id); }}
+                      onClick={(e) => { e.stopPropagation(); setExpandedNoteId(rookieKey(p)); }}
                       className={`text-sm transition ${hasNote ? "text-amber-400 hover:text-amber-300" : "text-gray-600 hover:text-gray-400"}`}
                       title={hasNote ? "View/edit note" : "Add note"}
                     >
