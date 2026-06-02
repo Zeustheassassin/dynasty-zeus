@@ -577,7 +577,9 @@ const refreshDraftBoard = useCallback(async () => {
   if (!selectedLeagueRef.current) return;
   setLoadingDraftRefresh(true);
   try {
-    const drafts = await sleeperApi.getLeagueDrafts(selectedLeagueRef.current.league_id);
+    // bypass the drafts cache too so a status flip (drafting → complete) is seen
+    // promptly — both the manual "Refresh Board" button and the live poll want fresh.
+    const drafts = await sleeperApi.getLeagueDrafts(selectedLeagueRef.current.league_id, true);
     const currentDraft = drafts[0];
     if (!currentDraft) return;
     setDraftId(currentDraft.draft_id);
@@ -592,6 +594,32 @@ const refreshDraftBoard = useCallback(async () => {
     setLoadingDraftRefresh(false);
   }
 }, []);
+
+// Live-draft auto-refresh. While the Draft Hub BOARD tab is open and the draft
+// is in progress, poll every 30s so picks appear without manual clicks. Polling
+// pauses when the browser tab is hidden and stops once the draft completes.
+// Cost: ~2 Sleeper calls per poll (drafts + picks) = ~4/min per active drafter,
+// far under Sleeper's ceiling and only during the rare live-draft window.
+useEffect(() => {
+  const status = draftSettings?.status;
+  const isLive = status === "drafting" || status === "paused";
+  const onBoard = mainTab === "DRAFT_HUB" && draftHubSection === "BOARD";
+  if (!isLive || !onBoard) return;
+  if (typeof document === "undefined") return;
+
+  const POLL_MS = 30_000;
+  let timer: ReturnType<typeof setInterval> | null = null;
+  const startTimer = () => { if (timer === null) timer = setInterval(() => { refreshDraftBoard(); }, POLL_MS); };
+  const stopTimer = () => { if (timer !== null) { clearInterval(timer); timer = null; } };
+  const onVisibilityChange = () => {
+    if (document.visibilityState === "visible") { refreshDraftBoard(); startTimer(); }
+    else stopTimer();
+  };
+
+  if (document.visibilityState === "visible") startTimer();
+  document.addEventListener("visibilitychange", onVisibilityChange);
+  return () => { stopTimer(); document.removeEventListener("visibilitychange", onVisibilityChange); };
+}, [mainTab, draftHubSection, draftSettings?.status, refreshDraftBoard]);
 
 // Load league-specific FC values and redraft values as soon as Trade Hub is opened.
 // redraftValues powers the redraft-rank half of the direction bucket — if it's empty

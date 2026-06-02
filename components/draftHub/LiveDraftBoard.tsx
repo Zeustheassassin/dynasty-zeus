@@ -244,6 +244,15 @@ export default function LiveDraftBoard({
             ✕ Reset Picks
           </button>
         )}
+        {(draftSettings?.status === "drafting" || draftSettings?.status === "paused") && (
+          <span
+            className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold text-emerald-300 bg-emerald-900/30 border border-emerald-700/40 rounded-lg"
+            title="The board auto-refreshes every 30s while the draft is live (pauses when this tab is in the background)."
+          >
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            Live · auto-refreshing
+          </span>
+        )}
         <button
           onClick={refreshDraftBoard}
           disabled={loadingDraftRefresh}
