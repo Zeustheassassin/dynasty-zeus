@@ -1,5 +1,5 @@
 "use client";
-import React, { createContext, useContext } from "react";
+import React, { createContext, useContext, useMemo } from "react";
 import type { SleeperLeague, SleeperRoster } from "./types";
 
 interface LeagueContextValue {
@@ -23,11 +23,13 @@ export function LeagueProvider({
   users,
   children,
 }: LeagueContextValue & { children: React.ReactNode }) {
-  return (
-    <LeagueContext.Provider value={{ selectedLeague, rosters, users }}>
-      {children}
-    </LeagueContext.Provider>
+  // Memoise so the ~22 useLeague() consumers don't re-render on unrelated
+  // top-level state changes (only when the league/rosters/users actually change).
+  const value = useMemo<LeagueContextValue>(
+    () => ({ selectedLeague, rosters, users }),
+    [selectedLeague, rosters, users],
   );
+  return <LeagueContext.Provider value={value}>{children}</LeagueContext.Provider>;
 }
 
 /**

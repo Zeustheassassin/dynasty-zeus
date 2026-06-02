@@ -1,5 +1,5 @@
 "use client";
-import React, { createContext, useContext } from "react";
+import React, { createContext, useContext, useMemo } from "react";
 import type {
   RosterDirectionProfile,
   LeagueSimulation,
@@ -30,8 +30,40 @@ const ValuesContext = createContext<ValuesContextValue>({
 
 export function ValuesProvider({
   children,
-  ...value
+  leagueAdjustedFcValues,
+  leagueAdjustedRedraftValues,
+  pickFcValues,
+  fcNameValues,
+  selectedLeagueDirection,
+  selectedLeagueDirectionAdjusted,
+  selectedLeagueSimulation,
+  selectedLeagueDynamicPickValues,
 }: ValuesContextValue & { children: React.ReactNode }) {
+  // The rest-spread previously rebuilt the value object on every render; memoise
+  // on the individual fields so the ~18 useValues() consumers only re-render when
+  // a value they read actually changes.
+  const value = useMemo<ValuesContextValue>(
+    () => ({
+      leagueAdjustedFcValues,
+      leagueAdjustedRedraftValues,
+      pickFcValues,
+      fcNameValues,
+      selectedLeagueDirection,
+      selectedLeagueDirectionAdjusted,
+      selectedLeagueSimulation,
+      selectedLeagueDynamicPickValues,
+    }),
+    [
+      leagueAdjustedFcValues,
+      leagueAdjustedRedraftValues,
+      pickFcValues,
+      fcNameValues,
+      selectedLeagueDirection,
+      selectedLeagueDirectionAdjusted,
+      selectedLeagueSimulation,
+      selectedLeagueDynamicPickValues,
+    ],
+  );
   return <ValuesContext.Provider value={value}>{children}</ValuesContext.Provider>;
 }
 

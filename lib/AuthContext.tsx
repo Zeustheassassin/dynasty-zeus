@@ -1,5 +1,5 @@
 "use client";
-import React, { createContext, useContext } from "react";
+import React, { createContext, useContext, useMemo } from "react";
 import type { User as SupabaseUser } from "@supabase/auth-js";
 
 interface AuthContextValue {
@@ -21,11 +21,13 @@ export function AuthProvider({
   supabaseUser: SupabaseUser | null;
   children: React.ReactNode;
 }) {
-  return (
-    <AuthContext.Provider value={{ supabaseUser, isLoggedIn: supabaseUser !== null }}>
-      {children}
-    </AuthContext.Provider>
+  // Memoise so consumers don't re-render every time an unrelated piece of
+  // top-level state changes (a keystroke, a sim re-run, a projection refresh).
+  const value = useMemo<AuthContextValue>(
+    () => ({ supabaseUser, isLoggedIn: supabaseUser !== null }),
+    [supabaseUser],
   );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 /** Returns the current Supabase auth context.

@@ -1,5 +1,5 @@
 "use client";
-import React, { createContext, useContext } from "react";
+import React, { createContext, useContext, useMemo } from "react";
 import type { SleeperRoster } from "./types";
 
 interface RosterContextValue {
@@ -15,11 +15,8 @@ export function RosterProvider({
   myRoster,
   children,
 }: RosterContextValue & { children: React.ReactNode }) {
-  return (
-    <RosterContext.Provider value={{ myRoster }}>
-      {children}
-    </RosterContext.Provider>
-  );
+  const value = useMemo<RosterContextValue>(() => ({ myRoster }), [myRoster]);
+  return <RosterContext.Provider value={value}>{children}</RosterContext.Provider>;
 }
 
 /**
