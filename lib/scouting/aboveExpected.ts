@@ -23,7 +23,6 @@ import type {
   QBDepthZone,
   QBTiming,
   QBPressure,
-  QBPlatform,
   QBPressureHandling,
   RouteType,
   TEPositioning,
@@ -43,7 +42,24 @@ const QB_DEPTH_ZONES: QBDepthZone[] = [
 // are already filtered out of AAE.
 const QB_TIMING_BUCKETS: QBTiming[] = ["first_option", "second_option", "checkdown", "extended_play"];
 const QB_PRESSURE_BUCKETS: QBPressure[] = ["clean", "mid", "backside", "front_side"];
-const QB_PLATFORM_BUCKETS: QBPlatform[] = ["on_platform", "off_platform", "on_the_run"];
+// Platform dimension is split on its side: an on-the-run throw is bucketed by
+// whether it was strong-side or cross-body (cross-body throws are meaningfully
+// harder). platform_side is only charted on `on_the_run` plays, so on-platform /
+// off-platform keep a single bucket each. `on_the_run` (no side charted) is the
+// fallback bucket for older plays.
+type QBPlatformKey =
+  | "on_platform" | "off_platform"
+  | "on_the_run" | "on_the_run_strong" | "on_the_run_cross";
+const QB_PLATFORM_KEYS: QBPlatformKey[] = [
+  "on_platform", "off_platform", "on_the_run", "on_the_run_strong", "on_the_run_cross",
+];
+function platformKey(pl: QBPlay): QBPlatformKey | null {
+  if (!pl.platform) return null;
+  if (pl.platform !== "on_the_run") return pl.platform; // on_platform | off_platform
+  if (pl.platform_side === "strong_side") return "on_the_run_strong";
+  if (pl.platform_side === "cross_body")  return "on_the_run_cross";
+  return "on_the_run";
+}
 
 const TE_POSITIONINGS: TEPositioning[] = ["wide", "slot", "inline", "full_back", "running_back", "wing_back"];
 
@@ -51,6 +67,26 @@ const MIN_SAMPLE = 15;
 // QB AAE samples 7 dimensions so each dimension's expected estimate is noisier
 // than the 2-dimension RB/TE versions — raise the minimum to compensate.
 const QB_MIN_SAMPLE = 25;
+// Empirical-Bayes shrinkage strength for league bucket baselines. A bucket's
+// rate is pulled toward the global mean throw value by SHRINK_K pseudo-throws:
+//   shrunk = (sum_value + SHRINK_K * globalMean) / (n + SHRINK_K)
+// Thin buckets (a depth zone seen only a handful of times) collapse toward the
+// league average instead of swinging the metric on noise; fat buckets are
+// barely moved. Tune up as samples stay small, down as the dataset grows.
+const SHRINK_K = 10;
+
+// #3-modified — graded "throw value" replacing the old binary on-target flag.
+// An on-target throw is always a perfect 1.0 (never penalized for a receiver
+// drop). A miss (high / low / in_front / behind — all that survive the graded-
+// throw filter besides on_target) that is still CAUGHT was functional ball
+// placement and earns partial credit; an uncaught miss (incomplete /
+// interception / result not charted) is a full 0. Both the QB's actual value
+// and every league baseline are computed on this same scale.
+const MISS_CAUGHT_CREDIT = 0.7;
+function throwValue(pl: QBPlay): number {
+  if (pl.accuracy === "on_target") return 1;
+  return pl.completion === "caught" ? MISS_CAUGHT_CREDIT : 0;
+}
 
 function combine(a: number | null, b: number | null): number | null {
   if (a != null && b != null) return (a + b) / 2;
@@ -131,95 +167,188 @@ export function computeRBAboveExpected(
 }
 
 // ── QB AAE ───────────────────────────────────────────────────────────────
-// "Accuracy Above Expected" — actual on-target% minus an expected on-target%
-// computed from league baselines across seven situational dimensions:
-//   depth zone, coverage, timing, pressure, platform, pressure handling, route type.
+// "Accuracy Above Expected" — the QB's actual mean throw value minus an
+// expected mean throw value built from league baselines across seven
+// situational dimensions:
+//   depth zone, coverage, timing, pressure, platform (incl. on-the-run side),
+//   pressure handling, route type.
 //
-// Per dimension, we compute a weighted-average expected on-target% using the
-// QB's distribution across that dimension's buckets and the league's on-target%
-// in each bucket. Dimensions whose values are NULL on a play don't contribute
-// for that play (older plays charted before Pressure / Platform / Handling
-// existed simply don't pull the metric toward 0). The seven per-dimension
-// estimates are then mean-averaged, ignoring nulls.
+// Throw value is the graded score from throwValue() (on_target = 1.0; a caught
+// miss = partial credit; an uncaught miss = 0) rather than a binary on-target
+// flag, so near-misses that still worked aren't scored identically to airmails.
+//
+// Three accuracy refinements layer on top of the raw bucket means:
+//   1. Shrinkage — each league bucket rate is pulled toward the global mean by
+//      SHRINK_K pseudo-throws, so thin buckets don't swing the metric on noise.
+//   2. Dimension weighting — the overall expected weights each dimension by how
+//      much it actually discriminates (the spread of its bucket rates); a flat
+//      dimension barely moves a play's expected. See resolveBaselines / weight.
+//   3. Per-play expected — the overall total compares actual throw value to the
+//      mean of per-play expecteds, not the mean of per-dim AAEs, so correlated
+//      dimensions (the pressure cluster) aren't double-counted.
+//
+// Dimensions whose values are NULL on a play don't contribute for that play
+// (older plays charted before Pressure / Platform / Handling existed simply
+// don't pull the metric toward 0).
 //
 // Excluded from both numerator and denominator:
 //   - Run plays (no throw)
 //   - Plays with accuracy == null (sack / scramble / throw_away)
-//   - Tipped balls (consistent with the on-target% denominator in QBStatsTable —
-//     the intended trajectory is unknowable after a deflection)
+//   - Tipped balls (the intended trajectory is unknowable after a deflection)
 const isQBGradedThrow = (pl: QBPlay) =>
   // Include RPO throws — they're real pass attempts with accuracy ratings.
   pl.play_type !== "run" && pl.accuracy != null && pl.accuracy !== "tipped_ball";
 
-type Bucketed<K extends string> = Partial<Record<K, { ot: number; n: number }>>;
+interface Acc { v: number; n: number }  // v = summed throw value, n = plays
+type Bucketed<K extends string> = Partial<Record<K, Acc>>;
 
 interface QBBaselines {
   depth:    Bucketed<QBDepthZone>;
-  cvg:      Record<"man" | "zone", { ot: number; n: number }>;
+  cvg:      Record<"man" | "zone", Acc>;
   timing:   Bucketed<QBTiming>;
   pressure: Bucketed<QBPressure>;
-  platform: Bucketed<QBPlatform>;
+  platform: Bucketed<QBPlatformKey>;
   handling: Bucketed<QBPressureHandling>;
   route:    Bucketed<RouteType>;
+  global:   Acc;  // all graded throws — the shrinkage target
 }
 
 function buildQBBaselines(leaguePlays: QBPlay[]): QBBaselines {
   const b: QBBaselines = {
-    depth: {}, cvg: { man: { ot: 0, n: 0 }, zone: { ot: 0, n: 0 } },
+    depth: {}, cvg: { man: { v: 0, n: 0 }, zone: { v: 0, n: 0 } },
     timing: {}, pressure: {}, platform: {}, handling: {}, route: {},
+    global: { v: 0, n: 0 },
+  };
+  const add = (acc: Acc | undefined, v: number): Acc => {
+    const a = acc ?? { v: 0, n: 0 };
+    a.v += v; a.n++;
+    return a;
   };
   for (const pl of leaguePlays) {
     if (!isQBGradedThrow(pl)) continue;
-    const ot = pl.accuracy === "on_target";
-    if (pl.depth_zone)        { (b.depth[pl.depth_zone]   ??= { ot: 0, n: 0 }).n++; if (ot) b.depth[pl.depth_zone]!.ot++; }
-    if (pl.coverage === "man" || pl.coverage === "zone") { b.cvg[pl.coverage].n++; if (ot) b.cvg[pl.coverage].ot++; }
-    if (pl.timing)            { (b.timing[pl.timing]      ??= { ot: 0, n: 0 }).n++; if (ot) b.timing[pl.timing]!.ot++; }
-    if (pl.pressure)          { (b.pressure[pl.pressure]  ??= { ot: 0, n: 0 }).n++; if (ot) b.pressure[pl.pressure]!.ot++; }
-    if (pl.platform)          { (b.platform[pl.platform]  ??= { ot: 0, n: 0 }).n++; if (ot) b.platform[pl.platform]!.ot++; }
-    if (pl.pressure_handling) { (b.handling[pl.pressure_handling] ??= { ot: 0, n: 0 }).n++; if (ot) b.handling[pl.pressure_handling]!.ot++; }
-    if (pl.route_type)        { (b.route[pl.route_type]   ??= { ot: 0, n: 0 }).n++; if (ot) b.route[pl.route_type]!.ot++; }
+    const v = throwValue(pl);
+    b.global.v += v; b.global.n++;
+    if (pl.depth_zone)        b.depth[pl.depth_zone]   = add(b.depth[pl.depth_zone], v);
+    if (pl.coverage === "man" || pl.coverage === "zone") b.cvg[pl.coverage] = add(b.cvg[pl.coverage], v);
+    if (pl.timing)            b.timing[pl.timing]      = add(b.timing[pl.timing], v);
+    if (pl.pressure)          b.pressure[pl.pressure]  = add(b.pressure[pl.pressure], v);
+    const pk = platformKey(pl);
+    if (pk)                   b.platform[pk]           = add(b.platform[pk], v);
+    if (pl.pressure_handling) b.handling[pl.pressure_handling] = add(b.handling[pl.pressure_handling], v);
+    if (pl.route_type)        b.route[pl.route_type]   = add(b.route[pl.route_type], v);
   }
   return b;
 }
 
-// Per-play expected on-target% — the mean of league bucket rates across every
-// dimension that's filled on the play. Skips a dim when its bucket is null on
-// this play or the league has no data for that bucket. Returns null only if
-// none of the seven dims yield a comparable league rate (essentially never on
-// a graded throw, since depth_zone is filled on every charted throw).
-//
-// This is the engine of the overall AAE calculation: comparing the QB's actual
-// on-target% against the mean of these per-play expecteds avoids the double-
-// counting that arises from averaging seven correlated per-dimension AAEs. A
-// broken-pocket throw, for example, gets one low expected (the mean of the
-// pressure / platform / handling / timing bucket rates, plus depth / coverage /
-// route) instead of being penalized four separate times.
-function expectedForPlay(pl: QBPlay, baselines: QBBaselines): number | null {
-  const rates: number[] = [];
-  const push = (lg: { ot: number; n: number } | undefined) => {
-    if (lg && lg.n > 0) rates.push(lg.ot / lg.n);
-  };
-  if (pl.depth_zone) push(baselines.depth[pl.depth_zone]);
-  if (pl.coverage === "man" || pl.coverage === "zone") push(baselines.cvg[pl.coverage]);
-  if (pl.timing) push(baselines.timing[pl.timing]);
-  if (pl.pressure) push(baselines.pressure[pl.pressure]);
-  if (pl.platform) push(baselines.platform[pl.platform]);
-  if (pl.pressure_handling) push(baselines.handling[pl.pressure_handling]);
-  if (pl.route_type) push(baselines.route[pl.route_type]);
-  if (!rates.length) return null;
-  return rates.reduce((a, b) => a + b, 0) / rates.length;
+// Resolved baselines: each dimension's raw counts collapsed into shrunk bucket
+// rates (#1) plus a discrimination weight (#4). Built once per league scan and
+// shared by every prospect's breakdown.
+interface ResolvedBaselines {
+  depth:    Map<QBDepthZone, number>;
+  cvg:      Map<"man" | "zone", number>;
+  timing:   Map<QBTiming, number>;
+  pressure: Map<QBPressure, number>;
+  platform: Map<QBPlatformKey, number>;
+  handling: Map<QBPressureHandling, number>;
+  route:    Map<RouteType, number>;
+  weight:   Record<"depth" | "coverage" | "timing" | "pressure" | "platform" | "handling" | "route", number>;
 }
 
-// Weighted expected on-target% for one dimension AND the QB's actual on-target%
-// over the same subset of plays (those where the dimension is filled and the
-// league has a matching bucket). Comparing actual to expected on the same
-// subset keeps AAE Hd / Pr / Pl honest — pressure_handling is only logged on
-// pressured throws, so comparing all-throw accuracy against a pressured-only
-// baseline biases AAE positive league-wide.
+// Collapse one dimension's raw buckets into shrunk rates + a discrimination
+// weight. The weight is the sample-weighted standard deviation of the shrunk
+// bucket rates: a dimension whose buckets all sit near the same rate carries
+// little information and is down-weighted toward 0; depth zone (wide spread)
+// dominates. Std (not variance) keeps a single noisy bucket from over-
+// concentrating the weight at current sample sizes.
+function resolveDim<K extends string>(raw: { [k: string]: Acc | undefined }, mean: number): { rates: Map<K, number>; weight: number } {
+  const rates = new Map<K, number>();
+  const ns: number[] = [];
+  const rs: number[] = [];
+  let N = 0;
+  for (const k of Object.keys(raw)) {
+    const acc = raw[k];
+    if (!acc || acc.n <= 0) continue;
+    const r = (acc.v + SHRINK_K * mean) / (acc.n + SHRINK_K);
+    rates.set(k as K, r);
+    ns.push(acc.n); rs.push(r); N += acc.n;
+  }
+  let weight = 0;
+  if (N > 0 && rs.length > 1) {
+    let m = 0;
+    for (let i = 0; i < rs.length; i++) m += (ns[i] / N) * rs[i];
+    let varr = 0;
+    for (let i = 0; i < rs.length; i++) varr += (ns[i] / N) * (rs[i] - m) ** 2;
+    weight = Math.sqrt(varr);
+  }
+  return { rates, weight };
+}
+
+function resolveBaselines(b: QBBaselines): ResolvedBaselines {
+  const mean = b.global.n > 0 ? b.global.v / b.global.n : 0;
+  const depth    = resolveDim<QBDepthZone>(b.depth, mean);
+  const cvg      = resolveDim<"man" | "zone">(b.cvg, mean);
+  const timing   = resolveDim<QBTiming>(b.timing, mean);
+  const pressure = resolveDim<QBPressure>(b.pressure, mean);
+  const platform = resolveDim<QBPlatformKey>(b.platform, mean);
+  const handling = resolveDim<QBPressureHandling>(b.handling, mean);
+  const route    = resolveDim<RouteType>(b.route, mean);
+  return {
+    depth: depth.rates, cvg: cvg.rates, timing: timing.rates, pressure: pressure.rates,
+    platform: platform.rates, handling: handling.rates, route: route.rates,
+    weight: {
+      depth: depth.weight, coverage: cvg.weight, timing: timing.weight,
+      pressure: pressure.weight, platform: platform.weight,
+      handling: handling.weight, route: route.weight,
+    },
+  };
+}
+
+// Per-play expected throw value — the discrimination-weighted mean of league
+// bucket rates across every dimension filled on the play (#4). Skips a dim when
+// its bucket is null on the play or the league never saw that bucket. If every
+// filled dim has zero weight (degenerate — nothing discriminates), falls back
+// to a plain mean so depth-only plays still get an expected. Returns null only
+// when no dimension yields a comparable league rate (essentially never on a
+// graded throw, since depth_zone is filled on every charted throw).
+//
+// Comparing actual throw value against the mean of these per-play expecteds
+// avoids the double-counting of averaging seven correlated per-dimension AAEs:
+// a broken-pocket throw gets one blended expected, not four separate penalties.
+function expectedForPlay(pl: QBPlay, R: ResolvedBaselines): number | null {
+  const pairs: Array<[number, number]> = []; // [rate, weight]
+  const push = (rate: number | undefined, w: number) => { if (rate != null) pairs.push([rate, w]); };
+  if (pl.depth_zone) push(R.depth.get(pl.depth_zone), R.weight.depth);
+  if (pl.coverage === "man" || pl.coverage === "zone") push(R.cvg.get(pl.coverage), R.weight.coverage);
+  if (pl.timing) push(R.timing.get(pl.timing), R.weight.timing);
+  if (pl.pressure) push(R.pressure.get(pl.pressure), R.weight.pressure);
+  const pk = platformKey(pl);
+  if (pk) push(R.platform.get(pk), R.weight.platform);
+  if (pl.pressure_handling) push(R.handling.get(pl.pressure_handling), R.weight.handling);
+  if (pl.route_type) push(R.route.get(pl.route_type), R.weight.route);
+  if (!pairs.length) return null;
+  let wsum = 0;
+  for (const [, w] of pairs) wsum += w;
+  if (wsum > 0) {
+    let num = 0;
+    for (const [r, w] of pairs) num += r * w;
+    return num / wsum;
+  }
+  // Degenerate: no dimension discriminates — fall back to an equal-weight mean.
+  let s = 0;
+  for (const [r] of pairs) s += r;
+  return s / pairs.length;
+}
+
+// Weighted expected throw value for one dimension AND the QB's actual throw
+// value over the same subset of plays (those where the dimension is filled and
+// the league has a matching bucket). Comparing actual to expected on the same
+// subset keeps the per-dim rows honest — pressure_handling, say, is only logged
+// on pressured throws, so comparing all-throw value against a pressured-only
+// baseline biases the row positive league-wide.
 function expectedFor<K extends string>(
   ratedPasses: QBPlay[],
   bucketFn: (pl: QBPlay) => K | null | undefined,
-  league: Bucketed<K>,
+  rates: Map<K, number>,
   buckets: readonly K[],
 ): { expected: number | null; actual: number | null; n: number } {
   const total = ratedPasses.length;
@@ -227,27 +356,27 @@ function expectedFor<K extends string>(
   let exp = 0;
   let weight = 0;
   let filled = 0;
-  let filledOnTgt = 0;
+  let filledVal = 0;
   for (const b of buckets) {
     const inBucket = ratedPasses.filter((pl) => bucketFn(pl) === b);
     const n = inBucket.length;
-    const lg = league[b];
-    if (n > 0 && lg && lg.n > 0) {
+    const r = rates.get(b);
+    if (n > 0 && r != null) {
       const share = n / total;
-      exp += share * (lg.ot / lg.n);
+      exp += share * r;
       weight += share;
       filled += n;
-      filledOnTgt += inBucket.filter((pl) => pl.accuracy === "on_target").length;
+      for (const pl of inBucket) filledVal += throwValue(pl);
     }
   }
   return {
     expected: weight > 0 ? exp / weight : null,
-    actual: filled > 0 ? filledOnTgt / filled : null,
+    actual: filled > 0 ? filledVal / filled : null,
     n: filled,
   };
 }
 
-// Per-dimension AAE row: actual on-target% minus the dimension's expected,
+// Per-dimension AAE row: actual throw value minus the dimension's expected,
 // in percentage points. `n` is how many of the QB's rated passes had this
 // dimension filled (a sample-size signal for the UI).
 export interface QBAAEDimRow {
@@ -259,51 +388,52 @@ export interface QBAAEDimRow {
 
 export interface QBAAEBreakdown {
   ratedPasses: number;        // total graded throws (denominator of actual on-target%)
-  actualOnTgtPct: number | null;
-  total: number | null;       // overall AAE — actual on-target% minus mean per-play expected
+  actualOnTgtPct: number | null;  // literal on-target% — display only, not the AAE basis
+  total: number | null;       // overall AAE — actual throw value minus mean per-play expected
   dims: QBAAEDimRow[];
 }
 
-function breakdownFor(ratedPasses: QBPlay[], baselines: QBBaselines): QBAAEBreakdown {
+function breakdownFor(ratedPasses: QBPlay[], R: ResolvedBaselines): QBAAEBreakdown {
   const denom = ratedPasses.length;
   if (!denom) {
     return { ratedPasses: 0, actualOnTgtPct: null, total: null, dims: [] };
   }
-  const actual = ratedPasses.filter((pl) => pl.accuracy === "on_target").length / denom;
+  // Literal on-target% kept for display only — the AAE math below runs on graded
+  // throw value, not this binary rate.
+  const onTgt = ratedPasses.filter((pl) => pl.accuracy === "on_target").length / denom;
 
   const rows: QBAAEDimRow[] = [
-    { key: "depth",    label: "Depth Zone",        ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.depth_zone,        baselines.depth,    QB_DEPTH_ZONES)) },
-    { key: "coverage", label: "Coverage",          ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.coverage === "man" || pl.coverage === "zone" ? pl.coverage : null, baselines.cvg, ["man", "zone"] as const)) },
-    { key: "timing",   label: "Timing",            ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.timing,            baselines.timing,   QB_TIMING_BUCKETS)) },
-    { key: "pressure", label: "Pressure",          ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.pressure,          baselines.pressure, QB_PRESSURE_BUCKETS)) },
-    { key: "platform", label: "Platform",          ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.platform,          baselines.platform, QB_PLATFORM_BUCKETS)) },
-    // Pressure Handling has no standalone AAE row by design — it's folded into
-    // the Pressure cluster. pressure_handling still feeds the overall AAE total
-    // via expectedForPlay; see the baselines.handling push there.
-    { key: "route",    label: "Route Type",        ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.route_type,        baselines.route,    ROUTE_TYPES)) },
+    { key: "depth",    label: "Depth Zone",        ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.depth_zone,        R.depth,    QB_DEPTH_ZONES)) },
+    { key: "coverage", label: "Coverage",          ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.coverage === "man" || pl.coverage === "zone" ? pl.coverage : null, R.cvg, ["man", "zone"] as const)) },
+    { key: "timing",   label: "Timing",            ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.timing,            R.timing,   QB_TIMING_BUCKETS)) },
+    { key: "pressure", label: "Pressure",          ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.pressure,          R.pressure, QB_PRESSURE_BUCKETS)) },
+    { key: "platform", label: "Platform",          ...toAaeRow(expectedFor(ratedPasses, platformKey,                  R.platform, QB_PLATFORM_KEYS)) },
+    // Pressure Handling has no standalone AAE row by design — it still feeds the
+    // overall AAE total via expectedForPlay (R.handling).
+    { key: "route",    label: "Route Type",        ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.route_type,        R.route,    ROUTE_TYPES)) },
   ];
 
-  // Overall AAE: per-play expected vs. actual on-target% on the same play
+  // Overall AAE: per-play expected vs. actual throw value on the same play
   // subset. This is intentionally NOT the mean of the per-dim AAEs above —
   // averaging correlated dim AAEs double-counts skill (e.g. broken-pocket
   // throws penalize all four pressure-cluster dims). See expectedForPlay.
   let sumExpected = 0;
-  let sumOnTgt = 0;
+  let sumActual = 0;
   let nContrib = 0;
   for (const pl of ratedPasses) {
-    const exp = expectedForPlay(pl, baselines);
+    const exp = expectedForPlay(pl, R);
     if (exp == null) continue;
     sumExpected += exp;
-    if (pl.accuracy === "on_target") sumOnTgt++;
+    sumActual += throwValue(pl);
     nContrib++;
   }
   const total = nContrib > 0
-    ? parseFloat((((sumOnTgt - sumExpected) / nContrib) * 100).toFixed(2))
+    ? parseFloat((((sumActual - sumExpected) / nContrib) * 100).toFixed(2))
     : null;
 
   return {
     ratedPasses: denom,
-    actualOnTgtPct: parseFloat((actual * 100).toFixed(2)),
+    actualOnTgtPct: parseFloat((onTgt * 100).toFixed(2)),
     total,
     dims: rows,
   };
@@ -326,13 +456,13 @@ export function computeQBAboveExpected(
   const out = new Map<string, number | null>();
   const gameToProspect = buildGameToProspect(games);
   const playsByProspect = buildPlaysByProspect(qbPlays, gameToProspect);
-  const baselines = buildQBBaselines(qbPlays);
+  const R = resolveBaselines(buildQBBaselines(qbPlays));
 
   for (const p of prospects) {
     if (p.position !== "QB") continue;
     const ratedPasses = (playsByProspect.get(p.id) ?? []).filter(isQBGradedThrow);
     if (ratedPasses.length < QB_MIN_SAMPLE) { out.set(p.id, null); continue; }
-    out.set(p.id, breakdownFor(ratedPasses, baselines).total);
+    out.set(p.id, breakdownFor(ratedPasses, R).total);
   }
 
   return out;
@@ -346,9 +476,9 @@ export function computeQBAAEBreakdown(
   prospectPlays: QBPlay[],
   leaguePlays: QBPlay[],
 ): QBAAEBreakdown {
-  const baselines = buildQBBaselines(leaguePlays);
+  const R = resolveBaselines(buildQBBaselines(leaguePlays));
   const ratedPasses = prospectPlays.filter(isQBGradedThrow);
-  return breakdownFor(ratedPasses, baselines);
+  return breakdownFor(ratedPasses, R);
 }
 
 // Bulk variant — builds baselines once and produces per-prospect breakdowns
@@ -364,13 +494,13 @@ export function computeQBAAEBreakdownMap(
   const out = new Map<string, QBAAEBreakdown>();
   const gameToProspect = buildGameToProspect(games);
   const playsByProspect = buildPlaysByProspect(qbPlays, gameToProspect);
-  const baselines = buildQBBaselines(qbPlays);
+  const R = resolveBaselines(buildQBBaselines(qbPlays));
 
   for (const p of prospects) {
     if (p.position !== "QB") continue;
     const ratedPasses = (playsByProspect.get(p.id) ?? []).filter(isQBGradedThrow);
     if (ratedPasses.length < QB_MIN_SAMPLE) continue;
-    out.set(p.id, breakdownFor(ratedPasses, baselines));
+    out.set(p.id, breakdownFor(ratedPasses, R));
   }
 
   return out;
