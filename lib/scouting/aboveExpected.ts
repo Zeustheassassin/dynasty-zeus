@@ -17,7 +17,6 @@ import type {
   ScoutingGame,
   RBPlay,
   QBPlay,
-  QBAccuracy,
   TEPlay,
   RBFormation,
   RBRunType,
@@ -77,34 +76,27 @@ const QB_MIN_SAMPLE = 25;
 const SHRINK_K = 10;
 
 // #3-modified — graded "throw value" replacing the old binary on-target flag.
-// A throw is graded primarily on PLACEMENT severity — the same green/orange/red
-// accuracy grade charted in qbConstants — independent of whether it was caught.
-// The catch is mostly the receiver's doing, so basing the QB metric on it would
-// reward a passer for having elite receivers and punish a pinpoint one who
-// simply doesn't throw catchable misses. A small CATCH_BONUS layers on top so a
-// functional, caught miss still edges an identical dropped one.
+// An on_target throw is a perfect 1.0 (caught or dropped — placement is the
+// QB's, the catch is the receiver's). Every OFF-target grade scores the same,
+// regardless of severity: high / low / in_front / behind all = MISS_BASE. The
+// metric is on-target vs not, not a ranking of miss types. A small CATCH_BONUS
+// layers on so a functional, caught miss edges an identical dropped one ("not as
+// bad as his accuracy looks") without letting catchable inaccuracy out-score a
+// pinpoint passer.
 //
-//   on_target          → 1.00  (a perfect throw; never docked for a drop)
-//   in_front / behind  → 0.45  (near-miss / orange)  + CATCH_BONUS if caught
-//   high / low         → 0.15  (errant / red)        + CATCH_BONUS if caught
+//   on_target            → 1.00
+//   any miss, caught     → MISS_BASE + CATCH_BONUS  (0.30)
+//   any miss, not caught → MISS_BASE                (0.20)
 //
 // All values are tunable. Both the QB's actual value and every league baseline
-// are computed on this same scale. tipped_ball / null accuracy never reach here
+// are computed on this scale. tipped_ball / null accuracy never reach here
 // (filtered out by isQBGradedThrow).
-const PLACEMENT_VALUE: Record<QBAccuracy, number> = {
-  on_target: 1,
-  in_front: 0.45,
-  behind: 0.45,
-  high: 0.15,
-  low: 0.15,
-  tipped_ball: 0, // excluded upstream; present only to satisfy the Record
-};
+const MISS_BASE = 0.2;
 const CATCH_BONUS = 0.1;
 function throwValue(pl: QBPlay): number {
-  if (pl.accuracy == null) return 0;             // not reached — filtered upstream
-  const base = PLACEMENT_VALUE[pl.accuracy];
-  if (pl.accuracy === "on_target") return base;  // a perfect throw is 1.0, caught or not
-  return pl.completion === "caught" ? base + CATCH_BONUS : base;
+  if (pl.accuracy === "on_target") return 1;
+  if (pl.accuracy == null) return 0;  // not reached — filtered upstream
+  return pl.completion === "caught" ? MISS_BASE + CATCH_BONUS : MISS_BASE;
 }
 
 function combine(a: number | null, b: number | null): number | null {
