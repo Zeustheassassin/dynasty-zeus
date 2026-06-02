@@ -11,6 +11,7 @@ import {
 import { finderPickKey } from "./finderUtils";
 import type { TradeResult } from "./finderTypes";
 import { ordinalSuffix, buildTradeFingerprint } from "./shared";
+import { computeFinderStarDiscounts } from "./calculatorUtils";
 
 interface TradeCardProps {
   trade: TradeResult;
@@ -154,45 +155,11 @@ export default function TradeCard({
   const cardOppDropCost = cardMyNetPlayerGain < 0
     ? calcDropCost(trade.oppRosterId, -cardMyNetPlayerGain)
     : 0;
-  const cardStarDiscounts = (() => {
-    const allGiveVals = [...trade.give.map((p) => p.value), ...trade.givePicks.map((p) => p.value)];
-    const allRecvVals = [...trade.receive.map((p) => p.value), ...trade.receivePicks.map((p) => p.value)];
-    if (allGiveVals.length === 0 || allRecvVals.length === 0) return { onReceive: 0, onGive: 0 };
-    const globalTop = Math.max(...allGiveVals, ...allRecvVals);
-    const pickParams = (picks: Array<{ round: number | string; value: number }>): { threshold: number; maxPct: number } => {
-      if (picks.length === 0) return { threshold: 0.78, maxPct: 0.12 };
-      const best = Math.min(...picks.map((p) => Number(p.round)));
-      if (best === 1) {
-        const bestVal = Math.max(...picks.filter((p) => Number(p.round) === 1).map((p) => p.value));
-        if (bestVal >= globalTop * 0.97) return { threshold: 0.78, maxPct: 0.12 };
-        return { threshold: 0.78, maxPct: 0.0125 };
-      }
-      if (best === 2) return { threshold: 0.83, maxPct: 0.09 };
-      if (best === 3) return { threshold: 0.87, maxPct: 0.14 };
-      return              { threshold: 0.91, maxPct: 0.20 };
-    };
-    const recvParams = pickParams(trade.receivePicks);
-    const giveParams = pickParams(trade.givePicks);
-    const giveSorted = [...allGiveVals].sort((a, b) => b - a);
-    const recvSorted = [...allRecvVals].sort((a, b) => b - a);
-    let onReceive = 0;
-    let onGive = 0;
-    const pairs = Math.min(giveSorted.length, recvSorted.length);
-    for (let i = 0; i < pairs; i++) {
-      const gv = giveSorted[i];
-      const rv = recvSorted[i];
-      if (gv > rv && gv >= 2000) {
-        const ratio = rv / gv;
-        if (ratio < recvParams.threshold)
-          onReceive -= Math.round(Math.min((recvParams.threshold - ratio) / 0.25, 1.0) * gv * recvParams.maxPct);
-      } else if (rv > gv && rv >= 2000) {
-        const ratio = gv / rv;
-        if (ratio < giveParams.threshold)
-          onGive -= Math.round(Math.min((giveParams.threshold - ratio) / 0.25, 1.0) * rv * giveParams.maxPct);
-      }
-    }
-    return { onReceive, onGive };
-  })();
+  // Single source of truth (shared with FinderResults' sort key) so the
+  // displayed net and the list ordering can never disagree.
+  const cardStarDiscounts = computeFinderStarDiscounts(
+    trade.give, trade.receive, trade.givePicks, trade.receivePicks,
+  );
   const cardStarOnReceive = cardStarDiscounts.onReceive;
   const cardStarOnGive    = cardStarDiscounts.onGive;
   const giveTotalAdj    = giveTotal    + cardMyDropCost  + cardStarOnGive;

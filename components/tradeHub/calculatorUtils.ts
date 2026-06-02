@@ -69,6 +69,31 @@ export function computeStarDiscounts(
   return { onReceive, onGive };
 }
 
+// Adapter so the Trade Finder's sort key (FinderResults) and the card's
+// displayed net (TradeCard) derive star discounts from the SAME canonical
+// computeStarDiscounts call. They previously used divergent inline copies and
+// disagreed — the list sorted by a different net than each card displayed.
+// computeStarDiscounts expects "season-round-rosterId" pick-key strings + a
+// getPickValue lookup; the finder has pick OBJECTS, so we synthesize globally
+// unique, side-prefixed keys (round in split("-")[1], matching
+// Math.floor(Number(k.split("-")[1]))) with a matching value lookup.
+export function computeFinderStarDiscounts(
+  give: { value: number }[],
+  receive: { value: number }[],
+  givePicks: { round: number | string; value: number }[],
+  receivePicks: { round: number | string; value: number }[],
+): { onReceive: number; onGive: number } {
+  const allGiveVals = [...give.map((p) => p.value), ...givePicks.map((p) => p.value)];
+  const allRecvVals = [...receive.map((p) => p.value), ...receivePicks.map((p) => p.value)];
+  const giveKeys = givePicks.map((p, i) => `0-${Number(p.round)}-g${i}`);
+  const recvKeys = receivePicks.map((p, i) => `0-${Number(p.round)}-r${i}`);
+  const valByKey = new Map<string, number>();
+  givePicks.forEach((p, i) => valByKey.set(`0-${Number(p.round)}-g${i}`, p.value));
+  receivePicks.forEach((p, i) => valByKey.set(`0-${Number(p.round)}-r${i}`, p.value));
+  const getPickValue = (k: string) => valByKey.get(k) ?? 0;
+  return computeStarDiscounts(allGiveVals, allRecvVals, giveKeys, recvKeys, getPickValue);
+}
+
 export function computePosTotals(
   playerIds: string[],
   players: Record<string, SleeperPlayer>,

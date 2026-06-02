@@ -3,6 +3,7 @@ import type { SleeperRoster, SleeperPlayer } from "@/lib/types";
 import {
   computeRosterDropCost,
   computeStarDiscounts,
+  computeFinderStarDiscounts,
   computePosTotals,
   computeLeagueRank,
 } from "@/components/tradeHub/calculatorUtils";
@@ -91,6 +92,59 @@ describe("computeStarDiscounts", () => {
     const { onReceive, onGive } = computeStarDiscounts([3000], [2500], [], [], noPickValue);
     expect(onReceive).toBe(0);
     expect(onGive).toBe(0);
+  });
+});
+
+// ── computeFinderStarDiscounts ───────────────────────────────────────
+// The finder adapter must delegate to computeStarDiscounts with non-colliding,
+// side-prefixed keys so the 1st-round "near global top" branch (0.12 maxPct) is
+// honoured — this is the path FinderResults' old inline copy got wrong (it used
+// a flat 0.0125), making the sort net disagree with the displayed card net.
+
+describe("computeFinderStarDiscounts", () => {
+  it("matches the canonical no-pick result (delegates correctly)", () => {
+    expect(
+      computeFinderStarDiscounts([{ value: 4000 }], [{ value: 1000 }], [], []),
+    ).toEqual({ onReceive: -480, onGive: 0 });
+  });
+
+  it("applies the 0.12 maxPct when a RECEIVED 1st is near the global top (not 0.0125)", () => {
+    // recv 1st = 5900 ≥ globalTop(6000)*0.97 → params {0.78, 0.12}.
+    // Penalised pairing: give star 6000 vs recv 1000 → ratio 0.167.
+    // discount = 1 * 6000 * 0.12 = 720 (old flat-0.0125 path would give 75).
+    const { onReceive, onGive } = computeFinderStarDiscounts(
+      [{ value: 6000 }, { value: 6000 }],
+      [{ value: 1000 }],
+      [],
+      [{ round: 1, value: 5900 }],
+    );
+    expect(onReceive).toBe(-720);
+    expect(onGive).toBe(0);
+  });
+
+  it("applies the 0.12 maxPct when a GIVEN 1st is near the global top", () => {
+    const { onReceive, onGive } = computeFinderStarDiscounts(
+      [{ value: 1000 }],
+      [{ value: 6000 }, { value: 6000 }],
+      [{ round: 1, value: 5900 }],
+      [],
+    );
+    expect(onReceive).toBe(0);
+    expect(onGive).toBe(-720);
+  });
+
+  it("values give/receive 1st-round picks from their own side (no key collision)", () => {
+    // Both sides hold a round-1 pick (give 6000, receive 500). The penalised
+    // pairing is give-star 6000 vs receive 1000, so recvParams (recv 1st = 500,
+    // below near-top → 0.0125) drives it: 1 * 6000 * 0.0125 = 75. A per-side
+    // index collision that let the receive pick read the give pick's 6000 would
+    // not change this pairing's params, but distinct keys keep each side honest.
+    expect(
+      computeFinderStarDiscounts(
+        [{ value: 1000 }], [{ value: 1000 }],
+        [{ round: 1, value: 6000 }], [{ round: 1, value: 500 }],
+      ),
+    ).toEqual({ onReceive: -75, onGive: 0 });
   });
 });
 

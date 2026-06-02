@@ -6,6 +6,7 @@ import type { TradeResult } from "./finderTypes";
 import type { PlayerWithValue } from "./shared";
 import { buildTradeFingerprint } from "./shared";
 import { finderPickKey } from "./finderUtils";
+import { computeFinderStarDiscounts } from "./calculatorUtils";
 import TradeCard from "./TradeCard";
 
 interface FinderResultsProps {
@@ -92,36 +93,17 @@ export default function FinderResults({
       const rVals = [...trade.receive.map((p) => p.value), ...trade.receivePicks.map((p) => p.value)];
       const gSum  = gVals.reduce((s, v) => s + v, 0);
       const rSum  = rVals.reduce((s, v) => s + v, 0);
-      const approxPickParams = (picks: { round?: number | string }[]): { thr: number; pct: number } => {
-        if (picks.length === 0) return { thr: 0.78, pct: 0.12 };
-        const rd = Math.min(...picks.map((p) => Number(p.round)));
-        if (rd === 1) return { thr: 0.78, pct: 0.0125 };
-        if (rd === 2) return { thr: 0.83, pct: 0.09 };
-        if (rd === 3) return { thr: 0.87, pct: 0.14 };
-        return             { thr: 0.91, pct: 0.20 };
-      };
-      const rp = approxPickParams(trade.receivePicks);
-      const gp = approxPickParams(trade.givePicks);
-      const gSorted = [...gVals].sort((a, b) => b - a);
-      const rSorted = [...rVals].sort((a, b) => b - a);
-      let starOnReceive = 0;
-      let starOnGive = 0;
-      const approxPairs = Math.min(gSorted.length, rSorted.length);
-      for (let i = 0; i < approxPairs; i++) {
-        const gv = gSorted[i];
-        const rv = rSorted[i];
-        if (gv > rv && gv >= 2000) {
-          const ratio = rv / gv;
-          if (ratio < rp.thr) starOnReceive -= Math.round(Math.min((rp.thr - ratio) / 0.25, 1) * gv * rp.pct);
-        } else if (rv > gv && rv >= 2000) {
-          const ratio = gv / rv;
-          if (ratio < gp.thr) starOnGive -= Math.round(Math.min((gp.thr - ratio) / 0.25, 1) * rv * gp.pct);
-        }
-      }
+      // Same canonical star-discount call TradeCard uses for its displayed net,
+      // so the sort key below can't drift from the badge on each card.
+      const { onReceive: starOnReceive, onGive: starOnGive } = computeFinderStarDiscounts(
+        trade.give, trade.receive, trade.givePicks, trade.receivePicks,
+      );
       const approxNetPlayerGain = trade.receive.length - trade.give.length;
       const approxMyDropCost  = approxNetPlayerGain > 0 ? calcDropCost(myRoster?.roster_id ?? 0, approxNetPlayerGain) : 0;
       const approxOppDropCost = approxNetPlayerGain < 0 ? calcDropCost(trade.oppRosterId, -approxNetPlayerGain) : 0;
-      const approxBadge = (rSum + approxOppDropCost + starOnReceive) - (gSum + approxMyDropCost + starOnGive);
+      // Mirror TradeCard.adjustedCardNet exactly — incl. the Math.max(0,...)
+      // receive clamp — so the list sorts by the same net each card displays.
+      const approxBadge = Math.max(0, rSum + approxOppDropCost + starOnReceive) - (gSum + approxMyDropCost + starOnGive);
       return { trade, approxBadge };
     })
     .sort((a, b) => Math.abs(a.approxBadge) - Math.abs(b.approxBadge));
