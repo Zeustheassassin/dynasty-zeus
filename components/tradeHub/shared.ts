@@ -3,8 +3,9 @@ import type { SleeperPlayer, AugmentedPick } from "../../lib/types";
 export type PlayerWithValue = SleeperPlayer & { value: number };
 export type PickWithValue = AugmentedPick & { value: number };
 
-export const BASE_YEAR_TH = new Date().getFullYear();
-export const YEARS = Array.from({ length: 3 }, (_, i) => String(BASE_YEAR_TH + i));
+// Re-export the NFL-season-year window from the single source of truth so the
+// trade hub can't drift from the corrected (March, not Jan-1) season rollover.
+export { YEARS } from "../../lib/helpers/season";
 
 export const buildTradeFingerprint = (
   leagueId: string,

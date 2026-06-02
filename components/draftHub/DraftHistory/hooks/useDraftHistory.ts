@@ -6,7 +6,7 @@ import { usePlayers } from "../../../../lib/PlayersContext";
 import { useAuth } from "../../../../lib/AuthContext";
 import { useLeague } from "../../../../lib/LeagueContext";
 import { useValues } from "../../../../lib/ValuesContext";
-import { CURRENT_YEAR as ROOKIE_YEAR, ROOKIE_DRAFT_MAX_ROUNDS } from "../../../../lib/helpers";
+import { BASE_YEAR, ROOKIE_DRAFT_MAX_ROUNDS } from "../../../../lib/helpers";
 import { toPickSlot } from "../../shared";
 import type { SleeperLeague, SleeperUser } from "../../../../lib/types";
 import type {
@@ -16,6 +16,9 @@ import type {
 import { getLocalStorageItem, setLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 
 const log = logger("components/draftHub/DraftHistory");
+
+// Rookie-draft class year tracks the CALENDAR (upcoming class), not the NFL season.
+const ROOKIE_YEAR = String(BASE_YEAR);
 
 type ConsensusMeta = Record<string, {
   draftCount: number;

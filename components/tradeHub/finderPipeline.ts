@@ -1,4 +1,4 @@
-import { CURRENT_YEAR } from "../../lib/helpers";
+import { getSeasonYear } from "../../lib/helpers";
 import type {
   SleeperRoster, SleeperPlayer, SleeperUser, SleeperLeague,
   AugmentedPick, TradeAttempt, LeagueMateView, TradePartnerRanking,
@@ -682,7 +682,7 @@ export function runFinderPipeline(
 
       const futurePickBonus = (() => {
         if (!finderPreferFuturePicks || r.receivePicks.length === 0) return 0;
-        const currentYear = Number(CURRENT_YEAR);
+        const currentYear = Number(getSeasonYear(nflState));
         return r.receivePicks.reduce((s: number, p) => {
           const yr = Number(p.season);
           if (yr === currentYear) return s - 4;
@@ -1122,7 +1122,7 @@ export function runFinderPipeline(
         rcb += totalReduction * 15 * urgency;
         if (r.givePicks.length >= 2 && r.receive.length <= 1) rcb += 20 * urgency;
         if (r.give.length >= 2 && r.receive.length === 1)      rcb += 15 * urgency;
-        const currentYearN = Number(CURRENT_YEAR);
+        const currentYearN = Number(getSeasonYear(nflState));
         const givesCurrent  = r.givePicks.some((p) => Number(p.season) === currentYearN);
         const receivesFuture = r.receivePicks.some((p) => Number(p.season) > currentYearN);
         if (givesCurrent && receivesFuture) rcb += 12 * urgency;

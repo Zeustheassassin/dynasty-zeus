@@ -5,9 +5,12 @@ import {
   isSnakeDraft,
   getDraftRoundSlot,
 } from "@/lib/helpers/picks";
+import { CURRENT_YEAR } from "@/lib/helpers/season";
 
-const CY = String(new Date().getFullYear());
-const NY = String(new Date().getFullYear() + 1);
+// Fixtures use the same NFL-season-year source the code compares against, so
+// "current-year" assertions hold year-round (incl. the Jan/Feb rollover window).
+const CY = CURRENT_YEAR;
+const NY = String(Number(CURRENT_YEAR) + 1);
 
 // ── getPickValueKey ──────────────────────────────────────────────────
 

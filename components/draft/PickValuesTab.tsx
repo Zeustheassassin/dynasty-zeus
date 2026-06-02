@@ -3,7 +3,9 @@
 // Displays a grid of rookie draft pick values for the current season.
 // Highlights any picks owned by the current user.
 import type { SleeperDraft, AugmentedPick } from "../../lib/types";
-import { CURRENT_YEAR as ROOKIE_YEAR } from "../../lib/helpers";
+import { BASE_YEAR } from "../../lib/helpers";
+// Rookie-draft class year tracks the CALENDAR (upcoming class), not the NFL season.
+const ROOKIE_YEAR = String(BASE_YEAR);
 const ROUNDS = Array.from({ length: 6 }, (_, i) => i + 1);
 
 interface PickValuesTabProps {

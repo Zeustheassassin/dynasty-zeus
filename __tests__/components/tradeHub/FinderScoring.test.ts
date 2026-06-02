@@ -16,9 +16,12 @@ import {
   computeTeamWindow,
   getPickSlotBonus,
 } from "@/components/tradeHub/FinderScoring";
+import { CURRENT_YEAR } from "@/lib/helpers/season";
 
-const CY = String(new Date().getFullYear());
-const NY = String(new Date().getFullYear() + 1);
+// Fixtures use the same NFL-season-year source the code compares against, so
+// "current-year" assertions hold year-round (incl. the Jan/Feb rollover window).
+const CY = CURRENT_YEAR;
+const NY = String(Number(CURRENT_YEAR) + 1);
 
 const p = (position: string, age: number | null, value = 0) =>
   ({ position, age, value }) as unknown as PlayerWithValue;

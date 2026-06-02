@@ -7,6 +7,7 @@ import {
 } from "@/lib/helpers/direction/roster";
 import type { RosterDirectionProfile } from "@/lib/types";
 import type { StrategicBucket } from "@/lib/types";
+import { CURRENT_YEAR } from "@/lib/helpers/season";
 
 // ── helpers ─────────────────────────────────────────────────────────
 
@@ -156,8 +157,8 @@ describe("getRosterDirectionProfile", () => {
   });
 
   it("counts future firsts correctly from ownedPicks", () => {
-    const currentYear = String(new Date().getFullYear());
-    const nextYear = String(new Date().getFullYear() + 1);
+    const currentYear = CURRENT_YEAR;
+    const nextYear = String(Number(CURRENT_YEAR) + 1);
     const rosters = [makeRoster(1), makeRoster(2)];
     const picks = [
       { season: currentYear, round: 1, owner_id: 1, slot: "1.07" },
@@ -178,7 +179,7 @@ describe("getRosterDirectionProfile", () => {
   });
 
   it("identifies premium current firsts (picks 1-6)", () => {
-    const currentYear = String(new Date().getFullYear());
+    const currentYear = CURRENT_YEAR;
     const rosters = [makeRoster(1), makeRoster(2)];
     const picks = [
       { season: currentYear, round: 1, owner_id: 1, slot: `${currentYear}.03` },

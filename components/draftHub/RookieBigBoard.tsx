@@ -4,7 +4,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { supabase } from "../../lib/supabaseclient";
 import { logger } from "../../lib/logger";
-import { CURRENT_YEAR as ROOKIE_YEAR } from "../../lib/helpers";
+import { BASE_YEAR } from "../../lib/helpers";
 import { useAuth } from "../../lib/AuthContext";
 import { useValues } from "../../lib/ValuesContext";
 import type { RookieBoardPlayer } from "../../lib/types";
@@ -12,6 +12,9 @@ import { posBadge, rookieKey, fuzzyFcLookup, normalizeRookieName } from "./share
 import { getLocalStorageItem, setLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 
 const log = logger("components/draftHub/RookieBigBoard");
+
+// Rookie-draft class year tracks the CALENDAR (upcoming class), not the NFL season.
+const ROOKIE_YEAR = String(BASE_YEAR);
 
 type NflDraftEntry = { team: string; round: number | null; pick: number | null };
 

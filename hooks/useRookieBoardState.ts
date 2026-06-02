@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 import { supabase } from "../lib/supabaseclient";
-import { CURRENT_YEAR, normalizeRookieName } from "../lib/helpers";
+import { BASE_YEAR, normalizeRookieName } from "../lib/helpers";
 import { FANTASYCALC_BASE_URL } from "../lib/constants";
 import { logger } from "../lib/logger";
 import { sleeperApi } from "../lib/sleeperApi";
@@ -11,7 +11,9 @@ import type { RookieBoardPlayer } from "../lib/types";
 const log = logger("hooks/useRookieBoardState");
 
 // ── Constants (exported so page.tsx logout handler can clear the right keys) ──
-export const ROOKIE_YEAR = CURRENT_YEAR;
+// The rookie-draft class year tracks the CALENDAR (the upcoming/active draft
+// class, which rolls Jan 1) — NOT the NFL season year (which holds in Jan/Feb).
+export const ROOKIE_YEAR = String(BASE_YEAR);
 export const ROOKIE_BOARD_POSITIONS = new Set(["QB", "RB", "WR", "TE"]);
 export const ROOKIE_BOARD_VERSION = `${ROOKIE_YEAR}_sf_v5`;
 export const ROOKIE_BOARD_RESET_KEY = `rookieBoardReset_${ROOKIE_BOARD_VERSION}`;

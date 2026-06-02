@@ -1,17 +1,47 @@
 // ============================================================
 // Season / year / round constants.
-// Single source of truth for the current NFL season year and
-// the rolling pick-round list used across draft-related views.
+// Single source of truth for two RELATED-BUT-DISTINCT year concepts:
+//   • BASE_YEAR  — the raw CALENDAR year (rolls over Jan 1). Anchors the
+//     rookie-draft class year (ROOKIE_YEAR) and the class-/film-year
+//     dropdowns, which are forward-looking (the upcoming draft class), so
+//     they track the calendar — NOT the NFL season.
+//   • CURRENT_YEAR / YEARS — the NFL SEASON year. Unlike the calendar, the
+//     NFL season year does NOT advance on Jan 1: January and February still
+//     belong to the just-ended season (Super Bowl + the offseason run-up to
+//     the new league year in ~March). Drives league lookups, pick-year
+//     windows, and trade-finder pick classification. Where Sleeper's live
+//     /state/nfl is available, prefer getSeasonYear(nflState) for the
+//     authoritative value at the exact rollover edge.
 // ============================================================
 
-/** Current calendar year as a number (e.g. 2026). */
+/** Current CALENDAR year as a number (e.g. 2026). Rolls over Jan 1. */
 export const BASE_YEAR = new Date().getFullYear();
 
-/** The current NFL season year as a string (e.g. "2026") */
-export const CURRENT_YEAR = String(BASE_YEAR);
+/** The NFL season year for a given date. Jan/Feb count as the PRIOR season
+ *  year (the just-completed season), so the value rolls over in ~March rather
+ *  than on Jan 1. Exported so it can be unit-tested with injected dates. */
+export function calendarSeasonYear(d = new Date()): number {
+  const y = d.getFullYear();
+  // getMonth() is 0-indexed: Jan(0)/Feb(1) belong to the previous NFL season.
+  return d.getMonth() <= 1 ? y - 1 : y;
+}
 
-/** Three-year window starting from the current year (e.g. ["2026","2027","2028"]) */
-export const YEARS = Array.from({ length: 3 }, (_, i) => String(BASE_YEAR + i));
+/** The current NFL season year as a string (e.g. "2026"). See module header. */
+export const CURRENT_YEAR = String(calendarSeasonYear());
+
+/** Prefer Sleeper's authoritative season from /state/nfl when present; fall
+ *  back to the calendar-derived CURRENT_YEAR (correct except possibly at the
+ *  exact season-rollover edge, which only the live nflState can pin down). */
+export function getSeasonYear(
+  nflState?: { season?: string | null } | null,
+): string {
+  const s = nflState?.season;
+  return s && /^\d{4}$/.test(String(s)) ? String(s) : CURRENT_YEAR;
+}
+
+/** Three-year NFL-season-year window starting from the current season year
+ *  (e.g. ["2026","2027","2028"]). */
+export const YEARS = Array.from({ length: 3 }, (_, i) => String(Number(CURRENT_YEAR) + i));
 
 /** Standard four-round rookie draft round list. The board trims this to
  *  the league's actual round count at render time via draftSettings. */

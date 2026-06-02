@@ -4,7 +4,7 @@ import { supabase } from "../../lib/supabaseclient";
 import { usePlayers } from "../../lib/PlayersContext";
 import { useAuth } from "../../lib/AuthContext";
 import { useLeague } from "../../lib/LeagueContext";
-import { CURRENT_YEAR as ROOKIE_YEAR } from "../../lib/helpers";
+import { BASE_YEAR } from "../../lib/helpers";
 import { removeLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 import { logger } from "../../lib/logger";
 import type {
@@ -14,6 +14,9 @@ import type {
 } from "../../lib/types";
 import { posColor, normalizeRookieName } from "./shared";
 import type { GridPick } from "./shared";
+
+// Rookie-draft class year tracks the CALENDAR (upcoming class), not the NFL season.
+const ROOKIE_YEAR = String(BASE_YEAR);
 
 const log = logger("LiveDraftBoard");
 

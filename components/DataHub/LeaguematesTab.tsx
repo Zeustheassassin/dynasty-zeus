@@ -5,8 +5,7 @@ import { sleeperApi } from "../../lib/sleeperApi";
 import type { SleeperLeague, SleeperRoster, SleeperUser, LeagueMateStatEntry } from "../../lib/types";
 import { POS_COLOR } from "./dataHubHelpers";
 import type { ExposureData, FetchedRoster, FetchedUser } from "./dataHubTypes";
-
-const CURRENT_YEAR = String(new Date().getFullYear());
+import { CURRENT_YEAR } from "../../lib/helpers";
 
 interface LeaguematesTabProps {
   leagueMateStats: LeagueMateStatEntry[];
