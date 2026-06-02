@@ -1,5 +1,5 @@
 "use client";
-import { useState, type Dispatch, type SetStateAction } from "react";
+import { useState, useRef, type Dispatch, type SetStateAction } from "react";
 import { CURRENT_YEAR, getDraftRoundSlot } from "../lib/helpers";
 import { logger } from "../lib/logger";
 import { sleeperApi } from "../lib/sleeperApi";
@@ -21,6 +21,8 @@ export interface UseUserTradesReturn {
   tradeHubData: AnnotatedTrade[] | null;
   setTradeHubData: Dispatch<SetStateAction<AnnotatedTrade[] | null>>;
   loadingTradeHub: boolean;
+  /** Non-null when the last load failed — lets the UI distinguish an outage from "no trades". */
+  tradeHubError: string | null;
   loadUserTrades: (targetUserId: string, bypass?: boolean) => Promise<void>;
 }
 
@@ -28,12 +30,17 @@ export function useUserTrades(): UseUserTradesReturn {
   const [tradeHubUserId, setTradeHubUserId] = useState<string | null>(null);
   const [tradeHubData, setTradeHubData] = useState<AnnotatedTrade[] | null>(null);
   const [loadingTradeHub, setLoadingTradeHub] = useState(false);
+  const [tradeHubError, setTradeHubError] = useState<string | null>(null);
+  // Monotonic guard so a slow load for an earlier user can't overwrite a newer one.
+  const requestSeq = useRef(0);
 
   const loadUserTrades = async (targetUserId: string, bypass?: boolean) => {
     setTradeHubUserId(targetUserId);
     // Keep prior data visible on a same-user refresh; only clear when switching users.
     if (!bypass) setTradeHubData(null);
     setLoadingTradeHub(true);
+    setTradeHubError(null);
+    const seq = ++requestSeq.current;
 
     try {
       const allLeagues = await sleeperApi.getUserLeagues(targetUserId, CURRENT_YEAR);
@@ -123,12 +130,16 @@ export function useUserTrades(): UseUserTradesReturn {
         })
       );
 
+      if (seq !== requestSeq.current) return; // a newer load started — discard stale result
       allTrades.sort((a, b) => b.created - a.created);
       setTradeHubData(allTrades.slice(0, 15));
     } catch (err) {
       log.error("trade hub fetch failed", { err: String(err) });
+      if (seq === requestSeq.current) {
+        setTradeHubError("Couldn't load trades. Sleeper may be unavailable — try again.");
+      }
     } finally {
-      setLoadingTradeHub(false);
+      if (seq === requestSeq.current) setLoadingTradeHub(false);
     }
   };
 
@@ -138,6 +149,7 @@ export function useUserTrades(): UseUserTradesReturn {
     tradeHubData,
     setTradeHubData,
     loadingTradeHub,
+    tradeHubError,
     loadUserTrades,
   };
 }

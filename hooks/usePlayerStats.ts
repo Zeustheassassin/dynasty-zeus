@@ -151,9 +151,15 @@ export function usePlayerStats(
     Promise.all(
       uncached.map((w) =>
         fetch(`/api/stats/sleeper-weekly?season=${season}&week=${w}`, { signal })
-          .then((r) => (r.ok ? r.json() : {}))
+          .then((r) => {
+            if (!r.ok) throw new Error(`sleeper-weekly ${r.status}`);
+            return r.json();
+          })
+          // Only cache a SUCCESSFUL response (a legit empty {} for a week with no
+          // data is fine to cache). On failure leave the key unset so the week is
+          // retried on a later run instead of being permanently stuck empty.
           .then((data) => { statsCache[`${season}-${w}`] = data ?? {}; })
-          .catch(() => { statsCache[`${season}-${w}`] = {}; })
+          .catch(() => { /* transient failure — do not cache, allow retry */ })
       )
     ).then(() => {
       if (signal.aborted) return;

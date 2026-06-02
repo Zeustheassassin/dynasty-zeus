@@ -1,5 +1,5 @@
 "use client";
-import { useState, type Dispatch, type SetStateAction } from "react";
+import { useState, useRef, type Dispatch, type SetStateAction } from "react";
 import { CURRENT_YEAR } from "../lib/helpers";
 import { logger } from "../lib/logger";
 import { sleeperApi } from "../lib/sleeperApi";
@@ -16,6 +16,8 @@ export interface UseUserExposureReturn {
   setSelectedUserId: Dispatch<SetStateAction<string | null>>;
   externalShares: ExposureData | null;
   loadingShares: boolean;
+  /** Non-null when the last load failed — lets the UI show an error+retry instead of a blank "no data" panel. */
+  exposureError: string | null;
   loadUserExposure: (userId: string) => Promise<void>;
 }
 
@@ -24,15 +26,22 @@ export function useUserExposure(): UseUserExposureReturn {
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [externalShares, setExternalShares] = useState<ExposureData | null>(null);
   const [loadingShares, setLoadingShares] = useState(false);
+  const [exposureError, setExposureError] = useState<string | null>(null);
+  // Monotonic guard: only the most recent load is allowed to commit, so a slow
+  // load('A') resolving after a later load('B') can't overwrite B's result.
+  const requestSeq = useRef(0);
 
   const loadUserExposure = async (userId: string) => {
     if (userCache[userId]) {
       setExternalShares(userCache[userId]);
       setSelectedUserId(userId);
+      setExposureError(null);
       return;
     }
+    const seq = ++requestSeq.current;
     try {
       setLoadingShares(true);
+      setExposureError(null);
       setSelectedUserId(userId);
 
       const leagues = await sleeperApi.getUserLeagues(userId, CURRENT_YEAR);
@@ -65,12 +74,16 @@ export function useUserExposure(): UseUserExposureReturn {
         }));
 
       const result: ExposureData = { players: topPlayers, leagueCount };
+      if (seq !== requestSeq.current) return; // a newer load started — discard stale result
       setExternalShares(result);
       setUserCache((prev) => ({ ...prev, [userId]: result }));
     } catch (err) {
       log.error("error loading user exposure", { err: String(err) });
+      if (seq === requestSeq.current) {
+        setExposureError("Couldn't load this user's shares. Sleeper may be unavailable — try again.");
+      }
     } finally {
-      setLoadingShares(false);
+      if (seq === requestSeq.current) setLoadingShares(false);
     }
   };
 
@@ -80,6 +93,7 @@ export function useUserExposure(): UseUserExposureReturn {
     setSelectedUserId,
     externalShares,
     loadingShares,
+    exposureError,
     loadUserExposure,
   };
 }

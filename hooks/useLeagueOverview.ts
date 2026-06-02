@@ -21,18 +21,23 @@ export function useLeagueOverview(
   const [leagueOverviewData, setLeagueOverviewData] = useState<Record<string, LeagueOverviewEntry>>({});
   const [loadingLeagueOverview, setLoadingLeagueOverview] = useState(false);
   const [leagueOverviewLoaded, setLeagueOverviewLoaded] = useState(false);
+  const [leagueOverviewError, setLeagueOverviewError] = useState<string | null>(null);
 
   // Stable refs so loadLeagueOverview stays a stable callback
   const leaguesRef = useRef(leagues);
   const userRef = useRef(user);
   useEffect(() => { leaguesRef.current = leagues; }, [leagues]);
   useEffect(() => { userRef.current = user; }, [user]);
+  // Monotonic guard so an earlier in-flight load can't overwrite a newer one.
+  const overviewSeq = useRef(0);
 
   const loadLeagueOverview = useCallback(async () => {
     const currentLeagues = leaguesRef.current;
     const currentUser = userRef.current;
     if (!currentLeagues.length || !currentUser) return;
+    const seq = ++overviewSeq.current;
     setLoadingLeagueOverview(true);
+    setLeagueOverviewError(null);
     try {
       const results = await Promise.all(
         currentLeagues.map(async (league) => {
@@ -130,6 +135,7 @@ export function useLeagueOverview(
         })
       );
 
+      if (seq !== overviewSeq.current) return; // a newer load started — discard stale result
       const byLeague: Record<string, LeagueOverviewEntry> = {};
       results
         .filter((r): r is NonNullable<typeof r> => r !== null)
@@ -138,10 +144,17 @@ export function useLeagueOverview(
         });
       setLeagueOverviewData(byLeague);
       setLeagueOverviewLoaded(true);
+      // If every league failed (empty result on a non-empty league list), surface an error.
+      if (Object.keys(byLeague).length === 0 && currentLeagues.length > 0) {
+        setLeagueOverviewError("Couldn't load league data. Sleeper may be unavailable — try again.");
+      }
     } catch (err) {
       log.error("loadLeagueOverview failed", { err: String(err) });
+      if (seq === overviewSeq.current) {
+        setLeagueOverviewError("Couldn't load league data. Sleeper may be unavailable — try again.");
+      }
     } finally {
-      setLoadingLeagueOverview(false);
+      if (seq === overviewSeq.current) setLoadingLeagueOverview(false);
     }
   }, []);
 
@@ -149,6 +162,7 @@ export function useLeagueOverview(
     leagueOverviewData,
     loadingLeagueOverview,
     leagueOverviewLoaded,
+    leagueOverviewError,
     loadLeagueOverview,
   };
 }
