@@ -14,6 +14,7 @@ import type {
   SimulationTeamRow,
   SleeperPlayer,
 } from "../lib/types";
+import type { MainTab } from "../lib/hubs";
 import { LEAGUE_HUB_GROUPS } from "../lib/leagueHubGroups";
 import { useLeagueTabState } from "./LeagueHub/hooks/useLeagueTabState";
 import StandingsTab from "./league/StandingsTab";
@@ -91,7 +92,7 @@ interface LeagueHubProps {
   handleRunAllSims: () => void;
   setPlayerProfileId: (id: string | null) => void;
   setCalcOpponentRosterId: (id: number | null) => void;
-  setMainTab: (tab: string) => void;
+  setMainTab: (tab: MainTab) => void;
   setTradeHubSection: (section: "CALCULATOR" | "FINDER" | "RECOMMENDATIONS") => void;
 }
 

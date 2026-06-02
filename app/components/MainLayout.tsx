@@ -1,6 +1,7 @@
 "use client";
 import type { User as SupabaseUser } from "@supabase/auth-js";
 import type { SleeperUser, SleeperLeague } from "../../lib/types";
+import { HUBS, type MainTab } from "../../lib/hubs";
 import { setLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 
 interface MainLayoutProps {
@@ -11,8 +12,8 @@ interface MainLayoutProps {
   leagues: SleeperLeague[];
   selectedLeague: SleeperLeague | null;
   loadRoster: (league: SleeperLeague) => void;
-  mainTab: string;
-  setMainTab: (tab: string) => void;
+  mainTab: MainTab;
+  setMainTab: (tab: MainTab) => void;
   children: React.ReactNode;
 }
 
@@ -97,18 +98,7 @@ export function MainLayout({
               <div className="border-t border-gray-800">
                 <div className="mx-auto max-w-7xl overflow-x-auto scrollbar-none">
                   <div className="flex min-w-max justify-start px-2 md:justify-center">
-                    {[
-                      { id: "DASHBOARD", label: "Dashboard" },
-                      { id: "LEAGUES", label: "League Hub" },
-                      { id: "DATA_HUB", label: "Data Hub" },
-                      { id: "DRAFT", label: "Draft Hub" },
-                      { id: "TRADE_HUB", label: "Trade Hub" },
-                      { id: "GAMEDAY_HUB", label: "Gameday Hub" },
-                      { id: "ALERTS", label: "Alert Hub" },
-                      { id: "MANAGEMENT_HUB", label: "Management Hub" },
-                      { id: "SCOUTING_HUB", label: "Scouting Hub" },
-                      { id: "USER_SCOUT", label: "User Scout" },
-                    ].map((tab) => (
+                    {HUBS.map((tab) => (
                       <button
                         key={tab.id}
                         onClick={() => setMainTab(tab.id)}

@@ -1,6 +1,7 @@
 "use client";
 import React from "react";
 import dynamic from "next/dynamic";
+import { isWideHub, type MainTab } from "../../lib/hubs";
 import Dashboard from "../../components/Dashboard";
 import AlertsPage from "../../components/AlertsPage";
 import ManagementHub from "../../components/ManagementHub";
@@ -53,9 +54,9 @@ type DataHubTabId = "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "LEAGUEMATES" 
 // ── Props ────────────────────────────────────────────────────────────────────
 interface HubRouterProps {
   // Navigation
-  mainTab: string;
+  mainTab: MainTab;
   dataHubTab: DataHubTabId;
-  setMainTab: (tab: string) => void;
+  setMainTab: (tab: MainTab) => void;
 
   // User / league
   user: SleeperUser | null;
@@ -308,7 +309,7 @@ export function HubRouter({
   return (
     <>
       <div className={
-        mainTab === "DRAFT" || mainTab === "TRADE_HUB" || mainTab === "MANAGEMENT_HUB" || mainTab === "LEAGUES" || mainTab === "ALERTS" || mainTab === "GAMEDAY_HUB" || mainTab === "SCOUTING_HUB" || mainTab === "USER_SCOUT"
+        isWideHub(mainTab)
           ? ""
           : (mainTab === "DATA_HUB" && dataHubTab === "DEPTH_CHARTS")
             ? "w-full px-6 py-6"

@@ -5,6 +5,7 @@ import { useAuth } from "../../lib/AuthContext";
 import { useLeague } from "../../lib/LeagueContext";
 import { useValues } from "../../lib/ValuesContext";
 import type { LeagueMateView } from "../../lib/types";
+import type { MainTab } from "../../lib/hubs";
 
 interface LeagueMatesTabProps {
   selectedLeagueMateProfilesView: LeagueMateView[];
@@ -13,7 +14,7 @@ interface LeagueMatesTabProps {
   loadUserTrades: (ownerId: string, bypass?: boolean) => void;
   loadUserExposure: (ownerId: string) => void;
   setCalcOpponentRosterId: (id: number | null) => void;
-  setMainTab: (tab: string) => void;
+  setMainTab: (tab: MainTab) => void;
   setTradeHubSection: (section: "CALCULATOR" | "FINDER" | "RECOMMENDATIONS") => void;
 }
 

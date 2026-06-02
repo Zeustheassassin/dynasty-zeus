@@ -1,12 +1,13 @@
 "use client";
 import Image from "next/image";
+import type { MainTab } from "../lib/hubs";
 
 type DashboardProps = {
   username: string;
-  onNavigate: (tab: string) => void;
+  onNavigate: (tab: MainTab) => void;
 };
 
-const navCardRows = [
+const navCardRows: { title: string; tab: MainTab; image: string; overlay: string }[][] = [
   [
     {
       title: "League Hub",

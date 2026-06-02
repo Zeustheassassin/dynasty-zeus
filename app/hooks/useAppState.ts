@@ -604,7 +604,7 @@ const refreshDraftBoard = useCallback(async () => {
 useEffect(() => {
   const status = draftSettings?.status;
   const isLive = status === "drafting" || status === "paused";
-  const onBoard = mainTab === "DRAFT_HUB" && draftHubSection === "BOARD";
+  const onBoard = mainTab === "DRAFT" && draftHubSection === "BOARD";
   if (!isLive || !onBoard) return;
   if (typeof document === "undefined") return;
 

@@ -1,9 +1,10 @@
 "use client";
 import { useState } from "react";
 import type { LeagueHubTab } from "../../lib/types";
+import type { MainTab } from "../../lib/hubs";
 
 export function useHubRouting() {
-  const [mainTab, setMainTab] = useState("DASHBOARD");
+  const [mainTab, setMainTab] = useState<MainTab>("DASHBOARD");
   const [tradeHubSection, setTradeHubSection] = useState<
     "CALCULATOR" | "FINDER" | "RECOMMENDATIONS" | "TRADE_LOG" | "ATTEMPTS" | "MARKET"
   >("CALCULATOR");
