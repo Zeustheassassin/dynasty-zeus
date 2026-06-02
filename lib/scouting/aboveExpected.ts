@@ -17,6 +17,7 @@ import type {
   ScoutingGame,
   RBPlay,
   QBPlay,
+  QBAccuracy,
   TEPlay,
   RBFormation,
   RBRunType,
@@ -76,16 +77,34 @@ const QB_MIN_SAMPLE = 25;
 const SHRINK_K = 10;
 
 // #3-modified — graded "throw value" replacing the old binary on-target flag.
-// An on-target throw is always a perfect 1.0 (never penalized for a receiver
-// drop). A miss (high / low / in_front / behind — all that survive the graded-
-// throw filter besides on_target) that is still CAUGHT was functional ball
-// placement and earns partial credit; an uncaught miss (incomplete /
-// interception / result not charted) is a full 0. Both the QB's actual value
-// and every league baseline are computed on this same scale.
-const MISS_CAUGHT_CREDIT = 0.7;
+// A throw is graded primarily on PLACEMENT severity — the same green/orange/red
+// accuracy grade charted in qbConstants — independent of whether it was caught.
+// The catch is mostly the receiver's doing, so basing the QB metric on it would
+// reward a passer for having elite receivers and punish a pinpoint one who
+// simply doesn't throw catchable misses. A small CATCH_BONUS layers on top so a
+// functional, caught miss still edges an identical dropped one.
+//
+//   on_target          → 1.00  (a perfect throw; never docked for a drop)
+//   in_front / behind  → 0.45  (near-miss / orange)  + CATCH_BONUS if caught
+//   high / low         → 0.15  (errant / red)        + CATCH_BONUS if caught
+//
+// All values are tunable. Both the QB's actual value and every league baseline
+// are computed on this same scale. tipped_ball / null accuracy never reach here
+// (filtered out by isQBGradedThrow).
+const PLACEMENT_VALUE: Record<QBAccuracy, number> = {
+  on_target: 1,
+  in_front: 0.45,
+  behind: 0.45,
+  high: 0.15,
+  low: 0.15,
+  tipped_ball: 0, // excluded upstream; present only to satisfy the Record
+};
+const CATCH_BONUS = 0.1;
 function throwValue(pl: QBPlay): number {
-  if (pl.accuracy === "on_target") return 1;
-  return pl.completion === "caught" ? MISS_CAUGHT_CREDIT : 0;
+  if (pl.accuracy == null) return 0;             // not reached — filtered upstream
+  const base = PLACEMENT_VALUE[pl.accuracy];
+  if (pl.accuracy === "on_target") return base;  // a perfect throw is 1.0, caught or not
+  return pl.completion === "caught" ? base + CATCH_BONUS : base;
 }
 
 function combine(a: number | null, b: number | null): number | null {
@@ -173,9 +192,10 @@ export function computeRBAboveExpected(
 //   depth zone, coverage, timing, pressure, platform (incl. on-the-run side),
 //   pressure handling, route type.
 //
-// Throw value is the graded score from throwValue() (on_target = 1.0; a caught
-// miss = partial credit; an uncaught miss = 0) rather than a binary on-target
-// flag, so near-misses that still worked aren't scored identically to airmails.
+// Throw value is the graded score from throwValue() — placement severity
+// (on_target / near-miss / errant) plus a small bonus if a miss was caught —
+// rather than a binary on-target flag, so near-misses aren't scored identically
+// to airmails and the metric leans on QB placement, not receiver bail-outs.
 //
 // Three accuracy refinements layer on top of the raw bucket means:
 //   1. Shrinkage — each league bucket rate is pulled toward the global mean by
