@@ -107,6 +107,7 @@ export function MainLayout({
                       { id: "ALERTS", label: "Alert Hub" },
                       { id: "MANAGEMENT_HUB", label: "Management Hub" },
                       { id: "SCOUTING_HUB", label: "Scouting Hub" },
+                      { id: "USER_SCOUT", label: "User Scout" },
                     ].map((tab) => (
                       <button
                         key={tab.id}

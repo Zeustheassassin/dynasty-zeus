@@ -22,6 +22,7 @@ import type {
   LeagueMgmtData, CommPaymentsData, TradePartnerRanking,
 } from "../../lib/types";
 import type { AnnotatedTrade } from "../../hooks/useUserTrades";
+import type { PlayerUsage } from "../../hooks/usePlayerStats";
 import type { DashboardAlert, LeagueTransaction, InjuryReportPlayer } from "../../components/AlertsPage/alertsPageHelpers";
 import type { ExposureData } from "../../hooks/useUserExposure";
 import type { DraftScoutLeague } from "../../hooks/useDraftScout";
@@ -44,6 +45,7 @@ const DataHub = dynamic(() => import("../../components/DataHub"), { ssr: false, 
 const LeagueHub = dynamic(() => import("../../components/LeagueHub"), { ssr: false, loading: HubSkeleton });
 const TradeHub = dynamic(() => import("../../components/TradeHub"), { ssr: false, loading: HubSkeleton });
 const ScoutingHub = dynamic(() => import("../../components/ScoutingHub"), { ssr: false, loading: HubSkeleton });
+const UserScoutHub = dynamic(() => import("../../components/UserScoutHub"), { ssr: false, loading: HubSkeleton });
 
 // ── Local types ──────────────────────────────────────────────────────────────
 type DataHubTabId = "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "LEAGUEMATES" | "DEPTH_CHARTS" | "BUY_LOW" | "MY_SHARES";
@@ -306,7 +308,7 @@ export function HubRouter({
   return (
     <>
       <div className={
-        mainTab === "DRAFT" || mainTab === "TRADE_HUB" || mainTab === "MANAGEMENT_HUB" || mainTab === "LEAGUES" || mainTab === "ALERTS" || mainTab === "GAMEDAY_HUB" || mainTab === "SCOUTING_HUB"
+        mainTab === "DRAFT" || mainTab === "TRADE_HUB" || mainTab === "MANAGEMENT_HUB" || mainTab === "LEAGUES" || mainTab === "ALERTS" || mainTab === "GAMEDAY_HUB" || mainTab === "SCOUTING_HUB" || mainTab === "USER_SCOUT"
           ? ""
           : (mainTab === "DATA_HUB" && dataHubTab === "DEPTH_CHARTS")
             ? "w-full px-6 py-6"
@@ -412,6 +414,20 @@ export function HubRouter({
             setCalcOpponentRosterId={setCalcOpponentRosterId}
             setMainTab={setMainTab}
             setTradeHubSection={setTradeHubSection}
+          />
+          </ErrorBoundary>
+        )}
+
+        {/* USER SCOUT — read-only lookup of any Sleeper user's leagues */}
+        {mainTab === "USER_SCOUT" && (
+          <ErrorBoundary label="User Scout">
+          <UserScoutHub
+            players={players}
+            nflState={nflState}
+            projectionData={projectionData}
+            projectionWeek={projectionWeek}
+            playerStats={playerStats as Record<string, PlayerUsage> | null}
+            rookies={rookies}
           />
           </ErrorBoundary>
         )}
