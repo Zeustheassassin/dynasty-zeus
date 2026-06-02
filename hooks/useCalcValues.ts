@@ -1,6 +1,7 @@
 "use client";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { logger } from "../lib/logger";
+import { FANTASYCALC_BASE_URL } from "../lib/constants";
 
 const log = logger("hooks/useCalcValues");
 
@@ -29,7 +30,7 @@ export function useCalcValues() {
     setCalcValuesError(null);
     try {
       const res = await fetch(
-        `https://api.fantasycalc.com/values/current?leagueId=${leagueId}&site=sleeper`
+        `${FANTASYCALC_BASE_URL}/values/current?leagueId=${leagueId}&site=sleeper`
       );
       if (!res.ok) throw new Error(`FantasyCalc ${res.status}`);
       const data = await res.json();
@@ -55,7 +56,7 @@ export function useCalcValues() {
     setRedraftError(null);
     try {
       const res = await fetch(
-        `https://api.fantasycalc.com/values/current?isDynasty=false&numQbs=2`
+        `${FANTASYCALC_BASE_URL}/values/current?isDynasty=false&numQbs=2`
       );
       if (!res.ok) throw new Error(`FantasyCalc ${res.status}`);
       const data = await res.json();

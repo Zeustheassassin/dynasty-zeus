@@ -24,6 +24,7 @@ import { cachedFetch } from "./clientFetch";
 import { withRetry } from "./withRetry";
 import {
   SLEEPER_BASE_URL,
+  SLEEPER_PROJECTIONS_BASE,
 } from "./constants";
 import type {
   SleeperUser,
@@ -293,7 +294,7 @@ async function getNFLState(): Promise<SleeperNFLState> {
  */
 async function getRookieBoardADP(year: string): Promise<Record<string, unknown>[]> {
   const url =
-    `https://api.sleeper.app/projections/nfl/${encodeURIComponent(year)}` +
+    `${SLEEPER_PROJECTIONS_BASE}/${encodeURIComponent(year)}` +
     `?season_type=regular&position=QB&position=RB&position=WR&position=TE&order_by=adp_dynasty_2qb`;
   const result = await getOrNull<Record<string, unknown>[]>(url);
   return result ?? [];

@@ -9,6 +9,9 @@
 // ── Sleeper ──────────────────────────────────────────────────
 export const SLEEPER_BASE_URL = "https://api.sleeper.app/v1";
 
+/** Sleeper projections (ADP / weekly) live at the host root, NOT under /v1. */
+export const SLEEPER_PROJECTIONS_BASE = "https://api.sleeper.app/projections/nfl";
+
 // ── FantasyCalc ───────────────────────────────────────────────
 export const FANTASYCALC_BASE_URL = "https://api.fantasycalc.com";
 

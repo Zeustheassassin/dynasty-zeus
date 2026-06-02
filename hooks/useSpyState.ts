@@ -16,6 +16,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { logger } from "../lib/logger";
 import { sleeperApi } from "../lib/sleeperApi";
+import { FANTASYCALC_BASE_URL } from "../lib/constants";
 import {
   CURRENT_YEAR, YEARS, ROUNDS, getDraftRoundSlot,
   computeScoringMultipliers, getRosterDirectionProfile,
@@ -38,7 +39,7 @@ const log = logger("hooks/useSpyState");
 // the run-all loop can fetch per-league values without shared state.
 async function fetchLeagueCalcValues(leagueId: string): Promise<Record<string, number>> {
   try {
-    const res = await fetch(`https://api.fantasycalc.com/values/current?leagueId=${leagueId}&site=sleeper`);
+    const res = await fetch(`${FANTASYCALC_BASE_URL}/values/current?leagueId=${leagueId}&site=sleeper`);
     const data = await res.json();
     const vals: Record<string, number> = {};
     (data as { player?: { sleeperId?: string }; value: number }[]).forEach((entry) => {
@@ -262,7 +263,7 @@ export function useSpyState({
     fetchFantasyCalcValues(2)
       .then(({ pickValues }) => { if (!cancelled) setPickFcValues(pickValues); })
       .catch((err) => log.error("pick values load failed", { err: String(err) }));
-    fetch("https://api.fantasycalc.com/values/current?isDynasty=false&numQbs=2")
+    fetch(`${FANTASYCALC_BASE_URL}/values/current?isDynasty=false&numQbs=2`)
       .then((r) => r.json())
       .then((data) => {
         if (cancelled) return;

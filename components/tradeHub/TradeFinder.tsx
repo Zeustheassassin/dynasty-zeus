@@ -23,7 +23,12 @@ import {
   isOldProducerBuy, isFutureInsulationAsset,
   packageOk, posTotals, isBalanced,
 } from "./FinderScoring";
-import { finderPickKey } from "./finderUtils";
+import {
+  finderPickKey,
+  buildPostTradePlayers as buildPostTradePlayersUtil,
+  getNFLDepthIdx as getNFLDepthIdxUtil,
+  computePosRank as computePosRankUtil,
+} from "./finderUtils";
 import type { MarketSignal, TradeResult } from "./finderTypes";
 import { YEARS } from "./shared";
 import { runFinderPipeline } from "./finderPipeline";
@@ -164,16 +169,10 @@ function TradeFinder({
     });
   }, [rosters, finderRosterPlayersMap]);
 
-  const computePosRank = (pos: string, rosterId: number, overrideTotal?: number): number => {
-    const vals = posTeamTotals.map((t) =>
-      t.rosterId === rosterId && overrideTotal !== undefined ? overrideTotal : (t.totals[pos] ?? 0)
-    ).sort((a, b) => b - a);
-    const myVal = overrideTotal !== undefined ? overrideTotal
-      : (posTeamTotals.find((t) => t.rosterId === rosterId)?.totals[pos] ?? 0);
-    let rank = 1;
-    for (const v of vals) { if (myVal >= v) break; rank++; }
-    return rank;
-  };
+  // Thin wrapper over the shared finderUtils implementation (closes over posTeamTotals)
+  // so the finder and useScoringFactors share one definition and can't drift.
+  const computePosRank = (pos: string, rosterId: number, overrideTotal?: number): number =>
+    computePosRankUtil(pos, rosterId, posTeamTotals, overrideTotal);
 
   const [directionRefreshing, setDirectionRefreshing] = useState(false);
 
@@ -446,16 +445,8 @@ function TradeFinder({
         players,
         calcFcValues,
       });
-      const buildPostTradePlayers = (baseRoster: SleeperRoster | undefined, givePlayers: PlayerWithValue[], receivePlayers: PlayerWithValue[]): PlayerWithValue[] => {
-        const giveIds = new Set(givePlayers.map((p) => p.player_id));
-        return [
-          ...(baseRoster?.players || [])
-            .map((id: string) => players[id])
-            .filter((p): p is SleeperPlayer => !!p && !giveIds.has(p.player_id))
-            .map((p) => ({ ...p, value: calcFcValues[p.player_id] ?? p.value ?? 0 })),
-          ...receivePlayers,
-        ].filter((p) => p && ["QB", "RB", "WR", "TE"].includes(p.position));
-      };
+      const buildPostTradePlayers = (baseRoster: SleeperRoster | undefined, givePlayers: PlayerWithValue[], receivePlayers: PlayerWithValue[]): PlayerWithValue[] =>
+        buildPostTradePlayersUtil(baseRoster, givePlayers, receivePlayers, players, calcFcValues);
       // Full roster is the give pool — no artificial cap
       const myTopBase = myPlayers
         .filter((p) => !isBlockedSellDisposition(p.player_id));
@@ -581,11 +572,8 @@ function TradeFinder({
 
       // nflTeamDepth is memoised at component level (useMemo above)
       // Returns sorted depth index for a player (0=starter, 1=primary HC, 2=secondary HC…)
-      const getNFLDepthIdx = (team: string, pos: string, playerId: string): number | null => {
-        const group = nflTeamDepth.get(team)?.[pos] ?? [];
-        const idx = group.findIndex((p) => p.player_id === playerId);
-        return idx >= 0 ? idx : null;
-      };
+      const getNFLDepthIdx = (team: string, pos: string, playerId: string): number | null =>
+        getNFLDepthIdxUtil(team, pos, playerId, nflTeamDepth);
 
       const results: TradeResult[] = [];
 

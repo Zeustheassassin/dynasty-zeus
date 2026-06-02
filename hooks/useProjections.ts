@@ -1,6 +1,7 @@
 "use client";
 import { useState, useRef, useCallback, type Dispatch, type SetStateAction } from "react";
 import { normalizeProjName, getProjectionKickoffAt } from "../lib/helpers";
+import { SLEEPER_PROJECTIONS_BASE } from "../lib/constants";
 import { computeLeagueFpts, DEFAULT_SCORING } from "../lib/helpers/scoring";
 import { useLocalStorage } from "../lib/hooks/useLocalStorage";
 import type { SleeperPlayer, ProjectionRow } from "../lib/types";
@@ -184,7 +185,7 @@ export function useProjections(
         try {
           const posResults = await Promise.all(
             ["QB", "RB", "WR", "TE"].map((pos) =>
-              fetch(`https://api.sleeper.app/projections/nfl/${currentNflYear}?season_type=regular&position=${pos}`)
+              fetch(`${SLEEPER_PROJECTIONS_BASE}/${currentNflYear}?season_type=regular&position=${pos}`)
                 .then((r) => r.json())
                 .catch(() => [])
             )
@@ -217,16 +218,16 @@ export function useProjections(
           const sleeperWeight = PROJ_SOURCES.find((s) => s.id === "sleeper")!.weight;
           let sleeperData: SleeperRawProjectionItem[] = [];
           if (week === "season") {
-            const curUrl = `https://api.sleeper.app/projections/nfl/${currentNflYear}?season_type=regular&${posParams}`;
+            const curUrl = `${SLEEPER_PROJECTIONS_BASE}/${currentNflYear}?season_type=regular&${posParams}`;
             let data: SleeperRawProjectionItem[] = await fetch(curUrl).then((r) => r.json());
             if (!Array.isArray(data) || data.length === 0) {
-              const prevUrl = `https://api.sleeper.app/projections/nfl/${currentNflYear - 1}?season_type=regular&${posParams}`;
+              const prevUrl = `${SLEEPER_PROJECTIONS_BASE}/${currentNflYear - 1}?season_type=regular&${posParams}`;
               data = await fetch(prevUrl).then((r) => r.json());
               if (Array.isArray(data) && data.length > 0) resolvedProjectionYear = currentNflYear - 1;
             }
             sleeperData = Array.isArray(data) ? data : [];
           } else {
-            const url = `https://api.sleeper.app/projections/nfl/${currentNflYear}/${week}?season_type=regular&${posParams}`;
+            const url = `${SLEEPER_PROJECTIONS_BASE}/${currentNflYear}/${week}?season_type=regular&${posParams}`;
             const data: SleeperRawProjectionItem[] = await fetch(url).then((r) => r.json());
             sleeperData = Array.isArray(data) ? data : [];
           }

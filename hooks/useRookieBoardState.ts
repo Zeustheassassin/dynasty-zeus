@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 import { supabase } from "../lib/supabaseclient";
 import { CURRENT_YEAR, normalizeRookieName } from "../lib/helpers";
+import { FANTASYCALC_BASE_URL } from "../lib/constants";
 import { logger } from "../lib/logger";
 import { sleeperApi } from "../lib/sleeperApi";
 import { getLocalStorageItem, setLocalStorageItem } from "@/lib/hooks/useLocalStorage";
@@ -172,7 +173,7 @@ export function useRookieBoardState(supabaseUser: { id: string } | null): UseRoo
       const [sheetText, adpResponse, fcRaw] = await Promise.all([
         fetch('/api/rookie-board-sheet', { signal }).then((res) => res.text()),
         sleeperApi.getRookieBoardADP(ROOKIE_YEAR).catch(() => []),
-        fetch(`https://api.fantasycalc.com/values/current?isDynasty=true&numQbs=2&numTeams=12&ppr=1`, { signal })
+        fetch(`${FANTASYCALC_BASE_URL}/values/current?isDynasty=true&numQbs=2&numTeams=12&ppr=1`, { signal })
           .then((res) => res.json()).catch(() => []),
       ]);
 
