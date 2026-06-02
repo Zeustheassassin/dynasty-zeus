@@ -2563,12 +2563,9 @@ const getTeamSummary = useCallback(() => {
     const isSnake = ((draftSettings?.settings?.type ?? draftSettings?.type) || "snake") !== "linear";
     const myRosterId = rosters.find((r) => r.owner_id === user?.user_id)?.roster_id;
 
-    // Strip Jr./Sr./II/III suffixes before collapsing to alpha-only so names from
-    // Sleeper ("Omar Cooper") and FantasyCalc ("Omar Cooper Jr.") still match.
-    const normName = (n: string) =>
-      (n || "").toLowerCase()
-        .replace(/\b(jr|sr|ii|iii|iv|v)\b\.?/gi, "")
-        .replace(/[^a-z]/g, "");
+    // Name matching uses the shared normalizeRookieName helper (imported above) so
+    // Sleeper ("Omar Cooper") and FantasyCalc ("Omar Cooper Jr.") still match, and
+    // there is a single normalisation implementation across board/predictor/compiler.
 
     // rosterId → userId map — needed to look up owner tendencies
     const rosterToUserId: Record<number, string> = {};
@@ -2597,12 +2594,12 @@ const getTeamSummary = useCallback(() => {
     Object.entries(players).forEach(([id, p]: [string, SleeperPlayer]) => {
       const val = leagueAdjustedFcValues[id] ?? p.value ?? 0;
       if (val > 0 && p.full_name) {
-        const key = normName(p.full_name);
+        const key = normalizeRookieName(p.full_name);
         if (!valueByNormName[key] || val > valueByNormName[key]) valueByNormName[key] = val;
       }
     });
     const getRookieValue = (r: RookieBoardPlayer): number =>
-      (r.player_id ? (leagueAdjustedFcValues[r.player_id] ?? 0) : 0) || valueByNormName[normName(r.name)] || 0;
+      (r.player_id ? (leagueAdjustedFcValues[r.player_id] ?? 0) : 0) || valueByNormName[normalizeRookieName(r.name)] || 0;
 
     // Network consensus override: once the user's compiled rookie-draft sample is
     // large enough (CONSENSUS_MIN_DRAFTS), use it as the primary ordering signal
@@ -2614,12 +2611,12 @@ const getTeamSummary = useCallback(() => {
     if (consensusActive) {
       consensusCurrentYear!.rows.forEach((row) => {
         if (row.player_name && row.avg_pick_no > 0) {
-          consensusByNormName[normName(row.player_name)] = row.avg_pick_no;
+          consensusByNormName[normalizeRookieName(row.player_name)] = row.avg_pick_no;
         }
       });
     }
     const getConsensusPick = (r: RookieBoardPlayer): number | undefined =>
-      consensusActive ? consensusByNormName[normName(r.name)] : undefined;
+      consensusActive ? consensusByNormName[normalizeRookieName(r.name)] : undefined;
 
     // Unified player pool for non-user picks.
     // When consensus is active: rank consensus-listed players by avg_pick_no first,
@@ -2726,21 +2723,21 @@ const getTeamSummary = useCallback(() => {
     const usedNames = new Set<string>();
     draftPicks.forEach((dp) => {
       const p = players[dp.player_id];
-      if (p?.full_name) usedNames.add(normName(p.full_name));
+      if (p?.full_name) usedNames.add(normalizeRookieName(p.full_name));
     });
     Object.values(myDraftSlotPicks).forEach((pid) => {
       const r = rookies.find((rk: RookieBoardPlayer) => rk.player_id === pid || rk.name === pid);
-      if (r?.name) usedNames.add(normName(r.name));
+      if (r?.name) usedNames.add(normalizeRookieName(r.name));
     });
 
     const isUsed = (r: RookieBoardPlayer) => {
       if (r.player_id && usedIds.has(String(r.player_id))) return true;
-      if (r.name && usedNames.has(normName(r.name))) return true;
+      if (r.name && usedNames.has(normalizeRookieName(r.name))) return true;
       return false;
     };
     const markUsed = (r: RookieBoardPlayer) => {
       if (r.player_id) usedIds.add(String(r.player_id));
-      if (r.name) usedNames.add(normName(r.name));
+      if (r.name) usedNames.add(normalizeRookieName(r.name));
     };
 
     const simCounts: Record<number, Record<string, number>> = {};
@@ -2766,7 +2763,7 @@ const getTeamSummary = useCallback(() => {
           if (dp?.player_id) {
             usedIds.add(String(dp.player_id));
             const ap = players[dp.player_id];
-            if (ap?.full_name) usedNames.add(normName(ap.full_name));
+            if (ap?.full_name) usedNames.add(normalizeRookieName(ap.full_name));
             if (ap?.position && rosterId) {
               simCounts[rosterId] = simCounts[rosterId] || {};
               simCounts[rosterId][ap.position] = (simCounts[rosterId][ap.position] || 0) + 1;
@@ -2810,12 +2807,12 @@ const getTeamSummary = useCallback(() => {
           .sort((a, b) => b.score - a.score)[0];
 
         if (best) {
-          const boardRank = rookies.findIndex((r: RookieBoardPlayer) => (r.player_id && r.player_id === best.player_id) || normName(r.name) === normName(best.name)) + 1;
+          const boardRank = rookies.findIndex((r: RookieBoardPlayer) => (r.player_id && r.player_id === best.player_id) || normalizeRookieName(r.name) === normalizeRookieName(best.name)) + 1;
           // poolRank = player's position in consensus dynasty-value pool (1 = most valuable).
           // Used to flag REACH/VALUE on user's predicted slots:
           //   overallPick << poolRank → reaching ahead of consensus
           //   overallPick >> poolRank → getting value relative to consensus
-          const poolRank = fullPool.findIndex((r: RookieBoardPlayer) => (r.player_id && r.player_id === best.player_id) || normName(r.name) === normName(best.name)) + 1 || 999;
+          const poolRank = fullPool.findIndex((r: RookieBoardPlayer) => (r.player_id && r.player_id === best.player_id) || normalizeRookieName(r.name) === normalizeRookieName(best.name)) + 1 || 999;
           predictions[slotStr] = { name: best.name, position: best.position, team: best.team || "", adp: best.adp ?? 999, player_id: best.player_id, boardRank, poolRank };
           markUsed(best);
           if (rosterId) { simCounts[rosterId] = simCounts[rosterId] || {}; simCounts[rosterId][best.position] = (simCounts[rosterId][best.position] || 0) + 1; }
@@ -2831,7 +2828,7 @@ const getTeamSummary = useCallback(() => {
     fullPool.forEach((r: RookieBoardPlayer, idx: number) => {
       const rank = idx + 1;
       if (r.player_id) poolRankByPlayerId[String(r.player_id)] = rank;
-      if (r.name) poolRankByName[normName(r.name)] = rank;
+      if (r.name) poolRankByName[normalizeRookieName(r.name)] = rank;
     });
 
     return { predictions, poolRankByPlayerId, poolRankByName };

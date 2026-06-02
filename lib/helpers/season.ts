@@ -17,6 +17,13 @@ export const YEARS = Array.from({ length: 3 }, (_, i) => String(BASE_YEAR + i));
  *  the league's actual round count at render time via draftSettings. */
 export const ROUNDS = [1, 2, 3, 4];
 
+/** Max rounds a draft can have to still count as a rookie (not startup) draft.
+ *  Single source of truth — Draft Scout, Draft History, and the consensus
+ *  compiler MUST all use this so a legal 6-round rookie draft is treated
+ *  consistently everywhere (previously Draft Scout used 5 and silently
+ *  dropped 6-round rookie drafts that History/Consensus accepted). */
+export const ROOKIE_DRAFT_MAX_ROUNDS = 6;
+
 /** Forward window for the Add-Prospect draft-class-year dropdown.
  *  [BASE_YEAR, BASE_YEAR+1, BASE_YEAR+2, BASE_YEAR+3] — current class plus
  *  the next three so scouts can stash early notes on future classes. */

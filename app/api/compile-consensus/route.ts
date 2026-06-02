@@ -10,6 +10,7 @@ import {
   SLEEPER_PLAYERS_TIMEOUT_MS,
   getCompilationYearRange,
 } from "../../../lib/constants";
+import { ROOKIE_DRAFT_MAX_ROUNDS } from "../../../lib/helpers/season";
 
 // Allow up to 5 minutes for large networks (Vercel Pro/Enterprise)
 export const maxDuration = 300;
@@ -187,9 +188,9 @@ async function compileDrafts(
           } else {
             return; // future years (shouldn't happen, but skip)
           }
-          // Rookie-only drafts have ≤6 rounds; skip startup/full-roster drafts
+          // Rookie-only drafts have ≤ROOKIE_DRAFT_MAX_ROUNDS rounds; skip startup/full-roster drafts
           const rounds = d.settings?.rounds ?? 99;
-          if (rounds > 6) return;
+          if (rounds > ROOKIE_DRAFT_MAX_ROUNDS) return;
           draftIdsByYear[season]?.add(d.draft_id);
         });
       }

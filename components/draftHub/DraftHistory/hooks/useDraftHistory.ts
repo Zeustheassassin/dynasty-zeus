@@ -6,7 +6,7 @@ import { usePlayers } from "../../../../lib/PlayersContext";
 import { useAuth } from "../../../../lib/AuthContext";
 import { useLeague } from "../../../../lib/LeagueContext";
 import { useValues } from "../../../../lib/ValuesContext";
-import { CURRENT_YEAR as ROOKIE_YEAR } from "../../../../lib/helpers";
+import { CURRENT_YEAR as ROOKIE_YEAR, ROOKIE_DRAFT_MAX_ROUNDS } from "../../../../lib/helpers";
 import { toPickSlot } from "../../shared";
 import type { SleeperLeague, SleeperUser } from "../../../../lib/types";
 import type {
@@ -83,7 +83,7 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
             if (!Array.isArray(drafts)) return;
             const rookieDrafts = drafts.filter((d) => {
               const rounds = d.settings?.rounds ?? d.rounds ?? 99;
-              if (rounds > 6) return false;
+              if (rounds > ROOKIE_DRAFT_MAX_ROUNDS) return false;
               // Past years: only completed drafts.
               if (d.season !== ROOKIE_YEAR) return d.status === "complete";
               // Current year: include in-progress drafts so partial picks show as live ADP signal.

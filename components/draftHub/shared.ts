@@ -1,5 +1,10 @@
 // Shared constants, pure helpers, and local types for the DraftHub tab components.
 
+// Canonical name normaliser lives in lib/helpers/formatting — re-exported here so the
+// many DraftHub importers keep working while there is a single implementation to maintain.
+import { normalizeRookieName } from "../../lib/helpers/formatting";
+export { normalizeRookieName };
+
 export const posColor: Record<string, string> = {
   QB: "text-red-400",
   RB: "text-green-400",
@@ -15,13 +20,6 @@ export const posBadge: Record<string, string> = {
 };
 
 export const PICK_KEY_RE = /^\d{4}-(\d+)\.(\d+)$/;
-
-export const normalizeRookieName = (name: string) =>
-  (name || "")
-    .toLowerCase()
-    .replace(/\b(jr|sr|ii|iii|iv|v)\b\.?/gi, "")
-    .replace(/[^a-z]/g, "")
-    .trim();
 
 // Stable key for a rookie board player — uses player_id when available so that
 // pre-draft players (no Sleeper ID yet) don't all collapse onto the same null key.

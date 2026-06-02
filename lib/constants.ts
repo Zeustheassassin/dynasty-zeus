@@ -82,17 +82,20 @@ export const PAYMENT_YEARS_FUTURE = 3;
 /**
  * Highest `paid_<year>` column currently provisioned in the database.
  * Migration 002 added paid_2030 – paid_2033 on top of paid_2026 – paid_2029
- * from migration 001/006.
+ * from migration 001/006; migration 036 added paid_2034 – paid_2037.
  *
- * MIGRATION 003 REMINDER — when `currentYear + PAYMENT_YEARS_FUTURE` exceeds
- * this value, you must run a new migration adding paid_<next>..paid_<next+3>
- * (mirror migration 002, bump the years) AND bump this constant. The app
- * logs a console.warn whenever the window touches or passes the ceiling.
+ * CEILING REMINDER — when `currentYear + PAYMENT_YEARS_FUTURE` exceeds this
+ * value, add a NEW migration (next free number after 036) adding
+ * paid_<next>..paid_<next+3> on BOTH league_management and
+ * commissioner_payments (mirror migration 036, bump the years) AND bump this
+ * constant. The app logs a console.warn whenever the window touches or passes
+ * the ceiling. Use `ADD COLUMN IF NOT EXISTS … BOOLEAN NOT NULL DEFAULT false`
+ * so the migration is additive and idempotent.
  *
- * Current ceiling: 2033 → safe through calendar year 2030. Run migration
- * 003 before Jan 1 2031.
+ * Current ceiling: 2037 → safe through calendar year 2034. Provision the next
+ * batch before Jan 1 2035.
  */
-export const MAX_PROVISIONED_PAYMENT_YEAR = 2033;
+export const MAX_PROVISIONED_PAYMENT_YEAR = 2037;
 
 let _paymentCeilingWarned = false;
 
@@ -111,15 +114,14 @@ export function getPaymentYears(): number[] {
   if (highestNeeded >= MAX_PROVISIONED_PAYMENT_YEAR && !_paymentCeilingWarned) {
     _paymentCeilingWarned = true;
     const overflow = highestNeeded > MAX_PROVISIONED_PAYMENT_YEAR;
-    // eslint-disable-next-line no-console
     console.warn(
       `[dynastyzeus] Payment-year window reached the provisioned ceiling.\n` +
       `  highest column the app will write to: paid_${highestNeeded}\n` +
       `  highest column provisioned in DB:     paid_${MAX_PROVISIONED_PAYMENT_YEAR}\n` +
       (overflow
-        ? `  STATUS: OVERFLOW — writes to paid_${highestNeeded} will fail. Run migration 003 NOW.\n`
-        : `  STATUS: At ceiling — run migration 003 before Jan 1 ${current + 1} to add paid_${MAX_PROVISIONED_PAYMENT_YEAR + 1}..paid_${MAX_PROVISIONED_PAYMENT_YEAR + 4}.\n`) +
-      `  See supabase/migrations/002_extended_years_and_cleanup.sql and bump MAX_PROVISIONED_PAYMENT_YEAR in lib/constants.ts.`
+        ? `  STATUS: OVERFLOW — writes to paid_${highestNeeded} will fail. Add the next payment-year migration NOW.\n`
+        : `  STATUS: At ceiling — add a new migration before Jan 1 ${current + 1} to add paid_${MAX_PROVISIONED_PAYMENT_YEAR + 1}..paid_${MAX_PROVISIONED_PAYMENT_YEAR + 4}.\n`) +
+      `  See supabase/migrations/036_extend_payment_years_2034_2037.sql for the template (additive ADD COLUMN IF NOT EXISTS) and bump MAX_PROVISIONED_PAYMENT_YEAR in lib/constants.ts.`
     );
   }
   return years;

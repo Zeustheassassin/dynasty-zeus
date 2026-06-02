@@ -2,7 +2,7 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { logger } from "../lib/logger";
 import { sleeperApi } from "../lib/sleeperApi";
-import { CURRENT_YEAR } from "../lib/helpers";
+import { CURRENT_YEAR, ROOKIE_DRAFT_MAX_ROUNDS } from "../lib/helpers";
 import type { SleeperDraft, SleeperPlayer } from "../lib/types";
 
 const log = logger("hooks/useDraftScout");
@@ -109,7 +109,7 @@ export function useDraftScout(players: Record<string, SleeperPlayer>) {
             (d: SleeperDraft) =>
               d.season === CURRENT_YEAR &&
               d.status !== "pre_draft" &&
-              (d.settings?.rounds ?? 99) <= 5
+              (d.settings?.rounds ?? 99) <= ROOKIE_DRAFT_MAX_ROUNDS
           );
           if (!rookieDraft) return null;
 
