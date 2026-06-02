@@ -21,6 +21,7 @@
 // ============================================================
 
 import { cachedFetch } from "./clientFetch";
+import { withRetry } from "./withRetry";
 import {
   SLEEPER_BASE_URL,
 } from "./constants";
@@ -249,17 +250,25 @@ async function getDraftPicks(
 // They keep the original direct-to-Sleeper fetch and stay outside the
 // browser cache layer for now. Revisit if/when proxies are added.
 
+// These bypass the proxy + browser cache, so they are the flakiest call paths
+// (getAllPlayers is ~5 MB). Wrap in withRetry so a single transient blip on a
+// hub switch doesn't hard-fail. Retries only fire on failure — successful
+// requests (the norm) cost nothing extra.
 async function get<T>(url: string): Promise<T> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Sleeper API error ${res.status} — ${url}`);
-  return res.json() as Promise<T>;
+  return withRetry<T>(async () => {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Sleeper API error ${res.status} — ${url}`);
+    return (await res.json()) as T;
+  }, 3);
 }
 
 async function getOrNull<T>(url: string): Promise<T | null> {
   try {
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    return res.json() as Promise<T>;
+    return await withRetry<T>(async () => {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`Sleeper API error ${res.status} — ${url}`);
+      return (await res.json()) as T;
+    }, 3);
   } catch {
     return null;
   }

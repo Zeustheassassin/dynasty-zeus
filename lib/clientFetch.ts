@@ -16,10 +16,47 @@
 // ============================================================
 
 import { logger } from "./logger";
+import { withRetry } from "./withRetry";
 
 const log = logger("clientFetch");
 
 const CACHE_PREFIX = "sleeperCache:";
+
+/** HTTP error the caller should NOT retry (deterministic 4xx, e.g. bad param / not found). */
+class NonRetryableHttpError extends Error {
+  constructor(public status: number, url: string) {
+    super(`cachedFetch ${status} — ${url}`);
+    this.name = "NonRetryableHttpError";
+  }
+}
+
+// In-flight request coalescing: concurrent callers for the same fetch URL share a
+// single network request instead of each firing their own on a cold cache. Prevents
+// a "cache stampede" (e.g. several tabs/hooks requesting the same league at once),
+// which both wastes requests and pushes the per-IP proxy rate limiter.
+const inFlight = new Map<string, Promise<unknown>>();
+
+/**
+ * Fetch + JSON-parse with bounded retry. Retries transient failures (network
+ * error, 429, 5xx) with exponential back-off; throws immediately on a
+ * deterministic 4xx so we don't burn retries on a request that can't succeed.
+ */
+async function fetchAndParse<T>(url: string): Promise<T> {
+  return withRetry<T>(
+    async () => {
+      const res = await fetch(url);
+      if (!res.ok) {
+        if (res.status >= 400 && res.status < 500 && res.status !== 429) {
+          throw new NonRetryableHttpError(res.status, url);
+        }
+        throw new Error(`cachedFetch ${res.status} — ${url}`);
+      }
+      return (await res.json()) as T;
+    },
+    3,
+    (err) => !(err instanceof NonRetryableHttpError),
+  );
+}
 
 interface CacheEntry<T> {
   data: T;
@@ -132,11 +169,9 @@ function writeCache<T>(key: string, data: T, ttlMs: number): void {
 }
 
 export async function cachedFetch<T>(url: string, opts: CachedFetchOpts): Promise<T> {
-  // SSR: no window → no cache layer, always go straight to network
+  // SSR: no window → no cache layer, but still retry transient failures.
   if (typeof window === "undefined") {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`cachedFetch ${res.status} — ${url}`);
-    return res.json() as Promise<T>;
+    return fetchAndParse<T>(url);
   }
 
   const key = CACHE_PREFIX + (opts.cacheKey ?? url);
@@ -146,9 +181,20 @@ export async function cachedFetch<T>(url: string, opts: CachedFetchOpts): Promis
     if (cached.hit) return cached.data;
   }
 
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`cachedFetch ${res.status} — ${url}`);
-  const data = (await res.json()) as T;
-  writeCache(key, data, opts.ttlMs);
-  return data;
+  // Coalesce on the fetch URL (which already includes any ?bypass param) so a
+  // bypass refresh and a normal read don't accidentally share one promise.
+  const existing = inFlight.get(url);
+  if (existing) return existing as Promise<T>;
+
+  const request = (async (): Promise<T> => {
+    const data = await fetchAndParse<T>(url);
+    writeCache(key, data, opts.ttlMs);
+    return data;
+  })();
+  inFlight.set(url, request);
+  try {
+    return await request;
+  } finally {
+    inFlight.delete(url);
+  }
 }

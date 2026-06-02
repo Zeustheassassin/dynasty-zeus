@@ -93,6 +93,26 @@ describe("withRetry", () => {
     expect(delays).toContain(400); // 200 * 2^1
   });
 
+  it("does not retry when shouldRetry returns false (deterministic failure)", async () => {
+    const fn = vi.fn().mockRejectedValue(new Error("400 bad request"));
+    const promise = withRetry(fn, 3, () => false);
+    await Promise.all([vi.runAllTimersAsync(), expect(promise).rejects.toThrow("400 bad request")]);
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries only the errors shouldRetry approves", async () => {
+    const retryable = new Error("503");
+    const fatal = new Error("404");
+    const fn = vi.fn()
+      .mockRejectedValueOnce(retryable)
+      .mockRejectedValueOnce(fatal)
+      .mockResolvedValue("never reached");
+    const promise = withRetry(fn, 5, (err) => err === retryable);
+    await Promise.all([vi.runAllTimersAsync(), expect(promise).rejects.toThrow("404")]);
+    // first (retryable) retries → second attempt throws fatal → stop. 2 calls, not 5.
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
   it("does not fire a delay after the final failing attempt", async () => {
     const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
 
