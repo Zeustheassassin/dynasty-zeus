@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../../../lib/supabaseclient";
+import { fetchAllRows } from "../../../lib/scouting/fetchPlays";
 import { logger } from "../../../lib/logger";
 
 const log = logger("scouting/rb/RBChartingBoard");
@@ -16,6 +17,15 @@ import type {
   RBRunType,
   RBRouteType,
 } from "../../../lib/types";
+
+// A "run play" is a designed carry — excludes pass-block, run-block, decoy, and
+// pure route plays. Single source of truth so the aggregate Run Att (footer) and
+// the per-game Run Att / Suc% can't disagree (they previously used different sets).
+const isRunPlay = (p: RBPlay): boolean =>
+  p.run_type !== "pass_block" &&
+  p.run_type !== "run_block" &&
+  p.run_type !== "decoy" &&
+  p.run_type !== "route";
 
 const FORMATIONS: { key: RBFormation; label: string }[] = [
   { key: "gun",          label: "Gun" },
@@ -149,28 +159,28 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
           onTabChange, onSelectGame, onToggleAddGame, onNewGameChange,
           onAddGame, onDeleteGame, onUpdateGame, onToggleEditBio, onBioChange, onSaveBio } = cs;
 
-  // Load plays when games change
+  // Load plays when games change (paginated past the 1000-row PostgREST cap).
   useEffect(() => {
     if (games.length === 0) return;
     const ids = games.map((g) => g.id);
-    supabase.from("rb_plays").select("*").in("game_id", ids).order("created_at")
-      .then(({ data, error }) => {
-        if (error) { log.error("rb_plays load failed", { err: error.message }); return; }
-        setPlays((data ?? []) as RBPlay[]);
-      });
+    fetchAllRows<RBPlay>((from, to) =>
+      supabase.from("rb_plays").select("*").in("game_id", ids).order("created_at").range(from, to)
+    )
+      .then((rows) => setPlays(rows))
+      .catch((err) => log.error("rb_plays load failed", { err: String(err) }));
   }, [games]);
 
   const gamePlays = useMemo(() => plays.filter((p) => p.game_id === selectedGameId), [plays, selectedGameId]);
 
   // ── Aggregate stats ───────────────────────────────────────────
   const stats = useMemo(() => {
-    const runPlays = plays.filter((p) => p.run_type !== "pass_block" && p.run_type !== "run_block" && p.run_type !== "decoy" && p.run_type !== "route");
+    const runPlays = plays.filter(isRunPlay);
     const routeRuns = plays.filter((p) => p.run_type === "route");
     const runAttempts = runPlays.length;
 
     // Formation breakdown (run plays only, not block/decoy/route plays)
     const formationStats = (["gun", "pistol", "under_center"] as RBFormation[]).reduce((acc, f) => {
-      const fp = plays.filter((p) => p.formation === f && p.run_type !== "route" && p.run_type !== "pass_block" && p.run_type !== "run_block" && p.run_type !== "decoy");
+      const fp = plays.filter((p) => p.formation === f && isRunPlay(p));
       const suc = fp.filter((p) => p.success === true).length;
       acc[f] = { attempts: fp.length, successes: suc, successPct: pct(suc, fp.length) };
       return acc;
@@ -349,7 +359,12 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
 
   async function deletePlay(id: string) {
     if (editingPlayId === id) resetPlayForm();
-    await supabase.from("rb_plays").delete().eq("id", id);
+    const { error } = await supabase.from("rb_plays").delete().eq("id", id);
+    if (error) {
+      log.error("rb_plays delete failed", { err: error.message });
+      setPlayError("Couldn't delete that play — please try again.");
+      return;
+    }
     setPlays((prev) => prev.filter((p) => p.id !== id));
     onDataChanged();
   }
@@ -901,7 +916,7 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
                 <tbody className="divide-y divide-gray-900">
                   {games.map((g) => {
                     const gPlays = plays.filter((p) => p.game_id === g.id);
-                    const runs = gPlays.filter((p) => p.run_type !== "pass_block" && p.run_type !== "route");
+                    const runs = gPlays.filter(isRunPlay);
                     const routes = gPlays.filter((p) => p.run_type === "route");
                     const suc = runs.filter((p) => p.success === true).length;
                     const sucPct = runs.length > 0 ? ((suc / runs.length) * 100).toFixed(0) : null;

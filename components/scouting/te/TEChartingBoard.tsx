@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../../../lib/supabaseclient";
+import { fetchAllRows } from "../../../lib/scouting/fetchPlays";
 import { logger } from "../../../lib/logger";
 
 const log = logger("scouting/te/TEChartingBoard");
@@ -95,11 +96,11 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged }: Pro
   useEffect(() => {
     if (games.length === 0) return;
     const ids = games.map((g) => g.id);
-    supabase.from("te_plays").select("*").in("game_id", ids).order("created_at")
-      .then(({ data, error }) => {
-        if (error) { log.error("te_plays load failed", { err: error.message }); return; }
-        setPlays((data ?? []) as TEPlay[]);
-      });
+    fetchAllRows<TEPlay>((from, to) =>
+      supabase.from("te_plays").select("*").in("game_id", ids).order("created_at").range(from, to)
+    )
+      .then((rows) => setPlays(rows))
+      .catch((err) => log.error("te_plays load failed", { err: String(err) }));
   }, [games]);
 
   const gamePlays = useMemo(
@@ -281,7 +282,12 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged }: Pro
 
   async function deletePlay(id: string) {
     if (editingPlayId === id) resetPlayForm();
-    await supabase.from("te_plays").delete().eq("id", id);
+    const { error } = await supabase.from("te_plays").delete().eq("id", id);
+    if (error) {
+      log.error("te_plays delete failed", { err: error.message });
+      setPlayError("Couldn't delete that play — please try again.");
+      return;
+    }
     setPlays((prev) => prev.filter((p) => p.id !== id));
     onDataChanged();
   }

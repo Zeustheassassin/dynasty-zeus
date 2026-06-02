@@ -294,7 +294,12 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
 
   async function deletePlay(id: string) {
     if (editingPlayId === id) resetForm();
-    await supabase.from("route_plays").delete().eq("id", id);
+    const { error } = await supabase.from("route_plays").delete().eq("id", id);
+    if (error) {
+      log.error("route_plays delete failed", { err: error.message });
+      setPlayError("Couldn't delete that play — please try again.");
+      return;
+    }
     setPlays((prev) => prev.filter((p) => p.id !== id));
     onDataChanged();
   }

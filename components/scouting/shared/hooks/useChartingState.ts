@@ -88,7 +88,15 @@ export function useChartingState(prospect: Prospect, options: Options) {
   }
 
   async function deleteGame(id: string) {
-    await supabase.from("scouting_games").delete().eq("id", id);
+    // Check the error BEFORE mutating local state — otherwise a failed delete
+    // still removes the game (and its plays) from the UI while they live on in
+    // the DB (phantom success), and the user thinks their data is gone.
+    const { error } = await supabase.from("scouting_games").delete().eq("id", id);
+    if (error) {
+      log.error("scouting_games delete failed", { err: error.message });
+      setGameError("Couldn't delete that game — please try again.");
+      return;
+    }
     setGames((prev) => prev.filter((g) => g.id !== id));
     onDeleteGamePlays?.(id);
     if (selectedGameId === id) setSelectedGameId(games.find((g) => g.id !== id)?.id ?? null);
@@ -109,8 +117,19 @@ export function useChartingState(prospect: Prospect, options: Options) {
 
   async function saveBio() {
     setSavingBio(true);
-    await supabase.from("prospects").update({ ...bio, updated_at: new Date().toISOString() }).eq("id", prospect.id);
+    setGameError(null);
+    const { error } = await supabase
+      .from("prospects")
+      .update({ ...bio, updated_at: new Date().toISOString() })
+      .eq("id", prospect.id);
     setSavingBio(false);
+    if (error) {
+      // Keep the edit form open so the user's unsaved changes aren't lost and
+      // they can see it didn't save, rather than silently closing on failure.
+      log.error("prospects bio update failed", { err: error.message });
+      setGameError("Couldn't save changes — please try again.");
+      return;
+    }
     setEditBio(false);
     onDataChanged();
   }

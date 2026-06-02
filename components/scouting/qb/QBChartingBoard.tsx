@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../../../lib/supabaseclient";
+import { fetchAllRows } from "../../../lib/scouting/fetchPlays";
 import { logger } from "../../../lib/logger";
 
 const log = logger("scouting/qb/QBChartingBoard");
@@ -105,27 +106,28 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
           onTabChange, onSelectGame, onToggleAddGame, onNewGameChange,
           onAddGame, onDeleteGame, onUpdateGame, onToggleEditBio, onBioChange, onSaveBio } = cs;
 
-  // Load plays when games change
+  // Load plays when games change (paginated past the 1000-row PostgREST cap).
   useEffect(() => {
     if (games.length === 0) return;
     const ids = games.map((g) => g.id);
-    supabase.from("qb_plays").select("*").in("game_id", ids).order("created_at")
-      .then(({ data, error }) => {
-        if (error) { log.error("qb_plays load failed", { err: error.message }); return; }
-        setPlays((data ?? []) as QBPlay[]);
-      });
+    fetchAllRows<QBPlay>((from, to) =>
+      supabase.from("qb_plays").select("*").in("game_id", ids).order("created_at").range(from, to)
+    )
+      .then((rows) => setPlays(rows))
+      .catch((err) => log.error("qb_plays load failed", { err: String(err) }));
   }, [games]);
 
-  // Load league-wide QB plays once for the AAE breakdown baselines. Refresh
-  // whenever this prospect's plays change so the QB's own contributions are
-  // up-to-date as the user backfills.
+  // Load league-wide QB plays ONCE on mount for the AAE breakdown baselines,
+  // paginated past the 1000-row cap. Previously this re-downloaded the entire
+  // qb_plays table on every play logged ([plays.length] dep) for almost no
+  // accuracy gain — one prospect's throw barely moves a league-wide mean.
   useEffect(() => {
-    supabase.from("qb_plays").select("*")
-      .then(({ data, error }) => {
-        if (error) { log.error("qb_plays league load failed", { err: error.message }); return; }
-        setLeaguePlays((data ?? []) as QBPlay[]);
-      });
-  }, [plays.length]);
+    fetchAllRows<QBPlay>((from, to) =>
+      supabase.from("qb_plays").select("*").order("created_at").range(from, to)
+    )
+      .then((rows) => setLeaguePlays(rows))
+      .catch((err) => log.error("qb_plays league load failed", { err: String(err) }));
+  }, []);
 
   const gamePlays    = useMemo(() => plays.filter((p) => p.game_id === selectedGameId), [plays, selectedGameId]);
 
@@ -339,7 +341,12 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
 
   async function deletePlay(id: string) {
     if (editingPlayId === id) resetForm();
-    await supabase.from("qb_plays").delete().eq("id", id);
+    const { error } = await supabase.from("qb_plays").delete().eq("id", id);
+    if (error) {
+      log.error("qb_plays delete failed", { err: error.message });
+      setPlayError("Couldn't delete that play — please try again.");
+      return;
+    }
     setPlays((prev) => prev.filter((p) => p.id !== id));
     onDataChanged();
   }

@@ -314,7 +314,20 @@ export default function ChartingBoard({
                       <button onClick={(e) => { e.stopPropagation(); openGameEdit(g); }}
                         className="text-gray-600 hover:text-blue-400 text-xs px-1 flex-shrink-0" title="Edit game">✎</button>
                     )}
-                    <button onClick={(e) => { e.stopPropagation(); onDeleteGame(g.id); }}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const count = gamePlayCounts[g.id] ?? 0;
+                        const label = `${g.season_year} ${g.opponent}`.trim();
+                        const playClause = count
+                          ? ` and its ${count} logged play${count === 1 ? "" : "s"}`
+                          : "";
+                        if (window.confirm(`Delete "${label}"${playClause}? This cannot be undone.`)) {
+                          onDeleteGame(g.id);
+                        }
+                      }}
+                      title="Delete game"
+                      aria-label={`Delete game ${g.season_year} ${g.opponent}`}
                       className="text-gray-600 hover:text-red-400 text-xs px-1 flex-shrink-0">✕</button>
                   </div>
                 ))
