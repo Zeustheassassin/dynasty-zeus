@@ -3,6 +3,7 @@ import { CURRENT_YEAR, formatRelativeDate } from "../../../lib/helpers";
 import type { SleeperPlayer, AugmentedPick, SleeperTradedPick } from "../../../lib/types";
 import type { AnnotatedTrade } from "../../../hooks/useUserTrades";
 import ErrorBanner from "../../../components/ErrorBanner";
+import { useModalBehavior } from "../../../lib/hooks/useModalBehavior";
 
 interface Props {
   tradeHubUserId: string;
@@ -16,6 +17,7 @@ interface Props {
 }
 
 export function TradeHubOpponentModal({ tradeHubUserId, users, loadingTradeHub, tradeHubError, tradeHubData, players, allPicks, onClose }: Props) {
+  useModalBehavior(onClose);
   const pickLabel = (p: SleeperTradedPick) => {
     if (String(p.season) === CURRENT_YEAR) {
       const match = allPicks.find(
@@ -36,7 +38,6 @@ export function TradeHubOpponentModal({ tradeHubUserId, users, loadingTradeHub, 
         aria-modal="true"
         aria-labelledby="trade-hub-modal-title"
         tabIndex={-1}
-        onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
         className="bg-gray-900 p-6 rounded-xl w-[560px] max-h-[85vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >

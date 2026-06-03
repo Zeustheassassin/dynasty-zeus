@@ -2,6 +2,7 @@
 import type {
   SleeperPlayer, SleeperLeague, SleeperRoster, LeagueOverviewEntry,
 } from "../../../lib/types";
+import { useModalBehavior } from "../../../lib/hooks/useModalBehavior";
 
 interface Props {
   playerProfileId: string;
@@ -25,6 +26,7 @@ export function PlayerProfilePanel({
   playerNotes, playerDispositions, rosters, users, selectedLeague,
   leagueOverviewData, leagues, savePlayerNote, savePlayerDisposition, onClose,
 }: Props) {
+  useModalBehavior(onClose);
   const p = players[playerProfileId];
   if (!p) return null;
 
@@ -72,7 +74,6 @@ export function PlayerProfilePanel({
         aria-modal="true"
         aria-labelledby="player-profile-title"
         tabIndex={-1}
-        onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
         className="fixed top-0 right-0 h-full w-full max-w-sm bg-gray-950 border-l border-gray-800 z-50 flex flex-col shadow-2xl overflow-y-auto"
       >
         <div className="flex items-start justify-between p-5 border-b border-gray-800">

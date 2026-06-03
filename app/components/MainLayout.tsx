@@ -63,7 +63,14 @@ export function MainLayout({
                       )}
                     </div>
                     {user && (
-                      <button onClick={disconnectSleeper} className="px-2 py-1 text-xs bg-gray-700 rounded hover:bg-gray-600 shrink-0">
+                      <button
+                        onClick={() => {
+                          if (window.confirm("Disconnect Sleeper? This clears your synced leagues from this browser. You can reconnect anytime by entering your username.")) {
+                            disconnectSleeper();
+                          }
+                        }}
+                        className="px-2 py-1 text-xs bg-gray-700 rounded hover:bg-gray-600 shrink-0"
+                      >
                         Disconnect
                       </button>
                     )}

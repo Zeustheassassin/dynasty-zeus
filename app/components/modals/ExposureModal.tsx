@@ -2,6 +2,7 @@
 import type { SleeperPlayer } from "../../../lib/types";
 import type { ExposureData } from "../../../hooks/useUserExposure";
 import ErrorBanner from "../../../components/ErrorBanner";
+import { useModalBehavior } from "../../../lib/hooks/useModalBehavior";
 
 interface Props {
   selectedUserId: string;
@@ -15,6 +16,7 @@ interface Props {
 }
 
 export function ExposureModal({ selectedUserId, users, loadingShares, exposureError, externalShares, players, myPlayerSet, onClose }: Props) {
+  useModalBehavior(onClose);
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={onClose}>
       <div
@@ -22,7 +24,6 @@ export function ExposureModal({ selectedUserId, users, loadingShares, exposureEr
         aria-modal="true"
         aria-labelledby="exposure-modal-title"
         tabIndex={-1}
-        onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
         className="bg-gray-900 p-6 rounded w-96"
         onClick={(e) => e.stopPropagation()}
       >

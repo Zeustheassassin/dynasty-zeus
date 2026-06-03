@@ -1,6 +1,7 @@
 "use client";
 import { ROOKIE_YEAR } from "../../../hooks/useRookieBoardState";
 import type { DraftScoutLeague } from "../../../hooks/useDraftScout";
+import { useModalBehavior } from "../../../lib/hooks/useModalBehavior";
 
 export type DraftScoutPatterns = {
   n: number;
@@ -34,6 +35,7 @@ const posText = (pos: string) =>
   "text-gray-400";
 
 export function DraftScoutModal({ draftScoutUserId, users, loadingDraftScout, draftScoutData, draftScoutPatterns, onClose }: Props) {
+  useModalBehavior(onClose);
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={onClose}>
       <div
@@ -41,7 +43,6 @@ export function DraftScoutModal({ draftScoutUserId, users, loadingDraftScout, dr
         aria-modal="true"
         aria-labelledby="draft-scout-modal-title"
         tabIndex={-1}
-        onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
         className="bg-gray-900 p-6 rounded-xl w-[560px] max-h-[85vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >

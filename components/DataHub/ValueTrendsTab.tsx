@@ -29,6 +29,38 @@ interface ValueTrendsTabProps {
   user: SleeperUser | null;
 }
 
+type TrendRow = {
+  playerId: string;
+  full_name: string;
+  position: string;
+  age?: number | null;
+  injury_status?: string | null;
+  team?: string;
+  currentVal: number;
+  snapVal: number;
+  delta: number;
+  pct: number;
+  owned: number;
+};
+
+type TradeSugg = {
+  type: "sell-window" | "buy-window";
+  giveId: string; receiveId: string;
+  giveVal: number; receiveVal: number;
+  givePct: number; receivePct: number;
+  partnerName: string;
+  givePos: string; receivePos: string;
+  giveAge?: number; receiveAge?: number;
+  giveTeam?: string; receiveTeam?: string;
+};
+
+// Hide low-value noise: a player going 10 → 12 is "+20%" but means nothing.
+// Require the player to be >500 in either the current map or the snapshot.
+const VALUE_FLOOR = 500;
+const MIN_TRADE_VAL = 1500;
+const RATIO_MIN = 0.72;
+const RATIO_MAX = 1.35;
+
 function ValueTrendsTab({ historicalSnapshot, onSaveSnapshot, shares, user }: ValueTrendsTabProps) {
   const players = usePlayers();
   const { rosters, users } = useLeague();
@@ -51,6 +83,150 @@ function ValueTrendsTab({ historicalSnapshot, onSaveSnapshot, shares, user }: Va
     return { ageLabel, isStaleSnapshot: ageDays >= 7 };
   }, [snap, mountedAt]);
 
+  const allTrends = React.useMemo<TrendRow[]>(() => {
+    if (!snap) return [];
+    const out: TrendRow[] = [];
+    Object.entries(snap.players).forEach(([playerId, snapData]: [string, PlayerValueSnapshotEntry]) => {
+      const currentVal = players[playerId]?.value ?? 0;
+      const snapVal = Number(snapData.value ?? 0);
+      if (snapVal <= 0 || currentVal <= 0) return;
+      if (currentVal < VALUE_FLOOR && snapVal < VALUE_FLOOR) return;
+      const delta = currentVal - snapVal;
+      const pct = (delta / snapVal) * 100;
+      const p = players[playerId];
+      if (!p || !["QB", "RB", "WR", "TE"].includes(p.position)) return;
+      if (trendPos !== "ALL" && p.position !== trendPos) return;
+      out.push({
+        playerId,
+        full_name: p.full_name ?? snapData.full_name,
+        position: p.position,
+        age: p.age,
+        injury_status: p.injury_status,
+        team: p.team ?? snapData.team,
+        currentVal,
+        snapVal,
+        delta,
+        pct,
+        owned: shares[playerId]?.count ?? 0,
+      });
+    });
+    return out;
+  }, [snap, players, trendPos, shares]);
+
+  const falling = React.useMemo(
+    () => allTrends.filter((r) => r.pct <= -trendThreshold).sort((a, b) => a.pct - b.pct),
+    [allTrends, trendThreshold]
+  );
+  const rising = React.useMemo(
+    () => allTrends.filter((r) => r.pct >= trendThreshold).sort((a, b) => b.pct - a.pct),
+    [allTrends, trendThreshold]
+  );
+
+  // Trend-based trade suggestions — O(n²) partner matching, so memoize off the
+  // render path (recomputes only when the snapshot, rosters, values, or league change).
+  const { sellWindowTrades, buyWindowTrades } = React.useMemo(() => {
+    if (!snap) return { sellWindowTrades: [] as TradeSugg[], buyWindowTrades: [] as TradeSugg[] };
+    const trendMap = new Map<string, number>();
+    Object.entries(snap.players).forEach(([pid, snapData]) => {
+      const cv = players[pid]?.value ?? 0;
+      const sv = Number(snapData.value ?? 0);
+      if (sv > 0 && cv > 0) trendMap.set(pid, ((cv - sv) / sv) * 100);
+    });
+
+    const myRoster = rosters.find((r) => r.owner_id === user?.user_id);
+    const myPlayerSet = new Set<string>(myRoster?.players ?? []);
+    const partnerRosters = rosters.filter((r) => r.owner_id && r.owner_id !== user?.user_id);
+
+    const usedGiveA = new Set<string>();
+    const usedRecvA = new Set<string>();
+    const sellWindowTrades: TradeSugg[] = [];
+    if (myRoster) {
+      const mySellCands = [...myPlayerSet]
+        .map((id) => ({ id, pct: trendMap.get(id) ?? 0, val: calcFcValues[id] ?? 0 }))
+        .filter((x) => x.pct <= -5 && x.val >= MIN_TRADE_VAL)
+        .sort((a, b) => a.pct - b.pct);
+
+      outer1: for (const mine of mySellCands) {
+        if (sellWindowTrades.length >= 5) break;
+        if (usedGiveA.has(mine.id)) continue;
+        for (const partnerRoster of partnerRosters) {
+          if (sellWindowTrades.length >= 5) break outer1;
+          const partnerCands = ((partnerRoster.players ?? []) as string[])
+            .map((id) => ({ id, pct: trendMap.get(id) ?? 0, val: calcFcValues[id] ?? 0 }))
+            .filter((x) => x.val >= MIN_TRADE_VAL && !usedRecvA.has(x.id))
+            .sort((a, b) => Math.abs(a.val - mine.val) - Math.abs(b.val - mine.val));
+          for (const theirs of partnerCands) {
+            const ratio = mine.val / theirs.val;
+            if (ratio < RATIO_MIN || ratio > RATIO_MAX) continue;
+            const myP = players[mine.id];
+            const theirP = players[theirs.id];
+            if (!myP || !theirP) continue;
+            usedGiveA.add(mine.id);
+            usedRecvA.add(theirs.id);
+            sellWindowTrades.push({
+              type: "sell-window",
+              giveId: mine.id, receiveId: theirs.id,
+              giveVal: mine.val, receiveVal: theirs.val,
+              givePct: mine.pct, receivePct: theirs.pct,
+              partnerName: users[partnerRoster.owner_id] || `Team ${partnerRoster.roster_id}`,
+              givePos: myP.position, receivePos: theirP.position,
+              giveAge: myP.age ?? undefined, receiveAge: theirP.age ?? undefined,
+              giveTeam: myP.team ?? undefined, receiveTeam: theirP.team ?? undefined,
+            });
+            break;
+          }
+        }
+      }
+    }
+
+    const usedGiveB = new Set<string>();
+    const usedRecvB = new Set<string>();
+    const buyWindowTrades: TradeSugg[] = [];
+    if (myRoster) {
+      const myGiveCands = [...myPlayerSet]
+        .map((id) => ({ id, pct: trendMap.get(id) ?? 0, val: calcFcValues[id] ?? 0 }))
+        .filter((x) => x.val >= MIN_TRADE_VAL);
+
+      outerBuy: for (const partnerRoster of partnerRosters) {
+        if (buyWindowTrades.length >= 5) break;
+        const partnerRising = ((partnerRoster.players ?? []) as string[])
+          .filter((id) => !myPlayerSet.has(id))
+          .map((id) => ({ id, pct: trendMap.get(id) ?? 0, val: calcFcValues[id] ?? 0 }))
+          .filter((x) => x.pct >= 5 && x.val >= MIN_TRADE_VAL && !usedRecvB.has(x.id))
+          .sort((a, b) => b.pct - a.pct);
+
+        for (const theirs of partnerRising) {
+          if (buyWindowTrades.length >= 5) break outerBuy;
+          const giveCand = myGiveCands
+            .filter((x) => !usedGiveB.has(x.id))
+            .sort((a, b) => Math.abs(a.val - theirs.val) - Math.abs(b.val - theirs.val))
+            .find((x) => {
+              const ratio = x.val / theirs.val;
+              return ratio >= RATIO_MIN && ratio <= RATIO_MAX;
+            });
+          if (!giveCand) continue;
+          const myP = players[giveCand.id];
+          const theirP = players[theirs.id];
+          if (!myP || !theirP) continue;
+          usedGiveB.add(giveCand.id);
+          usedRecvB.add(theirs.id);
+          buyWindowTrades.push({
+            type: "buy-window",
+            giveId: giveCand.id, receiveId: theirs.id,
+            giveVal: giveCand.val, receiveVal: theirs.val,
+            givePct: giveCand.pct, receivePct: theirs.pct,
+            partnerName: users[partnerRoster.owner_id] || `Team ${partnerRoster.roster_id}`,
+            givePos: myP.position, receivePos: theirP.position,
+            giveAge: myP.age ?? undefined, receiveAge: theirP.age ?? undefined,
+            giveTeam: myP.team ?? undefined, receiveTeam: theirP.team ?? undefined,
+          });
+        }
+      }
+    }
+
+    return { sellWindowTrades, buyWindowTrades };
+  }, [snap, players, rosters, user, calcFcValues, users]);
+
   if (!snap) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
@@ -62,58 +238,6 @@ function ValueTrendsTab({ historicalSnapshot, onSaveSnapshot, shares, user }: Va
       </div>
     );
   }
-
-  type TrendRow = {
-    playerId: string;
-    full_name: string;
-    position: string;
-    age?: number | null;
-    injury_status?: string | null;
-    team?: string;
-    currentVal: number;
-    snapVal: number;
-    delta: number;
-    pct: number;
-    owned: number;
-  };
-
-  // Hide low-value noise: a player going 10 → 12 is "+20%" but means nothing.
-  // Require the player to be >500 in either the current map or the snapshot.
-  const VALUE_FLOOR = 500;
-
-  const allTrends: TrendRow[] = [];
-  Object.entries(snap.players).forEach(([playerId, snapData]: [string, PlayerValueSnapshotEntry]) => {
-    const currentVal = players[playerId]?.value ?? 0;
-    const snapVal = Number(snapData.value ?? 0);
-    if (snapVal <= 0 || currentVal <= 0) return;
-    if (currentVal < VALUE_FLOOR && snapVal < VALUE_FLOOR) return;
-    const delta = currentVal - snapVal;
-    const pct = (delta / snapVal) * 100;
-    const p = players[playerId];
-    if (!p || !["QB", "RB", "WR", "TE"].includes(p.position)) return;
-    if (trendPos !== "ALL" && p.position !== trendPos) return;
-    allTrends.push({
-      playerId,
-      full_name: p.full_name ?? snapData.full_name,
-      position: p.position,
-      age: p.age,
-      injury_status: p.injury_status,
-      team: p.team ?? snapData.team,
-      currentVal,
-      snapVal,
-      delta,
-      pct,
-      owned: shares[playerId]?.count ?? 0,
-    });
-  });
-
-  const falling = allTrends
-    .filter((r) => r.pct <= -trendThreshold)
-    .sort((a, b) => a.pct - b.pct);
-
-  const rising = allTrends
-    .filter((r) => r.pct >= trendThreshold)
-    .sort((a, b) => b.pct - a.pct);
 
   const TrendRow = ({ row, direction }: { row: TrendRow; direction: "up" | "down" }) => (
     <div className={`${TREND_GRID} text-xs py-0.5`}>
@@ -131,124 +255,6 @@ function ValueTrendsTab({ historicalSnapshot, onSaveSnapshot, shares, user }: Va
       <span className="text-[10px] text-gray-500 text-right">{row.owned > 0 ? `${row.owned}×` : ""}</span>
     </div>
   );
-
-  // ── Trade suggestion computation ──────────────────────────────────────
-  const trendMap = new Map<string, number>();
-  Object.entries(snap.players).forEach(([pid, snapData]) => {
-    const cv = players[pid]?.value ?? 0;
-    const sv = Number(snapData.value ?? 0);
-    if (sv > 0 && cv > 0) trendMap.set(pid, ((cv - sv) / sv) * 100);
-  });
-
-  const myRoster = rosters.find((r) => r.owner_id === user?.user_id);
-  const myPlayerSet = new Set<string>(myRoster?.players ?? []);
-  const partnerRosters = rosters.filter(
-    (r) => r.owner_id && r.owner_id !== user?.user_id
-  );
-
-  const MIN_TRADE_VAL = 1500;
-  const RATIO_MIN = 0.72;
-  const RATIO_MAX = 1.35;
-
-  type TradeSugg = {
-    type: "sell-window" | "buy-window";
-    giveId: string; receiveId: string;
-    giveVal: number; receiveVal: number;
-    givePct: number; receivePct: number;
-    partnerName: string;
-    givePos: string; receivePos: string;
-    giveAge?: number; receiveAge?: number;
-    giveTeam?: string; receiveTeam?: string;
-  };
-
-  const usedGiveA = new Set<string>();
-  const usedRecvA = new Set<string>();
-  const sellWindowTrades: TradeSugg[] = [];
-
-  if (myRoster) {
-    const mySellCands = [...myPlayerSet]
-      .map((id) => ({ id, pct: trendMap.get(id) ?? 0, val: calcFcValues[id] ?? 0 }))
-      .filter((x) => x.pct <= -5 && x.val >= MIN_TRADE_VAL)
-      .sort((a, b) => a.pct - b.pct);
-
-    outer1: for (const mine of mySellCands) {
-      if (sellWindowTrades.length >= 5) break;
-      if (usedGiveA.has(mine.id)) continue;
-      for (const partnerRoster of partnerRosters) {
-        if (sellWindowTrades.length >= 5) break outer1;
-        const partnerCands = ((partnerRoster.players ?? []) as string[])
-          .map((id) => ({ id, pct: trendMap.get(id) ?? 0, val: calcFcValues[id] ?? 0 }))
-          .filter((x) => x.val >= MIN_TRADE_VAL && !usedRecvA.has(x.id))
-          .sort((a, b) => Math.abs(a.val - mine.val) - Math.abs(b.val - mine.val));
-        for (const theirs of partnerCands) {
-          const ratio = mine.val / theirs.val;
-          if (ratio < RATIO_MIN || ratio > RATIO_MAX) continue;
-          const myP = players[mine.id];
-          const theirP = players[theirs.id];
-          if (!myP || !theirP) continue;
-          usedGiveA.add(mine.id);
-          usedRecvA.add(theirs.id);
-          sellWindowTrades.push({
-            type: "sell-window",
-            giveId: mine.id, receiveId: theirs.id,
-            giveVal: mine.val, receiveVal: theirs.val,
-            givePct: mine.pct, receivePct: theirs.pct,
-            partnerName: users[partnerRoster.owner_id] || `Team ${partnerRoster.roster_id}`,
-            givePos: myP.position, receivePos: theirP.position,
-            giveAge: myP.age ?? undefined, receiveAge: theirP.age ?? undefined,
-            giveTeam: myP.team ?? undefined, receiveTeam: theirP.team ?? undefined,
-          });
-          break;
-        }
-      }
-    }
-  }
-
-  const usedGiveB = new Set<string>();
-  const usedRecvB = new Set<string>();
-  const buyWindowTrades: TradeSugg[] = [];
-
-  if (myRoster) {
-    const myGiveCands = [...myPlayerSet]
-      .map((id) => ({ id, pct: trendMap.get(id) ?? 0, val: calcFcValues[id] ?? 0 }))
-      .filter((x) => x.val >= MIN_TRADE_VAL);
-
-    outerBuy: for (const partnerRoster of partnerRosters) {
-      if (buyWindowTrades.length >= 5) break;
-      const partnerRising = ((partnerRoster.players ?? []) as string[])
-        .filter((id) => !myPlayerSet.has(id))
-        .map((id) => ({ id, pct: trendMap.get(id) ?? 0, val: calcFcValues[id] ?? 0 }))
-        .filter((x) => x.pct >= 5 && x.val >= MIN_TRADE_VAL && !usedRecvB.has(x.id))
-        .sort((a, b) => b.pct - a.pct);
-
-      for (const theirs of partnerRising) {
-        if (buyWindowTrades.length >= 5) break outerBuy;
-        const giveCand = myGiveCands
-          .filter((x) => !usedGiveB.has(x.id))
-          .sort((a, b) => Math.abs(a.val - theirs.val) - Math.abs(b.val - theirs.val))
-          .find((x) => {
-            const ratio = x.val / theirs.val;
-            return ratio >= RATIO_MIN && ratio <= RATIO_MAX;
-          });
-        if (!giveCand) continue;
-        const myP = players[giveCand.id];
-        const theirP = players[theirs.id];
-        if (!myP || !theirP) continue;
-        usedGiveB.add(giveCand.id);
-        usedRecvB.add(theirs.id);
-        buyWindowTrades.push({
-          type: "buy-window",
-          giveId: giveCand.id, receiveId: theirs.id,
-          giveVal: giveCand.val, receiveVal: theirs.val,
-          givePct: giveCand.pct, receivePct: theirs.pct,
-          partnerName: users[partnerRoster.owner_id] || `Team ${partnerRoster.roster_id}`,
-          givePos: myP.position, receivePos: theirP.position,
-          giveAge: myP.age ?? undefined, receiveAge: theirP.age ?? undefined,
-          giveTeam: myP.team ?? undefined, receiveTeam: theirP.team ?? undefined,
-        });
-      }
-    }
-  }
 
   const TradeSuggCard = ({ t }: { t: TradeSugg }) => {
     const isSell = t.type === "sell-window";
