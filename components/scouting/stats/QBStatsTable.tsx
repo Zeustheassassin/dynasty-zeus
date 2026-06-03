@@ -30,16 +30,16 @@ const COLS: ColDef[] = [
   { key: "g",      label: "G",     group: "Identity", fmt: "count", width: 40 },
   { key: "snaps",  label: "Snaps", group: "Identity", fmt: "count", width: 52 },
 
-  // Snap mix — a complete partition of every graded snap. The six counts sum
-  // EXACTLY to Snaps: graded throws + designed runs + scrambles + sacks +
-  // throw-aways + ungraded throws (tipped balls + not-yet-accuracy-graded throws).
-  // The footer Σ row totals each, and those totals also sum to total Snaps.
-  { key: "n_graded",    label: "Grd",  group: "Snap Mix", fmt: "count", width: 48, tooltip: "Graded throws — accuracy charted, tipped balls excluded. This is the AAE sample." },
-  { key: "n_run",       label: "Run",  group: "Snap Mix", fmt: "count", width: 46, tooltip: "Designed QB runs (play_type = run)." },
-  { key: "n_scramble",  label: "Scrm", group: "Snap Mix", fmt: "count", width: 52, tooltip: "Scrambles (pass/RPO play where the QB took off)." },
-  { key: "n_sack",      label: "Sack", group: "Snap Mix", fmt: "count", width: 50, tooltip: "Sacks taken." },
-  { key: "n_throwaway", label: "TA",   group: "Snap Mix", fmt: "count", width: 46, tooltip: "Throw-aways." },
-  { key: "n_ungraded",  label: "UGr",  group: "Snap Mix", fmt: "count", width: 48, tooltip: "Ungraded throws: tipped balls + throws not yet given an accuracy grade. The reconciling bucket so the snap mix sums to Snaps." },
+  // Snap mix — each outcome as a % of snaps (Snaps stays a raw count). The six
+  // percentages sum to ~100% when every throw is accuracy-graded; any shortfall
+  // from 100% is throws logged but not yet graded (a charting-to-do signal).
+  // League footer shows each as a true play-weighted rate (weightBy snaps).
+  { key: "graded_pct",    label: "Grd%",  group: "Snap Mix", fmt: "pct", width: 54, weightBy: "snaps", tooltip: "Graded throws as % of snaps — accuracy charted, tipped excluded (the AAE sample)." },
+  { key: "run_pct",       label: "Run%",  group: "Snap Mix", fmt: "pct", width: 54, weightBy: "snaps", tooltip: "Designed QB runs as % of snaps." },
+  { key: "scramble_pct",  label: "Scrm%", group: "Snap Mix", fmt: "pct", width: 58, weightBy: "snaps", tooltip: "Scrambles as % of snaps." },
+  { key: "sack_pct",      label: "Sack%", group: "Snap Mix", fmt: "pct", width: 58, weightBy: "snaps", tooltip: "Sacks as % of snaps." },
+  { key: "throwaway_pct", label: "TA%",   group: "Snap Mix", fmt: "pct", width: 54, weightBy: "snaps", tooltip: "Throw-aways as % of snaps." },
+  { key: "tipped_pct",    label: "Tip%",  group: "Snap Mix", fmt: "pct", width: 54, weightBy: "snaps", tooltip: "Tipped balls as % of snaps — deflected throws, excluded from accuracy grading." },
 
   // Overall AAE — play-weighted league mean ≈ 0 by construction. The footer is a
   // sanity check: if it drifts noticeably from 0, there are plays in the baseline
@@ -182,13 +182,14 @@ export default function QBStatsTable({ prospects, games, qbPlays, loading, draft
         const gradedThrows = thrownPlays.filter((pl) => pl.accuracy !== "tipped_ball" && pl.accuracy != null);
         const ratedN = gradedThrows.length;
 
-        // Snap-mix partition — these six counts sum to pPlays.length (Snaps):
-        //   graded + run + scramble + sack + throwaway + ungraded throws.
-        const runN            = pPlays.filter((pl) => pl.play_type === "run").length;
-        const scrambleN       = passRpoPlays.filter((pl) => pl.timing === "scramble").length;
-        const sackN           = passRpoPlays.filter((pl) => pl.timing === "sack").length;
-        const throwAwayN      = passRpoPlays.filter((pl) => pl.timing === "throw_away").length;
-        const ungradedThrowsN = thrownPlays.length - gradedThrows.length; // tipped balls + null-accuracy throws
+        // Snap-mix counts (rendered as % of snaps below): graded + run + scramble
+        // + sack + throwaway + tipped sum to snaps when every throw is graded.
+        const snapsN     = pPlays.length;
+        const runN       = pPlays.filter((pl) => pl.play_type === "run").length;
+        const scrambleN  = passRpoPlays.filter((pl) => pl.timing === "scramble").length;
+        const sackN      = passRpoPlays.filter((pl) => pl.timing === "sack").length;
+        const throwAwayN = passRpoPlays.filter((pl) => pl.timing === "throw_away").length;
+        const tippedN    = thrownPlays.filter((pl) => pl.accuracy === "tipped_ball").length;
 
         const compTracked   = thrownPlays.filter((pl) => pl.completion !== null);
         const compN         = compTracked.length;
@@ -269,13 +270,13 @@ export default function QBStatsTable({ prospects, games, qbPlays, loading, draft
           g: gamesByProspect.get(p.id) ?? 0,
           snaps: pPlays.length,
 
-          // Snap mix (sums to snaps): graded + run + scramble + sack + throwaway + ungraded
-          n_graded:    ratedN,
-          n_run:       runN,
-          n_scramble:  scrambleN,
-          n_sack:      sackN,
-          n_throwaway: throwAwayN,
-          n_ungraded:  ungradedThrowsN,
+          // Snap mix as % of snaps (sum to ~100% when every throw is graded)
+          graded_pct:    pct(ratedN,     snapsN),
+          run_pct:       pct(runN,       snapsN),
+          scramble_pct:  pct(scrambleN,  snapsN),
+          sack_pct:      pct(sackN,      snapsN),
+          throwaway_pct: pct(throwAwayN, snapsN),
+          tipped_pct:    pct(tippedN,    snapsN),
 
           // Weight denominators (referenced by ColDef.weightBy for the league row)
           rated_n: ratedN,
