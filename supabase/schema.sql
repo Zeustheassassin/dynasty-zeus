@@ -369,3 +369,27 @@ drop policy if exists "league_player_tags_self" on league_player_tags;
 create policy "league_player_tags_self" on league_player_tags for all
   using (auth.uid()::text = user_id::text)
   with check (auth.uid()::text = user_id::text);
+-- Fast lookup by user + league (most common query pattern); mirrors migration 003.
+create index if not exists idx_league_player_tags_user_league
+  on league_player_tags (user_id, league_id);
+
+-- ── gm_briefings (AI-generated per-team briefings, keyed by user+league+roster) ─
+-- Documented here for fresh-install parity (it was previously only in the
+-- migration chain: created by 013, RLS added by 026). Per audit batch B8 the
+-- user_id is intentionally LEFT WITHOUT a FK to auth.users — RLS (auth.uid() =
+-- user_id) is the access control; orphan cleanup on user-delete is not enforced.
+create table if not exists gm_briefings (
+  id           uuid        primary key default gen_random_uuid(),
+  user_id      uuid        not null,
+  league_id    text        not null,
+  roster_id    integer     not null,
+  briefing     jsonb       not null,
+  generated_at timestamptz not null default now(),
+  constraint gm_briefings_unique unique (user_id, league_id, roster_id)
+);
+create index if not exists gm_briefings_user_idx on gm_briefings (user_id);
+alter table gm_briefings enable row level security;
+drop policy if exists "gm_briefings_self" on gm_briefings;
+create policy "gm_briefings_self" on gm_briefings for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
