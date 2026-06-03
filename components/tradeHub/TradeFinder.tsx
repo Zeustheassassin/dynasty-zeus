@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useDeferredValue, startTransition } from "react";
 import {
   getStoredPickValue,
-  CURRENT_YEAR,
+  getSeasonYear,
 } from "../../lib/helpers";
 
 import type {
@@ -231,21 +231,13 @@ function TradeFinder({
   const top32QBFloor = allQBsSorted[31] ?? 0;
 
 
-  return (() => {
-      if (!selectedLeague) return (
-        <p className="text-gray-400 text-sm">Select a league from the dropdown above to use the Trade Finder.</p>
-      );
-      // Block the entire finder until the authoritative direction profile is ready.
-      // selectedLeagueDirectionAdjusted returns null whenever its inputs are mid-update
-      // (league switch, sim recomputing for the new league, etc.). Showing stale trades
-      // driven by the wrong direction is worse than showing a spinner.
-      if (!selectedLeagueDirectionAdjusted) return (
-        <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
-          <div className="w-8 h-8 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
-          <p className="text-sm text-gray-400">Computing direction engine…</p>
-          <p className="text-xs text-gray-600">Analysing your roster, picks, and playoff simulation</p>
-        </div>
-      );
+  // Entire render-time finder pipeline hoisted into one memo so typing in the
+  // search inputs (isolated components) and unrelated parent re-renders no longer
+  // re-run the O(n²)+ trade-generation loops. Returns null while any gate is unmet;
+  // the gate JSX is re-rendered at component level below (hooks can't be conditional).
+  const finderModel = useMemo(() => {
+      if (!selectedLeague || !selectedLeagueDirectionAdjusted || loadingCalcValues) return null;
+      const finderSeasonYear = getSeasonYear(nflState);
 
       const finderPickLabel = (p: AugmentedPick) => {
         const via = p.roster_id !== p.owner_id ? ` (via ${users[p.roster_id] || `Team ${p.roster_id}`})` : "";
@@ -257,7 +249,7 @@ function TradeFinder({
           ? (selectedLeagueDynamicPickValues[`${p.season}-${p.round}-${p.roster_id}`]?.expectedSlot ?? null)
           : null;
         // Only show predicted slot for current and next year — 2+ years out is too speculative
-        const expectedSuffix = expectedSlot != null && Number(p.season) <= Number(CURRENT_YEAR) + 1
+        const expectedSuffix = expectedSlot != null && Number(p.season) <= Number(finderSeasonYear) + 1
           ? ` · Predicted Slot ${expectedSlot}` : "";
         return `${slotLabel}${expectedSuffix}${via}`;
       };
@@ -367,7 +359,7 @@ function TradeFinder({
                       ? "Transition"
                       : "Direction Mix";
       const priorityDraftYear = String(
-        Number(CURRENT_YEAR) + (selectedLeagueDraftHasOccurred ? 1 : 0)
+        Number(finderSeasonYear) + (selectedLeagueDraftHasOccurred ? 1 : 0)
       );
       const orderedDraftYears = [
         ...YEARS.filter((year) => Number(year) >= Number(priorityDraftYear)),
@@ -379,7 +371,7 @@ function TradeFinder({
       const numTeams = rosters.length;
       // 2+ years out: skip slot prediction and use round-average as a neutral baseline
       const finderPickValue = (p: AugmentedPick) => {
-        if (Number(p.season) > Number(CURRENT_YEAR) + 1) return getStoredPickValue(pickFcValues, p);
+        if (Number(p.season) > Number(finderSeasonYear) + 1) return getStoredPickValue(pickFcValues, p);
         return selectedLeagueDynamicPickValues[`${p.season}-${p.round}-${p.roster_id}`]?.expectedValue ?? getStoredPickValue(pickFcValues, p);
       };
       const myFinderPicks = allPicks
@@ -457,10 +449,6 @@ function TradeFinder({
         ? [...myTopBase.slice(0, 9), myPinnedPlayer].filter(Boolean)
         : myTopBase;
       // When either give or receive player is pinned, relax loop caps so rarer combos surface
-
-
-
-      if (loadingCalcValues) return <p className="text-sm text-blue-400">Loading player values…</p>;
 
       // ── Ignored owners notice ──
       const ignoredInLeague = rosters.filter((r) => r.owner_id !== user?.user_id && ignoredOwnerIds.includes(r.owner_id));
@@ -1091,7 +1079,55 @@ function TradeFinder({
         getTradeLineupSafety,
       });
 
-      return (
+      return {
+        allTrades, recentFingerprints, rosterOverflow,
+        finderDirectionProfile, finderDirection, autoStrategyLabel,
+        isChampionshipPush, finderTankMode, draftCapitalMode,
+        finderPreferFuturePicks, iAmTankingFinder, weakPositions,
+        numTeams, myRoster, pinnedPlayer, targetPinnedPlayer,
+        allOppPlayers, ignoredInLeague, calcDropCost, finderPickLabel,
+        getTradeIntent,
+      };
+  }, [
+    selectedLeague, selectedLeagueDirectionAdjusted, loadingCalcValues, nflState,
+    users, selectedLeagueDynamicPickValues, finderRosterPlayersMap, rosters,
+    calcFcValues, user, playerDispositions, leaguePlayerTags, allPicks,
+    selectedLeagueDraftHasOccurred, pickFcValues, redraftValues, marketSignalMap,
+    players, deferredPinnedPlayerId, deferredTargetOppRosterId, deferredTargetPlayerId,
+    top32QBFloor, nflTeamDepth, ignoredOwnerIds, selectedLeagueSimulation,
+    deferredFinderSeed, tradePartnerRankings, leagueMateProfileByRosterId,
+    tradeAttempts, historicalSnapshot, playerStats, crossLeagueExposure,
+    buyLowPlayerIds, finderWeeklyProjMap,
+  ]);
+
+  if (!selectedLeague) return (
+    <p className="text-gray-400 text-sm">Select a league from the dropdown above to use the Trade Finder.</p>
+  );
+  // Block the entire finder until the authoritative direction profile is ready.
+  // selectedLeagueDirectionAdjusted returns null whenever its inputs are mid-update
+  // (league switch, sim recomputing for the new league, etc.). Showing stale trades
+  // driven by the wrong direction is worse than showing a spinner.
+  if (!selectedLeagueDirectionAdjusted) return (
+    <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+      <div className="w-8 h-8 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
+      <p className="text-sm text-gray-400">Computing direction engine…</p>
+      <p className="text-xs text-gray-600">Analysing your roster, picks, and playoff simulation</p>
+    </div>
+  );
+  if (loadingCalcValues) return <p className="text-sm text-blue-400">Loading player values…</p>;
+  if (!finderModel) return null;
+
+  const {
+    allTrades, recentFingerprints, rosterOverflow,
+    finderDirectionProfile, finderDirection, autoStrategyLabel,
+    isChampionshipPush, finderTankMode, draftCapitalMode,
+    finderPreferFuturePicks, iAmTankingFinder, weakPositions,
+    numTeams, myRoster, pinnedPlayer, targetPinnedPlayer,
+    allOppPlayers, ignoredInLeague, calcDropCost, finderPickLabel,
+    getTradeIntent,
+  } = finderModel;
+
+  return (
         <div className="space-y-4">
           {/* ── Player pin search ── */}
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 space-y-2">
@@ -1296,8 +1332,6 @@ function TradeFinder({
           />
         </div>
       );
-
-  })();
 }
 
 export default React.memo(TradeFinder);
