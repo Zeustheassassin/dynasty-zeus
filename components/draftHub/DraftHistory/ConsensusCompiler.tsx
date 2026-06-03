@@ -39,6 +39,8 @@ export default function ConsensusCompiler({
 }: ConsensusCompilerProps) {
   const hasMeta          = !!consensusMeta[selectedHistoryYear];
   const meta             = consensusMeta[selectedHistoryYear];
+  // Calendar-year range (NOT NFL season-year): historical drafts are filed by the
+  // calendar year they occurred. Spans 2020 → current calendar year.
   const YEAR_RANGE       = Array.from({ length: new Date().getFullYear() - 2020 + 1 }, (_, i) => 2020 + i);
   const ALL_COMPILED_YEARS = Object.keys(consensusMeta).map(Number).sort().reverse();
 

@@ -49,6 +49,7 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
   const [compileProgress, setCompileProgress] = useState(0);
   const [showCompilePanel, setShowCompilePanel] = useState(false);
   const [compileSelectedYears, setCompileSelectedYears] = useState<Set<number>>(() => {
+    // Calendar year (not NFL season-year): draft history is bucketed by calendar year.
     const cur = new Date().getFullYear();
     // Include current year so in-progress drafts can be compiled for a rough live ADP read.
     return new Set(Array.from({ length: cur - 2020 + 1 }, (_, i) => 2020 + i));

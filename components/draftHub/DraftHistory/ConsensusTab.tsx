@@ -80,6 +80,7 @@ export default function ConsensusTab({
   // Past years require 8% of compiled drafts to surface a player. Current year drops to 3%
   // because most drafts are still in progress and contribute fewer picks each — the 8% bar
   // would over-filter and hide legitimate live ADP signal.
+  // Calendar year intentionally (not NFL season-year): history is keyed by calendar year.
   const isCurrentYear = selectedHistoryYear === String(new Date().getFullYear());
   const minDraftsPct = isCurrentYear ? 0.03 : 0.08;
   const minDrafts = Math.max(1, Math.ceil(totalDraftsForYear * minDraftsPct));
