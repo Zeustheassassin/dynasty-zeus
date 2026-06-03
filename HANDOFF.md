@@ -54,6 +54,7 @@ dynastyzeus-app/
 │   ├── TradeHub.tsx + tradeHub/   # Trade calculator, finder, log, market
 │   ├── scouting/           # Position-specific scouting boards (QB/RB/WR/TE)
 │   ├── Dashboard.tsx
+│   ├── ErrorBanner.tsx     # shared inline error banner for loader-hook failures
 │   └── ErrorBoundary.tsx
 │
 ├── hooks/                  # Reusable React hooks for data fetching/state
@@ -62,7 +63,7 @@ dynastyzeus-app/
 ├── lib/                    # Pure utilities, contexts, API clients, constants
 │   ├── *Context.tsx        # React contexts (Auth, League, Players, Roster, Values)
 │   ├── helpers/            # Pure functions: math, lineup, picks, direction engine, etc.
-│   ├── hooks/              # useLocalStorage with TTL
+│   ├── hooks/              # useLocalStorage (TTL + quota eviction), useModalBehavior (Escape + scroll-lock)
 │   ├── recruiting/         # CFD/247 recruit matching logic
 │   ├── scouting/           # Aggregate-merge logic for charting data
 │   ├── apiHelpers.ts       # Shared server-side helpers (auth, response shapes)
@@ -77,7 +78,7 @@ dynastyzeus-app/
 │
 ├── supabase/
 │   ├── schema.sql          # Full snapshot of the database schema (run once on a new project)
-│   └── migrations/         # 22+ numbered migrations (001_… through 022_…) — apply in order
+│   └── migrations/         # numbered migrations 001_… through 039_… — apply in order
 │
 ├── scripts/
 │   ├── backup-supabase.bat # Double-click to run a manual DB backup on Windows
@@ -93,7 +94,10 @@ dynastyzeus-app/
 ├── vitest.config.mts       # Vitest test runner config
 ├── eslint.config.mjs       # ESLint flat config (ESLint 9)
 ├── postcss.config.mjs      # Tailwind v4 PostCSS plugin
+├── README.md               # Project overview + quick start (points here)
 ├── CLAUDE.md / AGENTS.md   # Agent-facing notes (Next.js version warning)
+├── SEASON_ROLLOVER.md      # Calendar-year vs NFL-season-year handling
+├── OBSERVABILITY.md        # Where prod logs land + optional alerting upgrade
 └── HANDOFF.md              # ← this file
 ```
 
@@ -172,10 +176,11 @@ Everything user-generated. See [§7](#7-supabase-database).
 ## 7. Supabase (database)
 
 ### 7.1 Structure
-The complete schema lives in [supabase/schema.sql](supabase/schema.sql) — this is the snapshot you would run to spin up a brand-new project. Incremental changes are in [supabase/migrations/](supabase/migrations/) numbered `001_…` through `035_…` (and growing). **Apply them in order.**
+The complete schema lives in [supabase/schema.sql](supabase/schema.sql) — this is the snapshot you would run to spin up a brand-new project. Incremental changes are in [supabase/migrations/](supabase/migrations/) numbered `001_…` through `039_…` (and growing). **Apply them in order.** (`db_setup.sql` — an old pre-migration manual setup — was removed; it was fully superseded by `006_consolidate_schema`.)
 
 Key table categories:
-- **User content:** `notes`, `league_notes`, `league_management`, `commissioner_payments`, `player_notes`, `player_dispositions`, `trade_attempts`, `alerts`, `watchlists`, `big_board_snapshots`, `rookie_board_overrides`, `player_value_snapshots`, `leaguemate_profiles`
+- **User content:** `notes`, `league_notes`, `league_management`, `commissioner_payments`, `player_notes`, `player_dispositions`, `trade_attempts`, `alerts`, `watchlists`, `big_board_snapshots`, `rookie_board_overrides`, `player_value_snapshots`, `leaguemate_profiles`, `league_player_tags` (Trade Finder CORE / WANT_TO_TRADE tags; `user_id` is `uuid`+FK after migration 038), `gm_briefings` (per-team briefings; FK added in 039)
+- **Bookkeeping:** `applied_migrations` (manual ledger of which numbered migrations have run, seeded + maintained by hand; added in 037)
 - **Server-side cron support:** `user_sleeper_links` (Supabase user → Sleeper user_id mapping; consumed by the league-transactions cron), `league_transactions_cache` (per-user transaction feed, refreshed every 2h)
 - **Caching tables:** `cross_league_rosters_cache`, `sleeper_stats_cache`, `fc_values_cache`, plus aggregate views
 - **Scouting:** `prospects`, `scouting_games`, `qb_plays`, `rb_plays`, `te_plays`, `wr_plays`, plus aggregate views (`scouting_game_route_stats`, `scouting_game_snap_stats`). `qb_plays` was expanded in migrations 031–034 to add tipped-ball accuracy, platform/pressure/handling charting, and touch logging — see [§5 / Scouting Hub](#5-the-hubs--what-each-major-screen-does).
@@ -264,7 +269,7 @@ This took the longest to get right. The current shape (after multiple architectu
 2. **Feature hooks** ([app/hooks/](app/hooks/), [hooks/](hooks/)) — each owns one slice (auth, projections, rookie board, etc.).
 3. **Context providers** ([app/providers/AppProviders.tsx](app/providers/AppProviders.tsx) + [lib/*Context.tsx](lib/)) — for shared values that many descendants read (players list, current league, FC values, current user). Avoids prop-drilling.
 4. **`useLocalStorage` with TTL** ([lib/hooks/useLocalStorage.ts](lib/hooks/useLocalStorage.ts)) — persists user prefs and caches Sleeper responses across sessions.
-5. **Tab/section state** — each hub has its own state hook (e.g. `useLeagueTabState`, `useAlertsState`, `useChartingState`).
+5. **Tab/section state** — `useHubRouting` owns the active hub (`mainTab`) plus each hub's subtab and **persists them to localStorage** (validated against the HUBS registry on restore, so a renamed/removed tab falls back to its default). Each hub additionally has its own internal state hook (e.g. `useLeagueTabState`, `useAlertsState`, `useChartingState`).
 
 ---
 
@@ -281,6 +286,8 @@ npm run test:watch    # Vitest watch mode
 ```
 
 **CI gotcha:** the project's CI runs `tsc` *after* `next build` because Next.js generates `routes.d.ts` during the build step. Running `tsc` first will fail with missing types. See [memory: project_ci_gotchas.md](C:/Users/bstefely.NPCSEALANTS/.claude/projects/c--Users-bstefely-NPCSEALANTS-dynastyzeus-app/memory/project_ci_gotchas.md).
+
+**Windows/Vitest gotcha:** on this machine, run Vitest through **PowerShell** (`npm run test`), not Git Bash. Vitest 4 under Git Bash fails to locate its runner (`Vitest failed to find the runner` / "Cannot read properties of undefined (reading 'config')") and silently collects **0 tests** — an environment quirk, not a test failure. The suite currently has ~430 tests, including the four previously-untested cores (finder pipeline, AAE model, consensus compiler, league-transactions cron).
 
 Other ESLint rules that bite frequently:
 - `react-hooks/exhaustive-deps` — error, not warning.
@@ -324,6 +331,7 @@ git push              # triggers Vercel deploy
 | FantasyCalc values stale | [app/api/fc-values/route.ts](app/api/fc-values/route.ts) — check upstream status. The route caches at the edge. |
 | Build fails on `noUnusedLocals` | Unused import or variable — remove it. TypeScript is strict here on purpose. |
 | Rate limit complaints from one IP | Upstash Redis dashboard → look at the `rl:*` keys, or temporarily raise the limit in the offending route. |
+| Need to see what happened in prod | Vercel → project → **Logs (Runtime Logs)**. Every `logger` call lands there as a JSON line keyed by `level`/`context`; filter `"level":"error"`. No external alerting is wired — see [OBSERVABILITY.md](OBSERVABILITY.md) for the (optional, paid) upgrade path. |
 
 ---
 
