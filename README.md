@@ -1,36 +1,51 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# DynastyZeus
 
-## Getting Started
+A single-owner Sleeper fantasy-football command center: dynasty/redraft value
+rankings, a trade calculator and trade finder, a season simulator, scouting
+charts (QB/RB/WR/TE), a rookie draft board with network consensus, league
+management, and leaguemate intel — all driven from your connected Sleeper
+account.
 
-First, run the development server:
+## Quick start
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+cp .env.example .env.local   # then fill in the values (see below)
+npm run dev                  # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Scripts
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+| Command | What it does |
+|---------|--------------|
+| `npm run dev`   | Start the dev server (Turbopack) |
+| `npm run build` | Production build (also runs the TypeScript check) |
+| `npm run test`  | Run the Vitest suite |
+| `npm run lint`  | Run ESLint |
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Tech stack
 
-## Learn More
+Next.js 16 (App Router) · React 19 · TypeScript 5 · Tailwind CSS v4 ·
+Supabase (Postgres + Auth + RLS) · Upstash Redis (rate limiting) · Vercel
+(hosting + cron).
 
-To learn more about Next.js, take a look at the following resources:
+## Environment
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Copy `.env.example` → `.env.local` and fill it in. Only the Supabase
+credentials are required for core functionality; Upstash and `CRON_SECRET` are
+for production rate-limiting and scheduled jobs. All external data sources
+(Sleeper, FantasyCalc, FantasyPros, ESPN, Google Sheets) are public APIs that
+need no keys.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Database
 
-## Deploy on Vercel
+Apply the migrations in [`supabase/migrations/`](supabase/migrations/) in
+numeric order via the Supabase SQL editor (or `supabase db push`).
+[`supabase/schema.sql`](supabase/schema.sql) is a full snapshot for reference /
+disaster recovery — the migration chain is the source of truth.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## More docs
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- [`HANDOFF.md`](HANDOFF.md) — architecture overview, tech stack, and file layout.
+- [`AGENTS.md`](AGENTS.md) — contributor notes, including the Next.js 16 API
+  differences to be aware of before writing code.

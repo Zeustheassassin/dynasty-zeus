@@ -22,6 +22,7 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from "next/server";
+import { timingSafeEqual } from "crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { safeFetch, withConcurrency } from "../../../../lib/sleeperServer";
 import { getDraftRoundSlot } from "../../../../lib/helpers/picks";
@@ -251,7 +252,11 @@ export async function GET(req: NextRequest): Promise<Response> {
       { status: 500 }
     );
   }
-  if (req.headers.get("authorization") !== `Bearer ${expected}`) {
+  // Constant-time comparison so a timing side-channel can't reveal the secret.
+  // timingSafeEqual throws on length mismatch, so guard the length first.
+  const authBuf = Buffer.from(req.headers.get("authorization") ?? "");
+  const expectedBuf = Buffer.from(`Bearer ${expected}`);
+  if (authBuf.length !== expectedBuf.length || !timingSafeEqual(authBuf, expectedBuf)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

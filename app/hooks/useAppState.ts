@@ -241,7 +241,7 @@ const [standings, setStandings] = useState<StandingRow[]>([]);
     loadingLeagueWeeklyMatchups, setLoadingLeagueWeeklyMatchups,
     ownerDraftTendencies,
     loadActivity,
-  } = useActivityState(rosters, user);
+  } = useActivityState();
 
   const leaguesRef2 = useRef(leagues);
   const selectedLeagueRef = useRef(selectedLeague);
@@ -1116,39 +1116,6 @@ const saveSnapshotNow = async () => {
 
 
 
-const getTeamSummary = useCallback(() => {
-  if (!roster || !players) return null;
-
-  const summary: Record<string, number> = {
-    QB: 0,
-    RB: 0,
-    WR: 0,
-    TE: 0,
-    TAXI: roster?.taxi?.length || 0,
-  };
-
-  roster.players?.forEach((id: string) => {
-    const p = players[id];
-    if (!p) return;
-
-    if (summary[p.position] !== undefined) {
-      summary[p.position]++;
-    }
-  });
-
-  // Derive year window from picks themselves — already correctly shifted by
-  // the pickYearWindow logic in loadRoster (drops completed-draft seasons,
-  // extends forward), so iterating YEARS here would miss the new far-year.
-  const pickSummary: Record<string, number> = {};
-  picks.forEach((p) => {
-    const year = String(p.season);
-    pickSummary[year] = (pickSummary[year] ?? 0) + 1;
-  });
-
-  return { summary, pickSummary };
-}, [roster, players, picks]);
-
-  const teamSummary = useMemo(() => getTeamSummary(), [getTeamSummary]);
   const gamedayWeek = useMemo(() => {
     const rawWeek = Number(nflState?.week || 0);
     return nflState?.season_type === "regular" && rawWeek > 0 ? rawWeek : 0;
@@ -3543,7 +3510,6 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     leagueOverviewData,
     leagueOverviewLoaded,
     leagueOverviewError,
-    teamSummary,
     selectedLeagueMateProfilesView,
     ignoredOwnerIds,
     toggleIgnoredOwner,

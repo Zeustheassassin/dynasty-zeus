@@ -313,7 +313,10 @@ async function compileDrafts(
       progress: 85,
     });
 
-    // Build rows sorted by average pick number
+    // Build rows sorted by average pick number. computed_at is stamped with a
+    // single per-run timestamp so the upsert refreshes it and we can prune rows
+    // left over from a previous compile (see the write block below).
+    const runAt = new Date().toISOString();
     const rows = Array.from(playerMap.entries())
       .map(([player_id, data]) => ({
         user_id:      authUserId,
@@ -324,24 +327,38 @@ async function compileDrafts(
         team:         data.team,
         avg_pick_no:  data.picks.reduce((s, p) => s + p, 0) / data.picks.length,
         draft_count:  data.picks.length,
+        computed_at:  runAt,
       }))
       .sort((a, b) => a.avg_pick_no - b.avg_pick_no);
 
-    // Delete old data for this user+year, then insert fresh rows
-    const { error: deleteError } = await supabaseClient
-      .from("consensus_draft_cache")
-      .delete()
-      .eq("user_id", authUserId)
-      .eq("year", year);
-    if (deleteError) {
-      emit({ type: "status", message: `Warning: could not clear old cache for ${year}: ${deleteError.message}`, progress: 70 });
+    // Atomic-ish replace: upsert the fresh rows first (old rows stay readable the
+    // whole time), then prune only the now-stale rows. The previous delete-then-
+    // insert could wipe the cache and then fail mid-insert, leaving it empty; this
+    // way a partial failure leaves a valid merge of old + new instead.
+    // Upsert in batches of 200 to stay under Supabase request size limits.
+    let writeOk = true;
+    for (let i = 0; i < rows.length; i += 200) {
+      const { error } = await supabaseClient
+        .from("consensus_draft_cache")
+        .upsert(rows.slice(i, i + 200), { onConflict: "user_id,year,player_id" });
+      if (error) {
+        writeOk = false;
+        emit({ type: "status", message: `Warning: save error for ${year} batch ${i}: ${error.message}`, progress: 85 });
+      }
     }
 
-    // Insert in batches of 200 to stay under Supabase request size limits
-    for (let i = 0; i < rows.length; i += 200) {
-      const { error } = await supabaseClient.from("consensus_draft_cache").insert(rows.slice(i, i + 200));
-      if (error) {
-        emit({ type: "status", message: `Warning: save error for ${year} batch ${i}: ${error.message}`, progress: 85 });
+    // Prune players left over from a previous compile (older computed_at), but
+    // only once every new row landed and only when this run actually produced
+    // rows — an empty result must not wipe a good cache.
+    if (writeOk && rows.length > 0) {
+      const { error: pruneError } = await supabaseClient
+        .from("consensus_draft_cache")
+        .delete()
+        .eq("user_id", authUserId)
+        .eq("year", year)
+        .lt("computed_at", runAt);
+      if (pruneError) {
+        emit({ type: "status", message: `Warning: could not prune old cache for ${year}: ${pruneError.message}`, progress: 88 });
       }
     }
 
