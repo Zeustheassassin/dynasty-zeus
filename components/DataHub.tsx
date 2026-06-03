@@ -11,6 +11,7 @@ import LeaguematesTab from "./DataHub/LeaguematesTab";
 import DepthChartsTab from "./DataHub/DepthChartsTab";
 import BuyLowTab from "./DataHub/BuyLowTab";
 import MySharesTab from "./DataHub/MySharesTab";
+import ErrorBanner from "./ErrorBanner";
 
 // ── Local types ─────────────────────────────────────────────────────────────
 type DataHubTabId = "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "LEAGUEMATES" | "DEPTH_CHARTS" | "BUY_LOW" | "MY_SHARES";
@@ -24,10 +25,12 @@ interface DataHubProps {
 
   // Dynasty/Redraft rankings
   loadingCalcValues: boolean;
+  calcValuesError: string | null;
   playerDispositions: Record<string, { sell: string; buy: string }>;
   savePlayerDisposition: (playerId: string, sell: string, buy: string) => void;
   setPlayerProfileId: (id: string | null) => void;
   loadingRedraft: boolean;
+  redraftError: string | null;
 
   // Projections tab
   projectionData: ProjectionRow[];
@@ -63,9 +66,9 @@ interface DataHubProps {
 function DataHub({
   dataHubTab, setDataHubTab,
   shares,
-  loadingCalcValues,
+  loadingCalcValues, calcValuesError,
   playerDispositions, savePlayerDisposition, setPlayerProfileId,
-  loadingRedraft,
+  loadingRedraft, redraftError,
   projectionData, setProjectionData, projectionPosFilter, setProjectionPosFilter,
   projectionWeek, setProjectionWeek, setProjectionLoaded, loadProjections,
   projectionSeasonYear, projectionSourceStatus, loadingProjections, projectionUsesSeasonFallback,
@@ -108,6 +111,13 @@ function DataHub({
           ))}
         </div>
       </div>
+
+      {(calcValuesError || redraftError) && (
+        <div className="mb-4 space-y-2">
+          <ErrorBanner message={calcValuesError} />
+          <ErrorBanner message={redraftError} />
+        </div>
+      )}
 
       {dataHubTab === "RANKINGS" && (
         <RankingsTab

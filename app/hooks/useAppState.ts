@@ -146,6 +146,7 @@ const {
   tradeHubUserId, setTradeHubUserId,
   tradeHubData, setTradeHubData,
   loadingTradeHub,
+  tradeHubError,
   loadUserTrades,
 } = useUserTrades();
 const {
@@ -164,8 +165,10 @@ const {
 const {
   calcFcValues,
   loadingCalcValues,
+  calcValuesError,
   redraftValues,
   loadingRedraft,
+  redraftError,
   loadCalcValues,
   loadRedraftValues,
 } = useCalcValues();
@@ -227,6 +230,7 @@ const [standings, setStandings] = useState<StandingRow[]>([]);
     leagueOverviewData,
     loadingLeagueOverview,
     leagueOverviewLoaded,
+    leagueOverviewError,
     loadLeagueOverview,
   } = useLeagueOverview(leagues, user);
 
@@ -253,6 +257,7 @@ const {
   selectedUserId, setSelectedUserId,
   externalShares,
   loadingShares,
+  exposureError,
   loadUserExposure,
 } = useUserExposure();
 // ── ALERTS / WATCHLIST ─────────────────────────────────────────
@@ -3537,12 +3542,14 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     activityTransactions,
     leagueOverviewData,
     leagueOverviewLoaded,
+    leagueOverviewError,
     teamSummary,
     selectedLeagueMateProfilesView,
     ignoredOwnerIds,
     toggleIgnoredOwner,
     freeAgents,
     loadingCalcValues,
+    calcValuesError,
     loadingDraftRefresh,
     rookies,
     draftedPlayerIds,
@@ -3575,6 +3582,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     playerDispositions,
     savePlayerDisposition,
     loadingRedraft,
+    redraftError,
     projectionData, setProjectionData,
     projectionPosFilter, setProjectionPosFilter,
     projectionWeek,
@@ -3587,6 +3595,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     selectedUserId, setSelectedUserId,
     externalShares,
     loadingShares,
+    exposureError,
     historicalSnapshot,
     saveSnapshotNow,
     draftHubSection, setDraftHubSection,
@@ -3613,6 +3622,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     tradePartnerRankings,
     tradeHubData,
     loadingTradeHub,
+    tradeHubError,
     tradeHubUserId, setTradeHubUserId,
     setTradeHubData,
     tradeAttempts,

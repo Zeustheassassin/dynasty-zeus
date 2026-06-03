@@ -2,18 +2,20 @@
 import { CURRENT_YEAR, formatRelativeDate } from "../../../lib/helpers";
 import type { SleeperPlayer, AugmentedPick, SleeperTradedPick } from "../../../lib/types";
 import type { AnnotatedTrade } from "../../../hooks/useUserTrades";
+import ErrorBanner from "../../../components/ErrorBanner";
 
 interface Props {
   tradeHubUserId: string;
   users: Record<string, string>;
   loadingTradeHub: boolean;
+  tradeHubError: string | null;
   tradeHubData: AnnotatedTrade[] | null;
   players: Record<string, SleeperPlayer>;
   allPicks: AugmentedPick[];
   onClose: () => void;
 }
 
-export function TradeHubOpponentModal({ tradeHubUserId, users, loadingTradeHub, tradeHubData, players, allPicks, onClose }: Props) {
+export function TradeHubOpponentModal({ tradeHubUserId, users, loadingTradeHub, tradeHubError, tradeHubData, players, allPicks, onClose }: Props) {
   const pickLabel = (p: SleeperTradedPick) => {
     if (String(p.season) === CURRENT_YEAR) {
       const match = allPicks.find(
@@ -47,6 +49,8 @@ export function TradeHubOpponentModal({ tradeHubUserId, users, loadingTradeHub, 
 
         {loadingTradeHub ? (
           <div className="text-sm text-gray-400">Loading trades...</div>
+        ) : tradeHubError ? (
+          <ErrorBanner message={tradeHubError} />
         ) : !tradeHubData?.length ? (
           <div className="text-sm text-gray-400">No trades found in the past 30 days.</div>
         ) : (

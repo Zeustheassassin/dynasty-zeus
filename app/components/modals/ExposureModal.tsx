@@ -1,18 +1,20 @@
 "use client";
 import type { SleeperPlayer } from "../../../lib/types";
 import type { ExposureData } from "../../../hooks/useUserExposure";
+import ErrorBanner from "../../../components/ErrorBanner";
 
 interface Props {
   selectedUserId: string;
   users: Record<string, string>;
   loadingShares: boolean;
+  exposureError: string | null;
   externalShares: ExposureData | null;
   players: Record<string, SleeperPlayer>;
   myPlayerSet: Set<string>;
   onClose: () => void;
 }
 
-export function ExposureModal({ selectedUserId, users, loadingShares, externalShares, players, myPlayerSet, onClose }: Props) {
+export function ExposureModal({ selectedUserId, users, loadingShares, exposureError, externalShares, players, myPlayerSet, onClose }: Props) {
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={onClose}>
       <div
@@ -30,6 +32,8 @@ export function ExposureModal({ selectedUserId, users, loadingShares, externalSh
 
         {loadingShares ? (
           <div className="text-sm text-gray-400">Loading exposure...</div>
+        ) : exposureError ? (
+          <ErrorBanner message={exposureError} />
         ) : (
           externalShares?.players?.map((entry) => {
             const p = players[entry.playerId];

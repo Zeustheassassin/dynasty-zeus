@@ -108,11 +108,13 @@ interface HubRouterProps {
   activityTransactions: AnnotatedTransaction[];
   leagueOverviewData: Record<string, LeagueOverviewEntry>;
   leagueOverviewLoaded: boolean;
+  leagueOverviewError: string | null;
   selectedLeagueMateProfilesView: LeagueMateView[];
   ignoredOwnerIds: string[];
   toggleIgnoredOwner: (ownerId: string) => void;
   freeAgents: SleeperPlayer[];
   loadingCalcValues: boolean;
+  calcValuesError: string | null;
   loadingDraftRefresh: boolean;
   rookies: RookieBoardPlayer[];
   draftedPlayerIds: Set<string>;
@@ -152,6 +154,7 @@ interface HubRouterProps {
   playerDispositions: Record<string, { sell: string; buy: string }>;
   savePlayerDisposition: (playerId: string, sell: string, buy: string) => void;
   loadingRedraft: boolean;
+  redraftError: string | null;
   projectionData: ProjectionRow[];
   setProjectionData: React.Dispatch<React.SetStateAction<ProjectionRow[]>>;
   projectionPosFilter: string;
@@ -167,6 +170,7 @@ interface HubRouterProps {
   setSelectedUserId: (id: string | null) => void;
   externalShares: ExposureData | null;
   loadingShares: boolean;
+  exposureError: string | null;
   historicalSnapshot: HistoricalSnapshot | null;
   saveSnapshotNow: () => Promise<void>;
 
@@ -204,6 +208,7 @@ interface HubRouterProps {
   tradePartnerRankings: TradePartnerRanking[];
   tradeHubData: AnnotatedTrade[] | null;
   loadingTradeHub: boolean;
+  tradeHubError: string | null;
   tradeHubUserId: string | null;
   setTradeHubUserId: React.Dispatch<React.SetStateAction<string | null>>;
   setTradeHubData: React.Dispatch<React.SetStateAction<AnnotatedTrade[] | null>>;
@@ -268,9 +273,9 @@ export function HubRouter({
   leagueHubTab, setLeagueHubTab, activeLeagueHubGroup, standings,
   committedSimsByLeague, leagueSimCache, simQueue, simProgress,
   loadingLeagueMateIntel, loadingCrossLeagueMateIntel, loadingActivity, loadingLeagueWeeklyMatchups,
-  leagueNotes, activityTransactions, leagueOverviewData, leagueOverviewLoaded,
+  leagueNotes, activityTransactions, leagueOverviewData, leagueOverviewLoaded, leagueOverviewError,
   selectedLeagueMateProfilesView, ignoredOwnerIds, toggleIgnoredOwner,
-  freeAgents, loadingCalcValues, loadingDraftRefresh, rookies, draftedPlayerIds,
+  freeAgents, loadingCalcValues, calcValuesError, loadingDraftRefresh, rookies, draftedPlayerIds,
   loadRoster, loadRedraftValues, loadUserTrades, loadUserExposure, loadDraftScout,
   saveLeagueNote, saveSimulationToSupabase, handleRunAllSims, refreshDraftBoard,
   setPlayerProfileId, setCalcOpponentRosterId, setTradeHubSection,
@@ -279,11 +284,11 @@ export function HubRouter({
   setProjectionWeek, setProjectionLoaded, loadProjections,
   shares, totalLeagues, loadingAllLeagueData, shareSearch, setShareSearch, sharePosition, setSharePosition,
   setDataHubTab,
-  playerDispositions, savePlayerDisposition, loadingRedraft,
+  playerDispositions, savePlayerDisposition, loadingRedraft, redraftError,
   projectionData, setProjectionData, projectionPosFilter, setProjectionPosFilter,
   projectionWeek, projectionSeasonYear, projectionSourceStatus, loadingProjections, projectionUsesSeasonFallback,
   enabledExtraSources, toggleExtraSource,
-  selectedUserId, setSelectedUserId, externalShares, loadingShares, historicalSnapshot, saveSnapshotNow,
+  selectedUserId, setSelectedUserId, externalShares, loadingShares, exposureError, historicalSnapshot, saveSnapshotNow,
   draftHubSection, setDraftHubSection, myDraftSlotPicks, setMyDraftSlotPicks,
   draftSlotEditing, setDraftSlotEditing, draftSlotSearchQuery, setDraftSlotSearchQuery,
   draftSettings, draftPicks, draftOrder, predictedDraftPicks, draftPoolRanks,
@@ -293,7 +298,7 @@ export function HubRouter({
   selectedLeagueDraftHasOccurred,
   leaguePlayerTags, handleToggleLeaguePlayerTag, leagueMateProfileByRosterId,
   tradeRecommendationCards, tradePartnerRankings,
-  tradeHubData, loadingTradeHub, tradeHubUserId, setTradeHubUserId, setTradeHubData,
+  tradeHubData, loadingTradeHub, tradeHubError, tradeHubUserId, setTradeHubUserId, setTradeHubData,
   tradeAttempts, loadingTradeAttempts, tradeAttemptsLeagueId,
   markTradeAttempted, updateAttemptStatus, deleteAttempt, loadTradeAttempts,
   onRefreshDirection, buyLowPlayerIds,
@@ -396,6 +401,7 @@ export function HubRouter({
             leagueOverviewData={leagueOverviewData}
             loadingLeagueOverview={loadingLeagueOverview}
             leagueOverviewLoaded={leagueOverviewLoaded}
+            leagueOverviewError={leagueOverviewError}
             selectedLeagueMateProfilesView={selectedLeagueMateProfilesView}
             ignoredOwnerIds={ignoredOwnerIds}
             toggleIgnoredOwner={toggleIgnoredOwner}
@@ -469,10 +475,12 @@ export function HubRouter({
             setDataHubTab={setDataHubTab}
             shares={shares}
             loadingCalcValues={loadingCalcValues}
+            calcValuesError={calcValuesError}
             playerDispositions={playerDispositions}
             savePlayerDisposition={savePlayerDisposition}
             setPlayerProfileId={setPlayerProfileId}
             loadingRedraft={loadingRedraft}
+            redraftError={redraftError}
             projectionData={projectionData}
             setProjectionData={setProjectionData}
             projectionPosFilter={projectionPosFilter}
@@ -588,6 +596,7 @@ export function HubRouter({
           selectedUserId={selectedUserId}
           users={users}
           loadingShares={loadingShares}
+          exposureError={exposureError}
           externalShares={externalShares}
           players={players}
           myPlayerSet={myPlayerSet}
@@ -643,6 +652,7 @@ export function HubRouter({
     tradeHubUserId={tradeHubUserId}
     users={users}
     loadingTradeHub={loadingTradeHub}
+    tradeHubError={tradeHubError}
     tradeHubData={tradeHubData}
     players={players}
     allPicks={allPicks}

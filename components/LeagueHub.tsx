@@ -28,6 +28,7 @@ import StartersTab from "./LeagueHub/StartersTab";
 import NotesTab from "./LeagueHub/NotesTab";
 import PowerRankingsTab from "./LeagueHub/PowerRankingsTab";
 import ActivityTab from "./LeagueHub/ActivityTab";
+import ErrorBanner from "./ErrorBanner";
 import type { StandingRow, AnnotatedTransaction } from "./LeagueHub/leagueHubTypes";
 
 // ── Props ──────────────────────────────────────────────────────────────────
@@ -65,6 +66,7 @@ interface LeagueHubProps {
   leagueOverviewData: Record<string, LeagueOverviewEntry>;
   loadingLeagueOverview: boolean;
   leagueOverviewLoaded: boolean;
+  leagueOverviewError: string | null;
 
   // Computed
   selectedLeagueMateProfilesView: LeagueMateView[];
@@ -104,7 +106,7 @@ function LeagueHub({
   committedSimsByLeague, leagueSimCache, simQueue, simProgress,
   loadingLeagueMateIntel, loadingCrossLeagueMateIntel, loadingActivity, loadingLeagueWeeklyMatchups,
   leagueNotes, activityTransactions,
-  leagueOverviewData, loadingLeagueOverview, leagueOverviewLoaded,
+  leagueOverviewData, loadingLeagueOverview, leagueOverviewLoaded, leagueOverviewError,
   selectedLeagueMateProfilesView,
   ignoredOwnerIds, toggleIgnoredOwner,
   projectionData, nflState,
@@ -125,6 +127,11 @@ function LeagueHub({
   return (
     <div className={`mx-auto px-4 py-6 ${leagueHubTab === "ROSTERS" || leagueHubTab === "OPP_ROSTERS" ? "max-w-7xl" : "max-w-5xl"}`}>
       <>
+        {leagueOverviewError && (
+          <div className="mb-4">
+            <ErrorBanner message={leagueOverviewError} onRetry={loadLeagueOverview} />
+          </div>
+        )}
         {/* Sub-tab nav */}
         <div className="mb-6 rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
           <div className="flex flex-wrap justify-center gap-2">
