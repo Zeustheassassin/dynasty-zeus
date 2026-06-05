@@ -801,3 +801,124 @@ describe("runFinderPipeline — pending suppression", () => {
     expect(allTrades).toHaveLength(0);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// Decline memory (attemptIntelScore status branch)
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("runFinderPipeline — decline memory", () => {
+  // A ME-initiated, refused, recent attempt with this opponent (roster 2). Tests override the
+  // status and the give/receive players to exercise each branch of the decline penalty.
+  const mkAttempt = (over: Record<string, unknown>) =>
+    ({
+      id: "att", user_id: "USER", league_id: "L1", partner_roster_id: 2, partner_name: "Opp",
+      give_players: [], give_picks: [], receive_players: [], receive_picks: [],
+      source: "FINDER", initiated_by: "ME", status: "DECLINED", counter_details: null,
+      attempted_at: new Date().toISOString(), resolved_at: null,
+      ...over,
+    }) as unknown as FinderPipelineCtx["tradeAttempts"][number];
+  // An attempt where I asked to RECEIVE `playerId` from this opponent.
+  const recvAttempt = (playerId: string, over: Record<string, unknown> = {}) =>
+    mkAttempt({ id: `att-${playerId}`, receive_players: [{ player_id: playerId }], ...over });
+  // Two otherwise-identical 1-for-1s to opp 2; only the received player (and its history) differ.
+  const recvTrade = (give: string, receive: string) =>
+    mkTrade({ give: [mkPlayer(give, "WR", 3000)], receive: [mkPlayer(receive, "RB", 3000)], oppRosterId: 2, score: 100 });
+
+  it("de-ranks receiving a player the opponent recently DECLINED to give up", () => {
+    // Input order puts the declined trade FIRST, so a correct result proves ordering is by the
+    // model (the −12 receive-side penalty), not by input order.
+    const { allTrades } = runFinderPipeline(
+      [recvTrade("g2", "DECLINED"), recvTrade("g1", "FRESH")],
+      baseCtx({ tradeAttempts: [recvAttempt("DECLINED")] }),
+    );
+    expect(allTrades.map((t) => t.receive[0].player_id)).toEqual(["FRESH", "DECLINED"]);
+  });
+
+  it("ranks fresh > NO_RESPONSE > DECLINED (a ghost counts as half a refusal)", () => {
+    const { allTrades } = runFinderPipeline(
+      [recvTrade("g3", "DECLINED"), recvTrade("g2", "GHOST"), recvTrade("g1", "FRESH")],
+      baseCtx({
+        tradeAttempts: [recvAttempt("GHOST", { status: "NO_RESPONSE" }), recvAttempt("DECLINED")],
+      }),
+    );
+    expect(allTrades.map((t) => t.receive[0].player_id)).toEqual(["FRESH", "GHOST", "DECLINED"]);
+  });
+
+  it("treats a COUNTERED attempt as live interest, not a refusal", () => {
+    // A counter is engagement: the targeted player keeps its +6 standing-interest nudge and so
+    // ranks ABOVE an otherwise identical fresh trade — proving COUNTERED is not penalized.
+    const { allTrades } = runFinderPipeline(
+      [recvTrade("g1", "FRESH"), recvTrade("g2", "TGT")],
+      baseCtx({ tradeAttempts: [recvAttempt("TGT", { status: "COUNTERED" })] }),
+    );
+    expect(allTrades.map((t) => t.receive[0].player_id)).toEqual(["TGT", "FRESH"]);
+  });
+
+  it("de-ranks re-offering a give-side player the opponent recently passed on", () => {
+    const fresh = mkTrade({ give: [mkPlayer("FRESHGIVE", "WR", 3000)], receive: [mkPlayer("r1", "RB", 3000)], oppRosterId: 2, score: 100 });
+    const passed = mkTrade({ give: [mkPlayer("PASSED", "WR", 3000)], receive: [mkPlayer("r2", "RB", 3000)], oppRosterId: 2, score: 100 });
+    const { allTrades } = runFinderPipeline(
+      [passed, fresh],
+      baseCtx({ tradeAttempts: [mkAttempt({ give_players: [{ player_id: "PASSED" }] })] }),
+    );
+    expect(allTrades.map((t) => t.give[0].player_id)).toEqual(["FRESHGIVE", "PASSED"]);
+  });
+
+  it("a stale (>56d) decline no longer de-ranks — it decays to a no-op", () => {
+    // A decline outside the half-life window weighs 0, so the output must be byte-identical to a
+    // run with no attempts at all (same scores → same seed tiebreak → same order).
+    const stale = recvAttempt("X", { attempted_at: new Date(Date.now() - 70 * 24 * 60 * 60 * 1000).toISOString() });
+    const trades = [recvTrade("g1", "X"), recvTrade("g2", "FRESH")];
+    const withStale = runFinderPipeline(trades, baseCtx({ tradeAttempts: [stale] })).allTrades.map((t) => t.receive[0].player_id);
+    const without = runFinderPipeline(trades, baseCtx()).allTrades.map((t) => t.receive[0].player_id);
+    expect(withStale).toEqual(without);
+  });
+
+  it("only ME-initiated refusals penalize: a THEM DECLINED attempt keeps its +11 sell signal", () => {
+    // They offered me SHOPPED and I declined — that is still a willing seller, NOT my refusal. The
+    // branch must route THEM attempts to theirSell (+11), so SHOPPED ranks ABOVE fresh, never below.
+    const themDeclined = mkAttempt({ initiated_by: "THEM", status: "DECLINED", give_players: [{ player_id: "SHOPPED" }] });
+    const { allTrades } = runFinderPipeline(
+      [recvTrade("g1", "FRESH"), recvTrade("g2", "SHOPPED")],
+      baseCtx({ tradeAttempts: [themDeclined] }),
+    );
+    expect(allTrades.map((t) => t.receive[0].player_id)).toEqual(["SHOPPED", "FRESH"]);
+  });
+
+  it("caps accumulated decline weight so repeat refusals can't stack an unbounded penalty", () => {
+    // Five recent declined asks for CHASED would be weight 5.0 (−60) uncapped; the 1.5 cap holds it
+    // to −18. Observable: a competing trade given a fixed −20 handicap (via score) still ranks BELOW
+    // the 5×-declined trade — which can only happen if the decline penalty was capped well under 20.
+    const declines = Array.from({ length: 5 }, (_, i) =>
+      recvAttempt("CHASED", { id: `chase-${i}` }),
+    );
+    const chased = mkTrade({ give: [mkPlayer("g1", "WR", 3000)], receive: [mkPlayer("CHASED", "RB", 3000)], oppRosterId: 2, score: 100 });
+    const handicapped = mkTrade({ give: [mkPlayer("g2", "WR", 3000)], receive: [mkPlayer("OTHER", "RB", 3000)], oppRosterId: 2, score: 80 });
+    const { allTrades } = runFinderPipeline([handicapped, chased], baseCtx({ tradeAttempts: declines }));
+    // chased: 100 − 18 (capped) = 82 > handicapped 80. Without the cap it would be 100 − 60 = 40 < 80.
+    expect(allTrades.map((t) => t.receive[0].player_id)).toEqual(["CHASED", "OTHER"]);
+  });
+
+  it("exempts a flagged sweetener from the give-side decline penalty", () => {
+    // Both trades send a 400 piece the opponent previously passed on, and both have identical
+    // effective give value (3000) and receive (3000), so the ONLY scoring difference is the −8
+    // penalty — which the flagged sweetener must escape. So the sweetened trade ranks above.
+    const declinedBoth = mkAttempt({ give_players: [{ player_id: "SW" }, { player_id: "NF" }] });
+    const sweetened = mkTrade({
+      give: [mkPlayer("mpA", "WR", 3000, { team: "SF" }), mkPlayer("SW", "WR", 400, { age: 22, team: "BUF" })],
+      receive: [mkPlayer("opA", "RB", 3000, { team: "KC" })],
+      sweetenerPlayerId: "SW",
+      oppRosterId: 2, score: 100, format: "1 for 1 + sweetener",
+    });
+    const plain = mkTrade({
+      // 2600 + 400 = 3000 effective give (matches sweetened's stripped 3000); core 2600 vs 3000 is
+      // ≥0.85 so the unflagged 400 survives the anti-padding gate and the trade still surfaces.
+      give: [mkPlayer("mpB", "WR", 2600, { team: "SF" }), mkPlayer("NF", "WR", 400, { age: 22, team: "DAL" })],
+      receive: [mkPlayer("opB", "RB", 3000, { team: "KC" })],
+      oppRosterId: 2, score: 100, format: "1 for 2",
+    });
+    const { allTrades } = runFinderPipeline([plain, sweetened], baseCtx({ tradeAttempts: [declinedBoth] }));
+    expect(allTrades).toHaveLength(2);
+    expect(allTrades[0].sweetenerPlayerId).toBe("SW"); // sweetened (penalty exempt) outranks plain (−8)
+  });
+});

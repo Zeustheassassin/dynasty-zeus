@@ -806,14 +806,31 @@ export function runFinderPipeline(
         const theirBuyWeight    = new Map<string, number>();
         const myShopWeight      = new Map<string, number>();
         const myTargetWeight    = new Map<string, number>();
+        // Decline memory: a deal I FLOATED that this owner refused is evidence against re-pitching
+        // the same pieces. declinedReceive = a player I asked for and they wouldn't part with;
+        // declinedGive = a player I offered and they wouldn't take. DECLINED counts full; NO_RESPONSE
+        // (a ghost) counts half. COUNTERED is engagement, not refusal, so it stays "live" below.
+        const declinedReceiveWeight = new Map<string, number>();
+        const declinedGiveWeight    = new Map<string, number>();
+        // Cap accumulated decline weight so chasing one player with several escalating offers can't
+        // stack an unbounded penalty that buries every OTHER package merely containing that player.
+        // One refusal already fires at full strength; repeats add a little, then plateau.
+        const DECLINE_WEIGHT_CAP = 1.5;
 
         for (const a of oppAttempts) {
           const w = weight(a.attempted_at);
           if (w === 0) continue;
           if (a.initiated_by === "THEM") {
+            // Their own offer reveals appetite regardless of how I ended up responding to it.
             for (const p of a.give_players)    theirSellWeight.set(p.player_id,  (theirSellWeight.get(p.player_id)  ?? 0) + w);
             for (const p of a.receive_players) theirBuyWeight.set(p.player_id,   (theirBuyWeight.get(p.player_id)   ?? 0) + w);
+          } else if (a.status === "DECLINED" || a.status === "NO_RESPONSE") {
+            // My offer, refused — a soft, decaying aversion to re-pitching the same players.
+            const rw = w * (a.status === "DECLINED" ? 1 : 0.5);
+            for (const p of a.give_players)    declinedGiveWeight.set(p.player_id,    (declinedGiveWeight.get(p.player_id)    ?? 0) + rw);
+            for (const p of a.receive_players) declinedReceiveWeight.set(p.player_id, (declinedReceiveWeight.get(p.player_id) ?? 0) + rw);
           } else {
+            // My offer, still live (PENDING / COUNTERED) or struck (ACCEPTED): standing interest.
             for (const p of a.give_players)    myShopWeight.set(p.player_id,     (myShopWeight.get(p.player_id)     ?? 0) + w);
             for (const p of a.receive_players) myTargetWeight.set(p.player_id,   (myTargetWeight.get(p.player_id)   ?? 0) + w);
           }
@@ -828,6 +845,10 @@ export function runFinderPipeline(
           if (buyW  > 0) ais -= 6  * buyW;
           const targetW = myTargetWeight.get(rp.player_id) ?? 0;
           if (targetW > 0) ais += 6 * targetW;
+          // They wouldn't part with this player when I asked — a cleaner, more durable "no" than a
+          // give-side refusal (which is more often about total value than the specific piece).
+          const declRecvW = Math.min(declinedReceiveWeight.get(rp.player_id) ?? 0, DECLINE_WEIGHT_CAP);
+          if (declRecvW > 0) ais -= 12 * declRecvW;
         }
 
         for (const gp of (r.give ?? [])) {
@@ -835,6 +856,12 @@ export function runFinderPipeline(
           if (buyW  > 0) ais += 14 * buyW;
           const shopW = myShopWeight.get(gp.player_id)    ?? 0;
           if (shopW > 0) ais += 3 * shopW;
+          // They passed on this player as my outgoing piece — lightly de-rank re-sending it. Skip
+          // a value-neutral sweetener (it must stay a pure +4 acceptance nudge; see TradeResult).
+          const declGiveW = gp.player_id === r.sweetenerPlayerId
+            ? 0
+            : Math.min(declinedGiveWeight.get(gp.player_id) ?? 0, DECLINE_WEIGHT_CAP);
+          if (declGiveW > 0) ais -= 8 * declGiveW;
         }
 
         return ais;
