@@ -130,7 +130,6 @@ const baseCtx = (over: Partial<FinderPipelineCtx> = {}): FinderPipelineCtx => {
     isBlockedSellDisposition: () => false,
     isBlockedBuyDisposition: () => false,
     isWantToTrade: () => false,
-    oppDirOk: () => true,
     failsDirectionGuardrail: () => false,
     getDirectionTradeScore: () => 0,
     getTradeLineupSafety: () => ({ valid: true, myValid: true, oppValid: true, score: 0 }),
@@ -183,10 +182,63 @@ describe("runFinderPipeline — basic acceptance & filtering", () => {
     expect(allTrades).toHaveLength(0);
   });
 
-  it("drops trades that oppDirOk rejects", () => {
-    const t = mkTrade({ give: [mkPlayer("g1", "WR", 3000)], receive: [mkPlayer("r1", "RB", 3000)] });
-    const { allTrades } = runFinderPipeline([t], baseCtx({ oppDirOk: () => false }));
+  it("drops trades the opponent's direction rejects (buyer asked to give a player for only our pick)", () => {
+    // oppDirOk Rule 2 (now bucket-aware, in-pipeline): an elite/contender opponent won't
+    // give up a player when all they get back is the user's pick.
+    const eliteOpp = {
+      rosterId: 2,
+      playoffOdds: 85,
+      directionProfile: { bucket: "Elite" },
+    } as unknown as FinderPipelineCtx["tradePartnerRankings"][number];
+    const t = mkTrade({
+      give: [],
+      givePicks: [{ round: 1, season: CY, value: 2500 } as unknown as PickWithValue],
+      receive: [mkPlayer("r1", "RB", 3000)],
+      receivePicks: [],
+    });
+    const { allTrades } = runFinderPipeline([t], baseCtx({ tradePartnerRankings: [eliteOpp] }));
     expect(allTrades).toHaveLength(0);
+  });
+
+  it("drops a standard swap that is clearly net-negative for the opponent (acceptance gate)", () => {
+    // Hopeless/rebuilder opponent receiving an aging vet for a young building block, no picks
+    // back → strongly negative oppDirectionScore → below ACCEPT_FLOOR → rejected.
+    const rebuildOpp = {
+      rosterId: 2,
+      playoffOdds: 10,
+      directionProfile: { bucket: "Hopeless" },
+    } as unknown as FinderPipelineCtx["tradePartnerRankings"][number];
+    const t = mkTrade({
+      give: [mkPlayer("vet", "RB", 4000, { age: 30 })],      // opp receives an aging vet
+      receive: [mkPlayer("young", "WR", 4000, { age: 22 })], // opp gives a young building block
+      oppRosterId: 2,
+    });
+    const { allTrades } = runFinderPipeline([t], baseCtx({ tradePartnerRankings: [rebuildOpp] }));
+    expect(allTrades).toHaveLength(0);
+  });
+
+  it("drops a trade whose balance depends on a sub-700 filler piece (anti-padding gate)", () => {
+    // give a 3000 WR for a 2400 RB + a 550 WR. Without the 550, [3000] vs [2400] fails
+    // isBalanced (ratio 0.8) — the 550 is load-bearing fake balance → dropped.
+    const t = mkTrade({
+      give: [mkPlayer("g1", "WR", 3000, { team: "SF" })],
+      receive: [mkPlayer("r1", "RB", 2400, { team: "KC" }), mkPlayer("r2", "WR", 550, { team: "BUF" })],
+      format: "1 for 2",
+    });
+    const { allTrades } = runFinderPipeline([t], baseCtx());
+    expect(allTrades).toHaveLength(0);
+  });
+
+  it("keeps a multi-piece trade already balanced without its sub-700 piece", () => {
+    // [3000] vs [3000] is balanced without the 500 bonus, so the 500 is a genuine extra
+    // (not fake balance) and survives the anti-padding gate.
+    const t = mkTrade({
+      give: [mkPlayer("g1", "WR", 3000, { team: "SF" })],
+      receive: [mkPlayer("r1", "RB", 3000, { team: "KC" }), mkPlayer("r2", "WR", 500, { team: "BUF" })],
+      format: "1 for 2",
+    });
+    const { allTrades } = runFinderPipeline([t], baseCtx());
+    expect(allTrades).toHaveLength(1);
   });
 
   it("drops trades whose total strategyScore is not positive", () => {

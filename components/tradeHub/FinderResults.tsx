@@ -6,7 +6,7 @@ import type { TradeResult } from "./finderTypes";
 import type { PlayerWithValue } from "./shared";
 import { buildTradeFingerprint } from "./shared";
 import { finderPickKey } from "./finderUtils";
-import { computeFinderStarDiscounts } from "./calculatorUtils";
+import { computeFinderAdjustedNet } from "./calculatorUtils";
 import TradeCard from "./TradeCard";
 
 interface FinderResultsProps {
@@ -89,24 +89,15 @@ export default function FinderResults({
       return !recentFingerprints.has(fp);
     })
     .map((trade) => {
-      const gVals = [...trade.give.map((p) => p.value), ...trade.givePicks.map((p) => p.value)];
-      const rVals = [...trade.receive.map((p) => p.value), ...trade.receivePicks.map((p) => p.value)];
-      const gSum  = gVals.reduce((s, v) => s + v, 0);
-      const rSum  = rVals.reduce((s, v) => s + v, 0);
-      // Same canonical star-discount call TradeCard uses for its displayed net,
-      // so the sort key below can't drift from the badge on each card.
-      const { onReceive: starOnReceive, onGive: starOnGive } = computeFinderStarDiscounts(
-        trade.give, trade.receive, trade.givePicks, trade.receivePicks,
-      );
-      const approxNetPlayerGain = trade.receive.length - trade.give.length;
-      const approxMyDropCost  = approxNetPlayerGain > 0 ? calcDropCost(myRoster?.roster_id ?? 0, approxNetPlayerGain) : 0;
-      const approxOppDropCost = approxNetPlayerGain < 0 ? calcDropCost(trade.oppRosterId, -approxNetPlayerGain) : 0;
-      // Mirror TradeCard.adjustedCardNet exactly — incl. the Math.max(0,...)
-      // receive clamp — so the list sorts by the same net each card displays.
-      const approxBadge = Math.max(0, rSum + approxOppDropCost + starOnReceive) - (gSum + approxMyDropCost + starOnGive);
-      return { trade, approxBadge };
+      // Same canonical adjusted-net TradeCard displays (shared helper), so the sort key
+      // can't drift from each card's badge.
+      const { net } = computeFinderAdjustedNet(trade, calcDropCost, myRoster?.roster_id ?? 0);
+      return { trade, net };
     })
-    .sort((a, b) => Math.abs(a.approxBadge) - Math.abs(b.approxBadge));
+    // Acceptance-first ranking: every trade here already cleared the opponent-acceptance
+    // gate in the pipeline, so order the survivors by the USER's gain — most favorable
+    // first — instead of "closest to even".
+    .sort((a, b) => b.net - a.net);
 
   return (
     <>

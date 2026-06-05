@@ -7,7 +7,7 @@ import type {
 import { usePlayers } from "../../lib/PlayersContext";
 import { useLeague } from "../../lib/LeagueContext";
 import { useValues } from "../../lib/ValuesContext";
-import { computeRosterDropCost, computeStarDiscounts } from "./calculatorUtils";
+import { computeRosterDropCost, computeStarDiscounts, EVEN_NET_THRESHOLD } from "./calculatorUtils";
 import CalculatorResult from "./CalculatorResult";
 
 interface TradeCalculatorProps {
@@ -139,7 +139,7 @@ function TradeCalculator({
   const totalReceiveAdj = Math.max(0, totalReceive + oppDropCostCalc + calcStarOnReceive);
 
   const net = totalReceiveAdj - totalGiveAdj;
-  const verdict = Math.abs(net) <= 300 ? "EVEN" : net > 0 ? "YOU WIN" : "YOU LOSE";
+  const verdict = Math.abs(net) <= EVEN_NET_THRESHOLD ? "EVEN" : net > 0 ? "YOU WIN" : "YOU LOSE";
   const verdictColor = verdict === "EVEN" ? "text-yellow-400" : verdict === "YOU WIN" ? "text-green-400" : "text-red-400";
 
   const filterPlayers = (list: SleeperPlayer[], search: string) =>

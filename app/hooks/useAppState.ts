@@ -11,7 +11,7 @@ import { normalizeRookieName } from "../../components/draftHub/shared";
 import {
   CURRENT_YEAR, YEARS, ROUNDS,
   getStoredPickValue, getDraftRoundSlot,
-  getBucketColor, getAdjustedDirectionBucket,
+  getBucketColor, getAdjustedDirectionBucket, classifyOppDirection,
   sum,
   getProjectionKickoffAt, getKickoffState,
   formatKickoffTime,
@@ -1716,6 +1716,7 @@ const saveSnapshotNow = async () => {
           preferredPositions: ownerCrossLeagueIntel?.preferredPositions || [],
           tradePreferredPositions: ownerCrossLeagueIntel?.tradePreferredPositions || [],
           repeatedPlayers: ownerCrossLeagueIntel?.repeatedPlayers || [],
+          ownedPlayerCounts: ownerCrossLeagueIntel?.ownedPlayerCounts || {},
           acquiredPlayers: ownerCrossLeagueIntel?.acquiredPlayers || [],
           totalDynastyLeagues: ownerCrossLeagueIntel?.totalDynastyLeagues || 0,
           averageAgeAllLeagues: ownerCrossLeagueIntel?.averageAgeAllLeagues || 0,
@@ -1806,7 +1807,9 @@ const saveSnapshotNow = async () => {
     return selectedLeagueMateProfilesView
       .map((partner) => {
         const simRow = selectedLeagueSimulation.rowByRosterId.get(Number(partner.rosterId));
-        const partnerPlayoffOdds = simRow?.playoffOdds ?? 0;
+        // Missing sim → neutral 50 (NOT 0); a 0 default would wrongly read every sim-less
+        // partner as a desperate seller and disagree with the finder's pipeline gates.
+        const partnerPlayoffOdds = simRow?.playoffOdds ?? 50;
         // Apply the same three-factor adjustment to each partner's bucket
         const partnerAdjustedBucket = getAdjustedDirectionBucket(
           partner.directionProfile?.bucket,
@@ -1816,8 +1819,8 @@ const saveSnapshotNow = async () => {
         );
         const partnerAdjustedProfile = { ...partner.directionProfile, bucket: partnerAdjustedBucket };
         const partnerBuckets = getProfilePosBuckets(partnerAdjustedProfile);
-        const isSeller = partnerPlayoffOdds < 50 || ["Rebuilder", "Stranded", "Fading Out", "Hopeless"].includes(partnerAdjustedBucket);
-        const isBuyer = partnerPlayoffOdds >= 55 || ["Elite", "True Contender", "Almost There", "Window Closing"].includes(partnerAdjustedBucket);
+        // Canonical seller/buyer classification — same resolver the trade finder uses.
+        const { isSeller, isBuyer } = classifyOppDirection(partnerAdjustedBucket, partnerPlayoffOdds);
         const bestApproach =
           isSeller ? `Buy ${weakPos}` :
           isBuyer && partnerBuckets.weak.includes(strongPos) ? `Sell ${strongPos}` :
@@ -1842,7 +1845,8 @@ const saveSnapshotNow = async () => {
           // Override directionProfile with the adjusted version so downstream consumers
           // (recommendation cards, guardrails, etc.) all see the same bucket
           directionProfile: { ...partnerAdjustedProfile, bucketColor: getBucketColor(partnerAdjustedBucket) },
-          playoffOdds: simRow?.playoffOdds ?? 0,
+          // Neutral 50 default so the pipeline reads this partner the same way as the gates.
+          playoffOdds: simRow?.playoffOdds ?? 50,
           titleOdds: simRow?.titleOdds ?? 0,
           finishRange: simRow?.finishRange || "-",
           oneOhOneOdds: simRow?.oneOhOneOdds ?? 0,

@@ -1,4 +1,5 @@
 import { getSeasonYear } from "../../lib/helpers";
+import { classifyOppDirection } from "../../lib/helpers/direction/scoring";
 import type {
   SleeperRoster, SleeperPlayer, SleeperUser, SleeperLeague,
   AugmentedPick, TradeAttempt, LeagueMateView, TradePartnerRanking,
@@ -7,11 +8,12 @@ import type {
 import {
   isFutureInsulationAsset, isOldProducerBuy,
   getAgeUrgency, getFutureValue, computeTeamWindow, getPickSlotBonus,
+  isBalanced, LOW_VALUE_FLOOR, MID_VALUE_CEILING,
 } from "./FinderScoring";
 import { finderPickKey } from "./finderUtils";
 import { buildTradeFingerprint } from "./shared";
 import type { TradeResult } from "./finderTypes";
-import type { PlayerWithValue, PickWithValue } from "./shared";
+import type { PlayerWithValue } from "./shared";
 
 export interface FinderPipelineCtx {
   // Data
@@ -71,13 +73,6 @@ export interface FinderPipelineCtx {
   isBlockedSellDisposition: (playerId?: string | null) => boolean;
   isBlockedBuyDisposition: (playerId?: string | null) => boolean;
   isWantToTrade: (playerId?: string | null) => boolean;
-  oppDirOk: (
-    oppRosterId: number,
-    give: PlayerWithValue[],
-    givePicks: PickWithValue[],
-    receive: PlayerWithValue[],
-    receivePicks: PickWithValue[],
-  ) => boolean;
   failsDirectionGuardrail: (r: TradeResult) => boolean;
   getDirectionTradeScore: (r: TradeResult) => number;
   getTradeLineupSafety: (r: TradeResult) => {
@@ -101,7 +96,7 @@ export function runFinderPipeline(
     nflState, selectedLeagueSimulation, selectedLeagueDraftHasOccurred,
     weeklyProjMap, playerDispositions, finderPickValue, buildPostTradePlayers,
     getNFLDepthIdx, rosterPlayers, isBlockedSellDisposition,
-    isBlockedBuyDisposition, isWantToTrade, oppDirOk, failsDirectionGuardrail,
+    isBlockedBuyDisposition, isWantToTrade, failsDirectionGuardrail,
     getDirectionTradeScore, getTradeLineupSafety,
   } = ctx;
 
@@ -217,6 +212,64 @@ export function runFinderPipeline(
     return false;
   };
 
+  const oppProfileByRosterId = new Map(
+    tradePartnerRankings.map((p) => [Number(p.rosterId), p])
+  );
+
+  // Hard structural acceptance pre-filter (#10): judged on the opponent's ADJUSTED window
+  // bucket via the canonical classifier, not raw playoff odds — so the front-door gate
+  // agrees with oppDirectionScore. Drops trades a tanker/buyer would never make.
+  const oppDirOk = (r: TradeResult): boolean => {
+    const oppProfile = oppProfileByRosterId.get(Number(r.oppRosterId));
+    const oppOdds = oppProfile?.playoffOdds
+      ?? selectedLeagueSimulation?.rowByRosterId?.get(Number(r.oppRosterId))?.playoffOdds
+      ?? 50;
+    const cls = classifyOppDirection(oppProfile?.directionProfile?.bucket ?? "", oppOdds);
+    // Rule 1: a hopeless/tanking team won't take our 1st-round pick plus only aging vets
+    // while sending back established players and no picks/youth — they need picks, not vets.
+    if (cls.isHopeless) {
+      const givingFirstRound = r.givePicks.some((p) => Number(p.round) === 1);
+      const receivingOnlyVets = r.give.length > 0
+        && r.give.every((p) => isOldProducerBuy(p))
+        && r.receivePicks.length === 0
+        && r.receive.filter((p) => isFutureInsulationAsset(p)).length === 0;
+      if (givingFirstRound && receivingOnlyVets) return false;
+    }
+    // Rule 2: a clear buyer (elite/contender) won't give up players for only the user's picks.
+    if ((cls.isElite || cls.isContender)
+        && r.receive.length > 0 && r.give.length === 0 && r.receivePicks.length === 0) {
+      return false;
+    }
+    return true;
+  };
+
+  // Anti-padding gate (#8): a sub-700 piece may RIDE in a package, but it must not be the
+  // thing making the trade balance. If removing a sub-700 body (other than a flagged affinity
+  // sweetener, and only when its side has another player) breaks isBalanced, that body was
+  // manufacturing fake balance to "bring the value closer so it fits" — drop the whole trade.
+  // Lottery / draft-capital formats are intentionally low-value and exempt.
+  const lowValueBalancerOk = (r: TradeResult): boolean => {
+    if (r.format === "Lottery" || r.draftCapital) return true;
+    const giveForCheck = r.sweetenerPlayerId
+      ? r.give.filter((p) => p.player_id !== r.sweetenerPlayerId)
+      : r.give;
+    const allGive = [...giveForCheck.map((p) => p.value), ...r.givePicks.map((p) => p.value)];
+    const allReceive = [...r.receive.map((p) => p.value), ...r.receivePicks.map((p) => p.value)];
+    if (giveForCheck.length >= 2) {
+      for (let i = 0; i < giveForCheck.length; i++) {
+        if (giveForCheck[i].value >= LOW_VALUE_FLOOR) continue;
+        if (!isBalanced(allGive.filter((_, idx) => idx !== i), allReceive)) return false;
+      }
+    }
+    if (r.receive.length >= 2) {
+      for (let i = 0; i < r.receive.length; i++) {
+        if (r.receive[i].value >= LOW_VALUE_FLOOR) continue;
+        if (!isBalanced(allGive, allReceive.filter((_, idx) => idx !== i))) return false;
+      }
+    }
+    return true;
+  };
+
   const preGuardrail = results
     .filter((r) => isFinite(r.score))
     .filter((r) => !r.give.some((p) => isBlockedSellDisposition(p.player_id)))
@@ -226,11 +279,9 @@ export function runFinderPipeline(
     .filter((r) => !isWrongOwnerHCPackage(r))
     .filter((r) => !hasBadSameTeamCombo(r.give) && !hasBadSameTeamCombo(r.receive))
     .filter((r) => !finderTankMode || r.receive.every((p) => isFutureInsulationAsset(p)))
-    .filter((r) => oppDirOk(r.oppRosterId, r.give, r.givePicks, r.receive, r.receivePicks));
+    .filter((r) => oppDirOk(r))
+    .filter((r) => lowValueBalancerOk(r));
   const hasGuardrailPassing = !finderTankMode && preGuardrail.some((r) => !failsDirectionGuardrail(r));
-  const oppProfileByRosterId = new Map(
-    tradePartnerRankings.map((p) => [Number(p.rosterId), p])
-  );
 
   // ── Roster concentration map ────────────────────────────────────────────
   const rosterConcentrationMap = new Map<number, Record<string, number>>();
@@ -359,6 +410,14 @@ export function runFinderPipeline(
     ).length;
   }
 
+  // Acceptance-first hard gate: on a standard swap, reject trades the opponent has no real
+  // reason to accept. oppDirectionScore mixes value + structural fit, so fair-but-neutral
+  // trades land mildly negative (a single aging vet ≈ -4); the genuine "they'd never accept"
+  // signals are large negatives (elite asked for picks-only ≈ -18, rebuilder handed pure
+  // vets ≈ -11). -10 rejects those structural mismatches while keeping neutral fair trades.
+  // Tunable: raise toward 0 for a stricter board (fewer, higher-conviction trades).
+  const ACCEPT_FLOOR = -10;
+
   // Seeded shuffle so Refresh button produces a new random set
   const shuffled = preGuardrail
     .filter((r) => finderTankMode || !hasGuardrailPassing || !failsDirectionGuardrail(r))
@@ -421,12 +480,12 @@ export function runFinderPipeline(
         const oppGivesPlayers    = r.receive;
         const oppGivesPicks      = r.receivePicks;
 
-        const oppIsHopeless   = oppPlayoffOdds < 30 || ["Stranded", "Fading Out", "Hopeless"].includes(oppBucket);
-        const oppIsRebuild    = !oppIsHopeless && (oppPlayoffOdds < 50 || oppBucket === "Rebuilder");
-        const oppIsElite      = oppPlayoffOdds >= 78 || ["Elite", "True Contender"].includes(oppBucket);
-        const oppIsContender  = !oppIsElite && (oppPlayoffOdds >= 65 || oppBucket === "Almost There");
-        const oppIsFading     = !oppIsHopeless && !oppIsRebuild && !oppIsElite && !oppIsContender
-                                && (oppPlayoffOdds >= 50 || oppBucket === "Fading Contender");
+        // Canonical classification — same ladder used by oppDirOk, crossLeagueIntel, the
+        // acceptance gate, and the leaguemate rankings (lib/helpers/direction/scoring).
+        const {
+          isHopeless: oppIsHopeless, isRebuild: oppIsRebuild, isElite: oppIsElite,
+          isContender: oppIsContender, isFading: oppIsFading,
+        } = classifyOppDirection(oppBucket, oppPlayoffOdds);
 
         const oppReceivesRedraft = oppReceivesPlayers.reduce((s: number, p) => s + (redraftValues?.[p.player_id] ?? 0), 0);
         const oppGivesRedraft    = oppGivesPlayers.reduce((s: number, p) => s + (redraftValues?.[p.player_id] ?? 0), 0);
@@ -678,7 +737,13 @@ export function runFinderPipeline(
         return sps;
       })();
 
-      const balancePenalty = -Math.pow(Math.abs(r.net) / 150, 1.5) * 3;
+      // Asymmetric (acceptance-first ranking): steeply penalize the USER overpaying
+      // (net < 0), but only mildly and boundedly reward the user gaining value (net > 0) so a
+      // single lopsided-but-acceptable deal can't dominate the board. Pairs with the signed
+      // user-gain sort in FinderResults. At net = 0 this is 0, matching the prior symmetric form.
+      const balancePenalty = r.net < 0
+        ? -Math.pow(Math.abs(r.net) / 150, 1.5) * 3   // user pays up — steep penalty
+        : Math.min(r.net / 150, 4);                    // user gains — small bounded reward
 
       const futurePickBonus = (() => {
         if (!finderPreferFuturePicks || r.receivePicks.length === 0) return 0;
@@ -963,8 +1028,14 @@ export function runFinderPipeline(
           }
         }
 
-        const isSeller = (partnerProfile as TradePartnerRanking).isSeller ?? false;
-        const isBuyer  = (partnerProfile as TradePartnerRanking).isBuyer  ?? false;
+        // Classify from the canonical resolver (not the cast) so seller/buyer here matches
+        // oppDirectionScore and oppDirOk exactly — same opponent, same classification.
+        const oppProfileCli = oppProfileByRosterId.get(Number(r.oppRosterId));
+        const oppOddsCli = oppProfileCli?.playoffOdds
+          ?? selectedLeagueSimulation?.rowByRosterId?.get(Number(r.oppRosterId))?.playoffOdds ?? 50;
+        const { isSeller, isBuyer } = classifyOppDirection(
+          oppProfileCli?.directionProfile?.bucket ?? "", oppOddsCli,
+        );
 
         if (isSeller) {
           const sendingProduction = r.give.filter((p) => isOldProducerBuy(p) || (Number(p.age || 0) >= 26 && p.value >= 2000)).length;
@@ -1197,13 +1268,51 @@ export function runFinderPipeline(
         return -Math.round(oppDropCostVal / 50);
       })();
 
-      const strategyScore = r.score + getDirectionTradeScore(r) + lineupSafety.score + partnerFitScore + dispositionScore + oppDirectionScore + formatBonus + balancePenalty + starPremiumScore + futurePickBonus + handcuffBonus + attemptIntelScore + marketIntelScore + archetypeWinRateBonus + seasonTimingBonus + usageSignalScore + teamWindowBonus + starterQualityBonus + activeTraderBonus + crossLeagueIntelScore + exposureBonus + standingsPressureScore + pickSlotScore + sellHighConfirmScore + championshipBonus + depthAwareTierBonus + rosterConsolidationBonus + rosterBalanceScore + wantToTradeBonus + oppDropCostPenalty;
+      // ── Strategy score: the ~30 terms grouped into 5 legible, tunable buckets ──────
+      // WEIGHTS is the single place to tune the acceptance-vs-value-vs-fit balance.
+      // clampBucket bounds any one bucket so a high-scale term (e.g. rosterConsolidation up
+      // to 50) can't swamp the value signal. VALUE_EDGE is never clamped — value always counts.
+      // BUCKET_CLAMP currently starts effectively OFF, so this is byte-identical to the prior
+      // flat sum (safe rollout); lower it to ~40 to enable dominance protection once the
+      // reordering has been eyeballed on a real league.
+      // Sweetener-affinity nudge: a goodwill piece the opponent already rosters elsewhere
+      // makes them marginally likelier to say yes (value-neutral; see TradeResult.sweetenerPlayerId).
+      const sweetenerBonus = r.sweetenerPlayerId ? 4 : 0;
+      // Soft de-rank (#9): pieces in the opinion-dependent 700-1000 band shouldn't decide a
+      // trade. Small, capped penalty per mid-value body — never enough to reject (de-rank only).
+      const midValueSoftPenalty = Math.max(
+        -8,
+        [...r.give, ...r.receive].filter(
+          (p) => p.value >= LOW_VALUE_FLOOR && p.value < MID_VALUE_CEILING,
+        ).length * -3,
+      );
+      const acceptanceBucket = oppDirectionScore + crossLeagueIntelScore + partnerFitScore
+        + attemptIntelScore + activeTraderBonus + oppDropCostPenalty + sweetenerBonus;
+      const userFitBucket = getDirectionTradeScore(r) + lineupSafety.score + teamWindowBonus
+        + starterQualityBonus + depthAwareTierBonus + rosterBalanceScore + championshipBonus
+        + futurePickBonus + standingsPressureScore;
+      const valueEdgeBucket = r.score + balancePenalty + starPremiumScore + pickSlotScore + handcuffBonus + midValueSoftPenalty;
+      const structureBucket = formatBonus + rosterConsolidationBonus;
+      const signalsBucket = dispositionScore + marketIntelScore + archetypeWinRateBonus
+        + seasonTimingBonus + usageSignalScore + exposureBonus + sellHighConfirmScore + wantToTradeBonus;
+
+      const WEIGHTS = { acceptance: 1, userFit: 1, valueEdge: 1, structure: 1, signals: 1 };
+      const BUCKET_CLAMP = 100000; // ~off (byte-identical); set to ~40 to bound non-value buckets
+      const clampBucket = (v: number) => Math.max(-BUCKET_CLAMP, Math.min(BUCKET_CLAMP, v));
+
+      const strategyScore =
+        WEIGHTS.acceptance * clampBucket(acceptanceBucket) +
+        WEIGHTS.userFit    * clampBucket(userFitBucket) +
+        WEIGHTS.valueEdge  * valueEdgeBucket +
+        WEIGHTS.structure  * clampBucket(structureBucket) +
+        WEIGHTS.signals    * clampBucket(signalsBucket);
       return {
         r,
         lineupSafety,
         partnerProfile,
         bucketPriority,
         strategyScore,
+        oppDirectionScore,
         sort: Math.abs(Math.sin(deferredFinderSeed * (results.indexOf(r) + 1)) * 10000) % 1,
       };
     })
@@ -1212,6 +1321,13 @@ export function runFinderPipeline(
       : lineupSafety.valid
     )
     .filter(({ strategyScore }) => strategyScore > 0)
+    .filter(({ r, oppDirectionScore }) => {
+      // Acceptance-first: never surface a standard swap the opponent has no directional
+      // reason to accept. Lottery / draft-capital formats are exempt — they are
+      // intentionally pick-skewed sell-side moves judged on different terms.
+      const isStandardSwap = !r.draftCapital && r.format !== "Lottery";
+      return !isStandardSwap || oppDirectionScore >= ACCEPT_FLOOR;
+    })
     .sort((a, b) => {
       if (a.bucketPriority !== b.bucketPriority) return a.bucketPriority - b.bucketPriority;
       if (b.strategyScore !== a.strategyScore) return b.strategyScore - a.strategyScore;
@@ -1219,7 +1335,9 @@ export function runFinderPipeline(
     })
     .map(({ r }) => r);
 
-  // ── Build the standard top-12 ──────────────────────────────────────────
+  // ── Build the standard final list ──────────────────────────────────────
+  const FINAL_TRADE_COUNT = 12;  // headline ranked trades
+  const BUY_LOW_COUNT = 5;       // bonus buy-low slots appended after
   const buyLowSet = new Set(buyLowPlayerIds);
   const seen = new Set<string>();
   const playerCount: Record<string, number> = {};
@@ -1232,8 +1350,8 @@ export function runFinderPipeline(
   };
   const MAX_COMPLEX_TRADES = 2;
   let complexTradeCount = 0;
-  const top15 = shuffled.reduce((acc: TradeResult[], r) => {
-      if (acc.length >= 12) return acc;
+  const topTrades = shuffled.reduce((acc: TradeResult[], r) => {
+      if (acc.length >= FINAL_TRADE_COUNT) return acc;
       const allIds = [
         ...r.give.map((p) => `player-${p.player_id}`),
         ...r.receive.map((p) => `player-${p.player_id}`),
@@ -1261,7 +1379,7 @@ export function runFinderPipeline(
 
   // ── 5 bonus buy-low slots ──────────────────────────────────────────────
   const buyLowSlots = shuffled.reduce((acc: TradeResult[], r) => {
-      if (acc.length >= 5) return acc;
+      if (acc.length >= BUY_LOW_COUNT) return acc;
 
       const totalGiven    = r.give.length + r.givePicks.length;
       const totalReceived = r.receive.length + r.receivePicks.length;
@@ -1285,7 +1403,7 @@ export function runFinderPipeline(
     }, [])
     .map((r) => ({ ...r, isBuyLow: true }));
 
-  const allTrades = [...top15, ...buyLowSlots];
+  const allTrades = [...topTrades, ...buyLowSlots];
 
   const TWENTY_EIGHT_DAYS = 28 * 24 * 60 * 60 * 1000;
   const recentFingerprints = new Set(

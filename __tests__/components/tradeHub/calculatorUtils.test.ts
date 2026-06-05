@@ -4,6 +4,7 @@ import {
   computeRosterDropCost,
   computeStarDiscounts,
   computeFinderStarDiscounts,
+  computeFinderAdjustedNet,
   computePosTotals,
   computeLeagueRank,
 } from "@/components/tradeHub/calculatorUtils";
@@ -145,6 +146,43 @@ describe("computeFinderStarDiscounts", () => {
         [{ round: 1, value: 6000 }], [{ round: 1, value: 500 }],
       ),
     ).toEqual({ onReceive: -75, onGive: 0 });
+  });
+});
+
+// ── computeFinderAdjustedNet ─────────────────────────────────────────
+
+describe("computeFinderAdjustedNet", () => {
+  const noDrop = () => 0;
+
+  it("computes signed net from the user's perspective (positive = user gains)", () => {
+    const trade = {
+      give: [{ value: 2000, player_id: "g1" }],
+      receive: [{ value: 2500 }],
+      givePicks: [], receivePicks: [], oppRosterId: 2,
+    };
+    const { net, giveTotalAdj, receiveTotalAdj } = computeFinderAdjustedNet(trade, noDrop, 1);
+    expect(giveTotalAdj).toBe(2000);
+    expect(receiveTotalAdj).toBe(2500);
+    expect(net).toBe(500);
+  });
+
+  it("excludes a sweetener piece from all value math (value-neutral)", () => {
+    const base = {
+      give: [{ value: 3000, player_id: "star" }],
+      receive: [{ value: 3000 }],
+      givePicks: [], receivePicks: [], oppRosterId: 2,
+    };
+    const withSweetener = {
+      give: [{ value: 3000, player_id: "star" }, { value: 400, player_id: "sweet" }],
+      receive: [{ value: 3000 }],
+      givePicks: [], receivePicks: [], oppRosterId: 2,
+      sweetenerPlayerId: "sweet",
+    };
+    const baseNet = computeFinderAdjustedNet(base, noDrop, 1).net;
+    const sweet = computeFinderAdjustedNet(withSweetener, noDrop, 1);
+    // The 400-value sweetener does not move the net or the give total.
+    expect(sweet.net).toBe(baseNet);
+    expect(sweet.giveTotalAdj).toBe(3000);
   });
 });
 

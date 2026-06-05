@@ -355,6 +355,9 @@ export interface RosterDirectionProfile {
   premiumCurrentFirsts: number;
   futureFirsts: number;
   playoffOdds?: number;
+  // Set true by selectedLeagueDirectionAdjusted once a committed/live sim has resolved.
+  // Consumers must not infer tank/sell direction from playoffOdds when this is falsy.
+  hasSimData?: boolean;
 }
 
 export interface LeagueMateProfile {
@@ -398,6 +401,10 @@ export interface CrossLeagueIntel {
   veteranRbBuyRate: number;
   // Extended fields populated by the cross-league intel loader
   ownedPositionCounts?: Record<string, number>;
+  // Full per-opponent ownership across their OTHER dynasty leagues: playerId → # of their
+  // leagues rostering that player. Drives the sweetener-affinity rule (a low-value piece is
+  // only worth showing if this owner already rosters that exact player elsewhere).
+  ownedPlayerCounts?: Record<string, number>;
   repeatedPlayers?: (CrossLeagueIntelPlayer | null)[];
   acquiredPlayers?: (CrossLeagueIntelPlayer | null)[];
   averageAgeAllLeagues?: number;
@@ -696,6 +703,9 @@ export interface LeagueMateView {
   preferredPositions: string[];
   tradePreferredPositions: string[];
   repeatedPlayers: CrossLeagueIntelPlayer[];
+  // Full cross-league ownership map (playerId → # of this owner's other leagues rostering
+  // them). Powers the sweetener-affinity rule in the trade finder.
+  ownedPlayerCounts?: Record<string, number>;
   acquiredPlayers: CrossLeagueIntelPlayer[];
   totalDynastyLeagues: number;
   averageAgeAllLeagues: number;

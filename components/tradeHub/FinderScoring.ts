@@ -72,6 +72,19 @@ export const isPremiumCurrentPick = (pick: AugmentedPick) =>
 
 // ── Package / balance helpers ─────────────────────────────────────────────────
 
+// Shared value-band thresholds (user policy):
+//   • A player below LOW_VALUE_FLOOR is noise — it may not be used to close a value
+//     gap (no waiver credit; see tradeWaiverAdj) and cannot be the load-bearing piece
+//     in a package (see the generation gate). It can only ride as a flagged sweetener.
+//   • A player in [LOW_VALUE_FLOOR, MID_VALUE_CEILING) is opinion-dependent — it is
+//     soft de-ranked at scoring time, never rejected.
+export const LOW_VALUE_FLOOR = 700;
+export const MID_VALUE_CEILING = 1000;
+
+// isBalanced gate literals — single source of truth (referenced by the comment below).
+export const BALANCE_ABS_CAP = 600;       // max adjusted value gap between the two sides
+export const BALANCE_RATIO_FLOOR = 0.85;  // lighter side must be ≥ 85% of the heavier side
+
 export const packageOk = (pkg: PlayerWithValue[]) => {
   const qbs = pkg.filter((p) => p.position === "QB").length;
   const tes = pkg.filter((p) => p.position === "TE").length;
@@ -85,12 +98,17 @@ export const posTotals = (plist: Array<{ position: string; value: number }>) => 
   return t;
 };
 
-// Waiver adj — kept ONLY for isBalanced gate (generation filter)
+// Waiver adj — kept ONLY for isBalanced gate (generation filter).
+// Surplus bodies below LOW_VALUE_FLOOR grant NO balance credit: a sub-700 throw-in is
+// noise and must not be the reason a package's value reconciles.
 export const tradeWaiverAdj = (giveVals: number[], receiveVals: number[]) => {
   const diff = giveVals.length - receiveVals.length;
   if (diff === 0) return 0;
   const capAdj = (extras: number[]) =>
-    extras.reduce((s, v, i) => s + Math.min(Math.round(v * 0.42), i === 0 ? 550 : 750), 0);
+    extras.reduce((s, v, i) => {
+      if (v < LOW_VALUE_FLOOR) return s; // sub-700 surplus body → zero phantom balance credit
+      return s + Math.min(Math.round(v * 0.42), i === 0 ? 550 : 750);
+    }, 0);
   if (diff > 0) {
     const sg = [...giveVals].sort((a, b) => b - a);
     return capAdj(sg.slice(receiveVals.length));
@@ -101,21 +119,23 @@ export const tradeWaiverAdj = (giveVals: number[], receiveVals: number[]) => {
 };
 
 // Check if a trade is value-balanced after waiver adjustment.
-// Two-part gate:
-//   1. Absolute cap: gap must be ≤600 — protects large-value trades from wild swings.
-//   2. Ratio cap: the lower side must be ≥70% of the higher side — prevents small-value
-//      trades from being wildly one-sided (e.g. 470 vs 976 is 48%, far too lopsided).
-//      On a 10k package a 600-pt gap is ~6%; on a 500 vs 976 deal it's basically free money.
+// Two-part gate (literals live in BALANCE_ABS_CAP / BALANCE_RATIO_FLOOR above):
+//   1. Absolute cap: gap must be ≤ BALANCE_ABS_CAP (600) — protects large-value trades
+//      from wild swings. On a 10k package a 600-pt gap is ~6%.
+//   2. Ratio cap: the lower side must be ≥ BALANCE_RATIO_FLOOR (85%) of the higher side —
+//      prevents small-value trades from being wildly one-sided.
+// Note: surplus bodies below LOW_VALUE_FLOOR contribute zero waiver credit (see
+// tradeWaiverAdj), so a sub-700 throw-in can no longer manufacture phantom balance.
 export const isBalanced = (giveVals: number[], receiveVals: number[]) => {
   const gTotal = giveVals.reduce((s, v) => s + v, 0);
   const rTotal = receiveVals.reduce((s, v) => s + v, 0);
   const diff = giveVals.length - receiveVals.length;
   const adjG = gTotal + (diff < 0 ? tradeWaiverAdj(giveVals, receiveVals) : 0);
   const adjR = rTotal + (diff > 0 ? tradeWaiverAdj(giveVals, receiveVals) : 0);
-  if (Math.abs(adjR - adjG) > 600) return false;
+  if (Math.abs(adjR - adjG) > BALANCE_ABS_CAP) return false;
   const higher = Math.max(adjG, adjR);
   const lower  = Math.min(adjG, adjR);
-  if (higher > 0 && lower / higher < 0.85) return false;
+  if (higher > 0 && lower / higher < BALANCE_RATIO_FLOOR) return false;
   return true;
 };
 

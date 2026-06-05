@@ -1,5 +1,10 @@
 import type { SleeperRoster, SleeperPlayer } from "../../lib/types";
 
+// Shared "essentially even" band for adjusted net, used by BOTH the Finder card badge and
+// the manual calculator verdict so the same value gap can't read EVEN on one surface and
+// WIN/LOSE on the other. Finder-native (stricter) value.
+export const EVEN_NET_THRESHOLD = 100;
+
 export function computeRosterDropCost(
   roster: SleeperRoster | null | undefined,
   netPlayerGain: number,
@@ -92,6 +97,48 @@ export function computeFinderStarDiscounts(
   receivePicks.forEach((p, i) => valByKey.set(`0-${Number(p.round)}-r${i}`, p.value));
   const getPickValue = (k: string) => valByKey.get(k) ?? 0;
   return computeStarDiscounts(allGiveVals, allRecvVals, giveKeys, recvKeys, getPickValue);
+}
+
+// SINGLE source of truth for the Trade Finder's adjusted net, from the USER's perspective.
+// Both the FinderResults sort key and the TradeCard displayed badge call this, so the list
+// ordering and each card's net can never drift. Returns the full breakdown (drop costs and
+// star discounts) so the card can render the adjustment lines from the same numbers.
+// net > 0 favors the user; net < 0 means the user is paying up.
+export function computeFinderAdjustedNet(
+  trade: {
+    give: { value: number; player_id?: string }[]; receive: { value: number }[];
+    givePicks: { round: number | string; value: number }[];
+    receivePicks: { round: number | string; value: number }[];
+    oppRosterId: number;
+    sweetenerPlayerId?: string;
+  },
+  calcDropCost: (rosterId: number, netPlayerGain: number) => number,
+  myRosterId: number,
+): {
+  giveTotal: number; receiveTotal: number;
+  myDropCost: number; oppDropCost: number;
+  starOnGive: number; starOnReceive: number;
+  giveTotalAdj: number; receiveTotalAdj: number; net: number;
+} {
+  // A sweetener piece is value-neutral: drop it from every value computation so the user's
+  // net is the base trade's net. It still appears on the card (tagged) as a goodwill add.
+  const give = trade.sweetenerPlayerId
+    ? trade.give.filter((p) => p.player_id !== trade.sweetenerPlayerId)
+    : trade.give;
+  const giveTotal = [...give, ...trade.givePicks].reduce((s, p) => s + p.value, 0);
+  const receiveTotal = [...trade.receive, ...trade.receivePicks].reduce((s, p) => s + p.value, 0);
+  const netPlayerGain = trade.receive.length - give.length;
+  const myDropCost  = netPlayerGain > 0 ? calcDropCost(myRosterId, netPlayerGain) : 0;
+  const oppDropCost = netPlayerGain < 0 ? calcDropCost(trade.oppRosterId, -netPlayerGain) : 0;
+  const { onReceive: starOnReceive, onGive: starOnGive } = computeFinderStarDiscounts(
+    give, trade.receive, trade.givePicks, trade.receivePicks,
+  );
+  const giveTotalAdj    = giveTotal + myDropCost + starOnGive;
+  const receiveTotalAdj = Math.max(0, receiveTotal + oppDropCost + starOnReceive);
+  return {
+    giveTotal, receiveTotal, myDropCost, oppDropCost, starOnGive, starOnReceive,
+    giveTotalAdj, receiveTotalAdj, net: receiveTotalAdj - giveTotalAdj,
+  };
 }
 
 export function computePosTotals(

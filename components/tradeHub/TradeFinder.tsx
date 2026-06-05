@@ -20,8 +20,7 @@ import { FinderSearchInput } from "./FinderSearch";
 import FinderResults from "./FinderResults";
 import { FinderDirectionPanel } from "./FinderDirectionPanel";
 import {
-  isOldProducerBuy, isFutureInsulationAsset,
-  packageOk, posTotals, isBalanced,
+  packageOk, posTotals, isBalanced, LOW_VALUE_FLOOR,
 } from "./FinderScoring";
 import {
   finderPickKey,
@@ -291,9 +290,12 @@ function TradeFinder({
       // At this point selectedLeagueDirectionAdjusted is guaranteed non-null (loading gate above).
       const finderDirectionProfile = selectedLeagueDirectionAdjusted;
       const finderDirection = finderDirectionProfile.bucket;
-      // Sim is now required before selectedLeagueDirectionAdjusted resolves — playoffOdds
-      // is always a real number by the time we reach here (loading gate above blocks otherwise).
-      const myFinderPlayoffOdds = finderDirectionProfile.playoffOdds ?? 0;
+      // Sim is normally resolved before selectedLeagueDirectionAdjusted is non-null, so
+      // playoffOdds is a real number here. Guard anyway: default to 50 (neutral), NEVER 0 —
+      // a 0 default would silently flip the whole finder into tank/sell-side mode.
+      const hasMySim = finderDirectionProfile.hasSimData === true
+        && Number.isFinite(finderDirectionProfile.playoffOdds);
+      const myFinderPlayoffOdds = hasMySim ? Number(finderDirectionProfile.playoffOdds) : 50;
 
       // ── Stockpiled-rebuild detection ─────────────────────────────────────
       // A team can be dynasty-elite (top of league) and already pick-rich while
@@ -321,7 +323,8 @@ function TradeFinder({
       // Tank-mode scoring (in useScoringFactors) boosts pick acquisition.
       // Disable for stockpiled teams so trade scoring doesn't keep pushing
       // them toward more picks they don't need.
-      const iAmTankingFinder = myFinderPlayoffOdds < 50 && !isStockpiledRebuild;
+      // Don't auto-tank unless the user's own sim is actually resolved (hasMySim).
+      const iAmTankingFinder = hasMySim && myFinderPlayoffOdds < 50 && !isStockpiledRebuild;
 
       const isHardSellSide = (
         ["Stranded", "Fading Out", "Hopeless"].includes(finderDirection)
@@ -518,37 +521,9 @@ function TradeFinder({
         return true;
       };
 
-      // Hard direction filter — applied at generation time alongside oppReceiveOk.
-      // Blocks structurally implausible trades before they reach scoring.
-      // Rules:
-      //   1. A tanking team (< 30% playoff odds) will not trade away a 1st-round pick
-      //      in exchange for only veterans and no picks/youth in return.
-      //   2. A clear contender (≥ 65% playoff odds) will not give up players for only picks.
-      const oppDirOk = (
-        oppRosterId: number,
-        givePlayers: PlayerWithValue[],   // what we send them
-        givePicks: PickWithValue[],
-        receivePlayers: PlayerWithValue[], // what they send us
-        receivePicks: PickWithValue[]
-      ): boolean => {
-        const oppOdds = selectedLeagueSimulation?.rowByRosterId?.get(Number(oppRosterId))?.playoffOdds ?? 50;
-        // Tanker giving a 1st for pure vets — they need picks, not aging players
-        if (oppOdds < 30) {
-          const givingFirstRound = givePicks.some((p) => Number(p.round) === 1);
-          const receivingOnlyVets = givePlayers.length > 0
-            && givePlayers.every((p) => isOldProducerBuy(p))
-            && receivePicks.length === 0
-            && receivePlayers.filter((p) => isFutureInsulationAsset(p)).length === 0;
-          if (givingFirstRound && receivingOnlyVets) return false;
-        }
-        // Contender giving away their own players for only the user's picks — they should be buying
-        // production to win now, not selling contributors for future capital (that's rebuilder behavior).
-        // "receivePlayers" = players the opponent gives us; "givePlayers" = players we send them.
-        if (oppOdds >= 65 && receivePlayers.length > 0 && givePlayers.length === 0 && receivePicks.length === 0) {
-          return false;
-        }
-        return true;
-      };
+      // oppDirOk (the hard structural acceptance pre-filter) now lives in finderPipeline,
+      // where it is judged on the opponent's ADJUSTED window bucket via the canonical
+      // classifier rather than raw playoff odds. See runFinderPipeline.
 
       // User-side package check — bypassed in Tank Mode so the user can give 2+ QBs/TEs
       const myPkgOk = (pkg: PlayerWithValue[]) => finderTankMode || packageOk(pkg);
@@ -565,7 +540,13 @@ function TradeFinder({
 
       const results: TradeResult[] = [];
 
+      // Freeze guard: a generous ceiling on total generated candidates. Not a quality knob —
+      // the per-format depth caps below define the intended search; this only stops a
+      // pathologically deep roster from growing results[] without bound before scoring.
+      const MAX_CANDIDATES = 50000;
+
       for (const oppRoster of rosters.filter((r) => r.owner_id !== user?.user_id && !ignoredOwnerIds.includes(r.owner_id) && (deferredTargetOppRosterId === null || r.roster_id === deferredTargetOppRosterId))) {
+        if (results.length >= MAX_CANDIDATES) break;
         const oppPlayers = rosterPlayers(oppRoster);
         const oppPicks: PickWithValue[] = allPicks
           .filter((p) => p.owner_id === oppRoster.roster_id)
@@ -649,9 +630,22 @@ function TradeFinder({
         const myCap = (base: number) => Math.min(myTop.length, pinnedMyIdx >= 0 ? Math.min(Math.max(base, pinnedMyIdx + 1), 18) : base);
         const oppCap = (base: number) => Math.min(oppTop.length, pinnedOppIdx >= 0 ? Math.min(Math.max(base, pinnedOppIdx + 1), 18) : base);
 
-        // 1v1
-        for (const mp of myTop) {
-          for (const op of oppTop) {
+        // Sweetener-affinity (#6): a sub-700 give-side piece this opponent already rosters on
+        // ≥2 of their OTHER dynasty leagues — proof they personally value the player. It is
+        // value-neutral goodwill (excluded from all value math; see computeFinderAdjustedNet)
+        // that only nudges acceptance, so it can ride alongside an already-balanced base.
+        const oppOwnedCounts = leagueMateProfileByRosterId.get(oppRoster.roster_id)?.ownedPlayerCounts ?? {};
+        const sweetenerPiece = myTop.find(
+          (p) => p.value < LOW_VALUE_FLOOR
+            && (oppOwnedCounts[p.player_id] ?? 0) >= 2
+            && !isBlockedSellDisposition(p.player_id),
+        ) ?? null;
+
+        // 1v1 — capped at the same sibling depth (18) as the multi-body formats.
+        for (let mi = 0; mi < myCap(18); mi++) {
+          const mp = myTop[mi];
+          for (let oi = 0; oi < oppCap(18); oi++) {
+            const op = oppTop[oi];
             if (!isBalanced([mp.value], [op.value])) continue;
             if (!qbSafe([mp])) continue;
             if (!oppQbSafe(oppPlayers, [op])) continue;
@@ -661,6 +655,16 @@ function TradeFinder({
               score: posScore([mp], [op]),
               net: op.value - mp.value, format: "1 for 1",
             });
+            // Value-neutral sweetener variant of the same balanced base (net/score unchanged).
+            if (sweetenerPiece && sweetenerPiece.player_id !== mp.player_id
+              && myPkgOk([mp, sweetenerPiece]) && qbSafe([mp, sweetenerPiece])) {
+              results.push({
+                give: [mp, sweetenerPiece], receive: [op], givePicks: [], receivePicks: [], oppName, oppRosterId: oppRoster.roster_id,
+                score: posScore([mp], [op]),
+                net: op.value - mp.value, format: "1 for 1 + sweetener",
+                sweetenerPlayerId: sweetenerPiece.player_id,
+              });
+            }
           }
         }
 
@@ -730,7 +734,8 @@ function TradeFinder({
         // 2v1
         for (let i = 0; i < myCap(18); i++) {
           for (let j = i + 1; j < myCap(18); j++) {
-            for (const op of oppTop) {
+            for (let k = 0; k < oppCap(18); k++) {
+              const op = oppTop[k];
               const mp1 = myTop[i], mp2 = myTop[j];
               if (!isBalanced([mp1.value, mp2.value], [op.value])) continue;
               if (!myPkgOk([mp1, mp2])) continue;
@@ -1073,7 +1078,6 @@ function TradeFinder({
         isBlockedSellDisposition,
         isBlockedBuyDisposition,
         isWantToTrade,
-        oppDirOk,
         failsDirectionGuardrail,
         getDirectionTradeScore,
         getTradeLineupSafety,

@@ -11,7 +11,7 @@ import {
 import { finderPickKey } from "./finderUtils";
 import type { TradeResult } from "./finderTypes";
 import { ordinalSuffix, buildTradeFingerprint } from "./shared";
-import { computeFinderStarDiscounts } from "./calculatorUtils";
+import { computeFinderAdjustedNet, EVEN_NET_THRESHOLD } from "./calculatorUtils";
 
 interface TradeCardProps {
   trade: TradeResult;
@@ -144,29 +144,19 @@ export default function TradeCard({
     return factors.slice(0, 6);
   })();
 
-  const giveVals = [...trade.give.map((p) => p.value), ...trade.givePicks.map((p) => p.value)];
-  const receiveVals = [...trade.receive.map((p) => p.value), ...trade.receivePicks.map((p) => p.value)];
-  const giveTotal = giveVals.reduce((s: number, v: number) => s + v, 0);
-  const receiveTotal = receiveVals.reduce((s: number, v: number) => s + v, 0);
-  const cardMyNetPlayerGain = trade.receive.length - trade.give.length;
-  const cardMyDropCost  = cardMyNetPlayerGain > 0
-    ? calcDropCost(myRoster?.roster_id ?? 0, cardMyNetPlayerGain)
-    : 0;
-  const cardOppDropCost = cardMyNetPlayerGain < 0
-    ? calcDropCost(trade.oppRosterId, -cardMyNetPlayerGain)
-    : 0;
-  // Single source of truth (shared with FinderResults' sort key) so the
-  // displayed net and the list ordering can never disagree.
-  const cardStarDiscounts = computeFinderStarDiscounts(
-    trade.give, trade.receive, trade.givePicks, trade.receivePicks,
-  );
-  const cardStarOnReceive = cardStarDiscounts.onReceive;
-  const cardStarOnGive    = cardStarDiscounts.onGive;
-  const giveTotalAdj    = giveTotal    + cardMyDropCost  + cardStarOnGive;
-  const receiveTotalAdj = Math.max(0, receiveTotal + cardOppDropCost + cardStarOnReceive);
-  const adjustedCardNet = receiveTotalAdj - giveTotalAdj;
+  // Single source of truth (shared with FinderResults' sort key) so the displayed net and
+  // the list ordering can never disagree. Returns the full breakdown for the adjustment lines.
+  const {
+    myDropCost: cardMyDropCost,
+    oppDropCost: cardOppDropCost,
+    starOnGive: cardStarOnGive,
+    starOnReceive: cardStarOnReceive,
+    giveTotalAdj,
+    receiveTotalAdj,
+    net: adjustedCardNet,
+  } = computeFinderAdjustedNet(trade, calcDropCost, myRoster?.roster_id ?? 0);
   const netDisplay = Math.abs(adjustedCardNet);
-  const isEven = netDisplay <= 100;
+  const isEven = netDisplay <= EVEN_NET_THRESHOLD;
   const oppSimRow = selectedLeagueSimulation?.rowByRosterId?.get(Number(trade.oppRosterId));
   const oppProjFinish   = oppSimRow ? Math.round(oppSimRow.projectedFinish) : null;
   const oppPlayoffOdds  = oppSimRow ? Math.round(oppSimRow.playoffOdds)     : null;
@@ -310,11 +300,15 @@ export default function TradeCard({
           <div className="space-y-1">
             {trade.give.map((p) => {
               const playerTag = leaguePlayerTags[cardLeagueId]?.[p.player_id];
+              const isSweetener = p.player_id === trade.sweetenerPlayerId;
               return (
                 <div key={p.player_id} className="flex items-center justify-between bg-gray-800 rounded-lg px-2 py-1.5">
                   <div className="flex items-center gap-1.5 min-w-0">
                     <button onClick={() => onSetPlayerProfileId(p.player_id)} className="text-xs text-white hover:text-blue-400 transition truncate text-left">{p.full_name}</button>
                     <span className="text-[10px] text-gray-500 shrink-0">{p.position}{p.team ? ` · ${p.team}` : ""}</span>
+                    {isSweetener && (
+                      <span title="Goodwill sweetener — this owner rosters this player on their other dynasty teams. Not counted in the value totals." className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-pink-700 bg-pink-950/40 text-pink-300 shrink-0">Sweetener &#127873;</span>
+                    )}
                     {playerTag === "CORE" && (
                       <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-emerald-700 bg-emerald-950/40 text-emerald-300 shrink-0">Core</span>
                     )}
@@ -330,7 +324,7 @@ export default function TradeCard({
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0 ml-1">
                     {p.age && <span className="text-[10px] text-gray-500">Age {p.age}</span>}
-                    <span className="text-xs text-gray-400 font-mono">{p.value.toLocaleString()}</span>
+                    <span className={`text-xs font-mono ${isSweetener ? "text-gray-600 line-through" : "text-gray-400"}`}>{p.value.toLocaleString()}</span>
                     <button
                       title={playerTag === "CORE" ? "Remove Core tag" : "Tag as Core (Do Not Sell)"}
                       onClick={() => onToggleLeaguePlayerTag(cardLeagueId, p.player_id, "CORE")}

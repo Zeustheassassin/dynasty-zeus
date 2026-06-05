@@ -16,6 +16,39 @@ export const computeWindowScore = (profile: Pick<RosterDirectionProfile, "coreAg
   return score; // typically -5 to +5
 };
 
+export interface OppAcceptanceClass {
+  isHopeless: boolean;
+  isRebuild: boolean;
+  isElite: boolean;
+  isContender: boolean;
+  isFading: boolean;
+  isSeller: boolean;   // hopeless || rebuild — wants picks/youth, sheds production
+  isBuyer: boolean;    // elite || contender — wants win-now production, not picks
+}
+
+/** Canonical buyer/seller + window classification for a trade partner.
+ *  SINGLE source of truth used by the trade-finder acceptance gate, oppDirectionScore,
+ *  cross-league intel, oppDirOk, and the leaguemate rankings — so the same opponent is
+ *  never classified three different ways. Callers pass the adjusted bucket and the
+ *  partner's playoff odds (missing sim → pass 50, neutral). Thresholds: <30 hopeless,
+ *  <50 rebuild, ≥78 elite, ≥65 contender, ≥50 fading. */
+export const classifyOppDirection = (
+  adjustedBucket: string,
+  playoffOdds: number,
+): OppAcceptanceClass => {
+  const isHopeless   = playoffOdds < 30 || ["Stranded", "Fading Out", "Hopeless"].includes(adjustedBucket);
+  const isRebuild    = !isHopeless && (playoffOdds < 50 || adjustedBucket === "Rebuilder");
+  const isElite      = playoffOdds >= 78 || ["Elite", "True Contender"].includes(adjustedBucket);
+  const isContender  = !isElite && (playoffOdds >= 65 || adjustedBucket === "Almost There");
+  const isFading     = !isHopeless && !isRebuild && !isElite && !isContender
+                       && (playoffOdds >= 50 || adjustedBucket === "Fading Contender");
+  return {
+    isHopeless, isRebuild, isElite, isContender, isFading,
+    isSeller: isHopeless || isRebuild,
+    isBuyer: isElite || isContender,
+  };
+};
+
 /** Three-factor adjusted bucket: raw rank bucket + window score (age/youth)
  *  + playoff simulation pressure. Single source of truth for strategic label. */
 export const getAdjustedDirectionBucket = (

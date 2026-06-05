@@ -265,15 +265,23 @@ describe("tradeWaiverAdj", () => {
   });
 
   it("returns adjustment when giving more players than receiving", () => {
-    // give [1000, 500], receive [800] → extra give sorted desc: [1000, 500].slice(1) = [500]
-    // capAdj([500]) = min(round(500*0.42), 550) = min(210, 550) = 210
-    expect(tradeWaiverAdj([1000, 500], [800])).toBe(210);
+    // give [1000, 800], receive [900] → extra give sorted desc: [1000, 800].slice(1) = [800]
+    // capAdj([800]) = min(round(800*0.42), 550) = min(336, 550) = 336
+    expect(tradeWaiverAdj([1000, 800], [900])).toBe(336);
   });
 
   it("returns adjustment when receiving more players than giving", () => {
-    // give [800], receive [1000, 500] → extra recv sorted desc: [1000, 500].slice(1) = [500]
-    // capAdj([500]) = 210
-    expect(tradeWaiverAdj([800], [1000, 500])).toBe(210);
+    // give [900], receive [1000, 800] → extra recv sorted desc: [1000, 800].slice(1) = [800]
+    // capAdj([800]) = 336
+    expect(tradeWaiverAdj([900], [1000, 800])).toBe(336);
+  });
+
+  it("grants zero credit for sub-700 surplus bodies (low-value floor)", () => {
+    // A 500-value throw-in is noise: it must not manufacture phantom balance credit.
+    expect(tradeWaiverAdj([1000, 500], [800])).toBe(0);
+    expect(tradeWaiverAdj([800], [1000, 500])).toBe(0);
+    // A 700+ surplus body still earns its credit: round(700 * 0.42) = 294
+    expect(tradeWaiverAdj([1000, 700], [800])).toBe(294);
   });
 
   it("caps each extra player adjustment", () => {

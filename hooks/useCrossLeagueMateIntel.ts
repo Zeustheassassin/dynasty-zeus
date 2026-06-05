@@ -218,6 +218,9 @@ export function useCrossLeagueMateIntel({
               {
                 totalDynastyLeagues: dynastyLeagues.length,
                 ownedPositionCounts,
+                // Keep the FULL ownership map (not just the top-3 repeatedPlayers) so the
+                // trade finder can check affinity for any player, including sub-700 sweeteners.
+                ownedPlayerCounts,
                 preferredPositions: sortedPositions.slice(0, 2),
                 repeatedPlayers,
                 averageAgeAllLeagues,
