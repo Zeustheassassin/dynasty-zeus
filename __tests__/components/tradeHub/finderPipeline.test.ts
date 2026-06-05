@@ -266,6 +266,29 @@ describe("runFinderPipeline — basic acceptance & filtering", () => {
     expect(runFinderPipeline([mk(true)], baseCtx()).allTrades[0].sweetenerPlayerId).toBe("sweet");
   });
 
+  it("blocks a non-contender from ACQUIRING an aging veteran (window guardrail)", () => {
+    // Rebuilder at 5% odds receiving a 32-year-old TE = burning dynasty value over a window
+    // they aren't competing in → hard-dropped regardless of value.
+    const t = mkTrade({
+      give: [mkPlayer("young", "TE", 2400, { age: 22, team: "NYJ" })],
+      receive: [mkPlayer("kittle", "TE", 2495, { age: 32, team: "SF" })],
+      format: "1 for 1",
+    });
+    const { allTrades } = runFinderPipeline([t], baseCtx({ finderDirection: "Rebuilder", myFinderPlayoffOdds: 5 }));
+    expect(allTrades).toHaveLength(0);
+  });
+
+  it("lets a contender ACQUIRE an aging veteran (win-now patch)", () => {
+    // Same trade, but the user is a contender — acquiring win-now production is legitimate.
+    const t = mkTrade({
+      give: [mkPlayer("young", "TE", 2400, { age: 22, team: "NYJ" })],
+      receive: [mkPlayer("kittle", "TE", 2495, { age: 32, team: "SF" })],
+      format: "1 for 1",
+    });
+    const { allTrades } = runFinderPipeline([t], baseCtx({ finderDirection: "Elite", myFinderPlayoffOdds: 80 }));
+    expect(allTrades).toHaveLength(1);
+  });
+
   it("drops trades whose total strategyScore is not positive", () => {
     // score is hugely negative so even the +12 format bonus can't lift it above 0
     const t = mkTrade({

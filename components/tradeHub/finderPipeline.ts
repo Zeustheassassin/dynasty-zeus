@@ -271,6 +271,21 @@ export function runFinderPipeline(
     return true;
   };
 
+  // Hard window guardrail: a team building dynasty value (NOT win-now) must never ACQUIRE an
+  // aging, depreciating veteran — an old producer only helps a genuine contender; for everyone
+  // else it just burns value over a window they aren't competing in. Win-now = a contender
+  // bucket, a championship push, or ≥50% playoff odds. (Selling old producers is unaffected —
+  // this only blocks RECEIVING them. A pinned/targeted player still routes through the pin
+  // filters above.) This is the rule a pick-rich "Consolidate"/Rebuilder team needs: it must
+  // not spend even its excess picks turning a young asset + future pick into an aging vet.
+  const userIsWinNow = isChampionshipPush
+    || ["Elite", "True Contender", "Almost There", "Window Closing"].includes(finderDirection)
+    || myFinderPlayoffOdds >= 50;
+  const userWindowOk = (r: TradeResult): boolean =>
+    userIsWinNow
+    || !!deferredTargetPlayerId
+    || !r.receive.some((p) => isOldProducerBuy(p));
+
   const preGuardrail = results
     .filter((r) => isFinite(r.score))
     .filter((r) => !r.give.some((p) => isBlockedSellDisposition(p.player_id)))
@@ -281,7 +296,8 @@ export function runFinderPipeline(
     .filter((r) => !hasBadSameTeamCombo(r.give) && !hasBadSameTeamCombo(r.receive))
     .filter((r) => !finderTankMode || r.receive.every((p) => isFutureInsulationAsset(p)))
     .filter((r) => oppDirOk(r))
-    .filter((r) => lowValueBalancerOk(r));
+    .filter((r) => lowValueBalancerOk(r))
+    .filter((r) => userWindowOk(r));
   const hasGuardrailPassing = !finderTankMode && preGuardrail.some((r) => !failsDirectionGuardrail(r));
 
   // ── Roster concentration map ────────────────────────────────────────────
