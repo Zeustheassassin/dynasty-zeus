@@ -8,9 +8,10 @@ const POSITIONS = ["QB", "RB", "WR", "TE"] as const;
 
 interface MySharesTabProps {
   shares: Record<string, ShareEntry>;
+  totalLeagues: number;
 }
 
-function MySharesTab({ shares }: MySharesTabProps) {
+function MySharesTab({ shares, totalLeagues }: MySharesTabProps) {
   const players = usePlayers();
 
   const grouped: Record<(typeof POSITIONS)[number], { name: string; count: number }[]> = {
@@ -36,6 +37,7 @@ function MySharesTab({ shares }: MySharesTabProps) {
           <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">My Shares</div>
           <div className="mt-1 text-xs text-gray-400">
             All players you own across every connected league, grouped by position.
+            Each row shows how many of your {totalLeagues} leagues you own them in, then that share as a %.
           </div>
         </div>
 
@@ -59,7 +61,12 @@ function MySharesTab({ shares }: MySharesTabProps) {
                         className="flex items-center justify-between px-2.5 py-1 text-xs"
                       >
                         <span className="text-gray-200 truncate pr-2">{p.name}</span>
-                        <span className="text-gray-400 font-mono shrink-0">{p.count}</span>
+                        <span className="font-mono shrink-0 flex items-baseline gap-1.5">
+                          <span className="text-gray-300">{p.count}</span>
+                          <span className="text-gray-500 text-[10px]">
+                            {totalLeagues > 0 ? Math.round((p.count / totalLeagues) * 100) : 0}%
+                          </span>
+                        </span>
                       </div>
                     ))
                   )}

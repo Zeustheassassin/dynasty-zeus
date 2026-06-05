@@ -22,6 +22,7 @@ interface DataHubProps {
   setDataHubTab: (tab: DataHubTabId) => void;
 
   shares: Record<string, ShareEntry>;
+  totalLeagues: number;
 
   // Dynasty/Redraft rankings
   loadingCalcValues: boolean;
@@ -65,7 +66,7 @@ interface DataHubProps {
 // ── Component ──────────────────────────────────────────────────────────────
 function DataHub({
   dataHubTab, setDataHubTab,
-  shares,
+  shares, totalLeagues,
   loadingCalcValues, calcValuesError,
   playerDispositions, savePlayerDisposition, setPlayerProfileId,
   loadingRedraft, redraftError,
@@ -192,7 +193,7 @@ function DataHub({
         />
       )}
 
-      {dataHubTab === "MY_SHARES" && <MySharesTab shares={shares} />}
+      {dataHubTab === "MY_SHARES" && <MySharesTab shares={shares} totalLeagues={totalLeagues} />}
     </>
   );
 }

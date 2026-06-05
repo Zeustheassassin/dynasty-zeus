@@ -474,6 +474,7 @@ export function HubRouter({
             dataHubTab={dataHubTab}
             setDataHubTab={setDataHubTab}
             shares={shares}
+            totalLeagues={totalLeagues}
             loadingCalcValues={loadingCalcValues}
             calcValuesError={calcValuesError}
             playerDispositions={playerDispositions}
