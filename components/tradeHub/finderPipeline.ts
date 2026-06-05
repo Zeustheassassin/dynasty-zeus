@@ -13,6 +13,7 @@ import {
 import { finderPickKey } from "./finderUtils";
 import { buildTradeFingerprint } from "./shared";
 import type { TradeResult } from "./finderTypes";
+import { valueBearingGive } from "./finderTypes";
 import type { PlayerWithValue } from "./shared";
 
 export interface FinderPipelineCtx {
@@ -418,6 +419,10 @@ export function runFinderPipeline(
   // Tunable: raise toward 0 for a stricter board (fewer, higher-conviction trades).
   const ACCEPT_FLOOR = -10;
 
+  // O(1) candidate index lookup for the seeded tiebreak below — avoids an O(n^2) results.indexOf
+  // per surviving candidate (the MAX_CANDIDATES ceiling makes the worst case large).
+  const resultIndex = new Map<TradeResult, number>(results.map((rr, i) => [rr, i]));
+
   // Seeded shuffle so Refresh button produces a new random set
   const shuffled = preGuardrail
     .filter((r) => finderTankMode || !hasGuardrailPassing || !failsDirectionGuardrail(r))
@@ -452,11 +457,12 @@ export function runFinderPipeline(
       };
       const dispositionScore = (() => {
         let ds = 0;
-        ds += r.give.reduce((s: number, gp) =>
+        const dsGive = valueBearingGive(r); // strip value-neutral sweetener from sell scoring
+        ds += dsGive.reduce((s: number, gp) =>
           s + (sellScoreMap[playerDispositions[gp.player_id]?.sell ?? "Neutral"] ?? 0), 0);
         ds += r.receive.reduce((s: number, rp) =>
           s + (buyScoreMap[playerDispositions[rp.player_id]?.buy ?? "Neutral"] ?? 0), 0);
-        const sellHighGiven = r.give.filter((gp) =>
+        const sellHighGiven = dsGive.filter((gp) =>
           playerDispositions[gp.player_id]?.sell === "Will Trade but Higher than Market"
         ).length;
         if (sellHighGiven > 0 && r.net < -150) ds -= sellHighGiven * 8;
@@ -475,7 +481,7 @@ export function runFinderPipeline(
           ?? 50;
         const oppBucket = oppProfile?.directionProfile?.bucket ?? "";
 
-        const oppReceivesPlayers = r.give;
+        const oppReceivesPlayers = valueBearingGive(r); // strip value-neutral sweetener
         const oppReceivesPicks   = r.givePicks;
         const oppGivesPlayers    = r.receive;
         const oppGivesPicks      = r.receivePicks;
@@ -705,7 +711,7 @@ export function runFinderPipeline(
       })();
 
       const starPremiumScore = (() => {
-        const allGiveVals    = [...r.give.map((p) => p.value), ...r.givePicks.map((p) => p.value)];
+        const allGiveVals    = [...valueBearingGive(r).map((p) => p.value), ...r.givePicks.map((p) => p.value)];
         const allReceiveVals = [...r.receive.map((p) => p.value), ...r.receivePicks.map((p) => p.value)];
         if (allGiveVals.length === 0 || allReceiveVals.length === 0) return 0;
         const topGive    = Math.max(...allGiveVals);
@@ -1093,7 +1099,7 @@ export function runFinderPipeline(
         const isComfortableLeader = inPlayoffs && (oppStanding.wins - lastPlayoffSpotWins) >= 2;
 
         if (isDesperate) {
-          const oppReceivesPlayers = r.give;
+          const oppReceivesPlayers = valueBearingGive(r); // strip value-neutral sweetener
           const oppReceivesRedraft = oppReceivesPlayers.reduce(
             (s: number, p) => s + (redraftValues?.[p.player_id] ?? 0), 0
           );
@@ -1254,7 +1260,7 @@ export function runFinderPipeline(
       const wantToTradeBonus = r.give.some((p) => isWantToTrade(p.player_id)) ? 20 : 0;
 
       const oppDropCostPenalty = (() => {
-        const oppNetPlayerGain = r.give.length - r.receive.length;
+        const oppNetPlayerGain = valueBearingGive(r).length - r.receive.length;
         if (oppNetPlayerGain <= 0) return 0;
         const oppRosterObj = rosters.find((ros) => ros.roster_id === r.oppRosterId);
         if (!oppRosterObj) return 0;
@@ -1272,14 +1278,16 @@ export function runFinderPipeline(
       // WEIGHTS is the single place to tune the acceptance-vs-value-vs-fit balance.
       // clampBucket bounds any one bucket so a high-scale term (e.g. rosterConsolidation up
       // to 50) can't swamp the value signal. VALUE_EDGE is never clamped — value always counts.
-      // BUCKET_CLAMP currently starts effectively OFF, so this is byte-identical to the prior
-      // flat sum (safe rollout); lower it to ~40 to enable dominance protection once the
-      // reordering has been eyeballed on a real league.
+      // BUCKET_CLAMP currently starts effectively OFF, so this is value-equivalent to the prior
+      // flat sum — same term set, and ordering unchanged for any non-tied pair (floating-point
+      // regrouping can differ by an ULP, which only matters for exact ties). Lower it to ~40 to
+      // enable dominance protection once the reordering has been eyeballed on a real league.
       // Sweetener-affinity nudge: a goodwill piece the opponent already rosters elsewhere
       // makes them marginally likelier to say yes (value-neutral; see TradeResult.sweetenerPlayerId).
       const sweetenerBonus = r.sweetenerPlayerId ? 4 : 0;
       // Soft de-rank (#9): pieces in the opinion-dependent 700-1000 band shouldn't decide a
-      // trade. Small, capped penalty per mid-value body — never enough to reject (de-rank only).
+      // trade. Small, capped penalty applied to the RANKING ONLY (rankAdjust below) — NOT to the
+      // strategyScore>0 reject gate — so it can only reorder, never drop, a trade.
       const midValueSoftPenalty = Math.max(
         -8,
         [...r.give, ...r.receive].filter(
@@ -1291,7 +1299,7 @@ export function runFinderPipeline(
       const userFitBucket = getDirectionTradeScore(r) + lineupSafety.score + teamWindowBonus
         + starterQualityBonus + depthAwareTierBonus + rosterBalanceScore + championshipBonus
         + futurePickBonus + standingsPressureScore;
-      const valueEdgeBucket = r.score + balancePenalty + starPremiumScore + pickSlotScore + handcuffBonus + midValueSoftPenalty;
+      const valueEdgeBucket = r.score + balancePenalty + starPremiumScore + pickSlotScore + handcuffBonus;
       const structureBucket = formatBonus + rosterConsolidationBonus;
       const signalsBucket = dispositionScore + marketIntelScore + archetypeWinRateBonus
         + seasonTimingBonus + usageSignalScore + exposureBonus + sellHighConfirmScore + wantToTradeBonus;
@@ -1312,8 +1320,11 @@ export function runFinderPipeline(
         partnerProfile,
         bucketPriority,
         strategyScore,
+        // Ordering score = strategyScore plus the soft mid-value de-rank. Kept separate from
+        // strategyScore so the >0 reject gate below can never be flipped by the de-rank.
+        rankScore: strategyScore + midValueSoftPenalty,
         oppDirectionScore,
-        sort: Math.abs(Math.sin(deferredFinderSeed * (results.indexOf(r) + 1)) * 10000) % 1,
+        sort: Math.abs(Math.sin(deferredFinderSeed * ((resultIndex.get(r) ?? 0) + 1)) * 10000) % 1,
       };
     })
     .filter(({ lineupSafety }) => finderTankMode
@@ -1330,7 +1341,7 @@ export function runFinderPipeline(
     })
     .sort((a, b) => {
       if (a.bucketPriority !== b.bucketPriority) return a.bucketPriority - b.bucketPriority;
-      if (b.strategyScore !== a.strategyScore) return b.strategyScore - a.strategyScore;
+      if (b.rankScore !== a.rankScore) return b.rankScore - a.rankScore;
       return a.sort - b.sort;
     })
     .map(({ r }) => r);

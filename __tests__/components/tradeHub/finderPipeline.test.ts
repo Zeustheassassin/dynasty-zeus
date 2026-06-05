@@ -241,6 +241,31 @@ describe("runFinderPipeline — basic acceptance & filtering", () => {
     expect(allTrades).toHaveLength(1);
   });
 
+  it("sweetener is value-neutral: a variant surfaces exactly when its plain base does", () => {
+    // A sub-700 sweetener (stripped from isBalanced/net AND every give-side scoring term) must
+    // not change whether the underlying deal surfaces. Run the base and its variant separately;
+    // their gate outcomes must match.
+    const mk = (withSweet: boolean) =>
+      mkTrade(withSweet
+        ? {
+            give: [mkPlayer("mp", "WR", 3000, { team: "SF" }), mkPlayer("sweet", "WR", 400, { age: 22, team: "BUF" })],
+            receive: [mkPlayer("op", "RB", 3000, { team: "KC" })],
+            sweetenerPlayerId: "sweet",
+            format: "1 for 1 + sweetener",
+          }
+        : {
+            give: [mkPlayer("mp", "WR", 3000, { team: "SF" })],
+            receive: [mkPlayer("op", "RB", 3000, { team: "KC" })],
+            format: "1 for 1",
+          });
+    const baseOut = runFinderPipeline([mk(false)], baseCtx()).allTrades.length;
+    const variantOut = runFinderPipeline([mk(true)], baseCtx()).allTrades.length;
+    expect(baseOut).toBe(1);
+    expect(variantOut).toBe(baseOut);
+    // The variant that surfaces still carries its sweetener flag (for the card's tagged row).
+    expect(runFinderPipeline([mk(true)], baseCtx()).allTrades[0].sweetenerPlayerId).toBe("sweet");
+  });
+
   it("drops trades whose total strategyScore is not positive", () => {
     // score is hugely negative so even the +12 format bonus can't lift it above 0
     const t = mkTrade({

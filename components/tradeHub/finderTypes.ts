@@ -14,3 +14,12 @@ export type TradeResult = {
   // from all value math (isBalanced, net, badge) — and only nudges acceptance scoring.
   sweetenerPlayerId?: string;
 };
+
+// The give side with any value-neutral sweetener stripped out. EVERY scoring term that reads
+// give-side value, direction-fit, disposition, or acceptance must use this (not raw trade.give)
+// so the sweetener stays a pure +4 acceptance nudge and never leaks into the rest of scoring.
+// (Roster-mechanics like lineup safety intentionally keep the raw give — the piece really moves.)
+export const valueBearingGive = (trade: TradeResult): PlayerWithValue[] =>
+  trade.sweetenerPlayerId
+    ? trade.give.filter((p) => p.player_id !== trade.sweetenerPlayerId)
+    : trade.give;

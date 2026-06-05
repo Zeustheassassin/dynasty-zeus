@@ -6,6 +6,7 @@ import {
 } from "../FinderScoring";
 import { buildPostTradePlayers } from "../finderUtils";
 import type { MarketSignal, TradeResult } from "../finderTypes";
+import { valueBearingGive } from "../finderTypes";
 import type { PlayerWithValue } from "../shared";
 
 export interface ScoringFactorsParams {
@@ -243,7 +244,7 @@ export function createScoringFactors({
   };
 
   const getDirectionTradeScore = (trade: TradeResult) => {
-    const outgoingPlayers = trade.give || [];
+    const outgoingPlayers = valueBearingGive(trade); // strip value-neutral sweetener
     const incomingPlayers = trade.receive || [];
     const outgoingPicks = trade.givePicks || [];
     const incomingPicks = trade.receivePicks || [];

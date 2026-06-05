@@ -44,8 +44,11 @@ export const classifyOppDirection = (
                        && (playoffOdds >= 50 || adjustedBucket === "Fading Contender");
   return {
     isHopeless, isRebuild, isElite, isContender, isFading,
+    // Mutually exclusive in cascade priority (matches oppDirectionScore's if/else-if order):
+    // a hopeless/rebuild team is a SELLER even if a high sim seed also trips isElite, so the
+    // same opponent can never be both a seller and a buyer.
     isSeller: isHopeless || isRebuild,
-    isBuyer: isElite || isContender,
+    isBuyer: !isHopeless && !isRebuild && (isElite || isContender),
   };
 };
 
