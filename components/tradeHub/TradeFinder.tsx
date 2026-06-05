@@ -442,9 +442,13 @@ function TradeFinder({
       });
       const buildPostTradePlayers = (baseRoster: SleeperRoster | undefined, givePlayers: PlayerWithValue[], receivePlayers: PlayerWithValue[]): PlayerWithValue[] =>
         buildPostTradePlayersUtil(baseRoster, givePlayers, receivePlayers, players, calcFcValues);
-      // Full roster is the give pool — no artificial cap
+      // Give pool: skill players worth ≥ LOW_VALUE_FLOOR (700). Sub-700 players are noise and
+      // must not be trade pieces — not as headliners and not as balancers (the root cause of
+      // junk like a 51-value WR padding a package). Two carve-outs preserve intent: a pinned
+      // player is re-added below (you explicitly want to move him), and the cross-league
+      // affinity sweetener is drawn from the full roster (myPlayers) further down.
       const myTopBase = myPlayers
-        .filter((p) => !isBlockedSellDisposition(p.player_id));
+        .filter((p) => !isBlockedSellDisposition(p.player_id) && (p.value ?? 0) >= LOW_VALUE_FLOOR);
       const myPinnedPlayer = deferredPinnedPlayerId && !isBlockedSellDisposition(deferredPinnedPlayerId)
         ? myPlayers.find((p) => p.player_id === deferredPinnedPlayerId)
         : null;
@@ -560,10 +564,13 @@ function TradeFinder({
           })
           .slice(0, 8);
 
-        // Full opponent roster is the receive pool — no artificial cap
-        // Also exclude "Zero Interest" buy-disposition players unless explicitly targeted
+        // Receive pool: skill players worth ≥ LOW_VALUE_FLOOR (700). Sub-700 players are noise
+        // (a 394-value TE or 545-value RB padding a package), so never receive them as
+        // headliners or balancers. A target-pinned opponent player is re-added below; the
+        // Lottery format (sourced separately from oppPlayers) keeps its low-value upside picks.
+        // Also exclude "Zero Interest" buy-disposition players unless explicitly targeted.
         const oppTopBase = oppPlayers
-          .filter((p) => !isBlockedBuyDisposition(p.player_id));
+          .filter((p) => !isBlockedBuyDisposition(p.player_id) && (p.value ?? 0) >= LOW_VALUE_FLOOR);
         const targetPinnedOppPlayer = deferredTargetPlayerId && !isBlockedBuyDisposition(deferredTargetPlayerId)
           ? oppPlayers.find((p) => p.player_id === deferredTargetPlayerId)
           : null;
@@ -635,7 +642,8 @@ function TradeFinder({
         // value-neutral goodwill (excluded from all value math; see computeFinderAdjustedNet)
         // that only nudges acceptance, so it can ride alongside an already-balanced base.
         const oppOwnedCounts = leagueMateProfileByRosterId.get(oppRoster.roster_id)?.ownedPlayerCounts ?? {};
-        const sweetenerPiece = myTop.find(
+        // Search the FULL roster (sub-700 players are excluded from myTop by the pool floor).
+        const sweetenerPiece = myPlayers.find(
           (p) => p.value < LOW_VALUE_FLOOR
             && (oppOwnedCounts[p.player_id] ?? 0) >= 2
             && !isBlockedSellDisposition(p.player_id),
