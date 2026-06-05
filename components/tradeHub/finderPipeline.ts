@@ -1,5 +1,5 @@
 import { getSeasonYear } from "../../lib/helpers";
-import { classifyOppDirection } from "../../lib/helpers/direction/scoring";
+import { classifyOppDirection, CONTENDER_BUCKETS, SELLER_BUCKETS } from "../../lib/helpers/direction/scoring";
 import type {
   SleeperRoster, SleeperPlayer, SleeperUser, SleeperLeague,
   AugmentedPick, TradeAttempt, LeagueMateView, TradePartnerRanking,
@@ -278,9 +278,15 @@ export function runFinderPipeline(
   // this only blocks RECEIVING them. A pinned/targeted player still routes through the pin
   // filters above.) This is the rule a pick-rich "Consolidate"/Rebuilder team needs: it must
   // not spend even its excess picks turning a young asset + future pick into an aging vet.
-  const userIsWinNow = isChampionshipPush
-    || ["Elite", "True Contender", "Almost There", "Window Closing"].includes(finderDirection)
-    || myFinderPlayoffOdds >= 50;
+  // Win-now = a contender bucket, a championship push, or a winning sim — but NEVER while
+  // actively tanking (a tanker is selling, even with a stale Almost There / Window Closing
+  // bucket), and the bare odds>=50 path excludes seller buckets (a high sim seed on a
+  // value-rich/points-poor roster doesn't make it a buyer of aging vets).
+  const userIsWinNow = !iAmTankingFinder && (
+    isChampionshipPush
+    || CONTENDER_BUCKETS.includes(finderDirection)
+    || (myFinderPlayoffOdds >= 50 && !SELLER_BUCKETS.includes(finderDirection))
+  );
   const userWindowOk = (r: TradeResult): boolean =>
     userIsWinNow
     || !!deferredTargetPlayerId
@@ -1356,8 +1362,11 @@ export function runFinderPipeline(
       return !isStandardSwap || oppDirectionScore >= ACCEPT_FLOOR;
     })
     .sort((a, b) => {
-      if (a.bucketPriority !== b.bucketPriority) return a.bucketPriority - b.bucketPriority;
+      // Rank by the full strategy/value model first; the draft-pick-year preference
+      // (bucketPriority) is only a tiebreak, so an excellent player trade can't be buried
+      // under a marginal pick trade just because the pick lands in the preferred year.
       if (b.rankScore !== a.rankScore) return b.rankScore - a.rankScore;
+      if (a.bucketPriority !== b.bucketPriority) return a.bucketPriority - b.bucketPriority;
       return a.sort - b.sort;
     })
     .map(({ r }) => r);

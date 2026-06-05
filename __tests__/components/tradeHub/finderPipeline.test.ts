@@ -289,6 +289,34 @@ describe("runFinderPipeline — basic acceptance & filtering", () => {
     expect(allTrades).toHaveLength(1);
   });
 
+  it("an actively-tanking team can't acquire an aging vet even with a stale contender bucket", () => {
+    // Almost There bucket but tanking at 30% odds — must NOT read as win-now (crossover 4.3).
+    const t = mkTrade({
+      give: [mkPlayer("young", "TE", 2400, { age: 22, team: "NYJ" })],
+      receive: [mkPlayer("kittle", "TE", 2495, { age: 32, team: "SF" })],
+      format: "1 for 1",
+    });
+    const { allTrades } = runFinderPipeline(
+      [t],
+      baseCtx({ finderDirection: "Almost There", myFinderPlayoffOdds: 30, iAmTankingFinder: true }),
+    );
+    expect(allTrades).toHaveLength(0);
+  });
+
+  it("a seller-bucket team can't acquire an aging vet even at >=50% odds", () => {
+    // Rebuilder at 60% odds is value-rich/points-poor, not a buyer of aging vets (crossover 4.4).
+    const t = mkTrade({
+      give: [mkPlayer("young", "TE", 2400, { age: 22, team: "NYJ" })],
+      receive: [mkPlayer("kittle", "TE", 2495, { age: 32, team: "SF" })],
+      format: "1 for 1",
+    });
+    const { allTrades } = runFinderPipeline(
+      [t],
+      baseCtx({ finderDirection: "Rebuilder", myFinderPlayoffOdds: 60 }),
+    );
+    expect(allTrades).toHaveLength(0);
+  });
+
   it("drops trades whose total strategyScore is not positive", () => {
     // score is hugely negative so even the +12 format bonus can't lift it above 0
     const t = mkTrade({

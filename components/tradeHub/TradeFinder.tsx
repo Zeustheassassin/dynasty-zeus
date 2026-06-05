@@ -352,10 +352,10 @@ function TradeFinder({
             ? "Consolidate"
             : isHardSellSide
               ? "Full Rebuild"
-              : finderDirection === "Rebuilder"
-                ? "Rebuild Sell"
-                : iAmTankingFinder
-                  ? "Soft Sell"
+              : iAmTankingFinder
+                ? "Soft Sell"
+                : finderDirection === "Rebuilder"
+                  ? "Rebuild Sell"
                   : ["Elite", "True Contender", "Almost There"].includes(finderDirection)
                     ? "Contender Mode"
                     : finderDirection === "Fading Contender"
@@ -419,6 +419,7 @@ function TradeFinder({
       } = createScoringFactors({
         finderDirection,
         iAmTankingFinder,
+        isStockpiledRebuild,
         draftCapitalMode,
         myFinderPlayoffOdds,
         weakPositions,

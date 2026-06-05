@@ -16,6 +16,14 @@ export const computeWindowScore = (profile: Pick<RosterDirectionProfile, "coreAg
   return score; // typically -5 to +5
 };
 
+// ── Canonical user-side bucket sets ───────────────────────────────────────────
+// SINGLE source of truth so the trade finder's "is this a contender / a seller" tests
+// can't drift apart across getDirectionTradeScore, failsDirectionGuardrail, and userWindowOk
+// (the prior copies disagreed — Window Closing was a contender for some gates but not others).
+export const CONTENDER_BUCKETS: readonly string[] = ["Elite", "True Contender", "Almost There", "Window Closing"];
+export const SELLER_BUCKETS: readonly string[] = ["Rebuilder", "Stranded", "Fading Out", "Hopeless"];
+export const HARD_SELL_BUCKETS: readonly string[] = ["Stranded", "Fading Out", "Hopeless"];
+
 export interface OppAcceptanceClass {
   isHopeless: boolean;
   isRebuild: boolean;

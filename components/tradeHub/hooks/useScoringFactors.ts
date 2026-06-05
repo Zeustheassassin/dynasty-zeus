@@ -1,4 +1,4 @@
-import { CURRENT_YEAR } from "../../../lib/helpers";
+import { CURRENT_YEAR, CONTENDER_BUCKETS, SELLER_BUCKETS } from "../../../lib/helpers";
 import type { AugmentedPick, SleeperPlayer, SleeperRoster } from "../../../lib/types";
 import {
   isAgingAsset, isOldProducerBuy, isYoungBuildingBlock,
@@ -12,6 +12,7 @@ import type { PlayerWithValue } from "../shared";
 export interface ScoringFactorsParams {
   finderDirection: string;
   iAmTankingFinder: boolean;
+  isStockpiledRebuild: boolean;
   draftCapitalMode: boolean;
   myFinderPlayoffOdds: number;
   weakPositions: Set<string>;
@@ -37,6 +38,7 @@ export interface ScoringFactorsParams {
 export function createScoringFactors({
   finderDirection,
   iAmTankingFinder,
+  isStockpiledRebuild,
   draftCapitalMode,
   myFinderPlayoffOdds,
   weakPositions,
@@ -294,7 +296,7 @@ export function createScoringFactors({
       score -= incomingRedraft / 160;
       score -= weakPosAdds * 10;
       score += strongPosSells * 3;
-    } else if (["Elite", "True Contender", "Almost There"].includes(finderDirection)) {
+    } else if (CONTENDER_BUCKETS.includes(finderDirection)) {
       score += (incomingRedraft - outgoingRedraft) / 160;
       score += weakPosAdds * 8;
       score -= weakPosLosses * 10;
@@ -309,7 +311,31 @@ export function createScoringFactors({
       score += incomingPlayers.filter((p) =>
         p.position === "RB" && Number(p.age || 0) >= 22 && Number(p.age || 0) <= 26
       ).length * 4;
-    } else if (["Rebuilder", "Stranded", "Fading Out", "Hopeless"].includes(finderDirection)) {
+    } else if (isStockpiledRebuild) {
+      // Consolidate (pick-rich, dynasty-strong, not competing this year): condense surplus
+      // depth/picks into fewer, stronger (ideally young) assets — do NOT reward hoarding MORE
+      // picks the way the plain rebuild branch does. This is the branch a "Consolidate" team needs.
+      score += assetConsolidation > 0 ? assetConsolidation * 6 : assetConsolidation * 2;
+      score += youngCoreBuys * 9;
+      score += insulationBuys * 7;
+      score -= insulationSells * 8;
+      score += (incomingDynasty - outgoingDynasty) / 200;
+      score -= picksIn / 200;
+      score -= futureFirstsIn * 5;
+      score -= oldProducerBuys * 12;
+      score += strongPosSells * 2;
+    } else if (finderDirection === "Fading Contender") {
+      // Transition (winning now on a slipping foundation): sell ONE aging piece before the
+      // cliff; reward youth/insulation/future firsts; do NOT double down on aging vets.
+      score += oldProducerSells * 6;
+      score += agingSells * 5;
+      score += youngCoreBuys * 6;
+      score += insulationBuys * 6;
+      score += futureFirstsIn * 7;
+      score += assetConsolidation > 0 ? assetConsolidation * 3 : assetConsolidation * 1.5;
+      score -= oldProducerBuys * 10;
+      score -= premiumCurrentPicksOut * 8;
+    } else if (SELLER_BUCKETS.includes(finderDirection)) {
       score += agingSells * 9;
       score += oldProducerSells * 8;
       score += youngCoreBuys * 8;
@@ -417,8 +443,11 @@ export function createScoringFactors({
     const incomingPicks = trade.receivePicks || [];
 
     // iAmTankingFinder covers ALL seller/rebuild cases regardless of bucket label.
-    const isEffectiveSeller = iAmTankingFinder || ["Rebuilder", "Stranded", "Fading Out", "Hopeless"].includes(finderDirection);
-    const isEffectiveContender = !iAmTankingFinder && ["Elite", "True Contender", "Almost There", "Window Closing"].includes(finderDirection);
+    const isEffectiveSeller = iAmTankingFinder || SELLER_BUCKETS.includes(finderDirection);
+    // Fading Contender is "winning now on a slipping base" — guard it like a contender so it
+    // can't accept a picks-only return (it previously had NO directional guardrail at all).
+    const isEffectiveContender = !iAmTankingFinder
+      && (CONTENDER_BUCKETS.includes(finderDirection) || finderDirection === "Fading Contender");
 
     if (isEffectiveSeller) {
       const outgoingPicksGuard = trade.givePicks || [];
