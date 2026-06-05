@@ -96,8 +96,14 @@ export default function FinderResults({
     })
     // Acceptance-first ranking: every trade here already cleared the opponent-acceptance
     // gate in the pipeline, so order the survivors by the USER's gain — most favorable
-    // first — instead of "closest to even".
-    .sort((a, b) => b.net - a.net);
+    // first — instead of "closest to even". Keep bonus buy-low slots grouped after the
+    // headline board (they're often ~even net) so they stay visible instead of scattered.
+    .sort((a, b) => {
+      const aBuy = a.trade.isBuyLow ? 1 : 0;
+      const bBuy = b.trade.isBuyLow ? 1 : 0;
+      if (aBuy !== bBuy) return aBuy - bBuy;
+      return b.net - a.net;
+    });
 
   return (
     <>
