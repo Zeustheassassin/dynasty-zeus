@@ -8,12 +8,13 @@ import {
   computeTERouteAboveExpected,
 } from "../../lib/scouting/aboveExpected";
 
-type NflDraftEntry = { team: string; round: number | null; pick: number | null };
 type LoadPositionPlaysFn = (pos: "RB" | "QB" | "TE") => void;
 
-const ROUTE_TYPES: RouteType[] = [
-  "nine", "post", "dig", "curl", "slant", "screen", "flat", "comeback", "out", "corner", "other",
-];
+// NFL Draft column is a per-prospect projected round (1st–7th).
+const DRAFT_ROUNDS = [1, 2, 3, 4, 5, 6, 7];
+const ROUND_LABEL: Record<number, string> = {
+  1: "1st", 2: "2nd", 3: "3rd", 4: "4th", 5: "5th", 6: "6th", 7: "7th",
+};
 
 type BoardTab = "all" | "QB" | "RB" | "WR" | "TE";
 
@@ -51,16 +52,6 @@ interface Props {
   loadPositionPlays: LoadPositionPlaysFn;
 }
 
-function n(v: number | null | undefined): string {
-  return v != null ? `${v}` : "—";
-}
-function pct(v: number | null | undefined): string {
-  return v != null ? `${v.toFixed(1)}%` : "—";
-}
-function sae(v: number | null | undefined): string {
-  if (v == null) return "—";
-  return `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
-}
 function computeAge(birthday: string | null | undefined): number | null {
   if (!birthday) return null;
   const b = new Date(birthday);
@@ -187,13 +178,19 @@ export default function BigBoard({
   const [rankInput, setRankInput] = useState("");
   const [savingRankId, setSavingRankId] = useState<string | null>(null);
 
-  const [nflDraftInfo, setNflDraftInfo] = useState<Record<string, NflDraftEntry>>(() =>
-    getLocalStorageItem<Record<string, NflDraftEntry>>("nflDraftInfo", {})
-  );
-  const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
-  const [draftEditTeam, setDraftEditTeam] = useState("");
-  const [draftEditRound, setDraftEditRound] = useState("");
-  const [draftEditPick, setDraftEditPick] = useState("");
+  // Projected NFL draft round (1–7) per prospect, persisted to localStorage.
+  // Migrates rounds out of the legacy {team,round,pick} "nflDraftInfo" map so
+  // any previously-entered rounds carry over to the new round-only column.
+  const [draftRound, setDraftRound] = useState<Record<string, number>>(() => {
+    const direct = getLocalStorageItem<Record<string, number>>("nflDraftRound", {});
+    if (Object.keys(direct).length > 0) return direct;
+    const legacy = getLocalStorageItem<Record<string, { round?: number | null }>>("nflDraftInfo", {});
+    const migrated: Record<string, number> = {};
+    for (const [id, v] of Object.entries(legacy)) {
+      if (v && typeof v.round === "number") migrated[id] = v.round;
+    }
+    return migrated;
+  });
 
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
@@ -314,89 +311,37 @@ export default function BigBoard({
     setEditingRankId(null);
   }
 
-  function openDraftEdit(id: string) {
-    const info = nflDraftInfo[id];
-    setDraftEditTeam(info?.team ?? "");
-    setDraftEditRound(info?.round != null ? String(info.round) : "");
-    setDraftEditPick(info?.pick != null ? String(info.pick) : "");
-    setEditingDraftId(id);
+  function setRound(id: string, value: string) {
+    const rd = parseInt(value, 10);
+    const updated = { ...draftRound };
+    if (isNaN(rd)) delete updated[id]; else updated[id] = rd;
+    setDraftRound(updated);
+    setLocalStorageItem("nflDraftRound", updated);
   }
 
-  function commitDraftEdit(id: string, team: string, round: string, pick: string) {
-    const t = team.trim().toUpperCase().slice(0, 3);
-    const rd = parseInt(round, 10);
-    const pk = parseInt(pick, 10);
-    const updated = { ...nflDraftInfo };
-    if (!t && isNaN(rd) && isNaN(pk)) {
-      delete updated[id];
-    } else {
-      updated[id] = { team: t, round: isNaN(rd) ? null : rd, pick: isNaN(pk) ? null : pk };
-    }
-    setNflDraftInfo(updated);
-    setLocalStorageItem("nflDraftInfo", updated);
-    setEditingDraftId(null);
-  }
-
+  // NFL Draft cell: a compact dropdown projecting the round (1st–7th) the
+  // player is expected to be picked. "—" clears the projection.
   function draftCell(p: ProspectWithStats) {
-    const info = nflDraftInfo[p.id];
-    const isEditing = editingDraftId === p.id;
-    const hasInfo = info?.team || info?.round != null || info?.pick != null;
-
-    if (isEditing) {
-      let localTeam = draftEditTeam;
-      let localRound = draftEditRound;
-      let localPick = draftEditPick;
-      return (
-        <td className="px-1.5 py-1 text-center whitespace-nowrap border-r border-gray-800" onClick={(e) => e.stopPropagation()}>
-          <div
-            className="flex items-center gap-1 justify-center"
-            onBlur={(e) => {
-              if (!e.currentTarget.contains(e.relatedTarget as Node))
-                commitDraftEdit(p.id, localTeam, localRound, localPick);
-            }}
-          >
-            <input
-              autoFocus
-              placeholder="TM"
-              maxLength={3}
-              className="w-9 px-1 py-0.5 bg-gray-800 border border-indigo-500 rounded text-white text-xs focus:outline-none text-center uppercase"
-              defaultValue={draftEditTeam}
-              onChange={(e) => { localTeam = e.target.value.toUpperCase(); setDraftEditTeam(localTeam); }}
-              onKeyDown={(e) => { if (e.key === "Enter") commitDraftEdit(p.id, localTeam, localRound, localPick); if (e.key === "Escape") setEditingDraftId(null); }}
-            />
-            <input
-              placeholder="Rd"
-              type="number" min={1} max={7}
-              className="w-7 px-0.5 py-0.5 bg-gray-800 border border-indigo-500 rounded text-white text-xs focus:outline-none text-center"
-              defaultValue={draftEditRound}
-              onChange={(e) => { localRound = e.target.value; setDraftEditRound(localRound); }}
-              onKeyDown={(e) => { if (e.key === "Enter") commitDraftEdit(p.id, localTeam, localRound, localPick); if (e.key === "Escape") setEditingDraftId(null); }}
-            />
-            <input
-              placeholder="#"
-              type="number" min={1}
-              className="w-9 px-0.5 py-0.5 bg-gray-800 border border-indigo-500 rounded text-white text-xs focus:outline-none text-center"
-              defaultValue={draftEditPick}
-              onChange={(e) => { localPick = e.target.value; setDraftEditPick(localPick); }}
-              onKeyDown={(e) => { if (e.key === "Enter") commitDraftEdit(p.id, localTeam, localRound, localPick); if (e.key === "Escape") setEditingDraftId(null); }}
-            />
-          </div>
-        </td>
-      );
-    }
-
+    const rd = draftRound[p.id];
     return (
       <td
-        className="px-1.5 py-1 text-center whitespace-nowrap text-xs border-r border-gray-800 cursor-pointer"
-        onClick={(e) => { e.stopPropagation(); openDraftEdit(p.id); }}
+        className="px-1.5 py-1 text-center whitespace-nowrap border-r border-gray-800"
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
       >
-        {hasInfo ? (
-          <span className="px-1.5 py-0.5 rounded bg-indigo-900/50 text-indigo-300 font-medium border border-indigo-700/50">
-            {[info.team || null, info.round != null ? `R${info.round}` : null, info.pick != null ? `#${info.pick}` : null].filter(Boolean).join(" · ")}
-          </span>
-        ) : (
-          <span className="text-gray-700 hover:text-gray-500 transition select-none">＋</span>
-        )}
+        <select
+          aria-label={`Projected NFL draft round for ${p.name}`}
+          value={rd ?? ""}
+          onChange={(e) => setRound(p.id, e.target.value)}
+          className={`bg-gray-950 text-xs rounded px-1 py-0.5 cursor-pointer focus:outline-none border ${
+            rd ? "text-indigo-300 font-medium border-indigo-700/50" : "text-gray-600 border-transparent hover:border-gray-700"
+          }`}
+        >
+          <option value="">—</option>
+          {DRAFT_ROUNDS.map((r) => (
+            <option key={r} value={r}>{ROUND_LABEL[r]}</option>
+          ))}
+        </select>
       </td>
     );
   }
@@ -483,8 +428,23 @@ export default function BigBoard({
     </div>
   );
 
-  // ── All board ──────────────────────────────────────────────
-  function renderAllTable() {
+  // ── Unified board (All + each position tab) ────────────────
+  // Every tab shares this layout. The All tab adds a Pos column and ranks by
+  // overall_rank (OVR), showing PosRk as a read-only readout; each position tab
+  // ranks by personal_rank (POS), showing OVR as the read-only readout. The
+  // Above-Exp (AE) column shows on every tab.
+  function renderStandardTable() {
+    const isAll = boardTab === "all";
+    const primaryLabel = isAll ? "OVR" : "POS";
+    const primaryKey: SortKey = isAll ? "overall_rank" : "personal_rank";
+    const secondaryLabel = isAll ? "PosRk" : "OVR";
+    const secondaryGroup = isAll ? "Pos Rank" : "OVR";
+    const secondaryKey: SortKey = isAll ? "personal_rank" : "overall_rank";
+    const secondaryValue = (p: ProspectWithStats) => (isAll ? p.personal_rank : p.overall_rank);
+    const identitySpan = isAll ? 6 : 5; // Pos column shows only on the All tab
+    const POSITION_COLORS: Record<string, string> = {
+      QB: "text-blue-400", RB: "text-green-400", WR: "text-yellow-400", TE: "text-orange-400",
+    };
     return scrollWrapper(
       <table className="text-xs border-collapse" style={{ minWidth: "max-content" }}>
         <thead>
@@ -493,18 +453,18 @@ export default function BigBoard({
             <th style={{ left: 24, minWidth: 44 }} className="sticky z-20 bg-gray-950" />
             <th style={{ left: 68, minWidth: 140 }} className="sticky z-20 bg-gray-950 border-r border-gray-800" />
             <th colSpan={1} className="px-2 py-1 text-center text-indigo-900 font-medium border-r border-gray-800">NFL Draft</th>
-            <th colSpan={1} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">Pos Rank</th>
-            <th colSpan={6} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">Identity</th>
+            <th colSpan={1} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">{secondaryGroup}</th>
+            <th colSpan={identitySpan} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">Identity</th>
             <th colSpan={1} className="px-2 py-1 text-center text-green-900 font-medium border-r border-gray-800">Above Exp</th>
           </tr>
           <tr className="border-b border-gray-800 bg-gray-950">
             <th className="sticky left-0 z-20 bg-gray-950 w-6 text-gray-700 text-center px-1">⠿</th>
-            {stickyTh("OVR", "overall_rank", 24, 44)}
+            {stickyTh(primaryLabel, primaryKey, 24, 44)}
             {stickyTh("Name", "name", 68, 140)}
-            <th className="px-1.5 py-1.5 text-center text-indigo-700 whitespace-nowrap text-xs border-r border-gray-800 select-none">NFL Draft</th>
-            {th("PosRk", "personal_rank", "border-l border-r border-gray-800 text-gray-400")}
-            {th("Pos", "position", "border-l border-gray-800")}
-            {th("School", "school")}
+            <th className="px-1.5 py-1.5 text-center text-indigo-700 whitespace-nowrap text-xs border-r border-gray-800 select-none">Round</th>
+            {th(secondaryLabel, secondaryKey, "border-l border-r border-gray-800 text-gray-400")}
+            {isAll && th("Pos", "position", "border-l border-gray-800")}
+            {th("School", "school", isAll ? "" : "border-l border-gray-800")}
             {th("Yr", "draft_class_year")}
             {th("Age", "age")}
             {th("Ht", "height")}
@@ -515,252 +475,21 @@ export default function BigBoard({
         <tbody className="divide-y divide-gray-900">
           {sorted.map((p, i) => {
             const age = computeAge(p.birthday);
-            const POSITION_COLORS: Record<string, string> = {
-              QB: "text-blue-400", RB: "text-green-400", WR: "text-yellow-400", TE: "text-orange-400",
-            };
+            const sv = secondaryValue(p);
             return (
               <tr key={p.id} {...rowProps(p, i)}>
                 {stickyRowCells(p)}
                 {draftCell(p)}
-                <td className={`${tdBase} text-gray-500 border-l border-r border-gray-800`}>{p.personal_rank ? `#${p.personal_rank}` : "—"}</td>
-                <td className={`${tdBase} font-semibold border-l border-gray-800 ${POSITION_COLORS[p.position] ?? "text-gray-400"}`}>{p.position}</td>
-                <td className={`${tdBase} text-gray-400`}>{p.school}</td>
+                <td className={`${tdBase} text-gray-500 border-l border-r border-gray-800`}>{sv ? `#${sv}` : "—"}</td>
+                {isAll && (
+                  <td className={`${tdBase} font-semibold border-l border-gray-800 ${POSITION_COLORS[p.position] ?? "text-gray-400"}`}>{p.position}</td>
+                )}
+                <td className={`${tdBase} text-gray-400 ${isAll ? "" : "border-l border-gray-800"}`}>{p.school}</td>
                 <td className={`${tdBase} text-gray-400`}>{p.draft_class_year}</td>
                 <td className={`${tdBase} text-gray-400`}>{age ?? "—"}</td>
                 <td className={`${tdBase} text-gray-400`}>{p.height || "—"}</td>
                 <td className={`${tdBase} text-gray-400 border-r border-gray-800`}>{p.weight ?? "—"}</td>
                 {aboveExpectedCell(p)}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    );
-  }
-
-  // ── Position stub board (QB / RB / TE) ────────────────────
-  function renderPositionStubTable(pos: "QB" | "RB" | "TE") {
-    const accentColor = pos === "QB" ? "text-blue-400" : pos === "RB" ? "text-green-400" : "text-orange-400";
-    return scrollWrapper(
-      <table className="text-xs border-collapse" style={{ minWidth: "max-content" }}>
-        <thead>
-          <tr className="border-b border-gray-700 bg-gray-950">
-            <th className="sticky left-0 z-20 bg-gray-950 w-6" />
-            <th style={{ left: 24, minWidth: 44 }} className="sticky z-20 bg-gray-950" />
-            <th style={{ left: 68, minWidth: 140 }} className="sticky z-20 bg-gray-950 border-r border-gray-800" />
-            <th colSpan={1} className="px-2 py-1 text-center text-indigo-900 font-medium border-r border-gray-800">NFL Draft</th>
-            <th colSpan={1} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">OVR</th>
-            <th colSpan={6} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">Identity</th>
-            <th colSpan={1} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">Scouting</th>
-          </tr>
-          <tr className="border-b border-gray-800 bg-gray-950">
-            <th className="sticky left-0 z-20 bg-gray-950 w-6 text-gray-700 text-center px-1">⠿</th>
-            {stickyTh("POS", "personal_rank", 24, 44)}
-            {stickyTh("Name", "name", 68, 140)}
-            <th className="px-1.5 py-1.5 text-center text-indigo-700 whitespace-nowrap text-xs border-r border-gray-800 select-none">NFL Draft</th>
-            {th("OVR", "overall_rank", "border-l border-r border-gray-800 text-gray-400")}
-            {th("School", "school", "border-l border-gray-800")}
-            {th("Yr", "draft_class_year")}
-            {th("Age", "age")}
-            {th("Ht", "height")}
-            {th("Wt", "weight")}
-            {th("Conf", "conference", "border-r border-gray-800")}
-            {th("Games", "total_games", `border-l border-gray-800 border-r border-gray-800 ${accentColor}`)}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-900">
-          {sorted.map((p, i) => {
-            const age = computeAge(p.birthday);
-            return (
-              <tr key={p.id} {...rowProps(p, i)}>
-                {stickyRowCells(p)}
-                {draftCell(p)}
-                <td className={`${tdBase} text-gray-500 border-l border-r border-gray-800`}>{p.overall_rank ? `#${p.overall_rank}` : "—"}</td>
-                <td className={`${tdBase} text-gray-400 border-l border-gray-800`}>{p.school}</td>
-                <td className={`${tdBase} text-gray-400`}>{p.draft_class_year}</td>
-                <td className={`${tdBase} text-gray-400`}>{age ?? "—"}</td>
-                <td className={`${tdBase} text-gray-400`}>{p.height || "—"}</td>
-                <td className={`${tdBase} text-gray-400`}>{p.weight ?? "—"}</td>
-                <td className={`${tdBase} text-gray-500 border-r border-gray-800`}>{p.conference || "—"}</td>
-                <td className={`${tdBase} border-l border-r border-gray-800 font-medium ${accentColor}`}>{p.total_games || "—"}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    );
-  }
-
-  // ── WR board (full stats) ──────────────────────────────────
-  function renderWRTable() {
-    return scrollWrapper(
-      <table className="text-xs border-collapse" style={{ minWidth: "max-content" }}>
-        <thead>
-          <tr className="border-b border-gray-700 bg-gray-950">
-            <th className="sticky left-0 z-20 bg-gray-950 w-6" />
-            <th style={{ left: 24, minWidth: 44 }} className="sticky z-20 bg-gray-950" />
-            <th style={{ left: 68, minWidth: 140 }} className="sticky z-20 bg-gray-950 border-r border-gray-800" />
-            <th colSpan={1} className="px-2 py-1 text-center text-indigo-900 font-medium border-r border-gray-800">NFL Draft</th>
-            <th colSpan={1} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">OVR</th>
-            <th colSpan={4} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">Identity</th>
-            <th colSpan={2} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">Totals</th>
-            <th colSpan={5} className="px-2 py-1 text-center text-yellow-900 font-medium border-r border-gray-800">Targets</th>
-            <th colSpan={17} className="px-2 py-1 text-center text-green-900 font-medium border-r border-gray-800">Metrics</th>
-            <th colSpan={3} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">Depth</th>
-            <th colSpan={8} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">Aligned</th>
-            <th colSpan={10} className="px-2 py-1 text-center text-teal-900 font-medium border-r border-gray-800">Align Open%</th>
-            <th colSpan={8} className="px-2 py-1 text-center text-orange-900 font-medium border-r border-gray-800">
-              Coverage — Att / Catch
-            </th>
-            <th colSpan={ROUTE_TYPES.length * 2} className="px-2 py-1 text-center text-blue-900 font-medium border-r border-gray-800">
-              Routes by Type — Att / Catch
-            </th>
-          </tr>
-          <tr className="border-b border-gray-800 bg-gray-950">
-            <th className="sticky left-0 z-20 bg-gray-950 w-6 text-gray-700 text-center px-1">⠿</th>
-            {stickyTh("POS", "personal_rank", 24, 44)}
-            {stickyTh("Name", "name", 68, 140)}
-            <th className="px-1.5 py-1.5 text-center text-indigo-700 whitespace-nowrap text-xs border-r border-gray-800 select-none">NFL Draft</th>
-            {th("OVR", "overall_rank", "border-l border-r border-gray-800 text-gray-400")}
-            {th("School", "school", "border-l border-gray-800")}
-            {th("Yr", "draft_class_year")}
-            {th("Ht", "height")}
-            {th("Wt", "weight", "border-r border-gray-800")}
-            {th("Games", "total_games", "border-l border-gray-800")}
-            {th("Routes", "total_routes", "border-r border-gray-800")}
-            {th("Tgt", "targets", "border-l border-gray-800 text-yellow-500")}
-            {th("Rec", "catches", "text-green-400")}
-            {th("Drops", "drops", "text-red-400")}
-            {th("Cont", "contested", "text-purple-400")}
-            {th("ContC", "contested_catches", "text-purple-300 border-r border-gray-800")}
-            {th("Tgt%", "target_rate", "border-l border-gray-800")}
-            {th("Suc%", "success_rate", "text-green-300")}
-            {th("SAE%", "adj_success_above_exp")}
-            {th("Man%", "cvg_man_rate", "text-orange-400")}
-            {th("Zone%", "cvg_zone_rate", "text-orange-400")}
-            {th("Press%", "cvg_press_rate", "text-orange-400")}
-            {ROUTE_TYPES.map((rt, i) => (
-              <th key={`rt_${rt}_rate`} onClick={() => toggleSort(`rt_${rt}_rate`)}
-                className={`px-1.5 py-1.5 text-center whitespace-nowrap cursor-pointer hover:text-white transition select-none capitalize ${i === ROUTE_TYPES.length - 1 ? "border-r border-gray-800" : ""} ${sortKey === `rt_${rt}_rate` ? "text-green-400" : "text-green-800"}`}>
-                {rt}{sortKey === `rt_${rt}_rate` ? (sortDir === "asc" ? "↑" : "↓") : ""}%
-              </th>
-            ))}
-            {th("BehindLOS", "depth_behind_los", "border-l border-gray-800")}
-            {th("OnLOS", "depth_on_los")}
-            {th("Snaps", "total_snaps", "border-r border-gray-800")}
-            {th("RWR", "pct_right")}
-            <th key="pct_right_pct" onClick={() => toggleSort("pct_right")} className={`px-1.5 py-1.5 text-center whitespace-nowrap cursor-pointer hover:text-white transition select-none text-gray-400 ${sortKey === "pct_right" ? "text-blue-400" : ""}`}>Right%{sortKey === "pct_right" ? (sortDir === "asc" ? "↑" : "↓") : ""}</th>
-            {th("LWR", "pct_left")}
-            <th key="pct_left_pct" onClick={() => toggleSort("pct_left")} className={`px-1.5 py-1.5 text-center whitespace-nowrap cursor-pointer hover:text-white transition select-none text-gray-400 ${sortKey === "pct_left" ? "text-blue-400" : ""}`}>Left%{sortKey === "pct_left" ? (sortDir === "asc" ? "↑" : "↓") : ""}</th>
-            {th("Slot", "pct_slot")}
-            <th key="pct_slot_pct" onClick={() => toggleSort("pct_slot")} className={`px-1.5 py-1.5 text-center whitespace-nowrap cursor-pointer hover:text-white transition select-none text-gray-400 ${sortKey === "pct_slot" ? "text-blue-400" : ""}`}>Slot%{sortKey === "pct_slot" ? (sortDir === "asc" ? "↑" : "↓") : ""}</th>
-            {th("BF", "pct_backfield")}
-            <th key="pct_backfield_pct" onClick={() => toggleSort("pct_backfield")} className={`px-1.5 py-1.5 text-center whitespace-nowrap cursor-pointer hover:text-white transition select-none text-gray-400 border-r border-gray-800 ${sortKey === "pct_backfield" ? "text-blue-400" : ""}`}>BF%{sortKey === "pct_backfield" ? (sortDir === "asc" ? "↑" : "↓") : ""}</th>
-            {th("Slot", "open_pct_slot", "border-l border-gray-800 text-teal-400")}
-            {th("Slot-On", "open_pct_slot_on", "text-teal-300")}
-            {th("Slot-Off", "open_pct_slot_off", "text-teal-300")}
-            {th("Right", "open_pct_right", "text-teal-400")}
-            {th("R-On", "open_pct_right_on", "text-teal-300")}
-            {th("R-Off", "open_pct_right_off", "text-teal-300")}
-            {th("Left", "open_pct_left", "text-teal-400")}
-            {th("L-On", "open_pct_left_on", "text-teal-300")}
-            {th("L-Off", "open_pct_left_off", "text-teal-300")}
-            {th("BF%", "open_pct_backfield", "text-teal-400 border-r border-gray-800")}
-            {th("Man", "cvg_man", "border-l border-gray-800 text-orange-500")}
-            {th("ManC", "cvg_man_catch", "text-orange-300")}
-            {th("Zone", "cvg_zone", "text-orange-500")}
-            {th("ZoneC", "cvg_zone_catch", "text-orange-300")}
-            {th("Dbl", "cvg_double", "text-orange-500")}
-            {th("DblC", "cvg_double_catch", "text-orange-300")}
-            {th("Press", "cvg_press", "text-orange-500")}
-            {th("PressC", "cvg_press_catch", "text-orange-300 border-r border-gray-800")}
-            {ROUTE_TYPES.map((rt, i) => [
-              <th key={`rt_${rt}_count`} onClick={() => toggleSort(`rt_${rt}_count`)}
-                className={`px-1.5 py-1.5 text-center whitespace-nowrap cursor-pointer hover:text-white transition select-none capitalize ${i === 0 ? "border-l border-gray-800" : ""} ${sortKey === `rt_${rt}_count` ? "text-blue-400" : "text-blue-700"}`}>
-                {rt}{sortKey === `rt_${rt}_count` ? (sortDir === "asc" ? "↑" : "↓") : ""}
-              </th>,
-              <th key={`rt_${rt}_catches`} onClick={() => toggleSort(`rt_${rt}_catches`)}
-                className={`px-1.5 py-1.5 text-center whitespace-nowrap cursor-pointer hover:text-white transition select-none border-r border-gray-800 ${sortKey === `rt_${rt}_catches` ? "text-green-400" : "text-blue-900"}`}>
-                Rec{sortKey === `rt_${rt}_catches` ? (sortDir === "asc" ? "↑" : "↓") : ""}
-              </th>,
-            ])}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-900">
-          {sorted.map((p, i) => {
-            const saeVal = p.adj_success_above_exp;
-            return (
-              <tr key={p.id} {...rowProps(p, i)}>
-                {stickyRowCells(p)}
-                {draftCell(p)}
-                <td className={`${tdBase} text-gray-500 border-l border-r border-gray-800`}>{p.overall_rank ? `#${p.overall_rank}` : "—"}</td>
-                <td className={`${tdBase} text-gray-400 border-l border-gray-800`}>{p.school}</td>
-                <td className={`${tdBase} text-gray-400`}>{p.draft_class_year}</td>
-                <td className={`${tdBase} text-gray-400`}>{p.height || "—"}</td>
-                <td className={`${tdBase} text-gray-400 border-r border-gray-800`}>{p.weight ?? "—"}</td>
-                <td className={`${tdBase} text-gray-400 border-l border-gray-800`}>{p.total_games}</td>
-                <td className={`${tdBase} text-blue-400 font-medium border-r border-gray-800`}>{p.total_routes}</td>
-                <td className={`${tdBase} text-yellow-400 border-l border-gray-800 font-medium`}>{p.targets || "—"}</td>
-                <td className={`${tdBase} text-green-400 font-medium`}>{p.catches || "—"}</td>
-                <td className={`${tdBase} text-red-400`}>{p.drops || "—"}</td>
-                <td className={`${tdBase} text-purple-400`}>{p.contested || "—"}</td>
-                <td className={`${tdBase} text-purple-300 border-r border-gray-800`}>{p.contested_catches || "—"}</td>
-                <td className={`${tdBase} text-gray-300 border-l border-gray-800`}>{pct(p.target_rate)}</td>
-                <td className={`${tdBase} text-green-300`}>{pct(p.success_rate)}</td>
-                <td className={`${tdBase} font-medium ${saeVal == null ? "text-gray-500" : saeVal >= 0 ? "text-green-400" : "text-red-400"}`}>
-                  {sae(saeVal)}
-                </td>
-                <td className={`${tdBase} text-orange-400`}>{p.coverage_stats.man.count > 0 ? `${Math.round((p.coverage_stats.man.open / p.coverage_stats.man.count) * 100)}%` : "—"}</td>
-                <td className={`${tdBase} text-orange-400`}>{p.coverage_stats.zone.count > 0 ? `${Math.round((p.coverage_stats.zone.open / p.coverage_stats.zone.count) * 100)}%` : "—"}</td>
-                <td className={`${tdBase} text-orange-400`}>{p.coverage_stats.press.count > 0 ? `${Math.round((p.coverage_stats.press.open / p.coverage_stats.press.count) * 100)}%` : "—"}</td>
-                {ROUTE_TYPES.map((rt, ri) => {
-                  const rs = p.route_stats[rt];
-                  return (
-                    <td key={`rt_${rt}_rate`} className={`${tdBase} text-green-700 ${ri === ROUTE_TYPES.length - 1 ? "border-r border-gray-800" : ""}`}>
-                      {rs && rs.count > 0 ? `${Math.round((rs.open / rs.count) * 100)}%` : "—"}
-                    </td>
-                  );
-                })}
-                <td className={`${tdBase} text-gray-400 border-l border-gray-800`}>{p.depth_behind_los || "—"}</td>
-                <td className={`${tdBase} text-gray-400`}>{p.depth_on_los || "—"}</td>
-                <td className={`${tdBase} text-gray-500 border-r border-gray-800`}>{p.total_routes || "—"}</td>
-                <td className={`${tdBase} text-gray-400`}>{p.pct_right != null ? `${Math.round((p.pct_right / 100) * p.total_routes)}` : "—"}</td>
-                <td className={`${tdBase} text-gray-500`}>{pct(p.pct_right)}</td>
-                <td className={`${tdBase} text-gray-400`}>{p.pct_left != null ? `${Math.round((p.pct_left / 100) * p.total_routes)}` : "—"}</td>
-                <td className={`${tdBase} text-gray-500`}>{pct(p.pct_left)}</td>
-                <td className={`${tdBase} text-gray-400`}>{p.pct_slot != null ? `${Math.round((p.pct_slot / 100) * p.total_routes)}` : "—"}</td>
-                <td className={`${tdBase} text-gray-500`}>{pct(p.pct_slot)}</td>
-                <td className={`${tdBase} text-gray-400`}>{p.pct_backfield != null ? `${Math.round((p.pct_backfield / 100) * p.total_routes)}` : "—"}</td>
-                <td className={`${tdBase} text-gray-500 border-r border-gray-800`}>{pct(p.pct_backfield)}</td>
-                <td className={`${tdBase} text-teal-400 border-l border-gray-800`}>{pct(p.open_pct_slot)}</td>
-                <td className={`${tdBase} text-teal-300`}>{pct(p.open_pct_slot_on_line)}</td>
-                <td className={`${tdBase} text-teal-300`}>{pct(p.open_pct_slot_off_line)}</td>
-                <td className={`${tdBase} text-teal-400`}>{pct(p.open_pct_right)}</td>
-                <td className={`${tdBase} text-teal-300`}>{pct(p.open_pct_right_on_line)}</td>
-                <td className={`${tdBase} text-teal-300`}>{pct(p.open_pct_right_off_line)}</td>
-                <td className={`${tdBase} text-teal-400`}>{pct(p.open_pct_left)}</td>
-                <td className={`${tdBase} text-teal-300`}>{pct(p.open_pct_left_on_line)}</td>
-                <td className={`${tdBase} text-teal-300`}>{pct(p.open_pct_left_off_line)}</td>
-                <td className={`${tdBase} text-teal-400 border-r border-gray-800`}>{pct(p.open_pct_backfield)}</td>
-                <td className={`${tdBase} text-orange-400 border-l border-gray-800`}>{p.coverage_stats.man.count > 0 ? p.coverage_stats.man.count : "—"}</td>
-                <td className={`${tdBase} text-orange-200`}>{p.coverage_stats.man.count > 0 && p.coverage_stats.man.catches !== -1 ? n(p.coverage_stats.man.catches) : "—"}</td>
-                <td className={`${tdBase} text-orange-400`}>{p.coverage_stats.zone.count > 0 ? p.coverage_stats.zone.count : "—"}</td>
-                <td className={`${tdBase} text-orange-200`}>{p.coverage_stats.zone.count > 0 && p.coverage_stats.zone.catches !== -1 ? n(p.coverage_stats.zone.catches) : "—"}</td>
-                <td className={`${tdBase} text-orange-400`}>{p.coverage_stats.double.count > 0 ? p.coverage_stats.double.count : "—"}</td>
-                <td className={`${tdBase} text-orange-200`}>{p.coverage_stats.double.count > 0 && p.coverage_stats.double.catches !== -1 ? n(p.coverage_stats.double.catches) : "—"}</td>
-                <td className={`${tdBase} text-orange-400`}>{p.coverage_stats.press.count > 0 ? p.coverage_stats.press.count : "—"}</td>
-                <td className={`${tdBase} text-orange-200 border-r border-gray-800`}>{p.coverage_stats.press.count > 0 && p.coverage_stats.press.catches !== -1 ? n(p.coverage_stats.press.catches) : "—"}</td>
-                {ROUTE_TYPES.map((rt, ri) => {
-                  const rs = p.route_stats[rt];
-                  return [
-                    <td key={`rt_${rt}_count`} className={`${tdBase} ${ri === 0 ? "border-l border-gray-800" : ""} text-gray-300`}>
-                      {rs?.count ?? "—"}
-                    </td>,
-                    <td key={`rt_${rt}_catches`} className={`${tdBase} text-green-300 border-r border-gray-800`}>
-                      {rs == null || rs.catches === -1 ? "—" : rs.catches}
-                    </td>,
-                  ];
-                })}
               </tr>
             );
           })}
@@ -826,13 +555,7 @@ export default function BigBoard({
       ) : sorted.length === 0 ? (
         <div className="text-gray-500 text-sm text-center py-12">No prospects match your filters.</div>
       ) : (
-        <>
-          {boardTab === "all" && renderAllTable()}
-          {boardTab === "QB"  && renderPositionStubTable("QB")}
-          {boardTab === "RB"  && renderPositionStubTable("RB")}
-          {boardTab === "WR"  && renderWRTable()}
-          {boardTab === "TE"  && renderPositionStubTable("TE")}
-        </>
+        renderStandardTable()
       )}
     </div>
   );
