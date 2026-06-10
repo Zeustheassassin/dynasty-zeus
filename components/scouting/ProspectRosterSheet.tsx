@@ -3,7 +3,11 @@ import { useMemo, useState } from "react";
 import { supabase } from "../../lib/supabaseclient";
 import { lookupConference } from "../../lib/scouting/schoolConferences";
 import { classYearOptionsWith } from "../../lib/helpers/season";
+import { reorderRanksWithinClass } from "../../lib/scouting/rankReorder";
+import { logger } from "../../lib/logger";
 import type { ProspectWithStats, ChartingDecision } from "../../lib/types";
+
+const log = logger("ProspectRosterSheet");
 
 const CHARTING_DECISIONS: { value: ChartingDecision; label: string }[] = [
   { value: "fully_charted", label: "Fully Charted" },
@@ -20,7 +24,6 @@ interface RowState {
   weight: number | null;
   birthday: string | null;
   draft_class_year: number;
-  personal_rank: number | null;
   should_play: string;
   charting_decision: ChartingDecision;
   charting_notes: string;
@@ -36,9 +39,13 @@ interface RosterRowProps {
   p: ProspectWithStats;
   nflRoles: string[];
   sizes: ColumnSizes;
+  /** Effective rank for this prospect (parent-owned, reflects pending reorders). */
+  rank: number | null;
+  /** Commit a new rank for this prospect; the parent re-sequences the position. */
+  onRankCommit: (raw: string) => void;
 }
 
-function RosterRow({ p, nflRoles, sizes }: RosterRowProps) {
+function RosterRow({ p, nflRoles, sizes, rank, onRankCommit }: RosterRowProps) {
   const [local, setLocal] = useState<RowState>({
     school: p.school,
     conference: p.conference,
@@ -46,12 +53,15 @@ function RosterRow({ p, nflRoles, sizes }: RosterRowProps) {
     weight: p.weight,
     birthday: p.birthday,
     draft_class_year: p.draft_class_year,
-    personal_rank: p.personal_rank,
     should_play: p.should_play,
     charting_decision: p.charting_decision,
     charting_notes: p.charting_notes,
   });
   const [saving, setSaving] = useState(false);
+  // The rank input is controlled by the parent-owned `rank` prop while not being
+  // edited, so a reorder updates every sibling row live. `rankEdit` holds the
+  // in-progress text only while the field is focused (no effect/resync needed).
+  const [rankEdit, setRankEdit] = useState<string | null>(null);
 
   async function saveFields(changes: Partial<RowState>) {
     setSaving(true);
@@ -142,9 +152,12 @@ function RosterRow({ p, nflRoles, sizes }: RosterRowProps) {
       </td>
 
       <td className={tdShrink}>
-        <input type="number" className={inpNum} size={4} value={local.personal_rank ?? ""}
-          onChange={(e) => setLocal((l) => ({ ...l, personal_rank: e.target.value ? Number(e.target.value) : null }))}
-          onBlur={() => saveFields({ personal_rank: local.personal_rank })} />
+        <input type="number" className={inpNum} size={4} aria-label={`Rank for ${p.name}`}
+          value={rankEdit ?? (rank ?? "")}
+          onFocus={() => setRankEdit(rank != null ? String(rank) : "")}
+          onChange={(e) => setRankEdit(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+          onBlur={() => { const v = rankEdit ?? ""; setRankEdit(null); onRankCommit(v); }} />
       </td>
 
       <td className={tdShrink}>
@@ -184,6 +197,76 @@ export default function ProspectRosterSheet({ prospects, nflRoles, onDataChanged
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [yearFilter, setYearFilter] = useState<number | null>(null);
   const [bulkSaving, setBulkSaving] = useState(false);
+  // Optimistic overrides for personal_rank after a reorder. Lives in the parent
+  // so all rows share one source of truth (each RosterRow keeps its own local
+  // copy of its other fields and never re-syncs from props, so rank can't live
+  // there). An entry present here wins over the prop value; only filled on edit.
+  const [rankOverride, setRankOverride] = useState<Map<string, number | null>>(() => new Map());
+  const [rankError, setRankError] = useState<string | null>(null);
+
+  // When a real data reload arrives (onDataChanged → the hub re-fetches and the
+  // `prospects` prop identity changes), the optimistic overrides are obsolete:
+  // the fresh props already carry our persisted ranks. Drop them so the props
+  // become the source of truth again and can't be masked by a stale override.
+  // Render-phase reset (React's "adjust state when a prop changes" pattern) —
+  // intentionally NOT a useEffect, which would trip react-set-state-in-effect.
+  const [prevProspects, setPrevProspects] = useState(prospects);
+  if (prospects !== prevProspects) {
+    setPrevProspects(prospects);
+    setRankOverride(new Map());
+  }
+
+  // Effective rank = optimistic override (if any) else the persisted value.
+  const effectiveRank = (p: ProspectWithStats): number | null =>
+    rankOverride.has(p.id) ? rankOverride.get(p.id)! : p.personal_rank;
+
+  async function commitRank(prospectId: string, raw: string) {
+    const mover = prospects.find((p) => p.id === prospectId);
+    if (!mover) return;
+    const trimmed = raw.trim();
+    const target = trimmed === "" ? null : Number(trimmed);
+    // personal_rank is a ladder per (position, draft class). The hub already
+    // filtered to one position; scope to the mover's draft class so the reorder
+    // matches the Big Board editor and never disturbs another class's ranks.
+    const items = prospects.map((p) => ({
+      id: p.id,
+      rank: effectiveRank(p),
+      draftClass: p.draft_class_year,
+    }));
+    const changes = reorderRanksWithinClass(items, prospectId, target);
+    if (changes.size === 0) return;
+
+    // Optimistically apply so every affected row re-renders immediately.
+    setRankOverride((prev) => {
+      const next = new Map(prev);
+      for (const [id, r] of changes) next.set(id, r);
+      return next;
+    });
+    setRankError(null);
+
+    // Persist the minimal diff. These rows already exist, so independent updates
+    // are safe; last-write-wins per row converges for a single editor.
+    const results = await Promise.all(
+      [...changes].map(([id, r]) =>
+        supabase
+          .from("prospects")
+          .update({ personal_rank: r, updated_at: new Date().toISOString() })
+          .eq("id", id),
+      ),
+    );
+    const failed = results.filter((res) => res.error);
+    if (failed.length > 0) {
+      log.error("rank reorder persist failed", {
+        prospectId,
+        failed: failed.length,
+        first: failed[0]?.error?.message,
+      });
+      setRankError("Couldn't save the new order — reloaded from the server.");
+      // Resync from the database so the UI never lies about what was saved.
+      setRankOverride(new Map());
+      onDataChanged?.();
+    }
+  }
 
   async function autofillConferences() {
     const updates = prospects
@@ -229,6 +312,8 @@ export default function ProspectRosterSheet({ prospects, nflRoles, onDataChanged
   }, [prospects]);
 
   const filteredSorted = useMemo(() => {
+    const rankFor = (p: ProspectWithStats): number | null =>
+      rankOverride.has(p.id) ? rankOverride.get(p.id)! : p.personal_rank;
     const list = yearFilter
       ? prospects.filter((p) => p.draft_class_year === yearFilter)
       : [...prospects];
@@ -237,13 +322,13 @@ export default function ProspectRosterSheet({ prospects, nflRoles, onDataChanged
       let vb: string | number = 0;
       if (sortKey === "name") { va = a.name; vb = b.name; }
       else if (sortKey === "draft_class_year") { va = a.draft_class_year; vb = b.draft_class_year; }
-      else { va = a.personal_rank ?? 9999; vb = b.personal_rank ?? 9999; }
+      else { va = rankFor(a) ?? 9999; vb = rankFor(b) ?? 9999; }
       if (typeof va === "string")
         return sortDir === "asc" ? va.localeCompare(vb as string) : (vb as string).localeCompare(va);
       return sortDir === "asc" ? (va as number) - (vb as number) : (vb as number) - (va as number);
     });
     return list;
-  }, [prospects, yearFilter, sortKey, sortDir]);
+  }, [prospects, yearFilter, sortKey, sortDir, rankOverride]);
 
   function toggleSort(k: SortKey) {
     if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -297,6 +382,10 @@ export default function ProspectRosterSheet({ prospects, nflRoles, onDataChanged
         </button>
       </div>
 
+      {rankError && (
+        <p className="text-red-400 text-xs mb-3" role="alert">{rankError}</p>
+      )}
+
       <div className="overflow-x-auto rounded-lg border border-gray-800">
         <table className="text-sm border-collapse w-full">
           <thead>
@@ -346,7 +435,14 @@ export default function ProspectRosterSheet({ prospects, nflRoles, onDataChanged
           </thead>
           <tbody className="bg-gray-950">
             {filteredSorted.map((p) => (
-              <RosterRow key={p.id} p={p} nflRoles={nflRoles} sizes={sizes} />
+              <RosterRow
+                key={p.id}
+                p={p}
+                nflRoles={nflRoles}
+                sizes={sizes}
+                rank={effectiveRank(p)}
+                onRankCommit={(raw) => commitRank(p.id, raw)}
+              />
             ))}
           </tbody>
         </table>
