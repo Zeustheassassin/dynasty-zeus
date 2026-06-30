@@ -3,7 +3,7 @@
 > **Audience:** a developer who has just been handed the keys and has never seen this project.
 > **Goal:** explain what the app is, how the code is structured, how data flows, and how every major subsystem actually works — in enough depth to debug and extend it on day one.
 >
-> *Last reviewed: 2026-06-10 (HEAD `9b10959`). This document was rebuilt from a full read of the codebase; verify against source where a claim is load-bearing, and keep it updated as the architecture changes.*
+> *Last reviewed: 2026-06-30 (HEAD `1691416`, + uncommitted PlayerProfilePanel depth-chart section). This document was rebuilt from a full read of the codebase; verify against source where a claim is load-bearing, and keep it updated as the architecture changes.*
 
 ---
 
@@ -853,6 +853,8 @@ The Finder's buy/sell opinion now comes entirely from the personal-ranking signa
   - `personalSignalToDisposition` + `buildPersonalDispositions(...)` — the **Phase-2 scoring adapter**, now a thin wrapper over `buildPersonalSignals` (so the two can't drift): maps each signal to the legacy `{ sell, buy }` strings `dispositionScore` keys off of.
   - `useAppState` builds the consensus once (`consensusOrderForFinder`) and derives both `finderSignals` and `finderDispositions` from it (memos just below `leagueAdjustedFcValues`), routing them to the Finder. The view presorts from live consensus and has a **Reset to market** button (`savePersonalOrdering([])` → re-seed) behind a confirm.
   - **Persistence (cross-device).** [`usePersonalRankings`](app/hooks/usePersonalRankings.ts) dual-persists: localStorage `personalRankings_v1` for instant reload **and** the Supabase `personal_rankings` table (one jsonb `ordering` row per user, PK `user_id`, RLS `auth.uid() = user_id`) as the source of truth. `useAppState` hydrates that row on login, so the board follows the user across devices (desktop ↔ phone).
+
+**Player profile panel — team depth chart.** The slide-over [PlayerProfilePanel.tsx](app/components/modals/PlayerProfilePanel.tsx) (the ⓘ info-circle pop-out in RankingsTab) renders a **Depth Chart** card for the player's own team + position group, between the Status and ownership cards. It reuses the Data Hub depth-chart logic inline — build the position group from the `players` prop, sort by `depth_chart_order` then dynasty value descending (the slim `/api/players` proxy strips `depth_chart_order`, so in practice this is value order), and reuse `injuryBadge`/`ageColor` from [dataHubHelpers.tsx](components/DataHub/dataHubHelpers.tsx). The current player's row is highlighted, depth #1 gets a **Starter** badge, and rows on a roster you own get a blue dot. The panel was widened `max-w-sm` → `max-w-lg` to fit it.
 
 ---
 

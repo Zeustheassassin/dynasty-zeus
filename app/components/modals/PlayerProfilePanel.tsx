@@ -1,8 +1,12 @@
 "use client";
+import { useMemo } from "react";
 import type {
   SleeperPlayer, SleeperLeague, SleeperRoster, LeagueOverviewEntry,
 } from "../../../lib/types";
 import { useModalBehavior } from "../../../lib/hooks/useModalBehavior";
+import { injuryBadge, ageColor } from "../../../components/DataHub/dataHubHelpers";
+
+const DEPTH_POSITIONS = ["QB", "RB", "WR", "TE"];
 
 interface Props {
   playerProfileId: string;
@@ -26,6 +30,30 @@ export function PlayerProfilePanel({
 }: Props) {
   useModalBehavior(onClose);
   const p = players[playerProfileId];
+
+  // Team depth chart for this player's position group. Sorted by Sleeper's
+  // depth_chart_order when present, otherwise dynasty value descending — the
+  // same logic the Data Hub Depth Charts tab uses (the slim /api/players proxy
+  // strips depth_chart_order, so in practice this falls back to value order).
+  const depthGroup = useMemo<SleeperPlayer[]>(() => {
+    if (!p?.team || !DEPTH_POSITIONS.includes(p.position)) return [];
+    return Object.values(players)
+      .filter(
+        (pl) =>
+          pl.team === p.team &&
+          pl.position === p.position &&
+          (pl.status ?? "").toLowerCase() !== "retired"
+      )
+      .sort((a, b) => {
+        const oa = a.depth_chart_order ?? null;
+        const ob = b.depth_chart_order ?? null;
+        if (oa !== null && ob !== null) return oa - ob;
+        if (oa !== null) return -1;
+        if (ob !== null) return 1;
+        return (calcFcValues[b.player_id] ?? 0) - (calcFcValues[a.player_id] ?? 0);
+      });
+  }, [players, calcFcValues, p]);
+
   if (!p) return null;
 
   const dynVal = calcFcValues[playerProfileId] ?? p.value ?? 0;
@@ -57,6 +85,10 @@ export function PlayerProfilePanel({
     });
   });
 
+  const ownedIds = new Set<string>(
+    rosters.flatMap((r) => [...(r.players ?? []), ...(r.taxi ?? [])])
+  );
+
   const noteVal = playerNotes[playerProfileId] ?? "";
 
   return (
@@ -71,7 +103,7 @@ export function PlayerProfilePanel({
         aria-modal="true"
         aria-labelledby="player-profile-title"
         tabIndex={-1}
-        className="fixed top-0 right-0 h-full w-full max-w-sm bg-gray-950 border-l border-gray-800 z-50 flex flex-col shadow-2xl overflow-y-auto"
+        className="fixed top-0 right-0 h-full w-full max-w-lg bg-gray-950 border-l border-gray-800 z-50 flex flex-col shadow-2xl overflow-y-auto"
       >
         <div className="flex items-start justify-between p-5 border-b border-gray-800">
           <div>
@@ -105,6 +137,49 @@ export function PlayerProfilePanel({
             {injuryNote && <p className="text-xs text-gray-400 mt-1.5">{injuryNote}</p>}
             {practiceDesc && <p className="text-xs text-gray-500 mt-1">{practiceDesc}</p>}
           </div>
+
+          {depthGroup.length > 0 && (
+            <div className="bg-gray-900 rounded-xl p-3 border border-gray-800">
+              <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">
+                {p.team} {p.position} Depth Chart
+              </p>
+              <div className="divide-y divide-gray-800/40">
+                {depthGroup.slice(0, p.position === "WR" ? 6 : 5).map((dp, idx) => {
+                  const isCurrent = dp.player_id === playerProfileId;
+                  const isOwned = ownedIds.has(dp.player_id);
+                  const val = calcFcValues[dp.player_id] ?? 0;
+                  return (
+                    <div
+                      key={dp.player_id}
+                      className={`flex items-center gap-2 px-1 py-1.5 ${isCurrent ? "bg-blue-950/40 rounded" : ""}`}
+                    >
+                      <span className={`text-[10px] font-bold w-4 shrink-0 ${idx === 0 ? "text-white" : "text-gray-600"}`}>
+                        {idx + 1}
+                      </span>
+                      <div className="flex-1 min-w-0 flex items-center gap-1 flex-wrap">
+                        <span className={`text-xs font-medium ${
+                          isCurrent ? "text-blue-300" : isOwned ? "text-blue-200" : "text-white"
+                        }`}>
+                          {dp.full_name || `${dp.first_name} ${dp.last_name}`}
+                        </span>
+                        {injuryBadge(dp.injury_status)}
+                        {idx === 0 && <span className="text-[9px] font-bold px-1 rounded bg-gray-700 text-gray-200 shrink-0">Starter</span>}
+                        {isOwned && <span className="text-[9px] font-bold text-blue-400 shrink-0" title="On a roster you own">●</span>}
+                      </div>
+                      <span className={`text-[10px] shrink-0 ${ageColor(dp.age ?? undefined, dp.position)}`}>
+                        {dp.age ?? "—"}
+                      </span>
+                      {val > 0 && (
+                        <span className="text-[10px] font-mono text-gray-400 shrink-0 w-12 text-right">
+                          {val.toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {ownersInSelectedLeague.length > 0 && (
             <div className="bg-gray-900 rounded-xl p-3 border border-gray-800">
