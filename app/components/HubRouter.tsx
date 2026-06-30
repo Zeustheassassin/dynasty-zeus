@@ -29,6 +29,7 @@ import type { ExposureData } from "../../hooks/useUserExposure";
 import type { DraftScoutLeague } from "../../hooks/useDraftScout";
 import type { StandingRow, AnnotatedTransaction } from "../../components/LeagueHub/leagueHubTypes";
 import type { ShareEntry } from "../../components/DataHub/dataHubTypes";
+import type { PersonalSignal } from "../../lib/helpers/personalRankings";
 
 // ── Hub loading skeleton ───────────────────────────────────────────────────
 function HubSkeleton() {
@@ -151,8 +152,12 @@ interface HubRouterProps {
 
   // Data Hub
   setDataHubTab: (tab: DataHubTabId) => void;
-  playerDispositions: Record<string, { sell: string; buy: string }>;
-  savePlayerDisposition: (playerId: string, sell: string, buy: string) => void;
+  /** Personal-ranking-derived disposition map; feeds the Trade Finder's tuned scoring (Phase 2 swap). */
+  finderDispositions: Record<string, { sell: string; buy: string }>;
+  /** Personal-ranking-derived raw signal map; the Finder's block predicates read it directly (Stage 6). */
+  finderSignals: Record<string, PersonalSignal>;
+  personalOrdering: string[];
+  savePersonalOrdering: (next: string[]) => void;
   loadingRedraft: boolean;
   redraftError: string | null;
   projectionData: ProjectionRow[];
@@ -204,7 +209,6 @@ interface HubRouterProps {
   leaguePlayerTags: Record<string, Record<string, "CORE" | "WANT_TO_TRADE">>;
   handleToggleLeaguePlayerTag: (leagueId: string, playerId: string, forceTag?: "CORE" | "WANT_TO_TRADE") => void;
   leagueMateProfileByRosterId: Map<number, LeagueMateView>;
-  tradeRecommendationCards: unknown[];
   tradePartnerRankings: TradePartnerRanking[];
   tradeHubData: AnnotatedTrade[] | null;
   loadingTradeHub: boolean;
@@ -284,7 +288,7 @@ export function HubRouter({
   setProjectionWeek, setProjectionLoaded, loadProjections,
   shares, totalLeagues, loadingAllLeagueData, shareSearch, setShareSearch, sharePosition, setSharePosition,
   setDataHubTab,
-  playerDispositions, savePlayerDisposition, loadingRedraft, redraftError,
+  finderDispositions, finderSignals, personalOrdering, savePersonalOrdering, loadingRedraft, redraftError,
   projectionData, setProjectionData, projectionPosFilter, setProjectionPosFilter,
   projectionWeek, projectionSeasonYear, projectionSourceStatus, loadingProjections, projectionUsesSeasonFallback,
   enabledExtraSources, toggleExtraSource,
@@ -297,7 +301,7 @@ export function HubRouter({
   tradeHubSection, calcOpponentRosterId,
   selectedLeagueDraftHasOccurred,
   leaguePlayerTags, handleToggleLeaguePlayerTag, leagueMateProfileByRosterId,
-  tradeRecommendationCards, tradePartnerRankings,
+  tradePartnerRankings,
   tradeHubData, loadingTradeHub, tradeHubError, tradeHubUserId, setTradeHubUserId, setTradeHubData,
   tradeAttempts, loadingTradeAttempts, tradeAttemptsLeagueId,
   markTradeAttempted, updateAttemptStatus, deleteAttempt, loadTradeAttempts,
@@ -477,8 +481,8 @@ export function HubRouter({
             totalLeagues={totalLeagues}
             loadingCalcValues={loadingCalcValues}
             calcValuesError={calcValuesError}
-            playerDispositions={playerDispositions}
-            savePlayerDisposition={savePlayerDisposition}
+            personalOrdering={personalOrdering}
+            savePersonalOrdering={savePersonalOrdering}
             setPlayerProfileId={setPlayerProfileId}
             loadingRedraft={loadingRedraft}
             redraftError={redraftError}
@@ -547,6 +551,10 @@ export function HubRouter({
 {/* ── TRADE HUB TAB ────────────────────────────────────────────────── */}
 {mainTab === "TRADE_HUB" && (
   <ErrorBoundary label="Trade Hub">
+  {/* Phase 2: the Finder's buy/sell opinion comes from the personal-ranking signal
+      map (finderDispositions for the tuned scoring, finderSignals for the block
+      predicates), not the manual dropdowns — those still render in DataHub until
+      Phase 3 removes them. */}
   <TradeHub
     tradeHubSection={tradeHubSection}
     setTradeHubSection={setTradeHubSection}
@@ -557,12 +565,12 @@ export function HubRouter({
     setCalcOpponentRosterId={setCalcOpponentRosterId}
     selectedLeagueDraftHasOccurred={selectedLeagueDraftHasOccurred}
     loadingCalcValues={loadingCalcValues}
-    playerDispositions={playerDispositions}
+    playerDispositions={finderDispositions}
+    finderSignals={finderSignals}
     leaguePlayerTags={leaguePlayerTags}
     onToggleLeaguePlayerTag={handleToggleLeaguePlayerTag}
     leagueMateProfileByRosterId={leagueMateProfileByRosterId}
     selectedLeagueMateProfilesView={selectedLeagueMateProfilesView}
-    tradeRecommendationCards={tradeRecommendationCards}
     tradePartnerRankings={tradePartnerRankings}
     setPlayerProfileId={setPlayerProfileId}
     loadUserExposure={loadUserExposure}
@@ -668,14 +676,12 @@ export function HubRouter({
           calcFcValues={calcFcValues}
           leagueAdjustedRedraftValues={leagueAdjustedRedraftValues}
           playerNotes={playerNotes}
-          playerDispositions={playerDispositions}
           rosters={rosters}
           users={users}
           selectedLeague={selectedLeague}
           leagueOverviewData={leagueOverviewData}
           leagues={leagues}
           savePlayerNote={savePlayerNote}
-          savePlayerDisposition={savePlayerDisposition}
           onClose={() => setPlayerProfileId(null)}
         />
       )}

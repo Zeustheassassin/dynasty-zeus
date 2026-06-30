@@ -5,17 +5,18 @@ export const POS_COLOR: Record<string, string> = {
   TE: "text-yellow-400",
 };
 
-export const sellColor = (v: string) =>
-  v === "Trade at All Costs" ? "text-green-400" :
-  v === "Lower than Market"  ? "text-green-600" :
-  v === "Not Willing to Trade" ? "text-red-400" :
-  v === "Will Trade but Higher than Market" ? "text-yellow-400" : "text-gray-500";
-
-export const buyColor = (v: string) =>
-  v === "Buy Over Market" ? "text-green-400" :
-  v === "Buy at Market"   ? "text-green-600" :
-  v === "Zero Interest"   ? "text-red-400" :
-  v === "Buy Low"         ? "text-yellow-400" : "text-gray-500";
+// Personal-vs-market buy/sell signal chip styling (Personal rankings view).
+// STRONG_* are the hard-block tiers the Trade Finder enforces; SELL/BUY are soft.
+export const PERSONAL_SIGNAL_META: Record<
+  "STRONG_SELL" | "SELL" | "NEUTRAL" | "BUY" | "STRONG_BUY",
+  { label: string; cls: string }
+> = {
+  STRONG_SELL: { label: "SELL", cls: "bg-red-900/60 text-red-300 border border-red-700/50 font-bold" },
+  SELL:        { label: "Sell", cls: "bg-red-900/30 text-red-400" },
+  NEUTRAL:     { label: "—",    cls: "text-gray-600" },
+  BUY:         { label: "Buy",  cls: "bg-green-900/30 text-green-400" },
+  STRONG_BUY:  { label: "BUY",  cls: "bg-green-900/60 text-green-300 border border-green-700/50 font-bold" },
+};
 
 const INJURY_CLS: Record<string, string> = {
   IR: "bg-red-900/70 text-red-300",

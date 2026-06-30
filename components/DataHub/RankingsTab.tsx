@@ -4,16 +4,24 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { usePlayers } from "../../lib/PlayersContext";
 import { useValues } from "../../lib/ValuesContext";
 import type { HistoricalSnapshot } from "../../lib/types";
-import { sellColor, buyColor, injuryBadge, ageColor, POS_COLOR } from "./dataHubHelpers";
+import { injuryBadge, ageColor, POS_COLOR, PERSONAL_SIGNAL_META } from "./dataHubHelpers";
 import type { ShareEntry } from "./dataHubTypes";
+import {
+  reconcilePersonalOrdering,
+  derivePersonalSignal,
+  moveInOrdering,
+  buildConsensusOrder,
+} from "../../lib/helpers/personalRankings";
+
+type RankView = "DYNASTY" | "REDRAFT" | "COMPARE" | "PERSONAL";
 
 interface RankingsTabProps {
   dynastyRankPos: string;
   setDynastyRankPos: (pos: string) => void;
   loadingCalcValues: boolean;
   loadingRedraft: boolean;
-  playerDispositions: Record<string, { sell: string; buy: string }>;
-  savePlayerDisposition: (playerId: string, sell: string, buy: string) => void;
+  personalOrdering: string[];
+  savePersonalOrdering: (next: string[]) => void;
   setPlayerProfileId: (id: string | null) => void;
   shares: Record<string, ShareEntry>;
   historicalSnapshot: HistoricalSnapshot | null;
@@ -22,17 +30,55 @@ interface RankingsTabProps {
 function RankingsTab({
   dynastyRankPos, setDynastyRankPos,
   loadingCalcValues, loadingRedraft,
-  playerDispositions, savePlayerDisposition, setPlayerProfileId,
+  personalOrdering, savePersonalOrdering, setPlayerProfileId,
   shares, historicalSnapshot,
 }: RankingsTabProps) {
   const players = usePlayers();
   const { leagueAdjustedFcValues: calcFcValues, leagueAdjustedRedraftValues: redraftValues } = useValues();
 
-  const [rankView, setRankView] = React.useState<"DYNASTY" | "REDRAFT" | "COMPARE">("DYNASTY");
+  const [rankView, setRankView] = React.useState<RankView>("DYNASTY");
   const [rankSearch, setRankSearch] = React.useState("");
 
   const fcVal = React.useCallback((id: string) => calcFcValues[id] ?? 0, [calcFcValues]);
   const rdVal = React.useCallback((id: string) => redraftValues[id] ?? 0, [redraftValues]);
+
+  const isPersonal = rankView === "PERSONAL";
+
+  // ── Consensus universe (dynasty market) — drives the Personal view ──────────
+  // Best-to-worst dynasty player_ids; index+1 = consensus rank. This is the
+  // market board the user's personal order is reconciled against and compared to.
+  const consensusOrder = React.useMemo(
+    () => buildConsensusOrder(players, fcVal),
+    [players, fcVal]
+  );
+
+  const consensusRankMap = React.useMemo(() => {
+    const m = new Map<string, number>();
+    consensusOrder.forEach((id, i) => m.set(id, i + 1));
+    return m;
+  }, [consensusOrder]);
+
+  // Reconciled personal order (seeds from consensus on first use, splices in
+  // newcomers, drops players who have left the universe). Pure helper.
+  const personalOrder = React.useMemo(
+    () => reconcilePersonalOrdering(personalOrdering, consensusOrder),
+    [personalOrdering, consensusOrder]
+  );
+
+  // Display rows for the Personal view: overall personal rank is preserved even
+  // when the board is filtered to a single position.
+  const personalRows = React.useMemo(() => {
+    const q = rankSearch.trim().toLowerCase();
+    return personalOrder
+      .map((id, i) => ({ id, personalRank: i + 1 }))
+      .filter(({ id }) => {
+        const p = players[id];
+        if (!p) return false;
+        if (dynastyRankPos !== "ALL" && p.position !== dynastyRankPos) return false;
+        if (q && !p.full_name?.toLowerCase().includes(q)) return false;
+        return true;
+      });
+  }, [personalOrder, players, dynastyRankPos, rankSearch]);
 
   const ranked = React.useMemo(
     () =>
@@ -55,14 +101,55 @@ function RankingsTab({
     [players, rankView, dynastyRankPos, rankSearch, fcVal, rdVal]
   );
 
+  // ── Personal reorder: drag-to-reorder + type-to-rank ────────────────────────
+  const [editingRankId, setEditingRankId] = React.useState<string | null>(null);
+  const [rankInput, setRankInput] = React.useState("");
+  const [draggingId, setDraggingId] = React.useState<string | null>(null);
+  const [dragOverId, setDragOverId] = React.useState<string | null>(null);
+  const [confirmReset, setConfirmReset] = React.useState(false);
+
+  const commitPersonalRank = React.useCallback(
+    (id: string) => {
+      const nr = parseInt(rankInput, 10);
+      setEditingRankId(null);
+      if (!rankInput || isNaN(nr) || nr < 1) return;
+      savePersonalOrdering(moveInOrdering(personalOrder, id, nr));
+    },
+    [rankInput, personalOrder, savePersonalOrdering]
+  );
+
+  const handlePersonalDrop = React.useCallback(
+    (targetId: string) => {
+      const dragged = draggingId;
+      setDraggingId(null);
+      setDragOverId(null);
+      if (!dragged || dragged === targetId) return;
+      const targetRank = personalOrder.indexOf(targetId) + 1;
+      if (targetRank < 1) return;
+      savePersonalOrdering(moveInOrdering(personalOrder, dragged, targetRank));
+    },
+    [draggingId, personalOrder, savePersonalOrdering]
+  );
+
+  const rowCount = isPersonal ? personalRows.length : ranked.length;
+
   const ranksParentRef = React.useRef<HTMLDivElement>(null);
   // eslint-disable-next-line react-hooks/incompatible-library
   const ranksVirtualizer = useVirtualizer({
-    count: ranked.length,
+    count: rowCount,
     getScrollElement: () => ranksParentRef.current,
     estimateSize: () => 36,
     overscan: 8,
   });
+
+  const RANK_VIEWS: { id: RankView; label: string }[] = [
+    { id: "DYNASTY", label: "Dynasty" },
+    { id: "REDRAFT", label: "Redraft" },
+    { id: "COMPARE", label: "Compare" },
+    { id: "PERSONAL", label: "Personal" },
+  ];
+
+  const noValues = Object.keys(calcFcValues).length === 0;
 
   return (
     <>
@@ -81,17 +168,49 @@ function RankingsTab({
           ))}
         </div>
         <div className="flex bg-gray-800 rounded-lg p-0.5 gap-0.5">
-          {(["DYNASTY", "REDRAFT", "COMPARE"] as const).map((v) => (
+          {RANK_VIEWS.map((v) => (
             <button
-              key={v}
-              onClick={() => setRankView(v)}
-              className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition ${rankView === v ? "bg-blue-600 text-white" : "text-gray-400 hover:text-white"}`}
+              key={v.id}
+              onClick={() => setRankView(v.id)}
+              className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition ${rankView === v.id ? "bg-blue-600 text-white" : "text-gray-400 hover:text-white"}`}
             >
-              {v === "DYNASTY" ? "Dynasty" : v === "REDRAFT" ? "Redraft" : "Compare"}
+              {v.label}
             </button>
           ))}
         </div>
       </div>
+      {/* Personal-view help + reset */}
+      {isPersonal && (
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <p className="text-[11px] text-gray-500">
+            Your board vs. the market. Drag a row or click its rank to set your own order — the gap drives the Trade Finder.
+          </p>
+          {confirmReset ? (
+            <span className="flex items-center gap-2 text-[11px]">
+              <span className="text-gray-400">Reset to market order?</span>
+              <button
+                onClick={() => { savePersonalOrdering([]); setConfirmReset(false); }}
+                className="px-2 py-0.5 rounded bg-red-700 hover:bg-red-600 text-white font-semibold"
+              >
+                Reset
+              </button>
+              <button
+                onClick={() => setConfirmReset(false)}
+                className="px-2 py-0.5 rounded bg-gray-700 hover:bg-gray-600 text-gray-200"
+              >
+                Cancel
+              </button>
+            </span>
+          ) : (
+            <button
+              onClick={() => setConfirmReset(true)}
+              className="px-2 py-0.5 rounded text-[11px] font-medium bg-gray-800 text-gray-400 hover:text-white transition shrink-0"
+            >
+              Reset to market
+            </button>
+          )}
+        </div>
+      )}
       {/* Player search */}
       <input
         className="w-full p-2 mb-3 rounded bg-gray-800 text-sm placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -105,7 +224,13 @@ function RankingsTab({
         <span className="w-6 shrink-0" />
         <span className="flex-1 text-[10px] text-gray-600 uppercase tracking-wider">Player</span>
         <span className="w-7 text-center text-[10px] text-gray-600 uppercase tracking-wider shrink-0">Age</span>
-        {rankView === "COMPARE" ? (
+        {isPersonal ? (
+          <>
+            <span className="w-12 text-right text-[10px] text-gray-600 uppercase tracking-wider shrink-0">Mkt</span>
+            <span className="w-12 text-right text-[10px] text-gray-600 uppercase tracking-wider shrink-0">vs Mkt</span>
+            <span className="w-16 text-center text-[10px] text-gray-600 uppercase tracking-wider shrink-0">Signal</span>
+          </>
+        ) : rankView === "COMPARE" ? (
           <>
             <span className="w-14 text-right text-[10px] text-gray-600 uppercase tracking-wider shrink-0">Dyn</span>
             <span className="w-14 text-right text-[10px] text-gray-600 uppercase tracking-wider shrink-0">Rdft</span>
@@ -114,13 +239,11 @@ function RankingsTab({
         ) : (
           <span className="w-14 text-right text-[10px] text-gray-600 uppercase tracking-wider shrink-0">Value</span>
         )}
-        <span className="w-20 text-center text-[10px] text-gray-600 uppercase tracking-wider shrink-0">Sell</span>
-        <span className="w-20 text-center text-[10px] text-gray-600 uppercase tracking-wider shrink-0">Buy</span>
         <span className="w-4 shrink-0" />
       </div>
-      {ranked.length === 0 && !loadingCalcValues && !loadingRedraft && (
+      {rowCount === 0 && !loadingCalcValues && !loadingRedraft && (
         <p className="text-gray-400 text-sm">
-          {Object.keys(calcFcValues).length === 0 ? "Load a league to populate player values." : "No players match your filter."}
+          {noValues ? "Load a league to populate player values." : "No players match your filter."}
         </p>
       )}
       <div
@@ -130,9 +253,67 @@ function RankingsTab({
       >
         <div style={{ height: ranksVirtualizer.getTotalSize(), position: "relative" }}>
           {ranksVirtualizer.getVirtualItems().map((vRow) => {
+            if (isPersonal) {
+              const { id, personalRank } = personalRows[vRow.index];
+              const p = players[id];
+              const consensusRank = consensusRankMap.get(id) ?? personalRank;
+              const vsMkt = consensusRank - personalRank; // >0 = you're higher than market (buy)
+              const signal = derivePersonalSignal(personalRank, consensusRank);
+              const meta = PERSONAL_SIGNAL_META[signal];
+              const isOwned = (shares[id]?.count ?? 0) > 0;
+              const isDragOver = dragOverId === id;
+              return (
+                <div
+                  key={id}
+                  draggable
+                  onDragStart={() => setDraggingId(id)}
+                  onDragOver={(e) => { e.preventDefault(); setDragOverId(id); }}
+                  onDragLeave={() => setDragOverId((cur) => (cur === id ? null : cur))}
+                  onDrop={() => handlePersonalDrop(id)}
+                  onDragEnd={() => { setDraggingId(null); setDragOverId(null); }}
+                  style={{ position: "absolute", top: vRow.start, left: 0, right: 0, height: vRow.size }}
+                  className={`flex items-center gap-2 rounded-lg px-2 py-1.5 transition ${draggingId === id ? "opacity-40" : ""} ${isDragOver ? "bg-blue-900/40 border-t-2 border-blue-500" : "bg-gray-800/70 hover:bg-gray-800"}`}
+                >
+                  <span
+                    className="w-5 text-right shrink-0 cursor-text"
+                    onClick={() => { setEditingRankId(id); setRankInput(`${personalRank}`); }}
+                    title="Click to set rank"
+                  >
+                    {editingRankId === id ? (
+                      <input
+                        autoFocus
+                        type="number"
+                        min={1}
+                        className="w-10 px-0.5 py-0.5 bg-gray-900 border border-blue-500 rounded text-yellow-400 font-bold text-[10px] focus:outline-none text-right"
+                        value={rankInput}
+                        onChange={(e) => setRankInput(e.target.value)}
+                        onBlur={() => commitPersonalRank(id)}
+                        onKeyDown={(e) => { if (e.key === "Enter") commitPersonalRank(id); if (e.key === "Escape") setEditingRankId(null); }}
+                      />
+                    ) : (
+                      <span className="text-[10px] text-yellow-400/80 font-mono hover:text-yellow-300">{personalRank}</span>
+                    )}
+                  </span>
+                  <span className={`text-[10px] font-bold w-6 shrink-0 cursor-grab active:cursor-grabbing ${POS_COLOR[p.position] ?? "text-gray-400"}`} title="Drag to reorder">{p.position}</span>
+                  <span className="text-xs flex-1 truncate min-w-0 flex items-center gap-1">
+                    {isOwned && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" title="On your roster" />}
+                    <span className={isOwned ? "text-blue-200" : "text-white"}>{p.full_name}</span>
+                    {injuryBadge(p.injury_status)}
+                  </span>
+                  <span className={`text-[10px] font-mono w-7 text-center shrink-0 ${ageColor(p.age ?? undefined, p.position)}`}>{p.age || "—"}</span>
+                  <span className="text-[10px] text-gray-500 font-mono w-12 text-right shrink-0">{consensusRank}</span>
+                  <span className={`text-[10px] font-mono w-12 text-right shrink-0 ${vsMkt > 0 ? "text-green-400" : vsMkt < 0 ? "text-red-400" : "text-gray-600"}`}>
+                    {vsMkt > 0 ? "+" : ""}{vsMkt}
+                  </span>
+                  <span className="w-16 text-center shrink-0">
+                    <span className={`inline-block px-1.5 py-0.5 rounded text-[9px] ${meta.cls}`}>{meta.label}</span>
+                  </span>
+                  <button onClick={() => setPlayerProfileId(id)} className="text-gray-600 hover:text-blue-400 text-xs transition shrink-0 w-4" title="View profile">ⓘ</button>
+                </div>
+              );
+            }
             const p = ranked[vRow.index];
             const idx = vRow.index;
-            const disp = playerDispositions[p.player_id] ?? { sell: "Neutral", buy: "Neutral" };
             const dyn = fcVal(p.player_id);
             const red = rdVal(p.player_id);
             const gap = dyn - red;
@@ -180,28 +361,6 @@ function RankingsTab({
                     )}
                   </span>
                 )}
-                <select
-                  value={disp.sell}
-                  onChange={(e) => savePlayerDisposition(p.player_id, e.target.value, disp.buy)}
-                  className={`w-20 bg-gray-900 border border-gray-700 rounded px-1 py-0.5 text-[10px] shrink-0 focus:outline-none focus:border-blue-500 ${sellColor(disp.sell)}`}
-                >
-                  <option value="Not Willing to Trade">No Trade</option>
-                  <option value="Will Trade but Higher than Market">↑ Price</option>
-                  <option value="Neutral">Neutral</option>
-                  <option value="Lower than Market">↓ Price</option>
-                  <option value="Trade at All Costs">Must Go</option>
-                </select>
-                <select
-                  value={disp.buy}
-                  onChange={(e) => savePlayerDisposition(p.player_id, disp.sell, e.target.value)}
-                  className={`w-20 bg-gray-900 border border-gray-700 rounded px-1 py-0.5 text-[10px] shrink-0 focus:outline-none focus:border-blue-500 ${buyColor(disp.buy)}`}
-                >
-                  <option value="Buy Over Market">Pay Up</option>
-                  <option value="Buy at Market">At Mkt</option>
-                  <option value="Neutral">Neutral</option>
-                  <option value="Buy Low">Buy Low</option>
-                  <option value="Zero Interest">Skip</option>
-                </select>
                 <button onClick={() => setPlayerProfileId(p.player_id)} className="text-gray-600 hover:text-blue-400 text-xs transition shrink-0 w-4" title="View profile">ⓘ</button>
               </div>
             );

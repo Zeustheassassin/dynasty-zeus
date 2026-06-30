@@ -15,9 +15,6 @@ export function usePlayerAnnotations(supabaseUser: SupabaseUser | null) {
   const [playerNotes, setPlayerNotes] = useState<Record<string, string>>(() =>
     getLocalStorageItem<Record<string, string>>("playerNotes_v1", {})
   );
-  const [playerDispositions, setPlayerDispositions] = useState<Record<string, { sell: string; buy: string }>>(() =>
-    getLocalStorageItem<Record<string, { sell: string; buy: string }>>("playerDispositions_v1", {})
-  );
   const [leaguePlayerTags, setLeaguePlayerTags] = useState<Record<string, Record<string, "CORE" | "WANT_TO_TRADE">>>(() =>
     getLocalStorageItem<Record<string, Record<string, "CORE" | "WANT_TO_TRADE">>>("leaguePlayerTags_v1", {})
   );
@@ -71,21 +68,6 @@ export function usePlayerAnnotations(supabaseUser: SupabaseUser | null) {
     }
   }, []); // reads supabaseUser via ref; uses functional setState — no deps needed
 
-  const savePlayerDisposition = useCallback(async (playerId: string, sell: string, buy: string) => {
-    setPlayerDispositions((prev) => {
-      const updated = { ...prev, [playerId]: { sell, buy } };
-      setLocalStorageItem("playerDispositions_v1", updated);
-      return updated;
-    });
-    const sbUser = supabaseUserRef.current;
-    if (sbUser) {
-      supabase.from("player_dispositions").upsert(
-        { user_id: sbUser.id, player_id: playerId, sell, buy, updated_at: new Date().toISOString() },
-        { onConflict: "user_id,player_id" }
-      ).then(() => {}, (err: unknown) => log.error("player_dispositions upsert failed", { err: String(err) }));
-    }
-  }, []); // reads supabaseUser via ref; uses functional setState — no deps needed
-
   // Toggle a per-league player tag. Cycling: untagged → CORE → WANT_TO_TRADE → untagged.
   // Passing a specific tag forces that tag (or removes it if already set).
   const handleToggleLeaguePlayerTag = useCallback((
@@ -131,15 +113,12 @@ export function usePlayerAnnotations(supabaseUser: SupabaseUser | null) {
     setPlayerProfileId,
     playerNotes,
     setPlayerNotes,
-    playerDispositions,
-    setPlayerDispositions,
     leaguePlayerTags,
     setLeaguePlayerTags,
     ignoredOwnerIds,
     toggleIgnoredOwner,
     saveLeagueNote,
     savePlayerNote,
-    savePlayerDisposition,
     handleToggleLeaguePlayerTag,
   };
 }

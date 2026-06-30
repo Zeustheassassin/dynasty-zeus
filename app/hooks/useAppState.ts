@@ -41,6 +41,9 @@ import { useNflState } from "./useNflState";
 import { useGamedayState } from "./useGamedayState";
 import { useActivityState } from "./useActivityState";
 import { usePlayerAnnotations } from "./usePlayerAnnotations";
+import { usePersonalRankings } from "./usePersonalRankings";
+import { buildConsensusOrder, buildPersonalDispositions, buildPersonalSignals } from "../../lib/helpers/personalRankings";
+import type { PersonalSignal } from "../../lib/helpers/personalRankings";
 import { useSimulatorState } from "./useSimulatorState";
 import { fetchSleeperUser } from "../../lib/sleeperUserCache";
 import { sleeperApi } from "../../lib/sleeperApi";
@@ -61,14 +64,14 @@ import type {
 // -------------------------
 // ROOKIE_YEAR, ROOKIE_BOARD_VERSION, ROOKIE_BOARD_RESET_KEY imported from useRookieBoardState
 
-// Module-level in-memory player map cache — avoids re-fetching/re-parsing the 6MB Sleeper player
+// Module-level in-memory player map cache â€” avoids re-fetching/re-parsing the 6MB Sleeper player
 // payload if loadPlayers is called more than once in the same browser session (e.g. strict-mode
 // double-invoke in dev, or a Sleeper reconnect event).
 let _playersInMemory: Record<string, SleeperPlayer> | null = null;
 
 // fetchSleeperUser imported from lib/sleeperUserCache (shared with useLeagues)
 
-// ── Page-local interfaces (shapes that don't warrant a lib/types entry) ──────
+// â”€â”€ Page-local interfaces (shapes that don't warrant a lib/types entry) â”€â”€â”€â”€â”€â”€
 // AugmentedPick, AnnotatedTransaction, StandingRow are exported from lib/types.ts
 interface OwnedPlayerEntry { player_id: string; player?: SleeperPlayer; leagues: string[]; shareCount: number; }
 interface AllLeagueDataEntry { leagueName?: string; roster: import("../../lib/types").SleeperRoster | null; }
@@ -97,15 +100,14 @@ export function useAppState() {
     leagueNotes, setLeagueNotes,
     playerProfileId, setPlayerProfileId,
     playerNotes, setPlayerNotes,
-    playerDispositions, setPlayerDispositions,
     leaguePlayerTags, setLeaguePlayerTags,
     ignoredOwnerIds,
     toggleIgnoredOwner,
     saveLeagueNote,
     savePlayerNote,
-    savePlayerDisposition,
     handleToggleLeaguePlayerTag,
   } = usePlayerAnnotations(supabaseUser);
+  const { personalOrdering, setPersonalOrdering, savePersonalOrdering } = usePersonalRankings(supabaseUser);
 
   // -------------------------
   // HUB ROUTING STATE
@@ -187,7 +189,7 @@ const {
 } = useProjections(players, selectedLeague?.scoring_settings ?? null);
 
 // Rolling snap% / target / carry stats from the last 4 weeks of Sleeper actuals.
-// Returns null during the off-season — TradeHub degrades gracefully when null.
+// Returns null during the off-season â€” TradeHub degrades gracefully when null.
 const nflStatsSeason = nflState?.season_type === "regular" ? (nflState?.season ?? null) : null;
 const nflStatsWeek   = nflState?.season_type === "regular" ? (nflState?.display_week ?? nflState?.week ?? null) : null;
 const { playerStats } = usePlayerStats(nflStatsSeason, nflStatsWeek);
@@ -260,7 +262,7 @@ const {
   exposureError,
   loadUserExposure,
 } = useUserExposure();
-// ── ALERTS / WATCHLIST ─────────────────────────────────────────
+// â”€â”€ ALERTS / WATCHLIST â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const {
   dashboardAlerts, setDashboardAlerts,
   dismissedAlertIds, setDismissedAlertIds,
@@ -285,7 +287,7 @@ const { crossLeagueMateIntel, loadingCrossLeagueMateIntel } = useCrossLeagueMate
 const [leagueTransactions, setLeagueTransactions] = useState<AnnotatedTransaction[]>([]);
 const [loadingTransactions, setLoadingTransactions] = useState(false);
 
-// ── MANAGEMENT HUB ────────────────────────────────────────────
+// â”€â”€ MANAGEMENT HUB â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const {
   mgmtHubTab, setMgmtHubTab,
   leagueMgmtData, setLeagueMgmtData,
@@ -296,7 +298,7 @@ const {
   loadingCommToolsRosters, setLoadingCommToolsRosters,
 } = useManagementState(supabaseUser);
 
-// ── ROOKIE BOARD ───────────────────────────────────────────────
+// â”€â”€ ROOKIE BOARD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const {
   rookies, setRookies,
   fcNameValues,
@@ -307,14 +309,14 @@ const {
 
 
 
-// alertSnapshotStorageKey is separate from the useAlerts hook — it tracks the daily
+// alertSnapshotStorageKey is separate from the useAlerts hook â€” it tracks the daily
 // player value baseline used for gaining/falling alerts, not the alert list itself.
 const alertSnapshotStorageKey = `alertSnapshots_v1_${alertStoreScope}`;
 const alertBootstrapRef = useRef(false);
-// Stable daily baseline for value-change alerts — loaded from Supabase, NOT localStorage.
+// Stable daily baseline for value-change alerts â€” loaded from Supabase, NOT localStorage.
 const historicalSnapshotRef = useRef<HistoricalSnapshot | null>(null);
 const [historicalSnapshot, setHistoricalSnapshot] = useState<HistoricalSnapshot | null>(null);
-// Refs for useCallback functions defined later in the file — avoids TDZ in dep arrays.
+// Refs for useCallback functions defined later in the file â€” avoids TDZ in dep arrays.
 const loadRosterRef = useRef<((league: SleeperLeague) => Promise<void>) | null>(null);
 
 // Load all Supabase-persisted user data whenever the logged-in user changes
@@ -345,7 +347,7 @@ useEffect(() => {
   // Rookie board is handled by the loadRookieBoard effect (depends on supabaseUser)
   // 3. League management + commissioner payments are loaded by useManagementState hook
   // 4. Watchlists + alerts are loaded by the useAlerts hook (depends on supabaseUser)
-  // 7. Daily player value snapshot — stable baseline for climbing/falling alerts
+  // 7. Daily player value snapshot â€” stable baseline for climbing/falling alerts
   supabase
     .from("player_value_snapshots")
     .select("snapshot, recorded_at")
@@ -378,25 +380,7 @@ useEffect(() => {
         });
       }
     });
-  // 8. Player dispositions
-  supabase
-    .from("player_dispositions")
-    .select("player_id, sell, buy")
-    .eq("user_id", supabaseUser.id)
-    .then(({ data, error }) => {
-      if (cancelled) return;
-      if (error) { log.error("player_dispositions load failed", { err: error.message }); return; }
-      if (data && data.length > 0) {
-        const map: Record<string, { sell: string; buy: string }> = {};
-        data.forEach((row: { player_id: string; sell: string; buy: string }) => { map[String(row.player_id)] = { sell: row.sell, buy: row.buy }; });
-        setPlayerDispositions((prev) => {
-          const merged = { ...prev, ...map };
-          setLocalStorageItem("playerDispositions_v1", merged);
-          return merged;
-        });
-      }
-    });
-  // 9. Per-league player tags (CORE = Do Not Sell, WANT_TO_TRADE = actively shopping)
+  // 8. Per-league player tags (CORE = Do Not Sell, WANT_TO_TRADE = actively shopping)
   supabase
     .from("league_player_tags")
     .select("league_id, player_id, tag")
@@ -421,8 +405,24 @@ useEffect(() => {
         });
       }
     });
+  // 9. Personal rankings (the user's own ordered board â€” one jsonb row per user)
+  supabase
+    .from("personal_rankings")
+    .select("ordering")
+    .eq("user_id", supabaseUser.id)
+    .maybeSingle()
+    .then(({ data, error }) => {
+      if (cancelled) return;
+      if (error) { log.error("personal_rankings load failed", { err: error.message }); return; }
+      const ordering = (data as { ordering?: unknown } | null)?.ordering;
+      if (Array.isArray(ordering) && ordering.length > 0) {
+        const ids = ordering.map((id) => String(id));
+        setPersonalOrdering(ids);
+        setLocalStorageItem("personalRankings_v1", ids);
+      }
+    });
   return () => { cancelled = true; };
-}, [supabaseUser, loadNotes, setSupabaseMessage, setLeagueNotes, setLeaguePlayerTags, setPlayerDispositions, setPlayerNotes]);
+}, [supabaseUser, loadNotes, setSupabaseMessage, setLeagueNotes, setLeaguePlayerTags, setPlayerNotes, setPersonalOrdering]);
 
 // Load network consensus draft data for the current draft year. Drives
 // predictedDraftPicks once draftCount >= CONSENSUS_MIN_DRAFTS; until then
@@ -453,7 +453,7 @@ useEffect(() => {
   return () => { cancelled = true; };
 }, [supabaseUser]);
 
-// Persist the (Supabase auth user → Sleeper user_id) mapping so the
+// Persist the (Supabase auth user â†’ Sleeper user_id) mapping so the
 // server-side league-transactions cron knows which Sleeper account to scan.
 // Re-runs on Sleeper reconnect (user.user_id change) so a re-link is captured.
 useEffect(() => {
@@ -519,10 +519,10 @@ useEffect(() => {
   const { signal } = controller;
 
   const loadPlayers = async () => {
-    // Fast path: already loaded this session — skip localStorage and network entirely
+    // Fast path: already loaded this session â€” skip localStorage and network entirely
     if (_playersInMemory) {
       setPlayers(_playersInMemory);
-      // nflState is React state and resets on remount — reload it from the cached route
+      // nflState is React state and resets on remount â€” reload it from the cached route
       fetch('/api/nfl-state', { signal })
         .then(r => r.json()).then((s) => { if (!signal.aborted) setNflState(s); }).catch(() => {});
       return;
@@ -583,14 +583,14 @@ const refreshDraftBoard = useCallback(async () => {
   if (!selectedLeagueRef.current) return;
   setLoadingDraftRefresh(true);
   try {
-    // bypass the drafts cache too so a status flip (drafting → complete) is seen
-    // promptly — both the manual "Refresh Board" button and the live poll want fresh.
+    // bypass the drafts cache too so a status flip (drafting â†’ complete) is seen
+    // promptly â€” both the manual "Refresh Board" button and the live poll want fresh.
     const drafts = await sleeperApi.getLeagueDrafts(selectedLeagueRef.current.league_id, true);
     const currentDraft = drafts[0];
     if (!currentDraft) return;
     setDraftId(currentDraft.draft_id);
     setDraftOrder(currentDraft.draft_order || currentDraft.slot_to_roster_id || {});
-    setDraftSettings(currentDraft); // full object — consistent with useLeagues.ts
+    setDraftSettings(currentDraft); // full object â€” consistent with useLeagues.ts
     setSelectedLeagueDraftHasOccurred(currentDraft.status !== "pre_draft");
     const picks = await sleeperApi.getDraftPicks(currentDraft.draft_id, true);
     setDraftPicks(picks);
@@ -636,7 +636,7 @@ useEffect(() => {
 }, [selectedLeague, loadRedraftValues]);
 
 // Load league-specific FC values and redraft values as soon as Trade Hub is opened.
-// redraftValues powers the redraft-rank half of the direction bucket — if it's empty
+// redraftValues powers the redraft-rank half of the direction bucket â€” if it's empty
 // when the direction memo fires it produces a garbage bucket (usually "Purgatory").
 useEffect(() => {
   if (mainTab === "TRADE_HUB" && selectedLeague?.league_id) {
@@ -892,7 +892,7 @@ useEffect(() => {
 // -------------------------
 const loadRoster = useCallback(async (league: SleeperLeague) => {
 
-  // ── Save recent league ───────────────────────────────────────────────────
+  // â”€â”€ Save recent league â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   let recents = getLocalStorageItem<{ league_id: string; name: string }[]>("recentLeagues", []);
   recents = recents.filter((l) => l.league_id !== league.league_id);
   recents.unshift({ league_id: league.league_id, name: league.name });
@@ -900,7 +900,7 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
 
   setSelectedLeague(league);
 
-  // ── Step 1: Rosters, traded picks, and drafts — from cache or network ────
+  // â”€â”€ Step 1: Rosters, traded picks, and drafts â€” from cache or network â”€â”€â”€â”€
   // Cache key is per-league; TTL is 2 hours (short enough to stay fresh during
   // trade season, long enough to avoid redundant fetches when switching leagues)
   const LEAGUE_CACHE_TTL = 2 * 60 * 60 * 1000;
@@ -927,7 +927,7 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
   }
   setRosters(allRosters);
 
-  // ── Step 2: Synchronous work derived from rosters ────────────────────────
+  // â”€â”€ Step 2: Synchronous work derived from rosters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const rosteredIds = new Set<string>();
   allRosters.forEach((r) => {
     (r.players || []).forEach((p: string) => rosteredIds.add(p));
@@ -953,7 +953,7 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
   // Skip seasons whose rookie draft is complete (those picks are spent); extend
   // the window forward to keep it 3 years long. A startup-sized draft (>6
   // rounds) also retires that season if no separate rookie-sized draft exists
-  // for the same season — that pattern means rookies were consumed inside the
+  // for the same season â€” that pattern means rookies were consumed inside the
   // startup itself and no follow-on rookie draft will fire.
   const seasonsWithRookieDraft = new Set(
     draftsData
@@ -988,10 +988,10 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
     });
   });
 
-  // ── Step 3: User names — fetchSleeperUser has its own module-level cache ──
+  // â”€â”€ Step 3: User names â€” fetchSleeperUser has its own module-level cache â”€â”€
   const userResults = await Promise.all(allRosters.map((r) => fetchSleeperUser(r.owner_id)));
 
-  // ── Step 4: Apply traded picks ───────────────────────────────────────────
+  // â”€â”€ Step 4: Apply traded picks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   tradedPicksData.forEach((tp) => {
     const match = tempPicks.find(
       (p) => p.season === tp.season && p.round === tp.round && p.roster_id === tp.roster_id
@@ -999,7 +999,7 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
     if (match) match.owner_id = tp.owner_id;
   });
 
-  // ── Step 6: Assign draft slots ───────────────────────────────────────────
+  // â”€â”€ Step 6: Assign draft slots â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const currentDraft = draftsData.find((d) => d.season === CURRENT_YEAR);
 
   // Trim to the league's actual round count (check both settings.rounds and top-level rounds)
@@ -1010,7 +1010,7 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
   const leagueRounds: number = Math.max(settingsRounds, tradedMaxRound, ROUNDS.length);
   tempPicks = tempPicks.filter((p) => Number(p.round) <= leagueRounds);
 
-  // ── Step 5: My picks (after trades applied and rounds trimmed) ───────────
+  // â”€â”€ Step 5: My picks (after trades applied and rounds trimmed) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const myPicks = tempPicks.filter((p) => p.owner_id === myRoster.roster_id);
   const order = currentDraft?.draft_order || {};
   setSelectedLeagueDraftHasOccurred(currentDraft?.status !== "pre_draft");
@@ -1040,7 +1040,7 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
     })
   );
 
-  // ── Step 7: Apply user names ─────────────────────────────────────────────
+  // â”€â”€ Step 7: Apply user names â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const userMap: Record<string | number, string> = {};
   allRosters.forEach((r, i: number) => {
     const u = userResults[i];
@@ -1051,7 +1051,7 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
   });
   setUsers(userMap);
 
-  // ── Step 8: Standings ────────────────────────────────────────────────────
+  // â”€â”€ Step 8: Standings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   setStandings(
     allRosters
       .map((r) => ({
@@ -1084,7 +1084,7 @@ const refreshFcTrends = async () => {
   }
 };
 
-// Manual snapshot save — callable from the Data Hub button.
+// Manual snapshot save â€” callable from the Data Hub button.
 // Uses generic FC values (players[id].value) rather than league-adjusted calcFcValues so that
 // scoring rule changes don't create artificial trend movement.
 const saveSnapshotNow = async () => {
@@ -1259,7 +1259,7 @@ const saveSnapshotNow = async () => {
       setSelectedGamedayMatchupId(gamedayMatchupCards[0].matchupId);
     }
   }, [gamedayMatchupCards, selectedGamedayMatchupId, setSelectedGamedayMatchupId]);
-  // ── League-adjusted FC dynasty values (Tier 3 scoring) ──────────────────
+  // â”€â”€ League-adjusted FC dynasty values (Tier 3 scoring) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Scales raw FantasyCalc values by per-position multipliers derived from the
   // selected league's scoring settings vs. the FC baseline (full PPR, 4pt TDs,
   // no TEP). Falls back to raw calcFcValues when no league is selected.
@@ -1278,7 +1278,30 @@ const saveSnapshotNow = async () => {
     return adjusted;
   }, [selectedLeague?.scoring_settings, calcFcValues, players]);
 
-  // ── League-adjusted redraft values ───────────────────────────────────────
+  // â”€â”€ Personal-ranking buy/sell signal â†’ Trade Finder (Phase 2 swap) â”€â”€â”€â”€â”€â”€â”€
+  // Derives the Finder's opinion input from the user's personal board vs. the
+  // market consensus (same league-adjusted dynasty universe the DataHub Personal
+  // view shows, via the shared buildConsensusOrder). Both maps below are sparse â€”
+  // only non-neutral players appear; the Finder defaults the rest to NEUTRAL.
+  // This replaces the manual playerDispositions dropdowns as the Finder's opinion
+  // source â€” the dropdowns still render until Phase 3 strips them.
+  const consensusOrderForFinder = useMemo(
+    () => buildConsensusOrder(players, (id) => leagueAdjustedFcValues[id] ?? 0),
+    [players, leagueAdjustedFcValues]
+  );
+  // finderSignals = the raw PersonalSignal map the Finder's block predicates read
+  // directly (STRONG_SELL â‡’ never acquire). finderDispositions = the same map
+  // adapted to the legacy sell/buy strings the tuned scoring still keys off of.
+  const finderSignals = useMemo<Record<string, PersonalSignal>>(
+    () => buildPersonalSignals(personalOrdering, consensusOrderForFinder),
+    [personalOrdering, consensusOrderForFinder]
+  );
+  const finderDispositions = useMemo(
+    () => buildPersonalDispositions(personalOrdering, consensusOrderForFinder),
+    [personalOrdering, consensusOrderForFinder]
+  );
+
+  // â”€â”€ League-adjusted redraft values â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Applies the same per-position scoring multipliers to raw redraft values
   // so they're consistent with the league-adjusted dynasty values above.
   const leagueAdjustedRedraftValues = useMemo((): Record<string, number> => {
@@ -1294,9 +1317,9 @@ const saveSnapshotNow = async () => {
     return adjusted;
   }, [selectedLeague?.scoring_settings, redraftValues, players]);
 
-  // ── Projected rookies per roster for the season simulator ────────────────
+  // â”€â”€ Projected rookies per roster for the season simulator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Runs a simplified BPA draft sim to project which rookie lands on each
-  // team. Only active in offseason mode — in-season, rookies are already on
+  // team. Only active in offseason mode â€” in-season, rookies are already on
   // Sleeper rosters. Every team is covered, not just the user's, so the
   // simulator reflects the full offseason landscape for all owners.
   //
@@ -1365,13 +1388,13 @@ const saveSnapshotNow = async () => {
     const myRosterId = rosters.find((r) => r.owner_id === user.user_id)?.roster_id;
     if (!myRosterId) return null;
 
-    // Guard: allPicks updates after rosters on league switch — if any picks exist but none
+    // Guard: allPicks updates after rosters on league switch â€” if any picks exist but none
     // belong to the current league's rosters, data is mid-update; return null and wait.
     const leagueRosterIds = new Set(rosters.map((r) => Number(r.roster_id)));
     if (allPicks.length > 0 && !allPicks.some((p) => leagueRosterIds.has(Number(p.roster_id)))) return null;
 
     // Guard: both value maps must be loaded before profile is meaningful.
-    // An empty map produces nonsense direction output — leagueAdjustedRedraftValues drives the
+    // An empty map produces nonsense direction output â€” leagueAdjustedRedraftValues drives the
     // redraft-rank half of the bucket; leagueAdjustedFcValues drives the dynasty-rank half.
     if (!Object.keys(leagueAdjustedFcValues).length) return null;
     if (!Object.keys(leagueAdjustedRedraftValues).length) return null;
@@ -1388,21 +1411,21 @@ const saveSnapshotNow = async () => {
   }, [selectedLeague, readyLeagueId, rosters, allPicks, players, pickFcValues, leagueAdjustedRedraftValues, leagueAdjustedFcValues, user?.user_id]);
 
   // Combines dynasty rank, redraft rank, simulation playoff odds, and core age into one profile.
-  // This is the authoritative direction — use this everywhere instead of raw selectedLeagueDirection.
-  // Returns null while waiting for consistent data — consumers must show a loading state.
+  // This is the authoritative direction â€” use this everywhere instead of raw selectedLeagueDirection.
+  // Returns null while waiting for consistent data â€” consumers must show a loading state.
   const selectedLeagueDirectionAdjusted = useMemo(() => {
     if (!selectedLeagueDirection || !selectedLeague?.league_id) return null;
     const myRosterId = rosters.find((r) => r.owner_id === user?.user_id)?.roster_id;
     if (!myRosterId) return null;
 
-    // PRIORITY: use the committed (user-saved) sim — it's what the League Hub displays
+    // PRIORITY: use the committed (user-saved) sim â€” it's what the League Hub displays
     // and is stable across renders. The live sim recomputes with a random seed each session
-    // and can diverge significantly (e.g. 1.7% committed → 40% live), causing wrong direction.
+    // and can diverge significantly (e.g. 1.7% committed â†’ 40% live), causing wrong direction.
     const committedRows = committedSimsByLeague[selectedLeague.league_id];
     const committedMyRow = committedRows ? committedRows[Number(myRosterId)] : null;
 
     if (committedMyRow) {
-      // We have a stable committed sim — use it unconditionally.
+      // We have a stable committed sim â€” use it unconditionally.
       const playoffOdds = Number(committedMyRow.playoffOdds ?? 50);
       const adjustedBucket = getAdjustedDirectionBucket(selectedLeagueDirection.bucket, selectedLeagueDirection, playoffOdds, true);
       return {
@@ -1415,7 +1438,7 @@ const saveSnapshotNow = async () => {
       };
     }
 
-    // No committed sim yet — fall back to the live sim but guard carefully:
+    // No committed sim yet â€” fall back to the live sim but guard carefully:
     // live sim recomputes every render and may not match the current league yet.
     if (!selectedLeagueSimulation) return null;
 
@@ -1443,7 +1466,7 @@ const saveSnapshotNow = async () => {
   const selectedLeagueDynamicPickValues = useMemo(() => {
     const leagueId = selectedLeague?.league_id;
     if (!leagueId || !selectedLeagueSimulation) return {} as Record<string, DynamicPickValue>;
-    // Always prefer the live sim for the currently selected league — it's always current.
+    // Always prefer the live sim for the currently selected league â€” it's always current.
     // Fall back to the frozen committed snapshot only when the live sim lacks the row
     // (shouldn't happen for the selected league, but keeps the fallback path safe).
     const getProjection = (rosterId: number): SimulationTeamRow | undefined =>
@@ -1547,10 +1570,10 @@ const saveSnapshotNow = async () => {
           acc[bucket] = (acc[bucket] || 0) + probability;
           return acc;
         }, { early: 0, mid: 0, late: 0 });
-        // Rank-based slot: integer 1–N where 1 = worst team in league (picks first).
+        // Rank-based slot: integer 1â€“N where 1 = worst team in league (picks first).
         const expectedSlot = rosterRankSlot.get(Number(pick.roster_id)) ?? Math.round((totalTeams + 1) / 2);
         // Linear interpolation between the floor and ceiling slot values.
-        // FantasyCalc has a huge slot-1 premium that makes raw per-slot values non-linear —
+        // FantasyCalc has a huge slot-1 premium that makes raw per-slot values non-linear â€”
         // users expect slot 2 to be close to the range top, not halfway down. Interpolating
         // gives a fair expected value that scales evenly from worst team (slot 1 = ceiling)
         // to best team (slot N = floor).
@@ -1565,7 +1588,7 @@ const saveSnapshotNow = async () => {
           .slice(0, 3);
         const bestBucket = (Object.entries(bucketProbabilities).sort((a, b) => b[1] - a[1])[0]?.[0] || "mid") as "early" | "mid" | "late";
         // Derive finish range directly from slotProbabilities so it is always
-        // consistent with expectedSlot and expectedValue — never stale.
+        // consistent with expectedSlot and expectedValue â€” never stale.
         // slot k+1 is given to the team finishing (totalTeams - k)th, so
         // P(finish j) = slotProbabilities[totalTeams - j] (0-based).
         let cumFinish = 0;
@@ -1746,7 +1769,7 @@ const saveSnapshotNow = async () => {
     () => new Map(selectedLeagueMateProfilesView.map((profile) => [Number(profile.rosterId), profile])),
     [selectedLeagueMateProfilesView]
   );
-  // ── Buy Low player IDs (shared with Trade Finder) ─────────────────────────
+  // â”€â”€ Buy Low player IDs (shared with Trade Finder) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Same formula as DataHub Buy Low tab. Top 30 IDs ordered by score descending,
   // only players with real projection data (not redraft fallback).
   const buyLowPlayerIds = useMemo<string[]>(() => {
@@ -1787,7 +1810,7 @@ const saveSnapshotNow = async () => {
     return rows
       .sort((a, b) => b.score - a.score)
       .slice(0, 30)
-      .filter(r => r.score / maxRaw >= 0.15) // only meaningful buy lows (≥15% of top score)
+      .filter(r => r.score / maxRaw >= 0.15) // only meaningful buy lows (â‰¥15% of top score)
       .map(r => r.player_id);
   }, [players, leagueAdjustedFcValues, projectionData]);
 
@@ -1807,7 +1830,7 @@ const saveSnapshotNow = async () => {
     return selectedLeagueMateProfilesView
       .map((partner) => {
         const simRow = selectedLeagueSimulation.rowByRosterId.get(Number(partner.rosterId));
-        // Missing sim → neutral 50 (NOT 0); a 0 default would wrongly read every sim-less
+        // Missing sim â†’ neutral 50 (NOT 0); a 0 default would wrongly read every sim-less
         // partner as a desperate seller and disagree with the finder's pipeline gates.
         const partnerPlayoffOdds = simRow?.playoffOdds ?? 50;
         // Apply the same three-factor adjustment to each partner's bucket
@@ -1819,7 +1842,7 @@ const saveSnapshotNow = async () => {
         );
         const partnerAdjustedProfile = { ...partner.directionProfile, bucket: partnerAdjustedBucket };
         const partnerBuckets = getProfilePosBuckets(partnerAdjustedProfile);
-        // Canonical seller/buyer classification — same resolver the trade finder uses.
+        // Canonical seller/buyer classification â€” same resolver the trade finder uses.
         const { isSeller, isBuyer } = classifyOppDirection(partnerAdjustedBucket, partnerPlayoffOdds);
         const bestApproach =
           isSeller ? `Buy ${weakPos}` :
@@ -1864,671 +1887,6 @@ const saveSnapshotNow = async () => {
       });
   }, [selectedLeague, rosters, user?.user_id, selectedLeagueSimulation, selectedLeagueDirection, selectedLeagueDirectionAdjusted, selectedLeagueMateProfilesView]);
 
-  // Local types for the trade recommendation engine.
-  type TradePartner = LeagueMateView & {
-    rankScore: number;
-    playoffOdds: number;
-    titleOdds: number;
-    bestApproach: string;
-    negotiationNotes: string[];
-    isSeller: boolean;
-    isBuyer: boolean;
-    directionProfile: RosterDirectionProfile;
-  };
-  // Local type for a trade recommendation card (the object pushed into candidateCards / recommendations).
-  type TradeCard = {
-    archetype: string;
-    partnerName: string;
-    fitLabel: string;
-    partnerOwnerId?: string;
-    partnerRosterId?: number;
-    give: TradeAsset[];
-    receive: TradeAsset[];
-    whyYou: string;
-    whyThem: string;
-    summary: string;
-    partnerPlayoffOdds: number;
-    partnerTitleOdds: number;
-    partnerRankScore: number;
-    recommendationScore: number;
-    giveTotal: number;
-    receiveTotal: number;
-    packageDelta: number;
-    bestApproach: string;
-    negotiationNotes: string[];
-    openingOffer: string;
-    isLottery?: boolean;
-  };
-  // Local type for trade assets — covers both player-like and pick-like objects in give/receive arrays.
-  type TradeAsset = {
-    player_id?: string;
-    season?: string;
-    round?: number;
-    roster_id?: number;
-    owner_id?: number;
-    dynValue?: number;
-    redValue?: number;
-    expectedValue?: number;
-    expectedSlot?: number | null;
-    label?: string;
-    dynamic?: DynamicPickValue;
-    value?: number;
-    age?: number | null;
-    position?: string;
-    full_name?: string;
-    diff?: number;
-  };
-  const tradeRecommendationCards = useMemo(() => {
-    if (!selectedLeague || !rosters.length || !user?.user_id || !selectedLeagueDirection) return [];
-
-    const myRoster = rosters.find((entry) => entry.owner_id === user.user_id);
-    if (!myRoster) return [];
-
-    // Use the fully adjusted profile — dynasty rank + redraft rank + sim + age all combined
-    const myProfile = selectedLeagueDirectionAdjusted ?? selectedLeagueDirection;
-    const myPlayoffOdds = myProfile?.playoffOdds ?? (selectedLeagueSimulation?.rowByRosterId?.get(Number(myRoster.roster_id))?.playoffOdds ?? 0);
-    // A team below 50% to make playoffs should NEVER be buying points.
-    // Winning 2 extra games moves you from 1.02 to 1.05 pick without any championship upside.
-    // The only valid strategy is accumulating draft capital and young upside shots.
-    const iAmTanking = myPlayoffOdds < 50;
-    const iAmContending = myPlayoffOdds >= 50;
-    const dynValueForPlayer = (id: string) => leagueAdjustedFcValues[id] ?? players[id]?.value ?? 0;
-    const playerListForRoster = (rosterId: number) => {
-      const rosterEntry = rosters.find((entry) => Number(entry.roster_id) === Number(rosterId));
-      return (rosterEntry?.players || [])
-        .map((id: string) => {
-          const player = players[id];
-          return player ? {
-            ...player,
-            dynValue: dynValueForPlayer(id),
-            redValue: leagueAdjustedRedraftValues[id] ?? 0,
-          } : null;
-        })
-        .filter((p): p is NonNullable<typeof p> => p !== null)
-        .filter((player) => ["QB", "RB", "WR", "TE"].includes(player.position));
-    };
-    const myPlayersDetailed = playerListForRoster(myRoster.roster_id);
-    const myPicksDetailed = allPicks
-      .filter((pick) => Number(pick.owner_id) === Number(myRoster.roster_id))
-      .map((pick) => {
-        const key = `${pick.season}-${pick.round}-${pick.roster_id}`;
-        const dynamic = selectedLeagueDynamicPickValues[key];
-        return {
-          ...pick,
-          expectedValue: dynamic?.expectedValue ?? getStoredPickValue(pickFcValues, pick),
-          dynamic,
-          label: dynamic?.label || "Flat value",
-          expectedSlot: dynamic?.expectedSlot ?? null,
-        };
-      })
-      .sort((a, b) => b.expectedValue - a.expectedValue);
-
-    const teamCount = rosters.length || 12;
-    const weakPositions = new Set(
-      (myProfile?.positionRanks || [])
-        .filter((entry) => entry.rank >= Math.max(4, teamCount - 2))
-        .map((entry) => entry.pos)
-    );
-    const strongPositions = new Set(
-      (myProfile?.positionRanks || [])
-        .filter((entry) => entry.rank <= Math.max(2, Math.ceil(teamCount / 3)))
-        .map((entry) => entry.pos)
-    );
-    const recommendations: TradeCard[] = [];
-    const sortedPartners = [...tradePartnerRankings];
-    const isBlockedSellDisposition = (playerId?: string | null) =>
-      !!playerId && playerDispositions[playerId]?.sell === "Not Willing to Trade";
-    const isBlockedBuyDisposition = (playerId?: string | null) =>
-      !!playerId && ["Zero Interest", "Skip"].includes(playerDispositions[playerId]?.buy || "");
-    const assetValue = (asset: TradeAsset) => asset?.expectedValue ?? asset?.dynValue ?? asset?.value ?? 0;
-    const meaningfulPlayerThreshold = 350;
-    const fairDeltaLimit = (total: number) => Math.max(250, Math.min(900, Math.round(total * 0.16)));
-    // Waiver credit: same formula as trade calculator & trade finder (0.42× extra asset value, capped)
-    const calcWaiverCredit = (extras: number[]) =>
-      extras.reduce((s, v, i) => s + Math.min(Math.round(v * 0.42), i === 0 ? 550 : 750), 0);
-    const isFairPackage = (give: TradeAsset[], receive: TradeAsset[]) => {
-      const giveVals = give.map((a) => assetValue(a)).sort((a, b) => b - a);
-      const receiveVals = receive.map((a) => assetValue(a)).sort((a, b) => b - a);
-      const rawGive = Math.round(giveVals.reduce((s, v) => s + v, 0));
-      const rawReceive = Math.round(receiveVals.reduce((s, v) => s + v, 0));
-      if (rawGive <= 0 || rawReceive <= 0) return false;
-      // Apply waiver credit to the side with fewer assets (same as calculator/finder)
-      const assetDiff = giveVals.length - receiveVals.length;
-      const waiverAdj = assetDiff > 0
-        ? calcWaiverCredit(giveVals.slice(receiveVals.length))
-        : assetDiff < 0
-        ? calcWaiverCredit(receiveVals.slice(giveVals.length))
-        : 0;
-      const giveAdj = rawGive + (assetDiff < 0 ? waiverAdj : 0);
-      const receiveAdj = rawReceive + (assetDiff > 0 ? waiverAdj : 0);
-      const delta = Math.abs(receiveAdj - giveAdj);
-      const ratio = receiveAdj / Math.max(giveAdj, 1);
-      return delta <= fairDeltaLimit(Math.max(giveAdj, receiveAdj)) && ratio >= 0.78 && ratio <= 1.22;
-    };
-    const chooseClosestPackage = (packages: TradeAsset[][], targetValue: number, opts?: { minValue?: number; maxValue?: number }) => {
-      const minValue = opts?.minValue ?? Math.max(400, Math.round(targetValue * 0.78));
-      const maxValue = opts?.maxValue ?? Math.round(targetValue * 1.22);
-      return packages
-        .map((pkg) => ({
-          assets: pkg,
-          total: Math.round(sum(pkg.map((asset) => assetValue(asset)))),
-        }))
-        .filter((entry) => entry.total >= minValue && entry.total <= maxValue)
-        .sort((a, b) => Math.abs(a.total - targetValue) - Math.abs(b.total - targetValue))[0] || null;
-    };
-    const twoAssetCombos = (assets: TradeAsset[]) => {
-      const combos: TradeAsset[][] = [];
-      for (let i = 0; i < assets.length; i++) {
-        for (let j = i + 1; j < assets.length; j++) {
-          combos.push([assets[i], assets[j]]);
-        }
-      }
-      return combos;
-    };
-    const buildCard = ({
-      archetype,
-      partner,
-      give,
-      receive,
-      whyYou,
-      whyThem,
-      summary,
-    }: { archetype: string; partner: TradePartner; give: TradeAsset[]; receive: TradeAsset[]; whyYou: string; whyThem: string; summary: string }) => {
-      const giveValsAdj = give.map((a) => assetValue(a)).sort((a: number, b: number) => b - a);
-      const receiveValsAdj = receive.map((a) => assetValue(a)).sort((a: number, b: number) => b - a);
-      const giveTotal = Math.round(giveValsAdj.reduce((s: number, v: number) => s + v, 0));
-      const receiveTotal = Math.round(receiveValsAdj.reduce((s: number, v: number) => s + v, 0));
-      const assetDiffCard = giveValsAdj.length - receiveValsAdj.length;
-      const waiverAdjCard = assetDiffCard > 0
-        ? calcWaiverCredit(giveValsAdj.slice(receiveValsAdj.length))
-        : assetDiffCard < 0
-        ? calcWaiverCredit(receiveValsAdj.slice(giveValsAdj.length))
-        : 0;
-      const giveTotalAdj = giveTotal + (assetDiffCard < 0 ? waiverAdjCard : 0);
-      const receiveTotalAdj = receiveTotal + (assetDiffCard > 0 ? waiverAdjCard : 0);
-      const packageDelta = receiveTotalAdj - giveTotalAdj;
-      if (give.some((asset) => !asset?.season && isBlockedSellDisposition(asset?.player_id))) return null;
-      if (receive.some((asset) => !asset?.season && isBlockedBuyDisposition(asset?.player_id))) return null;
-      if (!isFairPackage(give, receive)) return null;
-      if (give.some((asset) => asset?.dynValue != null && asset.dynValue < meaningfulPlayerThreshold && !asset?.season)) return null;
-      if (receive.some((asset) => asset?.dynValue != null && asset.dynValue < meaningfulPlayerThreshold && !asset?.season)) return null;
-      const archetypeBonus = archetype === "Draft Capital" ? 5 : archetype === "Tier Up" ? 4 : archetype === "Buy Low" ? 3 : 2;
-      const recommendationScore = Math.round(
-        partner.rankScore +
-        Math.max(0, 16 - Math.abs(packageDelta) / 140) +
-        archetypeBonus
-      );
-      return {
-        archetype,
-        partnerName: partner.ownerName,
-        fitLabel: partner.fitLabel,
-        partnerOwnerId: partner.ownerId,
-        partnerRosterId: partner.rosterId,
-        give,
-        receive,
-        whyYou,
-        whyThem,
-        summary,
-        partnerPlayoffOdds: partner.playoffOdds,
-        partnerTitleOdds: partner.titleOdds,
-        partnerRankScore: partner.rankScore,
-        recommendationScore,
-        giveTotal,
-        receiveTotal,
-        packageDelta,
-        bestApproach: partner.bestApproach,
-        negotiationNotes: partner.negotiationNotes,
-        openingOffer: `Open with the clean version first: ${archetype.toLowerCase()} framed around ${partner.bestApproach.toLowerCase()}.`,
-      };
-    };
-
-    const isAgingAsset = (player: TradeAsset) =>
-      (player.position === "RB" && Number(player.age || 0) >= 25) ||
-      (player.position === "QB" && Number(player.age || 0) >= 29) ||
-      (["WR", "TE"].includes(player.position ?? "") && Number(player.age || 0) >= 28);
-    const isYoungInsulation = (player: TradeAsset) =>
-      (["QB", "WR"].includes(player.position ?? "") && Number(player.age || 99) <= 25) ||
-      (player.position === "TE" && Number(player.age || 99) <= 25) ||
-      (player.position === "RB" && Number(player.age || 99) <= 23);
-    // A floor filler wins you games now but adds no dynasty upside — dangerous for tanking teams
-    // because it moves you from 1.02 to 1.05 pick without any realistic championship path.
-    const isFloorFiller = (player: TradeAsset) =>
-      (player.position === "RB" && Number(player.age || 0) >= 24) ||
-      (player.position === "QB" && Number(player.age || 0) >= 28) ||
-      (["WR", "TE"].includes(player.position ?? "") && Number(player.age || 0) >= 27);
-    const getPickPackage = (rosterId: number) =>
-      allPicks
-        .filter((pick) => Number(pick.owner_id) === Number(rosterId))
-        .map((pick) => {
-          const dynKey = `${pick.season}-${pick.round}-${pick.roster_id}`;
-          const dyn = selectedLeagueDynamicPickValues[dynKey];
-          return {
-            ...pick,
-            expectedValue: dyn?.expectedValue ?? getStoredPickValue(pickFcValues, pick),
-            label: dyn?.label || "Flat value",
-            expectedSlot: dyn?.expectedSlot ?? null,
-          };
-        })
-        .filter((pick) => pick.expectedValue > 0)
-        .sort((a, b) => b.expectedValue - a.expectedValue)
-        .slice(0, 6);
-    const comboPackages = (assets: TradeAsset[], maxItems = 2) => {
-      const singles = assets.map((asset) => [asset]);
-      if (maxItems <= 1) return singles;
-      return [...singles, ...twoAssetCombos(assets)];
-    };
-    const classifyArchetype = (give: TradeAsset[], receive: TradeAsset[], partner: TradePartner) => {
-      const givePlayers = give.filter((asset) => !asset?.season);
-      const receivePlayers = receive.filter((asset) => !asset?.season);
-      const givePicks = give.filter((asset) => !!asset?.season);
-      const receivePicks = receive.filter((asset) => !!asset?.season);
-      if (receivePicks.length > 0 && givePlayers.some((player) => isAgingAsset(player))) return "Sell High";
-      // Tanking teams trading floor fillers for picks = Draft Capital accumulation
-      if (iAmTanking && receivePicks.length > 0 && givePlayers.some((player) => isFloorFiller(player))) return "Draft Capital";
-      if (givePicks.length > 0 && receivePlayers.some((player) => weakPositions.has(player.position ?? ""))) return "Buy Low";
-      if (give.length > receive.length && receivePlayers.length === 1) return "2-for-1";
-      if (give.length >= 2 && receivePlayers.length === 1 && (receivePlayers[0]?.dynValue ?? 0) > Math.max(...givePlayers.map((player) => player.dynValue || 0), 0)) return "Tier Up";
-      if (partner?.isSeller) return "Insulation Buy";
-      return "Value Rebalance";
-    };
-    const scoreRecommendationFit = (give: TradeAsset[], receive: TradeAsset[], partner: TradePartner) => {
-      const givePlayers = give.filter((asset) => !asset?.season);
-      const receivePlayers = receive.filter((asset) => !asset?.season);
-      const givePicks = give.filter((asset) => !!asset?.season);
-      const receivePicks = receive.filter((asset) => !!asset?.season);
-      const partnerBuckets = getProfilePosBuckets(partner.directionProfile);
-      let myScore = 0;
-      let theirScore = 0;
-
-      if (["Rebuilder", "Stranded", "Fading Out", "Hopeless"].includes(myProfile.bucket)) {
-        myScore += givePlayers.filter((player) => isAgingAsset(player)).length * 8;
-        myScore += givePlayers.filter((player) => isFloorFiller(player) && !isAgingAsset(player)).length * 5;
-        myScore += receivePlayers.filter((player) => isYoungInsulation(player)).length * 8;
-        myScore += receivePicks.length * 7;
-        myScore -= receivePlayers.filter((player) => isAgingAsset(player)).length * 16;
-        myScore -= receivePlayers.filter((player) => isFloorFiller(player) && !isAgingAsset(player)).length * 10;
-      } else if (["Elite", "True Contender", "Almost There", "Window Closing"].includes(myProfile.bucket)) {
-        myScore += receivePlayers.filter((player) => weakPositions.has(player.position ?? "")).length * 8;
-        myScore += receivePlayers.reduce((sum: number, player) => sum + (player.redValue || 0), 0) / 350;
-        myScore -= receivePicks.length * 3;
-        // RBs injure at the highest rate and are hardest to replace off waivers.
-        // Contending teams should value RB depth even when RB is already a "strong" position.
-        myScore += receivePlayers.filter((player) =>
-          player.position === "RB" && Number(player.age || 0) >= 22 && Number(player.age || 0) <= 26
-        ).length * 5;
-      } else if (iAmTanking) {
-        // Purgatory/Fading teams below 50% playoff odds — buying points is COUNTERPRODUCTIVE.
-        // Going from 4-9 to 6-7 moves the 1.02 to 1.05 without any playoff upside.
-        // Only valid moves: sell floor fillers, accumulate picks, target young upside shots.
-        myScore += givePlayers.filter((player) => isFloorFiller(player)).length * 7;
-        myScore += givePlayers.filter((player) => isAgingAsset(player)).length * 8;
-        myScore += receivePlayers.filter((player) => isYoungInsulation(player)).length * 9;
-        myScore += receivePicks.length * 10;
-        myScore -= receivePlayers.filter((player) => isFloorFiller(player)).length * 16;
-        myScore -= receivePlayers.filter((player) => isAgingAsset(player)).length * 20;
-        // Filling a weak position with a floor player is exactly wrong — hurts draft slot
-        myScore -= receivePlayers.filter((player) => weakPositions.has(player.position ?? "") && isFloorFiller(player)).length * 8;
-      } else {
-        // True middle — realistic playoff path, balanced approach
-        myScore += receivePlayers.filter((player) => weakPositions.has(player.position ?? "")).length * 6;
-        myScore += receivePlayers.filter((player) => isYoungInsulation(player)).length * 4;
-        myScore += receivePicks.length * 3;
-      }
-
-      if (partner.isBuyer) {
-        theirScore += givePlayers.filter((player) => partnerBuckets.weak.includes(player.position ?? "")).length * 8;
-        theirScore += givePlayers.reduce((sum: number, player) => sum + (player.redValue || 0), 0) / 350;
-        theirScore -= receivePicks.length * 2;
-      } else if (partner.isSeller) {
-        theirScore += givePicks.length * 7;
-        theirScore += givePlayers.filter((player) => isYoungInsulation(player)).length * 7;
-        theirScore += receivePlayers.filter((player) => isAgingAsset(player)).length * 6;
-        theirScore -= givePlayers.filter((player) => isAgingAsset(player)).length * 6;
-      } else {
-        theirScore += givePlayers.filter((player) => partnerBuckets.weak.includes(player.position ?? "")).length * 5;
-        theirScore += givePicks.length * 3;
-      }
-
-      return { myScore, theirScore };
-    };
-    const passesRecommendationGuard = (give: TradeAsset[], receive: TradeAsset[], partner: TradePartner) => {
-      const givePlayers = give.filter((asset) => !asset?.season);
-      const receivePlayers = receive.filter((asset) => !asset?.season);
-      const givePicks = give.filter((asset) => !!asset?.season);
-      const receivePicks = receive.filter((asset) => !!asset?.season);
-      const partnerBuckets = getProfilePosBuckets(partner.directionProfile);
-      const incomingAging = receivePlayers.filter((player) => isAgingAsset(player)).length;
-      const incomingYoung = receivePlayers.filter((player) => isYoungInsulation(player)).length;
-      const outgoingAging = givePlayers.filter((player) => isAgingAsset(player)).length;
-      const givesPremiumCurrentPick = givePicks.some((pick) => String(pick.season) === CURRENT_YEAR && Number(pick.round) === 1);
-      const receivesPremiumCurrentPick = receivePicks.some((pick) => String(pick.season) === CURRENT_YEAR && Number(pick.round) === 1);
-
-      if (["Rebuilder", "Stranded", "Fading Out", "Hopeless"].includes(myProfile.bucket)) {
-        if (incomingAging > 0) return false;
-        if (givesPremiumCurrentPick && incomingYoung === 0 && receivePicks.length === 0) return false;
-        if (receivePlayers.some((player) => player.position === "RB" && Number(player.age || 99) >= 24)) return false;
-      }
-
-      // Tanking teams (below 50% playoff odds) in non-rebuild buckets must follow the same discipline.
-      // Buying points is actively harmful — it ruins your draft slot without adding championship upside.
-      // The ONLY valid acquisitions are: young upside shots, future picks, draft capital.
-      if (iAmTanking && !["Rebuilder", "Stranded", "Fading Out", "Hopeless"].includes(myProfile.bucket)) {
-        // Never take on aging assets regardless of position need
-        if (incomingAging > 0) return false;
-        // Never take on floor fillers unless also getting picks — you'd just win extra games
-        if (receivePlayers.some((p) => isFloorFiller(p)) && receivePicks.length === 0 && incomingYoung === 0) return false;
-        // Must receive picks or young upside — point fillers without future capital are vetoed
-        if (receivePlayers.length > 0 && receivePlayers.every((p) => !isYoungInsulation(p)) && receivePicks.length === 0) return false;
-        // Guard premium current picks — should only move them for meaningful future capital
-        if (givesPremiumCurrentPick && incomingYoung === 0 && receivePicks.length === 0) return false;
-        // Older RBs are the most dangerous floor-fillers: they win games now, crater fast
-        if (receivePlayers.some((p) => p.position === "RB" && Number(p.age || 99) >= 24)) return false;
-      }
-
-      if (["Elite", "True Contender", "Almost There", "Window Closing"].includes(myProfile.bucket)) {
-        if (receive.length > 0 && receivePlayers.length === 0) return false;
-        if (receivePlayers.length > 0 && receivePlayers.every((player) => isYoungInsulation(player)) && receivePicks.length > 0 && givePlayers.length > 0) {
-          return false;
-        }
-      }
-
-      if (partner.isBuyer) {
-        const pointsComingToPartner = givePlayers.reduce((sum: number, player) => sum + (player.redValue || 0), 0);
-        if (pointsComingToPartner <= 0 && givePicks.length > 0) return false;
-        if (partnerBuckets.weak.length > 0 && !givePlayers.some((player) => partnerBuckets.weak.includes(player.position ?? "")) && pointsComingToPartner < 1000) {
-          return false;
-        }
-      }
-
-      if (partner.isSeller) {
-        if (outgoingAging > 0 && givePicks.length === 0 && givePlayers.filter((player) => isYoungInsulation(player)).length === 0) return false;
-        if (receivesPremiumCurrentPick && partner.playoffOdds > 55) return false;
-      }
-
-      return true;
-    };
-    const getCandidateText = (archetype: string, partner: TradePartner, _give: TradeAsset[], receive: TradeAsset[]) => {
-      const receivePlayers = receive.filter((asset) => !asset?.season);
-      const receivePicks = receive.filter((asset) => !!asset?.season);
-      if (archetype === "Draft Capital") {
-        return {
-          whyYou: `At ${Math.round(myPlayoffOdds)}% to make the playoffs, buying points is counterproductive — getting marginally better moves you from a 1.02 to a 1.05 without any realistic championship path. Converting this floor player into picks preserves your draft slot and maximizes the only real lever you have.`,
-          whyThem: `${partner.ownerName} gets production that matches a buying window. The floor player helps them now; the picks help you long-term.`,
-          summary: "A draft capital accumulation trade that protects your rebuild trajectory without surrendering cornerstone pieces.",
-        };
-      }
-      if (archetype === "Sell High") {
-        return {
-          whyYou: "Moves present production into future insulation without waiting for the market to cool.",
-          whyThem: `${partner.ownerName} gets immediate points that better match a buying profile.`,
-          summary: "A fair veteran-for-future package that aligns with both roster timelines.",
-        };
-      }
-      if (archetype === "Buy Low" || archetype === "Insulation Buy") {
-        return {
-          whyYou: "Targets younger insulation without paying a reckless premium.",
-          whyThem: `${partner.ownerName} gets the kind of future value a seller should actually consider.`,
-          summary: "A future-facing package built around a player they can realistically move.",
-        };
-      }
-      if (archetype === "2-for-1" || archetype === "Tier Up") {
-        return {
-          whyYou: `Converts extra depth into one stronger piece at a weaker spot without blowing past fair value.`,
-          whyThem: `${partner.ownerName} gets multiple assets that better fit their roster shape.`,
-          summary: "A balanced consolidation deal that should make sense to both sides.",
-        };
-      }
-      return {
-        whyYou: `Improves roster shape with a package that stays inside a realistic value band.`,
-        whyThem: `${partner.ownerName} gets assets that better match their profile and current incentives.`,
-        summary: receivePicks.length > 0
-          ? "A fair rebalance that includes future insulation."
-          : `A fair rebalance centered on ${receivePlayers[0]?.position || "roster"} value.`,
-      };
-    };
-
-    sortedPartners.forEach((partner) => {
-      const partnerPlayers = playerListForRoster(Number(partner.rosterId));
-      const partnerPicks = getPickPackage(Number(partner.rosterId));
-      const partnerBuckets = getProfilePosBuckets(partner.directionProfile);
-
-      const myOfferPlayers = myPlayersDetailed
-        .filter((player) => {
-          const disp = playerDispositions[player.player_id];
-          if (isBlockedSellDisposition(player.player_id)) return false;
-          // Never offer players I've explicitly tagged as "buy" — I want them
-          if (disp?.buy) return false;
-          // Always include players I've tagged as "sell" (lower threshold: just needs some real value)
-          if (disp?.sell) return player.dynValue >= 150;
-          // Default criteria: strong positions, aging assets, or partner's weak spots
-          return (
-            player.dynValue >= meaningfulPlayerThreshold &&
-            (
-              strongPositions.has(player.position) ||
-              isAgingAsset(player) ||
-              (iAmTanking && isFloorFiller(player)) ||
-              partnerBuckets.weak.includes(player.position)
-            )
-          );
-        })
-        .sort((a, b) => {
-          // Sell-tagged players sort first so they're prioritized in combo generation
-          const aIsSell = playerDispositions[a.player_id]?.sell ? 1 : 0;
-          const bIsSell = playerDispositions[b.player_id]?.sell ? 1 : 0;
-          if (bIsSell !== aIsSell) return bIsSell - aIsSell;
-          return a.dynValue - b.dynValue;
-        })
-        .slice(0, 12);
-      const myOfferPicks = myPicksDetailed.slice(0, 5);
-
-      const partnerTradeablePlayers = partnerPlayers
-        .filter((player) =>
-          !isBlockedBuyDisposition(player.player_id) &&
-          player.dynValue >= meaningfulPlayerThreshold &&
-          (
-            // Always target players I've explicitly flagged as buy interest, regardless of profile
-            !!playerDispositions[player.player_id]?.buy ||
-            // Contending teams target positional needs; tanking teams target youth/upside only
-            (iAmContending && weakPositions.has(player.position)) ||
-            (iAmTanking && isYoungInsulation(player)) ||
-            (partner.isSeller && (isAgingAsset(player) || isYoungInsulation(player))) ||
-            (partner.isBuyer && partnerBuckets.strong.includes(player.position))
-          )
-        )
-        .sort((a, b) => {
-          // Buy-tagged players sort first
-          const aIsBuy = playerDispositions[a.player_id]?.buy ? 1 : 0;
-          const bIsBuy = playerDispositions[b.player_id]?.buy ? 1 : 0;
-          if (bIsBuy !== aIsBuy) return bIsBuy - aIsBuy;
-          return b.dynValue - a.dynValue;
-        })
-        .slice(0, 12);
-
-      const givePackages = comboPackages([...myOfferPlayers, ...myOfferPicks], 2).slice(0, 45);
-      const receivePackages = comboPackages([...partnerTradeablePlayers, ...partnerPicks], 2).slice(0, 45);
-      const candidateCards: TradeCard[] = [];
-      const tryBuildCandidates = (minimumFit: number, bandFloor: number, bandCeil: number) => {
-        givePackages.forEach((givePkg) => {
-          const giveTotal = Math.round(sum(givePkg.map((asset) => assetValue(asset))));
-          if (giveTotal < meaningfulPlayerThreshold) return;
-          const matchedReceive = chooseClosestPackage(receivePackages, giveTotal, {
-            minValue: Math.round(giveTotal * bandFloor),
-            maxValue: Math.round(giveTotal * bandCeil),
-          });
-          if (!matchedReceive) return;
-          const receivePkg = matchedReceive.assets;
-          if (!passesRecommendationGuard(givePkg, receivePkg, partner)) return;
-          const fit = scoreRecommendationFit(givePkg, receivePkg, partner);
-          if (fit.myScore < minimumFit || fit.theirScore < minimumFit) return;
-
-          const archetype = classifyArchetype(givePkg, receivePkg, partner);
-          const text = getCandidateText(archetype, partner, givePkg, receivePkg);
-          const card = buildCard({
-            archetype,
-            partner,
-            give: givePkg,
-            receive: receivePkg,
-            whyYou: text.whyYou,
-            whyThem: text.whyThem,
-            summary: text.summary,
-          });
-          if (!card) return;
-          candidateCards.push({
-            ...card,
-            recommendationScore: card.recommendationScore + fit.myScore + fit.theirScore,
-          });
-        });
-      };
-
-      tryBuildCandidates(6, 0.82, 1.12);
-      if (candidateCards.length === 0) tryBuildCandidates(4, 0.86, 1.14);
-      if (candidateCards.length === 0) tryBuildCandidates(3, 0.9, 1.1);
-
-      // ── Per-partner lottery ticket candidates ─────────────────────────────
-      // "Outside top 150" = dynValue < 700 but still has real upside potential.
-      // These compete with regular cards so the single best deal per partner wins.
-      // Dispositions: skip "Zero Interest" receive targets; boost "Buy Low" targets.
-      const LOTTERY_CEILING = 700;
-      const roundOrd = (r: number) => r === 1 ? "1st" : r === 2 ? "2nd" : r === 3 ? "3rd" : `${r}th`;
-      const myLotteryPicks = myPicksDetailed.filter((p) => Number(p.round) >= 3 && assetValue(p) > 0);
-      if (myLotteryPicks.length > 0) {
-        partnerPlayers
-          .filter((p) => {
-            if (playerDispositions[p.player_id]?.buy === "Zero Interest") return false;
-            const age = Number(p.age || 99);
-            const val = Number(p.dynValue || 0);
-            if (val < 60 || val >= LOTTERY_CEILING) return false;
-            if (p.position === "RB" && age > 23) return false;
-            if (p.position === "QB" && age > 26) return false;
-            if (["WR", "TE"].includes(p.position) && age > 27) return false;
-            return true;
-          })
-          .sort((a, b) => b.dynValue - a.dynValue)
-          .slice(0, 3)
-          .forEach((target) => {
-            const targetVal = Number(target.dynValue || 0);
-            const bestPick = myLotteryPicks
-              .filter((p) => {
-                const pv = assetValue(p);
-                const ratio = targetVal / Math.max(pv, 1);
-                return ratio >= 0.35 && ratio <= 1.6;
-              })
-              .map((p) => ({ ...p, diff: Math.abs(assetValue(p) - targetVal) }))
-              .sort((a, b) => a.diff - b.diff)[0];
-            if (!bestPick) return;
-            const pickVal = assetValue(bestPick);
-            if (pickVal <= 0 || targetVal <= 0) return;
-            const dispBonus = playerDispositions[target.player_id]?.buy === "Buy Low" ? 3
-              : playerDispositions[target.player_id]?.buy === "Buy at Market" ? 1 : 0;
-            candidateCards.push({
-              archetype: "Lottery Ticket",
-              partnerName: partner.ownerName,
-              fitLabel: partner.fitLabel,
-              give: [bestPick],
-              receive: [target],
-              whyYou: `${target.full_name} is priced outside the top 150 right now but has the age and upside to break into starter value. Worst case: a late pick you were unlikely to hit on. Best case: a future contributor at almost nothing.`,
-              whyThem: `${partner.ownerName} converts a developmental player into a guaranteed future pick.`,
-              summary: `Low-stakes upside bet: a ${roundOrd(Number(bestPick.round))}-round pick for a young player with breakout potential.`,
-              partnerPlayoffOdds: partner.playoffOdds,
-              partnerTitleOdds: partner.titleOdds,
-              partnerRankScore: partner.rankScore,
-              recommendationScore: Math.round(partner.rankScore * 0.4 + 8 + dispBonus),
-              giveTotal: Math.round(pickVal),
-              receiveTotal: Math.round(targetVal),
-              packageDelta: Math.round(targetVal - pickVal),
-              bestApproach: partner.bestApproach,
-              negotiationNotes: partner.negotiationNotes || [],
-              openingOffer: `Keep it casual — "I like ${target.full_name}, would you do him for my ${bestPick.season} ${roundOrd(Number(bestPick.round))}?"`,
-              isLottery: true,
-            });
-          });
-      }
-
-      // ── Fallback: guarantee a card for every partner ─────────────────────
-      // When the filtered pools produce nothing, find the closest fair 1-for-1
-      // from the full rosters (no position/age/profile restrictions).
-      if (candidateCards.length === 0) {
-        const fallbackMine = myPlayersDetailed
-          .filter((p) => p.dynValue >= 500 && !isBlockedSellDisposition(p.player_id));
-        const fallbackTheirs = partnerPlayers
-          .filter((p) => p.dynValue >= 500 && !isBlockedBuyDisposition(p.player_id));
-        type PlayerDetailed = ReturnType<typeof playerListForRoster>[number];
-        let bestPair: { mine: PlayerDetailed; theirs: PlayerDetailed; diff: number } | null = null;
-        for (const mine of fallbackMine) {
-          for (const theirs of fallbackTheirs) {
-            const ratio = mine.dynValue / Math.max(theirs.dynValue, 1);
-            if (ratio < 0.78 || ratio > 1.28) continue;
-            const diff = Math.abs(mine.dynValue - theirs.dynValue);
-            if (!bestPair || diff < bestPair.diff) bestPair = { mine, theirs, diff };
-          }
-        }
-        if (bestPair) {
-          const give = [bestPair.mine];
-          const receive = [bestPair.theirs];
-          const giveTotal = Math.round(assetValue(bestPair.mine));
-          const receiveTotal = Math.round(assetValue(bestPair.theirs));
-          const text = getCandidateText("Value Rebalance", partner, give, receive);
-          candidateCards.push({
-            archetype: "Value Rebalance",
-            partnerName: partner.ownerName,
-            fitLabel: partner.fitLabel,
-            give,
-            receive,
-            whyYou: text.whyYou,
-            whyThem: text.whyThem,
-            summary: text.summary,
-            partnerPlayoffOdds: partner.playoffOdds,
-            partnerTitleOdds: partner.titleOdds,
-            partnerRankScore: partner.rankScore,
-            recommendationScore: Math.round(partner.rankScore * 0.3 + 2),
-            giveTotal,
-            receiveTotal,
-            packageDelta: receiveTotal - giveTotal,
-            bestApproach: partner.bestApproach,
-            negotiationNotes: partner.negotiationNotes || [],
-            openingOffer: `A simple swap — test the waters with a casual offer to see if they're open to a roster rebalance.`,
-          });
-        }
-      }
-
-      const bestCard = candidateCards
-        .sort((a, b) => b.recommendationScore - a.recommendationScore)[0];
-      if (bestCard) recommendations.push(bestCard);
-    });
-
-    const base = recommendations
-      .filter(Boolean)
-      .filter((card) =>
-        !card.give.some((asset) => !asset?.season && isBlockedSellDisposition(asset?.player_id)) &&
-        !card.receive.some((asset) => !asset?.season && isBlockedBuyDisposition(asset?.player_id))
-      )
-      .filter((card) =>
-        !card.give.some((asset) => asset?.season && String(asset.season) > CURRENT_YEAR)
-      )
-      .sort((a, b) => b.recommendationScore - a.recommendationScore);
-
-    const lowImpact = base.filter((card) =>
-      card.giveTotal >= 500 && card.giveTotal <= 4000 &&
-      card.receiveTotal >= 500 && card.receiveTotal <= 4000
-    );
-
-    return (lowImpact.length > 0 ? lowImpact : base).slice(0, sortedPartners.length || 12);
-  }, [
-    selectedLeague,
-    rosters,
-    user?.user_id,
-    selectedLeagueDirection,
-    selectedLeagueDirectionAdjusted,
-    selectedLeagueSimulation,
-    leagueAdjustedFcValues,
-    leagueAdjustedRedraftValues,
-    players,
-    allPicks,
-    selectedLeagueDynamicPickValues,
-    pickFcValues,
-    tradePartnerRankings,
-    playerDispositions,
-  ]);
   useEffect(() => {
     if (!supabaseUser || !selectedLeague?.league_id || selectedLeagueMateProfiles.length === 0) return;
     supabase.from("leaguemate_profiles").upsert(
@@ -2555,12 +1913,12 @@ const saveSnapshotNow = async () => {
     return set;
   }, [draftPicks, players]);
 
-  // ── Draft board prediction engine ─────────────────────────────────────────
+  // â”€â”€ Draft board prediction engine â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Key design decisions:
   // - Actual picks detected by pick_no (overall pick number), not by roster matching
   // - Non-user slots: ranked by Sleeper ADP position (relative rookie rank, not absolute value)
   // - User's slots: ranked by their personal big board
-  // - Need multiplier capped at 1.20 — tiebreaker only, never overrides ADP tier
+  // - Need multiplier capped at 1.20 â€” tiebreaker only, never overrides ADP tier
   // - allPicks.owner_id = current owner after trades (used for slot ownership)
   const draftPredictionEngine = useMemo<{
     predictions: Record<string, { name: string; position: string; team: string; adp: number; player_id: string | null; boardRank: number; poolRank: number }>;
@@ -2580,7 +1938,7 @@ const saveSnapshotNow = async () => {
     // Sleeper ("Omar Cooper") and FantasyCalc ("Omar Cooper Jr.") still match, and
     // there is a single normalisation implementation across board/predictor/compiler.
 
-    // rosterId → userId map — needed to look up owner tendencies
+    // rosterId â†’ userId map â€” needed to look up owner tendencies
     const rosterToUserId: Record<number, string> = {};
     rosters.forEach((r) => { rosterToUserId[Number(r.roster_id)] = r.owner_id; });
 
@@ -2588,7 +1946,7 @@ const saveSnapshotNow = async () => {
     const leagueAvgRate: Record<string, number> = { QB: 0.12, RB: 0.28, WR: 0.48, TE: 0.12 };
 
     // Per-owner tendency multiplier: how much more/less likely vs. league average
-    // Capped at 0.75× – 1.30× so it influences without overriding dynasty value
+    // Capped at 0.75Ã— â€“ 1.30Ã— so it influences without overriding dynasty value
     const tendencyMult = (rosterId: number | null, pos: string): number => {
       if (!rosterId) return 1;
       const userId = rosterToUserId[rosterId];
@@ -2601,7 +1959,7 @@ const saveSnapshotNow = async () => {
       return Math.max(0.75, Math.min(1.30, ratio));
     };
 
-    // Build name→dynasty value map from Sleeper players dict + FC values
+    // Build nameâ†’dynasty value map from Sleeper players dict + FC values
     // Needed because rookies use FC player_ids which may differ from Sleeper player_ids
     const valueByNormName: Record<string, number> = {};
     Object.entries(players).forEach(([id, p]: [string, SleeperPlayer]) => {
@@ -2643,13 +2001,13 @@ const saveSnapshotNow = async () => {
         const hasAdp = typeof r.adp === "number" && r.adp < 9999;
         let sortKey: number;
         if (consensusActive && consensusPick !== undefined) {
-          // Bucket A: consensus-ranked. avg_pick_no is overall pick number (~1–60).
+          // Bucket A: consensus-ranked. avg_pick_no is overall pick number (~1â€“60).
           sortKey = consensusPick;
         } else if (consensusActive) {
           // Bucket B: tail fallback when consensus is active. Offset 1000 keeps all
           // tail entries strictly after the consensus bucket.
           if (dynVal > 0) {
-            // Higher dynVal → lower sortKey within tail (cap inversion at +999).
+            // Higher dynVal â†’ lower sortKey within tail (cap inversion at +999).
             sortKey = 1000 + (10000 - Math.min(dynVal, 9999));
           } else if (hasAdp) {
             sortKey = 20000 + r.adp;
@@ -2672,13 +2030,13 @@ const saveSnapshotNow = async () => {
     // User's personal board order for their own slots
     const boardSorted = [...rookies];
 
-    // slot → current owner_id (after trades), from allPicks
+    // slot â†’ current owner_id (after trades), from allPicks
     const slotOwnerMap = new Map<string, number>();
     allPicks.forEach((p) => {
       if (p.slot && p.owner_id) slotOwnerMap.set(String(p.slot), Number(p.owner_id));
     });
 
-    // Detect actual picks by pick_no — reliable regardless of slot/roster resolution
+    // Detect actual picks by pick_no â€” reliable regardless of slot/roster resolution
     const filledPickNos = new Set<number>(
       draftPicks.map((dp) => Number(dp.pick_no)).filter(Boolean)
     );
@@ -2705,13 +2063,13 @@ const saveSnapshotNow = async () => {
       TE: (starterSlots["TE"] || 0),
     };
 
-    // Position need multiplier — round-aware so early picks stay true to value tiers
+    // Position need multiplier â€” round-aware so early picks stay true to value tiers
     // while later rounds allow realistic need-based swings:
-    //   Round 1: cap 1.08  → barely 1-2 spot drift  (Love stays 1.01)
-    //   Round 2: cap 1.20  → moderate 2-3 spot swings
-    //   Round 3: cap 1.38  → 3-5 spot swings reasonable
-    //   Round 4: cap 1.55  → large swings fine (deep picks, less certain)
-    // Surplus penalty also scales — aggressive in round 4 to stop double-stacking one pos.
+    //   Round 1: cap 1.08  â†’ barely 1-2 spot drift  (Love stays 1.01)
+    //   Round 2: cap 1.20  â†’ moderate 2-3 spot swings
+    //   Round 3: cap 1.38  â†’ 3-5 spot swings reasonable
+    //   Round 4: cap 1.55  â†’ large swings fine (deep picks, less certain)
+    // Surplus penalty also scales â€” aggressive in round 4 to stop double-stacking one pos.
     const needMult = (rosterId: number | null, pos: string, simCounts: Record<number, Record<string, number>>, round: number): number => {
       if (!rosterId) return 1;
       const needCap     = round === 1 ? 1.08 : round === 2 ? 1.22 : round === 3 ? 1.38 : 1.55;
@@ -2770,7 +2128,7 @@ const saveSnapshotNow = async () => {
         const overallPick = (round - 1) * numTeams + pickIdx + 1;
         const rosterId = slotOwnerMap.get(slotStr) ?? null;
 
-        // Actual pick detected by pick_no — doesn't require rosterId resolution
+        // Actual pick detected by pick_no â€” doesn't require rosterId resolution
         if (filledPickNos.has(overallPick)) {
           const dp = pickByNo.get(overallPick);
           if (dp?.player_id) {
@@ -2807,7 +2165,7 @@ const saveSnapshotNow = async () => {
             const baseScore = 1000 / (rankIdx + 1);
             const nm = needMult(rosterId, r.position, simCounts, round);
             // Dynasty value bonus: FC value differences within same ADP tier.
-            // Skip when consensus is the primary signal for this player — the
+            // Skip when consensus is the primary signal for this player â€” the
             // consensus rank already encodes their expected ordering.
             const dynVal = getRookieValue(r);
             const consensusDriven = consensusActive && getConsensusPick(r) !== undefined;
@@ -2823,8 +2181,8 @@ const saveSnapshotNow = async () => {
           const boardRank = rookies.findIndex((r: RookieBoardPlayer) => (r.player_id && r.player_id === best.player_id) || normalizeRookieName(r.name) === normalizeRookieName(best.name)) + 1;
           // poolRank = player's position in consensus dynasty-value pool (1 = most valuable).
           // Used to flag REACH/VALUE on user's predicted slots:
-          //   overallPick << poolRank → reaching ahead of consensus
-          //   overallPick >> poolRank → getting value relative to consensus
+          //   overallPick << poolRank â†’ reaching ahead of consensus
+          //   overallPick >> poolRank â†’ getting value relative to consensus
           const poolRank = fullPool.findIndex((r: RookieBoardPlayer) => (r.player_id && r.player_id === best.player_id) || normalizeRookieName(r.name) === normalizeRookieName(best.name)) + 1 || 999;
           predictions[slotStr] = { name: best.name, position: best.position, team: best.team || "", adp: best.adp ?? 999, player_id: best.player_id, boardRank, poolRank };
           markUsed(best);
@@ -2953,7 +2311,7 @@ const saveSnapshotNow = async () => {
     return result.sort((a, b) => severityOrder(a.player) - severityOrder(b.player));
   }, [allLeagueData, dashboardOwnedPlayers, watchlistEntries, players]);
 
-  // ── League transactions feed ──────────────────────────────────────────────
+  // â”€â”€ League transactions feed â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Reads pre-annotated rows from league_transactions_cache. Rows are
   // produced by the server-side cron at app/api/cron/league-transactions
   // every 30 min, eliminating the ~240 Sleeper calls/cold-session this
@@ -3050,7 +2408,7 @@ const saveSnapshotNow = async () => {
     const nextPlayerSnapshot = Object.fromEntries(
       trackedPlayers.map((entry) => {
         const player = entry.player;
-        // Use generic FC value (player.value) — league-adjusted calcFcValues would create false trends on rule changes.
+        // Use generic FC value (player.value) â€” league-adjusted calcFcValues would create false trends on rule changes.
         const value = Number(player?.value ?? 0);
         return [entry.playerId, {
           full_name: player.full_name,
@@ -3067,7 +2425,7 @@ const saveSnapshotNow = async () => {
 
     // Value-change alerts use the Supabase daily baseline (historicalSnapshotRef), NOT localStorage.
     // This prevents false "Bo Nix gained 2,274" fires caused by FC API inconsistencies across sessions.
-    // Guards: baseline must be ≥ 12h old AND previous.value must be > 0 (avoids 0→value false positives).
+    // Guards: baseline must be â‰¥ 12h old AND previous.value must be > 0 (avoids 0â†’value false positives).
     const historicalBase = historicalSnapshotRef.current;
     const baselineAge = historicalBase ? Date.now() - new Date(historicalBase.recorded_at).getTime() : 0;
     const baselineReady = !!historicalBase && baselineAge >= 12 * 60 * 60 * 1000;
@@ -3112,7 +2470,7 @@ const saveSnapshotNow = async () => {
         }
       }
 
-      // Status/team alerts use localStorage (most-recent state) — these need immediate detection,
+      // Status/team alerts use localStorage (most-recent state) â€” these need immediate detection,
       // not a daily gate. A player going on IR should alert right away.
       const previous = savedSnapshots?.players?.[playerId];
       if (!previous) return;
@@ -3213,7 +2571,7 @@ const saveSnapshotNow = async () => {
       alertBootstrapRef.current = true;
       // Auto-save snapshot to Supabase if it's missing or > 6 days old.
       // FC values don't shift meaningfully day-to-day; 6-day cadence gives a useful trend window.
-      // Users can also manually take a snapshot from the Data Hub → Value Trends tab.
+      // Users can also manually take a snapshot from the Data Hub â†’ Value Trends tab.
       const snapshotAge = historicalSnapshotRef.current
         ? Date.now() - new Date(historicalSnapshotRef.current.recorded_at).getTime()
         : Infinity;
@@ -3274,7 +2632,7 @@ const saveSnapshotNow = async () => {
     mergeDashboardAlerts,
   ]);
 
-  // ── Bye week alerts ───────────────────────────────────────────────────────
+  // â”€â”€ Bye week alerts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     if (nflState?.season_type !== "regular") return;
     const currentWeek = Number(nflState?.week || 0);
@@ -3312,7 +2670,7 @@ const saveSnapshotNow = async () => {
     if (alerts.length) mergeDashboardAlerts(alerts);
   }, [nflState?.week, nflState?.season_type, nflState?.season, dashboardOwnedPlayers, watchlistEntries, players, mergeDashboardAlerts]);
 
-  // ── Available player alerts (watchlist player recently dropped) ──────────
+  // â”€â”€ Available player alerts (watchlist player recently dropped) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     if (!watchlistEntries.length || !leagueTransactions.length) return;
     const watchlistSet = new Set(watchlistEntries.map((e) => e.player_id));
@@ -3347,9 +2705,9 @@ const saveSnapshotNow = async () => {
     if (alerts.length) mergeDashboardAlerts(alerts);
   }, [leagueTransactions, watchlistEntries, players, mergeDashboardAlerts]);
 
-  // ── Top-250 drop alerts (any top-250-by-FC-value player dropped in any league) ──
+  // â”€â”€ Top-250 drop alerts (any top-250-by-FC-value player dropped in any league) â”€â”€
   // Surfaces potential pickups even if the player isn't on the watchlist. Skips
-  // watchlist players — they're already handled by the effect above, and we don't
+  // watchlist players â€” they're already handled by the effect above, and we don't
   // want two alerts for the same drop event.
   useEffect(() => {
     if (!leagueTransactions.length) return;
@@ -3433,7 +2791,7 @@ const onRefreshDirection = useCallback(() => {
 // -------------------------
 const myPlayerSet = new Set<string>(roster?.players || []);
 
-  // ── Grouped props for render components ──────────────────────────────────
+  // â”€â”€ Grouped props for render components â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const providerProps = {
     supabaseUser,
     players,
@@ -3549,8 +2907,10 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     loadingAllLeagueData,
     shareSearch, setShareSearch,
     sharePosition, setSharePosition,
-    playerDispositions,
-    savePlayerDisposition,
+    finderDispositions,
+    finderSignals,
+    personalOrdering,
+    savePersonalOrdering,
     loadingRedraft,
     redraftError,
     projectionData, setProjectionData,
@@ -3588,7 +2948,6 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     leaguePlayerTags,
     handleToggleLeaguePlayerTag,
     leagueMateProfileByRosterId,
-    tradeRecommendationCards,
     tradePartnerRankings,
     tradeHubData,
     loadingTradeHub,

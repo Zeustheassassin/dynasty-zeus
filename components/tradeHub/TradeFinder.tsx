@@ -12,6 +12,7 @@ import type {
   LeagueMateView, TradePartnerRanking, HistoricalSnapshot,
   FcTrendEntry,
 } from "../../lib/types";
+import type { PersonalSignal } from "../../lib/helpers/personalRankings";
 import { usePlayers } from "../../lib/PlayersContext";
 import { useLeague } from "../../lib/LeagueContext";
 import { useValues } from "../../lib/ValuesContext";
@@ -50,6 +51,8 @@ interface TradeFinderProps {
   selectedLeagueDraftHasOccurred: boolean;
   loadingCalcValues: boolean;
   playerDispositions: Record<string, { sell: string; buy: string }>;
+  /** Raw personal buy/sell signal map; the block predicates read it directly (Stage 6). */
+  finderSignals: Record<string, PersonalSignal>;
   leaguePlayerTags: Record<string, Record<string, "CORE" | "WANT_TO_TRADE">>;
   onToggleLeaguePlayerTag: (leagueId: string, playerId: string, forceTag?: "CORE" | "WANT_TO_TRADE") => void;
   leagueMateProfileByRosterId: Map<number, LeagueMateView>;
@@ -90,7 +93,7 @@ function TradeFinder({
   user,
   selectedLeagueDraftHasOccurred,
   loadingCalcValues,
-  playerDispositions, leaguePlayerTags, onToggleLeaguePlayerTag,
+  playerDispositions, finderSignals, leaguePlayerTags, onToggleLeaguePlayerTag,
   leagueMateProfileByRosterId, selectedLeagueMateProfilesView,
   tradePartnerRankings,
   onRefreshDirection,
@@ -275,13 +278,14 @@ function TradeFinder({
 
       const myRoster = rosters.find((r) => r.owner_id === user?.user_id);
       const myPlayers = rosterPlayers(myRoster);
+      // Stage 6: block predicates read the personal SIGNAL directly (no string round-trip).
+      // Sell-side (never trade away) is CORE-tag-only — no personal signal asks us to hold a
+      // player, so the gap signal never blocks the give side. Buy-side blocks acquiring a
+      // player we'd strongly shop (STRONG_SELL ⇒ personal rank far below market).
       const isBlockedSellDisposition = (playerId?: string | null) =>
-        !!playerId && (
-          playerDispositions[playerId]?.sell === "Not Willing to Trade" ||
-          leaguePlayerTags[selectedLeague?.league_id]?.[playerId] === "CORE"
-        );
+        !!playerId && leaguePlayerTags[selectedLeague?.league_id]?.[playerId] === "CORE";
       const isBlockedBuyDisposition = (playerId?: string | null) =>
-        !!playerId && ["Zero Interest", "Skip"].includes(playerDispositions[playerId]?.buy || "");
+        !!playerId && finderSignals[playerId] === "STRONG_SELL";
       const isWantToTrade = (playerId?: string | null) =>
         !!playerId && leaguePlayerTags[selectedLeague?.league_id]?.[playerId] === "WANT_TO_TRADE";
       const myT = posTotals(myPlayers);
@@ -1104,7 +1108,7 @@ function TradeFinder({
   }, [
     selectedLeague, selectedLeagueDirectionAdjusted, loadingCalcValues, nflState,
     users, selectedLeagueDynamicPickValues, finderRosterPlayersMap, rosters,
-    calcFcValues, user, playerDispositions, leaguePlayerTags, allPicks,
+    calcFcValues, user, playerDispositions, finderSignals, leaguePlayerTags, allPicks,
     selectedLeagueDraftHasOccurred, pickFcValues, redraftValues, marketSignalMap,
     players, deferredPinnedPlayerId, deferredTargetOppRosterId, deferredTargetPlayerId,
     top32QBFloor, nflTeamDepth, ignoredOwnerIds, selectedLeagueSimulation,

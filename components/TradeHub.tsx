@@ -8,6 +8,7 @@ import type {
   FcTrendEntry,
 } from "../lib/types";
 import type { AnnotatedTrade } from "../hooks/useUserTrades";
+import type { PersonalSignal } from "../lib/helpers/personalRankings";
 import { usePlayers } from "../lib/PlayersContext";
 import { useLeague } from "../lib/LeagueContext";
 import { useValues } from "../lib/ValuesContext";
@@ -29,11 +30,11 @@ interface TradeHubProps {
   selectedLeagueDraftHasOccurred: boolean;
   loadingCalcValues: boolean;
   playerDispositions: Record<string, { sell: string; buy: string }>;
+  finderSignals: Record<string, PersonalSignal>;
   leaguePlayerTags: Record<string, Record<string, "CORE" | "WANT_TO_TRADE">>;
   onToggleLeaguePlayerTag: (leagueId: string, playerId: string, forceTag?: "CORE" | "WANT_TO_TRADE") => void;
   leagueMateProfileByRosterId: Map<number, LeagueMateView>;
   selectedLeagueMateProfilesView: LeagueMateView[];
-  tradeRecommendationCards: unknown[];
   tradePartnerRankings: TradePartnerRanking[];
   setPlayerProfileId: (id: string | null) => void;
   loadUserExposure: (ownerId: string) => void;
@@ -68,7 +69,7 @@ function TradeHub({
   calcOpponentRosterId, setCalcOpponentRosterId,
   selectedLeagueDraftHasOccurred,
   loadingCalcValues,
-  playerDispositions, leaguePlayerTags, onToggleLeaguePlayerTag, projectionData,
+  playerDispositions, finderSignals, leaguePlayerTags, onToggleLeaguePlayerTag, projectionData,
   leagueMateProfileByRosterId, selectedLeagueMateProfilesView,
   tradePartnerRankings,
   setPlayerProfileId, loadUserExposure, loadUserTrades,
@@ -246,6 +247,7 @@ function TradeHub({
             selectedLeagueDraftHasOccurred={selectedLeagueDraftHasOccurred}
             loadingCalcValues={loadingCalcValues}
             playerDispositions={playerDispositions}
+            finderSignals={finderSignals}
             leaguePlayerTags={leaguePlayerTags}
             onToggleLeaguePlayerTag={onToggleLeaguePlayerTag}
             leagueMateProfileByRosterId={leagueMateProfileByRosterId}

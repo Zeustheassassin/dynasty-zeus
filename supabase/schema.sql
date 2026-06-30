@@ -185,19 +185,21 @@ create policy "player_notes_self" on player_notes for all
   using (auth.uid()::text = user_id::text)
   with check (auth.uid()::text = user_id::text);
 
--- ── player_dispositions (buy/sell tags per player) ────────────
-create table if not exists player_dispositions (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid references auth.users(id) on delete cascade not null,
-  player_id text not null,
-  sell text not null default '',
-  buy  text not null default '',
-  updated_at timestamptz not null default now(),
-  unique(user_id, player_id)
+-- (player_dispositions table removed in migration 041 — the manual Sell/Buy
+--  disposition feature was replaced by personal_rankings in Phases 2–3.)
+
+-- ── personal_rankings (the user's own ordered player board) ───
+-- One row per user — the ordered jsonb array of Sleeper player_ids
+-- (array index = rank) drives the Trade Finder buy/sell signal.
+-- Live grants are in migration 040 (snapshot omits grants like its siblings).
+create table if not exists personal_rankings (
+  user_id uuid references auth.users(id) on delete cascade not null primary key,
+  ordering jsonb not null default '[]'::jsonb,
+  updated_at timestamptz not null default now()
 );
-alter table player_dispositions enable row level security;
-drop policy if exists "player_dispositions_self" on player_dispositions;
-create policy "player_dispositions_self" on player_dispositions for all
+alter table personal_rankings enable row level security;
+drop policy if exists "personal_rankings_self" on personal_rankings;
+create policy "personal_rankings_self" on personal_rankings for all
   using (auth.uid()::text = user_id::text)
   with check (auth.uid()::text = user_id::text);
 

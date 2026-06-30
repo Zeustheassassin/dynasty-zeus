@@ -27,8 +27,8 @@ interface DataHubProps {
   // Dynasty/Redraft rankings
   loadingCalcValues: boolean;
   calcValuesError: string | null;
-  playerDispositions: Record<string, { sell: string; buy: string }>;
-  savePlayerDisposition: (playerId: string, sell: string, buy: string) => void;
+  personalOrdering: string[];
+  savePersonalOrdering: (next: string[]) => void;
   setPlayerProfileId: (id: string | null) => void;
   loadingRedraft: boolean;
   redraftError: string | null;
@@ -68,7 +68,7 @@ function DataHub({
   dataHubTab, setDataHubTab,
   shares, totalLeagues,
   loadingCalcValues, calcValuesError,
-  playerDispositions, savePlayerDisposition, setPlayerProfileId,
+  personalOrdering, savePersonalOrdering, setPlayerProfileId,
   loadingRedraft, redraftError,
   projectionData, setProjectionData, projectionPosFilter, setProjectionPosFilter,
   projectionWeek, setProjectionWeek, setProjectionLoaded, loadProjections,
@@ -126,8 +126,8 @@ function DataHub({
           setDynastyRankPos={setDynastyRankPos}
           loadingCalcValues={loadingCalcValues}
           loadingRedraft={loadingRedraft}
-          playerDispositions={playerDispositions}
-          savePlayerDisposition={savePlayerDisposition}
+          personalOrdering={personalOrdering}
+          savePersonalOrdering={savePersonalOrdering}
           setPlayerProfileId={setPlayerProfileId}
           shares={shares}
           historicalSnapshot={historicalSnapshot}
