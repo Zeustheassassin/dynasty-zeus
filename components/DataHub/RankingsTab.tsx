@@ -228,7 +228,7 @@ function RankingsTab({
           <>
             <span className="w-12 text-right text-[10px] text-gray-600 uppercase tracking-wider shrink-0">Mkt</span>
             <span className="w-12 text-right text-[10px] text-gray-600 uppercase tracking-wider shrink-0">vs Mkt</span>
-            <span className="w-16 text-center text-[10px] text-gray-600 uppercase tracking-wider shrink-0">Signal</span>
+            <span className="w-20 text-center text-[10px] text-gray-600 uppercase tracking-wider shrink-0">Signal</span>
           </>
         ) : rankView === "COMPARE" ? (
           <>
@@ -305,7 +305,7 @@ function RankingsTab({
                   <span className={`text-[10px] font-mono w-12 text-right shrink-0 ${vsMkt > 0 ? "text-green-400" : vsMkt < 0 ? "text-red-400" : "text-gray-600"}`}>
                     {vsMkt > 0 ? "+" : ""}{vsMkt}
                   </span>
-                  <span className="w-16 text-center shrink-0">
+                  <span className="w-20 text-center shrink-0">
                     <span className={`inline-block px-1.5 py-0.5 rounded text-[9px] ${meta.cls}`}>{meta.label}</span>
                   </span>
                   <button onClick={() => setPlayerProfileId(id)} className="text-gray-600 hover:text-blue-400 text-xs transition shrink-0 w-4" title="View profile">ⓘ</button>

@@ -11,11 +11,11 @@ export const PERSONAL_SIGNAL_META: Record<
   "STRONG_SELL" | "SELL" | "NEUTRAL" | "BUY" | "STRONG_BUY",
   { label: string; cls: string }
 > = {
-  STRONG_SELL: { label: "SELL", cls: "bg-red-900/60 text-red-300 border border-red-700/50 font-bold" },
-  SELL:        { label: "Sell", cls: "bg-red-900/30 text-red-400" },
-  NEUTRAL:     { label: "—",    cls: "text-gray-600" },
-  BUY:         { label: "Buy",  cls: "bg-green-900/30 text-green-400" },
-  STRONG_BUY:  { label: "BUY",  cls: "bg-green-900/60 text-green-300 border border-green-700/50 font-bold" },
+  STRONG_SELL: { label: "Super Sell", cls: "bg-red-900/60 text-red-300 border border-red-700/50 font-bold" },
+  SELL:        { label: "Sell",       cls: "bg-red-900/30 text-red-400" },
+  NEUTRAL:     { label: "Hold",       cls: "text-gray-600" },
+  BUY:         { label: "Buy",        cls: "bg-green-900/30 text-green-400" },
+  STRONG_BUY:  { label: "Super Buy",  cls: "bg-green-900/60 text-green-300 border border-green-700/50 font-bold" },
 };
 
 const INJURY_CLS: Record<string, string> = {

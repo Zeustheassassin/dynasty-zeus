@@ -10,50 +10,69 @@ import {
   DEFAULT_PERSONAL_SIGNAL_THRESHOLDS,
 } from "@/lib/helpers/personalRankings";
 
-describe("derivePersonalSignal", () => {
-  it("is NEUTRAL when personal and consensus ranks are close (within the band)", () => {
-    // The user's example: player X at personal 14 vs consensus 13 → neutral.
-    expect(derivePersonalSignal(14, 13)).toBe("NEUTRAL");
-    expect(derivePersonalSignal(13, 13)).toBe("NEUTRAL");
-    expect(derivePersonalSignal(8, 13)).toBe("NEUTRAL"); // delta -5, exactly the band
-    expect(derivePersonalSignal(18, 13)).toBe("NEUTRAL"); // delta +5, exactly the band
+describe("derivePersonalSignal (percentage of market rank)", () => {
+  it("is NEUTRAL when the gap is under the sell threshold (12%)", () => {
+    // User's example: market 200, personal 210 → 10/200 = 5% → no signal.
+    expect(derivePersonalSignal(210, 200)).toBe("NEUTRAL");
+    expect(derivePersonalSignal(200, 200)).toBe("NEUTRAL");
+    expect(derivePersonalSignal(111, 100)).toBe("NEUTRAL"); // 11% < 12%
   });
 
-  it("is SELL when you rank a player worse than the market (positive delta, mid)", () => {
-    // Player Y at personal 32 vs consensus 18 → delta +14 → sell, don't buy.
-    expect(derivePersonalSignal(32, 18)).toBe("SELL");
+  it("is SELL when you rank a player 12–20% worse than the market", () => {
+    // User's example: market 200, personal 230 → 30/200 = 15% → Sell.
+    expect(derivePersonalSignal(230, 200)).toBe("SELL");
+    expect(derivePersonalSignal(112, 100)).toBe("SELL"); // exactly 12%
   });
 
-  it("is BUY when you rank a player better than the market (negative delta, mid)", () => {
-    // Player Z at personal 19 vs consensus 33 → delta -14 → buy, don't sell.
-    expect(derivePersonalSignal(19, 33)).toBe("BUY");
+  it("is BUY when you rank a player 12–20% better than the market", () => {
+    expect(derivePersonalSignal(85, 100)).toBe("BUY"); // 15% better
+    expect(derivePersonalSignal(88, 100)).toBe("BUY"); // exactly 12%
   });
 
-  it("escalates to STRONG_SELL / STRONG_BUY past the strong band", () => {
-    expect(derivePersonalSignal(40, 18)).toBe("STRONG_SELL"); // delta +22
-    expect(derivePersonalSignal(10, 40)).toBe("STRONG_BUY"); // delta -30
+  it("escalates to STRONG (Super) Sell/Buy at/over 20%", () => {
+    expect(derivePersonalSignal(240, 200)).toBe("STRONG_SELL"); // 20% worse
+    expect(derivePersonalSignal(150, 200)).toBe("STRONG_BUY");  // 25% better
   });
 
-  it("treats the strong band as inclusive of SELL/BUY (boundary at strongBand)", () => {
-    // delta exactly +15 is still SELL; +16 tips into STRONG_SELL.
-    expect(derivePersonalSignal(20, 5)).toBe("SELL"); // delta +15
-    expect(derivePersonalSignal(21, 5)).toBe("STRONG_SELL"); // delta +16
-    expect(derivePersonalSignal(5, 20)).toBe("BUY"); // delta -15
-    expect(derivePersonalSignal(5, 21)).toBe("STRONG_BUY"); // delta -16
+  it("treats 20% as the inclusive STRONG boundary", () => {
+    expect(derivePersonalSignal(119, 100)).toBe("SELL");        // 19% → still SELL
+    expect(derivePersonalSignal(120, 100)).toBe("STRONG_SELL"); // 20% → STRONG
+    expect(derivePersonalSignal(81, 100)).toBe("BUY");          // 19% → still BUY
+    expect(derivePersonalSignal(80, 100)).toBe("STRONG_BUY");   // 20% → STRONG
+  });
+
+  it("applies an absolute rank-gap floor (6) so the top of the board is protected", () => {
+    // Rank 10: a 5-spot gap is 50% but under the 6-spot floor → no signal.
+    expect(derivePersonalSignal(15, 10)).toBe("NEUTRAL");      // delta +5, < 6 floor
+    expect(derivePersonalSignal(16, 10)).toBe("SELL");         // delta +6 → fires (capped by top guard)
+    // At rank 50 the floor and the 12% threshold coincide at exactly 6 spots.
+    expect(derivePersonalSignal(55, 50)).toBe("NEUTRAL");      // delta +5, < 6 floor
+    expect(derivePersonalSignal(56, 50)).toBe("SELL");         // delta +6 = 12%
+  });
+
+  it("caps a small delta (6–8) in the top 25 at SELL/BUY, not Super", () => {
+    expect(derivePersonalSignal(16, 10)).toBe("SELL");        // delta +6 (60%) → Sell, not Super
+    expect(derivePersonalSignal(18, 10)).toBe("SELL");        // delta +8 → Sell
+    expect(derivePersonalSignal(4, 10)).toBe("BUY");          // delta -6 → Buy
+    expect(derivePersonalSignal(19, 10)).toBe("STRONG_SELL"); // delta +9 → Super allowed
+    // Outside the top 25 the cap lifts: an 8-spot move past 20% is Super again.
+    expect(derivePersonalSignal(34, 26)).toBe("STRONG_SELL"); // delta +8 at rank 26 = 30.8%
   });
 
   it("respects custom thresholds", () => {
-    const tight = { neutralBand: 1, strongBand: 3 };
-    expect(derivePersonalSignal(10, 11, tight)).toBe("NEUTRAL"); // delta -1, within band
-    expect(derivePersonalSignal(10, 12, tight)).toBe("BUY"); // delta -2, mid (|2|>1, not >3)
-    expect(derivePersonalSignal(10, 15, tight)).toBe("STRONG_BUY"); // delta -5 (>3)
-    expect(derivePersonalSignal(14, 12, tight)).toBe("SELL"); // delta +2, mid
+    const tight = { sellPct: 5, strongPct: 10, minGap: 2, topGuardRank: 25, topGuardStrongGap: 9 };
+    expect(derivePersonalSignal(103, 100, tight)).toBe("NEUTRAL");     // 3% < 5
+    expect(derivePersonalSignal(106, 100, tight)).toBe("SELL");        // 6% mid
+    expect(derivePersonalSignal(112, 100, tight)).toBe("STRONG_SELL"); // 12% ≥ 10, rank 100 (no guard)
+    expect(derivePersonalSignal(94, 100, tight)).toBe("BUY");          // 6% better
+    expect(derivePersonalSignal(101, 100, tight)).toBe("NEUTRAL");     // delta 1 < minGap 2
   });
 
   it("exposes sane defaults", () => {
-    expect(DEFAULT_PERSONAL_SIGNAL_THRESHOLDS.neutralBand).toBeLessThan(
-      DEFAULT_PERSONAL_SIGNAL_THRESHOLDS.strongBand,
+    expect(DEFAULT_PERSONAL_SIGNAL_THRESHOLDS.sellPct).toBeLessThan(
+      DEFAULT_PERSONAL_SIGNAL_THRESHOLDS.strongPct,
     );
+    expect(DEFAULT_PERSONAL_SIGNAL_THRESHOLDS.minGap).toBeGreaterThan(0);
   });
 });
 
@@ -240,10 +259,12 @@ describe("buildPersonalSignals", () => {
 
   it("only STRONG_SELL drives the Finder's buy-block (the Stage 6 contract)", () => {
     // The block predicate reads signal === 'STRONG_SELL'. Confirm a mid SELL does NOT
-    // reach that tier: move A only past the neutral band but short of the strong band.
-    const midConsensus = Array.from({ length: 12 }, (_, i) => String.fromCharCode(65 + i)); // A..L
-    const midPersonal = ["B", "C", "D", "E", "F", "G", "H", "A", "I", "J", "K", "L"]; // A: #1 → #8 (delta +7)
+    // reach that tier. With the percentage model a top-of-board nudge is a huge %,
+    // so the SELL must come from a player deep enough that an 8-spot drop is ~16%.
+    const midConsensus = Array.from({ length: 100 }, (_, i) => `p${i + 1}`);
+    const midPersonal = midConsensus.filter((id) => id !== "p50");
+    midPersonal.splice(57, 0, "p50"); // p50 (market #50) → personal rank 58, gap 8/50 = 16%
     const map = buildPersonalSignals(midPersonal, midConsensus);
-    expect(map["A"]).toBe("SELL");
+    expect(map["p50"]).toBe("SELL");
   });
 });

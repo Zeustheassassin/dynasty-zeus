@@ -18,33 +18,58 @@ export type PersonalSignal =
   | "STRONG_BUY";
 
 export interface PersonalSignalThresholds {
-  /** |personalRank − consensusRank| ≤ this ⇒ NEUTRAL (also absorbs market drift). */
-  neutralBand: number;
-  /** |delta| > this ⇒ STRONG_* — the tier the Trade Finder treats as a hard block. */
-  strongBand: number;
+  /** gap% ≥ this ⇒ SELL/BUY. gap% = |personalRank − consensusRank| / consensusRank × 100. */
+  sellPct: number;
+  /** gap% ≥ this ⇒ STRONG (Super) SELL/BUY — the tier the Trade Finder hard-blocks. */
+  strongPct: number;
+  /** Absolute rank-gap floor: |delta| < this ⇒ always NEUTRAL, regardless of %. */
+  minGap: number;
+  /** Consensus ranks ≤ this get the small-delta STRONG guard below. */
+  topGuardRank: number;
+  /** Within `topGuardRank`, a |delta| < this caps at SELL/BUY (never STRONG). */
+  topGuardStrongGap: number;
 }
 
 /**
- * Default rank-gap bands. Deliberately a flat rank delta (matches the user's
- * mental model: "I have him at 19, the market has him at 33"). Tunable — a
- * value-aware or percentile band is a possible later refinement.
+ * Default percentage bands. The gap is measured RELATIVE to where the market
+ * ranks the player, matching the user's mental model: "market has him at 200, I
+ * have him at 230 → 15% off → Sell". A flat rank delta was the old model; a
+ * percentage keeps a 10-spot disagreement meaningful deep on the board without
+ * firing on every minor shuffle.
+ *
+ * The `minGap` floor (6) guards the top of the board: a percentage alone makes
+ * elite players hypersensitive (at rank 10, 20% is only 2 spots). Requiring at
+ * least a 6-spot disagreement before any signal protects roughly ranks 1–50,
+ * since at rank 50 the 12% threshold already equals 6 spots — above that the %
+ * dominates, below it the floor does.
+ *
+ * The top guard layers on top of that: inside the top 25, even a 6–8 spot move is
+ * a large % but only a modest real disagreement, so it caps at SELL/BUY — reaching
+ * Super (STRONG) up there needs a 9+ spot gap.
  */
 export const DEFAULT_PERSONAL_SIGNAL_THRESHOLDS: PersonalSignalThresholds = {
-  neutralBand: 5,
-  strongBand: 15,
+  sellPct: 12,
+  strongPct: 20,
+  minGap: 6,
+  topGuardRank: 25,
+  topGuardStrongGap: 9,
 };
 
 /**
  * Map a personal-vs-consensus rank gap to a buy/sell signal.
  *
- * delta = personalRank − consensusRank (both 1-based; lower rank = better player):
+ * delta = personalRank − consensusRank (both 1-based; lower rank = better player).
+ * gap% = |delta| / consensusRank × 100 — the disagreement as a fraction of the
+ * MARKET rank (so "market 200, me 230" is 15%, not a raw 30):
+ *   • |delta| below minGap ⇒ NEUTRAL (the top-of-board floor, applied first).
  *   • delta > 0 → you rank him WORSE than the market ⇒ SELL side (shop him, don't buy).
  *   • delta < 0 → you rank him BETTER than the market ⇒ BUY side (target him, don't sell).
- *   • |delta| within the neutral band ⇒ NEUTRAL.
+ *   • gap% below sellPct ⇒ NEUTRAL.
+ *   • inside the top `topGuardRank`, |delta| < `topGuardStrongGap` caps at SELL/BUY.
  *
- * The STRONG_* tier (|delta| beyond strongBand) is what the Trade Finder treats as
- * a hard block on the opposite action: never buy a STRONG_SELL, never sell a
- * STRONG_BUY. SELL/BUY are soft weightings.
+ * The STRONG_* tier (gap% ≥ strongPct) is what the Trade Finder treats as a hard
+ * block on the opposite action: never buy a STRONG_SELL, never sell a STRONG_BUY.
+ * SELL/BUY are soft weightings.
  */
 export function derivePersonalSignal(
   personalRank: number,
@@ -53,9 +78,19 @@ export function derivePersonalSignal(
 ): PersonalSignal {
   const delta = personalRank - consensusRank;
   const mag = Math.abs(delta);
-  if (mag <= thresholds.neutralBand) return "NEUTRAL";
-  if (delta > 0) return mag > thresholds.strongBand ? "STRONG_SELL" : "SELL";
-  return mag > thresholds.strongBand ? "STRONG_BUY" : "BUY";
+  // Absolute floor first — protects the top of the board from tiny-but-high-%
+  // disagreements (rank 10 ± 1 spot = 10%, but it's noise).
+  if (mag < thresholds.minGap) return "NEUTRAL";
+  // Then the percentage gap, relative to the market rank; guard consensusRank ≤ 0.
+  const gapPct = consensusRank > 0 ? (mag / consensusRank) * 100 : 0;
+  if (gapPct < thresholds.sellPct) return "NEUTRAL";
+  // Top-of-board guard: in the top N a 6–8 spot move is a big % but a small real
+  // disagreement, so it stays SELL/BUY — Super needs topGuardStrongGap+ spots.
+  const strongOk =
+    gapPct >= thresholds.strongPct &&
+    !(consensusRank <= thresholds.topGuardRank && mag < thresholds.topGuardStrongGap);
+  if (delta > 0) return strongOk ? "STRONG_SELL" : "SELL";
+  return strongOk ? "STRONG_BUY" : "BUY";
 }
 
 /**
