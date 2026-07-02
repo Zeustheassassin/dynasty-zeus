@@ -54,15 +54,23 @@ async function fetchPlaysByGame<T>(
   gameIds: string[],
 ): Promise<T[]> {
   if (gameIds.length === 0) return [];
+  // Chunk the game-id IN list so the request URL stays well under the
+  // gateway's URI-length limit. With hundreds of 36-char UUIDs a single
+  // .in() produces a >20k-char URL that PostgREST/Kong intermittently
+  // rejects (414), which is why QB/RB/TE analysis used to load blank.
+  const CHUNK = 80;
   const PAGE = 1000;
   const all: T[] = [];
-  let from = 0;
-  while (true) {
-    const { data, error } = await supabase.from(table).select("*").in("game_id", gameIds).range(from, from + PAGE - 1);
-    if (error) { log.error(`${table} load`, { msg: error.message }); break; }
-    all.push(...((data ?? []) as T[]));
-    if (!data || data.length < PAGE) break;
-    from += PAGE;
+  for (let i = 0; i < gameIds.length; i += CHUNK) {
+    const idsChunk = gameIds.slice(i, i + CHUNK);
+    let from = 0;
+    while (true) {
+      const { data, error } = await supabase.from(table).select("*").in("game_id", idsChunk).range(from, from + PAGE - 1);
+      if (error) { log.error(`${table} load`, { msg: error.message }); throw error; }
+      all.push(...((data ?? []) as T[]));
+      if (!data || data.length < PAGE) break;
+      from += PAGE;
+    }
   }
   return all;
 }
@@ -178,9 +186,12 @@ export default function ScoutingHub() {
     if (fetchedPlaysRef.current[pos] === gameIdsKey) return;
     fetchedPlaysRef.current[pos] = gameIdsKey;
     const ids = games.map((g) => g.id);
-    if (pos === "RB") fetchPlaysByGame<RBPlay>("rb_plays", ids).then((rows) => { setRbPlays(rows); });
-    else if (pos === "QB") fetchPlaysByGame<QBPlay>("qb_plays", ids).then((rows) => { setQbPlays(rows); });
-    else if (pos === "TE") fetchPlaysByGame<TEPlay>("te_plays", ids).then((rows) => { setTePlays(rows); });
+    // On failure, clear the cache marker so the next activation retries
+    // rather than sticking on a blank table until a full hub reload.
+    const onErr = () => { fetchedPlaysRef.current[pos] = null; };
+    if (pos === "RB") fetchPlaysByGame<RBPlay>("rb_plays", ids).then((rows) => { setRbPlays(rows); }).catch(onErr);
+    else if (pos === "QB") fetchPlaysByGame<QBPlay>("qb_plays", ids).then((rows) => { setQbPlays(rows); }).catch(onErr);
+    else if (pos === "TE") fetchPlaysByGame<TEPlay>("te_plays", ids).then((rows) => { setTePlays(rows); }).catch(onErr);
   }, [loading, games, gameIdsKey]);
 
   // Server-aggregated path: merge view rows + league baselines into ProspectWithStats.

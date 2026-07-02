@@ -3,7 +3,7 @@
 > **Audience:** a developer who has just been handed the keys and has never seen this project.
 > **Goal:** explain what the app is, how the code is structured, how data flows, and how every major subsystem actually works — in enough depth to debug and extend it on day one.
 >
-> *Last reviewed: 2026-06-30 (HEAD `963c5f3`, + uncommitted percentage-based personal-rankings signal). This document was rebuilt from a full read of the codebase; verify against source where a claim is load-bearing, and keep it updated as the architecture changes.*
+> *Last reviewed: 2026-07-02 (HEAD `62ae75d`, + uncommitted Scouting Analysis play-fetch chunking/retry fix). This document was rebuilt from a full read of the codebase; verify against source where a claim is load-bearing, and keep it updated as the architecture changes.*
 
 ---
 
@@ -877,7 +877,7 @@ The Scouting Hub is DynastyZeus's film-study workbench: you create college **pro
 - The three server-side aggregate views: `prospect_route_stats`, `league_route_baselines`, `prospect_game_snap_stats`
 - The per-position stat stubs: `prospect_rb_stats`, `prospect_qb_stats` (with `total_throws`), `prospect_te_stats` (with `total_routes`)
 
-It then calls [buildProspectsWithStats](lib/scouting/aggregateMerge.ts#L190) to merge `prospects` + view rows + league baselines into `ProspectWithStats` objects — the shared currency passed to every child tab. **Raw plays are not loaded here.** RB/QB/TE plays are fetched lazily and only on demand: a child (Big Board, Games Log, Analysis) calls `loadPositionPlays(pos)` ([ScoutingHub.tsx:176-184](components/ScoutingHub.tsx#L176)), which paginates the `*_plays` table 1000 rows at a time and caches the result keyed by the joined game-id string (`fetchedPlaysRef`) so a position is fetched at most once per parent reload. WR route data needs no raw-play fetch on these tabs because `prospect_route_stats` already projects everything.
+It then calls [buildProspectsWithStats](lib/scouting/aggregateMerge.ts#L190) to merge `prospects` + view rows + league baselines into `ProspectWithStats` objects — the shared currency passed to every child tab. **Raw plays are not loaded here.** RB/QB/TE plays are fetched lazily and only on demand: a child (Big Board, Games Log, Analysis) calls `loadPositionPlays(pos)` ([ScoutingHub.tsx:176-184](components/ScoutingHub.tsx#L176)), which fetches the `*_plays` table via [fetchPlaysByGame](components/ScoutingHub.tsx#L52) — the game-id IN list is chunked (80 ids/request) and each chunk paginated 1000 rows at a time — and caches the result keyed by the joined game-id string (`fetchedPlaysRef`) so a position is fetched at most once per parent reload. The chunking keeps the request URL under the gateway's URI-length cap; without it a class with hundreds of games produced a >20k-char URL that PostgREST intermittently 414-rejected, leaving QB/RB/TE Analysis blank. On fetch failure the `fetchedPlaysRef` marker is cleared so the next tab activation retries instead of sticking on a blank table until a full hub reload. WR route data needs no raw-play fetch on these tabs because `prospect_route_stats` already projects everything.
 
 The header shows a per-draft-class, per-position breakdown (prospect count, fully/partial-charted, games, snaps), recomputed in the `headerBreakdown` memo ([ScoutingHub.tsx:282-301](components/ScoutingHub.tsx#L282)).
 
