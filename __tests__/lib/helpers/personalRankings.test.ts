@@ -3,6 +3,7 @@ import {
   derivePersonalSignal,
   reconcilePersonalOrdering,
   moveInOrdering,
+  sortRangeByMarket,
   buildConsensusOrder,
   personalSignalToDisposition,
   buildPersonalDispositions,
@@ -152,6 +153,53 @@ describe("moveInOrdering", () => {
 
   it("is a no-op for an unknown id (returns the same array reference)", () => {
     expect(moveInOrdering(base, "ZZZ", 2)).toBe(base);
+  });
+});
+
+describe("sortRangeByMarket", () => {
+  // Personal order A..H; market (consensus) rank is reversed (H best, A worst).
+  const ordering = ["A", "B", "C", "D", "E", "F", "G", "H"];
+  const consensusRank = new Map([
+    ["A", 8], ["B", 7], ["C", 6], ["D", 5],
+    ["E", 4], ["F", 3], ["G", 2], ["H", 1],
+  ]);
+
+  it("re-sorts only the players inside the 1-based range, by market rank", () => {
+    // Range 3–6 (C,D,E,F) re-ordered best-market-first → F,E,D,C; ends untouched.
+    expect(sortRangeByMarket(ordering, consensusRank, 3, 6)).toEqual([
+      "A", "B", "F", "E", "D", "C", "G", "H",
+    ]);
+  });
+
+  it("accepts the bounds in either order", () => {
+    expect(sortRangeByMarket(ordering, consensusRank, 6, 3)).toEqual([
+      "A", "B", "F", "E", "D", "C", "G", "H",
+    ]);
+  });
+
+  it("is a no-op for a single-rank range", () => {
+    expect(sortRangeByMarket(ordering, consensusRank, 4, 4)).toEqual(ordering);
+  });
+
+  it("clamps an out-of-range end to the ordering length", () => {
+    expect(sortRangeByMarket(ordering, consensusRank, 6, 999)).toEqual([
+      "A", "B", "C", "D", "E", "H", "G", "F",
+    ]);
+  });
+
+  it("clamps a below-1 start up to 1", () => {
+    expect(sortRangeByMarket(ordering, consensusRank, -5, 2)).toEqual([
+      "B", "A", "C", "D", "E", "F", "G", "H",
+    ]);
+  });
+
+  it("is a no-op when the range is entirely outside the ordering", () => {
+    expect(sortRangeByMarket(ordering, consensusRank, 20, 30)).toBe(ordering);
+  });
+
+  it("pushes players missing from consensus (e.g. filtered out) to the back of their slice", () => {
+    const sparse = new Map([["A", 4], ["B", 1]]); // C has no consensus rank
+    expect(sortRangeByMarket(["A", "B", "C"], sparse, 1, 3)).toEqual(["B", "A", "C"]);
   });
 });
 

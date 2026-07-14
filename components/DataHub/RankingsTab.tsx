@@ -11,6 +11,7 @@ import {
   derivePersonalSignal,
   moveInOrdering,
   buildConsensusOrder,
+  sortRangeByMarket,
 } from "../../lib/helpers/personalRankings";
 
 type RankView = "DYNASTY" | "REDRAFT" | "COMPARE" | "PERSONAL";
@@ -107,6 +108,15 @@ function RankingsTab({
   const [draggingId, setDraggingId] = React.useState<string | null>(null);
   const [dragOverId, setDragOverId] = React.useState<string | null>(null);
   const [confirmReset, setConfirmReset] = React.useState(false);
+  const [rangeFrom, setRangeFrom] = React.useState("");
+  const [rangeTo, setRangeTo] = React.useState("");
+
+  const sortRangeToMarket = React.useCallback(() => {
+    const from = parseInt(rangeFrom, 10);
+    const to = parseInt(rangeTo, 10);
+    if (!rangeFrom || !rangeTo || isNaN(from) || isNaN(to) || from < 1 || to < 1) return;
+    savePersonalOrdering(sortRangeByMarket(personalOrder, consensusRankMap, from, to));
+  }, [rangeFrom, rangeTo, personalOrder, consensusRankMap, savePersonalOrdering]);
 
   const commitPersonalRank = React.useCallback(
     (id: string) => {
@@ -185,6 +195,34 @@ function RankingsTab({
           <p className="text-[11px] text-gray-500">
             Your board vs. the market. Drag a row or click its rank to set your own order — the gap drives the Trade Finder.
           </p>
+          <span className="flex items-center gap-1 text-[11px] shrink-0">
+            <span className="text-gray-500">Sort ranks</span>
+            <input
+              type="number"
+              min={1}
+              placeholder="280"
+              value={rangeFrom}
+              onChange={(e) => setRangeFrom(e.target.value)}
+              className="w-14 px-1 py-0.5 bg-gray-800 border border-gray-700 rounded text-gray-200 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+            <span className="text-gray-500">to</span>
+            <input
+              type="number"
+              min={1}
+              placeholder="350"
+              value={rangeTo}
+              onChange={(e) => setRangeTo(e.target.value)}
+              className="w-14 px-1 py-0.5 bg-gray-800 border border-gray-700 rounded text-gray-200 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+            <button
+              onClick={sortRangeToMarket}
+              disabled={!rangeFrom || !rangeTo}
+              title="Re-sort just this rank range into market-value order, in place"
+              className="px-2 py-0.5 rounded font-medium bg-gray-800 text-gray-400 hover:text-white transition disabled:opacity-40 disabled:hover:text-gray-400"
+            >
+              by market
+            </button>
+          </span>
           {confirmReset ? (
             <span className="flex items-center gap-2 text-[11px]">
               <span className="text-gray-400">Reset to market order?</span>

@@ -266,3 +266,38 @@ export function moveInOrdering(
   const insertIndex = Math.min(Math.max(Math.round(targetRank) - 1, 0), rest.length);
   return [...rest.slice(0, insertIndex), playerId, ...rest.slice(insertIndex)];
 }
+
+/**
+ * Re-sort a 1-based personal-rank RANGE (e.g. 280–350) into market-consensus
+ * order, leaving every rank outside the range untouched. This does not move
+ * players to their exact consensus rank number (that's `moveInOrdering` /
+ * per-row reset) — it just relatively re-orders the players already occupying
+ * that slice of the personal board so they read best-to-worst by market
+ * value, in the same slots.
+ *
+ * @param ordering       The current personal ordering (array of player_ids).
+ * @param consensusRank  player_id → 1-based market rank (lower = better).
+ * @param startRank      1-based inclusive start of the range (either bound order is fine).
+ * @param endRank        1-based inclusive end of the range.
+ */
+export function sortRangeByMarket(
+  ordering: string[],
+  consensusRank: Map<string, number>,
+  startRank: number,
+  endRank: number,
+): string[] {
+  const lo = Math.max(1, Math.min(startRank, endRank));
+  const hi = Math.min(ordering.length, Math.max(startRank, endRank));
+  if (lo > hi) return ordering;
+
+  const startIdx = lo - 1;
+  const endIdx = hi; // exclusive slice bound
+  const slice = ordering.slice(startIdx, endIdx);
+  const sorted = [...slice].sort((a, b) => {
+    const ra = consensusRank.get(a) ?? Number.MAX_SAFE_INTEGER;
+    const rb = consensusRank.get(b) ?? Number.MAX_SAFE_INTEGER;
+    return ra - rb;
+  });
+
+  return [...ordering.slice(0, startIdx), ...sorted, ...ordering.slice(endIdx)];
+}
