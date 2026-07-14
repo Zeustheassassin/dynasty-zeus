@@ -229,6 +229,7 @@ function RankingsTab({
             <span className="w-12 text-right text-[10px] text-gray-600 uppercase tracking-wider shrink-0">Mkt</span>
             <span className="w-12 text-right text-[10px] text-gray-600 uppercase tracking-wider shrink-0">vs Mkt</span>
             <span className="w-20 text-center text-[10px] text-gray-600 uppercase tracking-wider shrink-0">Signal</span>
+            <span className="w-4 shrink-0" />
           </>
         ) : rankView === "COMPARE" ? (
           <>
@@ -308,6 +309,14 @@ function RankingsTab({
                   <span className="w-20 text-center shrink-0">
                     <span className={`inline-block px-1.5 py-0.5 rounded text-[9px] ${meta.cls}`}>{meta.label}</span>
                   </span>
+                  <button
+                    onClick={() => savePersonalOrdering(moveInOrdering(personalOrder, id, consensusRank))}
+                    disabled={vsMkt === 0}
+                    className={`text-xs transition shrink-0 w-4 ${vsMkt === 0 ? "text-gray-800 cursor-default" : "text-gray-600 hover:text-yellow-400"}`}
+                    title={vsMkt === 0 ? "Already at market rank" : `Reset to market rank (${consensusRank})`}
+                  >
+                    ↺
+                  </button>
                   <button onClick={() => setPlayerProfileId(id)} className="text-gray-600 hover:text-blue-400 text-xs transition shrink-0 w-4" title="View profile">ⓘ</button>
                 </div>
               );
