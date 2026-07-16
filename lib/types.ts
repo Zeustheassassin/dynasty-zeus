@@ -439,6 +439,7 @@ export type LeagueHubTab =
   | "OPP_ROSTERS"
   | "STANDINGS"
   | "STARTERS"
+  | "ROSTER_TOOLS"
   | "NOTES"
   | "POWER_RANKINGS"
   | "ACTIVITY";

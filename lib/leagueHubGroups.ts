@@ -24,6 +24,7 @@ export const LEAGUE_HUB_GROUPS: Array<{
       { id: "ROSTER_OVERVIEW", label: "Roster Overview" },
       { id: "OPP_ROSTERS", label: "Opponent Rosters" },
       { id: "STARTERS", label: "Suggested Starters" },
+      { id: "ROSTER_TOOLS", label: "Team Tools" },
     ],
   },
   {

@@ -26,6 +26,7 @@ import RosterOverviewTab from "./LeagueHub/RosterOverviewTab";
 import LeagueMatesTab from "./LeagueHub/LeagueMatesTab";
 import OppRostersTab from "./LeagueHub/OppRostersTab";
 import StartersTab from "./LeagueHub/StartersTab";
+import RosterToolsTab from "./LeagueHub/RosterToolsTab";
 import NotesTab from "./LeagueHub/NotesTab";
 import PowerRankingsTab from "./LeagueHub/PowerRankingsTab";
 import ActivityTab from "./LeagueHub/ActivityTab";
@@ -127,7 +128,7 @@ function LeagueHub({
   } = useLeagueTabState();
 
   return (
-    <div className={`mx-auto px-4 py-6 ${leagueHubTab === "ROSTERS" || leagueHubTab === "OPP_ROSTERS" ? "max-w-7xl" : "max-w-5xl"}`}>
+    <div className={`mx-auto px-4 py-6 ${leagueHubTab === "ROSTERS" || leagueHubTab === "OPP_ROSTERS" || leagueHubTab === "ROSTER_TOOLS" ? "max-w-7xl" : "max-w-5xl"}`}>
       <>
         {leagueOverviewError && (
           <div className="mb-4">
@@ -260,6 +261,10 @@ function LeagueHub({
             projectionData={projectionData}
             nflState={nflState}
           />
+        )}
+
+        {leagueHubTab === "ROSTER_TOOLS" && (
+          <RosterToolsTab allPicks={allPicks} />
         )}
 
         {leagueHubTab === "NOTES" && (
