@@ -28,6 +28,7 @@ import OppRostersTab from "./LeagueHub/OppRostersTab";
 import StartersTab from "./LeagueHub/StartersTab";
 import RosterToolsTab from "./LeagueHub/RosterToolsTab";
 import NotesTab from "./LeagueHub/NotesTab";
+import RecapTab from "./LeagueHub/RecapTab";
 import PowerRankingsTab from "./LeagueHub/PowerRankingsTab";
 import ActivityTab from "./LeagueHub/ActivityTab";
 import ErrorBanner from "./ErrorBanner";
@@ -253,6 +254,13 @@ function LeagueHub({
           <StandingsTab
             standings={standings}
             selectedLeagueMateProfilesView={selectedLeagueMateProfilesView}
+          />
+        )}
+
+        {leagueHubTab === "RECAP" && (
+          <RecapTab
+            standings={standings}
+            activityTransactions={activityTransactions}
           />
         )}
 

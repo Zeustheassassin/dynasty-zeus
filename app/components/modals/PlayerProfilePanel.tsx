@@ -5,7 +5,7 @@ import type {
   SleeperPlayer, SleeperLeague, SleeperRoster, LeagueOverviewEntry, HistoricalSnapshot,
 } from "../../../lib/types";
 import { useModalBehavior } from "../../../lib/hooks/useModalBehavior";
-import { injuryBadge, ageColor } from "../../../components/DataHub/dataHubHelpers";
+import { injuryBadge, injuryRiskBadge, ageColor } from "../../../components/DataHub/dataHubHelpers";
 import { ChartCard, ChartTooltip, chartGridProps, chartAxisProps, chartTickStyle } from "../../../components/charts/ChartCard";
 import { CHART_CATEGORICAL } from "../../../lib/chartTheme";
 
@@ -163,6 +163,7 @@ export function PlayerProfilePanel({
             <span className={`inline-block text-xs font-semibold px-2 py-0.5 rounded-full border ${injuryColor}`}>
               {injuryStatus || "Active"}
             </span>
+            {injuryRiskBadge(p.age, p.position, p.injury_status)}
             {injuryNote && <p className="text-xs text-gray-400 mt-1.5">{injuryNote}</p>}
             {practiceDesc && <p className="text-xs text-gray-500 mt-1">{practiceDesc}</p>}
           </div>
@@ -192,6 +193,7 @@ export function PlayerProfilePanel({
                           {dp.full_name || `${dp.first_name} ${dp.last_name}`}
                         </span>
                         {injuryBadge(dp.injury_status)}
+                        {injuryRiskBadge(dp.age, dp.position, dp.injury_status)}
                         {idx === 0 && <span className="text-[9px] font-bold px-1 rounded bg-gray-700 text-gray-200 shrink-0">Starter</span>}
                         {isOwned && <span className="text-[9px] font-bold text-blue-400 shrink-0" title="On a roster you own">●</span>}
                       </div>

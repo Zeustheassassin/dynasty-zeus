@@ -23,7 +23,7 @@ const DEPTH_ZONES: QBDepthZone[] = [
 // pointed at in the Overview screenshots. Snap-position / coverage / raw-count
 // columns from the old build are gone — if you miss one, the Overview tab on
 // the QB charting board still has the full picture.
-const COLS: ColDef[] = [
+export const QB_STAT_COLS: ColDef[] = [
   // Identity
   { key: "name",   label: "Name",  group: "Identity", fmt: "name",  sticky: true, width: 160 },
   { key: "yr",     label: "Yr",    group: "Identity", fmt: "yr",    width: 46 },
@@ -131,12 +131,11 @@ function pct(n: number, d: number): number | null {
   return parseFloat(((n / d) * 100).toFixed(1));
 }
 
-export default function QBStatsTable({ prospects, games, qbPlays, loading, draftYearFilter, onSelectProspect }: Props) {
-  const prospectMap = useMemo(() => new Map(prospects.map((p) => [p.id, p])), [prospects]);
-  const aaeMap = useMemo(() => computeQBAboveExpected(prospects, games, qbPlays), [prospects, games, qbPlays]);
-  const breakdownMap = useMemo(() => computeQBAAEBreakdownMap(prospects, games, qbPlays), [prospects, games, qbPlays]);
-
-  const rows = useMemo((): StatRow[] => {
+// Extracted so the Phase I player-comparison tool can compute the same rows
+// for any two QB prospects without duplicating this logic.
+export function buildQBStatRows(prospects: Prospect[], games: ScoutingGame[], qbPlays: QBPlay[]): StatRow[] {
+    const aaeMap = computeQBAboveExpected(prospects, games, qbPlays);
+    const breakdownMap = computeQBAAEBreakdownMap(prospects, games, qbPlays);
     const gameToProspect = new Map<string, string>();
     for (const g of games) gameToProspect.set(g.id, g.prospect_id);
 
@@ -355,11 +354,15 @@ export default function QBStatsTable({ prospects, games, qbPlays, loading, draft
           t_away:     pct(passRpoPlays.filter((pl) => pl.timing === "throw_away").length,    timingTotal),
         } satisfies StatRow;
       });
-  }, [prospects, games, qbPlays, aaeMap, breakdownMap]);
+}
+
+export default function QBStatsTable({ prospects, games, qbPlays, loading, draftYearFilter, onSelectProspect }: Props) {
+  const prospectMap = useMemo(() => new Map(prospects.map((p) => [p.id, p])), [prospects]);
+  const rows = useMemo(() => buildQBStatRows(prospects, games, qbPlays), [prospects, games, qbPlays]);
 
   return (
     <StatsTableShell
-      cols={COLS}
+      cols={QB_STAT_COLS}
       rows={rows}
       defaultSortKey="aae"
       defaultSortDir="desc"

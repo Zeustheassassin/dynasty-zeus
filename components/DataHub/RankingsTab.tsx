@@ -4,7 +4,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { usePlayers } from "../../lib/PlayersContext";
 import { useValues } from "../../lib/ValuesContext";
 import type { HistoricalSnapshot } from "../../lib/types";
-import { injuryBadge, ageColor, POS_COLOR, PERSONAL_SIGNAL_META } from "./dataHubHelpers";
+import { injuryBadge, injuryRiskBadge, ageColor, POS_COLOR, PERSONAL_SIGNAL_META } from "./dataHubHelpers";
 import { MiniSparkline } from "../charts/MiniSparkline";
 import type { ShareEntry } from "./dataHubTypes";
 import {
@@ -339,6 +339,7 @@ function RankingsTab({
                     {isOwned && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" title="On your roster" />}
                     <span className={isOwned ? "text-blue-200" : "text-white"}>{p.full_name}</span>
                     {injuryBadge(p.injury_status)}
+                    {injuryRiskBadge(p.age, p.position, p.injury_status)}
                   </span>
                   <span className={`text-[10px] font-mono w-7 text-center shrink-0 ${ageColor(p.age ?? undefined, p.position)}`}>{p.age || "—"}</span>
                   <span className="text-[10px] text-gray-500 font-mono w-12 text-right shrink-0">{consensusRank}</span>
@@ -389,6 +390,7 @@ function RankingsTab({
                   {isOwned && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" title="On your roster" />}
                   <span className={isOwned ? "text-blue-200" : "text-white"}>{p.full_name}</span>
                   {injuryBadge(p.injury_status)}
+                  {injuryRiskBadge(p.age, p.position, p.injury_status)}
                 </span>
                 <span className={`text-[10px] font-mono w-7 text-center shrink-0 ${ageColor(p.age ?? undefined, p.position)}`}>{p.age || "—"}</span>
                 {rankView === "COMPARE" ? (

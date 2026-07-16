@@ -8,7 +8,7 @@ import { useModalBehavior } from "../lib/hooks/useModalBehavior";
 // Local copies of the sub-tab unions — every other hub/tab consumer (HubRouter,
 // DataHub, DraftHub, useHubRouting) keeps its own copy rather than a shared type.
 type TradeHubSection = "CALCULATOR" | "FINDER" | "TRADE_LOG" | "ATTEMPTS";
-type DataHubTab = "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "LEAGUEMATES" | "DEPTH_CHARTS" | "BUY_LOW" | "MY_SHARES";
+type DataHubTab = "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "LEAGUEMATES" | "DEPTH_CHARTS" | "BUY_LOW" | "MY_SHARES" | "COMPARE";
 type DraftHubSection = "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL";
 
 export interface CommandPaletteProps {
@@ -36,6 +36,7 @@ const DATA_HUB_LABELS: Record<DataHubTab, string> = {
   DEPTH_CHARTS: "Depth Charts",
   BUY_LOW: "Buy Low",
   MY_SHARES: "My Shares",
+  COMPARE: "Compare Players",
 };
 const DRAFT_HUB_LABELS: Record<DraftHubSection, string> = {
   BOARD: "Live Draft Board",

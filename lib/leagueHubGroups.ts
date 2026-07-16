@@ -14,6 +14,7 @@ export const LEAGUE_HUB_GROUPS: Array<{
       { id: "LEAGUE_MATES", label: "League Mates" },
       { id: "POWER_RANKINGS", label: "Power Rankings" },
       { id: "STANDINGS", label: "Standings" },
+      { id: "RECAP", label: "Season Recap" },
     ],
   },
   {

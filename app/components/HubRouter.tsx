@@ -50,7 +50,7 @@ const ScoutingHub = dynamic(() => import("../../components/ScoutingHub"), { ssr:
 const UserScoutHub = dynamic(() => import("../../components/UserScoutHub"), { ssr: false, loading: HubSkeleton });
 
 // ── Local types ──────────────────────────────────────────────────────────────
-type DataHubTabId = "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "LEAGUEMATES" | "DEPTH_CHARTS" | "BUY_LOW" | "MY_SHARES";
+type DataHubTabId = "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "LEAGUEMATES" | "DEPTH_CHARTS" | "BUY_LOW" | "MY_SHARES" | "COMPARE";
 
 // ── Props ────────────────────────────────────────────────────────────────────
 interface HubRouterProps {
@@ -231,8 +231,10 @@ interface HubRouterProps {
   refreshFcTrends: () => void;
 
   // Management Hub
-  mgmtHubTab: "LEAGUE_MGMT" | "COMMISSIONER_TOOLS";
-  setMgmtHubTab: (tab: "LEAGUE_MGMT" | "COMMISSIONER_TOOLS") => void;
+  mgmtHubTab: "LEAGUE_MGMT" | "COMMISSIONER_TOOLS" | "BYLAWS";
+  setMgmtHubTab: (tab: "LEAGUE_MGMT" | "COMMISSIONER_TOOLS" | "BYLAWS") => void;
+  leagueBylaws: Record<string, string>;
+  saveLeagueBylaws: (leagueId: string, text: string) => void;
   leagueMgmtData: LeagueMgmtData;
   setLeagueMgmtData: React.Dispatch<React.SetStateAction<LeagueMgmtData>>;
   commPaymentsData: CommPaymentsData;
@@ -311,6 +313,7 @@ export function HubRouter({
   commPaymentsData, setCommPaymentsData, commToolsLeagueId, setCommToolsLeagueId,
   commToolsRosters, setCommToolsRosters, commToolsUsers, setCommToolsUsers,
   loadingCommToolsRosters, setLoadingCommToolsRosters,
+  leagueBylaws, saveLeagueBylaws,
   draftScoutUserId, clearDraftScout, loadingDraftScout, draftScoutData, draftScoutPatterns,
   playerProfileId, calcFcValues, leagueAdjustedRedraftValues, playerNotes, savePlayerNote,
   myPlayerSet,
@@ -623,6 +626,8 @@ export function HubRouter({
   <ManagementHub
     mgmtHubTab={mgmtHubTab}
     setMgmtHubTab={setMgmtHubTab}
+    leagueBylaws={leagueBylaws}
+    saveLeagueBylaws={saveLeagueBylaws}
     leagues={leagues}
     leagueMgmtData={leagueMgmtData}
     setLeagueMgmtData={setLeagueMgmtData}

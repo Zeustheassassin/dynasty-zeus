@@ -442,7 +442,8 @@ export type LeagueHubTab =
   | "ROSTER_TOOLS"
   | "NOTES"
   | "POWER_RANKINGS"
-  | "ACTIVITY";
+  | "ACTIVITY"
+  | "RECAP";
 
 // ── Simulator shapes ─────────────────────────────────────────
 

@@ -296,6 +296,7 @@ const {
   commToolsRosters, setCommToolsRosters,
   commToolsUsers, setCommToolsUsers,
   loadingCommToolsRosters, setLoadingCommToolsRosters,
+  leagueBylaws, saveLeagueBylaws,
 } = useManagementState(supabaseUser);
 
 // â”€â”€ ROOKIE BOARD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -2981,6 +2982,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     commToolsRosters, setCommToolsRosters,
     commToolsUsers, setCommToolsUsers,
     loadingCommToolsRosters, setLoadingCommToolsRosters,
+    leagueBylaws, saveLeagueBylaws,
     draftScoutUserId,
     clearDraftScout,
     loadingDraftScout,

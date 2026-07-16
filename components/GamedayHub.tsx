@@ -2,6 +2,7 @@
 import React from "react";
 import type { SleeperLeague, SleeperPlayer, GamedayMatchup, GamedayTeamView, GamedayLineupRow } from "../lib/types";
 import { useLeague } from "../lib/LeagueContext";
+import { injuryRiskBadge } from "./DataHub/dataHubHelpers";
 
 // ── Helpers (module-level, same logic as page.tsx) ─────────────────────────
 const getKickoffStateClasses = (state: string) => {
@@ -119,6 +120,7 @@ function GamedayHub({
             {row.player.position} • {row.player.team || "-"}
           </span>
           {injuryBadge(row.player.injury_status)}
+          {injuryRiskBadge(row.player.age, row.player.position, row.player.injury_status)}
           <span className={`rounded-full border px-1.5 py-0.5 ${getKickoffStateClasses(row.gameState)}`}>
             {row.gameState}
           </span>
@@ -366,6 +368,7 @@ function GamedayHub({
                                     {row.player?.full_name}
                                   </button>
                                   {injuryBadge(row.player?.injury_status)}
+                                  {injuryRiskBadge(row.player?.age, row.player?.position ?? "", row.player?.injury_status)}
                                 </div>
                                 <div className="shrink-0 text-right text-[11px] text-gray-500">
                                   {row.actualPoints.toFixed(1)} now • {row.remainingProjection.toFixed(1)} left
@@ -394,6 +397,7 @@ function GamedayHub({
                                     {row.player?.full_name}
                                   </button>
                                   {injuryBadge(row.player?.injury_status)}
+                                  {injuryRiskBadge(row.player?.age, row.player?.position ?? "", row.player?.injury_status)}
                                 </div>
                                 <div className="shrink-0 text-right text-[11px] text-gray-500">
                                   {row.actualPoints.toFixed(1)} now • {row.remainingProjection.toFixed(1)} left
@@ -491,7 +495,7 @@ function GamedayHub({
                     <div className="flex items-center gap-2">
                       <span className={`text-[10px] font-bold shrink-0 ${POS_COLOR[p.position] ?? "text-gray-400"}`}>{p.position}</span>
                       <span className="text-sm font-medium text-white flex-1 truncate min-w-0 flex items-center gap-1">
-                        {p.full_name}{injuryBadge(p.injury_status)}
+                        {p.full_name}{injuryBadge(p.injury_status)}{injuryRiskBadge(p.age, p.position, p.injury_status)}
                       </span>
                       {p.team && <span className="text-[10px] text-gray-500 shrink-0">{p.team}</span>}
                       <span className={`text-[10px] font-semibold shrink-0 ${isStarting ? "text-green-400" : "text-gray-500"}`}>

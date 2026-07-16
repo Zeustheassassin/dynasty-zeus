@@ -6,7 +6,7 @@ import type { LeagueMgmtData, CommPaymentsData, SleeperRoster, SleeperUser } fro
 
 const log = logger("hooks/useManagementState");
 
-export type MgmtHubTab = "LEAGUE_MGMT" | "COMMISSIONER_TOOLS";
+export type MgmtHubTab = "LEAGUE_MGMT" | "COMMISSIONER_TOOLS" | "BYLAWS";
 
 export interface UseManagementStateReturn {
   mgmtHubTab: MgmtHubTab;
@@ -23,6 +23,8 @@ export interface UseManagementStateReturn {
   setCommToolsUsers: Dispatch<SetStateAction<Record<string, SleeperUser>>>;
   loadingCommToolsRosters: boolean;
   setLoadingCommToolsRosters: Dispatch<SetStateAction<boolean>>;
+  leagueBylaws: Record<string, string>;
+  saveLeagueBylaws: (leagueId: string, text: string) => void;
 }
 
 export function useManagementState(supabaseUser: { id: string } | null): UseManagementStateReturn {
@@ -33,6 +35,7 @@ export function useManagementState(supabaseUser: { id: string } | null): UseMana
   const [commToolsRosters, setCommToolsRosters] = useState<SleeperRoster[]>([]);
   const [commToolsUsers, setCommToolsUsers] = useState<Record<string, SleeperUser>>({});
   const [loadingCommToolsRosters, setLoadingCommToolsRosters] = useState(false);
+  const [leagueBylaws, setLeagueBylaws] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!supabaseUser) return;
@@ -102,8 +105,37 @@ export function useManagementState(supabaseUser: { id: string } | null): UseMana
         }
       });
 
+    // League bylaws/constitution text (Phase I, I3)
+    supabase
+      .from("league_bylaws")
+      .select("league_id, content")
+      .eq("user_id", supabaseUser.id)
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          log.error("league_bylaws load failed", { err: error.message });
+          return;
+        }
+        if (data && data.length > 0) {
+          const map: Record<string, string> = {};
+          data.forEach((row: { league_id: string; content: string }) => { map[row.league_id] = row.content; });
+          setLeagueBylaws(map);
+        }
+      });
+
     return () => { cancelled = true; };
   }, [supabaseUser]);
+
+  const saveLeagueBylaws = (leagueId: string, text: string) => {
+    setLeagueBylaws((prev) => ({ ...prev, [leagueId]: text }));
+    if (!supabaseUser) return;
+    supabase.from("league_bylaws").upsert(
+      { user_id: supabaseUser.id, league_id: leagueId, content: text, updated_at: new Date().toISOString() },
+      { onConflict: "user_id,league_id" }
+    ).then(({ error }) => {
+      if (error) log.error("league_bylaws upsert failed", { err: error.message });
+    });
+  };
 
   return {
     mgmtHubTab,
@@ -120,5 +152,7 @@ export function useManagementState(supabaseUser: { id: string } | null): UseMana
     setCommToolsUsers,
     loadingCommToolsRosters,
     setLoadingCommToolsRosters,
+    leagueBylaws,
+    saveLeagueBylaws,
   };
 }

@@ -35,7 +35,7 @@ interface Props {
   onNameClick?: (id: string) => void;
 }
 
-function fmtVal(val: number | string | null, f?: ColDef["fmt"]): string {
+export function fmtVal(val: number | string | null, f?: ColDef["fmt"]): string {
   if (val == null) return "—";
   if (typeof val === "string") return val;
   if (isNaN(val)) return "—";

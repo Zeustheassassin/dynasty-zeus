@@ -27,8 +27,11 @@ const MGMT_COLS: { key: string; label: string }[] = [
 
 // ── Props ──────────────────────────────────────────────────────────────────
 interface ManagementHubProps {
-  mgmtHubTab: "LEAGUE_MGMT" | "COMMISSIONER_TOOLS";
-  setMgmtHubTab: (tab: "LEAGUE_MGMT" | "COMMISSIONER_TOOLS") => void;
+  mgmtHubTab: "LEAGUE_MGMT" | "COMMISSIONER_TOOLS" | "BYLAWS";
+  setMgmtHubTab: (tab: "LEAGUE_MGMT" | "COMMISSIONER_TOOLS" | "BYLAWS") => void;
+
+  leagueBylaws: Record<string, string>;
+  saveLeagueBylaws: (leagueId: string, text: string) => void;
 
   leagues: SleeperLeague[];
   leagueMgmtData: LeagueMgmtData;
@@ -51,6 +54,8 @@ interface ManagementHubProps {
 function ManagementHub({
   mgmtHubTab,
   setMgmtHubTab,
+  leagueBylaws,
+  saveLeagueBylaws,
   leagues,
   leagueMgmtData,
   setLeagueMgmtData,
@@ -69,6 +74,9 @@ function ManagementHub({
 
   const [saveError, setSaveError] = useState<string | null>(null);
   const saveErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [bylawsLeagueId, setBylawsLeagueId] = useState<string>("");
+  const [lastBylawsSavedAt, setLastBylawsSavedAt] = useState<number | null>(null);
+  const bylawsLeague = leagues.find((l) => l.league_id === bylawsLeagueId) ?? leagues[0] ?? null;
 
   // Clear any pending error timer on unmount to prevent setState-after-unmount.
   useEffect(() => () => {
@@ -284,6 +292,16 @@ function ManagementHub({
         >
           Commissioner Tools
         </button>
+        <button
+          onClick={() => setMgmtHubTab("BYLAWS")}
+          className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition ${
+            mgmtHubTab === "BYLAWS"
+              ? "bg-gray-700 text-white"
+              : "text-gray-400 hover:text-white"
+          }`}
+        >
+          Bylaws
+        </button>
       </div>
 
       {/* ── LEAGUE MANAGEMENT ── */}
@@ -457,6 +475,39 @@ function ManagementHub({
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── BYLAWS ── */}
+      {mgmtHubTab === "BYLAWS" && (
+        <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4 space-y-3">
+          {leagues.length === 0 ? (
+            <p className="text-gray-400 text-sm">Connect your Sleeper account to see your leagues.</p>
+          ) : bylawsLeague ? (
+            <>
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-semibold text-gray-300">Bylaws for:</span>
+                <select
+                  className="bg-gray-800 border border-gray-700 text-sm text-white rounded-lg px-2 py-1 focus:outline-none focus:border-blue-500"
+                  value={bylawsLeague.league_id}
+                  onChange={(e) => setBylawsLeagueId(e.target.value)}
+                >
+                  {leagues.map((lg) => <option key={lg.league_id} value={lg.league_id}>{lg.name}</option>)}
+                </select>
+              </div>
+              <textarea
+                className="w-full h-80 bg-gray-900 border border-gray-700 rounded-xl p-4 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 resize-none"
+                placeholder={`Record ${bylawsLeague.name}'s constitution, dues, scoring rules, keeper/rookie draft rules, tiebreakers…`}
+                value={leagueBylaws[bylawsLeague.league_id] ?? ""}
+                onChange={(e) => { saveLeagueBylaws(bylawsLeague.league_id, e.target.value); setLastBylawsSavedAt(Date.now()); }}
+              />
+              <p className="text-[10px] text-gray-600">
+                {lastBylawsSavedAt
+                  ? <span className="text-green-600">✓ Saved just now{supabaseUser ? " · syncing across devices" : ""}</span>
+                  : supabaseUser ? "Bylaws sync across your devices." : "Log in with a DynastyZeus account to save your bylaws."}
+              </p>
+            </>
+          ) : null}
         </div>
       )}
 

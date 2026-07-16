@@ -15,7 +15,7 @@ interface Props {
 
 const RUN_TYPES: RBRunType[] = ["outside_zone", "inside_zone", "outside_man_gap", "inside_man_gap"];
 
-const COLS: ColDef[] = [
+export const RB_STAT_COLS: ColDef[] = [
   // Identity
   { key: "name",    label: "Name",   group: "Identity", fmt: "name",  sticky: true, width: 160 },
   { key: "yr",      label: "Yr",     group: "Identity", fmt: "yr",    width: 46 },
@@ -86,10 +86,10 @@ function pct(n: number, d: number): number | null {
   return parseFloat(((n / d) * 100).toFixed(1));
 }
 
-export default function RBStatsTable({ prospects, games, rbPlays, loading, draftYearFilter, onSelectProspect }: Props) {
-  const prospectMap = useMemo(() => new Map(prospects.map((p) => [p.id, p])), [prospects]);
-  const sraeMap = useMemo(() => computeRBAboveExpected(prospects, games, rbPlays), [prospects, games, rbPlays]);
-  const rows = useMemo((): StatRow[] => {
+// Extracted so the Phase I player-comparison tool can compute the same rows
+// for any two RB prospects without duplicating this logic.
+export function buildRBStatRows(prospects: Prospect[], games: ScoutingGame[], rbPlays: RBPlay[]): StatRow[] {
+    const sraeMap = computeRBAboveExpected(prospects, games, rbPlays);
     // Build game → prospect map
     const gameToProspect = new Map<string, string>();
     for (const g of games) gameToProspect.set(g.id, g.prospect_id);
@@ -189,11 +189,15 @@ export default function RBStatsTable({ prospects, games, rbPlays, loading, draft
           raw_catches:   recCatches,
         } satisfies StatRow;
       });
-  }, [prospects, games, rbPlays, sraeMap]);
+}
+
+export default function RBStatsTable({ prospects, games, rbPlays, loading, draftYearFilter, onSelectProspect }: Props) {
+  const prospectMap = useMemo(() => new Map(prospects.map((p) => [p.id, p])), [prospects]);
+  const rows = useMemo(() => buildRBStatRows(prospects, games, rbPlays), [prospects, games, rbPlays]);
 
   return (
     <StatsTableShell
-      cols={COLS}
+      cols={RB_STAT_COLS}
       rows={rows}
       defaultSortKey="srae"
       defaultSortDir="desc"

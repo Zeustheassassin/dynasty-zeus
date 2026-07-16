@@ -15,7 +15,7 @@ const ROUTE_LABELS: Record<string, string> = {
   screen: "Scr", flat: "Flat", comeback: "CB", out: "Out", corner: "Cor", other: "Oth",
 };
 
-const COLS: ColDef[] = [
+export const WR_STAT_COLS: ColDef[] = [
   // Identity
   { key: "name",   label: "Name",    group: "Identity", fmt: "name", sticky: true, width: 160 },
   { key: "yr",     label: "Yr",      group: "Identity", fmt: "yr",   width: 46 },
@@ -103,10 +103,10 @@ function cvgOpenPct(p: ProspectWithStats, cvg: "man" | "zone" | "double" | "pres
   return parseFloat(((s.open / s.count) * 100).toFixed(1));
 }
 
-export default function WRStatsTable({ prospectsWithStats, loading, draftYearFilter, onSelectProspect }: Props) {
-  const prospectMap = useMemo(() => new Map(prospectsWithStats.map((p) => [p.id, p])), [prospectsWithStats]);
-  const rows = useMemo((): StatRow[] =>
-    prospectsWithStats
+// Extracted so the Phase I player-comparison tool can compute the same rows
+// for any two WR prospects without duplicating this logic.
+export function buildWRStatRows(prospectsWithStats: ProspectWithStats[]): StatRow[] {
+  return prospectsWithStats
       .filter((p) => p.position === "WR")
       .map((p) => ({
         id: p.id,
@@ -191,12 +191,16 @@ export default function WRStatsTable({ prospectsWithStats, loading, draftYearFil
         ypc: p.avg_ypc,
         raw_snaps: p.total_snaps,
         raw_routes: p.total_routes,
-      })),
-    [prospectsWithStats]);
+      }));
+}
+
+export default function WRStatsTable({ prospectsWithStats, loading, draftYearFilter, onSelectProspect }: Props) {
+  const prospectMap = useMemo(() => new Map(prospectsWithStats.map((p) => [p.id, p])), [prospectsWithStats]);
+  const rows = useMemo(() => buildWRStatRows(prospectsWithStats), [prospectsWithStats]);
 
   return (
     <StatsTableShell
-      cols={COLS}
+      cols={WR_STAT_COLS}
       rows={rows}
       defaultSortKey="sae"
       defaultSortDir="desc"

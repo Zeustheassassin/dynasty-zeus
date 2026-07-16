@@ -4,7 +4,7 @@ import { usePlayers } from "../../lib/PlayersContext";
 import { useLeague } from "../../lib/LeagueContext";
 import { useValues } from "../../lib/ValuesContext";
 import type { SleeperUser, HistoricalSnapshot, PlayerValueSnapshotEntry, FcTrendEntry } from "../../lib/types";
-import { injuryBadge, ageColor } from "./dataHubHelpers";
+import { injuryBadge, injuryRiskBadge, ageColor } from "./dataHubHelpers";
 import type { ShareEntry } from "./dataHubTypes";
 import TradeMarket from "../tradeHub/TradeMarket";
 import { MiniSparkline } from "../charts/MiniSparkline";
@@ -283,7 +283,7 @@ function ValueTrendsTab({ historicalSnapshot, onSaveSnapshot, shares, user, fcTr
     <div className={`${TREND_GRID} text-xs py-0.5`}>
       <span className="text-[10px] uppercase text-gray-500">{row.position}</span>
       <span className="text-gray-200 min-w-0 truncate flex items-center gap-1">
-        {row.full_name}{injuryBadge(row.injury_status)}
+        {row.full_name}{injuryBadge(row.injury_status)}{injuryRiskBadge(row.age, row.position, row.injury_status)}
       </span>
       <span className={`text-[10px] font-mono text-center ${ageColor(row.age ?? undefined, row.position)}`}>{row.age || "—"}</span>
       <span className="text-[10px] text-gray-500 text-center truncate">{row.team || ""}</span>

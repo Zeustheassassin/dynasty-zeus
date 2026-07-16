@@ -4,7 +4,7 @@ import { usePlayers } from "../../lib/PlayersContext";
 import { useLeague } from "../../lib/LeagueContext";
 import { useValues } from "../../lib/ValuesContext";
 import type { SleeperPlayer } from "../../lib/types";
-import { injuryBadge, ageColor } from "./dataHubHelpers";
+import { injuryBadge, injuryRiskBadge, ageColor } from "./dataHubHelpers";
 
 function DepthChartsTab() {
   const players = usePlayers();
@@ -173,6 +173,7 @@ function DepthChartsTab() {
                           {p.full_name || `${p.first_name} ${p.last_name}`}
                         </span>
                         {injuryBadge(p.injury_status)}
+                        {injuryRiskBadge(p.age, p.position, p.injury_status)}
                         {role === "STARTER"  && <span className="text-[9px] font-bold px-1 rounded bg-gray-700 text-gray-200 shrink-0">Starter</span>}
                         {role === "HANDCUFF" && <span className="text-[9px] font-bold px-1 rounded bg-amber-900/60 text-amber-300 shrink-0">HC</span>}
                       </div>
