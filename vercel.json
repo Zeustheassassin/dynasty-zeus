@@ -8,6 +8,10 @@
     {
       "path": "/api/cron/simulation-history",
       "schedule": "0 9 * * 2"
+    },
+    {
+      "path": "/api/cron/player-value-history",
+      "schedule": "0 8 * * *"
     }
   ]
 }

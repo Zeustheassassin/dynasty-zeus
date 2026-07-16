@@ -1,12 +1,14 @@
 "use client";
-import React from "react";
+import React, { useMemo } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip } from "recharts";
 import { getStoredPickValue, ordinal } from "../../lib/helpers";
 import { usePlayers } from "../../lib/PlayersContext";
 import { useLeague } from "../../lib/LeagueContext";
 import { useValues } from "../../lib/ValuesContext";
+import { usePlayerValueHistory, type PlayerValuePoint } from "../../hooks/usePlayerValueHistory";
 import type { SleeperUser, SleeperTradedPick, SleeperPlayer, HistoricalSnapshot } from "../../lib/types";
 import { ChartCard, ChartTooltip, ChartLegend, chartGridProps, chartAxisProps, chartTickStyle } from "../charts/ChartCard";
+import { MultiPointSparkline } from "../charts/MultiPointSparkline";
 import { CHART_CATEGORICAL } from "../../lib/chartTheme";
 import { CartesianGrid } from "recharts";
 
@@ -48,6 +50,69 @@ function TeamValueTrendChart({
         <Bar dataKey="now" name="Now" fill={CHART_CATEGORICAL[0]} radius={2} barSize={8} />
       </BarChart>
     </ChartCard>
+  );
+}
+
+/** Real multi-point per-team dynasty value trend (migration 047 /
+ *  player-value-history cron), replacing the then/now bar chart once at
+ *  least 2 days of shared history exist — a grouped bar chart only reads
+ *  well for exactly 2 points, but a real time series needs to scale to
+ *  however many teams a league has (up to ~14), so this is a compact
+ *  sparkline-per-row list (same hand-rolled MultiPointSparkline the
+ *  Draft Hub Consensus board and Dashboard odds trend already use)
+ *  rather than one overlaid multi-line chart. */
+function TeamValueSparklineTable({
+  rows, historyByPlayer,
+}: {
+  rows: { roster_id: number; ownerName: string; playerList: (SleeperPlayer & { dynVal: number })[] }[];
+  historyByPlayer: Record<string, PlayerValuePoint[]>;
+}) {
+  const dates = Array.from(
+    new Set(
+      rows.flatMap((r) => r.playerList.flatMap((p) => (historyByPlayer[p.player_id] ?? []).map((h) => h.date)))
+    )
+  ).sort();
+
+  const teamSeries = rows
+    .map((r) => {
+      const valueByPlayer = new Map(
+        r.playerList.map((p) => [
+          p.player_id,
+          new Map((historyByPlayer[p.player_id] ?? []).map((h) => [h.date, h.value])),
+        ])
+      );
+      const series = dates.map((d) =>
+        r.playerList.reduce((s, p) => s + (valueByPlayer.get(p.player_id)?.get(d) ?? 0), 0)
+      );
+      const now = r.playerList.reduce((s, p) => s + p.dynVal, 0);
+      const first = series[0] ?? 0;
+      const delta = now - first;
+      const pct = first > 0 ? (delta / first) * 100 : 0;
+      return { rosterId: r.roster_id, name: r.ownerName, series, now, delta, pct };
+    })
+    .sort((a, b) => b.now - a.now);
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-3">
+      <div className="mb-2">
+        <div className="text-sm font-semibold text-white">Team Value Trend</div>
+        <div className="text-xs text-gray-500">Dynasty roster value over the last {dates.length} tracked days</div>
+      </div>
+      <div className="space-y-1">
+        {teamSeries.map((t) => (
+          <div key={t.rosterId} className="flex items-center gap-3 text-xs py-1">
+            <span className="text-gray-200 w-28 truncate shrink-0">{t.name}</span>
+            <MultiPointSparkline values={t.series} width={64} higherIsBetter />
+            <span className="text-gray-200 font-mono ml-auto tabular-nums">{t.now.toLocaleString()}</span>
+            <span
+              className={`font-mono w-16 text-right tabular-nums ${t.delta >= 0 ? "text-emerald-400" : "text-red-400"}`}
+            >
+              {t.delta >= 0 ? "+" : ""}{t.pct.toFixed(1)}%
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -139,6 +204,12 @@ function PowerRankingsTab({
     leagueAdjustedRedraftValues: redraftValues,
     pickFcValues,
   } = useValues();
+
+  const allRosterPlayerIds = useMemo(
+    () => Array.from(new Set(rosters.flatMap((r) => r.players || []))),
+    [rosters]
+  );
+  const { historyByPlayer } = usePlayerValueHistory(allRosterPlayerIds);
 
   if (!selectedLeague || !rosters.length) return (
     <p className="text-sm text-gray-500">Select a league from Rosters &amp; Rules first to view Power Rankings.</p>
@@ -302,7 +373,11 @@ function PowerRankingsTab({
           {prMode === "bench" && "Showing projected bench (players outside the optimal starting lineup)."}
           {" "}Click any pill to see that team&apos;s roster. Click column headers to sort.
         </p>
-        {historicalSnapshot && <TeamValueTrendChart rows={prRows} historicalSnapshot={historicalSnapshot} />}
+        {Object.values(historyByPlayer).some((h) => h.length >= 2) ? (
+          <TeamValueSparklineTable rows={prRows} historyByPlayer={historyByPlayer} />
+        ) : (
+          historicalSnapshot && <TeamValueTrendChart rows={prRows} historicalSnapshot={historicalSnapshot} />
+        )}
         <div className="overflow-x-auto pb-1">
           <table className="min-w-full text-sm border-separate border-spacing-y-1">
             <thead>

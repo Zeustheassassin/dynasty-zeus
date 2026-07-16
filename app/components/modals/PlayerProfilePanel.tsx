@@ -5,9 +5,12 @@ import type {
   SleeperPlayer, SleeperLeague, SleeperRoster, LeagueOverviewEntry, HistoricalSnapshot,
 } from "../../../lib/types";
 import { useModalBehavior } from "../../../lib/hooks/useModalBehavior";
+import { usePlayerValueHistory } from "../../../hooks/usePlayerValueHistory";
 import { injuryBadge, injuryRiskBadge, ageColor } from "../../../components/DataHub/dataHubHelpers";
 import { ChartCard, ChartTooltip, chartGridProps, chartAxisProps, chartTickStyle } from "../../../components/charts/ChartCard";
 import { CHART_CATEGORICAL } from "../../../lib/chartTheme";
+
+const shortDate = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 
 const DEPTH_POSITIONS = ["QB", "RB", "WR", "TE"];
 
@@ -58,6 +61,9 @@ export function PlayerProfilePanel({
       });
   }, [players, calcFcValues, p]);
 
+  const historyIds = useMemo(() => [playerProfileId], [playerProfileId]);
+  const { historyByPlayer } = usePlayerValueHistory(historyIds);
+
   if (!p) return null;
 
   const dynVal = calcFcValues[playerProfileId] ?? p.value ?? 0;
@@ -66,8 +72,27 @@ export function PlayerProfilePanel({
   const snapDate = historicalSnapshot?.recorded_at
     ? new Date(historicalSnapshot.recorded_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })
     : "Snapshot";
+
+  // Real multi-point history (migration 047 / player-value-history cron) once
+  // at least 2 days have accumulated; otherwise fall back to the single stored
+  // snapshot vs. current value (the 2-point comparison Phase D shipped with).
+  const realHistory = historyByPlayer[playerProfileId] ?? [];
+  const genericNow = p.value ?? 0;
+  const lastHistoryDate = realHistory[realHistory.length - 1]?.date;
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const historyPoints = realHistory.map((h) => ({ label: shortDate(h.date), value: h.value }));
+  if (genericNow > 0 && lastHistoryDate !== todayIso) {
+    historyPoints.push({ label: "Now", value: genericNow });
+  }
+
   const trendData =
-    snapVal > 0 && dynVal > 0 ? [{ label: snapDate, value: snapVal }, { label: "Now", value: dynVal }] : null;
+    historyPoints.length >= 2
+      ? historyPoints
+      : snapVal > 0 && dynVal > 0
+      ? [{ label: snapDate, value: snapVal }, { label: "Now", value: dynVal }]
+      : null;
+  const trendSubtitle =
+    historyPoints.length >= 2 ? `${historyPoints[0].label} → now` : `${snapDate} → now`;
   const injuryStatus = p.injury_status || p.status;
   const injuryNote = [p.injury_body_part, p.injury_notes].filter(Boolean).join(" — ");
   const practiceDesc = p.practice_description || p.practice_participation || "";
@@ -140,7 +165,7 @@ export function PlayerProfilePanel({
           </div>
 
           {trendData && (
-            <ChartCard title="Dynasty Value Trend" subtitle={`${snapDate} → now`} height={140}>
+            <ChartCard title="Dynasty Value Trend" subtitle={trendSubtitle} height={140}>
               <LineChart data={trendData} margin={{ top: 4, right: 12, left: -20, bottom: 0 }}>
                 <CartesianGrid {...chartGridProps} />
                 <XAxis dataKey="label" {...chartAxisProps} tick={chartTickStyle} />
