@@ -3,7 +3,7 @@
 > **Audience:** a developer who has just been handed the keys and has never seen this project.
 > **Goal:** explain what the app is, how the code is structured, how data flows, and how every major subsystem actually works — in enough depth to debug and extend it on day one.
 >
-> *Last reviewed: 2026-07-02 (HEAD `62ae75d`, + uncommitted Scouting Analysis play-fetch chunking/retry fix). This document was rebuilt from a full read of the codebase; verify against source where a claim is load-bearing, and keep it updated as the architecture changes.*
+> *Last reviewed: 2026-07-16 (HEAD `7102bf0`, + uncommitted Phase A stages A1-A5 and Phase B stages B1-B4: Phase A = dead RECOMMENDATIONS tab removed, gm_briefings drop migration written, FantasyCalc fetches consolidated onto the /api/fc-values proxy, dark-only CSS cleanup, recharts + shared chart-theme wrapper added. Phase B = deep-linkable `?hub=&tab=` URL sync with real back/forward ([app/hooks/useHubRouting.ts](app/hooks/useHubRouting.ts)), a Cmd+K command palette ([components/CommandPalette.tsx](components/CommandPalette.tsx)), a seasonal mobile bottom nav ([app/components/MainLayout.tsx](app/components/MainLayout.tsx)), Trade Hub's Market Trends tab merged into Data Hub's Value Trends tab as a "Market Pulse" view, and Draft Hub's two historical tabs merged into one with a type toggle). This document was rebuilt from a full read of the codebase; verify against source where a claim is load-bearing, and keep it updated as the architecture changes.*
 
 ---
 
@@ -27,7 +27,7 @@
 17. [Dev workflow: build, lint, test](#17-dev-workflow-build-lint-test)
 18. [CI pipeline (GitHub Actions)](#18-ci-pipeline-github-actions)
 19. [ESLint & TypeScript rules that bite](#19-eslint--typescript-rules-that-bite)
-20. [Test suite scope (506 tests, 21 files)](#20-test-suite-scope-506-tests-21-files)
+20. [Test suite scope (526 tests, 22 files)](#20-test-suite-scope-526-tests-22-files)
 21. [Common failure modes & where to look](#21-common-failure-modes--where-to-look)
 22. [Things intentionally NOT done (and why)](#22-things-intentionally-not-done-and-why)
 23. [Known open items & time bombs for the next owner](#23-known-open-items--time-bombs-for-the-next-owner)
@@ -45,7 +45,7 @@ It is deliberately **not** a multi-tenant SaaS. There are roughly **five** activ
 - **One Vercel cron** rather than a job queue.
 - **localStorage as the primary client cache** with hand-rolled TTLs ([lib/hooks/useLocalStorage.ts](lib/hooks/useLocalStorage.ts)), instead of a server-side cache layer.
 - **In-memory rate-limit fallback** when Upstash isn't configured ([lib/rateLimit.ts](lib/rateLimit.ts)).
-- **No URL routing, no search index, no e2e tests, no i18n.** The entire user-facing UI lives at a single URL (`/`).
+- **No file-based routing, no search index, no e2e tests, no i18n.** The entire user-facing UI lives at a single route (`/`); as of Phase B, hub/tab state is reflected into that URL's query string (`?hub=&tab=`) for deep-linking and browser back/forward, but this is a hand-rolled History API sync, not a router rebuild — see §4's "single-URL SPA model" callout.
 
 When something looks under-engineered, assume it was a conscious trade-off for a five-user audience — not an oversight.
 
@@ -62,6 +62,7 @@ All versions below are taken verbatim from [package.json](package.json) (do not 
 | Database / Auth | **`@supabase/supabase-js ^2.101.1`** (Postgres + Auth + RLS) | All user data. Browser uses the anon key; RLS does access control. |
 | Rate limiting | **`@upstash/ratelimit ^2.0.8`** + **`@upstash/redis ^1.37.0`** | Optional; falls back to in-memory if env vars absent. |
 | List virtualization | **`@tanstack/react-virtual ^3.13.23`** | Large tables (big boards, rankings). |
+| Charts | **`recharts ^3.9.2`** | Added Phase A stage A5. [lib/chartTheme.ts](lib/chartTheme.ts) (colors, dark-only, validated categorical palette) + [components/charts/ChartCard.tsx](components/charts/ChartCard.tsx) (`ChartCard`, `ChartTooltip`, `ChartLegend`, shared axis/grid presets) are the shared wrapper every Phase D+ chart builds on — no chart-specific components exist yet. |
 | Hosting / cron | **Vercel** (Pro plan) | `main` auto-deploys to prod; cron declared in [vercel.json](vercel.json) (Pro required). |
 | Testing | **Vitest `^4.1.4`** + **`@testing-library/react ^16.3.2`** + **jsdom ^29** + **`@vitejs/plugin-react ^6.0.1`** | Tests in [__tests__/](__tests__/). On this Windows machine, run via **PowerShell** (`npm run test`) — Vitest 4 silently collects 0 tests under Git Bash. |
 | Linting | **ESLint `^9`** + **`eslint-config-next 16.2.1`** | Flat config in [eslint.config.mjs](eslint.config.mjs). `exhaustive-deps`, `no-explicit-any`, `react-set-state-in-effect`, `no-unescaped-entities`, `prefer-const` are all **errors**, not warnings. |
@@ -150,13 +151,13 @@ There is exactly one user-facing route. Hitting `/` walks this chain:
 
 5. **[app/components/AuthSection.tsx](app/components/AuthSection.tsx)** is the auth gate. It renders a fixed full-screen sign-in modal (email/password, reset, create-account) and returns `null` once `supabaseUser` is set. It sits as a sibling of `MainLayout`, so the layout below it is always present but rendered non-interactive (`pointer-events-none opacity-40`) until you're signed in (see [MainLayout.tsx:37](app/components/MainLayout.tsx#L37)).
 
-6. **[app/components/MainLayout.tsx](app/components/MainLayout.tsx)** renders the persistent chrome: the sticky top bar (app title, dual auth-status dots for *Supabase account* vs *Sleeper connection*, league `<select>`, Disconnect/Log Out) and the horizontal hub nav. The nav buttons are generated by mapping over the `HUBS` registry, and every tab except `DASHBOARD` is disabled until a Sleeper user is connected.
+6. **[app/components/MainLayout.tsx](app/components/MainLayout.tsx)** renders the persistent chrome: the sticky top bar (app title, a Cmd+K search button, dual auth-status dots for *Supabase account* vs *Sleeper connection*, league `<select>`, Disconnect/Log Out) and the horizontal hub nav — desktop only as of Phase B (`hidden sm:block`). The nav buttons are generated by mapping over the `HUBS` registry, and every tab except `DASHBOARD` is disabled until a Sleeper user is connected. On small screens the top nav is replaced by a **fixed mobile bottom nav** with a seasonal primary hub set (Trade/League/Gameday/Alert in-season, Trade/League/Data/Alert offseason — the in-season check mirrors the `isRegularSeason` pattern used throughout `useAppState.ts`) plus a "More" button opening a sheet with the remaining hubs; both nav bars live inside the same sign-in-gated dimmed wrapper. **Cmd+K / Ctrl+K** (also the search button) opens [components/CommandPalette.tsx](components/CommandPalette.tsx), a fuzzy-filtered list combining every hub/sub-tab as a jump target with a live player-name search (substring match on `full_name`, capped results) that opens the Player Profile Panel directly.
 
 7. **[app/components/HubRouter.tsx](app/components/HubRouter.tsx)** is the in-app "router." It reads `mainTab` (and the relevant sub-tab) from props and conditionally renders **one** hub via a chain of `{mainTab === "…" && <Hub … />}` blocks, each wrapped in its own `<ErrorBoundary>`. Crucially:
    - **Non-active hubs are never mounted** — the conditional simply doesn't render them, so their effects and data fetches don't run.
    - **Most hubs are code-split** via `next/dynamic` with `{ ssr: false, loading: HubSkeleton }`: `DraftHub`, `DataHub`, `LeagueHub`, `TradeHub`, `ScoutingHub`, `UserScoutHub` ([HubRouter.tsx:44-49](app/components/HubRouter.tsx#L44)). The lighter hubs — `Dashboard`, `AlertsPage`, `ManagementHub`, `GamedayHub` — are imported statically. So switching to, say, the Trade Hub lazily downloads its bundle on first visit (showing a skeleton), then keeps it.
 
-> **The single-URL SPA model:** the browser URL stays `/` no matter which hub or sub-tab you're on. Navigation is pure React state (`mainTab`), persisted to localStorage (next section), not the address bar. Browser back/forward will **not** move between hubs. Everything under `/api/*` is the only other thing the server routes — and that's all server-side data plumbing, never user-facing pages.
+> **The single-URL SPA model:** there is still exactly one file-based route (`/`) — no `next/navigation` router rebuild, no per-hub pages. But as of Phase B, [app/hooks/useHubRouting.ts](app/hooks/useHubRouting.ts) mirrors `mainTab` (and the active hub's sub-tab) into that route's query string via the raw History API (`?hub=TRADE_HUB&tab=FINDER`), not `next/navigation`'s `useSearchParams`/`useRouter` — those hooks force a `Suspense` boundary for anything reading them, which this all-`"use client"` `page.tsx` doesn't have and doesn't need for a same-render URL cosmetic. A hub switch (`setMainTab`) calls `history.pushState`; a sub-tab change within the same hub calls `history.replaceState` (too fine-grained to spam the back stack with); a `popstate` listener restores state on browser back/forward without re-writing history. State is *also* still persisted to `localStorage` as a fallback for a plain `/` load with no query string. Everything under `/api/*` is the only other thing the server routes — and that's all server-side data plumbing, never user-facing pages.
 
 ## 5. The HUB registry (lib/hubs.ts)
 
@@ -165,7 +166,7 @@ There is exactly one user-facing route. Hitting `/` walks this chain:
 How it drives the app:
 - **Nav order + labels:** [MainLayout.tsx:108](app/components/MainLayout.tsx#L108) maps over `HUBS` to render the nav buttons.
 - **Content width:** the `wide` flag feeds `isWideHub(id)` ([lib/hubs.ts:42](lib/hubs.ts#L42)), which `HubRouter` uses to choose a full-bleed vs centered (`max-w-3xl`) container.
-- **Persistence validation:** [app/hooks/useHubRouting.ts](app/hooks/useHubRouting.ts) restores the last `mainTab` (and each hub's sub-tab) from localStorage but validates it against `HUBS` first, so a renamed/removed hub falls back to its default instead of selecting a dead tab.
+- **Persistence + deep-link validation:** [app/hooks/useHubRouting.ts](app/hooks/useHubRouting.ts) restores `mainTab` (and each hub's sub-tab) from the URL query string first, then localStorage, then a hardcoded default — validating every candidate against `HUBS`/the relevant sub-tab union first, so a renamed/removed tab (or a stale `?tab=` from an old bookmark) falls back instead of selecting a dead one. See §4's "single-URL SPA model" callout for the URL-sync mechanics.
 
 > **Caveat for maintainers:** `HUBS` drives the nav order, labels, and layout width — but **not** the render blocks. `HubRouter` still renders each hub with its own bespoke props in hand-written `{mainTab === "…" && …}` blocks (the file's own header comment says as much). Adding a hub therefore means: (1) add the registry entry here, **and** (2) add a render block (plus props) in `HubRouter`.
 
@@ -175,9 +176,9 @@ The ten hubs, in registry order, with their one-line purpose and width:
 |---|---|:---:|---|
 | `DASHBOARD` | Dashboard | no | Landing screen + Sleeper username connect + navigation tiles ([components/Dashboard.tsx](components/Dashboard.tsx)). The only hub usable before connecting Sleeper. |
 | `LEAGUES` | League Hub | yes | Per-league standings, rosters, season simulator, league-mate intel, notes, activity, power rankings ([components/LeagueHub/](components/LeagueHub/)). |
-| `DATA_HUB` | Data Hub | no | Cross-league rankings, value trends, projections, league-mate exposure, depth charts, buy-low, my shares ([components/DataHub/](components/DataHub/)). |
-| `DRAFT` | Draft Hub | yes | Live draft board, rookie big board, draft history, pick values, historical/network-consensus drafts ([components/DraftHub.tsx](components/DraftHub.tsx)). |
-| `TRADE_HUB` | Trade Hub | yes | Trade calculator, trade finder, market trends, and attempted/completed trade logs ([components/TradeHub.tsx](components/TradeHub.tsx)). |
+| `DATA_HUB` | Data Hub | no | Cross-league rankings, value trends (incl. the "Market Pulse" FantasyCalc trend view merged in from Trade Hub, Phase B4), projections, league-mate exposure, depth charts, buy-low, my shares ([components/DataHub/](components/DataHub/)). |
+| `DRAFT` | Draft Hub | yes | Live draft board, rookie big board, draft history, pick values, historical big boards/league drafts (one merged tab with a type toggle, Phase B4) ([components/DraftHub.tsx](components/DraftHub.tsx)). |
+| `TRADE_HUB` | Trade Hub | yes | Trade calculator, trade finder, and attempted/completed trade logs ([components/TradeHub.tsx](components/TradeHub.tsx)). Its old Market Trends tab was removed in Phase B4 — a small cross-link button now jumps to Data Hub's Value Trends tab instead. |
 | `GAMEDAY_HUB` | Gameday Hub | yes | Live weekly matchup view with remaining-projection math ([components/GamedayHub.tsx](components/GamedayHub.tsx)). |
 | `ALERTS` | Alert Hub | yes | Watchlist value/status alerts, league transactions (Trades/Waivers), injury reports ([components/AlertsPage/](components/AlertsPage/)). |
 | `MANAGEMENT_HUB` | Management Hub | yes | League management + commissioner tools / payment tracking ([components/ManagementHub.tsx](components/ManagementHub.tsx)). |
@@ -529,7 +530,7 @@ A few patterns repeat throughout `useAppState` and are worth recognizing on sigh
 | [`useGamedayState`](app/hooks/useGamedayState.ts) | Live matchups + selected matchup | Thin — just `loadGamedayMatchups` calling `sleeperApi.getLeagueMatchups`. |
 | [`useActivityState`](app/hooks/useActivityState.ts) | League activity feed, weekly matchup history | `ownerDraftTendencies` is a frozen empty map kept only for back-compat (the client-side compiler was removed). |
 | [`useSimulatorState`](app/hooks/useSimulatorState.ts) | Season simulation, committed sim snapshots, draft-slot picks | The most stateful feature hook — see [its own section](#the-simulator-the-trickiest-feature-hook). |
-| [`useCalcValues`](hooks/useCalcValues.ts) | League-adjusted FC dynasty + redraft values | `loadCalcValues(leagueId)` short-circuits if already loaded for that league; `calcSeq` ref discards stale responses. `loadRedraftValues(numQbs)` refetches when the SF/1-QB format changes. |
+| [`useCalcValues`](hooks/useCalcValues.ts) | Generic (numQbs-keyed) FC dynasty + redraft values, via the `/api/fc-values` proxy | `loadCalcValues(numQbs)` short-circuits if already loaded for that format; `calcSeq` ref discards stale responses. `loadRedraftValues(numQbs)` refetches when the SF/1-QB format changes. Both go through the cached proxy, not FantasyCalc directly (as of Phase A stage A3). |
 | [`useProjections`](hooks/useProjections.ts) | Weekly/season projection rows | Multi-source weighted consensus (FantasyPros 0.45 / numberFire 0.35 / Sleeper 0.20). Extra sources are opt-in and persisted via `useLocalStorage`. `requestIdRef` discards superseded loads. |
 | [`useLeagueOverview`](hooks/useLeagueOverview.ts) | Cross-league rosters/picks/users map | Fans out one Sleeper call set per league in parallel; `overviewSeq` ref guards stale results. |
 | [`useUserExposure`](hooks/useUserExposure.ts) / [`useUserTrades`](hooks/useUserTrades.ts) / [`useDraftScout`](hooks/useDraftScout.ts) | The "spy on another Sleeper user" read-only lookups | All three are **read-only** by design (they never touch the user's own link/cron — see the spy-username memory). Each has a `requestSeq`/`userCache` to avoid clobbering and re-fetching. |
@@ -614,13 +615,15 @@ This section covers DynastyZeus's *analytical core*: where player and pick value
 
 ### Where player values come from
 
-There are two independent FantasyCalc fetch paths, and it matters which one you're looking at:
+As of Phase A stage A3 (2026-07-16), all FantasyCalc reads for the main app go through one cached proxy — there is no direct-to-`api.fantasycalc.com` fetch left in `useCalcValues`. (`hooks/useRookieBoardState.ts` and `hooks/useSpyState.ts` still fetch FantasyCalc directly, uncached — flagged as a follow-up, out of A3's scope.)
 
-1. **Proxy path (player + pick values + market trends).** [fetchFantasyCalcValues()](lib/helpers/picks.ts#L88) calls the server route [app/api/fc-values/route.ts](app/api/fc-values/route.ts), which checks a Supabase cache (`fc_values_cache`, 24h TTL via [`FC_VALUES_TTL_MS`](lib/constants.ts#L32)) before hitting `api.fantasycalc.com/values/current?isDynasty=true&numQbs=…&numTeams=12&ppr=1`. This is rate-limited (30 req/min) and retried. The response is split into three maps: `playerValues` (keyed by Sleeper ID), `pickValues` (draft picks — see below), and `trendData` (raw `value`/`redraftValue`/`trend30Day`/`tradeFrequency` for QB/RB/WR/TE only, fed to the market-trends UI). In [useAppState](app/hooks/useAppState.ts#L562), `playerValues` is merged straight onto the in-memory player map (`data[id].value = fcValues[id]`), so **`players[id].value` IS the raw superflex (numQbs=2) FantasyCalc dynasty value.** That generic value is the universal fallback used everywhere a league-adjusted value is missing.
+**The proxy.** [app/api/fc-values/route.ts](app/api/fc-values/route.ts) accepts `numQbs` (1 or 2) and `isDynasty` (defaults `true`). It checks a Supabase cache — `fc_values_cache` for dynasty, `fc_redraft_values_cache` for redraft (24h TTL via [`FC_VALUES_TTL_MS`](lib/constants.ts#L32)) — before hitting `api.fantasycalc.com/values/current` (dynasty adds `numTeams=12&ppr=1`; redraft doesn't, matching the pre-consolidation query shape). Rate-limited (30 req/min) and retried on cache-write.
 
-2. **Direct path (per-league `calcFcValues` + `redraftValues`).** [hooks/useCalcValues.ts](hooks/useCalcValues.ts) fetches `${FANTASYCALC_BASE_URL}/values/current` **directly from `api.fantasycalc.com`, bypassing the `/api/fc-values` proxy and its Supabase cache.** `loadCalcValues(leagueId)` passes the actual Sleeper `leagueId` so FantasyCalc returns values tuned to that league's exact format; `loadRedraftValues(numQbs)` fetches `isDynasty=false` redraft values (refetched when a league switches between 1-QB and superflex). Both use a monotonic `calcSeq` guard so a slow fetch for an old league can't clobber a newer league's values.
+**Two consumers, two shapes, same proxy:**
 
-> **Verified gotcha to flag:** the two paths diverge. The direct path in `useCalcValues` is *not* behind the proxy/cache or CSP-friendly route used by everything else. This is worth keeping in mind when reasoning about caching, rate limits, or offline behavior.
+1. **Generic values (player + pick values + market trends).** [fetchFantasyCalcValues()](lib/helpers/picks.ts#L88) calls the proxy and splits the response into `playerValues` (keyed by Sleeper ID), `pickValues` (draft picks — see below), and `trendData` (raw `value`/`redraftValue`/`trend30Day`/`tradeFrequency` for QB/RB/WR/TE only, fed to the market-trends UI). In [useAppState](app/hooks/useAppState.ts#L562), `playerValues` is merged straight onto the in-memory player map (`data[id].value = fcValues[id]`), so **`players[id].value` IS the raw superflex (numQbs=2) FantasyCalc dynasty value.** That generic value is the universal fallback used everywhere a league-adjusted value is missing.
+
+2. **Trade Hub's `calcFcValues` + `redraftValues`.** [hooks/useCalcValues.ts](hooks/useCalcValues.ts) also calls the proxy, keyed only by `numQbs` (via [`getLeagueNumQbs()`](lib/helpers/scoring.ts#L90) reading the selected league's roster slots) — not by `leagueId`. `loadCalcValues(numQbs)` short-circuits if that format is already loaded; `loadRedraftValues(numQbs)` refetches when a league switches between 1-QB and superflex. Both use a monotonic `calcSeq`/loaded-format guard so a slow fetch can't clobber a newer one. The app's own per-league adjustment on top of these generic values is the multiplier step below (`leagueAdjustedFcValues`) — FantasyCalc's own `leagueId`-based auto-detection is no longer used; the app's `computeScoringMultipliers` is the only per-league adjustment now.
 
 A small static KTC ranking file exists at [app/data/ktcValues.json](app/data/ktcValues.json) (~30 hand-coded `name → value` entries), but it is **not imported anywhere in the TS/TSX codebase** — it is dead/legacy data and plays no role in the live value pipeline.
 
@@ -1205,7 +1208,7 @@ Note there is **no `typecheck` script**. The project type-checks with a bare `np
 
 ### The two environment gotchas that will waste your first hour
 
-**1. Run Vitest through PowerShell, not Git Bash.** On this Windows machine, `npm run test` works fine in PowerShell but fails under Git Bash: Vitest 4 cannot locate its runner (`Vitest failed to find the runner` / "Cannot read properties of undefined (reading 'config')") and **silently collects 0 tests**. A green "0 tests" is the failure mode — you think you passed when you ran nothing. This is an environment quirk, not a test problem. Verified: running `npx vitest run` in PowerShell yields **506 passing tests across 21 files**. (Confirmed in [memory: project_audit_remediation_progress.md](C:/Users/bstefely.NPCSEALANTS/.claude/projects/c--Users-bstefely-NPCSEALANTS-dynastyzeus-app/memory/project_audit_remediation_progress.md): "run vitest via PowerShell (Vitest 4 breaks under Git Bash here).")
+**1. Run Vitest through PowerShell, not Git Bash.** On this Windows machine, `npm run test` works fine in PowerShell but fails under Git Bash: Vitest 4 cannot locate its runner (`Vitest failed to find the runner` / "Cannot read properties of undefined (reading 'config')") and **silently collects 0 tests**. A green "0 tests" is the failure mode — you think you passed when you ran nothing. This is an environment quirk, not a test problem. Verified: running `npx vitest run` in PowerShell yields **526 passing tests across 22 files**. (Confirmed in [memory: project_audit_remediation_progress.md](C:/Users/bstefely.NPCSEALANTS/.claude/projects/c--Users-bstefely-NPCSEALANTS-dynastyzeus-app/memory/project_audit_remediation_progress.md): "run vitest via PowerShell (Vitest 4 breaks under Git Bash here).")
 
 **2. Run `tsc` AFTER `next build`, never before.** Next.js generates typed route definitions during the build step at [.next/types/routes.d.ts](.next/types/routes.d.ts), and `tsconfig.json` includes `.next/types/**/*.ts` in its compilation. If you run `npx tsc --noEmit` on a clean checkout (no `.next/`), it fails with missing route types. The fix is always: `npm run build` first, then type-check. CI enforces this ordering by design (see [memory: project_ci_gotchas.md](C:/Users/bstefely.NPCSEALANTS/.claude/projects/c--Users-bstefely-NPCSEALANTS-dynastyzeus-app/memory/project_ci_gotchas.md)).
 
@@ -1237,7 +1240,7 @@ The flat config in [eslint.config.mjs](eslint.config.mjs) is minimal: it just sp
 
 Beyond ESLint, TypeScript is strict at the `tsc` step. `tsconfig.json` enables `strict`, plus `noUnusedLocals` and `noUnusedParameters` — so an unused import, variable, or function parameter is a **build/type-check failure**, not a warning. This is the single most common reason a local edit that "looks fine" red-X's in CI.
 
-## 20. Test suite scope (506 tests, 21 files)
+## 20. Test suite scope (526 tests, 22 files)
 
 Run via PowerShell. The suite is [Vitest](vitest.config.mts) in a `jsdom` environment, globbing `**/__tests__/**/*.{ts,tsx}` and `**/*.{test,spec}.{ts,tsx}`. It deliberately covers **pure logic and server routes, not UI rendering** — there are no component-render or e2e tests.
 
@@ -1270,7 +1273,7 @@ The remaining files cover helpers (math, scoring, lineup, picks, season, formatt
 - **No automated DB backup pipeline.** With ~5 users, a manual weekly `pg_dump` suffices ([scripts/backup-supabase.bat](scripts/backup-supabase.bat); see [memory: project_supabase_backup.md](C:/Users/bstefely.NPCSEALANTS/.claude/projects/c--Users-bstefely-NPCSEALANTS-dynastyzeus-app/memory/project_supabase_backup.md)).
 - **No e2e tests (Playwright/Cypress) and no component-render tests.** Vitest covers pure logic and server routes; UI is hand-tested.
 - **No internationalization.** English only.
-- **Single-URL SPA — tab state is not in the URL.** The active hub/sub-tab lives in React state ([app/hooks/useHubRouting.ts](app/hooks/useHubRouting.ts)), so browser back/forward does not navigate between hubs and a refresh resets the view. (Persisting tab state was an audit "Add" item; not done.)
+- **No full router rebuild for hub/tab nav.** Phase B added deep-linkable `?hub=&tab=` URL sync with real back/forward via the raw History API ([app/hooks/useHubRouting.ts](app/hooks/useHubRouting.ts)) rather than migrating to per-hub file routes — deliberately the "lightweight scope" option from the audit, not a rewrite of the single-route SPA model.
 - **AI integration removed.** An earlier build used Anthropic's API to auto-summarize scouting notes; that path was removed (and dropped from `.env.example`) and replaced with a plain play-notes list. There is no LLM call anywhere in the app today.
 - **No leaguemate-trade alerts feed.** A prior cron wrote one `alerts` row per league-wide trade; it was pure noise (the same trades already appear under the Trades tab) and was removed. See [memory: project_leaguemate_alerts_server_side_april28.md](C:/Users/bstefely.NPCSEALANTS/.claude/projects/c--Users-bstefely-NPCSEALANTS-dynastyzeus-app/memory/project_leaguemate_alerts_server_side_april28.md) for the history.
 
@@ -1298,7 +1301,7 @@ Other lower-priority items the audit flagged that I did not re-verify line-by-li
 4. `npm run dev` → confirm the app loads at `http://localhost:3000`.
 5. `npm run build` → confirm a production build succeeds (also generates `.next/types/` so the next step works).
 6. `npx tsc --noEmit` → confirm type-check passes (run it *after* the build).
-7. **In PowerShell** (not Git Bash): `npm run test` → confirm **506 tests pass** across 21 files. If you see "0 tests," you're in the wrong shell.
+7. **In PowerShell** (not Git Bash): `npm run test` → confirm **526 tests pass** across 22 files. If you see "0 tests," you're in the wrong shell.
 8. `npm run lint` → confirm clean (remember `exhaustive-deps` warnings won't fail it; the four error rules will).
 9. Read [AGENTS.md](AGENTS.md) — it warns this Next.js version diverges from public docs; consult `node_modules/next/dist/docs/` before writing framework code.
 10. Walk the entry path: [app/page.tsx](app/page.tsx) → [app/hooks/useAppState.ts](app/hooks/useAppState.ts) → [app/components/HubRouter.tsx](app/components/HubRouter.tsx).

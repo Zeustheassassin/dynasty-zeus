@@ -39,7 +39,7 @@ export function useCrossLeagueMateIntel({
       !!Object.keys(players || {}).length &&
       (
         (mainTab === "LEAGUES" && leagueHubTab === "LEAGUE_MATES") ||
-        (mainTab === "TRADE_HUB" && (tradeHubSection === "FINDER" || tradeHubSection === "RECOMMENDATIONS"))
+        (mainTab === "TRADE_HUB" && tradeHubSection === "FINDER")
       );
 
     if (!shouldLoadCrossLeagueIntel) return;

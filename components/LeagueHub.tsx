@@ -95,7 +95,7 @@ interface LeagueHubProps {
   setPlayerProfileId: (id: string | null) => void;
   setCalcOpponentRosterId: (id: number | null) => void;
   setMainTab: (tab: MainTab) => void;
-  setTradeHubSection: (section: "CALCULATOR" | "FINDER" | "RECOMMENDATIONS") => void;
+  setTradeHubSection: (section: "CALCULATOR" | "FINDER") => void;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────

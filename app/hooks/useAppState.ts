@@ -640,27 +640,27 @@ useEffect(() => {
 // when the direction memo fires it produces a garbage bucket (usually "Purgatory").
 useEffect(() => {
   if (mainTab === "TRADE_HUB" && selectedLeague?.league_id) {
-    loadCalcValues(selectedLeague.league_id);
+    loadCalcValues(getLeagueNumQbs(selectedLeague));
     loadRedraftValues(getLeagueNumQbs(selectedLeague));
   }
 }, [mainTab, selectedLeague?.league_id, selectedLeague, loadCalcValues, loadRedraftValues]);
 
 // Also reload if the user switches sub-tabs within Trade Hub (redundant but keeps the guard intact)
 useEffect(() => {
-  if ((tradeHubSection === "CALCULATOR" || tradeHubSection === "FINDER" || tradeHubSection === "RECOMMENDATIONS") && selectedLeague?.league_id) {
-    loadCalcValues(selectedLeague.league_id);
+  if ((tradeHubSection === "CALCULATOR" || tradeHubSection === "FINDER") && selectedLeague?.league_id) {
+    loadCalcValues(getLeagueNumQbs(selectedLeague));
   }
   // Auto-load attempts when switching to ATTEMPTS tab
   if (tradeHubSection === "ATTEMPTS" && selectedLeague?.league_id && supabaseUser && tradeAttemptsLeagueId !== selectedLeague.league_id) {
     loadTradeAttempts(selectedLeague.league_id);
   }
-}, [tradeHubSection, selectedLeague?.league_id, supabaseUser, tradeAttemptsLeagueId, loadCalcValues, loadTradeAttempts]);
+}, [tradeHubSection, selectedLeague?.league_id, selectedLeague, supabaseUser, tradeAttemptsLeagueId, loadCalcValues, loadTradeAttempts]);
 
 useEffect(() => {
   if (mainTab === "DATA_HUB" && dataHubTab === "RANKINGS" && selectedLeague?.league_id) {
-    loadCalcValues(selectedLeague.league_id);
+    loadCalcValues(getLeagueNumQbs(selectedLeague));
   }
-}, [mainTab, dataHubTab, selectedLeague?.league_id, loadCalcValues]);
+}, [mainTab, dataHubTab, selectedLeague?.league_id, selectedLeague, loadCalcValues]);
 
 useEffect(() => {
   if (mainTab === "DATA_HUB" && dataHubTab === "RANKINGS") {
@@ -685,16 +685,16 @@ useEffect(() => {
 useEffect(() => {
   if (mainTab === "LEAGUES" && leagueHubTab === "STARTERS") {
     loadNflState();
-    if (selectedLeague?.league_id) loadCalcValues(selectedLeague.league_id);
+    if (selectedLeague?.league_id) loadCalcValues(getLeagueNumQbs(selectedLeague));
   }
-}, [mainTab, leagueHubTab, selectedLeague?.league_id, loadCalcValues, loadNflState]);
+}, [mainTab, leagueHubTab, selectedLeague?.league_id, selectedLeague, loadCalcValues, loadNflState]);
 
 useEffect(() => {
   if (mainTab === "LEAGUES" && leagueHubTab === "POWER_RANKINGS" && selectedLeague?.league_id) {
-    loadCalcValues(selectedLeague.league_id);
+    loadCalcValues(getLeagueNumQbs(selectedLeague));
     loadRedraftValues();
   }
-}, [mainTab, leagueHubTab, selectedLeague?.league_id, loadCalcValues, loadRedraftValues]);
+}, [mainTab, leagueHubTab, selectedLeague?.league_id, selectedLeague, loadCalcValues, loadRedraftValues]);
 
 useEffect(() => {
   if (mainTab === "LEAGUES" && leagueHubTab === "ACTIVITY" && selectedLeague?.league_id) {
@@ -2828,6 +2828,13 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     selectedLeague,
     loadRoster,
     mainTab, setMainTab,
+    nflState,
+    players,
+    setTradeHubSection,
+    setLeagueHubTab,
+    setDataHubTab,
+    setDraftHubSection,
+    setPlayerProfileId,
   };
   const hubRouterProps = {
     mainTab,

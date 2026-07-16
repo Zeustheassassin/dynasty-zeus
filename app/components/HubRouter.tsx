@@ -130,7 +130,7 @@ interface HubRouterProps {
   refreshDraftBoard: () => Promise<void>;
   setPlayerProfileId: (id: string | null) => void;
   setCalcOpponentRosterId: (id: number | null) => void;
-  setTradeHubSection: (section: "CALCULATOR" | "FINDER" | "RECOMMENDATIONS" | "TRADE_LOG" | "ATTEMPTS" | "MARKET") => void;
+  setTradeHubSection: (section: "CALCULATOR" | "FINDER" | "TRADE_LOG" | "ATTEMPTS") => void;
 
   // Gameday Hub
   gamedayWeek: number;
@@ -180,8 +180,8 @@ interface HubRouterProps {
   saveSnapshotNow: () => Promise<void>;
 
   // Draft Hub
-  draftHubSection: "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL_BOARDS" | "HISTORICAL_LEAGUE_DRAFTS";
-  setDraftHubSection: (s: "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL_BOARDS" | "HISTORICAL_LEAGUE_DRAFTS") => void;
+  draftHubSection: "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL";
+  setDraftHubSection: (s: "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL") => void;
   myDraftSlotPicks: Record<string, string>;
   setMyDraftSlotPicks: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   draftSlotEditing: string | null;
@@ -203,7 +203,7 @@ interface HubRouterProps {
   rookieOverrides: { added: { name: string; position: string }[]; nameEdits: Record<string, string> };
 
   // Trade Hub
-  tradeHubSection: "CALCULATOR" | "FINDER" | "RECOMMENDATIONS" | "TRADE_LOG" | "ATTEMPTS" | "MARKET";
+  tradeHubSection: "CALCULATOR" | "FINDER" | "TRADE_LOG" | "ATTEMPTS";
   calcOpponentRosterId: number | null;
   selectedLeagueDraftHasOccurred: boolean;
   leaguePlayerTags: Record<string, Record<string, "CORE" | "WANT_TO_TRADE">>;
@@ -508,6 +508,9 @@ export function HubRouter({
             loadingShares={loadingShares}
             historicalSnapshot={historicalSnapshot}
             onSaveSnapshot={saveSnapshotNow}
+            fcTrendData={fcTrendData}
+            loadingFcTrends={loadingFcTrends}
+            onRefreshFcTrends={refreshFcTrends}
           />
           </ErrorBoundary>
         )}
@@ -558,6 +561,8 @@ export function HubRouter({
   <TradeHub
     tradeHubSection={tradeHubSection}
     setTradeHubSection={setTradeHubSection}
+    setMainTab={setMainTab}
+    setDataHubTab={setDataHubTab}
     leagues={leagues}
     user={user}
     allPicks={allPicks}
@@ -594,8 +599,6 @@ export function HubRouter({
     playerStats={playerStats}
     crossLeagueExposure={shares}
     fcTrendData={fcTrendData}
-    loadingFcTrends={loadingFcTrends}
-    onRefreshFcTrends={refreshFcTrends}
   />
   </ErrorBoundary>
 )}

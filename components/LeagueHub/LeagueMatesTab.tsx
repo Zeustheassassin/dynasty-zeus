@@ -15,7 +15,7 @@ interface LeagueMatesTabProps {
   loadUserExposure: (ownerId: string) => void;
   setCalcOpponentRosterId: (id: number | null) => void;
   setMainTab: (tab: MainTab) => void;
-  setTradeHubSection: (section: "CALCULATOR" | "FINDER" | "RECOMMENDATIONS") => void;
+  setTradeHubSection: (section: "CALCULATOR" | "FINDER") => void;
 }
 
 function LeagueMatesTab({

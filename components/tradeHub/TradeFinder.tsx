@@ -73,7 +73,7 @@ interface TradeFinderProps {
   onSessionMark: (fingerprint: string) => void;
   setViewRosterRosterId: (id: number | null) => void;
   fcTrendData: FcTrendEntry[];
-  setTradeHubSection: (section: "CALCULATOR" | "FINDER" | "RECOMMENDATIONS" | "TRADE_LOG" | "ATTEMPTS" | "MARKET") => void;
+  setTradeHubSection: (section: "CALCULATOR" | "FINDER" | "TRADE_LOG" | "ATTEMPTS") => void;
   setCalcOpponentRosterId: (id: number | null) => void;
   setCalcGive: React.Dispatch<React.SetStateAction<string[]>>;
   setCalcReceive: React.Dispatch<React.SetStateAction<string[]>>;

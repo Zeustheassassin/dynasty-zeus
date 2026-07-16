@@ -375,23 +375,6 @@ create policy "league_player_tags_self" on league_player_tags for all
 create index if not exists idx_league_player_tags_user_league
   on league_player_tags (user_id, league_id);
 
--- ── gm_briefings (AI-generated per-team briefings, keyed by user+league+roster) ─
--- Documented here for fresh-install parity (it was previously only in the
--- migration chain: created by 013, RLS added by 026, FK added by 039). The
--- user_id FK to auth.users ON DELETE CASCADE cleans up briefings when a user
--- is deleted; RLS (auth.uid() = user_id) enforces per-user access.
-create table if not exists gm_briefings (
-  id           uuid        primary key default gen_random_uuid(),
-  user_id      uuid        references auth.users(id) on delete cascade not null,
-  league_id    text        not null,
-  roster_id    integer     not null,
-  briefing     jsonb       not null,
-  generated_at timestamptz not null default now(),
-  constraint gm_briefings_unique unique (user_id, league_id, roster_id)
-);
-create index if not exists gm_briefings_user_idx on gm_briefings (user_id);
-alter table gm_briefings enable row level security;
-drop policy if exists "gm_briefings_self" on gm_briefings;
-create policy "gm_briefings_self" on gm_briefings for all
-  using (auth.uid() = user_id)
-  with check (auth.uid() = user_id);
+-- (gm_briefings table removed in migration 042 — the AI-generated GM
+--  briefing feature was removed for cost reasons; there is no LLM call
+--  anywhere in the app today.)

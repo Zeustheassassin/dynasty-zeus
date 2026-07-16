@@ -3,9 +3,10 @@ import React from "react";
 import { usePlayers } from "../../lib/PlayersContext";
 import { useLeague } from "../../lib/LeagueContext";
 import { useValues } from "../../lib/ValuesContext";
-import type { SleeperUser, HistoricalSnapshot, PlayerValueSnapshotEntry } from "../../lib/types";
+import type { SleeperUser, HistoricalSnapshot, PlayerValueSnapshotEntry, FcTrendEntry } from "../../lib/types";
 import { injuryBadge, ageColor } from "./dataHubHelpers";
 import type { ShareEntry } from "./dataHubTypes";
+import TradeMarket from "../tradeHub/TradeMarket";
 
 const TREND_GRID = "grid grid-cols-[2rem_1fr_2.25rem_2.5rem_3.75rem_3.75rem_4rem_2.5rem] gap-2 items-center px-1";
 
@@ -27,6 +28,10 @@ interface ValueTrendsTabProps {
   onSaveSnapshot: () => Promise<void>;
   shares: Record<string, ShareEntry>;
   user: SleeperUser | null;
+  // Market Pulse view (merged in from Trade Hub's old Market Trends tab, Phase B4/R2)
+  fcTrendData: FcTrendEntry[];
+  loadingFcTrends: boolean;
+  onRefreshFcTrends: () => void;
 }
 
 type TrendRow = {
@@ -61,11 +66,12 @@ const MIN_TRADE_VAL = 1500;
 const RATIO_MIN = 0.72;
 const RATIO_MAX = 1.35;
 
-function ValueTrendsTab({ historicalSnapshot, onSaveSnapshot, shares, user }: ValueTrendsTabProps) {
+function ValueTrendsTab({ historicalSnapshot, onSaveSnapshot, shares, user, fcTrendData, loadingFcTrends, onRefreshFcTrends }: ValueTrendsTabProps) {
   const players = usePlayers();
   const { rosters, users } = useLeague();
   const { leagueAdjustedFcValues: calcFcValues } = useValues();
 
+  const [view, setView] = React.useState<"MY_LEAGUE" | "MARKET_PULSE">("MY_LEAGUE");
   const [trendThreshold, setTrendThreshold] = React.useState(10);
   const [trendPos, setTrendPos] = React.useState("ALL");
   const [savingSnapshot, setSavingSnapshot] = React.useState(false);
@@ -227,15 +233,47 @@ function ValueTrendsTab({ historicalSnapshot, onSaveSnapshot, shares, user }: Va
     return { sellWindowTrades, buyWindowTrades };
   }, [snap, players, rosters, user, calcFcValues, users]);
 
+  const viewToggle = (
+    <div className="flex justify-center gap-2 mb-4">
+      {(["MY_LEAGUE", "MARKET_PULSE"] as const).map((v) => (
+        <button
+          key={v}
+          onClick={() => setView(v)}
+          className={`px-3 py-1.5 rounded-full text-xs font-semibold transition ${
+            view === v ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:text-white"
+          }`}
+        >
+          {v === "MY_LEAGUE" ? "My League Trends" : "Market Pulse"}
+        </button>
+      ))}
+    </div>
+  );
+
+  // Market Pulse is FantasyCalc's league-wide trend data (30-day movers, most
+  // traded) — it doesn't depend on this league's snapshot, so it's available
+  // even before one exists. This is the old Trade Hub "Market Trends" tab,
+  // moved here in Phase B4/R2.
+  if (view === "MARKET_PULSE") {
+    return (
+      <>
+        {viewToggle}
+        <TradeMarket fcTrendData={fcTrendData} loadingFcTrends={loadingFcTrends} onRefreshFcTrends={onRefreshFcTrends} />
+      </>
+    );
+  }
+
   if (!snap) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
-        <div className="text-3xl">📊</div>
-        <p className="text-base font-semibold text-white">No baseline snapshot yet</p>
-        <p className="text-sm text-gray-400 max-w-sm">
-          Load a league to start tracking values. A daily snapshot will be saved automatically once your dynasty values are loaded.
-        </p>
-      </div>
+      <>
+        {viewToggle}
+        <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
+          <div className="text-3xl">📊</div>
+          <p className="text-base font-semibold text-white">No baseline snapshot yet</p>
+          <p className="text-sm text-gray-400 max-w-sm">
+            Load a league to start tracking values. A daily snapshot will be saved automatically once your dynasty values are loaded.
+          </p>
+        </div>
+      </>
     );
   }
 
@@ -311,6 +349,7 @@ function ValueTrendsTab({ historicalSnapshot, onSaveSnapshot, shares, user }: Va
 
   return (
     <>
+      {viewToggle}
       {/* Controls */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div className="flex gap-1.5">

@@ -16,12 +16,15 @@ import TradeCalculator from "./tradeHub/TradeCalculator";
 import TradeFinder from "./tradeHub/TradeFinder";
 import TradeLog from "./tradeHub/TradeLog";
 import TradeAttempts from "./tradeHub/TradeAttempts";
-import TradeMarket from "./tradeHub/TradeMarket";
+import type { MainTab } from "../lib/hubs";
 
 // ── Props ──────────────────────────────────────────────────────────────────
 interface TradeHubProps {
-  tradeHubSection: "CALCULATOR" | "FINDER" | "RECOMMENDATIONS" | "TRADE_LOG" | "ATTEMPTS" | "MARKET";
-  setTradeHubSection: (section: "CALCULATOR" | "FINDER" | "RECOMMENDATIONS" | "TRADE_LOG" | "ATTEMPTS" | "MARKET") => void;
+  tradeHubSection: "CALCULATOR" | "FINDER" | "TRADE_LOG" | "ATTEMPTS";
+  setTradeHubSection: (section: "CALCULATOR" | "FINDER" | "TRADE_LOG" | "ATTEMPTS") => void;
+  // Cross-link to Data Hub's Value Trends tab, where Market Trends moved (Phase B4/R2)
+  setMainTab: (tab: MainTab) => void;
+  setDataHubTab: (tab: "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "LEAGUEMATES" | "DEPTH_CHARTS" | "BUY_LOW" | "MY_SHARES") => void;
   leagues: SleeperLeague[];
   user: SleeperUser | null;
   allPicks: AugmentedPick[];
@@ -55,8 +58,6 @@ interface TradeHubProps {
   ignoredOwnerIds: string[];
   toggleIgnoredOwner: (ownerId: string) => void;
   fcTrendData: FcTrendEntry[];
-  loadingFcTrends: boolean;
-  onRefreshFcTrends: () => void;
   nflState?: { week: number; season_type: string; season: string; display_week?: number } | null;
   playerStats?: Record<string, { avgTargets: number; avgCarries: number; snapPct: number; gamesPlayed: number; recentTargets?: number; recentCarries?: number; recentSnapPct?: number; targetTrend?: number; carryTrend?: number; snapTrend?: number }> | null;
   projectionData?: { sleeperId: string; fpts: number }[] | null;
@@ -65,6 +66,7 @@ interface TradeHubProps {
 
 function TradeHub({
   tradeHubSection, setTradeHubSection,
+  setMainTab, setDataHubTab,
   user, allPicks,
   calcOpponentRosterId, setCalcOpponentRosterId,
   selectedLeagueDraftHasOccurred,
@@ -84,8 +86,6 @@ function TradeHub({
   playerStats,
   crossLeagueExposure,
   fcTrendData,
-  loadingFcTrends,
-  onRefreshFcTrends,
 }: TradeHubProps) {
   const players = usePlayers();
   const { selectedLeague, rosters, users } = useLeague();
@@ -154,16 +154,6 @@ function TradeHub({
               Trade Finder
             </button>
             <button
-              onClick={() => setTradeHubSection("MARKET")}
-              className={`pb-2 px-1 text-sm font-semibold transition whitespace-nowrap ${
-                tradeHubSection === "MARKET"
-                  ? "border-b-2 border-emerald-400 text-emerald-400"
-                  : "text-gray-400 hover:text-white"
-              }`}
-            >
-              Market Trends
-            </button>
-            <button
               onClick={() => {
                 if (selectedLeague?.league_id && tradeAttemptsLeagueId !== selectedLeague.league_id) {
                   onLoadTradeAttempts(selectedLeague.league_id);
@@ -199,6 +189,16 @@ function TradeHub({
               Completed Trades
             </button>
           </div>
+        </div>
+
+        {/* Market Trends moved into Data Hub's Value Trends tab (Phase B4/R2) */}
+        <div className="flex justify-end mb-4">
+          <button
+            onClick={() => { setMainTab("DATA_HUB"); setDataHubTab("VALUE_TRENDS"); }}
+            className="text-[11px] text-gray-500 hover:text-emerald-400 transition"
+          >
+            Market Trends moved to Data Hub →
+          </button>
         </div>
 
         {/* ── Trade Calculator ── */}
@@ -279,15 +279,6 @@ function TradeHub({
             setCalcReceivePicks={setCalcReceivePicks}
             setCalcSearchA={setCalcSearchA}
             setCalcSearchB={setCalcSearchB}
-          />
-        )}
-
-        {/* ── Market Trends ── */}
-        {tradeHubSection === "MARKET" && (
-          <TradeMarket
-            fcTrendData={fcTrendData}
-            loadingFcTrends={loadingFcTrends}
-            onRefreshFcTrends={onRefreshFcTrends}
           />
         )}
 

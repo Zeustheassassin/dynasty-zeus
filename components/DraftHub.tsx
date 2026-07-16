@@ -13,9 +13,36 @@ import RookieBigBoard from "./draftHub/RookieBigBoard";
 import HistoricalBigBoards from "./draftHub/HistoricalBigBoards";
 import HistoricalLeagueDrafts from "./draftHub/HistoricalLeagueDrafts";
 
+type HistoricalView = "BIG_BOARDS" | "LEAGUE_DRAFTS";
+
+function HistoricalSection() {
+  const [view, setView] = useState<HistoricalView>("BIG_BOARDS");
+  return (
+    <div>
+      <div className="flex justify-center gap-2 mb-6">
+        {(["BIG_BOARDS", "LEAGUE_DRAFTS"] as const).map((v) => (
+          <button
+            key={v}
+            onClick={() => setView(v)}
+            className={`px-3 py-1.5 rounded-full text-xs font-semibold transition ${
+              view === v ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:text-white"
+            }`}
+          >
+            {v === "BIG_BOARDS" ? "Big Boards" : "League Drafts"}
+          </button>
+        ))}
+      </div>
+      {view === "BIG_BOARDS" ? <HistoricalBigBoards /> : <HistoricalLeagueDrafts />}
+    </div>
+  );
+}
+
 
 // ── Props ──────────────────────────────────────────────────────────────────
-type DraftSection = "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL_BOARDS" | "HISTORICAL_LEAGUE_DRAFTS";
+// HISTORICAL_BOARDS + HISTORICAL_LEAGUE_DRAFTS were merged into one "HISTORICAL"
+// section with an in-page type toggle (Phase B4/R4) — HISTORY (this league's own
+// past drafts, DraftHistory.tsx) is a separate, unrelated tab and is untouched.
+type DraftSection = "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL";
 
 interface DraftHubProps {
   draftHubSection: DraftSection;
@@ -80,12 +107,11 @@ function DraftHub({
   const myRosterId = rosters.find((r) => r.owner_id === user?.user_id)?.roster_id;
 
   const TABS: { key: DraftSection; label: string }[] = [
-    { key: "BOARD",                    label: "Live Draft Board" },
-    { key: "BIG_BOARD",                label: "Rookie Big Board" },
-    { key: "PICK_VALUES",              label: "Pick Values" },
-    { key: "HISTORY",                  label: "Draft History" },
-    { key: "HISTORICAL_BOARDS",        label: "Historical Boards" },
-    { key: "HISTORICAL_LEAGUE_DRAFTS", label: "Historical League Drafts" },
+    { key: "BOARD",       label: "Live Draft Board" },
+    { key: "BIG_BOARD",   label: "Rookie Big Board" },
+    { key: "PICK_VALUES", label: "Pick Values" },
+    { key: "HISTORY",     label: "Draft History" },
+    { key: "HISTORICAL",  label: "Historical Boards & Drafts" },
   ];
 
   return (
@@ -180,17 +206,10 @@ function DraftHub({
       )}
 
       {/* ══════════════════════════════════════════════════════
-          HISTORICAL BIG BOARDS
+          HISTORICAL BOARDS & DRAFTS (merged, Phase B4/R4)
          ══════════════════════════════════════════════════════ */}
-      {draftHubSection === "HISTORICAL_BOARDS" && (
-        <HistoricalBigBoards />
-      )}
-
-      {/* ══════════════════════════════════════════════════════
-          HISTORICAL LEAGUE DRAFTS
-         ══════════════════════════════════════════════════════ */}
-      {draftHubSection === "HISTORICAL_LEAGUE_DRAFTS" && (
-        <HistoricalLeagueDrafts />
+      {draftHubSection === "HISTORICAL" && (
+        <HistoricalSection />
       )}
     </div>
   );

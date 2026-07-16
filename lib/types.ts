@@ -819,7 +819,7 @@ export interface ProjSource {
 // ── Trade attempts ────────────────────────────────────────────
 
 export type TradeAttemptStatus = "PENDING" | "ACCEPTED" | "DECLINED" | "COUNTERED" | "NO_RESPONSE";
-export type TradeAttemptSource = "FINDER" | "CALCULATOR" | "RECOMMENDATIONS";
+export type TradeAttemptSource = "FINDER" | "CALCULATOR";
 export type TradeAttemptDirection = "ME" | "THEM";
 
 export interface TradeAttemptAsset {

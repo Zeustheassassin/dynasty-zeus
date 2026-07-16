@@ -1,7 +1,7 @@
 "use client";
 import React, { useState } from "react";
 import type {
-  SleeperLeague, SleeperUser, ProjectionRow, LeagueMateStatEntry, HistoricalSnapshot,
+  SleeperLeague, SleeperUser, ProjectionRow, LeagueMateStatEntry, HistoricalSnapshot, FcTrendEntry,
 } from "../lib/types";
 import type { ShareEntry, ExposureData } from "./DataHub/dataHubTypes";
 import RankingsTab from "./DataHub/RankingsTab";
@@ -61,6 +61,9 @@ interface DataHubProps {
   // Value trends
   historicalSnapshot: HistoricalSnapshot | null;
   onSaveSnapshot: () => Promise<void>;
+  fcTrendData: FcTrendEntry[];
+  loadingFcTrends: boolean;
+  onRefreshFcTrends: () => void;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
@@ -77,6 +80,7 @@ function DataHub({
   leagues, user,
   loadUserExposure, selectedUserId, externalShares, loadingShares,
   historicalSnapshot, onSaveSnapshot,
+  fcTrendData, loadingFcTrends, onRefreshFcTrends,
 }: DataHubProps) {
   const [dynastyRankPos, setDynastyRankPos] = useState("ALL");
   const [leagueMateStats, setLeagueMateStats] = useState<LeagueMateStatEntry[]>([]);
@@ -140,6 +144,9 @@ function DataHub({
           onSaveSnapshot={onSaveSnapshot}
           shares={shares}
           user={user}
+          fcTrendData={fcTrendData}
+          loadingFcTrends={loadingFcTrends}
+          onRefreshFcTrends={onRefreshFcTrends}
         />
       )}
 
