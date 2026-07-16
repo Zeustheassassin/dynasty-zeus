@@ -24,6 +24,7 @@ export default function DraftHistory({ leagues, user }: DraftHistoryProps) {
     setMyPicksSort,
     consensusMeta,
     consensusCache,
+    consensusHistory,
     loadingCacheYear,
     compiling,
     compileLog,
@@ -42,6 +43,7 @@ export default function DraftHistory({ leagues, user }: DraftHistoryProps) {
     filteredDrafts,
     currentLeagueDraft,
     consensusList,
+    riserFallerList,
     myPicksList,
     gradeReport,
     runCompile,
@@ -128,6 +130,7 @@ export default function DraftHistory({ leagues, user }: DraftHistoryProps) {
               supabaseUser={supabaseUser}
               consensusMeta={consensusMeta}
               consensusCache={consensusCache}
+              consensusHistory={consensusHistory}
               loadingCacheYear={loadingCacheYear}
               compiling={compiling}
               compileLog={compileLog}
@@ -139,6 +142,7 @@ export default function DraftHistory({ leagues, user }: DraftHistoryProps) {
               playerGrades={playerGrades}
               filteredDrafts={filteredDrafts}
               consensusList={consensusList}
+              riserFallerList={riserFallerList}
               players={players}
               pickFcValues={pickFcValues}
               calcFcValues={calcFcValues}

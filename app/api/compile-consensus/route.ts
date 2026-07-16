@@ -362,6 +362,32 @@ async function compileDrafts(
       }
     }
 
+    // Append one history snapshot per player for this run (never overwritten,
+    // never pruned) so a later chart can plot avg_pick_no across compiles over
+    // time. Only recorded once the cache write itself succeeded, so the two
+    // tables never disagree about what a given run actually produced.
+    if (writeOk && rows.length > 0) {
+      const historyRows = rows.map((row) => ({
+        user_id:        row.user_id,
+        year:           row.year,
+        player_id:      row.player_id,
+        player_name:    row.player_name,
+        position:       row.position,
+        team:           row.team,
+        avg_pick_no:    row.avg_pick_no,
+        draft_count:    row.draft_count,
+        snapshotted_at: row.computed_at,
+      }));
+      for (let i = 0; i < historyRows.length; i += 200) {
+        const { error: historyError } = await supabaseClient
+          .from("consensus_draft_history")
+          .insert(historyRows.slice(i, i + 200));
+        if (historyError) {
+          emit({ type: "status", message: `Warning: history save error for ${year} batch ${i}: ${historyError.message}`, progress: 86 });
+        }
+      }
+    }
+
     // Save/update metadata for this year
     const { error: metaError } = await supabaseClient.from("consensus_draft_meta").upsert(
       {

@@ -29,8 +29,10 @@ const getUser = h.getUser;
 // Captured Supabase operations so we can assert the upsert/prune ordering + payloads.
 interface CapturedUpsert { table: string; rows: unknown[]; opts: unknown }
 interface CapturedDelete { table: string; filters: Array<[string, string, unknown]> }
+interface CapturedInsert { table: string; rows: unknown[] }
 let upserts: CapturedUpsert[] = [];
 let deletes: CapturedDelete[] = [];
+let inserts: CapturedInsert[] = [];
 // Lets a test force an upsert to fail (so the prune gate is exercised).
 let upsertError: { message: string } | null = null;
 
@@ -39,6 +41,10 @@ function makeFrom(table: string) {
     upsert: vi.fn((rows: unknown[], opts: unknown) => {
       upserts.push({ table, rows, opts });
       return Promise.resolve({ error: upsertError });
+    }),
+    insert: vi.fn((rows: unknown[]) => {
+      inserts.push({ table, rows });
+      return Promise.resolve({ error: null });
     }),
     delete: vi.fn(() => {
       const filters: Array<[string, string, unknown]> = [];
@@ -119,6 +125,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   upserts = [];
   deletes = [];
+  inserts = [];
   upsertError = null;
   fetchResponders.length = 0;
 
@@ -220,6 +227,8 @@ describe("POST compile-consensus — compilation stream", () => {
     // Critical: an empty result must NOT wipe the cache — no prune delete on cache rows.
     expect(deletes.length).toBe(0);
     expect(upserts.some((u) => u.table === "consensus_draft_cache")).toBe(false);
+    // No cache write → no history snapshot either.
+    expect(inserts.some((i) => i.table === "consensus_draft_history")).toBe(false);
   });
 
   it("aggregates avg_pick_no across drafts, sorts ascending, and filters veteran picks", async () => {
@@ -278,6 +287,21 @@ describe("POST compile-consensus — compilation stream", () => {
     const yearDone = events.find((e) => e.type === "year_done");
     expect(yearDone!.playerCount).toBe(1);
     expect(yearDone!.draftCount).toBe(1);
+
+    // A successful cache write also appends a history snapshot with the same
+    // aggregated fields (minus computed_at, renamed to snapshotted_at).
+    const historyInserts = inserts.filter((i) => i.table === "consensus_draft_history");
+    expect(historyInserts.length).toBe(1);
+    const historyRows = historyInserts[0].rows as Array<Record<string, unknown>>;
+    expect(historyRows.length).toBe(1);
+    expect(historyRows[0]).toMatchObject({
+      user_id:     "auth-user-1",
+      player_id:   "rook",
+      avg_pick_no: 2,
+      draft_count: 2,
+    });
+    expect(historyRows[0].snapshotted_at).toBeDefined();
+    expect(historyRows[0]).not.toHaveProperty("computed_at");
   });
 
   it("falls back to the Sleeper player DB when pick metadata has no name", async () => {
@@ -347,6 +371,11 @@ describe("POST compile-consensus — compilation stream", () => {
           upserts.push({ table, rows, opts });
           return Promise.resolve({ error: null });
         }),
+        insert: vi.fn((rows: unknown[]) => {
+          if (table === "consensus_draft_history") callOrder.push("insert-history");
+          inserts.push({ table, rows });
+          return Promise.resolve({ error: null });
+        }),
         delete: vi.fn(() => {
           const chain = {
             eq: () => chain,
@@ -366,7 +395,7 @@ describe("POST compile-consensus — compilation stream", () => {
     );
     await readEvents(res);
 
-    expect(callOrder).toEqual(["upsert-cache", "delete-cache"]);
+    expect(callOrder).toEqual(["upsert-cache", "delete-cache", "insert-history"]);
   });
 
   it("does NOT prune when the upsert fails (a partial write must not delete good rows)", async () => {
@@ -397,6 +426,8 @@ describe("POST compile-consensus — compilation stream", () => {
     // Upsert was attempted but failed → no prune delete on the cache.
     expect(upserts.some((u) => u.table === "consensus_draft_cache")).toBe(true);
     expect(deletes.length).toBe(0);
+    // A failed cache write must not produce a history snapshot either.
+    expect(inserts.some((i) => i.table === "consensus_draft_history")).toBe(false);
   });
 
   it("ignores startup/full-roster drafts (rounds above the rookie max)", async () => {

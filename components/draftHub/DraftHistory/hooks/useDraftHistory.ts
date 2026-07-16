@@ -11,7 +11,7 @@ import { toPickSlot } from "../../shared";
 import type { SleeperLeague, SleeperUser } from "../../../../lib/types";
 import type {
   HistoryDraftPick, HistoryDraftEntry, SleeperDraftBasic,
-  SleeperPickBasic, ConsensusCacheRow,
+  SleeperPickBasic, ConsensusCacheRow, ConsensusHistoryPoint, ConsensusMoverEntry,
 } from "../../shared";
 import { getLocalStorageItem, setLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 
@@ -43,6 +43,7 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
 
   const [consensusMeta, setConsensusMeta] = useState<ConsensusMeta>({});
   const [consensusCache, setConsensusCache] = useState<Record<string, ConsensusCacheRow[]>>({});
+  const [consensusHistory, setConsensusHistory] = useState<Record<string, Record<string, ConsensusHistoryPoint[]>>>({});
   const [loadingCacheYear, setLoadingCacheYear] = useState<string | null>(null);
   const [compiling, setCompiling]             = useState(false);
   const [compileLog, setCompileLog]           = useState("");
@@ -206,6 +207,33 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
     })();
   }, [supabaseUser?.id, historyTab, selectedHistoryYear, consensusMeta]); // eslint-disable-line
 
+  // Load ADP history (one row per past compile run) for the CONSENSUS tab's
+  // sparklines + riser/faller callouts. Same gating as the cache load above,
+  // kept as a separate query since most page loads never touch this data —
+  // it's meaningful only once a year has been recompiled more than once.
+  useEffect(() => {
+    if (!supabaseUser || historyTab !== "CONSENSUS") return;
+    if (!selectedHistoryYear || selectedHistoryYear === "ALL") return;
+    if (!consensusMeta[selectedHistoryYear]) return;
+    if (consensusHistory[selectedHistoryYear] !== undefined) return;
+
+    void (async () => {
+      const { data } = await supabase
+        .from("consensus_draft_history")
+        .select("player_id, avg_pick_no, snapshotted_at")
+        .eq("user_id", supabaseUser.id)
+        .eq("year", parseInt(selectedHistoryYear, 10))
+        .order("snapshotted_at", { ascending: true });
+
+      const byPlayer: Record<string, ConsensusHistoryPoint[]> = {};
+      (data as Array<{ player_id: string; avg_pick_no: number; snapshotted_at: string }> ?? []).forEach((row) => {
+        if (!byPlayer[row.player_id]) byPlayer[row.player_id] = [];
+        byPlayer[row.player_id].push({ avg_pick_no: row.avg_pick_no, snapshotted_at: row.snapshotted_at });
+      });
+      setConsensusHistory((prev) => ({ ...prev, [selectedHistoryYear]: byPlayer }));
+    })();
+  }, [supabaseUser?.id, historyTab, selectedHistoryYear, consensusMeta]); // eslint-disable-line
+
   // When GRADES tab opens, load ALL compiled years so every graded player has slot data
   useEffect(() => {
     if (historyTab !== "GRADES" || !supabaseUser) return;
@@ -307,6 +335,11 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
                 delete next[String(event.year)];
                 return next;
               });
+              setConsensusHistory((prev) => {
+                const next = { ...prev };
+                delete next[String(event.year)];
+                return next;
+              });
             }
           } catch { /* malformed line — skip */ }
         }
@@ -338,8 +371,11 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
       .delete().eq("user_id", supabaseUser.id).eq("year", year);
     await supabase.from("consensus_draft_meta")
       .delete().eq("user_id", supabaseUser.id).eq("year", year);
+    await supabase.from("consensus_draft_history")
+      .delete().eq("user_id", supabaseUser.id).eq("year", year);
     setConsensusMeta((prev) => { const n = { ...prev }; delete n[String(year)]; return n; });
     setConsensusCache((prev) => { const n = { ...prev }; delete n[String(year)]; return n; });
+    setConsensusHistory((prev) => { const n = { ...prev }; delete n[String(year)]; return n; });
   };
 
   // ── Computed values ───────────────────────────────────────────────────────
@@ -370,6 +406,34 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
     return Array.from(map.values())
       .map(e => ({ ...e, avgPickNo: e.picks.reduce((s: number, p: number) => s + p, 0) / e.picks.length, draftCount: e.picks.length }))
       .sort((a, b) => a.avgPickNo - b.avgPickNo);
+  })();
+
+  // Riser/faller callouts (Phase G stage G3): compares each player's earliest
+  // vs. latest compile-run snapshot for the selected year. Only ever non-empty
+  // once a year has been recompiled 2+ times — a fresh compile gives every
+  // player a single history point, which the `length >= 2` guard naturally
+  // excludes rather than needing a separate "not enough runs yet" check.
+  const RISER_FALLER_THRESHOLD = 2; // min |delta| in avg pick number to surface
+  const riserFallerList = (() => {
+    const yearHistory = consensusHistory[selectedHistoryYear];
+    if (!yearHistory) return { risers: [] as ConsensusMoverEntry[], fallers: [] as ConsensusMoverEntry[] };
+    const cacheRows = consensusCache[selectedHistoryYear] ?? [];
+    const cacheByPlayer = new Map(cacheRows.map((r) => [r.player_id, r]));
+
+    const movers: ConsensusMoverEntry[] = [];
+    Object.entries(yearHistory).forEach(([playerId, points]) => {
+      if (points.length < 2) return;
+      const cacheRow = cacheByPlayer.get(playerId);
+      if (!cacheRow) return; // player no longer on the board (e.g. removed) — skip
+      const delta = points[0].avg_pick_no - points[points.length - 1].avg_pick_no; // positive = moved up
+      if (Math.abs(delta) < RISER_FALLER_THRESHOLD) return;
+      movers.push({ player_id: playerId, name: cacheRow.player_name, position: cacheRow.position, team: cacheRow.team, delta });
+    });
+
+    return {
+      risers:  movers.filter((m) => m.delta > 0).sort((a, b) => b.delta - a.delta).slice(0, 5),
+      fallers: movers.filter((m) => m.delta < 0).sort((a, b) => a.delta - b.delta).slice(0, 5),
+    };
   })();
 
   const myPicksList = (() => {
@@ -452,6 +516,7 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
     // consensus state
     consensusMeta,
     consensusCache,
+    consensusHistory,
     loadingCacheYear,
     compiling,
     compileLog,
@@ -472,6 +537,7 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
     filteredDrafts,
     currentLeagueDraft,
     consensusList,
+    riserFallerList,
     myPicksList,
     gradeReport,
     // mutations

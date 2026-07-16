@@ -1,8 +1,9 @@
 "use client";
 import type { Dispatch, SetStateAction } from "react";
-import type { HistoryDraftEntry, ConsensusCacheRow } from "../shared";
+import type { HistoryDraftEntry, ConsensusCacheRow, ConsensusHistoryPoint, ConsensusMoverEntry } from "../shared";
 import { posColor, closestPickEquiv, pickEquivColor, toPickSlot } from "../shared";
 import ConsensusCompiler from "./ConsensusCompiler";
+import { MultiPointSparkline } from "../../charts/MultiPointSparkline";
 
 type ConsensusMeta = Record<string, {
   draftCount: number;
@@ -26,6 +27,7 @@ interface ConsensusTabProps {
   supabaseUser: { id: string } | null;
   consensusMeta: ConsensusMeta;
   consensusCache: Record<string, ConsensusCacheRow[]>;
+  consensusHistory: Record<string, Record<string, ConsensusHistoryPoint[]>>;
   loadingCacheYear: string | null;
   compiling: boolean;
   compileLog: string;
@@ -37,6 +39,7 @@ interface ConsensusTabProps {
   playerGrades: Record<string, "hit" | "neutral" | "bust">;
   filteredDrafts: HistoryDraftEntry[];
   consensusList: ConsensusBoardEntry[];
+  riserFallerList: { risers: ConsensusMoverEntry[]; fallers: ConsensusMoverEntry[] };
   players: Record<string, { full_name?: string | null; position?: string | null; team?: string | null }>;
   pickFcValues: Record<string, number>;
   calcFcValues: Record<string, number>;
@@ -51,6 +54,7 @@ export default function ConsensusTab({
   supabaseUser,
   consensusMeta,
   consensusCache,
+  consensusHistory,
   loadingCacheYear,
   compiling,
   compileLog,
@@ -62,6 +66,7 @@ export default function ConsensusTab({
   playerGrades,
   filteredDrafts,
   consensusList,
+  riserFallerList,
   players,
   pickFcValues,
   calcFcValues,
@@ -128,6 +133,42 @@ export default function ConsensusTab({
         clearYear={clearYear}
       />
 
+      {/* ── Risers / Fallers ── */}
+      {(riserFallerList.risers.length > 0 || riserFallerList.fallers.length > 0) && (
+        <div className="rounded-xl border border-gray-700 bg-gray-800/40 p-4 mb-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <div className="text-xs font-bold uppercase tracking-wider text-blue-400 mb-2">▲ Risers</div>
+            <div className="space-y-1">
+              {riserFallerList.risers.map((m) => (
+                <div key={m.player_id} className="flex items-center justify-between text-xs">
+                  <span className="text-gray-200 truncate">
+                    <span className={`font-bold mr-1 ${posColor[m.position] || "text-gray-400"}`}>{m.position}</span>
+                    {m.name}
+                  </span>
+                  <span className="text-blue-400 font-semibold shrink-0 ml-2">+{m.delta.toFixed(1)}</span>
+                </div>
+              ))}
+              {riserFallerList.risers.length === 0 && <div className="text-xs text-gray-600">None this run</div>}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs font-bold uppercase tracking-wider text-red-400 mb-2">▼ Fallers</div>
+            <div className="space-y-1">
+              {riserFallerList.fallers.map((m) => (
+                <div key={m.player_id} className="flex items-center justify-between text-xs">
+                  <span className="text-gray-200 truncate">
+                    <span className={`font-bold mr-1 ${posColor[m.position] || "text-gray-400"}`}>{m.position}</span>
+                    {m.name}
+                  </span>
+                  <span className="text-red-400 font-semibold shrink-0 ml-2">{m.delta.toFixed(1)}</span>
+                </div>
+              ))}
+              {riserFallerList.fallers.length === 0 && <div className="text-xs text-gray-600">None this run</div>}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Board ── */}
       {isLoadingCache ? (
         <div className="flex items-center gap-3 text-sm text-blue-400 py-6">
@@ -180,6 +221,9 @@ export default function ConsensusTab({
                   <div className="min-w-0 flex items-center gap-1.5">
                     <span className="text-sm font-medium text-white truncate">{p.name}</span>
                     {p.team && <span className="text-[10px] text-gray-500 shrink-0">{p.team}</span>}
+                    <MultiPointSparkline
+                      values={(consensusHistory[selectedHistoryYear]?.[p.player_id] ?? []).map((pt) => pt.avg_pick_no)}
+                    />
                     {hasCachedRows && supabaseUser && (
                       <button
                         title="Remove from compiled data"

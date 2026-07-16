@@ -140,6 +140,19 @@ export interface ConsensusCacheRow {
   draft_count: number;
 }
 
+export interface ConsensusHistoryPoint {
+  avg_pick_no: number;
+  snapshotted_at: string;
+}
+
+export interface ConsensusMoverEntry {
+  player_id: string;
+  name: string;
+  position: string;
+  team: string;
+  delta: number; // positive = moved up boards (avg pick no decreased)
+}
+
 export interface GridPick {
   slot: string;
   owner_id: number | null;
