@@ -96,6 +96,7 @@ function TradeHub({
   const [calcReceivePicks, setCalcReceivePicks] = useState<string[]>([]);
   const [calcSearchA, setCalcSearchA] = useState("");
   const [calcSearchB, setCalcSearchB] = useState("");
+  const [calcShowAllPlayers, setCalcShowAllPlayers] = useState(false);
   const [finderSeed, setFinderSeed] = useState(() => Math.random());
   const [finderPinnedPlayerId, setFinderPinnedPlayerId] = useState<string | null>(null);
   const [finderTargetOppRosterId, setFinderTargetOppRosterId] = useState<number | null>(null);
@@ -217,6 +218,8 @@ function TradeHub({
             setCalcSearchA={setCalcSearchA}
             calcSearchB={calcSearchB}
             setCalcSearchB={setCalcSearchB}
+            calcShowAllPlayers={calcShowAllPlayers}
+            setCalcShowAllPlayers={setCalcShowAllPlayers}
             loadingCalcValues={loadingCalcValues}
             allPicks={allPicks}
             user={user}

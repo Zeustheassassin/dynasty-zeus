@@ -25,6 +25,8 @@ interface TradeCalculatorProps {
   setCalcSearchA: (s: string) => void;
   calcSearchB: string;
   setCalcSearchB: (s: string) => void;
+  calcShowAllPlayers: boolean;
+  setCalcShowAllPlayers: (v: boolean) => void;
   loadingCalcValues: boolean;
   allPicks: AugmentedPick[];
   user: SleeperUser | null;
@@ -43,6 +45,7 @@ function TradeCalculator({
   calcGive, setCalcGive, calcReceive, setCalcReceive,
   calcGivePicks, setCalcGivePicks, calcReceivePicks, setCalcReceivePicks,
   calcSearchA, setCalcSearchA, calcSearchB, setCalcSearchB,
+  calcShowAllPlayers, setCalcShowAllPlayers,
   loadingCalcValues, allPicks, user,
   onMarkAttempted, sessionMarked, onSessionMark,
   setPlayerProfileId, loadUserExposure, loadUserTrades,
@@ -147,6 +150,27 @@ function TradeCalculator({
       ? list.filter((p) => p.full_name?.toLowerCase().includes(search.toLowerCase()))
       : list;
 
+  // Historical-logging escape hatch: a player who's since moved teams (or been
+  // dropped) no longer shows up on either roster, so the normal roster-scoped
+  // pickers can't find them. When calcShowAllPlayers is on, search the entire
+  // Sleeper player database instead — gated behind a minimum query length so
+  // we never map/sort/render the ~thousands of skill-position entries at once.
+  const ALL_PLAYER_SEARCH_MIN = 2;
+  const searchAllPlayers = (search: string, excludeIds: string[]): SleeperPlayer[] => {
+    const q = search.trim().toLowerCase();
+    if (q.length < ALL_PLAYER_SEARCH_MIN) return [];
+    const excluded = new Set(excludeIds);
+    return Object.values(players)
+      .filter((p): p is SleeperPlayer =>
+        !!p &&
+        ["QB", "RB", "WR", "TE"].includes(p.position) &&
+        !excluded.has(p.player_id) &&
+        !!p.full_name?.toLowerCase().includes(q)
+      )
+      .sort((a, b) => calcVal(b.player_id) - calcVal(a.player_id))
+      .slice(0, 25);
+  };
+
   const assetRow = (label: string, value: number, onAdd: () => void, playerId?: string) => (
     <div
       key={label}
@@ -248,6 +272,17 @@ function TradeCalculator({
             </div>
           </div>
         )}
+
+        <label className="mt-3 flex items-center gap-2 text-xs text-gray-400 cursor-pointer select-none w-fit">
+          <input
+            type="checkbox"
+            checked={calcShowAllPlayers}
+            onChange={(e) => setCalcShowAllPlayers(e.target.checked)}
+            className="rounded border-gray-700 bg-gray-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-gray-900"
+          />
+          Search all players, not just current rosters
+          <span className="text-gray-600">— for logging an old offer involving someone who&apos;s since changed teams</span>
+        </label>
       </div>
 
       {/* Two-column asset panels */}
@@ -261,11 +296,22 @@ function TradeCalculator({
             type="text"
             value={calcSearchA}
             onChange={(e) => setCalcSearchA(e.target.value)}
-            placeholder="Filter players..."
+            placeholder={calcShowAllPlayers ? "Search all players by name..." : "Filter players..."}
             className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-xs mb-3 focus:outline-none focus:border-blue-500"
           />
           <div className="space-y-1 max-h-56 overflow-y-auto pr-1">
             {(() => {
+              if (calcShowAllPlayers) {
+                if (calcSearchA.trim().length < ALL_PLAYER_SEARCH_MIN) return (
+                  <p className="text-xs text-gray-600">Type at least 2 letters to search all players</p>
+                );
+                const results = searchAllPlayers(calcSearchA, calcGive);
+                if (results.length === 0) return <p className="text-xs text-gray-600">No player found — try a different name</p>;
+                return results.map((p) =>
+                  assetRow(`${p.full_name} (${p.position}${p.team ? ` · ${p.team}` : ""})`, calcVal(p.player_id),
+                    () => setCalcGive((prev: string[]) => [...prev, p.player_id]), p.player_id)
+                );
+              }
               const items = [
                 ...filterPlayers(myAvailPlayers, calcSearchA).map((p) => ({
                   label: `${p.full_name} (${p.position} · ${p.team})`,
@@ -297,7 +343,11 @@ function TradeCalculator({
             type="text"
             value={calcSearchB}
             onChange={(e) => setCalcSearchB(e.target.value)}
-            placeholder={opponentRoster ? "Filter players..." : "Search any player to find their team..."}
+            placeholder={
+              !opponentRoster ? "Search any player to find their team..."
+              : calcShowAllPlayers ? "Search all players by name..."
+              : "Filter players..."
+            }
             className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-xs mb-3 focus:outline-none focus:border-blue-500"
           />
           <div className="space-y-1 max-h-56 overflow-y-auto pr-1">
@@ -330,7 +380,17 @@ function TradeCalculator({
                   setCalcReceive((prev) => [...prev, p.player_id]);
                 }, p.player_id)
               );
-            })() : (() => {
+            })() : calcShowAllPlayers ? (() => {
+                if (calcSearchB.trim().length < ALL_PLAYER_SEARCH_MIN) return (
+                  <p className="text-xs text-gray-600">Type at least 2 letters to search all players</p>
+                );
+                const results = searchAllPlayers(calcSearchB, calcReceive);
+                if (results.length === 0) return <p className="text-xs text-gray-600">No player found — try a different name</p>;
+                return results.map((p) =>
+                  assetRow(`${p.full_name} (${p.position}${p.team ? ` · ${p.team}` : ""})`, calcVal(p.player_id),
+                    () => setCalcReceive((prev: string[]) => [...prev, p.player_id]), p.player_id)
+                );
+              })() : (() => {
                 const items = [
                   ...filterPlayers(theirAvailPlayers, calcSearchB).map((p) => ({
                     label: `${p.full_name} (${p.position} · ${p.team})`,
