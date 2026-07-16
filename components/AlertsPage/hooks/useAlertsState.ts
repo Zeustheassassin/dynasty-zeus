@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { DashboardAlert, LeagueTransaction, InjuryReportPlayer } from "../alertsPageHelpers";
+import { getInjuredCount, getMarketMovers } from "../alertsPageHelpers";
 
 type FeedTabKey = "alerts" | "transactions" | "waivers" | "injury";
 
@@ -24,10 +25,7 @@ export function useAlertsState({
     (tx) => tx.type === "free_agent" || tx.type === "waiver"
   );
 
-  const injuredCount = injuryReportPlayers.filter((r) => {
-    const s = (r.player.injury_status || r.player.status || "").toLowerCase();
-    return /ir|pup|out|doubtful|questionable|suspended|inactive/.test(s);
-  }).length;
+  const injuredCount = getInjuredCount(injuryReportPlayers);
 
   const byeGroups: Record<number, InjuryReportPlayer[]> = {};
   if (currentNFLWeek > 0) {
@@ -43,15 +41,7 @@ export function useAlertsState({
     .map(Number)
     .sort((a, b) => a - b);
 
-  const marketAlerts = alerts.filter(
-    (a) => (a.category === "market" || a.category === "watchlist") && a.payload?.["direction"]
-  );
-  const gainers = [...marketAlerts]
-    .filter((a) => a.payload?.["direction"] === "up")
-    .sort((a, b) => ((b.payload?.["delta"] as number ?? 0) - (a.payload?.["delta"] as number ?? 0)));
-  const fallers = [...marketAlerts]
-    .filter((a) => a.payload?.["direction"] === "down")
-    .sort((a, b) => ((a.payload?.["delta"] as number ?? 0) - (b.payload?.["delta"] as number ?? 0)));
+  const { marketAlerts, gainers, fallers } = getMarketMovers(alerts);
 
   const TABS = [
     { key: "transactions" as const, label: `Trades${tradeActivity.length > 0 ? ` (${tradeActivity.length})` : ""}` },

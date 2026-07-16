@@ -42,6 +42,29 @@ export function injuryStatusStyle(player: SleeperPlayer) {
   return { cls: "bg-slate-800/40 text-slate-400 border-slate-700", label: "Active" };
 }
 
+export function getInjuredCount(injuryReportPlayers: InjuryReportPlayer[]): number {
+  return injuryReportPlayers.filter((r) => {
+    const s = (r.player.injury_status || r.player.status || "").toLowerCase();
+    return /ir|pup|out|doubtful|questionable|suspended|inactive/.test(s);
+  }).length;
+}
+
+/** Splits value-movement alerts (market/watchlist category with a direction
+ *  payload) into gainers/fallers, each sorted by magnitude of delta. Shared
+ *  between AlertsPage's "movers" tab and the Dashboard's Value Movers panel. */
+export function getMarketMovers(alerts: DashboardAlert[]) {
+  const marketAlerts = alerts.filter(
+    (a) => (a.category === "market" || a.category === "watchlist") && a.payload?.["direction"]
+  );
+  const gainers = [...marketAlerts]
+    .filter((a) => a.payload?.["direction"] === "up")
+    .sort((a, b) => ((b.payload?.["delta"] as number ?? 0) - (a.payload?.["delta"] as number ?? 0)));
+  const fallers = [...marketAlerts]
+    .filter((a) => a.payload?.["direction"] === "down")
+    .sort((a, b) => ((a.payload?.["delta"] as number ?? 0) - (b.payload?.["delta"] as number ?? 0)));
+  return { marketAlerts, gainers, fallers };
+}
+
 export function relTime(ts: number): string {
   const ms = Date.now() - ts;
   const m = Math.floor(ms / 60000);

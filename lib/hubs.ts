@@ -23,7 +23,7 @@ export interface HubDef {
 }
 
 export const HUBS = [
-  { id: "DASHBOARD",      label: "Dashboard",      wide: false },
+  { id: "DASHBOARD",      label: "Dashboard",      wide: true  },
   { id: "LEAGUES",        label: "League Hub",     wide: true  },
   { id: "DATA_HUB",       label: "Data Hub",       wide: false },
   { id: "DRAFT",          label: "Draft Hub",      wide: true  },

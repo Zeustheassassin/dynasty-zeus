@@ -3,6 +3,7 @@ import React from "react";
 import dynamic from "next/dynamic";
 import { isWideHub, type MainTab } from "../../lib/hubs";
 import Dashboard from "../../components/Dashboard";
+import type { DashboardLeagueEntry } from "../../components/Dashboard/TeamSummaryGrid";
 import AlertsPage from "../../components/AlertsPage";
 import ManagementHub from "../../components/ManagementHub";
 import GamedayHub from "../../components/GamedayHub";
@@ -88,9 +89,11 @@ interface HubRouterProps {
   loadingTransactions: boolean;
   injuryReportPlayers: InjuryReportPlayer[];
   allTradeAttempts: { id: string; league_id: string; status: string }[];
+  allLeagueData: DashboardLeagueEntry[];
   loadLeagueOverview: () => Promise<void>;
   loadingLeagueOverview: boolean;
   onNavigateToAttempts: (leagueId: string) => void;
+  onNavigateToLeague: (leagueId: string) => void;
 
   // League Hub
   leagueHubTab: LeagueHubTab;
@@ -274,8 +277,8 @@ export function HubRouter({
   connectLoading, connectError, connectSuccess, connectSleeper,
   visibleDashboardAlerts, actionableDashboardAlerts, watchlistEntries,
   dismissDashboardAlert, leagueTransactions, loadingTransactions,
-  injuryReportPlayers, allTradeAttempts,
-  loadLeagueOverview, loadingLeagueOverview, onNavigateToAttempts,
+  injuryReportPlayers, allTradeAttempts, allLeagueData,
+  loadLeagueOverview, loadingLeagueOverview, onNavigateToAttempts, onNavigateToLeague,
   leagueHubTab, setLeagueHubTab, activeLeagueHubGroup, standings,
   committedSimsByLeague, leagueSimCache, simQueue, simProgress,
   loadingLeagueMateIntel, loadingCrossLeagueMateIntel, loadingActivity, loadingLeagueWeeklyMatchups,
@@ -360,6 +363,14 @@ export function HubRouter({
   <Dashboard
     username={user?.display_name || ""}
     onNavigate={setMainTab}
+    allLeagueData={allLeagueData}
+    loadingAllLeagueData={loadingAllLeagueData}
+    injuryReportPlayers={injuryReportPlayers}
+    allTradeAttempts={allTradeAttempts}
+    visibleDashboardAlerts={visibleDashboardAlerts}
+    actionableDashboardAlerts={actionableDashboardAlerts}
+    onDismissAlert={dismissDashboardAlert}
+    onSelectLeague={onNavigateToLeague}
   />
 </>
   </>

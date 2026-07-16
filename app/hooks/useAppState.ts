@@ -74,7 +74,7 @@ let _playersInMemory: Record<string, SleeperPlayer> | null = null;
 // â”€â”€ Page-local interfaces (shapes that don't warrant a lib/types entry) â”€â”€â”€â”€â”€â”€
 // AugmentedPick, AnnotatedTransaction, StandingRow are exported from lib/types.ts
 interface OwnedPlayerEntry { player_id: string; player?: SleeperPlayer; leagues: string[]; shareCount: number; }
-interface AllLeagueDataEntry { leagueName?: string; roster: import("../../lib/types").SleeperRoster | null; }
+interface AllLeagueDataEntry { leagueId?: string; leagueName?: string; roster: import("../../lib/types").SleeperRoster | null; }
 interface PlayerSnapshot { full_name: string; status: string; team: string; value: number; active: boolean; shareCount: number; }
 
 export function useAppState() {
@@ -250,7 +250,7 @@ const [standings, setStandings] = useState<StandingRow[]>([]);
   useEffect(() => { leaguesRef2.current = leagues; }, [leagues]);
   useEffect(() => { selectedLeagueRef.current = selectedLeague; }, [selectedLeague]);
 
-  const [allLeagueData, setAllLeagueData] = useState<{ leagueName: string; roster: SleeperRoster | null }[]>([]);
+  const [allLeagueData, setAllLeagueData] = useState<{ leagueId: string; leagueName: string; roster: SleeperRoster | null }[]>([]);
   const [loadingAllLeagueData, setLoadingAllLeagueData] = useState(false);
   const [shareSearch, setShareSearch] = useState("");
   const [sharePosition, setSharePosition] = useState("ALL");
@@ -847,6 +847,7 @@ useEffect(() => {
             ).then((r) => r.json()).catch(() => ({ roster: null }));
 
             return {
+              leagueId: league.league_id,
               leagueName: league.name,
               roster,
             };
@@ -2782,6 +2783,15 @@ const onNavigateToAttempts = useCallback((leagueId: string) => {
   }
 }, [loadRoster, loadTradeAttempts, setMainTab, setTradeHubSection]);
 
+const onNavigateToLeague = useCallback((leagueId: string) => {
+  const league = leaguesRef2.current.find((l) => l.league_id === leagueId);
+  if (league) {
+    loadRoster(league);
+    setLeagueHubTab("OVERVIEW");
+    setMainTab("LEAGUES");
+  }
+}, [loadRoster, setLeagueHubTab, setMainTab]);
+
 const onRefreshDirection = useCallback(() => {
   const league = selectedLeagueRef.current;
   if (league) { loadRedraftValues(); loadRoster(league); }
@@ -2861,9 +2871,11 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     loadingTransactions,
     injuryReportPlayers,
     allTradeAttempts,
+    allLeagueData,
     loadLeagueOverview,
     loadingLeagueOverview,
     onNavigateToAttempts,
+    onNavigateToLeague,
     leagueHubTab, setLeagueHubTab,
     activeLeagueHubGroup,
     standings,

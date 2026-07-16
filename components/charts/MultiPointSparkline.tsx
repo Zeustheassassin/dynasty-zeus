@@ -17,9 +17,12 @@ interface MultiPointSparklineProps {
   values: number[]; // avg_pick_no per snapshot, chronological order
   width?: number;
   height?: number;
+  /** Default polarity (false) is avg-pick-no's "lower is better." Pass true
+   *  for metrics like playoff odds where a rising line is the good outcome. */
+  higherIsBetter?: boolean;
 }
 
-export function MultiPointSparkline({ values, width = 40, height = 14 }: MultiPointSparklineProps) {
+export function MultiPointSparkline({ values, width = 40, height = 14, higherIsBetter = false }: MultiPointSparklineProps) {
   if (values.length < 2 || values.some((v) => v <= 0)) return null;
 
   const max = Math.max(...values);
@@ -34,8 +37,11 @@ export function MultiPointSparkline({ values, width = 40, height = 14 }: MultiPo
     return { x, y };
   });
 
-  // Lower avg_pick_no is better (moved up the board), so a falling line is the "positive" color.
-  const improved = values[values.length - 1] <= values[0];
+  // Lower avg_pick_no is better (moved up the board) by default, so a falling
+  // line is the "positive" color; higherIsBetter flips that for metrics like odds.
+  const improved = higherIsBetter
+    ? values[values.length - 1] >= values[0]
+    : values[values.length - 1] <= values[0];
   const color = improved ? CHART_DIVERGING.positive : CHART_DIVERGING.negative;
   const last = points[points.length - 1];
 
