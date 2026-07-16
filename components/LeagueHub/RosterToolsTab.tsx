@@ -13,9 +13,11 @@ import {
   PolarRadiusAxis,
   Radar,
 } from "recharts";
+import type { TooltipContentProps } from "recharts";
+import type { NameType, ValueType } from "recharts/types/component/DefaultTooltipContent";
 import RosterSelect from "../shared/RosterSelect";
 import { ChartCard, ChartTooltip, ChartLegend, chartTickStyle } from "../charts/ChartCard";
-import { CHART_CATEGORICAL, CHART_CHROME } from "../../lib/chartTheme";
+import { CHART_CATEGORICAL, CHART_CHROME, CHART_FONT_STYLE } from "../../lib/chartTheme";
 import { usePlayers } from "../../lib/PlayersContext";
 import { useLeague } from "../../lib/LeagueContext";
 import { useMyRoster } from "../../lib/RosterContext";
@@ -40,6 +42,35 @@ const LEAGUE_AVG_COLOR = CHART_CATEGORICAL[4];
 
 interface RosterToolsTabProps {
   allPicks: SleeperTradedPick[];
+}
+
+/** The generic ChartTooltip only renders the axis-bound dataKeys (age, value)
+ *  — the player's name isn't wired to an axis, so without a custom tooltip
+ *  every point just reads as two bare numbers. Recharts always carries the
+ *  full source datum in `payload[0].payload`, so pull the name from there. */
+function AgeCurveTooltip({ active, payload }: TooltipContentProps<ValueType, NameType>) {
+  if (!active || !payload || payload.length === 0) return null;
+  const point = payload[0].payload as ReturnType<typeof getRosterAgeCurve>[number];
+  return (
+    <div
+      className="rounded-lg px-3 py-2 text-xs shadow-2xl"
+      style={{ background: CHART_CHROME.tooltipBg, border: `1px solid ${CHART_CHROME.tooltipBorder}`, ...CHART_FONT_STYLE }}
+    >
+      <div className="mb-1 font-semibold" style={{ color: CHART_CHROME.textPrimary }}>
+        {point.full_name} <span style={{ color: CHART_CHROME.textSecondary }}>({point.pos})</span>
+      </div>
+      <div className="space-y-0.5">
+        <div className="flex items-center justify-between gap-3">
+          <span style={{ color: CHART_CHROME.textSecondary }}>Age</span>
+          <span className="tabular-nums" style={{ color: CHART_CHROME.textPrimary }}>{point.age.toFixed(1)}</span>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <span style={{ color: CHART_CHROME.textSecondary }}>Value</span>
+          <span className="tabular-nums" style={{ color: CHART_CHROME.textPrimary }}>{point.value.toLocaleString()}</span>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function RosterAgeCurveChart({ points }: { points: ReturnType<typeof getRosterAgeCurve> }) {
@@ -75,7 +106,7 @@ function RosterAgeCurveChart({ points }: { points: ReturnType<typeof getRosterAg
           tick={chartTickStyle}
         />
         <ZAxis dataKey="full_name" name="Player" />
-        <Tooltip cursor={{ stroke: CHART_CHROME.gridline }} content={ChartTooltip} />
+        <Tooltip cursor={{ stroke: CHART_CHROME.gridline }} content={AgeCurveTooltip} />
         {byPos.map(({ pos, data }) => (
           <Scatter key={pos} name={pos} data={data} fill={POSITION_COLOR[pos]} />
         ))}
@@ -86,7 +117,18 @@ function RosterAgeCurveChart({ points }: { points: ReturnType<typeof getRosterAg
 
 function PositionalStrengthRadar({ radarData }: { radarData: Array<{ pos: string; pct: number; avg: number }> }) {
   return (
-    <ChartCard title="Positional Strength" subtitle="Value vs. league average (100 = average)">
+    <ChartCard
+      title="Positional Strength"
+      subtitle="Value vs. league average (100 = average)"
+      legend={
+        <ChartLegend
+          items={[
+            { label: "This Roster", color: CHART_CATEGORICAL[0] },
+            { label: "League Avg", color: LEAGUE_AVG_COLOR },
+          ]}
+        />
+      }
+    >
       <RadarChart data={radarData} outerRadius="70%">
         <PolarGrid stroke={CHART_CHROME.gridline} />
         <PolarAngleAxis dataKey="pos" tick={chartTickStyle} stroke={CHART_CHROME.axis} />
@@ -95,12 +137,6 @@ function PositionalStrengthRadar({ radarData }: { radarData: Array<{ pos: string
         <Radar name="This Roster" dataKey="pct" stroke={CHART_CATEGORICAL[0]} fill={CHART_CATEGORICAL[0]} fillOpacity={0.35} />
         <Tooltip content={ChartTooltip} />
       </RadarChart>
-      <ChartLegend
-        items={[
-          { label: "This Roster", color: CHART_CATEGORICAL[0] },
-          { label: "League Avg", color: LEAGUE_AVG_COLOR },
-        ]}
-      />
     </ChartCard>
   );
 }

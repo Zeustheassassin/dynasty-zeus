@@ -33,7 +33,12 @@ function TeamValueTrendChart({
   const height = Math.max(160, data.length * 28);
 
   return (
-    <ChartCard title="Team Value Trend" subtitle="Current roster's dynasty value vs. last snapshot" height={height}>
+    <ChartCard
+      title="Team Value Trend"
+      subtitle="Current roster's dynasty value vs. last snapshot"
+      height={height}
+      legend={<ChartLegend items={[{ label: "Then", color: CHART_CATEGORICAL[1] }, { label: "Now", color: CHART_CATEGORICAL[0] }]} />}
+    >
       <BarChart data={data} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 0 }}>
         <CartesianGrid {...chartGridProps} horizontal={false} />
         <XAxis type="number" {...chartAxisProps} tick={chartTickStyle} />
@@ -42,7 +47,6 @@ function TeamValueTrendChart({
         <Bar dataKey="then" name="Then" fill={CHART_CATEGORICAL[1]} radius={2} barSize={8} />
         <Bar dataKey="now" name="Now" fill={CHART_CATEGORICAL[0]} radius={2} barSize={8} />
       </BarChart>
-      <ChartLegend items={[{ label: "Then", color: CHART_CATEGORICAL[1] }, { label: "Now", color: CHART_CATEGORICAL[0] }]} />
     </ChartCard>
   );
 }

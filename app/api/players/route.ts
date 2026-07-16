@@ -35,14 +35,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
     interface SlimPlayer {
       player_id: string; full_name: string; position: string; team: string | null;
-      age: number | null; years_exp: number | null; search_rank: number | null;
+      age: number | null; birth_date: string | null; years_exp: number | null; search_rank: number | null;
       fantasy_positions: string[]; active: boolean; status: string;
       injury_status: string | null;
     }
     // Only keep the fields the app actually uses — strips ~90% of the payload.
     // injury_status is needed by Gameday badges, alerts, and the Roster
     // Overview's IR-eligible flag — without it those views silently miss
-    // every injury.
+    // every injury. birth_date lets age-sensitive charts (e.g. the roster
+    // age-curve scatter) compute a continuous age instead of Sleeper's
+    // whole-year `age`, which can make two players a couple of days apart
+    // in age look a full year apart on either side of a birthday.
     const players: Record<string, SlimPlayer> = {};
     for (const id of Object.keys(rawPlayers)) {
       const p = rawPlayers[id];
@@ -53,6 +56,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         position:          p.position          as string,
         team:              (p.team ?? null)     as string | null,
         age:               (p.age ?? null)      as number | null,
+        birth_date:        (p.birth_date ?? null) as string | null,
         years_exp:         (p.years_exp ?? null) as number | null,
         search_rank:       (p.search_rank ?? null) as number | null,
         fantasy_positions: (p.fantasy_positions ?? []) as string[],

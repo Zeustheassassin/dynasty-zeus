@@ -15,12 +15,18 @@ interface ChartCardProps {
   title: string;
   subtitle?: string;
   height?: number;
+  /** Rendered below the chart, outside ResponsiveContainer's fixed-height box.
+   *  Pass a <ChartLegend/> here instead of nesting it as a chart child —
+   *  ResponsiveContainer sizes to exactly `height`, and a legend nested
+   *  inside it has no guaranteed room, so it can visually spill into
+   *  whatever follows the card in the DOM instead of sitting below the chart. */
+  legend?: ReactNode;
   children: ReactNode;
 }
 
 /** Standard card shell for a full-size chart — matches the app's
  *  `bg-gray-900 border border-gray-800 rounded-xl` panel pattern. */
-export function ChartCard({ title, subtitle, height = 260, children }: ChartCardProps) {
+export function ChartCard({ title, subtitle, height = 260, legend, children }: ChartCardProps) {
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-xl p-3">
       <div className="mb-2">
@@ -30,6 +36,7 @@ export function ChartCard({ title, subtitle, height = 260, children }: ChartCard
       <ResponsiveContainer width="100%" height={height}>
         {children}
       </ResponsiveContainer>
+      {legend}
     </div>
   );
 }

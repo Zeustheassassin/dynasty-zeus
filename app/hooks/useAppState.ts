@@ -675,8 +675,10 @@ useEffect(() => {
     loadNflState();
     loadRedraftValues();
   }
-  // Also load overview when Alerts tab opens so GM Briefing has cross-league data.
-  if (mainTab === "ALERTS" && !leagueOverviewLoaded && leagues.length > 0) {
+  // Also load overview when Alerts or the Dashboard opens — Alerts needs it for
+  // cross-league data, and the Dashboard's Your Teams grid needs full per-league
+  // rosters (not just the user's own) to rank/bucket each team's direction (Phase J).
+  if ((mainTab === "ALERTS" || mainTab === "DASHBOARD") && !leagueOverviewLoaded && leagues.length > 0) {
     loadLeagueOverview();
     loadRedraftValues();
   }
@@ -2872,6 +2874,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     injuryReportPlayers,
     allTradeAttempts,
     allLeagueData,
+    redraftValues,
     loadLeagueOverview,
     loadingLeagueOverview,
     onNavigateToAttempts,

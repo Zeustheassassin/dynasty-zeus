@@ -3,6 +3,26 @@ interface AgeCurvePlayer {
   full_name?: string;
   position?: string;
   age?: number | null;
+  birth_date?: string | null;
+}
+
+const MS_PER_YEAR = 365.25 * 24 * 60 * 60 * 1000;
+
+/** Continuous age in years when birth_date is available, falling back to
+ *  Sleeper's whole-year `age` otherwise. Whole-year age makes two players
+ *  born a couple of days apart look a full year apart on either side of
+ *  a birthday — a real effect, but a misleading one on a scatter chart's
+ *  continuous x-axis, so this chart specifically wants the precise value. */
+function getPreciseAge(player: AgeCurvePlayer): number | null {
+  if (player.birth_date) {
+    const born = new Date(player.birth_date).getTime();
+    if (Number.isFinite(born)) {
+      const preciseAge = (Date.now() - born) / MS_PER_YEAR;
+      if (preciseAge > 0) return preciseAge;
+    }
+  }
+  const fallback = Number(player.age);
+  return Number.isFinite(fallback) && fallback > 0 ? fallback : null;
 }
 
 /** Minimal roster shape needed for the roster age curve. */
@@ -36,8 +56,8 @@ export const getRosterAgeCurve = ({
   (roster?.players || [])
     .map((id: string): RosterAgeCurvePoint | null => {
       const player = players?.[id];
-      const age = Number(player?.age);
-      if (!player || !positions.includes(player.position ?? "") || !Number.isFinite(age) || age <= 0) {
+      const age = player ? getPreciseAge(player) : null;
+      if (!player || !positions.includes(player.position ?? "") || age == null) {
         return null;
       }
       return {

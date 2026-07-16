@@ -90,6 +90,7 @@ interface HubRouterProps {
   injuryReportPlayers: InjuryReportPlayer[];
   allTradeAttempts: { id: string; league_id: string; status: string }[];
   allLeagueData: DashboardLeagueEntry[];
+  redraftValues: Record<string, number>;
   loadLeagueOverview: () => Promise<void>;
   loadingLeagueOverview: boolean;
   onNavigateToAttempts: (leagueId: string) => void;
@@ -277,7 +278,7 @@ export function HubRouter({
   connectLoading, connectError, connectSuccess, connectSleeper,
   visibleDashboardAlerts, actionableDashboardAlerts, watchlistEntries,
   dismissDashboardAlert, leagueTransactions, loadingTransactions,
-  injuryReportPlayers, allTradeAttempts, allLeagueData,
+  injuryReportPlayers, allTradeAttempts, allLeagueData, redraftValues,
   loadLeagueOverview, loadingLeagueOverview, onNavigateToAttempts, onNavigateToLeague,
   leagueHubTab, setLeagueHubTab, activeLeagueHubGroup, standings,
   committedSimsByLeague, leagueSimCache, simQueue, simProgress,
@@ -371,6 +372,8 @@ export function HubRouter({
     actionableDashboardAlerts={actionableDashboardAlerts}
     onDismissAlert={dismissDashboardAlert}
     onSelectLeague={onNavigateToLeague}
+    leagueOverviewData={leagueOverviewData}
+    redraftValues={redraftValues}
   />
 </>
   </>

@@ -206,7 +206,18 @@ function SimulatorTab({
               No odds history yet — the weekly snapshot cron builds this up over time. Check back after the next Tuesday run.
             </p>
           ) : (
-            <ChartCard title="Playoff / Title Odds" subtitle="Weekly snapshots">
+            <ChartCard
+              title="Playoff / Title Odds"
+              subtitle="Weekly snapshots"
+              legend={
+                <ChartLegend
+                  items={[
+                    { label: "Playoff Odds", color: CHART_CATEGORICAL[0] },
+                    { label: "Title Odds", color: CHART_CATEGORICAL[3] },
+                  ]}
+                />
+              }
+            >
               <LineChart data={oddsTrendData} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
                 <CartesianGrid {...chartGridProps} />
                 <XAxis dataKey="label" {...chartAxisProps} tick={chartTickStyle} />
@@ -215,12 +226,6 @@ function SimulatorTab({
                 <Line type="monotone" dataKey="playoffOdds" name="Playoff Odds" stroke={CHART_CATEGORICAL[0]} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 4 }} />
                 <Line type="monotone" dataKey="titleOdds" name="Title Odds" stroke={CHART_CATEGORICAL[3]} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 4 }} />
               </LineChart>
-              <ChartLegend
-                items={[
-                  { label: "Playoff Odds", color: CHART_CATEGORICAL[0] },
-                  { label: "Title Odds", color: CHART_CATEGORICAL[3] },
-                ]}
-              />
             </ChartCard>
           )}
 

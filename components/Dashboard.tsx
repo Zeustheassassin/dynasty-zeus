@@ -1,13 +1,13 @@
 "use client";
 import { useMemo } from "react";
 import type { MainTab } from "../lib/hubs";
+import type { LeagueOverviewEntry } from "../lib/types";
 import type { DashboardAlert, InjuryReportPlayer } from "./AlertsPage/alertsPageHelpers";
 import { getInjuredCount } from "./AlertsPage/alertsPageHelpers";
 import StatStrip from "./Dashboard/StatStrip";
 import TeamSummaryGrid, { type DashboardLeagueEntry } from "./Dashboard/TeamSummaryGrid";
 import ValueMoversPanel from "./Dashboard/ValueMoversPanel";
 import RecentAlertsPanel from "./Dashboard/RecentAlertsPanel";
-import HubNavGrid from "./Dashboard/HubNavGrid";
 
 type DashboardProps = {
   username: string;
@@ -20,6 +20,8 @@ type DashboardProps = {
   actionableDashboardAlerts: DashboardAlert[];
   onDismissAlert: (alertId: string) => void;
   onSelectLeague: (leagueId: string) => void;
+  leagueOverviewData: Record<string, LeagueOverviewEntry>;
+  redraftValues: Record<string, number>;
 };
 
 // Phase J — Dashboard rebuild (A7 cross-league team summary + R7 value
@@ -40,6 +42,8 @@ export default function Dashboard({
   actionableDashboardAlerts,
   onDismissAlert,
   onSelectLeague,
+  leagueOverviewData,
+  redraftValues,
 }: DashboardProps) {
   const isConnected = !!username;
 
@@ -82,6 +86,8 @@ export default function Dashboard({
               entries={allLeagueData}
               loading={loadingAllLeagueData}
               onSelectLeague={onSelectLeague}
+              leagueOverviewData={leagueOverviewData}
+              redraftValues={redraftValues}
             />
           </div>
 
@@ -95,13 +101,6 @@ export default function Dashboard({
           </div>
         </div>
       )}
-
-      <div className="mb-4">
-        <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">
-          Hubs
-        </h2>
-        <HubNavGrid isConnected={isConnected} onNavigate={onNavigate} />
-      </div>
 
       {!isConnected && (
         <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 text-sm text-slate-400">

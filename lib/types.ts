@@ -86,6 +86,7 @@ export interface SleeperPlayer {
   position: string;
   team: string | null;
   age: number | null;
+  birth_date?: string | null;
   years_exp: number | null;
   status: string;
   injury_status: string | null;
