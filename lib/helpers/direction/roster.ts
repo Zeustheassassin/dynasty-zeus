@@ -1,8 +1,9 @@
 import { CURRENT_YEAR } from "../season";
-import { average, ordinal, rankAgainstLeague } from "../math";
+import { average, ordinal } from "../math";
 import { getStoredPickValue } from "../picks";
 import type { RosterDirectionProfile, CrossLeagueIntel } from "../../types";
 import { getLeagueDirectionBucket } from "./bucket";
+import { getLeaguePositionalBaseline, getRosterPositionalStrength } from "./baseline";
 
 /** Minimal player shape needed inside getRosterDirectionProfile. */
 interface DirectionPlayer {
@@ -138,27 +139,15 @@ export const getRosterDirectionProfile = ({
   const maxPfRank = maxPfSorted.findIndex((r: RosterLike) => Number(r.roster_id) === Number(rosterId)) + 1;
   const { bucket, bucketColor } = getLeagueDirectionBucket(dynRank, redRank, n);
 
-  const positionTotals = positions.reduce((acc: Record<string, number>, pos) => {
-    acc[pos] = skillPlayers
-      .filter((p) => p.position === pos)
-      .reduce((s: number, p) => s + p.dynValue, 0);
-    return acc;
-  }, {});
-
-  const positionRanks = positions.map((pos) => {
-    const leagueTotals = rosters.map((roster: RosterLike) =>
-      (roster.players || []).reduce((s: number, id: string) => {
-        const player = players?.[id];
-        if (!player || player.position !== pos) return s;
-        return s + dynastyValueForPlayer(id);
-      }, 0)
-    );
-    return {
-      pos,
-      total: positionTotals[pos],
-      rank: rankAgainstLeague(leagueTotals, positionTotals[pos]),
-    };
+  const positionalBaseline = getLeaguePositionalBaseline({
+    rosters,
+    players,
+    dynastyValueForPlayer,
+    positions,
   });
+  const positionRanks = getRosterPositionalStrength(rosterId, positionalBaseline).map(
+    ({ pos, total, rank }) => ({ pos, total, rank })
+  );
 
   const strongThreshold = Math.max(2, Math.ceil(n / 3));
   const weakThreshold   = Math.max(strongThreshold + 1, n - 2);
