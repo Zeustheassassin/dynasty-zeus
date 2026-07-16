@@ -1,8 +1,13 @@
 "use client";
 import React from "react";
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from "recharts";
 import { ordinal } from "../../lib/helpers";
 import { useLeague } from "../../lib/LeagueContext";
 import { useValues } from "../../lib/ValuesContext";
+import { useSimulationHistory } from "../../hooks/useSimulationHistory";
+import RosterSelect from "../shared/RosterSelect";
+import { ChartCard, ChartTooltip, ChartLegend, chartGridProps, chartAxisProps, chartTickStyle } from "../charts/ChartCard";
+import { CHART_CATEGORICAL } from "../../lib/chartTheme";
 import type { SleeperUser, SimulationTeamRow } from "../../lib/types";
 
 interface SimulatorTabProps {
@@ -19,8 +24,39 @@ function SimulatorTab({
   const { selectedLeague, rosters } = useLeague();
   const { selectedLeagueSimulation } = useValues();
   const [simSavedAt, setSimSavedAt] = React.useState<number | null>(null);
+  const [pickedHistoryRosterId, setPickedHistoryRosterId] = React.useState<number | null>(null);
 
   React.useEffect(() => { setSimSavedAt(null); }, [selectedLeague?.league_id]);
+
+  const myRosterId = rosters.find((entry) => entry.owner_id === user?.user_id)?.roster_id ?? null;
+  // Default to the user's own roster once it loads, without a setState-in-effect
+  // sync loop — same derived-render pattern as RosterToolsTab.tsx.
+  const historyRosterId = pickedHistoryRosterId ?? myRosterId;
+  const { history, loadingHistory } = useSimulationHistory(selectedLeague?.league_id, historyRosterId);
+  const oddsTrendData = React.useMemo(
+    () =>
+      history.map((h) => ({
+        label: h.week === 0 ? "Preseason" : `Wk ${h.week}`,
+        playoffOdds: Math.round(h.playoffOdds),
+        titleOdds: Math.round(h.titleOdds),
+      })),
+    [history]
+  );
+  // Outcome-distribution histogram (Phase F stage F3) — finishProbabilities is
+  // already a per-finish-position probability mass built from every Monte
+  // Carlo trial (lib/helpers/simulation.ts's simulationStats.finishCounts /
+  // simCount), so no engine change was needed: index 0 is always empty
+  // (finish positions are 1-based), indices 1..rosters.length map to "finished
+  // 1st" through "finished last."
+  const finishDistData = React.useMemo(() => {
+    const row = selectedLeagueSimulation?.rows.find(
+      (r) => Number(r.rosterId) === Number(historyRosterId)
+    );
+    if (!row) return [];
+    return row.finishProbabilities
+      .map((p, finish) => ({ finish, label: ordinal(finish), pct: Math.round(p * 1000) / 10 }))
+      .filter((d) => d.finish >= 1);
+  }, [selectedLeagueSimulation, historyRosterId]);
 
   if (!selectedLeague || !rosters.length) {
     return <p className="text-sm text-gray-500">Select a league from Rosters &amp; Rules first to view the simulator.</p>;
@@ -34,7 +70,6 @@ function SimulatorTab({
     );
   }
 
-  const myRosterId = rosters.find((entry) => entry.owner_id === user?.user_id)?.roster_id;
   return (
     <div className="space-y-4">
       <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
@@ -154,6 +189,56 @@ function SimulatorTab({
           </div>
         </div>
       )}
+
+      <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Team Trends</div>
+            <div className="mt-1 text-sm text-gray-200">Weekly odds history and this season&apos;s simulated outcome range.</div>
+          </div>
+          <RosterSelect value={historyRosterId} onChange={setPickedHistoryRosterId} />
+        </div>
+        <div className="grid gap-4 lg:grid-cols-2">
+          {loadingHistory ? (
+            <p className="text-sm text-gray-500">Loading history…</p>
+          ) : oddsTrendData.length === 0 ? (
+            <p className="text-sm text-gray-500">
+              No odds history yet — the weekly snapshot cron builds this up over time. Check back after the next Tuesday run.
+            </p>
+          ) : (
+            <ChartCard title="Playoff / Title Odds" subtitle="Weekly snapshots">
+              <LineChart data={oddsTrendData} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
+                <CartesianGrid {...chartGridProps} />
+                <XAxis dataKey="label" {...chartAxisProps} tick={chartTickStyle} />
+                <YAxis {...chartAxisProps} tick={chartTickStyle} domain={[0, 100]} unit="%" />
+                <Tooltip content={ChartTooltip} />
+                <Line type="monotone" dataKey="playoffOdds" name="Playoff Odds" stroke={CHART_CATEGORICAL[0]} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 4 }} />
+                <Line type="monotone" dataKey="titleOdds" name="Title Odds" stroke={CHART_CATEGORICAL[3]} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 4 }} />
+              </LineChart>
+              <ChartLegend
+                items={[
+                  { label: "Playoff Odds", color: CHART_CATEGORICAL[0] },
+                  { label: "Title Odds", color: CHART_CATEGORICAL[3] },
+                ]}
+              />
+            </ChartCard>
+          )}
+
+          {finishDistData.length === 0 ? (
+            <p className="text-sm text-gray-500">Select a team to see its simulated outcome distribution.</p>
+          ) : (
+            <ChartCard title="Outcome Distribution" subtitle={`Final-standing likelihood across ${selectedLeagueSimulation.simCount} simulated seasons`}>
+              <BarChart data={finishDistData} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
+                <CartesianGrid {...chartGridProps} />
+                <XAxis dataKey="label" {...chartAxisProps} tick={chartTickStyle} />
+                <YAxis {...chartAxisProps} tick={chartTickStyle} domain={[0, "dataMax"]} unit="%" />
+                <Tooltip content={ChartTooltip} labelFormatter={(_, p) => (p?.[0]?.payload?.label ? `Finished ${p[0].payload.label}` : "")} />
+                <Bar dataKey="pct" name="Probability" fill={CHART_CATEGORICAL[0]} radius={2} />
+              </BarChart>
+            </ChartCard>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
