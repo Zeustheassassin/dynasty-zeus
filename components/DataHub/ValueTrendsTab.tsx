@@ -7,8 +7,9 @@ import type { SleeperUser, HistoricalSnapshot, PlayerValueSnapshotEntry, FcTrend
 import { injuryBadge, ageColor } from "./dataHubHelpers";
 import type { ShareEntry } from "./dataHubTypes";
 import TradeMarket from "../tradeHub/TradeMarket";
+import { MiniSparkline } from "../charts/MiniSparkline";
 
-const TREND_GRID = "grid grid-cols-[2rem_1fr_2.25rem_2.5rem_3.75rem_3.75rem_4rem_2.5rem] gap-2 items-center px-1";
+const TREND_GRID = "grid grid-cols-[2rem_1fr_2.25rem_2.5rem_3.75rem_3.75rem_2.25rem_4rem_2.5rem] gap-2 items-center px-1";
 
 const TrendHeader = () => (
   <div className={`${TREND_GRID} text-[10px] uppercase tracking-wide text-gray-500 mb-1`}>
@@ -18,6 +19,7 @@ const TrendHeader = () => (
     <span className="text-center">Team</span>
     <span className="text-right">Now</span>
     <span className="text-right">Then</span>
+    <span></span>
     <span className="text-right">Δ %</span>
     <span></span>
   </div>
@@ -287,6 +289,7 @@ function ValueTrendsTab({ historicalSnapshot, onSaveSnapshot, shares, user, fcTr
       <span className="text-[10px] text-gray-500 text-center truncate">{row.team || ""}</span>
       <span className="text-[11px] text-gray-200 font-mono text-right">{row.currentVal.toLocaleString()}</span>
       <span className="text-[11px] text-gray-500 font-mono text-right">{row.snapVal.toLocaleString()}</span>
+      <MiniSparkline from={row.snapVal} to={row.currentVal} />
       <span className={`text-xs font-semibold font-mono text-right ${direction === "down" ? "text-red-400" : "text-emerald-400"}`}>
         {direction === "up" ? "+" : ""}{row.pct.toFixed(1)}%
       </span>

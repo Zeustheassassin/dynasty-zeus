@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getLeagueDirectionBucket, getBucketColor } from "@/lib/helpers/direction/bucket";
+import { getLeagueDirectionBucket, getBucketColor, getDynastyTier } from "@/lib/helpers/direction/bucket";
 
 describe("getLeagueDirectionBucket", () => {
   it("returns Elite when both ranks are in top-20% of a 12-team league", () => {
@@ -103,5 +103,30 @@ describe("getBucketColor", () => {
       expect(bucket).toBe(expectedBucket);
       expect(getBucketColor(bucket)).toBe(bucketColor);
     }
+  });
+});
+
+describe("getDynastyTier", () => {
+  it("uses the same top33/bot33 thresholds as getLeagueDirectionBucket for a 12-team league", () => {
+    // top33 = ceil(12*0.33) = 4, bot33 = ceil(12*0.67) = 9
+    expect(getDynastyTier(1, 12)).toBe("Contender");
+    expect(getDynastyTier(4, 12)).toBe("Contender");
+    expect(getDynastyTier(5, 12)).toBe("Middle");
+    expect(getDynastyTier(9, 12)).toBe("Middle");
+    expect(getDynastyTier(10, 12)).toBe("Rebuilding");
+    expect(getDynastyTier(12, 12)).toBe("Rebuilding");
+  });
+
+  it("scales correctly for an 8-team league", () => {
+    // top33 = ceil(8*0.33) = 3, bot33 = ceil(8*0.67) = 6
+    expect(getDynastyTier(3, 8)).toBe("Contender");
+    expect(getDynastyTier(4, 8)).toBe("Middle");
+    expect(getDynastyTier(6, 8)).toBe("Middle");
+    expect(getDynastyTier(7, 8)).toBe("Rebuilding");
+  });
+
+  it("defaults to a 12-team league when leagueSize is omitted", () => {
+    expect(getDynastyTier(1)).toBe("Contender");
+    expect(getDynastyTier(12)).toBe("Rebuilding");
   });
 });

@@ -55,6 +55,21 @@ export const getLeagueDirectionBucket = (dynRank: number, redRank: number, leagu
   return   { bucket: "Hopeless",       bucketColor: "text-red-300 bg-red-900/40 border-red-600" };
 };
 
+export type DynastyTier = "Contender" | "Middle" | "Rebuilding";
+
+/** Coarse 3-band grouping of dynasty rank, same top33/bot33 thresholds as
+ *  the bucket grid above — feeds Phase D's tiered standings bands (D3),
+ *  which color-code by dynasty direction without needing the full 10-label
+ *  bucket grid. */
+export const getDynastyTier = (dynRank: number, leagueSize = 12): DynastyTier => {
+  const n = leagueSize;
+  const top33 = Math.ceil(n * 0.33);
+  const bot33 = Math.ceil(n * 0.67);
+  if (dynRank <= top33) return "Contender";
+  if (dynRank <= bot33) return "Middle";
+  return "Rebuilding";
+};
+
 /** Detached color lookup — lets adjusted buckets get the right colour
  *  without needing to re-derive ranks. */
 export const getBucketColor = (bucket: string): string => {

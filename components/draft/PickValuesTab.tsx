@@ -2,8 +2,12 @@
 // ── PickValuesTab ─────────────────────────────────────────────────────────────
 // Displays a grid of rookie draft pick values for the current season.
 // Highlights any picks owned by the current user.
+import { useMemo } from "react";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from "recharts";
 import type { SleeperDraft, AugmentedPick } from "../../lib/types";
 import { BASE_YEAR } from "../../lib/helpers";
+import { ChartCard, ChartTooltip, chartGridProps, chartAxisProps, chartTickStyle } from "../charts/ChartCard";
+import { CHART_CATEGORICAL } from "../../lib/chartTheme";
 // Rookie-draft class year tracks the CALENDAR (upcoming class), not the NFL season.
 const ROOKIE_YEAR = String(BASE_YEAR);
 const ROUNDS = Array.from({ length: 6 }, (_, i) => i + 1);
@@ -26,6 +30,24 @@ export default function PickValuesTab({
   const roundCount = Number(
     draftSettings?.settings?.rounds ?? draftSettings?.rounds ?? 4
   );
+  const slots = numSlots || 12;
+
+  const curveData = useMemo(
+    () =>
+      ROUNDS.slice(0, roundCount).flatMap((round) =>
+        Array.from({ length: slots }, (_, i) => {
+          const slot = i + 1;
+          const slotStr = `${round}.${String(slot).padStart(2, "0")}`;
+          const value =
+            pickFcValues[`${ROOKIE_YEAR}-${slotStr}`] ??
+            pickFcValues[`${ROOKIE_YEAR}-${round}`] ??
+            0;
+          const overallPick = (round - 1) * slots + slot;
+          return { pick: overallPick, label: slotStr, value };
+        })
+      ),
+    [roundCount, slots, pickFcValues]
+  );
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -40,8 +62,32 @@ export default function PickValuesTab({
       {Object.keys(pickFcValues).length === 0 ? (
         <div className="text-gray-400 text-sm">Pick values are loading…</div>
       ) : (
-        ROUNDS.slice(0, roundCount).map((round) => {
-          const slots = numSlots || 12;
+        <>
+          <div className="mb-6">
+            <ChartCard title="Pick Value Curve" subtitle={`${ROOKIE_YEAR} rookie draft, overall pick order`}>
+              <LineChart data={curveData} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
+                <CartesianGrid {...chartGridProps} />
+                <XAxis
+                  dataKey="pick"
+                  {...chartAxisProps}
+                  tick={chartTickStyle}
+                  label={{ value: "Overall Pick", position: "insideBottom", offset: -2, fill: chartTickStyle.fill, fontSize: 11 }}
+                />
+                <YAxis {...chartAxisProps} tick={chartTickStyle} />
+                <Tooltip content={ChartTooltip} labelFormatter={(_, p) => p?.[0]?.payload?.label ?? ""} />
+                <Line
+                  type="monotone"
+                  dataKey="value"
+                  name="Value"
+                  stroke={CHART_CATEGORICAL[0]}
+                  strokeWidth={2}
+                  dot={false}
+                  activeDot={{ r: 4 }}
+                />
+              </LineChart>
+            </ChartCard>
+          </div>
+          {ROUNDS.slice(0, roundCount).map((round) => {
           return (
             <div key={round} className="mb-6">
               <div className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">Round {round}</div>
@@ -94,7 +140,8 @@ export default function PickValuesTab({
               </div>
             </div>
           );
-        })
+          })}
+        </>
       )}
     </div>
   );

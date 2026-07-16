@@ -1,10 +1,13 @@
 "use client";
 import { useMemo } from "react";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from "recharts";
 import type {
-  SleeperPlayer, SleeperLeague, SleeperRoster, LeagueOverviewEntry,
+  SleeperPlayer, SleeperLeague, SleeperRoster, LeagueOverviewEntry, HistoricalSnapshot,
 } from "../../../lib/types";
 import { useModalBehavior } from "../../../lib/hooks/useModalBehavior";
 import { injuryBadge, ageColor } from "../../../components/DataHub/dataHubHelpers";
+import { ChartCard, ChartTooltip, chartGridProps, chartAxisProps, chartTickStyle } from "../../../components/charts/ChartCard";
+import { CHART_CATEGORICAL } from "../../../lib/chartTheme";
 
 const DEPTH_POSITIONS = ["QB", "RB", "WR", "TE"];
 
@@ -19,6 +22,7 @@ interface Props {
   selectedLeague: SleeperLeague | null;
   leagueOverviewData: Record<string, LeagueOverviewEntry>;
   leagues: SleeperLeague[];
+  historicalSnapshot: HistoricalSnapshot | null;
   savePlayerNote: (playerId: string, text: string) => void;
   onClose: () => void;
 }
@@ -26,7 +30,7 @@ interface Props {
 export function PlayerProfilePanel({
   playerProfileId, players, calcFcValues, leagueAdjustedRedraftValues,
   playerNotes, rosters, users, selectedLeague,
-  leagueOverviewData, leagues, savePlayerNote, onClose,
+  leagueOverviewData, leagues, historicalSnapshot, savePlayerNote, onClose,
 }: Props) {
   useModalBehavior(onClose);
   const p = players[playerProfileId];
@@ -58,6 +62,12 @@ export function PlayerProfilePanel({
 
   const dynVal = calcFcValues[playerProfileId] ?? p.value ?? 0;
   const redVal = leagueAdjustedRedraftValues[playerProfileId] ?? 0;
+  const snapVal = historicalSnapshot?.players[playerProfileId]?.value ?? 0;
+  const snapDate = historicalSnapshot?.recorded_at
+    ? new Date(historicalSnapshot.recorded_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+    : "Snapshot";
+  const trendData =
+    snapVal > 0 && dynVal > 0 ? [{ label: snapDate, value: snapVal }, { label: "Now", value: dynVal }] : null;
   const injuryStatus = p.injury_status || p.status;
   const injuryNote = [p.injury_body_part, p.injury_notes].filter(Boolean).join(" — ");
   const practiceDesc = p.practice_description || p.practice_participation || "";
@@ -128,6 +138,25 @@ export function PlayerProfilePanel({
               <p className="text-xl font-bold text-white">{redVal > 0 ? redVal.toLocaleString() : "—"}</p>
             </div>
           </div>
+
+          {trendData && (
+            <ChartCard title="Dynasty Value Trend" subtitle={`${snapDate} → now`} height={140}>
+              <LineChart data={trendData} margin={{ top: 4, right: 12, left: -20, bottom: 0 }}>
+                <CartesianGrid {...chartGridProps} />
+                <XAxis dataKey="label" {...chartAxisProps} tick={chartTickStyle} />
+                <YAxis {...chartAxisProps} tick={chartTickStyle} domain={["auto", "auto"]} />
+                <Tooltip content={ChartTooltip} />
+                <Line
+                  type="monotone"
+                  dataKey="value"
+                  name="Dynasty Value"
+                  stroke={CHART_CATEGORICAL[0]}
+                  strokeWidth={2}
+                  dot={{ r: 3 }}
+                />
+              </LineChart>
+            </ChartCard>
+          )}
 
           <div className="bg-gray-900 rounded-xl p-3 border border-gray-800">
             <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Status</p>

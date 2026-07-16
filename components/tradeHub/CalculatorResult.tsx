@@ -1,5 +1,6 @@
 "use client";
 import React from "react";
+import { BarChart, Bar, XAxis, YAxis, Cell, LabelList } from "recharts";
 import type {
   TradeAttempt, TradeAttemptAsset, TradeAttemptPick,
   SleeperPlayer, SleeperRoster, AugmentedPick,
@@ -8,6 +9,7 @@ import { usePlayers } from "../../lib/PlayersContext";
 import { useLeague } from "../../lib/LeagueContext";
 import { buildTradeFingerprint } from "./shared";
 import { computePosTotals, computeLeagueRank } from "./calculatorUtils";
+import { CHART_CHROME, CHART_DIVERGING } from "../../lib/chartTheme";
 
 interface CalculatorResultProps {
   calcGive: string[];
@@ -41,6 +43,60 @@ interface CalculatorResultProps {
   onMarkAttempted: (attempt: Omit<TradeAttempt, "id" | "user_id" | "attempted_at" | "resolved_at">) => Promise<void>;
   sessionMarked: Set<string>;
   onSessionMark: (fingerprint: string) => void;
+}
+
+/** Compact side-by-side give/receive bar chart for the Trade Calculator verdict row. */
+function TradeValueBars({ totalGiveAdj, totalReceiveAdj }: { totalGiveAdj: number; totalReceiveAdj: number }) {
+  const data = [
+    { label: "Give", value: totalGiveAdj },
+    { label: "Receive", value: totalReceiveAdj },
+  ];
+  return (
+    <BarChart
+      layout="vertical"
+      data={data}
+      width={180}
+      height={56}
+      margin={{ top: 0, right: 24, left: 0, bottom: 0 }}
+    >
+      <XAxis type="number" hide />
+      <YAxis type="category" dataKey="label" hide />
+      <Bar dataKey="value" radius={3} barSize={14}>
+        <LabelList
+          dataKey="value"
+          position="right"
+          style={{ ...CHART_CHROME, fill: CHART_CHROME.textSecondary, fontSize: 10 }}
+          formatter={(v) => (typeof v === "number" ? v.toLocaleString() : String(v ?? ""))}
+        />
+        {data.map((d) => (
+          <Cell key={d.label} fill={d.label === "Give" ? CHART_DIVERGING.negative : CHART_DIVERGING.positive} />
+        ))}
+      </Bar>
+    </BarChart>
+  );
+}
+
+/** Bidirectional margin gauge — proportional fill from center, colored by who wins the trade. */
+function TradeMarginGauge({ net, totalGiveAdj, totalReceiveAdj }: { net: number; totalGiveAdj: number; totalReceiveAdj: number }) {
+  const scale = Math.max(totalGiveAdj, totalReceiveAdj, 1);
+  const pct = Math.min(100, (Math.abs(net) / scale) * 100);
+  const positive = net >= 0;
+  return (
+    <div className="w-44">
+      <div className="relative h-2 rounded-full overflow-hidden" style={{ background: CHART_CHROME.border }}>
+        <div className="absolute inset-y-0 left-1/2 w-px" style={{ background: CHART_CHROME.axis }} />
+        <div
+          className="absolute inset-y-0 rounded-full transition-all"
+          style={{
+            background: positive ? CHART_DIVERGING.positive : CHART_DIVERGING.negative,
+            width: `${pct / 2}%`,
+            ...(positive ? { left: "50%" } : { right: "50%" }),
+          }}
+        />
+      </div>
+      <div className="text-[10px] text-gray-600 mt-1 text-center">Margin</div>
+    </div>
+  );
 }
 
 function CalculatorResult({
@@ -154,7 +210,7 @@ function CalculatorResult({
 
         {/* Verdict */}
         {(calcGive.length > 0 || calcGivePicks.length > 0 || calcReceive.length > 0 || calcReceivePicks.length > 0) && (
-          <div className="mt-4 pt-4 border-t border-gray-700 flex items-center justify-between">
+          <div className="mt-4 pt-4 border-t border-gray-700 flex items-center justify-between flex-wrap gap-4">
             <div>
               <span className={`text-xl font-black ${verdictColor}`}>{verdict}</span>
               {verdict !== "EVEN" && (
@@ -162,6 +218,10 @@ function CalculatorResult({
                   by {Math.abs(net).toLocaleString()} pts
                 </span>
               )}
+            </div>
+            <div className="flex items-center gap-4">
+              <TradeValueBars totalGiveAdj={totalGiveAdj} totalReceiveAdj={totalReceiveAdj} />
+              <TradeMarginGauge net={net} totalGiveAdj={totalGiveAdj} totalReceiveAdj={totalReceiveAdj} />
             </div>
             <div className="flex items-center gap-3">
               {calcOpponentRosterId != null && (calcGive.length > 0 || calcGivePicks.length > 0) && (calcReceive.length > 0 || calcReceivePicks.length > 0) && selectedLeague && (() => {

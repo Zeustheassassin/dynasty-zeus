@@ -1,10 +1,51 @@
 "use client";
 import React from "react";
+import { BarChart, Bar, XAxis, YAxis, Tooltip } from "recharts";
 import { getStoredPickValue, ordinal } from "../../lib/helpers";
 import { usePlayers } from "../../lib/PlayersContext";
 import { useLeague } from "../../lib/LeagueContext";
 import { useValues } from "../../lib/ValuesContext";
-import type { SleeperUser, SleeperTradedPick, SleeperPlayer } from "../../lib/types";
+import type { SleeperUser, SleeperTradedPick, SleeperPlayer, HistoricalSnapshot } from "../../lib/types";
+import { ChartCard, ChartTooltip, ChartLegend, chartGridProps, chartAxisProps, chartTickStyle } from "../charts/ChartCard";
+import { CHART_CATEGORICAL } from "../../lib/chartTheme";
+import { CartesianGrid } from "recharts";
+
+/** Per-team "then vs. now" dynasty value, built on the same single stored
+ *  snapshot every other Phase D trend uses (see project_platform_upgrade_plan_july15
+ *  memory — no dated history table exists yet, so this is 2 points per team,
+ *  not a real time series). Sums each roster's CURRENT players' THEN values,
+ *  same approximation RankingsTab/ValueTrendsTab already use per-player. */
+function TeamValueTrendChart({
+  rows, historicalSnapshot,
+}: {
+  rows: { roster_id: number; ownerName: string; playerList: (SleeperPlayer & { dynVal: number })[] }[];
+  historicalSnapshot: HistoricalSnapshot;
+}) {
+  // Player-only totals on both sides (picks excluded — no historical pick
+  // values exist) so "then" and "now" stay an apples-to-apples comparison.
+  const data = rows
+    .map((r) => ({
+      name: r.ownerName,
+      now: r.playerList.reduce((s, p) => s + p.dynVal, 0),
+      then: r.playerList.reduce((s, p) => s + (historicalSnapshot.players[p.player_id]?.value ?? 0), 0),
+    }))
+    .sort((a, b) => b.now - a.now);
+  const height = Math.max(160, data.length * 28);
+
+  return (
+    <ChartCard title="Team Value Trend" subtitle="Current roster's dynasty value vs. last snapshot" height={height}>
+      <BarChart data={data} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 0 }}>
+        <CartesianGrid {...chartGridProps} horizontal={false} />
+        <XAxis type="number" {...chartAxisProps} tick={chartTickStyle} />
+        <YAxis type="category" dataKey="name" {...chartAxisProps} tick={chartTickStyle} width={110} />
+        <Tooltip content={ChartTooltip} />
+        <Bar dataKey="then" name="Then" fill={CHART_CATEGORICAL[1]} radius={2} barSize={8} />
+        <Bar dataKey="now" name="Now" fill={CHART_CATEGORICAL[0]} radius={2} barSize={8} />
+      </BarChart>
+      <ChartLegend items={[{ label: "Then", color: CHART_CATEGORICAL[1] }, { label: "Now", color: CHART_CATEGORICAL[0] }]} />
+    </ChartCard>
+  );
+}
 
 type PrSortKey = "dynTotal" | "redTotal" | "qbTotal" | "rbTotal" | "wrTotal" | "teTotal";
 type PrColKey = "dyn" | "red" | "QB" | "RB" | "WR" | "TE";
@@ -67,6 +108,7 @@ interface PowerRankingsTabProps {
   ignoredOwnerIds: string[];
   toggleIgnoredOwner: (ownerId: string) => void;
   setPlayerProfileId: (id: string | null) => void;
+  historicalSnapshot: HistoricalSnapshot | null;
 }
 
 function PowerRankingsTab({
@@ -84,6 +126,7 @@ function PowerRankingsTab({
   ignoredOwnerIds,
   toggleIgnoredOwner,
   setPlayerProfileId,
+  historicalSnapshot,
 }: PowerRankingsTabProps) {
   const players = usePlayers();
   const { selectedLeague, rosters, users } = useLeague();
@@ -255,6 +298,7 @@ function PowerRankingsTab({
           {prMode === "bench" && "Showing projected bench (players outside the optimal starting lineup)."}
           {" "}Click any pill to see that team&apos;s roster. Click column headers to sort.
         </p>
+        {historicalSnapshot && <TeamValueTrendChart rows={prRows} historicalSnapshot={historicalSnapshot} />}
         <div className="overflow-x-auto pb-1">
           <table className="min-w-full text-sm border-separate border-spacing-y-1">
             <thead>

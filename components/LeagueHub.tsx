@@ -13,6 +13,7 @@ import type {
   LeagueMateView,
   SimulationTeamRow,
   SleeperPlayer,
+  HistoricalSnapshot,
 } from "../lib/types";
 import type { MainTab } from "../lib/hubs";
 import { LEAGUE_HUB_GROUPS } from "../lib/leagueHubGroups";
@@ -82,6 +83,7 @@ interface LeagueHubProps {
   // Additional state
   freeAgents: SleeperPlayer[];
   loadingCalcValues: boolean;
+  historicalSnapshot: HistoricalSnapshot | null;
 
   // Functions
   loadRoster: (league: SleeperLeague) => void;
@@ -110,7 +112,7 @@ function LeagueHub({
   selectedLeagueMateProfilesView,
   ignoredOwnerIds, toggleIgnoredOwner,
   projectionData, nflState,
-  freeAgents, loadingCalcValues,
+  freeAgents, loadingCalcValues, historicalSnapshot,
   loadRoster, loadLeagueOverview, loadRedraftValues, loadUserTrades, loadUserExposure,
   saveLeagueNote, onSaveSim, handleRunAllSims,
   setPlayerProfileId, setCalcOpponentRosterId, setMainTab, setTradeHubSection,
@@ -249,6 +251,7 @@ function LeagueHub({
         {leagueHubTab === "STANDINGS" && (
           <StandingsTab
             standings={standings}
+            selectedLeagueMateProfilesView={selectedLeagueMateProfilesView}
           />
         )}
 
@@ -284,6 +287,7 @@ function LeagueHub({
             ignoredOwnerIds={ignoredOwnerIds}
             toggleIgnoredOwner={toggleIgnoredOwner}
             setPlayerProfileId={setPlayerProfileId}
+            historicalSnapshot={historicalSnapshot}
           />
         )}
 

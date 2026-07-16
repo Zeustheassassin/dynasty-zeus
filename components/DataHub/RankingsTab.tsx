@@ -5,6 +5,7 @@ import { usePlayers } from "../../lib/PlayersContext";
 import { useValues } from "../../lib/ValuesContext";
 import type { HistoricalSnapshot } from "../../lib/types";
 import { injuryBadge, ageColor, POS_COLOR, PERSONAL_SIGNAL_META } from "./dataHubHelpers";
+import { MiniSparkline } from "../charts/MiniSparkline";
 import type { ShareEntry } from "./dataHubTypes";
 import {
   reconcilePersonalOrdering,
@@ -399,13 +400,16 @@ function RankingsTab({
                     </span>
                   </>
                 ) : (
-                  <span className="flex flex-col items-end w-14 shrink-0">
-                    <span className="text-[10px] text-gray-400 font-mono">{displayVal.toLocaleString()}</span>
-                    {trendPct !== null && (
-                      <span className={`text-[8px] font-semibold leading-none ${trendPct > 0 ? "text-green-500" : "text-red-500"}`}>
-                        {trendPct > 0 ? "+" : ""}{trendPct.toFixed(1)}%
-                      </span>
-                    )}
+                  <span className="flex items-center gap-1 shrink-0">
+                    {trendPct !== null && <MiniSparkline from={snapDynVal} to={rawVal} />}
+                    <span className="flex flex-col items-end w-14 shrink-0">
+                      <span className="text-[10px] text-gray-400 font-mono">{displayVal.toLocaleString()}</span>
+                      {trendPct !== null && (
+                        <span className={`text-[8px] font-semibold leading-none ${trendPct > 0 ? "text-green-500" : "text-red-500"}`}>
+                          {trendPct > 0 ? "+" : ""}{trendPct.toFixed(1)}%
+                        </span>
+                      )}
+                    </span>
                   </span>
                 )}
                 <button onClick={() => setPlayerProfileId(p.player_id)} className="text-gray-600 hover:text-blue-400 text-xs transition shrink-0 w-4" title="View profile">ⓘ</button>

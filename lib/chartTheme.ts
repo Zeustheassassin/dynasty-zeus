@@ -1,5 +1,3 @@
-import type { CSSProperties } from "react";
-
 // ============================================================
 // Shared chart theme — dark-only, matches the app's gray-900/800/700
 // card surfaces. Prerequisite for every chart built in Phase D onward
@@ -66,8 +64,11 @@ export const CHART_CHROME = {
 
 /** Recharts inherits nothing from the DOM by default; every text-bearing
  *  element (axis ticks, legend, tooltip) should spread this so numbers use
- *  the app's font and align in columns. */
-export const CHART_FONT_STYLE: CSSProperties = {
+ *  the app's font and align in columns. Deliberately NOT typed as
+ *  `CSSProperties` — that interface's broad `Property.*` unions (e.g.
+ *  `alignmentBaseline`) are incompatible with Recharts' narrower SVG-text
+ *  tick prop types once spread, so this stays a plain literal type. */
+export const CHART_FONT_STYLE: { fontFamily: string; fontVariantNumeric: string; fontSize: number } = {
   fontFamily: "var(--font-geist-sans), system-ui, sans-serif",
   fontVariantNumeric: "tabular-nums",
   fontSize: 11,

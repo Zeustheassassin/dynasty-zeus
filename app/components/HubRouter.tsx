@@ -413,6 +413,7 @@ export function HubRouter({
             nflState={nflState}
             freeAgents={freeAgents}
             loadingCalcValues={loadingCalcValues}
+            historicalSnapshot={historicalSnapshot}
             loadRoster={loadRoster}
             loadLeagueOverview={loadLeagueOverview}
             loadRedraftValues={loadRedraftValues}
@@ -684,6 +685,7 @@ export function HubRouter({
           selectedLeague={selectedLeague}
           leagueOverviewData={leagueOverviewData}
           leagues={leagues}
+          historicalSnapshot={historicalSnapshot}
           savePlayerNote={savePlayerNote}
           onClose={() => setPlayerProfileId(null)}
         />

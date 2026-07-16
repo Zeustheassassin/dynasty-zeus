@@ -2,6 +2,7 @@
 import type { ReactNode } from "react";
 import { ResponsiveContainer } from "recharts";
 import type { TooltipContentProps } from "recharts";
+import type { NameType, ValueType } from "recharts/types/component/DefaultTooltipContent";
 import { CHART_CHROME, CHART_FONT_STYLE } from "../../lib/chartTheme";
 
 // ============================================================
@@ -54,9 +55,15 @@ export const chartAxisProps = {
 } as const;
 
 /** Themed tooltip content, in place of Recharts' default light-mode box.
- *  Pass as `<Tooltip content={<ChartTooltip />} />`. Values render tabular-nums
- *  so multi-row tooltips align. */
-export function ChartTooltip({ active, payload, label }: TooltipContentProps<number, string>) {
+ *  Pass as `<Tooltip content={ChartTooltip} />` — the bare component reference,
+ *  not `<ChartTooltip />`, since Recharts injects active/payload/label itself
+ *  at render time and TS can't verify a pre-built element satisfies those
+ *  required props. Values render tabular-nums so multi-row tooltips align. */
+export function ChartTooltip<TValue extends ValueType = ValueType, TName extends NameType = NameType>({
+  active,
+  payload,
+  label,
+}: TooltipContentProps<TValue, TName>) {
   if (!active || !payload || payload.length === 0) return null;
   return (
     <div
