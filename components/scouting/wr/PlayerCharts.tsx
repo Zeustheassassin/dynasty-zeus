@@ -1,98 +1,37 @@
 "use client";
 import { useMemo } from "react";
 import type { ProspectWithStats, RouteType } from "../../../lib/types";
+import { ROUTE_RADAR_TYPES, ROUTE_RADAR_LABEL, ROUTE_RADAR_ANGLE_DEG } from "../shared/routeTreeRadar";
+import RadarChartSVG, {
+  computeRadarTier,
+  RadarTierLegend,
+  type RadarSpoke,
+  type RadarTier,
+} from "../shared/RadarChartSVG";
 
-const ROUTE_TYPES: RouteType[] = [
-  "nine", "post", "dig", "curl", "slant", "screen", "other", "flat", "comeback", "corner", "out",
-];
-const ROUTE_LABEL: Record<RouteType, string> = {
-  nine: "NINE", post: "POST", dig: "DIG", curl: "CURL", slant: "SLANT",
-  screen: "SCREEN", other: "OTHER", flat: "FLAT", comeback: "COMEBACK",
-  corner: "CORNER", out: "OUT",
-};
-// degrees from east (right), counter-clockwise — mirrors Reception Perception layout
-const ROUTE_ANGLE_DEG: Record<RouteType, number> = {
-  nine: 90, post: 55, dig: 10, curl: -32, slant: -60, screen: -80,
-  other: -118, flat: 178, comeback: 210, corner: 133, out: 162,
-};
-
-const TIER_COLOR = { top: "#22c55e", mid: "#eab308", bot: "#ef4444", none: "#6b7280" } as const;
-type Tier = "top" | "mid" | "bot" | "none";
+const ROUTE_TYPES = ROUTE_RADAR_TYPES;
 
 const MIN_ROUTES_FOR_TIER = 3;
-const MIN_DIST_SIZE = 5;
 
-function computeTier(value: number, dist: number[]): Tier {
-  if (dist.length < MIN_DIST_SIZE) return "none";
-  const sorted = [...dist].sort((a, b) => a - b);
-  const n = sorted.length;
-  const lo = sorted[Math.floor(n / 3)];
-  const hi = sorted[Math.floor((n * 2) / 3)];
-  if (value >= hi) return "top";
-  if (value >= lo) return "mid";
-  return "bot";
+function computeTier(value: number, dist: number[]): RadarTier {
+  return computeRadarTier(value, dist);
 }
 
-interface Spoke { rt: RouteType; valuePct: number; tier: Tier; hasData: boolean; }
+interface Spoke { rt: RouteType; valuePct: number; tier: RadarTier; hasData: boolean; }
 
-// SVG layout constants
-const CX = 208, CY = 205, R = 115, L_DIST = 150;
-
-function toRad(deg: number) { return (deg * Math.PI) / 180; }
+function toRouteRadarSpokes(spokes: Spoke[]): RadarSpoke[] {
+  return spokes.map(({ rt, valuePct, tier, hasData }) => ({
+    key: rt,
+    label: ROUTE_RADAR_LABEL[rt],
+    angleDeg: ROUTE_RADAR_ANGLE_DEG[rt],
+    valuePct,
+    tier,
+    hasData,
+  }));
+}
 
 function ChartSVG({ spokes, maxPct }: { spokes: Spoke[]; maxPct: number }) {
-  return (
-    <svg viewBox="0 0 400 400" className="w-full" aria-hidden="true">
-      {/* Guide rings */}
-      {[0.33, 0.66, 1].map((f) => (
-        <circle key={f} cx={CX} cy={CY} r={R * f} fill="none" stroke="#1f2937" strokeWidth={1} />
-      ))}
-      <circle cx={CX} cy={CY} r={5} fill="#e5e7eb" />
-
-      {spokes.map(({ rt, valuePct, tier, hasData }) => {
-        const deg = ROUTE_ANGLE_DEG[rt];
-        const rad = toRad(deg);
-        const cosA = Math.cos(rad);
-        const sinA = Math.sin(rad);
-        const len = hasData && maxPct > 0 ? Math.max(22, (valuePct / maxPct) * R) : 0;
-
-        const ex = CX + cosA * len;
-        const ey = CY - sinA * len;
-
-        // Arrowhead geometry
-        const hLen = 10, hW = 5;
-        const bx = ex - cosA * hLen;
-        const by = ey + sinA * hLen;
-        const pAx = bx + sinA * hW, pAy = by + cosA * hW;
-        const pBx = bx - sinA * hW, pBy = by - cosA * hW;
-
-        // Label position
-        const lx = CX + cosA * L_DIST;
-        const ly = CY - sinA * L_DIST;
-        const anchor: "start" | "middle" | "end" =
-          cosA > 0.15 ? "start" : cosA < -0.15 ? "end" : "middle";
-
-        const color = TIER_COLOR[tier];
-
-        return (
-          <g key={rt}>
-            {hasData && len > 0 && (
-              <>
-                <line x1={CX} y1={CY} x2={ex} y2={ey} stroke={color} strokeWidth={3.5} strokeLinecap="round" />
-                <polygon points={`${ex},${ey} ${pAx},${pAy} ${pBx},${pBy}`} fill={color} />
-              </>
-            )}
-            <text x={lx} y={ly - 6} textAnchor={anchor} fill="#9ca3af" fontSize={8.5} fontWeight="700" letterSpacing="0.08em">
-              {ROUTE_LABEL[rt]}
-            </text>
-            <text x={lx} y={ly + 6} textAnchor={anchor} fill={hasData ? color : "#4b5563"} fontSize={9.5} fontWeight="800">
-              {hasData ? `${valuePct.toFixed(1)}%` : "—"}
-            </text>
-          </g>
-        );
-      })}
-    </svg>
-  );
+  return <RadarChartSVG spokes={toRouteRadarSpokes(spokes)} maxPct={maxPct} />;
 }
 
 function CardHeader({ title, prospect }: { title: string; prospect: ProspectWithStats }) {
@@ -169,52 +108,18 @@ const ALL_ALIGN_KEYS: AlignKey[] = [
   "backfield",
 ];
 
-interface AlignSpoke { key: AlignKey; valuePct: number; tier: Tier; hasData: boolean; }
+interface AlignSpoke { key: AlignKey; valuePct: number; tier: RadarTier; hasData: boolean; }
 
 function AlignChartSVG({ spokes }: { spokes: AlignSpoke[] }) {
-  const maxPct = 100;
-  return (
-    <svg viewBox="0 0 400 400" className="w-full" aria-hidden="true">
-      {[0.33, 0.66, 1].map((f) => (
-        <circle key={f} cx={CX} cy={CY} r={R * f} fill="none" stroke="#1f2937" strokeWidth={1} />
-      ))}
-      <circle cx={CX} cy={CY} r={5} fill="#e5e7eb" />
-      {spokes.map(({ key, valuePct, tier, hasData }) => {
-        const deg = ALIGN_ANGLE_DEG[key];
-        const rad = toRad(deg);
-        const cosA = Math.cos(rad);
-        const sinA = Math.sin(rad);
-        const len = hasData && maxPct > 0 ? Math.max(22, (valuePct / maxPct) * R) : 0;
-        const ex = CX + cosA * len;
-        const ey = CY - sinA * len;
-        const hLen = 10, hW = 5;
-        const bx = ex - cosA * hLen; const by = ey + sinA * hLen;
-        const pAx = bx + sinA * hW; const pAy = by + cosA * hW;
-        const pBx = bx - sinA * hW; const pBy = by - cosA * hW;
-        const lx = CX + cosA * L_DIST;
-        const ly = CY - sinA * L_DIST;
-        const anchor: "start" | "middle" | "end" =
-          cosA > 0.15 ? "start" : cosA < -0.15 ? "end" : "middle";
-        const color = TIER_COLOR[tier];
-        return (
-          <g key={key}>
-            {hasData && len > 0 && (
-              <>
-                <line x1={CX} y1={CY} x2={ex} y2={ey} stroke={color} strokeWidth={3.5} strokeLinecap="round" />
-                <polygon points={`${ex},${ey} ${pAx},${pAy} ${pBx},${pBy}`} fill={color} />
-              </>
-            )}
-            <text x={lx} y={ly - 6} textAnchor={anchor} fill="#9ca3af" fontSize={8.5} fontWeight="700" letterSpacing="0.08em">
-              {ALIGN_LABEL[key]}
-            </text>
-            <text x={lx} y={ly + 6} textAnchor={anchor} fill={hasData ? color : "#4b5563"} fontSize={9.5} fontWeight="800">
-              {hasData ? `${valuePct.toFixed(1)}%` : "—"}
-            </text>
-          </g>
-        );
-      })}
-    </svg>
-  );
+  const radarSpokes: RadarSpoke[] = spokes.map(({ key, valuePct, tier, hasData }) => ({
+    key,
+    label: ALIGN_LABEL[key],
+    angleDeg: ALIGN_ANGLE_DEG[key],
+    valuePct,
+    tier,
+    hasData,
+  }));
+  return <RadarChartSVG spokes={radarSpokes} maxPct={100} />;
 }
 
 interface Props {
@@ -249,7 +154,7 @@ export default function PlayerCharts({ prospect, allProspects }: Props) {
       const rs = pRS[rt];
       const hasData = !!rs && rs.count > 0;
       const valuePct = hasData ? (rs!.open / rs!.count) * 100 : 0;
-      const tier: Tier = hasData && rs!.count >= MIN_ROUTES_FOR_TIER
+      const tier: RadarTier = hasData && rs!.count >= MIN_ROUTES_FOR_TIER
         ? computeTier(valuePct, sucDist[rt] ?? [])
         : "none";
       return { rt, valuePct, tier, hasData };
@@ -259,7 +164,7 @@ export default function PlayerCharts({ prospect, allProspects }: Props) {
       const rs = pRS[rt];
       const hasData = !!rs && rs.count > 0 && pTotal > 0;
       const valuePct = hasData ? (rs!.count / pTotal) * 100 : 0;
-      const tier: Tier = hasData && rs!.count >= MIN_ROUTES_FOR_TIER
+      const tier: RadarTier = hasData && rs!.count >= MIN_ROUTES_FOR_TIER
         ? computeTier(valuePct, pctDist[rt] ?? [])
         : "none";
       return { rt, valuePct, tier, hasData };
@@ -271,7 +176,7 @@ export default function PlayerCharts({ prospect, allProspects }: Props) {
       const v = getAlignValue(prospect, key);
       const hasData = v !== null;
       const valuePct = hasData ? v! : 0;
-      const tier: Tier = hasData ? computeTier(valuePct, alignDist[key] ?? []) : "none";
+      const tier: RadarTier = hasData ? computeTier(valuePct, alignDist[key] ?? []) : "none";
       return { key, valuePct, tier, hasData };
     });
 
@@ -309,14 +214,7 @@ export default function PlayerCharts({ prospect, allProspects }: Props) {
         )}
       </div>
 
-      <div className="flex flex-wrap justify-center gap-6 text-xs text-gray-400">
-        {(["top", "mid", "bot", "none"] as Tier[]).map((t) => (
-          <span key={t} className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: TIER_COLOR[t] }} />
-            {t === "top" ? "Top 1/3" : t === "mid" ? "Mid 1/3" : t === "bot" ? "Bottom 1/3" : `< ${MIN_ROUTES_FOR_TIER} routes`}
-          </span>
-        ))}
-      </div>
+      <RadarTierLegend noDataLabel={`< ${MIN_ROUTES_FOR_TIER} routes`} />
       <p className="text-center text-[11px] text-gray-600">
         Percentiles vs {chartedCount} charted prospects · all years
       </p>

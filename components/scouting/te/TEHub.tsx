@@ -1,7 +1,7 @@
 "use client";
 import { useState, useMemo, useEffect, startTransition } from "react";
 import dynamic from "next/dynamic";
-import type { Prospect, ProspectWithStats } from "../../../lib/types";
+import type { Prospect, ProspectWithStats, ScoutingGame, TEPlay } from "../../../lib/types";
 
 const TEProspectList    = dynamic(() => import("./TEProspectList"), { ssr: false });
 const TEChartingBoard   = dynamic(() => import("./TEChartingBoard"), { ssr: false });
@@ -20,6 +20,8 @@ export interface TEHubProps {
   setDraftYearFilter: (y: number | null) => void;
   navigateToProspect?: Prospect | null;
   onNavigated?: () => void;
+  games: ScoutingGame[];
+  tePlays: TEPlay[];
 }
 
 type HubView = "list" | "roster";
@@ -33,6 +35,8 @@ export default function TEHub({
   setDraftYearFilter,
   navigateToProspect,
   onNavigated,
+  games,
+  tePlays,
 }: TEHubProps) {
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
 
@@ -57,6 +61,9 @@ export default function TEHub({
         prospect={selectedProspect}
         onBack={() => { setSelectedProspect(null); onDataChanged(); }}
         onDataChanged={onDataChanged}
+        allProspects={teProspects}
+        allGames={games}
+        leaguePlays={tePlays}
       />
     );
   }

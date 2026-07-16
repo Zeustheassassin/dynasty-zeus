@@ -1,7 +1,7 @@
 "use client";
 import { useState, useMemo, useEffect, startTransition } from "react";
 import dynamic from "next/dynamic";
-import type { Prospect, ProspectWithStats } from "../../../lib/types";
+import type { Prospect, ProspectWithStats, ScoutingGame, RBPlay } from "../../../lib/types";
 
 const RBProspectList      = dynamic(() => import("./RBProspectList"), { ssr: false });
 const RBChartingBoard     = dynamic(() => import("./RBChartingBoard"), { ssr: false });
@@ -20,6 +20,8 @@ export interface RBHubProps {
   setDraftYearFilter: (y: number | null) => void;
   navigateToProspect?: Prospect | null;
   onNavigated?: () => void;
+  games: ScoutingGame[];
+  rbPlays: RBPlay[];
 }
 
 type HubView = "list" | "roster";
@@ -33,6 +35,8 @@ export default function RBHub({
   setDraftYearFilter,
   navigateToProspect,
   onNavigated,
+  games,
+  rbPlays,
 }: RBHubProps) {
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
 
@@ -57,6 +61,9 @@ export default function RBHub({
         prospect={selectedProspect}
         onBack={() => { setSelectedProspect(null); onDataChanged(); }}
         onDataChanged={onDataChanged}
+        allProspects={rbProspects}
+        allGames={games}
+        leaguePlays={rbPlays}
       />
     );
   }

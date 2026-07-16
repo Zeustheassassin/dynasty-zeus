@@ -2,7 +2,7 @@
 import { useState, useMemo, useEffect, startTransition } from "react";
 import dynamic from "next/dynamic";
 import { supabase } from "../../../lib/supabaseclient";
-import type { Prospect, ProspectWithStats, ChartingDecision } from "../../../lib/types";
+import type { Prospect, ProspectWithStats, ChartingDecision, ScoutingGame } from "../../../lib/types";
 import { useRecruitIndex } from "../../../hooks/useRecruitIndex";
 import { lookupConference } from "../../../lib/scouting/schoolConferences";
 import { BASE_YEAR, CLASS_YEARS } from "../../../lib/helpers/season";
@@ -30,6 +30,7 @@ export interface QBHubProps {
   setDraftYearFilter: (y: number | null) => void;
   navigateToProspect?: Prospect | null;
   onNavigated?: () => void;
+  games: ScoutingGame[];
 }
 
 type HubView = "list" | "roster";
@@ -44,6 +45,7 @@ export default function QBHub({
   setDraftYearFilter,
   navigateToProspect,
   onNavigated,
+  games,
 }: QBHubProps) {
   const { matchProspect } = useRecruitIndex();
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
@@ -135,6 +137,8 @@ export default function QBHub({
         prospect={selectedProspect}
         onBack={() => { setSelectedProspect(null); onDataChanged(); }}
         onDataChanged={onDataChanged}
+        allProspects={qbProspects}
+        allGames={games}
       />
     );
   }

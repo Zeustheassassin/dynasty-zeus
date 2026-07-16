@@ -8,6 +8,8 @@ const log = logger("scouting/te/TEChartingBoard");
 import PlayerNotesList from "../PlayerNotesList";
 import type {
   Prospect,
+  ProspectWithStats,
+  ScoutingGame,
   TEPlay,
   TELocation,
   TEPositioning,
@@ -20,6 +22,7 @@ import { ROUTE_TYPES } from "../shared/chartingConstants";
 import { pct, fmtPct } from "../shared/chartingTypes";
 import ChartingBoard, { type ChartingBoardConfig } from "../shared/ChartingBoard";
 import { useChartingState } from "../shared/hooks/useChartingState";
+import TEPlayerCharts from "./TEPlayerCharts";
 
 const NFL_ROLES = ["Inline TE", "Move TE", "Receiving TE", "Blocking TE", "F-Back/Flex", ""];
 
@@ -55,15 +58,19 @@ const tabs = [
   { key: "overview", label: "Overview" },
   { key: "chart",    label: "Chart Game" },
   { key: "games",    label: "Games" },
+  { key: "charts",   label: "Charts" },
 ];
 
 interface Props {
   prospect: Prospect;
   onBack: () => void;
   onDataChanged: () => void;
+  allProspects: ProspectWithStats[];
+  allGames: ScoutingGame[];
+  leaguePlays: TEPlay[];
 }
 
-export default function TEChartingBoard({ prospect, onBack, onDataChanged }: Props) {
+export default function TEChartingBoard({ prospect, onBack, onDataChanged, allProspects, allGames, leaguePlays }: Props) {
   const [plays, setPlays] = useState<TEPlay[]>([]);
 
   // Play logger form state
@@ -838,6 +845,9 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged }: Pro
             </div>
           )}
         </div>
+      )}
+      renderExtraTab={() => (
+        <TEPlayerCharts prospect={prospect} allProspects={allProspects} allGames={allGames} leaguePlays={leaguePlays} />
       )}
     />
   );

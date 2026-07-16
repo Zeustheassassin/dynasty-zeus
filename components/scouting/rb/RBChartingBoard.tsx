@@ -10,8 +10,11 @@ import ChartingBoard from "../shared/ChartingBoard";
 import type { ChartingBoardConfig } from "../shared/ChartingBoard";
 import { useChartingState } from "../shared/hooks/useChartingState";
 import { pct } from "../shared/chartingTypes";
+import RBPlayerCharts from "./RBPlayerCharts";
 import type {
   Prospect,
+  ProspectWithStats,
+  ScoutingGame,
   RBPlay,
   RBFormation,
   RBRunType,
@@ -126,9 +129,12 @@ interface Props {
   prospect: Prospect;
   onBack: () => void;
   onDataChanged: () => void;
+  allProspects: ProspectWithStats[];
+  allGames: ScoutingGame[];
+  leaguePlays: RBPlay[];
 }
 
-export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Props) {
+export default function RBChartingBoard({ prospect, onBack, onDataChanged, allProspects, allGames, leaguePlays }: Props) {
   // Position-specific play state
   const [plays, setPlays]                         = useState<RBPlay[]>([]);
   const [formation, setFormation]                 = useState<RBFormation>("gun");
@@ -373,6 +379,7 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     { key: "overview", label: "Overview" },
     { key: "chart",    label: "Chart Game" },
     { key: "games",    label: "Games" },
+    { key: "charts",   label: "Charts" },
   ];
 
   return (
@@ -949,6 +956,9 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged }: Pro
             </div>
           )}
         </div>
+      )}
+      renderExtraTab={() => (
+        <RBPlayerCharts prospect={prospect} allProspects={allProspects} allGames={allGames} leaguePlays={leaguePlays} />
       )}
     />
   );

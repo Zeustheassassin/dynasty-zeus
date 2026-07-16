@@ -194,6 +194,16 @@ export default function ScoutingHub() {
     else if (pos === "TE") fetchPlaysByGame<TEPlay>("te_plays", ids).then((rows) => { setTePlays(rows); }).catch(onErr);
   }, [loading, games, gameIdsKey]);
 
+  // Lazy-fetch league-wide plays for the active position sub-tab too — the new
+  // per-prospect "Charts" radar (H1) needs the same all-charted-prospects pool
+  // AnalysisHub already uses for percentile tiering, not just the selected
+  // prospect's own games.
+  useEffect(() => {
+    if (positionTab === "RB" || positionTab === "QB" || positionTab === "TE") {
+      loadPositionPlays(positionTab);
+    }
+  }, [positionTab, loadPositionPlays]);
+
   // Server-aggregated path: merge view rows + league baselines into ProspectWithStats.
   // Replaces the per-snap JS reduce.
   const prospectsWithStats = useMemo(
@@ -321,6 +331,13 @@ export default function ScoutingHub() {
     setDraftYearFilter,
     navigateToProspect: pendingProspect,
     onNavigated: () => setPendingProspect(null),
+    // League-wide (all charted prospects at that position) data — used by the
+    // "Charts" tab's percentile-tiered radar (H1). WRHub ignores these extra
+    // props since route_stats already lives on prospectsWithStats.
+    games,
+    rbPlays,
+    qbPlays,
+    tePlays,
   };
 
   return (

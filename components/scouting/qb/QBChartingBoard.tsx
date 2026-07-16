@@ -8,8 +8,11 @@ const log = logger("scouting/qb/QBChartingBoard");
 import ChartingBoard from "../shared/ChartingBoard";
 import type { ChartingBoardConfig } from "../shared/ChartingBoard";
 import { useChartingState } from "../shared/hooks/useChartingState";
+import QBPlayerCharts from "./QBPlayerCharts";
 import type {
   Prospect,
+  ProspectWithStats,
+  ScoutingGame,
   QBPlay,
   QBSnapPosition,
   QBPlayType,
@@ -54,6 +57,8 @@ interface Props {
   prospect: Prospect;
   onBack: () => void;
   onDataChanged: () => void;
+  allProspects: ProspectWithStats[];
+  allGames: ScoutingGame[];
 }
 
 // Short display labels for the play log
@@ -67,7 +72,7 @@ const DEPTH_SHORT: Record<QBDepthZone, string>   = {
   short_left:"SL", short_center:"SC", short_right:"SR",
 };
 
-export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Props) {
+export default function QBChartingBoard({ prospect, onBack, onDataChanged, allProspects, allGames }: Props) {
   // Position-specific play state
   const [plays, setPlays]                   = useState<QBPlay[]>([]);
   // League-wide QB plays (across all charted prospects) — used to build the
@@ -355,6 +360,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
     { key: "overview", label: "Overview" },
     { key: "chart",    label: "Chart Game" },
     { key: "games",    label: "Games" },
+    { key: "charts",   label: "Charts" },
   ];
 
   return (
@@ -809,6 +815,9 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged }: Pro
             </div>
           )}
         </div>
+      )}
+      renderExtraTab={() => (
+        <QBPlayerCharts prospect={prospect} allProspects={allProspects} allGames={allGames} leaguePlays={leaguePlays} />
       )}
     />
   );
