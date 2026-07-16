@@ -22,7 +22,7 @@ interface MainLayoutProps {
   players: Record<string, SleeperPlayer>;
   setTradeHubSection: (s: "CALCULATOR" | "FINDER" | "TRADE_LOG" | "ATTEMPTS") => void;
   setLeagueHubTab: (t: LeagueHubTab) => void;
-  setDataHubTab: (t: "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "LEAGUEMATES" | "DEPTH_CHARTS" | "BUY_LOW" | "MY_SHARES" | "COMPARE") => void;
+  setDataHubTab: (t: "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "LEAGUEMATES" | "DEPTH_CHARTS" | "MY_SHARES" | "COMPARE") => void;
   setDraftHubSection: (s: "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL") => void;
   setPlayerProfileId: (id: string | null) => void;
   children: React.ReactNode;

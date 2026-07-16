@@ -28,10 +28,10 @@ describe("useHubRouting", () => {
 
   it("falls back to localStorage when the URL has no hub param", () => {
     localStorage.setItem("mainTab", JSON.stringify("DATA_HUB"));
-    localStorage.setItem("dataHubTab", JSON.stringify("BUY_LOW"));
+    localStorage.setItem("dataHubTab", JSON.stringify("DEPTH_CHARTS"));
     const { result } = renderHook(() => useHubRouting());
     expect(result.current.mainTab).toBe("DATA_HUB");
-    expect(result.current.dataHubTab).toBe("BUY_LOW");
+    expect(result.current.dataHubTab).toBe("DEPTH_CHARTS");
   });
 
   it("ignores an invalid hub value in the URL", () => {

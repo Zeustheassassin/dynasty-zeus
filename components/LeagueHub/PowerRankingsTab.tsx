@@ -15,29 +15,34 @@ import { CartesianGrid } from "recharts";
 /** Per-team "then vs. now" dynasty value, built on the same single stored
  *  snapshot every other Phase D trend uses (see project_platform_upgrade_plan_july15
  *  memory — no dated history table exists yet, so this is 2 points per team,
- *  not a real time series). Sums each roster's CURRENT players' THEN values,
- *  same approximation RankingsTab/ValueTrendsTab already use per-player. */
+ *  not a real time series). "Now" uses `dynTotal` (the SAME total the table
+ *  below ranks by, including picks in "Full Team" mode) rather than re-summing
+ *  just `playerList`, so this chart's order/values always match the table's —
+ *  they used to diverge whenever picks were a meaningful share of a team's
+ *  value, which could show a team leading here while sitting 3rd in the
+ *  table. The current pick value is added to "then" too (a constant shared by
+ *  both sides, since no historical pick value exists) purely so the bars'
+ *  absolute magnitude also matches "now" — it does not affect the delta. */
 function TeamValueTrendChart({
   rows, historicalSnapshot,
 }: {
-  rows: { roster_id: number; ownerName: string; playerList: (SleeperPlayer & { dynVal: number })[] }[];
+  rows: { roster_id: number; ownerName: string; playerList: (SleeperPlayer & { dynVal: number })[]; pickVal: number; dynTotal: number }[];
   historicalSnapshot: HistoricalSnapshot;
 }) {
-  // Player-only totals on both sides (picks excluded — no historical pick
-  // values exist) so "then" and "now" stay an apples-to-apples comparison.
   const data = rows
     .map((r) => ({
       name: r.ownerName,
-      now: r.playerList.reduce((s, p) => s + p.dynVal, 0),
-      then: r.playerList.reduce((s, p) => s + (historicalSnapshot.players[p.player_id]?.value ?? 0), 0),
+      now: r.dynTotal,
+      then: r.playerList.reduce((s, p) => s + (historicalSnapshot.players[p.player_id]?.value ?? 0), 0) + r.pickVal,
     }))
     .sort((a, b) => b.now - a.now);
   const height = Math.max(160, data.length * 28);
+  const snapDate = new Date(historicalSnapshot.recorded_at).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 
   return (
     <ChartCard
       title="Team Value Trend"
-      subtitle="Current roster's dynasty value vs. last snapshot"
+      subtitle={`Current roster's dynasty value vs. ${snapDate} snapshot`}
       height={height}
       legend={<ChartLegend items={[{ label: "Then", color: CHART_CATEGORICAL[1] }, { label: "Now", color: CHART_CATEGORICAL[0] }]} />}
     >
@@ -64,7 +69,7 @@ function TeamValueTrendChart({
 function TeamValueSparklineTable({
   rows, historyByPlayer,
 }: {
-  rows: { roster_id: number; ownerName: string; playerList: (SleeperPlayer & { dynVal: number })[] }[];
+  rows: { roster_id: number; ownerName: string; playerList: (SleeperPlayer & { dynVal: number })[]; pickVal: number; dynTotal: number }[];
   historyByPlayer: Record<string, PlayerValuePoint[]>;
 }) {
   const dates = Array.from(
@@ -73,6 +78,12 @@ function TeamValueSparklineTable({
     )
   ).sort();
 
+  // "now"/sort use `dynTotal` (the same total the table below ranks by,
+  // including picks in "Full Team" mode) so this list's order always matches
+  // the table's — plain playerList sums used to disagree with it whenever
+  // picks were a meaningful share of a team's value. `pickVal` (current, held
+  // constant — no historical pick value exists) is folded into every point of
+  // the series too, so the sparkline's rightmost point lines up with "now."
   const teamSeries = rows
     .map((r) => {
       const valueByPlayer = new Map(
@@ -82,9 +93,9 @@ function TeamValueSparklineTable({
         ])
       );
       const series = dates.map((d) =>
-        r.playerList.reduce((s, p) => s + (valueByPlayer.get(p.player_id)?.get(d) ?? 0), 0)
+        r.playerList.reduce((s, p) => s + (valueByPlayer.get(p.player_id)?.get(d) ?? 0), 0) + r.pickVal
       );
-      const now = r.playerList.reduce((s, p) => s + p.dynVal, 0);
+      const now = r.dynTotal;
       const first = series[0] ?? 0;
       const delta = now - first;
       const pct = first > 0 ? (delta / first) * 100 : 0;

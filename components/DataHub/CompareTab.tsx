@@ -87,6 +87,17 @@ export default function CompareTab({ setPlayerProfileId }: Props) {
   const [playerA, setPlayerA] = useState<SleeperPlayer | null>(null);
   const [playerB, setPlayerB] = useState<SleeperPlayer | null>(null);
 
+  // Restrict comparison search to players FantasyCalc actually ranks (QB/RB/WR/TE
+  // with a dynasty value) — the full Sleeper player pool includes IDP (DB/LB/etc.)
+  // and other noise nobody wants to compare here.
+  const rankedPlayers = useMemo(() => {
+    const out: Record<string, SleeperPlayer> = {};
+    Object.values(players).forEach((p) => {
+      if ((leagueAdjustedFcValues[p.player_id] ?? 0) > 0) out[p.player_id] = p;
+    });
+    return out;
+  }, [players, leagueAdjustedFcValues]);
+
   const rows: CompareRow[] = [
     { label: "Position", render: (p) => <span className={POS_COLOR[p.position] ?? "text-gray-400"}>{p.position}</span> },
     { label: "Team", render: (p) => p.team || "—" },
@@ -136,8 +147,8 @@ export default function CompareTab({ setPlayerProfileId }: Props) {
   return (
     <div className="max-w-3xl mx-auto space-y-4">
       <div className="grid grid-cols-2 gap-3">
-        <PlayerPicker label="Player A" player={playerA} onSelect={setPlayerA} players={players} excludeId={playerB?.player_id} />
-        <PlayerPicker label="Player B" player={playerB} onSelect={setPlayerB} players={players} excludeId={playerA?.player_id} />
+        <PlayerPicker label="Player A" player={playerA} onSelect={setPlayerA} players={rankedPlayers} excludeId={playerB?.player_id} />
+        <PlayerPicker label="Player B" player={playerB} onSelect={setPlayerB} players={rankedPlayers} excludeId={playerA?.player_id} />
       </div>
 
       {playerA && playerB && (

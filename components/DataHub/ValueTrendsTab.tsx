@@ -3,10 +3,11 @@ import React from "react";
 import { usePlayers } from "../../lib/PlayersContext";
 import { useLeague } from "../../lib/LeagueContext";
 import { useValues } from "../../lib/ValuesContext";
-import type { SleeperUser, HistoricalSnapshot, PlayerValueSnapshotEntry, FcTrendEntry } from "../../lib/types";
+import type { SleeperUser, HistoricalSnapshot, PlayerValueSnapshotEntry, FcTrendEntry, ProjectionRow } from "../../lib/types";
 import { injuryBadge, injuryRiskBadge, ageColor } from "./dataHubHelpers";
 import type { ShareEntry } from "./dataHubTypes";
 import TradeMarket from "../tradeHub/TradeMarket";
+import BuyLowTab from "./BuyLowTab";
 import { MiniSparkline } from "../charts/MiniSparkline";
 
 const TREND_GRID = "grid grid-cols-[2rem_1fr_2.25rem_2.5rem_3.75rem_3.75rem_2.25rem_4rem_2.5rem] gap-2 items-center px-1";
@@ -34,6 +35,9 @@ interface ValueTrendsTabProps {
   fcTrendData: FcTrendEntry[];
   loadingFcTrends: boolean;
   onRefreshFcTrends: () => void;
+  // Buy Low view (merged in from Data Hub's old standalone Buy Low tab)
+  projectionData: ProjectionRow[];
+  setPlayerProfileId: (id: string | null) => void;
 }
 
 type TrendRow = {
@@ -68,12 +72,15 @@ const MIN_TRADE_VAL = 1500;
 const RATIO_MIN = 0.72;
 const RATIO_MAX = 1.35;
 
-function ValueTrendsTab({ historicalSnapshot, onSaveSnapshot, shares, user, fcTrendData, loadingFcTrends, onRefreshFcTrends }: ValueTrendsTabProps) {
+function ValueTrendsTab({
+  historicalSnapshot, onSaveSnapshot, shares, user, fcTrendData, loadingFcTrends, onRefreshFcTrends,
+  projectionData, setPlayerProfileId,
+}: ValueTrendsTabProps) {
   const players = usePlayers();
   const { rosters, users } = useLeague();
   const { leagueAdjustedFcValues: calcFcValues } = useValues();
 
-  const [view, setView] = React.useState<"MY_LEAGUE" | "MARKET_PULSE">("MY_LEAGUE");
+  const [view, setView] = React.useState<"MY_LEAGUE" | "BUY_LOW" | "MARKET_PULSE">("MY_LEAGUE");
   const [trendThreshold, setTrendThreshold] = React.useState(10);
   const [trendPos, setTrendPos] = React.useState("ALL");
   const [savingSnapshot, setSavingSnapshot] = React.useState(false);
@@ -237,7 +244,7 @@ function ValueTrendsTab({ historicalSnapshot, onSaveSnapshot, shares, user, fcTr
 
   const viewToggle = (
     <div className="flex justify-center gap-2 mb-4">
-      {(["MY_LEAGUE", "MARKET_PULSE"] as const).map((v) => (
+      {(["MY_LEAGUE", "BUY_LOW", "MARKET_PULSE"] as const).map((v) => (
         <button
           key={v}
           onClick={() => setView(v)}
@@ -245,11 +252,24 @@ function ValueTrendsTab({ historicalSnapshot, onSaveSnapshot, shares, user, fcTr
             view === v ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:text-white"
           }`}
         >
-          {v === "MY_LEAGUE" ? "My League Trends" : "Market Pulse"}
+          {v === "MY_LEAGUE" ? "My League Trends" : v === "BUY_LOW" ? "Buy Low" : "Market Pulse"}
         </button>
       ))}
     </div>
   );
+
+  // Buy Low is a dynasty-rank-vs-projection-rank gap model — it doesn't depend
+  // on this league's snapshot either, so it's available even before one exists.
+  // Merged in from Data Hub's old standalone Buy Low tab to cut down top-level
+  // sub-tabs, same reasoning as Market Pulse's earlier merge.
+  if (view === "BUY_LOW") {
+    return (
+      <>
+        {viewToggle}
+        <BuyLowTab projectionData={projectionData} setPlayerProfileId={setPlayerProfileId} />
+      </>
+    );
+  }
 
   // Market Pulse is FantasyCalc's league-wide trend data (30-day movers, most
   // traded) — it doesn't depend on this league's snapshot, so it's available

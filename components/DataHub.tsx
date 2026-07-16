@@ -9,13 +9,14 @@ import ValueTrendsTab from "./DataHub/ValueTrendsTab";
 import ProjectionsTab from "./DataHub/ProjectionsTab";
 import LeaguematesTab from "./DataHub/LeaguematesTab";
 import DepthChartsTab from "./DataHub/DepthChartsTab";
-import BuyLowTab from "./DataHub/BuyLowTab";
 import MySharesTab from "./DataHub/MySharesTab";
 import CompareTab from "./DataHub/CompareTab";
 import ErrorBanner from "./ErrorBanner";
 
 // ── Local types ─────────────────────────────────────────────────────────────
-type DataHubTabId = "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "LEAGUEMATES" | "DEPTH_CHARTS" | "BUY_LOW" | "MY_SHARES" | "COMPARE";
+// BUY_LOW is no longer a top-level tab — it's a view inside VALUE_TRENDS now
+// (same treatment MARKET_PULSE already got), to cut down top-level sub-tabs.
+type DataHubTabId = "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "LEAGUEMATES" | "DEPTH_CHARTS" | "MY_SHARES" | "COMPARE";
 
 interface DataHubProps {
   // Navigation
@@ -94,15 +95,13 @@ function DataHub({
       {/* Sub-tab nav */}
       <div className="flex justify-center border-b border-gray-800 mb-6">
         <div className="flex justify-center gap-1 sm:gap-3 lg:gap-5 text-center flex-wrap">
-          {(["MY_SHARES", "RANKINGS", "VALUE_TRENDS", "BUY_LOW", "PROJECTIONS", "DEPTH_CHARTS", "LEAGUEMATES", "COMPARE"] as const).map((tab) => (
+          {(["MY_SHARES", "RANKINGS", "VALUE_TRENDS", "PROJECTIONS", "DEPTH_CHARTS", "LEAGUEMATES", "COMPARE"] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setDataHubTab(tab)}
               className={`pb-2 px-1 text-xs sm:text-sm font-semibold transition whitespace-nowrap ${
                 dataHubTab === tab
-                  ? tab === "BUY_LOW"
-                    ? "border-b-2 border-green-400 text-green-400"
-                    : "border-b-2 border-blue-400 text-blue-400"
+                  ? "border-b-2 border-blue-400 text-blue-400"
                   : "text-gray-400 hover:text-white"
               }`}
             >
@@ -112,8 +111,7 @@ function DataHub({
                tab === "LEAGUEMATES" ? "League Mates" :
                tab === "DEPTH_CHARTS" ? "Depth Charts" :
                tab === "MY_SHARES" ? "My Shares" :
-               tab === "COMPARE" ? "Compare" :
-               "Buy Low"}
+               "Compare"}
             </button>
           ))}
         </div>
@@ -149,6 +147,8 @@ function DataHub({
           fcTrendData={fcTrendData}
           loadingFcTrends={loadingFcTrends}
           onRefreshFcTrends={onRefreshFcTrends}
+          projectionData={projectionData}
+          setPlayerProfileId={setPlayerProfileId}
         />
       )}
 
@@ -194,13 +194,6 @@ function DataHub({
       )}
 
       {dataHubTab === "DEPTH_CHARTS" && <DepthChartsTab />}
-
-      {dataHubTab === "BUY_LOW" && (
-        <BuyLowTab
-          projectionData={projectionData}
-          setPlayerProfileId={setPlayerProfileId}
-        />
-      )}
 
       {dataHubTab === "MY_SHARES" && <MySharesTab shares={shares} totalLeagues={totalLeagues} />}
 
