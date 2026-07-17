@@ -70,11 +70,17 @@ function buildUrl(hub: MainTab, tab: string | null): string {
 }
 
 export function useHubRouting() {
-  // Lazy-init: a deep-linking URL (`?hub=...&tab=...`) wins over localStorage,
-  // which wins over the hardcoded default. getLocalStorageItem/readUrlHub
-  // return null/default during SSR (window undefined) — resolved client-side
-  // on first render, same pattern as the existing useLocalStorage hook.
-  const [mainTab, setMainTabState] = useState<MainTab>(() => readUrlHub() ?? restore("mainTab", MAIN_TABS, "DASHBOARD"));
+  // mainTab always starts on DASHBOARD, full stop — no restoring from a
+  // deep-linking URL or from localStorage. This is deliberate: users kept
+  // landing back on whatever hub they'd last been on (Trade Hub, Data Hub,
+  // etc.) instead of the Dashboard, both because the URL bar itself still
+  // carries the last-visited `?hub=` (this hook rewrites it on every hub
+  // change) and because of the localStorage fallback below. The URL-sync
+  // effect further down still rewrites the address bar to `?hub=DASHBOARD`
+  // on first mount, so even an old bookmarked/restored URL gets corrected.
+  // Sub-tab state (tradeHubSection, dataHubTab, etc.) is unaffected — those
+  // still restore normally once the user actually navigates into a hub.
+  const [mainTab, setMainTabState] = useState<MainTab>("DASHBOARD");
   const [tradeHubSection, setTradeHubSection] = useState<TradeHubSection>(() => {
     const hub = readUrlHub();
     const tab = readUrlTab();
@@ -104,9 +110,9 @@ export function useHubRouting() {
       : restore("draftHubSection", DRAFT_HUB_SECTIONS, "BOARD");
   });
 
-  // Persist each selection (writing to localStorage is an external-system sync,
-  // the intended use of effects — not a React state update).
-  useEffect(() => { setLocalStorageItem("mainTab", mainTab); }, [mainTab]);
+  // Persist each sub-tab selection (writing to localStorage is an
+  // external-system sync, the intended use of effects — not a React state
+  // update). mainTab itself is deliberately NOT persisted — see above.
   useEffect(() => { setLocalStorageItem("tradeHubSection", tradeHubSection); }, [tradeHubSection]);
   useEffect(() => { setLocalStorageItem("leagueHubTab", leagueHubTab); }, [leagueHubTab]);
   useEffect(() => { setLocalStorageItem("dataHubTab", dataHubTab); }, [dataHubTab]);

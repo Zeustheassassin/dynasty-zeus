@@ -1,5 +1,7 @@
 import type { LeagueOverviewEntry, SleeperPlayer, StrategicBucket } from "../../types";
 import { getRosterDirectionProfile } from "./roster";
+import { getAdjustedDirectionBucket } from "./scoring";
+import { getBucketColor } from "./bucket";
 
 export interface CrossLeagueDirectionEntry {
   leagueId: string;
@@ -24,6 +26,18 @@ export interface CrossLeagueDirectionEntry {
  * multipliers per league just for a landing-screen summary. Not a fetch
  * cost issue like the roster data itself (leagueOverviewData is already
  * loaded); this is a deliberate scope cut on precision, not on data.
+ *
+ * IMPORTANT: the raw `getRosterDirectionProfile` bucket is only half the
+ * story everywhere else in the app — OverviewTab, LeagueMatesTab,
+ * UserScoutHub, and useSpyState all run it through
+ * `getAdjustedDirectionBucket` (age/youth window score + playoff-sim
+ * pressure) before displaying it. This used to skip that step entirely,
+ * so the Dashboard tally could show a different bucket than the "real"
+ * one on League Hub's Overview tab for the exact same team (e.g. a young
+ * "Rebuilder" with surprisingly good playoff odds shows as "Almost There"
+ * everywhere else, but showed as plain "Rebuilder" here). Now takes each
+ * league's latest known playoff odds (from the Dashboard's own
+ * `useDashboardPlayoffOdds` history read) and applies the same adjustment.
  */
 export function getCrossLeagueDirections({
   leagueOverviewData,
@@ -31,12 +45,14 @@ export function getCrossLeagueDirections({
   players,
   pickFcValues,
   redraftValues,
+  playoffOddsByLeague = {},
 }: {
   leagueOverviewData: Record<string, LeagueOverviewEntry>;
   myRosterIdByLeague: Record<string, number>;
   players: Record<string, SleeperPlayer>;
   pickFcValues: Record<string, number>;
   redraftValues: Record<string, number>;
+  playoffOddsByLeague?: Record<string, number>;
 }): Record<string, CrossLeagueDirectionEntry> {
   const result: Record<string, CrossLeagueDirectionEntry> = {};
   for (const [leagueId, entry] of Object.entries(leagueOverviewData)) {
@@ -52,10 +68,12 @@ export function getCrossLeagueDirections({
       dynastyValueForPlayer: (id) => players[id]?.value ?? 0,
     });
     if (!profile) continue;
+    const hasSimData = leagueId in playoffOddsByLeague;
+    const adjBucket = getAdjustedDirectionBucket(profile.bucket, profile, playoffOddsByLeague[leagueId] ?? 0, hasSimData);
     result[leagueId] = {
       leagueId,
-      bucket: profile.bucket,
-      bucketColor: profile.bucketColor,
+      bucket: adjBucket,
+      bucketColor: getBucketColor(adjBucket),
       dynRank: profile.dynRank,
       redRank: profile.redRank,
       n: profile.n,

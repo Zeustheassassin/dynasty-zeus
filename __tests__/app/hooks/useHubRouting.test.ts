@@ -18,19 +18,23 @@ describe("useHubRouting", () => {
     expect(result.current.mainTab).toBe("DASHBOARD");
   });
 
-  it("restores mainTab from a deep-linking URL, overriding localStorage", () => {
-    localStorage.setItem("mainTab", JSON.stringify("DASHBOARD"));
+  it("always starts on DASHBOARD, even with a deep-linking URL for another hub", () => {
+    // mainTab deliberately never restores from the URL or localStorage — every
+    // fresh load lands on the Dashboard regardless of which hub the user was
+    // last on. Sub-tab state (tradeHubSection here) still resolves from the
+    // URL independently, so navigating into that hub later picks up where
+    // the user left off; it just doesn't auto-navigate there on load.
     setUrl("hub=TRADE_HUB&tab=FINDER");
     const { result } = renderHook(() => useHubRouting());
-    expect(result.current.mainTab).toBe("TRADE_HUB");
+    expect(result.current.mainTab).toBe("DASHBOARD");
     expect(result.current.tradeHubSection).toBe("FINDER");
   });
 
-  it("falls back to localStorage when the URL has no hub param", () => {
+  it("always starts on DASHBOARD, even with a persisted mainTab in localStorage", () => {
     localStorage.setItem("mainTab", JSON.stringify("DATA_HUB"));
     localStorage.setItem("dataHubTab", JSON.stringify("DEPTH_CHARTS"));
     const { result } = renderHook(() => useHubRouting());
-    expect(result.current.mainTab).toBe("DATA_HUB");
+    expect(result.current.mainTab).toBe("DASHBOARD");
     expect(result.current.dataHubTab).toBe("DEPTH_CHARTS");
   });
 

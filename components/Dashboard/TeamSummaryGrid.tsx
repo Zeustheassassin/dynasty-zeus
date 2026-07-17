@@ -49,9 +49,22 @@ export default function TeamSummaryGrid({ entries, loading, onSelectLeague, leag
     return map;
   }, [entries]);
 
+  // Feed each league's latest known playoff odds into the same
+  // getAdjustedDirectionBucket step OverviewTab/LeagueMatesTab/UserScoutHub
+  // all apply — otherwise this tally shows the RAW pre-adjustment bucket,
+  // which can disagree with the "real" bucket shown everywhere else for the
+  // same team (see getCrossLeagueDirections' header comment).
+  const playoffOddsByLeague = useMemo(() => {
+    const map: Record<string, number> = {};
+    Object.entries(historyByLeague).forEach(([leagueId, history]) => {
+      if (history.length > 0) map[leagueId] = history[history.length - 1].playoffOdds;
+    });
+    return map;
+  }, [historyByLeague]);
+
   const directions = useMemo(
-    () => getCrossLeagueDirections({ leagueOverviewData, myRosterIdByLeague, players, pickFcValues, redraftValues }),
-    [leagueOverviewData, myRosterIdByLeague, players, pickFcValues, redraftValues]
+    () => getCrossLeagueDirections({ leagueOverviewData, myRosterIdByLeague, players, pickFcValues, redraftValues, playoffOddsByLeague }),
+    [leagueOverviewData, myRosterIdByLeague, players, pickFcValues, redraftValues, playoffOddsByLeague]
   );
 
   const directionTally = useMemo(() => {
