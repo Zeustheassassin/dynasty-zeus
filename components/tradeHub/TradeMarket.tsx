@@ -62,7 +62,7 @@ function TradeMarket({ fcTrendData, loadingFcTrends, onRefreshFcTrends }: TradeM
     <div className="space-y-5">
       {/* Sub-view nav */}
       <div className="flex gap-4 border-b border-gray-800 pb-0 overflow-x-auto">
-        {(["TARGETS", "TRENDING_UP", "TRENDING_DOWN", "MOST_TRADED"] as const).map((v) => {
+        {(["TRENDING_UP", "TRENDING_DOWN", "MOST_TRADED", "TARGETS"] as const).map((v) => {
           const labels: Record<string, string> = {
             TARGETS: "Rebuilding / Contending",
             TRENDING_UP: "Trending Up",
@@ -86,7 +86,7 @@ function TradeMarket({ fcTrendData, loadingFcTrends, onRefreshFcTrends }: TradeM
       </div>
 
       {/* Position filter */}
-      <div className="flex gap-2 flex-wrap">
+      <div className="flex gap-2 flex-wrap justify-center">
         {POS_TABS.map((p) => (
           <button
             key={p}

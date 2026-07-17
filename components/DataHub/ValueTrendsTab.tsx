@@ -244,7 +244,7 @@ function ValueTrendsTab({
 
   const viewToggle = (
     <div className="flex justify-center gap-2 mb-4">
-      {(["MY_LEAGUE", "BUY_LOW", "MARKET_PULSE"] as const).map((v) => (
+      {(["MARKET_PULSE", "BUY_LOW", "MY_LEAGUE"] as const).map((v) => (
         <button
           key={v}
           onClick={() => setView(v)}
