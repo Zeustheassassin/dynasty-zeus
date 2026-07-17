@@ -61,7 +61,7 @@ function TradeMarket({ fcTrendData, loadingFcTrends, onRefreshFcTrends }: TradeM
   return (
     <div className="space-y-5">
       {/* Sub-view nav */}
-      <div className="flex gap-4 border-b border-gray-800 pb-0 overflow-x-auto">
+      <div className="flex justify-center gap-4 border-b border-gray-800 pb-0 overflow-x-auto">
         {(["TRENDING_UP", "TRENDING_DOWN", "MOST_TRADED", "TARGETS"] as const).map((v) => {
           const labels: Record<string, string> = {
             TARGETS: "Rebuilding / Contending",
