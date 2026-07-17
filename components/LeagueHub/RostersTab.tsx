@@ -120,23 +120,23 @@ function RostersTab({
       )}
       {selectedLeague && roster && (
         <>
-          <button onClick={() => setSelectedLeague(null)} className="mb-2 text-sm text-gray-400">← Back</button>
+          <button onClick={() => setSelectedLeague(null)} className="mb-2 text-sm text-slate-400">← Back</button>
           <div className="mb-4">
             <h2 className="text-lg font-bold">{selectedLeague.name}</h2>
-            <div className="text-xs text-gray-400">{roster.settings?.team_name || "Your Team"}</div>
+            <div className="text-xs text-slate-400">{roster.settings?.team_name || "Your Team"}</div>
             <div className="text-xs text-blue-400 mt-1">{getLineupSettings(selectedLeague)}</div>
           </div>
           {dir && (
-            <div className="mb-3 bg-gray-900 border border-gray-800 rounded-xl p-3">
-              <div className="border-b border-gray-800 pb-2 mb-2 flex items-start justify-between gap-3">
+            <div className="mb-3 bg-slate-900 border border-slate-800 rounded-xl p-3">
+              <div className="border-b border-slate-800 pb-2 mb-2 flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-[11px] uppercase tracking-wide text-gray-500">Roster Direction</div>
-                  <div className="mt-0.5 text-xs text-gray-200">{dir.summary}</div>
+                  <div className="text-[11px] uppercase tracking-wide text-slate-500">Roster Direction</div>
+                  <div className="mt-0.5 text-xs text-slate-200">{dir.summary}</div>
                 </div>
-                <div className="text-[11px] text-gray-400 whitespace-nowrap">
+                <div className="text-[11px] text-slate-400 whitespace-nowrap">
                   <span className="font-semibold text-emerald-400">{dir.bucket}</span>
                   {dir.rawBucket && dir.rawBucket !== dir.bucket && (
-                    <span className="ml-1 text-gray-500">({dir.rawBucket} by assets)</span>
+                    <span className="ml-1 text-slate-500">({dir.rawBucket} by assets)</span>
                   )}
                 </div>
               </div>
@@ -150,8 +150,8 @@ function RostersTab({
                   { label: "1sts", value: dir.firstRounders },
                 ].map((tile) => (
                   <div key={tile.label} className="text-xs">
-                    <div className="text-[10px] uppercase tracking-wide text-gray-500">{tile.label}</div>
-                    <div className="text-gray-200 font-medium">{tile.value}</div>
+                    <div className="text-[10px] uppercase tracking-wide text-slate-500">{tile.label}</div>
+                    <div className="text-slate-200 font-medium">{tile.value}</div>
                   </div>
                 ))}
               </div>
@@ -163,18 +163,18 @@ function RostersTab({
             const sections = Object.entries(grouped).filter(([, items]) => items.length > 0);
             if (sections.length === 0) return null;
             return (
-              <div className="mb-3 bg-gray-900 border border-gray-800 rounded-xl p-3">
-                <div className="border-b border-gray-800 pb-2 mb-2">
-                  <div className="text-[11px] uppercase tracking-wide text-gray-500">Scoring Rules</div>
+              <div className="mb-3 bg-slate-900 border border-slate-800 rounded-xl p-3">
+                <div className="border-b border-slate-800 pb-2 mb-2">
+                  <div className="text-[11px] uppercase tracking-wide text-slate-500">Scoring Rules</div>
                 </div>
                 <div className="space-y-2">
                   {sections.map(([section, items]) => (
                     <div key={section}>
-                      <div className="text-[10px] uppercase tracking-wide text-gray-500 mb-1">{section}</div>
+                      <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">{section}</div>
                       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-1.5">
                         {items.map((rule) => (
                           <div key={rule.key} className="flex justify-between items-center gap-2 text-xs py-0.5">
-                            <span className="truncate text-gray-200">{formatRule(rule.key)}</span>
+                            <span className="truncate text-slate-200">{formatRule(rule.key)}</span>
                             <span className="text-emerald-400 font-medium whitespace-nowrap">{rule.value > 0 ? `+${rule.value}` : rule.value}</span>
                           </div>
                         ))}
@@ -193,27 +193,27 @@ function RostersTab({
               const avgAge = ages.length ? ages.reduce((s, a) => s + a, 0) / ages.length : null;
               const rank = positionRankByPos[pos];
               return (
-                <div key={pos} className="bg-gray-900 border border-gray-800 rounded-xl p-3">
-                  <div className="border-b border-gray-800 pb-2 mb-2">
-                    <div className="text-xs text-gray-400">
+                <div key={pos} className="bg-slate-900 border border-slate-800 rounded-xl p-3">
+                  <div className="border-b border-slate-800 pb-2 mb-2">
+                    <div className="text-xs text-slate-400">
                       {pos} Rank: <span className="font-semibold text-emerald-400">{rank ?? "—"}</span>
                     </div>
-                    <div className="text-[11px] text-gray-500 mt-0.5">
-                      Value: <span className="text-gray-200 font-medium">{totalValue.toLocaleString()}</span>
+                    <div className="text-[11px] text-slate-500 mt-0.5">
+                      Value: <span className="text-slate-200 font-medium">{totalValue.toLocaleString()}</span>
                       {avgAge != null && (
-                        <> {" | "}Age: <span className="text-gray-200 font-medium">{avgAge.toFixed(1)}</span></>
+                        <> {" | "}Age: <span className="text-slate-200 font-medium">{avgAge.toFixed(1)}</span></>
                       )}
                     </div>
                   </div>
                   <div className="space-y-0.5">
                     {list.length === 0 ? (
-                      <div className="text-[11px] text-gray-600 italic">No players</div>
+                      <div className="text-[11px] text-slate-600 italic">No players</div>
                     ) : (
                       list.map((p) => (
                         <div key={p.player_id} className="flex items-center justify-between gap-2 text-xs py-0.5">
                           <div className="flex-1 min-w-0">
-                            <div className="truncate text-gray-200">{p.full_name}</div>
-                            <div className="text-[10px] text-gray-500">{ROLE_LABEL[p.role] ?? ""}</div>
+                            <div className="truncate text-slate-200">{p.full_name}</div>
+                            <div className="text-[10px] text-slate-500">{ROLE_LABEL[p.role] ?? ""}</div>
                           </div>
                           <span className="text-emerald-400 font-medium whitespace-nowrap">{(p.value || 0).toLocaleString()}</span>
                         </div>
@@ -223,17 +223,17 @@ function RostersTab({
                 </div>
               );
             })}
-            <div className="bg-gray-900 border border-gray-800 rounded-xl p-3">
-              <div className="border-b border-gray-800 pb-2 mb-2">
-                <div className="text-xs text-gray-400">Picks: <span className="font-semibold text-emerald-400">{picks.length}</span></div>
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-3">
+              <div className="border-b border-slate-800 pb-2 mb-2">
+                <div className="text-xs text-slate-400">Picks: <span className="font-semibold text-emerald-400">{picks.length}</span></div>
               </div>
               <div className="space-y-2">
                 {picksByYear.length === 0 ? (
-                  <div className="text-[11px] text-gray-600 italic">No picks</div>
+                  <div className="text-[11px] text-slate-600 italic">No picks</div>
                 ) : (
                   picksByYear.map(({ year, list }) => (
                     <div key={year}>
-                      <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-1">{year}</div>
+                      <div className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">{year}</div>
                       <div className="space-y-0.5">
                         {list.map((pick) => {
                           const ownerName = users[pick.roster_id] || users[pick.owner_id] || "Unknown";
@@ -245,8 +245,8 @@ function RostersTab({
                               key={`${pick.season}-${pick.round}-${pick.roster_id}-${pick.owner_id}`}
                               className="flex items-center justify-between gap-2 text-xs py-0.5"
                             >
-                              <span className="text-gray-200 font-medium whitespace-nowrap">{label}</span>
-                              <span className="text-[10px] text-gray-500 truncate">via {ownerName}</span>
+                              <span className="text-slate-200 font-medium whitespace-nowrap">{label}</span>
+                              <span className="text-[10px] text-slate-500 truncate">via {ownerName}</span>
                             </div>
                           );
                         })}
@@ -256,19 +256,19 @@ function RostersTab({
                 )}
               </div>
             </div>
-            <div className="bg-gray-900 border border-gray-800 rounded-xl p-3">
-              <div className="border-b border-gray-800 pb-2 mb-2">
-                <div className="text-xs text-gray-400">Free Agents: <span className="font-semibold text-emerald-400">{freeAgents.length}</span></div>
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-3">
+              <div className="border-b border-slate-800 pb-2 mb-2">
+                <div className="text-xs text-slate-400">Free Agents: <span className="font-semibold text-emerald-400">{freeAgents.length}</span></div>
               </div>
               <div className="space-y-0.5">
                 {freeAgents.length === 0 ? (
-                  <div className="text-[11px] text-gray-600 italic">None</div>
+                  <div className="text-[11px] text-slate-600 italic">None</div>
                 ) : (
                   freeAgents.map((p) => (
                     <div key={p.player_id} className="flex items-center justify-between gap-2 text-xs py-0.5">
                       <div className="flex-1 min-w-0 flex items-center gap-1">
-                        <span className="text-[10px] text-gray-500 uppercase">{p.position}</span>
-                        <span className="truncate text-gray-200">{p.full_name}</span>
+                        <span className="text-[10px] text-slate-500 uppercase">{p.position}</span>
+                        <span className="truncate text-slate-200">{p.full_name}</span>
                       </div>
                       <span className="text-emerald-400 font-medium whitespace-nowrap">{(p.value || 0).toLocaleString()}</span>
                     </div>

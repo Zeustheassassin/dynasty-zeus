@@ -127,16 +127,16 @@ function BuyLowTab({ projectionData, setPlayerProfileId }: BuyLowTabProps) {
 
   const scoreColor = (s: number) =>
     s >= 70 ? "text-emerald-400" :
-    s >= 45 ? "text-yellow-400" :
-    "text-gray-400";
+    s >= 45 ? "text-amber-400" :
+    "text-slate-400";
 
   const GRID = "grid grid-cols-[2rem_2rem_1fr_2rem_3.5rem_3.5rem_2.5rem_3rem] gap-2 items-center px-1";
 
   return (
     <>
       {/* Header */}
-      <p className="text-xs text-gray-400 mb-1">
-        Players whose <span className="text-gray-200 font-medium">projected points rank</span> is better than their <span className="text-gray-200 font-medium">dynasty market rank</span> — they produce more than their price tag suggests. High gap + young age = high-conviction buy low.
+      <p className="text-xs text-slate-400 mb-1">
+        Players whose <span className="text-slate-200 font-medium">projected points rank</span> is better than their <span className="text-slate-200 font-medium">dynasty market rank</span> — they produce more than their price tag suggests. High gap + young age = high-conviction buy low.
       </p>
       {!projectionsLoaded && (
         <p className="text-[11px] text-amber-400 mb-2">
@@ -152,7 +152,7 @@ function BuyLowTab({ projectionData, setPlayerProfileId }: BuyLowTabProps) {
             key={pos}
             onClick={() => setBuyLowPos(pos)}
             className={`px-3 py-1 rounded text-sm font-medium transition ${
-              buyLowPos === pos ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:text-white"
+              buyLowPos === pos ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:text-white"
             }`}
           >
             {pos}
@@ -161,16 +161,16 @@ function BuyLowTab({ projectionData, setPlayerProfileId }: BuyLowTabProps) {
       </div>
 
       {/* Card with column header + rows */}
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-3">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3">
         {visible.length === 0 ? (
-          <div className="text-[11px] text-gray-600 italic">
+          <div className="text-[11px] text-slate-600 italic">
             {Object.keys(calcFcValues).length === 0
               ? "Load a league to populate dynasty values."
               : "No buy low candidates found for this filter."}
           </div>
         ) : (
           <>
-            <div className={`${GRID} text-[10px] uppercase tracking-wide text-gray-500 mb-1 pb-2 border-b border-gray-800`}>
+            <div className={`${GRID} text-[10px] uppercase tracking-wide text-slate-500 mb-1 pb-2 border-b border-slate-800`}>
               <span className="text-right">#</span>
               <span>Pos</span>
               <span>Player</span>
@@ -186,34 +186,34 @@ function BuyLowTab({ projectionData, setPlayerProfileId }: BuyLowTabProps) {
                   key={r.player_id}
                   className={`${GRID} text-xs py-0.5 ${r.usingFallback ? "opacity-40" : ""}`}
                 >
-                  <span className="text-gray-500 font-mono text-right">{idx + 1}</span>
-                  <span className="text-[10px] uppercase text-gray-500">{r.pos}</span>
+                  <span className="text-slate-500 font-mono text-right">{idx + 1}</span>
+                  <span className="text-[10px] uppercase text-slate-500">{r.pos}</span>
                   <button
-                    className={`text-left truncate min-w-0 transition ${r.usingFallback ? "text-gray-500 cursor-default" : "text-gray-200 hover:text-blue-300"}`}
+                    className={`text-left truncate min-w-0 transition ${r.usingFallback ? "text-slate-500 cursor-default" : "text-slate-200 hover:text-blue-300"}`}
                     onClick={() => !r.usingFallback && setPlayerProfileId(r.player_id)}
                   >
                     {r.full_name}
                     {r.team && (
-                      <span className="ml-1.5 text-[10px] text-gray-500 font-normal">{r.team}</span>
+                      <span className="ml-1.5 text-[10px] text-slate-500 font-normal">{r.team}</span>
                     )}
                   </button>
-                  <span className={`text-[10px] font-mono text-center ${r.usingFallback ? "text-gray-700" : ageColor(r.age, r.pos)}`}>
+                  <span className={`text-[10px] font-mono text-center ${r.usingFallback ? "text-slate-700" : ageColor(r.age, r.pos)}`}>
                     {r.age || "—"}
                   </span>
-                  <span className="text-[11px] text-gray-400 font-mono text-center">
+                  <span className="text-[11px] text-slate-400 font-mono text-center">
                     #{r.dynRank}
                   </span>
                   {r.usingFallback ? (
-                    <span className="text-[10px] text-gray-600 italic text-center">no proj</span>
+                    <span className="text-[10px] text-slate-600 italic text-center">no proj</span>
                   ) : (
-                    <span className="text-[11px] text-gray-400 font-mono text-center">
+                    <span className="text-[11px] text-slate-400 font-mono text-center">
                       #{r.projRank}
                     </span>
                   )}
                   <span className="text-[11px] text-emerald-400 font-mono text-center">
                     {r.usingFallback ? "—" : `+${r.gap}`}
                   </span>
-                  <span className={`text-xs font-semibold font-mono text-center ${r.usingFallback ? "text-gray-600" : scoreColor(r.score)}`}>
+                  <span className={`text-xs font-semibold font-mono text-center ${r.usingFallback ? "text-slate-600" : scoreColor(r.score)}`}>
                     {r.usingFallback ? "—" : r.score}
                   </span>
                 </div>
@@ -225,10 +225,10 @@ function BuyLowTab({ projectionData, setPlayerProfileId }: BuyLowTabProps) {
 
       {/* Legend */}
       {visible.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-gray-500">
+        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-slate-500">
           <span><span className="font-semibold text-emerald-400">Score 70+</span> — strong conviction buy low</span>
-          <span><span className="font-semibold text-yellow-400">45–69</span> — moderate opportunity</span>
-          <span><span className="font-semibold text-gray-400">&lt;45</span> — slight dip, less actionable</span>
+          <span><span className="font-semibold text-amber-400">45–69</span> — moderate opportunity</span>
+          <span><span className="font-semibold text-slate-400">&lt;45</span> — slight dip, less actionable</span>
           <span><span className="text-emerald-400">+Gap</span> — how many ranks better their production is vs. their dynasty price</span>
           <span>Dimmed rows have no projection data yet (rookies/unsigned FAs); sorted to the bottom.</span>
         </div>

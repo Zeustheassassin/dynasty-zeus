@@ -12,6 +12,7 @@ import DepthChartsTab from "./DataHub/DepthChartsTab";
 import MySharesTab from "./DataHub/MySharesTab";
 import CompareTab from "./DataHub/CompareTab";
 import ErrorBanner from "./ErrorBanner";
+import { ACCENT_CLASSES } from "../lib/uiTheme";
 
 // ── Local types ─────────────────────────────────────────────────────────────
 // BUY_LOW is no longer a top-level tab — it's a view inside VALUE_TRENDS now
@@ -93,7 +94,7 @@ function DataHub({
   return (
     <>
       {/* Sub-tab nav */}
-      <div className="flex justify-center border-b border-gray-800 mb-6">
+      <nav aria-label="Data Hub" className="flex justify-center border-b border-slate-800 mb-6">
         <div className="flex justify-center gap-1 sm:gap-3 lg:gap-5 text-center flex-wrap">
           {(["MY_SHARES", "RANKINGS", "VALUE_TRENDS", "PROJECTIONS", "DEPTH_CHARTS", "LEAGUEMATES", "COMPARE"] as const).map((tab) => (
             <button
@@ -101,8 +102,8 @@ function DataHub({
               onClick={() => setDataHubTab(tab)}
               className={`pb-2 px-1 text-xs sm:text-sm font-semibold transition whitespace-nowrap ${
                 dataHubTab === tab
-                  ? "border-b-2 border-blue-400 text-blue-400"
-                  : "text-gray-400 hover:text-white"
+                  ? `border-b-2 border-blue-400 ${ACCENT_CLASSES.text}`
+                  : "text-slate-400 hover:text-white"
               }`}
             >
               {tab === "RANKINGS" ? "Rankings" :
@@ -115,7 +116,7 @@ function DataHub({
             </button>
           ))}
         </div>
-      </div>
+      </nav>
 
       {(calcValuesError || redraftError) && (
         <div className="mb-4 space-y-2">

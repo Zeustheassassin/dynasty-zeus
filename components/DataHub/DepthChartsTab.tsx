@@ -5,6 +5,7 @@ import { useLeague } from "../../lib/LeagueContext";
 import { useValues } from "../../lib/ValuesContext";
 import type { SleeperPlayer } from "../../lib/types";
 import { injuryBadge, injuryRiskBadge, ageColor } from "./dataHubHelpers";
+import EmptyState from "../ui/EmptyState";
 
 function DepthChartsTab() {
   const players = usePlayers();
@@ -85,7 +86,7 @@ function DepthChartsTab() {
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-3 mb-5">
         {/* Position filter */}
-        <div className="flex gap-1 bg-gray-800/60 rounded-xl p-1">
+        <div className="flex gap-1 bg-slate-800/60 rounded-xl p-1">
           {(["QB", "RB", "WR", "TE"] as const).map((pos) => (
             <button
               key={pos}
@@ -96,7 +97,7 @@ function DepthChartsTab() {
                   : pos === "RB" ? "bg-green-900/60 text-green-300"
                   : pos === "WR" ? "bg-blue-900/60 text-blue-300"
                   : "bg-yellow-900/60 text-yellow-300"
-                  : "text-gray-400 hover:text-white"
+                  : "text-slate-400 hover:text-white"
               }`}
             >
               {pos}
@@ -109,7 +110,7 @@ function DepthChartsTab() {
           value={depthTeamSearch}
           onChange={(e) => setDepthTeamSearch(e.target.value)}
           placeholder="Filter team…"
-          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 w-36"
+          className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 w-36"
         />
         {/* Owned only toggle */}
         <button
@@ -117,15 +118,15 @@ function DepthChartsTab() {
           className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition ${
             depthShowOwnedOnly
               ? "border-blue-600 bg-blue-900/30 text-blue-300"
-              : "border-gray-700 text-gray-400 hover:text-white"
+              : "border-slate-700 text-slate-400 hover:text-white"
           }`}
         >
           Owned Players Only
         </button>
         {/* Legend */}
-        <div className="flex items-center gap-3 ml-auto text-[10px] text-gray-500 flex-wrap">
+        <div className="flex items-center gap-3 ml-auto text-[10px] text-slate-500 flex-wrap">
           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500 inline-block"/> Owned</span>
-          <span className="flex items-center gap-1"><span className="rounded px-1 bg-gray-700 text-gray-200 font-bold">Starter</span> Depth #1</span>
+          <span className="flex items-center gap-1"><span className="rounded px-1 bg-slate-700 text-slate-200 font-bold">Starter</span> Depth #1</span>
           <span className="flex items-center gap-1"><span className="rounded px-1 bg-amber-900/60 text-amber-300 font-bold">HC</span> Depth #2 handcuff</span>
         </div>
       </div>
@@ -139,19 +140,19 @@ function DepthChartsTab() {
           return (
             <div
               key={team}
-              className={`rounded-2xl border bg-gray-900/60 overflow-hidden ${
-                hasOwned ? "border-blue-800/60" : "border-gray-800"
+              className={`rounded-2xl border bg-slate-900/60 overflow-hidden ${
+                hasOwned ? "border-blue-800/60" : "border-slate-800"
               }`}
             >
               {/* Team header */}
               <div className={`px-3 py-2 border-b flex items-center justify-between ${
-                hasOwned ? "border-blue-800/40 bg-blue-950/20" : "border-gray-800"
+                hasOwned ? "border-blue-800/40 bg-blue-950/20" : "border-slate-800"
               }`}>
                 <span className="text-sm font-bold text-white">{team}</span>
                 {hasOwned && <span className="text-[9px] font-bold text-blue-400 uppercase tracking-wide">You own</span>}
               </div>
               {/* Player rows */}
-              <div className="divide-y divide-gray-800/40">
+              <div className="divide-y divide-slate-800/40">
                 {posGroup.slice(0, depthPos === "WR" ? 5 : 4).map((p, rowIdx) => {
                   const isOwned = ownedIds.has(p.player_id);
                   const role = getDepthRole(team, p);
@@ -165,7 +166,7 @@ function DepthChartsTab() {
                     >
                       {/* Depth number */}
                       <span className={`text-[10px] font-bold w-4 shrink-0 ${
-                        rowIdx === 0 ? "text-white" : "text-gray-600"
+                        rowIdx === 0 ? "text-white" : "text-slate-600"
                       }`}>{rowIdx + 1}</span>
                       {/* Name + role badge + injury */}
                       <div className="flex-1 min-w-0 flex items-center gap-1 flex-wrap">
@@ -174,7 +175,7 @@ function DepthChartsTab() {
                         </span>
                         {injuryBadge(p.injury_status)}
                         {injuryRiskBadge(p.age, p.position, p.injury_status)}
-                        {role === "STARTER"  && <span className="text-[9px] font-bold px-1 rounded bg-gray-700 text-gray-200 shrink-0">Starter</span>}
+                        {role === "STARTER"  && <span className="text-[9px] font-bold px-1 rounded bg-slate-700 text-slate-200 shrink-0">Starter</span>}
                         {role === "HANDCUFF" && <span className="text-[9px] font-bold px-1 rounded bg-amber-900/60 text-amber-300 shrink-0">HC</span>}
                       </div>
                       {/* Age */}
@@ -183,7 +184,7 @@ function DepthChartsTab() {
                       </span>
                       {/* Value */}
                       {val > 0 && (
-                        <span className="text-[10px] font-mono text-gray-400 shrink-0 w-12 text-right">
+                        <span className="text-[10px] font-mono text-slate-400 shrink-0 w-12 text-right">
                           {val.toLocaleString()}
                         </span>
                       )}
@@ -195,9 +196,7 @@ function DepthChartsTab() {
           );
         })}
         {filteredTeams.length === 0 && (
-          <div className="col-span-full rounded-xl border border-dashed border-gray-700 bg-gray-900/40 p-6 text-sm text-gray-400">
-            No teams match your filter.
-          </div>
+          <EmptyState className="col-span-full">No teams match your filter.</EmptyState>
         )}
       </div>
     </div>

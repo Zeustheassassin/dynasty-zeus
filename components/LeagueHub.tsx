@@ -33,6 +33,7 @@ import PowerRankingsTab from "./LeagueHub/PowerRankingsTab";
 import ActivityTab from "./LeagueHub/ActivityTab";
 import ErrorBanner from "./ErrorBanner";
 import type { StandingRow, AnnotatedTransaction } from "./LeagueHub/leagueHubTypes";
+import { Card } from "./ui/Card";
 
 // ── Props ──────────────────────────────────────────────────────────────────
 interface LeagueHubProps {
@@ -137,7 +138,7 @@ function LeagueHub({
           </div>
         )}
         {/* Sub-tab nav */}
-        <div className="mb-6 rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
+        <Card className="mb-6">
           <div className="flex flex-wrap justify-center gap-2">
             {LEAGUE_HUB_GROUPS.map((group) => {
               const isActive = activeLeagueHubGroup.id === group.id;
@@ -148,7 +149,7 @@ function LeagueHub({
                   className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
                     isActive
                       ? "bg-blue-600 text-white"
-                      : "bg-gray-800 text-gray-400 hover:text-white"
+                      : "bg-slate-800 text-slate-400 hover:text-white"
                   }`}
                 >
                   {group.label}
@@ -165,7 +166,7 @@ function LeagueHub({
                   className={`rounded-full px-3 py-1 text-xs font-semibold transition border ${
                     leagueHubTab === tab.id
                       ? "bg-blue-700/50 text-blue-200 border-blue-600"
-                      : "bg-gray-800 text-gray-500 border-transparent hover:text-gray-300"
+                      : "bg-slate-800 text-slate-500 border-transparent hover:text-slate-300"
                   }`}
                 >
                   {tab.label}
@@ -173,7 +174,7 @@ function LeagueHub({
               ))}
             </div>
           )}
-        </div>
+        </Card>
 
         {leagueHubTab === "OVERVIEW" && (
           <OverviewTab

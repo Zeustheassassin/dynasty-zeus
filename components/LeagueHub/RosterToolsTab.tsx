@@ -80,7 +80,7 @@ function RosterAgeCurveChart({ points }: { points: ReturnType<typeof getRosterAg
   );
 
   if (points.length === 0) {
-    return <p className="text-sm text-gray-500">No skill-position players with a known age on this roster.</p>;
+    return <p className="text-sm text-slate-500">No skill-position players with a known age on this roster.</p>;
   }
 
   return (
@@ -144,21 +144,21 @@ function PositionalStrengthRadar({ radarData }: { radarData: Array<{ pos: string
 function TeamNeedsCard({ profile }: { profile: ReturnType<typeof getRosterDirectionProfile> }) {
   if (!profile) return null;
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl p-3">
+    <div className="bg-slate-900 border border-slate-800 rounded-xl p-3">
       <div className="flex items-center gap-2 mb-2">
         <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${profile.bucketColor}`}>
           {profile.bucket}
         </span>
-        <span className="text-xs text-gray-500">
+        <span className="text-xs text-slate-500">
           Dyn {profile.dynRank}/{profile.n} &middot; Rdft {profile.redRank}/{profile.n}
         </span>
       </div>
-      <p className="text-sm text-gray-300 mb-3">{profile.summary}</p>
+      <p className="text-sm text-slate-300 mb-3">{profile.summary}</p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
-          <div className="text-[10px] uppercase tracking-wide text-gray-500 mb-1">Strengths</div>
+          <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">Strengths</div>
           {profile.strengths.length === 0 ? (
-            <div className="text-[11px] text-gray-600 italic">None stand out</div>
+            <div className="text-[11px] text-slate-600 italic">None stand out</div>
           ) : (
             <ul className="space-y-0.5">
               {profile.strengths.map((s) => (
@@ -168,9 +168,9 @@ function TeamNeedsCard({ profile }: { profile: ReturnType<typeof getRosterDirect
           )}
         </div>
         <div>
-          <div className="text-[10px] uppercase tracking-wide text-gray-500 mb-1">Concerns</div>
+          <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">Concerns</div>
           {profile.concerns.length === 0 ? (
-            <div className="text-[11px] text-gray-600 italic">None stand out</div>
+            <div className="text-[11px] text-slate-600 italic">None stand out</div>
           ) : (
             <ul className="space-y-0.5">
               {profile.concerns.map((c) => (
@@ -237,18 +237,18 @@ function RosterToolsTab({ allPicks }: RosterToolsTabProps) {
   }, [rosterId, rosters, allPicks, players, pickFcValues, leagueAdjustedRedraftValues, dynastyValueForPlayer]);
 
   if (!selectedLeague || !rosters.length) {
-    return <p className="text-sm text-gray-500">Select a league from Rosters &amp; Rules first to view team tools.</p>;
+    return <p className="text-sm text-slate-500">Select a league from Rosters &amp; Rules first to view team tools.</p>;
   }
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
-        <span className="text-sm text-gray-400">{selectedLeague.name}</span>
+        <span className="text-sm text-slate-400">{selectedLeague.name}</span>
         <RosterSelect value={rosterId} onChange={setPickedRosterId} />
       </div>
 
       {!selectedRoster ? (
-        <p className="text-sm text-gray-500">Select a team to view its tools.</p>
+        <p className="text-sm text-slate-500">Select a team to view its tools.</p>
       ) : (
         <>
           <RosterAgeCurveChart points={agePoints} />

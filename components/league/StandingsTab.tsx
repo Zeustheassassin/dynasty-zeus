@@ -48,7 +48,7 @@ export default function StandingsTab({ standings, selectedLeagueMateProfilesView
 
   if (!selectedLeague || !roster) {
     return (
-      <p className="text-sm text-gray-500">
+      <p className="text-sm text-slate-500">
         Select a league from Rosters &amp; Rules first to see its standings.
       </p>
     );
@@ -58,12 +58,12 @@ export default function StandingsTab({ standings, selectedLeagueMateProfilesView
     selectedLeague.settings?.playoff_teams ?? Math.min(Math.ceil(rosters.length / 2), 6);
 
   return (
-    <div className="bg-gray-900 border border-gray-700 rounded-xl p-5 shadow-md">
-      <h3 className="text-sm font-semibold text-gray-200 mb-2">
+    <div className="bg-slate-900 border border-slate-700 rounded-xl p-5 shadow-md">
+      <h3 className="text-sm font-semibold text-slate-200 mb-2">
         {selectedLeague.name} — Standings
       </h3>
       {profileByRosterId.size > 0 && (
-        <div className="flex flex-wrap gap-3 mb-3 text-[10px] text-gray-500">
+        <div className="flex flex-wrap gap-3 mb-3 text-[10px] text-slate-500">
           {(Object.keys(TIER_LABEL) as DynastyTier[]).map((tier) => (
             <span key={tier} className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full inline-block" style={{ background: TIER_COLOR[tier] }} />
@@ -82,7 +82,7 @@ export default function StandingsTab({ standings, selectedLeagueMateProfilesView
           <div key={team.roster_id}>
             <div
               className={`flex justify-between items-center p-2 rounded mb-1 border-l-4 ${
-                isMe ? "bg-blue-800/40" : "bg-gray-800"
+                isMe ? "bg-blue-800/40" : "bg-slate-800"
               }`}
               style={{ borderLeftColor: tier ? TIER_COLOR[tier] : "transparent" }}
             >
@@ -100,7 +100,7 @@ export default function StandingsTab({ standings, selectedLeagueMateProfilesView
                   </span>
                 )}
               </div>
-              <div className="text-xs text-gray-400 shrink-0">
+              <div className="text-xs text-slate-400 shrink-0">
                 {team.wins}-{team.losses}
                 {team.ties ? `-${team.ties}` : ""} •{" "}
                 {Math.round(team.fpts)} pts • Max {Math.round(team.max_pf)}
@@ -108,9 +108,9 @@ export default function StandingsTab({ standings, selectedLeagueMateProfilesView
                   <span
                     className={`ml-1.5 ${
                       efficiency >= 85
-                        ? "text-green-500"
+                        ? "text-emerald-500"
                         : efficiency >= 70
-                        ? "text-gray-400"
+                        ? "text-slate-400"
                         : "text-red-500"
                     }`}
                   >
@@ -120,7 +120,7 @@ export default function StandingsTab({ standings, selectedLeagueMateProfilesView
               </div>
             </div>
             {isCutLine && (
-              <div className="border-t border-yellow-500 my-2 text-center text-xs text-yellow-400">
+              <div className="border-t border-amber-500 my-2 text-center text-xs text-amber-400">
                 Playoff Cut Line
               </div>
             )}

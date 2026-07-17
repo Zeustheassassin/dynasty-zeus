@@ -29,14 +29,14 @@ function PlayerPicker({
 
   if (player) {
     return (
-      <div className="bg-gray-900 rounded-xl border border-gray-800 p-3 flex items-center justify-between gap-2">
+      <div className="bg-slate-900 rounded-xl border border-slate-800 p-3 flex items-center justify-between gap-2">
         <div className="min-w-0">
-          <p className="text-[10px] text-gray-500 uppercase tracking-wider">{label}</p>
+          <p className="text-[10px] text-slate-500 uppercase tracking-wider">{label}</p>
           <p className="text-sm font-semibold text-white truncate">{player.full_name}</p>
         </div>
         <button
           onClick={() => onSelect(null as unknown as SleeperPlayer)}
-          className="text-xs text-gray-500 hover:text-white shrink-0"
+          className="text-xs text-slate-500 hover:text-white shrink-0"
         >
           Change
         </button>
@@ -45,27 +45,27 @@ function PlayerPicker({
   }
 
   return (
-    <div className="bg-gray-900 rounded-xl border border-gray-800 p-3">
-      <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1.5">{label}</p>
+    <div className="bg-slate-900 rounded-xl border border-slate-800 p-3">
+      <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1.5">{label}</p>
       <input
         type="text"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Search player..."
-        className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+        className="w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
         aria-label={`Search for ${label.toLowerCase()}`}
       />
       {results.length > 0 && (
-        <ul className="mt-1.5 divide-y divide-gray-800 border border-gray-800 rounded overflow-hidden">
+        <ul className="mt-1.5 divide-y divide-slate-800 border border-slate-800 rounded overflow-hidden">
           {results.map((p) => (
             <li key={p.player_id}>
               <button
                 onClick={() => { onSelect(p); setQuery(""); }}
-                className="w-full text-left px-2 py-1.5 text-xs text-gray-200 hover:bg-gray-800 flex items-center gap-2"
+                className="w-full text-left px-2 py-1.5 text-xs text-slate-200 hover:bg-slate-800 flex items-center gap-2"
               >
-                <span className={`font-bold ${POS_COLOR[p.position] ?? "text-gray-400"}`}>{p.position}</span>
+                <span className={`font-bold ${POS_COLOR[p.position] ?? "text-slate-400"}`}>{p.position}</span>
                 <span className="truncate">{p.full_name}</span>
-                {p.team && <span className="text-gray-500 shrink-0">{p.team}</span>}
+                {p.team && <span className="text-slate-500 shrink-0">{p.team}</span>}
               </button>
             </li>
           ))}
@@ -99,7 +99,7 @@ export default function CompareTab({ setPlayerProfileId }: Props) {
   }, [players, leagueAdjustedFcValues]);
 
   const rows: CompareRow[] = [
-    { label: "Position", render: (p) => <span className={POS_COLOR[p.position] ?? "text-gray-400"}>{p.position}</span> },
+    { label: "Position", render: (p) => <span className={POS_COLOR[p.position] ?? "text-slate-400"}>{p.position}</span> },
     { label: "Team", render: (p) => p.team || "—" },
     {
       label: "Age",
@@ -152,26 +152,26 @@ export default function CompareTab({ setPlayerProfileId }: Props) {
       </div>
 
       {playerA && playerB && (
-        <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
-          <div className="grid grid-cols-[1fr_auto_1fr] items-center border-b border-gray-800 bg-gray-950/60 p-3">
+        <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
+          <div className="grid grid-cols-[1fr_auto_1fr] items-center border-b border-slate-800 bg-slate-950/60 p-3">
             <button onClick={() => setPlayerProfileId(playerA.player_id)} className="text-left text-sm font-bold text-white hover:text-blue-400 truncate">
               {playerA.full_name}
             </button>
-            <span className="text-xs text-gray-600 px-3">vs</span>
+            <span className="text-xs text-slate-600 px-3">vs</span>
             <button onClick={() => setPlayerProfileId(playerB.player_id)} className="text-right text-sm font-bold text-white hover:text-blue-400 truncate">
               {playerB.full_name}
             </button>
           </div>
-          <div className="divide-y divide-gray-800/60">
+          <div className="divide-y divide-slate-800/60">
             {rows.map((row) => {
               const better = row.betterId?.(playerA, playerB) ?? null;
               return (
                 <div key={row.label} className="grid grid-cols-[1fr_auto_1fr] items-center px-3 py-2 text-sm">
-                  <div className={`text-left ${better === playerA.player_id ? "font-bold text-green-400" : "text-gray-200"}`}>
+                  <div className={`text-left ${better === playerA.player_id ? "font-bold text-emerald-400" : "text-slate-200"}`}>
                     {row.render(playerA)}
                   </div>
-                  <div className="text-[10px] text-gray-600 uppercase tracking-wider px-3 text-center">{row.label}</div>
-                  <div className={`text-right ${better === playerB.player_id ? "font-bold text-green-400" : "text-gray-200"}`}>
+                  <div className="text-[10px] text-slate-600 uppercase tracking-wider px-3 text-center">{row.label}</div>
+                  <div className={`text-right ${better === playerB.player_id ? "font-bold text-emerald-400" : "text-slate-200"}`}>
                     {row.render(playerB)}
                   </div>
                 </div>
@@ -182,7 +182,7 @@ export default function CompareTab({ setPlayerProfileId }: Props) {
       )}
 
       {(!playerA || !playerB) && (
-        <p className="text-center text-xs text-gray-600 py-8">Search and select two players above to compare them.</p>
+        <p className="text-center text-xs text-slate-600 py-8">Search and select two players above to compare them.</p>
       )}
     </div>
   );

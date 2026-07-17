@@ -13,16 +13,16 @@ export const PERSONAL_SIGNAL_META: Record<
 > = {
   STRONG_SELL: { label: "Super Sell", cls: "bg-red-900/60 text-red-300 border border-red-700/50 font-bold" },
   SELL:        { label: "Sell",       cls: "bg-red-900/30 text-red-400" },
-  NEUTRAL:     { label: "Hold",       cls: "text-gray-600" },
-  BUY:         { label: "Buy",        cls: "bg-green-900/30 text-green-400" },
-  STRONG_BUY:  { label: "Super Buy",  cls: "bg-green-900/60 text-green-300 border border-green-700/50 font-bold" },
+  NEUTRAL:     { label: "Hold",       cls: "text-slate-600" },
+  BUY:         { label: "Buy",        cls: "bg-emerald-900/30 text-emerald-400" },
+  STRONG_BUY:  { label: "Super Buy",  cls: "bg-emerald-900/60 text-emerald-300 border border-emerald-700/50 font-bold" },
 };
 
 const INJURY_CLS: Record<string, string> = {
   IR: "bg-red-900/70 text-red-300",
   O:  "bg-red-900/70 text-red-300",
   D:  "bg-orange-900/70 text-orange-300",
-  Q:  "bg-yellow-900/70 text-yellow-300",
+  Q:  "bg-amber-900/70 text-amber-300",
 };
 
 export const injuryBadge = (status: string | null | undefined) => {
@@ -34,9 +34,9 @@ export const injuryBadge = (status: string | null | undefined) => {
 };
 
 export const ageColor = (age: number | undefined, pos: string) => {
-  if (!age) return "text-gray-600";
-  if (pos === "RB") return age <= 23 ? "text-green-400" : age <= 26 ? "text-yellow-400" : "text-red-400";
-  return age <= 24 ? "text-green-400" : age <= 27 ? "text-yellow-400" : "text-red-400";
+  if (!age) return "text-slate-600";
+  if (pos === "RB") return age <= 23 ? "text-emerald-400" : age <= 26 ? "text-amber-400" : "text-red-400";
+  return age <= 24 ? "text-emerald-400" : age <= 27 ? "text-amber-400" : "text-red-400";
 };
 
 // Injury risk score (Phase I, I2): position+age risk (same thresholds as
@@ -84,8 +84,8 @@ export const injuryRiskTier = (
   const score = ageRiskScore(age, pos) + injuryStatusSeverity(status);
   if (score >= 50) return { label: "High", short: "HIGH", cls: "bg-red-900/70 text-red-300", score };
   if (score >= 30) return { label: "Elevated", short: "ELEV", cls: "bg-orange-900/70 text-orange-300", score };
-  if (score >= 10) return { label: "Moderate", short: "MOD", cls: "bg-yellow-900/70 text-yellow-300", score };
-  return { label: "Low", short: "LOW", cls: "bg-green-900/40 text-green-400", score };
+  if (score >= 10) return { label: "Moderate", short: "MOD", cls: "bg-amber-900/70 text-amber-300", score };
+  return { label: "Low", short: "LOW", cls: "bg-emerald-900/40 text-emerald-400", score };
 };
 
 // Distinct from injuryBadge (which shows the raw current status) — this is a

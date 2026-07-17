@@ -55,7 +55,7 @@ function ProjectionsTab({
     <>
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-500 shrink-0">View:</span>
+          <span className="text-xs text-slate-500 shrink-0">View:</span>
           <select
             value={projectionWeek}
             onChange={(e) => {
@@ -64,7 +64,7 @@ function ProjectionsTab({
               setProjectionData([]);
               loadProjections(w === 0 ? "season" : w, enabledExtraSources);
             }}
-            className="bg-gray-800 border border-gray-700 text-sm text-white rounded-lg px-2 py-1 focus:outline-none focus:border-blue-500"
+            className="bg-slate-800 border border-slate-700 text-sm text-white rounded-lg px-2 py-1 focus:outline-none focus:border-blue-500"
           >
             <option value={0}>Full Season Projection</option>
             {Array.from({ length: 18 }, (_, i) => i + 1).map((w) => (
@@ -74,7 +74,7 @@ function ProjectionsTab({
         </div>
 
         {projectionSeasonYear && (
-          <span className="rounded-full border border-gray-700 bg-gray-900/70 px-3 py-1 text-[11px] font-medium text-gray-300">
+          <span className="rounded-full border border-slate-700 bg-slate-900/70 px-3 py-1 text-[11px] font-medium text-slate-300">
             {projectionWeek === 0 ? `${projectionSeasonYear} season projections` : `${projectionSeasonYear} projections`}
           </span>
         )}
@@ -84,7 +84,7 @@ function ProjectionsTab({
             <button
               key={pos}
               onClick={() => setProjectionPosFilter(pos)}
-              className={`px-3 py-1 rounded text-sm font-medium transition ${projectionPosFilter === pos ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:text-white"}`}
+              className={`px-3 py-1 rounded text-sm font-medium transition ${projectionPosFilter === pos ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:text-white"}`}
             >
               {pos}
             </button>
@@ -94,7 +94,7 @@ function ProjectionsTab({
         <button
           onClick={() => setProjRosterOnly((v) => !v)}
           disabled={!myRoster}
-          className={`text-xs font-semibold border rounded-lg px-3 py-1.5 transition disabled:opacity-40 ${projRosterOnly ? "bg-blue-600 border-blue-500 text-white" : "border-gray-700 text-gray-400 hover:text-white hover:border-gray-500"}`}
+          className={`text-xs font-semibold border rounded-lg px-3 py-1.5 transition disabled:opacity-40 ${projRosterOnly ? "bg-blue-600 border-blue-500 text-white" : "border-slate-700 text-slate-400 hover:text-white hover:border-slate-500"}`}
           title={myRoster ? "Toggle to show only your rostered players" : "Load a league to use this filter"}
         >
           My Roster
@@ -127,7 +127,7 @@ function ProjectionsTab({
             <div key={src.id} className="flex items-center gap-1">
               {isSleeper ? (
                 <span
-                  className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${ok === true ? "bg-green-900 text-green-300" : ok === false ? "bg-red-900 text-red-400" : "bg-gray-800 text-gray-400"}`}
+                  className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${ok === true ? "bg-emerald-900 text-emerald-300" : ok === false ? "bg-red-900 text-red-400" : "bg-slate-800 text-slate-400"}`}
                 >
                   {src.label} ✓
                 </span>
@@ -138,11 +138,11 @@ function ProjectionsTab({
                   className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border transition ${
                     isEnabled
                       ? ok === true
-                        ? "bg-green-900 border-green-700 text-green-300"
+                        ? "bg-emerald-900 border-emerald-700 text-emerald-300"
                         : ok === false
                         ? "bg-red-900 border-red-700 text-red-400"
                         : "bg-blue-900 border-blue-700 text-blue-300"
-                      : "bg-gray-800 border-gray-700 text-gray-500 hover:border-gray-500 hover:text-gray-300"
+                      : "bg-slate-800 border-slate-700 text-slate-500 hover:border-slate-500 hover:text-slate-300"
                   }`}
                   title={isEnabled ? `Disable ${src.label}` : `Enable ${src.label} — verify the link first`}
                 >
@@ -155,7 +155,7 @@ function ProjectionsTab({
                 target="_blank"
                 rel="noopener noreferrer"
                 title={`Open ${src.label} source — verify it shows ${projectionSeasonYear ?? new Date().getFullYear()} data before enabling`}
-                className="text-[10px] text-gray-600 hover:text-blue-400 transition"
+                className="text-[10px] text-slate-600 hover:text-blue-400 transition"
               >
                 ↗
               </a>
@@ -164,12 +164,12 @@ function ProjectionsTab({
         })}
         {loadingProjections && <span className="text-[10px] text-blue-400 ml-1">Loading…</span>}
       </div>
-      <p className="text-[10px] text-gray-600 mb-4">
-        Sleeper is always on and year-verified. Click <span className="text-gray-400">↗</span> on FantasyPros or numberFire to check the data year before enabling them — their full-season endpoints don&apos;t publish {new Date().getFullYear()} numbers until closer to training camp.
+      <p className="text-[10px] text-slate-600 mb-4">
+        Sleeper is always on and year-verified. Click <span className="text-slate-400">↗</span> on FantasyPros or numberFire to check the data year before enabling them — their full-season endpoints don&apos;t publish {new Date().getFullYear()} numbers until closer to training camp.
       </p>
 
       {projectionUsesSeasonFallback && projectionWeek !== 0 && (
-        <div className="mb-4 rounded-lg border border-yellow-700/50 bg-yellow-950/30 px-3 py-2 text-[11px] text-yellow-300">
+        <div className="mb-4 rounded-lg border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-[11px] text-amber-300">
           Weekly projections not yet available — showing Sleeper full-season projections ÷ 17 as a placeholder. Rankings will automatically switch to the full multi-source consensus once week-by-week projections are published closer to the season.
         </div>
       )}
@@ -177,10 +177,10 @@ function ProjectionsTab({
       {loadingProjections && projectionData.length === 0 ? (
         <p className="text-sm text-blue-400">Fetching consensus projections…</p>
       ) : visible.length === 0 ? (
-        <p className="text-sm text-gray-500">No projection data. Hit Refresh or check your connection.</p>
+        <p className="text-sm text-slate-500">No projection data. Hit Refresh or check your connection.</p>
       ) : (
         <>
-          <div className="flex items-center gap-3 px-3 pb-1 text-[10px] font-bold uppercase tracking-widest text-gray-600">
+          <div className="flex items-center gap-3 px-3 pb-1 text-[10px] font-bold uppercase tracking-widest text-slate-600">
             <span className="w-6 text-right shrink-0">#</span>
             <span className="w-7 shrink-0">Pos</span>
             <span className="flex-1">Player</span>
@@ -192,16 +192,16 @@ function ProjectionsTab({
             {visible.map((p, idx) => {
               const dynVal = calcFcValues[p.sleeperId] ?? 0;
               return (
-                <div key={p.sleeperId} className="flex items-center gap-3 bg-gray-800 rounded-lg px-3 py-2">
-                  <span className="text-xs text-gray-500 w-6 text-right shrink-0">{idx + 1}</span>
-                  <span className={`text-[10px] font-bold w-7 shrink-0 ${POS_COLOR[p.position] ?? "text-gray-400"}`}>{p.position}</span>
+                <div key={p.sleeperId} className="flex items-center gap-3 bg-slate-800 rounded-lg px-3 py-2">
+                  <span className="text-xs text-slate-500 w-6 text-right shrink-0">{idx + 1}</span>
+                  <span className={`text-[10px] font-bold w-7 shrink-0 ${POS_COLOR[p.position] ?? "text-slate-400"}`}>{p.position}</span>
                   <span className="text-sm text-white flex-1 truncate">{p.full_name}</span>
-                  {p.team && <span className="text-[10px] text-gray-500 shrink-0">{p.team}</span>}
-                  <span className="text-xs text-gray-300 font-mono w-10 text-right shrink-0">{p.fpts.toFixed(1)}</span>
-                  <span className={`hidden sm:block text-[10px] font-mono w-14 text-right shrink-0 ${dynVal > 0 ? "text-gray-400" : "text-gray-700"}`}>
+                  {p.team && <span className="text-[10px] text-slate-500 shrink-0">{p.team}</span>}
+                  <span className="text-xs text-slate-300 font-mono w-10 text-right shrink-0">{p.fpts.toFixed(1)}</span>
+                  <span className={`hidden sm:block text-[10px] font-mono w-14 text-right shrink-0 ${dynVal > 0 ? "text-slate-400" : "text-slate-700"}`}>
                     {dynVal > 0 ? dynVal.toLocaleString() : "—"}
                   </span>
-                  <span className="text-[10px] text-gray-600 w-10 text-right shrink-0 pr-1" title={p.sources.join(", ")}>
+                  <span className="text-[10px] text-slate-600 w-10 text-right shrink-0 pr-1" title={p.sources.join(", ")}>
                     {p.sources.length}/{Object.values(projectionSourceStatus).filter(Boolean).length || PROJ_SOURCES.length}
                   </span>
                 </div>

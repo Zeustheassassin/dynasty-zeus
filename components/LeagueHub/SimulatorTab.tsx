@@ -9,6 +9,7 @@ import RosterSelect from "../shared/RosterSelect";
 import { ChartCard, ChartTooltip, ChartLegend, chartGridProps, chartAxisProps, chartTickStyle } from "../charts/ChartCard";
 import { CHART_CATEGORICAL } from "../../lib/chartTheme";
 import type { SleeperUser, SimulationTeamRow } from "../../lib/types";
+import { Card } from "../ui/Card";
 
 interface SimulatorTabProps {
   user: SleeperUser | null;
@@ -59,31 +60,31 @@ function SimulatorTab({
   }, [selectedLeagueSimulation, historyRosterId]);
 
   if (!selectedLeague || !rosters.length) {
-    return <p className="text-sm text-gray-500">Select a league from Rosters &amp; Rules first to view the simulator.</p>;
+    return <p className="text-sm text-slate-500">Select a league from Rosters &amp; Rules first to view the simulator.</p>;
   }
   if (!selectedLeagueSimulation) {
     return (
       <p className="text-sm text-blue-400">
         Building simulator snapshot…{" "}
-        <span className="text-gray-600 text-xs">(if this persists, reload the league from Rosters &amp; Rules)</span>
+        <span className="text-slate-600 text-xs">(if this persists, reload the league from Rosters &amp; Rules)</span>
       </p>
     );
   }
 
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
+      <Card>
         <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
           <div>
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Season Simulator</div>
-            <div className="mt-1 text-sm text-gray-200">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Season Simulator</div>
+            <div className="mt-1 text-sm text-slate-200">
               {selectedLeagueSimulation.simulationMode === "offseason"
                 ? "Offseason mode uses season-long player projections to build optimal lineups, simulate standings, and estimate projected max PF before real schedules exist."
                 : "In-season mode blends real results, current schedule, and Monte Carlo rest-of-season sims for projected standings and playoff odds."}
             </div>
           </div>
           <div className="flex flex-col items-end gap-1.5">
-            <div className="text-[11px] text-gray-500">
+            <div className="text-[11px] text-slate-500">
               {selectedLeagueSimulation.simulationMode === "offseason"
                 ? `${selectedLeagueSimulation.simCount} sims - ${selectedLeagueSimulation.regularSeasonWeeks}-week baseline`
                 : loadingLeagueWeeklyMatchups
@@ -101,11 +102,11 @@ function SimulatorTab({
             </button>
           </div>
         </div>
-      </div>
+      </Card>
 
       <div className="overflow-x-auto pb-1">
         <div className="min-w-[1250px] space-y-2">
-          <div className="grid grid-cols-[minmax(180px,1.45fr)_78px_108px_88px_92px_92px_88px_82px_96px_92px_110px] gap-2 px-3 pb-1 text-[10px] font-bold uppercase tracking-widest text-gray-600">
+          <div className="grid grid-cols-[minmax(180px,1.45fr)_78px_108px_88px_92px_92px_88px_82px_96px_92px_110px] gap-2 px-3 pb-1 text-[10px] font-bold uppercase tracking-widest text-slate-600">
             <span>Team</span>
             <span className="text-center">Power</span>
             <span className="text-center">Proj Max PF</span>
@@ -121,28 +122,28 @@ function SimulatorTab({
           {selectedLeagueSimulation.rows.map((row) => {
             const isMe = Number(row.rosterId) === Number(myRosterId);
             return (
-              <div key={row.rosterId} className={`grid grid-cols-[minmax(180px,1.45fr)_78px_108px_88px_92px_92px_88px_82px_96px_92px_110px] gap-2 items-center rounded-xl border px-3 py-3 ${isMe ? "border-blue-700 bg-blue-950/20" : "border-gray-800 bg-gray-900"}`}>
+              <div key={row.rosterId} className={`grid grid-cols-[minmax(180px,1.45fr)_78px_108px_88px_92px_92px_88px_82px_96px_92px_110px] gap-2 items-center rounded-xl border px-3 py-3 ${isMe ? "border-blue-700 bg-blue-950/20" : "border-slate-800 bg-slate-900"}`}>
                 <div className="min-w-0">
                   <div className={`truncate text-sm font-semibold ${isMe ? "text-blue-300" : "text-white"}`}>{row.ownerName}</div>
-                  <div className="text-[11px] text-gray-500">
+                  <div className="text-[11px] text-slate-500">
                     {row.actualWins}-{row.actualLosses} actual • likely finish {ordinal(row.projectedFinish)}
                   </div>
                   {selectedLeagueSimulation.simulationMode !== "offseason" && (
-                    <div className="text-[10px] text-gray-600">
+                    <div className="text-[10px] text-slate-600">
                       All-play {row.allPlayWins}-{row.allPlayLosses} • luck {row.luckScore > 0 ? "+" : ""}{row.luckScore.toFixed(1)}
                     </div>
                   )}
                 </div>
                 <div className="text-center text-sm font-semibold text-white">{row.powerScore.toFixed(1)}</div>
-                <div className="text-center text-sm text-gray-200">{Math.round(row.projectedMaxPf || row.maxPf || 0).toLocaleString()}</div>
-                <div className="text-center text-sm text-gray-200">{row.expectedWins.toFixed(1)}</div>
-                <div className="text-center text-sm text-gray-200">{row.avgFinish?.toFixed?.(1) ?? row.avgFinish}</div>
-                <div className="text-center text-xs text-gray-300">{row.finishRange}</div>
+                <div className="text-center text-sm text-slate-200">{Math.round(row.projectedMaxPf || row.maxPf || 0).toLocaleString()}</div>
+                <div className="text-center text-sm text-slate-200">{row.expectedWins.toFixed(1)}</div>
+                <div className="text-center text-sm text-slate-200">{row.avgFinish?.toFixed?.(1) ?? row.avgFinish}</div>
+                <div className="text-center text-xs text-slate-300">{row.finishRange}</div>
                 <div className="text-center text-sm text-green-300">{Math.round(row.playoffOdds)}%</div>
                 <div className="text-center text-sm text-cyan-300">{Math.round(row.byeOdds)}%</div>
                 <div className="text-center text-sm text-amber-300">{Math.round(row.titleOdds)}%</div>
                 <div className="text-center text-sm text-rose-300">{Math.round(row.oneOhOneOdds || 0)}%</div>
-                <div className="text-center text-xs text-gray-300">
+                <div className="text-center text-xs text-slate-300">
                   {row.currentOpponent ? `${Math.round((row.currentWeekWinProb ?? 0) * 100)}% vs ${row.currentOpponent}` : `${Math.round((row.avgWinProb ?? 0) * 100)}% avg`}
                 </div>
               </div>
@@ -152,11 +153,11 @@ function SimulatorTab({
       </div>
 
       {selectedLeagueSimulation.weeklyMatchups?.length > 0 && (
-        <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
+        <Card>
           <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Schedule Preview</div>
-              <div className="mt-1 text-sm text-gray-200">
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Schedule Preview</div>
+              <div className="mt-1 text-sm text-slate-200">
                 {selectedLeagueSimulation.simulationMode === "offseason"
                   ? "Generated weekly matchups used for offseason sims."
                   : "Upcoming matchup forecast from the active league schedule."}
@@ -165,20 +166,20 @@ function SimulatorTab({
           </div>
           <div className="mt-4 grid gap-3 lg:grid-cols-2">
             {selectedLeagueSimulation.weeklyMatchups.slice(0, 4).map((week) => (
-              <div key={week.week} className="rounded-xl border border-gray-800 bg-gray-950/60 p-3">
+              <div key={week.week} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
                 <div className="flex items-center justify-between">
                   <div className="text-xs font-semibold text-white">Week {week.week}</div>
-                  <div className="text-[10px] uppercase tracking-wide text-gray-500">{week.source}</div>
+                  <div className="text-[10px] uppercase tracking-wide text-slate-500">{week.source}</div>
                 </div>
                 <div className="mt-2 space-y-1.5">
                   {week.matchups?.slice(0, 6).map((matchup, idx) => (
-                    <div key={`${week.week}-${idx}`} className="flex items-center justify-between rounded-lg bg-gray-800/80 px-3 py-2 text-xs">
-                      <div className="min-w-0 text-gray-200">
+                    <div key={`${week.week}-${idx}`} className="flex items-center justify-between rounded-lg bg-slate-800/80 px-3 py-2 text-xs">
+                      <div className="min-w-0 text-slate-200">
                         <span className="font-medium text-white">{matchup.aName}</span>
-                        <span className="text-gray-500"> vs </span>
+                        <span className="text-slate-500"> vs </span>
                         <span className="font-medium text-white">{matchup.bName}</span>
                       </div>
-                      <div className="shrink-0 text-right text-gray-400">
+                      <div className="shrink-0 text-right text-slate-400">
                         {Math.round((matchup.aWinProb || 0) * 100)}% • {Math.round(matchup.aProjected || 0)}
                       </div>
                     </div>
@@ -187,22 +188,22 @@ function SimulatorTab({
               </div>
             ))}
           </div>
-        </div>
+        </Card>
       )}
 
-      <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
+      <Card>
         <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
           <div>
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Team Trends</div>
-            <div className="mt-1 text-sm text-gray-200">Weekly odds history and this season&apos;s simulated outcome range.</div>
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Team Trends</div>
+            <div className="mt-1 text-sm text-slate-200">Weekly odds history and this season&apos;s simulated outcome range.</div>
           </div>
           <RosterSelect value={historyRosterId} onChange={setPickedHistoryRosterId} />
         </div>
         <div className="grid gap-4 lg:grid-cols-2">
           {loadingHistory ? (
-            <p className="text-sm text-gray-500">Loading history…</p>
+            <p className="text-sm text-slate-500">Loading history…</p>
           ) : oddsTrendData.length === 0 ? (
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-slate-500">
               No odds history yet — the weekly snapshot cron builds this up over time. Check back after the next Tuesday run.
             </p>
           ) : (
@@ -230,7 +231,7 @@ function SimulatorTab({
           )}
 
           {finishDistData.length === 0 ? (
-            <p className="text-sm text-gray-500">Select a team to see its simulated outcome distribution.</p>
+            <p className="text-sm text-slate-500">Select a team to see its simulated outcome distribution.</p>
           ) : (
             <ChartCard title="Outcome Distribution" subtitle={`Final-standing likelihood across ${selectedLeagueSimulation.simCount} simulated seasons`}>
               <BarChart data={finishDistData} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
@@ -243,7 +244,7 @@ function SimulatorTab({
             </ChartCard>
           )}
         </div>
-      </div>
+      </Card>
     </div>
   );
 }

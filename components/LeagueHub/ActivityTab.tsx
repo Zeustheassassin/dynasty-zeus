@@ -3,6 +3,7 @@ import { memo } from "react";
 import { usePlayers } from "../../lib/PlayersContext";
 import { useLeague } from "../../lib/LeagueContext";
 import type { AnnotatedTransaction } from "./leagueHubTypes";
+import { Card } from "../ui/Card";
 
 interface ActivityTabProps {
   activityTransactions: AnnotatedTransaction[];
@@ -19,7 +20,7 @@ function ActivityTab({
   const { selectedLeague, rosters, users } = useLeague();
 
   if (!selectedLeague) return (
-    <p className="text-sm text-gray-500">Select a league from Rosters &amp; Rules first to view the activity feed.</p>
+    <p className="text-sm text-slate-500">Select a league from Rosters &amp; Rules first to view the activity feed.</p>
   );
   if (loadingActivity) return <p className="text-sm text-blue-400">Loading transactions…</p>;
 
@@ -43,15 +44,15 @@ function ActivityTab({
   );
 
   if (!txns.length) return (
-    <div className="text-center py-10 text-gray-500 text-sm">
+    <div className="text-center py-10 text-slate-500 text-sm">
       No transactions found for {selectedLeague.name}. Activity appears here as the season progresses.
     </div>
   );
 
   return (
     <div className="space-y-2">
-      <p className="text-xs text-gray-500 mb-3">
-        Recent transactions for <strong className="text-gray-300">{selectedLeague.name}</strong>. Click any player name to view their profile.
+      <p className="text-xs text-slate-500 mb-3">
+        Recent transactions for <strong className="text-slate-300">{selectedLeague.name}</strong>. Click any player name to view their profile.
       </p>
       {txns.map((t, idx) => {
         const isWaiver = t.type === "waiver";
@@ -65,7 +66,7 @@ function ActivityTab({
           ? "bg-purple-900/40 text-purple-300 border-purple-700"
           : isWaiver
           ? "bg-blue-900/40 text-blue-300 border-blue-700"
-          : "bg-green-900/40 text-green-300 border-green-700";
+          : "bg-emerald-900/40 text-emerald-300 border-emerald-700";
 
         if (isTrade) {
           const rosterIds = Array.from(new Set([
@@ -75,11 +76,11 @@ function ActivityTab({
           ])) as number[];
 
           return (
-            <div key={t.transaction_id || idx} className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+            <Card key={t.transaction_id || idx} padding="lg">
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${typeColor}`}>{typeLabel}</span>
-                  <span className="text-xs text-gray-500">{fmtTs(t.updated || t.created)}</span>
+                  <span className="text-xs text-slate-500">{fmtTs(t.updated || t.created)}</span>
                 </div>
               </div>
               <div className={`grid gap-3`} style={{ gridTemplateColumns: `repeat(${Math.min(rosterIds.length, 3)}, 1fr)` }}>
@@ -93,17 +94,17 @@ function ActivityTab({
                       <p className="text-xs font-semibold text-blue-300 mb-1">{ownerName(rid)}</p>
                       {got.length > 0 && (
                         <div className="mb-1">
-                          <p className="text-[10px] text-green-500 uppercase font-bold mb-0.5">Received</p>
+                          <p className="text-[10px] text-emerald-500 uppercase font-bold mb-0.5">Received</p>
                           {got.map(pid => {
                             const p = players[pid];
                             return p ? (
                               <button key={pid} onClick={() => setPlayerProfileId(pid)} className="block text-xs text-white hover:text-blue-400 transition text-left">
-                                {p.full_name} <span className="text-gray-500">{p.position}</span>
+                                {p.full_name} <span className="text-slate-500">{p.position}</span>
                               </button>
                             ) : null;
                           })}
                           {gotPicks.map((pk) => (
-                            <p key={`${pk.season}-${pk.round}-${pk.roster_id}`} className="text-xs text-gray-400">{pk.season} Rd {pk.round}</p>
+                            <p key={`${pk.season}-${pk.round}-${pk.roster_id}`} className="text-xs text-slate-400">{pk.season} Rd {pk.round}</p>
                           ))}
                         </div>
                       )}
@@ -113,13 +114,13 @@ function ActivityTab({
                           {gave.map(pid => {
                             const p = players[pid];
                             return p ? (
-                              <button key={pid} onClick={() => setPlayerProfileId(pid)} className="block text-xs text-gray-400 hover:text-blue-400 transition text-left line-through">
-                                {p.full_name} <span className="text-gray-600">{p.position}</span>
+                              <button key={pid} onClick={() => setPlayerProfileId(pid)} className="block text-xs text-slate-400 hover:text-blue-400 transition text-left line-through">
+                                {p.full_name} <span className="text-slate-600">{p.position}</span>
                               </button>
                             ) : null;
                           })}
                           {gavePicks.map((pk) => (
-                            <p key={`${pk.season}-${pk.round}-${pk.roster_id}`} className="text-xs text-gray-600 line-through">{pk.season} Rd {pk.round}</p>
+                            <p key={`${pk.season}-${pk.round}-${pk.roster_id}`} className="text-xs text-slate-600 line-through">{pk.season} Rd {pk.round}</p>
                           ))}
                         </div>
                       )}
@@ -127,24 +128,24 @@ function ActivityTab({
                   );
                 })}
               </div>
-            </div>
+            </Card>
           );
         }
 
         return (
-          <div key={t.transaction_id || idx} className="bg-gray-900 border border-gray-800 rounded-xl px-4 py-3 flex items-start gap-3">
+          <div key={t.transaction_id || idx} className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 flex items-start gap-3">
             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border shrink-0 mt-0.5 ${typeColor}`}>{typeLabel}</span>
             <div className="min-w-0 flex-1">
               {adds.map(([pid, rid]) => {
                 const p = players[pid];
                 return p ? (
                   <div key={pid} className="flex items-center gap-1.5 text-xs">
-                    <span className="text-green-400 font-bold">+</span>
+                    <span className="text-emerald-400 font-bold">+</span>
                     <button onClick={() => setPlayerProfileId(pid)} className="text-white hover:text-blue-400 transition font-medium">
                       {p.full_name}
                     </button>
-                    <span className="text-gray-500">{p.position} · {p.team}</span>
-                    <span className="text-gray-600">→ {ownerName(rid)}</span>
+                    <span className="text-slate-500">{p.position} · {p.team}</span>
+                    <span className="text-slate-600">→ {ownerName(rid)}</span>
                   </div>
                 ) : null;
               })}
@@ -153,15 +154,15 @@ function ActivityTab({
                 return p ? (
                   <div key={pid} className="flex items-center gap-1.5 text-xs">
                     <span className="text-red-400 font-bold">−</span>
-                    <button onClick={() => setPlayerProfileId(pid)} className="text-gray-400 hover:text-blue-400 transition line-through">
+                    <button onClick={() => setPlayerProfileId(pid)} className="text-slate-400 hover:text-blue-400 transition line-through">
                       {p.full_name}
                     </button>
-                    <span className="text-gray-600">{p.position} · {p.team} dropped by {ownerName(rid)}</span>
+                    <span className="text-slate-600">{p.position} · {p.team} dropped by {ownerName(rid)}</span>
                   </div>
                 ) : null;
               })}
             </div>
-            <span className="text-[10px] text-gray-600 shrink-0 mt-0.5">{fmtTs(t.updated || t.created)}</span>
+            <span className="text-[10px] text-slate-600 shrink-0 mt-0.5">{fmtTs(t.updated || t.created)}</span>
           </div>
         );
       })}

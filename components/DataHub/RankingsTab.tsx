@@ -172,18 +172,18 @@ function RankingsTab({
             <button
               key={pos}
               onClick={() => setDynastyRankPos(pos)}
-              className={`px-3 py-1 rounded text-sm font-medium transition ${dynastyRankPos === pos ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:text-white"}`}
+              className={`px-3 py-1 rounded text-sm font-medium transition ${dynastyRankPos === pos ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:text-white"}`}
             >
               {pos}
             </button>
           ))}
         </div>
-        <div className="flex bg-gray-800 rounded-lg p-0.5 gap-0.5">
+        <div className="flex bg-slate-800 rounded-lg p-0.5 gap-0.5">
           {RANK_VIEWS.map((v) => (
             <button
               key={v.id}
               onClick={() => setRankView(v.id)}
-              className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition ${rankView === v.id ? "bg-blue-600 text-white" : "text-gray-400 hover:text-white"}`}
+              className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition ${rankView === v.id ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white"}`}
             >
               {v.label}
             </button>
@@ -193,40 +193,40 @@ function RankingsTab({
       {/* Personal-view help + reset */}
       {isPersonal && (
         <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-          <p className="text-[11px] text-gray-500">
+          <p className="text-[11px] text-slate-500">
             Your board vs. the market. Drag a row or click its rank to set your own order — the gap drives the Trade Finder.
           </p>
           <span className="flex items-center gap-1 text-[11px] shrink-0">
-            <span className="text-gray-500">Sort ranks</span>
+            <span className="text-slate-500">Sort ranks</span>
             <input
               type="number"
               min={1}
               placeholder="280"
               value={rangeFrom}
               onChange={(e) => setRangeFrom(e.target.value)}
-              className="w-14 px-1 py-0.5 bg-gray-800 border border-gray-700 rounded text-gray-200 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-14 px-1 py-0.5 bg-slate-800 border border-slate-700 rounded text-slate-200 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
-            <span className="text-gray-500">to</span>
+            <span className="text-slate-500">to</span>
             <input
               type="number"
               min={1}
               placeholder="350"
               value={rangeTo}
               onChange={(e) => setRangeTo(e.target.value)}
-              className="w-14 px-1 py-0.5 bg-gray-800 border border-gray-700 rounded text-gray-200 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-14 px-1 py-0.5 bg-slate-800 border border-slate-700 rounded text-slate-200 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
             <button
               onClick={sortRangeToMarket}
               disabled={!rangeFrom || !rangeTo}
               title="Re-sort just this rank range into market-value order, in place"
-              className="px-2 py-0.5 rounded font-medium bg-gray-800 text-gray-400 hover:text-white transition disabled:opacity-40 disabled:hover:text-gray-400"
+              className="px-2 py-0.5 rounded font-medium bg-slate-800 text-slate-400 hover:text-white transition disabled:opacity-40 disabled:hover:text-slate-400"
             >
               by market
             </button>
           </span>
           {confirmReset ? (
             <span className="flex items-center gap-2 text-[11px]">
-              <span className="text-gray-400">Reset to market order?</span>
+              <span className="text-slate-400">Reset to market order?</span>
               <button
                 onClick={() => { savePersonalOrdering([]); setConfirmReset(false); }}
                 className="px-2 py-0.5 rounded bg-red-700 hover:bg-red-600 text-white font-semibold"
@@ -235,7 +235,7 @@ function RankingsTab({
               </button>
               <button
                 onClick={() => setConfirmReset(false)}
-                className="px-2 py-0.5 rounded bg-gray-700 hover:bg-gray-600 text-gray-200"
+                className="px-2 py-0.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-200"
               >
                 Cancel
               </button>
@@ -243,7 +243,7 @@ function RankingsTab({
           ) : (
             <button
               onClick={() => setConfirmReset(true)}
-              className="px-2 py-0.5 rounded text-[11px] font-medium bg-gray-800 text-gray-400 hover:text-white transition shrink-0"
+              className="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-800 text-slate-400 hover:text-white transition shrink-0"
             >
               Reset to market
             </button>
@@ -252,7 +252,7 @@ function RankingsTab({
       )}
       {/* Player search */}
       <input
-        className="w-full p-2 mb-3 rounded bg-gray-800 text-sm placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        className="w-full p-2 mb-3 rounded bg-slate-800 text-sm placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
         placeholder="Search player…"
         value={rankSearch}
         onChange={(e) => setRankSearch(e.target.value)}
@@ -261,28 +261,28 @@ function RankingsTab({
       <div className="flex items-center gap-2 px-2 mb-1">
         <span className="w-5 shrink-0" />
         <span className="w-6 shrink-0" />
-        <span className="flex-1 text-[10px] text-gray-600 uppercase tracking-wider">Player</span>
-        <span className="w-7 text-center text-[10px] text-gray-600 uppercase tracking-wider shrink-0">Age</span>
+        <span className="flex-1 text-[10px] text-slate-600 uppercase tracking-wider">Player</span>
+        <span className="w-7 text-center text-[10px] text-slate-600 uppercase tracking-wider shrink-0">Age</span>
         {isPersonal ? (
           <>
-            <span className="w-12 text-right text-[10px] text-gray-600 uppercase tracking-wider shrink-0">Mkt</span>
-            <span className="w-12 text-right text-[10px] text-gray-600 uppercase tracking-wider shrink-0">vs Mkt</span>
-            <span className="w-20 text-center text-[10px] text-gray-600 uppercase tracking-wider shrink-0">Signal</span>
+            <span className="w-12 text-right text-[10px] text-slate-600 uppercase tracking-wider shrink-0">Mkt</span>
+            <span className="w-12 text-right text-[10px] text-slate-600 uppercase tracking-wider shrink-0">vs Mkt</span>
+            <span className="w-20 text-center text-[10px] text-slate-600 uppercase tracking-wider shrink-0">Signal</span>
             <span className="w-4 shrink-0" />
           </>
         ) : rankView === "COMPARE" ? (
           <>
-            <span className="w-14 text-right text-[10px] text-gray-600 uppercase tracking-wider shrink-0">Dyn</span>
-            <span className="w-14 text-right text-[10px] text-gray-600 uppercase tracking-wider shrink-0">Rdft</span>
-            <span className="w-12 text-right text-[10px] text-gray-600 uppercase tracking-wider shrink-0">Gap</span>
+            <span className="w-14 text-right text-[10px] text-slate-600 uppercase tracking-wider shrink-0">Dyn</span>
+            <span className="w-14 text-right text-[10px] text-slate-600 uppercase tracking-wider shrink-0">Rdft</span>
+            <span className="w-12 text-right text-[10px] text-slate-600 uppercase tracking-wider shrink-0">Gap</span>
           </>
         ) : (
-          <span className="w-14 text-right text-[10px] text-gray-600 uppercase tracking-wider shrink-0">Value</span>
+          <span className="w-14 text-right text-[10px] text-slate-600 uppercase tracking-wider shrink-0">Value</span>
         )}
         <span className="w-4 shrink-0" />
       </div>
       {rowCount === 0 && !loadingCalcValues && !loadingRedraft && (
-        <p className="text-gray-400 text-sm">
+        <p className="text-slate-400 text-sm">
           {noValues ? "Load a league to populate player values." : "No players match your filter."}
         </p>
       )}
@@ -312,7 +312,7 @@ function RankingsTab({
                   onDrop={() => handlePersonalDrop(id)}
                   onDragEnd={() => { setDraggingId(null); setDragOverId(null); }}
                   style={{ position: "absolute", top: vRow.start, left: 0, right: 0, height: vRow.size }}
-                  className={`flex items-center gap-2 rounded-lg px-2 py-1.5 transition ${draggingId === id ? "opacity-40" : ""} ${isDragOver ? "bg-blue-900/40 border-t-2 border-blue-500" : "bg-gray-800/70 hover:bg-gray-800"}`}
+                  className={`flex items-center gap-2 rounded-lg px-2 py-1.5 transition ${draggingId === id ? "opacity-40" : ""} ${isDragOver ? "bg-blue-900/40 border-t-2 border-blue-500" : "bg-slate-800/70 hover:bg-slate-800"}`}
                 >
                   <span
                     className="w-5 text-right shrink-0 cursor-text"
@@ -324,17 +324,17 @@ function RankingsTab({
                         autoFocus
                         type="number"
                         min={1}
-                        className="w-10 px-0.5 py-0.5 bg-gray-900 border border-blue-500 rounded text-yellow-400 font-bold text-[10px] focus:outline-none text-right"
+                        className="w-10 px-0.5 py-0.5 bg-slate-900 border border-blue-500 rounded text-amber-400 font-bold text-[10px] focus:outline-none text-right"
                         value={rankInput}
                         onChange={(e) => setRankInput(e.target.value)}
                         onBlur={() => commitPersonalRank(id)}
                         onKeyDown={(e) => { if (e.key === "Enter") commitPersonalRank(id); if (e.key === "Escape") setEditingRankId(null); }}
                       />
                     ) : (
-                      <span className="text-[10px] text-yellow-400/80 font-mono hover:text-yellow-300">{personalRank}</span>
+                      <span className="text-[10px] text-amber-400/80 font-mono hover:text-amber-300">{personalRank}</span>
                     )}
                   </span>
-                  <span className={`text-[10px] font-bold w-6 shrink-0 cursor-grab active:cursor-grabbing ${POS_COLOR[p.position] ?? "text-gray-400"}`} title="Drag to reorder">{p.position}</span>
+                  <span className={`text-[10px] font-bold w-6 shrink-0 cursor-grab active:cursor-grabbing ${POS_COLOR[p.position] ?? "text-slate-400"}`} title="Drag to reorder">{p.position}</span>
                   <span className="text-xs flex-1 truncate min-w-0 flex items-center gap-1">
                     {isOwned && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" title="On your roster" />}
                     <span className={isOwned ? "text-blue-200" : "text-white"}>{p.full_name}</span>
@@ -342,8 +342,8 @@ function RankingsTab({
                     {injuryRiskBadge(p.age, p.position, p.injury_status)}
                   </span>
                   <span className={`text-[10px] font-mono w-7 text-center shrink-0 ${ageColor(p.age ?? undefined, p.position)}`}>{p.age || "—"}</span>
-                  <span className="text-[10px] text-gray-500 font-mono w-12 text-right shrink-0">{consensusRank}</span>
-                  <span className={`text-[10px] font-mono w-12 text-right shrink-0 ${vsMkt > 0 ? "text-green-400" : vsMkt < 0 ? "text-red-400" : "text-gray-600"}`}>
+                  <span className="text-[10px] text-slate-500 font-mono w-12 text-right shrink-0">{consensusRank}</span>
+                  <span className={`text-[10px] font-mono w-12 text-right shrink-0 ${vsMkt > 0 ? "text-emerald-400" : vsMkt < 0 ? "text-red-400" : "text-slate-600"}`}>
                     {vsMkt > 0 ? "+" : ""}{vsMkt}
                   </span>
                   <span className="w-20 text-center shrink-0">
@@ -352,12 +352,12 @@ function RankingsTab({
                   <button
                     onClick={() => savePersonalOrdering(moveInOrdering(personalOrder, id, consensusRank))}
                     disabled={vsMkt === 0}
-                    className={`text-xs transition shrink-0 w-4 ${vsMkt === 0 ? "text-gray-800 cursor-default" : "text-gray-600 hover:text-yellow-400"}`}
+                    className={`text-xs transition shrink-0 w-4 ${vsMkt === 0 ? "text-slate-800 cursor-default" : "text-slate-600 hover:text-amber-400"}`}
                     title={vsMkt === 0 ? "Already at market rank" : `Reset to market rank (${consensusRank})`}
                   >
                     ↺
                   </button>
-                  <button onClick={() => setPlayerProfileId(id)} className="text-gray-600 hover:text-blue-400 text-xs transition shrink-0 w-4" title="View profile">ⓘ</button>
+                  <button onClick={() => setPlayerProfileId(id)} className="text-slate-600 hover:text-blue-400 text-xs transition shrink-0 w-4" title="View profile">ⓘ</button>
                 </div>
               );
             }
@@ -382,10 +382,10 @@ function RankingsTab({
                   right: 0,
                   height: vRow.size,
                 }}
-                className="flex items-center gap-2 bg-gray-800/70 hover:bg-gray-800 rounded-lg px-2 py-1.5 transition"
+                className="flex items-center gap-2 bg-slate-800/70 hover:bg-slate-800 rounded-lg px-2 py-1.5 transition"
               >
-                <span className="text-[10px] text-gray-600 w-5 text-right shrink-0">{idx + 1}</span>
-                <span className={`text-[10px] font-bold w-6 shrink-0 ${POS_COLOR[p.position] ?? "text-gray-400"}`}>{p.position}</span>
+                <span className="text-[10px] text-slate-600 w-5 text-right shrink-0">{idx + 1}</span>
+                <span className={`text-[10px] font-bold w-6 shrink-0 ${POS_COLOR[p.position] ?? "text-slate-400"}`}>{p.position}</span>
                 <span className="text-xs flex-1 truncate min-w-0 flex items-center gap-1">
                   {isOwned && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" title="On your roster" />}
                   <span className={isOwned ? "text-blue-200" : "text-white"}>{p.full_name}</span>
@@ -395,9 +395,9 @@ function RankingsTab({
                 <span className={`text-[10px] font-mono w-7 text-center shrink-0 ${ageColor(p.age ?? undefined, p.position)}`}>{p.age || "—"}</span>
                 {rankView === "COMPARE" ? (
                   <>
-                    <span className="text-[10px] text-gray-300 font-mono w-14 text-right shrink-0">{dyn.toLocaleString()}</span>
-                    <span className="text-[10px] text-gray-500 font-mono w-14 text-right shrink-0">{red > 0 ? red.toLocaleString() : "—"}</span>
-                    <span className={`text-[10px] font-mono w-12 text-right shrink-0 ${gapPct > 15 ? "text-green-400" : gapPct < -10 ? "text-red-400" : "text-gray-500"}`}>
+                    <span className="text-[10px] text-slate-300 font-mono w-14 text-right shrink-0">{dyn.toLocaleString()}</span>
+                    <span className="text-[10px] text-slate-500 font-mono w-14 text-right shrink-0">{red > 0 ? red.toLocaleString() : "—"}</span>
+                    <span className={`text-[10px] font-mono w-12 text-right shrink-0 ${gapPct > 15 ? "text-emerald-400" : gapPct < -10 ? "text-red-400" : "text-slate-500"}`}>
                       {red > 0 ? `${gap > 0 ? "+" : ""}${gap.toLocaleString()}` : "—"}
                     </span>
                   </>
@@ -405,16 +405,16 @@ function RankingsTab({
                   <span className="flex items-center gap-1 shrink-0">
                     {trendPct !== null && <MiniSparkline from={snapDynVal} to={rawVal} />}
                     <span className="flex flex-col items-end w-14 shrink-0">
-                      <span className="text-[10px] text-gray-400 font-mono">{displayVal.toLocaleString()}</span>
+                      <span className="text-[10px] text-slate-400 font-mono">{displayVal.toLocaleString()}</span>
                       {trendPct !== null && (
-                        <span className={`text-[8px] font-semibold leading-none ${trendPct > 0 ? "text-green-500" : "text-red-500"}`}>
+                        <span className={`text-[8px] font-semibold leading-none ${trendPct > 0 ? "text-emerald-500" : "text-red-500"}`}>
                           {trendPct > 0 ? "+" : ""}{trendPct.toFixed(1)}%
                         </span>
                       )}
                     </span>
                   </span>
                 )}
-                <button onClick={() => setPlayerProfileId(p.player_id)} className="text-gray-600 hover:text-blue-400 text-xs transition shrink-0 w-4" title="View profile">ⓘ</button>
+                <button onClick={() => setPlayerProfileId(p.player_id)} className="text-slate-600 hover:text-blue-400 text-xs transition shrink-0 w-4" title="View profile">ⓘ</button>
               </div>
             );
           })}

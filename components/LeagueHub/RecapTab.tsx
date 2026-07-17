@@ -9,6 +9,7 @@ import { getRosterAgeCurve } from "../../lib/helpers/direction/age";
 import { getDynastyTier } from "../../lib/helpers/direction/bucket";
 import { CURRENT_YEAR } from "../../lib/helpers/season";
 import type { StandingRow, AnnotatedTransaction } from "./leagueHubTypes";
+import { Card } from "../ui/Card";
 
 interface Props {
   standings: StandingRow[];
@@ -82,13 +83,13 @@ export default function RecapTab({ standings, activityTransactions }: Props) {
   const oddsLatest = history.length > 0 ? history[history.length - 1] : null;
 
   if (!selectedLeague) {
-    return <p className="text-sm text-gray-500">Select a league to generate a recap.</p>;
+    return <p className="text-sm text-slate-500">Select a league to generate a recap.</p>;
   }
 
   if (!generated) {
     return (
-      <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-6 text-center space-y-3">
-        <p className="text-sm text-gray-300">
+      <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6 text-center space-y-3">
+        <p className="text-sm text-slate-300">
           Generate a data-only season recap for <span className="font-semibold text-white">{selectedLeague.name}</span> —
           standings, trade activity, playoff-odds trend, and your roster&apos;s age curve.
         </p>
@@ -106,25 +107,25 @@ export default function RecapTab({ standings, activityTransactions }: Props) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-white">{selectedLeague.name} — {CURRENT_YEAR} Recap</h3>
-        <button onClick={() => setGenerated(false)} className="text-xs text-gray-500 hover:text-white">Reset</button>
+        <button onClick={() => setGenerated(false)} className="text-xs text-slate-500 hover:text-white">Reset</button>
       </div>
 
       {/* Standings */}
-      <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
-        <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Standings</p>
+      <Card>
+        <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-2">Standings</p>
         <div className="space-y-1">
           {rankedStandings.map((row) => (
             <div
               key={row.roster_id}
               className={`flex items-center justify-between text-xs px-2 py-1 rounded ${
-                row.roster_id === myRoster?.roster_id ? "bg-blue-900/30 text-blue-200" : "text-gray-300"
+                row.roster_id === myRoster?.roster_id ? "bg-blue-900/30 text-blue-200" : "text-slate-300"
               }`}
             >
               <span className="flex items-center gap-2">
-                <span className="text-gray-500 w-5">{row.rank}.</span>
+                <span className="text-slate-500 w-5">{row.rank}.</span>
                 <span className="font-medium">{row.ownerName}</span>
                 <span className={
-                  row.tier === "Contender" ? "text-green-400" : row.tier === "Middle" ? "text-yellow-400" : "text-red-400"
+                  row.tier === "Contender" ? "text-emerald-400" : row.tier === "Middle" ? "text-amber-400" : "text-red-400"
                 }>
                   {row.tier}
                 </span>
@@ -133,32 +134,32 @@ export default function RecapTab({ standings, activityTransactions }: Props) {
             </div>
           ))}
         </div>
-      </div>
+      </Card>
 
       {/* Trade activity */}
-      <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
-        <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Trade Activity</p>
-        <p className="text-sm text-gray-200">{tradeStats.count} completed trade{tradeStats.count === 1 ? "" : "s"} this season.</p>
+      <Card>
+        <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-2">Trade Activity</p>
+        <p className="text-sm text-slate-200">{tradeStats.count} completed trade{tradeStats.count === 1 ? "" : "s"} this season.</p>
         {mostActiveTrader && (
-          <p className="text-xs text-gray-500 mt-1">
-            Most active: <span className="text-gray-300">{mostActiveTrader.ownerName}</span> ({mostActiveTrader.count} trade{mostActiveTrader.count === 1 ? "" : "s"})
+          <p className="text-xs text-slate-500 mt-1">
+            Most active: <span className="text-slate-300">{mostActiveTrader.ownerName}</span> ({mostActiveTrader.count} trade{mostActiveTrader.count === 1 ? "" : "s"})
           </p>
         )}
-      </div>
+      </Card>
 
       {/* Playoff odds trend */}
-      <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
-        <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Your Playoff Odds Trend</p>
+      <Card>
+        <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-2">Your Playoff Odds Trend</p>
         {loadingHistory ? (
-          <p className="text-xs text-gray-500">Loading...</p>
+          <p className="text-xs text-slate-500">Loading...</p>
         ) : oddsLatest ? (
-          <div className="text-xs text-gray-300 space-y-1">
+          <div className="text-xs text-slate-300 space-y-1">
             <p>
               Week {oddsLatest.week}: <span className="font-semibold text-white">{oddsLatest.playoffOdds.toFixed(1)}%</span> playoff odds,{" "}
               <span className="font-semibold text-white">{oddsLatest.titleOdds.toFixed(1)}%</span> title odds.
             </p>
             {oddsStart && oddsStart.week !== oddsLatest.week && (
-              <p className="text-gray-500">
+              <p className="text-slate-500">
                 Since week {oddsStart.week}: playoff odds {(oddsLatest.playoffOdds - oddsStart.playoffOdds >= 0 ? "+" : "")}
                 {(oddsLatest.playoffOdds - oddsStart.playoffOdds).toFixed(1)}pts, title odds{" "}
                 {(oddsLatest.titleOdds - oddsStart.titleOdds >= 0 ? "+" : "")}
@@ -167,26 +168,26 @@ export default function RecapTab({ standings, activityTransactions }: Props) {
             )}
           </div>
         ) : (
-          <p className="text-xs text-gray-500">No simulator history recorded yet for your roster this season.</p>
+          <p className="text-xs text-slate-500">No simulator history recorded yet for your roster this season.</p>
         )}
-      </div>
+      </Card>
 
       {/* Roster age curve */}
-      <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
-        <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Your Roster Age</p>
+      <Card>
+        <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-2">Your Roster Age</p>
         {avgAge != null ? (
-          <div className="text-xs text-gray-300 space-y-1">
+          <div className="text-xs text-slate-300 space-y-1">
             <p>Average starter-eligible age: <span className="font-semibold text-white">{avgAge.toFixed(1)}</span></p>
-            {youngest && <p className="text-gray-500">Youngest: {youngest.full_name} ({youngest.pos}, {youngest.age})</p>}
-            {oldest && <p className="text-gray-500">Oldest: {oldest.full_name} ({oldest.pos}, {oldest.age})</p>}
+            {youngest && <p className="text-slate-500">Youngest: {youngest.full_name} ({youngest.pos}, {youngest.age})</p>}
+            {oldest && <p className="text-slate-500">Oldest: {oldest.full_name} ({oldest.pos}, {oldest.age})</p>}
           </div>
         ) : (
-          <p className="text-xs text-gray-500">No roster data available.</p>
+          <p className="text-xs text-slate-500">No roster data available.</p>
         )}
-      </div>
+      </Card>
 
       {myStanding && (
-        <p className="text-[10px] text-gray-600 text-center">
+        <p className="text-[10px] text-slate-600 text-center">
           You&apos;re ranked #{myStanding.rank} of {rankedStandings.length} in {selectedLeague.name}.
         </p>
       )}

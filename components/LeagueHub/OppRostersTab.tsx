@@ -94,7 +94,7 @@ function OppRostersTab({
   }, [oppRoster, allPicks]);
 
   if (!selectedLeague || !rosters.length) return (
-    <p className="text-sm text-gray-500">Select a league from Rosters &amp; Rules first to view opponent rosters.</p>
+    <p className="text-sm text-slate-500">Select a league from Rosters &amp; Rules first to view opponent rosters.</p>
   );
 
   const totalPicks = oppPicksByYear.reduce((s, g) => s + g.list.length, 0);
@@ -102,11 +102,11 @@ function OppRostersTab({
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-center gap-3">
-        <span className="text-sm text-gray-400">{selectedLeague.name}</span>
+        <span className="text-sm text-slate-400">{selectedLeague.name}</span>
         <select
           value={oppRosterOwnerId}
           onChange={(e) => setOppRosterOwnerId(e.target.value)}
-          className="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-white"
+          className="bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-white"
         >
           <option value="">— select an owner —</option>
           {rosters
@@ -120,7 +120,7 @@ function OppRostersTab({
       </div>
 
       {oppRosterOwnerId && !oppRoster && (
-        <p className="text-sm text-gray-500">Roster not found.</p>
+        <p className="text-sm text-slate-500">Roster not found.</p>
       )}
 
       {oppRoster && (
@@ -132,27 +132,27 @@ function OppRostersTab({
             const avgAge = ages.length ? ages.reduce((s, a) => s + a, 0) / ages.length : null;
             const rank = positionRankByPos[pos];
             return (
-              <div key={pos} className="bg-gray-900 border border-gray-800 rounded-xl p-3">
-                <div className="border-b border-gray-800 pb-2 mb-2">
-                  <div className="text-xs text-gray-400">
+              <div key={pos} className="bg-slate-900 border border-slate-800 rounded-xl p-3">
+                <div className="border-b border-slate-800 pb-2 mb-2">
+                  <div className="text-xs text-slate-400">
                     {pos} Rank: <span className="font-semibold text-emerald-400">{rank ?? "—"}</span>
                   </div>
-                  <div className="text-[11px] text-gray-500 mt-0.5">
-                    Value: <span className="text-gray-200 font-medium">{totalValue.toLocaleString()}</span>
+                  <div className="text-[11px] text-slate-500 mt-0.5">
+                    Value: <span className="text-slate-200 font-medium">{totalValue.toLocaleString()}</span>
                     {avgAge != null && (
-                      <> {" | "}Age: <span className="text-gray-200 font-medium">{avgAge.toFixed(1)}</span></>
+                      <> {" | "}Age: <span className="text-slate-200 font-medium">{avgAge.toFixed(1)}</span></>
                     )}
                   </div>
                 </div>
                 <div className="space-y-0.5">
                   {list.length === 0 ? (
-                    <div className="text-[11px] text-gray-600 italic">No players</div>
+                    <div className="text-[11px] text-slate-600 italic">No players</div>
                   ) : (
                     list.map((p) => (
                       <div key={p.player_id} className="flex items-center justify-between gap-2 text-xs py-0.5">
                         <div className="flex-1 min-w-0">
-                          <div className="truncate text-gray-200">{p.full_name}</div>
-                          <div className="text-[10px] text-gray-500">{ROLE_LABEL[p.role] ?? ""}</div>
+                          <div className="truncate text-slate-200">{p.full_name}</div>
+                          <div className="text-[10px] text-slate-500">{ROLE_LABEL[p.role] ?? ""}</div>
                         </div>
                         <span className="text-emerald-400 font-medium whitespace-nowrap">{(p.value || 0).toLocaleString()}</span>
                       </div>
@@ -162,17 +162,17 @@ function OppRostersTab({
               </div>
             );
           })}
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-3">
-            <div className="border-b border-gray-800 pb-2 mb-2">
-              <div className="text-xs text-gray-400">Picks: <span className="font-semibold text-emerald-400">{totalPicks}</span></div>
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-3">
+            <div className="border-b border-slate-800 pb-2 mb-2">
+              <div className="text-xs text-slate-400">Picks: <span className="font-semibold text-emerald-400">{totalPicks}</span></div>
             </div>
             <div className="space-y-2">
               {oppPicksByYear.length === 0 ? (
-                <div className="text-[11px] text-gray-600 italic">No picks</div>
+                <div className="text-[11px] text-slate-600 italic">No picks</div>
               ) : (
                 oppPicksByYear.map(({ year, list }) => (
                   <div key={year}>
-                    <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-1">{year}</div>
+                    <div className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">{year}</div>
                     <div className="space-y-0.5">
                       {list.map((pick) => {
                         const originalOwner = users[pick.roster_id] || "";
@@ -185,9 +185,9 @@ function OppRostersTab({
                             key={`${pick.season}-${pick.round}-${pick.roster_id}-${pick.owner_id}`}
                             className="flex items-center justify-between gap-2 text-xs py-0.5"
                           >
-                            <span className="text-gray-200 font-medium whitespace-nowrap">{label}</span>
+                            <span className="text-slate-200 font-medium whitespace-nowrap">{label}</span>
                             {showVia && (
-                              <span className="text-[10px] text-gray-500 truncate">via {originalOwner}</span>
+                              <span className="text-[10px] text-slate-500 truncate">via {originalOwner}</span>
                             )}
                           </div>
                         );

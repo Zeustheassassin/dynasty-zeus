@@ -11,6 +11,7 @@ import { ChartCard, ChartTooltip, ChartLegend, chartGridProps, chartAxisProps, c
 import { MultiPointSparkline } from "../charts/MultiPointSparkline";
 import { CHART_CATEGORICAL } from "../../lib/chartTheme";
 import { CartesianGrid } from "recharts";
+import { Card } from "../ui/Card";
 
 /** Per-team "then vs. now" dynasty value, built on the same single stored
  *  snapshot every other Phase D trend uses (see project_platform_upgrade_plan_july15
@@ -104,17 +105,17 @@ function TeamValueSparklineTable({
     .sort((a, b) => b.now - a.now);
 
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl p-3">
+    <div className="bg-slate-900 border border-slate-800 rounded-xl p-3">
       <div className="mb-2">
         <div className="text-sm font-semibold text-white">Team Value Trend</div>
-        <div className="text-xs text-gray-500">Dynasty roster value over the last {dates.length} tracked days</div>
+        <div className="text-xs text-slate-500">Dynasty roster value over the last {dates.length} tracked days</div>
       </div>
       <div className="space-y-1">
         {teamSeries.map((t) => (
           <div key={t.rosterId} className="flex items-center gap-3 text-xs py-1">
-            <span className="text-gray-200 w-28 truncate shrink-0">{t.name}</span>
+            <span className="text-slate-200 w-28 truncate shrink-0">{t.name}</span>
             <MultiPointSparkline values={t.series} width={64} higherIsBetter />
-            <span className="text-gray-200 font-mono ml-auto tabular-nums">{t.now.toLocaleString()}</span>
+            <span className="text-slate-200 font-mono ml-auto tabular-nums">{t.now.toLocaleString()}</span>
             <span
               className={`font-mono w-16 text-right tabular-nums ${t.delta >= 0 ? "text-emerald-400" : "text-red-400"}`}
             >
@@ -159,10 +160,10 @@ function RankPill({ r, rosterId, col, teamCount, setPrPopup }: {
   const top3rd = Math.ceil(teamCount / 3);
   const bot3rd = teamCount - Math.floor(teamCount / 3) + 1;
   const color = r <= top3rd
-    ? "bg-green-900/40 text-green-400 border-green-700"
+    ? "bg-emerald-900/40 text-emerald-400 border-emerald-700"
     : r >= bot3rd
     ? "bg-red-900/40 text-red-400 border-red-700"
-    : "bg-gray-800/60 text-gray-400 border-gray-700";
+    : "bg-slate-800/60 text-slate-400 border-slate-700";
   return (
     <button
       onClick={() => setPrPopup({ rosterId, col })}
@@ -223,7 +224,7 @@ function PowerRankingsTab({
   const { historyByPlayer } = usePlayerValueHistory(allRosterPlayerIds);
 
   if (!selectedLeague || !rosters.length) return (
-    <p className="text-sm text-gray-500">Select a league from Rosters &amp; Rules first to view Power Rankings.</p>
+    <p className="text-sm text-slate-500">Select a league from Rosters &amp; Rules first to view Power Rankings.</p>
   );
   if (loadingCalcValues) return <p className="text-sm text-blue-400">Loading player values…</p>;
 
@@ -315,44 +316,44 @@ function PowerRankingsTab({
       const colLabel = col === "dyn" ? "Dynasty" : col === "red" ? "Redraft" : col;
       popupContent = (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={() => setPrPopup(null)}>
-          <div role="dialog" aria-modal="true" aria-labelledby="pr-popup-title" tabIndex={-1} onKeyDown={(e) => { if (e.key === 'Escape') setPrPopup(null); }} className="bg-gray-900 border border-gray-700 rounded-2xl p-5 w-80 max-h-[80vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
+          <Card role="dialog" aria-modal="true" aria-labelledby="pr-popup-title" tabIndex={-1} onKeyDown={(e) => { if (e.key === 'Escape') setPrPopup(null); }} padding="lg" className="w-80 max-h-[80vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
               <div>
-                <p className="text-xs text-gray-500 uppercase tracking-wider">{colLabel} Roster</p>
+                <p className="text-xs text-slate-500 uppercase tracking-wider">{colLabel} Roster</p>
                 <p id="pr-popup-title" className="text-sm font-semibold text-white">{popRow.ownerName}</p>
               </div>
-              <button aria-label="Close roster popup" onClick={() => setPrPopup(null)} className="text-gray-500 hover:text-white text-lg leading-none">✕</button>
+              <button aria-label="Close roster popup" onClick={() => setPrPopup(null)} className="text-slate-500 hover:text-white text-lg leading-none">✕</button>
             </div>
             <div className="space-y-1">
               {popPlayers.map((p) => (
-                <div key={p.player_id} className="flex items-center justify-between bg-gray-800 rounded-lg px-2 py-1.5">
+                <div key={p.player_id} className="flex items-center justify-between bg-slate-800 rounded-lg px-2 py-1.5">
                   <div className="flex items-center gap-1.5 min-w-0">
                     <button onClick={() => { setPrPopup(null); setPlayerProfileId(p.player_id); }} className="text-xs text-white hover:text-blue-400 transition truncate text-left">{p.full_name}</button>
-                    <span className="text-[10px] text-gray-500 shrink-0">{p.position}</span>
+                    <span className="text-[10px] text-slate-500 shrink-0">{p.position}</span>
                   </div>
-                  <span className="text-xs text-gray-400 font-mono shrink-0 ml-2">
+                  <span className="text-xs text-slate-400 font-mono shrink-0 ml-2">
                     {col === "red" ? (p.redVal || 0).toLocaleString() : (p.dynVal || 0).toLocaleString()}
                   </span>
                 </div>
               ))}
               {(col === "dyn") && allPicks.filter((p) => p.owner_id === prPopup.rosterId).length > 0 && (
                 <>
-                  <p className="text-[10px] text-gray-600 uppercase tracking-wider pt-1 pb-0.5 pl-1">Picks</p>
+                  <p className="text-[10px] text-slate-600 uppercase tracking-wider pt-1 pb-0.5 pl-1">Picks</p>
                   {allPicks.filter((p) => p.owner_id === prPopup.rosterId).map((p) => {
                     const via = p.roster_id !== p.owner_id ? ` (via ${prRosterToName[p.roster_id] || `Team ${p.roster_id}`})` : "";
                     const label = p.slot && String(p.slot).includes(".") ? `${p.season} ${p.slot}` : `${p.season} Rd ${p.round}`;
                     const val = getStoredPickValue(pickFcValues, p);
                     return (
-                      <div key={`${p.season}-${p.round}-${p.roster_id}`} className="flex items-center justify-between bg-gray-800 rounded-lg px-2 py-1.5">
+                      <div key={`${p.season}-${p.round}-${p.roster_id}`} className="flex items-center justify-between bg-slate-800 rounded-lg px-2 py-1.5">
                         <span className="text-xs text-white truncate">{label}{via}</span>
-                        <span className="text-xs text-gray-400 font-mono shrink-0 ml-2">{val.toLocaleString()}</span>
+                        <span className="text-xs text-slate-400 font-mono shrink-0 ml-2">{val.toLocaleString()}</span>
                       </div>
                     );
                   })}
                 </>
               )}
             </div>
-          </div>
+          </Card>
         </div>
       );
     }
@@ -370,15 +371,15 @@ function PowerRankingsTab({
               <button
                 key={m}
                 onClick={() => setPrMode(m)}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition ${active ? "bg-blue-600 border-blue-500 text-white" : "bg-gray-800/60 border-gray-700 text-gray-400 hover:text-white hover:border-gray-500"}`}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition ${active ? "bg-blue-600 border-blue-500 text-white" : "bg-slate-800/60 border-slate-700 text-slate-400 hover:text-white hover:border-slate-500"}`}
               >
                 {labels[m]}
               </button>
             );
           })}
         </div>
-        <p className="text-xs text-gray-500">
-          Power rankings for <strong className="text-gray-300">{selectedLeague.name}</strong>.{" "}
+        <p className="text-xs text-slate-500">
+          Power rankings for <strong className="text-slate-300">{selectedLeague.name}</strong>.{" "}
           {prMode === "full" && "Dynasty rank includes picks."}
           {prMode === "starters" && "Showing projected optimal starting lineup based on dynasty values."}
           {prMode === "bench" && "Showing projected bench (players outside the optimal starting lineup)."}
@@ -392,7 +393,7 @@ function PowerRankingsTab({
         <div className="overflow-x-auto pb-1">
           <table className="min-w-full text-sm border-separate border-spacing-y-1">
             <thead>
-              <tr className="text-[10px] font-bold uppercase tracking-widest text-gray-600">
+              <tr className="text-[10px] font-bold uppercase tracking-widest text-slate-600">
                 <th className="text-left pl-3 pb-2 pr-2">Owner</th>
                 <SortTh col="dynTotal" label="Dynasty" prSortKey={prSortKey} prSortAsc={prSortAsc} setPrSortKey={setPrSortKey} setPrSortAsc={setPrSortAsc} />
                 <SortTh col="redTotal" label="Redraft" prSortKey={prSortKey} prSortAsc={prSortAsc} setPrSortKey={setPrSortKey} setPrSortAsc={setPrSortAsc} />
@@ -400,7 +401,7 @@ function PowerRankingsTab({
                 <SortTh col="rbTotal" label="RB" prSortKey={prSortKey} prSortAsc={prSortAsc} setPrSortKey={setPrSortKey} setPrSortAsc={setPrSortAsc} />
                 <SortTh col="wrTotal" label="WR" prSortKey={prSortKey} prSortAsc={prSortAsc} setPrSortKey={setPrSortKey} setPrSortAsc={setPrSortAsc} />
                 <SortTh col="teTotal" label="TE" prSortKey={prSortKey} prSortAsc={prSortAsc} setPrSortKey={setPrSortKey} setPrSortAsc={setPrSortAsc} />
-                {prMode === "full" && <th className="text-center pb-2 px-2 text-gray-600">Picks</th>}
+                {prMode === "full" && <th className="text-center pb-2 px-2 text-slate-600">Picks</th>}
               </tr>
             </thead>
             <tbody>
@@ -408,7 +409,7 @@ function PowerRankingsTab({
                 const isMe = row.roster_id === myRosterId;
                 const isIgnored = !isMe && ignoredOwnerIds.includes(row.ownerId);
                 return (
-                  <tr key={row.roster_id} className={`group ${isMe ? "bg-blue-900/20" : isIgnored ? "bg-red-950/20" : "bg-gray-900"}`}>
+                  <tr key={row.roster_id} className={`group ${isMe ? "bg-blue-900/20" : isIgnored ? "bg-red-950/20" : "bg-slate-900"}`}>
                     <td className={`pl-3 pr-2 py-2.5 rounded-l-xl text-sm font-medium ${isMe ? "text-blue-300" : isIgnored ? "text-red-400/70" : "text-white"}`}>
                       <div className="flex items-center gap-2">
                         <span>{row.ownerName}</span>
@@ -418,7 +419,7 @@ function PowerRankingsTab({
                           <button
                             onClick={() => toggleIgnoredOwner(row.ownerId)}
                             title={isIgnored ? "Remove from ignore list" : "Ignore this owner"}
-                            className={`text-[11px] leading-none transition ${isIgnored ? "opacity-100 text-red-500 hover:text-red-300" : "opacity-0 group-hover:opacity-100 text-gray-600 hover:text-red-400"}`}
+                            className={`text-[11px] leading-none transition ${isIgnored ? "opacity-100 text-red-500 hover:text-red-300" : "opacity-0 group-hover:opacity-100 text-slate-600 hover:text-red-400"}`}
                           >
                             🚫
                           </button>
@@ -431,7 +432,7 @@ function PowerRankingsTab({
                     <td className="text-center px-2 py-2.5"><RankPill r={rbRanks[row.roster_id]} rosterId={row.roster_id} col="RB" teamCount={n} setPrPopup={setPrPopup} /></td>
                     <td className="text-center px-2 py-2.5"><RankPill r={wrRanks[row.roster_id]} rosterId={row.roster_id} col="WR" teamCount={n} setPrPopup={setPrPopup} /></td>
                     <td className={`text-center px-2 py-2.5 ${prMode !== "full" ? "rounded-r-xl" : ""}`}><RankPill r={teRanks[row.roster_id]} rosterId={row.roster_id} col="TE" teamCount={n} setPrPopup={setPrPopup} /></td>
-                    {prMode === "full" && <td className="text-center px-2 py-2.5 rounded-r-xl text-xs text-gray-400 font-mono">{row.pickVal > 0 ? row.pickVal.toLocaleString() : <span className="text-gray-700">—</span>}</td>}
+                    {prMode === "full" && <td className="text-center px-2 py-2.5 rounded-r-xl text-xs text-slate-400 font-mono">{row.pickVal > 0 ? row.pickVal.toLocaleString() : <span className="text-slate-700">—</span>}</td>}
                   </tr>
                 );
               })}

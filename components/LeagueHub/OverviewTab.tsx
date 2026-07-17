@@ -160,7 +160,7 @@ function OverviewTab({
   }, [leagues, leagueOverviewData, user, calcFcValues, redraftValues, pickFcValues, players, committedSimsByLeague, leagueSimCache, mountedAt]);
 
   if (loadingLeagueOverview && !leagueOverviewLoaded) return <p className="text-sm text-blue-400">Loading league data…</p>;
-  if (!leagues.length) return <p className="text-sm text-gray-500">No leagues found.</p>;
+  if (!leagues.length) return <p className="text-sm text-slate-500">No leagues found.</p>;
 
   const GRID = "grid grid-cols-[minmax(180px,1.4fr)_minmax(170px,1.1fr)_56px_56px_56px_56px_64px] gap-2 items-center px-1";
 
@@ -178,7 +178,7 @@ function OverviewTab({
           onClick={handleRefreshAllRosters}
           disabled={refreshingRosters}
           title="Clear roster cache and re-fetch all leagues from Sleeper"
-          className="flex items-center gap-1 text-[11px] font-semibold px-3 py-1 rounded-full border border-gray-600 text-gray-400 hover:border-gray-400 hover:text-gray-200 transition disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+          className="flex items-center gap-1 text-[11px] font-semibold px-3 py-1 rounded-full border border-slate-600 text-slate-400 hover:border-slate-400 hover:text-slate-200 transition disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
         >
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className={`w-3 h-3 ${refreshingRosters ? "animate-spin" : ""}`}>
             <path fillRule="evenodd" d="M13.836 2.477a.75.75 0 0 1 .75.75v3.182a.75.75 0 0 1-.75.75h-3.182a.75.75 0 0 1 0-1.5h1.37l-.84-.841a4.5 4.5 0 0 0-7.08 1.196.75.75 0 1 1-1.31-.734 6 6 0 0 1 9.44-1.595l.842.841V3.227a.75.75 0 0 1 .75-.75Zm-.911 7.5A.75.75 0 0 1 13.199 11a6 6 0 0 1-9.44 1.595l-.842-.841v1.017a.75.75 0 0 1-1.5 0V9.591a.75.75 0 0 1 .75-.75H5.35a.75.75 0 0 1 0 1.5H3.98l.84.841a4.5 4.5 0 0 0 7.08-1.196.75.75 0 0 1 1.025-.009Z" clipRule="evenodd" />
@@ -187,13 +187,13 @@ function OverviewTab({
         </button>
         {simProgress && (
           <div className="flex-1 flex items-center gap-2 min-w-0">
-            <div className="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+            <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
               <div
                 className="h-full bg-blue-500 rounded-full transition-all duration-300"
                 style={{ width: `${(simProgress.done / simProgress.total) * 100}%` }}
               />
             </div>
-            <span className="text-[10px] text-gray-400 whitespace-nowrap">
+            <span className="text-[10px] text-slate-400 whitespace-nowrap">
               {simProgress.done === simProgress.total
                 ? `Done — ${simProgress.total} leagues updated`
                 : `${simProgress.done} / ${simProgress.total}`}
@@ -202,13 +202,13 @@ function OverviewTab({
         )}
         {rosterRefreshProgress && (
           <div className="flex-1 flex items-center gap-2 min-w-0">
-            <div className="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+            <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
               <div
-                className="h-full bg-gray-400 rounded-full transition-all duration-300"
+                className="h-full bg-slate-400 rounded-full transition-all duration-300"
                 style={{ width: `${(rosterRefreshProgress.done / rosterRefreshProgress.total) * 100}%` }}
               />
             </div>
-            <span className="text-[10px] text-gray-400 whitespace-nowrap">
+            <span className="text-[10px] text-slate-400 whitespace-nowrap">
               {rosterRefreshProgress.done === rosterRefreshProgress.total
                 ? `Done — ${rosterRefreshProgress.total} leagues refreshed`
                 : `${rosterRefreshProgress.done} / ${rosterRefreshProgress.total} leagues`}
@@ -217,9 +217,9 @@ function OverviewTab({
         )}
       </div>
 
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 overflow-x-auto">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 overflow-x-auto">
         <div className="min-w-[700px]">
-          <div className={`${GRID} text-[10px] uppercase tracking-wide text-gray-500 mb-1 pb-2 border-b border-gray-800`}>
+          <div className={`${GRID} text-[10px] uppercase tracking-wide text-slate-500 mb-1 pb-2 border-b border-slate-800`}>
             <span>League</span>
             <span>Direction</span>
             <span className="text-center">Dyn</span>
@@ -232,30 +232,30 @@ function OverviewTab({
             {leagueRows.map((row) => (
               <div
                 key={row.league.league_id}
-                className={`${GRID} text-xs py-1.5 rounded hover:bg-gray-800/40 transition ${simQueue[0] === row.league.league_id ? "ring-1 ring-blue-700/60" : ""}`}
+                className={`${GRID} text-xs py-1.5 rounded hover:bg-slate-800/40 transition ${simQueue[0] === row.league.league_id ? "ring-1 ring-blue-700/60" : ""}`}
               >
                 <button
-                  className="min-w-0 text-sm text-gray-200 font-medium text-left truncate hover:text-blue-400 transition"
+                  className="min-w-0 text-sm text-slate-200 font-medium text-left truncate hover:text-blue-400 transition"
                   onClick={() => { loadRoster(row.league); setLeagueHubTab("ROSTERS"); }}
                 >
                   {row.league.name}
                 </button>
                 <div className="min-w-0">
                   <span className={`inline-flex max-w-full text-[10px] font-semibold px-2 py-0.5 rounded-full border truncate ${row.bucketColor}`}>{row.bucket}</span>
-                  <div className="mt-0.5 text-[10px] text-gray-500 truncate">{row.shortAction}</div>
+                  <div className="mt-0.5 text-[10px] text-slate-500 truncate">{row.shortAction}</div>
                 </div>
-                <span className="text-center text-gray-300">{row.dynRank}<span className="text-gray-600">/{row.n}</span></span>
-                <span className="text-center text-gray-300">{row.redRank}<span className="text-gray-600">/{row.n}</span></span>
-                <span className="text-center text-gray-300">{row.standRank}<span className="text-gray-600">/{row.n}</span></span>
-                <span className="text-center text-gray-300">{row.maxPfRank}<span className="text-gray-600">/{row.n}</span></span>
+                <span className="text-center text-slate-300">{row.dynRank}<span className="text-slate-600">/{row.n}</span></span>
+                <span className="text-center text-slate-300">{row.redRank}<span className="text-slate-600">/{row.n}</span></span>
+                <span className="text-center text-slate-300">{row.standRank}<span className="text-slate-600">/{row.n}</span></span>
+                <span className="text-center text-slate-300">{row.maxPfRank}<span className="text-slate-600">/{row.n}</span></span>
                 <div className="text-center">
                   {row.hasCachedSim ? (
                     <>
-                      <div className={`font-mono font-semibold ${row.playoffOdds >= 50 ? "text-emerald-400" : row.playoffOdds >= 25 ? "text-yellow-400" : "text-red-400"}`}>
+                      <div className={`font-mono font-semibold ${row.playoffOdds >= 50 ? "text-emerald-400" : row.playoffOdds >= 25 ? "text-amber-400" : "text-red-400"}`}>
                         {row.playoffOdds}%
                       </div>
                       {row.simAge !== null && (
-                        <div className={`text-[10px] ${row.simAge > 48 ? "text-orange-500" : "text-gray-600"}`}>
+                        <div className={`text-[10px] ${row.simAge > 48 ? "text-orange-500" : "text-slate-600"}`}>
                           {row.simAge < 1 ? "just now" : row.simAge < 24 ? `${row.simAge}h ago` : `${Math.round(row.simAge / 24)}d ago`}
                         </div>
                       )}
@@ -276,7 +276,7 @@ function OverviewTab({
       </div>
 
       {!leagueOverviewLoaded && !loadingLeagueOverview && (
-        <button onClick={() => { loadLeagueOverview(); loadRedraftValues(); }} className="text-[10px] font-semibold border rounded-lg px-2.5 py-1 transition border-gray-700 text-gray-400 hover:text-white hover:border-gray-500">
+        <button onClick={() => { loadLeagueOverview(); loadRedraftValues(); }} className="text-[10px] font-semibold border rounded-lg px-2.5 py-1 transition border-slate-700 text-slate-400 hover:text-white hover:border-slate-500">
           Load Overview
         </button>
       )}

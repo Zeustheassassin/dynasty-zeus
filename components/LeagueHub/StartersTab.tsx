@@ -23,7 +23,7 @@ function StartersTab({ projectionData, nflState }: StartersTabProps) {
   const { leagueAdjustedRedraftValues: redraftValues } = useValues();
 
   if (!selectedLeague || !roster) return (
-    <p className="text-sm text-gray-500">Select a league from Rosters &amp; Rules first.</p>
+    <p className="text-sm text-slate-500">Select a league from Rosters &amp; Rules first.</p>
   );
 
   const week = nflState?.week;
@@ -160,24 +160,24 @@ function StartersTab({ projectionData, nflState }: StartersTabProps) {
     const s = status ? String(status).toLowerCase() : "";
     if (/out|inactive|suspended|covid|nfi|pup/.test(s)) return <span className="text-[10px] font-semibold text-red-400 shrink-0">OUT</span>;
     if (s === "doubtful") return <span className="text-[10px] font-semibold text-orange-400 shrink-0">D</span>;
-    if (s === "questionable") return <span className="text-[10px] font-semibold text-yellow-400 shrink-0">Q</span>;
+    if (s === "questionable") return <span className="text-[10px] font-semibold text-amber-400 shrink-0">Q</span>;
     return null;
   };
 
   return (
     <div className="space-y-3">
-      <p className="text-xs text-gray-500 mb-1">
+      <p className="text-xs text-slate-500 mb-1">
         {isInSeason
-          ? <>Week {week} starters based on <span className="text-gray-300 font-medium">consensus projections</span></>
-          : <>Offseason starters based on <span className="text-gray-300 font-medium">redraft rankings</span></>
+          ? <>Week {week} starters based on <span className="text-slate-300 font-medium">consensus projections</span></>
+          : <>Offseason starters based on <span className="text-slate-300 font-medium">redraft rankings</span></>
         }
-        {" — "}<span className="text-gray-300">{selectedLeague.name}</span>
+        {" — "}<span className="text-slate-300">{selectedLeague.name}</span>
       </p>
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-3">
-        <div className="border-b border-gray-800 pb-2 mb-2 flex items-start justify-between gap-3">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3">
+        <div className="border-b border-slate-800 pb-2 mb-2 flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-[11px] uppercase tracking-wide text-gray-500">Lineup Coach</div>
-            <div className="mt-0.5 text-xs text-gray-200">
+            <div className="text-[11px] uppercase tracking-wide text-slate-500">Lineup Coach</div>
+            <div className="mt-0.5 text-xs text-slate-200">
               {lineupCoachNotes.length === 0
                 ? "Your current lineup already matches the coach recommendation."
                 : `The coach would make ${lineupCoachNotes.length} swap${lineupCoachNotes.length === 1 ? "" : "s"}${lineupDelta > 0 ? ` for roughly +${lineupDelta.toFixed(1)}` : ""}.`}
@@ -185,12 +185,12 @@ function StartersTab({ projectionData, nflState }: StartersTabProps) {
           </div>
           <div className="grid grid-cols-2 gap-x-4 text-right whitespace-nowrap">
             <div>
-              <div className="text-[10px] uppercase tracking-wide text-gray-500">Current</div>
-              <div className="text-gray-200 font-medium text-xs">{currentLineupScore.toFixed(1)}</div>
+              <div className="text-[10px] uppercase tracking-wide text-slate-500">Current</div>
+              <div className="text-slate-200 font-medium text-xs">{currentLineupScore.toFixed(1)}</div>
             </div>
             <div>
-              <div className="text-[10px] uppercase tracking-wide text-gray-500">Suggested</div>
-              <div className={`font-medium text-xs ${lineupDelta > 0 ? "text-emerald-400" : "text-gray-200"}`}>
+              <div className="text-[10px] uppercase tracking-wide text-slate-500">Suggested</div>
+              <div className={`font-medium text-xs ${lineupDelta > 0 ? "text-emerald-400" : "text-slate-200"}`}>
                 {suggestedLineupScore.toFixed(1)}
               </div>
             </div>
@@ -201,58 +201,58 @@ function StartersTab({ projectionData, nflState }: StartersTabProps) {
             {lineupCoachNotes.map((note) => (
               <div key={`${note.slot}-${note.suggested.player_id}-${note.current?.player_id || "empty"}`} className="text-xs">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-[10px] uppercase tracking-wide text-gray-500 w-16 shrink-0">{note.slot.replace("_", " ")}</span>
-                  <span className="text-gray-200">{note.current?.full_name || "Empty slot"}</span>
-                  <span className="text-gray-600">→</span>
-                  <span className="text-gray-200 font-medium">{note.suggested.full_name}</span>
-                  <span className={`font-medium ${note.delta > 0 ? "text-emerald-400" : "text-gray-500"}`}>
+                  <span className="text-[10px] uppercase tracking-wide text-slate-500 w-16 shrink-0">{note.slot.replace("_", " ")}</span>
+                  <span className="text-slate-200">{note.current?.full_name || "Empty slot"}</span>
+                  <span className="text-slate-600">→</span>
+                  <span className="text-slate-200 font-medium">{note.suggested.full_name}</span>
+                  <span className={`font-medium ${note.delta > 0 ? "text-emerald-400" : "text-slate-500"}`}>
                     {note.delta > 0 ? "+" : ""}{note.delta.toFixed(1)}
                   </span>
                 </div>
-                <div className="mt-0.5 text-[11px] text-gray-500 pl-[4.5rem]">{note.reason}</div>
+                <div className="mt-0.5 text-[11px] text-slate-500 pl-[4.5rem]">{note.reason}</div>
               </div>
             ))}
           </div>
         )}
       </div>
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-3">
-        <div className="border-b border-gray-800 pb-2 mb-2">
-          <div className="text-[11px] uppercase tracking-wide text-gray-500">Suggested Lineup</div>
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3">
+        <div className="border-b border-slate-800 pb-2 mb-2">
+          <div className="text-[11px] uppercase tracking-wide text-slate-500">Suggested Lineup</div>
         </div>
         <div className="space-y-0.5">
           {lineup.map(({ slot, player, score }, index) => (
             <div key={`${slot}-${index}`} className="flex items-center gap-2 text-xs py-0.5">
-              <span className="text-[10px] uppercase tracking-wide text-gray-500 w-16 shrink-0">{slot.replace("_", " ")}</span>
+              <span className="text-[10px] uppercase tracking-wide text-slate-500 w-16 shrink-0">{slot.replace("_", " ")}</span>
               {player ? (
                 <>
-                  <span className="text-gray-200 flex-1 truncate">{player.full_name}</span>
+                  <span className="text-slate-200 flex-1 truncate">{player.full_name}</span>
                   {renderStatusBadge(player.status)}
-                  <span className="text-[10px] text-gray-500 shrink-0">{player.team}</span>
+                  <span className="text-[10px] text-slate-500 shrink-0">{player.team}</span>
                   <span className="text-emerald-400 font-medium shrink-0 w-12 text-right">{score > 0 ? score.toFixed(1) : "—"}</span>
                 </>
               ) : (
-                <span className="text-gray-600 italic flex-1">Empty</span>
+                <span className="text-slate-600 italic flex-1">Empty</span>
               )}
             </div>
           ))}
         </div>
       </div>
       <div className="grid gap-3 md:grid-cols-2">
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-3">
-          <div className="border-b border-gray-800 pb-2 mb-2">
-            <div className="text-xs text-gray-400">Bench: <span className="font-semibold text-emerald-400">{benchPlayers.length}</span></div>
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3">
+          <div className="border-b border-slate-800 pb-2 mb-2">
+            <div className="text-xs text-slate-400">Bench: <span className="font-semibold text-emerald-400">{benchPlayers.length}</span></div>
           </div>
           <div className="space-y-0.5">
             {benchPlayers.length === 0 ? (
-              <div className="text-[11px] text-gray-600 italic">No bench players</div>
+              <div className="text-[11px] text-slate-600 italic">No bench players</div>
             ) : (
               benchPlayers.map((player) => {
                 const score = playerScore(player.player_id);
                 return (
                   <div key={player.player_id} className="flex items-center gap-2 text-xs py-0.5">
-                    <span className="text-[10px] uppercase text-gray-500 w-7 shrink-0">{player.position}</span>
-                    <span className="text-gray-200 flex-1 truncate">{player.full_name}</span>
-                    <span className="text-[10px] text-gray-500 shrink-0">{player.team}</span>
+                    <span className="text-[10px] uppercase text-slate-500 w-7 shrink-0">{player.position}</span>
+                    <span className="text-slate-200 flex-1 truncate">{player.full_name}</span>
+                    <span className="text-[10px] text-slate-500 shrink-0">{player.team}</span>
                     <span className="text-emerald-400 font-medium shrink-0 w-12 text-right">{score > 0 ? score.toFixed(1) : "—"}</span>
                   </div>
                 );
@@ -260,21 +260,21 @@ function StartersTab({ projectionData, nflState }: StartersTabProps) {
             )}
           </div>
         </div>
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-3">
-          <div className="border-b border-gray-800 pb-2 mb-2">
-            <div className="text-xs text-gray-400">Taxi: <span className="font-semibold text-emerald-400">{taxiPlayers.length}</span></div>
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3">
+          <div className="border-b border-slate-800 pb-2 mb-2">
+            <div className="text-xs text-slate-400">Taxi: <span className="font-semibold text-emerald-400">{taxiPlayers.length}</span></div>
           </div>
           <div className="space-y-0.5">
             {taxiPlayers.length === 0 ? (
-              <div className="text-[11px] text-gray-600 italic">No taxi players</div>
+              <div className="text-[11px] text-slate-600 italic">No taxi players</div>
             ) : (
               taxiPlayers.map((player) => {
                 const score = playerScore(player.player_id);
                 return (
                   <div key={player.player_id} className="flex items-center gap-2 text-xs py-0.5">
-                    <span className="text-[10px] uppercase text-gray-500 w-7 shrink-0">{player.position}</span>
-                    <span className="text-gray-200 flex-1 truncate">{player.full_name}</span>
-                    <span className="text-[10px] text-gray-500 shrink-0">{player.team}</span>
+                    <span className="text-[10px] uppercase text-slate-500 w-7 shrink-0">{player.position}</span>
+                    <span className="text-slate-200 flex-1 truncate">{player.full_name}</span>
+                    <span className="text-[10px] text-slate-500 shrink-0">{player.team}</span>
                     <span className="text-emerald-400 font-medium shrink-0 w-12 text-right">{score > 0 ? score.toFixed(1) : "—"}</span>
                   </div>
                 );

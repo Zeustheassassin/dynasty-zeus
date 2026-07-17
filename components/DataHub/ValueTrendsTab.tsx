@@ -13,7 +13,7 @@ import { MiniSparkline } from "../charts/MiniSparkline";
 const TREND_GRID = "grid grid-cols-[2rem_1fr_2.25rem_2.5rem_3.75rem_3.75rem_2.25rem_4rem_2.5rem] gap-2 items-center px-1";
 
 const TrendHeader = () => (
-  <div className={`${TREND_GRID} text-[10px] uppercase tracking-wide text-gray-500 mb-1`}>
+  <div className={`${TREND_GRID} text-[10px] uppercase tracking-wide text-slate-500 mb-1`}>
     <span></span>
     <span>Player</span>
     <span className="text-center">Age</span>
@@ -249,7 +249,7 @@ function ValueTrendsTab({
           key={v}
           onClick={() => setView(v)}
           className={`px-3 py-1.5 rounded-full text-xs font-semibold transition ${
-            view === v ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:text-white"
+            view === v ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:text-white"
           }`}
         >
           {v === "MY_LEAGUE" ? "My League Trends" : v === "BUY_LOW" ? "Buy Low" : "Market Pulse"}
@@ -291,7 +291,7 @@ function ValueTrendsTab({
         <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
           <div className="text-3xl">📊</div>
           <p className="text-base font-semibold text-white">No baseline snapshot yet</p>
-          <p className="text-sm text-gray-400 max-w-sm">
+          <p className="text-sm text-slate-400 max-w-sm">
             Load a league to start tracking values. A daily snapshot will be saved automatically once your dynasty values are loaded.
           </p>
         </div>
@@ -301,19 +301,19 @@ function ValueTrendsTab({
 
   const TrendRow = ({ row, direction }: { row: TrendRow; direction: "up" | "down" }) => (
     <div className={`${TREND_GRID} text-xs py-0.5`}>
-      <span className="text-[10px] uppercase text-gray-500">{row.position}</span>
-      <span className="text-gray-200 min-w-0 truncate flex items-center gap-1">
+      <span className="text-[10px] uppercase text-slate-500">{row.position}</span>
+      <span className="text-slate-200 min-w-0 truncate flex items-center gap-1">
         {row.full_name}{injuryBadge(row.injury_status)}{injuryRiskBadge(row.age, row.position, row.injury_status)}
       </span>
       <span className={`text-[10px] font-mono text-center ${ageColor(row.age ?? undefined, row.position)}`}>{row.age || "—"}</span>
-      <span className="text-[10px] text-gray-500 text-center truncate">{row.team || ""}</span>
-      <span className="text-[11px] text-gray-200 font-mono text-right">{row.currentVal.toLocaleString()}</span>
-      <span className="text-[11px] text-gray-500 font-mono text-right">{row.snapVal.toLocaleString()}</span>
+      <span className="text-[10px] text-slate-500 text-center truncate">{row.team || ""}</span>
+      <span className="text-[11px] text-slate-200 font-mono text-right">{row.currentVal.toLocaleString()}</span>
+      <span className="text-[11px] text-slate-500 font-mono text-right">{row.snapVal.toLocaleString()}</span>
       <MiniSparkline from={row.snapVal} to={row.currentVal} />
       <span className={`text-xs font-semibold font-mono text-right ${direction === "down" ? "text-red-400" : "text-emerald-400"}`}>
         {direction === "up" ? "+" : ""}{row.pct.toFixed(1)}%
       </span>
-      <span className="text-[10px] text-gray-500 text-right">{row.owned > 0 ? `${row.owned}×` : ""}</span>
+      <span className="text-[10px] text-slate-500 text-right">{row.owned > 0 ? `${row.owned}×` : ""}</span>
     </div>
   );
 
@@ -323,44 +323,44 @@ function ValueTrendsTab({
     const receiveP = players[t.receiveId];
     const lastName = (full: string | undefined) => full?.split(" ").slice(1).join(" ") || full || "";
     return (
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-3">
-        <div className="border-b border-gray-800 pb-2 mb-2 flex items-center justify-between">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3">
+        <div className="border-b border-slate-800 pb-2 mb-2 flex items-center justify-between">
           <span className={`text-xs font-semibold ${isSell ? "text-red-400" : "text-emerald-400"}`}>
             {isSell ? "Sell Window" : "Buy Window"}
           </span>
-          <span className="text-[11px] text-gray-500">w/ {t.partnerName}</span>
+          <span className="text-[11px] text-slate-500">w/ {t.partnerName}</span>
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <div className="rounded-lg border border-gray-800 px-2 py-1.5">
-            <div className="text-[10px] uppercase tracking-wide text-gray-500 mb-0.5">You Give</div>
+          <div className="rounded-lg border border-slate-800 px-2 py-1.5">
+            <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-0.5">You Give</div>
             <div className="flex items-center gap-1.5 min-w-0">
-              <span className="text-[10px] uppercase text-gray-500 shrink-0">{t.givePos}</span>
-              <span className="text-xs text-gray-200 truncate">{giveP?.full_name}</span>
+              <span className="text-[10px] uppercase text-slate-500 shrink-0">{t.givePos}</span>
+              <span className="text-xs text-slate-200 truncate">{giveP?.full_name}</span>
             </div>
-            <div className="text-[10px] text-gray-500 mt-0.5">{t.giveTeam || "—"} · Age {t.giveAge || "—"}</div>
+            <div className="text-[10px] text-slate-500 mt-0.5">{t.giveTeam || "—"} · Age {t.giveAge || "—"}</div>
             <div className="flex items-center gap-2 mt-1">
-              <span className="text-[11px] text-gray-300 font-mono">{t.giveVal.toLocaleString()}</span>
+              <span className="text-[11px] text-slate-300 font-mono">{t.giveVal.toLocaleString()}</span>
               <span className={`text-[11px] font-semibold font-mono ${t.givePct < 0 ? "text-red-400" : "text-emerald-400"}`}>
                 {t.givePct > 0 ? "+" : ""}{t.givePct.toFixed(1)}%
               </span>
             </div>
           </div>
-          <div className="rounded-lg border border-gray-800 px-2 py-1.5">
-            <div className="text-[10px] uppercase tracking-wide text-gray-500 mb-0.5">You Receive</div>
+          <div className="rounded-lg border border-slate-800 px-2 py-1.5">
+            <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-0.5">You Receive</div>
             <div className="flex items-center gap-1.5 min-w-0">
-              <span className="text-[10px] uppercase text-gray-500 shrink-0">{t.receivePos}</span>
-              <span className="text-xs text-gray-200 truncate">{receiveP?.full_name}</span>
+              <span className="text-[10px] uppercase text-slate-500 shrink-0">{t.receivePos}</span>
+              <span className="text-xs text-slate-200 truncate">{receiveP?.full_name}</span>
             </div>
-            <div className="text-[10px] text-gray-500 mt-0.5">{t.receiveTeam || "—"} · Age {t.receiveAge || "—"}</div>
+            <div className="text-[10px] text-slate-500 mt-0.5">{t.receiveTeam || "—"} · Age {t.receiveAge || "—"}</div>
             <div className="flex items-center gap-2 mt-1">
-              <span className="text-[11px] text-gray-300 font-mono">{t.receiveVal.toLocaleString()}</span>
+              <span className="text-[11px] text-slate-300 font-mono">{t.receiveVal.toLocaleString()}</span>
               <span className={`text-[11px] font-semibold font-mono ${t.receivePct >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                 {t.receivePct > 0 ? "+" : ""}{t.receivePct.toFixed(1)}%
               </span>
             </div>
           </div>
         </div>
-        <div className="mt-2 text-[11px] text-gray-500 leading-relaxed">
+        <div className="mt-2 text-[11px] text-slate-500 leading-relaxed">
           {isSell
             ? `Sell ${lastName(giveP?.full_name)} while the market is down ${Math.abs(t.givePct).toFixed(0)}% and get fair value back in ${lastName(receiveP?.full_name)}${t.receivePct >= 5 ? ` (up ${t.receivePct.toFixed(0)}%)` : ""} before your asset drops further.`
             : `${lastName(receiveP?.full_name)} is up ${t.receivePct.toFixed(0)}% — buy in now using ${lastName(giveP?.full_name)}${t.givePct >= 10 ? ` (up ${t.givePct.toFixed(0)}%, sell high)` : ""} before the market catches on.`
@@ -380,20 +380,20 @@ function ValueTrendsTab({
             <button
               key={pos}
               onClick={() => setTrendPos(pos)}
-              className={`px-3 py-1 rounded text-sm font-medium transition ${trendPos === pos ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:text-white"}`}
+              className={`px-3 py-1 rounded text-sm font-medium transition ${trendPos === pos ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:text-white"}`}
             >
               {pos}
             </button>
           ))}
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-[11px] text-gray-500 shrink-0">Threshold</span>
-          <div className="flex bg-gray-800 rounded-lg p-0.5 gap-0.5">
+          <span className="text-[11px] text-slate-500 shrink-0">Threshold</span>
+          <div className="flex bg-slate-800 rounded-lg p-0.5 gap-0.5">
             {[5, 10, 15, 20].map((pct) => (
               <button
                 key={pct}
                 onClick={() => setTrendThreshold(pct)}
-                className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition ${trendThreshold === pct ? "bg-blue-600 text-white" : "text-gray-400 hover:text-white"}`}
+                className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition ${trendThreshold === pct ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white"}`}
               >
                 {pct}%
               </button>
@@ -403,12 +403,12 @@ function ValueTrendsTab({
       </div>
 
       {/* Snapshot age banner */}
-      <div className={`flex flex-wrap items-center gap-2 mb-3 rounded-xl border px-3 py-2 ${isStaleSnapshot ? "border-amber-700/50 bg-amber-950/20" : "border-gray-800 bg-gray-900"}`}>
-        <span className={`text-[11px] ${isStaleSnapshot ? "text-amber-400" : "text-gray-500"}`}>Comparing current values against snapshot from</span>
-        <span className={`text-[11px] font-semibold ${isStaleSnapshot ? "text-amber-300" : "text-gray-200"}`}>{ageLabel}</span>
-        <span className="text-[11px] text-gray-500">({snapshotDate?.toLocaleDateString()})</span>
+      <div className={`flex flex-wrap items-center gap-2 mb-3 rounded-xl border px-3 py-2 ${isStaleSnapshot ? "border-amber-700/50 bg-amber-950/20" : "border-slate-800 bg-slate-900"}`}>
+        <span className={`text-[11px] ${isStaleSnapshot ? "text-amber-400" : "text-slate-500"}`}>Comparing current values against snapshot from</span>
+        <span className={`text-[11px] font-semibold ${isStaleSnapshot ? "text-amber-300" : "text-slate-200"}`}>{ageLabel}</span>
+        <span className="text-[11px] text-slate-500">({snapshotDate?.toLocaleDateString()})</span>
         {isStaleSnapshot && <span className="text-[10px] text-amber-500 font-semibold">· snapshot may be stale</span>}
-        <span className="text-[10px] text-gray-500">{Object.keys(snap.players).length} players tracked</span>
+        <span className="text-[10px] text-slate-500">{Object.keys(snap.players).length} players tracked</span>
         <button
           type="button"
           disabled={savingSnapshot}
@@ -418,21 +418,21 @@ function ValueTrendsTab({
             setSavingSnapshot(false);
             setSnapshotSavedAt(Date.now());
           }}
-          className="ml-auto text-[10px] font-semibold border rounded-lg px-2.5 py-1 transition disabled:opacity-50 border-gray-700 text-gray-400 hover:text-white hover:border-gray-500"
+          className="ml-auto text-[10px] font-semibold border rounded-lg px-2.5 py-1 transition disabled:opacity-50 border-slate-700 text-slate-400 hover:text-white hover:border-slate-500"
         >
           {savingSnapshot ? "Saving…" : snapshotSavedAt ? "✓ Snapshot Saved" : "Take Snapshot Now"}
         </button>
       </div>
 
       {/* Sell window */}
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 mb-3">
-        <div className="border-b border-gray-800 pb-2 mb-2 flex items-center gap-2 flex-wrap">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 mb-3">
+        <div className="border-b border-slate-800 pb-2 mb-2 flex items-center gap-2 flex-wrap">
           <span className="text-xs font-semibold text-red-400">Sell Window Open</span>
-          <span className="text-xs text-gray-200 font-medium">{falling.length}</span>
-          <span className="text-[11px] text-gray-500">Value fell {trendThreshold}%+ — sell before it drops further</span>
+          <span className="text-xs text-slate-200 font-medium">{falling.length}</span>
+          <span className="text-[11px] text-slate-500">Value fell {trendThreshold}%+ — sell before it drops further</span>
         </div>
         {falling.length === 0 ? (
-          <div className="text-[11px] text-gray-600 italic">No players down {trendThreshold}%+ from the snapshot.</div>
+          <div className="text-[11px] text-slate-600 italic">No players down {trendThreshold}%+ from the snapshot.</div>
         ) : (
           <>
             <TrendHeader />
@@ -444,14 +444,14 @@ function ValueTrendsTab({
       </div>
 
       {/* Rising / buy window closing */}
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 mb-3">
-        <div className="border-b border-gray-800 pb-2 mb-2 flex items-center gap-2 flex-wrap">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 mb-3">
+        <div className="border-b border-slate-800 pb-2 mb-2 flex items-center gap-2 flex-wrap">
           <span className="text-xs font-semibold text-emerald-400">Buy Window Closing</span>
-          <span className="text-xs text-gray-200 font-medium">{rising.length}</span>
-          <span className="text-[11px] text-gray-500">Value up {trendThreshold}%+ — buy now or sell at peak</span>
+          <span className="text-xs text-slate-200 font-medium">{rising.length}</span>
+          <span className="text-[11px] text-slate-500">Value up {trendThreshold}%+ — buy now or sell at peak</span>
         </div>
         {rising.length === 0 ? (
-          <div className="text-[11px] text-gray-600 italic">No players up {trendThreshold}%+ from the snapshot.</div>
+          <div className="text-[11px] text-slate-600 italic">No players up {trendThreshold}%+ from the snapshot.</div>
         ) : (
           <>
             <TrendHeader />
@@ -464,8 +464,8 @@ function ValueTrendsTab({
 
       {/* ── Trade suggestions ── */}
       <div className="mt-6 mb-2">
-        <h3 className="text-sm font-semibold text-gray-200">Trend-Based Trade Suggestions</h3>
-        <p className="text-[11px] text-gray-500 mt-0.5">
+        <h3 className="text-sm font-semibold text-slate-200">Trend-Based Trade Suggestions</h3>
+        <p className="text-[11px] text-slate-500 mt-0.5">
           {!user || !rosters.length
             ? "Load a league to see trade suggestions based on your roster."
             : `Up to 5 suggestions per window · fixed thresholds: sell at −5%, buy at +5%, peak at +20%`}
@@ -473,18 +473,18 @@ function ValueTrendsTab({
       </div>
 
       {(!user || !rosters.length) ? (
-        <div className="text-[11px] text-gray-600 italic">No league loaded. Select a league from the League Hub first.</div>
+        <div className="text-[11px] text-slate-600 italic">No league loaded. Select a league from the League Hub first.</div>
       ) : (
         <>
           {/* Sell Window Trades */}
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 mb-3">
-            <div className="border-b border-gray-800 pb-2 mb-2 flex items-center gap-2 flex-wrap">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 mb-3">
+            <div className="border-b border-slate-800 pb-2 mb-2 flex items-center gap-2 flex-wrap">
               <span className="text-xs font-semibold text-red-400">Sell Window Trades</span>
-              <span className="text-xs text-gray-200 font-medium">{sellWindowTrades.length}</span>
-              <span className="text-[11px] text-gray-500">Give your −5%+ fallers · receive fair-value assets from league mates</span>
+              <span className="text-xs text-slate-200 font-medium">{sellWindowTrades.length}</span>
+              <span className="text-[11px] text-slate-500">Give your −5%+ fallers · receive fair-value assets from league mates</span>
             </div>
             {sellWindowTrades.length === 0 ? (
-              <div className="text-[11px] text-gray-600 italic">
+              <div className="text-[11px] text-slate-600 italic">
                 No matches found — either no roster players are down 5%+, no league mates hold players up 20%+, or value gaps are too wide.
               </div>
             ) : (
@@ -495,14 +495,14 @@ function ValueTrendsTab({
           </div>
 
           {/* Buy Window Trades */}
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-3">
-            <div className="border-b border-gray-800 pb-2 mb-2 flex items-center gap-2 flex-wrap">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-3">
+            <div className="border-b border-slate-800 pb-2 mb-2 flex items-center gap-2 flex-wrap">
               <span className="text-xs font-semibold text-emerald-400">Buy Window Trades</span>
-              <span className="text-xs text-gray-200 font-medium">{buyWindowTrades.length}</span>
-              <span className="text-[11px] text-gray-500">Target partners&apos; +5%+ early risers · give your closest fair-value asset in return</span>
+              <span className="text-xs text-slate-200 font-medium">{buyWindowTrades.length}</span>
+              <span className="text-[11px] text-slate-500">Target partners&apos; +5%+ early risers · give your closest fair-value asset in return</span>
             </div>
             {buyWindowTrades.length === 0 ? (
-              <div className="text-[11px] text-gray-600 italic">
+              <div className="text-[11px] text-slate-600 italic">
                 No matches found — either no roster players are up 20%+, no league mates hold early-rising players, or value gaps are too wide.
               </div>
             ) : (
