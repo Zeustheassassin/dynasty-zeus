@@ -6,6 +6,10 @@ import { MultiPointSparkline } from "../charts/MultiPointSparkline";
 import { usePlayers } from "../../lib/PlayersContext";
 import { useValues } from "../../lib/ValuesContext";
 import { getCrossLeagueDirections, DIRECTION_BUCKET_ORDER } from "../../lib/helpers";
+import { CardButton } from "../ui/Card";
+import Badge from "../ui/Badge";
+import EmptyState from "../ui/EmptyState";
+import Skeleton from "../ui/Skeleton";
 
 export interface DashboardLeagueEntry {
   leagueId?: string;
@@ -96,7 +100,7 @@ export default function TeamSummaryGrid({ entries, loading, onSelectLeague, leag
     return (
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {[0, 1, 2].map((i) => (
-          <div key={i} className="h-24 animate-pulse rounded-2xl border border-slate-800 bg-slate-900/40" />
+          <Skeleton key={i} className="h-24" />
         ))}
       </div>
     );
@@ -104,9 +108,7 @@ export default function TeamSummaryGrid({ entries, loading, onSelectLeague, leag
 
   if (entries.length === 0) {
     return (
-      <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-6 text-sm text-slate-400">
-        Connect your Sleeper account to see a summary of every league you&apos;re in.
-      </div>
+      <EmptyState>Connect your Sleeper account to see a summary of every league you&apos;re in.</EmptyState>
     );
   }
 
@@ -117,13 +119,10 @@ export default function TeamSummaryGrid({ entries, loading, onSelectLeague, leag
           {directionTally.map(({ bucket, count }) => {
             const bucketColor = Object.values(directions).find((d) => d.bucket === bucket)?.bucketColor ?? "text-gray-300 bg-gray-800 border-gray-600";
             return (
-              <span
-                key={bucket}
-                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${bucketColor}`}
-              >
+              <Badge key={bucket} className={`gap-1.5 py-1 ${bucketColor}`}>
                 {bucket}
                 <span className="opacity-80">×{count}</span>
-              </span>
+              </Badge>
             );
           })}
         </div>
@@ -136,18 +135,14 @@ export default function TeamSummaryGrid({ entries, loading, onSelectLeague, leag
           const settings = entry.roster?.settings;
           const direction = entry.leagueId ? directions[entry.leagueId] : undefined;
           return (
-            <button
+            <CardButton
               key={entry.leagueId ?? entry.leagueName}
-              type="button"
               onClick={() => entry.leagueId && onSelectLeague(entry.leagueId)}
-              className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 text-left transition hover:border-slate-600 hover:bg-slate-900"
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="truncate text-sm font-semibold text-white">{entry.leagueName ?? "League"}</div>
                 {direction && (
-                  <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${direction.bucketColor}`}>
-                    {direction.bucket}
-                  </span>
+                  <Badge className={`text-[10px] ${direction.bucketColor}`}>{direction.bucket}</Badge>
                 )}
               </div>
               <div className="mt-2 flex items-center justify-between">
@@ -163,7 +158,7 @@ export default function TeamSummaryGrid({ entries, loading, onSelectLeague, leag
                   ? `${latest.playoffOdds.toFixed(0)}% playoff · ${latest.titleOdds.toFixed(0)}% title odds`
                   : "No simulator history yet"}
               </div>
-            </button>
+            </CardButton>
           );
         })}
       </div>

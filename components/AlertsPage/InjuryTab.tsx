@@ -2,6 +2,7 @@
 import { memo } from "react";
 import type { InjuryReportPlayer } from "./alertsPageHelpers";
 import { POS_COLOR, injuryStatusStyle } from "./alertsPageHelpers";
+import EmptyState from "../ui/EmptyState";
 
 type InjuryTabProps = {
   injuryReportPlayers: InjuryReportPlayer[];
@@ -14,9 +15,7 @@ function InjuryTab({ injuryReportPlayers, currentNFLWeek, expandedInjuryId, setE
   return (
     <div>
       {injuryReportPlayers.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-6 text-sm text-slate-400">
-          Add players to your watchlist or load your leagues to see injury statuses here.
-        </div>
+        <EmptyState>Add players to your watchlist or load your leagues to see injury statuses here.</EmptyState>
       ) : (
         <div className="space-y-1.5">
           {injuryReportPlayers.map(({ player, playerId, leagues, startingLeagues, isWatchlisted }) => {

@@ -1,6 +1,8 @@
 "use client";
 import { getMarketMovers } from "../AlertsPage/alertsPageHelpers";
 import type { DashboardAlert } from "../AlertsPage/alertsPageHelpers";
+import { Card } from "../ui/Card";
+import Button from "../ui/Button";
 
 interface ValueMoversPanelProps {
   alerts: DashboardAlert[];
@@ -15,12 +17,12 @@ export default function ValueMoversPanel({ alerts, onViewAll }: ValueMoversPanel
   const { gainers, fallers } = getMarketMovers(alerts);
 
   return (
-    <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-5">
+    <Card padding="lg" elevated>
       <div className="flex items-center justify-between">
         <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Value Movers</div>
-        <button type="button" onClick={onViewAll} className="text-xs text-blue-300 hover:text-blue-200">
+        <Button variant="link" size="none" className="text-xs" onClick={onViewAll}>
           View all →
-        </button>
+        </Button>
       </div>
 
       {gainers.length === 0 && fallers.length === 0 ? (
@@ -59,6 +61,6 @@ export default function ValueMoversPanel({ alerts, onViewAll }: ValueMoversPanel
           </div>
         </div>
       )}
-    </div>
+    </Card>
   );
 }

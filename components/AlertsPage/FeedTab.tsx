@@ -2,6 +2,9 @@
 import { memo } from "react";
 import type { DashboardAlert } from "./alertsPageHelpers";
 import { severityStyles } from "./alertsPageHelpers";
+import Button from "../ui/Button";
+import Badge from "../ui/Badge";
+import EmptyState from "../ui/EmptyState";
 
 type FeedTabProps = {
   alerts: DashboardAlert[];
@@ -31,9 +34,9 @@ function FeedTab({ alerts, actionableAlerts, onDismissAlert }: FeedTabProps) {
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-full border border-white/10 bg-black/20 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em]">
+                <Badge className="border-white/10 bg-black/20 uppercase tracking-[0.16em]">
                   {alert.category}
-                </span>
+                </Badge>
                 <span className="text-[11px] uppercase tracking-[0.16em] text-slate-300/80">
                   {alert.source}
                 </span>
@@ -41,13 +44,9 @@ function FeedTab({ alerts, actionableAlerts, onDismissAlert }: FeedTabProps) {
               <div className="mt-2 text-sm font-semibold text-white">{alert.title}</div>
               <div className="mt-1 text-sm text-slate-300">{alert.detail}</div>
             </div>
-            <button
-              type="button"
-              onClick={() => onDismissAlert(alert.id)}
-              className="shrink-0 rounded-full border border-white/10 bg-black/20 px-2.5 py-1 text-[11px] text-slate-200 transition hover:border-white/25"
-            >
+            <Button variant="ghost" size="sm" className="shrink-0" onClick={() => onDismissAlert(alert.id)}>
               Dismiss
-            </button>
+            </Button>
           </div>
 
           {(alert.link || alert.teamLabel) && (
@@ -69,9 +68,7 @@ function FeedTab({ alerts, actionableAlerts, onDismissAlert }: FeedTabProps) {
       ))}
 
       {alerts.length === 0 && (
-        <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-6 text-sm text-slate-400">
-          Once values move, statuses change, or watchlist/news triggers hit, alerts will land here.
-        </div>
+        <EmptyState>Once values move, statuses change, or watchlist/news triggers hit, alerts will land here.</EmptyState>
       )}
     </div>
   );

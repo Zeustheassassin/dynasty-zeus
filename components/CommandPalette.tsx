@@ -157,7 +157,7 @@ export function CommandPalette(props: CommandPaletteProps) {
         role="dialog"
         aria-modal="true"
         aria-label="Command palette"
-        className="bg-gray-900 border border-gray-700 rounded-lg w-full max-w-lg mx-4 shadow-2xl overflow-hidden"
+        className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg mx-4 shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         <input
@@ -170,11 +170,11 @@ export function CommandPalette(props: CommandPaletteProps) {
             else if (e.key === "Enter") { e.preventDefault(); activate(selectedIndex); }
           }}
           placeholder="Jump to a hub, tab, or player..."
-          className="w-full px-4 py-3 bg-transparent border-b border-gray-700 text-sm text-white placeholder-gray-500 focus:outline-none"
+          className="w-full px-4 py-3 bg-transparent border-b border-slate-800 text-sm text-white placeholder-slate-500 focus:outline-none"
         />
         <div ref={listRef} className="max-h-80 overflow-y-auto py-1">
           {results.length === 0 && (
-            <div className="px-4 py-6 text-center text-sm text-gray-500">No matches</div>
+            <div className="px-4 py-6 text-center text-sm text-slate-500">No matches</div>
           )}
           {results.map((item, i) => (
             <button
@@ -182,7 +182,7 @@ export function CommandPalette(props: CommandPaletteProps) {
               onClick={() => activate(i)}
               onMouseEnter={() => setSelectedIndex(i)}
               className={`w-full text-left px-4 py-2 text-sm truncate ${
-                i === selectedIndex ? "bg-blue-600/30 text-white" : "text-gray-300 hover:bg-gray-800"
+                i === selectedIndex ? "bg-blue-600/30 text-white" : "text-slate-300 hover:bg-slate-800"
               }`}
             >
               {item.label}

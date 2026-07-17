@@ -8,6 +8,7 @@ import StatStrip from "./Dashboard/StatStrip";
 import TeamSummaryGrid, { type DashboardLeagueEntry } from "./Dashboard/TeamSummaryGrid";
 import ValueMoversPanel from "./Dashboard/ValueMoversPanel";
 import RecentAlertsPanel from "./Dashboard/RecentAlertsPanel";
+import EmptyState from "./ui/EmptyState";
 
 type DashboardProps = {
   username: string;
@@ -106,9 +107,9 @@ export default function Dashboard({
       )}
 
       {!isConnected && (
-        <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 text-sm text-slate-400">
+        <EmptyState>
           Sign in and connect Sleeper to activate your league workspace and alerts page.
-        </div>
+        </EmptyState>
       )}
     </div>
   );

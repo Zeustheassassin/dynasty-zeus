@@ -6,6 +6,8 @@ import { HUBS, type MainTab } from "../../lib/hubs";
 import { setLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 import { CommandPalette } from "../../components/CommandPalette";
 import { useModalBehavior } from "../../lib/hooks/useModalBehavior";
+import { ACCENT_CLASSES } from "../../lib/uiTheme";
+import Button from "../../components/ui/Button";
 
 interface MainLayoutProps {
   supabaseUser: SupabaseUser | null;
@@ -50,7 +52,7 @@ function MobileOverflowSheet({
         role="dialog"
         aria-modal="true"
         aria-label="More hubs"
-        className="absolute bottom-16 inset-x-0 bg-gray-900 border-t border-gray-700 rounded-t-lg overflow-hidden"
+        className="absolute bottom-16 inset-x-0 bg-slate-900 border-t border-slate-800 rounded-t-lg overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {hubs.map((h) => (
@@ -58,8 +60,8 @@ function MobileOverflowSheet({
             key={h.id}
             disabled={disabled && h.id !== "DASHBOARD"}
             onClick={() => { setMainTab(h.id); onClose(); }}
-            className={`w-full text-left px-4 py-3 text-sm border-b border-gray-800 last:border-0 ${
-              mainTab === h.id ? "text-blue-400 font-semibold" : "text-gray-300"
+            className={`w-full text-left px-4 py-3 text-sm border-b border-slate-800 last:border-0 ${
+              mainTab === h.id ? `${ACCENT_CLASSES.text} font-semibold` : "text-slate-300"
             } ${disabled && h.id !== "DASHBOARD" ? "opacity-40 cursor-not-allowed" : ""}`}
           >
             {h.label}
@@ -112,7 +114,7 @@ export function MainLayout({
   return (
     <>
       <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-[99999] focus:px-4 focus:py-2 focus:bg-blue-600 focus:text-white focus:rounded focus:text-sm">Skip to main content</a>
-      <main id="main-content" className="min-h-screen bg-gray-950 text-white">
+      <main id="main-content" className="min-h-screen bg-slate-950 text-white">
         {/* App content — always rendered but non-interactive when not signed in */}
         <div className={!supabaseUser ? "pointer-events-none select-none opacity-40" : ""}>
           <>
@@ -120,48 +122,52 @@ export function MainLayout({
             {/* z-30 keeps the nav above sticky table cells (Big Board uses z-10/z-20 on
                 sticky left columns + headers); without this, those cells paint over the
                 nav as the page scrolls vertically. */}
-            <div className="sticky top-0 z-30 bg-gray-900 border-b border-gray-700">
+            <div className="sticky top-0 z-30 bg-slate-900 border-b border-slate-800">
               {/* Top bar */}
               <div className="flex overflow-x-auto scrollbar-none md:justify-center">
                 <div className="flex items-center px-3 py-2 gap-4 shrink-0">
                   <h1 className="text-base font-bold shrink-0">DynastyZeus</h1>
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => setPaletteOpen(true)}
                     title="Search (Ctrl+K)"
-                    className="flex items-center gap-1.5 px-2 py-1 text-xs text-gray-400 bg-gray-800/60 border border-gray-700 rounded hover:text-white hover:border-gray-600 transition shrink-0"
+                    className="shrink-0 hover:text-white"
                   >
                     <span aria-hidden="true">🔍</span>
                     <span className="hidden sm:inline">Search</span>
-                    <kbd className="hidden sm:inline text-[10px] text-gray-500 border border-gray-700 rounded px-1">Ctrl K</kbd>
-                  </button>
+                    <kbd className="hidden sm:inline text-[10px] text-slate-500 border border-slate-700 rounded px-1">Ctrl K</kbd>
+                  </Button>
                   <div className="flex items-center gap-2 min-w-0">
                     {/* Unified auth status — shows both Supabase account and Sleeper connection */}
                     <div className="hidden sm:flex items-center gap-1.5 text-xs">
                       {/* DynastyZeus account */}
                       <span
-                        className={`w-1.5 h-1.5 rounded-full shrink-0 ${supabaseUser ? "bg-green-400" : "bg-red-500"}`}
+                        className={`w-1.5 h-1.5 rounded-full shrink-0 ${supabaseUser ? "bg-emerald-400" : "bg-red-500"}`}
                         title={supabaseUser ? `Signed in as ${supabaseUser.email}` : "Not signed in"}
                       />
                       {/* Sleeper connection */}
                       <span
-                        className={`w-1.5 h-1.5 rounded-full shrink-0 ${user ? "bg-blue-400" : "bg-gray-600"}`}
+                        className={`w-1.5 h-1.5 rounded-full shrink-0 ${user ? "bg-blue-400" : "bg-slate-600"}`}
                         title={user ? `Sleeper: ${user.display_name}` : "Sleeper not connected"}
                       />
                       {user && (
-                        <span className="text-gray-400 truncate max-w-[80px]">{user.display_name}</span>
+                        <span className="text-slate-400 truncate max-w-[80px]">{user.display_name}</span>
                       )}
                     </div>
                     {user && (
-                      <button
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="shrink-0"
                         onClick={() => {
                           if (window.confirm("Disconnect Sleeper? This clears your synced leagues from this browser. You can reconnect anytime by entering your username.")) {
                             disconnectSleeper();
                           }
                         }}
-                        className="px-2 py-1 text-xs bg-gray-700 rounded hover:bg-gray-600 shrink-0"
                       >
                         Disconnect
-                      </button>
+                      </Button>
                     )}
                     {leagues.length > 0 && (
                       <select
@@ -174,7 +180,7 @@ export function MainLayout({
                             setLocalStorageItem("selectedLeague", league);
                           }
                         }}
-                        className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs max-w-[120px] truncate"
+                        className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs max-w-[120px] truncate"
                       >
                         <option value="">Select League</option>
                         {leagues.map((l) => (
@@ -183,15 +189,15 @@ export function MainLayout({
                       </select>
                     )}
                     {supabaseUser && (
-                      <button onClick={signOut} className="px-2 py-1 text-xs bg-red-600 hover:bg-red-500 rounded transition shrink-0">
+                      <Button variant="danger" size="sm" className="shrink-0" onClick={signOut}>
                         Log Out
-                      </button>
+                      </Button>
                     )}
                   </div>
                 </div>
               </div>
               {/* NAV — desktop only; mobile gets the fixed bottom nav below (R3) */}
-              <div className="hidden sm:block border-t border-gray-800">
+              <nav aria-label="Main" className="hidden sm:block border-t border-slate-800">
                 <div className="mx-auto max-w-7xl overflow-x-auto scrollbar-none">
                   <div className="flex min-w-max justify-start px-2 md:justify-center">
                     {HUBS.map((tab) => (
@@ -201,8 +207,8 @@ export function MainLayout({
                         disabled={!user && tab.id !== "DASHBOARD"}
                         className={`px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition md:px-5 ${
                           mainTab === tab.id
-                            ? "border-blue-500 text-blue-400"
-                            : "border-transparent text-gray-400 hover:text-white"
+                            ? `border-blue-500 ${ACCENT_CLASSES.text}`
+                            : "border-transparent text-slate-400 hover:text-white"
                         } ${!user && tab.id !== "DASHBOARD" ? "opacity-40 cursor-not-allowed" : ""}`}
                       >
                         {tab.label}
@@ -210,7 +216,7 @@ export function MainLayout({
                     ))}
                   </div>
                 </div>
-              </div>
+              </nav>
             </div>
 
             {/* Bottom padding so the fixed mobile nav doesn't cover page content */}
@@ -219,14 +225,14 @@ export function MainLayout({
             {/* MOBILE BOTTOM NAV (R3) — seasonal primary hub set + overflow sheet for
                 the rest. Nested inside the dimmed wrapper so it goes inert along with
                 the rest of the app when signed out, same as the desktop nav above. */}
-            <div className="sm:hidden fixed bottom-0 inset-x-0 z-30 bg-gray-900 border-t border-gray-700 flex">
+            <div className="sm:hidden fixed bottom-0 inset-x-0 z-30 bg-slate-900 border-t border-slate-800 flex">
               {primaryMobileHubs.map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => setMainTab(tab.id)}
                   disabled={!user && tab.id !== "DASHBOARD"}
                   className={`flex-1 py-2.5 text-[11px] font-medium leading-tight transition ${
-                    mainTab === tab.id ? "text-blue-400" : "text-gray-400"
+                    mainTab === tab.id ? ACCENT_CLASSES.text : "text-slate-400"
                   } ${!user && tab.id !== "DASHBOARD" ? "opacity-40 cursor-not-allowed" : ""}`}
                 >
                   {tab.label}
@@ -235,7 +241,7 @@ export function MainLayout({
               <button
                 onClick={() => setOverflowOpen(true)}
                 className={`flex-1 py-2.5 text-[11px] font-medium leading-tight transition ${
-                  overflowMobileHubs.some((h) => h.id === mainTab) ? "text-blue-400" : "text-gray-400"
+                  overflowMobileHubs.some((h) => h.id === mainTab) ? ACCENT_CLASSES.text : "text-slate-400"
                 }`}
               >
                 More
