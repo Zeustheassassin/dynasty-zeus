@@ -2,19 +2,11 @@
 import { useState, useMemo } from "react";
 import { useRecruits } from "../../hooks/useRecruits";
 import type { RecruitRow } from "../../lib/recruiting/cfd";
+import { POS_COLOR } from "../../lib/uiTheme";
 
 const YEAR_MIN = 2017;
 const YEAR_MAX = new Date().getFullYear() + 1;
 const ALL_YEARS = Array.from({ length: YEAR_MAX - YEAR_MIN + 1 }, (_, i) => YEAR_MAX - i);
-
-const POSITION_COLORS: Record<string, string> = {
-  QB:   "text-blue-400",
-  RB:   "text-green-400",
-  WR:   "text-yellow-400",
-  TE:   "text-orange-400",
-  EDGE: "text-purple-400",
-  ATH:  "text-pink-400",
-};
 
 const STAR_COLORS: Record<number, string> = {
   5: "text-yellow-400",
@@ -202,7 +194,7 @@ export default function RecruitsTab() {
               onClick={() => setPositionFilter(positionFilter === pos ? null : pos)}
               className={`text-[11px] font-bold px-2.5 py-1 rounded border transition ${
                 positionFilter === pos
-                  ? `${POSITION_COLORS[pos] || "text-slate-300"} border-current`
+                  ? `${POS_COLOR[pos] || "text-slate-300"} border-current`
                   : "border-slate-700 text-slate-500 hover:text-white"
               }`}
             >
@@ -253,7 +245,7 @@ export default function RecruitsTab() {
                   {r.ranking ? `#${r.ranking}` : "—"}
                 </td>
                 <td className="px-2 py-1.5 text-white font-medium">{r.name}</td>
-                <td className={`px-2 py-1.5 font-bold ${POSITION_COLORS[r.position ?? ""] ?? "text-slate-400"}`}>
+                <td className={`px-2 py-1.5 font-bold ${POS_COLOR[r.position ?? ""] ?? "text-slate-400"}`}>
                   {r.position ?? "—"}
                 </td>
                 <td className={`px-2 py-1.5 text-center font-bold ${STAR_COLORS[r.stars ?? 0] ?? "text-slate-600"}`}>

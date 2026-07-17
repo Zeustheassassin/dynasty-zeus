@@ -1,5 +1,6 @@
 "use client";
 import EmptyState from "../../ui/EmptyState";
+import { POS_COLOR } from "../../../lib/uiTheme";
 
 interface GradeReportRow {
   slot: string;
@@ -16,11 +17,6 @@ interface GradeReportRow {
 interface GradesTabProps {
   gradeReport: GradeReportRow[];
 }
-
-const POS_COLOR: Record<string, string> = {
-  QB: "text-red-400", RB: "text-green-400", WR: "text-blue-400",
-  TE: "text-yellow-400", FB: "text-orange-400",
-};
 
 export default function GradesTab({ gradeReport }: GradesTabProps) {
   if (gradeReport.length === 0) {

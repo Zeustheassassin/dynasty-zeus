@@ -7,6 +7,7 @@ import {
   computeQBAboveExpected,
   computeTERouteAboveExpected,
 } from "../../lib/scouting/aboveExpected";
+import { POS_COLOR } from "../../lib/uiTheme";
 
 type LoadPositionPlaysFn = (pos: "RB" | "QB" | "TE") => void;
 
@@ -442,9 +443,6 @@ export default function BigBoard({
     const secondaryKey: SortKey = isAll ? "personal_rank" : "overall_rank";
     const secondaryValue = (p: ProspectWithStats) => (isAll ? p.personal_rank : p.overall_rank);
     const identitySpan = isAll ? 6 : 5; // Pos column shows only on the All tab
-    const POSITION_COLORS: Record<string, string> = {
-      QB: "text-blue-400", RB: "text-green-400", WR: "text-yellow-400", TE: "text-orange-400",
-    };
     return scrollWrapper(
       <table className="text-xs border-collapse" style={{ minWidth: "max-content" }}>
         <thead>
@@ -482,7 +480,7 @@ export default function BigBoard({
                 {draftCell(p)}
                 <td className={`${tdBase} text-slate-500 border-l border-r border-slate-800`}>{sv ? `#${sv}` : "—"}</td>
                 {isAll && (
-                  <td className={`${tdBase} font-semibold border-l border-slate-800 ${POSITION_COLORS[p.position] ?? "text-slate-400"}`}>{p.position}</td>
+                  <td className={`${tdBase} font-semibold border-l border-slate-800 ${POS_COLOR[p.position] ?? "text-slate-400"}`}>{p.position}</td>
                 )}
                 <td className={`${tdBase} text-slate-400 ${isAll ? "" : "border-l border-slate-800"}`}>{p.school}</td>
                 <td className={`${tdBase} text-slate-400`}>{p.draft_class_year}</td>

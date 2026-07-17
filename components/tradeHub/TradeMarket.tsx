@@ -2,6 +2,7 @@
 import React, { useState } from "react";
 import type { FcTrendEntry } from "../../lib/types";
 import { Card } from "../ui/Card";
+import { POS_COLOR } from "../../lib/uiTheme";
 
 interface TradeMarketProps {
   fcTrendData: FcTrendEntry[];
@@ -20,10 +21,6 @@ function TradeMarket({ fcTrendData, loadingFcTrends, onRefreshFcTrends }: TradeM
     ? fcTrendData
     : fcTrendData.filter((e) => e.position === marketPosFilter);
 
-  const posColor: Record<string, string> = {
-    QB: "text-purple-300", RB: "text-green-300", WR: "text-blue-300", TE: "text-orange-300",
-  };
-
   const RefreshButton = ({ section }: { section: string }) => (
     <button
       onClick={onRefreshFcTrends}
@@ -41,7 +38,7 @@ function TradeMarket({ fcTrendData, loadingFcTrends, onRefreshFcTrends }: TradeM
   const PlayerRow = ({ entry, metric }: { entry: FcTrendEntry; metric: React.ReactNode }) => (
     <div className="flex items-center justify-between py-2 border-b border-slate-800 last:border-0">
       <div className="flex items-center gap-2 min-w-0">
-        <span className={`text-[10px] font-bold w-7 shrink-0 ${posColor[entry.position] ?? "text-slate-400"}`}>{entry.position}</span>
+        <span className={`text-[10px] font-bold w-7 shrink-0 ${POS_COLOR[entry.position] ?? "text-slate-400"}`}>{entry.position}</span>
         <span className="text-sm text-slate-100 truncate">{entry.name}</span>
         {entry.team && <span className="text-[10px] text-slate-500 shrink-0">{entry.team}</span>}
       </div>
@@ -131,7 +128,7 @@ function TradeMarket({ fcTrendData, loadingFcTrends, onRefreshFcTrends }: TradeM
               {rebuilding.map((e, i) => (
                 <div key={e.sleeperId} className="flex items-center gap-2 py-2 border-b border-slate-800 last:border-0">
                   <span className="text-[11px] text-slate-600 w-5 shrink-0">{i + 1}.</span>
-                  <span className={`text-[10px] font-bold w-7 shrink-0 ${posColor[e.position] ?? "text-slate-400"}`}>{e.position}</span>
+                  <span className={`text-[10px] font-bold w-7 shrink-0 ${POS_COLOR[e.position] ?? "text-slate-400"}`}>{e.position}</span>
                   <span className="text-sm text-slate-100 truncate flex-1">{e.name}</span>
                   <span className="text-[11px] font-semibold text-red-400 shrink-0">{e.diff.toLocaleString()}</span>
                   <span className="text-[11px] text-slate-400 shrink-0 w-12 text-right">{e.value.toLocaleString()}</span>
@@ -155,7 +152,7 @@ function TradeMarket({ fcTrendData, loadingFcTrends, onRefreshFcTrends }: TradeM
               {contending.map((e, i) => (
                 <div key={e.sleeperId} className="flex items-center gap-2 py-2 border-b border-slate-800 last:border-0">
                   <span className="text-[11px] text-slate-600 w-5 shrink-0">{i + 1}.</span>
-                  <span className={`text-[10px] font-bold w-7 shrink-0 ${posColor[e.position] ?? "text-slate-400"}`}>{e.position}</span>
+                  <span className={`text-[10px] font-bold w-7 shrink-0 ${POS_COLOR[e.position] ?? "text-slate-400"}`}>{e.position}</span>
                   <span className="text-sm text-slate-100 truncate flex-1">{e.name}</span>
                   <span className={`text-[11px] font-semibold shrink-0 ${e.diff >= 0 ? "text-emerald-400" : "text-amber-400"}`}>
                     {e.diff >= 0 ? `+${e.diff.toLocaleString()}` : e.diff.toLocaleString()}

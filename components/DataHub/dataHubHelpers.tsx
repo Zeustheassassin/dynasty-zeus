@@ -1,9 +1,4 @@
-export const POS_COLOR: Record<string, string> = {
-  QB: "text-red-400",
-  RB: "text-green-400",
-  WR: "text-blue-400",
-  TE: "text-yellow-400",
-};
+export { POS_COLOR } from "../../lib/uiTheme";
 
 // Personal-vs-market buy/sell signal chip styling (Personal rankings view).
 // STRONG_* are the hard-block tiers the Trade Finder enforces; SELL/BUY are soft.

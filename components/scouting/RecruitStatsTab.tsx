@@ -2,6 +2,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../../lib/supabaseclient";
 import { logger } from "../../lib/logger";
+import { POS_COLOR } from "../../lib/uiTheme";
 
 const log = logger("components/scouting/RecruitStatsTab");
 
@@ -18,14 +19,6 @@ const POSITION_ALIASES: Record<string, string> = {
   DUAL: "QB",
   PRO:  "QB",
   APB:  "RB",
-};
-
-const POSITION_COLORS: Record<string, string> = {
-  QB:  "text-blue-400",
-  RB:  "text-green-400",
-  WR:  "text-yellow-400",
-  TE:  "text-orange-400",
-  ATH: "text-pink-400",
 };
 
 const STAR_TIER_COLORS: Record<number, string> = {
@@ -173,7 +166,7 @@ export default function RecruitStatsTab() {
                 return (
                   <tr key={`${pos}-${stars}`} className={isLastTier ? "border-b border-slate-800" : ""}>
                     <td className={`px-3 py-1.5 sticky left-0 bg-slate-950 z-10 border-r border-slate-800 font-medium whitespace-nowrap`}>
-                      <span className={POSITION_COLORS[pos] ?? "text-slate-400"}>{pos}</span>
+                      <span className={POS_COLOR[pos] ?? "text-slate-400"}>{pos}</span>
                       <span className={`ml-1 ${STAR_TIER_COLORS[stars]}`}>{stars}★</span>
                     </td>
                     {years.map((y) => {

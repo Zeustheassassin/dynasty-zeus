@@ -22,12 +22,7 @@ export const severityStyles = {
   low: "border-slate-700 bg-slate-900 text-slate-200",
 };
 
-export const POS_COLOR: Record<string, string> = {
-  QB: "text-red-400",
-  RB: "text-green-400",
-  WR: "text-blue-400",
-  TE: "text-yellow-400",
-};
+export { POS_COLOR } from "../../lib/uiTheme";
 
 export function injuryStatusStyle(player: SleeperPlayer) {
   const s = (player.injury_status || player.status || "").toLowerCase();

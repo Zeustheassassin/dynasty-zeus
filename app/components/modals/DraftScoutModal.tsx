@@ -2,6 +2,7 @@
 import { ROOKIE_YEAR } from "../../../hooks/useRookieBoardState";
 import type { DraftScoutLeague } from "../../../hooks/useDraftScout";
 import { useModalBehavior } from "../../../lib/hooks/useModalBehavior";
+import { POS_COLOR, POS_BADGE } from "../../../lib/uiTheme";
 
 export type DraftScoutPatterns = {
   n: number;
@@ -20,19 +21,9 @@ interface Props {
   onClose: () => void;
 }
 
-const posColor = (pos: string) =>
-  pos === "WR" ? "text-sky-300 bg-sky-900/40" :
-  pos === "RB" ? "text-green-300 bg-green-900/40" :
-  pos === "QB" ? "text-red-300 bg-red-900/40" :
-  pos === "TE" ? "text-yellow-300 bg-yellow-900/40" :
-  "text-gray-300 bg-gray-700/40";
+const posColor = (pos: string) => POS_BADGE[pos] ?? "text-gray-300 bg-gray-700/40";
 
-const posText = (pos: string) =>
-  pos === "WR" ? "text-sky-300" :
-  pos === "RB" ? "text-green-300" :
-  pos === "QB" ? "text-red-300" :
-  pos === "TE" ? "text-yellow-300" :
-  "text-gray-400";
+const posText = (pos: string) => POS_COLOR[pos] ?? "text-gray-400";
 
 export function DraftScoutModal({ draftScoutUserId, users, loadingDraftScout, draftScoutData, draftScoutPatterns, onClose }: Props) {
   useModalBehavior(onClose);

@@ -5,19 +5,7 @@
 import { normalizeRookieName } from "../../lib/helpers/formatting";
 export { normalizeRookieName };
 
-export const posColor: Record<string, string> = {
-  QB: "text-red-400",
-  RB: "text-green-400",
-  WR: "text-blue-400",
-  TE: "text-yellow-400",
-};
-
-export const posBadge: Record<string, string> = {
-  QB: "bg-purple-500/20 text-purple-400",
-  RB: "bg-green-500/20 text-green-400",
-  WR: "bg-blue-500/20 text-blue-400",
-  TE: "bg-orange-500/20 text-orange-400",
-};
+export { POS_COLOR as posColor, POS_BADGE as posBadge } from "../../lib/uiTheme";
 
 export const PICK_KEY_RE = /^\d{4}-(\d+)\.(\d+)$/;
 

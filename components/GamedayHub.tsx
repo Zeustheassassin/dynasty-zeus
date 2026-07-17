@@ -3,19 +3,13 @@ import React from "react";
 import type { SleeperLeague, SleeperPlayer, GamedayMatchup, GamedayTeamView, GamedayLineupRow } from "../lib/types";
 import { useLeague } from "../lib/LeagueContext";
 import { injuryRiskBadge } from "./DataHub/dataHubHelpers";
+import { POS_COLOR } from "../lib/uiTheme";
 
 // ── Helpers (module-level, same logic as page.tsx) ─────────────────────────
 const getKickoffStateClasses = (state: string) => {
   if (state === "Live") return "border-green-500/40 bg-green-500/10 text-green-300";
   if (state === "Final") return "border-gray-600 bg-gray-800 text-gray-300";
   return "border-blue-500/40 bg-blue-500/10 text-blue-300";
-};
-
-const POS_COLOR: Record<string, string> = {
-  QB: "text-red-400",
-  RB: "text-green-400",
-  WR: "text-blue-400",
-  TE: "text-yellow-400",
 };
 
 const INJURY_CLS: Record<string, string> = {
