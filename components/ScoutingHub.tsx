@@ -90,6 +90,12 @@ type HubTab = "prospects" | "big_board" | "games_log" | "analysis" | "compare" |
 type PositionTab = "WR" | "RB" | "QB" | "TE";
 
 const POSITIONS: PositionTab[] = ["QB", "RB", "WR", "TE"];
+const POSITION_LABELS: Record<PositionTab, string> = {
+  QB: "Quarterback",
+  RB: "Running Back",
+  WR: "Wide Receiver",
+  TE: "Tight End",
+};
 
 export default function ScoutingHub() {
   const [tab, setTab] = useState<HubTab>("prospects");
@@ -409,7 +415,8 @@ export default function ScoutingHub() {
                       : "border-transparent text-slate-400 hover:text-white"
                   }`}
                 >
-                  {pos}
+                  <span className="hidden sm:inline">{POSITION_LABELS[pos]}</span>
+                  <span className="sm:hidden">{pos}</span>
                 </button>
               ))}
             </div>

@@ -10,6 +10,12 @@ import type { LoadPositionPlaysFn } from "../../ScoutingHub";
 
 type PositionTab = "QB" | "RB" | "WR" | "TE";
 const POSITIONS: PositionTab[] = ["QB", "RB", "WR", "TE"];
+const POSITION_LABELS: Record<PositionTab, string> = {
+  QB: "Quarterback",
+  RB: "Running Back",
+  WR: "Wide Receiver",
+  TE: "Tight End",
+};
 
 interface Props {
   prospects: Prospect[];
@@ -137,7 +143,8 @@ export default function CompareProspectsTab({
               position === pos ? "border-blue-500 text-blue-400" : "border-transparent text-slate-400 hover:text-white"
             }`}
           >
-            {pos}
+            <span className="hidden sm:inline">{POSITION_LABELS[pos]}</span>
+            <span className="sm:hidden">{pos}</span>
           </button>
         ))}
       </div>

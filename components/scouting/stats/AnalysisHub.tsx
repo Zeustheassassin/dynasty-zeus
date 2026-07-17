@@ -25,6 +25,13 @@ interface Props {
   onSelectProspect?: (p: Prospect) => void;
 }
 
+const POSITION_LABELS: Record<PositionTab, string> = {
+  QB: "Quarterback",
+  RB: "Running Back",
+  WR: "Wide Receiver",
+  TE: "Tight End",
+};
+
 const POSITION_DESCRIPTIONS: Record<PositionTab, string> = {
   WR: "SAE · Open% by route, alignment, coverage · Target & catch rates",
   RB: "SRAE · Success% by run type, formation & box situation · Receiving",
@@ -71,7 +78,8 @@ export default function AnalysisHub({
                   : "border-transparent text-slate-400 hover:text-white"
               }`}
             >
-              {pos}
+              <span className="hidden sm:inline">{POSITION_LABELS[pos]}</span>
+              <span className="sm:hidden">{pos}</span>
             </button>
           ))}
         </div>
