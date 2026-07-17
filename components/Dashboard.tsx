@@ -21,7 +21,6 @@ type DashboardProps = {
   onDismissAlert: (alertId: string) => void;
   onSelectLeague: (leagueId: string) => void;
   leagueOverviewData: Record<string, LeagueOverviewEntry>;
-  redraftValues: Record<string, number>;
   committedSimsByLeague: CommittedSimsByLeague;
   leagueSimCache: Record<string, Record<number, CachedSimRow>>;
 };
@@ -45,7 +44,6 @@ export default function Dashboard({
   onDismissAlert,
   onSelectLeague,
   leagueOverviewData,
-  redraftValues,
   committedSimsByLeague,
   leagueSimCache,
 }: DashboardProps) {
@@ -91,7 +89,6 @@ export default function Dashboard({
               loading={loadingAllLeagueData}
               onSelectLeague={onSelectLeague}
               leagueOverviewData={leagueOverviewData}
-              redraftValues={redraftValues}
               committedSimsByLeague={committedSimsByLeague}
               leagueSimCache={leagueSimCache}
             />

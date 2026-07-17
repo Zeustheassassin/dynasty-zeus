@@ -17,15 +17,17 @@ export interface CrossLeagueDirectionEntry {
  * own strategic bucket (Elite/True Contender/.../Hopeless) in every
  * connected league at once, for the Dashboard's "Your Teams" summary.
  *
- * Uses global (not per-league-scoring-adjusted) dynasty/redraft values
- * rather than deriving each league's scoring multipliers. A scoring
- * adjustment (e.g. TE premium) reweights every roster in the *same*
- * league by roughly the same factor, so it barely moves relative RANK
- * within a league — which is all the bucket actually depends on — and
- * doing this properly for every league would mean re-deriving scoring
- * multipliers per league just for a landing-screen summary. Not a fetch
- * cost issue like the roster data itself (leagueOverviewData is already
- * loaded); this is a deliberate scope cut on precision, not on data.
+ * Takes the *selected* league's scoring-adjusted dynasty/redraft values
+ * (same ones OverviewTab/LeagueMatesTab/UserScoutHub use) and applies them
+ * uniformly across every connected league, rather than re-deriving each
+ * league's own scoring multipliers. A scoring adjustment (e.g. TE premium)
+ * reweights every roster in the *same* league by roughly the same factor,
+ * so it barely moves relative RANK within a league — which is all the
+ * bucket actually depends on. Not a fetch cost issue like the roster data
+ * itself (leagueOverviewData is already loaded); this is a deliberate
+ * scope cut on precision, not on data — and matching OverviewTab's exact
+ * value source (rather than falling back to unadjusted `players[id].value`)
+ * is what keeps this tally's bucket counts in sync with Overview's.
  *
  * IMPORTANT: the raw `getRosterDirectionProfile` bucket is only half the
  * story everywhere else in the app — OverviewTab, LeagueMatesTab,
@@ -45,6 +47,7 @@ export function getCrossLeagueDirections({
   players,
   pickFcValues,
   redraftValues,
+  dynastyValues = {},
   playoffOddsByLeague = {},
 }: {
   leagueOverviewData: Record<string, LeagueOverviewEntry>;
@@ -52,6 +55,7 @@ export function getCrossLeagueDirections({
   players: Record<string, SleeperPlayer>;
   pickFcValues: Record<string, number>;
   redraftValues: Record<string, number>;
+  dynastyValues?: Record<string, number>;
   playoffOddsByLeague?: Record<string, number>;
 }): Record<string, CrossLeagueDirectionEntry> {
   const result: Record<string, CrossLeagueDirectionEntry> = {};
@@ -65,7 +69,7 @@ export function getCrossLeagueDirections({
       players,
       pickValues: pickFcValues,
       redraftValues,
-      dynastyValueForPlayer: (id) => players[id]?.value ?? 0,
+      dynastyValueForPlayer: (id) => dynastyValues[id] ?? players[id]?.value ?? 0,
     });
     if (!profile) continue;
     const hasSimData = leagueId in playoffOddsByLeague;

@@ -18,7 +18,6 @@ interface TeamSummaryGridProps {
   loading: boolean;
   onSelectLeague: (leagueId: string) => void;
   leagueOverviewData: Record<string, LeagueOverviewEntry>;
-  redraftValues: Record<string, number>;
   committedSimsByLeague: CommittedSimsByLeague;
   leagueSimCache: Record<string, Record<number, CachedSimRow>>;
 }
@@ -30,9 +29,12 @@ interface TeamSummaryGridProps {
 // beyond the batched odds-history read. Also shows each league's strategic
 // direction bucket (same Elite/True Contender/.../Hopeless vocabulary as
 // Team Tools) via getCrossLeagueDirections, once leagueOverviewData loads.
-export default function TeamSummaryGrid({ entries, loading, onSelectLeague, leagueOverviewData, redraftValues, committedSimsByLeague, leagueSimCache }: TeamSummaryGridProps) {
+export default function TeamSummaryGrid({ entries, loading, onSelectLeague, leagueOverviewData, committedSimsByLeague, leagueSimCache }: TeamSummaryGridProps) {
   const players = usePlayers();
-  const { pickFcValues } = useValues();
+  // Same value source OverviewTab/LeagueMatesTab/UserScoutHub use (selected
+  // league's scoring-adjusted values) — using unadjusted values here made
+  // this tally's bucket counts disagree with Overview's for borderline teams.
+  const { pickFcValues, leagueAdjustedFcValues, leagueAdjustedRedraftValues } = useValues();
 
   const oddsKeys = useMemo(() => {
     const keys: LeagueRosterKey[] = [];
@@ -73,8 +75,11 @@ export default function TeamSummaryGrid({ entries, loading, onSelectLeague, leag
   }, [myRosterIdByLeague, committedSimsByLeague, leagueSimCache]);
 
   const directions = useMemo(
-    () => getCrossLeagueDirections({ leagueOverviewData, myRosterIdByLeague, players, pickFcValues, redraftValues, playoffOddsByLeague }),
-    [leagueOverviewData, myRosterIdByLeague, players, pickFcValues, redraftValues, playoffOddsByLeague]
+    () => getCrossLeagueDirections({
+      leagueOverviewData, myRosterIdByLeague, players, pickFcValues,
+      redraftValues: leagueAdjustedRedraftValues, dynastyValues: leagueAdjustedFcValues, playoffOddsByLeague,
+    }),
+    [leagueOverviewData, myRosterIdByLeague, players, pickFcValues, leagueAdjustedRedraftValues, leagueAdjustedFcValues, playoffOddsByLeague]
   );
 
   const directionTally = useMemo(() => {
