@@ -8,6 +8,7 @@ import {
   personalSignalToDisposition,
   buildPersonalDispositions,
   buildPersonalSignals,
+  buildPersonalRankGaps,
   DEFAULT_PERSONAL_SIGNAL_THRESHOLDS,
 } from "@/lib/helpers/personalRankings";
 
@@ -314,5 +315,30 @@ describe("buildPersonalSignals", () => {
     midPersonal.splice(57, 0, "p50"); // p50 (market #50) → personal rank 58, gap 8/50 = 16%
     const map = buildPersonalSignals(midPersonal, midConsensus);
     expect(map["p50"]).toBe("SELL");
+  });
+});
+
+describe("buildPersonalRankGaps", () => {
+  const consensus = Array.from({ length: 20 }, (_, i) => String.fromCharCode(65 + i)); // A..T
+  const personal = ["T", ...consensus.slice(1, -1), "A"]; // T first, A last
+
+  it("returns an empty map when the board is untouched (every gap is 0)", () => {
+    expect(buildPersonalRankGaps([], consensus)).toEqual({});
+  });
+
+  it("emits consensusRank - personalRank, positive when you rank the player above market", () => {
+    const map = buildPersonalRankGaps(personal, consensus);
+    expect(map["T"]).toBe(19); // consensus 20, personal 1 → you rank it higher (buy)
+    expect(map["A"]).toBe(-19); // consensus 1, personal 20 → you rank it lower (sell)
+    expect(map["B"]).toBeUndefined(); // unchanged slot → gap 0 → omitted
+  });
+
+  it("agrees in sign with buildPersonalSignals for the same inputs", () => {
+    const gaps = buildPersonalRankGaps(personal, consensus);
+    const signals = buildPersonalSignals(personal, consensus);
+    for (const id of Object.keys(signals)) {
+      const isBuy = signals[id] === "BUY" || signals[id] === "STRONG_BUY";
+      expect(gaps[id] > 0).toBe(isBuy);
+    }
   });
 });

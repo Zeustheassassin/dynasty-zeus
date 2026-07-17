@@ -159,6 +159,8 @@ interface HubRouterProps {
   finderDispositions: Record<string, { sell: string; buy: string }>;
   /** Personal-ranking-derived raw signal map; the Finder's block predicates read it directly (Stage 6). */
   finderSignals: Record<string, PersonalSignal>;
+  /** Raw personal-vs-consensus rank delta per player (vsMkt); shown on the Finder cards. */
+  finderRankGaps: Record<string, number>;
   personalOrdering: string[];
   savePersonalOrdering: (next: string[]) => void;
   loadingRedraft: boolean;
@@ -293,7 +295,7 @@ export function HubRouter({
   setProjectionWeek, setProjectionLoaded, loadProjections,
   shares, totalLeagues, loadingAllLeagueData, shareSearch, setShareSearch, sharePosition, setSharePosition,
   setDataHubTab,
-  finderDispositions, finderSignals, personalOrdering, savePersonalOrdering, loadingRedraft, redraftError,
+  finderDispositions, finderSignals, finderRankGaps, personalOrdering, savePersonalOrdering, loadingRedraft, redraftError,
   projectionData, setProjectionData, projectionPosFilter, setProjectionPosFilter,
   projectionWeek, projectionSeasonYear, projectionSourceStatus, loadingProjections, projectionUsesSeasonFallback,
   enabledExtraSources, toggleExtraSource,
@@ -590,6 +592,7 @@ export function HubRouter({
     loadingCalcValues={loadingCalcValues}
     playerDispositions={finderDispositions}
     finderSignals={finderSignals}
+    finderRankGaps={finderRankGaps}
     leaguePlayerTags={leaguePlayerTags}
     onToggleLeaguePlayerTag={handleToggleLeaguePlayerTag}
     leagueMateProfileByRosterId={leagueMateProfileByRosterId}

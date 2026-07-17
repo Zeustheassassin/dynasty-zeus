@@ -228,6 +228,33 @@ export function buildPersonalSignals(
 }
 
 /**
+ * Build the raw personal-vs-consensus rank gap for every player in the
+ * reconciled universe (vsMkt = consensusRank − personalRank; positive means
+ * you rank the player HIGHER than the market — a buy signal). Same shape and
+ * reconciliation as buildPersonalSignals, but the numeric delta instead of
+ * the derived signal — for UI that shows the raw "+4 / -3" gap (RankingsTab's
+ * "vs Mkt" column, and the Trade Finder cards). Zero-gap entries are omitted
+ * to keep the map sparse; missing entries read as 0.
+ */
+export function buildPersonalRankGaps(
+  personalOrdering: string[],
+  consensusOrder: string[],
+): Record<string, number> {
+  const order = reconcilePersonalOrdering(personalOrdering, consensusOrder);
+  const consensusRank = new Map<string, number>();
+  consensusOrder.forEach((id, i) => consensusRank.set(id, i + 1));
+
+  const out: Record<string, number> = {};
+  order.forEach((id, i) => {
+    const cr = consensusRank.get(id);
+    if (cr == null) return;
+    const gap = cr - (i + 1);
+    if (gap !== 0) out[id] = gap;
+  });
+  return out;
+}
+
+/**
  * Build the disposition map the Trade Finder's tuned SCORING consumes, derived
  * entirely from the user's personal ordering vs. the market consensus. A thin
  * adapter over buildPersonalSignals so the two representations can never drift:

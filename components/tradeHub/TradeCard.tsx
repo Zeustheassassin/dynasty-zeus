@@ -22,6 +22,8 @@ interface TradeCardProps {
   numTeams: number;
   leaguePlayerTags: Record<string, Record<string, "CORE" | "WANT_TO_TRADE">>;
   marketSignalMap: Map<string, string>;
+  /** Personal-vs-consensus rank delta per player (vsMkt): positive = you rank them higher than market. */
+  rankGapMap: Record<string, number>;
   tradeAttempts: TradeAttempt[];
   sessionMarked: Set<string>;
   iAmTankingFinder: boolean;
@@ -49,6 +51,7 @@ export default function TradeCard({
   numTeams,
   leaguePlayerTags,
   marketSignalMap,
+  rankGapMap,
   tradeAttempts,
   sessionMarked,
   iAmTankingFinder,
@@ -170,6 +173,22 @@ export default function TradeCard({
       : "border-gray-700 bg-gray-800/30 text-gray-400";
 
   const cardLeagueId = leagueId ?? "";
+
+  // Personal-vs-market rank badge — same "+4 / -3" convention as the DataHub
+  // Personal Rankings view (vsMkt = consensusRank − personalRank; positive
+  // means you rank this player higher than the market does).
+  const RankGapBadge = ({ playerId }: { playerId: string }) => {
+    const gap = rankGapMap[playerId];
+    if (!gap) return null;
+    return (
+      <span
+        title="Your personal rank vs. market consensus"
+        className={`text-[10px] font-mono shrink-0 ${gap > 0 ? "text-green-400" : "text-red-400"}`}
+      >
+        {gap > 0 ? "+" : ""}{gap}
+      </span>
+    );
+  };
 
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
@@ -324,6 +343,7 @@ export default function TradeCard({
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0 ml-1">
                     {p.age && <span className="text-[10px] text-gray-500">Age {p.age}</span>}
+                    <RankGapBadge playerId={p.player_id} />
                     <span className={`text-xs font-mono ${isSweetener ? "text-gray-600 line-through" : "text-gray-400"}`}>{p.value.toLocaleString()}</span>
                     <button
                       title={playerTag === "CORE" ? "Remove Core tag" : "Tag as Core (Do Not Sell)"}
@@ -384,6 +404,7 @@ export default function TradeCard({
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0 ml-1">
                   {p.age && <span className="text-[10px] text-gray-500">Age {p.age}</span>}
+                  <RankGapBadge playerId={p.player_id} />
                   <span className="text-xs text-gray-400 font-mono">{p.value.toLocaleString()}</span>
                 </div>
               </div>

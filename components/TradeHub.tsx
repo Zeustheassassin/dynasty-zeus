@@ -34,6 +34,7 @@ interface TradeHubProps {
   loadingCalcValues: boolean;
   playerDispositions: Record<string, { sell: string; buy: string }>;
   finderSignals: Record<string, PersonalSignal>;
+  finderRankGaps: Record<string, number>;
   leaguePlayerTags: Record<string, Record<string, "CORE" | "WANT_TO_TRADE">>;
   onToggleLeaguePlayerTag: (leagueId: string, playerId: string, forceTag?: "CORE" | "WANT_TO_TRADE") => void;
   leagueMateProfileByRosterId: Map<number, LeagueMateView>;
@@ -71,7 +72,7 @@ function TradeHub({
   calcOpponentRosterId, setCalcOpponentRosterId,
   selectedLeagueDraftHasOccurred,
   loadingCalcValues,
-  playerDispositions, finderSignals, leaguePlayerTags, onToggleLeaguePlayerTag, projectionData,
+  playerDispositions, finderSignals, finderRankGaps, leaguePlayerTags, onToggleLeaguePlayerTag, projectionData,
   leagueMateProfileByRosterId, selectedLeagueMateProfilesView,
   tradePartnerRankings,
   setPlayerProfileId, loadUserExposure, loadUserTrades,
@@ -251,6 +252,7 @@ function TradeHub({
             loadingCalcValues={loadingCalcValues}
             playerDispositions={playerDispositions}
             finderSignals={finderSignals}
+            finderRankGaps={finderRankGaps}
             leaguePlayerTags={leaguePlayerTags}
             onToggleLeaguePlayerTag={onToggleLeaguePlayerTag}
             leagueMateProfileByRosterId={leagueMateProfileByRosterId}

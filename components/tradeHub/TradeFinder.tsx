@@ -53,6 +53,8 @@ interface TradeFinderProps {
   playerDispositions: Record<string, { sell: string; buy: string }>;
   /** Raw personal buy/sell signal map; the block predicates read it directly (Stage 6). */
   finderSignals: Record<string, PersonalSignal>;
+  /** Raw personal-vs-consensus rank delta per player (vsMkt); shown on each card's player rows. */
+  finderRankGaps: Record<string, number>;
   leaguePlayerTags: Record<string, Record<string, "CORE" | "WANT_TO_TRADE">>;
   onToggleLeaguePlayerTag: (leagueId: string, playerId: string, forceTag?: "CORE" | "WANT_TO_TRADE") => void;
   leagueMateProfileByRosterId: Map<number, LeagueMateView>;
@@ -93,7 +95,7 @@ function TradeFinder({
   user,
   selectedLeagueDraftHasOccurred,
   loadingCalcValues,
-  playerDispositions, finderSignals, leaguePlayerTags, onToggleLeaguePlayerTag,
+  playerDispositions, finderSignals, finderRankGaps, leaguePlayerTags, onToggleLeaguePlayerTag,
   leagueMateProfileByRosterId, selectedLeagueMateProfilesView,
   tradePartnerRankings,
   onRefreshDirection,
@@ -1321,6 +1323,7 @@ function TradeFinder({
             numTeams={numTeams}
             leaguePlayerTags={leaguePlayerTags}
             marketSignalMap={marketSignalMap}
+            rankGapMap={finderRankGaps}
             tradeAttempts={tradeAttempts}
             sessionMarked={sessionMarked}
             iAmTankingFinder={iAmTankingFinder}

@@ -42,7 +42,7 @@ import { useGamedayState } from "./useGamedayState";
 import { useActivityState } from "./useActivityState";
 import { usePlayerAnnotations } from "./usePlayerAnnotations";
 import { usePersonalRankings } from "./usePersonalRankings";
-import { buildConsensusOrder, buildPersonalDispositions, buildPersonalSignals } from "../../lib/helpers/personalRankings";
+import { buildConsensusOrder, buildPersonalDispositions, buildPersonalSignals, buildPersonalRankGaps } from "../../lib/helpers/personalRankings";
 import type { PersonalSignal } from "../../lib/helpers/personalRankings";
 import { useSimulatorState } from "./useSimulatorState";
 import { fetchSleeperUser } from "../../lib/sleeperUserCache";
@@ -1298,6 +1298,13 @@ const saveSnapshotNow = async () => {
   // adapted to the legacy sell/buy strings the tuned scoring still keys off of.
   const finderSignals = useMemo<Record<string, PersonalSignal>>(
     () => buildPersonalSignals(personalOrdering, consensusOrderForFinder),
+    [personalOrdering, consensusOrderForFinder]
+  );
+  // finderRankGaps = the raw vsMkt rank delta per player (same "+4 / -3" the
+  // DataHub Personal view shows), for the Trade Finder cards to display
+  // alongside each player instead of just the derived buy/sell signal.
+  const finderRankGaps = useMemo<Record<string, number>>(
+    () => buildPersonalRankGaps(personalOrdering, consensusOrderForFinder),
     [personalOrdering, consensusOrderForFinder]
   );
   const finderDispositions = useMemo(
@@ -2932,6 +2939,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     sharePosition, setSharePosition,
     finderDispositions,
     finderSignals,
+    finderRankGaps,
     personalOrdering,
     savePersonalOrdering,
     loadingRedraft,

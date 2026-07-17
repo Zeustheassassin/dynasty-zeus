@@ -21,6 +21,7 @@ interface FinderResultsProps {
   numTeams: number;
   leaguePlayerTags: Record<string, Record<string, "CORE" | "WANT_TO_TRADE">>;
   marketSignalMap: Map<string, string>;
+  rankGapMap: Record<string, number>;
   tradeAttempts: TradeAttempt[];
   sessionMarked: Set<string>;
   iAmTankingFinder: boolean;
@@ -51,6 +52,7 @@ export default function FinderResults({
   numTeams,
   leaguePlayerTags,
   marketSignalMap,
+  rankGapMap,
   tradeAttempts,
   sessionMarked,
   iAmTankingFinder,
@@ -133,6 +135,7 @@ export default function FinderResults({
           numTeams={numTeams}
           leaguePlayerTags={leaguePlayerTags}
           marketSignalMap={marketSignalMap}
+          rankGapMap={rankGapMap}
           tradeAttempts={tradeAttempts}
           sessionMarked={sessionMarked}
           iAmTankingFinder={iAmTankingFinder}
