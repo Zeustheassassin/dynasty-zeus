@@ -151,6 +151,14 @@ function TradeCalculator({
       ? list.filter((p) => p.full_name?.toLowerCase().includes(search.toLowerCase()))
       : list;
 
+  const filterPicks = (list: AugmentedPick[], search: string) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter((p) =>
+      pickLabel(p).toLowerCase().includes(q) || String(p.season).includes(q)
+    );
+  };
+
   // Historical-logging escape hatch: a player who's since moved teams (or been
   // dropped) no longer shows up on either roster, so the normal roster-scoped
   // pickers can't find them. When calcShowAllPlayers is on, search the entire
@@ -306,12 +314,24 @@ function TradeCalculator({
                 if (calcSearchA.trim().length < ALL_PLAYER_SEARCH_MIN) return (
                   <p className="text-xs text-slate-600">Type at least 2 letters to search all players</p>
                 );
-                const results = searchAllPlayers(calcSearchA, calcGive);
-                if (results.length === 0) return <p className="text-xs text-slate-600">No player found — try a different name</p>;
-                return results.map((p) =>
-                  assetRow(`${p.full_name} (${p.position}${p.team ? ` · ${p.team}` : ""})`, calcVal(p.player_id),
-                    () => setCalcGive((prev: string[]) => [...prev, p.player_id]), p.player_id)
-                );
+                const playerResults = searchAllPlayers(calcSearchA, calcGive);
+                const pickResults = filterPicks(myAvailPicks, calcSearchA);
+                if (playerResults.length === 0 && pickResults.length === 0) return <p className="text-xs text-slate-600">No player or pick found — try a different name</p>;
+                const items = [
+                  ...playerResults.map((p) => ({
+                    label: `${p.full_name} (${p.position}${p.team ? ` · ${p.team}` : ""})`,
+                    value: calcVal(p.player_id),
+                    playerId: p.player_id as string | undefined,
+                    onAdd: () => setCalcGive((prev: string[]) => [...prev, p.player_id]),
+                  })),
+                  ...pickResults.map((p) => ({
+                    label: pickLabel(p),
+                    value: getPickValue(pickKey(p)),
+                    playerId: undefined as string | undefined,
+                    onAdd: () => setCalcGivePicks((prev: string[]) => [...prev, pickKey(p)]),
+                  })),
+                ].sort((a, b) => b.value - a.value);
+                return items.map((item) => assetRow(item.label, item.value, item.onAdd, item.playerId));
               }
               const items = [
                 ...filterPlayers(myAvailPlayers, calcSearchA).map((p) => ({
@@ -320,12 +340,12 @@ function TradeCalculator({
                   playerId: p.player_id as string | undefined,
                   onAdd: () => setCalcGive((prev: string[]) => [...prev, p.player_id]),
                 })),
-                ...(calcSearchA.trim().length === 0 ? myAvailPicks.map((p) => ({
+                ...filterPicks(myAvailPicks, calcSearchA).map((p) => ({
                   label: pickLabel(p),
                   value: getPickValue(pickKey(p)),
                   playerId: undefined as string | undefined,
                   onAdd: () => setCalcGivePicks((prev: string[]) => [...prev, pickKey(p)]),
-                })) : []),
+                })),
               ].sort((a, b) => b.value - a.value);
               if (items.length === 0) return <p className="text-xs text-slate-600">No assets available</p>;
               return items.map((item) => assetRow(item.label, item.value, item.onAdd, item.playerId));
@@ -373,7 +393,7 @@ function TradeCalculator({
                 )
                 .sort((a, b) => calcVal(b.player_id) - calcVal(a.player_id));
               if (allRosterPlayers.length === 0) return (
-                <p className="text-xs text-slate-600">No player found — try a different name</p>
+                <p className="text-xs text-slate-600">No player found — try a different name (picks aren&apos;t searchable until an opponent is selected)</p>
               );
               return allRosterPlayers.map((p) =>
                 assetRow(`${p.full_name} (${p.position} · ${p.team})`, calcVal(p.player_id), () => {
@@ -385,12 +405,24 @@ function TradeCalculator({
                 if (calcSearchB.trim().length < ALL_PLAYER_SEARCH_MIN) return (
                   <p className="text-xs text-slate-600">Type at least 2 letters to search all players</p>
                 );
-                const results = searchAllPlayers(calcSearchB, calcReceive);
-                if (results.length === 0) return <p className="text-xs text-slate-600">No player found — try a different name</p>;
-                return results.map((p) =>
-                  assetRow(`${p.full_name} (${p.position}${p.team ? ` · ${p.team}` : ""})`, calcVal(p.player_id),
-                    () => setCalcReceive((prev: string[]) => [...prev, p.player_id]), p.player_id)
-                );
+                const playerResults = searchAllPlayers(calcSearchB, calcReceive);
+                const pickResults = filterPicks(theirAvailPicks, calcSearchB);
+                if (playerResults.length === 0 && pickResults.length === 0) return <p className="text-xs text-slate-600">No player or pick found — try a different name</p>;
+                const items = [
+                  ...playerResults.map((p) => ({
+                    label: `${p.full_name} (${p.position}${p.team ? ` · ${p.team}` : ""})`,
+                    value: calcVal(p.player_id),
+                    playerId: p.player_id as string | undefined,
+                    onAdd: () => setCalcReceive((prev: string[]) => [...prev, p.player_id]),
+                  })),
+                  ...pickResults.map((p) => ({
+                    label: pickLabel(p),
+                    value: getPickValue(pickKey(p)),
+                    playerId: undefined as string | undefined,
+                    onAdd: () => setCalcReceivePicks((prev: string[]) => [...prev, pickKey(p)]),
+                  })),
+                ].sort((a, b) => b.value - a.value);
+                return items.map((item) => assetRow(item.label, item.value, item.onAdd, item.playerId));
               })() : (() => {
                 const items = [
                   ...filterPlayers(theirAvailPlayers, calcSearchB).map((p) => ({
@@ -399,12 +431,12 @@ function TradeCalculator({
                     playerId: p.player_id as string | undefined,
                     onAdd: () => setCalcReceive((prev: string[]) => [...prev, p.player_id]),
                   })),
-                  ...(calcSearchB.trim().length === 0 ? theirAvailPicks.map((p) => ({
+                  ...filterPicks(theirAvailPicks, calcSearchB).map((p) => ({
                     label: pickLabel(p),
                     value: getPickValue(pickKey(p)),
                     playerId: undefined as string | undefined,
                     onAdd: () => setCalcReceivePicks((prev: string[]) => [...prev, pickKey(p)]),
-                  })) : []),
+                  })),
                 ].sort((a, b) => b.value - a.value);
                 if (items.length === 0) return <p className="text-xs text-slate-600">No assets available</p>;
                 return items.map((item) => assetRow(item.label, item.value, item.onAdd, item.playerId));
