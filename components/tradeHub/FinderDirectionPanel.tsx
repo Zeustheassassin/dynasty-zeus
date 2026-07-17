@@ -35,32 +35,32 @@ export function FinderDirectionPanel({
   return (
     <>
       {loadingCalcValues ? (
-        <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-3 animate-pulse">
+        <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 animate-pulse">
           <div className="flex items-start justify-between gap-2">
             <div className="flex-1 space-y-2">
-              <div className="h-2.5 w-28 rounded bg-gray-700" />
-              <div className="h-4 w-3/4 rounded bg-gray-700" />
+              <div className="h-2.5 w-28 rounded bg-slate-700" />
+              <div className="h-4 w-3/4 rounded bg-slate-700" />
             </div>
-            <div className="h-5 w-20 rounded-full bg-gray-700" />
+            <div className="h-5 w-20 rounded-full bg-slate-700" />
           </div>
           <div className="mt-3 flex gap-2">
-            <div className="h-6 w-36 rounded-full bg-gray-700" />
-            <div className="h-6 w-44 rounded-full bg-gray-700" />
-            <div className="h-6 w-32 rounded-full bg-gray-700" />
+            <div className="h-6 w-36 rounded-full bg-slate-700" />
+            <div className="h-6 w-44 rounded-full bg-slate-700" />
+            <div className="h-6 w-32 rounded-full bg-slate-700" />
           </div>
         </div>
       ) : finderDirectionProfile ? (
-        <div className="rounded-xl border border-gray-800 bg-gray-950/60 p-3">
+        <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
           <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
             <div>
               <div className="flex items-center gap-2">
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Direction Engine</div>
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Direction Engine</div>
                 <button
                   type="button"
                   onClick={() => { setDirectionRefreshing(true); onRefreshDirection(); }}
                   disabled={directionRefreshing}
                   title="Reload direction data"
-                  className="text-gray-600 hover:text-gray-400 transition disabled:opacity-40"
+                  className="text-slate-600 hover:text-slate-400 transition disabled:opacity-40"
                 >
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
@@ -73,7 +73,7 @@ export function FinderDirectionPanel({
                   </svg>
                 </button>
               </div>
-              <div className="mt-1 text-sm text-gray-200">{finderDirectionProfile.summary}</div>
+              <div className="mt-1 text-sm text-slate-200">{finderDirectionProfile.summary}</div>
             </div>
             <div className="flex flex-col items-end gap-1 self-start">
               <span className={`inline-flex text-[10px] font-semibold px-2 py-1 rounded-full border ${finderDirectionProfile.bucketColor}`}>
@@ -81,7 +81,7 @@ export function FinderDirectionPanel({
               </span>
               {finderDirectionProfile.rawBucket &&
                finderDirectionProfile.rawBucket !== finderDirectionProfile.bucket && (
-                <span className="text-[9px] text-gray-500 whitespace-nowrap">
+                <span className="text-[9px] text-slate-500 whitespace-nowrap">
                   base: {finderDirectionProfile.rawBucket} → age + sim adjusted
                 </span>
               )}
@@ -96,7 +96,7 @@ export function FinderDirectionPanel({
           </div>
           {selectedLeagueMateProfilesView.length > 0 && (
             <div className="mt-3">
-              <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Best Partner Targets</div>
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Best Partner Targets</div>
               <div className="mt-2 flex flex-wrap gap-2">
                 {selectedLeagueMateProfilesView.slice(0, 3).map((mate) => (
                   <button
@@ -113,17 +113,17 @@ export function FinderDirectionPanel({
         </div>
       ) : null}
       {finderDirectionProfile && (
-        <div className="rounded-lg bg-gray-800/50 border border-gray-700/60 px-3 py-2">
-          <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-2">Auto-Strategy</div>
+        <div className="rounded-lg bg-slate-800/50 border border-slate-700/60 px-3 py-2">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 mb-2">Auto-Strategy</div>
           <div className="flex flex-wrap gap-2">
             <span className={`text-[11px] px-2.5 py-0.5 rounded-full border font-medium ${
               isChampionshipPush
-                ? "border-yellow-600 bg-yellow-900/30 text-yellow-300"
+                ? "border-amber-600 bg-amber-900/30 text-amber-300"
                 : finderTankMode
                   ? "border-red-700 bg-red-950/30 text-red-300"
                   : draftCapitalMode
                     ? "border-indigo-700 bg-indigo-950/30 text-indigo-300"
-                    : "border-green-700 bg-green-950/30 text-green-300"
+                    : "border-emerald-700 bg-emerald-950/30 text-emerald-300"
             }`}>
               {autoStrategyLabel}
             </span>
@@ -143,7 +143,7 @@ export function FinderDirectionPanel({
               </span>
             )}
             {rosterOverflow > 0 && (
-              <span className="text-[11px] px-2.5 py-0.5 rounded-full border border-yellow-800 bg-yellow-950/30 text-yellow-300">
+              <span className="text-[11px] px-2.5 py-0.5 rounded-full border border-amber-800 bg-amber-950/30 text-amber-300">
                 Roster pressure +{rosterOverflow} over cap
               </span>
             )}

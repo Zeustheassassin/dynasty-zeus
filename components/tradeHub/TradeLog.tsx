@@ -5,6 +5,7 @@ import type { TradeAttempt, SleeperUser, SleeperTradedPick } from "../../lib/typ
 import type { AnnotatedTrade } from "../../hooks/useUserTrades";
 import { usePlayers } from "../../lib/PlayersContext";
 import { useValues } from "../../lib/ValuesContext";
+import { Card } from "../ui/Card";
 
 interface TradeLogProps {
   tradeHubData: AnnotatedTrade[] | null;
@@ -29,11 +30,11 @@ function TradeLog({ tradeHubData, loadingTradeHub, tradeHubUserId, user, loadUse
 
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
+      <Card>
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Your Trade Log</div>
-            <div className="mt-1 text-sm text-gray-200">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Your Trade Log</div>
+            <div className="mt-1 text-sm text-slate-200">
               Your trades from the past 30 days across all dynasty leagues.
             </div>
           </div>
@@ -42,7 +43,7 @@ function TradeLog({ tradeHubData, loadingTradeHub, tradeHubUserId, user, loadUse
               onClick={() => { if (user?.user_id) loadUserTrades(user.user_id, true); }}
               disabled={loadingTradeHub}
               title="Bypass caches and re-fetch trades from Sleeper"
-              className="flex items-center gap-1 text-[11px] font-semibold px-3 py-1 rounded-full border border-gray-600 text-gray-400 hover:border-gray-400 hover:text-gray-200 transition disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+              className="flex items-center gap-1 text-[11px] font-semibold px-3 py-1 rounded-full border border-slate-600 text-slate-400 hover:border-slate-400 hover:text-slate-200 transition disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className={`w-3 h-3 ${loadingTradeHub ? "animate-spin" : ""}`}>
                 <path fillRule="evenodd" d="M13.836 2.477a.75.75 0 0 1 .75.75v3.182a.75.75 0 0 1-.75.75h-3.182a.75.75 0 0 1 0-1.5h1.37l-.84-.841a4.5 4.5 0 0 0-7.08 1.196.75.75 0 1 1-1.31-.734 6 6 0 0 1 9.44-1.595l.842.841V3.227a.75.75 0 0 1 .75-.75Zm-.911 7.5A.75.75 0 0 1 13.199 11a6 6 0 0 1-9.44 1.595l-.842-.841v1.017a.75.75 0 0 1-1.5 0V9.591a.75.75 0 0 1 .75-.75H5.35a.75.75 0 0 1 0 1.5H3.98l.84.841a4.5 4.5 0 0 0 7.08-1.196.75.75 0 0 1 1.025-.009Z" clipRule="evenodd" />
@@ -51,18 +52,18 @@ function TradeLog({ tradeHubData, loadingTradeHub, tradeHubUserId, user, loadUse
             </button>
           )}
         </div>
-      </div>
+      </Card>
 
       {showInitialLoad && (
-        <p className="text-sm text-gray-400">Loading your trades…</p>
+        <p className="text-sm text-slate-400">Loading your trades…</p>
       )}
 
       {showRefreshIndicator && (
-        <p className="text-xs text-gray-500">Refreshing from Sleeper…</p>
+        <p className="text-xs text-slate-500">Refreshing from Sleeper…</p>
       )}
 
       {!loadingTradeHub && tradeHubUserId === user?.user_id && tradeHubData && tradeHubData.length === 0 && (
-        <p className="text-sm text-gray-400">No trades found in the past 30 days.</p>
+        <p className="text-sm text-slate-400">No trades found in the past 30 days.</p>
       )}
 
       {!loadingTradeHub && (!tradeHubData || tradeHubUserId !== user?.user_id) && (
@@ -125,19 +126,19 @@ function TradeLog({ tradeHubData, loadingTradeHub, tradeHubUserId, user, loadUse
           .join(", ") || null;
 
         return (
-          <div key={trade.transaction_id} className="rounded-2xl border border-gray-800 bg-gray-900 p-4">
+          <Card key={trade.transaction_id}>
             <div className="flex items-center justify-between mb-3">
               <div>
                 <span className="text-xs font-semibold text-blue-400 uppercase tracking-wide">{trade.leagueName}</span>
-                {partnerLabel && <span className="text-xs text-gray-400 ml-2">with {partnerLabel}</span>}
+                {partnerLabel && <span className="text-xs text-slate-400 ml-2">with {partnerLabel}</span>}
               </div>
               <div className="flex items-center gap-2">
                 {giveTotal > 0 && recvTotal > 0 && (
-                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${Math.abs(net) <= 300 ? "bg-yellow-900 text-yellow-300" : net > 0 ? "bg-green-900 text-green-300" : "bg-red-900 text-red-300"}`}>
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${Math.abs(net) <= 300 ? "bg-amber-900 text-amber-300" : net > 0 ? "bg-emerald-900 text-emerald-300" : "bg-red-900 text-red-300"}`}>
                     {Math.abs(net) <= 300 ? "EVEN" : net > 0 ? `+${net.toLocaleString()}` : `${net.toLocaleString()}`}
                   </span>
                 )}
-                <span className="text-xs text-gray-500">{formatRelativeDate(trade.created)}</span>
+                <span className="text-xs text-slate-500">{formatRelativeDate(trade.created)}</span>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -145,30 +146,30 @@ function TradeLog({ tradeHubData, loadingTradeHub, tradeHubUserId, user, loadUse
                 <div className="text-[10px] font-bold uppercase tracking-widest text-red-400 mb-1.5">You Gave</div>
                 <div className="space-y-1">
                   {allGiven.map((item) => (
-                    <div key={item.name} className="flex items-center justify-between rounded-lg bg-gray-800 px-2 py-1.5">
+                    <div key={item.name} className="flex items-center justify-between rounded-lg bg-slate-800 px-2 py-1.5">
                       <div className="flex items-center gap-1.5 min-w-0">
                         <span className="text-xs text-white truncate">{item.name}</span>
-                        <span className="text-[10px] text-gray-500 shrink-0 uppercase">{item.pos}</span>
+                        <span className="text-[10px] text-slate-500 shrink-0 uppercase">{item.pos}</span>
                       </div>
-                      {item.val > 0 && <span className="text-[10px] font-mono text-gray-400 shrink-0 ml-1">{item.val.toLocaleString()}</span>}
+                      {item.val > 0 && <span className="text-[10px] font-mono text-slate-400 shrink-0 ml-1">{item.val.toLocaleString()}</span>}
                     </div>
                   ))}
-                  {allGiven.length === 0 && <p className="text-xs text-gray-600">—</p>}
+                  {allGiven.length === 0 && <p className="text-xs text-slate-600">—</p>}
                 </div>
               </div>
               <div>
-                <div className="text-[10px] font-bold uppercase tracking-widest text-green-400 mb-1.5">You Received</div>
+                <div className="text-[10px] font-bold uppercase tracking-widest text-emerald-400 mb-1.5">You Received</div>
                 <div className="space-y-1">
                   {allReceived.map((item) => (
-                    <div key={item.name} className="flex items-center justify-between rounded-lg bg-gray-800 px-2 py-1.5">
+                    <div key={item.name} className="flex items-center justify-between rounded-lg bg-slate-800 px-2 py-1.5">
                       <div className="flex items-center gap-1.5 min-w-0">
                         <span className="text-xs text-white truncate">{item.name}</span>
-                        <span className="text-[10px] text-gray-500 shrink-0 uppercase">{item.pos}</span>
+                        <span className="text-[10px] text-slate-500 shrink-0 uppercase">{item.pos}</span>
                       </div>
-                      {item.val > 0 && <span className="text-[10px] font-mono text-gray-400 shrink-0 ml-1">{item.val.toLocaleString()}</span>}
+                      {item.val > 0 && <span className="text-[10px] font-mono text-slate-400 shrink-0 ml-1">{item.val.toLocaleString()}</span>}
                     </div>
                   ))}
-                  {allReceived.length === 0 && <p className="text-xs text-gray-600">—</p>}
+                  {allReceived.length === 0 && <p className="text-xs text-slate-600">—</p>}
                 </div>
               </div>
             </div>
@@ -200,8 +201,8 @@ function TradeLog({ tradeHubData, loadingTradeHub, tradeHubUserId, user, loadUse
                     }}
                     className={`text-xs font-medium px-3 py-1.5 rounded-lg transition ${
                       alreadyLogged
-                        ? "bg-green-900/40 text-green-400 border border-green-700 cursor-default"
-                        : "bg-gray-800 text-gray-300 border border-gray-600 hover:border-blue-500 hover:text-blue-300"
+                        ? "bg-emerald-900/40 text-emerald-400 border border-emerald-700 cursor-default"
+                        : "bg-slate-800 text-slate-300 border border-slate-600 hover:border-blue-500 hover:text-blue-300"
                     }`}
                   >
                     {alreadyLogged ? "✓ Logged in Attempts" : "Log in Attempted Trades"}
@@ -209,7 +210,7 @@ function TradeLog({ tradeHubData, loadingTradeHub, tradeHubUserId, user, loadUse
                 </div>
               );
             })()}
-          </div>
+          </Card>
         );
       })}
     </div>

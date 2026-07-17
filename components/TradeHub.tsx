@@ -12,6 +12,7 @@ import type { PersonalSignal } from "../lib/helpers/personalRankings";
 import { usePlayers } from "../lib/PlayersContext";
 import { useLeague } from "../lib/LeagueContext";
 import { useValues } from "../lib/ValuesContext";
+import { ACCENT_CLASSES } from "../lib/uiTheme";
 import TradeCalculator from "./tradeHub/TradeCalculator";
 import TradeFinder from "./tradeHub/TradeFinder";
 import TradeLog from "./tradeHub/TradeLog";
@@ -132,14 +133,14 @@ function TradeHub({
       <div className="max-w-4xl mx-auto p-6">
 
         {/* Sub-tab nav */}
-        <div className="flex justify-center border-b border-gray-700 mb-6 overflow-x-auto">
+        <nav aria-label="Trade Hub" className="flex justify-center border-b border-slate-700 mb-6 overflow-x-auto">
           <div className="flex justify-center gap-6 text-center">
             <button
               onClick={() => setTradeHubSection("CALCULATOR")}
               className={`pb-2 px-1 text-sm font-semibold transition ${
                 tradeHubSection === "CALCULATOR"
-                  ? "border-b-2 border-blue-400 text-blue-400"
-                  : "text-gray-400 hover:text-white"
+                  ? `border-b-2 border-blue-400 ${ACCENT_CLASSES.text}`
+                  : "text-slate-400 hover:text-white"
               }`}
             >
               Trade Calculator
@@ -148,8 +149,8 @@ function TradeHub({
               onClick={() => setTradeHubSection("FINDER")}
               className={`pb-2 px-1 text-sm font-semibold transition ${
                 tradeHubSection === "FINDER"
-                  ? "border-b-2 border-blue-400 text-blue-400"
-                  : "text-gray-400 hover:text-white"
+                  ? `border-b-2 border-blue-400 ${ACCENT_CLASSES.text}`
+                  : "text-slate-400 hover:text-white"
               }`}
             >
               Trade Finder
@@ -164,7 +165,7 @@ function TradeHub({
               className={`pb-2 px-1 text-sm font-semibold transition whitespace-nowrap ${
                 tradeHubSection === "ATTEMPTS"
                   ? "border-b-2 border-orange-400 text-orange-400"
-                  : "text-gray-400 hover:text-white"
+                  : "text-slate-400 hover:text-white"
               }`}
             >
               Attempted Trades
@@ -183,20 +184,20 @@ function TradeHub({
               }}
               className={`pb-2 px-1 text-sm font-semibold transition whitespace-nowrap ${
                 tradeHubSection === "TRADE_LOG"
-                  ? "border-b-2 border-blue-400 text-blue-400"
-                  : "text-gray-400 hover:text-white"
+                  ? `border-b-2 border-blue-400 ${ACCENT_CLASSES.text}`
+                  : "text-slate-400 hover:text-white"
               }`}
             >
               Completed Trades
             </button>
           </div>
-        </div>
+        </nav>
 
         {/* Market Trends moved into Data Hub's Value Trends tab (Phase B4/R2) */}
         <div className="flex justify-end mb-4">
           <button
             onClick={() => { setMainTab("DATA_HUB"); setDataHubTab("VALUE_TRENDS"); }}
-            className="text-[11px] text-gray-500 hover:text-emerald-400 transition"
+            className="text-[11px] text-slate-500 hover:text-emerald-400 transition"
           >
             Market Trends moved to Data Hub →
           </button>
@@ -335,17 +336,17 @@ function TradeHub({
           >
             <div className="absolute inset-0 bg-black/70" aria-hidden="true" />
             <div
-              className="relative bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-md max-h-[80vh] flex flex-col shadow-2xl"
+              className="relative bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md max-h-[80vh] flex flex-col shadow-2xl"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800">
                 <div>
                   <div className="text-base font-bold text-white">{ownerName}</div>
-                  <div className="text-xs text-gray-500 mt-0.5">{rosterPlayers.length} players</div>
+                  <div className="text-xs text-slate-500 mt-0.5">{rosterPlayers.length} players</div>
                 </div>
                 <button
                   onClick={() => setViewRosterRosterId(null)}
-                  className="text-gray-500 hover:text-white transition text-lg leading-none"
+                  className="text-slate-500 hover:text-white transition text-lg leading-none"
                   aria-label="Close roster"
                 >
                   ✕
@@ -353,10 +354,10 @@ function TradeHub({
               </div>
               <div className="overflow-y-auto flex-1 px-4 py-3 space-y-1">
                 {rosterPlayers.length === 0 && (
-                  <p className="text-xs text-gray-500 text-center py-4">No players found</p>
+                  <p className="text-xs text-slate-500 text-center py-4">No players found</p>
                 )}
                 {rosterPlayers.map(({ pid, p, val }) => (
-                  <div key={pid} className="flex items-center justify-between rounded-lg bg-gray-800 px-3 py-2">
+                  <div key={pid} className="flex items-center justify-between rounded-lg bg-slate-800 px-3 py-2">
                     <div className="flex items-center gap-2 min-w-0">
                       <button
                         onClick={() => setPlayerProfileId(pid)}
@@ -365,13 +366,13 @@ function TradeHub({
                         {p?.full_name ?? pid}
                       </button>
                       {p && (
-                        <span className="text-[11px] text-gray-500 shrink-0">
+                        <span className="text-[11px] text-slate-500 shrink-0">
                           {p.position}{p.team ? ` · ${p.team}` : ""}
                         </span>
                       )}
-                      {p?.age && <span className="text-[11px] text-gray-600 shrink-0">Age {p.age}</span>}
+                      {p?.age && <span className="text-[11px] text-slate-600 shrink-0">Age {p.age}</span>}
                     </div>
-                    <span className="text-xs text-gray-400 font-mono shrink-0 ml-2">
+                    <span className="text-xs text-slate-400 font-mono shrink-0 ml-2">
                       {val > 0 ? val.toLocaleString() : "—"}
                     </span>
                   </div>

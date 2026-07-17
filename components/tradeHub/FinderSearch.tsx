@@ -22,21 +22,21 @@ export function FinderSearchInput({
         value={inputValue}
         onChange={(e) => setInputValue(e.target.value)}
         placeholder={placeholder}
-        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
       />
       {matches.length > 0 && (
-        <div className="absolute z-10 top-full mt-1 w-full bg-gray-800 border border-gray-700 rounded-lg overflow-hidden shadow-xl">
+        <div className="absolute z-10 top-full mt-1 w-full bg-slate-800 border border-slate-700 rounded-lg overflow-hidden shadow-xl">
           {matches.map((p) => (
             <button
               key={p.player_id}
               onClick={() => { setInputValue(""); onSelect(p.player_id); }}
-              className="w-full flex items-center justify-between px-3 py-2 hover:bg-gray-700 transition text-left"
+              className="w-full flex items-center justify-between px-3 py-2 hover:bg-slate-700 transition text-left"
             >
               <div className="flex items-center gap-2">
                 <span className="text-sm text-white">{p.full_name}</span>
-                <span className="text-[10px] text-gray-500 uppercase">{p.position}</span>
+                <span className="text-[10px] text-slate-500 uppercase">{p.position}</span>
               </div>
-              <span className="text-xs text-gray-400 font-mono">{p.value.toLocaleString()}</span>
+              <span className="text-xs text-slate-400 font-mono">{p.value.toLocaleString()}</span>
             </button>
           ))}
         </div>

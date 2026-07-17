@@ -33,6 +33,7 @@ import type { MarketSignal, TradeResult } from "./finderTypes";
 import { YEARS } from "./shared";
 import { runFinderPipeline } from "./finderPipeline";
 import type { PlayerWithValue, PickWithValue } from "./shared";
+import { Card } from "../ui/Card";
 
 // â”€â”€ Local types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -1120,7 +1121,7 @@ function TradeFinder({
   ]);
 
   if (!selectedLeague) return (
-    <p className="text-gray-400 text-sm">Select a league from the dropdown above to use the Trade Finder.</p>
+    <p className="text-slate-400 text-sm">Select a league from the dropdown above to use the Trade Finder.</p>
   );
   // Block the entire finder until the authoritative direction profile is ready.
   // selectedLeagueDirectionAdjusted returns null whenever its inputs are mid-update
@@ -1129,8 +1130,8 @@ function TradeFinder({
   if (!selectedLeagueDirectionAdjusted) return (
     <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
       <div className="w-8 h-8 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
-      <p className="text-sm text-gray-400">Computing direction engine…</p>
-      <p className="text-xs text-gray-600">Analysing your roster, picks, and playoff simulation</p>
+      <p className="text-sm text-slate-400">Computing direction engine…</p>
+      <p className="text-xs text-slate-600">Analysing your roster, picks, and playoff simulation</p>
     </div>
   );
   if (loadingCalcValues) return <p className="text-sm text-blue-400">Loading player values…</p>;
@@ -1149,7 +1150,7 @@ function TradeFinder({
   return (
         <div className="space-y-4">
           {/* ── Player pin search ── */}
-          <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 space-y-2">
+          <Card padding="lg" className="space-y-2">
             <FinderDirectionPanel
               loadingCalcValues={loadingCalcValues}
               finderDirectionProfile={finderDirectionProfile}
@@ -1165,17 +1166,17 @@ function TradeFinder({
               finderPreferFuturePicks={finderPreferFuturePicks}
               rosterOverflow={rosterOverflow}
             />
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Find trades involving a specific player</p>
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Find trades involving a specific player</p>
             {pinnedPlayer ? (
-              <div className="flex items-center justify-between bg-gray-800 rounded-lg px-3 py-2">
+              <div className="flex items-center justify-between bg-slate-800 rounded-lg px-3 py-2">
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-white font-medium">{pinnedPlayer.full_name}</span>
-                  <span className="text-[10px] text-gray-500 uppercase">{pinnedPlayer.position}</span>
-                  <span className="text-xs text-gray-500 font-mono">{pinnedPlayer.value.toLocaleString()}</span>
+                  <span className="text-[10px] text-slate-500 uppercase">{pinnedPlayer.position}</span>
+                  <span className="text-xs text-slate-500 font-mono">{pinnedPlayer.value.toLocaleString()}</span>
                 </div>
                 <button
                   onClick={() => { setFinderPinnedPlayerId(null); }}
-                  className="text-xs text-gray-500 hover:text-red-400 transition ml-3"
+                  className="text-xs text-slate-500 hover:text-red-400 transition ml-3"
                 >
                   ✕ Clear
                 </button>
@@ -1198,7 +1199,7 @@ function TradeFinder({
                   setFinderSeed(Math.random());
                 });
               }}
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
             >
               <option value="">Trade with any owner…</option>
               {rosters
@@ -1216,16 +1217,16 @@ function TradeFinder({
 
             {/* ── Target player (want to receive) search ── */}
             {targetPinnedPlayer ? (
-              <div className="flex items-center justify-between bg-gray-800 rounded-lg px-3 py-2">
+              <div className="flex items-center justify-between bg-slate-800 rounded-lg px-3 py-2">
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-gray-500 uppercase tracking-wider">Want to receive</span>
+                  <span className="text-[10px] text-slate-500 uppercase tracking-wider">Want to receive</span>
                   <span className="text-sm text-white font-medium">{targetPinnedPlayer.full_name}</span>
-                  <span className="text-[10px] text-gray-500 uppercase">{targetPinnedPlayer.position}</span>
-                  <span className="text-xs text-gray-500 font-mono">{targetPinnedPlayer.value.toLocaleString()}</span>
+                  <span className="text-[10px] text-slate-500 uppercase">{targetPinnedPlayer.position}</span>
+                  <span className="text-xs text-slate-500 font-mono">{targetPinnedPlayer.value.toLocaleString()}</span>
                 </div>
                 <button
                   onClick={() => startTransition(() => { setFinderTargetPlayerId(null); setFinderSeed(Math.random()); })}
-                  className="text-xs text-gray-500 hover:text-red-400 transition ml-3"
+                  className="text-xs text-slate-500 hover:text-red-400 transition ml-3"
                 >
                   ✕ Clear
                 </button>
@@ -1238,13 +1239,13 @@ function TradeFinder({
                 placeholder={finderTargetOppRosterId ? "Search their roster for a player to receive…" : "Search league for a player you want to receive…"}
               />
             )}
-          </div>
+          </Card>
 
           <div className="flex items-center justify-between">
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-slate-500">
               {pinnedPlayer
-                ? <>Trades involving <strong className="text-gray-300">{pinnedPlayer.full_name}</strong> for <strong className="text-gray-300">{selectedLeague.name}</strong>.</>
-                : <>Random trade suggestions for <strong className="text-gray-300">{selectedLeague.name}</strong>.</>
+                ? <>Trades involving <strong className="text-slate-300">{pinnedPlayer.full_name}</strong> for <strong className="text-slate-300">{selectedLeague.name}</strong>.</>
+                : <>Random trade suggestions for <strong className="text-slate-300">{selectedLeague.name}</strong>.</>
               }
               {loadingCalcValues && <span className="ml-2 text-blue-400">Loading values…</span>}
             </p>
@@ -1256,11 +1257,11 @@ function TradeFinder({
             </button>
           </div>
           {ignoredInLeague.length > 0 && (
-            <div className="flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-800/40 px-3 py-2 text-xs text-gray-500">
-              <span className="text-red-500">≡ƒÜ½</span>
+            <div className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/40 px-3 py-2 text-xs text-slate-500">
+              <span className="text-red-500">🚫</span>
               {ignoredInLeague.length === 1
-                ? <span><strong className="text-gray-400">{users[ignoredInLeague[0].owner_id] || "1 owner"}</strong> is on your ignore list and excluded from results.</span>
-                : <span><strong className="text-gray-400">{ignoredInLeague.length} owners</strong> on your ignore list are excluded from results.</span>
+                ? <span><strong className="text-slate-400">{users[ignoredInLeague[0].owner_id] || "1 owner"}</strong> is on your ignore list and excluded from results.</span>
+                : <span><strong className="text-slate-400">{ignoredInLeague.length} owners</strong> on your ignore list are excluded from results.</span>
               }
             </div>
           )}
@@ -1273,7 +1274,7 @@ function TradeFinder({
             if (corePlayers.length === 0 && shoppingPlayers.length === 0) return null;
             const playerMap = players as Record<string, SleeperPlayer>;
             return (
-              <div className="rounded-lg border border-gray-700 bg-gray-800/30 px-3 py-2 space-y-2">
+              <div className="rounded-lg border border-slate-700 bg-slate-800/30 px-3 py-2 space-y-2">
                 {corePlayers.length > 0 && (
                   <div>
                     <div className="text-[9px] font-bold uppercase tracking-widest text-emerald-500 mb-1">Core — Do Not Sell</div>

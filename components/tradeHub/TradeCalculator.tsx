@@ -9,6 +9,7 @@ import { useLeague } from "../../lib/LeagueContext";
 import { useValues } from "../../lib/ValuesContext";
 import { computeRosterDropCost, computeStarDiscounts, EVEN_NET_THRESHOLD } from "./calculatorUtils";
 import CalculatorResult from "./CalculatorResult";
+import { Card } from "../ui/Card";
 
 interface TradeCalculatorProps {
   calcOpponentRosterId: number | null;
@@ -143,7 +144,7 @@ function TradeCalculator({
 
   const net = totalReceiveAdj - totalGiveAdj;
   const verdict = Math.abs(net) <= EVEN_NET_THRESHOLD ? "EVEN" : net > 0 ? "YOU WIN" : "YOU LOSE";
-  const verdictColor = verdict === "EVEN" ? "text-yellow-400" : verdict === "YOU WIN" ? "text-green-400" : "text-red-400";
+  const verdictColor = verdict === "EVEN" ? "text-amber-400" : verdict === "YOU WIN" ? "text-emerald-400" : "text-red-400";
 
   const filterPlayers = (list: SleeperPlayer[], search: string) =>
     search.trim().length >= 1
@@ -174,7 +175,7 @@ function TradeCalculator({
   const assetRow = (label: string, value: number, onAdd: () => void, playerId?: string) => (
     <div
       key={label}
-      className="w-full flex items-center justify-between px-3 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg transition"
+      className="w-full flex items-center justify-between px-3 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition"
     >
       <button onClick={onAdd} className="flex-1 text-sm truncate text-left">{label}</button>
       <div className="flex items-center gap-2 shrink-0 ml-2">
@@ -182,7 +183,7 @@ function TradeCalculator({
         {playerId && (
           <button
             onClick={(e) => { e.stopPropagation(); setPlayerProfileId(playerId); }}
-            className="text-gray-600 hover:text-blue-400 text-xs transition"
+            className="text-slate-600 hover:text-blue-400 text-xs transition"
             title="View profile"
           >ⓘ</button>
         )}
@@ -191,19 +192,19 @@ function TradeCalculator({
   );
 
   if (!selectedLeague) {
-    return <p className="text-gray-400 text-sm">Select a league from the dropdown above to use the Trade Calculator.</p>;
+    return <p className="text-slate-400 text-sm">Select a league from the dropdown above to use the Trade Calculator.</p>;
   }
 
   return (
     <div>
-      <p className="text-xs text-gray-500 mb-2">
-        Powered by FantasyCalc — values calibrated for <strong className="text-gray-300">{selectedLeague.name}</strong>.
+      <p className="text-xs text-slate-500 mb-2">
+        Powered by FantasyCalc — values calibrated for <strong className="text-slate-300">{selectedLeague.name}</strong>.
         {loadingCalcValues && <span className="ml-2 text-blue-400">Loading values…</span>}
       </p>
 
       {/* Opponent picker */}
       <div className="mb-6">
-        <label className="text-xs text-gray-400 mb-1 block">Trade with</label>
+        <label className="text-xs text-slate-400 mb-1 block">Trade with</label>
         <div className="flex flex-col md:flex-row gap-3">
           <select
             value={calcOpponentRosterId ?? ""}
@@ -213,7 +214,7 @@ function TradeCalculator({
               setCalcReceivePicks([]);
               setCalcSearchB("");
             }}
-            className="bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500 w-full md:w-64"
+            className="bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500 w-full md:w-64"
           >
             <option value="">Select opponent...</option>
             {rosters
@@ -232,14 +233,14 @@ function TradeCalculator({
             <>
               <button
                 onClick={() => loadUserExposure(opponentRoster.owner_id)}
-                className="bg-gray-800 border border-gray-700 hover:border-blue-500 text-white rounded-xl px-3 py-2 text-sm font-medium transition whitespace-nowrap"
+                className="bg-slate-800 border border-slate-700 hover:border-blue-500 text-white rounded-xl px-3 py-2 text-sm font-medium transition whitespace-nowrap"
               >
                 Most Owned Players
               </button>
 
               <button
                 onClick={() => loadUserTrades(opponentRoster.owner_id)}
-                className="bg-gray-800 border border-gray-700 hover:border-blue-500 text-white rounded-xl px-3 py-2 text-sm font-medium transition whitespace-nowrap"
+                className="bg-slate-800 border border-slate-700 hover:border-blue-500 text-white rounded-xl px-3 py-2 text-sm font-medium transition whitespace-nowrap"
               >
                 Recent Trades
               </button>
@@ -248,8 +249,8 @@ function TradeCalculator({
                 onClick={() => toggleIgnoredOwner(opponentRoster.owner_id)}
                 className={`rounded-xl px-3 py-2 text-sm font-medium border transition whitespace-nowrap ${
                   ignoredOwnerIds.includes(opponentRoster.owner_id)
-                    ? "bg-gray-800 border-gray-700 text-gray-500 hover:border-gray-600 hover:text-gray-400"
-                    : "bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-600 hover:text-gray-300"
+                    ? "bg-slate-800 border-slate-700 text-slate-500 hover:border-slate-600 hover:text-slate-400"
+                    : "bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-600 hover:text-slate-300"
                 }`}
               >
                 {ignoredOwnerIds.includes(opponentRoster.owner_id) ? "Remove Ignore" : "Ignore Owner"}
@@ -260,36 +261,36 @@ function TradeCalculator({
 
         {/* Ignored owner warning banner */}
         {opponentRoster && ignoredOwnerIds.includes(opponentRoster.owner_id) && (
-          <div className="mt-3 flex items-start gap-2 rounded-lg border border-gray-700 bg-gray-800/50 px-3 py-2.5">
-            <span className="text-gray-500 text-sm leading-none mt-0.5">🚫</span>
+          <div className="mt-3 flex items-start gap-2 rounded-lg border border-slate-700 bg-slate-800/50 px-3 py-2.5">
+            <span className="text-slate-500 text-sm leading-none mt-0.5">🚫</span>
             <div>
-              <p className="text-sm font-medium text-gray-400">
+              <p className="text-sm font-medium text-slate-400">
                 {users[opponentRoster.owner_id] || "This owner"} is on your ignore list
               </p>
-              <p className="text-xs text-gray-600 mt-0.5">
+              <p className="text-xs text-slate-600 mt-0.5">
                 Excluded from Trade Finder and Recommendations. Click &quot;Remove Ignore&quot; above to re-enable.
               </p>
             </div>
           </div>
         )}
 
-        <label className="mt-3 flex items-center gap-2 text-xs text-gray-400 cursor-pointer select-none w-fit">
+        <label className="mt-3 flex items-center gap-2 text-xs text-slate-400 cursor-pointer select-none w-fit">
           <input
             type="checkbox"
             checked={calcShowAllPlayers}
             onChange={(e) => setCalcShowAllPlayers(e.target.checked)}
-            className="rounded border-gray-700 bg-gray-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-gray-900"
+            className="rounded border-slate-700 bg-slate-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-slate-900"
           />
           Search all players, not just current rosters
-          <span className="text-gray-600">— for logging an old offer involving someone who&apos;s since changed teams</span>
+          <span className="text-slate-600">— for logging an old offer involving someone who&apos;s since changed teams</span>
         </label>
       </div>
 
       {/* Two-column asset panels */}
       <div className="grid grid-cols-2 gap-4 mb-6">
         {/* Your assets */}
-        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
-          <div className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-3">
+        <Card>
+          <div className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-3">
             Your Assets — {user?.user_id ? (users[user.user_id] || "You") : "You"}
           </div>
           <input
@@ -297,16 +298,16 @@ function TradeCalculator({
             value={calcSearchA}
             onChange={(e) => setCalcSearchA(e.target.value)}
             placeholder={calcShowAllPlayers ? "Search all players by name..." : "Filter players..."}
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-xs mb-3 focus:outline-none focus:border-blue-500"
+            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs mb-3 focus:outline-none focus:border-blue-500"
           />
           <div className="space-y-1 max-h-56 overflow-y-auto pr-1">
             {(() => {
               if (calcShowAllPlayers) {
                 if (calcSearchA.trim().length < ALL_PLAYER_SEARCH_MIN) return (
-                  <p className="text-xs text-gray-600">Type at least 2 letters to search all players</p>
+                  <p className="text-xs text-slate-600">Type at least 2 letters to search all players</p>
                 );
                 const results = searchAllPlayers(calcSearchA, calcGive);
-                if (results.length === 0) return <p className="text-xs text-gray-600">No player found — try a different name</p>;
+                if (results.length === 0) return <p className="text-xs text-slate-600">No player found — try a different name</p>;
                 return results.map((p) =>
                   assetRow(`${p.full_name} (${p.position}${p.team ? ` · ${p.team}` : ""})`, calcVal(p.player_id),
                     () => setCalcGive((prev: string[]) => [...prev, p.player_id]), p.player_id)
@@ -326,15 +327,15 @@ function TradeCalculator({
                   onAdd: () => setCalcGivePicks((prev: string[]) => [...prev, pickKey(p)]),
                 })) : []),
               ].sort((a, b) => b.value - a.value);
-              if (items.length === 0) return <p className="text-xs text-gray-600">No assets available</p>;
+              if (items.length === 0) return <p className="text-xs text-slate-600">No assets available</p>;
               return items.map((item) => assetRow(item.label, item.value, item.onAdd, item.playerId));
             })()}
           </div>
-        </div>
+        </Card>
 
         {/* Their assets */}
-        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
-          <div className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-3">
+        <Card>
+          <div className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-3">
             {opponentRoster
               ? `${users[opponentRoster.owner_id] || "Opponent"}'s Assets`
               : "Their Assets"}
@@ -348,13 +349,13 @@ function TradeCalculator({
               : calcShowAllPlayers ? "Search all players by name..."
               : "Filter players..."
             }
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-xs mb-3 focus:outline-none focus:border-blue-500"
+            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs mb-3 focus:outline-none focus:border-blue-500"
           />
           <div className="space-y-1 max-h-56 overflow-y-auto pr-1">
             {!opponentRoster ? (() => {
               const q = calcSearchB.trim().toLowerCase();
               if (q.length < 1) return (
-                <p className="text-xs text-gray-600">Search a player name above or select an opponent from the dropdown</p>
+                <p className="text-xs text-slate-600">Search a player name above or select an opponent from the dropdown</p>
               );
               const allRosterPlayers = rosters
                 .filter((r) => r.owner_id !== user?.user_id)
@@ -372,7 +373,7 @@ function TradeCalculator({
                 )
                 .sort((a, b) => calcVal(b.player_id) - calcVal(a.player_id));
               if (allRosterPlayers.length === 0) return (
-                <p className="text-xs text-gray-600">No player found — try a different name</p>
+                <p className="text-xs text-slate-600">No player found — try a different name</p>
               );
               return allRosterPlayers.map((p) =>
                 assetRow(`${p.full_name} (${p.position} · ${p.team})`, calcVal(p.player_id), () => {
@@ -382,10 +383,10 @@ function TradeCalculator({
               );
             })() : calcShowAllPlayers ? (() => {
                 if (calcSearchB.trim().length < ALL_PLAYER_SEARCH_MIN) return (
-                  <p className="text-xs text-gray-600">Type at least 2 letters to search all players</p>
+                  <p className="text-xs text-slate-600">Type at least 2 letters to search all players</p>
                 );
                 const results = searchAllPlayers(calcSearchB, calcReceive);
-                if (results.length === 0) return <p className="text-xs text-gray-600">No player found — try a different name</p>;
+                if (results.length === 0) return <p className="text-xs text-slate-600">No player found — try a different name</p>;
                 return results.map((p) =>
                   assetRow(`${p.full_name} (${p.position}${p.team ? ` · ${p.team}` : ""})`, calcVal(p.player_id),
                     () => setCalcReceive((prev: string[]) => [...prev, p.player_id]), p.player_id)
@@ -405,12 +406,12 @@ function TradeCalculator({
                     onAdd: () => setCalcReceivePicks((prev: string[]) => [...prev, pickKey(p)]),
                   })) : []),
                 ].sort((a, b) => b.value - a.value);
-                if (items.length === 0) return <p className="text-xs text-gray-600">No assets available</p>;
+                if (items.length === 0) return <p className="text-xs text-slate-600">No assets available</p>;
                 return items.map((item) => assetRow(item.label, item.value, item.onAdd, item.playerId));
               })()
             }
           </div>
-        </div>
+        </Card>
       </div>
 
       <CalculatorResult

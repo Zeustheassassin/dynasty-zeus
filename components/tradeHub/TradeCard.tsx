@@ -12,6 +12,7 @@ import { finderPickKey } from "./finderUtils";
 import type { TradeResult } from "./finderTypes";
 import { ordinalSuffix, buildTradeFingerprint } from "./shared";
 import { computeFinderAdjustedNet, EVEN_NET_THRESHOLD } from "./calculatorUtils";
+import { Card } from "../ui/Card";
 
 interface TradeCardProps {
   trade: TradeResult;
@@ -167,10 +168,10 @@ export default function TradeCard({
   const oppNearBubble   = oppProjFinish !== null && (oppProjFinish === playoffCutline || oppProjFinish === playoffCutline + 1);
   const oppInPlayoffs   = oppProjFinish !== null && oppProjFinish <= playoffCutline;
   const oppStandingsBadgeColor = oppInPlayoffs
-    ? "border-green-700 bg-green-950/30 text-green-300"
+    ? "border-emerald-700 bg-emerald-950/30 text-emerald-300"
     : oppNearBubble
-      ? "border-yellow-700 bg-yellow-950/30 text-yellow-300"
-      : "border-gray-700 bg-gray-800/30 text-gray-400";
+      ? "border-amber-700 bg-amber-950/30 text-amber-300"
+      : "border-slate-700 bg-slate-800/30 text-slate-400";
 
   const cardLeagueId = leagueId ?? "";
 
@@ -183,7 +184,7 @@ export default function TradeCard({
     return (
       <span
         title="Your personal rank vs. market consensus"
-        className={`text-[10px] font-mono shrink-0 ${gap > 0 ? "text-green-400" : "text-red-400"}`}
+        className={`text-[10px] font-mono shrink-0 ${gap > 0 ? "text-emerald-400" : "text-red-400"}`}
       >
         {gap > 0 ? "+" : ""}{gap}
       </span>
@@ -191,12 +192,12 @@ export default function TradeCard({
   };
 
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+    <Card>
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">{trade.format}</span>
-          <span className="text-xs text-gray-500">with</span>
+          <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">{trade.format}</span>
+          <span className="text-xs text-slate-500">with</span>
           <button
             onClick={() => onSetViewRosterRosterId(trade.oppRosterId)}
             className="text-sm font-semibold text-blue-300 hover:text-blue-200 hover:underline transition"
@@ -212,7 +213,7 @@ export default function TradeCard({
             {tradeIntent.label}
           </span>
           {trade.isBuyLow && (
-            <span className="rounded-full border border-green-700 bg-green-950/40 px-2 py-0.5 text-[10px] font-semibold text-green-300">
+            <span className="rounded-full border border-emerald-700 bg-emerald-950/40 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
               Buy Low Target
             </span>
           )}
@@ -222,17 +223,17 @@ export default function TradeCard({
             </span>
           )}
         </div>
-        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${isEven ? "bg-yellow-900 text-yellow-300" : adjustedCardNet > 0 ? "bg-green-900 text-green-300" : "bg-red-900 text-red-300"}`}>
+        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${isEven ? "bg-amber-900 text-amber-300" : adjustedCardNet > 0 ? "bg-emerald-900 text-emerald-300" : "bg-red-900 text-red-300"}`}>
           {isEven ? "EVEN" : adjustedCardNet > 0 ? `+${netDisplay.toLocaleString()}` : `-${netDisplay.toLocaleString()}`}
         </span>
       </div>
       {partnerProfile?.fitReasons?.[0] && (
-        <div className="mb-3 text-xs text-gray-500">
+        <div className="mb-3 text-xs text-slate-500">
           {tradeIntent.detail} {partnerProfile.fitReasons[0] ? `• ${partnerProfile.fitReasons[0]}` : ""}
         </div>
       )}
       {!partnerProfile?.fitReasons?.[0] && (
-        <div className="mb-3 text-xs text-gray-500">
+        <div className="mb-3 text-xs text-slate-500">
           {tradeIntent.detail}
         </div>
       )}
@@ -270,9 +271,9 @@ export default function TradeCard({
         const oppBase = posTeamTotals.find((t) => t.rosterId === oppRosterId)?.totals ?? {};
 
         const rankColor = (rank: number) => {
-          if (rank <= 3) return "text-green-400";
+          if (rank <= 3) return "text-emerald-400";
           if (rank >= numTeams - 2) return "text-red-400";
-          return "text-gray-400";
+          return "text-slate-400";
         };
 
         const rows = positions.map((pos) => {
@@ -284,21 +285,21 @@ export default function TradeCard({
           const oppChanged = oppBefore !== oppAfter;
           if (!myChanged && !oppChanged) return null;
           const arrow = (before: number, after: number) =>
-            before > after ? <span className="text-green-400">&#8679;</span>
+            before > after ? <span className="text-emerald-400">&#8679;</span>
             : before < after ? <span className="text-red-400">&#8681;</span>
             : null;
           return (
             <div key={pos} className="flex items-center gap-3 text-[9px]">
-              <span className="text-gray-500 w-6">{pos}</span>
-              <span className="text-gray-600 w-8 shrink-0">You:</span>
+              <span className="text-slate-500 w-6">{pos}</span>
+              <span className="text-slate-600 w-8 shrink-0">You:</span>
               <span className={`font-mono ${rankColor(myBefore)}`}>#{myBefore}</span>
-              <span className="text-gray-600">&#8594;</span>
+              <span className="text-slate-600">&#8594;</span>
               <span className={`font-mono ${rankColor(myAfter)}`}>#{myAfter}</span>
               {arrow(myBefore, myAfter)}
-              <span className="text-gray-700 mx-1">|</span>
-              <span className="text-gray-600 w-10 shrink-0">Them:</span>
+              <span className="text-slate-700 mx-1">|</span>
+              <span className="text-slate-600 w-10 shrink-0">Them:</span>
               <span className={`font-mono ${rankColor(oppBefore)}`}>#{oppBefore}</span>
-              <span className="text-gray-600">&#8594;</span>
+              <span className="text-slate-600">&#8594;</span>
               <span className={`font-mono ${rankColor(oppAfter)}`}>#{oppAfter}</span>
               {arrow(oppBefore, oppAfter)}
             </div>
@@ -307,7 +308,7 @@ export default function TradeCard({
 
         if (rows.length === 0) return null;
         return (
-          <div className="mb-3 bg-gray-800/50 rounded-lg px-3 py-2 space-y-0.5">
+          <div className="mb-3 bg-slate-800/50 rounded-lg px-3 py-2 space-y-0.5">
             {rows}
           </div>
         );
@@ -321,10 +322,10 @@ export default function TradeCard({
               const playerTag = leaguePlayerTags[cardLeagueId]?.[p.player_id];
               const isSweetener = p.player_id === trade.sweetenerPlayerId;
               return (
-                <div key={p.player_id} className="flex items-center justify-between bg-gray-800 rounded-lg px-2 py-1.5">
+                <div key={p.player_id} className="flex items-center justify-between bg-slate-800 rounded-lg px-2 py-1.5">
                   <div className="flex items-center gap-1.5 min-w-0">
                     <button onClick={() => onSetPlayerProfileId(p.player_id)} className="text-xs text-white hover:text-blue-400 transition truncate text-left">{p.full_name}</button>
-                    <span className="text-[10px] text-gray-500 shrink-0">{p.position}{p.team ? ` · ${p.team}` : ""}</span>
+                    <span className="text-[10px] text-slate-500 shrink-0">{p.position}{p.team ? ` · ${p.team}` : ""}</span>
                     {isSweetener && (
                       <span title="Goodwill sweetener — this owner rosters this player on their other dynasty teams. Not counted in the value totals." className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-pink-700 bg-pink-950/40 text-pink-300 shrink-0">Sweetener &#127873;</span>
                     )}
@@ -342,20 +343,20 @@ export default function TradeCard({
                     )}
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0 ml-1">
-                    {p.age && <span className="text-[10px] text-gray-500">Age {p.age}</span>}
+                    {p.age && <span className="text-[10px] text-slate-500">Age {p.age}</span>}
                     <RankGapBadge playerId={p.player_id} />
-                    <span className={`text-xs font-mono ${isSweetener ? "text-gray-600 line-through" : "text-gray-400"}`}>{p.value.toLocaleString()}</span>
+                    <span className={`text-xs font-mono ${isSweetener ? "text-slate-600 line-through" : "text-slate-400"}`}>{p.value.toLocaleString()}</span>
                     <button
                       title={playerTag === "CORE" ? "Remove Core tag" : "Tag as Core (Do Not Sell)"}
                       onClick={() => onToggleLeaguePlayerTag(cardLeagueId, p.player_id, "CORE")}
-                      className={`text-[11px] leading-none px-1 py-0.5 rounded transition ${playerTag === "CORE" ? "text-emerald-300 hover:text-gray-400" : "text-gray-600 hover:text-emerald-400"}`}
+                      className={`text-[11px] leading-none px-1 py-0.5 rounded transition ${playerTag === "CORE" ? "text-emerald-300 hover:text-slate-400" : "text-slate-600 hover:text-emerald-400"}`}
                     >
                       &#128274;
                     </button>
                     <button
                       title={playerTag === "WANT_TO_TRADE" ? "Remove Shopping tag" : "Tag as Shopping (Want to Trade)"}
                       onClick={() => onToggleLeaguePlayerTag(cardLeagueId, p.player_id, "WANT_TO_TRADE")}
-                      className={`text-[11px] leading-none px-1 py-0.5 rounded transition ${playerTag === "WANT_TO_TRADE" ? "text-orange-300 hover:text-gray-400" : "text-gray-600 hover:text-orange-400"}`}
+                      className={`text-[11px] leading-none px-1 py-0.5 rounded transition ${playerTag === "WANT_TO_TRADE" ? "text-orange-300 hover:text-slate-400" : "text-slate-600 hover:text-orange-400"}`}
                     >
                       &#128276;
                     </button>
@@ -364,12 +365,12 @@ export default function TradeCard({
               );
             })}
             {trade.givePicks.map((p) => (
-              <div key={finderPickKey(p)} className="flex items-center justify-between bg-gray-800 rounded-lg px-2 py-1.5">
+              <div key={finderPickKey(p)} className="flex items-center justify-between bg-slate-800 rounded-lg px-2 py-1.5">
                 <div className="flex items-center gap-1.5 min-w-0">
                   <span className="text-xs text-white truncate">{finderPickLabel(p)}</span>
-                  <span className="text-[10px] text-gray-500 shrink-0">PICK</span>
+                  <span className="text-[10px] text-slate-500 shrink-0">PICK</span>
                 </div>
-                <span className="text-xs text-gray-400 font-mono shrink-0 ml-1">{p.value.toLocaleString()}</span>
+                <span className="text-xs text-slate-400 font-mono shrink-0 ml-1">{p.value.toLocaleString()}</span>
               </div>
             ))}
             {cardMyDropCost > 0 && (
@@ -384,38 +385,38 @@ export default function TradeCard({
                 <span className="text-[10px] text-violet-400 font-mono">{cardStarOnGive.toLocaleString()}</span>
               </div>
             )}
-            <div className="text-[10px] text-gray-600 text-right pr-1">Total: {giveTotalAdj.toLocaleString()}</div>
+            <div className="text-[10px] text-slate-600 text-right pr-1">Total: {giveTotalAdj.toLocaleString()}</div>
           </div>
         </div>
         <div>
-          <div className="text-[10px] font-bold uppercase tracking-widest text-green-400 mb-1.5">You Receive</div>
+          <div className="text-[10px] font-bold uppercase tracking-widest text-emerald-400 mb-1.5">You Receive</div>
           <div className="space-y-1">
             {trade.receive.map((p) => (
-              <div key={p.player_id} className="flex items-center justify-between bg-gray-800 rounded-lg px-2 py-1.5">
+              <div key={p.player_id} className="flex items-center justify-between bg-slate-800 rounded-lg px-2 py-1.5">
                 <div className="flex items-center gap-1.5 min-w-0">
                   <button onClick={() => onSetPlayerProfileId(p.player_id)} className="text-xs text-white hover:text-blue-400 transition truncate text-left">{p.full_name}</button>
-                  <span className="text-[10px] text-gray-500 shrink-0">{p.position}{p.team ? ` · ${p.team}` : ""}</span>
+                  <span className="text-[10px] text-slate-500 shrink-0">{p.position}{p.team ? ` · ${p.team}` : ""}</span>
                   {marketSignalMap.get(p.player_id) === "BUY_LOW" && (
-                    <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-green-700 bg-green-950/40 text-green-300 shrink-0">Buy Low &#8681;</span>
+                    <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-emerald-700 bg-emerald-950/40 text-emerald-300 shrink-0">Buy Low &#8681;</span>
                   )}
                   {marketSignalMap.get(p.player_id) === "LIQUID" && (
                     <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-sky-700 bg-sky-950/40 text-sky-300 shrink-0">Active</span>
                   )}
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0 ml-1">
-                  {p.age && <span className="text-[10px] text-gray-500">Age {p.age}</span>}
+                  {p.age && <span className="text-[10px] text-slate-500">Age {p.age}</span>}
                   <RankGapBadge playerId={p.player_id} />
-                  <span className="text-xs text-gray-400 font-mono">{p.value.toLocaleString()}</span>
+                  <span className="text-xs text-slate-400 font-mono">{p.value.toLocaleString()}</span>
                 </div>
               </div>
             ))}
             {trade.receivePicks.map((p) => (
-              <div key={finderPickKey(p)} className="flex items-center justify-between bg-gray-800 rounded-lg px-2 py-1.5">
+              <div key={finderPickKey(p)} className="flex items-center justify-between bg-slate-800 rounded-lg px-2 py-1.5">
                 <div className="flex items-center gap-1.5 min-w-0">
                   <span className="text-xs text-white truncate">{finderPickLabel(p)}</span>
-                  <span className="text-[10px] text-gray-500 shrink-0">PICK</span>
+                  <span className="text-[10px] text-slate-500 shrink-0">PICK</span>
                 </div>
-                <span className="text-xs text-gray-400 font-mono shrink-0 ml-1">{p.value.toLocaleString()}</span>
+                <span className="text-xs text-slate-400 font-mono shrink-0 ml-1">{p.value.toLocaleString()}</span>
               </div>
             ))}
             {cardOppDropCost > 0 && (
@@ -430,14 +431,14 @@ export default function TradeCard({
                 <span className="text-[10px] text-violet-400 font-mono">{cardStarOnReceive.toLocaleString()}</span>
               </div>
             )}
-            <div className="text-[10px] text-gray-600 text-right pr-1">Total: {receiveTotalAdj.toLocaleString()}</div>
+            <div className="text-[10px] text-slate-600 text-right pr-1">Total: {receiveTotalAdj.toLocaleString()}</div>
           </div>
         </div>
       </div>
       {/* Trade Reasoning expander */}
       {scoreFactors.length > 0 && (
         <details className="mt-3 group">
-          <summary className="cursor-pointer text-[11px] text-gray-500 hover:text-gray-300 transition list-none flex items-center gap-1 select-none">
+          <summary className="cursor-pointer text-[11px] text-slate-500 hover:text-slate-300 transition list-none flex items-center gap-1 select-none">
             <span className="group-open:rotate-90 inline-block transition-transform">&#9656;</span>
             Why this trade?
           </summary>
@@ -447,7 +448,7 @@ export default function TradeCard({
                 key={f.label}
                 className={`rounded-full px-2 py-0.5 text-[10px] font-medium border ${
                   f.positive
-                    ? "border-green-800 bg-green-950/30 text-green-300"
+                    ? "border-emerald-800 bg-emerald-950/30 text-emerald-300"
                     : "border-red-800 bg-red-950/30 text-red-300"
                 }`}
               >
@@ -462,7 +463,7 @@ export default function TradeCard({
       <div className="mt-3 flex gap-2">
         <button
           onClick={() => onOpenInCalculator(trade)}
-          className="flex-1 text-xs text-gray-500 hover:text-blue-400 border border-gray-700 hover:border-blue-500 rounded-lg py-1.5 transition"
+          className="flex-1 text-xs text-slate-500 hover:text-blue-400 border border-slate-700 hover:border-blue-500 rounded-lg py-1.5 transition"
         >
           Open in Calculator &#8594;
         </button>
@@ -493,13 +494,13 @@ export default function TradeCard({
                 });
                 onSessionMark(fp);
               }}
-              className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition shrink-0 ${alreadyMarked ? "border-green-700 text-green-400 cursor-default" : "border-orange-700 text-orange-400 hover:border-orange-500"}`}
+              className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition shrink-0 ${alreadyMarked ? "border-emerald-700 text-emerald-400 cursor-default" : "border-orange-700 text-orange-400 hover:border-orange-500"}`}
             >
               {alreadyMarked ? "✓ Offered" : "I Sent This"}
             </button>
           );
         })()}
       </div>
-    </div>
+    </Card>
   );
 }

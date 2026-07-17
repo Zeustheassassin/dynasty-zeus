@@ -10,6 +10,7 @@ import { useLeague } from "../../lib/LeagueContext";
 import { buildTradeFingerprint } from "./shared";
 import { computePosTotals, computeLeagueRank } from "./calculatorUtils";
 import { CHART_CHROME, CHART_DIVERGING } from "../../lib/chartTheme";
+import { Card } from "../ui/Card";
 
 interface CalculatorResultProps {
   calcGive: string[];
@@ -94,7 +95,7 @@ function TradeMarginGauge({ net, totalGiveAdj, totalReceiveAdj }: { net: number;
           }}
         />
       </div>
-      <div className="text-[10px] text-gray-600 mt-1 text-center">Margin</div>
+      <div className="text-[10px] text-slate-600 mt-1 text-center">Margin</div>
     </div>
   );
 }
@@ -113,11 +114,11 @@ function CalculatorResult({
   const { selectedLeague, rosters, users } = useLeague();
 
   const tradeRow = (label: string, value: number, onRemove: () => void) => (
-    <div key={label} className="flex items-center justify-between px-3 py-1.5 bg-gray-800 rounded-lg">
+    <div key={label} className="flex items-center justify-between px-3 py-1.5 bg-slate-800 rounded-lg">
       <span className="text-sm truncate">{label}</span>
       <div className="flex items-center gap-2 shrink-0 ml-2">
         <span className="text-xs text-blue-300 font-mono">{value > 0 ? value.toLocaleString() : "—"}</span>
-        <button onClick={onRemove} className="text-gray-600 hover:text-red-400 text-xs">✕</button>
+        <button onClick={onRemove} className="text-slate-600 hover:text-red-400 text-xs">✕</button>
       </div>
     </div>
   );
@@ -125,14 +126,14 @@ function CalculatorResult({
   return (
     <>
       {/* Trade summary */}
-      <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5">
+      <Card padding="lg">
         <div className="grid grid-cols-2 gap-6">
           {/* You Give */}
           <div>
             <div className="text-xs font-bold uppercase tracking-widest text-red-400 mb-2">You Give</div>
             <div className="space-y-1 min-h-[48px]">
               {calcGive.length === 0 && calcGivePicks.length === 0 && (
-                <p className="text-xs text-gray-600">Click assets above to add</p>
+                <p className="text-xs text-slate-600">Click assets above to add</p>
               )}
               {calcGive.map((id: string) => {
                 const p = players[id];
@@ -150,29 +151,29 @@ function CalculatorResult({
               })}
             </div>
             {myDropCostCalc > 0 && (
-              <div className="flex items-center justify-between px-3 py-1.5 bg-gray-800 rounded-lg">
+              <div className="flex items-center justify-between px-3 py-1.5 bg-slate-800 rounded-lg">
                 <span className="text-xs text-amber-400 italic">Your Drop Cost</span>
                 <span className="text-xs text-amber-400 font-mono">+{myDropCostCalc.toLocaleString()}</span>
               </div>
             )}
             {calcStarOnGive < 0 && (
-              <div className="flex items-center justify-between px-3 py-1.5 bg-gray-800 rounded-lg">
+              <div className="flex items-center justify-between px-3 py-1.5 bg-slate-800 rounded-lg">
                 <span className="text-xs text-violet-400 italic">Star Discount</span>
                 <span className="text-xs text-violet-400 font-mono">{calcStarOnGive.toLocaleString()}</span>
               </div>
             )}
-            <div className="mt-3 pt-2 border-t border-gray-700 flex justify-between items-center">
-              <span className="text-xs text-gray-500">Total</span>
+            <div className="mt-3 pt-2 border-t border-slate-700 flex justify-between items-center">
+              <span className="text-xs text-slate-500">Total</span>
               <span className="text-base font-bold text-red-400">{totalGiveAdj.toLocaleString()}</span>
             </div>
           </div>
 
           {/* You Receive */}
           <div>
-            <div className="text-xs font-bold uppercase tracking-widest text-green-400 mb-2">You Receive</div>
+            <div className="text-xs font-bold uppercase tracking-widest text-emerald-400 mb-2">You Receive</div>
             <div className="space-y-1 min-h-[48px]">
               {calcReceive.length === 0 && calcReceivePicks.length === 0 && (
-                <p className="text-xs text-gray-600">Click assets above to add</p>
+                <p className="text-xs text-slate-600">Click assets above to add</p>
               )}
               {calcReceive.map((id: string) => {
                 const p = players[id];
@@ -190,31 +191,31 @@ function CalculatorResult({
               })}
             </div>
             {oppDropCostCalc > 0 && (
-              <div className="flex items-center justify-between px-3 py-1.5 bg-gray-800 rounded-lg">
+              <div className="flex items-center justify-between px-3 py-1.5 bg-slate-800 rounded-lg">
                 <span className="text-xs text-amber-400 italic">Their Drop Cost</span>
                 <span className="text-xs text-amber-400 font-mono">+{oppDropCostCalc.toLocaleString()}</span>
               </div>
             )}
             {calcStarOnReceive < 0 && (
-              <div className="flex items-center justify-between px-3 py-1.5 bg-gray-800 rounded-lg">
+              <div className="flex items-center justify-between px-3 py-1.5 bg-slate-800 rounded-lg">
                 <span className="text-xs text-violet-400 italic">Star Discount</span>
                 <span className="text-xs text-violet-400 font-mono">{calcStarOnReceive.toLocaleString()}</span>
               </div>
             )}
-            <div className="mt-3 pt-2 border-t border-gray-700 flex justify-between items-center">
-              <span className="text-xs text-gray-500">Total</span>
-              <span className="text-base font-bold text-green-400">{totalReceiveAdj.toLocaleString()}</span>
+            <div className="mt-3 pt-2 border-t border-slate-700 flex justify-between items-center">
+              <span className="text-xs text-slate-500">Total</span>
+              <span className="text-base font-bold text-emerald-400">{totalReceiveAdj.toLocaleString()}</span>
             </div>
           </div>
         </div>
 
         {/* Verdict */}
         {(calcGive.length > 0 || calcGivePicks.length > 0 || calcReceive.length > 0 || calcReceivePicks.length > 0) && (
-          <div className="mt-4 pt-4 border-t border-gray-700 flex items-center justify-between flex-wrap gap-4">
+          <div className="mt-4 pt-4 border-t border-slate-700 flex items-center justify-between flex-wrap gap-4">
             <div>
               <span className={`text-xl font-black ${verdictColor}`}>{verdict}</span>
               {verdict !== "EVEN" && (
-                <span className="ml-2 text-sm text-gray-400">
+                <span className="ml-2 text-sm text-slate-400">
                   by {Math.abs(net).toLocaleString()} pts
                 </span>
               )}
@@ -262,7 +263,7 @@ function CalculatorResult({
                   };
                 };
                 if (alreadyMarked) {
-                  return <span className="text-xs text-green-400 font-semibold">✓ Recorded</span>;
+                  return <span className="text-xs text-emerald-400 font-semibold">✓ Recorded</span>;
                 }
                 return (
                   <div className="flex gap-2">
@@ -289,14 +290,14 @@ function CalculatorResult({
               })()}
               <button
                 onClick={() => { setCalcGive([]); setCalcReceive([]); setCalcGivePicks([]); setCalcReceivePicks([]); }}
-                className="text-xs text-gray-600 hover:text-gray-300 transition"
+                className="text-xs text-slate-600 hover:text-slate-300 transition"
               >
                 Clear trade
               </button>
             </div>
           </div>
         )}
-      </div>
+      </Card>
 
       {/* Position Health Panel */}
       {(calcGive.length > 0 || calcReceive.length > 0) && (() => {
@@ -313,17 +314,17 @@ function CalculatorResult({
         });
         const positions = ["QB", "RB", "WR", "TE"] as const;
         return (
-          <div className="mt-4 bg-gray-900 border border-gray-800 rounded-2xl p-4">
-            <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-3">Position Health</h3>
+          <Card className="mt-4">
+            <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-3">Position Health</h3>
             <div className="grid grid-cols-4 gap-2">
               {positions.map((pos) => {
                 const preRank = computeLeagueRank(allTeamsCalcPos, pos, preT[pos], rosters.length);
                 const postRank = computeLeagueRank(allTeamsCalcPos, pos, postT[pos], rosters.length);
                 const delta = preRank - postRank;
-                const color = delta > 0 ? "text-green-400" : delta < 0 ? "text-red-400" : "text-gray-500";
+                const color = delta > 0 ? "text-emerald-400" : delta < 0 ? "text-red-400" : "text-slate-500";
                 return (
-                  <div key={pos} className="bg-gray-800 rounded-xl p-3 text-center">
-                    <div className="text-[10px] font-bold uppercase tracking-widest text-gray-500 mb-1">{pos}</div>
+                  <div key={pos} className="bg-slate-800 rounded-xl p-3 text-center">
+                    <div className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1">{pos}</div>
                     <div className="text-sm font-bold text-white">#{postRank}</div>
                     <div className={`text-[10px] mt-0.5 ${color}`}>
                       {delta > 0 ? `▲${delta}` : delta < 0 ? `▼${Math.abs(delta)}` : "—"} from #{preRank}
@@ -332,7 +333,7 @@ function CalculatorResult({
                 );
               })}
             </div>
-          </div>
+          </Card>
         );
       })()}
 
@@ -386,24 +387,24 @@ function CalculatorResult({
 
           return (
             <div className="mt-4 flex justify-center">
-              <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5 w-full max-w-md">
-                <h3 className="text-sm font-semibold text-gray-200 mb-3">Equalize the Trade</h3>
-                <div className="flex justify-end gap-6 text-[11px] text-gray-500 mb-1 pr-9">
+              <Card padding="lg" className="w-full max-w-md">
+                <h3 className="text-sm font-semibold text-slate-200 mb-3">Equalize the Trade</h3>
+                <div className="flex justify-end gap-6 text-[11px] text-slate-500 mb-1 pr-9">
                   <span>Age</span>
                   <span>Value</span>
                 </div>
                 <div className="space-y-1">
                   {suggestions.map((s) => (
-                    <div key={s.label} className="flex items-center justify-between px-3 py-2 bg-gray-800 rounded-lg">
+                    <div key={s.label} className="flex items-center justify-between px-3 py-2 bg-slate-800 rounded-lg">
                       <div className="flex items-center gap-2 min-w-0">
                         <span className="text-sm font-medium text-blue-400 truncate">{s.label}</span>
-                        <span className="text-[10px] bg-gray-700 text-gray-400 px-1.5 py-0.5 rounded font-bold uppercase shrink-0">
+                        <span className="text-[10px] bg-slate-700 text-slate-400 px-1.5 py-0.5 rounded font-bold uppercase shrink-0">
                           {s.isPick ? "PICK" : s.position}
                         </span>
                       </div>
                       <div className="flex items-center gap-3 shrink-0 ml-3">
-                        <span className="text-xs text-gray-400 w-8 text-right">{s.age ?? ""}</span>
-                        <span className="text-xs font-mono text-gray-300 w-12 text-right">{s.value.toLocaleString()}</span>
+                        <span className="text-xs text-slate-400 w-8 text-right">{s.age ?? ""}</span>
+                        <span className="text-xs font-mono text-slate-300 w-12 text-right">{s.value.toLocaleString()}</span>
                         <button
                           onClick={s.onAdd}
                           className="w-6 h-6 bg-blue-500 hover:bg-blue-400 rounded-full flex items-center justify-center text-white text-sm font-bold transition shrink-0"
@@ -414,12 +415,12 @@ function CalculatorResult({
                     </div>
                   ))}
                 </div>
-              </div>
+              </Card>
             </div>
           );
         })()}
 
-      <p className="text-[10px] text-gray-700 mt-3">
+      <p className="text-[10px] text-slate-700 mt-3">
         Pick values shown as averages for that round. Drop Cost reflects the value of the lowest-ranked player your roster would need to cut to absorb extra incoming players. Star Discount applies when the best piece returning is far below the value of the star you&apos;re trading away.
       </p>
     </>

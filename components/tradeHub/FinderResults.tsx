@@ -110,7 +110,7 @@ export default function FinderResults({
   return (
     <>
       {allTrades.length === 0 && (
-        <p className="text-gray-400 text-sm">
+        <p className="text-slate-400 text-sm">
           {pinnedPlayer
             ? `No balanced trades found involving ${pinnedPlayer.full_name}. Try a different player or hit Refresh.`
             : draftCapitalMode
@@ -120,7 +120,7 @@ export default function FinderResults({
         </p>
       )}
       {suppressedCount > 0 && (
-        <p className="text-xs text-gray-500 italic">
+        <p className="text-xs text-slate-500 italic">
           {suppressedCount} recently-offered trade{suppressedCount > 1 ? "s" : ""} hidden (28-day window).
         </p>
       )}
