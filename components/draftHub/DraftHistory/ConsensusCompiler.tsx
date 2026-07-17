@@ -45,11 +45,11 @@ export default function ConsensusCompiler({
   const ALL_COMPILED_YEARS = Object.keys(consensusMeta).map(Number).sort().reverse();
 
   return (
-    <div className="rounded-xl border border-gray-700 bg-gray-800/40 p-4 mb-4">
+    <div className="rounded-xl border border-slate-700 bg-slate-800/40 p-4 mb-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-white">Network Consensus</div>
-          <div className="text-xs text-gray-400 mt-0.5">
+          <div className="text-xs text-slate-400 mt-0.5">
             {hasMeta
               ? `${meta!.draftCount} rookie drafts · ${meta!.leagueCount} leagues · last compiled ${new Date(meta!.compiledAt).toLocaleDateString()}`
               : supabaseUser
@@ -61,7 +61,7 @@ export default function ConsensusCompiler({
           {supabaseUser && !compiling && (
             <button
               onClick={() => setShowCompilePanel((v) => !v)}
-              className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded-lg transition font-medium"
+              className="text-xs bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded-lg transition font-medium"
             >
               {showCompilePanel ? "Hide" : hasMeta ? "Recompile" : "Compile Now"}
             </button>
@@ -80,8 +80,8 @@ export default function ConsensusCompiler({
 
       {/* Year selector + launch */}
       {showCompilePanel && !compiling && (
-        <div className="mt-3 border-t border-gray-700 pt-3">
-          <div className="text-xs text-gray-400 mb-2">
+        <div className="mt-3 border-t border-slate-700 pt-3">
+          <div className="text-xs text-slate-400 mb-2">
             Select years to compile. Existing data for each selected year will be replaced.
           </div>
           <div className="flex flex-wrap gap-1.5 mb-3">
@@ -99,12 +99,12 @@ export default function ConsensusCompiler({
                   className={`text-xs px-2.5 py-1 rounded-lg border transition flex items-center gap-1 ${
                     sel
                       ? "border-blue-600 bg-blue-900/30 text-blue-300"
-                      : "border-gray-700 bg-gray-800 text-gray-400"
+                      : "border-slate-700 bg-slate-800 text-slate-400"
                   }`}
                 >
                   {yr}
                   {yrMeta && (
-                    <span className="text-[9px] text-green-400 font-semibold">✓{yrMeta.draftCount}d</span>
+                    <span className="text-[9px] text-emerald-400 font-semibold">✓{yrMeta.draftCount}d</span>
                   )}
                 </button>
               );
@@ -119,27 +119,27 @@ export default function ConsensusCompiler({
                 runCompile(years);
               }}
               disabled={compileSelectedYears.size === 0}
-              className="text-xs bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white px-4 py-1.5 rounded-lg transition font-semibold"
+              className="text-xs bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white px-4 py-1.5 rounded-lg transition font-semibold"
             >
               Compile {compileSelectedYears.size} year{compileSelectedYears.size !== 1 ? "s" : ""}
             </button>
             <button
               onClick={() => setCompileSelectedYears(new Set(YEAR_RANGE))}
-              className="text-xs text-gray-400 hover:text-white transition"
+              className="text-xs text-slate-400 hover:text-white transition"
             >
               Select all
             </button>
             <button
               onClick={() => setCompileSelectedYears(new Set())}
-              className="text-xs text-gray-400 hover:text-white transition"
+              className="text-xs text-slate-400 hover:text-white transition"
             >
               Clear
             </button>
           </div>
 
           {ALL_COMPILED_YEARS.length > 0 && (
-            <div className="mt-3 pt-3 border-t border-gray-700/60">
-              <div className="text-xs text-gray-500 mb-2">Delete stored data for a year:</div>
+            <div className="mt-3 pt-3 border-t border-slate-700/60">
+              <div className="text-xs text-slate-500 mb-2">Delete stored data for a year:</div>
               <div className="flex flex-wrap gap-1.5">
                 {ALL_COMPILED_YEARS.map((yr) => (
                   <button
@@ -159,13 +159,13 @@ export default function ConsensusCompiler({
       {/* Progress bar + log */}
       {compiling && (
         <div className="mt-3">
-          <div className="h-1.5 bg-gray-700 rounded-full overflow-hidden mb-1.5">
+          <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden mb-1.5">
             <div
               className="h-full bg-blue-500 rounded-full transition-all duration-300"
               style={{ width: `${compileProgress}%` }}
             />
           </div>
-          <div className="text-[11px] text-gray-400 truncate">{compileLog}</div>
+          <div className="text-[11px] text-slate-400 truncate">{compileLog}</div>
         </div>
       )}
     </div>

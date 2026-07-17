@@ -298,11 +298,11 @@ export default function RookieBigBoard({
             aria-labelledby="add-rookie-title"
             tabIndex={-1}
             onKeyDown={(e) => { if (e.key === "Escape") setShowAddModal(false); }}
-            className="bg-gray-900 border border-gray-700 rounded-2xl p-5 w-full max-w-sm mx-4 shadow-2xl"
+            className="bg-slate-900 border border-slate-700 rounded-2xl p-5 w-full max-w-sm mx-4 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 id="add-rookie-title" className="text-white font-semibold text-sm mb-1">Add Rookie</h2>
-            <p className="text-gray-500 text-xs mb-4">
+            <p className="text-slate-500 text-xs mb-4">
               Add a player who isn&apos;t in the upstream rookie list. Spelling matters — exact matches to Sleeper&apos;s player database get team / ADP / FC value automatically.
             </p>
             <input
@@ -312,7 +312,7 @@ export default function RookieBigBoard({
               value={addName}
               onChange={(e) => setAddName(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") commitAddRookie(); }}
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:border-indigo-500 mb-3"
+              className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white text-sm placeholder-slate-500 focus:outline-none focus:border-indigo-500 mb-3"
             />
             <div className="flex gap-1.5 mb-4">
               {(["QB", "RB", "WR", "TE"] as const).map((pos) => (
@@ -322,7 +322,7 @@ export default function RookieBigBoard({
                   className={`flex-1 px-2 py-1.5 text-xs font-bold rounded border transition ${
                     addPosition === pos
                       ? posBadge[pos] + " border-transparent"
-                      : "border-gray-700 text-gray-500 hover:text-white"
+                      : "border-slate-700 text-slate-500 hover:text-white"
                   }`}
                 >
                   {pos}
@@ -332,7 +332,7 @@ export default function RookieBigBoard({
             <div className="flex justify-end gap-2">
               <button
                 onClick={() => setShowAddModal(false)}
-                className="px-4 py-1.5 text-sm text-gray-400 hover:text-white transition"
+                className="px-4 py-1.5 text-sm text-slate-400 hover:text-white transition"
               >Cancel</button>
               <button
                 onClick={commitAddRookie}
@@ -356,11 +356,11 @@ export default function RookieBigBoard({
             aria-labelledby="save-board-title"
             tabIndex={-1}
             onKeyDown={(e) => { if (e.key === "Escape" && !saving) setShowSaveModal(false); }}
-            className="bg-gray-900 border border-gray-700 rounded-2xl p-5 w-full max-w-sm mx-4 shadow-2xl"
+            className="bg-slate-900 border border-slate-700 rounded-2xl p-5 w-full max-w-sm mx-4 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 id="save-board-title" className="text-white font-semibold text-sm mb-1">Save Big Board Snapshot</h2>
-            <p className="text-gray-500 text-xs mb-4">
+            <p className="text-slate-500 text-xs mb-4">
               Give this snapshot a name. Saving with the same name overwrites the previous version.
             </p>
             <input
@@ -370,13 +370,13 @@ export default function RookieBigBoard({
               value={snapshotName}
               onChange={(e) => setSnapshotName(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") saveSnapshot(); }}
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:border-indigo-500 mb-4"
+              className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white text-sm placeholder-slate-500 focus:outline-none focus:border-indigo-500 mb-4"
             />
             <div className="flex justify-end gap-2">
               <button
                 onClick={() => setShowSaveModal(false)}
                 disabled={saving}
-                className="px-4 py-1.5 text-sm text-gray-400 hover:text-white transition disabled:opacity-50"
+                className="px-4 py-1.5 text-sm text-slate-400 hover:text-white transition disabled:opacity-50"
               >
                 Cancel
               </button>
@@ -385,7 +385,7 @@ export default function RookieBigBoard({
                 disabled={saving || !snapshotName.trim()}
                 className={`px-4 py-1.5 text-sm font-semibold rounded-lg transition disabled:opacity-50 ${
                   saveSuccess
-                    ? "bg-green-600 text-white"
+                    ? "bg-emerald-600 text-white"
                     : "bg-indigo-600 hover:bg-indigo-500 text-white"
                 }`}
               >
@@ -410,22 +410,22 @@ export default function RookieBigBoard({
               aria-labelledby="note-popup-title"
               tabIndex={-1}
               onKeyDown={(e) => { if (e.key === "Escape") setExpandedNoteId(null); }}
-              className="bg-gray-900 border border-gray-700 rounded-2xl p-5 w-full max-w-md mx-4 shadow-2xl"
+              className="bg-slate-900 border border-slate-700 rounded-2xl p-5 w-full max-w-md mx-4 shadow-2xl"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between mb-3">
                 <div>
                   <div id="note-popup-title" className="text-sm font-semibold text-white">{np?.name}</div>
-                  <div className="text-xs text-gray-500">{np?.position}{np?.team ? ` · ${np.team}` : ""}</div>
+                  <div className="text-xs text-slate-500">{np?.position}{np?.team ? ` · ${np.team}` : ""}</div>
                 </div>
-                <button aria-label="Close note editor" onClick={() => setExpandedNoteId(null)} className="text-gray-500 hover:text-white text-lg leading-none">✕</button>
+                <button aria-label="Close note editor" onClick={() => setExpandedNoteId(null)} className="text-slate-500 hover:text-white text-lg leading-none">✕</button>
               </div>
               <textarea
                 autoFocus
                 value={playerNotes[expandedNoteId] || ""}
                 onChange={(e) => saveNote(expandedNoteId, e.target.value)}
                 placeholder="Scouting notes, injury flags, scheme fit..."
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-sm text-white resize-none focus:outline-none focus:border-blue-500 placeholder:text-gray-600"
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-white resize-none focus:outline-none focus:border-blue-500 placeholder:text-slate-600"
                 rows={5}
               />
               <div className="flex justify-end mt-3">
@@ -445,14 +445,14 @@ export default function RookieBigBoard({
           placeholder="Search rookies..."
           value={rookieSearch}
           onChange={(e) => setRookieSearch(e.target.value)}
-          className="flex-1 p-2 rounded bg-gray-800 text-sm"
+          className="flex-1 p-2 rounded bg-slate-800 text-sm"
         />
         {rookieSearch && (
-          <span className="text-[11px] text-gray-500">Tiers hidden while searching</span>
+          <span className="text-[11px] text-slate-500">Tiers hidden while searching</span>
         )}
         <button
           onClick={() => setShowAddModal(true)}
-          className="px-3 py-1.5 text-xs font-semibold bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition shrink-0"
+          className="px-3 py-1.5 text-xs font-semibold bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition shrink-0"
         >
           + Add Rookie
         </button>
@@ -467,9 +467,9 @@ export default function RookieBigBoard({
       </div>
 
       {/* ±N vs FC legend */}
-      <div className="flex items-center gap-1 text-[10px] text-gray-600 mb-2 px-0.5">
+      <div className="flex items-center gap-1 text-[10px] text-slate-600 mb-2 px-0.5">
         <span>±N vs FC rank:</span>
-        <span className="text-green-500 font-semibold">+N</span>
+        <span className="text-emerald-500 font-semibold">+N</span>
         <span>you rank higher ·</span>
         <span className="text-red-500 font-semibold">−N</span>
         <span>you rank lower than FantasyCalc</span>
@@ -484,7 +484,7 @@ export default function RookieBigBoard({
             className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition ${
               posFilter === pos
                 ? posBadge[pos] + " border-transparent"
-                : "border-gray-700 text-gray-500 hover:text-white"
+                : "border-slate-700 text-slate-500 hover:text-white"
             }`}
           >
             {pos}
@@ -493,7 +493,7 @@ export default function RookieBigBoard({
         {posFilter && (
           <button
             onClick={() => setPosFilter(null)}
-            className="text-[10px] text-gray-500 hover:text-white transition ml-1"
+            className="text-[10px] text-slate-500 hover:text-white transition ml-1"
           >
             Clear
           </button>
@@ -554,11 +554,11 @@ export default function RookieBigBoard({
               >
                 {showDivider && (
                   <div className="flex items-center gap-3 my-2 px-1">
-                    <div className="flex-1 h-px bg-gray-600/50" />
+                    <div className="flex-1 h-px bg-slate-600/50" />
                     {myTier !== undefined && (
-                      <span className="text-[10px] font-bold tracking-widest text-gray-500 uppercase">Tier {myTier}</span>
+                      <span className="text-[10px] font-bold tracking-widest text-slate-500 uppercase">Tier {myTier}</span>
                     )}
-                    <div className="flex-1 h-px bg-gray-600/50" />
+                    <div className="flex-1 h-px bg-slate-600/50" />
                   </div>
                 )}
 
@@ -572,7 +572,7 @@ export default function RookieBigBoard({
                       setDragIndex(null);
                     }
                   }}
-                  className={`flex items-center justify-between bg-gray-800/70 px-3 py-1.5 mb-0.5 rounded-lg text-sm cursor-move hover:bg-gray-700/70 transition${isTaken ? " opacity-40" : ""}`}
+                  className={`flex items-center justify-between bg-slate-800/70 px-3 py-1.5 mb-0.5 rounded-lg text-sm cursor-move hover:bg-slate-700/70 transition${isTaken ? " opacity-40" : ""}`}
                 >
                   <div className="flex gap-3 items-center min-w-0">
                     <input
@@ -591,7 +591,7 @@ export default function RookieBigBoard({
                           setTempRanks((prev) => { const u = { ...prev }; delete u[originalIndex]; return u; });
                         }
                       }}
-                      className="w-12 text-center bg-transparent text-gray-400 outline-none"
+                      className="w-12 text-center bg-transparent text-slate-400 outline-none"
                     />
                     <div className="flex items-center gap-2 min-w-0">
                       {editingNameId === tierKey ? (
@@ -603,16 +603,16 @@ export default function RookieBigBoard({
                           onKeyDown={(e) => { if (e.key === "Enter") commitNameEdit(p.name); if (e.key === "Escape") setEditingNameId(null); }}
                           onClick={(e) => e.stopPropagation()}
                           onMouseDown={(e) => e.stopPropagation()}
-                          className="font-medium px-1.5 py-0.5 bg-gray-900 border border-blue-500 rounded text-white focus:outline-none min-w-0 flex-shrink"
+                          className="font-medium px-1.5 py-0.5 bg-slate-900 border border-blue-500 rounded text-white focus:outline-none min-w-0 flex-shrink"
                         />
                       ) : (
                         <span className="font-medium truncate">{p.name}</span>
                       )}
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold shrink-0 ${posBadge[p.position] || "bg-gray-700 text-gray-400"}`}>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold shrink-0 ${posBadge[p.position] || "bg-slate-700 text-slate-400"}`}>
                         {p.position}
                       </span>
-                      {p.team && <span className="text-[10px] text-gray-500 shrink-0">{p.team}</span>}
-                      {playerDynVal > 0 && <span className="text-[10px] text-gray-400 font-mono shrink-0">{playerDynVal.toLocaleString()}</span>}
+                      {p.team && <span className="text-[10px] text-slate-500 shrink-0">{p.team}</span>}
+                      {playerDynVal > 0 && <span className="text-[10px] text-slate-400 font-mono shrink-0">{playerDynVal.toLocaleString()}</span>}
                       {/* NFL Draft tag */}
                       {editingDraftId === tierKey ? (
                         <div
@@ -628,7 +628,7 @@ export default function RookieBigBoard({
                             autoFocus
                             placeholder="TM"
                             maxLength={3}
-                            className="w-9 px-1 py-0.5 bg-gray-900 border border-indigo-500 rounded text-white text-[10px] focus:outline-none text-center uppercase"
+                            className="w-9 px-1 py-0.5 bg-slate-900 border border-indigo-500 rounded text-white text-[10px] focus:outline-none text-center uppercase"
                             value={draftTeam}
                             onChange={(e) => setDraftTeam(e.target.value.toUpperCase())}
                             onKeyDown={(e) => { if (e.key === "Enter") commitDraftEdit(tierKey, draftTeam, draftRound, draftPick); if (e.key === "Escape") setEditingDraftId(null); }}
@@ -636,7 +636,7 @@ export default function RookieBigBoard({
                           <input
                             placeholder="Rd"
                             type="number" min={1} max={7}
-                            className="w-7 px-0.5 py-0.5 bg-gray-900 border border-indigo-500 rounded text-white text-[10px] focus:outline-none text-center"
+                            className="w-7 px-0.5 py-0.5 bg-slate-900 border border-indigo-500 rounded text-white text-[10px] focus:outline-none text-center"
                             value={draftRound}
                             onChange={(e) => setDraftRound(e.target.value)}
                             onKeyDown={(e) => { if (e.key === "Enter") commitDraftEdit(tierKey, draftTeam, draftRound, draftPick); if (e.key === "Escape") setEditingDraftId(null); }}
@@ -644,7 +644,7 @@ export default function RookieBigBoard({
                           <input
                             placeholder="#"
                             type="number" min={1}
-                            className="w-9 px-0.5 py-0.5 bg-gray-900 border border-indigo-500 rounded text-white text-[10px] focus:outline-none text-center"
+                            className="w-9 px-0.5 py-0.5 bg-slate-900 border border-indigo-500 rounded text-white text-[10px] focus:outline-none text-center"
                             value={draftPick}
                             onChange={(e) => setDraftPick(e.target.value)}
                             onKeyDown={(e) => { if (e.key === "Enter") commitDraftEdit(tierKey, draftTeam, draftRound, draftPick); if (e.key === "Escape") setEditingDraftId(null); }}
@@ -668,7 +668,7 @@ export default function RookieBigBoard({
                                 {label}
                               </span>
                             ) : (
-                              <span className="text-[10px] px-1.5 py-0.5 rounded border border-dashed border-gray-600 text-gray-500 hover:border-indigo-500 hover:text-indigo-400 transition font-medium">
+                              <span className="text-[10px] px-1.5 py-0.5 rounded border border-dashed border-slate-600 text-slate-500 hover:border-indigo-500 hover:text-indigo-400 transition font-medium">
                                 + NFL
                               </span>
                             )}
@@ -684,7 +684,7 @@ export default function RookieBigBoard({
                       <button
                         onClick={(e) => { e.stopPropagation(); setEditName(p.name); setEditingNameId(tierKey); }}
                         onMouseDown={(e) => e.stopPropagation()}
-                        className="text-gray-600 hover:text-blue-400 text-xs leading-none"
+                        className="text-slate-600 hover:text-blue-400 text-xs leading-none"
                         title="Edit name"
                       >✎</button>
                     )}
@@ -696,7 +696,7 @@ export default function RookieBigBoard({
                           if (entry) clearNameEdit(entry[0]);
                         }}
                         onMouseDown={(e) => e.stopPropagation()}
-                        className="text-gray-600 hover:text-yellow-400 text-xs leading-none"
+                        className="text-slate-600 hover:text-amber-400 text-xs leading-none"
                         title="Reset to original sheet name"
                       >↺</button>
                     )}
@@ -704,19 +704,19 @@ export default function RookieBigBoard({
                       <button
                         onClick={(e) => { e.stopPropagation(); if (window.confirm(`Remove ${p.name} from your rookie board?`)) removeAddedRookie(p.name); }}
                         onMouseDown={(e) => e.stopPropagation()}
-                        className="text-gray-600 hover:text-red-400 text-xs leading-none"
+                        className="text-slate-600 hover:text-red-400 text-xs leading-none"
                         title="Remove from board"
                       >✕</button>
                     )}
-                    {isTaken && <span className="text-[9px] font-bold text-gray-500 border border-gray-700 px-1 py-0.5 rounded leading-none">TAKEN</span>}
+                    {isTaken && <span className="text-[9px] font-bold text-slate-500 border border-slate-700 px-1 py-0.5 rounded leading-none">TAKEN</span>}
                     {gap === null ? (
-                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded text-gray-400 bg-gray-700/60 border border-gray-600/40" title="Not ranked by FantasyCalc">NR</span>
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded text-slate-400 bg-slate-700/60 border border-slate-600/40" title="Not ranked by FantasyCalc">NR</span>
                     ) : gap === 0 ? (
-                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded text-gray-400 bg-gray-800/40" title="Same rank as FantasyCalc">Even</span>
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded text-slate-400 bg-slate-800/40" title="Same rank as FantasyCalc">Even</span>
                     ) : (
                       <span
                         className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                          gap > 0 ? "text-green-400 bg-green-900/20" : "text-red-400 bg-red-900/20"
+                          gap > 0 ? "text-emerald-400 bg-emerald-900/20" : "text-red-400 bg-red-900/20"
                         }`}
                         title={gap > 0 ? `You rank them ${gap} spots higher than FantasyCalc` : `You rank them ${Math.abs(gap)} spots lower than FantasyCalc`}
                       >
@@ -726,7 +726,7 @@ export default function RookieBigBoard({
 
                     <button
                       onClick={(e) => { e.stopPropagation(); setExpandedNoteId(rookieKey(p)); }}
-                      className={`text-sm transition ${hasNote ? "text-amber-400 hover:text-amber-300" : "text-gray-600 hover:text-gray-400"}`}
+                      className={`text-sm transition ${hasNote ? "text-amber-400 hover:text-amber-300" : "text-slate-600 hover:text-slate-400"}`}
                       title={hasNote ? "View/edit note" : "Add note"}
                     >
                       {hasNote ? "📝" : "○"}
@@ -744,7 +744,7 @@ export default function RookieBigBoard({
                         className={`text-[10px] font-bold rounded px-1 py-0.5 outline-none cursor-pointer border transition ${
                           myTier !== undefined
                             ? "bg-blue-900/40 border-blue-800/60 text-blue-300"
-                            : "bg-gray-700/50 border-gray-700 text-gray-500"
+                            : "bg-slate-700/50 border-slate-700 text-slate-500"
                         }`}
                       >
                         <option value="">Tier</option>

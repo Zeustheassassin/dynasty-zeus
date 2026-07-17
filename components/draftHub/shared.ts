@@ -43,13 +43,13 @@ export function closestPickEquiv(playerValue: number, pickFcValues: Record<strin
 }
 
 export function pickEquivColor(equivPickNo: number, draftedPickNo: number): string {
-  if (equivPickNo === 0) return "text-gray-500";
+  if (equivPickNo === 0) return "text-slate-500";
   const diff = equivPickNo - draftedPickNo;
   if (diff <= -12) return "text-emerald-400";
-  if (diff <= -4)  return "text-green-400";
+  if (diff <= -4)  return "text-emerald-300";
   if (diff >= 12)  return "text-red-400";
   if (diff >= 4)   return "text-orange-400";
-  return "text-gray-300";
+  return "text-slate-300";
 }
 
 export function levenshtein(a: string, b: string): number {
@@ -86,8 +86,8 @@ export function toPickSlot(avgPickNo: number, teamSize = 12): string {
 }
 
 export function valueGrade(val: number): { label: string; cls: string } {
-  if (val >= 6000) return { label: "Elite",      cls: "text-yellow-400 bg-yellow-900/30 border-yellow-700/50" };
-  if (val >= 3500) return { label: "Starter",    cls: "text-green-400  bg-green-900/30  border-green-700/50"  };
+  if (val >= 6000) return { label: "Elite",      cls: "text-amber-400 bg-amber-900/30 border-amber-700/50" };
+  if (val >= 3500) return { label: "Starter",    cls: "text-emerald-400 bg-emerald-900/30 border-emerald-700/50" };
   if (val >= 1500) return { label: "Developing", cls: "text-blue-400   bg-blue-900/30   border-blue-700/50"   };
   if (val >= 500)  return { label: "Fringe",     cls: "text-orange-400 bg-orange-900/30 border-orange-700/50" };
   return               { label: "Bust",       cls: "text-red-400   bg-red-900/30    border-red-700/50"    };

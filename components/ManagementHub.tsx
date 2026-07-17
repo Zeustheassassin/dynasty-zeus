@@ -7,6 +7,8 @@ const log = logger("components/ManagementHub");
 import { SLEEPER_BASE_URL, getPaymentYears } from "../lib/constants";
 import type { LeagueMgmtData, CommPaymentsData, SleeperLeague, SleeperRoster, SleeperUser } from "../lib/types";
 import { useAuth } from "../lib/AuthContext";
+import { Card } from "./ui/Card";
+import ErrorBanner from "./ErrorBanner";
 
 // ── Column definitions (generated dynamically from current year) ───────────
 // Window: [currentYear - 1 ... currentYear + 3] — auto-advances each year.
@@ -247,37 +249,33 @@ function ManagementHub({
     <div className="max-w-6xl mx-auto px-4 py-6 space-y-5">
 
       {/* Header card */}
-      <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
+      <Card>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Management Hub</div>
-            <div className="mt-1 text-sm text-gray-200">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Management Hub</div>
+            <div className="mt-1 text-sm text-slate-200">
               Track dues, commissioner roles, and advance payments across all your leagues.
             </div>
           </div>
           {!supabaseUser && (
-            <div className="text-xs text-gray-500 sm:text-right">
+            <div className="text-xs text-slate-500 sm:text-right">
               Log in with a DynastyZeus account to save your settings.
             </div>
           )}
         </div>
-      </div>
+      </Card>
 
       {/* Save error banner */}
-      {saveError && (
-        <div className="rounded-xl border border-red-700 bg-red-900/40 px-4 py-2 text-xs text-red-300">
-          {saveError}
-        </div>
-      )}
+      <ErrorBanner message={saveError} className="text-xs" />
 
       {/* Sub-tab nav */}
-      <div className="flex gap-1 bg-gray-800/60 rounded-xl p-1">
+      <div className="flex gap-1 bg-slate-800/60 rounded-xl p-1">
         <button
           onClick={() => setMgmtHubTab("LEAGUE_MGMT")}
           className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition ${
             mgmtHubTab === "LEAGUE_MGMT"
-              ? "bg-gray-700 text-white"
-              : "text-gray-400 hover:text-white"
+              ? "bg-slate-700 text-white"
+              : "text-slate-400 hover:text-white"
           }`}
         >
           League Management
@@ -286,8 +284,8 @@ function ManagementHub({
           onClick={() => setMgmtHubTab("COMMISSIONER_TOOLS")}
           className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition ${
             mgmtHubTab === "COMMISSIONER_TOOLS"
-              ? "bg-gray-700 text-white"
-              : "text-gray-400 hover:text-white"
+              ? "bg-slate-700 text-white"
+              : "text-slate-400 hover:text-white"
           }`}
         >
           Commissioner Tools
@@ -296,8 +294,8 @@ function ManagementHub({
           onClick={() => setMgmtHubTab("BYLAWS")}
           className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition ${
             mgmtHubTab === "BYLAWS"
-              ? "bg-gray-700 text-white"
-              : "text-gray-400 hover:text-white"
+              ? "bg-slate-700 text-white"
+              : "text-slate-400 hover:text-white"
           }`}
         >
           Bylaws
@@ -306,26 +304,26 @@ function ManagementHub({
 
       {/* ── LEAGUE MANAGEMENT ── */}
       {mgmtHubTab === "LEAGUE_MGMT" && (
-        <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
+        <Card>
           {leagues.length === 0 ? (
-            <p className="text-gray-400 text-sm">Connect your Sleeper account to see your leagues.</p>
+            <p className="text-slate-400 text-sm">Connect your Sleeper account to see your leagues.</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm border-collapse">
                 <thead>
                   <tr>
-                    <th className="text-left text-gray-400 font-medium py-2 px-3 border-b border-gray-700 min-w-[140px]"></th>
-                    <th className="text-center text-gray-400 font-semibold py-2 px-3 border-b border-gray-700 border-l border-gray-700"></th>
-                    <th colSpan={PAID_YEAR_COLS.length} className="text-center text-blue-400 font-semibold py-2 px-3 border-b border-gray-700 border-l border-gray-700">Paid</th>
-                    <th colSpan={3} className="text-center text-purple-400 font-semibold py-2 px-3 border-b border-gray-700 border-l border-gray-700">Tools</th>
+                    <th className="text-left text-slate-400 font-medium py-2 px-3 border-b border-slate-700 min-w-[140px]"></th>
+                    <th className="text-center text-slate-400 font-semibold py-2 px-3 border-b border-slate-700 border-l border-slate-700"></th>
+                    <th colSpan={PAID_YEAR_COLS.length} className="text-center text-blue-400 font-semibold py-2 px-3 border-b border-slate-700 border-l border-slate-700">Paid</th>
+                    <th colSpan={3} className="text-center text-purple-400 font-semibold py-2 px-3 border-b border-slate-700 border-l border-slate-700">Tools</th>
                   </tr>
                   <tr>
-                    <th className="text-left text-gray-400 font-medium py-2 px-3 border-b border-gray-700"></th>
-                    <th className="text-center text-gray-300 font-medium py-2 px-3 border-b border-gray-700 border-l border-gray-700 min-w-[90px]">Amount</th>
+                    <th className="text-left text-slate-400 font-medium py-2 px-3 border-b border-slate-700"></th>
+                    <th className="text-center text-slate-300 font-medium py-2 px-3 border-b border-slate-700 border-l border-slate-700 min-w-[90px]">Amount</th>
                     {MGMT_COLS.map((col, ci) => (
                       <th
                         key={col.key}
-                        className={`text-center text-gray-300 font-medium py-2 px-3 border-b border-gray-700 ${ci === 0 ? "border-l border-gray-700" : ""} ${ci === PAID_YEAR_COLS.length ? "border-l border-gray-700" : ""}`}
+                        className={`text-center text-slate-300 font-medium py-2 px-3 border-b border-slate-700 ${ci === 0 ? "border-l border-slate-700" : ""} ${ci === PAID_YEAR_COLS.length ? "border-l border-slate-700" : ""}`}
                       >
                         {col.label}
                       </th>
@@ -337,26 +335,26 @@ function ManagementHub({
                     const row = leagueMgmtData[league.league_id] || {};
                     return (
                       <tr key={league.league_id} className={idx % 2 === 0 ? "bg-slate-900" : "bg-slate-950"}>
-                        <td className="py-2 px-3 text-white font-medium whitespace-nowrap border-r border-gray-800">
+                        <td className="py-2 px-3 text-white font-medium whitespace-nowrap border-r border-slate-800">
                           {league.name}
                         </td>
-                        <td className="text-center py-1.5 px-2 border-l border-gray-700">
+                        <td className="text-center py-1.5 px-2 border-l border-slate-700">
                           <div className="relative flex items-center">
-                            <span className="absolute left-2 text-gray-400 text-xs pointer-events-none">$</span>
+                            <span className="absolute left-2 text-slate-400 text-xs pointer-events-none">$</span>
                             <input
                               type="text"
                               value={row.amount ?? ""}
                               onChange={(e) => handleAmountChange(league.league_id, e.target.value)}
                               onBlur={() => handleAmountBlur(league.league_id)}
                               placeholder="0"
-                              className="w-20 pl-4 pr-2 py-1 text-xs text-white bg-gray-800 border border-gray-600 rounded focus:outline-none focus:border-blue-500 text-right"
+                              className="w-20 pl-4 pr-2 py-1 text-xs text-white bg-slate-800 border border-slate-600 rounded focus:outline-none focus:border-blue-500 text-right"
                             />
                           </div>
                         </td>
                         {MGMT_COLS.map((col, ci) => (
                           <td
                             key={col.key}
-                            className={`text-center py-2 px-3 ${ci === 0 ? "border-l border-gray-700" : ""} ${ci === PAID_YEAR_COLS.length ? "border-l border-gray-700" : ""}`}
+                            className={`text-center py-2 px-3 ${ci === 0 ? "border-l border-slate-700" : ""} ${ci === PAID_YEAR_COLS.length ? "border-l border-slate-700" : ""}`}
                           >
                             <input
                               type="checkbox"
@@ -373,14 +371,14 @@ function ManagementHub({
               </table>
             </div>
           )}
-        </div>
+        </Card>
       )}
 
       {/* ── COMMISSIONER TOOLS ── */}
       {mgmtHubTab === "COMMISSIONER_TOOLS" && (
-        <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
+        <Card>
           {commLeagues.length === 0 ? (
-            <p className="text-gray-400 text-sm">
+            <p className="text-slate-400 text-sm">
               No leagues marked as Commissioner in League Management. Check the{" "}
               <button
                 onClick={() => setMgmtHubTab("LEAGUE_MGMT")}
@@ -393,11 +391,11 @@ function ManagementHub({
           ) : (
             <div>
               <div className="mb-5">
-                <div className="text-xs text-gray-400 mb-1.5">Select League</div>
+                <div className="text-xs text-slate-400 mb-1.5">Select League</div>
                 <select
                   value={commToolsLeagueId}
                   onChange={(e) => handleCommLeagueSelect(e.target.value)}
-                  className="rounded-xl border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                  className="rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
                 >
                   <option value="">Select a league</option>
                   {commLeagues.map((l) => (
@@ -408,9 +406,9 @@ function ManagementHub({
 
               {commToolsLeagueId && (
                 loadingCommToolsRosters ? (
-                  <div className="text-sm text-gray-400">Loading owners...</div>
+                  <div className="text-sm text-slate-400">Loading owners...</div>
                 ) : commToolsRosters.length === 0 ? (
-                  <div className="text-sm text-gray-400">No roster data found.</div>
+                  <div className="text-sm text-slate-400">No roster data found.</div>
                 ) : (() => {
                   const totalOwners = commToolsRosters.filter((r) => r.owner_id).length;
                   return (
@@ -418,16 +416,16 @@ function ManagementHub({
                       <table className="w-full text-sm border-collapse">
                         <thead>
                           <tr>
-                            <th className="text-left text-gray-400 font-medium py-2 px-3 border-b border-gray-700 min-w-[160px]">Owner</th>
+                            <th className="text-left text-slate-400 font-medium py-2 px-3 border-b border-slate-700 min-w-[160px]">Owner</th>
                             {PAID_YEAR_COLS.map((col) => {
                               const paidCount = commToolsRosters.filter(
                                 (r) => r.owner_id && (commPaymentsData[commToolsLeagueId] || {})[r.owner_id]?.[col.key]
                               ).length;
                               const allPaid = totalOwners > 0 && paidCount === totalOwners;
                               return (
-                                <th key={col.key} className="text-center text-blue-400 font-medium py-2 px-3 border-b border-gray-700">
+                                <th key={col.key} className="text-center text-blue-400 font-medium py-2 px-3 border-b border-slate-700">
                                   <div>{col.label}</div>
-                                  <div className="text-[10px] text-gray-500 font-normal mt-0.5">
+                                  <div className="text-[10px] text-slate-500 font-normal mt-0.5">
                                     {paidCount}/{totalOwners} paid
                                   </div>
                                   <button
@@ -451,7 +449,7 @@ function ManagementHub({
                             const ownerPayments = (commPaymentsData[commToolsLeagueId] || {})[ownerId] || {};
                             return (
                               <tr key={ownerId} className={idx % 2 === 0 ? "bg-slate-900" : "bg-slate-950"}>
-                                <td className="py-2 px-3 text-white font-medium whitespace-nowrap border-r border-gray-800">
+                                <td className="py-2 px-3 text-white font-medium whitespace-nowrap border-r border-slate-800">
                                   {displayName}
                                 </td>
                                 {PAID_YEAR_COLS.map((col) => (
@@ -475,20 +473,20 @@ function ManagementHub({
               )}
             </div>
           )}
-        </div>
+        </Card>
       )}
 
       {/* ── BYLAWS ── */}
       {mgmtHubTab === "BYLAWS" && (
-        <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4 space-y-3">
+        <Card className="space-y-3">
           {leagues.length === 0 ? (
-            <p className="text-gray-400 text-sm">Connect your Sleeper account to see your leagues.</p>
+            <p className="text-slate-400 text-sm">Connect your Sleeper account to see your leagues.</p>
           ) : bylawsLeague ? (
             <>
               <div className="flex items-center gap-3">
-                <span className="text-sm font-semibold text-gray-300">Bylaws for:</span>
+                <span className="text-sm font-semibold text-slate-300">Bylaws for:</span>
                 <select
-                  className="bg-gray-800 border border-gray-700 text-sm text-white rounded-lg px-2 py-1 focus:outline-none focus:border-blue-500"
+                  className="bg-slate-800 border border-slate-700 text-sm text-white rounded-lg px-2 py-1 focus:outline-none focus:border-blue-500"
                   value={bylawsLeague.league_id}
                   onChange={(e) => setBylawsLeagueId(e.target.value)}
                 >
@@ -496,19 +494,19 @@ function ManagementHub({
                 </select>
               </div>
               <textarea
-                className="w-full h-80 bg-gray-900 border border-gray-700 rounded-xl p-4 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 resize-none"
+                className="w-full h-80 bg-slate-900 border border-slate-700 rounded-xl p-4 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-blue-500 resize-none"
                 placeholder={`Record ${bylawsLeague.name}'s constitution, dues, scoring rules, keeper/rookie draft rules, tiebreakers…`}
                 value={leagueBylaws[bylawsLeague.league_id] ?? ""}
                 onChange={(e) => { saveLeagueBylaws(bylawsLeague.league_id, e.target.value); setLastBylawsSavedAt(Date.now()); }}
               />
-              <p className="text-[10px] text-gray-600">
+              <p className="text-[10px] text-slate-600">
                 {lastBylawsSavedAt
-                  ? <span className="text-green-600">✓ Saved just now{supabaseUser ? " · syncing across devices" : ""}</span>
+                  ? <span className="text-emerald-500">✓ Saved just now{supabaseUser ? " · syncing across devices" : ""}</span>
                   : supabaseUser ? "Bylaws sync across your devices." : "Log in with a DynastyZeus account to save your bylaws."}
               </p>
             </>
           ) : null}
-        </div>
+        </Card>
       )}
 
     </div>

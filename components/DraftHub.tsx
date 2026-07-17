@@ -25,7 +25,7 @@ function HistoricalSection() {
             key={v}
             onClick={() => setView(v)}
             className={`px-3 py-1.5 rounded-full text-xs font-semibold transition ${
-              view === v ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:text-white"
+              view === v ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:text-white"
             }`}
           >
             {v === "BIG_BOARDS" ? "Big Boards" : "League Drafts"}
@@ -117,7 +117,7 @@ function DraftHub({
   return (
     <div className="p-4">
       {/* ── Tab nav ── */}
-      <div className="flex justify-center border-b border-gray-700 mb-6 overflow-x-auto">
+      <div className="flex justify-center border-b border-slate-700 mb-6 overflow-x-auto">
         <div className="flex gap-6 text-center">
           {TABS.map((tab) => (
             <button
@@ -126,7 +126,7 @@ function DraftHub({
               className={`pb-2 px-1 text-sm font-semibold whitespace-nowrap transition ${
                 draftHubSection === tab.key
                   ? "border-b-2 border-blue-400 text-blue-400"
-                  : "text-gray-400 hover:text-white"
+                  : "text-slate-400 hover:text-white"
               }`}
             >
               {tab.label}

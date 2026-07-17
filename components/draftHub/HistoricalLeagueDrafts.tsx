@@ -53,19 +53,19 @@ export default function HistoricalLeagueDrafts() {
   const selected = leagueSnapshots.find((s) => s.id === activeId);
 
   if (!supabaseUser) {
-    return <div className="text-gray-500 text-center py-16 text-sm">Sign in to view saved drafts.</div>;
+    return <div className="text-slate-500 text-center py-16 text-sm">Sign in to view saved drafts.</div>;
   }
   if (loading) {
-    return <div className="text-gray-500 text-center py-16 text-sm">Loading…</div>;
+    return <div className="text-slate-500 text-center py-16 text-sm">Loading…</div>;
   }
   if (!selectedLeague) {
-    return <div className="text-gray-500 text-center py-16 text-sm">Select a league to view its saved drafts.</div>;
+    return <div className="text-slate-500 text-center py-16 text-sm">Select a league to view its saved drafts.</div>;
   }
   if (leagueSnapshots.length === 0) {
     return (
       <div className="text-center py-16">
-        <p className="text-gray-400 text-sm font-medium">No saved drafts for {selectedLeague.name} yet.</p>
-        <p className="text-gray-600 text-xs mt-1">
+        <p className="text-slate-400 text-sm font-medium">No saved drafts for {selectedLeague.name} yet.</p>
+        <p className="text-slate-600 text-xs mt-1">
           Once a rookie draft completes, hit <span className="text-indigo-400 font-semibold">Save Snapshot</span> on the Live Draft Board to freeze it here.
         </p>
       </div>
@@ -83,7 +83,7 @@ export default function HistoricalLeagueDrafts() {
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
                 activeId === s.id
                   ? "bg-indigo-600 text-white"
-                  : "bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white"
+                  : "bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white"
               }`}
             >
               {s.name}
@@ -91,7 +91,7 @@ export default function HistoricalLeagueDrafts() {
             <button
               onClick={() => deleteSnapshot(s.id)}
               disabled={deleting === s.id}
-              className="text-gray-700 hover:text-red-400 transition text-xs leading-none opacity-0 group-hover:opacity-100"
+              className="text-slate-700 hover:text-red-400 transition text-xs leading-none opacity-0 group-hover:opacity-100"
               title="Delete snapshot"
             >
               ✕
@@ -119,14 +119,14 @@ function SnapshotGrid({ snapshot }: { snapshot: LeagueDraftSnapshot }) {
       <div className="flex items-center justify-between mb-3">
         <div>
           <h3 className="text-white font-semibold text-sm">{snapshot.name}</h3>
-          <span className="text-[11px] text-gray-500">
+          <span className="text-[11px] text-slate-500">
             {data.leagueName ? `${data.leagueName} · ` : ""}
             {data.season} Rookie Draft · Saved {new Date(snapshot.saved_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
           </span>
         </div>
-        <div className="flex items-center gap-4 text-[10px] text-gray-500 flex-wrap">
+        <div className="flex items-center gap-4 text-[10px] text-slate-500 flex-wrap">
           <span className="text-orange-400 font-bold">REACH</span><span>&gt;7 ahead of pool rank</span>
-          <span className="text-green-400 font-bold">VALUE</span><span>&gt;4 after pool rank</span>
+          <span className="text-emerald-400 font-bold">VALUE</span><span>&gt;4 after pool rank</span>
         </div>
       </div>
 
@@ -155,24 +155,24 @@ function SnapshotGrid({ snapshot }: { snapshot: LeagueDraftSnapshot }) {
               return (
                 <div
                   key={`${round}-${slotInRound}`}
-                  className="relative min-w-0 h-20 rounded-md flex flex-col justify-center items-center text-xs px-2 gap-0.5 border border-gray-700 bg-gray-800"
+                  className="relative min-w-0 h-20 rounded-md flex flex-col justify-center items-center text-xs px-2 gap-0.5 border border-slate-700 bg-slate-800"
                 >
                   {pick ? (
                     <>
                       {isReach && <span className="absolute top-0.5 left-1 text-[8px] font-bold text-orange-400">REACH</span>}
-                      {isValue && <span className="absolute top-0.5 left-1 text-[8px] font-bold text-green-400">VALUE</span>}
+                      {isValue && <span className="absolute top-0.5 left-1 text-[8px] font-bold text-emerald-400">VALUE</span>}
                       <div className="text-center w-full text-white font-medium whitespace-normal break-words leading-tight text-[10px]">{pick.name}</div>
-                      <div className={`text-[9px] ${posColor[pick.position] || "text-gray-400"}`}>
+                      <div className={`text-[9px] ${posColor[pick.position] || "text-slate-400"}`}>
                         {pick.position}{pick.team ? ` · ${pick.team}` : ""}
                       </div>
-                      <div className="text-[9px] text-gray-400 truncate w-full text-center">
+                      <div className="text-[9px] text-slate-400 truncate w-full text-center">
                         {pick.drafterName || pick.slot}
                       </div>
                     </>
                   ) : (
                     <>
-                      <div className="text-gray-600 font-semibold text-[10px]">{`${round}.${String(slotInRound).padStart(2, "0")}`}</div>
-                      <div className="text-[9px] text-gray-600">—</div>
+                      <div className="text-slate-600 font-semibold text-[10px]">{`${round}.${String(slotInRound).padStart(2, "0")}`}</div>
+                      <div className="text-[9px] text-slate-600">—</div>
                     </>
                   )}
                 </div>

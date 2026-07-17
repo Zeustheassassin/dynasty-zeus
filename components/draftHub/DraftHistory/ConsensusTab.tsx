@@ -4,6 +4,8 @@ import type { HistoryDraftEntry, ConsensusCacheRow, ConsensusHistoryPoint, Conse
 import { posColor, closestPickEquiv, pickEquivColor, toPickSlot } from "../shared";
 import ConsensusCompiler from "./ConsensusCompiler";
 import { MultiPointSparkline } from "../../charts/MultiPointSparkline";
+import Badge from "../../ui/Badge";
+import EmptyState from "../../ui/EmptyState";
 
 type ConsensusMeta = Record<string, {
   draftCount: number;
@@ -135,20 +137,20 @@ export default function ConsensusTab({
 
       {/* ── Risers / Fallers ── */}
       {(riserFallerList.risers.length > 0 || riserFallerList.fallers.length > 0) && (
-        <div className="rounded-xl border border-gray-700 bg-gray-800/40 p-4 mb-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="rounded-xl border border-slate-700 bg-slate-800/40 p-4 mb-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <div className="text-xs font-bold uppercase tracking-wider text-blue-400 mb-2">▲ Risers</div>
             <div className="space-y-1">
               {riserFallerList.risers.map((m) => (
                 <div key={m.player_id} className="flex items-center justify-between text-xs">
-                  <span className="text-gray-200 truncate">
-                    <span className={`font-bold mr-1 ${posColor[m.position] || "text-gray-400"}`}>{m.position}</span>
+                  <span className="text-slate-200 truncate">
+                    <span className={`font-bold mr-1 ${posColor[m.position] || "text-slate-400"}`}>{m.position}</span>
                     {m.name}
                   </span>
                   <span className="text-blue-400 font-semibold shrink-0 ml-2">+{m.delta.toFixed(1)}</span>
                 </div>
               ))}
-              {riserFallerList.risers.length === 0 && <div className="text-xs text-gray-600">None this run</div>}
+              {riserFallerList.risers.length === 0 && <div className="text-xs text-slate-600">None this run</div>}
             </div>
           </div>
           <div>
@@ -156,14 +158,14 @@ export default function ConsensusTab({
             <div className="space-y-1">
               {riserFallerList.fallers.map((m) => (
                 <div key={m.player_id} className="flex items-center justify-between text-xs">
-                  <span className="text-gray-200 truncate">
-                    <span className={`font-bold mr-1 ${posColor[m.position] || "text-gray-400"}`}>{m.position}</span>
+                  <span className="text-slate-200 truncate">
+                    <span className={`font-bold mr-1 ${posColor[m.position] || "text-slate-400"}`}>{m.position}</span>
                     {m.name}
                   </span>
                   <span className="text-red-400 font-semibold shrink-0 ml-2">{m.delta.toFixed(1)}</span>
                 </div>
               ))}
-              {riserFallerList.fallers.length === 0 && <div className="text-xs text-gray-600">None this run</div>}
+              {riserFallerList.fallers.length === 0 && <div className="text-xs text-slate-600">None this run</div>}
             </div>
           </div>
         </div>
@@ -179,48 +181,46 @@ export default function ConsensusTab({
           Loading compiled consensus…
         </div>
       ) : displayList.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-gray-700 bg-gray-900/40 p-6 text-sm text-gray-400">
+        <EmptyState>
           No draft data for {selectedHistoryYear}.{" "}
           {supabaseUser
             ? 'Click "Compile Now" above to build a network consensus board.'
             : "Log in to compile a network consensus board."}
-        </div>
+        </EmptyState>
       ) : (
-        <div className="rounded-2xl border border-gray-800 bg-gray-900/60 overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-800 flex items-start justify-between gap-2 flex-wrap">
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/60 overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-800 flex items-start justify-between gap-2 flex-wrap">
             <div>
               <div className="text-sm font-semibold text-white">
                 {selectedHistoryYear} Consensus Draft Board
               </div>
-              <div className="text-xs text-gray-400 mt-0.5">
+              <div className="text-xs text-slate-400 mt-0.5">
                 {displayList.length} players ranked by avg pick · {sourceLabel}
               </div>
             </div>
             {hasCachedRows && (
-              <span className="text-[10px] bg-green-900/40 border border-green-800/60 text-green-400 px-2 py-0.5 rounded-full font-semibold shrink-0">
-                Network Data
-              </span>
+              <Badge tone="good" className="shrink-0">Network Data</Badge>
             )}
           </div>
-          <div className="px-4 py-2 border-b border-gray-800/60 grid grid-cols-[2rem_3rem_1fr_5rem_4rem_6rem] gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+          <div className="px-4 py-2 border-b border-slate-800/60 grid grid-cols-[2rem_3rem_1fr_5rem_4rem_6rem] gap-2 text-[10px] font-bold uppercase tracking-wider text-slate-500">
             <span>#</span><span>Pos</span><span>Player</span><span>Avg Pick</span><span>Drafts</span><span className="text-right">≈ Pick Val</span>
           </div>
-          <div className="divide-y divide-gray-800/40">
+          <div className="divide-y divide-slate-800/40">
             {displayList.map((p, i) => {
               const { label: equivLabel, pickNo: equivPickNo } = closestPickEquiv(p.value, pickFcValues);
               const color  = pickEquivColor(equivPickNo, Math.round(p.avgPickNo));
               const grade  = playerGrades[`${selectedHistoryYear}_${p.player_id}`];
-              const rowBg  = grade === "hit"     ? "bg-green-950/25"
+              const rowBg  = grade === "hit"     ? "bg-emerald-950/25"
                            : grade === "bust"    ? "bg-red-950/25"
-                           : grade === "neutral" ? "bg-gray-800/30"
+                           : grade === "neutral" ? "bg-slate-800/30"
                            : "";
               return (
                 <div key={p.player_id} className={`group grid grid-cols-[2rem_3rem_1fr_5rem_4rem_6rem] gap-2 items-center px-4 py-1.5 ${rowBg}`}>
-                  <span className="text-xs text-gray-500">{i + 1}</span>
-                  <span className={`text-[10px] font-bold ${posColor[p.position] || "text-gray-400"}`}>{p.position}</span>
+                  <span className="text-xs text-slate-500">{i + 1}</span>
+                  <span className={`text-[10px] font-bold ${posColor[p.position] || "text-slate-400"}`}>{p.position}</span>
                   <div className="min-w-0 flex items-center gap-1.5">
                     <span className="text-sm font-medium text-white truncate">{p.name}</span>
-                    {p.team && <span className="text-[10px] text-gray-500 shrink-0">{p.team}</span>}
+                    {p.team && <span className="text-[10px] text-slate-500 shrink-0">{p.team}</span>}
                     <MultiPointSparkline
                       values={(consensusHistory[selectedHistoryYear]?.[p.player_id] ?? []).map((pt) => pt.avg_pick_no)}
                     />
@@ -228,7 +228,7 @@ export default function ConsensusTab({
                       <button
                         title="Remove from compiled data"
                         onClick={(e) => { e.stopPropagation(); removeCompiledPlayer(selectedHistoryYear, p.player_id); }}
-                        className="opacity-0 group-hover:opacity-100 text-[9px] text-gray-600 hover:text-red-400 transition shrink-0 leading-none"
+                        className="opacity-0 group-hover:opacity-100 text-[9px] text-slate-600 hover:text-red-400 transition shrink-0 leading-none"
                       >
                         ✕
                       </button>
@@ -237,8 +237,8 @@ export default function ConsensusTab({
                       {(["hit", "neutral", "bust"] as const).map((g) => {
                         const active = grade === g;
                         const activeCls =
-                          g === "hit"     ? "border-green-600 bg-green-800/70 text-green-300"
-                          : g === "neutral" ? "border-gray-500 bg-gray-700 text-gray-200"
+                          g === "hit"     ? "border-emerald-600 bg-emerald-800/70 text-emerald-300"
+                          : g === "neutral" ? "border-slate-500 bg-slate-700 text-slate-200"
                           :                   "border-red-600 bg-red-800/70 text-red-300";
                         return (
                           <button
@@ -248,7 +248,7 @@ export default function ConsensusTab({
                             className={`text-[9px] font-bold px-1 py-0.5 rounded border transition ${
                               active
                                 ? activeCls
-                                : "border-gray-800 text-gray-700 hover:border-gray-600 hover:text-gray-500 bg-transparent"
+                                : "border-slate-800 text-slate-700 hover:border-slate-600 hover:text-slate-500 bg-transparent"
                             }`}
                           >
                             {g === "hit" ? "H" : g === "neutral" ? "N" : "B"}
@@ -258,7 +258,7 @@ export default function ConsensusTab({
                     </div>
                   </div>
                   <span className="text-xs font-semibold text-white">{toPickSlot(p.avgPickNo)}</span>
-                  <span className="text-xs text-gray-400">{p.draftCount}x</span>
+                  <span className="text-xs text-slate-400">{p.draftCount}x</span>
                   <span className={`text-xs font-semibold text-right ${color}`}>{equivLabel}</span>
                 </div>
               );

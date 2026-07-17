@@ -177,11 +177,11 @@ export default function LiveDraftBoard({
             aria-labelledby="save-draft-snapshot-title"
             tabIndex={-1}
             onKeyDown={(e) => { if (e.key === "Escape" && !saving) setShowSaveModal(false); }}
-            className="bg-gray-900 border border-gray-700 rounded-2xl p-5 w-full max-w-sm mx-4 shadow-2xl"
+            className="bg-slate-900 border border-slate-700 rounded-2xl p-5 w-full max-w-sm mx-4 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 id="save-draft-snapshot-title" className="text-white font-semibold text-sm mb-1">Save Draft Snapshot</h2>
-            <p className="text-gray-500 text-xs mb-4">
+            <p className="text-slate-500 text-xs mb-4">
               Freezes the completed board (picks, drafters, REACH/VALUE flags) into the Historical League Drafts tab. Saving with the same name overwrites.
             </p>
             <input
@@ -191,13 +191,13 @@ export default function LiveDraftBoard({
               value={snapshotName}
               onChange={(e) => setSnapshotName(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") saveSnapshot(); }}
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:border-indigo-500 mb-4"
+              className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white text-sm placeholder-slate-500 focus:outline-none focus:border-indigo-500 mb-4"
             />
             <div className="flex justify-end gap-2">
               <button
                 onClick={() => setShowSaveModal(false)}
                 disabled={saving}
-                className="px-4 py-1.5 text-sm text-gray-400 hover:text-white transition disabled:opacity-50"
+                className="px-4 py-1.5 text-sm text-slate-400 hover:text-white transition disabled:opacity-50"
               >
                 Cancel
               </button>
@@ -206,7 +206,7 @@ export default function LiveDraftBoard({
                 disabled={saving || !snapshotName.trim()}
                 className={`px-4 py-1.5 text-sm font-semibold rounded-lg transition disabled:opacity-50 ${
                   saveSuccess
-                    ? "bg-green-600 text-white"
+                    ? "bg-emerald-600 text-white"
                     : "bg-indigo-600 hover:bg-indigo-500 text-white"
                 }`}
               >
@@ -242,7 +242,7 @@ export default function LiveDraftBoard({
                 }
               }
             }}
-            className="flex items-center gap-2 px-4 py-1.5 text-xs font-semibold bg-gray-700 hover:bg-red-800 text-gray-300 hover:text-white rounded-lg transition"
+            className="flex items-center gap-2 px-4 py-1.5 text-xs font-semibold bg-slate-700 hover:bg-red-800 text-slate-300 hover:text-white rounded-lg transition"
           >
             ✕ Reset Picks
           </button>
@@ -266,7 +266,7 @@ export default function LiveDraftBoard({
       </div>
 
       {!draftSettings && (
-        <div className="text-gray-400">No draft data available</div>
+        <div className="text-slate-400">No draft data available</div>
       )}
 
       {draftSettings && (
@@ -279,20 +279,20 @@ export default function LiveDraftBoard({
           return (
           <>
           {/* Legend */}
-          <div className="flex items-center gap-4 mb-3 text-[10px] text-gray-500 flex-wrap">
+          <div className="flex items-center gap-4 mb-3 text-[10px] text-slate-500 flex-wrap">
             <span className="flex items-center gap-1">
               <span className="inline-block w-2 h-2 rounded-sm bg-blue-900 border border-blue-600" />
               My Slots (click to set)
             </span>
-            <span className="flex items-center gap-1 italic text-gray-600">Italic gray = AI prediction</span>
+            <span className="flex items-center gap-1 italic text-slate-600">Italic gray = AI prediction</span>
             <span className="text-orange-400 font-bold">REACH</span><span>&gt;8 ahead of ADP</span>
-            <span className="text-green-400 font-bold">VALUE</span><span>&gt;5 after ADP</span>
+            <span className="text-emerald-400 font-bold">VALUE</span><span>&gt;5 after ADP</span>
           </div>
 
           {/* ── Positional Scarcity Tracker ── */}
           {draftPicks.length > 0 && (
-            <div className="mb-4 p-3 bg-gray-800/50 rounded-xl">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-2">
+            <div className="mb-4 p-3 bg-slate-800/50 rounded-xl">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-2">
                 Positions Drafted — {draftPicks.length} of {(rosters.length || 12) * activeRounds.length} picks made
               </div>
               <div className="flex flex-wrap gap-2">
@@ -302,15 +302,15 @@ export default function LiveDraftBoard({
                   const pctTaken = draftPicks.length > 0 ? Math.round((taken / draftPicks.length) * 100) : 0;
                   const barColors: Record<string, string> = { QB: "bg-red-500", RB: "bg-green-500", WR: "bg-blue-500", TE: "bg-yellow-500" };
                   return (
-                    <div key={pos} className="flex-1 min-w-[90px] rounded-lg border border-gray-700 bg-gray-900 px-3 py-2">
+                    <div key={pos} className="flex-1 min-w-[90px] rounded-lg border border-slate-700 bg-slate-900 px-3 py-2">
                       <div className="flex items-center justify-between mb-1.5">
                         <span className={`text-xs font-bold ${posColor[pos]}`}>{pos}</span>
-                        <span className="text-[10px] text-gray-500">{avail} left</span>
+                        <span className="text-[10px] text-slate-500">{avail} left</span>
                       </div>
-                      <div className="h-1 rounded-full bg-gray-700 mb-1.5">
+                      <div className="h-1 rounded-full bg-slate-700 mb-1.5">
                         <div className={`h-1 rounded-full ${barColors[pos]}`} style={{ width: `${Math.min(100, pctTaken)}%` }} />
                       </div>
-                      <div className="text-xs font-semibold text-white">{taken} <span className="text-gray-500 font-normal">taken ({pctTaken}%)</span></div>
+                      <div className="text-xs font-semibold text-white">{taken} <span className="text-slate-500 font-normal">taken ({pctTaken}%)</span></div>
                     </div>
                   );
                 })}
@@ -385,7 +385,7 @@ export default function LiveDraftBoard({
                   <div
                     key={`${round}-${i}`}
                     className={`relative min-w-0 h-20 rounded-md flex flex-col justify-center items-center text-xs px-2 gap-0.5 transition
-                      ${isMySlot && !actualPlayer ? "border-2 border-blue-600 bg-blue-950/40 cursor-pointer hover:bg-blue-900/40" : "border border-gray-700 bg-gray-800"}
+                      ${isMySlot && !actualPlayer ? "border-2 border-blue-600 bg-blue-950/40 cursor-pointer hover:bg-blue-900/40" : "border border-slate-700 bg-slate-800"}
                     `}
                     onClick={() => {
                       if (!isMySlot || actualPlayer) return;
@@ -396,10 +396,10 @@ export default function LiveDraftBoard({
                     {actualPlayer ? (
                       <>
                         {actualReach && <span className="absolute top-0.5 left-1 text-[8px] font-bold text-orange-400">REACH</span>}
-                        {actualValue && <span className="absolute top-0.5 left-1 text-[8px] font-bold text-green-400">VALUE</span>}
+                        {actualValue && <span className="absolute top-0.5 left-1 text-[8px] font-bold text-emerald-400">VALUE</span>}
                         <div className="text-center w-full text-white font-medium whitespace-normal break-words leading-tight text-[10px]">{actualPlayer.full_name}</div>
-                        <div className={`text-[9px] ${posColor[actualPlayer.position] || "text-gray-400"}`}>{actualPlayer.position} · {actualPlayer.team}</div>
-                        <div className="text-[9px] text-gray-400 truncate w-full text-center">{
+                        <div className={`text-[9px] ${posColor[actualPlayer.position] || "text-slate-400"}`}>{actualPlayer.position} · {actualPlayer.team}</div>
+                        <div className="text-[9px] text-slate-400 truncate w-full text-center">{
                           /* Prefer original drafter from draftPicks (historical, survives pick window rollover); */
                           /* fall back to current slot owner, then slot label as last resort. */
                           (playerPick?.picked_by && users[playerPick.picked_by])
@@ -411,10 +411,10 @@ export default function LiveDraftBoard({
                       <>
                         {isReach && <span className="absolute top-0.5 right-1 text-[8px] font-bold text-orange-400">REACH</span>}
                         <div className="text-center w-full text-white font-semibold whitespace-normal break-words leading-tight text-[10px]">{userOverride.name}</div>
-                        <div className={`text-[9px] ${posColor[userOverride.position] || "text-gray-400"}`}>{userOverride.position}</div>
+                        <div className={`text-[9px] ${posColor[userOverride.position] || "text-slate-400"}`}>{userOverride.position}</div>
                         <div className="text-[9px] text-blue-300 truncate w-full text-center">{rosterToName[Number(pick.owner_id)] || "You"}</div>
                         <button
-                          className="absolute bottom-0.5 right-1 text-[8px] text-gray-500 hover:text-red-400"
+                          className="absolute bottom-0.5 right-1 text-[8px] text-slate-500 hover:text-red-400"
                           onClick={(e) => {
                             e.stopPropagation();
                             const n = { ...myDraftSlotPicks };
@@ -426,16 +426,16 @@ export default function LiveDraftBoard({
                     ) : prediction ? (
                       <>
                         {predReach && <span className="absolute top-0.5 left-1 text-[8px] font-bold text-orange-400">REACH</span>}
-                        {predValue && <span className="absolute top-0.5 left-1 text-[8px] font-bold text-green-400">VALUE</span>}
-                        <div className="text-center w-full text-gray-400 italic whitespace-normal break-words leading-tight text-[10px]">{prediction.name}</div>
-                        <div className={`text-[9px] ${posColor[prediction.position] || "text-gray-500"} opacity-70`}>{prediction.position}</div>
-                        <div className="text-[9px] text-gray-500 italic truncate w-full text-center">{rosterToName[Number(pick.owner_id)] || slotStr}</div>
+                        {predValue && <span className="absolute top-0.5 left-1 text-[8px] font-bold text-emerald-400">VALUE</span>}
+                        <div className="text-center w-full text-slate-400 italic whitespace-normal break-words leading-tight text-[10px]">{prediction.name}</div>
+                        <div className={`text-[9px] ${posColor[prediction.position] || "text-slate-500"} opacity-70`}>{prediction.position}</div>
+                        <div className="text-[9px] text-slate-500 italic truncate w-full text-center">{rosterToName[Number(pick.owner_id)] || slotStr}</div>
                         {isMySlot && <div className="text-[8px] text-blue-500">click to set</div>}
                       </>
                     ) : (
                       <>
-                        <div className="text-gray-600 font-semibold text-[10px]">{pick.slot}</div>
-                        <div className="text-[9px] text-gray-600 truncate w-full text-center">{rosterToName[Number(pick.owner_id)] || ""}</div>
+                        <div className="text-slate-600 font-semibold text-[10px]">{pick.slot}</div>
+                        <div className="text-[9px] text-slate-600 truncate w-full text-center">{rosterToName[Number(pick.owner_id)] || ""}</div>
                         {isMySlot && <div className="text-[8px] text-blue-500">click to set</div>}
                       </>
                     )}
@@ -443,12 +443,12 @@ export default function LiveDraftBoard({
                     {/* Inline player picker */}
                     {isEditing && (
                       <div
-                        className="absolute top-full left-0 z-50 w-64 bg-gray-900 border border-blue-600 rounded-xl shadow-2xl p-2 mt-1"
+                        className="absolute top-full left-0 z-50 w-64 bg-slate-900 border border-blue-600 rounded-xl shadow-2xl p-2 mt-1"
                         onClick={(e) => e.stopPropagation()}
                       >
                         <input
                           autoFocus
-                          className="w-full bg-gray-800 text-white text-xs rounded px-2 py-1 mb-2 border border-gray-700 focus:outline-none focus:border-blue-500"
+                          className="w-full bg-slate-800 text-white text-xs rounded px-2 py-1 mb-2 border border-slate-700 focus:outline-none focus:border-blue-500"
                           placeholder="Search rookie…"
                           value={draftSlotSearchQuery}
                           onChange={(e) => setDraftSlotSearchQuery(e.target.value)}
@@ -467,7 +467,7 @@ export default function LiveDraftBoard({
                               return (
                                 <button
                                   key={`${r.boardRank}-${r.player_id || r.name}`}
-                                  className="w-full text-left px-2 py-1 rounded hover:bg-gray-800 flex items-center justify-between gap-1"
+                                  className="w-full text-left px-2 py-1 rounded hover:bg-slate-800 flex items-center justify-between gap-1"
                                   onClick={() => {
                                     setMyDraftSlotPicks((prev) => ({ ...prev, [slotStr]: r.player_id || r.name }));
                                     setDraftSlotEditing(null);
@@ -476,16 +476,16 @@ export default function LiveDraftBoard({
                                 >
                                   <span className="text-white text-[10px] truncate">#{r.boardRank} {r.name}</span>
                                   <span className="flex items-center gap-1 shrink-0">
-                                    <span className={`text-[9px] ${posColor[r.position] || "text-gray-400"}`}>{r.position}</span>
+                                    <span className={`text-[9px] ${posColor[r.position] || "text-slate-400"}`}>{r.position}</span>
                                     {reachAmt !== null && reachAmt < -8 && <span className="text-[8px] text-orange-400 font-bold">REACH</span>}
-                                    {reachAmt !== null && reachAmt > 5 && <span className="text-[8px] text-green-400">VALUE</span>}
+                                    {reachAmt !== null && reachAmt > 5 && <span className="text-[8px] text-emerald-400">VALUE</span>}
                                   </span>
                                 </button>
                               );
                             })}
                         </div>
                         <button
-                          className="mt-1 w-full text-[9px] text-gray-600 hover:text-gray-400"
+                          className="mt-1 w-full text-[9px] text-slate-600 hover:text-slate-400"
                           onClick={() => { setDraftSlotEditing(null); setDraftSlotSearchQuery(""); }}
                         >
                           cancel
@@ -507,21 +507,21 @@ export default function LiveDraftBoard({
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="text-lg font-semibold">Top Available Rookies From Your Big Board</h2>
-            <p className="text-sm text-gray-400">
+            <p className="text-sm text-slate-400">
               Automatically removes players after they are drafted in this Sleeper draft.
             </p>
           </div>
         </div>
         {!rookies.length ? (
-          <div className="text-gray-400 text-sm">Your rookie board is still loading from Sleeper.</div>
+          <div className="text-slate-400 text-sm">Your rookie board is still loading from Sleeper.</div>
         ) : topAvailableRookies.length === 0 ? (
-          <div className="text-gray-400 text-sm">No ranked rookies are currently available.</div>
+          <div className="text-slate-400 text-sm">No ranked rookies are currently available.</div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {topAvailableRookies.map((player) => (
               <div
                 key={player.player_id || `${normalizeRookieName(player.name)}-${player.boardRank}`}
-                className="bg-gray-900 border border-gray-800 rounded-xl px-4 py-3"
+                className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-3"
               >
                 <div className="flex items-center justify-between gap-3">
                   <div>
@@ -529,8 +529,8 @@ export default function LiveDraftBoard({
                     <div className="font-medium text-white">{player.name}</div>
                   </div>
                   <div className="text-right">
-                    <div className="text-xs text-gray-400">{player.team || "FA"}</div>
-                    <div className="text-xs text-gray-300">{player.position}</div>
+                    <div className="text-xs text-slate-400">{player.team || "FA"}</div>
+                    <div className="text-xs text-slate-300">{player.position}</div>
                   </div>
                 </div>
               </div>

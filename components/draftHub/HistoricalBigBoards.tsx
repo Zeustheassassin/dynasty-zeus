@@ -64,19 +64,19 @@ export default function HistoricalBigBoards() {
     : [];
 
   if (!supabaseUser) {
-    return <div className="text-gray-500 text-center py-16 text-sm">Sign in to view saved boards.</div>;
+    return <div className="text-slate-500 text-center py-16 text-sm">Sign in to view saved boards.</div>;
   }
 
   if (loading) {
-    return <div className="text-gray-500 text-center py-16 text-sm">Loading…</div>;
+    return <div className="text-slate-500 text-center py-16 text-sm">Loading…</div>;
   }
 
 
   if (snapshots.length === 0) {
     return (
       <div className="text-center py-16">
-        <p className="text-gray-400 text-sm font-medium">No saved boards yet.</p>
-        <p className="text-gray-600 text-xs mt-1">
+        <p className="text-slate-400 text-sm font-medium">No saved boards yet.</p>
+        <p className="text-slate-600 text-xs mt-1">
           Use <span className="text-indigo-400 font-semibold">Save Board</span> on the Rookie Big Board to create a snapshot.
         </p>
       </div>
@@ -94,7 +94,7 @@ export default function HistoricalBigBoards() {
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
                 selectedId === s.id
                   ? "bg-indigo-600 text-white"
-                  : "bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white"
+                  : "bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white"
               }`}
             >
               {s.name}
@@ -102,7 +102,7 @@ export default function HistoricalBigBoards() {
             <button
               onClick={() => deleteSnapshot(s.id)}
               disabled={deleting === s.id}
-              className="text-gray-700 hover:text-red-400 transition text-xs leading-none opacity-0 group-hover:opacity-100"
+              className="text-slate-700 hover:text-red-400 transition text-xs leading-none opacity-0 group-hover:opacity-100"
               title="Delete snapshot"
             >
               ✕
@@ -117,7 +117,7 @@ export default function HistoricalBigBoards() {
           <div className="flex items-center justify-between mb-3">
             <div>
               <h3 className="text-white font-semibold text-sm">{selected.name}</h3>
-              <span className="text-[11px] text-gray-500">
+              <span className="text-[11px] text-slate-500">
                 Saved {new Date(selected.saved_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
                 {" · "}{selected.snapshot_data.length} players
               </span>
@@ -131,7 +131,7 @@ export default function HistoricalBigBoards() {
                   className={`text-[11px] font-bold px-2 py-0.5 rounded border transition ${
                     posFilter === pos
                       ? posBadge[pos] + " border-transparent"
-                      : "border-gray-700 text-gray-500 hover:text-white"
+                      : "border-slate-700 text-slate-500 hover:text-white"
                   }`}
                 >
                   {pos}
@@ -151,14 +151,14 @@ export default function HistoricalBigBoards() {
               return (
                 <div
                   key={`${p.rank}-${p.name}`}
-                  className="flex items-center gap-2 bg-gray-800/70 px-3 py-2 rounded-lg text-sm"
+                  className="flex items-center gap-2 bg-slate-800/70 px-3 py-2 rounded-lg text-sm"
                 >
-                  <span className="w-7 text-center text-gray-500 text-xs font-mono shrink-0">{p.rank}</span>
+                  <span className="w-7 text-center text-slate-500 text-xs font-mono shrink-0">{p.rank}</span>
                   <span className="font-medium text-white truncate flex-1 min-w-0">{p.name}</span>
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold shrink-0 ${posBadge[p.position] || "bg-gray-700 text-gray-400"}`}>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold shrink-0 ${posBadge[p.position] || "bg-slate-700 text-slate-400"}`}>
                     {p.position}
                   </span>
-                  {p.team && <span className="text-[10px] text-gray-500 shrink-0">{p.team}</span>}
+                  {p.team && <span className="text-[10px] text-slate-500 shrink-0">{p.team}</span>}
                   {p.tier != null && (
                     <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-900/40 border border-blue-800/60 text-blue-300 shrink-0">
                       T{p.tier}
@@ -170,7 +170,7 @@ export default function HistoricalBigBoards() {
                     </span>
                   )}
                   {p.fc_value > 0 && (
-                    <span className="text-[10px] text-gray-500 font-mono shrink-0">{p.fc_value.toLocaleString()}</span>
+                    <span className="text-[10px] text-slate-500 font-mono shrink-0">{p.fc_value.toLocaleString()}</span>
                   )}
                 </div>
               );

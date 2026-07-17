@@ -1,6 +1,7 @@
 "use client";
 import type { Dispatch, SetStateAction } from "react";
 import { posColor, closestPickEquiv, pickEquivColor, toPickSlot } from "../shared";
+import EmptyState from "../../ui/EmptyState";
 
 interface MyPickEntry {
   player_id: string;
@@ -33,9 +34,9 @@ export default function MyPicksTab({
 }: MyPicksTabProps) {
   if (myPicksList.length === 0) {
     return (
-      <div className="rounded-xl border border-dashed border-gray-700 bg-gray-900/40 p-6 text-sm text-gray-400">
+      <EmptyState>
         No picks attributed to your user ID in the loaded drafts.
-      </div>
+      </EmptyState>
     );
   }
 
@@ -57,27 +58,27 @@ export default function MyPicksTab({
   });
 
   return (
-    <div className="rounded-2xl border border-gray-800 bg-gray-900/60 overflow-hidden">
-      <div className="px-4 py-3 border-b border-gray-800">
+    <div className="rounded-2xl border border-slate-800 bg-slate-900/60 overflow-hidden">
+      <div className="px-4 py-3 border-b border-slate-800">
         <div className="text-sm font-semibold text-white">Your Draft Picks</div>
-        <div className="text-xs text-gray-400 mt-0.5">
+        <div className="text-xs text-slate-400 mt-0.5">
           {myPicksList.length} unique players · {filteredDrafts.length} total draft{filteredDrafts.length !== 1 ? "s" : ""} {selectedHistoryYear === "ALL" ? "across all years" : `in ${selectedHistoryYear}`}
         </div>
       </div>
-      <div className="px-4 py-2 border-b border-gray-800/60 grid grid-cols-[3rem_1fr_4.5rem_5rem_6rem] gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+      <div className="px-4 py-2 border-b border-slate-800/60 grid grid-cols-[3rem_1fr_4.5rem_5rem_6rem] gap-2 text-[10px] font-bold uppercase tracking-wider text-slate-500">
         <span>Pos</span>
         <span>Player</span>
         <button onClick={() => toggleSort("times")} className="text-left hover:text-white transition">Times{arrow("times")}</button>
         <button onClick={() => toggleSort("avgPick")} className="text-left hover:text-white transition">Avg Pick{arrow("avgPick")}</button>
         <button onClick={() => toggleSort("value")} className="text-right hover:text-white transition w-full">≈ Pick Val{arrow("value")}</button>
       </div>
-      <div className="divide-y divide-gray-800/40">
+      <div className="divide-y divide-slate-800/40">
         {sorted.map((p) => {
           const { label: equivLabel, pickNo: equivPickNo } = closestPickEquiv(p.value, pickFcValues);
           const color = pickEquivColor(equivPickNo, Math.round(p.avgPickNo));
           return (
             <div key={p.player_id} className="grid grid-cols-[3rem_1fr_4.5rem_5rem_6rem] gap-2 items-center px-4 py-1.5">
-              <span className={`text-[10px] font-bold ${posColor[p.position] || "text-gray-400"}`}>{p.position}</span>
+              <span className={`text-[10px] font-bold ${posColor[p.position] || "text-slate-400"}`}>{p.position}</span>
               <span className="text-sm font-medium text-white truncate">{p.name}</span>
               <span className="text-sm font-semibold text-blue-400">{p.timesDrafted}×</span>
               <span className="text-xs text-white">{toPickSlot(p.avgPickNo)}</span>

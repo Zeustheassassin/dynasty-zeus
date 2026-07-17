@@ -5,6 +5,7 @@ import LeagueTab from "./DraftHistory/LeagueTab";
 import ConsensusTab from "./DraftHistory/ConsensusTab";
 import MyPicksTab from "./DraftHistory/MyPicksTab";
 import GradesTab from "./DraftHistory/GradesTab";
+import EmptyState from "../ui/EmptyState";
 
 interface DraftHistoryProps {
   leagues: SleeperLeague[];
@@ -58,13 +59,13 @@ export default function DraftHistory({ leagues, user }: DraftHistoryProps) {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
         <div>
           <h2 className="text-lg font-semibold">Historical Rookie Drafts</h2>
-          <p className="text-sm text-gray-400 mt-0.5">Past rookie draft classes by year.</p>
+          <p className="text-sm text-slate-400 mt-0.5">Past rookie draft classes by year.</p>
         </div>
         {availableYears.length > 0 && (
           <select
             value={selectedHistoryYear}
             onChange={(e) => setSelectedHistoryYear(e.target.value)}
-            className="bg-gray-800 border border-gray-700 text-sm text-white rounded-lg px-3 py-1.5 focus:outline-none focus:border-blue-500"
+            className="bg-slate-800 border border-slate-700 text-sm text-white rounded-lg px-3 py-1.5 focus:outline-none focus:border-blue-500"
           >
             {availableYears.map((yr) => <option key={yr} value={yr}>{yr}</option>)}
           </select>
@@ -84,16 +85,16 @@ export default function DraftHistory({ leagues, user }: DraftHistoryProps) {
 
       {/* Empty */}
       {!historyLoading && historyLoaded && historyData.length === 0 && (
-        <div className="rounded-xl border border-dashed border-gray-700 bg-gray-900/40 p-6 text-sm text-gray-400">
+        <EmptyState>
           No completed rookie drafts found in your leagues&apos; history. This may be your leagues&apos; first season.
-        </div>
+        </EmptyState>
       )}
 
       {/* Content */}
       {!historyLoading && (filteredDrafts.length > 0 || !!consensusMeta[selectedHistoryYear]) && (
         <>
           {/* Sub-tabs */}
-          <div className="flex gap-1 bg-gray-800/60 rounded-xl p-1 mb-5 w-fit">
+          <div className="flex gap-1 bg-slate-800/60 rounded-xl p-1 mb-5 w-fit">
             {([
               { key: "LEAGUE",    label: "League Board" },
               { key: "CONSENSUS", label: "Consensus Board" },
@@ -104,7 +105,7 @@ export default function DraftHistory({ leagues, user }: DraftHistoryProps) {
                 key={t.key}
                 onClick={() => setHistoryTab(t.key)}
                 className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition ${
-                  historyTab === t.key ? "bg-gray-700 text-white" : "text-gray-400 hover:text-white"
+                  historyTab === t.key ? "bg-slate-700 text-white" : "text-slate-400 hover:text-white"
                 }`}
               >
                 {t.label}

@@ -115,7 +115,7 @@ export default function UserScoutHub({
   const searchBar = (
     <div className="flex gap-2 items-center flex-wrap">
       <input
-        className="p-2 rounded bg-gray-800 border border-gray-700 text-sm flex-1 min-w-[200px]"
+        className="p-2 rounded bg-slate-800 border border-slate-700 text-sm flex-1 min-w-[200px]"
         placeholder="Enter any Sleeper username to scout"
         value={input}
         onChange={(e) => setInput(e.target.value)}
@@ -131,7 +131,7 @@ export default function UserScoutHub({
       {targetUser && (
         <button
           onClick={() => { reset(); setInput(""); }}
-          className="px-3 py-2 rounded text-sm bg-gray-700 hover:bg-gray-600"
+          className="px-3 py-2 rounded text-sm bg-slate-700 hover:bg-slate-600"
         >
           Clear
         </button>
@@ -143,7 +143,7 @@ export default function UserScoutHub({
     <div className="max-w-6xl mx-auto px-4 py-6 space-y-5">
       <div>
         <h2 className="text-lg font-bold mb-1">User Scout</h2>
-        <p className="text-xs text-gray-500 mb-3">
+        <p className="text-xs text-slate-500 mb-3">
           Read-only. Looking someone up never changes your own Sleeper connection or data.
         </p>
         {searchBar}
@@ -151,7 +151,7 @@ export default function UserScoutHub({
       </div>
 
       {!targetUser && !lookupLoading && (
-        <div className="text-sm text-gray-500 border border-dashed border-gray-800 rounded-xl p-8 text-center">
+        <div className="text-sm text-slate-500 border border-dashed border-slate-800 rounded-xl p-8 text-center">
           Enter a Sleeper username above to inspect their dynasty leagues, rosters, power rankings, and playoff odds.
         </div>
       )}
@@ -159,9 +159,9 @@ export default function UserScoutHub({
       {targetUser && (
         <>
           <div className="flex items-center justify-between flex-wrap gap-2">
-            <div className="text-sm text-gray-300">
+            <div className="text-sm text-slate-300">
               Scouting <span className="font-semibold text-white">{targetUser.display_name}</span>
-              <span className="text-gray-500"> · {targetLeagues.length} dynasty league{targetLeagues.length === 1 ? "" : "s"}</span>
+              <span className="text-slate-500"> · {targetLeagues.length} dynasty league{targetLeagues.length === 1 ? "" : "s"}</span>
             </div>
             {selectedSpyLeague && (
               <button
@@ -195,7 +195,7 @@ export default function UserScoutHub({
                 myRoster={spyLeagueBundle.myRoster}
               >
                 <div className="space-y-4">
-                  <div className="text-sm font-semibold text-gray-200">{spyLeagueBundle.league.name}</div>
+                  <div className="text-sm font-semibold text-slate-200">{spyLeagueBundle.league.name}</div>
                   {/* Sub-tab nav */}
                   <div className="flex flex-wrap gap-1.5">
                     {SPY_TABS.map((t) => (
@@ -205,7 +205,7 @@ export default function UserScoutHub({
                         className={`px-3 py-1.5 text-xs font-medium rounded-full border transition ${
                           leagueHubTab === t.id
                             ? "border-blue-500 text-blue-400 bg-blue-900/30"
-                            : "border-gray-700 text-gray-400 hover:text-gray-200"
+                            : "border-slate-700 text-slate-400 hover:text-slate-200"
                         }`}
                       >
                         {t.label}
@@ -278,13 +278,13 @@ export default function UserScoutHub({
                 </button>
                 {simProgress && (
                   <div className="flex-1 flex items-center gap-2 min-w-0">
-                    <div className="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                    <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
                       <div
                         className="h-full bg-blue-500 rounded-full transition-all duration-300"
                         style={{ width: `${(simProgress.done / simProgress.total) * 100}%` }}
                       />
                     </div>
-                    <span className="text-[10px] text-gray-400 whitespace-nowrap">
+                    <span className="text-[10px] text-slate-400 whitespace-nowrap">
                       {simProgress.done === simProgress.total
                         ? `Done — ${simProgress.total} leagues updated`
                         : `${simProgress.done} / ${simProgress.total}`}
@@ -296,11 +296,11 @@ export default function UserScoutHub({
               {loadingLeagueOverview && !leagueOverviewLoaded ? (
                 <p className="text-sm text-blue-400">Loading league data…</p>
               ) : !targetLeagues.length ? (
-                <p className="text-sm text-gray-500">No dynasty leagues found.</p>
+                <p className="text-sm text-slate-500">No dynasty leagues found.</p>
               ) : (
-                <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 overflow-x-auto">
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 overflow-x-auto">
                   <div className="min-w-[700px]">
-                    <div className={`${GRID} text-[10px] uppercase tracking-wide text-gray-500 mb-1 pb-2 border-b border-gray-800`}>
+                    <div className={`${GRID} text-[10px] uppercase tracking-wide text-slate-500 mb-1 pb-2 border-b border-slate-800`}>
                       <span>League</span>
                       <span>Direction</span>
                       <span className="text-center">Dyn</span>
@@ -311,24 +311,24 @@ export default function UserScoutHub({
                     </div>
                     <div className="space-y-0.5">
                       {overviewRows.map((row) => (
-                        <div key={row.league.league_id} className={`${GRID} text-xs py-1.5 rounded hover:bg-gray-800/40 transition`}>
+                        <div key={row.league.league_id} className={`${GRID} text-xs py-1.5 rounded hover:bg-slate-800/40 transition`}>
                           <button
-                            className="min-w-0 text-sm text-gray-200 font-medium text-left truncate hover:text-blue-400 transition"
+                            className="min-w-0 text-sm text-slate-200 font-medium text-left truncate hover:text-blue-400 transition"
                             onClick={() => selectSpyLeague(row.league)}
                           >
                             {row.league.name}
                           </button>
                           <div className="min-w-0">
                             <span className={`inline-flex max-w-full text-[10px] font-semibold px-2 py-0.5 rounded-full border truncate ${row.bucketColor}`}>{row.bucket}</span>
-                            <div className="mt-0.5 text-[10px] text-gray-500 truncate">{row.shortAction}</div>
+                            <div className="mt-0.5 text-[10px] text-slate-500 truncate">{row.shortAction}</div>
                           </div>
-                          <span className="text-center text-gray-300">{row.dynRank}<span className="text-gray-600">/{row.n}</span></span>
-                          <span className="text-center text-gray-300">{row.redRank}<span className="text-gray-600">/{row.n}</span></span>
-                          <span className="text-center text-gray-300">{row.standRank}<span className="text-gray-600">/{row.n}</span></span>
-                          <span className="text-center text-gray-300">{row.maxPfRank}<span className="text-gray-600">/{row.n}</span></span>
+                          <span className="text-center text-slate-300">{row.dynRank}<span className="text-slate-600">/{row.n}</span></span>
+                          <span className="text-center text-slate-300">{row.redRank}<span className="text-slate-600">/{row.n}</span></span>
+                          <span className="text-center text-slate-300">{row.standRank}<span className="text-slate-600">/{row.n}</span></span>
+                          <span className="text-center text-slate-300">{row.maxPfRank}<span className="text-slate-600">/{row.n}</span></span>
                           <div className="text-center">
                             {row.hasSim ? (
-                              <div className={`font-mono font-semibold ${row.playoffOdds >= 50 ? "text-emerald-400" : row.playoffOdds >= 25 ? "text-yellow-400" : "text-red-400"}`}>
+                              <div className={`font-mono font-semibold ${row.playoffOdds >= 50 ? "text-emerald-400" : row.playoffOdds >= 25 ? "text-amber-400" : "text-red-400"}`}>
                                 {row.playoffOdds}%
                               </div>
                             ) : (
