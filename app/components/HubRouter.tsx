@@ -374,6 +374,8 @@ export function HubRouter({
     onSelectLeague={onNavigateToLeague}
     leagueOverviewData={leagueOverviewData}
     redraftValues={redraftValues}
+    committedSimsByLeague={committedSimsByLeague}
+    leagueSimCache={leagueSimCache}
   />
 </>
   </>

@@ -1,7 +1,7 @@
 "use client";
 import { useMemo } from "react";
 import type { MainTab } from "../lib/hubs";
-import type { LeagueOverviewEntry } from "../lib/types";
+import type { LeagueOverviewEntry, CommittedSimsByLeague, CachedSimRow } from "../lib/types";
 import type { DashboardAlert, InjuryReportPlayer } from "./AlertsPage/alertsPageHelpers";
 import { getInjuredCount } from "./AlertsPage/alertsPageHelpers";
 import StatStrip from "./Dashboard/StatStrip";
@@ -22,6 +22,8 @@ type DashboardProps = {
   onSelectLeague: (leagueId: string) => void;
   leagueOverviewData: Record<string, LeagueOverviewEntry>;
   redraftValues: Record<string, number>;
+  committedSimsByLeague: CommittedSimsByLeague;
+  leagueSimCache: Record<string, Record<number, CachedSimRow>>;
 };
 
 // Phase J — Dashboard rebuild (A7 cross-league team summary + R7 value
@@ -44,6 +46,8 @@ export default function Dashboard({
   onSelectLeague,
   leagueOverviewData,
   redraftValues,
+  committedSimsByLeague,
+  leagueSimCache,
 }: DashboardProps) {
   const isConnected = !!username;
 
@@ -88,6 +92,8 @@ export default function Dashboard({
               onSelectLeague={onSelectLeague}
               leagueOverviewData={leagueOverviewData}
               redraftValues={redraftValues}
+              committedSimsByLeague={committedSimsByLeague}
+              leagueSimCache={leagueSimCache}
             />
           </div>
 

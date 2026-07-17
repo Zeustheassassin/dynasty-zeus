@@ -1,6 +1,6 @@
 "use client";
 import { useMemo } from "react";
-import type { SleeperRoster, LeagueOverviewEntry } from "../../lib/types";
+import type { SleeperRoster, LeagueOverviewEntry, CommittedSimsByLeague, CachedSimRow } from "../../lib/types";
 import { useDashboardPlayoffOdds, type LeagueRosterKey } from "../../hooks/useDashboardPlayoffOdds";
 import { MultiPointSparkline } from "../charts/MultiPointSparkline";
 import { usePlayers } from "../../lib/PlayersContext";
@@ -19,6 +19,8 @@ interface TeamSummaryGridProps {
   onSelectLeague: (leagueId: string) => void;
   leagueOverviewData: Record<string, LeagueOverviewEntry>;
   redraftValues: Record<string, number>;
+  committedSimsByLeague: CommittedSimsByLeague;
+  leagueSimCache: Record<string, Record<number, CachedSimRow>>;
 }
 
 // Cross-league "my teams" summary (A7) — one card per connected league,
@@ -28,7 +30,7 @@ interface TeamSummaryGridProps {
 // beyond the batched odds-history read. Also shows each league's strategic
 // direction bucket (same Elite/True Contender/.../Hopeless vocabulary as
 // Team Tools) via getCrossLeagueDirections, once leagueOverviewData loads.
-export default function TeamSummaryGrid({ entries, loading, onSelectLeague, leagueOverviewData, redraftValues }: TeamSummaryGridProps) {
+export default function TeamSummaryGrid({ entries, loading, onSelectLeague, leagueOverviewData, redraftValues, committedSimsByLeague, leagueSimCache }: TeamSummaryGridProps) {
   const players = usePlayers();
   const { pickFcValues } = useValues();
 
@@ -53,14 +55,22 @@ export default function TeamSummaryGrid({ entries, loading, onSelectLeague, leag
   // getAdjustedDirectionBucket step OverviewTab/LeagueMatesTab/UserScoutHub
   // all apply — otherwise this tally shows the RAW pre-adjustment bucket,
   // which can disagree with the "real" bucket shown everywhere else for the
-  // same team (see getCrossLeagueDirections' header comment).
+  // same team (see getCrossLeagueDirections' header comment). Source must
+  // match OverviewTab's precedence (live "Run All Sims" commit, then the
+  // Supabase sim cache) — the weekly league_simulation_history cron table
+  // used for the sparkline below lags behind or is missing for some leagues,
+  // which previously made this tally's bucket counts disagree with Overview's.
   const playoffOddsByLeague = useMemo(() => {
     const map: Record<string, number> = {};
-    Object.entries(historyByLeague).forEach(([leagueId, history]) => {
-      if (history.length > 0) map[leagueId] = history[history.length - 1].playoffOdds;
+    Object.entries(myRosterIdByLeague).forEach(([leagueId, rosterId]) => {
+      const committedRow = committedSimsByLeague[leagueId]?.[rosterId];
+      const cachedSimRow = leagueSimCache[leagueId]?.[rosterId];
+      if (committedRow || cachedSimRow) {
+        map[leagueId] = committedRow?.playoffOdds ?? cachedSimRow?.playoff_odds ?? 0;
+      }
     });
     return map;
-  }, [historyByLeague]);
+  }, [myRosterIdByLeague, committedSimsByLeague, leagueSimCache]);
 
   const directions = useMemo(
     () => getCrossLeagueDirections({ leagueOverviewData, myRosterIdByLeague, players, pickFcValues, redraftValues, playoffOddsByLeague }),
