@@ -8,7 +8,7 @@
 export type RadarTier = "top" | "mid" | "bot" | "none";
 
 export const RADAR_TIER_COLOR: Record<RadarTier, string> = {
-  top: "#22c55e", mid: "#eab308", bot: "#ef4444", none: "#6b7280",
+  top: "#10b981", mid: "#f59e0b", bot: "#ef4444", none: "#64748b",
 };
 
 const MIN_DIST_SIZE = 5;
@@ -121,11 +121,11 @@ export function RadarCardHeader({ title, name, school, draftYear }: {
         <div className="text-base font-black text-white leading-tight">
           {first} <span className="text-yellow-400">{last}</span>
         </div>
-        <div className="text-[9px] text-gray-400 tracking-[0.1em] uppercase mt-0.5">
+        <div className="text-[9px] text-slate-400 tracking-[0.1em] uppercase mt-0.5">
           {school} · {draftYear}
         </div>
       </div>
-      <div className="absolute top-3 right-4 text-[8px] font-bold tracking-widest text-gray-600 uppercase">
+      <div className="absolute top-3 right-4 text-[8px] font-bold tracking-widest text-slate-600 uppercase">
         Draft Prospect
       </div>
     </div>
@@ -134,7 +134,7 @@ export function RadarCardHeader({ title, name, school, draftYear }: {
 
 export function RadarTierLegend({ noDataLabel }: { noDataLabel: string }) {
   return (
-    <div className="flex flex-wrap justify-center gap-6 text-xs text-gray-400">
+    <div className="flex flex-wrap justify-center gap-6 text-xs text-slate-400">
       {(["top", "mid", "bot", "none"] as RadarTier[]).map((t) => (
         <span key={t} className="flex items-center gap-1.5">
           <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: RADAR_TIER_COLOR[t] }} />

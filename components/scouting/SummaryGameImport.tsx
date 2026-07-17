@@ -367,10 +367,10 @@ export default function SummaryGameImport({ gameLabel, onImport, onCancel }: Pro
     const routeCount = plays.filter((p) => !p.no_route_run).length;
     const snapCount = plays.length;
     return (
-      <div className="p-6 bg-gray-900 border border-gray-700 rounded-lg text-center">
-        <div className="text-green-400 text-2xl mb-2">✓</div>
+      <div className="p-6 bg-slate-900 border border-slate-700 rounded-lg text-center">
+        <div className="text-emerald-400 text-2xl mb-2">✓</div>
         <div className="text-white font-medium mb-1">{snapCount} snaps imported ({routeCount} routes · {snapCount - routeCount} alignment-only)</div>
-        <div className="text-gray-400 text-sm mb-4">for {gameLabel}</div>
+        <div className="text-slate-400 text-sm mb-4">for {gameLabel}</div>
         <button onClick={onCancel} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded transition">Done</button>
       </div>
     );
@@ -384,29 +384,29 @@ export default function SummaryGameImport({ gameLabel, onImport, onCancel }: Pro
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-sm font-semibold text-white">Summary Import</h3>
-          <p className="text-xs text-gray-400">{gameLabel}</p>
+          <p className="text-xs text-slate-400">{gameLabel}</p>
         </div>
-        <button onClick={onCancel} className="text-gray-500 hover:text-white text-sm px-2">✕ Cancel</button>
+        <button onClick={onCancel} className="text-slate-500 hover:text-white text-sm px-2">✕ Cancel</button>
       </div>
 
       {/* Instructions */}
-      <div className="p-3 bg-gray-900/80 border border-gray-800 rounded-lg text-xs text-gray-400 space-y-1">
-        <div className="text-gray-300 font-medium mb-1">How to import from your Google Sheet:</div>
+      <div className="p-3 bg-slate-900/80 border border-slate-800 rounded-lg text-xs text-slate-400 space-y-1">
+        <div className="text-slate-300 font-medium mb-1">How to import from your Google Sheet:</div>
         <div>1. Open the player tab in your Google Sheet</div>
         <div>2. Select the full game summary table (Routes + Depth + Alignment + Coverage sections)</div>
         <div>3. Copy (Ctrl+C) and paste below</div>
-        <div className="text-yellow-400/80 mt-1">Note: plays are reconstructed from totals — aggregate stats will be accurate, individual play order is approximate.</div>
+        <div className="text-amber-400/80 mt-1">Note: plays are reconstructed from totals — aggregate stats will be accurate, individual play order is approximate.</div>
       </div>
 
       {/* Paste area */}
       <div>
         <div className="flex items-center justify-between mb-1">
-          <label className="text-xs text-gray-400">Paste game summary here</label>
-          {text && <button onClick={() => { setText(""); setSummary(null); setParseError(""); }} className="text-xs text-gray-600 hover:text-gray-400">Clear</button>}
+          <label className="text-xs text-slate-400">Paste game summary here</label>
+          {text && <button onClick={() => { setText(""); setSummary(null); setParseError(""); }} className="text-xs text-slate-600 hover:text-slate-400">Clear</button>}
         </div>
         <textarea
           rows={10}
-          className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-white text-xs font-mono placeholder-gray-600 focus:outline-none focus:border-blue-500 resize-y"
+          className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-white text-xs font-mono placeholder-slate-600 focus:outline-none focus:border-blue-500 resize-y"
           placeholder={"Paste the full game summary from Google Sheets (Ctrl+V)…"}
           value={text}
           onChange={(e) => handleChange(e.target.value)}
@@ -421,41 +421,41 @@ export default function SummaryGameImport({ gameLabel, onImport, onCancel }: Pro
 
       {/* Preview */}
       {summary && (
-        <div className="p-3 bg-gray-900 border border-gray-700 rounded-lg text-xs space-y-3">
-          <div className="text-gray-300 font-medium">
+        <div className="p-3 bg-slate-900 border border-slate-700 rounded-lg text-xs space-y-3">
+          <div className="text-slate-300 font-medium">
             Detected — {plays.length} snaps total
             ({plays.filter((p) => !p.no_route_run).length} routes · <span className="text-amber-400">{plays.filter((p) => p.no_route_run).length} alignment-only</span>)
           </div>
           <div className="grid grid-cols-3 gap-3">
             {/* Routes */}
             <div>
-              <div className="text-gray-500 mb-1">Routes</div>
+              <div className="text-slate-500 mb-1">Routes</div>
               {Object.entries(summary.routeCounts).map(([rt, cnt]) => (
-                <div key={rt} className="flex justify-between text-gray-400">
+                <div key={rt} className="flex justify-between text-slate-400">
                   <span className="capitalize">{rt}</span>
                   <span className="text-white">{cnt}</span>
                 </div>
               ))}
-              <div className="flex justify-between text-gray-500 border-t border-gray-800 mt-1 pt-1">
+              <div className="flex justify-between text-slate-500 border-t border-slate-800 mt-1 pt-1">
                 <span>Total</span><span>{summary.totalRoutes}</span>
               </div>
             </div>
             {/* Outcomes */}
             <div>
-              <div className="text-gray-500 mb-1">Outcomes</div>
-              <div className="flex justify-between text-gray-400"><span>Targets</span><span className="text-yellow-400">{summary.targets}</span></div>
-              <div className="flex justify-between text-gray-400"><span>Catches</span><span className="text-green-400">{summary.catches}</span></div>
-              <div className="flex justify-between text-gray-400"><span>Drops</span><span className="text-red-400">{summary.drops}</span></div>
-              <div className="flex justify-between text-gray-400"><span>Contested</span><span className="text-purple-400">{summary.contested}</span></div>
-              <div className="flex justify-between text-gray-400"><span>Cont. Catch</span><span className="text-purple-300">{summary.contestedCatches}</span></div>
+              <div className="text-slate-500 mb-1">Outcomes</div>
+              <div className="flex justify-between text-slate-400"><span>Targets</span><span className="text-amber-400">{summary.targets}</span></div>
+              <div className="flex justify-between text-slate-400"><span>Catches</span><span className="text-emerald-400">{summary.catches}</span></div>
+              <div className="flex justify-between text-slate-400"><span>Drops</span><span className="text-red-400">{summary.drops}</span></div>
+              <div className="flex justify-between text-slate-400"><span>Contested</span><span className="text-purple-400">{summary.contested}</span></div>
+              <div className="flex justify-between text-slate-400"><span>Cont. Catch</span><span className="text-purple-300">{summary.contestedCatches}</span></div>
             </div>
             {/* Coverage */}
             <div>
-              <div className="text-gray-500 mb-1">Coverage</div>
-              {summary.coverageMan > 0 && <div className="flex justify-between text-gray-400"><span>Man</span><span>{summary.coverageMan}</span></div>}
-              {summary.coverageZone > 0 && <div className="flex justify-between text-gray-400"><span>Zone</span><span>{summary.coverageZone}</span></div>}
-              {summary.coveragePress > 0 && <div className="flex justify-between text-gray-400"><span>Press</span><span>{summary.coveragePress}</span></div>}
-              {summary.coverageDouble > 0 && <div className="flex justify-between text-gray-400"><span>Double</span><span>{summary.coverageDouble}</span></div>}
+              <div className="text-slate-500 mb-1">Coverage</div>
+              {summary.coverageMan > 0 && <div className="flex justify-between text-slate-400"><span>Man</span><span>{summary.coverageMan}</span></div>}
+              {summary.coverageZone > 0 && <div className="flex justify-between text-slate-400"><span>Zone</span><span>{summary.coverageZone}</span></div>}
+              {summary.coveragePress > 0 && <div className="flex justify-between text-slate-400"><span>Press</span><span>{summary.coveragePress}</span></div>}
+              {summary.coverageDouble > 0 && <div className="flex justify-between text-slate-400"><span>Double</span><span>{summary.coverageDouble}</span></div>}
             </div>
           </div>
         </div>
@@ -466,11 +466,11 @@ export default function SummaryGameImport({ gameLabel, onImport, onCancel }: Pro
         <button
           onClick={confirmImport}
           disabled={importing || !summary || plays.length === 0}
-          className="px-5 py-2 bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white text-sm rounded font-medium transition"
+          className="px-5 py-2 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white text-sm rounded font-medium transition"
         >
           {importing ? "Importing…" : summary ? `Import ${plays.length} Snaps (${plays.filter((p) => !p.no_route_run).length} routes)` : "Paste data above"}
         </button>
-        <button onClick={onCancel} className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm rounded transition">Cancel</button>
+        <button onClick={onCancel} className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white text-sm rounded transition">Cancel</button>
       </div>
     </div>
   );

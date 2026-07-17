@@ -73,17 +73,17 @@ function RosterRow({ p, nflRoles, sizes, rank, onRankCommit }: RosterRowProps) {
   }
 
   // No w-full — width comes from `size` attribute (text/number) or browser default (date/select).
-  const inp = "bg-transparent text-white text-xs px-1 py-0.5 focus:outline-none focus:bg-gray-800/80 rounded";
+  const inp = "bg-transparent text-white text-xs px-1 py-0.5 focus:outline-none focus:bg-slate-800/80 rounded";
   // Same as `inp` plus spinner-button removal so number inputs aren't padded by browser-default arrows.
-  const inpNum = "bg-transparent text-white text-xs px-1 py-0.5 focus:outline-none focus:bg-gray-800/80 rounded [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
-  const sel = "bg-gray-950 text-white text-xs px-1 py-0.5 focus:outline-none focus:bg-gray-800 rounded cursor-pointer";
-  const inpFull = "w-full bg-transparent text-white text-xs px-1 py-0.5 focus:outline-none focus:bg-gray-800/80 rounded min-w-0";
+  const inpNum = "bg-transparent text-white text-xs px-1 py-0.5 focus:outline-none focus:bg-slate-800/80 rounded [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
+  const sel = "bg-slate-950 text-white text-xs px-1 py-0.5 focus:outline-none focus:bg-slate-800 rounded cursor-pointer";
+  const inpFull = "w-full bg-transparent text-white text-xs px-1 py-0.5 focus:outline-none focus:bg-slate-800/80 rounded min-w-0";
   const tdShrink = "py-1 px-1.5 whitespace-nowrap";
 
   return (
-    <tr className={`border-b border-gray-800/60 hover:bg-gray-900/40 transition ${saving ? "opacity-50" : ""}`}>
+    <tr className={`border-b border-slate-800/60 hover:bg-slate-900/40 transition ${saving ? "opacity-50" : ""}`}>
       {/* Name — sticky */}
-      <td className="py-2 px-3 text-sm font-medium text-white whitespace-nowrap sticky left-0 bg-gray-950 z-10 border-r border-gray-800">
+      <td className="py-2 px-3 text-sm font-medium text-white whitespace-nowrap sticky left-0 bg-slate-950 z-10 border-r border-slate-800">
         {p.name}
       </td>
 
@@ -342,7 +342,7 @@ export default function ProspectRosterSheet({ prospects, nflRoles, onDataChanged
 
   if (prospects.length === 0) {
     return (
-      <div className="text-gray-500 text-sm text-center py-12">
+      <div className="text-slate-500 text-sm text-center py-12">
         No prospects added yet.
       </div>
     );
@@ -352,11 +352,11 @@ export default function ProspectRosterSheet({ prospects, nflRoles, onDataChanged
     <div>
       {/* Class filter + bulk actions */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
-        <span className="text-sm text-gray-400">Class:</span>
+        <span className="text-sm text-slate-400">Class:</span>
         <button
           onClick={() => setYearFilter(null)}
           className={`px-3 py-1 rounded text-xs font-medium transition ${
-            !yearFilter ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+            !yearFilter ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"
           }`}
         >
           All
@@ -366,7 +366,7 @@ export default function ProspectRosterSheet({ prospects, nflRoles, onDataChanged
             key={y}
             onClick={() => setYearFilter(y)}
             className={`px-3 py-1 rounded text-xs font-medium transition ${
-              yearFilter === y ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+              yearFilter === y ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"
             }`}
           >
             {y}
@@ -386,17 +386,17 @@ export default function ProspectRosterSheet({ prospects, nflRoles, onDataChanged
         <p className="text-red-400 text-xs mb-3" role="alert">{rankError}</p>
       )}
 
-      <div className="overflow-x-auto rounded-lg border border-gray-800">
+      <div className="overflow-x-auto rounded-lg border border-slate-800">
         <table className="text-sm border-collapse w-full">
           <thead>
-            <tr className="bg-gray-900 text-xs text-gray-500 border-b border-gray-700">
+            <tr className="bg-slate-900 text-xs text-slate-500 border-b border-slate-700">
               <th
-                className="text-left py-2 px-3 font-medium whitespace-nowrap sticky left-0 bg-gray-900 z-10 border-r border-gray-800"
+                className="text-left py-2 px-3 font-medium whitespace-nowrap sticky left-0 bg-slate-900 z-10 border-r border-slate-800"
                 style={shrinkStyle}
               >
                 <button
                   onClick={() => toggleSort("name")}
-                  className="text-gray-300 hover:text-white transition"
+                  className="text-slate-300 hover:text-white transition"
                 >
                   Name{sortIndicator("name")}
                 </button>
@@ -409,7 +409,7 @@ export default function ProspectRosterSheet({ prospects, nflRoles, onDataChanged
               <th className={thShrink} style={shrinkStyle}>
                 <button
                   onClick={() => toggleSort("draft_class_year")}
-                  className="text-gray-500 hover:text-white transition"
+                  className="text-slate-500 hover:text-white transition"
                 >
                   Draft Yr{sortIndicator("draft_class_year")}
                 </button>
@@ -418,7 +418,7 @@ export default function ProspectRosterSheet({ prospects, nflRoles, onDataChanged
               <th className={thShrink} style={shrinkStyle}>
                 <button
                   onClick={() => toggleSort("personal_rank")}
-                  className="text-gray-500 hover:text-white transition"
+                  className="text-slate-500 hover:text-white transition"
                 >
                   Rank{sortIndicator("personal_rank")}
                 </button>
@@ -433,7 +433,7 @@ export default function ProspectRosterSheet({ prospects, nflRoles, onDataChanged
               </th>
             </tr>
           </thead>
-          <tbody className="bg-gray-950">
+          <tbody className="bg-slate-950">
             {filteredSorted.map((p) => (
               <RosterRow
                 key={p.id}

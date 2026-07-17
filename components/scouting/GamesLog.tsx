@@ -24,7 +24,7 @@ function Th({ label, k, sortKey, sortDir, onToggle }: {
   const active = sortKey === k;
   return (
     <th
-      className={`px-3 py-2 text-left text-xs whitespace-nowrap cursor-pointer hover:text-white transition ${active ? "text-blue-400" : "text-gray-500"}`}
+      className={`px-3 py-2 text-left text-xs whitespace-nowrap cursor-pointer hover:text-white transition ${active ? "text-blue-400" : "text-slate-500"}`}
       onClick={() => onToggle(k)}
     >
       {label}{active ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
@@ -157,9 +157,9 @@ export default function GamesLog({
   const totalSnaps = rows.reduce((s, g) => s + (snapsByGame[g.id] ?? 0), 0);
 
   function fmtAboveExpected(v: number | null | undefined): { text: string; color: string } {
-    if (v == null) return { text: "—", color: "text-gray-600" };
+    if (v == null) return { text: "—", color: "text-slate-600" };
     const sign = v > 0 ? "+" : "";
-    const color = v >= 2 ? "text-green-400" : v <= -2 ? "text-red-400" : "text-gray-300";
+    const color = v >= 2 ? "text-emerald-400" : v <= -2 ? "text-red-400" : "text-slate-300";
     return { text: `${sign}${v.toFixed(1)}`, color };
   }
 
@@ -168,35 +168,35 @@ export default function GamesLog({
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <input
-          className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500 w-48"
+          className="px-3 py-1.5 bg-slate-800 border border-slate-700 rounded text-white text-sm placeholder-slate-500 focus:outline-none focus:border-blue-500 w-48"
           placeholder="Search player / opponent…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <span className="text-sm text-gray-400">Season:</span>
+        <span className="text-sm text-slate-400">Season:</span>
         <button
           onClick={() => setYearFilter(null)}
-          className={`px-3 py-1 rounded text-xs font-medium transition ${!yearFilter ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}
+          className={`px-3 py-1 rounded text-xs font-medium transition ${!yearFilter ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}
         >All</button>
         {years.map((y) => (
           <button
             key={y}
             onClick={() => setYearFilter(y)}
-            className={`px-3 py-1 rounded text-xs font-medium transition ${yearFilter === y ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}
+            className={`px-3 py-1 rounded text-xs font-medium transition ${yearFilter === y ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}
           >{y}</button>
         ))}
-        <span className="ml-auto text-xs text-gray-500">{rows.length} games</span>
+        <span className="ml-auto text-xs text-slate-500">{rows.length} games</span>
       </div>
 
       {loading ? (
-        <div className="text-gray-500 text-sm text-center py-12">Loading…</div>
+        <div className="text-slate-500 text-sm text-center py-12">Loading…</div>
       ) : rows.length === 0 ? (
-        <div className="text-gray-500 text-sm text-center py-12">No games charted yet.</div>
+        <div className="text-slate-500 text-sm text-center py-12">No games charted yet.</div>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm border-collapse">
             <thead>
-              <tr className="border-b border-gray-800">
+              <tr className="border-b border-slate-800">
                 <Th label="Player" k="player" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
                 <Th label="School" k="school" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
                 <Th label="Season" k="season_year" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
@@ -206,7 +206,7 @@ export default function GamesLog({
                 <Th label="Above Exp." k="above_exp" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-900">
+            <tbody className="divide-y divide-slate-900">
               {rows.map((g) => {
                 const p = prospectMap[g.prospect_id];
                 const ae = aboveExpectedByProspect.get(g.prospect_id);
@@ -216,18 +216,18 @@ export default function GamesLog({
                   <tr
                     key={g.id}
                     onClick={() => p && onSelectProspect(p)}
-                    className="hover:bg-gray-800/50 cursor-pointer transition"
+                    className="hover:bg-slate-800/50 cursor-pointer transition"
                   >
                     <td className="px-3 py-2 text-white font-medium whitespace-nowrap">{p?.name ?? "—"}</td>
-                    <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{p?.school ?? "—"}</td>
-                    <td className="px-3 py-2 text-gray-300">{g.season_year}</td>
-                    <td className="px-3 py-2 text-gray-200 whitespace-nowrap">{g.opponent}</td>
-                    <td className="px-3 py-2 text-gray-500 capitalize">{g.game_type}</td>
+                    <td className="px-3 py-2 text-slate-400 whitespace-nowrap">{p?.school ?? "—"}</td>
+                    <td className="px-3 py-2 text-slate-300">{g.season_year}</td>
+                    <td className="px-3 py-2 text-slate-200 whitespace-nowrap">{g.opponent}</td>
+                    <td className="px-3 py-2 text-slate-500 capitalize">{g.game_type}</td>
                     <td className="px-3 py-2 text-blue-400 font-medium">{snaps}</td>
                     <td className={`px-3 py-2 font-medium ${aeFmt.color}`}>
                       {aeFmt.text}
                       {ae != null && (
-                        <span className="ml-1 text-[10px] text-gray-500 font-normal">{aboveExpectedLabel(p?.position)}</span>
+                        <span className="ml-1 text-[10px] text-slate-500 font-normal">{aboveExpectedLabel(p?.position)}</span>
                       )}
                     </td>
                   </tr>
@@ -235,7 +235,7 @@ export default function GamesLog({
               })}
             </tbody>
             <tfoot>
-              <tr className="border-t border-gray-700 text-xs text-gray-500 font-medium">
+              <tr className="border-t border-slate-700 text-xs text-slate-500 font-medium">
                 <td colSpan={5} className="px-3 pt-2">Total ({rows.length} games)</td>
                 <td className="px-3 pt-2 text-blue-400">{totalSnaps}</td>
                 <td className="px-3 pt-2" />

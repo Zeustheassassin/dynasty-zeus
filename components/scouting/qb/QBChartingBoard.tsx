@@ -396,21 +396,21 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
       )}
       renderPlayLogger={(sg) => (
         !sg ? (
-          <div className="text-gray-500 text-sm text-center py-12">Select or add a game to start logging plays.</div>
+          <div className="text-slate-500 text-sm text-center py-12">Select or add a game to start logging plays.</div>
         ) : (
           <div className="space-y-4">
-            <div className="text-sm font-medium text-gray-300">
+            <div className="text-sm font-medium text-slate-300">
               Logging: <span className="text-white">{sg.season_year} vs {sg.opponent}</span>
               <span className="ml-2 text-blue-400 text-xs">{gamePlays.length} plays</span>
             </div>
 
             {/* 1. Snap Position */}
             <div>
-              <div className="text-xs text-gray-500 mb-2">Snap Position</div>
+              <div className="text-xs text-slate-500 mb-2">Snap Position</div>
               <div className="flex gap-2">
                 {SNAP_POSITIONS.map(({ key, label }) => (
                   <button key={key} onClick={() => setSnapPos(key)}
-                    className={`flex-1 py-2 rounded text-sm font-medium transition ${snapPos === key ? "bg-blue-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                    className={`flex-1 py-2 rounded text-sm font-medium transition ${snapPos === key ? "bg-blue-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                     {label}
                   </button>
                 ))}
@@ -419,11 +419,11 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
 
             {/* 2. Play Type */}
             <div>
-              <div className="text-xs text-gray-500 mb-2">Play Type</div>
+              <div className="text-xs text-slate-500 mb-2">Play Type</div>
               <div className="flex gap-2">
                 {PLAY_TYPES.map(({ key, label, color }) => (
                   <button key={key} onClick={() => handlePlayTypeChange(key)}
-                    className={`flex-1 py-2 rounded text-sm font-bold transition ${playType === key ? `${color} text-white` : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                    className={`flex-1 py-2 rounded text-sm font-bold transition ${playType === key ? `${color} text-white` : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                     {label}
                   </button>
                 ))}
@@ -433,14 +433,14 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
             {/* 3. Timing — only for RPO / Pass */}
             {needPassFields && (
               <div>
-                <div className="text-xs text-gray-500 mb-2">Timing</div>
+                <div className="text-xs text-slate-500 mb-2">Timing</div>
                 <div className="flex flex-wrap gap-2">
                   {TIMINGS.map(({ key, label }) => (
                     <button key={key} onClick={() => handleTimingChange(key)}
                       className={`px-4 py-2 rounded text-sm font-medium transition ${
                         timing === key
                           ? key === "scramble" ? "bg-orange-600 text-white" : "bg-blue-600 text-white"
-                          : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                          : "bg-slate-800 text-slate-400 hover:bg-slate-700"
                       }`}>
                       {label}
                     </button>
@@ -451,13 +451,13 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
 
             {/* 4. Pressure — required for every pass/rpo timing */}
             {needPressureFields && (
-              <div className="space-y-3 p-4 bg-gray-900/60 rounded-lg border border-amber-900/40">
+              <div className="space-y-3 p-4 bg-slate-900/60 rounded-lg border border-amber-900/40">
                 <div>
-                  <div className="text-xs text-gray-500 mb-2">Pressure</div>
+                  <div className="text-xs text-slate-500 mb-2">Pressure</div>
                   <div className="flex flex-wrap gap-2">
                     {PRESSURES.map(({ key, label, active }) => (
                       <button key={key} onClick={() => handlePressureChange(key)}
-                        className={`px-4 py-2 rounded text-sm font-medium transition ${pressure === key ? `${active} text-white` : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        className={`px-4 py-2 rounded text-sm font-medium transition ${pressure === key ? `${active} text-white` : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         {label}
                       </button>
                     ))}
@@ -465,11 +465,11 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
                 </div>
                 {needPressureHandling && (
                   <div>
-                    <div className="text-xs text-gray-500 mb-2">Pressure Handling</div>
+                    <div className="text-xs text-slate-500 mb-2">Pressure Handling</div>
                     <div className="flex flex-wrap gap-2">
                       {PRESSURE_HANDLINGS.map(({ key, label }) => (
                         <button key={key} onClick={() => setPressureHandling((h) => h === key ? null : key)}
-                          className={`px-4 py-2 rounded text-sm font-medium transition ${pressureHandling === key ? "bg-amber-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                          className={`px-4 py-2 rounded text-sm font-medium transition ${pressureHandling === key ? "bg-amber-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                           {label}
                         </button>
                       ))}
@@ -481,25 +481,25 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
 
             {/* 5-8. Throw details — only when timing is set and not scramble */}
             {needThrowFields && (
-              <div className="space-y-4 p-4 bg-gray-900/60 rounded-lg border border-blue-900/40">
+              <div className="space-y-4 p-4 bg-slate-900/60 rounded-lg border border-blue-900/40">
                 {/* Platform */}
                 <div>
-                  <div className="text-xs text-gray-500 mb-2">Platform</div>
+                  <div className="text-xs text-slate-500 mb-2">Platform</div>
                   <div className="flex flex-wrap gap-2">
                     {PLATFORMS.map(({ key, label }) => (
                       <button key={key} onClick={() => handlePlatformChange(key)}
-                        className={`px-4 py-2 rounded text-sm font-medium transition ${platform === key ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        className={`px-4 py-2 rounded text-sm font-medium transition ${platform === key ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         {label}
                       </button>
                     ))}
                   </div>
                   {needPlatformSide && (
                     <div className="mt-3">
-                      <div className="text-xs text-gray-500 mb-2">Run Direction</div>
+                      <div className="text-xs text-slate-500 mb-2">Run Direction</div>
                       <div className="flex gap-2">
                         {PLATFORM_SIDES.map(({ key, label }) => (
                           <button key={key} onClick={() => setPlatformSide((s) => s === key ? null : key)}
-                            className={`px-4 py-1.5 rounded text-xs font-medium transition ${platformSide === key ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                            className={`px-4 py-1.5 rounded text-xs font-medium transition ${platformSide === key ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                             {label}
                           </button>
                         ))}
@@ -510,11 +510,11 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
 
                 {/* Accuracy */}
                 <div>
-                  <div className="text-xs text-gray-500 mb-2">Accuracy</div>
+                  <div className="text-xs text-slate-500 mb-2">Accuracy</div>
                   <div className="flex flex-wrap gap-2">
                     {ACCURACIES.map(({ key, label, active }) => (
                       <button key={key} onClick={() => setAccuracy((a) => a === key ? null : key)}
-                        className={`px-4 py-2 rounded text-sm font-medium transition ${accuracy === key ? `${active} text-white` : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        className={`px-4 py-2 rounded text-sm font-medium transition ${accuracy === key ? `${active} text-white` : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         {label}
                       </button>
                     ))}
@@ -524,14 +524,14 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
                 {/* Touch — feathered vs fastball read. Defaults to "correct";
                     flip to "incorrect" when the velocity didn't fit the throw. */}
                 <div>
-                  <div className="text-xs text-gray-500 mb-2">Touch</div>
+                  <div className="text-xs text-slate-500 mb-2">Touch</div>
                   <div className="flex gap-2">
                     {([
-                      { key: "correct",   label: "Correct",   cls: "bg-green-600" },
+                      { key: "correct",   label: "Correct",   cls: "bg-emerald-600" },
                       { key: "incorrect", label: "Incorrect", cls: "bg-red-700" },
                     ] as { key: QBTouch; label: string; cls: string }[]).map(({ key, label, cls }) => (
                       <button key={key} onClick={() => setTouch(key)}
-                        className={`px-5 py-2 rounded text-sm font-medium transition ${touch === key ? `${cls} text-white` : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        className={`px-5 py-2 rounded text-sm font-medium transition ${touch === key ? `${cls} text-white` : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         {label}
                       </button>
                     ))}
@@ -540,11 +540,11 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
 
                 {/* Completion */}
                 <div>
-                  <div className="text-xs text-gray-500 mb-2">Result</div>
+                  <div className="text-xs text-slate-500 mb-2">Result</div>
                   <div className="flex gap-2 flex-wrap">
                     {([
-                      { key: "caught",       label: "Caught",       cls: "bg-green-600" },
-                      { key: "incomplete",   label: "Incomplete",   cls: "bg-gray-600" },
+                      { key: "caught",       label: "Caught",       cls: "bg-emerald-600" },
+                      { key: "incomplete",   label: "Incomplete",   cls: "bg-slate-600" },
                       { key: "interception", label: "Interception", cls: "bg-red-700" },
                     ] as { key: QBCompletion; label: string; cls: string }[]).map(({ key, label, cls }) => (
                       <button
@@ -554,7 +554,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
                           if (key !== "interception") setIntType(null);
                         }}
                         className={`px-5 py-2 rounded text-sm font-semibold transition ${
-                          completion === key ? `${cls} text-white` : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                          completion === key ? `${cls} text-white` : "bg-slate-800 text-slate-400 hover:bg-slate-700"
                         }`}
                       >
                         {label}
@@ -564,7 +564,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
                   {/* INT sub-type */}
                   {completion === "interception" && (
                     <div className="mt-3">
-                      <div className="text-xs text-gray-500 mb-2">INT Type</div>
+                      <div className="text-xs text-slate-500 mb-2">INT Type</div>
                       <div className="flex gap-2 flex-wrap">
                         {([
                           { key: "bad_throw",    label: "Bad Throw" },
@@ -576,7 +576,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
                             key={key}
                             onClick={() => setIntType((t) => t === key ? null : key)}
                             className={`px-4 py-1.5 rounded text-xs font-medium transition ${
-                              intType === key ? "bg-orange-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                              intType === key ? "bg-orange-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"
                             }`}
                           >
                             {label}
@@ -589,14 +589,14 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
 
                 {/* Target Position */}
                 <div>
-                  <div className="text-xs text-gray-500 mb-2">Target Position</div>
+                  <div className="text-xs text-slate-500 mb-2">Target Position</div>
                   <div className="flex gap-2">
                     {(["rb", "wr", "te"] as QBTargetPos[]).map((pos) => (
                       <button
                         key={pos}
                         onClick={() => setTargetPos((p) => p === pos ? null : pos)}
                         className={`px-6 py-2 rounded text-sm font-semibold uppercase transition ${
-                          targetPos === pos ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                          targetPos === pos ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"
                         }`}
                       >
                         {pos.toUpperCase()}
@@ -607,26 +607,26 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
 
                 {/* Depth / Location 3×3 grid */}
                 <div>
-                  <div className="text-xs text-gray-500 mb-2">Depth / Location</div>
+                  <div className="text-xs text-slate-500 mb-2">Depth / Location</div>
                   <table className="text-xs">
                     <thead>
                       <tr>
-                        <th className="pr-2 pb-1 text-gray-700 font-normal text-left" />
+                        <th className="pr-2 pb-1 text-slate-700 font-normal text-left" />
                         {["Left", "Center", "Right"].map((l) => (
-                          <th key={l} className="px-1 pb-1 text-gray-500 font-medium text-center">{l}</th>
+                          <th key={l} className="px-1 pb-1 text-slate-500 font-medium text-center">{l}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
                       {DEPTH_ROWS.map(({ label, depths }) => (
                         <tr key={label}>
-                          <td className="pr-2 py-1 text-gray-500 whitespace-nowrap text-right">{label}</td>
+                          <td className="pr-2 py-1 text-slate-500 whitespace-nowrap text-right">{label}</td>
                           {depths.map(({ key, loc }) => (
                             <td key={key} className="px-1 py-1">
                               <button
                                 onClick={() => setDepthZone((d) => d === key ? null : key)}
                                 className={`w-full py-2 px-3 rounded text-xs font-medium transition whitespace-nowrap ${
-                                  depthZone === key ? "bg-blue-600 text-white ring-1 ring-blue-400" : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                                  depthZone === key ? "bg-blue-600 text-white ring-1 ring-blue-400" : "bg-slate-800 text-slate-400 hover:bg-slate-700"
                                 }`}
                               >
                                 {loc}
@@ -641,11 +641,11 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
 
                 {/* Route Type */}
                 <div>
-                  <div className="text-xs text-gray-500 mb-2">Route Type</div>
+                  <div className="text-xs text-slate-500 mb-2">Route Type</div>
                   <div className="flex flex-wrap gap-1.5">
                     {ROUTE_TYPES.map((rt) => (
                       <button key={rt} onClick={() => setRouteType((r) => r === rt ? null : rt)}
-                        className={`px-3 py-1.5 rounded text-xs font-medium capitalize transition ${routeType === rt ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        className={`px-3 py-1.5 rounded text-xs font-medium capitalize transition ${routeType === rt ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         {rt}
                       </button>
                     ))}
@@ -654,11 +654,11 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
 
                 {/* Coverage */}
                 <div>
-                  <div className="text-xs text-gray-500 mb-2">Coverage</div>
+                  <div className="text-xs text-slate-500 mb-2">Coverage</div>
                   <div className="flex gap-2">
                     {(["man", "zone"] as const).map((cvg) => (
                       <button key={cvg} onClick={() => setCoverage((c) => c === cvg ? null : cvg)}
-                        className={`px-6 py-2 rounded text-sm font-medium capitalize transition ${coverage === cvg ? "bg-purple-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        className={`px-6 py-2 rounded text-sm font-medium capitalize transition ${coverage === cvg ? "bg-purple-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         {cvg}
                       </button>
                     ))}
@@ -669,27 +669,27 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
 
             {/* Notes + Log / Save */}
             {editingPlayId && (
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-900/30 border border-yellow-700/50 rounded text-xs text-yellow-300">
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-900/30 border border-amber-700/50 rounded text-xs text-amber-300">
                 <span>✎</span>
                 <span>Editing play — make changes above then save</span>
-                <button onClick={resetForm} className="ml-auto text-yellow-400 hover:text-white transition">Cancel</button>
+                <button onClick={resetForm} className="ml-auto text-amber-400 hover:text-white transition">Cancel</button>
               </div>
             )}
             <div className="flex gap-2">
               <input
-                className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500"
+                className="flex-1 px-3 py-2 bg-slate-800 border border-slate-700 rounded text-white text-sm placeholder-slate-500 focus:outline-none focus:border-blue-500"
                 placeholder="Play note (optional)"
                 value={playNotes}
                 onChange={(e) => setPlayNotes(e.target.value)}
               />
               {editingPlayId ? (
                 <button onClick={saveEditedPlay} disabled={!canLog}
-                  className="px-5 py-2 bg-yellow-600 hover:bg-yellow-500 disabled:opacity-40 text-white text-sm rounded font-medium transition whitespace-nowrap">
+                  className="px-5 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-40 text-white text-sm rounded font-medium transition whitespace-nowrap">
                   {savingPlay ? "…" : "Save Edit"}
                 </button>
               ) : (
                 <button onClick={logPlay} disabled={!canLog}
-                  className="px-5 py-2 bg-green-700 hover:bg-green-600 disabled:opacity-40 text-white text-sm rounded font-medium transition whitespace-nowrap">
+                  className="px-5 py-2 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 text-white text-sm rounded font-medium transition whitespace-nowrap">
                   {savingPlay ? "…" : "Log Play"}
                 </button>
               )}
@@ -699,57 +699,57 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
             {/* Logged plays for this game */}
             {gamePlays.length > 0 && (
               <div>
-                <div className="text-xs text-gray-500 mb-2">Plays This Game ({gamePlays.length})</div>
+                <div className="text-xs text-slate-500 mb-2">Plays This Game ({gamePlays.length})</div>
                 <div className="max-h-56 overflow-y-auto space-y-1 pr-1">
                   {[...gamePlays].reverse().map((pl, i) => (
                     <div key={pl.id} className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs transition ${
                       editingPlayId === pl.id
-                        ? "bg-yellow-900/40 border border-yellow-700/60"
-                        : "bg-gray-900 border border-transparent"
+                        ? "bg-amber-900/40 border border-amber-700/60"
+                        : "bg-slate-900 border border-transparent"
                     }`}>
-                      <span className="text-gray-500 w-5 flex-shrink-0">{gamePlays.length - i}</span>
-                      <span className="text-gray-500 font-medium">{SNAP_SHORT[pl.snap_position]}</span>
-                      <span className={`font-bold ${pl.play_type === "run" ? "text-green-400" : pl.play_type === "rpo" ? "text-yellow-400" : "text-blue-400"}`}>
+                      <span className="text-slate-500 w-5 flex-shrink-0">{gamePlays.length - i}</span>
+                      <span className="text-slate-500 font-medium">{SNAP_SHORT[pl.snap_position]}</span>
+                      <span className={`font-bold ${pl.play_type === "run" ? "text-emerald-400" : pl.play_type === "rpo" ? "text-amber-400" : "text-blue-400"}`}>
                         {PLAY_SHORT[pl.play_type]}
                       </span>
                       {pl.timing && (
-                        <span className={pl.timing === "scramble" ? "text-orange-400" : "text-gray-400"}>
+                        <span className={pl.timing === "scramble" ? "text-orange-400" : "text-slate-400"}>
                           {TIMING_SHORT[pl.timing]}
                         </span>
                       )}
                       {pl.accuracy && (
                         <span className={
-                          pl.accuracy === "on_target" ? "text-green-400"
-                          : pl.accuracy === "tipped_ball" ? "text-yellow-400"
+                          pl.accuracy === "on_target" ? "text-emerald-400"
+                          : pl.accuracy === "tipped_ball" ? "text-amber-400"
                           : "text-red-400"
                         }>
                           {ACC_SHORT[pl.accuracy]}
                         </span>
                       )}
                       {pl.target_pos && <span className="text-cyan-400 font-semibold uppercase">{pl.target_pos}</span>}
-                      {pl.completion === "caught"       && <span className="text-green-400 font-bold">C</span>}
-                      {pl.completion === "incomplete"   && <span className="text-gray-400 font-bold">INC</span>}
+                      {pl.completion === "caught"       && <span className="text-emerald-400 font-bold">C</span>}
+                      {pl.completion === "incomplete"   && <span className="text-slate-400 font-bold">INC</span>}
                       {pl.completion === "interception" && (
                         <span className="text-red-400 font-bold">
                           INT{pl.int_type ? ` (${pl.int_type === "bad_throw" ? "BT" : pl.int_type === "bad_decision" ? "BD" : pl.int_type === "fifty_fifty" ? "50" : "TP"})` : ""}
                         </span>
                       )}
                       {pl.depth_zone && <span className="text-blue-300">{DEPTH_SHORT[pl.depth_zone]}</span>}
-                      {pl.route_type && <span className="text-gray-300 capitalize">{pl.route_type}</span>}
+                      {pl.route_type && <span className="text-slate-300 capitalize">{pl.route_type}</span>}
                       {pl.coverage && <span className="text-purple-400 capitalize">{pl.coverage}</span>}
-                      {pl.play_notes && <span className="text-gray-500 truncate">{pl.play_notes}</span>}
+                      {pl.play_notes && <span className="text-slate-500 truncate">{pl.play_notes}</span>}
                       <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
                         <button
                           onClick={() => editingPlayId === pl.id ? resetForm() : startEditPlay(pl)}
                           className={`px-2 py-0.5 rounded text-xs transition ${
                             editingPlayId === pl.id
-                              ? "text-yellow-400 hover:text-white"
-                              : "text-gray-600 hover:text-yellow-400"
+                              ? "text-amber-400 hover:text-white"
+                              : "text-slate-600 hover:text-amber-400"
                           }`}
                         >
                           ✎
                         </button>
-                        <button onClick={() => deletePlay(pl.id)} className="text-gray-600 hover:text-red-400">✕</button>
+                        <button onClick={() => deletePlay(pl.id)} className="text-slate-600 hover:text-red-400">✕</button>
                       </div>
                     </div>
                   ))}
@@ -762,14 +762,14 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
       renderGamesTable={() => (
         <div>
           {loading ? (
-            <div className="text-gray-500 text-sm text-center py-8">Loading…</div>
+            <div className="text-slate-500 text-sm text-center py-8">Loading…</div>
           ) : games.length === 0 ? (
-            <div className="text-gray-500 text-sm text-center py-8">No games charted yet.</div>
+            <div className="text-slate-500 text-sm text-center py-8">No games charted yet.</div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-gray-800 text-left text-xs text-gray-500">
+                  <tr className="border-b border-slate-800 text-left text-xs text-slate-500">
                     <th className="pb-2 pr-4">Season</th>
                     <th className="pb-2 pr-4">Opponent</th>
                     <th className="pb-2 pr-4">Type</th>
@@ -778,7 +778,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
                     <th className="pb-2 text-right">On-Target%</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-900">
+                <tbody className="divide-y divide-slate-900">
                   {games.map((g) => {
                     const gp       = plays.filter((p) => p.game_id === g.id);
                     // Match the aggregate `thrownPlays` filter — sacks and throw-aways
@@ -788,12 +788,12 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
                     const onTgt    = graded.filter((p) => p.accuracy === "on_target").length;
                     const otPct    = pct(onTgt, graded.length);
                     return (
-                      <tr key={g.id} className="hover:bg-gray-900/50 transition">
-                        <td className="py-2 pr-4 text-gray-300">{g.season_year}</td>
+                      <tr key={g.id} className="hover:bg-slate-900/50 transition">
+                        <td className="py-2 pr-4 text-slate-300">{g.season_year}</td>
                         <td className="py-2 pr-4 text-white font-medium">{g.opponent}</td>
-                        <td className="py-2 pr-4 text-gray-400 capitalize">{g.game_type}</td>
+                        <td className="py-2 pr-4 text-slate-400 capitalize">{g.game_type}</td>
                         <td className="py-2 pr-4 text-right text-blue-400">{gp.length}</td>
-                        <td className="py-2 pr-4 text-right text-gray-300">{thrown.length}</td>
+                        <td className="py-2 pr-4 text-right text-slate-300">{thrown.length}</td>
                         <td className={`py-2 text-right font-medium ${onTargetColor(otPct)}`}>
                           {fmtPct(otPct)}
                         </td>
@@ -802,10 +802,10 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
                   })}
                 </tbody>
                 <tfoot>
-                  <tr className="border-t border-gray-700 text-xs text-gray-500 font-medium">
+                  <tr className="border-t border-slate-700 text-xs text-slate-500 font-medium">
                     <td colSpan={3} className="pt-2">Total ({games.length} games)</td>
                     <td className="pt-2 text-right text-blue-400">{headerStats.totalPlays}</td>
-                    <td className="pt-2 text-right text-gray-300">{headerStats.thrown}</td>
+                    <td className="pt-2 text-right text-slate-300">{headerStats.thrown}</td>
                     <td className={`pt-2 text-right font-medium ${onTargetColor(headerStats.onTargetPct)}`}>
                       {fmtPct(headerStats.onTargetPct)}
                     </td>

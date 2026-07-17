@@ -55,11 +55,11 @@ function CardHeader({ title, prospect }: { title: string; prospect: ProspectWith
         <div className="text-base font-black text-white leading-tight">
           {first} <span className="text-yellow-400">{last}</span>
         </div>
-        <div className="text-[9px] text-gray-400 tracking-[0.1em] uppercase mt-0.5">
+        <div className="text-[9px] text-slate-400 tracking-[0.1em] uppercase mt-0.5">
           {prospect.school} · {prospect.draft_class_year}
         </div>
       </div>
-      <div className="absolute top-3 right-4 text-[8px] font-bold tracking-widest text-gray-600 uppercase">
+      <div className="absolute top-3 right-4 text-[8px] font-bold tracking-widest text-slate-600 uppercase">
         Draft Prospect
       </div>
     </div>
@@ -187,7 +187,7 @@ export default function PlayerCharts({ prospect, allProspects }: Props) {
 
   if (prospect.total_routes === 0) {
     return (
-      <div className="text-gray-500 text-sm text-center py-12">
+      <div className="text-slate-500 text-sm text-center py-12">
         No routes charted yet — charts will appear once plays are logged.
       </div>
     );
@@ -198,16 +198,16 @@ export default function PlayerCharts({ prospect, allProspects }: Props) {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap gap-6 justify-center">
-        <div className="bg-gray-950 border border-gray-700 rounded-xl overflow-hidden w-full sm:w-[370px]">
+        <div className="bg-slate-950 border border-slate-700 rounded-xl overflow-hidden w-full sm:w-[370px]">
           <CardHeader title="Success Rate by Route" prospect={prospect} />
           <ChartSVG spokes={successSpokes} maxPct={100} />
         </div>
-        <div className="bg-gray-950 border border-gray-700 rounded-xl overflow-hidden w-full sm:w-[370px]">
+        <div className="bg-slate-950 border border-slate-700 rounded-xl overflow-hidden w-full sm:w-[370px]">
           <CardHeader title="Route Percentage" prospect={prospect} />
           <ChartSVG spokes={pctSpokes} maxPct={pctMax} />
         </div>
         {hasAlignData && (
-          <div className="bg-gray-950 border border-gray-700 rounded-xl overflow-hidden w-full sm:w-[370px]">
+          <div className="bg-slate-950 border border-slate-700 rounded-xl overflow-hidden w-full sm:w-[370px]">
             <CardHeader title="Open% by Alignment" prospect={prospect} />
             <AlignChartSVG spokes={alignSpokes} />
           </div>
@@ -215,7 +215,7 @@ export default function PlayerCharts({ prospect, allProspects }: Props) {
       </div>
 
       <RadarTierLegend noDataLabel={`< ${MIN_ROUTES_FOR_TIER} routes`} />
-      <p className="text-center text-[11px] text-gray-600">
+      <p className="text-center text-[11px] text-slate-600">
         Percentiles vs {chartedCount} charted prospects · all years
       </p>
     </div>

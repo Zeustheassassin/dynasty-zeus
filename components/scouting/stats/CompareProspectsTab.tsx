@@ -40,38 +40,38 @@ function ProspectPicker({
 
   if (prospect) {
     return (
-      <div className="bg-gray-900 rounded-xl border border-gray-800 p-3 flex items-center justify-between gap-2">
+      <div className="bg-slate-900 rounded-xl border border-slate-800 p-3 flex items-center justify-between gap-2">
         <div className="min-w-0">
-          <p className="text-[10px] text-gray-500 uppercase tracking-wider">{label}</p>
+          <p className="text-[10px] text-slate-500 uppercase tracking-wider">{label}</p>
           <p className="text-sm font-semibold text-white truncate">{prospect.name}</p>
-          <p className="text-[11px] text-gray-500">{prospect.school} · {prospect.draft_class_year}</p>
+          <p className="text-[11px] text-slate-500">{prospect.school} · {prospect.draft_class_year}</p>
         </div>
-        <button onClick={() => onSelect(null)} className="text-xs text-gray-500 hover:text-white shrink-0">Change</button>
+        <button onClick={() => onSelect(null)} className="text-xs text-slate-500 hover:text-white shrink-0">Change</button>
       </div>
     );
   }
 
   return (
-    <div className="bg-gray-900 rounded-xl border border-gray-800 p-3">
-      <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1.5">{label}</p>
+    <div className="bg-slate-900 rounded-xl border border-slate-800 p-3">
+      <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1.5">{label}</p>
       <input
         type="text"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Search prospect..."
-        className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+        className="w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
         aria-label={`Search for ${label.toLowerCase()}`}
       />
       {results.length > 0 && (
-        <ul className="mt-1.5 divide-y divide-gray-800 border border-gray-800 rounded overflow-hidden max-h-56 overflow-y-auto">
+        <ul className="mt-1.5 divide-y divide-slate-800 border border-slate-800 rounded overflow-hidden max-h-56 overflow-y-auto">
           {results.map((p) => (
             <li key={p.id}>
               <button
                 onClick={() => { onSelect(p); setQuery(""); }}
-                className="w-full text-left px-2 py-1.5 text-xs text-gray-200 hover:bg-gray-800 flex items-center justify-between gap-2"
+                className="w-full text-left px-2 py-1.5 text-xs text-slate-200 hover:bg-slate-800 flex items-center justify-between gap-2"
               >
                 <span className="truncate">{p.name}</span>
-                <span className="text-gray-500 shrink-0">{p.school} · {p.draft_class_year}</span>
+                <span className="text-slate-500 shrink-0">{p.school} · {p.draft_class_year}</span>
               </button>
             </li>
           ))}
@@ -128,13 +128,13 @@ export default function CompareProspectsTab({
 
   return (
     <div className="max-w-3xl mx-auto space-y-4">
-      <div className="flex gap-1 border-b border-gray-800">
+      <div className="flex gap-1 border-b border-slate-800">
         {POSITIONS.map((pos) => (
           <button
             key={pos}
             onClick={() => handlePositionChange(pos)}
             className={`px-5 py-2 text-sm font-medium border-b-2 transition ${
-              position === pos ? "border-blue-500 text-blue-400" : "border-transparent text-gray-400 hover:text-white"
+              position === pos ? "border-blue-500 text-blue-400" : "border-transparent text-slate-400 hover:text-white"
             }`}
           >
             {pos}
@@ -147,19 +147,19 @@ export default function CompareProspectsTab({
         <ProspectPicker label="Prospect B" prospect={prospectB} onSelect={setProspectB} options={positionProspects} excludeId={prospectA?.id} />
       </div>
 
-      {loading && <p className="text-center text-xs text-gray-600 py-8">Loading stats...</p>}
+      {loading && <p className="text-center text-xs text-slate-600 py-8">Loading stats...</p>}
 
       {!loading && rowA && rowB && (
-        <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
-          <div className="grid grid-cols-[1fr_auto_1fr] items-center border-b border-gray-800 bg-gray-950/60 p-3">
+        <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
+          <div className="grid grid-cols-[1fr_auto_1fr] items-center border-b border-slate-800 bg-slate-950/60 p-3">
             <span className="text-left text-sm font-bold text-white truncate">{prospectA!.name}</span>
-            <span className="text-xs text-gray-600 px-3">vs</span>
+            <span className="text-xs text-slate-600 px-3">vs</span>
             <span className="text-right text-sm font-bold text-white truncate">{prospectB!.name}</span>
           </div>
-          <div className="max-h-[60vh] overflow-y-auto divide-y divide-gray-800/60">
+          <div className="max-h-[60vh] overflow-y-auto divide-y divide-slate-800/60">
             {groups.map(([group, groupCols]) => (
               <div key={group}>
-                <div className="px-3 py-1 bg-slate-900/60 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                <div className="px-3 py-1 bg-slate-900/60 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
                   {group}
                 </div>
                 {groupCols.map((c) => {
@@ -173,13 +173,13 @@ export default function CompareProspectsTab({
                   }
                   return (
                     <div key={c.key} className="grid grid-cols-[1fr_auto_1fr] items-center px-3 py-1.5 text-sm">
-                      <div className={`text-left ${betterSide === "a" ? "font-bold text-green-400" : "text-gray-300"}`}>
+                      <div className={`text-left ${betterSide === "a" ? "font-bold text-emerald-400" : "text-slate-300"}`}>
                         {fmtVal(va, c.fmt)}
                       </div>
-                      <div className="text-[10px] text-gray-600 px-3 text-center whitespace-nowrap" title={c.tooltip ?? c.label}>
+                      <div className="text-[10px] text-slate-600 px-3 text-center whitespace-nowrap" title={c.tooltip ?? c.label}>
                         {c.label}
                       </div>
-                      <div className={`text-right ${betterSide === "b" ? "font-bold text-green-400" : "text-gray-300"}`}>
+                      <div className={`text-right ${betterSide === "b" ? "font-bold text-emerald-400" : "text-slate-300"}`}>
                         {fmtVal(vb, c.fmt)}
                       </div>
                     </div>
@@ -192,7 +192,7 @@ export default function CompareProspectsTab({
       )}
 
       {!loading && (!rowA || !rowB) && (
-        <p className="text-center text-xs text-gray-600 py-8">
+        <p className="text-center text-xs text-slate-600 py-8">
           Select two {position} prospects above to compare their charted stats.
         </p>
       )}

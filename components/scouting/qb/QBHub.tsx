@@ -14,9 +14,9 @@ const ProspectRosterSheet = dynamic(() => import("../ProspectRosterSheet"), { ss
 const QB_NFL_ROLES = ["Franchise QB", "Starter", "Bridge", "Backup", ""];
 
 const DECISION_DOT: Record<ChartingDecision, string> = {
-  fully_charted: "bg-green-500",
+  fully_charted: "bg-emerald-500",
   partial_chart: "bg-blue-400",
-  charting:      "bg-yellow-400",
+  charting:      "bg-amber-400",
   pending:       "bg-orange-400",
   not_charting:  "bg-red-500",
 };
@@ -146,13 +146,13 @@ export default function QBHub({
   return (
     <div>
       {/* Inner tab bar */}
-      <div className="flex gap-1 mb-5 border-b border-gray-800">
+      <div className="flex gap-1 mb-5 border-b border-slate-800">
         {(["list", "roster"] as HubView[]).map((v) => (
           <button
             key={v}
             onClick={() => { if (v === "list" && hubView === "roster") onDataChanged(); setHubView(v); }}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition whitespace-nowrap ${
-              hubView === v ? "border-blue-500 text-blue-400" : "border-transparent text-gray-400 hover:text-white"
+              hubView === v ? "border-blue-500 text-blue-400" : "border-transparent text-slate-400 hover:text-white"
             }`}
           >
             {v === "list" ? "Prospects" : "Prospect Data"}
@@ -164,11 +164,11 @@ export default function QBHub({
         <div>
           {/* Class filter + add button (matches WR/RB/TE layout) */}
           <div className="flex flex-wrap items-center gap-2 mb-4">
-            <span className="text-sm text-gray-400">Class:</span>
+            <span className="text-sm text-slate-400">Class:</span>
             <button
               onClick={() => setDraftYearFilter(null)}
               className={`px-3 py-1 rounded text-xs font-medium transition ${
-                !draftYearFilter ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                !draftYearFilter ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"
               }`}
             >
               All
@@ -178,7 +178,7 @@ export default function QBHub({
                 key={y}
                 onClick={() => setDraftYearFilter(y)}
                 className={`px-3 py-1 rounded text-xs font-medium transition ${
-                  draftYearFilter === y ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                  draftYearFilter === y ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"
                 }`}
               >
                 {y}
@@ -194,13 +194,13 @@ export default function QBHub({
 
           {/* Sort controls */}
           <div className="flex flex-wrap gap-2 mb-4">
-            <span className="text-xs text-gray-500 self-center">Sort:</span>
+            <span className="text-xs text-slate-500 self-center">Sort:</span>
             {(["personal_rank", "name", "school", "draft_class_year"] as SortKey[]).map((k) => {
               const labels: Record<SortKey, string> = { personal_rank: "Rank", name: "Name", school: "School", draft_class_year: "Draft Yr" };
               return (
                 <button key={k} onClick={() => toggleSort(k)}
                   className={`px-3 py-1 rounded text-xs font-medium transition ${
-                    sortKey === k ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                    sortKey === k ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"
                   }`}>
                   {labels[k]} {sortKey === k ? (sortDir === "asc" ? "↑" : "↓") : ""}
                 </button>
@@ -210,11 +210,11 @@ export default function QBHub({
 
           {/* Add form */}
           {showAdd && (
-            <div className="mb-4 p-4 bg-gray-900 border border-gray-700 rounded-lg">
+            <div className="mb-4 p-4 bg-slate-900 border border-slate-700 rounded-lg">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
-                <input className="px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500"
+                <input className="px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-white text-sm placeholder-slate-500 focus:outline-none focus:border-blue-500"
                   placeholder="Name *" value={newProspect.name} onChange={(e) => setNewProspect((n) => ({ ...n, name: e.target.value }))} />
-                <input className="px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500"
+                <input className="px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-white text-sm placeholder-slate-500 focus:outline-none focus:border-blue-500"
                   placeholder="School *" value={newProspect.school}
                   onChange={(e) => setNewProspect((n) => ({ ...n, school: e.target.value }))}
                   onBlur={() => {
@@ -223,12 +223,12 @@ export default function QBHub({
                       if (auto) setNewProspect((n) => ({ ...n, conference: auto }));
                     }
                   }} />
-                <input className="px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500"
+                <input className="px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-white text-sm placeholder-slate-500 focus:outline-none focus:border-blue-500"
                   placeholder="Conference" value={newProspect.conference} onChange={(e) => setNewProspect((n) => ({ ...n, conference: e.target.value }))} />
-                <input type="number" className="px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500"
+                <input type="number" className="px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-white text-sm placeholder-slate-500 focus:outline-none focus:border-blue-500"
                   placeholder="Personal Rank" value={newProspect.personal_rank}
                   onChange={(e) => setNewProspect((n) => ({ ...n, personal_rank: e.target.value }))} />
-                <select className="px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
+                <select className="px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
                   value={newProspect.draft_class_year} onChange={(e) => setNewProspect((n) => ({ ...n, draft_class_year: Number(e.target.value) }))}>
                   {CLASS_YEARS.map((y) => <option key={y}>{y}</option>)}
                 </select>
@@ -240,7 +240,7 @@ export default function QBHub({
                   Add
                 </button>
                 <button onClick={() => setShowAdd(false)}
-                  className="px-4 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm rounded transition">
+                  className="px-4 py-1.5 bg-slate-700 hover:bg-slate-600 text-white text-sm rounded transition">
                   Cancel
                 </button>
               </div>
@@ -248,9 +248,9 @@ export default function QBHub({
           )}
 
           {loading ? (
-            <div className="text-gray-500 text-sm text-center py-12">Loading…</div>
+            <div className="text-slate-500 text-sm text-center py-12">Loading…</div>
           ) : filtered.length === 0 ? (
-            <div className="text-gray-500 text-sm text-center py-12">
+            <div className="text-slate-500 text-sm text-center py-12">
               No QB prospects found. Click &quot;+ Add Prospect&quot; to add one.
             </div>
           ) : (
@@ -258,12 +258,12 @@ export default function QBHub({
               {filtered.map((p) => (
                 <div
                   key={p.id}
-                  className="w-full flex items-center gap-3 px-4 py-3 bg-gray-900 hover:bg-gray-800 border border-gray-800 hover:border-gray-600 rounded-lg transition text-left group cursor-pointer"
+                  className="w-full flex items-center gap-3 px-4 py-3 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-600 rounded-lg transition text-left group cursor-pointer"
                   onClick={() => { setConfirmDeleteId(null); setSelectedProspect(p); }}
                 >
                   <span className={`flex-shrink-0 w-2.5 h-2.5 rounded-full ${DECISION_DOT[p.charting_decision ?? "pending"]}`} title={p.charting_decision} />
                   <span className="text-sm font-medium text-white min-w-0 truncate">{p.name}</span>
-                  <span className="text-xs text-gray-400 truncate hidden sm:block">
+                  <span className="text-xs text-slate-400 truncate hidden sm:block">
                     {p.school}{p.conference ? ` · ${p.conference}` : ""}
                   </span>
                   <div className="ml-auto flex items-center gap-3 flex-shrink-0">
@@ -271,9 +271,9 @@ export default function QBHub({
                       <RecruitStarBadge recruit={matchProspect({ name: p.name, position: p.position, draft_class_year: p.draft_class_year })} />
                     </span>
                     {p.total_games > 0 && <span className="text-xs text-blue-400">{p.total_games}G</span>}
-                    {p.personal_rank && <span className="text-xs text-gray-500">#{p.personal_rank}</span>}
-                    <span className="text-xs text-gray-700">{p.draft_class_year}</span>
-                    <span className="text-gray-600 group-hover:text-gray-300 text-xs">›</span>
+                    {p.personal_rank && <span className="text-xs text-slate-500">#{p.personal_rank}</span>}
+                    <span className="text-xs text-slate-700">{p.draft_class_year}</span>
+                    <span className="text-slate-600 group-hover:text-slate-300 text-xs">›</span>
                     {confirmDeleteId === p.id ? (
                       <button onClick={(e) => { e.stopPropagation(); deleteProspect(p.id); }}
                         className="px-2 py-1 bg-red-700 hover:bg-red-600 text-white text-xs rounded transition flex-shrink-0">
@@ -281,7 +281,7 @@ export default function QBHub({
                       </button>
                     ) : (
                       <button onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(p.id); }}
-                        className="text-gray-600 hover:text-red-400 text-xs px-1 flex-shrink-0 transition"
+                        className="text-slate-600 hover:text-red-400 text-xs px-1 flex-shrink-0 transition"
                         title="Delete prospect"
                         aria-label={`Delete ${p.name}`}>
                         ✕

@@ -96,29 +96,29 @@ function mergeRunTypeStats(a: RunTypeStat, b: RunTypeStat): RunTypeStat {
 
 function StatRow({ label, s, indent }: { label: string; s: RunTypeStat; indent?: boolean }) {
   const successColor = s.successPct !== null
-    ? s.successPct >= 55 ? "text-green-400" : s.successPct >= 40 ? "text-yellow-400" : "text-red-400"
-    : "text-gray-600";
+    ? s.successPct >= 55 ? "text-emerald-400" : s.successPct >= 40 ? "text-amber-400" : "text-red-400"
+    : "text-slate-600";
   return (
-    <tr className="border-b border-gray-800/60 hover:bg-gray-800/30">
-      <td className={`py-2 pr-2 text-sm font-medium ${indent ? "pl-5 text-gray-400 text-xs" : "text-white"}`}>
-        {indent && <span className="text-gray-600 mr-1">↳</span>}{label}
+    <tr className="border-b border-slate-800/60 hover:bg-slate-800/30">
+      <td className={`py-2 pr-2 text-sm font-medium ${indent ? "pl-5 text-slate-400 text-xs" : "text-white"}`}>
+        {indent && <span className="text-slate-600 mr-1">↳</span>}{label}
       </td>
       <td className="py-2 px-2 text-right text-sm text-blue-400">{s.attempts || "—"}</td>
       <td className={`py-2 px-2 text-right text-sm font-semibold ${successColor}`}>
         {s.successPct !== null ? `${s.successPct}%` : "—"}
       </td>
-      <td className="py-2 px-2 text-right text-xs text-gray-400">
+      <td className="py-2 px-2 text-right text-xs text-slate-400">
         {s.loadedBox > 0 ? `${s.loadedBox}` : "—"}
-        {s.loadedBoxPct !== null && <span className="text-gray-600 ml-1">({s.loadedBoxPct}%)</span>}
+        {s.loadedBoxPct !== null && <span className="text-slate-600 ml-1">({s.loadedBoxPct}%)</span>}
       </td>
-      <td className={`py-2 px-2 text-right text-xs font-medium ${s.loadedBoxSuccessPct !== null ? (s.loadedBoxSuccessPct >= 50 ? "text-green-400" : "text-red-400") : "text-gray-600"}`}>
+      <td className={`py-2 px-2 text-right text-xs font-medium ${s.loadedBoxSuccessPct !== null ? (s.loadedBoxSuccessPct >= 50 ? "text-emerald-400" : "text-red-400") : "text-slate-600"}`}>
         {s.loadedBoxSuccessPct !== null ? `${s.loadedBoxSuccessPct}%` : "—"}
       </td>
-      <td className="py-2 px-2 text-right text-xs text-gray-400">
+      <td className="py-2 px-2 text-right text-xs text-slate-400">
         {s.unblocked > 0 ? `${s.unblocked}` : "—"}
-        {s.unblockedPct !== null && <span className="text-gray-600 ml-1">({s.unblockedPct}%)</span>}
+        {s.unblockedPct !== null && <span className="text-slate-600 ml-1">({s.unblockedPct}%)</span>}
       </td>
-      <td className={`py-2 pl-2 text-right text-xs font-medium ${s.unblockedSuccessPct !== null ? (s.unblockedSuccessPct >= 50 ? "text-green-400" : "text-red-400") : "text-gray-600"}`}>
+      <td className={`py-2 pl-2 text-right text-xs font-medium ${s.unblockedSuccessPct !== null ? (s.unblockedSuccessPct >= 50 ? "text-emerald-400" : "text-red-400") : "text-slate-600"}`}>
         {s.unblockedSuccessPct !== null ? `${s.unblockedSuccessPct}%` : "—"}
       </td>
     </tr>
@@ -404,9 +404,9 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
       renderOverview={() => (
         <div className="space-y-5">
           {loading ? (
-            <div className="text-gray-500 text-sm text-center py-8">Loading…</div>
+            <div className="text-slate-500 text-sm text-center py-8">Loading…</div>
           ) : stats.totalPlays === 0 ? (
-            <div className="text-gray-500 text-sm text-center py-8">
+            <div className="text-slate-500 text-sm text-center py-8">
               No plays charted yet. Go to &quot;Chart Game&quot; to start logging.
             </div>
           ) : (
@@ -418,43 +418,43 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
                   { label: "Run Attempts", value: stats.runAttempts,       color: "text-green-400" },
                   { label: "Pass Block",   value: stats.passBlockAttempts, color: "text-purple-400" },
                   { label: "Run Block",    value: stats.runBlockAttempts,  color: "text-orange-400" },
-                  { label: "Decoy",        value: stats.decoyAttempts,     color: "text-yellow-500" },
+                  { label: "Decoy",        value: stats.decoyAttempts,     color: "text-amber-500" },
                   { label: "Routes",       value: stats.routeAttempts,     color: "text-blue-300" },
-                  { label: "Open",         value: stats.routeOpen,         color: "text-green-300" },
-                  { label: "Targeted",     value: stats.routeTargets,      color: "text-yellow-400" },
-                  { label: "Catches",      value: stats.routeCatches,      color: "text-green-400" },
-                  { label: "Games",        value: games.length,            color: "text-gray-300" },
+                  { label: "Open",         value: stats.routeOpen,         color: "text-emerald-300" },
+                  { label: "Targeted",     value: stats.routeTargets,      color: "text-amber-400" },
+                  { label: "Catches",      value: stats.routeCatches,      color: "text-emerald-400" },
+                  { label: "Games",        value: games.length,            color: "text-slate-300" },
                 ].map((s) => (
-                  <div key={s.label} className="p-3 bg-gray-900 rounded-lg border border-gray-800">
-                    <div className="text-xs text-gray-500 mb-1">{s.label}</div>
+                  <div key={s.label} className="p-3 bg-slate-900 rounded-lg border border-slate-800">
+                    <div className="text-xs text-slate-500 mb-1">{s.label}</div>
                     <div className={`text-xl font-bold ${s.color}`}>{s.value}</div>
                   </div>
                 ))}
               </div>
 
               {/* Formation breakdown */}
-              <div className="p-4 bg-gray-900 rounded-lg border border-gray-800">
-                <div className="text-xs text-gray-500 mb-3">Formation Breakdown</div>
+              <div className="p-4 bg-slate-900 rounded-lg border border-slate-800">
+                <div className="text-xs text-slate-500 mb-3">Formation Breakdown</div>
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-gray-800 text-xs text-gray-600">
+                    <tr className="border-b border-slate-800 text-xs text-slate-600">
                       <th className="text-left pb-1.5 pr-3">Formation</th>
                       <th className="text-right pb-1.5 px-2">Att</th>
                       <th className="text-right pb-1.5 px-2">Suc</th>
                       <th className="text-right pb-1.5 pl-2">Suc%</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-800/60">
+                  <tbody className="divide-y divide-slate-800/60">
                     {FORMATIONS.map(({ key, label }) => {
                       const f = stats.formationStats[key];
                       const color = f.successPct !== null
-                        ? f.successPct >= 55 ? "text-green-400" : f.successPct >= 40 ? "text-yellow-400" : "text-red-400"
-                        : "text-gray-600";
+                        ? f.successPct >= 55 ? "text-emerald-400" : f.successPct >= 40 ? "text-amber-400" : "text-red-400"
+                        : "text-slate-600";
                       return (
-                        <tr key={key} className="hover:bg-gray-800/30">
+                        <tr key={key} className="hover:bg-slate-800/30">
                           <td className="py-2 pr-3 text-white font-medium">{label}</td>
                           <td className="py-2 px-2 text-right text-blue-400">{f.attempts || "—"}</td>
-                          <td className="py-2 px-2 text-right text-gray-300">{f.successes || "—"}</td>
+                          <td className="py-2 px-2 text-right text-slate-300">{f.successes || "—"}</td>
                           <td className={`py-2 pl-2 text-right font-semibold ${color}`}>
                             {f.successPct !== null ? `${f.successPct}%` : "—"}
                           </td>
@@ -466,12 +466,12 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
               </div>
 
               {/* Run type matrix */}
-              <div className="p-4 bg-gray-900 rounded-lg border border-gray-800">
-                <div className="text-xs text-gray-500 mb-3">Run Type Breakdown</div>
+              <div className="p-4 bg-slate-900 rounded-lg border border-slate-800">
+                <div className="text-xs text-slate-500 mb-3">Run Type Breakdown</div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm min-w-[620px]">
                     <thead>
-                      <tr className="border-b border-gray-800 text-xs text-gray-600">
+                      <tr className="border-b border-slate-800 text-xs text-slate-600">
                         <th className="text-left pb-1.5 pr-2">Run Type</th>
                         <th className="text-right pb-1.5 px-2">Att</th>
                         <th className="text-right pb-1.5 px-2">Suc%</th>
@@ -492,7 +492,7 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
                       <StatRow label="Run Block"       s={stats.runTypes.runBlock} />
                     </tbody>
                   </table>
-                  <div className="mt-2 flex gap-4 text-[10px] text-gray-600">
+                  <div className="mt-2 flex gap-4 text-[10px] text-slate-600">
                     <span><span className="text-teal-600">LB</span> = Loaded Box</span>
                     <span><span className="text-orange-700">UB</span> = Unblocked Defender</span>
                     <span>Suc% = success / attempts</span>
@@ -502,19 +502,19 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
 
               {/* Route Type Breakdown */}
               {stats.routeAttempts > 0 && (
-                <div className="p-4 bg-gray-900 rounded-lg border border-gray-800">
-                  <div className="text-xs text-gray-500 mb-3">Route Type Breakdown</div>
+                <div className="p-4 bg-slate-900 rounded-lg border border-slate-800">
+                  <div className="text-xs text-slate-500 mb-3">Route Type Breakdown</div>
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b border-gray-800 text-xs text-gray-600">
+                      <tr className="border-b border-slate-800 text-xs text-slate-600">
                         <th className="text-left pb-1.5 pr-2">Route</th>
                         <th className="text-right pb-1.5 px-2">Routes</th>
-                        <th className="text-right pb-1.5 px-2 text-green-600">Open</th>
-                        <th className="text-right pb-1.5 px-2 text-yellow-600">Targeted</th>
+                        <th className="text-right pb-1.5 px-2 text-emerald-600">Open</th>
+                        <th className="text-right pb-1.5 px-2 text-amber-600">Targeted</th>
                         <th className="text-right pb-1.5 pl-2 text-blue-400">Catches</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-800/60">
+                    <tbody className="divide-y divide-slate-800/60">
                       {([
                         { key: "mid_curl" as RBRouteType, label: "Mid Curl" },
                         { key: "flats" as RBRouteType, label: "Flats" },
@@ -523,16 +523,16 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
                         const r = stats.routeByType[key];
                         const catchPct = r.targets > 0 ? ((r.catches / r.targets) * 100).toFixed(0) : null;
                         return (
-                          <tr key={key} className="hover:bg-gray-800/30">
+                          <tr key={key} className="hover:bg-slate-800/30">
                             <td className="py-2 pr-2 text-sm font-medium text-white">{label}</td>
                             <td className="py-2 px-2 text-right text-sm text-blue-400">{r.routes || "—"}</td>
-                            <td className="py-2 px-2 text-right text-sm text-green-400">{r.open > 0 ? r.open : "—"}</td>
-                            <td className="py-2 px-2 text-right text-sm text-yellow-400">{r.targets > 0 ? r.targets : "—"}</td>
+                            <td className="py-2 px-2 text-right text-sm text-emerald-400">{r.open > 0 ? r.open : "—"}</td>
+                            <td className="py-2 px-2 text-right text-sm text-amber-400">{r.targets > 0 ? r.targets : "—"}</td>
                             <td className="py-2 pl-2 text-right text-sm">
                               {r.catches > 0 ? (
                                 <span className="text-blue-400 font-semibold">
                                   {r.catches}
-                                  {catchPct !== null && <span className="text-gray-500 font-normal ml-1">({catchPct}%)</span>}
+                                  {catchPct !== null && <span className="text-slate-500 font-normal ml-1">({catchPct}%)</span>}
                                 </span>
                               ) : "—"}
                             </td>
@@ -540,11 +540,11 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
                         );
                       })}
                       {/* Total row */}
-                      <tr className="border-t border-gray-700 text-xs text-gray-500 font-medium">
+                      <tr className="border-t border-slate-700 text-xs text-slate-500 font-medium">
                         <td className="pt-2 pr-2">Total</td>
                         <td className="pt-2 px-2 text-right text-blue-400">{stats.routeAttempts}</td>
-                        <td className="pt-2 px-2 text-right text-green-400">{stats.routeOpen > 0 ? stats.routeOpen : "—"}</td>
-                        <td className="pt-2 px-2 text-right text-yellow-400">{stats.routeTargets > 0 ? stats.routeTargets : "—"}</td>
+                        <td className="pt-2 px-2 text-right text-emerald-400">{stats.routeOpen > 0 ? stats.routeOpen : "—"}</td>
+                        <td className="pt-2 px-2 text-right text-amber-400">{stats.routeTargets > 0 ? stats.routeTargets : "—"}</td>
                         <td className="pt-2 pl-2 text-right text-blue-400">{stats.routeCatches > 0 ? stats.routeCatches : "—"}</td>
                       </tr>
                     </tbody>
@@ -554,18 +554,18 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
 
               {/* Play outcome flags */}
               {stats.runAttempts > 0 && (
-                <div className="p-4 bg-gray-900 rounded-lg border border-gray-800">
-                  <div className="text-xs text-gray-500 mb-3">Play Outcome Flags <span className="text-gray-700">(% of {stats.runAttempts} run attempts)</span></div>
+                <div className="p-4 bg-slate-900 rounded-lg border border-slate-800">
+                  <div className="text-xs text-slate-500 mb-3">Play Outcome Flags <span className="text-slate-700">(% of {stats.runAttempts} run attempts)</span></div>
                   <div className="grid grid-cols-3 gap-3">
                     {[
-                      { label: "Broken Tackle",  f: stats.flags.brokenTackle,  color: "text-yellow-400" },
-                      { label: "Explosive Play", f: stats.flags.explosivePlay, color: "text-green-400" },
+                      { label: "Broken Tackle",  f: stats.flags.brokenTackle,  color: "text-amber-400" },
+                      { label: "Explosive Play", f: stats.flags.explosivePlay, color: "text-emerald-400" },
                       { label: "Run Stuff",      f: stats.flags.runStuff,      color: "text-red-400" },
                     ].map(({ label, f, color }) => (
-                      <div key={label} className="p-3 bg-gray-800/50 rounded-lg text-center">
-                        <div className="text-xs text-gray-500 mb-1">{label}</div>
+                      <div key={label} className="p-3 bg-slate-800/50 rounded-lg text-center">
+                        <div className="text-xs text-slate-500 mb-1">{label}</div>
                         <div className={`text-xl font-bold ${color}`}>{f.count}</div>
-                        <div className="text-xs text-gray-500 mt-0.5">{f.pct !== null ? `${f.pct}%` : "—"}</div>
+                        <div className="text-xs text-slate-500 mt-0.5">{f.pct !== null ? `${f.pct}%` : "—"}</div>
                       </div>
                     ))}
                   </div>
@@ -583,21 +583,21 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
       )}
       renderPlayLogger={(sg) => (
         !sg ? (
-          <div className="text-gray-500 text-sm text-center py-12">Select or add a game to start logging plays.</div>
+          <div className="text-slate-500 text-sm text-center py-12">Select or add a game to start logging plays.</div>
         ) : (
           <div className="space-y-4">
-            <div className="text-sm font-medium text-gray-300">
+            <div className="text-sm font-medium text-slate-300">
               Logging: <span className="text-white">{sg.season_year} vs {sg.opponent}</span>
               <span className="ml-2 text-green-400 text-xs">{gamePlays.length} plays</span>
             </div>
 
             {/* Formation */}
             <div>
-              <div className="text-xs text-gray-500 mb-2">Formation</div>
+              <div className="text-xs text-slate-500 mb-2">Formation</div>
               <div className="flex gap-2">
                 {FORMATIONS.map((f) => (
                   <button key={f.key} onClick={() => setFormation(f.key)}
-                    className={`px-4 py-2 rounded text-sm font-medium transition ${formation === f.key ? "bg-green-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                    className={`px-4 py-2 rounded text-sm font-medium transition ${formation === f.key ? "bg-green-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                     {f.label}
                   </button>
                 ))}
@@ -606,27 +606,27 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
 
             {/* Run Type */}
             <div>
-              <div className="text-xs text-gray-500 mb-2">Run Type</div>
+              <div className="text-xs text-slate-500 mb-2">Run Type</div>
               <div className="space-y-2">
                 {/* Man Gap group */}
-                <div className="p-2 bg-gray-900 border border-gray-800 rounded-lg">
-                  <div className="text-xs text-gray-600 mb-1.5 font-medium uppercase tracking-wider">Man Gap</div>
+                <div className="p-2 bg-slate-900 border border-slate-800 rounded-lg">
+                  <div className="text-xs text-slate-600 mb-1.5 font-medium uppercase tracking-wider">Man Gap</div>
                   <div className="flex gap-2">
                     {(["outside_man_gap", "inside_man_gap"] as RBRunType[]).map((rt) => (
                       <button key={rt} onClick={() => setRunType(rt)}
-                        className={`flex-1 py-2 rounded text-xs font-medium transition ${runType === rt ? "bg-green-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        className={`flex-1 py-2 rounded text-xs font-medium transition ${runType === rt ? "bg-green-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         {rt === "outside_man_gap" ? "Outside" : "Inside"}
                       </button>
                     ))}
                   </div>
                 </div>
                 {/* Zone group */}
-                <div className="p-2 bg-gray-900 border border-gray-800 rounded-lg">
-                  <div className="text-xs text-gray-600 mb-1.5 font-medium uppercase tracking-wider">Zone Attempt</div>
+                <div className="p-2 bg-slate-900 border border-slate-800 rounded-lg">
+                  <div className="text-xs text-slate-600 mb-1.5 font-medium uppercase tracking-wider">Zone Attempt</div>
                   <div className="flex gap-2">
                     {(["outside_zone", "inside_zone"] as RBRunType[]).map((rt) => (
                       <button key={rt} onClick={() => setRunType(rt)}
-                        className={`flex-1 py-2 rounded text-xs font-medium transition ${runType === rt ? "bg-green-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        className={`flex-1 py-2 rounded text-xs font-medium transition ${runType === rt ? "bg-green-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         {rt === "outside_zone" ? "Outside" : "Inside"}
                       </button>
                     ))}
@@ -635,21 +635,21 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
                 {/* Pass block / Run block / Decoy */}
                 <div className="flex gap-2">
                   <button onClick={() => setRunType("pass_block")}
-                    className={`flex-1 py-2 rounded text-sm font-medium transition ${runType === "pass_block" ? "bg-purple-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                    className={`flex-1 py-2 rounded text-sm font-medium transition ${runType === "pass_block" ? "bg-purple-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                     Pass Block
                   </button>
                   <button onClick={() => setRunType("run_block")}
-                    className={`flex-1 py-2 rounded text-sm font-medium transition ${runType === "run_block" ? "bg-orange-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                    className={`flex-1 py-2 rounded text-sm font-medium transition ${runType === "run_block" ? "bg-orange-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                     Run Block
                   </button>
                   <button onClick={() => setRunType("decoy")}
-                    className={`flex-1 py-2 rounded text-sm font-medium transition ${runType === "decoy" ? "bg-yellow-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                    className={`flex-1 py-2 rounded text-sm font-medium transition ${runType === "decoy" ? "bg-amber-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                     Decoy
                   </button>
                 </div>
                 {/* Route run */}
                 <button onClick={() => { setRunType("route"); setSuccess(null); setRbOutcome(null); }}
-                  className={`w-full py-2 rounded text-sm font-medium transition ${runType === "route" ? "bg-blue-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                  className={`w-full py-2 rounded text-sm font-medium transition ${runType === "route" ? "bg-blue-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                   Route Run
                 </button>
               </div>
@@ -657,12 +657,12 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
 
             {/* Route play UI */}
             {runType === "route" ? (
-              <div className="space-y-3 p-3 bg-gray-900/60 rounded-lg border border-blue-900/50">
+              <div className="space-y-3 p-3 bg-slate-900/60 rounded-lg border border-blue-900/50">
                 <div className="text-xs text-blue-400 font-medium">Route Run Options</div>
                 <div className="flex flex-wrap gap-4">
                   {/* Route Type */}
                   <div className="w-full">
-                    <div className="text-xs text-gray-500 mb-2">Route Type</div>
+                    <div className="text-xs text-slate-500 mb-2">Route Type</div>
                     <div className="flex gap-2">
                       {([
                         { key: "mid_curl" as RBRouteType, label: "Mid Curl" },
@@ -670,65 +670,65 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
                         { key: "big_boy_route" as RBRouteType, label: "Big Boy Route" },
                       ]).map(({ key, label }) => (
                         <button key={key} onClick={() => setRbRouteType(rbRouteType === key ? null : key)}
-                          className={`flex-1 py-2 rounded text-xs font-medium transition ${rbRouteType === key ? "bg-blue-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                          className={`flex-1 py-2 rounded text-xs font-medium transition ${rbRouteType === key ? "bg-blue-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                           {label}
                         </button>
                       ))}
                     </div>
                   </div>
                   <div>
-                    <div className="text-xs text-gray-500 mb-2">Aligned at Snap</div>
+                    <div className="text-xs text-slate-500 mb-2">Aligned at Snap</div>
                     <div className="flex gap-1.5">
                       <button onClick={() => setAlignedAsWr(false)}
-                        className={`px-3 h-9 rounded text-xs font-medium transition ${!alignedAsWr ? "bg-green-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        className={`px-3 h-9 rounded text-xs font-medium transition ${!alignedAsWr ? "bg-green-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         RB
                       </button>
                       <button onClick={() => setAlignedAsWr(true)}
-                        className={`px-3 h-9 rounded text-xs font-medium transition ${alignedAsWr ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        className={`px-3 h-9 rounded text-xs font-medium transition ${alignedAsWr ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         WR Split Out
                       </button>
                     </div>
                   </div>
                   <div>
-                    <div className="text-xs text-gray-500 mb-2">Targeted?</div>
+                    <div className="text-xs text-slate-500 mb-2">Targeted?</div>
                     <div className="flex gap-1.5">
                       <button onClick={() => setRbTargeted(true)}
-                        className={`px-3 h-9 rounded text-xs font-medium transition ${rbTargeted ? "bg-yellow-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        className={`px-3 h-9 rounded text-xs font-medium transition ${rbTargeted ? "bg-amber-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         Yes
                       </button>
                       <button onClick={() => { setRbTargeted(false); setRbOutcome(null); }}
-                        className={`px-3 h-9 rounded text-xs font-medium transition ${!rbTargeted ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        className={`px-3 h-9 rounded text-xs font-medium transition ${!rbTargeted ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         No
                       </button>
                     </div>
                   </div>
                   <div>
-                    <div className="text-xs text-gray-500 mb-2">Open on Play?</div>
+                    <div className="text-xs text-slate-500 mb-2">Open on Play?</div>
                     <div className="flex gap-1.5">
                       <button onClick={() => setRbWasOpen(true)}
-                        className={`px-3 h-9 rounded text-xs font-medium transition ${rbWasOpen ? "bg-green-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        className={`px-3 h-9 rounded text-xs font-medium transition ${rbWasOpen ? "bg-green-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         Yes
                       </button>
                       <button onClick={() => setRbWasOpen(false)}
-                        className={`px-3 h-9 rounded text-xs font-medium transition ${!rbWasOpen ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        className={`px-3 h-9 rounded text-xs font-medium transition ${!rbWasOpen ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         No
                       </button>
                     </div>
                   </div>
                   {rbTargeted && (
                     <div>
-                      <div className="text-xs text-gray-500 mb-2">Outcome</div>
+                      <div className="text-xs text-slate-500 mb-2">Outcome</div>
                       <div className="flex gap-1.5">
                         <button onClick={() => setRbOutcome("caught")}
-                          className={`px-4 h-9 rounded text-xs font-bold transition ${rbOutcome === "caught" ? "bg-green-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                          className={`px-4 h-9 rounded text-xs font-bold transition ${rbOutcome === "caught" ? "bg-green-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                           Caught ✓
                         </button>
                         <button onClick={() => setRbOutcome("drop")}
-                          className={`px-4 h-9 rounded text-xs font-bold transition ${rbOutcome === "drop" ? "bg-red-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                          className={`px-4 h-9 rounded text-xs font-bold transition ${rbOutcome === "drop" ? "bg-red-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                           Drop ✗
                         </button>
                         <button onClick={() => setRbOutcome("incomplete")}
-                          className={`px-4 h-9 rounded text-xs font-bold transition ${rbOutcome === "incomplete" ? "bg-gray-500 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                          className={`px-4 h-9 rounded text-xs font-bold transition ${rbOutcome === "incomplete" ? "bg-slate-500 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                           Incomplete
                         </button>
                       </div>
@@ -739,20 +739,20 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
             ) : runType === "pass_block" || runType === "run_block" ? (
               /* Pass Block / Run Block — Success/Fail only */
               <div>
-                <div className="text-xs text-gray-500 mb-2">Result</div>
+                <div className="text-xs text-slate-500 mb-2">Result</div>
                 <div className="flex gap-3">
                   <button onClick={() => setSuccess(true)}
-                    className={`flex-1 py-3 rounded-lg text-sm font-bold transition ${success === true ? "bg-green-600 text-white ring-2 ring-green-400" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                    className={`flex-1 py-3 rounded-lg text-sm font-bold transition ${success === true ? "bg-green-600 text-white ring-2 ring-green-400" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                     ✓ SUCCESS
                   </button>
                   <button onClick={() => setSuccess(false)}
-                    className={`flex-1 py-3 rounded-lg text-sm font-bold transition ${success === false ? "bg-red-600 text-white ring-2 ring-red-400" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                    className={`flex-1 py-3 rounded-lg text-sm font-bold transition ${success === false ? "bg-red-600 text-white ring-2 ring-red-400" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                     ✗ FAIL
                   </button>
                 </div>
               </div>
             ) : runType === "decoy" ? (
-              <div className="p-3 bg-gray-900/60 rounded-lg border border-gray-700/50 text-xs text-gray-500">
+              <div className="p-3 bg-slate-900/60 rounded-lg border border-slate-700/50 text-xs text-slate-500">
                 Decoy — no additional options. Click Log Play to record.
               </div>
             ) : (
@@ -760,31 +760,31 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
                 {/* Context toggles — run plays only */}
                 <div className="flex flex-wrap gap-3">
                   <div>
-                    <div className="text-xs text-gray-500 mb-2">Loaded Box?</div>
+                    <div className="text-xs text-slate-500 mb-2">Loaded Box?</div>
                     <div className="flex gap-1.5">
-                      <button onClick={() => setLoadedBox(true)} className={`px-3 h-9 rounded text-xs font-medium transition ${loadedBox ? "bg-teal-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>Yes</button>
-                      <button onClick={() => setLoadedBox(false)} className={`px-3 h-9 rounded text-xs font-medium transition ${!loadedBox ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>No</button>
+                      <button onClick={() => setLoadedBox(true)} className={`px-3 h-9 rounded text-xs font-medium transition ${loadedBox ? "bg-teal-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
+                      <button onClick={() => setLoadedBox(false)} className={`px-3 h-9 rounded text-xs font-medium transition ${!loadedBox ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
                     </div>
                   </div>
                   <div>
-                    <div className="text-xs text-gray-500 mb-2">Unblocked Defender?</div>
+                    <div className="text-xs text-slate-500 mb-2">Unblocked Defender?</div>
                     <div className="flex gap-1.5">
-                      <button onClick={() => setUnblockedDefender(true)} className={`px-3 h-9 rounded text-xs font-medium transition ${unblockedDefender ? "bg-orange-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>Yes</button>
-                      <button onClick={() => setUnblockedDefender(false)} className={`px-3 h-9 rounded text-xs font-medium transition ${!unblockedDefender ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>No</button>
+                      <button onClick={() => setUnblockedDefender(true)} className={`px-3 h-9 rounded text-xs font-medium transition ${unblockedDefender ? "bg-orange-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
+                      <button onClick={() => setUnblockedDefender(false)} className={`px-3 h-9 rounded text-xs font-medium transition ${!unblockedDefender ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
                     </div>
                   </div>
                 </div>
 
                 {/* Success / Fail */}
                 <div>
-                  <div className="text-xs text-gray-500 mb-2">Result</div>
+                  <div className="text-xs text-slate-500 mb-2">Result</div>
                   <div className="flex gap-3">
                     <button onClick={() => setSuccess(true)}
-                      className={`flex-1 py-3 rounded-lg text-sm font-bold transition ${success === true ? "bg-green-600 text-white ring-2 ring-green-400" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                      className={`flex-1 py-3 rounded-lg text-sm font-bold transition ${success === true ? "bg-green-600 text-white ring-2 ring-green-400" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                       ✓ SUCCESS
                     </button>
                     <button onClick={() => setSuccess(false)}
-                      className={`flex-1 py-3 rounded-lg text-sm font-bold transition ${success === false ? "bg-red-600 text-white ring-2 ring-red-400" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                      className={`flex-1 py-3 rounded-lg text-sm font-bold transition ${success === false ? "bg-red-600 text-white ring-2 ring-red-400" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                       ✗ FAIL
                     </button>
                   </div>
@@ -792,15 +792,15 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
 
                 {/* Post-play flags */}
                 <div>
-                  <div className="text-xs text-gray-500 mb-2">Play Flags <span className="text-gray-700">(select if yes)</span></div>
+                  <div className="text-xs text-slate-500 mb-2">Play Flags <span className="text-slate-700">(select if yes)</span></div>
                   <div className="flex gap-2">
                     {[
-                      { label: "Broken Tackle", val: brokenTackle, set: setBrokenTackle, color: "bg-yellow-700" },
-                      { label: "Explosive Play", val: explosivePlay, set: setExplosivePlay, color: "bg-green-800" },
+                      { label: "Broken Tackle", val: brokenTackle, set: setBrokenTackle, color: "bg-amber-700" },
+                      { label: "Explosive Play", val: explosivePlay, set: setExplosivePlay, color: "bg-emerald-800" },
                       { label: "Run Stuff", val: runStuff, set: setRunStuff, color: "bg-red-800" },
                     ].map(({ label, val, set, color }) => (
                       <button key={label} onClick={() => set(!val)}
-                        className={`flex-1 py-2 rounded text-xs font-medium transition ${val ? `${color} text-white` : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        className={`flex-1 py-2 rounded text-xs font-medium transition ${val ? `${color} text-white` : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         {label}
                       </button>
                     ))}
@@ -811,19 +811,19 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
 
             {/* Notes + log */}
             {editingPlayId && (
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-900/30 border border-yellow-700/50 rounded text-xs text-yellow-300">
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-900/30 border border-amber-700/50 rounded text-xs text-amber-300">
                 <span>✎</span>
                 <span>Editing play — make changes above then save</span>
-                <button onClick={resetPlayForm} className="ml-auto text-yellow-400 hover:text-white transition">Cancel</button>
+                <button onClick={resetPlayForm} className="ml-auto text-amber-400 hover:text-white transition">Cancel</button>
               </div>
             )}
             <div className="flex gap-2">
-              <input className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-green-500"
+              <input className="flex-1 px-3 py-2 bg-slate-800 border border-slate-700 rounded text-white text-sm placeholder-slate-500 focus:outline-none focus:border-green-500"
                 placeholder="Play note (optional)" value={playNotes} onChange={(e) => setPlayNotes(e.target.value)} />
               {editingPlayId ? (
                 <button onClick={saveEditedPlay}
                   disabled={savingPlay || (runType !== "route" && runType !== "decoy" && success === null) || (runType === "route" && rbTargeted && rbOutcome === null)}
-                  className="px-5 py-2 bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 text-white text-sm rounded font-medium transition whitespace-nowrap">
+                  className="px-5 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm rounded font-medium transition whitespace-nowrap">
                   {savingPlay ? "…" : "Save Edit"}
                 </button>
               ) : (
@@ -839,7 +839,7 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
             {/* Recent plays */}
             {gamePlays.length > 0 && (
               <div>
-                <div className="text-xs text-gray-500 mb-2">Plays This Game ({gamePlays.length})</div>
+                <div className="text-xs text-slate-500 mb-2">Plays This Game ({gamePlays.length})</div>
                 <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
                   {[...gamePlays].reverse().map((pl, i) => {
                     const rtLabel: Record<RBRunType, string> = {
@@ -852,11 +852,11 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
                     return (
                       <div key={pl.id} className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs transition ${
                         editingPlayId === pl.id
-                          ? "bg-yellow-900/40 border border-yellow-700/60"
-                          : "bg-gray-900 border border-transparent"
+                          ? "bg-amber-900/40 border border-amber-700/60"
+                          : "bg-slate-900 border border-transparent"
                       }`}>
-                        <span className="text-gray-500 w-5 flex-shrink-0">{gamePlays.length - i}</span>
-                        <span className="text-gray-400">{fLabel[pl.formation]}</span>
+                        <span className="text-slate-500 w-5 flex-shrink-0">{gamePlays.length - i}</span>
+                        <span className="text-slate-400">{fLabel[pl.formation]}</span>
                         <span className={`font-medium ${isRoute ? "text-blue-400" : "text-white"}`}>{rtLabel[pl.run_type]}</span>
                         {isRoute ? (
                           <>
@@ -866,30 +866,30 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
                               </span>
                             )}
                             {pl.aligned_as_wr && <span className="text-blue-300">WR</span>}
-                            {pl.was_open && <span className="text-green-300">Open</span>}
+                            {pl.was_open && <span className="text-emerald-300">Open</span>}
                             {pl.targeted
-                              ? pl.success === true ? <span className="text-green-400">✓</span>
+                              ? pl.success === true ? <span className="text-emerald-400">✓</span>
                                 : pl.success === false ? <span className="text-red-400">Drop</span>
-                                : <span className="text-gray-400">Inc</span>
-                              : <span className="text-gray-600">—</span>}
+                                : <span className="text-slate-400">Inc</span>
+                              : <span className="text-slate-600">—</span>}
                           </>
                         ) : (
                           <>
                             {pl.loaded_box && <span className="text-teal-400">LB</span>}
                             {pl.unblocked_defender && <span className="text-orange-400">UB</span>}
-                            <span className={pl.success ? "text-green-400" : "text-red-400"}>{pl.success ? "✓" : "✗"}</span>
-                            {pl.broken_tackle && <span className="text-yellow-400">BT</span>}
-                            {pl.explosive_play && <span className="text-green-300">EXP</span>}
+                            <span className={pl.success ? "text-emerald-400" : "text-red-400"}>{pl.success ? "✓" : "✗"}</span>
+                            {pl.broken_tackle && <span className="text-amber-400">BT</span>}
+                            {pl.explosive_play && <span className="text-emerald-300">EXP</span>}
                             {pl.run_stuff && <span className="text-red-300">STF</span>}
                           </>
                         )}
-                        {pl.play_notes && <span className="text-gray-500 truncate">{pl.play_notes}</span>}
+                        {pl.play_notes && <span className="text-slate-500 truncate">{pl.play_notes}</span>}
                         <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
                           <button
                             onClick={() => editingPlayId === pl.id ? resetPlayForm() : startEditPlay(pl)}
-                            className={`px-2 py-0.5 rounded text-xs transition ${editingPlayId === pl.id ? "text-yellow-400 hover:text-white" : "text-gray-600 hover:text-yellow-400"}`}
+                            className={`px-2 py-0.5 rounded text-xs transition ${editingPlayId === pl.id ? "text-amber-400 hover:text-white" : "text-slate-600 hover:text-amber-400"}`}
                           >✎</button>
-                          <button onClick={() => deletePlay(pl.id)} className="text-gray-700 hover:text-red-400">✕</button>
+                          <button onClick={() => deletePlay(pl.id)} className="text-slate-700 hover:text-red-400">✕</button>
                         </div>
                       </div>
                     );
@@ -903,14 +903,14 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
       renderGamesTable={() => (
         <div>
           {loading ? (
-            <div className="text-gray-500 text-sm text-center py-8">Loading…</div>
+            <div className="text-slate-500 text-sm text-center py-8">Loading…</div>
           ) : games.length === 0 ? (
-            <div className="text-gray-500 text-sm text-center py-8">No games charted yet.</div>
+            <div className="text-slate-500 text-sm text-center py-8">No games charted yet.</div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-gray-800 text-left text-xs text-gray-500">
+                  <tr className="border-b border-slate-800 text-left text-xs text-slate-500">
                     <th className="pb-2 pr-4">Season</th>
                     <th className="pb-2 pr-4">Opponent</th>
                     <th className="pb-2 pr-4">Type</th>
@@ -920,7 +920,7 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
                     <th className="pb-2 text-right">Suc%</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-900">
+                <tbody className="divide-y divide-slate-900">
                   {games.map((g) => {
                     const gPlays = plays.filter((p) => p.game_id === g.id);
                     const runs = gPlays.filter(isRunPlay);
@@ -928,16 +928,16 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
                     const suc = runs.filter((p) => p.success === true).length;
                     const sucPct = runs.length > 0 ? ((suc / runs.length) * 100).toFixed(0) : null;
                     return (
-                      <tr key={g.id} className="hover:bg-gray-900/50 transition">
-                        <td className="py-2 pr-4 text-gray-300">{g.season_year}</td>
+                      <tr key={g.id} className="hover:bg-slate-900/50 transition">
+                        <td className="py-2 pr-4 text-slate-300">{g.season_year}</td>
                         <td className="py-2 pr-4 text-white font-medium">{g.opponent}</td>
-                        <td className="py-2 pr-4 text-gray-400 capitalize">{g.game_type}</td>
+                        <td className="py-2 pr-4 text-slate-400 capitalize">{g.game_type}</td>
                         <td className="py-2 pr-4 text-right text-blue-400">{gPlays.length}</td>
                         <td className="py-2 pr-4 text-right text-green-400">{runs.length}</td>
                         {routes.length > 0
                           ? <td className="py-2 pr-4 text-right text-blue-300">{routes.length} routes</td>
-                          : <td className="py-2 pr-4 text-right text-gray-700">—</td>}
-                        <td className={`py-2 text-right font-medium ${sucPct !== null ? (parseInt(sucPct) >= 55 ? "text-green-400" : parseInt(sucPct) >= 40 ? "text-yellow-400" : "text-red-400") : "text-gray-600"}`}>
+                          : <td className="py-2 pr-4 text-right text-slate-700">—</td>}
+                        <td className={`py-2 text-right font-medium ${sucPct !== null ? (parseInt(sucPct) >= 55 ? "text-emerald-400" : parseInt(sucPct) >= 40 ? "text-amber-400" : "text-red-400") : "text-slate-600"}`}>
                           {sucPct !== null ? `${sucPct}%` : "—"}
                         </td>
                       </tr>
@@ -945,11 +945,11 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
                   })}
                 </tbody>
                 <tfoot>
-                  <tr className="border-t border-gray-700 text-xs text-gray-500 font-medium">
+                  <tr className="border-t border-slate-700 text-xs text-slate-500 font-medium">
                     <td colSpan={3} className="pt-2">Total ({games.length} games)</td>
                     <td className="pt-2 text-right text-blue-400">{stats.totalPlays}</td>
                     <td className="pt-2 text-right text-green-400">{stats.runAttempts}</td>
-                    <td className="pt-2 text-right text-gray-400">—</td>
+                    <td className="pt-2 text-right text-slate-400">—</td>
                   </tr>
                 </tfoot>
               </table>

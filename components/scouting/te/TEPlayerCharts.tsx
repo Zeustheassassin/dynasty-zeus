@@ -102,7 +102,7 @@ export default function TEPlayerCharts({ prospect, allProspects, allGames, leagu
 
   if (!hasAnyData) {
     return (
-      <div className="text-gray-500 text-sm text-center py-12">
+      <div className="text-slate-500 text-sm text-center py-12">
         No routes charted yet — charts will appear once plays are logged.
       </div>
     );
@@ -111,7 +111,7 @@ export default function TEPlayerCharts({ prospect, allProspects, allGames, leagu
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap gap-6 justify-center">
-        <div className="bg-gray-950 border border-gray-700 rounded-xl overflow-hidden w-full sm:w-[370px]">
+        <div className="bg-slate-950 border border-slate-700 rounded-xl overflow-hidden w-full sm:w-[370px]">
           <RadarCardHeader
             title="Open% by Route"
             name={prospect.name}
@@ -120,7 +120,7 @@ export default function TEPlayerCharts({ prospect, allProspects, allGames, leagu
           />
           <RadarChartSVG spokes={routeSpokes} maxPct={100} />
         </div>
-        <div className="bg-gray-950 border border-gray-700 rounded-xl overflow-hidden w-full sm:w-[370px]">
+        <div className="bg-slate-950 border border-slate-700 rounded-xl overflow-hidden w-full sm:w-[370px]">
           <RadarCardHeader
             title="Open% by Positioning"
             name={prospect.name}
@@ -132,7 +132,7 @@ export default function TEPlayerCharts({ prospect, allProspects, allGames, leagu
       </div>
 
       <RadarTierLegend noDataLabel={`< ${MIN_ROUTES_FOR_TIER} routes`} />
-      <p className="text-center text-[11px] text-gray-600">
+      <p className="text-center text-[11px] text-slate-600">
         Percentiles vs {chartedCount} charted TE prospects · all years
       </p>
     </div>

@@ -246,7 +246,7 @@ export default function BigBoard({
         key={key}
         onClick={() => toggleSort(key)}
         className={`px-1.5 py-1.5 text-center whitespace-nowrap cursor-pointer hover:text-white transition select-none ${
-          active ? "text-blue-400" : "text-gray-500"
+          active ? "text-blue-400" : "text-slate-500"
         } ${cls}`}
       >
         {label}{active ? (sortDir === "asc" ? "↑" : "↓") : ""}
@@ -261,8 +261,8 @@ export default function BigBoard({
         key={key}
         onClick={() => toggleSort(key)}
         style={{ left: leftPx, minWidth: widthPx, width: widthPx }}
-        className={`sticky z-20 bg-gray-950 px-1.5 py-1.5 text-center whitespace-nowrap cursor-pointer hover:text-white transition select-none border-r border-gray-800 ${
-          active ? "text-blue-400" : "text-gray-500"
+        className={`sticky z-20 bg-slate-950 px-1.5 py-1.5 text-center whitespace-nowrap cursor-pointer hover:text-white transition select-none border-r border-slate-800 ${
+          active ? "text-blue-400" : "text-slate-500"
         }`}
       >
         {label}{active ? (sortDir === "asc" ? "↑" : "↓") : ""}
@@ -286,15 +286,15 @@ export default function BigBoard({
     const v = aboveExpectedMap.get(p.id);
     if (v == null) {
       return (
-        <td className={`${tdBase} text-gray-600 border-r border-gray-800`}>—</td>
+        <td className={`${tdBase} text-slate-600 border-r border-slate-800`}>—</td>
       );
     }
-    const color = v >= 0 ? "text-green-400" : "text-red-400";
+    const color = v >= 0 ? "text-emerald-400" : "text-red-400";
     const sign = v >= 0 ? "+" : "";
     return (
-      <td className={`${tdBase} border-r border-gray-800 ${color} font-medium`}>
+      <td className={`${tdBase} border-r border-slate-800 ${color} font-medium`}>
         {sign}{v.toFixed(1)}
-        <span className="ml-1 text-[10px] text-gray-500 font-normal">{aboveExpectedLabel(p.position)}</span>
+        <span className="ml-1 text-[10px] text-slate-500 font-normal">{aboveExpectedLabel(p.position)}</span>
       </td>
     );
   }
@@ -325,7 +325,7 @@ export default function BigBoard({
     const rd = draftRound[p.id];
     return (
       <td
-        className="px-1.5 py-1 text-center whitespace-nowrap border-r border-gray-800"
+        className="px-1.5 py-1 text-center whitespace-nowrap border-r border-slate-800"
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
       >
@@ -333,8 +333,8 @@ export default function BigBoard({
           aria-label={`Projected NFL draft round for ${p.name}`}
           value={rd ?? ""}
           onChange={(e) => setRound(p.id, e.target.value)}
-          className={`bg-gray-950 text-xs rounded px-1 py-0.5 cursor-pointer focus:outline-none border ${
-            rd ? "text-indigo-300 font-medium border-indigo-700/50" : "text-gray-600 border-transparent hover:border-gray-700"
+          className={`bg-slate-950 text-xs rounded px-1 py-0.5 cursor-pointer focus:outline-none border ${
+            rd ? "text-indigo-300 font-medium border-indigo-700/50" : "text-slate-600 border-transparent hover:border-slate-700"
           }`}
         >
           <option value="">—</option>
@@ -366,27 +366,27 @@ export default function BigBoard({
     const rank = rankField(p);
     return (
       <>
-        <td className="sticky left-0 z-10 bg-gray-950 px-1 text-gray-700 cursor-grab active:cursor-grabbing text-center w-6"
+        <td className="sticky left-0 z-10 bg-slate-950 px-1 text-slate-700 cursor-grab active:cursor-grabbing text-center w-6"
           onClick={(e) => e.stopPropagation()}>⠿</td>
         <td style={{ left: 24, minWidth: 44, width: 44 }}
-          className="sticky z-10 bg-gray-950 border-r border-gray-800 text-center"
+          className="sticky z-10 bg-slate-950 border-r border-slate-800 text-center"
           onClick={(e) => { e.stopPropagation(); setEditingRankId(p.id); setRankInput(rank ? `${rank}` : ""); }}>
           {editingRankId === p.id ? (
             <input autoFocus type="number" min={1}
-              className="w-10 px-0.5 py-0.5 bg-gray-800 border border-blue-500 rounded text-yellow-400 font-bold text-xs focus:outline-none text-center"
+              className="w-10 px-0.5 py-0.5 bg-slate-800 border border-blue-500 rounded text-yellow-400 font-bold text-xs focus:outline-none text-center"
               value={rankInput}
               onChange={(e) => setRankInput(e.target.value)}
               onBlur={() => commitRank(p.id)}
               onKeyDown={(e) => { if (e.key === "Enter") commitRank(p.id); if (e.key === "Escape") setEditingRankId(null); }}
               onClick={(e) => e.stopPropagation()} />
           ) : (
-            <span className={`cursor-text hover:bg-gray-800 px-1 rounded text-yellow-400 font-bold ${isSaving ? "animate-pulse" : ""}`}>
+            <span className={`cursor-text hover:bg-slate-800 px-1 rounded text-yellow-400 font-bold ${isSaving ? "animate-pulse" : ""}`}>
               {rank ? `#${rank}` : "—"}
             </span>
           )}
         </td>
         <td style={{ left: 68, minWidth: 140, width: 140 }}
-          className="sticky z-10 bg-gray-950 border-r border-gray-800 px-1.5 py-1.5 text-center text-white font-medium whitespace-nowrap">
+          className="sticky z-10 bg-slate-950 border-r border-slate-800 px-1.5 py-1.5 text-center text-white font-medium whitespace-nowrap">
           {p.name}
         </td>
       </>
@@ -396,7 +396,7 @@ export default function BigBoard({
   function rowProps(p: ProspectWithStats, i: number) {
     const isDragging = draggingId === p.id;
     const isDragOver = dragOverId === p.id;
-    const rowBg = isDragOver ? "bg-blue-900/30" : i % 2 === 0 ? "bg-gray-950" : "bg-gray-900/30";
+    const rowBg = isDragOver ? "bg-blue-900/30" : i % 2 === 0 ? "bg-slate-950" : "bg-slate-900/30";
     return {
       draggable: true,
       onDragStart: () => { setDraggingId(p.id); dragRankRef.current = rankField(p) ?? i + 1; },
@@ -405,7 +405,7 @@ export default function BigBoard({
       onDrop: () => handleDrop(p.id),
       onDragEnd: () => { setDraggingId(null); setDragOverId(null); },
       onClick: () => onSelectProspect(p),
-      className: `cursor-pointer transition hover:bg-gray-800/60 ${isDragging ? "opacity-40" : ""} ${isDragOver ? "border-t-2 border-blue-500" : ""} ${rowBg}`,
+      className: `cursor-pointer transition hover:bg-slate-800/60 ${isDragging ? "opacity-40" : ""} ${isDragOver ? "border-t-2 border-blue-500" : ""} ${rowBg}`,
     };
   }
 
@@ -413,14 +413,14 @@ export default function BigBoard({
     <div className="mx-auto w-fit max-w-full">
       <div
         ref={topScrollRef}
-        className="overflow-x-auto [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-track]:bg-gray-900 [&::-webkit-scrollbar-thumb]:bg-gray-600 [&::-webkit-scrollbar-thumb]:rounded hover:[&::-webkit-scrollbar-thumb]:bg-gray-400"
+        className="overflow-x-auto [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-track]:bg-slate-900 [&::-webkit-scrollbar-thumb]:bg-slate-600 [&::-webkit-scrollbar-thumb]:rounded hover:[&::-webkit-scrollbar-thumb]:bg-slate-400"
         onScroll={() => { if (tableScrollRef.current) tableScrollRef.current.scrollLeft = topScrollRef.current!.scrollLeft; }}
       >
         <div ref={topSpacerRef} style={{ height: 1 }} />
       </div>
       <div
         ref={tableScrollRef}
-        className="overflow-x-auto rounded border border-gray-800 [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-track]:bg-gray-900 [&::-webkit-scrollbar-thumb]:bg-gray-600 [&::-webkit-scrollbar-thumb]:rounded hover:[&::-webkit-scrollbar-thumb]:bg-gray-400"
+        className="overflow-x-auto rounded border border-slate-800 [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-track]:bg-slate-900 [&::-webkit-scrollbar-thumb]:bg-slate-600 [&::-webkit-scrollbar-thumb]:rounded hover:[&::-webkit-scrollbar-thumb]:bg-slate-400"
         onScroll={() => { if (topScrollRef.current) topScrollRef.current.scrollLeft = tableScrollRef.current!.scrollLeft; }}
       >
         {tableNode}
@@ -448,31 +448,31 @@ export default function BigBoard({
     return scrollWrapper(
       <table className="text-xs border-collapse" style={{ minWidth: "max-content" }}>
         <thead>
-          <tr className="border-b border-gray-700 bg-gray-950">
-            <th className="sticky left-0 z-20 bg-gray-950 w-6" />
-            <th style={{ left: 24, minWidth: 44 }} className="sticky z-20 bg-gray-950" />
-            <th style={{ left: 68, minWidth: 140 }} className="sticky z-20 bg-gray-950 border-r border-gray-800" />
-            <th colSpan={1} className="px-2 py-1 text-center text-indigo-900 font-medium border-r border-gray-800">NFL Draft</th>
-            <th colSpan={1} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">{secondaryGroup}</th>
-            <th colSpan={identitySpan} className="px-2 py-1 text-center text-gray-600 font-medium border-r border-gray-800">Identity</th>
-            <th colSpan={1} className="px-2 py-1 text-center text-green-900 font-medium border-r border-gray-800">Above Exp</th>
+          <tr className="border-b border-slate-700 bg-slate-950">
+            <th className="sticky left-0 z-20 bg-slate-950 w-6" />
+            <th style={{ left: 24, minWidth: 44 }} className="sticky z-20 bg-slate-950" />
+            <th style={{ left: 68, minWidth: 140 }} className="sticky z-20 bg-slate-950 border-r border-slate-800" />
+            <th colSpan={1} className="px-2 py-1 text-center text-indigo-900 font-medium border-r border-slate-800">NFL Draft</th>
+            <th colSpan={1} className="px-2 py-1 text-center text-slate-600 font-medium border-r border-slate-800">{secondaryGroup}</th>
+            <th colSpan={identitySpan} className="px-2 py-1 text-center text-slate-600 font-medium border-r border-slate-800">Identity</th>
+            <th colSpan={1} className="px-2 py-1 text-center text-emerald-900 font-medium border-r border-slate-800">Above Exp</th>
           </tr>
-          <tr className="border-b border-gray-800 bg-gray-950">
-            <th className="sticky left-0 z-20 bg-gray-950 w-6 text-gray-700 text-center px-1">⠿</th>
+          <tr className="border-b border-slate-800 bg-slate-950">
+            <th className="sticky left-0 z-20 bg-slate-950 w-6 text-slate-700 text-center px-1">⠿</th>
             {stickyTh(primaryLabel, primaryKey, 24, 44)}
             {stickyTh("Name", "name", 68, 140)}
-            <th className="px-1.5 py-1.5 text-center text-indigo-700 whitespace-nowrap text-xs border-r border-gray-800 select-none">Round</th>
-            {th(secondaryLabel, secondaryKey, "border-l border-r border-gray-800 text-gray-400")}
-            {isAll && th("Pos", "position", "border-l border-gray-800")}
-            {th("School", "school", isAll ? "" : "border-l border-gray-800")}
+            <th className="px-1.5 py-1.5 text-center text-indigo-700 whitespace-nowrap text-xs border-r border-slate-800 select-none">Round</th>
+            {th(secondaryLabel, secondaryKey, "border-l border-r border-slate-800 text-slate-400")}
+            {isAll && th("Pos", "position", "border-l border-slate-800")}
+            {th("School", "school", isAll ? "" : "border-l border-slate-800")}
             {th("Yr", "draft_class_year")}
             {th("Age", "age")}
             {th("Ht", "height")}
-            {th("Wt", "weight", "border-r border-gray-800")}
-            {th("AE", "above_expected", "border-l border-gray-800 border-r border-gray-800 text-green-700")}
+            {th("Wt", "weight", "border-r border-slate-800")}
+            {th("AE", "above_expected", "border-l border-slate-800 border-r border-slate-800 text-emerald-700")}
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-900">
+        <tbody className="divide-y divide-slate-900">
           {sorted.map((p, i) => {
             const age = computeAge(p.birthday);
             const sv = secondaryValue(p);
@@ -480,15 +480,15 @@ export default function BigBoard({
               <tr key={p.id} {...rowProps(p, i)}>
                 {stickyRowCells(p)}
                 {draftCell(p)}
-                <td className={`${tdBase} text-gray-500 border-l border-r border-gray-800`}>{sv ? `#${sv}` : "—"}</td>
+                <td className={`${tdBase} text-slate-500 border-l border-r border-slate-800`}>{sv ? `#${sv}` : "—"}</td>
                 {isAll && (
-                  <td className={`${tdBase} font-semibold border-l border-gray-800 ${POSITION_COLORS[p.position] ?? "text-gray-400"}`}>{p.position}</td>
+                  <td className={`${tdBase} font-semibold border-l border-slate-800 ${POSITION_COLORS[p.position] ?? "text-slate-400"}`}>{p.position}</td>
                 )}
-                <td className={`${tdBase} text-gray-400 ${isAll ? "" : "border-l border-gray-800"}`}>{p.school}</td>
-                <td className={`${tdBase} text-gray-400`}>{p.draft_class_year}</td>
-                <td className={`${tdBase} text-gray-400`}>{age ?? "—"}</td>
-                <td className={`${tdBase} text-gray-400`}>{p.height || "—"}</td>
-                <td className={`${tdBase} text-gray-400 border-r border-gray-800`}>{p.weight ?? "—"}</td>
+                <td className={`${tdBase} text-slate-400 ${isAll ? "" : "border-l border-slate-800"}`}>{p.school}</td>
+                <td className={`${tdBase} text-slate-400`}>{p.draft_class_year}</td>
+                <td className={`${tdBase} text-slate-400`}>{age ?? "—"}</td>
+                <td className={`${tdBase} text-slate-400`}>{p.height || "—"}</td>
+                <td className={`${tdBase} text-slate-400 border-r border-slate-800`}>{p.weight ?? "—"}</td>
                 {aboveExpectedCell(p)}
               </tr>
             );
@@ -499,7 +499,7 @@ export default function BigBoard({
   }
 
   const BOARD_TABS: { key: BoardTab; label: string; accent: string }[] = [
-    { key: "all",  label: "All",  accent: "border-gray-400 text-gray-300" },
+    { key: "all",  label: "All",  accent: "border-slate-400 text-slate-300" },
     { key: "QB",   label: "QB",   accent: "border-blue-500 text-blue-400" },
     { key: "RB",   label: "RB",   accent: "border-green-500 text-green-400" },
     { key: "WR",   label: "WR",   accent: "border-yellow-500 text-yellow-400" },
@@ -509,18 +509,18 @@ export default function BigBoard({
   return (
     <div>
       {/* Position board tabs */}
-      <div className="flex justify-center gap-1 mb-4 border-b border-gray-800">
+      <div className="flex justify-center gap-1 mb-4 border-b border-slate-800">
         {BOARD_TABS.map((t) => (
           <button
             key={t.key}
             onClick={() => { setBoardTab(t.key); setSortKey(t.key === "all" ? "overall_rank" : "personal_rank"); setSortDir("asc"); }}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition whitespace-nowrap ${
-              boardTab === t.key ? t.accent : "border-transparent text-gray-400 hover:text-white"
+              boardTab === t.key ? t.accent : "border-transparent text-slate-400 hover:text-white"
             }`}
           >
             {t.label}
             {t.key !== "all" && (
-              <span className="ml-1.5 text-xs text-gray-600">
+              <span className="ml-1.5 text-xs text-slate-600">
                 {prospects.filter((p) => p.position === t.key).length}
               </span>
             )}
@@ -531,29 +531,29 @@ export default function BigBoard({
       {/* Controls */}
       <div className="flex flex-wrap items-center justify-center gap-2 mb-3">
         <input
-          className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500 w-48"
+          className="px-3 py-1.5 bg-slate-800 border border-slate-700 rounded text-white text-sm placeholder-slate-500 focus:outline-none focus:border-blue-500 w-48"
           placeholder="Search name / school…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <span className="text-sm text-gray-400">Class:</span>
+        <span className="text-sm text-slate-400">Class:</span>
         <button
           onClick={() => setDraftYearFilter(null)}
-          className={`px-3 py-1 rounded text-xs font-medium transition ${!draftYearFilter ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}
+          className={`px-3 py-1 rounded text-xs font-medium transition ${!draftYearFilter ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}
         >All</button>
         {years.map((y) => (
           <button key={y} onClick={() => setDraftYearFilter(y)}
-            className={`px-3 py-1 rounded text-xs font-medium transition ${draftYearFilter === y ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}
+            className={`px-3 py-1 rounded text-xs font-medium transition ${draftYearFilter === y ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}
           >{y}</button>
         ))}
-        <span className="text-xs text-gray-500">{sorted.length} prospects</span>
+        <span className="text-xs text-slate-500">{sorted.length} prospects</span>
       </div>
-      <p className="text-xs text-gray-600 mb-2 text-center">Drag rows to reorder · Click rank to edit · Click any column header to sort</p>
+      <p className="text-xs text-slate-600 mb-2 text-center">Drag rows to reorder · Click rank to edit · Click any column header to sort</p>
 
       {loading ? (
-        <div className="text-gray-500 text-sm text-center py-12">Loading…</div>
+        <div className="text-slate-500 text-sm text-center py-12">Loading…</div>
       ) : sorted.length === 0 ? (
-        <div className="text-gray-500 text-sm text-center py-12">No prospects match your filters.</div>
+        <div className="text-slate-500 text-sm text-center py-12">No prospects match your filters.</div>
       ) : (
         renderStandardTable()
       )}

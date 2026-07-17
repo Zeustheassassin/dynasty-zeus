@@ -19,8 +19,8 @@ const POSITION_COLORS: Record<string, string> = {
 const STAR_COLORS: Record<number, string> = {
   5: "text-yellow-400",
   4: "text-amber-300",
-  3: "text-gray-400",
-  2: "text-gray-500",
+  3: "text-slate-400",
+  2: "text-slate-500",
 };
 
 type SortKey = "ranking" | "stars" | "rating" | "name" | "school" | "committed_to" | "position";
@@ -85,7 +85,7 @@ export default function RecruitsTab() {
       <th
         onClick={() => toggleSort(key)}
         className={`px-2 py-1.5 text-left whitespace-nowrap cursor-pointer hover:text-white transition select-none ${
-          active ? "text-blue-400" : "text-gray-400"
+          active ? "text-blue-400" : "text-slate-400"
         } ${cls}`}
       >
         {label}{active ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
@@ -104,11 +104,11 @@ export default function RecruitsTab() {
       {/* Header: year picker + refresh */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-500 uppercase tracking-wide">Class</span>
+          <span className="text-xs text-slate-500 uppercase tracking-wide">Class</span>
           <select
             value={year}
             onChange={(e) => setYear(Number(e.target.value))}
-            className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
+            className="px-3 py-1.5 bg-slate-800 border border-slate-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
           >
             {ALL_YEARS.map((y) => (
               <option key={y} value={y}>{y}</option>
@@ -125,7 +125,7 @@ export default function RecruitsTab() {
           {refreshing ? "Refreshing…" : "↻ Refresh from CFD"}
         </button>
 
-        <div className="text-xs text-gray-500">
+        <div className="text-xs text-slate-500">
           {lastRefreshed
             ? <>Cached {lastRefreshed} · {meta?.total_records ?? 0} recruits</>
             : error
@@ -147,7 +147,7 @@ export default function RecruitsTab() {
           placeholder="Search name / school / commit / city…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="flex-1 min-w-[200px] px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500"
+          className="flex-1 min-w-[200px] px-3 py-1.5 bg-slate-800 border border-slate-700 rounded text-white text-sm placeholder-slate-500 focus:outline-none focus:border-blue-500"
         />
 
         <div className="flex items-center gap-1">
@@ -158,7 +158,7 @@ export default function RecruitsTab() {
               className={`text-xs font-bold px-2 py-1 rounded border transition ${
                 starsFilter === s
                   ? "bg-yellow-500/20 border-yellow-500 text-yellow-300"
-                  : "border-gray-700 text-gray-500 hover:text-white"
+                  : "border-slate-700 text-slate-500 hover:text-white"
               }`}
             >
               {s}★
@@ -174,7 +174,7 @@ export default function RecruitsTab() {
               className={`text-xs font-medium px-2 py-1 rounded border transition capitalize ${
                 commitFilter === c
                   ? "bg-blue-600 border-blue-500 text-white"
-                  : "border-gray-700 text-gray-500 hover:text-white"
+                  : "border-slate-700 text-slate-500 hover:text-white"
               }`}
             >
               {c}
@@ -190,8 +190,8 @@ export default function RecruitsTab() {
             onClick={() => setPositionFilter(null)}
             className={`text-[11px] font-bold px-2.5 py-1 rounded border transition ${
               positionFilter === null
-                ? "bg-gray-700 border-gray-500 text-white"
-                : "border-gray-700 text-gray-500 hover:text-white"
+                ? "bg-slate-700 border-slate-500 text-white"
+                : "border-slate-700 text-slate-500 hover:text-white"
             }`}
           >
             ALL
@@ -202,8 +202,8 @@ export default function RecruitsTab() {
               onClick={() => setPositionFilter(positionFilter === pos ? null : pos)}
               className={`text-[11px] font-bold px-2.5 py-1 rounded border transition ${
                 positionFilter === pos
-                  ? `${POSITION_COLORS[pos] || "text-gray-300"} border-current`
-                  : "border-gray-700 text-gray-500 hover:text-white"
+                  ? `${POSITION_COLORS[pos] || "text-slate-300"} border-current`
+                  : "border-slate-700 text-slate-500 hover:text-white"
               }`}
             >
               {pos}
@@ -213,16 +213,16 @@ export default function RecruitsTab() {
       )}
 
       {/* Results count */}
-      <div className="text-xs text-gray-600">
+      <div className="text-xs text-slate-600">
         {loading
           ? "Loading…"
           : `Showing ${filtered.length} of ${recruits.length} recruits`}
       </div>
 
       {/* Table */}
-      <div className="overflow-x-auto rounded border border-gray-800">
+      <div className="overflow-x-auto rounded border border-slate-800">
         <table className="w-full text-xs border-collapse">
-          <thead className="bg-gray-950 border-b border-gray-700">
+          <thead className="bg-slate-950 border-b border-slate-700">
             <tr>
               {th("Rank", "ranking", "w-16")}
               {th("Name", "name")}
@@ -231,14 +231,14 @@ export default function RecruitsTab() {
               {th("Rating", "rating", "w-20")}
               {th("School", "school")}
               {th("Commit", "committed_to")}
-              <th className="px-2 py-1.5 text-left text-gray-400">Hometown</th>
-              <th className="px-2 py-1.5 text-left text-gray-400 w-20">Ht/Wt</th>
+              <th className="px-2 py-1.5 text-left text-slate-400">Hometown</th>
+              <th className="px-2 py-1.5 text-left text-slate-400 w-20">Ht/Wt</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-900">
+          <tbody className="divide-y divide-slate-900">
             {!loading && filtered.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-3 py-10 text-center text-gray-500">
+                <td colSpan={9} className="px-3 py-10 text-center text-slate-500">
                   {recruits.length === 0
                     ? error
                       ? "—"  /* error banner above already explains; don't suggest Refresh again */
@@ -248,28 +248,28 @@ export default function RecruitsTab() {
               </tr>
             )}
             {filtered.map((r, i) => (
-              <tr key={r.id} className={i % 2 === 0 ? "bg-gray-950" : "bg-gray-900/40"}>
+              <tr key={r.id} className={i % 2 === 0 ? "bg-slate-950" : "bg-slate-900/40"}>
                 <td className="px-2 py-1.5 text-blue-400 font-mono text-[11px]">
                   {r.ranking ? `#${r.ranking}` : "—"}
                 </td>
                 <td className="px-2 py-1.5 text-white font-medium">{r.name}</td>
-                <td className={`px-2 py-1.5 font-bold ${POSITION_COLORS[r.position ?? ""] ?? "text-gray-400"}`}>
+                <td className={`px-2 py-1.5 font-bold ${POSITION_COLORS[r.position ?? ""] ?? "text-slate-400"}`}>
                   {r.position ?? "—"}
                 </td>
-                <td className={`px-2 py-1.5 text-center font-bold ${STAR_COLORS[r.stars ?? 0] ?? "text-gray-600"}`}>
+                <td className={`px-2 py-1.5 text-center font-bold ${STAR_COLORS[r.stars ?? 0] ?? "text-slate-600"}`}>
                   {r.stars ? r.stars : "—"}
                 </td>
-                <td className="px-2 py-1.5 text-gray-300 font-mono">
+                <td className="px-2 py-1.5 text-slate-300 font-mono">
                   {r.rating != null ? r.rating.toFixed(4) : "—"}
                 </td>
-                <td className="px-2 py-1.5 text-gray-400 truncate max-w-[200px]">{r.school || "—"}</td>
-                <td className="px-2 py-1.5 text-gray-300 truncate max-w-[160px]">
-                  {r.committed_to || <span className="text-gray-600 italic">uncommitted</span>}
+                <td className="px-2 py-1.5 text-slate-400 truncate max-w-[200px]">{r.school || "—"}</td>
+                <td className="px-2 py-1.5 text-slate-300 truncate max-w-[160px]">
+                  {r.committed_to || <span className="text-slate-600 italic">uncommitted</span>}
                 </td>
-                <td className="px-2 py-1.5 text-gray-500 truncate max-w-[160px]">
+                <td className="px-2 py-1.5 text-slate-500 truncate max-w-[160px]">
                   {[r.city, r.state_province].filter(Boolean).join(", ") || "—"}
                 </td>
-                <td className="px-2 py-1.5 text-gray-500 font-mono text-[11px] whitespace-nowrap">
+                <td className="px-2 py-1.5 text-slate-500 font-mono text-[11px] whitespace-nowrap">
                   {formatHt(r.height)} / {r.weight ?? "—"}
                 </td>
               </tr>

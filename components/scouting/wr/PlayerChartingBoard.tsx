@@ -318,68 +318,68 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
         return (
           <div className="text-right">
             <div className="text-xs text-blue-400">{gs.routes}r</div>
-            <div className="text-xs text-gray-600">{gs.catches}/{gs.targets}</div>
+            <div className="text-xs text-slate-600">{gs.catches}/{gs.targets}</div>
           </div>
         );
       }}
       renderHeaderStats={() => (
         <>
           <div>{stats.totalSnaps} snaps · {stats.totalRoutes} routes · {games.length} games</div>
-          {stats.successRate && <div className="text-green-400">{stats.successRate}% open</div>}
+          {stats.successRate && <div className="text-emerald-400">{stats.successRate}% open</div>}
         </>
       )}
       renderOverview={() => (
         <div className="space-y-4">
           {loading ? (
-            <div className="text-gray-500 text-sm text-center py-8">Loading…</div>
+            <div className="text-slate-500 text-sm text-center py-8">Loading…</div>
           ) : stats.total === 0 ? (
-            <div className="text-gray-500 text-sm text-center py-8">
+            <div className="text-slate-500 text-sm text-center py-8">
               No routes charted yet. Go to &quot;Chart Game&quot; to start logging plays.
             </div>
           ) : (
             <>
               <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
                 {[
-                  { label: "Snaps",      value: stats.totalSnaps,       color: "text-gray-300" },
+                  { label: "Snaps",      value: stats.totalSnaps,       color: "text-slate-300" },
                   { label: "Routes",     value: stats.totalRoutes,      color: "text-blue-400" },
-                  { label: "Games",      value: games.length,           color: "text-gray-300" },
-                  { label: "Targets",    value: stats.targets,          color: "text-yellow-400" },
-                  { label: "Catches",    value: stats.catches,          color: "text-green-400" },
+                  { label: "Games",      value: games.length,           color: "text-slate-300" },
+                  { label: "Targets",    value: stats.targets,          color: "text-amber-400" },
+                  { label: "Catches",    value: stats.catches,          color: "text-emerald-400" },
                   { label: "Drops",      value: stats.drops,            color: "text-red-400" },
                   { label: "Contested",  value: stats.contested,        color: "text-purple-400" },
                   { label: "Cont. Catch",value: stats.contestedCatches, color: "text-purple-300" },
                 ].map((s) => (
-                  <div key={s.label} className="p-3 bg-gray-900 rounded-lg border border-gray-800">
-                    <div className="text-xs text-gray-500 mb-1">{s.label}</div>
+                  <div key={s.label} className="p-3 bg-slate-900 rounded-lg border border-slate-800">
+                    <div className="text-xs text-slate-500 mb-1">{s.label}</div>
                     <div className={`text-xl font-bold ${s.color}`}>{s.value}</div>
                   </div>
                 ))}
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                <div className="p-3 bg-gray-900 rounded-lg border border-gray-800">
-                  <div className="text-xs text-gray-500 mb-1">Open Rate (SRVC)</div>
-                  <div className="text-xl font-bold text-green-400">{stats.openRate ? `${stats.openRate}%` : "—"}</div>
-                  <div className="text-xs text-gray-600 mt-0.5">got open / total routes</div>
+                <div className="p-3 bg-slate-900 rounded-lg border border-slate-800">
+                  <div className="text-xs text-slate-500 mb-1">Open Rate (SRVC)</div>
+                  <div className="text-xl font-bold text-emerald-400">{stats.openRate ? `${stats.openRate}%` : "—"}</div>
+                  <div className="text-xs text-slate-600 mt-0.5">got open / total routes</div>
                 </div>
-                <div className="p-3 bg-gray-900 rounded-lg border border-gray-800">
-                  <div className="text-xs text-gray-500 mb-1">Catch Rate</div>
+                <div className="p-3 bg-slate-900 rounded-lg border border-slate-800">
+                  <div className="text-xs text-slate-500 mb-1">Catch Rate</div>
                   <div className="text-xl font-bold text-blue-400">{stats.catchRate ? `${stats.catchRate}%` : "—"}</div>
-                  <div className="text-xs text-gray-600 mt-0.5">{stats.catches} caught / {stats.targets} targeted</div>
+                  <div className="text-xs text-slate-600 mt-0.5">{stats.catches} caught / {stats.targets} targeted</div>
                 </div>
-                <div className="p-3 bg-gray-900 rounded-lg border border-gray-800">
-                  <div className="text-xs text-gray-500 mb-1">Target Rate</div>
-                  <div className="text-xl font-bold text-yellow-400">{stats.targetRate ? `${stats.targetRate}%` : "—"}</div>
-                  <div className="text-xs text-gray-600 mt-0.5">{stats.targets} / {stats.totalRoutes} routes</div>
+                <div className="p-3 bg-slate-900 rounded-lg border border-slate-800">
+                  <div className="text-xs text-slate-500 mb-1">Target Rate</div>
+                  <div className="text-xl font-bold text-amber-400">{stats.targetRate ? `${stats.targetRate}%` : "—"}</div>
+                  <div className="text-xs text-slate-600 mt-0.5">{stats.targets} / {stats.totalRoutes} routes</div>
                 </div>
               </div>
 
-              <div className="p-4 bg-gray-900 rounded-lg border border-gray-800">
-                <div className="text-xs text-gray-500 mb-3">Route Breakdown — Att · Times Open · Open% (SRVC)</div>
+              <div className="p-4 bg-slate-900 rounded-lg border border-slate-800">
+                <div className="text-xs text-slate-500 mb-3">Route Breakdown — Att · Times Open · Open% (SRVC)</div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs">
                     <thead>
-                      <tr className="border-b border-gray-800 text-gray-600">
+                      <tr className="border-b border-slate-800 text-slate-600">
                         <th className="text-left pb-1.5 pr-3">Route</th>
                         <th className="text-right pb-1.5 px-2">Att</th>
                         <th className="text-right pb-1.5 px-2">Open</th>
@@ -389,25 +389,25 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                         <th className="text-right pb-1.5 pl-2">% of Routes</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-900">
+                    <tbody className="divide-y divide-slate-900">
                       {ROUTE_TYPES
                         .filter((rt) => stats.routeStats[rt])
                         .sort((a, b) => (stats.routeStats[b]?.count ?? 0) - (stats.routeStats[a]?.count ?? 0))
                         .map((rt) => {
                           const rs = stats.routeStats[rt]!;
                           return (
-                            <tr key={rt} className="hover:bg-gray-800/40">
+                            <tr key={rt} className="hover:bg-slate-800/40">
                               <td className="py-1.5 pr-3 text-white font-medium capitalize">{rt}</td>
                               <td className="py-1.5 px-2 text-right text-blue-400">{rs.count}</td>
-                              <td className="py-1.5 px-2 text-right text-green-300">{rs.open || "—"}</td>
-                              <td className="py-1.5 px-2 text-right text-yellow-400">{rs.targets || "—"}</td>
-                              <td className="py-1.5 px-2 text-right text-gray-300">{rs.catches || "—"}</td>
+                              <td className="py-1.5 px-2 text-right text-emerald-300">{rs.open || "—"}</td>
+                              <td className="py-1.5 px-2 text-right text-amber-400">{rs.targets || "—"}</td>
+                              <td className="py-1.5 px-2 text-right text-slate-300">{rs.catches || "—"}</td>
                               <td className="py-1.5 px-2 text-right font-medium">
                                 {rs.successRate
-                                  ? <span className={parseInt(rs.successRate) >= 55 ? "text-green-400" : "text-red-400"}>{rs.successRate}</span>
-                                  : <span className="text-gray-600">—</span>}
+                                  ? <span className={parseInt(rs.successRate) >= 55 ? "text-emerald-400" : "text-red-400"}>{rs.successRate}</span>
+                                  : <span className="text-slate-600">—</span>}
                               </td>
-                              <td className="py-1.5 pl-2 text-right text-gray-500">
+                              <td className="py-1.5 pl-2 text-right text-slate-500">
                                 {stats.total > 0 ? ((rs.count / stats.total) * 100).toFixed(0) : 0}%
                               </td>
                             </tr>
@@ -419,19 +419,19 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
               </div>
 
               {stats.cvgStats.length > 0 && (
-                <div className="p-4 bg-gray-900 rounded-lg border border-gray-800">
-                  <div className="text-xs text-gray-500 mb-3">Coverage Breakdown — Routes · Open · Open% (SRVC)</div>
+                <div className="p-4 bg-slate-900 rounded-lg border border-slate-800">
+                  <div className="text-xs text-slate-500 mb-3">Coverage Breakdown — Routes · Open · Open% (SRVC)</div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     {stats.cvgStats.map((c) => (
-                      <div key={c.label} className="p-3 bg-gray-800/50 rounded-lg">
+                      <div key={c.label} className="p-3 bg-slate-800/50 rounded-lg">
                         <div className="text-xs text-orange-400 font-medium mb-2">vs. {c.label}</div>
                         <div className="space-y-1 text-xs">
-                          <div className="flex justify-between"><span className="text-gray-500">Routes</span><span className="text-gray-300">{c.count}</span></div>
-                          <div className="flex justify-between"><span className="text-gray-500">Times Open</span><span className="text-green-300">{c.open || "—"}</span></div>
-                          <div className="flex justify-between"><span className="text-gray-500">Targets</span><span className="text-yellow-400">{c.targets || "—"}</span></div>
-                          <div className="flex justify-between border-t border-gray-700 pt-1">
-                            <span className="text-gray-500">Open%</span>
-                            <span className={`font-medium ${c.successRate ? (parseInt(c.successRate) >= 55 ? "text-green-400" : "text-red-400") : "text-gray-600"}`}>{c.successRate ?? "—"}</span>
+                          <div className="flex justify-between"><span className="text-slate-500">Routes</span><span className="text-slate-300">{c.count}</span></div>
+                          <div className="flex justify-between"><span className="text-slate-500">Times Open</span><span className="text-emerald-300">{c.open || "—"}</span></div>
+                          <div className="flex justify-between"><span className="text-slate-500">Targets</span><span className="text-amber-400">{c.targets || "—"}</span></div>
+                          <div className="flex justify-between border-t border-slate-700 pt-1">
+                            <span className="text-slate-500">Open%</span>
+                            <span className={`font-medium ${c.successRate ? (parseInt(c.successRate) >= 55 ? "text-emerald-400" : "text-red-400") : "text-slate-600"}`}>{c.successRate ?? "—"}</span>
                           </div>
                         </div>
                       </div>
@@ -455,8 +455,8 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                 ];
                 const hasAnyOpen = openRows.some((r) => r.total !== null);
                 return (
-                  <div className="p-4 bg-gray-900 rounded-lg border border-gray-800">
-                    <div className="text-xs text-gray-500 mb-3">Alignment &amp; Depth</div>
+                  <div className="p-4 bg-slate-900 rounded-lg border border-slate-800">
+                    <div className="text-xs text-slate-500 mb-3">Alignment &amp; Depth</div>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
                       {[
                         { label: "LWR (Left)", value: stats.pctLeft },
@@ -465,50 +465,50 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                         { label: "Backfield", value: stats.pctBf },
                       ].map((a) => (
                         <div key={a.label}>
-                          <div className="text-xs text-gray-500 mb-1">{a.label}</div>
+                          <div className="text-xs text-slate-500 mb-1">{a.label}</div>
                           <div className="text-sm font-semibold text-white">{a.value ? `${a.value}%` : "—"}</div>
                           {a.value && (
-                            <div className="mt-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                            <div className="mt-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
                               <div className="h-full bg-blue-500 rounded-full" style={{ width: `${a.value}%` }} />
                             </div>
                           )}
                         </div>
                       ))}
                     </div>
-                    <div className="grid grid-cols-2 gap-3 border-t border-gray-800 pt-3">
-                      <div><div className="text-xs text-gray-500">On the Line</div><div className="text-sm font-semibold text-white">{stats.pctOnLine ? `${stats.pctOnLine}%` : "—"}</div></div>
-                      <div><div className="text-xs text-gray-500">Off the Line</div><div className="text-sm font-semibold text-white">{stats.pctOffLine ? `${stats.pctOffLine}%` : "—"}</div></div>
+                    <div className="grid grid-cols-2 gap-3 border-t border-slate-800 pt-3">
+                      <div><div className="text-xs text-slate-500">On the Line</div><div className="text-sm font-semibold text-white">{stats.pctOnLine ? `${stats.pctOnLine}%` : "—"}</div></div>
+                      <div><div className="text-xs text-slate-500">Off the Line</div><div className="text-sm font-semibold text-white">{stats.pctOffLine ? `${stats.pctOffLine}%` : "—"}</div></div>
                     </div>
                     {hasAnyOpen && (
-                      <div className="mt-4 border-t border-gray-800 pt-3">
-                        <div className="text-xs text-gray-500 mb-3">Open% by Alignment <span className="text-gray-700">(charted plays only)</span></div>
+                      <div className="mt-4 border-t border-slate-800 pt-3">
+                        <div className="text-xs text-slate-500 mb-3">Open% by Alignment <span className="text-slate-700">(charted plays only)</span></div>
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                           {openRows.map((r) => (
-                            <div key={r.label} className="p-3 bg-gray-800/50 rounded-lg">
+                            <div key={r.label} className="p-3 bg-slate-800/50 rounded-lg">
                               <div className="text-xs text-orange-400 font-medium mb-2">{r.label}</div>
                               <div className="space-y-1 text-xs">
                                 {r.bfOnly ? (
                                   <>
-                                    <div className="flex justify-between"><span className="text-gray-500">Routes</span><span className="text-gray-300">{r.all.routes || "—"}</span></div>
-                                    <div className="flex justify-between"><span className="text-gray-500">Times Open</span><span className="text-green-300">{r.all.open || "—"}</span></div>
-                                    <div className="flex justify-between border-t border-gray-700 pt-1">
-                                      <span className="text-gray-500">Open%</span>
-                                      <span className={`font-medium ${r.total !== null ? (r.total >= 55 ? "text-green-400" : r.total >= 40 ? "text-yellow-400" : "text-red-400") : "text-gray-600"}`}>{r.total !== null ? `${r.total}%` : "—"}</span>
+                                    <div className="flex justify-between"><span className="text-slate-500">Routes</span><span className="text-slate-300">{r.all.routes || "—"}</span></div>
+                                    <div className="flex justify-between"><span className="text-slate-500">Times Open</span><span className="text-emerald-300">{r.all.open || "—"}</span></div>
+                                    <div className="flex justify-between border-t border-slate-700 pt-1">
+                                      <span className="text-slate-500">Open%</span>
+                                      <span className={`font-medium ${r.total !== null ? (r.total >= 55 ? "text-emerald-400" : r.total >= 40 ? "text-amber-400" : "text-red-400") : "text-slate-600"}`}>{r.total !== null ? `${r.total}%` : "—"}</span>
                                     </div>
                                   </>
                                 ) : (
                                   <>
-                                    <div className="flex justify-between"><span className="text-gray-400 font-medium">On Line Routes</span><span className="text-gray-300">{r.onLine.routes || "—"}</span></div>
-                                    <div className="flex justify-between"><span className="text-gray-500">Times Open</span><span className="text-green-300">{r.onLine.open || "—"}</span></div>
-                                    <div className="flex justify-between border-t border-gray-700 pt-1 mb-2">
-                                      <span className="text-gray-500">Open%</span>
-                                      <span className={`font-medium ${r.onLinePct !== null ? (r.onLinePct >= 55 ? "text-green-400" : r.onLinePct >= 40 ? "text-yellow-400" : "text-red-400") : "text-gray-600"}`}>{r.onLinePct !== null ? `${r.onLinePct}%` : "—"}</span>
+                                    <div className="flex justify-between"><span className="text-slate-400 font-medium">On Line Routes</span><span className="text-slate-300">{r.onLine.routes || "—"}</span></div>
+                                    <div className="flex justify-between"><span className="text-slate-500">Times Open</span><span className="text-emerald-300">{r.onLine.open || "—"}</span></div>
+                                    <div className="flex justify-between border-t border-slate-700 pt-1 mb-2">
+                                      <span className="text-slate-500">Open%</span>
+                                      <span className={`font-medium ${r.onLinePct !== null ? (r.onLinePct >= 55 ? "text-emerald-400" : r.onLinePct >= 40 ? "text-amber-400" : "text-red-400") : "text-slate-600"}`}>{r.onLinePct !== null ? `${r.onLinePct}%` : "—"}</span>
                                     </div>
-                                    <div className="flex justify-between"><span className="text-gray-400 font-medium">Off Line Routes</span><span className="text-gray-300">{r.offLine.routes || "—"}</span></div>
-                                    <div className="flex justify-between"><span className="text-gray-500">Times Open</span><span className="text-green-300">{r.offLine.open || "—"}</span></div>
-                                    <div className="flex justify-between border-t border-gray-700 pt-1">
-                                      <span className="text-gray-500">Open%</span>
-                                      <span className={`font-medium ${r.offLinePct !== null ? (r.offLinePct >= 55 ? "text-green-400" : r.offLinePct >= 40 ? "text-yellow-400" : "text-red-400") : "text-gray-600"}`}>{r.offLinePct !== null ? `${r.offLinePct}%` : "—"}</span>
+                                    <div className="flex justify-between"><span className="text-slate-400 font-medium">Off Line Routes</span><span className="text-slate-300">{r.offLine.routes || "—"}</span></div>
+                                    <div className="flex justify-between"><span className="text-slate-500">Times Open</span><span className="text-emerald-300">{r.offLine.open || "—"}</span></div>
+                                    <div className="flex justify-between border-t border-slate-700 pt-1">
+                                      <span className="text-slate-500">Open%</span>
+                                      <span className={`font-medium ${r.offLinePct !== null ? (r.offLinePct >= 55 ? "text-emerald-400" : r.offLinePct >= 40 ? "text-amber-400" : "text-red-400") : "text-slate-600"}`}>{r.offLinePct !== null ? `${r.offLinePct}%` : "—"}</span>
                                     </div>
                                   </>
                                 )}
@@ -523,13 +523,13 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
               })()}
 
               {games.some((g) => g.notes?.trim()) && (
-                <div className="p-4 bg-gray-900 rounded-lg border border-gray-800">
-                  <div className="text-xs text-gray-500 mb-3">Game Notes</div>
+                <div className="p-4 bg-slate-900 rounded-lg border border-slate-800">
+                  <div className="text-xs text-slate-500 mb-3">Game Notes</div>
                   <div className="space-y-3">
                     {games.filter((g) => g.notes?.trim()).map((g) => (
-                      <div key={g.id} className="border-l-2 border-gray-700 pl-3">
-                        <div className="text-xs text-gray-500 mb-0.5">{g.season_year} vs {g.opponent}</div>
-                        <div className="text-sm text-gray-300 whitespace-pre-wrap">{g.notes}</div>
+                      <div key={g.id} className="border-l-2 border-slate-700 pl-3">
+                        <div className="text-xs text-slate-500 mb-0.5">{g.season_year} vs {g.opponent}</div>
+                        <div className="text-sm text-slate-300 whitespace-pre-wrap">{g.notes}</div>
                       </div>
                     ))}
                   </div>
@@ -546,7 +546,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
       )}
       renderPlayLogger={(sg) => (
         !sg ? (
-          <div className="text-gray-500 text-sm text-center py-12">Select or add a game to start logging routes.</div>
+          <div className="text-slate-500 text-sm text-center py-12">Select or add a game to start logging routes.</div>
         ) : showSummaryImport ? (
           <SummaryGameImport
             gameLabel={`${sg.season_year} vs ${sg.opponent}`}
@@ -562,9 +562,9 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
         ) : (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <div className="text-sm font-medium text-gray-300">
+              <div className="text-sm font-medium text-slate-300">
                 Logging: <span className="text-white">{sg.season_year} vs {sg.opponent}</span>
-                <span className="ml-2 text-gray-400 text-xs">{gamePlays.length} snaps · {gamePlays.filter((p) => !p.no_route_run).length} routes</span>
+                <span className="ml-2 text-slate-400 text-xs">{gamePlays.length} snaps · {gamePlays.filter((p) => !p.no_route_run).length} routes</span>
               </div>
               <div className="flex gap-2">
                 <button onClick={() => setShowSummaryImport(true)}
@@ -572,7 +572,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                   Paste Summary
                 </button>
                 <button onClick={() => setShowBulkImport(true)}
-                  className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded font-medium transition">
+                  className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white text-xs rounded font-medium transition">
                   Paste Play-by-Play
                 </button>
               </div>
@@ -580,7 +580,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
 
             <div>
               <button onClick={() => setNoRouteRun((v) => !v)}
-                className={`w-full py-2 rounded text-sm font-semibold transition ${noRouteRun ? "bg-amber-700 text-white ring-2 ring-amber-500" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                className={`w-full py-2 rounded text-sm font-semibold transition ${noRouteRun ? "bg-amber-700 text-white ring-2 ring-amber-500" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                 {noRouteRun ? "✓ No Route Run (Aligned Only — run play / blocking)" : "No Route Run"}
               </button>
               {noRouteRun && <p className="text-xs text-amber-400/70 mt-1">Counts as a snap on field. Only alignment and line are recorded.</p>}
@@ -588,11 +588,11 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
 
             {!noRouteRun && (
               <div>
-                <div className="text-xs text-gray-500 mb-2">Route Type</div>
+                <div className="text-xs text-slate-500 mb-2">Route Type</div>
                 <div className="flex flex-wrap gap-1.5">
                   {ROUTE_TYPES.map((rt) => (
                     <button key={rt} onClick={() => setRouteType(rt)}
-                      className={`px-3 py-1.5 rounded text-xs font-medium capitalize transition ${routeType === rt ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                      className={`px-3 py-1.5 rounded text-xs font-medium capitalize transition ${routeType === rt ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                       {rt}
                     </button>
                   ))}
@@ -602,32 +602,32 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
 
             <div className="flex flex-wrap gap-4">
               <div>
-                <div className="text-xs text-gray-500 mb-2">Alignment</div>
+                <div className="text-xs text-slate-500 mb-2">Alignment</div>
                 <div className="flex gap-1.5">
                   {ALIGNMENTS.map((a) => (
                     <button key={a.key} onClick={() => setAlignment(a.key)}
-                      className={`w-10 h-10 rounded font-bold text-sm transition ${alignment === a.key ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                      className={`w-10 h-10 rounded font-bold text-sm transition ${alignment === a.key ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                       {a.label}
                     </button>
                   ))}
                 </div>
               </div>
               <div>
-                <div className="text-xs text-gray-500 mb-2">Line</div>
+                <div className="text-xs text-slate-500 mb-2">Line</div>
                 <div className="flex gap-1.5">
                   <button onClick={() => setOnLine(true)}
-                    className={`px-3 h-10 rounded text-xs font-medium transition ${onLine ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>On</button>
+                    className={`px-3 h-10 rounded text-xs font-medium transition ${onLine ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>On</button>
                   <button onClick={() => setOnLine(false)}
-                    className={`px-3 h-10 rounded text-xs font-medium transition ${!onLine ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>Off</button>
+                    className={`px-3 h-10 rounded text-xs font-medium transition ${!onLine ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Off</button>
                 </div>
               </div>
               {!noRouteRun && (
                 <div>
-                  <div className="text-xs text-gray-500 mb-2">Coverage</div>
+                  <div className="text-xs text-slate-500 mb-2">Coverage</div>
                   <div className="flex gap-1.5">
                     {COVERAGES.map((cv) => (
                       <button key={cv.key} onClick={() => setCoverage((c) => c === cv.key ? "" : cv.key)}
-                        className={`px-3 h-10 rounded text-xs font-medium transition ${coverage === cv.key ? "bg-orange-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        className={`px-3 h-10 rounded text-xs font-medium transition ${coverage === cv.key ? "bg-orange-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         {cv.label}
                       </button>
                     ))}
@@ -636,55 +636,55 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
               )}
               {!noRouteRun && (
                 <div>
-                  <div className="text-xs text-gray-500 mb-2">Got Open?</div>
+                  <div className="text-xs text-slate-500 mb-2">Got Open?</div>
                   <div className="flex gap-1.5">
                     <button onClick={() => setWasOpen(true)}
-                      className={`px-3 h-10 rounded text-xs font-medium transition ${wasOpen ? "bg-green-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>Yes</button>
+                      className={`px-3 h-10 rounded text-xs font-medium transition ${wasOpen ? "bg-emerald-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
                     <button onClick={() => setWasOpen(false)}
-                      className={`px-3 h-10 rounded text-xs font-medium transition ${!wasOpen ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>No</button>
+                      className={`px-3 h-10 rounded text-xs font-medium transition ${!wasOpen ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
                   </div>
                 </div>
               )}
               {!noRouteRun && (
                 <div>
-                  <div className="text-xs text-gray-500 mb-2">Targeted?</div>
+                  <div className="text-xs text-slate-500 mb-2">Targeted?</div>
                   <div className="flex gap-1.5">
                     <button onClick={() => setTargeted(true)}
-                      className={`px-3 h-10 rounded text-xs font-medium transition ${targeted ? "bg-yellow-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>Yes</button>
+                      className={`px-3 h-10 rounded text-xs font-medium transition ${targeted ? "bg-amber-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
                     <button onClick={() => { setTargeted(false); setPlayOutcome(null); setContested(false); setYards(""); }}
-                      className={`px-3 h-10 rounded text-xs font-medium transition ${!targeted ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>No</button>
+                      className={`px-3 h-10 rounded text-xs font-medium transition ${!targeted ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
                   </div>
                 </div>
               )}
             </div>
 
             {!noRouteRun && targeted && (
-              <div className="flex flex-wrap gap-4 p-3 bg-gray-900/60 rounded-lg border border-gray-800">
+              <div className="flex flex-wrap gap-4 p-3 bg-slate-900/60 rounded-lg border border-slate-800">
                 <div>
-                  <div className="text-xs text-gray-500 mb-2">Outcome</div>
+                  <div className="text-xs text-slate-500 mb-2">Outcome</div>
                   <div className="flex gap-1.5">
                     <button onClick={() => setPlayOutcome("caught")}
-                      className={`px-4 h-10 rounded text-xs font-bold transition ${playOutcome === "caught" ? "bg-green-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>Caught ✓</button>
+                      className={`px-4 h-10 rounded text-xs font-bold transition ${playOutcome === "caught" ? "bg-emerald-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Caught ✓</button>
                     <button onClick={() => { setPlayOutcome("drop"); setYards(""); }}
-                      className={`px-4 h-10 rounded text-xs font-bold transition ${playOutcome === "drop" ? "bg-red-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>Drop ✗</button>
+                      className={`px-4 h-10 rounded text-xs font-bold transition ${playOutcome === "drop" ? "bg-red-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Drop ✗</button>
                     <button onClick={() => { setPlayOutcome("incomplete"); setYards(""); }}
-                      className={`px-4 h-10 rounded text-xs font-bold transition ${playOutcome === "incomplete" ? "bg-gray-500 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>Incomplete</button>
+                      className={`px-4 h-10 rounded text-xs font-bold transition ${playOutcome === "incomplete" ? "bg-slate-500 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Incomplete</button>
                   </div>
                 </div>
                 <div>
-                  <div className="text-xs text-gray-500 mb-2">Contested?</div>
+                  <div className="text-xs text-slate-500 mb-2">Contested?</div>
                   <div className="flex gap-1.5">
                     <button onClick={() => setContested(true)}
-                      className={`px-3 h-10 rounded text-xs font-medium transition ${contested ? "bg-purple-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>Yes</button>
+                      className={`px-3 h-10 rounded text-xs font-medium transition ${contested ? "bg-purple-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
                     <button onClick={() => setContested(false)}
-                      className={`px-3 h-10 rounded text-xs font-medium transition ${!contested ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>No</button>
+                      className={`px-3 h-10 rounded text-xs font-medium transition ${!contested ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
                   </div>
                 </div>
                 {playOutcome === "caught" && (
                   <div>
-                    <div className="text-xs text-gray-500 mb-2">Yards</div>
+                    <div className="text-xs text-slate-500 mb-2">Yards</div>
                     <input type="number"
-                      className="w-20 h-10 px-2 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
+                      className="w-20 h-10 px-2 bg-slate-800 border border-slate-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
                       placeholder="0" value={yards} onChange={(e) => setYards(e.target.value)} />
                   </div>
                 )}
@@ -692,22 +692,22 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
             )}
 
             {editingPlayId && (
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-900/30 border border-yellow-700/50 rounded text-xs text-yellow-300">
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-900/30 border border-amber-700/50 rounded text-xs text-amber-300">
                 <span>✎</span><span>Editing play — make changes above then save</span>
-                <button onClick={resetForm} className="ml-auto text-yellow-400 hover:text-white transition">Cancel</button>
+                <button onClick={resetForm} className="ml-auto text-amber-400 hover:text-white transition">Cancel</button>
               </div>
             )}
             <div className="flex gap-2">
-              <input className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-blue-500"
+              <input className="flex-1 px-3 py-2 bg-slate-800 border border-slate-700 rounded text-white text-sm placeholder-slate-500 focus:outline-none focus:border-blue-500"
                 placeholder="Play note (optional)" value={playNotes} onChange={(e) => setPlayNotes(e.target.value)} />
               {editingPlayId ? (
                 <button onClick={saveEditedPlay} disabled={savingPlay || (!noRouteRun && targeted && playOutcome === null)}
-                  className="px-5 py-2 bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 text-white text-sm rounded font-medium transition whitespace-nowrap">
+                  className="px-5 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm rounded font-medium transition whitespace-nowrap">
                   {savingPlay ? "…" : "Save Edit"}
                 </button>
               ) : (
                 <button onClick={logPlay} disabled={savingPlay || (!noRouteRun && targeted && playOutcome === null)}
-                  className="px-5 py-2 bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white text-sm rounded font-medium transition">
+                  className="px-5 py-2 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white text-sm rounded font-medium transition">
                   {savingPlay ? "…" : "Log Play"}
                 </button>
               )}
@@ -716,36 +716,36 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
 
             {gamePlays.length > 0 && (
               <div>
-                <div className="text-xs text-gray-500 mb-2">Plays This Game ({gamePlays.length})</div>
+                <div className="text-xs text-slate-500 mb-2">Plays This Game ({gamePlays.length})</div>
                 <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
                   {[...gamePlays].reverse().map((pl, i) => (
-                    <div key={pl.id} className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs transition ${editingPlayId === pl.id ? "bg-yellow-900/40 border border-yellow-700/60" : "bg-gray-900 border border-transparent"}`}>
-                      <span className="text-gray-500 w-5 flex-shrink-0">{gamePlays.length - i}</span>
+                    <div key={pl.id} className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs transition ${editingPlayId === pl.id ? "bg-amber-900/40 border border-amber-700/60" : "bg-slate-900 border border-transparent"}`}>
+                      <span className="text-slate-500 w-5 flex-shrink-0">{gamePlays.length - i}</span>
                       {pl.no_route_run
                         ? <span className="text-amber-500 font-medium">aligned</span>
                         : <span className="text-white capitalize font-medium">{pl.route_type}</span>}
-                      <span className="text-gray-500 uppercase text-xs">{pl.alignment[0]}</span>
-                      <span className="text-gray-600">{pl.on_line ? "OL" : "Off"}</span>
+                      <span className="text-slate-500 uppercase text-xs">{pl.alignment[0]}</span>
+                      <span className="text-slate-600">{pl.on_line ? "OL" : "Off"}</span>
                       {!pl.no_route_run && pl.coverage && (
                         <span className="text-purple-300 capitalize" title={`Coverage: ${pl.coverage}`}>
                           {pl.coverage === "double" ? "Dbl" : pl.coverage === "press" ? "Prs" : pl.coverage}
                         </span>
                       )}
                       {!pl.no_route_run && (
-                        <span className={pl.was_open ? "text-emerald-400" : "text-gray-600"} title={pl.was_open ? "Got open" : "Covered"}>
+                        <span className={pl.was_open ? "text-emerald-400" : "text-slate-600"} title={pl.was_open ? "Got open" : "Covered"}>
                           {pl.was_open ? "Open" : "Cvrd"}
                         </span>
                       )}
                       {!pl.no_route_run && (pl.targeted ? (
-                        pl.success === true ? <span className="text-green-400" title="Targeted: caught">Tgt ✓ {pl.yards ?? 0}yds</span>
+                        pl.success === true ? <span className="text-emerald-400" title="Targeted: caught">Tgt ✓ {pl.yards ?? 0}yds</span>
                           : pl.success === false ? <span className="text-red-400" title="Targeted: drop">Tgt ✗</span>
-                          : <span className="text-gray-400" title="Targeted: incomplete">Tgt inc</span>
-                      ) : <span className="text-gray-600" title="Not targeted">Not Tgt</span>)}
-                      {pl.play_notes && <span className="text-gray-500 truncate">{pl.play_notes}</span>}
+                          : <span className="text-slate-400" title="Targeted: incomplete">Tgt inc</span>
+                      ) : <span className="text-slate-600" title="Not targeted">Not Tgt</span>)}
+                      {pl.play_notes && <span className="text-slate-500 truncate">{pl.play_notes}</span>}
                       <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
                         <button onClick={() => editingPlayId === pl.id ? resetForm() : startEditPlay(pl)}
-                          className={`px-2 py-0.5 rounded text-xs transition ${editingPlayId === pl.id ? "text-yellow-400 hover:text-white" : "text-gray-600 hover:text-yellow-400"}`}>✎</button>
-                        <button onClick={() => deletePlay(pl.id)} className="text-gray-700 hover:text-red-400">✕</button>
+                          className={`px-2 py-0.5 rounded text-xs transition ${editingPlayId === pl.id ? "text-amber-400 hover:text-white" : "text-slate-600 hover:text-amber-400"}`}>✎</button>
+                        <button onClick={() => deletePlay(pl.id)} className="text-slate-700 hover:text-red-400">✕</button>
                       </div>
                     </div>
                   ))}
@@ -758,43 +758,43 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
       renderGamesTable={() => (
         <div>
           {loading ? (
-            <div className="text-gray-500 text-sm text-center py-8">Loading…</div>
+            <div className="text-slate-500 text-sm text-center py-8">Loading…</div>
           ) : games.length === 0 ? (
-            <div className="text-gray-500 text-sm text-center py-8">No games charted yet. Go to &quot;Chart Game&quot; to add one.</div>
+            <div className="text-slate-500 text-sm text-center py-8">No games charted yet. Go to &quot;Chart Game&quot; to add one.</div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-gray-800 text-left text-xs text-gray-500">
+                  <tr className="border-b border-slate-800 text-left text-xs text-slate-500">
                     <th className="pb-2 pr-4">Season</th><th className="pb-2 pr-4">Opponent</th>
                     <th className="pb-2 pr-4">Type</th><th className="pb-2 pr-4 text-right">Routes</th>
                     <th className="pb-2 pr-4 text-right">Targets</th><th className="pb-2 pr-4 text-right">Catches</th>
                     <th className="pb-2 text-right">Yards</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-900">
+                <tbody className="divide-y divide-slate-900">
                   {games.map((g) => {
                     const gs = gameStats[g.id] ?? { routes: 0, targets: 0, catches: 0, yards: 0 };
                     return (
-                      <tr key={g.id} className="hover:bg-gray-900/50 transition">
-                        <td className="py-2 pr-4 text-gray-300">{g.season_year}</td>
+                      <tr key={g.id} className="hover:bg-slate-900/50 transition">
+                        <td className="py-2 pr-4 text-slate-300">{g.season_year}</td>
                         <td className="py-2 pr-4 text-white font-medium">{g.opponent}</td>
-                        <td className="py-2 pr-4 text-gray-400 capitalize">{g.game_type}</td>
+                        <td className="py-2 pr-4 text-slate-400 capitalize">{g.game_type}</td>
                         <td className="py-2 pr-4 text-right text-blue-400">{gs.routes}</td>
-                        <td className="py-2 pr-4 text-right text-gray-300">{gs.targets}</td>
-                        <td className="py-2 pr-4 text-right text-green-400">{gs.catches}</td>
-                        <td className="py-2 text-right text-gray-300">{gs.yards}</td>
+                        <td className="py-2 pr-4 text-right text-slate-300">{gs.targets}</td>
+                        <td className="py-2 pr-4 text-right text-emerald-400">{gs.catches}</td>
+                        <td className="py-2 text-right text-slate-300">{gs.yards}</td>
                       </tr>
                     );
                   })}
                 </tbody>
                 <tfoot>
-                  <tr className="border-t border-gray-700 text-xs text-gray-500 font-medium">
+                  <tr className="border-t border-slate-700 text-xs text-slate-500 font-medium">
                     <td colSpan={3} className="pt-2">Total ({games.length} games)</td>
                     <td className="pt-2 text-right text-blue-400">{stats.total}</td>
-                    <td className="pt-2 text-right text-gray-300">{stats.targets}</td>
-                    <td className="pt-2 text-right text-green-400">{stats.catches}</td>
-                    <td className="pt-2 text-right text-gray-300">—</td>
+                    <td className="pt-2 text-right text-slate-300">{stats.targets}</td>
+                    <td className="pt-2 text-right text-emerald-400">{stats.catches}</td>
+                    <td className="pt-2 text-right text-slate-300">—</td>
                   </tr>
                 </tfoot>
               </table>
@@ -804,7 +804,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
       )}
       renderExtraTab={() => {
         const current = allProspects.find((p) => p.id === prospect.id);
-        if (!current) return <div className="text-gray-500 text-sm text-center py-12">Loading prospect data…</div>;
+        if (!current) return <div className="text-slate-500 text-sm text-center py-12">Loading prospect data…</div>;
         return <PlayerCharts prospect={current} allProspects={allProspects} />;
       }}
     />

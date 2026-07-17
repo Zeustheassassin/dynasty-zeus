@@ -81,7 +81,7 @@ export default function RBPlayerCharts({ prospect, allProspects, allGames, leagu
 
   if (!hasAnyData) {
     return (
-      <div className="text-gray-500 text-sm text-center py-12">
+      <div className="text-slate-500 text-sm text-center py-12">
         No plays charted yet — charts will appear once plays are logged.
       </div>
     );
@@ -90,7 +90,7 @@ export default function RBPlayerCharts({ prospect, allProspects, allGames, leagu
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap gap-6 justify-center">
-        <div className="bg-gray-950 border border-gray-700 rounded-xl overflow-hidden w-full sm:w-[370px]">
+        <div className="bg-slate-950 border border-slate-700 rounded-xl overflow-hidden w-full sm:w-[370px]">
           <RadarCardHeader
             title="Success Rate by Run Type & Block"
             name={prospect.name}
@@ -102,7 +102,7 @@ export default function RBPlayerCharts({ prospect, allProspects, allGames, leagu
       </div>
 
       <RadarTierLegend noDataLabel={`< ${MIN_ATTEMPTS_FOR_TIER} attempts`} />
-      <p className="text-center text-[11px] text-gray-600">
+      <p className="text-center text-[11px] text-slate-600">
         Percentiles vs {chartedCount} charted RB prospects · all years
       </p>
     </div>

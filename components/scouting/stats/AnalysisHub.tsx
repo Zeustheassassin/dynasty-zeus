@@ -60,7 +60,7 @@ export default function AnalysisHub({
     <div>
       {/* Position tabs + filter row */}
       <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-        <div className="flex gap-1 border-b border-gray-800">
+        <div className="flex gap-1 border-b border-slate-800">
           {(["QB", "RB", "WR", "TE"] as PositionTab[]).map((pos) => (
             <button
               key={pos}
@@ -68,7 +68,7 @@ export default function AnalysisHub({
               className={`px-5 py-2 text-sm font-medium border-b-2 transition whitespace-nowrap ${
                 posTab === pos
                   ? "border-blue-500 text-blue-400"
-                  : "border-transparent text-gray-400 hover:text-white"
+                  : "border-transparent text-slate-400 hover:text-white"
               }`}
             >
               {pos}
@@ -78,13 +78,13 @@ export default function AnalysisHub({
 
         {/* Draft year filter */}
         <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-500">Class:</span>
+          <span className="text-xs text-slate-500">Class:</span>
           <button
             onClick={() => setDraftYearFilter(null)}
             className={`px-3 py-1 text-xs rounded-full border transition ${
               draftYearFilter === null
                 ? "bg-blue-600 border-blue-500 text-white"
-                : "border-gray-600 text-gray-400 hover:text-white"
+                : "border-slate-600 text-slate-400 hover:text-white"
             }`}
           >
             All
@@ -96,7 +96,7 @@ export default function AnalysisHub({
               className={`px-3 py-1 text-xs rounded-full border transition ${
                 draftYearFilter === y
                   ? "bg-blue-600 border-blue-500 text-white"
-                  : "border-gray-600 text-gray-400 hover:text-white"
+                  : "border-slate-600 text-slate-400 hover:text-white"
               }`}
             >
               {y}
@@ -106,7 +106,7 @@ export default function AnalysisHub({
       </div>
 
       {/* Description */}
-      <p className="text-xs text-gray-500 mb-4">{POSITION_DESCRIPTIONS[posTab]}</p>
+      <p className="text-xs text-slate-500 mb-4">{POSITION_DESCRIPTIONS[posTab]}</p>
 
       {/* Stats table */}
       {posTab === "WR" && (

@@ -61,13 +61,13 @@ export default function WRHub({
   return (
     <div>
       {/* Inner tab bar */}
-      <div className="flex gap-1 mb-5 border-b border-gray-800">
+      <div className="flex gap-1 mb-5 border-b border-slate-800">
         {(["list", "roster"] as HubView[]).map((v) => (
           <button
             key={v}
             onClick={() => { if (v === "list" && hubView === "roster") onDataChanged(); setHubView(v); }}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition whitespace-nowrap ${
-              hubView === v ? "border-blue-500 text-blue-400" : "border-transparent text-gray-400 hover:text-white"
+              hubView === v ? "border-blue-500 text-blue-400" : "border-transparent text-slate-400 hover:text-white"
             }`}
           >
             {v === "list" ? "Prospects" : "Prospect Data"}

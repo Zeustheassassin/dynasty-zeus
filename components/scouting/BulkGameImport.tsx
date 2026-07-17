@@ -137,10 +137,10 @@ export default function BulkGameImport({ gameLabel, onImport, onCancel }: Props)
 
   if (done) {
     return (
-      <div className="p-6 bg-gray-900 border border-gray-700 rounded-lg text-center">
-        <div className="text-green-400 text-2xl mb-2">✓</div>
+      <div className="p-6 bg-slate-900 border border-slate-700 rounded-lg text-center">
+        <div className="text-emerald-400 text-2xl mb-2">✓</div>
         <div className="text-white font-medium mb-1">Imported {validCount} plays</div>
-        <div className="text-gray-400 text-sm mb-4">for {gameLabel}</div>
+        <div className="text-slate-400 text-sm mb-4">for {gameLabel}</div>
         <button onClick={onCancel} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded transition">
           Done
         </button>
@@ -154,43 +154,43 @@ export default function BulkGameImport({ gameLabel, onImport, onCancel }: Props)
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-sm font-semibold text-white">Bulk Import Plays</h3>
-          <p className="text-xs text-gray-400">{gameLabel}</p>
+          <p className="text-xs text-slate-400">{gameLabel}</p>
         </div>
-        <button onClick={onCancel} className="text-gray-500 hover:text-white text-sm px-2">✕ Cancel</button>
+        <button onClick={onCancel} className="text-slate-500 hover:text-white text-sm px-2">✕ Cancel</button>
       </div>
 
       {/* Format guide */}
-      <div className="p-3 bg-gray-900/80 border border-gray-800 rounded-lg text-xs">
-        <div className="text-gray-400 font-medium mb-2">
+      <div className="p-3 bg-slate-900/80 border border-slate-800 rounded-lg text-xs">
+        <div className="text-slate-400 font-medium mb-2">
           Column order — copy directly from your Google Sheet template:
         </div>
         <div className="grid grid-cols-7 gap-1 mb-2 text-center">
           {["Route", "Alignment", "On Line?", "Targeted?", "Success?", "Yards", "Notes"].map((h, i) => (
-            <div key={h} className={`px-1 py-0.5 rounded text-xs font-medium ${i < 4 ? "bg-blue-900/50 text-blue-300" : i === 4 ? "bg-green-900/50 text-green-300" : "bg-gray-800 text-gray-400"}`}>
+            <div key={h} className={`px-1 py-0.5 rounded text-xs font-medium ${i < 4 ? "bg-blue-900/50 text-blue-300" : i === 4 ? "bg-emerald-900/50 text-emerald-300" : "bg-slate-800 text-slate-400"}`}>
               {h}
             </div>
           ))}
         </div>
-        <div className="text-gray-500 space-y-0.5">
-          <div><span className="text-gray-300">Route:</span> curl, dig, post, corner, go, screen, slant, out, flat, comeback, other — or use <span className="text-amber-300 font-medium">nrr</span> / aligned / snap / run / block for alignment-only snaps (no route run)</div>
-          <div><span className="text-gray-300">Alignment:</span> L / R / S / B (or Left / Right / Slot / Backfield)</div>
-          <div><span className="text-gray-300">Booleans:</span> Y or N &nbsp;·&nbsp; Leave Success blank if not targeted &nbsp;·&nbsp; For NRR rows columns 4–7 are ignored</div>
+        <div className="text-slate-500 space-y-0.5">
+          <div><span className="text-slate-300">Route:</span> curl, dig, post, corner, go, screen, slant, out, flat, comeback, other — or use <span className="text-amber-300 font-medium">nrr</span> / aligned / snap / run / block for alignment-only snaps (no route run)</div>
+          <div><span className="text-slate-300">Alignment:</span> L / R / S / B (or Left / Right / Slot / Backfield)</div>
+          <div><span className="text-slate-300">Booleans:</span> Y or N &nbsp;·&nbsp; Leave Success blank if not targeted &nbsp;·&nbsp; For NRR rows columns 4–7 are ignored</div>
         </div>
-        <div className="mt-2 text-gray-600">Example (tab-separated, same as Google Sheets copy):</div>
-        <pre className="mt-1 text-gray-500 font-mono text-xs overflow-x-auto whitespace-pre">{EXAMPLE}</pre>
+        <div className="mt-2 text-slate-600">Example (tab-separated, same as Google Sheets copy):</div>
+        <pre className="mt-1 text-slate-500 font-mono text-xs overflow-x-auto whitespace-pre">{EXAMPLE}</pre>
       </div>
 
       {/* Paste area */}
       <div>
         <div className="flex items-center justify-between mb-1">
-          <label className="text-xs text-gray-400">Paste your sheet data here</label>
+          <label className="text-xs text-slate-400">Paste your sheet data here</label>
           {text && (
-            <button onClick={() => { setText(""); setPlays([]); }} className="text-xs text-gray-600 hover:text-gray-400">Clear</button>
+            <button onClick={() => { setText(""); setPlays([]); }} className="text-xs text-slate-600 hover:text-slate-400">Clear</button>
           )}
         </div>
         <textarea
           rows={10}
-          className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-white text-xs font-mono placeholder-gray-600 focus:outline-none focus:border-blue-500 resize-y"
+          className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-white text-xs font-mono placeholder-slate-600 focus:outline-none focus:border-blue-500 resize-y"
           placeholder={"Paste from Google Sheets (Ctrl+V)…\n\ncurl\tR\tY\tY\tY\t12\ndig\tS\tN\tN"}
           value={text}
           onChange={(e) => handleChange(e.target.value)}
@@ -207,17 +207,17 @@ export default function BulkGameImport({ gameLabel, onImport, onCancel }: Props)
       {plays.length > 0 && (
         <div>
           <div className="flex items-center gap-3 mb-2">
-            <span className="text-xs text-gray-400">{plays.length} rows parsed</span>
-            {validCount > 0 && <span className="text-xs text-green-400">✓ {validCount} valid</span>}
+            <span className="text-xs text-slate-400">{plays.length} rows parsed</span>
+            {validCount > 0 && <span className="text-xs text-emerald-400">✓ {validCount} valid</span>}
             {plays.filter((p) => p.valid && p.no_route_run).length > 0 && (
               <span className="text-xs text-amber-400">{plays.filter((p) => p.valid && p.no_route_run).length} aligned snaps</span>
             )}
             {invalidCount > 0 && <span className="text-xs text-red-400">✗ {invalidCount} with errors</span>}
           </div>
-          <div className="max-h-56 overflow-y-auto border border-gray-800 rounded">
+          <div className="max-h-56 overflow-y-auto border border-slate-800 rounded">
             <table className="w-full text-xs">
-              <thead className="sticky top-0 bg-gray-950">
-                <tr className="border-b border-gray-800 text-gray-500">
+              <thead className="sticky top-0 bg-slate-950">
+                <tr className="border-b border-slate-800 text-slate-500">
                   <th className="px-2 py-1 text-left w-6">#</th>
                   <th className="px-2 py-1 text-left">Route</th>
                   <th className="px-2 py-1 text-left">Align</th>
@@ -229,30 +229,30 @@ export default function BulkGameImport({ gameLabel, onImport, onCancel }: Props)
                   <th className="px-2 py-1 text-left">Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-900">
+              <tbody className="divide-y divide-slate-900">
                 {plays.map((pl, i) => (
-                  <tr key={pl.raw} className={pl.valid ? "bg-gray-950" : "bg-red-950/30"}>
-                    <td className="px-2 py-1 text-gray-600">{i + 1}</td>
+                  <tr key={pl.raw} className={pl.valid ? "bg-slate-950" : "bg-red-950/30"}>
+                    <td className="px-2 py-1 text-slate-600">{i + 1}</td>
                     <td className="px-2 py-1">
                       {pl.no_route_run
                         ? <span className="text-amber-400 font-medium">aligned</span>
                         : <span className="text-white capitalize">{pl.route_type}</span>}
                     </td>
-                    <td className="px-2 py-1 text-gray-300 capitalize">{pl.alignment[0].toUpperCase()}</td>
-                    <td className="px-2 py-1 text-gray-400">{pl.on_line ? "On" : "Off"}</td>
-                    <td className="px-2 py-1">{pl.targeted ? <span className="text-yellow-400">Y</span> : <span className="text-gray-600">N</span>}</td>
+                    <td className="px-2 py-1 text-slate-300 capitalize">{pl.alignment[0].toUpperCase()}</td>
+                    <td className="px-2 py-1 text-slate-400">{pl.on_line ? "On" : "Off"}</td>
+                    <td className="px-2 py-1">{pl.targeted ? <span className="text-amber-400">Y</span> : <span className="text-slate-600">N</span>}</td>
                     <td className="px-2 py-1">
                       {pl.targeted
-                        ? pl.success === true ? <span className="text-green-400">✓</span>
+                        ? pl.success === true ? <span className="text-emerald-400">✓</span>
                           : pl.success === false ? <span className="text-red-400">✗</span>
-                          : <span className="text-gray-600">—</span>
-                        : <span className="text-gray-600">—</span>}
+                          : <span className="text-slate-600">—</span>
+                        : <span className="text-slate-600">—</span>}
                     </td>
-                    <td className="px-2 py-1 text-gray-300">{pl.yards ?? "—"}</td>
-                    <td className="px-2 py-1 text-gray-500 max-w-24 truncate">{pl.play_notes || "—"}</td>
+                    <td className="px-2 py-1 text-slate-300">{pl.yards ?? "—"}</td>
+                    <td className="px-2 py-1 text-slate-500 max-w-24 truncate">{pl.play_notes || "—"}</td>
                     <td className="px-2 py-1">
                       {pl.valid
-                        ? <span className="text-green-400">✓</span>
+                        ? <span className="text-emerald-400">✓</span>
                         : <span className="text-red-400 truncate" title={pl.error}>✗ {pl.error}</span>}
                     </td>
                   </tr>
@@ -268,15 +268,15 @@ export default function BulkGameImport({ gameLabel, onImport, onCancel }: Props)
         <button
           onClick={confirmImport}
           disabled={importing || validCount === 0}
-          className="px-5 py-2 bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white text-sm rounded font-medium transition"
+          className="px-5 py-2 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white text-sm rounded font-medium transition"
         >
           {importing ? "Importing…" : `Import ${validCount} Play${validCount !== 1 ? "s" : ""}`}
         </button>
-        <button onClick={onCancel} className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm rounded transition">
+        <button onClick={onCancel} className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white text-sm rounded transition">
           Cancel
         </button>
         {invalidCount > 0 && validCount > 0 && (
-          <span className="text-xs text-gray-500 self-center">Invalid rows will be skipped</span>
+          <span className="text-xs text-slate-500 self-center">Invalid rows will be skipped</span>
         )}
       </div>
     </div>

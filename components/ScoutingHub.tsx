@@ -345,7 +345,7 @@ export default function ScoutingHub() {
   return (
     <div className="min-h-screen bg-slate-950 text-white">
       {/* Hub header */}
-      <div className="border-b border-gray-800 bg-gray-950">
+      <div className="border-b border-slate-800 bg-slate-950">
         <div className="px-4 py-4">
           <div className="flex items-start justify-center flex-wrap gap-2">
             <div className="text-center">
@@ -355,13 +355,13 @@ export default function ScoutingHub() {
                   <div key={year} className="flex flex-wrap items-baseline justify-center gap-x-4 gap-y-0.5 text-xs">
                     <span className="text-blue-400 font-semibold w-10 shrink-0">{year}</span>
                     {positions.map((r) => (
-                      <span key={r.pos} className="text-gray-400">
-                        <span className="text-gray-300 font-medium">{r.pos}</span>
+                      <span key={r.pos} className="text-slate-400">
+                        <span className="text-slate-300 font-medium">{r.pos}</span>
                         {": "}
                         {r.prospects} prospects
                         {" · "}
-                        <span className="text-green-400">{r.fully} FC</span>
-                        {r.partial > 0 && <> · <span className="text-yellow-400">{r.partial} PC</span></>}
+                        <span className="text-emerald-400">{r.fully} FC</span>
+                        {r.partial > 0 && <> · <span className="text-amber-400">{r.partial} PC</span></>}
                         {" · "}
                         {r.games} games
                         {" · "}
@@ -375,7 +375,7 @@ export default function ScoutingHub() {
           </div>
 
           {/* Main tab bar */}
-          <div className="flex justify-center gap-1 mt-4 border-b border-gray-800 -mb-px">
+          <div className="flex justify-center gap-1 mt-4 border-b border-slate-800 -mb-px">
             {hubTabs.map((t) => (
               <button
                 key={t.key}
@@ -383,7 +383,7 @@ export default function ScoutingHub() {
                 className={`px-5 py-2 text-sm font-medium border-b-2 transition whitespace-nowrap ${
                   tab === t.key
                     ? "border-blue-500 text-blue-400"
-                    : "border-transparent text-gray-400 hover:text-white"
+                    : "border-transparent text-slate-400 hover:text-white"
                 }`}
               >
                 {t.label}
@@ -398,7 +398,7 @@ export default function ScoutingHub() {
         {tab === "prospects" && (
           <>
             {/* Position sub-tabs */}
-            <div className="flex gap-1 mb-5 border-b border-gray-800">
+            <div className="flex gap-1 mb-5 border-b border-slate-800">
               {positionTabs.map((pos) => (
                 <button
                   key={pos}
@@ -406,7 +406,7 @@ export default function ScoutingHub() {
                   className={`px-5 py-2 text-sm font-medium border-b-2 transition whitespace-nowrap ${
                     positionTab === pos
                       ? "border-blue-500 text-blue-400"
-                      : "border-transparent text-gray-400 hover:text-white"
+                      : "border-transparent text-slate-400 hover:text-white"
                   }`}
                 >
                   {pos}

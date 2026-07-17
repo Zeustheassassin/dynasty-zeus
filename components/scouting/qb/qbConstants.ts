@@ -21,8 +21,8 @@ export const SNAP_POSITIONS: { key: QBSnapPosition; label: string }[] = [
 ];
 
 export const PLAY_TYPES: { key: QBPlayType; label: string; color: string }[] = [
-  { key: "run",  label: "Run",  color: "bg-green-700" },
-  { key: "rpo",  label: "RPO",  color: "bg-yellow-700" },
+  { key: "run",  label: "Run",  color: "bg-emerald-700" },
+  { key: "rpo",  label: "RPO",  color: "bg-amber-700" },
   { key: "pass", label: "Pass", color: "bg-blue-700" },
 ];
 
@@ -37,12 +37,12 @@ export const TIMINGS: { key: QBTiming; label: string }[] = [
 ];
 
 export const ACCURACIES: { key: QBAccuracy; label: string; active: string }[] = [
-  { key: "on_target",   label: "On Target",   active: "bg-green-600" },
+  { key: "on_target",   label: "On Target",   active: "bg-emerald-600" },
   { key: "high",        label: "High",        active: "bg-red-600" },
   { key: "low",         label: "Low",         active: "bg-red-700" },
   { key: "in_front",    label: "In Front",    active: "bg-orange-600" },
   { key: "behind",      label: "Behind",      active: "bg-orange-700" },
-  { key: "tipped_ball", label: "Tipped Ball", active: "bg-yellow-600" },
+  { key: "tipped_ball", label: "Tipped Ball", active: "bg-amber-600" },
 ];
 
 export const PLATFORMS: { key: QBPlatform; label: string }[] = [
@@ -99,8 +99,8 @@ export const DEPTH_ROWS: { label: string; short: string; depths: { loc: string; 
 ];
 
 export function onTargetColor(p: number | null): string {
-  if (p === null) return "text-gray-600";
-  if (p >= 65) return "text-green-400";
-  if (p >= 50) return "text-yellow-400";
+  if (p === null) return "text-slate-600";
+  if (p >= 65) return "text-emerald-400";
+  if (p >= 50) return "text-amber-400";
   return "text-red-400";
 }

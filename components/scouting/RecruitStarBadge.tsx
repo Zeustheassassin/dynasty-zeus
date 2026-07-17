@@ -4,15 +4,15 @@ import type { RecruitRow } from "../../lib/recruiting/cfd";
 const STAR_TEXT: Record<number, string> = {
   5: "text-yellow-400",
   4: "text-amber-300",
-  3: "text-gray-400",
-  2: "text-gray-500",
+  3: "text-slate-400",
+  2: "text-slate-500",
 };
 
 const STAR_BG: Record<number, string> = {
   5: "border-yellow-500/60 bg-yellow-500/10",
   4: "border-amber-400/50 bg-amber-400/10",
-  3: "border-gray-500/40 bg-gray-500/10",
-  2: "border-gray-600/40 bg-gray-600/10",
+  3: "border-slate-500/40 bg-slate-500/10",
+  2: "border-slate-600/40 bg-slate-600/10",
 };
 
 /** Inline pill showing the matched recruit's star rating + 247 Composite overall rank.
@@ -29,9 +29,9 @@ export default function RecruitStarBadge({ recruit }: { recruit: RecruitRow | nu
   return (
     <span
       title={tooltip}
-      className={`text-[10px] font-bold px-1.5 py-0.5 rounded border shrink-0 whitespace-nowrap ${STAR_TEXT[stars] ?? "text-gray-400"} ${STAR_BG[stars] ?? "border-gray-700"}`}
+      className={`text-[10px] font-bold px-1.5 py-0.5 rounded border shrink-0 whitespace-nowrap ${STAR_TEXT[stars] ?? "text-slate-400"} ${STAR_BG[stars] ?? "border-slate-700"}`}
     >
-      {stars}★{recruit.ranking ? <> <span className="text-gray-400 font-normal">#{recruit.ranking}</span></> : null}
+      {stars}★{recruit.ranking ? <> <span className="text-slate-400 font-normal">#{recruit.ranking}</span></> : null}
     </span>
   );
 }

@@ -119,7 +119,7 @@ export default function RecruitStatsTab() {
   }, [grid, years]);
 
   if (loading) {
-    return <div className="text-gray-500 text-sm py-12 text-center">Loading recruit statistics…</div>;
+    return <div className="text-slate-500 text-sm py-12 text-center">Loading recruit statistics…</div>;
   }
   if (error) {
     return (
@@ -131,8 +131,8 @@ export default function RecruitStatsTab() {
   if (years.length === 0) {
     return (
       <div className="text-center py-16">
-        <p className="text-gray-400 text-sm font-medium">No recruit data cached yet.</p>
-        <p className="text-gray-600 text-xs mt-1">
+        <p className="text-slate-400 text-sm font-medium">No recruit data cached yet.</p>
+        <p className="text-slate-600 text-xs mt-1">
           Open the <span className="text-indigo-400 font-semibold">Recruits</span> tab and refresh a few years to populate this table.
         </p>
       </div>
@@ -143,22 +143,22 @@ export default function RecruitStatsTab() {
     <div className="space-y-3">
       <div>
         <h3 className="text-sm font-semibold text-white">Recruit Statistics</h3>
-        <p className="text-xs text-gray-500 mt-0.5">
+        <p className="text-xs text-slate-500 mt-0.5">
           Counts of 4★ and 5★ recruits by position, per class year. Source: 247 Composite via CollegeFootballData.
         </p>
       </div>
 
-      <div className="overflow-x-auto rounded border border-gray-800">
+      <div className="overflow-x-auto rounded border border-slate-800">
         <table className="text-xs border-collapse" style={{ minWidth: "max-content" }}>
-          <thead className="bg-gray-950 border-b border-gray-700">
+          <thead className="bg-slate-950 border-b border-slate-700">
             <tr>
-              <th className="px-3 py-2 text-left text-gray-500 font-semibold uppercase tracking-wide sticky left-0 bg-gray-950 z-10 border-r border-gray-800">
+              <th className="px-3 py-2 text-left text-slate-500 font-semibold uppercase tracking-wide sticky left-0 bg-slate-950 z-10 border-r border-slate-800">
                 Position
               </th>
               {years.map((y) => (
                 <th
                   key={y}
-                  className="px-3 py-2 text-center text-gray-400 font-semibold whitespace-nowrap min-w-[60px]"
+                  className="px-3 py-2 text-center text-slate-400 font-semibold whitespace-nowrap min-w-[60px]"
                   title={`${meta[y]?.total_records ?? 0} total recruits cached for ${y}`}
                 >
                   {y}
@@ -166,14 +166,14 @@ export default function RecruitStatsTab() {
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-900">
+          <tbody className="divide-y divide-slate-900">
             {POSITIONS.flatMap((pos) =>
               STAR_TIERS.map((stars, i) => {
                 const isLastTier = i === STAR_TIERS.length - 1;
                 return (
-                  <tr key={`${pos}-${stars}`} className={isLastTier ? "border-b border-gray-800" : ""}>
-                    <td className={`px-3 py-1.5 sticky left-0 bg-gray-950 z-10 border-r border-gray-800 font-medium whitespace-nowrap`}>
-                      <span className={POSITION_COLORS[pos] ?? "text-gray-400"}>{pos}</span>
+                  <tr key={`${pos}-${stars}`} className={isLastTier ? "border-b border-slate-800" : ""}>
+                    <td className={`px-3 py-1.5 sticky left-0 bg-slate-950 z-10 border-r border-slate-800 font-medium whitespace-nowrap`}>
+                      <span className={POSITION_COLORS[pos] ?? "text-slate-400"}>{pos}</span>
                       <span className={`ml-1 ${STAR_TIER_COLORS[stars]}`}>{stars}★</span>
                     </td>
                     {years.map((y) => {
@@ -182,7 +182,7 @@ export default function RecruitStatsTab() {
                         <td
                           key={y}
                           className={`px-3 py-1.5 text-center font-mono ${
-                            v === 0 ? "text-gray-700" : "text-gray-200"
+                            v === 0 ? "text-slate-700" : "text-slate-200"
                           }`}
                         >
                           {v || "—"}
@@ -194,8 +194,8 @@ export default function RecruitStatsTab() {
               })
             )}
             {/* Totals footer */}
-            <tr className="border-t-2 border-blue-800/60 bg-gray-900/50">
-              <td className="px-3 py-2 sticky left-0 bg-gray-900 z-10 border-r border-gray-800 font-bold text-blue-300">
+            <tr className="border-t-2 border-blue-800/60 bg-slate-900/50">
+              <td className="px-3 py-2 sticky left-0 bg-slate-900 z-10 border-r border-slate-800 font-bold text-blue-300">
                 Total (shown)
               </td>
               {years.map((y) => (
@@ -208,7 +208,7 @@ export default function RecruitStatsTab() {
         </table>
       </div>
 
-      <p className="text-[10px] text-gray-600">
+      <p className="text-[10px] text-slate-600">
         Hover a year header to see the total cached recruits for that class. Years missing here haven&apos;t been refreshed yet.
       </p>
     </div>

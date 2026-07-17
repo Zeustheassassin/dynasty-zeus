@@ -183,11 +183,11 @@ export default function StatsTableShell({
     if (!range || range.max === range.min || typeof avg !== "number") return "";
     const span = range.max - range.min;
     const delta = ((val - avg) / span) * c.colorDir;
-    if (delta >= 0.2) return "text-green-400";
+    if (delta >= 0.2) return "text-emerald-400";
     if (delta >= 0.05) return "text-emerald-300";
     if (delta <= -0.2) return "text-red-400";
     if (delta <= -0.05) return "text-red-300";
-    return "text-gray-200";
+    return "text-slate-200";
   }
 
   function handleSort(key: string) {
@@ -220,14 +220,14 @@ export default function StatsTableShell({
     if (!firstInGroupKeys.has(key)) return "";
     const gIdx = groupIndexByKey[key];
     if (gIdx === 0) return ""; // no separator before Identity group
-    return "border-l-2 border-gray-600";
+    return "border-l-2 border-slate-600";
   }
 
   function thGroupClass(group: string, isFirst: boolean, gIdx: number): string {
-    const sep = isFirst && gIdx > 0 ? "border-l-2 border-gray-600" : "";
-    const tint = gIdx % 2 === 1 ? "bg-slate-900/80" : "bg-gray-950";
+    const sep = isFirst && gIdx > 0 ? "border-l-2 border-slate-600" : "";
+    const tint = gIdx % 2 === 1 ? "bg-slate-900/80" : "bg-slate-950";
     return `px-2 py-1 text-center text-xs font-semibold uppercase tracking-wide ${
-      group === "Raw" ? "text-gray-500" : "text-gray-400"
+      group === "Raw" ? "text-slate-500" : "text-slate-400"
     } ${sep} ${tint}`;
   }
 
@@ -240,10 +240,10 @@ export default function StatsTableShell({
           placeholder="Search player..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-sm text-white placeholder-gray-500 w-52 focus:outline-none focus:border-blue-500"
+          className="px-3 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm text-white placeholder-slate-500 w-52 focus:outline-none focus:border-blue-500"
           aria-label="Search players"
         />
-        <span className="text-xs text-gray-500">{sorted.length} player{sorted.length !== 1 ? "s" : ""}</span>
+        <span className="text-xs text-slate-500">{sorted.length} player{sorted.length !== 1 ? "s" : ""}</span>
       </div>
 
       {/* Top scrollbar — proxy that scrolls the middle table div via syncScroll.
@@ -251,7 +251,7 @@ export default function StatsTableShell({
           each side; the middle div hides its own native scrollbar below. */}
       <div
         ref={topRef}
-        className="overflow-x-auto [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-track]:bg-gray-900 [&::-webkit-scrollbar-thumb]:bg-gray-600 [&::-webkit-scrollbar-thumb]:rounded hover:[&::-webkit-scrollbar-thumb]:bg-gray-400"
+        className="overflow-x-auto [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-track]:bg-slate-900 [&::-webkit-scrollbar-thumb]:bg-slate-600 [&::-webkit-scrollbar-thumb]:rounded hover:[&::-webkit-scrollbar-thumb]:bg-slate-400"
         aria-hidden="true"
       >
         <div style={{ width: totalWidth, height: 1 }} />
@@ -278,10 +278,10 @@ export default function StatsTableShell({
               ))}
             </tr>
             {/* Column header row */}
-            <tr className="border-y border-gray-700">
+            <tr className="border-y border-slate-700">
               {cols.map((c) => {
                 const gIdx = groupIndexByKey[c.key];
-                const bgClass = gIdx % 2 === 1 ? "bg-slate-900" : "bg-gray-900";
+                const bgClass = gIdx % 2 === 1 ? "bg-slate-900" : "bg-slate-950";
                 return (
                   <th
                     key={c.key}
@@ -290,7 +290,7 @@ export default function StatsTableShell({
                     style={{ minWidth: c.width ?? 72 }}
                     className={[
                       "px-2 py-1.5 text-left font-medium whitespace-nowrap cursor-pointer select-none transition",
-                      sortKey === c.key ? "text-blue-400" : "text-gray-400 hover:text-gray-200",
+                      sortKey === c.key ? "text-blue-400" : "text-slate-400 hover:text-slate-200",
                       c.sticky ? `sticky left-0 z-20 ${bgClass} shadow-[2px_0_4px_rgba(0,0,0,0.5)]` : bgClass,
                       groupSepClass(c.key),
                     ].join(" ")}
@@ -307,14 +307,14 @@ export default function StatsTableShell({
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={cols.length} className="px-4 py-10 text-center text-gray-500">
+                <td colSpan={cols.length} className="px-4 py-10 text-center text-slate-500">
                   Loading stats...
                 </td>
               </tr>
             )}
             {!loading && sorted.length === 0 && (
               <tr>
-                <td colSpan={cols.length} className="px-4 py-10 text-center text-gray-500">
+                <td colSpan={cols.length} className="px-4 py-10 text-center text-slate-500">
                   No data
                 </td>
               </tr>
@@ -322,7 +322,7 @@ export default function StatsTableShell({
             {!loading && sorted.map((row, ri) => (
               <tr
                 key={row.id}
-                className={ri % 2 === 0 ? "hover:bg-gray-700/30" : "hover:bg-gray-700/30"}
+                className={ri % 2 === 0 ? "hover:bg-slate-700/30" : "hover:bg-slate-700/30"}
               >
                 {cols.map((c) => {
                   const rawVal = row[c.key];
@@ -330,16 +330,16 @@ export default function StatsTableShell({
                   const color = typeof rawVal === "number" ? cellColor(c, rawVal) : "";
                   const gIdx = groupIndexByKey[c.key];
                   const baseBg = ri % 2 === 0
-                    ? (gIdx % 2 === 1 ? "bg-slate-800/40" : "bg-gray-900/40")
-                    : (gIdx % 2 === 1 ? "bg-slate-800/20" : "bg-gray-900/10");
+                    ? (gIdx % 2 === 1 ? "bg-slate-800/40" : "bg-slate-900/40")
+                    : (gIdx % 2 === 1 ? "bg-slate-800/20" : "bg-slate-900/10");
                   return (
                     <td
                       key={c.key}
                       className={[
                         "px-2 py-1.5 whitespace-nowrap",
                         c.sticky
-                          ? "sticky left-0 z-10 bg-gray-900 shadow-[2px_0_4px_rgba(0,0,0,0.5)] font-medium text-white"
-                          : `${baseBg} ${color || "text-gray-300"}`,
+                          ? "sticky left-0 z-10 bg-slate-900 shadow-[2px_0_4px_rgba(0,0,0,0.5)] font-medium text-white"
+                          : `${baseBg} ${color || "text-slate-300"}`,
                         groupSepClass(c.key),
                       ].join(" ")}
                     >
@@ -373,7 +373,7 @@ export default function StatsTableShell({
                     : fmtVal(val, c.fmt);
                   const label = isCount && !isName ? "total" : "";
                   const gIdx = groupIndexByKey[c.key];
-                  const bgClass = gIdx % 2 === 1 ? "bg-slate-900/80" : "bg-gray-900/60";
+                  const bgClass = gIdx % 2 === 1 ? "bg-slate-900/80" : "bg-slate-900/60";
                   return (
                     <td
                       key={c.key}
@@ -381,7 +381,7 @@ export default function StatsTableShell({
                       className={[
                         "px-2 py-2 whitespace-nowrap font-semibold",
                         c.sticky
-                          ? "sticky left-0 z-10 bg-gray-900 text-blue-300 shadow-[2px_0_4px_rgba(0,0,0,0.5)]"
+                          ? "sticky left-0 z-10 bg-slate-900 text-blue-300 shadow-[2px_0_4px_rgba(0,0,0,0.5)]"
                           : `${bgClass} text-blue-300/80`,
                         groupSepClass(c.key),
                       ].join(" ")}
@@ -400,7 +400,7 @@ export default function StatsTableShell({
       {/* Bottom scrollbar — same thin styling as the top proxy. */}
       <div
         ref={botRef}
-        className="overflow-x-auto [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-track]:bg-gray-900 [&::-webkit-scrollbar-thumb]:bg-gray-600 [&::-webkit-scrollbar-thumb]:rounded hover:[&::-webkit-scrollbar-thumb]:bg-gray-400"
+        className="overflow-x-auto [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-track]:bg-slate-900 [&::-webkit-scrollbar-thumb]:bg-slate-600 [&::-webkit-scrollbar-thumb]:rounded hover:[&::-webkit-scrollbar-thumb]:bg-slate-400"
         aria-hidden="true"
       >
         <div style={{ width: totalWidth, height: 1 }} />

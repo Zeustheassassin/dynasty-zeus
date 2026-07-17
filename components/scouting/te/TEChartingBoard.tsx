@@ -317,9 +317,9 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
       renderOverview={() => (
         <div className="space-y-5">
           {loading ? (
-            <div className="text-gray-500 text-sm text-center py-8">Loading…</div>
+            <div className="text-slate-500 text-sm text-center py-8">Loading…</div>
           ) : stats.totalPlays === 0 ? (
-            <div className="text-gray-500 text-sm text-center py-8">
+            <div className="text-slate-500 text-sm text-center py-8">
               No plays charted yet. Go to &quot;Chart Game&quot; to start logging.
             </div>
           ) : (
@@ -329,14 +329,14 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
                   { label: "Total Plays",  value: stats.totalPlays,       color: "text-blue-400" },
                   { label: "Routes",       value: stats.routeAttempts,    color: "text-green-400" },
                   { label: "Blocks",       value: stats.blockAttempts,    color: "text-purple-400" },
-                  { label: "Targets",      value: stats.targets,          color: "text-yellow-400" },
-                  { label: "Catches",      value: stats.catches,          color: "text-green-300" },
+                  { label: "Targets",      value: stats.targets,          color: "text-amber-400" },
+                  { label: "Catches",      value: stats.catches,          color: "text-emerald-300" },
                   { label: "Drops",        value: stats.drops,            color: "text-red-400" },
                   { label: "Contested",    value: stats.contestedTargets, color: "text-orange-400" },
-                  { label: "Games",        value: games.length,           color: "text-gray-300" },
+                  { label: "Games",        value: games.length,           color: "text-slate-300" },
                 ].map((s) => (
-                  <div key={s.label} className="p-3 bg-gray-900 rounded-lg border border-gray-800">
-                    <div className="text-xs text-gray-500 mb-1">{s.label}</div>
+                  <div key={s.label} className="p-3 bg-slate-900 rounded-lg border border-slate-800">
+                    <div className="text-xs text-slate-500 mb-1">{s.label}</div>
                     <div className={`text-xl font-bold ${s.color}`}>{s.value}</div>
                   </div>
                 ))}
@@ -345,13 +345,13 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
               {stats.routeAttempts > 0 && (
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   {[
-                    { label: "Open Rate",            value: fmtPct(stats.openPct),           color: "text-green-400" },
-                    { label: "Target Rate",          value: fmtPct(stats.targetPct),         color: "text-yellow-400" },
-                    { label: "Catch Rate",           value: fmtPct(stats.catchPct),          color: "text-green-300" },
+                    { label: "Open Rate",            value: fmtPct(stats.openPct),           color: "text-emerald-400" },
+                    { label: "Target Rate",          value: fmtPct(stats.targetPct),         color: "text-amber-400" },
+                    { label: "Catch Rate",           value: fmtPct(stats.catchPct),          color: "text-emerald-300" },
                     { label: "Contested Catch Rate", value: fmtPct(stats.contestedCatchPct), color: "text-orange-400" },
                   ].map((s) => (
-                    <div key={s.label} className="p-3 bg-gray-900 rounded-lg border border-gray-800">
-                      <div className="text-xs text-gray-500 mb-1">{s.label}</div>
+                    <div key={s.label} className="p-3 bg-slate-900 rounded-lg border border-slate-800">
+                      <div className="text-xs text-slate-500 mb-1">{s.label}</div>
                       <div className={`text-xl font-bold ${s.color}`}>{s.value}</div>
                     </div>
                   ))}
@@ -359,62 +359,62 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
               )}
 
               {stats.blockAttempts > 0 && (
-                <div className="p-4 bg-gray-900 rounded-lg border border-gray-800">
-                  <div className="text-xs text-gray-500 mb-3">Blocking Breakdown</div>
+                <div className="p-4 bg-slate-900 rounded-lg border border-slate-800">
+                  <div className="text-xs text-slate-500 mb-3">Blocking Breakdown</div>
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b border-gray-800 text-xs text-gray-600">
+                      <tr className="border-b border-slate-800 text-xs text-slate-600">
                         <th className="text-left pb-1.5 pr-3">Type</th>
                         <th className="text-right pb-1.5 px-2">Att</th>
                         <th className="text-right pb-1.5 pl-2">Suc%</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-800/60">
-                      <tr className="hover:bg-gray-800/30">
+                    <tbody className="divide-y divide-slate-800/60">
+                      <tr className="hover:bg-slate-800/30">
                         <td className="py-2 pr-3 text-white font-medium">All Blocks</td>
                         <td className="py-2 px-2 text-right text-blue-400">{stats.blockAttempts}</td>
-                        <td className={`py-2 pl-2 text-right font-semibold ${stats.blockSucPct !== null ? (stats.blockSucPct >= 75 ? "text-green-400" : stats.blockSucPct >= 55 ? "text-yellow-400" : "text-red-400") : "text-gray-600"}`}>{fmtPct(stats.blockSucPct)}</td>
+                        <td className={`py-2 pl-2 text-right font-semibold ${stats.blockSucPct !== null ? (stats.blockSucPct >= 75 ? "text-emerald-400" : stats.blockSucPct >= 55 ? "text-amber-400" : "text-red-400") : "text-slate-600"}`}>{fmtPct(stats.blockSucPct)}</td>
                       </tr>
                       {stats.runBlockAttempts > 0 && (
-                        <tr className="hover:bg-gray-800/30">
+                        <tr className="hover:bg-slate-800/30">
                           <td className="py-2 pr-3 text-white font-medium">Run Block</td>
                           <td className="py-2 px-2 text-right text-blue-400">{stats.runBlockAttempts}</td>
-                          <td className={`py-2 pl-2 text-right font-semibold ${stats.runBlockSucPct !== null ? (stats.runBlockSucPct >= 75 ? "text-green-400" : stats.runBlockSucPct >= 55 ? "text-yellow-400" : "text-red-400") : "text-gray-600"}`}>{fmtPct(stats.runBlockSucPct)}</td>
+                          <td className={`py-2 pl-2 text-right font-semibold ${stats.runBlockSucPct !== null ? (stats.runBlockSucPct >= 75 ? "text-emerald-400" : stats.runBlockSucPct >= 55 ? "text-amber-400" : "text-red-400") : "text-slate-600"}`}>{fmtPct(stats.runBlockSucPct)}</td>
                         </tr>
                       )}
                       {stats.runMovementAttempts > 0 && (
-                        <tr className="hover:bg-gray-800/30">
-                          <td className="py-2 pr-3 pl-5 text-gray-400 text-xs"><span className="text-gray-600 mr-1">↳</span>Movement</td>
+                        <tr className="hover:bg-slate-800/30">
+                          <td className="py-2 pr-3 pl-5 text-slate-400 text-xs"><span className="text-slate-600 mr-1">↳</span>Movement</td>
                           <td className="py-2 px-2 text-right text-blue-400">{stats.runMovementAttempts}</td>
-                          <td className={`py-2 pl-2 text-right font-semibold ${stats.runMovementSucPct !== null ? (stats.runMovementSucPct >= 75 ? "text-green-400" : stats.runMovementSucPct >= 55 ? "text-yellow-400" : "text-red-400") : "text-gray-600"}`}>{fmtPct(stats.runMovementSucPct)}</td>
+                          <td className={`py-2 pl-2 text-right font-semibold ${stats.runMovementSucPct !== null ? (stats.runMovementSucPct >= 75 ? "text-emerald-400" : stats.runMovementSucPct >= 55 ? "text-amber-400" : "text-red-400") : "text-slate-600"}`}>{fmtPct(stats.runMovementSucPct)}</td>
                         </tr>
                       )}
                       {stats.runInlineAttempts > 0 && (
-                        <tr className="hover:bg-gray-800/30">
-                          <td className="py-2 pr-3 pl-5 text-gray-400 text-xs"><span className="text-gray-600 mr-1">↳</span>Inline</td>
+                        <tr className="hover:bg-slate-800/30">
+                          <td className="py-2 pr-3 pl-5 text-slate-400 text-xs"><span className="text-slate-600 mr-1">↳</span>Inline</td>
                           <td className="py-2 px-2 text-right text-blue-400">{stats.runInlineAttempts}</td>
-                          <td className={`py-2 pl-2 text-right font-semibold ${stats.runInlineSucPct !== null ? (stats.runInlineSucPct >= 75 ? "text-green-400" : stats.runInlineSucPct >= 55 ? "text-yellow-400" : "text-red-400") : "text-gray-600"}`}>{fmtPct(stats.runInlineSucPct)}</td>
+                          <td className={`py-2 pl-2 text-right font-semibold ${stats.runInlineSucPct !== null ? (stats.runInlineSucPct >= 75 ? "text-emerald-400" : stats.runInlineSucPct >= 55 ? "text-amber-400" : "text-red-400") : "text-slate-600"}`}>{fmtPct(stats.runInlineSucPct)}</td>
                         </tr>
                       )}
                       {stats.passBlockAttempts > 0 && (
-                        <tr className="hover:bg-gray-800/30">
+                        <tr className="hover:bg-slate-800/30">
                           <td className="py-2 pr-3 text-white font-medium">Pass Block</td>
                           <td className="py-2 px-2 text-right text-blue-400">{stats.passBlockAttempts}</td>
-                          <td className={`py-2 pl-2 text-right font-semibold ${stats.passBlockSucPct !== null ? (stats.passBlockSucPct >= 75 ? "text-green-400" : stats.passBlockSucPct >= 55 ? "text-yellow-400" : "text-red-400") : "text-gray-600"}`}>{fmtPct(stats.passBlockSucPct)}</td>
+                          <td className={`py-2 pl-2 text-right font-semibold ${stats.passBlockSucPct !== null ? (stats.passBlockSucPct >= 75 ? "text-emerald-400" : stats.passBlockSucPct >= 55 ? "text-amber-400" : "text-red-400") : "text-slate-600"}`}>{fmtPct(stats.passBlockSucPct)}</td>
                         </tr>
                       )}
                       {stats.passMovementAttempts > 0 && (
-                        <tr className="hover:bg-gray-800/30">
-                          <td className="py-2 pr-3 pl-5 text-gray-400 text-xs"><span className="text-gray-600 mr-1">↳</span>Movement</td>
+                        <tr className="hover:bg-slate-800/30">
+                          <td className="py-2 pr-3 pl-5 text-slate-400 text-xs"><span className="text-slate-600 mr-1">↳</span>Movement</td>
                           <td className="py-2 px-2 text-right text-blue-400">{stats.passMovementAttempts}</td>
-                          <td className={`py-2 pl-2 text-right font-semibold ${stats.passMovementSucPct !== null ? (stats.passMovementSucPct >= 75 ? "text-green-400" : stats.passMovementSucPct >= 55 ? "text-yellow-400" : "text-red-400") : "text-gray-600"}`}>{fmtPct(stats.passMovementSucPct)}</td>
+                          <td className={`py-2 pl-2 text-right font-semibold ${stats.passMovementSucPct !== null ? (stats.passMovementSucPct >= 75 ? "text-emerald-400" : stats.passMovementSucPct >= 55 ? "text-amber-400" : "text-red-400") : "text-slate-600"}`}>{fmtPct(stats.passMovementSucPct)}</td>
                         </tr>
                       )}
                       {stats.passInlineAttempts > 0 && (
-                        <tr className="hover:bg-gray-800/30">
-                          <td className="py-2 pr-3 pl-5 text-gray-400 text-xs"><span className="text-gray-600 mr-1">↳</span>Inline</td>
+                        <tr className="hover:bg-slate-800/30">
+                          <td className="py-2 pr-3 pl-5 text-slate-400 text-xs"><span className="text-slate-600 mr-1">↳</span>Inline</td>
                           <td className="py-2 px-2 text-right text-blue-400">{stats.passInlineAttempts}</td>
-                          <td className={`py-2 pl-2 text-right font-semibold ${stats.passInlineSucPct !== null ? (stats.passInlineSucPct >= 75 ? "text-green-400" : stats.passInlineSucPct >= 55 ? "text-yellow-400" : "text-red-400") : "text-gray-600"}`}>{fmtPct(stats.passInlineSucPct)}</td>
+                          <td className={`py-2 pl-2 text-right font-semibold ${stats.passInlineSucPct !== null ? (stats.passInlineSucPct >= 75 ? "text-emerald-400" : stats.passInlineSucPct >= 55 ? "text-amber-400" : "text-red-400") : "text-slate-600"}`}>{fmtPct(stats.passInlineSucPct)}</td>
                         </tr>
                       )}
                     </tbody>
@@ -423,12 +423,12 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
               )}
 
               {stats.routeBreakdown.length > 0 && (
-                <div className="p-4 bg-gray-900 rounded-lg border border-gray-800">
-                  <div className="text-xs text-gray-500 mb-3">Route Type Breakdown</div>
+                <div className="p-4 bg-slate-900 rounded-lg border border-slate-800">
+                  <div className="text-xs text-slate-500 mb-3">Route Type Breakdown</div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm min-w-[420px]">
                       <thead>
-                        <tr className="border-b border-gray-800 text-xs text-gray-600">
+                        <tr className="border-b border-slate-800 text-xs text-slate-600">
                           <th className="text-left pb-1.5 pr-3">Route</th>
                           <th className="text-right pb-1.5 px-2">Att</th>
                           <th className="text-right pb-1.5 px-2">Open%</th>
@@ -436,14 +436,14 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
                           <th className="text-right pb-1.5 pl-2">Catch%</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-gray-800/60">
+                      <tbody className="divide-y divide-slate-800/60">
                         {stats.routeBreakdown.map((r) => (
-                          <tr key={r.route} className="hover:bg-gray-800/30">
+                          <tr key={r.route} className="hover:bg-slate-800/30">
                             <td className="py-2 pr-3 text-white font-medium capitalize">{ROUTE_LABELS[r.route]}</td>
                             <td className="py-2 px-2 text-right text-blue-400">{r.attempts}</td>
-                            <td className={`py-2 px-2 text-right text-sm ${r.openPct !== null ? (r.openPct >= 50 ? "text-green-400" : "text-yellow-400") : "text-gray-600"}`}>{fmtPct(r.openPct)}</td>
-                            <td className="py-2 px-2 text-right text-yellow-400">{fmtPct(r.targetPct)}</td>
-                            <td className={`py-2 pl-2 text-right font-semibold ${r.catchPct !== null ? (r.catchPct >= 65 ? "text-green-400" : r.catchPct >= 50 ? "text-yellow-400" : "text-red-400") : "text-gray-600"}`}>{fmtPct(r.catchPct)}</td>
+                            <td className={`py-2 px-2 text-right text-sm ${r.openPct !== null ? (r.openPct >= 50 ? "text-emerald-400" : "text-amber-400") : "text-slate-600"}`}>{fmtPct(r.openPct)}</td>
+                            <td className="py-2 px-2 text-right text-amber-400">{fmtPct(r.targetPct)}</td>
+                            <td className={`py-2 pl-2 text-right font-semibold ${r.catchPct !== null ? (r.catchPct >= 65 ? "text-emerald-400" : r.catchPct >= 50 ? "text-amber-400" : "text-red-400") : "text-slate-600"}`}>{fmtPct(r.catchPct)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -453,11 +453,11 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
               )}
 
               {stats.coverageBreakdown.length > 0 && (
-                <div className="p-4 bg-gray-900 rounded-lg border border-gray-800">
-                  <div className="text-xs text-gray-500 mb-3">Coverage Breakdown</div>
+                <div className="p-4 bg-slate-900 rounded-lg border border-slate-800">
+                  <div className="text-xs text-slate-500 mb-3">Coverage Breakdown</div>
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b border-gray-800 text-xs text-gray-600">
+                      <tr className="border-b border-slate-800 text-xs text-slate-600">
                         <th className="text-left pb-1.5 pr-3">Coverage</th>
                         <th className="text-right pb-1.5 px-2">Att</th>
                         <th className="text-right pb-1.5 px-2">Open%</th>
@@ -465,14 +465,14 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
                         <th className="text-right pb-1.5 pl-2">Catch%</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-800/60">
+                    <tbody className="divide-y divide-slate-800/60">
                       {stats.coverageBreakdown.map((c) => (
-                        <tr key={c.coverage} className="hover:bg-gray-800/30">
+                        <tr key={c.coverage} className="hover:bg-slate-800/30">
                           <td className="py-2 pr-3 text-white font-medium capitalize">{c.coverage}</td>
                           <td className="py-2 px-2 text-right text-blue-400">{c.attempts}</td>
-                          <td className={`py-2 px-2 text-right text-sm ${c.openPct !== null ? (c.openPct >= 50 ? "text-green-400" : "text-yellow-400") : "text-gray-600"}`}>{fmtPct(c.openPct)}</td>
-                          <td className="py-2 px-2 text-right text-yellow-400">{fmtPct(c.targetPct)}</td>
-                          <td className={`py-2 pl-2 text-right font-semibold ${c.catchPct !== null ? (c.catchPct >= 65 ? "text-green-400" : c.catchPct >= 50 ? "text-yellow-400" : "text-red-400") : "text-gray-600"}`}>{fmtPct(c.catchPct)}</td>
+                          <td className={`py-2 px-2 text-right text-sm ${c.openPct !== null ? (c.openPct >= 50 ? "text-emerald-400" : "text-amber-400") : "text-slate-600"}`}>{fmtPct(c.openPct)}</td>
+                          <td className="py-2 px-2 text-right text-amber-400">{fmtPct(c.targetPct)}</td>
+                          <td className={`py-2 pl-2 text-right font-semibold ${c.catchPct !== null ? (c.catchPct >= 65 ? "text-emerald-400" : c.catchPct >= 50 ? "text-amber-400" : "text-red-400") : "text-slate-600"}`}>{fmtPct(c.catchPct)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -481,24 +481,24 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
               )}
 
               {stats.posBreakdown.length > 0 && (
-                <div className="p-4 bg-gray-900 rounded-lg border border-gray-800">
-                  <div className="text-xs text-gray-500 mb-3">Positioning Breakdown (Routes)</div>
+                <div className="p-4 bg-slate-900 rounded-lg border border-slate-800">
+                  <div className="text-xs text-slate-500 mb-3">Positioning Breakdown (Routes)</div>
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b border-gray-800 text-xs text-gray-600">
+                      <tr className="border-b border-slate-800 text-xs text-slate-600">
                         <th className="text-left pb-1.5 pr-3">Positioning</th>
                         <th className="text-right pb-1.5 px-2">Routes</th>
                         <th className="text-right pb-1.5 px-2">Tgt%</th>
                         <th className="text-right pb-1.5 pl-2">Catch%</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-800/60">
+                    <tbody className="divide-y divide-slate-800/60">
                       {stats.posBreakdown.map((p) => (
-                        <tr key={p.positioning} className="hover:bg-gray-800/30">
+                        <tr key={p.positioning} className="hover:bg-slate-800/30">
                           <td className="py-2 pr-3 text-white font-medium">{p.positioning}</td>
                           <td className="py-2 px-2 text-right text-blue-400">{p.attempts}</td>
-                          <td className="py-2 px-2 text-right text-yellow-400">{fmtPct(p.targetPct)}</td>
-                          <td className={`py-2 pl-2 text-right font-semibold ${p.catchPct !== null ? (p.catchPct >= 65 ? "text-green-400" : p.catchPct >= 50 ? "text-yellow-400" : "text-red-400") : "text-gray-600"}`}>{fmtPct(p.catchPct)}</td>
+                          <td className="py-2 px-2 text-right text-amber-400">{fmtPct(p.targetPct)}</td>
+                          <td className={`py-2 pl-2 text-right font-semibold ${p.catchPct !== null ? (p.catchPct >= 65 ? "text-emerald-400" : p.catchPct >= 50 ? "text-amber-400" : "text-red-400") : "text-slate-600"}`}>{fmtPct(p.catchPct)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -507,13 +507,13 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
               )}
 
               {stats.totalPlays > 0 && (
-                <div className="p-4 bg-gray-900 rounded-lg border border-gray-800">
-                  <div className="text-xs text-gray-500 mb-3">Play Flags</div>
+                <div className="p-4 bg-slate-900 rounded-lg border border-slate-800">
+                  <div className="text-xs text-slate-500 mb-3">Play Flags</div>
                   <div className="flex gap-4">
-                    <div className="p-3 bg-gray-800/50 rounded-lg text-center min-w-[100px]">
-                      <div className="text-xs text-gray-500 mb-1">Broken Tackles</div>
-                      <div className="text-xl font-bold text-yellow-400">{stats.brokenTackles}</div>
-                      <div className="text-xs text-gray-500 mt-0.5">{fmtPct(pct(stats.brokenTackles, stats.catches))} of catches</div>
+                    <div className="p-3 bg-slate-800/50 rounded-lg text-center min-w-[100px]">
+                      <div className="text-xs text-slate-500 mb-1">Broken Tackles</div>
+                      <div className="text-xl font-bold text-amber-400">{stats.brokenTackles}</div>
+                      <div className="text-xs text-slate-500 mt-0.5">{fmtPct(pct(stats.brokenTackles, stats.catches))} of catches</div>
                     </div>
                   </div>
                 </div>
@@ -529,20 +529,20 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
       )}
       renderPlayLogger={(sg) => (
         !sg ? (
-          <div className="text-gray-500 text-sm text-center py-12">Select or add a game to start logging plays.</div>
+          <div className="text-slate-500 text-sm text-center py-12">Select or add a game to start logging plays.</div>
         ) : (
           <div className="space-y-4">
-            <div className="text-sm font-medium text-gray-300">
+            <div className="text-sm font-medium text-slate-300">
               Logging: <span className="text-white">{sg.season_year} vs {sg.opponent}</span>
               <span className="ml-2 text-green-400 text-xs">{gamePlays.length} plays</span>
             </div>
 
             <div>
-              <div className="text-xs text-gray-500 mb-2">Location</div>
+              <div className="text-xs text-slate-500 mb-2">Location</div>
               <div className="flex gap-2">
                 {LOCATIONS.map((l) => (
                   <button key={l.key} onClick={() => setLocation(l.key)}
-                    className={`flex-1 py-2 rounded text-sm font-medium transition ${location === l.key ? "bg-green-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                    className={`flex-1 py-2 rounded text-sm font-medium transition ${location === l.key ? "bg-green-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                     {l.label}
                   </button>
                 ))}
@@ -550,11 +550,11 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
             </div>
 
             <div>
-              <div className="text-xs text-gray-500 mb-2">Positioning</div>
+              <div className="text-xs text-slate-500 mb-2">Positioning</div>
               <div className="flex flex-wrap gap-2">
                 {POSITIONINGS.map((p) => (
                   <button key={p.key} onClick={() => setPositioning(p.key)}
-                    className={`px-3 py-2 rounded text-sm font-medium transition ${positioning === p.key ? "bg-green-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                    className={`px-3 py-2 rounded text-sm font-medium transition ${positioning === p.key ? "bg-green-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                     {p.label}
                   </button>
                 ))}
@@ -562,18 +562,18 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
             </div>
 
             <div>
-              <div className="text-xs text-gray-500 mb-2">Play Type</div>
+              <div className="text-xs text-slate-500 mb-2">Play Type</div>
               <div className="flex gap-2">
                 <button onClick={() => { setPlayType("run_block"); setBlockType(null); setBlockSuccess(null); }}
-                  className={`flex-1 py-2 rounded text-sm font-medium transition ${playType === "run_block" ? "bg-purple-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                  className={`flex-1 py-2 rounded text-sm font-medium transition ${playType === "run_block" ? "bg-purple-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                   Run Block
                 </button>
                 <button onClick={() => { setPlayType("pass_block"); setBlockType(null); setBlockSuccess(null); }}
-                  className={`flex-1 py-2 rounded text-sm font-medium transition ${playType === "pass_block" ? "bg-purple-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                  className={`flex-1 py-2 rounded text-sm font-medium transition ${playType === "pass_block" ? "bg-purple-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                   Pass Block
                 </button>
                 <button onClick={() => { setPlayType("route_run"); setBlockType(null); setBlockSuccess(null); }}
-                  className={`flex-1 py-2 rounded text-sm font-medium transition ${playType === "route_run" ? "bg-blue-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                  className={`flex-1 py-2 rounded text-sm font-medium transition ${playType === "route_run" ? "bg-blue-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                   Route Run
                 </button>
                 <button onClick={() => {
@@ -582,42 +582,42 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
                   setCoverage(null); setRouteType(null); setWasOpen(null); setTargeted(null);
                   setTargetOutcome(null); setContestedTarget(null); setContestedCatch(null); setBrokenTackle(false);
                 }}
-                  className={`flex-1 py-2 rounded text-sm font-medium transition ${playType === "decoy" ? "bg-yellow-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                  className={`flex-1 py-2 rounded text-sm font-medium transition ${playType === "decoy" ? "bg-amber-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                   Decoy
                 </button>
               </div>
             </div>
 
             {playType === "decoy" && (
-              <div className="p-3 bg-gray-900/60 rounded-lg border border-gray-700/50 text-xs text-gray-500">
+              <div className="p-3 bg-slate-900/60 rounded-lg border border-slate-700/50 text-xs text-slate-500">
                 Decoy — no additional options. Click Log Play to record.
               </div>
             )}
 
             {(playType === "run_block" || playType === "pass_block") && (
-              <div className="space-y-3 p-3 bg-gray-900/60 rounded-lg border border-purple-900/50">
+              <div className="space-y-3 p-3 bg-slate-900/60 rounded-lg border border-purple-900/50">
                 <div className="text-xs text-purple-400 font-medium">Block Details</div>
                 <div className="flex flex-wrap gap-4">
                   <div>
-                    <div className="text-xs text-gray-500 mb-2">Block Type</div>
+                    <div className="text-xs text-slate-500 mb-2">Block Type</div>
                     <div className="flex gap-2">
                       {(["movement", "inline"] as TEBlockType[]).map((bt) => (
                         <button key={bt} onClick={() => setBlockType(bt)}
-                          className={`px-4 py-2 rounded text-sm font-medium transition capitalize ${blockType === bt ? "bg-purple-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                          className={`px-4 py-2 rounded text-sm font-medium transition capitalize ${blockType === bt ? "bg-purple-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                           {bt.charAt(0).toUpperCase() + bt.slice(1)}
                         </button>
                       ))}
                     </div>
                   </div>
                   <div>
-                    <div className="text-xs text-gray-500 mb-2">Outcome</div>
+                    <div className="text-xs text-slate-500 mb-2">Outcome</div>
                     <div className="flex gap-2">
                       <button onClick={() => setBlockSuccess(true)}
-                        className={`px-4 py-2 rounded text-sm font-bold transition ${blockSuccess === true ? "bg-green-600 text-white ring-2 ring-green-400" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        className={`px-4 py-2 rounded text-sm font-bold transition ${blockSuccess === true ? "bg-green-600 text-white ring-2 ring-green-400" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         ✓ Success
                       </button>
                       <button onClick={() => setBlockSuccess(false)}
-                        className={`px-4 py-2 rounded text-sm font-bold transition ${blockSuccess === false ? "bg-red-600 text-white ring-2 ring-red-400" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        className={`px-4 py-2 rounded text-sm font-bold transition ${blockSuccess === false ? "bg-red-600 text-white ring-2 ring-red-400" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         ✗ Fail
                       </button>
                     </div>
@@ -627,25 +627,25 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
             )}
 
             {playType === "route_run" && (
-              <div className="space-y-3 p-3 bg-gray-900/60 rounded-lg border border-blue-900/50">
+              <div className="space-y-3 p-3 bg-slate-900/60 rounded-lg border border-blue-900/50">
                 <div className="text-xs text-blue-400 font-medium">Route Details</div>
                 <div>
-                  <div className="text-xs text-gray-500 mb-2">Coverage</div>
+                  <div className="text-xs text-slate-500 mb-2">Coverage</div>
                   <div className="flex gap-2">
                     {(["man", "zone", "press", "double"] as TECoverage[]).map((cov) => (
                       <button key={cov} onClick={() => setCoverage(cov)}
-                        className={`flex-1 py-2 rounded text-xs font-medium transition capitalize ${coverage === cov ? "bg-blue-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        className={`flex-1 py-2 rounded text-xs font-medium transition capitalize ${coverage === cov ? "bg-blue-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         {cov.charAt(0).toUpperCase() + cov.slice(1)}
                       </button>
                     ))}
                   </div>
                 </div>
                 <div>
-                  <div className="text-xs text-gray-500 mb-2">Route</div>
+                  <div className="text-xs text-slate-500 mb-2">Route</div>
                   <div className="flex flex-wrap gap-1.5">
                     {ROUTE_TYPES.map((rt) => (
                       <button key={rt} onClick={() => setRouteType(rt)}
-                        className={`px-3 py-1.5 rounded text-xs font-medium transition ${routeType === rt ? "bg-blue-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                        className={`px-3 py-1.5 rounded text-xs font-medium transition ${routeType === rt ? "bg-blue-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         {ROUTE_LABELS[rt]}
                       </button>
                     ))}
@@ -653,54 +653,54 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
                 </div>
                 <div className="flex flex-wrap gap-4">
                   <div>
-                    <div className="text-xs text-gray-500 mb-2">Was He Open?</div>
+                    <div className="text-xs text-slate-500 mb-2">Was He Open?</div>
                     <div className="flex gap-1.5">
                       <button onClick={() => setWasOpen(true)}
-                        className={`px-4 h-9 rounded text-xs font-medium transition ${wasOpen === true ? "bg-green-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>Yes</button>
+                        className={`px-4 h-9 rounded text-xs font-medium transition ${wasOpen === true ? "bg-green-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
                       <button onClick={() => setWasOpen(false)}
-                        className={`px-4 h-9 rounded text-xs font-medium transition ${wasOpen === false ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>No</button>
+                        className={`px-4 h-9 rounded text-xs font-medium transition ${wasOpen === false ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
                     </div>
                   </div>
                   <div>
-                    <div className="text-xs text-gray-500 mb-2">Targeted?</div>
+                    <div className="text-xs text-slate-500 mb-2">Targeted?</div>
                     <div className="flex gap-1.5">
                       <button onClick={() => setTargeted(true)}
-                        className={`px-4 h-9 rounded text-xs font-medium transition ${targeted === true ? "bg-yellow-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>Yes</button>
+                        className={`px-4 h-9 rounded text-xs font-medium transition ${targeted === true ? "bg-amber-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
                       <button onClick={() => { setTargeted(false); setTargetOutcome(null); setContestedTarget(null); setContestedCatch(null); }}
-                        className={`px-4 h-9 rounded text-xs font-medium transition ${targeted === false ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>No</button>
+                        className={`px-4 h-9 rounded text-xs font-medium transition ${targeted === false ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
                     </div>
                   </div>
                 </div>
                 {targeted === true && (
-                  <div className="space-y-3 pl-2 border-l-2 border-yellow-800/50">
+                  <div className="space-y-3 pl-2 border-l-2 border-amber-800/50">
                     <div>
-                      <div className="text-xs text-gray-500 mb-2">Outcome</div>
+                      <div className="text-xs text-slate-500 mb-2">Outcome</div>
                       <div className="flex gap-2">
                         <button onClick={() => setTargetOutcome("caught")}
-                          className={`px-4 py-2 rounded text-xs font-bold transition ${targetOutcome === "caught" ? "bg-green-600 text-white ring-2 ring-green-400" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>✓ Caught</button>
+                          className={`px-4 py-2 rounded text-xs font-bold transition ${targetOutcome === "caught" ? "bg-green-600 text-white ring-2 ring-green-400" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>✓ Caught</button>
                         <button onClick={() => { setTargetOutcome("dropped"); setBrokenTackle(false); }}
-                          className={`px-4 py-2 rounded text-xs font-bold transition ${targetOutcome === "dropped" ? "bg-red-600 text-white ring-2 ring-red-400" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>✗ Drop</button>
+                          className={`px-4 py-2 rounded text-xs font-bold transition ${targetOutcome === "dropped" ? "bg-red-600 text-white ring-2 ring-red-400" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>✗ Drop</button>
                         <button onClick={() => { setTargetOutcome("incomplete"); setContestedCatch(null); setBrokenTackle(false); }}
-                          className={`px-4 py-2 rounded text-xs font-bold transition ${targetOutcome === "incomplete" ? "bg-gray-500 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>Incomplete</button>
+                          className={`px-4 py-2 rounded text-xs font-bold transition ${targetOutcome === "incomplete" ? "bg-slate-500 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Incomplete</button>
                       </div>
                     </div>
                     <div>
-                      <div className="text-xs text-gray-500 mb-2">Contested Target?</div>
+                      <div className="text-xs text-slate-500 mb-2">Contested Target?</div>
                       <div className="flex gap-1.5">
                         <button onClick={() => setContestedTarget(true)}
-                          className={`px-4 h-9 rounded text-xs font-medium transition ${contestedTarget === true ? "bg-orange-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>Yes</button>
+                          className={`px-4 h-9 rounded text-xs font-medium transition ${contestedTarget === true ? "bg-orange-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
                         <button onClick={() => { setContestedTarget(false); setContestedCatch(null); }}
-                          className={`px-4 h-9 rounded text-xs font-medium transition ${contestedTarget === false ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>No</button>
+                          className={`px-4 h-9 rounded text-xs font-medium transition ${contestedTarget === false ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
                       </div>
                     </div>
                     {contestedTarget === true && (
                       <div>
-                        <div className="text-xs text-gray-500 mb-2">Contested Catch?</div>
+                        <div className="text-xs text-slate-500 mb-2">Contested Catch?</div>
                         <div className="flex gap-1.5">
                           <button onClick={() => setContestedCatch(true)}
-                            className={`px-4 h-9 rounded text-xs font-medium transition ${contestedCatch === true ? "bg-orange-500 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>Yes</button>
+                            className={`px-4 h-9 rounded text-xs font-medium transition ${contestedCatch === true ? "bg-orange-500 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
                           <button onClick={() => setContestedCatch(false)}
-                            className={`px-4 h-9 rounded text-xs font-medium transition ${contestedCatch === false ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>No</button>
+                            className={`px-4 h-9 rounded text-xs font-medium transition ${contestedCatch === false ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
                         </div>
                       </div>
                     )}
@@ -711,26 +711,26 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
 
             {targetOutcome === "caught" && (
               <div>
-                <div className="text-xs text-gray-500 mb-2">Play Flags</div>
+                <div className="text-xs text-slate-500 mb-2">Play Flags</div>
                 <button onClick={() => setBrokenTackle((v) => !v)}
-                  className={`px-4 py-2 rounded text-sm font-medium transition ${brokenTackle ? "bg-yellow-700 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+                  className={`px-4 py-2 rounded text-sm font-medium transition ${brokenTackle ? "bg-amber-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                   Broken Tackle
                 </button>
               </div>
             )}
 
             {editingPlayId && (
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-900/30 border border-yellow-700/50 rounded text-xs text-yellow-300">
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-900/30 border border-amber-700/50 rounded text-xs text-amber-300">
                 <span>✎</span><span>Editing play — make changes above then save</span>
-                <button onClick={resetPlayForm} className="ml-auto text-yellow-400 hover:text-white transition">Cancel</button>
+                <button onClick={resetPlayForm} className="ml-auto text-amber-400 hover:text-white transition">Cancel</button>
               </div>
             )}
             <div className="flex gap-2">
-              <input className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded text-white text-sm placeholder-gray-500 focus:outline-none focus:border-green-500"
+              <input className="flex-1 px-3 py-2 bg-slate-800 border border-slate-700 rounded text-white text-sm placeholder-slate-500 focus:outline-none focus:border-green-500"
                 placeholder="Play note (optional)" value={playNotes} onChange={(e) => setPlayNotes(e.target.value)} />
               {editingPlayId ? (
                 <button onClick={saveEditedPlay} disabled={savingPlay || !canLog}
-                  className="px-5 py-2 bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 text-white text-sm rounded font-medium transition whitespace-nowrap">
+                  className="px-5 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm rounded font-medium transition whitespace-nowrap">
                   {savingPlay ? "…" : "Save Edit"}
                 </button>
               ) : (
@@ -744,7 +744,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
 
             {gamePlays.length > 0 && (
               <div>
-                <div className="text-xs text-gray-500 mb-2">Plays This Game ({gamePlays.length})</div>
+                <div className="text-xs text-slate-500 mb-2">Plays This Game ({gamePlays.length})</div>
                 <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
                   {[...gamePlays].reverse().map((pl, i) => {
                     const isBlock = pl.play_type === "run_block" || pl.play_type === "pass_block";
@@ -753,33 +753,33 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
                     const posLabel: Record<TEPositioning, string> = { wide: "Wide", slot: "Slot", inline: "Inl", full_back: "FB", running_back: "RB-pos", wing_back: "WB" };
                     const locLabel: Record<TELocation, string>    = { left: "L", right: "R", backfield: "BF" };
                     return (
-                      <div key={pl.id} className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs transition ${editingPlayId === pl.id ? "bg-yellow-900/40 border border-yellow-700/60" : "bg-gray-900 border border-transparent"}`}>
-                        <span className="text-gray-500 w-5 flex-shrink-0">{gamePlays.length - i}</span>
-                        <span className="text-gray-400">{locLabel[pl.location]}</span>
-                        <span className="text-gray-500">{posLabel[pl.positioning]}</span>
-                        <span className={`font-medium ${isBlock ? "text-purple-400" : isDecoy ? "text-yellow-400" : "text-blue-400"}`}>{ptLabel}</span>
+                      <div key={pl.id} className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs transition ${editingPlayId === pl.id ? "bg-amber-900/40 border border-amber-700/60" : "bg-slate-900 border border-transparent"}`}>
+                        <span className="text-slate-500 w-5 flex-shrink-0">{gamePlays.length - i}</span>
+                        <span className="text-slate-400">{locLabel[pl.location]}</span>
+                        <span className="text-slate-500">{posLabel[pl.positioning]}</span>
+                        <span className={`font-medium ${isBlock ? "text-purple-400" : isDecoy ? "text-amber-400" : "text-blue-400"}`}>{ptLabel}</span>
                         {isBlock ? (
                           <>
-                            {pl.block_type && <span className="text-gray-400">{pl.block_type === "movement" ? "Mov" : "Inl"}</span>}
-                            <span className={pl.block_success ? "text-green-400" : "text-red-400"}>{pl.block_success ? "✓" : "✗"}</span>
+                            {pl.block_type && <span className="text-slate-400">{pl.block_type === "movement" ? "Mov" : "Inl"}</span>}
+                            <span className={pl.block_success ? "text-emerald-400" : "text-red-400"}>{pl.block_success ? "✓" : "✗"}</span>
                           </>
                         ) : isDecoy ? null : (
                           <>
                             {pl.route_type && <span className="text-blue-300">{ROUTE_LABELS[pl.route_type]}</span>}
-                            {pl.coverage && <span className="text-gray-500 capitalize">{pl.coverage}</span>}
-                            {pl.was_open ? <span className="text-green-400">Open</span> : pl.was_open === false ? <span className="text-gray-600">Cvrd</span> : null}
+                            {pl.coverage && <span className="text-slate-500 capitalize">{pl.coverage}</span>}
+                            {pl.was_open ? <span className="text-emerald-400">Open</span> : pl.was_open === false ? <span className="text-slate-600">Cvrd</span> : null}
                             {pl.targeted
-                              ? pl.caught ? <span className="text-green-400">✓</span> : pl.dropped ? <span className="text-red-400">Drop</span> : <span className="text-gray-400">Inc</span>
-                              : pl.targeted === false ? <span className="text-gray-600">—</span> : null}
+                              ? pl.caught ? <span className="text-emerald-400">✓</span> : pl.dropped ? <span className="text-red-400">Drop</span> : <span className="text-slate-400">Inc</span>
+                              : pl.targeted === false ? <span className="text-slate-600">—</span> : null}
                             {pl.contested_target && <span className="text-orange-400">Con</span>}
                           </>
                         )}
-                        {pl.broken_tackle && <span className="text-yellow-400">BT</span>}
-                        {pl.play_notes && <span className="text-gray-500 truncate">{pl.play_notes}</span>}
+                        {pl.broken_tackle && <span className="text-amber-400">BT</span>}
+                        {pl.play_notes && <span className="text-slate-500 truncate">{pl.play_notes}</span>}
                         <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
                           <button onClick={() => editingPlayId === pl.id ? resetPlayForm() : startEditPlay(pl)}
-                            className={`px-2 py-0.5 rounded text-xs transition ${editingPlayId === pl.id ? "text-yellow-400 hover:text-white" : "text-gray-600 hover:text-yellow-400"}`}>✎</button>
-                          <button onClick={() => deletePlay(pl.id)} className="text-gray-700 hover:text-red-400">✕</button>
+                            className={`px-2 py-0.5 rounded text-xs transition ${editingPlayId === pl.id ? "text-amber-400 hover:text-white" : "text-slate-600 hover:text-amber-400"}`}>✎</button>
+                          <button onClick={() => deletePlay(pl.id)} className="text-slate-700 hover:text-red-400">✕</button>
                         </div>
                       </div>
                     );
@@ -793,21 +793,21 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
       renderGamesTable={() => (
         <div>
           {loading ? (
-            <div className="text-gray-500 text-sm text-center py-8">Loading…</div>
+            <div className="text-slate-500 text-sm text-center py-8">Loading…</div>
           ) : games.length === 0 ? (
-            <div className="text-gray-500 text-sm text-center py-8">No games charted yet.</div>
+            <div className="text-slate-500 text-sm text-center py-8">No games charted yet.</div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-gray-800 text-left text-xs text-gray-500">
+                  <tr className="border-b border-slate-800 text-left text-xs text-slate-500">
                     <th className="pb-2 pr-4">Season</th><th className="pb-2 pr-4">Opponent</th>
                     <th className="pb-2 pr-4">Type</th><th className="pb-2 pr-4 text-right">Plays</th>
                     <th className="pb-2 pr-4 text-right">Routes</th><th className="pb-2 pr-4 text-right">Tgts</th>
                     <th className="pb-2 pr-4 text-right">Blocks</th><th className="pb-2 text-right">Block Suc%</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-900">
+                <tbody className="divide-y divide-slate-900">
                   {games.map((g) => {
                     const gp     = plays.filter((p) => p.game_id === g.id);
                     const routes = gp.filter((p) => p.play_type === "route_run");
@@ -816,15 +816,15 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
                     const bSuc   = blocks.filter((p) => p.block_success === true).length;
                     const bSucPct= blocks.length > 0 ? ((bSuc / blocks.length) * 100).toFixed(0) : null;
                     return (
-                      <tr key={g.id} className="hover:bg-gray-900/50 transition">
-                        <td className="py-2 pr-4 text-gray-300">{g.season_year}</td>
+                      <tr key={g.id} className="hover:bg-slate-900/50 transition">
+                        <td className="py-2 pr-4 text-slate-300">{g.season_year}</td>
                         <td className="py-2 pr-4 text-white font-medium">{g.opponent}</td>
-                        <td className="py-2 pr-4 text-gray-400 capitalize">{g.game_type}</td>
+                        <td className="py-2 pr-4 text-slate-400 capitalize">{g.game_type}</td>
                         <td className="py-2 pr-4 text-right text-blue-400">{gp.length}</td>
                         <td className="py-2 pr-4 text-right text-green-400">{routes.length || "—"}</td>
-                        <td className="py-2 pr-4 text-right text-yellow-400">{tgts || "—"}</td>
+                        <td className="py-2 pr-4 text-right text-amber-400">{tgts || "—"}</td>
                         <td className="py-2 pr-4 text-right text-purple-400">{blocks.length || "—"}</td>
-                        <td className={`py-2 text-right font-medium ${bSucPct !== null ? (parseInt(bSucPct) >= 75 ? "text-green-400" : parseInt(bSucPct) >= 55 ? "text-yellow-400" : "text-red-400") : "text-gray-600"}`}>
+                        <td className={`py-2 text-right font-medium ${bSucPct !== null ? (parseInt(bSucPct) >= 75 ? "text-emerald-400" : parseInt(bSucPct) >= 55 ? "text-amber-400" : "text-red-400") : "text-slate-600"}`}>
                           {bSucPct !== null ? `${bSucPct}%` : "—"}
                         </td>
                       </tr>
@@ -832,13 +832,13 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
                   })}
                 </tbody>
                 <tfoot>
-                  <tr className="border-t border-gray-700 text-xs text-gray-500 font-medium">
+                  <tr className="border-t border-slate-700 text-xs text-slate-500 font-medium">
                     <td colSpan={3} className="pt-2">Total ({games.length} games)</td>
                     <td className="pt-2 text-right text-blue-400">{stats.totalPlays}</td>
                     <td className="pt-2 text-right text-green-400">{stats.routeAttempts}</td>
-                    <td className="pt-2 text-right text-yellow-400">{stats.targets}</td>
+                    <td className="pt-2 text-right text-amber-400">{stats.targets}</td>
                     <td className="pt-2 text-right text-purple-400">{stats.blockAttempts}</td>
-                    <td className="pt-2 text-right text-gray-400">{fmtPct(stats.blockSucPct)}</td>
+                    <td className="pt-2 text-right text-slate-400">{fmtPct(stats.blockSucPct)}</td>
                   </tr>
                 </tfoot>
               </table>
