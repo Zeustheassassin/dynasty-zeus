@@ -1,5 +1,6 @@
 "use client";
 import type { RosterDirectionProfile, LeagueMateView } from "../../lib/types";
+import type { FinderStrategyOverride } from "./finderTypes";
 
 interface FinderDirectionPanelProps {
   loadingCalcValues: boolean;
@@ -15,7 +16,15 @@ interface FinderDirectionPanelProps {
   autoStrategyLabel: string;
   finderPreferFuturePicks: boolean;
   rosterOverflow: number;
+  finderStrategyOverride: FinderStrategyOverride;
+  setFinderStrategyOverride: (mode: FinderStrategyOverride) => void;
 }
+
+const STRATEGY_OPTIONS: { mode: FinderStrategyOverride; label: string }[] = [
+  { mode: "AUTO", label: "Default" },
+  { mode: "TANK", label: "Full Tank" },
+  { mode: "CONTEND", label: "Full Contend" },
+];
 
 export function FinderDirectionPanel({
   loadingCalcValues,
@@ -31,6 +40,8 @@ export function FinderDirectionPanel({
   autoStrategyLabel,
   finderPreferFuturePicks,
   rosterOverflow,
+  finderStrategyOverride,
+  setFinderStrategyOverride,
 }: FinderDirectionPanelProps) {
   return (
     <>
@@ -114,7 +125,25 @@ export function FinderDirectionPanel({
       ) : null}
       {finderDirectionProfile && (
         <div className="rounded-lg bg-slate-800/50 border border-slate-700/60 px-3 py-2">
-          <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 mb-2">Auto-Strategy</div>
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Auto-Strategy</div>
+            <div className="flex gap-1.5">
+              {STRATEGY_OPTIONS.map(({ mode, label }) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setFinderStrategyOverride(mode)}
+                  className={`text-[11px] px-2.5 py-1 rounded-full border font-medium transition ${
+                    finderStrategyOverride === mode
+                      ? "border-blue-500 bg-blue-950/50 text-blue-200"
+                      : "border-slate-700 bg-slate-900/40 text-slate-400 hover:border-slate-500 hover:text-slate-300"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="flex flex-wrap gap-2">
             <span className={`text-[11px] px-2.5 py-0.5 rounded-full border font-medium ${
               isChampionshipPush

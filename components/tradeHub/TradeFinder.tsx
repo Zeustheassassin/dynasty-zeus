@@ -29,7 +29,7 @@ import {
   getNFLDepthIdx as getNFLDepthIdxUtil,
   computePosRank as computePosRankUtil,
 } from "./finderUtils";
-import type { MarketSignal, TradeResult } from "./finderTypes";
+import type { MarketSignal, TradeResult, FinderStrategyOverride } from "./finderTypes";
 import { YEARS } from "./shared";
 import { runFinderPipeline } from "./finderPipeline";
 import type { PlayerWithValue, PickWithValue } from "./shared";
@@ -47,6 +47,8 @@ interface TradeFinderProps {
   setFinderTargetOppRosterId: (id: number | null) => void;
   finderTargetPlayerId: string | null;
   setFinderTargetPlayerId: (id: string | null) => void;
+  finderStrategyOverride: FinderStrategyOverride;
+  setFinderStrategyOverride: (mode: FinderStrategyOverride) => void;
   allPicks: AugmentedPick[];
   user: SleeperUser | null;
   selectedLeagueDraftHasOccurred: boolean;
@@ -92,6 +94,7 @@ function TradeFinder({
   finderPinnedPlayerId, setFinderPinnedPlayerId,
   finderTargetOppRosterId, setFinderTargetOppRosterId,
   finderTargetPlayerId, setFinderTargetPlayerId,
+  finderStrategyOverride, setFinderStrategyOverride,
   allPicks,
   user,
   selectedLeagueDraftHasOccurred,
@@ -296,7 +299,15 @@ function TradeFinder({
       // Single source of truth: the fully adjusted profile (dynasty + redraft + sim + age).
       // At this point selectedLeagueDirectionAdjusted is guaranteed non-null (loading gate above).
       const finderDirectionProfile = selectedLeagueDirectionAdjusted;
-      const finderDirection = finderDirectionProfile.bucket;
+      // Manual strategy override: forces the bucket every downstream branch keys off of
+      // (CONTENDER_BUCKETS/SELLER_BUCKETS checks, getDirectionTradeScore, failsDirectionGuardrail,
+      // etc.), regardless of what the direction engine actually computed. The real computed
+      // bucket is still shown as-is in FinderDirectionPanel's "Direction Engine" badge.
+      const finderDirection = finderStrategyOverride === "TANK"
+        ? "Hopeless"
+        : finderStrategyOverride === "CONTEND"
+          ? "Elite"
+          : finderDirectionProfile.bucket;
       // Sim is normally resolved before selectedLeagueDirectionAdjusted is non-null, so
       // playoffOdds is a real number here. Guard anyway: default to 50 (neutral), NEVER 0 —
       // a 0 default would silently flip the whole finder into tank/sell-side mode.
@@ -320,7 +331,9 @@ function TradeFinder({
       // Each team naturally has 1 first per year (3 across the 3-year window),
       // so 5+ owned firsts means at least 2 acquired via trade — clear stockpile.
       const pickRich = ownedFirstsCount >= 5;
-      const isStockpiledRebuild = dynastyStrong && pickRich;
+      // Stockpile detection only makes sense for the automatic read — a manual override
+      // means the user has explicitly decided the strategy, so it must not be dampened.
+      const isStockpiledRebuild = finderStrategyOverride === "AUTO" && dynastyStrong && pickRich;
 
       // ── Auto-strategy detection (replaces manual toggles) ────────────────
       // "Full Rebuild" is reserved for genuinely no-hope situations: bottom-
@@ -331,7 +344,11 @@ function TradeFinder({
       // Disable for stockpiled teams so trade scoring doesn't keep pushing
       // them toward more picks they don't need.
       // Don't auto-tank unless the user's own sim is actually resolved (hasMySim).
-      const iAmTankingFinder = hasMySim && myFinderPlayoffOdds < 50 && !isStockpiledRebuild;
+      const iAmTankingFinder = finderStrategyOverride === "TANK"
+        ? true
+        : finderStrategyOverride === "CONTEND"
+          ? false
+          : hasMySim && myFinderPlayoffOdds < 50 && !isStockpiledRebuild;
 
       const isHardSellSide = (
         ["Stranded", "Fading Out", "Hopeless"].includes(finderDirection)
@@ -348,10 +365,17 @@ function TradeFinder({
       const finderTankMode = isHardSellSide;
       // Championship push: confirmed contender with locked/near-locked playoff odds.
       // The one move matters more than value — filling the exact hole is the priority.
-      const isChampionshipPush = ["Elite", "True Contender"].includes(finderDirection) &&
-        myFinderPlayoffOdds >= 70;
+      const isChampionshipPush = finderStrategyOverride === "CONTEND"
+        ? true
+        : finderStrategyOverride === "TANK"
+          ? false
+          : ["Elite", "True Contender"].includes(finderDirection) && myFinderPlayoffOdds >= 70;
       // Auto-strategy label for UI display
-      const autoStrategyLabel: string = isChampionshipPush
+      const autoStrategyLabel: string = finderStrategyOverride === "TANK"
+        ? "Full Tank Mode"
+        : finderStrategyOverride === "CONTEND"
+        ? "Full Contend Mode"
+        : isChampionshipPush
         ? "Championship Push"
         : finderDirection === "Window Closing"
           ? "Win-Now Window"
@@ -1117,7 +1141,7 @@ function TradeFinder({
     top32QBFloor, nflTeamDepth, ignoredOwnerIds, selectedLeagueSimulation,
     deferredFinderSeed, tradePartnerRankings, leagueMateProfileByRosterId,
     tradeAttempts, historicalSnapshot, playerStats, crossLeagueExposure,
-    buyLowPlayerIds, finderWeeklyProjMap,
+    buyLowPlayerIds, finderWeeklyProjMap, finderStrategyOverride,
   ]);
 
   if (!selectedLeague) return (
@@ -1165,6 +1189,8 @@ function TradeFinder({
               autoStrategyLabel={autoStrategyLabel}
               finderPreferFuturePicks={finderPreferFuturePicks}
               rosterOverflow={rosterOverflow}
+              finderStrategyOverride={finderStrategyOverride}
+              setFinderStrategyOverride={setFinderStrategyOverride}
             />
             <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Find trades involving a specific player</p>
             {pinnedPlayer ? (

@@ -2,6 +2,11 @@ import type { PlayerWithValue, PickWithValue } from "./shared";
 
 export type MarketSignal = "SELL_HIGH" | "BUY_LOW" | "LIQUID" | "NONE";
 
+// AUTO = today's direction-engine-driven behavior. TANK/CONTEND are manual overrides that
+// force the finder into a full sell-everything-for-picks/youth or buy-everything-for-vets
+// posture, regardless of what the direction engine actually computed for this team.
+export type FinderStrategyOverride = "AUTO" | "TANK" | "CONTEND";
+
 export type TradeResult = {
   give: PlayerWithValue[]; receive: PlayerWithValue[];
   givePicks: PickWithValue[]; receivePicks: PickWithValue[];

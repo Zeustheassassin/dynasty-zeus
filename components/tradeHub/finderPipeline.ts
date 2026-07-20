@@ -16,6 +16,11 @@ import type { TradeResult } from "./finderTypes";
 import { valueBearingGive } from "./finderTypes";
 import type { PlayerWithValue } from "./shared";
 
+// Shared injury-status classification — reused by the tank-mode receive filter (a hurt-but-
+// talented player is an acceptable tank return alongside picks/youth) and by the emergency-fill
+// and market-intel scoring below.
+const INJURED_STATUSES = new Set(["ir", "out", "dnr", "pup", "nfi"]);
+
 export interface FinderPipelineCtx {
   // Data
   allPicks: AugmentedPick[];
@@ -300,7 +305,10 @@ export function runFinderPipeline(
     .filter((r) => !deferredTargetPlayerId || r.receive.some((p) => p.player_id === deferredTargetPlayerId))
     .filter((r) => !isWrongOwnerHCPackage(r))
     .filter((r) => !hasBadSameTeamCombo(r.give) && !hasBadSameTeamCombo(r.receive))
-    .filter((r) => !finderTankMode || r.receive.every((p) => isFutureInsulationAsset(p)))
+    .filter((r) => !finderTankMode || r.receive.every((p) =>
+      isFutureInsulationAsset(p) ||
+      (INJURED_STATUSES.has((players[p.player_id]?.injury_status ?? "").toLowerCase()) && (p.value ?? 0) >= 1500)
+    ))
     .filter((r) => oppDirOk(r))
     .filter((r) => lowValueBalancerOk(r))
     .filter((r) => userWindowOk(r));

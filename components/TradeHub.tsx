@@ -17,6 +17,7 @@ import TradeCalculator from "./tradeHub/TradeCalculator";
 import TradeFinder from "./tradeHub/TradeFinder";
 import TradeLog from "./tradeHub/TradeLog";
 import TradeAttempts from "./tradeHub/TradeAttempts";
+import type { FinderStrategyOverride } from "./tradeHub/finderTypes";
 import type { MainTab } from "../lib/hubs";
 
 // ── Props ──────────────────────────────────────────────────────────────────
@@ -103,6 +104,7 @@ function TradeHub({
   const [finderPinnedPlayerId, setFinderPinnedPlayerId] = useState<string | null>(null);
   const [finderTargetOppRosterId, setFinderTargetOppRosterId] = useState<number | null>(null);
   const [finderTargetPlayerId, setFinderTargetPlayerId] = useState<string | null>(null);
+  const [finderStrategyOverride, setFinderStrategyOverride] = useState<FinderStrategyOverride>("AUTO");
 
   const [sessionMarked, setSessionMarked] = useState<Set<string>>(new Set());
   const autoMarkedRef = useRef<Set<string>>(new Set());
@@ -247,6 +249,8 @@ function TradeHub({
             setFinderTargetOppRosterId={setFinderTargetOppRosterId}
             finderTargetPlayerId={finderTargetPlayerId}
             setFinderTargetPlayerId={setFinderTargetPlayerId}
+            finderStrategyOverride={finderStrategyOverride}
+            setFinderStrategyOverride={setFinderStrategyOverride}
             allPicks={allPicks}
             user={user}
             selectedLeagueDraftHasOccurred={selectedLeagueDraftHasOccurred}
