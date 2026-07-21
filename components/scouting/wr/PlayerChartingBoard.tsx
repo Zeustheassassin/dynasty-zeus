@@ -182,15 +182,18 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
   }, [plays, games]);
 
   const gameStats = useMemo(() => {
-    const map: Record<string, { snaps: number; routes: number; targets: number; catches: number; yards: number }> = {};
+    const map: Record<string, { snaps: number; routes: number; targets: number; catches: number; yards: number; man: number; press: number; zone: number }> = {};
     for (const p of plays) {
-      if (!map[p.game_id]) map[p.game_id] = { snaps: 0, routes: 0, targets: 0, catches: 0, yards: 0 };
+      if (!map[p.game_id]) map[p.game_id] = { snaps: 0, routes: 0, targets: 0, catches: 0, yards: 0, man: 0, press: 0, zone: 0 };
       map[p.game_id].snaps++;
       if (!p.no_route_run) {
         map[p.game_id].routes++;
         if (p.targeted) map[p.game_id].targets++;
         if (p.targeted && p.success) map[p.game_id].catches++;
         if (p.yards) map[p.game_id].yards += p.yards;
+        if (p.coverage === "man") map[p.game_id].man++;
+        else if (p.coverage === "press") map[p.game_id].press++;
+        else if (p.coverage === "zone") map[p.game_id].zone++;
       }
     }
     return map;
@@ -314,11 +317,22 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
       onNewGameChange={onNewGameChange} onAddGame={onAddGame} onDeleteGame={onDeleteGame} onUpdateGame={onUpdateGame}
       onToggleEditBio={onToggleEditBio} onBioChange={onBioChange} onSaveBio={onSaveBio}
       renderGameBadge={(g) => {
-        const gs = gameStats[g.id] ?? { routes: 0, targets: 0, catches: 0 };
+        const gs = gameStats[g.id] ?? { routes: 0, targets: 0, catches: 0, man: 0, press: 0, zone: 0 };
+        const cvgPct = (n: number) => gs.routes > 0 ? Math.round((n / gs.routes) * 100) : 0;
         return (
-          <div className="text-right">
-            <div className="text-xs text-blue-400">{gs.routes}r</div>
-            <div className="text-xs text-slate-600">{gs.catches}/{gs.targets}</div>
+          <div className="flex items-center gap-3">
+            {/* Man/Press/Zone breakdown — desktop only; sidebar row has no room on small screens */}
+            {gs.routes > 0 && (
+              <div className="hidden md:flex items-center gap-2 text-[10px] text-slate-500 whitespace-nowrap">
+                <span>Man <span className="text-slate-300 font-medium">{cvgPct(gs.man)}%</span></span>
+                <span>Press <span className="text-slate-300 font-medium">{cvgPct(gs.press)}%</span></span>
+                <span>Zone <span className="text-slate-300 font-medium">{cvgPct(gs.zone)}%</span></span>
+              </div>
+            )}
+            <div className="text-right">
+              <div className="text-xs text-blue-400">{gs.routes}r</div>
+              <div className="text-xs text-slate-600">{gs.catches}/{gs.targets}</div>
+            </div>
           </div>
         );
       }}
