@@ -326,15 +326,26 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
         const gs = gameStats[g.id] ?? { routes: 0, targets: 0, catches: 0, man: 0, manOpen: 0, press: 0, pressOpen: 0, zone: 0, zoneOpen: 0 };
         // Success rate WITHIN that coverage (% of snaps against it where he got open) — not
         // how often that coverage was seen. No attempts against a coverage → "—", not 0%.
-        const cvgRate = (count: number, open: number) => count > 0 ? `${Math.round((open / count) * 100)}%` : "—";
+        const cvgCols = [
+          { label: "Man",   count: gs.man,   open: gs.manOpen },
+          { label: "Press", count: gs.press, open: gs.pressOpen },
+          { label: "Zone",  count: gs.zone,  open: gs.zoneOpen },
+        ];
         return (
           <div className="flex items-center gap-3">
             {/* Man/Press/Zone success rate — desktop only; sidebar row has no room on small screens */}
             {gs.routes > 0 && (
-              <div className="hidden md:flex items-center gap-2 text-[10px] text-slate-500 whitespace-nowrap">
-                <span>Man <span className="text-slate-300 font-medium">{cvgRate(gs.man, gs.manOpen)}</span></span>
-                <span>Press <span className="text-slate-300 font-medium">{cvgRate(gs.press, gs.pressOpen)}</span></span>
-                <span>Zone <span className="text-slate-300 font-medium">{cvgRate(gs.zone, gs.zoneOpen)}</span></span>
+              <div className="hidden md:flex items-center gap-3 text-[10px] whitespace-nowrap">
+                {cvgCols.map((c) => (
+                  <div key={c.label} className="flex flex-col items-center">
+                    <span className="text-slate-500">
+                      {c.label} <span className="text-slate-300 font-medium">
+                        {c.count > 0 ? `${Math.round((c.open / c.count) * 100)}%` : "—"}
+                      </span>
+                    </span>
+                    <span className="text-slate-600">{c.count > 0 ? `${c.open}/${c.count}` : "—"}</span>
+                  </div>
+                ))}
               </div>
             )}
             <div className="text-right">
