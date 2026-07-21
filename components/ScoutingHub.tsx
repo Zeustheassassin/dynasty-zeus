@@ -285,7 +285,8 @@ export default function ScoutingHub() {
   const hubTabs: { key: HubTab; label: string }[] = [
     { key: "prospects", label: "Prospects" },
     { key: "big_board", label: "Big Board" },
-    { key: "games_log", label: "Games Charted" },
+    // "games_log" (Games Charted) intentionally hidden from the tab bar — data/rendering
+    // kept intact below (tab === "games_log"), just not user-reachable via nav.
     { key: "analysis",  label: "Analysis" },
     { key: "compare",   label: "Compare" },
     { key: "recruits",  label: "Recruits" },
