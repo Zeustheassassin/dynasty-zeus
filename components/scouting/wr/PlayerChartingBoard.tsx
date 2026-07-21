@@ -182,18 +182,24 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
   }, [plays, games]);
 
   const gameStats = useMemo(() => {
-    const map: Record<string, { snaps: number; routes: number; targets: number; catches: number; yards: number; man: number; press: number; zone: number }> = {};
+    const map: Record<string, {
+      snaps: number; routes: number; targets: number; catches: number; yards: number;
+      man: number; manOpen: number; press: number; pressOpen: number; zone: number; zoneOpen: number;
+    }> = {};
     for (const p of plays) {
-      if (!map[p.game_id]) map[p.game_id] = { snaps: 0, routes: 0, targets: 0, catches: 0, yards: 0, man: 0, press: 0, zone: 0 };
+      if (!map[p.game_id]) map[p.game_id] = {
+        snaps: 0, routes: 0, targets: 0, catches: 0, yards: 0,
+        man: 0, manOpen: 0, press: 0, pressOpen: 0, zone: 0, zoneOpen: 0,
+      };
       map[p.game_id].snaps++;
       if (!p.no_route_run) {
         map[p.game_id].routes++;
         if (p.targeted) map[p.game_id].targets++;
         if (p.targeted && p.success) map[p.game_id].catches++;
         if (p.yards) map[p.game_id].yards += p.yards;
-        if (p.coverage === "man") map[p.game_id].man++;
-        else if (p.coverage === "press") map[p.game_id].press++;
-        else if (p.coverage === "zone") map[p.game_id].zone++;
+        if (p.coverage === "man") { map[p.game_id].man++; if (p.was_open) map[p.game_id].manOpen++; }
+        else if (p.coverage === "press") { map[p.game_id].press++; if (p.was_open) map[p.game_id].pressOpen++; }
+        else if (p.coverage === "zone") { map[p.game_id].zone++; if (p.was_open) map[p.game_id].zoneOpen++; }
       }
     }
     return map;
@@ -317,16 +323,18 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
       onNewGameChange={onNewGameChange} onAddGame={onAddGame} onDeleteGame={onDeleteGame} onUpdateGame={onUpdateGame}
       onToggleEditBio={onToggleEditBio} onBioChange={onBioChange} onSaveBio={onSaveBio}
       renderGameBadge={(g) => {
-        const gs = gameStats[g.id] ?? { routes: 0, targets: 0, catches: 0, man: 0, press: 0, zone: 0 };
-        const cvgPct = (n: number) => gs.routes > 0 ? Math.round((n / gs.routes) * 100) : 0;
+        const gs = gameStats[g.id] ?? { routes: 0, targets: 0, catches: 0, man: 0, manOpen: 0, press: 0, pressOpen: 0, zone: 0, zoneOpen: 0 };
+        // Success rate WITHIN that coverage (% of snaps against it where he got open) — not
+        // how often that coverage was seen. No attempts against a coverage → "—", not 0%.
+        const cvgRate = (count: number, open: number) => count > 0 ? `${Math.round((open / count) * 100)}%` : "—";
         return (
           <div className="flex items-center gap-3">
-            {/* Man/Press/Zone breakdown — desktop only; sidebar row has no room on small screens */}
+            {/* Man/Press/Zone success rate — desktop only; sidebar row has no room on small screens */}
             {gs.routes > 0 && (
               <div className="hidden md:flex items-center gap-2 text-[10px] text-slate-500 whitespace-nowrap">
-                <span>Man <span className="text-slate-300 font-medium">{cvgPct(gs.man)}%</span></span>
-                <span>Press <span className="text-slate-300 font-medium">{cvgPct(gs.press)}%</span></span>
-                <span>Zone <span className="text-slate-300 font-medium">{cvgPct(gs.zone)}%</span></span>
+                <span>Man <span className="text-slate-300 font-medium">{cvgRate(gs.man, gs.manOpen)}</span></span>
+                <span>Press <span className="text-slate-300 font-medium">{cvgRate(gs.press, gs.pressOpen)}</span></span>
+                <span>Zone <span className="text-slate-300 font-medium">{cvgRate(gs.zone, gs.zoneOpen)}</span></span>
               </div>
             )}
             <div className="text-right">
