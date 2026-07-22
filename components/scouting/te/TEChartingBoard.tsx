@@ -23,6 +23,10 @@ import { pct, fmtPct } from "../shared/chartingTypes";
 import ChartingBoard, { type ChartingBoardConfig } from "../shared/ChartingBoard";
 import { useChartingState } from "../shared/hooks/useChartingState";
 import TEPlayerCharts from "./TEPlayerCharts";
+import {
+  buildTERouteBaselines, computeTERouteAboveExpectedForPlays,
+  buildTEBlockBaselines, computeTEBlockAboveExpectedForPlays,
+} from "../../../lib/scouting/aboveExpected";
 
 const NFL_ROLES = ["Inline TE", "Move TE", "Receiving TE", "Blocking TE", "F-Back/Flex", ""];
 
@@ -227,6 +231,30 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
     return { cov, blk };
   }, [plays]);
 
+  // Per-game TE-SAER (route) / TE-SAEB (block) — a quick "this game looked
+  // good/bad" read. Deliberately ungated (no MIN_SAMPLE floor): single-game
+  // samples are always small, that's expected here. Baselines are built once
+  // from leaguePlays (already fetched for the career badges) and reused for
+  // every game.
+  const teRouteBaselines = useMemo(() => buildTERouteBaselines(leaguePlays), [leaguePlays]);
+  const teBlockBaselines = useMemo(() => buildTEBlockBaselines(leaguePlays), [leaguePlays]);
+  const perGameSaer = useMemo(() => {
+    const map: Record<string, number | null> = {};
+    for (const g of games) {
+      const gp = plays.filter((p) => p.game_id === g.id);
+      map[g.id] = computeTERouteAboveExpectedForPlays(gp, teRouteBaselines);
+    }
+    return map;
+  }, [plays, games, teRouteBaselines]);
+  const perGameSaeb = useMemo(() => {
+    const map: Record<string, number | null> = {};
+    for (const g of games) {
+      const gp = plays.filter((p) => p.game_id === g.id);
+      map[g.id] = computeTEBlockAboveExpectedForPlays(gp, teBlockBaselines);
+    }
+    return map;
+  }, [plays, games, teBlockBaselines]);
+
   const canLog = useMemo(() => {
     if (!selectedGameId) return false;
     if (playType === "decoy") return true;
@@ -340,6 +368,8 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
         const blk = gameStats.blk[g.id];
         const hasCov = !!cov && (["man", "press", "zone"] as const).some((k) => cov[k].count > 0);
         const hasBlk = !!blk && (["inline", "movement"] as const).some((k) => blk[k].count > 0);
+        const saer = perGameSaer[g.id] ?? null;
+        const saeb = perGameSaeb[g.id] ?? null;
         return (
           <div className="flex items-center gap-3">
             {(hasCov || hasBlk) && (
@@ -372,6 +402,14 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
                 })}
               </div>
             )}
+            <div className="hidden sm:flex items-center gap-1.5 text-[10px] font-semibold whitespace-nowrap flex-shrink-0">
+              <span className={saer == null ? "text-slate-600" : saer >= 0 ? "text-emerald-400" : "text-red-400"}>
+                TE-SAER {saer == null ? "—" : `${saer >= 0 ? "+" : ""}${saer.toFixed(1)}`}
+              </span>
+              <span className={saeb == null ? "text-slate-600" : saeb >= 0 ? "text-emerald-400" : "text-red-400"}>
+                TE-SAEB {saeb == null ? "—" : `${saeb >= 0 ? "+" : ""}${saeb.toFixed(1)}`}
+              </span>
+            </div>
             <div className="text-xs text-green-400 flex-shrink-0">{gamePlayCounts[g.id] ?? 0}pl</div>
           </div>
         );

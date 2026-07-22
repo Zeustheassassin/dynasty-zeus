@@ -11,6 +11,7 @@ import type { ChartingBoardConfig } from "../shared/ChartingBoard";
 import { useChartingState } from "../shared/hooks/useChartingState";
 import { pct } from "../shared/chartingTypes";
 import RBPlayerCharts from "./RBPlayerCharts";
+import { buildRBBaselines, computeRBAboveExpectedForPlays } from "../../../lib/scouting/aboveExpected";
 import type {
   Prospect,
   ProspectWithStats,
@@ -278,6 +279,21 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
     return map;
   }, [plays]);
 
+  // Per-game SRAE (Success Rate Above Expected) — a quick "this game looked
+  // good/bad" read. Deliberately ungated (no MIN_SAMPLE floor): single-game
+  // samples are always small, that's expected here. The league baseline is
+  // built once from leaguePlays (already fetched for the career badge) and
+  // reused for every game.
+  const rbBaselines = useMemo(() => buildRBBaselines(leaguePlays), [leaguePlays]);
+  const perGameSrae = useMemo(() => {
+    const map: Record<string, number | null> = {};
+    for (const g of games) {
+      const gp = plays.filter((p) => p.game_id === g.id);
+      map[g.id] = computeRBAboveExpectedForPlays(gp, rbBaselines);
+    }
+    return map;
+  }, [plays, games, rbBaselines]);
+
   function resetPlayForm() {
     setEditingPlayId(null);
     setFormation("gun");
@@ -419,6 +435,7 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
       renderGameBadge={(g) => {
         const rs = gameStats[g.id];
         const hasStats = !!rs && RUN_TYPE_KEYS.some((k) => rs[k].count > 0);
+        const srae = perGameSrae[g.id] ?? null;
         return (
           <div className="flex items-center gap-3">
             {hasStats && (
@@ -438,6 +455,9 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
                 })}
               </div>
             )}
+            <div className={`text-[10px] font-semibold whitespace-nowrap flex-shrink-0 ${srae == null ? "text-slate-600" : srae >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+              SRAE {srae == null ? "—" : `${srae >= 0 ? "+" : ""}${srae.toFixed(1)}`}
+            </div>
             <div className="text-xs text-green-400 flex-shrink-0">{gamePlayCounts[g.id] ?? 0}pl</div>
           </div>
         );

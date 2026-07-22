@@ -9,6 +9,7 @@ import ChartingBoard from "../shared/ChartingBoard";
 import type { ChartingBoardConfig } from "../shared/ChartingBoard";
 import { useChartingState } from "../shared/hooks/useChartingState";
 import QBPlayerCharts from "./QBPlayerCharts";
+import { buildQBBaselines, resolveBaselines, computeQBAAEForPlays } from "../../../lib/scouting/aboveExpected";
 import type {
   Prospect,
   ProspectWithStats,
@@ -175,6 +176,21 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
     }
     return map;
   }, [plays]);
+
+  // Per-game AAE (Accuracy Above Expected) — a quick "this game looked
+  // good/bad" read. Deliberately ungated (no QB_MIN_SAMPLE floor): single-game
+  // samples are always small, that's expected here. Resolved baselines are
+  // built once from leaguePlays (already fetched for the Overview AAE panel)
+  // and reused for every game.
+  const qbResolvedBaselines = useMemo(() => resolveBaselines(buildQBBaselines(leaguePlays)), [leaguePlays]);
+  const perGameAae = useMemo(() => {
+    const map: Record<string, number | null> = {};
+    for (const g of games) {
+      const gp = plays.filter((p) => p.game_id === g.id);
+      map[g.id] = computeQBAAEForPlays(gp, qbResolvedBaselines);
+    }
+    return map;
+  }, [plays, games, qbResolvedBaselines]);
 
   const needPassFields = playType === "rpo" || playType === "pass";
   const noThrowTimings: QBTiming[] = ["scramble", "sack", "throw_away"];
@@ -397,6 +413,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
       renderGameBadge={(g) => {
         const zs = gameStats[g.id];
         const hasStats = !!zs && (["short", "mid", "deep"] as const).some((k) => zs[k].count > 0);
+        const aae = perGameAae[g.id] ?? null;
         return (
           <div className="flex items-center gap-3">
             {hasStats && (
@@ -416,6 +433,9 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
                 })}
               </div>
             )}
+            <div className={`text-[10px] font-semibold whitespace-nowrap flex-shrink-0 ${aae == null ? "text-slate-600" : aae >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+              AAE {aae == null ? "—" : `${aae >= 0 ? "+" : ""}${aae.toFixed(1)}`}
+            </div>
             <div className="text-xs text-blue-400 flex-shrink-0">{gamePlayCounts[g.id] ?? 0}pl</div>
           </div>
         );

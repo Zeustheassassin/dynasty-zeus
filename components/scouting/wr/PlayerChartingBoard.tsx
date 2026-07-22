@@ -18,6 +18,7 @@ import type {
 import { ROUTE_TYPES } from "../shared/chartingConstants";
 import ChartingBoard, { type ChartingBoardConfig } from "../shared/ChartingBoard";
 import { useChartingState } from "../shared/hooks/useChartingState";
+import { indexBaselines, computeSAEForPlays, type LeagueRouteBaselineRow } from "../../../lib/scouting/aggregateMerge";
 
 const COVERAGES: { key: string; label: string }[] = [
   { key: "man", label: "Man" },
@@ -49,6 +50,10 @@ interface Props {
 
 export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, allProspects }: Props) {
   const [plays, setPlays] = useState<RoutePlay[]>([]);
+  // League-wide route/coverage baselines — used to build the per-game SAE
+  // badge. Fetched once on mount (mirrors QBChartingBoard's leaguePlays
+  // self-fetch); this is an aggregate view of ~15 rows, not raw plays.
+  const [leagueBaselineRows, setLeagueBaselineRows] = useState<LeagueRouteBaselineRow[]>([]);
 
   // Import panel state
   const [showBulkImport, setShowBulkImport]       = useState(false);
@@ -100,6 +105,14 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
       setPlays(allPlays);
     })();
   }, [games]);
+
+  useEffect(() => {
+    supabase.from("league_route_baselines").select("*")
+      .then(({ data, error }) => {
+        if (error) { log.error("league_route_baselines load failed", { err: error.message }); return; }
+        setLeagueBaselineRows((data ?? []) as LeagueRouteBaselineRow[]);
+      });
+  }, []);
 
   const gamePlays = useMemo(
     () => plays.filter((p) => p.game_id === selectedGameId),
@@ -204,6 +217,20 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
     }
     return map;
   }, [plays]);
+
+  // Per-game SAE (Success/Open Rate Above Expected) — a quick "this game
+  // looked good/bad" read. Deliberately ungated (no 15-route floor): a
+  // single-game sample is always small, that's expected here. Baselines are
+  // built once from leagueBaselineRows and reused for every game.
+  const wrBaselines = useMemo(() => indexBaselines(leagueBaselineRows), [leagueBaselineRows]);
+  const perGameSae = useMemo(() => {
+    const map: Record<string, number | null> = {};
+    for (const g of games) {
+      const gp = plays.filter((p) => p.game_id === g.id);
+      map[g.id] = computeSAEForPlays(gp, wrBaselines);
+    }
+    return map;
+  }, [plays, games, wrBaselines]);
 
   const gamePlayCounts = useMemo(() => {
     const map: Record<string, number> = {};
@@ -331,6 +358,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
           { label: "Press", count: gs.press, open: gs.pressOpen },
           { label: "Zone",  count: gs.zone,  open: gs.zoneOpen },
         ];
+        const sae = perGameSae[g.id] ?? null;
         return (
           <div className="flex items-center gap-3">
             {/* Man/Press/Zone success rate — desktop only; sidebar row has no room on small screens */}
@@ -348,6 +376,9 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                 ))}
               </div>
             )}
+            <div className={`text-[10px] font-semibold whitespace-nowrap flex-shrink-0 ${sae == null ? "text-slate-600" : sae >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+              SAE {sae == null ? "—" : `${sae >= 0 ? "+" : ""}${sae.toFixed(1)}`}
+            </div>
             <div className="text-right">
               <div className="text-xs text-blue-400">{gs.routes}r</div>
               <div className="text-xs text-slate-600">{gs.catches}/{gs.targets}</div>

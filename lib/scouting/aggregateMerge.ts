@@ -4,6 +4,7 @@ import type {
   RouteStat,
   CoverageStat,
   RouteType,
+  RoutePlay,
 } from "../types";
 import { deriveChartingDecision } from "../../components/scouting/shared/chartingConstants";
 
@@ -77,7 +78,7 @@ interface BaselineMaps {
   coverage: Map<string, { n: number; open: number }>;
 }
 
-function indexBaselines(rows: LeagueRouteBaselineRow[]): BaselineMaps {
+export function indexBaselines(rows: LeagueRouteBaselineRow[]): BaselineMaps {
   const route = new Map<string, { n: number; open: number }>();
   const coverage = new Map<string, { n: number; open: number }>();
   for (const r of rows) {
@@ -87,22 +88,27 @@ function indexBaselines(rows: LeagueRouteBaselineRow[]): BaselineMaps {
   return { route, coverage };
 }
 
-// Mirrors the JS SAE computation in ScoutingHub.prospectsWithStats.
-function computeSAE(
-  v: ProspectRouteStatsRow,
+// Shared weighted-average SAE math: actual open rate vs. an expected rate
+// blended from route-type mix and coverage mix against league baselines.
+// No minimum-sample gate here — callers that need the reliability floor
+// (season/career) apply it themselves before calling in.
+function saeFromCounts(
+  totalRoutes: number,
+  openRoutes: number,
+  routeTypeCounts: Record<string, number>,
+  coverageCounts: Record<string, number>,
   baselines: BaselineMaps,
 ): number | null {
-  if (!v.has_charted_open_data || v.total_routes < 15) return null;
-
-  const actualOpen = v.open_routes / v.total_routes;
+  if (totalRoutes === 0) return null;
+  const actualOpen = openRoutes / totalRoutes;
 
   let expRoute = 0, routeW = 0;
   for (const rt of ROUTE_TYPES) {
-    const rtCount = v.route_type_counts[rt] ?? 0;
+    const rtCount = routeTypeCounts[rt] ?? 0;
     const lg = baselines.route.get(rt);
     if (rtCount > 0 && lg && lg.n > 0) {
-      expRoute += (rtCount / v.total_routes) * (lg.open / lg.n);
-      routeW += rtCount / v.total_routes;
+      expRoute += (rtCount / totalRoutes) * (lg.open / lg.n);
+      routeW += rtCount / totalRoutes;
     }
   }
 
@@ -110,8 +116,8 @@ function computeSAE(
   for (const cvgType of SAE_COVERAGES) {
     // Man bucket combines man + press for both player count and league baseline.
     const cvgCount = cvgType === "man"
-      ? (v.coverage_counts["man"] ?? 0) + (v.coverage_counts["press"] ?? 0)
-      : (v.coverage_counts[cvgType] ?? 0);
+      ? (coverageCounts["man"] ?? 0) + (coverageCounts["press"] ?? 0)
+      : (coverageCounts[cvgType] ?? 0);
     let lg: { n: number; open: number } | undefined;
     if (cvgType === "man") {
       const m = baselines.coverage.get("man");
@@ -123,8 +129,8 @@ function computeSAE(
       lg = baselines.coverage.get(cvgType);
     }
     if (cvgCount > 0 && lg && lg.n > 0) {
-      expCvg += (cvgCount / v.total_routes) * (lg.open / lg.n);
-      cvgW += cvgCount / v.total_routes;
+      expCvg += (cvgCount / totalRoutes) * (lg.open / lg.n);
+      cvgW += cvgCount / totalRoutes;
     }
   }
 
@@ -135,6 +141,35 @@ function computeSAE(
   else if (normRoute != null) combined = normRoute;
   else if (normCvg != null) combined = normCvg;
   return combined != null ? parseFloat(((actualOpen - combined) * 100).toFixed(2)) : null;
+}
+
+// Mirrors the JS SAE computation in ScoutingHub.prospectsWithStats.
+function computeSAE(
+  v: ProspectRouteStatsRow,
+  baselines: BaselineMaps,
+): number | null {
+  if (!v.has_charted_open_data || v.total_routes < 15) return null;
+  return saeFromCounts(v.total_routes, v.open_routes, v.route_type_counts, v.coverage_counts, baselines);
+}
+
+// Per-game SAE (no minimum-sample gate — a single game's worth of routes is
+// expected to be noisy; this is a quick "did this game look good/bad" read,
+// not the reliability-gated season/career metric). Tallies route-type and
+// coverage counts directly from the raw route_plays for one game.
+export function computeSAEForPlays(
+  routePlays: RoutePlay[],
+  baselines: BaselineMaps,
+): number | null {
+  const rated = routePlays.filter((p) => !p.no_route_run);
+  const totalRoutes = rated.length;
+  const openRoutes = rated.filter((p) => p.was_open).length;
+  const routeTypeCounts: Record<string, number> = {};
+  const coverageCounts: Record<string, number> = {};
+  for (const p of rated) {
+    routeTypeCounts[p.route_type] = (routeTypeCounts[p.route_type] ?? 0) + 1;
+    if (p.coverage) coverageCounts[p.coverage] = (coverageCounts[p.coverage] ?? 0) + 1;
+  }
+  return saeFromCounts(totalRoutes, openRoutes, routeTypeCounts, coverageCounts, baselines);
 }
 
 function buildRouteStats(

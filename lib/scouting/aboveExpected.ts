@@ -125,16 +125,15 @@ function buildGameToProspect(games: ScoutingGame[]): Map<string, string> {
 }
 
 // ── RB SRAE ──────────────────────────────────────────────────────────────
-export function computeRBAboveExpected(
-  prospects: Prospect[],
-  games: ScoutingGame[],
-  rbPlays: RBPlay[],
-): Map<string, number | null> {
-  const out = new Map<string, number | null>();
-  const gameToProspect = buildGameToProspect(games);
-  const playsByProspect = buildPlaysByProspect(rbPlays, gameToProspect);
+export interface RBBaselines {
+  lgFormation: Record<RBFormation, { s: number; n: number }>;
+  lgBox: { loaded: { s: number; n: number }; unloaded: { s: number; n: number } };
+}
 
-  // League baselines: per-formation success rate and loaded-vs-unloaded box
+// League baselines: per-formation success rate and loaded-vs-unloaded box.
+// Built once from the full league play set and shared across every prospect
+// (and, for the per-game badge, every game) so the scan only runs once.
+export function buildRBBaselines(rbPlays: RBPlay[]): RBBaselines {
   const lgFormation: Record<RBFormation, { s: number; n: number }> = {
     gun: { s: 0, n: 0 }, pistol: { s: 0, n: 0 }, under_center: { s: 0, n: 0 },
   };
@@ -147,6 +146,50 @@ export function computeRBAboveExpected(
     if (pl.loaded_box) { lgBox.loaded.n++; if (pl.success) lgBox.loaded.s++; }
     else { lgBox.unloaded.n++; if (pl.success) lgBox.unloaded.s++; }
   }
+  return { lgFormation, lgBox };
+}
+
+// Actual-vs-expected for an arbitrary RB play subset (a prospect's whole
+// sample, or just one game's). No minimum-sample gate — callers that need
+// the reliability floor (season/career) apply MIN_SAMPLE themselves; the
+// per-game badge intentionally has none (small samples are expected there).
+export function computeRBAboveExpectedForPlays(
+  plays: RBPlay[],
+  baselines: RBBaselines,
+): number | null {
+  const { lgFormation, lgBox } = baselines;
+  const runPlays = plays.filter((pl) => RB_RUN_TYPES.includes(pl.run_type as RBRunType));
+  const knownRuns = runPlays.filter((pl) => pl.success !== null);
+  if (knownRuns.length === 0) return null;
+
+  const actual = knownRuns.filter((pl) => pl.success).length / knownRuns.length;
+
+  let expFm = 0, fmW = 0;
+  for (const fm of RB_FORMATIONS) {
+    const fmN = runPlays.filter((pl) => pl.formation === fm && pl.success !== null).length;
+    const lg = lgFormation[fm];
+    if (fmN > 0 && lg.n > 0) { expFm += (fmN / knownRuns.length) * (lg.s / lg.n); fmW += fmN / knownRuns.length; }
+  }
+  const loadedN = runPlays.filter((pl) => pl.loaded_box && pl.success !== null).length;
+  const unloadedN = runPlays.filter((pl) => !pl.loaded_box && pl.success !== null).length;
+  let expBox = 0, boxW = 0;
+  if (loadedN > 0 && lgBox.loaded.n > 0) { expBox += (loadedN / knownRuns.length) * (lgBox.loaded.s / lgBox.loaded.n); boxW += loadedN / knownRuns.length; }
+  if (unloadedN > 0 && lgBox.unloaded.n > 0) { expBox += (unloadedN / knownRuns.length) * (lgBox.unloaded.s / lgBox.unloaded.n); boxW += unloadedN / knownRuns.length; }
+  const normFm = fmW > 0 ? expFm / fmW : null;
+  const normBox = boxW > 0 ? expBox / boxW : null;
+  const combined = combine(normFm, normBox);
+  return combined != null ? parseFloat(((actual - combined) * 100).toFixed(2)) : null;
+}
+
+export function computeRBAboveExpected(
+  prospects: Prospect[],
+  games: ScoutingGame[],
+  rbPlays: RBPlay[],
+): Map<string, number | null> {
+  const out = new Map<string, number | null>();
+  const gameToProspect = buildGameToProspect(games);
+  const playsByProspect = buildPlaysByProspect(rbPlays, gameToProspect);
+  const baselines = buildRBBaselines(rbPlays);
 
   for (const p of prospects) {
     if (p.position !== "RB") continue;
@@ -154,24 +197,7 @@ export function computeRBAboveExpected(
     const runPlays = pPlays.filter((pl) => RB_RUN_TYPES.includes(pl.run_type as RBRunType));
     const knownRuns = runPlays.filter((pl) => pl.success !== null);
     if (knownRuns.length < MIN_SAMPLE) { out.set(p.id, null); continue; }
-
-    const actual = knownRuns.filter((pl) => pl.success).length / knownRuns.length;
-
-    let expFm = 0, fmW = 0;
-    for (const fm of RB_FORMATIONS) {
-      const fmN = runPlays.filter((pl) => pl.formation === fm && pl.success !== null).length;
-      const lg = lgFormation[fm];
-      if (fmN > 0 && lg.n > 0) { expFm += (fmN / knownRuns.length) * (lg.s / lg.n); fmW += fmN / knownRuns.length; }
-    }
-    const loadedN = runPlays.filter((pl) => pl.loaded_box && pl.success !== null).length;
-    const unloadedN = runPlays.filter((pl) => !pl.loaded_box && pl.success !== null).length;
-    let expBox = 0, boxW = 0;
-    if (loadedN > 0 && lgBox.loaded.n > 0) { expBox += (loadedN / knownRuns.length) * (lgBox.loaded.s / lgBox.loaded.n); boxW += loadedN / knownRuns.length; }
-    if (unloadedN > 0 && lgBox.unloaded.n > 0) { expBox += (unloadedN / knownRuns.length) * (lgBox.unloaded.s / lgBox.unloaded.n); boxW += unloadedN / knownRuns.length; }
-    const normFm = fmW > 0 ? expFm / fmW : null;
-    const normBox = boxW > 0 ? expBox / boxW : null;
-    const combined = combine(normFm, normBox);
-    out.set(p.id, combined != null ? parseFloat(((actual - combined) * 100).toFixed(2)) : null);
+    out.set(p.id, computeRBAboveExpectedForPlays(pPlays, baselines));
   }
 
   return out;
@@ -225,7 +251,7 @@ interface QBBaselines {
   global:   Acc;  // all graded throws — the shrinkage target
 }
 
-function buildQBBaselines(leaguePlays: QBPlay[]): QBBaselines {
+export function buildQBBaselines(leaguePlays: QBPlay[]): QBBaselines {
   const b: QBBaselines = {
     depth: {}, cvg: { man: { v: 0, n: 0 }, zone: { v: 0, n: 0 } },
     timing: {}, pressure: {}, platform: {}, handling: {}, route: {},
@@ -255,7 +281,7 @@ function buildQBBaselines(leaguePlays: QBPlay[]): QBBaselines {
 // Resolved baselines: each dimension's raw counts collapsed into shrunk bucket
 // rates (#1) plus a discrimination weight (#4). Built once per league scan and
 // shared by every prospect's breakdown.
-interface ResolvedBaselines {
+export interface ResolvedBaselines {
   depth:    Map<QBDepthZone, number>;
   cvg:      Map<"man" | "zone", number>;
   timing:   Map<QBTiming, number>;
@@ -295,7 +321,7 @@ function resolveDim<K extends string>(raw: { [k: string]: Acc | undefined }, mea
   return { rates, weight };
 }
 
-function resolveBaselines(b: QBBaselines): ResolvedBaselines {
+export function resolveBaselines(b: QBBaselines): ResolvedBaselines {
   const mean = b.global.n > 0 ? b.global.v / b.global.n : 0;
   const depth    = resolveDim<QBDepthZone>(b.depth, mean);
   const cvg      = resolveDim<"man" | "zone">(b.cvg, mean);
@@ -451,6 +477,13 @@ function breakdownFor(ratedPasses: QBPlay[], R: ResolvedBaselines): QBAAEBreakdo
   };
 }
 
+// Overall AAE for an arbitrary QB play subset (a prospect's whole sample, or
+// just one game's) against already-resolved league baselines. No minimum-
+// sample gate — see computeRBAboveExpectedForPlays for why.
+export function computeQBAAEForPlays(plays: QBPlay[], baselines: ResolvedBaselines): number | null {
+  return breakdownFor(plays.filter(isQBGradedThrow), baselines).total;
+}
+
 function toAaeRow(dim: { expected: number | null; actual: number | null; n: number }): { aae: number | null; n: number } {
   return {
     aae: dim.expected != null && dim.actual != null
@@ -522,15 +555,12 @@ export function computeQBAAEBreakdownMap(
 // Open Rate Above Expected. Adjusts a TE's open% on rated routes for the
 // situation mix across two dimensions: positioning (6 buckets) and coverage
 // (3 buckets — press folds into man).
-export function computeTERouteAboveExpected(
-  prospects: Prospect[],
-  games: ScoutingGame[],
-  tePlays: TEPlay[],
-): Map<string, number | null> {
-  const out = new Map<string, number | null>();
-  const gameToProspect = buildGameToProspect(games);
-  const playsByProspect = buildPlaysByProspect(tePlays, gameToProspect);
+export interface TERouteBaselines {
+  lgPos: Partial<Record<TEPositioning, { open: number; n: number }>>;
+  lgCvg: Partial<Record<TECoverage, { open: number; n: number }>>;
+}
 
+export function buildTERouteBaselines(tePlays: TEPlay[]): TERouteBaselines {
   const lgPos: Partial<Record<TEPositioning, { open: number; n: number }>> = {};
   const lgCvg: Partial<Record<TECoverage, { open: number; n: number }>> = {};
   for (const pl of tePlays) {
@@ -546,6 +576,54 @@ export function computeTERouteAboveExpected(
       if (pl.was_open) lgCvg[cvgKey]!.open++;
     }
   }
+  return { lgPos, lgCvg };
+}
+
+// Actual-vs-expected open rate for an arbitrary TE route-run play subset. No
+// minimum-sample gate — see computeRBAboveExpectedForPlays for why.
+export function computeTERouteAboveExpectedForPlays(
+  plays: TEPlay[],
+  baselines: TERouteBaselines,
+): number | null {
+  const { lgPos, lgCvg } = baselines;
+  const routePlays = plays.filter((pl) => pl.play_type === "route_run");
+  const ratedRoutes = routePlays.filter((pl) => pl.was_open !== null);
+  if (ratedRoutes.length === 0) return null;
+
+  const actual = ratedRoutes.filter((pl) => pl.was_open).length / ratedRoutes.length;
+
+  let expPos = 0, posW = 0;
+  for (const pos of TE_POSITIONINGS) {
+    const posN = ratedRoutes.filter((pl) => pl.positioning === pos).length;
+    const lg = lgPos[pos];
+    if (posN > 0 && lg && lg.n > 0) { expPos += (posN / ratedRoutes.length) * (lg.open / lg.n); posW += posN / ratedRoutes.length; }
+  }
+  let expCvg = 0, cvgW = 0;
+  // Press folds into Man — three mutually exclusive buckets keep the weighted
+  // average sound (no double-counting press routes).
+  const TE_SAE_COVERAGES: TECoverage[] = ["man", "zone", "double"];
+  for (const cvg of TE_SAE_COVERAGES) {
+    const cN = cvg === "man"
+      ? ratedRoutes.filter((pl) => pl.coverage === "man" || pl.coverage === "press").length
+      : ratedRoutes.filter((pl) => pl.coverage === cvg).length;
+    const lg = lgCvg[cvg];
+    if (cN > 0 && lg && lg.n > 0) { expCvg += (cN / ratedRoutes.length) * (lg.open / lg.n); cvgW += cN / ratedRoutes.length; }
+  }
+  const normPos = posW > 0 ? expPos / posW : null;
+  const normCvg = cvgW > 0 ? expCvg / cvgW : null;
+  const combined = combine(normPos, normCvg);
+  return combined != null ? parseFloat(((actual - combined) * 100).toFixed(2)) : null;
+}
+
+export function computeTERouteAboveExpected(
+  prospects: Prospect[],
+  games: ScoutingGame[],
+  tePlays: TEPlay[],
+): Map<string, number | null> {
+  const out = new Map<string, number | null>();
+  const gameToProspect = buildGameToProspect(games);
+  const playsByProspect = buildPlaysByProspect(tePlays, gameToProspect);
+  const baselines = buildTERouteBaselines(tePlays);
 
   for (const p of prospects) {
     if (p.position !== "TE") continue;
@@ -553,30 +631,7 @@ export function computeTERouteAboveExpected(
     const routePlays = pPlays.filter((pl) => pl.play_type === "route_run");
     const ratedRoutes = routePlays.filter((pl) => pl.was_open !== null);
     if (ratedRoutes.length < MIN_SAMPLE) { out.set(p.id, null); continue; }
-
-    const actual = ratedRoutes.filter((pl) => pl.was_open).length / ratedRoutes.length;
-
-    let expPos = 0, posW = 0;
-    for (const pos of TE_POSITIONINGS) {
-      const posN = ratedRoutes.filter((pl) => pl.positioning === pos).length;
-      const lg = lgPos[pos];
-      if (posN > 0 && lg && lg.n > 0) { expPos += (posN / ratedRoutes.length) * (lg.open / lg.n); posW += posN / ratedRoutes.length; }
-    }
-    let expCvg = 0, cvgW = 0;
-    // Press folds into Man — three mutually exclusive buckets keep the weighted
-    // average sound (no double-counting press routes).
-    const TE_SAE_COVERAGES: TECoverage[] = ["man", "zone", "double"];
-    for (const cvg of TE_SAE_COVERAGES) {
-      const cN = cvg === "man"
-        ? ratedRoutes.filter((pl) => pl.coverage === "man" || pl.coverage === "press").length
-        : ratedRoutes.filter((pl) => pl.coverage === cvg).length;
-      const lg = lgCvg[cvg];
-      if (cN > 0 && lg && lg.n > 0) { expCvg += (cN / ratedRoutes.length) * (lg.open / lg.n); cvgW += cN / ratedRoutes.length; }
-    }
-    const normPos = posW > 0 ? expPos / posW : null;
-    const normCvg = cvgW > 0 ? expCvg / cvgW : null;
-    const combined = combine(normPos, normCvg);
-    out.set(p.id, combined != null ? parseFloat(((actual - combined) * 100).toFixed(2)) : null);
+    out.set(p.id, computeTERouteAboveExpectedForPlays(pPlays, baselines));
   }
 
   return out;
@@ -590,27 +645,23 @@ export function computeTERouteAboveExpected(
 // Both run and pass blocks are included; plays missing block_type or
 // block_success are excluded from both the prospect's sample and the
 // league baseline. 15-block minimum sample.
-export function computeTEBlockAboveExpected(
-  prospects: Prospect[],
-  games: ScoutingGame[],
-  tePlays: TEPlay[],
-): Map<string, number | null> {
-  const out = new Map<string, number | null>();
-  const gameToProspect = buildGameToProspect(games);
-  const playsByProspect = buildPlaysByProspect(tePlays, gameToProspect);
+const TE_BLOCK_PLAY_TYPES = ["run_block", "pass_block"] as const;
+const TE_BLOCK_TYPES = ["movement", "inline"] as const;
+type TEBlockPlayType = (typeof TE_BLOCK_PLAY_TYPES)[number];
+type TEBlockType = (typeof TE_BLOCK_TYPES)[number];
 
-  const PLAY_TYPES = ["run_block", "pass_block"] as const;
-  const BLOCK_TYPES = ["movement", "inline"] as const;
-  type PT = (typeof PLAY_TYPES)[number];
-  type BT = (typeof BLOCK_TYPES)[number];
+export interface TEBlockBaselines {
+  lgPT: Record<TEBlockPlayType, { s: number; n: number }>;
+  lgBT: Record<TEBlockType, { s: number; n: number }>;
+}
 
-  const lgPT: Record<PT, { s: number; n: number }> = {
+export function buildTEBlockBaselines(tePlays: TEPlay[]): TEBlockBaselines {
+  const lgPT: Record<TEBlockPlayType, { s: number; n: number }> = {
     run_block: { s: 0, n: 0 }, pass_block: { s: 0, n: 0 },
   };
-  const lgBT: Record<BT, { s: number; n: number }> = {
+  const lgBT: Record<TEBlockType, { s: number; n: number }> = {
     movement: { s: 0, n: 0 }, inline: { s: 0, n: 0 },
   };
-
   for (const pl of tePlays) {
     if (pl.play_type !== "run_block" && pl.play_type !== "pass_block") continue;
     if (pl.block_success === null) continue;
@@ -621,6 +672,59 @@ export function computeTEBlockAboveExpected(
     lgBT[pl.block_type].n++;
     if (pl.block_success) lgBT[pl.block_type].s++;
   }
+  return { lgPT, lgBT };
+}
+
+// Actual-vs-expected block success for an arbitrary TE block-play subset. No
+// minimum-sample gate — see computeRBAboveExpectedForPlays for why.
+export function computeTEBlockAboveExpectedForPlays(
+  plays: TEPlay[],
+  baselines: TEBlockBaselines,
+): number | null {
+  const { lgPT, lgBT } = baselines;
+  const ratedBlocks = plays.filter(
+    (pl) =>
+      (pl.play_type === "run_block" || pl.play_type === "pass_block") &&
+      pl.block_success !== null &&
+      pl.block_type !== null,
+  );
+  if (ratedBlocks.length === 0) return null;
+
+  const actual = ratedBlocks.filter((pl) => pl.block_success).length / ratedBlocks.length;
+
+  let expPT = 0, ptW = 0;
+  for (const pt of TE_BLOCK_PLAY_TYPES) {
+    const ptN = ratedBlocks.filter((pl) => pl.play_type === pt).length;
+    const lg = lgPT[pt];
+    if (ptN > 0 && lg.n > 0) {
+      expPT += (ptN / ratedBlocks.length) * (lg.s / lg.n);
+      ptW += ptN / ratedBlocks.length;
+    }
+  }
+  let expBT = 0, btW = 0;
+  for (const bt of TE_BLOCK_TYPES) {
+    const btN = ratedBlocks.filter((pl) => pl.block_type === bt).length;
+    const lg = lgBT[bt];
+    if (btN > 0 && lg.n > 0) {
+      expBT += (btN / ratedBlocks.length) * (lg.s / lg.n);
+      btW += btN / ratedBlocks.length;
+    }
+  }
+  const normPT = ptW > 0 ? expPT / ptW : null;
+  const normBT = btW > 0 ? expBT / btW : null;
+  const combined = combine(normPT, normBT);
+  return combined != null ? parseFloat(((actual - combined) * 100).toFixed(2)) : null;
+}
+
+export function computeTEBlockAboveExpected(
+  prospects: Prospect[],
+  games: ScoutingGame[],
+  tePlays: TEPlay[],
+): Map<string, number | null> {
+  const out = new Map<string, number | null>();
+  const gameToProspect = buildGameToProspect(games);
+  const playsByProspect = buildPlaysByProspect(tePlays, gameToProspect);
+  const baselines = buildTEBlockBaselines(tePlays);
 
   for (const p of prospects) {
     if (p.position !== "TE") continue;
@@ -632,31 +736,7 @@ export function computeTEBlockAboveExpected(
         pl.block_type !== null,
     );
     if (ratedBlocks.length < MIN_SAMPLE) { out.set(p.id, null); continue; }
-
-    const actual = ratedBlocks.filter((pl) => pl.block_success).length / ratedBlocks.length;
-
-    let expPT = 0, ptW = 0;
-    for (const pt of PLAY_TYPES) {
-      const ptN = ratedBlocks.filter((pl) => pl.play_type === pt).length;
-      const lg = lgPT[pt];
-      if (ptN > 0 && lg.n > 0) {
-        expPT += (ptN / ratedBlocks.length) * (lg.s / lg.n);
-        ptW += ptN / ratedBlocks.length;
-      }
-    }
-    let expBT = 0, btW = 0;
-    for (const bt of BLOCK_TYPES) {
-      const btN = ratedBlocks.filter((pl) => pl.block_type === bt).length;
-      const lg = lgBT[bt];
-      if (btN > 0 && lg.n > 0) {
-        expBT += (btN / ratedBlocks.length) * (lg.s / lg.n);
-        btW += btN / ratedBlocks.length;
-      }
-    }
-    const normPT = ptW > 0 ? expPT / ptW : null;
-    const normBT = btW > 0 ? expBT / btW : null;
-    const combined = combine(normPT, normBT);
-    out.set(p.id, combined != null ? parseFloat(((actual - combined) * 100).toFixed(2)) : null);
+    out.set(p.id, computeTEBlockAboveExpectedForPlays(pPlays, baselines));
   }
 
   return out;

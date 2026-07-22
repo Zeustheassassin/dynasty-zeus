@@ -6,6 +6,15 @@ import {
   computeQBAAEBreakdownMap,
   computeTERouteAboveExpected,
   computeTEBlockAboveExpected,
+  buildRBBaselines,
+  computeRBAboveExpectedForPlays,
+  buildQBBaselines,
+  resolveBaselines,
+  computeQBAAEForPlays,
+  buildTERouteBaselines,
+  computeTERouteAboveExpectedForPlays,
+  buildTEBlockBaselines,
+  computeTEBlockAboveExpectedForPlays,
 } from "@/lib/scouting/aboveExpected";
 import type {
   Prospect,
@@ -503,5 +512,119 @@ describe("computeTEBlockAboveExpected", () => {
       ...repeat(8, () => block("g1", "pass_block", "movement", true)),
     ];
     expect(computeTEBlockAboveExpected(prospects, games, plays).get("te1")).not.toBeNull();
+  });
+});
+
+// =============================================================================
+// Per-game (ungated) variants — the Chart Game card badges. Unlike the
+// season/career functions above, these apply NO minimum-sample gate: a
+// single-play game must still return a number, not null, since the whole
+// point is a quick per-game "good/bad" read on an inherently tiny sample.
+// =============================================================================
+
+describe("computeRBAboveExpectedForPlays", () => {
+  it("returns a number for a single play (no MIN_SAMPLE gate)", () => {
+    const baselines = buildRBBaselines([
+      ...repeat(50, () => rbPlay("g_bg", "inside_zone", "gun", true, true)),
+      ...repeat(50, () => rbPlay("g_bg", "inside_zone", "gun", false, true)),
+    ]);
+    const gamePlays = [rbPlay("g1", "inside_zone", "gun", true, true)];
+    const out = computeRBAboveExpectedForPlays(gamePlays, baselines);
+    expect(out).not.toBeNull();
+    expect(Number.isFinite(out)).toBe(true);
+  });
+
+  it("returns null when the game has zero known runs (e.g. all pass-block)", () => {
+    const baselines = buildRBBaselines(repeat(30, () => rbPlay("g_bg", "inside_zone", "gun", true, true)));
+    const gamePlays = repeat(10, () => rbPlay("g1", "pass_block", "gun", true, false));
+    expect(computeRBAboveExpectedForPlays(gamePlays, baselines)).toBeNull();
+  });
+
+  it("agrees with computeRBAboveExpected when fed the same baseline + full prospect sample", () => {
+    const prospects = [prospect("hero", "RB"), prospect("bg", "RB")];
+    const games = [game("g_hero", "hero"), game("g_bg", "bg")];
+    const heroPlays = [
+      ...repeat(16, () => rbPlay("g_hero", "inside_zone", "gun", true, true)),
+      ...repeat(4, () => rbPlay("g_hero", "inside_zone", "gun", false, true)),
+    ];
+    const bgPlays = [
+      ...repeat(50, () => rbPlay("g_bg", "inside_zone", "gun", true, true)),
+      ...repeat(50, () => rbPlay("g_bg", "inside_zone", "gun", false, true)),
+    ];
+    const allPlays = [...heroPlays, ...bgPlays];
+    const scalar = computeRBAboveExpected(prospects, games, allPlays).get("hero");
+    const perPlay = computeRBAboveExpectedForPlays(heroPlays, buildRBBaselines(allPlays));
+    expect(perPlay).toBe(scalar);
+  });
+});
+
+describe("computeQBAAEForPlays", () => {
+  it("returns a number for a single graded throw (no QB_MIN_SAMPLE gate)", () => {
+    const baselines = resolveBaselines(buildQBBaselines(
+      repeat(30, () => qbPlay("g_bg", { accuracy: "on_target", depth_zone: "mid_center" })),
+    ));
+    const gamePlays = [qbPlay("g1", { accuracy: "on_target", depth_zone: "mid_center" })];
+    const out = computeQBAAEForPlays(gamePlays, baselines);
+    expect(out).not.toBeNull();
+    expect(Number.isFinite(out)).toBe(true);
+  });
+
+  it("returns null when the game has zero graded throws (all runs)", () => {
+    const baselines = resolveBaselines(buildQBBaselines(
+      repeat(30, () => qbPlay("g_bg", { accuracy: "on_target", depth_zone: "mid_center" })),
+    ));
+    const gamePlays = repeat(5, () => qbPlay("g1", { play_type: "run", accuracy: null }));
+    expect(computeQBAAEForPlays(gamePlays, baselines)).toBeNull();
+  });
+
+  it("agrees with computeQBAboveExpected when fed the same resolved baselines + full prospect sample", () => {
+    const prospects = [prospect("a", "QB"), prospect("b", "QB")];
+    const games = [game("g_a", "a"), game("g_b", "b")];
+    const aPlays = repeat(25, () => qbPlay("g_a", { accuracy: "on_target", completion: "caught", depth_zone: "deep_center" }));
+    const bPlays = repeat(25, () => qbPlay("g_b", { accuracy: "low", completion: "incomplete", depth_zone: "short_center" }));
+    const allPlays = [...aPlays, ...bPlays];
+    const scalar = computeQBAboveExpected(prospects, games, allPlays).get("a");
+    const perPlay = computeQBAAEForPlays(aPlays, resolveBaselines(buildQBBaselines(allPlays)));
+    expect(perPlay).toBe(scalar);
+  });
+});
+
+describe("computeTERouteAboveExpectedForPlays", () => {
+  it("returns a number for a single rated route (no MIN_SAMPLE gate)", () => {
+    const baselines = buildTERouteBaselines(
+      repeat(30, () => tePlay("g_bg", { positioning: "slot", coverage: "man", was_open: true })),
+    );
+    const gamePlays = [tePlay("g1", { positioning: "slot", coverage: "man", was_open: true })];
+    const out = computeTERouteAboveExpectedForPlays(gamePlays, baselines);
+    expect(out).not.toBeNull();
+    expect(Number.isFinite(out)).toBe(true);
+  });
+
+  it("returns null when the game has zero rated routes (all blocks)", () => {
+    const baselines = buildTERouteBaselines(
+      repeat(30, () => tePlay("g_bg", { positioning: "slot", coverage: "man", was_open: true })),
+    );
+    const gamePlays = repeat(5, () => tePlay("g1", { play_type: "run_block", block_type: "inline", block_success: true }));
+    expect(computeTERouteAboveExpectedForPlays(gamePlays, baselines)).toBeNull();
+  });
+});
+
+describe("computeTEBlockAboveExpectedForPlays", () => {
+  it("returns a number for a single rated block (no MIN_SAMPLE gate)", () => {
+    const baselines = buildTEBlockBaselines(
+      repeat(30, () => tePlay("g_bg", { play_type: "run_block", block_type: "inline", block_success: true })),
+    );
+    const gamePlays = [tePlay("g1", { play_type: "run_block", block_type: "inline", block_success: true })];
+    const out = computeTEBlockAboveExpectedForPlays(gamePlays, baselines);
+    expect(out).not.toBeNull();
+    expect(Number.isFinite(out)).toBe(true);
+  });
+
+  it("returns null when the game has zero rated blocks (all routes)", () => {
+    const baselines = buildTEBlockBaselines(
+      repeat(30, () => tePlay("g_bg", { play_type: "run_block", block_type: "inline", block_success: true })),
+    );
+    const gamePlays = repeat(5, () => tePlay("g1", { positioning: "slot", coverage: "man", was_open: true }));
+    expect(computeTEBlockAboveExpectedForPlays(gamePlays, baselines)).toBeNull();
   });
 });
