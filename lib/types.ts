@@ -939,6 +939,9 @@ export type RBFormation  = "gun" | "pistol" | "under_center";
 export type RBRunType    = "outside_man_gap" | "inside_man_gap" | "outside_zone" | "inside_zone" | "pass_block" | "run_block" | "decoy" | "route";
 export type RBRouteType  = "mid_curl" | "flats" | "big_boy_route";
 
+/** Full-career per-run-type success aggregate (prospect_rb_stats.run_type_stats_raw). */
+export interface RBRunTypeStat { count: number; success: number }
+
 export interface RBPlay {
   id: string;
   user_id: string;
@@ -978,6 +981,9 @@ export type QBPressure   = "clean" | "mid" | "backside" | "front_side";
 export type QBPressureHandling = "step_up" | "bail_front_side" | "bail_backside";
 export type QBTouch      = "correct" | "incorrect";
 
+/** Full-career per-depth-zone (short/mid/deep) accuracy aggregate (prospect_qb_stats.depth_zone_stats_raw). */
+export interface QBDepthZoneStat { count: number; onTarget: number }
+
 export interface QBPlay {
   id: string;
   user_id: string;
@@ -1007,6 +1013,9 @@ export type TEPositioning = "wide" | "slot" | "inline" | "full_back" | "running_
 export type TEPlayType    = "run_block" | "pass_block" | "route_run" | "decoy";
 export type TEBlockType   = "movement" | "inline";
 export type TECoverage    = "man" | "zone" | "press" | "double";
+
+/** Full-career per-block-type success aggregate (prospect_te_stats.block_stats_raw). */
+export interface TEBlockStat { count: number; success: number }
 
 export interface TEPlay {
   id: string;

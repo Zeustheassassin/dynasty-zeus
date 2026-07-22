@@ -158,6 +158,24 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
     return map;
   }, [plays]);
 
+  // Per-game accuracy by field depth (short/mid/deep). Mirrors headerStats'
+  // "thrownPlays" population (play_type !== run, excludes scramble/sack/throw_away)
+  // so the per-game and career numbers agree.
+  const gameStats = useMemo(() => {
+    const empty = () => ({ short: { count: 0, onTarget: 0 }, mid: { count: 0, onTarget: 0 }, deep: { count: 0, onTarget: 0 } });
+    const map: Record<string, ReturnType<typeof empty>> = {};
+    for (const p of plays) {
+      if (p.play_type === "run") continue;
+      if (p.timing === "scramble" || p.timing === "sack" || p.timing === "throw_away") continue;
+      if (!p.depth_zone) continue;
+      const zone = p.depth_zone.split("_")[0] as "short" | "mid" | "deep";
+      if (!map[p.game_id]) map[p.game_id] = empty();
+      map[p.game_id][zone].count++;
+      if (p.accuracy === "on_target") map[p.game_id][zone].onTarget++;
+    }
+    return map;
+  }, [plays]);
+
   const needPassFields = playType === "rpo" || playType === "pass";
   const noThrowTimings: QBTiming[] = ["scramble", "sack", "throw_away"];
   const needThrowFields = needPassFields && timing !== null && !noThrowTimings.includes(timing);
@@ -376,6 +394,32 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
       onTabChange={onTabChange} onSelectGame={onSelectGame} onToggleAddGame={onToggleAddGame}
       onNewGameChange={onNewGameChange} onAddGame={onAddGame} onDeleteGame={onDeleteGame} onUpdateGame={onUpdateGame}
       onToggleEditBio={onToggleEditBio} onBioChange={onBioChange} onSaveBio={onSaveBio}
+      renderGameBadge={(g) => {
+        const zs = gameStats[g.id];
+        const hasStats = !!zs && (["short", "mid", "deep"] as const).some((k) => zs[k].count > 0);
+        return (
+          <div className="flex items-center gap-3">
+            {hasStats && (
+              <div className="hidden md:flex items-center gap-3 text-[10px] whitespace-nowrap">
+                {(["short", "mid", "deep"] as const).map((zone) => {
+                  const s = zs![zone];
+                  return (
+                    <div key={zone} className="flex flex-col items-center">
+                      <span className="text-slate-500 capitalize">
+                        {zone} <span className="text-slate-300 font-medium">
+                          {s.count > 0 ? `${Math.round((s.onTarget / s.count) * 100)}%` : "—"}
+                        </span>
+                      </span>
+                      <span className="text-slate-600">{s.count > 0 ? `${s.onTarget}/${s.count}` : "—"}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <div className="text-xs text-blue-400 flex-shrink-0">{gamePlayCounts[g.id] ?? 0}pl</div>
+          </div>
+        );
+      }}
       renderHeaderStats={() => (
         <>
           <div>{headerStats.totalPlays} plays · {games.length} games</div>

@@ -1,7 +1,15 @@
 "use client";
 import { useState, useMemo } from "react";
 import { supabase } from "../../../lib/supabaseclient";
-import type { Prospect, ProspectWithStats, ChartingDecision } from "../../../lib/types";
+import type { Prospect, ProspectWithStats, ChartingDecision, RBRunTypeStat } from "../../../lib/types";
+
+type RBRunTypeKey = "outside_zone" | "inside_zone" | "outside_man_gap" | "inside_man_gap";
+const RUN_TYPE_COLS: { key: RBRunTypeKey; label: string }[] = [
+  { key: "outside_zone",    label: "Out Zone" },
+  { key: "inside_zone",     label: "In Zone" },
+  { key: "outside_man_gap", label: "Out Gap" },
+  { key: "inside_man_gap",  label: "In Gap" },
+];
 import { useRecruitIndex } from "../../../hooks/useRecruitIndex";
 import { lookupConference } from "../../../lib/scouting/schoolConferences";
 import { BASE_YEAR, CLASS_YEARS } from "../../../lib/helpers/season";
@@ -29,6 +37,7 @@ function SortBtn({ label, k, sortKey, sortDir, onToggle }: {
 interface Props {
   prospects: ProspectWithStats[];
   gameCountByProspect: Record<string, number>;
+  runTypeStatsByProspect: Map<string, Record<RBRunTypeKey, RBRunTypeStat>>;
   loading: boolean;
   onSelectProspect: (p: Prospect) => void;
   onAddProspect: (data: Omit<Prospect, "id" | "user_id" | "created_at" | "updated_at">) => Promise<void>;
@@ -56,6 +65,7 @@ const DECISION_LABEL: Record<ChartingDecision, string> = {
 export default function RBProspectList({
   prospects,
   gameCountByProspect,
+  runTypeStatsByProspect,
   loading,
   onSelectProspect,
   onAddProspect,
@@ -199,6 +209,8 @@ export default function RBProspectList({
         <div className="space-y-1">
           {filtered.map((p) => {
             const games = gameCountByProspect[p.id] ?? 0;
+            const runStats = runTypeStatsByProspect.get(p.id);
+            const hasRunStats = !!runStats && RUN_TYPE_COLS.some((c) => runStats[c.key].count > 0);
             return (
               <div key={p.id} onClick={() => { setConfirmDeleteId(null); onSelectProspect(p); }}
                 className="w-full flex items-center gap-3 px-4 py-3 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-600 rounded-lg transition text-left group cursor-pointer"
@@ -210,6 +222,23 @@ export default function RBProspectList({
                   <span className="w-20 flex justify-center">
                     <RecruitStarBadge recruit={matchProspect({ name: p.name, position: p.position, draft_class_year: p.draft_class_year })} />
                   </span>
+                  {hasRunStats && (
+                    <div className="hidden md:flex items-center gap-3 text-[10px] whitespace-nowrap">
+                      {RUN_TYPE_COLS.map(({ key, label }) => {
+                        const s = runStats![key];
+                        return (
+                          <div key={key} className="flex flex-col items-center">
+                            <span className="text-slate-500">
+                              {label} <span className="text-slate-300 font-medium">
+                                {s.count > 0 ? `${Math.round((s.success / s.count) * 100)}%` : "—"}
+                              </span>
+                            </span>
+                            <span className="text-slate-600">{s.count > 0 ? `${s.success}/${s.count}` : "—"}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                   {games > 0 && <span className="text-xs text-green-400">{games}G</span>}
                   {p.personal_rank && <span className="text-xs text-slate-500">#{p.personal_rank}</span>}
                   <span className="text-xs text-slate-700">{p.draft_class_year}</span>

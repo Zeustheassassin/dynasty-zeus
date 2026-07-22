@@ -1,7 +1,14 @@
 "use client";
 import { useState, useMemo } from "react";
 import { supabase } from "../../../lib/supabaseclient";
-import type { Prospect, ProspectWithStats, ChartingDecision } from "../../../lib/types";
+import type { Prospect, ProspectWithStats, ChartingDecision, CoverageStat, TEBlockStat } from "../../../lib/types";
+
+type TECoverageKey = "man" | "zone" | "press" | "double";
+type TEBlockKey = "inline" | "movement";
+const BLOCK_COLS: { key: TEBlockKey; label: string }[] = [
+  { key: "inline",   label: "Inline" },
+  { key: "movement", label: "Move" },
+];
 import { useRecruitIndex } from "../../../hooks/useRecruitIndex";
 import { lookupConference } from "../../../lib/scouting/schoolConferences";
 import { BASE_YEAR, CLASS_YEARS } from "../../../lib/helpers/season";
@@ -29,6 +36,8 @@ function SortBtn({ label, k, sortKey, sortDir, onToggle }: {
 interface Props {
   prospects: ProspectWithStats[];
   gameCountByProspect: Record<string, number>;
+  coverageStatsByProspect: Map<string, Record<TECoverageKey, CoverageStat>>;
+  blockStatsByProspect: Map<string, Record<TEBlockKey, TEBlockStat>>;
   loading: boolean;
   onSelectProspect: (p: Prospect) => void;
   onAddProspect: (data: Omit<Prospect, "id" | "user_id" | "created_at" | "updated_at">) => Promise<void>;
@@ -56,6 +65,8 @@ const DECISION_LABEL: Record<ChartingDecision, string> = {
 export default function TEProspectList({
   prospects,
   gameCountByProspect,
+  coverageStatsByProspect,
+  blockStatsByProspect,
   loading,
   onSelectProspect,
   onAddProspect,
@@ -199,6 +210,10 @@ export default function TEProspectList({
         <div className="space-y-1">
           {filtered.map((p) => {
             const games = gameCountByProspect[p.id] ?? 0;
+            const covStats = coverageStatsByProspect.get(p.id);
+            const blkStats = blockStatsByProspect.get(p.id);
+            const hasCovStats = !!covStats && (["man", "press", "zone"] as const).some((k) => covStats[k].count > 0);
+            const hasBlkStats = !!blkStats && BLOCK_COLS.some((c) => blkStats[c.key].count > 0);
             return (
               <div key={p.id} onClick={() => { setConfirmDeleteId(null); onSelectProspect(p); }}
                 className="w-full flex items-center gap-3 px-4 py-3 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-600 rounded-lg transition text-left group cursor-pointer"
@@ -210,6 +225,44 @@ export default function TEProspectList({
                   <span className="w-20 flex justify-center">
                     <RecruitStarBadge recruit={matchProspect({ name: p.name, position: p.position, draft_class_year: p.draft_class_year })} />
                   </span>
+                  {(hasCovStats || hasBlkStats) && (
+                    <div className="hidden md:flex flex-col gap-1 text-[10px] whitespace-nowrap">
+                      {hasCovStats && (
+                        <div className="flex items-center gap-3">
+                          {(["man", "press", "zone"] as const).map((cov) => {
+                            const s = covStats![cov];
+                            return (
+                              <div key={cov} className="flex flex-col items-center">
+                                <span className="text-slate-500 capitalize">
+                                  {cov} <span className="text-slate-300 font-medium">
+                                    {s.count > 0 ? `${Math.round((s.open / s.count) * 100)}%` : "—"}
+                                  </span>
+                                </span>
+                                <span className="text-slate-600">{s.count > 0 ? `${s.open}/${s.count}` : "—"}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {hasBlkStats && (
+                        <div className="flex items-center gap-3">
+                          {BLOCK_COLS.map(({ key, label }) => {
+                            const s = blkStats![key];
+                            return (
+                              <div key={key} className="flex flex-col items-center">
+                                <span className="text-slate-500">
+                                  {label} <span className="text-slate-300 font-medium">
+                                    {s.count > 0 ? `${Math.round((s.success / s.count) * 100)}%` : "—"}
+                                  </span>
+                                </span>
+                                <span className="text-slate-600">{s.count > 0 ? `${s.success}/${s.count}` : "—"}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {games > 0 && <span className="text-xs text-green-400">{games}G</span>}
                   {p.personal_rank && <span className="text-xs text-slate-500">#{p.personal_rank}</span>}
                   <span className="text-xs text-slate-700">{p.draft_class_year}</span>

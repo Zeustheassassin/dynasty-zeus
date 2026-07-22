@@ -200,6 +200,33 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
     return map;
   }, [plays]);
 
+  // Per-game coverage success (man/press/zone, on route_run plays) + block
+  // success (inline/movement, on run_block/pass_block plays).
+  const gameStats = useMemo(() => {
+    const emptyCov = () => ({
+      man: { count: 0, open: 0 }, zone: { count: 0, open: 0 },
+      press: { count: 0, open: 0 }, double: { count: 0, open: 0 },
+    });
+    const emptyBlk = () => ({ inline: { count: 0, success: 0 }, movement: { count: 0, success: 0 } });
+    const cov: Record<string, ReturnType<typeof emptyCov>> = {};
+    const blk: Record<string, ReturnType<typeof emptyBlk>> = {};
+    for (const p of plays) {
+      if (p.play_type === "route_run" && p.coverage) {
+        if (!cov[p.game_id]) cov[p.game_id] = emptyCov();
+        const c = cov[p.game_id][p.coverage];
+        c.count++;
+        if (p.was_open) c.open++;
+      }
+      if ((p.play_type === "run_block" || p.play_type === "pass_block") && p.block_type) {
+        if (!blk[p.game_id]) blk[p.game_id] = emptyBlk();
+        const b = blk[p.game_id][p.block_type];
+        b.count++;
+        if (p.block_success) b.success++;
+      }
+    }
+    return { cov, blk };
+  }, [plays]);
+
   const canLog = useMemo(() => {
     if (!selectedGameId) return false;
     if (playType === "decoy") return true;
@@ -308,6 +335,55 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
       onTabChange={onTabChange} onSelectGame={onSelectGame} onToggleAddGame={onToggleAddGame}
       onNewGameChange={onNewGameChange} onAddGame={onAddGame} onDeleteGame={onDeleteGame} onUpdateGame={onUpdateGame}
       onToggleEditBio={onToggleEditBio} onBioChange={onBioChange} onSaveBio={onSaveBio}
+      renderGameBadge={(g) => {
+        const cov = gameStats.cov[g.id];
+        const blk = gameStats.blk[g.id];
+        const hasCov = !!cov && (["man", "press", "zone"] as const).some((k) => cov[k].count > 0);
+        const hasBlk = !!blk && (["inline", "movement"] as const).some((k) => blk[k].count > 0);
+        return (
+          <div className="flex items-center gap-3">
+            {(hasCov || hasBlk) && (
+              <div className="hidden md:flex flex-col gap-1 text-[10px] whitespace-nowrap">
+                {hasCov && (
+                  <div className="flex items-center gap-3">
+                    {(["man", "press", "zone"] as const).map((k) => {
+                      const s = cov![k];
+                      return (
+                        <div key={k} className="flex flex-col items-center">
+                          <span className="text-slate-500 capitalize">
+                            {k} <span className="text-slate-300 font-medium">
+                              {s.count > 0 ? `${Math.round((s.open / s.count) * 100)}%` : "—"}
+                            </span>
+                          </span>
+                          <span className="text-slate-600">{s.count > 0 ? `${s.open}/${s.count}` : "—"}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {hasBlk && (
+                  <div className="flex items-center gap-3">
+                    {([["inline", "Inline"], ["movement", "Move"]] as const).map(([k, label]) => {
+                      const s = blk![k];
+                      return (
+                        <div key={k} className="flex flex-col items-center">
+                          <span className="text-slate-500">
+                            {label} <span className="text-slate-300 font-medium">
+                              {s.count > 0 ? `${Math.round((s.success / s.count) * 100)}%` : "—"}
+                            </span>
+                          </span>
+                          <span className="text-slate-600">{s.count > 0 ? `${s.success}/${s.count}` : "—"}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+            <div className="text-xs text-green-400 flex-shrink-0">{gamePlayCounts[g.id] ?? 0}pl</div>
+          </div>
+        );
+      }}
       renderHeaderStats={() => (
         <>
           <div>{stats.totalPlays} plays · {games.length} games</div>

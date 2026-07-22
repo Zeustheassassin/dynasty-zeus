@@ -257,6 +257,27 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
     return map;
   }, [plays]);
 
+  // Per-game success rate by run scheme (Outside/Inside Zone, Outside/Inside Gap).
+  const RUN_TYPE_KEYS = ["outside_zone", "inside_zone", "outside_man_gap", "inside_man_gap"] as const;
+  const RUN_TYPE_LABELS: { key: typeof RUN_TYPE_KEYS[number]; label: string }[] = [
+    { key: "outside_zone",    label: "Out Zone" },
+    { key: "inside_zone",     label: "In Zone" },
+    { key: "outside_man_gap", label: "Out Gap" },
+    { key: "inside_man_gap",  label: "In Gap" },
+  ];
+  const gameStats = useMemo(() => {
+    const empty = () => Object.fromEntries(RUN_TYPE_KEYS.map((k) => [k, { count: 0, success: 0 }])) as Record<typeof RUN_TYPE_KEYS[number], { count: number; success: number }>;
+    const map: Record<string, ReturnType<typeof empty>> = {};
+    for (const p of plays) {
+      if (!(RUN_TYPE_KEYS as readonly string[]).includes(p.run_type)) continue;
+      const key = p.run_type as typeof RUN_TYPE_KEYS[number];
+      if (!map[p.game_id]) map[p.game_id] = empty();
+      map[p.game_id][key].count++;
+      if (p.success === true) map[p.game_id][key].success++;
+    }
+    return map;
+  }, [plays]);
+
   function resetPlayForm() {
     setEditingPlayId(null);
     setFormation("gun");
@@ -395,6 +416,32 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
       onTabChange={onTabChange} onSelectGame={onSelectGame} onToggleAddGame={onToggleAddGame}
       onNewGameChange={onNewGameChange} onAddGame={onAddGame} onDeleteGame={onDeleteGame} onUpdateGame={onUpdateGame}
       onToggleEditBio={onToggleEditBio} onBioChange={onBioChange} onSaveBio={onSaveBio}
+      renderGameBadge={(g) => {
+        const rs = gameStats[g.id];
+        const hasStats = !!rs && RUN_TYPE_KEYS.some((k) => rs[k].count > 0);
+        return (
+          <div className="flex items-center gap-3">
+            {hasStats && (
+              <div className="hidden md:flex items-center gap-3 text-[10px] whitespace-nowrap">
+                {RUN_TYPE_LABELS.map(({ key, label }) => {
+                  const s = rs![key];
+                  return (
+                    <div key={key} className="flex flex-col items-center">
+                      <span className="text-slate-500">
+                        {label} <span className="text-slate-300 font-medium">
+                          {s.count > 0 ? `${Math.round((s.success / s.count) * 100)}%` : "—"}
+                        </span>
+                      </span>
+                      <span className="text-slate-600">{s.count > 0 ? `${s.success}/${s.count}` : "—"}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <div className="text-xs text-green-400 flex-shrink-0">{gamePlayCounts[g.id] ?? 0}pl</div>
+          </div>
+        );
+      }}
       renderHeaderStats={() => (
         <>
           <div>{stats.totalPlays} plays · {games.length} games</div>

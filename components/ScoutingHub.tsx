@@ -10,6 +10,10 @@ import type {
   RBPlay,
   QBPlay,
   TEPlay,
+  QBDepthZoneStat,
+  RBRunTypeStat,
+  TEBlockStat,
+  CoverageStat,
 } from "../lib/types";
 import {
   buildProspectsWithStats,
@@ -33,17 +37,56 @@ interface PosSnapsRow {
   total_snaps: number;
 }
 
+type QBZoneKey = "short" | "mid" | "deep";
+type RBRunTypeKey = "outside_zone" | "inside_zone" | "outside_man_gap" | "inside_man_gap";
+type TECoverageKey = "man" | "zone" | "press" | "double";
+type TEBlockKey = "inline" | "movement";
+
 interface QbThresholdRow {
   prospect_id: string;
   total_snaps: number;
   total_throws: number;
+  // jsonb_object_agg only includes keys that had at least one play — partial, not full.
+  depth_zone_stats_raw: Partial<Record<QBZoneKey, QBDepthZoneStat>> | null;
 }
 
 interface TeThresholdRow {
   prospect_id: string;
   total_snaps: number;
   total_routes: number;
+  coverage_stats_raw: Partial<Record<TECoverageKey, CoverageStat>> | null;
+  block_stats_raw: Partial<Record<TEBlockKey, TEBlockStat>> | null;
 }
+
+interface RbRunTypeRow {
+  prospect_id: string;
+  run_type_stats_raw: Partial<Record<RBRunTypeKey, RBRunTypeStat>> | null;
+}
+
+const fillZoneStats = (raw: Partial<Record<QBZoneKey, QBDepthZoneStat>> | null | undefined): Record<QBZoneKey, QBDepthZoneStat> => ({
+  short: raw?.short ?? { count: 0, onTarget: 0 },
+  mid:   raw?.mid   ?? { count: 0, onTarget: 0 },
+  deep:  raw?.deep  ?? { count: 0, onTarget: 0 },
+});
+
+const fillRunTypeStats = (raw: Partial<Record<RBRunTypeKey, RBRunTypeStat>> | null | undefined): Record<RBRunTypeKey, RBRunTypeStat> => ({
+  outside_zone:    raw?.outside_zone    ?? { count: 0, success: 0 },
+  inside_zone:     raw?.inside_zone     ?? { count: 0, success: 0 },
+  outside_man_gap: raw?.outside_man_gap ?? { count: 0, success: 0 },
+  inside_man_gap:  raw?.inside_man_gap  ?? { count: 0, success: 0 },
+});
+
+const fillTeCoverageStats = (raw: Partial<Record<TECoverageKey, CoverageStat>> | null | undefined): Record<TECoverageKey, CoverageStat> => ({
+  man:    raw?.man    ?? { count: 0, open: 0, catches: 0 },
+  zone:   raw?.zone   ?? { count: 0, open: 0, catches: 0 },
+  press:  raw?.press  ?? { count: 0, open: 0, catches: 0 },
+  double: raw?.double ?? { count: 0, open: 0, catches: 0 },
+});
+
+const fillBlockStats = (raw: Partial<Record<TEBlockKey, TEBlockStat>> | null | undefined): Record<TEBlockKey, TEBlockStat> => ({
+  inline:   raw?.inline   ?? { count: 0, success: 0 },
+  movement: raw?.movement ?? { count: 0, success: 0 },
+});
 
 // Paginate a *_plays table by game_id IN (...) until exhausted. Used by
 // the lazy-fetch hook below — these are the same fetches that previously
@@ -109,6 +152,17 @@ export default function ScoutingHub() {
   const [posSnapsRows, setPosSnapsRows] = useState<PosSnapsRow[]>([]);
   const [qbThrowsByProspect, setQbThrowsByProspect] = useState<Map<string, number>>(new Map());
   const [teRoutesByProspect, setTeRoutesByProspect] = useState<Map<string, number>>(new Map());
+  // Full-career success-rate breakdowns for the Prospects-list badges (Phase 3) —
+  // side-channel Maps mirroring qbThrowsByProspect/teRoutesByProspect above, kept
+  // out of ProspectWithStats/buildProspectsWithStats (that pipeline is WR-specific).
+  const [qbDepthZoneStatsByProspect, setQbDepthZoneStatsByProspect] =
+    useState<Map<string, Record<QBZoneKey, QBDepthZoneStat>>>(new Map());
+  const [rbRunTypeStatsByProspect, setRbRunTypeStatsByProspect] =
+    useState<Map<string, Record<RBRunTypeKey, RBRunTypeStat>>>(new Map());
+  const [teCoverageStatsByProspect, setTeCoverageStatsByProspect] =
+    useState<Map<string, Record<TECoverageKey, CoverageStat>>>(new Map());
+  const [teBlockStatsByProspect, setTeBlockStatsByProspect] =
+    useState<Map<string, Record<TEBlockKey, TEBlockStat>>>(new Map());
   const [loading, setLoading] = useState(true);
   const [draftYearFilter, setDraftYearFilter] = useState<number | null>(null);
 
@@ -138,9 +192,9 @@ export default function ScoutingHub() {
         supabase.from("prospect_route_stats").select("*"),
         supabase.from("league_route_baselines").select("*"),
         supabase.from("prospect_game_snap_stats").select("*"),
-        supabase.from("prospect_rb_stats").select("prospect_id,total_snaps"),
-        supabase.from("prospect_qb_stats").select("prospect_id,total_snaps,total_throws"),
-        supabase.from("prospect_te_stats").select("prospect_id,total_snaps,total_routes"),
+        supabase.from("prospect_rb_stats").select("prospect_id,total_snaps,run_type_stats_raw"),
+        supabase.from("prospect_qb_stats").select("prospect_id,total_snaps,total_throws,depth_zone_stats_raw"),
+        supabase.from("prospect_te_stats").select("prospect_id,total_snaps,total_routes,coverage_stats_raw,block_stats_raw"),
       ]);
       if (pErr) log.error("prospects load", { msg: pErr.message, code: pErr.code, details: pErr.details, hint: pErr.hint });
       if (gErr) log.error("games load", { msg: gErr.message, code: gErr.code, details: gErr.details, hint: gErr.hint });
@@ -163,6 +217,7 @@ export default function ScoutingHub() {
       setRouteStatsRows((rsData ?? []) as ProspectRouteStatsRow[]);
       setLeagueBaselines((lbData ?? []) as LeagueRouteBaselineRow[]);
       setGameSnapStatsRows((gssData ?? []) as GameSnapStatsRow[]);
+      const rbRows = (rbStatsData ?? []) as RbRunTypeRow[];
       const qbRows = (qbStatsData ?? []) as QbThresholdRow[];
       const teRows = (teStatsData ?? []) as TeThresholdRow[];
       setPosSnapsRows([
@@ -172,6 +227,10 @@ export default function ScoutingHub() {
       ]);
       setQbThrowsByProspect(new Map(qbRows.map((r) => [r.prospect_id, r.total_throws ?? 0])));
       setTeRoutesByProspect(new Map(teRows.map((r) => [r.prospect_id, r.total_routes ?? 0])));
+      setQbDepthZoneStatsByProspect(new Map(qbRows.map((r) => [r.prospect_id, fillZoneStats(r.depth_zone_stats_raw)])));
+      setRbRunTypeStatsByProspect(new Map(rbRows.map((r) => [r.prospect_id, fillRunTypeStats(r.run_type_stats_raw)])));
+      setTeCoverageStatsByProspect(new Map(teRows.map((r) => [r.prospect_id, fillTeCoverageStats(r.coverage_stats_raw)])));
+      setTeBlockStatsByProspect(new Map(teRows.map((r) => [r.prospect_id, fillBlockStats(r.block_stats_raw)])));
     } catch (e) {
       log.error("loadAll", { msg: String(e) });
     } finally {
@@ -347,6 +406,11 @@ export default function ScoutingHub() {
     rbPlays,
     qbPlays,
     tePlays,
+    // Full-career success-rate breakdowns for the Prospects-list badges (Phase 3).
+    qbDepthZoneStatsByProspect,
+    rbRunTypeStatsByProspect,
+    teCoverageStatsByProspect,
+    teBlockStatsByProspect,
   };
 
   return (

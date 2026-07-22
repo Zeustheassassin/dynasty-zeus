@@ -280,6 +280,23 @@ export default function ProspectList({
                   <RecruitStarBadge recruit={matchProspect({ name: p.name, position: p.position, draft_class_year: p.draft_class_year })} />
                 </span>
                 {p.total_routes > 0 && (
+                  <div className="hidden md:flex items-center gap-3 text-[10px] whitespace-nowrap">
+                    {(["man", "press", "zone"] as const).map((cov) => {
+                      const c = p.coverage_stats[cov];
+                      return (
+                        <div key={cov} className="flex flex-col items-center">
+                          <span className="text-slate-500 capitalize">
+                            {cov} <span className="text-slate-300 font-medium">
+                              {c.count > 0 ? `${Math.round((c.open / c.count) * 100)}%` : "—"}
+                            </span>
+                          </span>
+                          <span className="text-slate-600">{c.count > 0 ? `${c.open}/${c.count}` : "—"}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {p.total_routes > 0 && (
                   <span className="text-xs text-blue-400">{p.total_routes} routes</span>
                 )}
                 {p.total_games > 0 && (

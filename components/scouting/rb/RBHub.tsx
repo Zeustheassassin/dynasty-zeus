@@ -1,7 +1,9 @@
 "use client";
 import { useState, useMemo, useEffect, startTransition } from "react";
 import dynamic from "next/dynamic";
-import type { Prospect, ProspectWithStats, ScoutingGame, RBPlay } from "../../../lib/types";
+import type { Prospect, ProspectWithStats, ScoutingGame, RBPlay, RBRunTypeStat } from "../../../lib/types";
+
+type RBRunTypeKey = "outside_zone" | "inside_zone" | "outside_man_gap" | "inside_man_gap";
 
 const RBProspectList      = dynamic(() => import("./RBProspectList"), { ssr: false });
 const RBChartingBoard     = dynamic(() => import("./RBChartingBoard"), { ssr: false });
@@ -22,6 +24,7 @@ export interface RBHubProps {
   onNavigated?: () => void;
   games: ScoutingGame[];
   rbPlays: RBPlay[];
+  rbRunTypeStatsByProspect: Map<string, Record<RBRunTypeKey, RBRunTypeStat>>;
 }
 
 type HubView = "list" | "roster";
@@ -37,6 +40,7 @@ export default function RBHub({
   onNavigated,
   games,
   rbPlays,
+  rbRunTypeStatsByProspect,
 }: RBHubProps) {
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
 
@@ -89,6 +93,7 @@ export default function RBHub({
         <RBProspectList
           prospects={rbProspects}
           gameCountByProspect={gameCountByProspect}
+          runTypeStatsByProspect={rbRunTypeStatsByProspect}
           loading={loading}
           onSelectProspect={setSelectedProspect}
           onAddProspect={onAddProspect}

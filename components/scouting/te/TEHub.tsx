@@ -1,7 +1,10 @@
 "use client";
 import { useState, useMemo, useEffect, startTransition } from "react";
 import dynamic from "next/dynamic";
-import type { Prospect, ProspectWithStats, ScoutingGame, TEPlay } from "../../../lib/types";
+import type { Prospect, ProspectWithStats, ScoutingGame, TEPlay, CoverageStat, TEBlockStat } from "../../../lib/types";
+
+type TECoverageKey = "man" | "zone" | "press" | "double";
+type TEBlockKey = "inline" | "movement";
 
 const TEProspectList    = dynamic(() => import("./TEProspectList"), { ssr: false });
 const TEChartingBoard   = dynamic(() => import("./TEChartingBoard"), { ssr: false });
@@ -22,6 +25,8 @@ export interface TEHubProps {
   onNavigated?: () => void;
   games: ScoutingGame[];
   tePlays: TEPlay[];
+  teCoverageStatsByProspect: Map<string, Record<TECoverageKey, CoverageStat>>;
+  teBlockStatsByProspect: Map<string, Record<TEBlockKey, TEBlockStat>>;
 }
 
 type HubView = "list" | "roster";
@@ -37,6 +42,8 @@ export default function TEHub({
   onNavigated,
   games,
   tePlays,
+  teCoverageStatsByProspect,
+  teBlockStatsByProspect,
 }: TEHubProps) {
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
 
@@ -89,6 +96,8 @@ export default function TEHub({
         <TEProspectList
           prospects={teProspects}
           gameCountByProspect={gameCountByProspect}
+          coverageStatsByProspect={teCoverageStatsByProspect}
+          blockStatsByProspect={teBlockStatsByProspect}
           loading={loading}
           onSelectProspect={setSelectedProspect}
           onAddProspect={onAddProspect}

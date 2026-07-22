@@ -2,7 +2,14 @@
 import { useState, useMemo, useEffect, startTransition } from "react";
 import dynamic from "next/dynamic";
 import { supabase } from "../../../lib/supabaseclient";
-import type { Prospect, ProspectWithStats, ChartingDecision, ScoutingGame } from "../../../lib/types";
+import type { Prospect, ProspectWithStats, ChartingDecision, ScoutingGame, QBDepthZoneStat } from "../../../lib/types";
+
+type QBZoneKey = "short" | "mid" | "deep";
+const ZONE_COLS: { key: QBZoneKey; label: string }[] = [
+  { key: "short", label: "Short" },
+  { key: "mid",   label: "Mid" },
+  { key: "deep",  label: "Deep" },
+];
 import { useRecruitIndex } from "../../../hooks/useRecruitIndex";
 import { lookupConference } from "../../../lib/scouting/schoolConferences";
 import { BASE_YEAR, CLASS_YEARS } from "../../../lib/helpers/season";
@@ -31,6 +38,7 @@ export interface QBHubProps {
   navigateToProspect?: Prospect | null;
   onNavigated?: () => void;
   games: ScoutingGame[];
+  qbDepthZoneStatsByProspect: Map<string, Record<QBZoneKey, QBDepthZoneStat>>;
 }
 
 type HubView = "list" | "roster";
@@ -46,6 +54,7 @@ export default function QBHub({
   navigateToProspect,
   onNavigated,
   games,
+  qbDepthZoneStatsByProspect,
 }: QBHubProps) {
   const { matchProspect } = useRecruitIndex();
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
@@ -255,7 +264,10 @@ export default function QBHub({
             </div>
           ) : (
             <div className="space-y-1">
-              {filtered.map((p) => (
+              {filtered.map((p) => {
+                const zoneStats = qbDepthZoneStatsByProspect.get(p.id);
+                const hasZoneStats = !!zoneStats && ZONE_COLS.some((c) => zoneStats[c.key].count > 0);
+                return (
                 <div
                   key={p.id}
                   className="w-full flex items-center gap-3 px-4 py-3 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-600 rounded-lg transition text-left group cursor-pointer"
@@ -270,6 +282,23 @@ export default function QBHub({
                     <span className="w-20 flex justify-center">
                       <RecruitStarBadge recruit={matchProspect({ name: p.name, position: p.position, draft_class_year: p.draft_class_year })} />
                     </span>
+                    {hasZoneStats && (
+                      <div className="hidden md:flex items-center gap-3 text-[10px] whitespace-nowrap">
+                        {ZONE_COLS.map(({ key, label }) => {
+                          const s = zoneStats![key];
+                          return (
+                            <div key={key} className="flex flex-col items-center">
+                              <span className="text-slate-500">
+                                {label} <span className="text-slate-300 font-medium">
+                                  {s.count > 0 ? `${Math.round((s.onTarget / s.count) * 100)}%` : "—"}
+                                </span>
+                              </span>
+                              <span className="text-slate-600">{s.count > 0 ? `${s.onTarget}/${s.count}` : "—"}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                     {p.total_games > 0 && <span className="text-xs text-blue-400">{p.total_games}G</span>}
                     {p.personal_rank && <span className="text-xs text-slate-500">#{p.personal_rank}</span>}
                     <span className="text-xs text-slate-700">{p.draft_class_year}</span>
@@ -289,7 +318,7 @@ export default function QBHub({
                     )}
                   </div>
                 </div>
-              ))}
+              );})}
             </div>
           )}
         </div>
