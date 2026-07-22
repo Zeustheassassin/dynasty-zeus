@@ -12,7 +12,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "visual-check": "node --env-file=.env.test.local scripts/visual-check.js"
+    "visual-check": "node --env-file=.env.test.local scripts/visual-check.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.101.1",

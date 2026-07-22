@@ -4,15 +4,18 @@
 // anything. Requires the dev server already running (npm run dev).
 //
 // Usage:
-//   node --env-file=.env.test.local scripts/visual-check.js ["Hub Name"] [output.png]
+//   node --env-file=.env.test.local scripts/visual-check.mjs ["Hub Name"] [output.png]
 // or:
 //   npm run visual-check -- "Trade Hub" tradehub.png
 //
 // Credentials come from .env.test.local (gitignored, not committed).
 
-const { chromium } = require("playwright");
-const fs = require("fs");
-const path = require("path");
+import { chromium } from "playwright";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const BASE_URL = process.env.VISUAL_CHECK_URL || "http://localhost:3000";
 const OUT_DIR = path.join(__dirname, "..", ".next", "visual-check");
@@ -27,7 +30,7 @@ const SLEEPER_USERNAME = process.env.TEST_ACCOUNT_SLEEPER_USERNAME;
 if (!EMAIL || !PASSWORD) {
   console.error(
     "Missing TEST_ACCOUNT_EMAIL/TEST_ACCOUNT_PASSWORD.\n" +
-      "Run with: node --env-file=.env.test.local scripts/visual-check.js"
+      "Run with: node --env-file=.env.test.local scripts/visual-check.mjs"
   );
   process.exit(1);
 }
