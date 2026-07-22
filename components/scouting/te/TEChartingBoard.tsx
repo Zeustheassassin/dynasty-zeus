@@ -343,41 +343,33 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
         return (
           <div className="flex items-center gap-3">
             {(hasCov || hasBlk) && (
-              <div className="hidden md:flex flex-col gap-1 text-[10px] whitespace-nowrap">
-                {hasCov && (
-                  <div className="flex items-center gap-3">
-                    {(["man", "press", "zone"] as const).map((k) => {
-                      const s = cov![k];
-                      return (
-                        <div key={k} className="flex flex-col items-center">
-                          <span className="text-slate-500 capitalize">
-                            {k} <span className="text-slate-300 font-medium">
-                              {s.count > 0 ? `${Math.round((s.open / s.count) * 100)}%` : "—"}
-                            </span>
-                          </span>
-                          <span className="text-slate-600">{s.count > 0 ? `${s.open}/${s.count}` : "—"}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-                {hasBlk && (
-                  <div className="flex items-center gap-3">
-                    {([["inline", "Inline"], ["movement", "Move"]] as const).map(([k, label]) => {
-                      const s = blk![k];
-                      return (
-                        <div key={k} className="flex flex-col items-center">
-                          <span className="text-slate-500">
-                            {label} <span className="text-slate-300 font-medium">
-                              {s.count > 0 ? `${Math.round((s.success / s.count) * 100)}%` : "—"}
-                            </span>
-                          </span>
-                          <span className="text-slate-600">{s.count > 0 ? `${s.success}/${s.count}` : "—"}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+              <div className="hidden md:flex items-center gap-3 text-[10px] whitespace-nowrap">
+                {hasCov && (["man", "press", "zone"] as const).map((k) => {
+                  const s = cov![k];
+                  return (
+                    <div key={k} className="flex flex-col items-center">
+                      <span className="text-slate-500 capitalize">
+                        {k} <span className="text-slate-300 font-medium">
+                          {s.count > 0 ? `${Math.round((s.open / s.count) * 100)}%` : "—"}
+                        </span>
+                      </span>
+                      <span className="text-slate-600">{s.count > 0 ? `${s.open}/${s.count}` : "—"}</span>
+                    </div>
+                  );
+                })}
+                {hasBlk && ([["inline", "Inline"], ["movement", "Move"]] as const).map(([k, label]) => {
+                  const s = blk![k];
+                  return (
+                    <div key={k} className="flex flex-col items-center">
+                      <span className="text-slate-500">
+                        {label} <span className="text-slate-300 font-medium">
+                          {s.count > 0 ? `${Math.round((s.success / s.count) * 100)}%` : "—"}
+                        </span>
+                      </span>
+                      <span className="text-slate-600">{s.count > 0 ? `${s.success}/${s.count}` : "—"}</span>
+                    </div>
+                  );
+                })}
               </div>
             )}
             <div className="text-xs text-green-400 flex-shrink-0">{gamePlayCounts[g.id] ?? 0}pl</div>

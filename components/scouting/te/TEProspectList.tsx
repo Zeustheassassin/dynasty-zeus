@@ -226,41 +226,33 @@ export default function TEProspectList({
                     <RecruitStarBadge recruit={matchProspect({ name: p.name, position: p.position, draft_class_year: p.draft_class_year })} />
                   </span>
                   {(hasCovStats || hasBlkStats) && (
-                    <div className="hidden md:flex flex-col gap-1 text-[10px] whitespace-nowrap">
-                      {hasCovStats && (
-                        <div className="flex items-center gap-3">
-                          {(["man", "press", "zone"] as const).map((cov) => {
-                            const s = covStats![cov];
-                            return (
-                              <div key={cov} className="flex flex-col items-center">
-                                <span className="text-slate-500 capitalize">
-                                  {cov} <span className="text-slate-300 font-medium">
-                                    {s.count > 0 ? `${Math.round((s.open / s.count) * 100)}%` : "—"}
-                                  </span>
-                                </span>
-                                <span className="text-slate-600">{s.count > 0 ? `${s.open}/${s.count}` : "—"}</span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                      {hasBlkStats && (
-                        <div className="flex items-center gap-3">
-                          {BLOCK_COLS.map(({ key, label }) => {
-                            const s = blkStats![key];
-                            return (
-                              <div key={key} className="flex flex-col items-center">
-                                <span className="text-slate-500">
-                                  {label} <span className="text-slate-300 font-medium">
-                                    {s.count > 0 ? `${Math.round((s.success / s.count) * 100)}%` : "—"}
-                                  </span>
-                                </span>
-                                <span className="text-slate-600">{s.count > 0 ? `${s.success}/${s.count}` : "—"}</span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
+                    <div className="hidden md:flex items-center gap-3 text-[10px] whitespace-nowrap">
+                      {hasCovStats && (["man", "press", "zone"] as const).map((cov) => {
+                        const s = covStats![cov];
+                        return (
+                          <div key={cov} className="flex flex-col items-center">
+                            <span className="text-slate-500 capitalize">
+                              {cov} <span className="text-slate-300 font-medium">
+                                {s.count > 0 ? `${Math.round((s.open / s.count) * 100)}%` : "—"}
+                              </span>
+                            </span>
+                            <span className="text-slate-600">{s.count > 0 ? `${s.open}/${s.count}` : "—"}</span>
+                          </div>
+                        );
+                      })}
+                      {hasBlkStats && BLOCK_COLS.map(({ key, label }) => {
+                        const s = blkStats![key];
+                        return (
+                          <div key={key} className="flex flex-col items-center">
+                            <span className="text-slate-500">
+                              {label} <span className="text-slate-300 font-medium">
+                                {s.count > 0 ? `${Math.round((s.success / s.count) * 100)}%` : "—"}
+                              </span>
+                            </span>
+                            <span className="text-slate-600">{s.count > 0 ? `${s.success}/${s.count}` : "—"}</span>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                   {games > 0 && <span className="text-xs text-green-400">{games}G</span>}
