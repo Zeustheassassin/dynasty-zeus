@@ -294,8 +294,8 @@ function TradeCalculator({
         </label>
       </div>
 
-      {/* Two-column asset panels */}
-      <div className="grid grid-cols-2 gap-4 mb-6">
+      {/* Asset panels — stacked on phone, side-by-side from md up */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         {/* Your assets */}
         <Card>
           <div className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-3">

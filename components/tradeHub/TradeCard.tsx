@@ -193,17 +193,23 @@ export default function TradeCard({
 
   return (
     <Card>
-      {/* Header */}
-      <div className="flex items-center justify-between mb-3">
+      {/* Header — opponent/net stay on one line, descriptor badges wrap onto their own row
+          so a badge-heavy card can never force the whole card wider than the viewport. */}
+      <div className="mb-3">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">{trade.format}</span>
-          <span className="text-xs text-slate-500">with</span>
+          <span className="text-xs font-bold text-slate-500 uppercase tracking-wider shrink-0">{trade.format}</span>
+          <span className="text-xs text-slate-500 shrink-0">with</span>
           <button
             onClick={() => onSetViewRosterRosterId(trade.oppRosterId)}
-            className="text-sm font-semibold text-blue-300 hover:text-blue-200 hover:underline transition"
+            className="text-sm font-semibold text-blue-300 hover:text-blue-200 hover:underline transition truncate"
           >
             {trade.oppName}
           </button>
+          <span className={`ml-auto shrink-0 text-xs font-bold px-2 py-0.5 rounded-full ${isEven ? "bg-amber-900 text-amber-300" : adjustedCardNet > 0 ? "bg-emerald-900 text-emerald-300" : "bg-red-900 text-red-300"}`}>
+            {isEven ? "EVEN" : adjustedCardNet > 0 ? `+${netDisplay.toLocaleString()}` : `-${netDisplay.toLocaleString()}`}
+          </span>
+        </div>
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
           {oppProjFinish !== null && oppPlayoffOdds !== null && (
             <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${oppStandingsBadgeColor}`}>
               {oppInPlayoffs ? "In Playoffs" : oppNearBubble ? "Playoff Bubble" : `~${oppProjFinish}${ordinalSuffix(oppProjFinish)}`} &middot; {oppPlayoffOdds}%
@@ -223,9 +229,6 @@ export default function TradeCard({
             </span>
           )}
         </div>
-        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${isEven ? "bg-amber-900 text-amber-300" : adjustedCardNet > 0 ? "bg-emerald-900 text-emerald-300" : "bg-red-900 text-red-300"}`}>
-          {isEven ? "EVEN" : adjustedCardNet > 0 ? `+${netDisplay.toLocaleString()}` : `-${netDisplay.toLocaleString()}`}
-        </span>
       </div>
       {partnerProfile?.fitReasons?.[0] && (
         <div className="mb-3 text-xs text-slate-500">
@@ -322,55 +325,57 @@ export default function TradeCard({
               const playerTag = leaguePlayerTags[cardLeagueId]?.[p.player_id];
               const isSweetener = p.player_id === trade.sweetenerPlayerId;
               return (
-                <div key={p.player_id} className="flex items-center justify-between bg-slate-800 rounded-lg px-2 py-1.5">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <button onClick={() => onSetPlayerProfileId(p.player_id)} className="text-xs text-white hover:text-blue-400 transition truncate text-left">{p.full_name}</button>
-                    <span className="text-[10px] text-slate-500 shrink-0">{p.position}{p.team ? ` · ${p.team}` : ""}</span>
+                <div key={p.player_id} className="bg-slate-800 rounded-lg px-2 py-1.5">
+                  {/* Name gets its own full-width line so it never has to fight badges for room */}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <button onClick={() => onSetPlayerProfileId(p.player_id)} className="text-xs font-semibold text-white hover:text-blue-400 transition truncate text-left">{p.full_name}</button>
                     {isSweetener && (
-                      <span title="Goodwill sweetener — this owner rosters this player on their other dynasty teams. Not counted in the value totals." className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-pink-700 bg-pink-950/40 text-pink-300 shrink-0">Sweetener &#127873;</span>
+                      <span title="Goodwill sweetener — this owner rosters this player on their other dynasty teams. Not counted in the value totals." className="hidden sm:inline-flex text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-pink-700 bg-pink-950/40 text-pink-300 shrink-0">Sweetener &#127873;</span>
                     )}
                     {playerTag === "CORE" && (
-                      <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-emerald-700 bg-emerald-950/40 text-emerald-300 shrink-0">Core</span>
+                      <span className="hidden sm:inline-flex text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-emerald-700 bg-emerald-950/40 text-emerald-300 shrink-0">Core</span>
                     )}
                     {playerTag === "WANT_TO_TRADE" && (
-                      <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-orange-700 bg-orange-950/40 text-orange-300 shrink-0">Shopping</span>
+                      <span className="hidden sm:inline-flex text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-orange-700 bg-orange-950/40 text-orange-300 shrink-0">Shopping</span>
                     )}
                     {marketSignalMap.get(p.player_id) === "SELL_HIGH" && (
-                      <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-amber-600 bg-amber-950/40 text-amber-300 shrink-0">Sell High &#8679;</span>
+                      <span className="hidden sm:inline-flex text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-amber-600 bg-amber-950/40 text-amber-300 shrink-0">Sell High &#8679;</span>
                     )}
                     {marketSignalMap.get(p.player_id) === "LIQUID" && (
-                      <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-sky-700 bg-sky-950/40 text-sky-300 shrink-0">Active</span>
+                      <span className="hidden sm:inline-flex text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-sky-700 bg-sky-950/40 text-sky-300 shrink-0">Active</span>
                     )}
                   </div>
-                  <div className="flex items-center gap-1.5 shrink-0 ml-1">
-                    {p.age && <span className="text-[10px] text-slate-500">Age {p.age}</span>}
-                    <RankGapBadge playerId={p.player_id} />
-                    <span className={`text-xs font-mono ${isSweetener ? "text-slate-600 line-through" : "text-slate-400"}`}>{p.value.toLocaleString()}</span>
-                    <button
-                      title={playerTag === "CORE" ? "Remove Core tag" : "Tag as Core (Do Not Sell)"}
-                      onClick={() => onToggleLeaguePlayerTag(cardLeagueId, p.player_id, "CORE")}
-                      className={`text-[11px] leading-none px-1 py-0.5 rounded transition ${playerTag === "CORE" ? "text-emerald-300 hover:text-slate-400" : "text-slate-600 hover:text-emerald-400"}`}
-                    >
-                      &#128274;
-                    </button>
-                    <button
-                      title={playerTag === "WANT_TO_TRADE" ? "Remove Shopping tag" : "Tag as Shopping (Want to Trade)"}
-                      onClick={() => onToggleLeaguePlayerTag(cardLeagueId, p.player_id, "WANT_TO_TRADE")}
-                      className={`text-[11px] leading-none px-1 py-0.5 rounded transition ${playerTag === "WANT_TO_TRADE" ? "text-orange-300 hover:text-slate-400" : "text-slate-600 hover:text-orange-400"}`}
-                    >
-                      &#128276;
-                    </button>
+                  <div className="mt-0.5 flex items-center justify-between gap-1.5">
+                    <span className="text-[10px] text-slate-500 truncate">{p.position}{p.team ? ` · ${p.team}` : ""}{p.age ? ` · Age ${p.age}` : ""}</span>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <RankGapBadge playerId={p.player_id} />
+                      <span className={`text-xs font-mono ${isSweetener ? "text-slate-600 line-through" : "text-slate-400"}`}>{p.value.toLocaleString()}</span>
+                      <button
+                        title={playerTag === "CORE" ? "Remove Core tag" : "Tag as Core (Do Not Sell)"}
+                        onClick={() => onToggleLeaguePlayerTag(cardLeagueId, p.player_id, "CORE")}
+                        className={`text-[11px] leading-none px-1 py-0.5 rounded transition ${playerTag === "CORE" ? "text-emerald-300 hover:text-slate-400" : "text-slate-600 hover:text-emerald-400"}`}
+                      >
+                        &#128274;
+                      </button>
+                      <button
+                        title={playerTag === "WANT_TO_TRADE" ? "Remove Shopping tag" : "Tag as Shopping (Want to Trade)"}
+                        onClick={() => onToggleLeaguePlayerTag(cardLeagueId, p.player_id, "WANT_TO_TRADE")}
+                        className={`text-[11px] leading-none px-1 py-0.5 rounded transition ${playerTag === "WANT_TO_TRADE" ? "text-orange-300 hover:text-slate-400" : "text-slate-600 hover:text-orange-400"}`}
+                      >
+                        &#128276;
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
             })}
             {trade.givePicks.map((p) => (
-              <div key={finderPickKey(p)} className="flex items-center justify-between bg-slate-800 rounded-lg px-2 py-1.5">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <span className="text-xs text-white truncate">{finderPickLabel(p)}</span>
-                  <span className="text-[10px] text-slate-500 shrink-0">PICK</span>
+              <div key={finderPickKey(p)} className="bg-slate-800 rounded-lg px-2 py-1.5">
+                <div className="text-xs text-white truncate">{finderPickLabel(p)}</div>
+                <div className="mt-0.5 flex items-center justify-between gap-1.5">
+                  <span className="text-[10px] text-slate-500">PICK</span>
+                  <span className="text-xs text-slate-400 font-mono">{p.value.toLocaleString()}</span>
                 </div>
-                <span className="text-xs text-slate-400 font-mono shrink-0 ml-1">{p.value.toLocaleString()}</span>
               </div>
             ))}
             {cardMyDropCost > 0 && (
@@ -392,31 +397,32 @@ export default function TradeCard({
           <div className="text-[10px] font-bold uppercase tracking-widest text-emerald-400 mb-1.5">You Receive</div>
           <div className="space-y-1">
             {trade.receive.map((p) => (
-              <div key={p.player_id} className="flex items-center justify-between bg-slate-800 rounded-lg px-2 py-1.5">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <button onClick={() => onSetPlayerProfileId(p.player_id)} className="text-xs text-white hover:text-blue-400 transition truncate text-left">{p.full_name}</button>
-                  <span className="text-[10px] text-slate-500 shrink-0">{p.position}{p.team ? ` · ${p.team}` : ""}</span>
+              <div key={p.player_id} className="bg-slate-800 rounded-lg px-2 py-1.5">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <button onClick={() => onSetPlayerProfileId(p.player_id)} className="text-xs font-semibold text-white hover:text-blue-400 transition truncate text-left">{p.full_name}</button>
                   {marketSignalMap.get(p.player_id) === "BUY_LOW" && (
-                    <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-emerald-700 bg-emerald-950/40 text-emerald-300 shrink-0">Buy Low &#8681;</span>
+                    <span className="hidden sm:inline-flex text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-emerald-700 bg-emerald-950/40 text-emerald-300 shrink-0">Buy Low &#8681;</span>
                   )}
                   {marketSignalMap.get(p.player_id) === "LIQUID" && (
-                    <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-sky-700 bg-sky-950/40 text-sky-300 shrink-0">Active</span>
+                    <span className="hidden sm:inline-flex text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-sky-700 bg-sky-950/40 text-sky-300 shrink-0">Active</span>
                   )}
                 </div>
-                <div className="flex items-center gap-1.5 shrink-0 ml-1">
-                  {p.age && <span className="text-[10px] text-slate-500">Age {p.age}</span>}
-                  <RankGapBadge playerId={p.player_id} />
-                  <span className="text-xs text-slate-400 font-mono">{p.value.toLocaleString()}</span>
+                <div className="mt-0.5 flex items-center justify-between gap-1.5">
+                  <span className="text-[10px] text-slate-500 truncate">{p.position}{p.team ? ` · ${p.team}` : ""}{p.age ? ` · Age ${p.age}` : ""}</span>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <RankGapBadge playerId={p.player_id} />
+                    <span className="text-xs text-slate-400 font-mono">{p.value.toLocaleString()}</span>
+                  </div>
                 </div>
               </div>
             ))}
             {trade.receivePicks.map((p) => (
-              <div key={finderPickKey(p)} className="flex items-center justify-between bg-slate-800 rounded-lg px-2 py-1.5">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <span className="text-xs text-white truncate">{finderPickLabel(p)}</span>
-                  <span className="text-[10px] text-slate-500 shrink-0">PICK</span>
+              <div key={finderPickKey(p)} className="bg-slate-800 rounded-lg px-2 py-1.5">
+                <div className="text-xs text-white truncate">{finderPickLabel(p)}</div>
+                <div className="mt-0.5 flex items-center justify-between gap-1.5">
+                  <span className="text-[10px] text-slate-500">PICK</span>
+                  <span className="text-xs text-slate-400 font-mono">{p.value.toLocaleString()}</span>
                 </div>
-                <span className="text-xs text-slate-400 font-mono shrink-0 ml-1">{p.value.toLocaleString()}</span>
               </div>
             ))}
             {cardOppDropCost > 0 && (
