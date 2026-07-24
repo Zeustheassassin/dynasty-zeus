@@ -162,6 +162,12 @@ function RankingsTab({
 
   const noValues = Object.keys(calcFcValues).length === 0;
 
+  // Player names were losing to flex-1 squeeze against the fixed-width stat columns on
+  // phone widths (e.g. "QB" with no name visible). Give every row a real fixed width —
+  // wider than a phone screen — and let the shared scroll container (below) pan
+  // horizontally instead of crushing the name column to nothing.
+  const rowMinWidth = isPersonal ? 600 : rankView === "COMPARE" ? 520 : 400;
+
   return (
     <>
       {(loadingCalcValues || loadingRedraft) && <p className="text-sm text-blue-400 mb-4">Loading values…</p>}
@@ -257,41 +263,46 @@ function RankingsTab({
         value={rankSearch}
         onChange={(e) => setRankSearch(e.target.value)}
       />
-      {/* Column headers */}
-      <div className="flex items-center gap-2 px-2 mb-1">
-        <span className="w-5 shrink-0" />
-        <span className="w-6 shrink-0" />
-        <span className="flex-1 text-[10px] text-slate-600 uppercase tracking-wider">Player</span>
-        <span className="w-7 text-center text-[10px] text-slate-600 uppercase tracking-wider shrink-0">Age</span>
-        {isPersonal ? (
-          <>
-            <span className="w-12 text-right text-[10px] text-slate-600 uppercase tracking-wider shrink-0">Mkt</span>
-            <span className="w-12 text-right text-[10px] text-slate-600 uppercase tracking-wider shrink-0">vs Mkt</span>
-            <span className="w-20 text-center text-[10px] text-slate-600 uppercase tracking-wider shrink-0">Signal</span>
-            <span className="w-4 shrink-0" />
-          </>
-        ) : rankView === "COMPARE" ? (
-          <>
-            <span className="w-14 text-right text-[10px] text-slate-600 uppercase tracking-wider shrink-0">Dyn</span>
-            <span className="w-14 text-right text-[10px] text-slate-600 uppercase tracking-wider shrink-0">Rdft</span>
-            <span className="w-12 text-right text-[10px] text-slate-600 uppercase tracking-wider shrink-0">Gap</span>
-          </>
-        ) : (
-          <span className="w-14 text-right text-[10px] text-slate-600 uppercase tracking-wider shrink-0">Value</span>
-        )}
-        <span className="w-4 shrink-0" />
-      </div>
       {rowCount === 0 && !loadingCalcValues && !loadingRedraft && (
         <p className="text-slate-400 text-sm">
           {noValues ? "Load a league to populate player values." : "No players match your filter."}
         </p>
       )}
+      {/* Single scroll container for both axes: horizontal pan reveals the fixed-width
+          columns past screen width, vertical scroll drives the row virtualizer. The
+          header is `sticky` within this same container so it pans in lockstep with the
+          rows instead of scrolling away or drifting out of column alignment. */}
       <div
         ref={ranksParentRef}
-        className="overflow-y-auto"
+        className="overflow-auto"
         style={{ height: "calc(100vh - 330px)", minHeight: "400px" }}
       >
-        <div style={{ height: ranksVirtualizer.getTotalSize(), position: "relative" }}>
+        <div style={{ width: rowMinWidth }}>
+          {/* Column headers */}
+          <div className="flex items-center gap-2 px-2 mb-1 py-1 sticky top-0 z-10 bg-slate-950" style={{ width: rowMinWidth }}>
+            <span className="w-5 shrink-0" />
+            <span className="w-6 shrink-0" />
+            <span className="w-40 shrink-0 text-[10px] text-slate-600 uppercase tracking-wider">Player</span>
+            <span className="w-7 text-center text-[10px] text-slate-600 uppercase tracking-wider shrink-0">Age</span>
+            {isPersonal ? (
+              <>
+                <span className="w-12 text-right text-[10px] text-slate-600 uppercase tracking-wider shrink-0">Mkt</span>
+                <span className="w-12 text-right text-[10px] text-slate-600 uppercase tracking-wider shrink-0">vs Mkt</span>
+                <span className="w-20 text-center text-[10px] text-slate-600 uppercase tracking-wider shrink-0">Signal</span>
+                <span className="w-4 shrink-0" />
+              </>
+            ) : rankView === "COMPARE" ? (
+              <>
+                <span className="w-14 text-right text-[10px] text-slate-600 uppercase tracking-wider shrink-0">Dyn</span>
+                <span className="w-14 text-right text-[10px] text-slate-600 uppercase tracking-wider shrink-0">Rdft</span>
+                <span className="w-12 text-right text-[10px] text-slate-600 uppercase tracking-wider shrink-0">Gap</span>
+              </>
+            ) : (
+              <span className="w-14 text-right text-[10px] text-slate-600 uppercase tracking-wider shrink-0">Value</span>
+            )}
+            <span className="w-4 shrink-0" />
+          </div>
+          <div style={{ height: ranksVirtualizer.getTotalSize(), width: rowMinWidth, position: "relative" }}>
           {ranksVirtualizer.getVirtualItems().map((vRow) => {
             if (isPersonal) {
               const { id, personalRank } = personalRows[vRow.index];
@@ -311,7 +322,7 @@ function RankingsTab({
                   onDragLeave={() => setDragOverId((cur) => (cur === id ? null : cur))}
                   onDrop={() => handlePersonalDrop(id)}
                   onDragEnd={() => { setDraggingId(null); setDragOverId(null); }}
-                  style={{ position: "absolute", top: vRow.start, left: 0, right: 0, height: vRow.size }}
+                  style={{ position: "absolute", top: vRow.start, left: 0, width: rowMinWidth, height: vRow.size }}
                   className={`flex items-center gap-2 rounded-lg px-2 py-1.5 transition ${draggingId === id ? "opacity-40" : ""} ${isDragOver ? "bg-blue-900/40 border-t-2 border-blue-500" : "bg-slate-800/70 hover:bg-slate-800"}`}
                 >
                   <span
@@ -335,7 +346,7 @@ function RankingsTab({
                     )}
                   </span>
                   <span className={`text-[10px] font-bold w-6 shrink-0 cursor-grab active:cursor-grabbing ${POS_COLOR[p.position] ?? "text-slate-400"}`} title="Drag to reorder">{p.position}</span>
-                  <span className="text-xs flex-1 truncate min-w-0 flex items-center gap-1">
+                  <span className="text-xs w-40 shrink-0 truncate flex items-center gap-1">
                     {isOwned && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" title="On your roster" />}
                     <span className={isOwned ? "text-blue-200" : "text-white"}>{p.full_name}</span>
                     {injuryBadge(p.injury_status)}
@@ -379,14 +390,14 @@ function RankingsTab({
                   position: "absolute",
                   top: vRow.start,
                   left: 0,
-                  right: 0,
+                  width: rowMinWidth,
                   height: vRow.size,
                 }}
                 className="flex items-center gap-2 bg-slate-800/70 hover:bg-slate-800 rounded-lg px-2 py-1.5 transition"
               >
                 <span className="text-[10px] text-slate-600 w-5 text-right shrink-0">{idx + 1}</span>
                 <span className={`text-[10px] font-bold w-6 shrink-0 ${POS_COLOR[p.position] ?? "text-slate-400"}`}>{p.position}</span>
-                <span className="text-xs flex-1 truncate min-w-0 flex items-center gap-1">
+                <span className="text-xs w-40 shrink-0 truncate flex items-center gap-1">
                   {isOwned && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" title="On your roster" />}
                   <span className={isOwned ? "text-blue-200" : "text-white"}>{p.full_name}</span>
                   {injuryBadge(p.injury_status)}
@@ -418,6 +429,7 @@ function RankingsTab({
               </div>
             );
           })}
+          </div>
         </div>
       </div>
     </>
