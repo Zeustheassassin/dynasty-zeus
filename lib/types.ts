@@ -819,6 +819,17 @@ export interface ProjSource {
   weight: number;
 }
 
+// ── Asset dispositions ────────────────────────────────────────
+// Per-league, per-asset (player or draft pick) manual disposition, keyed by
+// player_id or a pick key (finderPickKey format: `${season}-${round}-${roster_id}`).
+// CORE/PRICEY/SHOPPING/OFFLOAD apply to assets on the user's own roster;
+// SELL_NO/SELL_OK apply to assets on any other roster in the league. No stored
+// value means Neutral — Neutral is never persisted. "WANT_TO_TRADE" is a legacy
+// value from before this type was widened; treat it as equivalent to SHOPPING
+// wherever a disposition is read.
+export type AssetDisposition = "CORE" | "PRICEY" | "SHOPPING" | "OFFLOAD" | "SELL_NO" | "SELL_OK" | "WANT_TO_TRADE";
+export type LeagueAssetDispositions = Record<string, Record<string, AssetDisposition>>;
+
 // ── Trade attempts ────────────────────────────────────────────
 
 export type TradeAttemptStatus = "PENDING" | "ACCEPTED" | "DECLINED" | "COUNTERED" | "NO_RESPONSE";

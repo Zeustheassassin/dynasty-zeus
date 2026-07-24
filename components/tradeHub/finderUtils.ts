@@ -1,8 +1,8 @@
 import type { AugmentedPick, SleeperPlayer, SleeperRoster } from "../../lib/types";
 import type { PlayerWithValue } from "./shared";
+import { pickDispositionKey } from "../../lib/helpers/dispositions";
 
-export const finderPickKey = (p: AugmentedPick): string =>
-  `${p.season}-${p.round}-${p.roster_id}`;
+export const finderPickKey = (p: AugmentedPick): string => pickDispositionKey(p);
 
 export const buildPostTradePlayers = (
   baseRoster: SleeperRoster | undefined,

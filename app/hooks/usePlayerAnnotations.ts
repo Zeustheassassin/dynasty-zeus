@@ -4,6 +4,7 @@ import type { User as SupabaseUser } from "@supabase/auth-js";
 import { supabase } from "../../lib/supabaseclient";
 import { logger } from "../../lib/logger";
 import { getLocalStorageItem, setLocalStorageItem } from "@/lib/hooks/useLocalStorage";
+import type { AssetDisposition, LeagueAssetDispositions } from "@/lib/types";
 
 const log = logger("app/hooks/usePlayerAnnotations");
 
@@ -15,8 +16,8 @@ export function usePlayerAnnotations(supabaseUser: SupabaseUser | null) {
   const [playerNotes, setPlayerNotes] = useState<Record<string, string>>(() =>
     getLocalStorageItem<Record<string, string>>("playerNotes_v1", {})
   );
-  const [leaguePlayerTags, setLeaguePlayerTags] = useState<Record<string, Record<string, "CORE" | "WANT_TO_TRADE">>>(() =>
-    getLocalStorageItem<Record<string, Record<string, "CORE" | "WANT_TO_TRADE">>>("leaguePlayerTags_v1", {})
+  const [leaguePlayerTags, setLeaguePlayerTags] = useState<LeagueAssetDispositions>(() =>
+    getLocalStorageItem<LeagueAssetDispositions>("leaguePlayerTags_v1", {})
   );
   const [ignoredOwnerIds, setIgnoredOwnerIds] = useState<string[]>(() =>
     getLocalStorageItem<string[]>("ignoredOwnerIds", [])
@@ -68,36 +69,31 @@ export function usePlayerAnnotations(supabaseUser: SupabaseUser | null) {
     }
   }, []); // reads supabaseUser via ref; uses functional setState — no deps needed
 
-  // Toggle a per-league player tag. Cycling: untagged → CORE → WANT_TO_TRADE → untagged.
-  // Passing a specific tag forces that tag (or removes it if already set).
-  const handleToggleLeaguePlayerTag = useCallback((
+  // Sets (or clears, when disposition is null) a per-league disposition for a player_id
+  // or pick key (finderPickKey format). Clicking the already-active option in a picker
+  // clears it back to Neutral — callers pass null in that case rather than relying on
+  // any cycling behavior.
+  const handleSetAssetDisposition = useCallback((
     leagueId: string,
-    playerId: string,
-    forceTag?: "CORE" | "WANT_TO_TRADE"
+    assetId: string,
+    disposition: AssetDisposition | null
   ) => {
     const sbUser = supabaseUserRef.current;
     setLeaguePlayerTags((prev) => {
       const leagueTags = prev[leagueId] ?? {};
-      const current = leagueTags[playerId];
-      let next: "CORE" | "WANT_TO_TRADE" | undefined;
-      if (forceTag !== undefined) {
-        next = current === forceTag ? undefined : forceTag;
-      } else {
-        next = current === undefined ? "CORE" : current === "CORE" ? "WANT_TO_TRADE" : undefined;
-      }
       const updatedLeague = { ...leagueTags };
-      if (next === undefined) delete updatedLeague[playerId];
-      else updatedLeague[playerId] = next;
+      if (disposition === null) delete updatedLeague[assetId];
+      else updatedLeague[assetId] = disposition;
       const updated = { ...prev, [leagueId]: updatedLeague };
       setLocalStorageItem("leaguePlayerTags_v1", updated);
       if (sbUser) {
-        if (next === undefined) {
+        if (disposition === null) {
           supabase.from("league_player_tags").delete()
-            .eq("user_id", sbUser.id).eq("league_id", leagueId).eq("player_id", playerId)
+            .eq("user_id", sbUser.id).eq("league_id", leagueId).eq("player_id", assetId)
             .then(() => {}, (err: unknown) => log.error("league_player_tags delete failed", { err: String(err) }));
         } else {
           supabase.from("league_player_tags")
-            .upsert({ user_id: sbUser.id, league_id: leagueId, player_id: playerId, tag: next },
+            .upsert({ user_id: sbUser.id, league_id: leagueId, player_id: assetId, tag: disposition },
                     { onConflict: "user_id,league_id,player_id" })
             .then(() => {}, (err: unknown) => log.error("league_player_tags upsert failed", { err: String(err) }));
         }
@@ -119,6 +115,6 @@ export function usePlayerAnnotations(supabaseUser: SupabaseUser | null) {
     toggleIgnoredOwner,
     saveLeagueNote,
     savePlayerNote,
-    handleToggleLeaguePlayerTag,
+    handleSetAssetDisposition,
   };
 }

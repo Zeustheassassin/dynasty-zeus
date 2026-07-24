@@ -130,6 +130,9 @@ const baseCtx = (over: Partial<FinderPipelineCtx> = {}): FinderPipelineCtx => {
     isBlockedSellDisposition: () => false,
     isBlockedBuyDisposition: () => false,
     isWantToTrade: () => false,
+    isOffload: () => false,
+    isPricey: () => false,
+    isOpenToSell: () => false,
     failsDirectionGuardrail: () => false,
     getDirectionTradeScore: () => 0,
     getTradeLineupSafety: () => ({ valid: true, myValid: true, oppValid: true, score: 0 }),
@@ -920,5 +923,63 @@ describe("runFinderPipeline — decline memory", () => {
     const { allTrades } = runFinderPipeline([plain, sweetened], baseCtx({ tradeAttempts: [declinedBoth] }));
     expect(allTrades).toHaveLength(2);
     expect(allTrades[0].sweetenerPlayerId).toBe("SW"); // sweetened (penalty exempt) outranks plain (−8)
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Manual asset dispositions (Core/Pricey/Shopping/Offload, SELL_NO/SELL_OK)
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("runFinderPipeline — manual asset dispositions", () => {
+  // Two independent opponents so each pair of otherwise-identical trades survives
+  // dedup (different oppRosterId) and ordering reflects the disposition bonus alone.
+  const rosters = [mkRoster(1, "USER", []), mkRoster(2, "OPP", []), mkRoster(3, "OPP2", [])];
+
+  it("ranks a give-side Offload-tagged asset above an otherwise identical trade", () => {
+    const tagged = mkTrade({
+      give: [mkPlayer("OFF", "WR", 2000)], receive: [mkPlayer("r1", "RB", 2000)],
+      oppRosterId: 2, score: 100,
+    });
+    const plain = mkTrade({
+      give: [mkPlayer("g2", "WR", 2000)], receive: [mkPlayer("r2", "RB", 2000)],
+      oppRosterId: 3, score: 100,
+    });
+    const { allTrades } = runFinderPipeline(
+      [plain, tagged],
+      baseCtx({ rosters, isOffload: (id) => id === "OFF" }),
+    );
+    expect(allTrades.map((t) => t.give[0].player_id)).toEqual(["OFF", "g2"]);
+  });
+
+  it("ranks a give-side Pricey-tagged asset below an otherwise identical trade", () => {
+    const tagged = mkTrade({
+      give: [mkPlayer("PRI", "WR", 2000)], receive: [mkPlayer("r1", "RB", 2000)],
+      oppRosterId: 2, score: 100,
+    });
+    const plain = mkTrade({
+      give: [mkPlayer("g2", "WR", 2000)], receive: [mkPlayer("r2", "RB", 2000)],
+      oppRosterId: 3, score: 100,
+    });
+    const { allTrades } = runFinderPipeline(
+      [plain, tagged],
+      baseCtx({ rosters, isPricey: (id) => id === "PRI" }),
+    );
+    expect(allTrades.map((t) => t.give[0].player_id)).toEqual(["g2", "PRI"]);
+  });
+
+  it("ranks a receive-side Open-to-Sell-tagged asset above an otherwise identical trade", () => {
+    const tagged = mkTrade({
+      give: [mkPlayer("g1", "WR", 2000)], receive: [mkPlayer("OK", "RB", 2000)],
+      oppRosterId: 2, score: 100,
+    });
+    const plain = mkTrade({
+      give: [mkPlayer("g2", "WR", 2000)], receive: [mkPlayer("r2", "RB", 2000)],
+      oppRosterId: 3, score: 100,
+    });
+    const { allTrades } = runFinderPipeline(
+      [plain, tagged],
+      baseCtx({ rosters, isOpenToSell: (id) => id === "OK" }),
+    );
+    expect(allTrades.map((t) => t.receive[0].player_id)).toEqual(["OK", "r2"]);
   });
 });

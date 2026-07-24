@@ -1,6 +1,7 @@
 "use client";
 import type {
   TradeAttempt, AugmentedPick, LeagueMateView, LeagueSimulation, SleeperRoster,
+  LeagueAssetDispositions,
 } from "../../lib/types";
 import type { TradeResult } from "./finderTypes";
 import type { PlayerWithValue } from "./shared";
@@ -19,7 +20,7 @@ interface FinderResultsProps {
   selectedLeagueSimulation: LeagueSimulation | null;
   posTeamTotals: { rosterId: number; totals: Record<string, number> }[];
   numTeams: number;
-  leaguePlayerTags: Record<string, Record<string, "CORE" | "WANT_TO_TRADE">>;
+  leaguePlayerTags: LeagueAssetDispositions;
   marketSignalMap: Map<string, string>;
   rankGapMap: Record<string, number>;
   tradeAttempts: TradeAttempt[];
@@ -35,7 +36,6 @@ interface FinderResultsProps {
   onSetPlayerProfileId: (id: string | null) => void;
   onSetViewRosterRosterId: (id: number | null) => void;
   onOpenInCalculator: (trade: TradeResult) => void;
-  onToggleLeaguePlayerTag: (leagueId: string, playerId: string, forceTag?: "CORE" | "WANT_TO_TRADE") => void;
   onMarkAttempted: (attempt: Omit<TradeAttempt, "id" | "user_id" | "attempted_at" | "resolved_at">) => Promise<void>;
   onSessionMark: (fingerprint: string) => void;
 }
@@ -66,7 +66,6 @@ export default function FinderResults({
   onSetPlayerProfileId,
   onSetViewRosterRosterId,
   onOpenInCalculator,
-  onToggleLeaguePlayerTag,
   onMarkAttempted,
   onSessionMark,
 }: FinderResultsProps) {
@@ -149,7 +148,6 @@ export default function FinderResults({
           onSetPlayerProfileId={onSetPlayerProfileId}
           onSetViewRosterRosterId={onSetViewRosterRosterId}
           onOpenInCalculator={onOpenInCalculator}
-          onToggleLeaguePlayerTag={onToggleLeaguePlayerTag}
           onMarkAttempted={onMarkAttempted}
           onSessionMark={onSessionMark}
         />

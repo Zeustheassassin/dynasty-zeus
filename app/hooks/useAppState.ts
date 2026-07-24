@@ -57,6 +57,7 @@ import type {
   HistoricalSnapshot, LeagueMateView, SimulationTeamRow,
   RosterDirectionProfile, DynamicPickValue, RookieBoardPlayer, FcTrendEntry,
   StandingRow,
+  AssetDisposition, LeagueAssetDispositions,
 } from "../../lib/types";
 
 // -------------------------
@@ -105,7 +106,7 @@ export function useAppState() {
     toggleIgnoredOwner,
     saveLeagueNote,
     savePlayerNote,
-    handleToggleLeaguePlayerTag,
+    handleSetAssetDisposition,
   } = usePlayerAnnotations(supabaseUser);
   const { personalOrdering, setPersonalOrdering, savePersonalOrdering } = usePersonalRankings(supabaseUser);
 
@@ -381,7 +382,8 @@ useEffect(() => {
         });
       }
     });
-  // 8. Per-league player tags (CORE = Do Not Sell, WANT_TO_TRADE = actively shopping)
+  // 8. Per-league asset dispositions (Core/Pricey/Shopping/Offload for own assets,
+  // SELL_NO/SELL_OK for opponent assets; WANT_TO_TRADE is a legacy value read as SHOPPING)
   supabase
     .from("league_player_tags")
     .select("league_id, player_id, tag")
@@ -390,14 +392,14 @@ useEffect(() => {
       if (cancelled) return;
       if (error) { log.error("league_player_tags load failed", { err: error.message }); return; }
       if (data && data.length > 0) {
-        const map: Record<string, Record<string, "CORE" | "WANT_TO_TRADE">> = {};
+        const map: LeagueAssetDispositions = {};
         data.forEach((row: { league_id: string; player_id: string; tag: string }) => {
           const lid = String(row.league_id);
           if (!map[lid]) map[lid] = {};
-          map[lid][String(row.player_id)] = row.tag as "CORE" | "WANT_TO_TRADE";
+          map[lid][String(row.player_id)] = row.tag as AssetDisposition;
         });
         setLeaguePlayerTags((prev) => {
-          const merged: Record<string, Record<string, "CORE" | "WANT_TO_TRADE">> = {};
+          const merged: LeagueAssetDispositions = {};
           for (const lid of new Set([...Object.keys(prev), ...Object.keys(map)])) {
             merged[lid] = { ...(prev[lid] ?? {}), ...(map[lid] ?? {}) };
           }
@@ -2977,7 +2979,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     calcOpponentRosterId,
     selectedLeagueDraftHasOccurred,
     leaguePlayerTags,
-    handleToggleLeaguePlayerTag,
+    handleSetAssetDisposition,
     leagueMateProfileByRosterId,
     tradePartnerRankings,
     tradeHubData,

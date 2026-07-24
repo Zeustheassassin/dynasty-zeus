@@ -1,8 +1,10 @@
 "use client";
 import { CURRENT_YEAR } from "../../lib/helpers";
+import { normalizeDisposition } from "../../lib/helpers/dispositions";
 import type {
   TradeAttempt, TradeAttemptAsset, TradeAttemptPick,
   AugmentedPick, LeagueMateView, LeagueSimulation, SleeperRoster,
+  LeagueAssetDispositions,
 } from "../../lib/types";
 import {
   isOldProducerBuy, isAgingAsset, isYoungBuildingBlock, isFutureInsulationAsset,
@@ -21,7 +23,7 @@ interface TradeCardProps {
   selectedLeagueSimulation: LeagueSimulation | null;
   posTeamTotals: { rosterId: number; totals: Record<string, number> }[];
   numTeams: number;
-  leaguePlayerTags: Record<string, Record<string, "CORE" | "WANT_TO_TRADE">>;
+  leaguePlayerTags: LeagueAssetDispositions;
   marketSignalMap: Map<string, string>;
   /** Personal-vs-consensus rank delta per player (vsMkt): positive = you rank them higher than market. */
   rankGapMap: Record<string, number>;
@@ -38,7 +40,6 @@ interface TradeCardProps {
   onSetPlayerProfileId: (id: string | null) => void;
   onSetViewRosterRosterId: (id: number | null) => void;
   onOpenInCalculator: (trade: TradeResult) => void;
-  onToggleLeaguePlayerTag: (leagueId: string, playerId: string, forceTag?: "CORE" | "WANT_TO_TRADE") => void;
   onMarkAttempted: (attempt: Omit<TradeAttempt, "id" | "user_id" | "attempted_at" | "resolved_at">) => Promise<void>;
   onSessionMark: (fingerprint: string) => void;
 }
@@ -66,7 +67,6 @@ export default function TradeCard({
   onSetPlayerProfileId,
   onSetViewRosterRosterId,
   onOpenInCalculator,
-  onToggleLeaguePlayerTag,
   onMarkAttempted,
   onSessionMark,
 }: TradeCardProps) {
@@ -322,7 +322,7 @@ export default function TradeCard({
           <div className="text-[10px] font-bold uppercase tracking-widest text-red-400 mb-1.5">You Give</div>
           <div className="space-y-1">
             {trade.give.map((p) => {
-              const playerTag = leaguePlayerTags[cardLeagueId]?.[p.player_id];
+              const disposition = normalizeDisposition(leaguePlayerTags[cardLeagueId]?.[p.player_id]);
               const isSweetener = p.player_id === trade.sweetenerPlayerId;
               return (
                 <div key={p.player_id} className="bg-slate-800 rounded-lg px-2 py-1.5">
@@ -332,11 +332,17 @@ export default function TradeCard({
                     {isSweetener && (
                       <span title="Goodwill sweetener — this owner rosters this player on their other dynasty teams. Not counted in the value totals." className="hidden sm:inline-flex text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-pink-700 bg-pink-950/40 text-pink-300 shrink-0">Sweetener &#127873;</span>
                     )}
-                    {playerTag === "CORE" && (
-                      <span className="hidden sm:inline-flex text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-emerald-700 bg-emerald-950/40 text-emerald-300 shrink-0">Core</span>
+                    {disposition === "CORE" && (
+                      <span title="Marked Core — Do Not Sell" className="hidden sm:inline-flex text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-emerald-700 bg-emerald-950/40 text-emerald-300 shrink-0">Core</span>
                     )}
-                    {playerTag === "WANT_TO_TRADE" && (
-                      <span className="hidden sm:inline-flex text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-orange-700 bg-orange-950/40 text-orange-300 shrink-0">Shopping</span>
+                    {disposition === "PRICEY" && (
+                      <span title="Marked Pricey — most likely not going to sell" className="hidden sm:inline-flex text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-amber-700 bg-amber-950/40 text-amber-300 shrink-0">Pricey</span>
+                    )}
+                    {disposition === "SHOPPING" && (
+                      <span title="Marked Shopping — small interest in selling" className="hidden sm:inline-flex text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-orange-700 bg-orange-950/40 text-orange-300 shrink-0">Shopping</span>
+                    )}
+                    {disposition === "OFFLOAD" && (
+                      <span title="Marked Offload — get off roster ASAP" className="hidden sm:inline-flex text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-red-700 bg-red-950/40 text-red-300 shrink-0">Offload</span>
                     )}
                     {marketSignalMap.get(p.player_id) === "SELL_HIGH" && (
                       <span className="hidden sm:inline-flex text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-amber-600 bg-amber-950/40 text-amber-300 shrink-0">Sell High &#8679;</span>
@@ -350,20 +356,6 @@ export default function TradeCard({
                     <div className="flex items-center gap-1.5 shrink-0">
                       <RankGapBadge playerId={p.player_id} />
                       <span className={`text-xs font-mono ${isSweetener ? "text-slate-600 line-through" : "text-slate-400"}`}>{p.value.toLocaleString()}</span>
-                      <button
-                        title={playerTag === "CORE" ? "Remove Core tag" : "Tag as Core (Do Not Sell)"}
-                        onClick={() => onToggleLeaguePlayerTag(cardLeagueId, p.player_id, "CORE")}
-                        className={`text-[11px] leading-none px-1 py-0.5 rounded transition ${playerTag === "CORE" ? "text-emerald-300 hover:text-slate-400" : "text-slate-600 hover:text-emerald-400"}`}
-                      >
-                        &#128274;
-                      </button>
-                      <button
-                        title={playerTag === "WANT_TO_TRADE" ? "Remove Shopping tag" : "Tag as Shopping (Want to Trade)"}
-                        onClick={() => onToggleLeaguePlayerTag(cardLeagueId, p.player_id, "WANT_TO_TRADE")}
-                        className={`text-[11px] leading-none px-1 py-0.5 rounded transition ${playerTag === "WANT_TO_TRADE" ? "text-orange-300 hover:text-slate-400" : "text-slate-600 hover:text-orange-400"}`}
-                      >
-                        &#128276;
-                      </button>
                     </div>
                   </div>
                 </div>

@@ -11,8 +11,10 @@ import type {
   AugmentedPick,
   LeagueMateView, TradePartnerRanking, HistoricalSnapshot,
   FcTrendEntry,
+  AssetDisposition, LeagueAssetDispositions,
 } from "../../lib/types";
 import type { PersonalSignal } from "../../lib/helpers/personalRankings";
+import { normalizeDisposition } from "../../lib/helpers/dispositions";
 import { usePlayers } from "../../lib/PlayersContext";
 import { useLeague } from "../../lib/LeagueContext";
 import { useValues } from "../../lib/ValuesContext";
@@ -58,8 +60,8 @@ interface TradeFinderProps {
   finderSignals: Record<string, PersonalSignal>;
   /** Raw personal-vs-consensus rank delta per player (vsMkt); shown on each card's player rows. */
   finderRankGaps: Record<string, number>;
-  leaguePlayerTags: Record<string, Record<string, "CORE" | "WANT_TO_TRADE">>;
-  onToggleLeaguePlayerTag: (leagueId: string, playerId: string, forceTag?: "CORE" | "WANT_TO_TRADE") => void;
+  leaguePlayerTags: LeagueAssetDispositions;
+  onSetAssetDisposition: (leagueId: string, assetId: string, disposition: AssetDisposition | null) => void;
   leagueMateProfileByRosterId: Map<number, LeagueMateView>;
   selectedLeagueMateProfilesView: LeagueMateView[];
   tradePartnerRankings: TradePartnerRanking[];
@@ -99,7 +101,7 @@ function TradeFinder({
   user,
   selectedLeagueDraftHasOccurred,
   loadingCalcValues,
-  playerDispositions, finderSignals, finderRankGaps, leaguePlayerTags, onToggleLeaguePlayerTag,
+  playerDispositions, finderSignals, finderRankGaps, leaguePlayerTags, onSetAssetDisposition,
   leagueMateProfileByRosterId, selectedLeagueMateProfilesView,
   tradePartnerRankings,
   onRefreshDirection,
@@ -287,13 +289,18 @@ function TradeFinder({
       // Stage 6: block predicates read the personal SIGNAL directly (no string round-trip).
       // Sell-side (never trade away) is CORE-tag-only — no personal signal asks us to hold a
       // player, so the gap signal never blocks the give side. Buy-side blocks acquiring a
-      // player we'd strongly shop (STRONG_SELL ⇒ personal rank far below market).
-      const isBlockedSellDisposition = (playerId?: string | null) =>
-        !!playerId && leaguePlayerTags[selectedLeague?.league_id]?.[playerId] === "CORE";
+      // player we'd strongly shop (STRONG_SELL ⇒ personal rank far below market) OR a player/pick
+      // the opponent has been manually marked SELL_NO ("Not Willing to Sell") on their roster —
+      // that's an explicit signal a suggested trade for them will never be accepted.
+      const disposition = (assetId?: string | null) =>
+        assetId ? normalizeDisposition(leaguePlayerTags[selectedLeague?.league_id ?? ""]?.[assetId]) : undefined;
+      const isBlockedSellDisposition = (assetId?: string | null) => disposition(assetId) === "CORE";
       const isBlockedBuyDisposition = (playerId?: string | null) =>
-        !!playerId && finderSignals[playerId] === "STRONG_SELL";
-      const isWantToTrade = (playerId?: string | null) =>
-        !!playerId && leaguePlayerTags[selectedLeague?.league_id]?.[playerId] === "WANT_TO_TRADE";
+        (!!playerId && finderSignals[playerId] === "STRONG_SELL") || disposition(playerId) === "SELL_NO";
+      const isWantToTrade = (assetId?: string | null) => disposition(assetId) === "SHOPPING";
+      const isOffload = (assetId?: string | null) => disposition(assetId) === "OFFLOAD";
+      const isPricey = (assetId?: string | null) => disposition(assetId) === "PRICEY";
+      const isOpenToSell = (assetId?: string | null) => disposition(assetId) === "SELL_OK";
       const myT = posTotals(myPlayers);
       // Read from component-level useMemo — only rebuilds on league switch / value refresh
       // Single source of truth: the fully adjusted profile (dynasty + redraft + sim + age).
@@ -409,7 +416,7 @@ function TradeFinder({
         return selectedLeagueDynamicPickValues[`${p.season}-${p.round}-${p.roster_id}`]?.expectedValue ?? getStoredPickValue(pickFcValues, p);
       };
       const myFinderPicks = allPicks
-        .filter((p) => p.owner_id === myRoster?.roster_id)
+        .filter((p) => p.owner_id === myRoster?.roster_id && !isBlockedSellDisposition(finderPickKey(p)))
         .map((p) => ({ ...p, value: finderPickValue(p) }))
         .filter((p) => p.value > 0)
         .sort((a, b) => {
@@ -585,7 +592,7 @@ function TradeFinder({
         if (results.length >= MAX_CANDIDATES) break;
         const oppPlayers = rosterPlayers(oppRoster);
         const oppPicks: PickWithValue[] = allPicks
-          .filter((p) => p.owner_id === oppRoster.roster_id)
+          .filter((p) => p.owner_id === oppRoster.roster_id && !isBlockedBuyDisposition(finderPickKey(p)))
           .map((p) => ({ ...p, value: finderPickValue(p) }))
           .filter((p) => p.value > 0)
           .sort((a, b) => {
@@ -1118,6 +1125,9 @@ function TradeFinder({
         isBlockedSellDisposition,
         isBlockedBuyDisposition,
         isWantToTrade,
+        isOffload,
+        isPricey,
+        isOpenToSell,
         failsDirectionGuardrail,
         getDirectionTradeScore,
         getTradeLineupSafety,
@@ -1291,49 +1301,59 @@ function TradeFinder({
               }
             </div>
           )}
-          {/* Tagged players strip — Core (locked) and Shopping (want to move) */}
+          {/* Tagged assets strip — read-only summary. Editing now lives on Rosters & Rules
+              (your own players/picks) and Opponent Rosters (their willingness to sell) in
+              League Hub, so this strip only shows counts + a quick-remove per tag. */}
           {(() => {
             const leagueId = selectedLeague?.league_id ?? "";
             const leagueTags = leaguePlayerTags[leagueId] ?? {};
-            const corePlayers = Object.entries(leagueTags).filter(([, t]) => t === "CORE");
-            const shoppingPlayers = Object.entries(leagueTags).filter(([, t]) => t === "WANT_TO_TRADE");
-            if (corePlayers.length === 0 && shoppingPlayers.length === 0) return null;
             const playerMap = players as Record<string, SleeperPlayer>;
+            const assetLabel = (id: string) => {
+              const p = playerMap[id];
+              if (p) return p.full_name ?? id;
+              const m = id.match(/^(\d{4})-(\d+)-(\d+)$/);
+              return m ? `${m[1]} Rd ${m[2]} Pick` : id;
+            };
+            const byDisposition = (target: string) =>
+              Object.entries(leagueTags).filter(([, t]) => normalizeDisposition(t) === target);
+            // Tailwind can't resolve dynamically-interpolated class names, so each bucket
+            // carries its complete, statically-written class strings rather than a color name.
+            const buckets: { key: string; label: string; labelCls: string; chipCls: string; xCls: string }[] = [
+              { key: "CORE", label: "Core — Do Not Sell", labelCls: "text-emerald-500", chipCls: "border-emerald-800 bg-emerald-950/30 text-emerald-300", xCls: "text-emerald-600" },
+              { key: "PRICEY", label: "Pricey — Unlikely to Sell", labelCls: "text-amber-500", chipCls: "border-amber-800 bg-amber-950/30 text-amber-300", xCls: "text-amber-600" },
+              { key: "SHOPPING", label: "Shopping — Small Interest", labelCls: "text-orange-500", chipCls: "border-orange-800 bg-orange-950/30 text-orange-300", xCls: "text-orange-600" },
+              { key: "OFFLOAD", label: "Offload — Move ASAP", labelCls: "text-red-500", chipCls: "border-red-800 bg-red-950/30 text-red-300", xCls: "text-red-600" },
+            ];
+            const sellNoCount = byDisposition("SELL_NO").length;
+            const hasAny = buckets.some((b) => byDisposition(b.key).length > 0) || sellNoCount > 0;
+            if (!hasAny) return null;
             return (
               <div className="rounded-lg border border-slate-700 bg-slate-800/30 px-3 py-2 space-y-2">
-                {corePlayers.length > 0 && (
-                  <div>
-                    <div className="text-[9px] font-bold uppercase tracking-widest text-emerald-500 mb-1">Core — Do Not Sell</div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {corePlayers.map(([pid]) => (
-                        <button
-                          key={pid}
-                          onClick={() => onToggleLeaguePlayerTag(leagueId, pid, "CORE")}
-                          title="Click to remove Core tag"
-                          className="flex items-center gap-1 rounded-full border border-emerald-800 bg-emerald-950/30 px-2 py-0.5 text-[10px] text-emerald-300 hover:border-red-600 hover:text-red-400 transition"
-                        >
-                          🔒 {playerMap[pid]?.full_name ?? pid} <span className="text-emerald-600 hover:text-red-400 ml-0.5">✕</span>
-                        </button>
-                      ))}
+                {buckets.map(({ key, label, labelCls, chipCls, xCls }) => {
+                  const entries = byDisposition(key);
+                  if (entries.length === 0) return null;
+                  return (
+                    <div key={key}>
+                      <div className={`text-[9px] font-bold uppercase tracking-widest ${labelCls} mb-1`}>{label}</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {entries.map(([id]) => (
+                          <button
+                            key={id}
+                            onClick={() => onSetAssetDisposition(leagueId, id, null)}
+                            title="Click to clear"
+                            className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] hover:border-red-600 hover:text-red-400 transition ${chipCls}`}
+                          >
+                            {assetLabel(id)} <span className={`${xCls} hover:text-red-400 ml-0.5`}>✕</span>
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                )}
-                {shoppingPlayers.length > 0 && (
-                  <div>
-                    <div className="text-[9px] font-bold uppercase tracking-widest text-orange-500 mb-1">Shopping — Want to Move</div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {shoppingPlayers.map(([pid]) => (
-                        <button
-                          key={pid}
-                          onClick={() => onToggleLeaguePlayerTag(leagueId, pid, "WANT_TO_TRADE")}
-                          title="Click to remove Shopping tag"
-                          className="flex items-center gap-1 rounded-full border border-orange-800 bg-orange-950/30 px-2 py-0.5 text-[10px] text-orange-300 hover:border-red-600 hover:text-red-400 transition"
-                        >
-                          🔄 {playerMap[pid]?.full_name ?? pid} <span className="text-orange-600 hover:text-red-400 ml-0.5">✕</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                  );
+                })}
+                {sellNoCount > 0 && (
+                  <p className="text-[10px] text-slate-500">
+                    {sellNoCount} opponent asset{sellNoCount > 1 ? "s are" : " is"} marked Not Willing to Sell and excluded from suggestions.
+                  </p>
                 )}
               </div>
             );
@@ -1373,7 +1393,6 @@ function TradeFinder({
               setCalcSearchB("");
               setTradeHubSection("CALCULATOR");
             }}
-            onToggleLeaguePlayerTag={onToggleLeaguePlayerTag}
             onMarkAttempted={onMarkAttempted}
             onSessionMark={onSessionMark}
           />

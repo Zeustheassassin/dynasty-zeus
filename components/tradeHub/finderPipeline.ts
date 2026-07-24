@@ -76,9 +76,12 @@ export interface FinderPipelineCtx {
   ) => PlayerWithValue[];
   getNFLDepthIdx: (team: string, pos: string, playerId: string) => number | null;
   rosterPlayers: (roster: SleeperRoster | null | undefined) => PlayerWithValue[];
-  isBlockedSellDisposition: (playerId?: string | null) => boolean;
-  isBlockedBuyDisposition: (playerId?: string | null) => boolean;
-  isWantToTrade: (playerId?: string | null) => boolean;
+  isBlockedSellDisposition: (assetId?: string | null) => boolean;
+  isBlockedBuyDisposition: (assetId?: string | null) => boolean;
+  isWantToTrade: (assetId?: string | null) => boolean;
+  isOffload: (assetId?: string | null) => boolean;
+  isPricey: (assetId?: string | null) => boolean;
+  isOpenToSell: (assetId?: string | null) => boolean;
   failsDirectionGuardrail: (r: TradeResult) => boolean;
   getDirectionTradeScore: (r: TradeResult) => number;
   getTradeLineupSafety: (r: TradeResult) => {
@@ -102,8 +105,8 @@ export function runFinderPipeline(
     nflState, selectedLeagueSimulation, selectedLeagueDraftHasOccurred,
     weeklyProjMap, playerDispositions, finderPickValue, buildPostTradePlayers,
     getNFLDepthIdx, rosterPlayers, isBlockedSellDisposition,
-    isBlockedBuyDisposition, isWantToTrade, failsDirectionGuardrail,
-    getDirectionTradeScore, getTradeLineupSafety,
+    isBlockedBuyDisposition, isWantToTrade, isOffload, isPricey, isOpenToSell,
+    failsDirectionGuardrail, getDirectionTradeScore, getTradeLineupSafety,
   } = ctx;
 
   const getSortedIds = <T,>(items: T[], getId: (item: T) => string) =>
@@ -1314,7 +1317,21 @@ export function runFinderPipeline(
         return cb;
       })();
 
-      const wantToTradeBonus = r.give.some((p) => isWantToTrade(p.player_id)) ? 20 : 0;
+      // Manual disposition scoring: Shopping/Offload on the give side nudge the Finder toward
+      // pieces the user has said they want moved (Offload — "get off my roster ASAP" — outweighs
+      // Shopping); Pricey nudges away without fully blocking it (that's CORE's job, a hard
+      // filter upstream). Open to Sell on the receive side mirrors Shopping for the opponent's
+      // manually-tagged assets. Covers both players and picks (finderPickKey-keyed).
+      const dispositionBonus = (() => {
+        let db = 0;
+        const giveAssetIds = [...valueBearingGive(r).map((p) => p.player_id), ...r.givePicks.map((p) => finderPickKey(p))];
+        const receiveAssetIds = [...r.receive.map((p) => p.player_id), ...r.receivePicks.map((p) => finderPickKey(p))];
+        if (giveAssetIds.some((id) => isWantToTrade(id))) db += 20;
+        if (giveAssetIds.some((id) => isOffload(id))) db += 35;
+        if (giveAssetIds.some((id) => isPricey(id))) db -= 15;
+        if (receiveAssetIds.some((id) => isOpenToSell(id))) db += 20;
+        return db;
+      })();
 
       const oppDropCostPenalty = (() => {
         const oppNetPlayerGain = valueBearingGive(r).length - r.receive.length;
@@ -1359,7 +1376,7 @@ export function runFinderPipeline(
       const valueEdgeBucket = r.score + balancePenalty + starPremiumScore + pickSlotScore + handcuffBonus;
       const structureBucket = formatBonus + rosterConsolidationBonus;
       const signalsBucket = dispositionScore + marketIntelScore + archetypeWinRateBonus
-        + seasonTimingBonus + usageSignalScore + exposureBonus + sellHighConfirmScore + wantToTradeBonus;
+        + seasonTimingBonus + usageSignalScore + exposureBonus + sellHighConfirmScore + dispositionBonus;
 
       const WEIGHTS = { acceptance: 1, userFit: 1, valueEdge: 1, structure: 1, signals: 1 };
       const BUCKET_CLAMP = 100000; // ~off (byte-identical); set to ~40 to bound non-value buckets

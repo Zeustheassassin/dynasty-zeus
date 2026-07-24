@@ -22,6 +22,7 @@ import type {
   TradeAttempt, TradeAttemptStatus, FcTrendEntry, PredictedPick, DraftPoolRanks,
   LeagueHubTab, ProjectionRow, SimulationTeamRow,
   LeagueMgmtData, CommPaymentsData, TradePartnerRanking,
+  AssetDisposition, LeagueAssetDispositions,
 } from "../../lib/types";
 import type { AnnotatedTrade } from "../../hooks/useUserTrades";
 import type { PlayerUsage } from "../../hooks/usePlayerStats";
@@ -211,8 +212,8 @@ interface HubRouterProps {
   tradeHubSection: "CALCULATOR" | "FINDER" | "TRADE_LOG" | "ATTEMPTS";
   calcOpponentRosterId: number | null;
   selectedLeagueDraftHasOccurred: boolean;
-  leaguePlayerTags: Record<string, Record<string, "CORE" | "WANT_TO_TRADE">>;
-  handleToggleLeaguePlayerTag: (leagueId: string, playerId: string, forceTag?: "CORE" | "WANT_TO_TRADE") => void;
+  leaguePlayerTags: LeagueAssetDispositions;
+  handleSetAssetDisposition: (leagueId: string, assetId: string, disposition: AssetDisposition | null) => void;
   leagueMateProfileByRosterId: Map<number, LeagueMateView>;
   tradePartnerRankings: TradePartnerRanking[];
   tradeHubData: AnnotatedTrade[] | null;
@@ -307,7 +308,7 @@ export function HubRouter({
   addRookie, editRookieName, removeAddedRookie, clearNameEdit, rookieOverrides,
   tradeHubSection, calcOpponentRosterId,
   selectedLeagueDraftHasOccurred,
-  leaguePlayerTags, handleToggleLeaguePlayerTag, leagueMateProfileByRosterId,
+  leaguePlayerTags, handleSetAssetDisposition, leagueMateProfileByRosterId,
   tradePartnerRankings,
   tradeHubData, loadingTradeHub, tradeHubError, tradeHubUserId, setTradeHubUserId, setTradeHubData,
   tradeAttempts, loadingTradeAttempts, tradeAttemptsLeagueId,
@@ -445,6 +446,8 @@ export function HubRouter({
             setCalcOpponentRosterId={setCalcOpponentRosterId}
             setMainTab={setMainTab}
             setTradeHubSection={setTradeHubSection}
+            leaguePlayerTags={leaguePlayerTags}
+            onSetAssetDisposition={handleSetAssetDisposition}
           />
           </ErrorBoundary>
         )}
@@ -594,7 +597,7 @@ export function HubRouter({
     finderSignals={finderSignals}
     finderRankGaps={finderRankGaps}
     leaguePlayerTags={leaguePlayerTags}
-    onToggleLeaguePlayerTag={handleToggleLeaguePlayerTag}
+    onSetAssetDisposition={handleSetAssetDisposition}
     leagueMateProfileByRosterId={leagueMateProfileByRosterId}
     selectedLeagueMateProfilesView={selectedLeagueMateProfilesView}
     tradePartnerRankings={tradePartnerRankings}

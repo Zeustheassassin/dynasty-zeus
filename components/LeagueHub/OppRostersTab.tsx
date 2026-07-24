@@ -3,7 +3,9 @@ import { memo, useMemo } from "react";
 import { usePlayers } from "../../lib/PlayersContext";
 import { useLeague } from "../../lib/LeagueContext";
 import { CURRENT_YEAR, rankAgainstLeague } from "../../lib/helpers";
-import type { SleeperUser, SleeperTradedPick, SleeperPlayer } from "../../lib/types";
+import { OPPONENT_DISPOSITIONS, pickDispositionKey } from "../../lib/helpers/dispositions";
+import { DispositionPicker } from "../shared/DispositionPicker";
+import type { SleeperUser, SleeperTradedPick, SleeperPlayer, AssetDisposition, LeagueAssetDispositions } from "../../lib/types";
 
 const ROLE_PRIORITY: Record<string, number> = { starter: 0, bench: 1, taxi: 2 };
 const ROLE_LABEL: Record<string, string> = { starter: "Starter", bench: "Bench", taxi: "Taxi" };
@@ -15,6 +17,8 @@ interface OppRostersTabProps {
   allPicks: SleeperTradedPick[];
   oppRosterOwnerId: string;
   setOppRosterOwnerId: (id: string) => void;
+  leaguePlayerTags: LeagueAssetDispositions;
+  onSetAssetDisposition: (leagueId: string, assetId: string, disposition: AssetDisposition | null) => void;
 }
 
 function OppRostersTab({
@@ -22,9 +26,16 @@ function OppRostersTab({
   allPicks,
   oppRosterOwnerId,
   setOppRosterOwnerId,
+  leaguePlayerTags,
+  onSetAssetDisposition,
 }: OppRostersTabProps) {
   const players = usePlayers();
   const { selectedLeague, rosters, users } = useLeague();
+  const leagueTags = leaguePlayerTags[selectedLeague?.league_id ?? ""] ?? {};
+  const setDisposition = (assetId: string, disposition: AssetDisposition | null) => {
+    if (!selectedLeague) return;
+    onSetAssetDisposition(selectedLeague.league_id, assetId, disposition);
+  };
 
   const oppRoster = useMemo(
     () => rosters.find((r) => r.owner_id === oppRosterOwnerId),
@@ -149,12 +160,19 @@ function OppRostersTab({
                     <div className="text-[11px] text-slate-600 italic">No players</div>
                   ) : (
                     list.map((p) => (
-                      <div key={p.player_id} className="flex items-center justify-between gap-2 text-xs py-0.5">
-                        <div className="flex-1 min-w-0">
-                          <div className="truncate text-slate-200">{p.full_name}</div>
-                          <div className="text-[10px] text-slate-500">{ROLE_LABEL[p.role] ?? ""}</div>
+                      <div key={p.player_id} className="text-xs py-0.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex-1 min-w-0 truncate text-slate-200">{p.full_name}</div>
+                          <span className="text-emerald-400 font-medium whitespace-nowrap">{(p.value || 0).toLocaleString()}</span>
                         </div>
-                        <span className="text-emerald-400 font-medium whitespace-nowrap">{(p.value || 0).toLocaleString()}</span>
+                        <div className="mt-0.5 flex items-center justify-between gap-2">
+                          <span className="text-[10px] text-slate-500">{ROLE_LABEL[p.role] ?? ""}</span>
+                          <DispositionPicker
+                            value={leagueTags[p.player_id]}
+                            options={OPPONENT_DISPOSITIONS}
+                            onChange={(next) => setDisposition(p.player_id, next)}
+                          />
+                        </div>
                       </div>
                     ))
                   )}
@@ -180,15 +198,22 @@ function OppRostersTab({
                           ? pick.slot
                           : `${pick.round}${["th", "st", "nd", "rd"][pick.round] || "th"}`;
                         const showVia = originalOwner && pick.roster_id !== oppRoster.roster_id;
+                        const assetId = pickDispositionKey(pick);
                         return (
-                          <div
-                            key={`${pick.season}-${pick.round}-${pick.roster_id}-${pick.owner_id}`}
-                            className="flex items-center justify-between gap-2 text-xs py-0.5"
-                          >
-                            <span className="text-slate-200 font-medium whitespace-nowrap">{label}</span>
-                            {showVia && (
-                              <span className="text-[10px] text-slate-500 truncate">via {originalOwner}</span>
-                            )}
+                          <div key={assetId} className="text-xs py-0.5">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-slate-200 font-medium whitespace-nowrap">{label}</span>
+                              {showVia && (
+                                <span className="text-[10px] text-slate-500 truncate">via {originalOwner}</span>
+                              )}
+                            </div>
+                            <div className="mt-0.5 flex justify-end">
+                              <DispositionPicker
+                                value={leagueTags[assetId]}
+                                options={OPPONENT_DISPOSITIONS}
+                                onChange={(next) => setDisposition(assetId, next)}
+                              />
+                            </div>
                           </div>
                         );
                       })}

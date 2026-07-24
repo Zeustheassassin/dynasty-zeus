@@ -6,6 +6,7 @@ import type {
   AugmentedPick,
   LeagueMateView, TradePartnerRanking, HistoricalSnapshot,
   FcTrendEntry,
+  AssetDisposition, LeagueAssetDispositions,
 } from "../lib/types";
 import type { AnnotatedTrade } from "../hooks/useUserTrades";
 import type { PersonalSignal } from "../lib/helpers/personalRankings";
@@ -37,8 +38,8 @@ interface TradeHubProps {
   playerDispositions: Record<string, { sell: string; buy: string }>;
   finderSignals: Record<string, PersonalSignal>;
   finderRankGaps: Record<string, number>;
-  leaguePlayerTags: Record<string, Record<string, "CORE" | "WANT_TO_TRADE">>;
-  onToggleLeaguePlayerTag: (leagueId: string, playerId: string, forceTag?: "CORE" | "WANT_TO_TRADE") => void;
+  leaguePlayerTags: LeagueAssetDispositions;
+  onSetAssetDisposition: (leagueId: string, assetId: string, disposition: AssetDisposition | null) => void;
   leagueMateProfileByRosterId: Map<number, LeagueMateView>;
   selectedLeagueMateProfilesView: LeagueMateView[];
   tradePartnerRankings: TradePartnerRanking[];
@@ -74,7 +75,7 @@ function TradeHub({
   calcOpponentRosterId, setCalcOpponentRosterId,
   selectedLeagueDraftHasOccurred,
   loadingCalcValues,
-  playerDispositions, finderSignals, finderRankGaps, leaguePlayerTags, onToggleLeaguePlayerTag, projectionData,
+  playerDispositions, finderSignals, finderRankGaps, leaguePlayerTags, onSetAssetDisposition, projectionData,
   leagueMateProfileByRosterId, selectedLeagueMateProfilesView,
   tradePartnerRankings,
   setPlayerProfileId, loadUserExposure, loadUserTrades,
@@ -259,7 +260,7 @@ function TradeHub({
             finderSignals={finderSignals}
             finderRankGaps={finderRankGaps}
             leaguePlayerTags={leaguePlayerTags}
-            onToggleLeaguePlayerTag={onToggleLeaguePlayerTag}
+            onSetAssetDisposition={onSetAssetDisposition}
             leagueMateProfileByRosterId={leagueMateProfileByRosterId}
             selectedLeagueMateProfilesView={selectedLeagueMateProfilesView}
             tradePartnerRankings={tradePartnerRankings}

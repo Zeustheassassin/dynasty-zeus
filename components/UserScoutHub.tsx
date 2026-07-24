@@ -25,6 +25,13 @@ import type {
   LeagueHubTab, ProjectionRow, RookieBoardPlayer,
 } from "../lib/types";
 import type { PlayerUsage } from "../hooks/usePlayerStats";
+import type { LeagueAssetDispositions } from "../lib/types";
+
+// This view is explicitly read-only (see header comment) — spied rosters never touch the
+// logged-in account's real dispositions, so RostersTab/OppRostersTab get a stable empty
+// map and a no-op setter rather than the app's real leaguePlayerTags/handleSetAssetDisposition.
+const SPY_NO_TAGS: LeagueAssetDispositions = {};
+const SPY_NOOP_SET_DISPOSITION = () => {};
 
 interface UserScoutHubProps {
   players: Record<string, SleeperPlayer>;
@@ -223,6 +230,8 @@ export default function UserScoutHub({
                       freeAgents={spyLeagueBundle.freeAgents}
                       setSelectedLeague={(lg) => { if (lg) selectSpyLeague(lg); else clearSelectedLeague(); }}
                       loadRoster={(lg) => selectSpyLeague(lg)}
+                      leaguePlayerTags={SPY_NO_TAGS}
+                      onSetAssetDisposition={SPY_NOOP_SET_DISPOSITION}
                     />
                   )}
                   {leagueHubTab === "OPP_ROSTERS" && (
@@ -231,6 +240,8 @@ export default function UserScoutHub({
                       allPicks={spyLeagueBundle.allPicks}
                       oppRosterOwnerId={tabState.oppRosterOwnerId}
                       setOppRosterOwnerId={tabState.setOppRosterOwnerId}
+                      leaguePlayerTags={SPY_NO_TAGS}
+                      onSetAssetDisposition={SPY_NOOP_SET_DISPOSITION}
                     />
                   )}
                   {leagueHubTab === "POWER_RANKINGS" && (

@@ -14,6 +14,8 @@ import type {
   SimulationTeamRow,
   SleeperPlayer,
   HistoricalSnapshot,
+  AssetDisposition,
+  LeagueAssetDispositions,
 } from "../lib/types";
 import type { MainTab } from "../lib/hubs";
 import { LEAGUE_HUB_GROUPS } from "../lib/leagueHubGroups";
@@ -101,6 +103,11 @@ interface LeagueHubProps {
   setCalcOpponentRosterId: (id: number | null) => void;
   setMainTab: (tab: MainTab) => void;
   setTradeHubSection: (section: "CALCULATOR" | "FINDER") => void;
+
+  // Manual player/pick dispositions (Core/Pricey/Shopping/Offload for my own
+  // roster, Not Willing/Open to Sell for opponent rosters)
+  leaguePlayerTags: LeagueAssetDispositions;
+  onSetAssetDisposition: (leagueId: string, assetId: string, disposition: AssetDisposition | null) => void;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
@@ -119,6 +126,7 @@ function LeagueHub({
   loadRoster, loadLeagueOverview, loadRedraftValues, loadUserTrades, loadUserExposure,
   saveLeagueNote, onSaveSim, handleRunAllSims,
   setPlayerProfileId, setCalcOpponentRosterId, setMainTab, setTradeHubSection,
+  leaguePlayerTags, onSetAssetDisposition,
 }: LeagueHubProps) {
   const {
     leagueSearch, setLeagueSearch,
@@ -213,6 +221,8 @@ function LeagueHub({
             freeAgents={freeAgents}
             setSelectedLeague={setSelectedLeague}
             loadRoster={loadRoster}
+            leaguePlayerTags={leaguePlayerTags}
+            onSetAssetDisposition={onSetAssetDisposition}
           />
         )}
 
@@ -248,6 +258,8 @@ function LeagueHub({
             allPicks={allPicks}
             oppRosterOwnerId={oppRosterOwnerId}
             setOppRosterOwnerId={setOppRosterOwnerId}
+            leaguePlayerTags={leaguePlayerTags}
+            onSetAssetDisposition={onSetAssetDisposition}
           />
         )}
 
