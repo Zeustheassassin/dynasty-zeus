@@ -5,6 +5,7 @@ import {
   getNonStandardRules,
   formatRule,
   groupRules,
+  roundScoringValue,
   ordinal,
   CURRENT_YEAR,
 } from "../../lib/helpers";
@@ -172,12 +173,15 @@ function RostersTab({
                     <div key={section}>
                       <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">{section}</div>
                       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-1.5">
-                        {items.map((rule) => (
-                          <div key={rule.key} className="flex justify-between items-center gap-2 text-xs py-0.5">
-                            <span className="truncate text-slate-200">{formatRule(rule.key)}</span>
-                            <span className="text-emerald-400 font-medium whitespace-nowrap">{rule.value > 0 ? `+${rule.value}` : rule.value}</span>
-                          </div>
-                        ))}
+                        {items.map((rule) => {
+                          const rounded = roundScoringValue(rule.value);
+                          return (
+                            <div key={rule.key} className="flex justify-between items-center gap-2 text-xs py-0.5">
+                              <span className="truncate text-slate-200">{formatRule(rule.key)}</span>
+                              <span className="text-emerald-400 font-medium whitespace-nowrap">{rounded > 0 ? `+${rounded}` : rounded}</span>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   ))}

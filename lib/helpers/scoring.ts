@@ -158,6 +158,11 @@ export const getNonStandardRules = (scoring: Record<string, number>) => {
   return changes;
 };
 
+/** Rounds a scoring value to the nearest 0.01 — Sleeper's API returns some
+ *  fractional rules (e.g. pass_yd) as float-imprecise values like
+ *  0.039999999910593033 instead of 0.04. */
+export const roundScoringValue = (v: number) => Math.round(v * 100) / 100;
+
 /** Returns a human-readable label for a Sleeper scoring key. */
 export const formatRule = (key: string) => {
   const labels: Record<string, string> = {

@@ -9,6 +9,7 @@ import {
   formatRule,
   groupRules,
   getLeagueNumQbs,
+  roundScoringValue,
 } from "@/lib/helpers/scoring";
 
 describe("getLeagueNumQbs", () => {
@@ -238,6 +239,21 @@ describe("formatRule", () => {
   it("title-cases unknown keys by replacing underscores with spaces", () => {
     expect(formatRule("some_custom_rule")).toBe("Some Custom Rule");
     expect(formatRule("rush_fd")).toBe("Rushing First Downs");
+  });
+});
+
+// ── roundScoringValue ───────────────────────────────────────────────────────
+
+describe("roundScoringValue", () => {
+  it("rounds Sleeper's float-imprecise values to the nearest 0.01", () => {
+    expect(roundScoringValue(0.039999999910593033)).toBe(0.04);
+    expect(roundScoringValue(0.10000000149011612)).toBe(0.1);
+  });
+
+  it("leaves already-clean values unchanged", () => {
+    expect(roundScoringValue(-1)).toBe(-1);
+    expect(roundScoringValue(0.5)).toBe(0.5);
+    expect(roundScoringValue(4)).toBe(4);
   });
 });
 
