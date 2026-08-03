@@ -432,6 +432,7 @@ export function HubRouter({
             projectionData={projectionData}
             nflState={nflState}
             freeAgents={freeAgents}
+            personalOrdering={personalOrdering}
             loadingCalcValues={loadingCalcValues}
             historicalSnapshot={historicalSnapshot}
             loadRoster={loadRoster}

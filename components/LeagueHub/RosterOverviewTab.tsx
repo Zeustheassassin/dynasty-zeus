@@ -1,6 +1,7 @@
 "use client";
 import React, { useEffect, useMemo } from "react";
 import { usePlayers } from "../../lib/PlayersContext";
+import { buildConsensusOrder, reconcilePersonalOrdering } from "../../lib/helpers/personalRankings";
 import type {
   SleeperLeague,
   SleeperUser,
@@ -30,6 +31,7 @@ interface RosterOverviewTabProps {
   loadLeagueOverview: () => Promise<void>;
   loadRoster: (league: SleeperLeague) => void;
   setLeagueHubTab: (tab: LeagueHubTab) => void;
+  personalOrdering: string[];
 }
 
 interface Row {
@@ -40,6 +42,7 @@ interface Row {
   ir: { filled: number; cap: number };
   taxi: { filled: number; cap: number };
   unflaggedInjuries: number;
+  topFreeAgents: string[];
 }
 
 function fillColor(filled: number, cap: number, hasCap: boolean): string {
@@ -64,8 +67,19 @@ function RosterOverviewTab({
   loadLeagueOverview,
   loadRoster,
   setLeagueHubTab,
+  personalOrdering,
 }: RosterOverviewTabProps) {
   const players = usePlayers();
+
+  // Global personal board (best-to-worst), reconciled against the raw
+  // (non-league-adjusted) player values — mirrors how the single-league Free
+  // Agents panel builds its consensus universe, just without a per-league
+  // scoring adjustment since this view spans many leagues at once.
+  const personalOrder = useMemo(() => {
+    if (!players) return [];
+    const consensusOrder = buildConsensusOrder(players, (id) => players[id]?.value ?? 0);
+    return reconcilePersonalOrdering(personalOrdering, consensusOrder);
+  }, [players, personalOrdering]);
 
   useEffect(() => {
     if (
@@ -113,6 +127,10 @@ function RosterOverviewTab({
         return isIREligible(players?.[pid]?.injury_status);
       }).length;
 
+      const leagueRosteredIds = new Set<string>();
+      entry.rosters.forEach((r) => (r.players ?? []).forEach((pid) => leagueRosteredIds.add(pid)));
+      const topFreeAgents = personalOrder.filter((id) => !leagueRosteredIds.has(id)).slice(0, 2);
+
       result.push({
         leagueId: league.league_id,
         leagueName: league.name,
@@ -121,11 +139,12 @@ function RosterOverviewTab({
         ir: { filled: irFilled, cap: irCap },
         taxi: { filled: taxiFilled, cap: taxiCap },
         unflaggedInjuries,
+        topFreeAgents,
       });
     }
     result.sort((a, b) => a.leagueName.localeCompare(b.leagueName));
     return result;
-  }, [user, leagues, leagueOverviewData, players]);
+  }, [user, leagues, leagueOverviewData, players, personalOrder]);
 
   if (!user || leagues.length === 0) {
     return (
@@ -138,7 +157,7 @@ function RosterOverviewTab({
   // Fixed (not minmax(0,1fr)) column widths so the league name always gets real room —
   // on a phone the row is wider than the screen and the wrapping container scrolls
   // horizontally instead of squeezing the name down to one character.
-  const GRID = "grid grid-cols-[13rem_5rem_4rem_4rem_5rem] gap-2 items-center px-1";
+  const GRID = "grid grid-cols-[13rem_5rem_4rem_4rem_5rem_14rem] gap-2 items-center px-1";
 
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-xl p-3">
@@ -172,6 +191,7 @@ function RosterOverviewTab({
                 <span className="text-right">IR</span>
                 <span className="text-right">Taxi</span>
                 <span className="text-right" title="IR-eligible players still on the active roster (could be moved to IR)">IR-Eligible</span>
+                <span title="Top 2 unrostered players in this league, ranked by your personal board">Top FAs</span>
               </div>
               <div className="space-y-0.5">
                 {rows.map((row) => {
@@ -198,6 +218,13 @@ function RosterOverviewTab({
                       </span>
                       <span className={`text-right font-mono ${row.unflaggedInjuries > 0 ? "text-orange-300" : "text-slate-600"}`}>
                         {row.unflaggedInjuries > 0 ? row.unflaggedInjuries : "—"}
+                      </span>
+                      <span className="text-slate-400 truncate">
+                        {row.topFreeAgents.length === 0
+                          ? "—"
+                          : row.topFreeAgents
+                              .map((id) => players?.[id]?.full_name ?? id)
+                              .join(", ")}
                       </span>
                     </div>
                   );

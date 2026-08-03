@@ -87,6 +87,7 @@ interface LeagueHubProps {
 
   // Additional state
   freeAgents: SleeperPlayer[];
+  personalOrdering: string[];
   loadingCalcValues: boolean;
   historicalSnapshot: HistoricalSnapshot | null;
 
@@ -122,7 +123,7 @@ function LeagueHub({
   selectedLeagueMateProfilesView,
   ignoredOwnerIds, toggleIgnoredOwner,
   projectionData, nflState,
-  freeAgents, loadingCalcValues, historicalSnapshot,
+  freeAgents, personalOrdering, loadingCalcValues, historicalSnapshot,
   loadRoster, loadLeagueOverview, loadRedraftValues, loadUserTrades, loadUserExposure,
   saveLeagueNote, onSaveSim, handleRunAllSims,
   setPlayerProfileId, setCalcOpponentRosterId, setMainTab, setTradeHubSection,
@@ -219,6 +220,7 @@ function LeagueHub({
             leagueSearch={leagueSearch}
             setLeagueSearch={setLeagueSearch}
             freeAgents={freeAgents}
+            personalOrdering={personalOrdering}
             setSelectedLeague={setSelectedLeague}
             loadRoster={loadRoster}
             leaguePlayerTags={leaguePlayerTags}
@@ -249,6 +251,7 @@ function LeagueHub({
             loadLeagueOverview={loadLeagueOverview}
             loadRoster={loadRoster}
             setLeagueHubTab={setLeagueHubTab}
+            personalOrdering={personalOrdering}
           />
         )}
 

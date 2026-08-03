@@ -15,6 +15,7 @@ import { useValues } from "../../lib/ValuesContext";
 import { useMyRoster } from "../../lib/RosterContext";
 import { MY_DISPOSITIONS, pickDispositionKey } from "../../lib/helpers/dispositions";
 import { DispositionPicker } from "../shared/DispositionPicker";
+import { buildConsensusOrder, reconcilePersonalOrdering } from "../../lib/helpers/personalRankings";
 import type { SleeperLeague, SleeperUser, SleeperTradedPick, SleeperPlayer, AssetDisposition, LeagueAssetDispositions } from "../../lib/types";
 
 const ROLE_PRIORITY: Record<string, number> = { starter: 0, bench: 1, taxi: 2 };
@@ -29,6 +30,7 @@ interface RostersTabProps {
   leagueSearch: string;
   setLeagueSearch: (s: string) => void;
   freeAgents: SleeperPlayer[];
+  personalOrdering?: string[];
   setSelectedLeague: (league: SleeperLeague | null) => void;
   loadRoster: (league: SleeperLeague) => void;
   leaguePlayerTags: LeagueAssetDispositions;
@@ -42,6 +44,7 @@ function RostersTab({
   leagueSearch,
   setLeagueSearch,
   freeAgents,
+  personalOrdering = [],
   setSelectedLeague,
   loadRoster,
   leaguePlayerTags,
@@ -50,7 +53,7 @@ function RostersTab({
   const players = usePlayers();
   const { selectedLeague, users } = useLeague();
   const { myRoster: roster } = useMyRoster();
-  const { selectedLeagueDirection, selectedLeagueDirectionAdjusted } = useValues();
+  const { selectedLeagueDirection, selectedLeagueDirectionAdjusted, leagueAdjustedFcValues } = useValues();
   const dir = selectedLeagueDirectionAdjusted ?? selectedLeagueDirection ?? null;
   const leagueTags = leaguePlayerTags[selectedLeague?.league_id ?? ""] ?? {};
   const setDisposition = (assetId: string, disposition: AssetDisposition | null) => {
@@ -88,6 +91,23 @@ function RostersTab({
     dir?.positionRanks?.forEach((r) => { map[r.pos as Position] = r.rank; });
     return map;
   }, [dir]);
+
+  const personalRankByPlayerId = useMemo(() => {
+    if (!players) return new Map<string, number>();
+    const consensusOrder = buildConsensusOrder(players, (id) => leagueAdjustedFcValues[id] ?? 0);
+    const order = reconcilePersonalOrdering(personalOrdering, consensusOrder);
+    const map = new Map<string, number>();
+    order.forEach((id, i) => map.set(id, i + 1));
+    return map;
+  }, [players, leagueAdjustedFcValues, personalOrdering]);
+
+  const sortedFreeAgents = useMemo(() => {
+    return [...freeAgents].sort((a, b) => {
+      const ra = personalRankByPlayerId.get(a.player_id) ?? Number.MAX_SAFE_INTEGER;
+      const rb = personalRankByPlayerId.get(b.player_id) ?? Number.MAX_SAFE_INTEGER;
+      return ra - rb;
+    });
+  }, [freeAgents, personalRankByPlayerId]);
 
   const picksByYear = useMemo(() => {
     const years = Array.from(new Set(picks.map((p) => String(p.season)))).sort();
@@ -290,10 +310,10 @@ function RostersTab({
                 <div className="text-xs text-slate-400">Free Agents: <span className="font-semibold text-emerald-400">{freeAgents.length}</span></div>
               </div>
               <div className="space-y-0.5">
-                {freeAgents.length === 0 ? (
+                {sortedFreeAgents.length === 0 ? (
                   <div className="text-[11px] text-slate-600 italic">None</div>
                 ) : (
-                  freeAgents.map((p) => (
+                  sortedFreeAgents.map((p) => (
                     <div key={p.player_id} className="flex items-center justify-between gap-2 text-xs py-0.5">
                       <div className="flex-1 min-w-0 flex items-center gap-1">
                         <span className="text-[10px] text-slate-500 uppercase">{p.position}</span>
