@@ -14,7 +14,7 @@ import type {
   AssetDisposition, LeagueAssetDispositions,
 } from "../../lib/types";
 import type { PersonalSignal } from "../../lib/helpers/personalRankings";
-import { normalizeDisposition } from "../../lib/helpers/dispositions";
+import { normalizeDisposition, opponentAssetKey } from "../../lib/helpers/dispositions";
 import { usePlayers } from "../../lib/PlayersContext";
 import { useLeague } from "../../lib/LeagueContext";
 import { useValues } from "../../lib/ValuesContext";
@@ -294,13 +294,21 @@ function TradeFinder({
       // that's an explicit signal a suggested trade for them will never be accepted.
       const disposition = (assetId?: string | null) =>
         assetId ? normalizeDisposition(leaguePlayerTags[selectedLeague?.league_id ?? ""]?.[assetId]) : undefined;
+      // Opponent-side dispositions (SELL_NO/SELL_OK) are keyed per-roster (opponentAssetKey) so a
+      // tag set against one opponent's copy of an asset never leaks onto another opponent's (or a
+      // re-acquired) copy of the same asset — the oppRosterId must be passed at every call site.
+      const oppDisposition = (assetId?: string | null, oppRosterId?: number | string | null) =>
+        assetId && oppRosterId != null
+          ? normalizeDisposition(leaguePlayerTags[selectedLeague?.league_id ?? ""]?.[opponentAssetKey(assetId, oppRosterId)])
+          : undefined;
       const isBlockedSellDisposition = (assetId?: string | null) => disposition(assetId) === "CORE";
-      const isBlockedBuyDisposition = (playerId?: string | null) =>
-        (!!playerId && finderSignals[playerId] === "STRONG_SELL") || disposition(playerId) === "SELL_NO";
+      const isBlockedBuyDisposition = (playerId?: string | null, oppRosterId?: number | string | null) =>
+        (!!playerId && finderSignals[playerId] === "STRONG_SELL") || oppDisposition(playerId, oppRosterId) === "SELL_NO";
       const isWantToTrade = (assetId?: string | null) => disposition(assetId) === "SHOPPING";
       const isOffload = (assetId?: string | null) => disposition(assetId) === "OFFLOAD";
       const isPricey = (assetId?: string | null) => disposition(assetId) === "PRICEY";
-      const isOpenToSell = (assetId?: string | null) => disposition(assetId) === "SELL_OK";
+      const isOpenToSell = (assetId?: string | null, oppRosterId?: number | string | null) =>
+        oppDisposition(assetId, oppRosterId) === "SELL_OK";
       const myT = posTotals(myPlayers);
       // Read from component-level useMemo — only rebuilds on league switch / value refresh
       // Single source of truth: the fully adjusted profile (dynasty + redraft + sim + age).
@@ -592,7 +600,7 @@ function TradeFinder({
         if (results.length >= MAX_CANDIDATES) break;
         const oppPlayers = rosterPlayers(oppRoster);
         const oppPicks: PickWithValue[] = allPicks
-          .filter((p) => p.owner_id === oppRoster.roster_id && !isBlockedBuyDisposition(finderPickKey(p)))
+          .filter((p) => p.owner_id === oppRoster.roster_id && !isBlockedBuyDisposition(finderPickKey(p), oppRoster.roster_id))
           .map((p) => ({ ...p, value: finderPickValue(p) }))
           .filter((p) => p.value > 0)
           .sort((a, b) => {
@@ -609,8 +617,8 @@ function TradeFinder({
         // Lottery format (sourced separately from oppPlayers) keeps its low-value upside picks.
         // Also exclude "Zero Interest" buy-disposition players unless explicitly targeted.
         const oppTopBase = oppPlayers
-          .filter((p) => !isBlockedBuyDisposition(p.player_id) && (p.value ?? 0) >= LOW_VALUE_FLOOR);
-        const targetPinnedOppPlayer = deferredTargetPlayerId && !isBlockedBuyDisposition(deferredTargetPlayerId)
+          .filter((p) => !isBlockedBuyDisposition(p.player_id, oppRoster.roster_id) && (p.value ?? 0) >= LOW_VALUE_FLOOR);
+        const targetPinnedOppPlayer = deferredTargetPlayerId && !isBlockedBuyDisposition(deferredTargetPlayerId, oppRoster.roster_id)
           ? oppPlayers.find((p) => p.player_id === deferredTargetPlayerId)
           : null;
         const oppTop = targetPinnedOppPlayer && !oppTopBase.some((p) => p.player_id === targetPinnedOppPlayer.player_id)
@@ -1048,7 +1056,7 @@ function TradeFinder({
           Number(p.round) >= 3 && Number(p.value || 0) > 0 && Number(p.value || 0) < FINDER_LOTTERY_CEILING
         );
         const oppLotteryPlayers = oppPlayers.filter((p) => {
-          if (isBlockedBuyDisposition(p.player_id)) return false;
+          if (isBlockedBuyDisposition(p.player_id, oppRoster.roster_id)) return false;
           const age = Number(p.age || 99);
           const val = Number(p.value || 0);
           if (val < 60 || val >= FINDER_LOTTERY_CEILING) return false;

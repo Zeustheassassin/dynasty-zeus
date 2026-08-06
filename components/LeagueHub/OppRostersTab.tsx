@@ -3,7 +3,7 @@ import { memo, useMemo } from "react";
 import { usePlayers } from "../../lib/PlayersContext";
 import { useLeague } from "../../lib/LeagueContext";
 import { CURRENT_YEAR, rankAgainstLeague } from "../../lib/helpers";
-import { OPPONENT_DISPOSITIONS, pickDispositionKey } from "../../lib/helpers/dispositions";
+import { OPPONENT_DISPOSITIONS, pickDispositionKey, opponentAssetKey } from "../../lib/helpers/dispositions";
 import { DispositionPicker } from "../shared/DispositionPicker";
 import type { SleeperUser, SleeperTradedPick, SleeperPlayer, AssetDisposition, LeagueAssetDispositions } from "../../lib/types";
 
@@ -168,9 +168,9 @@ function OppRostersTab({
                         <div className="mt-0.5 flex items-center justify-between gap-2">
                           <span className="text-[10px] text-slate-500">{ROLE_LABEL[p.role] ?? ""}</span>
                           <DispositionPicker
-                            value={leagueTags[p.player_id]}
+                            value={leagueTags[opponentAssetKey(p.player_id, oppRoster.roster_id)]}
                             options={OPPONENT_DISPOSITIONS}
-                            onChange={(next) => setDisposition(p.player_id, next)}
+                            onChange={(next) => setDisposition(opponentAssetKey(p.player_id, oppRoster.roster_id), next)}
                           />
                         </div>
                       </div>
@@ -198,7 +198,7 @@ function OppRostersTab({
                           ? pick.slot
                           : `${pick.round}${["th", "st", "nd", "rd"][pick.round] || "th"}`;
                         const showVia = originalOwner && pick.roster_id !== oppRoster.roster_id;
-                        const assetId = pickDispositionKey(pick);
+                        const assetId = opponentAssetKey(pickDispositionKey(pick), oppRoster.roster_id);
                         return (
                           <div key={assetId} className="text-xs py-0.5">
                             <div className="flex items-center justify-between gap-2">

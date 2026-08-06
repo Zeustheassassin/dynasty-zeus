@@ -77,11 +77,11 @@ export interface FinderPipelineCtx {
   getNFLDepthIdx: (team: string, pos: string, playerId: string) => number | null;
   rosterPlayers: (roster: SleeperRoster | null | undefined) => PlayerWithValue[];
   isBlockedSellDisposition: (assetId?: string | null) => boolean;
-  isBlockedBuyDisposition: (assetId?: string | null) => boolean;
+  isBlockedBuyDisposition: (assetId?: string | null, oppRosterId?: number | string | null) => boolean;
   isWantToTrade: (assetId?: string | null) => boolean;
   isOffload: (assetId?: string | null) => boolean;
   isPricey: (assetId?: string | null) => boolean;
-  isOpenToSell: (assetId?: string | null) => boolean;
+  isOpenToSell: (assetId?: string | null, oppRosterId?: number | string | null) => boolean;
   failsDirectionGuardrail: (r: TradeResult) => boolean;
   getDirectionTradeScore: (r: TradeResult) => number;
   getTradeLineupSafety: (r: TradeResult) => {
@@ -303,7 +303,7 @@ export function runFinderPipeline(
   const preGuardrail = results
     .filter((r) => isFinite(r.score))
     .filter((r) => !r.give.some((p) => isBlockedSellDisposition(p.player_id)))
-    .filter((r) => !r.receive.some((p) => isBlockedBuyDisposition(p.player_id)))
+    .filter((r) => !r.receive.some((p) => isBlockedBuyDisposition(p.player_id, r.oppRosterId)))
     .filter((r) => !pinnedPlayer || r.give.some((p) => p.player_id === pinnedPlayer.player_id))
     .filter((r) => !deferredTargetPlayerId || r.receive.some((p) => p.player_id === deferredTargetPlayerId))
     .filter((r) => !isWrongOwnerHCPackage(r))
@@ -1329,7 +1329,7 @@ export function runFinderPipeline(
         if (giveAssetIds.some((id) => isWantToTrade(id))) db += 20;
         if (giveAssetIds.some((id) => isOffload(id))) db += 35;
         if (giveAssetIds.some((id) => isPricey(id))) db -= 15;
-        if (receiveAssetIds.some((id) => isOpenToSell(id))) db += 20;
+        if (receiveAssetIds.some((id) => isOpenToSell(id, r.oppRosterId))) db += 20;
         return db;
       })();
 

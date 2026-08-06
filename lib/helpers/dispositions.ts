@@ -34,3 +34,10 @@ interface PickKeyLike {
 }
 export const pickDispositionKey = (p: PickKeyLike): string =>
   `${p.season}-${p.round}-${p.roster_id}`;
+
+/** Composite key for opponent-side dispositions (SELL_NO/SELL_OK) — scopes a tag to the
+ *  specific roster it was set against, so a trade to a new team never inherits the old
+ *  team's tag. roster_id (not owner_id): always present, and already in scope at every
+ *  call site (OppRostersTab's oppRoster, TradeFinder's oppRoster, finderPipeline's r.oppRosterId). */
+export const opponentAssetKey = (assetId: string, oppRosterId: number | string): string =>
+  `${assetId}::${oppRosterId}`;

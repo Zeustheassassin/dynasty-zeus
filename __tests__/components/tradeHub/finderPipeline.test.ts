@@ -982,4 +982,42 @@ describe("runFinderPipeline — manual asset dispositions", () => {
     );
     expect(allTrades.map((t) => t.receive[0].player_id)).toEqual(["OK", "r2"]);
   });
+
+  // Regression coverage for the cross-opponent tag-leak bug: a SELL_NO/SELL_OK tag is
+  // scoped to the specific roster it was set against (via opponentAssetKey upstream), so
+  // isBlockedBuyDisposition/isOpenToSell must be called with — and honor — r.oppRosterId
+  // rather than applying a tag on one player_id to every opponent who happens to roster it.
+  it("only blocks a receive-side Not-Willing tag for the opponent it was actually set against", () => {
+    const sameIdOtherOpp = mkTrade({
+      give: [mkPlayer("g1", "WR", 2000)], receive: [mkPlayer("shared", "RB", 2000)],
+      oppRosterId: 2, score: 100,
+    });
+    const sameIdTaggedOpp = mkTrade({
+      give: [mkPlayer("g2", "WR", 2000)], receive: [mkPlayer("shared", "RB", 2000)],
+      oppRosterId: 3, score: 100,
+    });
+    const { allTrades } = runFinderPipeline(
+      [sameIdOtherOpp, sameIdTaggedOpp],
+      baseCtx({ rosters, isBlockedBuyDisposition: (id, oppRosterId) => id === "shared" && oppRosterId === 3 }),
+    );
+    // Roster 2's copy of "shared" survives; roster 3's identical player_id is blocked.
+    expect(allTrades.map((t) => t.oppRosterId)).toEqual([2]);
+  });
+
+  it("only applies a receive-side Open-to-Sell bonus for the opponent it was actually set against", () => {
+    const sameIdOtherOpp = mkTrade({
+      give: [mkPlayer("g1", "WR", 2000)], receive: [mkPlayer("shared", "RB", 2000)],
+      oppRosterId: 2, score: 100,
+    });
+    const sameIdTaggedOpp = mkTrade({
+      give: [mkPlayer("g2", "WR", 2000)], receive: [mkPlayer("shared", "RB", 2000)],
+      oppRosterId: 3, score: 100,
+    });
+    const { allTrades } = runFinderPipeline(
+      [sameIdOtherOpp, sameIdTaggedOpp],
+      baseCtx({ rosters, isOpenToSell: (id, oppRosterId) => id === "shared" && oppRosterId === 3 }),
+    );
+    // The +20 bonus only lands for roster 3's trade, so it outranks roster 2's otherwise-identical one.
+    expect(allTrades.map((t) => t.oppRosterId)).toEqual([3, 2]);
+  });
 });

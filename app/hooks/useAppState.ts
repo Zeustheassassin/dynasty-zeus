@@ -43,6 +43,7 @@ import { useActivityState } from "./useActivityState";
 import { usePlayerAnnotations } from "./usePlayerAnnotations";
 import { usePersonalRankings } from "./usePersonalRankings";
 import { buildConsensusOrder, buildPersonalDispositions, buildPersonalSignals, buildPersonalRankGaps } from "../../lib/helpers/personalRankings";
+import { MY_DISPOSITIONS, pickDispositionKey, normalizeDisposition } from "../../lib/helpers/dispositions";
 import type { PersonalSignal } from "../../lib/helpers/personalRankings";
 import { useSimulatorState } from "./useSimulatorState";
 import { fetchSleeperUser } from "../../lib/sleeperUserCache";
@@ -109,6 +110,11 @@ export function useAppState() {
     handleSetAssetDisposition,
   } = usePlayerAnnotations(supabaseUser);
   const { personalOrdering, setPersonalOrdering, savePersonalOrdering } = usePersonalRankings(supabaseUser);
+
+  // Ref so loadRoster's useCallback (deps: [user, players]) always reads the latest tags
+  // without needing leaguePlayerTags in its own deps — mirrors supabaseUserRef in usePlayerAnnotations.ts
+  const leaguePlayerTagsRef = useRef(leaguePlayerTags);
+  useEffect(() => { leaguePlayerTagsRef.current = leaguePlayerTags; }, [leaguePlayerTags]);
 
   // -------------------------
   // HUB ROUTING STATE
@@ -1020,6 +1026,26 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
 
   // â”€â”€ Step 5: My picks (after trades applied and rounds trimmed) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const myPicks = tempPicks.filter((p) => p.owner_id === myRoster.roster_id);
+
+  // â”€â”€ Reconcile stale own-roster dispositions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // A Core/Pricey/Shopping/Offload tag is only meaningful while the asset is still mine.
+  // If it was traded away since the tag was set, clear it here so it can't silently
+  // resurface if the same player/pick is ever reacquired. Opponent-side tags (SELL_NO/
+  // SELL_OK) don't need this: they're keyed per-roster (opponentAssetKey) and self-correct
+  // on any trade without reconciliation.
+  {
+    const currentAssetIds = new Set<string>([
+      ...(myRoster.players ?? []),
+      ...myPicks.map((p) => pickDispositionKey(p)),
+    ]);
+    const myTagsForLeague = leaguePlayerTagsRef.current[league.league_id] ?? {};
+    for (const [assetId, rawTag] of Object.entries(myTagsForLeague)) {
+      const tag = normalizeDisposition(rawTag);
+      if (!tag || !MY_DISPOSITIONS.some((d) => d.value === tag)) continue;
+      if (!currentAssetIds.has(assetId)) handleSetAssetDisposition(league.league_id, assetId, null);
+    }
+  }
+
   const order = currentDraft?.draft_order || {};
   setSelectedLeagueDraftHasOccurred(currentDraft?.status !== "pre_draft");
   const totalDraftTeams = allRosters.length || Number(currentDraft?.settings?.teams) || 0;

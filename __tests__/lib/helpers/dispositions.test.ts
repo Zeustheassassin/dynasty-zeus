@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   normalizeDisposition,
   pickDispositionKey,
+  opponentAssetKey,
   MY_DISPOSITIONS,
   OPPONENT_DISPOSITIONS,
 } from "@/lib/helpers/dispositions";
@@ -28,6 +29,21 @@ describe("normalizeDisposition", () => {
 describe("pickDispositionKey", () => {
   it("matches the finderPickKey format (season-round-roster_id)", () => {
     expect(pickDispositionKey({ season: "2027", round: 1, roster_id: 4 })).toBe("2027-1-4");
+  });
+});
+
+describe("opponentAssetKey", () => {
+  it("scopes an asset id to a specific opponent roster", () => {
+    expect(opponentAssetKey("4046", 2)).toBe("4046::2");
+  });
+
+  it("produces distinct keys for the same asset under different rosters", () => {
+    expect(opponentAssetKey("4046", 2)).not.toBe(opponentAssetKey("4046", 3));
+  });
+
+  it("composes with pickDispositionKey for opponent-tagged picks", () => {
+    const pickKey = pickDispositionKey({ season: "2027", round: 1, roster_id: 4 });
+    expect(opponentAssetKey(pickKey, 7)).toBe("2027-1-4::7");
   });
 });
 
