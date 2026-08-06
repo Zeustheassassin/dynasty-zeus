@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { CURRENT_YEAR, average } from "../lib/helpers";
 import { sleeperApi } from "../lib/sleeperApi";
-import type { CrossLeagueIntel, CrossLeagueIntelPlayer, SleeperRoster, SleeperPlayer, SleeperTransaction, SleeperDraft, LeagueHubTab } from "../lib/types";
+import type { CrossLeagueIntel, CrossLeagueIntelPlayer, SleeperRoster, SleeperPlayer, SleeperTransaction, SleeperDraft } from "../lib/types";
 
 export interface UseCrossLeagueMateIntelReturn {
   crossLeagueMateIntel: Record<string, CrossLeagueIntel>;
@@ -15,7 +15,6 @@ interface UseCrossLeagueMateIntelOptions {
   userId: string | null | undefined;
   players: Record<string, SleeperPlayer>;
   mainTab: string;
-  leagueHubTab: LeagueHubTab;
   tradeHubSection: string;
 }
 
@@ -25,7 +24,6 @@ export function useCrossLeagueMateIntel({
   userId,
   players,
   mainTab,
-  leagueHubTab,
   tradeHubSection,
 }: UseCrossLeagueMateIntelOptions): UseCrossLeagueMateIntelReturn {
   const [crossLeagueMateIntel, setCrossLeagueMateIntel] = useState<Record<string, CrossLeagueIntel>>({});
@@ -37,10 +35,7 @@ export function useCrossLeagueMateIntel({
       !!rosters.length &&
       !!userId &&
       !!Object.keys(players || {}).length &&
-      (
-        (mainTab === "LEAGUES" && leagueHubTab === "LEAGUE_MATES") ||
-        (mainTab === "TRADE_HUB" && tradeHubSection === "FINDER")
-      );
+      mainTab === "TRADE_HUB" && tradeHubSection === "FINDER";
 
     if (!shouldLoadCrossLeagueIntel) return;
 
@@ -255,7 +250,7 @@ export function useCrossLeagueMateIntel({
 
     loadCrossLeagueMateIntel();
     return () => { cancelled = true; };
-  }, [leagueId, rosters, userId, players, mainTab, leagueHubTab, tradeHubSection, crossLeagueMateIntel]);
+  }, [leagueId, rosters, userId, players, mainTab, tradeHubSection, crossLeagueMateIntel]);
 
   return { crossLeagueMateIntel, loadingCrossLeagueMateIntel };
 }

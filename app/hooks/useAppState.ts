@@ -164,7 +164,7 @@ const {
   tradeAttempts, tradeAttemptsLeagueId, loadingTradeAttempts, allTradeAttempts,
   loadTradeAttempts, markTradeAttempted, updateAttemptStatus, deleteAttempt,
 } = useTradeAttempts(supabaseUser);
-const { leagueMateTradeIntel, loadingLeagueMateIntel } = useLeagueMateIntel(selectedLeague, rosters, players);
+const { leagueMateTradeIntel } = useLeagueMateIntel(selectedLeague, rosters, players);
 const [leagueMateProfileCache, setLeagueMateProfileCache] = useState<Record<string, LeagueMateView[]>>({});
 const { nflState, setNflState, loadNflState } = useNflState();
 const {
@@ -284,13 +284,12 @@ const {
   alertStorageKey,
   dismissedAlertStorageKey,
 } = useAlerts({ supabaseUser, players });
-const { crossLeagueMateIntel, loadingCrossLeagueMateIntel } = useCrossLeagueMateIntel({
+const { crossLeagueMateIntel } = useCrossLeagueMateIntel({
   leagueId: selectedLeague?.league_id,
   rosters,
   userId: user?.user_id,
   players,
   mainTab,
-  leagueHubTab,
   tradeHubSection,
 });
 const [leagueTransactions, setLeagueTransactions] = useState<AnnotatedTransaction[]>([]);
@@ -2961,8 +2960,6 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     leagueSimCache,
     simQueue,
     simProgress,
-    loadingLeagueMateIntel,
-    loadingCrossLeagueMateIntel,
     loadingActivity,
     loadingLeagueWeeklyMatchups,
     leagueNotes,

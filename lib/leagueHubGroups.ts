@@ -11,7 +11,6 @@ export const LEAGUE_HUB_GROUPS: Array<{
     tabs: [
       { id: "OVERVIEW", label: "League Overview" },
       { id: "SIMULATOR", label: "Season Simulator" },
-      { id: "LEAGUE_MATES", label: "League Mates" },
       { id: "POWER_RANKINGS", label: "Power Rankings" },
       { id: "STANDINGS", label: "Standings" },
       { id: "RECAP", label: "Season Recap" },

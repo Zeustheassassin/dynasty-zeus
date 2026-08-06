@@ -115,8 +115,6 @@ interface HubRouterProps {
   leagueSimCache: Record<string, Record<number, CachedSimRow>>;
   simQueue: string[];
   simProgress: { done: number; total: number } | null;
-  loadingLeagueMateIntel: boolean;
-  loadingCrossLeagueMateIntel: boolean;
   loadingActivity: boolean;
   loadingLeagueWeeklyMatchups: boolean;
   leagueNotes: Record<string, string>;
@@ -296,7 +294,7 @@ export function HubRouter({
   showAllOpenTrades, setShowAllOpenTrades, alertsFeedTab, setAlertsFeedTab,
   leagueHubTab, setLeagueHubTab, activeLeagueHubGroup, standings,
   committedSimsByLeague, leagueSimCache, simQueue, simProgress,
-  loadingLeagueMateIntel, loadingCrossLeagueMateIntel, loadingActivity, loadingLeagueWeeklyMatchups,
+  loadingActivity, loadingLeagueWeeklyMatchups,
   leagueNotes, activityTransactions, leagueOverviewData, leagueOverviewLoaded, leagueOverviewError,
   selectedLeagueMateProfilesView, ignoredOwnerIds, toggleIgnoredOwner,
   freeAgents, loadingCalcValues, calcValuesError, loadingDraftRefresh, rookies, draftedPlayerIds,
@@ -434,8 +432,6 @@ export function HubRouter({
             leagueSimCache={leagueSimCache}
             simQueue={simQueue}
             simProgress={simProgress}
-            loadingLeagueMateIntel={loadingLeagueMateIntel}
-            loadingCrossLeagueMateIntel={loadingCrossLeagueMateIntel}
             loadingActivity={loadingActivity}
             loadingLeagueWeeklyMatchups={loadingLeagueWeeklyMatchups}
             leagueNotes={leagueNotes}
@@ -455,15 +451,10 @@ export function HubRouter({
             loadRoster={loadRoster}
             loadLeagueOverview={loadLeagueOverview}
             loadRedraftValues={loadRedraftValues}
-            loadUserTrades={loadUserTrades}
-            loadUserExposure={loadUserExposure}
             saveLeagueNote={saveLeagueNote}
             onSaveSim={saveSimulationToSupabase}
             handleRunAllSims={handleRunAllSims}
             setPlayerProfileId={setPlayerProfileId}
-            setCalcOpponentRosterId={setCalcOpponentRosterId}
-            setMainTab={setMainTab}
-            setTradeHubSection={setTradeHubSection}
             leaguePlayerTags={leaguePlayerTags}
             onSetAssetDisposition={handleSetAssetDisposition}
           />

@@ -16,7 +16,6 @@ import type {
   AssetDisposition,
   LeagueAssetDispositions,
 } from "../lib/types";
-import type { MainTab } from "../lib/hubs";
 import { LEAGUE_HUB_GROUPS } from "../lib/leagueHubGroups";
 import { useLeagueTabState } from "./LeagueHub/hooks/useLeagueTabState";
 import StandingsTab from "./league/StandingsTab";
@@ -24,7 +23,6 @@ import OverviewTab from "./LeagueHub/OverviewTab";
 import SimulatorTab from "./LeagueHub/SimulatorTab";
 import RostersTab from "./LeagueHub/RostersTab";
 import RosterOverviewTab from "./LeagueHub/RosterOverviewTab";
-import LeagueMatesTab from "./LeagueHub/LeagueMatesTab";
 import OppRostersTab from "./LeagueHub/OppRostersTab";
 import StartersTab from "./LeagueHub/StartersTab";
 import RosterToolsTab from "./LeagueHub/RosterToolsTab";
@@ -58,8 +56,6 @@ interface LeagueHubProps {
   simProgress: { done: number; total: number } | null;
 
   // Loading states
-  loadingLeagueMateIntel: boolean;
-  loadingCrossLeagueMateIntel: boolean;
   loadingActivity: boolean;
   loadingLeagueWeeklyMatchups: boolean;
 
@@ -93,15 +89,10 @@ interface LeagueHubProps {
   loadRoster: (league: SleeperLeague) => void;
   loadLeagueOverview: () => Promise<void>;
   loadRedraftValues: () => void;
-  loadUserTrades: (ownerId: string, bypass?: boolean) => void;
-  loadUserExposure: (ownerId: string) => void;
   saveLeagueNote: (leagueId: string, text: string) => void;
   onSaveSim: (leagueId: string, rows: SimulationTeamRow[]) => void;
   handleRunAllSims: () => void;
   setPlayerProfileId: (id: string | null) => void;
-  setCalcOpponentRosterId: (id: number | null) => void;
-  setMainTab: (tab: MainTab) => void;
-  setTradeHubSection: (section: "CALCULATOR" | "FINDER") => void;
 
   // Manual player/pick dispositions (Core/Pricey/Shopping/Offload for my own
   // roster, Not Willing/Open to Sell for opponent rosters)
@@ -115,16 +106,16 @@ function LeagueHub({
   leagues, user, standings, setSelectedLeague,
   picks, allPicks,
   committedSimsByLeague, leagueSimCache, simQueue, simProgress,
-  loadingLeagueMateIntel, loadingCrossLeagueMateIntel, loadingActivity, loadingLeagueWeeklyMatchups,
+  loadingActivity, loadingLeagueWeeklyMatchups,
   leagueNotes, activityTransactions,
   leagueOverviewData, loadingLeagueOverview, leagueOverviewLoaded, leagueOverviewError,
   selectedLeagueMateProfilesView,
   ignoredOwnerIds, toggleIgnoredOwner,
   projectionData, nflState,
   freeAgents, personalOrdering, loadingCalcValues,
-  loadRoster, loadLeagueOverview, loadRedraftValues, loadUserTrades, loadUserExposure,
+  loadRoster, loadLeagueOverview, loadRedraftValues,
   saveLeagueNote, onSaveSim, handleRunAllSims,
-  setPlayerProfileId, setCalcOpponentRosterId, setMainTab, setTradeHubSection,
+  setPlayerProfileId,
   leaguePlayerTags, onSetAssetDisposition,
 }: LeagueHubProps) {
   const {
@@ -223,19 +214,6 @@ function LeagueHub({
             loadRoster={loadRoster}
             leaguePlayerTags={leaguePlayerTags}
             onSetAssetDisposition={onSetAssetDisposition}
-          />
-        )}
-
-        {leagueHubTab === "LEAGUE_MATES" && (
-          <LeagueMatesTab
-            selectedLeagueMateProfilesView={selectedLeagueMateProfilesView}
-            loadingLeagueMateIntel={loadingLeagueMateIntel}
-            loadingCrossLeagueMateIntel={loadingCrossLeagueMateIntel}
-            loadUserTrades={loadUserTrades}
-            loadUserExposure={loadUserExposure}
-            setCalcOpponentRosterId={setCalcOpponentRosterId}
-            setMainTab={setMainTab}
-            setTradeHubSection={setTradeHubSection}
           />
         )}
 

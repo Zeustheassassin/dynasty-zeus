@@ -436,7 +436,6 @@ export type LeagueHubTab =
   | "SIMULATOR"
   | "ROSTERS"
   | "ROSTER_OVERVIEW"
-  | "LEAGUE_MATES"
   | "OPP_ROSTERS"
   | "STANDINGS"
   | "STARTERS"
