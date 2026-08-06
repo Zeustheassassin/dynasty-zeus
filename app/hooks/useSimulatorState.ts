@@ -5,6 +5,7 @@ import { supabase } from "../../lib/supabaseclient";
 import { logger } from "../../lib/logger";
 import { simulateLeague, type PoolPlayer } from "../../lib/helpers/simulation";
 import { getLocalStorageItem, setLocalStorageItem } from "@/lib/hooks/useLocalStorage";
+import { CURRENT_YEAR } from "../../lib/helpers/season";
 import { ROOKIE_YEAR } from "../../hooks/useRookieBoardState";
 import type { PlayerUsage } from "../../hooks/usePlayerStats";
 import type {
@@ -274,8 +275,39 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
         .from("league_simulations")
         .upsert(rows, { onConflict: "user_id,league_id,roster_id" })
         .then(() => {}, (err: unknown) => log.error("league_simulations upsert failed", { err: String(err) }));
+
+      // Also feed the shared, non-personalized history table (migration 044) so
+      // the odds-tracker chart/sparklines get real data from actual usage —
+      // every registered user's "Run All Sims" click already computes this same
+      // per-roster result far more often than the weekly cron runs. Same
+      // currentWeek formula as lib/helpers/simulation.ts / the cron, so a manual
+      // save and a cron run for the same week land on the same row.
+      const isRegularSeason = nflState?.season_type === "regular" && Number(nflState?.week || 0) > 0;
+      const week = isRegularSeason ? Number(nflState!.week) : 0;
+      const season = nflState?.season ?? CURRENT_YEAR;
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (!session) return;
+        fetch("/api/simulation-history", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            accessToken: session.access_token,
+            leagueId,
+            season,
+            week,
+            rows: simRows.map((row) => ({
+              rosterId: row.rosterId,
+              playoffOdds: row.playoffOdds ?? 0,
+              titleOdds: row.titleOdds ?? 0,
+              expectedWins: row.expectedWins ?? 0,
+              avgFinish: row.avgFinish ?? 0,
+              finishRange: row.finishRange ?? "",
+            })),
+          }),
+        }).then(() => {}, (err: unknown) => log.error("simulation-history save failed", { err: String(err) }));
+      });
     }
-  }, [supabaseUser]);
+  }, [supabaseUser, nflState]);
 
   // Queue state machine: when the front of the queue is ready (loadRoster finished),
   // save the sim, advance the queue, and start loading the next league.
