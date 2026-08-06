@@ -2270,6 +2270,7 @@ const saveSnapshotNow = async () => {
   const injuryReportPlayers = useMemo(() => {
     // Build starting lineup map: playerId -> league names where they're a starter
     const startingMap = new Map<string, string[]>();
+    const irMap = new Map<string, string[]>();
     allLeagueData.forEach((entry) => {
       (entry?.roster?.starters || []).forEach((playerId: string) => {
         if (!playerId || playerId === "0") return;
@@ -2279,10 +2280,18 @@ const saveSnapshotNow = async () => {
         }
         startingMap.set(String(playerId), existing);
       });
+      (entry?.roster?.reserve || []).forEach((playerId: string) => {
+        if (!playerId || playerId === "0") return;
+        const existing = irMap.get(String(playerId)) || [];
+        if (entry?.leagueName && !existing.includes(entry.leagueName)) {
+          existing.push(entry.leagueName);
+        }
+        irMap.set(String(playerId), existing);
+      });
     });
 
     const seen = new Set<string>();
-    const result: Array<{ player: SleeperPlayer; playerId: string; leagues: string[]; startingLeagues: string[]; isWatchlisted: boolean }> = [];
+    const result: Array<{ player: SleeperPlayer; playerId: string; leagues: string[]; startingLeagues: string[]; irLeagues: string[]; isWatchlisted: boolean }> = [];
 
     dashboardOwnedPlayers.forEach((entry) => {
       if (seen.has(entry.player_id)) return;
@@ -2294,6 +2303,7 @@ const saveSnapshotNow = async () => {
         playerId: entry.player_id,
         leagues: entry.leagues || [],
         startingLeagues: startingMap.get(entry.player_id) || [],
+        irLeagues: irMap.get(entry.player_id) || [],
         isWatchlisted: watchlistEntries.some((w) => w.player_id === entry.player_id),
       });
     });
@@ -2308,6 +2318,7 @@ const saveSnapshotNow = async () => {
         playerId: entry.player_id,
         leagues: [],
         startingLeagues: startingMap.get(entry.player_id) || [],
+        irLeagues: irMap.get(entry.player_id) || [],
         isWatchlisted: true,
       });
     });

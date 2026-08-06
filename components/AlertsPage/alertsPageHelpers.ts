@@ -13,6 +13,7 @@ export type InjuryReportPlayer = {
   playerId: string;
   leagues: string[];
   startingLeagues: string[];
+  irLeagues: string[];
   isWatchlisted: boolean;
 };
 

@@ -18,12 +18,13 @@ function InjuryTab({ injuryReportPlayers, currentNFLWeek, expandedInjuryId, setE
         <EmptyState>Add players to your watchlist or load your leagues to see injury statuses here.</EmptyState>
       ) : (
         <div className="space-y-1.5">
-          {injuryReportPlayers.map(({ player, playerId, leagues, startingLeagues, isWatchlisted }) => {
+          {injuryReportPlayers.map(({ player, playerId, leagues, startingLeagues, irLeagues, isWatchlisted }) => {
             const { cls: statusCls, label: statusLabel } = injuryStatusStyle(player);
             const byeWeek = Number(player.bye_week || 0);
             const byeWeeksOut = currentNFLWeek && byeWeek ? byeWeek - currentNFLWeek : null;
             const showBye = byeWeeksOut === 1 || byeWeeksOut === 2;
             const isExpanded = expandedInjuryId === playerId;
+            const benchLeagues = leagues.filter((l) => !startingLeagues.includes(l) && !irLeagues.includes(l));
 
             return (
               <div key={playerId} className="rounded-2xl border border-slate-800 overflow-hidden">
@@ -62,6 +63,11 @@ function InjuryTab({ injuryReportPlayers, currentNFLWeek, expandedInjuryId, setE
                           : `Owned ${leagues.length}`}
                       </span>
                     )}
+                    {irLeagues.length > 0 && (
+                      <span className="text-[10px] font-semibold border border-red-800 bg-red-950/40 text-red-300 px-2 py-0.5 rounded-lg whitespace-nowrap">
+                        IR {irLeagues.length}/{leagues.length}
+                      </span>
+                    )}
                     <span className={`text-[10px] font-semibold border px-2 py-0.5 rounded-lg ${statusCls}`}>
                       {statusLabel}
                     </span>
@@ -70,60 +76,63 @@ function InjuryTab({ injuryReportPlayers, currentNFLWeek, expandedInjuryId, setE
                 </button>
 
                 {isExpanded && (
-                  <div className="border-t border-slate-800 bg-slate-900/60 px-4 py-3">
-                    {startingLeagues.length > 0 ? (
-                      <div>
-                        <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-500 mb-2">
-                          In starting lineup
-                        </div>
-                        <div className="flex flex-wrap gap-1.5">
-                          {startingLeagues.map((name) => (
-                            <span
-                              key={name}
-                              className="text-xs border border-emerald-800/60 bg-emerald-950/40 text-emerald-300 px-2.5 py-1 rounded-xl"
-                            >
-                              {name}
-                            </span>
-                          ))}
-                        </div>
-                        {leagues.length > startingLeagues.length && (
-                          <div className="mt-2.5">
+                  <div className="border-t border-slate-800 bg-slate-900/60 px-4 py-3 space-y-2.5">
+                    {leagues.length === 0 ? (
+                      <p className="text-xs text-slate-500">Not on any of your rosters — watchlist only.</p>
+                    ) : (
+                      <>
+                        {startingLeagues.length > 0 && (
+                          <div>
+                            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-500 mb-1.5">
+                              In starting lineup
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {startingLeagues.map((name) => (
+                                <span
+                                  key={name}
+                                  className="text-xs border border-emerald-800/60 bg-emerald-950/40 text-emerald-300 px-2.5 py-1 rounded-xl"
+                                >
+                                  {name}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {benchLeagues.length > 0 && (
+                          <div>
                             <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500 mb-1.5">
                               On bench
                             </div>
                             <div className="flex flex-wrap gap-1.5">
-                              {leagues
-                                .filter((l) => !startingLeagues.includes(l))
-                                .map((name) => (
-                                  <span
-                                    key={name}
-                                    className="text-xs border border-slate-700 bg-slate-800/40 text-slate-400 px-2.5 py-1 rounded-xl"
-                                  >
-                                    {name}
-                                  </span>
-                                ))}
+                              {benchLeagues.map((name) => (
+                                <span
+                                  key={name}
+                                  className="text-xs border border-slate-700 bg-slate-800/40 text-slate-400 px-2.5 py-1 rounded-xl"
+                                >
+                                  {name}
+                                </span>
+                              ))}
                             </div>
                           </div>
                         )}
-                      </div>
-                    ) : leagues.length > 0 ? (
-                      <div>
-                        <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500 mb-1.5">
-                          On bench in all leagues
-                        </div>
-                        <div className="flex flex-wrap gap-1.5">
-                          {leagues.map((name) => (
-                            <span
-                              key={name}
-                              className="text-xs border border-slate-700 bg-slate-800/40 text-slate-400 px-2.5 py-1 rounded-xl"
-                            >
-                              {name}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="text-xs text-slate-500">Not on any of your rosters — watchlist only.</p>
+                        {irLeagues.length > 0 && (
+                          <div>
+                            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-red-500 mb-1.5">
+                              On IR
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {irLeagues.map((name) => (
+                                <span
+                                  key={name}
+                                  className="text-xs border border-red-800/60 bg-red-950/40 text-red-300 px-2.5 py-1 rounded-xl"
+                                >
+                                  {name}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 )}
