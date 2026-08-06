@@ -1,10 +1,11 @@
 import { useState } from "react";
+import type { AlertsFeedTab } from "../../../app/hooks/useHubRouting";
 import type { DashboardAlert, LeagueTransaction, InjuryReportPlayer } from "../alertsPageHelpers";
 import { getInjuredCount, getMarketMovers } from "../alertsPageHelpers";
 
-type FeedTabKey = "alerts" | "transactions" | "waivers" | "injury";
-
 type Params = {
+  feedTab: AlertsFeedTab;
+  setFeedTab: (tab: AlertsFeedTab) => void;
   leagueTransactions: LeagueTransaction[];
   injuryReportPlayers: InjuryReportPlayer[];
   currentNFLWeek: number;
@@ -12,12 +13,13 @@ type Params = {
 };
 
 export function useAlertsState({
+  feedTab,
+  setFeedTab,
   leagueTransactions,
   injuryReportPlayers,
   currentNFLWeek,
   alerts,
 }: Params) {
-  const [feedTab, setFeedTab] = useState<FeedTabKey>("transactions");
   const [expandedInjuryId, setExpandedInjuryId] = useState<string | null>(null);
 
   const tradeActivity = leagueTransactions.filter((tx) => tx.type === "trade");

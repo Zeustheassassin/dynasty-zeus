@@ -13,6 +13,8 @@ import { DraftScoutModal } from "./modals/DraftScoutModal";
 import type { DraftScoutPatterns } from "./modals/DraftScoutModal";
 import { TradeHubOpponentModal } from "./modals/TradeHubOpponentModal";
 import { PlayerProfilePanel } from "./modals/PlayerProfilePanel";
+import { AllOpenTradesPanel } from "./modals/AllOpenTradesPanel";
+import type { AlertsFeedTab } from "../hooks/useHubRouting";
 import type {
   SleeperPlayer, SleeperLeague, SleeperRoster,
   SleeperNFLState, SleeperUser, SleeperDraft, SleeperDraftPick,
@@ -89,12 +91,20 @@ interface HubRouterProps {
   leagueTransactions: LeagueTransaction[];
   loadingTransactions: boolean;
   injuryReportPlayers: InjuryReportPlayer[];
-  allTradeAttempts: { id: string; league_id: string; status: string }[];
+  allTradeAttempts: TradeAttempt[];
   allLeagueData: DashboardLeagueEntry[];
   loadLeagueOverview: () => Promise<void>;
   loadingLeagueOverview: boolean;
   onNavigateToAttempts: (leagueId: string) => void;
   onNavigateToLeague: (leagueId: string) => void;
+  onOpenRosterOverview: () => void;
+  onOpenCrossLeaguePlayers: () => void;
+  onOpenInjuryReport: () => void;
+  onOpenAllTrades: () => void;
+  showAllOpenTrades: boolean;
+  setShowAllOpenTrades: (show: boolean) => void;
+  alertsFeedTab: AlertsFeedTab;
+  setAlertsFeedTab: (tab: AlertsFeedTab) => void;
 
   // League Hub
   leagueHubTab: LeagueHubTab;
@@ -282,6 +292,8 @@ export function HubRouter({
   dismissDashboardAlert, leagueTransactions, loadingTransactions,
   injuryReportPlayers, allTradeAttempts, allLeagueData,
   loadLeagueOverview, loadingLeagueOverview, onNavigateToAttempts, onNavigateToLeague,
+  onOpenRosterOverview, onOpenCrossLeaguePlayers, onOpenInjuryReport, onOpenAllTrades,
+  showAllOpenTrades, setShowAllOpenTrades, alertsFeedTab, setAlertsFeedTab,
   leagueHubTab, setLeagueHubTab, activeLeagueHubGroup, standings,
   committedSimsByLeague, leagueSimCache, simQueue, simProgress,
   loadingLeagueMateIntel, loadingCrossLeagueMateIntel, loadingActivity, loadingLeagueWeeklyMatchups,
@@ -377,6 +389,10 @@ export function HubRouter({
     leagueOverviewData={leagueOverviewData}
     committedSimsByLeague={committedSimsByLeague}
     leagueSimCache={leagueSimCache}
+    onOpenRosterOverview={onOpenRosterOverview}
+    onOpenCrossLeaguePlayers={onOpenCrossLeaguePlayers}
+    onOpenAllTrades={onOpenAllTrades}
+    onOpenInjuryReport={onOpenInjuryReport}
   />
 </>
   </>
@@ -396,6 +412,8 @@ export function HubRouter({
             allTradeAttempts={allTradeAttempts}
             allLeagues={leagues}
             onNavigateToAttempts={onNavigateToAttempts}
+            feedTab={alertsFeedTab}
+            setFeedTab={setAlertsFeedTab}
           />
           </ErrorBoundary>
         )}
@@ -698,6 +716,17 @@ export function HubRouter({
     onClose={() => { setTradeHubUserId(null); setTradeHubData(null); }}
   />
 )}
+      {/* ── All Open Trades Panel (Dashboard's Open Trades stat tile) ── */}
+      {showAllOpenTrades && (
+        <AllOpenTradesPanel
+          attempts={allTradeAttempts}
+          allLeagues={leagues}
+          onUpdateAttemptStatus={updateAttemptStatus}
+          onDeleteAttempt={deleteAttempt}
+          onNavigateToAttempts={onNavigateToAttempts}
+          onClose={() => setShowAllOpenTrades(false)}
+        />
+      )}
       {/* ── Global Player Profile Panel ── */}
       {playerProfileId && (
         <PlayerProfilePanel

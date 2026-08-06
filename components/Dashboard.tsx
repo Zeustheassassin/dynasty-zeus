@@ -1,7 +1,7 @@
 "use client";
 import { useMemo } from "react";
 import type { MainTab } from "../lib/hubs";
-import type { LeagueOverviewEntry, CommittedSimsByLeague, CachedSimRow } from "../lib/types";
+import type { LeagueOverviewEntry, CommittedSimsByLeague, CachedSimRow, TradeAttempt } from "../lib/types";
 import type { DashboardAlert, InjuryReportPlayer } from "./AlertsPage/alertsPageHelpers";
 import { getInjuredCount } from "./AlertsPage/alertsPageHelpers";
 import StatStrip from "./Dashboard/StatStrip";
@@ -16,7 +16,7 @@ type DashboardProps = {
   allLeagueData: DashboardLeagueEntry[];
   loadingAllLeagueData: boolean;
   injuryReportPlayers: InjuryReportPlayer[];
-  allTradeAttempts: { id: string; league_id: string; status: string }[];
+  allTradeAttempts: TradeAttempt[];
   visibleDashboardAlerts: DashboardAlert[];
   actionableDashboardAlerts: DashboardAlert[];
   onDismissAlert: (alertId: string) => void;
@@ -24,6 +24,10 @@ type DashboardProps = {
   leagueOverviewData: Record<string, LeagueOverviewEntry>;
   committedSimsByLeague: CommittedSimsByLeague;
   leagueSimCache: Record<string, Record<number, CachedSimRow>>;
+  onOpenRosterOverview: () => void;
+  onOpenCrossLeaguePlayers: () => void;
+  onOpenAllTrades: () => void;
+  onOpenInjuryReport: () => void;
 };
 
 // Phase J — Dashboard rebuild (A7 cross-league team summary + R7 value
@@ -47,6 +51,10 @@ export default function Dashboard({
   leagueOverviewData,
   committedSimsByLeague,
   leagueSimCache,
+  onOpenRosterOverview,
+  onOpenCrossLeaguePlayers,
+  onOpenAllTrades,
+  onOpenInjuryReport,
 }: DashboardProps) {
   const isConnected = !!username;
 
@@ -79,7 +87,20 @@ export default function Dashboard({
             ownedPlayerCount={ownedPlayerCount}
             openTradeCount={openTradeCount}
             injuredCount={injuredCount}
+            onLeaguesClick={onOpenRosterOverview}
+            onCrossLeagueClick={onOpenCrossLeaguePlayers}
+            onOpenTradesClick={onOpenAllTrades}
+            onInjuredClick={onOpenInjuryReport}
           />
+
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <ValueMoversPanel alerts={visibleDashboardAlerts} onViewAll={() => onNavigate("ALERTS")} />
+            <RecentAlertsPanel
+              alerts={actionableDashboardAlerts.length > 0 ? actionableDashboardAlerts : visibleDashboardAlerts}
+              onDismiss={onDismissAlert}
+              onViewAll={() => onNavigate("ALERTS")}
+            />
+          </div>
 
           <div>
             <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">
@@ -92,15 +113,6 @@ export default function Dashboard({
               leagueOverviewData={leagueOverviewData}
               committedSimsByLeague={committedSimsByLeague}
               leagueSimCache={leagueSimCache}
-            />
-          </div>
-
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <ValueMoversPanel alerts={visibleDashboardAlerts} onViewAll={() => onNavigate("ALERTS")} />
-            <RecentAlertsPanel
-              alerts={actionableDashboardAlerts.length > 0 ? actionableDashboardAlerts : visibleDashboardAlerts}
-              onDismiss={onDismissAlert}
-              onViewAll={() => onNavigate("ALERTS")}
             />
           </div>
         </div>

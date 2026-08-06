@@ -19,8 +19,9 @@ export function useTradeAttempts(supabaseUser: SupabaseUser | null) {
     let cancelled = false;
     supabase
       .from("trade_attempts")
-      .select("id, league_id, status")
+      .select("*")
       .eq("user_id", supabaseUser.id)
+      .order("attempted_at", { ascending: false })
       .then(({ data }) => { if (!cancelled && data) setAllTradeAttempts(data as TradeAttempt[]); });
     return () => { cancelled = true; };
   }, [supabaseUser]);
@@ -55,14 +56,7 @@ export function useTradeAttempts(supabaseUser: SupabaseUser | null) {
       .single();
     if (!error && data) {
       setTradeAttempts((prev) => [data as TradeAttempt, ...prev]);
-      setAllTradeAttempts((prev) => [
-        {
-          id: (data as TradeAttempt).id,
-          league_id: (data as TradeAttempt).league_id,
-          status: (data as TradeAttempt).status,
-        } as TradeAttempt,
-        ...prev,
-      ]);
+      setAllTradeAttempts((prev) => [data as TradeAttempt, ...prev]);
     }
   }, []);
 
@@ -97,7 +91,16 @@ export function useTradeAttempts(supabaseUser: SupabaseUser | null) {
         )
       );
       setAllTradeAttempts((prev) =>
-        prev.map((a) => (a.id === id ? { ...a, status } : a))
+        prev.map((a) =>
+          a.id === id
+            ? {
+                ...a,
+                status,
+                counter_details: counterDetails ?? a.counter_details,
+                resolved_at: update.resolved_at as string | null,
+              }
+            : a
+        )
       );
     }
   }, []);

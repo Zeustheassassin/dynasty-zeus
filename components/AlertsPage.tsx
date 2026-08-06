@@ -1,5 +1,6 @@
 "use client";
-import type { WatchlistEntry, SleeperPlayer } from "../lib/types";
+import type { WatchlistEntry, SleeperPlayer, TradeAttempt } from "../lib/types";
+import type { AlertsFeedTab } from "../app/hooks/useHubRouting";
 import type { DashboardAlert, LeagueTransaction, InjuryReportPlayer } from "./AlertsPage/alertsPageHelpers";
 import { POS_COLOR } from "./AlertsPage/alertsPageHelpers";
 import { useAlertsState } from "./AlertsPage/hooks/useAlertsState";
@@ -20,9 +21,11 @@ type AlertsPageProps = {
   players: Record<string, SleeperPlayer>;
   injuryReportPlayers: InjuryReportPlayer[];
   currentNFLWeek: number;
-  allTradeAttempts: { id: string; league_id: string; status: string }[];
+  allTradeAttempts: TradeAttempt[];
   allLeagues: { league_id: string; name: string }[];
   onNavigateToAttempts: (leagueId: string) => void;
+  feedTab: AlertsFeedTab;
+  setFeedTab: (tab: AlertsFeedTab) => void;
 };
 
 export default function AlertsPage({
@@ -37,10 +40,10 @@ export default function AlertsPage({
   allTradeAttempts,
   allLeagues,
   onNavigateToAttempts,
+  feedTab,
+  setFeedTab,
 }: AlertsPageProps) {
   const {
-    feedTab,
-    setFeedTab,
     expandedInjuryId,
     setExpandedInjuryId,
     tradeActivity,
@@ -53,6 +56,8 @@ export default function AlertsPage({
     fallers,
     TABS,
   } = useAlertsState({
+    feedTab,
+    setFeedTab,
     leagueTransactions,
     injuryReportPlayers,
     currentNFLWeek,

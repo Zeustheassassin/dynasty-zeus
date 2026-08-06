@@ -119,7 +119,9 @@ export function useAppState() {
     leagueHubTab, setLeagueHubTab,
     dataHubTab, setDataHubTab,
     draftHubSection, setDraftHubSection,
+    alertsFeedTab, setAlertsFeedTab,
   } = useHubRouting();
+  const [showAllOpenTrades, setShowAllOpenTrades] = useState(false);
 
   // -------------------------
   // CORE STATE
@@ -2814,6 +2816,27 @@ const onNavigateToLeague = useCallback((leagueId: string) => {
   }
 }, [loadRoster, setLeagueHubTab, setMainTab]);
 
+// Dashboard stat-tile navigation — each jumps into an existing hub/tab
+// rather than introducing a new nav destination.
+const onOpenRosterOverview = useCallback(() => {
+  setLeagueHubTab("ROSTER_OVERVIEW");
+  setMainTab("LEAGUES");
+}, [setLeagueHubTab, setMainTab]);
+
+const onOpenCrossLeaguePlayers = useCallback(() => {
+  setDataHubTab("MY_SHARES");
+  setMainTab("DATA_HUB");
+}, [setDataHubTab, setMainTab]);
+
+const onOpenInjuryReport = useCallback(() => {
+  setAlertsFeedTab("injury");
+  setMainTab("ALERTS");
+}, [setAlertsFeedTab, setMainTab]);
+
+const onOpenAllTrades = useCallback(() => {
+  setShowAllOpenTrades(true);
+}, []);
+
 const onRefreshDirection = useCallback(() => {
   const league = selectedLeagueRef.current;
   if (league) { loadRedraftValues(); loadRoster(league); }
@@ -2899,6 +2922,12 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     loadingLeagueOverview,
     onNavigateToAttempts,
     onNavigateToLeague,
+    onOpenRosterOverview,
+    onOpenCrossLeaguePlayers,
+    onOpenInjuryReport,
+    onOpenAllTrades,
+    showAllOpenTrades, setShowAllOpenTrades,
+    alertsFeedTab, setAlertsFeedTab,
     leagueHubTab, setLeagueHubTab,
     activeLeagueHubGroup,
     standings,

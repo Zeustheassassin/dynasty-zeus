@@ -17,6 +17,8 @@ type DataHubTab = typeof DATA_HUB_TABS[number];
 // HISTORICAL_BOARDS + HISTORICAL_LEAGUE_DRAFTS merged into HISTORICAL in Phase B4/R4.
 const DRAFT_HUB_SECTIONS = ["BOARD", "BIG_BOARD", "HISTORY", "PICK_VALUES", "HISTORICAL"] as const;
 type DraftHubSection = typeof DRAFT_HUB_SECTIONS[number];
+const ALERTS_FEED_TABS = ["transactions", "waivers", "injury", "alerts"] as const;
+export type AlertsFeedTab = typeof ALERTS_FEED_TABS[number];
 
 const MAIN_TABS = HUBS.map((h) => h.id) as MainTab[];
 const LEAGUE_HUB_TABS = LEAGUE_HUB_GROUPS.flatMap((g) => g.tabs.map((t) => t.id)) as LeagueHubTab[];
@@ -40,13 +42,14 @@ function restore<T>(key: string, allowed: readonly T[], fallback: T): T {
 // back stack).
 function subTabForHub(
   hub: MainTab,
-  state: { tradeHubSection: TradeHubSection; leagueHubTab: LeagueHubTab; dataHubTab: DataHubTab; draftHubSection: DraftHubSection }
+  state: { tradeHubSection: TradeHubSection; leagueHubTab: LeagueHubTab; dataHubTab: DataHubTab; draftHubSection: DraftHubSection; alertsFeedTab: AlertsFeedTab }
 ): string | null {
   switch (hub) {
     case "TRADE_HUB": return state.tradeHubSection;
     case "LEAGUES": return state.leagueHubTab;
     case "DATA_HUB": return state.dataHubTab;
     case "DRAFT": return state.draftHubSection;
+    case "ALERTS": return state.alertsFeedTab;
     default: return null;
   }
 }
@@ -109,6 +112,13 @@ export function useHubRouting() {
       ? (tab as DraftHubSection)
       : restore("draftHubSection", DRAFT_HUB_SECTIONS, "BOARD");
   });
+  const [alertsFeedTab, setAlertsFeedTab] = useState<AlertsFeedTab>(() => {
+    const hub = readUrlHub();
+    const tab = readUrlTab();
+    return hub === "ALERTS" && tab && (ALERTS_FEED_TABS as readonly string[]).includes(tab)
+      ? (tab as AlertsFeedTab)
+      : restore("alertsFeedTab", ALERTS_FEED_TABS, "transactions");
+  });
 
   // Persist each sub-tab selection (writing to localStorage is an
   // external-system sync, the intended use of effects — not a React state
@@ -117,10 +127,11 @@ export function useHubRouting() {
   useEffect(() => { setLocalStorageItem("leagueHubTab", leagueHubTab); }, [leagueHubTab]);
   useEffect(() => { setLocalStorageItem("dataHubTab", dataHubTab); }, [dataHubTab]);
   useEffect(() => { setLocalStorageItem("draftHubSection", draftHubSection); }, [draftHubSection]);
+  useEffect(() => { setLocalStorageItem("alertsFeedTab", alertsFeedTab); }, [alertsFeedTab]);
 
   const setMainTab = useCallback((tab: MainTab) => { setMainTabState(tab); }, []);
 
-  const currentSubTab = subTabForHub(mainTab, { tradeHubSection, leagueHubTab, dataHubTab, draftHubSection });
+  const currentSubTab = subTabForHub(mainTab, { tradeHubSection, leagueHubTab, dataHubTab, draftHubSection, alertsFeedTab });
 
   // Sync state -> URL. `prevRef`/`isFirstRunRef` live only inside this effect's
   // closure trail (read and written here alone), so there's no stale-closure
@@ -162,6 +173,7 @@ export function useHubRouting() {
         else if (hub === "LEAGUES" && (LEAGUE_HUB_TABS as readonly string[]).includes(tab as LeagueHubTab)) setLeagueHubTab(tab as LeagueHubTab);
         else if (hub === "DATA_HUB" && (DATA_HUB_TABS as readonly string[]).includes(tab)) setDataHubTab(tab as DataHubTab);
         else if (hub === "DRAFT" && (DRAFT_HUB_SECTIONS as readonly string[]).includes(tab)) setDraftHubSection(tab as DraftHubSection);
+        else if (hub === "ALERTS" && (ALERTS_FEED_TABS as readonly string[]).includes(tab)) setAlertsFeedTab(tab as AlertsFeedTab);
       }
     }
     window.addEventListener("popstate", onPopState);
@@ -174,5 +186,6 @@ export function useHubRouting() {
     leagueHubTab, setLeagueHubTab,
     dataHubTab, setDataHubTab,
     draftHubSection, setDraftHubSection,
+    alertsFeedTab, setAlertsFeedTab,
   };
 }
