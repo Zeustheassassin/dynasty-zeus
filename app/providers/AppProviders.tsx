@@ -26,6 +26,15 @@ interface AppProvidersProps {
   selectedLeagueSimulation: LeagueSimulation | null;
   selectedLeagueDynamicPickValues: Record<string, DynamicPickValue>;
   myRoster: SleeperRoster | null;
+  /** On-demand "what if" trade preview — re-runs the simulator with a hypothetical roster
+   * swap applied. Optional so read-only views (e.g. UserScoutHub's spy mode, which never
+   * mounts Trade Hub) don't need to supply it. */
+  previewTradeSimulation?: (
+    myRosterId: number,
+    opponentRosterId: number,
+    giveIds: string[],
+    receiveIds: string[],
+  ) => LeagueSimulation | null;
   children: React.ReactNode;
 }
 
@@ -44,6 +53,7 @@ export function AppProviders({
   selectedLeagueSimulation,
   selectedLeagueDynamicPickValues,
   myRoster,
+  previewTradeSimulation = () => null,
   children,
 }: AppProvidersProps) {
   return (
@@ -59,6 +69,7 @@ export function AppProviders({
       selectedLeagueDirectionAdjusted={selectedLeagueDirectionAdjusted}
       selectedLeagueSimulation={selectedLeagueSimulation}
       selectedLeagueDynamicPickValues={selectedLeagueDynamicPickValues}
+      previewTradeSimulation={previewTradeSimulation}
     >
     <RosterProvider myRoster={myRoster}>
       {children}

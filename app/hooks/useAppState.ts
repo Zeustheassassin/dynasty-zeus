@@ -1401,6 +1401,7 @@ const saveSnapshotNow = async () => {
     draftSlotSearchQuery, setDraftSlotSearchQuery,
     saveSimulationToSupabase,
     handleRunAllSims,
+    previewTradeSimulation,
   } = useSimulatorState({
     selectedLeague,
     rosters,
@@ -2888,6 +2889,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     selectedLeagueSimulation,
     selectedLeagueDynamicPickValues,
     myRoster: roster,
+    previewTradeSimulation,
   };
   const authSectionProps = {
     supabaseUser,

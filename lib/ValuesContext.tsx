@@ -15,6 +15,15 @@ interface ValuesContextValue {
   selectedLeagueDirectionAdjusted: RosterDirectionProfile | null;
   selectedLeagueSimulation: LeagueSimulation | null;
   selectedLeagueDynamicPickValues: Record<string, DynamicPickValue>;
+  /** On-demand "what if" trade preview — re-runs the simulator with a hypothetical roster
+   * swap applied. Callers invoke this only when the user asks (e.g. a Preview button), never
+   * automatically, since it re-runs the full Monte Carlo simulation on the main thread. */
+  previewTradeSimulation: (
+    myRosterId: number,
+    opponentRosterId: number,
+    giveIds: string[],
+    receiveIds: string[],
+  ) => LeagueSimulation | null;
 }
 
 const ValuesContext = createContext<ValuesContextValue>({
@@ -26,6 +35,7 @@ const ValuesContext = createContext<ValuesContextValue>({
   selectedLeagueDirectionAdjusted: null,
   selectedLeagueSimulation: null,
   selectedLeagueDynamicPickValues: {},
+  previewTradeSimulation: () => null,
 });
 
 export function ValuesProvider({
@@ -38,6 +48,7 @@ export function ValuesProvider({
   selectedLeagueDirectionAdjusted,
   selectedLeagueSimulation,
   selectedLeagueDynamicPickValues,
+  previewTradeSimulation,
 }: ValuesContextValue & { children: React.ReactNode }) {
   // The rest-spread previously rebuilt the value object on every render; memoise
   // on the individual fields so the ~18 useValues() consumers only re-render when
@@ -52,6 +63,7 @@ export function ValuesProvider({
       selectedLeagueDirectionAdjusted,
       selectedLeagueSimulation,
       selectedLeagueDynamicPickValues,
+      previewTradeSimulation,
     }),
     [
       leagueAdjustedFcValues,
@@ -62,6 +74,7 @@ export function ValuesProvider({
       selectedLeagueDirectionAdjusted,
       selectedLeagueSimulation,
       selectedLeagueDynamicPickValues,
+      previewTradeSimulation,
     ],
   );
   return <ValuesContext.Provider value={value}>{children}</ValuesContext.Provider>;

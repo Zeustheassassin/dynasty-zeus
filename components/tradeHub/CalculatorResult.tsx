@@ -1,12 +1,13 @@
 "use client";
-import React from "react";
+import React, { useState } from "react";
 import { BarChart, Bar, XAxis, YAxis, Cell, LabelList } from "recharts";
 import type {
   TradeAttempt, TradeAttemptAsset, TradeAttemptPick,
-  SleeperPlayer, SleeperRoster, AugmentedPick,
+  SleeperPlayer, SleeperRoster, AugmentedPick, LeagueSimulation,
 } from "../../lib/types";
 import { usePlayers } from "../../lib/PlayersContext";
 import { useLeague } from "../../lib/LeagueContext";
+import { useValues } from "../../lib/ValuesContext";
 import { buildTradeFingerprint } from "./shared";
 import { computePosTotals, computeLeagueRank } from "./calculatorUtils";
 import { CHART_CHROME, CHART_DIVERGING } from "../../lib/chartTheme";
@@ -100,6 +101,22 @@ function TradeMarginGauge({ net, totalGiveAdj, totalReceiveAdj }: { net: number;
   );
 }
 
+/** Before → after odds line for the Simulator Preview panel; hidden when either side is missing. */
+function SimPreviewStatLine({ label, before, after, suffix }: { label: string; before?: number; after?: number; suffix: string }) {
+  if (before == null || after == null) return null;
+  const delta = Math.round((after - before) * 10) / 10;
+  const color = delta > 0 ? "text-emerald-400" : delta < 0 ? "text-red-400" : "text-slate-500";
+  return (
+    <div className="flex items-center justify-between text-xs py-1">
+      <span className="text-slate-500">{label}</span>
+      <span className="font-mono text-slate-300">
+        {before}{suffix} <span className="text-slate-600">&#8594;</span> {after}{suffix}
+        <span className={`ml-2 ${color}`}>{delta > 0 ? "+" : ""}{delta}{suffix}</span>
+      </span>
+    </div>
+  );
+}
+
 function CalculatorResult({
   calcGive, setCalcGive, calcReceive, setCalcReceive,
   calcGivePicks, setCalcGivePicks, calcReceivePicks, setCalcReceivePicks,
@@ -112,6 +129,21 @@ function CalculatorResult({
 }: CalculatorResultProps) {
   const players = usePlayers();
   const { selectedLeague, rosters, users } = useLeague();
+  const { selectedLeagueSimulation, previewTradeSimulation } = useValues();
+
+  const opponentRoster = calcOpponentRosterId != null
+    ? rosters.find((r) => r.roster_id === calcOpponentRosterId)
+    : null;
+  const hasPlayerMovement = calcGive.length > 0 || calcReceive.length > 0;
+  const simPreviewSignature = `${calcOpponentRosterId ?? ""}|${[...calcGive].sort().join(",")}|${[...calcReceive].sort().join(",")}`;
+  const [simPreview, setSimPreview] = useState<LeagueSimulation | null>(null);
+  const [simPreviewSignatureRun, setSimPreviewSignatureRun] = useState<string>("");
+  const simPreviewStale = simPreview !== null && simPreviewSignatureRun !== simPreviewSignature;
+  const handleSimPreview = () => {
+    if (!myRoster || calcOpponentRosterId == null) return;
+    setSimPreview(previewTradeSimulation(myRoster.roster_id, calcOpponentRosterId, calcGive, calcReceive));
+    setSimPreviewSignatureRun(simPreviewSignature);
+  };
 
   const tradeRow = (label: string, value: number, onRemove: () => void) => (
     <div key={label} className="flex items-center justify-between px-3 py-1.5 bg-slate-800 rounded-lg">
@@ -336,6 +368,52 @@ function CalculatorResult({
           </Card>
         );
       })()}
+
+      {/* Simulator Preview */}
+      {calcOpponentRosterId != null && hasPlayerMovement && (
+        <Card className="mt-4">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400">Simulator Preview</h3>
+            <button
+              onClick={handleSimPreview}
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-blue-700 text-blue-400 hover:border-blue-500 hover:text-blue-300 transition shrink-0"
+            >
+              {simPreview ? "Re-run Preview" : "Preview in Simulator"}
+            </button>
+          </div>
+          {!simPreview && (
+            <p className="text-xs text-slate-600">
+              Runs this season&apos;s simulator with the trade applied to estimate the change in playoff odds. Reflects player swaps only — pick-for-pick moves don&apos;t change this season&apos;s projection.
+            </p>
+          )}
+          {simPreview && (() => {
+            const myBeforeRow = selectedLeagueSimulation?.rowByRosterId?.get(Number(myRoster?.roster_id));
+            const myAfterRow = simPreview.rowByRosterId.get(Number(myRoster?.roster_id));
+            const oppBeforeRow = selectedLeagueSimulation?.rowByRosterId?.get(calcOpponentRosterId);
+            const oppAfterRow = simPreview.rowByRosterId.get(calcOpponentRosterId);
+            const oppName = opponentRoster ? (users[opponentRoster.owner_id] || `Team ${opponentRoster.roster_id}`) : "Opponent";
+            return (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1">You</div>
+                  <SimPreviewStatLine label="Playoff Odds" before={myBeforeRow?.playoffOdds} after={myAfterRow?.playoffOdds} suffix="%" />
+                  <SimPreviewStatLine label="Title Odds" before={myBeforeRow?.titleOdds} after={myAfterRow?.titleOdds} suffix="%" />
+                  <SimPreviewStatLine label="Expected Wins" before={myBeforeRow?.expectedWins} after={myAfterRow?.expectedWins} suffix="" />
+                </div>
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1 truncate">{oppName}</div>
+                  <SimPreviewStatLine label="Playoff Odds" before={oppBeforeRow?.playoffOdds} after={oppAfterRow?.playoffOdds} suffix="%" />
+                  <SimPreviewStatLine label="Title Odds" before={oppBeforeRow?.titleOdds} after={oppAfterRow?.titleOdds} suffix="%" />
+                  <SimPreviewStatLine label="Expected Wins" before={oppBeforeRow?.expectedWins} after={oppAfterRow?.expectedWins} suffix="" />
+                </div>
+              </div>
+            );
+          })()}
+          {simPreviewStale && (
+            <p className="mt-2 text-[10px] text-amber-500">Trade changed since last preview — click Re-run Preview to refresh.</p>
+          )}
+        </Card>
+      )}
 
       {/* Trade Equalizer */}
       {verdict !== "EVEN" &&

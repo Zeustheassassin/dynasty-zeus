@@ -20,6 +20,34 @@ import type {
 
 export type PoolPlayer = { id: string; position: string; nflTeam: string | null; score: number };
 
+/**
+ * Clones `rosters` with a hypothetical trade applied — moves `giveIds` off myRosterId onto
+ * opponentRosterId and `receiveIds` the other way. Used to preview a trade's effect on
+ * simulateLeague's output before it's actually made; does not touch picks (simulateLeague's
+ * in-season math never reads them, so a pick-only trade would be a no-op anyway).
+ */
+export function buildRostersWithTrade(
+  rosters: SleeperRoster[],
+  myRosterId: number,
+  opponentRosterId: number,
+  giveIds: string[],
+  receiveIds: string[],
+): SleeperRoster[] {
+  if (giveIds.length === 0 && receiveIds.length === 0) return rosters;
+  const giveSet = new Set(giveIds);
+  const receiveSet = new Set(receiveIds);
+  return rosters.map((r) => {
+    const rid = Number(r.roster_id);
+    if (rid === myRosterId) {
+      return { ...r, players: [...(r.players || []).filter((id) => !giveSet.has(id)), ...receiveIds] };
+    }
+    if (rid === opponentRosterId) {
+      return { ...r, players: [...(r.players || []).filter((id) => !receiveSet.has(id)), ...giveIds] };
+    }
+    return r;
+  });
+}
+
 export interface SimulateLeagueArgs {
   selectedLeague: SleeperLeague | null;
   rosters: SleeperRoster[];

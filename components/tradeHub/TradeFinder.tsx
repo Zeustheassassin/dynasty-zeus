@@ -133,6 +133,7 @@ function TradeFinder({
     selectedLeagueDirectionAdjusted,
     selectedLeagueSimulation,
     selectedLeagueDynamicPickValues,
+    previewTradeSimulation,
   } = useValues();
 
   // Weekly projection map: sleeperId â†’ projected fpts
@@ -1374,6 +1375,7 @@ function TradeFinder({
             leagueId={selectedLeague.league_id}
             myRoster={myRoster}
             selectedLeagueSimulation={selectedLeagueSimulation}
+            previewTradeSimulation={previewTradeSimulation}
             posTeamTotals={posTeamTotals}
             numTeams={numTeams}
             leaguePlayerTags={leaguePlayerTags}

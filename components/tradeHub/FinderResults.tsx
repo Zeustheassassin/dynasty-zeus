@@ -18,6 +18,12 @@ interface FinderResultsProps {
   leagueId: string;
   myRoster: SleeperRoster | undefined;
   selectedLeagueSimulation: LeagueSimulation | null;
+  previewTradeSimulation: (
+    myRosterId: number,
+    opponentRosterId: number,
+    giveIds: string[],
+    receiveIds: string[],
+  ) => LeagueSimulation | null;
   posTeamTotals: { rosterId: number; totals: Record<string, number> }[];
   numTeams: number;
   leaguePlayerTags: LeagueAssetDispositions;
@@ -48,6 +54,7 @@ export default function FinderResults({
   leagueId,
   myRoster,
   selectedLeagueSimulation,
+  previewTradeSimulation,
   posTeamTotals,
   numTeams,
   leaguePlayerTags,
@@ -130,6 +137,7 @@ export default function FinderResults({
           leagueId={leagueId}
           myRoster={myRoster}
           selectedLeagueSimulation={selectedLeagueSimulation}
+          previewTradeSimulation={previewTradeSimulation}
           posTeamTotals={posTeamTotals}
           numTeams={numTeams}
           leaguePlayerTags={leaguePlayerTags}

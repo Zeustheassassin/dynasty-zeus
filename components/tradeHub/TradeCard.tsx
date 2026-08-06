@@ -1,4 +1,5 @@
 "use client";
+import { useState } from "react";
 import { CURRENT_YEAR } from "../../lib/helpers";
 import { normalizeDisposition } from "../../lib/helpers/dispositions";
 import type {
@@ -21,6 +22,12 @@ interface TradeCardProps {
   leagueId: string | null;
   myRoster: SleeperRoster | undefined;
   selectedLeagueSimulation: LeagueSimulation | null;
+  previewTradeSimulation: (
+    myRosterId: number,
+    opponentRosterId: number,
+    giveIds: string[],
+    receiveIds: string[],
+  ) => LeagueSimulation | null;
   posTeamTotals: { rosterId: number; totals: Record<string, number> }[];
   numTeams: number;
   leaguePlayerTags: LeagueAssetDispositions;
@@ -49,6 +56,7 @@ export default function TradeCard({
   leagueId,
   myRoster,
   selectedLeagueSimulation,
+  previewTradeSimulation,
   posTeamTotals,
   numTeams,
   leaguePlayerTags,
@@ -72,6 +80,21 @@ export default function TradeCard({
 }: TradeCardProps) {
   const partnerProfile = leagueMateProfileByRosterId.get(Number(trade.oppRosterId));
   const tradeIntent = getTradeIntent(trade);
+
+  // On-demand simulator preview — only computed when the user clicks the button below,
+  // never for every candidate the Finder generates (that would multiply the sim cost across
+  // dozens of trades). Player-only: picks don't move the current-season sim.
+  const hasPlayerMovement = trade.give.length > 0 || trade.receive.length > 0;
+  const [simPreview, setSimPreview] = useState<LeagueSimulation | null>(null);
+  const handleSimPreview = () => {
+    if (!myRoster) return;
+    setSimPreview(previewTradeSimulation(
+      myRoster.roster_id,
+      Number(trade.oppRosterId),
+      trade.give.map((p) => p.player_id),
+      trade.receive.map((p) => p.player_id),
+    ));
+  };
 
   const scoreFactors = (() => {
     const out = trade.give || [];
@@ -457,6 +480,34 @@ export default function TradeCard({
         </details>
       )}
 
+      {/* Simulator Preview — computed on demand via the button in the actions row below */}
+      {simPreview && (() => {
+        const myRosterId = Number(myRoster?.roster_id ?? 0);
+        const myBeforeRow = selectedLeagueSimulation?.rowByRosterId?.get(myRosterId);
+        const myAfterRow = simPreview.rowByRosterId.get(myRosterId);
+        const oppAfterRow = simPreview.rowByRosterId.get(Number(trade.oppRosterId));
+        const statLine = (label: string, before?: number, after?: number) => {
+          if (before == null || after == null) return null;
+          const delta = Math.round((after - before) * 10) / 10;
+          const color = delta > 0 ? "text-emerald-400" : delta < 0 ? "text-red-400" : "text-slate-500";
+          return (
+            <span className="text-[10px] text-slate-500">
+              {label}: <span className="font-mono text-slate-300">{before}%&#8594;{after}%</span>{" "}
+              <span className={color}>({delta > 0 ? "+" : ""}{delta})</span>
+            </span>
+          );
+        };
+        return (
+          <div className="mt-3 bg-slate-800/50 rounded-lg px-3 py-2 flex flex-col gap-1">
+            <div className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Simulator Preview</div>
+            <div className="flex flex-wrap gap-x-4 gap-y-1">
+              {statLine("Your Playoff Odds", myBeforeRow?.playoffOdds, myAfterRow?.playoffOdds)}
+              {statLine("Their Playoff Odds", oppPlayoffOdds ?? undefined, oppAfterRow?.playoffOdds)}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Actions row */}
       <div className="mt-3 flex gap-2">
         <button
@@ -465,6 +516,14 @@ export default function TradeCard({
         >
           Open in Calculator &#8594;
         </button>
+        {hasPlayerMovement && (
+          <button
+            onClick={handleSimPreview}
+            className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-blue-700 text-blue-400 hover:border-blue-500 hover:text-blue-300 transition shrink-0"
+          >
+            {simPreview ? "Re-run Preview" : "Preview in Simulator"}
+          </button>
+        )}
         {leagueId !== null && (() => {
           const fp = buildTradeFingerprint(
             leagueId,

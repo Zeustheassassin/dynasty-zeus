@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "../../lib/supabaseclient";
 import { logger } from "../../lib/logger";
-import { simulateLeague, type PoolPlayer } from "../../lib/helpers/simulation";
+import { simulateLeague, buildRostersWithTrade, type PoolPlayer } from "../../lib/helpers/simulation";
 import { getLocalStorageItem, setLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 import { CURRENT_YEAR } from "../../lib/helpers/season";
 import { ROOKIE_YEAR } from "../../hooks/useRookieBoardState";
@@ -52,6 +52,12 @@ export interface SimulatorResult {
   setDraftSlotSearchQuery: React.Dispatch<React.SetStateAction<string>>;
   saveSimulationToSupabase: (leagueId: string, simRows: SimulationTeamRow[]) => void;
   handleRunAllSims: () => void;
+  previewTradeSimulation: (
+    myRosterId: number,
+    opponentRosterId: number,
+    giveIds: string[],
+    receiveIds: string[],
+  ) => LeagueSimulation | null;
 }
 
 export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
@@ -229,6 +235,34 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
     ]
   );
 
+  // On-demand "what if" preview: re-runs the same engine against a hypothetical roster swap
+  // without touching any state — the caller (Trade Calculator/Finder) decides when to invoke
+  // this, so it never runs on every keystroke while a trade is being built.
+  const previewTradeSimulation = useCallback(
+    (myRosterId: number, opponentRosterId: number, giveIds: string[], receiveIds: string[]): LeagueSimulation | null =>
+      simulateLeague({
+        selectedLeague,
+        rosters: buildRostersWithTrade(rosters, myRosterId, opponentRosterId, giveIds, receiveIds),
+        players,
+        nflState,
+        projectionData,
+        projectionWeek,
+        playerStats,
+        leagueWeeklyMatchups,
+        standings,
+        users,
+        leagueAdjustedFcValues,
+        leagueAdjustedRedraftValues,
+        projectedRookiesByRoster,
+        simSalt,
+      }),
+    [
+      selectedLeague, rosters, players, nflState, projectionData, projectionWeek, playerStats,
+      leagueWeeklyMatchups, standings, users, leagueAdjustedFcValues, leagueAdjustedRedraftValues,
+      projectedRookiesByRoster, simSalt,
+    ]
+  );
+
   const saveSimulationToSupabase = useCallback((leagueId: string, simRows: SimulationTeamRow[]) => {
     const now = new Date().toISOString();
     const newEntries = Object.fromEntries(
@@ -362,5 +396,6 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
     setDraftSlotSearchQuery,
     saveSimulationToSupabase,
     handleRunAllSims,
+    previewTradeSimulation,
   };
 }
