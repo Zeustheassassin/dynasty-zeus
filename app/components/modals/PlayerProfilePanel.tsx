@@ -2,10 +2,11 @@
 import { useMemo } from "react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from "recharts";
 import type {
-  SleeperPlayer, SleeperLeague, SleeperRoster, LeagueOverviewEntry, HistoricalSnapshot,
+  SleeperPlayer, SleeperLeague, SleeperRoster, LeagueOverviewEntry,
 } from "../../../lib/types";
 import { useModalBehavior } from "../../../lib/hooks/useModalBehavior";
 import { usePlayerValueHistory } from "../../../hooks/usePlayerValueHistory";
+import { leagueAdjustRatio, valueAtLeastDaysAgo, MIN_TREND_AGE_DAYS } from "../../../lib/helpers";
 import { injuryBadge, injuryRiskBadge, ageColor } from "../../../components/DataHub/dataHubHelpers";
 import { ChartCard, ChartTooltip, chartGridProps, chartAxisProps, chartTickStyle } from "../../../components/charts/ChartCard";
 import { CHART_CATEGORICAL } from "../../../lib/chartTheme";
@@ -25,7 +26,6 @@ interface Props {
   selectedLeague: SleeperLeague | null;
   leagueOverviewData: Record<string, LeagueOverviewEntry>;
   leagues: SleeperLeague[];
-  historicalSnapshot: HistoricalSnapshot | null;
   savePlayerNote: (playerId: string, text: string) => void;
   onClose: () => void;
 }
@@ -33,7 +33,7 @@ interface Props {
 export function PlayerProfilePanel({
   playerProfileId, players, calcFcValues, leagueAdjustedRedraftValues,
   playerNotes, rosters, users, selectedLeague,
-  leagueOverviewData, leagues, historicalSnapshot, savePlayerNote, onClose,
+  leagueOverviewData, leagues, savePlayerNote, onClose,
 }: Props) {
   useModalBehavior(onClose);
   const p = players[playerProfileId];
@@ -68,31 +68,35 @@ export function PlayerProfilePanel({
 
   const dynVal = calcFcValues[playerProfileId] ?? p.value ?? 0;
   const redVal = leagueAdjustedRedraftValues[playerProfileId] ?? 0;
-  const snapVal = historicalSnapshot?.players[playerProfileId]?.value ?? 0;
-  const snapDate = historicalSnapshot?.recorded_at
-    ? new Date(historicalSnapshot.recorded_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })
-    : "Snapshot";
 
   // Real multi-point history (migration 047 / player-value-history cron) once
-  // at least 2 days have accumulated; otherwise fall back to the single stored
-  // snapshot vs. current value (the 2-point comparison Phase D shipped with).
+  // at least 2 days have accumulated; otherwise fall back to a single point
+  // at least MIN_TREND_AGE_DAYS old vs. current value. Every point (including
+  // "Now") is scaled by this player's current adjusted/generic ratio
+  // (leagueAdjustRatio) so the whole line sits on the same league-adjusted
+  // scale as the Dynasty Value tile above — comparing a raw generic
+  // historical value straight against an adjusted "now" made every
+  // SF/TE-premium league look like it had gained value for reasons having
+  // nothing to do with real movement.
   const realHistory = historyByPlayer[playerProfileId] ?? [];
   const genericNow = p.value ?? 0;
+  const ratio = leagueAdjustRatio(dynVal, genericNow);
   const lastHistoryDate = realHistory[realHistory.length - 1]?.date;
   const todayIso = new Date().toISOString().slice(0, 10);
-  const historyPoints = realHistory.map((h) => ({ label: shortDate(h.date), value: h.value }));
-  if (genericNow > 0 && lastHistoryDate !== todayIso) {
-    historyPoints.push({ label: "Now", value: genericNow });
+  const historyPoints = realHistory.map((h) => ({ label: shortDate(h.date), value: h.value * ratio }));
+  if (dynVal > 0 && lastHistoryDate !== todayIso) {
+    historyPoints.push({ label: "Now", value: dynVal });
   }
 
+  const weekAgoGeneric = valueAtLeastDaysAgo(realHistory);
   const trendData =
     historyPoints.length >= 2
       ? historyPoints
-      : snapVal > 0 && dynVal > 0
-      ? [{ label: snapDate, value: snapVal }, { label: "Now", value: dynVal }]
+      : weekAgoGeneric !== null && dynVal > 0
+      ? [{ label: `${MIN_TREND_AGE_DAYS}+d ago`, value: weekAgoGeneric * ratio }, { label: "Now", value: dynVal }]
       : null;
   const trendSubtitle =
-    historyPoints.length >= 2 ? `${historyPoints[0].label} → now` : `${snapDate} → now`;
+    historyPoints.length >= 2 ? `${historyPoints[0].label} → now` : `${MIN_TREND_AGE_DAYS}+ days ago → now`;
   const injuryStatus = p.injury_status || p.status;
   const injuryNote = [p.injury_body_part, p.injury_notes].filter(Boolean).join(" — ");
   const practiceDesc = p.practice_description || p.practice_participation || "";

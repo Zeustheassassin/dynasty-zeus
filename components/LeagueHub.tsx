@@ -13,7 +13,6 @@ import type {
   LeagueMateView,
   SimulationTeamRow,
   SleeperPlayer,
-  HistoricalSnapshot,
   AssetDisposition,
   LeagueAssetDispositions,
 } from "../lib/types";
@@ -89,7 +88,6 @@ interface LeagueHubProps {
   freeAgents: SleeperPlayer[];
   personalOrdering: string[];
   loadingCalcValues: boolean;
-  historicalSnapshot: HistoricalSnapshot | null;
 
   // Functions
   loadRoster: (league: SleeperLeague) => void;
@@ -123,7 +121,7 @@ function LeagueHub({
   selectedLeagueMateProfilesView,
   ignoredOwnerIds, toggleIgnoredOwner,
   projectionData, nflState,
-  freeAgents, personalOrdering, loadingCalcValues, historicalSnapshot,
+  freeAgents, personalOrdering, loadingCalcValues,
   loadRoster, loadLeagueOverview, loadRedraftValues, loadUserTrades, loadUserExposure,
   saveLeagueNote, onSaveSim, handleRunAllSims,
   setPlayerProfileId, setCalcOpponentRosterId, setMainTab, setTradeHubSection,
@@ -316,7 +314,6 @@ function LeagueHub({
             ignoredOwnerIds={ignoredOwnerIds}
             toggleIgnoredOwner={toggleIgnoredOwner}
             setPlayerProfileId={setPlayerProfileId}
-            historicalSnapshot={historicalSnapshot}
           />
         )}
 

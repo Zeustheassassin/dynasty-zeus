@@ -260,7 +260,6 @@ export default function UserScoutHub({
                       ignoredOwnerIds={[]}
                       toggleIgnoredOwner={() => {}}
                       setPlayerProfileId={() => {}}
-                      historicalSnapshot={null}
                     />
                   )}
                   {leagueHubTab === "STANDINGS" && (

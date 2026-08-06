@@ -18,3 +18,4 @@ export * from "./lineup";
 export * from "./picks";
 export * from "./direction";
 export * from "./dispositions";
+export * from "./valueHistory";
