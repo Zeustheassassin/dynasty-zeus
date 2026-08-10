@@ -3,12 +3,28 @@ import React, { useState } from "react";
 import { getStoredPickValue } from "../../lib/helpers";
 import type {
   TradeAttempt, TradeAttemptStatus, TradeAttemptAsset, TradeAttemptPick,
-  SleeperRoster, SleeperPlayer, SleeperUser, AugmentedPick,
+  SleeperRoster, SleeperPlayer, SleeperUser, AugmentedPick, NeverAcceptCounterDetails,
 } from "../../lib/types";
 import { usePlayers } from "../../lib/PlayersContext";
 import { useLeague } from "../../lib/LeagueContext";
 import { useValues } from "../../lib/ValuesContext";
 import { Card } from "../ui/Card";
+
+// Parses a PREDICTED_DECLINE row's counter_details JSON (written by TradeCard.tsx's
+// "Never Accept" panel). Falls back to treating the raw string as the reason if it isn't
+// valid JSON — defensive only, since this feature is the sole writer of these rows.
+function parseNeverAcceptDetails(raw: string | null): { reason: string; tags: NeverAcceptCounterDetails["tags"] | null } | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as NeverAcceptCounterDetails;
+    if (parsed && typeof parsed === "object" && "tags" in parsed) {
+      return { reason: parsed.reason ?? "", tags: parsed.tags ?? null };
+    }
+    return { reason: raw, tags: null };
+  } catch {
+    return { reason: raw, tags: null };
+  }
+}
 
 interface CounterDraft {
   givePlayers: TradeAttemptAsset[];
@@ -139,6 +155,37 @@ function TradeAttempts({
                 )}
               </div>
             </div>
+
+            {/* Never Accept reason + structured tags (PREDICTED_DECLINE rows only) */}
+            {attempt.source === "PREDICTED_DECLINE" && attempt.counter_details && (() => {
+              const parsed = parseNeverAcceptDetails(attempt.counter_details);
+              if (!parsed) return null;
+              const { reason, tags } = parsed;
+              const tagChips: string[] = [];
+              if (tags) {
+                tagChips.push(tags.scope === "any_opponent" ? "Any opponent" : "This opponent");
+                tags.wontGivePositions.forEach((p) => tagChips.push(`Won't give ${p}`));
+                tags.wontTakePositions.forEach((p) => tagChips.push(`Won't take ${p}`));
+                if (tags.wontGivePicks) tagChips.push("Won't give picks");
+                if (tags.wontTakePicks) tagChips.push("Won't take picks");
+                if (tags.valueConcentrationFlagged) tagChips.push("Value mismatch");
+              }
+              if (!reason && tagChips.length === 0) return null;
+              return (
+                <div className="mb-3 rounded-lg border border-red-900/50 bg-red-950/10 px-3 py-2 space-y-1.5">
+                  {reason && <p className="text-xs text-slate-300">{reason}</p>}
+                  {tagChips.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {tagChips.map((t) => (
+                        <span key={t} className="rounded-full border border-red-800 bg-red-950/30 px-2 py-0.5 text-[9px] font-semibold text-red-300">
+                          {t}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Trade columns */}
             <div className="grid grid-cols-2 gap-3 mb-3">

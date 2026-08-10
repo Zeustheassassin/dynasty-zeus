@@ -839,7 +839,7 @@ export type LeagueExpiringBlocks = Record<string, Record<string, string>>;
 // ── Trade attempts ────────────────────────────────────────────
 
 export type TradeAttemptStatus = "PENDING" | "ACCEPTED" | "DECLINED" | "COUNTERED" | "NO_RESPONSE";
-export type TradeAttemptSource = "FINDER" | "CALCULATOR";
+export type TradeAttemptSource = "FINDER" | "CALCULATOR" | "PREDICTED_DECLINE";
 export type TradeAttemptDirection = "ME" | "THEM";
 
 export interface TradeAttemptAsset {
@@ -871,6 +871,36 @@ export interface TradeAttempt {
   counter_details: string | null;
   attempted_at: string;
   resolved_at: string | null;
+}
+
+// ── "Never Accept" structured reason (TradeCard.tsx) ────────────
+// Stored as JSON.stringify({ reason, tags }) in a PREDICTED_DECLINE row's
+// counter_details — the free-text reason is for the user's own reference only
+// (never parsed); the tags are what finderPipeline.ts's aversionPenalty reads.
+export type NeverAcceptScope = "this_opponent" | "any_opponent";
+
+export interface NeverAcceptTags {
+  scope: NeverAcceptScope;
+  wontGivePositions: string[];
+  wontTakePositions: string[];
+  wontGivePicks: boolean;
+  wontTakePicks: boolean;
+  valueConcentrationFlagged: boolean;
+}
+
+export interface NeverAcceptCounterDetails {
+  reason: string;
+  tags: NeverAcceptTags;
+}
+
+// Merged/keyed aversion signal built (in TradeFinder.tsx) from NeverAcceptTags across a
+// league's PREDICTED_DECLINE attempts, and consumed by finderPipeline.ts's aversionPenalty.
+export interface AversionTags {
+  wontGivePositions: Set<string>;
+  wontTakePositions: Set<string>;
+  wontGivePicks: boolean;
+  wontTakePicks: boolean;
+  valueConcentrationFlagged: boolean;
 }
 
 

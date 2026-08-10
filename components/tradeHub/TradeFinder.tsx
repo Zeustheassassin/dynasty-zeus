@@ -12,6 +12,7 @@ import type {
   LeagueMateView, TradePartnerRanking, HistoricalSnapshot,
   FcTrendEntry,
   AssetDisposition, LeagueAssetDispositions, LeagueExpiringBlocks,
+  AversionTags, NeverAcceptCounterDetails,
 } from "../../lib/types";
 import type { PersonalSignal } from "../../lib/helpers/personalRankings";
 import { normalizeDisposition, opponentAssetKey, isBlockActive } from "../../lib/helpers/dispositions";
@@ -1124,6 +1125,49 @@ function TradeFinder({
           .map(([fp]) => fp)
       );
 
+      // ── "Never Accept" aversion tags ──────────────────────────────────────
+      // Built from every PREDICTED_DECLINE trade_attempts row in this league (see TradeCard.tsx's
+      // Never Accept panel + finderPipeline.ts's aversionPenalty/valueConcentrationPenalty). A
+      // stated trading philosophy is durable, not a one-off refusal, so this uses a 180-day
+      // presence window rather than the sharp 14/56-day decay attemptIntelScore uses. Every tag
+      // present was explicitly user-selected via toggles (never LLM-extracted), so no confidence
+      // filter is needed.
+      const emptyAversionTags = (): AversionTags => ({
+        wontGivePositions: new Set(), wontTakePositions: new Set(),
+        wontGivePicks: false, wontTakePicks: false, valueConcentrationFlagged: false,
+      });
+      const opponentAversionTags = new Map<number, AversionTags>();
+      const globalAversionTags = emptyAversionTags();
+      {
+        const AVERSION_WINDOW = 180 * 24 * 60 * 60 * 1000;
+        const now = Date.now();
+        for (const a of tradeAttempts) {
+          if (a.source !== "PREDICTED_DECLINE" || !a.counter_details) continue;
+          if (a.league_id !== selectedLeague?.league_id) continue;
+          if (now - new Date(a.attempted_at).getTime() > AVERSION_WINDOW) continue;
+          let details: NeverAcceptCounterDetails | null = null;
+          try {
+            details = JSON.parse(a.counter_details) as NeverAcceptCounterDetails;
+          } catch {
+            continue;
+          }
+          const tags = details?.tags;
+          if (!tags) continue;
+          const target = tags.scope === "any_opponent"
+            ? globalAversionTags
+            : (() => {
+                const key = Number(a.partner_roster_id);
+                if (!opponentAversionTags.has(key)) opponentAversionTags.set(key, emptyAversionTags());
+                return opponentAversionTags.get(key)!;
+              })();
+          tags.wontGivePositions.forEach((p) => target.wontGivePositions.add(p));
+          tags.wontTakePositions.forEach((p) => target.wontTakePositions.add(p));
+          if (tags.wontGivePicks) target.wontGivePicks = true;
+          if (tags.wontTakePicks) target.wontTakePicks = true;
+          if (tags.valueConcentrationFlagged) target.valueConcentrationFlagged = true;
+        }
+      }
+
       // ── Scoring + slotting pipeline ──────────────────────────────────────
       const { allTrades, recentFingerprints, rosterOverflow } = runFinderPipeline(results, {
         allPicks,
@@ -1158,6 +1202,8 @@ function TradeFinder({
         leagueMateProfileByRosterId,
         tradeAttempts,
         discardedFingerprints,
+        opponentAversionTags,
+        globalAversionTags,
         historicalSnapshot,
         playerStats: playerStats ?? null,
         crossLeagueExposure: crossLeagueExposure ?? null,

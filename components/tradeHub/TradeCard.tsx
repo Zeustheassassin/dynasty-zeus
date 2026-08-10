@@ -7,6 +7,7 @@ import type {
   TradeAttempt, TradeAttemptAsset, TradeAttemptPick,
   AugmentedPick, LeagueMateView, LeagueSimulation, SleeperRoster,
   LeagueAssetDispositions, LeagueExpiringBlocks,
+  NeverAcceptScope, NeverAcceptTags, NeverAcceptCounterDetails,
 } from "../../lib/types";
 import {
   isOldProducerBuy, isAgingAsset, isYoungBuildingBlock, isFutureInsulationAsset,
@@ -101,6 +102,62 @@ export default function TradeCard({
       trade.give.map((p) => p.player_id),
       trade.receive.map((p) => p.player_id),
     ));
+  };
+
+  // "Never Accept" — discards this suggestion (like Discard) and also teaches the Finder's
+  // decline-memory scoring via a PREDICTED_DECLINE trade_attempts row. The optional structured
+  // tags (position/pick-type this opponent won't move, or a general value-shape complaint) are
+  // read by finderPipeline.ts's aversionPenalty/valueConcentrationPenalty — see that file.
+  const POSITIONS = ["QB", "RB", "WR", "TE"] as const;
+  const [neverAcceptOpen, setNeverAcceptOpen] = useState(false);
+  const [neverAcceptReason, setNeverAcceptReason] = useState("");
+  const [naScope, setNaScope] = useState<NeverAcceptScope>("this_opponent");
+  const [naWontGivePos, setNaWontGivePos] = useState<Set<string>>(new Set());
+  const [naWontTakePos, setNaWontTakePos] = useState<Set<string>>(new Set());
+  const [naWontGivePicks, setNaWontGivePicks] = useState(false);
+  const [naWontTakePicks, setNaWontTakePicks] = useState(false);
+  const [naValueConcentration, setNaValueConcentration] = useState(false);
+  const togglePos = (set: Set<string>, setSet: (s: Set<string>) => void, pos: string) => {
+    const next = new Set(set);
+    if (next.has(pos)) next.delete(pos); else next.add(pos);
+    setSet(next);
+  };
+  const resetNeverAccept = () => {
+    setNeverAcceptOpen(false);
+    setNeverAcceptReason("");
+    setNaScope("this_opponent");
+    setNaWontGivePos(new Set());
+    setNaWontTakePos(new Set());
+    setNaWontGivePicks(false);
+    setNaWontTakePicks(false);
+    setNaValueConcentration(false);
+  };
+  const handleNeverAcceptConfirm = async (fp: string) => {
+    if (leagueId === null) return;
+    const tags: NeverAcceptTags = {
+      scope: naScope,
+      wontGivePositions: [...naWontGivePos],
+      wontTakePositions: [...naWontTakePos],
+      wontGivePicks: naWontGivePicks,
+      wontTakePicks: naWontTakePicks,
+      valueConcentrationFlagged: naValueConcentration,
+    };
+    const details: NeverAcceptCounterDetails = { reason: neverAcceptReason.trim(), tags };
+    onDiscardTrade(leagueId, fp);
+    await onMarkAttempted({
+      league_id: leagueId,
+      partner_roster_id: trade.oppRosterId,
+      partner_name: trade.oppName,
+      give_players: trade.give.map((p) => ({ player_id: p.player_id, name: p.full_name, position: p.position, value: p.value }) as TradeAttemptAsset),
+      give_picks: trade.givePicks.map((p) => ({ key: finderPickKey(p), label: finderPickLabel(p), value: p.value }) as TradeAttemptPick),
+      receive_players: trade.receive.map((p) => ({ player_id: p.player_id, name: p.full_name, position: p.position, value: p.value }) as TradeAttemptAsset),
+      receive_picks: trade.receivePicks.map((p) => ({ key: finderPickKey(p), label: finderPickLabel(p), value: p.value }) as TradeAttemptPick),
+      source: "PREDICTED_DECLINE",
+      initiated_by: "ME",
+      status: "DECLINED",
+      counter_details: JSON.stringify(details),
+    });
+    resetNeverAccept();
   };
 
   const scoreFactors = (() => {
@@ -589,7 +646,102 @@ export default function TradeCard({
             Discard
           </button>
         )}
+        {leagueId !== null && (
+          <button
+            onClick={() => setNeverAcceptOpen((prev) => !prev)}
+            title="Discard this suggestion and teach the Finder to stop pitching this shape"
+            className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition shrink-0 ${neverAcceptOpen ? "border-red-500 text-red-400" : "border-slate-700 text-slate-500 hover:border-red-500 hover:text-red-400"}`}
+          >
+            Never Accept
+          </button>
+        )}
       </div>
+
+      {/* Never Accept panel — inline, matches the simPreview toggle pattern above. */}
+      {neverAcceptOpen && leagueId !== null && (() => {
+        const fp = buildTradeFingerprint(
+          leagueId,
+          trade.oppRosterId,
+          [...trade.give.map((p) => p.player_id), ...trade.givePicks.map((p) => finderPickKey(p))],
+          [...trade.receive.map((p) => p.player_id), ...trade.receivePicks.map((p) => finderPickKey(p))],
+        );
+        const chip = (active: boolean) =>
+          `text-[9px] font-semibold px-2 py-0.5 rounded-full border transition ${
+            active
+              ? "border-red-600 bg-red-950/40 text-red-300"
+              : "border-slate-700 text-slate-500 hover:border-slate-500 hover:text-slate-300"
+          }`;
+        return (
+          <div className="mt-3 bg-slate-800/50 rounded-lg px-3 py-2.5 space-y-2.5">
+            <input
+              type="text"
+              value={neverAcceptReason}
+              onChange={(e) => setNeverAcceptReason(e.target.value.slice(0, 300))}
+              maxLength={300}
+              placeholder="Why won't they accept? (optional, for your own reference)"
+              className="w-full rounded-lg bg-slate-900 border border-slate-700 px-2.5 py-1.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-red-500"
+            />
+
+            <div className="flex items-center gap-1.5">
+              <span className="text-[9px] uppercase tracking-wide text-slate-500 shrink-0">Scope</span>
+              <button onClick={() => setNaScope("this_opponent")} className={chip(naScope === "this_opponent")}>This opponent</button>
+              <button onClick={() => setNaScope("any_opponent")} className={chip(naScope === "any_opponent")}>Any opponent</button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[9px] uppercase tracking-wide text-slate-500 shrink-0">Won&apos;t give up</span>
+              {POSITIONS.map((pos) => (
+                <button key={pos} onClick={() => togglePos(naWontGivePos, setNaWontGivePos, pos)} className={chip(naWontGivePos.has(pos))}>{pos}</button>
+              ))}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[9px] uppercase tracking-wide text-slate-500 shrink-0">Won&apos;t accept</span>
+              {POSITIONS.map((pos) => (
+                <button key={pos} onClick={() => togglePos(naWontTakePos, setNaWontTakePos, pos)} className={chip(naWontTakePos.has(pos))}>{pos}</button>
+              ))}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 text-[10px] text-slate-400">
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <input type="checkbox" checked={naWontGivePicks} onChange={(e) => setNaWontGivePicks(e.target.checked)} className="accent-red-500" />
+                Won&apos;t give up picks
+              </label>
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <input type="checkbox" checked={naWontTakePicks} onChange={(e) => setNaWontTakePicks(e.target.checked)} className="accent-red-500" />
+                Won&apos;t accept picks
+              </label>
+            </div>
+            <label className="flex items-center gap-1.5 cursor-pointer text-[10px] text-slate-400">
+              <input
+                type="checkbox"
+                checked={naValueConcentration}
+                onChange={(e) => {
+                  setNaValueConcentration(e.target.checked);
+                  if (e.target.checked) setNaScope("any_opponent");
+                }}
+                className="accent-red-500"
+              />
+              Too many small pieces for one (value mismatch)
+            </label>
+
+            <div className="flex gap-2 pt-0.5">
+              <button
+                onClick={() => handleNeverAcceptConfirm(fp)}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-red-700 text-red-400 hover:border-red-500 hover:text-red-300 transition"
+              >
+                Confirm
+              </button>
+              <button
+                onClick={resetNeverAccept}
+                className="text-xs text-slate-500 hover:text-slate-300 transition"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        );
+      })()}
     </Card>
   );
 }

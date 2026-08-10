@@ -698,8 +698,10 @@ useEffect(() => {
   if ((tradeHubSection === "CALCULATOR" || tradeHubSection === "FINDER") && selectedLeague?.league_id) {
     loadCalcValues(getLeagueNumQbs(selectedLeague));
   }
-  // Auto-load attempts when switching to ATTEMPTS tab
-  if (tradeHubSection === "ATTEMPTS" && selectedLeague?.league_id && supabaseUser && tradeAttemptsLeagueId !== selectedLeague.league_id) {
+  // Auto-load attempts when switching to ATTEMPTS or FINDER (the Finder's decline-memory
+  // scoring reads tradeAttempts too, and needs it populated even on a fresh-session visit
+  // that skips the Attempts tab entirely).
+  if ((tradeHubSection === "ATTEMPTS" || tradeHubSection === "FINDER") && selectedLeague?.league_id && supabaseUser && tradeAttemptsLeagueId !== selectedLeague.league_id) {
     loadTradeAttempts(selectedLeague.league_id);
   }
 }, [tradeHubSection, selectedLeague?.league_id, selectedLeague, supabaseUser, tradeAttemptsLeagueId, loadCalcValues, loadTradeAttempts]);

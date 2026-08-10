@@ -3,7 +3,7 @@ import { classifyOppDirection, CONTENDER_BUCKETS, SELLER_BUCKETS } from "../../l
 import type {
   SleeperRoster, SleeperPlayer, SleeperUser, SleeperLeague,
   AugmentedPick, TradeAttempt, LeagueMateView, TradePartnerRanking,
-  HistoricalSnapshot, LeagueSimulation,
+  HistoricalSnapshot, LeagueSimulation, AversionTags,
 } from "../../lib/types";
 import {
   isFutureInsulationAsset, isOldProducerBuy,
@@ -14,7 +14,7 @@ import { finderPickKey } from "./finderUtils";
 import { buildTradeFingerprint } from "./shared";
 import type { TradeResult } from "./finderTypes";
 import { valueBearingGive } from "./finderTypes";
-import type { PlayerWithValue } from "./shared";
+import type { PlayerWithValue, PickWithValue } from "./shared";
 
 // Shared injury-status classification — reused by the tank-mode receive filter (a hurt-but-
 // talented player is an acceptable tank return alongside picks/youth) and by the emergency-fill
@@ -56,6 +56,10 @@ export interface FinderPipelineCtx {
   tradeAttempts: TradeAttempt[];
   /** Fingerprints (buildTradeFingerprint) of still-active user-discarded Finder suggestions. */
   discardedFingerprints: Set<string>;
+  /** "Never Accept" structured tags scoped to one opponent, keyed by partner_roster_id. */
+  opponentAversionTags: Map<number, AversionTags>;
+  /** "Never Accept" structured tags scoped to "any opponent" — merged into one set. */
+  globalAversionTags: AversionTags;
   historicalSnapshot: HistoricalSnapshot | null;
   playerStats: Record<string, {
     avgTargets: number; avgCarries: number; snapPct: number; gamesPlayed: number;
@@ -103,7 +107,7 @@ export function runFinderPipeline(
     myFinderPlayoffOdds, isChampionshipPush, pinnedPlayer, deferredTargetPlayerId,
     deferredPinnedPlayerId, deferredTargetOppRosterId, deferredFinderSeed,
     nflTeamDepth, tradePartnerRankings, leagueMateProfileByRosterId, tradeAttempts,
-    discardedFingerprints,
+    discardedFingerprints, opponentAversionTags, globalAversionTags,
     historicalSnapshot, playerStats, crossLeagueExposure, buyLowPlayerIds,
     nflState, selectedLeagueSimulation, selectedLeagueDraftHasOccurred,
     weeklyProjMap, playerDispositions, finderPickValue, buildPostTradePlayers,
@@ -761,15 +765,15 @@ export function runFinderPipeline(
         if (allGiveVals.length === 0 || allReceiveVals.length === 0) return 0;
         const topGive    = Math.max(...allGiveVals);
         const topReceive = Math.max(...allReceiveVals);
-        const spsGlobalTop = Math.max(...allGiveVals, ...allReceiveVals);
+        // Value is value: whether the offsetting piece is a player or a pick doesn't change how
+        // steep the star-premium penalty is, so a round-1 pick no longer gets a special
+        // near-zero (0.10) scale collapse just for being "round 1" — same fix, same reasoning,
+        // as computeStarDiscounts in calculatorUtils.ts (a low-value round-1 pick shouldn't
+        // discount the penalty 10x purely because of its round label).
         const pickScoreParams = (picks: Array<{ round: number | string; value: number }>): { threshold: number; scale: number } => {
           if (picks.length === 0) return { threshold: 0.78, scale: 1.0 };
           const best = Math.min(...picks.map((p) => Number(p.round)));
-          if (best === 1) {
-            const bestFirstVal = Math.max(...picks.filter((p) => Number(p.round) === 1).map((p) => p.value));
-            if (bestFirstVal >= spsGlobalTop * 0.97) return { threshold: 0.78, scale: 1.0 };
-            return { threshold: 0.78, scale: 0.10 };
-          }
+          if (best === 1) return { threshold: 0.78, scale: 1.0 };
           if (best === 2) return { threshold: 0.83, scale: 0.75 };
           if (best === 3) return { threshold: 0.87, scale: 1.00 };
           return              { threshold: 0.91, scale: 1.50 };
@@ -1345,6 +1349,57 @@ export function runFinderPipeline(
         return db;
       })();
 
+      // "Never Accept" aversion signal: the user has explicitly said (via TradeCard's
+      // structured tags, stored on PREDICTED_DECLINE trade_attempts rows) that this opponent —
+      // or every opponent — won't move a given position/pick-type. A durable stated trading
+      // philosophy, not a one-off refusal, so it's not decayed on the 14/56-day window that
+      // attemptIntelScore's per-player decline memory uses (see TradeFinder.tsx for the
+      // 180-day presence window that builds these maps).
+      const aversionPenalty = (() => {
+        let ap = 0;
+        const oppTags = opponentAversionTags.get(Number(r.oppRosterId));
+        const tagSets = [globalAversionTags, oppTags].filter((t): t is AversionTags => !!t);
+        for (const tags of tagSets) {
+          if (r.receive.some((p) => tags.wontGivePositions.has(p.position))) ap -= 10;
+          if (r.give.some((p) => tags.wontTakePositions.has(p.position))) ap -= 10;
+          if (tags.wontGivePicks && r.receivePicks.length > 0) ap -= 10;
+          if (tags.wontTakePicks && r.givePicks.length > 0) ap -= 10;
+        }
+        return ap;
+      })();
+
+      // Reinforces starPremiumScore once the user has explicitly flagged (globally, via the
+      // "value mismatch" checkbox) that a 3-pieces-for-1 shape is never acceptable — none of
+      // the many pieces individually clears half the single piece's value. A flat add-on, not
+      // folded into starPremiumScore itself, so this explicit "no" can't be out-voted by other
+      // terms in the same bucket.
+      const valueConcentrationPenalty = (() => {
+        if (!globalAversionTags.valueConcentrationFlagged) return 0;
+        const giveVals = [...valueBearingGive(r).map((p) => p.value), ...r.givePicks.map((p) => p.value)];
+        const receiveVals = [...r.receive.map((p) => p.value), ...r.receivePicks.map((p) => p.value)];
+        const manyForOne = (many: number[], one: number[]) =>
+          many.length >= 3 && one.length === 1 && Math.max(...many) < one[0] * 0.5;
+        if (manyForOne(giveVals, receiveVals) || manyForOne(receiveVals, giveVals)) return -15;
+        return 0;
+      })();
+
+      // Always-on structural rule (not user-taught, unlike aversionPenalty/valueConcentrationPenalty
+      // above): acquiring a future 1st-round pick — a rebuild signal — and an aging veteran
+      // (isOldProducerBuy) — a win-now signal — in the SAME return is a roster-logic contradiction
+      // nobody actually makes: you're either building for the future or buying for right now, not
+      // both in one package. Checked on both sides (what I receive AND what the opponent receives,
+      // i.e. what I give) since the same incoherence applies whichever direction it flows.
+      const timelineMismatchPenalty = (() => {
+        const currentSeasonYear = getSeasonYear(nflState);
+        const hasFutureFirst = (picks: PickWithValue[]) =>
+          picks.some((p) => Number(p.round) === 1 && String(p.season) !== currentSeasonYear);
+        const hasAgingVet = (assets: PlayerWithValue[]) => assets.some((p) => isOldProducerBuy(p));
+        let tmp = 0;
+        if (hasFutureFirst(r.receivePicks) && hasAgingVet(r.receive)) tmp -= 15;
+        if (hasFutureFirst(r.givePicks) && hasAgingVet(r.give)) tmp -= 15;
+        return tmp;
+      })();
+
       const oppDropCostPenalty = (() => {
         const oppNetPlayerGain = valueBearingGive(r).length - r.receive.length;
         if (oppNetPlayerGain <= 0) return 0;
@@ -1386,9 +1441,10 @@ export function runFinderPipeline(
         + starterQualityBonus + depthAwareTierBonus + rosterBalanceScore + championshipBonus
         + futurePickBonus + standingsPressureScore;
       const valueEdgeBucket = r.score + balancePenalty + starPremiumScore + pickSlotScore + handcuffBonus;
-      const structureBucket = formatBonus + rosterConsolidationBonus;
+      const structureBucket = formatBonus + rosterConsolidationBonus + timelineMismatchPenalty;
       const signalsBucket = dispositionScore + marketIntelScore + archetypeWinRateBonus
-        + seasonTimingBonus + usageSignalScore + exposureBonus + sellHighConfirmScore + dispositionBonus;
+        + seasonTimingBonus + usageSignalScore + exposureBonus + sellHighConfirmScore + dispositionBonus
+        + aversionPenalty + valueConcentrationPenalty;
 
       const WEIGHTS = { acceptance: 1, userFit: 1, valueEdge: 1, structure: 1, signals: 1 };
       const BUCKET_CLAMP = 100000; // ~off (byte-identical); set to ~40 to bound non-value buckets

@@ -115,6 +115,14 @@ const baseCtx = (over: Partial<FinderPipelineCtx> = {}): FinderPipelineCtx => {
     leagueMateProfileByRosterId: new Map(),
     tradeAttempts: [],
     discardedFingerprints: new Set<string>(),
+    opponentAversionTags: new Map(),
+    globalAversionTags: {
+      wontGivePositions: new Set<string>(),
+      wontTakePositions: new Set<string>(),
+      wontGivePicks: false,
+      wontTakePicks: false,
+      valueConcentrationFlagged: false,
+    },
     historicalSnapshot: null,
     playerStats: null,
     crossLeagueExposure: null,
@@ -962,6 +970,342 @@ describe("runFinderPipeline — decline memory", () => {
     const { allTrades } = runFinderPipeline([plain, sweetened], baseCtx({ tradeAttempts: [declinedBoth] }));
     expect(allTrades).toHaveLength(2);
     expect(allTrades[0].sweetenerPlayerId).toBe("SW"); // sweetened (penalty exempt) outranks plain (−8)
+  });
+
+  it("a PREDICTED_DECLINE-source attempt (Never Accept) feeds the same decline-memory penalty as a real decline", () => {
+    // attemptIntelScore's decline-memory branch keys off status/initiated_by, not source — a
+    // "Never Accept" row (source: PREDICTED_DECLINE, status: DECLINED) must de-rank a future
+    // trade reusing the same receive player with the same opponent exactly like a real decline.
+    const { allTrades } = runFinderPipeline(
+      [recvTrade("g2", "DECLINED"), recvTrade("g1", "FRESH")],
+      baseCtx({ tradeAttempts: [recvAttempt("DECLINED", { source: "PREDICTED_DECLINE" })] }),
+    );
+    expect(allTrades.map((t) => t.receive[0].player_id)).toEqual(["FRESH", "DECLINED"]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// "Never Accept" aversion tags (opponentAversionTags / globalAversionTags)
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("runFinderPipeline — aversion tags (Never Accept)", () => {
+  const emptyTags = () => ({
+    wontGivePositions: new Set<string>(),
+    wontTakePositions: new Set<string>(),
+    wontGivePicks: false,
+    wontTakePicks: false,
+    valueConcentrationFlagged: false,
+  });
+
+  it("penalizes receiving a position the opponent-scoped tags say they won't give up", () => {
+    const t = mkTrade({
+      give: [mkPlayer("g1", "WR", 2000)],
+      receive: [mkPlayer("r1", "RB", 2000)],
+      oppRosterId: 2, score: 100,
+    });
+    const other = mkTrade({
+      give: [mkPlayer("g2", "WR", 2000)],
+      receive: [mkPlayer("r2", "RB", 2000)],
+      oppRosterId: 3, score: 100,
+    });
+    const opponentAversionTags = new Map([[2, { ...emptyTags(), wontGivePositions: new Set(["RB"]) }]]);
+    const { allTrades } = runFinderPipeline(
+      [t, other],
+      baseCtx({
+        rosters: [mkRoster(1, "USER", []), mkRoster(2, "OPP", []), mkRoster(3, "OPP2", [])],
+        opponentAversionTags,
+      }),
+    );
+    // Roster 2's trade eats the -10 aversion penalty; roster 3's identical trade doesn't.
+    expect(allTrades.map((x) => x.oppRosterId)).toEqual([3, 2]);
+  });
+
+  it("opponent-scoped tags do NOT apply to a different opponent", () => {
+    const taggedOpp = mkTrade({
+      give: [mkPlayer("g1", "WR", 2000)], receive: [mkPlayer("r1", "RB", 2000)],
+      oppRosterId: 2, score: 100,
+    });
+    const opponentAversionTags = new Map([[99, { ...emptyTags(), wontGivePositions: new Set(["RB"]) }]]);
+    const { allTrades } = runFinderPipeline([taggedOpp], baseCtx({ opponentAversionTags }));
+    expect(allTrades).toHaveLength(1);
+  });
+
+  it("globalAversionTags (scope: any_opponent) applies regardless of which opponent", () => {
+    const oppA = mkTrade({
+      give: [mkPlayer("g1", "WR", 2000)], receive: [mkPlayer("r1", "RB", 2000)],
+      oppRosterId: 2, score: 100,
+    });
+    const oppB = mkTrade({
+      give: [mkPlayer("g2", "WR", 2000)], receive: [mkPlayer("r2", "RB", 2000)],
+      oppRosterId: 3, score: 100,
+    });
+    const globalAversionTags = { ...emptyTags(), wontGivePositions: new Set(["RB"]) };
+    const { allTrades } = runFinderPipeline(
+      [oppA, oppB],
+      baseCtx({
+        rosters: [mkRoster(1, "USER", []), mkRoster(2, "OPP", []), mkRoster(3, "OPP2", [])],
+        globalAversionTags,
+      }),
+    );
+    // Both trades receive an RB, so both take the -10 global penalty — order stays input order
+    // (tie), but both must still SURVIVE the positive-strategyScore gate despite the penalty.
+    expect(allTrades).toHaveLength(2);
+  });
+
+  it("penalizes giving a position the tags say the opponent won't accept", () => {
+    const t = mkTrade({
+      give: [mkPlayer("g1", "RB", 2000)], receive: [mkPlayer("r1", "WR", 2000)],
+      oppRosterId: 2, score: 100,
+    });
+    const other = mkTrade({
+      give: [mkPlayer("g2", "RB", 2000)], receive: [mkPlayer("r2", "WR", 2000)],
+      oppRosterId: 3, score: 100,
+    });
+    const opponentAversionTags = new Map([[2, { ...emptyTags(), wontTakePositions: new Set(["RB"]) }]]);
+    const { allTrades } = runFinderPipeline(
+      [t, other],
+      baseCtx({
+        rosters: [mkRoster(1, "USER", []), mkRoster(2, "OPP", []), mkRoster(3, "OPP2", [])],
+        opponentAversionTags,
+      }),
+    );
+    expect(allTrades.map((x) => x.oppRosterId)).toEqual([3, 2]);
+  });
+
+  it("penalizes a trade with receive-side picks when tags say the opponent won't give up picks", () => {
+    const t = mkTrade({
+      give: [mkPlayer("g1", "WR", 2000)],
+      receive: [mkPlayer("r1", "RB", 1500)],
+      receivePicks: [{ round: 3, season: CY, value: 500 } as unknown as PickWithValue],
+      oppRosterId: 2, score: 100,
+    });
+    const other = mkTrade({
+      give: [mkPlayer("g2", "WR", 2000)],
+      receive: [mkPlayer("r2", "RB", 1500)],
+      receivePicks: [{ round: 3, season: CY, value: 500 } as unknown as PickWithValue],
+      oppRosterId: 3, score: 100,
+    });
+    const opponentAversionTags = new Map([[2, { ...emptyTags(), wontGivePicks: true }]]);
+    const { allTrades } = runFinderPipeline(
+      [t, other],
+      baseCtx({
+        rosters: [mkRoster(1, "USER", []), mkRoster(2, "OPP", []), mkRoster(3, "OPP2", [])],
+        opponentAversionTags,
+      }),
+    );
+    expect(allTrades.map((x) => x.oppRosterId)).toEqual([3, 2]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// valueConcentrationPenalty (globally-flagged "too many small pieces for one")
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("runFinderPipeline — valueConcentrationPenalty", () => {
+  const flaggedTags = () => ({
+    wontGivePositions: new Set<string>(), wontTakePositions: new Set<string>(),
+    wontGivePicks: false, wontTakePicks: false, valueConcentrationFlagged: true,
+  });
+
+  it("penalizes 3 give-side pieces worth ~1000 each vs. a single ~3000 receive-side piece, only when flagged", () => {
+    // manyForOne: give has 3+ pieces, receive has exactly 1, and the best give piece (1000) is
+    // under half the receive piece's value (3000 × 0.5 = 1500) → -15 when flagged.
+    const manyForOne = mkTrade({
+      give: [mkPlayer("g1", "WR", 1000), mkPlayer("g2", "RB", 1000), mkPlayer("g3", "TE", 1000)],
+      receive: [mkPlayer("r1", "RB", 3000)],
+      oppRosterId: 2, score: 100, format: "3-for-1",
+    });
+    // Score 55, not an arbitrary "15 below" — manyForOne's shape already carries its own
+    // starPremiumScore (-22, distinct signal) and formatBonus (-2, 4-piece trade) baggage versus
+    // this clean 1-for-1's formatBonus (+12), so 55 is the calibrated point where the -15 flag
+    // flips the ranking (unflagged: manyForOne 76 > competitor 67; flagged: 61 < 67).
+    const cleanCompetitor = mkTrade({
+      give: [mkPlayer("cg1", "WR", 3000)],
+      receive: [mkPlayer("cr1", "RB", 3000)],
+      oppRosterId: 3, score: 55,
+    });
+    const rosters = [mkRoster(1, "USER", []), mkRoster(2, "OPP", []), mkRoster(3, "OPP2", [])];
+
+    const { allTrades: withoutFlag } = runFinderPipeline([manyForOne, cleanCompetitor], baseCtx({ rosters }));
+    // Without the flag, manyForOne still outranks cleanCompetitor.
+    expect(withoutFlag.map((x) => x.oppRosterId)).toEqual([2, 3]);
+
+    const { allTrades: withFlag } = runFinderPipeline(
+      [manyForOne, cleanCompetitor],
+      baseCtx({ rosters, globalAversionTags: flaggedTags() }),
+    );
+    // With the flag, manyForOne's -15 penalty drops it to (at best) a tie with cleanCompetitor —
+    // it can no longer rank strictly above it.
+    expect(withFlag[0].oppRosterId).toBe(3);
+  });
+
+  it("does not penalize a package that isn't shaped many-for-one (2-for-1, below the 3+ threshold)", () => {
+    const twoForOne = mkTrade({
+      give: [mkPlayer("g1", "WR", 1000), mkPlayer("g2", "RB", 1000)],
+      receive: [mkPlayer("r1", "RB", 3000)],
+      oppRosterId: 2, score: 100, format: "2-for-1",
+    });
+    const cleanCompetitor = mkTrade({
+      give: [mkPlayer("cg1", "WR", 3000)],
+      receive: [mkPlayer("cr1", "RB", 3000)],
+      oppRosterId: 3, score: 55,
+    });
+    const rosters = [mkRoster(1, "USER", []), mkRoster(2, "OPP", []), mkRoster(3, "OPP2", [])];
+    const { allTrades: withFlag } = runFinderPipeline(
+      [twoForOne, cleanCompetitor],
+      baseCtx({ rosters, globalAversionTags: flaggedTags() }),
+    );
+    // No manyForOne match (only 2 give pieces, below the 3+ threshold) → the flag has zero effect,
+    // so twoForOne still outranks cleanCompetitor exactly as it would unflagged.
+    expect(withFlag.map((x) => x.oppRosterId)).toEqual([2, 3]);
+  });
+
+  it("is opponent-agnostic — the same many-for-one penalty fires against two different opponents", () => {
+    // Two independent many-for-one trades against different opponents, each paired with its own
+    // clean same-value competitor (opp 20/21). Global scope means the -15 lands on BOTH many-for-one
+    // trades identically, so both lose to their competitor in exactly the same way.
+    const manyForOneOppA = mkTrade({
+      give: [mkPlayer("g1", "WR", 1000), mkPlayer("g2", "RB", 1000), mkPlayer("g3", "TE", 1000)],
+      receive: [mkPlayer("r1", "RB", 3000)],
+      oppRosterId: 2, score: 100, format: "3-for-1",
+    });
+    const competitorA = mkTrade({
+      give: [mkPlayer("cg1", "WR", 3000)], receive: [mkPlayer("cr1", "RB", 3000)],
+      oppRosterId: 20, score: 55,
+    });
+    const manyForOneOppB = mkTrade({
+      give: [mkPlayer("g4", "WR", 1000), mkPlayer("g5", "RB", 1000), mkPlayer("g6", "TE", 1000)],
+      receive: [mkPlayer("r2", "RB", 3000)],
+      oppRosterId: 3, score: 100, format: "3-for-1",
+    });
+    const competitorB = mkTrade({
+      give: [mkPlayer("cg2", "WR", 3000)], receive: [mkPlayer("cr2", "RB", 3000)],
+      oppRosterId: 21, score: 55,
+    });
+    const rosters = [
+      mkRoster(1, "USER", []), mkRoster(2, "OPP", []), mkRoster(3, "OPP2", []),
+      mkRoster(20, "C1", []), mkRoster(21, "C2", []),
+    ];
+    const { allTrades } = runFinderPipeline(
+      [manyForOneOppA, competitorA, manyForOneOppB, competitorB],
+      baseCtx({ rosters, globalAversionTags: flaggedTags() }),
+    );
+    // Neither many-for-one trade (2 or 3) ranks above its own competitor (20 or 21) — the -15
+    // landed the same way against both opponents.
+    const rank = new Map(allTrades.map((t, i) => [t.oppRosterId, i]));
+    expect(rank.get(20)!).toBeLessThan(rank.get(2)!);
+    expect(rank.get(21)!).toBeLessThan(rank.get(3)!);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// starPremiumScore pick-round regression (round-1 pick scale collapse removed)
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("runFinderPipeline — starPremiumScore pick handling", () => {
+  it("a low-value round-1 pick no longer gets an easier ride than an equally low-value round-2 pick", () => {
+    // Give a 4000-value star; receive a small filler (200) plus a low-value (700) pick, far
+    // below the 0.78/0.83 threshold ratios either way. Before the fix, a non-near-top round-1
+    // pick collapsed the penalty scale to 0.10 (round(0.10×22)=2) — LESS penalized than the
+    // same-value round-2 pick's 0.75 scale (round(0.75×22)=17), backwards: the "better" pick
+    // round bought a bigger discount on an equally bad trade. After the fix, round-1 uses the
+    // full 1.0 scale (round(1.0×22)=22), so it is now the MORE penalized of the two — the
+    // discount is gone. Every other scoring term is identical between the two trades (same
+    // shape, values, positions), so this ordering flip isolates the fix.
+    const round1Trade = mkTrade({
+      give: [mkPlayer("star1", "WR", 4000)],
+      receive: [mkPlayer("filler1", "WR", 200)],
+      receivePicks: [{ round: 1, season: CY, value: 700 } as unknown as PickWithValue],
+      oppRosterId: 2, score: 100, format: "1 for 2",
+    });
+    const round2Trade = mkTrade({
+      give: [mkPlayer("star2", "WR", 4000)],
+      receive: [mkPlayer("filler2", "WR", 200)],
+      receivePicks: [{ round: 2, season: CY, value: 700 } as unknown as PickWithValue],
+      oppRosterId: 3, score: 100, format: "1 for 2",
+    });
+    const { allTrades } = runFinderPipeline(
+      [round1Trade, round2Trade],
+      baseCtx({ rosters: [mkRoster(1, "USER", []), mkRoster(2, "OPP", []), mkRoster(3, "OPP2", [])] }),
+    );
+    expect(allTrades).toHaveLength(2);
+    // round-2 (smaller penalty, -17) now outranks round-1 (larger penalty, -22) — the reverse
+    // of the pre-fix ordering, proving the round-1 scale collapse no longer applies.
+    expect(allTrades.map((t) => t.oppRosterId)).toEqual([3, 2]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// timelineMismatchPenalty — always-on structural rule (no user tagging): a future 1st-round
+// pick (rebuild signal) and an aging veteran (win-now signal) showing up on the SAME side of a
+// package is a roster-logic contradiction — you're either building for the future or buying for
+// right now, not both at once. Distinct from aversionPenalty/valueConcentrationPenalty above,
+// which only fire once the user has explicitly tagged something via "Never Accept".
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("runFinderPipeline — timelineMismatchPenalty (future 1st + aging vet)", () => {
+  // Every pair below shares an IDENTICAL shape (same piece counts, same values, same pick
+  // round) and differs in exactly ONE dimension of the rule (age, season, or which side) — so
+  // every other scoring term (starPremiumScore, formatBonus, pickSlotScore, …) is byte-identical
+  // between the two trades in a pair, and any ranking difference is attributable solely to
+  // timelineMismatchPenalty. This mirrors the starPremiumScore round1-vs-round2 test above.
+  const NY = String(Number(CY) + 1);
+  const rosters = [mkRoster(1, "USER", []), mkRoster(2, "OPP", []), mkRoster(3, "OPP2", [])];
+
+  it("penalizes a future 1st-round pick together with an aging veteran in the same return", () => {
+    const mismatched = mkTrade({
+      give: [mkPlayer("g1", "WR", 3000, { age: 24 })],
+      receive: [mkPlayer("agingRB", "RB", 2000, { age: 33 })],
+      receivePicks: [{ round: 1, season: NY, value: 1500 } as unknown as PickWithValue],
+      oppRosterId: 2, score: 100, format: "1 for 2",
+    });
+    const noMismatch = mkTrade({
+      give: [mkPlayer("g2", "WR", 3000, { age: 24 })],
+      receive: [mkPlayer("youngRB", "RB", 2000, { age: 22 })], // same value, not aging
+      receivePicks: [{ round: 1, season: NY, value: 1500 } as unknown as PickWithValue],
+      oppRosterId: 3, score: 100, format: "1 for 2",
+    });
+    const { allTrades } = runFinderPipeline([mismatched, noMismatch], baseCtx({ rosters }));
+    expect(allTrades).toHaveLength(2);
+    expect(allTrades.map((t) => t.oppRosterId)).toEqual([3, 2]);
+  });
+
+  it("does not penalize a CURRENT-year 1st-round pick paired with an aging vet (not a future first)", () => {
+    const currentYearPick = mkTrade({
+      give: [mkPlayer("g1", "WR", 3000, { age: 24 })],
+      receive: [mkPlayer("agingRB1", "RB", 2000, { age: 33 })],
+      receivePicks: [{ round: 1, season: CY, value: 1500 } as unknown as PickWithValue],
+      oppRosterId: 2, score: 100, format: "1 for 2",
+    });
+    const futurePick = mkTrade({
+      give: [mkPlayer("g2", "WR", 3000, { age: 24 })],
+      receive: [mkPlayer("agingRB2", "RB", 2000, { age: 33 })],
+      receivePicks: [{ round: 1, season: NY, value: 1500 } as unknown as PickWithValue],
+      oppRosterId: 3, score: 100, format: "1 for 2",
+    });
+    const { allTrades } = runFinderPipeline([currentYearPick, futurePick], baseCtx({ rosters }));
+    expect(allTrades).toHaveLength(2);
+    // Same pick round (1), same values → starPremiumScore is identical between the two; only
+    // the season differs, so the current-year one escaping the penalty is what flips the order.
+    expect(allTrades.map((t) => t.oppRosterId)).toEqual([2, 3]);
+  });
+
+  it("applies symmetrically to the give side — sending a future 1st + an aging vet in one package is penalized too", () => {
+    const mismatched = mkTrade({
+      give: [mkPlayer("agingRB", "RB", 2000, { age: 33 })],
+      givePicks: [{ round: 1, season: NY, value: 1500 } as unknown as PickWithValue],
+      receive: [mkPlayer("r1", "WR", 3000, { age: 24 })],
+      oppRosterId: 2, score: 100, format: "2 for 1",
+    });
+    const noMismatch = mkTrade({
+      give: [mkPlayer("youngRB", "RB", 2000, { age: 22 })], // same value, not aging
+      givePicks: [{ round: 1, season: NY, value: 1500 } as unknown as PickWithValue],
+      receive: [mkPlayer("r2", "WR", 3000, { age: 24 })],
+      oppRosterId: 3, score: 100, format: "2 for 1",
+    });
+    const { allTrades } = runFinderPipeline([mismatched, noMismatch], baseCtx({ rosters }));
+    expect(allTrades).toHaveLength(2);
+    expect(allTrades.map((t) => t.oppRosterId)).toEqual([3, 2]);
   });
 });
 
