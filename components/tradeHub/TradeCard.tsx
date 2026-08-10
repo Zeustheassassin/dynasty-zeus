@@ -2,10 +2,11 @@
 import { useState } from "react";
 import { CURRENT_YEAR } from "../../lib/helpers";
 import { normalizeDisposition } from "../../lib/helpers/dispositions";
+import { NoInterestPicker } from "../shared/NoInterestPicker";
 import type {
   TradeAttempt, TradeAttemptAsset, TradeAttemptPick,
   AugmentedPick, LeagueMateView, LeagueSimulation, SleeperRoster,
-  LeagueAssetDispositions,
+  LeagueAssetDispositions, LeagueExpiringBlocks,
 } from "../../lib/types";
 import {
   isOldProducerBuy, isAgingAsset, isYoungBuildingBlock, isFutureInsulationAsset,
@@ -31,6 +32,8 @@ interface TradeCardProps {
   posTeamTotals: { rosterId: number; totals: Record<string, number> }[];
   numTeams: number;
   leaguePlayerTags: LeagueAssetDispositions;
+  noInterestPlayers: LeagueExpiringBlocks;
+  onSetNoInterest: (leagueId: string, playerId: string, days: number | null) => void;
   marketSignalMap: Map<string, string>;
   /** Personal-vs-consensus rank delta per player (vsMkt): positive = you rank them higher than market. */
   rankGapMap: Record<string, number>;
@@ -61,6 +64,8 @@ export default function TradeCard({
   posTeamTotals,
   numTeams,
   leaguePlayerTags,
+  noInterestPlayers,
+  onSetNoInterest,
   marketSignalMap,
   rankGapMap,
   tradeAttempts,
@@ -422,6 +427,14 @@ export default function TradeCard({
                   )}
                   {marketSignalMap.get(p.player_id) === "LIQUID" && (
                     <span className="hidden sm:inline-flex text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-sky-700 bg-sky-950/40 text-sky-300 shrink-0">Active</span>
+                  )}
+                  {leagueId !== null && (
+                    <span className="ml-auto">
+                      <NoInterestPicker
+                        expiresAt={noInterestPlayers[leagueId]?.[p.player_id]}
+                        onChange={(days) => onSetNoInterest(leagueId, p.player_id, days)}
+                      />
+                    </span>
                   )}
                 </div>
                 <div className="mt-0.5 flex items-center justify-between gap-1.5">

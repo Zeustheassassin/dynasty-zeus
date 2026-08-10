@@ -62,8 +62,10 @@ interface TradeFinderProps {
   finderRankGaps: Record<string, number>;
   leaguePlayerTags: LeagueAssetDispositions;
   onSetAssetDisposition: (leagueId: string, assetId: string, disposition: AssetDisposition | null) => void;
-  /** Personal, time-boxed "don't want this player" block — read-only here; edited from League Hub. */
+  /** Personal, time-boxed "don't want this player" block — editable both here (each receive-side
+   *  player row) and from League Hub's Opponent Rosters tab; both surfaces share the same map. */
   noInterestPlayers: LeagueExpiringBlocks;
+  onSetNoInterest: (leagueId: string, playerId: string, days: number | null) => void;
   /** Fingerprints of Finder suggestions the user dismissed; still-active ones are filtered out. */
   discardedTrades: LeagueExpiringBlocks;
   discardFinderTrade: (leagueId: string, fingerprint: string) => void;
@@ -107,7 +109,7 @@ function TradeFinder({
   selectedLeagueDraftHasOccurred,
   loadingCalcValues,
   playerDispositions, finderSignals, finderRankGaps, leaguePlayerTags, onSetAssetDisposition,
-  noInterestPlayers, discardedTrades, discardFinderTrade,
+  noInterestPlayers, onSetNoInterest, discardedTrades, discardFinderTrade,
   leagueMateProfileByRosterId, selectedLeagueMateProfilesView,
   tradePartnerRankings,
   onRefreshDirection,
@@ -1418,6 +1420,8 @@ function TradeFinder({
             posTeamTotals={posTeamTotals}
             numTeams={numTeams}
             leaguePlayerTags={leaguePlayerTags}
+            noInterestPlayers={noInterestPlayers}
+            onSetNoInterest={onSetNoInterest}
             marketSignalMap={marketSignalMap}
             rankGapMap={finderRankGaps}
             tradeAttempts={tradeAttempts}

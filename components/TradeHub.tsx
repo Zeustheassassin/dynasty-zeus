@@ -41,6 +41,7 @@ interface TradeHubProps {
   leaguePlayerTags: LeagueAssetDispositions;
   onSetAssetDisposition: (leagueId: string, assetId: string, disposition: AssetDisposition | null) => void;
   noInterestPlayers: LeagueExpiringBlocks;
+  onSetNoInterest: (leagueId: string, playerId: string, days: number | null) => void;
   discardedTrades: LeagueExpiringBlocks;
   discardFinderTrade: (leagueId: string, fingerprint: string) => void;
   leagueMateProfileByRosterId: Map<number, LeagueMateView>;
@@ -79,7 +80,7 @@ function TradeHub({
   selectedLeagueDraftHasOccurred,
   loadingCalcValues,
   playerDispositions, finderSignals, finderRankGaps, leaguePlayerTags, onSetAssetDisposition, projectionData,
-  noInterestPlayers, discardedTrades, discardFinderTrade,
+  noInterestPlayers, onSetNoInterest, discardedTrades, discardFinderTrade,
   leagueMateProfileByRosterId, selectedLeagueMateProfilesView,
   tradePartnerRankings,
   setPlayerProfileId, loadUserExposure, loadUserTrades,
@@ -266,6 +267,7 @@ function TradeHub({
             leaguePlayerTags={leaguePlayerTags}
             onSetAssetDisposition={onSetAssetDisposition}
             noInterestPlayers={noInterestPlayers}
+            onSetNoInterest={onSetNoInterest}
             discardedTrades={discardedTrades}
             discardFinderTrade={discardFinderTrade}
             leagueMateProfileByRosterId={leagueMateProfileByRosterId}

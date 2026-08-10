@@ -619,6 +619,7 @@ export function HubRouter({
     leaguePlayerTags={leaguePlayerTags}
     onSetAssetDisposition={handleSetAssetDisposition}
     noInterestPlayers={noInterestPlayers}
+    onSetNoInterest={setNoInterest}
     discardedTrades={discardedTrades}
     discardFinderTrade={discardFinderTrade}
     leagueMateProfileByRosterId={leagueMateProfileByRosterId}

@@ -1,7 +1,7 @@
 "use client";
 import type {
   TradeAttempt, AugmentedPick, LeagueMateView, LeagueSimulation, SleeperRoster,
-  LeagueAssetDispositions,
+  LeagueAssetDispositions, LeagueExpiringBlocks,
 } from "../../lib/types";
 import type { TradeResult } from "./finderTypes";
 import type { PlayerWithValue } from "./shared";
@@ -27,6 +27,8 @@ interface FinderResultsProps {
   posTeamTotals: { rosterId: number; totals: Record<string, number> }[];
   numTeams: number;
   leaguePlayerTags: LeagueAssetDispositions;
+  noInterestPlayers: LeagueExpiringBlocks;
+  onSetNoInterest: (leagueId: string, playerId: string, days: number | null) => void;
   marketSignalMap: Map<string, string>;
   rankGapMap: Record<string, number>;
   tradeAttempts: TradeAttempt[];
@@ -59,6 +61,8 @@ export default function FinderResults({
   posTeamTotals,
   numTeams,
   leaguePlayerTags,
+  noInterestPlayers,
+  onSetNoInterest,
   marketSignalMap,
   rankGapMap,
   tradeAttempts,
@@ -143,6 +147,8 @@ export default function FinderResults({
           posTeamTotals={posTeamTotals}
           numTeams={numTeams}
           leaguePlayerTags={leaguePlayerTags}
+          noInterestPlayers={noInterestPlayers}
+          onSetNoInterest={onSetNoInterest}
           marketSignalMap={marketSignalMap}
           rankGapMap={rankGapMap}
           tradeAttempts={tradeAttempts}
