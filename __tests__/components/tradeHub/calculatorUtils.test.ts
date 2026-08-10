@@ -54,43 +54,41 @@ describe("computeRosterDropCost", () => {
 // ── computeStarDiscounts ─────────────────────────────────────────────
 
 describe("computeStarDiscounts", () => {
-  const noPickValue = () => 0;
-
   it("returns zeros for empty value arrays", () => {
-    expect(computeStarDiscounts([], [], [], [], noPickValue)).toEqual({ onReceive: 0, onGive: 0 });
+    expect(computeStarDiscounts([], [])).toEqual({ onReceive: 0, onGive: 0 });
   });
 
   it("returns zeros when only one side is empty", () => {
-    expect(computeStarDiscounts([3000], [], [], [], noPickValue)).toEqual({ onReceive: 0, onGive: 0 });
-    expect(computeStarDiscounts([], [3000], [], [], noPickValue)).toEqual({ onReceive: 0, onGive: 0 });
+    expect(computeStarDiscounts([3000], [])).toEqual({ onReceive: 0, onGive: 0 });
+    expect(computeStarDiscounts([], [3000])).toEqual({ onReceive: 0, onGive: 0 });
   });
 
   it("returns zeros when values are equal (no star premium)", () => {
-    expect(computeStarDiscounts([3000], [3000], [], [], noPickValue)).toEqual({ onReceive: 0, onGive: 0 });
+    expect(computeStarDiscounts([3000], [3000])).toEqual({ onReceive: 0, onGive: 0 });
   });
 
   it("returns zeros when values are below 2000 (no star threshold)", () => {
-    expect(computeStarDiscounts([1500], [800], [], [], noPickValue)).toEqual({ onReceive: 0, onGive: 0 });
+    expect(computeStarDiscounts([1500], [800])).toEqual({ onReceive: 0, onGive: 0 });
   });
 
   it("penalises onReceive when give star > receive (opponent gets the star)", () => {
-    // gv=4000 > rv=1000, gv >= 2000, no picks → threshold=0.78, maxPct=0.12
+    // gv=4000 > rv=1000, gv >= 2000 → threshold=0.78, maxPct=0.12
     // ratio=0.25 < 0.78; discount = min((0.78-0.25)/0.25, 1) * 4000 * 0.12 = 1 * 480 = 480
-    const { onReceive, onGive } = computeStarDiscounts([4000], [1000], [], [], noPickValue);
+    const { onReceive, onGive } = computeStarDiscounts([4000], [1000]);
     expect(onReceive).toBe(-480);
     expect(onGive).toBe(0);
   });
 
   it("penalises onGive when receive star > give (I am getting the star)", () => {
     // rv=4000 > gv=1000, rv >= 2000
-    const { onReceive, onGive } = computeStarDiscounts([1000], [4000], [], [], noPickValue);
+    const { onReceive, onGive } = computeStarDiscounts([1000], [4000]);
     expect(onReceive).toBe(0);
     expect(onGive).toBe(-480);
   });
 
   it("applies no discount when ratio is at or above threshold", () => {
     // gv=3000, rv=2500 → ratio=2500/3000≈0.833 ≥ 0.78 → no penalty
-    const { onReceive, onGive } = computeStarDiscounts([3000], [2500], [], [], noPickValue);
+    const { onReceive, onGive } = computeStarDiscounts([3000], [2500]);
     expect(onReceive).toBe(0);
     expect(onGive).toBe(0);
   });
@@ -98,9 +96,7 @@ describe("computeStarDiscounts", () => {
 
 // ── computeFinderStarDiscounts ───────────────────────────────────────
 // The finder adapter must delegate to computeStarDiscounts with non-colliding,
-// side-prefixed keys so the 1st-round "near global top" branch (0.12 maxPct) is
-// honoured — this is the path FinderResults' old inline copy got wrong (it used
-// a flat 0.0125), making the sort net disagree with the displayed card net.
+// side-prefixed keys so the sort net always matches the displayed card net.
 
 describe("computeFinderStarDiscounts", () => {
   it("matches the canonical no-pick result (delegates correctly)", () => {
@@ -109,43 +105,29 @@ describe("computeFinderStarDiscounts", () => {
     ).toEqual({ onReceive: -480, onGive: 0 });
   });
 
-  it("applies the 0.12 maxPct when a RECEIVED 1st is near the global top (not 0.0125)", () => {
-    // recv 1st = 5900 ≥ globalTop(6000)*0.97 → params {0.78, 0.12}.
-    // Penalised pairing: give star 6000 vs recv 1000 → ratio 0.167.
-    // discount = 1 * 6000 * 0.12 = 720 (old flat-0.0125 path would give 75).
+  it("a pick offsetting the star discounts identically to a player of the same value", () => {
+    // Same shape as the no-pick case above (4000 star vs 1000 back), but the
+    // 1000 comes from a pick instead of a player — value is value, so the
+    // discount must be unchanged (-480), not slashed because the piece is a pick.
+    const asPlayer = computeFinderStarDiscounts([{ value: 4000 }], [{ value: 1000 }], [], []);
+    const asPick = computeFinderStarDiscounts([{ value: 4000 }], [], [], [{ value: 1000 }]);
+    expect(asPick).toEqual(asPlayer);
+    expect(asPick).toEqual({ onReceive: -480, onGive: 0 });
+  });
+
+  it("a low-value 1st-round pick no longer collapses the discount cap", () => {
+    // Previously a non-near-top 1st-round pick dropped maxPct from 0.12 to
+    // 0.0125 (a ~10x smaller cap) purely because it was a pick. That special
+    // case is gone: give star 6000 vs a 1000-value 1st-round pick still uses
+    // the standard 0.12 cap → discount = 1 * 6000 * 0.12 = 720.
     const { onReceive, onGive } = computeFinderStarDiscounts(
-      [{ value: 6000 }, { value: 6000 }],
-      [{ value: 1000 }],
+      [{ value: 6000 }],
       [],
-      [{ round: 1, value: 5900 }],
+      [],
+      [{ value: 1000 }],
     );
     expect(onReceive).toBe(-720);
     expect(onGive).toBe(0);
-  });
-
-  it("applies the 0.12 maxPct when a GIVEN 1st is near the global top", () => {
-    const { onReceive, onGive } = computeFinderStarDiscounts(
-      [{ value: 1000 }],
-      [{ value: 6000 }, { value: 6000 }],
-      [{ round: 1, value: 5900 }],
-      [],
-    );
-    expect(onReceive).toBe(0);
-    expect(onGive).toBe(-720);
-  });
-
-  it("values give/receive 1st-round picks from their own side (no key collision)", () => {
-    // Both sides hold a round-1 pick (give 6000, receive 500). The penalised
-    // pairing is give-star 6000 vs receive 1000, so recvParams (recv 1st = 500,
-    // below near-top → 0.0125) drives it: 1 * 6000 * 0.0125 = 75. A per-side
-    // index collision that let the receive pick read the give pick's 6000 would
-    // not change this pairing's params, but distinct keys keep each side honest.
-    expect(
-      computeFinderStarDiscounts(
-        [{ value: 1000 }], [{ value: 1000 }],
-        [{ round: 1, value: 6000 }], [{ round: 1, value: 500 }],
-      ),
-    ).toEqual({ onReceive: -75, onGive: 0 });
   });
 });
 

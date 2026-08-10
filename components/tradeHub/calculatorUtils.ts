@@ -22,33 +22,20 @@ export function computeRosterDropCost(
   return sorted.slice(0, dropsNeeded).reduce((s, v) => s + v, 0);
 }
 
+// A star discount applies when the best piece coming back is far below the value of the
+// star being traded away — one fixed threshold/cap for every trade. Value is value: whether
+// the star is offset by a player or a pick (or a mix) doesn't change how steep the discount
+// is, so this deliberately does NOT special-case picks or their round (a prior version did,
+// and the cap could swing 10x — 0.12 down to 0.0125 — purely because a low/mid-value pick was
+// present instead of a player of the same value, which was the reported bug).
+const STAR_DISCOUNT_THRESHOLD = 0.78;
+const STAR_DISCOUNT_MAX_PCT = 0.12;
+
 export function computeStarDiscounts(
   allGiveVals: number[],
   allRecvVals: number[],
-  calcGivePicks: string[],
-  calcReceivePicks: string[],
-  getPickValue: (k: string) => number,
 ): { onReceive: number; onGive: number } {
   if (allGiveVals.length === 0 || allRecvVals.length === 0) return { onReceive: 0, onGive: 0 };
-  const globalTop = Math.max(...allGiveVals, ...allRecvVals);
-  const pickParams = (keys: string[]): { threshold: number; maxPct: number } => {
-    if (keys.length === 0) return { threshold: 0.78, maxPct: 0.12 };
-    const best = Math.min(...keys.map((k) => Math.floor(Number(k.split("-")[1]))));
-    if (best === 1) {
-      const bestVal = Math.max(
-        ...keys
-          .filter((k) => Math.floor(Number(k.split("-")[1])) === 1)
-          .map((k) => getPickValue(k)),
-      );
-      if (bestVal >= globalTop * 0.97) return { threshold: 0.78, maxPct: 0.12 };
-      return { threshold: 0.78, maxPct: 0.0125 };
-    }
-    if (best === 2) return { threshold: 0.83, maxPct: 0.09 };
-    if (best === 3) return { threshold: 0.87, maxPct: 0.14 };
-    return { threshold: 0.91, maxPct: 0.20 };
-  };
-  const recvParams = pickParams(calcReceivePicks);
-  const giveParams = pickParams(calcGivePicks);
   const giveSorted = [...allGiveVals].sort((a, b) => b - a);
   const recvSorted = [...allRecvVals].sort((a, b) => b - a);
   let onReceive = 0;
@@ -59,15 +46,15 @@ export function computeStarDiscounts(
     const rv = recvSorted[i];
     if (gv > rv && gv >= 2000) {
       const ratio = rv / gv;
-      if (ratio < recvParams.threshold)
+      if (ratio < STAR_DISCOUNT_THRESHOLD)
         onReceive -= Math.round(
-          Math.min((recvParams.threshold - ratio) / 0.25, 1.0) * gv * recvParams.maxPct,
+          Math.min((STAR_DISCOUNT_THRESHOLD - ratio) / 0.25, 1.0) * gv * STAR_DISCOUNT_MAX_PCT,
         );
     } else if (rv > gv && rv >= 2000) {
       const ratio = gv / rv;
-      if (ratio < giveParams.threshold)
+      if (ratio < STAR_DISCOUNT_THRESHOLD)
         onGive -= Math.round(
-          Math.min((giveParams.threshold - ratio) / 0.25, 1.0) * rv * giveParams.maxPct,
+          Math.min((STAR_DISCOUNT_THRESHOLD - ratio) / 0.25, 1.0) * rv * STAR_DISCOUNT_MAX_PCT,
         );
     }
   }
@@ -78,25 +65,15 @@ export function computeStarDiscounts(
 // displayed net (TradeCard) derive star discounts from the SAME canonical
 // computeStarDiscounts call. They previously used divergent inline copies and
 // disagreed — the list sorted by a different net than each card displayed.
-// computeStarDiscounts expects "season-round-rosterId" pick-key strings + a
-// getPickValue lookup; the finder has pick OBJECTS, so we synthesize globally
-// unique, side-prefixed keys (round in split("-")[1], matching
-// Math.floor(Number(k.split("-")[1]))) with a matching value lookup.
 export function computeFinderStarDiscounts(
   give: { value: number }[],
   receive: { value: number }[],
-  givePicks: { round: number | string; value: number }[],
-  receivePicks: { round: number | string; value: number }[],
+  givePicks: { value: number }[],
+  receivePicks: { value: number }[],
 ): { onReceive: number; onGive: number } {
   const allGiveVals = [...give.map((p) => p.value), ...givePicks.map((p) => p.value)];
   const allRecvVals = [...receive.map((p) => p.value), ...receivePicks.map((p) => p.value)];
-  const giveKeys = givePicks.map((p, i) => `0-${Number(p.round)}-g${i}`);
-  const recvKeys = receivePicks.map((p, i) => `0-${Number(p.round)}-r${i}`);
-  const valByKey = new Map<string, number>();
-  givePicks.forEach((p, i) => valByKey.set(`0-${Number(p.round)}-g${i}`, p.value));
-  receivePicks.forEach((p, i) => valByKey.set(`0-${Number(p.round)}-r${i}`, p.value));
-  const getPickValue = (k: string) => valByKey.get(k) ?? 0;
-  return computeStarDiscounts(allGiveVals, allRecvVals, giveKeys, recvKeys, getPickValue);
+  return computeStarDiscounts(allGiveVals, allRecvVals);
 }
 
 // SINGLE source of truth for the Trade Finder's adjusted net, from the USER's perspective.

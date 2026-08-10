@@ -136,7 +136,7 @@ function TradeCalculator({
     ...calcReceivePicks.map((k: string) => getPickValue(k)),
   ];
   const { onReceive: calcStarOnReceive, onGive: calcStarOnGive } = computeStarDiscounts(
-    allGiveVals, allRecvVals, calcGivePicks, calcReceivePicks, getPickValue,
+    allGiveVals, allRecvVals,
   );
 
   const totalGiveAdj    = totalGive    + myDropCostCalc  + calcStarOnGive;
