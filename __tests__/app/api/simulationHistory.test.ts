@@ -8,8 +8,19 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 
 const h = vi.hoisted(() => {
-  const checkRateLimit = vi.fn(async () => ({ allowed: true, remaining: 59 }));
-  const getUser = vi.fn(async () => ({ data: { user: { id: "auth-user-1" } } }));
+  // Explicit return types (rather than inferring from the initial resolved value) so
+  // later mockResolvedValue calls can switch to the other branch of each union —
+  // checkRateLimit's `{ allowed: false; response }` variant and getUser's `user: null`.
+  const checkRateLimit = vi.fn(
+    async (): Promise<{ allowed: true; remaining: number } | { allowed: false; response: Response }> => (
+      { allowed: true, remaining: 59 }
+    ),
+  );
+  const getUser = vi.fn(
+    async (): Promise<{ data: { user: { id: string } | null } }> => (
+      { data: { user: { id: "auth-user-1" } } }
+    ),
+  );
   return { checkRateLimit, getUser };
 });
 
