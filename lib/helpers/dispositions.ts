@@ -41,3 +41,27 @@ export const pickDispositionKey = (p: PickKeyLike): string =>
  *  call site (OppRostersTab's oppRoster, TradeFinder's oppRoster, finderPipeline's r.oppRosterId). */
 export const opponentAssetKey = (assetId: string, oppRosterId: number | string): string =>
   `${assetId}::${oppRosterId}`;
+
+// ============================================================
+// Time-boxed Trade Finder suppressions (finder_temp_blocks table).
+// See LeagueExpiringBlocks in lib/types.ts for the map shape.
+// ============================================================
+
+/** Duration choices offered by the "No Interest" picker (days, approximate for month/quarter/half-year). */
+export const NO_INTEREST_DURATIONS: { days: number; label: string }[] = [
+  { days: 7, label: "1 Week" },
+  { days: 30, label: "1 Month" },
+  { days: 90, label: "3 Months" },
+  { days: 182, label: "6 Months" },
+];
+
+/** Fixed suppression window for a discarded Finder trade suggestion — not user-configurable. */
+export const TRADE_DISCARD_DAYS = 14;
+
+/** Converts a duration in days to an absolute ISO expiry timestamp, from now. */
+export const addDays = (days: number): string =>
+  new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+
+/** True if an expiry timestamp exists and hasn't passed yet. Undefined/missing = not blocked. */
+export const isBlockActive = (expiresAt: string | undefined): boolean =>
+  !!expiresAt && Date.parse(expiresAt) > Date.now();

@@ -44,6 +44,7 @@ interface FinderResultsProps {
   onOpenInCalculator: (trade: TradeResult) => void;
   onMarkAttempted: (attempt: Omit<TradeAttempt, "id" | "user_id" | "attempted_at" | "resolved_at">) => Promise<void>;
   onSessionMark: (fingerprint: string) => void;
+  onDiscardTrade: (leagueId: string, fingerprint: string) => void;
 }
 
 export default function FinderResults({
@@ -75,6 +76,7 @@ export default function FinderResults({
   onOpenInCalculator,
   onMarkAttempted,
   onSessionMark,
+  onDiscardTrade,
 }: FinderResultsProps) {
   const suppressedCount = allTrades.filter((trade) => {
     const fp = buildTradeFingerprint(
@@ -158,6 +160,7 @@ export default function FinderResults({
           onOpenInCalculator={onOpenInCalculator}
           onMarkAttempted={onMarkAttempted}
           onSessionMark={onSessionMark}
+          onDiscardTrade={onDiscardTrade}
         />
       ))}
     </>

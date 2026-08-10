@@ -49,6 +49,7 @@ interface TradeCardProps {
   onOpenInCalculator: (trade: TradeResult) => void;
   onMarkAttempted: (attempt: Omit<TradeAttempt, "id" | "user_id" | "attempted_at" | "resolved_at">) => Promise<void>;
   onSessionMark: (fingerprint: string) => void;
+  onDiscardTrade: (leagueId: string, fingerprint: string) => void;
 }
 
 export default function TradeCard({
@@ -77,6 +78,7 @@ export default function TradeCard({
   onOpenInCalculator,
   onMarkAttempted,
   onSessionMark,
+  onDiscardTrade,
 }: TradeCardProps) {
   const partnerProfile = leagueMateProfileByRosterId.get(Number(trade.oppRosterId));
   const tradeIntent = getTradeIntent(trade);
@@ -557,6 +559,23 @@ export default function TradeCard({
             </button>
           );
         })()}
+        {leagueId !== null && (
+          <button
+            onClick={() => {
+              const fp = buildTradeFingerprint(
+                leagueId,
+                trade.oppRosterId,
+                [...trade.give.map((p) => p.player_id), ...trade.givePicks.map((p) => finderPickKey(p))],
+                [...trade.receive.map((p) => p.player_id), ...trade.receivePicks.map((p) => finderPickKey(p))],
+              );
+              onDiscardTrade(leagueId, fp);
+            }}
+            title="Hide this exact suggestion for 2 weeks"
+            className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-700 text-slate-500 hover:border-red-500 hover:text-red-400 transition shrink-0"
+          >
+            Discard
+          </button>
+        )}
       </div>
     </Card>
   );

@@ -24,7 +24,7 @@ import type {
   TradeAttempt, TradeAttemptStatus, FcTrendEntry, PredictedPick, DraftPoolRanks,
   LeagueHubTab, ProjectionRow, SimulationTeamRow,
   LeagueMgmtData, CommPaymentsData, TradePartnerRanking,
-  AssetDisposition, LeagueAssetDispositions,
+  AssetDisposition, LeagueAssetDispositions, LeagueExpiringBlocks,
 } from "../../lib/types";
 import type { AnnotatedTrade } from "../../hooks/useUserTrades";
 import type { PlayerUsage } from "../../hooks/usePlayerStats";
@@ -222,6 +222,13 @@ interface HubRouterProps {
   selectedLeagueDraftHasOccurred: boolean;
   leaguePlayerTags: LeagueAssetDispositions;
   handleSetAssetDisposition: (leagueId: string, assetId: string, disposition: AssetDisposition | null) => void;
+  // Personal, time-boxed Trade Finder suppressions: a player the user doesn't want to see
+  // suggested (independent of the opponent's own SELL_NO/SELL_OK tag above), and a discarded
+  // suggested-trade fingerprint that shouldn't resurface for a fixed window.
+  noInterestPlayers: LeagueExpiringBlocks;
+  setNoInterest: (leagueId: string, playerId: string, days: number | null) => void;
+  discardedTrades: LeagueExpiringBlocks;
+  discardFinderTrade: (leagueId: string, fingerprint: string) => void;
   leagueMateProfileByRosterId: Map<number, LeagueMateView>;
   tradePartnerRankings: TradePartnerRanking[];
   tradeHubData: AnnotatedTrade[] | null;
@@ -318,7 +325,9 @@ export function HubRouter({
   addRookie, editRookieName, removeAddedRookie, clearNameEdit, rookieOverrides,
   tradeHubSection, calcOpponentRosterId,
   selectedLeagueDraftHasOccurred,
-  leaguePlayerTags, handleSetAssetDisposition, leagueMateProfileByRosterId,
+  leaguePlayerTags, handleSetAssetDisposition,
+  noInterestPlayers, setNoInterest, discardedTrades, discardFinderTrade,
+  leagueMateProfileByRosterId,
   tradePartnerRankings,
   tradeHubData, loadingTradeHub, tradeHubError, tradeHubUserId, setTradeHubUserId, setTradeHubData,
   tradeAttempts, loadingTradeAttempts, tradeAttemptsLeagueId,
@@ -457,6 +466,8 @@ export function HubRouter({
             setPlayerProfileId={setPlayerProfileId}
             leaguePlayerTags={leaguePlayerTags}
             onSetAssetDisposition={handleSetAssetDisposition}
+            noInterestPlayers={noInterestPlayers}
+            onSetNoInterest={setNoInterest}
           />
           </ErrorBoundary>
         )}
@@ -607,6 +618,9 @@ export function HubRouter({
     finderRankGaps={finderRankGaps}
     leaguePlayerTags={leaguePlayerTags}
     onSetAssetDisposition={handleSetAssetDisposition}
+    noInterestPlayers={noInterestPlayers}
+    discardedTrades={discardedTrades}
+    discardFinderTrade={discardFinderTrade}
     leagueMateProfileByRosterId={leagueMateProfileByRosterId}
     selectedLeagueMateProfilesView={selectedLeagueMateProfilesView}
     tradePartnerRankings={tradePartnerRankings}

@@ -6,7 +6,7 @@ import type {
   AugmentedPick,
   LeagueMateView, TradePartnerRanking, HistoricalSnapshot,
   FcTrendEntry,
-  AssetDisposition, LeagueAssetDispositions,
+  AssetDisposition, LeagueAssetDispositions, LeagueExpiringBlocks,
 } from "../lib/types";
 import type { AnnotatedTrade } from "../hooks/useUserTrades";
 import type { PersonalSignal } from "../lib/helpers/personalRankings";
@@ -40,6 +40,9 @@ interface TradeHubProps {
   finderRankGaps: Record<string, number>;
   leaguePlayerTags: LeagueAssetDispositions;
   onSetAssetDisposition: (leagueId: string, assetId: string, disposition: AssetDisposition | null) => void;
+  noInterestPlayers: LeagueExpiringBlocks;
+  discardedTrades: LeagueExpiringBlocks;
+  discardFinderTrade: (leagueId: string, fingerprint: string) => void;
   leagueMateProfileByRosterId: Map<number, LeagueMateView>;
   selectedLeagueMateProfilesView: LeagueMateView[];
   tradePartnerRankings: TradePartnerRanking[];
@@ -76,6 +79,7 @@ function TradeHub({
   selectedLeagueDraftHasOccurred,
   loadingCalcValues,
   playerDispositions, finderSignals, finderRankGaps, leaguePlayerTags, onSetAssetDisposition, projectionData,
+  noInterestPlayers, discardedTrades, discardFinderTrade,
   leagueMateProfileByRosterId, selectedLeagueMateProfilesView,
   tradePartnerRankings,
   setPlayerProfileId, loadUserExposure, loadUserTrades,
@@ -261,6 +265,9 @@ function TradeHub({
             finderRankGaps={finderRankGaps}
             leaguePlayerTags={leaguePlayerTags}
             onSetAssetDisposition={onSetAssetDisposition}
+            noInterestPlayers={noInterestPlayers}
+            discardedTrades={discardedTrades}
+            discardFinderTrade={discardFinderTrade}
             leagueMateProfileByRosterId={leagueMateProfileByRosterId}
             selectedLeagueMateProfilesView={selectedLeagueMateProfilesView}
             tradePartnerRankings={tradePartnerRankings}

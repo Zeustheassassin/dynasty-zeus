@@ -5,7 +5,8 @@ import { useLeague } from "../../lib/LeagueContext";
 import { CURRENT_YEAR, rankAgainstLeague } from "../../lib/helpers";
 import { OPPONENT_DISPOSITIONS, pickDispositionKey, opponentAssetKey } from "../../lib/helpers/dispositions";
 import { DispositionPicker } from "../shared/DispositionPicker";
-import type { SleeperUser, SleeperTradedPick, SleeperPlayer, AssetDisposition, LeagueAssetDispositions } from "../../lib/types";
+import { NoInterestPicker } from "../shared/NoInterestPicker";
+import type { SleeperUser, SleeperTradedPick, SleeperPlayer, AssetDisposition, LeagueAssetDispositions, LeagueExpiringBlocks } from "../../lib/types";
 
 const ROLE_PRIORITY: Record<string, number> = { starter: 0, bench: 1, taxi: 2 };
 const ROLE_LABEL: Record<string, string> = { starter: "Starter", bench: "Bench", taxi: "Taxi" };
@@ -19,6 +20,8 @@ interface OppRostersTabProps {
   setOppRosterOwnerId: (id: string) => void;
   leaguePlayerTags: LeagueAssetDispositions;
   onSetAssetDisposition: (leagueId: string, assetId: string, disposition: AssetDisposition | null) => void;
+  noInterestPlayers: LeagueExpiringBlocks;
+  onSetNoInterest: (leagueId: string, playerId: string, days: number | null) => void;
 }
 
 function OppRostersTab({
@@ -28,13 +31,20 @@ function OppRostersTab({
   setOppRosterOwnerId,
   leaguePlayerTags,
   onSetAssetDisposition,
+  noInterestPlayers,
+  onSetNoInterest,
 }: OppRostersTabProps) {
   const players = usePlayers();
   const { selectedLeague, rosters, users } = useLeague();
   const leagueTags = leaguePlayerTags[selectedLeague?.league_id ?? ""] ?? {};
+  const leagueNoInterest = noInterestPlayers[selectedLeague?.league_id ?? ""] ?? {};
   const setDisposition = (assetId: string, disposition: AssetDisposition | null) => {
     if (!selectedLeague) return;
     onSetAssetDisposition(selectedLeague.league_id, assetId, disposition);
+  };
+  const setNoInterest = (playerId: string, days: number | null) => {
+    if (!selectedLeague) return;
+    onSetNoInterest(selectedLeague.league_id, playerId, days);
   };
 
   const oppRoster = useMemo(
@@ -167,11 +177,17 @@ function OppRostersTab({
                         </div>
                         <div className="mt-0.5 flex items-center justify-between gap-2">
                           <span className="text-[10px] text-slate-500">{ROLE_LABEL[p.role] ?? ""}</span>
-                          <DispositionPicker
-                            value={leagueTags[opponentAssetKey(p.player_id, oppRoster.roster_id)]}
-                            options={OPPONENT_DISPOSITIONS}
-                            onChange={(next) => setDisposition(opponentAssetKey(p.player_id, oppRoster.roster_id), next)}
-                          />
+                          <div className="flex items-center gap-1">
+                            <NoInterestPicker
+                              expiresAt={leagueNoInterest[p.player_id]}
+                              onChange={(days) => setNoInterest(p.player_id, days)}
+                            />
+                            <DispositionPicker
+                              value={leagueTags[opponentAssetKey(p.player_id, oppRoster.roster_id)]}
+                              options={OPPONENT_DISPOSITIONS}
+                              onChange={(next) => setDisposition(opponentAssetKey(p.player_id, oppRoster.roster_id), next)}
+                            />
+                          </div>
                         </div>
                       </div>
                     ))

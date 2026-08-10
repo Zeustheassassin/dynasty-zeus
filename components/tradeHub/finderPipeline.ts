@@ -54,6 +54,8 @@ export interface FinderPipelineCtx {
   tradePartnerRankings: TradePartnerRanking[];
   leagueMateProfileByRosterId: Map<number, LeagueMateView>;
   tradeAttempts: TradeAttempt[];
+  /** Fingerprints (buildTradeFingerprint) of still-active user-discarded Finder suggestions. */
+  discardedFingerprints: Set<string>;
   historicalSnapshot: HistoricalSnapshot | null;
   playerStats: Record<string, {
     avgTargets: number; avgCarries: number; snapPct: number; gamesPlayed: number;
@@ -101,6 +103,7 @@ export function runFinderPipeline(
     myFinderPlayoffOdds, isChampionshipPush, pinnedPlayer, deferredTargetPlayerId,
     deferredPinnedPlayerId, deferredTargetOppRosterId, deferredFinderSeed,
     nflTeamDepth, tradePartnerRankings, leagueMateProfileByRosterId, tradeAttempts,
+    discardedFingerprints,
     historicalSnapshot, playerStats, crossLeagueExposure, buyLowPlayerIds,
     nflState, selectedLeagueSimulation, selectedLeagueDraftHasOccurred,
     weeklyProjMap, playerDispositions, finderPickValue, buildPostTradePlayers,
@@ -468,6 +471,15 @@ export function runFinderPipeline(
       const topGive = [...r.give].sort((a, b) => b.value - a.value)[0];
       if (topGive && pendingGive?.has(topGive.player_id)) return false;
       return true;
+    })
+    .filter((r) => {
+      if (discardedFingerprints.size === 0) return true;
+      const fp = buildTradeFingerprint(
+        selectedLeague.league_id, r.oppRosterId,
+        [...r.give.map((p) => p.player_id), ...r.givePicks.map((p) => finderPickKey(p))],
+        [...r.receive.map((p) => p.player_id), ...r.receivePicks.map((p) => finderPickKey(p))],
+      );
+      return !discardedFingerprints.has(fp);
     })
     .map((r) => {
       const lineupSafety = getTradeLineupSafety(r);

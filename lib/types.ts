@@ -829,6 +829,13 @@ export interface ProjSource {
 export type AssetDisposition = "CORE" | "PRICEY" | "SHOPPING" | "OFFLOAD" | "SELL_NO" | "SELL_OK" | "WANT_TO_TRADE";
 export type LeagueAssetDispositions = Record<string, Record<string, AssetDisposition>>;
 
+// Time-boxed Trade Finder suppressions (finder_temp_blocks): per-league map of
+// block key -> ISO expires_at. Used for both a per-player "No Interest" block
+// (key = player_id) and a per-trade "Discard" block (key = a trade fingerprint,
+// see buildTradeFingerprint in components/tradeHub/shared.ts). See
+// lib/helpers/dispositions.ts's isBlockActive for how expiry is checked.
+export type LeagueExpiringBlocks = Record<string, Record<string, string>>;
+
 // ── Trade attempts ────────────────────────────────────────────
 
 export type TradeAttemptStatus = "PENDING" | "ACCEPTED" | "DECLINED" | "COUNTERED" | "NO_RESPONSE";

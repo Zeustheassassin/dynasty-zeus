@@ -58,7 +58,7 @@ import type {
   HistoricalSnapshot, LeagueMateView, SimulationTeamRow,
   RosterDirectionProfile, DynamicPickValue, RookieBoardPlayer, FcTrendEntry,
   StandingRow,
-  AssetDisposition, LeagueAssetDispositions,
+  AssetDisposition, LeagueAssetDispositions, LeagueExpiringBlocks,
 } from "../../lib/types";
 
 // -------------------------
@@ -105,6 +105,8 @@ export function useAppState() {
     leaguePlayerTags, setLeaguePlayerTags,
     ignoredOwnerIds,
     toggleIgnoredOwner,
+    noInterestPlayers, setNoInterestPlayers, setNoInterest,
+    discardedTrades, setDiscardedTrades, discardFinderTrade,
     saveLeagueNote,
     savePlayerNote,
     handleSetAssetDisposition,
@@ -415,7 +417,43 @@ useEffect(() => {
         });
       }
     });
-  // 9. Personal rankings (the user's own ordered board â€” one jsonb row per user)
+  // 9. Time-boxed Trade Finder suppressions (finder_temp_blocks, kind-discriminated:
+  // PLAYER_NO_INTEREST -> noInterestPlayers, TRADE_DISCARD -> discardedTrades)
+  supabase
+    .from("finder_temp_blocks")
+    .select("league_id, kind, block_key, expires_at")
+    .eq("user_id", supabaseUser.id)
+    .then(({ data, error }) => {
+      if (cancelled) return;
+      if (error) { log.error("finder_temp_blocks load failed", { err: error.message }); return; }
+      if (data && data.length > 0) {
+        const playerMap: LeagueExpiringBlocks = {};
+        const tradeMap: LeagueExpiringBlocks = {};
+        data.forEach((row: { league_id: string; kind: string; block_key: string; expires_at: string }) => {
+          const lid = String(row.league_id);
+          const target = row.kind === "TRADE_DISCARD" ? tradeMap : playerMap;
+          if (!target[lid]) target[lid] = {};
+          target[lid][String(row.block_key)] = row.expires_at;
+        });
+        setNoInterestPlayers((prev) => {
+          const merged: LeagueExpiringBlocks = {};
+          for (const lid of new Set([...Object.keys(prev), ...Object.keys(playerMap)])) {
+            merged[lid] = { ...(prev[lid] ?? {}), ...(playerMap[lid] ?? {}) };
+          }
+          setLocalStorageItem("noInterestPlayers_v1", merged);
+          return merged;
+        });
+        setDiscardedTrades((prev) => {
+          const merged: LeagueExpiringBlocks = {};
+          for (const lid of new Set([...Object.keys(prev), ...Object.keys(tradeMap)])) {
+            merged[lid] = { ...(prev[lid] ?? {}), ...(tradeMap[lid] ?? {}) };
+          }
+          setLocalStorageItem("discardedFinderTrades_v1", merged);
+          return merged;
+        });
+      }
+    });
+  // 10. Personal rankings (the user's own ordered board â€” one jsonb row per user)
   supabase
     .from("personal_rankings")
     .select("ordering")
@@ -432,7 +470,7 @@ useEffect(() => {
       }
     });
   return () => { cancelled = true; };
-}, [supabaseUser, loadNotes, setSupabaseMessage, setLeagueNotes, setLeaguePlayerTags, setPlayerNotes, setPersonalOrdering]);
+}, [supabaseUser, loadNotes, setSupabaseMessage, setLeagueNotes, setLeaguePlayerTags, setPlayerNotes, setPersonalOrdering, setNoInterestPlayers, setDiscardedTrades]);
 
 // Load network consensus draft data for the current draft year. Drives
 // predictedDraftPicks once draftCount >= CONSENSUS_MIN_DRAFTS; until then
@@ -3045,6 +3083,10 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     selectedLeagueDraftHasOccurred,
     leaguePlayerTags,
     handleSetAssetDisposition,
+    noInterestPlayers,
+    setNoInterest,
+    discardedTrades,
+    discardFinderTrade,
     leagueMateProfileByRosterId,
     tradePartnerRankings,
     tradeHubData,

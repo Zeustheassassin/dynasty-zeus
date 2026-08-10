@@ -15,6 +15,7 @@ import type {
   SleeperPlayer,
   AssetDisposition,
   LeagueAssetDispositions,
+  LeagueExpiringBlocks,
 } from "../lib/types";
 import { LEAGUE_HUB_GROUPS } from "../lib/leagueHubGroups";
 import { useLeagueTabState } from "./LeagueHub/hooks/useLeagueTabState";
@@ -98,6 +99,10 @@ interface LeagueHubProps {
   // roster, Not Willing/Open to Sell for opponent rosters)
   leaguePlayerTags: LeagueAssetDispositions;
   onSetAssetDisposition: (leagueId: string, assetId: string, disposition: AssetDisposition | null) => void;
+  // Personal, time-boxed "No Interest" block on an opposing player (separate from the
+  // opponent's own SELL_NO/SELL_OK willingness tag above)
+  noInterestPlayers: LeagueExpiringBlocks;
+  onSetNoInterest: (leagueId: string, playerId: string, days: number | null) => void;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
@@ -117,6 +122,7 @@ function LeagueHub({
   saveLeagueNote, onSaveSim, handleRunAllSims,
   setPlayerProfileId,
   leaguePlayerTags, onSetAssetDisposition,
+  noInterestPlayers, onSetNoInterest,
 }: LeagueHubProps) {
   const {
     leagueSearch, setLeagueSearch,
@@ -239,6 +245,8 @@ function LeagueHub({
             setOppRosterOwnerId={setOppRosterOwnerId}
             leaguePlayerTags={leaguePlayerTags}
             onSetAssetDisposition={onSetAssetDisposition}
+            noInterestPlayers={noInterestPlayers}
+            onSetNoInterest={onSetNoInterest}
           />
         )}
 

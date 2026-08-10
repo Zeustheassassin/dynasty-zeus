@@ -25,13 +25,17 @@ import type {
   LeagueHubTab, ProjectionRow, RookieBoardPlayer,
 } from "../lib/types";
 import type { PlayerUsage } from "../hooks/usePlayerStats";
-import type { LeagueAssetDispositions } from "../lib/types";
+import type { LeagueAssetDispositions, LeagueExpiringBlocks } from "../lib/types";
 
 // This view is explicitly read-only (see header comment) — spied rosters never touch the
 // logged-in account's real dispositions, so RostersTab/OppRostersTab get a stable empty
 // map and a no-op setter rather than the app's real leaguePlayerTags/handleSetAssetDisposition.
 const SPY_NO_TAGS: LeagueAssetDispositions = {};
 const SPY_NOOP_SET_DISPOSITION = () => {};
+// Same read-only contract for the newer "No Interest" block — a spied user's Finder
+// suggestions aren't a thing this view shows, but OppRostersTab always renders the picker.
+const SPY_NO_BLOCKS: LeagueExpiringBlocks = {};
+const SPY_NOOP_SET_NO_INTEREST = () => {};
 
 interface UserScoutHubProps {
   players: Record<string, SleeperPlayer>;
@@ -242,6 +246,8 @@ export default function UserScoutHub({
                       setOppRosterOwnerId={tabState.setOppRosterOwnerId}
                       leaguePlayerTags={SPY_NO_TAGS}
                       onSetAssetDisposition={SPY_NOOP_SET_DISPOSITION}
+                      noInterestPlayers={SPY_NO_BLOCKS}
+                      onSetNoInterest={SPY_NOOP_SET_NO_INTEREST}
                     />
                   )}
                   {leagueHubTab === "POWER_RANKINGS" && (

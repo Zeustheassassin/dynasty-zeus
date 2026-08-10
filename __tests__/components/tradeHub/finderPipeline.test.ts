@@ -3,6 +3,7 @@ import { runFinderPipeline } from "@/components/tradeHub/finderPipeline";
 import type { FinderPipelineCtx } from "@/components/tradeHub/finderPipeline";
 import type { TradeResult } from "@/components/tradeHub/finderTypes";
 import type { PlayerWithValue, PickWithValue } from "@/components/tradeHub/shared";
+import { buildTradeFingerprint } from "@/components/tradeHub/shared";
 import type { SleeperPlayer, SleeperRoster, SleeperLeague } from "@/lib/types";
 import { CURRENT_YEAR } from "@/lib/helpers/season";
 
@@ -113,6 +114,7 @@ const baseCtx = (over: Partial<FinderPipelineCtx> = {}): FinderPipelineCtx => {
     tradePartnerRankings: [],
     leagueMateProfileByRosterId: new Map(),
     tradeAttempts: [],
+    discardedFingerprints: new Set<string>(),
     historicalSnapshot: null,
     playerStats: null,
     crossLeagueExposure: null,
@@ -802,6 +804,43 @@ describe("runFinderPipeline — pending suppression", () => {
       baseCtx({ tradeAttempts: [attempt as unknown as FinderPipelineCtx["tradeAttempts"][number]] }),
     );
     expect(allTrades).toHaveLength(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Discarded-trade suppression (user-dismissed exact give/receive combination)
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("runFinderPipeline — discard suppression", () => {
+  it("suppresses a trade whose exact fingerprint is in discardedFingerprints", () => {
+    const t = mkTrade({
+      give: [mkPlayer("g1", "WR", 3000)],
+      receive: [mkPlayer("r1", "RB", 3000)],
+      oppRosterId: 2,
+    });
+    const fp = buildTradeFingerprint("L1", 2, ["g1"], ["r1"]);
+    const { allTrades } = runFinderPipeline([t], baseCtx({ discardedFingerprints: new Set([fp]) }));
+    expect(allTrades).toHaveLength(0);
+  });
+
+  it("does not suppress a different package with the same opponent (not an exact match)", () => {
+    const discardedFp = buildTradeFingerprint("L1", 2, ["g1"], ["r1"]);
+    const t = mkTrade({
+      give: [mkPlayer("g1", "WR", 3000)],
+      receive: [mkPlayer("r2", "RB", 3000)], // different receive player -> different fingerprint
+      oppRosterId: 2,
+    });
+    const { allTrades } = runFinderPipeline([t], baseCtx({ discardedFingerprints: new Set([discardedFp]) }));
+    expect(allTrades).toHaveLength(1);
+  });
+
+  it("leaves trades untouched when discardedFingerprints is empty (the default)", () => {
+    const t = mkTrade({
+      give: [mkPlayer("g1", "WR", 3000)],
+      receive: [mkPlayer("r1", "RB", 3000)],
+    });
+    const { allTrades } = runFinderPipeline([t], baseCtx());
+    expect(allTrades).toHaveLength(1);
   });
 });
 

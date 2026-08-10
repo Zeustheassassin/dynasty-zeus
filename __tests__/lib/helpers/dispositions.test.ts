@@ -5,6 +5,10 @@ import {
   opponentAssetKey,
   MY_DISPOSITIONS,
   OPPONENT_DISPOSITIONS,
+  NO_INTEREST_DURATIONS,
+  TRADE_DISCARD_DAYS,
+  addDays,
+  isBlockActive,
 } from "@/lib/helpers/dispositions";
 
 describe("normalizeDisposition", () => {
@@ -57,5 +61,30 @@ describe("MY_DISPOSITIONS / OPPONENT_DISPOSITIONS", () => {
   it("has 4 self dispositions and 2 opponent dispositions", () => {
     expect(MY_DISPOSITIONS).toHaveLength(4);
     expect(OPPONENT_DISPOSITIONS).toHaveLength(2);
+  });
+});
+
+describe("addDays / isBlockActive (finder_temp_blocks expiry)", () => {
+  it("addDays produces a future ISO timestamp isBlockActive treats as active", () => {
+    const expiresAt = addDays(7);
+    expect(Date.parse(expiresAt)).toBeGreaterThan(Date.now());
+    expect(isBlockActive(expiresAt)).toBe(true);
+  });
+
+  it("isBlockActive is false for a past timestamp", () => {
+    const past = new Date(Date.now() - 1000).toISOString();
+    expect(isBlockActive(past)).toBe(false);
+  });
+
+  it("isBlockActive is false for undefined (no block set)", () => {
+    expect(isBlockActive(undefined)).toBe(false);
+  });
+
+  it("NO_INTEREST_DURATIONS offers exactly the 4 documented choices", () => {
+    expect(NO_INTEREST_DURATIONS.map((d) => d.days)).toEqual([7, 30, 90, 182]);
+  });
+
+  it("TRADE_DISCARD_DAYS is the fixed 2-week window", () => {
+    expect(TRADE_DISCARD_DAYS).toBe(14);
   });
 });

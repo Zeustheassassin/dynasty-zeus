@@ -11,10 +11,10 @@ import type {
   AugmentedPick,
   LeagueMateView, TradePartnerRanking, HistoricalSnapshot,
   FcTrendEntry,
-  AssetDisposition, LeagueAssetDispositions,
+  AssetDisposition, LeagueAssetDispositions, LeagueExpiringBlocks,
 } from "../../lib/types";
 import type { PersonalSignal } from "../../lib/helpers/personalRankings";
-import { normalizeDisposition, opponentAssetKey } from "../../lib/helpers/dispositions";
+import { normalizeDisposition, opponentAssetKey, isBlockActive } from "../../lib/helpers/dispositions";
 import { usePlayers } from "../../lib/PlayersContext";
 import { useLeague } from "../../lib/LeagueContext";
 import { useValues } from "../../lib/ValuesContext";
@@ -62,6 +62,11 @@ interface TradeFinderProps {
   finderRankGaps: Record<string, number>;
   leaguePlayerTags: LeagueAssetDispositions;
   onSetAssetDisposition: (leagueId: string, assetId: string, disposition: AssetDisposition | null) => void;
+  /** Personal, time-boxed "don't want this player" block — read-only here; edited from League Hub. */
+  noInterestPlayers: LeagueExpiringBlocks;
+  /** Fingerprints of Finder suggestions the user dismissed; still-active ones are filtered out. */
+  discardedTrades: LeagueExpiringBlocks;
+  discardFinderTrade: (leagueId: string, fingerprint: string) => void;
   leagueMateProfileByRosterId: Map<number, LeagueMateView>;
   selectedLeagueMateProfilesView: LeagueMateView[];
   tradePartnerRankings: TradePartnerRanking[];
@@ -102,6 +107,7 @@ function TradeFinder({
   selectedLeagueDraftHasOccurred,
   loadingCalcValues,
   playerDispositions, finderSignals, finderRankGaps, leaguePlayerTags, onSetAssetDisposition,
+  noInterestPlayers, discardedTrades, discardFinderTrade,
   leagueMateProfileByRosterId, selectedLeagueMateProfilesView,
   tradePartnerRankings,
   onRefreshDirection,
@@ -303,8 +309,15 @@ function TradeFinder({
           ? normalizeDisposition(leaguePlayerTags[selectedLeague?.league_id ?? ""]?.[opponentAssetKey(assetId, oppRosterId)])
           : undefined;
       const isBlockedSellDisposition = (assetId?: string | null) => disposition(assetId) === "CORE";
+      // Personal "No Interest" block: independent of the opponent's own SELL_NO/SELL_OK tag
+      // above — this is the user not wanting that specific player, not the opponent refusing
+      // to sell. Not roster-scoped (bare player_id), so it still applies if he changes teams.
+      const isNoInterest = (playerId?: string | null) =>
+        !!playerId && isBlockActive(noInterestPlayers[selectedLeague?.league_id ?? ""]?.[playerId]);
       const isBlockedBuyDisposition = (playerId?: string | null, oppRosterId?: number | string | null) =>
-        (!!playerId && finderSignals[playerId] === "STRONG_SELL") || oppDisposition(playerId, oppRosterId) === "SELL_NO";
+        (!!playerId && finderSignals[playerId] === "STRONG_SELL")
+        || oppDisposition(playerId, oppRosterId) === "SELL_NO"
+        || isNoInterest(playerId);
       const isWantToTrade = (assetId?: string | null) => disposition(assetId) === "SHOPPING";
       const isOffload = (assetId?: string | null) => disposition(assetId) === "OFFLOAD";
       const isPricey = (assetId?: string | null) => disposition(assetId) === "PRICEY";
@@ -424,11 +437,25 @@ function TradeFinder({
         if (Number(p.season) > Number(finderSeasonYear) + 1) return getStoredPickValue(pickFcValues, p);
         return selectedLeagueDynamicPickValues[`${p.season}-${p.round}-${p.roster_id}`]?.expectedValue ?? getStoredPickValue(pickFcValues, p);
       };
+      // A pick the user has manually flagged Shopping/Offload should always make the give-pool,
+      // never buried behind a stack of untagged current-year picks in the slice(0, 6) below.
+      // Same for next year's capital while in Full Contend Mode / a championship push — a real
+      // contender can deal that without it costing this year's points or depth, so it shouldn't
+      // be strictly outranked by every current-year pick the way a rebuilder's future picks should.
+      const pickSellPriority = (p: AugmentedPick) => {
+        const key = finderPickKey(p);
+        if (isOffload(key)) return 0;
+        if (isWantToTrade(key)) return 1;
+        if (isChampionshipPush && Number(p.season) <= Number(finderSeasonYear) + 1) return 2;
+        return 3;
+      };
       const myFinderPicks = allPicks
         .filter((p) => p.owner_id === myRoster?.roster_id && !isBlockedSellDisposition(finderPickKey(p)))
         .map((p) => ({ ...p, value: finderPickValue(p) }))
         .filter((p) => p.value > 0)
         .sort((a, b) => {
+          const priorityDiff = pickSellPriority(a) - pickSellPriority(b);
+          if (priorityDiff !== 0) return priorityDiff;
           const yearDiff = (draftYearPriority[a.season] ?? 999) - (draftYearPriority[b.season] ?? 999);
           if (yearDiff !== 0) return yearDiff;
           if (a.round !== b.round) return a.round - b.round;
@@ -1085,6 +1112,16 @@ function TradeFinder({
         }
       }
 
+      // ── Discarded-trade suppression ──────────────────────────────────────
+      // Fingerprints of exact give/receive/opponent combinations the user dismissed via the
+      // card's Discard button (components/tradeHub/shared.ts's buildTradeFingerprint) — only
+      // still-active (unexpired) ones apply.
+      const discardedFingerprints = new Set(
+        Object.entries(discardedTrades[selectedLeague?.league_id ?? ""] ?? {})
+          .filter(([, expiresAt]) => isBlockActive(expiresAt))
+          .map(([fp]) => fp)
+      );
+
       // ── Scoring + slotting pipeline ──────────────────────────────────────
       const { allTrades, recentFingerprints, rosterOverflow } = runFinderPipeline(results, {
         allPicks,
@@ -1118,6 +1155,7 @@ function TradeFinder({
         tradePartnerRankings,
         leagueMateProfileByRosterId,
         tradeAttempts,
+        discardedFingerprints,
         historicalSnapshot,
         playerStats: playerStats ?? null,
         crossLeagueExposure: crossLeagueExposure ?? null,
@@ -1155,6 +1193,7 @@ function TradeFinder({
     selectedLeague, selectedLeagueDirectionAdjusted, loadingCalcValues, nflState,
     users, selectedLeagueDynamicPickValues, finderRosterPlayersMap, rosters,
     calcFcValues, user, playerDispositions, finderSignals, leaguePlayerTags, allPicks,
+    noInterestPlayers, discardedTrades,
     selectedLeagueDraftHasOccurred, pickFcValues, redraftValues, marketSignalMap,
     players, deferredPinnedPlayerId, deferredTargetOppRosterId, deferredTargetPlayerId,
     top32QBFloor, nflTeamDepth, ignoredOwnerIds, selectedLeagueSimulation,
@@ -1405,6 +1444,7 @@ function TradeFinder({
             }}
             onMarkAttempted={onMarkAttempted}
             onSessionMark={onSessionMark}
+            onDiscardTrade={discardFinderTrade}
           />
         </div>
       );
