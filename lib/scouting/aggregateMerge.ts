@@ -172,6 +172,57 @@ export function computeSAEForPlays(
   return saeFromCounts(totalRoutes, openRoutes, routeTypeCounts, coverageCounts, baselines);
 }
 
+// "Core-route" SAE — the same open-rate-above-expected math as SAE, but Go
+// (nine) and Screen routes are dropped from the sample entirely. Both are
+// scheme-driven outliers rather than a receiver "beating" anything: screens
+// are usually blocked open by design, gos are all-or-nothing deep shots.
+// A player who runs a lot of either can have their SAE swamped by them —
+// this variant isolates the more true "won leverage vs. coverage" routes.
+const SAE_EX_ROUTE_TYPES = new Set<RouteType>(["nine", "screen"]);
+
+// Season/career variant. Coverage-mix stays computed off the full sample —
+// prospect_route_stats has no route×coverage crosstab, so there's no exact
+// way to drop the coverage snaps that happened to come on a go/screen route.
+// Route-mix (and the actual open-rate numerator/denominator) IS filtered
+// exactly, using the per-route open/count breakdown already in route_stats_raw.
+function computeCoreSAE(
+  v: ProspectRouteStatsRow,
+  baselines: BaselineMaps,
+): number | null {
+  if (!v.has_charted_open_data) return null;
+  let totalRoutes = 0, openRoutes = 0;
+  const routeTypeCounts: Record<string, number> = {};
+  for (const rt of ROUTE_TYPES) {
+    if (SAE_EX_ROUTE_TYPES.has(rt)) continue;
+    const r = v.route_stats_raw[rt];
+    if (!r) continue;
+    totalRoutes += r.count;
+    openRoutes += r.open;
+    routeTypeCounts[rt] = r.count;
+  }
+  if (totalRoutes < 15) return null;
+  return saeFromCounts(totalRoutes, openRoutes, routeTypeCounts, v.coverage_counts, baselines);
+}
+
+// Per-game core-route SAE — ungated, mirrors computeSAEForPlays. Raw plays
+// carry both route_type and coverage per play, so this filters exactly (no
+// crosstab approximation needed, unlike the season variant above).
+export function computeCoreSAEForPlays(
+  routePlays: RoutePlay[],
+  baselines: BaselineMaps,
+): number | null {
+  const rated = routePlays.filter((p) => !p.no_route_run && !SAE_EX_ROUTE_TYPES.has(p.route_type));
+  const totalRoutes = rated.length;
+  const openRoutes = rated.filter((p) => p.was_open).length;
+  const routeTypeCounts: Record<string, number> = {};
+  const coverageCounts: Record<string, number> = {};
+  for (const p of rated) {
+    routeTypeCounts[p.route_type] = (routeTypeCounts[p.route_type] ?? 0) + 1;
+    if (p.coverage) coverageCounts[p.coverage] = (coverageCounts[p.coverage] ?? 0) + 1;
+  }
+  return saeFromCounts(totalRoutes, openRoutes, routeTypeCounts, coverageCounts, baselines);
+}
+
 function buildRouteStats(
   raw: Record<string, { count: number; open: number; targets: number; catches: number }>,
   has_charted_open_data: boolean,
@@ -272,6 +323,7 @@ export function buildProspectsWithStats(
       pct_backfield: v?.pct_backfield ?? null,
       pct_on_line: v?.pct_on_line ?? null,
       adj_success_above_exp: v ? computeSAE(v, baselines) : null,
+      core_sae: v ? computeCoreSAE(v, baselines) : null,
       avg_external_rank: avgExternalRank(p),
       depth_behind_los: v?.depth_behind_los ?? 0,
       depth_on_los: v?.depth_on_los ?? 0,

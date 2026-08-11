@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { indexBaselines, computeSAEForPlays, type LeagueRouteBaselineRow } from "@/lib/scouting/aggregateMerge";
+import { indexBaselines, computeSAEForPlays, computeCoreSAEForPlays, type LeagueRouteBaselineRow } from "@/lib/scouting/aggregateMerge";
 import type { RoutePlay, RouteType, CoverageType } from "@/lib/types";
 
 // The functions under test only read a handful of fields off each shape, so we
@@ -94,5 +94,52 @@ describe("computeSAEForPlays", () => {
     const out = computeSAEForPlays(gamePlays, baselines);
     expect(out).not.toBeNull();
     expect(Number.isFinite(out)).toBe(true);
+  });
+});
+
+// =============================================================================
+// computeCoreSAEForPlays — same as above, but drops Go (nine) & Screen routes
+// =============================================================================
+
+describe("computeCoreSAEForPlays", () => {
+  it("returns null when every play is a Go or Screen route", () => {
+    const bgPlays = repeat(30, () => routePlay("g_bg", "curl", "man", true));
+    const baselines = indexBaselines(baselineRowsFrom(bgPlays));
+    const gamePlays = [
+      ...repeat(3, () => routePlay("g1", "nine", "man", true)),
+      ...repeat(2, () => routePlay("g1", "screen", "man", true)),
+    ];
+    expect(computeCoreSAEForPlays(gamePlays, baselines)).toBeNull();
+  });
+
+  it("ignores Go/Screen plays but still scores the remaining routes", () => {
+    // League opens 50% on curl/man; the non-excluded routes in this game open
+    // 90% in the same bucket — the excluded nine/screen plays (both "open")
+    // would otherwise pull the number up further.
+    const bgPlays = [
+      ...repeat(50, () => routePlay("g_bg", "curl", "man", true)),
+      ...repeat(50, () => routePlay("g_bg", "curl", "man", false)),
+    ];
+    const baselines = indexBaselines(baselineRowsFrom(bgPlays));
+    const coreOnly = [
+      ...repeat(9, () => routePlay("g1", "curl", "man", true)),
+      ...repeat(1, () => routePlay("g1", "curl", "man", false)),
+    ];
+    const withExcluded = [
+      ...coreOnly,
+      ...repeat(4, () => routePlay("g1", "nine", "man", true)),
+      ...repeat(4, () => routePlay("g1", "screen", "man", true)),
+    ];
+    const coreOnlyOut = computeCoreSAEForPlays(coreOnly, baselines);
+    const withExcludedOut = computeCoreSAEForPlays(withExcluded, baselines);
+    expect(coreOnlyOut).not.toBeNull();
+    expect(withExcludedOut).toBe(coreOnlyOut);
+  });
+
+  it("returns null when the game has zero core routes (e.g. no_route_run only)", () => {
+    const bgPlays = repeat(30, () => routePlay("g_bg", "curl", "man", true));
+    const baselines = indexBaselines(baselineRowsFrom(bgPlays));
+    const gamePlays = repeat(5, () => routePlay("g1", "curl", "man", true, true));
+    expect(computeCoreSAEForPlays(gamePlays, baselines)).toBeNull();
   });
 });

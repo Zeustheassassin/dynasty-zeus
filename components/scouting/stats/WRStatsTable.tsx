@@ -24,6 +24,7 @@ export const WR_STAT_COLS: ColDef[] = [
   { key: "routes", label: "Routes",  group: "Identity", fmt: "count", width: 58 },
   // Advanced
   { key: "sae",      label: "SAE",    group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 62, tooltip: "Success (Open) Rate Above Expected — vs league avg adjusted for route mix & coverage", leagueOverride: 0 },
+  { key: "core_sae", label: "cSAE",   group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 64, tooltip: "Core-Route SAE — same as SAE, but excludes Go (Nine) and Screen routes, which are scheme-driven outliers rather than a receiver beating coverage. Min. 15 core routes.", leagueOverride: 0 },
   { key: "open_pct", label: "Open%",  group: "Advanced", fmt: "pct",       colorDir: 1,  width: 62, tooltip: "% of routes where player was open", weightBy: "routes" },
   { key: "tgt_pct",  label: "Tgt%",   group: "Advanced", fmt: "pct",       colorDir: 1,  width: 58, tooltip: "Targets per route run", weightBy: "routes" },
   { key: "catch_pct",label: "Catch%", group: "Advanced", fmt: "pct",       colorDir: 1,  width: 62, tooltip: "Catches per target", weightBy: "raw_tgts" },
@@ -116,6 +117,7 @@ export function buildWRStatRows(prospectsWithStats: ProspectWithStats[]): StatRo
         snaps: p.total_snaps,
         routes: p.total_routes,
         sae: p.adj_success_above_exp,
+        core_sae: p.core_sae,
         open_pct: p.success_rate,
         tgt_pct: p.target_rate,
         catch_pct: p.targets > 0 ? parseFloat(((p.catches / p.targets) * 100).toFixed(1)) : null,

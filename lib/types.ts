@@ -1105,6 +1105,9 @@ export interface ProspectWithStats extends Prospect {
   pct_backfield: number | null;
   pct_on_line: number | null;
   adj_success_above_exp: number | null;
+  // "Core-route" SAE — same stat, excluding Go (nine) and Screen routes. See
+  // computeCoreSAE in lib/scouting/aggregateMerge.ts for the rationale.
+  core_sae: number | null;
   avg_external_rank: number | null;
   depth_behind_los: number;
   depth_on_los: number;

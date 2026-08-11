@@ -18,7 +18,7 @@ import type {
 import { ROUTE_TYPES } from "../shared/chartingConstants";
 import ChartingBoard, { type ChartingBoardConfig } from "../shared/ChartingBoard";
 import { useChartingState } from "../shared/hooks/useChartingState";
-import { indexBaselines, computeSAEForPlays, type LeagueRouteBaselineRow } from "../../../lib/scouting/aggregateMerge";
+import { indexBaselines, computeSAEForPlays, computeCoreSAEForPlays, type LeagueRouteBaselineRow } from "../../../lib/scouting/aggregateMerge";
 
 const COVERAGES: { key: string; label: string }[] = [
   { key: "man", label: "Man" },
@@ -231,6 +231,16 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
     }
     return map;
   }, [plays, games, wrBaselines]);
+  // Same badge, but with Go (nine) and Screen routes dropped from the sample —
+  // see computeCoreSAEForPlays for why those two get excluded.
+  const perGameCoreSae = useMemo(() => {
+    const map: Record<string, number | null> = {};
+    for (const g of games) {
+      const gp = plays.filter((p) => p.game_id === g.id);
+      map[g.id] = computeCoreSAEForPlays(gp, wrBaselines);
+    }
+    return map;
+  }, [plays, games, wrBaselines]);
 
   const gamePlayCounts = useMemo(() => {
     const map: Record<string, number> = {};
@@ -359,6 +369,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
           { label: "Zone",  count: gs.zone,  open: gs.zoneOpen },
         ];
         const sae = perGameSae[g.id] ?? null;
+        const coreSae = perGameCoreSae[g.id] ?? null;
         return (
           <div className="flex items-center gap-3">
             {/* Man/Press/Zone success rate — desktop only; sidebar row has no room on small screens */}
@@ -376,6 +387,11 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                 ))}
               </div>
             )}
+            <div className="hidden sm:flex flex-col items-end whitespace-nowrap flex-shrink-0" title="Core-Route SAE — excludes Go & Screen routes">
+              <span className={`text-[10px] font-semibold ${coreSae == null ? "text-slate-600" : coreSae >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                cSAE {coreSae == null ? "—" : `${coreSae >= 0 ? "+" : ""}${coreSae.toFixed(1)}`}
+              </span>
+            </div>
             <div className={`text-[10px] font-semibold whitespace-nowrap flex-shrink-0 ${sae == null ? "text-slate-600" : sae >= 0 ? "text-emerald-400" : "text-red-400"}`}>
               SAE {sae == null ? "—" : `${sae >= 0 ? "+" : ""}${sae.toFixed(1)}`}
             </div>
@@ -420,7 +436,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                 ))}
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div className="p-3 bg-slate-900 rounded-lg border border-slate-800">
                   <div className="text-xs text-slate-500 mb-1">Open Rate (SRVC)</div>
                   <div className="text-xl font-bold text-emerald-400">{stats.openRate ? `${stats.openRate}%` : "—"}</div>
@@ -436,6 +452,18 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                   <div className="text-xl font-bold text-amber-400">{stats.targetRate ? `${stats.targetRate}%` : "—"}</div>
                   <div className="text-xs text-slate-600 mt-0.5">{stats.targets} / {stats.totalRoutes} routes</div>
                 </div>
+                {(() => {
+                  const coreSae = allProspects.find((p) => p.id === prospect.id)?.core_sae ?? null;
+                  return (
+                    <div className="p-3 bg-slate-900 rounded-lg border border-slate-800" title="Success Rate Above Expected, excluding Go (Nine) and Screen routes. Min. 15 core routes.">
+                      <div className="text-xs text-slate-500 mb-1">Core SAE</div>
+                      <div className={`text-xl font-bold ${coreSae == null ? "text-slate-600" : coreSae >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                        {coreSae == null ? "—" : `${coreSae >= 0 ? "+" : ""}${coreSae.toFixed(1)}`}
+                      </div>
+                      <div className="text-xs text-slate-600 mt-0.5">vs. expected, ex. Go &amp; Screen</div>
+                    </div>
+                  );
+                })()}
               </div>
 
               <div className="p-4 bg-slate-900 rounded-lg border border-slate-800">
