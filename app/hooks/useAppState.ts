@@ -811,8 +811,10 @@ useEffect(() => {
 useEffect(() => {
   const leagueId = selectedLeague?.league_id;
   if (mainTab !== "LEAGUES" || leagueHubTab !== "SIMULATOR" || !leagueId) return;
-  const isRegularSeason = nflState?.season_type === "regular" && (nflState?.week ?? 0) > 0;
-  if (!isRegularSeason) return;
+  // Not gated on NFL's season_type: Sleeper generates each league's schedule right
+  // after its rookie draft, weeks before the NFL regular season starts. Always try
+  // fetching it — simulateLeague already falls back to a generated round-robin for
+  // any week Sleeper returns no matchups for, so this is safe pre-draft too.
   if (leagueWeeklyMatchups[leagueId]) return;
 
   let cancelled = false;
@@ -846,7 +848,7 @@ useEffect(() => {
 
   loadLeagueWeeklyHistory();
   return () => { cancelled = true; };
-}, [mainTab, leagueHubTab, selectedLeague?.league_id, selectedLeague?.settings?.playoff_week_start, nflState?.week, nflState?.season_type, leagueWeeklyMatchups, setLeagueWeeklyMatchups, setLoadingLeagueWeeklyMatchups]);
+}, [mainTab, leagueHubTab, selectedLeague?.league_id, selectedLeague?.settings?.playoff_week_start, leagueWeeklyMatchups, setLeagueWeeklyMatchups, setLoadingLeagueWeeklyMatchups]);
 
 
 useEffect(() => {
