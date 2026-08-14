@@ -133,6 +133,32 @@ export function simulateLeague({
     return 0;
   };
 
+  // Per-player weekly injury risk, replacing the old flat 6.5% roll. BASE_INJURY_RATE
+  // stays the mid-tier (average age/durability) rate so the league-wide center of mass
+  // is unchanged from before; age/position pushes durability risk up or down around it
+  // every week (same thresholds as dataHubHelpers' ageRiskScore), while a live
+  // Sleeper injury_status only informs the *current* week — future weeks have no basis
+  // to assume a Questionable/Doubtful tag still holds, so only durability carries there.
+  const BASE_INJURY_RATE = 0.065;
+  const durabilityMultiplier = (age: number | null | undefined, position: string): number => {
+    if (!age) return 1;
+    const [young, mid] = position === "RB" ? [23, 26] : [24, 27];
+    if (age <= young) return 0.7;
+    if (age <= mid) return 1;
+    return 1.5;
+  };
+  const getPlayerInjuryRate = (playerId: string, position: string, simWeek: number): number => {
+    const p = players[playerId] as SleeperPlayer | undefined;
+    let rate = BASE_INJURY_RATE * durabilityMultiplier(p?.age, position);
+    if (simWeek === currentWeek) {
+      const status = (p?.injury_status ?? "").trim();
+      if (/^(?:q|questionable)$/i.test(status)) rate = Math.max(rate, 0.25);
+      else if (/^(?:d|doubtful)$/i.test(status)) rate = Math.max(rate, 0.75);
+      else if (status && !/^(?:active|probable)$/i.test(status)) rate = Math.max(rate, 0.97);
+    }
+    return Math.min(0.97, rate);
+  };
+
   const pickBestStarters = (pool: PoolPlayer[], unavailableIds: Set<string>): { score: number; used: Set<string> } => {
     const avail = [...pool].filter((p) => !unavailableIds.has(p.id)).sort((a, b) => b.score - a.score);
     const used = new Set<string>();
@@ -345,7 +371,7 @@ export function simulateLeague({
           const byeWk = getPlayerByeWeek(p.id, p.nflTeam);
           if (byeWk > 0 && byeWk === simWeek) {
             unavail.add(p.id);
-          } else if (rng() < 0.065) {
+          } else if (rng() < getPlayerInjuryRate(p.id, p.position, simWeek)) {
             unavail.add(p.id);
           }
         });
