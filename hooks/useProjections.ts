@@ -115,8 +115,6 @@ export function useProjections(
     const statusMap: Record<string, boolean> = {};
     const now = new Date();
     const currentNflYear = now.getFullYear();
-    // NFL regular season runs Sep–Jan. Months 0–7 (Jan–Aug) = offseason.
-    const isOffseason = now.getMonth() < 8;
     let resolvedProjectionYear = currentNflYear;
     setProjectionSeasonYear(currentNflYear);
 
@@ -195,9 +193,107 @@ export function useProjections(
         sourceRows.set(sleeperId, existing);
       };
 
+      // Always attempt real weekly data first, regardless of calendar date —
+      // external sources (FantasyPros, numberFire) often publish real weekly
+      // projections well before Sleeper's own per-week endpoint does, so a
+      // blind "Jan-Aug = offseason" cutoff was skipping sources that already
+      // had good data. Only fall back to Sleeper's full-season ÷ 17 estimate
+      // below if every active source truly comes back empty for this week.
       let usingSeasonFallback = false;
-      if (typeof week === "number" && isOffseason) {
-        // Offseason: use Sleeper season projections ÷ 17
+      const posParams = "position[]=QB&position[]=RB&position[]=WR&position[]=TE";
+
+      // Source 1: Sleeper/RotoWire
+      // Sleeper is always included. When it's the only active source the consensus
+      // math still works correctly because totalWeight equals sleeperWeight for every row.
+      try {
+        const sleeperWeight = PROJ_SOURCES.find((s) => s.id === "sleeper")!.weight;
+        let sleeperData: SleeperRawProjectionItem[] = [];
+        if (week === "season") {
+          const curUrl = `${SLEEPER_PROJECTIONS_BASE}/${currentNflYear}?season_type=regular&${posParams}`;
+          let data: SleeperRawProjectionItem[] = await fetch(curUrl).then((r) => r.json());
+          if (!Array.isArray(data) || data.length === 0) {
+            const prevUrl = `${SLEEPER_PROJECTIONS_BASE}/${currentNflYear - 1}?season_type=regular&${posParams}`;
+            data = await fetch(prevUrl).then((r) => r.json());
+            if (Array.isArray(data) && data.length > 0) resolvedProjectionYear = currentNflYear - 1;
+          }
+          sleeperData = Array.isArray(data) ? data : [];
+        } else {
+          const url = `${SLEEPER_PROJECTIONS_BASE}/${currentNflYear}/${week}?season_type=regular&${posParams}`;
+          const data: SleeperRawProjectionItem[] = await fetch(url).then((r) => r.json());
+          sleeperData = Array.isArray(data) ? data : [];
+        }
+        sleeperData.forEach((item: SleeperRawProjectionItem) => {
+          const pos: string = item.player?.position ?? "";
+          if (!["QB", "RB", "WR", "TE"].includes(pos) || !item.player_id) return;
+          const leagueFpts = calcFpts(item.stats as Record<string, number> | undefined, pos);
+          if (leagueFpts <= 0) return;
+          addRow(String(item.player_id), leagueFpts, "sleeper", sleeperWeight, getKickoffAt(item));
+          // Build per-player scaling ratio for FantasyPros/numberFire adjustment
+          const defaultFpts = calcDefaultFpts(item.stats as Record<string, number> | undefined, pos);
+          if (defaultFpts > 0) scalingRatios.set(String(item.player_id), leagueFpts / defaultFpts);
+        });
+        statusMap["sleeper"] = true;
+      } catch { statusMap["sleeper"] = false; }
+
+      // FantasyPros/numberFire's weekly endpoints carry no season/year of their
+      // own the way Sleeper's does (year baked straight into the URL path) — before
+      // a new season's real week-N numbers are published, a scrape/query for
+      // "week 1" can come back with stale or ambiguous prior-season content and
+      // there's no field in the response to catch that. Only trust them for a
+      // specific week once Sleeper's year-explicit fetch above already found
+      // real data for this exact year/week; full-season ("draft"/YEARLY)
+      // requests are unaffected by this gate.
+      const weeklyDataYearVerified = week === "season" || sourceRows.size > 0;
+
+      // Source 2: FantasyPros — opt-in only; user must explicitly enable it after
+      // verifying the link shows the correct year. During offseason their ?week=draft
+      // endpoint has no year parameter and returns prior-season data.
+      if (extraSources.includes("fantasypros") && weeklyDataYearVerified) {
+        try {
+          const weekParam = week === "season" ? "draft" : String(week);
+          const data: Array<{ name: string; position: string; fpts: number }> =
+            await fetch(`/api/projections/fantasypros?week=${weekParam}`).then((r) => r.json());
+          const src = PROJ_SOURCES.find((s) => s.id === "fantasypros")!;
+          data.forEach((item) => {
+            if (item.fpts <= 0) return;
+            const key = normalizeProjName(item.name);
+            const sleeperId = nameIndex.get(key);
+            if (!sleeperId) return;
+            // Scale by per-player ratio derived from Sleeper's raw stats so this
+            // source reflects the league's scoring rather than standard PPR.
+            const ratio = scalingRatios.get(sleeperId) ?? 1;
+            addRow(sleeperId, item.fpts * ratio, src.id, src.weight);
+          });
+          statusMap["fantasypros"] = true;
+        } catch { statusMap["fantasypros"] = false; }
+      }
+
+      // Source 3: numberFire — opt-in only for the same reason; YEARLY returns prior-season
+      // data until FanDuel publishes updated preseason projections.
+      if (extraSources.includes("numberfire") && weeklyDataYearVerified) {
+        try {
+          const weekParam = week === "season" ? "0" : String(week);
+          const data: Array<{ name: string; position: string; fpts: number }> =
+            await fetch(`/api/projections/numberfire?week=${weekParam}`).then((r) => r.json());
+          const src = PROJ_SOURCES.find((s) => s.id === "numberfire")!;
+          data.forEach((item) => {
+            if (item.fpts <= 0) return;
+            const key = normalizeProjName(item.name);
+            const sleeperId = nameIndex.get(key);
+            if (!sleeperId) return;
+            // Same scaling applied as FantasyPros — approximate league scoring adjustment.
+            const ratio = scalingRatios.get(sleeperId) ?? 1;
+            addRow(sleeperId, item.fpts * ratio, src.id, src.weight);
+          });
+          statusMap["numberfire"] = true;
+        } catch { statusMap["numberfire"] = false; }
+      }
+
+      // Fall back to Sleeper's full-season projections ÷ 17 only for a specific
+      // week whose weekly attempt above truly came back empty across every
+      // active source — the genuine early-offseason case, before anyone has
+      // published week-by-week numbers yet.
+      if (typeof week === "number" && sourceRows.size === 0) {
         try {
           const posResults = await Promise.all(
             ["QB", "RB", "WR", "TE"].map((pos) =>
@@ -222,90 +318,8 @@ export function useProjections(
             usingSeasonFallback = true;
           }
         } catch { /* silently ignore */ }
-        setProjectionUsesSeasonFallback(usingSeasonFallback);
-      } else {
-        // In-season: multi-source weekly consensus
-        const posParams = "position[]=QB&position[]=RB&position[]=WR&position[]=TE";
-
-        // Source 1: Sleeper/RotoWire
-        // Sleeper is always included. When it's the only active source the consensus
-        // math still works correctly because totalWeight equals sleeperWeight for every row.
-        try {
-          const sleeperWeight = PROJ_SOURCES.find((s) => s.id === "sleeper")!.weight;
-          let sleeperData: SleeperRawProjectionItem[] = [];
-          if (week === "season") {
-            const curUrl = `${SLEEPER_PROJECTIONS_BASE}/${currentNflYear}?season_type=regular&${posParams}`;
-            let data: SleeperRawProjectionItem[] = await fetch(curUrl).then((r) => r.json());
-            if (!Array.isArray(data) || data.length === 0) {
-              const prevUrl = `${SLEEPER_PROJECTIONS_BASE}/${currentNflYear - 1}?season_type=regular&${posParams}`;
-              data = await fetch(prevUrl).then((r) => r.json());
-              if (Array.isArray(data) && data.length > 0) resolvedProjectionYear = currentNflYear - 1;
-            }
-            sleeperData = Array.isArray(data) ? data : [];
-          } else {
-            const url = `${SLEEPER_PROJECTIONS_BASE}/${currentNflYear}/${week}?season_type=regular&${posParams}`;
-            const data: SleeperRawProjectionItem[] = await fetch(url).then((r) => r.json());
-            sleeperData = Array.isArray(data) ? data : [];
-          }
-          sleeperData.forEach((item: SleeperRawProjectionItem) => {
-            const pos: string = item.player?.position ?? "";
-            if (!["QB", "RB", "WR", "TE"].includes(pos) || !item.player_id) return;
-            const leagueFpts = calcFpts(item.stats as Record<string, number> | undefined, pos);
-            if (leagueFpts <= 0) return;
-            addRow(String(item.player_id), leagueFpts, "sleeper", sleeperWeight, getKickoffAt(item));
-            // Build per-player scaling ratio for FantasyPros/numberFire adjustment
-            const defaultFpts = calcDefaultFpts(item.stats as Record<string, number> | undefined, pos);
-            if (defaultFpts > 0) scalingRatios.set(String(item.player_id), leagueFpts / defaultFpts);
-          });
-          statusMap["sleeper"] = true;
-        } catch { statusMap["sleeper"] = false; }
-
-        // Source 2: FantasyPros — opt-in only; user must explicitly enable it after
-        // verifying the link shows the correct year. During offseason their ?week=draft
-        // endpoint has no year parameter and returns prior-season data.
-        if (extraSources.includes("fantasypros")) {
-          try {
-            const weekParam = week === "season" ? "draft" : String(week);
-            const data: Array<{ name: string; position: string; fpts: number }> =
-              await fetch(`/api/projections/fantasypros?week=${weekParam}`).then((r) => r.json());
-            const src = PROJ_SOURCES.find((s) => s.id === "fantasypros")!;
-            data.forEach((item) => {
-              if (item.fpts <= 0) return;
-              const key = normalizeProjName(item.name);
-              const sleeperId = nameIndex.get(key);
-              if (!sleeperId) return;
-              // Scale by per-player ratio derived from Sleeper's raw stats so this
-              // source reflects the league's scoring rather than standard PPR.
-              const ratio = scalingRatios.get(sleeperId) ?? 1;
-              addRow(sleeperId, item.fpts * ratio, src.id, src.weight);
-            });
-            statusMap["fantasypros"] = true;
-          } catch { statusMap["fantasypros"] = false; }
-        }
-
-        // Source 3: numberFire — opt-in only for the same reason; YEARLY returns prior-season
-        // data until FanDuel publishes updated preseason projections.
-        if (extraSources.includes("numberfire")) {
-          try {
-            const weekParam = week === "season" ? "0" : String(week);
-            const data: Array<{ name: string; position: string; fpts: number }> =
-              await fetch(`/api/projections/numberfire?week=${weekParam}`).then((r) => r.json());
-            const src = PROJ_SOURCES.find((s) => s.id === "numberfire")!;
-            data.forEach((item) => {
-              if (item.fpts <= 0) return;
-              const key = normalizeProjName(item.name);
-              const sleeperId = nameIndex.get(key);
-              if (!sleeperId) return;
-              // Same scaling applied as FantasyPros — approximate league scoring adjustment.
-              const ratio = scalingRatios.get(sleeperId) ?? 1;
-              addRow(sleeperId, item.fpts * ratio, src.id, src.weight);
-            });
-            statusMap["numberfire"] = true;
-          } catch { statusMap["numberfire"] = false; }
-        }
-
-        setProjectionUsesSeasonFallback(false);
       }
+      setProjectionUsesSeasonFallback(usingSeasonFallback);
 
       // Build final consensus list
       const rows: ProjectionRow[] = [];
