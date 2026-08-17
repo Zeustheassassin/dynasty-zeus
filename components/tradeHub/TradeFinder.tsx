@@ -1140,6 +1140,9 @@ function TradeFinder({
       const globalAversionTags = emptyAversionTags();
       {
         const AVERSION_WINDOW = 180 * 24 * 60 * 60 * 1000;
+        // A few ms/renders of drift on a 180-day inclusion window is inconsequential;
+        // recomputed whenever tradeAttempts changes (already a finderModel dep), never frozen stale.
+        // eslint-disable-next-line react-hooks/purity
         const now = Date.now();
         for (const a of tradeAttempts) {
           if (a.source !== "PREDICTED_DECLINE" || !a.counter_details) continue;
