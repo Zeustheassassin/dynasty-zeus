@@ -23,6 +23,7 @@ export interface SimulatorCtx {
   nflState: SleeperNFLState | null;
   projectionData: ProjectionRow[];
   projectionWeek: number;
+  loadingProjections: boolean;
   playerStats: Record<string, PlayerUsage> | null;
   leagueWeeklyMatchups: Record<string, { week: number; matchups: SleeperMatchup[] }[]>;
   standings: StandingRow[];
@@ -63,7 +64,7 @@ export interface SimulatorResult {
 export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
   const {
     selectedLeague, rosters, players, nflState,
-    projectionData, projectionWeek, playerStats,
+    projectionData, projectionWeek, loadingProjections, playerStats,
     leagueWeeklyMatchups, standings, users,
     leagueAdjustedFcValues, leagueAdjustedRedraftValues,
     projectedRookiesByRoster, supabaseUser, leagues, loadRoster,
@@ -348,6 +349,11 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
   useEffect(() => {
     if (!simQueue.length) return;
     if (readyLeagueId !== simQueue[0]) return;
+    // Projections are cached in flat, un-league-scoped state and get invalidated
+    // (loadingProjections flips true) the instant this league's scoring settings
+    // differ from what's currently cached — wait for that reload to finish so we
+    // never save a sim computed against the previous league's scoring/fpts.
+    if (loadingProjections) return;
 
     const leagueId = simQueue[0];
     if (
@@ -366,7 +372,7 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
       const nextLeague = leagues.find((l) => l.league_id === remaining[0]);
       if (nextLeague) loadRoster(nextLeague);
     }
-  }, [simQueue, readyLeagueId, selectedLeagueSimulation, selectedLeague?.league_id, leagues, saveSimulationToSupabase, loadRoster]);
+  }, [simQueue, readyLeagueId, loadingProjections, selectedLeagueSimulation, selectedLeague?.league_id, leagues, saveSimulationToSupabase, loadRoster]);
 
   const handleRunAllSims = useCallback(() => {
     if (!leagues.length) return;

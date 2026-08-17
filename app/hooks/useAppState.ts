@@ -1451,6 +1451,7 @@ const saveSnapshotNow = async () => {
     nflState,
     projectionData,
     projectionWeek,
+    loadingProjections,
     playerStats,
     leagueWeeklyMatchups,
     standings,

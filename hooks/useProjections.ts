@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef, useCallback, type Dispatch, type SetStateAction } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback, type Dispatch, type SetStateAction } from "react";
 import { normalizeProjName, getProjectionKickoffAt } from "../lib/helpers";
 import { SLEEPER_PROJECTIONS_BASE } from "../lib/constants";
 import { computeLeagueFpts, DEFAULT_SCORING } from "../lib/helpers/scoring";
@@ -92,6 +92,22 @@ export function useProjections(
   // Monotonic counter: if a newer call starts before the previous one finishes,
   // the older result is discarded so it can never overwrite fresher data.
   const requestIdRef = useRef(0);
+
+  // projectionData has no league_id/scoring attached to its rows — it's fpts
+  // baked with whatever scoring was active when it was computed. Track that
+  // scoring here so switching leagues (different scoring_settings) invalidates
+  // the cache instead of silently reusing another league's fpts numbers.
+  const scoringKey = useMemo(
+    () => JSON.stringify(leagueScoringSettings ?? DEFAULT_SCORING),
+    [leagueScoringSettings]
+  );
+  const loadedScoringKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (loadedScoringKeyRef.current !== null && loadedScoringKeyRef.current !== scoringKey) {
+      setProjectionData([]);
+      setProjectionLoaded(false);
+    }
+  }, [scoringKey]);
 
   const loadProjections = useCallback(async (week: number | "season", extraSources: string[] = []) => {
     const requestId = ++requestIdRef.current;
@@ -315,6 +331,7 @@ export function useProjections(
       setProjectionSeasonYear(resolvedProjectionYear);
       setProjectionSourceStatus(statusMap);
       setProjectionLoaded(true);
+      loadedScoringKeyRef.current = JSON.stringify(activeScoring);
     } finally {
       if (requestId === requestIdRef.current) setLoadingProjections(false);
     }
