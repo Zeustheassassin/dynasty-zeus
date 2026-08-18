@@ -140,6 +140,23 @@ function OverviewTab({
       : null;
     const adjBucket = getAdjustedDirectionBucket(profile.bucket, profile, playoffOdds, hasCachedSim);
     const adjColor = getBucketColor(adjBucket);
+
+    // entry.picks already only spans the next undrafted seasons (this league's
+    // draft-complete seasons are pre-filtered out), so the earliest season present
+    // is "this season" if its draft hasn't happened yet, else "next season".
+    const earliestSeason = ownedPicks.reduce<string>(
+      (min, p) => (!min || String(p.season) < min ? String(p.season) : min),
+      ""
+    );
+    const myOwnFirst = ownedPicks.find(
+      (p) => Number(p.roster_id) === Number(myRosterId) && String(p.season) === earliestSeason && Number(p.round) === 1
+    );
+    const ownFirst = !!myOwnFirst && Number(myOwnFirst.owner_id) === Number(myRosterId);
+    const myPicks = ownedPicks.filter((p) => Number(p.owner_id) === Number(myRosterId));
+    const totalFirsts = myPicks.filter((p) => Number(p.round) === 1).length;
+    const totalSeconds = myPicks.filter((p) => Number(p.round) === 2).length;
+    const totalThirds = myPicks.filter((p) => Number(p.round) === 3).length;
+
     return {
       league,
       ...profile,
@@ -149,6 +166,10 @@ function OverviewTab({
       playoffOdds,
       hasCachedSim,
       simAge,
+      ownFirst,
+      totalFirsts,
+      totalSeconds,
+      totalThirds,
     };
   }).filter((x): x is NonNullable<typeof x> => x !== null).sort((a, b) => {
     const bucketDiff = (bucketOrder[a.bucket] ?? 999) - (bucketOrder[b.bucket] ?? 999);
@@ -162,7 +183,7 @@ function OverviewTab({
   if (loadingLeagueOverview && !leagueOverviewLoaded) return <p className="text-sm text-blue-400">Loading league data…</p>;
   if (!leagues.length) return <p className="text-sm text-slate-500">No leagues found.</p>;
 
-  const GRID = "grid grid-cols-[minmax(180px,1.4fr)_minmax(170px,1.1fr)_56px_56px_56px_56px_64px] gap-2 items-center px-1";
+  const GRID = "grid grid-cols-[minmax(180px,1.4fr)_minmax(170px,1.1fr)_56px_56px_56px_56px_64px_56px_48px_48px_48px] gap-2 items-center px-1";
 
   return (
     <div className="space-y-3">
@@ -218,7 +239,7 @@ function OverviewTab({
       </div>
 
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 overflow-x-auto">
-        <div className="min-w-[700px]">
+        <div className="min-w-[900px]">
           <div className={`${GRID} text-[10px] uppercase tracking-wide text-slate-500 mb-1 pb-2 border-b border-slate-800`}>
             <span>League</span>
             <span>Direction</span>
@@ -227,6 +248,10 @@ function OverviewTab({
             <span className="text-center">Stnd</span>
             <span className="text-center">MaxPF</span>
             <span className="text-center">Playoff%</span>
+            <span className="text-center">Own 1st</span>
+            <span className="text-center">1sts</span>
+            <span className="text-center">2nds</span>
+            <span className="text-center">3rds</span>
           </div>
           <div className="space-y-0.5">
             {leagueRows.map((row) => (
@@ -269,6 +294,12 @@ function OverviewTab({
                     </button>
                   )}
                 </div>
+                <span className={`text-center font-semibold ${row.ownFirst ? "text-emerald-400" : "text-red-400"}`}>
+                  {row.ownFirst ? "Y" : "N"}
+                </span>
+                <span className="text-center text-slate-300">{row.totalFirsts}</span>
+                <span className="text-center text-slate-300">{row.totalSeconds}</span>
+                <span className="text-center text-slate-300">{row.totalThirds}</span>
               </div>
             ))}
           </div>
