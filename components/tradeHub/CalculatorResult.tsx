@@ -129,18 +129,25 @@ function CalculatorResult({
 }: CalculatorResultProps) {
   const players = usePlayers();
   const { selectedLeague, rosters, users } = useLeague();
-  const { selectedLeagueSimulation, previewTradeSimulation } = useValues();
+  const { previewTradeSimulation } = useValues();
 
   const opponentRoster = calcOpponentRosterId != null
     ? rosters.find((r) => r.roster_id === calcOpponentRosterId)
     : null;
   const hasPlayerMovement = calcGive.length > 0 || calcReceive.length > 0;
   const simPreviewSignature = `${calcOpponentRosterId ?? ""}|${[...calcGive].sort().join(",")}|${[...calcReceive].sort().join(",")}`;
+  const [simPreviewBefore, setSimPreviewBefore] = useState<LeagueSimulation | null>(null);
   const [simPreview, setSimPreview] = useState<LeagueSimulation | null>(null);
   const [simPreviewSignatureRun, setSimPreviewSignatureRun] = useState<string>("");
   const simPreviewStale = simPreview !== null && simPreviewSignatureRun !== simPreviewSignature;
+  // Both sides are computed back-to-back off the same live inputs in one click, rather than
+  // pairing a live-updating "before" against a frozen "after" — that mismatch (before drifting
+  // as async matchup/standings/projection data settled after the click, after staying pinned to
+  // whatever was loaded at click time) was the actual source of before/after numbers disagreeing
+  // with what the Simulator tab showed a moment later.
   const handleSimPreview = () => {
     if (!myRoster || calcOpponentRosterId == null) return;
+    setSimPreviewBefore(previewTradeSimulation(myRoster.roster_id, calcOpponentRosterId, [], []));
     setSimPreview(previewTradeSimulation(myRoster.roster_id, calcOpponentRosterId, calcGive, calcReceive));
     setSimPreviewSignatureRun(simPreviewSignature);
   };
@@ -386,10 +393,10 @@ function CalculatorResult({
               Runs this season&apos;s simulator with the trade applied to estimate the change in playoff odds. Reflects player swaps only — pick-for-pick moves don&apos;t change this season&apos;s projection.
             </p>
           )}
-          {simPreview && (() => {
-            const myBeforeRow = selectedLeagueSimulation?.rowByRosterId?.get(Number(myRoster?.roster_id));
+          {simPreview && simPreviewBefore && (() => {
+            const myBeforeRow = simPreviewBefore.rowByRosterId.get(Number(myRoster?.roster_id));
             const myAfterRow = simPreview.rowByRosterId.get(Number(myRoster?.roster_id));
-            const oppBeforeRow = selectedLeagueSimulation?.rowByRosterId?.get(calcOpponentRosterId);
+            const oppBeforeRow = simPreviewBefore.rowByRosterId.get(calcOpponentRosterId);
             const oppAfterRow = simPreview.rowByRosterId.get(calcOpponentRosterId);
             const oppName = opponentRoster ? (users[opponentRoster.owner_id] || `Team ${opponentRoster.roster_id}`) : "Opponent";
             return (
