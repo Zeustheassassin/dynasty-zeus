@@ -14,6 +14,7 @@ import type {
   RoutePlay,
   RouteType,
   Alignment,
+  CoverageType,
 } from "../../../lib/types";
 import { ROUTE_TYPES } from "../shared/chartingConstants";
 import ChartingBoard, { type ChartingBoardConfig } from "../shared/ChartingBoard";
@@ -275,7 +276,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
     setSavingPlay(false);
   }
 
-  async function handleBulkImport(parsedPlays: { route_type: RouteType; alignment: Alignment; on_line: boolean; targeted: boolean; success: boolean | null; yards: number | null; play_notes: string; no_route_run?: boolean }[]) {
+  async function handleBulkImport(parsedPlays: { route_type: RouteType; alignment: Alignment; on_line: boolean; coverage: CoverageType; was_open: boolean; targeted: boolean; success: boolean | null; yards: number | null; play_notes: string; no_route_run?: boolean }[]) {
     if (!selectedGameId) return;
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;

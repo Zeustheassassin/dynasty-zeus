@@ -2,6 +2,7 @@
 import { useState, useEffect, type Dispatch, type SetStateAction } from "react";
 import { supabase } from "../lib/supabaseclient";
 import { logger } from "../lib/logger";
+import { useDebouncedKeyedEffect } from "../lib/hooks/useDebouncedKeyedEffect";
 import type { LeagueMgmtData, CommPaymentsData, SleeperRoster, SleeperUser } from "../lib/types";
 
 const log = logger("hooks/useManagementState");
@@ -36,6 +37,9 @@ export function useManagementState(supabaseUser: { id: string } | null): UseMana
   const [commToolsUsers, setCommToolsUsers] = useState<Record<string, SleeperUser>>({});
   const [loadingCommToolsRosters, setLoadingCommToolsRosters] = useState(false);
   const [leagueBylaws, setLeagueBylaws] = useState<Record<string, string>>({});
+  // Debounces the bylaws Supabase write so rapid typing collapses to one
+  // upsert of the final text per league, instead of one per keystroke.
+  const scheduleWrite = useDebouncedKeyedEffect();
 
   useEffect(() => {
     if (!supabaseUser) return;
@@ -129,11 +133,13 @@ export function useManagementState(supabaseUser: { id: string } | null): UseMana
   const saveLeagueBylaws = (leagueId: string, text: string) => {
     setLeagueBylaws((prev) => ({ ...prev, [leagueId]: text }));
     if (!supabaseUser) return;
-    supabase.from("league_bylaws").upsert(
-      { user_id: supabaseUser.id, league_id: leagueId, content: text, updated_at: new Date().toISOString() },
-      { onConflict: "user_id,league_id" }
-    ).then(({ error }) => {
-      if (error) log.error("league_bylaws upsert failed", { err: error.message });
+    scheduleWrite(`league_bylaws:${supabaseUser.id}:${leagueId}`, () => {
+      supabase.from("league_bylaws").upsert(
+        { user_id: supabaseUser.id, league_id: leagueId, content: text, updated_at: new Date().toISOString() },
+        { onConflict: "user_id,league_id" }
+      ).then(({ error }) => {
+        if (error) log.error("league_bylaws upsert failed", { err: error.message });
+      });
     });
   };
 

@@ -144,7 +144,10 @@ export default function ConsensusCompiler({
                 {ALL_COMPILED_YEARS.map((yr) => (
                   <button
                     key={yr}
-                    onClick={() => clearYear(yr)}
+                    onClick={() => {
+                      if (!window.confirm(`Delete all compiled ${yr} consensus data? This cannot be undone.`)) return;
+                      clearYear(yr);
+                    }}
                     className="text-[10px] px-2 py-0.5 rounded border border-red-900/60 bg-red-950/30 text-red-400 hover:bg-red-900/50 transition"
                   >
                     Delete {yr}

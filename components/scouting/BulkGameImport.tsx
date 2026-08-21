@@ -1,11 +1,13 @@
 "use client";
 import { useState, useCallback } from "react";
-import type { RouteType, Alignment } from "../../lib/types";
+import type { RouteType, Alignment, CoverageType } from "../../lib/types";
 
-interface ParsedPlay {
+export interface ParsedPlay {
   route_type: RouteType;
   alignment: Alignment;
   on_line: boolean;
+  coverage: CoverageType;
+  was_open: boolean;
   targeted: boolean;
   success: boolean | null;
   yards: number | null;
@@ -46,17 +48,26 @@ const ALIGN_MAP: Record<string, Alignment> = {
   b: "backfield", backfield: "backfield", bf: "backfield", back: "backfield",
 };
 
+const COVERAGE_MAP: Record<string, CoverageType> = {
+  m: "man", man: "man",
+  z: "zone", zone: "zone",
+  p: "press", press: "press",
+  d: "double", double: "double", dbl: "double",
+};
+
 function parseBool(v: string): boolean {
   return ["y", "yes", "true", "1", "x", "✓", "catch", "caught", "c"].includes(v.toLowerCase().trim());
 }
 
 function parsePlay(row: string[]): ParsedPlay {
   const raw = row.join("\t");
-  if (row.length < 2) return { route_type: "other", alignment: "right", on_line: true, targeted: false, success: null, yards: null, play_notes: "", no_route_run: false, valid: false, raw, error: "Too few columns" };
+  if (row.length < 2) return { route_type: "other", alignment: "right", on_line: true, coverage: "", was_open: false, targeted: false, success: null, yards: null, play_notes: "", no_route_run: false, valid: false, raw, error: "Too few columns" };
 
   const col = (i: number) => (row[i] ?? "").trim();
 
-  // Column order: Route | Alignment | On Line | Targeted | Success | Yards | Notes
+  // Column order: Route | Alignment | On Line | Coverage | Open | Targeted | Success | Yards | Notes
+  // Notes is always the last column, for both route rows and NRR rows, so a
+  // paste that mixes row types still lines up under one fixed layout.
   const routeRaw = col(0).toLowerCase().replace(/\s+/g, " ").trim();
   const no_route_run = NRR_KEYWORDS.has(routeRaw);
 
@@ -65,9 +76,9 @@ function parsePlay(row: string[]): ParsedPlay {
     const alignment: Alignment = ALIGN_MAP[alignRaw] ?? "right";
     const alignValid = !!ALIGN_MAP[alignRaw];
     const on_line = col(2) === "" ? true : parseBool(col(2));
-    const play_notes = col(3) ?? "";
+    const play_notes = col(8) ?? "";
     const error = !alignValid ? `Unknown alignment "${col(1)}"` : undefined;
-    return { route_type: "other", alignment, on_line, targeted: false, success: null, yards: null, play_notes, no_route_run: true, valid: !error, raw, error };
+    return { route_type: "other", alignment, on_line, coverage: "", was_open: false, targeted: false, success: null, yards: null, play_notes, no_route_run: true, valid: !error, raw, error };
   }
 
   const route_type: RouteType = ROUTE_MAP[routeRaw] ?? "other";
@@ -78,19 +89,22 @@ function parsePlay(row: string[]): ParsedPlay {
   const alignValid = !!ALIGN_MAP[alignRaw];
 
   const on_line = col(2) === "" ? true : parseBool(col(2));
-  const targeted = col(3) === "" ? false : parseBool(col(3));
-  const successRaw = col(4);
+  const coverageRaw = col(3).toLowerCase();
+  const coverage: CoverageType = coverageRaw === "" ? "" : (COVERAGE_MAP[coverageRaw] ?? "");
+  const was_open = col(4) === "" ? false : parseBool(col(4));
+  const targeted = col(5) === "" ? false : parseBool(col(5));
+  const successRaw = col(6);
   const success = targeted ? (successRaw === "" ? null : parseBool(successRaw)) : null;
-  const yardsRaw = col(5);
+  const yardsRaw = col(7);
   const yards = yardsRaw && !isNaN(parseInt(yardsRaw, 10)) ? parseInt(yardsRaw, 10) : null;
-  const play_notes = col(6) ?? "";
+  const play_notes = col(8) ?? "";
 
   const error = !routeValid ? `Unknown route "${col(0)}"` : !alignValid ? `Unknown alignment "${col(1)}"` : undefined;
 
-  return { route_type, alignment, on_line, targeted, success, yards, play_notes, no_route_run: false, valid: !error, raw, error };
+  return { route_type, alignment, on_line, coverage, was_open, targeted, success, yards, play_notes, no_route_run: false, valid: !error, raw, error };
 }
 
-function parseInput(text: string): ParsedPlay[] {
+export function parseInput(text: string): ParsedPlay[] {
   const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
   const plays: ParsedPlay[] = [];
   for (const line of lines) {
@@ -104,12 +118,12 @@ function parseInput(text: string): ParsedPlay[] {
   return plays;
 }
 
-const EXAMPLE = `curl\tR\tY\tY\tY\t12
-nrr\tL\tY\t\t\t\tRun play aligned left
-dig\tS\tN\tN
-post\tL\tY\tY\tN
-nrr\tR\tN\t\t\t\tBlocking snap
-slant\tR\tY\tY\tY\t8\tGood separation`;
+const EXAMPLE = `curl\tR\tY\tM\tY\tY\tY\t12
+nrr\tL\tY\t\t\t\t\t\tRun play aligned left
+dig\tS\tN\tZ\tN\tN
+post\tL\tY\tP\tN\tY\tN
+nrr\tR\tN\t\t\t\t\t\tBlocking snap
+slant\tR\tY\tZ\tY\tY\tY\t8\tGood separation`;
 
 export default function BulkGameImport({ gameLabel, onImport, onCancel }: Props) {
   const [text, setText] = useState("");
@@ -164,9 +178,9 @@ export default function BulkGameImport({ gameLabel, onImport, onCancel }: Props)
         <div className="text-slate-400 font-medium mb-2">
           Column order — copy directly from your Google Sheet template:
         </div>
-        <div className="grid grid-cols-7 gap-1 mb-2 text-center">
-          {["Route", "Alignment", "On Line?", "Targeted?", "Success?", "Yards", "Notes"].map((h, i) => (
-            <div key={h} className={`px-1 py-0.5 rounded text-xs font-medium ${i < 4 ? "bg-blue-900/50 text-blue-300" : i === 4 ? "bg-emerald-900/50 text-emerald-300" : "bg-slate-800 text-slate-400"}`}>
+        <div className="grid grid-cols-9 gap-1 mb-2 text-center">
+          {["Route", "Alignment", "On Line?", "Coverage", "Open?", "Targeted?", "Success?", "Yards", "Notes"].map((h, i) => (
+            <div key={h} className={`px-1 py-0.5 rounded text-xs font-medium ${i < 3 ? "bg-blue-900/50 text-blue-300" : i < 5 ? "bg-purple-900/50 text-purple-300" : i === 5 ? "bg-amber-900/50 text-amber-300" : i === 6 ? "bg-emerald-900/50 text-emerald-300" : "bg-slate-800 text-slate-400"}`}>
               {h}
             </div>
           ))}
@@ -174,8 +188,10 @@ export default function BulkGameImport({ gameLabel, onImport, onCancel }: Props)
         <div className="text-slate-500 space-y-0.5">
           <div><span className="text-slate-300">Route:</span> curl, dig, post, corner, go, screen, slant, out, flat, comeback, other — or use <span className="text-amber-300 font-medium">nrr</span> / aligned / snap / run / block for alignment-only snaps (no route run)</div>
           <div><span className="text-slate-300">Alignment:</span> L / R / S / B (or Left / Right / Slot / Backfield)</div>
-          <div><span className="text-slate-300">Booleans:</span> Y or N &nbsp;·&nbsp; Leave Success blank if not targeted &nbsp;·&nbsp; For NRR rows columns 4–7 are ignored</div>
+          <div><span className="text-slate-300">Coverage:</span> M / Z / P / D (Man / Zone / Press / Double) — leave blank if unknown</div>
+          <div><span className="text-slate-300">Booleans:</span> Y or N &nbsp;·&nbsp; Leave Success blank if not targeted &nbsp;·&nbsp; Notes is always the last column, even on NRR rows (leave Coverage–Yards blank for those)</div>
         </div>
+        <div className="mt-2 text-amber-400/80">Coverage and Open feed the SAE/open-rate stats. A blank Open still saves as &ldquo;not open&rdquo; (the DB can&apos;t store &ldquo;unknown&rdquo;) and counts toward those numbers, so fill these two columns in from your chart before importing rather than leaving them blank.</div>
         <div className="mt-2 text-slate-600">Example (tab-separated, same as Google Sheets copy):</div>
         <pre className="mt-1 text-slate-500 font-mono text-xs overflow-x-auto whitespace-pre">{EXAMPLE}</pre>
       </div>
@@ -191,7 +207,7 @@ export default function BulkGameImport({ gameLabel, onImport, onCancel }: Props)
         <textarea
           rows={10}
           className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-white text-xs font-mono placeholder-slate-600 focus:outline-none focus:border-blue-500 resize-y"
-          placeholder={"Paste from Google Sheets (Ctrl+V)…\n\ncurl\tR\tY\tY\tY\t12\ndig\tS\tN\tN"}
+          placeholder={"Paste from Google Sheets (Ctrl+V)…\n\ncurl\tR\tY\tM\tY\tY\tY\t12\ndig\tS\tN\tZ\tN\tN"}
           value={text}
           onChange={(e) => handleChange(e.target.value)}
           onPaste={(e) => {
@@ -222,6 +238,8 @@ export default function BulkGameImport({ gameLabel, onImport, onCancel }: Props)
                   <th className="px-2 py-1 text-left">Route</th>
                   <th className="px-2 py-1 text-left">Align</th>
                   <th className="px-2 py-1 text-left">Line</th>
+                  <th className="px-2 py-1 text-left">Cvg</th>
+                  <th className="px-2 py-1 text-left">Open</th>
                   <th className="px-2 py-1 text-left">Tgt</th>
                   <th className="px-2 py-1 text-left">Result</th>
                   <th className="px-2 py-1 text-left">Yds</th>
@@ -240,6 +258,20 @@ export default function BulkGameImport({ gameLabel, onImport, onCancel }: Props)
                     </td>
                     <td className="px-2 py-1 text-slate-300 capitalize">{pl.alignment[0].toUpperCase()}</td>
                     <td className="px-2 py-1 text-slate-400">{pl.on_line ? "On" : "Off"}</td>
+                    <td className="px-2 py-1">
+                      {pl.no_route_run
+                        ? <span className="text-slate-600">—</span>
+                        : pl.coverage
+                          ? <span className="text-purple-300 capitalize">{pl.coverage}</span>
+                          : <span className="text-amber-500" title="No coverage charted">?</span>}
+                    </td>
+                    <td className="px-2 py-1">
+                      {pl.no_route_run
+                        ? <span className="text-slate-600">—</span>
+                        : pl.was_open
+                          ? <span className="text-emerald-400">Y</span>
+                          : <span className="text-slate-600">N</span>}
+                    </td>
                     <td className="px-2 py-1">{pl.targeted ? <span className="text-amber-400">Y</span> : <span className="text-slate-600">N</span>}</td>
                     <td className="px-2 py-1">
                       {pl.targeted

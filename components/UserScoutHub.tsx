@@ -275,7 +275,6 @@ export default function UserScoutHub({
                     <SimulatorTab
                       user={targetUser}
                       loadingLeagueWeeklyMatchups={false}
-                      onSaveSim={() => {}}
                     />
                   )}
                 </div>

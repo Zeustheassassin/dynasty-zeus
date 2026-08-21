@@ -47,7 +47,10 @@ export const classifyOppDirection = (
   const isHopeless   = playoffOdds < 30 || ["Stranded", "Fading Out", "Hopeless"].includes(adjustedBucket);
   const isRebuild    = !isHopeless && (playoffOdds < 50 || adjustedBucket === "Rebuilder");
   const isElite      = playoffOdds >= 78 || ["Elite", "True Contender"].includes(adjustedBucket);
-  const isContender  = !isElite && (playoffOdds >= 65 || adjustedBucket === "Almost There");
+  // "Almost There" and "Window Closing" both count as a buyer's bucket here — must match
+  // CONTENDER_BUCKETS above (the single source of truth) or an opponent can be a contender
+  // for some gates (userWindowOk, failsDirectionGuardrail) but not this one.
+  const isContender  = !isElite && (playoffOdds >= 65 || adjustedBucket === "Almost There" || adjustedBucket === "Window Closing");
   const isFading     = !isHopeless && !isRebuild && !isElite && !isContender
                        && (playoffOdds >= 50 || adjustedBucket === "Fading Contender");
   return {

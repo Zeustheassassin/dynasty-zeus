@@ -8,7 +8,7 @@
 -- default role privileges from EXISTING projects (this project
 -- included), so it is exactly the tables created before this
 -- policy was adopted (migrations 001–036) that are at risk, not
--- exempt from it. Full-codebase audit on 2026-08-21 found 33
+-- exempt from it. Full-codebase audit on 2026-08-21 found 35
 -- tables across migrations 001, 003, 006–010, 015–018, 023–025
 -- with zero GRANT statements. This migration is purely additive
 -- (GRANT only) — no DROP/ALTER/DELETE.
@@ -122,7 +122,7 @@ BEGIN
     ON CONFLICT (migration) DO NOTHING;
 
     INSERT INTO public.applied_migrations (migration, note)
-    VALUES ('050_retroactive_grants', 'GRANT remediation for 33 pre-037 tables missing explicit grants; corrects migration 037''s incorrect "grandfathered" comment')
+    VALUES ('050_retroactive_grants', 'GRANT remediation for 35 pre-037 tables missing explicit grants; corrects migration 037''s incorrect "grandfathered" comment')
     ON CONFLICT (migration) DO NOTHING;
   END IF;
 END $$;

@@ -849,8 +849,12 @@ export function runFinderPipeline(
           if (w === 0) continue;
           if (a.initiated_by === "THEM") {
             // Their own offer reveals appetite regardless of how I ended up responding to it.
-            for (const p of a.give_players)    theirSellWeight.set(p.player_id,  (theirSellWeight.get(p.player_id)  ?? 0) + w);
-            for (const p of a.receive_players) theirBuyWeight.set(p.player_id,   (theirBuyWeight.get(p.player_id)   ?? 0) + w);
+            // give_players/receive_players are always stored from MY perspective (even on a
+            // THEM-initiated row), so their assets — what they're willing to sell — is
+            // receive_players (what I'd receive), and what they're trying to buy is
+            // give_players (my assets, what I'd give up).
+            for (const p of a.receive_players) theirSellWeight.set(p.player_id,  (theirSellWeight.get(p.player_id)  ?? 0) + w);
+            for (const p of a.give_players)    theirBuyWeight.set(p.player_id,   (theirBuyWeight.get(p.player_id)   ?? 0) + w);
           } else if (a.status === "DECLINED" || a.status === "NO_RESPONSE") {
             // My offer, refused — a soft, decaying aversion to re-pitching the same players.
             const rw = w * (a.status === "DECLINED" ? 1 : 0.5);

@@ -164,10 +164,16 @@ export async function checkRateLimit(
   windowMs = 60_000,
   keyPrefix = ''
 ): Promise<RateLimitResult> {
-  const ip =
-    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-    req.headers.get('x-real-ip') ||
-    'unknown';
+  // x-forwarded-for is a comma-separated hop chain that each proxy APPENDS to
+  // (client, proxy1, proxy2, ...) — the first entry is whatever the original
+  // client claimed and is fully attacker-controlled (a client can send any
+  // fake/rotating value there to generate unlimited distinct rate-limit
+  // buckets). The last entry is the address the platform's own edge network
+  // saw the request arrive from, which a client cannot forge by setting
+  // headers, so it's the one to trust.
+  const xff = req.headers.get('x-forwarded-for');
+  const lastHop = xff?.split(',').map((s) => s.trim()).filter(Boolean).pop();
+  const ip = lastHop || req.headers.get('x-real-ip') || 'unknown';
 
   const upstashResult = await checkUpstash(ip, limit, windowMs, keyPrefix);
   if (upstashResult !== null) return upstashResult;

@@ -286,8 +286,8 @@ export default function LiveDraftBoard({
               My Slots (click to set)
             </span>
             <span className="flex items-center gap-1 italic text-slate-600">Italic gray = AI prediction</span>
-            <span className="text-orange-400 font-bold">REACH</span><span>&gt;8 ahead of ADP</span>
-            <span className="text-emerald-400 font-bold">VALUE</span><span>&gt;5 after ADP</span>
+            <span className="text-orange-400 font-bold">REACH</span><span>&gt;7 ahead of ADP</span>
+            <span className="text-emerald-400 font-bold">VALUE</span><span>&gt;4 after ADP</span>
           </div>
 
           {/* ── Positional Scarcity Tracker ── */}
@@ -368,7 +368,10 @@ export default function LiveDraftBoard({
                   : null;
                 const prediction = !actualPlayer && !userOverrideId ? predictedDraftPicks[slotStr] : null;
                 const overallPick = (round - 1) * rosters.length + (i + 1);
-                const isReach = userOverride && typeof userOverride.adp === "number" && overallPick < userOverride.adp - 8;
+                // Same ±7/+4 thresholds as the actual/predicted badges below (and
+                // HistoricalLeagueDrafts' snapshot grid) — kept in sync with the legend.
+                const isReach = userOverride && typeof userOverride.adp === "number" && overallPick < userOverride.adp - 7;
+                const isValue = userOverride && typeof userOverride.adp === "number" && overallPick > userOverride.adp + 4;
                 const predReach = isMySlot && prediction && (prediction.poolRank ?? 0) > 0 && overallPick < (prediction.poolRank ?? 999) - 7;
                 const predValue = isMySlot && prediction && (prediction.poolRank ?? 0) > 0 && overallPick > (prediction.poolRank ?? 0) + 4;
                 // Actual-pick REACH/VALUE: compare overall pick to that player's pool rank.
@@ -411,6 +414,7 @@ export default function LiveDraftBoard({
                     ) : userOverride ? (
                       <>
                         {isReach && <span className="absolute top-0.5 right-1 text-[8px] font-bold text-orange-400">REACH</span>}
+                        {isValue && <span className="absolute top-0.5 right-1 text-[8px] font-bold text-emerald-400">VALUE</span>}
                         <div className="text-center w-full text-white font-semibold whitespace-normal break-words leading-tight text-[10px]">{userOverride.name}</div>
                         <div className={`text-[9px] ${posColor[userOverride.position] || "text-slate-400"}`}>{userOverride.position}</div>
                         <div className="text-[9px] text-blue-300 truncate w-full text-center">{rosterToName[Number(pick.owner_id)] || "You"}</div>

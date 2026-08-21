@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeWindowScore, getAdjustedDirectionBucket } from "@/lib/helpers/direction/scoring";
+import { computeWindowScore, getAdjustedDirectionBucket, classifyOppDirection, CONTENDER_BUCKETS } from "@/lib/helpers/direction/scoring";
 
 describe("computeWindowScore", () => {
   it("returns 0 for null/undefined profile", () => {
@@ -126,5 +126,33 @@ describe("getAdjustedDirectionBucket", () => {
       false
     );
     expect(result).toBe("Purgatory");
+  });
+});
+
+describe("classifyOppDirection", () => {
+  it("every bucket in CONTENDER_BUCKETS classifies as a buyer regardless of playoff odds", () => {
+    // Regression test: classifyOppDirection used to hard-code its own Elite/Contender bucket
+    // lists that omitted "Window Closing", so it disagreed with CONTENDER_BUCKETS (the
+    // documented single source of truth used elsewhere for the exact same "is this opponent
+    // a buyer" question) for that one bucket specifically.
+    for (const bucket of CONTENDER_BUCKETS) {
+      const result = classifyOppDirection(bucket, 55); // below every odds-only threshold (65/78)
+      expect(result.isBuyer).toBe(true);
+      expect(result.isSeller).toBe(false);
+    }
+  });
+
+  it("Window Closing at moderate odds classifies as a contender buyer, not a fader", () => {
+    const result = classifyOppDirection("Window Closing", 55);
+    expect(result.isContender).toBe(true);
+    expect(result.isElite).toBe(false);
+    expect(result.isBuyer).toBe(true);
+    expect(result.isFading).toBe(false);
+  });
+
+  it("Window Closing still yields isHopeless/isRebuild when odds are low enough to override the bucket", () => {
+    const result = classifyOppDirection("Window Closing", 20);
+    expect(result.isHopeless).toBe(true);
+    expect(result.isBuyer).toBe(false);
   });
 });

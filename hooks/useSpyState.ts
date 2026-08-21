@@ -288,9 +288,18 @@ export function useSpyState({
     return () => { cancelled = true; };
   }, []);
 
+  // Guards against a stale lookup's result landing after a newer lookup (or a
+  // Clear) has already moved on — without it, a slow in-flight lookup's
+  // .then callbacks fire unconditionally and silently repopulate the UI with
+  // the very data the user just tried to clear. Mirrors useLeagueOverview's
+  // overviewSeq pattern; reset() also bumps this to invalidate any in-flight
+  // lookup when the user hits Clear.
+  const lookupSeq = useRef(0);
+
   const lookup = useCallback(async (rawName: string) => {
     const name = rawName.trim();
     if (!name) return;
+    const seq = ++lookupSeq.current;
     setLookupLoading(true);
     setLookupError("");
     setSelectedSpyLeague(null);
@@ -299,6 +308,7 @@ export function useSpyState({
     setSimProgress(null);
     try {
       const resolved = await sleeperApi.getUserByUsername(name);
+      if (seq !== lookupSeq.current) return; // a newer lookup or a Clear happened — discard
       if (!resolved?.user_id) {
         setTargetUser(null);
         setTargetLeagues([]);
@@ -306,6 +316,7 @@ export function useSpyState({
         return;
       }
       const leaguesData = await sleeperApi.getUserLeagues(resolved.user_id, CURRENT_YEAR);
+      if (seq !== lookupSeq.current) return; // discard — same as above
       const dynasty = (Array.isArray(leaguesData) ? leaguesData : []).filter(isDynastyLeague);
       setTargetUser(resolved);
       setTargetLeagues(dynasty);
@@ -313,10 +324,11 @@ export function useSpyState({
         setLookupError(`${resolved.display_name || name} has no dynasty leagues for ${CURRENT_YEAR}.`);
       }
     } catch (err) {
+      if (seq !== lookupSeq.current) return; // don't surface an error for an abandoned lookup
       log.error("spy lookup failed", { err: String(err) });
       setLookupError("Lookup failed — try again.");
     } finally {
-      setLookupLoading(false);
+      if (seq === lookupSeq.current) setLookupLoading(false);
     }
   }, []);
 
@@ -482,6 +494,7 @@ export function useSpyState({
   }, [targetUser, targetLeagues, simRunning, players, buildBundle]);
 
   const reset = useCallback(() => {
+    lookupSeq.current++; // invalidate any lookup still in flight
     setUsername("");
     setLookupError("");
     setTargetUser(null);

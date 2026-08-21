@@ -14,7 +14,10 @@ import { Card } from "../ui/Card";
 interface SimulatorTabProps {
   user: SleeperUser | null;
   loadingLeagueWeeklyMatchups: boolean;
-  onSaveSim: (leagueId: string, rows: SimulationTeamRow[]) => void;
+  // Optional so read-only views (User Scout's spy mode) can omit it entirely
+  // rather than passing a no-op — omitting it is what keeps the button from
+  // showing a false "✓ Saved" confirmation for a save that never happened.
+  onSaveSim?: (leagueId: string, rows: SimulationTeamRow[]) => void;
 }
 
 function SimulatorTab({
@@ -93,6 +96,7 @@ function SimulatorTab({
             </div>
             <button
               onClick={() => {
+                if (!onSaveSim) return;
                 onSaveSim(selectedLeague.league_id, selectedLeagueSimulation.rows);
                 setSimSavedAt(Date.now());
               }}

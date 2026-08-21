@@ -55,11 +55,17 @@ export const rebalanceLineupForKickoffWindows = (
     const lockedIndexes = nextLineup
       .map((row, index) => ({ row, index }))
       .filter(({ row }) => row.slot === lockedSlot && row.player?.player_id);
-    const flexIndexes = nextLineup
-      .map((row, index) => ({ row, index }))
-      .filter(({ row }) => row.slot === flexSlot && row.player?.player_id);
 
     lockedIndexes.forEach(({ row: lockedRow, index: lockedIndex }) => {
+      // Recomputed fresh on every locked slot, not hoisted above the loop:
+      // each swap below changes who currently occupies the FLEX slots, so a
+      // stale snapshot would keep re-selecting (and re-clobbering) the same
+      // candidate for every locked slot of this position instead of moving
+      // on to the next-best one.
+      const flexIndexes = nextLineup
+        .map((row, index) => ({ row, index }))
+        .filter(({ row }) => row.slot === flexSlot && row.player?.player_id);
+
       const swapCandidate = flexIndexes
         .filter(({ row }) => row.player?.position === lockedSlot)
         .sort((a, b) => getKickoffSortValue(a.row) - getKickoffSortValue(b.row))[0];

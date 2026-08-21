@@ -927,7 +927,9 @@ describe("runFinderPipeline — decline memory", () => {
   it("only ME-initiated refusals penalize: a THEM DECLINED attempt keeps its +11 sell signal", () => {
     // They offered me SHOPPED and I declined — that is still a willing seller, NOT my refusal. The
     // branch must route THEM attempts to theirSell (+11), so SHOPPED ranks ABOVE fresh, never below.
-    const themDeclined = mkAttempt({ initiated_by: "THEM", status: "DECLINED", give_players: [{ player_id: "SHOPPED" }] });
+    // give_players/receive_players are always stored from MY perspective (even on a THEM row),
+    // so "they offered me SHOPPED" is receive_players, not give_players.
+    const themDeclined = mkAttempt({ initiated_by: "THEM", status: "DECLINED", receive_players: [{ player_id: "SHOPPED" }] });
     const { allTrades } = runFinderPipeline(
       [recvTrade("g1", "FRESH"), recvTrade("g2", "SHOPPED")],
       baseCtx({ tradeAttempts: [themDeclined] }),

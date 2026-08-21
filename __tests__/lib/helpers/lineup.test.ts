@@ -170,4 +170,32 @@ describe("rebalanceLineupForKickoffWindows", () => {
     const result = rebalanceLineupForKickoffWindows(lineup, true);
     expect(result).not.toBe(lineup);
   });
+
+  it("with 2 locked RB slots and 2 FLEX RBs, assigns the earliest FLEX kickoff to each locked slot without duplicating or dropping a player", () => {
+    // Regression test: flexIndexes used to be computed once before the
+    // lockedIndexes loop, so every locked slot re-selected the SAME
+    // earliest-kickoff FLEX candidate instead of the next-best one —
+    // duplicating that player into two slots and silently dropping another.
+    const rb1  = makeRow("RB", "RB", 1300, "rb1-late-ish");   // 1:00pm
+    const rb2  = makeRow("RB", "RB", 1600, "rb2-latest");     // 4:00pm
+    const flex1 = makeRow("FLEX", "RB", 900,  "flex1-earliest");  // 9:00am
+    const flex2 = makeRow("FLEX", "RB", 1000, "flex2-early");     // 10:00am
+
+    const result = rebalanceLineupForKickoffWindows([rb1, rb2, flex1, flex2], true);
+
+    // Every original player must still appear exactly once.
+    const ids = result.map((r) => r.player?.player_id).sort();
+    expect(ids).toEqual(["flex1-earliest", "flex2-early", "rb1-late-ish", "rb2-latest"].sort());
+
+    const bySlot = (slot: string) => result.filter((r) => r.slot === slot).map((r) => r.player?.player_id);
+    // The earliest FLEX RB (flex1) fills the first locked RB slot...
+    expect(bySlot("RB")).toContain("flex1-earliest");
+    // ...and the next-earliest (flex2) fills the SECOND locked RB slot,
+    // not a repeat of flex1.
+    expect(bySlot("RB")).toContain("flex2-early");
+    expect(bySlot("RB")).not.toContain("rb1-late-ish");
+    expect(bySlot("RB")).not.toContain("rb2-latest");
+    // The two bumped locked players land in the vacated FLEX slots.
+    expect(bySlot("FLEX").sort()).toEqual(["rb1-late-ish", "rb2-latest"].sort());
+  });
 });

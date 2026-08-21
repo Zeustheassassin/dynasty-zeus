@@ -216,8 +216,11 @@ export default function TradeCard({
         (a) => a.league_id === leagueId && Number(a.partner_roster_id) === Number(trade.oppRosterId)
       );
       if (oppPastAttempts.length > 0) {
-        const theirSellIds = new Set(oppPastAttempts.filter(a => a.initiated_by === "THEM").flatMap(a => a.give_players.map(p => p.player_id)));
-        const theirBuyIds  = new Set(oppPastAttempts.filter(a => a.initiated_by === "THEM").flatMap(a => a.receive_players.map(p => p.player_id)));
+        // give_players/receive_players are always stored from MY perspective (even on a
+        // THEM-initiated row) — their assets (what they'd sell) is receive_players, and
+        // what they're trying to buy is give_players (my assets).
+        const theirSellIds = new Set(oppPastAttempts.filter(a => a.initiated_by === "THEM").flatMap(a => a.receive_players.map(p => p.player_id)));
+        const theirBuyIds  = new Set(oppPastAttempts.filter(a => a.initiated_by === "THEM").flatMap(a => a.give_players.map(p => p.player_id)));
         const myShopIds    = new Set(oppPastAttempts.filter(a => a.initiated_by === "ME").flatMap(a => a.give_players.map(p => p.player_id)));
         const myTargetIds  = new Set(oppPastAttempts.filter(a => a.initiated_by === "ME").flatMap(a => a.receive_players.map(p => p.player_id)));
         const receiveMatchesSell   = inc.filter((p) => theirSellIds.has(p.player_id));

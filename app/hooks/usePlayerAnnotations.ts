@@ -4,6 +4,7 @@ import type { User as SupabaseUser } from "@supabase/auth-js";
 import { supabase } from "../../lib/supabaseclient";
 import { logger } from "../../lib/logger";
 import { getLocalStorageItem, setLocalStorageItem } from "@/lib/hooks/useLocalStorage";
+import { useDebouncedKeyedEffect } from "@/lib/hooks/useDebouncedKeyedEffect";
 import { addDays, TRADE_DISCARD_DAYS } from "@/lib/helpers/dispositions";
 import type { AssetDisposition, LeagueAssetDispositions, LeagueExpiringBlocks } from "@/lib/types";
 
@@ -36,6 +37,10 @@ export function usePlayerAnnotations(supabaseUser: SupabaseUser | null) {
   const supabaseUserRef = useRef<SupabaseUser | null>(null);
   useEffect(() => { supabaseUserRef.current = supabaseUser; }, [supabaseUser]);
 
+  // Debounces the Supabase write for text fields that save on every keystroke
+  // (league notes, player notes) so only the latest value per key is ever sent.
+  const scheduleWrite = useDebouncedKeyedEffect();
+
   const toggleIgnoredOwner = useCallback((ownerId: string) => {
     setIgnoredOwnerIds(prev => {
       const next = prev.includes(ownerId) ? prev.filter(id => id !== ownerId) : [...prev, ownerId];
@@ -44,7 +49,7 @@ export function usePlayerAnnotations(supabaseUser: SupabaseUser | null) {
     });
   }, []);
 
-  const saveLeagueNote = useCallback(async (leagueId: string, text: string) => {
+  const saveLeagueNote = useCallback((leagueId: string, text: string) => {
     setLeagueNotes(prev => {
       const updated = { ...prev, [leagueId]: text };
       setLocalStorageItem("leagueNotes", updated);
@@ -52,18 +57,20 @@ export function usePlayerAnnotations(supabaseUser: SupabaseUser | null) {
     });
     const sbUser = supabaseUserRef.current;
     if (sbUser) {
-      try {
-        await supabase.from("league_notes").upsert(
+      // Debounced by (user, league) so rapid typing collapses to one write of
+      // the final text instead of one upsert per keystroke racing on the network.
+      scheduleWrite(`league_notes:${sbUser.id}:${leagueId}`, () => {
+        supabase.from("league_notes").upsert(
           { user_id: sbUser.id, league_id: leagueId, content: text, updated_at: new Date().toISOString() },
           { onConflict: "user_id,league_id" }
-        );
-      } catch (err: unknown) {
-        log.error("league_notes upsert failed", { err: String(err) });
-      }
+        ).then(({ error }) => {
+          if (error) log.error("league_notes upsert failed", { err: error.message });
+        });
+      });
     }
-  }, []);
+  }, [scheduleWrite]);
 
-  const savePlayerNote = useCallback(async (playerId: string, note: string) => {
+  const savePlayerNote = useCallback((playerId: string, note: string) => {
     setPlayerNotes((prev) => {
       const updated = { ...prev, [playerId]: note };
       setLocalStorageItem("playerNotes_v1", updated);
@@ -71,12 +78,17 @@ export function usePlayerAnnotations(supabaseUser: SupabaseUser | null) {
     });
     const sbUser = supabaseUserRef.current;
     if (sbUser) {
-      supabase.from("player_notes").upsert(
-        { user_id: sbUser.id, player_id: playerId, note, updated_at: new Date().toISOString() },
-        { onConflict: "user_id,player_id" }
-      ).then(() => {}, (err: unknown) => log.error("player_notes upsert failed", { err: String(err) }));
+      // Debounced by (user, player) — same rationale as saveLeagueNote above.
+      scheduleWrite(`player_notes:${sbUser.id}:${playerId}`, () => {
+        supabase.from("player_notes").upsert(
+          { user_id: sbUser.id, player_id: playerId, note, updated_at: new Date().toISOString() },
+          { onConflict: "user_id,player_id" }
+        ).then(({ error }) => {
+          if (error) log.error("player_notes upsert failed", { err: error.message });
+        });
+      });
     }
-  }, []); // reads supabaseUser via ref; uses functional setState — no deps needed
+  }, [scheduleWrite]);
 
   // Sets (or clears, when disposition is null) a per-league disposition for a player_id
   // or pick key (finderPickKey format). Clicking the already-active option in a picker
