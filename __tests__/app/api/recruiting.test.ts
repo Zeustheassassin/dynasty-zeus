@@ -16,8 +16,10 @@ vi.mock("@/lib/recruiting/cfd", async () => {
   return { ...actual, fetchCfdRecruits: h.fetchCfdRecruits };
 });
 
-// recruits_meta.last_refreshed_at the mocked DB currently holds for the requested year.
-let existingLastRefreshedAt: string | null = null;
+// recruits_meta row the mocked DB currently holds for the requested year —
+// a mutable stand-in so the atomic claim's update()/insert() calls actually
+// take effect, the same way a real UPDATE ... WHERE / INSERT would.
+let metaRow: { last_refreshed_at: string } | null = null;
 let deleteError: { message: string } | null = null;
 let insertError: { message: string } | null = null;
 let upsertError: { message: string } | null = null;
@@ -31,14 +33,37 @@ function makeFrom(table: string) {
         eq: () => ({
           maybeSingle: () =>
             Promise.resolve({
-              data: existingLastRefreshedAt != null ? { last_refreshed_at: existingLastRefreshedAt } : null,
+              data: metaRow ? { ...metaRow } : null,
               error: null,
             }),
         }),
       }),
-      upsert: (row: unknown) => ({
+      update: (patch: { last_refreshed_at: string }) => ({
+        eq: () => ({
+          lt: (_col: string, threshold: string) => ({
+            select: () => {
+              if (metaRow && metaRow.last_refreshed_at < threshold) {
+                metaRow = { ...metaRow, ...patch };
+                return Promise.resolve({ data: [{ last_refreshed_at: metaRow.last_refreshed_at }], error: null });
+              }
+              return Promise.resolve({ data: [], error: null });
+            },
+          }),
+        }),
+      }),
+      insert: (row: { last_refreshed_at: string }) => {
+        if (metaRow) {
+          return Promise.resolve({ error: { message: "duplicate key value violates unique constraint" } });
+        }
+        metaRow = { last_refreshed_at: row.last_refreshed_at };
+        return Promise.resolve({ error: null });
+      },
+      upsert: (row: { last_refreshed_at: string }) => ({
         select: () => ({
-          single: () => Promise.resolve({ data: row, error: upsertError }),
+          single: () => {
+            metaRow = { last_refreshed_at: row.last_refreshed_at };
+            return Promise.resolve({ data: row, error: upsertError });
+          },
         }),
       }),
     };
@@ -90,7 +115,7 @@ beforeEach(() => {
   h.fetchCfdRecruits.mockResolvedValue([
     { id: 1, year: 2026, ranking: 1, name: "Prospect One", school: null, committedTo: null, position: "QB", height: null, weight: null, stars: 5, rating: 0.99, city: null, stateProvince: null, country: null },
   ] as never);
-  existingLastRefreshedAt = null;
+  metaRow = null;
   deleteError = null;
   insertError = null;
   upsertError = null;
@@ -112,7 +137,7 @@ describe("POST /api/recruiting/[year] — cooldown protects the shared CFD quota
   });
 
   it("rejects a refresh with 429 RECRUITING_COOLDOWN when the year was refreshed seconds ago — and never calls CFD", async () => {
-    existingLastRefreshedAt = new Date(Date.now() - 5_000).toISOString(); // 5s ago
+    metaRow = { last_refreshed_at: new Date(Date.now() - 5_000).toISOString() }; // 5s ago
     const { POST } = await loadRoute();
     const res = await POST(makeReq() as never, ctx);
     expect(res.status).toBe(429);
@@ -125,7 +150,7 @@ describe("POST /api/recruiting/[year] — cooldown protects the shared CFD quota
   });
 
   it("allows a refresh again once the cooldown window has fully elapsed", async () => {
-    existingLastRefreshedAt = new Date(Date.now() - 61 * 60_000).toISOString(); // 61 min ago
+    metaRow = { last_refreshed_at: new Date(Date.now() - 61 * 60_000).toISOString() }; // 61 min ago
     const { POST } = await loadRoute();
     const res = await POST(makeReq() as never, ctx);
     expect(res.status).toBe(200);

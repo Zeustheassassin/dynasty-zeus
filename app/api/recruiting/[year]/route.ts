@@ -92,47 +92,95 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ year: stri
 
   const supabase = getAuthedClient(accessToken);
 
-  // Cooldown check — BEFORE spending a CFD call — so a burst of clicks/tabs
+  // Cooldown claim — BEFORE spending a CFD call — so a burst of clicks/tabs
   // across any number of users can't exhaust the shared monthly quota.
-  const { data: existingMeta } = await supabase
+  // This must be atomic: a plain read-then-write cooldown check lets two
+  // concurrent requests both read the same stale last_refreshed_at and both
+  // pass, each spending a CFD call. Instead we atomically UPDATE (only
+  // matching a row that's actually out of cooldown) or, if no row exists
+  // yet for this year, atomically INSERT — a unique-constraint failure on
+  // that insert means a concurrent request just created it first, so we
+  // lost the race too. Only one concurrent caller can win either branch.
+  const cooldownThresholdIso = new Date(Date.now() - RECRUITING_REFRESH_COOLDOWN_MS).toISOString();
+  const claimedAtIso = new Date().toISOString();
+
+  const { data: priorMeta } = await supabase
     .from("recruits_meta")
     .select("last_refreshed_at")
     .eq("year", year)
     .maybeSingle();
-  if (existingMeta?.last_refreshed_at) {
-    const elapsedMs = Date.now() - new Date(existingMeta.last_refreshed_at as string).getTime();
-    if (elapsedMs < RECRUITING_REFRESH_COOLDOWN_MS) {
-      const retryAfterSec = Math.ceil((RECRUITING_REFRESH_COOLDOWN_MS - elapsedMs) / 1000);
-      return NextResponse.json(
-        { error: `${year} was already refreshed recently — try again in ${Math.ceil(retryAfterSec / 60)} min.`, code: "RECRUITING_COOLDOWN" },
-        { status: 429, headers: { "Retry-After": String(retryAfterSec) } }
-      );
-    }
+
+  let wonClaim: boolean;
+  let createdNewRow = false;
+
+  if (priorMeta) {
+    const { data: updatedRows, error: updateErr } = await supabase
+      .from("recruits_meta")
+      .update({ last_refreshed_at: claimedAtIso })
+      .eq("year", year)
+      .lt("last_refreshed_at", cooldownThresholdIso)
+      .select("last_refreshed_at");
+    if (updateErr) return apiError(updateErr.message, 500, "DB_ERROR");
+    wonClaim = Array.isArray(updatedRows) && updatedRows.length > 0;
+  } else {
+    const { error: insertErr } = await supabase
+      .from("recruits_meta")
+      .insert({ year, last_refreshed_at: claimedAtIso, total_records: 0 });
+    wonClaim = !insertErr;
+    createdNewRow = wonClaim;
   }
+
+  if (!wonClaim) {
+    const elapsedMs = priorMeta?.last_refreshed_at
+      ? Date.now() - new Date(priorMeta.last_refreshed_at as string).getTime()
+      : 0;
+    const retryAfterSec = Math.max(1, Math.ceil((RECRUITING_REFRESH_COOLDOWN_MS - elapsedMs) / 1000));
+    return NextResponse.json(
+      { error: `${year} was already refreshed recently — try again in ${Math.ceil(retryAfterSec / 60)} min.`, code: "RECRUITING_COOLDOWN" },
+      { status: 429, headers: { "Retry-After": String(retryAfterSec) } }
+    );
+  }
+
+  // We won the claim — if the refresh itself fails before any data is
+  // actually replaced, roll the claim back so the year isn't wrongly
+  // locked out of retries for a full hour.
+  const releaseClaim = async () => {
+    if (createdNewRow) {
+      await supabase.from("recruits_meta").delete().eq("year", year);
+    } else if (priorMeta) {
+      await supabase.from("recruits_meta").update({ last_refreshed_at: priorMeta.last_refreshed_at }).eq("year", year);
+    }
+  };
 
   // 1. Fetch from CFD
   let cfdRecruits;
   try {
     cfdRecruits = await fetchCfdRecruits(year, cfdKey);
   } catch (err) {
+    await releaseClaim();
     return apiError(err instanceof Error ? err.message : "CFD fetch failed", 502, "CFD_ERROR");
   }
 
   // 2. Normalize → row shape (drop entries missing id or name)
   const rows: RecruitRow[] = cfdRecruits.map(toRecruitRow).filter((r): r is RecruitRow => r !== null);
   if (rows.length === 0) {
+    await releaseClaim();
     return apiError("CFD returned 0 valid records for this year", 502, "CFD_EMPTY");
   }
 
   // 3. Replace this year's cache (delete + insert in batches under one auth context)
   const { error: deleteErr } = await supabase.from("recruits").delete().eq("year", year);
-  if (deleteErr) return apiError(`Failed to clear ${year} cache: ${deleteErr.message}`, 500, "DB_ERROR");
+  if (deleteErr) {
+    await releaseClaim();
+    return apiError(`Failed to clear ${year} cache: ${deleteErr.message}`, 500, "DB_ERROR");
+  }
 
   // Supabase has a payload size ceiling — batch in 500-row chunks
   for (let i = 0; i < rows.length; i += 500) {
     const batch = rows.slice(i, i + 500);
     const { error: insertErr } = await supabase.from("recruits").insert(batch);
     if (insertErr) {
+      await releaseClaim();
       return apiError(`Insert failed at batch ${i}: ${insertErr.message}`, 500, "DB_ERROR");
     }
   }

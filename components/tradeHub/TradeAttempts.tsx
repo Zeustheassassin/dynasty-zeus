@@ -128,7 +128,7 @@ function TradeAttempts({
         </button>
       )}
 
-      {!loadingTradeAttempts && tradeAttemptsLeagueId === selectedLeague.league_id && leagueAttempts.length === 0 && (
+      {!loadingTradeAttempts && !tradeAttemptsError && tradeAttemptsLeagueId === selectedLeague.league_id && leagueAttempts.length === 0 && (
         <p className="text-sm text-slate-400">No attempted trades recorded for {selectedLeague.name} yet. Use &quot;Mark Attempted&quot; on any trade card in the Finder or Calculator.</p>
       )}
 

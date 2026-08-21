@@ -113,8 +113,11 @@ export async function POST(req: NextRequest): Promise<Response> {
     return apiError("No linked Sleeper account", 403, "NO_SLEEPER_LINK");
   }
 
-  const rosters = await safeFetch<Array<{ owner_id?: string }>>(`${SLEEPER_BASE_URL}/league/${leagueId}/rosters`);
-  const isMember = Array.isArray(rosters) && rosters.some((r) => String(r.owner_id) === String(link.sleeper_user_id));
+  const rosters = await safeFetch<Array<{ owner_id?: string; co_owners?: string[] | null }>>(`${SLEEPER_BASE_URL}/league/${leagueId}/rosters`);
+  const isMember = Array.isArray(rosters) && rosters.some((r) =>
+    String(r.owner_id) === String(link.sleeper_user_id) ||
+    (r.co_owners ?? []).some((id) => String(id) === String(link.sleeper_user_id))
+  );
   if (!isMember) {
     return apiError("You are not a member of this league", 403, "LEAGUE_ACCESS_DENIED");
   }

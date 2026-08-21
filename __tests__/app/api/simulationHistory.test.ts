@@ -196,6 +196,17 @@ describe("POST /api/simulation-history", () => {
     expect(upserts).toHaveLength(1);
   });
 
+  it("allows the write when the caller is only a co-owner of a roster, not its primary owner", async () => {
+    h.safeFetch.mockResolvedValue([
+      { owner_id: "someone-else", co_owners: null },
+      { owner_id: "another-owner", co_owners: ["sleeper-1"] },
+    ]);
+    const POST = await loadPOST();
+    const res = await POST(makeReq(validBody));
+    expect(res.status).toBe(200);
+    expect(upserts).toHaveLength(1);
+  });
+
   it("upserts with the same onConflict key the cron uses, keyed by league/roster/season/week", async () => {
     const POST = await loadPOST();
     const res = await POST(makeReq(validBody));
