@@ -24,7 +24,9 @@ function InjuryTab({ injuryReportPlayers, currentNFLWeek, expandedInjuryId, setE
             const byeWeeksOut = currentNFLWeek && byeWeek ? byeWeek - currentNFLWeek : null;
             const showBye = byeWeeksOut === 1 || byeWeeksOut === 2;
             const isExpanded = expandedInjuryId === playerId;
-            const benchLeagues = leagues.filter((l) => !startingLeagues.includes(l) && !irLeagues.includes(l));
+            const benchLeagues = leagues.filter(
+              (l) => !startingLeagues.some((s) => s.id === l.id) && !irLeagues.some((s) => s.id === l.id)
+            );
 
             return (
               <div key={playerId} className="rounded-2xl border border-slate-800 overflow-hidden">
@@ -87,12 +89,12 @@ function InjuryTab({ injuryReportPlayers, currentNFLWeek, expandedInjuryId, setE
                               In starting lineup
                             </div>
                             <div className="flex flex-wrap gap-1.5">
-                              {startingLeagues.map((name) => (
+                              {startingLeagues.map((l) => (
                                 <span
-                                  key={name}
+                                  key={l.id}
                                   className="text-xs border border-emerald-800/60 bg-emerald-950/40 text-emerald-300 px-2.5 py-1 rounded-xl"
                                 >
-                                  {name}
+                                  {l.name}
                                 </span>
                               ))}
                             </div>
@@ -104,12 +106,12 @@ function InjuryTab({ injuryReportPlayers, currentNFLWeek, expandedInjuryId, setE
                               On bench
                             </div>
                             <div className="flex flex-wrap gap-1.5">
-                              {benchLeagues.map((name) => (
+                              {benchLeagues.map((l) => (
                                 <span
-                                  key={name}
+                                  key={l.id}
                                   className="text-xs border border-slate-700 bg-slate-800/40 text-slate-400 px-2.5 py-1 rounded-xl"
                                 >
-                                  {name}
+                                  {l.name}
                                 </span>
                               ))}
                             </div>
@@ -121,12 +123,12 @@ function InjuryTab({ injuryReportPlayers, currentNFLWeek, expandedInjuryId, setE
                               On IR
                             </div>
                             <div className="flex flex-wrap gap-1.5">
-                              {irLeagues.map((name) => (
+                              {irLeagues.map((l) => (
                                 <span
-                                  key={name}
+                                  key={l.id}
                                   className="text-xs border border-red-800/60 bg-red-950/40 text-red-300 px-2.5 py-1 rounded-xl"
                                 >
-                                  {name}
+                                  {l.name}
                                 </span>
                               ))}
                             </div>

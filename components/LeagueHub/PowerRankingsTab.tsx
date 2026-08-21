@@ -189,7 +189,12 @@ function RankPill({ r, rosterId, col, teamCount, setPrPopup }: {
   setPrPopup: (popup: { rosterId: number; col: PrColKey } | null) => void;
 }) {
   const top3rd = Math.ceil(teamCount / 3);
-  const bot3rd = teamCount - Math.floor(teamCount / 3) + 1;
+  // Math.max(1, ...) guarantees the bottom bucket has at least one team even
+  // when floor(teamCount/3) rounds to 0 (teamCount <= 3) — without it, last
+  // place in a 1-2 team league could never reach the red threshold and
+  // rendered as neutral instead. No effect once teamCount >= 4, where
+  // floor(teamCount/3) is already >= 1.
+  const bot3rd = teamCount - Math.max(1, Math.floor(teamCount / 3)) + 1;
   const color = r <= top3rd
     ? "bg-emerald-900/40 text-emerald-400 border-emerald-700"
     : r >= bot3rd

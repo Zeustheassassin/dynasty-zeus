@@ -108,7 +108,11 @@ export default function TxCard({ tx, players }: { tx: LeagueTransaction; players
   }
 
   const rosterId = tx.roster_ids?.[0];
-  const ownerName = rosterOwnerMap[rosterId] ?? `Team ${rosterId ?? "?"}`;
+  // Only index rosterOwnerMap once rosterId is known to be defined — relying
+  // on rosterOwnerMap[undefined] returning undefined at runtime works today
+  // but isn't a guarantee, and the fallback text needs rosterId's presence
+  // checked either way.
+  const ownerName = (rosterId != null ? rosterOwnerMap[rosterId] : undefined) ?? `Team ${rosterId ?? "?"}`;
 
   return (
     <div className={`rounded-2xl border p-4 ${cardCls}`}>

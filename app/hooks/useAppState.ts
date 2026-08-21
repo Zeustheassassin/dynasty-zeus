@@ -49,6 +49,7 @@ import { useSimulatorState } from "./useSimulatorState";
 import { fetchSleeperUser } from "../../lib/sleeperUserCache";
 import { sleeperApi } from "../../lib/sleeperApi";
 import { getLocalStorageItem, setLocalStorageItem, removeLocalStorageItem, removeLocalStorageItemsByPrefix } from "@/lib/hooks/useLocalStorage";
+import type { LeagueRef } from "../../components/AlertsPage/alertsPageHelpers";
 import type {
   AlertsCenterItem,
   SleeperPlayer, SleeperLeague, SleeperRoster, SleeperTradedPick,
@@ -75,7 +76,7 @@ let _playersInMemory: Record<string, SleeperPlayer> | null = null;
 
 // â”€â”€ Page-local interfaces (shapes that don't warrant a lib/types entry) â”€â”€â”€â”€â”€â”€
 // AugmentedPick, AnnotatedTransaction, StandingRow are exported from lib/types.ts
-interface OwnedPlayerEntry { player_id: string; player?: SleeperPlayer; leagues: string[]; shareCount: number; }
+interface OwnedPlayerEntry { player_id: string; player?: SleeperPlayer; leagues: LeagueRef[]; shareCount: number; }
 interface AllLeagueDataEntry { leagueId?: string; leagueName?: string; roster: import("../../lib/types").SleeperRoster | null; }
 interface PlayerSnapshot { full_name: string; status: string; team: string; value: number; active: boolean; shareCount: number; }
 
@@ -163,7 +164,7 @@ const {
   loadUserTrades,
 } = useUserTrades();
 const {
-  tradeAttempts, tradeAttemptsLeagueId, loadingTradeAttempts, allTradeAttempts,
+  tradeAttempts, tradeAttemptsLeagueId, loadingTradeAttempts, tradeAttemptsError, allTradeAttempts,
   loadTradeAttempts, markTradeAttempted, updateAttemptStatus, deleteAttempt,
 } = useTradeAttempts(supabaseUser);
 const { leagueMateTradeIntel } = useLeagueMateIntel(selectedLeague, rosters, players);
@@ -2343,8 +2344,11 @@ const saveSnapshotNow = async () => {
         };
         existing.player = player;
         existing.shareCount += 1;
-        if (entry?.leagueName && !existing.leagues.includes(entry.leagueName)) {
-          existing.leagues.push(entry.leagueName);
+        // Dedupe by league id, not name — two distinct leagues can share a
+        // display name, and deduping by name would silently merge them.
+        const leagueId = entry?.leagueId;
+        if (leagueId && entry?.leagueName && !existing.leagues.some((l) => l.id === leagueId)) {
+          existing.leagues.push({ id: leagueId, name: entry.leagueName });
         }
         map.set(String(playerId), existing);
       });
@@ -2359,30 +2363,33 @@ const saveSnapshotNow = async () => {
 
   // Injury report: all owned + watchlisted players, sorted worst status first
   const injuryReportPlayers = useMemo(() => {
-    // Build starting lineup map: playerId -> league names where they're a starter
-    const startingMap = new Map<string, string[]>();
-    const irMap = new Map<string, string[]>();
+    // Build starting lineup map: playerId -> leagues (id+name) where they're a starter.
+    // Deduped by league id — two distinct leagues can share a display name, and
+    // deduping by name would silently merge one league's starter status onto another.
+    const startingMap = new Map<string, LeagueRef[]>();
+    const irMap = new Map<string, LeagueRef[]>();
     allLeagueData.forEach((entry) => {
+      const leagueId = entry?.leagueId;
       (entry?.roster?.starters || []).forEach((playerId: string) => {
         if (!playerId || playerId === "0") return;
         const existing = startingMap.get(String(playerId)) || [];
-        if (entry?.leagueName && !existing.includes(entry.leagueName)) {
-          existing.push(entry.leagueName);
+        if (leagueId && entry?.leagueName && !existing.some((l) => l.id === leagueId)) {
+          existing.push({ id: leagueId, name: entry.leagueName });
         }
         startingMap.set(String(playerId), existing);
       });
       (entry?.roster?.reserve || []).forEach((playerId: string) => {
         if (!playerId || playerId === "0") return;
         const existing = irMap.get(String(playerId)) || [];
-        if (entry?.leagueName && !existing.includes(entry.leagueName)) {
-          existing.push(entry.leagueName);
+        if (leagueId && entry?.leagueName && !existing.some((l) => l.id === leagueId)) {
+          existing.push({ id: leagueId, name: entry.leagueName });
         }
         irMap.set(String(playerId), existing);
       });
     });
 
     const seen = new Set<string>();
-    const result: Array<{ player: SleeperPlayer; playerId: string; leagues: string[]; startingLeagues: string[]; irLeagues: string[]; isWatchlisted: boolean }> = [];
+    const result: Array<{ player: SleeperPlayer; playerId: string; leagues: LeagueRef[]; startingLeagues: LeagueRef[]; irLeagues: LeagueRef[]; isWatchlisted: boolean }> = [];
 
     dashboardOwnedPlayers.forEach((entry) => {
       if (seen.has(entry.player_id)) return;
@@ -3121,6 +3128,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     setTradeHubData,
     tradeAttempts,
     loadingTradeAttempts,
+    tradeAttemptsError,
     tradeAttemptsLeagueId,
     markTradeAttempted,
     updateAttemptStatus,

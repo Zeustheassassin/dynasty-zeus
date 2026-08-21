@@ -239,6 +239,7 @@ interface HubRouterProps {
   setTradeHubData: React.Dispatch<React.SetStateAction<AnnotatedTrade[] | null>>;
   tradeAttempts: TradeAttempt[];
   loadingTradeAttempts: boolean;
+  tradeAttemptsError: string | null;
   tradeAttemptsLeagueId: string | null;
   markTradeAttempted: (attempt: Omit<TradeAttempt, "id" | "user_id" | "attempted_at" | "resolved_at">) => Promise<void>;
   updateAttemptStatus: (id: string, status: TradeAttemptStatus, counterDetails?: string) => Promise<void>;
@@ -330,7 +331,7 @@ export function HubRouter({
   leagueMateProfileByRosterId,
   tradePartnerRankings,
   tradeHubData, loadingTradeHub, tradeHubError, tradeHubUserId, setTradeHubUserId, setTradeHubData,
-  tradeAttempts, loadingTradeAttempts, tradeAttemptsLeagueId,
+  tradeAttempts, loadingTradeAttempts, tradeAttemptsError, tradeAttemptsLeagueId,
   markTradeAttempted, updateAttemptStatus, deleteAttempt, loadTradeAttempts,
   onRefreshDirection, buyLowPlayerIds,
   playerStats, fcTrendData, loadingFcTrends, refreshFcTrends,
@@ -634,6 +635,7 @@ export function HubRouter({
     tradeHubUserId={tradeHubUserId}
     tradeAttempts={tradeAttempts}
     loadingTradeAttempts={loadingTradeAttempts}
+    tradeAttemptsError={tradeAttemptsError}
     tradeAttemptsLeagueId={tradeAttemptsLeagueId}
     onMarkAttempted={markTradeAttempted}
     onUpdateAttemptStatus={updateAttemptStatus}

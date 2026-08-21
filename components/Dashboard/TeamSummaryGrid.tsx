@@ -129,14 +129,17 @@ export default function TeamSummaryGrid({ entries, loading, onSelectLeague, leag
       )}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {entries.map((entry) => {
+        {entries.map((entry, idx) => {
           const history = entry.leagueId ? historyByLeague[entry.leagueId] : undefined;
           const latest = history && history.length > 0 ? history[history.length - 1] : null;
           const settings = entry.roster?.settings;
           const direction = entry.leagueId ? directions[entry.leagueId] : undefined;
           return (
             <CardButton
-              key={entry.leagueId ?? entry.leagueName}
+              // Falls back to the array index (not just leagueName) so two
+              // entries missing leagueId that also share a leagueName don't
+              // collide onto the same key.
+              key={entry.leagueId ?? `${entry.leagueName ?? "league"}-${idx}`}
               onClick={() => entry.leagueId && onSelectLeague(entry.leagueId)}
             >
               <div className="flex items-start justify-between gap-2">

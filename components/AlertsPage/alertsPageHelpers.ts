@@ -8,12 +8,18 @@ export type LeagueTransaction = SleeperTransaction & {
   rosterOwnerMap: Record<number, string>;
 };
 
+// League name alone isn't a safe dedup/membership key — two distinct leagues
+// can share a display name, and comparing by name string would silently
+// merge their starting/bench/IR status together. Carry the id alongside the
+// name so membership checks compare by id while display still shows name.
+export type LeagueRef = { id: string; name: string };
+
 export type InjuryReportPlayer = {
   player: SleeperPlayer;
   playerId: string;
-  leagues: string[];
-  startingLeagues: string[];
-  irLeagues: string[];
+  leagues: LeagueRef[];
+  startingLeagues: LeagueRef[];
+  irLeagues: LeagueRef[];
   isWatchlisted: boolean;
 };
 

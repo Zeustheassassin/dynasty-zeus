@@ -1065,7 +1065,11 @@ export function runFinderPipeline(
           const recvRank = posAfterTrade.findIndex((p) => p.player_id === rp.player_id) + 1;
           const slots = starterCounts[rp.position] || 0;
           if (recvRank > 0 && recvRank <= slots) sqb += 4;
-          const displacedPlayer = posAfterTrade[recvRank];
+          // posAfterTrade is 0-indexed but recvRank is already 1-indexed (rank + 1
+          // above), so posAfterTrade[recvRank] was one slot past rp's own position —
+          // the actual player bumped OUT of the starting lineup is whoever now sits
+          // at the first bench slot, index `slots` (0-based).
+          const displacedPlayer = posAfterTrade[slots];
           if (displacedPlayer && recvRank > 0 && recvRank <= slots) {
             const myPre = myPlayers.filter((p) => p.position === rp.position).sort((a, b) => b.value - a.value);
             const weakBenchmark = myPre[slots - 1]?.value ?? 0;
@@ -1414,7 +1418,15 @@ export function runFinderPipeline(
         const openSlots = Math.max(0, limit - currentCount);
         const dropsNeeded = Math.max(0, oppNetPlayerGain - openSlots);
         if (dropsNeeded === 0) return 0;
-        const sorted = (oppRosterObj.players ?? []).map((pid) => calcFcValues[pid] ?? 0).sort((a, b) => a - b);
+        // Exclude players the opponent is sending away in THIS trade (r.receive, from
+        // our side) — they're already leaving via the trade itself, not an extra cut,
+        // so including them here would understate the real drop cost by letting the
+        // algorithm "spend" an already-departing (often low-value) player twice.
+        const receiveIds = new Set(r.receive.map((p) => p.player_id));
+        const sorted = (oppRosterObj.players ?? [])
+          .filter((pid) => !receiveIds.has(pid))
+          .map((pid) => calcFcValues[pid] ?? 0)
+          .sort((a, b) => a - b);
         const oppDropCostVal = sorted.slice(0, dropsNeeded).reduce((s, v) => s + v, 0);
         return -Math.round(oppDropCostVal / 50);
       })();

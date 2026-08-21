@@ -13,20 +13,24 @@ type FeedTabProps = {
 };
 
 function FeedTab({ alerts, actionableAlerts, onDismissAlert }: FeedTabProps) {
+  // "Dismiss all" must operate on exactly what's rendered below — not the
+  // unfiltered `alerts` array — or it silently discards alerts the user
+  // never saw on screen whenever actionableAlerts is the narrower subset.
+  const visibleAlerts = actionableAlerts.length > 0 ? actionableAlerts : alerts;
   return (
     <div className="grid gap-3">
-      {alerts.length > 1 && (
+      {visibleAlerts.length > 1 && (
         <div className="flex justify-end -mb-1">
           <button
             type="button"
-            onClick={() => alerts.forEach((a) => onDismissAlert(a.id))}
+            onClick={() => visibleAlerts.forEach((a) => onDismissAlert(a.id))}
             className="text-xs text-slate-500 hover:text-red-300 transition"
           >
             Dismiss all
           </button>
         </div>
       )}
-      {(actionableAlerts.length > 0 ? actionableAlerts : alerts).slice(0, 20).map((alert) => (
+      {visibleAlerts.slice(0, 20).map((alert) => (
         <div
           key={alert.id}
           className={`rounded-2xl border p-4 ${severityStyles[alert.severity] || severityStyles.low}`}

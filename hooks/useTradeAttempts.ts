@@ -8,6 +8,7 @@ export function useTradeAttempts(supabaseUser: SupabaseUser | null) {
   const [tradeAttempts, setTradeAttempts] = useState<TradeAttempt[]>([]);
   const [tradeAttemptsLeagueId, setTradeAttemptsLeagueId] = useState<string | null>(null);
   const [loadingTradeAttempts, setLoadingTradeAttempts] = useState(false);
+  const [tradeAttemptsError, setTradeAttemptsError] = useState<string | null>(null);
   const [allTradeAttempts, setAllTradeAttempts] = useState<TradeAttempt[]>([]);
 
   // Stable ref so useCallback functions can read current user without declaring it as a dep
@@ -15,7 +16,7 @@ export function useTradeAttempts(supabaseUser: SupabaseUser | null) {
   useEffect(() => { userRef.current = supabaseUser; }, [supabaseUser]);
 
   useEffect(() => {
-    if (!supabaseUser) { setAllTradeAttempts([]); return; }
+    if (!supabaseUser?.id) { setAllTradeAttempts([]); return; }
     let cancelled = false;
     supabase
       .from("trade_attempts")
@@ -24,12 +25,19 @@ export function useTradeAttempts(supabaseUser: SupabaseUser | null) {
       .order("attempted_at", { ascending: false })
       .then(({ data }) => { if (!cancelled && data) setAllTradeAttempts(data as TradeAttempt[]); });
     return () => { cancelled = true; };
-  }, [supabaseUser]);
+  }, [supabaseUser?.id]);
+
+  // Guards against a slow league switch landing after a faster one — without
+  // this, fast-switching leagues in Trade Hub could show one league's trade
+  // attempts under a different league's label.
+  const loadSeq = useRef(0);
 
   const loadTradeAttempts = useCallback(async (leagueId: string) => {
     const user = userRef.current;
     if (!user) return;
+    const seq = ++loadSeq.current;
     setLoadingTradeAttempts(true);
+    setTradeAttemptsError(null);
     setTradeAttemptsLeagueId(leagueId);
     try {
       const { data, error } = await supabase
@@ -38,9 +46,14 @@ export function useTradeAttempts(supabaseUser: SupabaseUser | null) {
         .eq("user_id", user.id)
         .eq("league_id", leagueId)
         .order("attempted_at", { ascending: false });
-      if (!error && data) setTradeAttempts(data as TradeAttempt[]);
+      if (seq !== loadSeq.current) return; // a newer league switch happened — discard
+      if (error) {
+        setTradeAttemptsError("Couldn't load trade attempts — try again.");
+        return;
+      }
+      if (data) setTradeAttempts(data as TradeAttempt[]);
     } finally {
-      setLoadingTradeAttempts(false);
+      if (seq === loadSeq.current) setLoadingTradeAttempts(false);
     }
   }, []);
 
@@ -123,6 +136,7 @@ export function useTradeAttempts(supabaseUser: SupabaseUser | null) {
     tradeAttempts,
     tradeAttemptsLeagueId,
     loadingTradeAttempts,
+    tradeAttemptsError,
     allTradeAttempts,
     loadTradeAttempts,
     markTradeAttempted,

@@ -56,6 +56,7 @@ interface TradeHubProps {
   tradeHubUserId: string | null;
   tradeAttempts: TradeAttempt[];
   loadingTradeAttempts: boolean;
+  tradeAttemptsError: string | null;
   tradeAttemptsLeagueId: string | null;
   onMarkAttempted: (attempt: Omit<TradeAttempt, "id" | "user_id" | "attempted_at" | "resolved_at">) => Promise<void>;
   onUpdateAttemptStatus: (id: string, status: TradeAttemptStatus, counterDetails?: string) => Promise<void>;
@@ -86,7 +87,7 @@ function TradeHub({
   setPlayerProfileId, loadUserExposure, loadUserTrades,
   historicalSnapshot,
   tradeHubData, loadingTradeHub, tradeHubUserId,
-  tradeAttempts, loadingTradeAttempts, tradeAttemptsLeagueId,
+  tradeAttempts, loadingTradeAttempts, tradeAttemptsError, tradeAttemptsLeagueId,
   onMarkAttempted, onUpdateAttemptStatus, onDeleteAttempt, onLoadTradeAttempts,
   onRefreshDirection,
   buyLowPlayerIds,
@@ -304,6 +305,7 @@ function TradeHub({
           <TradeAttempts
             tradeAttempts={tradeAttempts}
             loadingTradeAttempts={loadingTradeAttempts}
+            tradeAttemptsError={tradeAttemptsError}
             tradeAttemptsLeagueId={tradeAttemptsLeagueId}
             onUpdateAttemptStatus={onUpdateAttemptStatus}
             onDeleteAttempt={onDeleteAttempt}

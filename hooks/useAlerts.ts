@@ -74,6 +74,12 @@ export function useAlerts({ supabaseUser, players }: UseAlertsOptions): UseAlert
   // Alerts already persisted in Supabase — see UseAlertsReturn.persistedAlertIdsRef.
   const persistedAlertIdsRef = useRef<Set<string>>(new Set());
 
+  // Guards the login-sync effect below: bumped every time the effect re-runs
+  // (including on sign-out, since it's read before the early return) so a
+  // slow fetch from a previous account can't land after a fast sign-out/
+  // sign-in and overwrite the new account's state with stale data.
+  const authSyncSeq = useRef(0);
+
   // Hydrate from localStorage whenever the scope keys change (login/logout).
   // Synchronous setState here is intentional: we read a snapshot from an external
   // store (localStorage) and apply it as the initial value when the user scope changes.
@@ -100,7 +106,8 @@ export function useAlerts({ supabaseUser, players }: UseAlertsOptions): UseAlert
 
   // Sync from Supabase when user logs in
   useEffect(() => {
-    if (!supabaseUser) return;
+    const seq = ++authSyncSeq.current;
+    if (!supabaseUser?.id) return;
 
     // Watchlists — shape matches WatchlistEntry interface
     supabase
@@ -108,6 +115,7 @@ export function useAlerts({ supabaseUser, players }: UseAlertsOptions): UseAlert
       .select("player_id, label, threshold_up, threshold_down, league_id, updated_at")
       .eq("user_id", supabaseUser.id)
       .then(({ data, error }: { data: WatchlistEntry[] | null; error: { message: string } | null }) => {
+        if (seq !== authSyncSeq.current) return; // a newer login (or sign-out) happened — discard
         if (error) { log.error("watchlists load failed", { err: error.message }); return; }
         if (data && data.length > 0) {
           setWatchlistEntries(data);
@@ -140,6 +148,7 @@ export function useAlerts({ supabaseUser, players }: UseAlertsOptions): UseAlert
         payload: Record<string, unknown>;
         updated_at: string;
       }> | null; error: { message: string } | null }) => {
+        if (seq !== authSyncSeq.current) return; // discard — same as above
         if (error) { log.error("alerts load failed", { err: error.message }); return; }
         if (data && data.length > 0) {
           const rows: AlertsCenterItem[] = data.map((row) => ({
@@ -167,7 +176,7 @@ export function useAlerts({ supabaseUser, players }: UseAlertsOptions): UseAlert
           setLocalStorageItem(dismissedAlertStorageKey, dismissed);
         }
       });
-  }, [supabaseUser, watchlistStorageKey, alertStorageKey, dismissedAlertStorageKey]);
+  }, [supabaseUser?.id, watchlistStorageKey, alertStorageKey, dismissedAlertStorageKey]);
 
   const mergeDashboardAlerts = useCallback((incoming: AlertsCenterItem[]) => {
     if (!incoming.length) return;

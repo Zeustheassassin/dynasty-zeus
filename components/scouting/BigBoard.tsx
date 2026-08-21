@@ -96,7 +96,7 @@ function getSortValue(
   if (key === "pct_backfield") return p.pct_backfield ?? -BIG;
   if (key === "depth_behind_los") return p.depth_behind_los;
   if (key === "depth_on_los") return p.depth_on_los;
-  if (key === "total_snaps") return p.total_routes;
+  if (key === "total_snaps") return p.total_snaps;
   if (key === "cvg_man") return p.coverage_stats.man.count;
   if (key === "cvg_man_catch") return p.coverage_stats.man.catches;
   if (key === "cvg_zone") return p.coverage_stats.zone.count;
@@ -195,7 +195,6 @@ export default function BigBoard({
 
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
-  const dragRankRef = useRef<number | null>(null);
   const topScrollRef = useRef<HTMLDivElement>(null);
   const topSpacerRef = useRef<HTMLDivElement>(null);
   const tableScrollRef = useRef<HTMLDivElement>(null);
@@ -347,13 +346,17 @@ export default function BigBoard({
     );
   }
 
-  async function handleDrop(targetId: string) {
+  async function handleDrop(targetId: string, targetIndex: number) {
     if (!draggingId || draggingId === targetId) { setDraggingId(null); setDragOverId(null); return; }
     const draggedP = prospects.find((p) => p.id === draggingId);
     const targetP = prospects.find((p) => p.id === targetId);
     if (!draggedP || !targetP) return;
     setSavingRankId(draggingId);
-    await rankUpdater(draggingId, rankField(targetP) ?? dragRankRef.current ?? 1);
+    // Fall back to the TARGET row's own on-screen position (not the dragged
+    // item's rank) when the target is unranked — using the dragged item's own
+    // rank here made dropping onto an unranked row a silent no-op, since that
+    // "fallback" was just re-assigning the dragged item its existing rank.
+    await rankUpdater(draggingId, rankField(targetP) ?? targetIndex + 1);
     setSavingRankId(null);
     setDraggingId(null);
     setDragOverId(null);
@@ -400,10 +403,10 @@ export default function BigBoard({
     const rowBg = isDragOver ? "bg-blue-900/30" : i % 2 === 0 ? "bg-slate-950" : "bg-slate-900/30";
     return {
       draggable: true,
-      onDragStart: () => { setDraggingId(p.id); dragRankRef.current = rankField(p) ?? i + 1; },
+      onDragStart: () => setDraggingId(p.id),
       onDragOver: (e: React.DragEvent) => { e.preventDefault(); setDragOverId(p.id); },
       onDragLeave: () => setDragOverId(null),
-      onDrop: () => handleDrop(p.id),
+      onDrop: () => handleDrop(p.id, i),
       onDragEnd: () => { setDraggingId(null); setDragOverId(null); },
       onClick: () => onSelectProspect(p),
       className: `cursor-pointer transition hover:bg-slate-800/60 ${isDragging ? "opacity-40" : ""} ${isDragOver ? "border-t-2 border-blue-500" : ""} ${rowBg}`,

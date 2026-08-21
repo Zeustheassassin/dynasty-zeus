@@ -42,7 +42,7 @@ export function useManagementState(supabaseUser: { id: string } | null): UseMana
   const scheduleWrite = useDebouncedKeyedEffect();
 
   useEffect(() => {
-    if (!supabaseUser) return;
+    if (!supabaseUser?.id) return;
 
     let cancelled = false;
 
@@ -128,7 +128,7 @@ export function useManagementState(supabaseUser: { id: string } | null): UseMana
       });
 
     return () => { cancelled = true; };
-  }, [supabaseUser]);
+  }, [supabaseUser?.id]);
 
   const saveLeagueBylaws = (leagueId: string, text: string) => {
     setLeagueBylaws((prev) => ({ ...prev, [leagueId]: text }));

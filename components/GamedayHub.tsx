@@ -2,7 +2,11 @@
 import React from "react";
 import type { SleeperLeague, SleeperPlayer, GamedayMatchup, GamedayTeamView, GamedayLineupRow } from "../lib/types";
 import { useLeague } from "../lib/LeagueContext";
-import { injuryRiskBadge } from "./DataHub/dataHubHelpers";
+// injuryBadge shared with the rest of Data Hub (not a local copy) so a
+// player's status badge can't disagree between panels — this file used to
+// have its own narrower IR/O/D/Q-only copy that missed real Sleeper codes
+// like PUP/Suspended/full-word spellings.
+import { injuryBadge, injuryRiskBadge } from "./DataHub/dataHubHelpers";
 import { POS_COLOR } from "../lib/uiTheme";
 
 // ── Helpers (module-level, same logic as page.tsx) ─────────────────────────
@@ -10,20 +14,6 @@ const getKickoffStateClasses = (state: string) => {
   if (state === "Live") return "border-green-500/40 bg-green-500/10 text-green-300";
   if (state === "Final") return "border-gray-600 bg-gray-800 text-gray-300";
   return "border-blue-500/40 bg-blue-500/10 text-blue-300";
-};
-
-const INJURY_CLS: Record<string, string> = {
-  IR: "bg-red-900/70 text-red-300",
-  O:  "bg-red-900/70 text-red-300",
-  D:  "bg-orange-900/70 text-orange-300",
-  Q:  "bg-yellow-900/70 text-yellow-300",
-};
-const injuryBadge = (status: string | null | undefined) => {
-  if (!status) return null;
-  const s = status.toUpperCase();
-  const cls = INJURY_CLS[s];
-  if (!cls) return null;
-  return <span className={`ml-1 rounded px-1 py-0.5 text-[9px] font-bold ${cls}`}>{s}</span>;
 };
 
 // ── Props ──────────────────────────────────────────────────────────────────

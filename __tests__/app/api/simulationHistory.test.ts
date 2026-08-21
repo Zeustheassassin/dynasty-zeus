@@ -21,24 +21,42 @@ const h = vi.hoisted(() => {
       { data: { user: { id: "auth-user-1" } } }
     ),
   );
-  return { checkRateLimit, getUser };
+  const safeFetch = vi.fn(async (_url: string): Promise<unknown> => [{ owner_id: "sleeper-1" }]);
+  return { checkRateLimit, getUser, safeFetch };
 });
 
 vi.mock("../../../lib/rateLimit", () => ({ checkRateLimit: h.checkRateLimit }));
+vi.mock("../../../lib/sleeperServer", () => ({ safeFetch: h.safeFetch }));
 
 interface CapturedUpsert { rows: unknown[]; opts: unknown }
 let upserts: CapturedUpsert[] = [];
 let upsertError: { message: string } | null = null;
 let authClientCalls: string[] = []; // Authorization headers passed to the anon-key client
+// The user_sleeper_links row the mocked authClient resolves for auth-user-1.
+// Tests override this to exercise the "no link" / "not a league member" paths.
+let linkedSleeperUserId: string | null = "sleeper-1";
 
 vi.mock("@supabase/supabase-js", () => ({
   createClient: (_url: string, key: string, opts?: { global?: { headers?: Record<string, string> } }) => {
     // The route creates two clients: one with the anon key (to verify the
-    // caller's session) and one with the service-role key (to write).
-    // Distinguish them by which key string was passed in.
+    // caller's session + look up user_sleeper_links) and one with the
+    // service-role key (to write). Distinguish them by which key was passed.
     if (key === "anon-key") {
       authClientCalls.push(opts?.global?.headers?.Authorization ?? "");
-      return { auth: { getUser: h.getUser } };
+      return {
+        auth: { getUser: h.getUser },
+        from: (_table: string) => ({
+          select: (_cols: string) => ({
+            eq: (_col: string, _val: string) => ({
+              maybeSingle: () =>
+                Promise.resolve({
+                  data: linkedSleeperUserId != null ? { sleeper_user_id: linkedSleeperUserId } : null,
+                  error: null,
+                }),
+            }),
+          }),
+        }),
+      };
     }
     return {
       from: (_table: string) => ({
@@ -64,7 +82,7 @@ function makeReq(body: unknown) {
 }
 
 const validRow = { rosterId: 1, playoffOdds: 55.5, titleOdds: 12.3, expectedWins: 8.2, avgFinish: 4.1, finishRange: "2-7" };
-const validBody = { accessToken: "tok-abc", leagueId: "league-1", season: "2026", week: 0, rows: [validRow] };
+const validBody = { accessToken: "tok-abc", leagueId: "1000000000000000001", season: "2026", week: 0, rows: [validRow] };
 
 const ORIG_ENV = {
   URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -73,11 +91,14 @@ const ORIG_ENV = {
 };
 
 beforeEach(() => {
+  vi.clearAllMocks();
   upserts = [];
   upsertError = null;
   authClientCalls = [];
+  linkedSleeperUserId = "sleeper-1";
   h.checkRateLimit.mockResolvedValue({ allowed: true, remaining: 59 });
   h.getUser.mockResolvedValue({ data: { user: { id: "auth-user-1" } } });
+  h.safeFetch.mockResolvedValue([{ owner_id: "sleeper-1" }]);
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "anon-key";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "service-key";
@@ -127,6 +148,7 @@ describe("POST /api/simulation-history", () => {
     ["negative week", { ...validBody, week: -1 }],
     ["non-integer week", { ...validBody, week: 1.5 }],
     ["missing leagueId", { ...validBody, leagueId: "" }],
+    ["non-numeric leagueId", { ...validBody, leagueId: "league-1" }],
     ["empty rows", { ...validBody, rows: [] }],
     ["too many rows", { ...validBody, rows: Array(41).fill(validRow) }],
     ["malformed row", { ...validBody, rows: [{ rosterId: "not-a-number" }] }],
@@ -135,6 +157,43 @@ describe("POST /api/simulation-history", () => {
     const res = await POST(makeReq(body));
     expect(res.status).toBe(400);
     expect(upserts).toHaveLength(0);
+  });
+
+  it("rejects with 403 when the caller has no linked Sleeper account", async () => {
+    linkedSleeperUserId = null;
+    const POST = await loadPOST();
+    const res = await POST(makeReq(validBody));
+    expect(res.status).toBe(403);
+    expect((await res.json()).code).toBe("NO_SLEEPER_LINK");
+    expect(upserts).toHaveLength(0);
+    expect(h.safeFetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects with 403 when the caller's linked Sleeper account doesn't own a roster in this league", async () => {
+    // Linked to a real Sleeper account, but that account isn't among this league's roster owners.
+    h.safeFetch.mockResolvedValue([{ owner_id: "someone-else" }, { owner_id: "another-owner" }]);
+    const POST = await loadPOST();
+    const res = await POST(makeReq(validBody));
+    expect(res.status).toBe(403);
+    expect((await res.json()).code).toBe("LEAGUE_ACCESS_DENIED");
+    expect(upserts).toHaveLength(0);
+  });
+
+  it("rejects with 403 when the league's roster fetch fails (fails closed, not open)", async () => {
+    h.safeFetch.mockResolvedValue(null);
+    const POST = await loadPOST();
+    const res = await POST(makeReq(validBody));
+    expect(res.status).toBe(403);
+    expect((await res.json()).code).toBe("LEAGUE_ACCESS_DENIED");
+    expect(upserts).toHaveLength(0);
+  });
+
+  it("allows the write when the caller's linked Sleeper account owns a roster in the league", async () => {
+    h.safeFetch.mockResolvedValue([{ owner_id: "someone-else" }, { owner_id: "sleeper-1" }]);
+    const POST = await loadPOST();
+    const res = await POST(makeReq(validBody));
+    expect(res.status).toBe(200);
+    expect(upserts).toHaveLength(1);
   });
 
   it("upserts with the same onConflict key the cron uses, keyed by league/roster/season/week", async () => {
@@ -147,7 +206,7 @@ describe("POST /api/simulation-history", () => {
     expect(upserts[0].opts).toEqual({ onConflict: "league_id,roster_id,season,week" });
     expect(upserts[0].rows).toEqual([
       expect.objectContaining({
-        league_id: "league-1",
+        league_id: "1000000000000000001",
         roster_id: 1,
         season: "2026",
         week: 0,

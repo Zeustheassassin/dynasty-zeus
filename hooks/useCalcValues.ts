@@ -21,6 +21,9 @@ export function useCalcValues() {
   useEffect(() => { redraftLoadedRef.current = redraftLoaded; }, [redraftLoaded]);
   // Monotonic guard so a slow fetch for one format can't overwrite a newer one.
   const calcSeq = useRef(0);
+  // Same guard for the redraft side — separate counter since the two loads
+  // (dynasty vs. redraft) are independent and shouldn't invalidate each other.
+  const redraftSeq = useRef(0);
   // Track which num_qbs format the redraft values were loaded for, so a league
   // switch between superflex (2) and single-QB (1) refetches instead of serving
   // the wrong-format values. Superflex stays at 2 (unchanged behaviour).
@@ -58,6 +61,7 @@ export function useCalcValues() {
     // Already loaded for this format → nothing to do (no-arg refresh callers reuse
     // the last-loaded format, so they don't thrash).
     if (redraftLoadedRef.current && redraftNumQbsRef.current === numQbs) return;
+    const seq = ++redraftSeq.current;
     setLoadingRedraft(true);
     setRedraftError(null);
     try {
@@ -69,14 +73,15 @@ export function useCalcValues() {
         const sleeperId = entry.player?.sleeperId;
         if (sleeperId) vals[String(sleeperId)] = entry.value;
       });
+      if (seq !== redraftSeq.current) return; // a newer load started — discard
       setRedraftValues(vals);
       setRedraftLoaded(true);
       redraftNumQbsRef.current = numQbs;
     } catch (err) {
       log.error("loadRedraftValues failed", { err: String(err) });
-      setRedraftError("Couldn't load redraft values from FantasyCalc.");
+      if (seq === redraftSeq.current) setRedraftError("Couldn't load redraft values from FantasyCalc.");
     } finally {
-      setLoadingRedraft(false);
+      if (seq === redraftSeq.current) setLoadingRedraft(false);
     }
   }, []);
 

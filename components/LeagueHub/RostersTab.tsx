@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, memo } from "react";
+import { useMemo, useCallback, memo } from "react";
 import {
   getLineupSettings,
   getNonStandardRules,
@@ -61,6 +61,16 @@ function RostersTab({
     onSetAssetDisposition(selectedLeague.league_id, assetId, disposition);
   };
 
+  // League-adjusted value where available (matches what actually drives sort/rank
+  // everywhere else in this component, e.g. personalRankByPlayerId below) — falling
+  // back to the player's raw global value so unadjusted players don't show as 0.
+  // useCallback (not a plain closure) so its identity only changes with
+  // leagueAdjustedFcValues, keeping the useMemo below's deps array accurate.
+  const adjVal = useCallback(
+    (p: { player_id: string; value?: number | null }) => leagueAdjustedFcValues[p.player_id] ?? p.value ?? 0,
+    [leagueAdjustedFcValues]
+  );
+
   const grouped = useMemo(() => {
     const g: Record<Position, Array<SleeperPlayer & { role: string }>> = { QB: [], RB: [], WR: [], TE: [] };
     if (!roster || !players) return g;
@@ -80,11 +90,11 @@ function RostersTab({
       g[pos].sort((a, b) => {
         const roleDiff = ROLE_PRIORITY[a.role] - ROLE_PRIORITY[b.role];
         if (roleDiff !== 0) return roleDiff;
-        return (b.value || 0) - (a.value || 0);
+        return adjVal(b) - adjVal(a);
       });
     });
     return g;
-  }, [roster, players]);
+  }, [roster, players, adjVal]);
 
   const positionRankByPos = useMemo(() => {
     const map: Partial<Record<Position, number>> = {};
@@ -223,7 +233,7 @@ function RostersTab({
           <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
             {POSITIONS.map((pos) => {
               const list = grouped[pos];
-              const totalValue = list.reduce((s, p) => s + (p.value || 0), 0);
+              const totalValue = list.reduce((s, p) => s + adjVal(p), 0);
               const ages = list.map((p) => Number(p.age)).filter((a) => Number.isFinite(a) && a > 0);
               const avgAge = ages.length ? ages.reduce((s, a) => s + a, 0) / ages.length : null;
               const rank = positionRankByPos[pos];
@@ -248,7 +258,7 @@ function RostersTab({
                         <div key={p.player_id} className="text-xs py-0.5">
                           <div className="flex items-center justify-between gap-2">
                             <div className="flex-1 min-w-0 truncate text-slate-200">{p.full_name}</div>
-                            <span className="text-emerald-400 font-medium whitespace-nowrap">{(p.value || 0).toLocaleString()}</span>
+                            <span className="text-emerald-400 font-medium whitespace-nowrap">{adjVal(p).toLocaleString()}</span>
                           </div>
                           <div className="mt-0.5 flex items-center justify-between gap-2">
                             <span className="text-[10px] text-slate-500">{ROLE_LABEL[p.role] ?? ""}</span>
@@ -319,7 +329,7 @@ function RostersTab({
                         <span className="text-[10px] text-slate-500 uppercase">{p.position}</span>
                         <span className="truncate text-slate-200">{p.full_name}</span>
                       </div>
-                      <span className="text-emerald-400 font-medium whitespace-nowrap">{(p.value || 0).toLocaleString()}</span>
+                      <span className="text-emerald-400 font-medium whitespace-nowrap">{adjVal(p).toLocaleString()}</span>
                     </div>
                   ))
                 )}

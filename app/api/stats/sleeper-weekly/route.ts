@@ -46,7 +46,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const res = await fetch(
       `${SLEEPER_BASE_URL}/stats/nfl/${season}/${week}?season_type=regular`
     );
-    const data = res.ok ? await res.json() : {};
+    if (!res.ok) {
+      // Never cache a transient upstream failure — the 7-day TTL would
+      // otherwise serve empty stats for a full week. Return non-OK so the
+      // client (usePlayerStats.ts) leaves this week uncached and retries.
+      log.error('upstream returned non-OK status', { status: res.status, season, week });
+      return NextResponse.json({}, { status: 502 });
+    }
+    const data = await res.json();
 
     // ── 3. Write to Supabase cache (non-blocking, retries up to 3x) ──
     withRetry(() =>
@@ -59,7 +66,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     ).catch((err: unknown) => log.error('cache write failed after retries', { err: String(err) }));
 
     return NextResponse.json(data ?? {});
-  } catch {
-    return NextResponse.json({});
+  } catch (err) {
+    log.error('fetch failed', { err: String(err) });
+    return NextResponse.json({}, { status: 502 });
   }
 }

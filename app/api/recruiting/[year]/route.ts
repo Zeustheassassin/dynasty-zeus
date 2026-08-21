@@ -17,6 +17,13 @@ export const maxDuration = 60;
 const YEAR_MIN = 2017;
 const YEAR_MAX = new Date().getFullYear() + 1;
 
+// The app has no role/admin concept, so a refresh can't be gated to "trusted"
+// users — instead this caps how often the SAME year can hit the shared CFD
+// monthly quota (1000 calls/month across every user), regardless of how many
+// people or tabs click Refresh. Recruiting rankings don't meaningfully change
+// within an hour, so a refresh inside the cooldown is redundant anyway.
+const RECRUITING_REFRESH_COOLDOWN_MS = 60 * 60_000; // 1 hour
+
 function getAuthedClient(accessToken: string) {
   const url    = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anon   = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -83,6 +90,26 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ year: stri
   const cfdKey = process.env.CFD_API_KEY;
   if (!cfdKey) return apiError("CFD_API_KEY not configured", 500, "MISSING_CFD_KEY");
 
+  const supabase = getAuthedClient(accessToken);
+
+  // Cooldown check — BEFORE spending a CFD call — so a burst of clicks/tabs
+  // across any number of users can't exhaust the shared monthly quota.
+  const { data: existingMeta } = await supabase
+    .from("recruits_meta")
+    .select("last_refreshed_at")
+    .eq("year", year)
+    .maybeSingle();
+  if (existingMeta?.last_refreshed_at) {
+    const elapsedMs = Date.now() - new Date(existingMeta.last_refreshed_at as string).getTime();
+    if (elapsedMs < RECRUITING_REFRESH_COOLDOWN_MS) {
+      const retryAfterSec = Math.ceil((RECRUITING_REFRESH_COOLDOWN_MS - elapsedMs) / 1000);
+      return NextResponse.json(
+        { error: `${year} was already refreshed recently — try again in ${Math.ceil(retryAfterSec / 60)} min.`, code: "RECRUITING_COOLDOWN" },
+        { status: 429, headers: { "Retry-After": String(retryAfterSec) } }
+      );
+    }
+  }
+
   // 1. Fetch from CFD
   let cfdRecruits;
   try {
@@ -98,8 +125,6 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ year: stri
   }
 
   // 3. Replace this year's cache (delete + insert in batches under one auth context)
-  const supabase = getAuthedClient(accessToken);
-
   const { error: deleteErr } = await supabase.from("recruits").delete().eq("year", year);
   if (deleteErr) return apiError(`Failed to clear ${year} cache: ${deleteErr.message}`, 500, "DB_ERROR");
 

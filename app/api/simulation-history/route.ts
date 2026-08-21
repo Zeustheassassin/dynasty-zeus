@@ -1,7 +1,9 @@
 import { NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { checkRateLimit } from "../../../lib/rateLimit";
-import { apiError } from "../../../lib/apiHelpers";
+import { apiError, isValidSleeperId } from "../../../lib/apiHelpers";
+import { safeFetch } from "../../../lib/sleeperServer";
+import { SLEEPER_BASE_URL } from "../../../lib/constants";
 import { logger } from "../../../lib/logger";
 
 // ============================================================
@@ -70,7 +72,7 @@ export async function POST(req: NextRequest): Promise<Response> {
   const { accessToken, leagueId, season, week, rows } = body;
 
   if (!accessToken) return apiError("Missing accessToken", 400, "MISSING_PARAMS");
-  if (typeof leagueId !== "string" || !leagueId) return apiError("Missing leagueId", 400, "MISSING_PARAMS");
+  if (typeof leagueId !== "string" || !isValidSleeperId(leagueId)) return apiError("Missing or invalid leagueId", 400, "MISSING_PARAMS");
   if (typeof season !== "string" || !/^\d{4}$/.test(season)) return apiError("Invalid season", 400, "INVALID_SEASON");
   if (typeof week !== "number" || !Number.isInteger(week) || week < 0 || week > 25) {
     return apiError("Invalid week", 400, "INVALID_WEEK");
@@ -95,6 +97,26 @@ export async function POST(req: NextRequest): Promise<Response> {
   const { data: { user: authUser } } = await authClient.auth.getUser();
   if (!authUser) {
     return apiError("Unauthorized — invalid or expired access token", 401, "UNAUTHORIZED");
+  }
+
+  // league_simulation_history has no per-row owner (shared, non-personalized
+  // cache — see the header comment) and is written with the service-role
+  // key, so without this check any authenticated user could POST fabricated
+  // odds for a league they aren't even in. Resolve the caller's linked
+  // Sleeper account, then confirm they actually own a roster in this league.
+  const { data: link } = await authClient
+    .from("user_sleeper_links")
+    .select("sleeper_user_id")
+    .eq("user_id", authUser.id)
+    .maybeSingle();
+  if (!link?.sleeper_user_id) {
+    return apiError("No linked Sleeper account", 403, "NO_SLEEPER_LINK");
+  }
+
+  const rosters = await safeFetch<Array<{ owner_id?: string }>>(`${SLEEPER_BASE_URL}/league/${leagueId}/rosters`);
+  const isMember = Array.isArray(rosters) && rosters.some((r) => String(r.owner_id) === String(link.sleeper_user_id));
+  if (!isMember) {
+    return apiError("You are not a member of this league", 403, "LEAGUE_ACCESS_DENIED");
   }
 
   const serviceClient = createClient(supabaseUrl, serviceRoleKey, {

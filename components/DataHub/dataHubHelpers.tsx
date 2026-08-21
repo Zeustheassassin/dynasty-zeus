@@ -13,19 +13,34 @@ export const PERSONAL_SIGNAL_META: Record<
   STRONG_BUY:  { label: "Super Buy",  cls: "bg-emerald-900/60 text-emerald-300 border border-emerald-700/50 font-bold" },
 };
 
-const INJURY_CLS: Record<string, string> = {
-  IR: "bg-red-900/70 text-red-300",
-  O:  "bg-red-900/70 text-red-300",
-  D:  "bg-orange-900/70 text-orange-300",
-  Q:  "bg-amber-900/70 text-amber-300",
-};
+// Sleeper's injury_status is null/empty for healthy players and mixes
+// abbreviations with full words for hurt ones (IR, O, Out, D, Doubtful, Q,
+// Questionable, PUP, Sus, NA, DNR, Cov, NFI, "IR-Designated", etc. — see
+// isIREligible in RosterOverviewTab.tsx and injuryStatusSeverity below,
+// which classify the same way). This used to only recognize the exact
+// codes IR/O/D/Q, so any other real status (PUP, Suspended, full-word
+// spellings, ...) silently showed no badge at all — a player could read
+// "healthy" here while flagged everywhere else in the app. Now excludes
+// only the known-healthy/day-to-day statuses and badges everything else,
+// with the least-specific bucket (Out/IR-severity) as the catch-all —
+// matching injuryStatusSeverity's "anything unrecognized is most severe."
+const INJURY_BADGE_HEALTHY_RE = /^(?:active|probable)$/i;
+const INJURY_BADGE_TIERS: { re: RegExp; cls: string }[] = [
+  { re: /^(?:q|questionable)$/i, cls: "bg-amber-900/70 text-amber-300" },
+  { re: /^(?:d|doubtful)$/i, cls: "bg-orange-900/70 text-orange-300" },
+];
+const INJURY_BADGE_FALLBACK_CLS = "bg-red-900/70 text-red-300"; // O/Out, IR, and anything else unrecognized
 
 export const injuryBadge = (status: string | null | undefined) => {
-  if (!status) return null;
-  const s = status.toUpperCase();
-  const cls = INJURY_CLS[s];
-  if (!cls) return null;
-  return <span className={`ml-1 rounded px-1 py-0.5 text-[9px] font-bold ${cls}`}>{s}</span>;
+  const s = (status ?? "").trim();
+  if (!s || INJURY_BADGE_HEALTHY_RE.test(s)) return null;
+  const tier = INJURY_BADGE_TIERS.find((t) => t.re.test(s));
+  const cls = tier?.cls ?? INJURY_BADGE_FALLBACK_CLS;
+  // Short codes (<=3 chars, e.g. "IR", "PUP", "NFI") display as-is uppercased;
+  // full words (e.g. "Questionable") collapse to their first letter to stay
+  // badge-sized, matching the abbreviation the short-code path already shows.
+  const label = s.length <= 3 ? s.toUpperCase() : s[0]!.toUpperCase();
+  return <span className={`ml-1 rounded px-1 py-0.5 text-[9px] font-bold ${cls}`}>{label}</span>;
 };
 
 export const ageColor = (age: number | undefined, pos: string) => {

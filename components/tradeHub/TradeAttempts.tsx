@@ -9,6 +9,7 @@ import { usePlayers } from "../../lib/PlayersContext";
 import { useLeague } from "../../lib/LeagueContext";
 import { useValues } from "../../lib/ValuesContext";
 import { Card } from "../ui/Card";
+import ErrorBanner from "../ErrorBanner";
 
 // Parses a PREDICTED_DECLINE row's counter_details JSON (written by TradeCard.tsx's
 // "Never Accept" panel). Falls back to treating the raw string as the reason if it isn't
@@ -36,6 +37,7 @@ interface CounterDraft {
 interface TradeAttemptsProps {
   tradeAttempts: TradeAttempt[];
   loadingTradeAttempts: boolean;
+  tradeAttemptsError: string | null;
   tradeAttemptsLeagueId: string | null;
   onUpdateAttemptStatus: (id: string, status: TradeAttemptStatus, counterDetails?: string) => Promise<void>;
   onDeleteAttempt: (id: string) => Promise<void>;
@@ -48,6 +50,7 @@ interface TradeAttemptsProps {
 function TradeAttempts({
   tradeAttempts,
   loadingTradeAttempts,
+  tradeAttemptsError,
   tradeAttemptsLeagueId,
   onUpdateAttemptStatus,
   onDeleteAttempt,
@@ -108,6 +111,11 @@ function TradeAttempts({
           />
         </div>
       </Card>
+
+      <ErrorBanner
+        message={tradeAttemptsError}
+        onRetry={() => onLoadTradeAttempts(selectedLeague.league_id)}
+      />
 
       {loadingTradeAttempts && <p className="text-sm text-slate-400">Loading…</p>}
 
