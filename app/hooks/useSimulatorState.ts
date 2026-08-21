@@ -74,7 +74,19 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
   const [readyLeagueId, setReadyLeagueId] = useState<string | null>(null);
   const [simQueue, setSimQueue] = useState<string[]>([]);
   const [simProgress, setSimProgress] = useState<{ done: number; total: number } | null>(null);
-  const [simSalt, setSimSalt] = useState<number>(() => Math.floor(Math.random() * 1_000_000));
+  // Persisted so odds/wins/etc. stay stable across reloads and navigation — every reader
+  // of simulateLeague (the live Season Simulator tab, the Trade Calculator/Finder preview,
+  // Dashboard tiles) shares this one seed, and a fresh Math.random() draw on every mount
+  // used to make them silently disagree with each other and with what the user remembered
+  // seeing a moment earlier, with no trade or roster change involved. Only handleRunAllSims
+  // below is meant to intentionally re-roll it.
+  const [simSalt, setSimSalt] = useState<number>(() => {
+    const stored = getLocalStorageItem<number | null>("simSalt_v1", null);
+    if (stored != null) return stored;
+    const fresh = Math.floor(Math.random() * 1_000_000);
+    setLocalStorageItem("simSalt_v1", fresh);
+    return fresh;
+  });
   const [committedSimsByLeague, setCommittedSimsByLeague] = useState<CommittedSimsByLeague>(() =>
     getLocalStorageItem<CommittedSimsByLeague>("committedSimRows_v2", {})
   );
@@ -379,7 +391,9 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
     const leagueIds = leagues.map((l) => l.league_id);
     setSimProgress({ done: 0, total: leagueIds.length });
     setReadyLeagueId(null);
-    setSimSalt(Math.floor(Math.random() * 1_000_000));
+    const newSalt = Math.floor(Math.random() * 1_000_000);
+    setSimSalt(newSalt);
+    setLocalStorageItem("simSalt_v1", newSalt);
     setSimQueue(leagueIds);
     const first = leagues.find((l) => l.league_id === leagueIds[0]);
     if (first) loadRoster(first);
