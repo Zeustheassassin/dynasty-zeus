@@ -29,6 +29,11 @@ export function useDraftScout(players: Record<string, SleeperPlayer>) {
   const playersRef = useRef(players);
   useEffect(() => { playersRef.current = players; }, [players]);
 
+  // Discards a stale response if a newer loadDraftScout(userId) call has started
+  // since — otherwise a slow lookup for user A can overwrite a faster, more
+  // recent lookup for user B and show A's tendencies under B's name.
+  const requestSeq = useRef(0);
+
   const draftScoutPatterns = useMemo(() => {
     if (!draftScoutData?.length) return null;
     const leaguesWithPicks = draftScoutData.filter((l) => l.picks.length > 0);
@@ -93,6 +98,7 @@ export function useDraftScout(players: Record<string, SleeperPlayer>) {
   }, [draftScoutData]);
 
   const loadDraftScout = useCallback(async (userId: string) => {
+    const seq = ++requestSeq.current;
     setDraftScoutUserId(userId);
     setDraftScoutData(null);
     setLoadingDraftScout(true);
@@ -132,15 +138,17 @@ export function useDraftScout(players: Record<string, SleeperPlayer>) {
         })
       );
 
+      if (seq !== requestSeq.current) return; // a newer lookup started — discard stale result
       setDraftScoutData(results.filter((r) => r !== null) as DraftScoutLeague[]);
     } catch (err) {
       log.error("draft scout error", { err: String(err) });
     } finally {
-      setLoadingDraftScout(false);
+      if (seq === requestSeq.current) setLoadingDraftScout(false);
     }
   }, []);
 
   const clearDraftScout = useCallback(() => {
+    ++requestSeq.current; // invalidate any in-flight lookup
     setDraftScoutUserId(null);
     setDraftScoutData(null);
   }, []);

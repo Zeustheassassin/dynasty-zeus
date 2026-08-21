@@ -48,7 +48,7 @@ import type { PersonalSignal } from "../../lib/helpers/personalRankings";
 import { useSimulatorState } from "./useSimulatorState";
 import { fetchSleeperUser } from "../../lib/sleeperUserCache";
 import { sleeperApi } from "../../lib/sleeperApi";
-import { getLocalStorageItem, setLocalStorageItem, removeLocalStorageItem } from "@/lib/hooks/useLocalStorage";
+import { getLocalStorageItem, setLocalStorageItem, removeLocalStorageItem, removeLocalStorageItemsByPrefix } from "@/lib/hooks/useLocalStorage";
 import type {
   AlertsCenterItem,
   SleeperPlayer, SleeperLeague, SleeperRoster, SleeperTradedPick,
@@ -547,14 +547,34 @@ const signOut = async () => {
   setShowLoginPassword(false);
   setSupabaseError("");
   setSupabaseMessage("");
-  // Clear localStorage user-specific data so next user starts fresh
+  // Reset in-memory annotation/ranking state — without this, the next login's
+  // Supabase load effect merges the new user's rows onto this user's leftover
+  // state ({...prev, ...map}), and if the new user has zero rows for a given
+  // table the merge is skipped entirely, leaving this user's data on screen.
+  setPlayerNotes({});
+  setLeaguePlayerTags({});
+  setNoInterestPlayers({});
+  setDiscardedTrades({});
+  setPersonalOrdering([]);
+  // Clear localStorage user-specific data so next user starts fresh (shared-
+  // computer sign-out/sign-in must not leak the previous user's tags, notes,
+  // rankings, or committed sim state to whoever logs in next).
   removeLocalStorageItem("leagueNotes");
   removeLocalStorageItem(`rookieBoard_${ROOKIE_BOARD_VERSION}`);
   removeLocalStorageItem(ROOKIE_BOARD_RESET_KEY);
+  removeLocalStorageItem(`rookieBoardOverrides_${ROOKIE_BOARD_VERSION}`);
   removeLocalStorageItem(watchlistStorageKey);
   removeLocalStorageItem(alertStorageKey);
   removeLocalStorageItem(alertSnapshotStorageKey);
   removeLocalStorageItem(dismissedAlertStorageKey);
+  removeLocalStorageItem("playerNotes_v1");
+  removeLocalStorageItem("leaguePlayerTags_v1");
+  removeLocalStorageItem("noInterestPlayers_v1");
+  removeLocalStorageItem("discardedFinderTrades_v1");
+  removeLocalStorageItem("ignoredOwnerIds");
+  removeLocalStorageItem("personalRankings_v1");
+  removeLocalStorageItem("committedSimRows_v2");
+  removeLocalStorageItemsByPrefix("draftPicks_");
   // Disconnect Sleeper so the app returns fully to the logged-out state
   disconnectSleeper();
 };

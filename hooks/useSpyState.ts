@@ -14,6 +14,7 @@
 // [project_spy_username_switching] in memory for why this matters.
 // ============================================================
 import { useState, useRef, useCallback, useEffect } from "react";
+import { getLocalStorageItem, setLocalStorageItem } from "../lib/hooks/useLocalStorage";
 import { logger } from "../lib/logger";
 import { sleeperApi } from "../lib/sleeperApi";
 import { FANTASYCALC_BASE_URL } from "../lib/constants";
@@ -239,7 +240,16 @@ export function useSpyState({
   // Global value maps (league-independent) — loaded once.
   const [pickFcValues, setPickFcValues] = useState<Record<string, number>>({});
   const [redraftValues, setRedraftValues] = useState<Record<string, number>>({});
-  const [simSalt] = useState<number>(() => Math.floor(Math.random() * 1_000_000));
+  // Shares the same persisted seed as the main Season Simulator (simSalt_v1) so
+  // odds are stable across reloads and agree with every other simulateLeague call
+  // site — see useSimulatorState.ts for the original fix this mirrors.
+  const [simSalt] = useState<number>(() => {
+    const stored = getLocalStorageItem<number | null>("simSalt_v1", null);
+    if (stored != null) return stored;
+    const fresh = Math.floor(Math.random() * 1_000_000);
+    setLocalStorageItem("simSalt_v1", fresh);
+    return fresh;
+  });
 
   const { leagueOverviewData, loadingLeagueOverview, leagueOverviewLoaded, loadLeagueOverview } =
     useLeagueOverview(targetLeagues, targetUser);

@@ -152,8 +152,8 @@ function CalculatorResult({
     setSimPreviewSignatureRun(simPreviewSignature);
   };
 
-  const tradeRow = (label: string, value: number, onRemove: () => void) => (
-    <div key={label} className="flex items-center justify-between px-3 py-1.5 bg-slate-800 rounded-lg">
+  const tradeRow = (rowKey: string, label: string, value: number, onRemove: () => void) => (
+    <div key={rowKey} className="flex items-center justify-between px-3 py-1.5 bg-slate-800 rounded-lg">
       <span className="text-sm truncate">{label}</span>
       <div className="flex items-center gap-2 shrink-0 ml-2">
         <span className="text-xs text-blue-300 font-mono">{value > 0 ? value.toLocaleString() : "—"}</span>
@@ -177,6 +177,7 @@ function CalculatorResult({
               {calcGive.map((id: string) => {
                 const p = players[id];
                 return tradeRow(
+                  id,
                   `${p?.full_name ?? id} (${p?.position})`,
                   calcVal(id),
                   () => setCalcGive((prev) => prev.filter((x) => x !== id))
@@ -185,7 +186,7 @@ function CalculatorResult({
               {calcGivePicks.map((k: string) => {
                 const pick = allPicks.find((p) => pickKey(p) === k);
                 const label = pick ? pickLabel(pick) : k;
-                return tradeRow(label, getPickValue(k),
+                return tradeRow(k, label, getPickValue(k),
                   () => setCalcGivePicks((prev) => prev.filter((x) => x !== k)));
               })}
             </div>
@@ -217,6 +218,7 @@ function CalculatorResult({
               {calcReceive.map((id: string) => {
                 const p = players[id];
                 return tradeRow(
+                  id,
                   `${p?.full_name ?? id} (${p?.position})`,
                   calcVal(id),
                   () => setCalcReceive((prev) => prev.filter((x) => x !== id))
@@ -225,7 +227,7 @@ function CalculatorResult({
               {calcReceivePicks.map((k: string) => {
                 const pick = allPicks.find((p) => pickKey(p) === k);
                 const label = pick ? pickLabel(pick) : k;
-                return tradeRow(label, getPickValue(k),
+                return tradeRow(k, label, getPickValue(k),
                   () => setCalcReceivePicks((prev) => prev.filter((x) => x !== k)));
               })}
             </div>

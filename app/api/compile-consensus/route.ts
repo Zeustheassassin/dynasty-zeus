@@ -7,6 +7,8 @@ import {
   SLEEPER_BASE_URL,
   COMPILE_CONCURRENCY,
   COMPILE_PICKS_CONCURRENCY,
+  COMPILE_MAX_CONNECTED_USERS,
+  COMPILE_MAX_LEAGUES,
   SLEEPER_PLAYERS_TIMEOUT_MS,
   getCompilationYearRange,
 } from "../../../lib/constants";
@@ -19,6 +21,8 @@ const SLEEPER_BASE        = SLEEPER_BASE_URL;
 const CONCURRENCY         = COMPILE_CONCURRENCY;
 const PICKS_CONCURRENCY   = COMPILE_PICKS_CONCURRENCY;
 const PLAYERS_TIMEOUT_MS  = SLEEPER_PLAYERS_TIMEOUT_MS;
+const MAX_CONNECTED_USERS = COMPILE_MAX_CONNECTED_USERS;
+const MAX_LEAGUES         = COMPILE_MAX_LEAGUES;
 
 // ── Local types for Sleeper API responses ─────────────────────────────────────
 
@@ -120,9 +124,20 @@ async function compileDrafts(
     })
   );
 
+  // Cap total Sleeper request volume: expanding every connected user across
+  // every requested year is what turns a real (but large) network into an
+  // unbounded sequential crawl. Users beyond the cap are dropped from the
+  // expansion — the compile still runs on the rest and on the caller's own
+  // leagues either way.
+  let connectedUserIdList = Array.from(connectedUserIds);
+  const connectedUsersTruncated = connectedUserIdList.length > MAX_CONNECTED_USERS;
+  if (connectedUsersTruncated) connectedUserIdList = connectedUserIdList.slice(0, MAX_CONNECTED_USERS);
+
   emit({
     type: "status",
-    message: `Found ${connectedUserIds.size} connected users across your leagues. Scanning all their leagues…`,
+    message: connectedUsersTruncated
+      ? `Found ${connectedUserIds.size} connected users — capping expansion at ${MAX_CONNECTED_USERS} to stay within Sleeper's rate limits. Scanning their leagues…`
+      : `Found ${connectedUserIds.size} connected users across your leagues. Scanning all their leagues…`,
     progress: 15,
   });
 
@@ -133,7 +148,7 @@ async function compileDrafts(
 
   // Build (userId, year) pairs for expansion
   const userYearPairs: Array<[string, number]> = [];
-  connectedUserIds.forEach((uid) => years.forEach((yr) => userYearPairs.push([uid, yr])));
+  connectedUserIdList.forEach((uid) => years.forEach((yr) => userYearPairs.push([uid, yr])));
 
   let pairsDone = 0;
   await withConcurrency(
@@ -155,9 +170,17 @@ async function compileDrafts(
     CONCURRENCY
   );
 
+  // Same rate-limit rationale as the connected-user cap above, applied to
+  // the league scan itself: cap the number of leagues probed for drafts.
+  let leagueIdArray = Array.from(allLeagueIds);
+  const leaguesTruncated = leagueIdArray.length > MAX_LEAGUES;
+  if (leaguesTruncated) leagueIdArray = leagueIdArray.slice(0, MAX_LEAGUES);
+
   emit({
     type: "status",
-    message: `Identified ${allLeagueIds.size} unique dynasty leagues. Scanning for completed rookie drafts…`,
+    message: leaguesTruncated
+      ? `Identified ${allLeagueIds.size} unique dynasty leagues — capping the scan at ${MAX_LEAGUES} to stay within Sleeper's rate limits. Scanning for completed rookie drafts…`
+      : `Identified ${allLeagueIds.size} unique dynasty leagues. Scanning for completed rookie drafts…`,
     progress: 40,
   });
 
@@ -165,7 +188,6 @@ async function compileDrafts(
   const draftIdsByYear: Record<number, Set<string>> = {};
   years.forEach((yr) => { draftIdsByYear[yr] = new Set(); });
 
-  const leagueIdArray = Array.from(allLeagueIds);
   let leaguesDone = 0;
 
   await withConcurrency(
@@ -463,6 +485,19 @@ export async function POST(req: NextRequest): Promise<Response> {
   const { data: { user: authUser } } = await supabaseClient.auth.getUser();
   if (!authUser) {
     return apiError("Unauthorized — invalid or expired access token", 401, "UNAUTHORIZED");
+  }
+
+  // Verify the caller-supplied sleeperUserId actually belongs to this
+  // authenticated user. Without this, any authenticated user could point
+  // the compile at an arbitrary Sleeper network (their own or someone
+  // else's) and trigger the fan-out below against it.
+  const { data: link, error: linkError } = await supabaseClient
+    .from("user_sleeper_links")
+    .select("sleeper_user_id")
+    .eq("user_id", authUser.id)
+    .maybeSingle();
+  if (linkError || !link || String(link.sleeper_user_id) !== String(sleeperUserId)) {
+    return apiError("sleeperUserId does not match your linked Sleeper account", 403, "SLEEPER_ID_MISMATCH");
   }
 
   const encoder = new TextEncoder();

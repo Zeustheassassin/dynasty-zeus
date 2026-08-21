@@ -230,6 +230,7 @@ export default function LiveDraftBoard({
         {Object.keys(myDraftSlotPicks).length > 0 && (
           <button
             onClick={() => {
+              if (!window.confirm("Reset all your manually-set draft picks for this league? This cannot be undone.")) return;
               setMyDraftSlotPicks({});
               if (selectedLeague?.league_id) {
                 removeLocalStorageItem(`draftPicks_${selectedLeague.league_id}_${ROOKIE_YEAR}`);

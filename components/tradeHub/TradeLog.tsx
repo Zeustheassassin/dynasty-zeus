@@ -145,8 +145,8 @@ function TradeLog({ tradeHubData, loadingTradeHub, tradeHubUserId, user, loadUse
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-widest text-red-400 mb-1.5">You Gave</div>
                 <div className="space-y-1">
-                  {allGiven.map((item) => (
-                    <div key={item.name} className="flex items-center justify-between rounded-lg bg-slate-800 px-2 py-1.5">
+                  {allGiven.map((item, idx) => (
+                    <div key={`${item.name}-${idx}`} className="flex items-center justify-between rounded-lg bg-slate-800 px-2 py-1.5">
                       <div className="flex items-center gap-1.5 min-w-0">
                         <span className="text-xs text-white truncate">{item.name}</span>
                         <span className="text-[10px] text-slate-500 shrink-0 uppercase">{item.pos}</span>
@@ -160,8 +160,8 @@ function TradeLog({ tradeHubData, loadingTradeHub, tradeHubUserId, user, loadUse
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-widest text-emerald-400 mb-1.5">You Received</div>
                 <div className="space-y-1">
-                  {allReceived.map((item) => (
-                    <div key={item.name} className="flex items-center justify-between rounded-lg bg-slate-800 px-2 py-1.5">
+                  {allReceived.map((item, idx) => (
+                    <div key={`${item.name}-${idx}`} className="flex items-center justify-between rounded-lg bg-slate-800 px-2 py-1.5">
                       <div className="flex items-center gap-1.5 min-w-0">
                         <span className="text-xs text-white truncate">{item.name}</span>
                         <span className="text-[10px] text-slate-500 shrink-0 uppercase">{item.pos}</span>

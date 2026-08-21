@@ -2,7 +2,6 @@
 import { useState, useEffect, useMemo } from "react";
 import type {
   ScoutingGame,
-  Prospect,
   ProspectWithStats,
   RBPlay,
   QBPlay,
@@ -10,9 +9,13 @@ import type {
 } from "../../lib/types";
 import type { GameSnapStatsRow, LoadPositionPlaysFn } from "../ScoutingHub";
 import {
-  computeRBAboveExpected,
-  computeQBAboveExpected,
-  computeTERouteAboveExpected,
+  buildRBBaselines,
+  computeRBAboveExpectedForPlays,
+  buildQBBaselines,
+  resolveBaselines,
+  computeQBAAEForPlays,
+  buildTERouteBaselines,
+  computeTERouteAboveExpectedForPlays,
 } from "../../lib/scouting/aboveExpected";
 
 type SortKey = "player" | "school" | "season_year" | "opponent" | "game_type" | "snaps" | "above_exp";
@@ -44,11 +47,13 @@ interface Props {
   onSelectProspect: (p: ProspectWithStats) => void;
 }
 
-// Above Expected metric label per position. WR=SAE, RB=SRAE, QB=AAE, TE=TE-SAER
-// (route variant; TE-SAEB blocking lives only on the TE stats table).
+// Above Expected metric label per position. RB=SRAE, QB=AAE, TE=TE-SAER
+// (route variant; TE-SAEB blocking lives only on the TE stats table). WR's
+// SAE requires route_plays + league_route_baselines, which this cross-position
+// view doesn't fetch (see WR's own Charting Board for per-game SAE), so WR
+// rows show no per-game value here rather than a repeated season aggregate.
 function aboveExpectedLabel(position: string | null | undefined): string {
   switch (position) {
-    case "WR": return "SAE";
     case "RB": return "SRAE";
     case "QB": return "AAE";
     case "TE": return "TE-SAER";
@@ -86,24 +91,33 @@ export default function GamesLog({
     return m;
   }, [gameSnapStats]);
 
-  // Above Expected per prospect — position-aware. WR comes from
-  // ProspectWithStats.adj_success_above_exp (already computed by the
-  // server-side aggregate path). RB/QB/TE come from the lazy-loaded raw
-  // plays (same math as the Analysis tab — see lib/scouting/aboveExpected.ts).
-  const aboveExpectedByProspect = useMemo(() => {
+  // Above Expected per GAME (not per prospect) — position-aware, matching the
+  // per-game badge on each position's own Charting Board: baselines are built
+  // once from the full league play set, then each game's own plays (filtered
+  // by game_id) are scored against them, so every row reflects that specific
+  // game rather than the prospect's season/career aggregate repeated on every
+  // row. Deliberately ungated (no min-sample floor) — single-game samples are
+  // always small, that's expected here, same as the position boards.
+  const rbBaselines = useMemo(() => buildRBBaselines(rbPlays), [rbPlays]);
+  const qbResolvedBaselines = useMemo(() => resolveBaselines(buildQBBaselines(qbPlays)), [qbPlays]);
+  const teRouteBaselines = useMemo(() => buildTERouteBaselines(tePlays), [tePlays]);
+
+  const aboveExpectedByGame = useMemo(() => {
     const m = new Map<string, number | null>();
-    const prospectList: Prospect[] = prospects;
-    for (const p of prospects) {
-      if (p.position === "WR") m.set(p.id, p.adj_success_above_exp ?? null);
+    for (const g of games) {
+      const p = prospectMap[g.prospect_id];
+      if (!p) continue;
+      if (p.position === "RB") {
+        m.set(g.id, computeRBAboveExpectedForPlays(rbPlays.filter((pl) => pl.game_id === g.id), rbBaselines));
+      } else if (p.position === "QB") {
+        m.set(g.id, computeQBAAEForPlays(qbPlays.filter((pl) => pl.game_id === g.id), qbResolvedBaselines));
+      } else if (p.position === "TE") {
+        m.set(g.id, computeTERouteAboveExpectedForPlays(tePlays.filter((pl) => pl.game_id === g.id), teRouteBaselines));
+      }
+      // WR: no per-game value available in this view (see aboveExpectedLabel).
     }
-    const rb = computeRBAboveExpected(prospectList, games, rbPlays);
-    const qb = computeQBAboveExpected(prospectList, games, qbPlays);
-    const te = computeTERouteAboveExpected(prospectList, games, tePlays);
-    for (const [id, v] of rb) m.set(id, v);
-    for (const [id, v] of qb) m.set(id, v);
-    for (const [id, v] of te) m.set(id, v);
     return m;
-  }, [prospects, games, rbPlays, qbPlays, tePlays]);
+  }, [games, prospectMap, rbPlays, qbPlays, tePlays, rbBaselines, qbResolvedBaselines, teRouteBaselines]);
 
   const years = useMemo(() => {
     const s = new Set(games.map((g) => g.season_year));
@@ -127,8 +141,8 @@ export default function GamesLog({
     list = [...list].sort((a, b) => {
       const pa = prospectMap[a.prospect_id];
       const pb = prospectMap[b.prospect_id];
-      const aeA = aboveExpectedByProspect.get(a.prospect_id);
-      const aeB = aboveExpectedByProspect.get(b.prospect_id);
+      const aeA = aboveExpectedByGame.get(a.id);
+      const aeB = aboveExpectedByGame.get(b.id);
 
       let va: string | number = 0;
       let vb: string | number = 0;
@@ -147,7 +161,7 @@ export default function GamesLog({
       return sortDir === "asc" ? va - (vb as number) : (vb as number) - va;
     });
     return list;
-  }, [games, yearFilter, search, sortKey, sortDir, snapsByGame, prospectMap, aboveExpectedByProspect]);
+  }, [games, yearFilter, search, sortKey, sortDir, snapsByGame, prospectMap, aboveExpectedByGame]);
 
   function toggleSort(k: SortKey) {
     if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -209,7 +223,7 @@ export default function GamesLog({
             <tbody className="divide-y divide-slate-900">
               {rows.map((g) => {
                 const p = prospectMap[g.prospect_id];
-                const ae = aboveExpectedByProspect.get(g.prospect_id);
+                const ae = aboveExpectedByGame.get(g.id);
                 const aeFmt = fmtAboveExpected(ae);
                 const snaps = snapsByGame[g.id] ?? 0;
                 return (

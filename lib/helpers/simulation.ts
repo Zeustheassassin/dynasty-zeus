@@ -367,6 +367,14 @@ export function simulateLeague({
       const pool = rosterPoolMap.get(rosterId) || [];
       if (simWeek > 0 && pool.length > 0) {
         const unavail = new Set<string>();
+        // NOTE: rng() is only drawn for players NOT on bye this week — bye-week
+        // players consume zero random draws. Harmless today since bye status is
+        // deterministic per player/week (same for a given roster+simSalt every
+        // time), but it means the shape of the RNG stream depends on roster
+        // composition and pool ordering. Do NOT reorder `pool` or change the
+        // bye-skip logic without expecting every subsequent random draw in this
+        // sim to shift — that would silently change results for otherwise-
+        // unrelated simSalt values, including already-committed sim rows.
         pool.forEach((p) => {
           const byeWk = getPlayerByeWeek(p.id, p.nflTeam);
           if (byeWk > 0 && byeWk === simWeek) {

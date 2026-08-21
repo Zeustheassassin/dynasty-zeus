@@ -110,7 +110,7 @@ export function computeFinderAdjustedNet(
   const { onReceive: starOnReceive, onGive: starOnGive } = computeFinderStarDiscounts(
     give, trade.receive, trade.givePicks, trade.receivePicks,
   );
-  const giveTotalAdj    = giveTotal + myDropCost + starOnGive;
+  const giveTotalAdj    = Math.max(0, giveTotal + myDropCost + starOnGive);
   const receiveTotalAdj = Math.max(0, receiveTotal + oppDropCost + starOnReceive);
   return {
     giveTotal, receiveTotal, myDropCost, oppDropCost, starOnGive, starOnReceive,

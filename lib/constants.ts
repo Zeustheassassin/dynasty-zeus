@@ -151,6 +151,24 @@ export const COMPILE_CONCURRENCY = 15;
 /** Max parallel pick fetches (lower to avoid Sleeper rate limits) */
 export const COMPILE_PICKS_CONCURRENCY = 8;
 
+/**
+ * Hard ceiling on distinct connected Sleeper users expanded to per compile
+ * run. Without this, a caller's own real network (or a fabricated
+ * sleeperUserId, prior to the ownership check) can drive the Step 2
+ * expansion to thousands of (user, year) pairs — an unbounded sequential
+ * crawl against Sleeper's IP-level rate limit. Users beyond the cap are
+ * simply not expanded; the compile still runs on the rest.
+ */
+export const COMPILE_MAX_CONNECTED_USERS = 500;
+
+/**
+ * Hard ceiling on distinct leagues scanned for rookie drafts per compile
+ * run (Step 3). Same rationale as COMPILE_MAX_CONNECTED_USERS — bounds
+ * total Sleeper request volume regardless of how large the underlying
+ * network is.
+ */
+export const COMPILE_MAX_LEAGUES = 4000;
+
 /** Default request timeout for Sleeper API calls (ms) */
 export const SLEEPER_REQUEST_TIMEOUT_MS = 15_000;
 

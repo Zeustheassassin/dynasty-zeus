@@ -48,6 +48,8 @@ export default function HistoricalBigBoards() {
   }, [supabaseUser]);
 
   async function deleteSnapshot(id: string) {
+    const snap = snapshots.find((s) => s.id === id);
+    if (!window.confirm(`Delete "${snap?.name ?? "this snapshot"}"? This cannot be undone.`)) return;
     setDeleting(id);
     await supabase.from("big_board_snapshots").delete().eq("id", id);
     const remaining = snapshots.filter((s) => s.id !== id);

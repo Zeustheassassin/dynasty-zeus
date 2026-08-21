@@ -86,7 +86,9 @@ export const TE_STAT_COLS: ColDef[] = [
   { key: "raw_cont_tgt", label: "ContTgt",group: "Raw", fmt: "count", width: 60 },
   { key: "raw_cont_ctch",label: "ContCtch",group:"Raw", fmt: "count", width: 68 },
   { key: "raw_btk",      label: "BTkl",   group: "Raw", fmt: "count", width: 46 },
-  { key: "ypc",          label: "YPC",    group: "Raw", fmt: "dec1",  colorDir: 1, width: 50 },
+  // No YPC column — TEPlay doesn't track yards (unlike WR's route_plays),
+  // so there's no real data to show; a fake 0.0 for every player is worse
+  // than no column at all.
 ];
 
 function pct(n: number, d: number): number | null {
@@ -96,6 +98,26 @@ function pct(n: number, d: number): number | null {
 
 function openPct(plays: TEPlay[], filter: (p: TEPlay) => boolean): number | null {
   const sub = plays.filter(filter).filter((p) => p.was_open !== null);
+  if (sub.length === 0) return null;
+  return pct(sub.filter((p) => p.was_open === true).length, sub.length);
+}
+
+// Minimum-sample thresholds for the By Coverage columns — same values as
+// WRStatsTable's cvgOpenPct: tiny denominators surface as eye-catching
+// 0%/100% values that aren't meaningful. Only applied to coverage (not
+// positioning/location/route) columns, matching WR's precedent.
+const MIN_MAN_ROUTES = 15;   // applied to combined man + press
+const MIN_ZONE_ROUTES = 15;
+const MIN_PRESS_ROUTES = 10;
+
+function cvgOpenPct(routePlays: TEPlay[], cvg: "man" | "zone" | "press" | "double"): number | null {
+  const filter = cvg === "man"
+    ? (pl: TEPlay) => pl.coverage === "man" || pl.coverage === "press"
+    : (pl: TEPlay) => pl.coverage === cvg;
+  const sub = routePlays.filter(filter).filter((p) => p.was_open !== null);
+  if (cvg === "man" && sub.length < MIN_MAN_ROUTES) return null;
+  if (cvg === "zone" && sub.length < MIN_ZONE_ROUTES) return null;
+  if (cvg === "press" && sub.length < MIN_PRESS_ROUTES) return null;
   if (sub.length === 0) return null;
   return pct(sub.filter((p) => p.was_open === true).length, sub.length);
 }
@@ -140,7 +162,6 @@ export function buildTEStatRows(prospects: Prospect[], games: ScoutingGame[], te
         const drops = tgts.filter((pl) => pl.dropped === true);
         const contTgt = routePlays.filter((pl) => pl.contested_target === true);
         const contCatch = contTgt.filter((pl) => pl.contested_catch === true);
-        const yds = 0; // TEPlay has no yards field
         const btk = pPlays.filter((pl) => pl.broken_tackle).length;
 
         const te_saer = teSaerMap.get(p.id) ?? null;
@@ -192,15 +213,7 @@ export function buildTEStatRows(prospects: Prospect[], games: ScoutingGame[], te
           // into Man's numerator/denominator for the % calc. Press still
           // appears as its own column. Total routes are unchanged.
           ...Object.fromEntries(
-            COVERAGES.map((cvg) => [
-              `cvg_${cvg}_open`,
-              openPct(
-                routePlays,
-                cvg === "man"
-                  ? (pl) => pl.coverage === "man" || pl.coverage === "press"
-                  : (pl) => pl.coverage === cvg,
-              ),
-            ])
+            COVERAGES.map((cvg) => [`cvg_${cvg}_open`, cvgOpenPct(routePlays, cvg)])
           ),
           ...Object.fromEntries(
             COVERAGES.map((cvg) => [
@@ -237,7 +250,6 @@ export function buildTEStatRows(prospects: Prospect[], games: ScoutingGame[], te
           raw_cont_tgt: contTgt.length,
           raw_cont_ctch: contCatch.length,
           raw_btk:      btk,
-          ypc: yds,
         } satisfies StatRow;
       });
 }

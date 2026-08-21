@@ -44,6 +44,8 @@ export default function HistoricalLeagueDrafts() {
     : leagueSnapshots[0]?.id ?? null;
 
   async function deleteSnapshot(id: string) {
+    const snap = snapshots.find((s) => s.id === id);
+    if (!window.confirm(`Delete "${snap?.name ?? "this snapshot"}"? This cannot be undone.`)) return;
     setDeleting(id);
     await supabase.from("league_draft_snapshots").delete().eq("id", id);
     setSnapshots((prev) => prev.filter((s) => s.id !== id));

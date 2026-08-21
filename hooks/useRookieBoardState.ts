@@ -39,6 +39,88 @@ export interface UserRookieOverrides {
 
 const EMPTY_OVERRIDES: UserRookieOverrides = { added: [], nameEdits: {} };
 
+interface AdpPlayerInfo {
+  player_id: string;
+  name: string;
+  position: string;
+  team: string;
+  adp: number;
+}
+
+// Where the saved board order comes from: the DB (logged in, has a saved row),
+// the localStorage cache (logged out, or DB had nothing), or nowhere yet
+// (first time this board version has loaded for this browser/user).
+type OrderSource =
+  | { kind: "supabase" | "local"; names: string[] }
+  | { kind: "first-time" };
+
+// Everything fetched over the network (Sleeper ADP, FantasyCalc, the sheet,
+// and the saved order), cached here so that adding/editing/removing an
+// override only recomputes the board in memory — it never re-fetches. Rookie
+// overrides change on every keystroke of a name edit; re-hitting Sleeper's
+// ADP endpoint on each one risks tripping their rate limiting.
+interface RawBoardData {
+  sheetPlayers: { name: string; position: string }[]; // raw sheet names, corrections NOT yet applied
+  adpByName: Map<string, AdpPlayerInfo>;
+  fcByName: Map<string, number>;
+  fcBySleeperId: Map<string, number>;
+  orderSource: OrderSource;
+}
+
+function buildBoard(raw: RawBoardData, overrides: UserRookieOverrides): RookieBoardPlayer[] {
+  const { sheetPlayers, adpByName, fcByName, fcBySleeperId, orderSource } = raw;
+
+  const correctedSheet = sheetPlayers.map((player) => {
+    const norm = normalizeRookieName(player.name);
+    // User edit takes precedence over the built-in correction list.
+    const corrected = overrides.nameEdits[norm] ?? ROOKIE_NAME_CORRECTIONS[norm];
+    return { name: corrected ?? player.name, position: player.position };
+  });
+
+  // Append user-added rookies that aren't already in the upstream sheet.
+  const sheetNameSet = new Set(correctedSheet.map((p) => normalizeRookieName(p.name)));
+  for (const added of overrides.added) {
+    if (!sheetNameSet.has(normalizeRookieName(added.name))) {
+      correctedSheet.push({ name: added.name, position: added.position });
+    }
+  }
+
+  const canonicalBoard = correctedSheet
+    .map((player) => {
+      const norm = normalizeRookieName(player.name);
+      const adpPlayer = adpByName.get(norm);
+      return {
+        player_id: adpPlayer?.player_id || null,
+        name: adpPlayer?.name || player.name,
+        position: adpPlayer?.position || player.position,
+        team: adpPlayer?.team || "",
+        adp: typeof adpPlayer?.adp === "number" ? adpPlayer.adp : Number.MAX_SAFE_INTEGER,
+        // Match FC value: name first, then Sleeper ID fallback
+        fcValue: fcByName.get(norm)
+          ?? fcByName.get(normalizeRookieName(adpPlayer?.name || ""))
+          ?? (adpPlayer?.player_id ? (fcBySleeperId.get(adpPlayer.player_id) ?? 0) : 0),
+      };
+    })
+    // Sort by FantasyCalc Superflex dynasty value (descending). Falls back to Sleeper ADP then name.
+    .sort((a, b) => {
+      if (b.fcValue !== a.fcValue) return b.fcValue - a.fcValue;
+      if (a.adp !== b.adp) return a.adp - b.adp;
+      return a.name.localeCompare(b.name);
+    });
+
+  if (orderSource.kind === "first-time") return canonicalBoard;
+
+  const orderMap = new Map(orderSource.names.map((name, i) => [normalizeRookieName(name), i]));
+  return [...canonicalBoard].sort((a, b) => {
+    const ia = orderMap.get(normalizeRookieName(a.name)) ?? 9999;
+    const ib = orderMap.get(normalizeRookieName(b.name)) ?? 9999;
+    if (ia !== ib) return ia - ib;
+    // New players not in saved order: sort by FC value then ADP
+    if (b.fcValue !== a.fcValue) return b.fcValue - a.fcValue;
+    return a.adp - b.adp;
+  });
+}
+
 export interface UseRookieBoardStateReturn {
   rookies: RookieBoardPlayer[];
   setRookies: Dispatch<SetStateAction<RookieBoardPlayer[]>>;
@@ -62,6 +144,12 @@ export function useRookieBoardState(supabaseUser: { id: string } | null): UseRoo
   // supabaseUser as a dependency (which would overwrite Supabase data on login).
   const supabaseUserRef = useRef<{ id: string } | null>(null);
   useEffect(() => { supabaseUserRef.current = supabaseUser; }, [supabaseUser]);
+
+  // The network-fetched sheet/ADP/FC/saved-order data, cached so overrides
+  // can be re-applied (buildBoard) without re-fetching. Null until the first
+  // load completes.
+  const rawDataRef = useRef<RawBoardData | null>(null);
+  const [rawDataVersion, setRawDataVersion] = useState(0);
 
   // Load user overrides (additions + name edits) from Supabase on login.
   useEffect(() => {
@@ -163,14 +251,19 @@ export function useRookieBoardState(supabaseUser: { id: string } | null): UseRoo
     }
   }, [rookies]); // intentionally omits supabaseUser — use ref to avoid overwriting Supabase on login
 
-  // Load the rookie board.
-  // Runs on mount AND whenever supabaseUser.id changes (login / logout).
-  // Priority: Supabase (if logged in) > localStorage > FC default.
+  // Fetch the sheet, Sleeper ADP, FantasyCalc values, and saved order.
+  // Runs on mount AND whenever supabaseUser.id changes (login / logout) —
+  // deliberately does NOT depend on rookieOverrides. Overrides change on
+  // every keystroke of a name edit/add, and re-running this would mean a new
+  // Sleeper ADP + FantasyCalc fetch per keystroke; instead the results are
+  // cached in rawDataRef and re-combined with overrides by buildBoard below,
+  // entirely in memory.
   useEffect(() => {
     const controller = new AbortController();
     const { signal } = controller;
+    let cancelled = false;
 
-    const loadRookieBoard = async () => {
+    const loadRawData = async () => {
       // 1. Fetch sheet, Sleeper ADP (for metadata), and FC Superflex (2QB) raw data in parallel
       const [sheetText, adpResponse, fcRaw] = await Promise.all([
         fetch('/api/rookie-board-sheet', { signal }).then((res) => res.text()),
@@ -178,6 +271,7 @@ export function useRookieBoardState(supabaseUser: { id: string } | null): UseRoo
         fetch(`${FANTASYCALC_BASE_URL}/values/current?isDynasty=true&numQbs=2&numTeams=12&ppr=1`, { signal })
           .then((res) => res.json()).catch(() => []),
       ]);
+      if (cancelled) return;
 
       // Build name → FC value map and sleeperId → FC value map
       const fcByName = new Map<string, number>();
@@ -198,41 +292,23 @@ export function useRookieBoardState(supabaseUser: { id: string } | null): UseRoo
         setFcNameValues(Object.fromEntries(fcByName));
       }
 
+      // Raw sheet names — corrections are applied later by buildBoard, not here.
       const sheetPlayers = sheetText
         .split("\n")
         .slice(1)
         .map((row) => {
           const cols = row.split(",");
-          const rawName = cols[0]?.replace(/"/g, "").trim() ?? "";
-          const norm = normalizeRookieName(rawName);
-          // User edit takes precedence over the built-in correction list.
-          const corrected = rookieOverrides.nameEdits[norm] ?? ROOKIE_NAME_CORRECTIONS[norm];
           return {
-            name: corrected ?? rawName,
+            name: cols[0]?.replace(/"/g, "").trim() ?? "",
             position: cols[1]?.replace(/"/g, "").trim(),
           };
         })
         .filter((player) => player.name && player.name !== "Player Invalid");
 
-      // Append user-added rookies that aren't already in the upstream sheet.
-      const sheetNameSet = new Set(sheetPlayers.map((p) => normalizeRookieName(p.name)));
-      for (const added of rookieOverrides.added) {
-        if (!sheetNameSet.has(normalizeRookieName(added.name))) {
-          sheetPlayers.push({ name: added.name, position: added.position });
-        }
-      }
-
       interface SleeperAdpEntry {
         player_id?: string | number;
         player?: { first_name?: string; last_name?: string; position?: string; team?: string };
         stats?: { adp_dynasty_2qb?: number };
-      }
-      interface AdpPlayerInfo {
-        player_id: string;
-        name: string;
-        position: string;
-        team: string;
-        adp: number;
       }
       // Sleeper ADP only used for player_id, position, team metadata — NOT for sort order
       const adpByName = new Map<string, AdpPlayerInfo>();
@@ -258,31 +334,9 @@ export function useRookieBoardState(supabaseUser: { id: string } | null): UseRoo
           });
         });
 
-      const canonicalBoard = sheetPlayers
-        .map((player) => {
-          const norm = normalizeRookieName(player.name);
-          const adpPlayer = adpByName.get(norm);
-          return {
-            player_id: adpPlayer?.player_id || null,
-            name: adpPlayer?.name || player.name,
-            position: adpPlayer?.position || player.position,
-            team: adpPlayer?.team || "",
-            adp: typeof adpPlayer?.adp === "number" ? adpPlayer.adp : Number.MAX_SAFE_INTEGER,
-            // Match FC value: name first, then Sleeper ID fallback
-            fcValue: fcByName.get(norm)
-              ?? fcByName.get(normalizeRookieName(adpPlayer?.name || ""))
-              ?? (adpPlayer?.player_id ? (fcBySleeperId.get(adpPlayer.player_id) ?? 0) : 0),
-          };
-        })
-        // Sort by FantasyCalc Superflex dynasty value (descending). Falls back to Sleeper ADP then name.
-        .sort((a, b) => {
-          if (b.fcValue !== a.fcValue) return b.fcValue - a.fcValue;
-          if (a.adp !== b.adp) return a.adp - b.adp;
-          return a.name.localeCompare(b.name);
-        });
-
-      // 2. Try Supabase for saved order (if logged in) — isolated try/catch so a network
-      //    error here doesn't abort the whole function and leave rookies state stale.
+      // 2. Resolve the saved order once: Supabase (if logged in) > localStorage > none yet.
+      //    Isolated try/catch so a Supabase error falls through to localStorage.
+      let orderSource: OrderSource = { kind: "first-time" };
       const currentUser = supabaseUserRef.current;
       if (currentUser) {
         try {
@@ -293,58 +347,42 @@ export function useRookieBoardState(supabaseUser: { id: string } | null): UseRoo
             .eq("year", ROOKIE_BOARD_VERSION)
             .single();
           if (!error && data?.players && Array.isArray(data.players) && data.players.length > 0) {
-            const orderMap = new Map<string, number>(
-              (data.players as string[]).map((name, i) => [normalizeRookieName(name), i])
-            );
-            const ordered = [...canonicalBoard].sort((a, b) => {
-              const ia = orderMap.get(normalizeRookieName(a.name)) ?? 9999;
-              const ib = orderMap.get(normalizeRookieName(b.name)) ?? 9999;
-              if (ia !== ib) return ia - ib;
-              if (b.fcValue !== a.fcValue) return b.fcValue - a.fcValue;
-              return a.adp - b.adp;
-            });
-            setLocalStorageItem(`rookieBoard_${ROOKIE_BOARD_VERSION}`, ordered);
-            setRookies(ordered);
-            return;
+            orderSource = { kind: "supabase", names: data.players as string[] };
           }
         } catch {
           // Supabase unreachable — fall through to localStorage / FC default
         }
       }
-
-      // 3. Fall back to localStorage order
-      const saved = getLocalStorageItem<RookieBoardPlayer[] | null>(`rookieBoard_${ROOKIE_BOARD_VERSION}`, null);
-      const hasReset = getLocalStorageItem<boolean>(ROOKIE_BOARD_RESET_KEY, false);
-
-      if (!hasReset || !saved) {
-        setRookies(canonicalBoard);
-        setLocalStorageItem(`rookieBoard_${ROOKIE_BOARD_VERSION}`, canonicalBoard);
-        setLocalStorageItem(ROOKIE_BOARD_RESET_KEY, true);
-        return;
+      if (orderSource.kind === "first-time") {
+        const saved = getLocalStorageItem<RookieBoardPlayer[] | null>(`rookieBoard_${ROOKIE_BOARD_VERSION}`, null);
+        const hasReset = getLocalStorageItem<boolean>(ROOKIE_BOARD_RESET_KEY, false);
+        if (hasReset && saved) {
+          const savedNames = saved.map((p: RookieBoardPlayer | string) => (typeof p === "string" ? p : p.name));
+          orderSource = { kind: "local", names: savedNames };
+        }
       }
 
-      const savedNames: string[] = saved.map((p: RookieBoardPlayer | string) =>
-        typeof p === "string" ? p : p.name
-      );
-      const canonicalNames = new Set(canonicalBoard.map((p) => normalizeRookieName(p.name)));
-      const validSaved = savedNames.filter((n) => canonicalNames.has(normalizeRookieName(n)));
-      const orderMap = new Map(validSaved.map((name, i) => [normalizeRookieName(name), i]));
-      const merged = [...canonicalBoard].sort((a, b) => {
-        const ia = orderMap.get(normalizeRookieName(a.name)) ?? 9999;
-        const ib = orderMap.get(normalizeRookieName(b.name)) ?? 9999;
-        if (ia !== ib) return ia - ib;
-        // New players not in saved order: sort by FC value then ADP
-        if (b.fcValue !== a.fcValue) return b.fcValue - a.fcValue;
-        return a.adp - b.adp;
-      });
-
-      setLocalStorageItem(`rookieBoard_${ROOKIE_BOARD_VERSION}`, merged);
-      setRookies(merged);
+      if (cancelled) return;
+      rawDataRef.current = { sheetPlayers, adpByName, fcByName, fcBySleeperId, orderSource };
+      setRawDataVersion((v) => v + 1); // refs don't trigger renders — bump to run the build effect below
     };
 
-    loadRookieBoard().catch(() => {});
-    return () => { controller.abort(); };
-  }, [supabaseUser?.id, rookieOverrides]);
+    loadRawData().catch(() => {});
+    return () => { cancelled = true; controller.abort(); };
+  }, [supabaseUser?.id]);
+
+  // Recombine the cached raw data with the current overrides into the visible
+  // board — pure in-memory work, runs whenever either changes. This is what
+  // makes adding/editing/removing a rookie a local re-sort instead of a
+  // network reload.
+  useEffect(() => {
+    const raw = rawDataRef.current;
+    if (!raw) return;
+    const board = buildBoard(raw, rookieOverrides);
+    setRookies(board);
+    setLocalStorageItem(`rookieBoard_${ROOKIE_BOARD_VERSION}`, board);
+    if (raw.orderSource.kind === "first-time") setLocalStorageItem(ROOKIE_BOARD_RESET_KEY, true);
+  }, [rawDataVersion, rookieOverrides]);
 
   return {
     rookies,

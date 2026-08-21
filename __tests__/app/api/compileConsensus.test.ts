@@ -36,7 +36,28 @@ let inserts: CapturedInsert[] = [];
 // Lets a test force an upsert to fail (so the prune gate is exercised).
 let upsertError: { message: string } | null = null;
 
+// The Sleeper user_id currently on file in user_sleeper_links for auth-user-1.
+// makeReq() auto-links this to whatever sleeperUserId a test sends, so the
+// ownership check passes by default — tests exercising a mismatch override it
+// after calling makeReq.
+let linkedSleeperUserId: string | null = null;
+
 function makeFrom(table: string) {
+  if (table === "user_sleeper_links") {
+    return {
+      select: vi.fn(() => {
+        const chain = {
+          eq: () => chain,
+          maybeSingle: () =>
+            Promise.resolve({
+              data: linkedSleeperUserId != null ? { sleeper_user_id: linkedSleeperUserId } : null,
+              error: null,
+            }),
+        };
+        return chain;
+      }),
+    };
+  }
   return {
     upsert: vi.fn((rows: unknown[], opts: unknown) => {
       upserts.push({ table, rows, opts });
@@ -90,12 +111,16 @@ vi.mock("../../../lib/sleeperServer", () => ({
 }));
 
 import { POST } from "@/app/api/compile-consensus/route";
+import { COMPILE_MAX_CONNECTED_USERS, COMPILE_MAX_LEAGUES } from "@/lib/constants";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 const THIS_YEAR = new Date().getFullYear();
 
 function makeReq(body: unknown): Request {
+  if (body && typeof body === "object" && "sleeperUserId" in body) {
+    linkedSleeperUserId = String((body as { sleeperUserId?: unknown }).sleeperUserId ?? "");
+  }
   return new Request("http://localhost/api/compile-consensus", {
     method: "POST",
     headers: { "content-type": "application/json", "x-forwarded-for": "1.2.3.4" },
@@ -127,6 +152,7 @@ beforeEach(() => {
   deletes = [];
   inserts = [];
   upsertError = null;
+  linkedSleeperUserId = null;
   fetchResponders.length = 0;
 
   checkRateLimit.mockImplementation(async () => ({ allowed: true, remaining: 4 }));
@@ -204,6 +230,27 @@ describe("POST compile-consensus — guards", () => {
     );
     expect(res.status).toBe(401);
     expect((await res.json()).code).toBe("UNAUTHORIZED");
+  });
+
+  it("returns 403 SLEEPER_ID_MISMATCH when sleeperUserId doesn't match the caller's linked account", async () => {
+    const req = makeReq({ sleeperUserId: "999", accessToken: "t", years: [THIS_YEAR] });
+    // Simulate the authenticated user's real link pointing at a different Sleeper account —
+    // i.e. someone tampering with the request body to scan a network that isn't theirs.
+    linkedSleeperUserId = "1";
+    const res = await POST(req as never);
+    expect(res.status).toBe(403);
+    expect((await res.json()).code).toBe("SLEEPER_ID_MISMATCH");
+    // Must reject before any Sleeper fan-out happens.
+    expect(safeFetch).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 SLEEPER_ID_MISMATCH when the caller has no user_sleeper_links row at all", async () => {
+    const req = makeReq({ sleeperUserId: "1", accessToken: "t", years: [THIS_YEAR] });
+    linkedSleeperUserId = null; // no link on file
+    const res = await POST(req as never);
+    expect(res.status).toBe(403);
+    expect((await res.json()).code).toBe("SLEEPER_ID_MISMATCH");
+    expect(safeFetch).not.toHaveBeenCalled();
   });
 });
 
@@ -363,31 +410,36 @@ describe("POST compile-consensus — compilation stream", () => {
     });
 
     // Re-mock createClient for this test to record relative ordering of upsert vs delete.
+    // user_sleeper_links still goes through the shared makeFrom() so the ownership
+    // check (auto-linked by makeReq()) resolves normally.
     createClient.mockImplementationOnce(() => ({
       auth: { getUser },
-      from: vi.fn((table: string) => ({
-        upsert: vi.fn((rows: unknown[], opts: unknown) => {
-          if (table === "consensus_draft_cache") callOrder.push("upsert-cache");
-          upserts.push({ table, rows, opts });
-          return Promise.resolve({ error: null });
-        }),
-        insert: vi.fn((rows: unknown[]) => {
-          if (table === "consensus_draft_history") callOrder.push("insert-history");
-          inserts.push({ table, rows });
-          return Promise.resolve({ error: null });
-        }),
-        delete: vi.fn(() => {
-          const chain = {
-            eq: () => chain,
-            lt: () => chain,
-            then: (resolve: (v: { error: null }) => void) => {
-              callOrder.push("delete-cache");
-              return resolve({ error: null });
-            },
-          };
-          return chain;
-        }),
-      })),
+      from: vi.fn((table: string) => {
+        if (table === "user_sleeper_links") return makeFrom(table);
+        return {
+          upsert: vi.fn((rows: unknown[], opts: unknown) => {
+            if (table === "consensus_draft_cache") callOrder.push("upsert-cache");
+            upserts.push({ table, rows, opts });
+            return Promise.resolve({ error: null });
+          }),
+          insert: vi.fn((rows: unknown[]) => {
+            if (table === "consensus_draft_history") callOrder.push("insert-history");
+            inserts.push({ table, rows });
+            return Promise.resolve({ error: null });
+          }),
+          delete: vi.fn(() => {
+            const chain = {
+              eq: () => chain,
+              lt: () => chain,
+              then: (resolve: (v: { error: null }) => void) => {
+                callOrder.push("delete-cache");
+                return resolve({ error: null });
+              },
+            };
+            return chain;
+          }),
+        };
+      }),
     }) as never);
 
     const res = await POST(
@@ -484,5 +536,64 @@ describe("POST compile-consensus — compilation stream", () => {
     // None of the excluded league_ids should have had their /drafts endpoint hit.
     const draftCalls = safeFetch.mock.calls.filter((c) => String(c[0]).endsWith("/drafts"));
     expect(draftCalls.length).toBe(0);
+  });
+
+  it("caps connected-user expansion at COMPILE_MAX_CONNECTED_USERS instead of scanning the whole network", async () => {
+    const lid = "L1";
+    // One more owner than the cap allows, all distinct from the requesting user.
+    const ownerCount = COMPILE_MAX_CONNECTED_USERS + 1;
+    const roster = Array.from({ length: ownerCount }, (_, i) => ({
+      roster_id: i + 2,
+      owner_id: `owner${i}`,
+    }));
+    roster.push({ roster_id: 1, owner_id: "200" }); // the requesting user's own roster
+
+    fetchResponders.push((url) => {
+      if (url.endsWith(`/user/200/leagues/nfl/${THIS_YEAR}`)) return [dynastyLeague(lid)];
+      if (url.endsWith(`/league/${lid}/rosters`)) return roster;
+      // Every connected owner's own league scan (and the league's /drafts call) returns nothing.
+      if (url.includes("/leagues/nfl/")) return [];
+      if (url.endsWith("/drafts")) return [];
+      if (url.endsWith("/players/nfl")) return {};
+      return undefined;
+    });
+
+    const res = await POST(
+      makeReq({ sleeperUserId: "200", accessToken: "t", years: [THIS_YEAR] }) as never
+    );
+    await readEvents(res);
+
+    // Exactly MAX_CONNECTED_USERS distinct owner leagues/nfl calls, not ownerCount.
+    const ownerLeagueCalls = new Set(
+      safeFetch.mock.calls
+        .map((c) => String(c[0]))
+        .filter((u) => /\/user\/owner\d+\/leagues\/nfl\//.test(u))
+    );
+    expect(ownerLeagueCalls.size).toBe(COMPILE_MAX_CONNECTED_USERS);
+  });
+
+  it("caps the league scan at COMPILE_MAX_LEAGUES instead of probing every discovered league for drafts", async () => {
+    const leagueCount = COMPILE_MAX_LEAGUES + 1;
+    const leagues = Array.from({ length: leagueCount }, (_, i) => dynastyLeague(`L${i}`));
+
+    fetchResponders.push((url) => {
+      if (url.endsWith(`/user/200/leagues/nfl/${THIS_YEAR}`)) return leagues;
+      // Every league is solely owned by the requesting user — no connected-user expansion.
+      if (url.includes("/rosters")) return [{ roster_id: 1, owner_id: "200" }];
+      if (url.includes("/leagues/nfl/")) return [];
+      if (url.endsWith("/drafts")) return [];
+      if (url.endsWith("/players/nfl")) return {};
+      return undefined;
+    });
+
+    const res = await POST(
+      makeReq({ sleeperUserId: "200", accessToken: "t", years: [THIS_YEAR] }) as never
+    );
+    await readEvents(res);
+
+    const draftCalls = new Set(
+      safeFetch.mock.calls.map((c) => String(c[0])).filter((u) => u.endsWith("/drafts"))
+    );
+    expect(draftCalls.size).toBe(COMPILE_MAX_LEAGUES);
   });
 });

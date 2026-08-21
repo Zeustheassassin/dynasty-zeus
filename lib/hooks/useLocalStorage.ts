@@ -96,6 +96,23 @@ export function removeLocalStorageItem(key: string): void {
   }
 }
 
+/** Remove every localStorage key starting with `prefix` — for keys that embed
+ *  a variable suffix (league id, board version) so an exact key isn't known
+ *  up front, e.g. clearing all `draftPicks_<leagueId>_<year>` entries on sign-out. */
+export function removeLocalStorageItemsByPrefix(prefix: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    const toRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(prefix)) toRemove.push(k);
+    }
+    for (const k of toRemove) localStorage.removeItem(k);
+  } catch {
+    // private browsing or sandboxed iframe
+  }
+}
+
 export function useLocalStorage<T>(
   key: string,
   defaultValue: T

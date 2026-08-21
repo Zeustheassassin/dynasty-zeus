@@ -638,6 +638,11 @@ export async function GET(req: NextRequest): Promise<Response> {
           leagueAdjustedFcValues,
           leagueAdjustedRedraftValues,
           projectedRookiesByRoster,
+          // Deliberately a fresh random seed each run, not the persisted per-
+          // browser simSalt_v1 — this is a server cron with no single "the"
+          // user session to match (each browser has its own persisted salt).
+          // The daily snapshot is a historical trend point, not meant to be
+          // byte-for-byte reproducible against any one live session's odds.
           simSalt: Math.floor(Math.random() * 1_000_000),
         });
         if (!simulation) return;
