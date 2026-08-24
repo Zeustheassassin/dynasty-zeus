@@ -13,6 +13,7 @@ import {
   posTotals,
   tradeWaiverAdj,
   isBalanced,
+  isBalancedWithStarDiscount,
   computeTeamWindow,
   getPickSlotBonus,
 } from "@/components/tradeHub/FinderScoring";
@@ -289,6 +290,14 @@ describe("tradeWaiverAdj", () => {
     // capAdj([5000]): min(round(5000*0.42), 550) = min(2100, 550) = 550
     expect(tradeWaiverAdj([5000, 5000], [5000])).toBe(550);
   });
+
+  it("caps the COMBINED credit across 2+ extras at BALANCE_ABS_CAP, not just per-extra", () => {
+    // Regression: give [2524], receive [1901, 1119, 947] (2 extras beyond give's count).
+    // Per-extra credit alone: min(round(1119*0.42),550)=470, min(round(947*0.42),750)=398 → 868,
+    // which by itself exceeds the 600-point abs cap this credit is supposed to fit inside.
+    // Reported bug: that let a trade with a raw ~1443 gap read as "balanced" for generation.
+    expect(tradeWaiverAdj([2524], [1901, 1119, 947])).toBe(600);
+  });
 });
 
 // ── isBalanced ────────────────────────────────────────────────────────
@@ -317,6 +326,46 @@ describe("isBalanced", () => {
     expect(isBalanced([1000], [400])).toBe(false);
     // [1100] vs [500]: gap=600, ratio≈0.45 < 0.85 → false
     expect(isBalanced([1100], [500])).toBe(false);
+  });
+});
+
+// ── isBalancedWithStarDiscount ──────────────────────────────────────────
+
+describe("isBalancedWithStarDiscount", () => {
+  it("rejects a 1-for-3 package that only 'balanced' via stacked waiver credit (toOrich regression)", () => {
+    // give [2524], receive [1901, 1119, 947]: raw gap 1443. Before the BALANCE_ABS_CAP
+    // total-credit cap on tradeWaiverAdj, stacked per-extra credit (470 + 398 = 868) shrank
+    // the gap the gate saw down to 575 and let isBalanced() pass on its own. With that credit
+    // now capped at 600, isBalanced() alone already rejects it (gap 843); the star-discount
+    // re-check below is a second, independent line of defense for the same failure mode.
+    expect(isBalanced([2524], [1901, 1119, 947])).toBe(false);
+    expect(isBalancedWithStarDiscount([2524], [1901, 1119, 947])).toBe(false);
+  });
+
+  it("rejects a 1-for-2 package where the raw gap is real even though isBalanced()'s credit hides it (FFMattD regression)", () => {
+    // give [2008], receive [1565, 1322]: raw gap 879, waiver credit (550) shrinks it to 329 for
+    // isBalanced(). The tiny star discount here (-1) is incidental — what actually catches this
+    // is that any >=2000 piece drops the waiver credit entirely on re-check.
+    expect(isBalanced([2008], [1565, 1322])).toBe(true);
+    expect(isBalancedWithStarDiscount([2008], [1565, 1322])).toBe(false);
+  });
+
+  it("still allows a 1-for-2 package with only a modest star discount", () => {
+    // give [2200], receive [1300, 1200]: raw gap only 300 (already close), a mild star
+    // discount (-200, ratio 0.591) still leaves it well within the abs/ratio caps.
+    expect(isBalancedWithStarDiscount([2200], [1300, 1200])).toBe(true);
+  });
+
+  it("rejects a 2-for-3 package where waiver credit alone hides the gap and no piece reaches the star-discount trigger", () => {
+    // give [1999, 1999], receive [1999, 1999, 1034]: the two big pairs match exactly (raw gap
+    // is just the 1034 extra), and since nothing here reaches the $2000 star-discount trigger,
+    // the discount is always 0 — under the old shortcut that returned "balanced" immediately
+    // once credit (434) shrank the raw 1034 gap to the 600 boundary. Real displayed net has no
+    // credit at all, so the card would show the full ~1034 gap despite the gate seeing exactly
+    // the cap. isBalanced() alone (with credit) still passes this; only the unconditional
+    // credit-free re-check catches it.
+    expect(isBalanced([1999, 1999], [1999, 1999, 1034])).toBe(true);
+    expect(isBalancedWithStarDiscount([1999, 1999], [1999, 1999, 1034])).toBe(false);
   });
 });
 

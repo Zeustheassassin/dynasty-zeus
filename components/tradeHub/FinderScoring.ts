@@ -1,6 +1,7 @@
 import type { SleeperPlayer, AugmentedPick } from "../../lib/types";
 import { CURRENT_YEAR } from "../../lib/helpers";
 import type { PlayerWithValue, PickWithValue } from "./shared";
+import { computeStarDiscounts } from "./calculatorUtils";
 
 // ── Player / pick classification ─────────────────────────────────────────────
 
@@ -101,14 +102,23 @@ export const posTotals = (plist: Array<{ position: string; value: number }>) => 
 // Waiver adj — kept ONLY for isBalanced gate (generation filter).
 // Surplus bodies below LOW_VALUE_FLOOR grant NO balance credit: a sub-700 throw-in is
 // noise and must not be the reason a package's value reconciles.
+// The combined credit across every surplus body is capped at BALANCE_ABS_CAP — the same
+// tolerance band this credit exists to nudge a package into. Per-extra credit (550/750) was
+// tuned for a SINGLE surplus body; stacking it across 2+ extras could otherwise manufacture
+// more credit than the entire abs cap by itself (e.g. two ~1100-value extras ≈ 850 credit on
+// a 600 cap), letting a raw gap well outside the cap pass purely on credit with no real-dollar
+// check ever applied to it.
 export const tradeWaiverAdj = (giveVals: number[], receiveVals: number[]) => {
   const diff = giveVals.length - receiveVals.length;
   if (diff === 0) return 0;
   const capAdj = (extras: number[]) =>
-    extras.reduce((s, v, i) => {
-      if (v < LOW_VALUE_FLOOR) return s; // sub-700 surplus body → zero phantom balance credit
-      return s + Math.min(Math.round(v * 0.42), i === 0 ? 550 : 750);
-    }, 0);
+    Math.min(
+      extras.reduce((s, v, i) => {
+        if (v < LOW_VALUE_FLOOR) return s; // sub-700 surplus body → zero phantom balance credit
+        return s + Math.min(Math.round(v * 0.42), i === 0 ? 550 : 750);
+      }, 0),
+      BALANCE_ABS_CAP,
+    );
   if (diff > 0) {
     const sg = [...giveVals].sort((a, b) => b - a);
     return capAdj(sg.slice(receiveVals.length));
@@ -135,6 +145,33 @@ export const isBalanced = (giveVals: number[], receiveVals: number[]) => {
   if (Math.abs(adjR - adjG) > BALANCE_ABS_CAP) return false;
   const higher = Math.max(adjG, adjR);
   const lower  = Math.min(adjG, adjR);
+  if (higher > 0 && lower / higher < BALANCE_RATIO_FLOOR) return false;
+  return true;
+};
+
+// isBalanced() above only sees raw values PLUS tradeWaiverAdj's cardinality credit, so a
+// package that "balances" purely on that credit (e.g. two ~$1,999 pieces matched dollar-for-
+// dollar, plus a third receive-side piece the credit absorbs) can still be visibly lopsided at
+// display time — computeFinderAdjustedNet never applies this credit, only the star discount.
+// This re-checks the SAME abs/ratio caps against raw totals plus whatever star discount applies
+// (zero included) and WITHOUT the credit, so the gate can never be more permissive than what the
+// card actually shows. Every candidate-generation call site in TradeFinder.tsx uses this instead
+// of the raw isBalanced() directly.
+//
+// Note this makes tradeWaiverAdj's credit unable to single-handedly admit a trade: this second,
+// credit-free check is always at least as strict as the first (credit can only shrink a gap, and
+// the discount can only widen one), so a trade needs to be raw-close enough to pass the credit-
+// free check on its own. Deliberate — the credit exists to make a genuinely close 1-for-2/1-for-3
+// package's cardinality mismatch not count against it, not to admit a package that's actually far
+// apart in the raw dollars a real opponent would see.
+export const isBalancedWithStarDiscount = (giveVals: number[], receiveVals: number[]) => {
+  if (!isBalanced(giveVals, receiveVals)) return false;
+  const { onGive, onReceive } = computeStarDiscounts(giveVals, receiveVals);
+  const gTotal = giveVals.reduce((s, v) => s + v, 0) + onGive;
+  const rTotal = receiveVals.reduce((s, v) => s + v, 0) + onReceive;
+  if (Math.abs(rTotal - gTotal) > BALANCE_ABS_CAP) return false;
+  const higher = Math.max(gTotal, rTotal);
+  const lower  = Math.min(gTotal, rTotal);
   if (higher > 0 && lower / higher < BALANCE_RATIO_FLOOR) return false;
   return true;
 };

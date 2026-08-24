@@ -24,7 +24,7 @@ import { FinderSearchInput } from "./FinderSearch";
 import FinderResults from "./FinderResults";
 import { FinderDirectionPanel } from "./FinderDirectionPanel";
 import {
-  packageOk, posTotals, isBalanced, LOW_VALUE_FLOOR,
+  packageOk, posTotals, isBalancedWithStarDiscount, LOW_VALUE_FLOOR,
 } from "./FinderScoring";
 import {
   finderPickKey,
@@ -661,7 +661,7 @@ function TradeFinder({
           for (const mp of myTop) {
             if (isBlockedSellDisposition(mp.player_id)) continue;
             for (const pick of oppPicks) {
-              if (!isBalanced([mp.value], [pick.value])) continue;
+              if (!isBalancedWithStarDiscount([mp.value], [pick.value])) continue;
               if (!qbSafe([mp])) continue;
               if (!oppReceiveOk(oppPlayers, [mp], [])) continue;
               results.push({
@@ -676,7 +676,7 @@ function TradeFinder({
             for (let i = 0; i < oppPicks.length; i++) {
               for (let j = i + 1; j < oppPicks.length; j++) {
                 const p1 = oppPicks[i], p2 = oppPicks[j];
-                if (!isBalanced([mp.value], [p1.value, p2.value])) continue;
+                if (!isBalancedWithStarDiscount([mp.value], [p1.value, p2.value])) continue;
                 if (!qbSafe([mp])) continue;
                 if (!oppReceiveOk(oppPlayers, [mp], [])) continue;
                 results.push({
@@ -695,7 +695,7 @@ function TradeFinder({
               if (!qbSafe([mp1, mp2])) continue;
               if (!oppReceiveOk(oppPlayers, [mp1, mp2], [])) continue;
               for (const pick of oppPicks) {
-                if (!isBalanced([mp1.value, mp2.value], [pick.value])) continue;
+                if (!isBalancedWithStarDiscount([mp1.value, mp2.value], [pick.value])) continue;
                 results.push({
                   give: [mp1, mp2], receive: [], givePicks: [], receivePicks: [pick], oppName, oppRosterId: oppRoster.roster_id,
                   score: -Math.abs(pick.value - (mp1.value + mp2.value)), net: pick.value - mp1.value - mp2.value, format: "2 for 1", draftCapital: true,
@@ -732,7 +732,7 @@ function TradeFinder({
           const mp = myTop[mi];
           for (let oi = 0; oi < oppCap(18); oi++) {
             const op = oppTop[oi];
-            if (!isBalanced([mp.value], [op.value])) continue;
+            if (!isBalancedWithStarDiscount([mp.value], [op.value])) continue;
             if (!qbSafe([mp])) continue;
             if (!oppQbSafe(oppPlayers, [op])) continue;
             if (!oppReceiveOk(oppPlayers, [mp], [op])) continue;
@@ -759,7 +759,7 @@ function TradeFinder({
           for (let i = 0; i < oppCap(18); i++) {
             for (let j = i + 1; j < oppCap(18); j++) {
               const op1 = oppTop[i], op2 = oppTop[j];
-              if (!isBalanced([mp.value], [op1.value, op2.value])) continue;
+              if (!isBalancedWithStarDiscount([mp.value], [op1.value, op2.value])) continue;
               if (!packageOk([op1, op2])) continue;
               if (!qbSafe([mp])) continue;
               if (!oppQbSafe(oppPlayers, [op1, op2])) continue;
@@ -779,7 +779,7 @@ function TradeFinder({
             for (let j = i + 1; j < oppCap(14); j++) {
               for (let k = j + 1; k < oppCap(14); k++) {
                 const op1 = oppTop[i], op2 = oppTop[j], op3 = oppTop[k];
-                if (!isBalanced([mp.value], [op1.value, op2.value, op3.value])) continue;
+                if (!isBalancedWithStarDiscount([mp.value], [op1.value, op2.value, op3.value])) continue;
                 if (!packageOk([op1, op2, op3])) continue;
                 if (!qbSafe([mp])) continue;
                 if (!oppQbSafe(oppPlayers, [op1, op2, op3])) continue;
@@ -801,7 +801,7 @@ function TradeFinder({
               for (let k = j + 1; k < oppCap(10); k++) {
                 for (let l = k + 1; l < oppCap(10); l++) {
                   const op1 = oppTop[i], op2 = oppTop[j], op3 = oppTop[k], op4 = oppTop[l];
-                  if (!isBalanced([mp.value], [op1.value, op2.value, op3.value, op4.value])) continue;
+                  if (!isBalancedWithStarDiscount([mp.value], [op1.value, op2.value, op3.value, op4.value])) continue;
                   if (!packageOk([op1, op2, op3, op4])) continue;
                   if (!qbSafe([mp])) continue;
                   if (!oppQbSafe(oppPlayers, [op1, op2, op3, op4])) continue;
@@ -823,7 +823,7 @@ function TradeFinder({
             for (let k = 0; k < oppCap(18); k++) {
               const op = oppTop[k];
               const mp1 = myTop[i], mp2 = myTop[j];
-              if (!isBalanced([mp1.value, mp2.value], [op.value])) continue;
+              if (!isBalancedWithStarDiscount([mp1.value, mp2.value], [op.value])) continue;
               if (!myPkgOk([mp1, mp2])) continue;
               if (!qbSafe([mp1, mp2])) continue;
               if (!oppQbSafe(oppPlayers, [op])) continue;
@@ -844,7 +844,7 @@ function TradeFinder({
               for (let l = k + 1; l < oppCap(14); l++) {
                 const mp1 = myTop[i], mp2 = myTop[j];
                 const op1 = oppTop[k], op2 = oppTop[l];
-                if (!isBalanced([mp1.value, mp2.value], [op1.value, op2.value])) continue;
+                if (!isBalancedWithStarDiscount([mp1.value, mp2.value], [op1.value, op2.value])) continue;
                 if (!myPkgOk([mp1, mp2])) continue;
                 if (!packageOk([op1, op2])) continue;
                 if (!qbSafe([mp1, mp2])) continue;
@@ -868,7 +868,7 @@ function TradeFinder({
                 for (let m = l + 1; m < oppCap(12); m++) {
                   const mp1 = myTop[i], mp2 = myTop[j];
                   const op1 = oppTop[k], op2 = oppTop[l], op3 = oppTop[m];
-                  if (!isBalanced([mp1.value, mp2.value], [op1.value, op2.value, op3.value])) continue;
+                  if (!isBalancedWithStarDiscount([mp1.value, mp2.value], [op1.value, op2.value, op3.value])) continue;
                   if (!myPkgOk([mp1, mp2])) continue;
                   if (!packageOk([op1, op2, op3])) continue;
                   if (!qbSafe([mp1, mp2])) continue;
@@ -894,7 +894,7 @@ function TradeFinder({
                   for (let n = m + 1; n < oppCap(10); n++) {
                     const mp1 = myTop[i], mp2 = myTop[j];
                     const op1 = oppTop[k], op2 = oppTop[l], op3 = oppTop[m], op4 = oppTop[n];
-                    if (!isBalanced([mp1.value, mp2.value], [op1.value, op2.value, op3.value, op4.value])) continue;
+                    if (!isBalancedWithStarDiscount([mp1.value, mp2.value], [op1.value, op2.value, op3.value, op4.value])) continue;
                     if (!myPkgOk([mp1, mp2])) continue;
                     if (!packageOk([op1, op2, op3, op4])) continue;
                     if (!qbSafe([mp1, mp2])) continue;
@@ -923,7 +923,7 @@ function TradeFinder({
                 for (let b = a + 1; b < oppCap(10); b++) {
                   for (let c = b + 1; c < oppCap(10); c++) {
                     const op1 = oppTop[a], op2 = oppTop[b], op3 = oppTop[c];
-                    if (!isBalanced([mp1.value, mp2.value, mp3.value], [op1.value, op2.value, op3.value])) continue;
+                    if (!isBalancedWithStarDiscount([mp1.value, mp2.value, mp3.value], [op1.value, op2.value, op3.value])) continue;
                     if (!packageOk([op1, op2, op3])) continue;
                     if (!oppQbSafe(oppPlayers, [op1, op2, op3])) continue;
                     if (!oppReceiveOk(oppPlayers, [mp1, mp2, mp3], [op1, op2, op3])) continue;
@@ -951,7 +951,7 @@ function TradeFinder({
                   for (let c = b + 1; c < oppCap(8); c++) {
                     for (let d = c + 1; d < oppCap(8); d++) {
                       const op1 = oppTop[a], op2 = oppTop[b], op3 = oppTop[c], op4 = oppTop[d];
-                      if (!isBalanced([mp1.value, mp2.value, mp3.value], [op1.value, op2.value, op3.value, op4.value])) continue;
+                      if (!isBalancedWithStarDiscount([mp1.value, mp2.value, mp3.value], [op1.value, op2.value, op3.value, op4.value])) continue;
                       if (!packageOk([op1, op2, op3, op4])) continue;
                       if (!oppQbSafe(oppPlayers, [op1, op2, op3, op4])) continue;
                       if (!oppReceiveOk(oppPlayers, [mp1, mp2, mp3], [op1, op2, op3, op4])) continue;
@@ -981,7 +981,7 @@ function TradeFinder({
                     for (let c = b + 1; c < oppCap(8); c++) {
                       for (let d = c + 1; d < oppCap(8); d++) {
                         const op1 = oppTop[a], op2 = oppTop[b], op3 = oppTop[c], op4 = oppTop[d];
-                        if (!isBalanced([mp1.value, mp2.value, mp3.value, mp4.value], [op1.value, op2.value, op3.value, op4.value])) continue;
+                        if (!isBalancedWithStarDiscount([mp1.value, mp2.value, mp3.value, mp4.value], [op1.value, op2.value, op3.value, op4.value])) continue;
                         if (!packageOk([op1, op2, op3, op4])) continue;
                         if (!oppQbSafe(oppPlayers, [op1, op2, op3, op4])) continue;
                         if (!oppReceiveOk(oppPlayers, [mp1, mp2, mp3, mp4], [op1, op2, op3, op4])) continue;
@@ -1006,7 +1006,7 @@ function TradeFinder({
         for (const mp of myTop) {
           for (const myPick of myEqualizerPicks) {
             for (const op of oppTop) {
-              if (!isBalanced([mp.value, myPick.value], [op.value])) continue;
+              if (!isBalancedWithStarDiscount([mp.value, myPick.value], [op.value])) continue;
               if (!qbSafe([mp])) continue;
               if (!oppQbSafe(oppPlayers, [op])) continue;
               if (!oppReceiveOk(oppPlayers, [mp], [op])) continue;
@@ -1027,7 +1027,7 @@ function TradeFinder({
             if (!qbSafe([mp1, mp2])) continue;
             for (const myPick of myEqualizerPicks) {
               for (const op of oppTop) {
-                if (!isBalanced([mp1.value, mp2.value, myPick.value], [op.value])) continue;
+                if (!isBalancedWithStarDiscount([mp1.value, mp2.value, myPick.value], [op.value])) continue;
                 if (!oppQbSafe(oppPlayers, [op])) continue;
                 if (!oppReceiveOk(oppPlayers, [mp1, mp2], [op])) continue;
                 results.push({
@@ -1044,7 +1044,7 @@ function TradeFinder({
         for (const mp of myTop) {
           for (const op of oppTop) {
             for (const oppPick of oppEqualizerPicks) {
-              if (!isBalanced([mp.value], [op.value, oppPick.value])) continue;
+              if (!isBalancedWithStarDiscount([mp.value], [op.value, oppPick.value])) continue;
               if (!qbSafe([mp])) continue;
               if (!oppQbSafe(oppPlayers, [op])) continue;
               if (!oppReceiveOk(oppPlayers, [mp], [op])) continue;
@@ -1067,7 +1067,7 @@ function TradeFinder({
               if (!oppQbSafe(oppPlayers, [op1, op2])) continue;
               if (!oppReceiveOk(oppPlayers, [mp], [op1, op2])) continue;
               for (const oppPick of oppEqualizerPicks) {
-                if (!isBalanced([mp.value], [op1.value, op2.value, oppPick.value])) continue;
+                if (!isBalancedWithStarDiscount([mp.value], [op1.value, op2.value, oppPick.value])) continue;
                 results.push({
                   give: [mp], receive: [op1, op2], givePicks: [], receivePicks: [oppPick], oppName, oppRosterId: oppRoster.roster_id,
                   score: posScore([mp], [op1, op2]),
