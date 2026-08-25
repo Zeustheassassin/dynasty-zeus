@@ -583,6 +583,33 @@ const signOut = async () => {
 // -------------------------
 // LOAD PLAYERS
 // -------------------------
+// Shared by the mount-time loader below and refreshInjuryReport (Alerts Hub manual refresh):
+// hits /api/players fresh (bypassing the in-memory and localStorage caches entirely, since the
+// whole point of a manual refresh is to pick up injury_status changes those caches would hide
+// for up to a day) and re-merges FC dynasty values so `.value` stays populated for every other
+// surface reading from the shared `players` map.
+const fetchFreshPlayers = useCallback(async (signal?: AbortSignal) => {
+  const res = await fetch("/api/players", { signal });
+  if (signal?.aborted) return null;
+  const { players: data, nflState: fetchedNflState } = await res.json();
+  setNflState(fetchedNflState);
+
+  const { playerValues: fcValues, pickValues, trendData } = await fetchFantasyCalcValues(2);
+  if (signal?.aborted) return null;
+  setPickFcValues(pickValues);
+  setFcTrendData(trendData);
+
+  Object.keys(data).forEach((id) => {
+    if (fcValues[id]) data[id].value = fcValues[id];
+  });
+
+  setLocalStorageItem("playersCache", data);
+  setLocalStorageItem("playersCacheAt", Date.now());
+  _playersInMemory = data;
+  setPlayers(data);
+  return data;
+}, [setNflState]);
+
 useEffect(() => {
   const controller = new AbortController();
   const { signal } = controller;
@@ -623,29 +650,24 @@ useEffect(() => {
     }
 
     // /api/players returns pre-slimmed players + nflState, both server-cached
-    const res = await fetch("/api/players", { signal });
-    if (signal.aborted) return;
-    const { players: data, nflState: fetchedNflState } = await res.json();
-    setNflState(fetchedNflState);
-
-    const { playerValues: fcValues, pickValues, trendData } = await fetchFantasyCalcValues(2);
-    setPickFcValues(pickValues);
-    setFcTrendData(trendData);
-
-    // Merge FC dynasty values into the player map
-    Object.keys(data).forEach((id) => {
-      if (fcValues[id]) data[id].value = fcValues[id];
-    });
-
-    setLocalStorageItem("playersCache", data);
-    setLocalStorageItem("playersCacheAt", Date.now());
-    _playersInMemory = data;
-    setPlayers(data);
+    await fetchFreshPlayers(signal);
   };
 
   loadPlayers().catch((err) => { if (!controller.signal.aborted) log.error('loadPlayers failed', { err: String(err) }); });
   return () => controller.abort();
-}, [setNflState]);
+}, [setNflState, fetchFreshPlayers]);
+
+const [refreshingInjuryReport, setRefreshingInjuryReport] = useState(false);
+const refreshInjuryReport = useCallback(async () => {
+  setRefreshingInjuryReport(true);
+  try {
+    await fetchFreshPlayers();
+  } catch (err) {
+    log.error('refreshInjuryReport failed', { err: String(err) });
+  } finally {
+    setRefreshingInjuryReport(false);
+  }
+}, [fetchFreshPlayers]);
 
 
 const refreshDraftBoard = useCallback(async () => {
@@ -2437,34 +2459,45 @@ const saveSnapshotNow = async () => {
   // Reads pre-annotated rows from league_transactions_cache. Rows are
   // produced by the server-side cron at app/api/cron/league-transactions
   // every 30 min, eliminating the ~240 Sleeper calls/cold-session this
-  // effect used to do client-side.
+  // effect used to do client-side. Only fetched once per session (on login) —
+  // refreshTransactions lets the Alerts Hub's Trades/Waivers tabs re-query on
+  // demand instead of waiting for a full page reload.
+  // requestId guard: a manual refresh can overlap the mount-time load (or a second manual
+  // refresh click) — only the most recently issued request may commit its result.
+  const transactionsRequestIdRef = useRef(0);
+  const loadLeagueTransactions = useCallback(async (uid: string) => {
+    const requestId = ++transactionsRequestIdRef.current;
+    setLoadingTransactions(true);
+    try {
+      const { data, error } = await supabase
+        .from("league_transactions_cache")
+        .select("payload")
+        .eq("user_id", uid)
+        .order("created", { ascending: false })
+        .limit(200);
+      if (requestId !== transactionsRequestIdRef.current) return;
+      if (error) {
+        log.error("league_transactions_cache load failed", { err: error.message });
+        return;
+      }
+      const txs = (data ?? []).map(
+        (r: { payload: unknown }) => r.payload as AnnotatedTransaction
+      );
+      setLeagueTransactions(txs);
+    } finally {
+      if (requestId === transactionsRequestIdRef.current) setLoadingTransactions(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!supabaseUser) return;
-    let cancelled = false;
-    setLoadingTransactions(true);
-    (async () => {
-      try {
-        const { data, error } = await supabase
-          .from("league_transactions_cache")
-          .select("payload")
-          .eq("user_id", supabaseUser.id)
-          .order("created", { ascending: false })
-          .limit(200);
-        if (cancelled) return;
-        if (error) {
-          log.error("league_transactions_cache load failed", { err: error.message });
-          return;
-        }
-        const txs = (data ?? []).map(
-          (r: { payload: unknown }) => r.payload as AnnotatedTransaction
-        );
-        setLeagueTransactions(txs);
-      } finally {
-        if (!cancelled) setLoadingTransactions(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [supabaseUser]);
+    loadLeagueTransactions(supabaseUser.id);
+  }, [supabaseUser, loadLeagueTransactions]);
+
+  const refreshTransactions = useCallback(() => {
+    if (!supabaseUser) return Promise.resolve();
+    return loadLeagueTransactions(supabaseUser.id);
+  }, [supabaseUser, loadLeagueTransactions]);
 
   useEffect(() => {
     if (!supabaseUser || !dashboardAlerts.length) return;
@@ -3011,7 +3044,10 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     dismissDashboardAlert,
     leagueTransactions,
     loadingTransactions,
+    refreshTransactions,
     injuryReportPlayers,
+    refreshInjuryReport,
+    refreshingInjuryReport,
     allTradeAttempts,
     allLeagueData,
     redraftValues,

@@ -18,8 +18,11 @@ type AlertsPageProps = {
   onDismissAlert: (alertId: string) => void;
   leagueTransactions: LeagueTransaction[];
   loadingTransactions: boolean;
+  refreshTransactions: () => Promise<void>;
   players: Record<string, SleeperPlayer>;
   injuryReportPlayers: InjuryReportPlayer[];
+  refreshInjuryReport: () => Promise<void>;
+  refreshingInjuryReport: boolean;
   currentNFLWeek: number;
   allTradeAttempts: TradeAttempt[];
   allLeagues: { league_id: string; name: string }[];
@@ -34,8 +37,11 @@ export default function AlertsPage({
   onDismissAlert,
   leagueTransactions,
   loadingTransactions,
+  refreshTransactions,
   players,
   injuryReportPlayers,
+  refreshInjuryReport,
+  refreshingInjuryReport,
   currentNFLWeek,
   allTradeAttempts,
   allLeagues,
@@ -136,20 +142,40 @@ export default function AlertsPage({
       })()}
 
       <Card padding="lg" elevated>
-        <div className="flex flex-wrap gap-1 bg-slate-800/60 rounded-xl p-1 mb-4">
-          {TABS.map((tab) => (
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+          <div className="flex flex-wrap gap-1 bg-slate-800/60 rounded-xl p-1">
+            {TABS.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setFeedTab(tab.key)}
+                className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition ${
+                  feedTab === tab.key
+                    ? "bg-slate-700 text-white"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+          {(feedTab === "transactions" || feedTab === "waivers") && (
             <button
-              key={tab.key}
-              onClick={() => setFeedTab(tab.key)}
-              className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition ${
-                feedTab === tab.key
-                  ? "bg-slate-700 text-white"
-                  : "text-slate-400 hover:text-white"
-              }`}
+              onClick={refreshTransactions}
+              disabled={loadingTransactions}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-400 hover:text-white border border-slate-700 hover:border-slate-500 disabled:opacity-50 rounded-lg transition shrink-0"
             >
-              {tab.label}
+              {loadingTransactions ? "Refreshing…" : "↻ Refresh"}
             </button>
-          ))}
+          )}
+          {feedTab === "injury" && (
+            <button
+              onClick={refreshInjuryReport}
+              disabled={refreshingInjuryReport}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-400 hover:text-white border border-slate-700 hover:border-slate-500 disabled:opacity-50 rounded-lg transition shrink-0"
+            >
+              {refreshingInjuryReport ? "Refreshing…" : "↻ Refresh"}
+            </button>
+          )}
         </div>
 
         {feedTab === "alerts" && (

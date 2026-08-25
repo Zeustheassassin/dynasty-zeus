@@ -90,7 +90,10 @@ interface HubRouterProps {
   dismissDashboardAlert: (alertId: string) => void;
   leagueTransactions: LeagueTransaction[];
   loadingTransactions: boolean;
+  refreshTransactions: () => Promise<void>;
   injuryReportPlayers: InjuryReportPlayer[];
+  refreshInjuryReport: () => Promise<void>;
+  refreshingInjuryReport: boolean;
   allTradeAttempts: TradeAttempt[];
   allLeagueData: DashboardLeagueEntry[];
   loadLeagueOverview: () => Promise<void>;
@@ -295,8 +298,8 @@ export function HubRouter({
   nflState, selectedLeague, setSelectedLeague,
   connectLoading, connectError, connectSuccess, connectSleeper,
   visibleDashboardAlerts, actionableDashboardAlerts, watchlistEntries,
-  dismissDashboardAlert, leagueTransactions, loadingTransactions,
-  injuryReportPlayers, allTradeAttempts, allLeagueData,
+  dismissDashboardAlert, leagueTransactions, loadingTransactions, refreshTransactions,
+  injuryReportPlayers, refreshInjuryReport, refreshingInjuryReport, allTradeAttempts, allLeagueData,
   loadLeagueOverview, loadingLeagueOverview, onNavigateToAttempts, onNavigateToLeague,
   onOpenRosterOverview, onOpenCrossLeaguePlayers, onOpenInjuryReport, onOpenAllTrades,
   showAllOpenTrades, setShowAllOpenTrades, alertsFeedTab, setAlertsFeedTab,
@@ -414,8 +417,11 @@ export function HubRouter({
             onDismissAlert={dismissDashboardAlert}
             leagueTransactions={leagueTransactions}
             loadingTransactions={loadingTransactions}
+            refreshTransactions={refreshTransactions}
             players={players}
             injuryReportPlayers={injuryReportPlayers}
+            refreshInjuryReport={refreshInjuryReport}
+            refreshingInjuryReport={refreshingInjuryReport}
             currentNFLWeek={nflState?.season_type === "regular" ? Number(nflState?.week || 0) : 0}
             allTradeAttempts={allTradeAttempts}
             allLeagues={leagues}
