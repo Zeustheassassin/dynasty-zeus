@@ -17,6 +17,17 @@ export function getCommitmentNameColor(row: LeagueMgmtRow | undefined): string {
   }
 }
 
+/** Seasons after the current one marked paid (paid_YYYY === true) on a league_management row. */
+function getFuturePaidYears(row: LeagueMgmtRow | undefined): number[] {
+  if (!row) return [];
+  const currentYear = new Date().getFullYear();
+  return Object.keys(row)
+    .filter((k) => k.startsWith("paid_") && row[k] === true)
+    .map((k) => Number(k.slice("paid_".length)))
+    .filter((y) => Number.isFinite(y) && y > currentYear)
+    .sort((a, b) => a - b);
+}
+
 export interface FuturePaidBadge {
   label: string;
   colorClass: string;
@@ -28,14 +39,7 @@ export interface FuturePaidBadge {
  * beyond the current season is paid, so callers can omit the badge.
  */
 export function getFuturePaidBadge(row: LeagueMgmtRow | undefined): FuturePaidBadge | null {
-  if (!row) return null;
-  const currentYear = new Date().getFullYear();
-  const futurePaidYears = Object.keys(row)
-    .filter((k) => k.startsWith("paid_") && row[k] === true)
-    .map((k) => Number(k.slice("paid_".length)))
-    .filter((y) => Number.isFinite(y) && y > currentYear)
-    .sort((a, b) => a - b);
-
+  const futurePaidYears = getFuturePaidYears(row);
   if (futurePaidYears.length === 0) return null;
 
   const maxYear = futurePaidYears[futurePaidYears.length - 1];
@@ -43,4 +47,14 @@ export function getFuturePaidBadge(row: LeagueMgmtRow | undefined): FuturePaidBa
     label: futurePaidYears.length === 1 ? `Paid ${maxYear}` : `Paid thru ${maxYear}`,
     colorClass: "text-emerald-400 bg-emerald-950/40 border-emerald-800",
   };
+}
+
+/** True if any season after the current one is marked paid. Drives the Paid Future dot. */
+export function isFuturePaid(row: LeagueMgmtRow | undefined): boolean {
+  return getFuturePaidYears(row).length > 0;
+}
+
+/** Softened dot color (same muted palette as commitment status) for the Paid Future indicator. */
+export function getPaidFutureDotColor(paid: boolean): string {
+  return paid ? "bg-emerald-400/70" : "bg-red-400/70";
 }

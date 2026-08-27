@@ -5,7 +5,8 @@ import {
   getAdjustedDirectionBucket,
   getRosterDirectionProfile,
   getCommitmentNameColor,
-  getFuturePaidBadge,
+  isFuturePaid,
+  getPaidFutureDotColor,
 } from "../../lib/helpers";
 import { usePlayers } from "../../lib/PlayersContext";
 import { useLeague } from "../../lib/LeagueContext";
@@ -178,7 +179,7 @@ function OverviewTab({
       totalSeconds,
       totalThirds,
       nameColor: getCommitmentNameColor(mgmtRow),
-      paidBadge: getFuturePaidBadge(mgmtRow),
+      paidFuture: isFuturePaid(mgmtRow),
     };
   }).filter((x): x is NonNullable<typeof x> => x !== null).sort((a, b) => {
     const bucketDiff = (bucketOrder[a.bucket] ?? 999) - (bucketOrder[b.bucket] ?? 999);
@@ -192,7 +193,7 @@ function OverviewTab({
   if (loadingLeagueOverview && !leagueOverviewLoaded) return <p className="text-sm text-blue-400">Loading league data…</p>;
   if (!leagues.length) return <p className="text-sm text-slate-500">No leagues found.</p>;
 
-  const GRID = "grid grid-cols-[minmax(180px,1.4fr)_minmax(170px,1.1fr)_56px_56px_56px_56px_64px_56px_48px_48px_48px] gap-2 items-center px-1";
+  const GRID = "grid grid-cols-[minmax(180px,1.4fr)_minmax(170px,1.1fr)_56px_56px_56px_56px_64px_72px_56px_48px_48px_48px] gap-2 items-center px-1";
 
   return (
     <div className="space-y-3">
@@ -257,6 +258,7 @@ function OverviewTab({
             <span className="text-center">Stnd</span>
             <span className="text-center">MaxPF</span>
             <span className="text-center">Playoff%</span>
+            <span className="text-center">Paid Future</span>
             <span className="text-center">Own 1st</span>
             <span className="text-center">1sts</span>
             <span className="text-center">2nds</span>
@@ -275,11 +277,6 @@ function OverviewTab({
                   >
                     {row.league.name}
                   </button>
-                  {row.paidBadge && (
-                    <span className={`mt-0.5 inline-block text-[9px] font-semibold px-1.5 py-0.5 rounded-full border ${row.paidBadge.colorClass}`}>
-                      {row.paidBadge.label}
-                    </span>
-                  )}
                 </div>
                 <div className="min-w-0">
                   <span className={`inline-flex max-w-full text-[10px] font-semibold px-2 py-0.5 rounded-full border truncate ${row.bucketColor}`}>{row.bucket}</span>
@@ -309,6 +306,9 @@ function OverviewTab({
                       run sim →
                     </button>
                   )}
+                </div>
+                <div className="flex justify-center" title={row.paidFuture ? "Paid ahead for a future season" : "Not paid ahead"}>
+                  <span className={`w-2.5 h-2.5 rounded-full ${getPaidFutureDotColor(row.paidFuture)}`} />
                 </div>
                 <span className={`text-center font-semibold ${row.ownFirst ? "text-emerald-400" : "text-red-400"}`}>
                   {row.ownFirst ? "Y" : "N"}
