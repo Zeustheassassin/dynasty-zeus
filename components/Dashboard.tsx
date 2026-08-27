@@ -1,7 +1,7 @@
 "use client";
 import { useMemo } from "react";
 import type { MainTab } from "../lib/hubs";
-import type { LeagueOverviewEntry, CommittedSimsByLeague, CachedSimRow, TradeAttempt } from "../lib/types";
+import type { LeagueOverviewEntry, CommittedSimsByLeague, CachedSimRow, TradeAttempt, LeagueMgmtData } from "../lib/types";
 import type { DashboardAlert, InjuryReportPlayer } from "./AlertsPage/alertsPageHelpers";
 import { getInjuredCount } from "./AlertsPage/alertsPageHelpers";
 import StatStrip from "./Dashboard/StatStrip";
@@ -24,6 +24,7 @@ type DashboardProps = {
   leagueOverviewData: Record<string, LeagueOverviewEntry>;
   committedSimsByLeague: CommittedSimsByLeague;
   leagueSimCache: Record<string, Record<number, CachedSimRow>>;
+  leagueMgmtData: LeagueMgmtData;
   onOpenRosterOverview: () => void;
   onOpenCrossLeaguePlayers: () => void;
   onOpenAllTrades: () => void;
@@ -51,6 +52,7 @@ export default function Dashboard({
   leagueOverviewData,
   committedSimsByLeague,
   leagueSimCache,
+  leagueMgmtData,
   onOpenRosterOverview,
   onOpenCrossLeaguePlayers,
   onOpenAllTrades,
@@ -113,6 +115,7 @@ export default function Dashboard({
               leagueOverviewData={leagueOverviewData}
               committedSimsByLeague={committedSimsByLeague}
               leagueSimCache={leagueSimCache}
+              leagueMgmtData={leagueMgmtData}
             />
           </div>
         </div>

@@ -4,6 +4,8 @@ import {
   getBucketColor,
   getAdjustedDirectionBucket,
   getRosterDirectionProfile,
+  getCommitmentNameColor,
+  getFuturePaidBadge,
 } from "../../lib/helpers";
 import { usePlayers } from "../../lib/PlayersContext";
 import { useLeague } from "../../lib/LeagueContext";
@@ -15,6 +17,7 @@ import type {
   SleeperRoster,
   AugmentedPick,
   LeagueHubTab,
+  LeagueMgmtData,
 } from "../../lib/types";
 import type { CommittedSimsByLeague, CachedSimRow, LeagueOverviewEntry } from "../../lib/types";
 import { setLocalStorageItem, removeLocalStorageItem } from "@/lib/hooks/useLocalStorage";
@@ -22,6 +25,7 @@ import { setLocalStorageItem, removeLocalStorageItem } from "@/lib/hooks/useLoca
 interface OverviewTabProps {
   leagues: SleeperLeague[];
   user: SleeperUser | null;
+  leagueMgmtData: LeagueMgmtData;
   leagueOverviewData: Record<string, LeagueOverviewEntry>;
   loadingLeagueOverview: boolean;
   leagueOverviewLoaded: boolean;
@@ -39,6 +43,7 @@ interface OverviewTabProps {
 function OverviewTab({
   leagues,
   user,
+  leagueMgmtData,
   leagueOverviewData,
   loadingLeagueOverview,
   leagueOverviewLoaded,
@@ -157,6 +162,8 @@ function OverviewTab({
     const totalSeconds = myPicks.filter((p) => Number(p.round) === 2).length;
     const totalThirds = myPicks.filter((p) => Number(p.round) === 3).length;
 
+    const mgmtRow = leagueMgmtData[league.league_id];
+
     return {
       league,
       ...profile,
@@ -170,6 +177,8 @@ function OverviewTab({
       totalFirsts,
       totalSeconds,
       totalThirds,
+      nameColor: getCommitmentNameColor(mgmtRow),
+      paidBadge: getFuturePaidBadge(mgmtRow),
     };
   }).filter((x): x is NonNullable<typeof x> => x !== null).sort((a, b) => {
     const bucketDiff = (bucketOrder[a.bucket] ?? 999) - (bucketOrder[b.bucket] ?? 999);
@@ -178,7 +187,7 @@ function OverviewTab({
     if (a.dynRank !== b.dynRank) return a.dynRank - b.dynRank;
     return a.league.name.localeCompare(b.league.name);
   });
-  }, [leagues, leagueOverviewData, user, calcFcValues, redraftValues, pickFcValues, players, committedSimsByLeague, leagueSimCache, mountedAt]);
+  }, [leagues, leagueOverviewData, user, calcFcValues, redraftValues, pickFcValues, players, committedSimsByLeague, leagueSimCache, mountedAt, leagueMgmtData]);
 
   if (loadingLeagueOverview && !leagueOverviewLoaded) return <p className="text-sm text-blue-400">Loading league data…</p>;
   if (!leagues.length) return <p className="text-sm text-slate-500">No leagues found.</p>;
@@ -259,12 +268,19 @@ function OverviewTab({
                 key={row.league.league_id}
                 className={`${GRID} text-xs py-1.5 rounded hover:bg-slate-800/40 transition ${simQueue[0] === row.league.league_id ? "ring-1 ring-blue-700/60" : ""}`}
               >
-                <button
-                  className="min-w-0 text-sm text-slate-200 font-medium text-left truncate hover:text-blue-400 transition"
-                  onClick={() => { loadRoster(row.league); setLeagueHubTab("ROSTERS"); }}
-                >
-                  {row.league.name}
-                </button>
+                <div className="min-w-0">
+                  <button
+                    className={`min-w-0 text-sm font-medium text-left truncate hover:text-blue-400 transition ${row.nameColor || "text-slate-200"}`}
+                    onClick={() => { loadRoster(row.league); setLeagueHubTab("ROSTERS"); }}
+                  >
+                    {row.league.name}
+                  </button>
+                  {row.paidBadge && (
+                    <span className={`mt-0.5 inline-block text-[9px] font-semibold px-1.5 py-0.5 rounded-full border ${row.paidBadge.colorClass}`}>
+                      {row.paidBadge.label}
+                    </span>
+                  )}
+                </div>
                 <div className="min-w-0">
                   <span className={`inline-flex max-w-full text-[10px] font-semibold px-2 py-0.5 rounded-full border truncate ${row.bucketColor}`}>{row.bucket}</span>
                   <div className="mt-0.5 text-[10px] text-slate-500 truncate">{row.shortAction}</div>

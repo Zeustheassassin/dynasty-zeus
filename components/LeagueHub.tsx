@@ -16,6 +16,7 @@ import type {
   AssetDisposition,
   LeagueAssetDispositions,
   LeagueExpiringBlocks,
+  LeagueMgmtData,
 } from "../lib/types";
 import { LEAGUE_HUB_GROUPS } from "../lib/leagueHubGroups";
 import { useLeagueTabState } from "./LeagueHub/hooks/useLeagueTabState";
@@ -45,6 +46,7 @@ interface LeagueHubProps {
   // League / roster state
   leagues: SleeperLeague[];
   user: SleeperUser | null;
+  leagueMgmtData: LeagueMgmtData;
   standings: StandingRow[];
   setSelectedLeague: (league: SleeperLeague | null) => void;
   picks: SleeperTradedPick[];
@@ -108,7 +110,7 @@ interface LeagueHubProps {
 // ── Component ──────────────────────────────────────────────────────────────
 function LeagueHub({
   leagueHubTab, setLeagueHubTab, activeLeagueHubGroup,
-  leagues, user, standings, setSelectedLeague,
+  leagues, user, leagueMgmtData, standings, setSelectedLeague,
   picks, allPicks,
   committedSimsByLeague, leagueSimCache, simQueue, simProgress,
   loadingActivity, loadingLeagueWeeklyMatchups,
@@ -184,6 +186,7 @@ function LeagueHub({
           <OverviewTab
             leagues={leagues}
             user={user}
+            leagueMgmtData={leagueMgmtData}
             leagueOverviewData={leagueOverviewData}
             loadingLeagueOverview={loadingLeagueOverview}
             leagueOverviewLoaded={leagueOverviewLoaded}

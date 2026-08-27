@@ -1,11 +1,11 @@
 "use client";
 import { useMemo } from "react";
-import type { SleeperRoster, LeagueOverviewEntry, CommittedSimsByLeague, CachedSimRow } from "../../lib/types";
+import type { SleeperRoster, LeagueOverviewEntry, CommittedSimsByLeague, CachedSimRow, LeagueMgmtData } from "../../lib/types";
 import { useDashboardPlayoffOdds, type LeagueRosterKey } from "../../hooks/useDashboardPlayoffOdds";
 import { MultiPointSparkline } from "../charts/MultiPointSparkline";
 import { usePlayers } from "../../lib/PlayersContext";
 import { useValues } from "../../lib/ValuesContext";
-import { getCrossLeagueDirections, DIRECTION_BUCKET_ORDER } from "../../lib/helpers";
+import { getCrossLeagueDirections, DIRECTION_BUCKET_ORDER, getCommitmentNameColor, getFuturePaidBadge } from "../../lib/helpers";
 import { CardButton } from "../ui/Card";
 import Badge from "../ui/Badge";
 import EmptyState from "../ui/EmptyState";
@@ -24,6 +24,7 @@ interface TeamSummaryGridProps {
   leagueOverviewData: Record<string, LeagueOverviewEntry>;
   committedSimsByLeague: CommittedSimsByLeague;
   leagueSimCache: Record<string, Record<number, CachedSimRow>>;
+  leagueMgmtData: LeagueMgmtData;
 }
 
 // Cross-league "my teams" summary (A7) — one card per connected league,
@@ -33,7 +34,7 @@ interface TeamSummaryGridProps {
 // beyond the batched odds-history read. Also shows each league's strategic
 // direction bucket (same Elite/True Contender/.../Hopeless vocabulary as
 // Team Tools) via getCrossLeagueDirections, once leagueOverviewData loads.
-export default function TeamSummaryGrid({ entries, loading, onSelectLeague, leagueOverviewData, committedSimsByLeague, leagueSimCache }: TeamSummaryGridProps) {
+export default function TeamSummaryGrid({ entries, loading, onSelectLeague, leagueOverviewData, committedSimsByLeague, leagueSimCache, leagueMgmtData }: TeamSummaryGridProps) {
   const players = usePlayers();
   // Same value source OverviewTab/LeagueMatesTab/UserScoutHub use (selected
   // league's scoring-adjusted values) — using unadjusted values here made
@@ -134,6 +135,9 @@ export default function TeamSummaryGrid({ entries, loading, onSelectLeague, leag
           const latest = history && history.length > 0 ? history[history.length - 1] : null;
           const settings = entry.roster?.settings;
           const direction = entry.leagueId ? directions[entry.leagueId] : undefined;
+          const mgmtRow = entry.leagueId ? leagueMgmtData[entry.leagueId] : undefined;
+          const nameColor = getCommitmentNameColor(mgmtRow);
+          const paidBadge = getFuturePaidBadge(mgmtRow);
           return (
             <CardButton
               // Falls back to the array index (not just leagueName) so two
@@ -143,7 +147,7 @@ export default function TeamSummaryGrid({ entries, loading, onSelectLeague, leag
               onClick={() => entry.leagueId && onSelectLeague(entry.leagueId)}
             >
               <div className="flex items-start justify-between gap-2">
-                <div className="truncate text-sm font-semibold text-white">{entry.leagueName ?? "League"}</div>
+                <div className={`truncate text-sm font-semibold ${nameColor || "text-white"}`}>{entry.leagueName ?? "League"}</div>
                 {direction && (
                   <Badge className={`text-[10px] ${direction.bucketColor}`}>{direction.bucket}</Badge>
                 )}
@@ -156,10 +160,17 @@ export default function TeamSummaryGrid({ entries, loading, onSelectLeague, leag
                   <MultiPointSparkline values={history.map((h) => h.playoffOdds)} higherIsBetter />
                 )}
               </div>
-              <div className="mt-2 text-[11px] text-slate-500">
-                {latest
-                  ? `${latest.playoffOdds.toFixed(0)}% playoff · ${latest.titleOdds.toFixed(0)}% title odds`
-                  : "No simulator history yet"}
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <span className="text-[11px] text-slate-500">
+                  {latest
+                    ? `${latest.playoffOdds.toFixed(0)}% playoff · ${latest.titleOdds.toFixed(0)}% title odds`
+                    : "No simulator history yet"}
+                </span>
+                {paidBadge && (
+                  <span className={`shrink-0 text-[9px] font-semibold px-1.5 py-0.5 rounded-full border ${paidBadge.colorClass}`}>
+                    {paidBadge.label}
+                  </span>
+                )}
               </div>
             </CardButton>
           );

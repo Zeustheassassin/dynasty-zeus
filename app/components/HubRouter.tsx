@@ -400,6 +400,7 @@ export function HubRouter({
     leagueOverviewData={leagueOverviewData}
     committedSimsByLeague={committedSimsByLeague}
     leagueSimCache={leagueSimCache}
+    leagueMgmtData={leagueMgmtData}
     onOpenRosterOverview={onOpenRosterOverview}
     onOpenCrossLeaguePlayers={onOpenCrossLeaguePlayers}
     onOpenAllTrades={onOpenAllTrades}
@@ -440,6 +441,7 @@ export function HubRouter({
             activeLeagueHubGroup={activeLeagueHubGroup}
             leagues={leagues}
             user={user}
+            leagueMgmtData={leagueMgmtData}
             standings={standings}
             setSelectedLeague={setSelectedLeague}
             picks={picks}
