@@ -5,12 +5,14 @@
 // ============================================================
 import type { LeagueMgmtRow } from "../types";
 
-/** Tailwind text color class for a league name, driven by commitment_status. */
+/** Tailwind text color class for a league name, driven by commitment_status.
+ *  Muted/desaturated tones on purpose — full-saturation red-500/amber-400
+ *  repeated down a long league list read as visually jarring. */
 export function getCommitmentNameColor(row: LeagueMgmtRow | undefined): string {
   switch (row?.commitment_status) {
-    case "leaving": return "text-red-500";
-    case "on_fence": return "text-amber-400";
-    case "staying": return "text-emerald-400";
+    case "leaving": return "text-red-400/80";
+    case "on_fence": return "text-amber-300/80";
+    case "staying": return "text-emerald-400/80";
     default: return "";
   }
 }

@@ -6,6 +6,7 @@ import { logger } from "../lib/logger";
 const log = logger("components/ManagementHub");
 import { SLEEPER_BASE_URL, getPaymentYears } from "../lib/constants";
 import type { LeagueMgmtData, CommPaymentsData, LeagueCommitmentStatus, SleeperLeague, SleeperRoster, SleeperUser } from "../lib/types";
+import { getCommitmentNameColor } from "../lib/helpers";
 import { useAuth } from "../lib/AuthContext";
 import { Card } from "./ui/Card";
 import ErrorBanner from "./ErrorBanner";
@@ -348,7 +349,7 @@ function ManagementHub({
                       <tr key={league.league_id} className={idx % 2 === 0 ? "bg-slate-900" : "bg-slate-950"}>
                         <td
                           className={`py-2 px-3 font-medium whitespace-nowrap border-r border-slate-800 ${
-                            commitmentStatus === "leaving" ? "text-red-500" : "text-white"
+                            getCommitmentNameColor(row) || "text-white"
                           }`}
                         >
                           {league.name}
@@ -359,11 +360,11 @@ function ManagementHub({
                             onChange={(e) => handleCommitmentChange(league.league_id, e.target.value as LeagueCommitmentStatus)}
                             className={`w-full px-2 py-1 text-xs rounded border focus:outline-none focus:border-blue-500 ${
                               commitmentStatus === "leaving"
-                                ? "bg-red-950/40 border-red-800 text-red-400"
+                                ? "bg-red-950/25 border-red-900/60 text-red-400/80"
                                 : commitmentStatus === "on_fence"
-                                ? "bg-amber-950/30 border-amber-800 text-amber-400"
+                                ? "bg-amber-950/20 border-amber-900/60 text-amber-300/80"
                                 : commitmentStatus === "staying"
-                                ? "bg-emerald-950/30 border-emerald-800 text-emerald-400"
+                                ? "bg-emerald-950/20 border-emerald-900/60 text-emerald-400/80"
                                 : "bg-slate-800 border-slate-600 text-slate-300"
                             }`}
                           >
