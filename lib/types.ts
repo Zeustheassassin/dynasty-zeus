@@ -788,6 +788,8 @@ export interface LeagueDraftSnapshot {
 // via migration 002 and beyond. To avoid updating this type each
 // year, LeagueMgmtRow uses an index signature for `paid_*` keys.
 
+export type LeagueCommitmentStatus = "" | "staying" | "on_fence" | "leaving";
+
 export interface LeagueMgmtRow {
   /** Covers paid_2026, paid_2027, … and all other dynamic keys */
   [key: string]: boolean | string | undefined;
@@ -795,6 +797,7 @@ export interface LeagueMgmtRow {
   year_in_advance: boolean;
   picks_traded: boolean;
   amount?: string;
+  commitment_status?: LeagueCommitmentStatus;
 }
 
 export type LeagueMgmtData = Record<string, LeagueMgmtRow>;

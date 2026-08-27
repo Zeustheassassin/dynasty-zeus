@@ -5,7 +5,7 @@ import { logger } from "../lib/logger";
 
 const log = logger("components/ManagementHub");
 import { SLEEPER_BASE_URL, getPaymentYears } from "../lib/constants";
-import type { LeagueMgmtData, CommPaymentsData, SleeperLeague, SleeperRoster, SleeperUser } from "../lib/types";
+import type { LeagueMgmtData, CommPaymentsData, LeagueCommitmentStatus, SleeperLeague, SleeperRoster, SleeperUser } from "../lib/types";
 import { useAuth } from "../lib/AuthContext";
 import { Card } from "./ui/Card";
 import ErrorBanner from "./ErrorBanner";
@@ -115,6 +115,7 @@ function ManagementHub({
         year_in_advance: updated.year_in_advance ?? false,
         picks_traded: updated.picks_traded ?? false,
         amount: updated.amount ?? "",
+        commitment_status: updated.commitment_status ?? "",
         updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id,league_id" }
@@ -142,6 +143,13 @@ function ManagementHub({
 
   const handleAmountBlur = async (leagueId: string) => {
     const updated = leagueMgmtData[leagueId] || {};
+    await upsertLeagueMgmt(leagueId, updated);
+  };
+
+  const handleCommitmentChange = async (leagueId: string, value: LeagueCommitmentStatus) => {
+    const current = leagueMgmtData[leagueId] || {};
+    const updated = { ...current, commitment_status: value };
+    setLeagueMgmtData((prev) => ({ ...prev, [leagueId]: updated }));
     await upsertLeagueMgmt(leagueId, updated);
   };
 
@@ -314,11 +322,13 @@ function ManagementHub({
                   <tr>
                     <th className="text-left text-slate-400 font-medium py-2 px-3 border-b border-slate-700 min-w-[140px]"></th>
                     <th className="text-center text-slate-400 font-semibold py-2 px-3 border-b border-slate-700 border-l border-slate-700"></th>
+                    <th className="text-center text-slate-400 font-semibold py-2 px-3 border-b border-slate-700 border-l border-slate-700"></th>
                     <th colSpan={PAID_YEAR_COLS.length} className="text-center text-blue-400 font-semibold py-2 px-3 border-b border-slate-700 border-l border-slate-700">Paid</th>
                     <th colSpan={3} className="text-center text-purple-400 font-semibold py-2 px-3 border-b border-slate-700 border-l border-slate-700">Tools</th>
                   </tr>
                   <tr>
                     <th className="text-left text-slate-400 font-medium py-2 px-3 border-b border-slate-700"></th>
+                    <th className="text-center text-slate-300 font-medium py-2 px-3 border-b border-slate-700 border-l border-slate-700 min-w-[120px]">Status</th>
                     <th className="text-center text-slate-300 font-medium py-2 px-3 border-b border-slate-700 border-l border-slate-700 min-w-[90px]">Amount</th>
                     {MGMT_COLS.map((col, ci) => (
                       <th
@@ -333,10 +343,35 @@ function ManagementHub({
                 <tbody>
                   {leagues.map((league, idx) => {
                     const row = leagueMgmtData[league.league_id] || {};
+                    const commitmentStatus = row.commitment_status || "";
                     return (
                       <tr key={league.league_id} className={idx % 2 === 0 ? "bg-slate-900" : "bg-slate-950"}>
-                        <td className="py-2 px-3 text-white font-medium whitespace-nowrap border-r border-slate-800">
+                        <td
+                          className={`py-2 px-3 font-medium whitespace-nowrap border-r border-slate-800 ${
+                            commitmentStatus === "leaving" ? "text-red-500" : "text-white"
+                          }`}
+                        >
                           {league.name}
+                        </td>
+                        <td className="text-center py-1.5 px-2 border-l border-slate-700">
+                          <select
+                            value={commitmentStatus}
+                            onChange={(e) => handleCommitmentChange(league.league_id, e.target.value as LeagueCommitmentStatus)}
+                            className={`w-full px-2 py-1 text-xs rounded border focus:outline-none focus:border-blue-500 ${
+                              commitmentStatus === "leaving"
+                                ? "bg-red-950/40 border-red-800 text-red-400"
+                                : commitmentStatus === "on_fence"
+                                ? "bg-amber-950/30 border-amber-800 text-amber-400"
+                                : commitmentStatus === "staying"
+                                ? "bg-emerald-950/30 border-emerald-800 text-emerald-400"
+                                : "bg-slate-800 border-slate-600 text-slate-300"
+                            }`}
+                          >
+                            <option value="">—</option>
+                            <option value="staying">Staying long term</option>
+                            <option value="on_fence">On the fence</option>
+                            <option value="leaving">Leaving EOY</option>
+                          </select>
                         </td>
                         <td className="text-center py-1.5 px-2 border-l border-slate-700">
                           <div className="relative flex items-center">

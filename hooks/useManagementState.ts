@@ -3,7 +3,9 @@ import { useState, useEffect, type Dispatch, type SetStateAction } from "react";
 import { supabase } from "../lib/supabaseclient";
 import { logger } from "../lib/logger";
 import { useDebouncedKeyedEffect } from "../lib/hooks/useDebouncedKeyedEffect";
-import type { LeagueMgmtData, CommPaymentsData, SleeperRoster, SleeperUser } from "../lib/types";
+import type { LeagueMgmtData, CommPaymentsData, LeagueCommitmentStatus, SleeperRoster, SleeperUser } from "../lib/types";
+
+const COMMITMENT_STATUSES: LeagueCommitmentStatus[] = ["", "staying", "on_fence", "leaving"];
 
 const log = logger("hooks/useManagementState");
 
@@ -69,12 +71,16 @@ export function useManagementState(supabaseUser: { id: string } | null): UseMana
               }
             });
             const leagueId = String(row.league_id);
+            const commitmentStatus = COMMITMENT_STATUSES.includes(row.commitment_status as LeagueCommitmentStatus)
+              ? (row.commitment_status as LeagueCommitmentStatus)
+              : "";
             map[leagueId] = {
               ...paymentFields,
               commissioner: Boolean(row.commissioner),
               year_in_advance: Boolean(row.year_in_advance),
               picks_traded: Boolean(row.picks_traded),
               amount: typeof row.amount === "string" ? row.amount : "",
+              commitment_status: commitmentStatus,
             };
           });
           setLeagueMgmtData(map);
