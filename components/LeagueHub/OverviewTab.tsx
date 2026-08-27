@@ -249,7 +249,7 @@ function OverviewTab({
       </div>
 
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 overflow-x-auto">
-        <div className="min-w-[900px]">
+        <div className="min-w-[990px]">
           <div className={`${GRID} text-[10px] uppercase tracking-wide text-slate-500 mb-1 pb-2 border-b border-slate-800`}>
             <span>League</span>
             <span>Direction</span>

@@ -136,7 +136,7 @@ function LeagueHub({
   } = useLeagueTabState();
 
   return (
-    <div className={`mx-auto px-4 py-6 ${leagueHubTab === "ROSTERS" || leagueHubTab === "OPP_ROSTERS" || leagueHubTab === "ROSTER_TOOLS" ? "max-w-7xl" : "max-w-5xl"}`}>
+    <div className={`mx-auto px-4 py-6 ${leagueHubTab === "ROSTERS" || leagueHubTab === "OPP_ROSTERS" || leagueHubTab === "ROSTER_TOOLS" ? "max-w-7xl" : leagueHubTab === "OVERVIEW" ? "max-w-6xl" : "max-w-5xl"}`}>
       <>
         {leagueOverviewError && (
           <div className="mb-4">
