@@ -54,7 +54,7 @@ const ScoutingHub = dynamic(() => import("../../components/ScoutingHub"), { ssr:
 const UserScoutHub = dynamic(() => import("../../components/UserScoutHub"), { ssr: false, loading: HubSkeleton });
 
 // ── Local types ──────────────────────────────────────────────────────────────
-type DataHubTabId = "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "LEAGUEMATES" | "DEPTH_CHARTS" | "MY_SHARES" | "COMPARE";
+type DataHubTabId = "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "STAT_PROJECTIONS" | "LEAGUEMATES" | "DEPTH_CHARTS" | "MY_SHARES" | "COMPARE";
 
 // ── Props ────────────────────────────────────────────────────────────────────
 interface HubRouterProps {

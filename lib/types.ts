@@ -262,6 +262,10 @@ export interface ProjectionRow {
   fpts: number;
   sources: string[];
   kickoffAt: number | null;
+  /** Weighted-average raw stat line (pass_yd, rush_td, rec, etc.) blended
+   *  from whichever active sources report raw stats (Sleeper, ESPN) — null
+   *  when no stat-reporting source matched this player. */
+  stats: Record<string, number> | null;
 }
 
 export interface FantasyCalcPlayerValue {

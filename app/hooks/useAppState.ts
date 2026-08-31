@@ -915,7 +915,7 @@ useEffect(() => {
 
 
 useEffect(() => {
-  if (mainTab === "DATA_HUB" && dataHubTab === "PROJECTIONS" && !projectionLoaded) {
+  if (mainTab === "DATA_HUB" && (dataHubTab === "PROJECTIONS" || dataHubTab === "STAT_PROJECTIONS") && !projectionLoaded) {
     loadProjections(projectionWeek === 0 ? 'season' : projectionWeek, enabledExtraSources);
   }
 }, [mainTab, dataHubTab, projectionLoaded, projectionWeek, enabledExtraSources, loadProjections]);

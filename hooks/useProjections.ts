@@ -20,11 +20,32 @@ interface SleeperRawProjectionItem {
 
 // ── Projection sources (weights sum to 1.0) ────────────────────────────────
 export const PROJ_SOURCES = [
-  { id: "fantasypros" as const, label: "FantasyPros",     tier: 1, weight: 0.45 },
-  { id: "numberfire"  as const, label: "numberFire",      tier: 1, weight: 0.35 },
-  { id: "sleeper"     as const, label: "RotoWire/Sleeper", tier: 2, weight: 0.20 },
+  { id: "fantasypros" as const, label: "FantasyPros",     tier: 1, weight: 0.35 },
+  { id: "numberfire"  as const, label: "numberFire",      tier: 1, weight: 0.25 },
+  { id: "espn"        as const, label: "ESPN",            tier: 1, weight: 0.25 },
+  { id: "sleeper"     as const, label: "RotoWire/Sleeper", tier: 2, weight: 0.15 },
 ];
 export type ProjSourceId = typeof PROJ_SOURCES[number]["id"];
+
+// Raw stat categories tracked for the per-player consensus stat line (feeds
+// the Stat Detail tab + CSV export). Only sources with real stat breakdowns
+// (Sleeper, ESPN) contribute here — FantasyPros/numberFire report a single
+// blended fpts number with no category breakdown.
+const STAT_CATEGORIES = [
+  "pass_yd", "pass_td", "pass_int",
+  "rush_yd", "rush_td",
+  "rec", "rec_yd", "rec_td",
+] as const;
+
+function pickStatCategories(stats: Record<string, number> | undefined): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!stats) return out;
+  for (const key of STAT_CATEGORIES) {
+    const v = stats[key];
+    if (typeof v === "number" && v !== 0) out[key] = v;
+  }
+  return out;
+}
 
 // ── Hook ────────────────────────────────────────────────────────────────────
 
@@ -157,10 +178,31 @@ export function useProjections(
         kickoffAt: number | null;
       }>();
 
-      // Per-player scaling ratio: leagueFpts / defaultFpts derived from Sleeper raw stats.
-      // Applied to FantasyPros/numberFire projections (which return a single fpts number
-      // with no raw stat breakdown) to approximate league-specific scoring for those sources.
-      const scalingRatios = new Map<string, number>();
+      // Per-player scaling ratio: leagueFpts / defaultFpts, blended (weighted by
+      // source weight) across every source that reports raw stats (Sleeper, ESPN).
+      // Applied to FantasyPros/numberFire projections (which return a single fpts
+      // number with no raw stat breakdown) to approximate league-specific scoring —
+      // more raw-stat sources feeding this blend means a sturdier estimate of what
+      // those single-number sources are implicitly assuming.
+      const ratioAcc = new Map<string, { sum: number; weight: number }>();
+      const addRatio = (sleeperId: string, ratio: number, weight: number) => {
+        const existing = ratioAcc.get(sleeperId) ?? { sum: 0, weight: 0 };
+        existing.sum += ratio * weight;
+        existing.weight += weight;
+        ratioAcc.set(sleeperId, existing);
+      };
+
+      // Per-player consensus raw stat line (weighted average across raw-stat
+      // sources), surfaced on each row for the Stat Detail tab + CSV export.
+      const statAcc = new Map<string, { sums: Record<string, number>; weight: number }>();
+      const addStats = (sleeperId: string, stats: Record<string, number>, weight: number) => {
+        const existing = statAcc.get(sleeperId) ?? { sums: {}, weight: 0 };
+        for (const [key, value] of Object.entries(pickStatCategories(stats))) {
+          existing.sums[key] = (existing.sums[key] ?? 0) + value * weight;
+        }
+        existing.weight += weight;
+        statAcc.set(sleeperId, existing);
+      };
 
       const getKickoffAt = (row: SleeperRawProjectionItem): number | null => {
         const direct = getProjectionKickoffAt(row);
@@ -228,9 +270,11 @@ export function useProjections(
           const leagueFpts = calcFpts(item.stats as Record<string, number> | undefined, pos);
           if (leagueFpts <= 0) return;
           addRow(String(item.player_id), leagueFpts, "sleeper", sleeperWeight, getKickoffAt(item));
-          // Build per-player scaling ratio for FantasyPros/numberFire adjustment
+          // Feed the scaling-ratio + consensus stat-line accumulators for
+          // FantasyPros/numberFire adjustment and the Stat Detail tab.
           const defaultFpts = calcDefaultFpts(item.stats as Record<string, number> | undefined, pos);
-          if (defaultFpts > 0) scalingRatios.set(String(item.player_id), leagueFpts / defaultFpts);
+          if (defaultFpts > 0) addRatio(String(item.player_id), leagueFpts / defaultFpts, sleeperWeight);
+          addStats(String(item.player_id), item.stats as Record<string, number> | undefined ?? {}, sleeperWeight);
         });
         statusMap["sleeper"] = true;
       } catch { statusMap["sleeper"] = false; }
@@ -245,7 +289,40 @@ export function useProjections(
       // requests are unaffected by this gate.
       const weeklyDataYearVerified = week === "season" || sourceRows.size > 0;
 
-      // Source 2: FantasyPros — opt-in only; user must explicitly enable it after
+      // Source 2: ESPN — opt-in, like FantasyPros/numberFire below, but unlike
+      // them it reports a real per-category stat breakdown (pass/rush/rec yards,
+      // TDs, etc.), so it's scored directly via calcFpts rather than scaled by a
+      // ratio, and it feeds both the ratio and stat-line accumulators just like
+      // Sleeper does.
+      if (extraSources.includes("espn") && weeklyDataYearVerified) {
+        try {
+          const weekParam = week === "season" ? "0" : String(week);
+          const data: Array<{ name: string; position: string; fpts: number; stats: Record<string, number> }> =
+            await fetch(`/api/projections/espn?week=${weekParam}`).then((r) => r.json());
+          const src = PROJ_SOURCES.find((s) => s.id === "espn")!;
+          data.forEach((item) => {
+            const key = normalizeProjName(item.name);
+            const sleeperId = nameIndex.get(key);
+            if (!sleeperId) return;
+            const leagueFpts = calcFpts(item.stats, item.position);
+            if (leagueFpts <= 0) return;
+            addRow(sleeperId, leagueFpts, src.id, src.weight);
+            const defaultFpts = calcDefaultFpts(item.stats, item.position);
+            if (defaultFpts > 0) addRatio(sleeperId, leagueFpts / defaultFpts, src.weight);
+            addStats(sleeperId, item.stats, src.weight);
+          });
+          statusMap["espn"] = true;
+        } catch { statusMap["espn"] = false; }
+      }
+
+      // Finalize the blended scaling ratio (weighted average across every
+      // raw-stat source that matched each player) before it's applied below.
+      const scalingRatios = new Map<string, number>();
+      ratioAcc.forEach((acc, sleeperId) => {
+        if (acc.weight > 0) scalingRatios.set(sleeperId, acc.sum / acc.weight);
+      });
+
+      // Source 3: FantasyPros — opt-in only; user must explicitly enable it after
       // verifying the link shows the correct year. During offseason their ?week=draft
       // endpoint has no year parameter and returns prior-season data.
       if (extraSources.includes("fantasypros") && weeklyDataYearVerified) {
@@ -268,7 +345,7 @@ export function useProjections(
         } catch { statusMap["fantasypros"] = false; }
       }
 
-      // Source 3: numberFire — opt-in only for the same reason; YEARLY returns prior-season
+      // Source 4: numberFire — opt-in only for the same reason; YEARLY returns prior-season
       // data until FanDuel publishes updated preseason projections.
       if (extraSources.includes("numberfire") && weeklyDataYearVerified) {
         try {
@@ -313,6 +390,13 @@ export function useProjections(
               // Build per-player scaling ratio for FantasyPros/numberFire adjustment
               const defaultFpts = calcDefaultFpts(item.stats as Record<string, number> | undefined, pos);
               if (defaultFpts > 0) scalingRatios.set(String(item.player_id), leagueFpts / defaultFpts);
+              // ÷17 to match the per-week fpts estimate above — this fallback's raw
+              // stats are full-season totals, same as the fpts they're derived from.
+              const weeklyStats: Record<string, number> = {};
+              for (const [k, v] of Object.entries(pickStatCategories(item.stats as Record<string, number> | undefined))) {
+                weeklyStats[k] = v / 17;
+              }
+              addStats(String(item.player_id), weeklyStats, 1.0);
             });
             statusMap["sleeper"] = true;
             usingSeasonFallback = true;
@@ -329,6 +413,12 @@ export function useProjections(
         const consensusFpts = row.totalWeight > 0
           ? row.totalWeightedFpts / row.totalWeight
           : 0;
+        const statRow = statAcc.get(sleeperId);
+        const consensusStats = statRow && statRow.weight > 0
+          ? Object.fromEntries(
+              Object.entries(statRow.sums).map(([k, v]) => [k, Math.round((v / statRow.weight) * 10) / 10])
+            )
+          : null;
         rows.push({
           sleeperId,
           full_name: p.full_name,
@@ -337,6 +427,7 @@ export function useProjections(
           fpts: Math.round(consensusFpts * 10) / 10,
           sources: row.sources,
           kickoffAt: row.kickoffAt,
+          stats: consensusStats,
         });
       });
       rows.sort((a, b) => b.fpts - a.fpts);

@@ -220,6 +220,7 @@ function buildProjectionRows(
       fpts: isSeasonMode ? fpts / 17 : fpts,
       sources: ["sleeper"],
       kickoffAt: null,
+      stats: null,
     });
   });
   return rows;

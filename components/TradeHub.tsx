@@ -27,7 +27,7 @@ interface TradeHubProps {
   setTradeHubSection: (section: "CALCULATOR" | "FINDER" | "TRADE_LOG" | "ATTEMPTS") => void;
   // Cross-link to Data Hub's Value Trends tab, where Market Trends moved (Phase B4/R2)
   setMainTab: (tab: MainTab) => void;
-  setDataHubTab: (tab: "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "LEAGUEMATES" | "DEPTH_CHARTS" | "MY_SHARES" | "COMPARE") => void;
+  setDataHubTab: (tab: "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "STAT_PROJECTIONS" | "LEAGUEMATES" | "DEPTH_CHARTS" | "MY_SHARES" | "COMPARE") => void;
   leagues: SleeperLeague[];
   user: SleeperUser | null;
   allPicks: AugmentedPick[];

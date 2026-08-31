@@ -21,6 +21,9 @@ export const FANTASYPROS_BASE_URL = "https://www.fantasypros.com";
 // ── numberFire (FanDuel Research GraphQL) ─────────────────────
 export const NUMBERFIRE_GQL_URL = "https://fdresearch-api.fanduel.com/graphql";
 
+// ── ESPN Fantasy (public, unauthenticated leaguedefaults endpoint) ─────
+export const ESPN_FANTASY_BASE_URL = "https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons";
+
 // ── Google Sheets (crowdsourced rookie board) ─────────────────
 // This URL is a published CSV export — safe to store in code (not a secret).
 // If the sheet is re-published or moved, update here only.

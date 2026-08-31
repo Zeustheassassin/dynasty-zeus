@@ -4,12 +4,7 @@ import { useLeague } from "../../lib/LeagueContext";
 import { useValues } from "../../lib/ValuesContext";
 import type { SleeperUser, ProjectionRow } from "../../lib/types";
 import { POS_COLOR } from "./dataHubHelpers";
-
-const PROJ_SOURCES = [
-  { id: "fantasypros" as const, label: "FantasyPros",       tier: 1 as const, weight: 0.45 },
-  { id: "numberfire"  as const, label: "numberFire",         tier: 1 as const, weight: 0.35 },
-  { id: "sleeper"     as const, label: "RotoWire/Sleeper",   tier: 2 as const, weight: 0.20 },
-];
+import { PROJ_SOURCES } from "../../hooks/useProjections";
 
 interface ProjectionsTabProps {
   projectionData: ProjectionRow[];
@@ -121,6 +116,8 @@ function ProjectionsTab({
               ? `https://www.fantasypros.com/nfl/projections/qb.php?week=${projectionWeek === 0 ? "draft" : projectionWeek}&scoring=PPR`
               : src.id === "numberfire"
               ? "https://www.fanduel.com/research/nfl/fantasy/fantasy-football-projections/qb"
+              : src.id === "espn"
+              ? "https://fantasy.espn.com/football/players/projections"
               : `https://api.sleeper.app/projections/nfl/${projectionSeasonYear ?? new Date().getFullYear()}?season_type=regular&position=QB&order_by=pts_ppr`;
 
           return (
@@ -165,7 +162,7 @@ function ProjectionsTab({
         {loadingProjections && <span className="text-[10px] text-blue-400 ml-1">Loading…</span>}
       </div>
       <p className="text-[10px] text-slate-600 mb-4">
-        Sleeper is always on and year-verified. Click <span className="text-slate-400">↗</span> on FantasyPros or numberFire to check the data year before enabling them — their full-season endpoints don&apos;t publish {new Date().getFullYear()} numbers until closer to training camp.
+        Sleeper is always on and year-verified. Click <span className="text-slate-400">↗</span> on FantasyPros, numberFire, or ESPN to check the data year before enabling them — their full-season endpoints don&apos;t publish {new Date().getFullYear()} numbers until closer to training camp.
       </p>
 
       {projectionUsesSeasonFallback && projectionWeek !== 0 && (

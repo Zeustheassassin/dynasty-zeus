@@ -7,6 +7,7 @@ import type { ShareEntry, ExposureData } from "./DataHub/dataHubTypes";
 import RankingsTab from "./DataHub/RankingsTab";
 import ValueTrendsTab from "./DataHub/ValueTrendsTab";
 import ProjectionsTab from "./DataHub/ProjectionsTab";
+import StatProjectionsTab from "./DataHub/StatProjectionsTab";
 import LeaguematesTab from "./DataHub/LeaguematesTab";
 import DepthChartsTab from "./DataHub/DepthChartsTab";
 import MySharesTab from "./DataHub/MySharesTab";
@@ -17,7 +18,7 @@ import { ACCENT_CLASSES } from "../lib/uiTheme";
 // ── Local types ─────────────────────────────────────────────────────────────
 // BUY_LOW is no longer a top-level tab — it's a view inside VALUE_TRENDS now
 // (same treatment MARKET_PULSE already got), to cut down top-level sub-tabs.
-type DataHubTabId = "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "LEAGUEMATES" | "DEPTH_CHARTS" | "MY_SHARES" | "COMPARE";
+type DataHubTabId = "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "STAT_PROJECTIONS" | "LEAGUEMATES" | "DEPTH_CHARTS" | "MY_SHARES" | "COMPARE";
 
 interface DataHubProps {
   // Navigation
@@ -96,7 +97,7 @@ function DataHub({
       {/* Sub-tab nav */}
       <nav aria-label="Data Hub" className="flex justify-center border-b border-slate-800 mb-6">
         <div className="flex justify-center gap-1 sm:gap-3 lg:gap-5 text-center flex-wrap">
-          {(["MY_SHARES", "RANKINGS", "VALUE_TRENDS", "PROJECTIONS", "DEPTH_CHARTS", "LEAGUEMATES", "COMPARE"] as const).map((tab) => (
+          {(["MY_SHARES", "RANKINGS", "VALUE_TRENDS", "PROJECTIONS", "STAT_PROJECTIONS", "DEPTH_CHARTS", "LEAGUEMATES", "COMPARE"] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setDataHubTab(tab)}
@@ -109,6 +110,7 @@ function DataHub({
               {tab === "RANKINGS" ? "Rankings" :
                tab === "VALUE_TRENDS" ? "Value Trends" :
                tab === "PROJECTIONS" ? "Projections" :
+               tab === "STAT_PROJECTIONS" ? "Stat Detail" :
                tab === "LEAGUEMATES" ? "League Mates" :
                tab === "DEPTH_CHARTS" ? "Depth Charts" :
                tab === "MY_SHARES" ? "My Shares" :
@@ -170,6 +172,15 @@ function DataHub({
           enabledExtraSources={enabledExtraSources}
           toggleExtraSource={toggleExtraSource}
           user={user}
+        />
+      )}
+
+      {dataHubTab === "STAT_PROJECTIONS" && (
+        <StatProjectionsTab
+          projectionData={projectionData}
+          projectionSeasonYear={projectionSeasonYear}
+          projectionWeek={projectionWeek}
+          loadingProjections={loadingProjections}
         />
       )}
 
