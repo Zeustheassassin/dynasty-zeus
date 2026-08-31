@@ -642,7 +642,10 @@ describe("runFinderPipeline — structural guardrails", () => {
     expect(allTrades).toHaveLength(0);
   });
 
-  it("blocks a give-side package with an invalid same-team combo (two WRs same team)", () => {
+  it("does not block giving away two same-team WRs (only a newly-received clash counts)", () => {
+    // Giving both away resolves any clash rather than creating one — nothing for the
+    // post-trade-roster check to flag, since buildPostTradePlayers here only reflects
+    // what's received.
     const wr1 = mkPlayer("WR1", "WR", 3000, { team: "BUF" });
     const wr2 = mkPlayer("WR2", "WR", 2500, { team: "BUF" });
     const players: Record<string, SleeperPlayer> = {
@@ -654,8 +657,11 @@ describe("runFinderPipeline — structural guardrails", () => {
       receive: [mkPlayer("r1", "RB", 5000)],
       format: "2-for-1",
     });
-    const { allTrades } = runFinderPipeline([t], baseCtx({ players }));
-    expect(allTrades).toHaveLength(0);
+    const { allTrades } = runFinderPipeline(
+      [t],
+      baseCtx({ players, buildPostTradePlayers: (_b, _g, receive) => receive }),
+    );
+    expect(allTrades).toHaveLength(1);
   });
 
   it("allows a QB+WR same-team combo (valid stacking pair)", () => {
@@ -666,12 +672,121 @@ describe("runFinderPipeline — structural guardrails", () => {
       WR1: wr as unknown as SleeperPlayer,
     };
     const t = mkTrade({
-      give: [qb, wr],
-      receive: [mkPlayer("r1", "RB", 6000)],
+      give: [],
+      receive: [qb, wr],
       format: "2-for-1",
     });
-    const { allTrades } = runFinderPipeline([t], baseCtx({ players }));
+    const { allTrades } = runFinderPipeline(
+      [t],
+      baseCtx({ players, buildPostTradePlayers: (_b, _g, receive) => receive }),
+    );
     expect(allTrades).toHaveLength(1);
+  });
+
+  it("in a contender window, hard-blocks a receive-side same-team WR/WR clash", () => {
+    const wr1 = mkPlayer("WR1", "WR", 3000, { team: "BUF" });
+    const wr2 = mkPlayer("WR2", "WR", 2500, { team: "BUF" });
+    const players: Record<string, SleeperPlayer> = {
+      WR1: wr1 as unknown as SleeperPlayer,
+      WR2: wr2 as unknown as SleeperPlayer,
+    };
+    const t = mkTrade({
+      give: [mkPlayer("g1", "RB", 5000)],
+      receive: [wr1, wr2],
+      format: "1-for-2",
+    });
+    const { allTrades } = runFinderPipeline(
+      [t],
+      baseCtx({
+        players,
+        finderDirection: "Elite",
+        buildPostTradePlayers: (_b, _g, receive) => receive,
+      }),
+    );
+    expect(allTrades).toHaveLength(0);
+  });
+
+  it("in the Almost There window, a same-team WR/WR clash is penalized, not blocked", () => {
+    const wr1 = mkPlayer("WR1", "WR", 3000, { team: "BUF" });
+    const wr2 = mkPlayer("WR2", "WR", 2500, { team: "BUF" });
+    const players: Record<string, SleeperPlayer> = {
+      WR1: wr1 as unknown as SleeperPlayer,
+      WR2: wr2 as unknown as SleeperPlayer,
+    };
+    const t = mkTrade({
+      give: [mkPlayer("g1", "RB", 5000)],
+      receive: [wr1, wr2],
+      format: "1-for-2",
+    });
+    const { allTrades } = runFinderPipeline(
+      [t],
+      baseCtx({
+        players,
+        finderDirection: "Almost There",
+        buildPostTradePlayers: (_b, _g, receive) => receive,
+      }),
+    );
+    expect(allTrades).toHaveLength(1);
+  });
+
+  it("in a rebuild window, a same-team WR/WR clash is neither blocked nor penalized", () => {
+    const wr1 = mkPlayer("WR1", "WR", 3000, { team: "BUF" });
+    const wr2 = mkPlayer("WR2", "WR", 2500, { team: "BUF" });
+    const players: Record<string, SleeperPlayer> = {
+      WR1: wr1 as unknown as SleeperPlayer,
+      WR2: wr2 as unknown as SleeperPlayer,
+    };
+    const t = mkTrade({
+      give: [mkPlayer("g1", "RB", 5000)],
+      receive: [wr1, wr2],
+      format: "1-for-2",
+    });
+    const { allTrades } = runFinderPipeline(
+      [t],
+      baseCtx({
+        players,
+        finderDirection: "Rebuilder",
+        buildPostTradePlayers: (_b, _g, receive) => receive,
+      }),
+    );
+    expect(allTrades).toHaveLength(1);
+  });
+
+  it("penalizes (ranks below) a same-team QB/RB combo in a win-now window, without blocking it", () => {
+    // Both candidates are otherwise identical in value; the only difference is that
+    // receiving RB1 pairs it with the QB already on the roster (same team, BUF), while
+    // RB2 does not (KC). The QB/RB penalty should push the conflicting trade lower in
+    // the final ranking without dropping it from allTrades.
+    const existingQb = mkPlayer("QB1", "QB", 4000, { team: "BUF" });
+    const rbSameTeam = mkPlayer("RB1", "RB", 3000, { team: "BUF" });
+    const rbOtherTeam = mkPlayer("RB2", "RB", 3000, { team: "KC" });
+    const players: Record<string, SleeperPlayer> = {
+      QB1: existingQb as unknown as SleeperPlayer,
+      RB1: rbSameTeam as unknown as SleeperPlayer,
+      RB2: rbOtherTeam as unknown as SleeperPlayer,
+    };
+    const conflictTrade = mkTrade({
+      give: [mkPlayer("g1", "WR", 3000)],
+      receive: [rbSameTeam],
+      oppRosterId: 2,
+    });
+    const cleanTrade = mkTrade({
+      give: [mkPlayer("g2", "WR", 3000)],
+      receive: [rbOtherTeam],
+      oppRosterId: 3,
+    });
+    const oppRoster3 = mkRoster(3, "OPP3", []);
+    const { allTrades } = runFinderPipeline(
+      [conflictTrade, cleanTrade],
+      baseCtx({
+        players,
+        rosters: [mkRoster(1, "USER", []), mkRoster(2, "OPP", []), oppRoster3],
+        buildPostTradePlayers: (_b, _g, receive) => [existingQb, ...receive],
+      }),
+    );
+    expect(allTrades).toHaveLength(2);
+    expect(allTrades[0].receive[0].player_id).toBe("RB2");
+    expect(allTrades[1].receive[0].player_id).toBe("RB1");
   });
 });
 

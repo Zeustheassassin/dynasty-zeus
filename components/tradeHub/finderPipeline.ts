@@ -194,10 +194,20 @@ export function runFinderPipeline(
     });
   };
 
+  // Same-team skill-position pairs: two pass-catchers from the same NFL team compete for the
+  // same targets, so a big game from one often comes at the other's expense (WR/WR, WR/TE,
+  // TE/TE — "clash"). RB/RB doesn't have this problem once one is clearly the backup (handcuff,
+  // not competing for the same role), and a QB paired with his own pass-catcher is complementary
+  // rather than competing for a shared resource. QB/RB same team is a milder version of the same
+  // tension (a big rushing day can mean fewer drop-back attempts) — flagged separately as
+  // "qbRb" so it can be penalized softly instead of blocked.
   const isValidSameTeamPair = (team: string, p1: PlayerWithValue, p2: PlayerWithValue): boolean => {
     const pos1 = String(p1.position), pos2 = String(p2.position);
     if ((pos1 === "QB" && pos2 === "WR") || (pos1 === "WR" && pos2 === "QB")) return true;
     if ((pos1 === "QB" && pos2 === "TE") || (pos1 === "TE" && pos2 === "QB")) return true;
+    if ((pos1 === "QB" && pos2 === "RB") || (pos1 === "RB" && pos2 === "QB")) return true;
+    if ((pos1 === "RB" && pos2 === "WR") || (pos1 === "WR" && pos2 === "RB")) return true;
+    if ((pos1 === "RB" && pos2 === "TE") || (pos1 === "TE" && pos2 === "RB")) return true;
     if (pos1 === "RB" && pos2 === "RB") {
       const idx1 = getNFLDepthIdx(team, "RB", p1.player_id);
       const idx2 = getNFLDepthIdx(team, "RB", p2.player_id);
@@ -209,23 +219,39 @@ export function runFinderPipeline(
     }
     return false;
   };
-  const hasBadSameTeamCombo = (side: PlayerWithValue[]): boolean => {
+
+  // Finds same-team conflicts introduced by THIS trade on the user's own resulting roster —
+  // built from the full post-trade roster (buildPostTradePlayers), not just the two sides of
+  // the trade, so a receive that clashes with a player already on the roster (untouched by the
+  // trade) is caught too. Only pairs where at least one player is newly RECEIVED are reported —
+  // a pre-existing combo the trade doesn't touch is not this trade's problem to flag.
+  const findNewSameTeamConflicts = (r: TradeResult): ("clash" | "qbRb")[] => {
+    const postTrade = buildPostTradePlayers(myRoster, r.give, r.receive);
+    const receiveIds = new Set(r.receive.map((p) => p.player_id));
     const byTeam = new Map<string, PlayerWithValue[]>();
-    for (const p of side) {
+    for (const p of postTrade) {
       const team = players[p.player_id]?.team;
       if (!team) continue;
       if (!byTeam.has(team)) byTeam.set(team, []);
       byTeam.get(team)!.push(p);
     }
+    const conflicts: ("clash" | "qbRb")[] = [];
     for (const [team, tPlayers] of byTeam) {
       if (tPlayers.length < 2) continue;
       for (let i = 0; i < tPlayers.length; i++) {
         for (let j = i + 1; j < tPlayers.length; j++) {
-          if (!isValidSameTeamPair(team, tPlayers[i], tPlayers[j])) return true;
+          const p1 = tPlayers[i], p2 = tPlayers[j];
+          if (!receiveIds.has(p1.player_id) && !receiveIds.has(p2.player_id)) continue;
+          const pos1 = String(p1.position), pos2 = String(p2.position);
+          if ((pos1 === "QB" && pos2 === "RB") || (pos1 === "RB" && pos2 === "QB")) {
+            conflicts.push("qbRb");
+          } else if (!isValidSameTeamPair(team, p1, p2)) {
+            conflicts.push("clash");
+          }
         }
       }
     }
-    return false;
+    return conflicts;
   };
 
   const oppProfileByRosterId = new Map(
@@ -307,6 +333,14 @@ export function runFinderPipeline(
     || !!deferredTargetPlayerId
     || !r.receive.some((p) => isOldProducerBuy(p));
 
+  // Same-team conflict tier, reusing the same win-now classification as the aging-vet gate
+  // above: a true contender (or window-closing) roster can't afford a WR/WR-style clash in the
+  // starting lineup, so it's a hard block; "Almost There" is close enough to matter but not
+  // certain enough to lose a trade over, so it's a scoring penalty instead; a seller/rebuild
+  // team is playing for value over weekly points, so this doesn't apply at all.
+  const userConflictTier: "hard" | "partial" | "none" =
+    !userIsWinNow ? "none" : finderDirection === "Almost There" ? "partial" : "hard";
+
   const preGuardrail = results
     .filter((r) => isFinite(r.score))
     .filter((r) => !r.give.some((p) => isBlockedSellDisposition(p.player_id)))
@@ -314,7 +348,7 @@ export function runFinderPipeline(
     .filter((r) => !pinnedPlayer || r.give.some((p) => p.player_id === pinnedPlayer.player_id))
     .filter((r) => !deferredTargetPlayerId || r.receive.some((p) => p.player_id === deferredTargetPlayerId))
     .filter((r) => !isWrongOwnerHCPackage(r))
-    .filter((r) => !hasBadSameTeamCombo(r.give) && !hasBadSameTeamCombo(r.receive))
+    .filter((r) => userConflictTier !== "hard" || !findNewSameTeamConflicts(r).includes("clash"))
     .filter((r) => !finderTankMode || r.receive.every((p) =>
       isFutureInsulationAsset(p) ||
       (INJURED_STATUSES.has((players[p.player_id]?.injury_status ?? "").toLowerCase()) && (p.value ?? 0) >= 1500)
@@ -1408,6 +1442,22 @@ export function runFinderPipeline(
         return tmp;
       })();
 
+      // Soft counterpart to the hard "clash" block above (WR/WR, WR/TE, TE/TE): in the
+      // "Almost There" tier the trade still surfaces, just ranked down, since the window isn't
+      // locked in yet. QB/RB same-team is always a small penalty (never a block) whenever some
+      // window pressure exists — mild, not the severe target-competition of a receiver clash.
+      const sameTeamConflictPenalty = (() => {
+        if (userConflictTier === "none") return 0;
+        const conflicts = findNewSameTeamConflicts(r);
+        if (conflicts.length === 0) return 0;
+        let penalty = 0;
+        if (userConflictTier === "partial") {
+          penalty += conflicts.filter((c) => c === "clash").length * -12;
+        }
+        penalty += conflicts.filter((c) => c === "qbRb").length * -5;
+        return penalty;
+      })();
+
       const oppDropCostPenalty = (() => {
         const oppNetPlayerGain = valueBearingGive(r).length - r.receive.length;
         if (oppNetPlayerGain <= 0) return 0;
@@ -1455,7 +1505,7 @@ export function runFinderPipeline(
         + attemptIntelScore + activeTraderBonus + oppDropCostPenalty + sweetenerBonus;
       const userFitBucket = getDirectionTradeScore(r) + lineupSafety.score + teamWindowBonus
         + starterQualityBonus + depthAwareTierBonus + rosterBalanceScore + championshipBonus
-        + futurePickBonus + standingsPressureScore;
+        + futurePickBonus + standingsPressureScore + sameTeamConflictPenalty;
       const valueEdgeBucket = r.score + balancePenalty + starPremiumScore + pickSlotScore + handcuffBonus;
       const structureBucket = formatBonus + rosterConsolidationBonus + timelineMismatchPenalty;
       const signalsBucket = dispositionScore + marketIntelScore + archetypeWinRateBonus
