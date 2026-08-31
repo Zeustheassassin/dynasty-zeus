@@ -46,6 +46,17 @@ function ProjectionsTab({
     .filter((p) => projectionPosFilter === "ALL" || p.position === projectionPosFilter)
     .filter((p) => !projRosterOnly || myPlayerSet.has(p.sleeperId));
 
+  // A source can fetch successfully (projectionSourceStatus[id] === true) yet
+  // match zero players — e.g. ESPN/numberFire before they've published data
+  // for the selected week. Count only sources that actually contributed to at
+  // least one row, so the per-row Srcs ratio doesn't make every player look
+  // like it's "missing" a source that was never going to have data this load.
+  const matchedSourceCount = React.useMemo(() => {
+    const set = new Set<string>();
+    projectionData.forEach((p) => p.sources.forEach((s) => set.add(s)));
+    return set.size;
+  }, [projectionData]);
+
   return (
     <>
       <div className="flex flex-wrap items-center gap-3 mb-4">
@@ -199,7 +210,7 @@ function ProjectionsTab({
                     {dynVal > 0 ? dynVal.toLocaleString() : "—"}
                   </span>
                   <span className="text-[10px] text-slate-600 w-10 text-right shrink-0 pr-1" title={p.sources.join(", ")}>
-                    {p.sources.length}/{Object.values(projectionSourceStatus).filter(Boolean).length || PROJ_SOURCES.length}
+                    {p.sources.length}/{matchedSourceCount || PROJ_SOURCES.length}
                   </span>
                 </div>
               );
