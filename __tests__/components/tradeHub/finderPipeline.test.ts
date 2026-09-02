@@ -352,6 +352,56 @@ describe("runFinderPipeline — basic acceptance & filtering", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────
+// Contender tier-up overpay credit (user policy: on a win-now team that's
+// deep at a position, a 2-for-1 consolidating surplus into one difference-
+// maker is worth deliberately overpaying for — see tierUpOverpayCredit).
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("runFinderPipeline — contender tier-up overpay credit", () => {
+  // A 2-for-1 where the user pays a real premium: give 2 RBs (2000+1500=3500),
+  // receive 1 RB (2700) — net -800, well beyond what a standard swap's
+  // balancePenalty would tolerate unaided.
+  const overpayTierUp = () =>
+    mkTrade({
+      give: [mkPlayer("g1", "RB", 2000), mkPlayer("g2", "RB", 1500)],
+      receive: [mkPlayer("r1", "RB", 2700)],
+      score: 30,
+      net: -800,
+      format: "2 for 1",
+    });
+  // Third viable (>=1500) RB left on the roster after g1/g2 leave — the "solid
+  // backup" proof that the position was actually deep, not gutted.
+  const rosterWithBackup = [
+    mkPlayer("g1", "RB", 2000), mkPlayer("g2", "RB", 1500), mkPlayer("backup", "RB", 1600),
+  ];
+  const rosterNoBackup = [mkPlayer("g1", "RB", 2000), mkPlayer("g2", "RB", 1500)];
+
+  it("lets a win-now team's depth-backed 2-for-1 overpay survive the value gate", () => {
+    const { allTrades } = runFinderPipeline(
+      [overpayTierUp()],
+      baseCtx({ finderDirection: "Elite", myFinderPlayoffOdds: 80, myPlayers: rosterWithBackup }),
+    );
+    expect(allTrades).toHaveLength(1);
+  });
+
+  it("does not grant the credit when the given position has no depth left behind", () => {
+    const { allTrades } = runFinderPipeline(
+      [overpayTierUp()],
+      baseCtx({ finderDirection: "Elite", myFinderPlayoffOdds: 80, myPlayers: rosterNoBackup }),
+    );
+    expect(allTrades).toHaveLength(0);
+  });
+
+  it("does not grant the credit to a non-win-now team even with the same depth", () => {
+    const { allTrades } = runFinderPipeline(
+      [overpayTierUp()],
+      baseCtx({ finderDirection: "Rebuilder", myFinderPlayoffOdds: 20, myPlayers: rosterWithBackup }),
+    );
+    expect(allTrades).toHaveLength(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
 // Pinned-player and target-player gates
 // ─────────────────────────────────────────────────────────────────────────
 

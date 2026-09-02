@@ -176,6 +176,44 @@ export const isBalancedWithStarDiscount = (giveVals: number[], receiveVals: numb
   return true;
 };
 
+// ── Contender tier-up overpay allowance ────────────────────────────────────────
+// User policy: on a contending team that's deep at a position (solid backups behind
+// the starter), a 2-for-1 that consolidates that depth into one difference-maker is
+// worth deliberately overpaying for — the standard 600/85% gate is calibrated for
+// even-value swaps, not "give up surplus to tier up." This ONLY widens the band in
+// the direction where the USER gives more value than they receive (acquiring the
+// star); if the trade already favors the user, it falls back to the standard gate
+// unchanged. Callers must additionally gate this on contender status + give-side
+// roster depth — this function has no opinion on either.
+export const TIER_UP_BALANCE_ABS_CAP = 900;
+export const TIER_UP_BALANCE_RATIO_FLOOR = 0.72;
+
+export const isBalancedTierUp = (giveVals: number[], receiveVals: number[]) => {
+  const gTotal = giveVals.reduce((s, v) => s + v, 0);
+  const rTotal = receiveVals.reduce((s, v) => s + v, 0);
+  if (rTotal >= gTotal) return isBalanced(giveVals, receiveVals);
+  if (gTotal - rTotal > TIER_UP_BALANCE_ABS_CAP) return false;
+  if (rTotal / gTotal < TIER_UP_BALANCE_RATIO_FLOOR) return false;
+  return true;
+};
+
+export const isBalancedTierUpWithStarDiscount = (giveVals: number[], receiveVals: number[]) => {
+  if (!isBalancedTierUp(giveVals, receiveVals)) return false;
+  const { onGive, onReceive } = computeStarDiscounts(giveVals, receiveVals);
+  const gTotal = giveVals.reduce((s, v) => s + v, 0) + onGive;
+  const rTotal = receiveVals.reduce((s, v) => s + v, 0) + onReceive;
+  if (rTotal >= gTotal) {
+    if (Math.abs(rTotal - gTotal) > BALANCE_ABS_CAP) return false;
+    const higher = Math.max(gTotal, rTotal);
+    const lower  = Math.min(gTotal, rTotal);
+    if (higher > 0 && lower / higher < BALANCE_RATIO_FLOOR) return false;
+    return true;
+  }
+  if (gTotal - rTotal > TIER_UP_BALANCE_ABS_CAP) return false;
+  if (gTotal > 0 && rTotal / gTotal < TIER_UP_BALANCE_RATIO_FLOOR) return false;
+  return true;
+};
+
 // ── Team window ───────────────────────────────────────────────────────────────
 
 // Returns avg years until positional cliffs across the starting lineup.

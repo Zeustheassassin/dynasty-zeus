@@ -14,6 +14,8 @@ import {
   tradeWaiverAdj,
   isBalanced,
   isBalancedWithStarDiscount,
+  isBalancedTierUp,
+  isBalancedTierUpWithStarDiscount,
   computeTeamWindow,
   getPickSlotBonus,
 } from "@/components/tradeHub/FinderScoring";
@@ -366,6 +368,54 @@ describe("isBalancedWithStarDiscount", () => {
     // credit-free re-check catches it.
     expect(isBalanced([1999, 1999], [1999, 1999, 1034])).toBe(true);
     expect(isBalancedWithStarDiscount([1999, 1999], [1999, 1999, 1034])).toBe(false);
+  });
+});
+
+// ── isBalancedTierUp / isBalancedTierUpWithStarDiscount ─────────────────
+// User policy: on a contender consolidating depth into one star, deliberately
+// overpaying (giving more value than received) is fine within a wider band than
+// the standard even-value gate — but only in that direction.
+
+describe("isBalancedTierUp", () => {
+  it("when the user isn't overpaying (receive >= give), delegates to the standard isBalanced gate", () => {
+    // Equal cardinality (1-for-1) sidesteps tradeWaiverAdj entirely, so isBalanced's
+    // verdict here is just the plain abs/ratio check — an easy baseline to delegate to.
+    expect(isBalancedTierUp([1000], [1000])).toBe(isBalanced([1000], [1000]));
+    expect(isBalancedTierUp([1000], [1000])).toBe(true);
+    // Still rejects a real gap even on the "user gains value" side.
+    expect(isBalancedTierUp([100], [900])).toBe(isBalanced([100], [900]));
+    expect(isBalancedTierUp([100], [900])).toBe(false);
+  });
+
+  it("allows an overpay gap beyond the standard 600 cap, up to the wider 900 tier-up cap", () => {
+    // give [1300,1300]=2600, receive [1900]: raw gap=700 (fails the standard credit-free
+    // 600 cap — see isBalancedWithStarDiscount below — but passes the 900 tier-up cap),
+    // ratio=1900/2600=0.731 (clears the 0.72 floor). isBalanced() itself isn't a useful
+    // baseline here: any 2-for-1 gets a cardinality-mismatch credit there regardless.
+    expect(isBalancedWithStarDiscount([1300, 1300], [1900])).toBe(false);
+    expect(isBalancedTierUp([1300, 1300], [1900])).toBe(true);
+  });
+
+  it("still rejects an overpay gap beyond the 900 cap", () => {
+    // give [2000,2000]=4000, receive [2900]: gap=1100 > 900.
+    expect(isBalancedTierUp([2000, 2000], [2900])).toBe(false);
+  });
+
+  it("still rejects an overpay below the 0.72 ratio floor even with gap <= 900", () => {
+    // give [1300,1300]=2600, receive [1800]: gap=800 <= 900, ratio=1800/2600=0.692 < 0.72.
+    expect(isBalancedTierUp([1300, 1300], [1800])).toBe(false);
+  });
+});
+
+describe("isBalancedTierUpWithStarDiscount", () => {
+  it("allows the same wider overpay band as isBalancedTierUp when no piece triggers a star discount", () => {
+    // All values < 2000, so computeStarDiscounts contributes 0 on both sides.
+    expect(isBalancedWithStarDiscount([1300, 1300], [1900])).toBe(false); // raw gap 700 > 600
+    expect(isBalancedTierUpWithStarDiscount([1300, 1300], [1900])).toBe(true); // gap 700 <= 900, ratio 0.731
+  });
+
+  it("still rejects below the ratio floor", () => {
+    expect(isBalancedTierUpWithStarDiscount([1300, 1300], [1700])).toBe(false); // ratio 0.654 < 0.72
   });
 });
 

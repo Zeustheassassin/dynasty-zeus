@@ -3,6 +3,7 @@ import React, { useState, useMemo, useDeferredValue, startTransition } from "rea
 import {
   getStoredPickValue,
   getSeasonYear,
+  CONTENDER_BUCKETS,
 } from "../../lib/helpers";
 
 import type {
@@ -24,7 +25,7 @@ import { FinderSearchInput } from "./FinderSearch";
 import FinderResults from "./FinderResults";
 import { FinderDirectionPanel } from "./FinderDirectionPanel";
 import {
-  packageOk, posTotals, isBalancedWithStarDiscount, LOW_VALUE_FLOOR,
+  packageOk, posTotals, isBalancedWithStarDiscount, isBalancedTierUpWithStarDiscount, LOW_VALUE_FLOOR,
 } from "./FinderScoring";
 import {
   finderPickKey,
@@ -402,6 +403,15 @@ function TradeFinder({
         : finderStrategyOverride === "TANK"
           ? false
           : ["Elite", "True Contender"].includes(finderDirection) && myFinderPlayoffOdds >= 70;
+      // Contender tier-up mode: any team actively buying (not just locked-odds championship
+      // pushers) gets the wider "willing to overpay for a 2-for-1 consolidation" gate below —
+      // user policy: on a contender with depth at a position, tiering two solid backups into
+      // one difference-maker is worth a value premium.
+      const isContenderTierUpMode = finderStrategyOverride === "CONTEND"
+        ? true
+        : finderStrategyOverride === "TANK"
+          ? false
+          : CONTENDER_BUCKETS.includes(finderDirection);
       // Auto-strategy label for UI display
       const autoStrategyLabel: string = finderStrategyOverride === "TANK"
         ? "Full Tank Mode"
@@ -620,6 +630,26 @@ function TradeFinder({
       const getNFLDepthIdx = (team: string, pos: string, playerId: string): number | null =>
         getNFLDepthIdxUtil(team, pos, playerId, nflTeamDepth);
 
+      // Tier-up depth gate: a 2-for-1 only gets the wider overpay allowance (see
+      // isBalancedTierUpWithStarDiscount) when the two given players are actually surplus —
+      // i.e. at least one other viable (≥1500) body remains at each given position after the
+      // deal. 1500 matches the "viable depth" floor used elsewhere (finderPipeline
+      // myViableDepth) so "solid backup" means the same thing everywhere in the Finder.
+      const TIER_UP_DEPTH_FLOOR = 1500;
+      const hasTierUpDepth = (mp1: PlayerWithValue, mp2: PlayerWithValue): boolean => {
+        const posSet = new Set([mp1.position, mp2.position]);
+        for (const pos of posSet) {
+          const remaining = myPlayers.filter((p) =>
+            p.position === pos
+            && p.player_id !== mp1.player_id
+            && p.player_id !== mp2.player_id
+            && (p.value ?? 0) >= TIER_UP_DEPTH_FLOOR
+          ).length;
+          if (remaining < 1) return false;
+        }
+        return true;
+      };
+
       const results: TradeResult[] = [];
 
       // Freeze guard: a generous ceiling on total generated candidates. Not a quality knob —
@@ -823,7 +853,9 @@ function TradeFinder({
             for (let k = 0; k < oppCap(18); k++) {
               const op = oppTop[k];
               const mp1 = myTop[i], mp2 = myTop[j];
-              if (!isBalancedWithStarDiscount([mp1.value, mp2.value], [op.value])) continue;
+              const tierUpEligible = isContenderTierUpMode && hasTierUpDepth(mp1, mp2);
+              const balanceCheck = tierUpEligible ? isBalancedTierUpWithStarDiscount : isBalancedWithStarDiscount;
+              if (!balanceCheck([mp1.value, mp2.value], [op.value])) continue;
               if (!myPkgOk([mp1, mp2])) continue;
               if (!qbSafe([mp1, mp2])) continue;
               if (!oppQbSafe(oppPlayers, [op])) continue;

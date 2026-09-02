@@ -834,6 +834,24 @@ export function runFinderPipeline(
         ? -Math.pow(Math.abs(r.net) / 150, 1.5) * 3   // user pays up — steep penalty
         : Math.min(r.net / 150, 4);                    // user gains — small bounded reward
 
+      // Contender tier-up overpay credit: user policy — on a win-now team that's deep at a
+      // position (a viable, ≥1500-value body still on the roster after the two given players
+      // leave), a 2-for-1 that consolidates surplus into one difference-maker is worth
+      // deliberately overpaying for. This cancels balancePenalty's steep overpay tax for
+      // exactly that shape (2-for-1, user net-negative, give-side positions still have depth
+      // left behind) rather than letting a premium the user explicitly wants get scored like a
+      // bad-value trade. Every other trade shape is unaffected.
+      const tierUpOverpayCredit = (() => {
+        if (!userIsWinNow || r.net >= 0) return 0;
+        if (r.give.length !== 2 || r.receive.length !== 1) return 0;
+        const posSet = new Set(r.give.map((p) => p.position));
+        for (const pos of posSet) {
+          const givenAtPos = r.give.filter((p) => p.position === pos).length;
+          if ((myViableDepth[pos] ?? 0) - givenAtPos < 1) return 0;
+        }
+        return -balancePenalty;
+      })();
+
       const futurePickBonus = (() => {
         if (!finderPreferFuturePicks || r.receivePicks.length === 0) return 0;
         const currentYear = Number(getSeasonYear(nflState));
@@ -1506,7 +1524,7 @@ export function runFinderPipeline(
       const userFitBucket = getDirectionTradeScore(r) + lineupSafety.score + teamWindowBonus
         + starterQualityBonus + depthAwareTierBonus + rosterBalanceScore + championshipBonus
         + futurePickBonus + standingsPressureScore + sameTeamConflictPenalty;
-      const valueEdgeBucket = r.score + balancePenalty + starPremiumScore + pickSlotScore + handcuffBonus;
+      const valueEdgeBucket = r.score + balancePenalty + tierUpOverpayCredit + starPremiumScore + pickSlotScore + handcuffBonus;
       const structureBucket = formatBonus + rosterConsolidationBonus + timelineMismatchPenalty;
       const signalsBucket = dispositionScore + marketIntelScore + archetypeWinRateBonus
         + seasonTimingBonus + usageSignalScore + exposureBonus + sellHighConfirmScore + dispositionBonus
