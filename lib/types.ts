@@ -266,6 +266,12 @@ export interface ProjectionRow {
    *  from whichever active sources report raw stats (Sleeper, ESPN) — null
    *  when no stat-reporting source matched this player. */
   stats: Record<string, number> | null;
+  /** Each active source's own fpts for this player (source id -> fpts), before
+   *  blending into the weighted-average `fpts` above — null when nothing
+   *  matched. Powers the floor/ceiling volatility read (see
+   *  lib/helpers/projectionVolatility.ts): a tight spread across sources
+   *  reads as a "safe" projection, a wide one as "volatile". */
+  sourceFpts: Record<string, number> | null;
 }
 
 export interface FantasyCalcPlayerValue {

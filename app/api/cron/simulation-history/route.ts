@@ -221,6 +221,7 @@ function buildProjectionRows(
       sources: ["sleeper"],
       kickoffAt: null,
       stats: null,
+      sourceFpts: null,
     });
   });
   return rows;

@@ -167,3 +167,77 @@ describe("useProjections — weekly-data-first fallback", () => {
     expect(result.current.projectionData[0].fpts).toBeCloseTo(10, 1); // season÷17, not FantasyPros' 999
   });
 });
+
+// Regression/feature coverage: each active source's own fpts must survive onto
+// ProjectionRow.sourceFpts (not just the blended weighted average) so the
+// Suggested Starters tab can read a floor/ceiling spread across sources — see
+// lib/helpers/projectionVolatility.ts.
+describe("useProjections — per-source fpts retention", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps each matched source's own fpts on sourceFpts, separate from the blended fpts", async () => {
+    const players = {
+      "1": { player_id: "1", full_name: "Test Back", position: "RB", team: "SF" },
+    } as unknown as Record<string, import("@/lib/types").SleeperPlayer>;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) => {
+        if (url.includes("/projections/nfl/") && /\/\d+\?season_type=regular&position\[\]/.test(url)) {
+          return Promise.resolve({
+            json: () => Promise.resolve([
+              { player_id: "1", player: { position: "RB" }, stats: { rush_yd: 100 } }, // 10 fpts
+            ]),
+          });
+        }
+        if (url.includes("/api/projections/espn")) {
+          return Promise.resolve({
+            json: () => Promise.resolve([
+              { name: "Test Back", position: "RB", fpts: 0, stats: { rush_yd: 150 } }, // 15 fpts
+            ]),
+          });
+        }
+        return Promise.resolve({ json: () => Promise.resolve([]) });
+      })
+    );
+
+    const { result } = renderHook(() => useProjections(players, null));
+    await act(async () => {
+      await result.current.loadProjections(1, ["espn"]);
+    });
+
+    const row = result.current.projectionData[0];
+    // Blended (weighted-average) fpts is unaffected by this change.
+    expect(row.fpts).not.toBe(10);
+    expect(row.fpts).not.toBe(15);
+    // But each source's own number is retained untouched.
+    expect(row.sourceFpts).toEqual({ sleeper: 10, espn: 15 });
+  });
+
+  it("holds just the one matched source when only Sleeper reports data", async () => {
+    const players = {
+      "1": { player_id: "1", full_name: "Test Back", position: "RB", team: "SF" },
+    } as unknown as Record<string, import("@/lib/types").SleeperPlayer>;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) => {
+        if (url.includes("/projections/nfl/") && /\/\d+\?season_type=regular&position\[\]/.test(url)) {
+          return Promise.resolve({
+            json: () => Promise.resolve([
+              { player_id: "1", player: { position: "RB" }, stats: { rush_yd: 100 } }, // 10 fpts
+            ]),
+          });
+        }
+        return Promise.resolve({ json: () => Promise.resolve([]) });
+      })
+    );
+
+    const { result } = renderHook(() => useProjections(players, null));
+    await act(async () => {
+      await result.current.loadProjections(1);
+    });
+
+    expect(result.current.projectionData[0].sourceFpts).toEqual({ sleeper: 10 });
+  });
+});

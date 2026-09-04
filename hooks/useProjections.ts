@@ -176,6 +176,10 @@ export function useProjections(
         totalWeight: number;
         sources: string[];
         kickoffAt: number | null;
+        // Each source's own (league-scored) fpts for this player, keyed by source
+        // id — kept alongside the weighted blend above so the floor/ceiling spread
+        // across sources can be read later (see lib/helpers/projectionVolatility.ts).
+        perSourceFpts: Record<string, number>;
       }>();
 
       // Per-player scaling ratio: leagueFpts / defaultFpts, blended (weighted by
@@ -226,12 +230,13 @@ export function useProjections(
         kickoffAt?: number | null
       ) => {
         const existing = sourceRows.get(sleeperId) ?? {
-          totalWeightedFpts: 0, totalWeight: 0, sources: [], kickoffAt: null,
+          totalWeightedFpts: 0, totalWeight: 0, sources: [], kickoffAt: null, perSourceFpts: {},
         };
         existing.totalWeightedFpts += fpts * weight;
         existing.totalWeight += weight;
         if (!existing.sources.includes(sourceId)) existing.sources.push(sourceId);
         if (!existing.kickoffAt && kickoffAt) existing.kickoffAt = kickoffAt;
+        existing.perSourceFpts[sourceId] = fpts;
         sourceRows.set(sleeperId, existing);
       };
 
@@ -428,6 +433,11 @@ export function useProjections(
           sources: row.sources,
           kickoffAt: row.kickoffAt,
           stats: consensusStats,
+          sourceFpts: Object.keys(row.perSourceFpts).length > 0
+            ? Object.fromEntries(
+                Object.entries(row.perSourceFpts).map(([k, v]) => [k, Math.round(v * 10) / 10])
+              )
+            : null,
         });
       });
       rows.sort((a, b) => b.fpts - a.fpts);
