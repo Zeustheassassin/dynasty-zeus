@@ -781,8 +781,23 @@ useEffect(() => {
   if (mainTab === "LEAGUES" && leagueHubTab === "STARTERS") {
     loadNflState();
     if (selectedLeague?.league_id) loadCalcValues(getLeagueNumQbs(selectedLeague));
+    // StartersTab scores in-season players from projectionData, which useProjections
+    // clears (and marks !projectionLoaded) whenever the selected league's scoring
+    // settings change — switching leagues while already on this tab left every score
+    // reading 0 until some OTHER tab (Simulator, Gameday, Data Hub Projections)
+    // happened to reload it. Mirrors the Simulator/Overview effect below.
+    const isRegularSeason = nflState?.season_type === "regular" && (nflState?.week ?? 0) > 0;
+    const startersProjectionWeek = isRegularSeason ? Number(nflState?.week) : 0;
+    if (projectionWeek !== startersProjectionWeek) {
+      setProjectionWeek(startersProjectionWeek);
+      setProjectionLoaded(false);
+      loadProjections(startersProjectionWeek === 0 ? "season" : startersProjectionWeek, enabledExtraSources);
+    } else if (!projectionLoaded) {
+      loadProjections(startersProjectionWeek === 0 ? "season" : startersProjectionWeek, enabledExtraSources);
+    }
   }
-}, [mainTab, leagueHubTab, selectedLeague?.league_id, selectedLeague, loadCalcValues, loadNflState]);
+  // projectionWeek/projectionLoaded are in deps and set inside this effect; the conditional guards prevent loops
+}, [mainTab, leagueHubTab, selectedLeague?.league_id, selectedLeague, nflState?.week, nflState?.season_type, projectionWeek, projectionLoaded, enabledExtraSources, loadCalcValues, loadNflState, loadProjections, setProjectionLoaded, setProjectionWeek]);
 
 useEffect(() => {
   if (mainTab === "LEAGUES" && leagueHubTab === "POWER_RANKINGS" && selectedLeague?.league_id) {
