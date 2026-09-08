@@ -79,6 +79,7 @@ export function useManagementState(supabaseUser: { id: string } | null): UseMana
               commissioner: Boolean(row.commissioner),
               year_in_advance: Boolean(row.year_in_advance),
               picks_traded: Boolean(row.picks_traded),
+              offseason_budget: Boolean(row.offseason_budget),
               amount: typeof row.amount === "string" ? row.amount : "",
               commitment_status: commitmentStatus,
             };

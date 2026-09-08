@@ -26,6 +26,7 @@ const MGMT_COLS: { key: string; label: string }[] = [
   { key: "commissioner", label: "Commissioner" },
   { key: "year_in_advance", label: "Year in Advance" },
   { key: "picks_traded", label: "Picks Traded" },
+  { key: "offseason_budget", label: "Offseason Budget" },
 ];
 
 // ── Props ──────────────────────────────────────────────────────────────────
@@ -115,6 +116,7 @@ function ManagementHub({
         commissioner: updated.commissioner ?? false,
         year_in_advance: updated.year_in_advance ?? false,
         picks_traded: updated.picks_traded ?? false,
+        offseason_budget: updated.offseason_budget ?? false,
         amount: updated.amount ?? "",
         commitment_status: updated.commitment_status ?? "",
         updated_at: new Date().toISOString(),
@@ -325,7 +327,7 @@ function ManagementHub({
                     <th className="text-center text-slate-400 font-semibold py-2 px-3 border-b border-slate-700 border-l border-slate-700"></th>
                     <th className="text-center text-slate-400 font-semibold py-2 px-3 border-b border-slate-700 border-l border-slate-700"></th>
                     <th colSpan={PAID_YEAR_COLS.length} className="text-center text-blue-400 font-semibold py-2 px-3 border-b border-slate-700 border-l border-slate-700">Paid</th>
-                    <th colSpan={3} className="text-center text-purple-400 font-semibold py-2 px-3 border-b border-slate-700 border-l border-slate-700">Tools</th>
+                    <th colSpan={4} className="text-center text-purple-400 font-semibold py-2 px-3 border-b border-slate-700 border-l border-slate-700">Tools</th>
                   </tr>
                   <tr>
                     <th className="text-left text-slate-400 font-medium py-2 px-3 border-b border-slate-700"></th>

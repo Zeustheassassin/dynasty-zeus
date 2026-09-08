@@ -806,6 +806,8 @@ export interface LeagueMgmtRow {
   commissioner: boolean;
   year_in_advance: boolean;
   picks_traded: boolean;
+  /** FAAB resets twice a year (a separate offseason budget plus the in-season one), not just once. */
+  offseason_budget: boolean;
   amount?: string;
   commitment_status?: LeagueCommitmentStatus;
 }
