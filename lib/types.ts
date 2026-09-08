@@ -47,6 +47,11 @@ export interface SleeperLeagueSettings {
   taxi_years?: number;
   reserve_slots?: number;
   reserve_allow_out?: number;
+  reserve_allow_doubtful?: number;
+  reserve_allow_sus?: number;
+  reserve_allow_na?: number;
+  reserve_allow_dnr?: number;
+  reserve_allow_cov?: number;
 }
 
 export interface SleeperRoster {

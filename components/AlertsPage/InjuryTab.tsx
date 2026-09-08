@@ -18,7 +18,7 @@ function InjuryTab({ injuryReportPlayers, currentNFLWeek, expandedInjuryId, setE
         <EmptyState>Add players to your watchlist or load your leagues to see injury statuses here.</EmptyState>
       ) : (
         <div className="space-y-1.5">
-          {injuryReportPlayers.map(({ player, playerId, leagues, startingLeagues, irLeagues, isWatchlisted }) => {
+          {injuryReportPlayers.map(({ player, playerId, leagues, startingLeagues, irLeagues, irEligibleLeagues, isWatchlisted }) => {
             const { cls: statusCls, label: statusLabel } = injuryStatusStyle(player);
             const byeWeek = Number(player.bye_week || 0);
             const byeWeeksOut = currentNFLWeek && byeWeek ? byeWeek - currentNFLWeek : null;
@@ -66,8 +66,11 @@ function InjuryTab({ injuryReportPlayers, currentNFLWeek, expandedInjuryId, setE
                       </span>
                     )}
                     {irLeagues.length > 0 && (
-                      <span className="text-[10px] font-semibold border border-red-800 bg-red-950/40 text-red-300 px-2 py-0.5 rounded-lg whitespace-nowrap">
-                        IR {irLeagues.length}/{leagues.length}
+                      <span
+                        className="text-[10px] font-semibold border border-red-800 bg-red-950/40 text-red-300 px-2 py-0.5 rounded-lg whitespace-nowrap"
+                        title="Leagues on IR / leagues where this player is currently IR-eligible (excludes taxi squads, leagues whose settings don't allow their current status on IR, and leagues whose IR is already full)"
+                      >
+                        IR {irLeagues.length}/{irEligibleLeagues.length}
                       </span>
                     )}
                     <span className={`text-[10px] font-semibold border px-2 py-0.5 rounded-lg ${statusCls}`}>

@@ -36,6 +36,7 @@ describe("InjuryTab — league membership compared by id, not name", () => {
       ],
       startingLeagues: [{ id: "leagueA", name: "Dynasty League" }],
       irLeagues: [],
+      irEligibleLeagues: [],
       isWatchlisted: false,
     };
 
@@ -73,6 +74,7 @@ describe("InjuryTab — league membership compared by id, not name", () => {
         { id: "leagueB", name: "Dynasty League" },
       ],
       irLeagues: [],
+      irEligibleLeagues: [],
       isWatchlisted: false,
     };
 
@@ -95,6 +97,7 @@ describe("InjuryTab — league membership compared by id, not name", () => {
       leagues: [{ id: "leagueA", name: "League A" }],
       startingLeagues: [],
       irLeagues: [],
+      irEligibleLeagues: [],
       isWatchlisted: false,
     };
     const setExpandedInjuryId = vi.fn();

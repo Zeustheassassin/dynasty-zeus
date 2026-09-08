@@ -1,4 +1,4 @@
-import type { AlertsCenterItem, SleeperPlayer, SleeperTransaction } from "../../lib/types";
+import type { AlertsCenterItem, SleeperLeagueSettings, SleeperPlayer, SleeperTransaction } from "../../lib/types";
 
 export type DashboardAlert = AlertsCenterItem;
 
@@ -20,8 +20,34 @@ export type InjuryReportPlayer = {
   leagues: LeagueRef[];
   startingLeagues: LeagueRef[];
   irLeagues: LeagueRef[];
+  // Leagues counted in the "IR x/y" denominator: leagues where the player is
+  // already on IR, plus leagues where they aren't yet but could be added
+  // right now (their status is allowed onto IR by that league's settings AND
+  // that league's IR isn't already full). Taxi-squad leagues are never
+  // included — a taxi slot isn't an IR slot.
+  irEligibleLeagues: LeagueRef[];
   isWatchlisted: boolean;
 };
+
+// Sleeper only lets a league gate the "soft" statuses below behind a
+// reserve_allow_* toggle (default off — a commissioner must explicitly turn
+// each one on). "IR"/"Injured Reserve" and "PUP" are the reserve slot's own
+// base designations and are never gated by these settings.
+export function isReserveEligible(
+  player: SleeperPlayer,
+  settings: SleeperLeagueSettings | null | undefined
+): boolean {
+  const s = (player.injury_status || player.status || "").toLowerCase();
+  if (/injured reserve|^ir$|\bpup\b/.test(s)) return true;
+  if (!settings) return true;
+  if (/\bout\b/.test(s)) return Boolean(settings.reserve_allow_out);
+  if (/doubtful/.test(s)) return Boolean(settings.reserve_allow_doubtful);
+  if (/suspended|\bsus\b/.test(s)) return Boolean(settings.reserve_allow_sus);
+  if (/\bna\b/.test(s)) return Boolean(settings.reserve_allow_na);
+  if (/dnr|did not report|holdout/.test(s)) return Boolean(settings.reserve_allow_dnr);
+  if (/\bcov\b|covid/.test(s)) return Boolean(settings.reserve_allow_cov);
+  return false;
+}
 
 export const severityStyles = {
   high: "border-red-700/70 bg-red-950/40 text-red-200",

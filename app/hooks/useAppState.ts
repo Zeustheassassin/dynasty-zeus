@@ -50,9 +50,10 @@ import { fetchSleeperUser } from "../../lib/sleeperUserCache";
 import { sleeperApi } from "../../lib/sleeperApi";
 import { getLocalStorageItem, setLocalStorageItem, removeLocalStorageItem, removeLocalStorageItemsByPrefix } from "@/lib/hooks/useLocalStorage";
 import type { LeagueRef } from "../../components/AlertsPage/alertsPageHelpers";
+import { isReserveEligible } from "../../components/AlertsPage/alertsPageHelpers";
 import type {
   AlertsCenterItem,
-  SleeperPlayer, SleeperLeague, SleeperRoster, SleeperTradedPick,
+  SleeperPlayer, SleeperLeague, SleeperLeagueSettings, SleeperRoster, SleeperTradedPick,
   SleeperDraft, SleeperDraftPick, GamedayMatchup, GamedayTeamView,
   SleeperMatchup, AnnotatedTransaction,
   AugmentedPick,
@@ -77,7 +78,7 @@ let _playersInMemory: Record<string, SleeperPlayer> | null = null;
 // â”€â”€ Page-local interfaces (shapes that don't warrant a lib/types entry) â”€â”€â”€â”€â”€â”€
 // AugmentedPick, AnnotatedTransaction, StandingRow are exported from lib/types.ts
 interface OwnedPlayerEntry { player_id: string; player?: SleeperPlayer; leagues: LeagueRef[]; shareCount: number; }
-interface AllLeagueDataEntry { leagueId?: string; leagueName?: string; roster: import("../../lib/types").SleeperRoster | null; }
+interface AllLeagueDataEntry { leagueId?: string; leagueName?: string; roster: import("../../lib/types").SleeperRoster | null; settings?: SleeperLeagueSettings | null; }
 interface PlayerSnapshot { full_name: string; status: string; team: string; value: number; active: boolean; shareCount: number; }
 
 export function useAppState() {
@@ -262,7 +263,7 @@ const [standings, setStandings] = useState<StandingRow[]>([]);
   useEffect(() => { leaguesRef2.current = leagues; }, [leagues]);
   useEffect(() => { selectedLeagueRef.current = selectedLeague; }, [selectedLeague]);
 
-  const [allLeagueData, setAllLeagueData] = useState<{ leagueId: string; leagueName: string; roster: SleeperRoster | null }[]>([]);
+  const [allLeagueData, setAllLeagueData] = useState<{ leagueId: string; leagueName: string; roster: SleeperRoster | null; settings: SleeperLeagueSettings | null }[]>([]);
   const [loadingAllLeagueData, setLoadingAllLeagueData] = useState(false);
   const [shareSearch, setShareSearch] = useState("");
   const [sharePosition, setSharePosition] = useState("ALL");
@@ -961,6 +962,7 @@ useEffect(() => {
               leagueId: league.league_id,
               leagueName: league.name,
               roster,
+              settings: league.settings ?? null,
             };
           })
         );
@@ -2405,8 +2407,18 @@ const saveSnapshotNow = async () => {
     // deduping by name would silently merge one league's starter status onto another.
     const startingMap = new Map<string, LeagueRef[]>();
     const irMap = new Map<string, LeagueRef[]>();
+    // IR-badge denominator: leagues already counted in irMap, plus leagues
+    // where the player isn't on IR yet but could be added right now (status
+    // allowed by that league's reserve_allow_* settings AND that league's
+    // reserve isn't already full). Taxi-squad slots are never IR-eligible.
+    const irEligibleMap = new Map<string, LeagueRef[]>();
     allLeagueData.forEach((entry) => {
       const leagueId = entry?.leagueId;
+      const reserveIds = entry?.roster?.reserve || [];
+      const reserveSet = new Set(reserveIds);
+      const taxiSet = new Set(entry?.roster?.taxi || []);
+      const reserveSlots = entry?.settings?.reserve_slots ?? 0;
+      const reserveFull = reserveIds.length >= reserveSlots;
       (entry?.roster?.starters || []).forEach((playerId: string) => {
         if (!playerId || playerId === "0") return;
         const existing = startingMap.get(String(playerId)) || [];
@@ -2415,18 +2427,30 @@ const saveSnapshotNow = async () => {
         }
         startingMap.set(String(playerId), existing);
       });
-      (entry?.roster?.reserve || []).forEach((playerId: string) => {
-        if (!playerId || playerId === "0") return;
-        const existing = irMap.get(String(playerId)) || [];
-        if (leagueId && entry?.leagueName && !existing.some((l) => l.id === leagueId)) {
-          existing.push({ id: leagueId, name: entry.leagueName });
+      (entry?.roster?.players || []).forEach((playerId: string) => {
+        if (!playerId || playerId === "0" || taxiSet.has(playerId)) return;
+        const onReserve = reserveSet.has(playerId);
+        if (onReserve) {
+          const existing = irMap.get(String(playerId)) || [];
+          if (leagueId && entry?.leagueName && !existing.some((l) => l.id === leagueId)) {
+            existing.push({ id: leagueId, name: entry.leagueName });
+          }
+          irMap.set(String(playerId), existing);
         }
-        irMap.set(String(playerId), existing);
+        const playerData = players[playerId];
+        const eligible = onReserve || (!reserveFull && !!playerData && isReserveEligible(playerData, entry?.settings));
+        if (eligible) {
+          const existing = irEligibleMap.get(String(playerId)) || [];
+          if (leagueId && entry?.leagueName && !existing.some((l) => l.id === leagueId)) {
+            existing.push({ id: leagueId, name: entry.leagueName });
+          }
+          irEligibleMap.set(String(playerId), existing);
+        }
       });
     });
 
     const seen = new Set<string>();
-    const result: Array<{ player: SleeperPlayer; playerId: string; leagues: LeagueRef[]; startingLeagues: LeagueRef[]; irLeagues: LeagueRef[]; isWatchlisted: boolean }> = [];
+    const result: Array<{ player: SleeperPlayer; playerId: string; leagues: LeagueRef[]; startingLeagues: LeagueRef[]; irLeagues: LeagueRef[]; irEligibleLeagues: LeagueRef[]; isWatchlisted: boolean }> = [];
 
     dashboardOwnedPlayers.forEach((entry) => {
       if (seen.has(entry.player_id)) return;
@@ -2439,6 +2463,7 @@ const saveSnapshotNow = async () => {
         leagues: entry.leagues || [],
         startingLeagues: startingMap.get(entry.player_id) || [],
         irLeagues: irMap.get(entry.player_id) || [],
+        irEligibleLeagues: irEligibleMap.get(entry.player_id) || [],
         isWatchlisted: watchlistEntries.some((w) => w.player_id === entry.player_id),
       });
     });
@@ -2454,6 +2479,7 @@ const saveSnapshotNow = async () => {
         leagues: [],
         startingLeagues: startingMap.get(entry.player_id) || [],
         irLeagues: irMap.get(entry.player_id) || [],
+        irEligibleLeagues: irEligibleMap.get(entry.player_id) || [],
         isWatchlisted: true,
       });
     });
