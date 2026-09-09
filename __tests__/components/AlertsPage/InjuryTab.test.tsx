@@ -115,3 +115,91 @@ describe("InjuryTab — league membership compared by id, not name", () => {
     expect(setExpandedInjuryId).toHaveBeenCalledWith("p1");
   });
 });
+
+describe("InjuryTab — IR-eligibility badge and chip outline", () => {
+  it("shows the IR badge at 0/N when the player isn't on IR anywhere yet but is eligible somewhere", () => {
+    const entry: InjuryReportPlayer = {
+      player: mkPlayer(),
+      playerId: "p1",
+      leagues: [
+        { id: "leagueA", name: "Deep Ball Dimes" },
+        { id: "leagueB", name: "SF Dynasty 1" },
+        { id: "leagueC", name: "Dynasty 26" },
+      ],
+      startingLeagues: [
+        { id: "leagueA", name: "Deep Ball Dimes" },
+        { id: "leagueB", name: "SF Dynasty 1" },
+      ],
+      irLeagues: [],
+      irEligibleLeagues: [
+        { id: "leagueA", name: "Deep Ball Dimes" },
+        { id: "leagueB", name: "SF Dynasty 1" },
+      ],
+      isWatchlisted: false,
+    };
+
+    render(
+      <InjuryTab
+        injuryReportPlayers={[entry]}
+        currentNFLWeek={5}
+        expandedInjuryId="p1"
+        setExpandedInjuryId={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("IR 0/2")).toBeTruthy();
+  });
+
+  it("does not show the IR badge when no league is IR-eligible for this player", () => {
+    const entry: InjuryReportPlayer = {
+      player: mkPlayer(),
+      playerId: "p1",
+      leagues: [{ id: "leagueA", name: "League A" }],
+      startingLeagues: [{ id: "leagueA", name: "League A" }],
+      irLeagues: [],
+      irEligibleLeagues: [],
+      isWatchlisted: false,
+    };
+
+    render(
+      <InjuryTab
+        injuryReportPlayers={[entry]}
+        currentNFLWeek={5}
+        expandedInjuryId="p1"
+        setExpandedInjuryId={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText(/^IR /)).toBeNull();
+  });
+
+  it("outlines an eligible starting-lineup chip in red but leaves an ineligible one alone", () => {
+    const entry: InjuryReportPlayer = {
+      player: mkPlayer(),
+      playerId: "p1",
+      leagues: [
+        { id: "leagueA", name: "Deep Ball Dimes" },
+        { id: "leagueC", name: "Dynasty 26" },
+      ],
+      startingLeagues: [
+        { id: "leagueA", name: "Deep Ball Dimes" },
+        { id: "leagueC", name: "Dynasty 26" },
+      ],
+      irLeagues: [],
+      irEligibleLeagues: [{ id: "leagueA", name: "Deep Ball Dimes" }],
+      isWatchlisted: false,
+    };
+
+    render(
+      <InjuryTab
+        injuryReportPlayers={[entry]}
+        currentNFLWeek={5}
+        expandedInjuryId="p1"
+        setExpandedInjuryId={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Deep Ball Dimes").className).toContain("border-red-500");
+    expect(screen.getByText("Dynasty 26").className).not.toContain("border-red-500");
+  });
+});

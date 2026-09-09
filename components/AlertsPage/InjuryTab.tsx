@@ -27,6 +27,10 @@ function InjuryTab({ injuryReportPlayers, currentNFLWeek, expandedInjuryId, setE
             const benchLeagues = leagues.filter(
               (l) => !startingLeagues.some((s) => s.id === l.id) && !irLeagues.some((s) => s.id === l.id)
             );
+            // Leagues where the player isn't on IR yet but could be added right
+            // now — used to ring the starting/bench chip red without touching
+            // its starting/bench fill color.
+            const irEligibleIds = new Set(irEligibleLeagues.map((l) => l.id));
 
             return (
               <div key={playerId} className="rounded-2xl border border-slate-800 overflow-hidden">
@@ -65,7 +69,7 @@ function InjuryTab({ injuryReportPlayers, currentNFLWeek, expandedInjuryId, setE
                           : `Owned ${leagues.length}`}
                       </span>
                     )}
-                    {irLeagues.length > 0 && (
+                    {irEligibleLeagues.length > 0 && (
                       <span
                         className="text-[10px] font-semibold border border-red-800 bg-red-950/40 text-red-300 px-2 py-0.5 rounded-lg whitespace-nowrap"
                         title="Leagues on IR / leagues where this player is currently IR-eligible (excludes taxi squads, leagues whose settings don't allow their current status on IR, and leagues whose IR is already full)"
@@ -95,7 +99,10 @@ function InjuryTab({ injuryReportPlayers, currentNFLWeek, expandedInjuryId, setE
                               {startingLeagues.map((l) => (
                                 <span
                                   key={l.id}
-                                  className="text-xs border border-emerald-800/60 bg-emerald-950/40 text-emerald-300 px-2.5 py-1 rounded-xl"
+                                  className={`text-xs border bg-emerald-950/40 text-emerald-300 px-2.5 py-1 rounded-xl ${
+                                    irEligibleIds.has(l.id) ? "border-red-500" : "border-emerald-800/60"
+                                  }`}
+                                  title={irEligibleIds.has(l.id) ? "Eligible to be placed on IR in this league" : undefined}
                                 >
                                   {l.name}
                                 </span>
@@ -112,7 +119,10 @@ function InjuryTab({ injuryReportPlayers, currentNFLWeek, expandedInjuryId, setE
                               {benchLeagues.map((l) => (
                                 <span
                                   key={l.id}
-                                  className="text-xs border border-slate-700 bg-slate-800/40 text-slate-400 px-2.5 py-1 rounded-xl"
+                                  className={`text-xs border bg-slate-800/40 text-slate-400 px-2.5 py-1 rounded-xl ${
+                                    irEligibleIds.has(l.id) ? "border-red-500" : "border-slate-700"
+                                  }`}
+                                  title={irEligibleIds.has(l.id) ? "Eligible to be placed on IR in this league" : undefined}
                                 >
                                   {l.name}
                                 </span>

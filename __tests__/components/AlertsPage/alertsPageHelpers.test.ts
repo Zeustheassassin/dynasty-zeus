@@ -15,9 +15,10 @@ function mkPlayer(status: string, injuryStatus: string | null = null): SleeperPl
 
 describe("isReserveEligible", () => {
   it("treats IR and PUP as always eligible, regardless of settings", () => {
-    expect(isReserveEligible(mkPlayer("Injured Reserve"), {})).toBe(true);
-    expect(isReserveEligible(mkPlayer("IR"), {})).toBe(true);
-    expect(isReserveEligible(mkPlayer("PUP"), {})).toBe(true);
+    const settings = {} as SleeperLeagueSettings;
+    expect(isReserveEligible(mkPlayer("Injured Reserve"), settings)).toBe(true);
+    expect(isReserveEligible(mkPlayer("IR"), settings)).toBe(true);
+    expect(isReserveEligible(mkPlayer("PUP"), settings)).toBe(true);
   });
 
   it("defaults gated statuses to NOT eligible when the league setting is unset (opt-in, default off)", () => {
@@ -37,14 +38,14 @@ describe("isReserveEligible", () => {
   });
 
   it("Questionable/Active players are never IR-eligible, even with every flag enabled", () => {
-    const settings: SleeperLeagueSettings = {
+    const settings = {
       reserve_allow_out: 1,
       reserve_allow_doubtful: 1,
       reserve_allow_sus: 1,
       reserve_allow_na: 1,
       reserve_allow_dnr: 1,
       reserve_allow_cov: 1,
-    };
+    } as SleeperLeagueSettings;
     expect(isReserveEligible(mkPlayer("Active", "Questionable"), settings)).toBe(false);
     expect(isReserveEligible(mkPlayer("Active"), settings)).toBe(false);
   });
