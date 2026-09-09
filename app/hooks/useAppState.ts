@@ -1800,11 +1800,13 @@ const saveSnapshotNow = async () => {
         return isSelectedLeague ? row.fpts : recomputeConsensusFpts(row, scoringSettings);
       };
       const rosterPositions = league.roster_positions?.filter((p) => !["BN", "IR", "TAXI"].includes(p)) ?? [];
+      const taxiSet = new Set((myRoster.taxi ?? []).map((id) => String(id)));
+      const eligiblePlayerIds = (myRoster.players ?? []).filter((id) => !taxiSet.has(String(id)));
 
       const { swaps } = computeSuggestedLineup({
         rosterPositions,
         starters: myRoster.starters,
-        playerIds: myRoster.players,
+        playerIds: eligiblePlayerIds,
         players,
         scoreFn,
         hasKickoffData: false,

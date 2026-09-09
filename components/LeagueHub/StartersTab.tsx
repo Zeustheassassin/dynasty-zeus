@@ -112,11 +112,12 @@ function StartersTab({ projectionData, nflState }: StartersTabProps) {
   const positions: string[] = selectedLeague.roster_positions?.filter((p: string) => !["BN","IR","TAXI"].includes(p)) ?? [];
   const myPlayerIds: string[] = roster.players ?? [];
   const taxiIds = new Set<string>((roster.taxi ?? []).map((id) => String(id)));
+  const eligiblePlayerIds = myPlayerIds.filter((id) => !taxiIds.has(String(id)));
 
   const { lineup, swaps, currentLineupScore, suggestedLineupScore } = computeSuggestedLineup({
     rosterPositions: positions,
     starters: roster.starters,
-    playerIds: myPlayerIds,
+    playerIds: eligiblePlayerIds,
     players,
     scoreFn: playerScore,
     rankScoreFn: playerRankScore,
