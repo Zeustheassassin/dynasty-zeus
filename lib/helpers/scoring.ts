@@ -81,6 +81,66 @@ export function computeLeagueFpts(
   return total;
 }
 
+/** Sources that report a raw per-category stat breakdown — their contribution
+ *  to a projection row's blended fpts can be exactly regenerated for any
+ *  league by re-running computeLeagueFpts against the row's own `stats`. */
+const RAW_STAT_SOURCES = new Set(["sleeper", "espn"]);
+
+/**
+ * Reproduces the exact multi-source weighted blend useProjections.loadProjections
+ * builds into ProjectionRow.fpts, but for an ARBITRARY league's scoring_settings
+ * instead of whichever league happened to be selected when the row was fetched.
+ * Needed because projectionData is only ever baked for one league at a time —
+ * this lets any other league's own scoring be applied to the same fetched data
+ * without a second network round-trip.
+ *
+ * Raw-stat sources (Sleeper/ESPN) are regenerated straight from `row.stats`.
+ * Single-number sources (FantasyPros/numberFire) have no stat breakdown, so
+ * their native fpts (row.rawFptsBySource) is re-scaled by the same
+ * league-fpts/default-fpts ratio technique loadProjections uses at fetch time,
+ * just computed for the new league instead. Falls back to `row.fpts` unchanged
+ * when the row lacks the data needed to redo the blend (e.g. a hand-built
+ * fixture, or predates this recompute path).
+ */
+export function recomputeConsensusFpts(
+  row: {
+    stats: Record<string, number> | null;
+    position: string;
+    sources: string[];
+    fpts: number;
+    rawFptsBySource?: Record<string, number> | null;
+    sourceWeights?: Record<string, number> | null;
+  },
+  scoringSettings: Record<string, number>
+): number {
+  if (!row.stats || !row.sourceWeights) return row.fpts;
+
+  let totalWeighted = 0;
+  let totalWeight = 0;
+
+  const rawStatSourceIds = row.sources.filter((id) => RAW_STAT_SOURCES.has(id));
+  if (rawStatSourceIds.length > 0) {
+    const statFpts = computeLeagueFpts(row.stats, scoringSettings, row.position);
+    const weight = rawStatSourceIds.reduce((sum, id) => sum + (row.sourceWeights?.[id] ?? 0), 0);
+    totalWeighted += statFpts * weight;
+    totalWeight += weight;
+  }
+
+  for (const id of row.sources) {
+    if (RAW_STAT_SOURCES.has(id)) continue;
+    const raw = row.rawFptsBySource?.[id];
+    const weight = row.sourceWeights?.[id];
+    if (raw == null || !weight) continue;
+    const defaultFpts = computeLeagueFpts(row.stats, DEFAULT_SCORING, row.position);
+    const leagueStatFpts = computeLeagueFpts(row.stats, scoringSettings, row.position);
+    const ratio = defaultFpts > 0 ? leagueStatFpts / defaultFpts : 1;
+    totalWeighted += raw * ratio * weight;
+    totalWeight += weight;
+  }
+
+  return totalWeight > 0 ? Math.round((totalWeighted / totalWeight) * 10) / 10 : row.fpts;
+}
+
 /**
  * Derives the FantasyCalc `num_qbs` parameter from a league's roster positions.
  * Superflex / 2-QB leagues embed a QB premium (num_qbs=2); single-QB leagues use 1.

@@ -1,8 +1,9 @@
 // ============================================================
-// Lineup slot helpers — position eligibility and kickoff-window
-// rebalancing for the Gameday Hub lineup optimiser.
+// Lineup slot helpers — position eligibility, kickoff-window
+// rebalancing, and the shared greedy lineup-optimizer used by both
+// the Starters tab ("Lineup Coach") and the League Overview status dot.
 // ============================================================
-import type { LineupCoachRow } from "../types";
+import type { LineupCoachRow, SleeperPlayer } from "../types";
 
 /** Positions that can fill a FLEX slot. */
 export const FLEX_ELIGIBLE_POSITIONS = ["RB", "WR", "TE"];
@@ -89,3 +90,114 @@ export const rebalanceLineupForKickoffWindows = (
 
   return nextLineup;
 };
+
+export interface SuggestedLineupInput {
+  /** League's roster_positions, already filtered of BN/IR/TAXI. */
+  rosterPositions: string[];
+  starters: string[] | null | undefined;
+  playerIds: string[] | null | undefined;
+  players: Record<string, SleeperPlayer>;
+  /** Score used for the DISPLAYED value and for ranking replacement candidates. */
+  scoreFn: (id: string) => number;
+  /** Score used to pick the best slot-fill candidate — defaults to scoreFn.
+   *  Lets callers rank by a different criterion (e.g. Starters tab's "Lean
+   *  Volatile" ceiling toggle) while keeping displayed scores consistent. */
+  rankScoreFn?: (id: string) => number;
+  kickoffFn?: (id: string) => number | null;
+  hasKickoffData: boolean;
+}
+
+export interface SuggestedLineupSwap {
+  slot: string;
+  suggested: SleeperPlayer;
+  current: SleeperPlayer | null;
+  delta: number;
+}
+
+export interface SuggestedLineupResult {
+  currentStarterRows: LineupCoachRow[];
+  lineup: LineupCoachRow[];
+  /** Suggested-lineup players who differ from the current starters — empty
+   *  means the current lineup already matches the suggestion. */
+  swaps: SuggestedLineupSwap[];
+  currentLineupScore: number;
+  suggestedLineupScore: number;
+}
+
+/** Greedy per-slot fill: for each roster slot, picks the best-ranked
+ *  still-available eligible player, then diffs the result against the
+ *  current starters to report what would change. Pure function — reused by
+ *  the Starters tab (StartersTab.tsx) for the currently selected league and
+ *  by the League Overview status dot (useAppState.ts) across every league,
+ *  so both can never disagree about whether a lineup is already optimal. */
+export function computeSuggestedLineup(input: SuggestedLineupInput): SuggestedLineupResult {
+  const { rosterPositions, starters, playerIds, players, scoreFn, hasKickoffData } = input;
+  const rankScoreFn = input.rankScoreFn ?? scoreFn;
+  const kickoffFn = input.kickoffFn ?? (() => null);
+  const myPlayerIds = playerIds ?? [];
+  const used = new Set<string>();
+  const initialLineup: LineupCoachRow[] = [];
+
+  const currentStarterRows: LineupCoachRow[] = rosterPositions.map((slot, index) => {
+    const starterId = String(starters?.[index] || "");
+    const starterPlayer = starterId ? players[starterId] : null;
+    return {
+      slot,
+      player: starterPlayer,
+      score: starterPlayer ? scoreFn(starterPlayer.player_id) : 0,
+      kickoffAt: starterPlayer ? kickoffFn(starterPlayer.player_id) : null,
+    };
+  });
+
+  for (const slot of rosterPositions) {
+    const eligible = getLineupSlotEligiblePositions(slot);
+    const best = myPlayerIds
+      .filter((id) => !used.has(id))
+      .map((id) => ({ id, p: players[id] }))
+      .filter(({ p }) => p && eligible.includes(p.position))
+      .sort((a, b) => rankScoreFn(b.id) - rankScoreFn(a.id))[0];
+    if (best) {
+      used.add(best.id);
+      initialLineup.push({ slot, player: best.p, score: scoreFn(best.id), kickoffAt: kickoffFn(best.id) });
+    } else {
+      initialLineup.push({ slot, player: null, score: 0, kickoffAt: null });
+    }
+  }
+
+  const lineup = rebalanceLineupForKickoffWindows(initialLineup, hasKickoffData);
+
+  const currentStarterIds = new Set(
+    currentStarterRows.map((r) => r.player?.player_id).filter((id): id is string => !!id)
+  );
+  const newStarterIds = new Set(
+    lineup.map((r) => r.player?.player_id).filter((id): id is string => !!id)
+  );
+
+  // Players currently starting who are NOT in the optimized lineup — these go to the bench.
+  // Sort lowest-score first so they pair with the cheapest replacements first.
+  const benchedPool: SleeperPlayer[] = currentStarterRows
+    .map((r) => r.player)
+    .filter((p): p is SleeperPlayer => !!p && !newStarterIds.has(p.player_id))
+    .sort((a, b) => scoreFn(a.player_id) - scoreFn(b.player_id));
+
+  const swaps: SuggestedLineupSwap[] = lineup
+    .map(({ slot, player, score }) => {
+      if (!player?.player_id) return null;
+      // Skip players who were already starting — their slot may have shifted (e.g.,
+      // FLEX 1 → FLEX 2) but that's an internal shuffle, not a real lineup change.
+      if (currentStarterIds.has(player.player_id)) return null;
+
+      const eligible = getLineupSlotEligiblePositions(slot);
+      let matchIdx = benchedPool.findIndex((p) => eligible.includes(p.position));
+      if (matchIdx === -1 && benchedPool.length > 0) matchIdx = 0;
+      const replaced = matchIdx >= 0 ? benchedPool.splice(matchIdx, 1)[0] : null;
+      const replacedScore = replaced ? scoreFn(replaced.player_id) : 0;
+      return { slot, suggested: player, current: replaced, delta: score - replacedScore };
+    })
+    .filter((s): s is SuggestedLineupSwap => !!s);
+
+  const currentLineupScore = currentStarterRows.reduce((sum, row) => sum + (row.score || 0), 0);
+  const suggestedLineupScore = lineup.reduce((sum, row) => sum + (row.score || 0), 0);
+
+  return { currentStarterRows, lineup, swaps, currentLineupScore, suggestedLineupScore };
+}

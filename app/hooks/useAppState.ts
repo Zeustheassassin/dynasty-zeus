@@ -21,6 +21,8 @@ import {
   fetchFantasyCalcValues,
   computeScoringMultipliers,
   getLeagueNumQbs,
+  computeSuggestedLineup,
+  recomputeConsensusFpts,
 } from "../../lib/helpers";
 import { projectRookiesByRoster } from "../../lib/helpers/rookieProjection";
 import { useProjections } from "../../hooks/useProjections";
@@ -1771,6 +1773,48 @@ const saveSnapshotNow = async () => {
       })
     ) as Record<string, DynamicPickValue>;
   }, [selectedLeague?.league_id, selectedLeague?.settings?.playoff_teams, selectedLeagueSimulation, allPicks, pickFcValues, rosters]);
+
+  // Per-league "is this week's lineup already optimal" status for the League
+  // Overview status dot. Reuses the exact same greedy fill (computeSuggestedLineup)
+  // the Starters tab runs — never a separate calculation — against every
+  // league's own roster/scoring, using whatever projection sources are
+  // currently enabled. In-season only; null everywhere else (offseason, or
+  // before leagueOverviewData/projectionData have loaded) so the dot stays
+  // hidden rather than reading as a false "needs changes".
+  const leagueLineupStatus = useMemo(() => {
+    const isInSeason = nflState?.season_type === "regular";
+    const status: Record<string, { isOptimal: boolean; swapCount: number } | null> = {};
+    if (!isInSeason || !user?.user_id || projectionData.length === 0) return status;
+
+    const projectionBySleeperId = new Map(projectionData.map((row) => [String(row.sleeperId), row]));
+
+    Object.values(leagueOverviewData).forEach(({ league, rosters: leagueRosters }) => {
+      const myRoster = leagueRosters.find((r) => r.owner_id === user.user_id);
+      if (!myRoster) { status[league.league_id] = null; return; }
+
+      const scoringSettings = league.scoring_settings;
+      const isSelectedLeague = league.league_id === selectedLeague?.league_id;
+      const scoreFn = (id: string) => {
+        const row = projectionBySleeperId.get(String(id));
+        if (!row) return 0;
+        return isSelectedLeague ? row.fpts : recomputeConsensusFpts(row, scoringSettings);
+      };
+      const rosterPositions = league.roster_positions?.filter((p) => !["BN", "IR", "TAXI"].includes(p)) ?? [];
+
+      const { swaps } = computeSuggestedLineup({
+        rosterPositions,
+        starters: myRoster.starters,
+        playerIds: myRoster.players,
+        players,
+        scoreFn,
+        hasKickoffData: false,
+      });
+      status[league.league_id] = { isOptimal: swaps.length === 0, swapCount: swaps.length };
+    });
+
+    return status;
+  }, [leagueOverviewData, projectionData, players, nflState?.season_type, user?.user_id, selectedLeague?.league_id]);
+
   const selectedLeagueMateProfiles = useMemo((): LeagueMateView[] => {
     if (!selectedLeague || !rosters.length || !user?.user_id) return [];
 
@@ -3112,6 +3156,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     leagueOverviewData,
     leagueOverviewLoaded,
     leagueOverviewError,
+    leagueLineupStatus,
     selectedLeagueMateProfilesView,
     ignoredOwnerIds,
     toggleIgnoredOwner,

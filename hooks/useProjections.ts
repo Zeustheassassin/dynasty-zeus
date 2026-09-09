@@ -180,7 +180,17 @@ export function useProjections(
         // id — kept alongside the weighted blend above so the floor/ceiling spread
         // across sources can be read later (see lib/helpers/projectionVolatility.ts).
         perSourceFpts: Record<string, number>;
+        // The actual weight used per source for this row — see ProjectionRow.sourceWeights.
+        perSourceWeight: Record<string, number>;
       }>();
+      // Raw (pre-league-scaling) fpts for single-number sources (FantasyPros/
+      // numberFire) — see ProjectionRow.rawFptsBySource.
+      const rawFptsAcc = new Map<string, Record<string, number>>();
+      const addRawFpts = (sleeperId: string, sourceId: string, rawFpts: number) => {
+        const existing = rawFptsAcc.get(sleeperId) ?? {};
+        existing[sourceId] = rawFpts;
+        rawFptsAcc.set(sleeperId, existing);
+      };
 
       // Per-player scaling ratio: leagueFpts / defaultFpts, blended (weighted by
       // source weight) across every source that reports raw stats (Sleeper, ESPN).
@@ -230,13 +240,14 @@ export function useProjections(
         kickoffAt?: number | null
       ) => {
         const existing = sourceRows.get(sleeperId) ?? {
-          totalWeightedFpts: 0, totalWeight: 0, sources: [], kickoffAt: null, perSourceFpts: {},
+          totalWeightedFpts: 0, totalWeight: 0, sources: [], kickoffAt: null, perSourceFpts: {}, perSourceWeight: {},
         };
         existing.totalWeightedFpts += fpts * weight;
         existing.totalWeight += weight;
         if (!existing.sources.includes(sourceId)) existing.sources.push(sourceId);
         if (!existing.kickoffAt && kickoffAt) existing.kickoffAt = kickoffAt;
         existing.perSourceFpts[sourceId] = fpts;
+        existing.perSourceWeight[sourceId] = weight;
         sourceRows.set(sleeperId, existing);
       };
 
@@ -345,6 +356,7 @@ export function useProjections(
             // source reflects the league's scoring rather than standard PPR.
             const ratio = scalingRatios.get(sleeperId) ?? 1;
             addRow(sleeperId, item.fpts * ratio, src.id, src.weight);
+            addRawFpts(sleeperId, src.id, item.fpts);
           });
           statusMap["fantasypros"] = true;
         } catch { statusMap["fantasypros"] = false; }
@@ -366,6 +378,7 @@ export function useProjections(
             // Same scaling applied as FantasyPros — approximate league scoring adjustment.
             const ratio = scalingRatios.get(sleeperId) ?? 1;
             addRow(sleeperId, item.fpts * ratio, src.id, src.weight);
+            addRawFpts(sleeperId, src.id, item.fpts);
           });
           statusMap["numberfire"] = true;
         } catch { statusMap["numberfire"] = false; }
@@ -438,6 +451,13 @@ export function useProjections(
                 Object.entries(row.perSourceFpts).map(([k, v]) => [k, Math.round(v * 10) / 10])
               )
             : null,
+          rawFptsBySource: (() => {
+            const raw = rawFptsAcc.get(sleeperId);
+            return raw && Object.keys(raw).length > 0
+              ? Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, Math.round(v * 10) / 10]))
+              : null;
+          })(),
+          sourceWeights: Object.keys(row.perSourceWeight).length > 0 ? row.perSourceWeight : null,
         });
       });
       rows.sort((a, b) => b.fpts - a.fpts);

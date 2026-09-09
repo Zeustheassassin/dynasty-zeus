@@ -10,6 +10,7 @@ import {
   groupRules,
   getLeagueNumQbs,
   roundScoringValue,
+  recomputeConsensusFpts,
 } from "@/lib/helpers/scoring";
 
 describe("getLeagueNumQbs", () => {
@@ -294,5 +295,67 @@ describe("groupRules", () => {
     expect(result.Passing).toHaveLength(0);
     expect(result.Rushing).toHaveLength(0);
     expect(result.Receiving).toHaveLength(0);
+  });
+});
+
+// ── recomputeConsensusFpts ───────────────────────────────────────────────────
+
+describe("recomputeConsensusFpts", () => {
+  const stats = { rec: 5, rec_yd: 50 }; // computeLeagueFpts(stats, DEFAULT_SCORING, "WR") === 10
+
+  it("falls back to row.fpts when stats is missing", () => {
+    const row = { stats: null, position: "WR", sources: ["sleeper"], fpts: 12.3 };
+    expect(recomputeConsensusFpts(row, DEFAULT_SCORING)).toBe(12.3);
+  });
+
+  it("falls back to row.fpts when sourceWeights is missing", () => {
+    const row = { stats, position: "WR", sources: ["sleeper"], fpts: 12.3, sourceWeights: null };
+    expect(recomputeConsensusFpts(row, DEFAULT_SCORING)).toBe(12.3);
+  });
+
+  it("matches computeLeagueFpts directly for a single raw-stat source (weight cancels out)", () => {
+    const row = {
+      stats, position: "WR", sources: ["sleeper"], fpts: 999,
+      sourceWeights: { sleeper: 0.15 },
+    };
+    // Half-PPR: 5*0.5 + 50*0.1 = 7.5
+    const halfPpr = { ...DEFAULT_SCORING, rec: 0.5 };
+    expect(recomputeConsensusFpts(row, halfPpr)).toBeCloseTo(7.5, 5);
+  });
+
+  it("reproduces the same blend as fetch time when passed the scoring the row was built for", () => {
+    // sleeper (raw-stat) + fantasypros (single-number) blended per useProjections' weighting.
+    const row = {
+      stats, position: "WR", sources: ["sleeper", "fantasypros"], fpts: 999,
+      rawFptsBySource: { fantasypros: 12 },
+      sourceWeights: { sleeper: 0.15, fantasypros: 0.35 },
+    };
+    // Under DEFAULT_SCORING the fantasypros ratio is defaultFpts/defaultFpts = 1,
+    // so it contributes its raw fpts unscaled: (10*0.15 + 12*1*0.35) / 0.5 = 11.4
+    expect(recomputeConsensusFpts(row, DEFAULT_SCORING)).toBeCloseTo(11.4, 1);
+  });
+
+  it("rescales the single-number source's contribution when the target league's scoring differs", () => {
+    const row = {
+      stats, position: "WR", sources: ["sleeper", "fantasypros"], fpts: 999,
+      rawFptsBySource: { fantasypros: 12 },
+      sourceWeights: { sleeper: 0.15, fantasypros: 0.35 },
+    };
+    const halfPpr = { ...DEFAULT_SCORING, rec: 0.5 };
+    // Lower PPR should pull the blended result down from the full-PPR case above.
+    const fullPprResult = recomputeConsensusFpts(row, DEFAULT_SCORING);
+    const halfPprResult = recomputeConsensusFpts(row, halfPpr);
+    expect(halfPprResult).toBeLessThan(fullPprResult);
+    expect(halfPprResult).toBeGreaterThan(0);
+  });
+
+  it("ignores a single-number source with no raw fpts recorded for it", () => {
+    const row = {
+      stats, position: "WR", sources: ["sleeper", "fantasypros"], fpts: 999,
+      rawFptsBySource: {}, // fantasypros didn't match this player
+      sourceWeights: { sleeper: 0.15, fantasypros: 0.35 },
+    };
+    // Only the raw-stat source contributes → same as the single-source case.
+    expect(recomputeConsensusFpts(row, DEFAULT_SCORING)).toBeCloseTo(10, 5);
   });
 });

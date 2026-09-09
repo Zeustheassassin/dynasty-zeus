@@ -1,11 +1,12 @@
 import { describe, it, expect } from "vitest";
-import type { LineupCoachRow } from "@/lib/types";
+import type { LineupCoachRow, SleeperPlayer } from "@/lib/types";
 import {
   FLEX_ELIGIBLE_POSITIONS,
   SUPER_FLEX_ELIGIBLE_POSITIONS,
   getLineupSettings,
   getLineupSlotEligiblePositions,
   rebalanceLineupForKickoffWindows,
+  computeSuggestedLineup,
 } from "@/lib/helpers/lineup";
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -197,5 +198,100 @@ describe("rebalanceLineupForKickoffWindows", () => {
     expect(bySlot("RB")).not.toContain("rb2-latest");
     // The two bumped locked players land in the vacated FLEX slots.
     expect(bySlot("FLEX").sort()).toEqual(["rb1-late-ish", "rb2-latest"].sort());
+  });
+});
+
+// ── computeSuggestedLineup ───────────────────────────────────────────────────
+
+const mkPlayer = (id: string, position: string): SleeperPlayer =>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ({ player_id: id, position, full_name: id } as any);
+
+describe("computeSuggestedLineup", () => {
+  const players: Record<string, SleeperPlayer> = {
+    qb1: mkPlayer("qb1", "QB"),
+    rb1: mkPlayer("rb1", "RB"),
+    rb2: mkPlayer("rb2", "RB"),
+    wr1: mkPlayer("wr1", "WR"),
+  };
+  const scores: Record<string, number> = { qb1: 20, rb1: 10, rb2: 15, wr1: 8 };
+  const scoreFn = (id: string) => scores[id] ?? 0;
+
+  it("fills each slot with the best-scoring eligible player", () => {
+    const result = computeSuggestedLineup({
+      rosterPositions: ["QB", "RB", "FLEX"],
+      starters: ["qb1", "rb1", "wr1"],
+      playerIds: ["qb1", "rb1", "rb2", "wr1"],
+      players,
+      scoreFn,
+      hasKickoffData: false,
+    });
+    // RB slot takes the better RB (rb2, 15 > rb1, 10); FLEX takes the next-best
+    // eligible leftover (rb1, 10 > wr1, 8).
+    expect(result.lineup.find((r) => r.slot === "RB")?.player?.player_id).toBe("rb2");
+    expect(result.lineup.find((r) => r.slot === "FLEX")?.player?.player_id).toBe("rb1");
+  });
+
+  it("reports zero swaps when current starters already match the suggestion", () => {
+    // Best lineup here is qb1/rb2/rb1 (RB then FLEX) — set starters to match.
+    const result = computeSuggestedLineup({
+      rosterPositions: ["QB", "RB", "FLEX"],
+      starters: ["qb1", "rb2", "rb1"],
+      playerIds: ["qb1", "rb1", "rb2", "wr1"],
+      players,
+      scoreFn,
+      hasKickoffData: false,
+    });
+    expect(result.swaps).toHaveLength(0);
+    expect(result.currentLineupScore).toBe(result.suggestedLineupScore);
+  });
+
+  it("reports a swap when a bench player outscores a starter", () => {
+    // rb1 (10) is starting at RB while rb2 (15) sits on the bench.
+    const result = computeSuggestedLineup({
+      rosterPositions: ["QB", "RB"],
+      starters: ["qb1", "rb1"],
+      playerIds: ["qb1", "rb1", "rb2"],
+      players,
+      scoreFn,
+      hasKickoffData: false,
+    });
+    expect(result.swaps).toHaveLength(1);
+    expect(result.swaps[0]).toMatchObject({ slot: "RB", delta: 5 });
+    expect(result.swaps[0].suggested.player_id).toBe("rb2");
+    expect(result.swaps[0].current?.player_id).toBe("rb1");
+  });
+
+  it("ranks fill order by rankScoreFn while displaying scoreFn's value", () => {
+    // rankScoreFn flips the RB ranking (rb1 "ceiling" > rb2), but the score
+    // shown for whoever gets picked must still come from scoreFn.
+    const rankScoreFn = (id: string) => (id === "rb1" ? 99 : scoreFn(id));
+    const result = computeSuggestedLineup({
+      rosterPositions: ["RB"],
+      starters: ["rb2"],
+      playerIds: ["rb1", "rb2"],
+      players,
+      scoreFn,
+      rankScoreFn,
+      hasKickoffData: false,
+    });
+    const rbRow = result.lineup.find((r) => r.slot === "RB");
+    expect(rbRow?.player?.player_id).toBe("rb1");
+    expect(rbRow?.score).toBe(scores.rb1); // displayed score is scoreFn's, not rankScoreFn's
+  });
+
+  it("handles an empty roster without throwing", () => {
+    const result = computeSuggestedLineup({
+      rosterPositions: ["QB", "RB"],
+      starters: [],
+      playerIds: [],
+      players: {},
+      scoreFn: () => 0,
+      hasKickoffData: false,
+    });
+    expect(result.lineup.every((r) => r.player === null)).toBe(true);
+    expect(result.swaps).toHaveLength(0);
+    expect(result.currentLineupScore).toBe(0);
+    expect(result.suggestedLineupScore).toBe(0);
   });
 });

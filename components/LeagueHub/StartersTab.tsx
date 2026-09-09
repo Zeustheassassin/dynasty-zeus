@@ -2,8 +2,7 @@
 import { memo, useEffect, useState } from "react";
 import {
   getProjectionKickoffAt,
-  getLineupSlotEligiblePositions,
-  rebalanceLineupForKickoffWindows,
+  computeSuggestedLineup,
   getProjectionVolatility,
   getOpponentProjectedScore,
   getLineupRange,
@@ -14,7 +13,7 @@ import { useLeague } from "../../lib/LeagueContext";
 import { useValues } from "../../lib/ValuesContext";
 import { useMyRoster } from "../../lib/RosterContext";
 import { sleeperApi } from "../../lib/sleeperApi";
-import type { ProjectionRow, SleeperNFLState, SleeperPlayer, SleeperMatchup, LineupCoachRow } from "../../lib/types";
+import type { ProjectionRow, SleeperNFLState, SleeperPlayer, SleeperMatchup } from "../../lib/types";
 
 interface StartersTabProps {
   projectionData: ProjectionRow[];
@@ -113,38 +112,24 @@ function StartersTab({ projectionData, nflState }: StartersTabProps) {
   const positions: string[] = selectedLeague.roster_positions?.filter((p: string) => !["BN","IR","TAXI"].includes(p)) ?? [];
   const myPlayerIds: string[] = roster.players ?? [];
   const taxiIds = new Set<string>((roster.taxi ?? []).map((id) => String(id)));
-  const used = new Set<string>();
-  const initialLineup: LineupCoachRow[] = [];
-  const currentStarterRows = positions.map((slot: string, index: number) => {
-    const starterId = String(roster?.starters?.[index] || "");
-    const starterPlayer = starterId ? players[starterId] : null;
-    return {
-      slot,
-      player: starterPlayer,
-      score: starterPlayer ? playerScore(starterPlayer.player_id) : 0,
-      kickoffAt: starterPlayer ? playerKickoffAt(starterPlayer.player_id) : null,
-    };
+
+  const { lineup, swaps, currentLineupScore, suggestedLineupScore } = computeSuggestedLineup({
+    rosterPositions: positions,
+    starters: roster.starters,
+    playerIds: myPlayerIds,
+    players,
+    scoreFn: playerScore,
+    rankScoreFn: playerRankScore,
+    kickoffFn: playerKickoffAt,
+    hasKickoffData: isInSeason && hasKickoffData,
   });
+  const lineupDelta = suggestedLineupScore - currentLineupScore;
 
-  for (const slot of positions) {
-    const eligible = getLineupSlotEligiblePositions(slot);
-    const best = myPlayerIds
-      .filter(id => !used.has(id))
-      .map(id => ({ id, p: players[id] }))
-      .filter(({ p }) => p && eligible.includes(p.position))
-      .sort((a, b) => playerRankScore(b.id) - playerRankScore(a.id))[0];
-    if (best) {
-      used.add(best.id);
-      initialLineup.push({ slot, player: best.p, score: playerScore(best.id), kickoffAt: playerKickoffAt(best.id) });
-    } else {
-      initialLineup.push({ slot, player: null, score: 0, kickoffAt: null });
-    }
-  }
-
-  const lineup = rebalanceLineupForKickoffWindows(initialLineup, isInSeason && hasKickoffData);
-
+  const startingIds = new Set(
+    lineup.map((r) => r.player?.player_id).filter((id): id is string => !!id)
+  );
   const benchPlayers = myPlayerIds
-    .filter((id) => !used.has(id) && !taxiIds.has(String(id)))
+    .filter((id) => !startingIds.has(id) && !taxiIds.has(String(id)))
     .map((id) => players[id])
     .filter((p): p is SleeperPlayer => !!p)
     .sort((a, b) => playerScore(b.player_id) - playerScore(a.player_id));
@@ -155,73 +140,24 @@ function StartersTab({ projectionData, nflState }: StartersTabProps) {
     .filter((p): p is SleeperPlayer => !!p)
     .sort((a, b) => playerScore(b.player_id) - playerScore(a.player_id));
 
-  const currentStarterIds = new Set(
-    currentStarterRows
-      .map((r) => r.player?.player_id)
-      .filter((id): id is string => !!id)
-  );
-  const newStarterIds = new Set(
-    lineup
-      .map((r) => r.player?.player_id)
-      .filter((id): id is string => !!id)
-  );
-
-  // Players currently starting who are NOT in the optimized lineup — these go to the bench.
-  // Sort lowest-score first so they pair with the cheapest replacements first.
-  const benchedPool: SleeperPlayer[] = currentStarterRows
-    .map((r) => r.player)
-    .filter((p): p is SleeperPlayer => !!p && !newStarterIds.has(p.player_id))
-    .sort((a, b) => playerScore(a.player_id) - playerScore(b.player_id));
-
-  const lineupCoachNotes = lineup
-    .map(({ slot, player, score }) => {
-      if (!player?.player_id) return null;
-      // Skip players who were already starting — their slot may have shifted (e.g.,
-      // FLEX 1 → FLEX 2) but that's an internal shuffle, not a real lineup change.
-      if (currentStarterIds.has(player.player_id)) return null;
-
-      const eligible = getLineupSlotEligiblePositions(slot);
-      let matchIdx = benchedPool.findIndex((p) => eligible.includes(p.position));
-      if (matchIdx === -1 && benchedPool.length > 0) matchIdx = 0;
-      const replaced = matchIdx >= 0 ? benchedPool.splice(matchIdx, 1)[0] : null;
-      const replacedScore = replaced ? playerScore(replaced.player_id) : 0;
-      const delta = score - replacedScore;
-      const volatility = playerVolatility(player.player_id);
-
-      const reasonParts = [
-        delta > 0
-          ? `${isInSeason ? "Projection" : "Redraft score"} improves by ${delta.toFixed(1)}`
-          : `${isInSeason ? "Projection" : "Redraft score"} is safer for this slot`,
-        replaced?.status && /out|doubtful|inactive|suspended/i.test(String(replaced.status))
-          ? `${replaced.full_name} is ${String(replaced.status).toLowerCase()}`
-          : null,
-        volatility?.level === "volatile"
-          ? `wide range across sources (${volatility.floor.toFixed(1)}–${volatility.ceiling.toFixed(1)})`
-          : null,
-        slot === "FLEX" || slot === "SUPER_FLEX"
-          ? `${player.full_name} is the strongest remaining ${slot === "SUPER_FLEX" ? "flex-eligible" : "flex"} fit`
-          : `${player.full_name} grades best at ${slot.replace("_", " ")}`,
-      ].filter(Boolean);
-
-      return {
-        slot,
-        suggested: player,
-        current: replaced,
-        delta,
-        reason: reasonParts.join(" • "),
-      };
-    })
-    .filter(Boolean) as Array<{
-      slot: string;
-      suggested: SleeperPlayer;
-      current: SleeperPlayer | null;
-      delta: number;
-      reason: string;
-    }>;
-
-  const currentLineupScore = currentStarterRows.reduce((sum: number, row) => sum + (row.score || 0), 0);
-  const suggestedLineupScore = lineup.reduce((sum: number, row) => sum + (row.score || 0), 0);
-  const lineupDelta = suggestedLineupScore - currentLineupScore;
+  const lineupCoachNotes = swaps.map(({ slot, suggested, current, delta }) => {
+    const volatility = playerVolatility(suggested.player_id);
+    const reasonParts = [
+      delta > 0
+        ? `${isInSeason ? "Projection" : "Redraft score"} improves by ${delta.toFixed(1)}`
+        : `${isInSeason ? "Projection" : "Redraft score"} is safer for this slot`,
+      current?.status && /out|doubtful|inactive|suspended/i.test(String(current.status))
+        ? `${current.full_name} is ${String(current.status).toLowerCase()}`
+        : null,
+      volatility?.level === "volatile"
+        ? `wide range across sources (${volatility.floor.toFixed(1)}–${volatility.ceiling.toFixed(1)})`
+        : null,
+      slot === "FLEX" || slot === "SUPER_FLEX"
+        ? `${suggested.full_name} is the strongest remaining ${slot === "SUPER_FLEX" ? "flex-eligible" : "flex"} fit`
+        : `${suggested.full_name} grades best at ${slot.replace("_", " ")}`,
+    ].filter(Boolean);
+    return { slot, suggested, current, delta, reason: reasonParts.join(" • ") };
+  });
 
   // Floor/ceiling range for the suggested lineup as shown — reflects
   // whichever slot-fill mode (balanced/volatile) is currently active.

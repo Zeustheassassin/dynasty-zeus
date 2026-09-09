@@ -30,6 +30,7 @@ interface OverviewTabProps {
   leagueOverviewData: Record<string, LeagueOverviewEntry>;
   loadingLeagueOverview: boolean;
   leagueOverviewLoaded: boolean;
+  leagueLineupStatus: Record<string, { isOptimal: boolean; swapCount: number } | null>;
   committedSimsByLeague: CommittedSimsByLeague;
   leagueSimCache: Record<string, Record<number, CachedSimRow>>;
   simQueue: string[];
@@ -48,6 +49,7 @@ function OverviewTab({
   leagueOverviewData,
   loadingLeagueOverview,
   leagueOverviewLoaded,
+  leagueLineupStatus,
   committedSimsByLeague,
   leagueSimCache,
   simQueue,
@@ -270,7 +272,21 @@ function OverviewTab({
                 key={row.league.league_id}
                 className={`${GRID} text-xs py-1.5 rounded hover:bg-slate-800/40 transition ${simQueue[0] === row.league.league_id ? "ring-1 ring-blue-700/60" : ""}`}
               >
-                <div className="min-w-0">
+                <div className="min-w-0 flex items-center gap-1.5">
+                  {(() => {
+                    const lineupStatus = leagueLineupStatus[row.league.league_id];
+                    if (!lineupStatus) return null;
+                    return (
+                      <span
+                        title={
+                          lineupStatus.isOptimal
+                            ? "Lineup already optimized for this week"
+                            : `${lineupStatus.swapCount} lineup swap${lineupStatus.swapCount === 1 ? "" : "s"} recommended`
+                        }
+                        className={`w-2 h-2 rounded-full shrink-0 ${lineupStatus.isOptimal ? "bg-emerald-500" : "bg-red-500"}`}
+                      />
+                    );
+                  })()}
                   <button
                     className={`min-w-0 text-sm font-medium text-left truncate hover:text-blue-400 transition ${row.nameColor || "text-slate-200"}`}
                     onClick={() => { loadRoster(row.league); setLeagueHubTab("ROSTERS"); }}

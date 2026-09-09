@@ -125,6 +125,7 @@ interface HubRouterProps {
   leagueOverviewData: Record<string, LeagueOverviewEntry>;
   leagueOverviewLoaded: boolean;
   leagueOverviewError: string | null;
+  leagueLineupStatus: Record<string, { isOptimal: boolean; swapCount: number } | null>;
   selectedLeagueMateProfilesView: LeagueMateView[];
   ignoredOwnerIds: string[];
   toggleIgnoredOwner: (ownerId: string) => void;
@@ -307,6 +308,7 @@ export function HubRouter({
   committedSimsByLeague, leagueSimCache, simQueue, simProgress,
   loadingActivity, loadingLeagueWeeklyMatchups,
   leagueNotes, activityTransactions, leagueOverviewData, leagueOverviewLoaded, leagueOverviewError,
+  leagueLineupStatus,
   selectedLeagueMateProfilesView, ignoredOwnerIds, toggleIgnoredOwner,
   freeAgents, loadingCalcValues, calcValuesError, loadingDraftRefresh, rookies, draftedPlayerIds,
   loadRoster, loadRedraftValues, loadUserTrades, loadUserExposure, loadDraftScout,
@@ -458,6 +460,7 @@ export function HubRouter({
             loadingLeagueOverview={loadingLeagueOverview}
             leagueOverviewLoaded={leagueOverviewLoaded}
             leagueOverviewError={leagueOverviewError}
+            leagueLineupStatus={leagueLineupStatus}
             selectedLeagueMateProfilesView={selectedLeagueMateProfilesView}
             ignoredOwnerIds={ignoredOwnerIds}
             toggleIgnoredOwner={toggleIgnoredOwner}

@@ -71,6 +71,7 @@ interface LeagueHubProps {
   loadingLeagueOverview: boolean;
   leagueOverviewLoaded: boolean;
   leagueOverviewError: string | null;
+  leagueLineupStatus: Record<string, { isOptimal: boolean; swapCount: number } | null>;
 
   // Computed
   selectedLeagueMateProfilesView: LeagueMateView[];
@@ -116,6 +117,7 @@ function LeagueHub({
   loadingActivity, loadingLeagueWeeklyMatchups,
   leagueNotes, activityTransactions,
   leagueOverviewData, loadingLeagueOverview, leagueOverviewLoaded, leagueOverviewError,
+  leagueLineupStatus,
   selectedLeagueMateProfilesView,
   ignoredOwnerIds, toggleIgnoredOwner,
   projectionData, nflState,
@@ -190,6 +192,7 @@ function LeagueHub({
             leagueOverviewData={leagueOverviewData}
             loadingLeagueOverview={loadingLeagueOverview}
             leagueOverviewLoaded={leagueOverviewLoaded}
+            leagueLineupStatus={leagueLineupStatus}
             committedSimsByLeague={committedSimsByLeague}
             leagueSimCache={leagueSimCache}
             simQueue={simQueue}

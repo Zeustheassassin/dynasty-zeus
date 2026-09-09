@@ -277,6 +277,18 @@ export interface ProjectionRow {
    *  lib/helpers/projectionVolatility.ts): a tight spread across sources
    *  reads as a "safe" projection, a wide one as "volatile". */
   sourceFpts: Record<string, number> | null;
+  /** Each single-number source's (FantasyPros/numberFire) OWN native fpts,
+   *  BEFORE the per-league scaling ratio is applied — null when that source
+   *  didn't match this player. Sleeper/ESPN aren't included here since they're
+   *  regenerable straight from `stats` for any league. Powers
+   *  recomputeConsensusFpts (lib/helpers/scoring.ts), which redoes this row's
+   *  blend for a DIFFERENT league's scoring without re-fetching. */
+  rawFptsBySource?: Record<string, number> | null;
+  /** The actual weight used per source for this row (normally the fixed
+   *  PROJ_SOURCES constant, but the full-season-fallback path overrides
+   *  Sleeper's weight to 1.0) — null when no source matched. Optional since
+   *  rows built outside useProjections (tests, cron snapshots) won't have it. */
+  sourceWeights?: Record<string, number> | null;
 }
 
 export interface FantasyCalcPlayerValue {
