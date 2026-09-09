@@ -2,25 +2,13 @@
 import React, { useEffect, useMemo } from "react";
 import { usePlayers } from "../../lib/PlayersContext";
 import { buildConsensusOrder, reconcilePersonalOrdering } from "../../lib/helpers/personalRankings";
+import { isReserveEligible } from "../AlertsPage/alertsPageHelpers";
 import type {
   SleeperLeague,
   SleeperUser,
   LeagueOverviewEntry,
   LeagueHubTab,
 } from "../../lib/types";
-
-// Sleeper's `injury_status` is null/empty for healthy players and uses a mix
-// of spellings/codes for hurt ones (IR, O, Out, PUP, Sus, NA, DNR, Cov, NFI,
-// "IR-Designated", etc.). Rather than try to enumerate every code, exclude
-// the small set of statuses that are NOT IR-eligible: empty/null, "Active",
-// "Questionable", "Doubtful", "Probable". Everything else means the player
-// could go on IR.
-const NON_IR_RE = /^(?:active|questionable|doubtful|probable)$/i;
-const isIREligible = (injuryStatus?: string | null): boolean => {
-  const s = (injuryStatus ?? "").trim();
-  if (!s) return false;
-  return !NON_IR_RE.test(s);
-};
 
 interface RosterOverviewTabProps {
   leagues: SleeperLeague[];
@@ -121,10 +109,15 @@ function RosterOverviewTab({
 
       // Only count IR-eligible players who AREN'T already on IR — those are
       // the ones the user could still claim into a reserve slot. Taxi players
-      // generally can't be IR'd, so exclude them too.
+      // generally can't be IR'd, so exclude them too. Eligibility itself uses
+      // the same rule as the Alerts page's Injury Report (isReserveEligible):
+      // gated by this league's reserve_allow_* settings, and only counted if
+      // the reserve slot isn't already full.
+      const reserveFull = irFilled >= irCap;
       const unflaggedInjuries = allPlayers.filter((pid) => {
-        if (reserveSet.has(pid) || taxiSet.has(pid)) return false;
-        return isIREligible(players?.[pid]?.injury_status);
+        if (reserveSet.has(pid) || taxiSet.has(pid) || reserveFull) return false;
+        const playerData = players?.[pid];
+        return !!playerData && isReserveEligible(playerData, league.settings);
       }).length;
 
       const leagueRosteredIds = new Set<string>();
