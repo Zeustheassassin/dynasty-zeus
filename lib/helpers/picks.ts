@@ -95,6 +95,7 @@ export const fetchFantasyCalcValues = async (
   const slotPickValues: Record<string, number[]> = {};
   const pickBuckets: Record<string, number[]>     = {};
   const pickRoundValues: Record<string, number>   = {};
+  const pickBandValues: Record<string, number>    = {};
   const trendData: import("../types").FcTrendEntry[] = [];
 
   const SKILL_POSITIONS = new Set(["QB", "RB", "WR", "TE"]);
@@ -112,6 +113,16 @@ export const fetchFantasyCalcValues = async (
         slotPickValues[slotKey].push(value);
         if (!pickBuckets[roundKey]) pickBuckets[roundKey] = [];
         pickBuckets[roundKey].push(value);
+        return;
+      }
+      // Named Early/Mid/Late band — e.g. "2027 1st (Early)". FantasyCalc only
+      // publishes these for the nearest future draft class; must be checked
+      // before the plain round regex below (which would otherwise ignore the
+      // "(Early)" suffix and never match, but check order matters if that
+      // pattern is ever loosened).
+      const bandMatch = entry.player.name?.match(/^(\d{4})\s+(\d+)(?:st|nd|rd|th)\s+\((Early|Mid|Late)\)$/);
+      if (bandMatch) {
+        pickBandValues[`${bandMatch[1]}-${bandMatch[2]}-${bandMatch[3].toLowerCase()}`] = value;
         return;
       }
       // Future round — e.g. "2027 1st"
@@ -156,6 +167,13 @@ export const fetchFantasyCalcValues = async (
   // Fill future-year first-round values from named picks
   Object.entries(pickRoundValues).forEach(([key, val]) => {
     if (!pickValues[key]) pickValues[key] = val;
+  });
+
+  // Named Early/Mid/Late band values (e.g. "2027-1-early") — applied directly,
+  // no derivation needed since FantasyCalc publishes these outright for the
+  // nearest future draft class.
+  Object.entries(pickBandValues).forEach(([key, val]) => {
+    pickValues[key] = val;
   });
 
   // Derive future-year 2nd/3rd/4th using current-year ratios

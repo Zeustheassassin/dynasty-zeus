@@ -1640,18 +1640,18 @@ const saveSnapshotNow = async () => {
       if (slot <= midCut) return "mid";
       return "late";
     };
-    const currentRoundValue = (round: number) => pickFcValues[`${CURRENT_YEAR}-${round}`] || 0;
+    // FantasyCalc only publishes exact per-slot pick prices for a season once
+    // that season's draft slots are knowable, and Early/Mid/Late band prices
+    // only for the nearest future draft class — so band/slot values must be
+    // looked up on the pick's OWN season, never anchored to CURRENT_YEAR
+    // (which has no pick values left once that season's rookie draft has
+    // already happened).
     const getBandValue = (season: string, round: number, bucket: "early" | "mid" | "late") => {
-      const bucketSlots = slots.filter((slot) => bucketForSlot(slot) === bucket);
-      const baseSlots = bucketSlots
-        .map((slot) => pickFcValues[`${CURRENT_YEAR}-${round}.${String(slot).padStart(2, "0")}`])
-        .filter(Boolean);
-      const baseBandValue = baseSlots.length > 0
-        ? Math.round(sum(baseSlots as number[]) / baseSlots.length)
-        : Math.round((currentRoundValue(round) || 0) * (bucket === "early" ? 1.2 : bucket === "mid" ? 1 : 0.8));
-      const seasonRoundValue = pickFcValues[`${season}-${round}`] || currentRoundValue(round) || baseBandValue;
-      const currentRoundBase = currentRoundValue(round) || baseBandValue || 1;
-      return Math.round(baseBandValue * (seasonRoundValue / currentRoundBase));
+      const published = pickFcValues[`${season}-${round}-${bucket}`];
+      if (published) return published;
+      const roundValue = pickFcValues[`${season}-${round}`] || 0;
+      const multiplier = bucket === "early" ? 1.2 : bucket === "mid" ? 1 : 0.8;
+      return Math.round(roundValue * multiplier);
     };
 
     return Object.fromEntries(
@@ -1701,12 +1701,8 @@ const saveSnapshotNow = async () => {
         const slotProbabilities = rawSlotProbabilities.map((probability) => probability / slotTotal);
         const slotValues = slots.map((slot) => {
           const bucket = bucketForSlot(slot) as "early" | "mid" | "late";
-          const currentSlotValue = pickFcValues[`${CURRENT_YEAR}-${pick.round}.${String(slot).padStart(2, "0")}`];
-          if (currentSlotValue) {
-            const seasonRoundValue = pickFcValues[`${pick.season}-${pick.round}`] || currentRoundValue(Number(pick.round)) || 1;
-            const currentBase = currentRoundValue(Number(pick.round)) || 1;
-            return Math.round((currentSlotValue as number) * (seasonRoundValue / currentBase));
-          }
+          const exactSlotValue = pickFcValues[`${pick.season}-${pick.round}.${String(slot).padStart(2, "0")}`];
+          if (exactSlotValue) return exactSlotValue;
           return getBandValue(String(pick.season), Number(pick.round), bucket);
         });
         const bucketProbabilities = slotProbabilities.reduce((acc: Record<string, number>, probability, idx) => {
