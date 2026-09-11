@@ -14,13 +14,13 @@ import type { DraftScoutPatterns } from "./modals/DraftScoutModal";
 import { TradeHubOpponentModal } from "./modals/TradeHubOpponentModal";
 import { PlayerProfilePanel } from "./modals/PlayerProfilePanel";
 import { AllOpenTradesPanel } from "./modals/AllOpenTradesPanel";
-import type { AlertsFeedTab } from "../hooks/useHubRouting";
+import type { AlertsFeedTab, GamedayHubTab } from "../hooks/useHubRouting";
 import type {
   SleeperPlayer, SleeperLeague, SleeperRoster,
   SleeperNFLState, SleeperUser, SleeperDraft, SleeperDraftPick,
   AugmentedPick, LeagueOverviewEntry, HistoricalSnapshot,
   LeagueMateView, CommittedSimsByLeague, CachedSimRow, RookieBoardPlayer,
-  GamedayMatchup, WatchlistEntry,
+  GamedayMatchup, GamedayDashboardEntry, WatchlistEntry,
   TradeAttempt, TradeAttemptStatus, FcTrendEntry, PredictedPick, DraftPoolRanks,
   LeagueHubTab, ProjectionRow, SimulationTeamRow,
   LeagueMgmtData, CommPaymentsData, TradePartnerRanking,
@@ -54,7 +54,7 @@ const ScoutingHub = dynamic(() => import("../../components/ScoutingHub"), { ssr:
 const UserScoutHub = dynamic(() => import("../../components/UserScoutHub"), { ssr: false, loading: HubSkeleton });
 
 // ── Local types ──────────────────────────────────────────────────────────────
-type DataHubTabId = "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "STAT_PROJECTIONS" | "LEAGUEMATES" | "DEPTH_CHARTS" | "MY_SHARES" | "COMPARE";
+type DataHubTabId = "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "STAT_PROJECTIONS" | "LEAGUEMATES" | "DEPTH_CHARTS" | "MY_SHARES" | "ROSTER_CHECK" | "COMPARE";
 
 // ── Props ────────────────────────────────────────────────────────────────────
 interface HubRouterProps {
@@ -155,6 +155,12 @@ interface HubRouterProps {
   selectedGamedayMatchup: GamedayMatchup | null;
   setSelectedGamedayMatchupId: (id: number | null) => void;
   loadGamedayMatchups: (leagueId: string, week: number) => void;
+  loadSchedule: (week: number) => void;
+  gamedayHubTab: GamedayHubTab;
+  setGamedayHubTab: (tab: GamedayHubTab) => void;
+  gamedayDashboardEntries: GamedayDashboardEntry[];
+  loadingGamedayDashboard: boolean;
+  onRefreshGamedayDashboard: () => void;
   setProjectionWeek: (week: number) => void;
   setProjectionLoaded: (loaded: boolean) => void;
   loadProjections: (week: number | "season", extraSources?: string[]) => void;
@@ -315,7 +321,8 @@ export function HubRouter({
   saveLeagueNote, saveSimulationToSupabase, handleRunAllSims, refreshDraftBoard,
   setPlayerProfileId, setCalcOpponentRosterId, setTradeHubSection,
   gamedayWeek, gamedayMatchupCards, loadingGamedayMatchups, selectedGamedayMatchup,
-  setSelectedGamedayMatchupId, loadGamedayMatchups,
+  setSelectedGamedayMatchupId, loadGamedayMatchups, loadSchedule,
+  gamedayHubTab, setGamedayHubTab, gamedayDashboardEntries, loadingGamedayDashboard, onRefreshGamedayDashboard,
   setProjectionWeek, setProjectionLoaded, loadProjections,
   shares, totalLeagues, loadingAllLeagueData, shareSearch, setShareSearch, sharePosition, setSharePosition,
   setDataHubTab,
@@ -503,24 +510,22 @@ export function HubRouter({
           <GamedayHub
             leagues={leagues}
             loadRoster={loadRoster}
+            gamedayHubTab={gamedayHubTab}
+            setGamedayHubTab={setGamedayHubTab}
             gamedayWeek={gamedayWeek}
             gamedayMatchupCards={gamedayMatchupCards}
             loadingGamedayMatchups={loadingGamedayMatchups}
             selectedGamedayMatchup={selectedGamedayMatchup}
             setSelectedGamedayMatchupId={setSelectedGamedayMatchupId}
             loadGamedayMatchups={loadGamedayMatchups}
+            loadSchedule={loadSchedule}
             setProjectionWeek={setProjectionWeek}
             setProjectionLoaded={setProjectionLoaded}
             loadProjections={loadProjections}
             setPlayerProfileId={setPlayerProfileId}
-            shares={shares}
-            totalLeagues={totalLeagues}
-            loadingShares={loadingAllLeagueData}
-            shareSearch={shareSearch}
-            setShareSearch={setShareSearch}
-            sharePosition={sharePosition}
-            setSharePosition={setSharePosition}
-            players={players}
+            gamedayDashboardEntries={gamedayDashboardEntries}
+            loadingGamedayDashboard={loadingGamedayDashboard}
+            onRefreshGamedayDashboard={onRefreshGamedayDashboard}
           />
           </ErrorBoundary>
         )}
@@ -534,6 +539,11 @@ export function HubRouter({
             setDataHubTab={setDataHubTab}
             shares={shares}
             totalLeagues={totalLeagues}
+            loadingAllLeagueData={loadingAllLeagueData}
+            shareSearch={shareSearch}
+            setShareSearch={setShareSearch}
+            sharePosition={sharePosition}
+            setSharePosition={setSharePosition}
             loadingCalcValues={loadingCalcValues}
             calcValuesError={calcValuesError}
             personalOrdering={personalOrdering}

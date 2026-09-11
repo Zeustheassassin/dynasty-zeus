@@ -590,6 +590,23 @@ export interface GamedayMatchup {
   sortKickoff: number;
 }
 
+/** Cross-league Gameday Dashboard: the user's own matchup in one league. */
+export interface GamedayDashboardEntry {
+  league: SleeperLeague;
+  myTeam: GamedayTeamView | null;
+  oppTeam: GamedayTeamView | null;
+  error: boolean;
+}
+
+/** Real per-team kickoff/live/final status for the current week, from the
+ *  NFL scoreboard proxy (app/api/nfl-scoreboard) — authoritative source for
+ *  GamedayLineupRow/GamedayReserveRow's gameState, keyed by team abbreviation
+ *  since kickoff state is a property of the game, not any one player. */
+export interface TeamGameState {
+  kickoffAt: number;
+  state: "Upcoming" | "Live" | "Final";
+}
+
 // ── Data hub ─────────────────────────────────────────────────
 
 export interface LeagueMateStatEntry {

@@ -11,6 +11,7 @@ import StatProjectionsTab from "./DataHub/StatProjectionsTab";
 import LeaguematesTab from "./DataHub/LeaguematesTab";
 import DepthChartsTab from "./DataHub/DepthChartsTab";
 import MySharesTab from "./DataHub/MySharesTab";
+import RosterOwnershipTab from "./DataHub/RosterOwnershipTab";
 import CompareTab from "./DataHub/CompareTab";
 import ErrorBanner from "./ErrorBanner";
 import { ACCENT_CLASSES } from "../lib/uiTheme";
@@ -18,7 +19,7 @@ import { ACCENT_CLASSES } from "../lib/uiTheme";
 // ── Local types ─────────────────────────────────────────────────────────────
 // BUY_LOW is no longer a top-level tab — it's a view inside VALUE_TRENDS now
 // (same treatment MARKET_PULSE already got), to cut down top-level sub-tabs.
-type DataHubTabId = "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "STAT_PROJECTIONS" | "LEAGUEMATES" | "DEPTH_CHARTS" | "MY_SHARES" | "COMPARE";
+type DataHubTabId = "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "STAT_PROJECTIONS" | "LEAGUEMATES" | "DEPTH_CHARTS" | "MY_SHARES" | "ROSTER_CHECK" | "COMPARE";
 
 interface DataHubProps {
   // Navigation
@@ -27,6 +28,13 @@ interface DataHubProps {
 
   shares: Record<string, ShareEntry>;
   totalLeagues: number;
+
+  // Roster Ownership Check tab
+  loadingAllLeagueData: boolean;
+  shareSearch: string;
+  setShareSearch: (s: string) => void;
+  sharePosition: string;
+  setSharePosition: (pos: string) => void;
 
   // Dynasty/Redraft rankings
   loadingCalcValues: boolean;
@@ -74,6 +82,7 @@ interface DataHubProps {
 function DataHub({
   dataHubTab, setDataHubTab,
   shares, totalLeagues,
+  loadingAllLeagueData, shareSearch, setShareSearch, sharePosition, setSharePosition,
   loadingCalcValues, calcValuesError,
   personalOrdering, savePersonalOrdering, setPlayerProfileId,
   loadingRedraft, redraftError,
@@ -97,7 +106,7 @@ function DataHub({
       {/* Sub-tab nav */}
       <nav aria-label="Data Hub" className="flex justify-center border-b border-slate-800 mb-6">
         <div className="flex justify-center gap-1 sm:gap-3 lg:gap-5 text-center flex-wrap">
-          {(["MY_SHARES", "RANKINGS", "VALUE_TRENDS", "PROJECTIONS", "STAT_PROJECTIONS", "DEPTH_CHARTS", "LEAGUEMATES", "COMPARE"] as const).map((tab) => (
+          {(["MY_SHARES", "ROSTER_CHECK", "RANKINGS", "VALUE_TRENDS", "PROJECTIONS", "STAT_PROJECTIONS", "DEPTH_CHARTS", "LEAGUEMATES", "COMPARE"] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setDataHubTab(tab)}
@@ -114,6 +123,7 @@ function DataHub({
                tab === "LEAGUEMATES" ? "League Mates" :
                tab === "DEPTH_CHARTS" ? "Depth Charts" :
                tab === "MY_SHARES" ? "My Shares" :
+               tab === "ROSTER_CHECK" ? "Roster Check" :
                "Compare"}
             </button>
           ))}
@@ -208,6 +218,17 @@ function DataHub({
       {dataHubTab === "DEPTH_CHARTS" && <DepthChartsTab />}
 
       {dataHubTab === "MY_SHARES" && <MySharesTab shares={shares} totalLeagues={totalLeagues} />}
+
+      {dataHubTab === "ROSTER_CHECK" && (
+        <RosterOwnershipTab
+          shares={shares}
+          loading={loadingAllLeagueData}
+          search={shareSearch}
+          setSearch={setShareSearch}
+          position={sharePosition}
+          setPosition={setSharePosition}
+        />
+      )}
 
       {dataHubTab === "COMPARE" && <CompareTab setPlayerProfileId={setPlayerProfileId} />}
     </>

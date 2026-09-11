@@ -13,8 +13,7 @@ import {
   getStoredPickValue, getDraftRoundSlot,
   getBucketColor, getAdjustedDirectionBucket, classifyOppDirection,
   sum,
-  getProjectionKickoffAt, getKickoffState,
-  formatKickoffTime,
+  buildGamedayMatchups,
   getRosterDirectionProfile, getProfilePosBuckets,
   getLeagueMateMotivation, getTradePartnerFitLabel, getTradePartnerFit,
   getCrossLeaguePreferenceFit, getCrossLeagueTradeBehaviorFit,
@@ -41,6 +40,8 @@ import { useDraftScout } from "../../hooks/useDraftScout";
 import { useLeagueOverview } from "../../hooks/useLeagueOverview";
 import { useNflState } from "./useNflState";
 import { useGamedayState } from "./useGamedayState";
+import { useNflSchedule } from "./useNflSchedule";
+import { useGamedayDashboard } from "./useGamedayDashboard";
 import { useActivityState } from "./useActivityState";
 import { usePlayerAnnotations } from "./usePlayerAnnotations";
 import { usePersonalRankings } from "./usePersonalRankings";
@@ -56,7 +57,7 @@ import { isReserveEligible } from "../../components/AlertsPage/alertsPageHelpers
 import type {
   AlertsCenterItem,
   SleeperPlayer, SleeperLeague, SleeperLeagueSettings, SleeperRoster, SleeperTradedPick,
-  SleeperDraft, SleeperDraftPick, GamedayMatchup, GamedayTeamView,
+  SleeperDraft, SleeperDraftPick, GamedayMatchup,
   SleeperMatchup, AnnotatedTransaction,
   AugmentedPick,
   HistoricalSnapshot, LeagueMateView, SimulationTeamRow,
@@ -132,6 +133,7 @@ export function useAppState() {
     dataHubTab, setDataHubTab,
     draftHubSection, setDraftHubSection,
     alertsFeedTab, setAlertsFeedTab,
+    gamedayHubTab, setGamedayHubTab,
   } = useHubRouting();
   const [showAllOpenTrades, setShowAllOpenTrades] = useState(false);
 
@@ -179,6 +181,8 @@ const {
   selectedGamedayMatchupId, setSelectedGamedayMatchupId,
   loadGamedayMatchups,
 } = useGamedayState();
+const { scheduleByTeam, loadSchedule } = useNflSchedule();
+const { gamedayDashboardEntries, loadingGamedayDashboard, gamedayDashboardWeek, loadGamedayDashboard } = useGamedayDashboard();
 const {
   calcFcValues,
   loadingCalcValues,
@@ -867,7 +871,16 @@ useEffect(() => {
   }
 
   loadGamedayMatchups(selectedLeague.league_id, currentWeek);
-}, [mainTab, selectedLeague?.league_id, nflState?.week, nflState?.season_type, projectionWeek, projectionLoaded, enabledExtraSources, loadProjections, loadGamedayMatchups, setProjectionLoaded, setProjectionWeek, setGamedayMatchups, setSelectedGamedayMatchupId]);
+  loadSchedule(currentWeek);
+}, [mainTab, selectedLeague?.league_id, nflState?.week, nflState?.season_type, projectionWeek, projectionLoaded, enabledExtraSources, loadProjections, loadGamedayMatchups, loadSchedule, setProjectionLoaded, setProjectionWeek, setGamedayMatchups, setSelectedGamedayMatchupId]);
+
+useEffect(() => {
+  if (mainTab !== "GAMEDAY_HUB" || gamedayHubTab !== "DASHBOARD") return;
+  const isRegularSeason = nflState?.season_type === "regular" && Number(nflState?.week || 0) > 0;
+  const currentWeek = isRegularSeason ? Number(nflState?.week) : 0;
+  if (!currentWeek || gamedayDashboardWeek === currentWeek) return;
+  loadGamedayDashboard(leagues, user, currentWeek, players, projectionData, scheduleByTeam);
+}, [mainTab, gamedayHubTab, nflState?.week, nflState?.season_type, gamedayDashboardWeek, loadGamedayDashboard, leagues, user, players, projectionData, scheduleByTeam]);
 
 useEffect(() => {
   const leagueId = selectedLeague?.league_id;
@@ -1258,131 +1271,21 @@ const saveSnapshotNow = async () => {
     return nflState?.season_type === "regular" && rawWeek > 0 ? rawWeek : 0;
   }, [nflState?.week, nflState?.season_type]);
   const gamedayMatchupCards = useMemo((): GamedayMatchup[] => {
-    if (!selectedLeague || !rosters.length || !gamedayWeek) return [];
+    const built = buildGamedayMatchups(selectedLeague, rosters, gamedayMatchups, gamedayWeek, players, projectionData, users, scheduleByTeam);
+    if (built.length < 2) return built;
 
-    const starterSlots = (selectedLeague?.roster_positions || []).filter(
-      (slot: string) => !["BN", "IR", "TAXI"].includes(slot)
-    );
-    const rosterMap = new Map(rosters.map((entry) => [Number(entry.roster_id), entry]));
-    const projectionByPlayerId = new Map(
-      projectionData.map((row) => [String(row.sleeperId), row])
-    );
-    const matchupMap = new Map<number, SleeperMatchup[]>();
-
-    gamedayMatchups.forEach((entry) => {
-      const matchupId = Number(entry?.matchup_id || 0);
-      if (!matchupId) return;
-      if (!matchupMap.has(matchupId)) matchupMap.set(matchupId, []);
-      matchupMap.get(matchupId)?.push(entry);
-    });
-
-    const buildTeamView = (entry: SleeperMatchup) => {
-      const rosterId = Number(entry?.roster_id || 0);
-      const rosterEntry = rosterMap.get(rosterId);
-      const starterIds = Array.isArray(entry?.starters) && entry.starters.length > 0
-        ? entry.starters.map((id) => String(id || ""))
-        : (rosterEntry?.starters || []).map((id) => String(id || ""));
-      const playerPoints = entry?.players_points || {};
-      const starterRows = starterSlots.map((slot: string, index: number) => {
-        const playerId = starterIds[index] ? String(starterIds[index]) : "";
-        const player = playerId ? players[playerId] : null;
-        const projection = playerId ? projectionByPlayerId.get(playerId) : null;
-        const kickoffAt = getProjectionKickoffAt(projection);
-        const actualPoints = Number(playerId ? playerPoints[playerId] ?? entry?.starters_points?.[index] ?? 0 : 0);
-        const gameState = getKickoffState(kickoffAt);
-        const remainingProjection = gameState === "Upcoming"
-          ? Number(projection?.fpts || 0)
-          : gameState === "Live"
-          ? Math.max(Number(projection?.fpts || 0) - actualPoints, 0)
-          : 0;
-
-        return {
-          slot,
-          playerId,
-          player,
-          actualPoints,
-          remainingProjection,
-          kickoffAt,
-          kickoffLabel: formatKickoffTime(kickoffAt),
-          gameState,
-        };
-      });
-
-      const starterIdSet = new Set(starterRows.map((row) => row.playerId).filter(Boolean));
-      const taxiIdSet = new Set((rosterEntry?.taxi || []).map((id) => String(id)));
-      const buildReserveRow = (playerId: string) => {
-        const player = players[playerId];
-        const projection = projectionByPlayerId.get(String(playerId));
-        const kickoffAt = getProjectionKickoffAt(projection);
-        const actualPoints = Number(playerPoints[playerId] ?? 0);
-        const gameState = getKickoffState(kickoffAt);
-        const remainingProjection = gameState === "Upcoming"
-          ? Number(projection?.fpts || 0)
-          : gameState === "Live"
-          ? Math.max(Number(projection?.fpts || 0) - actualPoints, 0)
-          : 0;
-        return {
-          playerId,
-          player,
-          actualPoints,
-          remainingProjection,
-          kickoffAt,
-          kickoffLabel: formatKickoffTime(kickoffAt),
-          gameState,
-        };
-      };
-
-      const benchRows = (rosterEntry?.players || [])
-        .map((id) => String(id))
-        .filter((playerId: string) => !starterIdSet.has(playerId) && !taxiIdSet.has(playerId))
-        .map(buildReserveRow)
-        .filter((row) => row.player)
-        .sort((a, b) => (b.remainingProjection + b.actualPoints) - (a.remainingProjection + a.actualPoints));
-
-      const taxiRows = (rosterEntry?.taxi || [])
-        .map((id) => String(id))
-        .map(buildReserveRow)
-        .filter((row) => row.player)
-        .sort((a, b) => (b.remainingProjection + b.actualPoints) - (a.remainingProjection + a.actualPoints));
-
-      const ownerId = rosterEntry?.owner_id ?? "";
-      return {
-        rosterId,
-        ownerId,
-        ownerName: users[ownerId] || users[rosterId] || `Team ${rosterId}`,
-        actualPoints: Number(entry?.points || 0),
-        remainingProjection: Math.round(sum(starterRows.map((row) => row.remainingProjection)) * 10) / 10,
-        projectedFinal: Math.round((Number(entry?.points || 0) + sum(starterRows.map((row) => row.remainingProjection))) * 10) / 10,
-        finishedStarters: starterRows.filter((row) => row.gameState === "Final" && row.playerId).length,
-        liveStarters: starterRows.filter((row) => row.gameState === "Live" && row.playerId).length,
-        upcomingStarters: starterRows.filter((row) => row.gameState === "Upcoming" && row.playerId).length,
-        totalStarters: starterRows.filter((row) => row.playerId).length,
-        starterRows,
-        benchRows,
-        taxiRows,
-      };
-    };
-
-    return [...matchupMap.entries()]
-      .map(([matchupId, entries]) => {
-        const teams = entries
-          .map((entry) => buildTeamView(entry))
-          .sort((a, b) => b.actualPoints - a.actualPoints);
-        const sortKickoff = teams
-          .flatMap((team) => team.starterRows.map((row) => row.kickoffAt).filter((k): k is number => k !== null))
-          .sort((a, b) => a - b)[0] || Number.MAX_SAFE_INTEGER;
-
-        return {
-          matchupId,
-          teams: teams as GamedayTeamView[],
-          sortKickoff,
-        };
-      })
-      .sort((a, b) => {
-        if (a.sortKickoff !== b.sortKickoff) return a.sortKickoff - b.sortKickoff;
-        return a.matchupId - b.matchupId;
-      });
-  }, [selectedLeague, rosters, gamedayMatchups, gamedayWeek, players, projectionData, users]);
+    // Feature the user's own matchup first, ahead of the soonest-kickoff
+    // ordering buildGamedayMatchups otherwise applies — everything else keeps
+    // that original order.
+    const myRosterId = rosters.find((r) => r.owner_id === user?.user_id)?.roster_id;
+    if (myRosterId == null) return built;
+    const myIndex = built.findIndex((m) => m.teams.some((t) => t.rosterId === myRosterId));
+    if (myIndex <= 0) return built;
+    const reordered = [...built];
+    const [mine] = reordered.splice(myIndex, 1);
+    reordered.unshift(mine);
+    return reordered;
+  }, [selectedLeague, rosters, gamedayMatchups, gamedayWeek, players, projectionData, users, scheduleByTeam, user?.user_id]);
   const selectedGamedayMatchup = useMemo(
     () => gamedayMatchupCards.find((card) => card.matchupId === selectedGamedayMatchupId) || gamedayMatchupCards[0] || null,
     [gamedayMatchupCards, selectedGamedayMatchupId]
@@ -1396,6 +1299,11 @@ const saveSnapshotNow = async () => {
       setSelectedGamedayMatchupId(gamedayMatchupCards[0].matchupId);
     }
   }, [gamedayMatchupCards, selectedGamedayMatchupId, setSelectedGamedayMatchupId]);
+  const onRefreshGamedayDashboard = useCallback(() => {
+    if (!gamedayWeek) return;
+    loadSchedule(gamedayWeek);
+    loadGamedayDashboard(leagues, user, gamedayWeek, players, projectionData, scheduleByTeam);
+  }, [gamedayWeek, loadSchedule, loadGamedayDashboard, leagues, user, players, projectionData, scheduleByTeam]);
   // â”€â”€ League-adjusted FC dynasty values (Tier 3 scoring) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Scales raw FantasyCalc values by per-position multipliers derived from the
   // selected league's scoring settings vs. the FC baseline (full PPR, 4pt TDs,
@@ -3186,6 +3094,9 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     selectedGamedayMatchup,
     setSelectedGamedayMatchupId,
     loadGamedayMatchups,
+    loadSchedule,
+    gamedayHubTab, setGamedayHubTab,
+    gamedayDashboardEntries, loadingGamedayDashboard, onRefreshGamedayDashboard,
     setProjectionWeek,
     setProjectionLoaded,
     loadProjections,

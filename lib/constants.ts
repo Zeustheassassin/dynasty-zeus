@@ -24,6 +24,9 @@ export const NUMBERFIRE_GQL_URL = "https://fdresearch-api.fanduel.com/graphql";
 // ── ESPN Fantasy (public, unauthenticated leaguedefaults endpoint) ─────
 export const ESPN_FANTASY_BASE_URL = "https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons";
 
+// ── ESPN Scoreboard (public, unauthenticated live game status) ────────
+export const ESPN_SCOREBOARD_BASE_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard";
+
 // ── Google Sheets (crowdsourced rookie board) ─────────────────
 // This URL is a published CSV export — safe to store in code (not a secret).
 // If the sheet is re-published or moved, update here only.
@@ -74,6 +77,9 @@ export const SLEEPER_LEAGUE_INFO_REVALIDATE_S = 3600;
 
 /** FantasyPros projections — refreshed every hour */
 export const FANTASYPROS_REVALIDATE_S = 3600;
+
+/** NFL live scoreboard (kickoff/live/final per game) — changes constantly during games */
+export const NFL_SCOREBOARD_REVALIDATE_S = 30;
 
 /** Crowdsourced rookie board sheet — refreshed every 6 hours */
 export const ROOKIE_BOARD_REVALIDATE_S = 21600;
