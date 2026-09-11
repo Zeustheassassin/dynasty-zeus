@@ -12,8 +12,12 @@ interface RecentAlertsPanelProps {
 
 // Weekly alerts (R7) — the top actionable items, same feed AlertsPage's
 // "alerts" tab renders in full; capped to 5 here for the dashboard glance.
+// Value-movement alerts (climbing/falling) are excluded here since they're
+// already surfaced in ValueMoversPanel right next to this card.
 export default function RecentAlertsPanel({ alerts, onDismiss, onViewAll }: RecentAlertsPanelProps) {
-  const shown = alerts.slice(0, 5);
+  const shown = alerts
+    .filter((alert) => !((alert.category === "market" || alert.category === "watchlist") && alert.payload?.["direction"]))
+    .slice(0, 5);
 
   return (
     <Card padding="lg" elevated>
