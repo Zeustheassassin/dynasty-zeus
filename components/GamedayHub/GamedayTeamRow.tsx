@@ -4,13 +4,29 @@ import type { GamedayTeamView } from "../../lib/types";
 
 interface GamedayTeamRowProps {
   team: GamedayTeamView;
+  // Win/loss read vs. this team's opponent, for the Gameday Dashboard's "my
+  // team" row only — projected while games are in progress, actual once
+  // every starter on both sides has finished. Omitted elsewhere (e.g. the
+  // single-league matchup grid), which keeps this row's plain styling.
+  resultStatus?: { status: "win" | "loss" | "tie"; final: boolean } | null;
 }
 
 // Condensed team summary shared by the single-league matchup grid and the
 // cross-league Gameday Dashboard, so the two views can't visually drift apart.
-function GamedayTeamRow({ team }: GamedayTeamRowProps) {
+function GamedayTeamRow({ team, resultStatus }: GamedayTeamRowProps) {
+  const isDecided = resultStatus && resultStatus.status !== "tie";
+  const containerClasses = !isDecided
+    ? "border-gray-800 bg-gray-950/60"
+    : resultStatus.final
+    ? resultStatus.status === "win"
+      ? "border-green-600 bg-green-900/30"
+      : "border-red-600 bg-red-900/30"
+    : resultStatus.status === "win"
+    ? "border-green-500 bg-gray-950/60"
+    : "border-red-500 bg-gray-950/60";
+
   return (
-    <div className="rounded-xl border border-gray-800 bg-gray-950/60 px-3 py-2.5">
+    <div className={`rounded-xl border px-3 py-2.5 ${containerClasses}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold text-white">{team.ownerName}</div>

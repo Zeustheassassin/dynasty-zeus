@@ -35,8 +35,8 @@ interface GamedayHubProps {
 }
 
 const TABS: { id: GamedayHubTab; label: string }[] = [
-  { id: "MATCHUPS", label: "League Matchups" },
   { id: "DASHBOARD", label: "Gameday Dashboard" },
+  { id: "MATCHUPS", label: "League Matchups" },
 ];
 
 function GamedayHub({

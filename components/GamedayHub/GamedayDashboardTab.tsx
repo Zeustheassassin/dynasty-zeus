@@ -1,6 +1,7 @@
 "use client";
 import React from "react";
 import type { SleeperLeague, GamedayDashboardEntry } from "../../lib/types";
+import { getGamedayResultStatus } from "../../lib/helpers/gameday";
 import GamedayTeamRow from "./GamedayTeamRow";
 
 interface GamedayDashboardTabProps {
@@ -78,7 +79,7 @@ function GamedayDashboardTab({ week, entries, loading, onRefresh, onOpenLeague }
                     <div className="text-xs text-gray-500">No matchup this week.</div>
                   ) : (
                     <div className="space-y-3">
-                      <GamedayTeamRow team={entry.myTeam} />
+                      <GamedayTeamRow team={entry.myTeam} resultStatus={getGamedayResultStatus(entry.myTeam, entry.oppTeam)} />
                       {entry.oppTeam && <GamedayTeamRow team={entry.oppTeam} />}
                     </div>
                   )}

@@ -84,6 +84,22 @@ export const resolveGameState = (
   return { state: getKickoffState(fallbackKickoffAt), kickoffAt: fallbackKickoffAt };
 };
 
+/** Win/loss read on a Gameday Dashboard matchup: projected (from
+ *  projectedFinal) while any starter on either side hasn't finished yet,
+ *  actual (from actualPoints) once every starter on both sides is Final. */
+export function getGamedayResultStatus(
+  myTeam: GamedayTeamView | null | undefined,
+  oppTeam: GamedayTeamView | null | undefined
+): { status: "win" | "loss" | "tie"; final: boolean } | null {
+  if (!myTeam || !oppTeam) return null;
+  const final = myTeam.upcomingStarters === 0 && myTeam.liveStarters === 0
+    && oppTeam.upcomingStarters === 0 && oppTeam.liveStarters === 0;
+  const myScore = final ? myTeam.actualPoints : myTeam.projectedFinal;
+  const oppScore = final ? oppTeam.actualPoints : oppTeam.projectedFinal;
+  const status = myScore > oppScore ? "win" : myScore < oppScore ? "loss" : "tie";
+  return { status, final };
+}
+
 /**
  * Builds this week's full matchup grid for one league: groups raw Sleeper
  * matchup rows by matchup_id, and for each roster computes actual/remaining/

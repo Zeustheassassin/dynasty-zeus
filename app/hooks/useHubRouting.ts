@@ -127,7 +127,7 @@ export function useHubRouting() {
     const tab = readUrlTab();
     return hub === "GAMEDAY_HUB" && tab && (GAMEDAY_HUB_TABS as readonly string[]).includes(tab)
       ? (tab as GamedayHubTab)
-      : restore("gamedayHubTab", GAMEDAY_HUB_TABS, "MATCHUPS");
+      : restore("gamedayHubTab", GAMEDAY_HUB_TABS, "DASHBOARD");
   });
 
   // Persist each sub-tab selection (writing to localStorage is an
