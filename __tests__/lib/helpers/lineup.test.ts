@@ -294,4 +294,67 @@ describe("computeSuggestedLineup", () => {
     expect(result.currentLineupScore).toBe(0);
     expect(result.suggestedLineupScore).toBe(0);
   });
+
+  // A player's roster slot locks at their own kickoff (Sleeper rule) — a
+  // bench player whose game has already started can no longer be added to
+  // the lineup, so the coach must not suggest them even if they outscore
+  // the current starter.
+  it("never suggests a bench player whose game has already kicked off", () => {
+    const now = 2_000;
+    const kickoffAt: Record<string, number> = { rb1: 1_000, rb2: 1_000 }; // both already started
+    const result = computeSuggestedLineup(
+      {
+        rosterPositions: ["QB", "RB"],
+        starters: ["qb1", "rb1"],
+        playerIds: ["qb1", "rb1", "rb2"],
+        players,
+        scoreFn,
+        kickoffFn: (id) => kickoffAt[id] ?? null,
+        hasKickoffData: true,
+      },
+      now
+    );
+    // rb2 (15) outscores rb1 (10) but has already kicked off and isn't
+    // currently starting, so it must stay benched — no swap suggested.
+    expect(result.swaps).toHaveLength(0);
+    expect(result.lineup.find((r) => r.slot === "RB")?.player?.player_id).toBe("rb1");
+  });
+
+  it("still allows a bench player whose game has not started yet to be suggested", () => {
+    const now = 2_000;
+    const kickoffAt: Record<string, number> = { rb2: 3_000 }; // kicks off in the future
+    const result = computeSuggestedLineup(
+      {
+        rosterPositions: ["QB", "RB"],
+        starters: ["qb1", "rb1"],
+        playerIds: ["qb1", "rb1", "rb2"],
+        players,
+        scoreFn,
+        kickoffFn: (id) => kickoffAt[id] ?? null,
+        hasKickoffData: true,
+      },
+      now
+    );
+    expect(result.swaps).toHaveLength(1);
+    expect(result.swaps[0].suggested.player_id).toBe("rb2");
+  });
+
+  it("keeps an already-started player in place when they're already the starter", () => {
+    const now = 2_000;
+    const kickoffAt: Record<string, number> = { rb1: 1_000 }; // already started, but already starting
+    const result = computeSuggestedLineup(
+      {
+        rosterPositions: ["RB"],
+        starters: ["rb1"],
+        playerIds: ["rb1"],
+        players,
+        scoreFn,
+        kickoffFn: (id) => kickoffAt[id] ?? null,
+        hasKickoffData: true,
+      },
+      now
+    );
+    expect(result.lineup.find((r) => r.slot === "RB")?.player?.player_id).toBe("rb1");
+    expect(result.swaps).toHaveLength(0);
+  });
 });

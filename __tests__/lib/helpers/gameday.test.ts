@@ -170,6 +170,39 @@ describe("buildGamedayMatchups", () => {
     expect(built.teams[0].starterRows[0].remainingProjection).toBe(0);
   });
 
+  // Regression: the cross-league Gameday Dashboard passes ONE projectionData
+  // set (baked with whatever league happens to be globally selected) across
+  // every league it renders. A starter's points must be re-derived under
+  // THIS league's own scoring_settings rather than trusting projection.fpts
+  // as-is, or switching the globally selected league would silently change
+  // every other league's projected scores too.
+  it("recomputes a starter's points from this league's own scoring_settings instead of trusting projection.fpts", () => {
+    const league = mkLeague({
+      roster_positions: ["WR", "BN"],
+      scoring_settings: { rec: 0.5, rec_yd: 0.1, rec_td: 6 }, // half-PPR
+    });
+    const rosters = [mkRoster({ roster_id: 1, owner_id: "me", starters: ["wr1"], players: ["wr1"] })];
+    const matchups = [mkMatchup({ matchup_id: 1, roster_id: 1, starters: ["wr1"], players_points: {} })];
+    const players = { wr1: mkPlayer({ player_id: "wr1", position: "WR", team: "SF" }) };
+    const projectionData: ProjectionRow[] = [{
+      sleeperId: "wr1",
+      full_name: "Test WR",
+      position: "WR",
+      team: "SF",
+      fpts: 20, // baked under a DIFFERENT (full-PPR) league's scoring
+      sources: ["sleeper"],
+      kickoffAt: null,
+      stats: { rec: 10, rec_yd: 100 },
+      sourceFpts: { sleeper: 20 },
+      sourceWeights: { sleeper: 1 },
+    }];
+
+    const [built] = buildGamedayMatchups(league, rosters, matchups, 1, players, projectionData, {}, {});
+    const row = built.teams[0].starterRows[0];
+    // Half-PPR: 10 rec * 0.5 + 100 yd * 0.1 = 15 — NOT the baked-in 20.
+    expect(row.remainingProjection).toBe(15);
+  });
+
   it("falls back to Team {rosterId} when no owner name is provided", () => {
     const league = mkLeague({ roster_positions: ["QB"] });
     const rosters = [mkRoster({ roster_id: 7, owner_id: "unknown-owner" })];

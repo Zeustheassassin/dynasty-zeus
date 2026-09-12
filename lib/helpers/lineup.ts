@@ -129,8 +129,13 @@ export interface SuggestedLineupResult {
  *  current starters to report what would change. Pure function — reused by
  *  the Starters tab (StartersTab.tsx) for the currently selected league and
  *  by the League Overview status dot (useAppState.ts) across every league,
- *  so both can never disagree about whether a lineup is already optimal. */
-export function computeSuggestedLineup(input: SuggestedLineupInput): SuggestedLineupResult {
+ *  so both can never disagree about whether a lineup is already optimal.
+ *  `now` defaults to the real clock — overridable so tests can fix "already
+ *  started" checks to a known instant. */
+export function computeSuggestedLineup(
+  input: SuggestedLineupInput,
+  now: number = Date.now()
+): SuggestedLineupResult {
   const { rosterPositions, starters, playerIds, players, scoreFn, hasKickoffData } = input;
   const rankScoreFn = input.rankScoreFn ?? scoreFn;
   const kickoffFn = input.kickoffFn ?? (() => null);
@@ -149,10 +154,26 @@ export function computeSuggestedLineup(input: SuggestedLineupInput): SuggestedLi
     };
   });
 
+  const currentStarterIds = new Set(
+    currentStarterRows.map((r) => r.player?.player_id).filter((id): id is string => !!id)
+  );
+
+  // Sleeper locks a player's roster slot at their own kickoff — once their
+  // game has started, they can stay wherever they already are but can't be
+  // newly added to the lineup. A bench player whose game is already Live or
+  // Final is therefore never a legal swap-in, so exclude them from the fill
+  // pool entirely (already-starting players are exempt since keeping them
+  // put isn't a move). No-ops without kickoff data (offseason).
+  const isLockedOut = (id: string) => {
+    if (!hasKickoffData || currentStarterIds.has(id)) return false;
+    const kickoffAt = kickoffFn(id);
+    return kickoffAt != null && now >= kickoffAt;
+  };
+
   for (const slot of rosterPositions) {
     const eligible = getLineupSlotEligiblePositions(slot);
     const best = myPlayerIds
-      .filter((id) => !used.has(id))
+      .filter((id) => !used.has(id) && !isLockedOut(id))
       .map((id) => ({ id, p: players[id] }))
       .filter(({ p }) => p && eligible.includes(p.position))
       .sort((a, b) => rankScoreFn(b.id) - rankScoreFn(a.id))[0];
@@ -166,9 +187,6 @@ export function computeSuggestedLineup(input: SuggestedLineupInput): SuggestedLi
 
   const lineup = rebalanceLineupForKickoffWindows(initialLineup, hasKickoffData);
 
-  const currentStarterIds = new Set(
-    currentStarterRows.map((r) => r.player?.player_id).filter((id): id is string => !!id)
-  );
   const newStarterIds = new Set(
     lineup.map((r) => r.player?.player_id).filter((id): id is string => !!id)
   );

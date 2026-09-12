@@ -2586,7 +2586,7 @@ const saveSnapshotNow = async () => {
           const downThreshold = Number(watch?.threshold_down || 250);
           if (delta >= upThreshold) {
             incomingAlerts.push({
-              id: `market-up-${playerId}-${snapshot.value}`,
+              id: `market-move-${playerId}`,
               category: watch ? "watchlist" : "market",
               source: watch ? "watchlist" : "internal",
               severity: delta >= upThreshold * 1.8 ? "high" : "medium",
@@ -2600,7 +2600,7 @@ const saveSnapshotNow = async () => {
             });
           } else if (delta <= -downThreshold) {
             incomingAlerts.push({
-              id: `market-down-${playerId}-${snapshot.value}`,
+              id: `market-move-${playerId}`,
               category: watch ? "watchlist" : "market",
               source: watch ? "watchlist" : "internal",
               severity: delta <= -downThreshold * 1.8 ? "high" : "medium",

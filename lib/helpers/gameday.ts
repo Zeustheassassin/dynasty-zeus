@@ -3,6 +3,7 @@
 // Used by GamedayHub to determine game state and display times.
 // ============================================================
 import { sum } from "./math";
+import { recomputeConsensusFpts, DEFAULT_SCORING } from "./scoring";
 import type {
   SleeperLeague, SleeperRoster, SleeperMatchup, SleeperPlayer,
   ProjectionRow, GamedayMatchup, GamedayTeamView, GamedayLineupRow,
@@ -128,6 +129,16 @@ export function buildGamedayMatchups(
   );
   const matchupMap = new Map<number, SleeperMatchup[]>();
 
+  // projectionData's fpts is baked with whatever league's scoring was
+  // selected when it was fetched (see useProjections) — not necessarily
+  // THIS league's. Re-derive each player's points under this league's own
+  // scoring_settings so a cross-league view (the Gameday Dashboard) can't
+  // leak one league's scoring into another's projected numbers. No-ops back
+  // to `fpts` for rows without stats/sourceWeights (tests, older snapshots).
+  const leagueScoring = league.scoring_settings ?? DEFAULT_SCORING;
+  const scoreProjection = (projection: ProjectionRow | null | undefined): number =>
+    projection ? recomputeConsensusFpts(projection, leagueScoring) : 0;
+
   matchups.forEach((entry) => {
     const matchupId = Number(entry?.matchup_id || 0);
     if (!matchupId) return;
@@ -150,9 +161,9 @@ export function buildGamedayMatchups(
       const { state: gameState, kickoffAt } = resolveGameState(player?.team, scheduleByTeam, fallbackKickoffAt);
       const actualPoints = Number(playerId ? playerPoints[playerId] ?? entry?.starters_points?.[index] ?? 0 : 0);
       const remainingProjection = gameState === "Upcoming"
-        ? Number(projection?.fpts || 0)
+        ? scoreProjection(projection)
         : gameState === "Live"
-        ? Math.max(Number(projection?.fpts || 0) - actualPoints, 0)
+        ? Math.max(scoreProjection(projection) - actualPoints, 0)
         : 0;
 
       return {
@@ -176,9 +187,9 @@ export function buildGamedayMatchups(
       const { state: gameState, kickoffAt } = resolveGameState(player?.team, scheduleByTeam, fallbackKickoffAt);
       const actualPoints = Number(playerPoints[playerId] ?? 0);
       const remainingProjection = gameState === "Upcoming"
-        ? Number(projection?.fpts || 0)
+        ? scoreProjection(projection)
         : gameState === "Live"
-        ? Math.max(Number(projection?.fpts || 0) - actualPoints, 0)
+        ? Math.max(scoreProjection(projection) - actualPoints, 0)
         : 0;
       return {
         playerId,
