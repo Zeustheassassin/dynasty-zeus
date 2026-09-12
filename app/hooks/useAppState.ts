@@ -22,6 +22,8 @@ import {
   getLeagueNumQbs,
   computeSuggestedLineup,
   recomputeConsensusFpts,
+  resolveGameState,
+  getProjectionKickoffAt,
 } from "../../lib/helpers";
 import { projectRookiesByRoster } from "../../lib/helpers/rookieProjection";
 import { useProjections } from "../../hooks/useProjections";
@@ -802,9 +804,15 @@ useEffect(() => {
     } else if (!projectionLoaded) {
       loadProjections(startersProjectionWeek === 0 ? "season" : startersProjectionWeek, enabledExtraSources);
     }
+    // Real per-team game state (Live/Final vs Upcoming) for the Lineup Coach's
+    // lock-out rule — projection sources don't reliably populate per-player
+    // kickoff timestamps (see Gameday Hub's own fix for the same gap), so this
+    // is the only reliable signal for "has this player's game already started."
+    // No-ops offseason (loadSchedule ignores a week of 0).
+    loadSchedule(startersProjectionWeek);
   }
   // projectionWeek/projectionLoaded are in deps and set inside this effect; the conditional guards prevent loops
-}, [mainTab, leagueHubTab, selectedLeague?.league_id, selectedLeague, nflState?.week, nflState?.season_type, projectionWeek, projectionLoaded, enabledExtraSources, loadCalcValues, loadNflState, loadProjections, setProjectionLoaded, setProjectionWeek]);
+}, [mainTab, leagueHubTab, selectedLeague?.league_id, selectedLeague, nflState?.week, nflState?.season_type, projectionWeek, projectionLoaded, enabledExtraSources, loadCalcValues, loadNflState, loadProjections, loadSchedule, setProjectionLoaded, setProjectionWeek]);
 
 useEffect(() => {
   if (mainTab === "LEAGUES" && leagueHubTab === "POWER_RANKINGS" && selectedLeague?.league_id) {
@@ -840,9 +848,12 @@ useEffect(() => {
     } else if (!projectionLoaded) {
       loadProjections(simulatorProjectionWeek === 0 ? "season" : simulatorProjectionWeek, enabledExtraSources);
     }
+    // OVERVIEW's League Overview lineup-status dot needs real per-team game
+    // state for the same lock-out reason as the Starters effect above.
+    loadSchedule(simulatorProjectionWeek);
   }
   // projectionWeek/projectionLoaded are in deps and set inside this effect; the conditional guards prevent loops
-}, [mainTab, leagueHubTab, selectedLeague?.league_id, nflState?.week, nflState?.season_type, projectionWeek, projectionLoaded, enabledExtraSources, loadRedraftValues, loadProjections, loadNflState, setProjectionLoaded, setProjectionWeek]);
+}, [mainTab, leagueHubTab, selectedLeague?.league_id, nflState?.week, nflState?.season_type, projectionWeek, projectionLoaded, enabledExtraSources, loadRedraftValues, loadProjections, loadNflState, loadSchedule, setProjectionLoaded, setProjectionWeek]);
 
 useEffect(() => {
   if (mainTab !== "GAMEDAY_HUB") return;
@@ -1691,7 +1702,7 @@ const saveSnapshotNow = async () => {
   // hidden rather than reading as a false "needs changes".
   const leagueLineupStatus = useMemo(() => {
     const isInSeason = nflState?.season_type === "regular";
-    const status: Record<string, { isOptimal: boolean; swapCount: number } | null> = {};
+    const status: Record<string, { isOptimal: boolean; swapCount: number; delta: number } | null> = {};
     if (!isInSeason || !user?.user_id || projectionData.length === 0) return status;
 
     const projectionBySleeperId = new Map(projectionData.map((row) => [String(row.sleeperId), row]));
@@ -1711,19 +1722,33 @@ const saveSnapshotNow = async () => {
       const taxiSet = new Set((myRoster.taxi ?? []).map((id) => String(id)));
       const eligiblePlayerIds = (myRoster.players ?? []).filter((id) => !taxiSet.has(String(id)));
 
-      const { swaps } = computeSuggestedLineup({
+      // Same lock-out rule as the Starters tab's Lineup Coach — a bench
+      // player whose real-world game has already started can't legally be
+      // suggested as a swap-in for this dot either.
+      const isLockedFn = (id: string) => {
+        const player = players[id];
+        const fallbackKickoffAt = getProjectionKickoffAt(projectionBySleeperId.get(String(id)));
+        return resolveGameState(player?.team, scheduleByTeam, fallbackKickoffAt).state !== "Upcoming";
+      };
+
+      const { swaps, currentLineupScore, suggestedLineupScore } = computeSuggestedLineup({
         rosterPositions,
         starters: myRoster.starters,
         playerIds: eligiblePlayerIds,
         players,
         scoreFn,
         hasKickoffData: false,
+        isLockedFn,
       });
-      status[league.league_id] = { isOptimal: swaps.length === 0, swapCount: swaps.length };
+      status[league.league_id] = {
+        isOptimal: swaps.length === 0,
+        swapCount: swaps.length,
+        delta: Math.max(0, suggestedLineupScore - currentLineupScore),
+      };
     });
 
     return status;
-  }, [leagueOverviewData, projectionData, players, nflState?.season_type, user?.user_id, selectedLeague?.league_id]);
+  }, [leagueOverviewData, projectionData, players, scheduleByTeam, nflState?.season_type, user?.user_id, selectedLeague?.league_id]);
 
   const selectedLeagueMateProfiles = useMemo((): LeagueMateView[] => {
     if (!selectedLeague || !rosters.length || !user?.user_id) return [];
@@ -3113,6 +3138,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     loadingRedraft,
     redraftError,
     projectionData, setProjectionData,
+    scheduleByTeam,
     projectionPosFilter, setProjectionPosFilter,
     projectionWeek,
     projectionSeasonYear,

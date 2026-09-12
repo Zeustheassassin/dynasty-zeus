@@ -7,6 +7,42 @@ import { getLocalStorageItem, setLocalStorageItem } from "@/lib/hooks/useLocalSt
 
 const log = logger("hooks/useAlerts");
 
+// Legacy market-move alert ids baked the player's CURRENT value into the id
+// (market-up-<playerId>-<value> / market-down-<playerId>-<value>), so a
+// player's value moving again the next day generated a brand-new id instead
+// of replacing the old one — multiple "is climbing"/"is falling" rows for
+// the same player could pile up. Ids are now `market-move-<playerId>`
+// (see useAppState.ts), but rows already sitting in localStorage/Supabase
+// from before that change still use the old format. Normalize both shapes
+// to the same logical key so duplicates collapse the moment they're loaded,
+// not just the next time a fresh alert happens to fire for that player.
+const getAlertDedupeKey = (alert: AlertsCenterItem): string => {
+  if (alert.playerId && /^market-(up|down|move)-/.test(alert.id)) {
+    return `market-move-${alert.playerId}`;
+  }
+  return alert.id;
+};
+
+/** Collapses a list of alerts to one per dedupe key, keeping whichever has
+ *  the most recent timestamp (fields from the loser are only used to fill
+ *  in gaps, e.g. an existing `dismissed: true` isn't lost just because a
+ *  newer duplicate row didn't carry that flag). */
+function dedupeAlerts(alerts: AlertsCenterItem[]): AlertsCenterItem[] {
+  const merged = new Map<string, AlertsCenterItem>();
+  alerts.forEach((alert) => {
+    const key = getAlertDedupeKey(alert);
+    const existing = merged.get(key);
+    if (!existing) { merged.set(key, alert); return; }
+    const [newer, older] = alert.timestamp >= existing.timestamp ? [alert, existing] : [existing, alert];
+    // OR, not `??` — both objects here already carry a concrete boolean
+    // (unlike a freshly-generated incoming alert, which omits the field
+    // entirely). If the user dismissed ANY duplicate of this player's
+    // alert, the collapsed row should stay dismissed.
+    merged.set(key, { ...older, ...newer, dismissed: newer.dismissed || older.dismissed || false });
+  });
+  return [...merged.values()];
+}
+
 /**
  * useAlerts
  *
@@ -95,8 +131,11 @@ export function useAlerts({ supabaseUser, players }: UseAlertsOptions): UseAlert
     if (watchlist) setWatchlistEntries(watchlist);
     const alerts = getLocalStorageItem<AlertsCenterItem[] | null>(alertStorageKey, null);
     if (alerts) {
-      setDashboardAlerts(alerts);
-      // These mirror DB rows, so they're already persisted — don't re-upsert them.
+      setDashboardAlerts(dedupeAlerts(alerts));
+      // Mark every ORIGINAL id (pre-dedupe) as persisted — they mirror DB rows
+      // that already exist under those ids, so the bulk-persist effect must
+      // not re-upsert them even though a duplicate got collapsed out of the
+      // in-memory state above.
       alerts.forEach((a) => persistedAlertIdsRef.current.add(a.id));
     }
     const dismissed = getLocalStorageItem<string[] | null>(dismissedAlertStorageKey, null);
@@ -166,13 +205,16 @@ export function useAlerts({ supabaseUser, players }: UseAlertsOptions): UseAlert
             payload: row.payload ?? {},
             timestamp: new Date(row.updated_at).getTime(),
           }));
-          const dismissed = rows.filter((r) => r.dismissed).map((r) => r.id);
-          setDashboardAlerts(rows);
+          const deduped = dedupeAlerts(rows);
+          const dismissed = deduped.filter((r) => r.dismissed).map((r) => r.id);
+          setDashboardAlerts(deduped);
           setDismissedAlertIds(dismissed);
           // Loaded straight from the alerts table — already persisted, so the
           // bulk-persist effect must not re-UPDATE (and thus re-stamp) them.
+          // Marks every ORIGINAL row's id (pre-dedupe), same reasoning as the
+          // localStorage hydration path above.
           rows.forEach((r) => persistedAlertIdsRef.current.add(r.id));
-          setLocalStorageItem(alertStorageKey, rows);
+          setLocalStorageItem(alertStorageKey, deduped);
           setLocalStorageItem(dismissedAlertStorageKey, dismissed);
         }
       });
@@ -180,20 +222,11 @@ export function useAlerts({ supabaseUser, players }: UseAlertsOptions): UseAlert
 
   const mergeDashboardAlerts = useCallback((incoming: AlertsCenterItem[]) => {
     if (!incoming.length) return;
-    setDashboardAlerts((prev) => {
-      const merged = new Map<string, AlertsCenterItem>();
-      [...prev, ...incoming].forEach((alert) => {
-        const existing = merged.get(alert.id);
-        merged.set(alert.id, {
-          ...existing,
-          ...alert,
-          dismissed: alert.dismissed ?? existing?.dismissed ?? false,
-        });
-      });
-      return [...merged.values()]
+    setDashboardAlerts((prev) =>
+      dedupeAlerts([...prev, ...incoming])
         .sort((a, b) => b.timestamp - a.timestamp)
-        .slice(0, 80);
-    });
+        .slice(0, 80)
+    );
   }, []);
 
   const dismissAlert = (alertId: string) => {

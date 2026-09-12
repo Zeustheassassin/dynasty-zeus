@@ -25,6 +25,7 @@ import type {
   LeagueHubTab, ProjectionRow, SimulationTeamRow,
   LeagueMgmtData, CommPaymentsData, TradePartnerRanking,
   AssetDisposition, LeagueAssetDispositions, LeagueExpiringBlocks,
+  TeamGameState,
 } from "../../lib/types";
 import type { AnnotatedTrade } from "../../hooks/useUserTrades";
 import type { PlayerUsage } from "../../hooks/usePlayerStats";
@@ -125,7 +126,7 @@ interface HubRouterProps {
   leagueOverviewData: Record<string, LeagueOverviewEntry>;
   leagueOverviewLoaded: boolean;
   leagueOverviewError: string | null;
-  leagueLineupStatus: Record<string, { isOptimal: boolean; swapCount: number } | null>;
+  leagueLineupStatus: Record<string, { isOptimal: boolean; swapCount: number; delta: number } | null>;
   selectedLeagueMateProfilesView: LeagueMateView[];
   ignoredOwnerIds: string[];
   toggleIgnoredOwner: (ownerId: string) => void;
@@ -186,6 +187,7 @@ interface HubRouterProps {
   redraftError: string | null;
   projectionData: ProjectionRow[];
   setProjectionData: React.Dispatch<React.SetStateAction<ProjectionRow[]>>;
+  scheduleByTeam: Record<string, TeamGameState>;
   projectionPosFilter: string;
   setProjectionPosFilter: (pos: string) => void;
   projectionWeek: number;
@@ -327,7 +329,7 @@ export function HubRouter({
   shares, totalLeagues, loadingAllLeagueData, shareSearch, setShareSearch, sharePosition, setSharePosition,
   setDataHubTab,
   finderDispositions, finderSignals, finderRankGaps, personalOrdering, savePersonalOrdering, loadingRedraft, redraftError,
-  projectionData, setProjectionData, projectionPosFilter, setProjectionPosFilter,
+  projectionData, setProjectionData, projectionPosFilter, setProjectionPosFilter, scheduleByTeam,
   projectionWeek, projectionSeasonYear, projectionSourceStatus, loadingProjections, projectionUsesSeasonFallback,
   enabledExtraSources, toggleExtraSource,
   selectedUserId, setSelectedUserId, externalShares, loadingShares, exposureError, historicalSnapshot, saveSnapshotNow,
@@ -473,6 +475,7 @@ export function HubRouter({
             toggleIgnoredOwner={toggleIgnoredOwner}
             projectionData={projectionData}
             nflState={nflState}
+            scheduleByTeam={scheduleByTeam}
             freeAgents={freeAgents}
             personalOrdering={personalOrdering}
             loadingCalcValues={loadingCalcValues}

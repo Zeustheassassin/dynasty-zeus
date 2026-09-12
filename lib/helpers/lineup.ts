@@ -105,6 +105,15 @@ export interface SuggestedLineupInput {
   rankScoreFn?: (id: string) => number;
   kickoffFn?: (id: string) => number | null;
   hasKickoffData: boolean;
+  /** Returns true once a player's own game has already started (Live or
+   *  Final) — Sleeper locks a roster slot at kickoff, so a player who isn't
+   *  already starting can no longer be added to the lineup once this is
+   *  true. Callers with access to a real per-team schedule (see
+   *  resolveGameState in lib/helpers/gameday.ts) should pass this instead of
+   *  relying on `hasKickoffData`/`kickoffFn` alone — projection sources
+   *  don't reliably populate per-player kickoff timestamps, so that
+   *  fallback is used only when this isn't provided. */
+  isLockedFn?: (id: string) => boolean;
 }
 
 export interface SuggestedLineupSwap {
@@ -163,9 +172,13 @@ export function computeSuggestedLineup(
   // newly added to the lineup. A bench player whose game is already Live or
   // Final is therefore never a legal swap-in, so exclude them from the fill
   // pool entirely (already-starting players are exempt since keeping them
-  // put isn't a move). No-ops without kickoff data (offseason).
+  // put isn't a move). Prefers the caller's real-schedule-backed isLockedFn;
+  // falls back to the kickoff-timestamp heuristic (only reliable when
+  // hasKickoffData is true) when no isLockedFn was supplied.
   const isLockedOut = (id: string) => {
-    if (!hasKickoffData || currentStarterIds.has(id)) return false;
+    if (currentStarterIds.has(id)) return false;
+    if (input.isLockedFn) return input.isLockedFn(id);
+    if (!hasKickoffData) return false;
     const kickoffAt = kickoffFn(id);
     return kickoffAt != null && now >= kickoffAt;
   };

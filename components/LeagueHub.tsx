@@ -17,6 +17,7 @@ import type {
   LeagueAssetDispositions,
   LeagueExpiringBlocks,
   LeagueMgmtData,
+  TeamGameState,
 } from "../lib/types";
 import { LEAGUE_HUB_GROUPS } from "../lib/leagueHubGroups";
 import { useLeagueTabState } from "./LeagueHub/hooks/useLeagueTabState";
@@ -71,7 +72,7 @@ interface LeagueHubProps {
   loadingLeagueOverview: boolean;
   leagueOverviewLoaded: boolean;
   leagueOverviewError: string | null;
-  leagueLineupStatus: Record<string, { isOptimal: boolean; swapCount: number } | null>;
+  leagueLineupStatus: Record<string, { isOptimal: boolean; swapCount: number; delta: number } | null>;
 
   // Computed
   selectedLeagueMateProfilesView: LeagueMateView[];
@@ -83,6 +84,7 @@ interface LeagueHubProps {
   // Projections / season state (used by Starters tab)
   projectionData: ProjectionRow[];
   nflState: SleeperNFLState | null;
+  scheduleByTeam: Record<string, TeamGameState>;
 
   // Additional state
   freeAgents: SleeperPlayer[];
@@ -120,7 +122,7 @@ function LeagueHub({
   leagueLineupStatus,
   selectedLeagueMateProfilesView,
   ignoredOwnerIds, toggleIgnoredOwner,
-  projectionData, nflState,
+  projectionData, nflState, scheduleByTeam,
   freeAgents, personalOrdering, loadingCalcValues,
   loadRoster, loadLeagueOverview, loadRedraftValues,
   saveLeagueNote, onSaveSim, handleRunAllSims,
@@ -274,6 +276,7 @@ function LeagueHub({
           <StartersTab
             projectionData={projectionData}
             nflState={nflState}
+            scheduleByTeam={scheduleByTeam}
           />
         )}
 

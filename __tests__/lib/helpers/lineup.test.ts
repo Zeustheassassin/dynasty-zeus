@@ -339,6 +339,38 @@ describe("computeSuggestedLineup", () => {
     expect(result.swaps[0].suggested.player_id).toBe("rb2");
   });
 
+  it("uses isLockedFn (real per-team game state) over the kickoff-timestamp heuristic when both are provided", () => {
+    // No kickoff timestamp data at all (projection sources don't reliably
+    // populate it — see lib/helpers/gameday.ts's resolveGameState comment),
+    // but isLockedFn — backed by the real NFL scoreboard — says rb2 has
+    // already played. The coach must still respect that and leave rb1 in place.
+    const result = computeSuggestedLineup({
+      rosterPositions: ["QB", "RB"],
+      starters: ["qb1", "rb1"],
+      playerIds: ["qb1", "rb1", "rb2"],
+      players,
+      scoreFn,
+      hasKickoffData: false, // no kickoff timestamps available
+      isLockedFn: (id) => id === "rb2",
+    });
+    expect(result.swaps).toHaveLength(0);
+    expect(result.lineup.find((r) => r.slot === "RB")?.player?.player_id).toBe("rb1");
+  });
+
+  it("still allows a swap when isLockedFn says the candidate's game hasn't started", () => {
+    const result = computeSuggestedLineup({
+      rosterPositions: ["QB", "RB"],
+      starters: ["qb1", "rb1"],
+      playerIds: ["qb1", "rb1", "rb2"],
+      players,
+      scoreFn,
+      hasKickoffData: false,
+      isLockedFn: () => false,
+    });
+    expect(result.swaps).toHaveLength(1);
+    expect(result.swaps[0].suggested.player_id).toBe("rb2");
+  });
+
   it("keeps an already-started player in place when they're already the starter", () => {
     const now = 2_000;
     const kickoffAt: Record<string, number> = { rb1: 1_000 }; // already started, but already starting

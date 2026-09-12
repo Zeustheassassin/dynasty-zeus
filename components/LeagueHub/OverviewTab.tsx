@@ -30,7 +30,7 @@ interface OverviewTabProps {
   leagueOverviewData: Record<string, LeagueOverviewEntry>;
   loadingLeagueOverview: boolean;
   leagueOverviewLoaded: boolean;
-  leagueLineupStatus: Record<string, { isOptimal: boolean; swapCount: number } | null>;
+  leagueLineupStatus: Record<string, { isOptimal: boolean; swapCount: number; delta: number } | null>;
   committedSimsByLeague: CommittedSimsByLeague;
   leagueSimCache: Record<string, Record<number, CachedSimRow>>;
   simQueue: string[];
@@ -276,14 +276,23 @@ function OverviewTab({
                   {(() => {
                     const lineupStatus = leagueLineupStatus[row.league.league_id];
                     if (!lineupStatus) return null;
+                    // Traffic-light by how much is actually on the table, not just
+                    // whether a swap exists — a 0.2-point FLEX tweak isn't worth the
+                    // same attention as a 3+ point miss. Green: optimal (or a
+                    // negligible sub-0.01 rounding delta). Yellow: 0.01–3. Red: > 3.
+                    const dotColor = lineupStatus.delta > 3
+                      ? "bg-red-500"
+                      : lineupStatus.delta >= 0.01
+                      ? "bg-yellow-500"
+                      : "bg-emerald-500";
                     return (
                       <span
                         title={
                           lineupStatus.isOptimal
                             ? "Lineup already optimized for this week"
-                            : `${lineupStatus.swapCount} lineup swap${lineupStatus.swapCount === 1 ? "" : "s"} recommended`
+                            : `${lineupStatus.swapCount} lineup swap${lineupStatus.swapCount === 1 ? "" : "s"} recommended (+${lineupStatus.delta.toFixed(1)} pts)`
                         }
-                        className={`w-2 h-2 rounded-full shrink-0 ${lineupStatus.isOptimal ? "bg-emerald-500" : "bg-red-500"}`}
+                        className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`}
                       />
                     );
                   })()}

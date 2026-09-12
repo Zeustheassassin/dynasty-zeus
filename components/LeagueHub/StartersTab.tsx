@@ -7,20 +7,26 @@ import {
   getOpponentProjectedScore,
   getLineupRange,
   getMatchupLean,
+  resolveGameState,
 } from "../../lib/helpers";
 import { usePlayers } from "../../lib/PlayersContext";
 import { useLeague } from "../../lib/LeagueContext";
 import { useValues } from "../../lib/ValuesContext";
 import { useMyRoster } from "../../lib/RosterContext";
 import { sleeperApi } from "../../lib/sleeperApi";
-import type { ProjectionRow, SleeperNFLState, SleeperPlayer, SleeperMatchup } from "../../lib/types";
+import type { ProjectionRow, SleeperNFLState, SleeperPlayer, SleeperMatchup, TeamGameState } from "../../lib/types";
 
 interface StartersTabProps {
   projectionData: ProjectionRow[];
   nflState: SleeperNFLState | null;
+  /** Real per-team NFL game state (see useNflSchedule), keyed by team
+   *  abbreviation — used to lock the Lineup Coach's swap-in candidates once
+   *  their game has actually started, since projection sources don't
+   *  reliably populate per-player kickoff timestamps. */
+  scheduleByTeam: Record<string, TeamGameState>;
 }
 
-function StartersTab({ projectionData, nflState }: StartersTabProps) {
+function StartersTab({ projectionData, nflState, scheduleByTeam }: StartersTabProps) {
   const players = usePlayers();
   const { selectedLeague, users } = useLeague();
   const { myRoster: roster } = useMyRoster();
@@ -92,6 +98,17 @@ function StartersTab({ projectionData, nflState }: StartersTabProps) {
     return proj ? getProjectionKickoffAt(proj) : null;
   };
 
+  // Real game-state check (Live/Final vs Upcoming) for the Lineup Coach's
+  // lock-out rule — mirrors Gameday Hub's resolveGameState, falling back to
+  // the same kickoff-timestamp heuristic only when a team is missing from
+  // scheduleByTeam (bye week, or the ESPN scoreboard fetch hasn't loaded).
+  const playerIsLocked = (id: string) => {
+    if (!isInSeason) return false;
+    const player = players[id];
+    const fallbackKickoffAt = playerKickoffAt(id);
+    return resolveGameState(player?.team, scheduleByTeam, fallbackKickoffAt).state !== "Upcoming";
+  };
+
   // Only meaningful in-season, where projectionData carries each active
   // source's own fpts — offseason redraft values have no per-source spread.
   const playerVolatility = (id: string) => {
@@ -123,6 +140,7 @@ function StartersTab({ projectionData, nflState }: StartersTabProps) {
     rankScoreFn: playerRankScore,
     kickoffFn: playerKickoffAt,
     hasKickoffData: isInSeason && hasKickoffData,
+    isLockedFn: playerIsLocked,
   });
   const lineupDelta = suggestedLineupScore - currentLineupScore;
 
