@@ -36,12 +36,26 @@ export const getLineupSlotEligiblePositions = (slot: string) => {
   return [slot];
 };
 
+/** True when a player is tagged Out, IR, or Doubtful — the coach should not
+ *  recommend starting them even if a stale projection still ranks them
+ *  highly. Deliberately narrower than the injury badges elsewhere in the app
+ *  (Questionable/PUP/Suspended players are still recommendable). */
+export const isInjuryExcludedFromLineup = (player: SleeperPlayer | null | undefined): boolean => {
+  if (!player) return false;
+  const s = `${player.injury_status || player.status || ""}`.toLowerCase();
+  return /\bout\b|\bir\b|doubtful/.test(s);
+};
+
 /** Reorders a lineup so that players with earlier kickoffs move into
  *  locked positional slots from FLEX / SUPER_FLEX where eligible.
  *  No-ops when kickoff data is unavailable. */
 export const rebalanceLineupForKickoffWindows = (
   lineup: LineupCoachRow[],
-  hasKickoffData: boolean
+  hasKickoffData: boolean,
+  /** Player ids whose game has already started — computeSuggestedLineup has
+   *  already pinned these to their exact current slot, so this pass must
+   *  never move them (as either the displaced player or the mover). */
+  gameStartedPlayerIds: Set<string> = new Set()
 ) => {
   if (!hasKickoffData) return lineup;
 
@@ -55,7 +69,12 @@ export const rebalanceLineupForKickoffWindows = (
   ) => {
     const lockedIndexes = nextLineup
       .map((row, index) => ({ row, index }))
-      .filter(({ row }) => row.slot === lockedSlot && row.player?.player_id);
+      .filter(
+        ({ row }) =>
+          row.slot === lockedSlot &&
+          row.player?.player_id &&
+          !gameStartedPlayerIds.has(row.player.player_id)
+      );
 
     lockedIndexes.forEach(({ row: lockedRow, index: lockedIndex }) => {
       // Recomputed fresh on every locked slot, not hoisted above the loop:
@@ -65,7 +84,12 @@ export const rebalanceLineupForKickoffWindows = (
       // on to the next-best one.
       const flexIndexes = nextLineup
         .map((row, index) => ({ row, index }))
-        .filter(({ row }) => row.slot === flexSlot && row.player?.player_id);
+        .filter(
+          ({ row }) =>
+            row.slot === flexSlot &&
+            row.player?.player_id &&
+            !gameStartedPlayerIds.has(row.player.player_id)
+        );
 
       const swapCandidate = flexIndexes
         .filter(({ row }) => row.player?.position === lockedSlot)
@@ -167,38 +191,77 @@ export function computeSuggestedLineup(
     currentStarterRows.map((r) => r.player?.player_id).filter((id): id is string => !!id)
   );
 
-  // Sleeper locks a player's roster slot at their own kickoff — once their
-  // game has started, they can stay wherever they already are but can't be
-  // newly added to the lineup. A bench player whose game is already Live or
-  // Final is therefore never a legal swap-in, so exclude them from the fill
-  // pool entirely (already-starting players are exempt since keeping them
-  // put isn't a move). Prefers the caller's real-schedule-backed isLockedFn;
-  // falls back to the kickoff-timestamp heuristic (only reliable when
-  // hasKickoffData is true) when no isLockedFn was supplied.
-  const isLockedOut = (id: string) => {
-    if (currentStarterIds.has(id)) return false;
+  // Whether a player's own NFL game has already started (Live or Final) —
+  // shared by the "can't be newly added" bench check below AND the "can't be
+  // moved at all" starter check. Prefers the caller's real-schedule-backed
+  // isLockedFn; falls back to the kickoff-timestamp heuristic (only reliable
+  // when hasKickoffData is true) when no isLockedFn was supplied.
+  const hasGameStarted = (id: string) => {
     if (input.isLockedFn) return input.isLockedFn(id);
     if (!hasKickoffData) return false;
     const kickoffAt = kickoffFn(id);
     return kickoffAt != null && now >= kickoffAt;
   };
 
-  for (const slot of rosterPositions) {
+  // Sleeper locks a player's roster slot at their own kickoff — once their
+  // game has started, they can stay wherever they already are but can't be
+  // newly added to the lineup. A bench player whose game is already Live or
+  // Final is therefore never a legal swap-in, so exclude them from the fill
+  // pool entirely (already-starting players are exempt since keeping them
+  // put isn't a move).
+  const isLockedOut = (id: string) => !currentStarterIds.has(id) && hasGameStarted(id);
+
+  // A currently-starting player whose own game has already started is locked
+  // to their EXACT current slot for the rest of the week — Sleeper doesn't
+  // allow moving anyone out of, into, or within the lineup once their game is
+  // live, and the real-world result can't be undone. Pre-assign these by
+  // roster-position index before the greedy fill runs, so nothing below (not
+  // even a rankScoreFn/injury-driven pick) can bump them to the bench or
+  // shuffle their slot.
+  const lockedSlotIndexes = new Map<number, SleeperPlayer>();
+  currentStarterRows.forEach((row, index) => {
+    if (row.player?.player_id && hasGameStarted(row.player.player_id)) {
+      lockedSlotIndexes.set(index, row.player);
+    }
+  });
+  const gameStartedStarterIds = new Set(
+    Array.from(lockedSlotIndexes.values()).map((p) => p.player_id)
+  );
+
+  rosterPositions.forEach((slot, index) => {
+    const lockedPlayer = lockedSlotIndexes.get(index);
+    if (lockedPlayer) {
+      used.add(lockedPlayer.player_id);
+      initialLineup.push({
+        slot,
+        player: lockedPlayer,
+        score: scoreFn(lockedPlayer.player_id),
+        kickoffAt: kickoffFn(lockedPlayer.player_id),
+      });
+      return;
+    }
+
     const eligible = getLineupSlotEligiblePositions(slot);
-    const best = myPlayerIds
-      .filter((id) => !used.has(id) && !isLockedOut(id))
-      .map((id) => ({ id, p: players[id] }))
-      .filter(({ p }) => p && eligible.includes(p.position))
-      .sort((a, b) => rankScoreFn(b.id) - rankScoreFn(a.id))[0];
+    const candidates = (allowInjured: boolean) =>
+      myPlayerIds
+        .filter((id) => !used.has(id) && !isLockedOut(id))
+        .map((id) => ({ id, p: players[id] }))
+        .filter(({ p }) => p && eligible.includes(p.position))
+        .filter(({ p }) => allowInjured || !isInjuryExcludedFromLineup(p))
+        .sort((a, b) => rankScoreFn(b.id) - rankScoreFn(a.id));
+    // Don't recommend an Out/IR/Doubtful player over a healthy one even if a
+    // stale projection still ranks them higher — but rather than leave a
+    // slot empty, fall back to them when no healthy eligible player exists.
+    const best = candidates(false)[0] ?? candidates(true)[0];
     if (best) {
       used.add(best.id);
       initialLineup.push({ slot, player: best.p, score: scoreFn(best.id), kickoffAt: kickoffFn(best.id) });
     } else {
       initialLineup.push({ slot, player: null, score: 0, kickoffAt: null });
     }
-  }
+  });
 
-  const lineup = rebalanceLineupForKickoffWindows(initialLineup, hasKickoffData);
+  const lineup = rebalanceLineupForKickoffWindows(initialLineup, hasKickoffData, gameStartedStarterIds);
 
   const newStarterIds = new Set(
     lineup.map((r) => r.player?.player_id).filter((id): id is string => !!id)

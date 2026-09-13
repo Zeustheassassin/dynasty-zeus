@@ -389,4 +389,119 @@ describe("computeSuggestedLineup", () => {
     expect(result.lineup.find((r) => r.slot === "RB")?.player?.player_id).toBe("rb1");
     expect(result.swaps).toHaveLength(0);
   });
+
+  // A starter whose own game has already started can't be benched even if a
+  // bench player now projects higher — Sleeper doesn't allow moving anyone
+  // out of a slot once their game is live, and the real-world result of
+  // rb1's game can't be undone by a better rb2 projection.
+  it("never benches a starter whose game has already started, even for a higher-scoring bench player", () => {
+    const now = 2_000;
+    const kickoffAt: Record<string, number> = { rb1: 1_000 }; // starter already played
+    const result = computeSuggestedLineup(
+      {
+        rosterPositions: ["QB", "RB"],
+        starters: ["qb1", "rb1"],
+        playerIds: ["qb1", "rb1", "rb2"],
+        players,
+        scoreFn, // rb2 (15) outscores rb1 (10)
+        kickoffFn: (id) => kickoffAt[id] ?? null,
+        hasKickoffData: true,
+      },
+      now
+    );
+    expect(result.lineup.find((r) => r.slot === "RB")?.player?.player_id).toBe("rb1");
+    expect(result.swaps).toHaveLength(0);
+  });
+
+  it("locks a starter to their exact current slot via isLockedFn, not just 'still a starter somewhere'", () => {
+    // rb1 is locked in the RB slot; rb2 (bench, unlocked, higher score) must
+    // not bump rb1 to FLEX or anywhere else — rb1 stays at RB, rb2 fills FLEX.
+    const result = computeSuggestedLineup({
+      rosterPositions: ["RB", "FLEX"],
+      starters: ["rb1", ""],
+      playerIds: ["rb1", "rb2"],
+      players,
+      scoreFn,
+      hasKickoffData: false,
+      isLockedFn: (id) => id === "rb1",
+    });
+    expect(result.lineup.find((r) => r.slot === "RB")?.player?.player_id).toBe("rb1");
+    expect(result.lineup.find((r) => r.slot === "FLEX")?.player?.player_id).toBe("rb2");
+  });
+
+  // Injury tags: Out / IR / Doubtful should never be recommended over a
+  // healthy eligible player, even when a stale projection still ranks them
+  // higher — the coach should suggest swapping them out.
+  it("does not recommend a bench player tagged Out over a healthy lower-scoring starter", () => {
+    const injuredPlayers: Record<string, SleeperPlayer> = {
+      ...players,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      rb2: { ...players.rb2, injury_status: "Out" } as any,
+    };
+    const result = computeSuggestedLineup({
+      rosterPositions: ["QB", "RB"],
+      starters: ["qb1", "rb1"],
+      playerIds: ["qb1", "rb1", "rb2"],
+      players: injuredPlayers,
+      scoreFn, // rb2 (15) would normally outscore rb1 (10)
+      hasKickoffData: false,
+    });
+    expect(result.lineup.find((r) => r.slot === "RB")?.player?.player_id).toBe("rb1");
+    expect(result.swaps).toHaveLength(0);
+  });
+
+  it.each(["IR", "Doubtful"])(
+    "does not recommend a bench player tagged %s over a healthy lower-scoring starter",
+    (tag) => {
+      const injuredPlayers: Record<string, SleeperPlayer> = {
+        ...players,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        rb2: { ...players.rb2, injury_status: tag } as any,
+      };
+      const result = computeSuggestedLineup({
+        rosterPositions: ["QB", "RB"],
+        starters: ["qb1", "rb1"],
+        playerIds: ["qb1", "rb1", "rb2"],
+        players: injuredPlayers,
+        scoreFn,
+        hasKickoffData: false,
+      });
+      expect(result.lineup.find((r) => r.slot === "RB")?.player?.player_id).toBe("rb1");
+    }
+  );
+
+  it("still recommends a Questionable player (not gated) over a lower-scoring alternative", () => {
+    const questionablePlayers: Record<string, SleeperPlayer> = {
+      ...players,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      rb2: { ...players.rb2, injury_status: "Questionable" } as any,
+    };
+    const result = computeSuggestedLineup({
+      rosterPositions: ["QB", "RB"],
+      starters: ["qb1", "rb1"],
+      playerIds: ["qb1", "rb1", "rb2"],
+      players: questionablePlayers,
+      scoreFn,
+      hasKickoffData: false,
+    });
+    expect(result.lineup.find((r) => r.slot === "RB")?.player?.player_id).toBe("rb2");
+    expect(result.swaps).toHaveLength(1);
+  });
+
+  it("falls back to an injury-tagged player rather than leaving a slot empty when no healthy alternative exists", () => {
+    const injuredPlayers: Record<string, SleeperPlayer> = {
+      ...players,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      rb1: { ...players.rb1, injury_status: "Out" } as any,
+    };
+    const result = computeSuggestedLineup({
+      rosterPositions: ["RB"],
+      starters: ["rb1"],
+      playerIds: ["rb1"], // rb1 is the only RB-eligible player on the roster
+      players: injuredPlayers,
+      scoreFn,
+      hasKickoffData: false,
+    });
+    expect(result.lineup.find((r) => r.slot === "RB")?.player?.player_id).toBe("rb1");
+  });
 });
