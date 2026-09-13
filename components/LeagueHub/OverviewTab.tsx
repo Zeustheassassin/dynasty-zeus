@@ -42,6 +42,13 @@ interface OverviewTabProps {
   handleRunAllSims: () => void;
 }
 
+// Cooldown on the manual force-refresh — it bypasses every cache layer, so
+// without this a few impatient clicks would hammer Sleeper for every league
+// at once. Matches the background poll's ~5m staleness bound (see
+// useAppState's loadLeagueOverview interval), so a click that's refused here
+// isn't leaving the dots any staler than they'd already be getting refreshed to.
+const REFRESH_COOLDOWN_MS = 5 * 60 * 1000;
+
 function OverviewTab({
   leagues,
   user,
@@ -70,8 +77,20 @@ function OverviewTab({
   const [refreshingRosters, setRefreshingRosters] = React.useState(false);
   const [rosterRefreshProgress, setRosterRefreshProgress] = React.useState<{ done: number; total: number } | null>(null);
   const [mountedAt] = React.useState(() => Date.now());
+  const [lastRefreshedAt, setLastRefreshedAt] = React.useState<number | null>(null);
+  const [nowTick, setNowTick] = React.useState(() => Date.now());
+  React.useEffect(() => {
+    if (lastRefreshedAt === null) return;
+    const id = setInterval(() => setNowTick(Date.now()), 15000);
+    return () => clearInterval(id);
+  }, [lastRefreshedAt]);
+  const cooldownRemainingMs = lastRefreshedAt !== null
+    ? Math.max(0, REFRESH_COOLDOWN_MS - (nowTick - lastRefreshedAt))
+    : 0;
+  const onCooldown = cooldownRemainingMs > 0;
 
   const handleRefreshAllRosters = React.useCallback(async () => {
+    if (lastRefreshedAt !== null && Date.now() - lastRefreshedAt < REFRESH_COOLDOWN_MS) return;
     setRefreshingRosters(true);
     const total = leagues.length;
     setRosterRefreshProgress({ done: 0, total });
@@ -105,9 +124,10 @@ function OverviewTab({
     await loadLeagueOverview();
     if (selectedLeague) await loadRoster(selectedLeague);
     setRefreshingRosters(false);
+    setLastRefreshedAt(Date.now());
     const t = setTimeout(() => setRosterRefreshProgress(null), 3000);
     return () => clearTimeout(t);
-  }, [leagues, selectedLeague, loadRoster, loadLeagueOverview]);
+  }, [leagues, selectedLeague, loadRoster, loadLeagueOverview, lastRefreshedAt]);
 
   const leagueRows = React.useMemo(() => {
     const bucketOrder: Record<string, number> = {
@@ -209,14 +229,18 @@ function OverviewTab({
         </button>
         <button
           onClick={handleRefreshAllRosters}
-          disabled={refreshingRosters}
-          title="Clear roster cache and re-fetch all leagues from Sleeper"
+          disabled={refreshingRosters || onCooldown}
+          title={
+            onCooldown
+              ? `Refresh is limited to once every 5 minutes (Sleeper rosters already auto-refresh on that cadence) — available again in ${Math.ceil(cooldownRemainingMs / 60000)}m`
+              : "Clear roster cache and re-fetch all leagues from Sleeper"
+          }
           className="flex items-center gap-1 text-[11px] font-semibold px-3 py-1 rounded-full border border-slate-600 text-slate-400 hover:border-slate-400 hover:text-slate-200 transition disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
         >
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className={`w-3 h-3 ${refreshingRosters ? "animate-spin" : ""}`}>
             <path fillRule="evenodd" d="M13.836 2.477a.75.75 0 0 1 .75.75v3.182a.75.75 0 0 1-.75.75h-3.182a.75.75 0 0 1 0-1.5h1.37l-.84-.841a4.5 4.5 0 0 0-7.08 1.196.75.75 0 1 1-1.31-.734 6 6 0 0 1 9.44-1.595l.842.841V3.227a.75.75 0 0 1 .75-.75Zm-.911 7.5A.75.75 0 0 1 13.199 11a6 6 0 0 1-9.44 1.595l-.842-.841v1.017a.75.75 0 0 1-1.5 0V9.591a.75.75 0 0 1 .75-.75H5.35a.75.75 0 0 1 0 1.5H3.98l.84.841a4.5 4.5 0 0 0 7.08-1.196.75.75 0 0 1 1.025-.009Z" clipRule="evenodd" />
           </svg>
-          {refreshingRosters ? "Refreshing…" : "Refresh Rosters"}
+          {refreshingRosters ? "Refreshing…" : onCooldown ? `Refresh again in ${Math.ceil(cooldownRemainingMs / 60000)}m` : "Refresh Rosters"}
         </button>
         {simProgress && (
           <div className="flex-1 flex items-center gap-2 min-w-0">
@@ -279,10 +303,12 @@ function OverviewTab({
                     // Traffic-light by how much is actually on the table, not just
                     // whether a swap exists — a 0.2-point FLEX tweak isn't worth the
                     // same attention as a 3+ point miss. Green: optimal (or a
-                    // negligible sub-0.01 rounding delta). Yellow: 0.01–3. Red: > 3.
+                    // sub-0.5 delta — floating-point recompute noise between two
+                    // closely-projected players was flipping the dot yellow for
+                    // leagues that were actually fine). Yellow: 0.5–3. Red: > 3.
                     const dotColor = lineupStatus.delta > 3
                       ? "bg-red-500"
-                      : lineupStatus.delta >= 0.01
+                      : lineupStatus.delta >= 0.5
                       ? "bg-yellow-500"
                       : "bg-emerald-500";
                     return (

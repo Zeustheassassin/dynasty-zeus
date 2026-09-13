@@ -183,7 +183,7 @@ const {
   selectedGamedayMatchupId, setSelectedGamedayMatchupId,
   loadGamedayMatchups,
 } = useGamedayState();
-const { scheduleByTeam, loadSchedule } = useNflSchedule();
+const { scheduleByTeam, loadingSchedule, loadSchedule } = useNflSchedule();
 const { gamedayDashboardEntries, loadingGamedayDashboard, gamedayDashboardWeek, loadGamedayDashboard } = useGamedayDashboard();
 const {
   calcFcValues,
@@ -785,6 +785,23 @@ useEffect(() => {
   }
   // leagueOverviewLoaded guards against duplicate calls; leagues.length triggers when leagues first load
 }, [mainTab, leagueHubTab, leagueOverviewLoaded, leagues.length, loadLeagueOverview, loadNflState, loadRedraftValues]);
+
+// Keep leagueOverviewData (and the Overview status dots derived from it) from
+// sitting stale for the whole session once it's first loaded. loadLeagueOverview
+// re-fetches every league through sleeperApi, which already caches rosters for
+// 5m client-side (TTL.leagueRosters) — polling every 2m just means the next poll
+// after that 5m mark picks up a real refetch, bounding staleness to a few
+// minutes without hammering Sleeper on every tick. Manual "Refresh Rosters" on
+// the Overview tab still exists for an immediate force-refresh.
+useEffect(() => {
+  const showsLeagueOverviewData =
+    (mainTab === "LEAGUES" && leagueHubTab === "OVERVIEW") ||
+    mainTab === "ALERTS" ||
+    mainTab === "DASHBOARD";
+  if (!showsLeagueOverviewData || !leagueOverviewLoaded) return;
+  const interval = setInterval(() => loadLeagueOverview(), 2 * 60 * 1000);
+  return () => clearInterval(interval);
+}, [mainTab, leagueHubTab, leagueOverviewLoaded, loadLeagueOverview]);
 
 useEffect(() => {
   if (mainTab === "LEAGUES" && leagueHubTab === "STARTERS") {
@@ -1715,11 +1732,26 @@ const saveSnapshotNow = async () => {
   // Starters view open for them to match. In-season only; null everywhere
   // else (offseason, or before leagueOverviewData/projectionData have
   // loaded) so the dot stays hidden rather than reading as a false "needs
-  // changes".
+  // changes". This also guards against a cold-boot flash of wrong dots:
+  // leagueOverviewLoaded/projectionLoaded only flip true once their fetch for
+  // the CURRENT week has actually resolved (not just "some data, possibly
+  // from the wrong week/a placeholder, happens to be sitting in state"), and
+  // an empty scheduleByTeam mid-fetch would make isLockedFn's resolveGameState
+  // fallback default every player to "Upcoming" — i.e. treat already-started
+  // games as swappable — so that's gated too rather than computed against a
+  // half-loaded schedule.
   const leagueLineupStatus = useMemo(() => {
     const isInSeason = nflState?.season_type === "regular";
     const status: Record<string, { isOptimal: boolean; swapCount: number; delta: number } | null> = {};
-    if (!isInSeason || !user?.user_id || projectionData.length === 0) return status;
+    if (
+      !isInSeason ||
+      !user?.user_id ||
+      !leagueOverviewLoaded ||
+      !projectionLoaded ||
+      projectionData.length === 0 ||
+      loadingSchedule ||
+      Object.keys(scheduleByTeam).length === 0
+    ) return status;
 
     const projectionBySleeperId = new Map(projectionData.map((row) => [String(row.sleeperId), row]));
     // Same hasKickoffData/kickoffFn StartersTab.tsx computes — not league-
@@ -1775,7 +1807,7 @@ const saveSnapshotNow = async () => {
     });
 
     return status;
-  }, [leagueOverviewData, projectionData, players, scheduleByTeam, roster, nflState?.season_type, user?.user_id, selectedLeague?.league_id]);
+  }, [leagueOverviewData, leagueOverviewLoaded, projectionData, projectionLoaded, players, scheduleByTeam, loadingSchedule, roster, nflState?.season_type, user?.user_id, selectedLeague?.league_id]);
 
   const selectedLeagueMateProfiles = useMemo((): LeagueMateView[] => {
     if (!selectedLeague || !rosters.length || !user?.user_id) return [];
