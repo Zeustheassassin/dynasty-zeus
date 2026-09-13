@@ -429,6 +429,33 @@ describe("computeSuggestedLineup", () => {
     expect(result.lineup.find((r) => r.slot === "FLEX")?.player?.player_id).toBe("rb2");
   });
 
+  // A locked player is only added to `used` when the fill loop reaches their
+  // OWN pinned slot index — if an EARLIER slot in rosterPositions order is
+  // also eligible for them, nothing stopped them from being picked there
+  // too (isLockedOut deliberately exempts already-starting players), so
+  // they could end up in two lineup rows at once and inflate
+  // suggestedLineupScore without ever registering as a swap (they're
+  // already a current starter either way).
+  it("does not double-place a locked starter into an earlier-processed slot before their own pinned slot is reached", () => {
+    // rb2 (score 15) is locked at RB (index 1). FLEX (index 0) is processed
+    // first and, unfixed, would greedily pick rb2 over rb1 (score 10) since
+    // nothing yet excludes him — leaving rb2 in both FLEX and RB, and rb1
+    // benched despite being the only other eligible player.
+    const result = computeSuggestedLineup({
+      rosterPositions: ["FLEX", "RB"],
+      starters: ["", "rb2"],
+      playerIds: ["rb1", "rb2"],
+      players,
+      scoreFn,
+      hasKickoffData: false,
+      isLockedFn: (id) => id === "rb2",
+    });
+    expect(result.lineup.find((r) => r.slot === "RB")?.player?.player_id).toBe("rb2");
+    expect(result.lineup.find((r) => r.slot === "FLEX")?.player?.player_id).toBe("rb1");
+    const rb2Count = result.lineup.filter((r) => r.player?.player_id === "rb2").length;
+    expect(rb2Count).toBe(1);
+  });
+
   // Injury tags: Out / IR / Doubtful should never be recommended over a
   // healthy eligible player, even when a stale projection still ranks them
   // higher — the coach should suggest swapping them out.

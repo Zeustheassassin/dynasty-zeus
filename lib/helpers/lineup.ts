@@ -227,6 +227,17 @@ export function computeSuggestedLineup(
   const gameStartedStarterIds = new Set(
     Array.from(lockedSlotIndexes.values()).map((p) => p.player_id)
   );
+  // Seed `used` with every locked player BEFORE the fill loop runs. Without
+  // this, a locked player is only added to `used` once the loop reaches
+  // their own pinned index — but isLockedOut() deliberately exempts
+  // already-starting players (so pinning them doesn't fight itself), which
+  // meant an EARLIER slot in iteration order could still pick that same
+  // player as a fresh candidate (nothing was blocking it yet), and then the
+  // loop would ALSO pin them into their real slot when it got there —
+  // placing one player into two lineup rows and inflating the suggested
+  // score without ever registering as a "swap" (they're already a current
+  // starter either way, so the diff against currentStarterIds stays quiet).
+  gameStartedStarterIds.forEach((id) => used.add(id));
 
   rosterPositions.forEach((slot, index) => {
     const lockedPlayer = lockedSlotIndexes.get(index);
