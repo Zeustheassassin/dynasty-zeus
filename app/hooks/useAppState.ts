@@ -1695,28 +1695,54 @@ const saveSnapshotNow = async () => {
 
   // Per-league "is this week's lineup already optimal" status for the League
   // Overview status dot. Reuses the exact same greedy fill (computeSuggestedLineup)
-  // the Starters tab runs — never a separate calculation — against every
-  // league's own roster/scoring, using whatever projection sources are
-  // currently enabled. In-season only; null everywhere else (offseason, or
-  // before leagueOverviewData/projectionData have loaded) so the dot stays
-  // hidden rather than reading as a false "needs changes".
+  // the Starters tab runs — never a separate calculation. Scoring ALWAYS goes
+  // through recomputeConsensusFpts against that league's OWN scoring_settings,
+  // unconditionally, for every league — the same "always score against the
+  // league you're pointed at, never the globally selected one" rule
+  // buildGamedayMatchups (lib/helpers/gameday.ts) already follows for the
+  // Gameday Dashboard. There is deliberately no special case for whichever
+  // league happens to also be selected: `row.fpts` is a fetch-time artifact
+  // of whatever league was selected when projectionData was fetched, not a
+  // property of the league being scored here, so trusting it even some of
+  // the time reopens the exact cross-league scoring leak fixed for Gameday.
+  // For the currently SELECTED league specifically, this also reuses the
+  // exact same roster source (`roster`, RosterContext's up-to-date fetch)
+  // the Starters tab itself reads — not the Overview page's own
+  // separately-fetched `leagueOverviewData` snapshot — so the dot can't see
+  // a different roster than Suggested Starters shows for the league the
+  // user is looking at. Other (non-selected) leagues fall back to
+  // leagueOverviewData's roster snapshot, since there's no live Suggested
+  // Starters view open for them to match. In-season only; null everywhere
+  // else (offseason, or before leagueOverviewData/projectionData have
+  // loaded) so the dot stays hidden rather than reading as a false "needs
+  // changes".
   const leagueLineupStatus = useMemo(() => {
     const isInSeason = nflState?.season_type === "regular";
     const status: Record<string, { isOptimal: boolean; swapCount: number; delta: number } | null> = {};
     if (!isInSeason || !user?.user_id || projectionData.length === 0) return status;
 
     const projectionBySleeperId = new Map(projectionData.map((row) => [String(row.sleeperId), row]));
+    // Same hasKickoffData/kickoffFn StartersTab.tsx computes — not league-
+    // specific (it's just "did any projection source return a kickoff
+    // timestamp"), so it applies identically to every league below.
+    const hasKickoffData = projectionData.some((row) => getProjectionKickoffAt(row));
+    const kickoffFn = (id: string) => {
+      const row = projectionBySleeperId.get(String(id));
+      return row ? getProjectionKickoffAt(row) : null;
+    };
 
     Object.values(leagueOverviewData).forEach(({ league, rosters: leagueRosters }) => {
-      const myRoster = leagueRosters.find((r) => r.owner_id === user.user_id);
+      const isSelectedLeague = league.league_id === selectedLeague?.league_id;
+      const myRoster = isSelectedLeague && roster
+        ? roster
+        : leagueRosters.find((r) => r.owner_id === user.user_id);
       if (!myRoster) { status[league.league_id] = null; return; }
 
       const scoringSettings = league.scoring_settings;
-      const isSelectedLeague = league.league_id === selectedLeague?.league_id;
       const scoreFn = (id: string) => {
         const row = projectionBySleeperId.get(String(id));
         if (!row) return 0;
-        return isSelectedLeague ? row.fpts : recomputeConsensusFpts(row, scoringSettings);
+        return recomputeConsensusFpts(row, scoringSettings);
       };
       const rosterPositions = league.roster_positions?.filter((p) => !["BN", "IR", "TAXI"].includes(p)) ?? [];
       const taxiSet = new Set((myRoster.taxi ?? []).map((id) => String(id)));
@@ -1737,7 +1763,8 @@ const saveSnapshotNow = async () => {
         playerIds: eligiblePlayerIds,
         players,
         scoreFn,
-        hasKickoffData: false,
+        kickoffFn,
+        hasKickoffData,
         isLockedFn,
       });
       status[league.league_id] = {
@@ -1748,7 +1775,7 @@ const saveSnapshotNow = async () => {
     });
 
     return status;
-  }, [leagueOverviewData, projectionData, players, scheduleByTeam, nflState?.season_type, user?.user_id, selectedLeague?.league_id]);
+  }, [leagueOverviewData, projectionData, players, scheduleByTeam, roster, nflState?.season_type, user?.user_id, selectedLeague?.league_id]);
 
   const selectedLeagueMateProfiles = useMemo((): LeagueMateView[] => {
     if (!selectedLeague || !rosters.length || !user?.user_id) return [];
