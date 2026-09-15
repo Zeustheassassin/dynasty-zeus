@@ -79,6 +79,30 @@ export default function TeamSummaryGrid({ entries, loading, onSelectLeague, leag
     return map;
   }, [myRosterIdByLeague, committedSimsByLeague, leagueSimCache]);
 
+  // The card's own displayed "X% playoff / Y% title odds" line used to read
+  // straight from the weekly league_simulation_history cron snapshot — a
+  // different simulation run (its own random seed, its own day) than the
+  // one the user actually triggers via "Run All Sims", so the two numbers
+  // could legitimately disagree and did, confusingly. Same precedence fix
+  // as playoffOddsByLeague above: prefer the live commit, then the Supabase
+  // sim cache (both written together by saveSimulationToSupabase, so their
+  // playoff/title odds always come from the same run), and only fall back
+  // to the cron snapshot for a league the user has never run a sim for.
+  const latestSimByLeague = useMemo(() => {
+    const map: Record<string, { playoffOdds: number; titleOdds: number }> = {};
+    Object.entries(myRosterIdByLeague).forEach(([leagueId, rosterId]) => {
+      const committedRow = committedSimsByLeague[leagueId]?.[rosterId];
+      const cachedSimRow = leagueSimCache[leagueId]?.[rosterId];
+      if (committedRow || cachedSimRow) {
+        map[leagueId] = {
+          playoffOdds: committedRow?.playoffOdds ?? cachedSimRow?.playoff_odds ?? 0,
+          titleOdds: cachedSimRow?.title_odds ?? 0,
+        };
+      }
+    });
+    return map;
+  }, [myRosterIdByLeague, committedSimsByLeague, leagueSimCache]);
+
   const directions = useMemo(
     () => getCrossLeagueDirections({
       leagueOverviewData, myRosterIdByLeague, players, pickFcValues,
@@ -132,7 +156,8 @@ export default function TeamSummaryGrid({ entries, loading, onSelectLeague, leag
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {entries.map((entry, idx) => {
           const history = entry.leagueId ? historyByLeague[entry.leagueId] : undefined;
-          const latest = history && history.length > 0 ? history[history.length - 1] : null;
+          const cronLatest = history && history.length > 0 ? history[history.length - 1] : null;
+          const latest = (entry.leagueId ? latestSimByLeague[entry.leagueId] : undefined) ?? cronLatest;
           const settings = entry.roster?.settings;
           const direction = entry.leagueId ? directions[entry.leagueId] : undefined;
           const mgmtRow = entry.leagueId ? leagueMgmtData[entry.leagueId] : undefined;
@@ -161,7 +186,7 @@ export default function TeamSummaryGrid({ entries, loading, onSelectLeague, leag
                 )}
               </div>
               <div className="mt-2 flex items-center justify-between gap-2">
-                <span className="text-[11px] text-slate-500">
+                <span className="text-xs text-slate-300">
                   {latest
                     ? `${latest.playoffOdds.toFixed(0)}% playoff · ${latest.titleOdds.toFixed(0)}% title odds`
                     : "No simulator history yet"}
