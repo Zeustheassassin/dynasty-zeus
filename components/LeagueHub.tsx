@@ -72,6 +72,7 @@ interface LeagueHubProps {
   loadingLeagueOverview: boolean;
   leagueOverviewLoaded: boolean;
   leagueOverviewError: string | null;
+  leagueOverviewUpdatedAt: number | null;
   leagueLineupStatus: Record<string, { isOptimal: boolean; swapCount: number; delta: number } | null>;
 
   // Computed
@@ -119,6 +120,7 @@ function LeagueHub({
   loadingActivity, loadingLeagueWeeklyMatchups,
   leagueNotes, activityTransactions,
   leagueOverviewData, loadingLeagueOverview, leagueOverviewLoaded, leagueOverviewError,
+  leagueOverviewUpdatedAt,
   leagueLineupStatus,
   selectedLeagueMateProfilesView,
   ignoredOwnerIds, toggleIgnoredOwner,
@@ -238,6 +240,7 @@ function LeagueHub({
             leagueOverviewData={leagueOverviewData}
             loadingLeagueOverview={loadingLeagueOverview}
             leagueOverviewLoaded={leagueOverviewLoaded}
+            leagueOverviewUpdatedAt={leagueOverviewUpdatedAt}
             loadLeagueOverview={loadLeagueOverview}
             loadRoster={loadRoster}
             setLeagueHubTab={setLeagueHubTab}

@@ -254,6 +254,7 @@ const [standings, setStandings] = useState<StandingRow[]>([]);
     loadingLeagueOverview,
     leagueOverviewLoaded,
     leagueOverviewError,
+    leagueOverviewUpdatedAt,
     loadLeagueOverview,
   } = useLeagueOverview(leagues, user);
 
@@ -3150,6 +3151,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     leagueOverviewData,
     leagueOverviewLoaded,
     leagueOverviewError,
+    leagueOverviewUpdatedAt,
     leagueLineupStatus,
     selectedLeagueMateProfilesView,
     ignoredOwnerIds,

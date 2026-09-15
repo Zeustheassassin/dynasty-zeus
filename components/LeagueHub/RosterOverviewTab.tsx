@@ -16,6 +16,7 @@ interface RosterOverviewTabProps {
   leagueOverviewData: Record<string, LeagueOverviewEntry>;
   loadingLeagueOverview: boolean;
   leagueOverviewLoaded: boolean;
+  leagueOverviewUpdatedAt: number | null;
   loadLeagueOverview: () => Promise<void>;
   loadRoster: (league: SleeperLeague) => void;
   setLeagueHubTab: (tab: LeagueHubTab) => void;
@@ -53,12 +54,31 @@ function RosterOverviewTab({
   leagueOverviewData,
   loadingLeagueOverview,
   leagueOverviewLoaded,
+  leagueOverviewUpdatedAt,
   loadLeagueOverview,
   loadRoster,
   setLeagueHubTab,
   personalOrdering,
 }: RosterOverviewTabProps) {
   const players = usePlayers();
+
+  // Ticks once a minute so the "Updated Xm ago" label stays live without
+  // needing a refresh to re-render.
+  const [nowTick, setNowTick] = React.useState(() => Date.now());
+  useEffect(() => {
+    const interval = setInterval(() => setNowTick(Date.now()), 60_000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const updatedLabel = useMemo(() => {
+    if (!leagueOverviewUpdatedAt) return null;
+    const seconds = Math.max(0, Math.round((nowTick - leagueOverviewUpdatedAt) / 1000));
+    if (seconds < 60) return "Updated just now";
+    const minutes = Math.round(seconds / 60);
+    if (minutes < 60) return `Updated ${minutes}m ago`;
+    const hours = Math.round(minutes / 60);
+    return `Updated ${hours}h ago`;
+  }, [leagueOverviewUpdatedAt, nowTick]);
 
   // Global personal board (best-to-worst), reconciled against the raw
   // (non-league-adjusted) player values — mirrors how the single-league Free
@@ -171,13 +191,18 @@ function RosterOverviewTab({
             Active / IR / Taxi utilization across all your leagues, plus flags for IR-eligible players still on your active roster and IR slot players who&apos;ve lost eligibility.
           </div>
         </div>
-        <button
-          onClick={() => loadLeagueOverview()}
-          disabled={loadingLeagueOverview}
-          className="text-[10px] font-semibold border rounded-lg px-2.5 py-1 transition disabled:opacity-50 border-slate-700 text-slate-400 hover:text-white hover:border-slate-500 whitespace-nowrap"
-        >
-          {loadingLeagueOverview ? "Refreshing…" : "Refresh"}
-        </button>
+        <div className="flex flex-col items-end gap-1 shrink-0">
+          <button
+            onClick={() => loadLeagueOverview()}
+            disabled={loadingLeagueOverview}
+            className="text-[10px] font-semibold border rounded-lg px-2.5 py-1 transition disabled:opacity-50 border-slate-700 text-slate-400 hover:text-white hover:border-slate-500 whitespace-nowrap"
+          >
+            {loadingLeagueOverview ? "Refreshing…" : "Refresh"}
+          </button>
+          {updatedLabel && (
+            <span className="text-[10px] text-slate-600 whitespace-nowrap">{updatedLabel}</span>
+          )}
+        </div>
       </div>
 
       {!leagueOverviewLoaded && loadingLeagueOverview && rows.length === 0 ? (

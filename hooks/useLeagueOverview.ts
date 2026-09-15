@@ -22,6 +22,7 @@ export function useLeagueOverview(
   const [loadingLeagueOverview, setLoadingLeagueOverview] = useState(false);
   const [leagueOverviewLoaded, setLeagueOverviewLoaded] = useState(false);
   const [leagueOverviewError, setLeagueOverviewError] = useState<string | null>(null);
+  const [leagueOverviewUpdatedAt, setLeagueOverviewUpdatedAt] = useState<number | null>(null);
 
   // Stable refs so loadLeagueOverview stays a stable callback
   const leaguesRef = useRef(leagues);
@@ -147,6 +148,8 @@ export function useLeagueOverview(
       // If every league failed (empty result on a non-empty league list), surface an error.
       if (Object.keys(byLeague).length === 0 && currentLeagues.length > 0) {
         setLeagueOverviewError("Couldn't load league data. Sleeper may be unavailable — try again.");
+      } else {
+        setLeagueOverviewUpdatedAt(Date.now());
       }
     } catch (err) {
       log.error("loadLeagueOverview failed", { err: String(err) });
@@ -163,6 +166,7 @@ export function useLeagueOverview(
     loadingLeagueOverview,
     leagueOverviewLoaded,
     leagueOverviewError,
+    leagueOverviewUpdatedAt,
     loadLeagueOverview,
   };
 }
