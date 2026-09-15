@@ -37,6 +37,8 @@ export interface SleeperLeagueSettings {
   playoff_week_start: number;
   playoff_teams: number;
   num_teams: number;
+  league_average_match?: number; // 1 = teams also play against the weekly league-median score
+
   max_keepers?: number;
   type?: number; // 0 = redraft, 2 = dynasty
   best_ball?: number; // 1 = best ball league

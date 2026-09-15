@@ -524,6 +524,15 @@ export function simulateLeague({
     }])
   ) as Record<number, { winsSum: number; finishCounts: number[]; slotCounts: number[]; playoffCount: number; byeCount: number; titleCount: number }>;
 
+  // Sleeper's "play against the league median score" setting — each week,
+  // on top of the normal head-to-head result, every roster also earns a win
+  // or loss based on whether they scored above or below that week's median
+  // across the whole league. Already-played weeks don't need this here:
+  // `actualWins` above is seeded from Sleeper's own `standings.wins`, which
+  // already has real median results baked in — this only covers weeks the
+  // sim itself is projecting.
+  const hasMedianMatch = Number(selectedLeague?.settings?.league_average_match || 0) === 1;
+
   const leagueSeed = String(leagueId).split("").reduce((acc, char, idx) => acc + char.charCodeAt(0) * (idx + 1), 0) + simSalt;
   const simStartWeek = currentWeek > 0 ? currentWeek : 1;
   for (let sim = 0; sim < simCount; sim++) {
@@ -534,12 +543,26 @@ export function simulateLeague({
     scheduleByWeek
       .filter((week) => week.week >= simStartWeek)
       .forEach((week) => {
+        const weekPoints = new Map<number, number>();
         week.pairs.forEach(([aRosterId, bRosterId]) => {
           const result = playMatch(aRosterId, bRosterId, week.week, rng);
           pointMap.set(aRosterId, (pointMap.get(aRosterId) || 0) + result.aPoints);
           pointMap.set(bRosterId, (pointMap.get(bRosterId) || 0) + result.bPoints);
           winMap.set(result.winner, (winMap.get(result.winner) || 0) + 1);
+          weekPoints.set(aRosterId, result.aPoints);
+          weekPoints.set(bRosterId, result.bPoints);
         });
+
+        if (hasMedianMatch && weekPoints.size > 0) {
+          const sortedScores = [...weekPoints.values()].sort((a, b) => a - b);
+          const mid = Math.floor(sortedScores.length / 2);
+          const median = sortedScores.length % 2 === 0
+            ? (sortedScores[mid - 1] + sortedScores[mid]) / 2
+            : sortedScores[mid];
+          weekPoints.forEach((points, rosterId) => {
+            if (points > median) winMap.set(rosterId, (winMap.get(rosterId) || 0) + 1);
+          });
+        }
       });
 
     const simStandings = rows
