@@ -30,6 +30,7 @@ interface Row {
   ir: { filled: number; cap: number };
   taxi: { filled: number; cap: number };
   unflaggedInjuries: number;
+  staleIR: number;
   topFreeAgents: string[];
 }
 
@@ -120,6 +121,14 @@ function RosterOverviewTab({
         return !!playerData && isReserveEligible(playerData, league.settings);
       }).length;
 
+      // Players sitting in reserve slots whose current status no longer
+      // qualifies them for IR (e.g. activated off injury, tag cleared) —
+      // these need to be moved back to the active roster or dropped.
+      const staleIR = (myRoster.reserve ?? []).filter((pid) => {
+        const playerData = players?.[pid];
+        return !!playerData && !isReserveEligible(playerData, league.settings);
+      }).length;
+
       const leagueRosteredIds = new Set<string>();
       entry.rosters.forEach((r) => (r.players ?? []).forEach((pid) => leagueRosteredIds.add(pid)));
       const topFreeAgents = personalOrder.filter((id) => !leagueRosteredIds.has(id)).slice(0, 2);
@@ -132,6 +141,7 @@ function RosterOverviewTab({
         ir: { filled: irFilled, cap: irCap },
         taxi: { filled: taxiFilled, cap: taxiCap },
         unflaggedInjuries,
+        staleIR,
         topFreeAgents,
       });
     }
@@ -150,7 +160,7 @@ function RosterOverviewTab({
   // Fixed (not minmax(0,1fr)) column widths so the league name always gets real room —
   // on a phone the row is wider than the screen and the wrapping container scrolls
   // horizontally instead of squeezing the name down to one character.
-  const GRID = "grid grid-cols-[13rem_5rem_4rem_4rem_5rem_14rem] gap-2 items-center px-1";
+  const GRID = "grid grid-cols-[13rem_5rem_4rem_4rem_5rem_5rem_14rem] gap-2 items-center px-1";
 
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-xl p-3">
@@ -158,7 +168,7 @@ function RosterOverviewTab({
         <div className="min-w-0">
           <div className="text-[11px] uppercase tracking-wide text-slate-500">Roster Overview</div>
           <div className="mt-0.5 text-xs text-slate-200">
-            Active / IR / Taxi utilization across all your leagues, plus a flag for IR-eligible players still on your active roster.
+            Active / IR / Taxi utilization across all your leagues, plus flags for IR-eligible players still on your active roster and IR slot players who&apos;ve lost eligibility.
           </div>
         </div>
         <button
@@ -184,6 +194,7 @@ function RosterOverviewTab({
                 <span className="text-right">IR</span>
                 <span className="text-right">Taxi</span>
                 <span className="text-right" title="IR-eligible players still on the active roster (could be moved to IR)">IR-Eligible</span>
+                <span className="text-right" title="Players in your IR slots whose current status no longer qualifies them for IR">IR Stale</span>
                 <span title="Top 2 unrostered players in this league, ranked by your personal board">Top FAs</span>
               </div>
               <div className="space-y-0.5">
@@ -211,6 +222,9 @@ function RosterOverviewTab({
                       </span>
                       <span className={`text-right font-mono ${row.unflaggedInjuries > 0 ? "text-orange-300" : "text-slate-600"}`}>
                         {row.unflaggedInjuries > 0 ? row.unflaggedInjuries : "—"}
+                      </span>
+                      <span className={`text-right font-mono ${row.staleIR > 0 ? "text-red-400 font-bold" : "text-slate-600"}`}>
+                        {row.staleIR > 0 ? row.staleIR : "—"}
                       </span>
                       <span className="text-slate-400 truncate">
                         {row.topFreeAgents.length === 0
