@@ -74,6 +74,14 @@ function OverviewTab({
     leagueAdjustedRedraftValues: redraftValues,
     pickFcValues,
   } = useValues();
+  const [sortConfig, setSortConfig] = React.useState<{ key: "league" | "direction" | "playoff"; dir: "asc" | "desc" } | null>(null);
+  const toggleSort = React.useCallback((key: "league" | "direction" | "playoff") => {
+    setSortConfig((prev) => {
+      if (prev?.key === key) return { key, dir: prev.dir === "asc" ? "desc" : "asc" };
+      // Playoff% defaults high-to-low (most useful first); the rest default A-Z / best-to-worst.
+      return { key, dir: key === "playoff" ? "desc" : "asc" };
+    });
+  }, []);
   const [refreshingRosters, setRefreshingRosters] = React.useState(false);
   const [rosterRefreshProgress, setRosterRefreshProgress] = React.useState<{ done: number; total: number } | null>(null);
   const [mountedAt] = React.useState(() => Date.now());
@@ -204,13 +212,26 @@ function OverviewTab({
       paidFuture: isFuturePaid(mgmtRow),
     };
   }).filter((x): x is NonNullable<typeof x> => x !== null).sort((a, b) => {
+    if (sortConfig) {
+      const dirMul = sortConfig.dir === "asc" ? 1 : -1;
+      let cmp = 0;
+      if (sortConfig.key === "league") {
+        cmp = a.league.name.localeCompare(b.league.name);
+      } else if (sortConfig.key === "direction") {
+        cmp = (bucketOrder[a.bucket] ?? 999) - (bucketOrder[b.bucket] ?? 999);
+      } else {
+        cmp = a.playoffOdds - b.playoffOdds;
+      }
+      if (cmp !== 0) return cmp * dirMul;
+      return a.league.name.localeCompare(b.league.name);
+    }
     const bucketDiff = (bucketOrder[a.bucket] ?? 999) - (bucketOrder[b.bucket] ?? 999);
     if (bucketDiff !== 0) return bucketDiff;
     if (b.playoffOdds !== a.playoffOdds) return b.playoffOdds - a.playoffOdds;
     if (a.dynRank !== b.dynRank) return a.dynRank - b.dynRank;
     return a.league.name.localeCompare(b.league.name);
   });
-  }, [leagues, leagueOverviewData, user, calcFcValues, redraftValues, pickFcValues, players, committedSimsByLeague, leagueSimCache, mountedAt, leagueMgmtData]);
+  }, [leagues, leagueOverviewData, user, calcFcValues, redraftValues, pickFcValues, players, committedSimsByLeague, leagueSimCache, mountedAt, leagueMgmtData, sortConfig]);
 
   if (loadingLeagueOverview && !leagueOverviewLoaded) return <p className="text-sm text-blue-400">Loading league data…</p>;
   if (!leagues.length) return <p className="text-sm text-slate-500">No leagues found.</p>;
@@ -277,13 +298,31 @@ function OverviewTab({
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 overflow-x-auto">
         <div className="min-w-[990px]">
           <div className={`${GRID} text-[10px] uppercase tracking-wide text-slate-500 mb-1 pb-2 border-b border-slate-800`}>
-            <span>League</span>
-            <span>Direction</span>
+            <button
+              type="button"
+              onClick={() => toggleSort("league")}
+              className="text-left flex items-center gap-0.5 hover:text-slate-300 transition"
+            >
+              League{sortConfig?.key === "league" && <span>{sortConfig.dir === "asc" ? "▲" : "▼"}</span>}
+            </button>
+            <button
+              type="button"
+              onClick={() => toggleSort("direction")}
+              className="text-left flex items-center gap-0.5 hover:text-slate-300 transition"
+            >
+              Direction{sortConfig?.key === "direction" && <span>{sortConfig.dir === "asc" ? "▲" : "▼"}</span>}
+            </button>
             <span className="text-center">Dyn</span>
             <span className="text-center">Rdft</span>
             <span className="text-center">Stnd</span>
             <span className="text-center">MaxPF</span>
-            <span className="text-center">Playoff%</span>
+            <button
+              type="button"
+              onClick={() => toggleSort("playoff")}
+              className="flex items-center justify-center gap-0.5 hover:text-slate-300 transition"
+            >
+              Playoff%{sortConfig?.key === "playoff" && <span>{sortConfig.dir === "asc" ? "▲" : "▼"}</span>}
+            </button>
             <span className="text-center">Paid Future</span>
             <span className="text-center">Own 1st</span>
             <span className="text-center">1sts</span>
