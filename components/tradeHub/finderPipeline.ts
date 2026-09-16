@@ -44,6 +44,8 @@ export interface FinderPipelineCtx {
   finderPreferFuturePicks: boolean;
   iAmTankingFinder: boolean;
   myFinderPlayoffOdds: number;
+  /** True only when myFinderPlayoffOdds reflects a real committed/cached sim, not the neutral 50 fallback. */
+  hasMySim: boolean;
   isChampionshipPush: boolean;
   pinnedPlayer: PlayerWithValue | null;
   deferredTargetPlayerId: string | null;
@@ -95,16 +97,35 @@ export interface FinderPipelineCtx {
   };
 }
 
+/** A finder-generated candidate flagged for the caller to real-simulate before finalizing
+ *  the displayed list (see SIM_CANDIDATE_POOL_SIZE). oppIsContender/oppIsRebuildSide mirror
+ *  the same classifyOppDirection call oppDirectionScore already makes for this opponent. */
+export interface FinderSimCandidate {
+  fingerprint: string;
+  myRosterId: number;
+  oppRosterId: number;
+  giveIds: string[];
+  receiveIds: string[];
+  oppPlayoffOddsBefore: number;
+  oppIsContender: boolean;
+  oppIsRebuildSide: boolean;
+}
+
 export function runFinderPipeline(
   results: TradeResult[],
   ctx: FinderPipelineCtx,
-): { allTrades: TradeResult[]; recentFingerprints: Set<string>; rosterOverflow: number } {
+): {
+  allTrades: TradeResult[];
+  recentFingerprints: Set<string>;
+  rosterOverflow: number;
+  simCandidates: FinderSimCandidate[];
+} {
   const {
     allPicks, players, calcFcValues, redraftValues, rosters, selectedLeague,
     user, myPlayers, myRoster, numTeams, starterCounts, hasSuperFlex,
     draftYearPriority, priorityDraftYear, weakPositions, finderDirection,
     finderTankMode, draftCapitalMode, finderPreferFuturePicks, iAmTankingFinder,
-    myFinderPlayoffOdds, isChampionshipPush, pinnedPlayer, deferredTargetPlayerId,
+    myFinderPlayoffOdds, hasMySim, isChampionshipPush, pinnedPlayer, deferredTargetPlayerId,
     deferredPinnedPlayerId, deferredTargetOppRosterId, deferredFinderSeed,
     nflTeamDepth, tradePartnerRankings, leagueMateProfileByRosterId, tradeAttempts,
     discardedFingerprints, opponentAversionTags, globalAversionTags,
@@ -492,6 +513,15 @@ export function runFinderPipeline(
   // vets ≈ -11). -10 rejects those structural mismatches while keeping neutral fair trades.
   // Tunable: raise toward 0 for a stricter board (fewer, higher-conviction trades).
   const ACCEPT_FLOOR = -10;
+
+  // How many top-ranked, win-now standard-swap candidates the caller should real-simulate
+  // (simulateLeague, via previewTradeSimulation) before finalizing the displayed list — wider
+  // than the ~17 slots actually shown so there's room to discard negligible-playoff-odds-gain
+  // trades and backfill from the survivors. A team already this close to a lock (playoff odds
+  // ≥ ceiling) has no meaningful room left to gain, so the whole check is skipped for them —
+  // otherwise an elite team would see zero trades once the gain-threshold filter runs.
+  const SIM_CANDIDATE_POOL_SIZE = 22;
+  const PLAYOFF_ODDS_CEILING_SKIP = 95;
 
   // O(1) candidate index lookup for the seeded tiebreak below — avoids an O(n^2) results.indexOf
   // per surviving candidate (the MAX_CANDIDATES ceiling makes the worst case large).
@@ -1315,9 +1345,16 @@ export function runFinderPipeline(
           const floorRequired = slots + 1;
           const hadFloor = viableBefore >= floorRequired;
           const hasFloor = viableAfter  >= floorRequired;
+          // How many viable (≥1500) bodies actually left this position in the trade —
+          // scales the break-the-floor / thin-it-further penalties below so giving away 3
+          // at once (gutting the room) costs more than a single body that happens to tip
+          // the same floor, not the same flat penalty either way.
+          const viableGivenAtPos = r.give.filter(
+            (p) => p.position === pos && (p.value ?? 0) >= 1500
+          ).length;
 
-          if (hadFloor && !hasFloor) rbs -= 15;
-          if (!hadFloor && viableAfter < viableBefore) rbs -= 8;
+          if (hadFloor && !hasFloor) rbs -= 15 + Math.max(0, viableGivenAtPos - 1) * 8;
+          if (!hadFloor && viableAfter < viableBefore) rbs -= 8 + Math.max(0, viableGivenAtPos - 1) * 5;
           if (topEndAfter > topEndBefore) rbs += (topEndAfter - topEndBefore) / 600;
           if (!hadFloor && hasFloor) rbs += 10;
         }
@@ -1355,9 +1392,15 @@ export function runFinderPipeline(
             const viableGiven = givenAtPos.filter((p) => (p.value ?? 0) >= 1500).length;
             const remainingAfter = viable - viableGiven;
             if (remainingAfter >= slots) {
-              dtb += givenAtPos.length * 6;
+              // Capped at 2 bodies — this bonus rewards the 2-for-1 tier-up shape
+              // (consolidating surplus into a difference-maker), not a 3-for-3 spread
+              // that liquidates most of a deep position at once.
+              dtb += Math.min(givenAtPos.length, 2) * 6;
+              // Only credited when the return actually fills a real roster need — otherwise
+              // draining a deep position to buy depth nobody needed gets no strategic-fit
+              // credit just because value moved to a different position.
               const receivesOtherPos = r.receive.filter(
-                (p) => p.position !== pos && (p.value ?? 0) >= 1500
+                (p) => p.position !== pos && (p.value ?? 0) >= 1500 && weakPositions.has(p.position)
               ).length;
               dtb += receivesOtherPos * 3;
             }
@@ -1575,6 +1618,50 @@ export function runFinderPipeline(
     })
     .map(({ r }) => r);
 
+  // ── Sim-vetting candidate pool ─────────────────────────────────────────
+  // Expose the top standard-swap, win-now candidates so the caller can real-simulate
+  // (simulateLeague, via previewTradeSimulation) each one and discard/backfill trades whose
+  // actual playoff-odds impact is negligible — heuristic scoring alone let e.g. a 3-RB-for-
+  // 2WR+TE trade through that barely moved the needle (34% → 34.3%). Skipped entirely once
+  // the user is already near-locked into the playoffs (nothing meaningful left to gain).
+  const simCandidates: FinderSimCandidate[] = (() => {
+    if (!myRoster || !userIsWinNow || !hasMySim || myFinderPlayoffOdds >= PLAYOFF_ODDS_CEILING_SKIP) return [];
+    const myRosterId = Number(myRoster.roster_id);
+    return shuffled
+      .filter((r) => !r.draftCapital && r.format !== "Lottery")
+      .slice(0, SIM_CANDIDATE_POOL_SIZE)
+      .map((r) => {
+        const oppRosterId = Number(r.oppRosterId);
+        // Same lookup oppDirectionScore already used per-candidate above — recomputed here
+        // rather than threaded through, since shuffled has been stripped back down to plain
+        // TradeResult objects by the .map(({ r }) => r) just above.
+        const oppProfile = oppProfileByRosterId.get(oppRosterId);
+        const oppPlayoffOddsBefore = oppProfile?.playoffOdds
+          ?? selectedLeagueSimulation?.rowByRosterId?.get(oppRosterId)?.playoffOdds
+          ?? 50;
+        const oppBucket = oppProfile?.directionProfile?.bucket ?? "";
+        const { isRebuild: oppIsRebuild, isHopeless: oppIsHopeless, isElite: oppIsElite, isContender: oppIsContenderStrict } =
+          classifyOppDirection(oppBucket, oppPlayoffOddsBefore);
+        return {
+          fingerprint: buildTradeFingerprint(
+            selectedLeague.league_id, oppRosterId,
+            [...r.give.map((p) => p.player_id), ...r.givePicks.map((p) => finderPickKey(p))],
+            [...r.receive.map((p) => p.player_id), ...r.receivePicks.map((p) => finderPickKey(p))],
+          ),
+          myRosterId,
+          oppRosterId,
+          giveIds: r.give.map((p) => p.player_id),
+          receiveIds: r.receive.map((p) => p.player_id),
+          oppPlayoffOddsBefore,
+          // "A true playoff contender" per the user's framing — classifyOppDirection splits
+          // this into isElite/isContender (a structural-acceptance distinction), but for
+          // "should their odds rise if they're accepting this" both flavors apply.
+          oppIsContender: oppIsElite || oppIsContenderStrict,
+          oppIsRebuildSide: oppIsRebuild || oppIsHopeless,
+        };
+      });
+  })();
+
   // ── Build the standard final list ──────────────────────────────────────
   const FINAL_TRADE_COUNT = 12;  // headline ranked trades
   const BUY_LOW_COUNT = 5;       // bonus buy-low slots appended after
@@ -1657,5 +1744,5 @@ export function runFinderPipeline(
       ))
   );
 
-  return { allTrades, recentFingerprints, rosterOverflow };
+  return { allTrades, recentFingerprints, rosterOverflow, simCandidates };
 }

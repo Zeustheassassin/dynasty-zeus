@@ -12,6 +12,10 @@ import TradeCard from "./TradeCard";
 
 interface FinderResultsProps {
   allTrades: TradeResult[];
+  /** Real-simulation playoff-odds vetting pass progress (TradeFinder.tsx) — set while it's
+   *  running, null once idle/done. Purely informational; allTrades already reflects the
+   *  vetted list once available (the pipeline recomputes when the pass completes). */
+  simVettingProgress?: { done: number; total: number } | null;
   recentFingerprints: Set<string>;
   pinnedPlayer: PlayerWithValue | null;
   draftCapitalMode: boolean;
@@ -51,6 +55,7 @@ interface FinderResultsProps {
 
 export default function FinderResults({
   allTrades,
+  simVettingProgress,
   recentFingerprints,
   pinnedPlayer,
   draftCapitalMode,
@@ -121,6 +126,19 @@ export default function FinderResults({
 
   return (
     <>
+      {simVettingProgress && (
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-blue-500 rounded-full transition-all duration-300"
+              style={{ width: `${(simVettingProgress.done / simVettingProgress.total) * 100}%` }}
+            />
+          </div>
+          <span className="text-[10px] text-slate-400 whitespace-nowrap">
+            Verifying playoff impact… {simVettingProgress.done}/{simVettingProgress.total}
+          </span>
+        </div>
+      )}
       {allTrades.length === 0 && (
         <p className="text-slate-400 text-sm">
           {pinnedPlayer

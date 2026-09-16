@@ -201,6 +201,14 @@ function TradeFinder({
     if (directionRefreshing && selectedLeagueDirectionAdjusted) setDirectionRefreshing(false);
   }, [directionRefreshing, selectedLeagueDirectionAdjusted]);
 
+  // Real-simulation playoff-odds verdicts for finderModel.simCandidates (see the effect
+  // below, placed after finderModel exists). fingerprint -> true (survives) / false
+  // (discarded — negligible or wrong-direction playoff-odds movement). Fed back into
+  // discardedFingerprints below so the pipeline's existing discard-filter + slot-backfill
+  // logic does the rest — no separate filtering/backfill code needed here.
+  const [simVerdicts, setSimVerdicts] = useState<Map<string, boolean>>(new Map());
+  const [simVettingProgress, setSimVettingProgress] = useState<{ done: number; total: number } | null>(null);
+
   // NFL depth chart map — sorted by depth_chart_order then dynasty value.
   const nflTeamDepth = useMemo(() => {
     const map = new Map<string, Record<string, PlayerWithValue[]>>();
@@ -1151,11 +1159,18 @@ function TradeFinder({
       // Fingerprints of exact give/receive/opponent combinations the user dismissed via the
       // card's Discard button (components/tradeHub/shared.ts's buildTradeFingerprint) — only
       // still-active (unexpired) ones apply.
-      const discardedFingerprints = new Set(
+      const userDiscardedFingerprints = new Set(
         Object.entries(discardedTrades[selectedLeague?.league_id ?? ""] ?? {})
           .filter(([, expiresAt]) => isBlockActive(expiresAt))
           .map(([fp]) => fp)
       );
+      // Also fold in trades the real-simulation vetting pass (below) has already ruled out
+      // for negligible/wrong-direction playoff-odds movement — same discard mechanism, two
+      // sources feeding it, so the existing backfill logic handles both uniformly.
+      const discardedFingerprints = new Set([
+        ...userDiscardedFingerprints,
+        ...[...simVerdicts.entries()].filter(([, passed]) => !passed).map(([fp]) => fp),
+      ]);
 
       // ── "Never Accept" aversion tags ──────────────────────────────────────
       // Built from every PREDICTED_DECLINE trade_attempts row in this league (see TradeCard.tsx's
@@ -1204,7 +1219,7 @@ function TradeFinder({
       }
 
       // ── Scoring + slotting pipeline ──────────────────────────────────────
-      const { allTrades, recentFingerprints, rosterOverflow } = runFinderPipeline(results, {
+      const { allTrades, recentFingerprints, rosterOverflow, simCandidates } = runFinderPipeline(results, {
         allPicks,
         players,
         calcFcValues: calcFcValues as Record<string, number>,
@@ -1226,6 +1241,7 @@ function TradeFinder({
         finderPreferFuturePicks,
         iAmTankingFinder,
         myFinderPlayoffOdds,
+        hasMySim,
         isChampionshipPush,
         pinnedPlayer,
         deferredTargetPlayerId,
@@ -1264,19 +1280,19 @@ function TradeFinder({
       });
 
       return {
-        allTrades, recentFingerprints, rosterOverflow,
+        allTrades, recentFingerprints, rosterOverflow, simCandidates,
         finderDirectionProfile, finderDirection, autoStrategyLabel,
         isChampionshipPush, finderTankMode, draftCapitalMode,
         finderPreferFuturePicks, iAmTankingFinder, weakPositions,
         numTeams, myRoster, pinnedPlayer, targetPinnedPlayer,
         allOppPlayers, ignoredInLeague, calcDropCost, finderPickLabel,
-        getTradeIntent,
+        getTradeIntent, myFinderPlayoffOdds,
       };
   }, [
     selectedLeague, selectedLeagueDirectionAdjusted, loadingCalcValues, nflState,
     users, selectedLeagueDynamicPickValues, finderRosterPlayersMap, rosters,
     calcFcValues, user, playerDispositions, finderSignals, leaguePlayerTags, allPicks,
-    noInterestPlayers, discardedTrades,
+    noInterestPlayers, discardedTrades, simVerdicts,
     selectedLeagueDraftHasOccurred, pickFcValues, redraftValues, marketSignalMap,
     players, deferredPinnedPlayerId, deferredTargetOppRosterId, deferredTargetPlayerId,
     top32QBFloor, nflTeamDepth, ignoredOwnerIds, selectedLeagueSimulation,
@@ -1284,6 +1300,67 @@ function TradeFinder({
     tradeAttempts, historicalSnapshot, playerStats, crossLeagueExposure,
     buyLowPlayerIds, finderWeeklyProjMap, finderStrategyOverride,
   ]);
+
+  // ── Real-simulation playoff-odds vetting pass ──────────────────────────
+  // finderModel.simCandidates is the Finder's top ~22 heuristically-ranked, win-now
+  // standard-swap candidates (finderPipeline.ts's SIM_CANDIDATE_POOL_SIZE). Heuristic
+  // scoring alone let trades through that barely moved the real playoff-odds needle (a
+  // 3-RB-for-2WR+TE trade going 34% -> 34.3%), so this runs the actual simulateLeague
+  // engine (via the same on-demand previewTradeSimulation TradeCard's manual "Preview"
+  // button already uses) on each candidate and discards ones that don't clear a real
+  // threshold — feeding the result back into discardedFingerprints above, which reuses
+  // the pipeline's existing backfill logic to fill the slots from survivors.
+  //
+  // Checks BOTH sides using the single previewTradeSimulation call per candidate (it
+  // already returns every roster's odds via rowByRosterId, so the opponent-side check is
+  // free): my own odds must gain meaningfully, AND — if the opponent is a clear contender
+  // or a clear rebuilder — their odds must move in the direction their situation implies
+  // (a contender's odds should rise, a rebuilder's should fall) or the trade doesn't
+  // actually make sense for them despite passing the value/structural heuristics.
+  //
+  // Yielding a tick between calls (~20-22 total, not the full raw candidate pool) is the
+  // concession that keeps this compatible with the earlier "never eagerly sim every
+  // Finder candidate" decision (project_trade_sim_preview_plan) — the UI stays responsive.
+  const MIN_PLAYOFF_ODDS_GAIN = 1.0;
+  React.useEffect(() => {
+    const candidates = finderModel?.simCandidates ?? [];
+    if (candidates.length === 0) {
+      setSimVettingProgress(null);
+      return;
+    }
+    let cancelled = false;
+    setSimVettingProgress({ done: 0, total: candidates.length });
+    const myBeforeOdds = finderModel?.myFinderPlayoffOdds ?? 50;
+    (async () => {
+      const verdicts = new Map<string, boolean>();
+      for (let i = 0; i < candidates.length; i++) {
+        if (cancelled) return;
+        const c = candidates[i];
+        const after = previewTradeSimulation(c.myRosterId, c.oppRosterId, c.giveIds, c.receiveIds);
+        const myAfterOdds = after?.rowByRosterId?.get(c.myRosterId)?.playoffOdds;
+        const myPasses = myAfterOdds == null
+          ? true // no sim data for my side — don't block on a check we can't run
+          : (myAfterOdds - myBeforeOdds) >= MIN_PLAYOFF_ODDS_GAIN;
+        let oppPasses = true;
+        if (c.oppIsContender || c.oppIsRebuildSide) {
+          const oppAfterOdds = after?.rowByRosterId?.get(c.oppRosterId)?.playoffOdds;
+          if (oppAfterOdds != null) {
+            const oppDelta = oppAfterOdds - c.oppPlayoffOddsBefore;
+            oppPasses = c.oppIsContender ? oppDelta >= MIN_PLAYOFF_ODDS_GAIN : oppDelta <= -MIN_PLAYOFF_ODDS_GAIN;
+          }
+        }
+        verdicts.set(c.fingerprint, myPasses && oppPasses);
+        if (!cancelled) setSimVettingProgress({ done: i + 1, total: candidates.length });
+        // Yield to the main thread between sim calls so this can't jank the UI.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      if (!cancelled) {
+        setSimVerdicts(verdicts);
+        setSimVettingProgress(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [finderModel?.simCandidates, finderModel?.myFinderPlayoffOdds, previewTradeSimulation]);
 
   if (!selectedLeague) return (
     <p className="text-slate-400 text-sm">Select a league from the dropdown above to use the Trade Finder.</p>
@@ -1491,6 +1568,7 @@ function TradeFinder({
           })()}
           <FinderResults
             allTrades={allTrades}
+            simVettingProgress={simVettingProgress}
             recentFingerprints={recentFingerprints}
             pinnedPlayer={pinnedPlayer}
             draftCapitalMode={draftCapitalMode}

@@ -104,6 +104,7 @@ const baseCtx = (over: Partial<FinderPipelineCtx> = {}): FinderPipelineCtx => {
     finderPreferFuturePicks: false,
     iAmTankingFinder: false,
     myFinderPlayoffOdds: 50,
+    hasMySim: false,
     isChampionshipPush: false,
     pinnedPlayer: null,
     deferredTargetPlayerId: null,
@@ -1569,5 +1570,163 @@ describe("runFinderPipeline — manual asset dispositions", () => {
     );
     // The +20 bonus only lands for roster 3's trade, so it outranks roster 2's otherwise-identical one.
     expect(allTrades.map((t) => t.oppRosterId)).toEqual([3, 2]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Depth-strip scoring: giving away several viable bodies from one position at
+// once (e.g. 3 RBs in one trade) should be penalized harder than giving away
+// one — and the "healthy consolidation" bonus should require the return to
+// actually fill a real need, not just land at a different position.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("runFinderPipeline — depth-strip scoring", () => {
+  it("ranks a trade that gives away 1 viable body from a position above an otherwise-equal trade that gives away 3", () => {
+    // starterCounts.RB = 2 -> floor = 3. 3 viable (>=1500) RBs before either trade, so both
+    // trades break the floor (RB after < 3) but by different amounts. Receive side kept
+    // below the 2000 star-premium threshold on both so that term stays at 0 for both.
+    const myPlayers = [mkPlayer("rb1", "RB", 1900), mkPlayer("rb2", "RB", 1800), mkPlayer("rb3", "RB", 1700)];
+    const give1 = mkTrade({
+      give: [mkPlayer("rb3", "RB", 1700)],
+      receive: [mkPlayer("w1", "WR", 1700)],
+      score: 100, net: 0,
+    });
+    const give3 = mkTrade({
+      give: [mkPlayer("rb1", "RB", 1900), mkPlayer("rb2", "RB", 1800), mkPlayer("rb3", "RB", 1700)],
+      receive: [mkPlayer("w4", "WR", 1800), mkPlayer("w5", "WR", 1800), mkPlayer("w6", "WR", 1800)],
+      score: 100, net: 0, format: "3 for 3",
+    });
+    const { allTrades } = runFinderPipeline(
+      [give1, give3],
+      baseCtx({
+        myPlayers, finderDirection: "Elite", myFinderPlayoffOdds: 80,
+        // rosterBalanceScore needs the real post-trade roster (the baseCtx stub always
+        // returns []), so give/receive here are actually reflected in viableAfter.
+        buildPostTradePlayers: (_baseRoster, give, receive) => [
+          ...myPlayers.filter((p) => !give.some((g) => g.player_id === p.player_id)),
+          ...receive,
+        ],
+      }),
+    );
+    expect(allTrades.map((t) => t.oppName)).toHaveLength(2);
+    expect(allTrades[0].give.map((p) => p.player_id)).toEqual(["rb3"]);
+    expect(allTrades[1].give.map((p) => p.player_id)).toEqual(["rb1", "rb2", "rb3"]);
+  });
+
+  it("does not credit the deep-position give-away bonus when the return doesn't fill a real need", () => {
+    // isDeep needs viable >= slots+2 = 4. Give 1 body, remainingAfter (3) still >= slots (2).
+    const myPlayers = [
+      mkPlayer("rb1", "RB", 1900), mkPlayer("rb2", "RB", 1800),
+      mkPlayer("rb3", "RB", 1700), mkPlayer("rb4", "RB", 1600),
+    ];
+    const fillsWeakPos = mkTrade({
+      give: [mkPlayer("rb4", "RB", 1600)], receive: [mkPlayer("te1", "TE", 1600)],
+      score: 100, net: 0, oppRosterId: 2,
+    });
+    const fillsNonNeed = mkTrade({
+      give: [mkPlayer("rb4b", "RB", 1600)], receive: [mkPlayer("te1b", "TE", 1600)],
+      score: 100, net: 0, oppRosterId: 3,
+    });
+    const rosters = [mkRoster(1, "USER", []), mkRoster(2, "OPP2", []), mkRoster(3, "OPP3", [])];
+    const { allTrades } = runFinderPipeline(
+      [fillsWeakPos, fillsNonNeed],
+      baseCtx({
+        myPlayers, rosters, finderDirection: "Elite", myFinderPlayoffOdds: 80,
+        weakPositions: new Set(["TE"]),
+      }),
+    );
+    // Both survive (identical value math), but the one filling a real (weak-position) need
+    // outranks the otherwise-identical one that doesn't.
+    expect(allTrades.map((t) => t.oppRosterId)).toEqual([2, 3]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// simCandidates: the real-simulation vetting pool the caller (TradeFinder.tsx)
+// sim-checks before finalizing the displayed list. Pure derivation — no actual
+// sim call happens inside the pipeline.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("runFinderPipeline — simCandidates", () => {
+  const standardTrade = () => mkTrade({
+    give: [mkPlayer("g1", "WR", 3000)],
+    receive: [mkPlayer("r1", "RB", 3000)],
+  });
+
+  it("is populated for a win-now standard-swap trade with a real sim and odds below the ceiling", () => {
+    const { simCandidates } = runFinderPipeline(
+      [standardTrade()],
+      baseCtx({ finderDirection: "Elite", myFinderPlayoffOdds: 80, hasMySim: true }),
+    );
+    expect(simCandidates).toHaveLength(1);
+    expect(simCandidates[0]).toMatchObject({ myRosterId: 1, oppRosterId: 2, giveIds: ["g1"], receiveIds: ["r1"] });
+  });
+
+  it("is empty while tanking even if odds/direction would otherwise qualify", () => {
+    const { simCandidates } = runFinderPipeline(
+      [standardTrade()],
+      baseCtx({ finderDirection: "Elite", myFinderPlayoffOdds: 80, hasMySim: true, iAmTankingFinder: true }),
+    );
+    expect(simCandidates).toHaveLength(0);
+  });
+
+  it("is empty when there is no real sim to compare against", () => {
+    const { simCandidates } = runFinderPipeline(
+      [standardTrade()],
+      baseCtx({ finderDirection: "Elite", myFinderPlayoffOdds: 80, hasMySim: false }),
+    );
+    expect(simCandidates).toHaveLength(0);
+  });
+
+  it("is empty once the user is already near-locked into the playoffs", () => {
+    const { simCandidates } = runFinderPipeline(
+      [standardTrade()],
+      baseCtx({ finderDirection: "Elite", myFinderPlayoffOdds: 97, hasMySim: true }),
+    );
+    expect(simCandidates).toHaveLength(0);
+  });
+
+  it("excludes draft-capital and Lottery-format trades", () => {
+    const draftCapitalTrade = mkTrade({
+      give: [mkPlayer("g1", "WR", 3000)], givePicks: [], receive: [],
+      receivePicks: [{ round: 1, season: CY, value: 3000 } as unknown as PickWithValue],
+      draftCapital: true,
+    });
+    const lotteryTrade = mkTrade({
+      give: [mkPlayer("g2", "WR", 500)], receive: [mkPlayer("r2", "RB", 500)],
+      format: "Lottery",
+    });
+    const { simCandidates } = runFinderPipeline(
+      [draftCapitalTrade, lotteryTrade],
+      baseCtx({ finderDirection: "Elite", myFinderPlayoffOdds: 80, hasMySim: true }),
+    );
+    expect(simCandidates).toHaveLength(0);
+  });
+
+  it("flags the opponent's contender/rebuild classification for the caller's opponent-side check", () => {
+    const eliteOpp = {
+      rosterId: 2, playoffOdds: 85, directionProfile: { bucket: "Elite" },
+    } as unknown as FinderPipelineCtx["tradePartnerRankings"][number];
+    const rebuildOpp = {
+      rosterId: 3, playoffOdds: 8, directionProfile: { bucket: "Hopeless" },
+    } as unknown as FinderPipelineCtx["tradePartnerRankings"][number];
+    const rosters = [mkRoster(1, "USER", []), mkRoster(2, "OPP2", []), mkRoster(3, "OPP3", [])];
+    const vsElite = mkTrade({
+      give: [mkPlayer("g1", "WR", 3000)], receive: [mkPlayer("r1", "RB", 3000)], oppRosterId: 2,
+    });
+    const vsRebuild = mkTrade({
+      give: [mkPlayer("g2", "WR", 3000)], receive: [mkPlayer("r2", "RB", 3000)], oppRosterId: 3,
+    });
+    const { simCandidates } = runFinderPipeline(
+      [vsElite, vsRebuild],
+      baseCtx({
+        finderDirection: "Elite", myFinderPlayoffOdds: 80, hasMySim: true, rosters,
+        tradePartnerRankings: [eliteOpp, rebuildOpp],
+      }),
+    );
+    const vsEliteCandidate = simCandidates.find((c) => c.oppRosterId === 2);
+    const vsRebuildCandidate = simCandidates.find((c) => c.oppRosterId === 3);
+    expect(vsEliteCandidate).toMatchObject({ oppIsContender: true, oppIsRebuildSide: false });
+    expect(vsRebuildCandidate).toMatchObject({ oppIsContender: false, oppIsRebuildSide: true });
   });
 });
