@@ -58,6 +58,13 @@ export interface FinderPipelineCtx {
   tradeAttempts: TradeAttempt[];
   /** Fingerprints (buildTradeFingerprint) of still-active user-discarded Finder suggestions. */
   discardedFingerprints: Set<string>;
+  /** Fingerprints the caller's real-simulation vetting pass (simCandidates) has ruled out for
+   *  negligible/wrong-direction playoff-odds movement. Deliberately NOT folded into
+   *  discardedFingerprints above — that set also drives simCandidates itself, and letting sim
+   *  verdicts shrink that pool would reshuffle which trades get vetted on every recompute
+   *  (an endless "vet, discard some, vet a different 22" loop). Applied only when building the
+   *  final displayed list, after simCandidates has already been derived from the stable pool. */
+  simDiscardedFingerprints?: Set<string>;
   /** "Never Accept" structured tags scoped to one opponent, keyed by partner_roster_id. */
   opponentAversionTags: Map<number, AversionTags>;
   /** "Never Accept" structured tags scoped to "any opponent" — merged into one set. */
@@ -128,7 +135,7 @@ export function runFinderPipeline(
     myFinderPlayoffOdds, hasMySim, isChampionshipPush, pinnedPlayer, deferredTargetPlayerId,
     deferredPinnedPlayerId, deferredTargetOppRosterId, deferredFinderSeed,
     nflTeamDepth, tradePartnerRankings, leagueMateProfileByRosterId, tradeAttempts,
-    discardedFingerprints, opponentAversionTags, globalAversionTags,
+    discardedFingerprints, simDiscardedFingerprints, opponentAversionTags, globalAversionTags,
     historicalSnapshot, playerStats, crossLeagueExposure, buyLowPlayerIds,
     nflState, selectedLeagueSimulation, selectedLeagueDraftHasOccurred,
     weeklyProjMap, playerDispositions, finderPickValue, buildPostTradePlayers,
@@ -1662,6 +1669,17 @@ export function runFinderPipeline(
       });
   })();
 
+  // Trades the sim-vetting pass has ruled out get excluded here — the LAST step, after
+  // simCandidates (above) already locked in the stable pool that got vetted. shuffled itself
+  // is untouched so re-vetting never sees a shifted pool.
+  const shuffledForDisplay = simDiscardedFingerprints && simDiscardedFingerprints.size > 0
+    ? shuffled.filter((r) => !simDiscardedFingerprints.has(buildTradeFingerprint(
+        selectedLeague.league_id, r.oppRosterId,
+        [...r.give.map((p) => p.player_id), ...r.givePicks.map((p) => finderPickKey(p))],
+        [...r.receive.map((p) => p.player_id), ...r.receivePicks.map((p) => finderPickKey(p))],
+      )))
+    : shuffled;
+
   // ── Build the standard final list ──────────────────────────────────────
   const FINAL_TRADE_COUNT = 12;  // headline ranked trades
   const BUY_LOW_COUNT = 5;       // bonus buy-low slots appended after
@@ -1677,7 +1695,7 @@ export function runFinderPipeline(
   };
   const MAX_COMPLEX_TRADES = 2;
   let complexTradeCount = 0;
-  const topTrades = shuffled.reduce((acc: TradeResult[], r) => {
+  const topTrades = shuffledForDisplay.reduce((acc: TradeResult[], r) => {
       if (acc.length >= FINAL_TRADE_COUNT) return acc;
       const allIds = [
         ...r.give.map((p) => `player-${p.player_id}`),
@@ -1705,7 +1723,7 @@ export function runFinderPipeline(
     }, []);
 
   // ── 5 bonus buy-low slots ──────────────────────────────────────────────
-  const buyLowSlots = shuffled.reduce((acc: TradeResult[], r) => {
+  const buyLowSlots = shuffledForDisplay.reduce((acc: TradeResult[], r) => {
       if (acc.length >= BUY_LOW_COUNT) return acc;
 
       const totalGiven    = r.give.length + r.givePicks.length;

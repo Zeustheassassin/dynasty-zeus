@@ -1729,4 +1729,33 @@ describe("runFinderPipeline — simCandidates", () => {
     expect(vsEliteCandidate).toMatchObject({ oppIsContender: true, oppIsRebuildSide: false });
     expect(vsRebuildCandidate).toMatchObject({ oppIsContender: false, oppIsRebuildSide: true });
   });
+
+  it("regression: simDiscardedFingerprints does not shrink or reshuffle the candidate pool itself", () => {
+    // The caller re-invokes runFinderPipeline once vetting verdicts arrive so allTrades can
+    // exclude/backfill around them. If simCandidates were derived from a discard set that
+    // includes those verdicts, the pool would shrink on every recompute, handing the vetting
+    // effect a different set of candidates each time — an endless re-vet loop (regression).
+    // simCandidates must stay identical regardless of simDiscardedFingerprints.
+    const trades = [
+      mkTrade({ give: [mkPlayer("g1", "WR", 3000)], receive: [mkPlayer("r1", "RB", 3000)], oppRosterId: 2 }),
+      mkTrade({ give: [mkPlayer("g2", "WR", 3000)], receive: [mkPlayer("r2", "RB", 3000)], oppRosterId: 2 }),
+      mkTrade({ give: [mkPlayer("g3", "WR", 3000)], receive: [mkPlayer("r3", "RB", 3000)], oppRosterId: 2 }),
+    ];
+    const ctxBase = { finderDirection: "Elite", myFinderPlayoffOdds: 80, hasMySim: true };
+    const before = runFinderPipeline(trades, baseCtx(ctxBase));
+    expect(before.simCandidates).toHaveLength(3);
+
+    const discardedFp = buildTradeFingerprint("L1", 2, ["g1"], ["r1"]);
+    const after = runFinderPipeline(
+      trades,
+      baseCtx({ ...ctxBase, simDiscardedFingerprints: new Set([discardedFp]) }),
+    );
+    // Same 3 candidates, same fingerprints — simDiscardedFingerprints had zero effect on the pool.
+    expect(after.simCandidates.map((c) => c.fingerprint).sort()).toEqual(
+      before.simCandidates.map((c) => c.fingerprint).sort(),
+    );
+    // But the discarded trade is excluded from the actual displayed list.
+    expect(after.allTrades.some((t) => t.give[0].player_id === "g1")).toBe(false);
+    expect(before.allTrades.some((t) => t.give[0].player_id === "g1")).toBe(true);
+  });
 });

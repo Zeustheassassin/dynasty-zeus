@@ -1158,19 +1158,22 @@ function TradeFinder({
       // ── Discarded-trade suppression ──────────────────────────────────────
       // Fingerprints of exact give/receive/opponent combinations the user dismissed via the
       // card's Discard button (components/tradeHub/shared.ts's buildTradeFingerprint) — only
-      // still-active (unexpired) ones apply.
-      const userDiscardedFingerprints = new Set(
+      // still-active (unexpired) ones apply. Deliberately kept separate from the sim-vetting
+      // pass's verdicts below (passed as simDiscardedFingerprints instead) — this same set also
+      // drives which candidates simCandidates offers up for vetting, and folding sim verdicts
+      // into it would shrink/reshuffle that pool every time a verdict arrives, re-triggering
+      // the vetting effect on a different 22 candidates each round (an endless loop).
+      const discardedFingerprints = new Set(
         Object.entries(discardedTrades[selectedLeague?.league_id ?? ""] ?? {})
           .filter(([, expiresAt]) => isBlockActive(expiresAt))
           .map(([fp]) => fp)
       );
-      // Also fold in trades the real-simulation vetting pass (below) has already ruled out
-      // for negligible/wrong-direction playoff-odds movement — same discard mechanism, two
-      // sources feeding it, so the existing backfill logic handles both uniformly.
-      const discardedFingerprints = new Set([
-        ...userDiscardedFingerprints,
-        ...[...simVerdicts.entries()].filter(([, passed]) => !passed).map(([fp]) => fp),
-      ]);
+      // Trades the vetting effect below has already ruled out for negligible/wrong-direction
+      // playoff-odds movement — applied only to the final displayed list (see finderPipeline.ts's
+      // shuffledForDisplay), never to the candidate pool itself.
+      const simDiscardedFingerprints = new Set(
+        [...simVerdicts.entries()].filter(([, passed]) => !passed).map(([fp]) => fp)
+      );
 
       // ── "Never Accept" aversion tags ──────────────────────────────────────
       // Built from every PREDICTED_DECLINE trade_attempts row in this league (see TradeCard.tsx's
@@ -1253,6 +1256,7 @@ function TradeFinder({
         leagueMateProfileByRosterId,
         tradeAttempts,
         discardedFingerprints,
+        simDiscardedFingerprints,
         opponentAversionTags,
         globalAversionTags,
         historicalSnapshot,
@@ -1328,6 +1332,12 @@ function TradeFinder({
       setSimVettingProgress(null);
       return;
     }
+    // simCandidates is a stable pool (finderPipeline.ts derives it from discardedFingerprints
+    // only, never from sim verdicts — see shuffledForDisplay), so once every candidate here
+    // already has a verdict there's nothing new to vet. Without this check, the memo
+    // recomputing after setSimVerdicts (needed so allTrades picks up the new verdicts) hands
+    // this effect a fresh-but-identical array and it would re-run the whole vetting pass again.
+    if (candidates.every((c) => simVerdicts.has(c.fingerprint))) return;
     let cancelled = false;
     setSimVettingProgress({ done: 0, total: candidates.length });
     const myBeforeOdds = finderModel?.myFinderPlayoffOdds ?? 50;
@@ -1360,7 +1370,7 @@ function TradeFinder({
       }
     })();
     return () => { cancelled = true; };
-  }, [finderModel?.simCandidates, finderModel?.myFinderPlayoffOdds, previewTradeSimulation]);
+  }, [finderModel?.simCandidates, finderModel?.myFinderPlayoffOdds, previewTradeSimulation, simVerdicts]);
 
   if (!selectedLeague) return (
     <p className="text-slate-400 text-sm">Select a league from the dropdown above to use the Trade Finder.</p>
