@@ -51,11 +51,12 @@ function ProjectionsTab({
   // for the selected week. Count only sources that actually contributed to at
   // least one row, so the per-row Srcs ratio doesn't make every player look
   // like it's "missing" a source that was never going to have data this load.
-  const matchedSourceCount = React.useMemo(() => {
+  const sourcesWithData = React.useMemo(() => {
     const set = new Set<string>();
     projectionData.forEach((p) => p.sources.forEach((s) => set.add(s)));
-    return set.size;
+    return set;
   }, [projectionData]);
+  const matchedSourceCount = sourcesWithData.size;
 
   return (
     <>
@@ -119,7 +120,13 @@ function ProjectionsTab({
       {/* Source pills */}
       <div className="flex gap-2 mb-1 flex-wrap items-center">
         {PROJ_SOURCES.map((src) => {
-          const ok = projectionSourceStatus[src.id];
+          const fetchOk = projectionSourceStatus[src.id];
+          // A source can fetch successfully yet match zero players for the
+          // selected week (e.g. ESPN hasn't published weekly-projected stat
+          // blocks yet, only a season total) — treat that as distinct from a
+          // real match so the pill doesn't read as active when it contributed
+          // nothing to the table below.
+          const ok = fetchOk === true ? (sourcesWithData.has(src.id) ? true : "empty") : fetchOk;
           const isSleeper = src.id === "sleeper";
           const isEnabled = isSleeper || enabledExtraSet.has(src.id);
           const verifyUrl =
@@ -135,9 +142,10 @@ function ProjectionsTab({
             <div key={src.id} className="flex items-center gap-1">
               {isSleeper ? (
                 <span
-                  className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${ok === true ? "bg-emerald-900 text-emerald-300" : ok === false ? "bg-red-900 text-red-400" : "bg-slate-800 text-slate-400"}`}
+                  className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${ok === true ? "bg-emerald-900 text-emerald-300" : ok === "empty" ? "bg-amber-900 text-amber-300" : ok === false ? "bg-red-900 text-red-400" : "bg-slate-800 text-slate-400"}`}
+                  title={ok === "empty" ? "Fetched OK but matched 0 players for this week" : undefined}
                 >
-                  {src.label} ✓
+                  {src.label} {ok === "empty" ? "0 matched" : "✓"}
                 </span>
               ) : (
                 <button
@@ -147,14 +155,22 @@ function ProjectionsTab({
                     isEnabled
                       ? ok === true
                         ? "bg-emerald-900 border-emerald-700 text-emerald-300"
+                        : ok === "empty"
+                        ? "bg-amber-900 border-amber-700 text-amber-300"
                         : ok === false
                         ? "bg-red-900 border-red-700 text-red-400"
                         : "bg-blue-900 border-blue-700 text-blue-300"
                       : "bg-slate-800 border-slate-700 text-slate-500 hover:border-slate-500 hover:text-slate-300"
                   }`}
-                  title={isEnabled ? `Disable ${src.label}` : `Enable ${src.label} — verify the link first`}
+                  title={
+                    isEnabled
+                      ? ok === "empty"
+                        ? `${src.label} fetched OK but matched 0 players for this week`
+                        : `Disable ${src.label}`
+                      : `Enable ${src.label} — verify the link first`
+                  }
                 >
-                  {src.label} {isEnabled ? (ok === true ? "✓" : ok === false ? "✕" : "…") : "+ Add"}
+                  {src.label} {isEnabled ? (ok === true ? "✓" : ok === "empty" ? "0 matched" : ok === false ? "✕" : "…") : "+ Add"}
                 </button>
               )}
               {/* Verify link */}
