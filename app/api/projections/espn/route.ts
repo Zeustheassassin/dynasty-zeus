@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { ESPN_FANTASY_BASE_URL, FANTASYPROS_REVALIDATE_S } from '../../../../lib/constants';
 import { checkRateLimit } from '../../../../lib/rateLimit';
 
+// The full player-universe fetch below (~11k players before filtering) is
+// slower than a typical route — give it headroom past the default limit.
+export const maxDuration = 60;
+
 // ESPN's public (unauthenticated) fantasy football API. Undocumented but
 // stable — used by the espn-api open-source project for years. No API key,
 // no league ID required: "leaguedefaults/3" is ESPN's generic default-scoring
@@ -80,9 +84,23 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     },
   };
 
+  // The "leaguedefaults" pool (leagueless generic default-scoring player
+  // list) only ever carries the season-total projected block — confirmed
+  // live it has no per-week projected stats for any player, even close to
+  // kickoff. The top-level `players` endpoint (the full ~11k-player NFL
+  // universe, same one fantasy.espn.com's own projections page reads from)
+  // does carry real per-week projected blocks. It ignores X-Fantasy-Filter's
+  // usual narrowing (always returns the full universe, ~40MB), so we only
+  // pay that cost for weekly requests and filter down to QB/RB/WR/TE with
+  // real week-scoped stats below; season-long requests stay on the smaller,
+  // pre-filtered leaguedefaults pool.
+  const url = isSeason
+    ? `${ESPN_FANTASY_BASE_URL}/${year}/segments/0/leaguedefaults/3?view=kona_player_info`
+    : `${ESPN_FANTASY_BASE_URL}/${year}/players?view=kona_player_info`;
+
   try {
     const res = await fetch(
-      `${ESPN_FANTASY_BASE_URL}/${year}/segments/0/leaguedefaults/3?view=kona_player_info`,
+      url,
       {
         headers: {
           Accept: 'application/json',
@@ -97,7 +115,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     if (!res.ok) return NextResponse.json([]);
 
     const json = await res.json();
-    const raw: EspnPlayerEntry[] = json?.players ?? [];
+    // leaguedefaults wraps each player as { player: {...} } under a `players`
+    // key; the top-level `players` endpoint returns the player objects
+    // directly in a bare array.
+    const raw: EspnPlayerEntry[] = isSeason
+      ? (json?.players ?? [])
+      : (Array.isArray(json) ? json.map((player) => ({ player })) : []);
 
     const results = raw
       .map((entry) => {
@@ -125,11 +148,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         return {
           name: p.fullName,
           position: pos,
+          // ESPN only computes appliedTotal for past/current weeks under this
+          // view — future weeks' projected blocks carry raw stats with no
+          // total. Not used downstream (the client derives fpts from `stats`
+          // under the league's own scoring), kept only as a display fallback.
           fpts: block.appliedTotal ?? 0,
           stats,
         };
       })
-      .filter((r): r is NonNullable<typeof r> => r !== null && r.fpts > 0);
+      .filter((r): r is NonNullable<typeof r> => r !== null);
 
     return NextResponse.json(results);
   } catch {
