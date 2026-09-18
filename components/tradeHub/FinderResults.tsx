@@ -12,6 +12,13 @@ import TradeCard from "./TradeCard";
 
 interface FinderResultsProps {
   allTrades: TradeResult[];
+  /** "recommended" (default heuristic/net ranking) or "playoffImpact" (rank the sim-vetted
+   *  win-now pool by real playoff-odds gain, contender-only toggle in TradeFinder.tsx). */
+  sortMode: "recommended" | "playoffImpact";
+  /** Trade fingerprint -> real sim-measured playoff-odds gain for MY side. Only populated for
+   *  the win-now vetted candidate pool (finderModel.simCandidates) — trades outside it have no
+   *  entry and sort to the bottom of the playoffImpact ordering. */
+  playoffOddsGainByFingerprint: Map<string, number>;
   /** Real-simulation playoff-odds vetting pass progress (TradeFinder.tsx) — set while it's
    *  running, null once idle/done. Purely informational; allTrades already reflects the
    *  vetted list once available (the pipeline recomputes when the pass completes). */
@@ -55,6 +62,8 @@ interface FinderResultsProps {
 
 export default function FinderResults({
   allTrades,
+  sortMode,
+  playoffOddsGainByFingerprint,
   simVettingProgress,
   recentFingerprints,
   pinnedPlayer,
@@ -111,13 +120,30 @@ export default function FinderResults({
       // Same canonical adjusted-net TradeCard displays (shared helper), so the sort key
       // can't drift from each card's badge.
       const { net } = computeFinderAdjustedNet(trade, calcDropCost, myRoster?.roster_id ?? 0);
-      return { trade, net };
+      const fp = buildTradeFingerprint(
+        leagueId,
+        trade.oppRosterId,
+        [...trade.give.map((p) => p.player_id), ...trade.givePicks.map((p) => finderPickKey(p))],
+        [...trade.receive.map((p) => p.player_id), ...trade.receivePicks.map((p) => finderPickKey(p))],
+      );
+      const playoffOddsGain = playoffOddsGainByFingerprint.get(fp);
+      return { trade, net, playoffOddsGain };
     })
     // Acceptance-first ranking: every trade here already cleared the opponent-acceptance
     // gate in the pipeline, so order the survivors by the USER's gain — most favorable
     // first — instead of "closest to even". Keep bonus buy-low slots grouped after the
     // headline board (they're often ~even net) so they stay visible instead of scattered.
     .sort((a, b) => {
+      if (sortMode === "playoffImpact") {
+        // Trades outside the win-now sim-vetted pool have no real gain figure — push them
+        // below every trade that does, rather than mixing an unmeasured trade in by net value.
+        const aHas = a.playoffOddsGain != null;
+        const bHas = b.playoffOddsGain != null;
+        if (aHas !== bHas) return aHas ? -1 : 1;
+        if (aHas && bHas && a.playoffOddsGain !== b.playoffOddsGain) {
+          return b.playoffOddsGain! - a.playoffOddsGain!;
+        }
+      }
       const aBuy = a.trade.isBuyLow ? 1 : 0;
       const bBuy = b.trade.isBuyLow ? 1 : 0;
       if (aBuy !== bBuy) return aBuy - bBuy;

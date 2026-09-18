@@ -202,12 +202,16 @@ function TradeFinder({
   }, [directionRefreshing, selectedLeagueDirectionAdjusted]);
 
   // Real-simulation playoff-odds verdicts for finderModel.simCandidates (see the effect
-  // below, placed after finderModel exists). fingerprint -> true (survives) / false
-  // (discarded — negligible or wrong-direction playoff-odds movement). Fed back into
-  // discardedFingerprints below so the pipeline's existing discard-filter + slot-backfill
-  // logic does the rest — no separate filtering/backfill code needed here.
-  const [simVerdicts, setSimVerdicts] = useState<Map<string, boolean>>(new Map());
+  // below, placed after finderModel exists). fingerprint -> { passes, myOddsGain }.
+  // passes: survives (true) / discarded (false — negligible or wrong-direction playoff-odds
+  // movement). Fed back into discardedFingerprints below so the pipeline's existing
+  // discard-filter + slot-backfill logic does the rest — no separate filtering/backfill code
+  // needed here. myOddsGain is the actual sim-measured playoff-odds delta for MY side —
+  // kept alongside the pass/fail boolean so the "sort by playoff impact" toggle (contenders
+  // only) can rank the vetted pool by real impact instead of just filtering on it.
+  const [simVerdicts, setSimVerdicts] = useState<Map<string, { passes: boolean; myOddsGain: number }>>(new Map());
   const [simVettingProgress, setSimVettingProgress] = useState<{ done: number; total: number } | null>(null);
+  const [finderSortMode, setFinderSortMode] = useState<"recommended" | "playoffImpact">("recommended");
 
   // NFL depth chart map — sorted by depth_chart_order then dynasty value.
   const nflTeamDepth = useMemo(() => {
@@ -1172,7 +1176,7 @@ function TradeFinder({
       // playoff-odds movement — applied only to the final displayed list (see finderPipeline.ts's
       // shuffledForDisplay), never to the candidate pool itself.
       const simDiscardedFingerprints = new Set(
-        [...simVerdicts.entries()].filter(([, passed]) => !passed).map(([fp]) => fp)
+        [...simVerdicts.entries()].filter(([, v]) => !v.passes).map(([fp]) => fp)
       );
 
       // ── "Never Accept" aversion tags ──────────────────────────────────────
@@ -1342,15 +1346,16 @@ function TradeFinder({
     setSimVettingProgress({ done: 0, total: candidates.length });
     const myBeforeOdds = finderModel?.myFinderPlayoffOdds ?? 50;
     (async () => {
-      const verdicts = new Map<string, boolean>();
+      const verdicts = new Map<string, { passes: boolean; myOddsGain: number }>();
       for (let i = 0; i < candidates.length; i++) {
         if (cancelled) return;
         const c = candidates[i];
         const after = previewTradeSimulation(c.myRosterId, c.oppRosterId, c.giveIds, c.receiveIds);
         const myAfterOdds = after?.rowByRosterId?.get(c.myRosterId)?.playoffOdds;
+        const myOddsGain = myAfterOdds == null ? 0 : myAfterOdds - myBeforeOdds;
         const myPasses = myAfterOdds == null
           ? true // no sim data for my side — don't block on a check we can't run
-          : (myAfterOdds - myBeforeOdds) >= MIN_PLAYOFF_ODDS_GAIN;
+          : myOddsGain >= MIN_PLAYOFF_ODDS_GAIN;
         let oppPasses = true;
         if (c.oppIsContender || c.oppIsRebuildSide) {
           const oppAfterOdds = after?.rowByRosterId?.get(c.oppRosterId)?.playoffOdds;
@@ -1359,7 +1364,7 @@ function TradeFinder({
             oppPasses = c.oppIsContender ? oppDelta >= MIN_PLAYOFF_ODDS_GAIN : oppDelta <= -MIN_PLAYOFF_ODDS_GAIN;
           }
         }
-        verdicts.set(c.fingerprint, myPasses && oppPasses);
+        verdicts.set(c.fingerprint, { passes: myPasses && oppPasses, myOddsGain });
         if (!cancelled) setSimVettingProgress({ done: i + 1, total: candidates.length });
         // Yield to the main thread between sim calls so this can't jank the UI.
         await new Promise((resolve) => setTimeout(resolve, 0));
@@ -1398,6 +1403,13 @@ function TradeFinder({
     allOppPlayers, ignoredInLeague, calcDropCost, finderPickLabel,
     getTradeIntent,
   } = finderModel;
+
+  // fingerprint -> real sim-measured playoff-odds gain, for the "Playoff Impact" sort toggle
+  // below. Only populated for the ~22-candidate win-now pool the vetting effect actually
+  // simulates (see simVerdicts above) — trades outside that pool have no entry and
+  // FinderResults falls back to the recommended order for them.
+  const playoffOddsGainByFingerprint = new Map<string, number>();
+  simVerdicts.forEach((v, fp) => playoffOddsGainByFingerprint.set(fp, v.myOddsGain));
 
   return (
         <div className="space-y-4">
@@ -1503,12 +1515,33 @@ function TradeFinder({
               }
               {loadingCalcValues && <span className="ml-2 text-blue-400">Loading values…</span>}
             </p>
-            <button
-              onClick={() => startTransition(() => setFinderSeed(Math.random()))}
-              className="text-xs font-semibold text-blue-400 hover:text-blue-300 border border-blue-700 hover:border-blue-500 rounded-lg px-3 py-1.5 transition shrink-0 ml-3"
-            >
-              Refresh
-            </button>
+            <div className="flex items-center gap-2 shrink-0 ml-3">
+              {/* Championship-push only — playoff-odds gain is only meaningful, and only
+                  sim-vetted, for a genuine win-now push (see simCandidates above). */}
+              {isChampionshipPush && (
+                <div className="flex items-center rounded-lg border border-slate-700 overflow-hidden text-xs font-semibold">
+                  <button
+                    onClick={() => setFinderSortMode("recommended")}
+                    className={`px-2.5 py-1.5 transition ${finderSortMode === "recommended" ? "bg-blue-600 text-white" : "text-slate-400 hover:text-slate-200"}`}
+                  >
+                    Recommended
+                  </button>
+                  <button
+                    onClick={() => setFinderSortMode("playoffImpact")}
+                    className={`px-2.5 py-1.5 transition ${finderSortMode === "playoffImpact" ? "bg-blue-600 text-white" : "text-slate-400 hover:text-slate-200"}`}
+                    title="Sort by real sim-measured playoff-odds gain (win-now vetted pool only)"
+                  >
+                    Playoff Impact
+                  </button>
+                </div>
+              )}
+              <button
+                onClick={() => startTransition(() => setFinderSeed(Math.random()))}
+                className="text-xs font-semibold text-blue-400 hover:text-blue-300 border border-blue-700 hover:border-blue-500 rounded-lg px-3 py-1.5 transition"
+              >
+                Refresh
+              </button>
+            </div>
           </div>
           {ignoredInLeague.length > 0 && (
             <div className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/40 px-3 py-2 text-xs text-slate-500">
@@ -1578,6 +1611,8 @@ function TradeFinder({
           })()}
           <FinderResults
             allTrades={allTrades}
+            sortMode={isChampionshipPush ? finderSortMode : "recommended"}
+            playoffOddsGainByFingerprint={playoffOddsGainByFingerprint}
             simVettingProgress={simVettingProgress}
             recentFingerprints={recentFingerprints}
             pinnedPlayer={pinnedPlayer}
