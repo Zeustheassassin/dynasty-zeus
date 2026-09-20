@@ -1239,7 +1239,7 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
         losses: r.settings?.losses || 0,
         ties: r.settings?.ties || 0,
         fpts: r.settings?.fpts || 0,
-        max_pf: r.settings?.fpts_max || 0,
+        max_pf: r.settings?.ppts || 0,
         owner_id: r.owner_id,
       }))
       .sort((a, b) =>

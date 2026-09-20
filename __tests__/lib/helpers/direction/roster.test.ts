@@ -14,7 +14,7 @@ import { CURRENT_YEAR } from "@/lib/helpers/season";
 const makeRoster = (id: number, wins = 5, fpts = 1200) => ({
   roster_id: id,
   players: [] as string[],
-  settings: { wins, losses: 10 - wins, fpts, fpts_max: fpts * 1.1 },
+  settings: { wins, losses: 10 - wins, fpts, ppts: fpts * 1.1 },
 });
 
 const makeProfile = (
@@ -130,7 +130,7 @@ describe("getRosterDirectionProfile", () => {
     const rosters = Array.from({ length: 4 }, (_, i) => ({
       roster_id: i + 1,
       players: [`player${i + 1}`],
-      settings: { wins: 5, losses: 5, fpts: 1000, fpts_max: 1100 },
+      settings: { wins: 5, losses: 5, fpts: 1000, ppts: 1100 },
     }));
     const dynastyValues: Record<string, number> = {
       player1: 100,

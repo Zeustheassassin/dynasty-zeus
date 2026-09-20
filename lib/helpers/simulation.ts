@@ -194,7 +194,7 @@ export function simulateLeague({
     const weeklyBenchDepth = rawBenchDepth / (projectionIsSeason ? regularSeasonWeeks : 1);
     const seasonProjection = projectionIsSeason
       ? rawLineupScore
-      : Number(rosterEntry?.settings?.fpts_max || 0) + (Math.max(regularSeasonWeeks - Math.max(currentWeek - 1, 0), 0) * rawLineupScore);
+      : Number(rosterEntry?.settings?.ppts || 0) + (Math.max(regularSeasonWeeks - Math.max(currentWeek - 1, 0), 0) * rawLineupScore);
 
     const teamVolatilityMultiplier = (() => {
       const starters = pool.filter((p) => used.has(p.id) && players[p.id]);
@@ -249,7 +249,7 @@ export function simulateLeague({
       actualWins: Number(standing?.wins || rosterEntry.settings?.wins || 0),
       actualLosses: Number(standing?.losses || rosterEntry.settings?.losses || 0),
       pointsFor: Number(standing?.fpts || rosterEntry.settings?.fpts || 0),
-      maxPf: Number(standing?.max_pf || rosterEntry.settings?.fpts_max || 0),
+      maxPf: Number(standing?.max_pf || rosterEntry.settings?.ppts || 0),
       ...strength,
       expectedWins: 0,
       avgFinish: 0,

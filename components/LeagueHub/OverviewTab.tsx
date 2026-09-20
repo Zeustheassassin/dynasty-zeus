@@ -155,8 +155,14 @@ function OverviewTab({
     if (!entry) return null;
     const lr = entry.rosters;
     const ownedPicks: AugmentedPick[] = entry.picks || [];
-    const myRosterId = lr.find((r) => r.owner_id === user?.user_id)?.roster_id;
+    const myRoster = lr.find((r) => r.owner_id === user?.user_id);
+    const myRosterId = myRoster?.roster_id;
     if (!myRosterId) return null;
+    const record = {
+      wins: myRoster?.settings?.wins ?? 0,
+      losses: myRoster?.settings?.losses ?? 0,
+      ties: myRoster?.settings?.ties ?? 0,
+    };
     const profile = getRosterDirectionProfile({
       rosterId: myRosterId,
       rosters: lr,
@@ -198,6 +204,7 @@ function OverviewTab({
     return {
       league,
       ...profile,
+      record,
       bucket: adjBucket,
       bucketColor: adjColor,
       rawBucket: profile.bucket,
@@ -236,7 +243,7 @@ function OverviewTab({
   if (loadingLeagueOverview && !leagueOverviewLoaded) return <p className="text-sm text-blue-400">Loading league data…</p>;
   if (!leagues.length) return <p className="text-sm text-slate-500">No leagues found.</p>;
 
-  const GRID = "grid grid-cols-[minmax(180px,1.4fr)_minmax(170px,1.1fr)_56px_56px_56px_56px_64px_72px_56px_48px_48px_48px] gap-2 items-center px-1";
+  const GRID = "grid grid-cols-[minmax(180px,1.4fr)_52px_minmax(170px,1.1fr)_56px_56px_56px_56px_64px_72px_56px_48px_48px_48px] gap-2 items-center px-1";
 
   return (
     <div className="space-y-3">
@@ -296,7 +303,7 @@ function OverviewTab({
       </div>
 
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 overflow-x-auto">
-        <div className="min-w-[990px]">
+        <div className="min-w-[1050px]">
           <div className={`${GRID} text-[10px] uppercase tracking-wide text-slate-500 mb-1 pb-2 border-b border-slate-800`}>
             <button
               type="button"
@@ -305,6 +312,7 @@ function OverviewTab({
             >
               League{sortConfig?.key === "league" && <span>{sortConfig.dir === "asc" ? "▲" : "▼"}</span>}
             </button>
+            <span className="text-center">Record</span>
             <button
               type="button"
               onClick={() => toggleSort("direction")}
@@ -368,6 +376,9 @@ function OverviewTab({
                     {row.league.name}
                   </button>
                 </div>
+                <span className="text-center text-slate-300 font-mono">
+                  {row.record.wins}-{row.record.losses}{row.record.ties > 0 ? `-${row.record.ties}` : ""}
+                </span>
                 <div className="min-w-0">
                   <span className={`inline-flex max-w-full text-[10px] font-semibold px-2 py-0.5 rounded-full border truncate ${row.bucketColor}`}>{row.bucket}</span>
                   <div className="mt-0.5 text-[10px] text-slate-500 truncate">{row.shortAction}</div>

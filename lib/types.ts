@@ -77,8 +77,11 @@ export interface SleeperRosterSettings {
   fpts_decimal: number;
   fpts_against: number;
   fpts_against_decimal: number;
-  fpts_max?: number;
-  fpts_max_decimal?: number;
+  // Sleeper's "potential points" (optimal-lineup max) field — actually named `ppts` on the
+  // wire, not `fpts_max` (confirmed against the live rosters endpoint; `fpts_max` doesn't
+  // exist in Sleeper's response and was always silently falling back to 0).
+  ppts?: number;
+  ppts_decimal?: number;
   total_moves?: number;
   waiver_position?: number;
   waiver_budget_used?: number;

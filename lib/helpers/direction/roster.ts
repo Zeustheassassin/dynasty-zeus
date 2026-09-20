@@ -30,7 +30,9 @@ interface RosterLike {
     wins?: number;
     losses?: number;
     fpts?: number;
-    fpts_max?: number;
+    // Sleeper's field for optimal-lineup potential points is `ppts`, not `fpts_max` — see
+    // lib/types.ts's SleeperRosterSettings comment.
+    ppts?: number;
   };
 }
 
@@ -130,7 +132,7 @@ export const getRosterDirectionProfile = ({
     return bw !== aw ? bw - aw : (b.settings?.fpts || 0) - (a.settings?.fpts || 0);
   });
   const maxPfSorted = [...rosters].sort(
-    (a: RosterLike, b: RosterLike) => (b.settings?.fpts_max || 0) - (a.settings?.fpts_max || 0)
+    (a: RosterLike, b: RosterLike) => (b.settings?.ppts || 0) - (a.settings?.ppts || 0)
   );
 
   const dynRank   = rosterDynVal.findIndex((r) => Number(r.roster_id) === Number(rosterId)) + 1;
