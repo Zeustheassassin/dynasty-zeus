@@ -1,8 +1,8 @@
 // ============================================================
 // Cron — Daily dynasty-value history snapshot
 // ============================================================
-// Runs on a Vercel cron schedule. Reads the shared FantasyCalc 2QB
-// dynasty values already cached in fc_values_cache (num_qbs=2) — the
+// Runs on a Vercel cron schedule. Loads the shared FantasyCalc 2QB
+// dynasty values through getFcValues (lib/server/fcValues.ts) — the
 // exact same table/row app/hooks/useAppState.ts's loadPlayers merges
 // onto players[id].value for every user, regardless of league or
 // personal numQbs preference (see that file's loadPlayers) — and
@@ -10,6 +10,12 @@
 // for today's date. Upserted on (player_id, snapshot_date) so a
 // retried/duplicate run for the same day overwrites cleanly instead of
 // accumulating dupes, same idempotency pattern as the other crons.
+//
+// The cron refreshes FantasyCalc ITSELF when the cached row is older than
+// SNAPSHOT_MAX_AGE_MS, and refuses stale data: if it can't get values from
+// the last few hours it writes NOTHING and answers 502. Previously it read
+// whatever fc_values_cache held, so once cache writes broke (Sept 21 2026
+// audit) it stamped the same frozen payload every day — a fake, flat trend.
 //
 // This is deliberately NOT per-user: player_value_snapshots (the
 // existing single-row-per-user table) stores this same generic value,
@@ -33,18 +39,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import { logger } from "../../../../lib/logger";
+import { getFcValues, type FcRawEntry } from "../../../../lib/server/fcValues";
 
 const log = logger("cron/player-value-history");
 
 export const maxDuration = 60;
 
-// fc_values_cache/fc_redraft_values_cache store the raw FantasyCalc API
-// response verbatim (see app/api/fc-values/route.ts) — same shape the
-// simulation-history cron parses.
-interface FcRawEntry {
-  player?: { position?: string; sleeperId?: string | number };
-  value?: number;
-}
+/** A cached FantasyCalc row older than this is refreshed before the snapshot is taken, so each daily
+ *  row reflects values from the last few hours rather than a day-old cache. */
+const SNAPSHOT_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 
 function parsePlayerValues(raw: FcRawEntry[]): { player_id: string; value: number }[] {
   const rows: { player_id: string; value: number }[] = [];
@@ -80,18 +83,14 @@ export async function GET(req: NextRequest): Promise<Response> {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
-  const { data: cached, error: cacheErr } = await supabase
-    .from("fc_values_cache")
-    .select("data")
-    .eq("num_qbs", 2)
-    .single();
-  if (cacheErr) {
-    log.error("fc_values_cache read failed", { err: cacheErr.message });
-    return NextResponse.json({ error: "DB read failed" }, { status: 500 });
+  // allowStale:false — a history row must never be stamped with values older than the freshness window.
+  const fc = await getFcValues(2, true, { maxAgeMs: SNAPSHOT_MAX_AGE_MS, allowStale: false });
+  if (!fc) {
+    log.error("FantasyCalc values unavailable — skipping today's snapshot instead of stamping stale values");
+    return NextResponse.json({ ok: false, error: "FantasyCalc values unavailable" }, { status: 502 });
   }
 
-  const raw = Array.isArray(cached?.data) ? (cached.data as FcRawEntry[]) : [];
-  const values = parsePlayerValues(raw);
+  const values = parsePlayerValues(fc.data);
   if (!values.length) {
     return NextResponse.json({ ok: true, playersFound: 0, rowsWritten: 0 });
   }
@@ -124,5 +123,7 @@ export async function GET(req: NextRequest): Promise<Response> {
     playersFound: values.length,
     rowsWritten,
     snapshotDate,
+    fcSource: fc.source,
+    fcFetchedAt: fc.fetchedAt,
   });
 }

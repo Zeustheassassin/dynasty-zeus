@@ -3,30 +3,28 @@
 // Mirrors simulation-history.test.ts's approach: the route reads
 // process.env at request time, so env is set BEFORE each import and
 // vi.resetModules() runs per test. Covers the timing-safe auth guard,
-// env-misconfiguration guards, the fc_values_cache read-error guard, the
-// zero-work early return, and the value-parsing + upsert happy path.
+// env-misconfiguration guards, the FantasyCalc-unavailable guard (getFcValues is
+// mocked — its own behavior is covered in __tests__/lib/server/fcValues.test.ts),
+// the zero-work early return, and the value-parsing + upsert happy path.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const SECRET = "super-secret-cron-token";
 
 interface FakeState {
-  fcCache: { data: unknown; error: { message: string } | null };
   upsertedBatches: unknown[][];
 }
 
 let fake: FakeState;
 
-function makeQueryBuilder(table: string) {
-  if (table === "fc_values_cache") {
-    return {
-      select: (_cols: string) => ({
-        eq: (_col: string, _val: unknown) => ({
-          single: () => Promise.resolve({ data: fake.fcCache.data, error: fake.fcCache.error }),
-        }),
-      }),
-    };
-  }
+// The cron's own service-role client only writes player_value_history now — FantasyCalc values come
+// from the (mocked) shared loader.
+const h = vi.hoisted(() => ({ getFcValues: vi.fn() }));
+vi.mock("@/lib/server/fcValues", () => ({ getFcValues: h.getFcValues }));
+
+const fcResult = (data: unknown[], source = "live") => ({ data, source, fetchedAt: "2026-09-21T08:00:00.000Z" });
+
+function makeQueryBuilder(_table: string) {
   // player_value_history
   return {
     upsert: (batch: unknown[], _opts: unknown) => {
@@ -61,7 +59,9 @@ const ORIG_ENV = {
 };
 
 beforeEach(() => {
-  fake = { fcCache: { data: null, error: null }, upsertedBatches: [] };
+  fake = { upsertedBatches: [] };
+  h.getFcValues.mockReset();
+  h.getFcValues.mockResolvedValue(fcResult([]));
   process.env.CRON_SECRET = SECRET;
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://x.supabase.co";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "service.role.key";
@@ -114,17 +114,30 @@ describe("GET auth + env guards", () => {
   });
 });
 
-describe("GET fc_values_cache read + write", () => {
-  it("returns 500 when the fc_values_cache read errors", async () => {
-    fake.fcCache = { data: null, error: { message: "boom" } };
+describe("GET FantasyCalc load + snapshot write", () => {
+  it("asks for the 2QB dynasty values with a short freshness window and NEVER accepts stale data", async () => {
     const GET = await loadGET();
-    const res = await GET(makeReq(`Bearer ${SECRET}`));
-    expect(res.status).toBe(500);
-    expect((await res.json()).error).toMatch(/DB read failed/);
+    await GET(makeReq(`Bearer ${SECRET}`));
+    expect(h.getFcValues).toHaveBeenCalledTimes(1);
+    const [numQbs, isDynasty, opts] = h.getFcValues.mock.calls[0];
+    expect([numQbs, isDynasty]).toEqual([2, true]);
+    // Refreshes rather than reuse a day-old cache row, and refuses to stamp expired values as today's.
+    expect(opts.allowStale).toBe(false);
+    expect(opts.maxAgeMs).toBeGreaterThan(0);
+    expect(opts.maxAgeMs).toBeLessThanOrEqual(12 * 60 * 60 * 1000);
   });
 
-  it("returns ok:true with zero work when the cache has no usable entries", async () => {
-    fake.fcCache = { data: { data: [{ player: { position: "PICK" }, value: 5000 }] }, error: null };
+  it("answers 502 and writes NOTHING when FantasyCalc values are unavailable (no fake history point)", async () => {
+    h.getFcValues.mockResolvedValue(null);
+    const GET = await loadGET();
+    const res = await GET(makeReq(`Bearer ${SECRET}`));
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ ok: false, error: "FantasyCalc values unavailable" });
+    expect(fake.upsertedBatches).toHaveLength(0);
+  });
+
+  it("returns ok:true with zero work when the payload has no usable entries", async () => {
+    h.getFcValues.mockResolvedValue(fcResult([{ player: { position: "PICK" }, value: 5000 }]));
     const GET = await loadGET();
     const res = await GET(makeReq(`Bearer ${SECRET}`));
     expect(res.status).toBe(200);
@@ -133,17 +146,17 @@ describe("GET fc_values_cache read + write", () => {
   });
 
   it("parses sleeperId/value entries and upserts one row per player for today", async () => {
-    fake.fcCache = {
-      data: {
-        data: [
+    h.getFcValues.mockResolvedValue(
+      fcResult(
+        [
           { player: { position: "WR", sleeperId: "1001" }, value: 8000 },
           { player: { position: "RB", sleeperId: "1002" }, value: 6500.6 },
           { player: { position: "QB" }, value: 9000 }, // no sleeperId — skipped
           { player: { position: "WR", sleeperId: "1003" }, value: 0 }, // zero value — skipped
         ],
-      },
-      error: null,
-    };
+        "live"
+      )
+    );
     const GET = await loadGET();
     const res = await GET(makeReq(`Bearer ${SECRET}`));
     expect(res.status).toBe(200);
@@ -152,6 +165,7 @@ describe("GET fc_values_cache read + write", () => {
     expect(body.playersFound).toBe(2);
     expect(body.rowsWritten).toBe(2);
     expect(typeof body.snapshotDate).toBe("string");
+    expect(body.fcSource).toBe("live");
 
     expect(fake.upsertedBatches).toHaveLength(1);
     const batch = fake.upsertedBatches[0] as { player_id: string; value: number; snapshot_date: string }[];

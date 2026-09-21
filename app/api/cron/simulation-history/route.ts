@@ -33,8 +33,9 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "crypto";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { createClient } from "@supabase/supabase-js";
 import { safeFetch, withConcurrency } from "../../../../lib/sleeperServer";
+import { getFcValues, type FcRawEntry } from "../../../../lib/server/fcValues";
 import {
   CURRENT_YEAR, YEARS, ROUNDS, BASE_YEAR,
   getDraftRoundSlot, computeScoringMultipliers, computeLeagueFpts,
@@ -115,16 +116,8 @@ async function fetchSlimPlayers(): Promise<Record<string, SimPlayer>> {
   return players;
 }
 
-// ── FantasyCalc raw-entry parsing (fc_values_cache / fc_redraft_values_cache
-// store the raw FantasyCalc API response verbatim — see app/api/fc-values).
-interface FcRawEntry {
-  player?: {
-    position?: string; name?: string; firstName?: string; lastName?: string;
-    sleeperId?: string | number;
-  };
-  value?: number;
-}
-
+// ── FantasyCalc raw-entry parsing (getFcValues hands back the raw FantasyCalc
+// API response — the same array fc_values_cache / fc_redraft_values_cache store).
 interface FcValueMap {
   bySleeperId: Record<string, number>;
   byName: Map<string, number>;
@@ -148,15 +141,13 @@ function parseFcRawEntries(raw: FcRawEntry[]): FcValueMap {
   return { bySleeperId, byName };
 }
 
-async function readFcTable(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase: SupabaseClient<any>,
-  table: "fc_values_cache" | "fc_redraft_values_cache",
-  numQbs: number
-): Promise<FcValueMap> {
-  const { data } = await supabase.from(table).select("data").eq("num_qbs", numQbs).single();
-  const raw = Array.isArray(data?.data) ? (data.data as FcRawEntry[]) : [];
-  return parseFcRawEntries(raw);
+/** One format's FantasyCalc values, or null when there is nothing usable. getFcValues refreshes the
+ *  cache itself (fresh cache -> live fetch -> expired cache), so this never depends on a user having
+ *  warmed it — and null means a league in that format must NOT be simulated: with an empty map the
+ *  sim silently scores every projection-less player 0 and the odds would be stored as a fake data point. */
+async function loadFcMap(numQbs: number, isDynasty: boolean): Promise<FcValueMap | null> {
+  const result = await getFcValues(numQbs === 1 ? 1 : 2, isDynasty);
+  return result ? parseFcRawEntries(result.data) : null;
 }
 
 function applyMultipliers(
@@ -565,22 +556,37 @@ export async function GET(req: NextRequest): Promise<Response> {
   const season = nflState?.season ?? CURRENT_YEAR;
   const isOffseason = currentWeek === 0;
 
-  const [fcDyn1, fcDyn2, fcRed1, fcRed2] = await Promise.all([
-    readFcTable(supabase, "fc_values_cache", 1),
-    readFcTable(supabase, "fc_values_cache", 2),
-    readFcTable(supabase, "fc_redraft_values_cache", 1),
-    readFcTable(supabase, "fc_redraft_values_cache", 2),
+  // FantasyCalc values for only the formats these leagues use (dynasty + redraft per numQbs), plus the
+  // superflex dynasty map the canonical rookie board is ranked by in the offseason. Each load
+  // refreshes the cache itself, so the weekly run never depends on a user having warmed it.
+  const leagueQbFormats = [...new Set(leagues.map((l) => getLeagueNumQbs(l)))];
+  const dynastyByNumQbs: Record<number, FcValueMap | null> = {};
+  const redraftByNumQbs: Record<number, FcValueMap | null> = {};
+  await Promise.all([
+    ...[...new Set([...leagueQbFormats, ...(isOffseason ? [2] : [])])].map(async (n) => {
+      dynastyByNumQbs[n] = await loadFcMap(n, true);
+    }),
+    ...leagueQbFormats.map(async (n) => {
+      redraftByNumQbs[n] = await loadFcMap(n, false);
+    }),
   ]);
-  const dynastyByNumQbs: Record<number, FcValueMap> = { 1: fcDyn1, 2: fcDyn2 };
-  const redraftByNumQbs: Record<number, FcValueMap> = { 1: fcRed1, 2: fcRed2 };
+
+  // Offseason odds project every league's rookies from the superflex board — without it every league
+  // would be simulated with no projected rookies, so fail the run instead of storing that.
+  const fc2qb = dynastyByNumQbs[2];
+  if (isOffseason && !fc2qb) {
+    log.error("FantasyCalc superflex dynasty values unavailable — aborting the offseason run");
+    return NextResponse.json({ ok: false, error: "FantasyCalc values unavailable" }, { status: 502 });
+  }
 
   const { items: rawProjItems, isSeasonMode: projIsSeasonMode } = await fetchRawProjections(season, currentWeek);
   const playerStats = await fetchPlayerStats(season, currentWeek);
   const rookieYear = String(BASE_YEAR);
-  const rookies = isOffseason ? await fetchCanonicalRookieBoard(rookieYear, dynastyByNumQbs[2]) : [];
+  const rookies = isOffseason && fc2qb ? await fetchCanonicalRookieBoard(rookieYear, fc2qb) : [];
 
   // ── 3. Per-league simulate + collect rows ──
   let leaguesSimulated = 0;
+  let leaguesSkipped = 0;
   const allRows: HistoryRow[] = [];
   const nowIso = new Date().toISOString();
 
@@ -588,14 +594,25 @@ export async function GET(req: NextRequest): Promise<Response> {
     leagues,
     async (league) => {
       try {
+        // Checked before any Sleeper fan-out so a skipped league costs nothing.
+        const numQbs = getLeagueNumQbs(league);
+        const fcDynasty = dynastyByNumQbs[numQbs];
+        const fcRedraft = redraftByNumQbs[numQbs];
+        if (!fcDynasty || !fcRedraft) {
+          log.error("skipping league — FantasyCalc values unavailable for its format", {
+            leagueId: league.league_id, numQbs, dynasty: !!fcDynasty, redraft: !!fcRedraft,
+          });
+          leaguesSkipped++;
+          return;
+        }
+
         const core = await fetchLeagueCore(league);
         if (!core) return;
 
-        const numQbs = getLeagueNumQbs(league);
         const scoringSettings = league.scoring_settings ?? DEFAULT_SCORING;
         const multipliers = computeScoringMultipliers(scoringSettings);
-        const leagueAdjustedFcValues = applyMultipliers(dynastyByNumQbs[numQbs].bySleeperId, multipliers, players);
-        const leagueAdjustedRedraftValues = applyMultipliers(redraftByNumQbs[numQbs].bySleeperId, multipliers, players);
+        const leagueAdjustedFcValues = applyMultipliers(fcDynasty.bySleeperId, multipliers, players);
+        const leagueAdjustedRedraftValues = applyMultipliers(fcRedraft.bySleeperId, multipliers, players);
 
         const projectionData = buildProjectionRows(rawProjItems, projIsSeasonMode, scoringSettings, players);
         const projectionWeek = projIsSeasonMode ? 0 : currentWeek;
@@ -691,12 +708,19 @@ export async function GET(req: NextRequest): Promise<Response> {
     rowsWritten += Array.isArray(data) ? data.length : 0;
   }
 
-  return NextResponse.json({
-    ok: true,
-    leaguesFound: leagues.length,
-    leaguesSimulated,
-    rowsWritten,
-    season,
-    currentWeek,
-  });
+  // Every league skipped for missing FantasyCalc values is a failed run, not a quiet success — answer
+  // non-2xx so it shows up in the Vercel cron log instead of reading as "ok, 0 rows".
+  const allSkipped = leaguesSkipped > 0 && leaguesSkipped === leagues.length;
+  return NextResponse.json(
+    {
+      ok: !allSkipped,
+      leaguesFound: leagues.length,
+      leaguesSimulated,
+      leaguesSkipped,
+      rowsWritten,
+      season,
+      currentWeek,
+    },
+    { status: allSkipped ? 502 : 200 }
+  );
 }

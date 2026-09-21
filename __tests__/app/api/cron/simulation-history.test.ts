@@ -6,7 +6,9 @@
 // high-value, cheap-to-verify boundary the league-transactions cron test
 // covers: the timing-safe auth guard, env-misconfiguration guards, the
 // user_sleeper_links DB-error guard, and the zero-work early return
-// (which happens before any FC-cache/simulation work runs).
+// (which happens before any FC-cache/simulation work runs), plus how the run
+// behaves when FantasyCalc values are (un)available. getFcValues is mocked —
+// its own behavior is covered in __tests__/lib/server/fcValues.test.ts.
 //
 // The route reads process.env at request time and imports CURRENT_YEAR /
 // SLEEPER_BASE_URL at module scope, so we set env BEFORE importing and use
@@ -19,6 +21,7 @@ const SECRET = "super-secret-cron-token";
 interface FakeState {
   links: { rows: unknown[] | null; error: { message: string } | null };
   createClientCalls: number;
+  historyUpserts: number;
 }
 
 let fake: FakeState;
@@ -29,19 +32,19 @@ function makeQueryBuilder(table: string) {
       if (table === "user_sleeper_links") {
         return Promise.resolve({ data: fake.links.rows, error: fake.links.error });
       }
-      // fc_values_cache / fc_redraft_values_cache read chain:
-      // .select("data").eq("num_qbs", numQbs).single()
-      return {
-        eq: (_col: string, _val: unknown) => ({
-          single: () => Promise.resolve({ data: null, error: { message: "no rows" } }),
-        }),
-      };
+      // Only user_sleeper_links is read with this client — FantasyCalc values come from the mocked loader.
+      return Promise.resolve({ data: [], error: null });
     },
-    upsert: (_batch: unknown[], _opts: unknown) => ({
-      select: (_cols: string) => Promise.resolve({ data: [], error: null }),
-    }),
+    upsert: (_batch: unknown[], _opts: unknown) => {
+      fake.historyUpserts++;
+      return { select: (_cols: string) => Promise.resolve({ data: [], error: null }) };
+    },
   };
 }
+
+const h = vi.hoisted(() => ({ getFcValues: vi.fn() }));
+vi.mock("@/lib/server/fcValues", () => ({ getFcValues: h.getFcValues }));
+const fcOk = { data: [], source: "cache", fetchedAt: "2026-09-21T09:00:00.000Z" };
 
 vi.mock("@supabase/supabase-js", () => ({
   createClient: (_url: string, _key: string, _opts: unknown) => {
@@ -92,7 +95,9 @@ const ORIG_ENV = {
 };
 
 beforeEach(() => {
-  fake = { links: { rows: [], error: null }, createClientCalls: 0 };
+  fake = { links: { rows: [], error: null }, createClientCalls: 0, historyUpserts: 0 };
+  h.getFcValues.mockReset();
+  h.getFcValues.mockResolvedValue(fcOk);
   fetchRoutes = [];
   installFetch();
   process.env.CRON_SECRET = SECRET;
@@ -228,5 +233,94 @@ describe("GET league discovery", () => {
     const body = await res.json();
     expect(body.leaguesFound).toBe(1);
     expect(rosterFetchCount).toBe(1);
+  });
+});
+
+describe("GET FantasyCalc availability", () => {
+  const league2qb = {
+    league_id: "L-sf", name: "Superflex", settings: { taxi_slots: 2, best_ball: 0 },
+    roster_positions: ["QB", "RB", "WR", "TE", "FLEX", "SUPER_FLEX", "BN"],
+  };
+  const league1qb = {
+    league_id: "L-1qb", name: "One QB", settings: { taxi_slots: 2, best_ball: 0 },
+    roster_positions: ["QB", "RB", "WR", "TE", "FLEX", "BN"],
+  };
+  let rosterFetches: string[];
+
+  beforeEach(() => {
+    rosterFetches = [];
+  });
+
+  function setup(leagues: unknown[], { inSeason }: { inSeason: boolean }) {
+    fake.links = { rows: [{ sleeper_user_id: "s1" }], error: null };
+    route((u) => u.includes("/user/s1/leagues/"), leagues);
+    if (inSeason) route((u) => u.includes("/state/nfl"), { season_type: "regular", week: 5, season: "2026" });
+    route((u) => {
+      if (u.includes("/rosters")) { rosterFetches.push(u); return true; }
+      return false;
+    }, []);
+  }
+  const asked = () =>
+    h.getFcValues.mock.calls.map(([n, dynasty]) => `${n}:${dynasty ? "dynasty" : "redraft"}`).sort();
+  const run = async () => (await loadGET())(makeReq(`Bearer ${SECRET}`));
+
+  it("loads only the formats its leagues use — a superflex-only run never asks for 1QB", async () => {
+    setup([league2qb], { inSeason: true });
+    await run();
+    expect(asked()).toEqual(["2:dynasty", "2:redraft"]);
+  });
+
+  it("a single-QB league asks for the 1QB formats", async () => {
+    setup([league1qb], { inSeason: true });
+    await run();
+    expect(asked()).toEqual(["1:dynasty", "1:redraft"]);
+  });
+
+  it("in the offseason it also loads the superflex dynasty map the rookie board is ranked by", async () => {
+    setup([league1qb], { inSeason: false });
+    await run();
+    expect(asked()).toEqual(["1:dynasty", "1:redraft", "2:dynasty"]);
+  });
+
+  it("aborts with 502 (nothing fetched, nothing written) when the offseason superflex values are unavailable", async () => {
+    setup([league2qb], { inSeason: false });
+    h.getFcValues.mockImplementation(async (n: number, dynasty: boolean) => (n === 2 && dynasty ? null : fcOk));
+    const res = await run();
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ ok: false, error: "FantasyCalc values unavailable" });
+    expect(rosterFetches).toEqual([]);
+    expect(fake.historyUpserts).toBe(0);
+  });
+
+  it("skips every league — without spending Sleeper requests — and answers 502 when FantasyCalc is down in-season", async () => {
+    setup([league2qb], { inSeason: true });
+    h.getFcValues.mockResolvedValue(null);
+    const res = await run();
+    expect(res.status).toBe(502);
+    const body = await res.json();
+    expect(body).toMatchObject({ ok: false, leaguesFound: 1, leaguesSimulated: 0, leaguesSkipped: 1, rowsWritten: 0 });
+    expect(rosterFetches).toEqual([]);
+    expect(fake.historyUpserts).toBe(0);
+  });
+
+  it("skips a league whose REDRAFT map is missing even though the dynasty map loaded (the sim needs both)", async () => {
+    setup([league2qb], { inSeason: true });
+    h.getFcValues.mockImplementation(async (_n: number, dynasty: boolean) => (dynasty ? fcOk : null));
+    const res = await run();
+    expect(res.status).toBe(502);
+    expect((await res.json()).leaguesSkipped).toBe(1);
+    expect(rosterFetches).toEqual([]);
+  });
+
+  it("a partial outage skips only the affected league and does not fail the run", async () => {
+    setup([league2qb, league1qb], { inSeason: true });
+    h.getFcValues.mockImplementation(async (n: number) => (n === 2 ? fcOk : null));
+    const res = await run();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({ ok: true, leaguesFound: 2, leaguesSkipped: 1 });
+    // The 2QB league still ran (its rosters were requested); the 1QB league was skipped up front.
+    expect(rosterFetches.filter((u) => u.includes("L-sf"))).toHaveLength(1);
+    expect(rosterFetches.filter((u) => u.includes("L-1qb"))).toHaveLength(0);
   });
 });
