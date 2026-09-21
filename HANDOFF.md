@@ -11,7 +11,7 @@
 > - **Browser verification without touching Sleeper.** [scripts/gameday-stub-check.mjs](scripts/gameday-stub-check.mjs) (`node --env-file=.env.test.local scripts/gameday-stub-check.mjs`, dev server running): Playwright with EVERY `/api/*` and direct Sleeper/FantasyCalc/ESPN call stubbed; only localhost and the throwaway Supabase account's auth are real. Plays a scripted 4-stage game and asserts 25 things (live clock/score/possession, No game, win %, bench regret, ESPN overlay both directions, per-stat pace path, polling picks up changes with no reload, `?bypass=1`, Dashboard poll, polling goes quiet when all games are Final). 25/25 pass.
 > - **Two real bugs the browser run found (both fixed):** (1) the cross-league Dashboard never loaded the scoreboard or projections unless a league was selected in the top nav — it rendered every starter "upcoming" with +0.0 left; the hub-open effect now loads week-level data unconditionally and only the single-league matchups need a selected league. (2) With no projections loaded and games remaining, win probability read a made-up **100%**; `getMatchupWinProbability` now returns `null` (UI shows nothing) when neither side has any uncertainty while games remain.
 > - **Stats-URL bug found and FIXED (option B, no DELETE):** `/api/stats/sleeper-weekly` (feeds `usePlayerStats` — Trade Hub rolling snap%/target/carry stats) and the simulation-history cron both called `/stats/nfl/{season}/{week}?season_type=regular`, which returns `{}` for every player for every week/season tested (incl. 2025 wk10) — so those usage stats were silently empty. Both now use `/stats/nfl/regular/{season}/{week}` (verified to carry `off_snp`, `tm_off_snp`, `rec_tgt`, `rush_att`, the exact fields both consumers read). The weekly route's Supabase cache (`sleeper_stats_cache`, 7-day TTL) had pinned the empties, so rows are now written/read under a versioned key `v2-{season}` (`season` is free-form TEXT; PK (season, week)) — old rows are simply never read and the existing 60-day cleanup cron ages them out; nothing was deleted. The route also refuses to cache an all-empty response and ignores a cached row with no stats, so this class of bug cannot pin itself again. Bump `CACHE_KEY_VERSION` if the cached shape ever changes. Trade Hub usage numbers will now be real for the first time — expect Finder/UI behavior that reads them to shift.
-> - tsc clean (also after `next build`), eslint clean on all 37 changed files, **967/54 tests green** (up from 912/52).*
+> - tsc clean (also after `next build`), eslint clean on all 37 changed files, **971/55 tests green** (up from 912/52).*
 >
 > *Prior review: 2026-09-21, HEAD `ef8784b` (working tree on top of it, uncommitted; HANDOFF was last touched at `78d1677`, so commits `5478a20`..`ef8784b` — Trade Finder playoff-odds sort, ESPN per-week projections, Max PF `ppts` fix — are not narrated here). Gameday Hub live accuracy — the 9-item plan saved as `project_gameday_live_accuracy_plan_sept21`. Root cause: `buildGamedayMatchups` set a Live starter's remaining points to `max(fullProjection - actual, 0)`, ignoring how much of the game was left (a player past their pre-game number showed 0 left at halftime), and nothing ever refreshed (no polling; matchups proxy cached 300s + 60s client TTL ≈ 6 min stale).
 > - **Live model, new pure module [lib/helpers/gamedayLive.ts](lib/helpers/gamedayLive.ts)** (every constant tunable in one place): `gameFractionRemaining` (period/clock → 0..1; halftime = 0.5; OT measured against regulation), `projectRemainingPoints` (baseline `proj × fractionLeft`, blended with observed pace via shrinkage `elapsed/(elapsed+1.5)` and a 0.4–2.0 clamp), `gameScriptMultiplier` (lead shifts RB up / WR-TE-QB down, ramps in by halftime, late-blowout leader QB/WR/TE cut), `playerAvailability` (Out/IR/PUP/Sus/Inactive → 0, Doubtful → ×0.2), `playerRemainingStdDev` + `winProbability` (normal approx, std-dev ≈ 0.4×proj+2 scaled by √time-left and source disagreement from `projectionVolatility`), `computeBenchRegret` (greedy optimal lineup, nested position ⊂ FLEX ⊂ SUPER_FLEX eligibility), `formatGameDetail`, `getGamedayPollPlan`.
@@ -221,7 +221,7 @@
 17. [Dev workflow: build, lint, test](#17-dev-workflow-build-lint-test)
 18. [CI pipeline (GitHub Actions)](#18-ci-pipeline-github-actions)
 19. [ESLint & TypeScript rules that bite](#19-eslint--typescript-rules-that-bite)
-20. [Test suite scope (967 tests, 54 files)](#20-test-suite-scope-967-tests-54-files)
+20. [Test suite scope (971 tests, 55 files)](#20-test-suite-scope-971-tests-55-files)
 21. [Common failure modes & where to look](#21-common-failure-modes--where-to-look)
 22. [Things intentionally NOT done (and why)](#22-things-intentionally-not-done-and-why)
 23. [Known open items & time bombs for the next owner](#23-known-open-items--time-bombs-for-the-next-owner)
@@ -409,7 +409,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 The anon key is safe to ship to the browser because **RLS** does the real access control (see below). The client throws on startup if `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` are missing.
 
 Session handling lives in [app/hooks/useAuthState.ts](app/hooks/useAuthState.ts):
-- On mount it calls `supabase.auth.getUser()` to hydrate the current session, then subscribes via `supabase.auth.onAuthStateChange` and stores the user in React state (`supabaseUser`). The subscription is cleaned up on unmount ([useAuthState.ts:26](app/hooks/useAuthState.ts#L26)).
+- On mount it calls `supabase.auth.getUser()` to hydrate the current session, then subscribes via `supabase.auth.onAuthStateChange` and stores the user in React state (`supabaseUser`). Updates go through `sameAuthUser` (id + updated_at + email) so auth-js re-emitting SIGNED_IN on tab refocus keeps the same object reference and does not re-run the ~15 effects keyed on `[supabaseUser]`. The subscription is cleaned up on unmount ([useAuthState.ts:26](app/hooks/useAuthState.ts#L26)).
 - `signIn()` ([useAuthState.ts:68](app/hooks/useAuthState.ts#L68)) wraps `signInWithPassword` in a 10-second timeout race so a dead network/Supabase project surfaces a real error instead of hanging. It deliberately **does not** set `supabaseUser` itself — it lets `onAuthStateChange` fire and update state, avoiding a race with sign-out ([useAuthState.ts:97](app/hooks/useAuthState.ts#L97)).
 - `signUp()` uses `supabase.auth.signUp` (email confirmation expected), and `resetPassword()` uses `resetPasswordForEmail` with `redirectTo` set to the app origin.
 - The last-used email is remembered in `localStorage["lastLoginEmail"]` for convenience; the password is never persisted.
@@ -717,7 +717,7 @@ A few patterns repeat throughout `useAppState` and are worth recognizing on sigh
 
 | Hook | Owns | Notable behavior |
 |---|---|---|
-| [`useAuthState`](app/hooks/useAuthState.ts) | Supabase auth user + login form | Subscribes to `supabase.auth.onAuthStateChange`; `signIn` races the call against a 10s timeout. Remembers last email in localStorage (`lastLoginEmail`). |
+| [`useAuthState`](app/hooks/useAuthState.ts) | Supabase auth user + login form | Subscribes to `supabase.auth.onAuthStateChange`; `signIn` races the call against a 10s timeout. Dedupes equivalent auth events (`sameAuthUser`). Remembers last email in localStorage (`lastLoginEmail`). |
 | [`usePlayerAnnotations`](app/hooks/usePlayerAnnotations.ts) | League notes, player notes, per-league manual asset dispositions (`handleSetAssetDisposition` — Core/Pricey/Shopping/Offload for own players+picks, SELL_NO/SELL_OK for opponents'), ignored owners | **Dual-write pattern:** every setter writes localStorage synchronously *and* upserts Supabase. Reads `supabaseUser` through a ref so the save callbacks stay dependency-free and never go stale. `handleSetAssetDisposition` is an explicit set-or-clear (not the old click-to-cycle) — see §10's disposition-system writeup. |
 | [`useHubRouting`](app/hooks/useHubRouting.ts) | The 5 tab selections | Lazy-init from localStorage, validated against registries; persists on change (detail below). |
 | [`useNflState`](app/hooks/useNflState.ts) | Current NFL week/season | `loadNflState` is a no-op if already loaded (guards via `nflStateRef`). |
@@ -1517,7 +1517,7 @@ The flat config in [eslint.config.mjs](eslint.config.mjs) is minimal: it just sp
 
 Beyond ESLint, TypeScript is strict at the `tsc` step. `tsconfig.json` enables `strict`, plus `noUnusedLocals` and `noUnusedParameters` — so an unused import, variable, or function parameter is a **build/type-check failure**, not a warning. This is the single most common reason a local edit that "looks fine" red-X's in CI.
 
-## 20. Test suite scope (967 tests, 54 files)
+## 20. Test suite scope (971 tests, 55 files)
 
 Run via PowerShell. The suite is [Vitest](vitest.config.mts) in a `jsdom` environment, globbing `**/__tests__/**/*.{ts,tsx}` and `**/*.{test,spec}.{ts,tsx}`. It deliberately covers **pure logic and server routes, not UI rendering** — there are no component-render or e2e tests.
 
@@ -1579,7 +1579,7 @@ Other lower-priority items the audit flagged that I did not re-verify line-by-li
 4. `npm run dev` → confirm the app loads at `http://localhost:3000`.
 5. `npm run build` → confirm a production build succeeds (also generates `.next/types/` so the next step works).
 6. `npx tsc --noEmit` → confirm type-check passes (run it *after* the build).
-7. **In PowerShell** (not Git Bash): `npm run test` → confirm **967 tests pass** across 54 files. If you see "0 tests," you're in the wrong shell.
+7. **In PowerShell** (not Git Bash): `npm run test` → confirm **971 tests pass** across 55 files. If you see "0 tests," you're in the wrong shell.
 8. `npm run lint` → confirm clean (remember `exhaustive-deps` warnings won't fail it; the four error rules will).
 9. Read [AGENTS.md](AGENTS.md) — it warns this Next.js version diverges from public docs; consult `node_modules/next/dist/docs/` before writing framework code.
 10. Walk the entry path: [app/page.tsx](app/page.tsx) → [app/hooks/useAppState.ts](app/hooks/useAppState.ts) → [app/components/HubRouter.tsx](app/components/HubRouter.tsx).

@@ -7,6 +7,17 @@ import { getLocalStorageItem, setLocalStorageItem } from "@/lib/hooks/useLocalSt
 export interface Note { id: string; user_id: string; title: string; body: string; updated_at: string; }
 export const LAST_LOGIN_EMAIL_KEY = "lastLoginEmail";
 
+/**
+ * auth-js re-emits SIGNED_IN (with a fresh user object) on every tab refocus.
+ * Consumers key ~15 effects on the supabaseUser object, so keep the previous
+ * reference unless something the app reads actually changed.
+ */
+export function sameAuthUser(a: SupabaseUser | null, b: SupabaseUser | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.id === b.id && a.updated_at === b.updated_at && a.email === b.email;
+}
+
 export function useAuthState() {
   const [supabaseUser, setSupabaseUser] = useState<SupabaseUser | null>(null);
   const [loginEmail, setLoginEmail] = useState("");
@@ -25,12 +36,13 @@ export function useAuthState() {
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
-      setSupabaseUser(data.user);
+      setSupabaseUser((prev) => (sameAuthUser(prev, data.user) ? prev : data.user));
       if (!data.user) setNotes([]);
     });
     const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
       // Use session directly — avoids a second async getUser() call that races with signOut state
-      setSupabaseUser(session?.user ?? null);
+      const next = session?.user ?? null;
+      setSupabaseUser((prev) => (sameAuthUser(prev, next) ? prev : next));
       if (!session?.user) setNotes([]);
     });
     return () => subscription?.subscription?.unsubscribe?.();
