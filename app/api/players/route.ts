@@ -9,13 +9,18 @@ const log = logger('api/players');
 // Proxies the Sleeper player map + NFL state with server-side caching.
 // Slims the player map server-side so clients download ~500 KB instead of ~5 MB raw.
 // Players cached 24 hours, NFL state cached 1 hour.
+// Sleeper's raw player map (~5 MB) exceeds Next's 2 MB Data Cache item limit, so the
+// fetch-level revalidate does not actually cache it — the CDN Cache-Control header below
+// is what stops every request re-downloading and re-slimming it. `?fresh=1` (manual injury
+// refresh) bypasses both layers and is never cached.
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const rl = await checkRateLimit(request, 10, 60_000, 'players');
   if (!rl.allowed) return rl.response;
+  const fresh = request.nextUrl.searchParams.get('fresh') === '1';
   try {
     const [playersRes, stateRes] = await Promise.all([
-      fetch(`${SLEEPER_BASE_URL}/players/nfl`, { next: { revalidate: PLAYERS_REVALIDATE_S } }),
-      fetch(`${SLEEPER_BASE_URL}/state/nfl`,   { next: { revalidate: NFL_STATE_REVALIDATE_S } }),
+      fetch(`${SLEEPER_BASE_URL}/players/nfl`, fresh ? { cache: 'no-store' } : { next: { revalidate: PLAYERS_REVALIDATE_S } }),
+      fetch(`${SLEEPER_BASE_URL}/state/nfl`,   fresh ? { cache: 'no-store' } : { next: { revalidate: NFL_STATE_REVALIDATE_S } }),
     ]);
 
     if (!playersRes.ok) {
@@ -66,7 +71,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       };
     }
 
-    return NextResponse.json({ players, nflState });
+    return NextResponse.json(
+      { players, nflState },
+      { headers: { 'Cache-Control': fresh ? 'no-store' : 'public, s-maxage=300, stale-while-revalidate=3600' } }
+    );
   } catch (err) {
     log.error('fetch failed', { error: String(err) });
     return NextResponse.json(

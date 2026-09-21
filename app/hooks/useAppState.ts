@@ -620,8 +620,8 @@ const signOut = async () => {
 // whole point of a manual refresh is to pick up injury_status changes those caches would hide
 // for up to a day) and re-merges FC dynasty values so `.value` stays populated for every other
 // surface reading from the shared `players` map.
-const fetchFreshPlayers = useCallback(async (signal?: AbortSignal) => {
-  const res = await fetch("/api/players", { signal });
+const fetchFreshPlayers = useCallback(async (signal?: AbortSignal, opts?: { bypassCache?: boolean }) => {
+  const res = await fetch(opts?.bypassCache ? "/api/players?fresh=1" : "/api/players", { signal });
   if (signal?.aborted) return null;
   const { players: data, nflState: fetchedNflState } = await res.json();
   setNflState(fetchedNflState);
@@ -693,7 +693,7 @@ const [refreshingInjuryReport, setRefreshingInjuryReport] = useState(false);
 const refreshInjuryReport = useCallback(async () => {
   setRefreshingInjuryReport(true);
   try {
-    await fetchFreshPlayers();
+    await fetchFreshPlayers(undefined, { bypassCache: true });
   } catch (err) {
     log.error('refreshInjuryReport failed', { err: String(err) });
   } finally {
@@ -815,16 +815,16 @@ useEffect(() => {
 // 5m client-side (TTL.leagueRosters) — polling every 2m just means the next poll
 // after that 5m mark picks up a real refetch, bounding staleness to a few
 // minutes without hammering Sleeper on every tick. Manual "Refresh Rosters" on
-// the Overview tab still exists for an immediate force-refresh.
-useEffect(() => {
-  const showsLeagueOverviewData =
-    (mainTab === "LEAGUES" && leagueHubTab === "OVERVIEW") ||
-    mainTab === "ALERTS" ||
-    mainTab === "DASHBOARD";
-  if (!showsLeagueOverviewData || !leagueOverviewLoaded) return;
-  const interval = setInterval(() => loadLeagueOverview(), 2 * 60 * 1000);
-  return () => clearInterval(interval);
-}, [mainTab, leagueHubTab, leagueOverviewLoaded, loadLeagueOverview]);
+// the Overview tab still exists for an immediate force-refresh. useVisibilityPolling pauses
+// while the tab is hidden and never overlaps a still-running load.
+const showsLeagueOverviewData =
+  (mainTab === "LEAGUES" && leagueHubTab === "OVERVIEW") ||
+  mainTab === "ALERTS" ||
+  mainTab === "DASHBOARD";
+useVisibilityPolling(
+  () => loadLeagueOverview(),
+  showsLeagueOverviewData && leagueOverviewLoaded ? 2 * 60 * 1000 : null
+);
 
 useEffect(() => {
   if (mainTab === "LEAGUES" && leagueHubTab === "STARTERS") {
@@ -1074,7 +1074,12 @@ useEffect(() => {
   // -------------------------
 // LOAD LEAGUE 
 // -------------------------
+const loadRosterSeqRef = useRef(0);
 const loadRoster = useCallback(async (league: SleeperLeague) => {
+  // Sequence guard: rapid league switches overlap, and a slower earlier call must not commit
+  // its rosters/picks/users over the league the user actually ended up on.
+  const seq = ++loadRosterSeqRef.current;
+  const isStale = () => seq !== loadRosterSeqRef.current;
 
   // â”€â”€ Save recent league â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   let recents = getLocalStorageItem<{ league_id: string; name: string }[]>("recentLeagues", []);
@@ -1108,6 +1113,7 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
       sleeperApi.getLeagueDrafts(league.league_id),
     ]);
     setLocalStorageItem(leagueCacheKey, { data: { allRosters, tradedPicksData, draftsData }, cachedAt: Date.now() });
+    if (isStale()) return;
   }
   setRosters(allRosters);
 
@@ -1174,6 +1180,7 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
 
   // â”€â”€ Step 3: User names â€” fetchSleeperUser has its own module-level cache â”€â”€
   const userResults = await Promise.all(allRosters.map((r) => fetchSleeperUser(r.owner_id)));
+  if (isStale()) return;
 
   // â”€â”€ Step 4: Apply traded picks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   tradedPicksData.forEach((tp) => {
