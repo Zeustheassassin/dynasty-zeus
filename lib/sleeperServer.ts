@@ -4,7 +4,9 @@
 // Shared by API routes that fan out to Sleeper directly (not via
 // the /api/sleeper proxies). Currently used by:
 //   - app/api/compile-consensus/route.ts  (consensus draft compile)
-//   - app/api/cron/leaguemate-alerts      (server-side trade alerts)
+//   - app/api/cron/league-transactions    (server-side transactions feed)
+//   - app/api/cron/simulation-history     (weekly simulation snapshots)
+//   - app/api/simulation-history/route.ts
 //
 // Why these helpers exist:
 //   Sleeper rate-limits aggressive fan-out callers (~1000 req/min

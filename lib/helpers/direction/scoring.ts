@@ -22,7 +22,6 @@ export const computeWindowScore = (profile: Pick<RosterDirectionProfile, "coreAg
 // (the prior copies disagreed — Window Closing was a contender for some gates but not others).
 export const CONTENDER_BUCKETS: readonly string[] = ["Elite", "True Contender", "Almost There", "Window Closing"];
 export const SELLER_BUCKETS: readonly string[] = ["Rebuilder", "Stranded", "Fading Out", "Hopeless"];
-export const HARD_SELL_BUCKETS: readonly string[] = ["Stranded", "Fading Out", "Hopeless"];
 
 export interface OppAcceptanceClass {
   isHopeless: boolean;

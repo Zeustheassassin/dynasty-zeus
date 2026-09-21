@@ -23,17 +23,6 @@ export const CHART_CATEGORICAL = [
   "#e66767", // 8 red
 ] as const;
 
-/** Single-hue sequential ramp (magnitude), light -> dark. */
-export const CHART_SEQUENTIAL = {
-  100: "#cde2fb",
-  200: "#9ec5f4",
-  300: "#6da7ec",
-  400: "#3987e5",
-  500: "#256abf",
-  600: "#184f95",
-  700: "#0d366b",
-} as const;
-
 /** Diverging pair (polarity) + neutral midpoint. */
 export const CHART_DIVERGING = {
   positive: "#3987e5", // blue

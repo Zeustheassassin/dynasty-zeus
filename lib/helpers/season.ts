@@ -74,8 +74,3 @@ export function classYearOptionsWith(existing: number | null | undefined): numbe
   return [existing, ...CLASS_YEARS].sort((a, b) => a - b);
 }
 
-/** Same idea for the film-year (NFL season) dropdown. */
-export function filmYearOptionsWith(existing: number | null | undefined): number[] {
-  if (existing == null || FILM_YEARS.includes(existing)) return FILM_YEARS;
-  return [existing, ...FILM_YEARS].sort((a, b) => a - b);
-}

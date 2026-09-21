@@ -16,11 +16,6 @@ export type AnnotatedTransaction = SleeperTransaction & {
   rosterOwnerMap: Record<number, string>;
 };
 
-export interface TeamSummary {
-  summary: Record<string, number>;
-  pickSummary: Record<string, number>;
-}
-
 export interface PredictedPick {
   name: string;
   position: string;

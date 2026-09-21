@@ -77,14 +77,14 @@ import type {
 // -------------------------
 // ROOKIE_YEAR, ROOKIE_BOARD_VERSION, ROOKIE_BOARD_RESET_KEY imported from useRookieBoardState
 
-// Module-level in-memory player map cache â€” avoids re-fetching/re-parsing the 6MB Sleeper player
+// Module-level in-memory player map cache — avoids re-fetching/re-parsing the 6MB Sleeper player
 // payload if loadPlayers is called more than once in the same browser session (e.g. strict-mode
 // double-invoke in dev, or a Sleeper reconnect event).
 let _playersInMemory: Record<string, SleeperPlayer> | null = null;
 
 // fetchSleeperUser imported from lib/sleeperUserCache (shared with useLeagues)
 
-// â”€â”€ Page-local interfaces (shapes that don't warrant a lib/types entry) â”€â”€â”€â”€â”€â”€
+// ── Page-local interfaces (shapes that don't warrant a lib/types entry) ──────
 // AugmentedPick, AnnotatedTransaction, StandingRow are exported from lib/types.ts
 interface OwnedPlayerEntry { player_id: string; player?: SleeperPlayer; leagues: LeagueRef[]; shareCount: number; }
 interface AllLeagueDataEntry { leagueId?: string; leagueName?: string; roster: import("../../lib/types").SleeperRoster | null; settings?: SleeperLeagueSettings | null; }
@@ -213,7 +213,7 @@ const {
 } = useProjections(players, selectedLeague?.scoring_settings ?? null);
 
 // Rolling snap% / target / carry stats from the last 4 weeks of Sleeper actuals.
-// Returns null during the off-season â€” TradeHub degrades gracefully when null.
+// Returns null during the off-season — TradeHub degrades gracefully when null.
 const nflStatsSeason = nflState?.season_type === "regular" ? (nflState?.season ?? null) : null;
 const nflStatsWeek   = nflState?.season_type === "regular" ? (nflState?.display_week ?? nflState?.week ?? null) : null;
 const { playerStats } = usePlayerStats(nflStatsSeason, nflStatsWeek);
@@ -299,7 +299,7 @@ const {
   exposureError,
   loadUserExposure,
 } = useUserExposure();
-// â”€â”€ ALERTS / WATCHLIST â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── ALERTS / WATCHLIST ─────────────────────────────────────────
 const {
   dashboardAlerts, setDashboardAlerts,
   dismissedAlertIds, setDismissedAlertIds,
@@ -323,7 +323,7 @@ const { crossLeagueMateIntel } = useCrossLeagueMateIntel({
 const [leagueTransactions, setLeagueTransactions] = useState<AnnotatedTransaction[]>([]);
 const [loadingTransactions, setLoadingTransactions] = useState(false);
 
-// â”€â”€ MANAGEMENT HUB â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── MANAGEMENT HUB ────────────────────────────────────────────
 const {
   mgmtHubTab, setMgmtHubTab,
   leagueMgmtData, setLeagueMgmtData,
@@ -335,7 +335,7 @@ const {
   leagueBylaws, saveLeagueBylaws,
 } = useManagementState(supabaseUser);
 
-// â”€â”€ ROOKIE BOARD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── ROOKIE BOARD ───────────────────────────────────────────────
 const {
   rookies, setRookies,
   fcNameValues,
@@ -346,7 +346,7 @@ const {
 
 
 
-// alertSnapshotStorageKey is separate from the useAlerts hook â€” it tracks the daily
+// alertSnapshotStorageKey is separate from the useAlerts hook — it tracks the daily
 // player value baseline used for gaining/falling alerts, not the alert list itself.
 const alertSnapshotStorageKey = `alertSnapshots_v1_${alertStoreScope}`;
 const alertBootstrapRef = useRef(false);
@@ -357,10 +357,10 @@ const snapshotExpandAttemptedRef = useRef<string | null>(null);
 // Last leaguemate_profiles payload written per user+league (signature) so unchanged
 // profiles aren't re-upserted every time the memo recomputes.
 const leagueMateWriteSigRef = useRef<Record<string, string>>({});
-// Stable daily baseline for value-change alerts â€” loaded from Supabase, NOT localStorage.
+// Stable daily baseline for value-change alerts — loaded from Supabase, NOT localStorage.
 const historicalSnapshotRef = useRef<HistoricalSnapshot | null>(null);
 const [historicalSnapshot, setHistoricalSnapshot] = useState<HistoricalSnapshot | null>(null);
-// Refs for useCallback functions defined later in the file â€” avoids TDZ in dep arrays.
+// Refs for useCallback functions defined later in the file — avoids TDZ in dep arrays.
 const loadRosterRef = useRef<((league: SleeperLeague) => Promise<void>) | null>(null);
 
 // Load all Supabase-persisted user data whenever the logged-in user changes
@@ -391,7 +391,7 @@ useEffect(() => {
   // Rookie board is handled by the loadRookieBoard effect (depends on supabaseUser)
   // 3. League management + commissioner payments are loaded by useManagementState hook
   // 4. Watchlists + alerts are loaded by the useAlerts hook (depends on supabaseUser)
-  // 7. Daily player value snapshot â€” stable baseline for climbing/falling alerts
+  // 7. Daily player value snapshot — stable baseline for climbing/falling alerts
   supabase
     .from("player_value_snapshots")
     .select("snapshot, recorded_at")
@@ -486,7 +486,7 @@ useEffect(() => {
         });
       }
     });
-  // 10. Personal rankings (the user's own ordered board â€” one jsonb row per user)
+  // 10. Personal rankings (the user's own ordered board — one jsonb row per user)
   supabase
     .from("personal_rankings")
     .select("ordering")
@@ -534,7 +534,7 @@ useEffect(() => {
   return () => { cancelled = true; };
 }, [supabaseUser]);
 
-// Persist the (Supabase auth user â†’ Sleeper user_id) mapping so the
+// Persist the (Supabase auth user → Sleeper user_id) mapping so the
 // server-side league-transactions cron knows which Sleeper account to scan.
 // Re-runs on Sleeper reconnect (user.user_id change) so a re-link is captured.
 useEffect(() => {
@@ -647,10 +647,10 @@ useEffect(() => {
   const { signal } = controller;
 
   const loadPlayers = async () => {
-    // Fast path: already loaded this session â€” skip localStorage and network entirely
+    // Fast path: already loaded this session — skip localStorage and network entirely
     if (_playersInMemory) {
       setPlayers(_playersInMemory);
-      // nflState is React state and resets on remount â€” reload it from the cached route
+      // nflState is React state and resets on remount — reload it from the cached route
       fetch('/api/nfl-state', { signal })
         .then(r => r.json()).then((s) => { if (!signal.aborted) setNflState(s); }).catch(() => {});
       return;
@@ -706,14 +706,14 @@ const refreshDraftBoard = useCallback(async () => {
   if (!selectedLeagueRef.current) return;
   setLoadingDraftRefresh(true);
   try {
-    // bypass the drafts cache too so a status flip (drafting â†’ complete) is seen
-    // promptly â€” both the manual "Refresh Board" button and the live poll want fresh.
+    // bypass the drafts cache too so a status flip (drafting → complete) is seen
+    // promptly — both the manual "Refresh Board" button and the live poll want fresh.
     const drafts = await sleeperApi.getLeagueDrafts(selectedLeagueRef.current.league_id, true);
     const currentDraft = drafts[0];
     if (!currentDraft) return;
     setDraftId(currentDraft.draft_id);
     setDraftOrder(currentDraft.draft_order || currentDraft.slot_to_roster_id || {});
-    setDraftSettings(currentDraft); // full object â€” consistent with useLeagues.ts
+    setDraftSettings(currentDraft); // full object — consistent with useLeagues.ts
     setSelectedLeagueDraftHasOccurred(currentDraft.status !== "pre_draft");
     const picks = await sleeperApi.getDraftPicks(currentDraft.draft_id, true);
     setDraftPicks(picks);
@@ -759,7 +759,7 @@ useEffect(() => {
 }, [selectedLeague, loadRedraftValues]);
 
 // Load league-specific FC values and redraft values as soon as Trade Hub is opened.
-// redraftValues powers the redraft-rank half of the direction bucket â€” if it's empty
+// redraftValues powers the redraft-rank half of the direction bucket — if it's empty
 // when the direction memo fires it produces a garbage bucket (usually "Purgatory").
 useEffect(() => {
   if (mainTab === "TRADE_HUB" && selectedLeague?.league_id) {
@@ -1081,7 +1081,7 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
   const seq = ++loadRosterSeqRef.current;
   const isStale = () => seq !== loadRosterSeqRef.current;
 
-  // â”€â”€ Save recent league â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Save recent league ───────────────────────────────────────────────────
   let recents = getLocalStorageItem<{ league_id: string; name: string }[]>("recentLeagues", []);
   recents = recents.filter((l) => l.league_id !== league.league_id);
   recents.unshift({ league_id: league.league_id, name: league.name });
@@ -1089,7 +1089,7 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
 
   setSelectedLeague(league);
 
-  // â”€â”€ Step 1: Rosters, traded picks, and drafts â€” from cache or network â”€â”€â”€â”€
+  // ── Step 1: Rosters, traded picks, and drafts — from cache or network ────
   // Cache key is per-league; TTL is 2 hours (short enough to stay fresh during
   // trade season, long enough to avoid redundant fetches when switching leagues)
   const LEAGUE_CACHE_TTL = 2 * 60 * 60 * 1000;
@@ -1117,7 +1117,7 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
   }
   setRosters(allRosters);
 
-  // â”€â”€ Step 2: Synchronous work derived from rosters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Step 2: Synchronous work derived from rosters ────────────────────────
   const rosteredIds = new Set<string>();
   allRosters.forEach((r) => {
     (r.players || []).forEach((p: string) => rosteredIds.add(p));
@@ -1143,7 +1143,7 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
   // Skip seasons whose rookie draft is complete (those picks are spent); extend
   // the window forward to keep it 3 years long. A startup-sized draft (>6
   // rounds) also retires that season if no separate rookie-sized draft exists
-  // for the same season â€” that pattern means rookies were consumed inside the
+  // for the same season — that pattern means rookies were consumed inside the
   // startup itself and no follow-on rookie draft will fire.
   const seasonsWithRookieDraft = new Set(
     draftsData
@@ -1178,11 +1178,11 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
     });
   });
 
-  // â”€â”€ Step 3: User names â€” fetchSleeperUser has its own module-level cache â”€â”€
+  // ── Step 3: User names — fetchSleeperUser has its own module-level cache ──
   const userResults = await Promise.all(allRosters.map((r) => fetchSleeperUser(r.owner_id)));
   if (isStale()) return;
 
-  // â”€â”€ Step 4: Apply traded picks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Step 4: Apply traded picks ───────────────────────────────────────────
   tradedPicksData.forEach((tp) => {
     const match = tempPicks.find(
       (p) => p.season === tp.season && p.round === tp.round && p.roster_id === tp.roster_id
@@ -1190,7 +1190,7 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
     if (match) match.owner_id = tp.owner_id;
   });
 
-  // â”€â”€ Step 6: Assign draft slots â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Step 6: Assign draft slots ───────────────────────────────────────────
   const currentDraft = draftsData.find((d) => d.season === CURRENT_YEAR);
 
   // Trim to the league's actual round count (check both settings.rounds and top-level rounds)
@@ -1201,10 +1201,10 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
   const leagueRounds: number = Math.max(settingsRounds, tradedMaxRound, ROUNDS.length);
   tempPicks = tempPicks.filter((p) => Number(p.round) <= leagueRounds);
 
-  // â”€â”€ Step 5: My picks (after trades applied and rounds trimmed) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Step 5: My picks (after trades applied and rounds trimmed) ───────────
   const myPicks = tempPicks.filter((p) => p.owner_id === myRoster.roster_id);
 
-  // â”€â”€ Reconcile stale own-roster dispositions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Reconcile stale own-roster dispositions ───────────────────────────
   // A Core/Pricey/Shopping/Offload tag is only meaningful while the asset is still mine.
   // If it was traded away since the tag was set, clear it here so it can't silently
   // resurface if the same player/pick is ever reacquired. Opponent-side tags (SELL_NO/
@@ -1251,7 +1251,7 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
     })
   );
 
-  // â”€â”€ Step 7: Apply user names â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Step 7: Apply user names ─────────────────────────────────────────────
   const userMap: Record<string | number, string> = {};
   allRosters.forEach((r, i: number) => {
     const u = userResults[i];
@@ -1262,7 +1262,7 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
   });
   setUsers(userMap);
 
-  // â”€â”€ Step 8: Standings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Step 8: Standings ────────────────────────────────────────────────────
   setStandings(
     allRosters
       .map((r) => ({
@@ -1295,7 +1295,7 @@ const refreshFcTrends = async () => {
   }
 };
 
-// Manual snapshot save â€” callable from the Data Hub button.
+// Manual snapshot save — callable from the Data Hub button.
 // Uses generic FC values (players[id].value) rather than league-adjusted calcFcValues so that
 // scoring rule changes don't create artificial trend movement.
 const saveSnapshotNow = async () => {
@@ -1463,7 +1463,7 @@ const saveSnapshotNow = async () => {
     lastFreshProjectionAtRef.current = Date.now();
     loadProjections(gamedayWeek, enabledExtraSources, { fresh: true });
   }, [gamedayHubActive, gamedayPollPlan, projectionLoaded, gamedayWeek, enabledExtraSources, loadProjections]);
-  // â”€â”€ League-adjusted FC dynasty values (Tier 3 scoring) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── League-adjusted FC dynasty values (Tier 3 scoring) ──────────────────
   // Scales raw FantasyCalc values by per-position multipliers derived from the
   // selected league's scoring settings vs. the FC baseline (full PPR, 4pt TDs,
   // no TEP). Falls back to raw calcFcValues when no league is selected.
@@ -1482,19 +1482,19 @@ const saveSnapshotNow = async () => {
     return adjusted;
   }, [selectedLeague?.scoring_settings, calcFcValues, players]);
 
-  // â”€â”€ Personal-ranking buy/sell signal â†’ Trade Finder (Phase 2 swap) â”€â”€â”€â”€â”€â”€â”€
+  // ── Personal-ranking buy/sell signal → Trade Finder (Phase 2 swap) ───────
   // Derives the Finder's opinion input from the user's personal board vs. the
   // market consensus (same league-adjusted dynasty universe the DataHub Personal
-  // view shows, via the shared buildConsensusOrder). Both maps below are sparse â€”
+  // view shows, via the shared buildConsensusOrder). Both maps below are sparse —
   // only non-neutral players appear; the Finder defaults the rest to NEUTRAL.
   // This replaces the manual playerDispositions dropdowns as the Finder's opinion
-  // source â€” the dropdowns still render until Phase 3 strips them.
+  // source — the dropdowns still render until Phase 3 strips them.
   const consensusOrderForFinder = useMemo(
     () => buildConsensusOrder(players, (id) => leagueAdjustedFcValues[id] ?? 0),
     [players, leagueAdjustedFcValues]
   );
   // finderSignals = the raw PersonalSignal map the Finder's block predicates read
-  // directly (STRONG_SELL â‡’ never acquire). finderDispositions = the same map
+  // directly (STRONG_SELL ⇒ never acquire). finderDispositions = the same map
   // adapted to the legacy sell/buy strings the tuned scoring still keys off of.
   const finderSignals = useMemo<Record<string, PersonalSignal>>(
     () => buildPersonalSignals(personalOrdering, consensusOrderForFinder),
@@ -1512,7 +1512,7 @@ const saveSnapshotNow = async () => {
     [personalOrdering, consensusOrderForFinder]
   );
 
-  // â”€â”€ League-adjusted redraft values â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── League-adjusted redraft values ───────────────────────────────────────
   // Applies the same per-position scoring multipliers to raw redraft values
   // so they're consistent with the league-adjusted dynasty values above.
   const leagueAdjustedRedraftValues = useMemo((): Record<string, number> => {
@@ -1528,9 +1528,9 @@ const saveSnapshotNow = async () => {
     return adjusted;
   }, [selectedLeague?.scoring_settings, redraftValues, players]);
 
-  // â”€â”€ Projected rookies per roster for the season simulator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Projected rookies per roster for the season simulator ────────────────
   // Runs a simplified BPA draft sim to project which rookie lands on each
-  // team. Only active in offseason mode â€” in-season, rookies are already on
+  // team. Only active in offseason mode — in-season, rookies are already on
   // Sleeper rosters. Every team is covered, not just the user's, so the
   // simulator reflects the full offseason landscape for all owners.
   //
@@ -1601,13 +1601,13 @@ const saveSnapshotNow = async () => {
     const myRosterId = rosters.find((r) => r.owner_id === user.user_id)?.roster_id;
     if (!myRosterId) return null;
 
-    // Guard: allPicks updates after rosters on league switch â€” if any picks exist but none
+    // Guard: allPicks updates after rosters on league switch — if any picks exist but none
     // belong to the current league's rosters, data is mid-update; return null and wait.
     const leagueRosterIds = new Set(rosters.map((r) => Number(r.roster_id)));
     if (allPicks.length > 0 && !allPicks.some((p) => leagueRosterIds.has(Number(p.roster_id)))) return null;
 
     // Guard: both value maps must be loaded before profile is meaningful.
-    // An empty map produces nonsense direction output â€” leagueAdjustedRedraftValues drives the
+    // An empty map produces nonsense direction output — leagueAdjustedRedraftValues drives the
     // redraft-rank half of the bucket; leagueAdjustedFcValues drives the dynasty-rank half.
     if (!Object.keys(leagueAdjustedFcValues).length) return null;
     if (!Object.keys(leagueAdjustedRedraftValues).length) return null;
@@ -1624,21 +1624,21 @@ const saveSnapshotNow = async () => {
   }, [selectedLeague, readyLeagueId, rosters, allPicks, players, pickFcValues, leagueAdjustedRedraftValues, leagueAdjustedFcValues, user?.user_id]);
 
   // Combines dynasty rank, redraft rank, simulation playoff odds, and core age into one profile.
-  // This is the authoritative direction â€” use this everywhere instead of raw selectedLeagueDirection.
-  // Returns null while waiting for consistent data â€” consumers must show a loading state.
+  // This is the authoritative direction — use this everywhere instead of raw selectedLeagueDirection.
+  // Returns null while waiting for consistent data — consumers must show a loading state.
   const selectedLeagueDirectionAdjusted = useMemo(() => {
     if (!selectedLeagueDirection || !selectedLeague?.league_id) return null;
     const myRosterId = rosters.find((r) => r.owner_id === user?.user_id)?.roster_id;
     if (!myRosterId) return null;
 
-    // PRIORITY: use the committed (user-saved) sim â€” it's what the League Hub displays
+    // PRIORITY: use the committed (user-saved) sim — it's what the League Hub displays
     // and is stable across renders. The live sim recomputes with a random seed each session
-    // and can diverge significantly (e.g. 1.7% committed â†’ 40% live), causing wrong direction.
+    // and can diverge significantly (e.g. 1.7% committed → 40% live), causing wrong direction.
     const committedRows = committedSimsByLeague[selectedLeague.league_id];
     const committedMyRow = committedRows ? committedRows[Number(myRosterId)] : null;
 
     if (committedMyRow) {
-      // We have a stable committed sim â€” use it unconditionally.
+      // We have a stable committed sim — use it unconditionally.
       const playoffOdds = Number(committedMyRow.playoffOdds ?? 50);
       const adjustedBucket = getAdjustedDirectionBucket(selectedLeagueDirection.bucket, selectedLeagueDirection, playoffOdds, true);
       return {
@@ -1651,7 +1651,7 @@ const saveSnapshotNow = async () => {
       };
     }
 
-    // No committed sim yet â€” fall back to the live sim but guard carefully:
+    // No committed sim yet — fall back to the live sim but guard carefully:
     // live sim recomputes every render and may not match the current league yet.
     if (!selectedLeagueSimulation) return null;
 
@@ -1679,7 +1679,7 @@ const saveSnapshotNow = async () => {
   const selectedLeagueDynamicPickValues = useMemo(() => {
     const leagueId = selectedLeague?.league_id;
     if (!leagueId || !selectedLeagueSimulation) return {} as Record<string, DynamicPickValue>;
-    // Always prefer the live sim for the currently selected league â€” it's always current.
+    // Always prefer the live sim for the currently selected league — it's always current.
     // Fall back to the frozen committed snapshot only when the live sim lacks the row
     // (shouldn't happen for the selected league, but keeps the fallback path safe).
     const getProjection = (rosterId: number): SimulationTeamRow | undefined =>
@@ -1779,10 +1779,10 @@ const saveSnapshotNow = async () => {
           acc[bucket] = (acc[bucket] || 0) + probability;
           return acc;
         }, { early: 0, mid: 0, late: 0 });
-        // Rank-based slot: integer 1â€“N where 1 = worst team in league (picks first).
+        // Rank-based slot: integer 1–N where 1 = worst team in league (picks first).
         const expectedSlot = rosterRankSlot.get(Number(pick.roster_id)) ?? Math.round((totalTeams + 1) / 2);
         // Linear interpolation between the floor and ceiling slot values.
-        // FantasyCalc has a huge slot-1 premium that makes raw per-slot values non-linear â€”
+        // FantasyCalc has a huge slot-1 premium that makes raw per-slot values non-linear —
         // users expect slot 2 to be close to the range top, not halfway down. Interpolating
         // gives a fair expected value that scales evenly from worst team (slot 1 = ceiling)
         // to best team (slot N = floor).
@@ -1797,7 +1797,7 @@ const saveSnapshotNow = async () => {
           .slice(0, 3);
         const bestBucket = (Object.entries(bucketProbabilities).sort((a, b) => b[1] - a[1])[0]?.[0] || "mid") as "early" | "mid" | "late";
         // Derive finish range directly from slotProbabilities so it is always
-        // consistent with expectedSlot and expectedValue â€” never stale.
+        // consistent with expectedSlot and expectedValue — never stale.
         // slot k+1 is given to the team finishing (totalTeams - k)th, so
         // P(finish j) = slotProbabilities[totalTeams - j] (0-based).
         let cumFinish = 0;
@@ -2078,7 +2078,7 @@ const saveSnapshotNow = async () => {
     () => new Map(selectedLeagueMateProfilesView.map((profile) => [Number(profile.rosterId), profile])),
     [selectedLeagueMateProfilesView]
   );
-  // â”€â”€ Buy Low player IDs (shared with Trade Finder) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Buy Low player IDs (shared with Trade Finder) ─────────────────────────
   // Same formula as DataHub Buy Low tab. Top 30 IDs ordered by score descending,
   // only players with real projection data (not redraft fallback).
   const buyLowPlayerIds = useMemo<string[]>(() => {
@@ -2119,7 +2119,7 @@ const saveSnapshotNow = async () => {
     return rows
       .sort((a, b) => b.score - a.score)
       .slice(0, 30)
-      .filter(r => r.score / maxRaw >= 0.15) // only meaningful buy lows (â‰¥15% of top score)
+      .filter(r => r.score / maxRaw >= 0.15) // only meaningful buy lows (≥15% of top score)
       .map(r => r.player_id);
   }, [players, leagueAdjustedFcValues, projectionData]);
 
@@ -2139,7 +2139,7 @@ const saveSnapshotNow = async () => {
     return selectedLeagueMateProfilesView
       .map((partner) => {
         const simRow = selectedLeagueSimulation.rowByRosterId.get(Number(partner.rosterId));
-        // Missing sim â†’ neutral 50 (NOT 0); a 0 default would wrongly read every sim-less
+        // Missing sim → neutral 50 (NOT 0); a 0 default would wrongly read every sim-less
         // partner as a desperate seller and disagree with the finder's pipeline gates.
         const partnerPlayoffOdds = simRow?.playoffOdds ?? 50;
         // Apply the same three-factor adjustment to each partner's bucket
@@ -2151,7 +2151,7 @@ const saveSnapshotNow = async () => {
         );
         const partnerAdjustedProfile = { ...partner.directionProfile, bucket: partnerAdjustedBucket };
         const partnerBuckets = getProfilePosBuckets(partnerAdjustedProfile);
-        // Canonical seller/buyer classification â€” same resolver the trade finder uses.
+        // Canonical seller/buyer classification — same resolver the trade finder uses.
         const { isSeller, isBuyer } = classifyOppDirection(partnerAdjustedBucket, partnerPlayoffOdds);
         const bestApproach =
           isSeller ? `Buy ${weakPos}` :
@@ -2243,12 +2243,12 @@ const saveSnapshotNow = async () => {
     return set;
   }, [draftPicks, players]);
 
-  // â”€â”€ Draft board prediction engine â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Draft board prediction engine ─────────────────────────────────────────
   // Key design decisions:
   // - Actual picks detected by pick_no (overall pick number), not by roster matching
   // - Non-user slots: ranked by Sleeper ADP position (relative rookie rank, not absolute value)
   // - User's slots: ranked by their personal big board
-  // - Need multiplier capped at 1.20 â€” tiebreaker only, never overrides ADP tier
+  // - Need multiplier capped at 1.20 — tiebreaker only, never overrides ADP tier
   // - allPicks.owner_id = current owner after trades (used for slot ownership)
   const draftPredictionEngine = useMemo<{
     predictions: Record<string, { name: string; position: string; team: string; adp: number; player_id: string | null; boardRank: number; poolRank: number }>;
@@ -2268,7 +2268,7 @@ const saveSnapshotNow = async () => {
     // Sleeper ("Omar Cooper") and FantasyCalc ("Omar Cooper Jr.") still match, and
     // there is a single normalisation implementation across board/predictor/compiler.
 
-    // rosterId â†’ userId map â€” needed to look up owner tendencies
+    // rosterId → userId map — needed to look up owner tendencies
     const rosterToUserId: Record<number, string> = {};
     rosters.forEach((r) => { rosterToUserId[Number(r.roster_id)] = r.owner_id; });
 
@@ -2276,7 +2276,7 @@ const saveSnapshotNow = async () => {
     const leagueAvgRate: Record<string, number> = { QB: 0.12, RB: 0.28, WR: 0.48, TE: 0.12 };
 
     // Per-owner tendency multiplier: how much more/less likely vs. league average
-    // Capped at 0.75Ã— â€“ 1.30Ã— so it influences without overriding dynasty value
+    // Capped at 0.75× – 1.30× so it influences without overriding dynasty value
     const tendencyMult = (rosterId: number | null, pos: string): number => {
       if (!rosterId) return 1;
       const userId = rosterToUserId[rosterId];
@@ -2289,7 +2289,7 @@ const saveSnapshotNow = async () => {
       return Math.max(0.75, Math.min(1.30, ratio));
     };
 
-    // Build nameâ†’dynasty value map from Sleeper players dict + FC values
+    // Build name→dynasty value map from Sleeper players dict + FC values
     // Needed because rookies use FC player_ids which may differ from Sleeper player_ids
     const valueByNormName: Record<string, number> = {};
     Object.entries(players).forEach(([id, p]: [string, SleeperPlayer]) => {
@@ -2331,13 +2331,13 @@ const saveSnapshotNow = async () => {
         const hasAdp = typeof r.adp === "number" && r.adp < 9999;
         let sortKey: number;
         if (consensusActive && consensusPick !== undefined) {
-          // Bucket A: consensus-ranked. avg_pick_no is overall pick number (~1â€“60).
+          // Bucket A: consensus-ranked. avg_pick_no is overall pick number (~1–60).
           sortKey = consensusPick;
         } else if (consensusActive) {
           // Bucket B: tail fallback when consensus is active. Offset 1000 keeps all
           // tail entries strictly after the consensus bucket.
           if (dynVal > 0) {
-            // Higher dynVal â†’ lower sortKey within tail (cap inversion at +999).
+            // Higher dynVal → lower sortKey within tail (cap inversion at +999).
             sortKey = 1000 + (10000 - Math.min(dynVal, 9999));
           } else if (hasAdp) {
             sortKey = 20000 + r.adp;
@@ -2360,13 +2360,13 @@ const saveSnapshotNow = async () => {
     // User's personal board order for their own slots
     const boardSorted = [...rookies];
 
-    // slot â†’ current owner_id (after trades), from allPicks
+    // slot → current owner_id (after trades), from allPicks
     const slotOwnerMap = new Map<string, number>();
     allPicks.forEach((p) => {
       if (p.slot && p.owner_id) slotOwnerMap.set(String(p.slot), Number(p.owner_id));
     });
 
-    // Detect actual picks by pick_no â€” reliable regardless of slot/roster resolution
+    // Detect actual picks by pick_no — reliable regardless of slot/roster resolution
     const filledPickNos = new Set<number>(
       draftPicks.map((dp) => Number(dp.pick_no)).filter(Boolean)
     );
@@ -2393,13 +2393,13 @@ const saveSnapshotNow = async () => {
       TE: (starterSlots["TE"] || 0),
     };
 
-    // Position need multiplier â€” round-aware so early picks stay true to value tiers
+    // Position need multiplier — round-aware so early picks stay true to value tiers
     // while later rounds allow realistic need-based swings:
-    //   Round 1: cap 1.08  â†’ barely 1-2 spot drift  (Love stays 1.01)
-    //   Round 2: cap 1.20  â†’ moderate 2-3 spot swings
-    //   Round 3: cap 1.38  â†’ 3-5 spot swings reasonable
-    //   Round 4: cap 1.55  â†’ large swings fine (deep picks, less certain)
-    // Surplus penalty also scales â€” aggressive in round 4 to stop double-stacking one pos.
+    //   Round 1: cap 1.08  → barely 1-2 spot drift  (Love stays 1.01)
+    //   Round 2: cap 1.20  → moderate 2-3 spot swings
+    //   Round 3: cap 1.38  → 3-5 spot swings reasonable
+    //   Round 4: cap 1.55  → large swings fine (deep picks, less certain)
+    // Surplus penalty also scales — aggressive in round 4 to stop double-stacking one pos.
     const needMult = (rosterId: number | null, pos: string, simCounts: Record<number, Record<string, number>>, round: number): number => {
       if (!rosterId) return 1;
       const needCap     = round === 1 ? 1.08 : round === 2 ? 1.22 : round === 3 ? 1.38 : 1.55;
@@ -2458,7 +2458,7 @@ const saveSnapshotNow = async () => {
         const overallPick = (round - 1) * numTeams + pickIdx + 1;
         const rosterId = slotOwnerMap.get(slotStr) ?? null;
 
-        // Actual pick detected by pick_no â€” doesn't require rosterId resolution
+        // Actual pick detected by pick_no — doesn't require rosterId resolution
         if (filledPickNos.has(overallPick)) {
           const dp = pickByNo.get(overallPick);
           if (dp?.player_id) {
@@ -2495,7 +2495,7 @@ const saveSnapshotNow = async () => {
             const baseScore = 1000 / (rankIdx + 1);
             const nm = needMult(rosterId, r.position, simCounts, round);
             // Dynasty value bonus: FC value differences within same ADP tier.
-            // Skip when consensus is the primary signal for this player â€” the
+            // Skip when consensus is the primary signal for this player — the
             // consensus rank already encodes their expected ordering.
             const dynVal = getRookieValue(r);
             const consensusDriven = consensusActive && getConsensusPick(r) !== undefined;
@@ -2511,8 +2511,8 @@ const saveSnapshotNow = async () => {
           const boardRank = rookies.findIndex((r: RookieBoardPlayer) => (r.player_id && r.player_id === best.player_id) || normalizeRookieName(r.name) === normalizeRookieName(best.name)) + 1;
           // poolRank = player's position in consensus dynasty-value pool (1 = most valuable).
           // Used to flag REACH/VALUE on user's predicted slots:
-          //   overallPick << poolRank â†’ reaching ahead of consensus
-          //   overallPick >> poolRank â†’ getting value relative to consensus
+          //   overallPick << poolRank → reaching ahead of consensus
+          //   overallPick >> poolRank → getting value relative to consensus
           const poolRank = fullPool.findIndex((r: RookieBoardPlayer) => (r.player_id && r.player_id === best.player_id) || normalizeRookieName(r.name) === normalizeRookieName(best.name)) + 1 || 999;
           predictions[slotStr] = { name: best.name, position: best.position, team: best.team || "", adp: best.adp ?? 999, player_id: best.player_id, boardRank, poolRank };
           markUsed(best);
@@ -2682,10 +2682,10 @@ const saveSnapshotNow = async () => {
     return result.sort((a, b) => severityOrder(a.player) - severityOrder(b.player));
   }, [allLeagueData, dashboardOwnedPlayers, watchlistEntries, players]);
 
-  // â”€â”€ League transactions feed â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── League transactions feed ──────────────────────────────────────────────
   // Reads pre-annotated rows from league_transactions_cache. Rows are
   // produced by the server-side cron at app/api/cron/league-transactions
-  // every 30 min, eliminating the ~240 Sleeper calls/cold-session this
+  // every 2 hours (see vercel.json), eliminating the ~240 Sleeper calls/cold-session this
   // effect used to do client-side. Only fetched once per session (on login) —
   // refreshTransactions lets the Alerts Hub's Trades/Waivers tabs re-query on
   // demand instead of waiting for a full page reload.
@@ -2790,7 +2790,7 @@ const saveSnapshotNow = async () => {
     const nextPlayerSnapshot = Object.fromEntries(
       trackedPlayers.map((entry) => {
         const player = entry.player;
-        // Use generic FC value (player.value) â€” league-adjusted calcFcValues would create false trends on rule changes.
+        // Use generic FC value (player.value) — league-adjusted calcFcValues would create false trends on rule changes.
         const value = Number(player?.value ?? 0);
         return [entry.playerId, {
           full_name: player.full_name,
@@ -2807,7 +2807,7 @@ const saveSnapshotNow = async () => {
 
     // Value-change alerts use the Supabase daily baseline (historicalSnapshotRef), NOT localStorage.
     // This prevents false "Bo Nix gained 2,274" fires caused by FC API inconsistencies across sessions.
-    // Guards: baseline must be â‰¥ 12h old AND previous.value must be > 0 (avoids 0â†’value false positives).
+    // Guards: baseline must be ≥ 12h old AND previous.value must be > 0 (avoids 0→value false positives).
     const historicalBase = historicalSnapshotRef.current;
     const baselineAge = historicalBase ? Date.now() - new Date(historicalBase.recorded_at).getTime() : 0;
     const baselineReady = !!historicalBase && baselineAge >= 12 * 60 * 60 * 1000;
@@ -2852,7 +2852,7 @@ const saveSnapshotNow = async () => {
         }
       }
 
-      // Status/team alerts use localStorage (most-recent state) â€” these need immediate detection,
+      // Status/team alerts use localStorage (most-recent state) — these need immediate detection,
       // not a daily gate. A player going on IR should alert right away.
       const previous = savedSnapshots?.players?.[playerId];
       if (!previous) return;
@@ -2953,7 +2953,7 @@ const saveSnapshotNow = async () => {
       alertBootstrapRef.current = true;
       // Auto-save snapshot to Supabase if it's missing or > 6 days old.
       // FC values don't shift meaningfully day-to-day; 6-day cadence gives a useful trend window.
-      // Users can also manually take a snapshot from the Data Hub â†’ Value Trends tab.
+      // Users can also manually take a snapshot from the Data Hub → Value Trends tab.
       const snapshotAge = historicalSnapshotRef.current
         ? Date.now() - new Date(historicalSnapshotRef.current.recorded_at).getTime()
         : Infinity;
@@ -3015,7 +3015,7 @@ const saveSnapshotNow = async () => {
     mergeDashboardAlerts,
   ]);
 
-  // â”€â”€ Bye week alerts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Bye week alerts ───────────────────────────────────────────────────────
   useEffect(() => {
     if (nflState?.season_type !== "regular") return;
     const currentWeek = Number(nflState?.week || 0);
@@ -3053,7 +3053,7 @@ const saveSnapshotNow = async () => {
     if (alerts.length) mergeDashboardAlerts(alerts);
   }, [nflState?.week, nflState?.season_type, nflState?.season, dashboardOwnedPlayers, watchlistEntries, players, mergeDashboardAlerts]);
 
-  // â”€â”€ Available player alerts (watchlist player recently dropped) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Available player alerts (watchlist player recently dropped) ──────────
   useEffect(() => {
     if (!watchlistEntries.length || !leagueTransactions.length) return;
     const watchlistSet = new Set(watchlistEntries.map((e) => e.player_id));
@@ -3088,9 +3088,9 @@ const saveSnapshotNow = async () => {
     if (alerts.length) mergeDashboardAlerts(alerts);
   }, [leagueTransactions, watchlistEntries, players, mergeDashboardAlerts]);
 
-  // â”€â”€ Top-250 drop alerts (any top-250-by-FC-value player dropped in any league) â”€â”€
+  // ── Top-250 drop alerts (any top-250-by-FC-value player dropped in any league) ──
   // Surfaces potential pickups even if the player isn't on the watchlist. Skips
-  // watchlist players â€” they're already handled by the effect above, and we don't
+  // watchlist players — they're already handled by the effect above, and we don't
   // want two alerts for the same drop event.
   useEffect(() => {
     if (!leagueTransactions.length) return;
@@ -3204,7 +3204,7 @@ const onRefreshDirection = useCallback(() => {
 // -------------------------
 const myPlayerSet = new Set<string>(roster?.players || []);
 
-  // â”€â”€ Grouped props for render components â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Grouped props for render components ──────────────────────────────────
   const providerProps = {
     supabaseUser,
     players,

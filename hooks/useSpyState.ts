@@ -520,4 +520,3 @@ export function useSpyState({
   };
 }
 
-export type UseSpyStateReturn = ReturnType<typeof useSpyState>;

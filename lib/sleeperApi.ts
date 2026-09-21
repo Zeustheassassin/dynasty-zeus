@@ -22,10 +22,7 @@
 
 import { cachedFetch } from "./clientFetch";
 import { withRetry } from "./withRetry";
-import {
-  SLEEPER_BASE_URL,
-  SLEEPER_PROJECTIONS_BASE,
-} from "./constants";
+import { SLEEPER_PROJECTIONS_BASE } from "./constants";
 import type {
   SleeperUser,
   SleeperLeague,
@@ -35,7 +32,6 @@ import type {
   SleeperDraft,
   SleeperDraftPick,
   SleeperTradedPick,
-  SleeperNFLState,
 } from "./types";
 
 // Proxy base — all routes mounted under app/api/sleeper/**
@@ -242,29 +238,17 @@ async function getDraftPicks(
 }
 
 // ===========================================================================
-// PLAYER / NFL STATE / ADP — outliers (no /api/sleeper/* proxy)
+// ADP — outlier (no /api/sleeper/* proxy)
 // ===========================================================================
-// These three call paths are not part of the Phase M proxy set:
-//   • getAllPlayers / getNFLState — the shared `/api/players` proxy returns
-//     a slimmed combined `{ players, nflState }` shape; switching here would
-//     change the function signatures.
-//   • getRookieBoardADP — Sleeper's projections endpoint lives at a different
-//     host path and is hit on a separate cadence.
-// They keep the original direct-to-Sleeper fetch and stay outside the
-// browser cache layer for now. Revisit if/when proxies are added.
+// getRookieBoardADP is not part of the Phase M proxy set: Sleeper's projections
+// endpoint lives at a different host path and is hit on a separate cadence. It
+// keeps the direct-to-Sleeper fetch and stays outside the browser cache layer.
+// (The player map + NFL state are served by the shared `/api/players` proxy.)
 
-// These bypass the proxy + browser cache, so they are the flakiest call paths
-// (getAllPlayers is ~5 MB). Wrap in withRetry so a single transient blip on a
-// hub switch doesn't hard-fail. Retries only fire on failure — successful
+// This bypasses the proxy + browser cache, so it is one of the flakiest call
+// paths. Wrap in withRetry so a single transient blip on a hub switch doesn't
+// hard-fail. Retries only fire on failure — successful
 // requests (the norm) cost nothing extra.
-async function get<T>(url: string): Promise<T> {
-  return withRetry<T>(async () => {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`Sleeper API error ${res.status} — ${url}`);
-    return (await res.json()) as T;
-  }, 3);
-}
-
 async function getOrNull<T>(url: string): Promise<T | null> {
   try {
     return await withRetry<T>(async () => {
@@ -275,19 +259,6 @@ async function getOrNull<T>(url: string): Promise<T | null> {
   } catch {
     return null;
   }
-}
-
-/**
- * Fetch the full NFL player map from Sleeper.
- * This is a heavy payload (~5 MB). Cache it where possible.
- */
-async function getAllPlayers(): Promise<Record<string, import("./types").SleeperPlayer>> {
-  return get<Record<string, import("./types").SleeperPlayer>>(`${SLEEPER_BASE_URL}/players/nfl`);
-}
-
-/** Fetch the current NFL week/season state. */
-async function getNFLState(): Promise<SleeperNFLState> {
-  return get<SleeperNFLState>(`${SLEEPER_BASE_URL}/state/nfl`);
 }
 
 /**
@@ -319,7 +290,5 @@ export const sleeperApi = {
   getLeagueTradedPicks,
   getLeagueDrafts,
   getDraftPicks,
-  getAllPlayers,
-  getNFLState,
   getRookieBoardADP,
 } as const;

@@ -530,17 +530,13 @@ The TTLs are defined twice and **deliberately paired**: server-side `SLEEPER_*_R
 
 **Live-draft bypass.** `getDraftPicks(draftId, bypassCache = true)` appends `?bypass=1` to the fetch URL (see `appendBypassParam` at [lib/sleeperApi.ts:83](lib/sleeperApi.ts#L83)). The proxy reads that param and switches to `cache: 'no-store'`, so an in-progress draft never serves stale picks. Cleverly, the **`cacheKey` stays the un-suffixed URL** ([lib/sleeperApi.ts:66](lib/sleeperApi.ts#L66)), so a fresh bypass result repopulates the same `localStorage` slot a normal read would later check. `bypass` is also plumbed through `getLeagueRosters`, `getLeagueUsers`, `getLeagueTransactions`, `getLeagueTradedPicks`, and `getLeagueDrafts`.
 
-#### A.2 The three un-proxied Sleeper paths (the exceptions)
+#### A.2 The un-proxied Sleeper path (the one exception)
 
-Three call paths in [lib/sleeperApi.ts:243](lib/sleeperApi.ts#L243) **bypass both the proxy and the `localStorage` cache** and fetch `api.sleeper.app` directly via a separate `withRetry`-wrapped `get`/`getOrNull` helper ([lib/sleeperApi.ts:258](lib/sleeperApi.ts#L258)):
+One call path in [lib/sleeperApi.ts](lib/sleeperApi.ts) **bypasses both the proxy and the `localStorage` cache** and fetches `api.sleeper.app` directly via a `withRetry`-wrapped `getOrNull` helper:
 
-- **`getAllPlayers()`** → `https://api.sleeper.app/v1/players/nfl` — the ~5 MB master player map.
-- **`getNFLState()`** → `https://api.sleeper.app/v1/state/nfl`.
-- **`getRookieBoardADP(year)`** → `https://api.sleeper.app/projections/nfl/{year}?...` (note: projections live at the **host root, not under `/v1`** — `SLEEPER_PROJECTIONS_BASE` in [lib/constants.ts:13](lib/constants.ts#L13)).
+- **`getRookieBoardADP(year)`** → `https://api.sleeper.app/projections/nfl/{year}?...` (note: projections live at the **host root, not under `/v1`** — `SLEEPER_PROJECTIONS_BASE` in [lib/constants.ts:13](lib/constants.ts#L13)). Wrapped in `withRetry(..., 3)`.
 
-These are explicitly "flakiest call paths" (the comment at [lib/sleeperApi.ts:254](lib/sleeperApi.ts#L254)), so each is wrapped in `withRetry(..., 3)`.
-
-There is a **subtle inconsistency worth flagging**: a `/api/players` proxy route **does exist** ([app/api/players/route.ts](app/api/players/route.ts)) and even slims the payload server-side from ~5 MB to ~500 KB by keeping only the fields the app uses, but `sleeperApi.getAllPlayers()` does **not** call it (the comment at [lib/sleeperApi.ts:245](lib/sleeperApi.ts#L245) says switching would change the function signature, so it was left direct). Likewise an `/api/nfl-state` proxy exists and **is** used by [app/hooks/useNflState.ts:16](app/hooks/useNflState.ts#L16), while `sleeperApi.getNFLState()` still hits Sleeper directly — so NFL state is fetched two different ways depending on the caller. Treat the `sleeperApi` outliers and the proxy routes as parallel paths, not one canonical path. *(Confirm which path a given feature uses before assuming caching behavior.)*
+The player map and NFL state are **not** fetched from `sleeperApi` any more: the unused direct `getAllPlayers()` / `getNFLState()` wrappers were removed (Sept 21 audit, Batch 1 step 4). Players + NFL state come through the [`/api/players`](app/api/players/route.ts) proxy (slimmed ~5 MB → ~500 KB) and the `/api/nfl-state` proxy ([app/hooks/useNflState.ts:16](app/hooks/useNflState.ts#L16)).
 
 Separately, **Sleeper projections** are read directly (not via proxy) inside [hooks/useProjections.ts](hooks/useProjections.ts): the "Sleeper/RotoWire" source fetches `SLEEPER_PROJECTIONS_BASE` straight from the browser, while the two *opt-in* extra sources go through the proxies `/api/projections/fantasypros` and `/api/projections/numberfire`.
 
@@ -625,8 +621,8 @@ Cache-Control: s-maxage=300, stale-while-revalidate=60
                                   │ same-origin /api/* fetch                        │ DIRECT (no proxy, CSP-allowed)
                                   ▼                                                 ▼
    ┌──────────────────────── NEXT.js ROUTE HANDLERS (server) ─────────────┐   api.sleeper.app
-   │ every route:  checkRateLimit() ─ rateLimit.ts ─ Upstash | in-memory   │   • /players/nfl   (getAllPlayers, ~5MB)
-   │                                                                        │   • /state/nfl     (getNFLState)
+   │ every route:  checkRateLimit() ─ rateLimit.ts ─ Upstash | in-memory   │   • /players/nfl   (via /api/players only)
+   │                                                                        │   • /state/nfl     (via /api/*)       
    │  /api/sleeper/*        next:{revalidate}  ──────────────────────────▶ │   • /projections/* (useProjections "sleeper" src,
    │     rosters,users,matchups,transactions,traded-picks,drafts,          │                     getRookieBoardADP)
    │     league,user,user-leagues,draft/picks    (?bypass ⇒ no-store)   ───▶ api.sleeper.app/v1
@@ -821,7 +817,7 @@ As of Phase A stage A3 (2026-07-16), all FantasyCalc reads for the main app go t
 
 2. **Trade Hub's `calcFcValues` + `redraftValues`.** [hooks/useCalcValues.ts](hooks/useCalcValues.ts) also calls the proxy, keyed only by `numQbs` (via [`getLeagueNumQbs()`](lib/helpers/scoring.ts#L90) reading the selected league's roster slots) — not by `leagueId`. `loadCalcValues(numQbs)` short-circuits if that format is already loaded; `loadRedraftValues(numQbs)` refetches when a league switches between 1-QB and superflex. Both use a monotonic `calcSeq`/loaded-format guard so a slow fetch can't clobber a newer one. The app's own per-league adjustment on top of these generic values is the multiplier step below (`leagueAdjustedFcValues`) — FantasyCalc's own `leagueId`-based auto-detection is no longer used; the app's `computeScoringMultipliers` is the only per-league adjustment now.
 
-A small static KTC ranking file exists at [app/data/ktcValues.json](app/data/ktcValues.json) (~30 hand-coded `name → value` entries), but it is **not imported anywhere in the TS/TSX codebase** — it is dead/legacy data and plays no role in the live value pipeline.
+A small static KTC ranking file (`app/data/ktcValues.json`, ~30 hand-coded entries) used to exist but was never imported anywhere; it was deleted in the Sept 21 audit cleanup and plays no role in the live value pipeline.
 
 ### League-adjusted values (Tier-3 scoring)
 
@@ -868,7 +864,7 @@ It runs in three composable stages:
 
 3. **Adjusted bucket** — [getAdjustedDirectionBucket()](lib/helpers/direction/scoring.ts#L65) is the authoritative label. It blends the rank bucket with a [computeWindowScore()](lib/helpers/direction/scoring.ts#L5) (core age vs the ~26 dynasty-prime line, young builders +, aging vets −) and simulated *playoff pressure* `(playoffOdds − 50) / 12.5`. The composite nudges the bucket up or down a tier, then **hard playoff-odds floors** override it: a team with 0% odds can't stay an "Elite/Contender" label regardless of paper value. In [useAppState](app/hooks/useAppState.ts#L1393), `selectedLeagueDirectionAdjusted` prefers the **committed** (user-saved) sim's playoff odds over the live sim, because the live sim re-seeds each session and can swing wildly — using the committed odds keeps the strategy label stable across renders.
 
-Direction also exposes the canonical buyer/seller classifier [classifyOppDirection()](lib/helpers/direction/scoring.ts#L43) and the `CONTENDER_BUCKETS`/`SELLER_BUCKETS`/`HARD_SELL_BUCKETS` constant sets — a deliberate single source of truth so the Trade Finder's "is this team a buyer?" tests can't drift apart. Partner-fit helpers (`getTradePartnerFit`, `getCrossLeaguePreferenceFit`, `getCrossLeagueTradeBehaviorFit`, `getLeagueMateMotivation`) also live here and are detailed in the Trade Finder section.
+Direction also exposes the canonical buyer/seller classifier [classifyOppDirection()](lib/helpers/direction/scoring.ts#L43) and the `CONTENDER_BUCKETS`/`SELLER_BUCKETS` constant sets — a deliberate single source of truth so the Trade Finder's "is this team a buyer?" tests can't drift apart. Partner-fit helpers (`getTradePartnerFit`, `getCrossLeaguePreferenceFit`, `getCrossLeagueTradeBehaviorFit`, `getLeagueMateMotivation`) also live here and are detailed in the Trade Finder section.
 
 ### The Season Simulator depth model
 
@@ -1595,7 +1591,7 @@ This file drifts the moment the architecture moves. When you change any of the f
 
 - **CSP / image allowlist** — a new image host needs edits in *two* places in [next.config.ts](next.config.ts) (the CSP `img-src` directive **and** `images.remotePatterns`).
 - **Environment variables** — keep the env table and [.env.example](.env.example) in sync.
-- **Cron schedule** — [vercel.json](vercel.json) is the source of truth; note that an in-code comment in `useAppState.ts` still says "every 30 min" while the schedule is every 2h.
+- **Cron schedule** — [vercel.json](vercel.json) is the source of truth.
 - **Database migrations** — every new migration is additive, ships explicit GRANTs + an RLS policy, and gets a row in the `applied_migrations` ledger.
 - **The Trade Finder scoring model** — magic constants in [finderPipeline.ts](components/tradeHub/finderPipeline.ts) and the direction engine are deliberately tuned; document any change to a weight or gate.
 

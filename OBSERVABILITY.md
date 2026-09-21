@@ -30,7 +30,7 @@ e.g. `level":"error"` or `context":"api/cron`.
 
 Practical tips:
 - Cron failures: filter the Logs view to the cron route paths
-  (`/api/cron/league-transactions`, `/api/cron/leaguemate-alerts`).
+  (`/api/cron/league-transactions`, `/api/cron/simulation-history`, `/api/cron/player-value-history`).
 - Every server route already logs failures at `error` level (e.g. the crons,
   `compile-consensus`), so an `error`-level filter surfaces real problems.
 

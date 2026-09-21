@@ -246,15 +246,6 @@ export interface SleeperNFLState {
 
 // ── Projection / analytics shapes ───────────────────────────
 
-export interface ProjectionEntry {
-  name: string;
-  position: string;
-  fpts: number;
-  playerId?: string;
-  kickoffAt?: number | null;
-  source?: string;
-}
-
 export interface ProjectionSourceWeightedEntry {
   playerId: string;
   name: string;
@@ -294,11 +285,6 @@ export interface ProjectionRow {
    *  Sleeper's weight to 1.0) — null when no source matched. Optional since
    *  rows built outside useProjections (tests, cron snapshots) won't have it. */
   sourceWeights?: Record<string, number> | null;
-}
-
-export interface FantasyCalcPlayerValue {
-  playerId: string;   // Sleeper player_id
-  value: number;
 }
 
 export interface FantasyCalcPickValue {
@@ -391,29 +377,6 @@ export interface RosterDirectionProfile {
   // Set true by selectedLeagueDirectionAdjusted once a committed/live sim has resolved.
   // Consumers must not infer tank/sell direction from playoffOdds when this is falsy.
   hasSimData?: boolean;
-}
-
-export interface LeagueMateProfile {
-  rosterId: number;
-  ownerId: string;
-  bucket: StrategicBucket;
-  bucketColor: string;
-  dynRank: number;
-  redRank: number;
-  standRank: number;
-  positionRanks: Array<{ pos: string; total: number; rank: number }>;
-  coreAge: number;
-  youngCoreCount: number;
-  oldCoreCount: number;
-  pickTotal: number;
-  futureFirsts: number;
-  firstRounders: number;
-}
-
-export interface TradePartnerFit {
-  fitScore: number;
-  fitLabel: string;
-  fitReasons: string[];
 }
 
 export interface CrossLeagueIntelPlayer {
@@ -517,18 +480,6 @@ export interface CachedSimRow {
 }
 
 // ── Draft hub ────────────────────────────────────────────────
-
-export interface RookiePlayer {
-  player_id: string;
-  full_name: string;
-  position: string;
-  team?: string | null;
-  age?: number | null;
-  rank?: number;
-  adp?: number | null;
-  adp_dynasty_2qb?: number | null;
-  source?: string;
-}
 
 /** A player row on the custom rookie big board (useRookieBoardState) */
 export interface RookieBoardPlayer {
@@ -935,13 +886,6 @@ export type CommPaymentsData = Record<
 // ── Projection source ────────────────────────────────────────
 
 export type ProjSourceId = "fantasypros" | "numberfire" | "sleeper";
-
-export interface ProjSource {
-  id: ProjSourceId;
-  label: string;
-  tier: 1 | 2;
-  weight: number;
-}
 
 // ── Asset dispositions ────────────────────────────────────────
 // Per-league, per-asset (player or draft pick) manual disposition, keyed by

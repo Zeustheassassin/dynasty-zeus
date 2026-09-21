@@ -13,7 +13,7 @@
 // that fanned out ~240 Sleeper calls per cold session for a
 // 34-league user.
 //
-// Auth + idempotency mirror app/api/cron/leaguemate-alerts:
+// Auth + idempotency (same shape as the other cron routes):
 //   - Authorization: Bearer ${CRON_SECRET}
 //   - Service-role Supabase client bypasses RLS
 //   - Upsert with onConflict (user_id, transaction_id) so repeat
@@ -43,8 +43,8 @@ const log = logger("cron/league-transactions");
 export const maxDuration = 300;
 
 // Per-user concurrency cap for the per-league fan-out. Same value as
-// the leaguemate-alerts cron so the two crons keep similar load
-// profiles when they run in overlapping windows.
+// the other server-side Sleeper fan-out helpers in lib/sleeperServer.ts so
+// load stays bounded when crons run in overlapping windows.
 const CONCURRENCY = 5;
 
 // Mirror the client effect's lookback window — current week + 3 prior.
