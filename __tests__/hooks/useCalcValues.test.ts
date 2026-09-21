@@ -13,6 +13,57 @@ function fcResponse(sleeperId: string, value: number) {
   return [{ player: { sleeperId }, value }];
 }
 
+// An outage must surface as an error AND stay retryable. Both loaders skip work once a format is
+// "loaded", so latching an empty success (200 + []) would freeze the app on zero values.
+describe("useCalcValues — empty / failed responses are errors, not loaded-but-empty", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function respondInOrder(...responses: Response[]) {
+    const queue = [...responses];
+    global.fetch = vi.fn(async () => queue.shift() ?? new Response("[]", { status: 200 })) as never;
+    return global.fetch as ReturnType<typeof vi.fn>;
+  }
+  const ok = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
+
+  it.each([
+    ["an empty array", () => ok([])],
+    ["a non-array body", () => ok({ error: "nope" })],
+    ["a 502", () => new Response(JSON.stringify([]), { status: 502 })],
+  ])("loadCalcValues: %s sets the error and the next call retries", async (_label, bad) => {
+    const fetchMock = respondInOrder(bad(), ok(fcResponse("p1", 4000)));
+    const { result } = renderHook(() => useCalcValues());
+
+    await act(async () => { await result.current.loadCalcValues(2); });
+    expect(result.current.calcValuesError).not.toBeNull();
+    expect(result.current.calcFcValues).toEqual({});
+
+    // Not latched: the same format is fetched again and recovers.
+    await act(async () => { await result.current.loadCalcValues(2); });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.current.calcValuesError).toBeNull();
+    expect(result.current.calcFcValues).toEqual({ p1: 4000 });
+  });
+
+  it.each([
+    ["an empty array", () => ok([])],
+    ["a non-array body", () => ok({ error: "nope" })],
+  ])("loadRedraftValues: %s sets the error and the next call retries", async (_label, bad) => {
+    const fetchMock = respondInOrder(bad(), ok(fcResponse("p1", 3000)));
+    const { result } = renderHook(() => useCalcValues());
+
+    await act(async () => { await result.current.loadRedraftValues(2); });
+    expect(result.current.redraftError).not.toBeNull();
+    expect(result.current.redraftValues).toEqual({});
+
+    await act(async () => { await result.current.loadRedraftValues(2); });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.current.redraftError).toBeNull();
+    expect(result.current.redraftValues).toEqual({ p1: 3000 });
+  });
+});
+
 describe("useCalcValues — loadRedraftValues race guard", () => {
   beforeEach(() => {
     vi.restoreAllMocks();

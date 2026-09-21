@@ -18,6 +18,7 @@ import {
   getLeagueMateMotivation, getTradePartnerFitLabel, getTradePartnerFit,
   getCrossLeaguePreferenceFit, getCrossLeagueTradeBehaviorFit,
   fetchFantasyCalcValues,
+  withFcValues,
   computeScoringMultipliers,
   getLeagueNumQbs,
   computeSuggestedLineup,
@@ -623,21 +624,43 @@ const signOut = async () => {
 const fetchFreshPlayers = useCallback(async (signal?: AbortSignal, opts?: { bypassCache?: boolean }) => {
   const res = await fetch(opts?.bypassCache ? "/api/players?fresh=1" : "/api/players", { signal });
   if (signal?.aborted) return null;
-  const { players: data, nflState: fetchedNflState } = await res.json();
-  setNflState(fetchedNflState);
+  // A failed upstream still answers with a parseable { players: {}, nflState: null } body. Without
+  // these guards that empty map would land in _playersInMemory, which the mount loader treats as
+  // "already loaded" for the rest of the session.
+  if (!res.ok) throw new Error(`players ${res.status}`);
+  const body = await res.json();
+  const fetched: Record<string, SleeperPlayer> | undefined = body?.players;
+  if (!fetched || Object.keys(fetched).length === 0) throw new Error("players response was empty");
+  setNflState(body.nflState);
 
-  const { playerValues: fcValues, pickValues, trendData } = await fetchFantasyCalcValues(2);
-  if (signal?.aborted) return null;
-  setPickFcValues(pickValues);
-  setFcTrendData(trendData);
+  // FantasyCalc is only the value overlay — its outage must not block the player map itself.
+  let values: Record<string, number> | null = null;
+  try {
+    const fc = await fetchFantasyCalcValues(2);
+    if (signal?.aborted) return null;
+    setPickFcValues(fc.pickValues);
+    setFcTrendData(fc.trendData);
+    values = fc.playerValues;
+  } catch (err) {
+    if (signal?.aborted) return null;
+    log.warn("FantasyCalc values unavailable while loading players", { err: String(err) });
+    if (_playersInMemory) {
+      // Manual injury refresh during an FC outage: carry the last known values forward instead of
+      // blanking every value on a refresh that was only meant to pick up injury changes.
+      const carried: Record<string, number> = {};
+      for (const [id, player] of Object.entries(_playersInMemory)) if (player?.value) carried[id] = player.value;
+      if (Object.keys(carried).length > 0) values = carried;
+    }
+  }
 
-  Object.keys(data).forEach((id) => {
-    if (fcValues[id]) data[id].value = fcValues[id];
-  });
-
-  setLocalStorageItem("playersCache", data);
-  setLocalStorageItem("playersCacheAt", Date.now());
-  _playersInMemory = data;
+  const data = values ? withFcValues(fetched, values) : fetched;
+  if (values) {
+    // Persist / pin only a map that carries values: a value-less one would otherwise be served
+    // for the full 24h TTL (or the whole session). Without values the next mount simply retries.
+    setLocalStorageItem("playersCache", data);
+    setLocalStorageItem("playersCacheAt", Date.now());
+    _playersInMemory = data;
+  }
   setPlayers(data);
   return data;
 }, [setNflState]);
@@ -670,11 +693,27 @@ useEffect(() => {
         "fantasy_positions" in cacheSample &&
         "injury_status" in cacheSample;
 
-      if (hasRookieFields) {
+      // A cache written during a past FantasyCalc outage holds players with no values at all —
+      // treat that as a miss and refetch rather than serving it for the rest of the TTL.
+      const hasValues = Object.values(parsedCache).some((player) => (player?.value ?? 0) > 0);
+
+      if (hasRookieFields && hasValues) {
         _playersInMemory = parsedCache;
         setPlayers(parsedCache);
-        // Still load pick values and nflState even when players come from cache
-        fetchFantasyCalcValues(2).then(({ pickValues, trendData }) => { if (!signal.aborted) { setPickFcValues(pickValues); setFcTrendData(trendData); } }).catch(() => {});
+        // Still load pick values and nflState even when players come from cache. The cached
+        // `.value`s can be up to a day old, so overlay the current FantasyCalc values as well.
+        fetchFantasyCalcValues(2)
+          .then(({ playerValues, pickValues, trendData }) => {
+            if (signal.aborted) return;
+            setPickFcValues(pickValues);
+            setFcTrendData(trendData);
+            // A manual refresh may already have replaced the map — don't clobber it.
+            if (_playersInMemory !== parsedCache) return;
+            const merged = withFcValues(parsedCache, playerValues);
+            _playersInMemory = merged;
+            setPlayers(merged);
+          })
+          .catch((err) => log.warn("FantasyCalc refresh of cached players failed", { err: String(err) }));
         fetch('/api/nfl-state', { signal })
           .then(r => r.json()).then((s) => { if (!signal.aborted) setNflState(s); }).catch(() => {});
         return;

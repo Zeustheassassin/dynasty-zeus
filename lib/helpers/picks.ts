@@ -81,15 +81,38 @@ export const getDraftRoundSlot = (
   return round % 2 === 0 ? totalTeams - baseSlot + 1 : baseSlot;
 };
 
+/** Returns `players` with `.value` set from `values` (Sleeper ID -> FC value) for every player that
+ *  has one. Non-mutating — the input map may already be held in React state — and only players whose
+ *  value actually changes are cloned. Returns the SAME map when nothing changes, so re-applying
+ *  identical values is a no-op for React. Merge-only: a player absent from `values` keeps whatever
+ *  `.value` it already had. */
+export const withFcValues = <P extends { value?: number }>(
+  players: Record<string, P>,
+  values: Record<string, number>
+): Record<string, P> => {
+  let merged: Record<string, P> | null = null;
+  for (const id of Object.keys(values)) {
+    const player = players[id];
+    if (!player || player.value === values[id]) continue;
+    merged ??= { ...players };
+    merged[id] = { ...player, value: values[id] };
+  }
+  return merged ?? players;
+};
+
 /** Fetches dynasty values from the /api/fc-values proxy and normalises
  *  them into separate player and pick value maps keyed by Sleeper ID.
  *  Also returns raw trendData (trend30Day, tradeFrequency, redraftValue)
- *  for the market trends view — these are raw FC values, never league-adjusted. */
+ *  for the market trends view — these are raw FC values, never league-adjusted.
+ *  Throws when the proxy has no usable data (non-OK status, or an empty / non-array
+ *  body) so callers never mistake an outage for "no player has a value" and cache that. */
 export const fetchFantasyCalcValues = async (
   numQbs = 1
 ): Promise<{ playerValues: Record<string, number>; pickValues: Record<string, number>; trendData: import("../types").FcTrendEntry[] }> => {
   const res = await fetch(`/api/fc-values?numQbs=${numQbs}`);
-  const data = await res.json();
+  if (!res.ok) throw new Error(`fc-values ${res.status}`);
+  const data: unknown = await res.json();
+  if (!Array.isArray(data) || data.length === 0) throw new Error("fc-values returned no data");
 
   const playerValues: Record<string, number> = {};
   const slotPickValues: Record<string, number[]> = {};

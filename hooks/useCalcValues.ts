@@ -4,6 +4,18 @@ import { logger } from "../lib/logger";
 
 const log = logger("hooks/useCalcValues");
 
+/** Parses an /api/fc-values body into Sleeper ID -> value. Throws on an empty or non-array body so
+ *  an outage is reported (and retried on the next call) rather than latched as a loaded-but-empty map. */
+function parseFcValues(data: unknown): Record<string, number> {
+  if (!Array.isArray(data) || data.length === 0) throw new Error("fc-values returned no data");
+  const vals: Record<string, number> = {};
+  (data as { player?: { sleeperId?: string }; value: number }[]).forEach((entry) => {
+    const sleeperId = entry.player?.sleeperId;
+    if (sleeperId) vals[String(sleeperId)] = entry.value;
+  });
+  return vals;
+}
+
 export function useCalcValues() {
   const [calcFcValues, setCalcFcValues] = useState<Record<string, number>>({});
   const [calcValuesNumQbs, setCalcValuesNumQbs] = useState<number | null>(null);
@@ -40,12 +52,7 @@ export function useCalcValues() {
     try {
       const res = await fetch(`/api/fc-values?numQbs=${numQbs}`);
       if (!res.ok) throw new Error(`fc-values ${res.status}`);
-      const data = await res.json();
-      const vals: Record<string, number> = {};
-      (data as { player?: { sleeperId?: string }; value: number }[]).forEach((entry) => {
-        const sleeperId = entry.player?.sleeperId;
-        if (sleeperId) vals[String(sleeperId)] = entry.value;
-      });
+      const vals = parseFcValues(await res.json());
       if (seq !== calcSeq.current) return; // a newer load started — discard
       setCalcFcValues(vals);
       setCalcValuesNumQbs(numQbs);
@@ -67,12 +74,7 @@ export function useCalcValues() {
     try {
       const res = await fetch(`/api/fc-values?numQbs=${numQbs}&isDynasty=false`);
       if (!res.ok) throw new Error(`fc-values ${res.status}`);
-      const data = await res.json();
-      const vals: Record<string, number> = {};
-      (data as { player?: { sleeperId?: string }; value: number }[]).forEach((entry) => {
-        const sleeperId = entry.player?.sleeperId;
-        if (sleeperId) vals[String(sleeperId)] = entry.value;
-      });
+      const vals = parseFcValues(await res.json());
       if (seq !== redraftSeq.current) return; // a newer load started — discard
       setRedraftValues(vals);
       setRedraftLoaded(true);
