@@ -350,6 +350,13 @@ const {
 // player value baseline used for gaining/falling alerts, not the alert list itself.
 const alertSnapshotStorageKey = `alertSnapshots_v1_${alertStoreScope}`;
 const alertBootstrapRef = useRef(false);
+// User id we already tried to "expand" the value snapshot for this session. The expand check
+// compares FC entries (all positions) against a QB/RB/WR/TE-only snapshot, so it can stay true
+// forever and would otherwise re-upsert on every alert-effect run.
+const snapshotExpandAttemptedRef = useRef<string | null>(null);
+// Last leaguemate_profiles payload written per user+league (signature) so unchanged
+// profiles aren't re-upserted every time the memo recomputes.
+const leagueMateWriteSigRef = useRef<Record<string, string>>({});
 // Stable daily baseline for value-change alerts â€” loaded from Supabase, NOT localStorage.
 const historicalSnapshotRef = useRef<HistoricalSnapshot | null>(null);
 const [historicalSnapshot, setHistoricalSnapshot] = useState<HistoricalSnapshot | null>(null);
@@ -2184,15 +2191,36 @@ const saveSnapshotNow = async () => {
 
   useEffect(() => {
     if (!supabaseUser || !selectedLeague?.league_id || selectedLeagueMateProfiles.length === 0) return;
-    supabase.from("leaguemate_profiles").upsert(
-      {
-        user_id: supabaseUser.id,
-        league_id: selectedLeague.league_id,
-        profiles: selectedLeagueMateProfiles,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "user_id,league_id" }
-    ).then(() => {}, (err: unknown) => log.error("leaguemate_profiles upsert failed", { err: String(err) }));
+    const userId = supabaseUser.id;
+    const leagueId = selectedLeague.league_id;
+    const sigKey = `${userId}:${leagueId}`;
+    // Profiles recompute whenever any upstream input (sim, direction, rosters) settles, often in
+    // bursts. Debounce so only the settled value is written, and skip if it's unchanged.
+    const timer = setTimeout(() => {
+      const sig = JSON.stringify(selectedLeagueMateProfiles);
+      if (leagueMateWriteSigRef.current[sigKey] === sig) return;
+      leagueMateWriteSigRef.current[sigKey] = sig;
+      supabase.from("leaguemate_profiles").upsert(
+        {
+          user_id: userId,
+          league_id: leagueId,
+          profiles: selectedLeagueMateProfiles,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id,league_id" }
+      ).then(
+        ({ error }) => {
+          if (!error) return;
+          delete leagueMateWriteSigRef.current[sigKey]; // let the next change retry
+          log.error("leaguemate_profiles upsert failed", { err: error.message });
+        },
+        (err: unknown) => {
+          delete leagueMateWriteSigRef.current[sigKey];
+          log.error("leaguemate_profiles upsert failed", { err: String(err) });
+        }
+      );
+    }, 5000);
+    return () => clearTimeout(timer);
   }, [supabaseUser, selectedLeague?.league_id, selectedLeagueMateProfiles]);
 
   // Drafted players keyed by both Sleeper player_id AND `name:<normalized>` so the rookie
@@ -2944,10 +2972,11 @@ const saveSnapshotNow = async () => {
     // Post-bootstrap: if calcFcValues just loaded and the saved snapshot is too small, expand it.
     // This handles the case where the snapshot was taken before dynasty values were loaded.
     // IMPORTANT: preserve the original recorded_at so this expansion never resets the 6-day clock.
-    if (supabaseUser && historicalSnapshotRef.current) {
+    if (supabaseUser && historicalSnapshotRef.current && snapshotExpandAttemptedRef.current !== supabaseUser.id) {
       const existingCount = Object.keys(historicalSnapshotRef.current.players ?? {}).length;
       const calcCount = Object.values(calcFcValues as Record<string, number>).filter(v => v > 0).length;
       if (calcCount > 100 && calcCount > existingCount + 50) {
+        snapshotExpandAttemptedRef.current = supabaseUser.id;
         const originalRecordedAt = historicalSnapshotRef.current.recorded_at;
         const fullSnap = buildFullSnapshot();
         supabase
