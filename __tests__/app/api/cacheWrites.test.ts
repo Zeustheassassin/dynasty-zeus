@@ -4,8 +4,8 @@ import { NextRequest } from "next/server";
 // Audit Batch 2 step 7. Since migration 026 the shared cache tables are SELECT-only for the anon key,
 // so the routes' anon-client upserts were denied by RLS and nothing was ever cached (fc_values_cache
 // stuck at one 2026-04-29 row; the other three tables empty). Reads still use the anon client; the
-// WRITES must go through the service-role helper. Covers /api/fc-values and /api/cross-league-rosters
-// (/api/stats/sleeper-weekly has its own file).
+// WRITES must go through the service-role helper. Covers /api/fc-values (route + real getFcValues, step 8
+// wiring) and /api/cross-league-rosters (/api/stats/sleeper-weekly has its own file).
 
 const h = vi.hoisted(() => ({
   checkRateLimit: vi.fn(async () => ({ allowed: true, remaining: 29 })),
@@ -49,8 +49,10 @@ beforeEach(() => {
   anonWrites = 0;
 });
 
-describe("GET /api/fc-values — cache writes", () => {
-  const FC = [{ player: { sleeperId: "1", position: "QB" }, value: 9000 }];
+// The route + the REAL getFcValues helper together (the route test mocks the helper; the helper test
+// skips the route) — guards the wiring between them.
+describe("GET /api/fc-values — route + helper wiring", () => {
+  const FC = Array.from({ length: 60 }, (_, i) => ({ player: { sleeperId: String(i + 1), position: "QB" }, value: 9000 - i }));
   const stubFc = (body: unknown = FC, status = 200) => {
     global.fetch = vi.fn(async () => new Response(JSON.stringify(body), { status })) as never;
   };
@@ -61,6 +63,7 @@ describe("GET /api/fc-values — cache writes", () => {
     const res = await GET(req("/api/fc-values?numQbs=2"));
     await flush();
 
+    expect(res.headers.get("X-FC-Source")).toBe("live");
     expect(await res.json()).toEqual(FC);
     expect(h.upsertCacheRow).toHaveBeenCalledTimes(1);
     expect(h.upsertCacheRow).toHaveBeenCalledWith("fc_values_cache", expect.objectContaining({ num_qbs: 2, data: FC }));
@@ -82,16 +85,30 @@ describe("GET /api/fc-values — cache writes", () => {
     const { GET } = await load("@/app/api/fc-values/route");
     const res = await GET(req("/api/fc-values?numQbs=2"));
     await flush();
+    expect(res.headers.get("X-FC-Source")).toBe("cache");
     expect(await res.json()).toEqual(FC);
     expect(global.fetch).not.toHaveBeenCalled();
     expect(h.upsertCacheRow).not.toHaveBeenCalled();
   });
 
-  it.each([[[]], [{ error: "nope" }]])("never caches an empty / non-array FantasyCalc body (%j)", async (body) => {
+  it("serves the expired cache (200, X-FC-Source: stale) instead of [] when FantasyCalc is down", async () => {
+    cachedRow = { data: FC, cached_at: new Date(Date.now() - 50 * 3_600_000).toISOString() };
+    stubFc({ error: "down" }, 503);
+    const { GET } = await load("@/app/api/fc-values/route");
+    const res = await GET(req("/api/fc-values?numQbs=2"));
+    await flush();
+    expect(res.status).toBe(200);
+    expect(res.headers.get("X-FC-Source")).toBe("stale");
+    expect(await res.json()).toEqual(FC);
+    expect(h.upsertCacheRow).not.toHaveBeenCalled();
+  });
+
+  it.each([[[]], [{ error: "nope" }]])("answers 502 and caches nothing for an unusable FantasyCalc body (%j) with no cache to fall back on", async (body) => {
     stubFc(body);
     const { GET } = await load("@/app/api/fc-values/route");
-    await GET(req("/api/fc-values?numQbs=2"));
+    const res = await GET(req("/api/fc-values?numQbs=2"));
     await flush();
+    expect(res.status).toBe(502);
     expect(h.upsertCacheRow).not.toHaveBeenCalled();
   });
 

@@ -1,62 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '../../../lib/supabaseclient';
-import { FANTASYCALC_BASE_URL, FC_VALUES_TTL_MS } from '../../../lib/constants';
 import { checkRateLimit } from '../../../lib/rateLimit';
-import { upsertCacheRow } from '../../../lib/supabaseAdmin';
-import { afterResponse } from '../../../lib/afterResponse';
+import { getFcValues } from '../../../lib/server/fcValues';
 
+// Serves the raw FantasyCalc values array. All the caching / refresh / fallback logic lives in
+// getFcValues (shared with the crons): fresh cache -> live fetch (timeout, validated, cached with the
+// service role) -> expired cache if FantasyCalc is down. Only when there is nothing usable at all does
+// this answer non-200 — clients (fetchFantasyCalcValues, useCalcValues) treat that as an error and
+// retry instead of caching "no values". X-FC-Source says where the payload came from.
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const rl = await checkRateLimit(req, 30, 60_000, 'fc-values');
   if (!rl.allowed) return rl.response;
 
   const numQbsRaw = parseInt(req.nextUrl.searchParams.get('numQbs') ?? '2', 10);
   // Only 1QB and 2QB formats are valid FantasyCalc endpoints
-  if (!Number.isInteger(numQbsRaw) || numQbsRaw < 1 || numQbsRaw > 2) {
+  if (numQbsRaw !== 1 && numQbsRaw !== 2) {
     return NextResponse.json({ error: 'numQbs must be 1 or 2' }, { status: 400 });
   }
-  const numQbs = numQbsRaw;
   const isDynasty = req.nextUrl.searchParams.get('isDynasty') !== 'false';
-  const table = isDynasty ? 'fc_values_cache' : 'fc_redraft_values_cache';
 
-  // ── 1. Check Supabase cache ──────────────────────────────
-  try {
-    const { data: cached } = await supabase
-      .from(table)
-      .select('data, cached_at')
-      .eq('num_qbs', numQbs)
-      .single();
-
-    if (cached && Date.now() - new Date(cached.cached_at).getTime() < FC_VALUES_TTL_MS) {
-      return NextResponse.json(cached.data);
-    }
-  } catch { /* cache miss — proceed to fetch */ }
-
-  // ── 2. Fetch from FantasyCalc ────────────────────────────
-  // numTeams/ppr only apply to the dynasty query shape (matches prior direct-fetch
-  // behavior); the redraft shape was always queried without them.
-  const fcUrl = isDynasty
-    ? `${FANTASYCALC_BASE_URL}/values/current?isDynasty=true&numQbs=${numQbs}&numTeams=12&ppr=1`
-    : `${FANTASYCALC_BASE_URL}/values/current?isDynasty=false&numQbs=${numQbs}`;
-  try {
-    const res = await fetch(fcUrl);
-    if (!res.ok) return NextResponse.json([]);
-    const data = await res.json();
-
-    // ── 3. Write to Supabase cache (service role, after the response, retries up to 3x) ──
-    // The write must use the service role: the FC cache tables are SELECT-only for anon (RLS).
-    // Never cache an empty / non-array body — it would be served for the full 24h TTL.
-    if (Array.isArray(data) && data.length > 0) {
-      afterResponse(() =>
-        upsertCacheRow(table, {
-          num_qbs: numQbs,
-          data,
-          cached_at: new Date().toISOString(),
-        })
-      );
-    }
-
-    return NextResponse.json(data);
-  } catch {
-    return NextResponse.json([]);
+  const result = await getFcValues(numQbsRaw, isDynasty);
+  if (!result) {
+    return NextResponse.json({ error: 'FantasyCalc values unavailable' }, { status: 502 });
   }
+  return NextResponse.json(result.data, {
+    headers: { 'X-FC-Source': result.source, 'X-FC-Fetched-At': result.fetchedAt },
+  });
 }

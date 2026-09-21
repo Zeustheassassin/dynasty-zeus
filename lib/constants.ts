@@ -40,6 +40,13 @@ export const ROOKIE_BOARD_SHEET_URL =
 /** FantasyCalc dynasty values — updated at most once per day */
 export const FC_VALUES_TTL_MS = 24 * 60 * 60 * 1000;
 
+/** Upstream timeout for a FantasyCalc values fetch (ms) — it normally answers in under a second */
+export const FC_FETCH_TIMEOUT_MS = 8_000;
+
+/** A FantasyCalc payload with fewer valued entries than this is treated as an upstream failure
+ *  (real payloads carry 200-450) so a truncated / error body is never cached or served as data */
+export const FC_MIN_VALID_ENTRIES = 50;
+
 /** Cross-league roster lookups — rosters change with trades/waivers */
 export const CROSS_LEAGUE_ROSTERS_TTL_MS = 6 * 60 * 60 * 1000;
 
