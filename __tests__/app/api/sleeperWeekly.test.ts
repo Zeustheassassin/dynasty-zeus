@@ -9,11 +9,18 @@ import { NextRequest } from "next/server";
 
 const h = vi.hoisted(() => ({
   checkRateLimit: vi.fn(async () => ({ allowed: true, remaining: 29 })),
+  upsertCacheRow: vi.fn(async (_table: string, _row: Record<string, unknown>) => true),
 }));
 vi.mock("@/lib/rateLimit", () => ({ checkRateLimit: h.checkRateLimit }));
 
+// Cache WRITES go through the service-role helper: sleeper_stats_cache is SELECT-only for the anon
+// client (RLS), so an anon upsert is silently denied and nothing is ever cached (audit Batch 2 step 7).
+vi.mock("@/lib/supabaseAdmin", () => ({ upsertCacheRow: h.upsertCacheRow }));
+
 let cachedRow: { data: unknown; cached_at: string } | null = null;
 let upserts: Array<{ season: string; week: number; data: unknown; cached_at: string }> = [];
+let upsertTables: string[] = [];
+let anonWrites = 0;
 let selectEqs: Array<[string, unknown]> = [];
 
 vi.mock("@/lib/supabaseclient", () => ({
@@ -29,9 +36,10 @@ vi.mock("@/lib/supabaseclient", () => ({
           },
         }),
       }),
-      upsert: (row: { season: string; week: number; data: unknown; cached_at: string }) => {
-        upserts.push(row);
-        return Promise.resolve({ error: null });
+      // Reads still use the anon client; a write here would be denied by RLS in production.
+      upsert: () => {
+        anonWrites++;
+        return Promise.resolve({ error: { message: "new row violates row-level security policy" } });
       },
     }),
   },
@@ -57,7 +65,14 @@ beforeEach(() => {
   h.checkRateLimit.mockResolvedValue({ allowed: true, remaining: 29 });
   cachedRow = null;
   upserts = [];
+  upsertTables = [];
+  anonWrites = 0;
   selectEqs = [];
+  h.upsertCacheRow.mockImplementation(async (table, row) => {
+    upsertTables.push(table);
+    upserts.push(row as (typeof upserts)[number]);
+    return true;
+  });
 });
 
 describe("GET /api/stats/sleeper-weekly", () => {
@@ -71,6 +86,15 @@ describe("GET /api/stats/sleeper-weekly", () => {
     expect(upserts).toHaveLength(1);
     // Stored under the versioned key so pre-fix (all-empty) rows can never be served.
     expect(upserts[0]).toMatchObject({ season: "v2-2026", week: 3, data: { "123": { pts: 10 } } });
+  });
+
+  it("writes the cache through the service-role helper, never the anon client (RLS makes anon writes a no-op)", async () => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({ "123": { pts: 10 } }), { status: 200 })) as never;
+    const GET = await loadGET();
+    await GET(makeReq("2026", "3") as never);
+    await flush();
+    expect(upsertTables).toEqual(["sleeper_stats_cache"]);
+    expect(anonWrites).toBe(0);
   });
 
   it("requests Sleeper's working stats URL shape (the old ?season_type= form returns {} for every player)", async () => {

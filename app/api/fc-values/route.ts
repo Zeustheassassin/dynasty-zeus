@@ -2,10 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '../../../lib/supabaseclient';
 import { FANTASYCALC_BASE_URL, FC_VALUES_TTL_MS } from '../../../lib/constants';
 import { checkRateLimit } from '../../../lib/rateLimit';
-import { logger } from '../../../lib/logger';
-import { withRetry } from '../../../lib/withRetry';
-
-const log = logger('api/fc-values');
+import { upsertCacheRow } from '../../../lib/supabaseAdmin';
+import { afterResponse } from '../../../lib/afterResponse';
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const rl = await checkRateLimit(req, 30, 60_000, 'fc-values');
@@ -44,14 +42,18 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     if (!res.ok) return NextResponse.json([]);
     const data = await res.json();
 
-    // ── 3. Write to Supabase cache (non-blocking, retries up to 3x) ──
-    withRetry(() =>
-      supabase.from(table).upsert({
-        num_qbs: numQbs,
-        data,
-        cached_at: new Date().toISOString(),
-      }).then(({ error }) => { if (error) throw error; })
-    ).catch((err: unknown) => log.error('cache write failed after retries', { err: String(err) }));
+    // ── 3. Write to Supabase cache (service role, after the response, retries up to 3x) ──
+    // The write must use the service role: the FC cache tables are SELECT-only for anon (RLS).
+    // Never cache an empty / non-array body — it would be served for the full 24h TTL.
+    if (Array.isArray(data) && data.length > 0) {
+      afterResponse(() =>
+        upsertCacheRow(table, {
+          num_qbs: numQbs,
+          data,
+          cached_at: new Date().toISOString(),
+        })
+      );
+    }
 
     return NextResponse.json(data);
   } catch {

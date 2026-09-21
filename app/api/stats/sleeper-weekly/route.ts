@@ -4,7 +4,8 @@ import { SLEEPER_BASE_URL, SLEEPER_STATS_TTL_MS } from '../../../../lib/constant
 import { checkRateLimit } from '../../../../lib/rateLimit';
 import { apiError, parseIntParam } from '../../../../lib/apiHelpers';
 import { logger } from '../../../../lib/logger';
-import { withRetry } from '../../../../lib/withRetry';
+import { upsertCacheRow } from '../../../../lib/supabaseAdmin';
+import { afterResponse } from '../../../../lib/afterResponse';
 
 const log = logger('api/stats/sleeper-weekly');
 
@@ -80,18 +81,19 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
     const data = await res.json();
 
-    // ── 3. Write to Supabase cache (non-blocking, retries up to 3x) ──
+    // ── 3. Write to Supabase cache (service role, after the response, retries up to 3x) ──
     // Never cache a response with no stats in it: a future/unplayed week or an
     // upstream hiccup would otherwise be pinned as "empty" for the full TTL.
+    // The write must use the service role: sleeper_stats_cache is SELECT-only for anon (RLS).
     if (hasAnyStats(data)) {
-      withRetry(() =>
-        supabase.from('sleeper_stats_cache').upsert({
+      afterResponse(() =>
+        upsertCacheRow('sleeper_stats_cache', {
           season: cacheSeason,
           week,
           data,
           cached_at: new Date().toISOString(),
-        }).then(({ error }) => { if (error) throw error; })
-      ).catch((err: unknown) => log.error('cache write failed after retries', { err: String(err) }));
+        })
+      );
     }
 
     return NextResponse.json(data ?? {});
