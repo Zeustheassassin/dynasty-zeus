@@ -14,6 +14,8 @@ export * from "./math";
 export * from "./scoring";
 export * from "./formatting";
 export * from "./gameday";
+export * from "./gamedayLive";
+export * from "./injuryOverrides";
 export * from "./lineup";
 export * from "./picks";
 export * from "./direction";

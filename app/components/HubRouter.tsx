@@ -156,8 +156,10 @@ interface HubRouterProps {
   loadingGamedayMatchups: boolean;
   selectedGamedayMatchup: GamedayMatchup | null;
   setSelectedGamedayMatchupId: (id: number | null) => void;
-  loadGamedayMatchups: (leagueId: string, week: number) => void;
-  loadSchedule: (week: number) => void;
+  onRefreshGamedaySnapshot: () => void;
+  gamedayMatchupsUpdatedAt: number | null;
+  gamedayDashboardUpdatedAt: number | null;
+  gamedayLive: boolean;
   gamedayHubTab: GamedayHubTab;
   setGamedayHubTab: (tab: GamedayHubTab) => void;
   gamedayDashboardEntries: GamedayDashboardEntry[];
@@ -325,7 +327,7 @@ export function HubRouter({
   saveLeagueNote, saveSimulationToSupabase, handleRunAllSims, refreshDraftBoard,
   setPlayerProfileId, setCalcOpponentRosterId, setTradeHubSection,
   gamedayWeek, gamedayMatchupCards, loadingGamedayMatchups, selectedGamedayMatchup,
-  setSelectedGamedayMatchupId, loadGamedayMatchups, loadSchedule,
+  setSelectedGamedayMatchupId, onRefreshGamedaySnapshot, gamedayMatchupsUpdatedAt, gamedayDashboardUpdatedAt, gamedayLive,
   gamedayHubTab, setGamedayHubTab, gamedayDashboardEntries, loadingGamedayDashboard, onRefreshGamedayDashboard,
   setProjectionWeek, setProjectionLoaded, loadProjections,
   shares, totalLeagues, loadingAllLeagueData, shareSearch, setShareSearch, sharePosition, setSharePosition,
@@ -523,11 +525,10 @@ export function HubRouter({
             loadingGamedayMatchups={loadingGamedayMatchups}
             selectedGamedayMatchup={selectedGamedayMatchup}
             setSelectedGamedayMatchupId={setSelectedGamedayMatchupId}
-            loadGamedayMatchups={loadGamedayMatchups}
-            loadSchedule={loadSchedule}
-            setProjectionWeek={setProjectionWeek}
-            setProjectionLoaded={setProjectionLoaded}
-            loadProjections={loadProjections}
+            onRefreshGamedaySnapshot={onRefreshGamedaySnapshot}
+            gamedayMatchupsUpdatedAt={gamedayMatchupsUpdatedAt}
+            gamedayDashboardUpdatedAt={gamedayDashboardUpdatedAt}
+            gamedayLive={gamedayLive}
             setPlayerProfileId={setPlayerProfileId}
             gamedayDashboardEntries={gamedayDashboardEntries}
             loadingGamedayDashboard={loadingGamedayDashboard}

@@ -24,6 +24,8 @@ import {
   recomputeConsensusFpts,
   resolveGameState,
   getProjectionKickoffAt,
+  getGamedayPollPlan,
+  PROJECTION_REFRESH_MS,
 } from "../../lib/helpers";
 import { projectRookiesByRoster } from "../../lib/helpers/rookieProjection";
 import { useProjections } from "../../hooks/useProjections";
@@ -44,6 +46,8 @@ import { useNflState } from "./useNflState";
 import { useGamedayState } from "./useGamedayState";
 import { useNflSchedule } from "./useNflSchedule";
 import { useGamedayDashboard } from "./useGamedayDashboard";
+import { useVisibilityPolling } from "./useVisibilityPolling";
+import { useGamedayLiveData } from "./useGamedayLiveData";
 import { useActivityState } from "./useActivityState";
 import { usePlayerAnnotations } from "./usePlayerAnnotations";
 import { usePersonalRankings } from "./usePersonalRankings";
@@ -179,12 +183,11 @@ const [leagueMateProfileCache, setLeagueMateProfileCache] = useState<Record<stri
 const { nflState, setNflState, loadNflState } = useNflState();
 const {
   gamedayMatchups, setGamedayMatchups,
-  loadingGamedayMatchups,
+  loadingGamedayMatchups, gamedayMatchupsUpdatedAt,
   selectedGamedayMatchupId, setSelectedGamedayMatchupId,
   loadGamedayMatchups,
 } = useGamedayState();
 const { scheduleByTeam, loadingSchedule, loadSchedule } = useNflSchedule();
-const { gamedayDashboardEntries, loadingGamedayDashboard, gamedayDashboardWeek, loadGamedayDashboard } = useGamedayDashboard();
 const {
   calcFcValues,
   loadingCalcValues,
@@ -248,6 +251,18 @@ const [standings, setStandings] = useState<StandingRow[]>([]);
       setMainTab("DASHBOARD");
     },
   });
+
+  // Fresh-during-game layers over the base data: live stat lines (per-stat pace)
+  // and ESPN's injury report overlaid on Sleeper's up-to-24h-old players map.
+  const { liveStatsByPlayerId, loadLiveStats, loadInjuries, gamedayPlayers } = useGamedayLiveData(players);
+
+  // Declared after useSleeperUser (needs `user`) and useProjections/useNflSchedule
+  // (needs their live output): the scored dashboard cards are derived from raw
+  // fetched data + the *current* scoreboard, not baked at fetch time.
+  const {
+    gamedayDashboardEntries, loadingGamedayDashboard, gamedayDashboardWeek, gamedayDashboardUpdatedAt,
+    loadGamedayDashboard, refreshGamedayDashboardMatchups,
+  } = useGamedayDashboard({ user, players: gamedayPlayers, projectionData, scheduleByTeam, liveStatsByPlayerId });
 
   const {
     leagueOverviewData,
@@ -883,14 +898,16 @@ useEffect(() => {
   const isRegularSeason = nflState?.season_type === "regular" && Number(nflState?.week || 0) > 0;
   const currentWeek = isRegularSeason ? Number(nflState?.week) : 0;
 
-  if (mainTab !== "GAMEDAY_HUB" || !selectedLeague?.league_id || !currentWeek) {
-    if (mainTab === "GAMEDAY_HUB" && !currentWeek) {
-      setGamedayMatchups([]);
-      setSelectedGamedayMatchupId(null);
-    }
+  if (mainTab !== "GAMEDAY_HUB") return;
+  if (!currentWeek) {
+    setGamedayMatchups([]);
+    setSelectedGamedayMatchupId(null);
     return;
   }
 
+  // Week-level data every Gameday view needs. Deliberately NOT gated on a selected
+  // league: the cross-league Dashboard works with none, and without the scoreboard
+  // and projections it rendered every starter as "upcoming" with nothing left to score.
   if (projectionWeek !== currentWeek) {
     setProjectionWeek(currentWeek);
     setProjectionLoaded(false);
@@ -898,9 +915,10 @@ useEffect(() => {
   } else if (!projectionLoaded) {
     loadProjections(currentWeek, enabledExtraSources);
   }
-
-  loadGamedayMatchups(selectedLeague.league_id, currentWeek);
   loadSchedule(currentWeek);
+
+  // Only the single-league Matchups tab needs a league's own matchup rows.
+  if (selectedLeague?.league_id) loadGamedayMatchups(selectedLeague.league_id, currentWeek);
 }, [mainTab, selectedLeague?.league_id, nflState?.week, nflState?.season_type, projectionWeek, projectionLoaded, enabledExtraSources, loadProjections, loadGamedayMatchups, loadSchedule, setProjectionLoaded, setProjectionWeek, setGamedayMatchups, setSelectedGamedayMatchupId]);
 
 useEffect(() => {
@@ -908,8 +926,8 @@ useEffect(() => {
   const isRegularSeason = nflState?.season_type === "regular" && Number(nflState?.week || 0) > 0;
   const currentWeek = isRegularSeason ? Number(nflState?.week) : 0;
   if (!currentWeek || gamedayDashboardWeek === currentWeek) return;
-  loadGamedayDashboard(leagues, user, currentWeek, players, projectionData, scheduleByTeam);
-}, [mainTab, gamedayHubTab, nflState?.week, nflState?.season_type, gamedayDashboardWeek, loadGamedayDashboard, leagues, user, players, projectionData, scheduleByTeam]);
+  loadGamedayDashboard(leagues, user, currentWeek);
+}, [mainTab, gamedayHubTab, nflState?.week, nflState?.season_type, gamedayDashboardWeek, loadGamedayDashboard, leagues, user]);
 
 useEffect(() => {
   const leagueId = selectedLeague?.league_id;
@@ -1300,7 +1318,7 @@ const saveSnapshotNow = async () => {
     return nflState?.season_type === "regular" && rawWeek > 0 ? rawWeek : 0;
   }, [nflState?.week, nflState?.season_type]);
   const gamedayMatchupCards = useMemo((): GamedayMatchup[] => {
-    const built = buildGamedayMatchups(selectedLeague, rosters, gamedayMatchups, gamedayWeek, players, projectionData, users, scheduleByTeam);
+    const built = buildGamedayMatchups(selectedLeague, rosters, gamedayMatchups, gamedayWeek, gamedayPlayers, projectionData, users, scheduleByTeam, liveStatsByPlayerId);
     if (built.length < 2) return built;
 
     // Feature the user's own matchup first, ahead of the soonest-kickoff
@@ -1314,7 +1332,7 @@ const saveSnapshotNow = async () => {
     const [mine] = reordered.splice(myIndex, 1);
     reordered.unshift(mine);
     return reordered;
-  }, [selectedLeague, rosters, gamedayMatchups, gamedayWeek, players, projectionData, users, scheduleByTeam, user?.user_id]);
+  }, [selectedLeague, rosters, gamedayMatchups, gamedayWeek, gamedayPlayers, projectionData, users, scheduleByTeam, liveStatsByPlayerId, user?.user_id]);
   const selectedGamedayMatchup = useMemo(
     () => gamedayMatchupCards.find((card) => card.matchupId === selectedGamedayMatchupId) || gamedayMatchupCards[0] || null,
     [gamedayMatchupCards, selectedGamedayMatchupId]
@@ -1328,11 +1346,109 @@ const saveSnapshotNow = async () => {
       setSelectedGamedayMatchupId(gamedayMatchupCards[0].matchupId);
     }
   }, [gamedayMatchupCards, selectedGamedayMatchupId, setSelectedGamedayMatchupId]);
+  // Manual refreshes bypass every cache layer (browser TTL + the proxy's 5-minute
+  // server cache) — the scores themselves are what the user is asking to re-check.
   const onRefreshGamedayDashboard = useCallback(() => {
     if (!gamedayWeek) return;
-    loadSchedule(gamedayWeek);
-    loadGamedayDashboard(leagues, user, gamedayWeek, players, projectionData, scheduleByTeam);
-  }, [gamedayWeek, loadSchedule, loadGamedayDashboard, leagues, user, players, projectionData, scheduleByTeam]);
+    loadSchedule(gamedayWeek, { bypass: true });
+    loadGamedayDashboard(leagues, user, gamedayWeek, { bypass: true });
+  }, [gamedayWeek, loadSchedule, loadGamedayDashboard, leagues, user]);
+  const onRefreshGamedaySnapshot = useCallback(() => {
+    if (!gamedayWeek) return;
+    if (selectedLeague?.league_id) loadGamedayMatchups(selectedLeague.league_id, gamedayWeek, { bypass: true });
+    loadSchedule(gamedayWeek, { bypass: true });
+    loadProjections(gamedayWeek, enabledExtraSources, { fresh: true });
+  }, [gamedayWeek, selectedLeague?.league_id, loadGamedayMatchups, loadSchedule, loadProjections, enabledExtraSources]);
+
+  // ── Live polling ──────────────────────────────────────────
+  // Matchup points only move while a game is Live, so only the (cheap, 30s
+  // server-cached) scoreboard is polled outside that. Every poll is visibility-
+  // gated and silent: a failed tick keeps what's on screen instead of blanking it.
+  const gamedayPollPlan = useMemo(() => getGamedayPollPlan(scheduleByTeam), [scheduleByTeam]);
+  const gamedayHubActive = mainTab === "GAMEDAY_HUB" && gamedayWeek > 0;
+  const gamedayLive = gamedayHubActive && gamedayPollPlan.anyLive;
+  const selectedLeagueId = selectedLeague?.league_id ?? null;
+
+  useVisibilityPolling(
+    () => loadSchedule(gamedayWeek, { bypass: true }),
+    gamedayHubActive ? gamedayPollPlan.scoreboardMs : null
+  );
+  useVisibilityPolling(
+    () => selectedLeagueId ? loadGamedayMatchups(selectedLeagueId, gamedayWeek, { bypass: true, silent: true }) : undefined,
+    gamedayHubActive && gamedayHubTab === "MATCHUPS" && selectedLeagueId ? gamedayPollPlan.matchupsMs : null
+  );
+  // Live stat lines feed the per-stat pace model. One shared, server-cached fetch
+  // serves both tabs; fetched immediately when a game goes live, then polled.
+  const nflSeason = nflState?.season ?? null;
+  useVisibilityPolling(
+    () => nflSeason ? loadLiveStats(nflSeason, gamedayWeek) : undefined,
+    gamedayHubActive ? gamedayPollPlan.matchupsMs : null
+  );
+  useEffect(() => {
+    if (gamedayLive && nflSeason) loadLiveStats(nflSeason, gamedayWeek);
+  }, [gamedayLive, nflSeason, gamedayWeek, loadLiveStats]);
+  // ESPN injury report: once on entering the hub, then every 10 minutes while it's
+  // open (statuses move around inactives time, not second to second).
+  useEffect(() => {
+    if (gamedayHubActive) loadInjuries();
+  }, [gamedayHubActive, loadInjuries]);
+  useVisibilityPolling(() => loadInjuries(), gamedayHubActive ? 10 * 60_000 : null);
+
+  // Cross-league: one request per league, so poll slower and only leagues that
+  // actually have a live starter (either side) — see POLL_LIVE_DASHBOARD_MS.
+  const liveDashboardLeagueIds = useMemo(
+    () => gamedayDashboardEntries
+      .filter((entry) => (entry.myTeam?.liveStarters ?? 0) + (entry.oppTeam?.liveStarters ?? 0) > 0)
+      .map((entry) => entry.league.league_id),
+    [gamedayDashboardEntries]
+  );
+  useVisibilityPolling(
+    () => refreshGamedayDashboardMatchups(liveDashboardLeagueIds, gamedayWeek),
+    gamedayHubActive && gamedayHubTab === "DASHBOARD" ? gamedayPollPlan.dashboardMs : null
+  );
+
+  // Switching to a tab that was last loaded before games went live: catch up
+  // immediately instead of waiting a full poll interval on stale numbers.
+  useEffect(() => {
+    if (!gamedayLive) return;
+    if (gamedayHubTab === "MATCHUPS" && selectedLeagueId) {
+      loadGamedayMatchups(selectedLeagueId, gamedayWeek, { bypass: true, silent: true });
+    } else if (gamedayHubTab === "DASHBOARD" && gamedayDashboardWeek === gamedayWeek) {
+      refreshGamedayDashboardMatchups(liveDashboardLeagueIds, gamedayWeek);
+    }
+    // liveDashboardLeagueIds intentionally omitted: this is a tab-switch/go-live catch-up, not a poll.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gamedayLive, gamedayHubTab, selectedLeagueId, gamedayWeek, gamedayDashboardWeek, loadGamedayMatchups, refreshGamedayDashboardMatchups]);
+
+  // When the last live game ends, the final matchup poll can predate the final
+  // whistle (and Sleeper posts stat corrections a few minutes later) — re-pull
+  // once shortly after and once again a couple of minutes on.
+  const finalCatchUpRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    finalCatchUpRef.current = () => {
+      if (selectedLeagueId) loadGamedayMatchups(selectedLeagueId, gamedayWeek, { bypass: true, silent: true });
+      refreshGamedayDashboardMatchups(gamedayDashboardEntries.map((entry) => entry.league.league_id), gamedayWeek);
+    };
+  });
+  const wasLiveRef = useRef(false);
+  useEffect(() => {
+    const wasLive = wasLiveRef.current;
+    wasLiveRef.current = gamedayLive;
+    if (!wasLive || gamedayLive) return;
+    const timers = [30_000, 150_000].map((ms) => setTimeout(() => finalCatchUpRef.current(), ms));
+    return () => timers.forEach(clearTimeout);
+  }, [gamedayLive]);
+
+  // Projections are a pre-game snapshot, but inactives land ~90 min before kickoff
+  // and the proxies cache for an hour. Once a game is inside that window, re-pull
+  // (bypassing the proxy caches) at most every PROJECTION_REFRESH_MS.
+  const lastFreshProjectionAtRef = useRef(0);
+  useEffect(() => {
+    if (!gamedayHubActive || !gamedayPollPlan.refreshProjections || !projectionLoaded) return;
+    if (Date.now() - lastFreshProjectionAtRef.current < PROJECTION_REFRESH_MS) return;
+    lastFreshProjectionAtRef.current = Date.now();
+    loadProjections(gamedayWeek, enabledExtraSources, { fresh: true });
+  }, [gamedayHubActive, gamedayPollPlan, projectionLoaded, gamedayWeek, enabledExtraSources, loadProjections]);
   // â”€â”€ League-adjusted FC dynasty values (Tier 3 scoring) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Scales raw FantasyCalc values by per-position multipliers derived from the
   // selected league's scoring settings vs. the FC baseline (full PPR, 4pt TDs,
@@ -3179,10 +3295,9 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     loadingGamedayMatchups,
     selectedGamedayMatchup,
     setSelectedGamedayMatchupId,
-    loadGamedayMatchups,
-    loadSchedule,
     gamedayHubTab, setGamedayHubTab,
     gamedayDashboardEntries, loadingGamedayDashboard, onRefreshGamedayDashboard,
+    onRefreshGamedaySnapshot, gamedayMatchupsUpdatedAt, gamedayDashboardUpdatedAt, gamedayLive,
     setProjectionWeek,
     setProjectionLoaded,
     loadProjections,

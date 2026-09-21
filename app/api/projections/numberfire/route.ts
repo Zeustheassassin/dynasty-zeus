@@ -25,6 +25,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const { searchParams } = new URL(req.url);
   // week=draft or week=0 → season/yearly; week=1-18 → specific week
   const rawWeek = searchParams.get('week') ?? 'draft';
+  // ?bypass=1: client wants post-inactives data — skip the 1h server cache
+  // (same pattern as the Sleeper rosters proxy; rate limit above bounds upstream load).
+  const fresh = searchParams.get('bypass') === '1';
   // Validate: only "draft", "0", or integers 1–18 are valid
   if (rawWeek !== 'draft' && rawWeek !== '0') {
     const weekNum = parseInt(rawWeek, 10);
@@ -59,7 +62,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           },
         },
       }),
-      next: { revalidate: FANTASYPROS_REVALIDATE_S },
+      ...(fresh ? { cache: 'no-store' as const } : { next: { revalidate: FANTASYPROS_REVALIDATE_S } }),
     });
 
     if (!res.ok) return NextResponse.json([]);

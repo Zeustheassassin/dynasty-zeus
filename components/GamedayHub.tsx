@@ -21,16 +21,16 @@ interface GamedayHubProps {
   loadingGamedayMatchups: boolean;
   selectedGamedayMatchup: GamedayMatchup | null;
   setSelectedGamedayMatchupId: (id: number | null) => void;
-  loadGamedayMatchups: (leagueId: string, week: number) => void;
-  loadSchedule: (week: number) => void;
-  setProjectionWeek: (week: number) => void;
-  setProjectionLoaded: (loaded: boolean) => void;
-  loadProjections: (week: number) => void;
+  onRefreshGamedaySnapshot: () => void;
+  gamedayMatchupsUpdatedAt: number | null;
+  /** A game is in progress right now (drives the live indicator). */
+  gamedayLive: boolean;
   setPlayerProfileId: (id: string | null) => void;
 
   // Gameday Dashboard tab
   gamedayDashboardEntries: GamedayDashboardEntry[];
   loadingGamedayDashboard: boolean;
+  gamedayDashboardUpdatedAt: number | null;
   onRefreshGamedayDashboard: () => void;
 }
 
@@ -49,14 +49,13 @@ function GamedayHub({
   loadingGamedayMatchups,
   selectedGamedayMatchup,
   setSelectedGamedayMatchupId,
-  loadGamedayMatchups,
-  loadSchedule,
-  setProjectionWeek,
-  setProjectionLoaded,
-  loadProjections,
+  onRefreshGamedaySnapshot,
+  gamedayMatchupsUpdatedAt,
+  gamedayLive,
   setPlayerProfileId,
   gamedayDashboardEntries,
   loadingGamedayDashboard,
+  gamedayDashboardUpdatedAt,
   onRefreshGamedayDashboard,
 }: GamedayHubProps) {
   return (
@@ -86,11 +85,9 @@ function GamedayHub({
           loadingGamedayMatchups={loadingGamedayMatchups}
           selectedGamedayMatchup={selectedGamedayMatchup}
           setSelectedGamedayMatchupId={setSelectedGamedayMatchupId}
-          loadGamedayMatchups={loadGamedayMatchups}
-          loadSchedule={loadSchedule}
-          setProjectionWeek={setProjectionWeek}
-          setProjectionLoaded={setProjectionLoaded}
-          loadProjections={loadProjections}
+          onRefreshSnapshot={onRefreshGamedaySnapshot}
+          updatedAt={gamedayMatchupsUpdatedAt}
+          live={gamedayLive}
           setPlayerProfileId={setPlayerProfileId}
         />
       )}
@@ -101,6 +98,8 @@ function GamedayHub({
             week={gamedayWeek}
             entries={gamedayDashboardEntries}
             loading={loadingGamedayDashboard}
+            updatedAt={gamedayDashboardUpdatedAt}
+            live={gamedayLive}
             onRefresh={onRefreshGamedayDashboard}
             onOpenLeague={(league) => {
               loadRoster(league);

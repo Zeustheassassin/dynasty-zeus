@@ -1,6 +1,7 @@
 "use client";
 import React from "react";
-import type { SleeperLeague, GamedayMatchup, GamedayTeamView, GamedayLineupRow } from "../../lib/types";
+import type { SleeperLeague, GamedayMatchup, GamedayTeamView, GamedayLineupRow, GamedayReserveRow } from "../../lib/types";
+import { getKickoffStateClasses, getMatchupWinProbability } from "../../lib/helpers/gameday";
 import { useLeague } from "../../lib/LeagueContext";
 // injuryBadge shared with the rest of Data Hub (not a local copy) so a
 // player's status badge can't disagree between panels — this file used to
@@ -9,12 +10,29 @@ import { useLeague } from "../../lib/LeagueContext";
 import { injuryBadge, injuryRiskBadge } from "../DataHub/dataHubHelpers";
 import { POS_COLOR } from "../../lib/uiTheme";
 import GamedayTeamRow from "./GamedayTeamRow";
+import LiveStamp from "./LiveStamp";
 
-const getKickoffStateClasses = (state: string) => {
-  if (state === "Live") return "border-green-500/40 bg-green-500/10 text-green-300";
-  if (state === "Final") return "border-gray-600 bg-gray-800 text-gray-300";
-  return "border-blue-500/40 bg-blue-500/10 text-blue-300";
+/** Win probability for team `index` of a two-team matchup, or undefined once the
+ *  matchup is decided (every starter on both sides done) - nothing left to predict. */
+const undecidedWinProbability = (teams: GamedayTeamView[], index: number): number | undefined => {
+  const [a, b] = teams;
+  if (!a || !b) return undefined;
+  const done = a.upcomingStarters + a.liveStarters + b.upcomingStarters + b.liveStarters === 0;
+  if (done) return undefined;
+  const pA = getMatchupWinProbability(a, b);
+  if (pA == null) return undefined; // nothing to predict from yet
+  return index === 0 ? pA : 1 - pA;
 };
+
+const PACE_SOURCE_HINT: Record<GamedayLineupRow["paceSource"], string> = {
+  stats: "Remaining points paced from live stat lines (yards/receptions paced, touchdowns regressed to projection)",
+  points: "Remaining points paced from the points total so far",
+  projection: "Pre-game projection (game not in progress)",
+};
+
+/** "12.3 pts now • 4.5 left • 16.8 proj" for a starter line. */
+const pointsLine = (row: GamedayLineupRow | GamedayReserveRow): string =>
+  `${row.actualPoints.toFixed(1)} pts now • ${row.remainingProjection.toFixed(1)} left • ${row.projectedFinal.toFixed(1)} proj`;
 
 interface LeagueMatchupsTabProps {
   leagues: SleeperLeague[];
@@ -26,11 +44,10 @@ interface LeagueMatchupsTabProps {
   selectedGamedayMatchup: GamedayMatchup | null;
   setSelectedGamedayMatchupId: (id: number | null) => void;
 
-  loadGamedayMatchups: (leagueId: string, week: number) => void;
-  loadSchedule: (week: number) => void;
-  setProjectionWeek: (week: number) => void;
-  setProjectionLoaded: (loaded: boolean) => void;
-  loadProjections: (week: number) => void;
+  /** Re-pulls matchups, scoreboard and projections with every cache bypassed. */
+  onRefreshSnapshot: () => void;
+  updatedAt: number | null;
+  live: boolean;
 
   setPlayerProfileId: (id: string | null) => void;
 }
@@ -43,11 +60,9 @@ function LeagueMatchupsTab({
   loadingGamedayMatchups,
   selectedGamedayMatchup,
   setSelectedGamedayMatchupId,
-  loadGamedayMatchups,
-  loadSchedule,
-  setProjectionWeek,
-  setProjectionLoaded,
-  loadProjections,
+  onRefreshSnapshot,
+  updatedAt,
+  live,
   setPlayerProfileId,
 }: LeagueMatchupsTabProps) {
   const { selectedLeague } = useLeague();
@@ -85,10 +100,10 @@ function LeagueMatchupsTab({
           <span className={`rounded-full border px-1.5 py-0.5 ${getKickoffStateClasses(row.gameState)}`}>
             {row.gameState}
           </span>
-          <span>{row.kickoffLabel}</span>
+          <span>{row.gameDetail || row.kickoffLabel}</span>
         </div>
-        <div className="mt-1 text-xs text-gray-300">
-          {row.actualPoints.toFixed(1)} pts now • {row.remainingProjection.toFixed(1)} left
+        <div className="mt-1 text-xs text-gray-300" title={PACE_SOURCE_HINT[row.paceSource]} data-pace-source={row.paceSource}>
+          {pointsLine(row)}
         </div>
       </div>
     );
@@ -105,7 +120,7 @@ function LeagueMatchupsTab({
               Official Sleeper matchup totals for the current week, with projected remaining points for each lineup slot.
             </div>
             <div className="mt-2 text-[11px] text-gray-500">
-              Player status badges reflect kickoff windows: upcoming, live, or final.
+              Live games show the clock and score; projected remaining points scale with time left and how each player is pacing.
             </div>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -125,15 +140,7 @@ function LeagueMatchupsTab({
               ))}
             </select>
             <button
-              onClick={() => {
-                if (selectedLeague?.league_id && gamedayWeek) loadGamedayMatchups(selectedLeague.league_id, gamedayWeek);
-                if (gamedayWeek) {
-                  setProjectionWeek(gamedayWeek);
-                  setProjectionLoaded(false);
-                  loadProjections(gamedayWeek);
-                  loadSchedule(gamedayWeek);
-                }
-              }}
+              onClick={onRefreshSnapshot}
               disabled={!selectedLeague?.league_id || !gamedayWeek}
               className={`rounded-xl border px-3 py-2 text-sm transition ${
                 selectedLeague?.league_id && gamedayWeek
@@ -162,7 +169,10 @@ function LeagueMatchupsTab({
       {selectedLeague && gamedayWeek > 0 && (
         <>
           <div className="flex items-center justify-between text-xs text-gray-500">
-            <span>{selectedLeague.name} • Week {gamedayWeek}</span>
+            <span className="inline-flex items-center gap-3">
+              <span>{selectedLeague.name} • Week {gamedayWeek}</span>
+              <LiveStamp updatedAt={updatedAt} live={live} />
+            </span>
             <span>
               {loadingGamedayMatchups
                 ? "Refreshing matchup totals..."
@@ -203,8 +213,12 @@ function LeagueMatchupsTab({
                       </div>
                     </div>
                     <div className="space-y-3">
-                      {card.teams.map((team) => (
-                        <GamedayTeamRow key={team.rosterId} team={team} />
+                      {card.teams.map((team, index) => (
+                        <GamedayTeamRow
+                          key={team.rosterId}
+                          team={team}
+                          winProbability={undecidedWinProbability(card.teams, index)}
+                        />
                       ))}
                     </div>
                   </button>
@@ -232,15 +246,23 @@ function LeagueMatchupsTab({
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-3 text-right">
-                      {[teamA, teamB].map((team) => (
-                        <div key={team.rosterId} className="rounded-xl border border-gray-800 bg-gray-950/60 px-3 py-2">
-                          <div className="text-xs text-gray-500">{team.ownerName}</div>
-                          <div className="mt-1 text-xl font-semibold text-white">{team.actualPoints.toFixed(1)}</div>
-                          <div className="text-[11px] text-gray-500">
-                            {team.remainingProjection.toFixed(1)} left • {team.projectedFinal.toFixed(1)} final
+                      {[teamA, teamB].map((team, index) => {
+                        const winProb = undecidedWinProbability([teamA, teamB], index);
+                        return (
+                          <div key={team.rosterId} className="rounded-xl border border-gray-800 bg-gray-950/60 px-3 py-2">
+                            <div className="text-xs text-gray-500">{team.ownerName}</div>
+                            <div className="mt-1 text-xl font-semibold text-white">{team.actualPoints.toFixed(1)}</div>
+                            <div className="text-[11px] text-gray-500">
+                              {team.remainingProjection.toFixed(1)} left • {team.projectedFinal.toFixed(1)} final
+                            </div>
+                            {winProb != null && (
+                              <div className="mt-0.5 text-[11px] text-gray-400">
+                                Win <span className="font-semibold text-gray-200">{Math.round(winProb * 100)}%</span>
+                              </div>
+                            )}
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
 
@@ -290,6 +312,19 @@ function LeagueMatchupsTab({
                         className="rounded-xl border border-gray-800 bg-gray-950/50 p-3"
                       >
                         <div className="text-sm font-semibold text-white">{team.ownerName} — Bench & Taxi</div>
+                        {team.benchRegret.points >= 0.5 && (
+                          <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-200">
+                            <div className="font-semibold">
+                              Bench regret so far: {team.benchRegret.points.toFixed(1)} pts
+                              <span className="font-normal text-amber-300/70"> (best lineup {team.benchRegret.optimalPoints.toFixed(1)})</span>
+                            </div>
+                            {team.benchRegret.swaps.slice(0, 3).map((swap) => (
+                              <div key={swap.benchPlayerId} className="mt-0.5 text-amber-200/80">
+                                {swap.benchName} ({swap.benchPoints.toFixed(1)}) over {swap.starterName} ({swap.starterPoints.toFixed(1)}) — +{swap.gain.toFixed(1)}
+                              </div>
+                            ))}
+                          </div>
+                        )}
                         <details className="mt-3 group">
                           <summary className="cursor-pointer list-none text-xs font-semibold text-blue-300 group-open:text-blue-200">
                             Bench ({team.benchRows.length})
@@ -313,7 +348,7 @@ function LeagueMatchupsTab({
                                   {injuryRiskBadge(row.player?.age, row.player?.position ?? "", row.player?.injury_status)}
                                 </div>
                                 <div className="shrink-0 text-right text-[11px] text-gray-500">
-                                  {row.actualPoints.toFixed(1)} now • {row.remainingProjection.toFixed(1)} left
+                                  {row.actualPoints.toFixed(1)} now • {row.remainingProjection.toFixed(1)} left • {row.projectedFinal.toFixed(1)} proj
                                 </div>
                               </div>
                             ))}
@@ -342,7 +377,7 @@ function LeagueMatchupsTab({
                                   {injuryRiskBadge(row.player?.age, row.player?.position ?? "", row.player?.injury_status)}
                                 </div>
                                 <div className="shrink-0 text-right text-[11px] text-gray-500">
-                                  {row.actualPoints.toFixed(1)} now • {row.remainingProjection.toFixed(1)} left
+                                  {row.actualPoints.toFixed(1)} now • {row.remainingProjection.toFixed(1)} left • {row.projectedFinal.toFixed(1)} proj
                                 </div>
                               </div>
                             ))}

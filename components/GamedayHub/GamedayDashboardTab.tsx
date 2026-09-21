@@ -3,16 +3,19 @@ import React from "react";
 import type { SleeperLeague, GamedayDashboardEntry } from "../../lib/types";
 import { getGamedayResultStatus } from "../../lib/helpers/gameday";
 import GamedayTeamRow from "./GamedayTeamRow";
+import LiveStamp from "./LiveStamp";
 
 interface GamedayDashboardTabProps {
   week: number;
   entries: GamedayDashboardEntry[];
   loading: boolean;
+  updatedAt: number | null;
+  live: boolean;
   onRefresh: () => void;
   onOpenLeague: (league: SleeperLeague) => void;
 }
 
-function GamedayDashboardTab({ week, entries, loading, onRefresh, onOpenLeague }: GamedayDashboardTabProps) {
+function GamedayDashboardTab({ week, entries, loading, updatedAt, live, onRefresh, onOpenLeague }: GamedayDashboardTabProps) {
   return (
     <div className="space-y-5">
       <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
@@ -46,7 +49,10 @@ function GamedayDashboardTab({ week, entries, loading, onRefresh, onOpenLeague }
       {week > 0 && (
         <>
           <div className="flex items-center justify-between text-xs text-gray-500">
-            <span>Week {week}</span>
+            <span className="inline-flex items-center gap-3">
+              <span>Week {week}</span>
+              <LiveStamp updatedAt={updatedAt} live={live} />
+            </span>
             <span>
               {loading && entries.length === 0
                 ? "Loading your matchups..."

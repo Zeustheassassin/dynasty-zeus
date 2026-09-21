@@ -55,6 +55,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json([]);
   }
   const week = rawWeek;
+  // ?bypass=1: client wants post-inactives data — skip the 1h server cache
+  // (same pattern as the Sleeper rosters proxy; rate limit above bounds upstream load).
+  const fresh = searchParams.get('bypass') === '1';
 
   const allProjections: Array<{ name: string; position: string; fpts: number }> = [];
 
@@ -73,7 +76,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
             Referer: 'https://www.fantasypros.com/',
           },
           // Cache for 1 hour server-side — projections don't change minute-to-minute
-          next: { revalidate: FANTASYPROS_REVALIDATE_S },
+          ...(fresh ? { cache: 'no-store' as const } : { next: { revalidate: FANTASYPROS_REVALIDATE_S } }),
         });
 
         if (!res.ok) return;

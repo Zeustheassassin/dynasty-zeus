@@ -49,6 +49,11 @@ function pickStatCategories(stats: Record<string, number> | undefined): Record<s
 
 // ── Hook ────────────────────────────────────────────────────────────────────
 
+export interface LoadProjectionsOpts {
+  /** Ask the FantasyPros/ESPN/numberFire proxies for post-inactives data (shorter server cache). */
+  fresh?: boolean;
+}
+
 export interface UseProjectionsReturn {
   projectionData: ProjectionRow[];
   setProjectionData: Dispatch<SetStateAction<ProjectionRow[]>>;
@@ -62,7 +67,7 @@ export interface UseProjectionsReturn {
   projectionLoaded: boolean;
   setProjectionLoaded: Dispatch<SetStateAction<boolean>>;
   projectionUsesSeasonFallback: boolean;
-  loadProjections: (week: number | "season", extraSources?: string[]) => Promise<void>;
+  loadProjections: (week: number | "season", extraSources?: string[], opts?: LoadProjectionsOpts) => Promise<void>;
   enabledExtraSources: string[];
   toggleExtraSource: (id: string) => void;
 }
@@ -130,7 +135,8 @@ export function useProjections(
     }
   }, [scoringKey]);
 
-  const loadProjections = useCallback(async (week: number | "season", extraSources: string[] = []) => {
+  const loadProjections = useCallback(async (week: number | "season", extraSources: string[] = [], opts?: LoadProjectionsOpts) => {
+    const freshParam = opts?.fresh ? "&bypass=1" : "";
     const requestId = ++requestIdRef.current;
     setLoadingProjections(true);
     const statusMap: Record<string, boolean> = {};
@@ -314,7 +320,7 @@ export function useProjections(
         try {
           const weekParam = week === "season" ? "0" : String(week);
           const data: Array<{ name: string; position: string; fpts: number; stats: Record<string, number> }> =
-            await fetch(`/api/projections/espn?week=${weekParam}`).then((r) => r.json());
+            await fetch(`/api/projections/espn?week=${weekParam}${freshParam}`).then((r) => r.json());
           const src = PROJ_SOURCES.find((s) => s.id === "espn")!;
           data.forEach((item) => {
             const key = normalizeProjName(item.name);
@@ -345,7 +351,7 @@ export function useProjections(
         try {
           const weekParam = week === "season" ? "draft" : String(week);
           const data: Array<{ name: string; position: string; fpts: number }> =
-            await fetch(`/api/projections/fantasypros?week=${weekParam}`).then((r) => r.json());
+            await fetch(`/api/projections/fantasypros?week=${weekParam}${freshParam}`).then((r) => r.json());
           const src = PROJ_SOURCES.find((s) => s.id === "fantasypros")!;
           data.forEach((item) => {
             if (item.fpts <= 0) return;
@@ -368,7 +374,7 @@ export function useProjections(
         try {
           const weekParam = week === "season" ? "0" : String(week);
           const data: Array<{ name: string; position: string; fpts: number }> =
-            await fetch(`/api/projections/numberfire?week=${weekParam}`).then((r) => r.json());
+            await fetch(`/api/projections/numberfire?week=${weekParam}${freshParam}`).then((r) => r.json());
           const src = PROJ_SOURCES.find((s) => s.id === "numberfire")!;
           data.forEach((item) => {
             if (item.fpts <= 0) return;

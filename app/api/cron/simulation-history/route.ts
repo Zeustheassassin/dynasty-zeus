@@ -248,9 +248,11 @@ async function fetchPlayerStats(
   if (!weeks.length) return null;
   const recentWeeks = weeks.slice(0, 2);
 
+  // Path shape matters: the older /stats/nfl/{season}/{week}?season_type=regular form
+  // returns {} for every player, which silently zeroed all usage data.
   const weekData = await Promise.all(
     weeks.map((w) =>
-      safeFetch<Record<string, RawStatItem>>(`${SLEEPER_BASE_URL}/stats/nfl/${season}/${w}?season_type=regular`)
+      safeFetch<Record<string, RawStatItem>>(`${SLEEPER_BASE_URL}/stats/nfl/regular/${season}/${w}`)
     )
   );
 

@@ -22,9 +22,15 @@ export async function GET(
     return NextResponse.json({ error: 'Invalid week' }, { status: 400 });
   }
 
+  // Live scoring polls pass ?bypass=1 — the 5-minute server cache would otherwise
+  // make scores look up to ~6 minutes stale (same pattern as the rosters proxy).
+  const bypass = req.nextUrl.searchParams.get('bypass') === '1';
   const upstream = `${SLEEPER_BASE_URL}/league/${leagueId}/matchups/${weekNum}`;
   try {
-    const res = await fetch(upstream, { next: { revalidate: SLEEPER_LEAGUE_MATCHUPS_REVALIDATE_S } });
+    const res = await fetch(
+      upstream,
+      bypass ? { cache: 'no-store' } : { next: { revalidate: SLEEPER_LEAGUE_MATCHUPS_REVALIDATE_S } },
+    );
     if (!res.ok) {
       log.error('upstream non-OK', { status: res.status, leagueId, week: weekNum });
       return NextResponse.json({ error: "Upstream Sleeper request failed" }, { status: 502 });

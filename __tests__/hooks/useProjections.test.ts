@@ -241,3 +241,50 @@ describe("useProjections — per-source fpts retention", () => {
     expect(result.current.projectionData[0].sourceFpts).toEqual({ sleeper: 10 });
   });
 });
+
+describe("useProjections — fresh (post-inactives) reloads", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const players = {
+    "1": { player_id: "1", full_name: "Test Back", position: "RB", team: "SF" },
+  } as unknown as Record<string, import("@/lib/types").SleeperPlayer>;
+
+  const stubFetch = () => {
+    const fetchMock = vi.fn((url: string) => {
+      if (url.includes("/projections/nfl/") && /\/\d+\?season_type=regular&position\[\]/.test(url)) {
+        return Promise.resolve({ json: () => Promise.resolve([{ player_id: "1", player: { position: "RB" }, stats: { rush_yd: 100 } }]) });
+      }
+      return Promise.resolve({ json: () => Promise.resolve([]) });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  };
+  const proxyUrls = (fetchMock: ReturnType<typeof stubFetch>) =>
+    fetchMock.mock.calls.map((call) => String(call[0])).filter((url) => url.includes("/api/projections/"));
+
+  it("asks every enabled proxy to bypass its server cache when fresh is set", async () => {
+    const fetchMock = stubFetch();
+    const { result } = renderHook(() => useProjections(players, null));
+    await act(async () => {
+      await result.current.loadProjections(3, ["espn", "fantasypros", "numberfire"], { fresh: true });
+    });
+
+    const urls = proxyUrls(fetchMock);
+    expect(urls).toHaveLength(3);
+    urls.forEach((url) => expect(url).toContain("&bypass=1"));
+  });
+
+  it("does not send bypass on a normal load", async () => {
+    const fetchMock = stubFetch();
+    const { result } = renderHook(() => useProjections(players, null));
+    await act(async () => {
+      await result.current.loadProjections(3, ["espn", "fantasypros", "numberfire"]);
+    });
+
+    const urls = proxyUrls(fetchMock);
+    expect(urls).toHaveLength(3);
+    urls.forEach((url) => expect(url).not.toContain("bypass"));
+  });
+});

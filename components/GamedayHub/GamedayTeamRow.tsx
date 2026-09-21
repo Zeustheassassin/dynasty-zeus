@@ -8,12 +8,14 @@ interface GamedayTeamRowProps {
   // team" row only — projected while games are in progress, actual once
   // every starter on both sides has finished. Omitted elsewhere (e.g. the
   // single-league matchup grid), which keeps this row's plain styling.
-  resultStatus?: { status: "win" | "loss" | "tie"; final: boolean } | null;
+  resultStatus?: { status: "win" | "loss" | "tie"; final: boolean; winProbability?: number | null; pointsNeeded?: number } | null;
+  // Chance this team wins its matchup (0-1). Shown only while the matchup is undecided.
+  winProbability?: number;
 }
 
 // Condensed team summary shared by the single-league matchup grid and the
 // cross-league Gameday Dashboard, so the two views can't visually drift apart.
-function GamedayTeamRow({ team, resultStatus }: GamedayTeamRowProps) {
+function GamedayTeamRow({ team, resultStatus, winProbability }: GamedayTeamRowProps) {
   const isDecided = resultStatus && resultStatus.status !== "tie";
   const containerClasses = !isDecided
     ? "border-gray-800 bg-gray-950/60"
@@ -25,6 +27,8 @@ function GamedayTeamRow({ team, resultStatus }: GamedayTeamRowProps) {
     ? "border-green-500 bg-gray-950/60"
     : "border-red-500 bg-gray-950/60";
 
+  const winPct = winProbability ?? resultStatus?.winProbability;
+
   return (
     <div className={`rounded-xl border px-3 py-2.5 ${containerClasses}`}>
       <div className="flex items-start justify-between gap-3">
@@ -35,6 +39,7 @@ function GamedayTeamRow({ team, resultStatus }: GamedayTeamRowProps) {
               team.finishedStarters > 0 && `${team.finishedStarters} final`,
               team.liveStarters > 0 && `${team.liveStarters} live`,
               team.upcomingStarters > 0 && `${team.upcomingStarters} upcoming`,
+              team.noGameStarters > 0 && `${team.noGameStarters} no game`,
             ].filter(Boolean).join(" • ") || "—"}
           </div>
         </div>
@@ -43,9 +48,21 @@ function GamedayTeamRow({ team, resultStatus }: GamedayTeamRowProps) {
           <div className="text-[11px] text-gray-500">+{team.remainingProjection.toFixed(1)} left</div>
         </div>
       </div>
-      <div className="mt-2 text-xs text-gray-400">
-        Projected final: <span className="text-gray-200">{team.projectedFinal.toFixed(1)}</span>
+      <div className="mt-2 flex items-center justify-between gap-3 text-xs text-gray-400">
+        <span>
+          Projected final: <span className="text-gray-200">{team.projectedFinal.toFixed(1)}</span>
+        </span>
+        {winPct != null && resultStatus?.final !== true && (
+          <span title="Chance to win this matchup, from projected finals and remaining-points spread">
+            Win <span className="font-semibold text-gray-200">{Math.round(winPct * 100)}%</span>
+          </span>
+        )}
       </div>
+      {resultStatus && !resultStatus.final && winPct != null && resultStatus.pointsNeeded != null && resultStatus.pointsNeeded > 0 && (
+        <div className="mt-1 text-[11px] text-gray-500">
+          Needs {resultStatus.pointsNeeded.toFixed(1)} from remaining starters (projected {team.remainingProjection.toFixed(1)})
+        </div>
+      )}
     </div>
   );
 }

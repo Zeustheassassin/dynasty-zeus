@@ -27,6 +27,9 @@ export const ESPN_FANTASY_BASE_URL = "https://lm-api-reads.fantasy.espn.com/apis
 // ── ESPN Scoreboard (public, unauthenticated live game status) ────────
 export const ESPN_SCOREBOARD_BASE_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard";
 
+/** ESPN public NFL injury report (Out / Doubtful / Questionable / IR / Active per player). */
+export const ESPN_INJURIES_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/injuries";
+
 // ── Google Sheets (crowdsourced rookie board) ─────────────────
 // This URL is a published CSV export — safe to store in code (not a secret).
 // If the sheet is re-published or moved, update here only.
@@ -80,6 +83,9 @@ export const FANTASYPROS_REVALIDATE_S = 3600;
 
 /** NFL live scoreboard (kickoff/live/final per game) — changes constantly during games */
 export const NFL_SCOREBOARD_REVALIDATE_S = 30;
+
+/** Live per-player stat lines for the Gameday per-stat pace model */
+export const NFL_LIVE_STATS_REVALIDATE_S = 30;
 
 /** Crowdsourced rookie board sheet — refreshed every 6 hours */
 export const ROOKIE_BOARD_REVALIDATE_S = 21600;

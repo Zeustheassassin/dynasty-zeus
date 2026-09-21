@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { useGamedayDashboard } from "@/app/hooks/useGamedayDashboard";
-import type { SleeperLeague, SleeperRoster, SleeperUser, SleeperMatchup } from "@/lib/types";
+import type { SleeperLeague, SleeperRoster, SleeperUser, SleeperMatchup, SleeperPlayer, TeamGameState } from "@/lib/types";
 
 const getLeagueRosters = vi.fn();
 const getLeagueUsers = vi.fn();
@@ -55,6 +55,8 @@ const mkMatchup = (matchupId: number, rosterId: number, points: number): Sleeper
 
 const me: SleeperUser = mkUser("me", "Me");
 
+const noInputs = { user: me, players: {}, projectionData: [], scheduleByTeam: {} };
+
 beforeEach(() => {
   getLeagueRosters.mockReset();
   getLeagueUsers.mockReset();
@@ -63,9 +65,9 @@ beforeEach(() => {
 
 describe("useGamedayDashboard", () => {
   it("does nothing when user, leagues, or week are missing", async () => {
-    const { result } = renderHook(() => useGamedayDashboard());
+    const { result } = renderHook(() => useGamedayDashboard(noInputs));
     await act(async () => {
-      await result.current.loadGamedayDashboard([], null, 1, {}, [], {});
+      await result.current.loadGamedayDashboard([], null, 1);
     });
     expect(getLeagueRosters).not.toHaveBeenCalled();
     expect(result.current.gamedayDashboardEntries).toEqual([]);
@@ -78,9 +80,9 @@ describe("useGamedayDashboard", () => {
     getLeagueUsers.mockResolvedValue([mkUser("me", "Me"), mkUser("them", "Them")]);
     getLeagueMatchups.mockResolvedValue([mkMatchup(1, 1, 10), mkMatchup(1, 2, 20)]);
 
-    const { result } = renderHook(() => useGamedayDashboard());
+    const { result } = renderHook(() => useGamedayDashboard(noInputs));
     await act(async () => {
-      await result.current.loadGamedayDashboard([leagueA, leagueB], me, 1, {}, [], {});
+      await result.current.loadGamedayDashboard([leagueA, leagueB], me, 1);
     });
 
     await waitFor(() => expect(result.current.gamedayDashboardEntries).toHaveLength(2));
@@ -103,9 +105,9 @@ describe("useGamedayDashboard", () => {
     getLeagueUsers.mockResolvedValue([mkUser("me", "Me"), mkUser("them", "Them")]);
     getLeagueMatchups.mockResolvedValue([mkMatchup(1, 1, 10), mkMatchup(1, 2, 20)]);
 
-    const { result } = renderHook(() => useGamedayDashboard());
+    const { result } = renderHook(() => useGamedayDashboard(noInputs));
     await act(async () => {
-      await result.current.loadGamedayDashboard([leagueA, leagueB], me, 1, {}, [], {});
+      await result.current.loadGamedayDashboard([leagueA, leagueB], me, 1);
     });
 
     await waitFor(() => expect(result.current.gamedayDashboardEntries).toHaveLength(2));
@@ -123,9 +125,9 @@ describe("useGamedayDashboard", () => {
     getLeagueUsers.mockResolvedValue([mkUser("me", "Me")]);
     getLeagueMatchups.mockResolvedValue([]); // no matchup row for my roster this week
 
-    const { result } = renderHook(() => useGamedayDashboard());
+    const { result } = renderHook(() => useGamedayDashboard(noInputs));
     await act(async () => {
-      await result.current.loadGamedayDashboard([league], me, 1, {}, [], {});
+      await result.current.loadGamedayDashboard([league], me, 1);
     });
 
     await waitFor(() => expect(result.current.gamedayDashboardEntries).toHaveLength(1));
@@ -133,5 +135,97 @@ describe("useGamedayDashboard", () => {
     expect(entry.error).toBe(false);
     expect(entry.myTeam).toBeNull();
     expect(entry.oppTeam).toBeNull();
+  });
+
+  it("passes bypass through to the matchup fetch only", async () => {
+    getLeagueRosters.mockResolvedValue([mkRoster(1, "me"), mkRoster(2, "them")]);
+    getLeagueUsers.mockResolvedValue([mkUser("me", "Me")]);
+    getLeagueMatchups.mockResolvedValue([mkMatchup(1, 1, 10), mkMatchup(1, 2, 20)]);
+
+    const { result } = renderHook(() => useGamedayDashboard(noInputs));
+    await act(async () => {
+      await result.current.loadGamedayDashboard([mkLeague("A")], me, 1, { bypass: true });
+    });
+    expect(getLeagueMatchups).toHaveBeenCalledWith("A", 1, true);
+    expect(getLeagueRosters).toHaveBeenCalledWith("A");
+  });
+
+  it("re-scores cards from the current scoreboard without refetching anything", async () => {
+    const league = mkLeague("A");
+    const rosterMe = { ...mkRoster(1, "me"), starters: ["qb1"], players: ["qb1"] };
+    getLeagueRosters.mockResolvedValue([rosterMe, mkRoster(2, "them")]);
+    getLeagueUsers.mockResolvedValue([mkUser("me", "Me"), mkUser("them", "Them")]);
+    getLeagueMatchups.mockResolvedValue([
+      { ...mkMatchup(1, 1, 8), starters: ["qb1"], players_points: { qb1: 8 } },
+      mkMatchup(1, 2, 0),
+    ]);
+    const players = { qb1: { player_id: "qb1", position: "QB", team: "SF", full_name: "QB One" } as SleeperPlayer };
+    const projectionData = [{
+      sleeperId: "qb1", full_name: "QB One", position: "QB", team: "SF", fpts: 20,
+      sources: ["sleeper"], kickoffAt: null, stats: null, sourceFpts: null,
+    }];
+
+    let schedule: Record<string, TeamGameState> = { SF: { kickoffAt: 1, state: "Upcoming" } };
+    const { result, rerender } = renderHook(() => useGamedayDashboard({ user: me, players, projectionData, scheduleByTeam: schedule }));
+    await act(async () => { await result.current.loadGamedayDashboard([league], me, 1); });
+    await waitFor(() => expect(result.current.gamedayDashboardEntries).toHaveLength(1));
+    expect(result.current.gamedayDashboardEntries[0].myTeam?.starterRows[0].gameState).toBe("Upcoming");
+    const fetchesAfterLoad = getLeagueMatchups.mock.calls.length;
+
+    schedule = { SF: { kickoffAt: 1, state: "Final" } };
+    rerender();
+    expect(result.current.gamedayDashboardEntries[0].myTeam?.starterRows[0].gameState).toBe("Final");
+    expect(getLeagueMatchups.mock.calls.length).toBe(fetchesAfterLoad);
+  });
+
+  describe("refreshGamedayDashboardMatchups", () => {
+    const setup = async () => {
+      getLeagueRosters.mockResolvedValue([mkRoster(1, "me"), mkRoster(2, "them")]);
+      getLeagueUsers.mockResolvedValue([mkUser("me", "Me"), mkUser("them", "Them")]);
+      getLeagueMatchups.mockResolvedValue([mkMatchup(1, 1, 10), mkMatchup(1, 2, 20)]);
+      const hook = renderHook(() => useGamedayDashboard(noInputs));
+      await act(async () => {
+        await hook.result.current.loadGamedayDashboard([mkLeague("A"), mkLeague("B")], me, 1);
+      });
+      await waitFor(() => expect(hook.result.current.gamedayDashboardEntries).toHaveLength(2));
+      getLeagueRosters.mockClear();
+      getLeagueMatchups.mockReset();
+      return hook;
+    };
+    const pointsFor = (result: { current: ReturnType<typeof useGamedayDashboard> }, id: string) =>
+      result.current.gamedayDashboardEntries.find((e) => e.league.league_id === id)?.myTeam?.actualPoints;
+
+    it("re-pulls only the requested leagues, with the cache bypassed, and leaves rosters alone", async () => {
+      const { result } = await setup();
+      getLeagueMatchups.mockResolvedValue([mkMatchup(1, 1, 33), mkMatchup(1, 2, 20)]);
+
+      await act(async () => { await result.current.refreshGamedayDashboardMatchups(["A"], 1); });
+
+      expect(getLeagueMatchups).toHaveBeenCalledTimes(1);
+      expect(getLeagueMatchups).toHaveBeenCalledWith("A", 1, true);
+      expect(getLeagueRosters).not.toHaveBeenCalled();
+      expect(pointsFor(result, "A")).toBe(33);
+      expect(pointsFor(result, "B")).toBe(10);
+      expect(result.current.gamedayDashboardUpdatedAt).not.toBeNull();
+    });
+
+    it("keeps a league's previous data when its refresh fails", async () => {
+      const { result } = await setup();
+      getLeagueMatchups.mockRejectedValue(new Error("429"));
+
+      await act(async () => { await result.current.refreshGamedayDashboardMatchups(["A"], 1); });
+
+      expect(pointsFor(result, "A")).toBe(10);
+      expect(result.current.gamedayDashboardEntries[0].error).toBe(false);
+    });
+
+    it("ignores a refresh for a different week", async () => {
+      const { result } = await setup();
+      getLeagueMatchups.mockResolvedValue([mkMatchup(1, 1, 99), mkMatchup(1, 2, 20)]);
+
+      await act(async () => { await result.current.refreshGamedayDashboardMatchups(["A"], 2); });
+
+      expect(pointsFor(result, "A")).toBe(10);
+    });
   });
 });

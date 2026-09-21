@@ -155,11 +155,13 @@ async function getLeagueInfo(leagueId: string): Promise<SleeperLeague | null> {
 // MATCHUP endpoints
 // ===========================================================================
 
-/** Fetch all matchups for a given week (1-22). */
-async function getLeagueMatchups(leagueId: string, week: number): Promise<SleeperMatchup[]> {
+/** Fetch all matchups for a given week (1-22). Pass `bypass: true` for live
+ *  scoring — it skips both the browser TTL cache and the proxy's 5-minute server cache. */
+async function getLeagueMatchups(leagueId: string, week: number, bypass?: boolean): Promise<SleeperMatchup[]> {
   return cachedGet<SleeperMatchup[]>(
     `${PROXY_BASE}/league/${encodeURIComponent(leagueId)}/matchups/${week}`,
     TTL.leagueMatchups,
+    bypass,
   );
 }
 

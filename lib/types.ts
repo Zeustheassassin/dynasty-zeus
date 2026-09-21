@@ -558,9 +558,23 @@ export interface GamedayLineupRow {
   player: SleeperPlayer | null;
   actualPoints: number;
   remainingProjection: number;
+  /** actualPoints + remainingProjection — this player's projected final. */
+  projectedFinal: number;
+  /** Std-dev of this player's remaining points (shrinks as the game ends);
+   *  feeds the team-level win probability. */
+  remainingStdDev: number;
   kickoffAt: number | null;
   kickoffLabel: string;
+  /** "Upcoming" | "Live" | "Final" | "No game". */
   gameState: string;
+  /** Live-game readout, e.g. "Q3 4:12 · SF 17-10"; "" when there's nothing beyond the state. */
+  gameDetail: string;
+  /** The player's NFL opponent this week (null when unknown) — for same-game correlation. */
+  nflOpponent: string | null;
+  /** How `remainingProjection` was derived: "stats" = per-stat pace from live stat lines,
+   *  "points" = pace read from Sleeper's points total (no/lagging stat feed, or no clock),
+   *  "projection" = not in progress (pre-game / final / no game). */
+  paceSource: "projection" | "points" | "stats";
 }
 
 export interface GamedayReserveRow {
@@ -568,9 +582,32 @@ export interface GamedayReserveRow {
   player: SleeperPlayer | null;
   actualPoints: number;
   remainingProjection: number;
+  projectedFinal: number;
+  remainingStdDev: number;
   kickoffAt: number | null;
   kickoffLabel: string;
   gameState: string;
+  gameDetail: string;
+  nflOpponent: string | null;
+  paceSource: "projection" | "points" | "stats";
+}
+
+/** One "bench player outscored a starter" swap in hindsight. */
+export interface BenchRegretSwap {
+  benchPlayerId: string;
+  benchName: string;
+  benchPoints: number;
+  starterPlayerId: string;
+  starterName: string;
+  starterPoints: number;
+  gain: number;
+}
+
+export interface BenchRegret {
+  /** Best-possible lineup total (by actual points so far) minus the actual lineup total. */
+  points: number;
+  optimalPoints: number;
+  swaps: BenchRegretSwap[];
 }
 
 export interface GamedayTeamView {
@@ -580,13 +617,18 @@ export interface GamedayTeamView {
   actualPoints: number;
   remainingProjection: number;
   projectedFinal: number;
+  /** Std-dev of the team's remaining points, including QB↔pass-catcher correlation. */
+  remainingStdDev: number;
   finishedStarters: number;
   liveStarters: number;
   upcomingStarters: number;
+  /** Starters whose team has no game this week (bye) — can't score. */
+  noGameStarters: number;
   totalStarters: number;
   starterRows: GamedayLineupRow[];
   benchRows: GamedayReserveRow[];
   taxiRows: GamedayReserveRow[];
+  benchRegret: BenchRegret;
 }
 
 export interface GamedayMatchup {
@@ -603,13 +645,42 @@ export interface GamedayDashboardEntry {
   error: boolean;
 }
 
+/** Raw, un-scored per-league data behind one Gameday Dashboard card. Kept
+ *  separate from GamedayDashboardEntry so the scored view can be re-derived
+ *  whenever the live scoreboard or projections change without refetching. */
+export interface GamedayDashboardRaw {
+  league: SleeperLeague;
+  error: boolean;
+  rosters: SleeperRoster[];
+  users: SleeperUser[];
+  matchups: SleeperMatchup[];
+}
+
 /** Real per-team kickoff/live/final status for the current week, from the
  *  NFL scoreboard proxy (app/api/nfl-scoreboard) — authoritative source for
  *  GamedayLineupRow/GamedayReserveRow's gameState, keyed by team abbreviation
- *  since kickoff state is a property of the game, not any one player. */
+ *  since kickoff state is a property of the game, not any one player.
+ *
+ *  Everything past `state` is live-game detail. All optional: pre-game entries
+ *  don't carry it, and a payload cached before it existed won't either. */
 export interface TeamGameState {
   kickoffAt: number;
   state: "Upcoming" | "Live" | "Final";
+  /** Quarter, 1-4; 5 = overtime. */
+  period?: number;
+  /** Seconds left in the current period. */
+  clockSeconds?: number;
+  /** ESPN's display clock, e.g. "4:12". */
+  clockDisplay?: string;
+  /** Non-standard game status. Halftime/delayed stay `state: "Live"`; postponed stays "Upcoming"; canceled is "Final". */
+  status?: "halftime" | "delayed" | "postponed" | "canceled";
+  /** This team's score / its opponent's score (live and final games only). */
+  score?: number;
+  oppScore?: number;
+  /** The opponent's abbreviation — set in every state, so pre-game code can tell who shares a game. */
+  opponent?: string;
+  /** This team currently has the ball. */
+  hasPossession?: boolean;
 }
 
 // ── Data hub ─────────────────────────────────────────────────

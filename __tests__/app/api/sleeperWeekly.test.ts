@@ -14,15 +14,19 @@ vi.mock("@/lib/rateLimit", () => ({ checkRateLimit: h.checkRateLimit }));
 
 let cachedRow: { data: unknown; cached_at: string } | null = null;
 let upserts: Array<{ season: string; week: number; data: unknown; cached_at: string }> = [];
+let selectEqs: Array<[string, unknown]> = [];
 
 vi.mock("@/lib/supabaseclient", () => ({
   supabase: {
     from: (_table: string) => ({
       select: () => ({
-        eq: () => ({
-          eq: () => ({
-            single: () => Promise.resolve(cachedRow ? { data: cachedRow, error: null } : { data: null, error: { message: "no rows" } }),
-          }),
+        eq: (col: string, val: unknown) => ({
+          eq: (col2: string, val2: unknown) => {
+            selectEqs.push([col, val], [col2, val2]);
+            return {
+              single: () => Promise.resolve(cachedRow ? { data: cachedRow, error: null } : { data: null, error: { message: "no rows" } }),
+            };
+          },
         }),
       }),
       upsert: (row: { season: string; week: number; data: unknown; cached_at: string }) => {
@@ -53,6 +57,7 @@ beforeEach(() => {
   h.checkRateLimit.mockResolvedValue({ allowed: true, remaining: 29 });
   cachedRow = null;
   upserts = [];
+  selectEqs = [];
 });
 
 describe("GET /api/stats/sleeper-weekly", () => {
@@ -64,7 +69,54 @@ describe("GET /api/stats/sleeper-weekly", () => {
     expect(await res.json()).toEqual({ "123": { pts: 10 } });
     await flush();
     expect(upserts).toHaveLength(1);
-    expect(upserts[0]).toMatchObject({ season: "2026", week: 3, data: { "123": { pts: 10 } } });
+    // Stored under the versioned key so pre-fix (all-empty) rows can never be served.
+    expect(upserts[0]).toMatchObject({ season: "v2-2026", week: 3, data: { "123": { pts: 10 } } });
+  });
+
+  it("requests Sleeper's working stats URL shape (the old ?season_type= form returns {} for every player)", async () => {
+    const fetchMock = vi.fn(async (_url: string) => new Response(JSON.stringify({ "1": { off_snp: 30 } }), { status: 200 }));
+    global.fetch = fetchMock as never;
+    const GET = await loadGET();
+    await GET(makeReq("2026", "3") as never);
+    const url = String(fetchMock.mock.calls[0][0]);
+    expect(url).toContain("/stats/nfl/regular/2026/3");
+    expect(url).not.toContain("season_type");
+  });
+
+  it("reads the cache under the versioned key, not the legacy one", async () => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({ "1": { off_snp: 30 } }), { status: 200 })) as never;
+    const GET = await loadGET();
+    await GET(makeReq("2026", "3") as never);
+    expect(selectEqs).toContainEqual(["season", "v2-2026"]);
+    expect(selectEqs).not.toContainEqual(["season", "2026"]);
+  });
+
+  it("does NOT cache an all-empty response (every player {}), but still returns it", async () => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({ "1": {}, "2": {} }), { status: 200 })) as never;
+    const GET = await loadGET();
+    const res = await GET(makeReq("2026", "3") as never);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ "1": {}, "2": {} });
+    await flush();
+    expect(upserts).toHaveLength(0);
+  });
+
+  it("does NOT cache an empty object either", async () => {
+    global.fetch = vi.fn(async () => new Response("{}", { status: 200 })) as never;
+    const GET = await loadGET();
+    await GET(makeReq("2026", "18") as never);
+    await flush();
+    expect(upserts).toHaveLength(0);
+  });
+
+  it("ignores a cached row that holds no stats and refetches instead of serving it", async () => {
+    cachedRow = { data: { "1": {}, "2": {} }, cached_at: new Date().toISOString() };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ "1": { off_snp: 30 } }), { status: 200 }));
+    global.fetch = fetchMock as never;
+    const GET = await loadGET();
+    const res = await GET(makeReq("2026", "3") as never);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(await res.json()).toEqual({ "1": { off_snp: 30 } });
   });
 
   it("does NOT cache when the upstream response is non-OK, and returns a non-OK status itself", async () => {
