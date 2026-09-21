@@ -3,7 +3,9 @@
 > **Audience:** a developer who has just been handed the keys and has never seen this project.
 > **Goal:** explain what the app is, how the code is structured, how data flows, and how every major subsystem actually works — in enough depth to debug and extend it on day one.
 >
-> *Last reviewed: 2026-09-21, same day follow-up, HEAD `ef8784b` (working tree, uncommitted) — closing the gaps left by the Gameday live-accuracy pass below. Five items:
+> *Last reviewed: 2026-09-21, HEAD `6f24287` (working tree, uncommitted) — Sept 21 audit **Batch 3: Next.js 16.2.1 → 16.3.5** (`next` and `eslint-config-next` pinned exact). 16.2.1 carried 25 advisories incl. 2 critical RCEs (fixed ≥16.3.3); `npm audit` critical count 1 → 0, 15 → 11 total (the rest are dev-tooling transitives — a separate `npm audit fix` commit is Batch 3 step 2). No source changes were needed for the upgrade (build, `tsc`, eslint and all 1180 tests unchanged). `next.config.ts`: the dead `images` block (AVIF + remotePatterns, with nothing importing `next/image`) is now `images: { unoptimized: true }` so `/_next/image` 404s, and `images.unsplash.com` / `images.pexels.com` are gone from the CSP `img-src`. Verified on a production build served locally: CSP header as expected, `/_next/image` → 404 (even for an allowed Sleeper host with `Accept: image/avif`), API proxies 200/400 as before, and Playwright runs of Dashboard / Trade Hub / Gameday logged **zero CSP violations and zero page errors**. Two things that look like regressions but are not: (1) 429s on the cross-league Dashboard appear only when several browser sessions run back-to-back from one IP — the local limiter is the in-memory fallback (60/min per route per IP) — and a single run on a fresh server has none; (2) a 406 from Supabase `consensus_draft_meta` is the existing `.single()` no-row response for accounts without a consensus row. eslint: 0 errors, 2 pre-existing warnings (`BulkGameImport.tsx` unused directive, `RBChartingBoard.tsx` exhaustive-deps).*
+>
+> *Prior review: 2026-09-21, same day follow-up, HEAD `ef8784b` (working tree, uncommitted) — closing the gaps left by the Gameday live-accuracy pass below. Five items:
 > - **Per-stat pace (was: points-level).** `projectRemainingFromStats` in [gamedayLive.ts](lib/helpers/gamedayLive.ts): yards/receptions extrapolate at their own shrunk, clamped pace; TDs/INTs are NOT paced (regress to the projection, nudged 50% by the related yardage pace); the remaining stat line is then scored with the league's own rules. Projection mass the stat line doesn't explain (bonuses, fumbles, blended single-number sources) is carried at baseline, so at kickoff the result equals the projection exactly. Fed by a new [/api/stats/sleeper-live](app/api/stats/sleeper-live/route.ts) (30s server cache, trimmed to the 8 tracked stats) via [useGamedayLiveData.ts](app/hooks/useGamedayLiveData.ts). **Safety guard:** the stat feed is only trusted while its scored total matches Sleeper's official points (`liveStatsMatchOfficialPoints`, tolerance max(4, 25%)); otherwise that player silently falls back to points-level pace. Rows expose `paceSource` ("stats" | "points" | "projection"), shown as a tooltip + `data-pace-source`. **Unverified against a real in-progress game — whether Sleeper's stats endpoint updates live is exactly what tonight's capture will answer; the guard makes the answer non-fatal either way.**
 > - **Correlated win probability.** `playerCorrelation`/`teamVariance`/`crossTeamCovariance`: same-NFL-team QB↔WR 0.45, QB↔TE 0.35, QB↔RB 0.10, WR↔WR/TE 0.10; opposing passing-game players in one game 0.10 (heuristics, all in one table). Team spread now includes the covariance; win probability uses Var(A−B) = σA²+σB²−2Cov(A,B) so an opponent starting a player from my QB's team tightens the result. `TeamGameState.opponent` is now set in every state (needed pre-kickoff); rows carry `nflOpponent`.
 > - **Fresher injury status.** [/api/injuries/espn](app/api/injuries/espn/route.ts) (ESPN's injury report — the raw payload is ~9 MB, over Next's 2 MB Data Cache item limit, so it is trimmed to QB/RB/WR/TE and cached in module memory for 5 min) + [injuryOverrides.ts](lib/helpers/injuryOverrides.ts): matched by normalized name with position required and team not contradicting (WSH/WAS aliased); ambiguous matches are skipped; **ESPN wins when it lists a player, and "Active" clears a stale Sleeper Out**. Applied by overlaying onto the players map (`gamedayPlayers`) so both Gameday builders and the injury badges see it. Refreshed on hub entry and every 10 min. Projection-dropout as an inactives signal was deliberately not built (less reliable than the ESPN list).
@@ -249,7 +251,7 @@ All versions below are taken verbatim from [package.json](package.json) (do not 
 
 | Layer | Choice & exact version | Notes |
 |---|---|---|
-| Framework | **Next.js `16.2.1`** (App Router) | Bleeding-edge. APIs differ materially from older Next docs — read the in-repo guides before writing code. |
+| Framework | **Next.js `16.3.5`** (App Router) | Bleeding-edge. APIs differ materially from older Next docs — read the in-repo guides before writing code. |
 | UI runtime | **React `19.2.4`** + **react-dom `19.2.4`** | Pinned exact (no `^`). Almost every visible component is `"use client"`. |
 | Language | **TypeScript `^5`** (`@types/node ^20`, `@types/react ^19`) | strict mode; `noUnusedLocals` / `noUnusedParameters` enforced. |
 | Styling | **Tailwind CSS `^4`** via **`@tailwindcss/postcss ^4`** | v4 PostCSS-plugin model; config in [postcss.config.mjs](postcss.config.mjs). CSP allows `'unsafe-inline'` styles because Tailwind v4 inlines critical CSS. |
@@ -259,7 +261,7 @@ All versions below are taken verbatim from [package.json](package.json) (do not 
 | Charts | **`recharts ^3.9.2`** | Added Phase A stage A5. [lib/chartTheme.ts](lib/chartTheme.ts) (colors, dark-only, validated categorical palette) + [components/charts/ChartCard.tsx](components/charts/ChartCard.tsx) (`ChartCard`, `ChartTooltip`, `ChartLegend`, shared axis/grid presets) are the shared wrapper. `ChartTooltip` is generic over Recharts' `ValueType`/`NameType` and must be passed as `content={ChartTooltip}` (the bare component, not `<ChartTooltip />`) — Recharts injects `active`/`payload`/`label` at render time so a pre-built element can't satisfy the required-props check. Phase D (D1-D5) is the first consumer: pick-value curve, Trade Calculator gauge, tiered standings bands, player/team value trend charts, plus a hand-rolled-SVG [components/charts/MiniSparkline.tsx](components/charts/MiniSparkline.tsx) for dense virtualized table rows where mounting a full Recharts instance per row would be wasteful. |
 | Hosting / cron | **Vercel** (Pro plan) | `main` auto-deploys to prod; cron declared in [vercel.json](vercel.json) (Pro required). |
 | Testing | **Vitest `^4.1.4`** + **`@testing-library/react ^16.3.2`** + **jsdom ^29** + **`@vitejs/plugin-react ^6.0.1`** | Tests in [__tests__/](__tests__/). On this Windows machine, run via **PowerShell** (`npm run test`) — Vitest 4 silently collects 0 tests under Git Bash. |
-| Linting | **ESLint `^9`** + **`eslint-config-next 16.2.1`** | Flat config in [eslint.config.mjs](eslint.config.mjs). `exhaustive-deps`, `no-explicit-any`, `react-set-state-in-effect`, `no-unescaped-entities`, `prefer-const` are all **errors**, not warnings. |
+| Linting | **ESLint `^9`** + **`eslint-config-next 16.3.5`** | Flat config in [eslint.config.mjs](eslint.config.mjs). `exhaustive-deps`, `no-explicit-any`, `react-set-state-in-effect`, `no-unescaped-entities`, `prefer-const` are all **errors**, not warnings. |
 | Node | **`>=20.0.0`** | Enforced in `package.json` `engines`. |
 
 > ### Read this before writing any Next.js code
@@ -301,7 +303,7 @@ dynastyzeus-app/
 ├── public/               # Static assets
 ├── __tests__/            # Vitest suite
 ├── db_setup.sql          # Legacy pre-migration manual setup (still present in the tree)
-├── next.config.ts        # CSP headers, image remotePatterns, edge caching
+├── next.config.ts        # CSP headers, images.unoptimized (optimizer off), edge caching
 ├── vercel.json           # Cron schedule(s)
 ├── postcss.config.mjs eslint.config.mjs vitest.config.mts tsconfig.json   # Tooling configs
 ├── AGENTS.md / CLAUDE.md # The Next-16 warning
@@ -606,7 +608,7 @@ source: "/api/projections/:path*"
 Cache-Control: s-maxage=300, stale-while-revalidate=60
 ```
 
-`s-maxage=300` lets Vercel's edge serve the projection response from its shared cache for 5 minutes (`s-maxage` applies to shared caches, not the browser), and `stale-while-revalidate=60` lets it serve slightly-stale data for 60s while it refreshes in the background. **No other `/api/*` route sets edge cache headers** — they rely solely on the Next.js Data Cache (`revalidate`) for server-side reuse. The same config file also defines the **image `remotePatterns`** (`sleepercdn.com`, `a.espncdn.com`, `static.www.nfl.com`, `images.unsplash.com`, `images.pexels.com`) which **must be kept in lock-step with the CSP `img-src` allowlist** in the same file — change one without the other and images break. Likewise the CSP `connect-src` allowlist (`api.sleeper.app`, `*.fantasycalc.com`, `*.supabase.co`) is what permits the un-proxied direct Sleeper/FantasyCalc browser calls noted in §A.2.
+`s-maxage=300` lets Vercel's edge serve the projection response from its shared cache for 5 minutes (`s-maxage` applies to shared caches, not the browser), and `stale-while-revalidate=60` lets it serve slightly-stale data for 60s while it refreshes in the background. **No other `/api/*` route sets edge cache headers** — they rely solely on the Next.js Data Cache (`revalidate`) for server-side reuse. The same config file sets `images: { unoptimized: true }` (the app renders every image with a plain `<img>`; the `/_next/image` optimizer is switched off — it 404s — rather than left exposed) and carries the CSP `img-src` allowlist (`sleepercdn.com`, `a.espncdn.com`, `static.www.nfl.com`); see §Security model for what adopting `next/image` would require. Likewise the CSP `connect-src` allowlist (`api.sleeper.app`, `*.fantasycalc.com`, `*.supabase.co`) is what permits the un-proxied direct Sleeper/FantasyCalc browser calls noted in §A.2.
 
 ---
 
@@ -1428,7 +1430,7 @@ All defined in [next.config.ts](next.config.ts), applied to **every** route (`so
   - `default-src 'self'` — block everything by default.
   - `script-src 'self' 'unsafe-inline'` — **`'unsafe-eval'` is appended DEV-ONLY** (`isDev` is `process.env.NODE_ENV === "development"`). React's dev build uses `eval()` for stack traces; production drops it, so prod never ships `unsafe-eval`. (`'unsafe-inline'` for scripts/styles is required by Tailwind v4's inlined critical styles.)
   - `style-src 'self' 'unsafe-inline'`, `font-src 'self'`.
-  - **`img-src`** allowlist: `'self' data:` + `sleepercdn.com`, `a.espncdn.com`, `static.www.nfl.com`, `images.unsplash.com`, `images.pexels.com`.
+  - **`img-src`** allowlist: `'self' data:` + `sleepercdn.com`, `a.espncdn.com`, `static.www.nfl.com`. (`images.unsplash.com` / `images.pexels.com` were removed in the Sept 21 audit Batch 3 — nothing referenced them. As of that batch the source contains no `<img>`, no `next/image`, and no CDN URLs at all, so even the three remaining hosts are currently unused; they were kept deliberately, not because something needs them.)
   - **`connect-src`** allowlist: `'self'` + `api.sleeper.app`, `www.fantasycalc.com`, `api.fantasycalc.com`, `*.supabase.co`.
   - **`frame-ancestors 'none'`** — the app cannot be iframed.
 - **`X-Frame-Options: DENY`** — same intent, older header.
@@ -1436,7 +1438,7 @@ All defined in [next.config.ts](next.config.ts), applied to **every** route (`so
 - **`Strict-Transport-Security: max-age=31536000; includeSubDomains`** — force HTTPS for a year (no-op over plain HTTP in local dev).
 - **`Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()`** — denies features the app never uses.
 
-> **CRITICAL RULE — a new image host needs TWO edits.** To load images from a new host you must add it to **BOTH** the CSP `img-src` directive **AND** [`images.remotePatterns`](next.config.ts#L15) in `next.config.ts`. `remotePatterns` lets the Next image optimizer fetch it; CSP lets the browser render it. Add only one and images break (silently or via a CSP console error). The two lists must stay in lock-step.
+> **Images: the optimizer is OFF on purpose.** `next.config.ts` sets `images: { unoptimized: true }`, which makes `/_next/image` return 404 (verified in `next-server.js`: it renders a 404 when `images.unoptimized` is set; merely deleting the `images` block would leave the optimizer running on defaults). It was disabled because nothing uses it and the optimizer has carried RCE/DoS advisories (16.3.3 fixed an unauthenticated RCE that needed AVIF enabled — the old config enabled AVIF). **Loading a plain `<img>` from a new host needs ONE edit:** add the host to the CSP `img-src` directive. **If you ever adopt `next/image`**, you must instead remove `unoptimized`, add the host to `images.remotePatterns`, AND keep it in the CSP `img-src`. (The AVIF RCE was fixed in 16.3.3; AVIF was re-enabled in 16.3.4 — stay on ≥16.3.4.)
 
 There is also one **caching** header: `/api/projections/:path*` gets `Cache-Control: s-maxage=300, stale-while-revalidate=60` (5-min edge cache for FantasyPros/numberFire projection data).
 
@@ -1513,7 +1515,7 @@ The flat config in [eslint.config.mjs](eslint.config.mjs) is minimal: it just sp
 | `prefer-const` | **error** | yes | Use `const` for never-reassigned bindings |
 | `react-hooks/exhaustive-deps` | **warning** | **NO** | Add the missing dep, or justify the gap |
 
-> **Heads-up on `react-hooks/exhaustive-deps`:** contrary to a common assumption, with the current `eslint-config-next@16.2.1` it is a **warning**, not an error, and exits 0 — a missing-dependency warning alone will NOT fail `npm run lint` or CI (verified: probe file with only an `exhaustive-deps` warning exited 0). Treat it as a strong code-smell to fix, but know it is not a hard gate. The four rules above *are* hard errors that fail CI.
+> **Heads-up on `react-hooks/exhaustive-deps`:** contrary to a common assumption, with the current `eslint-config-next@16.3.5` it is a **warning**, not an error, and exits 0 — a missing-dependency warning alone will NOT fail `npm run lint` or CI (verified: probe file with only an `exhaustive-deps` warning exited 0). Treat it as a strong code-smell to fix, but know it is not a hard gate. The four rules above *are* hard errors that fail CI.
 
 Beyond ESLint, TypeScript is strict at the `tsc` step. `tsconfig.json` enables `strict`, plus `noUnusedLocals` and `noUnusedParameters` — so an unused import, variable, or function parameter is a **build/type-check failure**, not a warning. This is the single most common reason a local edit that "looks fine" red-X's in CI.
 
@@ -1540,7 +1542,7 @@ The remaining files cover helpers (math, scoring, lineup, picks, season, formatt
 | Symptom | First place to check |
 |---|---|
 | App white-screens entirely | Browser console + [components/ErrorBoundary.tsx](components/ErrorBoundary.tsx) — a child threw; the boundary should catch and show a fallback. |
-| Images won't load | [next.config.ts](next.config.ts#L49): the CSP `img-src` allowlist (`sleepercdn.com`, `a.espncdn.com`, `static.www.nfl.com`, `images.unsplash.com`, `images.pexels.com`) **and** `images.remotePatterns` ([line 15](next.config.ts#L15)) must *both* include the host. |
+| Images won't load | [next.config.ts](next.config.ts): the CSP `img-src` allowlist (`sleepercdn.com`, `a.espncdn.com`, `static.www.nfl.com`) must include the host (check the browser console for a "Refused to load the image" CSP error). `/_next/image` is intentionally 404 (`images.unoptimized`), so `next/image` with a remote `src` will not work as-is — see §Security model. |
 | Sleeper calls return 429 / fail | The proxy routes under [app/api/sleeper/](app/api/sleeper/) (`draft`, `league`, `user`, `user-leagues`) and the limiter in [lib/rateLimit.ts](lib/rateLimit.ts) (Upstash Redis). Sleeper data is also localStorage-TTL-cached client-side. |
 | Supabase reads come back empty | RLS / `auth.uid()` mismatch — the row's `user_id` must equal the authenticated user. Re-check the Supabase session. |
 | Cron didn't run | Vercel dashboard → Project → **Cron** tab (requires Vercel Pro). The route at [app/api/cron/league-transactions/route.ts](app/api/cron/league-transactions/route.ts#L247) refuses to run unless `CRON_SECRET` is set and the `Authorization: Bearer` header matches; it also needs `SUPABASE_SERVICE_ROLE_KEY`. |
@@ -1595,7 +1597,7 @@ Other lower-priority items the audit flagged that I did not re-verify line-by-li
 
 This file drifts the moment the architecture moves. When you change any of the following, update both the code **and** the relevant section here:
 
-- **CSP / image allowlist** — a new image host needs edits in *two* places in [next.config.ts](next.config.ts) (the CSP `img-src` directive **and** `images.remotePatterns`).
+- **CSP / image allowlist** — a new `<img>` host needs the CSP `img-src` directive in [next.config.ts](next.config.ts); the `/_next/image` optimizer is disabled (`images.unoptimized`), so adopting `next/image` is a config change, not just a new host.
 - **Environment variables** — keep the env table and [.env.example](.env.example) in sync.
 - **Cron schedule** — [vercel.json](vercel.json) is the source of truth.
 - **Database migrations** — every new migration is additive, ships explicit GRANTs + an RLS policy, and gets a row in the `applied_migrations` ledger.
