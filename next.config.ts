@@ -11,9 +11,12 @@ const nextConfig: NextConfig = {
 
   // The app renders every image with a plain <img> (nothing imports next/image),
   // so the /_next/image optimizer has no legitimate caller. `unoptimized` makes
-  // that endpoint 404 instead of leaving it exposed (it has had RCE/DoS
-  // advisories). If next/image is ever adopted, replace this with a
-  // remotePatterns allowlist AND keep the hosts in the CSP img-src below.
+  // `next start` 404 that endpoint, and with no remotePatterns Vercel rejects
+  // every remote URL (400 INVALID_IMAGE_OPTIMIZE_REQUEST); note Vercel still
+  // serves same-origin /public files through it. The optimizer has had RCE/DoS
+  // advisories, hence not leaving remote hosts allowlisted. If next/image is
+  // ever adopted, replace this with a remotePatterns allowlist AND keep the
+  // hosts in the CSP img-src below.
   images: {
     unoptimized: true,
   },
