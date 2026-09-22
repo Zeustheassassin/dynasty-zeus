@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { useGamedayDashboard } from "@/app/hooks/useGamedayDashboard";
+import { GAMEDAY_DASHBOARD_CONCURRENCY } from "@/lib/constants";
 import type { SleeperLeague, SleeperRoster, SleeperUser, SleeperMatchup, SleeperPlayer, TeamGameState } from "@/lib/types";
 
 const getLeagueRosters = vi.fn();
@@ -178,6 +179,33 @@ describe("useGamedayDashboard", () => {
     expect(getLeagueMatchups.mock.calls.length).toBe(fetchesAfterLoad);
   });
 
+  describe("loadGamedayDashboard — concurrency cap", () => {
+    // Sept 22 code-review 50-league-scalability finding, Tier 1 #1: loadGamedayDashboard
+    // fanned out every league at once (3 concurrent Sleeper calls each). Mirrors
+    // useLeagueOverview.test.ts's cap test.
+    it(`fetches at most GAMEDAY_DASHBOARD_CONCURRENCY (${GAMEDAY_DASHBOARD_CONCURRENCY}) leagues at once, deferring the rest`, async () => {
+      const leagues = Array.from({ length: GAMEDAY_DASHBOARD_CONCURRENCY + 1 }, (_, i) => mkLeague(`L${i + 1}`));
+      let callCount = 0;
+      const releasers: (() => void)[] = [];
+      getLeagueRosters.mockImplementation(() => {
+        callCount++;
+        return new Promise((resolve) => releasers.push(() => resolve([mkRoster(1, "me")])));
+      });
+      getLeagueUsers.mockResolvedValue([mkUser("me", "Me")]);
+      getLeagueMatchups.mockResolvedValue([mkMatchup(1, 1, 10)]);
+
+      const { result } = renderHook(() => useGamedayDashboard(noInputs));
+      act(() => { result.current.loadGamedayDashboard(leagues, me, 1); });
+
+      await waitFor(() => expect(callCount).toBeGreaterThan(0));
+      // The cap's calls fire synchronously together — the extra league must not have started yet.
+      expect(callCount).toBe(GAMEDAY_DASHBOARD_CONCURRENCY);
+
+      releasers.forEach((release) => release());
+      await waitFor(() => expect(callCount).toBe(GAMEDAY_DASHBOARD_CONCURRENCY + 1));
+    });
+  });
+
   describe("refreshGamedayDashboardMatchups", () => {
     const setup = async () => {
       getLeagueRosters.mockResolvedValue([mkRoster(1, "me"), mkRoster(2, "them")]);
@@ -226,6 +254,25 @@ describe("useGamedayDashboard", () => {
       await act(async () => { await result.current.refreshGamedayDashboardMatchups(["A"], 2); });
 
       expect(pointsFor(result, "A")).toBe(10);
+    });
+
+    it(`caps concurrent refetches at GAMEDAY_DASHBOARD_CONCURRENCY (${GAMEDAY_DASHBOARD_CONCURRENCY})`, async () => {
+      const { result } = await setup();
+      const leagueIds = Array.from({ length: GAMEDAY_DASHBOARD_CONCURRENCY + 1 }, (_, i) => `L${i + 1}`);
+      let callCount = 0;
+      const releasers: (() => void)[] = [];
+      getLeagueMatchups.mockImplementation(() => {
+        callCount++;
+        return new Promise((resolve) => releasers.push(() => resolve([mkMatchup(1, 1, 10)])));
+      });
+
+      act(() => { result.current.refreshGamedayDashboardMatchups(leagueIds, 1); });
+
+      await waitFor(() => expect(callCount).toBeGreaterThan(0));
+      expect(callCount).toBe(GAMEDAY_DASHBOARD_CONCURRENCY);
+
+      releasers.forEach((release) => release());
+      await waitFor(() => expect(callCount).toBe(GAMEDAY_DASHBOARD_CONCURRENCY + 1));
     });
   });
 });

@@ -211,6 +211,16 @@ export const CROSS_LEAGUE_INTEL_LEAGUE_CONCURRENCY = 2;
 export const LEAGUE_OVERVIEW_CONCURRENCY = 3;
 
 /**
+ * Gameday Dashboard (useGamedayDashboard) loads rosters + users + matchups for every one of
+ * the current user's leagues at once — 3 concurrent Sleeper calls per league — and the live
+ * refresh loop re-runs that same fan-out every poll tick during a live slate. Same unbounded
+ * shape as LEAGUE_OVERVIEW_CONCURRENCY above (Sept 22 code-review 50-league-scalability
+ * finding, Tier 1 #1-2); capping the outer per-league loop keeps the worst-case burst at this
+ * number x 3.
+ */
+export const GAMEDAY_DASHBOARD_CONCURRENCY = 3;
+
+/**
  * A batch pass where every owner fails (e.g. Sleeper is down) never changes
  * `crossLeagueMateIntel`, which is the load effect's only dependency that advances it to the
  * next batch — without this, those owners would be silently dropped for the rest of the

@@ -2,6 +2,8 @@
 import { useState, useCallback, useMemo, useRef } from "react";
 import { sleeperApi } from "../../lib/sleeperApi";
 import { buildGamedayDashboardEntries } from "../../lib/helpers";
+import { withConcurrency } from "../../lib/concurrency";
+import { GAMEDAY_DASHBOARD_CONCURRENCY } from "../../lib/constants";
 import type { StatLine } from "../../lib/helpers/gamedayLive";
 import type {
   SleeperLeague, SleeperUser, SleeperPlayer, ProjectionRow,
@@ -57,7 +59,11 @@ export function useGamedayDashboard({ user, players, projectionData, scheduleByT
     weekRef.current = week;
     setLoadingGamedayDashboard(true);
     try {
-      const results = await Promise.all(leagues.map(async (league): Promise<GamedayDashboardRaw> => {
+      // Fetched GAMEDAY_DASHBOARD_CONCURRENCY leagues at a time (3 Sleeper calls each) rather
+      // than firing every league at once — an uncapped fan-out here hit the same 429 risk
+      // Batch 5 found and fixed for cross-league intel (Sept 22 code-review 50-league-
+      // scalability finding, Tier 1 #1).
+      const results = await withConcurrency(leagues, async (league): Promise<GamedayDashboardRaw> => {
         try {
           const [rosters, users, matchups] = await Promise.all([
             sleeperApi.getLeagueRosters(league.league_id),
@@ -68,7 +74,7 @@ export function useGamedayDashboard({ user, players, projectionData, scheduleByT
         } catch {
           return { league, error: true, rosters: [], users: [], matchups: [] };
         }
-      }));
+      }, GAMEDAY_DASHBOARD_CONCURRENCY);
       if (weekRef.current !== week) return;
       setRawEntries(results);
       setGamedayDashboardWeek(week);
@@ -84,11 +90,14 @@ export function useGamedayDashboard({ user, players, projectionData, scheduleByT
   const refreshGamedayDashboardMatchups = useCallback(async (leagueIds: string[], week: number) => {
     if (!week || !leagueIds.length) return;
     const fresh = new Map<string, GamedayDashboardRaw["matchups"]>();
-    await Promise.all(leagueIds.map(async (leagueId) => {
+    // Same GAMEDAY_DASHBOARD_CONCURRENCY cap as loadGamedayDashboard above — this refresh
+    // re-runs every poll tick during a live slate, so an uncapped fan-out here repeats the
+    // 429 risk on every single tick rather than just once per page load.
+    await withConcurrency(leagueIds, async (leagueId) => {
       try {
         fresh.set(leagueId, await sleeperApi.getLeagueMatchups(leagueId, week, true));
       } catch { /* keep previous */ }
-    }));
+    }, GAMEDAY_DASHBOARD_CONCURRENCY);
     if (weekRef.current !== week || fresh.size === 0) return;
     setRawEntries((prev) => prev.map((item) => {
       const matchups = fresh.get(item.league.league_id);
