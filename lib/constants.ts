@@ -211,8 +211,8 @@ export const CROSS_LEAGUE_INTEL_OWNER_BATCH = 12;
  * Sept 22 deferred follow-up #1: that queue now holds UNIQUE LEAGUES, not (owner, league)
  * pairs. The unit this number counts therefore changed, but what it bounds did NOT — a queue
  * item still costs exactly 5 Sleeper calls either way, so the peak burst is the same 2 x 5 = 10.
- * The dedup shortens the queue (every owner in the batch shares at least the current league),
- * which makes the same cap drain faster; it deliberately does not widen it. Raise this only on
+ * The dedup shortens the queue by however much the batch's owners share OTHER leagues with each
+ * other, which makes the same cap drain faster; it deliberately does not widen it. Raise this only on
  * real 429 evidence, exactly as before.
  */
 export const CROSS_LEAGUE_INTEL_LEAGUE_CONCURRENCY = 2;

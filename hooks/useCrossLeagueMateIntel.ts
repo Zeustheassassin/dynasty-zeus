@@ -66,7 +66,9 @@ function ownerViewOfLeague(shared: LeagueSharedFetch, ownerId: string): LeagueIn
 }
 
 /** Pure aggregation — no network. Turns one owner's per-league fetch results into their
- *  CrossLeagueIntel profile. `leagueResults` may cover fewer leagues than `dynastyLeagueCount`
+ *  CrossLeagueIntel profile. Every count here is across the owner's leagues OTHER than the one
+ *  being traded in (loadOwnerIntelBatch filters the current league out), so nothing double-counts
+ *  data the caller can already see directly. `leagueResults` may cover fewer leagues than `dynastyLeagueCount`
  *  (the owner has one or more still-outstanding leagues) — callers pass `isPartial` in that
  *  case so the summary text says so explicitly rather than looking confidently complete when
  *  it's actually an understatement of the owner's true cross-league activity. */
@@ -190,15 +192,15 @@ function buildIntelFromLeagueResults(
     : "";
   const repeatedNames = repeatedPlayers.filter((player) => player.count >= 2).map((player) => player.name);
   const crossLeagueSummary = (repeatedNames.length > 0
-    ? `Across ${dynastyLeagueCount} dynasty leagues, leans ${topPos}/${secondPos} and repeatedly holds ${repeatedNames.join(", ")}.`
-    : `Across ${dynastyLeagueCount} dynasty leagues, leans ${topPos}/${secondPos} with an average skill-player age of ${averageAgeAllLeagues || "-"}.`) + partialNote;
+    ? `Across ${dynastyLeagueCount} other dynasty leagues, leans ${topPos}/${secondPos} and repeatedly holds ${repeatedNames.join(", ")}.`
+    : `Across ${dynastyLeagueCount} other dynasty leagues, leans ${topPos}/${secondPos} with an average skill-player age of ${averageAgeAllLeagues || "-"}.`) + partialNote;
   const acquiredNames = acquiredPlayers.filter((player) => player.count >= 2).map((player) => player.name);
   const crossLeagueTradeSummary = (
     crossLeagueTradeCount30d === 0
       ? "No strong cross-league trade tendency in the last 30 days."
       : acquiredNames.length > 0
-      ? `Over the last 30 days, they made ${crossLeagueTradeCount30d} cross-league trades and kept buying ${acquiredNames.join(", ")}.`
-      : `Over the last 30 days, they made ${crossLeagueTradeCount30d} cross-league trades, leaning ${tradePreferredPositions.slice(0, 2).join("/") || "best-player"} while moving picks ${crossLeaguePickBuys30d}-${crossLeaguePickSells30d}.`
+      ? `Over the last 30 days, they made ${crossLeagueTradeCount30d} trades outside this league and kept buying ${acquiredNames.join(", ")}.`
+      : `Over the last 30 days, they made ${crossLeagueTradeCount30d} trades outside this league, leaning ${tradePreferredPositions.slice(0, 2).join("/") || "best-player"} while moving picks ${crossLeaguePickBuys30d}-${crossLeaguePickSells30d}.`
   ) + partialNote;
 
   return {
@@ -237,12 +239,18 @@ function buildIntelFromLeagueResults(
  *
  * Phase 2 is keyed by league, not by (owner, league) pair, because a league's rosters,
  * transactions and drafts are entirely owner-independent — only "which roster is mine" differs,
- * and that is derived from the shared fetch. The batch's owners overlap heavily by design (they
- * are all in the CURRENT league, and co-owners commonly share others), so the pair-keyed version
- * this replaced re-fetched the same league once per owner sharing it. The browser cache in
- * lib/clientFetch.ts absorbed much of that in the happy path — but only while localStorage is
- * healthy, and it is exactly the localStorage-under-eviction-pressure case (many leagues, large
- * payloads) where those duplicate calls became real 429 risk on this specific hook.
+ * and that is derived from the shared fetch. Leaguemates who share OTHER leagues with each other
+ * is this hook's whole use case, so the pair-keyed version this replaced re-fetched those shared
+ * leagues once per owner in them. The browser cache in lib/clientFetch.ts absorbed much of that
+ * in the happy path — but only while localStorage is healthy, and it is exactly the
+ * localStorage-under-eviction-pressure case (many leagues, large payloads) where those duplicate
+ * calls became real duplicate network calls, and real 429 risk on this specific hook.
+ *
+ * `currentLeagueId` is excluded from every owner's league list: this is CROSS-league intel, and
+ * the league being traded in is already fully visible to the caller (rosters, and in-league
+ * trades via leagueMateTradeIntel). Counting it here double-counted it into the 30-day trade
+ * tendencies and made a player an owner holds here plus in one other league look like a
+ * repeatedly-hoarded asset.
  *
  * Sept 22 code-review 50-league-scalability finding, Tier 1 #5 (Batch 4): an owner used to be
  * dropped entirely if even ONE of their leagues failed, which got specifically worse as an
@@ -267,13 +275,17 @@ function buildIntelFromLeagueResults(
 async function loadOwnerIntelBatch(
   ownerIds: string[],
   players: Record<string, SleeperPlayer>,
-  leagueIntelCache: Map<string, LeagueSharedFetch>
+  leagueIntelCache: Map<string, LeagueSharedFetch>,
+  currentLeagueId: string
 ): Promise<{ ownerId: string; intel: CrossLeagueIntel }[]> {
   const ownerLeagueResults = await Promise.all(
     ownerIds.map(async (ownerId) => {
       try {
         const ownerLeagues = await sleeperApi.getUserLeagues(ownerId, CURRENT_YEAR);
-        return { ownerId, dynastyLeagues: ownerLeagues.filter(isDynastyLeague), failed: false };
+        const dynastyLeagues = ownerLeagues.filter(
+          (league) => isDynastyLeague(league) && league.league_id !== currentLeagueId
+        );
+        return { ownerId, dynastyLeagues, failed: false };
       } catch (err) {
         log.warn("cross-league intel: getUserLeagues failed — will retry next pass", { ownerId, err: String(err) });
         return { ownerId, dynastyLeagues: [] as SleeperLeague[], failed: true };
@@ -373,6 +385,10 @@ export function useCrossLeagueMateIntel({
       mainTab === "TRADE_HUB" && tradeHubSection === "FINDER";
 
     if (!shouldLoadCrossLeagueIntel) return;
+    // Redundant at runtime (shouldLoadCrossLeagueIntel already requires it) — this is what
+    // narrows leagueId to string for the async closure below.
+    if (!leagueId) return;
+    const currentLeagueId: string = leagueId;
 
     const ownerIds = rosters
       .filter((r) => r.owner_id && r.owner_id !== userId)
@@ -411,7 +427,7 @@ export function useCrossLeagueMateIntel({
     const loadCrossLeagueMateIntel = async () => {
       setLoadingCrossLeagueMateIntel(true);
       try {
-        const succeeded = await loadOwnerIntelBatch(batch, players, leagueIntelCacheRef.current);
+        const succeeded = await loadOwnerIntelBatch(batch, players, leagueIntelCacheRef.current, currentLeagueId);
         if (cancelled) return;
 
         const noProgressCount = batch.length - succeeded.length;

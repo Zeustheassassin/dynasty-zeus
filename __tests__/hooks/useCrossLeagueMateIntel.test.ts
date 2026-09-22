@@ -251,10 +251,10 @@ describe("useCrossLeagueMateIntel — partial profiles + targeted retry", () => 
 });
 
 describe("useCrossLeagueMateIntel — shared-league dedup", () => {
-  // Sept 22 deferred follow-up #1: the batch's owners overlap by design (they are all in the
-  // CURRENT league, and co-owners commonly share others), but the fetch queue used to be keyed
-  // by (owner, league) pair — so a league shared by N owners cost its 5 Sleeper calls N times.
-  // The queue is now keyed by league_id and each owner's view is derived from the one fetch.
+  // Sept 22 deferred follow-up #1: leaguemates sharing OTHER leagues is this hook's whole use
+  // case, but the fetch queue used to be keyed by (owner, league) pair — so a league shared by
+  // N owners cost its 5 Sleeper calls N times. The queue is now keyed by league_id and each
+  // owner's view is derived from the one fetch.
   function dynastyLeague(id: string): Partial<SleeperLeague> {
     return {
       league_id: id,
@@ -310,6 +310,27 @@ describe("useCrossLeagueMateIntel — shared-league dedup", () => {
     expect(rosterCalls.filter((id) => id === "shared")).toHaveLength(1);
     expect(rosterCalls).toContain("owner1-own");
     expect(rosterCalls).toContain("owner2-own");
+  });
+
+  it("excludes the league currently being traded in — this is CROSS-league intel", async () => {
+    const rosters = [roster("owner1", 1)];
+    // Sleeper's user-leagues endpoint returns every league the owner is in, including this one.
+    api.impl.getUserLeagues = vi.fn(async () => [dynastyLeague("L"), dynastyLeague("other")]);
+    const rosterCalls: string[] = [];
+    api.impl.getLeagueRosters = vi.fn(async (leagueId: string) => {
+      rosterCalls.push(leagueId);
+      return [{ ...roster("owner1", 7), players: ["p1"] }];
+    });
+
+    // baseArgs.leagueId is "L".
+    const { result } = renderHook(() => useCrossLeagueMateIntel({ ...baseArgs, rosters }));
+    await waitFor(() => expect(result.current.crossLeagueMateIntel.owner1).toBeDefined());
+
+    expect(rosterCalls).toEqual(["other"]);
+    expect(result.current.crossLeagueMateIntel.owner1.totalDynastyLeagues).toBe(1);
+    // Counted once (the other league), not twice — the current-league copy is not double-counted
+    // into the hoarding/affinity signals the Finder reads off ownedPlayerCounts.
+    expect(result.current.crossLeagueMateIntel.owner1.ownedPlayerCounts).toEqual({ p1: 1 });
   });
 });
 
