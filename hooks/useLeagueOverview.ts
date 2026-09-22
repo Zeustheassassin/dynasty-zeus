@@ -1,7 +1,7 @@
 "use client";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { logger } from "../lib/logger";
-import { sleeperApi } from "../lib/sleeperApi";
+import { fetchLeagueCore } from "./leagueCoreFetch";
 import { buildLeaguePickPool } from "../lib/helpers";
 import { withConcurrency } from "../lib/concurrency";
 import { LEAGUE_OVERVIEW_CONCURRENCY } from "../lib/constants";
@@ -53,26 +53,15 @@ export function useLeagueOverview(
       try {
         const fetchLeague = async (league: SleeperLeague) => {
           try {
-            const [rostersData, tradedPicksData, draftsData, usersData] = await Promise.all([
-              sleeperApi.getLeagueRosters(league.league_id),
-              sleeperApi.getLeagueTradedPicks(league.league_id),
-              sleeperApi.getLeagueDrafts(league.league_id),
-              sleeperApi.getLeagueUsers(league.league_id),
-            ]);
-
-            const leagueUserMap: Record<string, string> = {};
-            (usersData || []).forEach((u) => {
-              leagueUserMap[u.user_id] =
-                u.display_name || u.username || u.metadata?.team_name || `Team`;
-            });
+            const { rosters, tradedPicks, drafts, userMap } = await fetchLeagueCore(league.league_id);
 
             // Pick pool: shared with useAppState.loadRoster/useSpyState via buildLeaguePickPool.
             // Overview renders every league at once, so it caps round depth at ROUNDS.length
             // and skips the per-league round trim/slot fallback the other two callers use —
             // see __tests__/hooks/pickWindowCopies.test.ts for the pinned per-caller behavior.
-            const tempPicks = buildLeaguePickPool(rostersData, tradedPicksData, draftsData, "overview");
+            const tempPicks = buildLeaguePickPool(rosters, tradedPicks, drafts, "overview");
 
-            return { league, rosters: rostersData, picks: tempPicks, userMap: leagueUserMap };
+            return { league, rosters, picks: tempPicks, userMap };
           } catch (err) {
             log.warn("loadLeagueOverview league fetch error", { err: String(err) });
             return null;

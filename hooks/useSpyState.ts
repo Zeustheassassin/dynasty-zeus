@@ -17,8 +17,10 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { getLocalStorageItem, setLocalStorageItem } from "../lib/hooks/useLocalStorage";
 import { logger } from "../lib/logger";
 import { sleeperApi } from "../lib/sleeperApi";
-import { FANTASYCALC_BASE_URL, FC_FETCH_TIMEOUT_MS } from "../lib/constants";
+import { cachedFetch } from "../lib/clientFetch";
+import { FANTASYCALC_BASE_URL, FC_VALUES_CLIENT_TTL_MS } from "../lib/constants";
 import { getFcValuesRaw } from "../lib/fcValuesStore";
+import { fetchLeagueCore } from "./leagueCoreFetch";
 import {
   CURRENT_YEAR, buildLeaguePickPool, sortOwnerPicks,
   computeScoringMultipliers, getRosterDirectionProfile,
@@ -38,16 +40,20 @@ const log = logger("hooks/useSpyState");
 
 // FantasyCalc dynasty values for a single league (league-scoped, identity-
 // independent). Mirrors useCalcValues.loadCalcValues but returns the map so
-// the run-all loop can fetch per-league values without shared state.
+// the run-all loop can fetch per-league values without shared state. Routed
+// through clientFetch's cachedFetch (Sept 22 code-review Tier 4 finding #12)
+// rather than a raw fetch() — gets bounded retry-with-backoff on 429/5xx plus
+// a short localStorage cache, same TTL as the global FC values client store
+// (FC_VALUES_CLIENT_TTL_MS), so re-selecting a league in the same session
+// doesn't re-hit FantasyCalc.
 async function fetchLeagueCalcValues(leagueId: string): Promise<Record<string, number>> {
   try {
-    const res = await fetch(`${FANTASYCALC_BASE_URL}/values/current?leagueId=${leagueId}&site=sleeper`, {
-      signal: AbortSignal.timeout(FC_FETCH_TIMEOUT_MS),
-    });
-    if (!res.ok) throw new Error(`FantasyCalc league values ${res.status}`);
-    const data = await res.json();
+    const data = await cachedFetch<{ player?: { sleeperId?: string }; value: number }[]>(
+      `${FANTASYCALC_BASE_URL}/values/current?leagueId=${leagueId}&site=sleeper`,
+      { ttlMs: FC_VALUES_CLIENT_TTL_MS, cacheKey: `fc-league-values:${leagueId}` }
+    );
     const vals: Record<string, number> = {};
-    (data as { player?: { sleeperId?: string }; value: number }[]).forEach((entry) => {
+    data.forEach((entry) => {
       const sleeperId = entry.player?.sleeperId;
       if (sleeperId) vals[String(sleeperId)] = entry.value;
     });
@@ -84,25 +90,10 @@ async function loadSpyLeagueCore(
   targetUserId: string,
   players: Record<string, SleeperPlayer>
 ): Promise<SpyLeagueCore> {
-  const [allRosters, tradedPicksData, draftsData, usersData] = await Promise.all([
-    sleeperApi.getLeagueRosters(league.league_id),
-    sleeperApi.getLeagueTradedPicks(league.league_id),
-    sleeperApi.getLeagueDrafts(league.league_id),
-    sleeperApi.getLeagueUsers(league.league_id),
-  ]);
-
-  const rosters = Array.isArray(allRosters) ? allRosters : [];
-  const tradedPicks = Array.isArray(tradedPicksData) ? tradedPicksData : [];
-  const drafts = Array.isArray(draftsData) ? draftsData : [];
-
-  const users: Record<string, string> = {};
-  (usersData || []).forEach((u) => {
-    const name = u.display_name || u.username || u.metadata?.team_name || "Team";
-    users[u.user_id] = name;
-  });
-  rosters.forEach((r) => {
-    if (users[r.owner_id]) users[r.roster_id] = users[r.owner_id];
-  });
+  const { rosters, tradedPicks, drafts, userMap: users } = await fetchLeagueCore(
+    league.league_id,
+    { aliasRosterId: true } // RosterSelect.tsx's users[r.roster_id] || users[r.owner_id] lookup relies on this
+  );
 
   const myRoster = rosters.find((r) => r.owner_id === targetUserId) ?? null;
 
