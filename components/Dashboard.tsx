@@ -1,7 +1,7 @@
 "use client";
 import { useMemo } from "react";
 import type { MainTab } from "../lib/hubs";
-import type { LeagueOverviewEntry, CommittedSimsByLeague, CachedSimRow, TradeAttempt, LeagueMgmtData } from "../lib/types";
+import type { LeagueOverviewEntry, CommittedSimsByLeague, CachedSimRow, TradeAttempt, LeagueMgmtData, HistoricalSnapshot } from "../lib/types";
 import type { DashboardAlert, InjuryReportPlayer } from "./AlertsPage/alertsPageHelpers";
 import { getInjuredCount } from "./AlertsPage/alertsPageHelpers";
 import StatStrip from "./Dashboard/StatStrip";
@@ -19,6 +19,7 @@ type DashboardProps = {
   allTradeAttempts: TradeAttempt[];
   visibleDashboardAlerts: DashboardAlert[];
   actionableDashboardAlerts: DashboardAlert[];
+  historicalSnapshot: HistoricalSnapshot | null;
   onDismissAlert: (alertId: string) => void;
   onSelectLeague: (leagueId: string) => void;
   leagueOverviewData: Record<string, LeagueOverviewEntry>;
@@ -29,6 +30,7 @@ type DashboardProps = {
   onOpenCrossLeaguePlayers: () => void;
   onOpenAllTrades: () => void;
   onOpenInjuryReport: () => void;
+  onOpenValueTrends: () => void;
 };
 
 // Phase J — Dashboard rebuild (A7 cross-league team summary + R7 value
@@ -47,6 +49,7 @@ export default function Dashboard({
   allTradeAttempts,
   visibleDashboardAlerts,
   actionableDashboardAlerts,
+  historicalSnapshot,
   onDismissAlert,
   onSelectLeague,
   leagueOverviewData,
@@ -57,6 +60,7 @@ export default function Dashboard({
   onOpenCrossLeaguePlayers,
   onOpenAllTrades,
   onOpenInjuryReport,
+  onOpenValueTrends,
 }: DashboardProps) {
   const isConnected = !!username;
 
@@ -96,7 +100,7 @@ export default function Dashboard({
           />
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <ValueMoversPanel alerts={visibleDashboardAlerts} onViewAll={() => onNavigate("ALERTS")} />
+            <ValueMoversPanel historicalSnapshot={historicalSnapshot} onViewAll={onOpenValueTrends} />
             <RecentAlertsPanel
               alerts={actionableDashboardAlerts.length > 0 ? actionableDashboardAlerts : visibleDashboardAlerts}
               onDismiss={onDismissAlert}

@@ -1,20 +1,28 @@
 "use client";
-import { getMarketMovers } from "../AlertsPage/alertsPageHelpers";
-import type { DashboardAlert } from "../AlertsPage/alertsPageHelpers";
+import { useMemo } from "react";
+import { usePlayers } from "../../lib/PlayersContext";
+import { computeValueTrends, splitValueMovers } from "../../lib/helpers/valueTrends";
+import type { HistoricalSnapshot } from "../../lib/types";
 import { Card } from "../ui/Card";
 import Button from "../ui/Button";
 
 interface ValueMoversPanelProps {
-  alerts: DashboardAlert[];
+  historicalSnapshot: HistoricalSnapshot | null;
   onViewAll: () => void;
 }
 
-// Top value movers (R7) among owned + watchlisted players — reuses the same
-// gainers/fallers split as AlertsPage's "movers" tab (components/AlertsPage/
-// alertsPageHelpers.ts's getMarketMovers), just capped to 3 per side for a
-// glanceable dashboard card instead of the full feed.
-export default function ValueMoversPanel({ alerts, onViewAll }: ValueMoversPanelProps) {
-  const { gainers, fallers } = getMarketMovers(alerts);
+const TOP_N = 5;
+
+// Top value movers — same computation the Data Hub's Value Trends "My League
+// Trends" view uses (lib/helpers/valueTrends.ts), so the two surfaces always
+// agree; capped to the top 5 per side for a glanceable dashboard card instead
+// of the full feed.
+export default function ValueMoversPanel({ historicalSnapshot, onViewAll }: ValueMoversPanelProps) {
+  const players = usePlayers();
+  const { gainers, fallers } = useMemo(
+    () => splitValueMovers(computeValueTrends(historicalSnapshot, players)),
+    [historicalSnapshot, players]
+  );
 
   return (
     <Card padding="lg" elevated>
@@ -32,30 +40,24 @@ export default function ValueMoversPanel({ alerts, onViewAll }: ValueMoversPanel
           <div>
             <div className="mb-1.5 text-[10px] font-bold uppercase tracking-[0.2em] text-emerald-400">Gaining</div>
             <div className="space-y-1.5">
-              {gainers.slice(0, 3).map((alert) => {
-                const delta = (alert.payload?.["delta"] as number | undefined) ?? 0;
-                return (
-                  <div key={alert.id} className="flex items-center justify-between gap-2 text-sm">
-                    <span className="truncate text-slate-200">{alert.title.replace(" is climbing", "")}</span>
-                    <span className="shrink-0 font-mono text-emerald-400">+{delta.toLocaleString()}</span>
-                  </div>
-                );
-              })}
+              {gainers.slice(0, TOP_N).map((row) => (
+                <div key={row.playerId} className="flex items-center justify-between gap-2 text-sm">
+                  <span className="truncate text-slate-200">{row.full_name}</span>
+                  <span className="shrink-0 font-mono text-emerald-400">+{row.delta.toLocaleString()}</span>
+                </div>
+              ))}
               {gainers.length === 0 && <p className="text-xs text-slate-600 italic">None</p>}
             </div>
           </div>
           <div>
             <div className="mb-1.5 text-[10px] font-bold uppercase tracking-[0.2em] text-red-400">Falling</div>
             <div className="space-y-1.5">
-              {fallers.slice(0, 3).map((alert) => {
-                const delta = Math.abs((alert.payload?.["delta"] as number | undefined) ?? 0);
-                return (
-                  <div key={alert.id} className="flex items-center justify-between gap-2 text-sm">
-                    <span className="truncate text-slate-200">{alert.title.replace(" is falling", "")}</span>
-                    <span className="shrink-0 font-mono text-red-400">-{delta.toLocaleString()}</span>
-                  </div>
-                );
-              })}
+              {fallers.slice(0, TOP_N).map((row) => (
+                <div key={row.playerId} className="flex items-center justify-between gap-2 text-sm">
+                  <span className="truncate text-slate-200">{row.full_name}</span>
+                  <span className="shrink-0 font-mono text-red-400">{row.delta.toLocaleString()}</span>
+                </div>
+              ))}
               {fallers.length === 0 && <p className="text-xs text-slate-600 italic">None</p>}
             </div>
           </div>

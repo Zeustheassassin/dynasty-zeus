@@ -6,6 +6,7 @@ import { MultiPointSparkline } from "../charts/MultiPointSparkline";
 import { usePlayers } from "../../lib/PlayersContext";
 import { useValues } from "../../lib/ValuesContext";
 import { getCrossLeagueDirections, DIRECTION_BUCKET_ORDER, getCommitmentNameColor, getFuturePaidBadge } from "../../lib/helpers";
+import { sortByPlayoffOdds } from "./teamSummaryHelpers";
 import { CardButton } from "../ui/Card";
 import Badge from "../ui/Badge";
 import EmptyState from "../ui/EmptyState";
@@ -121,6 +122,21 @@ export default function TeamSummaryGrid({ entries, loading, onSelectLeague, leag
       .filter((row) => row.count > 0);
   }, [directions]);
 
+  // Best-record-first instead of whatever order allLeagueData happened to load in (previously
+  // a hodgepodge, effectively alphabetical-ish) — mirrors the same live-commit-then-sim-cache-
+  // then-cron precedence the card itself displays below, so the ordering always matches the
+  // number shown.
+  const sortedEntries = useMemo(() => {
+    return sortByPlayoffOdds(
+      entries.map((entry) => {
+        const history = entry.leagueId ? historyByLeague[entry.leagueId] : undefined;
+        const cronLatest = history && history.length > 0 ? history[history.length - 1] : null;
+        const latest = (entry.leagueId ? latestSimByLeague[entry.leagueId] : undefined) ?? cronLatest;
+        return { entry, playoffOdds: latest?.playoffOdds };
+      })
+    );
+  }, [entries, historyByLeague, latestSimByLeague]);
+
   if (loading && entries.length === 0) {
     return (
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -154,7 +170,7 @@ export default function TeamSummaryGrid({ entries, loading, onSelectLeague, leag
       )}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {entries.map((entry, idx) => {
+        {sortedEntries.map((entry, idx) => {
           const history = entry.leagueId ? historyByLeague[entry.leagueId] : undefined;
           const cronLatest = history && history.length > 0 ? history[history.length - 1] : null;
           const latest = (entry.leagueId ? latestSimByLeague[entry.leagueId] : undefined) ?? cronLatest;

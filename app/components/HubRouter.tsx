@@ -105,6 +105,7 @@ interface HubRouterProps {
   onOpenCrossLeaguePlayers: () => void;
   onOpenInjuryReport: () => void;
   onOpenAllTrades: () => void;
+  onOpenValueTrends: () => void;
   showAllOpenTrades: boolean;
   setShowAllOpenTrades: (show: boolean) => void;
   alertsFeedTab: AlertsFeedTab;
@@ -313,7 +314,7 @@ export function HubRouter({
   dismissDashboardAlert, leagueTransactions, loadingTransactions, refreshTransactions,
   injuryReportPlayers, refreshInjuryReport, refreshingInjuryReport, allTradeAttempts, allLeagueData,
   loadLeagueOverview, loadingLeagueOverview, onNavigateToAttempts, onNavigateToLeague,
-  onOpenRosterOverview, onOpenCrossLeaguePlayers, onOpenInjuryReport, onOpenAllTrades,
+  onOpenRosterOverview, onOpenCrossLeaguePlayers, onOpenInjuryReport, onOpenAllTrades, onOpenValueTrends,
   showAllOpenTrades, setShowAllOpenTrades, alertsFeedTab, setAlertsFeedTab,
   leagueHubTab, setLeagueHubTab, activeLeagueHubGroup, standings,
   committedSimsByLeague, leagueSimCache, simQueue, simProgress,
@@ -410,6 +411,7 @@ export function HubRouter({
     allTradeAttempts={allTradeAttempts}
     visibleDashboardAlerts={visibleDashboardAlerts}
     actionableDashboardAlerts={actionableDashboardAlerts}
+    historicalSnapshot={historicalSnapshot}
     onDismissAlert={dismissDashboardAlert}
     onSelectLeague={onNavigateToLeague}
     leagueOverviewData={leagueOverviewData}
@@ -420,6 +422,7 @@ export function HubRouter({
     onOpenCrossLeaguePlayers={onOpenCrossLeaguePlayers}
     onOpenAllTrades={onOpenAllTrades}
     onOpenInjuryReport={onOpenInjuryReport}
+    onOpenValueTrends={onOpenValueTrends}
   />
 </>
   </>

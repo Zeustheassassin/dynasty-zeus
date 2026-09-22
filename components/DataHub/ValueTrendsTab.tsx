@@ -3,7 +3,8 @@ import React from "react";
 import { usePlayers } from "../../lib/PlayersContext";
 import { useLeague } from "../../lib/LeagueContext";
 import { useValues } from "../../lib/ValuesContext";
-import type { SleeperUser, HistoricalSnapshot, PlayerValueSnapshotEntry, FcTrendEntry, ProjectionRow } from "../../lib/types";
+import type { SleeperUser, HistoricalSnapshot, FcTrendEntry, ProjectionRow } from "../../lib/types";
+import { computeValueTrends } from "../../lib/helpers/valueTrends";
 import { injuryBadge, injuryRiskBadge, ageColor } from "./dataHubHelpers";
 import type { ShareEntry } from "./dataHubTypes";
 import TradeMarket from "../tradeHub/TradeMarket";
@@ -65,9 +66,6 @@ type TradeSugg = {
   giveTeam?: string; receiveTeam?: string;
 };
 
-// Hide low-value noise: a player going 10 → 12 is "+20%" but means nothing.
-// Require the player to be >500 in either the current map or the snapshot.
-const VALUE_FLOOR = 500;
 const MIN_TRADE_VAL = 1500;
 const RATIO_MIN = 0.72;
 const RATIO_MAX = 1.35;
@@ -99,33 +97,18 @@ function ValueTrendsTab({
   }, [snap, mountedAt]);
 
   const allTrends = React.useMemo<TrendRow[]>(() => {
-    if (!snap) return [];
-    const out: TrendRow[] = [];
-    Object.entries(snap.players).forEach(([playerId, snapData]: [string, PlayerValueSnapshotEntry]) => {
-      const currentVal = players[playerId]?.value ?? 0;
-      const snapVal = Number(snapData.value ?? 0);
-      if (snapVal <= 0 || currentVal <= 0) return;
-      if (currentVal < VALUE_FLOOR && snapVal < VALUE_FLOOR) return;
-      const delta = currentVal - snapVal;
-      const pct = (delta / snapVal) * 100;
-      const p = players[playerId];
-      if (!p || !["QB", "RB", "WR", "TE"].includes(p.position)) return;
-      if (trendPos !== "ALL" && p.position !== trendPos) return;
-      out.push({
-        playerId,
-        full_name: p.full_name ?? snapData.full_name,
-        position: p.position,
-        age: p.age,
-        injury_status: p.injury_status,
-        team: p.team ?? snapData.team,
-        currentVal,
-        snapVal,
-        delta,
-        pct,
-        owned: shares[playerId]?.count ?? 0,
+    return computeValueTrends(snap, players)
+      .filter((r) => trendPos === "ALL" || r.position === trendPos)
+      .map((r) => {
+        const p = players[r.playerId];
+        return {
+          ...r,
+          age: p?.age,
+          injury_status: p?.injury_status,
+          team: p?.team ?? snap?.players[r.playerId]?.team,
+          owned: shares[r.playerId]?.count ?? 0,
+        };
       });
-    });
-    return out;
   }, [snap, players, trendPos, shares]);
 
   const falling = React.useMemo(

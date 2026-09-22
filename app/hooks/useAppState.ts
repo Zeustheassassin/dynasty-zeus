@@ -3170,6 +3170,11 @@ const onOpenCrossLeaguePlayers = useCallback(() => {
   setMainTab("DATA_HUB");
 }, [setDataHubTab, setMainTab]);
 
+const onOpenValueTrends = useCallback(() => {
+  setDataHubTab("VALUE_TRENDS");
+  setMainTab("DATA_HUB");
+}, [setDataHubTab, setMainTab]);
+
 const onOpenInjuryReport = useCallback(() => {
   setAlertsFeedTab("injury");
   setMainTab("ALERTS");
@@ -3272,6 +3277,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     onOpenCrossLeaguePlayers,
     onOpenInjuryReport,
     onOpenAllTrades,
+    onOpenValueTrends,
     showAllOpenTrades, setShowAllOpenTrades,
     alertsFeedTab, setAlertsFeedTab,
     leagueHubTab, setLeagueHubTab,
