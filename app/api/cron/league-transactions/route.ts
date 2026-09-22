@@ -53,15 +53,19 @@ const LEAGUE_CONCURRENCY = 3;
 // finish before the next user's began) — safe from bursts but slow, and at
 // growing user counts risks running past `maxDuration` with nothing to show
 // for the users never reached. Kept deliberately low and paired with the
-// reduced LEAGUE_CONCURRENCY above (2 * 3 = 6 concurrent per-league fan-outs,
-// vs. the original single-user peak of 5): a per-item concurrency cap alone
-// still produces an unbounded aggregate burst when the outer loop it's
-// nested inside isn't itself bounded — the cross-league intel fan-out hit
-// this exact bug (a per-owner cap still burst to 60 concurrent Sleeper calls
-// and tripped 429s until the cap was made global). Not live-load-tested
-// against a multi-user account since prod currently has only a handful of
-// registered users; revisit both constants if Vercel cron logs ever show
-// this run taking long enough to approach TIME_BUDGET_MS.
+// reduced LEAGUE_CONCURRENCY above: each concurrent league slot itself fires
+// 7 simultaneous Sleeper calls (TRANSACTION_LOOKBACK_WEEKS=4 tx-week fetches
+// + users + rosters + drafts), so the actual peak is USER_CONCURRENCY *
+// LEAGUE_CONCURRENCY * 7 = 2 * 3 * 7 = 42 concurrent Sleeper calls, not just
+// the 2 * 3 = 6 concurrent per-league fan-outs the outer two loop levels
+// alone would suggest. A per-item concurrency cap alone still produces an
+// unbounded aggregate burst when the outer loop it's nested inside isn't
+// itself bounded — the cross-league intel fan-out hit this exact bug (a
+// per-owner cap still burst to 60 concurrent Sleeper calls and tripped 429s
+// until the cap was made global). Not live-load-tested against a multi-user
+// account since prod currently has only a handful of registered users;
+// revisit both constants (or the 42 figure above) if Vercel cron logs ever
+// show 429s or this run taking long enough to approach TIME_BUDGET_MS.
 const USER_CONCURRENCY = 2;
 
 // Wall-clock ceiling for starting NEW user batches, well under `maxDuration`
