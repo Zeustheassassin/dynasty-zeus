@@ -2929,12 +2929,24 @@ const saveSnapshotNow = async () => {
             { user_id: supabaseUser.id, snapshot: fullSnap, recorded_at: recordedAt },
             { onConflict: "user_id" }
           )
-          .then(() => {
-            if (cancelled) return;
-            const snap = { players: fullSnap, recorded_at: recordedAt };
-            historicalSnapshotRef.current = snap;
-            setHistoricalSnapshot(snap);
-          });
+          .then(
+            ({ error }) => {
+              if (cancelled) return;
+              if (error) {
+                alertBootstrapRef.current = false; // let a later load retry
+                log.error("player_value_snapshots bootstrap upsert failed", { err: error.message });
+                return;
+              }
+              const snap = { players: fullSnap, recorded_at: recordedAt };
+              historicalSnapshotRef.current = snap;
+              setHistoricalSnapshot(snap);
+            },
+            (err: unknown) => {
+              if (cancelled) return;
+              alertBootstrapRef.current = false;
+              log.error("player_value_snapshots bootstrap upsert failed", { err: String(err) });
+            }
+          );
       }
       return () => { cancelled = true; };
     }
@@ -2946,7 +2958,8 @@ const saveSnapshotNow = async () => {
       const existingCount = Object.keys(historicalSnapshotRef.current.players ?? {}).length;
       const calcCount = Object.values(calcFcValues as Record<string, number>).filter(v => v > 0).length;
       if (calcCount > 100 && calcCount > existingCount + 50) {
-        snapshotExpandAttemptedRef.current = supabaseUser.id;
+        const attemptedUserId = supabaseUser.id;
+        snapshotExpandAttemptedRef.current = attemptedUserId;
         const originalRecordedAt = historicalSnapshotRef.current.recorded_at;
         const fullSnap = buildFullSnapshot();
         supabase
@@ -2955,12 +2968,24 @@ const saveSnapshotNow = async () => {
             { user_id: supabaseUser.id, snapshot: fullSnap, recorded_at: originalRecordedAt },
             { onConflict: "user_id" }
           )
-          .then(() => {
-            if (cancelled) return;
-            const snap = { players: fullSnap, recorded_at: originalRecordedAt };
-            historicalSnapshotRef.current = snap;
-            setHistoricalSnapshot(snap);
-          });
+          .then(
+            ({ error }) => {
+              if (cancelled) return;
+              if (error) {
+                if (snapshotExpandAttemptedRef.current === attemptedUserId) snapshotExpandAttemptedRef.current = null;
+                log.error("player_value_snapshots expand upsert failed", { err: error.message });
+                return;
+              }
+              const snap = { players: fullSnap, recorded_at: originalRecordedAt };
+              historicalSnapshotRef.current = snap;
+              setHistoricalSnapshot(snap);
+            },
+            (err: unknown) => {
+              if (cancelled) return;
+              if (snapshotExpandAttemptedRef.current === attemptedUserId) snapshotExpandAttemptedRef.current = null;
+              log.error("player_value_snapshots expand upsert failed", { err: String(err) });
+            }
+          );
       }
     }
 

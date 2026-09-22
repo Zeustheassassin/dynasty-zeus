@@ -202,6 +202,14 @@ export const CROSS_LEAGUE_INTEL_OWNER_BATCH = 4;
 export const CROSS_LEAGUE_INTEL_LEAGUE_CONCURRENCY = 2;
 
 /**
+ * A batch pass where every owner fails (e.g. Sleeper is down) never changes
+ * `crossLeagueMateIntel`, which is the load effect's only dependency that advances it to the
+ * next batch — without this, those owners would be silently dropped for the rest of the
+ * session instead of retried once Sleeper recovers.
+ */
+export const CROSS_LEAGUE_INTEL_RETRY_COOLDOWN_MS = 60_000;
+
+/**
  * Hard ceiling on distinct connected Sleeper users expanded to per compile
  * run. Without this, a caller's own real network (or a fabricated
  * sleeperUserId, prior to the ownership check) can drive the Step 2

@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { useCrossLeagueMateIntel } from "@/hooks/useCrossLeagueMateIntel";
-import { CROSS_LEAGUE_INTEL_OWNER_BATCH, CROSS_LEAGUE_INTEL_LEAGUE_CONCURRENCY } from "@/lib/constants";
+import { CROSS_LEAGUE_INTEL_OWNER_BATCH, CROSS_LEAGUE_INTEL_LEAGUE_CONCURRENCY, CROSS_LEAGUE_INTEL_RETRY_COOLDOWN_MS } from "@/lib/constants";
 import type { SleeperRoster, SleeperPlayer, SleeperLeague } from "@/lib/types";
 
 // Sept 21 audit finding #5: this hook used to fan out owners x their-other-leagues x ~5 Sleeper
@@ -123,5 +123,63 @@ describe("useCrossLeagueMateIntel — failure surfacing", () => {
     // Give the rejected Promise.all inside buildOwnerLeaguesBounded time to unwind.
     await new Promise((r) => setTimeout(r, 10));
     expect(result.current.crossLeagueMateIntel.owner1).toBeUndefined();
+  });
+});
+
+describe("useCrossLeagueMateIntel — retry after an all-failed pass", () => {
+  // A pass where every owner in the batch fails never changes crossLeagueMateIntel, which is
+  // otherwise the only dependency that advances the effect to a new attempt — without an
+  // explicit retry, a persistently-failing owner (e.g. Sleeper down for a few minutes) would be
+  // silently dropped for the rest of the session instead of picked back up once it recovers.
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  // A single fake-timer tick doesn't settle a chained promise -> setState -> re-render ->
+  // effect-re-fire round trip; advance a few no-op ticks to let it fully propagate.
+  const flush = async () => {
+    for (let i = 0; i < 5; i++) await vi.advanceTimersByTimeAsync(0);
+  };
+
+  it("retries a lone failing owner on a cooldown instead of dropping them for the session", async () => {
+    const rosters = [roster("bad", 1)];
+    let attempts = 0;
+    api.impl.getUserLeagues = vi.fn(() => {
+      attempts++;
+      if (attempts < 3) return Promise.reject(new Error("429"));
+      return Promise.resolve([]);
+    });
+
+    const { result } = renderHook(() => useCrossLeagueMateIntel({ ...baseArgs, rosters }));
+
+    await flush();
+    expect(attempts).toBe(1);
+    expect(result.current.crossLeagueMateIntel.bad).toBeUndefined();
+
+    await vi.advanceTimersByTimeAsync(CROSS_LEAGUE_INTEL_RETRY_COOLDOWN_MS);
+    await flush();
+    expect(attempts).toBe(2);
+    expect(result.current.crossLeagueMateIntel.bad).toBeUndefined();
+
+    await vi.advanceTimersByTimeAsync(CROSS_LEAGUE_INTEL_RETRY_COOLDOWN_MS);
+    await flush();
+    expect(attempts).toBe(3);
+    expect(result.current.crossLeagueMateIntel.bad).toBeDefined();
+  });
+
+  it("does not keep polling once every owner has successfully loaded", async () => {
+    const rosters = [roster("good", 1)];
+    api.impl.getUserLeagues = vi.fn(() => Promise.resolve([]));
+
+    const { result } = renderHook(() => useCrossLeagueMateIntel({ ...baseArgs, rosters }));
+
+    await flush();
+    expect(result.current.crossLeagueMateIntel.good).toBeDefined();
+    const callsBefore = (api.impl.getUserLeagues as ReturnType<typeof vi.fn>).mock.calls.length;
+
+    // Nothing is missing any more, so the effect returns before even scheduling a retry timer —
+    // this asserts the retry mechanism doesn't leave a stray poll running after success.
+    await vi.advanceTimersByTimeAsync(CROSS_LEAGUE_INTEL_RETRY_COOLDOWN_MS);
+    await flush();
+    expect((api.impl.getUserLeagues as ReturnType<typeof vi.fn>).mock.calls.length).toBe(callsBefore);
   });
 });

@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { CURRENT_YEAR, average } from "../lib/helpers";
 import { sleeperApi } from "../lib/sleeperApi";
-import { CROSS_LEAGUE_INTEL_OWNER_BATCH, CROSS_LEAGUE_INTEL_LEAGUE_CONCURRENCY } from "../lib/constants";
+import { CROSS_LEAGUE_INTEL_OWNER_BATCH, CROSS_LEAGUE_INTEL_LEAGUE_CONCURRENCY, CROSS_LEAGUE_INTEL_RETRY_COOLDOWN_MS } from "../lib/constants";
 import { logger } from "../lib/logger";
 import type { CrossLeagueIntel, CrossLeagueIntelPlayer, SleeperRoster, SleeperPlayer, SleeperTransaction, SleeperDraft, SleeperLeague } from "../lib/types";
 
@@ -275,6 +275,10 @@ export function useCrossLeagueMateIntel({
 }: UseCrossLeagueMateIntelOptions): UseCrossLeagueMateIntelReturn {
   const [crossLeagueMateIntel, setCrossLeagueMateIntel] = useState<Record<string, CrossLeagueIntel>>({});
   const [loadingCrossLeagueMateIntel, setLoadingCrossLeagueMateIntel] = useState(false);
+  // Bumped on a cooldown after an all-failed pass, so persistently-failing owners get retried
+  // instead of being stuck forever (crossLeagueMateIntel is otherwise the only dependency below
+  // that advances the effect to a new batch, and an all-failed pass never changes it).
+  const [retryNonce, setRetryNonce] = useState(0);
 
   useEffect(() => {
     const shouldLoadCrossLeagueIntel =
@@ -297,6 +301,7 @@ export function useCrossLeagueMateIntel({
     // lands, picking up the next batch automatically.
     const batch = missingOwnerIds.slice(0, CROSS_LEAGUE_INTEL_OWNER_BATCH);
     let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
 
     const loadCrossLeagueMateIntel = async () => {
       setLoadingCrossLeagueMateIntel(true);
@@ -318,6 +323,12 @@ export function useCrossLeagueMateIntel({
             ...prev,
             ...Object.fromEntries(succeeded.map((r) => [r.ownerId, r.intel])),
           }));
+        } else {
+          // Nothing changed, so nothing below will re-trigger this effect on its own — force a
+          // retry on a cooldown instead of leaving this batch stuck for the rest of the session.
+          retryTimer = setTimeout(() => {
+            if (!cancelled) setRetryNonce((n) => n + 1);
+          }, CROSS_LEAGUE_INTEL_RETRY_COOLDOWN_MS);
         }
       } finally {
         if (!cancelled) setLoadingCrossLeagueMateIntel(false);
@@ -325,8 +336,11 @@ export function useCrossLeagueMateIntel({
     };
 
     loadCrossLeagueMateIntel();
-    return () => { cancelled = true; };
-  }, [leagueId, rosters, userId, players, mainTab, tradeHubSection, crossLeagueMateIntel]);
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+  }, [leagueId, rosters, userId, players, mainTab, tradeHubSection, crossLeagueMateIntel, retryNonce]);
 
   return { crossLeagueMateIntel, loadingCrossLeagueMateIntel };
 }
