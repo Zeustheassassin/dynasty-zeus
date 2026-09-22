@@ -173,8 +173,14 @@ export default function ScoutingHub() {
   const [qbPlays, setQbPlays] = useState<QBPlay[]>([]);
   const [tePlays, setTePlays] = useState<TEPlay[]>([]);
   const fetchedPlaysRef = useRef<{ RB: string | null; QB: string | null; TE: string | null }>({ RB: null, QB: null, TE: null });
+  const loadSeqRef = useRef(0);
+  const mountedRef = useRef(false);
 
   const loadAll = useCallback(async () => {
+    // Reloads come from several places (initial mount, list edits, a charting board flushing its
+    // writes) and can overlap. Only the newest may commit — otherwise a slow older reload lands
+    // last and overwrites fresher rows.
+    const seq = ++loadSeqRef.current;
     setLoading(true);
     try {
       const [
@@ -196,6 +202,7 @@ export default function ScoutingHub() {
         supabase.from("prospect_qb_stats").select("prospect_id,total_snaps,total_throws,depth_zone_stats_raw"),
         supabase.from("prospect_te_stats").select("prospect_id,total_snaps,total_routes,coverage_stats_raw,block_stats_raw"),
       ]);
+      if (seq !== loadSeqRef.current) return; // superseded by a newer reload
       if (pErr) log.error("prospects load", { msg: pErr.message, code: pErr.code, details: pErr.details, hint: pErr.hint });
       if (gErr) log.error("games load", { msg: gErr.message, code: gErr.code, details: gErr.details, hint: gErr.hint });
       if (rsErr) log.error("prospect_route_stats load", { msg: rsErr.message, code: rsErr.code, details: rsErr.details, hint: rsErr.hint });
@@ -234,12 +241,25 @@ export default function ScoutingHub() {
     } catch (e) {
       log.error("loadAll", { msg: String(e) });
     } finally {
-      setLoading(false);
+      if (seq === loadSeqRef.current) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     loadAll();
+  }, [loadAll]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  // What the position hubs / charting boards call as `onDataChanged`. A board flushes its pending
+  // writes as it unmounts — which includes this whole hub unmounting (navigating to another hub),
+  // and reloading a hub that is going away would just burn ~8 queries. (React runs a deleted
+  // tree's passive cleanups parent-first, so mountedRef is already false by then.)
+  const reloadHub = useCallback(() => {
+    if (mountedRef.current) void loadAll();
   }, [loadAll]);
 
   // Lazy-fetch the raw plays for one position. Idempotent per parent
@@ -394,7 +414,7 @@ export default function ScoutingHub() {
     prospectsWithStats,
     loading,
     onAddProspect: handleAddProspect,
-    onDataChanged: loadAll,
+    onDataChanged: reloadHub,
     draftYearFilter,
     setDraftYearFilter,
     navigateToProspect: pendingProspect,

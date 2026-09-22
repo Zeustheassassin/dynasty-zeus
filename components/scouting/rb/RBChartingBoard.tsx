@@ -135,6 +135,11 @@ interface Props {
   leaguePlays: RBPlay[];
 }
 
+// Only the Charts tab renders hub-derived data (allProspects/leaguePlays from the hub's load);
+// Overview reads this board's own plays; its league baselines (built from leaguePlays) may be a
+// few plays stale, same as QB's once-per-mount league fetch, so it needs no hub reload per write.
+const RB_FRESH_DATA_TABS: readonly string[] = ["charts"];
+
 export default function RBChartingBoard({ prospect, onBack, onDataChanged, allProspects, allGames, leaguePlays }: Props) {
   // Position-specific play state
   const [plays, setPlays]                         = useState<RBPlay[]>([]);
@@ -159,6 +164,7 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
   // Shared state via hook
   const cs = useChartingState(prospect, {
     onDataChanged,
+    freshDataTabs: RB_FRESH_DATA_TABS,
     onDeleteGamePlays: (id) => setPlays((p) => p.filter((pl) => pl.game_id !== id)),
   });
   const { tab, games, selectedGameId, loading, showAddGame, newGame, savingGame, gameError,
@@ -342,7 +348,7 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
     else if (data) {
       setPlays((prev) => [...prev, data as RBPlay]);
       resetPlayForm();
-      onDataChanged();
+      cs.markDataDirty();
     }
     setSavingPlay(false);
   }
@@ -395,7 +401,7 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
     else if (data) {
       setPlays((prev) => prev.map((p) => p.id === editingPlayId ? (data as RBPlay) : p));
       resetPlayForm();
-      onDataChanged();
+      cs.markDataDirty();
     }
     setSavingPlay(false);
   }
@@ -409,7 +415,7 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
       return;
     }
     setPlays((prev) => prev.filter((p) => p.id !== id));
-    onDataChanged();
+    cs.markDataDirty();
   }
 
   const tabs = [

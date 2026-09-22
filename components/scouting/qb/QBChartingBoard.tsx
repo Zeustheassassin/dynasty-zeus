@@ -73,6 +73,10 @@ const DEPTH_SHORT: Record<QBDepthZone, string>   = {
   short_left:"SL", short_center:"SC", short_right:"SR",
 };
 
+// Only the Charts tab renders hub-derived data (allProspects/allGames from the hub's load);
+// Overview reads this board's own plays + its self-fetched leaguePlays.
+const QB_FRESH_DATA_TABS: readonly string[] = ["charts"];
+
 export default function QBChartingBoard({ prospect, onBack, onDataChanged, allProspects, allGames }: Props) {
   // Position-specific play state
   const [plays, setPlays]                   = useState<QBPlay[]>([]);
@@ -105,6 +109,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
   // Shared state via hook
   const cs = useChartingState(prospect, {
     onDataChanged,
+    freshDataTabs: QB_FRESH_DATA_TABS,
     onDeleteGamePlays: (id) => setPlays((p) => p.filter((pl) => pl.game_id !== id)),
   });
   const { tab, games, selectedGameId, loading, showAddGame, newGame, savingGame, gameError,
@@ -340,7 +345,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
     else if (data) {
       setPlays((prev) => [...prev, data as QBPlay]);
       resetForm();
-      onDataChanged();
+      cs.markDataDirty();
     }
     setSavingPlay(false);
   }
@@ -373,7 +378,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
     else if (data) {
       setPlays((prev) => prev.map((p) => p.id === editingPlayId ? data as QBPlay : p));
       resetForm();
-      onDataChanged();
+      cs.markDataDirty();
     }
     setSavingPlay(false);
   }
@@ -387,7 +392,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
       return;
     }
     setPlays((prev) => prev.filter((p) => p.id !== id));
-    onDataChanged();
+    cs.markDataDirty();
   }
 
   const tabs = [

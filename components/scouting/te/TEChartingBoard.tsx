@@ -74,6 +74,11 @@ interface Props {
   leaguePlays: TEPlay[];
 }
 
+// Only the Charts tab renders hub-derived data (allProspects/leaguePlays from the hub's load);
+// Overview reads this board's own plays; its league baselines (built from leaguePlays) may be a
+// few plays stale, same as QB's once-per-mount league fetch, so it needs no hub reload per write.
+const TE_FRESH_DATA_TABS: readonly string[] = ["charts"];
+
 export default function TEChartingBoard({ prospect, onBack, onDataChanged, allProspects, allGames, leaguePlays }: Props) {
   const [plays, setPlays] = useState<TEPlay[]>([]);
 
@@ -98,6 +103,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
 
   const cs = useChartingState(prospect, {
     onDataChanged,
+    freshDataTabs: TE_FRESH_DATA_TABS,
     onDeleteGamePlays: (id) => setPlays((p) => p.filter((pl) => pl.game_id !== id)),
   });
   const { tab, games, selectedGameId, loading, showAddGame, newGame, savingGame, gameError,
@@ -312,7 +318,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
       play_notes: playNotes || null,
     }).eq("id", editingPlayId).select().single();
     if (error) { setPlayError(error.message); }
-    else if (data) { setPlays((prev) => prev.map((p) => p.id === editingPlayId ? (data as TEPlay) : p)); resetPlayForm(); onDataChanged(); }
+    else if (data) { setPlays((prev) => prev.map((p) => p.id === editingPlayId ? (data as TEPlay) : p)); resetPlayForm(); cs.markDataDirty(); }
     setSavingPlay(false);
   }
 
@@ -338,7 +344,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
       play_notes: playNotes || null,
     }).select().single();
     if (error) { setPlayError(error.message); }
-    else if (data) { setPlays((prev) => [...prev, data as TEPlay]); resetPlayForm(); onDataChanged(); }
+    else if (data) { setPlays((prev) => [...prev, data as TEPlay]); resetPlayForm(); cs.markDataDirty(); }
     setSavingPlay(false);
   }
 
@@ -351,7 +357,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
       return;
     }
     setPlays((prev) => prev.filter((p) => p.id !== id));
-    onDataChanged();
+    cs.markDataDirty();
   }
 
   return (

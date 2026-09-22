@@ -144,7 +144,7 @@ export default function QBHub({
     return (
       <QBChartingBoard
         prospect={selectedProspect}
-        onBack={() => { setSelectedProspect(null); onDataChanged(); }}
+        onBack={() => setSelectedProspect(null)} // the board reloads the hub on unmount if it wrote anything
         onDataChanged={onDataChanged}
         allProspects={qbProspects}
         allGames={games}

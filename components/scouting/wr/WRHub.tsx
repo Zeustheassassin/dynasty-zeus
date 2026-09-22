@@ -51,7 +51,7 @@ export default function WRHub({
     return (
       <PlayerChartingBoard
         prospect={selectedProspect}
-        onBack={() => { setSelectedProspect(null); onDataChanged(); }}
+        onBack={() => setSelectedProspect(null)} // the board reloads the hub on unmount if it wrote anything
         onDataChanged={onDataChanged}
         allProspects={prospectsWithStats}
       />

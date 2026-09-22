@@ -66,7 +66,7 @@ export default function TEHub({
     return (
       <TEChartingBoard
         prospect={selectedProspect}
-        onBack={() => { setSelectedProspect(null); onDataChanged(); }}
+        onBack={() => setSelectedProspect(null)} // the board reloads the hub on unmount if it wrote anything
         onDataChanged={onDataChanged}
         allProspects={teProspects}
         allGames={games}

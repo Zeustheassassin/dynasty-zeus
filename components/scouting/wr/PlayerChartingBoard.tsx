@@ -271,7 +271,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
     else if (data) {
       setPlays((prev) => [...prev, data as RoutePlay]);
       setWasOpen(false); setTargeted(false); setPlayOutcome(null); setContested(false); setYards(""); setPlayNotes("");
-      onDataChanged();
+      cs.markDataDirty();
     }
     setSavingPlay(false);
   }
@@ -282,7 +282,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
     if (!user) return;
     const rows = parsedPlays.map((pl) => ({ ...pl, game_id: selectedGameId, user_id: user.id }));
     const { data, error } = await supabase.from("route_plays").insert(rows).select();
-    if (!error && data) { setPlays((prev) => [...prev, ...(data as RoutePlay[])]); onDataChanged(); }
+    if (!error && data) { setPlays((prev) => [...prev, ...(data as RoutePlay[])]); cs.markDataDirty(); }
     setShowBulkImport(false);
   }
 
@@ -304,7 +304,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
     ]);
     if (!error && data) { setPlays((prev) => [...prev, ...(data as RoutePlay[])]); }
     if (gErr) log.error("summary totals save", { err: gErr.message });
-    onDataChanged();
+    cs.markDataDirty();
     setShowSummaryImport(false);
   }
 
@@ -335,7 +335,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
       play_notes: playNotes,
     }).eq("id", editingPlayId).select().single();
     if (error) { setPlayError(error.message); }
-    else if (data) { setPlays((prev) => prev.map((p) => p.id === editingPlayId ? (data as RoutePlay) : p)); resetForm(); onDataChanged(); }
+    else if (data) { setPlays((prev) => prev.map((p) => p.id === editingPlayId ? (data as RoutePlay) : p)); resetForm(); cs.markDataDirty(); }
     setSavingPlay(false);
   }
 
@@ -348,7 +348,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
       return;
     }
     setPlays((prev) => prev.filter((p) => p.id !== id));
-    onDataChanged();
+    cs.markDataDirty();
   }
 
   return (

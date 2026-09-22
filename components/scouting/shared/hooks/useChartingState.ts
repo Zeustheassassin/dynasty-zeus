@@ -4,18 +4,30 @@ import { supabase } from "../../../../lib/supabaseclient";
 import { logger } from "../../../../lib/logger";
 import { BASE_YEAR } from "../../../../lib/helpers/season";
 import type { Prospect, ScoutingGame } from "../../../../lib/types";
+import { useDeferredDataChanged } from "./useDeferredDataChanged";
 
 const log = logger("scouting/shared/useChartingState");
 
+// Board tabs that render data derived from the hub's own load (allProspects / league plays).
+const DEFAULT_FRESH_DATA_TABS: readonly string[] = ["overview", "charts"];
+
 interface Options {
+  /** The hub's reload. Boards should call the returned `markDataDirty()` instead of this directly. */
   onDataChanged: () => void;
   onDeleteGamePlays?: (gameId: string) => void;
+  /**
+   * Tabs that read hub-derived data and so need a reload when writes are pending. Must be a
+   * stable reference (module constant). Default: overview + charts.
+   */
+  freshDataTabs?: readonly string[];
 }
 
 export function useChartingState(prospect: Prospect, options: Options) {
-  const { onDataChanged, onDeleteGamePlays } = options;
+  const { onDataChanged, onDeleteGamePlays, freshDataTabs = DEFAULT_FRESH_DATA_TABS } = options;
 
   const [tab, setTab]                         = useState<string>("overview");
+  // Deferred hub reload (see useDeferredDataChanged): every write below calls markDataDirty().
+  const { markDirty: markDataDirty }          = useDeferredDataChanged(onDataChanged, tab, freshDataTabs);
   const [games, setGames]                     = useState<ScoutingGame[]>([]);
   const [selectedGameId, setSelectedGameId]   = useState<string | null>(null);
   const [loading, setLoading]                 = useState(true);
@@ -82,7 +94,7 @@ export function useChartingState(prospect: Prospect, options: Options) {
       setSelectedGameId(data.id as string);
       setNewGame((n) => ({ ...n, opponent: "" }));
       setShowAddGame(false);
-      onDataChanged();
+      markDataDirty();
     }
     setSavingGame(false);
   }
@@ -100,7 +112,7 @@ export function useChartingState(prospect: Prospect, options: Options) {
     setGames((prev) => prev.filter((g) => g.id !== id));
     onDeleteGamePlays?.(id);
     if (selectedGameId === id) setSelectedGameId(games.find((g) => g.id !== id)?.id ?? null);
-    onDataChanged();
+    markDataDirty();
   }
 
   async function updateGame(id: string, updates: Partial<Pick<ScoutingGame, "opponent" | "season_year" | "game_type">>) {
@@ -112,7 +124,7 @@ export function useChartingState(prospect: Prospect, options: Options) {
     const { error } = await supabase.from("scouting_games").update(cleaned).eq("id", id);
     if (error) { log.error("scouting_games update failed", { err: error.message }); return; }
     setGames((prev) => prev.map((g) => g.id === id ? { ...g, ...cleaned } as ScoutingGame : g));
-    onDataChanged();
+    markDataDirty();
   }
 
   async function saveBio() {
@@ -131,7 +143,7 @@ export function useChartingState(prospect: Prospect, options: Options) {
       return;
     }
     setEditBio(false);
-    onDataChanged();
+    markDataDirty();
   }
 
   const selectedGame = games.find((g) => g.id === selectedGameId) ?? null;
@@ -145,6 +157,8 @@ export function useChartingState(prospect: Prospect, options: Options) {
     setTab, setSelectedGameId, setGames, setBio,
     // Helpers
     loadGames,
+    /** Record a write; the hub reload is deferred (see useDeferredDataChanged). */
+    markDataDirty,
     // ChartingBoard-compatible handler props
     onTabChange:      (t: string) => setTab(t),
     onSelectGame:     (id: string) => setSelectedGameId(id),

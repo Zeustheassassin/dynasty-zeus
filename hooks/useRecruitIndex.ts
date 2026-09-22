@@ -1,11 +1,8 @@
 "use client";
-import { useState, useEffect, useMemo, useCallback } from "react";
-import { supabase } from "../lib/supabaseclient";
-import { logger } from "../lib/logger";
+import { useState, useEffect, useCallback } from "react";
 import type { RecruitRow } from "../lib/recruiting/cfd";
-import { buildRecruitIndex, findRecruitMatch, type MatchableProspect } from "../lib/recruiting/match";
-
-const log = logger("hooks/useRecruitIndex");
+import { findRecruitMatch, type MatchableProspect } from "../lib/recruiting/match";
+import { loadRecruitSnapshot, peekRecruitSnapshot, type RecruitSnapshot } from "../lib/recruiting/recruitStore";
 
 export interface UseRecruitIndexReturn {
   loaded: boolean;
@@ -13,55 +10,34 @@ export interface UseRecruitIndexReturn {
   recruitCount: number;
 }
 
+const EMPTY_INDEX: Map<string, RecruitRow[]> = new Map();
+
 /**
- * Loads the minimal recruit fields needed for prospect→recruit matching from Supabase
- * once per page mount, builds an in-memory name index, and exposes a `matchProspect()`
- * function. The index is rebuilt whenever the underlying data changes (rare).
+ * Exposes `matchProspect()` backed by an in-memory name index of the recruits table.
  *
- * Only pulls fields actually used for matching/display: name, position, year, stars,
- * school. Keeps the payload tiny (~30 bytes/row × 30k rows ≈ 1MB worst case).
+ * The table (~30k rows) is loaded once and shared by every mount through
+ * lib/recruiting/recruitStore — concurrent mounts join one in-flight load and later mounts
+ * reuse the cached snapshot (10 min TTL, dropped when Recruits is refreshed from CFD), so a
+ * remount renders with `loaded` already true instead of re-paging the table.
+ *
+ * Only the fields needed for matching/display are pulled: id, name, position, year, stars,
+ * school, ranking, committed_to.
  */
 export function useRecruitIndex(): UseRecruitIndexReturn {
-  const [recruits, setRecruits] = useState<RecruitRow[]>([]);
-  const [loaded, setLoaded]     = useState(false);
+  const [snapshot, setSnapshot] = useState<RecruitSnapshot | null>(() => peekRecruitSnapshot());
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      // Supabase enforces PostgREST `max-rows` (default 1000) regardless of `.range()`.
-      // Paginate in 1000-row chunks until a short page indicates the end. For a typical
-      // 10-year cache (~30k rows) this is ~30 round trips, all small.
-      const PAGE = 1000;
-      const all: RecruitRow[] = [];
-      let from = 0;
-      while (true) {
-        const { data, error } = await supabase
-          .from("recruits")
-          .select("id,name,position,year,stars,school,ranking,committed_to")
-          .range(from, from + PAGE - 1);
-        if (cancelled) return;
-        if (error) {
-          log.error("recruit index load failed", { err: error.message, page: from / PAGE });
-          break;
-        }
-        const batch = data ?? [];
-        all.push(...(batch as unknown as RecruitRow[]));
-        if (batch.length < PAGE) break; // partial page = last page
-        from += PAGE;
-      }
-      if (cancelled) return;
-      setRecruits(all);
-      setLoaded(true);
-    })();
+    loadRecruitSnapshot().then((s) => { if (!cancelled) setSnapshot(s); });
     return () => { cancelled = true; };
   }, []);
 
-  const index = useMemo(() => buildRecruitIndex(recruits), [recruits]);
+  const index = snapshot?.index ?? EMPTY_INDEX;
 
   const matchProspect = useCallback(
     (p: MatchableProspect) => findRecruitMatch(p, index),
     [index]
   );
 
-  return { loaded, matchProspect, recruitCount: recruits.length };
+  return { loaded: snapshot !== null, matchProspect, recruitCount: snapshot?.rows.length ?? 0 };
 }

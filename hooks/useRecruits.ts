@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "../lib/supabaseclient";
 import { logger } from "../lib/logger";
 import type { RecruitRow } from "../lib/recruiting/cfd";
+import { invalidateRecruitSnapshot } from "../lib/recruiting/recruitStore";
 
 const log = logger("hooks/useRecruits");
 
@@ -92,6 +93,9 @@ export function useRecruits(year: number | null): UseRecruitsReturn {
         const body = await res.json().catch(() => ({ error: res.statusText }));
         throw new Error(body.error || `HTTP ${res.status}`);
       }
+      // The recruits table just changed — drop the shared prospect-matching index so the next
+      // Prospects-list mount rebuilds it from the new rows.
+      invalidateRecruitSnapshot();
       // Refresh succeeded — re-pull the cached rows for display.
       const reload = await fetch(`/api/recruiting/${y}`, {
         headers: { Authorization: `Bearer ${session.access_token}` },
