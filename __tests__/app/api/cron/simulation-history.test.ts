@@ -429,9 +429,9 @@ describe("GET weekly-matchup fetch concurrency", () => {
           totalMatchupCalls++;
           concurrentMatchupCalls++;
           maxConcurrentMatchupCalls = Math.max(maxConcurrentMatchupCalls, concurrentMatchupCalls);
-          // A small real delay lets every call in the SAME withConcurrency chunk arrive
-          // (each chunk's calls are started synchronously via Promise.all) before any of
-          // them resolves — without it a same-chunk race could under-count the peak.
+          // A small real delay keeps concurrent calls overlapping long enough for the peak
+          // to be observable — without it each call could resolve before the next one is
+          // dispatched, under-counting maxConcurrentMatchupCalls.
           await new Promise((resolve) => setTimeout(resolve, 5));
           concurrentMatchupCalls--;
           return jsonResponse([]);
