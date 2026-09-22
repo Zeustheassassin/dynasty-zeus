@@ -1,6 +1,7 @@
 "use client";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { logger } from "../lib/logger";
+import { getFcValuesRaw } from "../lib/fcValuesStore";
 
 const log = logger("hooks/useCalcValues");
 
@@ -50,9 +51,8 @@ export function useCalcValues() {
     setLoadingCalcValues(true);
     setCalcValuesError(null);
     try {
-      const res = await fetch(`/api/fc-values?numQbs=${numQbs}`);
-      if (!res.ok) throw new Error(`fc-values ${res.status}`);
-      const vals = parseFcValues(await res.json());
+      const data = await getFcValuesRaw(numQbs === 2 ? 2 : 1, true);
+      const vals = parseFcValues(data);
       if (seq !== calcSeq.current) return; // a newer load started — discard
       setCalcFcValues(vals);
       setCalcValuesNumQbs(numQbs);
@@ -72,9 +72,8 @@ export function useCalcValues() {
     setLoadingRedraft(true);
     setRedraftError(null);
     try {
-      const res = await fetch(`/api/fc-values?numQbs=${numQbs}&isDynasty=false`);
-      if (!res.ok) throw new Error(`fc-values ${res.status}`);
-      const vals = parseFcValues(await res.json());
+      const data = await getFcValuesRaw(numQbs === 2 ? 2 : 1, false);
+      const vals = parseFcValues(data);
       if (seq !== redraftSeq.current) return; // a newer load started — discard
       setRedraftValues(vals);
       setRedraftLoaded(true);

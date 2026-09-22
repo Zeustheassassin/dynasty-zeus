@@ -23,6 +23,9 @@
 import { cachedFetch } from "./clientFetch";
 import { withRetry } from "./withRetry";
 import { SLEEPER_PROJECTIONS_BASE } from "./constants";
+import { logger } from "./logger";
+
+const log = logger("lib/sleeperApi");
 import type {
   SleeperUser,
   SleeperLeague,
@@ -71,7 +74,11 @@ async function cachedGetOrNull<T>(url: string, ttlMs: number, bypass?: boolean):
   const fetchUrl = bypass ? appendBypassParam(url) : url;
   try {
     return await cachedFetch<T>(fetchUrl, { ttlMs, bypass, cacheKey: url });
-  } catch {
+  } catch (err) {
+    // Callers of the getOrNull* functions treat this as "nothing yet" (empty array / null),
+    // not an error — but that made a 429 or a genuine outage invisible (Sept 21 audit finding
+    // #5). Logging here doesn't change the return contract, just makes failures observable.
+    log.warn("request failed — returning null", { url, err: String(err) });
     return null;
   }
 }

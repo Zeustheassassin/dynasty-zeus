@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useCalcValues } from "@/hooks/useCalcValues";
+import { invalidateFcValuesCache } from "@/lib/fcValuesStore";
 
 function deferred<T>() {
   let resolve!: (v: T) => void;
@@ -18,6 +19,7 @@ function fcResponse(sleeperId: string, value: number) {
 describe("useCalcValues — empty / failed responses are errors, not loaded-but-empty", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    invalidateFcValuesCache(); // the shared store is module-level state — isolate each test
   });
 
   function respondInOrder(...responses: Response[]) {
@@ -67,6 +69,7 @@ describe("useCalcValues — empty / failed responses are errors, not loaded-but-
 describe("useCalcValues — loadRedraftValues race guard", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    invalidateFcValuesCache();
   });
 
   it("a slower single-QB (numQbs=1) load never overwrites a faster superflex (numQbs=2) load's result", async () => {

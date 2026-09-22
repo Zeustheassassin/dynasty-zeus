@@ -1325,7 +1325,7 @@ loadRosterRef.current = loadRoster;
 const refreshFcTrends = async () => {
   setLoadingFcTrends(true);
   try {
-    const { trendData } = await fetchFantasyCalcValues(2);
+    const { trendData } = await fetchFantasyCalcValues(2, { force: true });
     setFcTrendData(trendData);
   } catch (err) {
     log.error('refreshFcTrends failed', { err: String(err) });

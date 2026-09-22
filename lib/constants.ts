@@ -47,6 +47,15 @@ export const FC_FETCH_TIMEOUT_MS = 8_000;
  *  (real payloads carry 200-450) so a truncated / error body is never cached or served as data */
 export const FC_MIN_VALID_ENTRIES = 50;
 
+/** Client-side TTL for the shared FantasyCalc values store (lib/fcValuesStore.ts). The server
+ *  already caches for 24h (FC_VALUES_TTL_MS) — this only coalesces the burst of near-simultaneous
+ *  requests a single page load produces across hooks that all want the same (numQbs, isDynasty)
+ *  key, not to track upstream freshness. */
+export const FC_VALUES_CLIENT_TTL_MS = 10 * 60_000;
+
+/** Timeout for the client fetching /api/fc-values (lib/fcValuesStore.ts). */
+export const FC_VALUES_CLIENT_TIMEOUT_MS = 10_000;
+
 /** Cross-league roster lookups — rosters change with trades/waivers */
 export const CROSS_LEAGUE_ROSTERS_TTL_MS = 6 * 60 * 60 * 1000;
 
@@ -172,6 +181,25 @@ export const COMPILE_CONCURRENCY = 15;
 
 /** Max parallel pick fetches (lower to avoid Sleeper rate limits) */
 export const COMPILE_PICKS_CONCURRENCY = 8;
+
+/**
+ * Trade Finder's cross-league intel (useCrossLeagueMateIntel) profiles every OTHER roster
+ * owner in the league, and for each owner fans out across every OTHER dynasty league that
+ * owner is in — uncapped, this was owners x leagues x ~5 calls (hundreds at once against a
+ * 60/min/route limiter; Sept 21 audit finding #5). Only this many owners are computed per
+ * effect pass; the rest stay "missing" and are picked up on the next pass.
+ */
+export const CROSS_LEAGUE_INTEL_OWNER_BATCH = 4;
+
+/**
+ * GLOBAL cap (across every owner in the current batch, not per-owner) on how many "other
+ * dynasty league" fetches run concurrently. Each one costs 5 Sleeper calls (rosters, 3x
+ * transactions, drafts), so this bounds the real burst size the browser fires at once — live
+ * testing against a 36-league account with OWNER_BATCH=4 and a naive PER-OWNER cap of 3 still
+ * produced 60 concurrent calls (4 owners x 3 leagues x 5 calls) and tripped 429s; capping the
+ * flattened owner+league queue globally instead keeps the worst-case burst at this number x 5.
+ */
+export const CROSS_LEAGUE_INTEL_LEAGUE_CONCURRENCY = 2;
 
 /**
  * Hard ceiling on distinct connected Sleeper users expanded to per compile

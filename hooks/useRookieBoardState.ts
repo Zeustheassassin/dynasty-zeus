@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 import { supabase } from "../lib/supabaseclient";
 import { BASE_YEAR, normalizeRookieName } from "../lib/helpers";
-import { FANTASYCALC_BASE_URL } from "../lib/constants";
+import { getFcValuesRaw } from "../lib/fcValuesStore";
 import { logger } from "../lib/logger";
 import { sleeperApi } from "../lib/sleeperApi";
 import { getLocalStorageItem, setLocalStorageItem } from "@/lib/hooks/useLocalStorage";
@@ -268,8 +268,7 @@ export function useRookieBoardState(supabaseUser: { id: string } | null): UseRoo
       const [sheetText, adpResponse, fcRaw] = await Promise.all([
         fetch('/api/rookie-board-sheet', { signal }).then((res) => res.text()),
         sleeperApi.getRookieBoardADP(ROOKIE_YEAR).catch(() => []),
-        fetch(`${FANTASYCALC_BASE_URL}/values/current?isDynasty=true&numQbs=2&numTeams=12&ppr=1`, { signal })
-          .then((res) => res.json()).catch(() => []),
+        getFcValuesRaw(2, true).catch(() => []),
       ]);
       if (cancelled) return;
 
@@ -278,7 +277,7 @@ export function useRookieBoardState(supabaseUser: { id: string } | null): UseRoo
       const fcBySleeperId = new Map<string, number>();
 
       if (Array.isArray(fcRaw)) {
-        fcRaw.forEach((entry: { player?: { position?: string; name?: string; firstName?: string; lastName?: string; sleeperId?: string | number }; value?: number }) => {
+        (fcRaw as { player?: { position?: string; name?: string; firstName?: string; lastName?: string; sleeperId?: string | number }; value?: number }[]).forEach((entry) => {
           if (entry.player?.position === "PICK") return;
           const fullName = entry.player?.name || `${entry.player?.firstName || ""} ${entry.player?.lastName || ""}`.trim();
           if (fullName && typeof entry.value === "number") {

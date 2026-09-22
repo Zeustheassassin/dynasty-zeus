@@ -4,6 +4,7 @@
 // ============================================================
 
 import { CURRENT_YEAR } from "./season";
+import { getFcValuesRaw } from "../fcValuesStore";
 
 /** Minimal pick shape needed for value key generation (subset of SleeperTradedPick). */
 interface PickLike {
@@ -107,12 +108,10 @@ export const withFcValues = <P extends { value?: number }>(
  *  Throws when the proxy has no usable data (non-OK status, or an empty / non-array
  *  body) so callers never mistake an outage for "no player has a value" and cache that. */
 export const fetchFantasyCalcValues = async (
-  numQbs = 1
+  numQbs = 1,
+  opts?: { force?: boolean }
 ): Promise<{ playerValues: Record<string, number>; pickValues: Record<string, number>; trendData: import("../types").FcTrendEntry[] }> => {
-  const res = await fetch(`/api/fc-values?numQbs=${numQbs}`);
-  if (!res.ok) throw new Error(`fc-values ${res.status}`);
-  const data: unknown = await res.json();
-  if (!Array.isArray(data) || data.length === 0) throw new Error("fc-values returned no data");
+  const data = await getFcValuesRaw((numQbs === 2 ? 2 : 1), true, opts);
 
   const playerValues: Record<string, number> = {};
   const slotPickValues: Record<string, number[]> = {};
@@ -123,7 +122,7 @@ export const fetchFantasyCalcValues = async (
 
   const SKILL_POSITIONS = new Set(["QB", "RB", "WR", "TE"]);
 
-  data.forEach((entry: FcEntry) => {
+  (data as FcEntry[]).forEach((entry) => {
     if (typeof entry.value !== "number" || entry.value <= 0) return;
     const value = entry.value;
     if (entry.player?.position === "PICK") {

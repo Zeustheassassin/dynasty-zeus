@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { fetchFantasyCalcValues, withFcValues } from "@/lib/helpers/picks";
 import { CURRENT_YEAR } from "@/lib/helpers/season";
+import { invalidateFcValuesCache } from "@/lib/fcValuesStore";
 
 function stubFetch(body: unknown, status = 200) {
   const fn = vi.fn(async (_url: string) => new Response(JSON.stringify(body), { status }));
@@ -8,6 +9,7 @@ function stubFetch(body: unknown, status = 200) {
   return fn;
 }
 
+beforeEach(() => invalidateFcValuesCache()); // the shared store is module-level state — isolate each test
 afterEach(() => vi.unstubAllGlobals());
 
 describe("fetchFantasyCalcValues", () => {
