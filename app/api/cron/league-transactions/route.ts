@@ -42,10 +42,33 @@ const log = logger("cron/league-transactions");
 
 export const maxDuration = 300;
 
-// Per-user concurrency cap for the per-league fan-out. Same value as
-// the other server-side Sleeper fan-out helpers in lib/sleeperServer.ts so
-// load stays bounded when crons run in overlapping windows.
-const CONCURRENCY = 5;
+// Per-user concurrency cap for the per-league fan-out (unchanged from the
+// original single value — kept distinct from USER_CONCURRENCY below so the
+// two caps stay easy to reason about independently).
+const LEAGUE_CONCURRENCY = 3;
+
+// How many users' processUser() calls run at once. A per-league cap alone
+// left every user fully serialized (one user's whole league fan-out had to
+// finish before the next user's began) — safe from bursts but slow, and at
+// growing user counts risks running past `maxDuration` with nothing to show
+// for the users never reached. Kept deliberately low and paired with the
+// reduced LEAGUE_CONCURRENCY above (2 * 3 = 6 concurrent per-league fan-outs,
+// vs. the original single-user peak of 5): a per-item concurrency cap alone
+// still produces an unbounded aggregate burst when the outer loop it's
+// nested inside isn't itself bounded — the cross-league intel fan-out hit
+// this exact bug (a per-owner cap still burst to 60 concurrent Sleeper calls
+// and tripped 429s until the cap was made global). Not live-load-tested
+// against a multi-user account since prod currently has only a handful of
+// registered users; revisit both constants if Vercel cron logs ever show
+// this run taking long enough to approach TIME_BUDGET_MS.
+const USER_CONCURRENCY = 2;
+
+// Wall-clock ceiling for starting NEW user batches, well under `maxDuration`
+// (300s) so in-flight work can finish and write its rows before Vercel kills
+// the function outright — which would silently drop every remaining user's
+// transactions for this run (no partial response, nothing in the log beyond
+// a generic timeout) rather than the graceful early-stop this guard gives.
+const TIME_BUDGET_MS = 270_000;
 
 // Mirror the client effect's lookback window — current week + 3 prior.
 // Captures both in-progress and recently-completed transactions. During
@@ -213,7 +236,7 @@ async function processUser(
         });
       }
     },
-    CONCURRENCY
+    LEAGUE_CONCURRENCY
   );
 
   if (!collected.length) return 0;
@@ -284,22 +307,45 @@ export async function GET(req: NextRequest): Promise<Response> {
     if (w >= 1) weeks.push(w);
   }
 
+  const runStartedAt = Date.now();
+  const allLinks = links ?? [];
   let usersProcessed = 0;
+  let usersSkippedTimeBudget = 0;
   let rowsWritten = 0;
-  for (const link of links ?? []) {
-    try {
-      rowsWritten += await processUser(
-        link.user_id,
-        link.sleeper_user_id,
-        weeks,
-        supabase
-      );
-      usersProcessed++;
-    } catch (err) {
-      log.error("processUser threw", {
-        authUserId: link.user_id,
-        err: err instanceof Error ? err.message : String(err),
+
+  for (let i = 0; i < allLinks.length; i += USER_CONCURRENCY) {
+    if (Date.now() - runStartedAt > TIME_BUDGET_MS) {
+      usersSkippedTimeBudget = allLinks.length - i;
+      log.error("league-transactions cron hit its time budget — stopping early", {
+        usersProcessed,
+        usersSkippedTimeBudget,
       });
+      break;
+    }
+
+    const batch = allLinks.slice(i, i + USER_CONCURRENCY);
+    const batchResults = await Promise.all(
+      batch.map(async (link) => {
+        try {
+          return await processUser(
+            link.user_id,
+            link.sleeper_user_id,
+            weeks,
+            supabase
+          );
+        } catch (err) {
+          log.error("processUser threw", {
+            authUserId: link.user_id,
+            err: err instanceof Error ? err.message : String(err),
+          });
+          return null;
+        }
+      })
+    );
+    for (const written of batchResults) {
+      if (written === null) continue;
+      usersProcessed++;
+      rowsWritten += written;
     }
   }
 
@@ -307,6 +353,7 @@ export async function GET(req: NextRequest): Promise<Response> {
     ok: true,
     linksFound: links?.length ?? 0,
     usersProcessed,
+    usersSkippedTimeBudget,
     rowsWritten,
     weeks,
   });
