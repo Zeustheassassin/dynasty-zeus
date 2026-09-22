@@ -221,6 +221,16 @@ export const LEAGUE_OVERVIEW_CONCURRENCY = 3;
 export const GAMEDAY_DASHBOARD_CONCURRENCY = 3;
 
 /**
+ * OverviewTab's manual "Refresh Rosters" button (handleRefreshAllRosters /
+ * refreshAllLeagueRosters) force-bypasses cache for every one of the current user's leagues at
+ * once — 4 concurrent Sleeper calls per league, all guaranteed real requests since bypass:true
+ * rules out a cache hit. Same unbounded shape as LEAGUE_OVERVIEW_CONCURRENCY above (Sept 22
+ * code-review 50-league-scalability finding, Tier 1 #3); capping the outer per-league loop
+ * keeps the worst-case burst at this number x 4.
+ */
+export const OVERVIEW_REFRESH_ROSTERS_CONCURRENCY = 3;
+
+/**
  * A batch pass where every owner fails (e.g. Sleeper is down) never changes
  * `crossLeagueMateIntel`, which is the load effect's only dependency that advances it to the
  * next batch — without this, those owners would be silently dropped for the rest of the

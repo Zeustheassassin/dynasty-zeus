@@ -11,17 +11,16 @@ import {
 import { usePlayers } from "../../lib/PlayersContext";
 import { useLeague } from "../../lib/LeagueContext";
 import { useValues } from "../../lib/ValuesContext";
-import { sleeperApi } from "../../lib/sleeperApi";
+import { refreshAllLeagueRosters } from "./overviewTabHelpers";
 import type {
   SleeperLeague,
   SleeperUser,
-  SleeperRoster,
   AugmentedPick,
   LeagueHubTab,
   LeagueMgmtData,
 } from "../../lib/types";
 import type { CommittedSimsByLeague, CachedSimRow, LeagueOverviewEntry } from "../../lib/types";
-import { setLocalStorageItem, removeLocalStorageItem } from "@/lib/hooks/useLocalStorage";
+import { removeLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 
 interface OverviewTabProps {
   leagues: SleeperLeague[];
@@ -111,22 +110,12 @@ function OverviewTab({
       if (key?.startsWith("leagueData_") || key?.startsWith("sleeperCache:")) keysToRemove.push(key);
     }
     keysToRemove.forEach((k) => removeLocalStorageItem(k));
-    await Promise.all(
-      leagues.map((league) =>
-        Promise.all([
-          sleeperApi.getLeagueRosters(league.league_id, true).catch(() => [] as SleeperRoster[]),
-          sleeperApi.getLeagueTradedPicks(league.league_id, true),
-          sleeperApi.getLeagueDrafts(league.league_id, true),
-          sleeperApi.getLeagueUsers(league.league_id, true),
-        ]).then(([allRosters, tradedPicksData, draftsData]) => {
-          setLocalStorageItem(
-            `leagueData_${league.league_id}`,
-            { data: { allRosters, tradedPicksData, draftsData }, cachedAt: Date.now() }
-          );
-          setRosterRefreshProgress((prev) => prev ? { done: prev.done + 1, total: prev.total } : null);
-        })
-      )
-    );
+    // Capped at OVERVIEW_REFRESH_ROSTERS_CONCURRENCY leagues at once rather than firing every
+    // league's 4 Sleeper calls simultaneously (Sept 22 code-review 50-league-scalability
+    // finding, Tier 1 #3) — see overviewTabHelpers.ts.
+    await refreshAllLeagueRosters(leagues, () => {
+      setRosterRefreshProgress((prev) => prev ? { done: prev.done + 1, total: prev.total } : null);
+    });
     // Rebuild the overview table state from the now-fresh cache. Without this,
     // leagueOverviewData stays stale even though the underlying caches updated.
     await loadLeagueOverview();
