@@ -463,9 +463,9 @@ interface HistoryRow {
   computed_at: string;
 }
 
-/** Upserts one per-league-batch's worth of rows, chunked to Supabase's per-request row limit.
- *  Called after EACH per-league batch (not once at the end of the whole run) so a Vercel
- *  hard-kill past maxDuration only loses the unreached leagues' rows, not every league already
+/** Upserts one league's rows, chunked to Supabase's per-request row limit. Called as soon as
+ *  EACH league finishes (not once at the end of the whole run) so a Vercel hard-kill past
+ *  maxDuration only loses the rows of leagues still in flight, not every league already
  *  simulated this run — see the TIME_BUDGET_MS comment above. */
 async function writeHistoryRows(supabase: SupabaseClient, rows: HistoryRow[]): Promise<number> {
   let written = 0;
@@ -582,7 +582,6 @@ export async function GET(req: NextRequest): Promise<Response> {
   // ── 3. Per-league simulate + collect rows ──
   let leaguesSimulated = 0;
   let leaguesSkipped = 0;
-  let leaguesSkippedTimeBudget = 0;
   let rowsWritten = 0;
   const nowIso = new Date().toISOString();
 
@@ -682,24 +681,40 @@ export async function GET(req: NextRequest): Promise<Response> {
     }
   };
 
-  // Each batch's rows are upserted right after that batch finishes (not accumulated for one
-  // write at the very end) so a Vercel hard-kill past maxDuration only drops the leagues that
-  // hadn't started yet, matching the graceful-early-stop the TIME_BUDGET_MS guard below implies.
-  for (let i = 0; i < leagues.length; i += CONCURRENCY) {
-    if (Date.now() - runStartedAt > TIME_BUDGET_MS) {
-      leaguesSkippedTimeBudget = leagues.length - i;
-      log.error("simulation-history cron hit its time budget — stopping early", {
-        leaguesSimulated,
-        leaguesSkipped,
-        leaguesSkippedTimeBudget,
-      });
-      break;
-    }
-    const batch = leagues.slice(i, i + CONCURRENCY);
-    const batchRows = (await Promise.all(batch.map(simulateOneLeague))).flat();
-    if (batchRows.length) {
-      rowsWritten += await writeHistoryRows(supabase, batchRows);
-    }
+  // Each league's rows are upserted as soon as THAT league finishes — not accumulated for one
+  // write at the very end, and no longer held behind a batch boundary — so a Vercel hard-kill
+  // past maxDuration only drops the leagues actually in flight, matching the graceful early-stop
+  // the TIME_BUDGET_MS guard implies. The batching this replaced was an artifact of the
+  // hand-rolled chunk loop rather than the point of it; per-league writes deliver the same
+  // intent strictly better, at the cost of one upsert per league instead of one per five.
+  //
+  // simulateOneLeague catches everything and returns [] on failure, and writeHistoryRows logs
+  // and continues on an upsert error, so fn never rejects — one bad league can't take the run
+  // down through withConcurrency's fail-fast batching.
+  const processedLeagues = await withConcurrency(
+    leagues,
+    async (league) => {
+      const rows = await simulateOneLeague(league);
+      if (!rows.length) return;
+      // Deliberately NOT `rowsWritten += await ...`: compound assignment reads the left side
+      // BEFORE evaluating the right, so with leagues writing concurrently every worker would
+      // read the same stale total and clobber the others' increments.
+      const written = await writeHistoryRows(supabase, rows);
+      rowsWritten += written;
+    },
+    CONCURRENCY,
+    { shouldBail: () => Date.now() - runStartedAt > TIME_BUDGET_MS }
+  );
+
+  // Only leagues actually dispatched produce a result, so the tail that never started is what
+  // the time-budget bail skipped.
+  const leaguesSkippedTimeBudget = leagues.length - processedLeagues.length;
+  if (leaguesSkippedTimeBudget > 0) {
+    log.error("simulation-history cron hit its time budget — stopping early", {
+      leaguesSimulated,
+      leaguesSkipped,
+      leaguesSkippedTimeBudget,
+    });
   }
 
   // Every league skipped for missing FantasyCalc values is a failed run, not a quiet success — answer

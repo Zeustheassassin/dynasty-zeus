@@ -370,11 +370,15 @@ describe("GET FantasyCalc availability", () => {
 describe("GET incremental writes", () => {
   // Sept 22 code-review Tier 1 #6: allRows used to be accumulated across the WHOLE per-league
   // loop and upserted once at the very end. If Vercel hard-kills the function past maxDuration
-  // mid-run, every already-simulated league's rows were lost, not just the unreached ones. The
-  // route now upserts each per-league batch's rows right after that batch finishes.
-  it("upserts each per-league batch immediately instead of writing everything once at the end", async () => {
-    // CONCURRENCY (route-internal, not exported) is 5 — 6 leagues means a 5-league batch then a
-    // 1-league batch, each with its own upsert call.
+  // mid-run, every already-simulated league's rows were lost, not just the unreached ones.
+  //
+  // That fix originally upserted once per CONCURRENCY-sized batch, because the hand-rolled
+  // chunk loop's batch boundary was the only checkpoint available. The loop now runs on
+  // withConcurrency's rolling pool, which has no batches, so each league's rows are written as
+  // soon as THAT league finishes — the same intent, held strictly tighter: a hard-kill now
+  // loses only the leagues actually in flight rather than up to a whole batch of five.
+  it("upserts each league's rows as soon as that league finishes, not once at the end", async () => {
+    // 6 leagues, one row each, so one upsert per league rather than one per batch of 5.
     const leagues = Array.from({ length: 6 }, (_, i) => ({
       league_id: `L${i + 1}`,
       name: `League ${i + 1}`,
@@ -394,7 +398,7 @@ describe("GET incremental writes", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.leaguesSimulated).toBe(6);
-    expect(fake.historyUpsertBatchSizes).toEqual([5, 1]);
+    expect(fake.historyUpsertBatchSizes).toEqual([1, 1, 1, 1, 1, 1]);
     expect(body.rowsWritten).toBe(6);
   });
 });
@@ -456,8 +460,12 @@ describe("GET time budget", () => {
   // maxDuration=300s with none of the graceful early-stop accounting the other cron has.
   const run = async () => (await loadGET())(makeReq(`Bearer ${SECRET}`));
 
-  it("stops starting new per-league simulation batches once the time budget is exceeded", async () => {
-    // CONCURRENCY (route-internal, not exported) is 5 — 6 leagues means a 2nd batch of 1.
+  it("stops starting new per-league simulations once the time budget is exceeded", async () => {
+    // The mocked clock below jumps past TIME_BUDGET_MS on the very first roster fetch. Under
+    // the old chunk loop the budget was only re-checked at batch boundaries, so all 5 leagues
+    // of the first batch ran regardless and only 1 was skipped. The rolling pool re-checks
+    // before handing out each item, so the second worker sees the blown budget immediately and
+    // nothing further starts — the guard doing its job sooner, not a weaker guard.
     const leagues = Array.from({ length: 6 }, (_, i) => ({
       league_id: `L${i + 1}`,
       name: `League ${i + 1}`,
@@ -487,9 +495,9 @@ describe("GET time budget", () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.leaguesFound).toBe(6);
-      // Only the first (CONCURRENCY-sized) batch started before the time-budget check tripped.
-      expect(rosterFetches).toHaveLength(5);
-      expect(body.leaguesSkippedTimeBudget).toBe(1);
+      // Only the league that blew the clock ever started.
+      expect(rosterFetches).toHaveLength(1);
+      expect(body.leaguesSkippedTimeBudget).toBe(5);
     } finally {
       nowSpy.mockRestore();
     }
