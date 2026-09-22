@@ -202,6 +202,15 @@ export const CROSS_LEAGUE_INTEL_OWNER_BATCH = 4;
 export const CROSS_LEAGUE_INTEL_LEAGUE_CONCURRENCY = 2;
 
 /**
+ * League Overview (useLeagueOverview) loads every one of the current user's OWN leagues at
+ * once, and each league costs 4 concurrent Sleeper calls (rosters, traded picks, drafts,
+ * users) — the same unbounded-fan-out shape that caused Batch 5's cross-league-intel 429s
+ * (Sept 22 code-review P1 finding #3), just with no per-owner fan-out on top of it. Capping
+ * the outer per-league loop keeps the worst-case burst at this number x 4.
+ */
+export const LEAGUE_OVERVIEW_CONCURRENCY = 3;
+
+/**
  * A batch pass where every owner fails (e.g. Sleeper is down) never changes
  * `crossLeagueMateIntel`, which is the load effect's only dependency that advances it to the
  * next batch — without this, those owners would be silently dropped for the rest of the

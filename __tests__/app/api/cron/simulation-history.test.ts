@@ -324,3 +324,65 @@ describe("GET FantasyCalc availability", () => {
     expect(rosterFetches.filter((u) => u.includes("L-1qb"))).toHaveLength(0);
   });
 });
+
+describe("GET time budget", () => {
+  // Sept 22 code-review P1 finding #4: this cron had no TIME_BUDGET_MS guard (unlike
+  // league-transactions, fixed in the Sept 21 audit's Batch 7), so a growing unique-league
+  // count across registered users risked Vercel killing the function mid-run past
+  // maxDuration=300s with none of the graceful early-stop accounting the other cron has.
+  const run = async () => (await loadGET())(makeReq(`Bearer ${SECRET}`));
+
+  it("stops starting new per-league simulation batches once the time budget is exceeded", async () => {
+    // CONCURRENCY (route-internal, not exported) is 5 — 6 leagues means a 2nd batch of 1.
+    const leagues = Array.from({ length: 6 }, (_, i) => ({
+      league_id: `L${i + 1}`,
+      name: `League ${i + 1}`,
+      settings: { taxi_slots: 2, best_ball: 0 },
+      roster_positions: ["QB", "RB", "WR", "TE", "FLEX", "SUPER_FLEX", "BN"],
+    }));
+    fake.links = { rows: [{ sleeper_user_id: "s1" }], error: null };
+    route((u) => u.includes("/user/s1/leagues/"), leagues);
+    route((u) => u.includes("/state/nfl"), { season_type: "regular", week: 5, season: "2026" });
+
+    const rosterFetches: string[] = [];
+    let now = 1_000_000;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+    route((u) => {
+      if (u.includes("/rosters")) {
+        rosterFetches.push(u);
+        // Mirrors the wall-clock TIME_BUDGET_MS the route enforces (270_000) — simulate the
+        // first batch's fan-out taking long enough that the next batch's pre-check trips.
+        now += 271_000;
+        return true;
+      }
+      return false;
+    }, []);
+
+    try {
+      const res = await run();
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.leaguesFound).toBe(6);
+      // Only the first (CONCURRENCY-sized) batch started before the time-budget check tripped.
+      expect(rosterFetches).toHaveLength(5);
+      expect(body.leaguesSkippedTimeBudget).toBe(1);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("reports zero leagues skipped for time when the whole run finishes under budget", async () => {
+    const leagues = [{
+      league_id: "L1", name: "League 1", settings: { taxi_slots: 2, best_ball: 0 },
+      roster_positions: ["QB", "RB", "WR", "TE", "FLEX", "SUPER_FLEX", "BN"],
+    }];
+    fake.links = { rows: [{ sleeper_user_id: "s1" }], error: null };
+    route((u) => u.includes("/user/s1/leagues/"), leagues);
+    route((u) => u.includes("/state/nfl"), { season_type: "regular", week: 5, season: "2026" });
+    route((u) => u.includes("/rosters"), []);
+
+    const res = await run();
+    const body = await res.json();
+    expect(body.leaguesSkippedTimeBudget).toBe(0);
+  });
+});

@@ -3,6 +3,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { logger } from "../lib/logger";
 import { sleeperApi } from "../lib/sleeperApi";
 import { buildLeaguePickPool } from "../lib/helpers";
+import { LEAGUE_OVERVIEW_CONCURRENCY } from "../lib/constants";
 import type {
   SleeperLeague,
   LeagueOverviewEntry,
@@ -40,39 +41,47 @@ export function useLeagueOverview(
     setLoadingLeagueOverview(true);
     setLeagueOverviewError(null);
     try {
-      const results = await Promise.all(
-        currentLeagues.map(async (league) => {
-          try {
-            const [rostersData, tradedPicksData, draftsData, usersData] = await Promise.all([
-              sleeperApi.getLeagueRosters(league.league_id),
-              sleeperApi.getLeagueTradedPicks(league.league_id),
-              sleeperApi.getLeagueDrafts(league.league_id),
-              sleeperApi.getLeagueUsers(league.league_id),
-            ]);
+      const fetchLeague = async (league: SleeperLeague) => {
+        try {
+          const [rostersData, tradedPicksData, draftsData, usersData] = await Promise.all([
+            sleeperApi.getLeagueRosters(league.league_id),
+            sleeperApi.getLeagueTradedPicks(league.league_id),
+            sleeperApi.getLeagueDrafts(league.league_id),
+            sleeperApi.getLeagueUsers(league.league_id),
+          ]);
 
-            const leagueUserMap: Record<string, string> = {};
-            (usersData || []).forEach((u) => {
-              leagueUserMap[u.user_id] =
-                u.display_name || u.username || u.metadata?.team_name || `Team`;
-            });
+          const leagueUserMap: Record<string, string> = {};
+          (usersData || []).forEach((u) => {
+            leagueUserMap[u.user_id] =
+              u.display_name || u.username || u.metadata?.team_name || `Team`;
+          });
 
-            // Pick pool: shared with useAppState.loadRoster/useSpyState via buildLeaguePickPool.
-            // Overview renders every league at once, so it caps round depth at ROUNDS.length
-            // and skips the per-league round trim/slot fallback the other two callers use —
-            // see __tests__/hooks/pickWindowCopies.test.ts for the pinned per-caller behavior.
-            const tempPicks = buildLeaguePickPool(rostersData, tradedPicksData, draftsData, {
-              roundsMode: "fixed",
-              slotFallback: "bare-round",
-              labelFutureSlots: false,
-            });
+          // Pick pool: shared with useAppState.loadRoster/useSpyState via buildLeaguePickPool.
+          // Overview renders every league at once, so it caps round depth at ROUNDS.length
+          // and skips the per-league round trim/slot fallback the other two callers use —
+          // see __tests__/hooks/pickWindowCopies.test.ts for the pinned per-caller behavior.
+          const tempPicks = buildLeaguePickPool(rostersData, tradedPicksData, draftsData, {
+            roundsMode: "fixed",
+            slotFallback: "bare-round",
+            labelFutureSlots: false,
+          });
 
-            return { league, rosters: rostersData, picks: tempPicks, userMap: leagueUserMap };
-          } catch (err) {
-            log.warn("loadLeagueOverview league fetch error", { err: String(err) });
-            return null;
-          }
-        })
-      );
+          return { league, rosters: rostersData, picks: tempPicks, userMap: leagueUserMap };
+        } catch (err) {
+          log.warn("loadLeagueOverview league fetch error", { err: String(err) });
+          return null;
+        }
+      };
+
+      // Fetched LEAGUE_OVERVIEW_CONCURRENCY leagues at a time (4 Sleeper calls each) rather
+      // than firing every league at once — an uncapped fan-out here hit the same 429 risk
+      // Batch 5 found and fixed for cross-league intel (Sept 22 code-review P1 finding #3).
+      const results: Array<Awaited<ReturnType<typeof fetchLeague>>> = [];
+      for (let i = 0; i < currentLeagues.length; i += LEAGUE_OVERVIEW_CONCURRENCY) {
+        if (seq !== overviewSeq.current) return; // a newer load started — stop fetching for this one
+        const slice = currentLeagues.slice(i, i + LEAGUE_OVERVIEW_CONCURRENCY);
+        results.push(...(await Promise.all(slice.map(fetchLeague))));
+      }
 
       if (seq !== overviewSeq.current) return; // a newer load started — discard stale result
       const byLeague: Record<string, LeagueOverviewEntry> = {};

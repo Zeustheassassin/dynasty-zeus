@@ -63,6 +63,16 @@ export const maxDuration = 300;
 // so overlapping runs keep a similar load profile against Sleeper.
 const CONCURRENCY = 5;
 
+// Wall-clock ceiling for starting NEW league-simulation batches (the dominant
+// cost — one fetchLeagueCore + simulateLeague per league — and the one whose
+// size scales with total unique dynasty leagues across every registered
+// user), well under `maxDuration` (300s) so in-flight work can finish and
+// write its rows before Vercel kills the function outright — which would
+// silently drop every remaining league's odds for this run instead of the
+// graceful early-stop this guard gives. Same shape and value as
+// league-transactions/route.ts's TIME_BUDGET_MS.
+const TIME_BUDGET_MS = 270_000;
+
 function isDynastyLeague(l: SleeperLeague): boolean {
   return (
     ((l.settings?.taxi_slots ?? 0) > 0 ||
@@ -511,6 +521,8 @@ export async function GET(req: NextRequest): Promise<Response> {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
+  const runStartedAt = Date.now();
+
   // ── 1. Discover unique dynasty leagues across every registered user ──
   const { data: links, error: linksErr } = await supabase
     .from("user_sleeper_links")
@@ -579,111 +591,122 @@ export async function GET(req: NextRequest): Promise<Response> {
   // ── 3. Per-league simulate + collect rows ──
   let leaguesSimulated = 0;
   let leaguesSkipped = 0;
+  let leaguesSkippedTimeBudget = 0;
   const allRows: HistoryRow[] = [];
   const nowIso = new Date().toISOString();
 
-  await withConcurrency(
-    leagues,
-    async (league) => {
-      try {
-        // Checked before any Sleeper fan-out so a skipped league costs nothing.
-        const numQbs = getLeagueNumQbs(league);
-        const fcDynasty = dynastyByNumQbs[numQbs];
-        const fcRedraft = redraftByNumQbs[numQbs];
-        if (!fcDynasty || !fcRedraft) {
-          log.error("skipping league — FantasyCalc values unavailable for its format", {
-            leagueId: league.league_id, numQbs, dynasty: !!fcDynasty, redraft: !!fcRedraft,
-          });
-          leaguesSkipped++;
-          return;
-        }
-
-        const core = await fetchLeagueCore(league);
-        if (!core) return;
-
-        const scoringSettings = league.scoring_settings ?? DEFAULT_SCORING;
-        const multipliers = computeScoringMultipliers(scoringSettings);
-        const leagueAdjustedFcValues = applyMultipliers(fcDynasty.bySleeperId, multipliers, players);
-        const leagueAdjustedRedraftValues = applyMultipliers(fcRedraft.bySleeperId, multipliers, players);
-
-        const projectionData = buildProjectionRows(rawProjItems, projIsSeasonMode, scoringSettings, players);
-        const projectionWeek = projIsSeasonMode ? 0 : currentWeek;
-
-        let leagueWeeklyMatchups: Record<string, { week: number; matchups: SleeperMatchup[] }[]> = {};
-        if (currentWeek > 1) {
-          const weeks = Array.from({ length: currentWeek - 1 }, (_, i) => i + 1);
-          const results = await Promise.all(
-            weeks.map(async (week) => ({
-              week,
-              matchups:
-                (await safeFetch<SleeperMatchup[]>(
-                  `${SLEEPER_BASE_URL}/league/${league.league_id}/matchups/${week}`
-                )) ?? [],
-            }))
-          );
-          leagueWeeklyMatchups = { [league.league_id]: results };
-        }
-
-        const projectedRookiesByRoster = isOffseason
-          ? projectRookiesByRoster({
-              selectedLeague: league,
-              nflState,
-              draftSettings: core.draftSettings,
-              rosters: core.rosters,
-              rookies,
-              allPicks: core.allPicks,
-              players: players as unknown as Record<string, SleeperPlayer>,
-              leagueAdjustedFcValues,
-            })
-          : new Map();
-
-        const simulation = simulateLeague({
-          selectedLeague: league,
-          rosters: core.rosters,
-          players: players as unknown as Record<string, SleeperPlayer>,
-          nflState,
-          projectionData,
-          projectionWeek,
-          playerStats,
-          leagueWeeklyMatchups,
-          standings: core.standings,
-          users: core.userNames,
-          leagueAdjustedFcValues,
-          leagueAdjustedRedraftValues,
-          projectedRookiesByRoster,
-          // Deliberately a fresh random seed each run, not the persisted per-
-          // browser simSalt_v1 — this is a server cron with no single "the"
-          // user session to match (each browser has its own persisted salt).
-          // The daily snapshot is a historical trend point, not meant to be
-          // byte-for-byte reproducible against any one live session's odds.
-          simSalt: Math.floor(Math.random() * 1_000_000),
+  const simulateOneLeague = async (league: SleeperLeague): Promise<void> => {
+    try {
+      // Checked before any Sleeper fan-out so a skipped league costs nothing.
+      const numQbs = getLeagueNumQbs(league);
+      const fcDynasty = dynastyByNumQbs[numQbs];
+      const fcRedraft = redraftByNumQbs[numQbs];
+      if (!fcDynasty || !fcRedraft) {
+        log.error("skipping league — FantasyCalc values unavailable for its format", {
+          leagueId: league.league_id, numQbs, dynasty: !!fcDynasty, redraft: !!fcRedraft,
         });
-        if (!simulation) return;
-
-        leaguesSimulated++;
-        simulation.rows.forEach((row) => {
-          allRows.push({
-            league_id: league.league_id,
-            roster_id: row.rosterId,
-            season,
-            week: currentWeek,
-            playoff_odds: row.playoffOdds ?? 0,
-            title_odds: row.titleOdds ?? 0,
-            expected_wins: row.expectedWins ?? 0,
-            avg_finish: row.avgFinish ?? 0,
-            finish_range: row.finishRange ?? "",
-            computed_at: nowIso,
-          });
-        });
-      } catch (err) {
-        log.error("league simulation failed", {
-          leagueId: league.league_id,
-          err: err instanceof Error ? err.message : String(err),
-        });
+        leaguesSkipped++;
+        return;
       }
-    },
-    CONCURRENCY
-  );
+
+      const core = await fetchLeagueCore(league);
+      if (!core) return;
+
+      const scoringSettings = league.scoring_settings ?? DEFAULT_SCORING;
+      const multipliers = computeScoringMultipliers(scoringSettings);
+      const leagueAdjustedFcValues = applyMultipliers(fcDynasty.bySleeperId, multipliers, players);
+      const leagueAdjustedRedraftValues = applyMultipliers(fcRedraft.bySleeperId, multipliers, players);
+
+      const projectionData = buildProjectionRows(rawProjItems, projIsSeasonMode, scoringSettings, players);
+      const projectionWeek = projIsSeasonMode ? 0 : currentWeek;
+
+      let leagueWeeklyMatchups: Record<string, { week: number; matchups: SleeperMatchup[] }[]> = {};
+      if (currentWeek > 1) {
+        const weeks = Array.from({ length: currentWeek - 1 }, (_, i) => i + 1);
+        const results = await Promise.all(
+          weeks.map(async (week) => ({
+            week,
+            matchups:
+              (await safeFetch<SleeperMatchup[]>(
+                `${SLEEPER_BASE_URL}/league/${league.league_id}/matchups/${week}`
+              )) ?? [],
+          }))
+        );
+        leagueWeeklyMatchups = { [league.league_id]: results };
+      }
+
+      const projectedRookiesByRoster = isOffseason
+        ? projectRookiesByRoster({
+            selectedLeague: league,
+            nflState,
+            draftSettings: core.draftSettings,
+            rosters: core.rosters,
+            rookies,
+            allPicks: core.allPicks,
+            players: players as unknown as Record<string, SleeperPlayer>,
+            leagueAdjustedFcValues,
+          })
+        : new Map();
+
+      const simulation = simulateLeague({
+        selectedLeague: league,
+        rosters: core.rosters,
+        players: players as unknown as Record<string, SleeperPlayer>,
+        nflState,
+        projectionData,
+        projectionWeek,
+        playerStats,
+        leagueWeeklyMatchups,
+        standings: core.standings,
+        users: core.userNames,
+        leagueAdjustedFcValues,
+        leagueAdjustedRedraftValues,
+        projectedRookiesByRoster,
+        // Deliberately a fresh random seed each run, not the persisted per-
+        // browser simSalt_v1 — this is a server cron with no single "the"
+        // user session to match (each browser has its own persisted salt).
+        // The daily snapshot is a historical trend point, not meant to be
+        // byte-for-byte reproducible against any one live session's odds.
+        simSalt: Math.floor(Math.random() * 1_000_000),
+      });
+      if (!simulation) return;
+
+      leaguesSimulated++;
+      simulation.rows.forEach((row) => {
+        allRows.push({
+          league_id: league.league_id,
+          roster_id: row.rosterId,
+          season,
+          week: currentWeek,
+          playoff_odds: row.playoffOdds ?? 0,
+          title_odds: row.titleOdds ?? 0,
+          expected_wins: row.expectedWins ?? 0,
+          avg_finish: row.avgFinish ?? 0,
+          finish_range: row.finishRange ?? "",
+          computed_at: nowIso,
+        });
+      });
+    } catch (err) {
+      log.error("league simulation failed", {
+        leagueId: league.league_id,
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
+  for (let i = 0; i < leagues.length; i += CONCURRENCY) {
+    if (Date.now() - runStartedAt > TIME_BUDGET_MS) {
+      leaguesSkippedTimeBudget = leagues.length - i;
+      log.error("simulation-history cron hit its time budget — stopping early", {
+        leaguesSimulated,
+        leaguesSkipped,
+        leaguesSkippedTimeBudget,
+      });
+      break;
+    }
+    const batch = leagues.slice(i, i + CONCURRENCY);
+    await Promise.all(batch.map(simulateOneLeague));
+  }
 
   // ── 4. Write history rows ──
   let rowsWritten = 0;
@@ -709,6 +732,7 @@ export async function GET(req: NextRequest): Promise<Response> {
       leaguesFound: leagues.length,
       leaguesSimulated,
       leaguesSkipped,
+      leaguesSkippedTimeBudget,
       rowsWritten,
       season,
       currentWeek,
