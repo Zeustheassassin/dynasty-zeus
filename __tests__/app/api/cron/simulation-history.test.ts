@@ -240,6 +240,37 @@ describe("GET league discovery", () => {
   });
 });
 
+describe("GET NFL state availability", () => {
+  // Sept 22 code-review Tier 2 #8: a failed /state/nfl fetch used to fall through to
+  // currentWeek=0/isOffseason=true even during the regular season, silently mis-simulating
+  // every league. It must now abort the whole run instead of guessing.
+  it("aborts with 502 (nothing fetched, nothing written) when Sleeper's /state/nfl is unavailable", async () => {
+    fake.links = { rows: [{ sleeper_user_id: "s1" }], error: null };
+    route((u) => u.includes("/user/s1/leagues/"), [
+      {
+        league_id: "L-1",
+        name: "Dynasty",
+        settings: { taxi_slots: 2, best_ball: 0 },
+        roster_positions: ["QB", "RB", "WR", "TE", "FLEX", "BN"],
+      },
+    ]);
+    route((u) => u.includes("/state/nfl"), null); // safeFetch returns null on a JSON body of null too
+    let rosterFetchCount = 0;
+    route((u) => {
+      if (u.includes("/rosters")) { rosterFetchCount++; return true; }
+      return false;
+    }, []);
+
+    const GET = await loadGET();
+    const res = await GET(makeReq(`Bearer ${SECRET}`));
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ ok: false, error: "NFL state unavailable" });
+    expect(rosterFetchCount).toBe(0);
+    expect(h.getFcValues).not.toHaveBeenCalled();
+    expect(fake.historyUpserts).toBe(0);
+  });
+});
+
 describe("GET FantasyCalc availability", () => {
   const league2qb = {
     league_id: "L-sf", name: "Superflex", settings: { taxi_slots: 2, best_ball: 0 },

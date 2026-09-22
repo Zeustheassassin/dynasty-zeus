@@ -573,9 +573,15 @@ export async function GET(req: NextRequest): Promise<Response> {
     fetchSlimPlayers(),
     safeFetch<SleeperNFLState>(`${SLEEPER_BASE_URL}/state/nfl`),
   ]);
+  // currentWeek/isOffseason drive every league's simulation mode this run — a failed fetch must not
+  // silently masquerade as "offseason" (week 0), which would corrupt every league's history row.
+  if (!nflState) {
+    log.error("Sleeper /state/nfl unavailable — aborting run rather than guessing the current week");
+    return NextResponse.json({ ok: false, error: "NFL state unavailable" }, { status: 502 });
+  }
   const currentWeek =
-    nflState?.season_type === "regular" && Number(nflState?.week || 0) > 0 ? Number(nflState.week) : 0;
-  const season = nflState?.season ?? CURRENT_YEAR;
+    nflState.season_type === "regular" && Number(nflState.week || 0) > 0 ? Number(nflState.week) : 0;
+  const season = nflState.season ?? CURRENT_YEAR;
   const isOffseason = currentWeek === 0;
 
   // FantasyCalc values for only the formats these leagues use (dynasty + redraft per numQbs), plus the
