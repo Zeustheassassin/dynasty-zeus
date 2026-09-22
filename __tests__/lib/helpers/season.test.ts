@@ -6,6 +6,7 @@ import {
   ROUNDS,
   calendarSeasonYear,
   getSeasonYear,
+  isValidNflState,
 } from "@/lib/helpers/season";
 
 // ── calendarSeasonYear ───────────────────────────────────────────────────────
@@ -65,6 +66,40 @@ describe("getSeasonYear", () => {
     expect(getSeasonYear({ season: "" })).toBe(CURRENT_YEAR);
     expect(getSeasonYear({ season: "off" })).toBe(CURRENT_YEAR);
     expect(getSeasonYear({ season: null })).toBe(CURRENT_YEAR);
+  });
+});
+
+// ── isValidNflState ──────────────────────────────────────────────────────────
+// Catches a truthy-but-malformed /state/nfl body, not just null — the class of bug a bare
+// `!nflState` check misses (code-review catch, Sept 22).
+
+describe("isValidNflState", () => {
+  it("accepts a well-formed state", () => {
+    expect(isValidNflState({ season_type: "regular", week: 5, season: "2026" })).toBe(true);
+  });
+
+  it("rejects null/undefined", () => {
+    expect(isValidNflState(null)).toBe(false);
+    expect(isValidNflState(undefined)).toBe(false);
+  });
+
+  it("rejects a truthy-but-empty object — the exact shape a malformed 200 response could return", () => {
+    expect(isValidNflState({})).toBe(false);
+  });
+
+  it("rejects a non-object", () => {
+    expect(isValidNflState("regular")).toBe(false);
+    expect(isValidNflState(42)).toBe(false);
+  });
+
+  it("rejects a missing or non-numeric week", () => {
+    expect(isValidNflState({ season_type: "regular", season: "2026" })).toBe(false);
+    expect(isValidNflState({ season_type: "regular", week: "5", season: "2026" })).toBe(false);
+  });
+
+  it("rejects a missing or malformed season", () => {
+    expect(isValidNflState({ season_type: "regular", week: 5 })).toBe(false);
+    expect(isValidNflState({ season_type: "regular", week: 5, season: "off" })).toBe(false);
   });
 });
 

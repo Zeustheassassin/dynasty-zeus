@@ -34,6 +34,51 @@ const PACE_SOURCE_HINT: Record<GamedayLineupRow["paceSource"], string> = {
 const pointsLine = (row: GamedayLineupRow | GamedayReserveRow): string =>
   `${row.actualPoints.toFixed(1)} pts now • ${row.remainingProjection.toFixed(1)} left • ${row.projectedFinal.toFixed(1)} proj`;
 
+/** A collapsible reserve-player row list — the Bench and Taxi sections of a team card are the
+ *  same layout twice (code-review catch: they were hand-duplicated JSX, ~28 lines each), so any
+ *  future styling/behavior change to one could silently drift from the other. */
+function ReserveGroup({
+  label, rows, keyPrefix, emptyText, onSelectPlayer,
+}: {
+  label: string;
+  rows: GamedayReserveRow[];
+  keyPrefix: string;
+  emptyText: string;
+  onSelectPlayer: (id: string) => void;
+}) {
+  return (
+    <details className="mt-3 group">
+      <summary className="cursor-pointer list-none text-xs font-semibold text-blue-300 group-open:text-blue-200">
+        {label} ({rows.length})
+      </summary>
+      <div className="mt-2 space-y-2">
+        {rows.length === 0 ? (
+          <div className="text-xs text-gray-600">{emptyText}</div>
+        ) : rows.map((row) => (
+          <div
+            key={`${keyPrefix}-${row.playerId}`}
+            className="flex items-center justify-between gap-3 rounded-lg border border-gray-800 bg-gray-900/60 px-3 py-2"
+          >
+            <div className="flex items-center gap-1 min-w-0">
+              <button
+                onClick={() => onSelectPlayer(row.playerId)}
+                className="min-w-0 truncate text-xs font-medium text-white hover:text-blue-400 transition"
+              >
+                {row.player?.full_name}
+              </button>
+              {injuryBadge(row.player?.injury_status)}
+              {injuryRiskBadge(row.player?.age, row.player?.position ?? "", row.player?.injury_status)}
+            </div>
+            <div className="shrink-0 text-right text-[11px] text-gray-500">
+              {row.actualPoints.toFixed(1)} now • {row.remainingProjection.toFixed(1)} left • {row.projectedFinal.toFixed(1)} proj
+            </div>
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}
+
 interface LeagueMatchupsTabProps {
   leagues: SleeperLeague[];
   loadRoster: (league: SleeperLeague) => void;
@@ -325,64 +370,14 @@ function LeagueMatchupsTab({
                             ))}
                           </div>
                         )}
-                        <details className="mt-3 group">
-                          <summary className="cursor-pointer list-none text-xs font-semibold text-blue-300 group-open:text-blue-200">
-                            Bench ({team.benchRows.length})
-                          </summary>
-                          <div className="mt-2 space-y-2">
-                            {team.benchRows.length === 0 ? (
-                              <div className="text-xs text-gray-600">No bench players loaded.</div>
-                            ) : team.benchRows.map((row) => (
-                              <div
-                                key={`${team.rosterId}-bench-${row.playerId}`}
-                                className="flex items-center justify-between gap-3 rounded-lg border border-gray-800 bg-gray-900/60 px-3 py-2"
-                              >
-                                <div className="flex items-center gap-1 min-w-0">
-                                  <button
-                                    onClick={() => setPlayerProfileId(row.playerId)}
-                                    className="min-w-0 truncate text-xs font-medium text-white hover:text-blue-400 transition"
-                                  >
-                                    {row.player?.full_name}
-                                  </button>
-                                  {injuryBadge(row.player?.injury_status)}
-                                  {injuryRiskBadge(row.player?.age, row.player?.position ?? "", row.player?.injury_status)}
-                                </div>
-                                <div className="shrink-0 text-right text-[11px] text-gray-500">
-                                  {row.actualPoints.toFixed(1)} now • {row.remainingProjection.toFixed(1)} left • {row.projectedFinal.toFixed(1)} proj
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </details>
-                        <details className="mt-3 group">
-                          <summary className="cursor-pointer list-none text-xs font-semibold text-blue-300 group-open:text-blue-200">
-                            Taxi ({team.taxiRows.length})
-                          </summary>
-                          <div className="mt-2 space-y-2">
-                            {team.taxiRows.length === 0 ? (
-                              <div className="text-xs text-gray-600">No taxi players loaded.</div>
-                            ) : team.taxiRows.map((row) => (
-                              <div
-                                key={`${team.rosterId}-taxi-${row.playerId}`}
-                                className="flex items-center justify-between gap-3 rounded-lg border border-gray-800 bg-gray-900/60 px-3 py-2"
-                              >
-                                <div className="flex items-center gap-1 min-w-0">
-                                  <button
-                                    onClick={() => setPlayerProfileId(row.playerId)}
-                                    className="min-w-0 truncate text-xs font-medium text-white hover:text-blue-400 transition"
-                                  >
-                                    {row.player?.full_name}
-                                  </button>
-                                  {injuryBadge(row.player?.injury_status)}
-                                  {injuryRiskBadge(row.player?.age, row.player?.position ?? "", row.player?.injury_status)}
-                                </div>
-                                <div className="shrink-0 text-right text-[11px] text-gray-500">
-                                  {row.actualPoints.toFixed(1)} now • {row.remainingProjection.toFixed(1)} left • {row.projectedFinal.toFixed(1)} proj
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </details>
+                        <ReserveGroup
+                          label="Bench" rows={team.benchRows} keyPrefix={`${team.rosterId}-bench`}
+                          emptyText="No bench players loaded." onSelectPlayer={setPlayerProfileId}
+                        />
+                        <ReserveGroup
+                          label="Taxi" rows={team.taxiRows} keyPrefix={`${team.rosterId}-taxi`}
+                          emptyText="No taxi players loaded." onSelectPlayer={setPlayerProfileId}
+                        />
                       </div>
                     ))}
                   </div>

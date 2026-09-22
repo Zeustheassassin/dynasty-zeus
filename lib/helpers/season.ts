@@ -39,6 +39,25 @@ export function getSeasonYear(
   return s && /^\d{4}$/.test(String(s)) ? String(s) : CURRENT_YEAR;
 }
 
+/** True when a /state/nfl response has the shape callers actually read (season_type/week/season
+ *  present and sane) — NOT just non-null. safeFetch()/cachedFetch() cast a 200 response's JSON
+ *  body to SleeperNFLState with no runtime validation, so a Sleeper API change, a proxy error
+ *  page served with a 200, or any other malformed-but-truthy body (e.g. `{}`) would otherwise
+ *  pass a bare `!nflState` null-check and silently mis-derive currentWeek=0/isOffseason=true —
+ *  the exact "guessing the current week" failure a null-check alone was meant to prevent (code-
+ *  review catch on app/api/cron/simulation-history/route.ts's null-check-only guard). */
+export function isValidNflState(
+  nflState: unknown,
+): nflState is { season_type: string; week: number; season: string } {
+  if (!nflState || typeof nflState !== "object") return false;
+  const s = nflState as Record<string, unknown>;
+  return (
+    typeof s.season_type === "string" && s.season_type.length > 0 &&
+    typeof s.week === "number" && Number.isFinite(s.week) &&
+    typeof s.season === "string" && /^\d{4}$/.test(s.season)
+  );
+}
+
 /** Three-year NFL-season-year window starting from the current season year
  *  (e.g. ["2026","2027","2028"]). */
 export const YEARS = Array.from({ length: 3 }, (_, i) => String(Number(CURRENT_YEAR) + i));

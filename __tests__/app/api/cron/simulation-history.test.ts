@@ -222,6 +222,7 @@ describe("GET league discovery", () => {
     };
     route((u) => u.includes("/user/sleeper-1/leagues/"), [sharedLeague]);
     route((u) => u.includes("/user/sleeper-2/leagues/"), [sharedLeague]);
+    route((u) => u.includes("/state/nfl"), { season_type: "regular", week: 5, season: "2026" });
     let rosterFetchCount = 0;
     route((u) => {
       if (u.includes("/league/L-shared/rosters")) {
@@ -289,7 +290,13 @@ describe("GET FantasyCalc availability", () => {
   function setup(leagues: unknown[], { inSeason }: { inSeason: boolean }) {
     fake.links = { rows: [{ sleeper_user_id: "s1" }], error: null };
     route((u) => u.includes("/user/s1/leagues/"), leagues);
-    if (inSeason) route((u) => u.includes("/state/nfl"), { season_type: "regular", week: 5, season: "2026" });
+    // A real /state/nfl response either way — isValidNflState rejects the fallback `[]` an
+    // unmocked route would otherwise resolve to (code-review catch: these offseason cases used
+    // to rely on that fallback's malformed shape as their route into isOffseason=true, which
+    // is the exact "truthy but malformed" gap isValidNflState was added to close).
+    route((u) => u.includes("/state/nfl"), inSeason
+      ? { season_type: "regular", week: 5, season: "2026" }
+      : { season_type: "off", week: 0, season: "2026" });
     route((u) => {
       if (u.includes("/rosters")) { rosterFetches.push(u); return true; }
       return false;
@@ -389,6 +396,56 @@ describe("GET incremental writes", () => {
     expect(body.leaguesSimulated).toBe(6);
     expect(fake.historyUpsertBatchSizes).toEqual([5, 1]);
     expect(body.rowsWritten).toBe(6);
+  });
+});
+
+describe("GET weekly-matchup fetch concurrency", () => {
+  // Code-review catch: simulateOneLeague's weekly-matchup fetch was an uncapped Promise.all
+  // over every elapsed week of the season, nested inside the outer per-league CONCURRENCY=5
+  // fan-out — late-season that's up to 5*16=80 concurrent Sleeper calls just for matchups. Now
+  // capped per league by WEEKLY_MATCHUP_CONCURRENCY (route-internal, not exported) = 4.
+  it("fetches at most 4 weekly-matchup requests at once for one league", async () => {
+    const league = {
+      league_id: "L-1", name: "Dynasty", settings: { taxi_slots: 2, best_ball: 0 },
+      roster_positions: ["QB", "RB", "WR", "TE", "FLEX", "SUPER_FLEX", "BN"],
+    };
+    fake.links = { rows: [{ sleeper_user_id: "s1" }], error: null };
+    route((u) => u.includes("/user/s1/leagues/"), [league]);
+    // week 6 -> weeks 1..5 fetched for matchups: a 4-call chunk then a 1-call chunk.
+    route((u) => u.includes("/state/nfl"), { season_type: "regular", week: 6, season: "2026" });
+    route((u) => u.includes("/rosters"), [{ roster_id: 1, owner_id: "owner1", settings: {} }]);
+    h.simulateLeague.mockReturnValue({
+      rows: [{ rosterId: 1, playoffOdds: 0.5, titleOdds: 0.1, expectedWins: 5, avgFinish: 4, finishRange: "3-5" }],
+    });
+
+    let concurrentMatchupCalls = 0;
+    let maxConcurrentMatchupCalls = 0;
+    let totalMatchupCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL) => {
+        const u = String(url);
+        if (u.includes("/matchups/")) {
+          totalMatchupCalls++;
+          concurrentMatchupCalls++;
+          maxConcurrentMatchupCalls = Math.max(maxConcurrentMatchupCalls, concurrentMatchupCalls);
+          // A small real delay lets every call in the SAME withConcurrency chunk arrive
+          // (each chunk's calls are started synchronously via Promise.all) before any of
+          // them resolves — without it a same-chunk race could under-count the peak.
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          concurrentMatchupCalls--;
+          return jsonResponse([]);
+        }
+        const r = fetchRoutes.find((route) => route.match(u));
+        return jsonResponse(r ? r.body : []);
+      })
+    );
+
+    const GET = await loadGET();
+    const res = await GET(makeReq(`Bearer ${SECRET}`));
+    expect(res.status).toBe(200);
+    expect(totalMatchupCalls).toBe(5);
+    expect(maxConcurrentMatchupCalls).toBe(4);
   });
 });
 

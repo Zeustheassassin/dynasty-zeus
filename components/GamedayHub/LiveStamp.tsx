@@ -17,7 +17,10 @@ const formatAge = (seconds: number): string => {
 // "● Live · Updated 12s ago". The clock is a state value written from an interval
 // callback (not read during render), so the label ticks without refetching anything.
 function LiveStamp({ updatedAt, live }: LiveStampProps) {
-  const [now, setNow] = useState<number>(updatedAt ?? 0);
+  // Date.now(), not updatedAt — a remount with an already-stale updatedAt (e.g. the user
+  // switched tabs for a few minutes and came back) would otherwise show "just now" for up
+  // to 5s until the first interval tick corrects it (code-review catch).
+  const [now, setNow] = useState<number>(() => Date.now());
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 5_000);

@@ -1,14 +1,9 @@
 "use client";
 import { useState, useEffect, useRef, type Dispatch, type SetStateAction } from "react";
-import { CURRENT_YEAR } from "../lib/helpers";
+import { CURRENT_YEAR, isDynastyLeague } from "../lib/helpers";
 import { sleeperApi } from "../lib/sleeperApi";
 import type { SleeperUser, SleeperLeague } from "../lib/types";
 import { getLocalStorageItem, setLocalStorageItem, removeLocalStorageItem } from "@/lib/hooks/useLocalStorage";
-
-// Sleeper dynasty league filter — same criteria used everywhere in the app.
-const isDynastyLeague = (l: SleeperLeague) =>
-  ((l.settings?.taxi_slots ?? 0) > 0 || (l.roster_positions?.length ?? 0) > 20) &&
-  (l.settings?.best_ball ?? 0) === 0;
 
 interface UseSleeperUserOptions {
   /** Called after leagues are loaded (connect or initial hydration). */

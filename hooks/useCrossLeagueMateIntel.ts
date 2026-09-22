@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
-import { CURRENT_YEAR, average } from "../lib/helpers";
+import { CURRENT_YEAR, average, isDynastyLeague } from "../lib/helpers";
 import { sleeperApi } from "../lib/sleeperApi";
 import { CROSS_LEAGUE_INTEL_OWNER_BATCH, CROSS_LEAGUE_INTEL_LEAGUE_CONCURRENCY, CROSS_LEAGUE_INTEL_RETRY_COOLDOWN_MS } from "../lib/constants";
 import { logger } from "../lib/logger";
@@ -22,12 +22,6 @@ interface UseCrossLeagueMateIntelOptions {
   tradeHubSection: string;
 }
 
-function isCrossLeagueDynasty(league: SleeperLeague): boolean {
-  return (
-    ((league.settings?.taxi_slots ?? 0) > 0 || (league.roster_positions?.length ?? 0) > 20) &&
-    (league.settings?.best_ball ?? 0) === 0
-  );
-}
 
 interface LeagueIntelFetch {
   ownerRoster: SleeperRoster | null;
@@ -247,7 +241,7 @@ async function loadOwnerIntelBatch(
     ownerIds.map(async (ownerId) => {
       try {
         const ownerLeagues = await sleeperApi.getUserLeagues(ownerId, CURRENT_YEAR);
-        return { ownerId, dynastyLeagues: ownerLeagues.filter(isCrossLeagueDynasty), failed: false };
+        return { ownerId, dynastyLeagues: ownerLeagues.filter(isDynastyLeague), failed: false };
       } catch (err) {
         log.warn("cross-league intel: getUserLeagues failed — will retry next pass", { ownerId, err: String(err) });
         return { ownerId, dynastyLeagues: [] as SleeperLeague[], failed: true };

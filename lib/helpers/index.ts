@@ -25,3 +25,4 @@ export * from "./valueTrends";
 export * from "./leagueCommitment";
 export * from "./projectionVolatility";
 export * from "./matchupVolatility";
+export * from "./leagueType";

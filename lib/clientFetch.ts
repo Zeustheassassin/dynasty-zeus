@@ -41,10 +41,12 @@ const inFlight = new Map<string, Promise<unknown>>();
  * error, 429, 5xx) with exponential back-off; throws immediately on a
  * deterministic 4xx so we don't burn retries on a request that can't succeed.
  */
-async function fetchAndParse<T>(url: string): Promise<T> {
+async function fetchAndParse<T>(url: string, timeoutMs?: number, retries = 3): Promise<T> {
   return withRetry<T>(
     async () => {
-      const res = await fetch(url);
+      const res = timeoutMs != null
+        ? await fetch(url, { signal: AbortSignal.timeout(timeoutMs) })
+        : await fetch(url);
       if (!res.ok) {
         if (res.status >= 400 && res.status < 500 && res.status !== 429) {
           throw new NonRetryableHttpError(res.status, url);
@@ -53,7 +55,7 @@ async function fetchAndParse<T>(url: string): Promise<T> {
       }
       return (await res.json()) as T;
     },
-    3,
+    retries,
     (err) => !(err instanceof NonRetryableHttpError),
   );
 }
@@ -67,6 +69,12 @@ interface CachedFetchOpts {
   ttlMs: number;
   cacheKey?: string;
   bypass?: boolean;
+  /** Aborts the underlying fetch after this many ms (each retry attempt gets its own timer). Omit for no timeout. */
+  timeoutMs?: number;
+  /** Total attempts (first try + retries) on a retryable failure. Defaults to 3 — lower this for
+   *  a caller where timeoutMs is already generous, so attempts*timeoutMs doesn't compound into an
+   *  unexpectedly long worst case (a caller migrating off a single-attempt raw fetch(), say). */
+  retries?: number;
 }
 
 function readCache<T>(key: string): { hit: true; data: T } | { hit: false } {
@@ -171,7 +179,7 @@ function writeCache<T>(key: string, data: T, ttlMs: number): void {
 export async function cachedFetch<T>(url: string, opts: CachedFetchOpts): Promise<T> {
   // SSR: no window → no cache layer, but still retry transient failures.
   if (typeof window === "undefined") {
-    return fetchAndParse<T>(url);
+    return fetchAndParse<T>(url, opts.timeoutMs, opts.retries);
   }
 
   const key = CACHE_PREFIX + (opts.cacheKey ?? url);
@@ -187,7 +195,7 @@ export async function cachedFetch<T>(url: string, opts: CachedFetchOpts): Promis
   if (existing) return existing as Promise<T>;
 
   const request = (async (): Promise<T> => {
-    const data = await fetchAndParse<T>(url);
+    const data = await fetchAndParse<T>(url, opts.timeoutMs, opts.retries);
     writeCache(key, data, opts.ttlMs);
     return data;
   })();

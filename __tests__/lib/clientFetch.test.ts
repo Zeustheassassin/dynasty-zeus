@@ -104,6 +104,24 @@ describe("cachedFetch — in-flight coalescing", () => {
   });
 });
 
+describe("cachedFetch — timeoutMs", () => {
+  // Code-review catch (same session as the useSpyState.ts cachedFetch migration): the original
+  // raw fetch() this replaced carried AbortSignal.timeout(FC_FETCH_TIMEOUT_MS); cachedFetch had
+  // no timeout anywhere in its chain, so a stalled (accepted-but-never-resolving) connection
+  // would hang forever instead of failing fast. timeoutMs restores that bound, opt-in only.
+  it("passes an AbortSignal to fetch when timeoutMs is set", async () => {
+    await cachedFetch("/api/sleeper/a", { ttlMs: 1000, timeoutMs: 5000 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, init] = fetchMock.mock.calls[0];
+    expect((init as RequestInit).signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("calls fetch with just the URL (no second arg) when timeoutMs is omitted", async () => {
+    await cachedFetch("/api/sleeper/a", { ttlMs: 1000 });
+    expect(fetchMock).toHaveBeenCalledWith("/api/sleeper/a");
+  });
+});
+
 describe("cachedFetch — retry policy", () => {
   it("does not retry a deterministic 4xx and does not cache it", async () => {
     fetchMock.mockImplementation(async () => json({}, 404));
@@ -123,6 +141,12 @@ describe("cachedFetch — retry policy", () => {
     await expect(cachedFetch("/api/sleeper/a", { ttlMs: 1000 })).rejects.toThrow(/503/);
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(window.localStorage.getItem(P + "/api/sleeper/a")).toBeNull();
+  });
+
+  it("a lower `retries` opt caps attempts below the default of 3", async () => {
+    fetchMock.mockImplementation(async () => json({}, 503));
+    await expect(cachedFetch("/api/sleeper/a", { ttlMs: 1000, retries: 2 })).rejects.toThrow(/503/);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 

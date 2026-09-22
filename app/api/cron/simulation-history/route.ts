@@ -37,9 +37,10 @@ import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 import { safeFetch, withConcurrency } from "../../../../lib/sleeperServer";
 import { getFcValues, type FcRawEntry } from "../../../../lib/server/fcValues";
 import {
-  CURRENT_YEAR, YEARS, ROUNDS, BASE_YEAR,
-  getDraftRoundSlot, computeScoringMultipliers, computeLeagueFpts,
-  getLeagueNumQbs, normalizeRookieName, DEFAULT_SCORING,
+  CURRENT_YEAR, BASE_YEAR,
+  computeScoringMultipliers, computeLeagueFpts,
+  getLeagueNumQbs, normalizeRookieName, DEFAULT_SCORING, isDynastyLeague,
+  buildLeaguePickPool, isValidNflState,
 } from "../../../../lib/helpers";
 import {
   SLEEPER_BASE_URL, SLEEPER_PROJECTIONS_BASE, ROOKIE_BOARD_SHEET_URL,
@@ -64,6 +65,17 @@ export const maxDuration = 300;
 // so overlapping runs keep a similar load profile against Sleeper.
 const CONCURRENCY = 5;
 
+// Cap on simultaneous weekly-matchup fetches WITHIN one league's simulateOneLeague call
+// (code-review catch: this was an uncapped Promise.all over every elapsed week of the season —
+// late-season that's up to 16 concurrent calls per league, and this whole block already runs
+// inside the CONCURRENCY=5 outer per-league fan-out, so the real peak was up to 5*16=80
+// concurrent Sleeper calls just for matchups, before fetchLeagueCore's own 4-per-league fan-out
+// on top — the same "per-item cap alone still bursts when the outer loop isn't bounded" shape
+// the cross-league-intel 429 incident hit). 4 keeps the per-league burst modest regardless of
+// how far into the season a run happens, without adding a second wall-clock budget to reason
+// about.
+const WEEKLY_MATCHUP_CONCURRENCY = 4;
+
 // Wall-clock ceiling for starting NEW league-simulation batches (the dominant
 // cost — one fetchLeagueCore + simulateLeague per league — and the one whose
 // size scales with total unique dynasty leagues across every registered
@@ -73,14 +85,6 @@ const CONCURRENCY = 5;
 // graceful early-stop this guard gives. Same shape and value as
 // league-transactions/route.ts's TIME_BUDGET_MS.
 const TIME_BUDGET_MS = 270_000;
-
-function isDynastyLeague(l: SleeperLeague): boolean {
-  return (
-    ((l.settings?.taxi_slots ?? 0) > 0 ||
-      (l.roster_positions?.length ?? 0) > 20) &&
-    (l.settings?.best_ball ?? 0) === 0
-  );
-}
 
 async function fetchText(url: string, timeoutMs = SLEEPER_REQUEST_TIMEOUT_MS): Promise<string> {
   try {
@@ -392,9 +396,10 @@ async function fetchCanonicalRookieBoard(
     });
 }
 
-// ── Per-league core data — ports hooks/useLeagueOverview.ts's fetch +
-// pick-slot-assignment logic (that hook is "use client" and can't be
-// imported here) using safeFetch instead of the client sleeperApi proxy.
+// ── Per-league core data — the fetch itself ports hooks/useLeagueOverview.ts's shape using
+// safeFetch instead of the client sleeperApi proxy (that hook is "use client" and its own
+// localStorage-cached fetch layer can't run here); pick-slot assignment reuses the shared
+// buildLeaguePickPool(..., "overview") directly, see the comment inside fetchLeagueCore below.
 interface LeagueCore {
   rosters: SleeperRoster[];
   userNames: Record<string, string>;
@@ -421,66 +426,16 @@ async function fetchLeagueCore(league: SleeperLeague): Promise<LeagueCore | null
     userNames[u.user_id] = u.display_name || u.username || "Team";
   });
 
-  const seasonsWithRookieDraft = new Set(
-    draftList
-      .filter((d) => {
-        if (!d?.season) return false;
-        const rounds = d.settings?.rounds ?? d.rounds ?? 99;
-        return rounds <= 6;
-      })
-      .map((d) => String(d.season))
-  );
-  const completedDraftSeasons = new Set<string>();
-  draftList.forEach((d) => {
-    if (d?.status !== "complete" || !d?.season) return;
-    const rounds = d.settings?.rounds ?? d.rounds ?? 99;
-    const season = String(d.season);
-    if (rounds <= 6) completedDraftSeasons.add(season);
-    else if (!seasonsWithRookieDraft.has(season)) completedDraftSeasons.add(season);
-  });
-  const baseYearNum = Number(YEARS[0]);
-  const pickYearWindow: string[] = [];
-  for (let offset = 0; pickYearWindow.length < YEARS.length; offset++) {
-    const y = String(baseYearNum + offset);
-    if (!completedDraftSeasons.has(y)) pickYearWindow.push(y);
-  }
-
-  const allPicks: AugmentedPick[] = [];
-  const rosterToUser: Record<string, string> = {};
-  rosterList.forEach((r) => {
-    rosterToUser[String(r.roster_id)] = r.owner_id;
-    pickYearWindow.forEach((year) => {
-      ROUNDS.forEach((round) => {
-        allPicks.push({
-          season: year,
-          round,
-          roster_id: r.roster_id,
-          owner_id: r.roster_id,
-          previous_owner_id: r.roster_id,
-        });
-      });
-    });
-  });
-  tradedPicksList.forEach((tp) => {
-    const match = allPicks.find(
-      (p) => p.season === tp.season && p.round === tp.round && p.roster_id === tp.roster_id
-    );
-    if (match) match.owner_id = tp.owner_id;
-  });
-
+  // Shared with useAppState.loadRoster/useSpyState/useLeagueOverview — this cron intentionally
+  // ports useLeagueOverview's "overview" mode (full pool, bare-round slot fallback), matching
+  // how it renders every discovered league at once rather than one user's own league view.
+  // Previously hand-duplicated here byte-for-byte (code-review catch: the comment above this
+  // function claimed useLeagueOverview couldn't be imported because it's "use client", but the
+  // actual duplicated logic lives in lib/helpers/picks.ts, which has no such restriction and was
+  // already imported into this file for getDraftRoundSlot) — see
+  // __tests__/hooks/pickWindowCopies.test.ts for the pinned per-mode behavior.
+  const allPicks: AugmentedPick[] = buildLeaguePickPool(rosterList, tradedPicksList, draftList, "overview");
   const currentDraft = draftList.find((d) => d.season === CURRENT_YEAR) ?? null;
-  const order = currentDraft?.draft_order || {};
-  const totalDraftTeams = rosterList.length || Number(currentDraft?.settings?.teams) || 0;
-  allPicks.forEach((pick) => {
-    if (pick.season === CURRENT_YEAR) {
-      const userId = rosterToUser[String(pick.roster_id)];
-      const baseSlot = Number(order[String(userId)] || 0);
-      const slot = getDraftRoundSlot(currentDraft ?? {}, Number(pick.round), baseSlot, totalDraftTeams);
-      pick.slot = slot
-        ? `${pick.round}.${String(slot).padStart(2, "0")}`
-        : `${pick.round}`;
-    }
-  });
 
   const standings: StandingRow[] = rosterList.map((r) => ({
     roster_id: r.roster_id,
@@ -573,10 +528,13 @@ export async function GET(req: NextRequest): Promise<Response> {
     fetchSlimPlayers(),
     safeFetch<SleeperNFLState>(`${SLEEPER_BASE_URL}/state/nfl`),
   ]);
-  // currentWeek/isOffseason drive every league's simulation mode this run — a failed fetch must not
-  // silently masquerade as "offseason" (week 0), which would corrupt every league's history row.
-  if (!nflState) {
-    log.error("Sleeper /state/nfl unavailable — aborting run rather than guessing the current week");
+  // currentWeek/isOffseason drive every league's simulation mode this run — a failed fetch (or a
+  // 200 response with an unexpected/malformed body — safeFetch casts the JSON with no runtime
+  // shape check, so a bare null-check alone would miss that case) must not silently masquerade
+  // as "offseason" (week 0), which would corrupt every league's history row (code-review catch:
+  // isValidNflState added after the original null-check-only version shipped).
+  if (!isValidNflState(nflState)) {
+    log.error("Sleeper /state/nfl unavailable or malformed — aborting run rather than guessing the current week");
     return NextResponse.json({ ok: false, error: "NFL state unavailable" }, { status: 502 });
   }
   const currentWeek =
@@ -607,10 +565,19 @@ export async function GET(req: NextRequest): Promise<Response> {
     return NextResponse.json({ ok: false, error: "FantasyCalc values unavailable" }, { status: 502 });
   }
 
-  const { items: rawProjItems, isSeasonMode: projIsSeasonMode } = await fetchRawProjections(season, currentWeek);
-  const playerStats = await fetchPlayerStats(season, currentWeek);
+  // Independent, non-data-dependent fetches — run concurrently instead of adding their
+  // latencies sequentially (code-review catch: this once-per-run setup phase eats into the
+  // same TIME_BUDGET_MS that gates how many leagues get simulated before the cron stops early).
   const rookieYear = String(BASE_YEAR);
-  const rookies = isOffseason && fc2qb ? await fetchCanonicalRookieBoard(rookieYear, fc2qb) : [];
+  const [
+    { items: rawProjItems, isSeasonMode: projIsSeasonMode },
+    playerStats,
+    rookies,
+  ] = await Promise.all([
+    fetchRawProjections(season, currentWeek),
+    fetchPlayerStats(season, currentWeek),
+    isOffseason && fc2qb ? fetchCanonicalRookieBoard(rookieYear, fc2qb) : Promise.resolve([]),
+  ]);
 
   // ── 3. Per-league simulate + collect rows ──
   let leaguesSimulated = 0;
@@ -647,15 +614,13 @@ export async function GET(req: NextRequest): Promise<Response> {
       let leagueWeeklyMatchups: Record<string, { week: number; matchups: SleeperMatchup[] }[]> = {};
       if (currentWeek > 1) {
         const weeks = Array.from({ length: currentWeek - 1 }, (_, i) => i + 1);
-        const results = await Promise.all(
-          weeks.map(async (week) => ({
-            week,
-            matchups:
-              (await safeFetch<SleeperMatchup[]>(
-                `${SLEEPER_BASE_URL}/league/${league.league_id}/matchups/${week}`
-              )) ?? [],
-          }))
-        );
+        const results = await withConcurrency(weeks, async (week) => ({
+          week,
+          matchups:
+            (await safeFetch<SleeperMatchup[]>(
+              `${SLEEPER_BASE_URL}/league/${league.league_id}/matchups/${week}`
+            )) ?? [],
+        }), WEEKLY_MATCHUP_CONCURRENCY);
         leagueWeeklyMatchups = { [league.league_id]: results };
       }
 

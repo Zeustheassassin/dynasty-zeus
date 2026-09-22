@@ -18,13 +18,14 @@ import { getLocalStorageItem, setLocalStorageItem } from "../lib/hooks/useLocalS
 import { logger } from "../lib/logger";
 import { sleeperApi } from "../lib/sleeperApi";
 import { cachedFetch } from "../lib/clientFetch";
-import { FANTASYCALC_BASE_URL, FC_VALUES_CLIENT_TTL_MS } from "../lib/constants";
+import { FANTASYCALC_BASE_URL, FC_VALUES_CLIENT_TTL_MS, FC_FETCH_TIMEOUT_MS } from "../lib/constants";
 import { getFcValuesRaw } from "../lib/fcValuesStore";
 import { fetchLeagueCore } from "./leagueCoreFetch";
 import {
   CURRENT_YEAR, buildLeaguePickPool, sortOwnerPicks,
   computeScoringMultipliers, getRosterDirectionProfile,
   getAdjustedDirectionBucket, getBucketColor, fetchFantasyCalcValues,
+  isDynastyLeague,
 } from "../lib/helpers";
 import { simulateLeague } from "../lib/helpers/simulation";
 import { projectRookiesByRoster } from "../lib/helpers/rookieProjection";
@@ -45,12 +46,23 @@ const log = logger("hooks/useSpyState");
 // rather than a raw fetch() — gets bounded retry-with-backoff on 429/5xx plus
 // a short localStorage cache, same TTL as the global FC values client store
 // (FC_VALUES_CLIENT_TTL_MS), so re-selecting a league in the same session
-// doesn't re-hit FantasyCalc.
+// doesn't re-hit FantasyCalc. timeoutMs keeps the original per-attempt abort
+// (FC_FETCH_TIMEOUT_MS) the raw fetch() had — a caught error still resolves
+// to {} below, but without it a stalled connection (accepted, never resolves)
+// would hang selectSpyLeague's Promise.all / runAllSpySims' sequential loop
+// forever instead of failing after ~8s. retries:2 (not the cachedFetch default
+// of 3) caps the worst case at ~2*8s+backoff instead of ~3*8s+backoff — still
+// retries once on a transient 429/5xx, but runAllSpySims' sequential per-league
+// loop doesn't compound a full 3-attempt timeout into every league during an
+// actual FantasyCalc outage (both code-review catches, same session).
 async function fetchLeagueCalcValues(leagueId: string): Promise<Record<string, number>> {
   try {
     const data = await cachedFetch<{ player?: { sleeperId?: string }; value: number }[]>(
       `${FANTASYCALC_BASE_URL}/values/current?leagueId=${leagueId}&site=sleeper`,
-      { ttlMs: FC_VALUES_CLIENT_TTL_MS, cacheKey: `fc-league-values:${leagueId}` }
+      {
+        ttlMs: FC_VALUES_CLIENT_TTL_MS, cacheKey: `fc-league-values:${leagueId}`,
+        timeoutMs: FC_FETCH_TIMEOUT_MS, retries: 2,
+      }
     );
     const vals: Record<string, number> = {};
     data.forEach((entry) => {
@@ -62,13 +74,6 @@ async function fetchLeagueCalcValues(leagueId: string): Promise<Record<string, n
     log.error("fetchLeagueCalcValues failed", { leagueId, err: String(err) });
     return {};
   }
-}
-
-function isDynastyLeague(l: SleeperLeague): boolean {
-  return (
-    ((l.settings?.taxi_slots ?? 0) > 0 || (l.roster_positions?.length ?? 0) > 20) &&
-    (l.settings?.best_ball ?? 0) === 0
-  );
 }
 
 // Core per-league read-only fetch + derivations (no values, no sim). Mirrors

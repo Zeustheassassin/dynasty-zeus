@@ -13,6 +13,7 @@ import {
   getCompilationYearRange,
 } from "../../../lib/constants";
 import { ROOKIE_DRAFT_MAX_ROUNDS } from "../../../lib/helpers/season";
+import { isDynastyLeague } from "../../../lib/helpers/leagueType";
 
 // Allow up to 5 minutes for large networks (Vercel Pro/Enterprise)
 export const maxDuration = 300;
@@ -65,13 +66,6 @@ interface SleeperPlayerBasic {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-function isDynastyLeague(l: SleeperLeagueBasic): boolean {
-  return (
-    ((l.settings?.taxi_slots ?? 0) > 0 || (l.roster_positions?.length ?? 0) > 20) &&
-    (l.settings?.best_ball ?? 0) === 0
-  );
-}
 
 function isSuperflex(l: SleeperLeagueBasic): boolean {
   return Array.isArray(l.roster_positions) && l.roster_positions.includes("SUPER_FLEX");

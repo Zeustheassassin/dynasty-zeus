@@ -1,6 +1,6 @@
 "use client";
 import { useState, useRef, type Dispatch, type SetStateAction } from "react";
-import { CURRENT_YEAR, getDraftRoundSlot } from "../lib/helpers";
+import { CURRENT_YEAR, getDraftRoundSlot, isDynastyLeague } from "../lib/helpers";
 import { logger } from "../lib/logger";
 import { sleeperApi } from "../lib/sleeperApi";
 import { withConcurrency } from "../lib/concurrency";
@@ -47,11 +47,7 @@ export function useUserTrades(): UseUserTradesReturn {
     try {
       const allLeagues = await sleeperApi.getUserLeagues(targetUserId, CURRENT_YEAR);
 
-      const dynastyLeagues = allLeagues.filter((l) =>
-        ((l.settings?.taxi_slots ?? 0) > 0 ||
-          (l.roster_positions?.length ?? 0) > 20) &&
-        (l.settings?.best_ball ?? 0) === 0
-      );
+      const dynastyLeagues = allLeagues.filter(isDynastyLeague);
 
       const oneMonthAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
       const allTrades: AnnotatedTrade[] = [];

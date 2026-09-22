@@ -532,20 +532,12 @@ export interface GamedayLineupRow {
   paceSource: "projection" | "points" | "stats";
 }
 
-export interface GamedayReserveRow {
-  playerId: string;
-  player: SleeperPlayer | null;
-  actualPoints: number;
-  remainingProjection: number;
-  projectedFinal: number;
-  remainingStdDev: number;
-  kickoffAt: number | null;
-  kickoffLabel: string;
-  gameState: string;
-  gameDetail: string;
-  nflOpponent: string | null;
-  paceSource: "projection" | "points" | "stats";
-}
+/** Same shape as GamedayLineupRow minus `slot` — a bench/taxi player isn't in a roster slot.
+ *  Was a hand-duplicated copy of every field (code-review catch: 5 fields have already been
+ *  added to both by hand together, so a future field added to one and not the other would
+ *  silently drift from the runtime object lib/helpers/gameday.ts's buildPlayerLine actually
+ *  produces for both starters and reserves). */
+export type GamedayReserveRow = Omit<GamedayLineupRow, "slot">;
 
 /** One "bench player outscored a starter" swap in hindsight. */
 export interface BenchRegretSwap {

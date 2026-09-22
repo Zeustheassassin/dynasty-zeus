@@ -27,6 +27,7 @@ import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 import { safeFetch, withConcurrency } from "../../../../lib/sleeperServer";
 import { getDraftRoundSlot } from "../../../../lib/helpers/picks";
 import { CURRENT_YEAR } from "../../../../lib/helpers/season";
+import { isDynastyLeague } from "../../../../lib/helpers/leagueType";
 import { SLEEPER_BASE_URL } from "../../../../lib/constants";
 import { logger } from "../../../../lib/logger";
 import { verifyCron } from "../../../../lib/server/verifyCron";
@@ -114,14 +115,6 @@ interface CacheRow {
   created: number;
   payload: AnnotatedTransactionPayload;
   updated_at: string;
-}
-
-function isDynastyLeague(l: SleeperLeague): boolean {
-  return (
-    ((l.settings?.taxi_slots ?? 0) > 0 ||
-      (l.roster_positions?.length ?? 0) > 20) &&
-    (l.settings?.best_ball ?? 0) === 0
-  );
 }
 
 /**

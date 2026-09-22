@@ -76,8 +76,11 @@ export const formatKickoffTime = (kickoffAt: number | null) => {
 
 /** A scoreboard covering fewer teams than this is treated as a failed/partial
  *  fetch, not proof that a missing team is on bye. A real week has 12+ teams
- *  playing even in the sparsest bye weeks. */
-const MIN_TEAMS_TO_TRUST_SCHEDULE = 8;
+ *  playing even in the sparsest bye weeks. (Code-review catch: this was 8,
+ *  contradicting its own comment — a truncated ESPN response of 5-6 games
+ *  would have been trusted as complete, silently zeroing out every player on
+ *  a missing team that actually had a game in progress.) */
+const MIN_TEAMS_TO_TRUST_SCHEDULE = 12;
 
 /**
  * Resolves a player's real game state from the NFL scoreboard, keyed by team
