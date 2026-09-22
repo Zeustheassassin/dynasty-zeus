@@ -12,8 +12,8 @@
 // history cron writes nothing rather than stamp a fake data point.
 // ============================================================
 
-import { supabase } from "../supabaseclient";
-import { upsertCacheRow, type CacheTable } from "../supabaseAdmin";
+import { readCacheRow, type CacheTable } from "../supabaseclient";
+import { upsertCacheRow } from "../supabaseAdmin";
 import { afterResponse } from "../afterResponse";
 import {
   FANTASYCALC_BASE_URL,
@@ -94,17 +94,9 @@ function fcUrl(numQbs: number, isDynasty: boolean): string {
 }
 
 async function readCache(table: CacheTable, numQbs: number): Promise<{ data: FcRawEntry[]; cachedAt: string } | null> {
-  try {
-    const { data: row } = await supabase
-      .from(table)
-      .select("data, cached_at")
-      .eq("num_qbs", numQbs)
-      .single();
-    if (!row || !isUsableFcPayload(row.data)) return null;
-    return { data: row.data, cachedAt: String(row.cached_at) };
-  } catch {
-    return null; // cache read failed — treat as a miss
-  }
+  const row = await readCacheRow<{ data: unknown; cached_at: unknown }>(table, [["num_qbs", numQbs]], "data, cached_at");
+  if (!row || !isUsableFcPayload(row.data)) return null;
+  return { data: row.data, cachedAt: String(row.cached_at) };
 }
 
 async function fetchLive(numQbs: number, isDynasty: boolean): Promise<FcRawEntry[] | null> {

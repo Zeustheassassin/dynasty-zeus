@@ -86,32 +86,25 @@ export const getDraftRoundSlot = (
 const MAX_SUPPORTED_ROUNDS = 6;
 const ALL_ROUNDS = Array.from({ length: MAX_SUPPORTED_ROUNDS }, (_, i) => i + 1);
 
-export interface PickPoolOptions {
-  /** "adaptive": builds up to MAX_SUPPORTED_ROUNDS then trims to
-   *  max(league settings rounds, traded-pick max round, ROUNDS.length) — used by loadRoster and
-   *  useSpyState, which show one league's full pick board. "fixed": builds exactly ROUNDS.length
-   *  rounds with no trim — used by useLeagueOverview, which renders every league at once. */
-  roundsMode: "adaptive" | "fixed";
-  /** Fallback slot label for a current-year pick with no resolvable draft-order slot.
-   *  "padded-roster-id": `${round}.${paddedRosterId}` (loadRoster/useSpyState).
-   *  "bare-round": `${round}` (useLeagueOverview). */
-  slotFallback: "padded-roster-id" | "bare-round";
-  /** Whether a non-current-year pick gets a bare-round slot label (loadRoster/useSpyState) or is
-   *  left with no slot at all (useLeagueOverview). */
-  labelFutureSlots: boolean;
-}
+/** "perLeague": builds up to MAX_SUPPORTED_ROUNDS then trims to max(league settings rounds,
+ *  traded-pick max round, ROUNDS.length), falls back to a padded-roster-id slot label, and
+ *  labels non-current-year picks with a bare round — used by loadRoster and useSpyState, which
+ *  show one league's full pick board. "overview": builds exactly ROUNDS.length rounds with no
+ *  trim, falls back to a bare-round slot label, and leaves non-current-year picks unlabeled —
+ *  used by useLeagueOverview, which renders every league at once. */
+export type PickPoolMode = "perLeague" | "overview";
 
 /** Builds a league's full pick pool (every roster's picks across the pick-year window), shared by
  *  the three client copies of this logic: useAppState.loadRoster, useSpyState.loadSpyLeagueCore,
  *  and useLeagueOverview. The season-window and traded-pick-application rules below are identical
- *  across all three callers; `options` captures where they intentionally diverge (round depth and
+ *  across all three callers; `mode` captures where they intentionally diverge (round depth and
  *  slot-label fallback) — see __tests__/hooks/pickWindowCopies.test.ts, which pins each
  *  difference per caller so a future edit here can't silently change one of them. */
 export function buildLeaguePickPool(
   rosters: SleeperRoster[],
   tradedPicks: SleeperTradedPick[],
   drafts: SleeperDraft[],
-  options: PickPoolOptions
+  mode: PickPoolMode
 ): AugmentedPick[] {
   // Skip seasons whose rookie draft is complete (those picks are spent); extend the window
   // forward to keep it the same length. A startup-sized draft (>6 rounds) also retires that
@@ -141,7 +134,7 @@ export function buildLeaguePickPool(
     if (!completedDraftSeasons.has(y)) pickYearWindow.push(y);
   }
 
-  const buildRounds = options.roundsMode === "adaptive" ? ALL_ROUNDS : ROUNDS;
+  const buildRounds = mode === "perLeague" ? ALL_ROUNDS : ROUNDS;
   let tempPicks: AugmentedPick[] = [];
   pickYearWindow.forEach((year) => {
     rosters.forEach((r) => {
@@ -163,7 +156,7 @@ export function buildLeaguePickPool(
 
   const currentDraft = drafts.find((d) => d.season === CURRENT_YEAR);
 
-  if (options.roundsMode === "adaptive") {
+  if (mode === "perLeague") {
     const settingsRounds = Number(currentDraft?.settings?.rounds ?? currentDraft?.rounds) || 0;
     const tradedMaxRound = tradedPicks.reduce((max, tp) => Math.max(max, Number(tp.round) || 0), 0);
     const leagueRounds = Math.max(settingsRounds, tradedMaxRound, ROUNDS.length);
@@ -182,12 +175,12 @@ export function buildLeaguePickPool(
       const slot = getDraftRoundSlot(currentDraft ?? {}, Number(pick.round), baseSlot, totalDraftTeams);
       if (slot) {
         pick.slot = `${pick.round}.${String(slot).padStart(2, "0")}`;
-      } else if (options.slotFallback === "padded-roster-id") {
+      } else if (mode === "perLeague") {
         pick.slot = `${pick.round}.${String(pick.roster_id).padStart(2, "0")}`;
       } else {
         pick.slot = `${pick.round}`;
       }
-    } else if (options.labelFutureSlots) {
+    } else if (mode === "perLeague") {
       pick.slot = `${pick.round}`;
     }
   });

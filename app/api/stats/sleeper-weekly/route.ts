@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '../../../../lib/supabaseclient';
+import { readCacheRow } from '../../../../lib/supabaseclient';
 import { SLEEPER_BASE_URL, SLEEPER_STATS_TTL_MS } from '../../../../lib/constants';
 import { checkRateLimit } from '../../../../lib/rateLimit';
 import { apiError, parseIntParam } from '../../../../lib/apiHelpers';
@@ -47,22 +47,18 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const cacheSeason = `${CACHE_KEY_VERSION}-${season}`;
 
   // ── 1. Check Supabase cache ──────────────────────────────
-  try {
-    const { data: cached } = await supabase
-      .from('sleeper_stats_cache')
-      .select('data, cached_at')
-      .eq('season', cacheSeason)
-      .eq('week', week)
-      .single();
-
-    if (
-      cached &&
-      hasAnyStats(cached.data) &&
-      Date.now() - new Date(cached.cached_at).getTime() < SLEEPER_STATS_TTL_MS
-    ) {
-      return NextResponse.json(cached.data);
-    }
-  } catch { /* cache miss */ }
+  const cached = await readCacheRow<{ data: unknown; cached_at: unknown }>(
+    'sleeper_stats_cache',
+    [['season', cacheSeason], ['week', week]],
+    'data, cached_at'
+  );
+  if (
+    cached &&
+    hasAnyStats(cached.data) &&
+    Date.now() - new Date(String(cached.cached_at)).getTime() < SLEEPER_STATS_TTL_MS
+  ) {
+    return NextResponse.json(cached.data);
+  }
 
   // ── 2. Fetch from Sleeper ────────────────────────────────
   try {

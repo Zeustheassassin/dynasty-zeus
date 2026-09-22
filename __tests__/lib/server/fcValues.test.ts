@@ -13,8 +13,8 @@ vi.mock("@/lib/supabaseAdmin", () => ({ upsertCacheRow: h.upsertCacheRow }));
 let cacheRow: { data: unknown; cached_at: string } | null = null;
 let cacheThrows = false;
 let readFrom: string[] = [];
-vi.mock("@/lib/supabaseclient", () => ({
-  supabase: {
+vi.mock("@/lib/supabaseclient", () => {
+  const supabase = {
     from: (table: string) => {
       const q: Record<string, unknown> = {};
       q.select = () => { readFrom.push(table); return q; };
@@ -25,8 +25,16 @@ vi.mock("@/lib/supabaseclient", () => ({
       };
       return q;
     },
-  },
-}));
+  };
+  // Mirrors the real lib/supabaseclient.ts readCacheRow's contract (miss/failure -> null)
+  // directly against this test's state, rather than re-simulating the query chain.
+  const readCacheRow = async (table: string, _filters: [string, unknown][], _columns: string) => {
+    readFrom.push(table);
+    if (cacheThrows) return null;
+    return cacheRow ?? null;
+  };
+  return { supabase, readCacheRow };
+});
 
 import { getFcValues, isUsableFcPayload, type FcRawEntry } from "@/lib/server/fcValues";
 import { FC_MIN_VALID_ENTRIES } from "@/lib/constants";

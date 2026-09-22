@@ -29,6 +29,7 @@ import {
   PROJECTION_REFRESH_MS,
 } from "../../lib/helpers";
 import { projectRookiesByRoster } from "../../lib/helpers/rookieProjection";
+import { useLatestRequest } from "../../hooks/useLatestRequest";
 import { useProjections } from "../../hooks/useProjections";
 import { useSleeperUser } from "../../hooks/useSleeperUser";
 import { usePlayerStats } from "../../hooks/usePlayerStats";
@@ -1113,12 +1114,12 @@ useEffect(() => {
   // -------------------------
 // LOAD LEAGUE 
 // -------------------------
-const loadRosterSeqRef = useRef(0);
+const { begin: beginLoadRoster, isCurrent: isLoadRosterCurrent } = useLatestRequest();
 const loadRoster = useCallback(async (league: SleeperLeague) => {
   // Sequence guard: rapid league switches overlap, and a slower earlier call must not commit
   // its rosters/picks/users over the league the user actually ended up on.
-  const seq = ++loadRosterSeqRef.current;
-  const isStale = () => seq !== loadRosterSeqRef.current;
+  const seq = beginLoadRoster();
+  const isStale = () => !isLoadRosterCurrent(seq);
 
   // ── Save recent league ───────────────────────────────────────────────────
   let recents = getLocalStorageItem<{ league_id: string; name: string }[]>("recentLeagues", []);
@@ -1180,11 +1181,7 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
   // ── Steps 2/4/6: Pick window, traded-pick ownership, and draft slots ─────
   // Shared with useSpyState/useLeagueOverview via buildLeaguePickPool — see
   // __tests__/hooks/pickWindowCopies.test.ts for the pinned per-caller behavior.
-  const tempPicks = buildLeaguePickPool(allRosters, tradedPicksData, draftsData, {
-    roundsMode: "adaptive",
-    slotFallback: "padded-roster-id",
-    labelFutureSlots: true,
-  });
+  const tempPicks = buildLeaguePickPool(allRosters, tradedPicksData, draftsData, "perLeague");
   const currentDraft = draftsData.find((d) => d.season === CURRENT_YEAR);
 
   // ── Step 5: My picks (after trades applied and rounds trimmed) ───────────
@@ -1243,7 +1240,7 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
   );
   setReadyLeagueId(league.league_id);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- setReadyLeagueId is a stable setter; TDZ prevents adding to deps (useSimulatorState is called after this callback)
-}, [user, players]);
+}, [user, players, beginLoadRoster, isLoadRosterCurrent]);
 loadRosterRef.current = loadRoster;
 
 const refreshFcTrends = async () => {
@@ -2654,9 +2651,9 @@ const saveSnapshotNow = async () => {
   // demand instead of waiting for a full page reload.
   // requestId guard: a manual refresh can overlap the mount-time load (or a second manual
   // refresh click) — only the most recently issued request may commit its result.
-  const transactionsRequestIdRef = useRef(0);
+  const { begin: beginTransactionsLoad, isCurrent: isTransactionsLoadCurrent } = useLatestRequest();
   const loadLeagueTransactions = useCallback(async (uid: string) => {
-    const requestId = ++transactionsRequestIdRef.current;
+    const requestId = beginTransactionsLoad();
     setLoadingTransactions(true);
     try {
       const { data, error } = await supabase
@@ -2665,7 +2662,7 @@ const saveSnapshotNow = async () => {
         .eq("user_id", uid)
         .order("created", { ascending: false })
         .limit(200);
-      if (requestId !== transactionsRequestIdRef.current) return;
+      if (!isTransactionsLoadCurrent(requestId)) return;
       if (error) {
         log.error("league_transactions_cache load failed", { err: error.message });
         return;
@@ -2675,9 +2672,9 @@ const saveSnapshotNow = async () => {
       );
       setLeagueTransactions(txs);
     } finally {
-      if (requestId === transactionsRequestIdRef.current) setLoadingTransactions(false);
+      if (isTransactionsLoadCurrent(requestId)) setLoadingTransactions(false);
     }
-  }, []);
+  }, [beginTransactionsLoad, isTransactionsLoadCurrent]);
 
   useEffect(() => {
     if (!supabaseUser) return;

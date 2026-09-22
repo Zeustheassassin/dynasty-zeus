@@ -115,11 +115,7 @@ async function loadSpyLeagueCore(
 
   // Pick pool: shared with useAppState.loadRoster/useLeagueOverview via buildLeaguePickPool —
   // see __tests__/hooks/pickWindowCopies.test.ts for the pinned per-caller behavior.
-  const tempPicks = buildLeaguePickPool(rosters, tradedPicks, drafts, {
-    roundsMode: "adaptive",
-    slotFallback: "padded-roster-id",
-    labelFutureSlots: true,
-  });
+  const tempPicks = buildLeaguePickPool(rosters, tradedPicks, drafts, "perLeague");
   const currentDraft = drafts.find((d) => d.season === CURRENT_YEAR) ?? null;
 
   const picks = myRoster ? sortOwnerPicks(tempPicks, myRoster.roster_id) : [];

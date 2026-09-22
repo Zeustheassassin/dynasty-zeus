@@ -72,21 +72,8 @@ export async function safeFetch<T>(
   return null;
 }
 
-/**
- * Runs `fn` over all `items` with at most `limit` concurrent
- * operations. Processes in strict batches (Promise.all per slice)
- * so we never have more than `limit` requests in flight at once.
- *
- * Trades a small amount of total throughput for predictable load
- * on Sleeper — pairs with safeFetch's 429 backoff to keep us under
- * the rate ceiling during large fan-outs.
- */
-export async function withConcurrency<T>(
-  items: T[],
-  fn: (item: T) => Promise<void>,
-  limit: number
-): Promise<void> {
-  for (let i = 0; i < items.length; i += limit) {
-    await Promise.all(items.slice(i, i + limit).map(fn));
-  }
-}
+// Re-exported so existing server-side callers (cron routes, compile-consensus) don't need
+// an import-path change. The implementation itself is client-safe too — see ./concurrency —
+// but this module as a whole is not (see the file header): it bypasses the client
+// proxy/cache and will hammer Sleeper directly if imported from client code.
+export { withConcurrency } from "./concurrency";

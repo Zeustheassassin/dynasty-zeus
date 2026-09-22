@@ -28,7 +28,13 @@ vi.mock("@/lib/supabaseclient", () => {
     q.upsert = () => { anonWrites++; return Promise.resolve({ error: { message: "new row violates row-level security policy" } }); };
     return q;
   };
-  return { supabase: { from: (table: string) => chain(table) } };
+  // Mirrors the real lib/supabaseclient.ts readCacheRow's contract (miss -> null) directly
+  // against this same test state, rather than re-simulating the query chain.
+  const readCacheRow = async (table: string, _filters: [string, unknown][], _columns: string) => {
+    readTables.push(table);
+    return cachedRow ?? null;
+  };
+  return { supabase: { from: (table: string) => chain(table) }, readCacheRow };
 });
 
 type Route = { GET: (req: never) => Promise<Response> };

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '../../../lib/supabaseclient';
+import { readCacheRow } from '../../../lib/supabaseclient';
 import { SLEEPER_BASE_URL, CROSS_LEAGUE_ROSTERS_TTL_MS } from '../../../lib/constants';
 import { checkRateLimit } from '../../../lib/rateLimit';
 import { upsertCacheRow } from '../../../lib/supabaseAdmin';
@@ -21,18 +21,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   // ── 1. Check Supabase cache ──────────────────────────────
-  try {
-    const { data: cached } = await supabase
-      .from('cross_league_rosters_cache')
-      .select('roster, cached_at')
-      .eq('sleeper_user_id', sleeperUserId)
-      .eq('league_id', leagueId)
-      .single();
-
-    if (cached && Date.now() - new Date(cached.cached_at).getTime() < CROSS_LEAGUE_ROSTERS_TTL_MS) {
-      return NextResponse.json({ roster: cached.roster });
-    }
-  } catch { /* cache miss */ }
+  const cached = await readCacheRow<{ roster: unknown; cached_at: unknown }>(
+    'cross_league_rosters_cache',
+    [['sleeper_user_id', sleeperUserId], ['league_id', leagueId]],
+    'roster, cached_at'
+  );
+  if (cached && Date.now() - new Date(String(cached.cached_at)).getTime() < CROSS_LEAGUE_ROSTERS_TTL_MS) {
+    return NextResponse.json({ roster: cached.roster });
+  }
 
   // ── 2. Fetch from Sleeper ────────────────────────────────
   try {

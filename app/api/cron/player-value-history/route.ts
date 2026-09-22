@@ -36,7 +36,7 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 import { logger } from "../../../../lib/logger";
 import { getFcValues, type FcRawEntry } from "../../../../lib/server/fcValues";
 import { verifyCron } from "../../../../lib/server/verifyCron";
@@ -65,15 +65,11 @@ export async function GET(req: NextRequest): Promise<Response> {
   const unauthorized = verifyCron(req, log);
   if (unauthorized) return unauthorized;
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!supabaseUrl || !serviceRoleKey) {
+  const supabase = getSupabaseAdmin();
+  if (!supabase) {
     log.error("Supabase service-role env vars not configured");
     return NextResponse.json({ error: "Server misconfiguration" }, { status: 500 });
   }
-  const supabase = createClient(supabaseUrl, serviceRoleKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
 
   // allowStale:false — a history row must never be stamped with values older than the freshness window.
   const fc = await getFcValues(2, true, { maxAgeMs: SNAPSHOT_MAX_AGE_MS, allowStale: false });

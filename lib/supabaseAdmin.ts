@@ -15,6 +15,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { logger } from "./logger";
 import { withRetry } from "./withRetry";
+import type { CacheTable } from "./supabaseclient";
 
 const log = logger("lib/supabaseAdmin");
 
@@ -38,13 +39,6 @@ export function getSupabaseAdmin(): SupabaseClient | null {
   admin = createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
   return admin;
 }
-
-/** Tables `upsertCacheRow` may write — a closed list so this helper can't be pointed at user data. */
-export type CacheTable =
-  | "fc_values_cache"
-  | "fc_redraft_values_cache"
-  | "sleeper_stats_cache"
-  | "cross_league_rosters_cache";
 
 /** PostgrestError is a plain object, not an Error, so `String(err)` would log "[object Object]". */
 function describeError(err: unknown): { err: string; code?: string } {

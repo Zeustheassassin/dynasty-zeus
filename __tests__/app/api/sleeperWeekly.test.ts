@@ -23,8 +23,8 @@ let upsertTables: string[] = [];
 let anonWrites = 0;
 let selectEqs: Array<[string, unknown]> = [];
 
-vi.mock("@/lib/supabaseclient", () => ({
-  supabase: {
+vi.mock("@/lib/supabaseclient", () => {
+  const supabase = {
     from: (_table: string) => ({
       select: () => ({
         eq: (col: string, val: unknown) => ({
@@ -42,8 +42,15 @@ vi.mock("@/lib/supabaseclient", () => ({
         return Promise.resolve({ error: { message: "new row violates row-level security policy" } });
       },
     }),
-  },
-}));
+  };
+  // Mirrors the real lib/supabaseclient.ts readCacheRow's contract (miss/failure -> null)
+  // directly against this test's state, rather than re-simulating the query chain.
+  const readCacheRow = async (_table: string, filters: [string, unknown][], _columns: string) => {
+    filters.forEach(([col, val]) => selectEqs.push([col, val]));
+    return cachedRow ?? null;
+  };
+  return { supabase, readCacheRow };
+});
 
 async function loadGET() {
   vi.resetModules();

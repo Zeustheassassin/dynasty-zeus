@@ -3,6 +3,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { logger } from "../lib/logger";
 import { sleeperApi } from "../lib/sleeperApi";
 import { buildLeaguePickPool } from "../lib/helpers";
+import { withConcurrency } from "../lib/concurrency";
 import { LEAGUE_OVERVIEW_CONCURRENCY } from "../lib/constants";
 import type {
   SleeperLeague,
@@ -60,11 +61,7 @@ export function useLeagueOverview(
           // Overview renders every league at once, so it caps round depth at ROUNDS.length
           // and skips the per-league round trim/slot fallback the other two callers use —
           // see __tests__/hooks/pickWindowCopies.test.ts for the pinned per-caller behavior.
-          const tempPicks = buildLeaguePickPool(rostersData, tradedPicksData, draftsData, {
-            roundsMode: "fixed",
-            slotFallback: "bare-round",
-            labelFutureSlots: false,
-          });
+          const tempPicks = buildLeaguePickPool(rostersData, tradedPicksData, draftsData, "overview");
 
           return { league, rosters: rostersData, picks: tempPicks, userMap: leagueUserMap };
         } catch (err) {
@@ -76,12 +73,9 @@ export function useLeagueOverview(
       // Fetched LEAGUE_OVERVIEW_CONCURRENCY leagues at a time (4 Sleeper calls each) rather
       // than firing every league at once — an uncapped fan-out here hit the same 429 risk
       // Batch 5 found and fixed for cross-league intel (Sept 22 code-review P1 finding #3).
-      const results: Array<Awaited<ReturnType<typeof fetchLeague>>> = [];
-      for (let i = 0; i < currentLeagues.length; i += LEAGUE_OVERVIEW_CONCURRENCY) {
-        if (seq !== overviewSeq.current) return; // a newer load started — stop fetching for this one
-        const slice = currentLeagues.slice(i, i + LEAGUE_OVERVIEW_CONCURRENCY);
-        results.push(...(await Promise.all(slice.map(fetchLeague))));
-      }
+      const results = await withConcurrency(currentLeagues, fetchLeague, LEAGUE_OVERVIEW_CONCURRENCY, {
+        shouldBail: () => seq !== overviewSeq.current, // a newer load started — stop fetching for this one
+      });
 
       if (seq !== overviewSeq.current) return; // a newer load started — discard stale result
       const byLeague: Record<string, LeagueOverviewEntry> = {};
