@@ -5,6 +5,7 @@ import {
   YEARS,
   ROUNDS,
   calendarSeasonYear,
+  getCurrentNflWeek,
   getSeasonYear,
   isValidNflState,
 } from "@/lib/helpers/season";
@@ -143,5 +144,47 @@ describe("ROUNDS", () => {
 
   it("has 4 rounds", () => {
     expect(ROUNDS).toHaveLength(4);
+  });
+});
+
+describe("getCurrentNflWeek", () => {
+  // Sept 22 deferred follow-up #4: six places in app/hooks/useAppState.ts re-derived this gate
+  // independently, so a change to the rule could land in some copies and not others. The rule
+  // lives here now specifically so it can be tested -- useAppState.ts has no test harness.
+
+  it("returns the live week during the regular season", () => {
+    expect(getCurrentNflWeek({ season_type: "regular", week: 7 })).toBe(7);
+  });
+
+  it("returns 0 outside the regular season even when a week is present", () => {
+    // Sleeper keeps reporting a week through the pre- and post-season; callers treat 0 as
+    // "season mode" (season-long projections, no schedule load, week-scoped UI hidden).
+    expect(getCurrentNflWeek({ season_type: "pre", week: 3 })).toBe(0);
+    expect(getCurrentNflWeek({ season_type: "post", week: 20 })).toBe(0);
+    expect(getCurrentNflWeek({ season_type: "off", week: 0 })).toBe(0);
+  });
+
+  it("returns 0 for a regular season reporting week 0", () => {
+    expect(getCurrentNflWeek({ season_type: "regular", week: 0 })).toBe(0);
+  });
+
+  it("returns 0 for a missing, null or absent nflState", () => {
+    expect(getCurrentNflWeek(null)).toBe(0);
+    expect(getCurrentNflWeek(undefined)).toBe(0);
+    expect(getCurrentNflWeek({})).toBe(0);
+    expect(getCurrentNflWeek({ season_type: "regular" })).toBe(0);
+    expect(getCurrentNflWeek({ season_type: "regular", week: null })).toBe(0);
+  });
+
+  it("returns 0 rather than NaN for an unparseable week", () => {
+    // safeFetch/cachedFetch cast a 200 body with no runtime shape check, so a malformed week
+    // can reach here. NaN would be falsy at every call site but would also leak into
+    // loadProjections/loadSchedule as NaN; 0 is the value they all already handle.
+    expect(getCurrentNflWeek({ season_type: "regular", week: "junk" } as never)).toBe(0);
+    expect(getCurrentNflWeek({ season_type: "regular", week: NaN })).toBe(0);
+  });
+
+  it("treats a negative week as out of season", () => {
+    expect(getCurrentNflWeek({ season_type: "regular", week: -1 })).toBe(0);
   });
 });

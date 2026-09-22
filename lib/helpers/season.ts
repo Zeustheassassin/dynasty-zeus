@@ -58,6 +58,25 @@ export function isValidNflState(
   );
 }
 
+/** The live NFL week, or 0 whenever that week shouldn't drive week-scoped data — i.e. outside
+ *  the regular season, or on a missing/zero/unparseable week. Returning 0 rather than null is
+ *  deliberate: every caller treats 0 as "season mode" (fetch season-long projections, skip the
+ *  schedule load, hide week-scoped UI), so one falsy value covers pre-season, post-season and
+ *  the off-season without each caller re-deciding.
+ *
+ *  Six places in useAppState.ts re-derived this independently before it was collapsed here, so
+ *  a change to the gating rule could land in some copies and not others.
+ *
+ *  NOT the right source for stats lookups: those want `display_week` (the week whose actuals
+ *  Sleeper is currently serving, which lags `week` mid-week) and need to tell the off-season
+ *  apart from a week of 0 — see useAppState.ts's nflStatsWeek. */
+export function getCurrentNflWeek(
+  nflState?: { season_type?: string | null; week?: number | null } | null,
+): number {
+  const rawWeek = Number(nflState?.week || 0);
+  return nflState?.season_type === "regular" && rawWeek > 0 ? rawWeek : 0;
+}
+
 /** Three-year NFL-season-year window starting from the current season year
  *  (e.g. ["2026","2027","2028"]). */
 export const YEARS = Array.from({ length: 3 }, (_, i) => String(Number(CURRENT_YEAR) + i));

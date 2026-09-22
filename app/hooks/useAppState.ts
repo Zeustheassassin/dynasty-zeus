@@ -26,6 +26,7 @@ import {
   resolveGameState,
   getProjectionKickoffAt,
   getGamedayPollPlan,
+  getCurrentNflWeek,
   PROJECTION_REFRESH_MS,
 } from "../../lib/helpers";
 import { projectRookiesByRoster } from "../../lib/helpers/rookieProjection";
@@ -219,6 +220,19 @@ const {
 const nflStatsSeason = nflState?.season_type === "regular" ? (nflState?.season ?? null) : null;
 const nflStatsWeek   = nflState?.season_type === "regular" ? (nflState?.display_week ?? nflState?.week ?? null) : null;
 const { playerStats } = usePlayerStats(nflStatsSeason, nflStatsWeek);
+
+// The current NFL week, or 0 outside the regular season. Six places below used to re-derive
+// this independently (the Starters, Simulator/Overview, Gameday and Gameday-Dashboard effects,
+// the Gameday week memo, and the bye-week alert effect), which meant a future change to the
+// gating rule could land in some copies and not others. They were all equivalent: `week ?? 0`
+// and `Number(week || 0)` differ only when the input is falsy-but-not-nullish, and both fall
+// back to 0 here, so collapsing them changed nothing about the null-handling.
+//
+// The rule itself lives in lib/helpers/season.ts so it can be unit-tested — this file has no
+// standalone test harness. Deliberately NOT shared with nflStatsWeek above; see the helper's
+// docblock for why that one is a different computation. A plain const rather than useMemo
+// because the value is a primitive: dependency arrays compare it by value.
+const currentNflWeek = getCurrentNflWeek(nflState);
 
 const [pickFcValues, setPickFcValues] = useState<Record<string, number>>({});
 const [fcTrendData, setFcTrendData] = useState<FcTrendEntry[]>([]);
@@ -875,8 +889,7 @@ useEffect(() => {
     // settings change — switching leagues while already on this tab left every score
     // reading 0 until some OTHER tab (Simulator, Gameday, Data Hub Projections)
     // happened to reload it. Mirrors the Simulator/Overview effect below.
-    const isRegularSeason = nflState?.season_type === "regular" && (nflState?.week ?? 0) > 0;
-    const startersProjectionWeek = isRegularSeason ? Number(nflState?.week) : 0;
+    const startersProjectionWeek = currentNflWeek;
     if (projectionWeek !== startersProjectionWeek) {
       setProjectionWeek(startersProjectionWeek);
       setProjectionLoaded(false);
@@ -892,7 +905,7 @@ useEffect(() => {
     loadSchedule(startersProjectionWeek);
   }
   // projectionWeek/projectionLoaded are in deps and set inside this effect; the conditional guards prevent loops
-}, [mainTab, leagueHubTab, selectedLeague?.league_id, selectedLeague, nflState?.week, nflState?.season_type, projectionWeek, projectionLoaded, enabledExtraSources, loadCalcValues, loadNflState, loadProjections, loadSchedule, setProjectionLoaded, setProjectionWeek]);
+}, [mainTab, leagueHubTab, selectedLeague?.league_id, selectedLeague, currentNflWeek, projectionWeek, projectionLoaded, enabledExtraSources, loadCalcValues, loadNflState, loadProjections, loadSchedule, setProjectionLoaded, setProjectionWeek]);
 
 useEffect(() => {
   if (mainTab === "LEAGUES" && leagueHubTab === "POWER_RANKINGS" && selectedLeague?.league_id) {
@@ -919,8 +932,7 @@ useEffect(() => {
   if (mainTab === "LEAGUES" && (leagueHubTab === "SIMULATOR" || leagueHubTab === "OVERVIEW")) {
     loadNflState();
     loadRedraftValues();
-    const isRegularSeason = nflState?.season_type === "regular" && (nflState?.week ?? 0) > 0;
-    const simulatorProjectionWeek = isRegularSeason ? Number(nflState?.week) : 0;
+    const simulatorProjectionWeek = currentNflWeek;
     if (projectionWeek !== simulatorProjectionWeek) {
       setProjectionWeek(simulatorProjectionWeek);
       setProjectionLoaded(false);
@@ -933,7 +945,7 @@ useEffect(() => {
     loadSchedule(simulatorProjectionWeek);
   }
   // projectionWeek/projectionLoaded are in deps and set inside this effect; the conditional guards prevent loops
-}, [mainTab, leagueHubTab, selectedLeague?.league_id, nflState?.week, nflState?.season_type, projectionWeek, projectionLoaded, enabledExtraSources, loadRedraftValues, loadProjections, loadNflState, loadSchedule, setProjectionLoaded, setProjectionWeek]);
+}, [mainTab, leagueHubTab, selectedLeague?.league_id, currentNflWeek, projectionWeek, projectionLoaded, enabledExtraSources, loadRedraftValues, loadProjections, loadNflState, loadSchedule, setProjectionLoaded, setProjectionWeek]);
 
 useEffect(() => {
   if (mainTab !== "GAMEDAY_HUB") return;
@@ -942,8 +954,7 @@ useEffect(() => {
 
 
 useEffect(() => {
-  const isRegularSeason = nflState?.season_type === "regular" && Number(nflState?.week || 0) > 0;
-  const currentWeek = isRegularSeason ? Number(nflState?.week) : 0;
+  const currentWeek = currentNflWeek;
 
   if (mainTab !== "GAMEDAY_HUB") return;
   if (!currentWeek) {
@@ -966,15 +977,14 @@ useEffect(() => {
 
   // Only the single-league Matchups tab needs a league's own matchup rows.
   if (selectedLeague?.league_id) loadGamedayMatchups(selectedLeague.league_id, currentWeek);
-}, [mainTab, selectedLeague?.league_id, nflState?.week, nflState?.season_type, projectionWeek, projectionLoaded, enabledExtraSources, loadProjections, loadGamedayMatchups, loadSchedule, setProjectionLoaded, setProjectionWeek, setGamedayMatchups, setSelectedGamedayMatchupId]);
+}, [mainTab, selectedLeague?.league_id, currentNflWeek, projectionWeek, projectionLoaded, enabledExtraSources, loadProjections, loadGamedayMatchups, loadSchedule, setProjectionLoaded, setProjectionWeek, setGamedayMatchups, setSelectedGamedayMatchupId]);
 
 useEffect(() => {
   if (mainTab !== "GAMEDAY_HUB" || gamedayHubTab !== "DASHBOARD") return;
-  const isRegularSeason = nflState?.season_type === "regular" && Number(nflState?.week || 0) > 0;
-  const currentWeek = isRegularSeason ? Number(nflState?.week) : 0;
+  const currentWeek = currentNflWeek;
   if (!currentWeek || gamedayDashboardWeek === currentWeek) return;
   loadGamedayDashboard(leagues, user, currentWeek);
-}, [mainTab, gamedayHubTab, nflState?.week, nflState?.season_type, gamedayDashboardWeek, loadGamedayDashboard, leagues, user]);
+}, [mainTab, gamedayHubTab, currentNflWeek, gamedayDashboardWeek, loadGamedayDashboard, leagues, user]);
 
 useEffect(() => {
   const leagueId = selectedLeague?.league_id;
@@ -1287,10 +1297,9 @@ const saveSnapshotNow = async () => {
 
 
 
-  const gamedayWeek = useMemo(() => {
-    const rawWeek = Number(nflState?.week || 0);
-    return nflState?.season_type === "regular" && rawWeek > 0 ? rawWeek : 0;
-  }, [nflState?.week, nflState?.season_type]);
+  // Same gate as currentNflWeek, kept under its Gameday-facing name: it is part of this hook's
+  // return contract and threaded through HubRouter into LeagueMatchupsTab.
+  const gamedayWeek = currentNflWeek;
   const gamedayMatchupCards = useMemo((): GamedayMatchup[] => {
     const built = buildGamedayMatchups(selectedLeague, rosters, gamedayMatchups, gamedayWeek, gamedayPlayers, projectionData, users, scheduleByTeam, liveStatsByPlayerId);
     if (built.length < 2) return built;
@@ -1832,7 +1841,11 @@ const saveSnapshotNow = async () => {
   // games as swappable — so that's gated too rather than computed against a
   // half-loaded schedule.
   const leagueLineupStatus = useMemo(() => {
-    const isInSeason = nflState?.season_type === "regular";
+    // This was the one site gating on season_type alone, with no week guard. In practice the
+    // empty-scheduleByTeam check below already covered it (loadSchedule ignores a week of 0, so
+    // a "regular season, week 0" state leaves the schedule empty), but gating on the shared
+    // value makes the intent explicit instead of leaving it to an indirect guard.
+    const isInSeason = currentNflWeek > 0;
     const status: Record<string, { isOptimal: boolean; swapCount: number; delta: number } | null> = {};
     if (
       !isInSeason ||
@@ -1898,7 +1911,7 @@ const saveSnapshotNow = async () => {
     });
 
     return status;
-  }, [leagueOverviewData, leagueOverviewLoaded, projectionData, projectionLoaded, players, scheduleByTeam, loadingSchedule, roster, nflState?.season_type, user?.user_id, selectedLeague?.league_id]);
+  }, [leagueOverviewData, leagueOverviewLoaded, projectionData, projectionLoaded, players, scheduleByTeam, loadingSchedule, roster, currentNflWeek, user?.user_id, selectedLeague?.league_id]);
 
   const selectedLeagueMateProfiles = useMemo((): LeagueMateView[] => {
     if (!selectedLeague || !rosters.length || !user?.user_id) return [];
@@ -3002,9 +3015,10 @@ const saveSnapshotNow = async () => {
 
   // ── Bye week alerts ───────────────────────────────────────────────────────
   useEffect(() => {
-    if (nflState?.season_type !== "regular") return;
-    const currentWeek = Number(nflState?.week || 0);
-    if (!currentWeek) return;
+    // currentNflWeek already IS the "regular season and week > 0" gate this used to re-derive
+    // as two sequential early returns.
+    if (!currentNflWeek) return;
+    const currentWeek = currentNflWeek;
     if (!dashboardOwnedPlayers.length && !watchlistEntries.length) return;
 
     const seen = new Set<string>();
@@ -3021,7 +3035,9 @@ const saveSnapshotNow = async () => {
         const weeksOut = byeWeek - currentWeek;
         if (weeksOut !== 1 && weeksOut !== 2) return;
         alerts.push({
-          id: `bye-${playerId}-wk${byeWeek}-${nflState.season}`,
+          // Optional-chained only to satisfy the type checker: currentNflWeek is non-zero
+          // here, which already implies nflState is present.
+          id: `bye-${playerId}-wk${byeWeek}-${nflState?.season}`,
           category: "status",
           source: "internal",
           severity: weeksOut === 1 ? "medium" : "low",
@@ -3036,7 +3052,7 @@ const saveSnapshotNow = async () => {
       });
 
     if (alerts.length) mergeDashboardAlerts(alerts);
-  }, [nflState?.week, nflState?.season_type, nflState?.season, dashboardOwnedPlayers, watchlistEntries, players, mergeDashboardAlerts]);
+  }, [currentNflWeek, nflState?.season, dashboardOwnedPlayers, watchlistEntries, players, mergeDashboardAlerts]);
 
   // ── Available player alerts (watchlist player recently dropped) ──────────
   useEffect(() => {
