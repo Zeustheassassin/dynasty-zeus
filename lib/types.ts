@@ -410,6 +410,10 @@ export interface CrossLeagueIntel {
   tradePreferenceLabel?: string;
   crossLeagueSummary?: string;
   crossLeagueTradeSummary?: string;
+  /** True when one or more of this owner's dynasty leagues haven't successfully loaded yet —
+   *  the profile reflects only the leagues that HAVE succeeded so far, not the full
+   *  totalDynastyLeagues count. Still-outstanding leagues are retried on later passes. */
+  isPartial?: boolean;
 }
 
 // ── League overview ──────────────────────────────────────────

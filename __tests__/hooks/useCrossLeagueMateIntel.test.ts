@@ -105,7 +105,7 @@ describe("useCrossLeagueMateIntel — failure surfacing", () => {
     expect(result.current.crossLeagueMateIntel.good.totalDynastyLeagues).toBe(0);
   });
 
-  it("does not cache a partial result — one failed league fails the whole owner", async () => {
+  it("does not cache anything for an owner whose only league never succeeds (Batch 4 still excludes zero-progress owners)", async () => {
     const rosters = [roster("owner1", 1)];
     const dynastyLeague: Partial<SleeperLeague> = {
       league_id: "dl1",
@@ -181,5 +181,71 @@ describe("useCrossLeagueMateIntel — retry after an all-failed pass", () => {
     await vi.advanceTimersByTimeAsync(CROSS_LEAGUE_INTEL_RETRY_COOLDOWN_MS);
     await flush();
     expect((api.impl.getUserLeagues as ReturnType<typeof vi.fn>).mock.calls.length).toBe(callsBefore);
+  });
+});
+
+describe("useCrossLeagueMateIntel — partial profiles + targeted retry", () => {
+  // Sept 22 code-review 50-league-scalability finding, Tier 1 #5 (Batch 4): an owner used to be
+  // dropped ENTIRELY if even one of their (possibly many) dynasty leagues failed, which got
+  // specifically worse as an owner's own league count grew toward 50. These tests cover the
+  // redesign: a partial profile is cached as soon as any league succeeds (flagged isPartial),
+  // and only the still-outstanding leagues are re-fetched on a later pass — a league that
+  // already succeeded is never refetched.
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  const flush = async () => {
+    for (let i = 0; i < 5; i++) await vi.advanceTimersByTimeAsync(0);
+  };
+
+  function dynastyLeague(id: string): Partial<SleeperLeague> {
+    return {
+      league_id: id,
+      roster_positions: Array(22).fill("BN"),
+      settings: { playoff_week_start: 15, playoff_teams: 6, num_teams: 12, taxi_slots: 0, best_ball: 0 },
+    };
+  }
+
+  it("caches a partial profile (isPartial: true) as soon as one league succeeds, without waiting for the rest", async () => {
+    const rosters = [roster("owner1", 1)];
+    api.impl.getUserLeagues = vi.fn(async () => [dynastyLeague("A"), dynastyLeague("B")]);
+    api.impl.getLeagueRosters = vi.fn((leagueId: string) =>
+      leagueId === "A" ? Promise.resolve([]) : Promise.reject(new Error("429"))
+    );
+
+    const { result } = renderHook(() => useCrossLeagueMateIntel({ ...baseArgs, rosters }));
+    await flush();
+
+    expect(result.current.crossLeagueMateIntel.owner1).toBeDefined();
+    expect(result.current.crossLeagueMateIntel.owner1.isPartial).toBe(true);
+    expect(result.current.crossLeagueMateIntel.owner1.totalDynastyLeagues).toBe(2);
+    expect(result.current.crossLeagueMateIntel.owner1.crossLeagueSummary).toMatch(/partial/i);
+  });
+
+  it("only re-fetches the still-failing league on retry — the already-succeeded one is never refetched", async () => {
+    const rosters = [roster("owner1", 1)];
+    api.impl.getUserLeagues = vi.fn(async () => [dynastyLeague("A"), dynastyLeague("B")]);
+    let bFails = true;
+    const rosterCalls: string[] = [];
+    api.impl.getLeagueRosters = vi.fn((leagueId: string) => {
+      rosterCalls.push(leagueId);
+      if (leagueId === "A") return Promise.resolve([]);
+      return bFails ? Promise.reject(new Error("429")) : Promise.resolve([]);
+    });
+
+    const { result } = renderHook(() => useCrossLeagueMateIntel({ ...baseArgs, rosters }));
+    await flush();
+
+    expect(result.current.crossLeagueMateIntel.owner1.isPartial).toBe(true);
+    expect(rosterCalls.filter((id) => id === "A")).toHaveLength(1);
+    expect(rosterCalls.filter((id) => id === "B")).toHaveLength(1);
+
+    bFails = false;
+    await vi.advanceTimersByTimeAsync(CROSS_LEAGUE_INTEL_RETRY_COOLDOWN_MS);
+    await flush();
+
+    expect(result.current.crossLeagueMateIntel.owner1.isPartial).toBe(false);
+    expect(rosterCalls.filter((id) => id === "A")).toHaveLength(1); // never refetched — served from cache
+    expect(rosterCalls.filter((id) => id === "B")).toHaveLength(2);
   });
 });

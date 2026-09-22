@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { CURRENT_YEAR, average } from "../lib/helpers";
 import { sleeperApi } from "../lib/sleeperApi";
 import { CROSS_LEAGUE_INTEL_OWNER_BATCH, CROSS_LEAGUE_INTEL_LEAGUE_CONCURRENCY, CROSS_LEAGUE_INTEL_RETRY_COOLDOWN_MS } from "../lib/constants";
@@ -49,13 +49,15 @@ async function fetchOwnerLeagueIntel(league: SleeperLeague, ownerId: string): Pr
 }
 
 /** Pure aggregation — no network. Turns one owner's per-league fetch results into their
- *  CrossLeagueIntel profile. `leagueResults` must be every dynasty league that owner is in;
- *  a partial list would silently understate their true cross-league activity while looking
- *  complete, so callers only reach this once every league for the owner has succeeded. */
+ *  CrossLeagueIntel profile. `leagueResults` may cover fewer leagues than `dynastyLeagueCount`
+ *  (the owner has one or more still-outstanding leagues) — callers pass `isPartial` in that
+ *  case so the summary text says so explicitly rather than looking confidently complete when
+ *  it's actually an understatement of the owner's true cross-league activity. */
 function buildIntelFromLeagueResults(
   dynastyLeagueCount: number,
   leagueResults: LeagueIntelFetch[],
-  players: Record<string, SleeperPlayer>
+  players: Record<string, SleeperPlayer>,
+  isPartial: boolean
 ): CrossLeagueIntel {
   const ownedPlayerCounts: Record<string, number> = {};
   const ownedPositionCounts: Record<string, number> = { QB: 0, RB: 0, WR: 0, TE: 0 };
@@ -166,17 +168,21 @@ function buildIntelFromLeagueResults(
     veteranRbBuyRate >= 0.15 ? "Actively buying veteran RB points" :
     tradePreferredPositions[0] ? `Recent ${tradePreferredPositions[0]} buyer` :
     "Recent cross-league trade activity";
+  const partialNote = isPartial
+    ? ` (partial — ${leagueResults.length}/${dynastyLeagueCount} leagues loaded so far)`
+    : "";
   const repeatedNames = repeatedPlayers.filter((player) => player.count >= 2).map((player) => player.name);
-  const crossLeagueSummary = repeatedNames.length > 0
+  const crossLeagueSummary = (repeatedNames.length > 0
     ? `Across ${dynastyLeagueCount} dynasty leagues, leans ${topPos}/${secondPos} and repeatedly holds ${repeatedNames.join(", ")}.`
-    : `Across ${dynastyLeagueCount} dynasty leagues, leans ${topPos}/${secondPos} with an average skill-player age of ${averageAgeAllLeagues || "-"}.`;
+    : `Across ${dynastyLeagueCount} dynasty leagues, leans ${topPos}/${secondPos} with an average skill-player age of ${averageAgeAllLeagues || "-"}.`) + partialNote;
   const acquiredNames = acquiredPlayers.filter((player) => player.count >= 2).map((player) => player.name);
-  const crossLeagueTradeSummary =
+  const crossLeagueTradeSummary = (
     crossLeagueTradeCount30d === 0
       ? "No strong cross-league trade tendency in the last 30 days."
       : acquiredNames.length > 0
       ? `Over the last 30 days, they made ${crossLeagueTradeCount30d} cross-league trades and kept buying ${acquiredNames.join(", ")}.`
-      : `Over the last 30 days, they made ${crossLeagueTradeCount30d} cross-league trades, leaning ${tradePreferredPositions.slice(0, 2).join("/") || "best-player"} while moving picks ${crossLeaguePickBuys30d}-${crossLeaguePickSells30d}.`;
+      : `Over the last 30 days, they made ${crossLeagueTradeCount30d} cross-league trades, leaning ${tradePreferredPositions.slice(0, 2).join("/") || "best-player"} while moving picks ${crossLeaguePickBuys30d}-${crossLeaguePickSells30d}.`
+  ) + partialNote;
 
   return {
     totalDynastyLeagues: dynastyLeagueCount,
@@ -198,6 +204,7 @@ function buildIntelFromLeagueResults(
     tradePreferenceLabel,
     crossLeagueSummary,
     crossLeagueTradeSummary,
+    isPartial,
   };
 }
 
@@ -207,15 +214,34 @@ function buildIntelFromLeagueResults(
  * batch (a per-owner cap alone still multiplies: live testing against a 36-league account
  * showed 4 owners x a per-owner cap of 3 producing 60 concurrent calls and 429s):
  *   1. Resolve each owner's OTHER dynasty leagues (1 cheap call per owner, all in parallel).
- *   2. Flatten every (owner, league) pair across the WHOLE batch and fetch them through one
+ *   2. Flatten every (owner, league) pair across the WHOLE batch — skipping any league already
+ *      in `ownerLeagueCache` from a prior pass — and fetch the rest through one
  *      globally-bounded queue.
- * An owner is only included in the result once every one of their leagues has succeeded — a
- * failed owner (or one with a failed league) is left out entirely so the caller doesn't cache
- * a wrong-but-confident partial profile; the next pass retries them.
+ *
+ * Sept 22 code-review 50-league-scalability finding, Tier 1 #5 (Batch 4): an owner used to be
+ * dropped entirely if even ONE of their leagues failed, which got specifically worse as an
+ * owner's league count grew toward 50 (higher odds at least one flakes on any given pass) — a
+ * persistently-unlucky high-league-count owner could effectively never load. `ownerLeagueCache`
+ * (owned by the caller, persisted across passes/retries) now keeps every league that HAS
+ * succeeded, so:
+ *   - an owner is reported here as soon as they have data for at least one more league than
+ *     `ownerLeagueCache` already held for them before this call (real forward progress) — not
+ *     only once every league has succeeded. `buildIntelFromLeagueResults` is told `isPartial`
+ *     whenever the cached count is still short of their true dynasty-league count, so the
+ *     profile is never presented as more complete than it actually is (preserving the original
+ *     "never cache a wrong-but-confident profile" intent, just at league granularity instead of
+ *     owner granularity).
+ *   - a later pass only re-fetches the leagues still missing from the cache — a league that
+ *     already succeeded is never re-fetched, so retrying a stuck owner gets cheaper each time
+ *     rather than repeating their whole league list forever.
+ *   - an owner with zero real progress this call (every still-outstanding league failed again)
+ *     is left out of the result entirely, same as before — the caller's per-owner cooldown
+ *     throttles how soon they're retried.
  */
 async function loadOwnerIntelBatch(
   ownerIds: string[],
-  players: Record<string, SleeperPlayer>
+  players: Record<string, SleeperPlayer>,
+  ownerLeagueCache: Map<string, Map<string, LeagueIntelFetch>>
 ): Promise<{ ownerId: string; intel: CrossLeagueIntel }[]> {
   const ownerLeagueResults = await Promise.all(
     ownerIds.map(async (ownerId) => {
@@ -229,11 +255,23 @@ async function loadOwnerIntelBatch(
     })
   );
 
-  const failedOwnerIds = new Set(ownerLeagueResults.filter((r) => r.failed).map((r) => r.ownerId));
-  const leagueResultsByOwner = new Map<string, LeagueIntelFetch[]>();
-  const pairs = ownerLeagueResults.flatMap((r) =>
-    r.failed ? [] : r.dynastyLeagues.map((league) => ({ ownerId: r.ownerId, league }))
-  );
+  // How many of each owner's leagues were already cached BEFORE this call, so the result step
+  // below can tell real progress (something new landed in the cache) apart from an owner whose
+  // still-outstanding league(s) just failed again — only the former gets reported.
+  const priorCachedCount = new Map<string, number>();
+  ownerLeagueResults.forEach((r) => {
+    if (r.failed) return;
+    const cached = ownerLeagueCache.get(r.ownerId);
+    priorCachedCount.set(r.ownerId, r.dynastyLeagues.filter((l) => cached?.has(l.league_id)).length);
+  });
+
+  const pairs = ownerLeagueResults.flatMap((r) => {
+    if (r.failed) return [];
+    const cached = ownerLeagueCache.get(r.ownerId);
+    return r.dynastyLeagues
+      .filter((league) => !cached?.has(league.league_id))
+      .map((league) => ({ ownerId: r.ownerId, league }));
+  });
 
   for (let i = 0; i < pairs.length; i += CROSS_LEAGUE_INTEL_LEAGUE_CONCURRENCY) {
     const slice = pairs.slice(i, i + CROSS_LEAGUE_INTEL_LEAGUE_CONCURRENCY);
@@ -241,28 +279,38 @@ async function loadOwnerIntelBatch(
       slice.map(({ league, ownerId }) => fetchOwnerLeagueIntel(league, ownerId))
     );
     sliceResults.forEach((res, idx) => {
-      const { ownerId } = slice[idx];
-      if (failedOwnerIds.has(ownerId)) return; // already dropped — no point bookkeeping more
+      const { ownerId, league } = slice[idx];
       if (res.status === "rejected") {
-        log.warn("cross-league intel: a league fetch failed — dropping the whole owner this pass", {
-          ownerId, err: String(res.reason),
+        log.warn("cross-league intel: a league fetch failed — will retry just this league next pass", {
+          ownerId, leagueId: league.league_id, err: String(res.reason),
         });
-        failedOwnerIds.add(ownerId);
-        leagueResultsByOwner.delete(ownerId);
         return;
       }
-      const existing = leagueResultsByOwner.get(ownerId) ?? [];
-      existing.push(res.value);
-      leagueResultsByOwner.set(ownerId, existing);
+      let ownerCache = ownerLeagueCache.get(ownerId);
+      if (!ownerCache) {
+        ownerCache = new Map();
+        ownerLeagueCache.set(ownerId, ownerCache);
+      }
+      ownerCache.set(league.league_id, res.value);
     });
   }
 
   return ownerLeagueResults
-    .filter((r) => !failedOwnerIds.has(r.ownerId))
-    .map((r) => ({
-      ownerId: r.ownerId,
-      intel: buildIntelFromLeagueResults(r.dynastyLeagues.length, leagueResultsByOwner.get(r.ownerId) ?? [], players),
-    }));
+    .filter((r) => !r.failed)
+    .map((r) => {
+      const ownerCache = ownerLeagueCache.get(r.ownerId);
+      const cachedResults = r.dynastyLeagues
+        .map((league) => ownerCache?.get(league.league_id))
+        .filter((x): x is LeagueIntelFetch => x !== undefined);
+      const isComplete = cachedResults.length === r.dynastyLeagues.length;
+      const madeProgress = cachedResults.length > (priorCachedCount.get(r.ownerId) ?? 0);
+      if (!isComplete && !madeProgress) return null; // nothing new to report this pass
+      return {
+        ownerId: r.ownerId,
+        intel: buildIntelFromLeagueResults(r.dynastyLeagues.length, cachedResults, players, !isComplete),
+      };
+    })
+    .filter((x): x is { ownerId: string; intel: CrossLeagueIntel } => x !== null);
 }
 
 export function useCrossLeagueMateIntel({
@@ -275,10 +323,18 @@ export function useCrossLeagueMateIntel({
 }: UseCrossLeagueMateIntelOptions): UseCrossLeagueMateIntelReturn {
   const [crossLeagueMateIntel, setCrossLeagueMateIntel] = useState<Record<string, CrossLeagueIntel>>({});
   const [loadingCrossLeagueMateIntel, setLoadingCrossLeagueMateIntel] = useState(false);
-  // Bumped on a cooldown after an all-failed pass, so persistently-failing owners get retried
-  // instead of being stuck forever (crossLeagueMateIntel is otherwise the only dependency below
-  // that advances the effect to a new batch, and an all-failed pass never changes it).
+  // Bumped on a cooldown when nothing is currently eligible to fetch (either a pass made no
+  // progress, or every still-incomplete owner is on its own per-owner cooldown below), so
+  // persistently-failing owners get retried instead of being stuck forever (crossLeagueMateIntel
+  // is otherwise the only dependency below that advances the effect, and neither case changes it).
   const [retryNonce, setRetryNonce] = useState(0);
+  // Successful per-(owner, league) fetch results, kept across passes so a retry only re-fetches
+  // the leagues that failed rather than an owner's whole league list — see loadOwnerIntelBatch.
+  const ownerLeagueCacheRef = useRef<Map<string, Map<string, LeagueIntelFetch>>>(new Map());
+  // Last attempt time per owner, so a still-incomplete owner (one with a persistently failing
+  // league) isn't re-selected into every batch the moment OTHER owners' progress re-triggers
+  // this effect — throttled to the same cadence as the all-failed retry above.
+  const ownerLastAttemptRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
     const shouldLoadCrossLeagueIntel =
@@ -293,29 +349,50 @@ export function useCrossLeagueMateIntel({
     const ownerIds = rosters
       .filter((r) => r.owner_id && r.owner_id !== userId)
       .map((r) => String(r.owner_id));
-    const missingOwnerIds = ownerIds.filter((ownerId) => !crossLeagueMateIntel[ownerId]);
-    if (missingOwnerIds.length === 0) return;
+    const stillIncompleteOwnerIds = ownerIds.filter((ownerId) => {
+      const existing = crossLeagueMateIntel[ownerId];
+      return !existing || existing.isPartial;
+    });
+    if (stillIncompleteOwnerIds.length === 0) return; // every owner is fully loaded
 
-    // Only a bounded batch is computed per pass — the rest stay "missing" and this effect
-    // re-fires (crossLeagueMateIntel is a dependency) once setCrossLeagueMateIntel below
-    // lands, picking up the next batch automatically.
-    const batch = missingOwnerIds.slice(0, CROSS_LEAGUE_INTEL_OWNER_BATCH);
+    const now = Date.now();
+    const eligibleOwnerIds = stillIncompleteOwnerIds.filter((ownerId) => {
+      const lastAttempt = ownerLastAttemptRef.current.get(ownerId);
+      return lastAttempt === undefined || now - lastAttempt >= CROSS_LEAGUE_INTEL_RETRY_COOLDOWN_MS;
+    });
+
     let cancelled = false;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
+
+    if (eligibleOwnerIds.length === 0) {
+      // Everyone still incomplete is on cooldown right now — nothing else will change
+      // crossLeagueMateIntel to naturally re-trigger this effect, so check back once the
+      // cooldown has had a chance to clear instead of staying stuck.
+      retryTimer = setTimeout(() => {
+        if (!cancelled) setRetryNonce((n) => n + 1);
+      }, CROSS_LEAGUE_INTEL_RETRY_COOLDOWN_MS);
+      return () => { cancelled = true; if (retryTimer) clearTimeout(retryTimer); };
+    }
+
+    // Only a bounded batch is computed per pass — the rest stay eligible and this effect
+    // re-fires (crossLeagueMateIntel is a dependency) once setCrossLeagueMateIntel below
+    // lands, picking up the next batch automatically.
+    const batch = eligibleOwnerIds.slice(0, CROSS_LEAGUE_INTEL_OWNER_BATCH);
+    batch.forEach((ownerId) => ownerLastAttemptRef.current.set(ownerId, now));
 
     const loadCrossLeagueMateIntel = async () => {
       setLoadingCrossLeagueMateIntel(true);
       try {
-        const succeeded = await loadOwnerIntelBatch(batch, players);
+        const succeeded = await loadOwnerIntelBatch(batch, players, ownerLeagueCacheRef.current);
         if (cancelled) return;
 
-        const failedCount = batch.length - succeeded.length;
-        if (failedCount > 0) {
-          log.warn("cross-league intel: some owners failed this pass", { failedCount, leagueId });
+        const noProgressCount = batch.length - succeeded.length;
+        if (noProgressCount > 0) {
+          log.warn("cross-league intel: some owners made no progress this pass", { noProgressCount, leagueId });
         }
-        if (missingOwnerIds.length > batch.length) {
+        if (stillIncompleteOwnerIds.length > batch.length) {
           log.info("cross-league intel: deferring remaining owners to a later pass", {
-            deferred: missingOwnerIds.length - batch.length, leagueId,
+            deferred: stillIncompleteOwnerIds.length - batch.length, leagueId,
           });
         }
         if (succeeded.length > 0) {

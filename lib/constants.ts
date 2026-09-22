@@ -188,8 +188,15 @@ export const COMPILE_PICKS_CONCURRENCY = 8;
  * owner is in — uncapped, this was owners x leagues x ~5 calls (hundreds at once against a
  * 60/min/route limiter; Sept 21 audit finding #5). Only this many owners are computed per
  * effect pass; the rest stay "missing" and are picked up on the next pass.
+ *
+ * Raised from 4 (Sept 22 code-review 50-league-scalability finding, Tier 3 #10, folded into
+ * Batch 4): this only controls how many owners' cheap getUserLeagues calls fire per pass and
+ * how many (owner, league) pairs get queued — the real Sleeper-call burst stays capped by
+ * CROSS_LEAGUE_INTEL_LEAGUE_CONCURRENCY below regardless of this number, so raising it doesn't
+ * raise the peak burst, just how many owners a normal-sized league (typically <=12 OTHER
+ * owners) can finish in a single pass instead of 3 sequential ones.
  */
-export const CROSS_LEAGUE_INTEL_OWNER_BATCH = 4;
+export const CROSS_LEAGUE_INTEL_OWNER_BATCH = 12;
 
 /**
  * GLOBAL cap (across every owner in the current batch, not per-owner) on how many "other
@@ -246,10 +253,13 @@ export const OVERVIEW_REFRESH_ROSTERS_CONCURRENCY = 3;
 export const TARGET_USER_LEAGUE_CONCURRENCY = 3;
 
 /**
- * A batch pass where every owner fails (e.g. Sleeper is down) never changes
- * `crossLeagueMateIntel`, which is the load effect's only dependency that advances it to the
- * next batch — without this, those owners would be silently dropped for the rest of the
- * session instead of retried once Sleeper recovers.
+ * Two jobs (Sept 22 code-review 50-league-scalability finding, Tier 1 #5, Batch 4): (1) a batch
+ * pass where nobody makes progress never changes `crossLeagueMateIntel`, which is the load
+ * effect's only dependency that advances it to a new attempt — without an explicit retry timer,
+ * those owners would be silently dropped for the rest of the session instead of retried once
+ * Sleeper recovers; (2) throttles how soon a still-incomplete owner (one with a persistently
+ * failing league) can be re-selected into a batch, so their one bad league doesn't get hammered
+ * on every render triggered by OTHER owners' progress.
  */
 export const CROSS_LEAGUE_INTEL_RETRY_COOLDOWN_MS = 60_000;
 
