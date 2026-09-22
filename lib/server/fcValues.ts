@@ -72,6 +72,19 @@ export function fcCacheTable(isDynasty: boolean): CacheTable {
   return isDynasty ? "fc_values_cache" : "fc_redraft_values_cache";
 }
 
+// In-flight dedup: concurrent callers with the SAME (table, numQbs, maxAgeMs, allowStale) join
+// one shared load instead of each independently reading the cache and, on a miss, each hitting
+// FantasyCalc directly. maxAgeMs/allowStale are part of the key (not just table/numQbs) because
+// different callers ask for different freshness guarantees — player-value-history's 6h/no-stale
+// window must never be satisfied by a result another caller computed under the 24h/stale-ok
+// default (Sept 22 code-review P2 finding #6; see lib/fcValuesStore.ts for the client-side
+// equivalent of this pattern).
+const inFlight = new Map<string, Promise<FcValuesResult | null>>();
+
+function fcInFlightKey(table: CacheTable, numQbs: number, maxAgeMs: number, allowStale: boolean): string {
+  return `${table}:${numQbs}:${maxAgeMs}:${allowStale}`;
+}
+
 // numTeams/ppr only apply to the dynasty query shape (matches prior direct-fetch behavior); the
 // redraft shape was always queried without them.
 function fcUrl(numQbs: number, isDynasty: boolean): string {
@@ -120,28 +133,41 @@ export async function getFcValues(
   { maxAgeMs = FC_VALUES_TTL_MS, allowStale = true }: FcValuesOptions = {}
 ): Promise<FcValuesResult | null> {
   const table = fcCacheTable(isDynasty);
+  const key = fcInFlightKey(table, numQbs, maxAgeMs, allowStale);
 
-  const cached = await readCache(table, numQbs);
-  const cachedAgeMs = cached ? Date.now() - new Date(cached.cachedAt).getTime() : Infinity;
-  if (cached && cachedAgeMs < maxAgeMs) {
-    return { data: cached.data, source: "cache", fetchedAt: cached.cachedAt };
+  const existing = inFlight.get(key);
+  if (existing) return existing;
+
+  const load = (async (): Promise<FcValuesResult | null> => {
+    const cached = await readCache(table, numQbs);
+    const cachedAgeMs = cached ? Date.now() - new Date(cached.cachedAt).getTime() : Infinity;
+    if (cached && cachedAgeMs < maxAgeMs) {
+      return { data: cached.data, source: "cache", fetchedAt: cached.cachedAt };
+    }
+
+    const live = await fetchLive(numQbs, isDynasty);
+    if (live) {
+      const fetchedAt = new Date().toISOString();
+      // Written with the service role after the response — the cache tables are SELECT-only for anon.
+      afterResponse(() => upsertCacheRow(table, { num_qbs: numQbs, data: live, cached_at: fetchedAt }));
+      return { data: live, source: "live", fetchedAt };
+    }
+
+    if (cached && allowStale) {
+      log.warn("FantasyCalc unavailable — serving the expired cache", {
+        table, numQbs, ageHours: Math.round(cachedAgeMs / 3_600_000),
+      });
+      return { data: cached.data, source: "stale", fetchedAt: cached.cachedAt };
+    }
+
+    log.error("FantasyCalc unavailable and no usable cache", { table, numQbs, hadCache: !!cached });
+    return null;
+  })();
+
+  inFlight.set(key, load);
+  try {
+    return await load;
+  } finally {
+    inFlight.delete(key);
   }
-
-  const live = await fetchLive(numQbs, isDynasty);
-  if (live) {
-    const fetchedAt = new Date().toISOString();
-    // Written with the service role after the response — the cache tables are SELECT-only for anon.
-    afterResponse(() => upsertCacheRow(table, { num_qbs: numQbs, data: live, cached_at: fetchedAt }));
-    return { data: live, source: "live", fetchedAt };
-  }
-
-  if (cached && allowStale) {
-    log.warn("FantasyCalc unavailable — serving the expired cache", {
-      table, numQbs, ageHours: Math.round(cachedAgeMs / 3_600_000),
-    });
-    return { data: cached.data, source: "stale", fetchedAt: cached.cachedAt };
-  }
-
-  log.error("FantasyCalc unavailable and no usable cache", { table, numQbs, hadCache: !!cached });
-  return null;
 }

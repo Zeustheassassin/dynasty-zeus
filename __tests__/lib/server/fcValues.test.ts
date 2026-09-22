@@ -204,3 +204,58 @@ describe("getFcValues — FantasyCalc unavailable", () => {
     expect((await getFcValues(2, true, { allowStale: false }))?.source).toBe("cache");
   });
 });
+
+describe("getFcValues — concurrent-caller dedup", () => {
+  // Sept 22 code-review P2 finding #6: getFcValues had no single-flight dedup (unlike the
+  // client-side lib/fcValuesStore.ts), so concurrent callers on a cache miss each independently
+  // re-read the cache AND re-hit FantasyCalc.
+  it("joins one live fetch for concurrent callers with the same numQbs/isDynasty/options", async () => {
+    let release: (() => void) | null = null;
+    let fetchCalls = 0;
+    fetchMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          fetchCalls++;
+          release = () => resolve(new Response(JSON.stringify(payload(120, 9000)), { status: 200 }));
+        })
+    );
+
+    const p1 = getFcValues(2, true);
+    const p2 = getFcValues(2, true);
+    await flush(); // let both calls reach the in-flight fetch before releasing it
+    expect(fetchCalls).toBe(1);
+    release!();
+
+    const [r1, r2] = await Promise.all([p1, p2]);
+    await flush();
+    expect(r1).toEqual(r2);
+    expect(h.upsertCacheRow).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT coalesce callers asking for different freshness guarantees (e.g. allowStale:false)", async () => {
+    // player-value-history's 6h/no-stale window must never be satisfied by a result computed
+    // under another caller's 24h/allowStale:true default.
+    cached(payload(120, 4000), 50);
+    upstreamFails("500");
+
+    const [lax, strict] = await Promise.all([
+      getFcValues(2, true),
+      getFcValues(2, true, { allowStale: false }),
+    ]);
+    expect(lax?.source).toBe("stale");
+    expect(strict).toBeNull();
+  });
+
+  it("a later call with the same options starts its own fresh load once the earlier one resolved", async () => {
+    // Proves the in-flight entry is cleared after resolving, not left coalescing forever.
+    upstreamOk(payload(120, 1000));
+    const r1 = await getFcValues(2, true);
+    expect(r1?.data[0].value).toBe(1000);
+
+    upstreamOk(payload(120, 2000));
+    const r2 = await getFcValues(2, true);
+    expect(r2?.data[0].value).toBe(2000);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
