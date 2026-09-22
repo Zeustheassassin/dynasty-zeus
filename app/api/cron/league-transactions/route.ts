@@ -303,43 +303,49 @@ export async function GET(req: NextRequest): Promise<Response> {
   const runStartedAt = Date.now();
   const allLinks = links ?? [];
   let usersProcessed = 0;
-  let usersSkippedTimeBudget = 0;
   let rowsWritten = 0;
 
-  for (let i = 0; i < allLinks.length; i += USER_CONCURRENCY) {
-    if (Date.now() - runStartedAt > TIME_BUDGET_MS) {
-      usersSkippedTimeBudget = allLinks.length - i;
-      log.error("league-transactions cron hit its time budget — stopping early", {
-        usersProcessed,
-        usersSkippedTimeBudget,
-      });
-      break;
-    }
+  // Per-user fan-out runs on the same shared helper as the per-league fan-out
+  // inside processUser(). The try/catch below is what gives per-user fault
+  // isolation (withConcurrency itself is fail-fast within a batch), and
+  // `shouldBail` stops NEW users from starting once the run is out of
+  // wall-clock budget without aborting users already in flight.
+  const userResults = await withConcurrency(
+    allLinks,
+    async (link) => {
+      try {
+        return await processUser(
+          link.user_id,
+          link.sleeper_user_id,
+          weeks,
+          supabase
+        );
+      } catch (err) {
+        log.error("processUser threw", {
+          authUserId: link.user_id,
+          err: err instanceof Error ? err.message : String(err),
+        });
+        return null;
+      }
+    },
+    USER_CONCURRENCY,
+    { shouldBail: () => Date.now() - runStartedAt > TIME_BUDGET_MS }
+  );
 
-    const batch = allLinks.slice(i, i + USER_CONCURRENCY);
-    const batchResults = await Promise.all(
-      batch.map(async (link) => {
-        try {
-          return await processUser(
-            link.user_id,
-            link.sleeper_user_id,
-            weeks,
-            supabase
-          );
-        } catch (err) {
-          log.error("processUser threw", {
-            authUserId: link.user_id,
-            err: err instanceof Error ? err.message : String(err),
-          });
-          return null;
-        }
-      })
-    );
-    for (const written of batchResults) {
-      if (written === null) continue;
-      usersProcessed++;
-      rowsWritten += written;
-    }
+  for (const written of userResults) {
+    if (written === null) continue;
+    usersProcessed++;
+    rowsWritten += written;
+  }
+
+  // Only the users actually dispatched produce a result, so anything missing
+  // from the tail was skipped by the time-budget bail above.
+  const usersSkippedTimeBudget = allLinks.length - userResults.length;
+  if (usersSkippedTimeBudget > 0) {
+    log.error("league-transactions cron hit its time budget — stopping early", {
+      usersProcessed,
+      usersSkippedTimeBudget,
+    });
   }
 
   return NextResponse.json({
