@@ -249,3 +249,115 @@ describe("useCrossLeagueMateIntel — partial profiles + targeted retry", () => 
     expect(rosterCalls.filter((id) => id === "B")).toHaveLength(2);
   });
 });
+
+describe("useCrossLeagueMateIntel — shared-league dedup", () => {
+  // Sept 22 deferred follow-up #1: the batch's owners overlap by design (they are all in the
+  // CURRENT league, and co-owners commonly share others), but the fetch queue used to be keyed
+  // by (owner, league) pair — so a league shared by N owners cost its 5 Sleeper calls N times.
+  // The queue is now keyed by league_id and each owner's view is derived from the one fetch.
+  function dynastyLeague(id: string): Partial<SleeperLeague> {
+    return {
+      league_id: id,
+      roster_positions: Array(22).fill("BN"),
+      settings: { playoff_week_start: 15, playoff_teams: 6, num_teams: 12, taxi_slots: 0, best_ball: 0 },
+    };
+  }
+
+  it("fetches a league shared by two owners exactly once, and still derives each owner's own roster from it", async () => {
+    const rosters = [roster("owner1", 1), roster("owner2", 2)];
+    api.impl.getUserLeagues = vi.fn(async () => [dynastyLeague("shared")]);
+    const rosterCalls: string[] = [];
+    api.impl.getLeagueRosters = vi.fn(async (leagueId: string) => {
+      rosterCalls.push(leagueId);
+      return [
+        { ...roster("owner1", 7), players: ["p1"] },
+        { ...roster("owner2", 8), players: [] },
+      ];
+    });
+
+    const { result } = renderHook(() => useCrossLeagueMateIntel({ ...baseArgs, rosters }));
+    await waitFor(() => expect(Object.keys(result.current.crossLeagueMateIntel)).toHaveLength(2));
+
+    // One unique league, one fetch — not one per owner in it.
+    expect(rosterCalls).toEqual(["shared"]);
+    // Only the roster lookup is owner-specific, and each owner got theirs out of the one fetch.
+    expect(result.current.crossLeagueMateIntel.owner1.ownedPlayerCounts).toEqual({ p1: 1 });
+    expect(result.current.crossLeagueMateIntel.owner2.ownedPlayerCounts).toEqual({});
+    expect(result.current.crossLeagueMateIntel.owner1.isPartial).toBe(false);
+    expect(result.current.crossLeagueMateIntel.owner2.isPartial).toBe(false);
+  });
+
+  it("attempts a failing shared league once per pass, leaving every owner in it partial rather than dropping one owner's copy of the same failure", async () => {
+    const rosters = [roster("owner1", 1), roster("owner2", 2)];
+    api.impl.getUserLeagues = vi.fn(async (ownerId: string) => [
+      dynastyLeague("shared"),
+      dynastyLeague(`${ownerId}-own`),
+    ]);
+    const rosterCalls: string[] = [];
+    api.impl.getLeagueRosters = vi.fn((leagueId: string) => {
+      rosterCalls.push(leagueId);
+      if (leagueId === "shared") return Promise.reject(new Error("429"));
+      return Promise.resolve([roster("owner1", 7), roster("owner2", 8)]);
+    });
+
+    const { result } = renderHook(() => useCrossLeagueMateIntel({ ...baseArgs, rosters }));
+    await waitFor(() => expect(Object.keys(result.current.crossLeagueMateIntel)).toHaveLength(2));
+
+    // withConcurrency is fail-fast within a batch, so this also pins that the per-league catch
+    // lives inside fn — without it the shared league's rejection would take the others down.
+    expect(result.current.crossLeagueMateIntel.owner1.isPartial).toBe(true);
+    expect(result.current.crossLeagueMateIntel.owner2.isPartial).toBe(true);
+    expect(rosterCalls.filter((id) => id === "shared")).toHaveLength(1);
+    expect(rosterCalls).toContain("owner1-own");
+    expect(rosterCalls).toContain("owner2-own");
+  });
+});
+
+describe("useCrossLeagueMateIntel — league cache is shared across passes", () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  const flush = async () => {
+    for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(0);
+  };
+
+  function dynastyLeague(id: string): Partial<SleeperLeague> {
+    return {
+      league_id: id,
+      roster_positions: Array(22).fill("BN"),
+      settings: { playoff_week_start: 15, playoff_teams: 6, num_teams: 12, taxi_slots: 0, best_ball: 0 },
+    };
+  }
+
+  it("does not re-fetch a league on a later pass just because a different owner needs it", async () => {
+    const rosters = [roster("owner1", 1), roster("owner2", 2)];
+    let owner2Fails = true;
+    api.impl.getUserLeagues = vi.fn((ownerId: string) => {
+      if (ownerId === "owner2" && owner2Fails) return Promise.reject(new Error("429"));
+      return Promise.resolve([dynastyLeague("shared")]);
+    });
+    const rosterCalls: string[] = [];
+    api.impl.getLeagueRosters = vi.fn(async (leagueId: string) => {
+      rosterCalls.push(leagueId);
+      return [roster("owner1", 7), roster("owner2", 8)];
+    });
+
+    const { result } = renderHook(() => useCrossLeagueMateIntel({ ...baseArgs, rosters }));
+    await flush();
+
+    // Pass 1: owner2 never got as far as a league list, so only owner1 pulled "shared".
+    expect(result.current.crossLeagueMateIntel.owner1).toBeDefined();
+    expect(result.current.crossLeagueMateIntel.owner2).toBeUndefined();
+    expect(rosterCalls).toEqual(["shared"]);
+
+    owner2Fails = false;
+    await vi.advanceTimersByTimeAsync(CROSS_LEAGUE_INTEL_RETRY_COOLDOWN_MS);
+    await flush();
+
+    // Pass 2: owner2 resolves to the same league, which is already in the league-keyed cache —
+    // a per-owner cache would have refetched it here.
+    expect(result.current.crossLeagueMateIntel.owner2).toBeDefined();
+    expect(result.current.crossLeagueMateIntel.owner2.isPartial).toBe(false);
+    expect(rosterCalls).toEqual(["shared"]);
+  });
+});

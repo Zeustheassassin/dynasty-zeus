@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from "react";
 import { CURRENT_YEAR, average, isDynastyLeague } from "../lib/helpers";
 import { sleeperApi } from "../lib/sleeperApi";
+import { withConcurrency } from "../lib/concurrency";
 import { CROSS_LEAGUE_INTEL_OWNER_BATCH, CROSS_LEAGUE_INTEL_LEAGUE_CONCURRENCY, CROSS_LEAGUE_INTEL_RETRY_COOLDOWN_MS } from "../lib/constants";
 import { logger } from "../lib/logger";
 import type { CrossLeagueIntel, CrossLeagueIntelPlayer, SleeperRoster, SleeperPlayer, SleeperTransaction, SleeperDraft, SleeperLeague } from "../lib/types";
@@ -23,23 +24,45 @@ interface UseCrossLeagueMateIntelOptions {
 }
 
 
+/** One dynasty league's OWNER-INDEPENDENT data — the 5 Sleeper calls a league costs. Every
+ *  owner in that league derives their own view from this one fetch (see ownerViewOfLeague),
+ *  so a league shared by N owners in a batch costs 5 calls, not 5N. */
+interface LeagueSharedFetch {
+  rosters: SleeperRoster[];
+  trades: SleeperTransaction[];
+  draftsData: SleeperDraft[];
+}
+
+/** One owner's view of a league: which roster in it is theirs, plus the league-wide trades and
+ *  drafts BY REFERENCE. buildIntelFromLeagueResults only ever reads those two (its `.filter()`
+ *  chains allocate a new array before any `.sort()`), so sharing the references across the
+ *  owners in a league is safe — there is no per-owner mutation to isolate. */
 interface LeagueIntelFetch {
   ownerRoster: SleeperRoster | null;
   trades: SleeperTransaction[];
   draftsData: SleeperDraft[];
 }
 
-/** One dynasty league's data for a single owner — 5 Sleeper calls. */
-async function fetchOwnerLeagueIntel(league: SleeperLeague, ownerId: string): Promise<LeagueIntelFetch> {
-  const [leagueRosters, t0, t1, t2, draftsData] = await Promise.all([
-    sleeperApi.getLeagueRosters(league.league_id),
-    sleeperApi.getLeagueTransactions(league.league_id, 0),
-    sleeperApi.getLeagueTransactions(league.league_id, 1),
-    sleeperApi.getLeagueTransactions(league.league_id, 2),
-    sleeperApi.getLeagueDrafts(league.league_id),
+/** One dynasty league's shared data — 5 Sleeper calls, fetched once per unique league_id. */
+async function fetchLeagueIntel(leagueId: string): Promise<LeagueSharedFetch> {
+  const [rosters, t0, t1, t2, draftsData] = await Promise.all([
+    sleeperApi.getLeagueRosters(leagueId),
+    sleeperApi.getLeagueTransactions(leagueId, 0),
+    sleeperApi.getLeagueTransactions(leagueId, 1),
+    sleeperApi.getLeagueTransactions(leagueId, 2),
+    sleeperApi.getLeagueDrafts(leagueId),
   ]);
-  const ownerRoster = leagueRosters.find((roster) => String(roster.owner_id) === ownerId) || null;
-  return { ownerRoster, trades: [...t0, ...t1, ...t2], draftsData };
+  return { rosters, trades: [...t0, ...t1, ...t2], draftsData };
+}
+
+/** Narrow a shared league fetch to one owner. The roster lookup is the ONLY owner-specific
+ *  part of a league's intel, which is what makes the shared fetch above correct. */
+function ownerViewOfLeague(shared: LeagueSharedFetch, ownerId: string): LeagueIntelFetch {
+  return {
+    ownerRoster: shared.rosters.find((roster) => String(roster.owner_id) === ownerId) || null,
+    trades: shared.trades,
+    draftsData: shared.draftsData,
+  };
 }
 
 /** Pure aggregation — no network. Turns one owner's per-league fetch results into their
@@ -207,10 +230,19 @@ function buildIntelFromLeagueResults(
  * capped by CROSS_LEAGUE_INTEL_LEAGUE_CONCURRENCY regardless of how many owners are in the
  * batch (a per-owner cap alone still multiplies: live testing against a 36-league account
  * showed 4 owners x a per-owner cap of 3 producing 60 concurrent calls and 429s):
- *   1. Resolve each owner's OTHER dynasty leagues (1 cheap call per owner, all in parallel).
- *   2. Flatten every (owner, league) pair across the WHOLE batch — skipping any league already
- *      in `ownerLeagueCache` from a prior pass — and fetch the rest through one
- *      globally-bounded queue.
+ *   1. Resolve each owner's dynasty leagues (1 cheap call per owner, all in parallel).
+ *   2. Collect the UNIQUE league_ids across the WHOLE batch — skipping any league already in
+ *      `leagueIntelCache` from a prior pass — and fetch the rest through one globally-bounded
+ *      queue (`withConcurrency`, the same shared helper every other fan-out in the app uses).
+ *
+ * Phase 2 is keyed by league, not by (owner, league) pair, because a league's rosters,
+ * transactions and drafts are entirely owner-independent — only "which roster is mine" differs,
+ * and that is derived from the shared fetch. The batch's owners overlap heavily by design (they
+ * are all in the CURRENT league, and co-owners commonly share others), so the pair-keyed version
+ * this replaced re-fetched the same league once per owner sharing it. The browser cache in
+ * lib/clientFetch.ts absorbed much of that in the happy path — but only while localStorage is
+ * healthy, and it is exactly the localStorage-under-eviction-pressure case (many leagues, large
+ * payloads) where those duplicate calls became real 429 risk on this specific hook.
  *
  * Sept 22 code-review 50-league-scalability finding, Tier 1 #5 (Batch 4): an owner used to be
  * dropped entirely if even ONE of their leagues failed, which got specifically worse as an
@@ -235,7 +267,7 @@ function buildIntelFromLeagueResults(
 async function loadOwnerIntelBatch(
   ownerIds: string[],
   players: Record<string, SleeperPlayer>,
-  ownerLeagueCache: Map<string, Map<string, LeagueIntelFetch>>
+  leagueIntelCache: Map<string, LeagueSharedFetch>
 ): Promise<{ ownerId: string; intel: CrossLeagueIntel }[]> {
   const ownerLeagueResults = await Promise.all(
     ownerIds.map(async (ownerId) => {
@@ -255,47 +287,47 @@ async function loadOwnerIntelBatch(
   const priorCachedCount = new Map<string, number>();
   ownerLeagueResults.forEach((r) => {
     if (r.failed) return;
-    const cached = ownerLeagueCache.get(r.ownerId);
-    priorCachedCount.set(r.ownerId, r.dynastyLeagues.filter((l) => cached?.has(l.league_id)).length);
-  });
-
-  const pairs = ownerLeagueResults.flatMap((r) => {
-    if (r.failed) return [];
-    const cached = ownerLeagueCache.get(r.ownerId);
-    return r.dynastyLeagues
-      .filter((league) => !cached?.has(league.league_id))
-      .map((league) => ({ ownerId: r.ownerId, league }));
-  });
-
-  for (let i = 0; i < pairs.length; i += CROSS_LEAGUE_INTEL_LEAGUE_CONCURRENCY) {
-    const slice = pairs.slice(i, i + CROSS_LEAGUE_INTEL_LEAGUE_CONCURRENCY);
-    const sliceResults = await Promise.allSettled(
-      slice.map(({ league, ownerId }) => fetchOwnerLeagueIntel(league, ownerId))
+    priorCachedCount.set(
+      r.ownerId,
+      r.dynastyLeagues.filter((l) => leagueIntelCache.has(l.league_id)).length
     );
-    sliceResults.forEach((res, idx) => {
-      const { ownerId, league } = slice[idx];
-      if (res.status === "rejected") {
-        log.warn("cross-league intel: a league fetch failed — will retry just this league next pass", {
-          ownerId, leagueId: league.league_id, err: String(res.reason),
-        });
-        return;
-      }
-      let ownerCache = ownerLeagueCache.get(ownerId);
-      if (!ownerCache) {
-        ownerCache = new Map();
-        ownerLeagueCache.set(ownerId, ownerCache);
-      }
-      ownerCache.set(league.league_id, res.value);
+  });
+
+  // De-duplicated queue: one entry per league_id still missing from the cache, however many
+  // owners in this batch are waiting on it.
+  const missingLeagues = new Map<string, SleeperLeague>();
+  ownerLeagueResults.forEach((r) => {
+    if (r.failed) return;
+    r.dynastyLeagues.forEach((league) => {
+      if (leagueIntelCache.has(league.league_id)) return;
+      if (!missingLeagues.has(league.league_id)) missingLeagues.set(league.league_id, league);
     });
-  }
+  });
+
+  // withConcurrency is fail-fast WITHIN a batch (Promise.all), so per-league fault isolation
+  // has to live inside fn — one league 429ing must still leave the others cached, exactly as
+  // the hand-rolled Promise.allSettled loop this replaced did.
+  await withConcurrency(
+    [...missingLeagues.values()],
+    async (league) => {
+      try {
+        leagueIntelCache.set(league.league_id, await fetchLeagueIntel(league.league_id));
+      } catch (err) {
+        log.warn("cross-league intel: a league fetch failed — will retry just this league next pass", {
+          leagueId: league.league_id, err: String(err),
+        });
+      }
+    },
+    CROSS_LEAGUE_INTEL_LEAGUE_CONCURRENCY
+  );
 
   return ownerLeagueResults
     .filter((r) => !r.failed)
     .map((r) => {
-      const ownerCache = ownerLeagueCache.get(r.ownerId);
       const cachedResults = r.dynastyLeagues
-        .map((league) => ownerCache?.get(league.league_id))
-        .filter((x): x is LeagueIntelFetch => x !== undefined);
+        .map((league) => leagueIntelCache.get(league.league_id))
+        .filter((shared): shared is LeagueSharedFetch => shared !== undefined)
+        .map((shared) => ownerViewOfLeague(shared, r.ownerId));
       const isComplete = cachedResults.length === r.dynastyLeagues.length;
       const madeProgress = cachedResults.length > (priorCachedCount.get(r.ownerId) ?? 0);
       if (!isComplete && !madeProgress) return null; // nothing new to report this pass
@@ -322,9 +354,11 @@ export function useCrossLeagueMateIntel({
   // persistently-failing owners get retried instead of being stuck forever (crossLeagueMateIntel
   // is otherwise the only dependency below that advances the effect, and neither case changes it).
   const [retryNonce, setRetryNonce] = useState(0);
-  // Successful per-(owner, league) fetch results, kept across passes so a retry only re-fetches
-  // the leagues that failed rather than an owner's whole league list — see loadOwnerIntelBatch.
-  const ownerLeagueCacheRef = useRef<Map<string, Map<string, LeagueIntelFetch>>>(new Map());
+  // Successful per-league fetch results, kept across passes so a retry only re-fetches the
+  // leagues that failed rather than an owner's whole league list — see loadOwnerIntelBatch.
+  // Keyed by league_id rather than by owner, so a league one owner has already loaded is free
+  // for every other owner in it, on this pass and on every later one.
+  const leagueIntelCacheRef = useRef<Map<string, LeagueSharedFetch>>(new Map());
   // Last attempt time per owner, so a still-incomplete owner (one with a persistently failing
   // league) isn't re-selected into every batch the moment OTHER owners' progress re-triggers
   // this effect — throttled to the same cadence as the all-failed retry above.
@@ -377,7 +411,7 @@ export function useCrossLeagueMateIntel({
     const loadCrossLeagueMateIntel = async () => {
       setLoadingCrossLeagueMateIntel(true);
       try {
-        const succeeded = await loadOwnerIntelBatch(batch, players, ownerLeagueCacheRef.current);
+        const succeeded = await loadOwnerIntelBatch(batch, players, leagueIntelCacheRef.current);
         if (cancelled) return;
 
         const noProgressCount = batch.length - succeeded.length;

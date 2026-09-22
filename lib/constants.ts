@@ -190,11 +190,13 @@ export const COMPILE_PICKS_CONCURRENCY = 8;
  * effect pass; the rest stay "missing" and are picked up on the next pass.
  *
  * Raised from 4 (Sept 22 code-review 50-league-scalability finding, Tier 3 #10, folded into
- * Batch 4): this only controls how many owners' cheap getUserLeagues calls fire per pass and
- * how many (owner, league) pairs get queued — the real Sleeper-call burst stays capped by
- * CROSS_LEAGUE_INTEL_LEAGUE_CONCURRENCY below regardless of this number, so raising it doesn't
- * raise the peak burst, just how many owners a normal-sized league (typically <=12 OTHER
- * owners) can finish in a single pass instead of 3 sequential ones.
+ * Batch 4): this only controls how many owners' cheap getUserLeagues calls fire per pass — the
+ * real Sleeper-call burst stays capped by CROSS_LEAGUE_INTEL_LEAGUE_CONCURRENCY below
+ * regardless of this number, so raising it doesn't raise the peak burst, just how many owners a
+ * normal-sized league (typically <=12 OTHER owners) can finish in a single pass instead of 3
+ * sequential ones. Since the queue below is keyed by unique league, a wider owner batch now also
+ * makes the dedup MORE effective (more owners sharing the same leagues in one pass), rather than
+ * lengthening the queue proportionally the way the old (owner, league) pair queue did.
  */
 export const CROSS_LEAGUE_INTEL_OWNER_BATCH = 12;
 
@@ -204,7 +206,14 @@ export const CROSS_LEAGUE_INTEL_OWNER_BATCH = 12;
  * transactions, drafts), so this bounds the real burst size the browser fires at once — live
  * testing against a 36-league account with OWNER_BATCH=4 and a naive PER-OWNER cap of 3 still
  * produced 60 concurrent calls (4 owners x 3 leagues x 5 calls) and tripped 429s; capping the
- * flattened owner+league queue globally instead keeps the worst-case burst at this number x 5.
+ * flattened queue globally instead keeps the worst-case burst at this number x 5.
+ *
+ * Sept 22 deferred follow-up #1: that queue now holds UNIQUE LEAGUES, not (owner, league)
+ * pairs. The unit this number counts therefore changed, but what it bounds did NOT — a queue
+ * item still costs exactly 5 Sleeper calls either way, so the peak burst is the same 2 x 5 = 10.
+ * The dedup shortens the queue (every owner in the batch shares at least the current league),
+ * which makes the same cap drain faster; it deliberately does not widen it. Raise this only on
+ * real 429 evidence, exactly as before.
  */
 export const CROSS_LEAGUE_INTEL_LEAGUE_CONCURRENCY = 2;
 
