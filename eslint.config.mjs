@@ -12,6 +12,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Local/generated artifacts, gitignored but sometimes present on disk
+    // (a stray .codex-sleeper-bundle.js has previously OOM'd `eslint .`):
+    ".codex-*.js",
+    ".codex-*.json",
+    ".tmp/**",
   ]),
   {
     rules: {
