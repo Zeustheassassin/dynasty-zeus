@@ -231,6 +231,21 @@ export const GAMEDAY_DASHBOARD_CONCURRENCY = 3;
 export const OVERVIEW_REFRESH_ROSTERS_CONCURRENCY = 3;
 
 /**
+ * Shared cap for the three "look up one target user" fan-outs — Trade Hub (useUserTrades, 5
+ * Sleeper calls/league: rosters, 2x transactions, drafts, users), Shares/Exposure
+ * (useUserExposure, 1 call/league: rosters), and Draft Scout (useDraftScout, 1-2 calls/league:
+ * drafts, then draft picks if a rookie draft is found) — each previously fanned out across
+ * every league the TARGET user (not the viewer) is in, uncapped. Since these scale with a
+ * looked-up leaguemate's or opponent's league count rather than the viewer's own, even a
+ * small-league viewer can trip this by looking up a whale (Sept 22 code-review 50-league-
+ * scalability finding, Tier 1 #4). One shared constant since all three are single-shot,
+ * user-triggered lookups (never run concurrently with each other) rather than a repeating
+ * background fan-out; 3 keeps the worst case (useUserTrades, this number x 5) well short of the
+ * burst sizes already proven safe elsewhere in this file.
+ */
+export const TARGET_USER_LEAGUE_CONCURRENCY = 3;
+
+/**
  * A batch pass where every owner fails (e.g. Sleeper is down) never changes
  * `crossLeagueMateIntel`, which is the load effect's only dependency that advances it to the
  * next batch — without this, those owners would be silently dropped for the rest of the

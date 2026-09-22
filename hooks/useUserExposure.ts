@@ -3,6 +3,8 @@ import { useState, useRef, type Dispatch, type SetStateAction } from "react";
 import { CURRENT_YEAR } from "../lib/helpers";
 import { logger } from "../lib/logger";
 import { sleeperApi } from "../lib/sleeperApi";
+import { withConcurrency } from "../lib/concurrency";
+import { TARGET_USER_LEAGUE_CONCURRENCY } from "../lib/constants";
 import type { SleeperRoster } from "../lib/types";
 
 const log = logger("hooks/useUserExposure");
@@ -46,12 +48,15 @@ export function useUserExposure(): UseUserExposureReturn {
 
       const leagues = await sleeperApi.getUserLeagues(userId, CURRENT_YEAR);
 
-      const rosterResults = await Promise.all(
-        leagues.map(async (league) => {
-          const rosters = await sleeperApi.getLeagueRosters(league.league_id);
-          return rosters.find((r) => r.owner_id === userId);
-        })
-      );
+      // Capped at TARGET_USER_LEAGUE_CONCURRENCY leagues at once (Sept 22 code-review
+      // 50-league-scalability finding, Tier 1 #4) — this scales with the LOOKED-UP user's
+      // league count, not the viewer's own. The .catch mirrors useUserTrades' pattern: without
+      // it, one failed league would reject the whole Promise.all and blank the entire panel
+      // instead of just dropping that one league's roster.
+      const rosterResults = await withConcurrency(leagues, async (league) => {
+        const rosters = await sleeperApi.getLeagueRosters(league.league_id).catch(() => [] as SleeperRoster[]);
+        return rosters.find((r) => r.owner_id === userId);
+      }, TARGET_USER_LEAGUE_CONCURRENCY);
 
       const validRosters = rosterResults.filter((r): r is SleeperRoster => r !== undefined);
       const leagueCount = validRosters.length;

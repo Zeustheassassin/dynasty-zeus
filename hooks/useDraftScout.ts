@@ -2,7 +2,9 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { logger } from "../lib/logger";
 import { sleeperApi } from "../lib/sleeperApi";
+import { withConcurrency } from "../lib/concurrency";
 import { CURRENT_YEAR, ROOKIE_DRAFT_MAX_ROUNDS } from "../lib/helpers";
+import { TARGET_USER_LEAGUE_CONCURRENCY } from "../lib/constants";
 import type { SleeperDraft, SleeperPlayer } from "../lib/types";
 
 const log = logger("hooks/useDraftScout");
@@ -107,36 +109,37 @@ export function useDraftScout(players: Record<string, SleeperPlayer>) {
       const leagues = await sleeperApi.getUserLeagues(userId, CURRENT_YEAR);
       const currentPlayers = playersRef.current;
 
-      const results = await Promise.all(
-        leagues.map(async (league) => {
-          const drafts = await sleeperApi.getLeagueDrafts(league.league_id);
+      // Capped at TARGET_USER_LEAGUE_CONCURRENCY leagues at once (Sept 22 code-review
+      // 50-league-scalability finding, Tier 1 #4) — this scales with the LOOKED-UP user's
+      // league count, not the viewer's own.
+      const results = await withConcurrency(leagues, async (league) => {
+        const drafts = await sleeperApi.getLeagueDrafts(league.league_id);
 
-          const rookieDraft = drafts.find(
-            (d: SleeperDraft) =>
-              d.season === CURRENT_YEAR &&
-              d.status !== "pre_draft" &&
-              (d.settings?.rounds ?? 99) <= ROOKIE_DRAFT_MAX_ROUNDS
-          );
-          if (!rookieDraft) return null;
+        const rookieDraft = drafts.find(
+          (d: SleeperDraft) =>
+            d.season === CURRENT_YEAR &&
+            d.status !== "pre_draft" &&
+            (d.settings?.rounds ?? 99) <= ROOKIE_DRAFT_MAX_ROUNDS
+        );
+        if (!rookieDraft) return null;
 
-          const allPicks = await sleeperApi.getDraftPicks(rookieDraft.draft_id);
+        const allPicks = await sleeperApi.getDraftPicks(rookieDraft.draft_id);
 
-          const myPicks = allPicks
-            .filter((p) => p.picked_by === userId)
-            .sort((a, b) => a.pick_no - b.pick_no)
-            .map((p) => ({
-              slot: `${p.round}.${String(p.draft_slot).padStart(2, "0")}`,
-              round: p.round,
-              player: currentPlayers[p.player_id] || null,
-              playerName: p.metadata?.first_name
-                ? `${p.metadata.first_name} ${p.metadata.last_name}`
-                : null,
-              position: p.metadata?.position || null,
-            }));
+        const myPicks = allPicks
+          .filter((p) => p.picked_by === userId)
+          .sort((a, b) => a.pick_no - b.pick_no)
+          .map((p) => ({
+            slot: `${p.round}.${String(p.draft_slot).padStart(2, "0")}`,
+            round: p.round,
+            player: currentPlayers[p.player_id] || null,
+            playerName: p.metadata?.first_name
+              ? `${p.metadata.first_name} ${p.metadata.last_name}`
+              : null,
+            position: p.metadata?.position || null,
+          }));
 
-          return { leagueName: league.name, picks: myPicks };
-        })
-      );
+        return { leagueName: league.name, picks: myPicks };
+      }, TARGET_USER_LEAGUE_CONCURRENCY);
 
       if (seq !== requestSeq.current) return; // a newer lookup started — discard stale result
       setDraftScoutData(results.filter((r) => r !== null) as DraftScoutLeague[]);
