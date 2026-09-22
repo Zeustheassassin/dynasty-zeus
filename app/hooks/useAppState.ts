@@ -9,8 +9,8 @@ import { useAuthState, LAST_LOGIN_EMAIL_KEY } from "./useAuthState";
 import { useHubRouting } from "./useHubRouting";
 import { normalizeRookieName } from "../../components/draftHub/shared";
 import {
-  CURRENT_YEAR, YEARS, ROUNDS,
-  getStoredPickValue, getDraftRoundSlot,
+  CURRENT_YEAR,
+  getStoredPickValue, buildLeaguePickPool, sortOwnerPicks,
   getBucketColor, getAdjustedDirectionBucket, classifyOppDirection,
   sum,
   buildGamedayMatchups,
@@ -1162,9 +1162,6 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
     (r.players || []).forEach((p: string) => rosteredIds.add(p));
   });
 
-  const rosterToUser: Record<number, string> = {};
-  allRosters.forEach((r) => { rosterToUser[r.roster_id] = r.owner_id; });
-
   const myRoster = allRosters.find((r) => r.owner_id === user?.user_id);
   if (!myRoster) { setReadyLeagueId(league.league_id); return; }
   setRoster(myRoster);
@@ -1176,72 +1173,22 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
       .slice(0, 20)
   );
 
-  const MAX_SUPPORTED_ROUNDS = 6;
-  const ALL_ROUNDS = Array.from({ length: MAX_SUPPORTED_ROUNDS }, (_, i) => i + 1);
-
-  // Skip seasons whose rookie draft is complete (those picks are spent); extend
-  // the window forward to keep it 3 years long. A startup-sized draft (>6
-  // rounds) also retires that season if no separate rookie-sized draft exists
-  // for the same season — that pattern means rookies were consumed inside the
-  // startup itself and no follow-on rookie draft will fire.
-  const seasonsWithRookieDraft = new Set(
-    draftsData
-      .filter((d) => {
-        if (!d?.season) return false;
-        const rounds = d.settings?.rounds ?? d.rounds ?? 99;
-        return rounds <= 6;
-      })
-      .map((d) => String(d.season))
-  );
-  const completedDraftSeasons = new Set<string>();
-  draftsData.forEach((d) => {
-    if (d?.status !== "complete" || !d?.season) return;
-    const rounds = d.settings?.rounds ?? d.rounds ?? 99;
-    const season = String(d.season);
-    if (rounds <= 6) completedDraftSeasons.add(season);
-    else if (!seasonsWithRookieDraft.has(season)) completedDraftSeasons.add(season);
-  });
-  const baseYearNum = Number(YEARS[0]);
-  const pickYearWindow: string[] = [];
-  for (let offset = 0; pickYearWindow.length < YEARS.length; offset++) {
-    const y = String(baseYearNum + offset);
-    if (!completedDraftSeasons.has(y)) pickYearWindow.push(y);
-  }
-
-  let tempPicks: AugmentedPick[] = [];
-  pickYearWindow.forEach((year) => {
-    allRosters.forEach((r) => {
-      ALL_ROUNDS.forEach((round) => {
-        tempPicks.push({ season: year, round, roster_id: r.roster_id, owner_id: r.roster_id, previous_owner_id: r.roster_id });
-      });
-    });
-  });
-
   // ── Step 3: User names — fetchSleeperUser has its own module-level cache ──
   const userResults = await Promise.all(allRosters.map((r) => fetchSleeperUser(r.owner_id)));
   if (isStale()) return;
 
-  // ── Step 4: Apply traded picks ───────────────────────────────────────────
-  tradedPicksData.forEach((tp) => {
-    const match = tempPicks.find(
-      (p) => p.season === tp.season && p.round === tp.round && p.roster_id === tp.roster_id
-    );
-    if (match) match.owner_id = tp.owner_id;
+  // ── Steps 2/4/6: Pick window, traded-pick ownership, and draft slots ─────
+  // Shared with useSpyState/useLeagueOverview via buildLeaguePickPool — see
+  // __tests__/hooks/pickWindowCopies.test.ts for the pinned per-caller behavior.
+  const tempPicks = buildLeaguePickPool(allRosters, tradedPicksData, draftsData, {
+    roundsMode: "adaptive",
+    slotFallback: "padded-roster-id",
+    labelFutureSlots: true,
   });
-
-  // ── Step 6: Assign draft slots ───────────────────────────────────────────
   const currentDraft = draftsData.find((d) => d.season === CURRENT_YEAR);
 
-  // Trim to the league's actual round count (check both settings.rounds and top-level rounds)
-  const settingsRounds = Number(currentDraft?.settings?.rounds ?? currentDraft?.rounds) || 0;
-  const tradedMaxRound = tradedPicksData.reduce(
-    (max, tp) => Math.max(max, Number(tp.round) || 0), 0
-  );
-  const leagueRounds: number = Math.max(settingsRounds, tradedMaxRound, ROUNDS.length);
-  tempPicks = tempPicks.filter((p) => Number(p.round) <= leagueRounds);
-
   // ── Step 5: My picks (after trades applied and rounds trimmed) ───────────
-  const myPicks = tempPicks.filter((p) => p.owner_id === myRoster.roster_id);
+  const myPicks = sortOwnerPicks(tempPicks, myRoster.roster_id);
 
   // ── Reconcile stale own-roster dispositions ───────────────────────────
   // A Core/Pricey/Shopping/Offload tag is only meaningful while the asset is still mine.
@@ -1262,33 +1209,10 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
     }
   }
 
-  const order = currentDraft?.draft_order || {};
   setSelectedLeagueDraftHasOccurred(currentDraft?.status !== "pre_draft");
-  const totalDraftTeams = allRosters.length || Number(currentDraft?.settings?.teams) || 0;
-
-  tempPicks.forEach((pick) => {
-    if (pick.season === CURRENT_YEAR) {
-      const userId = rosterToUser[pick.roster_id];
-      const baseSlot = Number(order[String(userId)] || 0);
-      const slot = getDraftRoundSlot(currentDraft ?? {}, Number(pick.round), baseSlot, totalDraftTeams);
-      pick.slot = slot
-        ? `${pick.round}.${String(slot).padStart(2, "0")}`
-        : `${pick.round}.${String(pick.roster_id).padStart(2, "0")}`;
-    } else {
-      pick.slot = `${pick.round}`;
-    }
-  });
 
   setAllPicks(tempPicks);
-  setPicks(
-    myPicks.sort((a, b) => {
-      if (a.season !== b.season) return Number(a.season) - Number(b.season);
-      if (a.round !== b.round) return a.round - b.round;
-      const aSlot = parseInt(a.slot?.split(".")[1] ?? "0", 10);
-      const bSlot = parseInt(b.slot?.split(".")[1] ?? "0", 10);
-      return aSlot - bSlot;
-    })
-  );
+  setPicks(myPicks);
 
   // ── Step 7: Apply user names ─────────────────────────────────────────────
   const userMap: Record<string | number, string> = {};

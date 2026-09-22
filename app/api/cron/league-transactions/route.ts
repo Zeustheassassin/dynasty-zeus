@@ -22,13 +22,13 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from "next/server";
-import { timingSafeEqual } from "crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { safeFetch, withConcurrency } from "../../../../lib/sleeperServer";
 import { getDraftRoundSlot } from "../../../../lib/helpers/picks";
 import { CURRENT_YEAR } from "../../../../lib/helpers/season";
 import { SLEEPER_BASE_URL } from "../../../../lib/constants";
 import { logger } from "../../../../lib/logger";
+import { verifyCron } from "../../../../lib/server/verifyCron";
 import type {
   SleeperLeague,
   SleeperRoster,
@@ -244,21 +244,8 @@ async function processUser(
 }
 
 export async function GET(req: NextRequest): Promise<Response> {
-  const expected = process.env.CRON_SECRET;
-  if (!expected) {
-    log.error("CRON_SECRET env var is not set — refusing to run");
-    return NextResponse.json(
-      { error: "CRON_SECRET not configured on server" },
-      { status: 500 }
-    );
-  }
-  // Constant-time comparison so a timing side-channel can't reveal the secret.
-  // timingSafeEqual throws on length mismatch, so guard the length first.
-  const authBuf = Buffer.from(req.headers.get("authorization") ?? "");
-  const expectedBuf = Buffer.from(`Bearer ${expected}`);
-  if (authBuf.length !== expectedBuf.length || !timingSafeEqual(authBuf, expectedBuf)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const unauthorized = verifyCron(req, log);
+  if (unauthorized) return unauthorized;
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;

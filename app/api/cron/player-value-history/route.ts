@@ -36,10 +36,10 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from "next/server";
-import { timingSafeEqual } from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import { logger } from "../../../../lib/logger";
 import { getFcValues, type FcRawEntry } from "../../../../lib/server/fcValues";
+import { verifyCron } from "../../../../lib/server/verifyCron";
 
 const log = logger("cron/player-value-history");
 
@@ -62,16 +62,8 @@ function parsePlayerValues(raw: FcRawEntry[]): { player_id: string; value: numbe
 }
 
 export async function GET(req: NextRequest): Promise<Response> {
-  const expected = process.env.CRON_SECRET;
-  if (!expected) {
-    log.error("CRON_SECRET env var is not set — refusing to run");
-    return NextResponse.json({ error: "CRON_SECRET not configured on server" }, { status: 500 });
-  }
-  const authBuf = Buffer.from(req.headers.get("authorization") ?? "");
-  const expectedBuf = Buffer.from(`Bearer ${expected}`);
-  if (authBuf.length !== expectedBuf.length || !timingSafeEqual(authBuf, expectedBuf)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const unauthorized = verifyCron(req, log);
+  if (unauthorized) return unauthorized;
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;

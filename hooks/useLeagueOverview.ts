@@ -2,10 +2,10 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { logger } from "../lib/logger";
 import { sleeperApi } from "../lib/sleeperApi";
-import { CURRENT_YEAR, YEARS, ROUNDS, getDraftRoundSlot } from "../lib/helpers";
+import { buildLeaguePickPool } from "../lib/helpers";
 import type {
   SleeperLeague,
-  AugmentedPick, LeagueOverviewEntry,
+  LeagueOverviewEntry,
 } from "../lib/types";
 
 const log = logger("hooks/useLeagueOverview");
@@ -56,76 +56,14 @@ export function useLeagueOverview(
                 u.display_name || u.username || u.metadata?.team_name || `Team`;
             });
 
-            // Skip seasons whose rookie draft is complete (those picks are
-            // spent); extend the window forward to keep it the same length.
-            // A startup-sized draft (>6 rounds) also retires that season if no
-            // separate rookie-sized draft exists for it — that pattern means
-            // rookies were consumed inside the startup itself.
-            const seasonsWithRookieDraft = new Set(
-              draftsData
-                .filter((d) => {
-                  if (!d?.season) return false;
-                  const rounds = d.settings?.rounds ?? d.rounds ?? 99;
-                  return rounds <= 6;
-                })
-                .map((d) => String(d.season))
-            );
-            const completedDraftSeasons = new Set<string>();
-            draftsData.forEach((d) => {
-              if (d?.status !== "complete" || !d?.season) return;
-              const rounds = d.settings?.rounds ?? d.rounds ?? 99;
-              const season = String(d.season);
-              if (rounds <= 6) completedDraftSeasons.add(season);
-              else if (!seasonsWithRookieDraft.has(season)) completedDraftSeasons.add(season);
-            });
-            const baseYearNum = Number(YEARS[0]);
-            const pickYearWindow: string[] = [];
-            for (let offset = 0; pickYearWindow.length < YEARS.length; offset++) {
-              const y = String(baseYearNum + offset);
-              if (!completedDraftSeasons.has(y)) pickYearWindow.push(y);
-            }
-
-            const tempPicks: AugmentedPick[] = [];
-            const rosterToUser: Record<string, string> = {};
-            rostersData.forEach((r) => {
-              rosterToUser[String(r.roster_id)] = r.owner_id;
-              pickYearWindow.forEach((year) => {
-                ROUNDS.forEach((round) => {
-                  tempPicks.push({
-                    season: year,
-                    round,
-                    roster_id: r.roster_id,
-                    owner_id: r.roster_id,
-                    previous_owner_id: r.roster_id,
-                  });
-                });
-              });
-            });
-
-            tradedPicksData.forEach((tp) => {
-              const match = tempPicks.find(
-                (p) => p.season === tp.season && p.round === tp.round && p.roster_id === tp.roster_id
-              );
-              if (match) match.owner_id = tp.owner_id;
-            });
-
-            const currentDraft = draftsData.find((d) => d.season === CURRENT_YEAR);
-            const order = currentDraft?.draft_order || {};
-            const totalDraftTeams = rostersData.length || Number(currentDraft?.settings?.teams) || 0;
-            tempPicks.forEach((pick) => {
-              if (pick.season === CURRENT_YEAR) {
-                const userId = rosterToUser[String(pick.roster_id)];
-                const baseSlot = Number(order[String(userId)] || 0);
-                const slot = getDraftRoundSlot(
-                  currentDraft ?? {},
-                  Number(pick.round),
-                  baseSlot,
-                  totalDraftTeams
-                );
-                pick.slot = slot
-                  ? `${pick.round}.${String(slot).padStart(2, "0")}`
-                  : `${pick.round}`;
-              }
+            // Pick pool: shared with useAppState.loadRoster/useSpyState via buildLeaguePickPool.
+            // Overview renders every league at once, so it caps round depth at ROUNDS.length
+            // and skips the per-league round trim/slot fallback the other two callers use —
+            // see __tests__/hooks/pickWindowCopies.test.ts for the pinned per-caller behavior.
+            const tempPicks = buildLeaguePickPool(rostersData, tradedPicksData, draftsData, {
+              roundsMode: "fixed",
+              slotFallback: "bare-round",
+              labelFutureSlots: false,
             });
 
             return { league, rosters: rostersData, picks: tempPicks, userMap: leagueUserMap };

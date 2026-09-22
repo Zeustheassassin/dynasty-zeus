@@ -3,8 +3,9 @@
 // draft type detection, slot calculation, and FantasyCalc fetch.
 // ============================================================
 
-import { CURRENT_YEAR } from "./season";
+import { CURRENT_YEAR, YEARS, ROUNDS } from "./season";
 import { getFcValuesRaw } from "../fcValuesStore";
+import type { SleeperRoster, SleeperDraft, SleeperTradedPick, AugmentedPick } from "../types";
 
 /** Minimal pick shape needed for value key generation (subset of SleeperTradedPick). */
 interface PickLike {
@@ -81,6 +82,133 @@ export const getDraftRoundSlot = (
   if (!isSnakeDraft(draft)) return baseSlot;
   return round % 2 === 0 ? totalTeams - baseSlot + 1 : baseSlot;
 };
+
+const MAX_SUPPORTED_ROUNDS = 6;
+const ALL_ROUNDS = Array.from({ length: MAX_SUPPORTED_ROUNDS }, (_, i) => i + 1);
+
+export interface PickPoolOptions {
+  /** "adaptive": builds up to MAX_SUPPORTED_ROUNDS then trims to
+   *  max(league settings rounds, traded-pick max round, ROUNDS.length) — used by loadRoster and
+   *  useSpyState, which show one league's full pick board. "fixed": builds exactly ROUNDS.length
+   *  rounds with no trim — used by useLeagueOverview, which renders every league at once. */
+  roundsMode: "adaptive" | "fixed";
+  /** Fallback slot label for a current-year pick with no resolvable draft-order slot.
+   *  "padded-roster-id": `${round}.${paddedRosterId}` (loadRoster/useSpyState).
+   *  "bare-round": `${round}` (useLeagueOverview). */
+  slotFallback: "padded-roster-id" | "bare-round";
+  /** Whether a non-current-year pick gets a bare-round slot label (loadRoster/useSpyState) or is
+   *  left with no slot at all (useLeagueOverview). */
+  labelFutureSlots: boolean;
+}
+
+/** Builds a league's full pick pool (every roster's picks across the pick-year window), shared by
+ *  the three client copies of this logic: useAppState.loadRoster, useSpyState.loadSpyLeagueCore,
+ *  and useLeagueOverview. The season-window and traded-pick-application rules below are identical
+ *  across all three callers; `options` captures where they intentionally diverge (round depth and
+ *  slot-label fallback) — see __tests__/hooks/pickWindowCopies.test.ts, which pins each
+ *  difference per caller so a future edit here can't silently change one of them. */
+export function buildLeaguePickPool(
+  rosters: SleeperRoster[],
+  tradedPicks: SleeperTradedPick[],
+  drafts: SleeperDraft[],
+  options: PickPoolOptions
+): AugmentedPick[] {
+  // Skip seasons whose rookie draft is complete (those picks are spent); extend the window
+  // forward to keep it the same length. A startup-sized draft (>6 rounds) also retires that
+  // season if no separate rookie-sized draft exists for it — that pattern means rookies were
+  // consumed inside the startup itself and no follow-on rookie draft will fire.
+  const seasonsWithRookieDraft = new Set(
+    drafts
+      .filter((d) => {
+        if (!d?.season) return false;
+        const rounds = d.settings?.rounds ?? d.rounds ?? 99;
+        return rounds <= 6;
+      })
+      .map((d) => String(d.season))
+  );
+  const completedDraftSeasons = new Set<string>();
+  drafts.forEach((d) => {
+    if (d?.status !== "complete" || !d?.season) return;
+    const rounds = d.settings?.rounds ?? d.rounds ?? 99;
+    const season = String(d.season);
+    if (rounds <= 6) completedDraftSeasons.add(season);
+    else if (!seasonsWithRookieDraft.has(season)) completedDraftSeasons.add(season);
+  });
+  const baseYearNum = Number(YEARS[0]);
+  const pickYearWindow: string[] = [];
+  for (let offset = 0; pickYearWindow.length < YEARS.length; offset++) {
+    const y = String(baseYearNum + offset);
+    if (!completedDraftSeasons.has(y)) pickYearWindow.push(y);
+  }
+
+  const buildRounds = options.roundsMode === "adaptive" ? ALL_ROUNDS : ROUNDS;
+  let tempPicks: AugmentedPick[] = [];
+  pickYearWindow.forEach((year) => {
+    rosters.forEach((r) => {
+      buildRounds.forEach((round) => {
+        tempPicks.push({
+          season: year, round, roster_id: r.roster_id,
+          owner_id: r.roster_id, previous_owner_id: r.roster_id,
+        });
+      });
+    });
+  });
+
+  tradedPicks.forEach((tp) => {
+    const match = tempPicks.find(
+      (p) => p.season === tp.season && p.round === tp.round && p.roster_id === tp.roster_id
+    );
+    if (match) match.owner_id = tp.owner_id;
+  });
+
+  const currentDraft = drafts.find((d) => d.season === CURRENT_YEAR);
+
+  if (options.roundsMode === "adaptive") {
+    const settingsRounds = Number(currentDraft?.settings?.rounds ?? currentDraft?.rounds) || 0;
+    const tradedMaxRound = tradedPicks.reduce((max, tp) => Math.max(max, Number(tp.round) || 0), 0);
+    const leagueRounds = Math.max(settingsRounds, tradedMaxRound, ROUNDS.length);
+    tempPicks = tempPicks.filter((p) => Number(p.round) <= leagueRounds);
+  }
+
+  const rosterToUser: Record<number, string> = {};
+  rosters.forEach((r) => { rosterToUser[r.roster_id] = r.owner_id; });
+  const order = currentDraft?.draft_order || {};
+  const totalDraftTeams = rosters.length || Number(currentDraft?.settings?.teams) || 0;
+
+  tempPicks.forEach((pick) => {
+    if (pick.season === CURRENT_YEAR) {
+      const userId = rosterToUser[Number(pick.roster_id)];
+      const baseSlot = Number(order[String(userId)] || 0);
+      const slot = getDraftRoundSlot(currentDraft ?? {}, Number(pick.round), baseSlot, totalDraftTeams);
+      if (slot) {
+        pick.slot = `${pick.round}.${String(slot).padStart(2, "0")}`;
+      } else if (options.slotFallback === "padded-roster-id") {
+        pick.slot = `${pick.round}.${String(pick.roster_id).padStart(2, "0")}`;
+      } else {
+        pick.slot = `${pick.round}`;
+      }
+    } else if (options.labelFutureSlots) {
+      pick.slot = `${pick.round}`;
+    }
+  });
+
+  return tempPicks;
+}
+
+/** Filters a league pick pool down to one owner's picks, sorted by season, round, then slot —
+ *  the "my picks" view shared by loadRoster and useSpyState (useLeagueOverview doesn't call this;
+ *  it keeps the full pool and lets its own caller filter/display differently). */
+export function sortOwnerPicks(allPicks: AugmentedPick[], ownerRosterId: number): AugmentedPick[] {
+  return allPicks
+    .filter((p) => p.owner_id === ownerRosterId)
+    .sort((a, b) => {
+      if (a.season !== b.season) return Number(a.season) - Number(b.season);
+      if (a.round !== b.round) return a.round - b.round;
+      const aSlot = parseInt(a.slot?.split(".")[1] ?? "0", 10);
+      const bSlot = parseInt(b.slot?.split(".")[1] ?? "0", 10);
+      return aSlot - bSlot;
+    });
+}
 
 /** Returns `players` with `.value` set from `values` (Sleeper ID -> FC value) for every player that
  *  has one. Non-mutating — the input map may already be held in React state — and only players whose

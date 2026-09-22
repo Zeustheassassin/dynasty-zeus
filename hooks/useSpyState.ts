@@ -20,7 +20,7 @@ import { sleeperApi } from "../lib/sleeperApi";
 import { FANTASYCALC_BASE_URL, FC_FETCH_TIMEOUT_MS } from "../lib/constants";
 import { getFcValuesRaw } from "../lib/fcValuesStore";
 import {
-  CURRENT_YEAR, YEARS, ROUNDS, getDraftRoundSlot,
+  CURRENT_YEAR, buildLeaguePickPool, sortOwnerPicks,
   computeScoringMultipliers, getRosterDirectionProfile,
   getAdjustedDirectionBucket, getBucketColor, fetchFantasyCalcValues,
 } from "../lib/helpers";
@@ -30,7 +30,7 @@ import { useLeagueOverview } from "./useLeagueOverview";
 import type { PlayerUsage } from "./usePlayerStats";
 import type {
   SleeperUser, SleeperLeague, SleeperRoster, SleeperPlayer, SleeperNFLState,
-  SleeperDraft, SleeperTradedPick, AugmentedPick, StandingRow,
+  SleeperDraft, AugmentedPick, StandingRow,
   RosterDirectionProfile, LeagueSimulation, RookieBoardPlayer, ProjectionRow,
 } from "../lib/types";
 
@@ -100,9 +100,7 @@ async function loadSpyLeagueCore(
     const name = u.display_name || u.username || u.metadata?.team_name || "Team";
     users[u.user_id] = name;
   });
-  const rosterToUser: Record<number, string> = {};
   rosters.forEach((r) => {
-    rosterToUser[r.roster_id] = r.owner_id;
     if (users[r.owner_id]) users[r.roster_id] = users[r.owner_id];
   });
 
@@ -115,81 +113,16 @@ async function loadSpyLeagueCore(
     .sort((a, b) => (b.value || 0) - (a.value || 0))
     .slice(0, 20);
 
-  // Pick-year window (drop completed-rookie-draft seasons, extend forward)
-  const seasonsWithRookieDraft = new Set(
-    drafts
-      .filter((d) => {
-        if (!d?.season) return false;
-        const rounds = d.settings?.rounds ?? d.rounds ?? 99;
-        return rounds <= 6;
-      })
-      .map((d) => String(d.season))
-  );
-  const completedDraftSeasons = new Set<string>();
-  drafts.forEach((d) => {
-    if (d?.status !== "complete" || !d?.season) return;
-    const rounds = d.settings?.rounds ?? d.rounds ?? 99;
-    const season = String(d.season);
-    if (rounds <= 6) completedDraftSeasons.add(season);
-    else if (!seasonsWithRookieDraft.has(season)) completedDraftSeasons.add(season);
+  // Pick pool: shared with useAppState.loadRoster/useLeagueOverview via buildLeaguePickPool —
+  // see __tests__/hooks/pickWindowCopies.test.ts for the pinned per-caller behavior.
+  const tempPicks = buildLeaguePickPool(rosters, tradedPicks, drafts, {
+    roundsMode: "adaptive",
+    slotFallback: "padded-roster-id",
+    labelFutureSlots: true,
   });
-  const baseYearNum = Number(YEARS[0]);
-  const pickYearWindow: string[] = [];
-  for (let offset = 0; pickYearWindow.length < YEARS.length; offset++) {
-    const y = String(baseYearNum + offset);
-    if (!completedDraftSeasons.has(y)) pickYearWindow.push(y);
-  }
-
-  const MAX_SUPPORTED_ROUNDS = 6;
-  const ALL_ROUNDS = Array.from({ length: MAX_SUPPORTED_ROUNDS }, (_, i) => i + 1);
-  let tempPicks: AugmentedPick[] = [];
-  pickYearWindow.forEach((year) => {
-    rosters.forEach((r) => {
-      ALL_ROUNDS.forEach((round) => {
-        tempPicks.push({ season: year, round, roster_id: r.roster_id, owner_id: r.roster_id, previous_owner_id: r.roster_id });
-      });
-    });
-  });
-
-  tradedPicks.forEach((tp: SleeperTradedPick) => {
-    const match = tempPicks.find(
-      (p) => p.season === tp.season && p.round === tp.round && p.roster_id === tp.roster_id
-    );
-    if (match) match.owner_id = tp.owner_id;
-  });
-
   const currentDraft = drafts.find((d) => d.season === CURRENT_YEAR) ?? null;
-  const settingsRounds = Number(currentDraft?.settings?.rounds ?? currentDraft?.rounds) || 0;
-  const tradedMaxRound = tradedPicks.reduce((max: number, tp: SleeperTradedPick) => Math.max(max, Number(tp.round) || 0), 0);
-  const leagueRounds = Math.max(settingsRounds, tradedMaxRound, ROUNDS.length);
-  tempPicks = tempPicks.filter((p) => Number(p.round) <= leagueRounds);
 
-  const order = currentDraft?.draft_order || {};
-  const totalDraftTeams = rosters.length || Number(currentDraft?.settings?.teams) || 0;
-  tempPicks.forEach((pick) => {
-    if (pick.season === CURRENT_YEAR) {
-      const userId = rosterToUser[pick.roster_id];
-      const baseSlot = Number(order[String(userId)] || 0);
-      const slot = getDraftRoundSlot(currentDraft ?? {}, Number(pick.round), baseSlot, totalDraftTeams);
-      pick.slot = slot
-        ? `${pick.round}.${String(slot).padStart(2, "0")}`
-        : `${pick.round}.${String(pick.roster_id).padStart(2, "0")}`;
-    } else {
-      pick.slot = `${pick.round}`;
-    }
-  });
-
-  const picks = myRoster
-    ? tempPicks
-        .filter((p) => p.owner_id === myRoster.roster_id)
-        .sort((a, b) => {
-          if (a.season !== b.season) return Number(a.season) - Number(b.season);
-          if (a.round !== b.round) return a.round - b.round;
-          const aSlot = parseInt(a.slot?.split(".")[1] ?? "0", 10);
-          const bSlot = parseInt(b.slot?.split(".")[1] ?? "0", 10);
-          return aSlot - bSlot;
-        })
-    : [];
+  const picks = myRoster ? sortOwnerPicks(tempPicks, myRoster.roster_id) : [];
 
   const standings: StandingRow[] = rosters
     .map((r) => ({
