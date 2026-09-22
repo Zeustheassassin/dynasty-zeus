@@ -22,6 +22,7 @@ interface FakeState {
   links: { rows: unknown[] | null; error: { message: string } | null };
   createClientCalls: number;
   historyUpserts: number;
+  historyUpsertBatchSizes: number[];
 }
 
 let fake: FakeState;
@@ -35,15 +36,17 @@ function makeQueryBuilder(table: string) {
       // Only user_sleeper_links is read with this client — FantasyCalc values come from the mocked loader.
       return Promise.resolve({ data: [], error: null });
     },
-    upsert: (_batch: unknown[], _opts: unknown) => {
+    upsert: (batch: unknown[], _opts: unknown) => {
       fake.historyUpserts++;
-      return { select: (_cols: string) => Promise.resolve({ data: [], error: null }) };
+      fake.historyUpsertBatchSizes.push(batch.length);
+      return { select: (_cols: string) => Promise.resolve({ data: batch.map(() => ({ id: 1 })), error: null }) };
     },
   };
 }
 
-const h = vi.hoisted(() => ({ getFcValues: vi.fn() }));
+const h = vi.hoisted(() => ({ getFcValues: vi.fn(), simulateLeague: vi.fn() }));
 vi.mock("@/lib/server/fcValues", () => ({ getFcValues: h.getFcValues }));
+vi.mock("@/lib/helpers/simulation", () => ({ simulateLeague: h.simulateLeague }));
 const fcOk = { data: [], source: "cache", fetchedAt: "2026-09-21T09:00:00.000Z" };
 
 vi.mock("@supabase/supabase-js", () => ({
@@ -95,9 +98,10 @@ const ORIG_ENV = {
 };
 
 beforeEach(() => {
-  fake = { links: { rows: [], error: null }, createClientCalls: 0, historyUpserts: 0 };
+  fake = { links: { rows: [], error: null }, createClientCalls: 0, historyUpserts: 0, historyUpsertBatchSizes: [] };
   h.getFcValues.mockReset();
   h.getFcValues.mockResolvedValue(fcOk);
+  h.simulateLeague.mockReset();
   fetchRoutes = [];
   installFetch();
   process.env.CRON_SECRET = SECRET;
@@ -322,6 +326,38 @@ describe("GET FantasyCalc availability", () => {
     // The 2QB league still ran (its rosters were requested); the 1QB league was skipped up front.
     expect(rosterFetches.filter((u) => u.includes("L-sf"))).toHaveLength(1);
     expect(rosterFetches.filter((u) => u.includes("L-1qb"))).toHaveLength(0);
+  });
+});
+
+describe("GET incremental writes", () => {
+  // Sept 22 code-review Tier 1 #6: allRows used to be accumulated across the WHOLE per-league
+  // loop and upserted once at the very end. If Vercel hard-kills the function past maxDuration
+  // mid-run, every already-simulated league's rows were lost, not just the unreached ones. The
+  // route now upserts each per-league batch's rows right after that batch finishes.
+  it("upserts each per-league batch immediately instead of writing everything once at the end", async () => {
+    // CONCURRENCY (route-internal, not exported) is 5 — 6 leagues means a 5-league batch then a
+    // 1-league batch, each with its own upsert call.
+    const leagues = Array.from({ length: 6 }, (_, i) => ({
+      league_id: `L${i + 1}`,
+      name: `League ${i + 1}`,
+      settings: { taxi_slots: 2, best_ball: 0 },
+      roster_positions: ["QB", "RB", "WR", "TE", "FLEX", "SUPER_FLEX", "BN"],
+    }));
+    fake.links = { rows: [{ sleeper_user_id: "s1" }], error: null };
+    route((u) => u.includes("/user/s1/leagues/"), leagues);
+    route((u) => u.includes("/state/nfl"), { season_type: "regular", week: 5, season: "2026" });
+    route((u) => u.includes("/rosters"), [{ roster_id: 1, owner_id: "owner1", settings: {} }]);
+    h.simulateLeague.mockReturnValue({
+      rows: [{ rosterId: 1, playoffOdds: 0.5, titleOdds: 0.1, expectedWins: 5, avgFinish: 4, finishRange: "3-5" }],
+    });
+
+    const GET = await loadGET();
+    const res = await GET(makeReq(`Bearer ${SECRET}`));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.leaguesSimulated).toBe(6);
+    expect(fake.historyUpsertBatchSizes).toEqual([5, 1]);
+    expect(body.rowsWritten).toBe(6);
   });
 });
 

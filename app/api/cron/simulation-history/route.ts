@@ -32,6 +32,7 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 import { safeFetch, withConcurrency } from "../../../../lib/sleeperServer";
 import { getFcValues, type FcRawEntry } from "../../../../lib/server/fcValues";
@@ -507,6 +508,27 @@ interface HistoryRow {
   computed_at: string;
 }
 
+/** Upserts one per-league-batch's worth of rows, chunked to Supabase's per-request row limit.
+ *  Called after EACH per-league batch (not once at the end of the whole run) so a Vercel
+ *  hard-kill past maxDuration only loses the unreached leagues' rows, not every league already
+ *  simulated this run — see the TIME_BUDGET_MS comment above. */
+async function writeHistoryRows(supabase: SupabaseClient, rows: HistoryRow[]): Promise<number> {
+  let written = 0;
+  for (let i = 0; i < rows.length; i += 200) {
+    const chunk = rows.slice(i, i + 200);
+    const { error, data } = await supabase
+      .from("league_simulation_history")
+      .upsert(chunk, { onConflict: "league_id,roster_id,season,week" })
+      .select("id");
+    if (error) {
+      log.error("league_simulation_history upsert failed", { batchStart: i, err: error.message });
+      continue;
+    }
+    written += Array.isArray(data) ? data.length : 0;
+  }
+  return written;
+}
+
 export async function GET(req: NextRequest): Promise<Response> {
   const unauthorized = verifyCron(req, log);
   if (unauthorized) return unauthorized;
@@ -588,10 +610,10 @@ export async function GET(req: NextRequest): Promise<Response> {
   let leaguesSimulated = 0;
   let leaguesSkipped = 0;
   let leaguesSkippedTimeBudget = 0;
-  const allRows: HistoryRow[] = [];
+  let rowsWritten = 0;
   const nowIso = new Date().toISOString();
 
-  const simulateOneLeague = async (league: SleeperLeague): Promise<void> => {
+  const simulateOneLeague = async (league: SleeperLeague): Promise<HistoryRow[]> => {
     try {
       // Checked before any Sleeper fan-out so a skipped league costs nothing.
       const numQbs = getLeagueNumQbs(league);
@@ -602,11 +624,11 @@ export async function GET(req: NextRequest): Promise<Response> {
           leagueId: league.league_id, numQbs, dynasty: !!fcDynasty, redraft: !!fcRedraft,
         });
         leaguesSkipped++;
-        return;
+        return [];
       }
 
       const core = await fetchLeagueCore(league);
-      if (!core) return;
+      if (!core) return [];
 
       const scoringSettings = league.scoring_settings ?? DEFAULT_SCORING;
       const multipliers = computeScoringMultipliers(scoringSettings);
@@ -665,31 +687,33 @@ export async function GET(req: NextRequest): Promise<Response> {
         // byte-for-byte reproducible against any one live session's odds.
         simSalt: Math.floor(Math.random() * 1_000_000),
       });
-      if (!simulation) return;
+      if (!simulation) return [];
 
       leaguesSimulated++;
-      simulation.rows.forEach((row) => {
-        allRows.push({
-          league_id: league.league_id,
-          roster_id: row.rosterId,
-          season,
-          week: currentWeek,
-          playoff_odds: row.playoffOdds ?? 0,
-          title_odds: row.titleOdds ?? 0,
-          expected_wins: row.expectedWins ?? 0,
-          avg_finish: row.avgFinish ?? 0,
-          finish_range: row.finishRange ?? "",
-          computed_at: nowIso,
-        });
-      });
+      return simulation.rows.map((row) => ({
+        league_id: league.league_id,
+        roster_id: row.rosterId,
+        season,
+        week: currentWeek,
+        playoff_odds: row.playoffOdds ?? 0,
+        title_odds: row.titleOdds ?? 0,
+        expected_wins: row.expectedWins ?? 0,
+        avg_finish: row.avgFinish ?? 0,
+        finish_range: row.finishRange ?? "",
+        computed_at: nowIso,
+      }));
     } catch (err) {
       log.error("league simulation failed", {
         leagueId: league.league_id,
         err: err instanceof Error ? err.message : String(err),
       });
+      return [];
     }
   };
 
+  // Each batch's rows are upserted right after that batch finishes (not accumulated for one
+  // write at the very end) so a Vercel hard-kill past maxDuration only drops the leagues that
+  // hadn't started yet, matching the graceful-early-stop the TIME_BUDGET_MS guard below implies.
   for (let i = 0; i < leagues.length; i += CONCURRENCY) {
     if (Date.now() - runStartedAt > TIME_BUDGET_MS) {
       leaguesSkippedTimeBudget = leagues.length - i;
@@ -701,22 +725,10 @@ export async function GET(req: NextRequest): Promise<Response> {
       break;
     }
     const batch = leagues.slice(i, i + CONCURRENCY);
-    await Promise.all(batch.map(simulateOneLeague));
-  }
-
-  // ── 4. Write history rows ──
-  let rowsWritten = 0;
-  for (let i = 0; i < allRows.length; i += 200) {
-    const batch = allRows.slice(i, i + 200);
-    const { error, data } = await supabase
-      .from("league_simulation_history")
-      .upsert(batch, { onConflict: "league_id,roster_id,season,week" })
-      .select("id");
-    if (error) {
-      log.error("league_simulation_history upsert failed", { batchStart: i, err: error.message });
-      continue;
+    const batchRows = (await Promise.all(batch.map(simulateOneLeague))).flat();
+    if (batchRows.length) {
+      rowsWritten += await writeHistoryRows(supabase, batchRows);
     }
-    rowsWritten += Array.isArray(data) ? data.length : 0;
   }
 
   // Every league skipped for missing FantasyCalc values is a failed run, not a quiet success — answer
