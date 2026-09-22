@@ -62,6 +62,55 @@ describe("useLeagueOverview — concurrency cap", () => {
   });
 });
 
+describe("useLeagueOverview — in-flight dedupe", () => {
+  // Sept 22 code-review Tier 2 finding #7: multiple useAppState.ts effects (the OVERVIEW-tab
+  // effect and the player-profile-open effect) can each call loadLeagueOverview() in the same
+  // render pass, before leagueOverviewLoaded flips true — every one of them used to kick off
+  // its own full per-league fan-out. A call made while one is already running should now join
+  // that same in-flight promise instead of starting a duplicate fetch.
+  it("ignores a second call while the first is still in flight, joining the same load", async () => {
+    const leagues = [league("A"), league("B")];
+    let callCount = 0;
+    const releasers: (() => void)[] = [];
+    api.impl.getLeagueRosters = vi.fn(() => {
+      callCount++;
+      return new Promise((resolve) => releasers.push(() => resolve([])));
+    });
+
+    const { result } = renderHook(() => useLeagueOverview(leagues, user));
+    let p1!: Promise<void>;
+    let p2!: Promise<void>;
+    act(() => {
+      p1 = result.current.loadLeagueOverview();
+      p2 = result.current.loadLeagueOverview();
+    });
+
+    expect(p1).toBe(p2); // the second call joined the first's in-flight promise, not a new one
+    await waitFor(() => expect(callCount).toBe(2)); // both leagues' rosters requested exactly once each
+
+    releasers.forEach((release) => release());
+    await act(async () => { await p1; });
+
+    expect(callCount).toBe(2); // still 2 — no duplicate fan-out fired for the second call
+    expect(Object.keys(result.current.leagueOverviewData).sort()).toEqual(["A", "B"]);
+  });
+
+  it("starts a genuinely new fetch on the next call once the previous one has resolved", async () => {
+    const leagues = [league("A")];
+    let callCount = 0;
+    api.impl.getLeagueRosters = vi.fn(() => {
+      callCount++;
+      return Promise.resolve([]);
+    });
+
+    const { result } = renderHook(() => useLeagueOverview(leagues, user));
+    await act(async () => { await result.current.loadLeagueOverview(); });
+    await act(async () => { await result.current.loadLeagueOverview(); });
+
+    expect(callCount).toBe(2); // two sequential (non-overlapping) calls each did their own fetch
+  });
+});
+
 describe("useLeagueOverview — per-league failure isolation", () => {
   it("drops only the league whose fetch failed, keeping the rest", async () => {
     const leagues = [league("bad"), league("good")];
