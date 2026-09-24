@@ -1,10 +1,14 @@
 "use client";
 // ── StandingsTab ──────────────────────────────────────────────────────────────
 // Displays the win-loss standings for the selected league with playoff cut line.
+// Teams below the cut are re-ranked by max PF (their record has stopped mattering);
+// see lib/helpers/standings.ts for why, and note the source `standings` array is
+// left alone because the season simulator seeds playoffs from it.
 import { useMemo } from "react";
 import { useLeague } from "../../lib/LeagueContext";
 import { useMyRoster } from "../../lib/RosterContext";
 import { getDynastyTier, type DynastyTier } from "../../lib/helpers/direction/bucket";
+import { orderStandingsForDisplay } from "../../lib/helpers/standings";
 import { CHART_STATUS, CHART_DIVERGING } from "../../lib/chartTheme";
 import type { LeagueMateView } from "../../lib/types";
 
@@ -46,6 +50,16 @@ export default function StandingsTab({ standings, selectedLeagueMateProfilesView
     [selectedLeagueMateProfilesView]
   );
 
+  const playoffTeams =
+    selectedLeague?.settings?.playoff_teams ?? Math.min(Math.ceil(rosters.length / 2), 6);
+
+  // Teams below the cut line are re-ranked by max PF — see orderStandingsForDisplay.
+  // Computed above the early return below so the hook order never changes.
+  const orderedStandings = useMemo(
+    () => orderStandingsForDisplay(standings, playoffTeams),
+    [standings, playoffTeams]
+  );
+
   if (!selectedLeague || !roster) {
     return (
       <p className="text-sm text-slate-500">
@@ -54,8 +68,7 @@ export default function StandingsTab({ standings, selectedLeagueMateProfilesView
     );
   }
 
-  const playoffTeams =
-    selectedLeague.settings?.playoff_teams ?? Math.min(Math.ceil(rosters.length / 2), 6);
+  const hasEliminated = orderedStandings.length > playoffTeams;
 
   return (
     <div className="bg-slate-900 border border-slate-700 rounded-xl p-5 shadow-md">
@@ -72,7 +85,7 @@ export default function StandingsTab({ standings, selectedLeagueMateProfilesView
           ))}
         </div>
       )}
-      {standings.map((team, index) => {
+      {orderedStandings.map((team, index) => {
         const isMe = team.roster_id === roster.roster_id;
         const isCutLine = index === playoffTeams - 1;
         const efficiency = team.max_pf > 0 ? Math.round((team.fpts / team.max_pf) * 100) : null;
@@ -103,7 +116,10 @@ export default function StandingsTab({ standings, selectedLeagueMateProfilesView
               <div className="text-xs text-slate-400 shrink-0">
                 {team.wins}-{team.losses}
                 {team.ties ? `-${team.ties}` : ""} •{" "}
-                {Math.round(team.fpts)} pts • Max {Math.round(team.max_pf)}
+                {Math.round(team.fpts)} pts •{" "}
+                <span className={index >= playoffTeams ? "text-slate-200 font-semibold" : ""}>
+                  Max {Math.round(team.max_pf)}
+                </span>
                 {efficiency !== null ? (
                   <span
                     className={`ml-1.5 ${
@@ -120,8 +136,13 @@ export default function StandingsTab({ standings, selectedLeagueMateProfilesView
               </div>
             </div>
             {isCutLine && (
-              <div className="border-t border-amber-500 my-2 text-center text-xs text-amber-400">
-                Playoff Cut Line
+              <div className="border-t border-amber-500 my-2 text-center">
+                <div className="text-xs text-amber-400">Playoff Cut Line</div>
+                {hasEliminated && (
+                  <div className="text-[10px] text-slate-500 mt-0.5">
+                    Below this line: ranked by Max PF, not record
+                  </div>
+                )}
               </div>
             )}
           </div>

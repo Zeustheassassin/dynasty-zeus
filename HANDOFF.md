@@ -3,7 +3,9 @@
 > **Audience:** a developer who has just been handed the keys and has never seen this project.
 > **Goal:** explain what the app is, how the code is structured, how data flows, and how every major subsystem actually works — in enough depth to debug and extend it on day one.
 >
-> *Last reviewed: 2026-09-24, HEAD `3c50dae` (working tree) — **consensus compile rewritten: discovery decoupled from compile years, drafts found per-user instead of per-league, and a per-year lock.** Three confirmed defects: discovery scoped to the requested years found 22 connected users where a full sweep finds 524 (and *zero* for 2020/2021); the 4,000-league cap sliced a Set in race order, so every run scanned a different random 18% of a 22,051-league network; and that per-league scan could never finish inside `maxDuration` anyway. Now uses `/user/{id}/drafts/nfl/{year}` — measured ~1,480 calls for full coverage vs ~4,500 for the old sample. New `createPacer` holds the crawl to a real requests-per-minute ceiling rather than trusting a concurrency number. See "How the compile finds drafts" and "Locking a compiled year" under §13. tsc/eslint/build clean, **1370/87 tests** (+11).*
+> *Last reviewed: 2026-09-24, HEAD `ed10386` (working tree) — **standings below the playoff cut line now rank by max PF instead of record.** Display-only transform in [lib/helpers/standings.ts](lib/helpers/standings.ts); the source `standings` array is left alone because the season simulator seeds its bracket from it. See "Standings: two ranking rules, one table" under §11. tsc/eslint/build clean, **1382/88 tests** (+12).*
+>
+> *Prior review: 2026-09-24, HEAD `3c50dae` — **consensus compile rewritten: discovery decoupled from compile years, drafts found per-user instead of per-league, and a per-year lock.** Three confirmed defects: discovery scoped to the requested years found 22 connected users where a full sweep finds 524 (and *zero* for 2020/2021); the 4,000-league cap sliced a Set in race order, so every run scanned a different random 18% of a 22,051-league network; and that per-league scan could never finish inside `maxDuration` anyway. Now uses `/user/{id}/drafts/nfl/{year}` — measured ~1,480 calls for full coverage vs ~4,500 for the old sample. New `createPacer` holds the crawl to a real requests-per-minute ceiling rather than trusting a concurrency number. See "How the compile finds drafts" and "Locking a compiled year" under §13. tsc/eslint/build clean, **1370/87 tests** (+11).*
 >
 > *Prior review: 2026-09-24, HEAD `b5da845` — **Consensus Board inclusion rules: draft-count bar 8% → 6% for past years, and the position filter rebuilt around three disagreeing sources.** The old single `includes()` on one position field would have dropped Travis Hunter (Sleeper lists him `DB` with `["DB","WR"]` eligibility) on the next recompile. New [lib/draft/skillPosition.ts](lib/draft/skillPosition.ts); FB dropped from the allowlist, and the dual-eligibility clause requires >1 entry specifically so Sleeper's 112 fullbacks (all `["RB"]`) stay out. See "Who appears on the Consensus Board" under §13. tsc/eslint/build clean, **1359/86 tests** (+17).*
 >
@@ -384,7 +386,7 @@
 17. [Dev workflow: build, lint, test](#17-dev-workflow-build-lint-test)
 18. [CI pipeline (GitHub Actions)](#18-ci-pipeline-github-actions)
 19. [ESLint & TypeScript rules that bite](#19-eslint--typescript-rules-that-bite)
-20. [Test suite scope (1370 tests, 87 files)](#20-test-suite-scope-1370-tests-87-files)
+20. [Test suite scope (1382 tests, 88 files)](#20-test-suite-scope-1382-tests-88-files)
 21. [Common failure modes & where to look](#21-common-failure-modes--where-to-look)
 22. [Things intentionally NOT done (and why)](#22-things-intentionally-not-done-and-why)
 23. [Known open items & time bombs for the next owner](#23-known-open-items--time-bombs-for-the-next-owner)
@@ -1418,6 +1420,16 @@ Every prospect carries two independent scout grades on a **1.0–100.0 one-decim
 
 The **NFL Draft** column is a per-prospect **projected round** (1st–7th) dropdown, stored in `localStorage["nflDraftRound"]` as `Record<prospectId, number>`. On first load it migrates any rounds out of the legacy `{team,round,pick}` `localStorage["nflDraftInfo"]` map (read-only — that legacy key is still owned independently by the Rookie Big Board's draft tracker, so the migration never mutates it).
 
+### Standings: two ranking rules, one table
+
+[StandingsTab.tsx](components/league/StandingsTab.tsx) does **not** render `standings` in the order it receives it. Teams **at or above** the playoff cut line keep their real seeding (wins desc, then fpts desc); teams **below** it are re-ranked by **max PF, highest first** — once a team is eliminated its record has stopped deciding anything, and points-for penalises a team that lost with points on its bench, so max PF is the better read on who is closest to being good.
+
+The transform is [lib/helpers/standings.ts](lib/helpers/standings.ts)'s `orderStandingsForDisplay(standings, playoffTeams)`, covered by [__tests__/lib/helpers/standings.test.ts](__tests__/lib/helpers/standings.test.ts).
+
+**The source array is deliberately left alone.** Both builders — [useAppState.ts](app/hooks/useAppState.ts) step 8 and [useSpyState.ts](hooks/useSpyState.ts) — sort wins-then-fpts, and that same array seeds the season simulator's playoff bracket ([lib/helpers/simulation.ts](lib/helpers/simulation.ts)). Re-sorting at the source would have silently re-seeded the simulator. This is a display transform applied at the table for exactly that reason.
+
+Details worth keeping: the sort is stable, so teams tied on max PF fall back to the real seeding rather than shuffling between renders; a cut line at or past the end of the table leaves everything untouched; and the divider under the cut line spells out "Below this line: ranked by Max PF, not record" so the numbering doesn't read as a bug, with Max brightened on those rows since it is the sort key.
+
 ## 12. Recruits & CFD Matching
 
 The Scouting Hub cross-references your hand-built prospects against the **247Sports Composite** high-school recruiting rankings, sourced from the CollegeFootballData (CFD) API.
@@ -1756,7 +1768,7 @@ Note there is **no `typecheck` script**. The project type-checks with a bare `np
 
 ### The two environment gotchas that will waste your first hour
 
-**1. Run Vitest through PowerShell, not Git Bash.** On this Windows machine, `npm run test` works fine in PowerShell but fails under Git Bash: Vitest 4 cannot locate its runner (`Vitest failed to find the runner` / "Cannot read properties of undefined (reading 'config')") and **silently collects 0 tests**. A green "0 tests" is the failure mode — you think you passed when you ran nothing. This is an environment quirk, not a test problem. Verified: running `npx vitest run` in PowerShell yields **1370 passing tests across 87 files**. (Confirmed in [memory: project_audit_remediation_progress.md](C:/Users/bstefely.NPCSEALANTS/.claude/projects/c--Users-bstefely-NPCSEALANTS-dynastyzeus-app/memory/project_audit_remediation_progress.md): "run vitest via PowerShell (Vitest 4 breaks under Git Bash here).")
+**1. Run Vitest through PowerShell, not Git Bash.** On this Windows machine, `npm run test` works fine in PowerShell but fails under Git Bash: Vitest 4 cannot locate its runner (`Vitest failed to find the runner` / "Cannot read properties of undefined (reading 'config')") and **silently collects 0 tests**. A green "0 tests" is the failure mode — you think you passed when you ran nothing. This is an environment quirk, not a test problem. Verified: running `npx vitest run` in PowerShell yields **1382 passing tests across 88 files**. (Confirmed in [memory: project_audit_remediation_progress.md](C:/Users/bstefely.NPCSEALANTS/.claude/projects/c--Users-bstefely-NPCSEALANTS-dynastyzeus-app/memory/project_audit_remediation_progress.md): "run vitest via PowerShell (Vitest 4 breaks under Git Bash here).")
 
 **2. Run `tsc` AFTER `next build`, never before.** Next.js generates typed route definitions during the build step at [.next/types/routes.d.ts](.next/types/routes.d.ts), and `tsconfig.json` includes `.next/types/**/*.ts` in its compilation. If you run `npx tsc --noEmit` on a clean checkout (no `.next/`), it fails with missing route types. The fix is always: `npm run build` first, then type-check. CI enforces this ordering by design (see [memory: project_ci_gotchas.md](C:/Users/bstefely.NPCSEALANTS/.claude/projects/c--Users-bstefely-NPCSEALANTS-dynastyzeus-app/memory/project_ci_gotchas.md)).
 
@@ -1788,7 +1800,7 @@ The flat config in [eslint.config.mjs](eslint.config.mjs) is minimal: it just sp
 
 Beyond ESLint, TypeScript is strict at the `tsc` step. `tsconfig.json` enables `strict`, plus `noUnusedLocals` and `noUnusedParameters` — so an unused import, variable, or function parameter is a **build/type-check failure**, not a warning. This is the single most common reason a local edit that "looks fine" red-X's in CI.
 
-## 20. Test suite scope (1370 tests, 87 files)
+## 20. Test suite scope (1382 tests, 88 files)
 
 Run via PowerShell. The suite is [Vitest](vitest.config.mts) in a `jsdom` environment, globbing `**/__tests__/**/*.{ts,tsx}` and `**/*.{test,spec}.{ts,tsx}`. It deliberately covers **pure logic and server routes, not UI rendering** — there are no component-render or e2e tests.
 
@@ -1854,7 +1866,7 @@ Other lower-priority items the audit flagged that I did not re-verify line-by-li
 4. `npm run dev` → confirm the app loads at `http://localhost:3000`.
 5. `npm run build` → confirm a production build succeeds (also generates `.next/types/` so the next step works).
 6. `npx tsc --noEmit` → confirm type-check passes (run it *after* the build).
-7. **In PowerShell** (not Git Bash): `npm run test` → confirm **1370 tests pass** across 87 files. If you see "0 tests," you're in the wrong shell.
+7. **In PowerShell** (not Git Bash): `npm run test` → confirm **1382 tests pass** across 88 files. If you see "0 tests," you're in the wrong shell.
 8. `npm run lint` → confirm clean (remember `exhaustive-deps` warnings won't fail it; the four error rules will).
 9. Read [AGENTS.md](AGENTS.md) — it warns this Next.js version diverges from public docs; consult `node_modules/next/dist/docs/` before writing framework code.
 10. Walk the entry path: [app/page.tsx](app/page.tsx) → [app/hooks/useAppState.ts](app/hooks/useAppState.ts) → [app/components/HubRouter.tsx](app/components/HubRouter.tsx).
