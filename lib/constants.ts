@@ -290,6 +290,43 @@ export const COMPILE_MAX_CONNECTED_USERS = 500;
  */
 export const COMPILE_MAX_LEAGUES = 4000;
 
+/**
+ * Target request rate for the consensus compile, in requests per minute.
+ *
+ * Sleeper's published guidance is to stay under ~1000 calls/minute. Bounded
+ * concurrency alone does not enforce that (see createPacer in
+ * ./sleeperServer) — 15 concurrent calls at 150 ms each is 6000/min. This is
+ * the number the pacer actually holds the crawl to, with headroom under the
+ * ceiling so a burst of fast responses can't overshoot it.
+ */
+export const COMPILE_TARGET_RPM = 850;
+
+/**
+ * Years the connected-user network is discovered across, independent of which
+ * years are being compiled.
+ *
+ * These are NOT the same thing, and conflating them was a real bug: discovery
+ * used to be scoped to the requested years, so compiling 2023 alone seeded from
+ * the caller's 2023 league membership and found 22 connected users where
+ * discovering across every year finds 524 — and compiling 2020 or 2021 alone
+ * found *zero*, because the caller wasn't in a superflex dynasty league yet.
+ * Who is in your network is a property of your whole Sleeper history; which
+ * draft class to compile is a separate choice.
+ */
+export function getDiscoveryYears(): number[] {
+  const current = new Date().getFullYear();
+  const FIRST = 2020; // matches the compile panel's earliest selectable year
+  return Array.from({ length: current - FIRST + 1 }, (_, i) => FIRST + i);
+}
+
+/**
+ * Wall-clock budget for the discovery + draft-scan phases, in ms. Vercel kills
+ * the route at maxDuration (300s); this leaves room for the picks fetch and the
+ * Supabase writes that follow, and makes a partial run report honestly rather
+ * than being cut off mid-write.
+ */
+export const COMPILE_DISCOVERY_BUDGET_MS = 180_000;
+
 /** Default request timeout for Sleeper API calls (ms) */
 export const SLEEPER_REQUEST_TIMEOUT_MS = 15_000;
 

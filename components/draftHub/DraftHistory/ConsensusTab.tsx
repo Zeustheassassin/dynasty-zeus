@@ -14,6 +14,7 @@ type ConsensusMeta = Record<string, {
   leagueCount: number;
   connectedUserCount: number;
   compiledAt: string;
+  locked: boolean;
 }>;
 
 interface ConsensusBoardEntry {
@@ -57,6 +58,7 @@ interface ConsensusTabProps {
   runCompile: (years: number[]) => Promise<void>;
   removeCompiledPlayer: (year: string, playerId: string) => Promise<void>;
   clearYear: (year: number) => Promise<void>;
+  setYearLocked: (year: number, locked: boolean) => Promise<void>;
   setTier: (year: string, playerId: string, tier: PlayerTier) => void;
 }
 
@@ -84,6 +86,7 @@ export default function ConsensusTab({
   runCompile,
   removeCompiledPlayer,
   clearYear,
+  setYearLocked,
   setTier,
 }: ConsensusTabProps) {
   const hasCachedRows  = Array.isArray(consensusCache[selectedHistoryYear]) && consensusCache[selectedHistoryYear].length > 0;
@@ -151,6 +154,7 @@ export default function ConsensusTab({
         setCompileSelectedYears={setCompileSelectedYears}
         runCompile={runCompile}
         clearYear={clearYear}
+        setYearLocked={setYearLocked}
       />
 
       {/* ── Risers / Fallers ── */}

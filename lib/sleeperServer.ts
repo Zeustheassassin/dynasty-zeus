@@ -72,6 +72,40 @@ export async function safeFetch<T>(
   return null;
 }
 
+/**
+ * A request pacer: bounds the *rate* requests are issued at, which bounded
+ * concurrency alone does not.
+ *
+ * Concurrency caps how many calls are in flight, not how many are issued per
+ * minute — those are only the same thing if latency is fixed. 15 concurrent
+ * calls at 150 ms each is 6,000 requests/minute, six times Sleeper's ~1,000/min
+ * guidance; the same 15 at 900 ms is 1,000/min. Sleeper responds with 429s,
+ * `safeFetch` backs off, and the job finishes eventually — so the limit is
+ * respected only by accident, via the retry path, after already tripping it.
+ *
+ * `pace()` resolves when the next request is allowed to start. Calls are
+ * serialised onto a monotonically advancing schedule, so N concurrent workers
+ * awaiting it still collectively issue at no more than `requestsPerMinute`.
+ *
+ * Usage: `await pace(); const data = await safeFetch(url);`
+ */
+export function createPacer(requestsPerMinute: number): () => Promise<void> {
+  const intervalMs = 60_000 / Math.max(1, requestsPerMinute);
+  // The timestamp the next request may start at. Starts in the past so the
+  // first call through is never delayed.
+  let nextSlot = 0;
+  return async function pace(): Promise<void> {
+    const now = Date.now();
+    // A gap in demand shouldn't bank credit for a later burst — if the schedule
+    // has fallen behind the clock, restart it from now rather than letting a
+    // backlog of "owed" slots fire off at once.
+    const slot = Math.max(now, nextSlot);
+    nextSlot = slot + intervalMs;
+    const wait = slot - now;
+    if (wait > 0) await delay(wait);
+  };
+}
+
 // Re-exported so existing server-side callers (cron routes, compile-consensus) don't need
 // an import-path change. The implementation itself is client-safe too — see ./concurrency —
 // but this module as a whole is not (see the file header): it bypasses the client

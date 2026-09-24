@@ -3,7 +3,9 @@
 > **Audience:** a developer who has just been handed the keys and has never seen this project.
 > **Goal:** explain what the app is, how the code is structured, how data flows, and how every major subsystem actually works — in enough depth to debug and extend it on day one.
 >
-> *Last reviewed: 2026-09-24, HEAD `b5da845` (working tree) — **Consensus Board inclusion rules: draft-count bar 8% → 6% for past years, and the position filter rebuilt around three disagreeing sources.** The old single `includes()` on one position field would have dropped Travis Hunter (Sleeper lists him `DB` with `["DB","WR"]` eligibility) on the next recompile. New [lib/draft/skillPosition.ts](lib/draft/skillPosition.ts); FB dropped from the allowlist, and the dual-eligibility clause requires >1 entry specifically so Sleeper's 112 fullbacks (all `["RB"]`) stay out. See "Who appears on the Consensus Board" under §13. tsc/eslint/build clean, **1359/86 tests** (+17).*
+> *Last reviewed: 2026-09-24, HEAD `3c50dae` (working tree) — **consensus compile rewritten: discovery decoupled from compile years, drafts found per-user instead of per-league, and a per-year lock.** Three confirmed defects: discovery scoped to the requested years found 22 connected users where a full sweep finds 524 (and *zero* for 2020/2021); the 4,000-league cap sliced a Set in race order, so every run scanned a different random 18% of a 22,051-league network; and that per-league scan could never finish inside `maxDuration` anyway. Now uses `/user/{id}/drafts/nfl/{year}` — measured ~1,480 calls for full coverage vs ~4,500 for the old sample. New `createPacer` holds the crawl to a real requests-per-minute ceiling rather than trusting a concurrency number. See "How the compile finds drafts" and "Locking a compiled year" under §13. tsc/eslint/build clean, **1370/87 tests** (+11).*
+>
+> *Prior review: 2026-09-24, HEAD `b5da845` — **Consensus Board inclusion rules: draft-count bar 8% → 6% for past years, and the position filter rebuilt around three disagreeing sources.** The old single `includes()` on one position field would have dropped Travis Hunter (Sleeper lists him `DB` with `["DB","WR"]` eligibility) on the next recompile. New [lib/draft/skillPosition.ts](lib/draft/skillPosition.ts); FB dropped from the allowlist, and the dual-eligibility clause requires >1 entry specifically so Sleeper's 112 fullbacks (all `["RB"]`) stay out. See "Who appears on the Consensus Board" under §13. tsc/eslint/build clean, **1359/86 tests** (+17).*
 >
 > *Prior review: 2026-09-24, HEAD `6613e3a` — **Draft History regrade: hit/neutral/bust → a six-tier outcome scale (star / starter / flex / bench / clogger / cut), and the ≈ Pick Val column → the player's current FantasyCalc value.** User is re-grading every player by hand, so the old three-way marks are retired — but written to a NEW column ([migration 055](supabase/migrations/055_consensus_player_tiers.sql)) rather than overwritten, so ~400 existing grades stay recoverable. New scale module [lib/draft/playerTier.ts](lib/draft/playerTier.ts); new `rawFcValues` on ValuesContext so a historical board's values don't move when the selected league changes. See "Draft-outcome tiers" and "The value column" under §13. tsc/eslint/build clean, **1342/85 tests** (+24).*
 >
@@ -382,7 +384,7 @@
 17. [Dev workflow: build, lint, test](#17-dev-workflow-build-lint-test)
 18. [CI pipeline (GitHub Actions)](#18-ci-pipeline-github-actions)
 19. [ESLint & TypeScript rules that bite](#19-eslint--typescript-rules-that-bite)
-20. [Test suite scope (1359 tests, 86 files)](#20-test-suite-scope-1359-tests-86-files)
+20. [Test suite scope (1370 tests, 87 files)](#20-test-suite-scope-1370-tests-87-files)
 21. [Common failure modes & where to look](#21-common-failure-modes--where-to-look)
 22. [Things intentionally NOT done (and why)](#22-things-intentionally-not-done-and-why)
 23. [Known open items & time bombs for the next owner](#23-known-open-items--time-bombs-for-the-next-owner)
@@ -1435,7 +1437,7 @@ The goal: compute a crowd-sourced rookie ADP by mining the rookie drafts of **ev
 **Server route** [app/api/compile-consensus/route.ts](app/api/compile-consensus/route.ts) (`maxDuration = 300`s, Vercel Pro; rate-limited to 5 compiles / 10 min / IP). Before any fan-out, the caller-supplied `sleeperUserId` is checked against `user_sleeper_links` for the authenticated user (`.eq("user_id", authUser.id)`) — a mismatch or missing link is rejected with `403 SLEEPER_ID_MISMATCH` (added 2026-08-21; previously any authenticated user could point the compile at an arbitrary Sleeper network). It POSTs a streaming **NDJSON** response (`application/x-ndjson`, nginx buffering disabled) so the client sees live progress. The expansion algorithm:
 
 1. **Seed** — fetch your own dynasty leagues for each requested year, filtered to **Superflex, non-IDP dynasty** leagues only (`isDynastyLeague` = taxi slots > 0 or > 20 roster positions and not best-ball; `isSuperflex`; `!hasIDP`). Collect every other owner's Sleeper user-id from those leagues' rosters.
-2. **Expand** — cap the connected-user set at `COMPILE_MAX_CONNECTED_USERS` (500; added 2026-08-21 — `withConcurrency` only bounds *in-flight* concurrency, not total volume, so an uncapped set could drive an unbounded sequential crawl for a large network), then build `(connectedUserId, year)` pairs and, with bounded concurrency (`COMPILE_CONCURRENCY = 15`), fetch each connected user's leagues for each year, accumulating a deduped set of all reachable dynasty league-ids.
+2. **Expand** — *(rewritten 2026-09-24 — see "How the compile finds drafts" below; steps 2-3 no longer crawl league-by-league)* cap the connected-user set at `COMPILE_MAX_CONNECTED_USERS` (500; added 2026-08-21 — `withConcurrency` only bounds *in-flight* concurrency, not total volume, so an uncapped set could drive an unbounded sequential crawl for a large network), then build `(connectedUserId, year)` pairs and, with bounded concurrency (`COMPILE_CONCURRENCY = 15`), fetch each connected user's leagues for each year, accumulating a deduped set of all reachable dynasty league-ids.
 3. **Find rookie drafts** — cap the league set at `COMPILE_MAX_LEAGUES` (4000; same rationale as step 2's cap), then for each league fetch its drafts and keep only rookie drafts (≤ `ROOKIE_DRAFT_MAX_ROUNDS` = 6 rounds). Past years require `status = complete`; the **current year also accepts in-progress** (`drafting`/`paused`) drafts for a rough live-ADP read.
 4. **Compile picks** — load the full Sleeper player map once as a fallback (`COMPILE_PICKS_CONCURRENCY = 8`), then for each draft aggregate picks per player. **Veterans are filtered out** via the pick's `years_exp > 0`. Output rows are average pick number + draft count, sorted by avg pick.
 5. **Write** — upsert fresh rows into `consensus_draft_cache` in 200-row batches (old rows stay readable), then prune only now-stale rows (`computed_at < runAt`), and only if the run produced rows — so a failed/empty run can't wipe a good cache. Per-year metadata lands in `consensus_draft_meta`. **Also appends** one row per player into `consensus_draft_history` (migration 045, Phase G stage G1) — but only once the cache write succeeded, so the two tables never disagree.
@@ -1464,6 +1466,33 @@ Every player on the Consensus Board is graded on a **six-way outcome scale** —
 - **Everything read back is run through `sanitizeTierMap`, never cast.** Both stores are untyped JSON and the retired scale lives one column over; a stray `"hit"` must be dropped rather than rendered as an unknown tier. `playerTiers` is seeded from localStorage in the `useState` initializer (not an effect — that trips `react-hooks/set-state-in-effect`), and the Supabase read overwrites it only when the DB blob is non-empty, so the pre-first-sync state keeps the local seed.
 - **A tier whose year isn't compiled drops out of the report, not out of storage.** `tierReport` resolves each graded player to a pick slot via the year's `consensus_draft_cache` row; no cache row means no average pick to bucket by. The grade is untouched and reappears once that year is compiled again.
 - **Fixed while rebuilding the summary:** the old H/N/B roll-up matched its "5th+/Waiv" bucket as `round === 5` exactly, so a 6th-round or waiver-slot grade fell out of the totals entirely. `summarizeTiersByGroup` matches `round >= 5`. A test pins that rounds 1–4 are covered with no gaps and no overlaps.
+
+### How the compile finds drafts (rewritten 2026-09-24)
+
+The pipeline had three separate defects, all confirmed against live data before being touched.
+
+**1. Discovery years were conflated with compile years.** Step 1 seeded the connected-user set from `/user/{caller}/leagues/nfl/{year}` for the *requested* years only. Measured on the owner's real account: discovering across every year finds **524** connected users; scoped to 2023 alone it finds **22**; scoped to 2020 or 2021 alone it finds **zero**, because the caller had no superflex dynasty league yet. That is why compiling a past year "only worked" when the current year was also ticked. Discovery now always sweeps `getDiscoveryYears()` (2020 → current); only the *expansion* is scoped to the years being compiled. **Who is in your network is a property of your whole Sleeper history; which draft class to compile is a separate choice.**
+
+**2. The caps truncated non-deterministically.** `Array.from(set).slice(0, N)` on a Set iterates in *insertion* order, which depends on which concurrent fetch lands first — so every run kept a different arbitrary subset. With 22,051 leagues discovered against `COMPILE_MAX_LEAGUES` of 4,000, each compile scanned a randomly redrawn **18% sample**. The stored meta shows the damage: the same network reported 5,546 / 6,108 / 10,597 / 22,051 leagues on consecutive runs. Both caps now sort before slicing, so a truncated run is at least reproducible.
+
+**3. The per-league draft scan could never finish.** One `/league/{id}/drafts` call per discovered league is 22,051 requests; at Sleeper's ~1000/min ceiling that is ~22 minutes against a `maxDuration` of 300s. No amount of extra budget fixes it.
+
+**The fix is `/user/{id}/drafts/nfl/{year}`**, which returns a user's drafts for a season directly — `draft_id`, `league_id`, `status`, `settings.rounds`. Drafts are now found per *user* rather than per *league*, which removes the 22,051-call step entirely. Measured projection for a single-year compile of this network: **~1,480 calls for complete coverage, against ~4,500 for the old 18% sample.** More complete *and* roughly 3x lighter on Sleeper.
+
+Two things were verified rather than assumed:
+
+- **The draft object cannot reproduce the league filters.** Probing real data turned up a `metadata.scoring_type` of `"dynasty_2qb"` on a best-ball league and `"2qb"` on a league with no taxi squad. So the dynasty / superflex / non-IDP verdict is still read off the league itself via `/league/{id}` — just on the few hundred leagues that actually hold a candidate rookie draft, not on all 22,051. A league the run didn't get to verify is **excluded**, never assumed good: polluting the consensus with a best-ball or IDP league is worse than missing it.
+- **The caller is swept alongside their network** (`sweepUserIds`). Their own leagues are otherwise only reachable through a leaguemate's draft list, so a league where nobody else is a connected user would contribute nothing.
+
+**Rate: `createPacer` ([lib/sleeperServer.ts](lib/sleeperServer.ts)), not just concurrency.** Bounded concurrency does not bound the request *rate* unless latency is fixed — 15 concurrent calls at 150 ms each is 6,000/min, six times Sleeper's guidance; the same 15 at 900 ms is 1,000/min. The old code respected the ceiling only by accident, via `safeFetch`'s 429 backoff, i.e. *after* already tripping it. Every discovery call now passes through a pacer held to `COMPILE_TARGET_RPM` (850). `COMPILE_DISCOVERY_BUDGET_MS` (180s) caps the crawl so a huge network degrades to a partial run that **says so** rather than being killed mid-write.
+
+`total_leagues` in the meta is now the count of leagues that actually *qualified*, not the count discovered — the old number described a scan that never happened.
+
+### Locking a compiled year
+
+`consensus_draft_meta.locked` ([migration 056](supabase/migrations/056_consensus_year_lock.sql)) freezes a year the user is happy with. A compile is destructive to the previous result — it prunes rows the new run didn't produce — and results shift as the underlying network changes, so "I like this one, freeze it" needed to be expressible.
+
+Enforced in **both** places, and both are needed: [app/api/compile-consensus/route.ts](app/api/compile-consensus/route.ts) drops locked years before any fan-out (409 `YEARS_LOCKED` when every requested year is locked, otherwise it compiles the rest and emits a "Skipping locked year" status), and [ConsensusCompiler.tsx](components/draftHub/DraftHistory/ConsensusCompiler.tsx) disables the year chip, excludes locked years from "Select all" and the Compile button's count, and swaps the Delete button for a padlock. `clearYear` in the hook refuses a locked year too — the panel's hidden button is only a courtesy if that state is stale.
 
 ### Who appears on the Consensus Board (two independent filters)
 
@@ -1727,7 +1756,7 @@ Note there is **no `typecheck` script**. The project type-checks with a bare `np
 
 ### The two environment gotchas that will waste your first hour
 
-**1. Run Vitest through PowerShell, not Git Bash.** On this Windows machine, `npm run test` works fine in PowerShell but fails under Git Bash: Vitest 4 cannot locate its runner (`Vitest failed to find the runner` / "Cannot read properties of undefined (reading 'config')") and **silently collects 0 tests**. A green "0 tests" is the failure mode — you think you passed when you ran nothing. This is an environment quirk, not a test problem. Verified: running `npx vitest run` in PowerShell yields **1359 passing tests across 86 files**. (Confirmed in [memory: project_audit_remediation_progress.md](C:/Users/bstefely.NPCSEALANTS/.claude/projects/c--Users-bstefely-NPCSEALANTS-dynastyzeus-app/memory/project_audit_remediation_progress.md): "run vitest via PowerShell (Vitest 4 breaks under Git Bash here).")
+**1. Run Vitest through PowerShell, not Git Bash.** On this Windows machine, `npm run test` works fine in PowerShell but fails under Git Bash: Vitest 4 cannot locate its runner (`Vitest failed to find the runner` / "Cannot read properties of undefined (reading 'config')") and **silently collects 0 tests**. A green "0 tests" is the failure mode — you think you passed when you ran nothing. This is an environment quirk, not a test problem. Verified: running `npx vitest run` in PowerShell yields **1370 passing tests across 87 files**. (Confirmed in [memory: project_audit_remediation_progress.md](C:/Users/bstefely.NPCSEALANTS/.claude/projects/c--Users-bstefely-NPCSEALANTS-dynastyzeus-app/memory/project_audit_remediation_progress.md): "run vitest via PowerShell (Vitest 4 breaks under Git Bash here).")
 
 **2. Run `tsc` AFTER `next build`, never before.** Next.js generates typed route definitions during the build step at [.next/types/routes.d.ts](.next/types/routes.d.ts), and `tsconfig.json` includes `.next/types/**/*.ts` in its compilation. If you run `npx tsc --noEmit` on a clean checkout (no `.next/`), it fails with missing route types. The fix is always: `npm run build` first, then type-check. CI enforces this ordering by design (see [memory: project_ci_gotchas.md](C:/Users/bstefely.NPCSEALANTS/.claude/projects/c--Users-bstefely-NPCSEALANTS-dynastyzeus-app/memory/project_ci_gotchas.md)).
 
@@ -1759,7 +1788,7 @@ The flat config in [eslint.config.mjs](eslint.config.mjs) is minimal: it just sp
 
 Beyond ESLint, TypeScript is strict at the `tsc` step. `tsconfig.json` enables `strict`, plus `noUnusedLocals` and `noUnusedParameters` — so an unused import, variable, or function parameter is a **build/type-check failure**, not a warning. This is the single most common reason a local edit that "looks fine" red-X's in CI.
 
-## 20. Test suite scope (1359 tests, 86 files)
+## 20. Test suite scope (1370 tests, 87 files)
 
 Run via PowerShell. The suite is [Vitest](vitest.config.mts) in a `jsdom` environment, globbing `**/__tests__/**/*.{ts,tsx}` and `**/*.{test,spec}.{ts,tsx}`. It deliberately covers **pure logic and server routes, not UI rendering** — there are no component-render or e2e tests.
 
@@ -1825,7 +1854,7 @@ Other lower-priority items the audit flagged that I did not re-verify line-by-li
 4. `npm run dev` → confirm the app loads at `http://localhost:3000`.
 5. `npm run build` → confirm a production build succeeds (also generates `.next/types/` so the next step works).
 6. `npx tsc --noEmit` → confirm type-check passes (run it *after* the build).
-7. **In PowerShell** (not Git Bash): `npm run test` → confirm **1359 tests pass** across 86 files. If you see "0 tests," you're in the wrong shell.
+7. **In PowerShell** (not Git Bash): `npm run test` → confirm **1370 tests pass** across 87 files. If you see "0 tests," you're in the wrong shell.
 8. `npm run lint` → confirm clean (remember `exhaustive-deps` warnings won't fail it; the four error rules will).
 9. Read [AGENTS.md](AGENTS.md) — it warns this Next.js version diverges from public docs; consult `node_modules/next/dist/docs/` before writing framework code.
 10. Walk the entry path: [app/page.tsx](app/page.tsx) → [app/hooks/useAppState.ts](app/hooks/useAppState.ts) → [app/components/HubRouter.tsx](app/components/HubRouter.tsx).

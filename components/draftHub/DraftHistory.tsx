@@ -51,6 +51,7 @@ export default function DraftHistory({ leagues, user }: DraftHistoryProps) {
     runCompile,
     removeCompiledPlayer,
     clearYear,
+    setYearLocked,
     setTier,
   } = useDraftHistory(leagues, user);
 
@@ -151,6 +152,7 @@ export default function DraftHistory({ leagues, user }: DraftHistoryProps) {
               runCompile={runCompile}
               removeCompiledPlayer={removeCompiledPlayer}
               clearYear={clearYear}
+              setYearLocked={setYearLocked}
               setTier={setTier}
             />
           )}

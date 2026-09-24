@@ -42,7 +42,27 @@ let upsertError: { message: string } | null = null;
 // after calling makeReq.
 let linkedSleeperUserId: string | null = null;
 
+// Years the caller has locked, as consensus_draft_meta would report them.
+let lockedYears: number[] = [];
+
 function makeFrom(table: string) {
+  if (table === "consensus_draft_meta") {
+    return {
+      // The route reads locked years before compiling anything.
+      select: vi.fn(() => {
+        const chain = {
+          eq: () => chain,
+          then: (resolve: (v: { data: Array<{ year: number }>; error: null }) => void) =>
+            resolve({ data: lockedYears.map((year) => ({ year })), error: null }),
+        };
+        return chain;
+      }),
+      upsert: vi.fn((rows: unknown[], opts: unknown) => {
+        upserts.push({ table, rows, opts });
+        return Promise.resolve({ error: upsertError });
+      }),
+    };
+  }
   if (table === "user_sleeper_links") {
     return {
       select: vi.fn(() => {
@@ -108,10 +128,13 @@ h.withConcurrency.mockImplementation(
 vi.mock("../../../lib/sleeperServer", () => ({
   safeFetch: h.safeFetch,
   withConcurrency: h.withConcurrency,
+  // The real pacer sleeps to hold the crawl under Sleeper's rate ceiling;
+  // in tests it resolves immediately so the suite doesn't wait on wall clock.
+  createPacer: () => async () => {},
 }));
 
 import { POST } from "@/app/api/compile-consensus/route";
-import { COMPILE_MAX_CONNECTED_USERS, COMPILE_MAX_LEAGUES } from "@/lib/constants";
+import { COMPILE_MAX_CONNECTED_USERS } from "@/lib/constants";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -153,6 +176,7 @@ beforeEach(() => {
   inserts = [];
   upsertError = null;
   linkedSleeperUserId = null;
+  lockedYears = [];
   fetchResponders.length = 0;
 
   checkRateLimit.mockImplementation(async () => ({ allowed: true, remaining: 4 }));
@@ -290,8 +314,9 @@ describe("POST compile-consensus — compilation stream", () => {
       // Any other user's league scan returns nothing.
       if (url.includes("/leagues/nfl/")) return [];
       // The league has one short (rookie) draft this year, in-progress is fine for current year.
-      if (url.endsWith(`/league/${lid}/drafts`))
-        return [{ draft_id: draftId, season: String(THIS_YEAR), status: "complete", settings: { rounds: 4 } }];
+      if (url.endsWith(`/user/200/drafts/nfl/${THIS_YEAR}`))
+        return [{ draft_id: draftId, league_id: lid, season: String(THIS_YEAR), status: "complete", settings: { rounds: 4 } }];
+      if (url.includes("/drafts/nfl/")) return [];
       // Full Sleeper player DB fallback (large enough to avoid the warning path).
       if (url.endsWith("/players/nfl")) {
         const db: Record<string, unknown> = {};
@@ -358,8 +383,9 @@ describe("POST compile-consensus — compilation stream", () => {
       if (url.endsWith(`/user/200/leagues/nfl/${THIS_YEAR}`)) return [dynastyLeague(lid)];
       if (url.endsWith(`/league/${lid}/rosters`)) return [{ roster_id: 1, owner_id: "200" }];
       if (url.includes("/leagues/nfl/")) return [];
-      if (url.endsWith(`/league/${lid}/drafts`))
-        return [{ draft_id: draftId, season: String(THIS_YEAR), status: "complete", settings: { rounds: 3 } }];
+      if (url.endsWith(`/user/200/drafts/nfl/${THIS_YEAR}`))
+        return [{ draft_id: draftId, league_id: lid, season: String(THIS_YEAR), status: "complete", settings: { rounds: 3 } }];
+      if (url.includes("/drafts/nfl/")) return [];
       if (url.endsWith("/players/nfl")) {
         const db: Record<string, unknown> = { p9: { first_name: "Fallback", last_name: "Name", position: "RB", team: "DAL" } };
         for (let i = 0; i < 200; i++) db[`x${i}`] = { first_name: "Db", last_name: `${i}` };
@@ -397,8 +423,9 @@ describe("POST compile-consensus — compilation stream", () => {
       if (url.endsWith(`/user/200/leagues/nfl/${THIS_YEAR}`)) return [dynastyLeague(lid)];
       if (url.endsWith(`/league/${lid}/rosters`)) return [{ roster_id: 1, owner_id: "200" }];
       if (url.includes("/leagues/nfl/")) return [];
-      if (url.endsWith(`/league/${lid}/drafts`))
-        return [{ draft_id: draftId, season: String(THIS_YEAR), status: "complete", settings: { rounds: 2 } }];
+      if (url.endsWith(`/user/200/drafts/nfl/${THIS_YEAR}`))
+        return [{ draft_id: draftId, league_id: lid, season: String(THIS_YEAR), status: "complete", settings: { rounds: 2 } }];
+      if (url.includes("/drafts/nfl/")) return [];
       if (url.endsWith("/players/nfl")) {
         const db: Record<string, unknown> = {};
         for (let i = 0; i < 200; i++) db[`x${i}`] = { first_name: "Db", last_name: `${i}` };
@@ -416,6 +443,8 @@ describe("POST compile-consensus — compilation stream", () => {
       auth: { getUser },
       from: vi.fn((table: string) => {
         if (table === "user_sleeper_links") return makeFrom(table);
+        // The route reads locked years from consensus_draft_meta before compiling.
+        if (table === "consensus_draft_meta") return makeFrom(table);
         return {
           upsert: vi.fn((rows: unknown[], opts: unknown) => {
             if (table === "consensus_draft_cache") callOrder.push("upsert-cache");
@@ -458,8 +487,9 @@ describe("POST compile-consensus — compilation stream", () => {
       if (url.endsWith(`/user/200/leagues/nfl/${THIS_YEAR}`)) return [dynastyLeague(lid)];
       if (url.endsWith(`/league/${lid}/rosters`)) return [{ roster_id: 1, owner_id: "200" }];
       if (url.includes("/leagues/nfl/")) return [];
-      if (url.endsWith(`/league/${lid}/drafts`))
-        return [{ draft_id: draftId, season: String(THIS_YEAR), status: "complete", settings: { rounds: 2 } }];
+      if (url.endsWith(`/user/200/drafts/nfl/${THIS_YEAR}`))
+        return [{ draft_id: draftId, league_id: lid, season: String(THIS_YEAR), status: "complete", settings: { rounds: 2 } }];
+      if (url.includes("/drafts/nfl/")) return [];
       if (url.endsWith("/players/nfl")) {
         const db: Record<string, unknown> = {};
         for (let i = 0; i < 200; i++) db[`x${i}`] = { first_name: "Db", last_name: `${i}` };
@@ -488,9 +518,9 @@ describe("POST compile-consensus — compilation stream", () => {
       if (url.endsWith(`/user/200/leagues/nfl/${THIS_YEAR}`)) return [dynastyLeague(lid)];
       if (url.endsWith(`/league/${lid}/rosters`)) return [{ roster_id: 1, owner_id: "200" }];
       if (url.includes("/leagues/nfl/")) return [];
-      if (url.endsWith(`/league/${lid}/drafts`))
-        // 15-round startup draft — must be skipped by the ROOKIE_DRAFT_MAX_ROUNDS filter.
-        return [{ draft_id: "startup", season: String(THIS_YEAR), status: "complete", settings: { rounds: 15 } }];
+      if (url.endsWith(`/user/200/drafts/nfl/${THIS_YEAR}`))
+        return [{ draft_id: "startup", league_id: lid, season: String(THIS_YEAR), status: "complete", settings: { rounds: 15 } }];
+      if (url.includes("/drafts/nfl/")) return [];
       if (url.endsWith("/players/nfl")) return {};
       return undefined;
     });
@@ -553,7 +583,7 @@ describe("POST compile-consensus — compilation stream", () => {
       if (url.endsWith(`/league/${lid}/rosters`)) return roster;
       // Every connected owner's own league scan (and the league's /drafts call) returns nothing.
       if (url.includes("/leagues/nfl/")) return [];
-      if (url.endsWith("/drafts")) return [];
+      if (url.includes("/drafts/nfl/")) return [];
       if (url.endsWith("/players/nfl")) return {};
       return undefined;
     });
@@ -563,37 +593,181 @@ describe("POST compile-consensus — compilation stream", () => {
     );
     await readEvents(res);
 
-    // Exactly MAX_CONNECTED_USERS distinct owner leagues/nfl calls, not ownerCount.
-    const ownerLeagueCalls = new Set(
+    // Exactly MAX_CONNECTED_USERS distinct owners swept, not ownerCount.
+    const ownerDraftCalls = new Set(
       safeFetch.mock.calls
         .map((c) => String(c[0]))
-        .filter((u) => /\/user\/owner\d+\/leagues\/nfl\//.test(u))
+        .filter((u) => /\/user\/owner\d+\/drafts\/nfl\//.test(u))
     );
-    expect(ownerLeagueCalls.size).toBe(COMPILE_MAX_CONNECTED_USERS);
+    expect(ownerDraftCalls.size).toBe(COMPILE_MAX_CONNECTED_USERS);
   });
 
-  it("caps the league scan at COMPILE_MAX_LEAGUES instead of probing every discovered league for drafts", async () => {
-    const leagueCount = COMPILE_MAX_LEAGUES + 1;
-    const leagues = Array.from({ length: leagueCount }, (_, i) => dynastyLeague(`L${i}`));
+  it("keeps the SAME connected users when truncating, run to run", async () => {
+    // A Set iterates in insertion order, which under concurrent fetches depends on
+    // which response lands first — so slicing it unsorted kept a different arbitrary
+    // subset every run. That is what made repeat compiles of one network disagree
+    // (5,546 vs 22,051 leagues on consecutive days). Sorting makes it reproducible.
+    const ownerCount = COMPILE_MAX_CONNECTED_USERS + 25;
+    const owners = Array.from({ length: ownerCount }, (_, i) => `owner${String(i).padStart(4, "0")}`);
 
+    const runOnce = async (rosterOrder: string[]) => {
+      fetchResponders.length = 0;
+      safeFetch.mockClear();
+      fetchResponders.push((url) => {
+        if (url.endsWith(`/user/200/leagues/nfl/${THIS_YEAR}`)) return [dynastyLeague("L1")];
+        if (url.endsWith("/league/L1/rosters"))
+          return rosterOrder.map((owner_id, i) => ({ roster_id: i + 2, owner_id }));
+        if (url.includes("/leagues/nfl/")) return [];
+        if (url.includes("/drafts/nfl/")) return [];
+        if (url.endsWith("/players/nfl")) return {};
+        return undefined;
+      });
+      await readEvents(await POST(
+        makeReq({ sleeperUserId: "200", accessToken: "t", years: [THIS_YEAR] }) as never
+      ));
+      return new Set(
+        safeFetch.mock.calls
+          .map((c) => String(c[0]))
+          .filter((u) => /\/user\/owner\d+\/drafts\/nfl\//.test(u))
+      );
+    };
+
+    const forward = await runOnce(owners);
+    const reversed = await runOnce([...owners].reverse());
+
+    expect(forward.size).toBe(COMPILE_MAX_CONNECTED_USERS);
+    // Same set despite the rosters arriving in the opposite order.
+    expect([...reversed].sort()).toEqual([...forward].sort());
+  });
+
+  it("never probes /league/{id}/drafts — the per-league scan is gone", async () => {
+    // The old pipeline cost one request per discovered league to find drafts:
+    // 22,051 of them on a real network, against a 4,000 cap, i.e. an arbitrary
+    // 18% sample. Drafts now come from the user-drafts endpoint instead.
+    const leagues = Array.from({ length: 50 }, (_, i) => dynastyLeague(`L${i}`));
     fetchResponders.push((url) => {
       if (url.endsWith(`/user/200/leagues/nfl/${THIS_YEAR}`)) return leagues;
-      // Every league is solely owned by the requesting user — no connected-user expansion.
       if (url.includes("/rosters")) return [{ roster_id: 1, owner_id: "200" }];
       if (url.includes("/leagues/nfl/")) return [];
-      if (url.endsWith("/drafts")) return [];
+      if (url.includes("/drafts/nfl/")) return [];
       if (url.endsWith("/players/nfl")) return {};
       return undefined;
     });
 
+    await readEvents(await POST(
+      makeReq({ sleeperUserId: "200", accessToken: "t", years: [THIS_YEAR] }) as never
+    ));
+
+    const perLeagueDraftScans = safeFetch.mock.calls
+      .map((c) => String(c[0]))
+      .filter((u) => /\/league\/[^/]+\/drafts$/.test(u));
+    expect(perLeagueDraftScans).toEqual([]);
+  });
+
+  it("sweeps the caller's own drafts, not just their leaguemates'", async () => {
+    // Own leagues are otherwise only reachable through a leaguemate's draft list,
+    // so a league with no other connected user would contribute nothing.
+    fetchResponders.push((url) => {
+      if (url.endsWith(`/user/200/leagues/nfl/${THIS_YEAR}`)) return [dynastyLeague("L1")];
+      if (url.includes("/rosters")) return [{ roster_id: 1, owner_id: "200" }];
+      if (url.includes("/leagues/nfl/")) return [];
+      if (url.includes("/drafts/nfl/")) return [];
+      if (url.endsWith("/players/nfl")) return {};
+      return undefined;
+    });
+
+    await readEvents(await POST(
+      makeReq({ sleeperUserId: "200", accessToken: "t", years: [THIS_YEAR] }) as never
+    ));
+
+    expect(
+      safeFetch.mock.calls.map((c) => String(c[0]))
+    ).toContain(`https://api.sleeper.app/v1/user/200/drafts/nfl/${THIS_YEAR}`);
+  });
+});
+
+// ── Discovery years are independent of the years being compiled ──────────────
+
+describe("POST compile-consensus — network discovery", () => {
+  it("discovers the network across ALL years, not just the requested one", async () => {
+    // The bug this covers: discovery used to be scoped to the requested years, so
+    // compiling 2023 alone seeded from 2023 league membership only. On a real
+    // account that found 22 connected users where the full sweep finds 524 — and
+    // compiling 2020 alone found zero, because the caller had no superflex dynasty
+    // league yet. Who is in your network is a property of your whole history.
+    const PAST = THIS_YEAR - 3;
+    fetchResponders.push((url) => {
+      // The caller has a league only in the CURRENT year, with a leaguemate.
+      if (url.endsWith(`/user/200/leagues/nfl/${THIS_YEAR}`)) return [dynastyLeague("Lnow")];
+      if (url.endsWith("/league/Lnow/rosters"))
+        return [{ roster_id: 1, owner_id: "200" }, { roster_id: 2, owner_id: "mate" }];
+      if (url.includes("/leagues/nfl/")) return [];
+      if (url.includes("/drafts/nfl/")) return [];
+      if (url.endsWith("/players/nfl")) return {};
+      return undefined;
+    });
+
+    // Compile a PAST year only.
+    await readEvents(await POST(
+      makeReq({ sleeperUserId: "200", accessToken: "t", years: [PAST] }) as never
+    ));
+
+    const urls = safeFetch.mock.calls.map((c) => String(c[0]));
+    // The current year's leagues were still swept for discovery...
+    expect(urls).toContain(`https://api.sleeper.app/v1/user/200/leagues/nfl/${THIS_YEAR}`);
+    // ...so the leaguemate found there is asked about the PAST year's drafts.
+    expect(urls).toContain(`https://api.sleeper.app/v1/user/mate/drafts/nfl/${PAST}`);
+    // And drafts are only ever requested for the year actually being compiled.
+    expect(urls.filter((u) => u.includes("/drafts/nfl/")).every((u) => u.endsWith(`/${PAST}`))).toBe(true);
+  });
+});
+
+// ── Year locking ─────────────────────────────────────────────────────────────
+
+describe("POST compile-consensus — locked years", () => {
+  it("rejects with 409 YEARS_LOCKED when every requested year is locked", async () => {
+    lockedYears = [THIS_YEAR];
     const res = await POST(
       makeReq({ sleeperUserId: "200", accessToken: "t", years: [THIS_YEAR] }) as never
     );
-    await readEvents(res);
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("YEARS_LOCKED");
+    // Nothing was fetched or written — the guard runs before any fan-out.
+    expect(safeFetch.mock.calls.length).toBe(0);
+    expect(upserts.length).toBe(0);
+  });
 
-    const draftCalls = new Set(
-      safeFetch.mock.calls.map((c) => String(c[0])).filter((u) => u.endsWith("/drafts"))
+  it("compiles the unlocked years and skips the locked ones", async () => {
+    const PAST = THIS_YEAR - 1;
+    lockedYears = [PAST];
+    fetchResponders.push((url) => {
+      if (url.includes("/leagues/nfl/")) return [];
+      if (url.includes("/drafts/nfl/")) return [];
+      if (url.endsWith("/players/nfl")) return {};
+      return undefined;
+    });
+
+    const events = await readEvents(await POST(
+      makeReq({ sleeperUserId: "200", accessToken: "t", years: [PAST, THIS_YEAR] }) as never
+    ));
+
+    const doneYears = events.filter((e) => e.type === "year_done").map((e) => e.year);
+    expect(doneYears).toEqual([THIS_YEAR]);
+    expect(doneYears).not.toContain(PAST);
+    expect(events.some((e) => typeof e.message === "string" && e.message.includes("Skipping locked year"))).toBe(true);
+  });
+
+  it("does not reject when the lock is on some OTHER year", async () => {
+    lockedYears = [THIS_YEAR - 5];
+    fetchResponders.push((url) => {
+      if (url.includes("/leagues/nfl/")) return [];
+      if (url.includes("/drafts/nfl/")) return [];
+      if (url.endsWith("/players/nfl")) return {};
+      return undefined;
+    });
+    const res = await POST(
+      makeReq({ sleeperUserId: "200", accessToken: "t", years: [THIS_YEAR] }) as never
     );
-    expect(draftCalls.size).toBe(COMPILE_MAX_LEAGUES);
+    expect(res.status).toBe(200);
   });
 });

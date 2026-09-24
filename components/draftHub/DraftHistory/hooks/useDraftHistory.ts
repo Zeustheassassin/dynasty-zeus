@@ -34,6 +34,8 @@ type ConsensusMeta = Record<string, {
   leagueCount: number;
   connectedUserCount: number;
   compiledAt: string;
+  /** User froze this year: no recompile, no clear. See migration 056. */
+  locked: boolean;
 }>;
 
 export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | null) {
@@ -165,17 +167,18 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
     if (Object.keys(consensusMeta).length > 0) return;
     supabase
       .from("consensus_draft_meta")
-      .select("year, total_drafts, total_leagues, connected_user_count, compiled_at")
+      .select("year, total_drafts, total_leagues, connected_user_count, compiled_at, locked")
       .eq("user_id", supabaseUser.id)
       .then(({ data }) => {
         if (!data) return;
         const meta: ConsensusMeta = {};
-        (data as Array<{ year: number; total_drafts: number; total_leagues: number; connected_user_count: number; compiled_at: string }>).forEach((row) => {
+        (data as Array<{ year: number; total_drafts: number; total_leagues: number; connected_user_count: number; compiled_at: string; locked?: boolean }>).forEach((row) => {
           meta[String(row.year)] = {
             draftCount:         row.total_drafts,
             leagueCount:        row.total_leagues,
             connectedUserCount: row.connected_user_count,
             compiledAt:         row.compiled_at,
+            locked:             row.locked === true,
           };
         });
         setConsensusMeta(meta);
@@ -297,6 +300,11 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
 
   const runCompile = async (years: number[]) => {
     if (!user?.user_id || !supabaseUser) return;
+    // Filter locked years before the request. The route rejects them too; this
+    // just avoids a pointless round trip and a confusing 409 when the panel and
+    // the server disagree.
+    years = years.filter((y) => !consensusMeta[String(y)]?.locked);
+    if (years.length === 0) return;
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.access_token) return;
 
@@ -347,6 +355,9 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
                   leagueCount:        event.leagueCount,
                   connectedUserCount: event.connectedUserCount ?? 0,
                   compiledAt:         new Date().toISOString(),
+                  // A freshly compiled year is never locked — a locked one could
+                  // not have been compiled (the route rejects it).
+                  locked:             false,
                 },
               }));
               setConsensusCache((prev) => {
@@ -386,6 +397,13 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
 
   const clearYear = async (year: number) => {
     if (!supabaseUser) return;
+    // A locked year is frozen against both recompile and clear. The compile
+    // panel already hides the Delete button, but this guard is what actually
+    // holds if that state is ever stale.
+    if (consensusMeta[String(year)]?.locked) {
+      log.warn("refused to clear a locked year", { year });
+      return;
+    }
     await supabase.from("consensus_draft_cache")
       .delete().eq("user_id", supabaseUser.id).eq("year", year);
     await supabase.from("consensus_draft_meta")
@@ -395,6 +413,31 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
     setConsensusMeta((prev) => { const n = { ...prev }; delete n[String(year)]; return n; });
     setConsensusCache((prev) => { const n = { ...prev }; delete n[String(year)]; return n; });
     setConsensusHistory((prev) => { const n = { ...prev }; delete n[String(year)]; return n; });
+  };
+
+  /**
+   * Freeze / unfreeze a compiled year. Optimistic, and rolled back on a failed
+   * write — a lock that looks set but isn't is worse than no lock at all, since
+   * the whole point is to stop an accidental overwrite.
+   */
+  const setYearLocked = async (year: number, locked: boolean) => {
+    if (!supabaseUser) return;
+    const key = String(year);
+    if (!consensusMeta[key]) return; // nothing compiled for that year to lock
+    setConsensusMeta((prev) => (
+      prev[key] ? { ...prev, [key]: { ...prev[key], locked } } : prev
+    ));
+    const { error } = await supabase
+      .from("consensus_draft_meta")
+      .update({ locked })
+      .eq("user_id", supabaseUser.id)
+      .eq("year", year);
+    if (error) {
+      log.error("lock toggle failed", { err: error.message, year, locked });
+      setConsensusMeta((prev) => (
+        prev[key] ? { ...prev, [key]: { ...prev[key], locked: !locked } } : prev
+      ));
+    }
   };
 
   // ── Computed values ───────────────────────────────────────────────────────
@@ -540,6 +583,7 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
     runCompile,
     removeCompiledPlayer,
     clearYear,
+    setYearLocked,
     setTier,
   };
 }

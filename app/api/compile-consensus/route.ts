@@ -2,15 +2,18 @@ import { NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { checkRateLimit } from "../../../lib/rateLimit";
 import { apiError } from "../../../lib/apiHelpers";
-import { safeFetch, withConcurrency } from "../../../lib/sleeperServer";
+import { safeFetch, withConcurrency, createPacer } from "../../../lib/sleeperServer";
 import {
   SLEEPER_BASE_URL,
   COMPILE_CONCURRENCY,
   COMPILE_PICKS_CONCURRENCY,
   COMPILE_MAX_CONNECTED_USERS,
   COMPILE_MAX_LEAGUES,
+  COMPILE_TARGET_RPM,
+  COMPILE_DISCOVERY_BUDGET_MS,
   SLEEPER_PLAYERS_TIMEOUT_MS,
   getCompilationYearRange,
+  getDiscoveryYears,
 } from "../../../lib/constants";
 import { ROOKIE_DRAFT_MAX_ROUNDS } from "../../../lib/helpers/season";
 import { isDynastyLeague } from "../../../lib/helpers/leagueType";
@@ -44,6 +47,11 @@ interface SleeperDraftBasic {
   season: string;
   status: string;
   settings?: { rounds?: number; teams?: number };
+}
+
+/** Shape returned by /user/{id}/drafts/nfl/{year} — same as above plus league_id. */
+interface SleeperUserDraft extends SleeperDraftBasic {
+  league_id?: string;
 }
 
 interface SleeperPickBasic {
@@ -90,138 +98,210 @@ async function compileDrafts(
   emit: (event: object) => void
 ): Promise<void> {
 
-  // ── Step 1: Collect user's leagues + connected user IDs ──────────────────
-  emit({ type: "status", message: "Collecting your dynasty leagues across all years…", progress: 2 });
+  // Every Sleeper call in the discovery phase goes through this pacer. Bounded
+  // concurrency alone does not bound the request *rate* — see createPacer.
+  const pace = createPacer(COMPILE_TARGET_RPM);
+  const deadline = Date.now() + COMPILE_DISCOVERY_BUDGET_MS;
+  const outOfTime = () => Date.now() > deadline;
+  const paced = async <T,>(url: string, timeoutMs?: number): Promise<T | null> => {
+    await pace();
+    return safeFetch<T>(url, timeoutMs);
+  };
+
+  // ── Step 1: Discover the connected-user network ──────────────────────────
+  // Discovery years are deliberately NOT the requested years. Who is in your
+  // Sleeper network is a property of your whole history; which draft class to
+  // compile is a separate choice. Scoping discovery to the requested years
+  // meant compiling 2023 alone seeded from 2023 membership and found 22
+  // connected users where the full sweep finds 524 — and compiling 2020 alone
+  // found zero, because the caller wasn't in a superflex dynasty league yet.
+  const discoveryYears = getDiscoveryYears();
+  emit({
+    type: "status",
+    message: `Mapping your dynasty network across ${discoveryYears[0]}–${discoveryYears[discoveryYears.length - 1]}…`,
+    progress: 2,
+  });
 
   const connectedUserIds = new Set<string>();
-  const userLeagueIdsByYear: Record<number, string[]> = {};
+  const ownLeagueIds = new Set<string>();
 
-  await Promise.all(
-    years.map(async (year) => {
-      const leagues = await safeFetch<SleeperLeagueBasic[]>(`${SLEEPER_BASE}/user/${sleeperUserId}/leagues/nfl/${year}`);
-      if (!Array.isArray(leagues)) return;
-      const dynLeagues = leagues.filter(isDynastyLeague).filter(isSuperflex).filter((l) => !hasIDP(l));
-      userLeagueIdsByYear[year] = dynLeagues.map((l: SleeperLeagueBasic) => l.league_id);
+  for (const year of discoveryYears) {
+    const leagues = await paced<SleeperLeagueBasic[]>(`${SLEEPER_BASE}/user/${sleeperUserId}/leagues/nfl/${year}`);
+    if (!Array.isArray(leagues)) continue;
+    const dynLeagues = leagues.filter(isDynastyLeague).filter(isSuperflex).filter((l) => !hasIDP(l));
+    dynLeagues.forEach((l) => ownLeagueIds.add(l.league_id));
 
-      // Fetch rosters in parallel to gather owner IDs
-      await Promise.all(
-        dynLeagues.map(async (league: SleeperLeagueBasic) => {
-          const rosters = await safeFetch<SleeperRosterBasic[]>(`${SLEEPER_BASE}/league/${league.league_id}/rosters`);
-          if (!Array.isArray(rosters)) return;
-          rosters.forEach((r: SleeperRosterBasic) => {
-            if (r.owner_id && String(r.owner_id) !== String(sleeperUserId)) {
-              connectedUserIds.add(String(r.owner_id));
-            }
-          });
-        })
-      );
-    })
-  );
+    await withConcurrency(
+      dynLeagues,
+      async (league: SleeperLeagueBasic) => {
+        const rosters = await paced<SleeperRosterBasic[]>(`${SLEEPER_BASE}/league/${league.league_id}/rosters`);
+        if (!Array.isArray(rosters)) return;
+        rosters.forEach((r: SleeperRosterBasic) => {
+          if (r.owner_id && String(r.owner_id) !== String(sleeperUserId)) {
+            connectedUserIds.add(String(r.owner_id));
+          }
+        });
+      },
+      CONCURRENCY,
+    );
+  }
 
-  // Cap total Sleeper request volume: expanding every connected user across
-  // every requested year is what turns a real (but large) network into an
-  // unbounded sequential crawl. Users beyond the cap are dropped from the
-  // expansion — the compile still runs on the rest and on the caller's own
-  // leagues either way.
-  let connectedUserIdList = Array.from(connectedUserIds);
+  // Cap total Sleeper request volume. Sorted before slicing: a Set's iteration
+  // order is insertion order, which depends on which concurrent fetches happen
+  // to land first — so an unsorted slice kept a DIFFERENT arbitrary subset on
+  // every run, which is what made repeat compiles of the same network disagree
+  // wildly (5,546 vs 22,051 leagues on consecutive days).
+  let connectedUserIdList = Array.from(connectedUserIds).sort();
   const connectedUsersTruncated = connectedUserIdList.length > MAX_CONNECTED_USERS;
   if (connectedUsersTruncated) connectedUserIdList = connectedUserIdList.slice(0, MAX_CONNECTED_USERS);
 
   emit({
     type: "status",
     message: connectedUsersTruncated
-      ? `Found ${connectedUserIds.size} connected users — capping expansion at ${MAX_CONNECTED_USERS} to stay within Sleeper's rate limits. Scanning their leagues…`
-      : `Found ${connectedUserIds.size} connected users across your leagues. Scanning all their leagues…`,
+      ? `Found ${connectedUserIds.size} connected users — capping expansion at ${MAX_CONNECTED_USERS} to stay within Sleeper's rate limits. Finding their rookie drafts…`
+      : `Found ${connectedUserIds.size} connected users across your whole Sleeper history. Finding their rookie drafts…`,
     progress: 15,
   });
 
-  // ── Step 2: Expand to all connected users' leagues ───────────────────────
-  const allLeagueIds = new Set<string>();
-  // Seed with user's own leagues
-  Object.values(userLeagueIdsByYear).forEach((ids) => ids.forEach((id) => allLeagueIds.add(id)));
+  // ── Step 2: Ask each user for their drafts directly ──────────────────────
+  // /user/{id}/drafts/nfl/{year} returns a user's drafts for a season complete
+  // with league_id, status and rounds. That replaces the old two-phase crawl
+  // (expand to every league id, then fetch /league/{id}/drafts for each), which
+  // cost one request per league — 22,051 of them on this network against a
+  // 4,000 cap, i.e. an arbitrary 18% sample. One request per user-year instead:
+  // measured at ~3x fewer calls for complete coverage.
+  const candidateDraftsByYear: Record<number, SleeperUserDraft[]> = {};
+  years.forEach((yr) => { candidateDraftsByYear[yr] = []; });
+  const seenDraftIds = new Set<string>();
+  const currentYear = new Date().getFullYear();
 
-  // Build (userId, year) pairs for expansion
+  // The caller is swept alongside their network. Their own leagues would
+  // otherwise only be reachable through a leaguemate's draft list, so a league
+  // where nobody else is a connected user — or one whose leaguemates' fetches
+  // all failed — would silently contribute nothing.
+  const sweepUserIds = [String(sleeperUserId), ...connectedUserIdList];
   const userYearPairs: Array<[string, number]> = [];
-  connectedUserIdList.forEach((uid) => years.forEach((yr) => userYearPairs.push([uid, yr])));
+  sweepUserIds.forEach((uid) => years.forEach((yr) => userYearPairs.push([uid, yr])));
 
   let pairsDone = 0;
+  let discoveryTruncated = false;
   await withConcurrency(
     userYearPairs,
     async ([uid, yr]) => {
-      const leagues = await safeFetch<SleeperLeagueBasic[]>(`${SLEEPER_BASE}/user/${uid}/leagues/nfl/${yr}`);
-      if (Array.isArray(leagues)) {
-        leagues.filter(isDynastyLeague).filter(isSuperflex).filter((l) => !hasIDP(l)).forEach((l: SleeperLeagueBasic) => allLeagueIds.add(l.league_id));
-      }
-      pairsDone++;
-      if (pairsDone % 50 === 0 || pairsDone === userYearPairs.length) {
-        emit({
-          type: "status",
-          message: `Scanned ${pairsDone}/${userYearPairs.length} user-year combinations — ${allLeagueIds.size} unique leagues found…`,
-          progress: 15 + Math.floor((pairsDone / userYearPairs.length) * 25),
-        });
-      }
-    },
-    CONCURRENCY
-  );
-
-  // Same rate-limit rationale as the connected-user cap above, applied to
-  // the league scan itself: cap the number of leagues probed for drafts.
-  let leagueIdArray = Array.from(allLeagueIds);
-  const leaguesTruncated = leagueIdArray.length > MAX_LEAGUES;
-  if (leaguesTruncated) leagueIdArray = leagueIdArray.slice(0, MAX_LEAGUES);
-
-  emit({
-    type: "status",
-    message: leaguesTruncated
-      ? `Identified ${allLeagueIds.size} unique dynasty leagues — capping the scan at ${MAX_LEAGUES} to stay within Sleeper's rate limits. Scanning for completed rookie drafts…`
-      : `Identified ${allLeagueIds.size} unique dynasty leagues. Scanning for completed rookie drafts…`,
-    progress: 40,
-  });
-
-  // ── Step 3: Collect completed rookie draft IDs per year ──────────────────
-  const draftIdsByYear: Record<number, Set<string>> = {};
-  years.forEach((yr) => { draftIdsByYear[yr] = new Set(); });
-
-  let leaguesDone = 0;
-
-  await withConcurrency(
-    leagueIdArray,
-    async (leagueId) => {
-      const drafts = await safeFetch<SleeperDraftBasic[]>(`${SLEEPER_BASE}/league/${leagueId}/drafts`);
+      const drafts = await paced<SleeperUserDraft[]>(`${SLEEPER_BASE}/user/${uid}/drafts/nfl/${yr}`);
       if (Array.isArray(drafts)) {
-        const currentYear = new Date().getFullYear();
-        drafts.forEach((d: SleeperDraftBasic) => {
+        drafts.forEach((d) => {
+          if (!d?.draft_id || seenDraftIds.has(d.draft_id)) return;
           const season = parseInt(String(d.season), 10);
-          if (!years.includes(season)) return;
-          // Past years: completed drafts only.
-          // Current year: also accept in-progress drafts so partial picks contribute to a
-          // rough live ADP signal. The ≤6-round filter + per-pick years_exp check below
-          // keep startup/veteran drafts and veterans out of the rookie consensus.
+          if (season !== yr || !years.includes(season)) return;
+          // Past years: completed drafts only. Current year also accepts
+          // in-progress so partial picks give a rough live ADP signal.
           if (season < currentYear) {
             if (d.status !== "complete") return;
           } else if (season === currentYear) {
             if (d.status !== "complete" && d.status !== "drafting" && d.status !== "paused") return;
           } else {
-            return; // future years (shouldn't happen, but skip)
+            return;
           }
-          // Rookie-only drafts have ≤ROOKIE_DRAFT_MAX_ROUNDS rounds; skip startup/full-roster drafts
-          const rounds = d.settings?.rounds ?? 99;
-          if (rounds > ROOKIE_DRAFT_MAX_ROUNDS) return;
-          draftIdsByYear[season]?.add(d.draft_id);
+          // Rookie-only drafts are short; this drops startup/full-roster drafts.
+          if ((d.settings?.rounds ?? 99) > ROOKIE_DRAFT_MAX_ROUNDS) return;
+          seenDraftIds.add(d.draft_id);
+          candidateDraftsByYear[season].push(d);
         });
       }
-      leaguesDone++;
-      if (leaguesDone % 100 === 0 || leaguesDone === leagueIdArray.length) {
-        const totalFound = Object.values(draftIdsByYear).reduce((s, d) => s + d.size, 0);
+      pairsDone++;
+      if (pairsDone % 50 === 0 || pairsDone === userYearPairs.length) {
         emit({
           type: "status",
-          message: `Scanned ${leaguesDone}/${leagueIdArray.length} leagues — ${totalFound} rookie drafts found so far…`,
-          progress: 40 + Math.floor((leaguesDone / leagueIdArray.length) * 25),
+          message: `Scanned ${pairsDone}/${userYearPairs.length} user-year combinations — ${seenDraftIds.size} candidate rookie drafts found…`,
+          progress: 15 + Math.floor((pairsDone / userYearPairs.length) * 25),
         });
       }
     },
-    CONCURRENCY
+    CONCURRENCY,
+    // Stop expanding rather than getting killed mid-write on a huge network.
+    { shouldBail: () => { if (outOfTime()) { discoveryTruncated = true; return true; } return false; } },
   );
+
+  // ── Step 3: Verify each candidate draft's league matches the format ──────
+  // The draft object alone cannot reproduce the league filters: its
+  // metadata.scoring_type reads "dynasty_2qb" for at least one best-ball league
+  // and "2qb" for a league with no taxi squad. So the dynasty / superflex /
+  // non-IDP verdict is still taken from the league itself, exactly as before —
+  // just on the few hundred leagues that actually hold a candidate rookie
+  // draft, instead of on every league in the network.
+  const candidateLeagueIds = new Set<string>();
+  for (const yr of years) {
+    for (const d of candidateDraftsByYear[yr]) {
+      if (d.league_id) candidateLeagueIds.add(d.league_id);
+    }
+  }
+  // Own leagues already passed the filters during discovery — no re-fetch.
+  const leagueVerdict = new Map<string, boolean>();
+  ownLeagueIds.forEach((id) => leagueVerdict.set(id, true));
+  let leaguesToCheck = Array.from(candidateLeagueIds).filter((id) => !leagueVerdict.has(id)).sort();
+  const leaguesTruncated = leaguesToCheck.length > MAX_LEAGUES;
+  if (leaguesTruncated) {
+    // Should no longer bind in practice — only leagues holding a candidate
+    // rookie draft reach here, a few hundred rather than the whole network —
+    // but the ceiling stays as a safety valve. Sorted above, so the subset kept
+    // is the same one on every run.
+    leaguesToCheck = leaguesToCheck.slice(0, MAX_LEAGUES);
+    discoveryTruncated = true;
+  }
+
+  emit({
+    type: "status",
+    message: `${seenDraftIds.size} candidate rookie drafts across ${candidateLeagueIds.size} leagues. Checking league formats…`,
+    progress: 40,
+  });
+
+  let leaguesDone = 0;
+  await withConcurrency(
+    leaguesToCheck,
+    async (leagueId) => {
+      const league = await paced<SleeperLeagueBasic>(`${SLEEPER_BASE}/league/${leagueId}`);
+      leagueVerdict.set(
+        leagueId,
+        !!league && isDynastyLeague(league) && isSuperflex(league) && !hasIDP(league),
+      );
+      leaguesDone++;
+      if (leaguesDone % 100 === 0 || leaguesDone === leaguesToCheck.length) {
+        emit({
+          type: "status",
+          message: `Checked ${leaguesDone}/${leaguesToCheck.length} league formats…`,
+          progress: 40 + Math.floor((leaguesDone / Math.max(1, leaguesToCheck.length)) * 25),
+        });
+      }
+    },
+    CONCURRENCY,
+    { shouldBail: () => { if (outOfTime()) { discoveryTruncated = true; return true; } return false; } },
+  );
+
+  // Keep only drafts whose league passed. A league we ran out of time to check
+  // is excluded rather than assumed good — an unverified league could be
+  // best-ball or IDP, and polluting the consensus is worse than missing it.
+  const draftIdsByYear: Record<number, Set<string>> = {};
+  const qualifyingLeagueIds = new Set<string>();
+  years.forEach((yr) => {
+    draftIdsByYear[yr] = new Set(
+      candidateDraftsByYear[yr]
+        .filter((d) => {
+          const ok = !!d.league_id && leagueVerdict.get(d.league_id) === true;
+          if (ok) qualifyingLeagueIds.add(d.league_id!);
+          return ok;
+        })
+        .map((d) => d.draft_id),
+    );
+  });
+
+  if (discoveryTruncated) {
+    emit({
+      type: "status",
+      message: "Heads up: this network is large enough that the scan hit its time budget, so coverage for this run is partial. The numbers below are what was actually scanned.",
+      progress: 65,
+    });
+  }
 
   const totalDrafts = Object.values(draftIdsByYear).reduce((s, d) => s + d.size, 0);
   emit({
@@ -410,7 +490,7 @@ async function compileDrafts(
         user_id:              authUserId,
         year,
         total_drafts:         draftIds.length,
-        total_leagues:        allLeagueIds.size,
+        total_leagues:        qualifyingLeagueIds.size,
         connected_user_count: connectedUserIds.size,
         compiled_at:          new Date().toISOString(),
       },
@@ -424,7 +504,7 @@ async function compileDrafts(
       type: "year_done",
       year,
       draftCount:          draftIds.length,
-      leagueCount:         allLeagueIds.size,
+      leagueCount:         qualifyingLeagueIds.size,
       playerCount:         rows.length,
       connectedUserCount:  connectedUserIds.size,
     });
@@ -494,6 +574,29 @@ export async function POST(req: NextRequest): Promise<Response> {
     return apiError("sleeperUserId does not match your linked Sleeper account", 403, "SLEEPER_ID_MISMATCH");
   }
 
+  // Drop any year the user has locked. Enforced here as well as in the compile
+  // panel because the panel's disabled checkbox is only a client-side courtesy:
+  // a stale tab, a replayed request or a direct POST would otherwise overwrite a
+  // board the user deliberately froze, and a compile is destructive to the
+  // previous result (it prunes rows the new run didn't produce).
+  const { data: lockedRows } = await supabaseClient
+    .from("consensus_draft_meta")
+    .select("year")
+    .eq("user_id", authUser.id)
+    .eq("locked", true);
+  const lockedYears = new Set((lockedRows ?? []).map((r: { year: number }) => r.year));
+  const unlockedYears = validYears.filter((y) => !lockedYears.has(y));
+  if (unlockedYears.length === 0) {
+    return apiError(
+      validYears.length === 1
+        ? `${validYears[0]} is locked. Unlock it first if you want to recompile.`
+        : "Every year you selected is locked. Unlock at least one to recompile.",
+      409,
+      "YEARS_LOCKED",
+    );
+  }
+  const skippedLocked = validYears.filter((y) => lockedYears.has(y));
+
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
@@ -507,7 +610,14 @@ export async function POST(req: NextRequest): Promise<Response> {
       };
 
       try {
-        await compileDrafts(sleeperUserId, validYears, authUser.id, supabaseClient, emit);
+        if (skippedLocked.length > 0) {
+          emit({
+            type: "status",
+            message: `Skipping locked year${skippedLocked.length > 1 ? "s" : ""} ${skippedLocked.join(", ")}.`,
+            progress: 1,
+          });
+        }
+        await compileDrafts(sleeperUserId, unlockedYears, authUser.id, supabaseClient, emit);
       } catch (err: unknown) {
         emit({ type: "error", message: err instanceof Error ? err.message : "Unknown compilation error" });
       } finally {

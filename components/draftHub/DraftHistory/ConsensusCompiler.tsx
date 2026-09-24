@@ -6,6 +6,7 @@ type ConsensusMeta = Record<string, {
   leagueCount: number;
   connectedUserCount: number;
   compiledAt: string;
+  locked: boolean;
 }>;
 
 interface ConsensusCompilerProps {
@@ -21,6 +22,7 @@ interface ConsensusCompilerProps {
   setCompileSelectedYears: Dispatch<SetStateAction<Set<number>>>;
   runCompile: (years: number[]) => Promise<void>;
   clearYear: (year: number) => Promise<void>;
+  setYearLocked: (year: number, locked: boolean) => Promise<void>;
 }
 
 export default function ConsensusCompiler({
@@ -36,6 +38,7 @@ export default function ConsensusCompiler({
   setCompileSelectedYears,
   runCompile,
   clearYear,
+  setYearLocked,
 }: ConsensusCompilerProps) {
   const hasMeta          = !!consensusMeta[selectedHistoryYear];
   const meta             = consensusMeta[selectedHistoryYear];
@@ -43,6 +46,10 @@ export default function ConsensusCompiler({
   // calendar year they occurred. Spans 2020 → current calendar year.
   const YEAR_RANGE       = Array.from({ length: new Date().getFullYear() - 2020 + 1 }, (_, i) => 2020 + i);
   const ALL_COMPILED_YEARS = Object.keys(consensusMeta).map(Number).sort().reverse();
+  const isLocked = (yr: number) => consensusMeta[String(yr)]?.locked === true;
+  const selectedIsLocked = isLocked(Number(selectedHistoryYear));
+  // A locked year can't be compiled, so counting it would make the button lie.
+  const compilableSelection = Array.from(compileSelectedYears).filter((yr) => !isLocked(yr)).sort();
 
   return (
     <div className="rounded-xl border border-slate-700 bg-slate-800/40 p-4 mb-4">
@@ -51,13 +58,29 @@ export default function ConsensusCompiler({
           <div className="text-sm font-semibold text-white">Network Consensus</div>
           <div className="text-xs text-slate-400 mt-0.5">
             {hasMeta
-              ? `${meta!.draftCount} rookie drafts · ${meta!.leagueCount} leagues · last compiled ${new Date(meta!.compiledAt).toLocaleDateString()}`
+              ? `${meta!.draftCount} rookie drafts · ${meta!.leagueCount} leagues · last compiled ${new Date(meta!.compiledAt).toLocaleDateString()}${selectedIsLocked ? " · locked" : ""}`
               : supabaseUser
                 ? `No compiled data for ${selectedHistoryYear} yet.`
                 : "Log in to compile a network consensus board."}
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          {supabaseUser && hasMeta && !compiling && (
+            <button
+              onClick={() => setYearLocked(Number(selectedHistoryYear), !selectedIsLocked)}
+              title={selectedIsLocked
+                ? `${selectedHistoryYear} is locked \u2014 it can't be recompiled or deleted. Click to unlock.`
+                : `Lock ${selectedHistoryYear} so it can't be recompiled or deleted by accident.`}
+              aria-pressed={selectedIsLocked}
+              className={`text-xs px-3 py-1.5 rounded-lg transition font-medium border ${
+                selectedIsLocked
+                  ? "border-amber-600 bg-amber-900/30 text-amber-300 hover:bg-amber-900/50"
+                  : "border-slate-700 bg-slate-800 text-slate-400 hover:text-white hover:border-slate-600"
+              }`}
+            >
+              {selectedIsLocked ? "🔒 Locked" : "🔓 Lock"}
+            </button>
+          )}
           {supabaseUser && !compiling && (
             <button
               onClick={() => setShowCompilePanel((v) => !v)}
@@ -87,23 +110,29 @@ export default function ConsensusCompiler({
           <div className="flex flex-wrap gap-1.5 mb-3">
             {YEAR_RANGE.map((yr) => {
               const yrMeta = consensusMeta[String(yr)];
-              const sel    = compileSelectedYears.has(yr);
+              const locked = isLocked(yr);
+              const sel    = compileSelectedYears.has(yr) && !locked;
               return (
                 <button
                   key={yr}
+                  disabled={locked}
+                  title={locked ? `${yr} is locked \u2014 unlock it on the ${yr} board to recompile.` : undefined}
                   onClick={() => setCompileSelectedYears((prev) => {
                     const next = new Set(prev);
                     if (next.has(yr)) next.delete(yr); else next.add(yr);
                     return next;
                   })}
                   className={`text-xs px-2.5 py-1 rounded-lg border transition flex items-center gap-1 ${
-                    sel
-                      ? "border-blue-600 bg-blue-900/30 text-blue-300"
-                      : "border-slate-700 bg-slate-800 text-slate-400"
+                    locked
+                      ? "border-amber-900/60 bg-amber-950/20 text-amber-700/80 cursor-not-allowed"
+                      : sel
+                        ? "border-blue-600 bg-blue-900/30 text-blue-300"
+                        : "border-slate-700 bg-slate-800 text-slate-400"
                   }`}
                 >
+                  {locked && <span aria-hidden="true">🔒</span>}
                   {yr}
-                  {yrMeta && (
+                  {yrMeta && !locked && (
                     <span className="text-[9px] text-emerald-400 font-semibold">✓{yrMeta.draftCount}d</span>
                   )}
                 </button>
@@ -113,18 +142,17 @@ export default function ConsensusCompiler({
           <div className="flex items-center gap-3">
             <button
               onClick={() => {
-                const years = Array.from(compileSelectedYears).sort();
-                if (!years.length) return;
+                if (!compilableSelection.length) return;
                 setShowCompilePanel(false);
-                runCompile(years);
+                runCompile(compilableSelection);
               }}
-              disabled={compileSelectedYears.size === 0}
+              disabled={compilableSelection.length === 0}
               className="text-xs bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white px-4 py-1.5 rounded-lg transition font-semibold"
             >
-              Compile {compileSelectedYears.size} year{compileSelectedYears.size !== 1 ? "s" : ""}
+              Compile {compilableSelection.length} year{compilableSelection.length !== 1 ? "s" : ""}
             </button>
             <button
-              onClick={() => setCompileSelectedYears(new Set(YEAR_RANGE))}
+              onClick={() => setCompileSelectedYears(new Set(YEAR_RANGE.filter((yr) => !isLocked(yr))))}
               className="text-xs text-slate-400 hover:text-white transition"
             >
               Select all
@@ -142,16 +170,26 @@ export default function ConsensusCompiler({
               <div className="text-xs text-slate-500 mb-2">Delete stored data for a year:</div>
               <div className="flex flex-wrap gap-1.5">
                 {ALL_COMPILED_YEARS.map((yr) => (
-                  <button
-                    key={yr}
-                    onClick={() => {
-                      if (!window.confirm(`Delete all compiled ${yr} consensus data? This cannot be undone.`)) return;
-                      clearYear(yr);
-                    }}
-                    className="text-[10px] px-2 py-0.5 rounded border border-red-900/60 bg-red-950/30 text-red-400 hover:bg-red-900/50 transition"
-                  >
-                    Delete {yr}
-                  </button>
+                  isLocked(yr) ? (
+                    <span
+                      key={yr}
+                      title={`${yr} is locked \u2014 unlock it before deleting.`}
+                      className="text-[10px] px-2 py-0.5 rounded border border-amber-900/60 bg-amber-950/20 text-amber-700/80 cursor-not-allowed"
+                    >
+                      🔒 {yr}
+                    </span>
+                  ) : (
+                    <button
+                      key={yr}
+                      onClick={() => {
+                        if (!window.confirm(`Delete all compiled ${yr} consensus data? This cannot be undone.`)) return;
+                        clearYear(yr);
+                      }}
+                      className="text-[10px] px-2 py-0.5 rounded border border-red-900/60 bg-red-950/30 text-red-400 hover:bg-red-900/50 transition"
+                    >
+                      Delete {yr}
+                    </button>
+                  )
                 ))}
               </div>
             </div>
