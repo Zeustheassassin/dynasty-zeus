@@ -16,6 +16,7 @@ import type {
   TEBlockStat,
   CoverageStat,
 } from "../lib/types";
+import type { GradeField } from "../lib/scouting/prospectGrade";
 import {
   buildProspectsWithStats,
   type ProspectRouteStatsRow,
@@ -314,6 +315,22 @@ export default function ScoutingHub() {
     if (inserted) setProspects((prev) => [...prev, inserted as Prospect]);
   }
 
+  // Pre/post-draft scout grade (1.0–100.0, one decimal; null clears it).
+  // Optimistic: the cell repaints immediately, and a failed write rolls the
+  // row back so the board can't show a grade the database doesn't have.
+  async function handleUpdateGrade(id: string, field: GradeField, grade: number | null) {
+    const previous = prospects.find((p) => p.id === id)?.[field] ?? null;
+    setProspects((prev) => prev.map((p) => p.id === id ? { ...p, [field]: grade } : p));
+    const { error } = await supabase
+      .from("prospects")
+      .update({ [field]: grade, updated_at: new Date().toISOString() })
+      .eq("id", id);
+    if (error) {
+      log.error("update prospect grade", { msg: error.message, field });
+      setProspects((prev) => prev.map((p) => p.id === id ? { ...p, [field]: previous } : p));
+    }
+  }
+
   // Position rank: #1 WR, #1 QB, etc. — scoped to same position + draft class
   async function handleUpdateRank(id: string, targetRank: number) {
     const clamp = Math.max(1, targetRank);
@@ -521,6 +538,7 @@ export default function ScoutingHub() {
             onSelectProspect={(p) => { setPositionTab(p.position as PositionTab); setTab("prospects"); }}
             onUpdateRank={handleUpdateRank}
             onUpdateOverallRank={handleUpdateOverallRank}
+            onUpdateGrade={handleUpdateGrade}
             draftYearFilter={draftYearFilter}
             setDraftYearFilter={setDraftYearFilter}
             games={games}

@@ -131,6 +131,7 @@ export default function RBProspectList({
       personal_rank: null, pff_rank: null, mock_draft_rank: null,
       drafttek_rank: null, pfn_rank: null,
       draft_round: null, draft_pick: null, draft_team: null,
+      pre_draft_grade: null, post_draft_grade: null,
       should_play: "", will_play_pre: "", will_play_post: "",
       charting_decision: "pending", charting_notes: "", overall_rank: null,
     });

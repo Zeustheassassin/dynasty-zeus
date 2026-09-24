@@ -1003,6 +1003,10 @@ export interface Prospect {
   draft_round: number | null;
   draft_pick: number | null;
   draft_team: string | null;
+  /** Scout grade 1.0-100.0 off the tape, pre-NFL-draft. null = ungraded. See lib/scouting/prospectGrade.ts. */
+  pre_draft_grade: number | null;
+  /** Scout grade 1.0-100.0 once draft capital / landing spot are known. null = ungraded. */
+  post_draft_grade: number | null;
   created_at: string;
   updated_at: string;
 }

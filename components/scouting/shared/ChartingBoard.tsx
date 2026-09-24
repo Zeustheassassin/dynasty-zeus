@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { Prospect, ScoutingGame, ChartingDecision } from "../../../lib/types";
 import { GAME_TYPES, CHARTING_DECISIONS } from "./chartingConstants";
 import { BASE_YEAR, FILM_YEARS, classYearOptionsWith } from "../../../lib/helpers/season";
+import { parseGrade, formatGrade, gradeColor, GRADE_MIN, GRADE_MAX } from "../../../lib/scouting/prospectGrade";
 
 export interface ChartingBoardConfig {
   positionLabel: string;
@@ -69,6 +70,40 @@ const ACCENT = {
   },
 } as const;
 
+/**
+ * One scout-grade field. Holds the user's raw keystrokes locally and only hands
+ * the parsed number upward, because a `type="number"` input reports `""` for a
+ * half-typed "88." — which, mirrored straight into a controlled value, eats the
+ * decimal point as it is typed. Normalising (clamp + round to one decimal)
+ * happens on blur so the box shows exactly what will be saved.
+ */
+function GradeInput({ label, value, focusBorder, onChange }: {
+  label: string;
+  value: number | null;
+  focusBorder: string;
+  onChange: (g: number | null) => void;
+}) {
+  const [raw, setRaw] = useState<string | null>(null);
+  const shown = raw ?? (value != null ? `${value}` : "");
+  return (
+    <div>
+      <label className="block text-xs text-slate-500 mb-1">{label}</label>
+      <input type="text" inputMode="decimal" placeholder="e.g. 88.6"
+        aria-label={`${label} (${GRADE_MIN}-${GRADE_MAX})`}
+        className={`w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-white text-sm focus:outline-none ${focusBorder}`}
+        value={shown}
+        onChange={(e) => {
+          setRaw(e.target.value);
+          const parsed = parseGrade(e.target.value);
+          // undefined = not a number yet (e.g. "8."); leave the last good value
+          // in place rather than writing a half-typed grade upward.
+          if (parsed !== undefined) onChange(parsed);
+        }}
+        onBlur={() => setRaw(null)} />
+    </div>
+  );
+}
+
 export default function ChartingBoard({
   prospect, config, tabs,
   tab, games, selectedGameId, loading, gamePlayCounts,
@@ -108,6 +143,15 @@ export default function ChartingBoard({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <h2 className="text-xl font-bold text-white truncate">{prospect.name}</h2>
+            {(prospect.pre_draft_grade != null || prospect.post_draft_grade != null) && (
+              <span className="px-2 py-0.5 bg-slate-800 border border-slate-700 rounded text-xs font-semibold">
+                <span className="text-slate-500 font-normal">Pre </span>
+                <span className={gradeColor(prospect.pre_draft_grade)}>{formatGrade(prospect.pre_draft_grade)}</span>
+                <span className="text-slate-700 mx-1">/</span>
+                <span className="text-slate-500 font-normal">Post </span>
+                <span className={gradeColor(prospect.post_draft_grade)}>{formatGrade(prospect.post_draft_grade)}</span>
+              </span>
+            )}
             {prospect.draft_round && (
               <span className="px-2 py-0.5 bg-yellow-600/20 border border-yellow-600/40 rounded text-xs font-semibold text-yellow-400">
                 Rd {prospect.draft_round}{prospect.draft_pick ? `, Pick ${prospect.draft_pick}` : ""}{prospect.draft_team ? ` · ${prospect.draft_team}` : ""}
@@ -182,6 +226,13 @@ export default function ChartingBoard({
             <textarea rows={2}
               className={`w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-white text-sm focus:outline-none ${a.focusBorder} resize-none`}
               value={bio.charting_notes ?? ""} onChange={(e) => onBioChange({ charting_notes: e.target.value })} />
+          </div>
+          {/* Scout grades — 1.0–100.0, one decimal (e.g. 88.6). Blank = ungraded. */}
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <GradeInput label="Pre-Draft Grade" value={bio.pre_draft_grade ?? null} focusBorder={a.focusBorder}
+              onChange={(g) => onBioChange({ pre_draft_grade: g })} />
+            <GradeInput label="Post-Draft Grade" value={bio.post_draft_grade ?? null} focusBorder={a.focusBorder}
+              onChange={(g) => onBioChange({ post_draft_grade: g })} />
           </div>
           <div className="grid grid-cols-3 gap-3 mb-3">
             <div>

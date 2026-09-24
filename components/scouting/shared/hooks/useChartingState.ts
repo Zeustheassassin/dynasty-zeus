@@ -64,12 +64,14 @@ export function useChartingState(prospect: Prospect, options: Options) {
       will_play_post: prospect.will_play_post, charting_decision: prospect.charting_decision,
       charting_notes: prospect.charting_notes,
       draft_round: prospect.draft_round, draft_pick: prospect.draft_pick, draft_team: prospect.draft_team,
+      pre_draft_grade: prospect.pre_draft_grade, post_draft_grade: prospect.post_draft_grade,
     });
   }, [loadGames, prospect.id, prospect.name, prospect.school, prospect.height, prospect.weight, prospect.birthday,
     prospect.draft_class_year, prospect.personal_rank,
     prospect.should_play, prospect.will_play_pre, prospect.will_play_post,
     prospect.charting_decision, prospect.charting_notes,
-    prospect.draft_round, prospect.draft_pick, prospect.draft_team]);
+    prospect.draft_round, prospect.draft_pick, prospect.draft_team,
+    prospect.pre_draft_grade, prospect.post_draft_grade]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect

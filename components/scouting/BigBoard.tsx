@@ -8,6 +8,10 @@ import {
   computeTERouteAboveExpected,
 } from "../../lib/scouting/aboveExpected";
 import { POS_COLOR } from "../../lib/uiTheme";
+import {
+  parseGrade, formatGrade, gradeColor, gradeDelta,
+  GRADE_MIN, GRADE_MAX, type GradeField,
+} from "../../lib/scouting/prospectGrade";
 
 type LoadPositionPlaysFn = (pos: "RB" | "QB" | "TE") => void;
 
@@ -20,6 +24,7 @@ const ROUND_LABEL: Record<number, string> = {
 type BoardTab = "all" | "QB" | "RB" | "WR" | "TE";
 
 type SortKey =
+  | "pre_draft_grade" | "post_draft_grade" | "grade_delta"
   | "personal_rank" | "overall_rank" | "name" | "school" | "conference" | "draft_class_year" | "height" | "weight" | "age" | "position"
   | "total_routes" | "total_games" | "targets" | "catches" | "drops" | "contested" | "contested_catches"
   | "success_rate" | "target_rate" | "adj_success_above_exp" | "above_expected"
@@ -41,6 +46,8 @@ interface Props {
   onSelectProspect: (p: Prospect) => void;
   onUpdateRank: (id: string, rank: number) => Promise<void>;
   onUpdateOverallRank: (id: string, rank: number) => Promise<void>;
+  /** Persist a pre/post draft grade (1.0-100.0, one decimal) or null to clear it. */
+  onUpdateGrade: (id: string, field: GradeField, grade: number | null) => Promise<void>;
   draftYearFilter: number | null;
   setDraftYearFilter: (y: number | null) => void;
   // Raw plays + games are lazy-loaded by ScoutingHub. The board triggers
@@ -69,6 +76,11 @@ function getSortValue(
   aboveExpMap?: Map<string, number | null>,
 ): number | string {
   const BIG = 99999;
+  // Ungraded sorts to the bottom in both directions' natural reading: -BIG keeps
+  // it off the top of a descending (best-first) grade sort.
+  if (key === "pre_draft_grade") return p.pre_draft_grade ?? -BIG;
+  if (key === "post_draft_grade") return p.post_draft_grade ?? -BIG;
+  if (key === "grade_delta") return gradeDelta(p.pre_draft_grade, p.post_draft_grade) ?? -BIG;
   if (key === "personal_rank") return p.personal_rank ?? BIG;
   if (key === "overall_rank") return p.overall_rank ?? BIG;
   if (key === "name") return p.name;
@@ -134,6 +146,7 @@ export default function BigBoard({
   onSelectProspect,
   onUpdateRank,
   onUpdateOverallRank,
+  onUpdateGrade,
   draftYearFilter,
   setDraftYearFilter,
   games,
@@ -178,6 +191,12 @@ export default function BigBoard({
   const [editingRankId, setEditingRankId] = useState<string | null>(null);
   const [rankInput, setRankInput] = useState("");
   const [savingRankId, setSavingRankId] = useState<string | null>(null);
+
+  // Grade editing is keyed by (id, field) because a row has two gradeable
+  // cells — keying by id alone would open both at once.
+  const [editingGrade, setEditingGrade] = useState<{ id: string; field: GradeField } | null>(null);
+  const [gradeInput, setGradeInput] = useState("");
+  const [savingGradeId, setSavingGradeId] = useState<string | null>(null);
 
   // Projected NFL draft round (1–7) per prospect, persisted to localStorage.
   // Migrates rounds out of the legacy {team,round,pick} "nflDraftInfo" map so
@@ -319,6 +338,73 @@ export default function BigBoard({
     setLocalStorageItem("nflDraftRound", updated);
   }
 
+  // ── Grade cells (pre-draft / post-draft, 1.0-100.0) ──────────
+  // Click to edit, Enter or blur to commit, Escape to cancel, empty to clear
+  // back to ungraded. Parsing, clamping and the one-decimal rounding all live
+  // in lib/scouting/prospectGrade, so whatever is written already satisfies the
+  // numeric(4,1) 1-100 CHECK on the column rather than bouncing off it.
+  async function commitGrade(id: string, field: GradeField, current: number | null) {
+    const parsed = parseGrade(gradeInput);
+    setEditingGrade(null);
+    // undefined = unparseable text; equal value = nothing to write.
+    if (parsed === undefined || parsed === current) return;
+    setSavingGradeId(id);
+    await onUpdateGrade(id, field, parsed);
+    setSavingGradeId(null);
+  }
+
+  function gradeCell(p: ProspectWithStats, field: GradeField) {
+    const value = p[field];
+    const isEditing = editingGrade?.id === p.id && editingGrade.field === field;
+    const label = field === "pre_draft_grade" ? "Pre-draft" : "Post-draft";
+    return (
+      <td
+        className={`${tdBase} border-r border-slate-800`}
+        onClick={(e) => {
+          e.stopPropagation();
+          setEditingGrade({ id: p.id, field });
+          setGradeInput(value != null ? `${value}` : "");
+        }}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        {/* The editor is type=text, not number: a number input reports "" for a
+            half-typed "88.", so mirroring e.target.value into state loses the
+            decimal mid-entry and a blur right then would clear the grade. */}
+        {isEditing ? (
+          <input
+            autoFocus type="text" inputMode="decimal"
+            aria-label={`${label} grade for ${p.name} (${GRADE_MIN}-${GRADE_MAX})`}
+            className="w-14 px-0.5 py-0.5 bg-slate-800 border border-blue-500 rounded text-white font-semibold text-xs focus:outline-none text-center"
+            value={gradeInput}
+            onChange={(e) => setGradeInput(e.target.value)}
+            onBlur={() => commitGrade(p.id, field, value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commitGrade(p.id, field, value);
+              if (e.key === "Escape") setEditingGrade(null);
+            }}
+            onClick={(e) => e.stopPropagation()}
+          />
+        ) : (
+          <span className={`cursor-text hover:bg-slate-800 px-1 rounded font-semibold ${gradeColor(value)} ${savingGradeId === p.id ? "animate-pulse" : ""}`}>
+            {formatGrade(value)}
+          </span>
+        )}
+      </td>
+    );
+  }
+
+  // How far the landing spot moved him: post - pre, blank until both exist.
+  function gradeDeltaCell(p: ProspectWithStats) {
+    const d = gradeDelta(p.pre_draft_grade, p.post_draft_grade);
+    if (d == null) return <td className={`${tdBase} text-slate-600 border-r border-slate-800`}>—</td>;
+    const color = d > 0 ? "text-emerald-400" : d < 0 ? "text-red-400" : "text-slate-400";
+    return (
+      <td className={`${tdBase} border-r border-slate-800 font-medium ${color}`}>
+        {d > 0 ? "+" : ""}{d.toFixed(1)}
+      </td>
+    );
+  }
+
   // NFL Draft cell: a compact dropdown projecting the round (1st–7th) the
   // player is expected to be picked. "—" clears the projection.
   function draftCell(p: ProspectWithStats) {
@@ -453,6 +539,7 @@ export default function BigBoard({
             <th className="sticky left-0 z-20 bg-slate-950 w-6" />
             <th style={{ left: 24, minWidth: 44 }} className="sticky z-20 bg-slate-950" />
             <th style={{ left: 68, minWidth: 140 }} className="sticky z-20 bg-slate-950 border-r border-slate-800" />
+            <th colSpan={3} className="px-2 py-1 text-center text-amber-900 font-medium border-r border-slate-800">Grade</th>
             <th colSpan={1} className="px-2 py-1 text-center text-indigo-900 font-medium border-r border-slate-800">NFL Draft</th>
             <th colSpan={1} className="px-2 py-1 text-center text-slate-600 font-medium border-r border-slate-800">{secondaryGroup}</th>
             <th colSpan={identitySpan} className="px-2 py-1 text-center text-slate-600 font-medium border-r border-slate-800">Identity</th>
@@ -462,6 +549,9 @@ export default function BigBoard({
             <th className="sticky left-0 z-20 bg-slate-950 w-6 text-slate-700 text-center px-1">⠿</th>
             {stickyTh(primaryLabel, primaryKey, 24, 44)}
             {stickyTh("Name", "name", 68, 140)}
+            {th("Pre", "pre_draft_grade", "border-l border-slate-800 text-amber-700")}
+            {th("Post", "post_draft_grade", "text-amber-700")}
+            {th("Δ", "grade_delta", "border-r border-slate-800 text-amber-700")}
             <th className="px-1.5 py-1.5 text-center text-indigo-700 whitespace-nowrap text-xs border-r border-slate-800 select-none">Round</th>
             {th(secondaryLabel, secondaryKey, "border-l border-r border-slate-800 text-slate-400")}
             {isAll && th("Pos", "position", "border-l border-slate-800")}
@@ -480,6 +570,9 @@ export default function BigBoard({
             return (
               <tr key={p.id} {...rowProps(p, i)}>
                 {stickyRowCells(p)}
+                {gradeCell(p, "pre_draft_grade")}
+                {gradeCell(p, "post_draft_grade")}
+                {gradeDeltaCell(p)}
                 {draftCell(p)}
                 <td className={`${tdBase} text-slate-500 border-l border-r border-slate-800`}>{sv ? `#${sv}` : "—"}</td>
                 {isAll && (
@@ -549,7 +642,7 @@ export default function BigBoard({
         ))}
         <span className="text-xs text-slate-500">{sorted.length} prospects</span>
       </div>
-      <p className="text-xs text-slate-600 mb-2 text-center">Drag rows to reorder · Click rank to edit · Click any column header to sort</p>
+      <p className="text-xs text-slate-600 mb-2 text-center">Drag rows to reorder · Click rank or a grade to edit (1.0–100.0) · Click any column header to sort</p>
 
       {loading ? (
         <div className="text-slate-500 text-sm text-center py-12">Loading…</div>
