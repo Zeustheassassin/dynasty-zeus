@@ -841,6 +841,23 @@ useEffect(() => {
   }
 }, [mainTab, dataHubTab, selectedLeague?.league_id, selectedLeague, loadCalcValues]);
 
+// Draft Hub needs FantasyCalc values too — Draft History's FC Value column reads
+// them for every board. This trigger was simply missing, so opening the Draft Hub
+// without having visited Trade Hub / Data Hub Rankings / League Hub first left
+// calcFcValues empty and every value cell rendering an em dash.
+//
+// Deliberately NOT gated on selectedLeague?.league_id, unlike the league-scoped
+// loads above: these boards are league-independent (the consensus network is
+// superflex dynasty by construction), and getLeagueNumQbs already defaults to
+// superflex when there is no league to read a format off. Passing the selected
+// league when there is one keeps this in step with the other hubs rather than
+// forcing a format change that would refetch on every hub switch.
+useEffect(() => {
+  if (mainTab === "DRAFT") {
+    loadCalcValues(getLeagueNumQbs(selectedLeague));
+  }
+}, [mainTab, selectedLeague, loadCalcValues]);
+
 useEffect(() => {
   if (mainTab === "DATA_HUB" && dataHubTab === "RANKINGS") {
     loadRedraftValues();
