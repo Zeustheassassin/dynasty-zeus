@@ -3,7 +3,9 @@
 > **Audience:** a developer who has just been handed the keys and has never seen this project.
 > **Goal:** explain what the app is, how the code is structured, how data flows, and how every major subsystem actually works — in enough depth to debug and extend it on day one.
 >
-> *Last reviewed: 2026-09-24, HEAD `6613e3a` (working tree) — **Draft History regrade: hit/neutral/bust → a six-tier outcome scale (star / starter / flex / bench / clogger / cut), and the ≈ Pick Val column → the player's current FantasyCalc value.** User is re-grading every player by hand, so the old three-way marks are retired — but written to a NEW column ([migration 055](supabase/migrations/055_consensus_player_tiers.sql)) rather than overwritten, so ~400 existing grades stay recoverable. New scale module [lib/draft/playerTier.ts](lib/draft/playerTier.ts); new `rawFcValues` on ValuesContext so a historical board's values don't move when the selected league changes. See "Draft-outcome tiers" and "The value column" under §13. tsc/eslint/build clean, **1342/85 tests** (+24).*
+> *Last reviewed: 2026-09-24, HEAD `b5da845` (working tree) — **Consensus Board inclusion rules: draft-count bar 8% → 6% for past years, and the position filter rebuilt around three disagreeing sources.** The old single `includes()` on one position field would have dropped Travis Hunter (Sleeper lists him `DB` with `["DB","WR"]` eligibility) on the next recompile. New [lib/draft/skillPosition.ts](lib/draft/skillPosition.ts); FB dropped from the allowlist, and the dual-eligibility clause requires >1 entry specifically so Sleeper's 112 fullbacks (all `["RB"]`) stay out. See "Who appears on the Consensus Board" under §13. tsc/eslint/build clean, **1359/86 tests** (+17).*
+>
+> *Prior review: 2026-09-24, HEAD `6613e3a` — **Draft History regrade: hit/neutral/bust → a six-tier outcome scale (star / starter / flex / bench / clogger / cut), and the ≈ Pick Val column → the player's current FantasyCalc value.** User is re-grading every player by hand, so the old three-way marks are retired — but written to a NEW column ([migration 055](supabase/migrations/055_consensus_player_tiers.sql)) rather than overwritten, so ~400 existing grades stay recoverable. New scale module [lib/draft/playerTier.ts](lib/draft/playerTier.ts); new `rawFcValues` on ValuesContext so a historical board's values don't move when the selected league changes. See "Draft-outcome tiers" and "The value column" under §13. tsc/eslint/build clean, **1342/85 tests** (+24).*
 >
 > *Prior review: 2026-09-23, HEAD `1c15225` — **prospect scout grades: a pre-draft and a post-draft grade, 1.0–100.0 on a one-decimal scale, on every prospect.** New `numeric(4,1)` columns `prospects.pre_draft_grade` / `post_draft_grade` (migration 054, which also backfills the never-migrated `draft_round`/`draft_pick`/`draft_team` columns — they exist in the live DB but no migration in this repo ever created them). Scale logic centralised in [lib/scouting/prospectGrade.ts](lib/scouting/prospectGrade.ts); editable in place on the Big Board's new `Grade` column group and in the charting Bio panel. See the "Prospect scout grades" subsection under §11. tsc/eslint/build clean, **1318/84 tests** (+16). See the migration's own header for why `numeric(4,1)` rather than a float.*
 >
@@ -380,7 +382,7 @@
 17. [Dev workflow: build, lint, test](#17-dev-workflow-build-lint-test)
 18. [CI pipeline (GitHub Actions)](#18-ci-pipeline-github-actions)
 19. [ESLint & TypeScript rules that bite](#19-eslint--typescript-rules-that-bite)
-20. [Test suite scope (1342 tests, 85 files)](#20-test-suite-scope-1342-tests-85-files)
+20. [Test suite scope (1359 tests, 86 files)](#20-test-suite-scope-1359-tests-86-files)
 21. [Common failure modes & where to look](#21-common-failure-modes--where-to-look)
 22. [Things intentionally NOT done (and why)](#22-things-intentionally-not-done-and-why)
 23. [Known open items & time bombs for the next owner](#23-known-open-items--time-bombs-for-the-next-owner)
@@ -1463,6 +1465,34 @@ Every player on the Consensus Board is graded on a **six-way outcome scale** —
 - **A tier whose year isn't compiled drops out of the report, not out of storage.** `tierReport` resolves each graded player to a pick slot via the year's `consensus_draft_cache` row; no cache row means no average pick to bucket by. The grade is untouched and reappears once that year is compiled again.
 - **Fixed while rebuilding the summary:** the old H/N/B roll-up matched its "5th+/Waiv" bucket as `round === 5` exactly, so a 6th-round or waiver-slot grade fell out of the totals entirely. `summarizeTiersByGroup` matches `round >= 5`. A test pins that rounds 1–4 are covered with no gaps and no overlaps.
 
+### Who appears on the Consensus Board (two independent filters)
+
+A compiled player is listed only if they clear **both** gates in [ConsensusTab.tsx](components/draftHub/DraftHistory/ConsensusTab.tsx). Neither filter exists server-side — `compile-consensus` stores every rookie it finds — so both are display-only and changing either is a one-line edit with no recompile.
+
+**1. Draft-count threshold.** A percentage of that year's compiled drafts, `Math.max(1, Math.ceil(total * pct))`:
+
+- **Past years: 6%** (lowered from 8% on 2026-09-24).
+- **Current calendar year: 3%**, unchanged — most drafts are still in progress and contribute fewer picks each, so a higher bar over-filters live ADP signal.
+
+The distribution is sharply bimodal (for 2023: 112 stored rows, 23 of them appearing in exactly one draft, then a cliff), so the 8%→6 drop moved the per-year visible count by only 0–3 players.
+
+**2. Position — and it is NOT a single `includes()` check.** See [lib/draft/skillPosition.ts](lib/draft/skillPosition.ts), covered by [__tests__/lib/draft/skillPosition.test.ts](__tests__/lib/draft/skillPosition.test.ts). A player's position has **three disagreeing sources**, and they qualify if any says QB/RB/WR/TE:
+
+1. `compiled` — `pick.metadata.position`, frozen whenever the board was last compiled, possibly years ago.
+2. `current` — Sleeper's primary position today.
+3. `fantasy_positions` — Sleeper's eligibility list, **but only when it holds more than one entry**.
+
+That length check on (3) is load-bearing: every fullback in Sleeper's map is `position: "FB"` with `fantasy_positions: ["RB"]`, a single entry, so all 112 of them fail all three clauses. Drop the check and they are all readmitted as RBs.
+
+Verified against the full Sleeper player map, the two clauses beyond the obvious one admit exactly two players across the entire cache:
+
+- **Travis Hunter** — `position: "DB"`, `fantasy_positions: ["DB","WR"]`. His 2025 pick metadata happens to say "WR" so he shows via clause (1) today, but a recompile falling back to the player map would silently drop the WR4-by-ADP off the board; clause (3) is the net. He is the **only active player** clause (3) admits.
+- **Sione Vaki** — compiled as "DB" (15 drafts, 2024), an RB in Sleeper today. Admitted by clause (2).
+
+`displayPosition` picks the first source that yields a skill position, so an admitted player reads as the thing that makes him relevant (Vaki as RB, not the "DB" frozen into his pick metadata) rather than carrying a defensive label on a fantasy board. A test asserts no admitted player can ever render a non-skill label.
+
+Both source paths — compiled cache rows and the live your-leagues-only `consensusList` — run through the same normalisation, so a player cannot qualify on one and vanish on the other. `fantasy_positions` survives [app/api/players/route.ts](app/api/players/route.ts)'s server-side slimming (confirmed — without it clause (3) would silently never fire).
+
 ### The value column: FantasyCalc value, not a pick equivalent
 
 The Consensus Board and My Draft Picks tabs used to end in an **≈ Pick Val** column — `closestPickEquiv` mapped a player's value onto the nearest rookie pick and printed that pick's label ("1.05"). Both now show the player's **current FantasyCalc dynasty value** as a plain number.
@@ -1697,7 +1727,7 @@ Note there is **no `typecheck` script**. The project type-checks with a bare `np
 
 ### The two environment gotchas that will waste your first hour
 
-**1. Run Vitest through PowerShell, not Git Bash.** On this Windows machine, `npm run test` works fine in PowerShell but fails under Git Bash: Vitest 4 cannot locate its runner (`Vitest failed to find the runner` / "Cannot read properties of undefined (reading 'config')") and **silently collects 0 tests**. A green "0 tests" is the failure mode — you think you passed when you ran nothing. This is an environment quirk, not a test problem. Verified: running `npx vitest run` in PowerShell yields **1342 passing tests across 85 files**. (Confirmed in [memory: project_audit_remediation_progress.md](C:/Users/bstefely.NPCSEALANTS/.claude/projects/c--Users-bstefely-NPCSEALANTS-dynastyzeus-app/memory/project_audit_remediation_progress.md): "run vitest via PowerShell (Vitest 4 breaks under Git Bash here).")
+**1. Run Vitest through PowerShell, not Git Bash.** On this Windows machine, `npm run test` works fine in PowerShell but fails under Git Bash: Vitest 4 cannot locate its runner (`Vitest failed to find the runner` / "Cannot read properties of undefined (reading 'config')") and **silently collects 0 tests**. A green "0 tests" is the failure mode — you think you passed when you ran nothing. This is an environment quirk, not a test problem. Verified: running `npx vitest run` in PowerShell yields **1359 passing tests across 86 files**. (Confirmed in [memory: project_audit_remediation_progress.md](C:/Users/bstefely.NPCSEALANTS/.claude/projects/c--Users-bstefely-NPCSEALANTS-dynastyzeus-app/memory/project_audit_remediation_progress.md): "run vitest via PowerShell (Vitest 4 breaks under Git Bash here).")
 
 **2. Run `tsc` AFTER `next build`, never before.** Next.js generates typed route definitions during the build step at [.next/types/routes.d.ts](.next/types/routes.d.ts), and `tsconfig.json` includes `.next/types/**/*.ts` in its compilation. If you run `npx tsc --noEmit` on a clean checkout (no `.next/`), it fails with missing route types. The fix is always: `npm run build` first, then type-check. CI enforces this ordering by design (see [memory: project_ci_gotchas.md](C:/Users/bstefely.NPCSEALANTS/.claude/projects/c--Users-bstefely-NPCSEALANTS-dynastyzeus-app/memory/project_ci_gotchas.md)).
 
@@ -1729,7 +1759,7 @@ The flat config in [eslint.config.mjs](eslint.config.mjs) is minimal: it just sp
 
 Beyond ESLint, TypeScript is strict at the `tsc` step. `tsconfig.json` enables `strict`, plus `noUnusedLocals` and `noUnusedParameters` — so an unused import, variable, or function parameter is a **build/type-check failure**, not a warning. This is the single most common reason a local edit that "looks fine" red-X's in CI.
 
-## 20. Test suite scope (1342 tests, 85 files)
+## 20. Test suite scope (1359 tests, 86 files)
 
 Run via PowerShell. The suite is [Vitest](vitest.config.mts) in a `jsdom` environment, globbing `**/__tests__/**/*.{ts,tsx}` and `**/*.{test,spec}.{ts,tsx}`. It deliberately covers **pure logic and server routes, not UI rendering** — there are no component-render or e2e tests.
 
@@ -1795,7 +1825,7 @@ Other lower-priority items the audit flagged that I did not re-verify line-by-li
 4. `npm run dev` → confirm the app loads at `http://localhost:3000`.
 5. `npm run build` → confirm a production build succeeds (also generates `.next/types/` so the next step works).
 6. `npx tsc --noEmit` → confirm type-check passes (run it *after* the build).
-7. **In PowerShell** (not Git Bash): `npm run test` → confirm **1342 tests pass** across 85 files. If you see "0 tests," you're in the wrong shell.
+7. **In PowerShell** (not Git Bash): `npm run test` → confirm **1359 tests pass** across 86 files. If you see "0 tests," you're in the wrong shell.
 8. `npm run lint` → confirm clean (remember `exhaustive-deps` warnings won't fail it; the four error rules will).
 9. Read [AGENTS.md](AGENTS.md) — it warns this Next.js version diverges from public docs; consult `node_modules/next/dist/docs/` before writing framework code.
 10. Walk the entry path: [app/page.tsx](app/page.tsx) → [app/hooks/useAppState.ts](app/hooks/useAppState.ts) → [app/components/HubRouter.tsx](app/components/HubRouter.tsx).

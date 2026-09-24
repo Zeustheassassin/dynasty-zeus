@@ -3,6 +3,7 @@ import type { Dispatch, SetStateAction } from "react";
 import type { HistoryDraftEntry, ConsensusCacheRow, ConsensusHistoryPoint, ConsensusMoverEntry } from "../shared";
 import { posColor, toPickSlot } from "../shared";
 import { PLAYER_TIERS, TIER_META, type PlayerTier } from "../../../lib/draft/playerTier";
+import { countsAsSkillPlayer, displayPosition } from "../../../lib/draft/skillPosition";
 import ConsensusCompiler from "./ConsensusCompiler";
 import { MultiPointSparkline } from "../../charts/MultiPointSparkline";
 import Badge from "../../ui/Badge";
@@ -43,7 +44,13 @@ interface ConsensusTabProps {
   filteredDrafts: HistoryDraftEntry[];
   consensusList: ConsensusBoardEntry[];
   riserFallerList: { risers: ConsensusMoverEntry[]; fallers: ConsensusMoverEntry[] };
-  players: Record<string, { full_name?: string | null; position?: string | null; team?: string | null }>;
+  players: Record<string, {
+    full_name?: string | null;
+    position?: string | null;
+    team?: string | null;
+    /** Sleeper eligibility list — how a two-way player like Travis Hunter shows up twice. */
+    fantasy_positions?: string[] | null;
+  }>;
   calcFcValues: Record<string, number>;
   /** Raw FantasyCalc dynasty values — what the FC Value column shows. */
   rawFcValues: Record<string, number>;
@@ -86,33 +93,42 @@ export default function ConsensusTab({
   const totalDraftsForYear = hasCachedRows
     ? (meta?.draftCount ?? 0)
     : filteredDrafts.length;
-  // Past years require 8% of compiled drafts to surface a player. Current year drops to 3%
-  // because most drafts are still in progress and contribute fewer picks each — the 8% bar
-  // would over-filter and hide legitimate live ADP signal.
+  // Past years require 6% of compiled drafts to surface a player (lowered from 8%
+  // on 2026-09-24). Current year stays at 3% because most drafts are still in
+  // progress and contribute fewer picks each — a higher bar would over-filter and
+  // hide legitimate live ADP signal.
   // Calendar year intentionally (not NFL season-year): history is keyed by calendar year.
   const isCurrentYear = selectedHistoryYear === String(new Date().getFullYear());
-  const minDraftsPct = isCurrentYear ? 0.03 : 0.08;
+  const minDraftsPct = isCurrentYear ? 0.03 : 0.06;
   const minDrafts = Math.max(1, Math.ceil(totalDraftsForYear * minDraftsPct));
 
   interface DisplayListEntry { player_id: string; name: string; position: string; team: string; avgPickNo: number; draftCount: number; value: number; }
+  // Both source paths (compiled cache rows, and the live your-leagues-only list)
+  // are normalised through the same position rule, so a player can't qualify on
+  // one path and vanish on the other. See lib/draft/skillPosition.ts for why a
+  // single `includes()` on one position field isn't enough.
   const displayList: DisplayListEntry[] = (hasCachedRows
-    ? consensusCache[selectedHistoryYear].map((row) => {
-        const fullPlayer = players[row.player_id];
-        return {
-          player_id:  row.player_id,
-          name:       row.player_name || fullPlayer?.full_name || "",
-          position:   row.position    || fullPlayer?.position  || "",
-          team:       row.team        || fullPlayer?.team      || "",
-          avgPickNo:  row.avg_pick_no,
-          draftCount: row.draft_count,
-          value:      calcFcValues[row.player_id] ?? 0,
-        };
-      })
+    ? consensusCache[selectedHistoryYear].map((row) => ({
+        player_id:  row.player_id,
+        name:       row.player_name || players[row.player_id]?.full_name || "",
+        position:   row.position,
+        team:       row.team || players[row.player_id]?.team || "",
+        avgPickNo:  row.avg_pick_no,
+        draftCount: row.draft_count,
+        value:      calcFcValues[row.player_id] ?? 0,
+      }))
     : consensusList
-  ).filter((p) =>
-    p.draftCount >= minDrafts &&
-    ["QB", "RB", "WR", "TE", "FB"].includes(p.position)
-  );
+  ).flatMap((p) => {
+    if (p.draftCount < minDrafts) return [];
+    const fullPlayer = players[p.player_id];
+    const sources = {
+      compiled:         p.position,
+      current:          fullPlayer?.position,
+      fantasyPositions: fullPlayer?.fantasy_positions,
+    };
+    if (!countsAsSkillPlayer(sources)) return [];
+    return [{ ...p, position: displayPosition(sources) }];
+  });
 
   const draftCount  = hasCachedRows ? (meta?.draftCount ?? 0) : filteredDrafts.length;
   const sourceLabel = hasCachedRows
