@@ -167,9 +167,17 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
     if (Object.keys(consensusMeta).length > 0) return;
     supabase
       .from("consensus_draft_meta")
-      .select("year, total_drafts, total_leagues, connected_user_count, compiled_at, locked")
+      // `select("*")` rather than a column list on purpose. Naming `locked`
+      // explicitly makes the WHOLE query fail with a 400 until migration 056 is
+      // applied, which silently emptied consensusMeta — every compiled year
+      // vanished from the year dropdown and the panel claimed nothing had ever
+      // been compiled. A star select just leaves `locked` undefined until the
+      // column exists. The table is one row per year, so there is nothing to
+      // save by narrowing it.
+      .select("*")
       .eq("user_id", supabaseUser.id)
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        if (error) { log.error("consensus meta load failed", { err: error.message }); return; }
         if (!data) return;
         const meta: ConsensusMeta = {};
         (data as Array<{ year: number; total_drafts: number; total_leagues: number; connected_user_count: number; compiled_at: string; locked?: boolean }>).forEach((row) => {
@@ -198,7 +206,11 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
       .select("tier_grades")
       .eq("user_id", supabaseUser.id)
       .single()
-      .then(({ data }: { data: { tier_grades: unknown } | null }) => {
+      .then(({ data, error }: { data: { tier_grades: unknown } | null; error: { message: string } | null }) => {
+        // Degrades to the localStorage seed rather than wiping state, but say so:
+        // before migration 055 is applied this fails every time, and a silent
+        // failure looks identical to "you have no grades yet".
+        if (error) { log.error("tier load failed (is migration 055 applied?)", { err: error.message }); return; }
         const fromDb = sanitizeTierMap(data?.tier_grades);
         if (Object.keys(fromDb).length === 0) return;
         setPlayerTiers(fromDb);
