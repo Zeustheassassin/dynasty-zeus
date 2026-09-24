@@ -14,11 +14,20 @@ import type {
   SleeperPickBasic, ConsensusCacheRow, ConsensusHistoryPoint, ConsensusMoverEntry,
 } from "../../shared";
 import { getLocalStorageItem, setLocalStorageItem } from "@/lib/hooks/useLocalStorage";
+import {
+  sanitizeTierMap, buildTierReport,
+  type PlayerTier, type TierReportInput,
+} from "../../../../lib/draft/playerTier";
 
 const log = logger("components/draftHub/DraftHistory");
 
 // Rookie-draft class year tracks the CALENDAR (upcoming class), not the NFL season.
 const ROOKIE_YEAR = String(BASE_YEAR);
+
+// Deliberately NOT the old "consensusPlayerGrades" key: that one still holds the
+// retired hit/neutral/bust marks, and reusing it would overwrite the only local
+// copy of them the moment the first tier is set.
+const TIERS_LS_KEY = "consensusPlayerTiers";
 
 type ConsensusMeta = Record<string, {
   draftCount: number;
@@ -31,7 +40,10 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
   const players = usePlayers();
   const { supabaseUser } = useAuth();
   const { selectedLeague } = useLeague();
-  const { leagueAdjustedFcValues: calcFcValues, pickFcValues } = useValues();
+  // rawFcValues is the un-adjusted FantasyCalc map: the Draft History boards show a
+  // player's current FC value, and that number must not move when the user switches
+  // leagues — these boards grade past picks across every league at once.
+  const { leagueAdjustedFcValues: calcFcValues, rawFcValues, pickFcValues } = useValues();
 
   // ── State ────────────────────────────────────────────────────────────────
   const [historyData, setHistoryData]       = useState<HistoryDraftEntry[]>([]);
@@ -55,7 +67,14 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
     // Include current year so in-progress drafts can be compiled for a rough live ADP read.
     return new Set(Array.from({ length: cur - 2020 + 1 }, (_, i) => 2020 + i));
   });
-  const [playerGrades, setPlayerGrades] = useState<Record<string, "hit" | "neutral" | "bust">>({});
+  // Keyed `${year}_${player_id}` -> tier. The old hit/neutral/bust scale this replaced
+  // still sits in `consensus_player_grades.grades`, unread (migration 055).
+  // Seeded from localStorage in the initializer, so a logged-out board (and the
+  // first paint of a logged-in one) already shows the user's tiers rather than
+  // flashing an ungraded board while the Supabase round trip is in flight.
+  const [playerTiers, setPlayerTiers] = useState<Record<string, PlayerTier>>(
+    () => sanitizeTierMap(getLocalStorageItem<unknown>(TIERS_LS_KEY, null)),
+  );
 
   // ── Effects ───────────────────────────────────────────────────────────────
 
@@ -163,27 +182,24 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
       });
   }, [supabaseUser?.id]); // eslint-disable-line
 
-  // Load player grades from Supabase (localStorage fallback)
+  // Pull the authoritative tiers down once logged in, overwriting the localStorage
+  // seed above. A row that exists but has an empty tier_grades blob is left alone:
+  // that is the pre-first-sync state, and the local seed is the better answer.
+  //
+  // Everything read back — from either store — goes through sanitizeTierMap rather
+  // than being cast. Both are untyped JSON, and the RETIRED hit/neutral/bust scale
+  // lives one column over, so a stray "hit" must be dropped, not rendered.
   useEffect(() => {
-    if (!supabaseUser) {
-      void (async () => {
-        const saved = getLocalStorageItem<Record<string, "hit" | "neutral" | "bust"> | null>("consensusPlayerGrades", null);
-        if (saved) setPlayerGrades(saved);
-      })();
-      return;
-    }
+    if (!supabaseUser) return;
     supabase.from("consensus_player_grades")
-      .select("grades")
+      .select("tier_grades")
       .eq("user_id", supabaseUser.id)
       .single()
-      .then(({ data }: { data: { grades: Record<string, string> } | null }) => {
-        if (data?.grades && typeof data.grades === "object") {
-          setPlayerGrades(data.grades as Record<string, "hit" | "neutral" | "bust">);
-          setLocalStorageItem("consensusPlayerGrades", data.grades);
-        } else {
-          const saved = getLocalStorageItem<Record<string, "hit" | "neutral" | "bust"> | null>("consensusPlayerGrades", null);
-          if (saved) setPlayerGrades(saved);
-        }
+      .then(({ data }: { data: { tier_grades: unknown } | null }) => {
+        const fromDb = sanitizeTierMap(data?.tier_grades);
+        if (Object.keys(fromDb).length === 0) return;
+        setPlayerTiers(fromDb);
+        setLocalStorageItem(TIERS_LS_KEY, fromDb);
       });
   }, [supabaseUser?.id]); // eslint-disable-line
 
@@ -252,26 +268,29 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
 
   // ── Mutations ─────────────────────────────────────────────────────────────
 
-  const syncGradesToSupabase = (grades: Record<string, string>) => {
+  // Writes tier_grades only. `grades` (the retired hit/neutral/bust blob) is never
+  // named here, so an upsert can't blank it — the row keeps its old column intact.
+  const syncTiersToSupabase = (tierGrades: Record<string, PlayerTier>) => {
     if (!supabaseUser) return;
     supabase.from("consensus_player_grades")
       .upsert(
-        { user_id: supabaseUser.id, grades, updated_at: new Date().toISOString() },
+        { user_id: supabaseUser.id, tier_grades: tierGrades, updated_at: new Date().toISOString() },
         { onConflict: "user_id" }
       )
       .then(({ error }: { error: { message: string } | null }) => {
-        if (error) log.error("grade sync failed", { err: error.message });
+        if (error) log.error("tier sync failed", { err: error.message });
       });
   };
 
-  const setGrade = (year: string, playerId: string, grade: "hit" | "neutral" | "bust") => {
-    setPlayerGrades((prev) => {
+  /** Set a player's tier, or clear it by picking the tier they already carry. */
+  const setTier = (year: string, playerId: string, tier: PlayerTier) => {
+    setPlayerTiers((prev) => {
       const key  = `${year}_${playerId}`;
       const next = { ...prev };
-      if (next[key] === grade) delete next[key];
-      else next[key] = grade;
-      setLocalStorageItem("consensusPlayerGrades", next);
-      syncGradesToSupabase(next);
+      if (next[key] === tier) delete next[key];
+      else next[key] = tier;
+      setLocalStorageItem(TIERS_LS_KEY, next);
+      syncTiersToSupabase(next);
       return next;
     });
   };
@@ -452,52 +471,28 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
       .sort((a, b) => b.timesDrafted - a.timesDrafted || a.avgPickNo - b.avgPickNo);
   })();
 
-  const gradeReport = (() => {
-    const slotMap = new Map<string, {
-      hit: number; neutral: number; bust: number;
-      players: { name: string; position: string; year: string; grade: string; avgPickNo: number }[];
-    }>();
-
-    Object.entries(playerGrades).forEach(([key, grade]) => {
+  // Resolve each graded player to their pick slot, then let buildTierReport do the
+  // grouping. A tier whose year hasn't been compiled (or whose player was removed
+  // from the compiled data) has no avg pick to bucket, so it drops out here — the
+  // grade itself is untouched and reappears once that year is compiled again.
+  const tierReport = (() => {
+    const rows: TierReportInput[] = [];
+    for (const [key, tier] of Object.entries(playerTiers)) {
       const sep      = key.indexOf("_");
       const year     = key.substring(0, sep);
       const playerId = key.substring(sep + 1);
       const cacheRow = (consensusCache[year] ?? []).find((r) => r.player_id === playerId);
-      if (!cacheRow) return;
-
-      const slot = toPickSlot(cacheRow.avg_pick_no);
-      if (!slotMap.has(slot)) slotMap.set(slot, { hit: 0, neutral: 0, bust: 0, players: [] });
-      const entry = slotMap.get(slot)!;
-      entry[grade as "hit" | "neutral" | "bust"]++;
-      entry.players.push({
+      if (!cacheRow) continue;
+      rows.push({
+        slot:      toPickSlot(cacheRow.avg_pick_no),
         name:      cacheRow.player_name,
         position:  cacheRow.position,
         year,
-        grade,
+        tier,
         avgPickNo: cacheRow.avg_pick_no,
       });
-    });
-
-    return Array.from(slotMap.entries())
-      .map(([slot, data]) => {
-        const total = data.hit + data.neutral + data.bust;
-        return {
-          slot,
-          hit:      data.hit,
-          neutral:  data.neutral,
-          bust:     data.bust,
-          total,
-          hitRate:  total ? data.hit     / total : 0,
-          neutRate: total ? data.neutral / total : 0,
-          bustRate: total ? data.bust    / total : 0,
-          players:  [...data.players].sort((a, b) => a.avgPickNo - b.avgPickNo),
-        };
-      })
-      .sort((a, b) => {
-        const [ar, as_] = a.slot.split(".").map(Number);
-        const [br, bs_] = b.slot.split(".").map(Number);
-        return (ar - br) || (as_ - bs_);
-      });
+    }
+    return buildTierReport(rows);
   })();
 
   // ── Return ────────────────────────────────────────────────────────────────
@@ -525,12 +520,13 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
     setShowCompilePanel,
     compileSelectedYears,
     setCompileSelectedYears,
-    playerGrades,
+    playerTiers,
     // context pass-throughs
     supabaseUser,
     players,
     pickFcValues,
     calcFcValues,
+    rawFcValues,
     selectedLeagueName: selectedLeague?.name,
     // computed values
     availableYears,
@@ -539,11 +535,11 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
     consensusList,
     riserFallerList,
     myPicksList,
-    gradeReport,
+    tierReport,
     // mutations
     runCompile,
     removeCompiledPlayer,
     clearYear,
-    setGrade,
+    setTier,
   };
 }

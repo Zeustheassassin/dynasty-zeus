@@ -1,7 +1,8 @@
 "use client";
 import type { Dispatch, SetStateAction } from "react";
 import type { HistoryDraftEntry, ConsensusCacheRow, ConsensusHistoryPoint, ConsensusMoverEntry } from "../shared";
-import { posColor, closestPickEquiv, pickEquivColor, toPickSlot } from "../shared";
+import { posColor, toPickSlot } from "../shared";
+import { PLAYER_TIERS, TIER_META, type PlayerTier } from "../../../lib/draft/playerTier";
 import ConsensusCompiler from "./ConsensusCompiler";
 import { MultiPointSparkline } from "../../charts/MultiPointSparkline";
 import Badge from "../../ui/Badge";
@@ -38,17 +39,18 @@ interface ConsensusTabProps {
   setShowCompilePanel: Dispatch<SetStateAction<boolean>>;
   compileSelectedYears: Set<number>;
   setCompileSelectedYears: Dispatch<SetStateAction<Set<number>>>;
-  playerGrades: Record<string, "hit" | "neutral" | "bust">;
+  playerTiers: Record<string, PlayerTier>;
   filteredDrafts: HistoryDraftEntry[];
   consensusList: ConsensusBoardEntry[];
   riserFallerList: { risers: ConsensusMoverEntry[]; fallers: ConsensusMoverEntry[] };
   players: Record<string, { full_name?: string | null; position?: string | null; team?: string | null }>;
-  pickFcValues: Record<string, number>;
   calcFcValues: Record<string, number>;
+  /** Raw FantasyCalc dynasty values — what the FC Value column shows. */
+  rawFcValues: Record<string, number>;
   runCompile: (years: number[]) => Promise<void>;
   removeCompiledPlayer: (year: string, playerId: string) => Promise<void>;
   clearYear: (year: number) => Promise<void>;
-  setGrade: (year: string, playerId: string, grade: "hit" | "neutral" | "bust") => void;
+  setTier: (year: string, playerId: string, tier: PlayerTier) => void;
 }
 
 export default function ConsensusTab({
@@ -65,17 +67,17 @@ export default function ConsensusTab({
   setShowCompilePanel,
   compileSelectedYears,
   setCompileSelectedYears,
-  playerGrades,
+  playerTiers,
   filteredDrafts,
   consensusList,
   riserFallerList,
   players,
-  pickFcValues,
   calcFcValues,
+  rawFcValues,
   runCompile,
   removeCompiledPlayer,
   clearYear,
-  setGrade,
+  setTier,
 }: ConsensusTabProps) {
   const hasCachedRows  = Array.isArray(consensusCache[selectedHistoryYear]) && consensusCache[selectedHistoryYear].length > 0;
   const isLoadingCache = loadingCacheYear === selectedHistoryYear;
@@ -203,17 +205,15 @@ export default function ConsensusTab({
             )}
           </div>
           <div className="px-4 py-2 border-b border-slate-800/60 grid grid-cols-[2rem_3rem_1fr_5rem_4rem_6rem] gap-2 text-[10px] font-bold uppercase tracking-wider text-slate-500">
-            <span>#</span><span>Pos</span><span>Player</span><span>Avg Pick</span><span>Drafts</span><span className="text-right">≈ Pick Val</span>
+            <span>#</span><span>Pos</span><span>Player</span><span>Avg Pick</span><span>Drafts</span><span className="text-right">FC Value</span>
           </div>
           <div className="divide-y divide-slate-800/40">
             {displayList.map((p, i) => {
-              const { label: equivLabel, pickNo: equivPickNo } = closestPickEquiv(p.value, pickFcValues);
-              const color  = pickEquivColor(equivPickNo, Math.round(p.avgPickNo));
-              const grade  = playerGrades[`${selectedHistoryYear}_${p.player_id}`];
-              const rowBg  = grade === "hit"     ? "bg-emerald-950/25"
-                           : grade === "bust"    ? "bg-red-950/25"
-                           : grade === "neutral" ? "bg-slate-800/30"
-                           : "";
+              // Raw FantasyCalc dynasty value — deliberately not the league-adjusted
+              // number, so a historical board doesn't move when leagues are switched.
+              const fcValue = rawFcValues[p.player_id] ?? 0;
+              const tier    = playerTiers[`${selectedHistoryYear}_${p.player_id}`];
+              const rowBg   = tier ? TIER_META[tier].rowBg : "";
               return (
                 <div key={p.player_id} className={`group grid grid-cols-[2rem_3rem_1fr_5rem_4rem_6rem] gap-2 items-center px-4 py-1.5 ${rowBg}`}>
                   <span className="text-xs text-slate-500">{i + 1}</span>
@@ -233,25 +233,27 @@ export default function ConsensusTab({
                         ✕
                       </button>
                     )}
+                    {/* Outcome tier, best → worst. One click sets it; clicking the
+                        active tier again clears it. Iterates PLAYER_TIERS so the row
+                        never drifts out of sync with the scale. */}
                     <div className="flex items-center gap-0.5 shrink-0 ml-0.5">
-                      {(["hit", "neutral", "bust"] as const).map((g) => {
-                        const active = grade === g;
-                        const activeCls =
-                          g === "hit"     ? "border-emerald-600 bg-emerald-800/70 text-emerald-300"
-                          : g === "neutral" ? "border-slate-500 bg-slate-700 text-slate-200"
-                          :                   "border-red-600 bg-red-800/70 text-red-300";
+                      {PLAYER_TIERS.map((t) => {
+                        const meta   = TIER_META[t];
+                        const active = tier === t;
                         return (
                           <button
-                            key={g}
-                            title={g.charAt(0).toUpperCase() + g.slice(1)}
-                            onClick={(e) => { e.stopPropagation(); setGrade(selectedHistoryYear, p.player_id, g); }}
-                            className={`text-[9px] font-bold px-1 py-0.5 rounded border transition ${
+                            key={t}
+                            title={active ? `${meta.label} — click to clear` : meta.label}
+                            aria-label={`Grade ${p.name} as ${meta.label}`}
+                            aria-pressed={active}
+                            onClick={(e) => { e.stopPropagation(); setTier(selectedHistoryYear, p.player_id, t); }}
+                            className={`w-4 text-[9px] font-bold leading-none px-0 py-0.5 rounded border transition ${
                               active
-                                ? activeCls
+                                ? meta.activeBtn
                                 : "border-slate-800 text-slate-700 hover:border-slate-600 hover:text-slate-500 bg-transparent"
                             }`}
                           >
-                            {g === "hit" ? "H" : g === "neutral" ? "N" : "B"}
+                            {meta.glyph}
                           </button>
                         );
                       })}
@@ -259,7 +261,9 @@ export default function ConsensusTab({
                   </div>
                   <span className="text-xs font-semibold text-white">{toPickSlot(p.avgPickNo)}</span>
                   <span className="text-xs text-slate-400">{p.draftCount}x</span>
-                  <span className={`text-xs font-semibold text-right ${color}`}>{equivLabel}</span>
+                  <span className={`text-xs font-semibold text-right ${fcValue > 0 ? "text-white" : "text-slate-600"}`}>
+                    {fcValue > 0 ? fcValue.toLocaleString() : "—"}
+                  </span>
                 </div>
               );
             })}

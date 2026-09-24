@@ -3218,6 +3218,10 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     rosters,
     users,
     leagueAdjustedFcValues,
+    // Un-adjusted FantasyCalc values, for consumers that must stay stable across
+    // a league switch (Draft History). leagueAdjustedFcValues above is this map
+    // scaled by the selected league's scoring multipliers.
+    rawFcValues: calcFcValues,
     leagueAdjustedRedraftValues,
     pickFcValues,
     fcNameValues,

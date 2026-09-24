@@ -18,6 +18,10 @@ interface AppProvidersProps {
   rosters: SleeperRoster[];
   users: Record<string, string>;
   leagueAdjustedFcValues: Record<string, number>;
+  /** Raw FantasyCalc dynasty values (no league scoring multipliers). Optional for the
+   *  same reason as previewTradeSimulation below — read-only spy mode never mounts the
+   *  Draft Hub, the only consumer, and has no un-adjusted value map of its own. */
+  rawFcValues?: Record<string, number>;
   leagueAdjustedRedraftValues: Record<string, number>;
   pickFcValues: Record<string, number>;
   fcNameValues: Record<string, number>;
@@ -45,6 +49,7 @@ export function AppProviders({
   rosters,
   users,
   leagueAdjustedFcValues,
+  rawFcValues = {},
   leagueAdjustedRedraftValues,
   pickFcValues,
   fcNameValues,
@@ -62,6 +67,7 @@ export function AppProviders({
     <LeagueProvider selectedLeague={selectedLeague} rosters={rosters} users={users}>
     <ValuesProvider
       leagueAdjustedFcValues={leagueAdjustedFcValues}
+      rawFcValues={rawFcValues}
       leagueAdjustedRedraftValues={leagueAdjustedRedraftValues}
       pickFcValues={pickFcValues}
       fcNameValues={fcNameValues}

@@ -8,6 +8,13 @@ import type {
 
 interface ValuesContextValue {
   leagueAdjustedFcValues: Record<string, number>;
+  /**
+   * Raw FantasyCalc dynasty values, straight off /api/fc-values with no league
+   * scoring multipliers applied. Use this wherever a value must NOT change when
+   * the user switches leagues — e.g. the Draft History boards, which grade past
+   * picks across every league at once. Empty in read-only spy mode.
+   */
+  rawFcValues: Record<string, number>;
   leagueAdjustedRedraftValues: Record<string, number>;
   pickFcValues: Record<string, number>;
   fcNameValues: Record<string, number>;
@@ -28,6 +35,7 @@ interface ValuesContextValue {
 
 const ValuesContext = createContext<ValuesContextValue>({
   leagueAdjustedFcValues: {},
+  rawFcValues: {},
   leagueAdjustedRedraftValues: {},
   pickFcValues: {},
   fcNameValues: {},
@@ -41,6 +49,7 @@ const ValuesContext = createContext<ValuesContextValue>({
 export function ValuesProvider({
   children,
   leagueAdjustedFcValues,
+  rawFcValues,
   leagueAdjustedRedraftValues,
   pickFcValues,
   fcNameValues,
@@ -56,6 +65,7 @@ export function ValuesProvider({
   const value = useMemo<ValuesContextValue>(
     () => ({
       leagueAdjustedFcValues,
+      rawFcValues,
       leagueAdjustedRedraftValues,
       pickFcValues,
       fcNameValues,
@@ -67,6 +77,7 @@ export function ValuesProvider({
     }),
     [
       leagueAdjustedFcValues,
+      rawFcValues,
       leagueAdjustedRedraftValues,
       pickFcValues,
       fcNameValues,

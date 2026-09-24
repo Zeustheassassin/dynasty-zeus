@@ -34,11 +34,12 @@ export default function DraftHistory({ leagues, user }: DraftHistoryProps) {
     setShowCompilePanel,
     compileSelectedYears,
     setCompileSelectedYears,
-    playerGrades,
+    playerTiers,
     supabaseUser,
     players,
     pickFcValues,
     calcFcValues,
+    rawFcValues,
     selectedLeagueName,
     availableYears,
     filteredDrafts,
@@ -46,11 +47,11 @@ export default function DraftHistory({ leagues, user }: DraftHistoryProps) {
     consensusList,
     riserFallerList,
     myPicksList,
-    gradeReport,
+    tierReport,
     runCompile,
     removeCompiledPlayer,
     clearYear,
-    setGrade,
+    setTier,
   } = useDraftHistory(leagues, user);
 
   return (
@@ -140,17 +141,17 @@ export default function DraftHistory({ leagues, user }: DraftHistoryProps) {
               setShowCompilePanel={setShowCompilePanel}
               compileSelectedYears={compileSelectedYears}
               setCompileSelectedYears={setCompileSelectedYears}
-              playerGrades={playerGrades}
+              playerTiers={playerTiers}
               filteredDrafts={filteredDrafts}
               consensusList={consensusList}
               riserFallerList={riserFallerList}
               players={players}
-              pickFcValues={pickFcValues}
               calcFcValues={calcFcValues}
+              rawFcValues={rawFcValues}
               runCompile={runCompile}
               removeCompiledPlayer={removeCompiledPlayer}
               clearYear={clearYear}
-              setGrade={setGrade}
+              setTier={setTier}
             />
           )}
 
@@ -162,13 +163,13 @@ export default function DraftHistory({ leagues, user }: DraftHistoryProps) {
               selectedHistoryYear={selectedHistoryYear}
               myPicksSort={myPicksSort}
               setMyPicksSort={setMyPicksSort}
-              pickFcValues={pickFcValues}
+              rawFcValues={rawFcValues}
             />
           )}
 
           {/* ── Pick Slot Grades ── */}
           {historyTab === "GRADES" && (
-            <GradesTab gradeReport={gradeReport} />
+            <GradesTab tierReport={tierReport} />
           )}
         </>
       )}
