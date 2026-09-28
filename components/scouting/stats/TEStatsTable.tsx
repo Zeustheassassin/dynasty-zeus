@@ -1,6 +1,6 @@
 "use client";
 import { useMemo } from "react";
-import StatsTableShell, { StatRow, ColDef } from "./StatsTableShell";
+import StatsTableShell, { StatRow, ColDef, MinFilterDef } from "./StatsTableShell";
 import { computeTERouteAboveExpected, computeTEBlockAboveExpected } from "../../../lib/scouting/aboveExpected";
 import type { Prospect, ScoutingGame, TEPlay, TEPositioning, TELocation, TECoverage } from "../../../lib/types";
 
@@ -254,6 +254,12 @@ export function buildTEStatRows(prospects: Prospect[], games: ScoutingGame[], te
       });
 }
 
+// "Min …" boxes beside the search bar — hide prospects below a sample size.
+const TE_MIN_FILTERS: MinFilterDef[] = [
+  { key: "routes", label: "Routes" },
+  { key: "blocks", label: "Blocks" },
+];
+
 export default function TEStatsTable({ prospects, games, tePlays, loading, draftYearFilter, onSelectProspect }: Props) {
   const prospectMap = useMemo(() => new Map(prospects.map((p) => [p.id, p])), [prospects]);
   const rows = useMemo(() => buildTEStatRows(prospects, games, tePlays), [prospects, games, tePlays]);
@@ -262,6 +268,7 @@ export default function TEStatsTable({ prospects, games, tePlays, loading, draft
     <StatsTableShell
       cols={TE_STAT_COLS}
       rows={rows}
+      minFilters={TE_MIN_FILTERS}
       defaultSortKey="te_saer"
       defaultSortDir="desc"
       loading={loading}

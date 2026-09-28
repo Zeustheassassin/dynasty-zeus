@@ -1,6 +1,6 @@
 "use client";
 import { useMemo } from "react";
-import StatsTableShell, { StatRow, ColDef } from "./StatsTableShell";
+import StatsTableShell, { StatRow, ColDef, MinFilterDef } from "./StatsTableShell";
 import type { Prospect, ProspectWithStats } from "../../../lib/types";
 
 interface Props {
@@ -196,6 +196,9 @@ export function buildWRStatRows(prospectsWithStats: ProspectWithStats[]): StatRo
       }));
 }
 
+// "Min …" boxes beside the search bar — hide prospects below a sample size.
+const WR_MIN_FILTERS: MinFilterDef[] = [{ key: "routes", label: "Routes" }];
+
 export default function WRStatsTable({ prospectsWithStats, loading, draftYearFilter, onSelectProspect }: Props) {
   const prospectMap = useMemo(() => new Map(prospectsWithStats.map((p) => [p.id, p])), [prospectsWithStats]);
   const rows = useMemo(() => buildWRStatRows(prospectsWithStats), [prospectsWithStats]);
@@ -204,6 +207,7 @@ export default function WRStatsTable({ prospectsWithStats, loading, draftYearFil
     <StatsTableShell
       cols={WR_STAT_COLS}
       rows={rows}
+      minFilters={WR_MIN_FILTERS}
       defaultSortKey="sae"
       defaultSortDir="desc"
       loading={loading}

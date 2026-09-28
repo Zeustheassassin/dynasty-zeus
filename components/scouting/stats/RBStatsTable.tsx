@@ -1,6 +1,6 @@
 "use client";
 import { useMemo } from "react";
-import StatsTableShell, { StatRow, ColDef } from "./StatsTableShell";
+import StatsTableShell, { StatRow, ColDef, MinFilterDef } from "./StatsTableShell";
 import { computeRBAboveExpected } from "../../../lib/scouting/aboveExpected";
 import type { Prospect, ScoutingGame, RBPlay, RBRunType } from "../../../lib/types";
 
@@ -191,6 +191,9 @@ export function buildRBStatRows(prospects: Prospect[], games: ScoutingGame[], rb
       });
 }
 
+// "Min …" boxes beside the search bar — hide prospects below a sample size.
+const RB_MIN_FILTERS: MinFilterDef[] = [{ key: "runs", label: "Runs" }];
+
 export default function RBStatsTable({ prospects, games, rbPlays, loading, draftYearFilter, onSelectProspect }: Props) {
   const prospectMap = useMemo(() => new Map(prospects.map((p) => [p.id, p])), [prospects]);
   const rows = useMemo(() => buildRBStatRows(prospects, games, rbPlays), [prospects, games, rbPlays]);
@@ -199,6 +202,7 @@ export default function RBStatsTable({ prospects, games, rbPlays, loading, draft
     <StatsTableShell
       cols={RB_STAT_COLS}
       rows={rows}
+      minFilters={RB_MIN_FILTERS}
       defaultSortKey="srae"
       defaultSortDir="desc"
       loading={loading}

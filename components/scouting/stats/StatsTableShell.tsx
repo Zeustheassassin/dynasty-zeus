@@ -25,6 +25,15 @@ export interface ColDef {
   weightBy?: string;
 }
 
+/** A "Min {label}" box next to the search bar that hides rows whose `key`
+ *  value is below the number typed — e.g. only WRs with 100+ routes. */
+export interface MinFilterDef {
+  /** Row field holding a raw count (e.g. "routes"). */
+  key: string;
+  /** Shown as "Min {label}". */
+  label: string;
+}
+
 interface Props {
   cols: ColDef[];
   rows: StatRow[];
@@ -33,6 +42,7 @@ interface Props {
   loading?: boolean;
   draftYearFilter?: number | null;
   onNameClick?: (id: string) => void;
+  minFilters?: MinFilterDef[];
 }
 
 export function fmtVal(val: number | string | null, f?: ColDef["fmt"]): string {
@@ -50,12 +60,14 @@ export function fmtVal(val: number | string | null, f?: ColDef["fmt"]): string {
 }
 
 export default function StatsTableShell({
-  cols, rows, defaultSortKey, defaultSortDir = "desc", loading, draftYearFilter, onNameClick,
+  cols, rows, defaultSortKey, defaultSortDir = "desc", loading, draftYearFilter, onNameClick, minFilters,
 }: Props) {
   const firstDataCol = cols.find((c) => !c.sticky);
   const [sortKey, setSortKey] = useState(defaultSortKey ?? firstDataCol?.key ?? "");
   const [sortDir, setSortDir] = useState<"asc" | "desc">(defaultSortDir);
   const [search, setSearch] = useState("");
+  // Typed text per min filter (kept as a string so the box can be cleared).
+  const [minText, setMinText] = useState<Record<string, string>>({});
 
   const topRef = useRef<HTMLDivElement>(null);
   const midRef = useRef<HTMLDivElement>(null);
@@ -79,9 +91,17 @@ export default function StatsTableShell({
     return () => cleanup.forEach((f) => f());
   }, [syncScroll]);
 
-  // Filter
+  // Filter. Like search, the min filters only hide rows — the League footer and
+  // the color scale still come from every row.
+  const activeMins = (minFilters ?? [])
+    .map((f) => ({ key: f.key, min: Number(minText[f.key]) }))
+    .filter((m) => Number.isFinite(m.min) && m.min > 0);
   const filtered = rows.filter((r) => {
     if (draftYearFilter && r.yr !== draftYearFilter) return false;
+    for (const { key, min } of activeMins) {
+      const v = r[key];
+      if (typeof v !== "number" || !(v >= min)) return false;
+    }
     return !search || (r.name as string).toLowerCase().includes(search.toLowerCase());
   });
 
@@ -243,6 +263,21 @@ export default function StatsTableShell({
           className="px-3 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm text-white placeholder-slate-500 w-52 focus:outline-none focus:border-blue-500"
           aria-label="Search players"
         />
+        {minFilters?.map((f) => (
+          <label key={f.key} className="flex items-center gap-1.5 text-xs text-slate-400">
+            Min {f.label}
+            <input
+              type="number"
+              min={0}
+              step={1}
+              inputMode="numeric"
+              placeholder="0"
+              value={minText[f.key] ?? ""}
+              onChange={(e) => setMinText((prev) => ({ ...prev, [f.key]: e.target.value }))}
+              className="px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm text-white placeholder-slate-500 w-20 focus:outline-none focus:border-blue-500"
+            />
+          </label>
+        ))}
         <span className="text-xs text-slate-500">{sorted.length} player{sorted.length !== 1 ? "s" : ""}</span>
       </div>
 

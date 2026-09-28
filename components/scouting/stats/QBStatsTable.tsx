@@ -1,6 +1,6 @@
 "use client";
 import { useMemo } from "react";
-import StatsTableShell, { StatRow, ColDef } from "./StatsTableShell";
+import StatsTableShell, { StatRow, ColDef, MinFilterDef } from "./StatsTableShell";
 import { computeQBAboveExpected, computeQBAAEBreakdownMap } from "../../../lib/scouting/aboveExpected";
 import type { Prospect, ScoutingGame, QBPlay, QBDepthZone } from "../../../lib/types";
 
@@ -29,6 +29,7 @@ export const QB_STAT_COLS: ColDef[] = [
   { key: "yr",     label: "Yr",    group: "Identity", fmt: "yr",    width: 46 },
   { key: "g",      label: "G",     group: "Identity", fmt: "count", width: 40 },
   { key: "snaps",  label: "Snaps", group: "Identity", fmt: "count", width: 52 },
+  { key: "throws", label: "Throws", group: "Identity", fmt: "count", width: 56, tooltip: "Balls thrown — pass/RPO snaps minus scrambles, sacks and throw-aways. Includes tipped and not-yet-graded throws; AAE uses the graded ones." },
 
   // Snap mix — each outcome as a % of snaps (Snaps stays a raw count). The six
   // percentages sum to ~100% when every throw is accuracy-graded; any shortfall
@@ -268,6 +269,7 @@ export function buildQBStatRows(prospects: Prospect[], games: ScoutingGame[], qb
           yr: p.draft_class_year,
           g: gamesByProspect.get(p.id) ?? 0,
           snaps: pPlays.length,
+          throws: thrownPlays.length,
 
           // Snap mix as % of snaps (sum to ~100% when every throw is graded)
           graded_pct:    pct(ratedN,     snapsN),
@@ -356,6 +358,9 @@ export function buildQBStatRows(prospects: Prospect[], games: ScoutingGame[], qb
       });
 }
 
+// "Min …" boxes beside the search bar — hide prospects below a sample size.
+const QB_MIN_FILTERS: MinFilterDef[] = [{ key: "throws", label: "Throws" }];
+
 export default function QBStatsTable({ prospects, games, qbPlays, loading, draftYearFilter, onSelectProspect }: Props) {
   const prospectMap = useMemo(() => new Map(prospects.map((p) => [p.id, p])), [prospects]);
   const rows = useMemo(() => buildQBStatRows(prospects, games, qbPlays), [prospects, games, qbPlays]);
@@ -364,6 +369,7 @@ export default function QBStatsTable({ prospects, games, qbPlays, loading, draft
     <StatsTableShell
       cols={QB_STAT_COLS}
       rows={rows}
+      minFilters={QB_MIN_FILTERS}
       defaultSortKey="aae"
       defaultSortDir="desc"
       loading={loading}
