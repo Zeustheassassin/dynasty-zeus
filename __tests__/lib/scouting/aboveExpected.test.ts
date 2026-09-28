@@ -45,8 +45,9 @@ const rbPlay = (
   formation: RBFormation,
   success: boolean | null,
   loaded_box: boolean,
+  unblocked_defender = false,
 ): RBPlay =>
-  ({ game_id, run_type, formation, success, loaded_box }) as unknown as RBPlay;
+  ({ game_id, run_type, formation, success, loaded_box, unblocked_defender }) as unknown as RBPlay;
 
 const qbPlay = (
   game_id: string,
@@ -162,14 +163,10 @@ describe("computeRBAboveExpected", () => {
     expect(out.has("qb1")).toBe(false);
   });
 
-  it("matches a hand-computed value for a single isolated-baseline RB", () => {
-    // Construct so the formation and box dimensions DISAGREE, making the
-    // combine() average observable. The RB is the only league data.
-    //   20 known runs total.
-    //   Formation mix: 10 gun (8 success), 10 under_center (2 success).
-    //   Box mix:       all loaded_box.
-    // Because the RB is the whole league, every bucket baseline == that bucket's
-    // own rate, so the weighted expected == actual in BOTH dims → metric 0.
+  it("returns 0 for a lone RB whose situations differ (the league is exactly him)", () => {
+    // Formation mix: 10 gun (8 success), 10 under_center (2 success), all
+    // loaded. The model's unpenalized intercept makes the league's expected
+    // sum equal its actual sum, so the RB who IS the league reads exactly 0.
     const prospects = [prospect("rb1", "RB")];
     const games = [game("g1", "rb1")];
     const plays = [
@@ -469,10 +466,9 @@ describe("computeTERouteAboveExpected", () => {
     expect(computeTERouteAboveExpected(prospects, games, plays).get("te1")).toBe(0);
   });
 
-  it("folds press coverage into the man bucket (no double-counting)", () => {
-    // The prospect runs press + man routes; press must be scored against the man
-    // baseline. If press were dropped, the metric would change. We verify the
-    // metric is a finite number (press contributed) rather than null.
+  it("scores press routes too (press is its own bucket, not dropped)", () => {
+    // The prospect runs press + man routes against a man-only league. Press has
+    // no league data yet, so it adds no effect — but those routes still count.
     const prospects = [prospect("te1", "TE"), prospect("bg", "TE")];
     const games = [game("g1", "te1"), game("g_bg", "bg")];
     const tePlays = [
@@ -696,5 +692,82 @@ describe("computeTEBlockAboveExpectedForPlays", () => {
     );
     const gamePlays = repeat(5, () => tePlay("g1", { positioning: "slot", coverage: "man", was_open: true }));
     expect(computeTEBlockAboveExpectedForPlays(gamePlays, baselines)).toBeNull();
+  });
+});
+
+// =============================================================================
+// RB / TE difficulty models — a rep is judged against reps like it
+// =============================================================================
+
+describe("RB SRAE difficulty model", () => {
+  // League: blocked, unloaded runs succeed 60%; runs with an unblocked defender
+  // 20%; loaded-box runs 30%. No loaded-box + unblocked run in the league — the
+  // model must infer that one from the two effects.
+  const league = [
+    ...repeat(200, (i) => rbPlay("g_bg", "inside_zone", "gun", i % 5 < 3, false, false)),
+    ...repeat(100, (i) => rbPlay("g_bg", "inside_zone", "gun", i % 5 < 1, false, true)),
+    ...repeat(100, (i) => rbPlay("g_bg", "inside_zone", "gun", i % 10 < 3, true, false)),
+  ];
+  const B = buildRBBaselines(league);
+  const oneRun = (success: boolean, loaded: boolean, unblocked: boolean, run: RBRunType = "inside_zone") =>
+    computeRBAboveExpectedForPlays([rbPlay("g1", run, "gun", success, loaded, unblocked)], B)!;
+
+  it("a stuffed run with an unblocked defender costs far less than a blocked one", () => {
+    expect(oneRun(false, false, true) - oneRun(false, false, false)).toBeGreaterThan(30);
+  });
+
+  it("difficulty stacks: loaded box + unblocked defender is harder than either alone", () => {
+    // An average of per-dimension rates can never go below the lowest rate, so
+    // a success here could never out-earn both single-tag successes.
+    const both = oneRun(true, true, true);
+    expect(both).toBeGreaterThan(oneRun(true, false, true));
+    expect(both).toBeGreaterThan(oneRun(true, true, false));
+  });
+
+  it("run type is not a difficulty dimension", () => {
+    expect(oneRun(true, false, false, "outside_zone")).toBe(oneRun(true, false, false, "inside_zone"));
+  });
+
+  it("league-wide SRAE nets to 0 (run-weighted) even when RBs face different situations", () => {
+    const prospects = [prospect("a", "RB"), prospect("b", "RB")];
+    const games = [game("g_a", "a"), game("g_b", "b")];
+    const plays = [
+      ...repeat(30, (i) => rbPlay("g_a", "inside_zone", "gun", i % 5 === 0, false, true)),
+      ...repeat(40, (i) => rbPlay("g_b", "outside_zone", "under_center", i % 2 === 0, true, false)),
+    ];
+    const out = computeRBAboveExpected(prospects, games, plays);
+    expect(Math.abs((30 * out.get("a")! + 40 * out.get("b")!) / 70)).toBeLessThan(0.01);
+  });
+});
+
+describe("TE difficulty models", () => {
+  it("TE-SAER: a closed go route costs less than a closed slant (route type counts)", () => {
+    const B = buildTERouteBaselines([
+      ...repeat(200, (i) => tePlay("g_bg", { route_type: "nine", coverage: "zone", positioning: "slot", was_open: i % 10 < 3 })),
+      ...repeat(200, (i) => tePlay("g_bg", { route_type: "slant", coverage: "zone", positioning: "slot", was_open: i % 10 < 9 })),
+    ]);
+    const closed = (route_type: TEPlay["route_type"]) =>
+      computeTERouteAboveExpectedForPlays([tePlay("g1", { route_type, coverage: "zone", positioning: "slot", was_open: false })], B)!;
+    expect(closed("nine") - closed("slant")).toBeGreaterThan(30);
+  });
+
+  it("TE-SAER: press is its own, harder bucket than off man", () => {
+    const B = buildTERouteBaselines([
+      ...repeat(200, (i) => tePlay("g_bg", { route_type: "curl", coverage: "press", positioning: "inline", was_open: i % 10 < 3 })),
+      ...repeat(200, (i) => tePlay("g_bg", { route_type: "curl", coverage: "man", positioning: "inline", was_open: i % 10 < 8 })),
+    ]);
+    const closed = (coverage: TEPlay["coverage"]) =>
+      computeTERouteAboveExpectedForPlays([tePlay("g1", { route_type: "curl", coverage, positioning: "inline", was_open: false })], B)!;
+    expect(closed("press") - closed("man")).toBeGreaterThan(25);
+  });
+
+  it("TE-SAEB: a lost movement block costs less than a lost inline block", () => {
+    const B = buildTEBlockBaselines([
+      ...repeat(200, (i) => tePlay("g_bg", { play_type: "run_block", block_type: "movement", block_success: i % 10 < 6 })),
+      ...repeat(200, (i) => tePlay("g_bg", { play_type: "run_block", block_type: "inline", block_success: i % 20 < 19 })),
+    ]);
+    const lost = (block_type: TEBlockType) =>
+      computeTEBlockAboveExpectedForPlays([tePlay("g1", { play_type: "run_block", block_type, block_success: false })], B)!;
+    expect(lost("movement") - lost("inline")).toBeGreaterThan(20);
   });
 });

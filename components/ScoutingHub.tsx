@@ -20,7 +20,7 @@ import type { GradeField } from "../lib/scouting/prospectGrade";
 import {
   buildProspectsWithStats,
   type ProspectRouteStatsRow,
-  type LeagueRouteBaselineRow,
+  type ProspectRouteCellsRow,
 } from "../lib/scouting/aggregateMerge";
 
 const log = logger("ScoutingHub");
@@ -149,7 +149,7 @@ export default function ScoutingHub() {
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [games, setGames] = useState<ScoutingGame[]>([]);
   const [routeStatsRows, setRouteStatsRows] = useState<ProspectRouteStatsRow[]>([]);
-  const [leagueBaselines, setLeagueBaselines] = useState<LeagueRouteBaselineRow[]>([]);
+  const [routeCellRows, setRouteCellRows] = useState<ProspectRouteCellsRow[]>([]);
   const [gameSnapStatsRows, setGameSnapStatsRows] = useState<GameSnapStatsRow[]>([]);
   const [posSnapsRows, setPosSnapsRows] = useState<PosSnapsRow[]>([]);
   const [qbThrowsByProspect, setQbThrowsByProspect] = useState<Map<string, number>>(new Map());
@@ -189,7 +189,7 @@ export default function ScoutingHub() {
         { data: pData, error: pErr },
         { data: gData, error: gErr },
         { data: rsData, error: rsErr },
-        { data: lbData, error: lbErr },
+        { data: cellData, error: cellErr },
         { data: gssData, error: gssErr },
         { data: rbStatsData, error: rbStatsErr },
         { data: qbStatsData, error: qbStatsErr },
@@ -198,7 +198,9 @@ export default function ScoutingHub() {
         supabase.from("prospects").select("*").order("personal_rank", { ascending: true, nullsFirst: false }),
         supabase.from("scouting_games").select("*").order("season_year", { ascending: false }),
         supabase.from("prospect_route_stats").select("*"),
-        supabase.from("league_route_baselines").select("*"),
+        // WR SAE's difficulty model (migration 057). Its own query, so a not-yet-applied
+        // migration only blanks SAE / cSAE instead of failing prospect_route_stats too.
+        supabase.from("prospect_route_cells").select("prospect_id,cells"),
         supabase.from("prospect_game_snap_stats").select("*"),
         supabase.from("prospect_rb_stats").select("prospect_id,total_snaps,run_type_stats_raw"),
         supabase.from("prospect_qb_stats").select("prospect_id,total_snaps,total_throws,depth_zone_stats_raw"),
@@ -208,7 +210,7 @@ export default function ScoutingHub() {
       if (pErr) log.error("prospects load", { msg: pErr.message, code: pErr.code, details: pErr.details, hint: pErr.hint });
       if (gErr) log.error("games load", { msg: gErr.message, code: gErr.code, details: gErr.details, hint: gErr.hint });
       if (rsErr) log.error("prospect_route_stats load", { msg: rsErr.message, code: rsErr.code, details: rsErr.details, hint: rsErr.hint });
-      if (lbErr) log.error("league_route_baselines load", { msg: lbErr.message, code: lbErr.code, details: lbErr.details, hint: lbErr.hint });
+      if (cellErr) log.error("prospect_route_cells load (WR SAE/cSAE stay blank until migration 057 is applied)", { msg: cellErr.message, code: cellErr.code, details: cellErr.details, hint: cellErr.hint });
       if (gssErr) log.error("prospect_game_snap_stats load", { msg: gssErr.message, code: gssErr.code, details: gssErr.details, hint: gssErr.hint, raw: JSON.stringify(gssErr) });
       if (rbStatsErr) log.error("prospect_rb_stats load", { msg: rbStatsErr.message });
       if (qbStatsErr) log.error("prospect_qb_stats load", { msg: qbStatsErr.message });
@@ -224,7 +226,7 @@ export default function ScoutingHub() {
       setProspects((pData ?? []) as Prospect[]);
       setGames((gData ?? []) as ScoutingGame[]);
       setRouteStatsRows((rsData ?? []) as ProspectRouteStatsRow[]);
-      setLeagueBaselines((lbData ?? []) as LeagueRouteBaselineRow[]);
+      setRouteCellRows((cellData ?? []) as ProspectRouteCellsRow[]);
       setGameSnapStatsRows((gssData ?? []) as GameSnapStatsRow[]);
       const rbRows = (rbStatsData ?? []) as RbRunTypeRow[];
       const qbRows = (qbStatsData ?? []) as QbThresholdRow[];
@@ -292,15 +294,15 @@ export default function ScoutingHub() {
     }
   }, [positionTab, loadPositionPlays]);
 
-  // Server-aggregated path: merge view rows + league baselines into ProspectWithStats.
-  // Replaces the per-snap JS reduce.
+  // Server-aggregated path: merge view rows + route cells (WR SAE's difficulty
+  // model) into ProspectWithStats. Replaces the per-snap JS reduce.
   const prospectsWithStats = useMemo(
     (): ProspectWithStats[] =>
-      buildProspectsWithStats(prospects, routeStatsRows, leagueBaselines, {
+      buildProspectsWithStats(prospects, routeStatsRows, routeCellRows, {
         qbThrowsByProspect,
         teRoutesByProspect,
       }),
-    [prospects, routeStatsRows, leagueBaselines, qbThrowsByProspect, teRoutesByProspect],
+    [prospects, routeStatsRows, routeCellRows, qbThrowsByProspect, teRoutesByProspect],
   );
 
   async function handleAddProspect(data: Omit<Prospect, "id" | "user_id" | "created_at" | "updated_at">) {

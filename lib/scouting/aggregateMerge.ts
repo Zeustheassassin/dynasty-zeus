@@ -7,15 +7,17 @@ import type {
   RoutePlay,
 } from "../types";
 import { deriveChartingDecision } from "../../components/scouting/shared/chartingConstants";
+import {
+  makeDesign,
+  fitDifficultyModel,
+  expectedFromModel,
+  toAbovePts,
+  type FittedDifficulty,
+} from "./difficultyModel";
 
 const ROUTE_TYPES: RouteType[] = [
   "nine", "post", "dig", "curl", "slant", "screen", "flat", "comeback", "out", "corner", "other",
 ];
-
-// SAE buckets: press is a subtype of man, so it folds into the man bucket for
-// the expected-rate math (and stays a display-only column elsewhere). Three
-// mutually exclusive buckets keep the weighted average mathematically sound.
-const SAE_COVERAGES: Array<"man" | "zone" | "double"> = ["man", "zone", "double"];
 
 export interface ProspectRouteStatsRow {
   prospect_id: string;
@@ -66,161 +68,154 @@ export interface ProspectRouteStatsRow {
   open_pct_backfield: number | null;
 }
 
-export interface LeagueRouteBaselineRow {
-  kind: "route" | "coverage";
-  key: string;
-  n: number;
-  open_n: number;
+// ── WR SAE (Success / Open Rate Above Expected) ──────────────────────────
+// The WR's open rate on routes run minus the difficulty model's expected open
+// rate for those same routes (difficultyModel.ts). Situation dimensions:
+//   route type, coverage (press its own bucket — a harder look than off man),
+//   alignment (outside / slot / backfield), on / off the line.
+// A go route against press counts as the hard rep it is: not getting open
+// there costs little, getting open earns a lot. Left and right are one
+// "outside" bucket — which side of the field isn't a difficulty (TE-SAER
+// leaves location out for the same reason). With route and coverage held
+// fixed, the slot comes out ~3 pts HARDER than outside; its high raw open%
+// comes from the easy routes slot receivers run, which the route dimension
+// already prices.
+//
+// This replaced a 50/50 average of the route-type and coverage league rates,
+// which halved the route effect: measured 2026-09 on 12,200 charted routes, a
+// go is open 39% of the time league-wide but was expected at ~52%, so deep
+// threats were marked down for running gos and screen/flat-heavy receivers
+// marked up (go share correlated −0.21 with SAE; ~0 after).
+//
+// Ridge strength 3, chosen by 5-fold held-out-WR validation over 1–30: every
+// fifth of routes (by difficulty) lands within 1.3 pts of its actual open rate
+// at 1–3, and it drifts to 2.5+ from 10 up. 3 over 1 for a little more
+// protection on the thin buckets (double coverage, backfield alignment: a
+// few dozen routes each).
+const WR_RIDGE_LAMBDA = 3;
+
+// One route situation — a raw RoutePlay, or one cell of prospect_route_cells.
+interface WRSituation {
+  route_type: string;
+  coverage: string;
+  alignment: string;
+  on_line: boolean;
+}
+interface RouteCell extends WRSituation { n: number; open: number }
+
+const WR_DESIGN = makeDesign<WRSituation>([
+  [ROUTE_TYPES,                            (s) => s.route_type],
+  [["man", "press", "zone", "double"],     (s) => s.coverage || null],  // "" = uncharted
+  [["outside", "slot", "backfield"],       (s) => (s.alignment === "left" || s.alignment === "right" ? "outside" : s.alignment || null)],
+  [["on", "off"],                          (s) => (s.on_line ? "on" : "off")],
+]);
+
+export type WRDifficultyModel = FittedDifficulty<WRSituation>;
+
+// One row of the prospect_route_cells view (migration 057): cell key
+// "route_type|coverage|alignment|on_line" → [routes, open routes].
+export interface ProspectRouteCellsRow {
+  prospect_id: string;
+  cells: Record<string, [number, number]> | null;
 }
 
-interface BaselineMaps {
-  route: Map<string, { n: number; open: number }>;
-  coverage: Map<string, { n: number; open: number }>;
-}
-
-export function indexBaselines(rows: LeagueRouteBaselineRow[]): BaselineMaps {
-  const route = new Map<string, { n: number; open: number }>();
-  const coverage = new Map<string, { n: number; open: number }>();
-  for (const r of rows) {
-    if (r.kind === "route") route.set(r.key, { n: r.n, open: r.open_n });
-    else if (r.kind === "coverage") coverage.set(r.key, { n: r.n, open: r.open_n });
+function parseCells(raw: Record<string, [number, number]> | null | undefined): RouteCell[] {
+  const out: RouteCell[] = [];
+  for (const [key, counts] of Object.entries(raw ?? {})) {
+    const parts = key.split("|");
+    if (parts.length !== 4 || !Array.isArray(counts)) continue;
+    const [n, open] = counts;
+    if (!(n > 0)) continue;
+    out.push({ route_type: parts[0], coverage: parts[1], alignment: parts[2], on_line: parts[3] === "on", n, open });
   }
-  return { route, coverage };
+  return out;
 }
 
-// Shared weighted-average SAE math: actual open rate vs. an expected rate
-// blended from route-type mix and coverage mix against league baselines.
-// No minimum-sample gate here — callers that need the reliability floor
+// The league model: every prospect's cells, summed. Null model (so SAE reads
+// "—") when there are no cells — e.g. migration 057 not yet applied.
+export function buildWRModel(cellRows: ProspectRouteCellsRow[]): WRDifficultyModel {
+  const league = new Map<string, RouteCell>();
+  for (const row of cellRows) {
+    for (const c of parseCells(row.cells)) {
+      const key = `${c.route_type}|${c.coverage}|${c.alignment}|${c.on_line}`;
+      const acc = league.get(key);
+      if (acc) { acc.n += c.n; acc.open += c.open; } else league.set(key, { ...c });
+    }
+  }
+  const rows = [...league.values()].map((c) => ({ cols: WR_DESIGN.cols(c), y: c.open / c.n, w: c.n }));
+  return { design: WR_DESIGN, model: fitDifficultyModel(rows, WR_DESIGN.size, WR_RIDGE_LAMBDA) };
+}
+
+// Actual open rate vs the model's expected over a set of route cells. No
+// minimum-sample gate here — callers that need the reliability floor
 // (season/career) apply it themselves before calling in.
-function saeFromCounts(
-  totalRoutes: number,
-  openRoutes: number,
-  routeTypeCounts: Record<string, number>,
-  coverageCounts: Record<string, number>,
-  baselines: BaselineMaps,
-): number | null {
-  if (totalRoutes === 0) return null;
-  const actualOpen = openRoutes / totalRoutes;
-
-  let expRoute = 0, routeW = 0;
-  for (const rt of ROUTE_TYPES) {
-    const rtCount = routeTypeCounts[rt] ?? 0;
-    const lg = baselines.route.get(rt);
-    if (rtCount > 0 && lg && lg.n > 0) {
-      expRoute += (rtCount / totalRoutes) * (lg.open / lg.n);
-      routeW += rtCount / totalRoutes;
-    }
+function saeFromCells(cells: RouteCell[], model: WRDifficultyModel): number | null {
+  if (!model.model) return null;
+  let n = 0, open = 0, expected = 0;
+  for (const c of cells) {
+    n += c.n;
+    open += c.open;
+    expected += c.n * expectedFromModel(model.model, WR_DESIGN.cols(c));
   }
-
-  let expCvg = 0, cvgW = 0;
-  for (const cvgType of SAE_COVERAGES) {
-    // Man bucket combines man + press for both player count and league baseline.
-    const cvgCount = cvgType === "man"
-      ? (coverageCounts["man"] ?? 0) + (coverageCounts["press"] ?? 0)
-      : (coverageCounts[cvgType] ?? 0);
-    let lg: { n: number; open: number } | undefined;
-    if (cvgType === "man") {
-      const m = baselines.coverage.get("man");
-      const pr = baselines.coverage.get("press");
-      const n = (m?.n ?? 0) + (pr?.n ?? 0);
-      const open = (m?.open ?? 0) + (pr?.open ?? 0);
-      if (n > 0) lg = { n, open };
-    } else {
-      lg = baselines.coverage.get(cvgType);
-    }
-    if (cvgCount > 0 && lg && lg.n > 0) {
-      expCvg += (cvgCount / totalRoutes) * (lg.open / lg.n);
-      cvgW += cvgCount / totalRoutes;
-    }
-  }
-
-  const normRoute = routeW > 0 ? expRoute / routeW : null;
-  const normCvg = cvgW > 0 ? expCvg / cvgW : null;
-  let combined: number | null = null;
-  if (normRoute != null && normCvg != null) combined = (normRoute + normCvg) / 2;
-  else if (normRoute != null) combined = normRoute;
-  else if (normCvg != null) combined = normCvg;
-  return combined != null ? parseFloat(((actualOpen - combined) * 100).toFixed(2)) : null;
+  return n > 0 ? toAbovePts(open / n, expected / n) : null;
 }
 
-// Mirrors the JS SAE computation in ScoutingHub.prospectsWithStats.
+const playCell = (p: RoutePlay): RouteCell => ({
+  route_type: p.route_type, coverage: p.coverage, alignment: p.alignment, on_line: p.on_line,
+  n: 1, open: p.was_open ? 1 : 0,
+});
+
+// "Core-route" SAE — the same math as SAE, but Go (nine) and Screen routes
+// are dropped from the sample entirely. Both are scheme-driven outliers rather
+// than a receiver "beating" anything: screens are usually blocked open by
+// design, gos are all-or-nothing deep shots. The difficulty model already
+// prices both correctly; cSAE is the "won leverage vs coverage" view without
+// them.
+const SAE_EX_ROUTE_TYPES = new Set<string>(["nine", "screen"]);
+
+// Season/career SAE, gated on 15 routes with charted open data.
 function computeSAE(
   v: ProspectRouteStatsRow,
-  baselines: BaselineMaps,
+  cells: RouteCell[],
+  model: WRDifficultyModel,
 ): number | null {
   if (!v.has_charted_open_data || v.total_routes < 15) return null;
-  return saeFromCounts(v.total_routes, v.open_routes, v.route_type_counts, v.coverage_counts, baselines);
+  return saeFromCells(cells, model);
+}
+
+// Season/career cSAE, gated on 15 core routes. Exact: each cell carries its
+// own route type and coverage, so dropping gos/screens drops their coverage
+// snaps too.
+function computeCoreSAE(
+  v: ProspectRouteStatsRow,
+  cells: RouteCell[],
+  model: WRDifficultyModel,
+): number | null {
+  if (!v.has_charted_open_data) return null;
+  const core = cells.filter((c) => !SAE_EX_ROUTE_TYPES.has(c.route_type));
+  if (core.reduce((s, c) => s + c.n, 0) < 15) return null;
+  return saeFromCells(core, model);
 }
 
 // Per-game SAE (no minimum-sample gate — a single game's worth of routes is
 // expected to be noisy; this is a quick "did this game look good/bad" read,
-// not the reliability-gated season/career metric). Tallies route-type and
-// coverage counts directly from the raw route_plays for one game.
+// not the reliability-gated season/career metric).
 export function computeSAEForPlays(
   routePlays: RoutePlay[],
-  baselines: BaselineMaps,
+  model: WRDifficultyModel,
 ): number | null {
-  const rated = routePlays.filter((p) => !p.no_route_run);
-  const totalRoutes = rated.length;
-  const openRoutes = rated.filter((p) => p.was_open).length;
-  const routeTypeCounts: Record<string, number> = {};
-  const coverageCounts: Record<string, number> = {};
-  for (const p of rated) {
-    routeTypeCounts[p.route_type] = (routeTypeCounts[p.route_type] ?? 0) + 1;
-    if (p.coverage) coverageCounts[p.coverage] = (coverageCounts[p.coverage] ?? 0) + 1;
-  }
-  return saeFromCounts(totalRoutes, openRoutes, routeTypeCounts, coverageCounts, baselines);
+  return saeFromCells(routePlays.filter((p) => !p.no_route_run).map(playCell), model);
 }
 
-// "Core-route" SAE — the same open-rate-above-expected math as SAE, but Go
-// (nine) and Screen routes are dropped from the sample entirely. Both are
-// scheme-driven outliers rather than a receiver "beating" anything: screens
-// are usually blocked open by design, gos are all-or-nothing deep shots.
-// A player who runs a lot of either can have their SAE swamped by them —
-// this variant isolates the more true "won leverage vs. coverage" routes.
-const SAE_EX_ROUTE_TYPES = new Set<RouteType>(["nine", "screen"]);
-
-// Season/career variant. Coverage-mix stays computed off the full sample —
-// prospect_route_stats has no route×coverage crosstab, so there's no exact
-// way to drop the coverage snaps that happened to come on a go/screen route.
-// Route-mix (and the actual open-rate numerator/denominator) IS filtered
-// exactly, using the per-route open/count breakdown already in route_stats_raw.
-function computeCoreSAE(
-  v: ProspectRouteStatsRow,
-  baselines: BaselineMaps,
-): number | null {
-  if (!v.has_charted_open_data) return null;
-  let totalRoutes = 0, openRoutes = 0;
-  const routeTypeCounts: Record<string, number> = {};
-  for (const rt of ROUTE_TYPES) {
-    if (SAE_EX_ROUTE_TYPES.has(rt)) continue;
-    const r = v.route_stats_raw[rt];
-    if (!r) continue;
-    totalRoutes += r.count;
-    openRoutes += r.open;
-    routeTypeCounts[rt] = r.count;
-  }
-  if (totalRoutes < 15) return null;
-  return saeFromCounts(totalRoutes, openRoutes, routeTypeCounts, v.coverage_counts, baselines);
-}
-
-// Per-game core-route SAE — ungated, mirrors computeSAEForPlays. Raw plays
-// carry both route_type and coverage per play, so this filters exactly (no
-// crosstab approximation needed, unlike the season variant above).
+// Per-game core-route SAE — ungated, mirrors computeSAEForPlays.
 export function computeCoreSAEForPlays(
   routePlays: RoutePlay[],
-  baselines: BaselineMaps,
+  model: WRDifficultyModel,
 ): number | null {
-  const rated = routePlays.filter((p) => !p.no_route_run && !SAE_EX_ROUTE_TYPES.has(p.route_type));
-  const totalRoutes = rated.length;
-  const openRoutes = rated.filter((p) => p.was_open).length;
-  const routeTypeCounts: Record<string, number> = {};
-  const coverageCounts: Record<string, number> = {};
-  for (const p of rated) {
-    routeTypeCounts[p.route_type] = (routeTypeCounts[p.route_type] ?? 0) + 1;
-    if (p.coverage) coverageCounts[p.coverage] = (coverageCounts[p.coverage] ?? 0) + 1;
-  }
-  return saeFromCounts(totalRoutes, openRoutes, routeTypeCounts, coverageCounts, baselines);
+  return saeFromCells(
+    routePlays.filter((p) => !p.no_route_run && !SAE_EX_ROUTE_TYPES.has(p.route_type)).map(playCell),
+    model,
+  );
 }
 
 function buildRouteStats(
@@ -276,15 +271,17 @@ export interface ProspectThresholdCounts {
 export function buildProspectsWithStats(
   prospects: Prospect[],
   viewRows: ProspectRouteStatsRow[],
-  baselineRows: LeagueRouteBaselineRow[],
+  cellRows: ProspectRouteCellsRow[],
   thresholdCounts: ProspectThresholdCounts = {},
 ): ProspectWithStats[] {
   const byProspect = new Map(viewRows.map((r) => [r.prospect_id, r]));
-  const baselines = indexBaselines(baselineRows);
+  const wrModel = buildWRModel(cellRows);
+  const cellsByProspect = new Map(cellRows.map((r) => [r.prospect_id, parseCells(r.cells)]));
   const { qbThrowsByProspect, teRoutesByProspect } = thresholdCounts;
 
   return prospects.map((p) => {
     const v = byProspect.get(p.id);
+    const cells = cellsByProspect.get(p.id) ?? [];
 
     const total_games = v?.total_games ?? 0;
     const has_charted_open_data = v?.has_charted_open_data ?? false;
@@ -322,8 +319,8 @@ export function buildProspectsWithStats(
       pct_slot: v?.pct_slot ?? null,
       pct_backfield: v?.pct_backfield ?? null,
       pct_on_line: v?.pct_on_line ?? null,
-      adj_success_above_exp: v ? computeSAE(v, baselines) : null,
-      core_sae: v ? computeCoreSAE(v, baselines) : null,
+      adj_success_above_exp: v ? computeSAE(v, cells, wrModel) : null,
+      core_sae: v ? computeCoreSAE(v, cells, wrModel) : null,
       avg_external_rank: avgExternalRank(p),
       depth_behind_los: v?.depth_behind_los ?? 0,
       depth_on_los: v?.depth_on_los ?? 0,

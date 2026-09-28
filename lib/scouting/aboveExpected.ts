@@ -1,16 +1,15 @@
-// Per-prospect "Above Expected" metric calculators for RB / QB / TE.
+// Per-prospect "Above Expected" metric calculators for RB / QB / TE (WR SAE
+// lives in aggregateMerge.ts, fed from server-side cell counts).
 //
 // Each function returns a Map<prospect_id, number | null> where the number
 // is the metric in percentage points (e.g. +5.2 means 5.2 pp better than
-// the league baseline given the prospect's situation mix). Returns null
-// for prospects under the 15-known-play minimum or with no comparable
-// league baseline.
+// the league would be expected to do on the same plays). Returns null for
+// prospects under the minimum sample or with no league to compare against.
 //
-// All three follow the same shape: actual rate − weighted expected rate
-// derived from league averages over two situation dimensions, averaged.
-// The math here is a verbatim extraction of the calcs that previously
-// lived inline in RBStatsTable / QBStatsTable / TEStatsTable so the
-// numbers stay consistent across Analysis and the Games Log.
+// All of them share one shape: actual rate − the mean per-play expected rate
+// from the league difficulty model (difficultyModel.ts), which judges each
+// play against plays like it, every situation tag's effect stacked. They
+// differ only in the outcome, the situation dimensions, and the ridge strength.
 
 import type {
   Prospect,
@@ -29,6 +28,15 @@ import type {
   TECoverage,
 } from "../types";
 import { ROUTE_TYPES } from "../../components/scouting/shared/chartingConstants";
+import {
+  makeDesign,
+  fitDifficultyModel,
+  fitFromPlays,
+  expectedFromModel,
+  aboveExpectedForPlays,
+  type ModelRow,
+  type FittedDifficulty,
+} from "./difficultyModel";
 
 const RB_RUN_TYPES: RBRunType[] = ["outside_zone", "inside_zone", "outside_man_gap", "inside_man_gap"];
 const RB_FORMATIONS: RBFormation[] = ["gun", "pistol", "under_center"];
@@ -62,6 +70,10 @@ function platformKey(pl: QBPlay): QBPlatformKey | null {
 }
 
 const TE_POSITIONINGS: TEPositioning[] = ["wide", "slot", "inline", "full_back", "running_back", "wing_back"];
+// Coverage buckets for TE routes. Press is its own bucket (a harder look than
+// off man), not folded into man: the difficulty model has no need for the
+// mutually-exclusive merge the old weighted average relied on.
+const TE_COVERAGES: TECoverage[] = ["man", "press", "zone", "double"];
 
 const MIN_SAMPLE = 15;
 // QB AAE samples 7 dimensions so each dimension's expected estimate is noisier
@@ -99,11 +111,6 @@ function throwValue(pl: QBPlay): number {
   return pl.completion === "caught" ? MISS_BASE + CATCH_BONUS : MISS_BASE;
 }
 
-function combine(a: number | null, b: number | null): number | null {
-  if (a != null && b != null) return (a + b) / 2;
-  return a ?? b;
-}
-
 function buildPlaysByProspect<T extends { game_id: string }>(
   plays: T[],
   gameToProspect: Map<string, string>,
@@ -125,28 +132,38 @@ function buildGameToProspect(games: ScoutingGame[]): Map<string, string> {
 }
 
 // ── RB SRAE ──────────────────────────────────────────────────────────────
-export interface RBBaselines {
-  lgFormation: Record<RBFormation, { s: number; n: number }>;
-  lgBox: { loaded: { s: number; n: number }; unloaded: { s: number; n: number } };
-}
+// Success Rate Above Expected: the RB's success rate on known runs minus the
+// difficulty model's expected success for those same runs. Situation
+// dimensions:
+//   formation, box (loaded / not), unblocked defender (yes / no).
+// A stuffed run into a loaded box with a free defender costs almost nothing;
+// making something of it earns a lot.
+//
+// Run type (inside/outside zone, man/gap) is deliberately NOT a dimension:
+// measured 2026-09 on 1,756 known runs, adding it made predictions for held-out
+// RBs worse, not better — which run schemes a back sees tracks his team more
+// than the difficulty of the rep.
+//
+// Ridge strength 3, chosen by 5-fold held-out-RB validation over 1–30: the
+// error is flat from 1 to 3 and rises above that; 3 keeps a little more
+// protection for the thin buckets (under center, unblocked: ~100 runs each).
+const RB_RIDGE_LAMBDA = 3;
 
-// League baselines: per-formation success rate and loaded-vs-unloaded box.
-// Built once from the full league play set and shared across every prospect
-// (and, for the per-game badge, every game) so the scan only runs once.
+const isKnownRun = (pl: RBPlay) =>
+  RB_RUN_TYPES.includes(pl.run_type as RBRunType) && pl.success !== null;
+const rbSuccess = (pl: RBPlay) => (pl.success ? 1 : 0);
+const RB_DESIGN = makeDesign<RBPlay>([
+  [RB_FORMATIONS,           (pl) => pl.formation],
+  [["loaded", "unloaded"],  (pl) => (pl.loaded_box ? "loaded" : "unloaded")],
+  [["unblocked", "blocked"], (pl) => (pl.unblocked_defender ? "unblocked" : "blocked")],
+]);
+
+// The fitted league model. Built once from the full league play set and shared
+// across every prospect (and, for the per-game badge, every game).
+export type RBBaselines = FittedDifficulty<RBPlay>;
+
 export function buildRBBaselines(rbPlays: RBPlay[]): RBBaselines {
-  const lgFormation: Record<RBFormation, { s: number; n: number }> = {
-    gun: { s: 0, n: 0 }, pistol: { s: 0, n: 0 }, under_center: { s: 0, n: 0 },
-  };
-  const lgBox = { loaded: { s: 0, n: 0 }, unloaded: { s: 0, n: 0 } };
-  for (const pl of rbPlays) {
-    if (!RB_RUN_TYPES.includes(pl.run_type as RBRunType)) continue;
-    if (pl.success === null) continue;
-    lgFormation[pl.formation].n++;
-    if (pl.success) lgFormation[pl.formation].s++;
-    if (pl.loaded_box) { lgBox.loaded.n++; if (pl.success) lgBox.loaded.s++; }
-    else { lgBox.unloaded.n++; if (pl.success) lgBox.unloaded.s++; }
-  }
-  return { lgFormation, lgBox };
+  return fitFromPlays(rbPlays.filter(isKnownRun), RB_DESIGN, rbSuccess, RB_RIDGE_LAMBDA);
 }
 
 // Actual-vs-expected for an arbitrary RB play subset (a prospect's whole
@@ -157,28 +174,7 @@ export function computeRBAboveExpectedForPlays(
   plays: RBPlay[],
   baselines: RBBaselines,
 ): number | null {
-  const { lgFormation, lgBox } = baselines;
-  const runPlays = plays.filter((pl) => RB_RUN_TYPES.includes(pl.run_type as RBRunType));
-  const knownRuns = runPlays.filter((pl) => pl.success !== null);
-  if (knownRuns.length === 0) return null;
-
-  const actual = knownRuns.filter((pl) => pl.success).length / knownRuns.length;
-
-  let expFm = 0, fmW = 0;
-  for (const fm of RB_FORMATIONS) {
-    const fmN = runPlays.filter((pl) => pl.formation === fm && pl.success !== null).length;
-    const lg = lgFormation[fm];
-    if (fmN > 0 && lg.n > 0) { expFm += (fmN / knownRuns.length) * (lg.s / lg.n); fmW += fmN / knownRuns.length; }
-  }
-  const loadedN = runPlays.filter((pl) => pl.loaded_box && pl.success !== null).length;
-  const unloadedN = runPlays.filter((pl) => !pl.loaded_box && pl.success !== null).length;
-  let expBox = 0, boxW = 0;
-  if (loadedN > 0 && lgBox.loaded.n > 0) { expBox += (loadedN / knownRuns.length) * (lgBox.loaded.s / lgBox.loaded.n); boxW += loadedN / knownRuns.length; }
-  if (unloadedN > 0 && lgBox.unloaded.n > 0) { expBox += (unloadedN / knownRuns.length) * (lgBox.unloaded.s / lgBox.unloaded.n); boxW += unloadedN / knownRuns.length; }
-  const normFm = fmW > 0 ? expFm / fmW : null;
-  const normBox = boxW > 0 ? expBox / boxW : null;
-  const combined = combine(normFm, normBox);
-  return combined != null ? parseFloat(((actual - combined) * 100).toFixed(2)) : null;
+  return aboveExpectedForPlays(plays.filter(isKnownRun), baselines, rbSuccess);
 }
 
 export function computeRBAboveExpected(
@@ -194,9 +190,7 @@ export function computeRBAboveExpected(
   for (const p of prospects) {
     if (p.position !== "RB") continue;
     const pPlays = playsByProspect.get(p.id) ?? [];
-    const runPlays = pPlays.filter((pl) => RB_RUN_TYPES.includes(pl.run_type as RBRunType));
-    const knownRuns = runPlays.filter((pl) => pl.success !== null);
-    if (knownRuns.length < MIN_SAMPLE) { out.set(p.id, null); continue; }
+    if (pPlays.filter(isKnownRun).length < MIN_SAMPLE) { out.set(p.id, null); continue; }
     out.set(p.id, computeRBAboveExpectedForPlays(pPlays, baselines));
   }
 
@@ -214,9 +208,9 @@ export function computeRBAboveExpected(
 // small bonus if a miss was caught — so the metric leans on QB placement, not
 // receiver bail-outs.
 //
-// The difficulty model is a ridge-regularized fractional logistic regression of
-// throw value on one-hot buckets of all seven dimensions, fit once on every
-// league throw (fitDifficultyModel). Each bucket learns how much it adds to or
+// The difficulty model (difficultyModel.ts) is a ridge-regularized fractional
+// logistic regression of throw value on one-hot buckets of all seven
+// dimensions, fit once on every league throw. Each bucket learns how much it adds to or
 // takes from a throw's odds, and those effects STACK: a deep nine thrown cross-
 // body on the run under pressure is expected to be harder than any one of those
 // tags alone, so a miss there costs much less than the same miss from a clean
@@ -255,23 +249,18 @@ type Bucketed<K extends string> = Partial<Record<K, Acc>>;
 
 // ── Difficulty model ──
 // Ridge strength in pseudo-throws: each bucket's effect is pulled toward 0
-// (league average) as if backed by RIDGE_LAMBDA throws of no information. It
+// (league average) as if backed by QB_RIDGE_LAMBDA throws of no information. It
 // plays the role SHRINK_K plays for the marginal rows — a bucket seen a handful
 // of times (comeback, corner, cross-body) can't swing the model. Chosen 2026-09
 // by 5-fold held-out-QB validation over 1–100: error is flat across 10–30, and
 // 10 is the most even between the hardest and easiest fifths of throws (each
 // ~2 pts off). Below ~5 it overfits hard throws; above ~30 it flattens back
 // toward average. Re-validate as the dataset grows.
-const RIDGE_LAMBDA = 10;
-// Target clamp: keeps a league of all-perfect throws (y ≡ 1) from sending the
-// intercept to +∞. Invisible at real data.
-const MODEL_Y_EPS = 1e-6;
+const QB_RIDGE_LAMBDA = 10;
 
 const QB_HANDLING_BUCKETS: QBPressureHandling[] = ["step_up", "bail_front_side", "bail_backside"];
-// One one-hot column per bucket of every dimension; column 0 is the intercept.
-// Fixed from the bucket lists (not from the data) so a bucket the league has
-// never seen gets an all-zero column, which the ridge pins at 0.
-const QB_MODEL_DIMS: ReadonlyArray<readonly [readonly string[], (pl: QBPlay) => string | null]> = [
+// One one-hot column per bucket of every dimension (see difficultyModel.ts).
+const QB_DESIGN = makeDesign<QBPlay>([
   [QB_DEPTH_ZONES,      (pl) => pl.depth_zone],
   [["man", "zone"],     (pl) => pl.coverage],
   [QB_TIMING_BUCKETS,   (pl) => pl.timing],
@@ -279,107 +268,7 @@ const QB_MODEL_DIMS: ReadonlyArray<readonly [readonly string[], (pl: QBPlay) => 
   [QB_PLATFORM_KEYS,    platformKey],
   [QB_HANDLING_BUCKETS, (pl) => pl.pressure_handling],
   [ROUTE_TYPES,         (pl) => pl.route_type],
-];
-const QB_MODEL_COLS: Map<string, number>[] = (() => {
-  let col = 1;
-  return QB_MODEL_DIMS.map(([buckets]) => new Map(buckets.map((b) => [b, col++] as const)));
-})();
-const QB_MODEL_SIZE = 1 + QB_MODEL_DIMS.reduce((s, [buckets]) => s + buckets.length, 0);
-
-// The play's value-1 columns — at most one per dimension, intercept excluded.
-function modelCols(pl: QBPlay): number[] {
-  const cols: number[] = [];
-  QB_MODEL_DIMS.forEach(([, bucketOf], d) => {
-    const b = bucketOf(pl);
-    const c = b == null ? undefined : QB_MODEL_COLS[d].get(b);
-    if (c != null) cols.push(c);
-  });
-  return cols;
-}
-
-const sigmoid = (z: number) => 1 / (1 + Math.exp(-z));
-// log(1 + e^z) without overflow.
-const softplus = (z: number) => (z > 0 ? z + Math.log1p(Math.exp(-z)) : Math.log1p(Math.exp(z)));
-
-interface ModelRow { cols: number[]; y: number }
-
-// Solve A·x = b by Gaussian elimination with partial pivoting. A is the model's
-// small, dense Hessian (positive definite thanks to the ridge). Null if singular.
-function solveLinear(A: Float64Array[], b: Float64Array): Float64Array | null {
-  const n = b.length;
-  const M = A.map((row, i) => { const r = new Float64Array(n + 1); r.set(row); r[n] = b[i]; return r; });
-  for (let c = 0; c < n; c++) {
-    let piv = c;
-    for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
-    if (!M[piv][c]) return null;
-    [M[c], M[piv]] = [M[piv], M[c]];
-    for (let r = c + 1; r < n; r++) {
-      const f = M[r][c] / M[c][c];
-      if (f) for (let k = c; k <= n; k++) M[r][k] -= f * M[c][k];
-    }
-  }
-  const x = new Float64Array(n);
-  for (let r = n - 1; r >= 0; r--) {
-    let s = M[r][n];
-    for (let k = r + 1; k < n; k++) s -= M[r][k] * x[k];
-    x[r] = s / M[r][r];
-  }
-  return x;
-}
-
-// Fit the difficulty model: ridge-penalized fractional-logit by Newton's method
-// with step halving. Returns the coefficient vector (index 0 = intercept), or
-// null when the league has no graded throws. ~40 columns and each row touches
-// at most 8 of them, so a full league fit is milliseconds.
-function fitDifficultyModel(rows: ModelRow[]): Float64Array | null {
-  if (!rows.length) return null;
-  const P = QB_MODEL_SIZE;
-  const logit = (b: Float64Array, cols: number[]) => { let s = b[0]; for (const c of cols) s += b[c]; return s; };
-  // Penalized negative log-likelihood — every accepted step must lower it.
-  const objective = (b: Float64Array) => {
-    let f = 0;
-    for (const r of rows) { const z = logit(b, r.cols); f += softplus(z) - r.y * z; }
-    for (let j = 1; j < P; j++) f += 0.5 * RIDGE_LAMBDA * b[j] * b[j];
-    return f;
-  };
-
-  let beta = new Float64Array(P);
-  const ybar = rows.reduce((s, r) => s + r.y, 0) / rows.length;
-  beta[0] = Math.log(ybar / (1 - ybar));
-  let f = objective(beta);
-  for (let iter = 0; iter < 50; iter++) {
-    const g = new Float64Array(P);
-    const H = Array.from({ length: P }, () => new Float64Array(P));
-    for (const r of rows) {
-      const p = sigmoid(logit(beta, r.cols));
-      const resid = p - r.y;
-      const w = p * (1 - p);
-      g[0] += resid; H[0][0] += w;
-      for (const a of r.cols) {
-        g[a] += resid; H[0][a] += w; H[a][0] += w;
-        for (const c of r.cols) H[a][c] += w;
-      }
-    }
-    for (let j = 1; j < P; j++) { g[j] += RIDGE_LAMBDA * beta[j]; H[j][j] += RIDGE_LAMBDA; }
-    const step = solveLinear(H, g);
-    if (!step) break;
-    let t = 1;
-    let next = beta;
-    let fNext = Infinity;
-    for (; t > 1e-6; t /= 2) {
-      next = beta.map((v, j) => v - t * step[j]);
-      fNext = objective(next);
-      if (fNext <= f) break;
-    }
-    if (!(fNext <= f)) break;
-    let moved = 0;
-    for (let j = 0; j < P; j++) moved = Math.max(moved, Math.abs(t * step[j]));
-    beta = next;
-    f = fNext;
-    if (moved < 1e-10) break;
-  }
-  return beta;
-}
+]);
 
 interface QBBaselines {
   depth:    Bucketed<QBDepthZone>;
@@ -414,7 +303,7 @@ export function buildQBBaselines(leaguePlays: QBPlay[]): QBBaselines {
     const pk = platformKey(pl);
     if (pk)                   b.platform[pk]           = add(b.platform[pk], v);
     if (pl.route_type)        b.route[pl.route_type]   = add(b.route[pl.route_type], v);
-    b.rows.push({ cols: modelCols(pl), y: Math.min(Math.max(v, MODEL_Y_EPS), 1 - MODEL_Y_EPS) });
+    b.rows.push({ cols: QB_DESIGN.cols(pl), y: v });
   }
   return b;
 }
@@ -453,7 +342,7 @@ export function resolveBaselines(b: QBBaselines): ResolvedBaselines {
     pressure: resolveDim<QBPressure>(b.pressure, mean),
     platform: resolveDim<QBPlatformKey>(b.platform, mean),
     route:    resolveDim<RouteType>(b.route, mean),
-    model:    fitDifficultyModel(b.rows),
+    model:    fitDifficultyModel(b.rows, QB_DESIGN.size, QB_RIDGE_LAMBDA),
   };
 }
 
@@ -462,10 +351,7 @@ export function resolveBaselines(b: QBBaselines): ResolvedBaselines {
 // dimension's effect stacked. Null only when there is no model (no league
 // throws).
 function expectedForPlay(pl: QBPlay, R: ResolvedBaselines): number | null {
-  if (!R.model) return null;
-  let z = R.model[0];
-  for (const c of modelCols(pl)) z += R.model[c];
-  return sigmoid(z);
+  return R.model ? expectedFromModel(R.model, QB_DESIGN.cols(pl)) : null;
 }
 
 // Weighted expected throw value for one dimension AND the QB's actual throw
@@ -643,32 +529,34 @@ export function computeQBAAEBreakdownMap(
   return out;
 }
 
+// ── TE (shared) ──────────────────────────────────────────────────────────
+// Ridge strength for both TE models. Only a few TEs are charted yet, too few
+// to validate on held-out prospects the way QB / WR / RB were, so this borrows
+// QB's value (10), the heaviest of the three: with thin data the model stays
+// close to league average and firms up as charting grows. Re-validate once
+// ~10 TEs are charted.
+const TE_RIDGE_LAMBDA = 10;
+
 // ── TE TE-SAER (route running) ───────────────────────────────────────────
-// Open Rate Above Expected. Adjusts a TE's open% on rated routes for the
-// situation mix across two dimensions: positioning (6 buckets) and coverage
-// (3 buckets — press folds into man).
-export interface TERouteBaselines {
-  lgPos: Partial<Record<TEPositioning, { open: number; n: number }>>;
-  lgCvg: Partial<Record<TECoverage, { open: number; n: number }>>;
-}
+// Open Rate Above Expected: the TE's open rate on rated routes minus the
+// difficulty model's expected open rate for those same routes. Situation
+// dimensions:
+//   route type, coverage (press its own bucket), positioning (inline / slot /
+//   wide / wing / backfield).
+// Mirrors WR SAE's route + coverage + alignment. Location (left / right) is
+// left out — a side of the field, not a difficulty.
+const isRatedTERoute = (pl: TEPlay) => pl.play_type === "route_run" && pl.was_open !== null;
+const teOpen = (pl: TEPlay) => (pl.was_open ? 1 : 0);
+const TE_ROUTE_DESIGN = makeDesign<TEPlay>([
+  [ROUTE_TYPES,     (pl) => pl.route_type],
+  [TE_COVERAGES,    (pl) => pl.coverage],
+  [TE_POSITIONINGS, (pl) => pl.positioning],
+]);
+
+export type TERouteBaselines = FittedDifficulty<TEPlay>;
 
 export function buildTERouteBaselines(tePlays: TEPlay[]): TERouteBaselines {
-  const lgPos: Partial<Record<TEPositioning, { open: number; n: number }>> = {};
-  const lgCvg: Partial<Record<TECoverage, { open: number; n: number }>> = {};
-  for (const pl of tePlays) {
-    if (pl.play_type !== "route_run" || pl.was_open === null) continue;
-    if (!lgPos[pl.positioning]) lgPos[pl.positioning] = { open: 0, n: 0 };
-    lgPos[pl.positioning]!.n++;
-    if (pl.was_open) lgPos[pl.positioning]!.open++;
-    if (pl.coverage) {
-      // Press folds into Man for TE-SAER bucketing.
-      const cvgKey: TECoverage = pl.coverage === "press" ? "man" : pl.coverage;
-      if (!lgCvg[cvgKey]) lgCvg[cvgKey] = { open: 0, n: 0 };
-      lgCvg[cvgKey]!.n++;
-      if (pl.was_open) lgCvg[cvgKey]!.open++;
-    }
-  }
-  return { lgPos, lgCvg };
+  return fitFromPlays(tePlays.filter(isRatedTERoute), TE_ROUTE_DESIGN, teOpen, TE_RIDGE_LAMBDA);
 }
 
 // Actual-vs-expected open rate for an arbitrary TE route-run play subset. No
@@ -677,34 +565,7 @@ export function computeTERouteAboveExpectedForPlays(
   plays: TEPlay[],
   baselines: TERouteBaselines,
 ): number | null {
-  const { lgPos, lgCvg } = baselines;
-  const routePlays = plays.filter((pl) => pl.play_type === "route_run");
-  const ratedRoutes = routePlays.filter((pl) => pl.was_open !== null);
-  if (ratedRoutes.length === 0) return null;
-
-  const actual = ratedRoutes.filter((pl) => pl.was_open).length / ratedRoutes.length;
-
-  let expPos = 0, posW = 0;
-  for (const pos of TE_POSITIONINGS) {
-    const posN = ratedRoutes.filter((pl) => pl.positioning === pos).length;
-    const lg = lgPos[pos];
-    if (posN > 0 && lg && lg.n > 0) { expPos += (posN / ratedRoutes.length) * (lg.open / lg.n); posW += posN / ratedRoutes.length; }
-  }
-  let expCvg = 0, cvgW = 0;
-  // Press folds into Man — three mutually exclusive buckets keep the weighted
-  // average sound (no double-counting press routes).
-  const TE_SAE_COVERAGES: TECoverage[] = ["man", "zone", "double"];
-  for (const cvg of TE_SAE_COVERAGES) {
-    const cN = cvg === "man"
-      ? ratedRoutes.filter((pl) => pl.coverage === "man" || pl.coverage === "press").length
-      : ratedRoutes.filter((pl) => pl.coverage === cvg).length;
-    const lg = lgCvg[cvg];
-    if (cN > 0 && lg && lg.n > 0) { expCvg += (cN / ratedRoutes.length) * (lg.open / lg.n); cvgW += cN / ratedRoutes.length; }
-  }
-  const normPos = posW > 0 ? expPos / posW : null;
-  const normCvg = cvgW > 0 ? expCvg / cvgW : null;
-  const combined = combine(normPos, normCvg);
-  return combined != null ? parseFloat(((actual - combined) * 100).toFixed(2)) : null;
+  return aboveExpectedForPlays(plays.filter(isRatedTERoute), baselines, teOpen);
 }
 
 export function computeTERouteAboveExpected(
@@ -720,9 +581,7 @@ export function computeTERouteAboveExpected(
   for (const p of prospects) {
     if (p.position !== "TE") continue;
     const pPlays = playsByProspect.get(p.id) ?? [];
-    const routePlays = pPlays.filter((pl) => pl.play_type === "route_run");
-    const ratedRoutes = routePlays.filter((pl) => pl.was_open !== null);
-    if (ratedRoutes.length < MIN_SAMPLE) { out.set(p.id, null); continue; }
+    if (pPlays.filter(isRatedTERoute).length < MIN_SAMPLE) { out.set(p.id, null); continue; }
     out.set(p.id, computeTERouteAboveExpectedForPlays(pPlays, baselines));
   }
 
@@ -730,41 +589,32 @@ export function computeTERouteAboveExpected(
 }
 
 // ── TE TE-SAEB (blocking) ────────────────────────────────────────────────
-// Block Success Above Expected. Adjusts a TE's overall block success rate
-// for the situation mix across two dimensions:
-//   1. play_type — run_block vs pass_block
-//   2. block_type — movement vs inline
+// Block Success Above Expected: the TE's block success rate minus the
+// difficulty model's expected success for those same blocks. Situation
+// dimensions:
+//   run vs pass block, movement vs inline block, positioning (a detached
+//   block from the slot or wing is a different rep than one from inline).
 // Both run and pass blocks are included; plays missing block_type or
-// block_success are excluded from both the prospect's sample and the
-// league baseline. 15-block minimum sample.
+// block_success are excluded from both the prospect's sample and the league
+// model. 15-block minimum sample.
 const TE_BLOCK_PLAY_TYPES = ["run_block", "pass_block"] as const;
 const TE_BLOCK_TYPES = ["movement", "inline"] as const;
-type TEBlockPlayType = (typeof TE_BLOCK_PLAY_TYPES)[number];
-type TEBlockType = (typeof TE_BLOCK_TYPES)[number];
 
-export interface TEBlockBaselines {
-  lgPT: Record<TEBlockPlayType, { s: number; n: number }>;
-  lgBT: Record<TEBlockType, { s: number; n: number }>;
-}
+const isRatedTEBlock = (pl: TEPlay) =>
+  (pl.play_type === "run_block" || pl.play_type === "pass_block") &&
+  pl.block_success !== null &&
+  pl.block_type !== null;
+const teBlockWon = (pl: TEPlay) => (pl.block_success ? 1 : 0);
+const TE_BLOCK_DESIGN = makeDesign<TEPlay>([
+  [TE_BLOCK_PLAY_TYPES, (pl) => pl.play_type],
+  [TE_BLOCK_TYPES,      (pl) => pl.block_type],
+  [TE_POSITIONINGS,     (pl) => pl.positioning],
+]);
+
+export type TEBlockBaselines = FittedDifficulty<TEPlay>;
 
 export function buildTEBlockBaselines(tePlays: TEPlay[]): TEBlockBaselines {
-  const lgPT: Record<TEBlockPlayType, { s: number; n: number }> = {
-    run_block: { s: 0, n: 0 }, pass_block: { s: 0, n: 0 },
-  };
-  const lgBT: Record<TEBlockType, { s: number; n: number }> = {
-    movement: { s: 0, n: 0 }, inline: { s: 0, n: 0 },
-  };
-  for (const pl of tePlays) {
-    if (pl.play_type !== "run_block" && pl.play_type !== "pass_block") continue;
-    if (pl.block_success === null) continue;
-    if (pl.block_type === null) continue;
-    const pt = pl.play_type;
-    lgPT[pt].n++;
-    if (pl.block_success) lgPT[pt].s++;
-    lgBT[pl.block_type].n++;
-    if (pl.block_success) lgBT[pl.block_type].s++;
-  }
-  return { lgPT, lgBT };
+  return fitFromPlays(tePlays.filter(isRatedTEBlock), TE_BLOCK_DESIGN, teBlockWon, TE_RIDGE_LAMBDA);
 }
 
 // Actual-vs-expected block success for an arbitrary TE block-play subset. No
@@ -773,39 +623,7 @@ export function computeTEBlockAboveExpectedForPlays(
   plays: TEPlay[],
   baselines: TEBlockBaselines,
 ): number | null {
-  const { lgPT, lgBT } = baselines;
-  const ratedBlocks = plays.filter(
-    (pl) =>
-      (pl.play_type === "run_block" || pl.play_type === "pass_block") &&
-      pl.block_success !== null &&
-      pl.block_type !== null,
-  );
-  if (ratedBlocks.length === 0) return null;
-
-  const actual = ratedBlocks.filter((pl) => pl.block_success).length / ratedBlocks.length;
-
-  let expPT = 0, ptW = 0;
-  for (const pt of TE_BLOCK_PLAY_TYPES) {
-    const ptN = ratedBlocks.filter((pl) => pl.play_type === pt).length;
-    const lg = lgPT[pt];
-    if (ptN > 0 && lg.n > 0) {
-      expPT += (ptN / ratedBlocks.length) * (lg.s / lg.n);
-      ptW += ptN / ratedBlocks.length;
-    }
-  }
-  let expBT = 0, btW = 0;
-  for (const bt of TE_BLOCK_TYPES) {
-    const btN = ratedBlocks.filter((pl) => pl.block_type === bt).length;
-    const lg = lgBT[bt];
-    if (btN > 0 && lg.n > 0) {
-      expBT += (btN / ratedBlocks.length) * (lg.s / lg.n);
-      btW += btN / ratedBlocks.length;
-    }
-  }
-  const normPT = ptW > 0 ? expPT / ptW : null;
-  const normBT = btW > 0 ? expBT / btW : null;
-  const combined = combine(normPT, normBT);
-  return combined != null ? parseFloat(((actual - combined) * 100).toFixed(2)) : null;
+  return aboveExpectedForPlays(plays.filter(isRatedTEBlock), baselines, teBlockWon);
 }
 
 export function computeTEBlockAboveExpected(
@@ -821,13 +639,7 @@ export function computeTEBlockAboveExpected(
   for (const p of prospects) {
     if (p.position !== "TE") continue;
     const pPlays = playsByProspect.get(p.id) ?? [];
-    const ratedBlocks = pPlays.filter(
-      (pl) =>
-        (pl.play_type === "run_block" || pl.play_type === "pass_block") &&
-        pl.block_success !== null &&
-        pl.block_type !== null,
-    );
-    if (ratedBlocks.length < MIN_SAMPLE) { out.set(p.id, null); continue; }
+    if (pPlays.filter(isRatedTEBlock).length < MIN_SAMPLE) { out.set(p.id, null); continue; }
     out.set(p.id, computeTEBlockAboveExpectedForPlays(pPlays, baselines));
   }
 

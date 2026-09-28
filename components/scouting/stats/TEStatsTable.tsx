@@ -31,8 +31,8 @@ export const TE_STAT_COLS: ColDef[] = [
   { key: "routes",  label: "Routes", group: "Identity", fmt: "count", width: 58 },
   { key: "blocks",  label: "Blocks", group: "Identity", fmt: "count", width: 58 },
   // Advanced
-  { key: "te_saer",    label: "TE-SAER", group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 76, tooltip: "Route SAE — Open Rate Above Expected, adjusted for positioning & coverage mix (15+ rated routes)", leagueOverride: 0 },
-  { key: "te_saeb",    label: "TE-SAEB", group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 76, tooltip: "Block SAE — Block Success Above Expected, adjusted for run/pass-block & movement/inline mix (15+ rated blocks)", leagueOverride: 0 },
+  { key: "te_saer",    label: "TE-SAER", group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 76, tooltip: "Route SAE — Open Rate Above Expected, each route judged against routes like it (route, coverage incl. press, positioning stacked) (15+ rated routes)", leagueOverride: 0 },
+  { key: "te_saeb",    label: "TE-SAEB", group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 76, tooltip: "Block SAE — Block Success Above Expected, each block judged against blocks like it (run/pass, movement/inline, positioning stacked) (15+ rated blocks)", leagueOverride: 0 },
   { key: "open_pct",   label: "Open%",   group: "Advanced", fmt: "pct",       colorDir: 1,  width: 62, weightBy: "rated_routes_n" },
   { key: "tgt_pct",    label: "Tgt%",    group: "Advanced", fmt: "pct",       colorDir: 1,  width: 58, weightBy: "routes" },
   { key: "catch_pct",  label: "Catch%",  group: "Advanced", fmt: "pct",       colorDir: 1,  width: 62, weightBy: "raw_tgts" },

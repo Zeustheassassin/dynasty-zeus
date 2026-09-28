@@ -23,7 +23,7 @@ export const RB_STAT_COLS: ColDef[] = [
   { key: "snaps",   label: "Snaps",  group: "Identity", fmt: "count", width: 52 },
   { key: "runs",    label: "Runs",   group: "Identity", fmt: "count", width: 48 },
   // Advanced
-  { key: "srae",         label: "SRAE",     group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 66, tooltip: "Success Rate Above Expected — vs league avg adjusted for formation and box mix. Min. 15 runs.", leagueOverride: 0 },
+  { key: "srae",         label: "SRAE",     group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 66, tooltip: "Success Rate Above Expected — each run judged against runs like it (formation, loaded box, unblocked defender stacked), so a stuffed run into a free defender costs little. Min. 15 runs.", leagueOverride: 0 },
   { key: "succ_pct",     label: "Succ%",    group: "Advanced", fmt: "pct",       colorDir: 1,  width: 60, tooltip: "Success rate on all rushing attempts", weightBy: "runs" },
   { key: "explosive_pct",label: "Expl%",    group: "Advanced", fmt: "pct",       colorDir: 1,  width: 58, tooltip: "Explosive play rate per rush attempt", weightBy: "runs" },
   { key: "stuff_pct",    label: "Stuff%",   group: "Advanced", fmt: "pct",       colorDir: -1, width: 56, tooltip: "Run stuff rate (stopped at or behind LOS)", weightBy: "runs" },

@@ -49,8 +49,8 @@ interface Props {
 
 // Above Expected metric label per position. RB=SRAE, QB=AAE, TE=TE-SAER
 // (route variant; TE-SAEB blocking lives only on the TE stats table). WR's
-// SAE requires route_plays + league_route_baselines, which this cross-position
-// view doesn't fetch (see WR's own Charting Board for per-game SAE), so WR
+// SAE requires route_plays + the prospect_route_cells model, which this
+// cross-position view doesn't fetch (see WR's own Charting Board for per-game SAE), so WR
 // rows show no per-game value here rather than a repeated season aggregate.
 function aboveExpectedLabel(position: string | null | undefined): string {
   switch (position) {

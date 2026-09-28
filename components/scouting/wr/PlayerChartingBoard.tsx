@@ -19,7 +19,7 @@ import type {
 import { ROUTE_TYPES } from "../shared/chartingConstants";
 import ChartingBoard, { type ChartingBoardConfig } from "../shared/ChartingBoard";
 import { useChartingState } from "../shared/hooks/useChartingState";
-import { indexBaselines, computeSAEForPlays, computeCoreSAEForPlays, type LeagueRouteBaselineRow } from "../../../lib/scouting/aggregateMerge";
+import { buildWRModel, computeSAEForPlays, computeCoreSAEForPlays, type ProspectRouteCellsRow } from "../../../lib/scouting/aggregateMerge";
 
 const COVERAGES: { key: string; label: string }[] = [
   { key: "man", label: "Man" },
@@ -54,7 +54,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
   // League-wide route/coverage baselines — used to build the per-game SAE
   // badge. Fetched once on mount (mirrors QBChartingBoard's leaguePlays
   // self-fetch); this is an aggregate view of ~15 rows, not raw plays.
-  const [leagueBaselineRows, setLeagueBaselineRows] = useState<LeagueRouteBaselineRow[]>([]);
+  const [routeCellRows, setRouteCellRows] = useState<ProspectRouteCellsRow[]>([]);
 
   // Import panel state
   const [showBulkImport, setShowBulkImport]       = useState(false);
@@ -108,10 +108,10 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
   }, [games]);
 
   useEffect(() => {
-    supabase.from("league_route_baselines").select("*")
+    supabase.from("prospect_route_cells").select("prospect_id,cells")
       .then(({ data, error }) => {
-        if (error) { log.error("league_route_baselines load failed", { err: error.message }); return; }
-        setLeagueBaselineRows((data ?? []) as LeagueRouteBaselineRow[]);
+        if (error) { log.error("prospect_route_cells load failed (per-game SAE blank until migration 057 is applied)", { err: error.message }); return; }
+        setRouteCellRows((data ?? []) as ProspectRouteCellsRow[]);
       });
   }, []);
 
@@ -221,27 +221,28 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
 
   // Per-game SAE (Success/Open Rate Above Expected) — a quick "this game
   // looked good/bad" read. Deliberately ungated (no 15-route floor): a
-  // single-game sample is always small, that's expected here. Baselines are
-  // built once from leagueBaselineRows and reused for every game.
-  const wrBaselines = useMemo(() => indexBaselines(leagueBaselineRows), [leagueBaselineRows]);
+  // single-game sample is always small, that's expected here. Expected comes
+  // from the league difficulty model, fit once from every prospect's route
+  // cells and reused for every game.
+  const wrModel = useMemo(() => buildWRModel(routeCellRows), [routeCellRows]);
   const perGameSae = useMemo(() => {
     const map: Record<string, number | null> = {};
     for (const g of games) {
       const gp = plays.filter((p) => p.game_id === g.id);
-      map[g.id] = computeSAEForPlays(gp, wrBaselines);
+      map[g.id] = computeSAEForPlays(gp, wrModel);
     }
     return map;
-  }, [plays, games, wrBaselines]);
+  }, [plays, games, wrModel]);
   // Same badge, but with Go (nine) and Screen routes dropped from the sample —
   // see computeCoreSAEForPlays for why those two get excluded.
   const perGameCoreSae = useMemo(() => {
     const map: Record<string, number | null> = {};
     for (const g of games) {
       const gp = plays.filter((p) => p.game_id === g.id);
-      map[g.id] = computeCoreSAEForPlays(gp, wrBaselines);
+      map[g.id] = computeCoreSAEForPlays(gp, wrModel);
     }
     return map;
-  }, [plays, games, wrBaselines]);
+  }, [plays, games, wrModel]);
 
   const gamePlayCounts = useMemo(() => {
     const map: Record<string, number> = {};
@@ -456,7 +457,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                 {(() => {
                   const coreSae = allProspects.find((p) => p.id === prospect.id)?.core_sae ?? null;
                   return (
-                    <div className="p-3 bg-slate-900 rounded-lg border border-slate-800" title="Success Rate Above Expected, excluding Go (Nine) and Screen routes. Min. 15 core routes.">
+                    <div className="p-3 bg-slate-900 rounded-lg border border-slate-800" title="Open Rate Above Expected, excluding Go (Nine) and Screen routes. Each route is judged against routes like it (route, coverage incl. press, slot/outside, on/off line). Min. 15 core routes.">
                       <div className="text-xs text-slate-500 mb-1">Core SAE</div>
                       <div className={`text-xl font-bold ${coreSae == null ? "text-slate-600" : coreSae >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                         {coreSae == null ? "—" : `${coreSae >= 0 ? "+" : ""}${coreSae.toFixed(1)}`}
