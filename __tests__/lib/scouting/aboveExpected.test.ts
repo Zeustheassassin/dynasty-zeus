@@ -183,7 +183,7 @@ describe("computeRBAboveExpected", () => {
 });
 
 // =============================================================================
-// computeQBAboveExpected  (graded throw value + shrinkage + dim weighting)
+// computeQBAboveExpected  (graded throw value + difficulty model)
 // =============================================================================
 
 describe("computeQBAboveExpected", () => {
@@ -266,6 +266,76 @@ describe("computeQBAboveExpected", () => {
     );
     const out = computeQBAboveExpected(prospects, games, [...caughtPlays, ...droppedPlays]);
     expect(out.get("caught")!).toBeGreaterThan(out.get("dropped")!);
+  });
+
+  it("league-wide AAE nets to 0 (play-weighted) even when QBs face different situations", () => {
+    // The unpenalized intercept makes the league's expected sum equal its actual
+    // sum — the QBStatsTable footer relies on this.
+    const prospects = [prospect("a", "QB"), prospect("b", "QB")];
+    const games = [game("g_a", "a"), game("g_b", "b")];
+    const plays = [
+      ...repeat(30, (i) => qbPlay("g_a", { accuracy: i % 3 ? "on_target" : "high", depth_zone: "deep_left", pressure: "clean" })),
+      ...repeat(40, (i) => qbPlay("g_b", { accuracy: i % 5 ? "on_target" : "low", depth_zone: "short_right", pressure: "backside" })),
+    ];
+    const out = computeQBAboveExpected(prospects, games, plays);
+    expect(Math.abs((30 * out.get("a")! + 40 * out.get("b")!) / 70)).toBeLessThan(0.01);
+  });
+});
+
+// =============================================================================
+// Difficulty model — a throw is judged against throws like it
+// =============================================================================
+
+describe("QB AAE difficulty model", () => {
+  // Background league where going deep and throwing cross-body on the run each
+  // make a throw harder, independently: clean short throws hit 90%, clean deep
+  // throws 60%, short cross-body throws 60%. No deep cross-body throw is in the
+  // league — the model must infer that one from the two effects.
+  const league = [
+    ...repeat(100, (i) => qbPlay("g_bg", { accuracy: i % 10 ? "on_target" : "high", depth_zone: "short_center", pressure: "clean", platform: "on_platform" })),
+    ...repeat(100, (i) => qbPlay("g_bg", { accuracy: i % 5 < 3 ? "on_target" : "high", depth_zone: "deep_center", pressure: "clean", platform: "on_platform" })),
+    ...repeat(100, (i) => qbPlay("g_bg", { accuracy: i % 5 < 3 ? "on_target" : "high", depth_zone: "short_center", pressure: "front_side", platform: "on_the_run", platform_side: "cross_body" })),
+  ];
+  const R = resolveBaselines(buildQBBaselines(league));
+  // One-throw AAE: for a hit it's (1 − expected) × 100, for a dropped miss
+  // (0.2 − expected) × 100 — either way, a harder throw scores higher.
+  const aae = (opts: Partial<QBPlay> & { accuracy: QBPlay["accuracy"] }) =>
+    computeQBAAEForPlays([qbPlay("g1", { completion: "incomplete", ...opts })], R)!;
+  const deepClean = { depth_zone: "deep_center", pressure: "clean", platform: "on_platform" } as const;
+  const shortCross = { depth_zone: "short_center", pressure: "front_side", platform: "on_the_run", platform_side: "cross_body" } as const;
+  const deepCross = { depth_zone: "deep_center", pressure: "front_side", platform: "on_the_run", platform_side: "cross_body" } as const;
+
+  it("a pressured cross-body miss costs less than the same miss from a clean pocket", () => {
+    const cleanMiss = aae({ accuracy: "high", ...deepClean });
+    const hardMiss = aae({ accuracy: "high", ...deepCross });
+    expect(hardMiss).toBeLessThan(0);
+    expect(hardMiss - cleanMiss).toBeGreaterThan(10); // far less than a clean-pocket miss, not ~2 pts
+  });
+
+  it("difficulty stacks: deep + cross-body is expected to be harder than either alone", () => {
+    // Both single-tag situations run at a 0.68 mean value (60% hit), so a hit
+    // there is worth ≈ +32. Stacked effects must expect the deep cross-body throw
+    // to be HARDER than anything the league has seen — an average of
+    // per-dimension rates can never go below the lowest rate, so it can't pass.
+    const singleTagHit = (1 - 0.68) * 100;
+    const hitDeep = aae({ accuracy: "on_target", ...deepClean });
+    const hitCross = aae({ accuracy: "on_target", ...shortCross });
+    const hitBoth = aae({ accuracy: "on_target", ...deepCross });
+    expect(hitBoth).toBeGreaterThan(hitDeep);
+    expect(hitBoth).toBeGreaterThan(hitCross);
+    expect(hitBoth).toBeGreaterThan(singleTagHit + 5);
+  });
+
+  it("with plenty of data, lands a well-sampled situation near its league rate", () => {
+    // Same league ×10. Clean short throws hit 90% ⇒ mean value 0.92, so a hit
+    // is worth ≈ +8. The ridge shrinks toward average, most at small samples;
+    // at this size it should cost well under 2 pts.
+    const bigR = resolveBaselines(buildQBBaselines(repeat(10, () => league).flat()));
+    const hit = computeQBAAEForPlays(
+      [qbPlay("g1", { accuracy: "on_target", depth_zone: "short_center", pressure: "clean", platform: "on_platform" })],
+      bigR,
+    )!;
+    expect(Math.abs(hit - 8)).toBeLessThan(2);
   });
 });
 

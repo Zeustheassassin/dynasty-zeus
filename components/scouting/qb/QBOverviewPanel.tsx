@@ -600,7 +600,7 @@ export default function QBOverviewPanel({ plays, leaguePlays, gamesCount, loadin
             })}
           </div>
           <p className="text-[10px] text-slate-600 mt-3">
-            Each dimension compares this QB&apos;s on-target% to the league baseline weighted by his mix in that dimension. Null (&quot;—&quot;) means no plays had that dimension filled, or no league plays exist yet for those buckets. The overall AAE up top is computed per play across all filled dimensions (including Pressure Handling, which is folded into the Pressure cluster rather than shown as its own row), so it isn&apos;t simply the mean of these rows.
+            Each dimension compares this QB&apos;s on-target% to the league baseline weighted by his mix in that dimension. Null (&quot;—&quot;) means no plays had that dimension filled, or no league plays exist yet for those buckets. The overall AAE up top judges each throw against throws like it: a league model stacks every tag on the play (including Pressure Handling, which has no row of its own), so a deep ball thrown cross-body under pressure is expected to be harder than any one of those alone. It isn&apos;t simply the mean of these rows.
           </p>
         </div>
       )}

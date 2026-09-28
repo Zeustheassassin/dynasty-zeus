@@ -45,7 +45,7 @@ export const QB_STAT_COLS: ColDef[] = [
   // sanity check: if it drifts noticeably from 0, there are plays in the baseline
   // pool (e.g., other-year QBs) that aren't represented in the visible rows.
   { key: "aae", label: "AAE", group: "AAE", fmt: "plusMinus", colorDir: 1, width: 62,
-    tooltip: "Accuracy Above Expected — overall (mean of non-null dimension rows). Min 25 graded passes.",
+    tooltip: "Accuracy Above Expected — overall. Each throw is judged against throws like it (all situation tags stacked). Min 25 graded passes.",
     weightBy: "rated_n" },
 
   // Per-dimension AAE (the same 6 dims as the Overview panel's AAE Breakdown).

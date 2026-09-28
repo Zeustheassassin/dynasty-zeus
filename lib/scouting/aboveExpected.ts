@@ -204,30 +204,43 @@ export function computeRBAboveExpected(
 }
 
 // ── QB AAE ───────────────────────────────────────────────────────────────
-// "Accuracy Above Expected" — the QB's actual mean throw value minus an
-// expected mean throw value built from league baselines across seven
-// situational dimensions:
+// "Accuracy Above Expected" — the QB's actual mean throw value minus the mean
+// expected throw value of the same throws. Each throw's expected comes from a
+// league difficulty model over seven situational dimensions:
 //   depth zone, coverage, timing, pressure, platform (incl. on-the-run side),
 //   pressure handling, route type.
 //
-// Throw value is the graded score from throwValue() — placement severity
-// (on_target / near-miss / errant) plus a small bonus if a miss was caught —
-// rather than a binary on-target flag, so near-misses aren't scored identically
-// to airmails and the metric leans on QB placement, not receiver bail-outs.
+// Throw value is the graded score from throwValue() — on-target vs not, plus a
+// small bonus if a miss was caught — so the metric leans on QB placement, not
+// receiver bail-outs.
 //
-// Three accuracy refinements layer on top of the raw bucket means:
-//   1. Shrinkage — each league bucket rate is pulled toward the global mean by
-//      SHRINK_K pseudo-throws, so thin buckets don't swing the metric on noise.
-//   2. Dimension weighting — the overall expected weights each dimension by how
-//      much it actually discriminates (the spread of its bucket rates); a flat
-//      dimension barely moves a play's expected. See resolveBaselines / weight.
-//   3. Per-play expected — the overall total compares actual throw value to the
-//      mean of per-play expecteds, not the mean of per-dim AAEs, so correlated
-//      dimensions (the pressure cluster) aren't double-counted.
+// The difficulty model is a ridge-regularized fractional logistic regression of
+// throw value on one-hot buckets of all seven dimensions, fit once on every
+// league throw (fitDifficultyModel). Each bucket learns how much it adds to or
+// takes from a throw's odds, and those effects STACK: a deep nine thrown cross-
+// body on the run under pressure is expected to be harder than any one of those
+// tags alone, so a miss there costs much less than the same miss from a clean
+// pocket, and a hit earns much more. A throw is judged against throws like it.
+// Fitting every dimension jointly also lets correlated tags (nine ↔ deep,
+// pressure ↔ handling ↔ platform) share credit instead of double-counting. The
+// unpenalized intercept makes the league's expected sum equal its actual sum,
+// so league-wide AAE is 0 by construction.
 //
-// Dimensions whose values are NULL on a play don't contribute for that play
-// (older plays charted before Pressure / Platform / Handling existed simply
-// don't pull the metric toward 0).
+// This replaced a discrimination-weighted AVERAGE of single-dimension bucket
+// rates, which could not stack difficulty and washed out rare-but-hard buckets
+// (cross-body, bail-backside): measured 2026-09 on 1,717 league throws, a
+// pressured cross-body miss cost within ~2 pts of a clean-pocket one, and on
+// held-out QBs the hardest fifth of throws was expected ~8 pts too high.
+// Interaction terms (e.g. cross-body hurting more on deep throws than short)
+// are deliberately left out until the data can support them.
+//
+// The per-dimension breakdown rows still use SHRINK_K-shrunk single-dimension
+// bucket rates: each row asks "how does he do vs the league within this one
+// dimension", which a marginal answers directly.
+//
+// A dimension that is NULL on a play adds no effect for that play (older plays
+// charted before Pressure / Platform / Handling existed aren't pulled either
+// way).
 //
 // Excluded from both numerator and denominator:
 //   - Run plays (no throw)
@@ -240,22 +253,150 @@ const isQBGradedThrow = (pl: QBPlay) =>
 interface Acc { v: number; n: number }  // v = summed throw value, n = plays
 type Bucketed<K extends string> = Partial<Record<K, Acc>>;
 
+// ── Difficulty model ──
+// Ridge strength in pseudo-throws: each bucket's effect is pulled toward 0
+// (league average) as if backed by RIDGE_LAMBDA throws of no information. It
+// plays the role SHRINK_K plays for the marginal rows — a bucket seen a handful
+// of times (comeback, corner, cross-body) can't swing the model. Chosen 2026-09
+// by 5-fold held-out-QB validation over 1–100: error is flat across 10–30, and
+// 10 is the most even between the hardest and easiest fifths of throws (each
+// ~2 pts off). Below ~5 it overfits hard throws; above ~30 it flattens back
+// toward average. Re-validate as the dataset grows.
+const RIDGE_LAMBDA = 10;
+// Target clamp: keeps a league of all-perfect throws (y ≡ 1) from sending the
+// intercept to +∞. Invisible at real data.
+const MODEL_Y_EPS = 1e-6;
+
+const QB_HANDLING_BUCKETS: QBPressureHandling[] = ["step_up", "bail_front_side", "bail_backside"];
+// One one-hot column per bucket of every dimension; column 0 is the intercept.
+// Fixed from the bucket lists (not from the data) so a bucket the league has
+// never seen gets an all-zero column, which the ridge pins at 0.
+const QB_MODEL_DIMS: ReadonlyArray<readonly [readonly string[], (pl: QBPlay) => string | null]> = [
+  [QB_DEPTH_ZONES,      (pl) => pl.depth_zone],
+  [["man", "zone"],     (pl) => pl.coverage],
+  [QB_TIMING_BUCKETS,   (pl) => pl.timing],
+  [QB_PRESSURE_BUCKETS, (pl) => pl.pressure],
+  [QB_PLATFORM_KEYS,    platformKey],
+  [QB_HANDLING_BUCKETS, (pl) => pl.pressure_handling],
+  [ROUTE_TYPES,         (pl) => pl.route_type],
+];
+const QB_MODEL_COLS: Map<string, number>[] = (() => {
+  let col = 1;
+  return QB_MODEL_DIMS.map(([buckets]) => new Map(buckets.map((b) => [b, col++] as const)));
+})();
+const QB_MODEL_SIZE = 1 + QB_MODEL_DIMS.reduce((s, [buckets]) => s + buckets.length, 0);
+
+// The play's value-1 columns — at most one per dimension, intercept excluded.
+function modelCols(pl: QBPlay): number[] {
+  const cols: number[] = [];
+  QB_MODEL_DIMS.forEach(([, bucketOf], d) => {
+    const b = bucketOf(pl);
+    const c = b == null ? undefined : QB_MODEL_COLS[d].get(b);
+    if (c != null) cols.push(c);
+  });
+  return cols;
+}
+
+const sigmoid = (z: number) => 1 / (1 + Math.exp(-z));
+// log(1 + e^z) without overflow.
+const softplus = (z: number) => (z > 0 ? z + Math.log1p(Math.exp(-z)) : Math.log1p(Math.exp(z)));
+
+interface ModelRow { cols: number[]; y: number }
+
+// Solve A·x = b by Gaussian elimination with partial pivoting. A is the model's
+// small, dense Hessian (positive definite thanks to the ridge). Null if singular.
+function solveLinear(A: Float64Array[], b: Float64Array): Float64Array | null {
+  const n = b.length;
+  const M = A.map((row, i) => { const r = new Float64Array(n + 1); r.set(row); r[n] = b[i]; return r; });
+  for (let c = 0; c < n; c++) {
+    let piv = c;
+    for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
+    if (!M[piv][c]) return null;
+    [M[c], M[piv]] = [M[piv], M[c]];
+    for (let r = c + 1; r < n; r++) {
+      const f = M[r][c] / M[c][c];
+      if (f) for (let k = c; k <= n; k++) M[r][k] -= f * M[c][k];
+    }
+  }
+  const x = new Float64Array(n);
+  for (let r = n - 1; r >= 0; r--) {
+    let s = M[r][n];
+    for (let k = r + 1; k < n; k++) s -= M[r][k] * x[k];
+    x[r] = s / M[r][r];
+  }
+  return x;
+}
+
+// Fit the difficulty model: ridge-penalized fractional-logit by Newton's method
+// with step halving. Returns the coefficient vector (index 0 = intercept), or
+// null when the league has no graded throws. ~40 columns and each row touches
+// at most 8 of them, so a full league fit is milliseconds.
+function fitDifficultyModel(rows: ModelRow[]): Float64Array | null {
+  if (!rows.length) return null;
+  const P = QB_MODEL_SIZE;
+  const logit = (b: Float64Array, cols: number[]) => { let s = b[0]; for (const c of cols) s += b[c]; return s; };
+  // Penalized negative log-likelihood — every accepted step must lower it.
+  const objective = (b: Float64Array) => {
+    let f = 0;
+    for (const r of rows) { const z = logit(b, r.cols); f += softplus(z) - r.y * z; }
+    for (let j = 1; j < P; j++) f += 0.5 * RIDGE_LAMBDA * b[j] * b[j];
+    return f;
+  };
+
+  let beta = new Float64Array(P);
+  const ybar = rows.reduce((s, r) => s + r.y, 0) / rows.length;
+  beta[0] = Math.log(ybar / (1 - ybar));
+  let f = objective(beta);
+  for (let iter = 0; iter < 50; iter++) {
+    const g = new Float64Array(P);
+    const H = Array.from({ length: P }, () => new Float64Array(P));
+    for (const r of rows) {
+      const p = sigmoid(logit(beta, r.cols));
+      const resid = p - r.y;
+      const w = p * (1 - p);
+      g[0] += resid; H[0][0] += w;
+      for (const a of r.cols) {
+        g[a] += resid; H[0][a] += w; H[a][0] += w;
+        for (const c of r.cols) H[a][c] += w;
+      }
+    }
+    for (let j = 1; j < P; j++) { g[j] += RIDGE_LAMBDA * beta[j]; H[j][j] += RIDGE_LAMBDA; }
+    const step = solveLinear(H, g);
+    if (!step) break;
+    let t = 1;
+    let next = beta;
+    let fNext = Infinity;
+    for (; t > 1e-6; t /= 2) {
+      next = beta.map((v, j) => v - t * step[j]);
+      fNext = objective(next);
+      if (fNext <= f) break;
+    }
+    if (!(fNext <= f)) break;
+    let moved = 0;
+    for (let j = 0; j < P; j++) moved = Math.max(moved, Math.abs(t * step[j]));
+    beta = next;
+    f = fNext;
+    if (moved < 1e-10) break;
+  }
+  return beta;
+}
+
 interface QBBaselines {
   depth:    Bucketed<QBDepthZone>;
   cvg:      Record<"man" | "zone", Acc>;
   timing:   Bucketed<QBTiming>;
   pressure: Bucketed<QBPressure>;
   platform: Bucketed<QBPlatformKey>;
-  handling: Bucketed<QBPressureHandling>;
   route:    Bucketed<RouteType>;
   global:   Acc;  // all graded throws — the shrinkage target
+  rows:     ModelRow[];  // one per graded throw — the difficulty model's training set
 }
 
 export function buildQBBaselines(leaguePlays: QBPlay[]): QBBaselines {
   const b: QBBaselines = {
     depth: {}, cvg: { man: { v: 0, n: 0 }, zone: { v: 0, n: 0 } },
-    timing: {}, pressure: {}, platform: {}, handling: {}, route: {},
-    global: { v: 0, n: 0 },
+    timing: {}, pressure: {}, platform: {}, route: {},
+    global: { v: 0, n: 0 }, rows: [],
   };
   const add = (acc: Acc | undefined, v: number): Acc => {
     const a = acc ?? { v: 0, n: 0 };
@@ -272,109 +413,59 @@ export function buildQBBaselines(leaguePlays: QBPlay[]): QBBaselines {
     if (pl.pressure)          b.pressure[pl.pressure]  = add(b.pressure[pl.pressure], v);
     const pk = platformKey(pl);
     if (pk)                   b.platform[pk]           = add(b.platform[pk], v);
-    if (pl.pressure_handling) b.handling[pl.pressure_handling] = add(b.handling[pl.pressure_handling], v);
     if (pl.route_type)        b.route[pl.route_type]   = add(b.route[pl.route_type], v);
+    b.rows.push({ cols: modelCols(pl), y: Math.min(Math.max(v, MODEL_Y_EPS), 1 - MODEL_Y_EPS) });
   }
   return b;
 }
 
 // Resolved baselines: each dimension's raw counts collapsed into shrunk bucket
-// rates (#1) plus a discrimination weight (#4). Built once per league scan and
-// shared by every prospect's breakdown.
+// rates (for the per-dimension rows) plus the fitted difficulty model (for the
+// overall total). Built once per league scan and shared by every prospect's
+// breakdown.
 export interface ResolvedBaselines {
   depth:    Map<QBDepthZone, number>;
   cvg:      Map<"man" | "zone", number>;
   timing:   Map<QBTiming, number>;
   pressure: Map<QBPressure, number>;
   platform: Map<QBPlatformKey, number>;
-  handling: Map<QBPressureHandling, number>;
   route:    Map<RouteType, number>;
-  weight:   Record<"depth" | "coverage" | "timing" | "pressure" | "platform" | "handling" | "route", number>;
+  model:    Float64Array | null;  // fitDifficultyModel coefficients; null = no league throws
 }
 
-// Collapse one dimension's raw buckets into shrunk rates + a discrimination
-// weight. The weight is the sample-weighted standard deviation of the shrunk
-// bucket rates: a dimension whose buckets all sit near the same rate carries
-// little information and is down-weighted toward 0; depth zone (wide spread)
-// dominates. Std (not variance) keeps a single noisy bucket from over-
-// concentrating the weight at current sample sizes.
-function resolveDim<K extends string>(raw: { [k: string]: Acc | undefined }, mean: number): { rates: Map<K, number>; weight: number } {
+// Collapse one dimension's raw buckets into shrunk rates.
+function resolveDim<K extends string>(raw: { [k: string]: Acc | undefined }, mean: number): Map<K, number> {
   const rates = new Map<K, number>();
-  const ns: number[] = [];
-  const rs: number[] = [];
-  let N = 0;
   for (const k of Object.keys(raw)) {
     const acc = raw[k];
     if (!acc || acc.n <= 0) continue;
-    const r = (acc.v + SHRINK_K * mean) / (acc.n + SHRINK_K);
-    rates.set(k as K, r);
-    ns.push(acc.n); rs.push(r); N += acc.n;
+    rates.set(k as K, (acc.v + SHRINK_K * mean) / (acc.n + SHRINK_K));
   }
-  let weight = 0;
-  if (N > 0 && rs.length > 1) {
-    let m = 0;
-    for (let i = 0; i < rs.length; i++) m += (ns[i] / N) * rs[i];
-    let varr = 0;
-    for (let i = 0; i < rs.length; i++) varr += (ns[i] / N) * (rs[i] - m) ** 2;
-    weight = Math.sqrt(varr);
-  }
-  return { rates, weight };
+  return rates;
 }
 
 export function resolveBaselines(b: QBBaselines): ResolvedBaselines {
   const mean = b.global.n > 0 ? b.global.v / b.global.n : 0;
-  const depth    = resolveDim<QBDepthZone>(b.depth, mean);
-  const cvg      = resolveDim<"man" | "zone">(b.cvg, mean);
-  const timing   = resolveDim<QBTiming>(b.timing, mean);
-  const pressure = resolveDim<QBPressure>(b.pressure, mean);
-  const platform = resolveDim<QBPlatformKey>(b.platform, mean);
-  const handling = resolveDim<QBPressureHandling>(b.handling, mean);
-  const route    = resolveDim<RouteType>(b.route, mean);
   return {
-    depth: depth.rates, cvg: cvg.rates, timing: timing.rates, pressure: pressure.rates,
-    platform: platform.rates, handling: handling.rates, route: route.rates,
-    weight: {
-      depth: depth.weight, coverage: cvg.weight, timing: timing.weight,
-      pressure: pressure.weight, platform: platform.weight,
-      handling: handling.weight, route: route.weight,
-    },
+    depth:    resolveDim<QBDepthZone>(b.depth, mean),
+    cvg:      resolveDim<"man" | "zone">(b.cvg, mean),
+    timing:   resolveDim<QBTiming>(b.timing, mean),
+    pressure: resolveDim<QBPressure>(b.pressure, mean),
+    platform: resolveDim<QBPlatformKey>(b.platform, mean),
+    route:    resolveDim<RouteType>(b.route, mean),
+    model:    fitDifficultyModel(b.rows),
   };
 }
 
-// Per-play expected throw value — the discrimination-weighted mean of league
-// bucket rates across every dimension filled on the play (#4). Skips a dim when
-// its bucket is null on the play or the league never saw that bucket. If every
-// filled dim has zero weight (degenerate — nothing discriminates), falls back
-// to a plain mean so depth-only plays still get an expected. Returns null only
-// when no dimension yields a comparable league rate (essentially never on a
-// graded throw, since depth_zone is filled on every charted throw).
-//
-// Comparing actual throw value against the mean of these per-play expecteds
-// avoids the double-counting of averaging seven correlated per-dimension AAEs:
-// a broken-pocket throw gets one blended expected, not four separate penalties.
+// Per-play expected throw value from the difficulty model: the league's odds
+// for a throw carrying exactly this play's situation tags, every filled
+// dimension's effect stacked. Null only when there is no model (no league
+// throws).
 function expectedForPlay(pl: QBPlay, R: ResolvedBaselines): number | null {
-  const pairs: Array<[number, number]> = []; // [rate, weight]
-  const push = (rate: number | undefined, w: number) => { if (rate != null) pairs.push([rate, w]); };
-  if (pl.depth_zone) push(R.depth.get(pl.depth_zone), R.weight.depth);
-  if (pl.coverage === "man" || pl.coverage === "zone") push(R.cvg.get(pl.coverage), R.weight.coverage);
-  if (pl.timing) push(R.timing.get(pl.timing), R.weight.timing);
-  if (pl.pressure) push(R.pressure.get(pl.pressure), R.weight.pressure);
-  const pk = platformKey(pl);
-  if (pk) push(R.platform.get(pk), R.weight.platform);
-  if (pl.pressure_handling) push(R.handling.get(pl.pressure_handling), R.weight.handling);
-  if (pl.route_type) push(R.route.get(pl.route_type), R.weight.route);
-  if (!pairs.length) return null;
-  let wsum = 0;
-  for (const [, w] of pairs) wsum += w;
-  if (wsum > 0) {
-    let num = 0;
-    for (const [r, w] of pairs) num += r * w;
-    return num / wsum;
-  }
-  // Degenerate: no dimension discriminates — fall back to an equal-weight mean.
-  let s = 0;
-  for (const [r] of pairs) s += r;
-  return s / pairs.length;
+  if (!R.model) return null;
+  let z = R.model[0];
+  for (const c of modelCols(pl)) z += R.model[c];
+  return sigmoid(z);
 }
 
 // Weighted expected throw value for one dimension AND the QB's actual throw
@@ -447,14 +538,15 @@ function breakdownFor(ratedPasses: QBPlay[], R: ResolvedBaselines): QBAAEBreakdo
     { key: "pressure", label: "Pressure",          ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.pressure,          R.pressure, QB_PRESSURE_BUCKETS)) },
     { key: "platform", label: "Platform",          ...toAaeRow(expectedFor(ratedPasses, platformKey,                  R.platform, QB_PLATFORM_KEYS)) },
     // Pressure Handling has no standalone AAE row by design — it still feeds the
-    // overall AAE total via expectedForPlay (R.handling).
+    // overall AAE total through the difficulty model (expectedForPlay).
     { key: "route",    label: "Route Type",        ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.route_type,        R.route,    ROUTE_TYPES)) },
   ];
 
-  // Overall AAE: per-play expected vs. actual throw value on the same play
-  // subset. This is intentionally NOT the mean of the per-dim AAEs above —
-  // averaging correlated dim AAEs double-counts skill (e.g. broken-pocket
-  // throws penalize all four pressure-cluster dims). See expectedForPlay.
+  // Overall AAE: each throw's actual value vs the difficulty model's expected
+  // for that throw's full situation mix. Intentionally NOT the mean of the
+  // per-dim AAEs above — those are one-dimension views, and averaging them
+  // double-counts correlated dims (e.g. a broken-pocket throw would be judged
+  // four times across the pressure cluster). See expectedForPlay.
   let sumExpected = 0;
   let sumActual = 0;
   let nContrib = 0;
