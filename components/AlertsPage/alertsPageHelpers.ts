@@ -1,4 +1,5 @@
 import type { AlertsCenterItem, SleeperLeagueSettings, SleeperPlayer, SleeperTransaction } from "../../lib/types";
+import { nonInjuryReason } from "../../lib/helpers/injurySummary";
 
 export type DashboardAlert = AlertsCenterItem;
 
@@ -57,7 +58,18 @@ export const severityStyles = {
 
 export { POS_COLOR } from "../../lib/uiTheme";
 
-export function injuryStatusStyle(player: SleeperPlayer) {
+// Listed, but not hurt. A healthy scratch stays on the Injury Report (a
+// scratched "Out" can be IR-eligible) with its own color so it reads apart
+// from a real injury at a glance.
+const NON_INJURY_BADGE = {
+  scratch:    { cls: "bg-sky-900/40 text-sky-300 border-sky-700",             label: "Scratch",   title: "Healthy scratch (coach's decision) — not injured" },
+  personal:   { cls: "bg-slate-700/50 text-slate-200 border-slate-500",       label: "Personal",  title: "Out for personal reasons — not an injury" },
+  suspension: { cls: "bg-fuchsia-900/40 text-fuchsia-300 border-fuchsia-700", label: "Suspended", title: "Suspended — not an injury" },
+} as const;
+
+export function injuryStatusStyle(player: SleeperPlayer): { cls: string; label: string; title?: string } {
+  const reason = nonInjuryReason(player);
+  if (reason) return NON_INJURY_BADGE[reason];
   const s = (player.injury_status || player.status || "").toLowerCase();
   if (/ir|pup/.test(s))
     return { cls: "bg-red-900/60 text-red-300 border-red-700", label: player.injury_status || player.status };
@@ -70,11 +82,18 @@ export function injuryStatusStyle(player: SleeperPlayer) {
   return { cls: "bg-slate-800/40 text-slate-400 border-slate-700", label: "Active" };
 }
 
+const hasListedStatus = (p: SleeperPlayer) =>
+  /ir|pup|out|doubtful|questionable|suspended|inactive/.test((p.injury_status || p.status || "").toLowerCase());
+
+// Scratches, personal absences and suspensions stay on the report but aren't injuries.
 export function getInjuredCount(injuryReportPlayers: InjuryReportPlayer[]): number {
-  return injuryReportPlayers.filter((r) => {
-    const s = (r.player.injury_status || r.player.status || "").toLowerCase();
-    return /ir|pup|out|doubtful|questionable|suspended|inactive/.test(s);
-  }).length;
+  return injuryReportPlayers.filter((r) => !nonInjuryReason(r.player) && hasListedStatus(r.player)).length;
+}
+
+/** Everyone the report lists with a status — injuries plus scratches, personal
+ *  absences and suspensions — so the tab count matches the rows shown. */
+export function getListedCount(injuryReportPlayers: InjuryReportPlayer[]): number {
+  return injuryReportPlayers.filter((r) => nonInjuryReason(r.player) || hasListedStatus(r.player)).length;
 }
 
 /** Splits value-movement alerts (market/watchlist category with a direction

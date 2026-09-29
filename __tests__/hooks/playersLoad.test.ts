@@ -42,7 +42,7 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 const player = (id: string, extra: Record<string, unknown> = {}) => ({
   player_id: id, full_name: `Player ${id}`, position: "WR", team: "KC",
   age: 25, birth_date: null, years_exp: 3, search_rank: 100, fantasy_positions: ["WR"],
-  active: true, status: "Active", injury_status: null, ...extra,
+  active: true, status: "Active", injury_status: null, injury_body_part: null, injury_notes: null, ...extra,
 });
 const playersBody = (extra: Record<string, unknown> = {}) => ({
   players: { "1": player("1", extra), "2": player("2") },
@@ -184,6 +184,18 @@ describe("player map loader — cached path", () => {
     await settle();
     expect(playersOf(result)["1"].value).toBe(1000);
     expect(playersFetches()).toBe(0);
+  });
+
+  it("refetches a cache saved before injury_body_part existed (scratch badge + injury summaries)", async () => {
+    const old = (id: string, value: number) => {
+      const { injury_body_part: _b, injury_notes: _n, ...rest } = player(id, { value });
+      return rest;
+    };
+    seedCache({ "1": old("1", 1000), "2": old("2", 500) });
+    const { result } = await mount();
+
+    await waitFor(() => expect(playersOf(result)["1"]?.value).toBe(9000));
+    expect(playersFetches()).toBe(1);
   });
 
   it("treats a cache with no values at all as a miss and refetches", async () => {

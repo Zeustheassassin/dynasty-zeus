@@ -43,6 +43,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       age: number | null; birth_date: string | null; years_exp: number | null; search_rank: number | null;
       fantasy_positions: string[]; active: boolean; status: string;
       injury_status: string | null;
+      injury_body_part: string | null;
+      injury_notes: string | null;
     }
     // Only keep the fields the app actually uses — strips ~90% of the payload.
     // injury_status is needed by Gameday badges, alerts, and the Roster
@@ -51,6 +53,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     // age-curve scatter) compute a continuous age instead of Sleeper's
     // whole-year `age`, which can make two players a couple of days apart
     // in age look a full year apart on either side of a birthday.
+    // injury_body_part / injury_notes carry the "why": Sleeper tags a healthy
+    // scratch as Out with body part "Coach's Decision", which the Injury Report
+    // badges separately, and they feed its plain-English injury summary.
     const players: Record<string, SlimPlayer> = {};
     for (const id of Object.keys(rawPlayers)) {
       const p = rawPlayers[id];
@@ -68,6 +73,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         active:            (p.active ?? false)  as boolean,
         status:            (p.status ?? '')     as string,
         injury_status:     (p.injury_status ?? null) as string | null,
+        injury_body_part:  (p.injury_body_part ?? null) as string | null,
+        injury_notes:      (p.injury_notes ?? null) as string | null,
       };
     }
 

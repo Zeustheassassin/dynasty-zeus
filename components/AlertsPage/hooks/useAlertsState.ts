@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { AlertsFeedTab } from "../../../app/hooks/useHubRouting";
 import type { DashboardAlert, LeagueTransaction, InjuryReportPlayer } from "../alertsPageHelpers";
-import { getInjuredCount, getMarketMovers } from "../alertsPageHelpers";
+import { getInjuredCount, getListedCount, getMarketMovers } from "../alertsPageHelpers";
 
 type Params = {
   feedTab: AlertsFeedTab;
@@ -28,6 +28,7 @@ export function useAlertsState({
   );
 
   const injuredCount = getInjuredCount(injuryReportPlayers);
+  const listedCount = getListedCount(injuryReportPlayers);
 
   const byeGroups: Record<number, InjuryReportPlayer[]> = {};
   if (currentNFLWeek > 0) {
@@ -48,7 +49,7 @@ export function useAlertsState({
   const TABS = [
     { key: "transactions" as const, label: `Trades${tradeActivity.length > 0 ? ` (${tradeActivity.length})` : ""}` },
     { key: "waivers" as const, label: `Waivers${waiverActivity.length > 0 ? ` (${waiverActivity.length})` : ""}` },
-    { key: "injury" as const, label: `Injury Report${injuredCount > 0 ? ` (${injuredCount})` : ""}` },
+    { key: "injury" as const, label: `Injury Report${listedCount > 0 ? ` (${listedCount})` : ""}` },
     { key: "alerts" as const, label: `Alerts${alerts.length > 0 ? ` (${alerts.length})` : ""}` },
   ];
 

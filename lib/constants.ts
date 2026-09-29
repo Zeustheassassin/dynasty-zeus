@@ -30,6 +30,9 @@ export const ESPN_SCOREBOARD_BASE_URL = "https://site.api.espn.com/apis/site/v2/
 /** ESPN public NFL injury report (Out / Doubtful / Questionable / IR / Active per player). */
 export const ESPN_INJURIES_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/injuries";
 
+/** ESPN public core API for the NFL — per-athlete injury records (type, side, return date, news). */
+export const ESPN_CORE_NFL_URL = "https://sports.core.api.espn.com/v2/sports/football/leagues/nfl";
+
 // ── Google Sheets (crowdsourced rookie board) ─────────────────
 // This URL is a published CSV export — safe to store in code (not a secret).
 // If the sheet is re-published or moved, update here only.

@@ -3,6 +3,7 @@ import { memo } from "react";
 import type { InjuryReportPlayer } from "./alertsPageHelpers";
 import { POS_COLOR, injuryStatusStyle } from "./alertsPageHelpers";
 import EmptyState from "../ui/EmptyState";
+import InjurySummaryPanel from "./InjurySummaryPanel";
 
 type InjuryTabProps = {
   injuryReportPlayers: InjuryReportPlayer[];
@@ -19,7 +20,7 @@ function InjuryTab({ injuryReportPlayers, currentNFLWeek, expandedInjuryId, setE
       ) : (
         <div className="space-y-1.5">
           {injuryReportPlayers.map(({ player, playerId, leagues, startingLeagues, irLeagues, irEligibleLeagues, isWatchlisted }) => {
-            const { cls: statusCls, label: statusLabel } = injuryStatusStyle(player);
+            const { cls: statusCls, label: statusLabel, title: statusTitle } = injuryStatusStyle(player);
             const byeWeek = Number(player.bye_week || 0);
             const byeWeeksOut = currentNFLWeek && byeWeek ? byeWeek - currentNFLWeek : null;
             const showBye = byeWeeksOut === 1 || byeWeeksOut === 2;
@@ -77,7 +78,7 @@ function InjuryTab({ injuryReportPlayers, currentNFLWeek, expandedInjuryId, setE
                         IR {irLeagues.length}/{irEligibleLeagues.length}
                       </span>
                     )}
-                    <span className={`text-[10px] font-semibold border px-2 py-0.5 rounded-lg ${statusCls}`}>
+                    <span className={`text-[10px] font-semibold border px-2 py-0.5 rounded-lg ${statusCls}`} title={statusTitle}>
                       {statusLabel}
                     </span>
                     <span className={`inline-block transition-transform duration-150 text-slate-600 text-xs ${isExpanded ? "rotate-180" : ""}`}>▼</span>
@@ -86,6 +87,7 @@ function InjuryTab({ injuryReportPlayers, currentNFLWeek, expandedInjuryId, setE
 
                 {isExpanded && (
                   <div className="border-t border-slate-800 bg-slate-900/60 px-4 py-3 space-y-2.5">
+                    <InjurySummaryPanel player={player} />
                     {leagues.length === 0 ? (
                       <p className="text-xs text-slate-500">Not on any of your rosters — watchlist only.</p>
                     ) : (

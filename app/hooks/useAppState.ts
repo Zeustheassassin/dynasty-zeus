@@ -706,7 +706,10 @@ useEffect(() => {
         "years_exp" in cacheSample &&
         "search_rank" in cacheSample &&
         "fantasy_positions" in cacheSample &&
-        "injury_status" in cacheSample;
+        "injury_status" in cacheSample &&
+        // Added 2026-09 (healthy-scratch badge + injury summaries) — a cache from
+        // before that is refetched rather than served for up to a day without it.
+        "injury_body_part" in cacheSample;
 
       // A cache written during a past FantasyCalc outage holds players with no values at all —
       // treat that as a miss and refetch rather than serving it for the rest of the TTL.
