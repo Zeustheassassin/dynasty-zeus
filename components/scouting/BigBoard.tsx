@@ -6,6 +6,7 @@ import {
   computeRBAboveExpected,
   computeQBAboveExpected,
   computeTERouteAboveExpected,
+  computeTEBlockAboveExpected,
 } from "../../lib/scouting/aboveExpected";
 import { POS_COLOR } from "../../lib/uiTheme";
 import {
@@ -23,11 +24,25 @@ const ROUND_LABEL: Record<number, string> = {
 
 type BoardTab = "all" | "QB" | "RB" | "WR" | "TE";
 
+// One column per Above-Expected metric. The All tab shows every column (a row
+// fills only its own position's); a position tab shows just its own. Tooltips
+// match the Analysis tables' so the two describe each metric the same way.
+type AEKey = "aae" | "srae" | "sae" | "csae" | "te_saer" | "te_saeb";
+const AE_COLUMNS: { key: AEKey; label: string; pos: "QB" | "RB" | "WR" | "TE"; tooltip: string }[] = [
+  { key: "aae",     label: "AAE",     pos: "QB", tooltip: "Accuracy Above Expected — each throw judged against throws like it (all situation tags stacked). Min. 25 graded passes." },
+  { key: "srae",    label: "SRAE",    pos: "RB", tooltip: "Success Rate Above Expected — each run judged against runs like it (formation, loaded box, unblocked defender stacked). Min. 15 runs." },
+  { key: "sae",     label: "SAE",     pos: "WR", tooltip: "Success (Open) Rate Above Expected — each route judged against routes like it (route, coverage incl. press, slot/outside, on/off line stacked). Min. 15 routes." },
+  { key: "csae",    label: "cSAE",    pos: "WR", tooltip: "Core-Route SAE — same as SAE, but excludes Go (Nine) and Screen routes. Min. 15 core routes." },
+  { key: "te_saer", label: "TE-SAER", pos: "TE", tooltip: "Route SAE — Open Rate Above Expected, each route judged against routes like it (route, coverage incl. press, positioning stacked). Min. 15 rated routes." },
+  { key: "te_saeb", label: "TE-SAEB", pos: "TE", tooltip: "Block SAE — Block Success Above Expected, each block judged against blocks like it (run/pass, movement/inline, positioning stacked). Min. 15 rated blocks." },
+];
+type AEMaps = Record<AEKey, Map<string, number | null>>;
+
 type SortKey =
   | "pre_draft_grade" | "post_draft_grade" | "grade_delta"
   | "personal_rank" | "overall_rank" | "name" | "school" | "conference" | "draft_class_year" | "height" | "weight" | "age" | "position"
   | "total_routes" | "total_games" | "targets" | "catches" | "drops" | "contested" | "contested_catches"
-  | "success_rate" | "target_rate" | "adj_success_above_exp" | "above_expected"
+  | "success_rate" | "target_rate" | "adj_success_above_exp" | `ae_${AEKey}`
   | "pct_left" | "pct_right" | "pct_slot" | "pct_backfield"
   | "depth_behind_los" | "depth_on_los" | "total_snaps"
   | "cvg_man" | "cvg_man_catch" | "cvg_zone" | "cvg_zone_catch"
@@ -52,7 +67,8 @@ interface Props {
   setDraftYearFilter: (y: number | null) => void;
   // Raw plays + games are lazy-loaded by ScoutingHub. The board triggers
   // load via loadPositionPlays on mount and uses the resulting plays to
-  // compute the unified Above-Expected metric (AAE / SRAE / SAE / TE-SAER).
+  // compute the Above-Expected columns (AAE / SRAE / TE-SAER / TE-SAEB; WR's
+  // SAE / cSAE arrive pre-aggregated on the prospect).
   games: ScoutingGame[];
   rbPlays: RBPlay[];
   qbPlays: QBPlay[];
@@ -73,8 +89,8 @@ function computeAge(birthday: string | null | undefined): number | null {
 function getSortValue(
   p: ProspectWithStats,
   key: SortKey,
-  aboveExpMap?: Map<string, number | null>,
-): number | string {
+  aeMaps: AEMaps,
+): number | string | null {
   const BIG = 99999;
   // Ungraded sorts to the bottom in both directions' natural reading: -BIG keeps
   // it off the top of a descending (best-first) grade sort.
@@ -84,7 +100,9 @@ function getSortValue(
   if (key === "personal_rank") return p.personal_rank ?? BIG;
   if (key === "overall_rank") return p.overall_rank ?? BIG;
   if (key === "name") return p.name;
-  if (key === "above_expected") return aboveExpMap?.get(p.id) ?? -BIG;
+  // null, not -BIG: on the All tab most rows have no value for a given AE
+  // column (other positions), and the sort sinks those in both directions.
+  if (key.startsWith("ae_")) return aeMaps[key.slice(3) as AEKey].get(p.id) ?? null;
   if (key === "school") return p.school;
   if (key === "conference") return p.conference ?? "";
   if (key === "position") return p.position;
@@ -164,22 +182,24 @@ export default function BigBoard({
     loadPositionPlays("TE");
   }, [loadPositionPlays]);
 
-  // Unified Above-Expected map: AAE for QB, SRAE for RB, TE-SAER for TE
-  // (route-running variant; TE-SAEB blocking lives only on the TE stats
-  // table), and the pre-aggregated WR adj_success_above_exp for WR.
-  // Returns null for any prospect under the per-position min-sample threshold.
-  const aboveExpectedMap = useMemo(() => {
-    const m = new Map<string, number | null>();
-    const rb = computeRBAboveExpected(prospects, games, rbPlays);
-    const qb = computeQBAboveExpected(prospects, games, qbPlays);
-    const te = computeTERouteAboveExpected(prospects, games, tePlays);
-    for (const [id, v] of rb) m.set(id, v);
-    for (const [id, v] of qb) m.set(id, v);
-    for (const [id, v] of te) m.set(id, v);
+  // One map per Above-Expected column, each holding only its own position's
+  // prospects. null = under that metric's min-sample threshold.
+  const aeMaps = useMemo<AEMaps>(() => {
+    const sae = new Map<string, number | null>();
+    const csae = new Map<string, number | null>();
     for (const p of prospects) {
-      if (p.position === "WR") m.set(p.id, p.adj_success_above_exp);
+      if (p.position !== "WR") continue;
+      sae.set(p.id, p.adj_success_above_exp);
+      csae.set(p.id, p.core_sae);
     }
-    return m;
+    return {
+      aae: computeQBAboveExpected(prospects, games, qbPlays),
+      srae: computeRBAboveExpected(prospects, games, rbPlays),
+      sae,
+      csae,
+      te_saer: computeTERouteAboveExpected(prospects, games, tePlays),
+      te_saeb: computeTEBlockAboveExpected(prospects, games, tePlays),
+    };
   }, [prospects, games, rbPlays, qbPlays, tePlays]);
 
   const [boardTab, setBoardTab] = useState<BoardTab>("all");
@@ -232,15 +252,16 @@ export default function BigBoard({
       list = list.filter((p) => p.name.toLowerCase().includes(q) || p.school.toLowerCase().includes(q));
     }
     return [...list].sort((a, b) => {
-      const va = getSortValue(a, sortKey, aboveExpectedMap);
-      const vb = getSortValue(b, sortKey, aboveExpectedMap);
+      const va = getSortValue(a, sortKey, aeMaps);
+      const vb = getSortValue(b, sortKey, aeMaps);
+      if (va === null || vb === null) return va === vb ? 0 : va === null ? 1 : -1;
       if (typeof va === "number" && typeof vb === "number")
         return sortDir === "asc" ? va - vb : vb - va;
       return sortDir === "asc"
         ? String(va).localeCompare(String(vb))
         : String(vb).localeCompare(String(va));
     });
-  }, [prospects, boardTab, draftYearFilter, search, sortKey, sortDir, aboveExpectedMap]);
+  }, [prospects, boardTab, draftYearFilter, search, sortKey, sortDir, aeMaps]);
 
   useEffect(() => {
     const table = tableScrollRef.current;
@@ -255,14 +276,16 @@ export default function BigBoard({
 
   function toggleSort(k: SortKey) {
     if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    else { setSortKey(k); setSortDir("asc"); }
+    // AE columns open best-first; every other column opens ascending.
+    else { setSortKey(k); setSortDir(k.startsWith("ae_") ? "desc" : "asc"); }
   }
 
-  function th(label: string, key: SortKey, cls = "") {
+  function th(label: string, key: SortKey, cls = "", title?: string) {
     const active = sortKey === key;
     return (
       <th
         key={key}
+        title={title}
         onClick={() => toggleSort(key)}
         className={`px-1.5 py-1.5 text-center whitespace-nowrap cursor-pointer hover:text-white transition select-none ${
           active ? "text-blue-400" : "text-slate-500"
@@ -290,30 +313,19 @@ export default function BigBoard({
   }
 
   // ── Above-Expected cell renderer ──────────────────────────────
-  // Single column on the All board showing the position-appropriate
-  // metric: AAE for QB, SRAE for RB, SAE for WR, TE-SAER for TE.
-  // Color-coded green/red on sign; small grey tag identifies which
-  // metric the value represents.
-  const aboveExpectedLabel = (pos: string): string => {
-    if (pos === "QB") return "AAE";
-    if (pos === "RB") return "SRAE";
-    if (pos === "WR") return "SAE";
-    if (pos === "TE") return "TE-SAER";
-    return "";
-  };
-  function aboveExpectedCell(p: ProspectWithStats) {
-    const v = aboveExpectedMap.get(p.id);
+  // Color-coded green/red on sign. A metric that doesn't apply to the row's
+  // position stays blank, so "—" keeps meaning "applies, but under the sample
+  // floor". `cls` carries the column's border so cells line up with headers.
+  function aeCell(p: ProspectWithStats, col: (typeof AE_COLUMNS)[number], cls: string) {
+    if (p.position !== col.pos) return <td key={col.key} className={`${tdBase} ${cls}`} />;
+    const v = aeMaps[col.key].get(p.id);
     if (v == null) {
-      return (
-        <td className={`${tdBase} text-slate-600 border-r border-slate-800`}>—</td>
-      );
+      return <td key={col.key} className={`${tdBase} text-slate-600 ${cls}`}>—</td>;
     }
     const color = v >= 0 ? "text-emerald-400" : "text-red-400";
-    const sign = v >= 0 ? "+" : "";
     return (
-      <td className={`${tdBase} border-r border-slate-800 ${color} font-medium`}>
-        {sign}{v.toFixed(1)}
-        <span className="ml-1 text-[10px] text-slate-500 font-normal">{aboveExpectedLabel(p.position)}</span>
+      <td key={col.key} className={`${tdBase} ${color} font-medium ${cls}`}>
+        {v >= 0 ? "+" : ""}{v.toFixed(1)}
       </td>
     );
   }
@@ -522,7 +534,7 @@ export default function BigBoard({
   // Every tab shares this layout. The All tab adds a Pos column and ranks by
   // overall_rank (OVR), showing PosRk as a read-only readout; each position tab
   // ranks by personal_rank (POS), showing OVR as the read-only readout. The
-  // Above-Exp (AE) column shows on every tab.
+  // Above Exp group shows every AE column on All, only the tab's own elsewhere.
   function renderStandardTable() {
     const isAll = boardTab === "all";
     const primaryLabel = isAll ? "OVR" : "POS";
@@ -532,6 +544,14 @@ export default function BigBoard({
     const secondaryKey: SortKey = isAll ? "personal_rank" : "overall_rank";
     const secondaryValue = (p: ProspectWithStats) => (isAll ? p.personal_rank : p.overall_rank);
     const identitySpan = isAll ? 6 : 5; // Pos column shows only on the All tab
+    const aeCols = isAll ? AE_COLUMNS : AE_COLUMNS.filter((c) => c.pos === boardTab);
+    // A border opens each position's cluster (and closes the last), so WR's and
+    // TE's pairs read as one group on the All tab.
+    const aeBorder = aeCols.map((c, i) => {
+      const first = i === 0 || aeCols[i - 1].pos !== c.pos;
+      const last = i === aeCols.length - 1;
+      return `${first ? "border-l border-slate-800" : ""} ${last ? "border-r border-slate-800" : ""}`;
+    });
     return scrollWrapper(
       <table className="text-xs border-collapse" style={{ minWidth: "max-content" }}>
         <thead>
@@ -543,7 +563,7 @@ export default function BigBoard({
             <th colSpan={1} className="px-2 py-1 text-center text-indigo-900 font-medium border-r border-slate-800">NFL Draft</th>
             <th colSpan={1} className="px-2 py-1 text-center text-slate-600 font-medium border-r border-slate-800">{secondaryGroup}</th>
             <th colSpan={identitySpan} className="px-2 py-1 text-center text-slate-600 font-medium border-r border-slate-800">Identity</th>
-            <th colSpan={1} className="px-2 py-1 text-center text-emerald-900 font-medium border-r border-slate-800">Above Exp</th>
+            <th colSpan={aeCols.length} className="px-2 py-1 text-center text-emerald-900 font-medium border-r border-slate-800">Above Exp</th>
           </tr>
           <tr className="border-b border-slate-800 bg-slate-950">
             <th className="sticky left-0 z-20 bg-slate-950 w-6 text-slate-700 text-center px-1">⠿</th>
@@ -560,7 +580,7 @@ export default function BigBoard({
             {th("Age", "age")}
             {th("Ht", "height")}
             {th("Wt", "weight", "border-r border-slate-800")}
-            {th("AE", "above_expected", "border-l border-slate-800 border-r border-slate-800 text-emerald-700")}
+            {aeCols.map((c, i) => th(c.label, `ae_${c.key}`, `${aeBorder[i]} text-emerald-700`, c.tooltip))}
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-900">
@@ -583,7 +603,7 @@ export default function BigBoard({
                 <td className={`${tdBase} text-slate-400`}>{age ?? "—"}</td>
                 <td className={`${tdBase} text-slate-400`}>{p.height || "—"}</td>
                 <td className={`${tdBase} text-slate-400 border-r border-slate-800`}>{p.weight ?? "—"}</td>
-                {aboveExpectedCell(p)}
+                {aeCols.map((c, i) => aeCell(p, c, aeBorder[i]))}
               </tr>
             );
           })}

@@ -3,7 +3,9 @@
 > **Audience:** a developer who has just been handed the keys and has never seen this project.
 > **Goal:** explain what the app is, how the code is structured, how data flows, and how every major subsystem actually works — in enough depth to debug and extend it on day one.
 >
-> *Last reviewed: 2026-09-29, HEAD `8ae49b6` (working tree) — **Injury Report: plain-English injury summaries and a separate healthy-scratch badge, no AI.** Opening a row now shows e.g. "Based on reports, Jordyn Tyson is on injured reserve (designated to return) with a right hamstring strain. Projected return: Oct 11 (about 2 weeks)" plus ESPN's latest news blurb, built by templates ([lib/helpers/injurySummary.ts](lib/helpers/injurySummary.ts)) from a new per-player ESPN lookup ([app/api/injuries/detail](app/api/injuries/detail/route.ts)); it falls back to Sleeper's fields when ESPN has no record. Sleeper tags a healthy scratch as Out with body part "Coach's Decision" (45 of 77 skill players listed Out on 2026-09-29) — those now get a sky-blue **Scratch** badge (plus **Personal** / **Suspended**), stay on the report, and are left out of the INJURED count. `/api/players` now keeps `injury_body_part` / `injury_notes`. tsc/eslint/build clean, **1447/93 tests** (+41).*
+> *Last reviewed: 2026-09-30, HEAD `9faa85c` (working tree) — **Big Board: one column per Above-Expected metric instead of a single mixed "AE" column.** The Above Exp group is now AAE · SRAE · SAE · cSAE · TE-SAER · TE-SAEB. The All tab shows all six, and each row fills only its own position's (other cells are blank, so "—" still means "applies, but under the sample floor"). A position tab shows only its own metrics (WR: SAE + cSAE, TE: TE-SAER + TE-SAEB). cSAE and TE-SAEB were previously only on the Analysis tables. AE columns sort best-first on the first click, and rows with no value sink in both directions. See "Big Board Above Exp columns" under §11. First component-render test for the board: [BigBoard.test.tsx](__tests__/components/scouting/BigBoard.test.tsx). tsc/eslint clean, **1452/94 tests** (+5).*
+>
+> *Prior review: 2026-09-29, HEAD `8ae49b6` (working tree) — **Injury Report: plain-English injury summaries and a separate healthy-scratch badge, no AI.** Opening a row now shows e.g. "Based on reports, Jordyn Tyson is on injured reserve (designated to return) with a right hamstring strain. Projected return: Oct 11 (about 2 weeks)" plus ESPN's latest news blurb, built by templates ([lib/helpers/injurySummary.ts](lib/helpers/injurySummary.ts)) from a new per-player ESPN lookup ([app/api/injuries/detail](app/api/injuries/detail/route.ts)); it falls back to Sleeper's fields when ESPN has no record. Sleeper tags a healthy scratch as Out with body part "Coach's Decision" (45 of 77 skill players listed Out on 2026-09-29) — those now get a sky-blue **Scratch** badge (plus **Personal** / **Suspended**), stay on the report, and are left out of the INJURED count. `/api/players` now keeps `injury_body_part` / `injury_notes`. tsc/eslint/build clean, **1447/93 tests** (+41).*
 >
 > *Prior review: 2026-09-28, HEAD `8ae49b6` — **Analysis tables gained sample-size filters and QB a Throws column.** "Min Routes" (WR), "Min Runs" (RB), "Min Routes" + "Min Blocks" (TE) and "Min Throws" (QB) boxes beside the search bar, built once into `StatsTableShell` (`minFilters` prop). QB `throws` = pass/RPO snaps minus scrambles, sacks and throw-aways (the table's existing thrown-plays definition). See "Analysis tables: sample-size filters" under §11. tsc/eslint/build clean, **1406/89 tests** (+6).*
 >
@@ -394,7 +396,7 @@
 17. [Dev workflow: build, lint, test](#17-dev-workflow-build-lint-test)
 18. [CI pipeline (GitHub Actions)](#18-ci-pipeline-github-actions)
 19. [ESLint & TypeScript rules that bite](#19-eslint--typescript-rules-that-bite)
-20. [Test suite scope (1447 tests, 93 files)](#20-test-suite-scope-1447-tests-93-files)
+20. [Test suite scope (1452 tests, 94 files)](#20-test-suite-scope-1452-tests-94-files)
 21. [Common failure modes & where to look](#21-common-failure-modes--where-to-look)
 22. [Things intentionally NOT done (and why)](#22-things-intentionally-not-done-and-why)
 23. [Known open items & time bombs for the next owner](#23-known-open-items--time-bombs-for-the-next-owner)
@@ -1427,7 +1429,17 @@ Bold = new vs the old averaging. Choices, all checked with 5-fold held-out-prosp
 
 Tests: [aggregateMerge.test.ts](__tests__/lib/scouting/aggregateMerge.test.ts) (WR, rebuilt around the cells model: a closed go costs ≈ the league go rate, press is harder than man, go-vs-press stacks, league nets to 0, 15-route gate, no cells → null) and the RB/TE difficulty blocks in [aboveExpected.test.ts](__tests__/lib/scouting/aboveExpected.test.ts). The WR go/press/stacking/deep-threat tests cannot pass under the old averaging by construction.
 
-The Big Board surfaces a unified "Above Expected" sortable column that dispatches to the right metric per position (`computeRBAboveExpected` / `computeQBAboveExpected` / `computeTERouteAboveExpected`), triggering the lazy play fetch on mount ([BigBoard.tsx:1-52](components/scouting/BigBoard.tsx#L1)).
+### Big Board Above Exp columns
+
+The Big Board's Above Exp group has one sortable column per metric, driven by `AE_COLUMNS` in [BigBoard.tsx](components/scouting/BigBoard.tsx): **AAE** (QB, `computeQBAboveExpected`), **SRAE** (RB, `computeRBAboveExpected`), **SAE** / **cSAE** (WR, the pre-aggregated `adj_success_above_exp` / `core_sae` on the prospect), **TE-SAER** / **TE-SAEB** (TE, `computeTERouteAboveExpected` / `computeTEBlockAboveExpected`). The board triggers the lazy RB/QB/TE play fetch on mount, and `aeMaps` holds one map per column, keyed by prospect id.
+
+- **All tab** shows all six. A cell for another position's metric is rendered **blank**, not "—": "—" is reserved for "this metric applies but the prospect is under its sample floor" (15 routes/runs/blocks, 25 graded throws). A border opens each position's cluster so WR's and TE's pairs read as one group.
+- **Position tabs** show only that position's columns. Switching tabs resets the sort to rank, so a sort never points at a hidden column.
+- **Sorting.** An AE column opens **descending** (best first), unlike the other columns, which open ascending. `getSortValue` returns `null` (not the `-BIG` sentinel the grade columns use) for a missing AE value, and the comparator sinks `null` in **both** directions. Otherwise, sorting SAE ascending on the All tab would put every non-WR above the WRs.
+- Header tooltips (`title`) match the Analysis tables' wording for each metric.
+- The QB per-dimension AAE breakdown (Dp/Cv/Tm/Pr/Pl/Rt) is deliberately **not** on the board. It stays on the QB Analysis table.
+
+Before 2026-09-30 this was a single "AE" column showing a different metric per row (AAE / SRAE / SAE / TE-SAER), with a grey tag naming it. cSAE and TE-SAEB weren't on the board at all. Tests: [BigBoard.test.tsx](__tests__/components/scouting/BigBoard.test.tsx) stubs the AE calculators and checks the column wiring, the blank-vs-"—" rule, the per-tab narrowing and the null-sinking sort.
 
 ### The two ranking columns + the Prospect Data reorder
 
@@ -1836,9 +1848,9 @@ The flat config in [eslint.config.mjs](eslint.config.mjs) is minimal: it just sp
 
 Beyond ESLint, TypeScript is strict at the `tsc` step. `tsconfig.json` enables `strict`, plus `noUnusedLocals` and `noUnusedParameters` — so an unused import, variable, or function parameter is a **build/type-check failure**, not a warning. This is the single most common reason a local edit that "looks fine" red-X's in CI.
 
-## 20. Test suite scope (1447 tests, 93 files)
+## 20. Test suite scope (1452 tests, 94 files)
 
-Run via PowerShell. The suite is [Vitest](vitest.config.mts) in a `jsdom` environment, globbing `**/__tests__/**/*.{ts,tsx}` and `**/*.{test,spec}.{ts,tsx}`. It deliberately covers **pure logic and server routes, not UI rendering** — there are no component-render or e2e tests.
+Run via PowerShell. The suite is [Vitest](vitest.config.mts) in a `jsdom` environment, globbing `**/__tests__/**/*.{ts,tsx}` and `**/*.{test,spec}.{ts,tsx}`. It deliberately covers **pure logic and server routes, not UI rendering**. There are no e2e tests. A handful of narrow component-render tests (via `@testing-library/react`) live under [__tests__/components/](__tests__/components/), each pinning one piece of UI behavior (e.g. the Injury Report panels, the Analysis min filters, the Big Board's Above Exp columns).
 
 The four "hard cores" — the high-value, previously-untested paths that were given coverage during the June remediation — are:
 
@@ -1872,7 +1884,7 @@ The remaining files cover helpers (math, scoring, lineup, picks, season, formatt
 ## 22. Things intentionally NOT done (and why)
 
 - **No automated DB backup pipeline.** With ~5 users, a manual weekly `pg_dump` suffices ([scripts/backup-supabase.bat](scripts/backup-supabase.bat); see [memory: project_supabase_backup.md](C:/Users/bstefely.NPCSEALANTS/.claude/projects/c--Users-bstefely-NPCSEALANTS-dynastyzeus-app/memory/project_supabase_backup.md)).
-- **No e2e tests (Playwright/Cypress) and no component-render tests.** Vitest covers pure logic and server routes; UI is hand-tested.
+- **No e2e tests (Playwright/Cypress), and only a few narrow component-render tests.** Vitest covers pure logic and server routes. UI is mostly hand-tested. The few render tests under [__tests__/components/](__tests__/components/) each pin one piece of UI behavior rather than covering whole screens.
 - **No internationalization.** English only.
 - **No full router rebuild for hub/tab nav.** Phase B added deep-linkable `?hub=&tab=` URL sync with real back/forward via the raw History API ([app/hooks/useHubRouting.ts](app/hooks/useHubRouting.ts)) rather than migrating to per-hub file routes — deliberately the "lightweight scope" option from the audit, not a rewrite of the single-route SPA model.
 - **AI integration removed.** An earlier build used Anthropic's API to auto-summarize scouting notes; that path was removed (and dropped from `.env.example`) and replaced with a plain play-notes list. There is no LLM call anywhere in the app today.
@@ -1902,7 +1914,7 @@ Other lower-priority items the audit flagged that I did not re-verify line-by-li
 4. `npm run dev` → confirm the app loads at `http://localhost:3000`.
 5. `npm run build` → confirm a production build succeeds (also generates `.next/types/` so the next step works).
 6. `npx tsc --noEmit` → confirm type-check passes (run it *after* the build).
-7. **In PowerShell** (not Git Bash): `npm run test` → confirm **1386 tests pass** across 88 files. If you see "0 tests," you're in the wrong shell.
+7. **In PowerShell** (not Git Bash): `npm run test` → confirm **1452 tests pass** across 94 files. If you see "0 tests," you're in the wrong shell.
 8. `npm run lint` → confirm clean (remember `exhaustive-deps` warnings won't fail it; the four error rules will).
 9. Read [AGENTS.md](AGENTS.md) — it warns this Next.js version diverges from public docs; consult `node_modules/next/dist/docs/` before writing framework code.
 10. Walk the entry path: [app/page.tsx](app/page.tsx) → [app/hooks/useAppState.ts](app/hooks/useAppState.ts) → [app/components/HubRouter.tsx](app/components/HubRouter.tsx).
