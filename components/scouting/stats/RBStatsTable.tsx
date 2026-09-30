@@ -1,7 +1,7 @@
 "use client";
 import { useMemo } from "react";
 import StatsTableShell, { StatRow, ColDef, MinFilterDef } from "./StatsTableShell";
-import { computeRBAboveExpected } from "../../../lib/scouting/aboveExpected";
+import { computeRBAboveExpected, computeRBRunSliceSRAE } from "../../../lib/scouting/aboveExpected";
 import type { Prospect, ScoutingGame, RBPlay, RBRunType } from "../../../lib/types";
 
 interface Props {
@@ -28,6 +28,13 @@ export const RB_STAT_COLS: ColDef[] = [
   { key: "explosive_pct",label: "Expl%",    group: "Advanced", fmt: "pct",       colorDir: 1,  width: 58, tooltip: "Explosive play rate per rush attempt", weightBy: "runs" },
   { key: "stuff_pct",    label: "Stuff%",   group: "Advanced", fmt: "pct",       colorDir: -1, width: 56, tooltip: "Run stuff rate (stopped at or behind LOS)", weightBy: "runs" },
   { key: "btk_pct",      label: "BTkl%",    group: "Advanced", fmt: "pct",       colorDir: 1,  width: 58, tooltip: "Broken tackle rate per rush attempt", weightBy: "runs" },
+  // SRAE by run type (see computeRBRunSliceSRAE). Each run is judged against
+  // the league's runs of the same run type, so each column nets to ~0 league-
+  // wide. The league row weights each back by his runs in that slice.
+  { key: "srae_out",  label: "Outside", group: "SRAE Breakdown", fmt: "plusMinus", colorDir: 1, width: 66, tooltip: "SRAE on outside runs (outside zone + outside man gap), each judged against outside runs like it (formation, loaded box, unblocked defender stacked). Min. 10 such runs.", weightBy: "srae_out_n" },
+  { key: "srae_in",   label: "Inside",  group: "SRAE Breakdown", fmt: "plusMinus", colorDir: 1, width: 62, tooltip: "SRAE on inside runs (inside zone + inside man gap), each judged against inside runs like it (formation, loaded box, unblocked defender stacked). Min. 10 such runs.",    weightBy: "srae_in_n" },
+  { key: "srae_zone", label: "Zone",    group: "SRAE Breakdown", fmt: "plusMinus", colorDir: 1, width: 58, tooltip: "SRAE on zone runs (outside + inside zone), each judged against zone runs like it (formation, loaded box, unblocked defender stacked). Min. 10 such runs.",             weightBy: "srae_zone_n" },
+  { key: "srae_mg",   label: "Man Gap", group: "SRAE Breakdown", fmt: "plusMinus", colorDir: 1, width: 68, tooltip: "SRAE on man gap runs (outside + inside man gap), each judged against man gap runs like it (formation, loaded box, unblocked defender stacked). Min. 10 such runs.",  weightBy: "srae_mg_n" },
   // By Run Type
   { key: "oz_pct",   label: "OZ%",  group: "By Run Type", fmt: "pct", colorDir: 1, width: 54, tooltip: "Outside Zone success%", weightBy: "oz_n" },
   { key: "iz_pct",   label: "IZ%",  group: "By Run Type", fmt: "pct", colorDir: 1, width: 52, tooltip: "Inside Zone success%", weightBy: "iz_n" },
@@ -90,6 +97,7 @@ function pct(n: number, d: number): number | null {
 // for any two RB prospects without duplicating this logic.
 export function buildRBStatRows(prospects: Prospect[], games: ScoutingGame[], rbPlays: RBPlay[]): StatRow[] {
     const sraeMap = computeRBAboveExpected(prospects, games, rbPlays);
+    const sliceMap = computeRBRunSliceSRAE(prospects, games, rbPlays);
     // Build game → prospect map
     const gameToProspect = new Map<string, string>();
     for (const g of games) gameToProspect.set(g.id, g.prospect_id);
@@ -117,6 +125,7 @@ export function buildRBStatRows(prospects: Prospect[], games: ScoutingGame[], rb
         const routePlays = pPlays.filter((pl) => pl.run_type === "route");
 
         const srae = sraeMap.get(p.id) ?? null;
+        const slices = sliceMap.get(p.id);
 
         const oz = runPlays.filter((pl) => pl.run_type === "outside_zone");
         const iz = runPlays.filter((pl) => pl.run_type === "inside_zone");
@@ -143,6 +152,11 @@ export function buildRBStatRows(prospects: Prospect[], games: ScoutingGame[], rb
           explosive_pct: pct(pPlays.filter((pl) => pl.explosive_play).length, runPlays.length),
           stuff_pct: pct(pPlays.filter((pl) => pl.run_stuff).length, runPlays.length),
           btk_pct: pct(pPlays.filter((pl) => pl.broken_tackle).length, runPlays.length),
+          // SRAE by run type, with each slice's run count as its league-footer weight
+          srae_out:  slices?.outside.ae ?? null, srae_out_n:  slices?.outside.n ?? 0,
+          srae_in:   slices?.inside.ae ?? null,  srae_in_n:   slices?.inside.n ?? 0,
+          srae_zone: slices?.zone.ae ?? null,    srae_zone_n: slices?.zone.n ?? 0,
+          srae_mg:   slices?.man_gap.ae ?? null, srae_mg_n:   slices?.man_gap.n ?? 0,
           // By run type
           oz_pct:  succPct(oz,  () => true),
           iz_pct:  succPct(iz,  () => true),

@@ -3,7 +3,8 @@ import {
   computeRBAboveExpected,
   computeQBAboveExpected,
   computeQBAAEBreakdown,
-  computeQBAAEBreakdownMap,
+  computeQBThrowSliceAAE,
+  computeRBRunSliceSRAE,
   computeTERouteAboveExpected,
   computeTEBlockAboveExpected,
   buildRBBaselines,
@@ -397,38 +398,62 @@ describe("computeQBAAEBreakdown", () => {
 });
 
 // =============================================================================
-// computeQBAAEBreakdownMap  (bulk variant — omits gated prospects)
+// computeQBThrowSliceAAE  (AAE by throw location)
 // =============================================================================
 
-describe("computeQBAAEBreakdownMap", () => {
-  it("omits QBs under the sample gate and includes those over it", () => {
-    const prospects = [prospect("big", "QB"), prospect("small", "QB"), prospect("rb", "RB")];
-    const games = [game("g_big", "big"), game("g_small", "small"), game("g_rb", "rb")];
-    const plays = [
-      ...repeat(30, () => qbPlay("g_big", { accuracy: "on_target", depth_zone: "mid_left" })),
-      ...repeat(10, () => qbPlay("g_small", { accuracy: "on_target", depth_zone: "mid_left" })),
-    ];
-    const map = computeQBAAEBreakdownMap(prospects, games, plays);
-    expect(map.has("big")).toBe(true);
-    expect(map.has("small")).toBe(false); // under QB_MIN_SAMPLE
-    expect(map.has("rb")).toBe(false);     // wrong position
-    expect(map.get("big")!.ratedPasses).toBe(30);
+describe("computeQBThrowSliceAAE", () => {
+  // QB "a": 12 deep-left, 8 deep-center, 14 mid-right, 16 short-center throws,
+  // hitting each at a different rate. QB "b" fills out the league.
+  const prospects = [prospect("a", "QB"), prospect("b", "QB"), prospect("small", "QB"), prospect("rb", "RB")];
+  const games = [game("g_a", "a"), game("g_b", "b"), game("g_small", "small"), game("g_rb", "rb")];
+  const throwsOf = (g: string, n: number, zone: QBPlay["depth_zone"], hitEvery: number) =>
+    repeat(n, (i) => qbPlay(g, { accuracy: i % hitEvery ? "high" : "on_target", completion: "incomplete", depth_zone: zone }));
+  const plays = [
+    ...throwsOf("g_a", 12, "deep_left", 2),
+    ...throwsOf("g_a", 8, "deep_center", 3),
+    ...throwsOf("g_a", 14, "mid_right", 1),
+    ...throwsOf("g_a", 16, "short_center", 4),
+    ...throwsOf("g_b", 20, "deep_right", 3),
+    ...throwsOf("g_b", 20, "mid_center", 2),
+    ...throwsOf("g_b", 20, "short_left", 1),
+    ...throwsOf("g_small", 20, "short_left", 1),
+  ];
+  const out = computeQBThrowSliceAAE(prospects, games, plays);
+  const a = out.get("a")!;
+
+  it("reads each slice off the depth zone: outside = left + right, inside = center", () => {
+    expect(a.outside.n).toBe(12 + 14);
+    expect(a.inside.n).toBe(8 + 16);
+    expect(a.deep.n).toBe(12 + 8);
+    expect(a.intermediate.n).toBe(14);
+    expect(a.short.n).toBe(16);
   });
 
-  it("the bulk total matches the standalone computeQBAboveExpected total", () => {
-    // Same inputs through both entry points must agree (shared internals).
-    const prospects = [prospect("a", "QB"), prospect("b", "QB")];
-    const games = [game("g_a", "a"), game("g_b", "b")];
-    const plays = [
-      ...repeat(20, () => qbPlay("g_a", { accuracy: "on_target", completion: "caught", depth_zone: "deep_center" })),
-      ...repeat(10, () => qbPlay("g_a", { accuracy: "behind", completion: "incomplete", depth_zone: "deep_center" })),
-      ...repeat(15, () => qbPlay("g_b", { accuracy: "on_target", completion: "caught", depth_zone: "short_center" })),
-      ...repeat(15, () => qbPlay("g_b", { accuracy: "in_front", completion: "caught", depth_zone: "short_center" })),
-    ];
-    const scalar = computeQBAboveExpected(prospects, games, plays);
-    const map = computeQBAAEBreakdownMap(prospects, games, plays);
-    expect(map.get("a")!.total).toBe(scalar.get("a"));
-    expect(map.get("b")!.total).toBe(scalar.get("b"));
+  it("blanks every slice under the 25-throw AAE floor; other positions get no entry", () => {
+    for (const s of [a.outside, a.inside, a.deep, a.intermediate, a.short]) expect(s.ae).not.toBeNull();
+    // "small" has 20 short throws — enough for the slice, not for AAE itself.
+    const small = out.get("small")!;
+    expect(small.short.n).toBe(20);
+    expect(small.short.ae).toBeNull();
+    expect(out.has("rb")).toBe(false);
+  });
+
+  it("blanks a slice the QB threw fewer than 10 times", () => {
+    const thin = computeQBThrowSliceAAE(
+      [prospect("t", "QB")], [game("g_t", "t")],
+      [...plays, ...throwsOf("g_t", 20, "short_left", 2), ...throwsOf("g_t", 9, "deep_center", 2)],
+    ).get("t")!;
+    expect(thin.deep.n).toBe(9);
+    expect(thin.deep.ae).toBeNull();
+    expect(thin.short.ae).not.toBeNull();
+  });
+
+  it("splits the headline exactly: each set of slices averages back to the QB's AAE", () => {
+    const total = computeQBAboveExpected(prospects, games, plays).get("a")!;
+    const mean = (...ss: { ae: number | null; n: number }[]) =>
+      ss.reduce((s, x) => s + x.ae! * x.n, 0) / ss.reduce((s, x) => s + x.n, 0);
+    expect(mean(a.outside, a.inside)).toBeCloseTo(total, 1);
+    expect(mean(a.deep, a.intermediate, a.short)).toBeCloseTo(total, 1);
   });
 });
 
@@ -737,6 +762,48 @@ describe("RB SRAE difficulty model", () => {
     ];
     const out = computeRBAboveExpected(prospects, games, plays);
     expect(Math.abs((30 * out.get("a")! + 40 * out.get("b")!) / 70)).toBeLessThan(0.01);
+  });
+});
+
+describe("computeRBRunSliceSRAE  (SRAE by run type)", () => {
+  // League: outside runs succeed 70%, inside runs 40%. Back "a" matches the
+  // league on both, so he is average on each — even though his outside runs
+  // beat the league's overall rate by ~15 pts.
+  const prospects = [prospect("a", "RB"), prospect("small", "RB"), prospect("qb", "QB")];
+  const games = [game("g_a", "a"), game("g_small", "small"), game("g_qb", "qb")];
+  const plays = [
+    ...repeat(200, (i) => rbPlay("g_bg", "outside_zone", "gun", i % 10 < 7, false)),
+    ...repeat(200, (i) => rbPlay("g_bg", "inside_zone", "gun", i % 10 < 4, false)),
+    ...repeat(20, (i) => rbPlay("g_a", "outside_zone", "gun", i % 10 < 7, false)),
+    ...repeat(20, (i) => rbPlay("g_a", "inside_zone", "gun", i % 10 < 4, false)),
+    ...repeat(14, (i) => rbPlay("g_small", "outside_zone", "gun", i % 10 < 7, false)),
+  ];
+  const out = computeRBRunSliceSRAE(prospects, games, plays);
+  const a = out.get("a")!;
+
+  it("judges each slice against the league on the same run type", () => {
+    expect(Math.abs(a.outside.ae!)).toBeLessThan(1);
+    expect(Math.abs(a.inside.ae!)).toBeLessThan(1);
+    // The headline model ignores run type, so the same outside runs read well
+    // above expected there.
+    const outsideOnly = computeRBAboveExpectedForPlays(plays.filter((p) => p.game_id === "g_a" && p.run_type === "outside_zone"), buildRBBaselines(plays))!;
+    expect(outsideOnly).toBeGreaterThan(10);
+  });
+
+  it("pairs run types: outside/inside by direction, zone/man gap by scheme", () => {
+    expect(a.outside.n).toBe(20);
+    expect(a.inside.n).toBe(20);
+    expect(a.zone.n).toBe(40);
+    expect(a.man_gap.n).toBe(0);
+  });
+
+  it("blanks a slice under 10 runs, and every slice under the 15-run SRAE floor", () => {
+    expect(a.zone.ae).not.toBeNull();
+    expect(a.man_gap.ae).toBeNull();
+    // "small" has 14 outside runs: enough for the slice, not for SRAE itself.
+    expect(out.get("small")!.outside.n).toBe(14);
+    expect(out.get("small")!.outside.ae).toBeNull();
+    expect(out.has("qb")).toBe(false);
   });
 });
 

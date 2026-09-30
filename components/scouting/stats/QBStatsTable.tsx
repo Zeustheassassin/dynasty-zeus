@@ -1,7 +1,7 @@
 "use client";
 import { useMemo } from "react";
 import StatsTableShell, { StatRow, ColDef, MinFilterDef } from "./StatsTableShell";
-import { computeQBAboveExpected, computeQBAAEBreakdownMap } from "../../../lib/scouting/aboveExpected";
+import { computeQBAboveExpected, computeQBThrowSliceAAE } from "../../../lib/scouting/aboveExpected";
 import type { Prospect, ScoutingGame, QBPlay, QBDepthZone } from "../../../lib/types";
 
 interface Props {
@@ -49,17 +49,14 @@ export const QB_STAT_COLS: ColDef[] = [
     tooltip: "Accuracy Above Expected — overall. Each throw is judged against throws like it (all situation tags stacked). Min 25 graded passes.",
     weightBy: "rated_n" },
 
-  // Per-dimension AAE (the same 6 dims as the Overview panel's AAE Breakdown).
-  // Pressure Handling has no standalone AAE row — it's folded into the Pressure
-  // cluster, though it still feeds the overall AAE total. See aboveExpected.ts.
-  // Each weights the league row by the QB's count of dim-filled plays — same
-  // subset used to compute that QB's per-dim AAE — so the math identity holds.
-  { key: "aae_dpth", label: "AAE Dp", group: "AAE Breakdown", fmt: "plusMinus", colorDir: 1, width: 70, tooltip: "AAE — Depth Zone", weightBy: "aae_dpth_n" },
-  { key: "aae_cvg",  label: "AAE Cv", group: "AAE Breakdown", fmt: "plusMinus", colorDir: 1, width: 70, tooltip: "AAE — Coverage",   weightBy: "aae_cvg_n" },
-  { key: "aae_tmg",  label: "AAE Tm", group: "AAE Breakdown", fmt: "plusMinus", colorDir: 1, width: 70, tooltip: "AAE — Timing",     weightBy: "aae_tmg_n" },
-  { key: "aae_prs",  label: "AAE Pr", group: "AAE Breakdown", fmt: "plusMinus", colorDir: 1, width: 70, tooltip: "AAE — Pressure",   weightBy: "aae_prs_n" },
-  { key: "aae_plt",  label: "AAE Pl", group: "AAE Breakdown", fmt: "plusMinus", colorDir: 1, width: 70, tooltip: "AAE — Platform",   weightBy: "aae_plt_n" },
-  { key: "aae_rte",  label: "AAE Rt", group: "AAE Breakdown", fmt: "plusMinus", colorDir: 1, width: 70, tooltip: "AAE — Route Type", weightBy: "aae_rte_n" },
+  // AAE by throw location: the same AAE over one slice of his throws (see
+  // computeQBThrowSliceAAE). Each weights the league row by the QB's throws in
+  // that slice, so the footer lands near 0.
+  { key: "aae_out",   label: "Outside",      group: "AAE Breakdown", fmt: "plusMinus", colorDir: 1, width: 70, tooltip: "AAE on outside throws (left or right third of the field), each judged against throws like it. Min. 10 such throws.", weightBy: "aae_out_n" },
+  { key: "aae_in",    label: "Inside",       group: "AAE Breakdown", fmt: "plusMinus", colorDir: 1, width: 66, tooltip: "AAE on inside throws (middle third of the field), each judged against throws like it. Min. 10 such throws.",          weightBy: "aae_in_n" },
+  { key: "aae_deep",  label: "Deep",         group: "AAE Breakdown", fmt: "plusMinus", colorDir: 1, width: 62, tooltip: "AAE on deep throws (20+ yds), each judged against throws like it. Min. 10 such throws.",                           weightBy: "aae_deep_n" },
+  { key: "aae_mid",   label: "Intermediate", group: "AAE Breakdown", fmt: "plusMinus", colorDir: 1, width: 92, tooltip: "AAE on intermediate throws (10–20 yds), each judged against throws like it. Min. 10 such throws.",                 weightBy: "aae_mid_n" },
+  { key: "aae_short", label: "Short",        group: "AAE Breakdown", fmt: "plusMinus", colorDir: 1, width: 62, tooltip: "AAE on short throws (under 10 yds), each judged against throws like it. Min. 10 such throws.",                     weightBy: "aae_short_n" },
 
   // Accuracy bucket distribution
   { key: "on_tgt_pct",  label: "OnTgt%", group: "Accuracy", fmt: "pct", colorDir: 1,  width: 66, tooltip: "% of graded throws on-target (tipped balls excluded)", weightBy: "rated_n" },
@@ -136,7 +133,7 @@ function pct(n: number, d: number): number | null {
 // for any two QB prospects without duplicating this logic.
 export function buildQBStatRows(prospects: Prospect[], games: ScoutingGame[], qbPlays: QBPlay[]): StatRow[] {
     const aaeMap = computeQBAboveExpected(prospects, games, qbPlays);
-    const breakdownMap = computeQBAAEBreakdownMap(prospects, games, qbPlays);
+    const sliceMap = computeQBThrowSliceAAE(prospects, games, qbPlays);
     const gameToProspect = new Map<string, string>();
     for (const g of games) gameToProspect.set(g.id, g.prospect_id);
 
@@ -152,21 +149,6 @@ export function buildQBStatRows(prospects: Prospect[], games: ScoutingGame[], qb
     for (const g of games) {
       gamesByProspect.set(g.prospect_id, (gamesByProspect.get(g.prospect_id) ?? 0) + 1);
     }
-
-    // Pull a dimension's AAE from the breakdown map. Returns null when the QB
-    // is under the sample gate or the dimension itself had no comparable plays.
-    const dimAAE = (pid: string, key: string): number | null => {
-      const brk = breakdownMap.get(pid);
-      if (!brk) return null;
-      return brk.dims.find((d) => d.key === key)?.aae ?? null;
-    };
-    // Count of plays that contributed to that dim — used as the league-footer
-    // weight so the play-weighted mean of AAE collapses to ~0 across all QBs.
-    const dimN = (pid: string, key: string): number => {
-      const brk = breakdownMap.get(pid);
-      if (!brk) return 0;
-      return brk.dims.find((d) => d.key === key)?.n ?? 0;
-    };
 
     return prospects
       .filter((p) => p.position === "QB")
@@ -263,6 +245,8 @@ export function buildQBStatRows(prospects: Prospect[], games: ScoutingGame[], qb
         const hdlBfs  = hdlBucket("bail_front_side");
         const hdlBbs  = hdlBucket("bail_backside");
 
+        const slices = sliceMap.get(p.id);
+
         return {
           id: p.id,
           name: p.name,
@@ -287,22 +271,14 @@ export function buildQBStatRows(prospects: Prospect[], games: ScoutingGame[], qb
           passrpo_n: passRpoN,
           handled_n: handledN,
 
-          // Overall + per-dim AAE
+          // Overall AAE + AAE by throw location, with each slice's throw count
+          // as its league-footer weight (see ColDef.weightBy).
           aae: aaeMap.get(p.id) ?? null,
-          aae_dpth: dimAAE(p.id, "depth"),
-          aae_cvg:  dimAAE(p.id, "coverage"),
-          aae_tmg:  dimAAE(p.id, "timing"),
-          aae_prs:  dimAAE(p.id, "pressure"),
-          aae_plt:  dimAAE(p.id, "platform"),
-          aae_rte:  dimAAE(p.id, "route"),
-
-          // Per-dim play counts — league-footer weights (see ColDef.weightBy).
-          aae_dpth_n: dimN(p.id, "depth"),
-          aae_cvg_n:  dimN(p.id, "coverage"),
-          aae_tmg_n:  dimN(p.id, "timing"),
-          aae_prs_n:  dimN(p.id, "pressure"),
-          aae_plt_n:  dimN(p.id, "platform"),
-          aae_rte_n:  dimN(p.id, "route"),
+          aae_out:   slices?.outside.ae ?? null,      aae_out_n:   slices?.outside.n ?? 0,
+          aae_in:    slices?.inside.ae ?? null,       aae_in_n:    slices?.inside.n ?? 0,
+          aae_deep:  slices?.deep.ae ?? null,         aae_deep_n:  slices?.deep.n ?? 0,
+          aae_mid:   slices?.intermediate.ae ?? null, aae_mid_n:   slices?.intermediate.n ?? 0,
+          aae_short: slices?.short.ae ?? null,        aae_short_n: slices?.short.n ?? 0,
 
           // Accuracy
           on_tgt_pct:  pct(accCount("on_target"), ratedN),

@@ -34,6 +34,7 @@ import {
   fitFromPlays,
   expectedFromModel,
   aboveExpectedForPlays,
+  type DifficultyDim,
   type ModelRow,
   type FittedDifficulty,
 } from "./difficultyModel";
@@ -86,6 +87,18 @@ const QB_MIN_SAMPLE = 25;
 // league average instead of swinging the metric on noise; fat buckets are
 // barely moved. Tune up as samples stay small, down as the dataset grows.
 const SHRINK_K = 10;
+
+// The by-slice breakdowns (QB throws by location, RB runs by run type) need
+// this many plays in the slice itself, on top of the prospect clearing the
+// headline floor. Measured 2026-09: the median charted QB has 12 deep throws
+// (some have 3) and the median back 17 outside runs; a 3-play slice swings
+// ±30 pts on one rep and would top any sort. 10 keeps most prospects' slices
+// visible and blanks the ones that are only noise.
+const SLICE_MIN_SAMPLE = 10;
+
+// One slice's above-expected value (pts; null = under a floor) and how many of
+// the prospect's plays fell in it.
+export interface AESlice { ae: number | null; n: number }
 
 // #3-modified — graded "throw value" replacing the old binary on-target flag.
 // An on_target throw is a perfect 1.0 (caught or dropped — placement is the
@@ -152,11 +165,12 @@ const RB_RIDGE_LAMBDA = 3;
 const isKnownRun = (pl: RBPlay) =>
   RB_RUN_TYPES.includes(pl.run_type as RBRunType) && pl.success !== null;
 const rbSuccess = (pl: RBPlay) => (pl.success ? 1 : 0);
-const RB_DESIGN = makeDesign<RBPlay>([
+const RB_DIMS: DifficultyDim<RBPlay>[] = [
   [RB_FORMATIONS,           (pl) => pl.formation],
   [["loaded", "unloaded"],  (pl) => (pl.loaded_box ? "loaded" : "unloaded")],
   [["unblocked", "blocked"], (pl) => (pl.unblocked_defender ? "unblocked" : "blocked")],
-]);
+];
+const RB_DESIGN = makeDesign(RB_DIMS);
 
 // The fitted league model. Built once from the full league play set and shared
 // across every prospect (and, for the per-game badge, every game).
@@ -192,6 +206,57 @@ export function computeRBAboveExpected(
     const pPlays = playsByProspect.get(p.id) ?? [];
     if (pPlays.filter(isKnownRun).length < MIN_SAMPLE) { out.set(p.id, null); continue; }
     out.set(p.id, computeRBAboveExpectedForPlays(pPlays, baselines));
+  }
+
+  return out;
+}
+
+// ── RB SRAE by run type ──────────────────────────────────────────────────
+// SRAE over one slice of a back's runs: outside vs inside, zone vs man/gap.
+// Each slice pairs two of the four run types.
+//
+// Judged by a SECOND model: the SRAE model plus run type. The headline leaves
+// run type out (see RB_RIDGE_LAMBDA), but a slice has to be compared with the
+// league on the same kind of run. Measured 2026-09 on 1,775 known runs, the
+// headline model left outside runs +3.1 pts above expected league-wide and
+// inside runs −1.7, so every back would have read "better outside, worse
+// inside" from the run type alone. With run type in, all four slices net to
+// within 0.1 pt of 0 league-wide. Zone vs man/gap barely moved (±0.2).
+//
+// The flip side: the slices are measured against a different baseline than
+// the headline, so a back's Outside and Inside don't average back to his SRAE.
+export type RBRunSliceKey = "outside" | "inside" | "zone" | "man_gap";
+const RB_RUN_SLICES: readonly { key: RBRunSliceKey; runTypes: readonly RBRunType[] }[] = [
+  { key: "outside", runTypes: ["outside_zone", "outside_man_gap"] },
+  { key: "inside",  runTypes: ["inside_zone", "inside_man_gap"] },
+  { key: "zone",    runTypes: ["outside_zone", "inside_zone"] },
+  { key: "man_gap", runTypes: ["outside_man_gap", "inside_man_gap"] },
+];
+const RB_SLICE_DESIGN = makeDesign<RBPlay>([...RB_DIMS, [RB_RUN_TYPES, (pl) => pl.run_type]]);
+
+// Every RB gets an entry; a slice's `ae` is null under the 15-run headline
+// floor or the slice's own SLICE_MIN_SAMPLE.
+export function computeRBRunSliceSRAE(
+  prospects: Prospect[],
+  games: ScoutingGame[],
+  rbPlays: RBPlay[],
+): Map<string, Record<RBRunSliceKey, AESlice>> {
+  const out = new Map<string, Record<RBRunSliceKey, AESlice>>();
+  const playsByProspect = buildPlaysByProspect(rbPlays, buildGameToProspect(games));
+  const fitted = fitFromPlays(rbPlays.filter(isKnownRun), RB_SLICE_DESIGN, rbSuccess, RB_RIDGE_LAMBDA);
+
+  for (const p of prospects) {
+    if (p.position !== "RB") continue;
+    const runs = (playsByProspect.get(p.id) ?? []).filter(isKnownRun);
+    const slices = {} as Record<RBRunSliceKey, AESlice>;
+    for (const s of RB_RUN_SLICES) {
+      const sub = runs.filter((pl) => s.runTypes.includes(pl.run_type));
+      slices[s.key] = {
+        n: sub.length,
+        ae: runs.length < MIN_SAMPLE || sub.length < SLICE_MIN_SAMPLE ? null : aboveExpectedForPlays(sub, fitted, rbSuccess),
+      };
+    }
+    out.set(p.id, slices);
   }
 
   return out;
@@ -428,11 +493,22 @@ function breakdownFor(ratedPasses: QBPlay[], R: ResolvedBaselines): QBAAEBreakdo
     { key: "route",    label: "Route Type",        ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.route_type,        R.route,    ROUTE_TYPES)) },
   ];
 
-  // Overall AAE: each throw's actual value vs the difficulty model's expected
-  // for that throw's full situation mix. Intentionally NOT the mean of the
-  // per-dim AAEs above — those are one-dimension views, and averaging them
-  // double-counts correlated dims (e.g. a broken-pocket throw would be judged
-  // four times across the pressure cluster). See expectedForPlay.
+  return {
+    ratedPasses: denom,
+    actualOnTgtPct: parseFloat((onTgt * 100).toFixed(2)),
+    // Intentionally NOT the mean of the per-dim AAEs above — those are
+    // one-dimension views, and averaging them double-counts correlated dims
+    // (e.g. a broken-pocket throw would be judged four times across the
+    // pressure cluster).
+    total: modelAAE(ratedPasses, R),
+    dims: rows,
+  };
+}
+
+// AAE over a set of graded throws: each throw's actual value vs the difficulty
+// model's expected for that throw's full situation mix (see expectedForPlay).
+// The overall total and every throw-location slice go through here.
+function modelAAE(ratedPasses: QBPlay[], R: ResolvedBaselines): number | null {
   let sumExpected = 0;
   let sumActual = 0;
   let nContrib = 0;
@@ -443,23 +519,16 @@ function breakdownFor(ratedPasses: QBPlay[], R: ResolvedBaselines): QBAAEBreakdo
     sumActual += throwValue(pl);
     nContrib++;
   }
-  const total = nContrib > 0
+  return nContrib > 0
     ? parseFloat((((sumActual - sumExpected) / nContrib) * 100).toFixed(2))
     : null;
-
-  return {
-    ratedPasses: denom,
-    actualOnTgtPct: parseFloat((onTgt * 100).toFixed(2)),
-    total,
-    dims: rows,
-  };
 }
 
 // Overall AAE for an arbitrary QB play subset (a prospect's whole sample, or
 // just one game's) against already-resolved league baselines. No minimum-
 // sample gate — see computeRBAboveExpectedForPlays for why.
 export function computeQBAAEForPlays(plays: QBPlay[], baselines: ResolvedBaselines): number | null {
-  return breakdownFor(plays.filter(isQBGradedThrow), baselines).total;
+  return modelAAE(plays.filter(isQBGradedThrow), baselines);
 }
 
 function toAaeRow(dim: { expected: number | null; actual: number | null; n: number }): { aae: number | null; n: number } {
@@ -485,7 +554,7 @@ export function computeQBAboveExpected(
     if (p.position !== "QB") continue;
     const ratedPasses = (playsByProspect.get(p.id) ?? []).filter(isQBGradedThrow);
     if (ratedPasses.length < QB_MIN_SAMPLE) { out.set(p.id, null); continue; }
-    out.set(p.id, breakdownFor(ratedPasses, R).total);
+    out.set(p.id, modelAAE(ratedPasses, R));
   }
 
   return out;
@@ -504,26 +573,55 @@ export function computeQBAAEBreakdown(
   return breakdownFor(ratedPasses, R);
 }
 
-// Bulk variant — builds baselines once and produces per-prospect breakdowns
-// for every QB. Used by the Analysis-tab stats table so each row can surface
-// per-dimension AAE columns without re-running the baseline scan per prospect.
-// Prospects under the QB_MIN_SAMPLE gate are omitted (consistent with the
-// overall AAE column hiding their value).
-export function computeQBAAEBreakdownMap(
+// ── QB AAE by throw location ─────────────────────────────────────────────
+// AAE over one slice of a QB's graded throws, by where the ball went: outside
+// (left or right third of the field) vs inside (middle third), and deep (20+
+// yds) / intermediate (10–20) / short (under 10), all read off the 3×3 depth
+// zone. Each throw is still judged by the full difficulty model, so a slice
+// reads "his accuracy on these throws vs the league's on throws like them".
+// Depth zone is itself a model dimension, so every slice nets to about 0
+// league-wide: measured 2026-09 on 1,746 graded throws, within ±0.4 pts, and
+// intermediate at −1.1 from ridge shrinkage.
+//
+// Unlike the RB slices these split the headline exactly: outside + inside (and
+// deep + intermediate + short) cover every throw with a depth zone, so their
+// throw-weighted mean is his AAE on those throws.
+//
+// This replaced the per-dimension rows (Depth / Coverage / Timing / Pressure /
+// Platform / Route) on the Analysis table in 2026-09. Those rows still feed
+// the prospect Overview panel via computeQBAAEBreakdown.
+export type QBThrowSliceKey = "outside" | "inside" | "deep" | "intermediate" | "short";
+const QB_THROW_SLICES: readonly { key: QBThrowSliceKey; zones: readonly QBDepthZone[] }[] = [
+  { key: "outside",      zones: ["deep_left", "deep_right", "mid_left", "mid_right", "short_left", "short_right"] },
+  { key: "inside",       zones: ["deep_center", "mid_center", "short_center"] },
+  { key: "deep",         zones: ["deep_left", "deep_center", "deep_right"] },
+  { key: "intermediate", zones: ["mid_left", "mid_center", "mid_right"] },
+  { key: "short",        zones: ["short_left", "short_center", "short_right"] },
+];
+
+// Every QB gets an entry; a slice's `ae` is null under the 25-throw headline
+// floor or the slice's own SLICE_MIN_SAMPLE.
+export function computeQBThrowSliceAAE(
   prospects: Prospect[],
   games: ScoutingGame[],
   qbPlays: QBPlay[],
-): Map<string, QBAAEBreakdown> {
-  const out = new Map<string, QBAAEBreakdown>();
-  const gameToProspect = buildGameToProspect(games);
-  const playsByProspect = buildPlaysByProspect(qbPlays, gameToProspect);
+): Map<string, Record<QBThrowSliceKey, AESlice>> {
+  const out = new Map<string, Record<QBThrowSliceKey, AESlice>>();
+  const playsByProspect = buildPlaysByProspect(qbPlays, buildGameToProspect(games));
   const R = resolveBaselines(buildQBBaselines(qbPlays));
 
   for (const p of prospects) {
     if (p.position !== "QB") continue;
     const ratedPasses = (playsByProspect.get(p.id) ?? []).filter(isQBGradedThrow);
-    if (ratedPasses.length < QB_MIN_SAMPLE) continue;
-    out.set(p.id, breakdownFor(ratedPasses, R));
+    const slices = {} as Record<QBThrowSliceKey, AESlice>;
+    for (const s of QB_THROW_SLICES) {
+      const sub = ratedPasses.filter((pl) => pl.depth_zone != null && s.zones.includes(pl.depth_zone));
+      slices[s.key] = {
+        n: sub.length,
+        ae: ratedPasses.length < QB_MIN_SAMPLE || sub.length < SLICE_MIN_SAMPLE ? null : modelAAE(sub, R),
+      };
+    }
+    out.set(p.id, slices);
   }
 
   return out;
