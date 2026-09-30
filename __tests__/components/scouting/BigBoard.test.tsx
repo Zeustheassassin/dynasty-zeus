@@ -31,7 +31,7 @@ const prospect = (id: string, name: string, position: string, rank: number, extr
   }) as ProspectWithStats;
 
 const PROSPECTS = [
-  prospect("wr1", "Wide One", "WR", 1, { adj_success_above_exp: 8.8, core_sae: 6.1 }),
+  prospect("wr1", "Wide One", "WR", 1, { adj_success_above_exp: 8.8, core_sae: 6.1, pre_draft_grade: 92.4 }),
   prospect("wr2", "Wide Two", "WR", 2, { adj_success_above_exp: -0.4, core_sae: null }),
   prospect("qb1", "Quarter One", "QB", 3),
   prospect("rb1", "Running One", "RB", 4),
@@ -105,6 +105,18 @@ describe("BigBoard Above Exp columns", () => {
     fireEvent.click(screen.getByRole("columnheader", { name: /^SAE/ }));
     expect(names().slice(0, 2)).toEqual(["Wide Two", "Wide One"]);
     expect(names().slice(2)).toEqual(others);
+  });
+
+  it("shows the grade tier legend and colours a grade by its tier", () => {
+    renderBoard();
+    const legend = screen.getByRole("list", { name: "Grade tiers" });
+    expect(within(legend).getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+      "Generational95+", "Cornerstone90–94.9", "Star85–89.9", "Starter80–84.9",
+      "Rotational75–79.9", "Depth70–74.9", "Practice Squad65–69.9", "CFLUnder 65",
+    ]);
+    const grade = screen.getByText("92.4");
+    expect(grade.className).toContain("text-violet-400");
+    expect(grade.getAttribute("title")).toBe("Cornerstone (90–94.9)");
   });
 
   it("sinks an under-floor value below every real one", () => {

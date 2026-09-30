@@ -56,17 +56,56 @@ export function formatGrade(g: number | null | undefined): string {
 }
 
 /**
- * Tailwind text colour for a grade, so a board scanned at a glance separates
- * the tiers. Tuned to the way these grades are used on the board — 90+ is a
- * blue-chip, 80+ a clear starter, 70+ a contributor, below that a flier —
- * rather than to a generic red/green split.
+ * The scout's tier scale, best→worst (the user's own cut-offs). `min` is
+ * inclusive and a tier runs up to the next one's `min`; grades are one-decimal,
+ * so Cornerstone is 90.0–94.9. Every consumer (grade colour, the Big Board
+ * legend) iterates this list, so changing a cut-off or colour is one edit here.
+ *
+ * Colours match the Draft History outcome scale (lib/draft/playerTier.ts)
+ * wherever the meanings line up, so a name reads the same colour everywhere:
+ * Star amber, Starter emerald, Rotational ≈ Flex sky, Depth ≈ Bench Depth
+ * slate, Practice Squad ≈ Roster Clogger orange, CFL ≈ Cut red. The two tiers
+ * that scale lacks sit above its gold in purple.
  */
+export interface GradeTier {
+  label: string;
+  /** Lowest grade in the tier, inclusive. */
+  min: number;
+  /** Text colour for a grade in this tier. */
+  text: string;
+  /** Solid fill for the legend swatch. */
+  swatch: string;
+}
+
+export const GRADE_TIERS: readonly GradeTier[] = [
+  { label: "Generational",   min: 95,        text: "text-fuchsia-400", swatch: "bg-fuchsia-400" },
+  { label: "Cornerstone",    min: 90,        text: "text-violet-400",  swatch: "bg-violet-400" },
+  { label: "Star",           min: 85,        text: "text-amber-400",   swatch: "bg-amber-400" },
+  { label: "Starter",        min: 80,        text: "text-emerald-400", swatch: "bg-emerald-400" },
+  { label: "Rotational",     min: 75,        text: "text-sky-400",     swatch: "bg-sky-400" },
+  { label: "Depth",          min: 70,        text: "text-slate-300",   swatch: "bg-slate-300" },
+  { label: "Practice Squad", min: 65,        text: "text-orange-400",  swatch: "bg-orange-400" },
+  { label: "CFL",            min: GRADE_MIN, text: "text-red-400",     swatch: "bg-red-400" },
+];
+
+/** The tier a grade falls in; null when ungraded. */
+export function gradeTier(g: number | null | undefined): GradeTier | null {
+  if (g == null) return null;
+  return GRADE_TIERS.find((t) => g >= t.min) ?? GRADE_TIERS[GRADE_TIERS.length - 1];
+}
+
+/** A tier's grade range for display: "95+", "90–94.9", …, "Under 65". */
+export function gradeTierRange(tier: GradeTier): string {
+  const i = GRADE_TIERS.indexOf(tier);
+  if (i === 0) return `${tier.min}+`;
+  const upper = GRADE_TIERS[i - 1].min;
+  if (i === GRADE_TIERS.length - 1) return `Under ${upper}`;
+  return `${tier.min}–${(upper - 0.1).toFixed(1)}`;
+}
+
+/** Tailwind text colour for a grade, by tier; dim slate when ungraded. */
 export function gradeColor(g: number | null | undefined): string {
-  if (g == null) return "text-slate-600";
-  if (g >= 90) return "text-emerald-400";
-  if (g >= 80) return "text-sky-400";
-  if (g >= 70) return "text-slate-200";
-  return "text-slate-500";
+  return gradeTier(g)?.text ?? "text-slate-600";
 }
 
 /**

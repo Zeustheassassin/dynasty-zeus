@@ -6,8 +6,11 @@ import {
   formatGrade,
   gradeColor,
   gradeDelta,
+  gradeTier,
+  gradeTierRange,
   GRADE_MIN,
   GRADE_MAX,
+  GRADE_TIERS,
 } from "@/lib/scouting/prospectGrade";
 
 describe("parseGrade", () => {
@@ -79,14 +82,46 @@ describe("formatGrade", () => {
   });
 });
 
+describe("gradeTier", () => {
+  // The user's scale: each cut-off is the tier's lowest grade, and the grade
+  // one decimal below it falls in the next tier down.
+  const cases: [number, string][] = [
+    [100, "Generational"], [95, "Generational"],
+    [94.9, "Cornerstone"], [90, "Cornerstone"],
+    [89.9, "Star"], [85, "Star"],
+    [84.9, "Starter"], [80, "Starter"],
+    [79.9, "Rotational"], [75, "Rotational"],
+    [74.9, "Depth"], [70, "Depth"],
+    [69.9, "Practice Squad"], [65, "Practice Squad"],
+    [64.9, "CFL"], [GRADE_MIN, "CFL"],
+  ];
+  it.each(cases)("%s → %s", (g, label) => {
+    expect(gradeTier(g)!.label).toBe(label);
+  });
+
+  it("is null for an ungraded prospect", () => {
+    expect(gradeTier(null)).toBeNull();
+    expect(gradeTier(undefined)).toBeNull();
+  });
+});
+
+describe("gradeTierRange", () => {
+  it("labels each tier's range the way the legend shows it", () => {
+    expect(GRADE_TIERS.map(gradeTierRange)).toEqual([
+      "95+", "90–94.9", "85–89.9", "80–84.9", "75–79.9", "70–74.9", "65–69.9", "Under 65",
+    ]);
+  });
+});
+
 describe("gradeColor", () => {
-  it("separates the tiers at 90 / 80 / 70", () => {
-    expect(gradeColor(90)).toBe("text-emerald-400");
-    expect(gradeColor(89.9)).toBe("text-sky-400");
-    expect(gradeColor(80)).toBe("text-sky-400");
-    expect(gradeColor(79.9)).toBe("text-slate-200");
-    expect(gradeColor(70)).toBe("text-slate-200");
-    expect(gradeColor(69.9)).toBe("text-slate-500");
+  it("colours a grade by its tier", () => {
+    expect(gradeColor(95)).toBe("text-fuchsia-400");
+    expect(gradeColor(88.6)).toBe("text-amber-400");
+    expect(gradeColor(64.9)).toBe("text-red-400");
+  });
+
+  it("gives every tier its own colour", () => {
+    expect(new Set(GRADE_TIERS.map((t) => t.text)).size).toBe(GRADE_TIERS.length);
   });
 
   it("dims ungraded rows", () => {

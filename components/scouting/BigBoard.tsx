@@ -10,8 +10,8 @@ import {
 } from "../../lib/scouting/aboveExpected";
 import { POS_COLOR } from "../../lib/uiTheme";
 import {
-  parseGrade, formatGrade, gradeColor, gradeDelta,
-  GRADE_MIN, GRADE_MAX, type GradeField,
+  parseGrade, formatGrade, gradeColor, gradeDelta, gradeTier, gradeTierRange,
+  GRADE_MIN, GRADE_MAX, GRADE_TIERS, type GradeField,
 } from "../../lib/scouting/prospectGrade";
 
 type LoadPositionPlaysFn = (pos: "RB" | "QB" | "TE") => void;
@@ -369,6 +369,7 @@ export default function BigBoard({
     const value = p[field];
     const isEditing = editingGrade?.id === p.id && editingGrade.field === field;
     const label = field === "pre_draft_grade" ? "Pre-draft" : "Post-draft";
+    const tier = gradeTier(value);
     return (
       <td
         className={`${tdBase} border-r border-slate-800`}
@@ -397,7 +398,10 @@ export default function BigBoard({
             onClick={(e) => e.stopPropagation()}
           />
         ) : (
-          <span className={`cursor-text hover:bg-slate-800 px-1 rounded font-semibold ${gradeColor(value)} ${savingGradeId === p.id ? "animate-pulse" : ""}`}>
+          <span
+            title={tier ? `${tier.label} (${gradeTierRange(tier)})` : undefined}
+            className={`cursor-text hover:bg-slate-800 px-1 rounded font-semibold ${gradeColor(value)} ${savingGradeId === p.id ? "animate-pulse" : ""}`}
+          >
             {formatGrade(value)}
           </span>
         )}
@@ -662,6 +666,16 @@ export default function BigBoard({
         ))}
         <span className="text-xs text-slate-500">{sorted.length} prospects</span>
       </div>
+      {/* Grade tier legend — the colours the Pre / Post grade cells use. */}
+      <ul aria-label="Grade tiers" className="flex flex-wrap justify-center gap-x-4 gap-y-1 mb-2 text-xs">
+        {GRADE_TIERS.map((t) => (
+          <li key={t.label} className="flex items-center gap-1.5 whitespace-nowrap">
+            <span aria-hidden="true" className={`inline-block w-2.5 h-2.5 rounded-sm ${t.swatch}`} />
+            <span className={`font-semibold ${t.text}`}>{t.label}</span>
+            <span className="text-slate-500">{gradeTierRange(t)}</span>
+          </li>
+        ))}
+      </ul>
       <p className="text-xs text-slate-600 mb-2 text-center">Drag rows to reorder · Click rank or a grade to edit (1.0–100.0) · Click any column header to sort</p>
 
       {loading ? (
