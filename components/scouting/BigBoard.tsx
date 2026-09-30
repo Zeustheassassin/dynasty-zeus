@@ -7,6 +7,9 @@ import {
   computeQBAboveExpected,
   computeTERouteAboveExpected,
   computeTEBlockAboveExpected,
+  computeQBThrowSliceAAE,
+  computeRBRunSliceSRAE,
+  type AESlice,
 } from "../../lib/scouting/aboveExpected";
 import { POS_COLOR } from "../../lib/uiTheme";
 import {
@@ -24,17 +27,40 @@ const ROUND_LABEL: Record<number, string> = {
 
 type BoardTab = "all" | "QB" | "RB" | "WR" | "TE";
 
-// One column per Above-Expected metric. The All tab shows every column (a row
-// fills only its own position's); a position tab shows just its own. Tooltips
-// match the Analysis tables' so the two describe each metric the same way.
-type AEKey = "aae" | "srae" | "sae" | "csae" | "te_saer" | "te_saeb";
-const AE_COLUMNS: { key: AEKey; label: string; pos: "QB" | "RB" | "WR" | "TE"; tooltip: string }[] = [
-  { key: "aae",     label: "AAE",     pos: "QB", tooltip: "Accuracy Above Expected — each throw judged against throws like it (all situation tags stacked). Min. 25 graded passes." },
-  { key: "srae",    label: "SRAE",    pos: "RB", tooltip: "Success Rate Above Expected — each run judged against runs like it (formation, loaded box, unblocked defender stacked). Min. 15 runs." },
-  { key: "sae",     label: "SAE",     pos: "WR", tooltip: "Success (Open) Rate Above Expected — each route judged against routes like it (route, coverage incl. press, slot/outside, on/off line stacked). Min. 15 routes." },
-  { key: "csae",    label: "cSAE",    pos: "WR", tooltip: "Core-Route SAE — same as SAE, but excludes Go (Nine) and Screen routes. Min. 15 core routes." },
-  { key: "te_saer", label: "TE-SAER", pos: "TE", tooltip: "Route SAE — Open Rate Above Expected, each route judged against routes like it (route, coverage incl. press, positioning stacked). Min. 15 rated routes." },
-  { key: "te_saeb", label: "TE-SAEB", pos: "TE", tooltip: "Block SAE — Block Success Above Expected, each block judged against blocks like it (run/pass, movement/inline, positioning stacked). Min. 15 rated blocks." },
+// One column per Above-Expected metric. The All tab shows every headline
+// column (a row fills only its own position's); a position tab shows its own
+// headline metrics plus, for QB and RB, the Analysis tables' breakdown columns
+// (`breakdown: true`, never on All). `group` is the header band each column sits
+// under. Tooltips match the Analysis tables' so the two describe each metric
+// the same way.
+type AEKey =
+  | "aae" | "srae" | "sae" | "csae" | "te_saer" | "te_saeb"
+  | "aae_out" | "aae_in" | "aae_deep" | "aae_mid" | "aae_short"
+  | "srae_out" | "srae_in" | "srae_zone" | "srae_mg";
+interface AEColumn {
+  key: AEKey;
+  label: string;
+  pos: "QB" | "RB" | "WR" | "TE";
+  group: "Above Exp" | "AAE Breakdown" | "SRAE Breakdown";
+  breakdown?: true;
+  tooltip: string;
+}
+const AE_COLUMNS: AEColumn[] = [
+  { key: "aae",     label: "AAE",     pos: "QB", group: "Above Exp", tooltip: "Accuracy Above Expected — each throw judged against throws like it (all situation tags stacked). Min. 25 graded passes." },
+  { key: "srae",    label: "SRAE",    pos: "RB", group: "Above Exp", tooltip: "Success Rate Above Expected — each run judged against runs like it (formation, loaded box, unblocked defender stacked). Min. 15 runs." },
+  { key: "sae",     label: "SAE",     pos: "WR", group: "Above Exp", tooltip: "Success (Open) Rate Above Expected — each route judged against routes like it (route, coverage incl. press, slot/outside, on/off line stacked). Min. 15 routes." },
+  { key: "csae",    label: "cSAE",    pos: "WR", group: "Above Exp", tooltip: "Core-Route SAE — same as SAE, but excludes Go (Nine) and Screen routes. Min. 15 core routes." },
+  { key: "te_saer", label: "TE-SAER", pos: "TE", group: "Above Exp", tooltip: "Route SAE — Open Rate Above Expected, each route judged against routes like it (route, coverage incl. press, positioning stacked). Min. 15 rated routes." },
+  { key: "te_saeb", label: "TE-SAEB", pos: "TE", group: "Above Exp", tooltip: "Block SAE — Block Success Above Expected, each block judged against blocks like it (run/pass, movement/inline, positioning stacked). Min. 15 rated blocks." },
+  { key: "aae_out",   label: "Outside",      pos: "QB", group: "AAE Breakdown", breakdown: true, tooltip: "AAE on outside throws (left or right third of the field), each judged against throws like it. Min. 10 such throws." },
+  { key: "aae_in",    label: "Inside",       pos: "QB", group: "AAE Breakdown", breakdown: true, tooltip: "AAE on inside throws (middle third of the field), each judged against throws like it. Min. 10 such throws." },
+  { key: "aae_deep",  label: "Deep",         pos: "QB", group: "AAE Breakdown", breakdown: true, tooltip: "AAE on deep throws (20+ yds), each judged against throws like it. Min. 10 such throws." },
+  { key: "aae_mid",   label: "Intermediate", pos: "QB", group: "AAE Breakdown", breakdown: true, tooltip: "AAE on intermediate throws (10–20 yds), each judged against throws like it. Min. 10 such throws." },
+  { key: "aae_short", label: "Short",        pos: "QB", group: "AAE Breakdown", breakdown: true, tooltip: "AAE on short throws (under 10 yds), each judged against throws like it. Min. 10 such throws." },
+  { key: "srae_out",  label: "Outside",      pos: "RB", group: "SRAE Breakdown", breakdown: true, tooltip: "SRAE on outside runs (outside zone + outside man gap), each judged against outside runs like it (formation, loaded box, unblocked defender stacked). Min. 10 such runs." },
+  { key: "srae_in",   label: "Inside",       pos: "RB", group: "SRAE Breakdown", breakdown: true, tooltip: "SRAE on inside runs (inside zone + inside man gap), each judged against inside runs like it (formation, loaded box, unblocked defender stacked). Min. 10 such runs." },
+  { key: "srae_zone", label: "Zone",         pos: "RB", group: "SRAE Breakdown", breakdown: true, tooltip: "SRAE on zone runs (outside + inside zone), each judged against zone runs like it (formation, loaded box, unblocked defender stacked). Min. 10 such runs." },
+  { key: "srae_mg",   label: "Man Gap",      pos: "RB", group: "SRAE Breakdown", breakdown: true, tooltip: "SRAE on man gap runs (outside + inside man gap), each judged against man gap runs like it (formation, loaded box, unblocked defender stacked). Min. 10 such runs." },
 ];
 type AEMaps = Record<AEKey, Map<string, number | null>>;
 
@@ -192,6 +218,12 @@ export default function BigBoard({
       sae.set(p.id, p.adj_success_above_exp);
       csae.set(p.id, p.core_sae);
     }
+    // Breakdown slices come back as one record per prospect; split each slice
+    // out into its own column map.
+    const sliceCol = <K extends string>(m: Map<string, Record<K, AESlice>>, k: K) =>
+      new Map([...m].map(([id, s]) => [id, s[k].ae]));
+    const qbSlices = computeQBThrowSliceAAE(prospects, games, qbPlays);
+    const rbSlices = computeRBRunSliceSRAE(prospects, games, rbPlays);
     return {
       aae: computeQBAboveExpected(prospects, games, qbPlays),
       srae: computeRBAboveExpected(prospects, games, rbPlays),
@@ -199,6 +231,15 @@ export default function BigBoard({
       csae,
       te_saer: computeTERouteAboveExpected(prospects, games, tePlays),
       te_saeb: computeTEBlockAboveExpected(prospects, games, tePlays),
+      aae_out: sliceCol(qbSlices, "outside"),
+      aae_in: sliceCol(qbSlices, "inside"),
+      aae_deep: sliceCol(qbSlices, "deep"),
+      aae_mid: sliceCol(qbSlices, "intermediate"),
+      aae_short: sliceCol(qbSlices, "short"),
+      srae_out: sliceCol(rbSlices, "outside"),
+      srae_in: sliceCol(rbSlices, "inside"),
+      srae_zone: sliceCol(rbSlices, "zone"),
+      srae_mg: sliceCol(rbSlices, "man_gap"),
     };
   }, [prospects, games, rbPlays, qbPlays, tePlays]);
 
@@ -316,7 +357,7 @@ export default function BigBoard({
   // Color-coded green/red on sign. A metric that doesn't apply to the row's
   // position stays blank, so "—" keeps meaning "applies, but under the sample
   // floor". `cls` carries the column's border so cells line up with headers.
-  function aeCell(p: ProspectWithStats, col: (typeof AE_COLUMNS)[number], cls: string) {
+  function aeCell(p: ProspectWithStats, col: AEColumn, cls: string) {
     if (p.position !== col.pos) return <td key={col.key} className={`${tdBase} ${cls}`} />;
     const v = aeMaps[col.key].get(p.id);
     if (v == null) {
@@ -538,7 +579,8 @@ export default function BigBoard({
   // Every tab shares this layout. The All tab adds a Pos column and ranks by
   // overall_rank (OVR), showing PosRk as a read-only readout; each position tab
   // ranks by personal_rank (POS), showing OVR as the read-only readout. The
-  // Above Exp group shows every AE column on All, only the tab's own elsewhere.
+  // Above Exp group shows every headline AE column on All; a position tab shows
+  // its own headline columns plus its breakdown group (QB, RB).
   function renderStandardTable() {
     const isAll = boardTab === "all";
     const primaryLabel = isAll ? "OVR" : "POS";
@@ -548,14 +590,25 @@ export default function BigBoard({
     const secondaryKey: SortKey = isAll ? "personal_rank" : "overall_rank";
     const secondaryValue = (p: ProspectWithStats) => (isAll ? p.personal_rank : p.overall_rank);
     const identitySpan = isAll ? 6 : 5; // Pos column shows only on the All tab
-    const aeCols = isAll ? AE_COLUMNS : AE_COLUMNS.filter((c) => c.pos === boardTab);
-    // A border opens each position's cluster (and closes the last), so WR's and
-    // TE's pairs read as one group on the All tab.
+    const aeCols = isAll
+      ? AE_COLUMNS.filter((c) => !c.breakdown)
+      : AE_COLUMNS.filter((c) => c.pos === boardTab);
+    // A border opens each position's cluster and each header band (and closes
+    // the last), so WR's and TE's pairs read as one group on the All tab and a
+    // breakdown sits apart from its headline metric.
     const aeBorder = aeCols.map((c, i) => {
-      const first = i === 0 || aeCols[i - 1].pos !== c.pos;
+      const prev = aeCols[i - 1];
+      const first = !prev || prev.pos !== c.pos || prev.group !== c.group;
       const last = i === aeCols.length - 1;
       return `${first ? "border-l border-slate-800" : ""} ${last ? "border-r border-slate-800" : ""}`;
     });
+    // Header bands: one cell per run of consecutive columns sharing a group.
+    const aeGroups: { group: AEColumn["group"]; span: number }[] = [];
+    for (const c of aeCols) {
+      const g = aeGroups[aeGroups.length - 1];
+      if (g?.group === c.group) g.span++;
+      else aeGroups.push({ group: c.group, span: 1 });
+    }
     return scrollWrapper(
       <table className="text-xs border-collapse" style={{ minWidth: "max-content" }}>
         <thead>
@@ -567,7 +620,9 @@ export default function BigBoard({
             <th colSpan={1} className="px-2 py-1 text-center text-indigo-900 font-medium border-r border-slate-800">NFL Draft</th>
             <th colSpan={1} className="px-2 py-1 text-center text-slate-600 font-medium border-r border-slate-800">{secondaryGroup}</th>
             <th colSpan={identitySpan} className="px-2 py-1 text-center text-slate-600 font-medium border-r border-slate-800">Identity</th>
-            <th colSpan={aeCols.length} className="px-2 py-1 text-center text-emerald-900 font-medium border-r border-slate-800">Above Exp</th>
+            {aeGroups.map((g) => (
+              <th key={g.group} colSpan={g.span} className="px-2 py-1 text-center text-emerald-900 font-medium border-r border-slate-800 whitespace-nowrap">{g.group}</th>
+            ))}
           </tr>
           <tr className="border-b border-slate-800 bg-slate-950">
             <th className="sticky left-0 z-20 bg-slate-950 w-6 text-slate-700 text-center px-1">⠿</th>

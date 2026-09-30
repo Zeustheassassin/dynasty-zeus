@@ -14,6 +14,13 @@ vi.mock("@/lib/scouting/aboveExpected", () => ({
   computeRBAboveExpected: () => new Map([["rb1", -2]]),
   computeTERouteAboveExpected: () => new Map([["te1", 4.2], ["te2", null]]),
   computeTEBlockAboveExpected: () => new Map([["te1", -1.1], ["te2", null]]),
+  computeQBThrowSliceAAE: () => new Map([["qb1", {
+    outside: { ae: 1.5, n: 20 }, inside: { ae: 7.2, n: 12 }, deep: { ae: null, n: 4 },
+    intermediate: { ae: -3, n: 11 }, short: { ae: 2, n: 17 },
+  }]]),
+  computeRBRunSliceSRAE: () => new Map([["rb1", {
+    outside: { ae: 4, n: 12 }, inside: { ae: -5.5, n: 30 }, zone: { ae: null, n: 6 }, man_gap: { ae: 0.4, n: 36 },
+  }]]),
 }));
 
 // The board sizes its proxy scrollbar with a ResizeObserver, which jsdom lacks.
@@ -94,6 +101,29 @@ describe("BigBoard Above Exp columns", () => {
     expect(headerLabels().filter((l) => AE_LABELS.includes(l))).toEqual(["TE-SAER", "TE-SAEB"]);
     fireEvent.click(screen.getByRole("button", { name: /^WR/ }));
     expect(headerLabels().filter((l) => AE_LABELS.includes(l))).toEqual(["SAE", "cSAE"]);
+  });
+
+  it("adds the QB breakdown to the QB tab, under its own header band", () => {
+    renderBoard();
+    fireEvent.click(screen.getByRole("button", { name: /^QB/ }));
+    const cols = ["AAE", "Outside", "Inside", "Deep", "Intermediate", "Short"];
+    expect(headerLabels().slice(-cols.length)).toEqual(cols);
+    expect(within(screen.getAllByRole("row")[0]).getAllByRole("columnheader").slice(-2).map((h) => h.textContent))
+      .toEqual(["Above Exp", "AAE Breakdown"]);
+    expect(cols.map((l) => cell("Quarter One", l))).toEqual(["+3.5", "+1.5", "+7.2", "—", "-3.0", "+2.0"]);
+  });
+
+  it("adds the RB breakdown to the RB tab", () => {
+    renderBoard();
+    fireEvent.click(screen.getByRole("button", { name: /^RB/ }));
+    const cols = ["SRAE", "Outside", "Inside", "Zone", "Man Gap"];
+    expect(headerLabels().slice(-cols.length)).toEqual(cols);
+    expect(cols.map((l) => cell("Running One", l))).toEqual(["-2.0", "+4.0", "-5.5", "—", "+0.4"]);
+  });
+
+  it("keeps breakdowns off the All tab", () => {
+    renderBoard();
+    for (const l of ["Outside", "Inside", "Deep", "Zone", "Man Gap"]) expect(headerLabels()).not.toContain(l);
   });
 
   it("sorts an AE column best-first on the first click, other positions sinking both ways", () => {

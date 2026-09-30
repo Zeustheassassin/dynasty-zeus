@@ -3,7 +3,9 @@
 > **Audience:** a developer who has just been handed the keys and has never seen this project.
 > **Goal:** explain what the app is, how the code is structured, how data flows, and how every major subsystem actually works — in enough depth to debug and extend it on day one.
 >
-> *Last reviewed: 2026-09-30, HEAD `ce179f9` (working tree) — **Pre/post grades coloured by the user's eight-tier scale, with a legend on the Big Board.** Generational 95+ · Cornerstone 90–94.9 · Star 85–89.9 · Starter 80–84.9 · Rotational 75–79.9 · Depth 70–74.9 · Practice Squad 65–69.9 · CFL under 65, defined once as `GRADE_TIERS` in [prospectGrade.ts](lib/scouting/prospectGrade.ts). The legend sits above the "Drag rows to reorder" hint, and each grade cell's tooltip names its tier. Colours match the Draft History outcome scale where the names line up. Replaces the old four-step 90 / 80 / 70 colouring. See "Prospect scout grades" under §11. tsc/eslint clean, **1477/94 tests** (+20).*
+> *Last reviewed: 2026-09-30, HEAD `c0b44f3` (working tree) — **Big Board QB and RB tabs show their AE breakdowns.** The QB tab's Above Exp area is now AAE plus an **AAE Breakdown** band (Outside · Inside · Deep · Intermediate · Short), and the RB tab's is SRAE plus an **SRAE Breakdown** band (Outside · Inside · Zone · Man Gap). Same numbers and 10-play floor as the Analysis tables. The All tab and the WR/TE tabs are unchanged. See "Big Board Above Exp columns" under §11. tsc/eslint clean, **1480/94 tests** (+3).*
+>
+> *Prior review: 2026-09-30, HEAD `ce179f9` — **Pre/post grades coloured by the user's eight-tier scale, with a legend on the Big Board.** Generational 95+ · Cornerstone 90–94.9 · Star 85–89.9 · Starter 80–84.9 · Rotational 75–79.9 · Depth 70–74.9 · Practice Squad 65–69.9 · CFL under 65, defined once as `GRADE_TIERS` in [prospectGrade.ts](lib/scouting/prospectGrade.ts). The legend sits above the "Drag rows to reorder" hint, and each grade cell's tooltip names its tier. Colours match the Draft History outcome scale where the names line up. Replaces the old four-step 90 / 80 / 70 colouring. See "Prospect scout grades" under §11. tsc/eslint clean, **1477/94 tests** (+20).*
 >
 > *Prior review: 2026-09-30, HEAD `5b2bfb3` — **Analysis tables: QB AAE broken down by throw location, RB SRAE by run type.** QB's six per-dimension AAE columns (Dp / Cv / Tm / Pr / Pl / Rt) are replaced by Outside · Inside · Deep · Intermediate · Short (AAE over just those throws, read off the 3×3 depth zone). RB gets a new SRAE Breakdown group: Outside · Inside · Zone · Man Gap. RB slices are judged by a second model that adds run type, because against the headline SRAE model outside runs sat +3.1 above expected league-wide and inside −1.7. A slice shows once a prospect clears the usual floor and has 10 plays in it. The Overview panel's per-dimension AAE Breakdown is unchanged. See "Analysis breakdowns" under §11. tsc/eslint clean, **1457/94 tests** (+5).*
 >
@@ -400,7 +402,7 @@
 17. [Dev workflow: build, lint, test](#17-dev-workflow-build-lint-test)
 18. [CI pipeline (GitHub Actions)](#18-ci-pipeline-github-actions)
 19. [ESLint & TypeScript rules that bite](#19-eslint--typescript-rules-that-bite)
-20. [Test suite scope (1477 tests, 94 files)](#20-test-suite-scope-1477-tests-94-files)
+20. [Test suite scope (1480 tests, 94 files)](#20-test-suite-scope-1480-tests-94-files)
 21. [Common failure modes & where to look](#21-common-failure-modes--where-to-look)
 22. [Things intentionally NOT done (and why)](#22-things-intentionally-not-done-and-why)
 23. [Known open items & time bombs for the next owner](#23-known-open-items--time-bombs-for-the-next-owner)
@@ -1435,7 +1437,7 @@ Tests: [aggregateMerge.test.ts](__tests__/lib/scouting/aggregateMerge.test.ts) (
 
 ### Analysis breakdowns: QB AAE by throw location, RB SRAE by run type
 
-Since 2026-09-30 the QB and RB Analysis tables (and the Compare tab, which reuses their column lists) break the headline metric down by **slice**: the same above-expected number, computed over just the plays in one slice.
+Since 2026-09-30 the QB and RB Analysis tables (and the Compare tab, which reuses their column lists, and the Big Board's QB and RB tabs) break the headline metric down by **slice**: the same above-expected number, computed over just the plays in one slice.
 
 | Table | Group | Columns | Slice definition | Entry point |
 |---|---|---|---|---|
@@ -1456,12 +1458,11 @@ Tests: the `computeQBThrowSliceAAE` and `computeRBRunSliceSRAE` blocks in [above
 The Big Board's Above Exp group has one sortable column per metric, driven by `AE_COLUMNS` in [BigBoard.tsx](components/scouting/BigBoard.tsx): **AAE** (QB, `computeQBAboveExpected`), **SRAE** (RB, `computeRBAboveExpected`), **SAE** / **cSAE** (WR, the pre-aggregated `adj_success_above_exp` / `core_sae` on the prospect), **TE-SAER** / **TE-SAEB** (TE, `computeTERouteAboveExpected` / `computeTEBlockAboveExpected`). The board triggers the lazy RB/QB/TE play fetch on mount, and `aeMaps` holds one map per column, keyed by prospect id.
 
 - **All tab** shows all six. A cell for another position's metric is rendered **blank**, not "—": "—" is reserved for "this metric applies but the prospect is under its sample floor" (15 routes/runs/blocks, 25 graded throws). A border opens each position's cluster so WR's and TE's pairs read as one group.
-- **Position tabs** show only that position's columns. Switching tabs resets the sort to rank, so a sort never points at a hidden column.
+- **Position tabs** show only that position's columns, and QB and RB add their Analysis breakdown (see "Analysis breakdowns" above) under its own header band: the QB tab shows AAE, then **AAE Breakdown** (Outside · Inside · Deep · Intermediate · Short); the RB tab shows SRAE, then **SRAE Breakdown** (Outside · Inside · Zone · Man Gap). These columns carry `breakdown: true` in `AE_COLUMNS` and never show on All. Their values come from `computeQBThrowSliceAAE` / `computeRBRunSliceSRAE`, split into one `aeMaps` entry per column, so the same 10-play slice floor applies ("—" below it). WR and TE have no breakdowns, so their tabs are unchanged. Switching tabs resets the sort to rank, so a sort never points at a hidden column.
 - **Sorting.** An AE column opens **descending** (best first), unlike the other columns, which open ascending. `getSortValue` returns `null` (not the `-BIG` sentinel the grade columns use) for a missing AE value, and the comparator sinks `null` in **both** directions. Otherwise, sorting SAE ascending on the All tab would put every non-WR above the WRs.
 - Header tooltips (`title`) match the Analysis tables' wording for each metric.
-- The QB and RB breakdown columns (see "Analysis breakdowns" above) are deliberately **not** on the board. They live on the Analysis tables.
 
-Before 2026-09-30 this was a single "AE" column showing a different metric per row (AAE / SRAE / SAE / TE-SAER), with a grey tag naming it. cSAE and TE-SAEB weren't on the board at all. Tests: [BigBoard.test.tsx](__tests__/components/scouting/BigBoard.test.tsx) stubs the AE calculators and checks the column wiring, the blank-vs-"—" rule, the per-tab narrowing and the null-sinking sort.
+Before 2026-09-30 this was a single "AE" column showing a different metric per row (AAE / SRAE / SAE / TE-SAER), with a grey tag naming it. cSAE and TE-SAEB weren't on the board at all. Tests: [BigBoard.test.tsx](__tests__/components/scouting/BigBoard.test.tsx) stubs the AE calculators and checks the column wiring, the blank-vs-"—" rule, the per-tab narrowing, the QB/RB breakdown columns and header bands (and their absence on All) and the null-sinking sort.
 
 ### The two ranking columns + the Prospect Data reorder
 
@@ -1871,7 +1872,7 @@ The flat config in [eslint.config.mjs](eslint.config.mjs) is minimal: it just sp
 
 Beyond ESLint, TypeScript is strict at the `tsc` step. `tsconfig.json` enables `strict`, plus `noUnusedLocals` and `noUnusedParameters` — so an unused import, variable, or function parameter is a **build/type-check failure**, not a warning. This is the single most common reason a local edit that "looks fine" red-X's in CI.
 
-## 20. Test suite scope (1477 tests, 94 files)
+## 20. Test suite scope (1480 tests, 94 files)
 
 Run via PowerShell. The suite is [Vitest](vitest.config.mts) in a `jsdom` environment, globbing `**/__tests__/**/*.{ts,tsx}` and `**/*.{test,spec}.{ts,tsx}`. It deliberately covers **pure logic and server routes, not UI rendering**. There are no e2e tests. A handful of narrow component-render tests (via `@testing-library/react`) live under [__tests__/components/](__tests__/components/), each pinning one piece of UI behavior (e.g. the Injury Report panels, the Analysis min filters, the Big Board's Above Exp columns).
 
@@ -1937,7 +1938,7 @@ Other lower-priority items the audit flagged that I did not re-verify line-by-li
 4. `npm run dev` → confirm the app loads at `http://localhost:3000`.
 5. `npm run build` → confirm a production build succeeds (also generates `.next/types/` so the next step works).
 6. `npx tsc --noEmit` → confirm type-check passes (run it *after* the build).
-7. **In PowerShell** (not Git Bash): `npm run test` → confirm **1477 tests pass** across 94 files. If you see "0 tests," you're in the wrong shell.
+7. **In PowerShell** (not Git Bash): `npm run test` → confirm **1480 tests pass** across 94 files. If you see "0 tests," you're in the wrong shell.
 8. `npm run lint` → confirm clean (remember `exhaustive-deps` warnings won't fail it; the four error rules will).
 9. Read [AGENTS.md](AGENTS.md) — it warns this Next.js version diverges from public docs; consult `node_modules/next/dist/docs/` before writing framework code.
 10. Walk the entry path: [app/page.tsx](app/page.tsx) → [app/hooks/useAppState.ts](app/hooks/useAppState.ts) → [app/components/HubRouter.tsx](app/components/HubRouter.tsx).
