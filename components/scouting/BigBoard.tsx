@@ -71,7 +71,7 @@ type AEMaps = Record<AEKey, Map<string, number | null>>;
 
 // What each AE Score metric counts, for the cell tooltips.
 const SAMPLE_UNIT: Record<string, string> = {
-  aae: "throws", srae: "runs", sae: "routes", te_saer: "routes", te_saeb: "blocks",
+  aae: "throws", srae: "runs", sae: "routes", csae: "core routes", te_saer: "routes", te_saeb: "blocks",
 };
 const COMPOSITE_POS: CompositePos[] = ["QB", "RB", "WR", "TE"];
 const isCompositePos = (pos: string): pos is CompositePos => (COMPOSITE_POS as string[]).includes(pos);
@@ -231,11 +231,13 @@ export default function BigBoard({
     const sae = new Map<string, number | null>();
     const csae = new Map<string, number | null>();
     const wr = new Map<string, AESample | null>();
+    const wrCore = new Map<string, AESample | null>();
     for (const p of prospects) {
       if (p.position !== "WR") continue;
       sae.set(p.id, p.adj_success_above_exp);
       csae.set(p.id, p.core_sae);
       wr.set(p.id, p.sae_sample);
+      wrCore.set(p.id, p.core_sae_sample);
     }
     const qb = computeQBAboveExpectedSamples(prospects, games, qbPlays);
     const rb = computeRBAboveExpectedSamples(prospects, games, rbPlays);
@@ -265,7 +267,7 @@ export default function BigBoard({
         srae_zone: sliceCol(rbSlices, "zone"),
         srae_mg: sliceCol(rbSlices, "man_gap"),
       },
-      composite: buildAEComposite({ qb, rb, wr, teRoute, teBlock }),
+      composite: buildAEComposite({ qb, rb, wr, wrCore, teRoute, teBlock }),
     };
   }, [prospects, games, rbPlays, qbPlays, tePlays]);
 
@@ -436,7 +438,7 @@ export default function BigBoard({
   const compositeTooltip =
     "AE Score: each prospect's headline Above-Expected, discounted for sample size and put in " +
     "true-talent SDs vs the average charted prospect at the position, so it compares across " +
-    "positions. TE blends TE-SAER 80% and TE-SAEB 20%. " +
+    "positions. WR blends cSAE 70% and SAE 30%; TE blends TE-SAER 80% and TE-SAEB 20%. " +
     `True spread: ${compositeStatus}.`;
 
   const rankUpdater = boardTab === "all" ? onUpdateOverallRank : onUpdateRank;

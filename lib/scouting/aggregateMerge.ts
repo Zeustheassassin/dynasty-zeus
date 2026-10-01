@@ -196,18 +196,35 @@ function computeSAE(
   return saeFromCells(cells, model);
 }
 
-// computeSAE plus the sample behind it, for the cross-position composite
-// (aeComposite.ts). Same gate, same sums, so `ae` equals computeSAE's value.
+// saeFromCells plus the sample behind it (play count, sampling variance).
+function sampleFromCells(cells: RouteCell[], model: Float64Array): AESample | null {
+  const s = cellSums(cells, model);
+  const variance = residualVariancePts(s);
+  if (variance == null) return null;
+  return { ae: toAbovePts(s.actual / s.n, s.expected / s.n), n: s.n, variance };
+}
+
+// computeSAE / computeCoreSAE plus the sample behind each, for the
+// cross-position composite (aeComposite.ts). Same gates, same sums, so `ae`
+// equals the column's value.
 function computeSAESample(
   v: ProspectRouteStatsRow,
   cells: RouteCell[],
   model: WRDifficultyModel,
 ): AESample | null {
   if (!v.has_charted_open_data || v.total_routes < 15 || !model.model) return null;
-  const s = cellSums(cells, model.model);
-  const variance = residualVariancePts(s);
-  if (variance == null) return null;
-  return { ae: toAbovePts(s.actual / s.n, s.expected / s.n), n: s.n, variance };
+  return sampleFromCells(cells, model.model);
+}
+
+function computeCoreSAESample(
+  v: ProspectRouteStatsRow,
+  cells: RouteCell[],
+  model: WRDifficultyModel,
+): AESample | null {
+  if (!v.has_charted_open_data || !model.model) return null;
+  const core = cells.filter((c) => !SAE_EX_ROUTE_TYPES.has(c.route_type));
+  if (core.reduce((s, c) => s + c.n, 0) < 15) return null;
+  return sampleFromCells(core, model.model);
 }
 
 // Season/career cSAE, gated on 15 core routes. Exact: each cell carries its
@@ -349,6 +366,7 @@ export function buildProspectsWithStats(
       adj_success_above_exp: v ? computeSAE(v, cells, wrModel) : null,
       core_sae: v ? computeCoreSAE(v, cells, wrModel) : null,
       sae_sample: v ? computeSAESample(v, cells, wrModel) : null,
+      core_sae_sample: v ? computeCoreSAESample(v, cells, wrModel) : null,
       avg_external_rank: avgExternalRank(p),
       depth_behind_los: v?.depth_behind_los ?? 0,
       depth_on_los: v?.depth_on_los ?? 0,

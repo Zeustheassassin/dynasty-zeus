@@ -232,6 +232,16 @@ describe("buildProspectsWithStats — WR SAE", () => {
     expect(p.sae_sample!.variance).toBeCloseTo((32 / 199 / 200) * 1e4, 6);
   });
 
+  it("keeps cSAE's sample over core routes only", () => {
+    const out = build(cellRowsFrom(byProspect));
+    const d = out.find((x) => x.id === "deep")!;
+    expect(d.core_sae_sample!.ae).toBe(d.core_sae);
+    expect(d.core_sae_sample!.n).toBe(100); // the curls; the 100 gos are dropped
+    expect(d.sae_sample!.n).toBe(200);
+    // 80 of 100 curls open, one cell: (80·0.2² + 20·0.8²) / 99 per route, over 100.
+    expect(d.core_sae_sample!.variance).toBeCloseTo((16 / 99 / 100) * 1e4, 6);
+  });
+
   it("applies the 15-route gate", () => {
     const few = repeat(14, () => routePlay("g_f", "curl", "zone", true));
     const out = buildProspectsWithStats(
@@ -242,6 +252,7 @@ describe("buildProspectsWithStats — WR SAE", () => {
     expect(out[0].adj_success_above_exp).toBeNull();
     expect(out[0].core_sae).toBeNull();
     expect(out[0].sae_sample).toBeNull();
+    expect(out[0].core_sae_sample).toBeNull();
   });
 
   it("shows no SAE / cSAE (null) when the cells view isn't available yet", () => {
@@ -250,6 +261,7 @@ describe("buildProspectsWithStats — WR SAE", () => {
       expect(p.adj_success_above_exp).toBeNull();
       expect(p.core_sae).toBeNull();
       expect(p.sae_sample).toBeNull();
+      expect(p.core_sae_sample).toBeNull();
     }
   });
 });

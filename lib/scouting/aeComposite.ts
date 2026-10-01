@@ -167,21 +167,28 @@ export function buildPositionComposite(pos: CompositePos, metrics: CompositeMetr
 }
 
 // ── The board's inputs ───────────────────────────────────────────────────
-// One headline metric per position, except TE, which blends route running
-// (SAER) with blocking (SAEB). Blocking scores no fantasy points but keeps a
-// rookie TE on the field, so it gets a fifth.
+// One headline metric each for QB and RB. TE blends route running (SAER) with
+// blocking (SAEB): blocking scores no fantasy points but keeps a rookie TE on
+// the field, so it gets a fifth.
 //
-// WR uses SAE, not cSAE. cSAE (no gos or screens) predates the difficulty
-// model and was a guard against gos being under-expected. The model now prices
-// both routes, and the two agree closely (r = 0.88 over 82 WRs, 2026-10), so
-// cSAE would add little beyond a smaller sample.
+// WR leans on cSAE, 70/30 with SAE, by the user's call (2026-10-01). A nine is
+// often a clear-out with no intent to win, and a screen is close to an
+// automatic win, so cSAE (neither) is the read on the routes a receiver is
+// actually trying to win. cSAE is the primary metric: a WR needs 15 core routes
+// to be scored. Its routes are a subset of SAE's, so in effect core routes
+// count in full and nines and screens at about 30%.
+const WR_CORE_WEIGHT = 0.7;
+const WR_ALL_WEIGHT = 0.3;
 const TE_ROUTE_WEIGHT = 0.8;
 const TE_BLOCK_WEIGHT = 0.2;
 
 export interface AECompositeInputs {
   qb: Map<string, AESample | null>;
   rb: Map<string, AESample | null>;
+  /** WR SAE (every route). */
   wr: Map<string, AESample | null>;
+  /** WR cSAE (no nines or screens). */
+  wrCore: Map<string, AESample | null>;
   teRoute: Map<string, AESample | null>;
   teBlock: Map<string, AESample | null>;
 }
@@ -196,7 +203,10 @@ export function buildAEComposite(inp: AECompositeInputs): AEComposite {
   const positions: Record<CompositePos, PositionComposite> = {
     QB: buildPositionComposite("QB", [{ key: "aae", label: "AAE", weight: 1, samples: inp.qb }]),
     RB: buildPositionComposite("RB", [{ key: "srae", label: "SRAE", weight: 1, samples: inp.rb }]),
-    WR: buildPositionComposite("WR", [{ key: "sae", label: "SAE", weight: 1, samples: inp.wr }]),
+    WR: buildPositionComposite("WR", [
+      { key: "csae", label: "cSAE", weight: WR_CORE_WEIGHT, samples: inp.wrCore },
+      { key: "sae", label: "SAE", weight: WR_ALL_WEIGHT, samples: inp.wr },
+    ]),
     TE: buildPositionComposite("TE", [
       { key: "te_saer", label: "TE-SAER", weight: TE_ROUTE_WEIGHT, samples: inp.teRoute },
       { key: "te_saeb", label: "TE-SAEB", weight: TE_BLOCK_WEIGHT, samples: inp.teBlock },

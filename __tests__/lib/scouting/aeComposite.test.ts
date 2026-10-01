@@ -137,6 +137,7 @@ describe("buildAEComposite", () => {
       qb: tag("qb", pool(SPREAD)),
       rb: tag("rb", pool(SPREAD.map((x) => x * 2))),
       wr: tag("wr", pool(SPREAD)),
+      wrCore: tag("wr", pool(SPREAD.map((x) => x * 0.8))),
       teRoute: tag("te", pool([3, -1, 2])),
       teBlock: tag("te", pool([1, 0, -2])),
     });
@@ -148,5 +149,20 @@ describe("buildAEComposite", () => {
     expect(comp.scores.get("rbp9")!.score).toBeGreaterThan(comp.scores.get("qbp9")!.score);
     expect(comp.scores.get("rbp9")!.score).toBeLessThan(comp.scores.get("qbp9")!.score * 1.3);
     expect(comp.positions.TE.metrics.map((m) => m.weight)).toEqual([0.8, 0.2]);
+    // WR leads with cSAE (70%), SAE behind it (30%).
+    expect(comp.positions.WR.metrics.map((m) => [m.key, m.weight])).toEqual([["csae", 0.7], ["sae", 0.3]]);
+    const wr = comp.scores.get("wrp9")!;
+    expect(wr.score).toBeCloseTo(0.7 * wr.components[0].z + 0.3 * wr.components[1].z, 9);
+  });
+
+  it("scores a WR only with enough core routes, whatever the SAE", () => {
+    const empty = new Map<string, AESample | null>();
+    const wrCore = pool(SPREAD);
+    wrCore.set("goScreenGuy", null); // under 15 core routes
+    const wr = pool(SPREAD);
+    wr.set("goScreenGuy", s(12));
+    const comp = buildAEComposite({ qb: empty, rb: empty, wr, wrCore, teRoute: empty, teBlock: empty });
+    expect(comp.scores.has("goScreenGuy")).toBe(false);
+    expect(comp.scores.has("p0")).toBe(true);
   });
 });

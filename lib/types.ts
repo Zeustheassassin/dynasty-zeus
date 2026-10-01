@@ -1184,9 +1184,10 @@ export interface ProspectWithStats extends Prospect {
   // "Core-route" SAE — same stat, excluding Go (nine) and Screen routes. See
   // computeCoreSAE in lib/scouting/aggregateMerge.ts for the rationale.
   core_sae: number | null;
-  // SAE with its route count and sampling variance — what the cross-position
-  // AE Score (lib/scouting/aeComposite.ts) shrinks and standardizes.
+  // SAE and cSAE with their route counts and sampling variances — what the
+  // cross-position AE Score (lib/scouting/aeComposite.ts) shrinks and standardizes.
   sae_sample: AESample | null;
+  core_sae_sample: AESample | null;
   avg_external_rank: number | null;
   depth_behind_los: number;
   depth_on_los: number;

@@ -59,7 +59,7 @@ const prospect = (id: string, name: string, position: string, rank: number, extr
     id, name, position, school: "State", conference: "", draft_class_year: 2027,
     height: "", weight: null, birthday: null, personal_rank: rank, overall_rank: rank,
     pre_draft_grade: null, post_draft_grade: null,
-    adj_success_above_exp: null, core_sae: null, sae_sample: null,
+    adj_success_above_exp: null, core_sae: null, sae_sample: null, core_sae_sample: null,
     ...extra,
   }) as ProspectWithStats;
 
