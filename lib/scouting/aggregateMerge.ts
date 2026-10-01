@@ -15,6 +15,8 @@ import {
   toAbovePts,
   emptyResidualSums,
   residualVariancePts,
+  addTierResidual,
+  type ByTier,
   type FittedDifficulty,
   type ResidualSums,
 } from "./difficultyModel";
@@ -202,6 +204,43 @@ function sampleFromCells(cells: RouteCell[], model: Float64Array): AESample | nu
   const variance = residualVariancePts(s);
   if (variance == null) return null;
   return { ae: toAbovePts(s.actual / s.n, s.expected / s.n), n: s.n, variance };
+}
+
+// One row of prospect_game_route_cells (migration 058): 057's cells, per game.
+export interface ProspectGameRouteCellsRow extends ProspectRouteCellsRow { game_id: string }
+
+export interface WRTierSplits {
+  /** Every route (SAE). */
+  all: Map<string, ByTier>;
+  /** Core routes, no nines or screens (cSAE). */
+  core: Map<string, ByTier>;
+}
+
+// Each WR's residuals (open − expected) by the opponent tier of the game, for
+// the AE Score's opponent adjustment. The league model is refit from the
+// per-game cells: they sum to the same league cells as 057, so it's the same
+// model the SAE columns use.
+export function buildWRTierSplits(
+  gameRows: ProspectGameRouteCellsRow[],
+  tierOf: (gameId: string) => "P4" | "G5" | "FCS" | null | undefined,
+): WRTierSplits {
+  const out: WRTierSplits = { all: new Map(), core: new Map() };
+  const { model } = buildWRModel(gameRows);
+  if (!model) return out;
+  for (const row of gameRows) {
+    const tier = tierOf(row.game_id);
+    if (!tier) continue;
+    const all = out.all.get(row.prospect_id) ?? {};
+    const core = out.core.get(row.prospect_id) ?? {};
+    for (const c of parseCells(row.cells)) {
+      const resid = c.open - c.n * expectedFromModel(model, WR_DESIGN.cols(c));
+      addTierResidual(all, tier, c.n, resid);
+      if (!SAE_EX_ROUTE_TYPES.has(c.route_type)) addTierResidual(core, tier, c.n, resid);
+    }
+    out.all.set(row.prospect_id, all);
+    out.core.set(row.prospect_id, core);
+  }
+  return out;
 }
 
 // computeSAE / computeCoreSAE plus the sample behind each, for the

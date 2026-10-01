@@ -360,3 +360,10 @@ describe("BigBoard Dynasty Score", () => {
     expect(names()[0]).toBe("Pool QB 9");
   });
 });
+
+describe("BigBoard opponent strength", () => {
+  it("says it's waiting on the per-game WR data until it loads", () => {
+    renderBoard();
+    expect(screen.getByText(/Opponent strength \(scores only\):/).textContent).toContain("migration 058");
+  });
+});

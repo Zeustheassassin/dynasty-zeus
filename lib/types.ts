@@ -1160,7 +1160,17 @@ export interface TEPlay {
 // expected) scatter around their own mean, divided by his play count. Thin or
 // streaky samples get a wide one. The cross-position AE Score
 // (lib/scouting/aeComposite.ts) uses it to decide how far to trust the number.
-export interface AESample { ae: number; n: number; variance: number }
+export interface AESample {
+  ae: number;
+  n: number;
+  variance: number;
+  /** Residual sums (actual − expected, as fractions) by the game's opponent
+   *  tier, for the AE Score's opponent-strength adjustment (opponentAdjust.ts).
+   *  Only plays against a recognized opponent are counted. */
+  byTier?: Partial<Record<"P4" | "G5" | "FCS", { n: number; resid: number }>>;
+  /** Set once opponent-adjusted: the AE before the adjustment. */
+  rawAe?: number;
+}
 
 export interface ProspectWithStats extends Prospect {
   total_snaps: number;

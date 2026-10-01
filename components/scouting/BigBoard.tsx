@@ -24,6 +24,9 @@ import {
 import { prospectAgeAt, rookieSeasonAge, parseHeightInches, type ProspectAge } from "../../lib/scouting/prospectAge";
 import { DRAFT_ROUND_CHOICES, UNDRAFTED_ROUND, draftRoundLabel } from "../../lib/draftRound";
 import { useRecruitIndex } from "../../hooks/useRecruitIndex";
+import { tierGames, type OpponentTier } from "../../lib/scouting/opponentTier";
+import { applyOpponentStrength, type OpponentAdjusted } from "../../lib/scouting/opponentAdjust";
+import { buildWRTierSplits, type ProspectGameRouteCellsRow } from "../../lib/scouting/aggregateMerge";
 import { POS_COLOR } from "../../lib/uiTheme";
 import {
   parseGrade, formatGrade, gradeColor, gradeDelta, gradeTier, gradeTierRange,
@@ -132,6 +135,10 @@ interface Props {
   qbPlays: QBPlay[];
   tePlays: TEPlay[];
   loadPositionPlays: LoadPositionPlaysFn;
+  /** Per-game WR route cells (migration 058), for the AE Score's opponent
+   *  adjustment. Null until loaded, or when the view isn't available. */
+  gameRouteCells?: ProspectGameRouteCellsRow[] | null;
+  loadGameRouteCells?: () => void;
 }
 
 function getSortValue(
@@ -226,6 +233,8 @@ export default function BigBoard({
   qbPlays,
   tePlays,
   loadPositionPlays,
+  gameRouteCells = null,
+  loadGameRouteCells,
 }: Props) {
   // Trigger lazy load of all three position plays the first time the
   // board renders. ScoutingHub no-ops if a position is already loaded
@@ -235,11 +244,18 @@ export default function BigBoard({
     loadPositionPlays("QB");
     loadPositionPlays("TE");
   }, [loadPositionPlays]);
+  useEffect(() => { loadGameRouteCells?.(); }, [loadGameRouteCells]);
+
+  // Each game's opponent tier (P4 / G5 / FCS), for the opponent adjustment.
+  const gameTiers = useMemo(() => tierGames(games), [games]);
 
   // One map per Above-Expected column, each holding only its own position's
   // prospects. null = under that metric's min-sample threshold. The headline
   // samples also feed the cross-position AE Score, so each model is fit once.
-  const { aeMaps, composite } = useMemo<{ aeMaps: AEMaps; composite: AEComposite }>(() => {
+  // The AE Score (and the Dynasty scores built on it) take the samples after
+  // the opponent-strength adjustment (opponentAdjust.ts). The AE columns keep
+  // the unadjusted values, by the user's call.
+  const { aeMaps, composite, opponent } = useMemo<{ aeMaps: AEMaps; composite: AEComposite; opponent: OpponentAdjusted["effects"] }>(() => {
     const sae = new Map<string, number | null>();
     const csae = new Map<string, number | null>();
     const wr = new Map<string, AESample | null>();
@@ -251,10 +267,23 @@ export default function BigBoard({
       wr.set(p.id, p.sae_sample);
       wrCore.set(p.id, p.core_sae_sample);
     }
+    const tiers = gameTiers.byGame;
     const qb = computeQBAboveExpectedSamples(prospects, games, qbPlays);
-    const rb = computeRBAboveExpectedSamples(prospects, games, rbPlays);
-    const teRoute = computeTERouteAboveExpectedSamples(prospects, games, tePlays);
-    const teBlock = computeTEBlockAboveExpectedSamples(prospects, games, tePlays);
+    const rb = computeRBAboveExpectedSamples(prospects, games, rbPlays, tiers);
+    const teRoute = computeTERouteAboveExpectedSamples(prospects, games, tePlays, tiers);
+    const teBlock = computeTEBlockAboveExpectedSamples(prospects, games, tePlays, tiers);
+    // WR's tier splits come from the per-game cells; without them WR (and so
+    // RB and TE, which borrow WR's effect) stays unadjusted.
+    const splits = gameRouteCells ? buildWRTierSplits(gameRouteCells, (id) => tiers.get(id)) : null;
+    const withSplits = (m: Map<string, AESample | null>, by: Map<string, NonNullable<AESample["byTier"]>> | undefined) =>
+      by ? new Map([...m].map(([id, smp]) => [id, smp ? { ...smp, byTier: by.get(id) ?? {} } : smp])) : m;
+    const opp = applyOpponentStrength({
+      rb,
+      wr: withSplits(wr, splits?.all),
+      wrCore: withSplits(wrCore, splits?.core),
+      teRoute,
+      teBlock,
+    });
     // Breakdown slices come back as one record per prospect; split each slice
     // out into its own column map.
     const sliceCol = <K extends string>(m: Map<string, Record<K, AESlice>>, k: K) =>
@@ -279,9 +308,23 @@ export default function BigBoard({
         srae_zone: sliceCol(rbSlices, "zone"),
         srae_mg: sliceCol(rbSlices, "man_gap"),
       },
-      composite: buildAEComposite({ qb, rb, wr, wrCore, teRoute, teBlock }),
+      composite: buildAEComposite({ qb, rb: opp.rb, wr: opp.wr, wrCore: opp.wrCore, teRoute: opp.teRoute, teBlock: opp.teBlock }),
+      opponent: opp.effects,
     };
-  }, [prospects, games, rbPlays, qbPlays, tePlays]);
+  }, [prospects, games, rbPlays, qbPlays, tePlays, gameTiers, gameRouteCells]);
+
+  // Each prospect's charted games by opponent tier, for the AE Score tooltip.
+  const gamesByTier = useMemo(() => {
+    const m = new Map<string, Record<OpponentTier, number>>();
+    for (const g of games) {
+      const t = gameTiers.byGame.get(g.id);
+      if (!t) continue;
+      const r = m.get(g.prospect_id) ?? { P4: 0, G5: 0, FCS: 0 };
+      r[t]++;
+      m.set(g.prospect_id, r);
+    }
+    return m;
+  }, [games, gameTiers]);
 
   const [boardTab, setBoardTab] = useState<BoardTab>("all");
   // All board sorts by overall_rank; position boards sort by personal_rank
@@ -497,9 +540,14 @@ export default function BigBoard({
     }
     const lines = sc.components.map((c) => {
       const m = pc.metrics.find((x) => x.key === c.key)!;
-      return `${c.label} ${signed(c.ae, 1)} on ${c.n} ${SAMPLE_UNIT[c.key] ?? "plays"} · ` +
+      const ae = c.rawAe != null
+        ? `${signed(c.rawAe, 1)} (${signed(c.ae - c.rawAe, 1)} for opponents) = ${signed(c.ae, 1)}`
+        : signed(c.ae, 1);
+      return `${c.label} ${ae} on ${c.n} ${SAMPLE_UNIT[c.key] ?? "plays"} · ` +
         `${Math.round(c.reliability * 100)}% taken as real · ${p.position} spread ±${m.tau!.toFixed(1)} → ${signed(c.z, 2)}`;
     });
+    const mix = gamesByTier.get(p.id);
+    if (mix && p.position !== "QB") lines.push(`Charted opponents: ${mix.P4} P4 · ${mix.G5} G5 · ${mix.FCS} FCS`);
     const title = [`${signed(sc.score, 2)} true-talent SDs vs the average charted ${p.position}`, ...lines].join("\n");
     const color = sc.score >= 0 ? "text-emerald-400" : "text-red-400";
     return <td className={`${cls} ${color} font-semibold`} title={title}>{signed(sc.score, 2)}</td>;
@@ -553,10 +601,26 @@ export default function BigBoard({
     if (pc.ready) return `${pos} ±${m.tau!.toFixed(1)} pts (${m.qualified})`;
     return m.qualified >= MIN_POOL ? `${pos} out, no spread beyond noise (${m.qualified})` : `${pos} joins at ${MIN_POOL} (${m.qualified} now)`;
   }).join(" · ");
+  // Opponent-strength status: how much easier a G5 / FCS rep counts, by
+  // position, and any opponent names that couldn't be matched to a team.
+  const pts = (x: number) => (x * 100).toFixed(1);
+  const effectText = (pos: "WR" | "TE" | "RB") => {
+    const e = opponent[pos];
+    if (e.source === "none") return null;
+    const size = e.effects.G5 === e.effects.FCS ? `${pts(e.effects.G5)}` : `G5 ${pts(e.effects.G5)} / FCS ${pts(e.effects.FCS)}`;
+    const how = e.source === "measured" ? `measured, ${e.prospects} players` : e.source;
+    return `${pos} −${size} pts per G5/FCS rep (${how})`;
+  };
+  const opponentStatus = !gameRouteCells
+    ? "waiting on the per-game WR route data (migration 058)"
+    : [effectText("WR"), effectText("TE"), effectText("RB"), "QB not adjusted"].filter(Boolean).join(" · ") || "not enough games vs G5/FCS yet";
+  const unrecognized = [...gameTiers.unrecognized].map(([name, n]) => `${name}${n > 1 ? ` (${n})` : ""}`);
+
   const compositeTooltip =
     "AE Score: each prospect's headline Above-Expected, discounted for sample size and put in " +
     "true-talent SDs vs the average charted prospect at the position, so it compares across " +
     "positions. WR blends cSAE 70% and SAE 30%; TE blends TE-SAER 80% and TE-SAEB 20%. " +
+    "Reps against G5 and FCS opponents are discounted (the AE columns are not). " +
     `True spread: ${compositeStatus}.`;
 
   const rankUpdater = boardTab === "all" ? onUpdateOverallRank : onUpdateRank;
@@ -924,6 +988,10 @@ export default function BigBoard({
       </ul>
       <p className="text-xs text-slate-600 mb-2 text-center">Drag rows to reorder · Click rank or a grade to edit (1.0–100.0) · Click any column header to sort</p>
       <p className="text-xs text-slate-600 mb-2 text-center">AE Score true spread: {compositeStatus}</p>
+      <p className="text-xs text-slate-600 mb-2 text-center">
+        Opponent strength (scores only): {opponentStatus}
+        {unrecognized.length > 0 && <span className="text-amber-700"> · Unrecognized opponents: {unrecognized.join(", ")}</span>}
+      </p>
       <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 mb-3 text-xs text-slate-400">
         <span className="text-slate-500">Dynasty weights</span>
         {WEIGHT_SLIDERS.map((w) => (

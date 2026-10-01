@@ -29,6 +29,7 @@ import type {
   TECoverage,
 } from "../types";
 import { ROUTE_TYPES } from "../../components/scouting/shared/chartingConstants";
+import type { OpponentTier } from "./opponentTier";
 import {
   makeDesign,
   fitDifficultyModel,
@@ -109,6 +110,10 @@ export interface AESlice { ae: number | null; n: number }
 // each prospect's play count and sampling variance (the composite needs them),
 // and `compute*AboveExpected` is just its values. Callers that need both should
 // take the samples and map them through aeValues, so the league model is fit once.
+// The RB / TE sample functions also take an optional game → opponent tier map,
+// which sums each prospect's residuals by tier (AESample.byTier) for the AE
+// Score's opponent adjustment. The values are the same either way. QB takes
+// none: the user expects no cross-level effect on accuracy.
 export function aeValues(samples: Map<string, AESample | null>): Map<string, number | null> {
   return new Map([...samples].map(([id, s]) => [id, s?.ae ?? null]));
 }
@@ -208,6 +213,7 @@ export function computeRBAboveExpectedSamples(
   prospects: Prospect[],
   games: ScoutingGame[],
   rbPlays: RBPlay[],
+  tierByGame?: ReadonlyMap<string, OpponentTier>,
 ): Map<string, AESample | null> {
   const out = new Map<string, AESample | null>();
   const gameToProspect = buildGameToProspect(games);
@@ -217,7 +223,7 @@ export function computeRBAboveExpectedSamples(
   for (const p of prospects) {
     if (p.position !== "RB") continue;
     const runs = (playsByProspect.get(p.id) ?? []).filter(isKnownRun);
-    out.set(p.id, runs.length < MIN_SAMPLE ? null : aboveExpectedSampleForPlays(runs, baselines, rbSuccess));
+    out.set(p.id, runs.length < MIN_SAMPLE ? null : aboveExpectedSampleForPlays(runs, baselines, rbSuccess, tierByGame && ((pl) => tierByGame.get(pl.game_id))));
   }
 
   return out;
@@ -708,6 +714,7 @@ export function computeTERouteAboveExpectedSamples(
   prospects: Prospect[],
   games: ScoutingGame[],
   tePlays: TEPlay[],
+  tierByGame?: ReadonlyMap<string, OpponentTier>,
 ): Map<string, AESample | null> {
   const out = new Map<string, AESample | null>();
   const gameToProspect = buildGameToProspect(games);
@@ -717,7 +724,7 @@ export function computeTERouteAboveExpectedSamples(
   for (const p of prospects) {
     if (p.position !== "TE") continue;
     const routes = (playsByProspect.get(p.id) ?? []).filter(isRatedTERoute);
-    out.set(p.id, routes.length < MIN_SAMPLE ? null : aboveExpectedSampleForPlays(routes, baselines, teOpen));
+    out.set(p.id, routes.length < MIN_SAMPLE ? null : aboveExpectedSampleForPlays(routes, baselines, teOpen, tierByGame && ((pl) => tierByGame.get(pl.game_id))));
   }
 
   return out;
@@ -773,6 +780,7 @@ export function computeTEBlockAboveExpectedSamples(
   prospects: Prospect[],
   games: ScoutingGame[],
   tePlays: TEPlay[],
+  tierByGame?: ReadonlyMap<string, OpponentTier>,
 ): Map<string, AESample | null> {
   const out = new Map<string, AESample | null>();
   const gameToProspect = buildGameToProspect(games);
@@ -782,7 +790,7 @@ export function computeTEBlockAboveExpectedSamples(
   for (const p of prospects) {
     if (p.position !== "TE") continue;
     const blocks = (playsByProspect.get(p.id) ?? []).filter(isRatedTEBlock);
-    out.set(p.id, blocks.length < MIN_SAMPLE ? null : aboveExpectedSampleForPlays(blocks, baselines, teBlockWon));
+    out.set(p.id, blocks.length < MIN_SAMPLE ? null : aboveExpectedSampleForPlays(blocks, baselines, teBlockWon, tierByGame && ((pl) => tierByGame.get(pl.game_id))));
   }
 
   return out;

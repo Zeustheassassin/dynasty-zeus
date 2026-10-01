@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildWRModel,
+  buildWRTierSplits,
   buildProspectsWithStats,
   computeSAEForPlays,
   computeCoreSAEForPlays,
@@ -263,5 +264,31 @@ describe("buildProspectsWithStats — WR SAE", () => {
       expect(p.sae_sample).toBeNull();
       expect(p.core_sae_sample).toBeNull();
     }
+  });
+});
+
+describe("buildWRTierSplits", () => {
+  it("splits each WR's residuals by the game's opponent tier, core routes on their own", () => {
+    const g1 = [...repeat(20, (i) => routePlay("g1", "curl", "zone", i % 2 === 0)), ...repeat(10, () => routePlay("g1", "screen", "zone", true))];
+    const g2 = repeat(20, (i) => routePlay("g2", "curl", "zone", i % 4 !== 0));
+    const rows = [
+      { prospect_id: "a", game_id: "g1", cells: cellRowsFrom({ a: g1 })[0].cells },
+      { prospect_id: "a", game_id: "g2", cells: cellRowsFrom({ a: g2 })[0].cells },
+    ];
+    const tiers: Record<string, "P4" | "G5"> = { g1: "P4", g2: "G5" };
+    const s = buildWRTierSplits(rows, (id) => tiers[id]).all.get("a")!;
+    expect(s.P4!.n).toBe(30);
+    expect(s.G5!.n).toBe(20);
+    // One league model: residuals over every route sum to 0.
+    expect(s.P4!.resid + s.G5!.resid).toBeCloseTo(0, 3);
+    // The G5 game went better (75% vs 50% on curls).
+    expect(s.G5!.resid / s.G5!.n).toBeGreaterThan(s.P4!.resid / s.P4!.n);
+    // Core routes drop the screens.
+    expect(buildWRTierSplits(rows, (id) => tiers[id]).core.get("a")!.P4!.n).toBe(20);
+  });
+
+  it("skips games whose opponent isn't recognized", () => {
+    const rows = [{ prospect_id: "a", game_id: "g1", cells: cellRowsFrom({ a: repeat(20, () => routePlay("g1", "curl", "zone", true)) })[0].cells }];
+    expect(buildWRTierSplits(rows, () => null).all.get("a")).toBeUndefined();
   });
 });

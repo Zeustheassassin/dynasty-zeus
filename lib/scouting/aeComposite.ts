@@ -71,6 +71,8 @@ export interface ScoreComponent {
   label: string;
   weight: number;
   ae: number;
+  /** The AE before the opponent-strength adjustment, when there was one. */
+  rawAe?: number;
   n: number;
   /** τ² / (τ² + v): the share of the prospect's AE taken as real. */
   reliability: number;
@@ -158,7 +160,7 @@ export function buildPositionComposite(pos: CompositePos, metrics: CompositeMetr
       const v = varianceOf(s);
       const reliability = (tau * tau) / (tau * tau + v);
       const z = (reliability * (s.ae - spread.mean!)) / tau;
-      components.push({ key: m.key, label: m.label, weight: m.weight, ae: s.ae, n: s.n, reliability, z });
+      components.push({ key: m.key, label: m.label, weight: m.weight, ae: s.ae, rawAe: s.rawAe, n: s.n, reliability, z });
       weighted += m.weight * z;
     }
     scores.set(id, { score: weighted / totalWeight, components });

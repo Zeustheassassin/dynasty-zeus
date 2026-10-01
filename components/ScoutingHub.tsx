@@ -21,6 +21,7 @@ import {
   buildProspectsWithStats,
   type ProspectRouteStatsRow,
   type ProspectRouteCellsRow,
+  type ProspectGameRouteCellsRow,
 } from "../lib/scouting/aggregateMerge";
 
 const log = logger("ScoutingHub");
@@ -120,6 +121,23 @@ async function fetchPlaysByGame<T>(
   return all;
 }
 
+// prospect_game_route_cells (migration 058), paged. Throws on error, which
+// includes the view not existing yet.
+async function fetchGameRouteCells(): Promise<ProspectGameRouteCellsRow[]> {
+  const PAGE = 1000;
+  const all: ProspectGameRouteCellsRow[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("prospect_game_route_cells")
+      .select("prospect_id,game_id,cells")
+      .order("game_id", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    all.push(...((data ?? []) as ProspectGameRouteCellsRow[]));
+    if (!data || data.length < PAGE) return all;
+  }
+}
+
 const WRHub = dynamic(() => import("./scouting/wr/WRHub"), { ssr: false });
 const RBHub = dynamic(() => import("./scouting/rb/RBHub"), { ssr: false });
 const QBHub = dynamic(() => import("./scouting/qb/QBHub"), { ssr: false });
@@ -175,6 +193,12 @@ export default function ScoutingHub() {
   const [qbPlays, setQbPlays] = useState<QBPlay[]>([]);
   const [tePlays, setTePlays] = useState<TEPlay[]>([]);
   const fetchedPlaysRef = useRef<{ RB: string | null; QB: string | null; TE: string | null }>({ RB: null, QB: null, TE: null });
+  // Per-game WR route cells for the AE Score's opponent adjustment. Only the
+  // Big Board uses them, so they load when it opens. Null until then, and
+  // after a failed load (e.g. migration 058 not applied): WR just isn't
+  // opponent-adjusted.
+  const [gameRouteCells, setGameRouteCells] = useState<ProspectGameRouteCellsRow[] | null>(null);
+  const fetchedGameCellsRef = useRef<string | null>(null);
   const { begin: beginLoad, isCurrent: isLoadCurrent } = useLatestRequest();
   const mountedRef = useRef(false);
 
@@ -219,6 +243,7 @@ export default function ScoutingHub() {
       // Reset lazy-fetch cache so a parent reload re-fetches plays the
       // next time AnalysisHub or GamesLog needs them.
       fetchedPlaysRef.current = { RB: null, QB: null, TE: null };
+      fetchedGameCellsRef.current = null;
       setRbPlays([]);
       setQbPlays([]);
       setTePlays([]);
@@ -283,6 +308,19 @@ export default function ScoutingHub() {
     else if (pos === "QB") fetchPlaysByGame<QBPlay>("qb_plays", ids).then((rows) => { setQbPlays(rows); }).catch(onErr);
     else if (pos === "TE") fetchPlaysByGame<TEPlay>("te_plays", ids).then((rows) => { setTePlays(rows); }).catch(onErr);
   }, [loading, games, gameIdsKey]);
+
+  // Once per parent reload, like the plays. A failure isn't retried until the
+  // next reload, so a missing view logs once instead of on every visit.
+  const loadGameRouteCells = useCallback(() => {
+    if (loading || games.length === 0 || fetchedGameCellsRef.current === gameIdsKey) return;
+    fetchedGameCellsRef.current = gameIdsKey;
+    fetchGameRouteCells()
+      .then((rows) => { setGameRouteCells(rows); })
+      .catch((e: { message?: string; code?: string }) => {
+        log.error("prospect_game_route_cells load (WR AE Score not opponent-adjusted until migration 058 is applied)", { msg: e?.message, code: e?.code });
+        setGameRouteCells(null);
+      });
+  }, [loading, games.length, gameIdsKey]);
 
   // Lazy-fetch league-wide plays for the active position sub-tab too — the new
   // per-prospect "Charts" radar (H1) needs the same all-charted-prospects pool
@@ -572,6 +610,8 @@ export default function ScoutingHub() {
             qbPlays={qbPlays}
             tePlays={tePlays}
             loadPositionPlays={loadPositionPlays}
+            gameRouteCells={gameRouteCells}
+            loadGameRouteCells={loadGameRouteCells}
           />
         )}
 

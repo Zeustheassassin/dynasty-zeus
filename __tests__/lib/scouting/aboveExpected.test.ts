@@ -912,6 +912,19 @@ describe("AE samples", () => {
     expect(smp.variance).toBeCloseTo(((20 * 0.25) / 19 / 20) * 1e4, 6);
   });
 
+  it("sums residuals by opponent tier when given the game tiers, without changing the value", () => {
+    const tiers = new Map([["g_rbA", "G5" as const]]);
+    const plain = computeRBAboveExpectedSamples(prospects, games, rbPlays).get("rbA")!;
+    const split = computeRBAboveExpectedSamples(prospects, games, rbPlays, tiers).get("rbA")!;
+    expect(split.ae).toBe(plain.ae);
+    expect(plain.byTier).toBeUndefined();
+    expect(split.byTier!.G5!.n).toBe(30);
+    // Residuals sum to (actual − expected) × n: the AE, back in fractions.
+    expect(split.byTier!.G5!.resid).toBeCloseTo((split.ae / 100) * 30, 1);
+    // rbB's game isn't in the map: no tier, nothing summed.
+    expect(computeRBAboveExpectedSamples(prospects, games, rbPlays, tiers).get("rbB")!.byTier).toEqual({});
+  });
+
   it("is null under the same floor as the column", () => {
     const short = rbPlays.filter((pl) => pl.game_id === "g_rbA").slice(0, 14);
     expect(computeRBAboveExpectedSamples(prospects, games, short).get("rbA")).toBeNull();

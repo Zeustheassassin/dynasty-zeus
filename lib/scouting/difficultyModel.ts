@@ -207,20 +207,42 @@ export function residualVariancePts(s: ResidualSums): number | null {
   return (perPlay / s.n) * 1e4;
 }
 
+type TierCode = "P4" | "G5" | "FCS";
+export type ByTier = NonNullable<AESample["byTier"]>;
+
+// Adds one play's (or one cell's) residual to its opponent tier's running sum.
+export function addTierResidual(byTier: ByTier, tier: TierCode | null | undefined, n: number, resid: number): void {
+  if (!tier) return;
+  const t = (byTier[tier] ??= { n: 0, resid: 0 });
+  t.n += n;
+  t.resid += resid;
+}
+
 // Mean actual outcome minus mean model-expected outcome over `plays`, with its
-// sample. Null when there are fewer than 2 plays or no league model.
+// sample. Null when there are fewer than 2 plays or no league model. With
+// `tierOf`, the residuals are also summed by the play's opponent tier
+// (AESample.byTier) for the AE Score's opponent adjustment.
 export function aboveExpectedSampleForPlays<T>(
   plays: T[],
   fitted: FittedDifficulty<T>,
   outcome: (row: T) => number,
+  tierOf?: (row: T) => TierCode | null | undefined,
 ): AESample | null {
   const { design, model } = fitted;
   if (!model || plays.length === 0) return null;
   const s = emptyResidualSums();
-  for (const pl of plays) addResidual(s, outcome(pl), expectedFromModel(model, design.cols(pl)));
+  const byTier: ByTier = {};
+  for (const pl of plays) {
+    const y = outcome(pl);
+    const e = expectedFromModel(model, design.cols(pl));
+    addResidual(s, y, e);
+    if (tierOf) addTierResidual(byTier, tierOf(pl), 1, y - e);
+  }
   const variance = residualVariancePts(s);
   if (variance == null) return null;
-  return { ae: toAbovePts(s.actual / s.n, s.expected / s.n), n: s.n, variance };
+  const out: AESample = { ae: toAbovePts(s.actual / s.n, s.expected / s.n), n: s.n, variance };
+  if (tierOf) out.byTier = byTier;
+  return out;
 }
 
 // Mean actual outcome minus mean model-expected outcome over `plays`, in pts.
