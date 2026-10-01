@@ -1155,6 +1155,13 @@ export interface TEPlay {
   created_at: string;
 }
 
+// One prospect's above-expected plus the sample it rests on. `variance` is the
+// sampling variance of `ae` in pts²: how much his per-play residuals (actual −
+// expected) scatter around their own mean, divided by his play count. Thin or
+// streaky samples get a wide one. The cross-position AE Score
+// (lib/scouting/aeComposite.ts) uses it to decide how far to trust the number.
+export interface AESample { ae: number; n: number; variance: number }
+
 export interface ProspectWithStats extends Prospect {
   total_snaps: number;
   total_routes: number;
@@ -1177,6 +1184,9 @@ export interface ProspectWithStats extends Prospect {
   // "Core-route" SAE — same stat, excluding Go (nine) and Screen routes. See
   // computeCoreSAE in lib/scouting/aggregateMerge.ts for the rationale.
   core_sae: number | null;
+  // SAE with its route count and sampling variance — what the cross-position
+  // AE Score (lib/scouting/aeComposite.ts) shrinks and standardizes.
+  sae_sample: AESample | null;
   avg_external_rank: number | null;
   depth_behind_los: number;
   depth_on_los: number;

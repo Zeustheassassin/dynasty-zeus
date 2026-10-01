@@ -222,6 +222,16 @@ describe("buildProspectsWithStats — WR SAE", () => {
     expect(Math.abs(d.core_sae!)).toBeLessThan(2);
   });
 
+  it("keeps SAE's route count and sampling variance for the AE Score", () => {
+    const out = build(cellRowsFrom(byProspect));
+    const p = out.find((x) => x.id === "poss")!;
+    expect(p.sae_sample!.ae).toBe(p.adj_success_above_exp);
+    expect(p.sae_sample!.n).toBe(200);
+    // One cell, 160 of 200 open: the residuals vary exactly as the outcomes do,
+    // (160·0.2² + 40·0.8²) / 199 per route, over 200 routes, in pts².
+    expect(p.sae_sample!.variance).toBeCloseTo((32 / 199 / 200) * 1e4, 6);
+  });
+
   it("applies the 15-route gate", () => {
     const few = repeat(14, () => routePlay("g_f", "curl", "zone", true));
     const out = buildProspectsWithStats(
@@ -231,6 +241,7 @@ describe("buildProspectsWithStats — WR SAE", () => {
     );
     expect(out[0].adj_success_above_exp).toBeNull();
     expect(out[0].core_sae).toBeNull();
+    expect(out[0].sae_sample).toBeNull();
   });
 
   it("shows no SAE / cSAE (null) when the cells view isn't available yet", () => {
@@ -238,6 +249,7 @@ describe("buildProspectsWithStats — WR SAE", () => {
     for (const p of out) {
       expect(p.adj_success_above_exp).toBeNull();
       expect(p.core_sae).toBeNull();
+      expect(p.sae_sample).toBeNull();
     }
   });
 });

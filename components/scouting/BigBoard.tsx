@@ -1,16 +1,21 @@
 "use client";
 import { useState, useMemo, useRef, useEffect } from "react";
-import type { ProspectWithStats, Prospect, RouteType, ScoutingGame, RBPlay, QBPlay, TEPlay } from "../../lib/types";
+import type { ProspectWithStats, Prospect, RouteType, ScoutingGame, RBPlay, QBPlay, TEPlay, AESample } from "../../lib/types";
 import { getLocalStorageItem, setLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 import {
-  computeRBAboveExpected,
-  computeQBAboveExpected,
-  computeTERouteAboveExpected,
-  computeTEBlockAboveExpected,
+  computeRBAboveExpectedSamples,
+  computeQBAboveExpectedSamples,
+  computeTERouteAboveExpectedSamples,
+  computeTEBlockAboveExpectedSamples,
   computeQBThrowSliceAAE,
   computeRBRunSliceSRAE,
+  aeValues,
   type AESlice,
 } from "../../lib/scouting/aboveExpected";
+import {
+  buildAEComposite, MIN_POOL,
+  type AEComposite, type AEScore, type CompositePos,
+} from "../../lib/scouting/aeComposite";
 import { POS_COLOR } from "../../lib/uiTheme";
 import {
   parseGrade, formatGrade, gradeColor, gradeDelta, gradeTier, gradeTierRange,
@@ -64,9 +69,17 @@ const AE_COLUMNS: AEColumn[] = [
 ];
 type AEMaps = Record<AEKey, Map<string, number | null>>;
 
+// What each AE Score metric counts, for the cell tooltips.
+const SAMPLE_UNIT: Record<string, string> = {
+  aae: "throws", srae: "runs", sae: "routes", te_saer: "routes", te_saeb: "blocks",
+};
+const COMPOSITE_POS: CompositePos[] = ["QB", "RB", "WR", "TE"];
+const isCompositePos = (pos: string): pos is CompositePos => (COMPOSITE_POS as string[]).includes(pos);
+const signed = (v: number, dp: number) => `${v >= 0 ? "+" : ""}${v.toFixed(dp)}`;
+
 type SortKey =
   | "pre_draft_grade" | "post_draft_grade" | "grade_delta"
-  | "personal_rank" | "overall_rank" | "name" | "school" | "conference" | "draft_class_year" | "height" | "weight" | "age" | "position"
+  | "personal_rank" | "overall_rank" | "ae_score" | "name" | "school" | "conference" | "draft_class_year" | "height" | "weight" | "age" | "position"
   | "total_routes" | "total_games" | "targets" | "catches" | "drops" | "contested" | "contested_catches"
   | "success_rate" | "target_rate" | "adj_success_above_exp" | `ae_${AEKey}`
   | "pct_left" | "pct_right" | "pct_slot" | "pct_backfield"
@@ -116,6 +129,7 @@ function getSortValue(
   p: ProspectWithStats,
   key: SortKey,
   aeMaps: AEMaps,
+  aeScores: Map<string, AEScore>,
 ): number | string | null {
   const BIG = 99999;
   // Ungraded sorts to the bottom in both directions' natural reading: -BIG keeps
@@ -126,6 +140,8 @@ function getSortValue(
   if (key === "personal_rank") return p.personal_rank ?? BIG;
   if (key === "overall_rank") return p.overall_rank ?? BIG;
   if (key === "name") return p.name;
+  // Unscored (under the floor, or a position not in the score yet) sinks both ways.
+  if (key === "ae_score") return aeScores.get(p.id)?.score ?? null;
   // null, not -BIG: on the All tab most rows have no value for a given AE
   // column (other positions), and the sort sinks those in both directions.
   if (key.startsWith("ae_")) return aeMaps[key.slice(3) as AEKey].get(p.id) ?? null;
@@ -209,15 +225,22 @@ export default function BigBoard({
   }, [loadPositionPlays]);
 
   // One map per Above-Expected column, each holding only its own position's
-  // prospects. null = under that metric's min-sample threshold.
-  const aeMaps = useMemo<AEMaps>(() => {
+  // prospects. null = under that metric's min-sample threshold. The headline
+  // samples also feed the cross-position AE Score, so each model is fit once.
+  const { aeMaps, composite } = useMemo<{ aeMaps: AEMaps; composite: AEComposite }>(() => {
     const sae = new Map<string, number | null>();
     const csae = new Map<string, number | null>();
+    const wr = new Map<string, AESample | null>();
     for (const p of prospects) {
       if (p.position !== "WR") continue;
       sae.set(p.id, p.adj_success_above_exp);
       csae.set(p.id, p.core_sae);
+      wr.set(p.id, p.sae_sample);
     }
+    const qb = computeQBAboveExpectedSamples(prospects, games, qbPlays);
+    const rb = computeRBAboveExpectedSamples(prospects, games, rbPlays);
+    const teRoute = computeTERouteAboveExpectedSamples(prospects, games, tePlays);
+    const teBlock = computeTEBlockAboveExpectedSamples(prospects, games, tePlays);
     // Breakdown slices come back as one record per prospect; split each slice
     // out into its own column map.
     const sliceCol = <K extends string>(m: Map<string, Record<K, AESlice>>, k: K) =>
@@ -225,21 +248,24 @@ export default function BigBoard({
     const qbSlices = computeQBThrowSliceAAE(prospects, games, qbPlays);
     const rbSlices = computeRBRunSliceSRAE(prospects, games, rbPlays);
     return {
-      aae: computeQBAboveExpected(prospects, games, qbPlays),
-      srae: computeRBAboveExpected(prospects, games, rbPlays),
-      sae,
-      csae,
-      te_saer: computeTERouteAboveExpected(prospects, games, tePlays),
-      te_saeb: computeTEBlockAboveExpected(prospects, games, tePlays),
-      aae_out: sliceCol(qbSlices, "outside"),
-      aae_in: sliceCol(qbSlices, "inside"),
-      aae_deep: sliceCol(qbSlices, "deep"),
-      aae_mid: sliceCol(qbSlices, "intermediate"),
-      aae_short: sliceCol(qbSlices, "short"),
-      srae_out: sliceCol(rbSlices, "outside"),
-      srae_in: sliceCol(rbSlices, "inside"),
-      srae_zone: sliceCol(rbSlices, "zone"),
-      srae_mg: sliceCol(rbSlices, "man_gap"),
+      aeMaps: {
+        aae: aeValues(qb),
+        srae: aeValues(rb),
+        sae,
+        csae,
+        te_saer: aeValues(teRoute),
+        te_saeb: aeValues(teBlock),
+        aae_out: sliceCol(qbSlices, "outside"),
+        aae_in: sliceCol(qbSlices, "inside"),
+        aae_deep: sliceCol(qbSlices, "deep"),
+        aae_mid: sliceCol(qbSlices, "intermediate"),
+        aae_short: sliceCol(qbSlices, "short"),
+        srae_out: sliceCol(rbSlices, "outside"),
+        srae_in: sliceCol(rbSlices, "inside"),
+        srae_zone: sliceCol(rbSlices, "zone"),
+        srae_mg: sliceCol(rbSlices, "man_gap"),
+      },
+      composite: buildAEComposite({ qb, rb, wr, teRoute, teBlock }),
     };
   }, [prospects, games, rbPlays, qbPlays, tePlays]);
 
@@ -293,8 +319,8 @@ export default function BigBoard({
       list = list.filter((p) => p.name.toLowerCase().includes(q) || p.school.toLowerCase().includes(q));
     }
     return [...list].sort((a, b) => {
-      const va = getSortValue(a, sortKey, aeMaps);
-      const vb = getSortValue(b, sortKey, aeMaps);
+      const va = getSortValue(a, sortKey, aeMaps, composite.scores);
+      const vb = getSortValue(b, sortKey, aeMaps, composite.scores);
       if (va === null || vb === null) return va === vb ? 0 : va === null ? 1 : -1;
       if (typeof va === "number" && typeof vb === "number")
         return sortDir === "asc" ? va - vb : vb - va;
@@ -302,7 +328,7 @@ export default function BigBoard({
         ? String(va).localeCompare(String(vb))
         : String(vb).localeCompare(String(va));
     });
-  }, [prospects, boardTab, draftYearFilter, search, sortKey, sortDir, aeMaps]);
+  }, [prospects, boardTab, draftYearFilter, search, sortKey, sortDir, aeMaps, composite]);
 
   useEffect(() => {
     const table = tableScrollRef.current;
@@ -317,7 +343,8 @@ export default function BigBoard({
 
   function toggleSort(k: SortKey) {
     if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    // AE columns open best-first; every other column opens ascending.
+    // AE columns (the AE Score included) open best-first; every other column
+    // opens ascending.
     else { setSortKey(k); setSortDir(k.startsWith("ae_") ? "desc" : "asc"); }
   }
 
@@ -370,6 +397,47 @@ export default function BigBoard({
       </td>
     );
   }
+
+  // ── AE Score cell ─────────────────────────────────────────────
+  // "—" for a prospect under the position's sample floor, or at a position
+  // without enough charted prospects to join the score yet; the tooltip says
+  // which. A scored cell's tooltip walks through the math.
+  function scoreCell(p: ProspectWithStats) {
+    const cls = `${tdBase} border-l border-r border-slate-800`;
+    if (!isCompositePos(p.position)) return <td className={cls} />;
+    const pc = composite.positions[p.position];
+    const primary = pc.metrics[0];
+    const sc = composite.scores.get(p.id);
+    if (!sc) {
+      const why = pc.ready
+        ? `Under the ${primary.label} sample floor`
+        : primary.qualified >= MIN_POOL
+          ? `${p.position}s are out of the AE Score: their ${primary.label}s don't spread more than sample noise yet`
+          : `${p.position}s join the AE Score once ${MIN_POOL} clear the ${primary.label} sample floor (${primary.qualified} now)`;
+      return <td className={`${cls} text-slate-600`} title={why}>—</td>;
+    }
+    const lines = sc.components.map((c) => {
+      const m = pc.metrics.find((x) => x.key === c.key)!;
+      return `${c.label} ${signed(c.ae, 1)} on ${c.n} ${SAMPLE_UNIT[c.key] ?? "plays"} · ` +
+        `${Math.round(c.reliability * 100)}% taken as real · ${p.position} spread ±${m.tau!.toFixed(1)} → ${signed(c.z, 2)}`;
+    });
+    const title = [`${signed(sc.score, 2)} true-talent SDs vs the average charted ${p.position}`, ...lines].join("\n");
+    const color = sc.score >= 0 ? "text-emerald-400" : "text-red-400";
+    return <td className={`${cls} ${color} font-semibold`} title={title}>{signed(sc.score, 2)}</td>;
+  }
+
+  // Each position's true spread, or how far it is from joining the score.
+  const compositeStatus = COMPOSITE_POS.map((pos) => {
+    const pc = composite.positions[pos];
+    const m = pc.metrics[0];
+    if (pc.ready) return `${pos} ±${m.tau!.toFixed(1)} pts (${m.qualified})`;
+    return m.qualified >= MIN_POOL ? `${pos} out, no spread beyond noise (${m.qualified})` : `${pos} joins at ${MIN_POOL} (${m.qualified} now)`;
+  }).join(" · ");
+  const compositeTooltip =
+    "AE Score: each prospect's headline Above-Expected, discounted for sample size and put in " +
+    "true-talent SDs vs the average charted prospect at the position, so it compares across " +
+    "positions. TE blends TE-SAER 80% and TE-SAEB 20%. " +
+    `True spread: ${compositeStatus}.`;
 
   const rankUpdater = boardTab === "all" ? onUpdateOverallRank : onUpdateRank;
   const rankField = (p: ProspectWithStats) => boardTab === "all" ? p.overall_rank : p.personal_rank;
@@ -620,6 +688,7 @@ export default function BigBoard({
             <th colSpan={1} className="px-2 py-1 text-center text-indigo-900 font-medium border-r border-slate-800">NFL Draft</th>
             <th colSpan={1} className="px-2 py-1 text-center text-slate-600 font-medium border-r border-slate-800">{secondaryGroup}</th>
             <th colSpan={identitySpan} className="px-2 py-1 text-center text-slate-600 font-medium border-r border-slate-800">Identity</th>
+            <th colSpan={1} className="px-2 py-1 text-center text-teal-900 font-medium border-r border-slate-800">Composite</th>
             {aeGroups.map((g) => (
               <th key={g.group} colSpan={g.span} className="px-2 py-1 text-center text-emerald-900 font-medium border-r border-slate-800 whitespace-nowrap">{g.group}</th>
             ))}
@@ -639,6 +708,7 @@ export default function BigBoard({
             {th("Age", "age")}
             {th("Ht", "height")}
             {th("Wt", "weight", "border-r border-slate-800")}
+            {th("AE Score", "ae_score", "border-l border-r border-slate-800 text-teal-600", compositeTooltip)}
             {aeCols.map((c, i) => th(c.label, `ae_${c.key}`, `${aeBorder[i]} text-emerald-700`, c.tooltip))}
           </tr>
         </thead>
@@ -662,6 +732,7 @@ export default function BigBoard({
                 <td className={`${tdBase} text-slate-400`}>{age ?? "—"}</td>
                 <td className={`${tdBase} text-slate-400`}>{p.height || "—"}</td>
                 <td className={`${tdBase} text-slate-400 border-r border-slate-800`}>{p.weight ?? "—"}</td>
+                {scoreCell(p)}
                 {aeCols.map((c, i) => aeCell(p, c, aeBorder[i]))}
               </tr>
             );
@@ -732,6 +803,7 @@ export default function BigBoard({
         ))}
       </ul>
       <p className="text-xs text-slate-600 mb-2 text-center">Drag rows to reorder · Click rank or a grade to edit (1.0–100.0) · Click any column header to sort</p>
+      <p className="text-xs text-slate-600 mb-2 text-center">AE Score true spread: {compositeStatus}</p>
 
       {loading ? (
         <div className="text-slate-500 text-sm text-center py-12">Loading…</div>

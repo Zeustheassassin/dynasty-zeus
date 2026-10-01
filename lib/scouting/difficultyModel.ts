@@ -19,6 +19,8 @@
 // The intercept is unpenalized, so the league's expected sum equals its actual
 // sum: league-wide above-expected is 0 by construction.
 
+import type { AESample } from "../types";
+
 // A situation dimension: the fixed bucket list and how to read a row's bucket.
 // Buckets come from the lists, not the data, so a bucket the league has never
 // seen gets an all-zero column, which the ridge pins at 0.
@@ -184,6 +186,41 @@ export function fitFromPlays<T>(
     design,
     model: fitDifficultyModel(plays.map((pl) => ({ cols: design.cols(pl), y: outcome(pl) })), design.size, lambda),
   };
+}
+
+// Running sums over a prospect's plays. WR adds a whole route cell at a time
+// (aggregateMerge.ts), since its routes arrive pre-counted.
+export interface ResidualSums { n: number; actual: number; expected: number; sq: number }
+export const emptyResidualSums = (): ResidualSums => ({ n: 0, actual: 0, expected: 0, sq: 0 });
+export function addResidual(acc: ResidualSums, y: number, expected: number): void {
+  acc.n++;
+  acc.actual += y;
+  acc.expected += expected;
+  acc.sq += (y - expected) * (y - expected);
+}
+
+// The sampling variance of the mean residual, in pts². Null under 2 plays.
+export function residualVariancePts(s: ResidualSums): number | null {
+  if (s.n < 2) return null;
+  const mean = (s.actual - s.expected) / s.n;
+  const perPlay = Math.max(0, (s.sq - s.n * mean * mean) / (s.n - 1));
+  return (perPlay / s.n) * 1e4;
+}
+
+// Mean actual outcome minus mean model-expected outcome over `plays`, with its
+// sample. Null when there are fewer than 2 plays or no league model.
+export function aboveExpectedSampleForPlays<T>(
+  plays: T[],
+  fitted: FittedDifficulty<T>,
+  outcome: (row: T) => number,
+): AESample | null {
+  const { design, model } = fitted;
+  if (!model || plays.length === 0) return null;
+  const s = emptyResidualSums();
+  for (const pl of plays) addResidual(s, outcome(pl), expectedFromModel(model, design.cols(pl)));
+  const variance = residualVariancePts(s);
+  if (variance == null) return null;
+  return { ae: toAbovePts(s.actual / s.n, s.expected / s.n), n: s.n, variance };
 }
 
 // Mean actual outcome minus mean model-expected outcome over `plays`, in pts.

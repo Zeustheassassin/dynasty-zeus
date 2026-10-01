@@ -9,31 +9,57 @@ import type { ProspectWithStats } from "@/lib/types";
 // and aggregateMerge.test.ts; here they're stubbed so the test pins the board's
 // wiring — which value lands in which column, and how the columns sort.
 
-vi.mock("@/lib/scouting/aboveExpected", () => ({
-  computeQBAboveExpected: () => new Map([["qb1", 3.5]]),
-  computeRBAboveExpected: () => new Map([["rb1", -2]]),
-  computeTERouteAboveExpected: () => new Map([["te1", 4.2], ["te2", null]]),
-  computeTEBlockAboveExpected: () => new Map([["te1", -1.1], ["te2", null]]),
-  computeQBThrowSliceAAE: () => new Map([["qb1", {
-    outside: { ae: 1.5, n: 20 }, inside: { ae: 7.2, n: 12 }, deep: { ae: null, n: 4 },
-    intermediate: { ae: -3, n: 11 }, short: { ae: 2, n: 17 },
-  }]]),
-  computeRBRunSliceSRAE: () => new Map([["rb1", {
-    outside: { ae: 4, n: 12 }, inside: { ae: -5.5, n: 30 }, zone: { ae: null, n: 6 }, man_gap: { ae: 0.4, n: 36 },
-  }]]),
-}));
+// The headline calculators return samples (value + plays + noise), which the
+// board shows as values and feeds to the AE Score. Each stub reads a per-id
+// table, so a test can add prospects (the AE Score's QB pool) just by listing
+// them. Noise is variance 4 (±2 pts) on 50 plays unless a test raises it.
+const { TABLES, NOISE } = vi.hoisted(() => {
+  const POOL_QB_AE = [-9, -6, -4, -2, 0, 1, 3, 5, 8, 12];
+  const qb: Record<string, number | null> = { qb1: 3.5 };
+  POOL_QB_AE.forEach((ae, i) => { qb[`pq${i}`] = ae; });
+  return {
+    NOISE: { variance: 4 },
+    TABLES: {
+      qb,
+      rb: { rb1: -2 } as Record<string, number | null>,
+      teRoute: { te1: 4.2, te2: null } as Record<string, number | null>,
+      teBlock: { te1: -1.1, te2: null } as Record<string, number | null>,
+    },
+  };
+});
+vi.mock("@/lib/scouting/aboveExpected", () => {
+  const samples = (table: Record<string, number | null>) => (prospects: { id: string }[]) =>
+    new Map(prospects.filter((p) => p.id in table).map((p) => {
+      const ae = table[p.id];
+      return [p.id, ae == null ? null : { ae, n: 50, variance: NOISE.variance }];
+    }));
+  return {
+    computeQBAboveExpectedSamples: samples(TABLES.qb),
+    computeRBAboveExpectedSamples: samples(TABLES.rb),
+    computeTERouteAboveExpectedSamples: samples(TABLES.teRoute),
+    computeTEBlockAboveExpectedSamples: samples(TABLES.teBlock),
+    aeValues: (m: Map<string, { ae: number } | null>) => new Map([...m].map(([id, v]) => [id, v?.ae ?? null])),
+    computeQBThrowSliceAAE: () => new Map([["qb1", {
+      outside: { ae: 1.5, n: 20 }, inside: { ae: 7.2, n: 12 }, deep: { ae: null, n: 4 },
+      intermediate: { ae: -3, n: 11 }, short: { ae: 2, n: 17 },
+    }]]),
+    computeRBRunSliceSRAE: () => new Map([["rb1", {
+      outside: { ae: 4, n: 12 }, inside: { ae: -5.5, n: 30 }, zone: { ae: null, n: 6 }, man_gap: { ae: 0.4, n: 36 },
+    }]]),
+  };
+});
 
 // The board sizes its proxy scrollbar with a ResizeObserver, which jsdom lacks.
 vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); NOISE.variance = 4; });
 
 const prospect = (id: string, name: string, position: string, rank: number, extra: Partial<ProspectWithStats> = {}) =>
   ({
     id, name, position, school: "State", conference: "", draft_class_year: 2027,
     height: "", weight: null, birthday: null, personal_rank: rank, overall_rank: rank,
     pre_draft_grade: null, post_draft_grade: null,
-    adj_success_above_exp: null, core_sae: null,
+    adj_success_above_exp: null, core_sae: null, sae_sample: null,
     ...extra,
   }) as ProspectWithStats;
 
@@ -48,10 +74,10 @@ const PROSPECTS = [
 
 const AE_LABELS = ["AAE", "SRAE", "SAE", "cSAE", "TE-SAER", "TE-SAEB"];
 
-function renderBoard() {
+function renderBoard(prospects: ProspectWithStats[] = PROSPECTS) {
   render(
     <BigBoard
-      prospects={PROSPECTS}
+      prospects={prospects}
       loading={false}
       onSelectProspect={vi.fn()}
       onUpdateRank={vi.fn()}
@@ -154,5 +180,60 @@ describe("BigBoard Above Exp columns", () => {
     fireEvent.click(screen.getByRole("columnheader", { name: "cSAE" }));
     expect(names()[0]).toBe("Wide One");
     expect(names().indexOf("Wide Two")).toBeGreaterThan(0);
+  });
+});
+
+describe("BigBoard AE Score", () => {
+  // Ten more QBs, enough for QB to join the score (qb1 makes eleven).
+  const POOL = Array.from({ length: 10 }, (_, i) => prospect(`pq${i}`, `Pool QB ${i}`, "QB", 10 + i));
+  const scoreOf = (name: string) => cell(name, "AE Score");
+  const scoreCell = (name: string) => within(rowFor(name)).getAllByRole("cell")[headerLabels().indexOf("AE Score")];
+
+  it("sits in its own Composite band before the Above Exp metrics, on every tab", () => {
+    renderBoard();
+    const labels = headerLabels();
+    expect(labels.indexOf("AE Score")).toBe(labels.indexOf("Wt") + 1);
+    expect(labels.indexOf("AAE")).toBe(labels.indexOf("AE Score") + 1);
+    expect(within(screen.getAllByRole("row")[0]).getAllByRole("columnheader").map((h) => h.textContent))
+      .toContain("Composite");
+    fireEvent.click(screen.getByRole("button", { name: /^TE/ }));
+    expect(headerLabels()).toContain("AE Score");
+  });
+
+  it("shows — and says why while a position has too few charted prospects", () => {
+    renderBoard();
+    expect(scoreOf("Quarter One")).toBe("—");
+    expect(scoreCell("Quarter One").getAttribute("title")).toBe("QBs join the AE Score once 10 clear the AAE sample floor (1 now)");
+    expect(screen.getByText(/AE Score true spread:/).textContent).toContain("TE joins at 10 (1 now)");
+  });
+
+  it("scores a position once it has the pool, and explains the number", () => {
+    renderBoard([...PROSPECTS, ...POOL]);
+    const score = scoreOf("Quarter One")!;
+    expect(score).toMatch(/^\+0\.\d\d$/);
+    const title = scoreCell("Quarter One").getAttribute("title")!;
+    expect(title.split("\n")[0]).toBe(`${score} true-talent SDs vs the average charted QB`);
+    expect(title).toContain("AAE +3.5 on 50 throws");
+    expect(screen.getByText(/AE Score true spread:/).textContent).toMatch(/QB ±\d+\.\d pts \(11\)/);
+    // Other positions are still short of the pool.
+    expect(scoreOf("Running One")).toBe("—");
+  });
+
+  it("keeps a full pool out, and says so, when its spread is all noise", () => {
+    NOISE.variance = 400; // ±20 pts each: the pool's ±6 is nothing but noise
+    renderBoard([...PROSPECTS, ...POOL]);
+    expect(scoreOf("Quarter One")).toBe("—");
+    expect(scoreCell("Quarter One").getAttribute("title"))
+      .toBe("QBs are out of the AE Score: their AAEs don't spread more than sample noise yet");
+    expect(screen.getByText(/AE Score true spread:/).textContent).toContain("QB out, no spread beyond noise (11)");
+  });
+
+  it("sorts best-first on the first click, unscored rows sinking", () => {
+    renderBoard([...PROSPECTS, ...POOL]);
+    fireEvent.click(screen.getByRole("columnheader", { name: "AE Score" }));
+    const order = names();
+    expect(order[0]).toBe("Pool QB 9"); // +12
+    expect(order.slice(0, 11).every((n) => n!.startsWith("Pool QB") || n === "Quarter One")).toBe(true);
+    expect(order.indexOf("Pool QB 0")).toBe(10); // -9, last of the scored
   });
 });

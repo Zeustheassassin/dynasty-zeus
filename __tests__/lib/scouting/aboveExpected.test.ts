@@ -16,6 +16,11 @@ import {
   computeTERouteAboveExpectedForPlays,
   buildTEBlockBaselines,
   computeTEBlockAboveExpectedForPlays,
+  computeRBAboveExpectedSamples,
+  computeQBAboveExpectedSamples,
+  computeTERouteAboveExpectedSamples,
+  computeTEBlockAboveExpectedSamples,
+  aeValues,
 } from "@/lib/scouting/aboveExpected";
 import type {
   Prospect,
@@ -836,5 +841,80 @@ describe("TE difficulty models", () => {
     const lost = (block_type: TEBlockType) =>
       computeTEBlockAboveExpectedForPlays([tePlay("g1", { play_type: "run_block", block_type, block_success: false })], B)!;
     expect(lost("movement") - lost("inline")).toBeGreaterThan(20);
+  });
+});
+
+// =============================================================================
+// AE samples — each headline AE with its play count and sampling variance, for
+// the cross-position AE Score (aeComposite.ts)
+// =============================================================================
+
+describe("AE samples", () => {
+  // Two prospects per position in one league, one clearly better, so each
+  // model has something to separate.
+  const prospects = [
+    prospect("rbA", "RB"), prospect("rbB", "RB"),
+    prospect("qbA", "QB"), prospect("qbB", "QB"),
+    prospect("teA", "TE"), prospect("teB", "TE"),
+  ];
+  const games = ["rbA", "rbB", "qbA", "qbB", "teA", "teB"].map((id) => game(`g_${id}`, id));
+  const rbPlays = [
+    ...repeat(30, (i) => rbPlay("g_rbA", "inside_zone", "gun", i % 10 < 7, i % 3 === 0)),
+    ...repeat(30, (i) => rbPlay("g_rbB", "outside_zone", "pistol", i % 10 < 4, i % 2 === 0)),
+  ];
+  const qbPlays = [
+    ...repeat(40, (i) => qbPlay("g_qbA", { accuracy: i % 10 < 8 ? "on_target" : "high", depth_zone: i % 2 ? "deep_left" : "short_center" })),
+    ...repeat(40, (i) => qbPlay("g_qbB", { accuracy: i % 10 < 5 ? "on_target" : "behind", completion: i % 4 ? "caught" : null, depth_zone: "short_center" })),
+  ];
+  const tePlays = [
+    ...repeat(20, (i) => tePlay("g_teA", { positioning: "slot", coverage: "man", was_open: i % 4 !== 0 })),
+    ...repeat(20, (i) => tePlay("g_teB", { positioning: "inline", coverage: "zone", was_open: i % 2 === 0 })),
+    ...repeat(20, (i) => tePlay("g_teA", { play_type: "run_block", block_type: "inline", block_success: i % 5 !== 0 })),
+    ...repeat(20, (i) => tePlay("g_teB", { play_type: "pass_block", block_type: "movement", block_success: i % 2 === 0 })),
+  ];
+
+  it("carries exactly the value each headline column shows", () => {
+    expect(aeValues(computeRBAboveExpectedSamples(prospects, games, rbPlays)))
+      .toEqual(computeRBAboveExpected(prospects, games, rbPlays));
+    expect(aeValues(computeQBAboveExpectedSamples(prospects, games, qbPlays)))
+      .toEqual(computeQBAboveExpected(prospects, games, qbPlays));
+    expect(aeValues(computeTERouteAboveExpectedSamples(prospects, games, tePlays)))
+      .toEqual(computeTERouteAboveExpected(prospects, games, tePlays));
+    expect(aeValues(computeTEBlockAboveExpectedSamples(prospects, games, tePlays)))
+      .toEqual(computeTEBlockAboveExpected(prospects, games, tePlays));
+    // And the fixture really separates them, so the check above isn't 0 = 0.
+    const rb = computeRBAboveExpected(prospects, games, rbPlays);
+    expect(rb.get("rbA")!).toBeGreaterThan(rb.get("rbB")!);
+  });
+
+  it("counts only the plays the metric is built on", () => {
+    expect(computeRBAboveExpectedSamples(prospects, games, rbPlays).get("rbA")!.n).toBe(30);
+    expect(computeQBAboveExpectedSamples(prospects, games, [
+      ...qbPlays,
+      ...repeat(10, () => qbPlay("g_qbA", { play_type: "run", accuracy: null })),
+      ...repeat(10, () => qbPlay("g_qbA", { accuracy: "tipped_ball", depth_zone: "short_center" })),
+    ]).get("qbA")!.n).toBe(40);
+    expect(computeTERouteAboveExpectedSamples(prospects, games, tePlays).get("teA")!.n).toBe(20);
+    expect(computeTEBlockAboveExpectedSamples(prospects, games, tePlays).get("teA")!.n).toBe(20);
+  });
+
+  it("gives the sampling variance of the mean residual, in pts²", () => {
+    // A lone back who is the whole league, 10 of 20 successes in one bucket:
+    // every run is expected at 0.5, so the residuals are ±0.5.
+    const lone = [prospect("rb1", "RB")];
+    const plays = [
+      ...repeat(10, () => rbPlay("g1", "inside_zone", "gun", true, true)),
+      ...repeat(10, () => rbPlay("g1", "inside_zone", "gun", false, true)),
+    ];
+    const smp = computeRBAboveExpectedSamples(lone, [game("g1", "rb1")], plays).get("rb1")!;
+    expect(smp.ae).toBe(0);
+    expect(smp.n).toBe(20);
+    expect(smp.variance).toBeCloseTo(((20 * 0.25) / 19 / 20) * 1e4, 6);
+  });
+
+  it("is null under the same floor as the column", () => {
+    const short = rbPlays.filter((pl) => pl.game_id === "g_rbA").slice(0, 14);
+    expect(computeRBAboveExpectedSamples(prospects, games, short).get("rbA")).toBeNull();
+    expect(computeQBAboveExpectedSamples(prospects, games, qbPlays.slice(0, 24)).get("qbA")).toBeNull();
   });
 });

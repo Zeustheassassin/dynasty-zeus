@@ -1,4 +1,5 @@
 import type {
+  AESample,
   Prospect,
   ProspectWithStats,
   RouteStat,
@@ -12,7 +13,10 @@ import {
   fitDifficultyModel,
   expectedFromModel,
   toAbovePts,
+  emptyResidualSums,
+  residualVariancePts,
   type FittedDifficulty,
+  type ResidualSums,
 } from "./difficultyModel";
 
 const ROUTE_TYPES: RouteType[] = [
@@ -146,18 +150,27 @@ export function buildWRModel(cellRows: ProspectRouteCellsRow[]): WRDifficultyMod
   return { design: WR_DESIGN, model: fitDifficultyModel(rows, WR_DESIGN.size, WR_RIDGE_LAMBDA) };
 }
 
+// Open / expected / squared-residual sums over a set of route cells. A cell of
+// n routes with k open adds k residuals of (1 − e) and n − k of −e.
+function cellSums(cells: RouteCell[], model: Float64Array): ResidualSums {
+  const s = emptyResidualSums();
+  for (const c of cells) {
+    const e = expectedFromModel(model, WR_DESIGN.cols(c));
+    s.n += c.n;
+    s.actual += c.open;
+    s.expected += c.n * e;
+    s.sq += c.open * (1 - e) * (1 - e) + (c.n - c.open) * e * e;
+  }
+  return s;
+}
+
 // Actual open rate vs the model's expected over a set of route cells. No
 // minimum-sample gate here — callers that need the reliability floor
 // (season/career) apply it themselves before calling in.
 function saeFromCells(cells: RouteCell[], model: WRDifficultyModel): number | null {
   if (!model.model) return null;
-  let n = 0, open = 0, expected = 0;
-  for (const c of cells) {
-    n += c.n;
-    open += c.open;
-    expected += c.n * expectedFromModel(model.model, WR_DESIGN.cols(c));
-  }
-  return n > 0 ? toAbovePts(open / n, expected / n) : null;
+  const s = cellSums(cells, model.model);
+  return s.n > 0 ? toAbovePts(s.actual / s.n, s.expected / s.n) : null;
 }
 
 const playCell = (p: RoutePlay): RouteCell => ({
@@ -181,6 +194,20 @@ function computeSAE(
 ): number | null {
   if (!v.has_charted_open_data || v.total_routes < 15) return null;
   return saeFromCells(cells, model);
+}
+
+// computeSAE plus the sample behind it, for the cross-position composite
+// (aeComposite.ts). Same gate, same sums, so `ae` equals computeSAE's value.
+function computeSAESample(
+  v: ProspectRouteStatsRow,
+  cells: RouteCell[],
+  model: WRDifficultyModel,
+): AESample | null {
+  if (!v.has_charted_open_data || v.total_routes < 15 || !model.model) return null;
+  const s = cellSums(cells, model.model);
+  const variance = residualVariancePts(s);
+  if (variance == null) return null;
+  return { ae: toAbovePts(s.actual / s.n, s.expected / s.n), n: s.n, variance };
 }
 
 // Season/career cSAE, gated on 15 core routes. Exact: each cell carries its
@@ -321,6 +348,7 @@ export function buildProspectsWithStats(
       pct_on_line: v?.pct_on_line ?? null,
       adj_success_above_exp: v ? computeSAE(v, cells, wrModel) : null,
       core_sae: v ? computeCoreSAE(v, cells, wrModel) : null,
+      sae_sample: v ? computeSAESample(v, cells, wrModel) : null,
       avg_external_rank: avgExternalRank(p),
       depth_behind_los: v?.depth_behind_los ?? 0,
       depth_on_los: v?.depth_on_los ?? 0,

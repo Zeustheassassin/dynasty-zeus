@@ -12,6 +12,7 @@
 // differ only in the outcome, the situation dimensions, and the ridge strength.
 
 import type {
+  AESample,
   Prospect,
   ScoutingGame,
   RBPlay,
@@ -34,6 +35,10 @@ import {
   fitFromPlays,
   expectedFromModel,
   aboveExpectedForPlays,
+  aboveExpectedSampleForPlays,
+  emptyResidualSums,
+  addResidual,
+  residualVariancePts,
   type DifficultyDim,
   type ModelRow,
   type FittedDifficulty,
@@ -99,6 +104,14 @@ const SLICE_MIN_SAMPLE = 10;
 // One slice's above-expected value (pts; null = under a floor) and how many of
 // the prospect's plays fell in it.
 export interface AESlice { ae: number | null; n: number }
+
+// The headline calculators come in pairs: `compute*AboveExpectedSamples` keeps
+// each prospect's play count and sampling variance (the composite needs them),
+// and `compute*AboveExpected` is just its values. Callers that need both should
+// take the samples and map them through aeValues, so the league model is fit once.
+export function aeValues(samples: Map<string, AESample | null>): Map<string, number | null> {
+  return new Map([...samples].map(([id, s]) => [id, s?.ae ?? null]));
+}
 
 // #3-modified — graded "throw value" replacing the old binary on-target flag.
 // An on_target throw is a perfect 1.0 (caught or dropped — placement is the
@@ -191,24 +204,31 @@ export function computeRBAboveExpectedForPlays(
   return aboveExpectedForPlays(plays.filter(isKnownRun), baselines, rbSuccess);
 }
 
-export function computeRBAboveExpected(
+export function computeRBAboveExpectedSamples(
   prospects: Prospect[],
   games: ScoutingGame[],
   rbPlays: RBPlay[],
-): Map<string, number | null> {
-  const out = new Map<string, number | null>();
+): Map<string, AESample | null> {
+  const out = new Map<string, AESample | null>();
   const gameToProspect = buildGameToProspect(games);
   const playsByProspect = buildPlaysByProspect(rbPlays, gameToProspect);
   const baselines = buildRBBaselines(rbPlays);
 
   for (const p of prospects) {
     if (p.position !== "RB") continue;
-    const pPlays = playsByProspect.get(p.id) ?? [];
-    if (pPlays.filter(isKnownRun).length < MIN_SAMPLE) { out.set(p.id, null); continue; }
-    out.set(p.id, computeRBAboveExpectedForPlays(pPlays, baselines));
+    const runs = (playsByProspect.get(p.id) ?? []).filter(isKnownRun);
+    out.set(p.id, runs.length < MIN_SAMPLE ? null : aboveExpectedSampleForPlays(runs, baselines, rbSuccess));
   }
 
   return out;
+}
+
+export function computeRBAboveExpected(
+  prospects: Prospect[],
+  games: ScoutingGame[],
+  rbPlays: RBPlay[],
+): Map<string, number | null> {
+  return aeValues(computeRBAboveExpectedSamples(prospects, games, rbPlays));
 }
 
 // ── RB SRAE by run type ──────────────────────────────────────────────────
@@ -524,6 +544,17 @@ function modelAAE(ratedPasses: QBPlay[], R: ResolvedBaselines): number | null {
     : null;
 }
 
+// modelAAE plus the sample behind it (see AESample). Same sums in the same
+// order, so `ae` is exactly modelAAE's value.
+function modelAAESample(ratedPasses: QBPlay[], R: ResolvedBaselines): AESample | null {
+  if (!R.model) return null;
+  const s = emptyResidualSums();
+  for (const pl of ratedPasses) addResidual(s, throwValue(pl), expectedFromModel(R.model, QB_DESIGN.cols(pl)));
+  const variance = residualVariancePts(s);
+  if (variance == null) return null;
+  return { ae: parseFloat((((s.actual - s.expected) / s.n) * 100).toFixed(2)), n: s.n, variance };
+}
+
 // Overall AAE for an arbitrary QB play subset (a prospect's whole sample, or
 // just one game's) against already-resolved league baselines. No minimum-
 // sample gate — see computeRBAboveExpectedForPlays for why.
@@ -540,12 +571,12 @@ function toAaeRow(dim: { expected: number | null; actual: number | null; n: numb
   };
 }
 
-export function computeQBAboveExpected(
+export function computeQBAboveExpectedSamples(
   prospects: Prospect[],
   games: ScoutingGame[],
   qbPlays: QBPlay[],
-): Map<string, number | null> {
-  const out = new Map<string, number | null>();
+): Map<string, AESample | null> {
+  const out = new Map<string, AESample | null>();
   const gameToProspect = buildGameToProspect(games);
   const playsByProspect = buildPlaysByProspect(qbPlays, gameToProspect);
   const R = resolveBaselines(buildQBBaselines(qbPlays));
@@ -553,11 +584,18 @@ export function computeQBAboveExpected(
   for (const p of prospects) {
     if (p.position !== "QB") continue;
     const ratedPasses = (playsByProspect.get(p.id) ?? []).filter(isQBGradedThrow);
-    if (ratedPasses.length < QB_MIN_SAMPLE) { out.set(p.id, null); continue; }
-    out.set(p.id, modelAAE(ratedPasses, R));
+    out.set(p.id, ratedPasses.length < QB_MIN_SAMPLE ? null : modelAAESample(ratedPasses, R));
   }
 
   return out;
+}
+
+export function computeQBAboveExpected(
+  prospects: Prospect[],
+  games: ScoutingGame[],
+  qbPlays: QBPlay[],
+): Map<string, number | null> {
+  return aeValues(computeQBAboveExpectedSamples(prospects, games, qbPlays));
 }
 
 // Per-dimension AAE for a single prospect, given that prospect's plays and the
@@ -666,24 +704,31 @@ export function computeTERouteAboveExpectedForPlays(
   return aboveExpectedForPlays(plays.filter(isRatedTERoute), baselines, teOpen);
 }
 
-export function computeTERouteAboveExpected(
+export function computeTERouteAboveExpectedSamples(
   prospects: Prospect[],
   games: ScoutingGame[],
   tePlays: TEPlay[],
-): Map<string, number | null> {
-  const out = new Map<string, number | null>();
+): Map<string, AESample | null> {
+  const out = new Map<string, AESample | null>();
   const gameToProspect = buildGameToProspect(games);
   const playsByProspect = buildPlaysByProspect(tePlays, gameToProspect);
   const baselines = buildTERouteBaselines(tePlays);
 
   for (const p of prospects) {
     if (p.position !== "TE") continue;
-    const pPlays = playsByProspect.get(p.id) ?? [];
-    if (pPlays.filter(isRatedTERoute).length < MIN_SAMPLE) { out.set(p.id, null); continue; }
-    out.set(p.id, computeTERouteAboveExpectedForPlays(pPlays, baselines));
+    const routes = (playsByProspect.get(p.id) ?? []).filter(isRatedTERoute);
+    out.set(p.id, routes.length < MIN_SAMPLE ? null : aboveExpectedSampleForPlays(routes, baselines, teOpen));
   }
 
   return out;
+}
+
+export function computeTERouteAboveExpected(
+  prospects: Prospect[],
+  games: ScoutingGame[],
+  tePlays: TEPlay[],
+): Map<string, number | null> {
+  return aeValues(computeTERouteAboveExpectedSamples(prospects, games, tePlays));
 }
 
 // ── TE TE-SAEB (blocking) ────────────────────────────────────────────────
@@ -724,22 +769,29 @@ export function computeTEBlockAboveExpectedForPlays(
   return aboveExpectedForPlays(plays.filter(isRatedTEBlock), baselines, teBlockWon);
 }
 
-export function computeTEBlockAboveExpected(
+export function computeTEBlockAboveExpectedSamples(
   prospects: Prospect[],
   games: ScoutingGame[],
   tePlays: TEPlay[],
-): Map<string, number | null> {
-  const out = new Map<string, number | null>();
+): Map<string, AESample | null> {
+  const out = new Map<string, AESample | null>();
   const gameToProspect = buildGameToProspect(games);
   const playsByProspect = buildPlaysByProspect(tePlays, gameToProspect);
   const baselines = buildTEBlockBaselines(tePlays);
 
   for (const p of prospects) {
     if (p.position !== "TE") continue;
-    const pPlays = playsByProspect.get(p.id) ?? [];
-    if (pPlays.filter(isRatedTEBlock).length < MIN_SAMPLE) { out.set(p.id, null); continue; }
-    out.set(p.id, computeTEBlockAboveExpectedForPlays(pPlays, baselines));
+    const blocks = (playsByProspect.get(p.id) ?? []).filter(isRatedTEBlock);
+    out.set(p.id, blocks.length < MIN_SAMPLE ? null : aboveExpectedSampleForPlays(blocks, baselines, teBlockWon));
   }
 
   return out;
+}
+
+export function computeTEBlockAboveExpected(
+  prospects: Prospect[],
+  games: ScoutingGame[],
+  tePlays: TEPlay[],
+): Map<string, number | null> {
+  return aeValues(computeTEBlockAboveExpectedSamples(prospects, games, tePlays));
 }
