@@ -339,18 +339,18 @@ describe("BigBoard Dynasty Score", () => {
     // 22.25 as a rookie: a hair under the typical 22-year-old's window → small minus.
     expect(dyn).toBeLessThan(ae);
     expect(dyn).toBeGreaterThan(ae - 0.1);
-    // Round 1 adds +1.00 at the default weight.
-    expect(plus).toBeCloseTo(dyn + 1, 2);
+    // Round 1 adds +2.00 at the default 2× draft weight.
+    expect(plus).toBeCloseTo(dyn + 2, 2);
     const title = scoreCellOf("Quarter One", "Dynasty+").getAttribute("title")!;
     expect(title).toContain("AE Score ");
     expect(title).toContain("Age 22.3 as a rookie");
-    expect(title).toContain("Drafted: 1st → +1.00");
+    expect(title).toContain("Drafted: 1st → +2.00");
   });
 
   it("re-weights from the sliders", () => {
     renderBoard([...PROSPECTS.map((p) => (p.id === "qb1" ? { ...p, draft_round: 8 } : p)), ...POOL]);
     const dyn = Number(cell("Quarter One", "Dynasty"));
-    expect(Number(cell("Quarter One", "Dynasty+"))).toBeCloseTo(dyn - 1, 2); // Undrafted −1.00
+    expect(Number(cell("Quarter One", "Dynasty+"))).toBeCloseTo(dyn - 2, 2); // Undrafted −2.00 at 2×
     fireEvent.change(screen.getByRole("slider", { name: "Draft weight" }), { target: { value: "0.5" } });
     expect(Number(cell("Quarter One", "Dynasty+"))).toBeCloseTo(dyn - 0.5, 2);
     expect(JSON.parse(localStorage.getItem("dynastyScoreWeights")!)).toMatchObject({ draft: 0.5 });

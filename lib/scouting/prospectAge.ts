@@ -56,7 +56,6 @@ export function parseHeightInches(height: string | null | undefined): number | n
   const s = height.trim();
   const ftIn = s.match(/^(\d)\s*['’-]\s*(\d{1,2})/);
   if (ftIn) return Number(ftIn[1]) * 12 + Number(ftIn[2]);
-  const inches = s.match(/^(\d{2})(\.\d+)?$/);
-  if (inches) return Number(s);
+  if (/^\d{2}(\.\d+)?$/.test(s)) return Number(s);
   return null;
 }

@@ -87,7 +87,7 @@ const signed = (v: number, dp: number) => `${v >= 0 ? "+" : ""}${v.toFixed(dp)}`
 const DYNASTY_WEIGHTS_KEY = "dynastyScoreWeights";
 const WEIGHT_SLIDERS: { key: keyof DynastyWeights; label: string; hint: string }[] = [
   { key: "age",   label: "Age",   hint: "How much the career window (prime seasons left) counts" },
-  { key: "size",  label: "Size",  hint: "How much the extreme-size flags count" },
+  { key: "size",  label: "Size",  hint: "How much size counts: RBs and WRs carrying more weight for their height gain, lean and very light ones lose" },
   { key: "draft", label: "Draft", hint: "How much draft round counts in Dynasty Score Plus" },
 ];
 
@@ -649,10 +649,10 @@ export default function BigBoard({
   const dynastyTooltip =
     "Dynasty Score: the AE Score plus a career-window adjustment for age (prime seasons left at rookie " +
     `age vs a typical ${REFERENCE_ROOKIE_AGE}-year-old rookie; primes end RB ${PRIME_END_AGE.RB}, WR ${PRIME_END_AGE.WR}, ` +
-    `TE ${PRIME_END_AGE.TE}, QB ${PRIME_END_AGE.QB}) and small flags for extreme size. Weighted by the sliders.`;
+    `TE ${PRIME_END_AGE.TE}, QB ${PRIME_END_AGE.QB}) and size (RB and WR pounds per inch of height vs the position's typical, plus WRs under 175 lb). Weighted by the sliders.`;
   const dynastyPlusTooltip =
-    "Dynasty Score Plus: the Dynasty Score plus draft capital (initial opportunity), from 1st round +1.0 " +
-    "to Undrafted −1.0 at the default weight. Shows once the NFL draft round is set.";
+    "Dynasty Score Plus: the Dynasty Score plus draft capital (initial opportunity), from 1st round +2.0 " +
+    "to Undrafted −2.0 at the default 2× weight. Shows once the NFL draft round is set.";
 
   // Each position's true spread, or how far it is from joining the score.
   const compositeStatus = COMPOSITE_POS.map((pos) => {
