@@ -333,6 +333,24 @@ export default function ScoutingHub() {
     }
   }
 
+  // NFL draft round: 1–7, UNDRAFTED_ROUND (8), or null before the draft. Same
+  // optimistic write-and-roll-back as the grades. Resolves false on a failed
+  // write so the Big Board's one-time localStorage migration keeps that entry.
+  async function handleUpdateDraftRound(id: string, round: number | null): Promise<boolean> {
+    const previous = prospects.find((p) => p.id === id)?.draft_round ?? null;
+    setProspects((prev) => prev.map((p) => p.id === id ? { ...p, draft_round: round } : p));
+    const { error } = await supabase
+      .from("prospects")
+      .update({ draft_round: round, updated_at: new Date().toISOString() })
+      .eq("id", id);
+    if (error) {
+      log.error("update prospect draft round", { msg: error.message });
+      setProspects((prev) => prev.map((p) => p.id === id ? { ...p, draft_round: previous } : p));
+      return false;
+    }
+    return true;
+  }
+
   // Position rank: #1 WR, #1 QB, etc. — scoped to same position + draft class
   async function handleUpdateRank(id: string, targetRank: number) {
     const clamp = Math.max(1, targetRank);
@@ -546,6 +564,7 @@ export default function ScoutingHub() {
             onUpdateRank={handleUpdateRank}
             onUpdateOverallRank={handleUpdateOverallRank}
             onUpdateGrade={handleUpdateGrade}
+            onUpdateDraftRound={handleUpdateDraftRound}
             draftYearFilter={draftYearFilter}
             setDraftYearFilter={setDraftYearFilter}
             games={games}

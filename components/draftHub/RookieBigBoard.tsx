@@ -10,6 +10,7 @@ import { useValues } from "../../lib/ValuesContext";
 import type { RookieBoardPlayer } from "../../lib/types";
 import { posBadge, rookieKey, fuzzyFcLookup, normalizeRookieName } from "./shared";
 import { getLocalStorageItem, setLocalStorageItem } from "@/lib/hooks/useLocalStorage";
+import { nflDraftSlotLabel, UNDRAFTED_ROUND } from "../../lib/draftRound";
 
 const log = logger("components/draftHub/RookieBigBoard");
 
@@ -637,7 +638,8 @@ export default function RookieBigBoard({
                           />
                           <input
                             placeholder="Rd"
-                            type="number" min={1} max={7}
+                            title={`Round 1–7, or ${UNDRAFTED_ROUND} for undrafted`}
+                            type="number" min={1} max={UNDRAFTED_ROUND}
                             className="w-7 px-0.5 py-0.5 bg-slate-900 border border-indigo-500 rounded text-white text-[10px] focus:outline-none text-center"
                             value={draftRound}
                             onChange={(e) => setDraftRound(e.target.value)}
@@ -655,9 +657,7 @@ export default function RookieBigBoard({
                       ) : (() => {
                         const info = nflDraftInfo[tierKey];
                         const hasInfo = info?.team || info?.round != null || info?.pick != null;
-                        const label = hasInfo
-                          ? [info.team || null, info.round != null ? `R${info.round}` : null, info.pick != null ? `#${info.pick}` : null].filter(Boolean).join(" · ")
-                          : null;
+                        const label = hasInfo ? nflDraftSlotLabel(info) : null;
                         return (
                           <button
                             onClick={(e) => { e.stopPropagation(); openDraftEdit(tierKey); }}

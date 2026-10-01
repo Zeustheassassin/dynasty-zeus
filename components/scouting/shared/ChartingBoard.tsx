@@ -4,6 +4,7 @@ import type { Prospect, ScoutingGame, ChartingDecision } from "../../../lib/type
 import { GAME_TYPES, CHARTING_DECISIONS } from "./chartingConstants";
 import { BASE_YEAR, FILM_YEARS, classYearOptionsWith } from "../../../lib/helpers/season";
 import { parseGrade, formatGrade, gradeColor, GRADE_MIN, GRADE_MAX } from "../../../lib/scouting/prospectGrade";
+import { DRAFT_ROUND_CHOICES, UNDRAFTED_ROUND, draftRoundLabel } from "../../../lib/draftRound";
 
 export interface ChartingBoardConfig {
   positionLabel: string;
@@ -152,9 +153,12 @@ export default function ChartingBoard({
                 <span className={gradeColor(prospect.post_draft_grade)}>{formatGrade(prospect.post_draft_grade)}</span>
               </span>
             )}
-            {prospect.draft_round && (
+            {prospect.draft_round != null && (
               <span className="px-2 py-0.5 bg-yellow-600/20 border border-yellow-600/40 rounded text-xs font-semibold text-yellow-400">
-                Rd {prospect.draft_round}{prospect.draft_pick ? `, Pick ${prospect.draft_pick}` : ""}{prospect.draft_team ? ` · ${prospect.draft_team}` : ""}
+                {prospect.draft_round === UNDRAFTED_ROUND
+                  ? "Undrafted"
+                  : `Rd ${prospect.draft_round}${prospect.draft_pick ? `, Pick ${prospect.draft_pick}` : ""}`}
+                {prospect.draft_team ? ` · ${prospect.draft_team}` : ""}
               </span>
             )}
           </div>
@@ -237,10 +241,13 @@ export default function ChartingBoard({
           <div className="grid grid-cols-3 gap-3 mb-3">
             <div>
               <label className="block text-xs text-slate-500 mb-1">Draft Round</label>
-              <input type="number" min={1} max={7} placeholder="e.g. 1"
+              <select
                 className={`w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-white text-sm focus:outline-none ${a.focusBorder}`}
                 value={bio.draft_round ?? ""}
-                onChange={(e) => onBioChange({ draft_round: e.target.value ? Number(e.target.value) : null })} />
+                onChange={(e) => onBioChange({ draft_round: e.target.value ? Number(e.target.value) : null })}>
+                <option value="">—</option>
+                {DRAFT_ROUND_CHOICES.map((r) => <option key={r} value={r}>{draftRoundLabel(r)}</option>)}
+              </select>
             </div>
             <div>
               <label className="block text-xs text-slate-500 mb-1">Draft Pick #</label>

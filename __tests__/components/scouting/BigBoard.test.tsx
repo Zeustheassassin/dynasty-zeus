@@ -49,16 +49,35 @@ vi.mock("@/lib/scouting/aboveExpected", () => {
   };
 });
 
+// The recruit index (247 HS class year, for estimated ages) is a table load;
+// here a per-id stub, filled by the age tests.
+const { HS_CLASS } = vi.hoisted(() => ({ HS_CLASS: {} as Record<string, number> }));
+vi.mock("@/hooks/useRecruitIndex", () => ({
+  useRecruitIndex: () => ({
+    loaded: true,
+    recruitCount: 0,
+    matchProspect: (p: { name: string }) => {
+      const id = Object.keys(HS_CLASS).find((k) => k === p.name);
+      return id ? { year: HS_CLASS[id] } : null;
+    },
+  }),
+}));
+
 // The board sizes its proxy scrollbar with a ResizeObserver, which jsdom lacks.
 vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
 
-afterEach(() => { cleanup(); NOISE.variance = 4; });
+afterEach(() => {
+  cleanup();
+  NOISE.variance = 4;
+  for (const k of Object.keys(HS_CLASS)) delete HS_CLASS[k];
+  localStorage.clear();
+});
 
 const prospect = (id: string, name: string, position: string, rank: number, extra: Partial<ProspectWithStats> = {}) =>
   ({
     id, name, position, school: "State", conference: "", draft_class_year: 2027,
     height: "", weight: null, birthday: null, personal_rank: rank, overall_rank: rank,
-    pre_draft_grade: null, post_draft_grade: null,
+    pre_draft_grade: null, post_draft_grade: null, draft_round: null,
     adj_success_above_exp: null, core_sae: null, sae_sample: null, core_sae_sample: null,
     ...extra,
   }) as ProspectWithStats;
@@ -74,7 +93,10 @@ const PROSPECTS = [
 
 const AE_LABELS = ["AAE", "SRAE", "SAE", "cSAE", "TE-SAER", "TE-SAEB"];
 
-function renderBoard(prospects: ProspectWithStats[] = PROSPECTS) {
+function renderBoard(
+  prospects: ProspectWithStats[] = PROSPECTS,
+  onUpdateDraftRound: (id: string, round: number | null) => Promise<boolean> = vi.fn(async () => true),
+) {
   render(
     <BigBoard
       prospects={prospects}
@@ -83,6 +105,7 @@ function renderBoard(prospects: ProspectWithStats[] = PROSPECTS) {
       onUpdateRank={vi.fn()}
       onUpdateOverallRank={vi.fn()}
       onUpdateGrade={vi.fn()}
+      onUpdateDraftRound={onUpdateDraftRound}
       draftYearFilter={null}
       setDraftYearFilter={vi.fn()}
       games={[]}
@@ -193,7 +216,8 @@ describe("BigBoard AE Score", () => {
     renderBoard();
     const labels = headerLabels();
     expect(labels.indexOf("AE Score")).toBe(labels.indexOf("Wt") + 1);
-    expect(labels.indexOf("AAE")).toBe(labels.indexOf("AE Score") + 1);
+    expect(labels.slice(labels.indexOf("AE Score"), labels.indexOf("AE Score") + 3)).toEqual(["AE Score", "Dynasty", "Dynasty+"]);
+    expect(labels.indexOf("AAE")).toBe(labels.indexOf("Dynasty+") + 1);
     expect(within(screen.getAllByRole("row")[0]).getAllByRole("columnheader").map((h) => h.textContent))
       .toContain("Composite");
     fireEvent.click(screen.getByRole("button", { name: /^TE/ }));
@@ -235,5 +259,104 @@ describe("BigBoard AE Score", () => {
     expect(order[0]).toBe("Pool QB 9"); // +12
     expect(order.slice(0, 11).every((n) => n!.startsWith("Pool QB") || n === "Quarter One")).toBe(true);
     expect(order.indexOf("Pool QB 0")).toBe(10); // -9, last of the scored
+  });
+});
+
+describe("BigBoard NFL draft round", () => {
+  const roundSelect = (name: string) => screen.getByRole("combobox", { name: `NFL draft round for ${name}` }) as HTMLSelectElement;
+
+  it("reads the saved round, labels 8 as Undrafted, and saves a change", () => {
+    const save = vi.fn(async () => true);
+    renderBoard([
+      prospect("a", "Rd One", "WR", 1, { draft_round: 1 }),
+      prospect("b", "No Pick", "WR", 2, { draft_round: 8 }),
+      prospect("c", "Not Yet", "WR", 3),
+    ], save);
+    expect(roundSelect("Rd One").value).toBe("1");
+    expect(roundSelect("No Pick").selectedOptions[0].textContent).toBe("Undrafted");
+    expect(within(roundSelect("Not Yet")).getAllByRole("option").map((o) => o.textContent))
+      .toEqual(["—", "1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "Undrafted"]);
+    fireEvent.change(roundSelect("Not Yet"), { target: { value: "8" } });
+    expect(save).toHaveBeenCalledWith("c", 8);
+    fireEvent.change(roundSelect("Rd One"), { target: { value: "" } });
+    expect(save).toHaveBeenCalledWith("a", null);
+  });
+
+  it("moves rounds kept in this browser into the database once, never over a saved one", async () => {
+    localStorage.setItem("nflDraftRound", JSON.stringify({ a: 3, b: 5, gone: 2 }));
+    const save = vi.fn(async () => true);
+    renderBoard([
+      prospect("a", "Local Only", "WR", 1),
+      prospect("b", "Saved Already", "WR", 2, { draft_round: 1 }),
+    ], save);
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save).toHaveBeenCalledWith("a", 3);
+    await vi.waitFor(() => expect(JSON.parse(localStorage.getItem("nflDraftRound")!)).toEqual({}));
+  });
+
+  it("keeps a local round whose database write failed", async () => {
+    localStorage.setItem("nflDraftRound", JSON.stringify({ a: 3 }));
+    const save = vi.fn(async () => false);
+    renderBoard([prospect("a", "Local Only", "WR", 1)], save);
+    await vi.waitFor(() => expect(JSON.parse(localStorage.getItem("nflDraftRound")!)).toEqual({ a: 3 }));
+  });
+});
+
+describe("BigBoard ages", () => {
+  it("shows an exact age from the birthday and a ~estimate from the HS class", () => {
+    HS_CLASS["Est Age"] = 2023;
+    renderBoard([
+      prospect("a", "Has Bday", "WR", 1, { birthday: "2004-01-15" }),
+      prospect("b", "Est Age", "WR", 2),
+      prospect("c", "No Age", "WR", 3),
+    ]);
+    expect(cell("Has Bday", "Age")).toMatch(/^\d\d$/);
+    expect(cell("Est Age", "Age")).toMatch(/^~\d\d$/);
+    expect(cell("No Age", "Age")).toBe("—");
+  });
+});
+
+describe("BigBoard Dynasty Score", () => {
+  const POOL = Array.from({ length: 10 }, (_, i) => prospect(`pq${i}`, `Pool QB ${i}`, "QB", 10 + i));
+  const scoreCellOf = (name: string, label: string) =>
+    within(rowFor(name)).getAllByRole("cell")[headerLabels().indexOf(label)];
+
+  it("needs an AE Score, and Plus also needs the draft round", () => {
+    renderBoard([...PROSPECTS, ...POOL]);
+    expect(cell("Running One", "Dynasty")).toBe("—"); // RB pool too small for an AE Score
+    expect(cell("Quarter One", "Dynasty")).toMatch(/^[+-]\d\.\d\d$/);
+    expect(cell("Quarter One", "Dynasty+")).toBe("—");
+    expect(scoreCellOf("Quarter One", "Dynasty+").getAttribute("title")).toBe("Set the NFL draft round to see Dynasty Score Plus");
+  });
+
+  it("adds age and draft capital, and explains each piece", () => {
+    renderBoard([...PROSPECTS.map((p) => (p.id === "qb1" ? { ...p, draft_round: 1, birthday: "2005-06-01" } : p)), ...POOL]);
+    const ae = Number(cell("Quarter One", "AE Score"));
+    const dyn = Number(cell("Quarter One", "Dynasty"));
+    const plus = Number(cell("Quarter One", "Dynasty+"));
+    // 22.25 as a rookie: a hair under the typical 22-year-old's window → small minus.
+    expect(dyn).toBeLessThan(ae);
+    expect(dyn).toBeGreaterThan(ae - 0.1);
+    // Round 1 adds +1.00 at the default weight.
+    expect(plus).toBeCloseTo(dyn + 1, 2);
+    const title = scoreCellOf("Quarter One", "Dynasty+").getAttribute("title")!;
+    expect(title).toContain("AE Score ");
+    expect(title).toContain("Age 22.3 as a rookie");
+    expect(title).toContain("Drafted: 1st → +1.00");
+  });
+
+  it("re-weights from the sliders", () => {
+    renderBoard([...PROSPECTS.map((p) => (p.id === "qb1" ? { ...p, draft_round: 8 } : p)), ...POOL]);
+    const dyn = Number(cell("Quarter One", "Dynasty"));
+    expect(Number(cell("Quarter One", "Dynasty+"))).toBeCloseTo(dyn - 1, 2); // Undrafted −1.00
+    fireEvent.change(screen.getByRole("slider", { name: "Draft weight" }), { target: { value: "0.5" } });
+    expect(Number(cell("Quarter One", "Dynasty+"))).toBeCloseTo(dyn - 0.5, 2);
+    expect(JSON.parse(localStorage.getItem("dynastyScoreWeights")!)).toMatchObject({ draft: 0.5 });
+  });
+
+  it("sorts best-first on the first click", () => {
+    renderBoard([...PROSPECTS, ...POOL]);
+    fireEvent.click(screen.getByRole("columnheader", { name: "Dynasty" }));
+    expect(names()[0]).toBe("Pool QB 9");
   });
 });

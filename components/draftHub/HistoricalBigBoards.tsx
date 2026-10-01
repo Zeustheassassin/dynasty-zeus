@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "../../lib/supabaseclient";
 import { useAuth } from "../../lib/AuthContext";
 import { posBadge } from "./shared";
+import { nflDraftSlotLabel } from "../../lib/draftRound";
 
 type NflDraft = { team: string; round: number | null; pick: number | null } | null;
 
@@ -146,10 +147,7 @@ export default function HistoricalBigBoards() {
           <div className="space-y-0.5">
             {players.map((p) => {
               const nfl = p.nfl_draft;
-              const nflLabel = nfl
-                ? [nfl.team || null, nfl.round != null ? `R${nfl.round}` : null, nfl.pick != null ? `#${nfl.pick}` : null]
-                    .filter(Boolean).join(" · ")
-                : null;
+              const nflLabel = nfl ? nflDraftSlotLabel(nfl) : null;
               return (
                 <div
                   key={`${p.rank}-${p.name}`}

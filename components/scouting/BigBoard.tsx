@@ -16,6 +16,14 @@ import {
   buildAEComposite, MIN_POOL,
   type AEComposite, type AEScore, type CompositePos,
 } from "../../lib/scouting/aeComposite";
+import {
+  scoreDynasty, PRIME_END_AGE, REFERENCE_ROOKIE_AGE,
+  DEFAULT_DYNASTY_WEIGHTS, WEIGHT_MIN, WEIGHT_MAX, WEIGHT_STEP,
+  type DynastyBreakdown, type DynastyWeights,
+} from "../../lib/scouting/dynastyScore";
+import { prospectAgeAt, rookieSeasonAge, parseHeightInches, type ProspectAge } from "../../lib/scouting/prospectAge";
+import { DRAFT_ROUND_CHOICES, UNDRAFTED_ROUND, draftRoundLabel } from "../../lib/draftRound";
+import { useRecruitIndex } from "../../hooks/useRecruitIndex";
 import { POS_COLOR } from "../../lib/uiTheme";
 import {
   parseGrade, formatGrade, gradeColor, gradeDelta, gradeTier, gradeTierRange,
@@ -23,12 +31,6 @@ import {
 } from "../../lib/scouting/prospectGrade";
 
 type LoadPositionPlaysFn = (pos: "RB" | "QB" | "TE") => void;
-
-// NFL Draft column is a per-prospect projected round (1st–7th).
-const DRAFT_ROUNDS = [1, 2, 3, 4, 5, 6, 7];
-const ROUND_LABEL: Record<number, string> = {
-  1: "1st", 2: "2nd", 3: "3rd", 4: "4th", 5: "5th", 6: "6th", 7: "7th",
-};
 
 type BoardTab = "all" | "QB" | "RB" | "WR" | "TE";
 
@@ -77,9 +79,24 @@ const COMPOSITE_POS: CompositePos[] = ["QB", "RB", "WR", "TE"];
 const isCompositePos = (pos: string): pos is CompositePos => (COMPOSITE_POS as string[]).includes(pos);
 const signed = (v: number, dp: number) => `${v >= 0 ? "+" : ""}${v.toFixed(dp)}`;
 
+// The Dynasty sliders, persisted per browser (a viewing preference).
+const DYNASTY_WEIGHTS_KEY = "dynastyScoreWeights";
+const WEIGHT_SLIDERS: { key: keyof DynastyWeights; label: string; hint: string }[] = [
+  { key: "age",   label: "Age",   hint: "How much the career window (prime seasons left) counts" },
+  { key: "size",  label: "Size",  hint: "How much the extreme-size flags count" },
+  { key: "draft", label: "Draft", hint: "How much draft round counts in Dynasty Score Plus" },
+];
+
+// Derived per-prospect values the sort reads.
+interface SortContext {
+  aeScores: Map<string, AEScore>;
+  dynasty: Map<string, DynastyBreakdown>;
+  ages: Map<string, ProspectAge>;
+}
+
 type SortKey =
   | "pre_draft_grade" | "post_draft_grade" | "grade_delta"
-  | "personal_rank" | "overall_rank" | "ae_score" | "name" | "school" | "conference" | "draft_class_year" | "height" | "weight" | "age" | "position"
+  | "personal_rank" | "overall_rank" | "ae_score" | "dynasty" | "dynasty_plus" | "name" | "school" | "conference" | "draft_class_year" | "height" | "weight" | "age" | "position"
   | "total_routes" | "total_games" | "targets" | "catches" | "drops" | "contested" | "contested_catches"
   | "success_rate" | "target_rate" | "adj_success_above_exp" | `ae_${AEKey}`
   | "pct_left" | "pct_right" | "pct_slot" | "pct_backfield"
@@ -102,6 +119,8 @@ interface Props {
   onUpdateOverallRank: (id: string, rank: number) => Promise<void>;
   /** Persist a pre/post draft grade (1.0-100.0, one decimal) or null to clear it. */
   onUpdateGrade: (id: string, field: GradeField, grade: number | null) => Promise<void>;
+  /** Persist the NFL draft round (1–7, UNDRAFTED_ROUND) or null; false if the write failed. */
+  onUpdateDraftRound: (id: string, round: number | null) => Promise<boolean>;
   draftYearFilter: number | null;
   setDraftYearFilter: (y: number | null) => void;
   // Raw plays + games are lazy-loaded by ScoutingHub. The board triggers
@@ -115,21 +134,11 @@ interface Props {
   loadPositionPlays: LoadPositionPlaysFn;
 }
 
-function computeAge(birthday: string | null | undefined): number | null {
-  if (!birthday) return null;
-  const b = new Date(birthday);
-  if (isNaN(b.getTime())) return null;
-  const today = new Date();
-  let age = today.getFullYear() - b.getFullYear();
-  if (today < new Date(today.getFullYear(), b.getMonth(), b.getDate())) age--;
-  return age;
-}
-
 function getSortValue(
   p: ProspectWithStats,
   key: SortKey,
   aeMaps: AEMaps,
-  aeScores: Map<string, AEScore>,
+  ctx: SortContext,
 ): number | string | null {
   const BIG = 99999;
   // Ungraded sorts to the bottom in both directions' natural reading: -BIG keeps
@@ -141,7 +150,9 @@ function getSortValue(
   if (key === "overall_rank") return p.overall_rank ?? BIG;
   if (key === "name") return p.name;
   // Unscored (under the floor, or a position not in the score yet) sinks both ways.
-  if (key === "ae_score") return aeScores.get(p.id)?.score ?? null;
+  if (key === "ae_score") return ctx.aeScores.get(p.id)?.score ?? null;
+  if (key === "dynasty") return ctx.dynasty.get(p.id)?.dynasty ?? null;
+  if (key === "dynasty_plus") return ctx.dynasty.get(p.id)?.plus ?? null;
   // null, not -BIG: on the All tab most rows have no value for a given AE
   // column (other positions), and the sort sinks those in both directions.
   if (key.startsWith("ae_")) return aeMaps[key.slice(3) as AEKey].get(p.id) ?? null;
@@ -151,7 +162,7 @@ function getSortValue(
   if (key === "draft_class_year") return p.draft_class_year;
   if (key === "height") return p.height || "ZZZ";
   if (key === "weight") return p.weight ?? BIG;
-  if (key === "age") return computeAge(p.birthday) ?? BIG;
+  if (key === "age") return ctx.ages.get(p.id)?.years ?? BIG;
   if (key === "total_routes") return p.total_routes;
   if (key === "total_games") return p.total_games;
   if (key === "targets") return p.targets;
@@ -207,6 +218,7 @@ export default function BigBoard({
   onUpdateRank,
   onUpdateOverallRank,
   onUpdateGrade,
+  onUpdateDraftRound,
   draftYearFilter,
   setDraftYearFilter,
   games,
@@ -287,19 +299,84 @@ export default function BigBoard({
   const [gradeInput, setGradeInput] = useState("");
   const [savingGradeId, setSavingGradeId] = useState<string | null>(null);
 
-  // Projected NFL draft round (1–7) per prospect, persisted to localStorage.
-  // Migrates rounds out of the legacy {team,round,pick} "nflDraftInfo" map so
-  // any previously-entered rounds carry over to the new round-only column.
-  const [draftRound, setDraftRound] = useState<Record<string, number>>(() => {
+  // The Round column used to keep a per-device projected round in
+  // localStorage ("nflDraftRound", or rounds inside the older "nflDraftInfo"
+  // map). It now reads and writes prospects.draft_round, so a round is the same
+  // on every device and feeds Dynasty Score Plus. This moves any old local
+  // rounds into the database once. A prospect that already has a database
+  // round keeps it. Written entries leave localStorage; a failed write stays
+  // for the next visit. "nflDraftInfo" is left alone: the Rookie Big Board
+  // keeps its own Sleeper-id entries under that key.
+  const migratedRoundsRef = useRef(false);
+  useEffect(() => {
+    if (loading || prospects.length === 0 || migratedRoundsRef.current) return;
+    migratedRoundsRef.current = true;
     const direct = getLocalStorageItem<Record<string, number>>("nflDraftRound", {});
-    if (Object.keys(direct).length > 0) return direct;
-    const legacy = getLocalStorageItem<Record<string, { round?: number | null }>>("nflDraftInfo", {});
-    const migrated: Record<string, number> = {};
-    for (const [id, v] of Object.entries(legacy)) {
-      if (v && typeof v.round === "number") migrated[id] = v.round;
+    const local: Record<string, number> = { ...direct };
+    if (Object.keys(direct).length === 0) {
+      const legacy = getLocalStorageItem<Record<string, { round?: number | null }>>("nflDraftInfo", {});
+      for (const [id, v] of Object.entries(legacy)) if (v && typeof v.round === "number") local[id] = v.round;
     }
-    return migrated;
-  });
+    const byId = new Map(prospects.map((p) => [p.id, p]));
+    const pending = Object.entries(local).filter(([id, rd]) =>
+      byId.get(id)?.draft_round == null && byId.has(id) && DRAFT_ROUND_CHOICES.includes(rd));
+    if (pending.length === 0 && Object.keys(direct).length === 0) return;
+    void (async () => {
+      const keep: Record<string, number> = {};
+      for (const [id, rd] of pending) if (!(await onUpdateDraftRound(id, rd))) keep[id] = rd;
+      setLocalStorageItem("nflDraftRound", keep);
+    })();
+  }, [loading, prospects, onUpdateDraftRound]);
+
+  // Age: the birthday when there is one, else estimated from the 247 HS class
+  // year (prospectAge.ts). The estimate covers 2027-28 prospects, whose
+  // birthdates no public source carries.
+  const { matchProspect } = useRecruitIndex();
+  const hsClass = useMemo(
+    () => new Map(prospects.map((p) => [p.id, matchProspect(p)?.year ?? null])),
+    [prospects, matchProspect],
+  );
+  const ages = useMemo(() => {
+    const now = new Date();
+    const m = new Map<string, ProspectAge>();
+    for (const p of prospects) {
+      const a = prospectAgeAt(now, p.birthday, hsClass.get(p.id));
+      if (a) m.set(p.id, a);
+    }
+    return m;
+  }, [prospects, hsClass]);
+
+  const [weights, setWeights] = useState<DynastyWeights>(() => ({
+    ...DEFAULT_DYNASTY_WEIGHTS,
+    ...getLocalStorageItem<Partial<DynastyWeights>>(DYNASTY_WEIGHTS_KEY, {}),
+  }));
+  function setWeight(key: keyof DynastyWeights, value: number) {
+    const next = { ...weights, [key]: value };
+    setWeights(next);
+    setLocalStorageItem(DYNASTY_WEIGHTS_KEY, next);
+  }
+
+  // Dynasty Score (+ Plus) for every prospect with an AE Score.
+  const dynasty = useMemo(() => {
+    const m = new Map<string, DynastyBreakdown>();
+    for (const p of prospects) {
+      const sc = composite.scores.get(p.id);
+      if (!sc || !isCompositePos(p.position)) continue;
+      m.set(p.id, scoreDynasty({
+        pos: p.position,
+        aeScore: sc.score,
+        rookieAge: rookieSeasonAge(p.draft_class_year, p.birthday, hsClass.get(p.id)),
+        heightIn: parseHeightInches(p.height),
+        weightLb: p.weight,
+        draftRound: p.draft_round,
+      }, weights));
+    }
+    return m;
+  }, [prospects, composite, hsClass, weights]);
+  const sortCtx = useMemo<SortContext>(
+    () => ({ aeScores: composite.scores, dynasty, ages }),
+    [composite, dynasty, ages],
+  );
 
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
@@ -321,8 +398,8 @@ export default function BigBoard({
       list = list.filter((p) => p.name.toLowerCase().includes(q) || p.school.toLowerCase().includes(q));
     }
     return [...list].sort((a, b) => {
-      const va = getSortValue(a, sortKey, aeMaps, composite.scores);
-      const vb = getSortValue(b, sortKey, aeMaps, composite.scores);
+      const va = getSortValue(a, sortKey, aeMaps, sortCtx);
+      const vb = getSortValue(b, sortKey, aeMaps, sortCtx);
       if (va === null || vb === null) return va === vb ? 0 : va === null ? 1 : -1;
       if (typeof va === "number" && typeof vb === "number")
         return sortDir === "asc" ? va - vb : vb - va;
@@ -330,7 +407,7 @@ export default function BigBoard({
         ? String(va).localeCompare(String(vb))
         : String(vb).localeCompare(String(va));
     });
-  }, [prospects, boardTab, draftYearFilter, search, sortKey, sortDir, aeMaps, composite]);
+  }, [prospects, boardTab, draftYearFilter, search, sortKey, sortDir, aeMaps, sortCtx]);
 
   useEffect(() => {
     const table = tableScrollRef.current;
@@ -345,9 +422,9 @@ export default function BigBoard({
 
   function toggleSort(k: SortKey) {
     if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    // AE columns (the AE Score included) open best-first; every other column
+    // AE columns and the Composite scores open best-first; every other column
     // opens ascending.
-    else { setSortKey(k); setSortDir(k.startsWith("ae_") ? "desc" : "asc"); }
+    else { setSortKey(k); setSortDir(k.startsWith("ae_") || k.startsWith("dynasty") ? "desc" : "asc"); }
   }
 
   function th(label: string, key: SortKey, cls = "", title?: string) {
@@ -405,7 +482,7 @@ export default function BigBoard({
   // without enough charted prospects to join the score yet; the tooltip says
   // which. A scored cell's tooltip walks through the math.
   function scoreCell(p: ProspectWithStats) {
-    const cls = `${tdBase} border-l border-r border-slate-800`;
+    const cls = `${tdBase} border-l border-slate-800`;
     if (!isCompositePos(p.position)) return <td className={cls} />;
     const pc = composite.positions[p.position];
     const primary = pc.metrics[0];
@@ -427,6 +504,47 @@ export default function BigBoard({
     const color = sc.score >= 0 ? "text-emerald-400" : "text-red-400";
     return <td className={`${cls} ${color} font-semibold`} title={title}>{signed(sc.score, 2)}</td>;
   }
+
+  // ── Dynasty / Dynasty Plus cells ──────────────────────────────
+  // "—" without an AE Score (the skill base), or for Plus before a round is
+  // set. The tooltip walks through each piece at the current slider weights.
+  function dynastyCell(p: ProspectWithStats, plus: boolean) {
+    const cls = `${tdBase} ${plus ? "border-r border-slate-800" : ""}`;
+    if (!isCompositePos(p.position)) return <td className={cls} />;
+    const d = dynasty.get(p.id);
+    if (!d) return <td className={`${cls} text-slate-600`} title="Needs an AE Score first">—</td>;
+    if (plus && d.plus == null) {
+      return <td className={`${cls} text-slate-600`} title="Set the NFL draft round to see Dynasty Score Plus">—</td>;
+    }
+    const pos = p.position;
+    const lines = [`AE Score ${signed(d.aeScore, 2)}`];
+    if (d.rookieAge && d.window != null) {
+      const left = Math.max(0, PRIME_END_AGE[pos] - d.rookieAge.years);
+      lines.push(
+        `Age ${d.rookieAge.years.toFixed(1)} as a rookie${d.rookieAge.estimated ? " (est. from HS class)" : ""}: ` +
+        `${left.toFixed(1)} prime seasons left vs ${PRIME_END_AGE[pos] - REFERENCE_ROOKIE_AGE} typical → ${signed(weights.age * d.window, 2)}`,
+      );
+    } else {
+      lines.push("Age unknown → +0.00");
+    }
+    if (d.flags.length) for (const f of d.flags) lines.push(`Size: ${f.label} → ${signed(weights.size * f.value, 2)}`);
+    else lines.push("Size: no flag → +0.00");
+    lines.push(`= Dynasty ${signed(d.dynasty, 2)}`);
+    if (plus && d.draftCapital != null) {
+      lines.push(`Drafted: ${draftRoundLabel(p.draft_round!)} → ${signed(weights.draft * d.draftCapital, 2)}`);
+      lines.push(`= Dynasty+ ${signed(d.plus!, 2)}`);
+    }
+    const v = plus ? d.plus! : d.dynasty;
+    const color = v >= 0 ? "text-emerald-400" : "text-red-400";
+    return <td className={`${cls} ${color} font-semibold`} title={lines.join("\n")}>{signed(v, 2)}</td>;
+  }
+  const dynastyTooltip =
+    "Dynasty Score: the AE Score plus a career-window adjustment for age (prime seasons left at rookie " +
+    `age vs a typical ${REFERENCE_ROOKIE_AGE}-year-old rookie; primes end RB ${PRIME_END_AGE.RB}, WR ${PRIME_END_AGE.WR}, ` +
+    `TE ${PRIME_END_AGE.TE}, QB ${PRIME_END_AGE.QB}) and small flags for extreme size. Weighted by the sliders.`;
+  const dynastyPlusTooltip =
+    "Dynasty Score Plus: the Dynasty Score plus draft capital (initial opportunity), from 1st round +1.0 " +
+    "to Undrafted −1.0 at the default weight. Shows once the NFL draft round is set.";
 
   // Each position's true spread, or how far it is from joining the score.
   const compositeStatus = COMPOSITE_POS.map((pos) => {
@@ -451,14 +569,6 @@ export default function BigBoard({
     await rankUpdater(id, nr);
     setSavingRankId(null);
     setEditingRankId(null);
-  }
-
-  function setRound(id: string, value: string) {
-    const rd = parseInt(value, 10);
-    const updated = { ...draftRound };
-    if (isNaN(rd)) delete updated[id]; else updated[id] = rd;
-    setDraftRound(updated);
-    setLocalStorageItem("nflDraftRound", updated);
   }
 
   // ── Grade cells (pre-draft / post-draft, 1.0-100.0) ──────────
@@ -532,10 +642,10 @@ export default function BigBoard({
     );
   }
 
-  // NFL Draft cell: a compact dropdown projecting the round (1st–7th) the
-  // player is expected to be picked. "—" clears the projection.
+  // NFL Draft cell: the round the player was drafted in (1st–7th or
+  // Undrafted), saved to prospects.draft_round. "—" clears it.
   function draftCell(p: ProspectWithStats) {
-    const rd = draftRound[p.id];
+    const rd = p.draft_round;
     return (
       <td
         className="px-1.5 py-1 text-center whitespace-nowrap border-r border-slate-800"
@@ -543,16 +653,18 @@ export default function BigBoard({
         onMouseDown={(e) => e.stopPropagation()}
       >
         <select
-          aria-label={`Projected NFL draft round for ${p.name}`}
+          aria-label={`NFL draft round for ${p.name}`}
           value={rd ?? ""}
-          onChange={(e) => setRound(p.id, e.target.value)}
+          onChange={(e) => { void onUpdateDraftRound(p.id, e.target.value ? Number(e.target.value) : null); }}
           className={`bg-slate-950 text-xs rounded px-1 py-0.5 cursor-pointer focus:outline-none border ${
-            rd ? "text-indigo-300 font-medium border-indigo-700/50" : "text-slate-600 border-transparent hover:border-slate-700"
+            rd == null ? "text-slate-600 border-transparent hover:border-slate-700"
+              : rd === UNDRAFTED_ROUND ? "text-slate-400 font-medium border-slate-700"
+              : "text-indigo-300 font-medium border-indigo-700/50"
           }`}
         >
           <option value="">—</option>
-          {DRAFT_ROUNDS.map((r) => (
-            <option key={r} value={r}>{ROUND_LABEL[r]}</option>
+          {DRAFT_ROUND_CHOICES.map((r) => (
+            <option key={r} value={r}>{draftRoundLabel(r)}</option>
           ))}
         </select>
       </td>
@@ -690,7 +802,7 @@ export default function BigBoard({
             <th colSpan={1} className="px-2 py-1 text-center text-indigo-900 font-medium border-r border-slate-800">NFL Draft</th>
             <th colSpan={1} className="px-2 py-1 text-center text-slate-600 font-medium border-r border-slate-800">{secondaryGroup}</th>
             <th colSpan={identitySpan} className="px-2 py-1 text-center text-slate-600 font-medium border-r border-slate-800">Identity</th>
-            <th colSpan={1} className="px-2 py-1 text-center text-teal-900 font-medium border-r border-slate-800">Composite</th>
+            <th colSpan={3} className="px-2 py-1 text-center text-teal-900 font-medium border-r border-slate-800">Composite</th>
             {aeGroups.map((g) => (
               <th key={g.group} colSpan={g.span} className="px-2 py-1 text-center text-emerald-900 font-medium border-r border-slate-800 whitespace-nowrap">{g.group}</th>
             ))}
@@ -710,13 +822,15 @@ export default function BigBoard({
             {th("Age", "age")}
             {th("Ht", "height")}
             {th("Wt", "weight", "border-r border-slate-800")}
-            {th("AE Score", "ae_score", "border-l border-r border-slate-800 text-teal-600", compositeTooltip)}
+            {th("AE Score", "ae_score", "border-l border-slate-800 text-teal-600", compositeTooltip)}
+            {th("Dynasty", "dynasty", "text-teal-600", dynastyTooltip)}
+            {th("Dynasty+", "dynasty_plus", "border-r border-slate-800 text-teal-600", dynastyPlusTooltip)}
             {aeCols.map((c, i) => th(c.label, `ae_${c.key}`, `${aeBorder[i]} text-emerald-700`, c.tooltip))}
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-900">
           {sorted.map((p, i) => {
-            const age = computeAge(p.birthday);
+            const age = ages.get(p.id);
             const sv = secondaryValue(p);
             return (
               <tr key={p.id} {...rowProps(p, i)}>
@@ -731,10 +845,14 @@ export default function BigBoard({
                 )}
                 <td className={`${tdBase} text-slate-400 ${isAll ? "" : "border-l border-slate-800"}`}>{p.school}</td>
                 <td className={`${tdBase} text-slate-400`}>{p.draft_class_year}</td>
-                <td className={`${tdBase} text-slate-400`}>{age ?? "—"}</td>
+                <td className={`${tdBase} text-slate-400`} title={age?.estimated ? "Estimated from the HS class year" : undefined}>
+                  {age ? `${age.estimated ? "~" : ""}${Math.floor(age.years)}` : "—"}
+                </td>
                 <td className={`${tdBase} text-slate-400`}>{p.height || "—"}</td>
                 <td className={`${tdBase} text-slate-400 border-r border-slate-800`}>{p.weight ?? "—"}</td>
                 {scoreCell(p)}
+                {dynastyCell(p, false)}
+                {dynastyCell(p, true)}
                 {aeCols.map((c, i) => aeCell(p, c, aeBorder[i]))}
               </tr>
             );
@@ -806,6 +924,26 @@ export default function BigBoard({
       </ul>
       <p className="text-xs text-slate-600 mb-2 text-center">Drag rows to reorder · Click rank or a grade to edit (1.0–100.0) · Click any column header to sort</p>
       <p className="text-xs text-slate-600 mb-2 text-center">AE Score true spread: {compositeStatus}</p>
+      <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 mb-3 text-xs text-slate-400">
+        <span className="text-slate-500">Dynasty weights</span>
+        {WEIGHT_SLIDERS.map((w) => (
+          <label key={w.key} className="flex items-center gap-1.5" title={w.hint}>
+            <span>{w.label}</span>
+            <input
+              type="range" min={WEIGHT_MIN} max={WEIGHT_MAX} step={WEIGHT_STEP}
+              value={weights[w.key]}
+              onChange={(e) => setWeight(w.key, Number(e.target.value))}
+              aria-label={`${w.label} weight`}
+              className="w-20 accent-teal-500"
+            />
+            <span className="w-9 tabular-nums text-slate-300">{weights[w.key].toFixed(2)}×</span>
+          </label>
+        ))}
+        <button
+          onClick={() => { setWeights(DEFAULT_DYNASTY_WEIGHTS); setLocalStorageItem(DYNASTY_WEIGHTS_KEY, DEFAULT_DYNASTY_WEIGHTS); }}
+          className="px-2 py-0.5 rounded bg-slate-800 text-slate-400 hover:bg-slate-700"
+        >Reset</button>
+      </div>
 
       {loading ? (
         <div className="text-slate-500 text-sm text-center py-12">Loading…</div>
