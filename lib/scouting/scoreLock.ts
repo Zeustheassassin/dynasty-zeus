@@ -14,7 +14,6 @@
 // Score uses the rookie-season age, not today's.
 
 import type { AEScoreLock } from "../types";
-import type { AEScore, PositionComposite } from "./aeComposite";
 
 // A class counts as drafted from May 1 of its draft year. The NFL draft runs
 // in late April.
@@ -22,11 +21,12 @@ export function classDraftedBy(draftClassYear: number, now: Date): boolean {
   return now.getTime() >= Date.UTC(draftClassYear, 4, 1);
 }
 
-/** The lock to save for a live score: the score, each part, and the spread it was scored against. */
-export function makeLock(score: AEScore, pc: PositionComposite, now: Date): AEScoreLock {
+/** The snapshot to save for a live score: the score, each part with the spread it was scored against, and any alignment penalty. */
+export function makeLock(live: Omit<AEScoreLock, "locked_at">, now: Date): AEScoreLock {
   return {
-    score: score.score,
-    components: score.components.map((c) => ({ ...c, tau: pc.metrics.find((m) => m.key === c.key)?.tau ?? 0 })),
+    score: live.score,
+    components: live.components,
+    ...(live.alignment ? { alignment: live.alignment } : {}),
     locked_at: now.toISOString(),
   };
 }

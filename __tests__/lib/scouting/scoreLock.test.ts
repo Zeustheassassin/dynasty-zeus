@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import { classDraftedBy, makeLock, activeLock } from "@/lib/scouting/scoreLock";
-import type { AEScore, PositionComposite } from "@/lib/scouting/aeComposite";
 
 describe("score lock", () => {
   it("counts a class as drafted from May 1 of its draft year", () => {
@@ -9,11 +8,12 @@ describe("score lock", () => {
     expect(classDraftedBy(2027, new Date("2026-10-01T00:00:00Z"))).toBe(false);
   });
 
-  it("keeps the score, its parts and the spread each was scored against", () => {
-    const score: AEScore = { score: 1.2, components: [{ key: "aae", label: "AAE", weight: 1, ae: 5, n: 100, reliability: 0.4, z: 1.2 }] };
-    const pc = { pos: "QB", ready: true, scores: new Map(), metrics: [{ key: "aae", label: "AAE", weight: 1, qualified: 22, ready: true, mean: 0.5, tau: 2 }] } as PositionComposite;
-    const lock = makeLock(score, pc, new Date("2026-10-01T12:00:00Z"));
-    expect(lock).toEqual({ score: 1.2, components: [{ ...score.components[0], tau: 2 }], locked_at: "2026-10-01T12:00:00.000Z" });
+  it("keeps the score, its parts with their spreads, and any alignment penalty", () => {
+    const components = [{ key: "csae", label: "cSAE", weight: 0.7, ae: 5, n: 100, reliability: 0.4, z: 1.2, tau: 4 }];
+    const at = new Date("2026-10-01T12:00:00Z");
+    expect(makeLock({ score: 1.2, components }, at)).toEqual({ score: 1.2, components, locked_at: "2026-10-01T12:00:00.000Z" });
+    const alignment = { label: "96% of snaps on the right side", value: -0.5 };
+    expect(makeLock({ score: 0.7, components, alignment }, at).alignment).toEqual(alignment);
   });
 
   it("only honours a lock on a drafted class", () => {

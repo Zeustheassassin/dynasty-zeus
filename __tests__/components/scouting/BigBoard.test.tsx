@@ -432,3 +432,32 @@ describe("BigBoard drafted classes", () => {
     expect(cell("Quarter One", "AE Score")).toBe(live);
   });
 });
+
+describe("BigBoard WR alignment", () => {
+  // Ten WRs with cSAE and SAE samples (variance 4, 50 routes), enough to score.
+  const AES = [-9, -6, -4, -2, 0, 1, 3, 5, 8, 12];
+  const wr = (id: string, name: string, ae: number, extra: Partial<ProspectWithStats> = {}) =>
+    prospect(id, name, "WR", 30, {
+      adj_success_above_exp: ae, core_sae: ae,
+      sae_sample: { ae, n: 50, variance: 4 }, core_sae_sample: { ae, n: 50, variance: 4 },
+      pct_left: 45, pct_right: 45, pct_slot: 10, ...extra,
+    });
+  const POOL = AES.map((ae, i) => wr(`pw${i}`, `Pool WR ${i}`, ae));
+
+  it("takes the one-side penalty off the AE Score and says why", () => {
+    renderBoard([
+      ...POOL,
+      wr("bal", "Balanced WR", 3),
+      wr("one", "One Side WR", 3, { pct_left: 0, pct_right: 96, pct_slot: 4 }),
+      wr("slt", "Slot WR", 3, { pct_left: 2, pct_right: 2, pct_slot: 96 }),
+    ]);
+    const bal = Number(cell("Balanced WR", "AE Score"));
+    expect(Number(cell("One Side WR", "AE Score"))).toBeCloseTo(bal - 0.5, 2);
+    expect(Number(cell("Slot WR", "AE Score"))).toBeCloseTo(bal - 0.2, 2);
+    // Dynasty builds on it.
+    expect(Number(cell("One Side WR", "Dynasty"))).toBeCloseTo(Number(cell("Balanced WR", "Dynasty")) - 0.5, 2);
+    const title = within(rowFor("One Side WR")).getAllByRole("cell")[headerLabels().indexOf("AE Score")].getAttribute("title")!;
+    expect(title).toContain("after the alignment penalty");
+    expect(title).toContain("Alignment: 96% of snaps on the right side → -0.50");
+  });
+});

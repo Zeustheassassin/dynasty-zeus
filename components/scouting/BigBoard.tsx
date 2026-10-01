@@ -27,6 +27,7 @@ import { useRecruitIndex } from "../../hooks/useRecruitIndex";
 import { tierGames, type OpponentTier } from "../../lib/scouting/opponentTier";
 import { applyOpponentStrength, type OpponentAdjusted } from "../../lib/scouting/opponentAdjust";
 import { classDraftedBy, makeLock, activeLock } from "../../lib/scouting/scoreLock";
+import { alignmentPenalty } from "../../lib/scouting/alignmentPenalty";
 import { buildWRTierSplits, type ProspectGameRouteCellsRow } from "../../lib/scouting/aggregateMerge";
 import { POS_COLOR } from "../../lib/uiTheme";
 import {
@@ -101,6 +102,8 @@ const WEIGHT_SLIDERS: { key: keyof DynastyWeights; label: string; hint: string }
 interface ScoreView {
   score: number;
   components: (ScoreComponent & { tau: number })[];
+  /** A WR's alignment penalty, already in `score`. */
+  alignment?: { label: string; value: number };
   /** Set when the value shown IS the draft-day snapshot. */
   lockedAt?: string;
   /** In the live view, the draft-day snapshot for reference. */
@@ -356,6 +359,25 @@ export default function BigBoard({
     setLocalStorageItem(SCORE_VIEW_KEY, mode);
   }
 
+  // The live AE Score: the composite, plus a WR's alignment penalty
+  // (alignmentPenalty.ts). The penalty is part of the AE Score, so Dynasty and
+  // Dynasty+ carry it.
+  const liveScores = useMemo(() => {
+    const m = new Map<string, ScoreView>();
+    for (const p of prospects) {
+      const sc = composite.scores.get(p.id);
+      if (!sc || !isCompositePos(p.position)) continue;
+      const pc = composite.positions[p.position];
+      const alignment = p.position === "WR" ? alignmentPenalty(p) : null;
+      m.set(p.id, {
+        score: sc.score + (alignment?.value ?? 0),
+        components: sc.components.map((c) => ({ ...c, tau: pc.metrics.find((x) => x.key === c.key)?.tau ?? 0 })),
+        ...(alignment ? { alignment } : {}),
+      });
+    }
+    return m;
+  }, [prospects, composite]);
+
   // AE Score per prospect. Live by default: more charting sharpens the models
   // and spreads, and that should reach every class. "As of draft" swaps in a
   // drafted class's draft-day snapshot (lib/scouting/scoreLock.ts). Live keeps
@@ -366,19 +388,16 @@ export default function BigBoard({
     const m = new Map<string, ScoreView>();
     for (const p of prospects) {
       const lock = activeLock(p, now);
-      const snapshot: ScoreView | null = lock ? { score: lock.score, components: lock.components, lockedAt: lock.locked_at } : null;
-      const sc = composite.scores.get(p.id);
-      if (snapshot && (scoreMode === "draft" || !sc)) { m.set(p.id, snapshot); continue; }
-      if (!sc || !isCompositePos(p.position)) continue;
-      const pc = composite.positions[p.position];
-      m.set(p.id, {
-        score: sc.score,
-        components: sc.components.map((c) => ({ ...c, tau: pc.metrics.find((x) => x.key === c.key)?.tau ?? 0 })),
-        atDraft: lock ? { score: lock.score, lockedAt: lock.locked_at } : undefined,
-      });
+      const snapshot: ScoreView | null = lock
+        ? { score: lock.score, components: lock.components, alignment: lock.alignment, lockedAt: lock.locked_at }
+        : null;
+      const live = liveScores.get(p.id);
+      if (snapshot && (scoreMode === "draft" || !live)) { m.set(p.id, snapshot); continue; }
+      if (!live) continue;
+      m.set(p.id, lock ? { ...live, atDraft: { score: lock.score, lockedAt: lock.locked_at } } : live);
     }
     return m;
-  }, [prospects, composite, scoreMode]);
+  }, [prospects, liveScores, scoreMode]);
 
   // Snapshot each drafted prospect's AE Score the first time it's scored, once
   // every lazy input has landed: the draft-day record behind "As of draft".
@@ -390,16 +409,16 @@ export default function BigBoard({
     const now = new Date();
     const toLock = prospects.filter((p) =>
       classDraftedBy(p.draft_class_year, now) && !p.ae_score_lock && !lockAttemptedRef.current.has(p.id)
-      && isCompositePos(p.position) && composite.scores.has(p.id));
+      && liveScores.has(p.id));
     if (toLock.length === 0) return;
     for (const p of toLock) lockAttemptedRef.current.add(p.id);
     void (async () => {
       for (const p of toLock) {
-        const pos = p.position as CompositePos;
-        await onLockAEScore(p.id, makeLock(composite.scores.get(p.id)!, composite.positions[pos], now));
+        const live = liveScores.get(p.id)!;
+        await onLockAEScore(p.id, makeLock({ score: live.score, components: live.components, alignment: live.alignment }, now));
       }
     })();
-  }, [scoresReady, prospects, composite, onLockAEScore]);
+  }, [scoresReady, prospects, liveScores, onLockAEScore]);
 
   const [boardTab, setBoardTab] = useState<BoardTab>("all");
   // All board sorts by overall_rank; position boards sort by personal_rank
@@ -625,9 +644,11 @@ export default function BigBoard({
     } else if (sc.atDraft) {
       lines.push(`At draft: ${signed(sc.atDraft.score, 2)} (locked ${new Date(sc.atDraft.lockedAt).toLocaleDateString()})`);
     }
+    if (sc.alignment) lines.push(`Alignment: ${sc.alignment.label} → ${signed(sc.alignment.value, 2)}`);
     const mix = gamesByTier.get(p.id);
     if (mix && p.position !== "QB") lines.push(`Charted opponents: ${mix.P4} P4 · ${mix.G5} G5 · ${mix.FCS} FCS`);
-    const title = [`${signed(sc.score, 2)} true-talent SDs vs the average charted ${p.position}`, ...lines].join("\n");
+    const head = `${signed(sc.score, 2)} true-talent SDs vs the average charted ${p.position}${sc.alignment ? ", after the alignment penalty" : ""}`;
+    const title = [head, ...lines].join("\n");
     const color = sc.score >= 0 ? "text-emerald-400" : "text-red-400";
     return (
       <td className={`${cls} ${color} font-semibold`} title={title}>
@@ -705,6 +726,7 @@ export default function BigBoard({
     "true-talent SDs vs the average charted prospect at the position, so it compares across " +
     "positions. WR blends cSAE 70% and SAE 30%; TE blends TE-SAER 80% and TE-SAEB 20%. " +
     "Reps against G5 and FCS opponents are discounted (the AE columns are not). " +
+    "WRs lined up 75%+ on one side (or, milder, in the slot) lose up to 0.5 (0.2), most at 95%. " +
     `True spread: ${compositeStatus}.`;
 
   const rankUpdater = boardTab === "all" ? onUpdateOverallRank : onUpdateRank;

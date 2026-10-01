@@ -1181,6 +1181,8 @@ export interface ScoreComponent {
 export interface AEScoreLock {
   score: number;
   components: (ScoreComponent & { tau: number })[];
+  /** A WR's alignment penalty, already in `score` (lib/scouting/alignmentPenalty.ts). */
+  alignment?: { label: string; value: number };
   locked_at: string;
 }
 
