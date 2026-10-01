@@ -13,6 +13,15 @@ import { MiniSparkline } from "../charts/MiniSparkline";
 
 const TREND_GRID = "grid grid-cols-[2rem_1fr_2.25rem_2.5rem_3.75rem_3.75rem_2.25rem_4rem_2.5rem] gap-2 items-center px-1";
 
+// TREND_GRID's fixed columns alone need ~27rem, wider than a phone. Below that
+// the list scrolls sideways inside its card instead of widening the whole page;
+// the min width leaves the 1fr Player column room for a name.
+const TrendScroll = ({ children }: { children: React.ReactNode }) => (
+  <div className="overflow-x-auto">
+    <div className="min-w-[34rem]">{children}</div>
+  </div>
+);
+
 const TrendHeader = () => (
   <div className={`${TREND_GRID} text-[10px] uppercase tracking-wide text-slate-500 mb-1`}>
     <span></span>
@@ -417,12 +426,12 @@ function ValueTrendsTab({
         {falling.length === 0 ? (
           <div className="text-[11px] text-slate-600 italic">No players down {trendThreshold}%+ from the snapshot.</div>
         ) : (
-          <>
+          <TrendScroll>
             <TrendHeader />
             <div className="space-y-0.5">
               {falling.map((row) => <TrendRow key={row.playerId} row={row} direction="down" />)}
             </div>
-          </>
+          </TrendScroll>
         )}
       </div>
 
@@ -436,12 +445,12 @@ function ValueTrendsTab({
         {rising.length === 0 ? (
           <div className="text-[11px] text-slate-600 italic">No players up {trendThreshold}%+ from the snapshot.</div>
         ) : (
-          <>
+          <TrendScroll>
             <TrendHeader />
             <div className="space-y-0.5">
               {rising.map((row) => <TrendRow key={row.playerId} row={row} direction="up" />)}
             </div>
-          </>
+          </TrendScroll>
         )}
       </div>
 

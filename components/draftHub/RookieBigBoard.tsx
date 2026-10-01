@@ -439,13 +439,15 @@ export default function RookieBigBoard({
         );
       })()}
 
-      <div className="flex items-center gap-3 mb-2">
+      {/* min-w-0 lets the search box shrink below its default input width so the
+          buttons stay on a phone screen; flex-wrap catches the search hint. */}
+      <div className="flex flex-wrap items-center gap-3 mb-2">
         <input
           type="text"
           placeholder="Search rookies..."
           value={rookieSearch}
           onChange={(e) => setRookieSearch(e.target.value)}
-          className="flex-1 p-2 rounded bg-slate-800 text-sm"
+          className="flex-1 min-w-0 p-2 rounded bg-slate-800 text-sm"
         />
         {rookieSearch && (
           <span className="text-[11px] text-slate-500">Tiers hidden while searching</span>

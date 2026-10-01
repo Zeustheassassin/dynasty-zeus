@@ -583,8 +583,8 @@ export default function TradeCard({
         );
       })()}
 
-      {/* Actions row */}
-      <div className="mt-3 flex gap-2">
+      {/* Actions row — wraps on a phone, where five buttons don't fit one line */}
+      <div className="mt-3 flex flex-wrap gap-2">
         <button
           onClick={() => onOpenInCalculator(trade)}
           className="flex-1 text-xs text-slate-500 hover:text-blue-400 border border-slate-700 hover:border-blue-500 rounded-lg py-1.5 transition"

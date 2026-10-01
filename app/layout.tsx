@@ -13,9 +13,13 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// viewportFit "cover" makes iOS report its safe-area insets (home indicator,
+// rounded corners, landscape notch) through env(safe-area-inset-*), which the
+// mobile bottom nav and <main> pad by. Without it those insets read 0.
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  viewportFit: "cover",
 };
 
 export const metadata: Metadata = {

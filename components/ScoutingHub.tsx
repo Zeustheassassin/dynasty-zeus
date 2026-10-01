@@ -485,21 +485,26 @@ export default function ScoutingHub() {
             </div>
           </div>
 
-          {/* Main tab bar */}
-          <div className="flex justify-center gap-1 mt-4 border-b border-slate-800 -mb-px">
-            {hubTabs.map((t) => (
-              <button
-                key={t.key}
-                onClick={() => setTab(t.key)}
-                className={`px-5 py-2 text-sm font-medium border-b-2 transition whitespace-nowrap ${
-                  tab === t.key
-                    ? "border-blue-500 text-blue-400"
-                    : "border-transparent text-slate-400 hover:text-white"
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
+          {/* Main tab bar. Six tabs are wider than a phone: the bar scrolls
+              sideways there and centres only when it fits. (justify-center on an
+              overflowing flex row pushed "Prospects" off the left edge, out of
+              reach, and widened the whole page on the right.) */}
+          <div className="mt-4 border-b border-slate-800 -mb-px overflow-x-auto">
+            <div className="flex gap-1 w-max mx-auto">
+              {hubTabs.map((t) => (
+                <button
+                  key={t.key}
+                  onClick={() => setTab(t.key)}
+                  className={`px-5 py-2 text-sm font-medium border-b-2 transition whitespace-nowrap ${
+                    tab === t.key
+                      ? "border-blue-500 text-blue-400"
+                      : "border-transparent text-slate-400 hover:text-white"
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>

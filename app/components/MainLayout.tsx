@@ -52,7 +52,7 @@ function MobileOverflowSheet({
         role="dialog"
         aria-modal="true"
         aria-label="More hubs"
-        className="absolute bottom-16 inset-x-0 bg-slate-900 border-t border-slate-800 rounded-t-lg overflow-hidden"
+        className="absolute bottom-[calc(4rem_+_env(safe-area-inset-bottom))] inset-x-0 bg-slate-900 border-t border-slate-800 rounded-t-lg overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {hubs.map((h) => (
@@ -114,7 +114,9 @@ export function MainLayout({
   return (
     <>
       <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-[99999] focus:px-4 focus:py-2 focus:bg-blue-600 focus:text-white focus:rounded focus:text-sm">Skip to main content</a>
-      <main id="main-content" className="min-h-screen bg-slate-950 text-white">
+      {/* Side safe-area padding keeps content clear of the notch in landscape
+          (viewportFit "cover", app/layout.tsx); it is 0 in portrait. */}
+      <main id="main-content" className="min-h-screen bg-slate-950 text-white pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
         {/* App content — always rendered but non-interactive when not signed in */}
         <div className={!supabaseUser ? "pointer-events-none select-none opacity-40" : ""}>
           <>
@@ -220,18 +222,22 @@ export function MainLayout({
             </div>
 
             {/* Bottom padding so the fixed mobile nav doesn't cover page content */}
-            <div className="pb-16 sm:pb-0">{children}</div>
+            <div className="pb-[calc(4rem_+_env(safe-area-inset-bottom))] sm:pb-0">{children}</div>
 
             {/* MOBILE BOTTOM NAV (R3) — seasonal primary hub set + overflow sheet for
                 the rest. Nested inside the dimmed wrapper so it goes inert along with
-                the rest of the app when signed out, same as the desktop nav above. */}
-            <div className="sm:hidden fixed bottom-0 inset-x-0 z-30 bg-slate-900 border-t border-slate-800 flex">
+                the rest of the app when signed out, same as the desktop nav above.
+                The bottom safe-area inset lifts the buttons above the iPhone home
+                indicator and out of the rounded corners, where the end buttons
+                (Trade Hub, More) were hard to hit; buttons are 44px, Apple's
+                minimum touch target. */}
+            <div className="sm:hidden fixed bottom-0 inset-x-0 z-30 bg-slate-900 border-t border-slate-800 flex pb-[env(safe-area-inset-bottom)] pl-[max(env(safe-area-inset-left),0.5rem)] pr-[max(env(safe-area-inset-right),0.5rem)]">
               {primaryMobileHubs.map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => setMainTab(tab.id)}
                   disabled={!user && tab.id !== "DASHBOARD"}
-                  className={`flex-1 py-2.5 text-[11px] font-medium leading-tight transition ${
+                  className={`flex-1 min-h-11 py-2 text-[11px] font-medium leading-tight transition ${
                     mainTab === tab.id ? ACCENT_CLASSES.text : "text-slate-400"
                   } ${!user && tab.id !== "DASHBOARD" ? "opacity-40 cursor-not-allowed" : ""}`}
                 >
@@ -240,7 +246,7 @@ export function MainLayout({
               ))}
               <button
                 onClick={() => setOverflowOpen(true)}
-                className={`flex-1 py-2.5 text-[11px] font-medium leading-tight transition ${
+                className={`flex-1 min-h-11 py-2 text-[11px] font-medium leading-tight transition ${
                   overflowMobileHubs.some((h) => h.id === mainTab) ? ACCENT_CLASSES.text : "text-slate-400"
                 }`}
               >

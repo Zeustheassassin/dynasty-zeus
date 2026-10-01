@@ -253,8 +253,9 @@ export default function StatsTableShell({
 
   return (
     <div className="space-y-2">
-      {/* Search bar */}
-      <div className="flex items-center gap-3">
+      {/* Search bar — wraps on a phone, where search + the Min boxes + the
+          count don't fit one line (TE has two Min boxes). */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <input
           type="text"
           placeholder="Search player..."
@@ -264,7 +265,7 @@ export default function StatsTableShell({
           aria-label="Search players"
         />
         {minFilters?.map((f) => (
-          <label key={f.key} className="flex items-center gap-1.5 text-xs text-slate-400">
+          <label key={f.key} className="flex items-center gap-1.5 text-xs text-slate-400 whitespace-nowrap">
             Min {f.label}
             <input
               type="number"
@@ -278,7 +279,7 @@ export default function StatsTableShell({
             />
           </label>
         ))}
-        <span className="text-xs text-slate-500">{sorted.length} player{sorted.length !== 1 ? "s" : ""}</span>
+        <span className="text-xs text-slate-500 whitespace-nowrap">{sorted.length} player{sorted.length !== 1 ? "s" : ""}</span>
       </div>
 
       {/* Top scrollbar — proxy that scrolls the middle table div via syncScroll.
