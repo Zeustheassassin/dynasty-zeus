@@ -1,6 +1,6 @@
 "use client";
 import { useState, useMemo, useRef, useEffect } from "react";
-import type { ProspectWithStats, Prospect, RouteType, ScoutingGame, RBPlay, QBPlay, TEPlay, AESample } from "../../lib/types";
+import type { ProspectWithStats, Prospect, RouteType, ScoutingGame, RBPlay, QBPlay, TEPlay, AESample, AEScoreLock, ScoreComponent } from "../../lib/types";
 import { getLocalStorageItem, setLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 import {
   computeRBAboveExpectedSamples,
@@ -14,7 +14,7 @@ import {
 } from "../../lib/scouting/aboveExpected";
 import {
   buildAEComposite, MIN_POOL,
-  type AEComposite, type AEScore, type CompositePos,
+  type AEComposite, type CompositePos,
 } from "../../lib/scouting/aeComposite";
 import {
   scoreDynasty, PRIME_END_AGE, REFERENCE_ROOKIE_AGE,
@@ -26,6 +26,7 @@ import { DRAFT_ROUND_CHOICES, UNDRAFTED_ROUND, draftRoundLabel } from "../../lib
 import { useRecruitIndex } from "../../hooks/useRecruitIndex";
 import { tierGames, type OpponentTier } from "../../lib/scouting/opponentTier";
 import { applyOpponentStrength, type OpponentAdjusted } from "../../lib/scouting/opponentAdjust";
+import { classDraftedBy, makeLock, activeLock } from "../../lib/scouting/scoreLock";
 import { buildWRTierSplits, type ProspectGameRouteCellsRow } from "../../lib/scouting/aggregateMerge";
 import { POS_COLOR } from "../../lib/uiTheme";
 import {
@@ -90,9 +91,18 @@ const WEIGHT_SLIDERS: { key: keyof DynastyWeights; label: string; hint: string }
   { key: "draft", label: "Draft", hint: "How much draft round counts in Dynasty Score Plus" },
 ];
 
+// The AE Score a cell shows: the saved lock for a drafted class, else live.
+// Each part carries the position spread it was scored against.
+interface ScoreView {
+  score: number;
+  components: (ScoreComponent & { tau: number })[];
+  /** Set when this is a saved lock. */
+  lockedAt?: string;
+}
+
 // Derived per-prospect values the sort reads.
 interface SortContext {
-  aeScores: Map<string, AEScore>;
+  aeScores: Map<string, ScoreView>;
   dynasty: Map<string, DynastyBreakdown>;
   ages: Map<string, ProspectAge>;
 }
@@ -139,6 +149,10 @@ interface Props {
    *  adjustment. Null until loaded, or when the view isn't available. */
   gameRouteCells?: ProspectGameRouteCellsRow[] | null;
   loadGameRouteCells?: () => void;
+  /** Every lazy input has loaded, so a score is safe to freeze. */
+  scoresReady?: boolean;
+  /** Save a drafted prospect's frozen AE Score; false if the write failed. */
+  onLockAEScore?: (id: string, lock: AEScoreLock) => Promise<boolean>;
 }
 
 function getSortValue(
@@ -235,6 +249,8 @@ export default function BigBoard({
   loadPositionPlays,
   gameRouteCells = null,
   loadGameRouteCells,
+  scoresReady = false,
+  onLockAEScore,
 }: Props) {
   // Trigger lazy load of all three position plays the first time the
   // board renders. ScoutingHub no-ops if a position is already loaded
@@ -326,6 +342,45 @@ export default function BigBoard({
     return m;
   }, [games, gameTiers]);
 
+  // AE Score per prospect: the saved lock once the draft class is drafted
+  // (lib/scouting/scoreLock.ts), else the live score.
+  const scoreViews = useMemo(() => {
+    const now = new Date();
+    const m = new Map<string, ScoreView>();
+    for (const p of prospects) {
+      const lock = activeLock(p, now);
+      if (lock) { m.set(p.id, { score: lock.score, components: lock.components, lockedAt: lock.locked_at }); continue; }
+      const sc = composite.scores.get(p.id);
+      if (!sc || !isCompositePos(p.position)) continue;
+      const pc = composite.positions[p.position];
+      m.set(p.id, {
+        score: sc.score,
+        components: sc.components.map((c) => ({ ...c, tau: pc.metrics.find((x) => x.key === c.key)?.tau ?? 0 })),
+      });
+    }
+    return m;
+  }, [prospects, composite]);
+
+  // Freeze each drafted prospect's AE Score the first time it's scored, once
+  // every lazy input has landed. One attempt per prospect per visit: if the
+  // write fails (migration 059 not applied), the prospect is just scored live.
+  const lockAttemptedRef = useRef(new Set<string>());
+  useEffect(() => {
+    if (!scoresReady || !onLockAEScore) return;
+    const now = new Date();
+    const toLock = prospects.filter((p) =>
+      classDraftedBy(p.draft_class_year, now) && !p.ae_score_lock && !lockAttemptedRef.current.has(p.id)
+      && isCompositePos(p.position) && composite.scores.has(p.id));
+    if (toLock.length === 0) return;
+    for (const p of toLock) lockAttemptedRef.current.add(p.id);
+    void (async () => {
+      for (const p of toLock) {
+        const pos = p.position as CompositePos;
+        await onLockAEScore(p.id, makeLock(composite.scores.get(p.id)!, composite.positions[pos], now));
+      }
+    })();
+  }, [scoresReady, prospects, composite, onLockAEScore]);
+
   const [boardTab, setBoardTab] = useState<BoardTab>("all");
   // All board sorts by overall_rank; position boards sort by personal_rank
   const [sortKey, setSortKey] = useState<SortKey>("overall_rank");
@@ -403,7 +458,7 @@ export default function BigBoard({
   const dynasty = useMemo(() => {
     const m = new Map<string, DynastyBreakdown>();
     for (const p of prospects) {
-      const sc = composite.scores.get(p.id);
+      const sc = scoreViews.get(p.id);
       if (!sc || !isCompositePos(p.position)) continue;
       m.set(p.id, scoreDynasty({
         pos: p.position,
@@ -415,10 +470,10 @@ export default function BigBoard({
       }, weights));
     }
     return m;
-  }, [prospects, composite, hsClass, weights]);
+  }, [prospects, scoreViews, hsClass, weights]);
   const sortCtx = useMemo<SortContext>(
-    () => ({ aeScores: composite.scores, dynasty, ages }),
-    [composite, dynasty, ages],
+    () => ({ aeScores: scoreViews, dynasty, ages }),
+    [scoreViews, dynasty, ages],
   );
 
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -529,7 +584,7 @@ export default function BigBoard({
     if (!isCompositePos(p.position)) return <td className={cls} />;
     const pc = composite.positions[p.position];
     const primary = pc.metrics[0];
-    const sc = composite.scores.get(p.id);
+    const sc = scoreViews.get(p.id);
     if (!sc) {
       const why = pc.ready
         ? `Under the ${primary.label} sample floor`
@@ -539,18 +594,23 @@ export default function BigBoard({
       return <td className={`${cls} text-slate-600`} title={why}>—</td>;
     }
     const lines = sc.components.map((c) => {
-      const m = pc.metrics.find((x) => x.key === c.key)!;
       const ae = c.rawAe != null
         ? `${signed(c.rawAe, 1)} (${signed(c.ae - c.rawAe, 1)} for opponents) = ${signed(c.ae, 1)}`
         : signed(c.ae, 1);
       return `${c.label} ${ae} on ${c.n} ${SAMPLE_UNIT[c.key] ?? "plays"} · ` +
-        `${Math.round(c.reliability * 100)}% taken as real · ${p.position} spread ±${m.tau!.toFixed(1)} → ${signed(c.z, 2)}`;
+        `${Math.round(c.reliability * 100)}% taken as real · ${p.position} spread ±${c.tau.toFixed(1)} → ${signed(c.z, 2)}`;
     });
+    if (sc.lockedAt) lines.push(`Locked ${new Date(sc.lockedAt).toLocaleDateString()}: the ${p.draft_class_year} class has been drafted, so later charting won't move it`);
     const mix = gamesByTier.get(p.id);
     if (mix && p.position !== "QB") lines.push(`Charted opponents: ${mix.P4} P4 · ${mix.G5} G5 · ${mix.FCS} FCS`);
     const title = [`${signed(sc.score, 2)} true-talent SDs vs the average charted ${p.position}`, ...lines].join("\n");
     const color = sc.score >= 0 ? "text-emerald-400" : "text-red-400";
-    return <td className={`${cls} ${color} font-semibold`} title={title}>{signed(sc.score, 2)}</td>;
+    return (
+      <td className={`${cls} ${color} font-semibold`} title={title}>
+        {signed(sc.score, 2)}
+        {sc.lockedAt && <span className="ml-0.5 text-[9px] opacity-70" aria-label="locked">🔒</span>}
+      </td>
+    );
   }
 
   // ── Dynasty / Dynasty Plus cells ──────────────────────────────

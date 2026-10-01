@@ -2,7 +2,7 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, cleanup, within } from "@testing-library/react";
 import BigBoard from "@/components/scouting/BigBoard";
-import type { ProspectWithStats } from "@/lib/types";
+import type { ProspectWithStats, AEScoreLock } from "@/lib/types";
 
 // The Big Board's Above Exp group: one column per metric (AAE, SRAE, SAE, cSAE,
 // TE-SAER, TE-SAEB). The models themselves are tested in aboveExpected.test.ts
@@ -96,8 +96,9 @@ const AE_LABELS = ["AAE", "SRAE", "SAE", "cSAE", "TE-SAER", "TE-SAEB"];
 function renderBoard(
   prospects: ProspectWithStats[] = PROSPECTS,
   onUpdateDraftRound: (id: string, round: number | null) => Promise<boolean> = vi.fn(async () => true),
+  extra: { scoresReady?: boolean; onLockAEScore?: (id: string, lock: AEScoreLock) => Promise<boolean> } = {},
 ) {
-  render(
+  return render(
     <BigBoard
       prospects={prospects}
       loading={false}
@@ -113,6 +114,7 @@ function renderBoard(
       qbPlays={[]}
       tePlays={[]}
       loadPositionPlays={vi.fn()}
+      {...extra}
     />,
   );
 }
@@ -365,5 +367,59 @@ describe("BigBoard opponent strength", () => {
   it("says it's waiting on the per-game WR data until it loads", () => {
     renderBoard();
     expect(screen.getByText(/Opponent strength \(scores only\):/).textContent).toContain("migration 058");
+  });
+});
+
+describe("BigBoard drafted classes", () => {
+  const POOL = Array.from({ length: 10 }, (_, i) => prospect(`pq${i}`, `Pool QB ${i}`, "QB", 10 + i));
+  const as2026 = (p: ProspectWithStats) => ({ ...p, draft_class_year: 2026 }) as ProspectWithStats;
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("scores a rookie's age as of the rookie season, so years later nothing moves", () => {
+    const board = [...PROSPECTS.map((p) => (p.id === "qb1" ? { ...p, birthday: "2005-06-01" } : p)), ...POOL];
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-01T12:00:00Z"));
+    const first = renderBoard(board);
+    const then = { dyn: cell("Quarter One", "Dynasty"), age: cell("Quarter One", "Age") };
+    first.unmount();
+    vi.setSystemTime(new Date("2031-10-01T12:00:00Z"));
+    renderBoard(board);
+    expect(cell("Quarter One", "Dynasty")).toBe(then.dyn);
+    expect(Number(cell("Quarter One", "Age"))).toBe(Number(then.age) + 5); // only the display ages
+  });
+
+  it("freezes the AE Score of a drafted class once everything has loaded", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-01T12:00:00Z"));
+    const lock = vi.fn(async () => true);
+    const board = [...PROSPECTS.map((p) => (p.id === "qb1" ? as2026(p) : p)), ...POOL.map((p, i) => (i < 3 ? as2026(p) : p))];
+    const { unmount } = renderBoard(board, undefined, { scoresReady: false, onLockAEScore: lock });
+    expect(lock).not.toHaveBeenCalled(); // not until the plays and opponent data are in
+    unmount();
+    renderBoard(board, undefined, { scoresReady: true, onLockAEScore: lock });
+    await vi.waitFor(() => expect(lock).toHaveBeenCalledTimes(4));
+    const ids = (lock.mock.calls as unknown as [string, AEScoreLock][]).map(([id]) => id).sort();
+    expect(ids).toEqual(["pq0", "pq1", "pq2", "qb1"]); // the 2026 class only
+    const [, saved] = (lock.mock.calls as unknown as [string, AEScoreLock][]).find(([id]) => id === "qb1")!;
+    expect(cell("Quarter One", "AE Score")).toBe(`${saved.score >= 0 ? "+" : ""}${saved.score.toFixed(2)}`);
+    expect(saved.components[0]).toMatchObject({ key: "aae", tau: expect.any(Number) });
+  });
+
+  it("shows a saved lock instead of the live score, and builds Dynasty on it", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-01T12:00:00Z"));
+    const saved: AEScoreLock = {
+      score: -0.42,
+      components: [{ key: "aae", label: "AAE", weight: 1, ae: -2, n: 80, reliability: 0.3, z: -0.42, tau: 2 }],
+      locked_at: "2026-09-01T00:00:00.000Z",
+    };
+    const board = [...PROSPECTS.map((p) => (p.id === "qb1" ? { ...as2026(p), ae_score_lock: saved } : p)), ...POOL];
+    renderBoard(board);
+    expect(cell("Quarter One", "AE Score")).toBe("-0.42🔒");
+    const title = within(rowFor("Quarter One")).getAllByRole("cell")[headerLabels().indexOf("AE Score")].getAttribute("title")!;
+    expect(title).toContain("Locked");
+    expect(title).toContain("the 2026 class has been drafted");
+    // Dynasty adds only age/size to the locked -0.42 (no birthday or size here: +0).
+    expect(cell("Quarter One", "Dynasty")).toBe("-0.42");
   });
 });

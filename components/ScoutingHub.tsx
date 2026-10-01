@@ -5,6 +5,7 @@ import { supabase } from "../lib/supabaseclient";
 import { logger } from "../lib/logger";
 import { useLatestRequest } from "../hooks/useLatestRequest";
 import type {
+  AEScoreLock,
   Prospect,
   ProspectWithStats,
   ScoutingGame,
@@ -199,6 +200,12 @@ export default function ScoutingHub() {
   // opponent-adjusted.
   const [gameRouteCells, setGameRouteCells] = useState<ProspectGameRouteCellsRow[] | null>(null);
   const fetchedGameCellsRef = useRef<string | null>(null);
+  // Whether each lazy load has landed (or, for the game cells, given up). The
+  // Big Board only freezes a drafted prospect's AE Score once all four have,
+  // so it never locks a half-computed score.
+  const [playsLoaded, setPlaysLoaded] = useState({ RB: false, QB: false, TE: false });
+  const [gameCellsSettled, setGameCellsSettled] = useState(false);
+  const scoresReady = playsLoaded.RB && playsLoaded.QB && playsLoaded.TE && gameCellsSettled;
   const { begin: beginLoad, isCurrent: isLoadCurrent } = useLatestRequest();
   const mountedRef = useRef(false);
 
@@ -244,6 +251,8 @@ export default function ScoutingHub() {
       // next time AnalysisHub or GamesLog needs them.
       fetchedPlaysRef.current = { RB: null, QB: null, TE: null };
       fetchedGameCellsRef.current = null;
+      setPlaysLoaded({ RB: false, QB: false, TE: false });
+      setGameCellsSettled(false);
       setRbPlays([]);
       setQbPlays([]);
       setTePlays([]);
@@ -304,9 +313,10 @@ export default function ScoutingHub() {
     // On failure, clear the cache marker so the next activation retries
     // rather than sticking on a blank table until a full hub reload.
     const onErr = () => { fetchedPlaysRef.current[pos] = null; };
-    if (pos === "RB") fetchPlaysByGame<RBPlay>("rb_plays", ids).then((rows) => { setRbPlays(rows); }).catch(onErr);
-    else if (pos === "QB") fetchPlaysByGame<QBPlay>("qb_plays", ids).then((rows) => { setQbPlays(rows); }).catch(onErr);
-    else if (pos === "TE") fetchPlaysByGame<TEPlay>("te_plays", ids).then((rows) => { setTePlays(rows); }).catch(onErr);
+    const loaded = () => setPlaysLoaded((prev) => ({ ...prev, [pos]: true }));
+    if (pos === "RB") fetchPlaysByGame<RBPlay>("rb_plays", ids).then((rows) => { setRbPlays(rows); loaded(); }).catch(onErr);
+    else if (pos === "QB") fetchPlaysByGame<QBPlay>("qb_plays", ids).then((rows) => { setQbPlays(rows); loaded(); }).catch(onErr);
+    else if (pos === "TE") fetchPlaysByGame<TEPlay>("te_plays", ids).then((rows) => { setTePlays(rows); loaded(); }).catch(onErr);
   }, [loading, games, gameIdsKey]);
 
   // Once per parent reload, like the plays. A failure isn't retried until the
@@ -315,10 +325,11 @@ export default function ScoutingHub() {
     if (loading || games.length === 0 || fetchedGameCellsRef.current === gameIdsKey) return;
     fetchedGameCellsRef.current = gameIdsKey;
     fetchGameRouteCells()
-      .then((rows) => { setGameRouteCells(rows); })
+      .then((rows) => { setGameRouteCells(rows); setGameCellsSettled(true); })
       .catch((e: { message?: string; code?: string }) => {
         log.error("prospect_game_route_cells load (WR AE Score not opponent-adjusted until migration 058 is applied)", { msg: e?.message, code: e?.code });
         setGameRouteCells(null);
+        setGameCellsSettled(true);
       });
   }, [loading, games.length, gameIdsKey]);
 
@@ -384,6 +395,20 @@ export default function ScoutingHub() {
     if (error) {
       log.error("update prospect draft round", { msg: error.message });
       setProspects((prev) => prev.map((p) => p.id === id ? { ...p, draft_round: previous } : p));
+      return false;
+    }
+    return true;
+  }
+
+  // Freeze a drafted prospect's AE Score (prospects.ae_score_lock, migration
+  // 059). Optimistic; a failed write (e.g. the migration not applied yet) rolls
+  // back, and the board keeps scoring that prospect live.
+  async function handleLockAEScore(id: string, lock: AEScoreLock): Promise<boolean> {
+    setProspects((prev) => prev.map((p) => p.id === id ? { ...p, ae_score_lock: lock } : p));
+    const { error } = await supabase.from("prospects").update({ ae_score_lock: lock }).eq("id", id);
+    if (error) {
+      log.error("lock prospect AE Score (needs migration 059)", { msg: error.message });
+      setProspects((prev) => prev.map((p) => p.id === id ? { ...p, ae_score_lock: null } : p));
       return false;
     }
     return true;
@@ -612,6 +637,8 @@ export default function ScoutingHub() {
             loadPositionPlays={loadPositionPlays}
             gameRouteCells={gameRouteCells}
             loadGameRouteCells={loadGameRouteCells}
+            scoresReady={scoresReady}
+            onLockAEScore={handleLockAEScore}
           />
         )}
 

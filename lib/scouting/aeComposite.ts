@@ -30,7 +30,7 @@
 // metric's sample floor. τ can't be read off a handful of players. TE sat at
 // 3 when this shipped and joins on its own once charting reaches 10.
 
-import type { AESample } from "../types";
+import type { AESample, ScoreComponent } from "../types";
 
 export type CompositePos = "QB" | "RB" | "WR" | "TE";
 
@@ -66,19 +66,7 @@ export interface MetricSpread {
   tau: number | null;
 }
 
-export interface ScoreComponent {
-  key: string;
-  label: string;
-  weight: number;
-  ae: number;
-  /** The AE before the opponent-strength adjustment, when there was one. */
-  rawAe?: number;
-  n: number;
-  /** τ² / (τ² + v): the share of the prospect's AE taken as real. */
-  reliability: number;
-  /** This metric's score, in true-talent SDs. */
-  z: number;
-}
+export type { ScoreComponent };
 
 export interface AEScore {
   score: number;

@@ -1007,6 +1007,10 @@ export interface Prospect {
   pre_draft_grade: number | null;
   /** Scout grade 1.0-100.0 once draft capital / landing spot are known. null = ungraded. */
   post_draft_grade: number | null;
+  /** The AE Score frozen once the prospect's draft class has been drafted
+   *  (migration 059; lib/scouting/scoreLock.ts). Optional: absent before the
+   *  migration, and never sent on insert. */
+  ae_score_lock?: AEScoreLock | null;
   created_at: string;
   updated_at: string;
 }
@@ -1153,6 +1157,31 @@ export interface TEPlay {
   broken_tackle: boolean;
   play_notes: string | null;
   created_at: string;
+}
+
+// One metric's part of a prospect's AE Score (lib/scouting/aeComposite.ts).
+export interface ScoreComponent {
+  key: string;
+  label: string;
+  weight: number;
+  ae: number;
+  /** The AE before the opponent-strength adjustment, when there was one. */
+  rawAe?: number;
+  n: number;
+  /** τ² / (τ² + v): the share of the prospect's AE taken as real. */
+  reliability: number;
+  /** This metric's score, in true-talent SDs. */
+  z: number;
+}
+
+// A prospect's AE Score as it stood when the draft class was drafted, kept so
+// later charting (new classes reshaping the pool, refit models) can't move a
+// drafted player's ranking. `tau` per component is the position spread it
+// was scored against, for the tooltip.
+export interface AEScoreLock {
+  score: number;
+  components: (ScoreComponent & { tau: number })[];
+  locked_at: string;
 }
 
 // One prospect's above-expected plus the sample it rests on. `variance` is the
