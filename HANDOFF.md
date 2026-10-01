@@ -3,7 +3,9 @@
 > **Audience:** a developer who has just been handed the keys and has never seen this project.
 > **Goal:** explain what the app is, how the code is structured, how data flows, and how every major subsystem actually works — in enough depth to debug and extend it on day one.
 >
-> *Last reviewed: 2026-10-01, HEAD `9a43d94` (working tree) — **WR alignment penalty on the AE Score:** 75%+ of snaps on one side costs up to −0.5, curving to full at 95%; the slot costs up to −0.2. See "WR alignment penalty" in §11. 1560/102 tests.*
+> *Last reviewed: 2026-10-01, HEAD `946c49f` (working tree) — **Full-trust ceilings:** WRs count at face value from 232 total / 168 core routes, and QB/RB/TE ceilings are matched (≈443 throws / 245 runs) to keep the positions level. See "Full-trust ceilings" in §11. 1563/102 tests.*
+>
+> *Prior review: 2026-10-01, HEAD `9a43d94` (working tree) — **WR alignment penalty on the AE Score:** 75%+ of snaps on one side costs up to −0.5, curving to full at 95%; the slot costs up to −0.2. See "WR alignment penalty" in §11. 1560/102 tests.*
 >
 > *Prior review: 2026-10-01, HEAD `3469e66` (working tree) — **The score lock became a draft-day snapshot: live by default, with a Live / As of draft toggle** (see "Draft-day snapshots" in §11; the user chose this after asking whether more charting *should* update drafted players). Earlier the same day: Draft weight defaults to 2×, and size is pounds per inch of height for RB/WR (3469e66). 1555/101 tests.*
 >
@@ -1549,6 +1551,12 @@ Added 2026-10-01. The user asked that a player's charted *opponents* set the lev
 - **Applying:** AE −= 100 × Σ_tier (reps vs tier / all reps) × effect. Variance is unchanged. `rawAe` keeps the pre-adjustment value for the tooltip, which shows "cSAE +4.5 (−1.3 for opponents) = +3.2" plus the prospect's P4 / G5 / FCS game count.
 - **Measured 2026-10-01:** WR G5 +2.8 pts within players (19 prospects, 803 reps, ±4.4 95%), so +1.3 cSAE / +2.0 SAE after shrinking. WR FCS: 5 prospects, noise, so it takes G5's value. QB: 1 prospect. RB: 2. Biggest movers were Cameron Dorner (6 G5 + 1 FCS, AE Score 0.56 → 0.36) and Bryce Lance (5 FCS, −0.14 → −0.30).
 - **WR data path:** WR routes arrive pre-aggregated per prospect (057), with no game. **Migration 058 `prospect_game_route_cells`** is the same cells split by game (~420 rows / ~200 KB). ScoutingHub's `loadGameRouteCells` fetches it only when the Big Board opens (once per reload; a failure isn't retried). `buildWRTierSplits` refits the WR model from those cells, which sum to the same league cells as 057. Without 058, WR has no splits, so WR is unmeasured and RB/TE have nothing to borrow. The status line then reads "waiting on the per-game WR route data (migration 058)".
+
+### Full-trust ceilings (sample-size discount)
+
+Added 2026-10-01. The user set where a WR's numbers are fully trusted: **232 total routes (SAE) and 168 core routes (cSAE)**. At or above that a sample counts at face value; below it the discount applies. [aeComposite.ts](lib/scouting/aeComposite.ts) `trustAt(n, F, h)` = 1 for n ≥ F, else `f(n) / f(F)` with `f(n) = n / (n + h)`. Here h is the metric's half point (median per-play noise / τ²; ~176 routes for SAE, ~108 for cSAE), so trust gains fast early and flattens later. It depends only on the play count, so steadier players no longer get extra trust.
+
+**Matched ceilings keep the positions level** (the user liked the current cross-position balance). A ceiling F lifts trust below it by (F + h) / F. `matchedCeiling(WR)` gives QB, RB and TE ceilings at the same multiple of their own half point, recomputed from the data each time, so every position gets the same lift. On 2026-10-01 that was QB **443 throws** (max charted 172) and RB **245 runs** (max 103). TE gets one too once its pool fills. Measured with the alignment penalty: top 15 stayed 10 WR · 2 QB · 3 RB and top 30 went 20/3/7 → 19/3/8. A WR-only ceiling would have tilted it to 12/1/2. The board's "% taken as real" tooltip now shows "(full at 168 core routes)". Effects 2026-10-01: Wesco 1.61 → 2.13 (cSAE 57% → 72% trusted), Wilde 1.47 → 2.12 (66% → 93%), T.J. Moore 0.25 → 0.48 (34% → 47%). The best QB moved from Darian Mensah (30 throws, now trusted less) to Julian Sayin (111).
 
 ### WR alignment penalty (AE Score, so Dynasty / Dynasty+ too)
 

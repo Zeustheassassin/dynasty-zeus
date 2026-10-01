@@ -637,7 +637,7 @@ export default function BigBoard({
         ? `${signed(c.rawAe, 1)} (${signed(c.ae - c.rawAe, 1)} for opponents) = ${signed(c.ae, 1)}`
         : signed(c.ae, 1);
       return `${c.label} ${ae} on ${c.n} ${SAMPLE_UNIT[c.key] ?? "plays"} · ` +
-        `${Math.round(c.reliability * 100)}% taken as real · ${p.position} spread ±${c.tau.toFixed(1)} → ${signed(c.z, 2)}`;
+        `${Math.round(c.reliability * 100)}% taken as real${fullAt(p.position, c.key)} · ${p.position} spread ±${c.tau.toFixed(1)} → ${signed(c.z, 2)}`;
     });
     if (sc.lockedAt) {
       lines.push(`As of draft: frozen ${new Date(sc.lockedAt).toLocaleDateString()}, the ${p.draft_class_year} class's draft-day score`);
@@ -699,6 +699,13 @@ export default function BigBoard({
     "Dynasty Score Plus: the Dynasty Score plus draft capital (initial opportunity), from 1st round +2.0 " +
     "to Undrafted −2.0 at the default 2× weight. Shows once the NFL draft round is set.";
 
+  // Where a metric's sample counts in full (aeComposite.ts trustAt), for the tooltip.
+  function fullAt(pos: string, key: string): string {
+    if (!isCompositePos(pos)) return "";
+    const m = composite.positions[pos].metrics.find((x) => x.key === key);
+    return m?.fullTrustAt != null ? ` (full at ${m.fullTrustAt} ${SAMPLE_UNIT[key] ?? "plays"})` : "";
+  }
+
   // Each position's true spread, or how far it is from joining the score.
   const compositeStatus = COMPOSITE_POS.map((pos) => {
     const pc = composite.positions[pos];
@@ -727,6 +734,8 @@ export default function BigBoard({
     "positions. WR blends cSAE 70% and SAE 30%; TE blends TE-SAER 80% and TE-SAEB 20%. " +
     "Reps against G5 and FCS opponents are discounted (the AE columns are not). " +
     "WRs lined up 75%+ on one side (or, milder, in the slot) lose up to 0.5 (0.2), most at 95%. " +
+    "Small samples are discounted until full trust: WR at 232 total / 168 core routes, with QB, RB and TE " +
+    "ceilings matched to keep the positions level. " +
     `True spread: ${compositeStatus}.`;
 
   const rankUpdater = boardTab === "all" ? onUpdateOverallRank : onUpdateRank;

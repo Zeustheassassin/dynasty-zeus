@@ -50,6 +50,10 @@ export interface CompositeMetric {
   weight: number;
   /** Every prospect at the position; null = under the metric's sample floor. */
   samples: Map<string, AESample | null>;
+  /** Plays at which a sample counts in full (see trustAt), or a rule giving it
+   *  from the metric's half point. Unset: the statistical reliability
+   *  τ² / (τ² + v), which never reaches 100%. */
+  fullTrustAt?: number | ((halfPoint: number) => number);
 }
 
 export interface MetricSpread {
@@ -64,6 +68,10 @@ export interface MetricSpread {
   mean: number | null;
   /** True-talent SD, pts. Null when not ready. */
   tau: number | null;
+  /** With fullTrustAt: the plays at which a typical prospect is half-trusted
+   *  statistically (median per-play noise / τ²), which sets the curve's shape. */
+  halfPoint?: number;
+  fullTrustAt?: number;
 }
 
 export type { ScoreComponent };
@@ -113,6 +121,20 @@ export function estimateSpread(xs: AESample[]): { mean: number; tau2: number } {
   return { mean: generalizedQ(xs, tau2).mean, tau2 };
 }
 
+// Trust with a full-trust ceiling (the user's call for WRs, 2026-10-01: 232
+// total routes, 168 core). At or above `full` plays a sample counts at face
+// value. Below, trust follows the statistical curve n / (n + halfPoint), which
+// gains fast early and flattens later, rescaled so it reaches 1 exactly at
+// `full`. It depends only on the play count, so every prospect at the ceiling
+// is treated alike.
+export function trustAt(n: number, full: number, halfPoint: number): number {
+  if (n >= full) return 1;
+  const f = (x: number) => x / (x + halfPoint);
+  return f(n) / f(full);
+}
+
+const median = (xs: number[]) => { const a = [...xs].sort((x, y) => x - y); return a[Math.floor(a.length / 2)]; };
+
 // metrics[0] is the primary metric: it decides whether the position is scored
 // and who gets a score. Later metrics add to that score once they're ready
 // themselves; until then they're left out and the weights renormalize.
@@ -128,6 +150,10 @@ export function buildPositionComposite(pos: CompositePos, metrics: CompositeMetr
       mean: ready ? est.mean : null,
       tau: ready ? Math.sqrt(est.tau2) : null,
     };
+    if (ready && m.fullTrustAt != null) {
+      spread.halfPoint = median(xs.map((s) => varianceOf(s) * s.n)) / est.tau2;
+      spread.fullTrustAt = typeof m.fullTrustAt === "function" ? m.fullTrustAt(spread.halfPoint) : m.fullTrustAt;
+    }
     return { m, spread };
   });
   const spreads = fitted.map((f) => f.spread);
@@ -145,8 +171,9 @@ export function buildPositionComposite(pos: CompositePos, metrics: CompositeMetr
       const s = m.samples.get(id);
       if (!s) continue; // no evidence on this metric: the best estimate is average, 0
       const tau = spread.tau!;
-      const v = varianceOf(s);
-      const reliability = (tau * tau) / (tau * tau + v);
+      const reliability = spread.fullTrustAt != null
+        ? trustAt(s.n, spread.fullTrustAt, spread.halfPoint!)
+        : (tau * tau) / (tau * tau + varianceOf(s));
       const z = (reliability * (s.ae - spread.mean!)) / tau;
       components.push({ key: m.key, label: m.label, weight: m.weight, ae: s.ae, rawAe: s.rawAe, n: s.n, reliability, z });
       weighted += m.weight * z;
@@ -169,6 +196,27 @@ export function buildPositionComposite(pos: CompositePos, metrics: CompositeMetr
 // count in full and nines and screens at about 30%.
 const WR_CORE_WEIGHT = 0.7;
 const WR_ALL_WEIGHT = 0.3;
+// WR samples count in full from these route counts (the user's call,
+// 2026-10-01; see trustAt).
+export const WR_CORE_FULL_TRUST = 168;
+export const WR_ALL_FULL_TRUST = 232;
+
+// QB, RB and TE get matching ceilings, so no position gains on another (the
+// user's call: keep today's cross-position balance). A ceiling F lifts trust
+// below it by (F + h) / F, where h is the metric's half point. Each other
+// metric's ceiling sits at the same multiple of its own half point as WR's do,
+// recomputed from the data every time, so the boost matches. On 2026-10-01
+// that was about 443 throws and 245 runs. With no WR ceiling to match (WR not
+// ready), the others keep the statistical reliability.
+export function matchedCeiling(wr: PositionComposite): ((halfPoint: number) => number) | undefined {
+  const capped = wr.metrics.filter((m) => m.ready && m.fullTrustAt != null && m.halfPoint != null);
+  if (!capped.length) return undefined;
+  const totalW = capped.reduce((a, m) => a + m.weight, 0);
+  const boost = capped.reduce((a, m) => a + m.weight * (m.fullTrustAt! + m.halfPoint!) / m.fullTrustAt!, 0) / totalW;
+  if (!(boost > 1)) return undefined;
+  const multiple = 1 / (boost - 1);
+  return (h) => Math.round(multiple * h);
+}
 const TE_ROUTE_WEIGHT = 0.8;
 const TE_BLOCK_WEIGHT = 0.2;
 
@@ -190,16 +238,18 @@ export interface AEComposite {
 }
 
 export function buildAEComposite(inp: AECompositeInputs): AEComposite {
+  const WR = buildPositionComposite("WR", [
+    { key: "csae", label: "cSAE", weight: WR_CORE_WEIGHT, samples: inp.wrCore, fullTrustAt: WR_CORE_FULL_TRUST },
+    { key: "sae", label: "SAE", weight: WR_ALL_WEIGHT, samples: inp.wr, fullTrustAt: WR_ALL_FULL_TRUST },
+  ]);
+  const matched = matchedCeiling(WR);
   const positions: Record<CompositePos, PositionComposite> = {
-    QB: buildPositionComposite("QB", [{ key: "aae", label: "AAE", weight: 1, samples: inp.qb }]),
-    RB: buildPositionComposite("RB", [{ key: "srae", label: "SRAE", weight: 1, samples: inp.rb }]),
-    WR: buildPositionComposite("WR", [
-      { key: "csae", label: "cSAE", weight: WR_CORE_WEIGHT, samples: inp.wrCore },
-      { key: "sae", label: "SAE", weight: WR_ALL_WEIGHT, samples: inp.wr },
-    ]),
+    QB: buildPositionComposite("QB", [{ key: "aae", label: "AAE", weight: 1, samples: inp.qb, fullTrustAt: matched }]),
+    RB: buildPositionComposite("RB", [{ key: "srae", label: "SRAE", weight: 1, samples: inp.rb, fullTrustAt: matched }]),
+    WR,
     TE: buildPositionComposite("TE", [
-      { key: "te_saer", label: "TE-SAER", weight: TE_ROUTE_WEIGHT, samples: inp.teRoute },
-      { key: "te_saeb", label: "TE-SAEB", weight: TE_BLOCK_WEIGHT, samples: inp.teBlock },
+      { key: "te_saer", label: "TE-SAER", weight: TE_ROUTE_WEIGHT, samples: inp.teRoute, fullTrustAt: matched },
+      { key: "te_saeb", label: "TE-SAEB", weight: TE_BLOCK_WEIGHT, samples: inp.teBlock, fullTrustAt: matched },
     ]),
   };
   const scores = new Map<string, AEScore>();

@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
+  trustAt,
+  matchedCeiling,
+  WR_CORE_FULL_TRUST,
+  WR_ALL_FULL_TRUST,
   estimateSpread,
   buildPositionComposite,
   buildAEComposite,
@@ -146,8 +150,8 @@ describe("buildAEComposite", () => {
     expect(comp.scores.size).toBe(30);
     // RB's AEs are twice as spread out, and so is its τ: the same place in the
     // pool earns about the same score.
-    expect(comp.scores.get("rbp9")!.score).toBeGreaterThan(comp.scores.get("qbp9")!.score);
-    expect(comp.scores.get("rbp9")!.score).toBeLessThan(comp.scores.get("qbp9")!.score * 1.3);
+    const ratio = comp.scores.get("rbp9")!.score / comp.scores.get("qbp9")!.score;
+    expect(Math.abs(ratio - 1)).toBeLessThan(0.15);
     expect(comp.positions.TE.metrics.map((m) => m.weight)).toEqual([0.8, 0.2]);
     // WR leads with cSAE (70%), SAE behind it (30%).
     expect(comp.positions.WR.metrics.map((m) => [m.key, m.weight])).toEqual([["csae", 0.7], ["sae", 0.3]]);
@@ -164,5 +168,45 @@ describe("buildAEComposite", () => {
     const comp = buildAEComposite({ qb: empty, rb: empty, wr, wrCore, teRoute: empty, teBlock: empty });
     expect(comp.scores.has("goScreenGuy")).toBe(false);
     expect(comp.scores.has("p0")).toBe(true);
+  });
+});
+
+describe("full-trust ceilings", () => {
+  it("counts a sample in full at the ceiling, and tapers below it", () => {
+    expect(trustAt(232, 232, 160)).toBe(1);
+    expect(trustAt(400, 232, 160)).toBe(1);
+    const f = (n: number) => n / (n + 160);
+    expect(trustAt(116, 232, 160)).toBeCloseTo(f(116) / f(232), 12);
+    // Early routes buy more trust than late ones.
+    expect(trustAt(116, 232, 160) - trustAt(58, 232, 160)).toBeGreaterThan(trustAt(232, 232, 160) - trustAt(174, 232, 160));
+  });
+
+  it("scores a sample at the ceiling at face value", () => {
+    const samples = pool(SPREAD); // n = 100 each
+    const pc = buildPositionComposite("WR", [{ key: "csae", label: "cSAE", weight: 1, samples, fullTrustAt: 100 }]);
+    const top = pc.scores.get("p9")!.components[0];
+    expect(top.reliability).toBe(1);
+    expect(top.z).toBeCloseTo((6 - pc.metrics[0].mean!) / pc.metrics[0].tau!, 12);
+  });
+
+  it("matches the other positions' ceilings to WR's, so every position gets the same lift", () => {
+    const tag = (prefix: string, m: Map<string, AESample | null>) => new Map([...m].map(([id, v]) => [`${prefix}${id}`, v]));
+    const comp = buildAEComposite({
+      qb: tag("qb", pool(SPREAD, 9)),
+      rb: tag("rb", pool(SPREAD.map((x) => x * 2), 16)),
+      wr: tag("wr", pool(SPREAD)),
+      wrCore: tag("wr", pool(SPREAD)),
+      teRoute: new Map(), teBlock: new Map(),
+    });
+    const wr = comp.positions.WR.metrics;
+    expect(wr.map((m) => m.fullTrustAt)).toEqual([WR_CORE_FULL_TRUST, WR_ALL_FULL_TRUST]);
+    const lift = (m: { fullTrustAt?: number; halfPoint?: number }) => (m.fullTrustAt! + m.halfPoint!) / m.fullTrustAt!;
+    const wrLift = 0.7 * lift(wr[0]) + 0.3 * lift(wr[1]);
+    for (const pos of ["QB", "RB"] as const) {
+      const m = comp.positions[pos].metrics[0];
+      expect(m.fullTrustAt).toBeGreaterThan(0);
+      expect(lift(m)).toBeCloseTo(wrLift, 1);
+    }
+    expect(matchedCeiling(comp.positions.TE)).toBeUndefined(); // nothing to match without a WR-style ceiling
   });
 });
