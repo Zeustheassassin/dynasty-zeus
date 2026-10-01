@@ -405,7 +405,7 @@ describe("BigBoard drafted classes", () => {
     expect(saved.components[0]).toMatchObject({ key: "aae", tau: expect.any(Number) });
   });
 
-  it("shows a saved lock instead of the live score, and builds Dynasty on it", () => {
+  it("shows live scores by default, quoting the draft-day snapshot, and the snapshot in As of draft", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-10-01T12:00:00Z"));
     const saved: AEScoreLock = {
@@ -415,11 +415,20 @@ describe("BigBoard drafted classes", () => {
     };
     const board = [...PROSPECTS.map((p) => (p.id === "qb1" ? { ...as2026(p), ae_score_lock: saved } : p)), ...POOL];
     renderBoard(board);
+    const aeTitle = () => within(rowFor("Quarter One")).getAllByRole("cell")[headerLabels().indexOf("AE Score")].getAttribute("title")!;
+    // Live: the current score, with the snapshot quoted.
+    const live = cell("Quarter One", "AE Score")!;
+    expect(live).toMatch(/^[+-]\d\.\d\d$/);
+    expect(live).not.toBe("-0.42");
+    expect(aeTitle()).toContain("At draft: -0.42 (locked");
+    // As of draft: the snapshot, with a lock, and Dynasty built on it.
+    fireEvent.click(screen.getByRole("button", { name: "As of draft" }));
     expect(cell("Quarter One", "AE Score")).toBe("-0.42🔒");
-    const title = within(rowFor("Quarter One")).getAllByRole("cell")[headerLabels().indexOf("AE Score")].getAttribute("title")!;
-    expect(title).toContain("Locked");
-    expect(title).toContain("the 2026 class has been drafted");
-    // Dynasty adds only age/size to the locked -0.42 (no birthday or size here: +0).
-    expect(cell("Quarter One", "Dynasty")).toBe("-0.42");
+    expect(aeTitle()).toContain("the 2026 class's draft-day score");
+    expect(cell("Quarter One", "Dynasty")).toBe("-0.42"); // no birthday or size here: +0
+    expect(JSON.parse(localStorage.getItem("bigBoardScoreView")!)).toBe("draft");
+    // Back to live.
+    fireEvent.click(screen.getByRole("button", { name: "Live" }));
+    expect(cell("Quarter One", "AE Score")).toBe(live);
   });
 });

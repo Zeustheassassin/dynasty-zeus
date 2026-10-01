@@ -85,19 +85,26 @@ const signed = (v: number, dp: number) => `${v >= 0 ? "+" : ""}${v.toFixed(dp)}`
 
 // The Dynasty sliders, persisted per browser (a viewing preference).
 const DYNASTY_WEIGHTS_KEY = "dynastyScoreWeights";
+// Live scores, or a drafted class's scores as they stood at the draft
+// (lib/scouting/scoreLock.ts). Per browser, a viewing preference.
+const SCORE_VIEW_KEY = "bigBoardScoreView";
+type ScoreViewMode = "live" | "draft";
 const WEIGHT_SLIDERS: { key: keyof DynastyWeights; label: string; hint: string }[] = [
   { key: "age",   label: "Age",   hint: "How much the career window (prime seasons left) counts" },
   { key: "size",  label: "Size",  hint: "How much size counts: RBs and WRs carrying more weight for their height gain, lean and very light ones lose" },
   { key: "draft", label: "Draft", hint: "How much draft round counts in Dynasty Score Plus" },
 ];
 
-// The AE Score a cell shows: the saved lock for a drafted class, else live.
-// Each part carries the position spread it was scored against.
+// The AE Score a cell shows: live, or in the "As of draft" view a drafted
+// class's saved snapshot. Each part carries the position spread it was scored
+// against.
 interface ScoreView {
   score: number;
   components: (ScoreComponent & { tau: number })[];
-  /** Set when this is a saved lock. */
+  /** Set when the value shown IS the draft-day snapshot. */
   lockedAt?: string;
+  /** In the live view, the draft-day snapshot for reference. */
+  atDraft?: { score: number; lockedAt: string };
 }
 
 // Derived per-prospect values the sort reads.
@@ -342,28 +349,41 @@ export default function BigBoard({
     return m;
   }, [games, gameTiers]);
 
-  // AE Score per prospect: the saved lock once the draft class is drafted
-  // (lib/scouting/scoreLock.ts), else the live score.
+  const [scoreMode, setScoreMode] = useState<ScoreViewMode>(() =>
+    getLocalStorageItem<ScoreViewMode>(SCORE_VIEW_KEY, "live") === "draft" ? "draft" : "live");
+  function chooseScoreMode(mode: ScoreViewMode) {
+    setScoreMode(mode);
+    setLocalStorageItem(SCORE_VIEW_KEY, mode);
+  }
+
+  // AE Score per prospect. Live by default: more charting sharpens the models
+  // and spreads, and that should reach every class. "As of draft" swaps in a
+  // drafted class's draft-day snapshot (lib/scouting/scoreLock.ts). Live keeps
+  // the snapshot alongside for the tooltip. A prospect with a snapshot but no
+  // live score falls back to the snapshot.
   const scoreViews = useMemo(() => {
     const now = new Date();
     const m = new Map<string, ScoreView>();
     for (const p of prospects) {
       const lock = activeLock(p, now);
-      if (lock) { m.set(p.id, { score: lock.score, components: lock.components, lockedAt: lock.locked_at }); continue; }
+      const snapshot: ScoreView | null = lock ? { score: lock.score, components: lock.components, lockedAt: lock.locked_at } : null;
       const sc = composite.scores.get(p.id);
+      if (snapshot && (scoreMode === "draft" || !sc)) { m.set(p.id, snapshot); continue; }
       if (!sc || !isCompositePos(p.position)) continue;
       const pc = composite.positions[p.position];
       m.set(p.id, {
         score: sc.score,
         components: sc.components.map((c) => ({ ...c, tau: pc.metrics.find((x) => x.key === c.key)?.tau ?? 0 })),
+        atDraft: lock ? { score: lock.score, lockedAt: lock.locked_at } : undefined,
       });
     }
     return m;
-  }, [prospects, composite]);
+  }, [prospects, composite, scoreMode]);
 
-  // Freeze each drafted prospect's AE Score the first time it's scored, once
-  // every lazy input has landed. One attempt per prospect per visit: if the
-  // write fails (migration 059 not applied), the prospect is just scored live.
+  // Snapshot each drafted prospect's AE Score the first time it's scored, once
+  // every lazy input has landed: the draft-day record behind "As of draft".
+  // One attempt per prospect per visit; a failed write (migration 059 not
+  // applied) just means no snapshot.
   const lockAttemptedRef = useRef(new Set<string>());
   useEffect(() => {
     if (!scoresReady || !onLockAEScore) return;
@@ -600,7 +620,11 @@ export default function BigBoard({
       return `${c.label} ${ae} on ${c.n} ${SAMPLE_UNIT[c.key] ?? "plays"} · ` +
         `${Math.round(c.reliability * 100)}% taken as real · ${p.position} spread ±${c.tau.toFixed(1)} → ${signed(c.z, 2)}`;
     });
-    if (sc.lockedAt) lines.push(`Locked ${new Date(sc.lockedAt).toLocaleDateString()}: the ${p.draft_class_year} class has been drafted, so later charting won't move it`);
+    if (sc.lockedAt) {
+      lines.push(`As of draft: frozen ${new Date(sc.lockedAt).toLocaleDateString()}, the ${p.draft_class_year} class's draft-day score`);
+    } else if (sc.atDraft) {
+      lines.push(`At draft: ${signed(sc.atDraft.score, 2)} (locked ${new Date(sc.atDraft.lockedAt).toLocaleDateString()})`);
+    }
     const mix = gamesByTier.get(p.id);
     if (mix && p.position !== "QB") lines.push(`Charted opponents: ${mix.P4} P4 · ${mix.G5} G5 · ${mix.FCS} FCS`);
     const title = [`${signed(sc.score, 2)} true-talent SDs vs the average charted ${p.position}`, ...lines].join("\n");
@@ -1053,6 +1077,17 @@ export default function BigBoard({
         {unrecognized.length > 0 && <span className="text-amber-700"> · Unrecognized opponents: {unrecognized.join(", ")}</span>}
       </p>
       <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 mb-3 text-xs text-slate-400">
+        <div role="group" aria-label="Score view" className="inline-flex rounded border border-slate-700 overflow-hidden"
+          title="Live: scores sharpen as you chart more. As of draft: a drafted class's scores as they stood at its draft (🔒).">
+          {(["live", "draft"] as const).map((mode) => (
+            <button
+              key={mode}
+              aria-pressed={scoreMode === mode}
+              onClick={() => chooseScoreMode(mode)}
+              className={`px-2 py-0.5 ${scoreMode === mode ? "bg-teal-800 text-white" : "bg-slate-900 text-slate-400 hover:bg-slate-800"}`}
+            >{mode === "live" ? "Live" : "As of draft"}</button>
+          ))}
+        </div>
         <span className="text-slate-500">Dynasty weights</span>
         {WEIGHT_SLIDERS.map((w) => (
           <label key={w.key} className="flex items-center gap-1.5" title={w.hint}>

@@ -1,18 +1,17 @@
-// Freezing the AE Score once a prospect's draft class has been drafted.
+// A draft-day snapshot of the AE Score, saved once a prospect's draft class
+// has been drafted.
 //
 // The AE Score is relative: each AE is judged by league difficulty models fit
 // on every charted play, then shrunk and scaled against the whole charted
 // pool at the position, with opponent strength measured across everyone too.
-// Charting later classes reshapes all of that and would nudge a drafted
-// player's score for years. The user wants a drafted class's rankings to stay
-// put, so the first time a drafted prospect is scored, the score is saved
-// (prospects.ae_score_lock, migration 059) and used from then on. Dynasty and
-// Dynasty+ are built on it, so they hold too. They only move when the user
-// moves the sliders or edits the prospect's size or round. Age never drifts
-// either way: the Dynasty Score uses the rookie-season age, not today's.
-//
-// Locked prospects still count in the pool and the league models for
-// everyone not yet locked.
+// Charting later classes keeps sharpening all of that, so a drafted player's
+// live score keeps moving. Mostly that's the measurement getting better, which
+// is why the Big Board shows live scores by default (the user's call,
+// 2026-10-01). The first time a drafted prospect is scored, though, the score
+// is also saved (prospects.ae_score_lock, migration 059). That keeps a record
+// of how the class stood at its draft: the "As of draft" view shows it, and
+// the live view's tooltip quotes it. Age never drifts either way: the Dynasty
+// Score uses the rookie-season age, not today's.
 
 import type { AEScoreLock } from "../types";
 import type { AEScore, PositionComposite } from "./aeComposite";
