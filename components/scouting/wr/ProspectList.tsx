@@ -267,17 +267,20 @@ export default function ProspectList({
             <div
               key={p.id}
               onClick={() => { setConfirmDeleteId(null); onSelectProspect(p); }}
-              className="w-full flex items-center gap-3 px-4 py-3 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-600 rounded-lg transition text-left group cursor-pointer"
+              className="w-full flex flex-wrap sm:flex-nowrap items-center gap-x-3 gap-y-1.5 px-4 py-3 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-600 rounded-lg transition text-left group cursor-pointer"
             >
               <span
                 className={`flex-shrink-0 w-2.5 h-2.5 rounded-full ${DECISION_DOT[p.charting_decision]}`}
                 title={p.charting_decision}
               />
-              <span className="text-sm font-medium text-white min-w-0 truncate">{p.name}</span>
+              {/* Phones: the name gets the whole first line (row width minus the dot and
+                  gap) and the stats wrap underneath; the stats used to squeeze it to an
+                  initial. From sm up the row is one line, as before. */}
+              <span className="text-sm font-medium text-white min-w-0 truncate w-[calc(100%-1.375rem)] sm:w-auto">{p.name}</span>
               <span className="text-xs text-slate-400 truncate hidden sm:block">{p.school}</span>
               <span className="text-xs text-slate-600 hidden md:block">{p.position}</span>
-              <div className="ml-auto flex items-center gap-3 flex-shrink-0">
-                <span className="w-20 flex justify-center">
+              <div className="ml-[1.375rem] sm:ml-auto flex flex-wrap sm:flex-nowrap items-center gap-x-3 gap-y-1 min-w-0 sm:flex-shrink-0">
+                <span className="sm:w-20 flex justify-center empty:hidden sm:empty:flex">
                   <RecruitStarBadge recruit={matchProspect({ name: p.name, position: p.position, draft_class_year: p.draft_class_year })} />
                 </span>
                 {p.total_routes > 0 && (
