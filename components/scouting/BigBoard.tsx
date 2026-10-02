@@ -14,6 +14,7 @@ import {
 } from "../../lib/scouting/aboveExpected";
 import {
   buildAEComposite, MIN_POOL,
+  QB_FULL_TRUST, RB_FULL_TRUST, WR_ALL_FULL_TRUST, WR_CORE_FULL_TRUST, POSITION_BASELINE,
   type AEComposite, type CompositePos,
 } from "../../lib/scouting/aeComposite";
 import {
@@ -105,6 +106,8 @@ interface ScoreView {
   components: (ScoreComponent & { tau: number })[];
   /** A WR's alignment penalty, already in `score`. */
   alignment?: { label: string; value: number };
+  /** The position's baseline shift (aeComposite POSITION_BASELINE), already in `score`. */
+  baseline?: number;
   /** Set when the value shown IS the draft-day snapshot. */
   lockedAt?: string;
   /** In the live view, the draft-day snapshot for reference. */
@@ -371,6 +374,7 @@ export default function BigBoard({
         score: sc.score + (alignment?.value ?? 0),
         components: sc.components.map((c) => ({ ...c, tau: pc.metrics.find((x) => x.key === c.key)?.tau ?? 0 })),
         ...(alignment ? { alignment } : {}),
+        ...(sc.baseline ? { baseline: sc.baseline } : {}),
       });
     }
     return m;
@@ -387,7 +391,7 @@ export default function BigBoard({
     for (const p of prospects) {
       const lock = activeLock(p, now);
       const snapshot: ScoreView | null = lock
-        ? { score: lock.score, components: lock.components, alignment: lock.alignment, lockedAt: lock.locked_at }
+        ? { score: lock.score, components: lock.components, alignment: lock.alignment, baseline: lock.baseline, lockedAt: lock.locked_at }
         : null;
       const live = liveScores.get(p.id);
       if (snapshot && (scoreMode === "draft" || !live)) { m.set(p.id, snapshot); continue; }
@@ -413,7 +417,7 @@ export default function BigBoard({
     void (async () => {
       for (const p of toLock) {
         const live = liveScores.get(p.id)!;
-        await onLockAEScore(p.id, makeLock({ score: live.score, components: live.components, alignment: live.alignment }, now));
+        await onLockAEScore(p.id, makeLock({ score: live.score, components: live.components, alignment: live.alignment, baseline: live.baseline }, now));
       }
     })();
   }, [scoresReady, prospects, liveScores, onLockAEScore]);
@@ -643,9 +647,11 @@ export default function BigBoard({
       lines.push(`At draft: ${signed(sc.atDraft.score, 2)} (locked ${new Date(sc.atDraft.lockedAt).toLocaleDateString()})`);
     }
     if (sc.alignment) lines.push(`Alignment: ${sc.alignment.label} → ${signed(sc.alignment.value, 2)}`);
+    if (sc.baseline) lines.push(`${p.position} baseline: every ${p.position} sits ${Math.abs(sc.baseline).toFixed(1)} ${sc.baseline < 0 ? "lower" : "higher"} → ${signed(sc.baseline, 2)}`);
     const mix = gamesByTier.get(p.id);
     if (mix && p.position !== "QB") lines.push(`Charted opponents: ${mix.P4} P4 · ${mix.G5} G5 · ${mix.FCS} FCS`);
-    const head = `${signed(sc.score, 2)} true-talent SDs vs the average charted ${p.position}${sc.alignment ? ", after the alignment penalty" : ""}`;
+    const after = [sc.alignment && "the alignment penalty", sc.baseline && `the ${p.position} baseline`].filter(Boolean).join(" and ");
+    const head = `${signed(sc.score, 2)} true-talent SDs vs the average charted ${p.position}${after ? `, after ${after}` : ""}`;
     const title = [head, ...lines].join("\n");
     const color = sc.score >= 0 ? "text-emerald-400" : "text-red-400";
     return (
@@ -733,8 +739,9 @@ export default function BigBoard({
     "Reps against G5 and FCS opponents are discounted (the AE columns are not). " +
     `Older seasons count a little less, here and in the AE columns (each season back ×${SEASON_DECAY}). ` +
     "WRs lined up 75%+ on one side (or, milder, in the slot) lose up to 0.5 (0.2), most at 95%. " +
-    "Small samples are discounted until full trust: WR at 232 total / 168 core routes, with QB, RB and TE " +
-    "ceilings matched to keep the positions level. " +
+    `Small samples are discounted until full trust: WR at ${WR_ALL_FULL_TRUST} total / ${WR_CORE_FULL_TRUST} core routes, ` +
+    `QB at ${QB_FULL_TRUST} throws, RB at ${RB_FULL_TRUST} runs (TE's ceiling is matched to WR's). ` +
+    `RBs sit ${Math.abs(POSITION_BASELINE.RB ?? 0).toFixed(1)} lower across the board, to keep them from crowding the top. ` +
     `True spread: ${compositeStatus}.`;
 
   const rankUpdater = boardTab === "all" ? onUpdateOverallRank : onUpdateRank;

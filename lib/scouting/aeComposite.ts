@@ -80,6 +80,8 @@ export interface AEScore {
   score: number;
   /** One per ready metric the prospect has a sample for; a ready metric without one counts as 0. */
   components: ScoreComponent[];
+  /** The position's baseline shift (POSITION_BASELINE), already in `score`. */
+  baseline?: number;
 }
 
 export interface PositionComposite {
@@ -138,7 +140,8 @@ const median = (xs: number[]) => { const a = [...xs].sort((x, y) => x - y); retu
 // metrics[0] is the primary metric: it decides whether the position is scored
 // and who gets a score. Later metrics add to that score once they're ready
 // themselves; until then they're left out and the weights renormalize.
-export function buildPositionComposite(pos: CompositePos, metrics: CompositeMetric[]): PositionComposite {
+// `baseline` shifts every score at the position (see POSITION_BASELINE).
+export function buildPositionComposite(pos: CompositePos, metrics: CompositeMetric[], baseline = 0): PositionComposite {
   const fitted = metrics.map((m) => {
     const xs = [...m.samples.values()].filter((s): s is AESample => s != null);
     const est = xs.length >= MIN_POOL ? estimateSpread(xs) : null;
@@ -178,7 +181,7 @@ export function buildPositionComposite(pos: CompositePos, metrics: CompositeMetr
       components.push({ key: m.key, label: m.label, weight: m.weight, ae: s.ae, rawAe: s.rawAe, n: s.n, reliability, z });
       weighted += m.weight * z;
     }
-    scores.set(id, { score: weighted / totalWeight, components });
+    scores.set(id, { score: weighted / totalWeight + baseline, components, ...(baseline ? { baseline } : {}) });
   }
   return { pos, ready: true, metrics: spreads, scores };
 }
@@ -201,13 +204,30 @@ const WR_ALL_WEIGHT = 0.3;
 export const WR_CORE_FULL_TRUST = 168;
 export const WR_ALL_FULL_TRUST = 232;
 
-// QB, RB and TE get matching ceilings, so no position gains on another (the
-// user's call: keep today's cross-position balance). A ceiling F lifts trust
-// below it by (F + h) / F, where h is the metric's half point. Each other
-// metric's ceiling sits at the same multiple of its own half point as WR's do,
-// recomputed from the data every time, so the boost matches. On 2026-10-01
-// that was about 443 throws and 245 runs. With no WR ceiling to match (WR not
-// ready), the others keep the statistical reliability.
+// QB and RB ceilings, also the user's (2026-10-02): a QB counts in full at 232
+// throws, an RB at 160 runs. They replace ceilings matched to WR's, which had
+// drifted to ~282 throws and ~234 runs, out of an RB's reach (the most charted
+// has 103). Below a ceiling a lower one lifts every sample's trust by the same
+// factor, so it only widens the position's spread: on the real data ×1.09 for
+// QB and ×1.19 for RB, with the 2027 top 34 mix unchanged.
+export const QB_FULL_TRUST = 232;
+export const RB_FULL_TRUST = 160;
+
+// Every RB's AE Score sits 0.2 lower (the user's call, 2026-10-02). Each
+// position's 0 is its own average charted prospect, and on that footing RBs
+// crowded the board: 13 of the 2027 top 34, against about 10 in the user's own
+// rankings (15 WR, 10 RB, 9 QB). Scaling RB scores down couldn't fix that: it
+// pulls good RBs down but lifts below-average ones toward 0, right where the
+// cut sits. So the level moves instead. Real data: the 2027 top 34 went from
+// 8 QB, 13 RB, 13 WR to 8 / 11 / 15.
+export const POSITION_BASELINE: Partial<Record<CompositePos, number>> = { RB: -0.2 };
+
+// TE's ceiling is matched to WR's, so TE neither gains nor loses on WR when it
+// joins. A ceiling F lifts trust below it by (F + h) / F, where h is the
+// metric's half point. A TE metric's ceiling sits at the same multiple of its
+// own half point as WR's do, recomputed from the data every time, so the boost
+// matches. (QB and RB used this until their own ceilings were set.) With no WR
+// ceiling to match (WR not ready), TE keeps the statistical reliability.
 export function matchedCeiling(wr: PositionComposite): ((halfPoint: number) => number) | undefined {
   const capped = wr.metrics.filter((m) => m.ready && m.fullTrustAt != null && m.halfPoint != null);
   if (!capped.length) return undefined;
@@ -241,16 +261,16 @@ export function buildAEComposite(inp: AECompositeInputs): AEComposite {
   const WR = buildPositionComposite("WR", [
     { key: "csae", label: "cSAE", weight: WR_CORE_WEIGHT, samples: inp.wrCore, fullTrustAt: WR_CORE_FULL_TRUST },
     { key: "sae", label: "SAE", weight: WR_ALL_WEIGHT, samples: inp.wr, fullTrustAt: WR_ALL_FULL_TRUST },
-  ]);
+  ], POSITION_BASELINE.WR);
   const matched = matchedCeiling(WR);
   const positions: Record<CompositePos, PositionComposite> = {
-    QB: buildPositionComposite("QB", [{ key: "aae", label: "AAE", weight: 1, samples: inp.qb, fullTrustAt: matched }]),
-    RB: buildPositionComposite("RB", [{ key: "srae", label: "SRAE", weight: 1, samples: inp.rb, fullTrustAt: matched }]),
+    QB: buildPositionComposite("QB", [{ key: "aae", label: "AAE", weight: 1, samples: inp.qb, fullTrustAt: QB_FULL_TRUST }], POSITION_BASELINE.QB),
+    RB: buildPositionComposite("RB", [{ key: "srae", label: "SRAE", weight: 1, samples: inp.rb, fullTrustAt: RB_FULL_TRUST }], POSITION_BASELINE.RB),
     WR,
     TE: buildPositionComposite("TE", [
       { key: "te_saer", label: "TE-SAER", weight: TE_ROUTE_WEIGHT, samples: inp.teRoute, fullTrustAt: matched },
       { key: "te_saeb", label: "TE-SAEB", weight: TE_BLOCK_WEIGHT, samples: inp.teBlock, fullTrustAt: matched },
-    ]),
+    ], POSITION_BASELINE.TE),
   };
   const scores = new Map<string, AEScore>();
   for (const pc of Object.values(positions)) for (const [id, sc] of pc.scores) scores.set(id, sc);

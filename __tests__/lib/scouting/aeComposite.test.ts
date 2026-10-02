@@ -4,6 +4,9 @@ import {
   matchedCeiling,
   WR_CORE_FULL_TRUST,
   WR_ALL_FULL_TRUST,
+  QB_FULL_TRUST,
+  RB_FULL_TRUST,
+  POSITION_BASELINE,
   estimateSpread,
   buildPositionComposite,
   buildAEComposite,
@@ -189,24 +192,48 @@ describe("full-trust ceilings", () => {
     expect(top.z).toBeCloseTo((6 - pc.metrics[0].mean!) / pc.metrics[0].tau!, 12);
   });
 
-  it("matches the other positions' ceilings to WR's, so every position gets the same lift", () => {
-    const tag = (prefix: string, m: Map<string, AESample | null>) => new Map([...m].map(([id, v]) => [`${prefix}${id}`, v]));
-    const comp = buildAEComposite({
-      qb: tag("qb", pool(SPREAD, 9)),
-      rb: tag("rb", pool(SPREAD.map((x) => x * 2), 16)),
-      wr: tag("wr", pool(SPREAD)),
-      wrCore: tag("wr", pool(SPREAD)),
-      teRoute: new Map(), teBlock: new Map(),
-    });
-    const wr = comp.positions.WR.metrics;
-    expect(wr.map((m) => m.fullTrustAt)).toEqual([WR_CORE_FULL_TRUST, WR_ALL_FULL_TRUST]);
+  const tag = (prefix: string, m: Map<string, AESample | null>) => new Map([...m].map(([id, v]) => [`${prefix}${id}`, v]));
+  const fullBoard = () => buildAEComposite({
+    qb: tag("qb", pool(SPREAD, 9)),
+    rb: tag("rb", pool(SPREAD.map((x) => x * 2), 16)),
+    wr: tag("wr", pool(SPREAD)),
+    wrCore: tag("wr", pool(SPREAD)),
+    teRoute: tag("te", pool(SPREAD)), teBlock: new Map(),
+  });
+
+  it("gives QB and RB their own ceilings: 232 throws, 160 runs", () => {
+    const comp = fullBoard();
+    expect(comp.positions.WR.metrics.map((m) => m.fullTrustAt)).toEqual([WR_CORE_FULL_TRUST, WR_ALL_FULL_TRUST]);
+    expect(comp.positions.QB.metrics[0].fullTrustAt).toBe(QB_FULL_TRUST);
+    expect(comp.positions.RB.metrics[0].fullTrustAt).toBe(RB_FULL_TRUST);
+    expect([QB_FULL_TRUST, RB_FULL_TRUST]).toEqual([232, 160]);
+  });
+
+  it("matches TE's ceiling to WR's, so TE gets the same lift", () => {
+    const comp = fullBoard();
     const lift = (m: { fullTrustAt?: number; halfPoint?: number }) => (m.fullTrustAt! + m.halfPoint!) / m.fullTrustAt!;
-    const wrLift = 0.7 * lift(wr[0]) + 0.3 * lift(wr[1]);
-    for (const pos of ["QB", "RB"] as const) {
-      const m = comp.positions[pos].metrics[0];
-      expect(m.fullTrustAt).toBeGreaterThan(0);
-      expect(lift(m)).toBeCloseTo(wrLift, 1);
+    const wr = comp.positions.WR.metrics;
+    const te = comp.positions.TE.metrics[0];
+    expect(te.fullTrustAt).toBeGreaterThan(0);
+    expect(lift(te)).toBeCloseTo(0.7 * lift(wr[0]) + 0.3 * lift(wr[1]), 1);
+    // Nothing to match without a ceiling.
+    expect(matchedCeiling(buildPositionComposite("WR", [metric(pool(SPREAD))]))).toBeUndefined();
+  });
+});
+
+describe("position baseline", () => {
+  it("sets every RB 0.2 lower, recorded on the score, and leaves the other positions alone", () => {
+    expect(POSITION_BASELINE).toEqual({ RB: -0.2 });
+    const rb = pool(SPREAD, 16);
+    const comp = buildAEComposite({ qb: pool(SPREAD, 9), rb, wr: new Map(), wrCore: new Map(), teRoute: new Map(), teBlock: new Map() });
+    const plain = buildPositionComposite("RB", [{ key: "srae", label: "SRAE", weight: 1, samples: rb, fullTrustAt: RB_FULL_TRUST }]);
+    for (const [id, sc] of plain.scores) {
+      const shifted = comp.positions.RB.scores.get(id)!;
+      expect(shifted.score).toBeCloseTo(sc.score - 0.2, 12);
+      expect(shifted.baseline).toBe(-0.2);
+      expect(shifted.components).toEqual(sc.components); // the parts are untouched
+      expect(sc.baseline).toBeUndefined();
     }
-    expect(matchedCeiling(comp.positions.TE)).toBeUndefined(); // nothing to match without a WR-style ceiling
+    for (const sc of comp.positions.QB.scores.values()) expect(sc.baseline).toBeUndefined();
   });
 });

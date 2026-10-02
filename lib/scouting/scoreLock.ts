@@ -21,12 +21,13 @@ export function classDraftedBy(draftClassYear: number, now: Date): boolean {
   return now.getTime() >= Date.UTC(draftClassYear, 4, 1);
 }
 
-/** The snapshot to save for a live score: the score, each part with the spread it was scored against, and any alignment penalty. */
+/** The snapshot to save for a live score: the score, each part with the spread it was scored against, and any alignment penalty or position baseline. */
 export function makeLock(live: Omit<AEScoreLock, "locked_at">, now: Date): AEScoreLock {
   return {
     score: live.score,
     components: live.components,
     ...(live.alignment ? { alignment: live.alignment } : {}),
+    ...(live.baseline ? { baseline: live.baseline } : {}),
     locked_at: now.toISOString(),
   };
 }

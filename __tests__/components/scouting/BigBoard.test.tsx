@@ -433,6 +433,23 @@ describe("BigBoard drafted classes", () => {
   });
 });
 
+describe("BigBoard RB baseline", () => {
+  // Ten more RBs, enough for RB to join the score (rb1 makes eleven).
+  const AES = [-9, -6, -4, -2, 0, 1, 3, 5, 8, 12];
+  const POOL = AES.map((_, i) => prospect(`pr${i}`, `Pool RB ${i}`, "RB", 40 + i));
+  afterEach(() => { AES.forEach((_, i) => { delete TABLES.rb[`pr${i}`]; }); });
+
+  it("sets every RB 0.2 lower and says so", () => {
+    AES.forEach((ae, i) => { TABLES.rb[`pr${i}`] = ae; });
+    renderBoard([...PROSPECTS, ...POOL]);
+    const score = cell("Running One", "AE Score")!;
+    const title = within(rowFor("Running One")).getAllByRole("cell")[headerLabels().indexOf("AE Score")].getAttribute("title")!;
+    expect(title.split("\n")[0]).toBe(`${score} true-talent SDs vs the average charted RB, after the RB baseline`);
+    expect(title).toContain("RB baseline: every RB sits 0.2 lower → -0.20");
+    expect(title).toContain("taken as real (full at 160 runs)");
+  });
+});
+
 describe("BigBoard WR alignment", () => {
   // Ten WRs with cSAE and SAE samples (variance 4, 50 routes), enough to score.
   const AES = [-9, -6, -4, -2, 0, 1, 3, 5, 8, 12];
