@@ -21,7 +21,6 @@ import type { GradeField } from "../lib/scouting/prospectGrade";
 import {
   buildProspectsWithStats,
   type ProspectRouteStatsRow,
-  type ProspectRouteCellsRow,
   type ProspectGameRouteCellsRow,
 } from "../lib/scouting/aggregateMerge";
 
@@ -123,7 +122,7 @@ async function fetchPlaysByGame<T>(
 }
 
 // prospect_game_route_cells (migration 058), paged. Throws on error, which
-// includes the view not existing yet.
+// includes the view not existing.
 async function fetchGameRouteCells(): Promise<ProspectGameRouteCellsRow[]> {
   const PAGE = 1000;
   const all: ProspectGameRouteCellsRow[] = [];
@@ -168,7 +167,6 @@ export default function ScoutingHub() {
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [games, setGames] = useState<ScoutingGame[]>([]);
   const [routeStatsRows, setRouteStatsRows] = useState<ProspectRouteStatsRow[]>([]);
-  const [routeCellRows, setRouteCellRows] = useState<ProspectRouteCellsRow[]>([]);
   const [gameSnapStatsRows, setGameSnapStatsRows] = useState<GameSnapStatsRow[]>([]);
   const [posSnapsRows, setPosSnapsRows] = useState<PosSnapsRow[]>([]);
   const [qbThrowsByProspect, setQbThrowsByProspect] = useState<Map<string, number>>(new Map());
@@ -194,18 +192,16 @@ export default function ScoutingHub() {
   const [qbPlays, setQbPlays] = useState<QBPlay[]>([]);
   const [tePlays, setTePlays] = useState<TEPlay[]>([]);
   const fetchedPlaysRef = useRef<{ RB: string | null; QB: string | null; TE: string | null }>({ RB: null, QB: null, TE: null });
-  // Per-game WR route cells for the AE Score's opponent adjustment. Only the
-  // Big Board uses them, so they load when it opens. Null until then, and
-  // after a failed load (e.g. migration 058 not applied): WR just isn't
-  // opponent-adjusted.
+  // Per-game WR route cells (migration 058). They feed WR SAE / cSAE (each
+  // route season-weighted by its game, see seasonWeight.ts) and the AE Score's
+  // opponent adjustment, so they load with everything else. Null after a
+  // failed load: WR SAE / cSAE show "—" and WR isn't opponent-adjusted.
   const [gameRouteCells, setGameRouteCells] = useState<ProspectGameRouteCellsRow[] | null>(null);
-  const fetchedGameCellsRef = useRef<string | null>(null);
-  // Whether each lazy load has landed (or, for the game cells, given up). The
-  // Big Board only freezes a drafted prospect's AE Score once all four have,
-  // so it never locks a half-computed score.
+  // Whether each lazy play load has landed. The Big Board only snapshots a
+  // drafted prospect's AE Score once all three have, so it never saves a
+  // half-computed score. (The route cells arrive with the hub's own load.)
   const [playsLoaded, setPlaysLoaded] = useState({ RB: false, QB: false, TE: false });
-  const [gameCellsSettled, setGameCellsSettled] = useState(false);
-  const scoresReady = playsLoaded.RB && playsLoaded.QB && playsLoaded.TE && gameCellsSettled;
+  const scoresReady = playsLoaded.RB && playsLoaded.QB && playsLoaded.TE;
   const { begin: beginLoad, isCurrent: isLoadCurrent } = useLatestRequest();
   const mountedRef = useRef(false);
 
@@ -220,7 +216,7 @@ export default function ScoutingHub() {
         { data: pData, error: pErr },
         { data: gData, error: gErr },
         { data: rsData, error: rsErr },
-        { data: cellData, error: cellErr },
+        { rows: cellData, error: cellErr },
         { data: gssData, error: gssErr },
         { data: rbStatsData, error: rbStatsErr },
         { data: qbStatsData, error: qbStatsErr },
@@ -229,9 +225,12 @@ export default function ScoutingHub() {
         supabase.from("prospects").select("*").order("personal_rank", { ascending: true, nullsFirst: false }),
         supabase.from("scouting_games").select("*").order("season_year", { ascending: false }),
         supabase.from("prospect_route_stats").select("*"),
-        // WR SAE's difficulty model (migration 057). Its own query, so a not-yet-applied
-        // migration only blanks SAE / cSAE instead of failing prospect_route_stats too.
-        supabase.from("prospect_route_cells").select("prospect_id,cells"),
+        // WR SAE / cSAE, per game (migration 058). Its own query, so a failure only
+        // blanks SAE / cSAE instead of failing prospect_route_stats too.
+        fetchGameRouteCells().then(
+          (rows) => ({ rows, error: null }),
+          (error: { message?: string; code?: string }) => ({ rows: null, error }),
+        ),
         supabase.from("prospect_game_snap_stats").select("*"),
         supabase.from("prospect_rb_stats").select("prospect_id,total_snaps,run_type_stats_raw"),
         supabase.from("prospect_qb_stats").select("prospect_id,total_snaps,total_throws,depth_zone_stats_raw"),
@@ -241,7 +240,7 @@ export default function ScoutingHub() {
       if (pErr) log.error("prospects load", { msg: pErr.message, code: pErr.code, details: pErr.details, hint: pErr.hint });
       if (gErr) log.error("games load", { msg: gErr.message, code: gErr.code, details: gErr.details, hint: gErr.hint });
       if (rsErr) log.error("prospect_route_stats load", { msg: rsErr.message, code: rsErr.code, details: rsErr.details, hint: rsErr.hint });
-      if (cellErr) log.error("prospect_route_cells load (WR SAE/cSAE stay blank until migration 057 is applied)", { msg: cellErr.message, code: cellErr.code, details: cellErr.details, hint: cellErr.hint });
+      if (cellErr) log.error("prospect_game_route_cells load (WR SAE/cSAE blank, WR AE Score not opponent-adjusted)", { msg: cellErr.message, code: cellErr.code });
       if (gssErr) log.error("prospect_game_snap_stats load", { msg: gssErr.message, code: gssErr.code, details: gssErr.details, hint: gssErr.hint, raw: JSON.stringify(gssErr) });
       if (rbStatsErr) log.error("prospect_rb_stats load", { msg: rbStatsErr.message });
       if (qbStatsErr) log.error("prospect_qb_stats load", { msg: qbStatsErr.message });
@@ -250,9 +249,7 @@ export default function ScoutingHub() {
       // Reset lazy-fetch cache so a parent reload re-fetches plays the
       // next time AnalysisHub or GamesLog needs them.
       fetchedPlaysRef.current = { RB: null, QB: null, TE: null };
-      fetchedGameCellsRef.current = null;
       setPlaysLoaded({ RB: false, QB: false, TE: false });
-      setGameCellsSettled(false);
       setRbPlays([]);
       setQbPlays([]);
       setTePlays([]);
@@ -260,7 +257,7 @@ export default function ScoutingHub() {
       setProspects((pData ?? []) as Prospect[]);
       setGames((gData ?? []) as ScoutingGame[]);
       setRouteStatsRows((rsData ?? []) as ProspectRouteStatsRow[]);
-      setRouteCellRows((cellData ?? []) as ProspectRouteCellsRow[]);
+      setGameRouteCells(cellData);
       setGameSnapStatsRows((gssData ?? []) as GameSnapStatsRow[]);
       const rbRows = (rbStatsData ?? []) as RbRunTypeRow[];
       const qbRows = (qbStatsData ?? []) as QbThresholdRow[];
@@ -319,20 +316,6 @@ export default function ScoutingHub() {
     else if (pos === "TE") fetchPlaysByGame<TEPlay>("te_plays", ids).then((rows) => { setTePlays(rows); loaded(); }).catch(onErr);
   }, [loading, games, gameIdsKey]);
 
-  // Once per parent reload, like the plays. A failure isn't retried until the
-  // next reload, so a missing view logs once instead of on every visit.
-  const loadGameRouteCells = useCallback(() => {
-    if (loading || games.length === 0 || fetchedGameCellsRef.current === gameIdsKey) return;
-    fetchedGameCellsRef.current = gameIdsKey;
-    fetchGameRouteCells()
-      .then((rows) => { setGameRouteCells(rows); setGameCellsSettled(true); })
-      .catch((e: { message?: string; code?: string }) => {
-        log.error("prospect_game_route_cells load (WR AE Score not opponent-adjusted until migration 058 is applied)", { msg: e?.message, code: e?.code });
-        setGameRouteCells(null);
-        setGameCellsSettled(true);
-      });
-  }, [loading, games.length, gameIdsKey]);
-
   // Lazy-fetch league-wide plays for the active position sub-tab too — the new
   // per-prospect "Charts" radar (H1) needs the same all-charted-prospects pool
   // AnalysisHub already uses for percentile tiering, not just the selected
@@ -343,15 +326,16 @@ export default function ScoutingHub() {
     }
   }, [positionTab, loadPositionPlays]);
 
-  // Server-aggregated path: merge view rows + route cells (WR SAE's difficulty
-  // model) into ProspectWithStats. Replaces the per-snap JS reduce.
+  // Server-aggregated path: merge view rows + per-game route cells (WR SAE's
+  // difficulty model, season-weighted by the games) into ProspectWithStats.
+  // Replaces the per-snap JS reduce.
   const prospectsWithStats = useMemo(
     (): ProspectWithStats[] =>
-      buildProspectsWithStats(prospects, routeStatsRows, routeCellRows, {
+      buildProspectsWithStats(prospects, routeStatsRows, gameRouteCells ?? [], games, {
         qbThrowsByProspect,
         teRoutesByProspect,
       }),
-    [prospects, routeStatsRows, routeCellRows, qbThrowsByProspect, teRoutesByProspect],
+    [prospects, routeStatsRows, gameRouteCells, games, qbThrowsByProspect, teRoutesByProspect],
   );
 
   async function handleAddProspect(data: Omit<Prospect, "id" | "user_id" | "created_at" | "updated_at">) {
@@ -636,7 +620,6 @@ export default function ScoutingHub() {
             tePlays={tePlays}
             loadPositionPlays={loadPositionPlays}
             gameRouteCells={gameRouteCells}
-            loadGameRouteCells={loadGameRouteCells}
             scoresReady={scoresReady}
             onLockAEScore={handleLockAEScore}
           />

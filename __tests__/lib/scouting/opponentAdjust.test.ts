@@ -65,6 +65,12 @@ describe("adjustSample", () => {
     expect(out.variance).toBe(4);
   });
 
+  it("uses the season-weighted share of reps when the sample carries weights", () => {
+    // 50 G5 reps from an older season (weight 0.9), 50 P4 reps from the newest.
+    const s: AESample = { ae: 6, n: 100, w: 95, variance: 4, byTier: { P4: { n: 50, resid: 0, w: 50 }, G5: { n: 50, resid: 0, w: 45 } } };
+    expect(adjustSample(s, { G5: 0.02, FCS: 0.04 })!.ae).toBeCloseTo(6 - ((45 * 0.02) / 95) * 100, 9);
+  });
+
   it("leaves P4-only and unsplit samples alone", () => {
     const p4: AESample = { ae: 3, n: 50, variance: 4, byTier: { P4: { n: 50, resid: 0 } } };
     expect(adjustSample(p4, { G5: 0.02, FCS: 0.04 })).toBe(p4);

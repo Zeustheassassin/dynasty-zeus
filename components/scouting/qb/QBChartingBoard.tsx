@@ -459,7 +459,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
         <QBOverviewPanel
           plays={plays}
           leaguePlays={leaguePlays}
-          gamesCount={games.length}
+          games={games}
           loading={loading}
         />
       )}

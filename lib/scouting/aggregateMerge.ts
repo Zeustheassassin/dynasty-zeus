@@ -6,6 +6,7 @@ import type {
   CoverageStat,
   RouteType,
   RoutePlay,
+  ScoutingGame,
 } from "../types";
 import { deriveChartingDecision } from "../../components/scouting/shared/chartingConstants";
 import {
@@ -20,6 +21,7 @@ import {
   type FittedDifficulty,
   type ResidualSums,
 } from "./difficultyModel";
+import { seasonWeights } from "./seasonWeight";
 
 const ROUTE_TYPES: RouteType[] = [
   "nine", "post", "dig", "curl", "slant", "screen", "flat", "comeback", "out", "corner", "other",
@@ -93,6 +95,11 @@ export interface ProspectRouteStatsRow {
 // threats were marked down for running gos and screen/flat-heavy receivers
 // marked up (go share correlated −0.21 with SAE; ~0 after).
 //
+// A WR's routes are season-weighted like every Above-Expected metric
+// (seasonWeight.ts), so his cells come from the per-game view (migration 058),
+// which knows each route's game and so its season. The league model is fit
+// unweighted.
+//
 // Ridge strength 3, chosen by 5-fold held-out-WR validation over 1–30: every
 // fifth of routes (by difficulty) lands within 1.3 pts of its actual open rate
 // at 1–3, and it drifts to 2.5+ from 10 up. 3 over 1 for a little more
@@ -107,7 +114,8 @@ interface WRSituation {
   alignment: string;
   on_line: boolean;
 }
-interface RouteCell extends WRSituation { n: number; open: number }
+// `w` is the season weight of each of the cell's routes (1 = counts in full).
+interface RouteCell extends WRSituation { n: number; open: number; w: number }
 
 const WR_DESIGN = makeDesign<WRSituation>([
   [ROUTE_TYPES,                            (s) => s.route_type],
@@ -125,20 +133,42 @@ export interface ProspectRouteCellsRow {
   cells: Record<string, [number, number]> | null;
 }
 
-function parseCells(raw: Record<string, [number, number]> | null | undefined): RouteCell[] {
+function parseCells(raw: Record<string, [number, number]> | null | undefined, w = 1): RouteCell[] {
   const out: RouteCell[] = [];
   for (const [key, counts] of Object.entries(raw ?? {})) {
     const parts = key.split("|");
     if (parts.length !== 4 || !Array.isArray(counts)) continue;
     const [n, open] = counts;
     if (!(n > 0)) continue;
-    out.push({ route_type: parts[0], coverage: parts[1], alignment: parts[2], on_line: parts[3] === "on", n, open });
+    out.push({ route_type: parts[0], coverage: parts[1], alignment: parts[2], on_line: parts[3] === "on", n, open, w });
   }
   return out;
 }
 
-// The league model: every prospect's cells, summed. Null model (so SAE reads
-// "—") when there are no cells — e.g. migration 057 not yet applied.
+// Each prospect's cells from the per-game rows, every game's routes carrying
+// its season weight. Games of the same weight (the same season) merge into one
+// cell per situation.
+function weightedCellsByProspect(
+  gameRows: ProspectGameRouteCellsRow[],
+  weights: Map<string, number>,
+): Map<string, RouteCell[]> {
+  const merged = new Map<string, Map<string, RouteCell>>();
+  for (const row of gameRows) {
+    const w = weights.get(row.game_id) ?? 1;
+    const cells = merged.get(row.prospect_id) ?? new Map<string, RouteCell>();
+    merged.set(row.prospect_id, cells);
+    for (const c of parseCells(row.cells, w)) {
+      const key = `${c.route_type}|${c.coverage}|${c.alignment}|${c.on_line}|${w}`;
+      const acc = cells.get(key);
+      if (acc) { acc.n += c.n; acc.open += c.open; } else cells.set(key, c);
+    }
+  }
+  return new Map([...merged].map(([id, cells]) => [id, [...cells.values()]]));
+}
+
+// The league model: every prospect's cells (or every game's), summed and
+// unweighted. Null model (so SAE reads "—") when there are no cells, e.g. the
+// view didn't load.
 export function buildWRModel(cellRows: ProspectRouteCellsRow[]): WRDifficultyModel {
   const league = new Map<string, RouteCell>();
   for (const row of cellRows) {
@@ -153,15 +183,18 @@ export function buildWRModel(cellRows: ProspectRouteCellsRow[]): WRDifficultyMod
 }
 
 // Open / expected / squared-residual sums over a set of route cells. A cell of
-// n routes with k open adds k residuals of (1 − e) and n − k of −e.
+// n routes with k open adds k residuals of (1 − e) and n − k of −e, each at
+// the cell's season weight.
 function cellSums(cells: RouteCell[], model: Float64Array): ResidualSums {
   const s = emptyResidualSums();
   for (const c of cells) {
     const e = expectedFromModel(model, WR_DESIGN.cols(c));
     s.n += c.n;
-    s.actual += c.open;
-    s.expected += c.n * e;
-    s.sq += c.open * (1 - e) * (1 - e) + (c.n - c.open) * e * e;
+    s.w += c.w * c.n;
+    s.w2 += c.w * c.w * c.n;
+    s.actual += c.w * c.open;
+    s.expected += c.w * c.n * e;
+    s.sq += c.w * (c.open * (1 - e) * (1 - e) + (c.n - c.open) * e * e);
   }
   return s;
 }
@@ -172,12 +205,12 @@ function cellSums(cells: RouteCell[], model: Float64Array): ResidualSums {
 function saeFromCells(cells: RouteCell[], model: WRDifficultyModel): number | null {
   if (!model.model) return null;
   const s = cellSums(cells, model.model);
-  return s.n > 0 ? toAbovePts(s.actual / s.n, s.expected / s.n) : null;
+  return s.n > 0 ? toAbovePts(s.actual / s.w, s.expected / s.w) : null;
 }
 
 const playCell = (p: RoutePlay): RouteCell => ({
   route_type: p.route_type, coverage: p.coverage, alignment: p.alignment, on_line: p.on_line,
-  n: 1, open: p.was_open ? 1 : 0,
+  n: 1, open: p.was_open ? 1 : 0, w: 1,
 });
 
 // "Core-route" SAE — the same math as SAE, but Go (nine) and Screen routes
@@ -203,7 +236,7 @@ function sampleFromCells(cells: RouteCell[], model: Float64Array): AESample | nu
   const s = cellSums(cells, model);
   const variance = residualVariancePts(s);
   if (variance == null) return null;
-  return { ae: toAbovePts(s.actual / s.n, s.expected / s.n), n: s.n, variance };
+  return { ae: toAbovePts(s.actual / s.w, s.expected / s.w), n: s.n, w: s.w, variance };
 }
 
 // One row of prospect_game_route_cells (migration 058): 057's cells, per game.
@@ -218,24 +251,28 @@ export interface WRTierSplits {
 
 // Each WR's residuals (open − expected) by the opponent tier of the game, for
 // the AE Score's opponent adjustment. The league model is refit from the
-// per-game cells: they sum to the same league cells as 057, so it's the same
-// model the SAE columns use.
+// per-game cells, the same model the SAE columns use. `games` supplies the
+// seasons, so each tier's share of a WR's routes is season-weighted like his
+// SAE; the residuals themselves stay unweighted for the tier measurement.
 export function buildWRTierSplits(
   gameRows: ProspectGameRouteCellsRow[],
   tierOf: (gameId: string) => "P4" | "G5" | "FCS" | null | undefined,
+  games: readonly ScoutingGame[] = [],
 ): WRTierSplits {
   const out: WRTierSplits = { all: new Map(), core: new Map() };
   const { model } = buildWRModel(gameRows);
   if (!model) return out;
+  const weights = seasonWeights(games);
   for (const row of gameRows) {
     const tier = tierOf(row.game_id);
     if (!tier) continue;
+    const w = weights.get(row.game_id) ?? 1;
     const all = out.all.get(row.prospect_id) ?? {};
     const core = out.core.get(row.prospect_id) ?? {};
     for (const c of parseCells(row.cells)) {
       const resid = c.open - c.n * expectedFromModel(model, WR_DESIGN.cols(c));
-      addTierResidual(all, tier, c.n, resid);
-      if (!SAE_EX_ROUTE_TYPES.has(c.route_type)) addTierResidual(core, tier, c.n, resid);
+      addTierResidual(all, tier, c.n, resid, w * c.n);
+      if (!SAE_EX_ROUTE_TYPES.has(c.route_type)) addTierResidual(core, tier, c.n, resid, w * c.n);
     }
     out.all.set(row.prospect_id, all);
     out.core.set(row.prospect_id, core);
@@ -351,15 +388,18 @@ export interface ProspectThresholdCounts {
   teRoutesByProspect?: Map<string, number>;
 }
 
+// `gameCellRows` is prospect_game_route_cells (migration 058) and `games` the
+// scouting games, for each route's season weight.
 export function buildProspectsWithStats(
   prospects: Prospect[],
   viewRows: ProspectRouteStatsRow[],
-  cellRows: ProspectRouteCellsRow[],
+  gameCellRows: ProspectGameRouteCellsRow[],
+  games: readonly ScoutingGame[],
   thresholdCounts: ProspectThresholdCounts = {},
 ): ProspectWithStats[] {
   const byProspect = new Map(viewRows.map((r) => [r.prospect_id, r]));
-  const wrModel = buildWRModel(cellRows);
-  const cellsByProspect = new Map(cellRows.map((r) => [r.prospect_id, parseCells(r.cells)]));
+  const wrModel = buildWRModel(gameCellRows);
+  const cellsByProspect = weightedCellsByProspect(gameCellRows, seasonWeights(games));
   const { qbThrowsByProspect, teRoutesByProspect } = thresholdCounts;
 
   return prospects.map((p) => {

@@ -1194,11 +1194,15 @@ export interface AEScoreLock {
 export interface AESample {
   ae: number;
   n: number;
+  /** Sum of the plays' season weights (seasonWeight.ts). Equals n when every
+   *  play counts in full; absent means the same. */
+  w?: number;
   variance: number;
   /** Residual sums (actual − expected, as fractions) by the game's opponent
    *  tier, for the AE Score's opponent-strength adjustment (opponentAdjust.ts).
-   *  Only plays against a recognized opponent are counted. */
-  byTier?: Partial<Record<"P4" | "G5" | "FCS", { n: number; resid: number }>>;
+   *  Only plays against a recognized opponent are counted. n and resid are
+   *  unweighted; w is the season-weighted count (absent = n). */
+  byTier?: Partial<Record<"P4" | "G5" | "FCS", { n: number; resid: number; w?: number }>>;
   /** Set once opponent-adjusted: the AE before the adjustment. */
   rawAe?: number;
 }

@@ -188,45 +188,62 @@ export function fitFromPlays<T>(
   };
 }
 
-// Running sums over a prospect's plays. WR adds a whole route cell at a time
-// (aggregateMerge.ts), since its routes arrive pre-counted.
-export interface ResidualSums { n: number; actual: number; expected: number; sq: number }
-export const emptyResidualSums = (): ResidualSums => ({ n: 0, actual: 0, expected: 0, sq: 0 });
-export function addResidual(acc: ResidualSums, y: number, expected: number): void {
+// Running sums over a prospect's plays, each play weighted by its season
+// (seasonWeight.ts; 1 = counts in full). `n` is the plain play count, `w` and
+// `w2` the sums of the weights and of their squares; actual, expected and sq
+// are weighted sums. WR adds a whole route cell at a time (aggregateMerge.ts),
+// since its routes arrive pre-counted.
+export interface ResidualSums { n: number; w: number; w2: number; actual: number; expected: number; sq: number }
+export const emptyResidualSums = (): ResidualSums => ({ n: 0, w: 0, w2: 0, actual: 0, expected: 0, sq: 0 });
+export function addResidual(acc: ResidualSums, y: number, expected: number, w = 1): void {
   acc.n++;
-  acc.actual += y;
-  acc.expected += expected;
-  acc.sq += (y - expected) * (y - expected);
+  acc.w += w;
+  acc.w2 += w * w;
+  acc.actual += w * y;
+  acc.expected += w * expected;
+  acc.sq += w * (y - expected) * (y - expected);
 }
 
-// The sampling variance of the mean residual, in pts². Null under 2 plays.
+// The sampling variance of the weighted mean residual, in pts². Null under 2
+// plays. The per-play variance uses the reliability-weights denominator
+// w − w2/w, and the effective sample size is w²/w2; with every weight 1 those
+// are n − 1 and n, the plain unweighted formula.
 export function residualVariancePts(s: ResidualSums): number | null {
   if (s.n < 2) return null;
-  const mean = (s.actual - s.expected) / s.n;
-  const perPlay = Math.max(0, (s.sq - s.n * mean * mean) / (s.n - 1));
-  return (perPlay / s.n) * 1e4;
+  const mean = (s.actual - s.expected) / s.w;
+  const perPlay = Math.max(0, (s.sq - s.w * mean * mean) / (s.w - s.w2 / s.w));
+  const nEff = (s.w * s.w) / s.w2;
+  return (perPlay / nEff) * 1e4;
 }
 
 type TierCode = "P4" | "G5" | "FCS";
 export type ByTier = NonNullable<AESample["byTier"]>;
 
 // Adds one play's (or one cell's) residual to its opponent tier's running sum.
-export function addTierResidual(byTier: ByTier, tier: TierCode | null | undefined, n: number, resid: number): void {
+// `n` and `resid` are unweighted (the tier effect is measured on reps as they
+// are); `w` is the season-weighted count, for the prospect's share of reps
+// against the tier.
+export function addTierResidual(byTier: ByTier, tier: TierCode | null | undefined, n: number, resid: number, w = n): void {
   if (!tier) return;
-  const t = (byTier[tier] ??= { n: 0, resid: 0 });
+  const t = (byTier[tier] ??= { n: 0, resid: 0, w: 0 });
   t.n += n;
   t.resid += resid;
+  t.w = (t.w ?? 0) + w;
 }
 
-// Mean actual outcome minus mean model-expected outcome over `plays`, with its
-// sample. Null when there are fewer than 2 plays or no league model. With
+// Weighted mean actual outcome minus weighted mean model-expected outcome over
+// `plays`, with its sample. Null when there are fewer than 2 plays or no
+// league model. `weightOf` is the play's season weight (default 1). With
 // `tierOf`, the residuals are also summed by the play's opponent tier
 // (AESample.byTier) for the AE Score's opponent adjustment.
 export function aboveExpectedSampleForPlays<T>(
   plays: T[],
   fitted: FittedDifficulty<T>,
   outcome: (row: T) => number,
-  tierOf?: (row: T) => TierCode | null | undefined,
+  { tierOf, weightOf }: {
+    tierOf?: (row: T) => TierCode | null | undefined;
+    weightOf?: (row: T) => number;
+  } = {},
 ): AESample | null {
   const { design, model } = fitted;
   if (!model || plays.length === 0) return null;
@@ -235,30 +252,36 @@ export function aboveExpectedSampleForPlays<T>(
   for (const pl of plays) {
     const y = outcome(pl);
     const e = expectedFromModel(model, design.cols(pl));
-    addResidual(s, y, e);
-    if (tierOf) addTierResidual(byTier, tierOf(pl), 1, y - e);
+    const w = weightOf ? weightOf(pl) : 1;
+    addResidual(s, y, e, w);
+    if (tierOf) addTierResidual(byTier, tierOf(pl), 1, y - e, w);
   }
   const variance = residualVariancePts(s);
   if (variance == null) return null;
-  const out: AESample = { ae: toAbovePts(s.actual / s.n, s.expected / s.n), n: s.n, variance };
+  const out: AESample = { ae: toAbovePts(s.actual / s.w, s.expected / s.w), n: s.n, w: s.w, variance };
   if (tierOf) out.byTier = byTier;
   return out;
 }
 
-// Mean actual outcome minus mean model-expected outcome over `plays`, in pts.
-// Null when there are no plays or no league model.
+// Weighted mean actual outcome minus weighted mean model-expected outcome over
+// `plays`, in pts. Null when there are no plays or no league model.
+// `weightOf` is the play's season weight (default 1).
 export function aboveExpectedForPlays<T>(
   plays: T[],
   fitted: FittedDifficulty<T>,
   outcome: (row: T) => number,
+  weightOf?: (row: T) => number,
 ): number | null {
   const { design, model } = fitted;
   if (!model || plays.length === 0) return null;
   let sumActual = 0;
   let sumExpected = 0;
+  let sumW = 0;
   for (const pl of plays) {
-    sumActual += outcome(pl);
-    sumExpected += expectedFromModel(model, design.cols(pl));
+    const w = weightOf ? weightOf(pl) : 1;
+    sumActual += w * outcome(pl);
+    sumExpected += w * expectedFromModel(model, design.cols(pl));
+    sumW += w;
   }
-  return toAbovePts(sumActual / plays.length, sumExpected / plays.length);
+  return toAbovePts(sumActual / sumW, sumExpected / sumW);
 }

@@ -22,6 +22,8 @@ import {
   computeTEBlockAboveExpectedSamples,
   aeValues,
 } from "@/lib/scouting/aboveExpected";
+import { aboveExpectedSampleForPlays, expectedFromModel } from "@/lib/scouting/difficultyModel";
+import { SEASON_DECAY } from "@/lib/scouting/seasonWeight";
 import type {
   Prospect,
   ScoutingGame,
@@ -929,5 +931,135 @@ describe("AE samples", () => {
     const short = rbPlays.filter((pl) => pl.game_id === "g_rbA").slice(0, 14);
     expect(computeRBAboveExpectedSamples(prospects, games, short).get("rbA")).toBeNull();
     expect(computeQBAboveExpectedSamples(prospects, games, qbPlays.slice(0, 24)).get("qbA")).toBeNull();
+  });
+});
+
+// =============================================================================
+// Season weighting — older tape counts a little less (seasonWeight.ts)
+// =============================================================================
+
+describe("season weighting", () => {
+  const dated = (id: string, prospect_id: string, season_year: number): ScoutingGame =>
+    ({ id, prospect_id, season_year }) as unknown as ScoutingGame;
+  // One situation bucket, so every run is expected at the same rate. Back "a"
+  // converted 50% in 2025 and 80% in 2026, 20 runs each.
+  const rbs = [prospect("a", "RB")];
+  const runs = [
+    ...repeat(200, (i) => rbPlay("g_bg", "inside_zone", "gun", i % 10 < 6, false)),
+    ...repeat(20, (i) => rbPlay("a25", "inside_zone", "gun", i % 10 < 5, false)),
+    ...repeat(20, (i) => rbPlay("a26", "inside_zone", "gun", i % 10 < 8, false)),
+  ];
+  const undated = [game("a25", "a"), game("a26", "a")];
+  const seasons = [dated("a25", "a", 2025), dated("a26", "a", 2026)];
+
+  it("leans the AE toward the newer season", () => {
+    const flat = computeRBAboveExpectedSamples(rbs, undated, runs).get("a")!;
+    const weighted = computeRBAboveExpectedSamples(rbs, seasons, runs).get("a")!;
+    const newerLean = (0.5 * 20 * SEASON_DECAY + 0.8 * 20) / (20 * SEASON_DECAY + 20) - 0.65;
+    expect(weighted.ae - flat.ae).toBeCloseTo(newerLean * 100, 1);
+    expect(weighted.n).toBe(40);
+    expect(weighted.w).toBeCloseTo(20 + 20 * SEASON_DECAY, 9);
+    expect(flat.w).toBe(40);
+  });
+
+  it("changes nothing when the seasons agree", () => {
+    const same = [
+      ...repeat(200, (i) => rbPlay("g_bg", "inside_zone", "gun", i % 10 < 6, false)),
+      ...repeat(20, (i) => rbPlay("a25", "inside_zone", "gun", i % 10 < 7, false)),
+      ...repeat(20, (i) => rbPlay("a26", "inside_zone", "gun", i % 10 < 7, false)),
+    ];
+    const flat = computeRBAboveExpectedSamples(rbs, undated, same).get("a")!;
+    const weighted = computeRBAboveExpectedSamples(rbs, seasons, same).get("a")!;
+    expect(weighted.ae).toBe(flat.ae);
+  });
+
+  it("gives the weighted mean's sampling variance (reliability weights)", () => {
+    const B = buildRBBaselines(runs);
+    const e = expectedFromModel(B.model!, B.design.cols(runs[0]));
+    const mine = runs.filter((pl) => pl.game_id !== "g_bg");
+    const w = mine.map((pl) => (pl.game_id === "a25" ? SEASON_DECAY : 1));
+    const r = mine.map((pl) => (pl.success ? 1 : 0) - e);
+    const W = w.reduce((s, x) => s + x, 0);
+    const W2 = w.reduce((s, x) => s + x * x, 0);
+    const mean = r.reduce((s, x, i) => s + w[i] * x, 0) / W;
+    const perPlay = r.reduce((s, x, i) => s + w[i] * (x - mean) ** 2, 0) / (W - W2 / W);
+    const smp = computeRBAboveExpectedSamples(rbs, seasons, runs).get("a")!;
+    expect(smp.variance).toBeCloseTo(((perPlay * W2) / (W * W)) * 1e4, 6);
+  });
+
+  it("is scale-free: a uniform weight leaves the AE and its variance alone", () => {
+    const B = buildRBBaselines(runs);
+    const mine = runs.filter((pl) => pl.game_id !== "g_bg");
+    const y = (pl: RBPlay) => (pl.success ? 1 : 0);
+    const plain = aboveExpectedSampleForPlays(mine, B, y)!;
+    const halved = aboveExpectedSampleForPlays(mine, B, y, { weightOf: () => 0.5 })!;
+    expect(halved.ae).toBe(plain.ae);
+    expect(halved.variance).toBeCloseTo(plain.variance, 9);
+  });
+
+  it("weights each tier's share of the reps for the opponent adjustment", () => {
+    const tiers = new Map([["a25", "G5" as const], ["a26", "P4" as const]]);
+    const smp = computeRBAboveExpectedSamples(rbs, seasons, runs, tiers).get("a")!;
+    expect(smp.byTier!.G5!.n).toBe(20);
+    expect(smp.byTier!.G5!.w).toBeCloseTo(20 * SEASON_DECAY, 9);
+    expect(smp.byTier!.P4!.w).toBe(20);
+  });
+
+  it("weights the RB run-type slices too", () => {
+    const flat = computeRBRunSliceSRAE(rbs, undated, runs).get("a")!;
+    const weighted = computeRBRunSliceSRAE(rbs, seasons, runs).get("a")!;
+    expect(weighted.inside.n).toBe(40);
+    expect(weighted.inside.ae!).toBeGreaterThan(flat.inside.ae!);
+  });
+
+  describe("QB", () => {
+    // All short-center throws: on target 50% in 2025, 90% in 2026.
+    const qbs = [prospect("q", "QB")];
+    const throws = [
+      ...repeat(200, (i) => qbPlay("g_bg", { accuracy: i % 10 < 7 ? "on_target" : "high", depth_zone: "short_center" })),
+      ...repeat(30, (i) => qbPlay("q25", { accuracy: i % 10 < 5 ? "on_target" : "high", depth_zone: "short_center" })),
+      ...repeat(30, (i) => qbPlay("q26", { accuracy: i % 10 < 9 ? "on_target" : "high", depth_zone: "short_center" })),
+    ];
+    const qGames = [dated("q25", "q", 2025), dated("q26", "q", 2026)];
+    const mine = throws.filter((pl) => pl.game_id !== "g_bg");
+
+    it("weights the headline, and the Overview total still matches it", () => {
+      const flat = computeQBAboveExpectedSamples(qbs, [game("q25", "q"), game("q26", "q")], throws).get("q")!;
+      const weighted = computeQBAboveExpectedSamples(qbs, qGames, throws).get("q")!;
+      expect(weighted.ae).toBeGreaterThan(flat.ae);
+      expect(computeQBAAEBreakdown(mine, throws, qGames).total).toBe(weighted.ae);
+      // Without the games, the Overview counts every throw in full.
+      expect(computeQBAAEBreakdown(mine, throws).total).toBe(flat.ae);
+    });
+
+    it("weights the Overview per-dimension rows", () => {
+      const depth = (games?: ScoutingGame[]) => computeQBAAEBreakdown(mine, throws, games).dims.find((d) => d.key === "depth")!;
+      expect(depth(qGames).aae!).toBeGreaterThan(depth().aae!);
+      expect(depth(qGames).n).toBe(60);
+    });
+
+    it("weights the throw-location slices", () => {
+      const weighted = computeQBAboveExpectedSamples(qbs, qGames, throws).get("q")!;
+      // Every throw is short, so the short slice is the whole headline.
+      expect(computeQBThrowSliceAAE(qbs, qGames, throws).get("q")!.short.ae).toBe(weighted.ae);
+    });
+  });
+
+  it("weights TE-SAER and TE-SAEB", () => {
+    const tes = [prospect("t", "TE")];
+    const plays = [
+      ...repeat(20, (i) => tePlay("t25", { positioning: "slot", coverage: "man", was_open: i % 10 < 3 })),
+      ...repeat(20, (i) => tePlay("t26", { positioning: "slot", coverage: "man", was_open: i % 10 < 8 })),
+      ...repeat(20, (i) => tePlay("t25", { play_type: "run_block", block_type: "inline", block_success: i % 10 < 4 })),
+      ...repeat(20, (i) => tePlay("t26", { play_type: "run_block", block_type: "inline", block_success: i % 10 < 9 })),
+      ...repeat(100, (i) => tePlay("g_bg", { positioning: "slot", coverage: "man", was_open: i % 2 === 0 })),
+      ...repeat(100, (i) => tePlay("g_bg", { play_type: "run_block", block_type: "inline", block_success: i % 2 === 0 })),
+    ];
+    const undatedTE = [game("t25", "t"), game("t26", "t")];
+    const datedTE = [dated("t25", "t", 2025), dated("t26", "t", 2026)];
+    expect(computeTERouteAboveExpectedSamples(tes, datedTE, plays).get("t")!.ae)
+      .toBeGreaterThan(computeTERouteAboveExpectedSamples(tes, undatedTE, plays).get("t")!.ae);
+    expect(computeTEBlockAboveExpectedSamples(tes, datedTE, plays).get("t")!.ae)
+      .toBeGreaterThan(computeTEBlockAboveExpectedSamples(tes, undatedTE, plays).get("t")!.ae);
   });
 });

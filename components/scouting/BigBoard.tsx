@@ -29,6 +29,7 @@ import { applyOpponentStrength, type OpponentAdjusted } from "../../lib/scouting
 import { classDraftedBy, makeLock, activeLock } from "../../lib/scouting/scoreLock";
 import { alignmentPenalty } from "../../lib/scouting/alignmentPenalty";
 import { buildWRTierSplits, type ProspectGameRouteCellsRow } from "../../lib/scouting/aggregateMerge";
+import { SEASON_DECAY } from "../../lib/scouting/seasonWeight";
 import { POS_COLOR } from "../../lib/uiTheme";
 import {
   parseGrade, formatGrade, gradeColor, gradeDelta, gradeTier, gradeTierRange,
@@ -58,12 +59,12 @@ interface AEColumn {
   tooltip: string;
 }
 const AE_COLUMNS: AEColumn[] = [
-  { key: "aae",     label: "AAE",     pos: "QB", group: "Above Exp", tooltip: "Accuracy Above Expected — each throw judged against throws like it (all situation tags stacked). Min. 25 graded passes." },
-  { key: "srae",    label: "SRAE",    pos: "RB", group: "Above Exp", tooltip: "Success Rate Above Expected — each run judged against runs like it (formation, loaded box, unblocked defender stacked). Min. 15 runs." },
-  { key: "sae",     label: "SAE",     pos: "WR", group: "Above Exp", tooltip: "Success (Open) Rate Above Expected — each route judged against routes like it (route, coverage incl. press, slot/outside, on/off line stacked). Min. 15 routes." },
-  { key: "csae",    label: "cSAE",    pos: "WR", group: "Above Exp", tooltip: "Core-Route SAE — same as SAE, but excludes Go (Nine) and Screen routes. Min. 15 core routes." },
-  { key: "te_saer", label: "TE-SAER", pos: "TE", group: "Above Exp", tooltip: "Route SAE — Open Rate Above Expected, each route judged against routes like it (route, coverage incl. press, positioning stacked). Min. 15 rated routes." },
-  { key: "te_saeb", label: "TE-SAEB", pos: "TE", group: "Above Exp", tooltip: "Block SAE — Block Success Above Expected, each block judged against blocks like it (run/pass, movement/inline, positioning stacked). Min. 15 rated blocks." },
+  { key: "aae",     label: "AAE",     pos: "QB", group: "Above Exp", tooltip: "Accuracy Above Expected — each throw judged against throws like it (all situation tags stacked). Min. 25 graded passes. Older seasons count a little less." },
+  { key: "srae",    label: "SRAE",    pos: "RB", group: "Above Exp", tooltip: "Success Rate Above Expected — each run judged against runs like it (formation, loaded box, unblocked defender stacked). Min. 15 runs. Older seasons count a little less." },
+  { key: "sae",     label: "SAE",     pos: "WR", group: "Above Exp", tooltip: "Success (Open) Rate Above Expected — each route judged against routes like it (route, coverage incl. press, slot/outside, on/off line stacked). Min. 15 routes. Older seasons count a little less." },
+  { key: "csae",    label: "cSAE",    pos: "WR", group: "Above Exp", tooltip: "Core-Route SAE — same as SAE, but excludes Go (Nine) and Screen routes. Min. 15 core routes. Older seasons count a little less." },
+  { key: "te_saer", label: "TE-SAER", pos: "TE", group: "Above Exp", tooltip: "Route SAE — Open Rate Above Expected, each route judged against routes like it (route, coverage incl. press, positioning stacked). Min. 15 rated routes. Older seasons count a little less." },
+  { key: "te_saeb", label: "TE-SAEB", pos: "TE", group: "Above Exp", tooltip: "Block SAE — Block Success Above Expected, each block judged against blocks like it (run/pass, movement/inline, positioning stacked). Min. 15 rated blocks. Older seasons count a little less." },
   { key: "aae_out",   label: "Outside",      pos: "QB", group: "AAE Breakdown", breakdown: true, tooltip: "AAE on outside throws (left or right third of the field), each judged against throws like it. Min. 10 such throws." },
   { key: "aae_in",    label: "Inside",       pos: "QB", group: "AAE Breakdown", breakdown: true, tooltip: "AAE on inside throws (middle third of the field), each judged against throws like it. Min. 10 such throws." },
   { key: "aae_deep",  label: "Deep",         pos: "QB", group: "AAE Breakdown", breakdown: true, tooltip: "AAE on deep throws (20+ yds), each judged against throws like it. Min. 10 such throws." },
@@ -156,9 +157,8 @@ interface Props {
   tePlays: TEPlay[];
   loadPositionPlays: LoadPositionPlaysFn;
   /** Per-game WR route cells (migration 058), for the AE Score's opponent
-   *  adjustment. Null until loaded, or when the view isn't available. */
+   *  adjustment. Null when the view didn't load. */
   gameRouteCells?: ProspectGameRouteCellsRow[] | null;
-  loadGameRouteCells?: () => void;
   /** Every lazy input has loaded, so a score is safe to freeze. */
   scoresReady?: boolean;
   /** Save a drafted prospect's frozen AE Score; false if the write failed. */
@@ -258,7 +258,6 @@ export default function BigBoard({
   tePlays,
   loadPositionPlays,
   gameRouteCells = null,
-  loadGameRouteCells,
   scoresReady = false,
   onLockAEScore,
 }: Props) {
@@ -270,7 +269,6 @@ export default function BigBoard({
     loadPositionPlays("QB");
     loadPositionPlays("TE");
   }, [loadPositionPlays]);
-  useEffect(() => { loadGameRouteCells?.(); }, [loadGameRouteCells]);
 
   // Each game's opponent tier (P4 / G5 / FCS), for the opponent adjustment.
   const gameTiers = useMemo(() => tierGames(games), [games]);
@@ -300,7 +298,7 @@ export default function BigBoard({
     const teBlock = computeTEBlockAboveExpectedSamples(prospects, games, tePlays, tiers);
     // WR's tier splits come from the per-game cells; without them WR (and so
     // RB and TE, which borrow WR's effect) stays unadjusted.
-    const splits = gameRouteCells ? buildWRTierSplits(gameRouteCells, (id) => tiers.get(id)) : null;
+    const splits = gameRouteCells ? buildWRTierSplits(gameRouteCells, (id) => tiers.get(id), games) : null;
     const withSplits = (m: Map<string, AESample | null>, by: Map<string, NonNullable<AESample["byTier"]>> | undefined) =>
       by ? new Map([...m].map(([id, smp]) => [id, smp ? { ...smp, byTier: by.get(id) ?? {} } : smp])) : m;
     const opp = applyOpponentStrength({
@@ -724,7 +722,7 @@ export default function BigBoard({
     return `${pos} −${size} pts per G5/FCS rep (${how})`;
   };
   const opponentStatus = !gameRouteCells
-    ? "waiting on the per-game WR route data (migration 058)"
+    ? "the per-game WR route data (migration 058) didn't load"
     : [effectText("WR"), effectText("TE"), effectText("RB"), "QB not adjusted"].filter(Boolean).join(" · ") || "not enough games vs G5/FCS yet";
   const unrecognized = [...gameTiers.unrecognized].map(([name, n]) => `${name}${n > 1 ? ` (${n})` : ""}`);
 
@@ -733,6 +731,7 @@ export default function BigBoard({
     "true-talent SDs vs the average charted prospect at the position, so it compares across " +
     "positions. WR blends cSAE 70% and SAE 30%; TE blends TE-SAER 80% and TE-SAEB 20%. " +
     "Reps against G5 and FCS opponents are discounted (the AE columns are not). " +
+    `Older seasons count a little less, here and in the AE columns (each season back ×${SEASON_DECAY}). ` +
     "WRs lined up 75%+ on one side (or, milder, in the slot) lose up to 0.5 (0.2), most at 95%. " +
     "Small samples are discounted until full trust: WR at 232 total / 168 core routes, with QB, RB and TE " +
     "ceilings matched to keep the positions level. " +

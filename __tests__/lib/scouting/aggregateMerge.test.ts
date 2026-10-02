@@ -6,9 +6,11 @@ import {
   computeSAEForPlays,
   computeCoreSAEForPlays,
   type ProspectRouteCellsRow,
+  type ProspectGameRouteCellsRow,
   type ProspectRouteStatsRow,
 } from "@/lib/scouting/aggregateMerge";
-import type { Prospect, RoutePlay, RouteType, CoverageType, Alignment } from "@/lib/types";
+import { SEASON_DECAY } from "@/lib/scouting/seasonWeight";
+import type { Prospect, RoutePlay, RouteType, CoverageType, Alignment, ScoutingGame } from "@/lib/types";
 
 // The functions under test only read a handful of fields off each shape, so we
 // build minimal objects and cast through `unknown` to the full interface.
@@ -45,6 +47,18 @@ function cellRowsFrom(playsByProspect: Record<string, RoutePlay[]>): ProspectRou
   });
 }
 const modelFrom = (plays: RoutePlay[]) => buildWRModel(cellRowsFrom({ league: plays }));
+
+// Per-game cell rows, as prospect_game_route_cells (migration 058) returns
+// them: the same cells, one row per prospect per game.
+function gameRowsFrom(playsByProspect: Record<string, RoutePlay[]>): ProspectGameRouteCellsRow[] {
+  const out: ProspectGameRouteCellsRow[] = [];
+  for (const [prospect_id, plays] of Object.entries(playsByProspect)) {
+    const byGame = new Map<string, RoutePlay[]>();
+    for (const p of plays) byGame.set(p.game_id, [...(byGame.get(p.game_id) ?? []), p]);
+    for (const [game_id, gp] of byGame) out.push({ prospect_id, game_id, cells: cellRowsFrom({ [prospect_id]: gp })[0].cells });
+  }
+  return out;
+}
 
 // =============================================================================
 // computeSAEForPlays — ungated per-game WR SAE (no 15-route minimum)
@@ -197,15 +211,16 @@ describe("buildProspectsWithStats — WR SAE", () => {
   ];
   const poss = repeat(200, (i) => routePlay("g_p", "curl", "zone", i % 10 < 8));  // 80%
   const byProspect = { deep, poss };
-  const build = (cells: ProspectRouteCellsRow[]) =>
+  const build = (rows: ProspectGameRouteCellsRow[]) =>
     buildProspectsWithStats(
       [prospect("deep"), prospect("poss")],
       [statsRow("deep", deep), statsRow("poss", poss)],
-      cells,
+      rows,
+      [],
     );
 
   it("judges each receiver against what he ran, so league-rate receivers both land near 0", () => {
-    const out = build(cellRowsFrom(byProspect));
+    const out = build(gameRowsFrom(byProspect));
     const d = out.find((p) => p.id === "deep")!.adj_success_above_exp!;
     const p = out.find((p) => p.id === "poss")!.adj_success_above_exp!;
     // Old averaging would have put the deep threat well below 0 for running gos.
@@ -216,7 +231,7 @@ describe("buildProspectsWithStats — WR SAE", () => {
   });
 
   it("cSAE drops gos exactly — the deep threat's cSAE comes from his curls alone", () => {
-    const out = build(cellRowsFrom(byProspect));
+    const out = build(gameRowsFrom(byProspect));
     const d = out.find((p) => p.id === "deep")!;
     // 100 core routes (≥ 15) — curls vs zone at the league curl rate.
     expect(d.core_sae).not.toBeNull();
@@ -224,7 +239,7 @@ describe("buildProspectsWithStats — WR SAE", () => {
   });
 
   it("keeps SAE's route count and sampling variance for the AE Score", () => {
-    const out = build(cellRowsFrom(byProspect));
+    const out = build(gameRowsFrom(byProspect));
     const p = out.find((x) => x.id === "poss")!;
     expect(p.sae_sample!.ae).toBe(p.adj_success_above_exp);
     expect(p.sae_sample!.n).toBe(200);
@@ -234,7 +249,7 @@ describe("buildProspectsWithStats — WR SAE", () => {
   });
 
   it("keeps cSAE's sample over core routes only", () => {
-    const out = build(cellRowsFrom(byProspect));
+    const out = build(gameRowsFrom(byProspect));
     const d = out.find((x) => x.id === "deep")!;
     expect(d.core_sae_sample!.ae).toBe(d.core_sae);
     expect(d.core_sae_sample!.n).toBe(100); // the curls; the 100 gos are dropped
@@ -248,12 +263,42 @@ describe("buildProspectsWithStats — WR SAE", () => {
     const out = buildProspectsWithStats(
       [prospect("few")],
       [statsRow("few", few)],
-      cellRowsFrom({ ...byProspect, few }),
+      gameRowsFrom({ ...byProspect, few }),
+      [],
     );
     expect(out[0].adj_success_above_exp).toBeNull();
     expect(out[0].core_sae).toBeNull();
     expect(out[0].sae_sample).toBeNull();
     expect(out[0].core_sae_sample).toBeNull();
+  });
+
+  it("matches the per-prospect cells view (057) when every route counts in full", () => {
+    const fromGames = build(gameRowsFrom(byProspect));
+    const fromProspects = buildWRModel(cellRowsFrom(byProspect));
+    expect(fromProspects.model).not.toBeNull();
+    // The league model fit from either view is the same model.
+    const fromGameRows = buildWRModel(gameRowsFrom(byProspect)).model!;
+    fromGameRows.forEach((x, i) => expect(x).toBeCloseTo(fromProspects.model![i], 6));
+    expect(fromGames.find((p) => p.id === "poss")!.sae_sample!.w).toBe(200);
+  });
+
+  it("weights each route by its season, leaning toward the newer tape", () => {
+    // 100 curls a season: 60% open in 2024, 90% open in 2025.
+    const older = repeat(100, (i) => routePlay("w24", "curl", "zone", i % 10 < 6));
+    const newer = repeat(100, (i) => routePlay("w25", "curl", "zone", i % 10 < 9));
+    const rows = gameRowsFrom({ ...byProspect, w: [...older, ...newer] });
+    const games = [
+      { id: "w24", prospect_id: "w", season_year: 2024 },
+      { id: "w25", prospect_id: "w", season_year: 2025 },
+    ] as unknown as ScoutingGame[];
+    const stats = [statsRow("w", [...older, ...newer])];
+    const flat = buildProspectsWithStats([prospect("w")], stats, rows, [])[0];
+    const weighted = buildProspectsWithStats([prospect("w")], stats, rows, games)[0];
+    const lean = ((0.6 * SEASON_DECAY + 0.9) / (SEASON_DECAY + 1) - 0.75) * 100;
+    expect(weighted.adj_success_above_exp! - flat.adj_success_above_exp!).toBeCloseTo(lean, 1);
+    expect(weighted.core_sae! - flat.core_sae!).toBeCloseTo(lean, 1);
+    expect(weighted.sae_sample!.n).toBe(200);
+    expect(weighted.sae_sample!.w).toBeCloseTo(100 + 100 * SEASON_DECAY, 9);
   });
 
   it("shows no SAE / cSAE (null) when the cells view isn't available yet", () => {
@@ -285,6 +330,27 @@ describe("buildWRTierSplits", () => {
     expect(s.G5!.resid / s.G5!.n).toBeGreaterThan(s.P4!.resid / s.P4!.n);
     // Core routes drop the screens.
     expect(buildWRTierSplits(rows, (id) => tiers[id]).core.get("a")!.P4!.n).toBe(20);
+  });
+
+  it("season-weights each tier's share of a WR's routes, leaving n and the residuals as counted", () => {
+    const g1 = repeat(20, (i) => routePlay("g1", "curl", "zone", i % 2 === 0));
+    const g2 = repeat(20, (i) => routePlay("g2", "curl", "zone", i % 4 !== 0));
+    const rows = [
+      { prospect_id: "a", game_id: "g1", cells: cellRowsFrom({ a: g1 })[0].cells },
+      { prospect_id: "a", game_id: "g2", cells: cellRowsFrom({ a: g2 })[0].cells },
+    ];
+    const tiers: Record<string, "P4" | "G5"> = { g1: "P4", g2: "G5" };
+    const games = [
+      { id: "g1", prospect_id: "a", season_year: 2025 },
+      { id: "g2", prospect_id: "a", season_year: 2024 },
+    ] as unknown as ScoutingGame[];
+    const flat = buildWRTierSplits(rows, (id) => tiers[id]).all.get("a")!;
+    const s = buildWRTierSplits(rows, (id) => tiers[id], games).all.get("a")!;
+    expect(s.G5!.n).toBe(20);
+    expect(s.G5!.w).toBeCloseTo(20 * SEASON_DECAY, 9);
+    expect(s.P4!.w).toBe(20);
+    expect(s.G5!.resid).toBe(flat.G5!.resid);
+    expect(flat.G5!.w).toBe(20);
   });
 
   it("skips games whose opponent isn't recognized", () => {

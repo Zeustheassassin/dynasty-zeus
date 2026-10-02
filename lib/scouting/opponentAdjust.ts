@@ -77,12 +77,17 @@ export function resolveEffects(m: Record<LowerTier, TierMeasurement>, fallback: 
   return { G5: g5, FCS: Math.max(fcs, g5) };
 }
 
-/** The AE minus the opponent lift, over all the prospect's plays (unrecognized opponents count as 0). */
+/** The AE minus the opponent lift, over all the prospect's plays (unrecognized
+ *  opponents count as 0). Each tier's share of the plays is season-weighted,
+ *  like the AE itself (seasonWeight.ts). */
 export function adjustSample(s: AESample | null, effects: TierEffects): AESample | null {
   if (!s || !s.byTier) return s;
   let lift = 0;
-  for (const tier of LOWER_TIERS) lift += (s.byTier[tier]?.n ?? 0) * effects[tier];
-  const adj = (lift / s.n) * 100;
+  for (const tier of LOWER_TIERS) {
+    const t = s.byTier[tier];
+    if (t) lift += (t.w ?? t.n) * effects[tier];
+  }
+  const adj = (lift / (s.w ?? s.n)) * 100;
   if (adj === 0) return s;
   return { ...s, ae: s.ae - adj, rawAe: s.ae };
 }

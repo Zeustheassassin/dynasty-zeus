@@ -9,6 +9,7 @@ import type {
   QBIntType,
   QBDepthZone,
   RouteType,
+  ScoutingGame,
 } from "../../../lib/types";
 import { ROUTE_TYPES } from "../shared/chartingConstants";
 import { pct, fmtPct } from "../shared/chartingTypes";
@@ -30,14 +31,16 @@ import {
 interface Props {
   plays: QBPlay[];
   leaguePlays: QBPlay[];
-  gamesCount: number;
+  /** This prospect's games: their seasons weight the AAE breakdown. */
+  games: ScoutingGame[];
   loading?: boolean;
 }
 
-export default function QBOverviewPanel({ plays, leaguePlays, gamesCount, loading }: Props) {
+export default function QBOverviewPanel({ plays, leaguePlays, games, loading }: Props) {
+  const gamesCount = games.length;
   const aaeBreakdown = useMemo(
-    () => computeQBAAEBreakdown(plays, leaguePlays),
-    [plays, leaguePlays],
+    () => computeQBAAEBreakdown(plays, leaguePlays, games),
+    [plays, leaguePlays, games],
   );
 
   const stats = useMemo(() => {

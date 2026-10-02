@@ -10,6 +10,10 @@
 // from the league difficulty model (difficultyModel.ts), which judges each
 // play against plays like it, every situation tag's effect stacked. They
 // differ only in the outcome, the situation dimensions, and the ridge strength.
+//
+// A prospect's plays are season-weighted (seasonWeight.ts): older tape counts
+// a little less than his newest. The per-game functions (`*ForPlays`) take a
+// single game, so they're unweighted.
 
 import type {
   AESample,
@@ -44,6 +48,7 @@ import {
   type ModelRow,
   type FittedDifficulty,
 } from "./difficultyModel";
+import { playWeights, type PlayWeight } from "./seasonWeight";
 
 const RB_RUN_TYPES: RBRunType[] = ["outside_zone", "inside_zone", "outside_man_gap", "inside_man_gap"];
 const RB_FORMATIONS: RBFormation[] = ["gun", "pistol", "under_center"];
@@ -219,11 +224,13 @@ export function computeRBAboveExpectedSamples(
   const gameToProspect = buildGameToProspect(games);
   const playsByProspect = buildPlaysByProspect(rbPlays, gameToProspect);
   const baselines = buildRBBaselines(rbPlays);
+  const weightOf = playWeights(games);
+  const tierOf = tierByGame && ((pl: RBPlay) => tierByGame.get(pl.game_id));
 
   for (const p of prospects) {
     if (p.position !== "RB") continue;
     const runs = (playsByProspect.get(p.id) ?? []).filter(isKnownRun);
-    out.set(p.id, runs.length < MIN_SAMPLE ? null : aboveExpectedSampleForPlays(runs, baselines, rbSuccess, tierByGame && ((pl) => tierByGame.get(pl.game_id))));
+    out.set(p.id, runs.length < MIN_SAMPLE ? null : aboveExpectedSampleForPlays(runs, baselines, rbSuccess, { tierOf, weightOf }));
   }
 
   return out;
@@ -270,6 +277,7 @@ export function computeRBRunSliceSRAE(
   const out = new Map<string, Record<RBRunSliceKey, AESlice>>();
   const playsByProspect = buildPlaysByProspect(rbPlays, buildGameToProspect(games));
   const fitted = fitFromPlays(rbPlays.filter(isKnownRun), RB_SLICE_DESIGN, rbSuccess, RB_RIDGE_LAMBDA);
+  const weightOf = playWeights(games);
 
   for (const p of prospects) {
     if (p.position !== "RB") continue;
@@ -279,7 +287,7 @@ export function computeRBRunSliceSRAE(
       const sub = runs.filter((pl) => s.runTypes.includes(pl.run_type));
       slices[s.key] = {
         n: sub.length,
-        ae: runs.length < MIN_SAMPLE || sub.length < SLICE_MIN_SAMPLE ? null : aboveExpectedForPlays(sub, fitted, rbSuccess),
+        ae: runs.length < MIN_SAMPLE || sub.length < SLICE_MIN_SAMPLE ? null : aboveExpectedForPlays(sub, fitted, rbSuccess, weightOf),
       };
     }
     out.set(p.id, slices);
@@ -450,34 +458,45 @@ function expectedForPlay(pl: QBPlay, R: ResolvedBaselines): number | null {
 // the league has a matching bucket). Comparing actual to expected on the same
 // subset keeps the per-dim rows honest — pressure_handling, say, is only logged
 // on pressured throws, so comparing all-throw value against a pressured-only
-// baseline biases the row positive league-wide.
+// baseline biases the row positive league-wide. Bucket shares and the actual
+// value are season-weighted (weightOf; default 1).
 function expectedFor<K extends string>(
   ratedPasses: QBPlay[],
   bucketFn: (pl: QBPlay) => K | null | undefined,
   rates: Map<K, number>,
   buckets: readonly K[],
+  weightOf?: PlayWeight,
 ): { expected: number | null; actual: number | null; n: number } {
-  const total = ratedPasses.length;
-  if (!total) return { expected: null, actual: null, n: 0 };
+  if (!ratedPasses.length) return { expected: null, actual: null, n: 0 };
+  const wOf = (pl: QBPlay) => (weightOf ? weightOf(pl) : 1);
+  let total = 0;
+  for (const pl of ratedPasses) total += wOf(pl);
   let exp = 0;
   let weight = 0;
   let filled = 0;
+  let filledW = 0;
   let filledVal = 0;
   for (const b of buckets) {
     const inBucket = ratedPasses.filter((pl) => bucketFn(pl) === b);
     const n = inBucket.length;
     const r = rates.get(b);
     if (n > 0 && r != null) {
-      const share = n / total;
+      let bucketW = 0;
+      for (const pl of inBucket) {
+        const w = wOf(pl);
+        bucketW += w;
+        filledVal += w * throwValue(pl);
+      }
+      const share = bucketW / total;
       exp += share * r;
       weight += share;
       filled += n;
-      for (const pl of inBucket) filledVal += throwValue(pl);
+      filledW += bucketW;
     }
   }
   return {
     expected: weight > 0 ? exp / weight : null,
-    actual: filled > 0 ? filledVal / filled : null,
+    actual: filled > 0 ? filledVal / filledW : null,
     n: filled,
   };
 }
@@ -499,24 +518,24 @@ export interface QBAAEBreakdown {
   dims: QBAAEDimRow[];
 }
 
-function breakdownFor(ratedPasses: QBPlay[], R: ResolvedBaselines): QBAAEBreakdown {
+function breakdownFor(ratedPasses: QBPlay[], R: ResolvedBaselines, weightOf?: PlayWeight): QBAAEBreakdown {
   const denom = ratedPasses.length;
   if (!denom) {
     return { ratedPasses: 0, actualOnTgtPct: null, total: null, dims: [] };
   }
   // Literal on-target% kept for display only — the AAE math below runs on graded
-  // throw value, not this binary rate.
+  // throw value, not this binary rate. A raw stat, so not season-weighted.
   const onTgt = ratedPasses.filter((pl) => pl.accuracy === "on_target").length / denom;
 
   const rows: QBAAEDimRow[] = [
-    { key: "depth",    label: "Depth Zone",        ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.depth_zone,        R.depth,    QB_DEPTH_ZONES)) },
-    { key: "coverage", label: "Coverage",          ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.coverage === "man" || pl.coverage === "zone" ? pl.coverage : null, R.cvg, ["man", "zone"] as const)) },
-    { key: "timing",   label: "Timing",            ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.timing,            R.timing,   QB_TIMING_BUCKETS)) },
-    { key: "pressure", label: "Pressure",          ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.pressure,          R.pressure, QB_PRESSURE_BUCKETS)) },
-    { key: "platform", label: "Platform",          ...toAaeRow(expectedFor(ratedPasses, platformKey,                  R.platform, QB_PLATFORM_KEYS)) },
+    { key: "depth",    label: "Depth Zone",        ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.depth_zone,        R.depth,    QB_DEPTH_ZONES, weightOf)) },
+    { key: "coverage", label: "Coverage",          ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.coverage === "man" || pl.coverage === "zone" ? pl.coverage : null, R.cvg, ["man", "zone"] as const, weightOf)) },
+    { key: "timing",   label: "Timing",            ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.timing,            R.timing,   QB_TIMING_BUCKETS, weightOf)) },
+    { key: "pressure", label: "Pressure",          ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.pressure,          R.pressure, QB_PRESSURE_BUCKETS, weightOf)) },
+    { key: "platform", label: "Platform",          ...toAaeRow(expectedFor(ratedPasses, platformKey,                  R.platform, QB_PLATFORM_KEYS, weightOf)) },
     // Pressure Handling has no standalone AAE row by design — it still feeds the
     // overall AAE total through the difficulty model (expectedForPlay).
-    { key: "route",    label: "Route Type",        ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.route_type,        R.route,    ROUTE_TYPES)) },
+    { key: "route",    label: "Route Type",        ...toAaeRow(expectedFor(ratedPasses, (pl) => pl.route_type,        R.route,    ROUTE_TYPES, weightOf)) },
   ];
 
   return {
@@ -526,39 +545,41 @@ function breakdownFor(ratedPasses: QBPlay[], R: ResolvedBaselines): QBAAEBreakdo
     // one-dimension views, and averaging them double-counts correlated dims
     // (e.g. a broken-pocket throw would be judged four times across the
     // pressure cluster).
-    total: modelAAE(ratedPasses, R),
+    total: modelAAE(ratedPasses, R, weightOf),
     dims: rows,
   };
 }
 
 // AAE over a set of graded throws: each throw's actual value vs the difficulty
-// model's expected for that throw's full situation mix (see expectedForPlay).
-// The overall total and every throw-location slice go through here.
-function modelAAE(ratedPasses: QBPlay[], R: ResolvedBaselines): number | null {
+// model's expected for that throw's full situation mix (see expectedForPlay),
+// each throw season-weighted (weightOf; default 1). The overall total and
+// every throw-location slice go through here.
+function modelAAE(ratedPasses: QBPlay[], R: ResolvedBaselines, weightOf?: PlayWeight): number | null {
   let sumExpected = 0;
   let sumActual = 0;
-  let nContrib = 0;
+  let sumW = 0;
   for (const pl of ratedPasses) {
     const exp = expectedForPlay(pl, R);
     if (exp == null) continue;
-    sumExpected += exp;
-    sumActual += throwValue(pl);
-    nContrib++;
+    const w = weightOf ? weightOf(pl) : 1;
+    sumExpected += w * exp;
+    sumActual += w * throwValue(pl);
+    sumW += w;
   }
-  return nContrib > 0
-    ? parseFloat((((sumActual - sumExpected) / nContrib) * 100).toFixed(2))
+  return sumW > 0
+    ? parseFloat((((sumActual - sumExpected) / sumW) * 100).toFixed(2))
     : null;
 }
 
 // modelAAE plus the sample behind it (see AESample). Same sums in the same
 // order, so `ae` is exactly modelAAE's value.
-function modelAAESample(ratedPasses: QBPlay[], R: ResolvedBaselines): AESample | null {
+function modelAAESample(ratedPasses: QBPlay[], R: ResolvedBaselines, weightOf?: PlayWeight): AESample | null {
   if (!R.model) return null;
   const s = emptyResidualSums();
-  for (const pl of ratedPasses) addResidual(s, throwValue(pl), expectedFromModel(R.model, QB_DESIGN.cols(pl)));
+  for (const pl of ratedPasses) addResidual(s, throwValue(pl), expectedFromModel(R.model, QB_DESIGN.cols(pl)), weightOf ? weightOf(pl) : 1);
   const variance = residualVariancePts(s);
   if (variance == null) return null;
-  return { ae: parseFloat((((s.actual - s.expected) / s.n) * 100).toFixed(2)), n: s.n, variance };
+  return { ae: parseFloat((((s.actual - s.expected) / s.w) * 100).toFixed(2)), n: s.n, w: s.w, variance };
 }
 
 // Overall AAE for an arbitrary QB play subset (a prospect's whole sample, or
@@ -586,11 +607,12 @@ export function computeQBAboveExpectedSamples(
   const gameToProspect = buildGameToProspect(games);
   const playsByProspect = buildPlaysByProspect(qbPlays, gameToProspect);
   const R = resolveBaselines(buildQBBaselines(qbPlays));
+  const weightOf = playWeights(games);
 
   for (const p of prospects) {
     if (p.position !== "QB") continue;
     const ratedPasses = (playsByProspect.get(p.id) ?? []).filter(isQBGradedThrow);
-    out.set(p.id, ratedPasses.length < QB_MIN_SAMPLE ? null : modelAAESample(ratedPasses, R));
+    out.set(p.id, ratedPasses.length < QB_MIN_SAMPLE ? null : modelAAESample(ratedPasses, R, weightOf));
   }
 
   return out;
@@ -607,14 +629,17 @@ export function computeQBAboveExpected(
 // Per-dimension AAE for a single prospect, given that prospect's plays and the
 // full league play set used to build baselines. Surfaces in the prospect
 // Overview panel; the aggregate `computeQBAboveExpected` calls the same guts
-// internally so the total line matches the table.
+// internally so the total line matches the table. `games` (the prospect's)
+// supplies the seasons for the season weighting; without it every throw
+// counts in full.
 export function computeQBAAEBreakdown(
   prospectPlays: QBPlay[],
   leaguePlays: QBPlay[],
+  games: readonly ScoutingGame[] = [],
 ): QBAAEBreakdown {
   const R = resolveBaselines(buildQBBaselines(leaguePlays));
   const ratedPasses = prospectPlays.filter(isQBGradedThrow);
-  return breakdownFor(ratedPasses, R);
+  return breakdownFor(ratedPasses, R, playWeights(games));
 }
 
 // ── QB AAE by throw location ─────────────────────────────────────────────
@@ -629,7 +654,8 @@ export function computeQBAAEBreakdown(
 //
 // Unlike the RB slices these split the headline exactly: outside + inside (and
 // deep + intermediate + short) cover every throw with a depth zone, so their
-// throw-weighted mean is his AAE on those throws.
+// mean, weighted by each slice's season-weighted throws, is his AAE on those
+// throws.
 //
 // This replaced the per-dimension rows (Depth / Coverage / Timing / Pressure /
 // Platform / Route) on the Analysis table in 2026-09. Those rows still feed
@@ -653,6 +679,7 @@ export function computeQBThrowSliceAAE(
   const out = new Map<string, Record<QBThrowSliceKey, AESlice>>();
   const playsByProspect = buildPlaysByProspect(qbPlays, buildGameToProspect(games));
   const R = resolveBaselines(buildQBBaselines(qbPlays));
+  const weightOf = playWeights(games);
 
   for (const p of prospects) {
     if (p.position !== "QB") continue;
@@ -662,7 +689,7 @@ export function computeQBThrowSliceAAE(
       const sub = ratedPasses.filter((pl) => pl.depth_zone != null && s.zones.includes(pl.depth_zone));
       slices[s.key] = {
         n: sub.length,
-        ae: ratedPasses.length < QB_MIN_SAMPLE || sub.length < SLICE_MIN_SAMPLE ? null : modelAAE(sub, R),
+        ae: ratedPasses.length < QB_MIN_SAMPLE || sub.length < SLICE_MIN_SAMPLE ? null : modelAAE(sub, R, weightOf),
       };
     }
     out.set(p.id, slices);
@@ -720,11 +747,13 @@ export function computeTERouteAboveExpectedSamples(
   const gameToProspect = buildGameToProspect(games);
   const playsByProspect = buildPlaysByProspect(tePlays, gameToProspect);
   const baselines = buildTERouteBaselines(tePlays);
+  const weightOf = playWeights(games);
+  const tierOf = tierByGame && ((pl: TEPlay) => tierByGame.get(pl.game_id));
 
   for (const p of prospects) {
     if (p.position !== "TE") continue;
     const routes = (playsByProspect.get(p.id) ?? []).filter(isRatedTERoute);
-    out.set(p.id, routes.length < MIN_SAMPLE ? null : aboveExpectedSampleForPlays(routes, baselines, teOpen, tierByGame && ((pl) => tierByGame.get(pl.game_id))));
+    out.set(p.id, routes.length < MIN_SAMPLE ? null : aboveExpectedSampleForPlays(routes, baselines, teOpen, { tierOf, weightOf }));
   }
 
   return out;
@@ -786,11 +815,13 @@ export function computeTEBlockAboveExpectedSamples(
   const gameToProspect = buildGameToProspect(games);
   const playsByProspect = buildPlaysByProspect(tePlays, gameToProspect);
   const baselines = buildTEBlockBaselines(tePlays);
+  const weightOf = playWeights(games);
+  const tierOf = tierByGame && ((pl: TEPlay) => tierByGame.get(pl.game_id));
 
   for (const p of prospects) {
     if (p.position !== "TE") continue;
     const blocks = (playsByProspect.get(p.id) ?? []).filter(isRatedTEBlock);
-    out.set(p.id, blocks.length < MIN_SAMPLE ? null : aboveExpectedSampleForPlays(blocks, baselines, teBlockWon, tierByGame && ((pl) => tierByGame.get(pl.game_id))));
+    out.set(p.id, blocks.length < MIN_SAMPLE ? null : aboveExpectedSampleForPlays(blocks, baselines, teBlockWon, { tierOf, weightOf }));
   }
 
   return out;
