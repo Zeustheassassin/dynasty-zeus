@@ -2,6 +2,7 @@
 import { useState, useEffect, startTransition } from "react";
 import dynamic from "next/dynamic";
 import type { Prospect, ProspectWithStats } from "../../../lib/types";
+import type { WRDifficultyModel } from "../../../lib/scouting/aggregateMerge";
 
 const ProspectList     = dynamic(() => import("./ProspectList"), { ssr: false });
 const PlayerChartingBoard = dynamic(() => import("./PlayerChartingBoard"), { ssr: false });
@@ -21,6 +22,8 @@ export interface WRHubProps {
   setDraftYearFilter: (y: number | null) => void;
   navigateToProspect?: Prospect | null;
   onNavigated?: () => void;
+  /** The league WR model, for the charting board's per-game SAE badges. */
+  wrModel: WRDifficultyModel;
 }
 
 type HubView = "list" | "roster";
@@ -34,6 +37,7 @@ export default function WRHub({
   setDraftYearFilter,
   navigateToProspect,
   onNavigated,
+  wrModel,
 }: WRHubProps) {
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
 
@@ -54,6 +58,7 @@ export default function WRHub({
         onBack={() => setSelectedProspect(null)} // the board reloads the hub on unmount if it wrote anything
         onDataChanged={onDataChanged}
         allProspects={prospectsWithStats}
+        wrModel={wrModel}
       />
     );
   }

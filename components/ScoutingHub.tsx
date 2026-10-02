@@ -20,6 +20,7 @@ import type {
 import type { GradeField } from "../lib/scouting/prospectGrade";
 import {
   buildProspectsWithStats,
+  buildWRModel,
   type ProspectRouteStatsRow,
   type ProspectGameRouteCellsRow,
 } from "../lib/scouting/aggregateMerge";
@@ -326,6 +327,11 @@ export default function ScoutingHub() {
     }
   }, [positionTab, loadPositionPlays]);
 
+  // The WR difficulty model (coverage judged per definition era), fit once per
+  // load. It feeds the SAE / cSAE columns and the WR charting board's per-game
+  // badges, so both judge routes the same way.
+  const wrModel = useMemo(() => buildWRModel(gameRouteCells ?? [], games), [gameRouteCells, games]);
+
   // Server-aggregated path: merge view rows + per-game route cells (WR SAE's
   // difficulty model, season-weighted by the games) into ProspectWithStats.
   // Replaces the per-snap JS reduce.
@@ -334,8 +340,8 @@ export default function ScoutingHub() {
       buildProspectsWithStats(prospects, routeStatsRows, gameRouteCells ?? [], games, {
         qbThrowsByProspect,
         teRoutesByProspect,
-      }),
-    [prospects, routeStatsRows, gameRouteCells, games, qbThrowsByProspect, teRoutesByProspect],
+      }, wrModel),
+    [prospects, routeStatsRows, gameRouteCells, games, qbThrowsByProspect, teRoutesByProspect, wrModel],
   );
 
   async function handleAddProspect(data: Omit<Prospect, "id" | "user_id" | "created_at" | "updated_at">) {
@@ -596,7 +602,7 @@ export default function ScoutingHub() {
               ))}
             </div>
 
-            {positionTab === "WR" && <WRHub {...hubProps} />}
+            {positionTab === "WR" && <WRHub {...hubProps} wrModel={wrModel} />}
             {positionTab === "RB" && <RBHub {...hubProps} />}
             {positionTab === "QB" && <QBHub {...hubProps} />}
             {positionTab === "TE" && <TEHub {...hubProps} />}

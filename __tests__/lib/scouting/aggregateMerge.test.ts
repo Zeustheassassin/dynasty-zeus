@@ -358,3 +358,60 @@ describe("buildWRTierSplits", () => {
     expect(buildWRTierSplits(rows, () => null).all.get("a")).toBeUndefined();
   });
 });
+
+// =============================================================================
+// Coverage eras — press was redefined after the 2026-04-30 import (coverageEra.ts)
+// =============================================================================
+
+describe("WR coverage eras", () => {
+  const prospect = (id: string): Prospect => ({ id, position: "WR", name: id }) as unknown as Prospect;
+  const statsRow = (prospect_id: string, plays: RoutePlay[]): ProspectRouteStatsRow =>
+    ({ prospect_id, total_routes: plays.length, has_charted_open_data: true, route_stats_raw: {}, coverage_stats_raw: {} }) as unknown as ProspectRouteStatsRow;
+  // Old charting folded press into man: "o" is 60% open on (old) man. New
+  // charting splits it: "n" is 80% open on man and 40% on press. Both run 100
+  // zone curls at 80%. Every route is a curl from the same spot, so without
+  // coverage the league expects 71% everywhere: o is open 70%, n 72%.
+  const oPlays = [
+    ...repeat(100, (i) => routePlay("go", "curl", "zone", i % 10 < 8)),
+    ...repeat(100, (i) => routePlay("go", "curl", "man", i % 10 < 6)),
+  ];
+  const nPlays = [
+    ...repeat(100, (i) => routePlay("gn", "curl", "zone", i % 10 < 8)),
+    ...repeat(60, (i) => routePlay("gn", "curl", "man", i % 10 < 8)),
+    ...repeat(40, (i) => routePlay("gn", "curl", "press", i % 10 < 4)),
+  ];
+  const rows = gameRowsFrom({ o: oPlays, n: nPlays });
+  const oldGame = { id: "go", prospect_id: "o", season_year: 2025, created_at: "2026-04-30T19:00:00Z" } as unknown as ScoutingGame;
+  const newGame = { id: "gn", prospect_id: "n", season_year: 2025, created_at: "2026-05-02T12:00:00Z" } as unknown as ScoutingGame;
+  const games = [oldGame, newGame];
+  const build = (gs: ScoutingGame[]) =>
+    new Map(buildProspectsWithStats([prospect("o"), prospect("n")], [statsRow("o", oPlays), statsRow("n", nPlays)], rows, gs)
+      .map((p) => [p.id, p.adj_success_above_exp!]));
+
+  it("judges a rep against reps charted under the same press definition", () => {
+    const model = buildWRModel(rows, games);
+    const manAt80 = nPlays.filter((p) => p.coverage === "man");
+    const asNew = computeSAEForPlays(manAt80, model, newGame)!;
+    const asOld = computeSAEForPlays(manAt80, model, oldGame)!;
+    // Under the old definition, man was the 60% look, so 80% open reads far better.
+    expect(asOld - asNew).toBeGreaterThan(10);
+  });
+
+  it("keeps each era's overall level, so the tags only move credit within an era", () => {
+    const sae = build(games);
+    expect(sae.get("n")!).toBeCloseTo(1, 1);
+    expect(sae.get("o")!).toBeCloseTo(-1, 1);
+  });
+
+  it("without eras, the new receiver collects credit for the definition change", () => {
+    const undated = games.map((g) => ({ ...g, created_at: undefined }) as unknown as ScoutingGame);
+    const sae = build(undated);
+    expect(sae.get("n")!).toBeGreaterThan(3);
+    expect(sae.get("o")!).toBeLessThan(-3);
+  });
+
+  it("still nets the league to 0", () => {
+    const sae = build(games);
+    expect(sae.get("n")! + sae.get("o")!).toBeCloseTo(0, 1);
+  });
+});

@@ -19,7 +19,7 @@ import type {
 import { ROUTE_TYPES } from "../shared/chartingConstants";
 import ChartingBoard, { type ChartingBoardConfig } from "../shared/ChartingBoard";
 import { useChartingState } from "../shared/hooks/useChartingState";
-import { buildWRModel, computeSAEForPlays, computeCoreSAEForPlays, type ProspectRouteCellsRow } from "../../../lib/scouting/aggregateMerge";
+import { computeSAEForPlays, computeCoreSAEForPlays, type WRDifficultyModel } from "../../../lib/scouting/aggregateMerge";
 
 const COVERAGES: { key: string; label: string }[] = [
   { key: "man", label: "Man" },
@@ -47,14 +47,13 @@ interface Props {
   onBack: () => void;
   onDataChanged: () => void;
   allProspects: ProspectWithStats[];
+  /** The league WR difficulty model, built by ScoutingHub (the same one the
+   *  SAE / cSAE columns use), for the per-game SAE badges. */
+  wrModel: WRDifficultyModel;
 }
 
-export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, allProspects }: Props) {
+export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, allProspects, wrModel }: Props) {
   const [plays, setPlays] = useState<RoutePlay[]>([]);
-  // League-wide route/coverage baselines — used to build the per-game SAE
-  // badge. Fetched once on mount (mirrors QBChartingBoard's leaguePlays
-  // self-fetch); this is an aggregate view of ~15 rows, not raw plays.
-  const [routeCellRows, setRouteCellRows] = useState<ProspectRouteCellsRow[]>([]);
 
   // Import panel state
   const [showBulkImport, setShowBulkImport]       = useState(false);
@@ -106,14 +105,6 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
       setPlays(allPlays);
     })();
   }, [games]);
-
-  useEffect(() => {
-    supabase.from("prospect_route_cells").select("prospect_id,cells")
-      .then(({ data, error }) => {
-        if (error) { log.error("prospect_route_cells load failed (per-game SAE blank until migration 057 is applied)", { err: error.message }); return; }
-        setRouteCellRows((data ?? []) as ProspectRouteCellsRow[]);
-      });
-  }, []);
 
   const gamePlays = useMemo(
     () => plays.filter((p) => p.game_id === selectedGameId),
@@ -222,14 +213,14 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
   // Per-game SAE (Success/Open Rate Above Expected) — a quick "this game
   // looked good/bad" read. Deliberately ungated (no 15-route floor): a
   // single-game sample is always small, that's expected here. Expected comes
-  // from the league difficulty model, fit once from every prospect's route
-  // cells and reused for every game.
-  const wrModel = useMemo(() => buildWRModel(routeCellRows), [routeCellRows]);
+  // from the league difficulty model (built once by ScoutingHub), with the
+  // game's coverage era deciding which press definition its routes are
+  // judged under.
   const perGameSae = useMemo(() => {
     const map: Record<string, number | null> = {};
     for (const g of games) {
       const gp = plays.filter((p) => p.game_id === g.id);
-      map[g.id] = computeSAEForPlays(gp, wrModel);
+      map[g.id] = computeSAEForPlays(gp, wrModel, g);
     }
     return map;
   }, [plays, games, wrModel]);
@@ -239,7 +230,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
     const map: Record<string, number | null> = {};
     for (const g of games) {
       const gp = plays.filter((p) => p.game_id === g.id);
-      map[g.id] = computeCoreSAEForPlays(gp, wrModel);
+      map[g.id] = computeCoreSAEForPlays(gp, wrModel, g);
     }
     return map;
   }, [plays, games, wrModel]);
