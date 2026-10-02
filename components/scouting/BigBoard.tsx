@@ -32,6 +32,8 @@ import { alignmentPenalty } from "../../lib/scouting/alignmentPenalty";
 import { buildWRTierSplits, type ProspectGameRouteCellsRow } from "../../lib/scouting/aggregateMerge";
 import { SEASON_DECAY } from "../../lib/scouting/seasonWeight";
 import { POS_COLOR } from "../../lib/uiTheme";
+import { computeRoleFits } from "../../lib/scouting/roleFits";
+import { matchFor, roleFitTooltip, roleLabel, VERSATILE_PCT, type RoleFit } from "../../lib/scouting/roleFit";
 import {
   parseGrade, formatGrade, gradeColor, gradeDelta, gradeTier, gradeTierRange,
   GRADE_MIN, GRADE_MAX, GRADE_TIERS, type GradeField,
@@ -119,11 +121,12 @@ interface SortContext {
   aeScores: Map<string, ScoreView>;
   dynasty: Map<string, DynastyBreakdown>;
   ages: Map<string, ProspectAge>;
+  roles: Map<string, RoleFit>;
 }
 
 type SortKey =
   | "pre_draft_grade" | "post_draft_grade" | "grade_delta"
-  | "personal_rank" | "overall_rank" | "ae_score" | "dynasty" | "dynasty_plus" | "name" | "school" | "conference" | "draft_class_year" | "height" | "weight" | "age" | "position"
+  | "personal_rank" | "overall_rank" | "ae_score" | "dynasty" | "dynasty_plus" | "role" | "name" | "school" | "conference" | "draft_class_year" | "height" | "weight" | "age" | "position"
   | "total_routes" | "total_games" | "targets" | "catches" | "drops" | "contested" | "contested_catches"
   | "success_rate" | "target_rate" | "adj_success_above_exp" | `ae_${AEKey}`
   | "pct_left" | "pct_right" | "pct_slot" | "pct_backfield"
@@ -187,6 +190,8 @@ function getSortValue(
   if (key === "ae_score") return ctx.aeScores.get(p.id)?.score ?? null;
   if (key === "dynasty") return ctx.dynasty.get(p.id)?.dynasty ?? null;
   if (key === "dynasty_plus") return ctx.dynasty.get(p.id)?.plus ?? null;
+  // Groups each role together; no role (under the floor) sinks both ways.
+  if (key === "role") { const f = ctx.roles.get(p.id); return f ? roleLabel(f) : null; }
   // null, not -BIG: on the All tab most rows have no value for a given AE
   // column (other positions), and the sort sinks those in both directions.
   if (key.startsWith("ae_")) return aeMaps[key.slice(3) as AEKey].get(p.id) ?? null;
@@ -512,9 +517,16 @@ export default function BigBoard({
     }
     return m;
   }, [prospects, scoreViews, hsClass, weights]);
+  // Each prospect's role buckets (lib/scouting/roleFit.ts). They describe a
+  // player and feed none of the scores.
+  const roleFits = useMemo(
+    () => computeRoleFits(prospects, games, rbPlays, qbPlays, tePlays),
+    [prospects, games, rbPlays, qbPlays, tePlays],
+  );
+
   const sortCtx = useMemo<SortContext>(
-    () => ({ aeScores: scoreViews, dynasty, ages }),
-    [scoreViews, dynasty, ages],
+    () => ({ aeScores: scoreViews, dynasty, ages, roles: roleFits }),
+    [scoreViews, dynasty, ages, roleFits],
   );
 
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -695,6 +707,30 @@ export default function BigBoard({
     const color = v >= 0 ? "text-emerald-400" : "text-red-400";
     return <td className={`${cls} ${color} font-semibold`} title={lines.join("\n")}>{signed(v, 2)}</td>;
   }
+  // ── Role cell ─────────────────────────────────────────────────
+  // The best-case role ("X", or "X / Y" on a near tie) with a V for
+  // Versatile; the tooltip lists every role's match and why.
+  function roleCell(p: ProspectWithStats) {
+    const cls = `${tdBase} border-l border-r border-slate-800`;
+    const fit = roleFits.get(p.id);
+    if (!fit) {
+      return <td className={`${cls} text-slate-600`} title={isCompositePos(p.position) ? "Not enough tape for a role yet" : undefined}>—</td>;
+    }
+    // Greyed when it's uncertain: little tape, or a headline not proven yet
+    // ("X?", an X without in-app press reps).
+    const weak = fit.confidence === "low" || matchFor(fit, fit.best)?.proven === false;
+    return (
+      <td className={`${cls} font-medium ${weak ? "text-slate-500" : "text-slate-200"}`} title={roleFitTooltip(fit)}>
+        {roleLabel(fit)}
+        {fit.versatile && <span className="ml-1 px-1 rounded bg-teal-900/60 text-teal-300 text-[9px] font-semibold">V</span>}
+      </td>
+    );
+  }
+  const roleTooltip =
+    "Role: the best-case NFL role from the charting plus height and weight (Analysis → Role Fit has every role's match %). " +
+    "Two roles within 5 points read \"A / B\", the higher-ceiling one first. \"?\" = not proven yet (an X needs 10+ in-app press reps). " +
+    `V = Versatile, ${VERSATILE_PCT}%+ in two or more roles. Greyed = little tape, or not proven yet. Feeds none of the scores.`;
+
   const dynastyTooltip =
     "Dynasty Score: the AE Score plus a career-window adjustment for age (prime seasons left at rookie " +
     `age vs a typical ${REFERENCE_ROOKIE_AGE}-year-old rookie; primes end RB ${PRIME_END_AGE.RB}, WR ${PRIME_END_AGE.WR}, ` +
@@ -988,6 +1024,7 @@ export default function BigBoard({
             <th colSpan={1} className="px-2 py-1 text-center text-slate-600 font-medium border-r border-slate-800">{secondaryGroup}</th>
             <th colSpan={identitySpan} className="px-2 py-1 text-center text-slate-600 font-medium border-r border-slate-800">Identity</th>
             <th colSpan={3} className="px-2 py-1 text-center text-teal-900 font-medium border-r border-slate-800">Composite</th>
+            <th colSpan={1} className="px-2 py-1 text-center text-violet-900 font-medium border-r border-slate-800">Role Fit</th>
             {aeGroups.map((g) => (
               <th key={g.group} colSpan={g.span} className="px-2 py-1 text-center text-emerald-900 font-medium border-r border-slate-800 whitespace-nowrap">{g.group}</th>
             ))}
@@ -1010,6 +1047,7 @@ export default function BigBoard({
             {th("AE Score", "ae_score", "border-l border-slate-800 text-teal-600", compositeTooltip)}
             {th("Dynasty", "dynasty", "text-teal-600", dynastyTooltip)}
             {th("Dynasty+", "dynasty_plus", "border-r border-slate-800 text-teal-600", dynastyPlusTooltip)}
+            {th("Role", "role", "border-l border-r border-slate-800 text-violet-500", roleTooltip)}
             {aeCols.map((c, i) => th(c.label, `ae_${c.key}`, `${aeBorder[i]} text-emerald-700`, c.tooltip))}
           </tr>
         </thead>
@@ -1038,6 +1076,7 @@ export default function BigBoard({
                 {scoreCell(p)}
                 {dynastyCell(p, false)}
                 {dynastyCell(p, true)}
+                {roleCell(p)}
                 {aeCols.map((c, i) => aeCell(p, c, aeBorder[i]))}
               </tr>
             );

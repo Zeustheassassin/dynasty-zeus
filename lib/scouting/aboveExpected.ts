@@ -834,3 +834,98 @@ export function computeTEBlockAboveExpected(
 ): Map<string, number | null> {
   return aeValues(computeTEBlockAboveExpectedSamples(prospects, games, tePlays));
 }
+
+// ── Role-bucket slices (roleFitRB / roleFitTE / roleFitQB) ───────────────
+// Above-expected over named slices of each prospect's reps, for the role
+// buckets: the same models and season weighting as the headline metrics, but
+// no floors, since the buckets discount small samples themselves. Every
+// prospect at the position gets an entry; an empty slice is { ae: null, n: 0 }.
+
+function sliceOf<T extends { game_id: string }>(
+  plays: T[],
+  pred: (pl: T) => boolean,
+  fitted: FittedDifficulty<T>,
+  outcome: (pl: T) => number,
+  weightOf: PlayWeight,
+): AESlice {
+  const sub = plays.filter(pred);
+  return { n: sub.length, ae: sub.length ? aboveExpectedForPlays(sub, fitted, outcome, weightOf) : null };
+}
+
+/** An RB slice of known runs. `byRunType` judges it with the run-type model,
+ *  like the SRAE breakdown columns; otherwise the headline SRAE model. */
+export interface RBRoleSlice { pred: (pl: RBPlay) => boolean; byRunType?: boolean }
+
+export function computeRBRoleSlices<K extends string>(
+  prospects: Prospect[],
+  games: ScoutingGame[],
+  rbPlays: RBPlay[],
+  slices: Record<K, RBRoleSlice>,
+): Map<string, Record<K, AESlice>> {
+  const out = new Map<string, Record<K, AESlice>>();
+  const playsByProspect = buildPlaysByProspect(rbPlays, buildGameToProspect(games));
+  const headline = buildRBBaselines(rbPlays);
+  const byRunType = fitFromPlays(rbPlays.filter(isKnownRun), RB_SLICE_DESIGN, rbSuccess, RB_RIDGE_LAMBDA);
+  const weightOf = playWeights(games);
+  const keys = Object.keys(slices) as K[];
+  for (const p of prospects) {
+    if (p.position !== "RB") continue;
+    const runs = (playsByProspect.get(p.id) ?? []).filter(isKnownRun);
+    const rec = {} as Record<K, AESlice>;
+    for (const k of keys) rec[k] = sliceOf(runs, slices[k].pred, slices[k].byRunType ? byRunType : headline, rbSuccess, weightOf);
+    out.set(p.id, rec);
+  }
+  return out;
+}
+
+/** QB slices of graded throws, each judged by the full AAE model. */
+export function computeQBRoleSlices<K extends string>(
+  prospects: Prospect[],
+  games: ScoutingGame[],
+  qbPlays: QBPlay[],
+  slices: Record<K, (pl: QBPlay) => boolean>,
+): Map<string, Record<K, AESlice>> {
+  const out = new Map<string, Record<K, AESlice>>();
+  const playsByProspect = buildPlaysByProspect(qbPlays, buildGameToProspect(games));
+  const R = resolveBaselines(buildQBBaselines(qbPlays));
+  const weightOf = playWeights(games);
+  const keys = Object.keys(slices) as K[];
+  for (const p of prospects) {
+    if (p.position !== "QB") continue;
+    const graded = (playsByProspect.get(p.id) ?? []).filter(isQBGradedThrow);
+    const rec = {} as Record<K, AESlice>;
+    for (const k of keys) {
+      const sub = graded.filter(slices[k]);
+      rec[k] = { n: sub.length, ae: sub.length ? modelAAE(sub, R, weightOf) : null };
+    }
+    out.set(p.id, rec);
+  }
+  return out;
+}
+
+/** TE slices: of rated routes (TE-SAER model) and of rated blocks (TE-SAEB model). */
+export function computeTERoleSlices<R extends string, B extends string>(
+  prospects: Prospect[],
+  games: ScoutingGame[],
+  tePlays: TEPlay[],
+  routeSlices: Record<R, (pl: TEPlay) => boolean>,
+  blockSlices: Record<B, (pl: TEPlay) => boolean>,
+): Map<string, { route: Record<R, AESlice>; block: Record<B, AESlice> }> {
+  const out = new Map<string, { route: Record<R, AESlice>; block: Record<B, AESlice> }>();
+  const playsByProspect = buildPlaysByProspect(tePlays, buildGameToProspect(games));
+  const routeModel = buildTERouteBaselines(tePlays);
+  const blockModel = buildTEBlockBaselines(tePlays);
+  const weightOf = playWeights(games);
+  for (const p of prospects) {
+    if (p.position !== "TE") continue;
+    const plays = playsByProspect.get(p.id) ?? [];
+    const routes = plays.filter(isRatedTERoute);
+    const blocks = plays.filter(isRatedTEBlock);
+    const route = {} as Record<R, AESlice>;
+    const block = {} as Record<B, AESlice>;
+    for (const k of Object.keys(routeSlices) as R[]) route[k] = sliceOf(routes, routeSlices[k], routeModel, teOpen, weightOf);
+    for (const k of Object.keys(blockSlices) as B[]) block[k] = sliceOf(blocks, blockSlices[k], blockModel, teBlockWon, weightOf);
+    out.set(p.id, { route, block });
+  }
+  return out;
+}

@@ -2,7 +2,9 @@
 import { useMemo } from "react";
 import StatsTableShell, { StatRow, ColDef, MinFilterDef } from "./StatsTableShell";
 import { computeQBAboveExpected, computeQBThrowSliceAAE } from "../../../lib/scouting/aboveExpected";
+import { computeQBRoleFits } from "../../../lib/scouting/roleFitQB";
 import type { Prospect, ScoutingGame, QBPlay, QBDepthZone } from "../../../lib/types";
+import { roleFitCols, roleFitRow } from "./roleFitCols";
 
 interface Props {
   prospects: Prospect[];
@@ -30,6 +32,9 @@ export const QB_STAT_COLS: ColDef[] = [
   { key: "g",      label: "G",     group: "Identity", fmt: "count", width: 40 },
   { key: "snaps",  label: "Snaps", group: "Identity", fmt: "count", width: 52 },
   { key: "throws", label: "Throws", group: "Identity", fmt: "count", width: 56, tooltip: "Balls thrown — pass/RPO snaps minus scrambles, sacks and throw-aways. Includes tipped and not-yet-graded throws; AAE uses the graded ones." },
+
+  // Role buckets (lib/scouting/roleFitQB.ts)
+  ...roleFitCols("QB"),
 
   // Snap mix — each outcome as a % of snaps (Snaps stays a raw count). The six
   // percentages sum to ~100% when every throw is accuracy-graded; any shortfall
@@ -134,6 +139,7 @@ function pct(n: number, d: number): number | null {
 export function buildQBStatRows(prospects: Prospect[], games: ScoutingGame[], qbPlays: QBPlay[]): StatRow[] {
     const aaeMap = computeQBAboveExpected(prospects, games, qbPlays);
     const sliceMap = computeQBThrowSliceAAE(prospects, games, qbPlays);
+    const roleFits = computeQBRoleFits(prospects, games, qbPlays);
     const gameToProspect = new Map<string, string>();
     for (const g of games) gameToProspect.set(g.id, g.prospect_id);
 
@@ -254,6 +260,7 @@ export function buildQBStatRows(prospects: Prospect[], games: ScoutingGame[], qb
           g: gamesByProspect.get(p.id) ?? 0,
           snaps: pPlays.length,
           throws: thrownPlays.length,
+          ...roleFitRow("QB", roleFits.get(p.id)),
 
           // Snap mix as % of snaps (sum to ~100% when every throw is graded)
           graded_pct:    pct(ratedN,     snapsN),

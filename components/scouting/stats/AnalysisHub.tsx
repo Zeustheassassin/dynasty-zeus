@@ -33,10 +33,10 @@ const POSITION_LABELS: Record<PositionTab, string> = {
 };
 
 const POSITION_DESCRIPTIONS: Record<PositionTab, string> = {
-  WR: "SAE · Open% by route, alignment, coverage · Target & catch rates",
-  RB: "SRAE · Success% by run type, formation & box situation · Receiving",
-  QB: "AAE · Accuracy by depth, coverage, timing, pressure, platform, handling & route mix · Decision timing breakdown",
-  TE: "TE-SAER · Open% by positioning, location & coverage · TE-SAEB · Block success above expected",
+  WR: "Role fit (X · Y · Slot · Gadget) · SAE · Open% by route, alignment, coverage · Target & catch rates",
+  RB: "Role fit (Three-down · Zone · Gap/Power · Receiving · Big-play) · SRAE · Success% by run type, formation & box situation · Receiving",
+  QB: "Role fit (Creator · Distributor · Vertical · Dual-threat) · AAE · Accuracy by depth, coverage, timing, pressure, platform, handling & route mix · Decision timing breakdown",
+  TE: "Role fit (Inline Y · Move · H-back · Blocking) · TE-SAER · Open% by positioning, location & coverage · TE-SAEB · Block success above expected",
 };
 
 export default function AnalysisHub({

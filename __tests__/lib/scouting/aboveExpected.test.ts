@@ -20,6 +20,9 @@ import {
   computeQBAboveExpectedSamples,
   computeTERouteAboveExpectedSamples,
   computeTEBlockAboveExpectedSamples,
+  computeRBRoleSlices,
+  computeQBRoleSlices,
+  computeTERoleSlices,
   aeValues,
 } from "@/lib/scouting/aboveExpected";
 import { aboveExpectedSampleForPlays, expectedFromModel } from "@/lib/scouting/difficultyModel";
@@ -1061,5 +1064,58 @@ describe("season weighting", () => {
       .toBeGreaterThan(computeTERouteAboveExpectedSamples(tes, undatedTE, plays).get("t")!.ae);
     expect(computeTEBlockAboveExpectedSamples(tes, datedTE, plays).get("t")!.ae)
       .toBeGreaterThan(computeTEBlockAboveExpectedSamples(tes, undatedTE, plays).get("t")!.ae);
+  });
+});
+
+// =============================================================================
+// Role-bucket slices (roleFitRB / roleFitQB / roleFitTE)
+// =============================================================================
+
+describe("role-bucket slices", () => {
+  it("RB: the all-runs slice is SRAE itself, run-type slices use the run-type model, and there's no floor", () => {
+    const prospects = [prospect("a", "RB"), prospect("thin", "RB"), prospect("qb", "QB")];
+    const games = [game("g_a", "a"), game("g_thin", "thin")];
+    const plays = [
+      ...repeat(200, (i) => rbPlay("g_bg", "outside_zone", "gun", i % 10 < 7, false)),
+      ...repeat(200, (i) => rbPlay("g_bg", "inside_man_gap", "gun", i % 10 < 4, false)),
+      ...repeat(20, (i) => rbPlay("g_a", "outside_zone", "gun", i % 10 < 7, false)),
+      ...repeat(20, (i) => rbPlay("g_a", "inside_man_gap", "gun", i % 10 < 4, i < 5)),
+      ...repeat(3, () => rbPlay("g_thin", "outside_zone", "gun", true, false)),
+    ];
+    const out = computeRBRoleSlices(prospects, games, plays, {
+      all: { pred: () => true },
+      loaded: { pred: (pl) => pl.loaded_box },
+      zone: { pred: (pl) => pl.run_type === "outside_zone", byRunType: true },
+    });
+    const a = out.get("a")!;
+    expect(a.all.ae).toBeCloseTo(computeRBAboveExpected(prospects, games, plays).get("a")!, 6);
+    expect(a.loaded.n).toBe(5);
+    expect(Math.abs(a.zone.ae!)).toBeLessThan(1); // matches the league on his run type
+    expect(out.get("thin")!.all.n).toBe(3);       // under SRAE's 15-run floor, still read
+    expect(out.has("qb")).toBe(false);
+  });
+
+  it("QB: the all slice is AAE itself; an empty slice is null", () => {
+    const prospects = [prospect("q", "QB")];
+    const games = [game("g_q", "q")];
+    const plays = [
+      ...repeat(40, (i) => qbPlay("g_bg", { accuracy: i % 2 ? "on_target" : "high", depth_zone: "short_center" })),
+      ...repeat(30, (i) => qbPlay("g_q", { accuracy: i % 3 ? "on_target" : "low", depth_zone: "short_center" })),
+    ];
+    const out = computeQBRoleSlices(prospects, games, plays, { all: () => true, deep: (pl) => pl.depth_zone?.startsWith("deep_") ?? false });
+    expect(out.get("q")!.all.ae).toBeCloseTo(computeQBAboveExpected(prospects, games, plays).get("q")!, 6);
+    expect(out.get("q")!.deep).toEqual({ ae: null, n: 0 });
+  });
+
+  it("TE: route slices read rated routes, block slices rated blocks", () => {
+    const prospects = [prospect("t", "TE")];
+    const games = [game("g_t", "t")];
+    const plays = [
+      ...repeat(20, (i) => tePlay("g_t", { was_open: i % 2 === 0, coverage: i < 8 ? "man" : "zone", route_type: "flat" })),
+      ...repeat(16, (i) => tePlay("g_t", { play_type: "run_block", block_type: i < 10 ? "inline" : "movement", block_success: i % 2 === 0 })),
+    ];
+    const out = computeTERoleSlices(prospects, games, plays, { all: () => true, man: (pl) => pl.coverage === "man" }, { all: () => true, movement: (pl) => pl.block_type === "movement" });
+    const t = out.get("t")!;
+    expect([t.route.all.n, t.route.man.n, t.block.all.n, t.block.movement.n]).toEqual([20, 8, 16, 6]);
   });
 });

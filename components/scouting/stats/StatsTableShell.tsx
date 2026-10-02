@@ -11,7 +11,7 @@ export interface ColDef {
   key: string;
   label: string;
   group: string;
-  fmt?: "pct" | "count" | "dec1" | "plusMinus" | "name" | "yr";
+  fmt?: "pct" | "pct0" | "count" | "dec1" | "plusMinus" | "name" | "yr";
   sticky?: boolean;
   width?: number;
   /** 1 = higher is better, -1 = lower is better, 0/undefined = no color */
@@ -19,6 +19,8 @@ export interface ColDef {
   tooltip?: string;
   /** Fixed value to show in the League footer row instead of the computed mean/total */
   leagueOverride?: number;
+  /** Row field holding this cell's own tooltip (e.g. why a role match is what it is). */
+  titleKey?: string;
   /** For pct / plusMinus columns: row field name holding the denominator (e.g. number of attempts).
    *  When set, the league total is sum(value*weight) / sum(weight), not mean of values.
    *  This produces a true global rate / play-weighted mean instead of average-of-averages. */
@@ -51,6 +53,7 @@ export function fmtVal(val: number | string | null, f?: ColDef["fmt"]): string {
   if (isNaN(val)) return "—";
   switch (f) {
     case "pct":       return `${val.toFixed(1)}%`;
+    case "pct0":      return `${Math.round(val)}%`;
     case "count":     return String(Math.round(val));
     case "dec1":      return val.toFixed(1);
     case "plusMinus": return `${val >= 0 ? "+" : ""}${val.toFixed(1)}`;
@@ -365,12 +368,14 @@ export default function StatsTableShell({
                   const display = fmtVal(rawVal, c.fmt);
                   const color = typeof rawVal === "number" ? cellColor(c, rawVal) : "";
                   const gIdx = groupIndexByKey[c.key];
+                  const cellTitle = c.titleKey ? row[c.titleKey] : null;
                   const baseBg = ri % 2 === 0
                     ? (gIdx % 2 === 1 ? "bg-slate-800/40" : "bg-slate-900/40")
                     : (gIdx % 2 === 1 ? "bg-slate-800/20" : "bg-slate-900/10");
                   return (
                     <td
                       key={c.key}
+                      title={typeof cellTitle === "string" ? cellTitle : undefined}
                       className={[
                         "px-2 py-1.5 whitespace-nowrap",
                         c.sticky

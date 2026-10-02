@@ -6,6 +6,8 @@
 // All interfaces mirror the real shape returned by Sleeper's API.
 // ============================================================
 
+import type { RoleFit } from "./scouting/roleFit";
+
 // ── Sleeper data shapes ──────────────────────────────────────
 
 export interface SleeperUser {
@@ -1244,6 +1246,10 @@ export interface ProspectWithStats extends Prospect {
   pct_on_line: number | null;
   /** In-app snaps by where he lined up; null with none (or migration 060 not applied). */
   lined_up: LinedUp | null;
+  /** WR role buckets (lib/scouting/roleFitWR.ts); null for other positions,
+   *  under the route floor, or without the per-game route cells. RB / QB / TE
+   *  buckets are computed from their plays (computeRoleFits). */
+  role_fit: RoleFit | null;
   adj_success_above_exp: number | null;
   // "Core-route" SAE — same stat, excluding Go (nine) and Screen routes. See
   // computeCoreSAE in lib/scouting/aggregateMerge.ts for the rationale.

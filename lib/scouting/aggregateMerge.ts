@@ -25,6 +25,9 @@ import {
 } from "./difficultyModel";
 import { seasonWeights } from "./seasonWeight";
 import { COVERAGE_ERAS, coverageEra, coverageEras, type CoverageEra } from "./coverageEra";
+import { parseHeightInches } from "./prospectAge";
+import type { AESum } from "./roleFit";
+import { wrRoleFit, type WRRoleSkill } from "./roleFitWR";
 
 const ROUTE_TYPES: RouteType[] = [
   "nine", "post", "dig", "curl", "slant", "screen", "flat", "comeback", "out", "corner", "other",
@@ -420,6 +423,31 @@ function computeCoreSAE(
   return saeFromCells(core, model);
 }
 
+// The WR role buckets' skill sums (roleFitWR.ts): his routes by route type and
+// by coverage, every game season-weighted like SAE. Press counts in-app games
+// only: before the 2026-05-01 redefinition some press reps were charted as man.
+function wrRoleSkill(cells: RouteCell[], model: Float64Array): WRRoleSkill {
+  const sum = (pred: (c: RouteCell) => boolean): AESum => {
+    const r = cellSums(cells.filter(pred), model);
+    return { n: r.n, w: r.w, actual: r.actual, expected: r.expected };
+  };
+  const byRoute: Partial<Record<string, AESum>> = {};
+  for (const rt of ROUTE_TYPES) if (cells.some((c) => c.route_type === rt)) byRoute[rt] = sum((c) => c.route_type === rt);
+  return {
+    byRoute,
+    zone: sum((c) => c.coverage === "zone"),
+    man: sum((c) => c.coverage === "man"),
+    press: sum((c) => c.coverage === "press" && c.era === "new"),
+  };
+}
+
+// Routes run per route type in in-app games, for the role buckets' route mix.
+function inAppRouteCounts(cells: RouteCell[]): Partial<Record<string, number>> {
+  const out: Partial<Record<string, number>> = {};
+  for (const c of cells) if (c.era === "new") out[c.route_type] = (out[c.route_type] ?? 0) + c.n;
+  return out;
+}
+
 // Per-game SAE (no minimum-sample gate — a single game's worth of routes is
 // expected to be noisy; this is a quick "did this game look good/bad" read,
 // not the reliability-gated season/career metric). `game` sets the coverage
@@ -516,6 +544,7 @@ export function buildProspectsWithStats(
   return prospects.map((p) => {
     const v = byProspect.get(p.id);
     const cells = cellsByProspect.get(p.id) ?? [];
+    const lined_up = linedUp.get(p.id) ?? null;
 
     const total_games = v?.total_games ?? 0;
     const has_charted_open_data = v?.has_charted_open_data ?? false;
@@ -553,7 +582,16 @@ export function buildProspectsWithStats(
       pct_slot: v?.pct_slot ?? null,
       pct_backfield: v?.pct_backfield ?? null,
       pct_on_line: v?.pct_on_line ?? null,
-      lined_up: linedUp.get(p.id) ?? null,
+      lined_up,
+      role_fit: p.position === "WR" && wrModel.model
+        ? wrRoleFit({
+            skill: wrRoleSkill(cells, wrModel.model),
+            linedUp: lined_up,
+            inAppRouteCounts: inAppRouteCounts(cells),
+            heightIn: parseHeightInches(p.height),
+            weightLb: p.weight,
+          })
+        : null,
       adj_success_above_exp: v ? computeSAE(v, cells, wrModel) : null,
       core_sae: v ? computeCoreSAE(v, cells, wrModel) : null,
       sae_sample: v ? computeSAESample(v, cells, wrModel) : null,

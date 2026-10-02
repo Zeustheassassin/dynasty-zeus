@@ -452,3 +452,36 @@ describe("lined up (in-app alignment, every play)", () => {
     expect(buildProspectsWithStats([prospect], [], [], [imported], {}, undefined, [row("gi", { slot_on: 40 })])[0].lined_up).toBeNull();
   });
 });
+
+describe("WR role buckets on ProspectWithStats", () => {
+  const imported = { id: "gi", prospect_id: "w", season_year: 2025, created_at: "2026-04-30T19:00:00Z" } as unknown as ScoutingGame;
+  const inApp = { id: "ga", prospect_id: "w", season_year: 2025, created_at: "2026-05-02T12:00:00Z" } as unknown as ScoutingGame;
+  const league = { id: "gl", prospect_id: "l", season_year: 2025, created_at: "2026-05-03T12:00:00Z" } as unknown as ScoutingGame;
+  const wr = { id: "w", name: "W", position: "WR", height: "6'2\"", weight: 200 } as unknown as Prospect;
+  const rb = { id: "r", name: "R", position: "RB" } as unknown as Prospect;
+  const leaguePlays = [
+    ...repeat(60, (i) => routePlay("gl", "nine", "press", i % 3 === 0)),
+    ...repeat(60, (i) => routePlay("gl", "slant", "zone", i % 3 !== 0)),
+  ];
+
+  it("lands on a WR from his route cells, with press counted from in-app games only", () => {
+    const importOnly = gameRowsFrom({ w: repeat(50, (i) => routePlay("gi", "nine", "press", i < 30)), l: leaguePlays });
+    const [p, r] = buildProspectsWithStats([wr, rb], [], importOnly, [imported, league]);
+    expect(r.role_fit).toBeNull();
+    expect(p.role_fit!.sample).toEqual({ n: 50, unit: "routes" });
+    expect(p.role_fit!.features.press!.n).toBe(0); // imported press: untested, not counted
+    expect(p.role_fit!.skillOnly).toBe(true);
+
+    const withInApp = gameRowsFrom({
+      w: [...repeat(50, (i) => routePlay("gi", "nine", "press", i < 30)), ...repeat(12, (i) => routePlay("ga", "nine", "press", i < 8))],
+      l: leaguePlays,
+    });
+    const [p2] = buildProspectsWithStats([wr], [], withInApp, [imported, inApp, league]);
+    expect(p2.role_fit!.features.press!.display).toMatch(/on 12 in-app routes$/);
+  });
+
+  it("is null under the route floor", () => {
+    const rows = gameRowsFrom({ w: repeat(10, () => routePlay("ga", "slant", "zone", true)), l: leaguePlays });
+    expect(buildProspectsWithStats([wr], [], rows, [inApp, league])[0].role_fit).toBeNull();
+  });
+});

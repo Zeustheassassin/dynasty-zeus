@@ -180,13 +180,19 @@ export default function CompareProspectsTab({
                   }
                   return (
                     <div key={c.key} className="grid grid-cols-[1fr_auto_1fr] items-center px-3 py-1.5 text-sm">
-                      <div className={`text-left ${betterSide === "a" ? "font-bold text-emerald-400" : "text-slate-300"}`}>
+                      <div
+                        className={`text-left ${betterSide === "a" ? "font-bold text-emerald-400" : "text-slate-300"}`}
+                        title={c.titleKey && typeof rowA[c.titleKey] === "string" ? (rowA[c.titleKey] as string) : undefined}
+                      >
                         {fmtVal(va, c.fmt)}
                       </div>
                       <div className="text-[10px] text-slate-600 px-3 text-center whitespace-nowrap" title={c.tooltip ?? c.label}>
                         {c.label}
                       </div>
-                      <div className={`text-right ${betterSide === "b" ? "font-bold text-emerald-400" : "text-slate-300"}`}>
+                      <div
+                        className={`text-right ${betterSide === "b" ? "font-bold text-emerald-400" : "text-slate-300"}`}
+                        title={c.titleKey && typeof rowB[c.titleKey] === "string" ? (rowB[c.titleKey] as string) : undefined}
+                      >
                         {fmtVal(vb, c.fmt)}
                       </div>
                     </div>

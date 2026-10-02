@@ -2,7 +2,9 @@
 import { useMemo } from "react";
 import StatsTableShell, { StatRow, ColDef, MinFilterDef } from "./StatsTableShell";
 import { computeTERouteAboveExpected, computeTEBlockAboveExpected } from "../../../lib/scouting/aboveExpected";
+import { computeTERoleFits } from "../../../lib/scouting/roleFitTE";
 import type { Prospect, ScoutingGame, TEPlay, TEPositioning, TELocation, TECoverage } from "../../../lib/types";
+import { roleFitCols, roleFitRow } from "./roleFitCols";
 
 interface Props {
   prospects: Prospect[];
@@ -30,6 +32,8 @@ export const TE_STAT_COLS: ColDef[] = [
   { key: "snaps",   label: "Snaps",  group: "Identity", fmt: "count", width: 52 },
   { key: "routes",  label: "Routes", group: "Identity", fmt: "count", width: 58 },
   { key: "blocks",  label: "Blocks", group: "Identity", fmt: "count", width: 58 },
+  // Role buckets (lib/scouting/roleFitTE.ts)
+  ...roleFitCols("TE"),
   // Advanced
   { key: "te_saer",    label: "TE-SAER", group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 76, tooltip: "Route SAE — Open Rate Above Expected, each route judged against routes like it (route, coverage incl. press, positioning stacked) (15+ rated routes) Older seasons count a little less.", leagueOverride: 0 },
   { key: "te_saeb",    label: "TE-SAEB", group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 76, tooltip: "Block SAE — Block Success Above Expected, each block judged against blocks like it (run/pass, movement/inline, positioning stacked) (15+ rated blocks) Older seasons count a little less.", leagueOverride: 0 },
@@ -133,6 +137,7 @@ function blkSuccPct(plays: TEPlay[], filter: (p: TEPlay) => boolean): number | n
 export function buildTEStatRows(prospects: Prospect[], games: ScoutingGame[], tePlays: TEPlay[]): StatRow[] {
     const teSaerMap = computeTERouteAboveExpected(prospects, games, tePlays);
     const teSaebMap = computeTEBlockAboveExpected(prospects, games, tePlays);
+    const roleFits = computeTERoleFits(prospects, games, tePlays);
     const gameToProspect = new Map<string, string>();
     for (const g of games) gameToProspect.set(g.id, g.prospect_id);
 
@@ -175,6 +180,7 @@ export function buildTEStatRows(prospects: Prospect[], games: ScoutingGame[], te
           snaps: pPlays.length,
           routes: routePlays.length,
           blocks: blockPlays.length,
+          ...roleFitRow("TE", roleFits.get(p.id)),
           rated_routes_n: ratedRoutes.length,
           te_saer,
           te_saeb,

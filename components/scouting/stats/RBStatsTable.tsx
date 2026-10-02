@@ -2,7 +2,9 @@
 import { useMemo } from "react";
 import StatsTableShell, { StatRow, ColDef, MinFilterDef } from "./StatsTableShell";
 import { computeRBAboveExpected, computeRBRunSliceSRAE } from "../../../lib/scouting/aboveExpected";
+import { computeRBRoleFits } from "../../../lib/scouting/roleFitRB";
 import type { Prospect, ScoutingGame, RBPlay, RBRunType } from "../../../lib/types";
+import { roleFitCols, roleFitRow } from "./roleFitCols";
 
 interface Props {
   prospects: Prospect[];
@@ -22,6 +24,8 @@ export const RB_STAT_COLS: ColDef[] = [
   { key: "g",       label: "G",      group: "Identity", fmt: "count", width: 40 },
   { key: "snaps",   label: "Snaps",  group: "Identity", fmt: "count", width: 52 },
   { key: "runs",    label: "Runs",   group: "Identity", fmt: "count", width: 48 },
+  // Role buckets (lib/scouting/roleFitRB.ts)
+  ...roleFitCols("RB"),
   // Advanced
   { key: "srae",         label: "SRAE",     group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 66, tooltip: "Success Rate Above Expected — each run judged against runs like it (formation, loaded box, unblocked defender stacked), so a stuffed run into a free defender costs little. Min. 15 runs. Older seasons count a little less.", leagueOverride: 0 },
   { key: "succ_pct",     label: "Succ%",    group: "Advanced", fmt: "pct",       colorDir: 1,  width: 60, tooltip: "Success rate on all rushing attempts", weightBy: "runs" },
@@ -98,6 +102,7 @@ function pct(n: number, d: number): number | null {
 export function buildRBStatRows(prospects: Prospect[], games: ScoutingGame[], rbPlays: RBPlay[]): StatRow[] {
     const sraeMap = computeRBAboveExpected(prospects, games, rbPlays);
     const sliceMap = computeRBRunSliceSRAE(prospects, games, rbPlays);
+    const roleFits = computeRBRoleFits(prospects, games, rbPlays);
     // Build game → prospect map
     const gameToProspect = new Map<string, string>();
     for (const g of games) gameToProspect.set(g.id, g.prospect_id);
@@ -147,6 +152,7 @@ export function buildRBStatRows(prospects: Prospect[], games: ScoutingGame[], rb
           g: gamesByProspect.get(p.id) ?? 0,
           snaps: pPlays.length,
           runs: runPlays.length,
+          ...roleFitRow("RB", roleFits.get(p.id)),
           srae,
           succ_pct: succPct(runPlays, () => true),
           explosive_pct: pct(pPlays.filter((pl) => pl.explosive_play).length, runPlays.length),

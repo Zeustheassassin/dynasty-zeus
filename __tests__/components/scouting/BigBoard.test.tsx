@@ -3,6 +3,7 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, cleanup, within } from "@testing-library/react";
 import BigBoard from "@/components/scouting/BigBoard";
 import type { ProspectWithStats, AEScoreLock } from "@/lib/types";
+import type { RoleFit } from "@/lib/scouting/roleFit";
 
 // The Big Board's Above Exp group: one column per metric (AAE, SRAE, SAE, cSAE,
 // TE-SAER, TE-SAEB). The models themselves are tested in aboveExpected.test.ts
@@ -46,6 +47,11 @@ vi.mock("@/lib/scouting/aboveExpected", () => {
     computeRBRunSliceSRAE: () => new Map([["rb1", {
       outside: { ae: 4, n: 12 }, inside: { ae: -5.5, n: 30 }, zone: { ae: null, n: 6 }, man_gap: { ae: 0.4, n: 36 },
     }]]),
+    // The role buckets' slices: none here, so RB / QB / TE have no role. The
+    // role column is pinned with a WR fit (roleFit*.test.ts test the recipes).
+    computeRBRoleSlices: () => new Map(),
+    computeQBRoleSlices: () => new Map(),
+    computeTERoleSlices: () => new Map(),
   };
 });
 
@@ -219,7 +225,8 @@ describe("BigBoard AE Score", () => {
     const labels = headerLabels();
     expect(labels.indexOf("AE Score")).toBe(labels.indexOf("Wt") + 1);
     expect(labels.slice(labels.indexOf("AE Score"), labels.indexOf("AE Score") + 3)).toEqual(["AE Score", "Dynasty", "Dynasty+"]);
-    expect(labels.indexOf("AAE")).toBe(labels.indexOf("Dynasty+") + 1);
+    expect(labels.indexOf("Role")).toBe(labels.indexOf("Dynasty+") + 1);
+    expect(labels.indexOf("AAE")).toBe(labels.indexOf("Role") + 1);
     expect(within(screen.getAllByRole("row")[0]).getAllByRole("columnheader").map((h) => h.textContent))
       .toContain("Composite");
     fireEvent.click(screen.getByRole("button", { name: /^TE/ }));
@@ -476,5 +483,34 @@ describe("BigBoard WR alignment", () => {
     const title = within(rowFor("One Side WR")).getAllByRole("cell")[headerLabels().indexOf("AE Score")].getAttribute("title")!;
     expect(title).toContain("after the alignment penalty");
     expect(title).toContain("Alignment: 96% of snaps on the right side → -0.50");
+  });
+});
+
+describe("BigBoard Role column", () => {
+  const match = (role: RoleFit["best"], pct: number) => ({ role, pct, sizeDrop: 0, sizeNote: null, drivers: [], proven: true });
+  const FIT: RoleFit = {
+    pos: "WR", best: "x", hybrid: "y", versatile: true, usedAs: "x", confidence: "high",
+    sample: { n: 240, unit: "routes" }, skillOnly: false, features: {},
+    matches: [match("x", 82), match("y", 79), match("slot", 55), match("gadget", 40)],
+  };
+
+  it("shows the best-case role with V for Versatile, every role's match in the tooltip, and — without one", () => {
+    renderBoard([prospect("wr1", "Wide One", "WR", 1, { role_fit: FIT }), prospect("rb1", "Running One", "RB", 2)]);
+    const td = within(rowFor("Wide One")).getAllByRole("cell")[headerLabels().indexOf("Role")];
+    expect(td.textContent).toBe("X / YV");
+    expect(td.getAttribute("title")).toContain("Best case: X, equally a Y");
+    expect(td.getAttribute("title")).toContain("X 82% · Y 79% · Slot 55% · Gadget 40%");
+    expect(cell("Running One", "Role")).toBe("—");
+  });
+
+  it("sorts by role, players without one sinking", () => {
+    const slot: RoleFit = { ...FIT, best: "slot", hybrid: null, matches: [match("x", 40), match("y", 50), match("slot", 80), match("gadget", 60)] };
+    renderBoard([
+      prospect("a", "No Role", "RB", 1),
+      prospect("b", "Slot Guy", "WR", 2, { role_fit: slot }),
+      prospect("c", "X Guy", "WR", 3, { role_fit: FIT }),
+    ]);
+    fireEvent.click(screen.getByRole("columnheader", { name: "Role" }));
+    expect(names()).toEqual(["Slot Guy", "X Guy", "No Role"]);
   });
 });

@@ -2,6 +2,7 @@
 import { useMemo } from "react";
 import StatsTableShell, { StatRow, ColDef, MinFilterDef } from "./StatsTableShell";
 import type { LinedUp, Prospect, ProspectWithStats } from "../../../lib/types";
+import { roleFitCols, roleFitRow } from "./roleFitCols";
 
 interface Props {
   prospectsWithStats: ProspectWithStats[];
@@ -22,6 +23,8 @@ export const WR_STAT_COLS: ColDef[] = [
   { key: "g",      label: "G",       group: "Identity", fmt: "count", width: 40 },
   { key: "snaps",  label: "Snaps",   group: "Identity", fmt: "count", width: 52 },
   { key: "routes", label: "Routes",  group: "Identity", fmt: "count", width: 58 },
+  // Role buckets (lib/scouting/roleFitWR.ts)
+  ...roleFitCols("WR"),
   // Advanced
   { key: "sae",      label: "SAE",    group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 62, tooltip: "Success (Open) Rate Above Expected — each route judged against routes like it (route, coverage incl. press, slot/outside, on/off line stacked), so a hard rep costs little when he isn't open. Min. 15 routes. Older seasons count a little less.", leagueOverride: 0 },
   { key: "core_sae", label: "cSAE",   group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 64, tooltip: "Core-Route SAE — same as SAE, but excludes Go (Nine) and Screen routes, which are scheme-driven rather than a receiver beating coverage. Min. 15 core routes. Older seasons count a little less.", leagueOverride: 0 },
@@ -141,6 +144,7 @@ export function buildWRStatRows(prospectsWithStats: ProspectWithStats[]): StatRo
         g: p.total_games,
         snaps: p.total_snaps,
         routes: p.total_routes,
+        ...roleFitRow("WR", p.role_fit),
         sae: p.adj_success_above_exp,
         core_sae: p.core_sae,
         open_pct: p.success_rate,
