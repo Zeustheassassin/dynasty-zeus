@@ -1,7 +1,7 @@
 "use client";
 import { useMemo } from "react";
 import StatsTableShell, { StatRow, ColDef, MinFilterDef } from "./StatsTableShell";
-import type { Prospect, ProspectWithStats } from "../../../lib/types";
+import type { LinedUp, Prospect, ProspectWithStats } from "../../../lib/types";
 
 interface Props {
   prospectsWithStats: ProspectWithStats[];
@@ -36,18 +36,29 @@ export const WR_STAT_COLS: ColDef[] = [
   { key: "cvg_zone_open",   label: "Zone%",   group: "By Coverage", fmt: "pct", colorDir: 1, width: 62, weightBy: "cvg_zone_n" },
   { key: "cvg_double_open", label: "Dbl%",    group: "By Coverage", fmt: "pct", colorDir: 1, width: 58, weightBy: "cvg_double_n" },
   { key: "cvg_press_open",  label: "Press%",  group: "By Coverage", fmt: "pct", colorDir: 1, width: 62, weightBy: "cvg_press_n" },
-  // By Alignment
-  { key: "open_slot",      label: "Slot%",  group: "By Alignment", fmt: "pct", colorDir: 1, width: 60, weightBy: "align_n_slot" },
-  { key: "open_left",      label: "Left%",  group: "By Alignment", fmt: "pct", colorDir: 1, width: 58, weightBy: "align_n_left" },
-  { key: "open_right",     label: "Right%", group: "By Alignment", fmt: "pct", colorDir: 1, width: 62, weightBy: "align_n_right" },
-  { key: "open_backfield", label: "Bkfld%", group: "By Alignment", fmt: "pct", colorDir: 1, width: 62, weightBy: "align_n_backfield" },
-  // On / Off Line — now properly weighted by per-cell route counts
-  { key: "open_slot_on",   label: "SlotOn%",  group: "On/Off LOS", fmt: "pct", colorDir: 1, width: 70, weightBy: "align_n_slot_on_line" },
-  { key: "open_slot_off",  label: "SlotOff%", group: "On/Off LOS", fmt: "pct", colorDir: 1, width: 72, weightBy: "align_n_slot_off_line" },
-  { key: "open_left_on",   label: "LftOn%",   group: "On/Off LOS", fmt: "pct", colorDir: 1, width: 66, weightBy: "align_n_left_on_line" },
-  { key: "open_left_off",  label: "LftOff%",  group: "On/Off LOS", fmt: "pct", colorDir: 1, width: 68, weightBy: "align_n_left_off_line" },
-  { key: "open_right_on",  label: "RgtOn%",   group: "On/Off LOS", fmt: "pct", colorDir: 1, width: 68, weightBy: "align_n_right_on_line" },
-  { key: "open_right_off", label: "RgtOff%",  group: "On/Off LOS", fmt: "pct", colorDir: 1, width: 70, weightBy: "align_n_right_off_line" },
+  // Lined Up — where he lines up, as a share of every snap charted in the app,
+  // run plays included (the import entered whole games, so its alignment isn't
+  // per play). Role, not quality, so no color. X = outside on the line, Z =
+  // outside off it.
+  { key: "lu_slot",      label: "Slot",  group: "Lined Up (in-app)", fmt: "pct", width: 56, weightBy: "lu_snaps", tooltip: "% of his in-app snaps (runs included) in the slot" },
+  { key: "lu_x",         label: "X",     group: "Lined Up (in-app)", fmt: "pct", width: 52, weightBy: "lu_snaps", tooltip: "% of his in-app snaps outside and on the line of scrimmage (X / split end), either side" },
+  { key: "lu_z",         label: "Z",     group: "Lined Up (in-app)", fmt: "pct", width: 52, weightBy: "lu_snaps", tooltip: "% of his in-app snaps outside and off the line (Z / flanker), either side" },
+  { key: "lu_left",      label: "Left",  group: "Lined Up (in-app)", fmt: "pct", width: 54, weightBy: "lu_snaps", tooltip: "% of his in-app snaps outside on the left, on or off the line" },
+  { key: "lu_right",     label: "Right", group: "Lined Up (in-app)", fmt: "pct", width: 56, weightBy: "lu_snaps", tooltip: "% of his in-app snaps outside on the right, on or off the line" },
+  { key: "lu_backfield", label: "Bkfld", group: "Lined Up (in-app)", fmt: "pct", width: 56, weightBy: "lu_snaps", tooltip: "% of his in-app snaps in the backfield" },
+  { key: "lu_snaps",     label: "Snaps", group: "Lined Up (in-app)", fmt: "count", width: 52, tooltip: "Snaps charted in the app, runs included, which these shares come from. Imported games are left out: the import entered whole games, not plays." },
+  // Open% by Alignment
+  { key: "open_slot",      label: "Slot%",  group: "Open% by Alignment", fmt: "pct", colorDir: 1, width: 60, weightBy: "align_n_slot" },
+  { key: "open_left",      label: "Left%",  group: "Open% by Alignment", fmt: "pct", colorDir: 1, width: 58, weightBy: "align_n_left" },
+  { key: "open_right",     label: "Right%", group: "Open% by Alignment", fmt: "pct", colorDir: 1, width: 62, weightBy: "align_n_right" },
+  { key: "open_backfield", label: "Bkfld%", group: "Open% by Alignment", fmt: "pct", colorDir: 1, width: 62, weightBy: "align_n_backfield" },
+  // Open% On / Off Line — weighted by per-cell route counts
+  { key: "open_slot_on",   label: "SlotOn%",  group: "Open% On/Off LOS", fmt: "pct", colorDir: 1, width: 70, weightBy: "align_n_slot_on_line" },
+  { key: "open_slot_off",  label: "SlotOff%", group: "Open% On/Off LOS", fmt: "pct", colorDir: 1, width: 72, weightBy: "align_n_slot_off_line" },
+  { key: "open_left_on",   label: "LftOn%",   group: "Open% On/Off LOS", fmt: "pct", colorDir: 1, width: 66, weightBy: "align_n_left_on_line" },
+  { key: "open_left_off",  label: "LftOff%",  group: "Open% On/Off LOS", fmt: "pct", colorDir: 1, width: 68, weightBy: "align_n_left_off_line" },
+  { key: "open_right_on",  label: "RgtOn%",   group: "Open% On/Off LOS", fmt: "pct", colorDir: 1, width: 68, weightBy: "align_n_right_on_line" },
+  { key: "open_right_off", label: "RgtOff%",  group: "Open% On/Off LOS", fmt: "pct", colorDir: 1, width: 70, weightBy: "align_n_right_off_line" },
   // By Route
   { key: "rt_nine",     label: ROUTE_LABELS.nine,     group: "Open% by Route", fmt: "pct", colorDir: 1, width: 52, weightBy: "rt_nine_n" },
   { key: "rt_post",     label: ROUTE_LABELS.post,     group: "Open% by Route", fmt: "pct", colorDir: 1, width: 52, weightBy: "rt_post_n" },
@@ -104,6 +115,20 @@ function cvgOpenPct(p: ProspectWithStats, cvg: "man" | "zone" | "double" | "pres
   return parseFloat(((s.open / s.count) * 100).toFixed(1));
 }
 
+// Each spot's share of his in-app snaps; "—" (null) with none charted in the app.
+function linedUpShares(lu: LinedUp | null) {
+  const share = (n: number) => (lu && lu.snaps > 0 ? parseFloat(((n / lu.snaps) * 100).toFixed(1)) : null);
+  return {
+    lu_slot: share((lu?.slot_on ?? 0) + (lu?.slot_off ?? 0)),
+    lu_x: share((lu?.left_on ?? 0) + (lu?.right_on ?? 0)),
+    lu_z: share((lu?.left_off ?? 0) + (lu?.right_off ?? 0)),
+    lu_left: share((lu?.left_on ?? 0) + (lu?.left_off ?? 0)),
+    lu_right: share((lu?.right_on ?? 0) + (lu?.right_off ?? 0)),
+    lu_backfield: share(lu?.backfield ?? 0),
+    lu_snaps: lu?.snaps ?? 0,
+  };
+}
+
 // Extracted so the Phase I player-comparison tool can compute the same rows
 // for any two WR prospects without duplicating this logic.
 export function buildWRStatRows(prospectsWithStats: ProspectWithStats[]): StatRow[] {
@@ -136,6 +161,8 @@ export function buildWRStatRows(prospectsWithStats: ProspectWithStats[]): StatRo
         cvg_zone_n: p.coverage_stats.zone.count,
         cvg_double_n: p.coverage_stats.double.count,
         cvg_press_n: p.coverage_stats.press.count,
+        // Lined up (in-app routes)
+        ...linedUpShares(p.lined_up),
         // Alignment
         open_slot: p.open_pct_slot,
         open_left: p.open_pct_left,

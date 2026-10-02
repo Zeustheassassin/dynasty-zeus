@@ -1,5 +1,6 @@
 import type {
   AESample,
+  LinedUp,
   Prospect,
   ProspectWithStats,
   RouteStat,
@@ -194,6 +195,34 @@ function weightedCellsByProspect(
     }
   }
   return new Map([...merged].map(([id, cells]) => [id, [...cells.values()]]));
+}
+
+/** prospect_game_alignment (migration 060): one game's snaps by where he lined up. */
+export interface ProspectGameAlignmentRow extends LinedUp {
+  prospect_id: string;
+  game_id: string;
+}
+
+const LINED_UP_KEYS = ["snaps", "slot_on", "slot_off", "left_on", "left_off", "right_on", "right_off", "backfield"] as const;
+
+// Where each WR lined up on plays charted in the app, run plays included. The
+// 2026-04-30 import entered whole games, not plays, so an imported snap's
+// alignment and on/off line aren't a real per-play record; those games are
+// left out. A game's import-vs-app split is the coverage era's cutoff
+// ("new" = in-app).
+export function linedUpByProspect(
+  rows: readonly ProspectGameAlignmentRow[],
+  eras: Map<string, CoverageEra>,
+): Map<string, LinedUp> {
+  const out = new Map<string, LinedUp>();
+  for (const row of rows) {
+    if ((eras.get(row.game_id) ?? "new") !== "new") continue;
+    const lu = out.get(row.prospect_id)
+      ?? { snaps: 0, slot_on: 0, slot_off: 0, left_on: 0, left_off: 0, right_on: 0, right_off: 0, backfield: 0 };
+    for (const k of LINED_UP_KEYS) lu[k] += row[k] ?? 0;
+    out.set(row.prospect_id, lu);
+  }
+  return out;
 }
 
 // The logit offset that makes a set of cells' expected opens sum to `target`
@@ -468,6 +497,7 @@ export interface ProspectThresholdCounts {
 // `gameCellRows` is prospect_game_route_cells (migration 058) and `games` the
 // scouting games, for each route's season weight and coverage era. Pass
 // `wrModel` when the caller already built it from the same rows and games.
+// `alignmentRows` is prospect_game_alignment (migration 060), for lined_up.
 export function buildProspectsWithStats(
   prospects: Prospect[],
   viewRows: ProspectRouteStatsRow[],
@@ -475,9 +505,12 @@ export function buildProspectsWithStats(
   games: readonly ScoutingGame[],
   thresholdCounts: ProspectThresholdCounts = {},
   wrModel: WRDifficultyModel = buildWRModel(gameCellRows, games),
+  alignmentRows: readonly ProspectGameAlignmentRow[] = [],
 ): ProspectWithStats[] {
   const byProspect = new Map(viewRows.map((r) => [r.prospect_id, r]));
-  const cellsByProspect = weightedCellsByProspect(gameCellRows, seasonWeights(games), coverageEras(games));
+  const eras = coverageEras(games);
+  const cellsByProspect = weightedCellsByProspect(gameCellRows, seasonWeights(games), eras);
+  const linedUp = linedUpByProspect(alignmentRows, eras);
   const { qbThrowsByProspect, teRoutesByProspect } = thresholdCounts;
 
   return prospects.map((p) => {
@@ -520,6 +553,7 @@ export function buildProspectsWithStats(
       pct_slot: v?.pct_slot ?? null,
       pct_backfield: v?.pct_backfield ?? null,
       pct_on_line: v?.pct_on_line ?? null,
+      lined_up: linedUp.get(p.id) ?? null,
       adj_success_above_exp: v ? computeSAE(v, cells, wrModel) : null,
       core_sae: v ? computeCoreSAE(v, cells, wrModel) : null,
       sae_sample: v ? computeSAESample(v, cells, wrModel) : null,

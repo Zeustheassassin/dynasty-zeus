@@ -1209,6 +1209,21 @@ export interface AESample {
   rawAe?: number;
 }
 
+// Where a WR lined up, counted over every play charted in the app, run plays
+// included (games from 2026-05-01 on; prospect_game_alignment, migration 060).
+// The 2026-04-30 import entered whole games rather than plays, so its
+// alignment isn't a per-play record and imported games are left out.
+export interface LinedUp {
+  snaps: number;
+  slot_on: number;
+  slot_off: number;
+  left_on: number;
+  left_off: number;
+  right_on: number;
+  right_off: number;
+  backfield: number;
+}
+
 export interface ProspectWithStats extends Prospect {
   total_snaps: number;
   total_routes: number;
@@ -1227,6 +1242,8 @@ export interface ProspectWithStats extends Prospect {
   pct_slot: number | null;
   pct_backfield: number | null;
   pct_on_line: number | null;
+  /** In-app snaps by where he lined up; null with none (or migration 060 not applied). */
+  lined_up: LinedUp | null;
   adj_success_above_exp: number | null;
   // "Core-route" SAE — same stat, excluding Go (nine) and Screen routes. See
   // computeCoreSAE in lib/scouting/aggregateMerge.ts for the rationale.

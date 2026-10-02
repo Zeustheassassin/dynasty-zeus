@@ -23,6 +23,7 @@ import {
   buildWRModel,
   type ProspectRouteStatsRow,
   type ProspectGameRouteCellsRow,
+  type ProspectGameAlignmentRow,
 } from "../lib/scouting/aggregateMerge";
 
 const log = logger("ScoutingHub");
@@ -139,6 +140,23 @@ async function fetchGameRouteCells(): Promise<ProspectGameRouteCellsRow[]> {
   }
 }
 
+// prospect_game_alignment (migration 060), paged. Throws on error, which
+// includes the view not existing.
+async function fetchGameAlignment(): Promise<ProspectGameAlignmentRow[]> {
+  const PAGE = 1000;
+  const all: ProspectGameAlignmentRow[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("prospect_game_alignment")
+      .select("prospect_id,game_id,snaps,slot_on,slot_off,left_on,left_off,right_on,right_off,backfield")
+      .order("game_id", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    all.push(...((data ?? []) as ProspectGameAlignmentRow[]));
+    if (!data || data.length < PAGE) return all;
+  }
+}
+
 const WRHub = dynamic(() => import("./scouting/wr/WRHub"), { ssr: false });
 const RBHub = dynamic(() => import("./scouting/rb/RBHub"), { ssr: false });
 const QBHub = dynamic(() => import("./scouting/qb/QBHub"), { ssr: false });
@@ -198,6 +216,9 @@ export default function ScoutingHub() {
   // opponent adjustment, so they load with everything else. Null after a
   // failed load: WR SAE / cSAE show "—" and WR isn't opponent-adjusted.
   const [gameRouteCells, setGameRouteCells] = useState<ProspectGameRouteCellsRow[] | null>(null);
+  // Per-game WR alignment over every play (migration 060), for the WR stats'
+  // Lined Up columns. Empty after a failed load: those columns show "—".
+  const [gameAlignment, setGameAlignment] = useState<ProspectGameAlignmentRow[]>([]);
   // Whether each lazy play load has landed. The Big Board only snapshots a
   // drafted prospect's AE Score once all three have, so it never saves a
   // half-computed score. (The route cells arrive with the hub's own load.)
@@ -218,6 +239,7 @@ export default function ScoutingHub() {
         { data: gData, error: gErr },
         { data: rsData, error: rsErr },
         { rows: cellData, error: cellErr },
+        { rows: alignData, error: alignErr },
         { data: gssData, error: gssErr },
         { data: rbStatsData, error: rbStatsErr },
         { data: qbStatsData, error: qbStatsErr },
@@ -232,6 +254,12 @@ export default function ScoutingHub() {
           (rows) => ({ rows, error: null }),
           (error: { message?: string; code?: string }) => ({ rows: null, error }),
         ),
+        // WR alignment over every play (migration 060). Its own query too, so a
+        // failure only blanks the Lined Up columns.
+        fetchGameAlignment().then(
+          (rows) => ({ rows, error: null }),
+          (error: { message?: string; code?: string }) => ({ rows: [] as ProspectGameAlignmentRow[], error }),
+        ),
         supabase.from("prospect_game_snap_stats").select("*"),
         supabase.from("prospect_rb_stats").select("prospect_id,total_snaps,run_type_stats_raw"),
         supabase.from("prospect_qb_stats").select("prospect_id,total_snaps,total_throws,depth_zone_stats_raw"),
@@ -242,6 +270,7 @@ export default function ScoutingHub() {
       if (gErr) log.error("games load", { msg: gErr.message, code: gErr.code, details: gErr.details, hint: gErr.hint });
       if (rsErr) log.error("prospect_route_stats load", { msg: rsErr.message, code: rsErr.code, details: rsErr.details, hint: rsErr.hint });
       if (cellErr) log.error("prospect_game_route_cells load (WR SAE/cSAE blank, WR AE Score not opponent-adjusted)", { msg: cellErr.message, code: cellErr.code });
+      if (alignErr) log.error("prospect_game_alignment load (WR Lined Up columns blank; is migration 060 applied?)", { msg: alignErr.message, code: alignErr.code });
       if (gssErr) log.error("prospect_game_snap_stats load", { msg: gssErr.message, code: gssErr.code, details: gssErr.details, hint: gssErr.hint, raw: JSON.stringify(gssErr) });
       if (rbStatsErr) log.error("prospect_rb_stats load", { msg: rbStatsErr.message });
       if (qbStatsErr) log.error("prospect_qb_stats load", { msg: qbStatsErr.message });
@@ -259,6 +288,7 @@ export default function ScoutingHub() {
       setGames((gData ?? []) as ScoutingGame[]);
       setRouteStatsRows((rsData ?? []) as ProspectRouteStatsRow[]);
       setGameRouteCells(cellData);
+      setGameAlignment(alignData);
       setGameSnapStatsRows((gssData ?? []) as GameSnapStatsRow[]);
       const rbRows = (rbStatsData ?? []) as RbRunTypeRow[];
       const qbRows = (qbStatsData ?? []) as QbThresholdRow[];
@@ -340,8 +370,8 @@ export default function ScoutingHub() {
       buildProspectsWithStats(prospects, routeStatsRows, gameRouteCells ?? [], games, {
         qbThrowsByProspect,
         teRoutesByProspect,
-      }, wrModel),
-    [prospects, routeStatsRows, gameRouteCells, games, qbThrowsByProspect, teRoutesByProspect, wrModel],
+      }, wrModel, gameAlignment),
+    [prospects, routeStatsRows, gameRouteCells, games, qbThrowsByProspect, teRoutesByProspect, wrModel, gameAlignment],
   );
 
   async function handleAddProspect(data: Omit<Prospect, "id" | "user_id" | "created_at" | "updated_at">) {

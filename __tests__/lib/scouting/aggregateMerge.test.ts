@@ -3,12 +3,15 @@ import {
   buildWRModel,
   buildWRTierSplits,
   buildProspectsWithStats,
+  linedUpByProspect,
   computeSAEForPlays,
   computeCoreSAEForPlays,
   type ProspectRouteCellsRow,
   type ProspectGameRouteCellsRow,
   type ProspectRouteStatsRow,
+  type ProspectGameAlignmentRow,
 } from "@/lib/scouting/aggregateMerge";
+import { coverageEras } from "@/lib/scouting/coverageEra";
 import { SEASON_DECAY } from "@/lib/scouting/seasonWeight";
 import type { Prospect, RoutePlay, RouteType, CoverageType, Alignment, ScoutingGame } from "@/lib/types";
 
@@ -413,5 +416,39 @@ describe("WR coverage eras", () => {
   it("still nets the league to 0", () => {
     const sae = build(games);
     expect(sae.get("n")! + sae.get("o")!).toBeCloseTo(0, 1);
+  });
+});
+
+describe("lined up (in-app alignment, every play)", () => {
+  const imported = { id: "gi", prospect_id: "w", season_year: 2025, created_at: "2026-04-30T19:00:00Z" } as unknown as ScoutingGame;
+  const inApp1 = { id: "ga", prospect_id: "w", season_year: 2025, created_at: "2026-05-02T12:00:00Z" } as unknown as ScoutingGame;
+  const inApp2 = { id: "gb", prospect_id: "w", season_year: 2026, created_at: "2026-09-10T12:00:00Z" } as unknown as ScoutingGame;
+  const row = (game_id: string, counts: Partial<Omit<ProspectGameAlignmentRow, "prospect_id" | "game_id">>, prospect_id = "w"): ProspectGameAlignmentRow => {
+    const base = { slot_on: 0, slot_off: 0, left_on: 0, left_off: 0, right_on: 0, right_off: 0, backfield: 0, ...counts };
+    const snaps = base.slot_on + base.slot_off + base.left_on + base.left_off + base.right_on + base.right_off + base.backfield;
+    return { prospect_id, game_id, snaps, ...base };
+  };
+
+  it("sums every in-app game and leaves the imported ones out", () => {
+    const lu = linedUpByProspect([
+      row("gi", { slot_on: 40, left_on: 30 }), // imported: whole-game entry, not per play
+      row("ga", { left_on: 20, left_off: 5, slot_off: 10, backfield: 1 }),
+      row("gb", { right_on: 12, right_off: 3, slot_off: 9 }),
+    ], coverageEras([imported, inApp1, inApp2]));
+    expect(lu.get("w")).toEqual({ snaps: 60, slot_on: 0, slot_off: 19, left_on: 20, left_off: 5, right_on: 12, right_off: 3, backfield: 1 });
+  });
+
+  it("has nothing for a player charted only in the import", () => {
+    expect(linedUpByProspect([row("gi", { left_on: 30 })], coverageEras([imported])).has("w")).toBe(false);
+  });
+
+  it("lands on ProspectWithStats as lined_up", () => {
+    const prospect = { id: "w", name: "W", position: "WR" } as unknown as Prospect;
+    const [p] = buildProspectsWithStats([prospect], [], [], [imported, inApp1], {}, undefined, [
+      row("gi", { slot_on: 40 }),
+      row("ga", { left_on: 6, right_off: 4 }),
+    ]);
+    expect(p.lined_up).toEqual({ snaps: 10, slot_on: 0, slot_off: 0, left_on: 6, left_off: 0, right_on: 0, right_off: 4, backfield: 0 });
+    expect(buildProspectsWithStats([prospect], [], [], [imported], {}, undefined, [row("gi", { slot_on: 40 })])[0].lined_up).toBeNull();
   });
 });
