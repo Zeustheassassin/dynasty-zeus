@@ -33,7 +33,7 @@ import { buildWRTierSplits, type ProspectGameRouteCellsRow } from "../../lib/sco
 import { SEASON_DECAY } from "../../lib/scouting/seasonWeight";
 import { POS_COLOR } from "../../lib/uiTheme";
 import { computeRoleFits } from "../../lib/scouting/roleFits";
-import { matchFor, roleFitTooltip, roleLabel, VERSATILE_PCT, type RoleFit } from "../../lib/scouting/roleFit";
+import { matchFor, roleFitTooltip, roleLabel, versatileRuleText, type RoleFit } from "../../lib/scouting/roleFit";
 import {
   parseGrade, formatGrade, gradeColor, gradeDelta, gradeTier, gradeTierRange,
   GRADE_MIN, GRADE_MAX, GRADE_TIERS, type GradeField,
@@ -729,7 +729,7 @@ export default function BigBoard({
   const roleTooltip =
     "Role: the best-case NFL role from the charting plus height and weight (Analysis → Role Fit has every role's match %). " +
     "Two roles within 5 points read \"A / B\", the higher-ceiling one first. \"?\" = not proven yet (an X needs 10+ in-app press reps). " +
-    `V = Versatile, ${VERSATILE_PCT}%+ in two or more roles. Greyed = little tape, or not proven yet. Feeds none of the scores.`;
+    `V = Versatile: a WR ${versatileRuleText("WR")}, a TE ${versatileRuleText("TE")} (none for RB or QB: Three-down, Creator and Dual-threat already mean all-round). Greyed = little tape, or not proven yet. Feeds none of the scores.`;
 
   const dynastyTooltip =
     "Dynasty Score: the AE Score plus a career-window adjustment for age (prime seasons left at rookie " +

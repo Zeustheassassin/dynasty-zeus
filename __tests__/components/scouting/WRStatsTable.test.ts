@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { buildWRStatRows, WR_STAT_COLS } from "@/components/scouting/stats/WRStatsTable";
 import type { ProspectWithStats } from "@/lib/types";
 import type { RoleFit } from "@/lib/scouting/roleFit";
+import { roleFitCols } from "@/components/scouting/stats/roleFitCols";
 
 // buildWRStatRows reads many fields; only the Lined Up ones matter here.
 const wr = (lined_up: ProspectWithStats["lined_up"]) =>
@@ -58,6 +59,12 @@ describe("WR stats: Role Fit", () => {
     const [row] = buildWRStatRows([withFit(null)]);
     expect([row.role, row.role_x, row.role_used, row.role_vers, row.role_conf]).toEqual([null, null, null, null, null]);
     expect(row.role_tip).toBe("Not enough tape for a role yet");
+  });
+
+  it("has no Vers column at RB or QB", () => {
+    expect(roleFitCols("RB").map((c) => c.key)).not.toContain("role_vers");
+    expect(roleFitCols("QB").map((c) => c.key)).not.toContain("role_vers");
+    expect(roleFitCols("TE").map((c) => c.key)).toContain("role_vers");
   });
 
   it("sits right after Identity, one % column per role", () => {

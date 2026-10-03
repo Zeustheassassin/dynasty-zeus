@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   buildRoleFit, scoreBucket, skillFeature, usageFeature, inverseUsageFeature, contrastFeature, shrinkAE,
   roleLabel, roleFitTooltip, matchTooltip, aeOf, mergeAESums,
-  ELITE_SIZE_SHARE, NEAR_TIE, VERSATILE_PCT, FALLBACK_LINE,
-  type BucketRecipe, type FeatureSet, type Feature,
+  ELITE_SIZE_SHARE, NEAR_TIE, VERSATILE_PCT, FALLBACK_LINE, versatileRuleText, hasVersatile, ROLES,
+  type BucketRecipe, type FeatureSet, type Feature, type RolePos,
 } from "@/lib/scouting/roleFit";
 
 // A feature with a set fit, for driving the recipes directly.
@@ -68,6 +68,16 @@ describe("scoreBucket", () => {
     expect(elite.sizeNote).toContain("elite");
   });
 
+  it("cuts a gated bucket in proportion to how far short of each gate he falls", () => {
+    const gated: BucketRecipe = { role: "x", ingredients: [{ feature: "a", weight: 1 }], gates: [{ feature: "g1", maxCut: 0.5 }, { feature: "g2", maxCut: 0.5 }] };
+    expect(scoreBucket(gated, { a: skill(0.8), g1: skill(1), g2: skill(1) }, null, null).pct).toBe(80);
+    expect(scoreBucket(gated, { a: skill(0.8), g1: skill(0.5), g2: skill(1) }, null, null).pct).toBe(60);  // −25%
+    expect(scoreBucket(gated, { a: skill(0.8), g1: skill(0), g2: skill(0) }, null, null).pct).toBe(20);    // −50% twice
+    expect(scoreBucket(gated, { a: skill(0.8) }, null, null).pct).toBe(80);                                // missing gate: no cut
+    expect(scoreBucket(gated, { a: skill(0.8), g1: { ...skill(0.5), label: "Hands", display: "2 drops" } }, null, null).drivers)
+      .toContain("− Hands: 2 drops (−25%)");
+  });
+
   it("never drops a player with no height or weight on file", () => {
     expect(scoreBucket(recipe, { a: skill(0.7) }, null, null).sizeDrop).toBe(0);
   });
@@ -108,10 +118,41 @@ describe("buildRoleFit", () => {
     expect(roleLabel(r)).toBe("X / Slot");
   });
 
-  it("calls a player Versatile at 70%+ in two roles", () => {
-    expect(fit({ x: skill(0.72), y: skill(0.71), slot: skill(0.4), g: skill(0.3) }).versatile).toBe(true);
-    expect(fit({ x: skill(0.72), y: skill(0.69), slot: skill(0.4), g: skill(0.3) }).versatile).toBe(false);
+  it("calls a WR Versatile above 60% at both X and Y, and only with a proven X", () => {
+    expect(fit({ x: skill(0.61), y: skill(0.62), slot: skill(0.4), g: skill(0.3) }).versatile).toBe(true);
+    expect(fit({ x: skill(0.61), y: skill(0.6), slot: skill(0.4), g: skill(0.3) }).versatile).toBe(false);
+    // Strong elsewhere doesn't count: it's X and Y.
+    expect(fit({ x: skill(0.9), y: skill(0.5), slot: skill(0.9), g: skill(0.9) }).versatile).toBe(false);
+    const unproven = buildRoleFit({
+      pos: "WR",
+      recipes: recipes.map((r) => (r.role === "x" ? { ...r, requires: { feature: "x", minN: 10, why: "needs 10 reps" } } : r)),
+      features: { x: { ...skill(0.7), n: 3 }, y: skill(0.7), slot: skill(0.4), g: skill(0.3) },
+      heightIn: null, weightLb: null, sample: { n: 150, unit: "routes" }, confidenceAt: { medium: 100, high: 200 },
+    });
+    expect(unproven.versatile).toBe(false);
+    expect(versatileRuleText("WR")).toBe("above 60% at both X and Y");
+    expect(roleFitTooltip(fit({ x: skill(0.65), y: skill(0.66), slot: skill(0.4), g: skill(0.3) }))).toContain("Versatile: above 60% at both X and Y");
+  });
+
+  // One recipe per role, one feature each, for any position.
+  const fitAt = (pos: RolePos, fits: number[]) => buildRoleFit({
+    pos,
+    recipes: ROLES[pos].map((r, i) => ({ role: r.key, ingredients: [{ feature: `f${i}`, weight: 1 }] })),
+    features: Object.fromEntries(fits.map((v, i) => [`f${i}`, skill(v)])),
+    heightIn: null, weightLb: null, sample: { n: 80, unit: "plays" }, confidenceAt: { medium: 60, high: 120 },
+  });
+
+  it("calls a TE Versatile at 70%+ in two roles", () => {
+    expect(fitAt("TE", [0.72, 0.71, 0.4, 0.4]).versatile).toBe(true);
+    expect(fitAt("TE", [0.72, 0.69, 0.4, 0.4]).versatile).toBe(false);
     expect(VERSATILE_PCT).toBe(70);
+    expect(versatileRuleText("TE")).toBe("70%+ in two or more roles");
+  });
+
+  it("never calls an RB or QB Versatile: Three-down, Creator and Dual-threat already mean all-round", () => {
+    expect(fitAt("RB", [0.9, 0.9, 0.9, 0.9, 0.9]).versatile).toBe(false);
+    expect(fitAt("QB", [0.9, 0.9, 0.9, 0.9]).versatile).toBe(false);
+    expect([hasVersatile("RB"), hasVersatile("QB"), hasVersatile("WR"), hasVersatile("TE")]).toEqual([false, false, true, true]);
   });
 
   it("says what his usage alone points to, which can differ from where he projects", () => {

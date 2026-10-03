@@ -4,8 +4,8 @@
 // confidence. Each cell's tooltip says why (ColDef.titleKey).
 import type { ColDef } from "./StatsTableShell";
 import {
-  ROLES, VERSATILE_PCT, confidenceLabel, matchFor, matchTooltip, roleFitTooltip, roleInfo, roleLabel,
-  type RoleFit, type RolePos,
+  ROLES, confidenceLabel, matchFor, matchTooltip, roleFitTooltip, roleInfo, roleLabel,
+  hasVersatile, versatileRuleText, type RoleFit, type RolePos,
 } from "../../../lib/scouting/roleFit";
 
 const GROUP = "Role Fit";
@@ -24,7 +24,8 @@ export function roleFitCols(pos: RolePos): ColDef[] {
       key: "role_used", label: "Used as", group: GROUP, width: 80,
       tooltip: "The role his usage alone points to (where he lined up, what he was asked to do). Blank without usage data, e.g. a WR charted only in the import.",
     },
-    { key: "role_vers", label: "Vers", group: GROUP, width: 48, tooltip: `Versatile: ${VERSATILE_PCT}%+ in two or more roles.` },
+    // No Vers column at RB / QB: the user doesn't use Versatile there.
+    ...(hasVersatile(pos) ? [{ key: "role_vers", label: "Vers", group: GROUP, width: 48, tooltip: `Versatile: ${versatileRuleText(pos)}.` }] : []),
     { key: "role_conf", label: "Conf", group: GROUP, width: 64, titleKey: "role_conf_tip", tooltip: "How much tape the fit rests on." },
   ];
 }

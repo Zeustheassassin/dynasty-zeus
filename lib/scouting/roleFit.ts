@@ -70,7 +70,7 @@ export const ROLES: Record<RolePos, readonly RoleInfo[]> = {
     { key: "gadget", label: "Gadget", short: "Gadget", tier: 2, fallback: true, description: "The catch-all for a receiver who isn't good enough for X, Y or Slot (all under 50%): a special-teamer or one-touch-a-game role. Its % is how much his game is screens, flats and slants." },
   ],
   RB: [
-    { key: "three_down", label: "Three-down", short: "3-Down",  tier: 0, description: "Wins on zone and gap runs, holds up in pass protection, useful as a receiver; built to carry the load." },
+    { key: "three_down", label: "Three-down", short: "3-Down",  tier: 0, description: "The workhorse: wins on zone and gap runs, reliable hands (no drops), holds up in pass protection, and the build to carry the load." },
     { key: "zone",       label: "Zone",       short: "Zone",    tier: 1, description: "One-cut runner: much better on zone runs than gap runs." },
     { key: "gap",        label: "Gap/Power",  short: "Gap",     tier: 2, description: "Wins on gap runs and against a stacked box, breaks tackles; heavier." },
     { key: "receiving",  label: "Receiving",  short: "Recv",    tier: 3, description: "Runs a lot of routes, often split out wide, gets open on longer routes." },
@@ -101,6 +101,30 @@ export const NEAR_TIE = 5;
 export const FALLBACK_LINE = 50;
 // A match this high counts toward Versatile, which takes two such buckets.
 export const VERSATILE_PCT = 70;
+// A position's own Versatile rule, where it has one: every listed bucket
+// above `above`, and proven. null = no Versatile at the position. All the
+// user's calls (2026-10-02): a WR is Versatile above 60% at both X and Y (an
+// X? doesn't count). RB and QB have none: Three-down already is the all-round
+// back, and Creator and Dual-threat are the all-round QBs. TE keeps the
+// default, VERSATILE_PCT+ in two or more buckets.
+export interface VersatileRule { roles: readonly RoleKey[]; above: number }
+export const VERSATILE_RULES: Partial<Record<RolePos, VersatileRule | null>> = {
+  WR: { roles: ["x", "y"], above: 60 },
+  RB: null,
+  QB: null,
+};
+
+/** Whether the position uses Versatile at all. */
+export const hasVersatile = (pos: RolePos) => VERSATILE_RULES[pos] !== null;
+
+/** What Versatile means at a position, for tooltips. */
+export function versatileRuleText(pos: RolePos): string {
+  const rule = VERSATILE_RULES[pos];
+  if (rule === null) return "not used at this position";
+  if (!rule) return `${VERSATILE_PCT}%+ in two or more roles`;
+  const names = rule.roles.map((k) => roleInfo(k).label);
+  return `above ${rule.above}% at both ${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
 // A core-skill fit this high is elite (about the top tenth of charted players
 // on the 2026-10-02 data): the size drop shrinks to ELITE_SIZE_SHARE of itself.
 export const ELITE_FIT = 0.8;
@@ -112,7 +136,8 @@ export const SIZE_PER_INCH = 0.06;
 export const SIZE_PER_LB = 0.006;
 export const SIZE_MAX_DROP = 0.6;
 
-export type FeatureKind = "skill" | "usage";
+// "body" = his build (e.g. a bell-cow's weight): neither skill nor usage.
+export type FeatureKind = "skill" | "usage" | "body";
 
 /** One feature's reading for one prospect. */
 export interface Feature {
@@ -152,6 +177,10 @@ export interface BucketRecipe {
    *  still be his top match, shown with a "?", but it never wins a near tie.
    *  WR X needs in-app press reps (the user: press is what makes an X). */
   requires?: { feature: string; minN: number; why: string };
+  /** Bars he has to clear. Each gate cuts the match by up to `maxCut` (at a
+   *  fit of 0), in proportion to how far short he falls; a gate feature that's
+   *  missing cuts nothing. RB Three-down gates on hands and pass protection. */
+  gates?: readonly { feature: string; maxCut: number }[];
 }
 
 export interface RoleMatch {
@@ -179,7 +208,7 @@ export interface RoleFit {
   hybrid: RoleKey | null;
   /** One per bucket, in ROLES order. */
   matches: RoleMatch[];
-  /** VERSATILE_PCT+ in two or more buckets. */
+  /** The position's VERSATILE_RULES entry (always false at RB and QB), else VERSATILE_PCT+ in two or more buckets. */
   versatile: boolean;
   /** The bucket his usage alone points to; null without usage data. */
   usedAs: RoleKey | null;
@@ -297,11 +326,19 @@ export function scoreBucket(recipe: BucketRecipe, features: FeatureSet, heightIn
     .sort((a, b) => Math.abs(b.pull) - Math.abs(a.pull))
     .slice(0, 3)
     .map(({ f, pull }) => `${pull > 0 ? "+" : "−"} ${f.label}: ${f.display}`);
+  let gate = 1;
+  for (const g of recipe.gates ?? []) {
+    const f = features[g.feature];
+    if (!f) continue;
+    const cut = g.maxCut * (1 - f.fit);
+    gate *= 1 - cut;
+    if (cut >= 0.03) drivers.push(`− ${f.label}: ${f.display} (−${Math.round(cut * 100)}%)`);
+  }
   const req = recipe.requires;
   const proven = !req || (features[req.feature]?.n ?? 0) >= req.minN;
   return {
     role: recipe.role,
-    pct: Math.round(100 * raw * (1 - drop)),
+    pct: Math.round(100 * raw * gate * (1 - drop)),
     sizeDrop: drop,
     sizeNote: size.short ? `${size.short}${elite ? " (elite at the core skills: kept most)" : ""}` : null,
     drivers,
@@ -340,6 +377,16 @@ export interface FitInputs {
   sample: { n: number; unit: string };
   /** Sample sizes at which confidence turns medium and high. */
   confidenceAt: { medium: number; high: number };
+}
+
+function isVersatile(pos: RolePos, matches: readonly RoleMatch[]): boolean {
+  const rule = VERSATILE_RULES[pos];
+  if (rule === null) return false;
+  if (!rule) return matches.filter((m) => m.pct >= VERSATILE_PCT).length >= 2;
+  return rule.roles.every((k) => {
+    const m = matches.find((x) => x.role === k);
+    return m != null && m.proven && m.pct > rule.above;
+  });
 }
 
 export function buildRoleFit(inp: FitInputs): RoleFit {
@@ -382,7 +429,7 @@ export function buildRoleFit(inp: FitInputs): RoleFit {
     best: best.role,
     hybrid: hybrid?.role ?? null,
     matches,
-    versatile: matches.filter((m) => m.pct >= VERSATILE_PCT).length >= 2,
+    versatile: isVersatile(inp.pos, matches),
     usedAs: skillOnly ? null : usedAsRole(inp.recipes, inp.features, order),
     confidence: n >= inp.confidenceAt.high ? "high" : n >= inp.confidenceAt.medium ? "medium" : "low",
     sample: inp.sample,
@@ -430,7 +477,7 @@ export function roleFitTooltip(fit: RoleFit): string {
   if (best.sizeNote) lines.push(`Size: ${best.sizeNote} → −${Math.round(best.sizeDrop * 100)}%`);
   for (const m of fit.matches) if (m.pendingWhy && (m.role === fit.best || m.role === fit.hybrid)) lines.push(`${roleInfo(m.role).label}?: ${m.pendingWhy}`);
   if (fit.usedAs && fit.usedAs !== fit.best) lines.push(`Used as: ${roleInfo(fit.usedAs).label}`);
-  if (fit.versatile) lines.push(`Versatile: ${VERSATILE_PCT}%+ in ${fit.matches.filter((m) => m.pct >= VERSATILE_PCT).length} roles`);
+  if (fit.versatile) lines.push(`Versatile: ${versatileRuleText(fit.pos)}`);
   lines.push(`Confidence: ${confidenceLabel(fit.confidence)} (${fit.sample.n} ${fit.sample.unit})${fit.skillOnly ? " · skill only, no in-app alignment" : ""}`);
   return lines.join("\n");
 }

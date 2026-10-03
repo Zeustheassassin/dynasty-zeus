@@ -13,10 +13,10 @@ const routes = (n: number, open: number) => Array.from({ length: n }, (_, i) => 
 const passBlocks = (n: number, won: number) => Array.from({ length: n }, (_, i) => play({ run_type: "pass_block", success: i < won }));
 
 // League rates: explosive 6%, broken tackles 8%, stuffed 15%, pass pro 70%,
-// open on routes 60%, on longer routes 45%, catches 75%.
+// open on routes 60%, on longer routes 45%, drops 9% of targets.
 const LEAGUE = {
   explosive: { hits: 6, n: 100 }, btk: { hits: 8, n: 100 }, stuff: { hits: 15, n: 100 },
-  passPro: { hits: 70, n: 100 }, open: { hits: 60, n: 100 }, bigOpen: { hits: 45, n: 100 }, catch: { hits: 75, n: 100 },
+  passPro: { hits: 70, n: 100 }, open: { hits: 60, n: 100 }, bigOpen: { hits: 45, n: 100 }, drops: { hits: 9, n: 100 },
 };
 const slices = (s: Partial<Record<"all" | "loaded" | "zone" | "gap", [number, number]>>): RBRoleInputs["slices"] => ({
   all: { ae: s.all?.[0] ?? 0, n: s.all?.[1] ?? 100 },
@@ -52,6 +52,41 @@ describe("RB role buckets", () => {
     const plays = runs(80, "outside_zone").map((p, i) => ({ ...p, explosive_play: i < 16, run_stuff: i >= 60 }));
     const f = fit(plays, slices({ all: [0, 80], zone: [0, 80], gap: [0, 0] }))!;
     expect(matchFor(f, "big_play")!.pct).toBe(Math.max(...f.matches.map((m) => m.pct)));
+  });
+
+  // A Jadan Baugh-like back: wins on zone and gap runs, 0 drops on 13 targets
+  // (3 of them uncatchable, not drops), wins 22 of 24 pass blocks, 231 lb,
+  // and his college barely used him on passing downs.
+  const targets = (n: number, caught: number, drops: number) => Array.from({ length: n }, (_, i) =>
+    play({ run_type: "route", targeted: true, was_open: true, route_type: "flats", success: i < caught ? true : i < caught + drops ? false : null }));
+  const workhorse = (hands = targets(13, 10, 0), blocks = passBlocks(24, 22)) =>
+    [...runs(55, "inside_zone"), ...runs(48, "inside_man_gap"), ...hands, ...blocks];
+  const WORKHORSE_SLICES = slices({ all: [12, 103], zone: [12, 55], gap: [10, 48] });
+
+  it("makes a big back who runs well in both schemes, has no drops and blocks decently a Three-down back, whatever his college usage", () => {
+    const f = fit(workhorse(), WORKHORSE_SLICES, 73, 231)!;
+    expect(f.best).toBe("three_down");
+    expect(matchFor(f, "three_down")!.pct).toBeGreaterThanOrEqual(75);
+    expect(f.features.passGame!.fit).toBe(0); // 26% passing-down snaps: no credit, and none needed
+  });
+
+  it("cuts Three-down for drops and for poor pass protection, but not for uncatchable balls", () => {
+    const pct = (plays: RBPlay[]) => matchFor(fit(plays, WORKHORSE_SLICES, 73, 231)!, "three_down")!.pct;
+    const clean = pct(workhorse());
+    expect(pct(workhorse(targets(13, 13, 0)))).toBe(clean);          // 3 more catches instead of uncatchables: same
+    expect(pct(workhorse(targets(13, 7, 3)))).toBeLessThan(clean - 10); // 3 drops
+    expect(pct(workhorse(undefined, passBlocks(24, 14)))).toBeLessThan(clean - 10); // 58% pass pro
+  });
+
+  it("doesn't make an average runner a workhorse just for clearing the bars", () => {
+    const f = fit(workhorse(), slices({ all: [0, 103], zone: [0, 55], gap: [0, 48] }), 72, 215)!;
+    expect(matchFor(f, "three_down")!.pct).toBeLessThan(55);
+  });
+
+  it("doesn't cut a back with no targets charted for unknown hands", () => {
+    const f = fit([...runs(55, "inside_zone"), ...runs(48, "inside_man_gap"), ...passBlocks(24, 22)], WORKHORSE_SLICES, 73, 231)!;
+    expect(f.features.handsOk).toBeUndefined();
+    expect(matchFor(f, "three_down")!.drivers.join(" ")).not.toContain("Hands");
   });
 
   it("holds a 5'7\" 185 back out of Three-down", () => {

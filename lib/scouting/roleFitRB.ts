@@ -11,7 +11,7 @@
 // model the SRAE breakdown columns use, so a back isn't credited for running
 // the easier scheme. The rest are rates against the league's rate on the same
 // kind of play (explosive, broken tackle and stuffed runs; pass-block wins;
-// open and catch rates on routes).
+// open rate on routes; drops per target).
 import type { Prospect, RBPlay, RBRunType, ScoutingGame } from "../types";
 import { computeRBRoleSlices } from "./aboveExpected";
 import { parseHeightInches } from "./prospectAge";
@@ -41,7 +41,7 @@ const SCALE = {
   passPro: 3.6,
   recOpen: 2.6,
   bigOpen: 3.5,
-  catch: 3.8,
+  hands: 2.2,
 } as const;
 
 const RUN_TYPES: readonly RBRunType[] = ["outside_zone", "inside_zone", "outside_man_gap", "inside_man_gap"];
@@ -71,16 +71,35 @@ const RATES = {
   passPro:   (plays: RBPlay[]) => rateOf(plays.filter((pl) => pl.run_type === "pass_block" && pl.success !== null), (pl) => pl.success === true),
   open:      (plays: RBPlay[]) => rateOf(routesOf(plays).filter((pl) => pl.was_open !== null), (pl) => pl.was_open === true),
   bigOpen:   (plays: RBPlay[]) => rateOf(routesOf(plays).filter((pl) => pl.route_type === "big_boy_route" && pl.was_open !== null), (pl) => pl.was_open === true),
-  catch:     (plays: RBPlay[]) => rateOf(routesOf(plays).filter((pl) => pl.targeted), (pl) => pl.success === true),
+  // Drops per target (success false = dropped; null = not caught but not a
+  // drop, e.g. an uncatchable ball, so it doesn't count against his hands).
+  drops:     (plays: RBPlay[]) => rateOf(routesOf(plays).filter((pl) => pl.targeted), (pl) => pl.success === false),
 };
 type RateKey = keyof typeof RATES;
 
 /** His rate minus the league's, as a skill feature. */
-function rateFeature(label: string, his: Rate, league: Rate, prior: number, scale: number, unit: string): Feature {
+function rateFeature(label: string, his: Rate, league: Rate, prior: number, scale: number, unit: string, lowerIsBetter = false): Feature {
   const h = pctOf(his), l = pctOf(league);
-  const f = skillFeature(label, h != null && l != null ? h - l : null, his.n, prior, scale, unit);
+  const diff = h != null && l != null ? (lowerIsBetter ? l - h : h - l) : null;
+  const f = skillFeature(label, diff, his.n, prior, scale, unit);
   return h != null && l != null ? { ...f, display: `${h.toFixed(0)}% vs ${l.toFixed(0)}% league on ${his.n} ${unit}` } : f;
 }
+
+// A bell-cow's build: weight ramped from BUILD_LB[0] (0) to BUILD_LB[1] (1).
+// The user's call (2026-10-02): good size is part of what makes a workhorse,
+// not just a floor to clear.
+const BUILD_LB = [205, 225] as const;
+
+// For a workhorse, hands and pass protection are bars to clear, not skills to
+// max out (the user: "no drops" and "decently good at blocking"). A fit at or
+// above the bar reads 1; below it, in proportion. They gate Three-down rather
+// than add to it, so clearing them doesn't make an average runner a workhorse.
+// With no reps (no targets, no pass blocks) there's no bar reading, so no cut.
+const HANDS_BAR = 0.6;
+const PASS_PRO_BAR = 0.55;
+const GATE_MAX_CUT = 0.5;
+const meetsBar = (f: Feature | undefined, bar: number, label: string): Feature | undefined =>
+  f && (f.n ?? 0) > 0 ? { ...f, label, fit: Math.min(1, f.fit / bar) } : undefined;
 
 export interface RBRoleInputs {
   plays: RBPlay[];
@@ -109,8 +128,14 @@ export function rbFeatures(inp: RBRoleInputs): FeatureSet {
     passPro: rateFeature("Pass protection", mine.passPro, league.passPro, REC_PRIOR, SCALE.passPro, "pass blocks"),
     recOpen: rateFeature("Open on routes", mine.open, league.open, REC_PRIOR, SCALE.recOpen, "routes"),
     bigOpen: rateFeature("Open on longer routes", mine.bigOpen, league.bigOpen, REC_PRIOR, SCALE.bigOpen, "longer routes"),
-    catch: rateFeature("Catches", mine.catch, league.catch, REC_PRIOR, SCALE.catch, "targets"),
+    hands: rateFeature("Hands (drops)", mine.drops, league.drops, REC_PRIOR, SCALE.hands, "targets", true),
   };
+  f.handsOk = meetsBar(f.hands, HANDS_BAR, "Hands (no drops)");
+  f.passProOk = meetsBar(f.passPro, PASS_PRO_BAR, "Pass protection (decent is enough)");
+  if (inp.weightLb != null) {
+    const w = inp.weightLb;
+    f.build = { label: "Build", kind: "body", fit: Math.min(1, Math.max(0, (w - BUILD_LB[0]) / (BUILD_LB[1] - BUILD_LB[0]))), display: `${w} lb` };
+  }
   if (snaps > 0) {
     const pb = plays.filter((pl) => pl.run_type === "pass_block").length;
     f.passGame = usageFeature("Passing-down snaps (routes + pass pro)", (routes + pb) / snaps, 0.3, 0.55, `${Math.round(((routes + pb) / snaps) * 100)}% of snaps`);
@@ -129,14 +154,21 @@ export function rbFeatures(inp: RBRoleInputs): FeatureSet {
 
 export const RB_RECIPES: readonly BucketRecipe[] = [
   {
+    // The user's definition (2026-10-02): a good runner in both schemes with
+    // no drops, decent pass protection and good size is a workhorse. The
+    // match is his rushing and build, cut up to half each for falling short
+    // on hands or pass pro. How much his college used him on passing downs
+    // doesn't count ("Used as" still shows it), nor does route open rate.
     role: "three_down",
     ingredients: [
-      { feature: "srae", weight: 0.2, core: true },
-      { feature: "zoneAE", weight: 0.1 },
-      { feature: "gapAE", weight: 0.1 },
-      { feature: "passPro", weight: 0.15, core: true },
-      { feature: "recOpen", weight: 0.1 },
-      { feature: "passGame", weight: 0.35 },
+      { feature: "srae", weight: 0.5, core: true },
+      { feature: "zoneAE", weight: 0.15 },
+      { feature: "gapAE", weight: 0.15 },
+      { feature: "build", weight: 0.2 },
+    ],
+    gates: [
+      { feature: "handsOk", maxCut: GATE_MAX_CUT },
+      { feature: "passProOk", maxCut: GATE_MAX_CUT },
     ],
     size: { minHeightIn: 69, minWeightLb: 205 },
   },
@@ -165,7 +197,7 @@ export const RB_RECIPES: readonly BucketRecipe[] = [
     ingredients: [
       { feature: "recOpen", weight: 0.3, core: true },
       { feature: "bigOpen", weight: 0.15 },
-      { feature: "catch", weight: 0.2 },
+      { feature: "hands", weight: 0.2 },
       { feature: "routeShare", weight: 0.25 },
       { feature: "wideShare", weight: 0.1 },
     ],
