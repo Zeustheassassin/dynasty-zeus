@@ -81,8 +81,8 @@ describe("GET /api/injuries/espn", () => {
       {
         displayName: "Arizona Cardinals",
         injuries: [
-          { status: "Out", date: "2026-09-21T03:12Z", athlete: { displayName: "Some Runner", position: { abbreviation: "RB" }, team: { abbreviation: "ARI" } }, longComment: "x".repeat(2000) },
-          { status: "Active", date: "2026-09-20T00:00Z", athlete: { displayName: "Some Passer", position: { abbreviation: "QB" }, team: { abbreviation: "ARI" } } },
+          { status: "Out", date: "2026-09-21T03:12Z", athlete: { displayName: "Some Runner", position: { abbreviation: "RB" }, team: { abbreviation: "ARI" } }, longComment: "x".repeat(2000), shortComment: "Runner (ankle) has been ruled out for Sunday's game." },
+          { status: "Active", date: "2026-09-20T00:00Z", athlete: { displayName: "Some Passer", position: { abbreviation: "QB" }, team: { abbreviation: "ARI" } }, shortComment: "Passer completed 20 of 30 passes." },
           { status: "Out", athlete: { displayName: "A Kicker", position: { abbreviation: "K" }, team: { abbreviation: "ARI" } } },
           { athlete: { displayName: "No Status", position: { abbreviation: "WR" } } },
         ],
@@ -90,13 +90,14 @@ describe("GET /api/injuries/espn", () => {
     ],
   };
 
-  it("keeps only skill positions with a status, trimmed to what the overlay needs", async () => {
+  it("keeps only skill positions with a status, trimmed to what the overlay and Lineup Coach need", async () => {
     global.fetch = vi.fn(async () => new Response(JSON.stringify(espnPayload), { status: 200 })) as never;
     const { GET } = await importRoute();
     const body = await (await GET(req("/api/injuries/espn"))).json();
     expect(body.players).toEqual([
-      { name: "Some Runner", position: "RB", team: "ARI", status: "Out", date: "2026-09-21T03:12Z" },
-      { name: "Some Passer", position: "QB", team: "ARI", status: "Active", date: "2026-09-20T00:00Z" },
+      // The news note rides along only for designated players — "Active" rows' notes are stat lines.
+      { name: "Some Runner", position: "RB", team: "ARI", status: "Out", date: "2026-09-21T03:12Z", comment: "Runner (ankle) has been ruled out for Sunday's game." },
+      { name: "Some Passer", position: "QB", team: "ARI", status: "Active", date: "2026-09-20T00:00Z", comment: null },
     ]);
   });
 

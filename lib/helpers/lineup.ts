@@ -138,6 +138,10 @@ export interface SuggestedLineupInput {
    *  don't reliably populate per-player kickoff timestamps, so that
    *  fallback is used only when this isn't provided. */
   isLockedFn?: (id: string) => boolean;
+  /** Players to treat like an Out tag this week on top of their official
+   *  status — the user marked them out, or this week's ESPN note says they're
+   *  unlikely to play (see isAvailabilityExcluded in lineupAvailability.ts). */
+  isExcludedFn?: (id: string) => boolean;
 }
 
 export interface SuggestedLineupSwap {
@@ -172,24 +176,11 @@ export function computeSuggestedLineup(
   const { rosterPositions, starters, playerIds, players, scoreFn, hasKickoffData } = input;
   const rankScoreFn = input.rankScoreFn ?? scoreFn;
   const kickoffFn = input.kickoffFn ?? (() => null);
+  const isExcluded = (id: string, p: SleeperPlayer) =>
+    isInjuryExcludedFromLineup(p) || (input.isExcludedFn?.(id) ?? false);
   const myPlayerIds = playerIds ?? [];
   const used = new Set<string>();
   const initialLineup: LineupCoachRow[] = [];
-
-  const currentStarterRows: LineupCoachRow[] = rosterPositions.map((slot, index) => {
-    const starterId = String(starters?.[index] || "");
-    const starterPlayer = starterId ? players[starterId] : null;
-    return {
-      slot,
-      player: starterPlayer,
-      score: starterPlayer ? scoreFn(starterPlayer.player_id) : 0,
-      kickoffAt: starterPlayer ? kickoffFn(starterPlayer.player_id) : null,
-    };
-  });
-
-  const currentStarterIds = new Set(
-    currentStarterRows.map((r) => r.player?.player_id).filter((id): id is string => !!id)
-  );
 
   // Whether a player's own NFL game has already started (Live or Final) —
   // shared by the "can't be newly added" bench check below AND the "can't be
@@ -202,6 +193,32 @@ export function computeSuggestedLineup(
     const kickoffAt = kickoffFn(id);
     return kickoffAt != null && now >= kickoffAt;
   };
+
+  // What a player is expected to score in THIS lineup. A player the coach
+  // treats as out (Out/IR/Doubtful tag, marked out, ESPN "unlikely to play")
+  // counts as 0 until his game starts — a projection doesn't zero out when the
+  // news breaks, so otherwise benching him reads as a points LOSS and the
+  // swap's delta (and the League Overview dot) hides exactly the case that
+  // matters. Once his game has started the real result takes over.
+  const expectedScore = (id: string) => {
+    const p = players[id];
+    return p && isExcluded(id, p) && !hasGameStarted(id) ? 0 : scoreFn(id);
+  };
+
+  const currentStarterRows: LineupCoachRow[] = rosterPositions.map((slot, index) => {
+    const starterId = String(starters?.[index] || "");
+    const starterPlayer = starterId ? players[starterId] : null;
+    return {
+      slot,
+      player: starterPlayer,
+      score: starterPlayer ? expectedScore(starterPlayer.player_id) : 0,
+      kickoffAt: starterPlayer ? kickoffFn(starterPlayer.player_id) : null,
+    };
+  });
+
+  const currentStarterIds = new Set(
+    currentStarterRows.map((r) => r.player?.player_id).filter((id): id is string => !!id)
+  );
 
   // Sleeper locks a player's roster slot at their own kickoff — once their
   // game has started, they can stay wherever they already are but can't be
@@ -246,7 +263,7 @@ export function computeSuggestedLineup(
       initialLineup.push({
         slot,
         player: lockedPlayer,
-        score: scoreFn(lockedPlayer.player_id),
+        score: expectedScore(lockedPlayer.player_id),
         kickoffAt: kickoffFn(lockedPlayer.player_id),
       });
       return;
@@ -258,15 +275,15 @@ export function computeSuggestedLineup(
         .filter((id) => !used.has(id) && !isLockedOut(id))
         .map((id) => ({ id, p: players[id] }))
         .filter(({ p }) => p && eligible.includes(p.position))
-        .filter(({ p }) => allowInjured || !isInjuryExcludedFromLineup(p))
+        .filter(({ id, p }) => allowInjured || !isExcluded(id, p))
         .sort((a, b) => rankScoreFn(b.id) - rankScoreFn(a.id));
-    // Don't recommend an Out/IR/Doubtful player over a healthy one even if a
-    // stale projection still ranks them higher — but rather than leave a
-    // slot empty, fall back to them when no healthy eligible player exists.
+    // Don't recommend an Out/IR/Doubtful (or marked-out) player over a healthy
+    // one even if a stale projection still ranks them higher — but rather than
+    // leave a slot empty, fall back to them when no healthy eligible player exists.
     const best = candidates(false)[0] ?? candidates(true)[0];
     if (best) {
       used.add(best.id);
-      initialLineup.push({ slot, player: best.p, score: scoreFn(best.id), kickoffAt: kickoffFn(best.id) });
+      initialLineup.push({ slot, player: best.p, score: expectedScore(best.id), kickoffAt: kickoffFn(best.id) });
     } else {
       initialLineup.push({ slot, player: null, score: 0, kickoffAt: null });
     }
@@ -283,7 +300,7 @@ export function computeSuggestedLineup(
   const benchedPool: SleeperPlayer[] = currentStarterRows
     .map((r) => r.player)
     .filter((p): p is SleeperPlayer => !!p && !newStarterIds.has(p.player_id))
-    .sort((a, b) => scoreFn(a.player_id) - scoreFn(b.player_id));
+    .sort((a, b) => expectedScore(a.player_id) - expectedScore(b.player_id));
 
   const swaps: SuggestedLineupSwap[] = lineup
     .map(({ slot, player, score }) => {
@@ -296,7 +313,7 @@ export function computeSuggestedLineup(
       let matchIdx = benchedPool.findIndex((p) => eligible.includes(p.position));
       if (matchIdx === -1 && benchedPool.length > 0) matchIdx = 0;
       const replaced = matchIdx >= 0 ? benchedPool.splice(matchIdx, 1)[0] : null;
-      const replacedScore = replaced ? scoreFn(replaced.player_id) : 0;
+      const replacedScore = replaced ? expectedScore(replaced.player_id) : 0;
       return { slot, suggested: player, current: replaced, delta: score - replacedScore };
     })
     .filter((s): s is SuggestedLineupSwap => !!s);

@@ -6,7 +6,14 @@ import { logger } from "../../lib/logger";
 import { getLocalStorageItem, setLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 import { useDebouncedKeyedEffect } from "@/lib/hooks/useDebouncedKeyedEffect";
 import { addDays, TRADE_DISCARD_DAYS } from "@/lib/helpers/dispositions";
-import type { AssetDisposition, LeagueAssetDispositions, LeagueExpiringBlocks } from "@/lib/types";
+import { lineupWeekKey } from "@/lib/helpers/lineupAvailability";
+import type {
+  AssetDisposition,
+  LeagueAssetDispositions,
+  LeagueExpiringBlocks,
+  LineupAvailabilityOverride,
+  LineupAvailabilityOverrides,
+} from "@/lib/types";
 
 const log = logger("app/hooks/usePlayerAnnotations");
 
@@ -31,6 +38,11 @@ export function usePlayerAnnotations(supabaseUser: SupabaseUser | null) {
   );
   const [discardedTrades, setDiscardedTrades] = useState<LeagueExpiringBlocks>(() =>
     getLocalStorageItem<LeagueExpiringBlocks>("discardedFinderTrades_v1", {})
+  );
+  // The user's per-week Out/In calls for the Lineup Coach, in every league
+  // (lineup_availability_overrides). See LineupAvailabilityOverrides in lib/types.ts.
+  const [lineupAvailabilityOverrides, setLineupAvailabilityOverrides] = useState<LineupAvailabilityOverrides>(() =>
+    getLocalStorageItem<LineupAvailabilityOverrides>("lineupAvailability_v1", {})
   );
 
   // Ref so useCallback closures always read the latest supabaseUser without stale captures
@@ -177,6 +189,46 @@ export function usePlayerAnnotations(supabaseUser: SupabaseUser | null) {
     );
   }, [setFinderTempBlock]);
 
+  // Sets (or clears, when value is null) the user's call on a player for one
+  // NFL week. Only that week's entries are kept locally — older weeks no
+  // longer apply to anything.
+  const setLineupAvailabilityOverride = useCallback((
+    season: string,
+    week: number,
+    playerId: string,
+    value: LineupAvailabilityOverride | null,
+  ) => {
+    const sbUser = supabaseUserRef.current;
+    const weekKey = lineupWeekKey(season, week);
+    setLineupAvailabilityOverrides((prev) => {
+      const weekMap = { ...(prev[weekKey] ?? {}) };
+      if (value === null) delete weekMap[playerId];
+      else weekMap[playerId] = value;
+      const updated = { [weekKey]: weekMap };
+      setLocalStorageItem("lineupAvailability_v1", updated);
+      return updated;
+    });
+    if (sbUser) {
+      const seasonNum = Number(season);
+      if (value === null) {
+        supabase.from("lineup_availability_overrides").delete()
+          .eq("user_id", sbUser.id).eq("player_id", playerId).eq("season", seasonNum).eq("week", week)
+          .then(
+            ({ error }) => { if (error) log.error("lineup_availability_overrides delete failed", { err: error.message }); },
+            (err: unknown) => log.error("lineup_availability_overrides delete failed", { err: String(err) }),
+          );
+      } else {
+        supabase.from("lineup_availability_overrides")
+          .upsert({ user_id: sbUser.id, player_id: playerId, season: seasonNum, week, availability: value },
+                  { onConflict: "user_id,player_id,season,week" })
+          .then(
+            ({ error }) => { if (error) log.error("lineup_availability_overrides upsert failed", { err: error.message }); },
+            (err: unknown) => log.error("lineup_availability_overrides upsert failed", { err: String(err) }),
+          );
+      }
+    }
+  }, []);
+
   return {
     leagueNotes,
     setLeagueNotes,
@@ -194,6 +246,9 @@ export function usePlayerAnnotations(supabaseUser: SupabaseUser | null) {
     discardedTrades,
     setDiscardedTrades,
     discardFinderTrade,
+    lineupAvailabilityOverrides,
+    setLineupAvailabilityOverrides,
+    setLineupAvailabilityOverride,
     saveLeagueNote,
     savePlayerNote,
     handleSetAssetDisposition,

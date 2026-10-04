@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { ESPN_INJURIES_URL } from '../../../../lib/constants';
 import { checkRateLimit } from '../../../../lib/rateLimit';
 import { logger } from '../../../../lib/logger';
+import { cleanEspnComment } from '../../../../lib/helpers/espnInjuryDetail';
 
 const log = logger('api/injuries/espn');
 
@@ -9,7 +10,9 @@ const log = logger('api/injuries/espn');
 // app caches for up to 24h), so the Gameday Hub uses it to catch Sunday-morning
 // Out/Doubtful/inactive changes. The raw payload is ~9 MB (long comments, links,
 // headshots) — over Next's 2 MB Data Cache item limit — so it's trimmed to
-// skill positions here and cached in module memory instead.
+// skill positions here and cached in module memory instead. The one-line news
+// note rides along for designated players only (the Lineup Coach reads it for
+// "unlikely to play" calls); "Active" rows' notes are mostly stat lines.
 
 const CACHE_MS = 5 * 60_000;
 const SKILL_POSITIONS = new Set(['QB', 'RB', 'WR', 'TE']);
@@ -22,6 +25,7 @@ interface EspnInjuryAthlete {
 interface EspnInjury {
   status?: string;
   date?: string;
+  shortComment?: string;
   athlete?: EspnInjuryAthlete;
 }
 interface EspnInjuryTeam {
@@ -34,6 +38,7 @@ export interface InjuryRow {
   team: string;
   status: string;
   date: string | null;
+  comment: string | null;
 }
 
 let cache: { at: number; players: InjuryRow[] } | null = null;
@@ -67,6 +72,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           team: athlete.team?.abbreviation ?? '',
           status: injury.status,
           date: injury.date ?? null,
+          comment: /^active$/i.test(injury.status) ? null : cleanEspnComment(injury.shortComment),
         });
       }
     }

@@ -28,6 +28,11 @@ import {
   getGamedayPollPlan,
   getCurrentNflWeek,
   PROJECTION_REFRESH_MS,
+  buildInjuryNewsFlags,
+  getLineupAvailabilityChecks,
+  getLatePivotRisks,
+  lineupWeekKey,
+  type LineupAvailability,
 } from "../../lib/helpers";
 import { projectRookiesByRoster } from "../../lib/helpers/rookieProjection";
 import { useLatestRequest } from "../../hooks/useLatestRequest";
@@ -73,6 +78,7 @@ import type {
   RosterDirectionProfile, DynamicPickValue, RookieBoardPlayer, FcTrendEntry,
   StandingRow,
   AssetDisposition, LeagueAssetDispositions, LeagueExpiringBlocks,
+  LeagueLineupStatus, LineupAvailabilityOverride, LineupAvailabilityOverrides,
 } from "../../lib/types";
 
 // -------------------------
@@ -121,6 +127,7 @@ export function useAppState() {
     toggleIgnoredOwner,
     noInterestPlayers, setNoInterestPlayers, setNoInterest,
     discardedTrades, setDiscardedTrades, discardFinderTrade,
+    lineupAvailabilityOverrides, setLineupAvailabilityOverrides, setLineupAvailabilityOverride,
     saveLeagueNote,
     savePlayerNote,
     handleSetAssetDisposition,
@@ -270,7 +277,7 @@ const [standings, setStandings] = useState<StandingRow[]>([]);
 
   // Fresh-during-game layers over the base data: live stat lines (per-stat pace)
   // and ESPN's injury report overlaid on Sleeper's up-to-24h-old players map.
-  const { liveStatsByPlayerId, loadLiveStats, loadInjuries, gamedayPlayers } = useGamedayLiveData(players);
+  const { liveStatsByPlayerId, loadLiveStats, loadInjuries, injuries, gamedayPlayers } = useGamedayLiveData(players);
 
   // Declared after useSleeperUser (needs `user`) and useProjections/useNflSchedule
   // (needs their live output): the scored dashboard cards are derived from raw
@@ -518,8 +525,29 @@ useEffect(() => {
         setLocalStorageItem("personalRankings_v1", ids);
       }
     });
+  // 11. Lineup Coach Out/In calls (lineup_availability_overrides) — per week, every league.
+  // Server wins once it answers: a call cleared on another device must clear
+  // here too. If the load fails (e.g. migration 061 not applied yet) the
+  // localStorage copy stays in charge.
+  supabase
+    .from("lineup_availability_overrides")
+    .select("player_id, season, week, availability")
+    .eq("user_id", supabaseUser.id)
+    .then(({ data, error }) => {
+      if (cancelled) return;
+      if (error) { log.error("lineup_availability_overrides load failed", { err: error.message }); return; }
+      const map: LineupAvailabilityOverrides = {};
+      (data ?? []).forEach((row: { player_id: string; season: number; week: number; availability: string }) => {
+        if (row.availability !== "OUT" && row.availability !== "IN") return;
+        const key = lineupWeekKey(row.season, row.week);
+        if (!map[key]) map[key] = {};
+        map[key][String(row.player_id)] = row.availability as LineupAvailabilityOverride;
+      });
+      setLineupAvailabilityOverrides(map);
+      setLocalStorageItem("lineupAvailability_v1", map);
+    });
   return () => { cancelled = true; };
-}, [supabaseUser, loadNotes, setSupabaseMessage, setLeagueNotes, setLeaguePlayerTags, setPlayerNotes, setPersonalOrdering, setNoInterestPlayers, setDiscardedTrades]);
+}, [supabaseUser, loadNotes, setSupabaseMessage, setLeagueNotes, setLeaguePlayerTags, setPlayerNotes, setPersonalOrdering, setNoInterestPlayers, setDiscardedTrades, setLineupAvailabilityOverrides]);
 
 // Load network consensus draft data for the current draft year. Drives
 // predictedDraftPicks once draftCount >= CONSENSUS_MIN_DRAFTS; until then
@@ -604,6 +632,7 @@ const signOut = async () => {
   setLeaguePlayerTags({});
   setNoInterestPlayers({});
   setDiscardedTrades({});
+  setLineupAvailabilityOverrides({});
   setPersonalOrdering([]);
   // Clear localStorage user-specific data so next user starts fresh (shared-
   // computer sign-out/sign-in must not leak the previous user's tags, notes,
@@ -620,6 +649,7 @@ const signOut = async () => {
   removeLocalStorageItem("leaguePlayerTags_v1");
   removeLocalStorageItem("noInterestPlayers_v1");
   removeLocalStorageItem("discardedFinderTrades_v1");
+  removeLocalStorageItem("lineupAvailability_v1");
   removeLocalStorageItem("ignoredOwnerIds");
   removeLocalStorageItem("personalRankings_v1");
   removeLocalStorageItem("committedSimRows_v2");
@@ -1390,12 +1420,15 @@ const saveSnapshotNow = async () => {
   useEffect(() => {
     if (gamedayLive && nflSeason) loadLiveStats(nflSeason, gamedayWeek);
   }, [gamedayLive, nflSeason, gamedayWeek, loadLiveStats]);
-  // ESPN injury report: once on entering the hub, then every 10 minutes while it's
-  // open (statuses move around inactives time, not second to second).
+  // ESPN injury report: loaded all regular season, not just in the Gameday Hub —
+  // the Lineup Coach and the League Overview dot read its fresher statuses and
+  // news notes too. Every 10 minutes while the tab is visible (statuses move
+  // around inactives time, not second to second; the route caches 5 minutes).
+  const injuryFeedActive = gamedayHubActive || currentNflWeek > 0;
   useEffect(() => {
-    if (gamedayHubActive) loadInjuries();
-  }, [gamedayHubActive, loadInjuries]);
-  useVisibilityPolling(() => loadInjuries(), gamedayHubActive ? 10 * 60_000 : null);
+    if (injuryFeedActive) loadInjuries();
+  }, [injuryFeedActive, loadInjuries]);
+  useVisibilityPolling(() => loadInjuries(), injuryFeedActive ? 10 * 60_000 : null);
 
   // Cross-league: one request per league, so poll slower and only leagues that
   // actually have a live starter (either side) — see POLL_LIVE_DASHBOARD_MS.
@@ -1830,6 +1863,29 @@ const saveSnapshotNow = async () => {
     ) as Record<string, DynamicPickValue>;
   }, [selectedLeague?.league_id, selectedLeague?.settings?.playoff_teams, selectedLeagueSimulation, allPicks, pickFcValues, rosters]);
 
+  // What the Lineup Coach knows beyond Sleeper's player map: ESPN's fresher
+  // statuses (gamedayPlayers), this week's ESPN news reads, and the user's own
+  // Out/In calls for the current week. One object so the Starters tab and the
+  // status dot below can never read different inputs.
+  const lineupSeason = nflState?.season ?? null;
+  const injuryNewsFlags = useMemo(() => buildInjuryNewsFlags(players, injuries), [players, injuries]);
+  const currentWeekAvailability = useMemo(
+    () => (lineupSeason && currentNflWeek > 0
+      ? lineupAvailabilityOverrides[lineupWeekKey(lineupSeason, currentNflWeek)] ?? {}
+      : {}),
+    [lineupAvailabilityOverrides, lineupSeason, currentNflWeek]
+  );
+  const setCurrentWeekAvailability = useCallback((playerId: string, value: LineupAvailabilityOverride | null) => {
+    if (!lineupSeason || currentNflWeek <= 0) return;
+    setLineupAvailabilityOverride(lineupSeason, currentNflWeek, playerId, value);
+  }, [lineupSeason, currentNflWeek, setLineupAvailabilityOverride]);
+  const lineupAvailability = useMemo((): LineupAvailability => ({
+    players: gamedayPlayers,
+    news: injuryNewsFlags,
+    overrides: currentWeekAvailability,
+    setOverride: setCurrentWeekAvailability,
+  }), [gamedayPlayers, injuryNewsFlags, currentWeekAvailability, setCurrentWeekAvailability]);
+
   // Per-league "is this week's lineup already optimal" status for the League
   // Overview status dot. Reuses the exact same greedy fill (computeSuggestedLineup)
   // the Starters tab runs — never a separate calculation. Scoring ALWAYS goes
@@ -1866,7 +1922,7 @@ const saveSnapshotNow = async () => {
     // a "regular season, week 0" state leaves the schedule empty), but gating on the shared
     // value makes the intent explicit instead of leaving it to an indirect guard.
     const isInSeason = currentNflWeek > 0;
-    const status: Record<string, { isOptimal: boolean; swapCount: number; delta: number } | null> = {};
+    const status: Record<string, LeagueLineupStatus | null> = {};
     if (
       !isInSeason ||
       !user?.user_id ||
@@ -1886,6 +1942,11 @@ const saveSnapshotNow = async () => {
       const row = projectionBySleeperId.get(String(id));
       return row ? getProjectionKickoffAt(row) : null;
     };
+    // Same Out/In calls, ESPN statuses and news reads as the Starters tab.
+    const { players: lineupPlayers } = lineupAvailability;
+    const { isExcludedFn, isRiskFn, isUnavailableFn } = getLineupAvailabilityChecks(lineupAvailability);
+    const scheduledKickoff = (id: string) =>
+      resolveGameState(lineupPlayers[id]?.team, scheduleByTeam, kickoffFn(id)).kickoffAt;
 
     Object.values(leagueOverviewData).forEach(({ league, rosters: leagueRosters }) => {
       const isSelectedLeague = league.league_id === selectedLeague?.league_id;
@@ -1908,30 +1969,41 @@ const saveSnapshotNow = async () => {
       // player whose real-world game has already started can't legally be
       // suggested as a swap-in for this dot either.
       const isLockedFn = (id: string) => {
-        const player = players[id];
+        const player = lineupPlayers[id];
         const fallbackKickoffAt = getProjectionKickoffAt(projectionBySleeperId.get(String(id)));
         return resolveGameState(player?.team, scheduleByTeam, fallbackKickoffAt).state !== "Upcoming";
       };
 
-      const { swaps, currentLineupScore, suggestedLineupScore } = computeSuggestedLineup({
+      const { lineup, swaps, currentLineupScore, suggestedLineupScore } = computeSuggestedLineup({
         rosterPositions,
         starters: myRoster.starters,
         playerIds: eligiblePlayerIds,
-        players,
+        players: lineupPlayers,
         scoreFn,
         kickoffFn,
         hasKickoffData,
         isLockedFn,
+        isExcludedFn,
+      });
+      const pivotRisks = getLatePivotRisks({
+        lineup,
+        playerIds: eligiblePlayerIds,
+        players: lineupPlayers,
+        scoreFn,
+        kickoffFn: scheduledKickoff,
+        isRiskFn,
+        isUnavailableFn,
       });
       status[league.league_id] = {
         isOptimal: swaps.length === 0,
         swapCount: swaps.length,
         delta: Math.max(0, suggestedLineupScore - currentLineupScore),
+        pivotRiskCount: pivotRisks.filter((risk) => risk.pivots.length === 0).length,
       };
     });
 
     return status;
-  }, [leagueOverviewData, leagueOverviewLoaded, projectionData, projectionLoaded, players, scheduleByTeam, loadingSchedule, roster, currentNflWeek, user?.user_id, selectedLeague?.league_id]);
+  }, [leagueOverviewData, leagueOverviewLoaded, projectionData, projectionLoaded, lineupAvailability, scheduleByTeam, loadingSchedule, roster, currentNflWeek, user?.user_id, selectedLeague?.league_id]);
 
   const selectedLeagueMateProfiles = useMemo((): LeagueMateView[] => {
     if (!selectedLeague || !rosters.length || !user?.user_id) return [];
@@ -3336,6 +3408,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     leagueOverviewError,
     leagueOverviewUpdatedAt,
     leagueLineupStatus,
+    lineupAvailability,
     selectedLeagueMateProfilesView,
     ignoredOwnerIds,
     toggleIgnoredOwner,

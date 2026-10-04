@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { applyInjuryOverrides, mapEspnInjuryStatus, type EspnInjuryEntry } from "@/lib/helpers/injuryOverrides";
+import { applyInjuryOverrides, mapEspnInjuryStatus, matchEspnInjuryEntries, type EspnInjuryEntry } from "@/lib/helpers/injuryOverrides";
 import type { SleeperPlayer } from "@/lib/types";
 
 const mk = (id: string, name: string, position: string, team: string, injury: string | null = null): SleeperPlayer =>
@@ -80,5 +80,29 @@ describe("applyInjuryOverrides", () => {
     expect(applyInjuryOverrides(players, [entry({ name: "Nobody Known" })])).toBe(players);
     const already = { "1": mk("1", "Some Runner", "RB", "ARI", "Out") };
     expect(applyInjuryOverrides(already, [entry({})])).toBe(already);
+  });
+});
+
+describe("matchEspnInjuryEntries", () => {
+  const players = {
+    "1": mk("1", "Some Runner", "RB", "ARI"),
+    "2": mk("2", "Twin Name", "WR", "DAL"),
+    "3": mk("3", "Twin Name", "WR", "SF"),
+  };
+
+  it("pairs an entry with its one matching player", () => {
+    const matches = matchEspnInjuryEntries(players, [entry({ comment: "note" })]);
+    expect(matches).toHaveLength(1);
+    expect(matches[0].player.player_id).toBe("1");
+    expect(matches[0].entry.comment).toBe("note");
+  });
+
+  it("uses the team to separate players who share a name, and drops a still-ambiguous one", () => {
+    expect(matchEspnInjuryEntries(players, [entry({ name: "Twin Name", position: "WR", team: "SF" })])[0].player.player_id).toBe("3");
+    expect(matchEspnInjuryEntries(players, [entry({ name: "Twin Name", position: "WR", team: "" })])).toEqual([]);
+  });
+
+  it("drops an entry whose position disagrees", () => {
+    expect(matchEspnInjuryEntries(players, [entry({ position: "WR" })])).toEqual([]);
   });
 });

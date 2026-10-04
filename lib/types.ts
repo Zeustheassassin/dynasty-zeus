@@ -509,6 +509,17 @@ export interface LineupCoachRow {
   kickoffAt: number | null;
 }
 
+/** League Overview status dot: how far the current lineup is from the Lineup
+ *  Coach's suggestion (useAppState's leagueLineupStatus). */
+export interface LeagueLineupStatus {
+  isOptimal: boolean;
+  swapCount: number;
+  delta: number;
+  /** Risky starters (Questionable etc.) whose inactive call lands after every
+   *  bench player who could replace them has kicked off. */
+  pivotRiskCount: number;
+}
+
 export interface GamedayLineupRow {
   slot: string;
   playerId: string;
@@ -902,6 +913,14 @@ export type LeagueAssetDispositions = Record<string, Record<string, AssetDisposi
 // see buildTradeFingerprint in components/tradeHub/shared.ts). See
 // lib/helpers/dispositions.ts's isBlockActive for how expiry is checked.
 export type LeagueExpiringBlocks = Record<string, Record<string, string>>;
+
+// The user's own call on a player for one NFL week, applied in every league
+// (lineup_availability_overrides). OUT = keep him out of suggested lineups;
+// IN = start him anyway (overrides a "likely out" ESPN note). No stored value
+// means "go by the injury report". See lib/helpers/lineupAvailability.ts.
+export type LineupAvailabilityOverride = "OUT" | "IN";
+// "season:week" (lineupWeekKey) -> player_id -> override.
+export type LineupAvailabilityOverrides = Record<string, Record<string, LineupAvailabilityOverride>>;
 
 // ── Trade attempts ────────────────────────────────────────────
 

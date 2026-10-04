@@ -25,8 +25,9 @@ import type {
   LeagueHubTab, ProjectionRow, SimulationTeamRow,
   LeagueMgmtData, CommPaymentsData, TradePartnerRanking,
   AssetDisposition, LeagueAssetDispositions, LeagueExpiringBlocks,
-  TeamGameState,
+  TeamGameState, LeagueLineupStatus,
 } from "../../lib/types";
+import type { LineupAvailability } from "../../lib/helpers/lineupAvailability";
 import type { AnnotatedTrade } from "../../hooks/useUserTrades";
 import type { PlayerUsage } from "../../hooks/usePlayerStats";
 import type { DashboardAlert, LeagueTransaction, InjuryReportPlayer } from "../../components/AlertsPage/alertsPageHelpers";
@@ -128,7 +129,8 @@ interface HubRouterProps {
   leagueOverviewLoaded: boolean;
   leagueOverviewError: string | null;
   leagueOverviewUpdatedAt: number | null;
-  leagueLineupStatus: Record<string, { isOptimal: boolean; swapCount: number; delta: number } | null>;
+  leagueLineupStatus: Record<string, LeagueLineupStatus | null>;
+  lineupAvailability: LineupAvailability;
   selectedLeagueMateProfilesView: LeagueMateView[];
   ignoredOwnerIds: string[];
   toggleIgnoredOwner: (ownerId: string) => void;
@@ -322,6 +324,7 @@ export function HubRouter({
   leagueNotes, activityTransactions, leagueOverviewData, leagueOverviewLoaded, leagueOverviewError,
   leagueOverviewUpdatedAt,
   leagueLineupStatus,
+  lineupAvailability,
   selectedLeagueMateProfilesView, ignoredOwnerIds, toggleIgnoredOwner,
   freeAgents, loadingCalcValues, calcValuesError, loadingDraftRefresh, rookies, draftedPlayerIds,
   loadRoster, loadRedraftValues, loadUserTrades, loadUserExposure, loadDraftScout,
@@ -478,6 +481,7 @@ export function HubRouter({
             leagueOverviewError={leagueOverviewError}
             leagueOverviewUpdatedAt={leagueOverviewUpdatedAt}
             leagueLineupStatus={leagueLineupStatus}
+            lineupAvailability={lineupAvailability}
             selectedLeagueMateProfilesView={selectedLeagueMateProfilesView}
             ignoredOwnerIds={ignoredOwnerIds}
             toggleIgnoredOwner={toggleIgnoredOwner}

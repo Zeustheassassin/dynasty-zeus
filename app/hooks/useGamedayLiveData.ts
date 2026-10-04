@@ -7,7 +7,8 @@ import type { SleeperPlayer } from "../../lib/types";
 /**
  * The two fresh-during-game feeds the Gameday Hub layers on top of its base data:
  *  - live cumulative stat lines (per-stat pace), and
- *  - ESPN's injury report, overlaid onto Sleeper's up-to-24h-old players map.
+ *  - ESPN's injury report, overlaid onto Sleeper's up-to-24h-old players map
+ *    (`injuries` itself is returned too — the Lineup Coach reads its news notes).
  *
  * Both fail soft: a failed fetch keeps whatever was loaded before, and the
  * Gameday model already degrades to points-level pace / Sleeper's own status
@@ -45,5 +46,5 @@ export function useGamedayLiveData(players: Record<string, SleeperPlayer>) {
    *  (not `players`) to the Gameday builders. Same reference when nothing changed. */
   const gamedayPlayers = useMemo(() => applyInjuryOverrides(players, injuries), [players, injuries]);
 
-  return { liveStatsByPlayerId, liveStatsUpdatedAt, loadLiveStats, loadInjuries, gamedayPlayers };
+  return { liveStatsByPlayerId, liveStatsUpdatedAt, loadLiveStats, loadInjuries, injuries, gamedayPlayers };
 }

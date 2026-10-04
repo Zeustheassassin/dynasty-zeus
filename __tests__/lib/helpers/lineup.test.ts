@@ -531,4 +531,66 @@ describe("computeSuggestedLineup", () => {
     });
     expect(result.lineup.find((r) => r.slot === "RB")?.player?.player_id).toBe("rb1");
   });
+
+  // isExcludedFn: the user's "Out this week" call or an ESPN "unlikely to
+  // play" note — treated exactly like an Out tag.
+  it("benches a starter that isExcludedFn rules out, even with no injury tag", () => {
+    const result = computeSuggestedLineup({
+      rosterPositions: ["QB", "RB"],
+      starters: ["qb1", "rb2"],
+      playerIds: ["qb1", "rb1", "rb2"],
+      players,
+      scoreFn, // rb2 (15) outscores rb1 (10) — only the exclusion moves him
+      hasKickoffData: false,
+      isExcludedFn: (id) => id === "rb2",
+    });
+    expect(result.lineup.find((r) => r.slot === "RB")?.player?.player_id).toBe("rb1");
+    expect(result.swaps).toHaveLength(1);
+    expect(result.swaps[0].current?.player_id).toBe("rb2");
+  });
+
+  it("counts an excluded starter as 0 so the swap reads as a gain, not a loss", () => {
+    // rb2 still projects 15 (the projection doesn't zero out when the news
+    // breaks), but he won't play — swapping in rb1 (10) is worth +10, not −5.
+    const result = computeSuggestedLineup({
+      rosterPositions: ["RB"],
+      starters: ["rb2"],
+      playerIds: ["rb1", "rb2"],
+      players,
+      scoreFn,
+      hasKickoffData: false,
+      isExcludedFn: (id) => id === "rb2",
+    });
+    expect(result.currentLineupScore).toBe(0);
+    expect(result.suggestedLineupScore).toBe(10);
+    expect(result.swaps[0].delta).toBe(10);
+  });
+
+  it("falls back to an excluded player rather than leaving a slot empty", () => {
+    const result = computeSuggestedLineup({
+      rosterPositions: ["RB"],
+      starters: ["rb1"],
+      playerIds: ["rb1"],
+      players,
+      scoreFn,
+      hasKickoffData: false,
+      isExcludedFn: () => true,
+    });
+    expect(result.lineup[0].player?.player_id).toBe("rb1");
+  });
+
+  it("never moves an excluded starter whose game has already started", () => {
+    const result = computeSuggestedLineup({
+      rosterPositions: ["RB"],
+      starters: ["rb2"],
+      playerIds: ["rb1", "rb2"],
+      players,
+      scoreFn,
+      hasKickoffData: false,
+      isLockedFn: (id) => id === "rb2",
+      isExcludedFn: (id) => id === "rb2",
+    });
+    expect(result.lineup[0].player?.player_id).toBe("rb2");
+    expect(result.swaps).toHaveLength(0);
+  });
 });

@@ -8,8 +8,12 @@ import {
   getLineupRange,
   getMatchupLean,
   resolveGameState,
+  getLineupAvailabilityChecks,
+  getLatePivotRisks,
+  getLineupSlotEligiblePositions,
+  type LineupAvailability,
+  type InjuryNewsFlag,
 } from "../../lib/helpers";
-import { usePlayers } from "../../lib/PlayersContext";
 import { useLeague } from "../../lib/LeagueContext";
 import { useValues } from "../../lib/ValuesContext";
 import { useMyRoster } from "../../lib/RosterContext";
@@ -24,10 +28,37 @@ interface StartersTabProps {
    *  their game has actually started, since projection sources don't
    *  reliably populate per-player kickoff timestamps. */
   scheduleByTeam: Record<string, TeamGameState>;
+  /** ESPN-fresh statuses, this week's ESPN news reads, and the user's own
+   *  Out/In calls (built in useAppState — the League Overview dot reads the
+   *  same object, so the two can't disagree). */
+  availability: LineupAvailability;
 }
 
-function StartersTab({ projectionData, nflState, scheduleByTeam }: StartersTabProps) {
-  const players = usePlayers();
+/** "Sun 7:20 PM" in the viewer's time zone. */
+const formatDayTime = (ms: number | null) => {
+  if (ms == null || !Number.isFinite(ms)) return "--";
+  try {
+    return new Date(ms).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
+  } catch {
+    return "--";
+  }
+};
+
+const NEWS_LEAN_LABEL: Record<InjuryNewsFlag["lean"], string> = {
+  "likely-out": "Likely out",
+  uncertain: "Uncertain",
+  "likely-in": "Likely plays",
+};
+const NEWS_LEAN_CLASSES: Record<InjuryNewsFlag["lean"], string> = {
+  "likely-out": "text-red-300 bg-red-500/10 border-red-800",
+  uncertain: "text-amber-300 bg-amber-500/10 border-amber-800",
+  "likely-in": "text-emerald-300 bg-emerald-500/10 border-emerald-800",
+};
+
+function StartersTab({ projectionData, nflState, scheduleByTeam, availability }: StartersTabProps) {
+  // ESPN's fresher injury statuses over Sleeper's up-to-24h-old map.
+  const players = availability.players;
+  const { news, overrides, setOverride } = availability;
   const { selectedLeague, users } = useLeague();
   const { myRoster: roster } = useMyRoster();
   const { leagueAdjustedRedraftValues: redraftValues } = useValues();
@@ -131,6 +162,9 @@ function StartersTab({ projectionData, nflState, scheduleByTeam }: StartersTabPr
   const taxiIds = new Set<string>((roster.taxi ?? []).map((id) => String(id)));
   const eligiblePlayerIds = myPlayerIds.filter((id) => !taxiIds.has(String(id)));
 
+  // Out/In calls and ESPN news reads only mean anything for a real week.
+  const { isExcludedFn, isRiskFn, isUnavailableFn } = getLineupAvailabilityChecks(availability);
+
   const { lineup, swaps, currentLineupScore, suggestedLineupScore } = computeSuggestedLineup({
     rosterPositions: positions,
     starters: roster.starters,
@@ -141,8 +175,36 @@ function StartersTab({ projectionData, nflState, scheduleByTeam }: StartersTabPr
     kickoffFn: playerKickoffAt,
     hasKickoffData: isInSeason && hasKickoffData,
     isLockedFn: playerIsLocked,
+    isExcludedFn: isInSeason ? isExcludedFn : undefined,
   });
   const lineupDelta = suggestedLineupScore - currentLineupScore;
+
+  // Real kickoff from the schedule (projection timestamps are unreliable).
+  const scheduledKickoff = (id: string) =>
+    resolveGameState(players[id]?.team, scheduleByTeam, playerKickoffAt(id)).kickoffAt;
+
+  // Questionable-type starters whose inactive call is still to come, with the
+  // bench players who'd still be swappable when it lands.
+  const pivotRisks = isInSeason
+    ? getLatePivotRisks({
+        lineup,
+        playerIds: eligiblePlayerIds,
+        players,
+        scoreFn: playerScore,
+        kickoffFn: scheduledKickoff,
+        isRiskFn,
+        isUnavailableFn,
+      })
+    : [];
+
+  // Rostered players with something to say this week: an ESPN news read or
+  // the user's own call. Starters first, then by projection.
+  const rosterIdSet = new Set(eligiblePlayerIds);
+  const availabilityIds = isInSeason
+    ? Array.from(new Set([...Object.keys(news), ...Object.keys(overrides)]))
+        .filter((id) => rosterIdSet.has(id) && players[id])
+        .sort((a, b) => playerScore(b) - playerScore(a))
+    : [];
 
   const startingIds = new Set(
     lineup.map((r) => r.player?.player_id).filter((id): id is string => !!id)
@@ -159,15 +221,24 @@ function StartersTab({ projectionData, nflState, scheduleByTeam }: StartersTabPr
     .filter((p): p is SleeperPlayer => !!p)
     .sort((a, b) => playerScore(b.player_id) - playerScore(a.player_id));
 
+  // Why a replaced starter shouldn't play, when it's about availability.
+  const availabilityReason = (current: SleeperPlayer | null) => {
+    if (!current) return null;
+    const id = current.player_id;
+    if (overrides[id] === "OUT") return `${current.full_name} is marked out this week`;
+    const tag = String(current.injury_status || current.status || "");
+    if (/\bout\b|\bir\b|doubtful|inactive|suspended/i.test(tag)) return `${current.full_name} is ${tag.toLowerCase()}`;
+    if (overrides[id] !== "IN" && news[id]?.lean === "likely-out") return `ESPN news: ${current.full_name} is unlikely to play`;
+    return null;
+  };
+
   const lineupCoachNotes = swaps.map(({ slot, suggested, current, delta }) => {
     const volatility = playerVolatility(suggested.player_id);
     const reasonParts = [
       delta > 0
         ? `${isInSeason ? "Projection" : "Redraft score"} improves by ${delta.toFixed(1)}`
         : `${isInSeason ? "Projection" : "Redraft score"} is safer for this slot`,
-      current?.status && /out|doubtful|inactive|suspended/i.test(String(current.status))
-        ? `${current.full_name} is ${String(current.status).toLowerCase()}`
-        : null,
+      availabilityReason(current),
       volatility?.level === "volatile"
         ? `wide range across sources (${volatility.floor.toFixed(1)}–${volatility.ceiling.toFixed(1)})`
         : null,
@@ -213,7 +284,7 @@ function StartersTab({ projectionData, nflState, scheduleByTeam }: StartersTabPr
 
   const renderStatusBadge = (status: string | null | undefined) => {
     const s = status ? String(status).toLowerCase() : "";
-    if (/out|inactive|suspended|covid|nfi|pup/.test(s)) return <span className="text-[10px] font-semibold text-red-400 shrink-0">OUT</span>;
+    if (/out|inactive|suspended|covid|nfi|pup|\bir\b/.test(s)) return <span className="text-[10px] font-semibold text-red-400 shrink-0">OUT</span>;
     if (s === "doubtful") return <span className="text-[10px] font-semibold text-orange-400 shrink-0">D</span>;
     if (s === "questionable") return <span className="text-[10px] font-semibold text-amber-400 shrink-0">Q</span>;
     return null;
@@ -234,6 +305,44 @@ function StartersTab({ projectionData, nflState, scheduleByTeam }: StartersTabPr
       >
         {isVolatile ? "VOLATILE" : "SAFE"}
       </span>
+    );
+  };
+
+  // This week's ESPN news read, hidden once the user has made their own call.
+  const renderNewsBadge = (id: string) => {
+    const flag = news[id];
+    if (!isInSeason || !flag || overrides[id]) return null;
+    return (
+      <span
+        title={`${NEWS_LEAN_LABEL[flag.lean]}: ${flag.comment}`}
+        className={`text-[9px] font-semibold px-1 rounded border shrink-0 ${NEWS_LEAN_CLASSES[flag.lean]}`}
+      >
+        NEWS
+      </span>
+    );
+  };
+
+  // Per-week "treat as out" toggle — applies in every league until Sleeper's
+  // week rolls over. Hidden once the player's game has started (his slot is
+  // locked either way).
+  const renderOutToggle = (player: SleeperPlayer) => {
+    if (!isInSeason || playerIsLocked(player.player_id)) return null;
+    const isOut = overrides[player.player_id] === "OUT";
+    return (
+      <button
+        type="button"
+        aria-pressed={isOut}
+        aria-label={isOut
+          ? `${player.full_name} is marked out for week ${week} — undo`
+          : `Mark ${player.full_name} out for week ${week} in every league`}
+        title={isOut ? "Marked out this week in every league — click to undo" : "Mark out this week in every league"}
+        onClick={() => setOverride(player.player_id, isOut ? null : "OUT")}
+        className={`text-[9px] font-semibold px-1.5 py-0.5 rounded border shrink-0 transition ${
+          isOut ? "bg-red-900/60 border-red-700 text-red-300" : "border-slate-700 text-slate-500 hover:text-slate-300"
+        }`}
+      >
+        Out
+      </button>
     );
   };
 
@@ -300,6 +409,111 @@ function StartersTab({ projectionData, nflState, scheduleByTeam }: StartersTabPr
           </div>
         </div>
       )}
+      {(pivotRisks.length > 0 || availabilityIds.length > 0) && (
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3">
+          <div className="border-b border-slate-800 pb-2 mb-2">
+            <div className="text-[11px] uppercase tracking-wide text-slate-500">Availability</div>
+            <div className="mt-0.5 text-[11px] text-slate-500">
+              ESPN injury news and your own calls for week {week}. A call applies in every league until the week ends.
+            </div>
+          </div>
+          <div className="space-y-2.5">
+            {pivotRisks.map((risk) => {
+              const noPivot = risk.pivots.length === 0;
+              const slotPositions = getLineupSlotEligiblePositions(risk.slot).join("/");
+              return (
+                <div
+                  key={`risk-${risk.player.player_id}`}
+                  className={`text-xs rounded-lg border p-2 ${noPivot ? "border-amber-800 bg-amber-500/5" : "border-slate-800"}`}
+                >
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className={`text-[10px] font-semibold uppercase tracking-wide ${noPivot ? "text-amber-400" : "text-slate-500"}`}>
+                      {noPivot ? "Late-game risk" : "Late-game backup"}
+                    </span>
+                    <span className="text-slate-200 font-medium">{risk.player.full_name}</span>
+                    {renderStatusBadge(risk.player.injury_status || risk.player.status)}
+                    <span className="text-[10px] text-slate-500">
+                      {risk.slot.replace("_", " ")} · kicks off {formatDayTime(risk.kickoffAt)}
+                    </span>
+                    {noPivot && <span className="ml-auto">{renderOutToggle(risk.player)}</span>}
+                  </div>
+                  <div className="mt-1 text-[11px] text-slate-400">
+                    {noPivot ? (
+                      <>
+                        Inactives come out around {formatDayTime(risk.decisionAt)}. None of your bench {slotPositions}s
+                        will still be unlocked by then, so if he sits this slot scores 0. Mark him out to have the coach
+                        start someone safe now.
+                      </>
+                    ) : (
+                      <>
+                        If he&apos;s inactive (around {formatDayTime(risk.decisionAt)}),{" "}
+                        {risk.pivots.slice(0, 2).map((p) => p.full_name).join(" or ")} will still be swappable.
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            {availabilityIds.map((id) => {
+              const player = players[id];
+              const flag = news[id];
+              const override = overrides[id];
+              const postedAt = flag?.date ? Date.parse(flag.date) : null;
+              return (
+                <div key={`avail-${id}`} className="text-xs">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="text-slate-200 font-medium">{player.full_name}</span>
+                    {renderStatusBadge(player.injury_status || player.status)}
+                    {override === "OUT" && (
+                      <span className="text-[9px] font-semibold px-1 rounded border text-red-300 bg-red-500/10 border-red-800">MARKED OUT</span>
+                    )}
+                    {override === "IN" && (
+                      <span className="text-[9px] font-semibold px-1 rounded border text-emerald-300 bg-emerald-500/10 border-emerald-800">STARTING ANYWAY</span>
+                    )}
+                    {!override && flag && (
+                      <span className={`text-[9px] font-semibold px-1 rounded border ${NEWS_LEAN_CLASSES[flag.lean]}`}>
+                        {NEWS_LEAN_LABEL[flag.lean].toUpperCase()}
+                      </span>
+                    )}
+                    <span className="text-[10px] text-slate-500">{player.team}</span>
+                    <span className="ml-auto">
+                      {override ? (
+                        <button
+                          type="button"
+                          onClick={() => setOverride(id, null)}
+                          aria-label={`Undo your call on ${player.full_name} for week ${week}`}
+                          className="text-[10px] font-semibold px-2 py-0.5 rounded-full border border-slate-700 text-slate-400 hover:text-slate-200 transition"
+                        >
+                          Undo
+                        </button>
+                      ) : flag?.lean === "likely-out" ? (
+                        <button
+                          type="button"
+                          onClick={() => setOverride(id, "IN")}
+                          aria-label={`Start ${player.full_name} anyway this week`}
+                          className="text-[10px] font-semibold px-2 py-0.5 rounded-full border border-slate-700 text-slate-400 hover:text-slate-200 transition"
+                        >
+                          Start anyway
+                        </button>
+                      ) : (
+                        renderOutToggle(player)
+                      )}
+                    </span>
+                  </div>
+                  {flag && (
+                    <div className="mt-0.5 text-[11px] text-slate-400">
+                      &ldquo;{flag.comment}&rdquo; <span className="text-slate-600">ESPN, {formatDayTime(postedAt)}</span>
+                      {!override && flag.lean === "likely-out" && (
+                        <span className="text-slate-500"> — the coach is treating him as out.</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-3">
         <div className="border-b border-slate-800 pb-2 mb-2 flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -353,10 +567,12 @@ function StartersTab({ projectionData, nflState, scheduleByTeam }: StartersTabPr
               {player ? (
                 <>
                   <span className="text-slate-200 flex-1 truncate">{player.full_name}</span>
-                  {renderStatusBadge(player.status)}
+                  {renderStatusBadge(player.injury_status || player.status)}
+                  {renderNewsBadge(player.player_id)}
                   {renderVolatilityBadge(player.player_id)}
                   <span className="text-[10px] text-slate-500 shrink-0">{player.team}</span>
                   <span className="text-emerald-400 font-medium shrink-0 w-12 text-right">{score > 0 ? score.toFixed(1) : "—"}</span>
+                  {renderOutToggle(player)}
                 </>
               ) : (
                 <span className="text-slate-600 italic flex-1">Empty</span>
@@ -380,9 +596,12 @@ function StartersTab({ projectionData, nflState, scheduleByTeam }: StartersTabPr
                   <div key={player.player_id} className="flex items-center gap-2 text-xs py-0.5">
                     <span className="text-[10px] uppercase text-slate-500 w-7 shrink-0">{player.position}</span>
                     <span className="text-slate-200 flex-1 truncate">{player.full_name}</span>
+                    {renderStatusBadge(player.injury_status || player.status)}
+                    {renderNewsBadge(player.player_id)}
                     {renderVolatilityBadge(player.player_id)}
                     <span className="text-[10px] text-slate-500 shrink-0">{player.team}</span>
                     <span className="text-emerald-400 font-medium shrink-0 w-12 text-right">{score > 0 ? score.toFixed(1) : "—"}</span>
+                    {renderOutToggle(player)}
                   </div>
                 );
               })

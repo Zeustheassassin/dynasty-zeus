@@ -18,6 +18,7 @@ import type {
   AugmentedPick,
   LeagueHubTab,
   LeagueMgmtData,
+  LeagueLineupStatus,
 } from "../../lib/types";
 import type { CommittedSimsByLeague, CachedSimRow, LeagueOverviewEntry } from "../../lib/types";
 import { removeLocalStorageItem } from "@/lib/hooks/useLocalStorage";
@@ -29,7 +30,7 @@ interface OverviewTabProps {
   leagueOverviewData: Record<string, LeagueOverviewEntry>;
   loadingLeagueOverview: boolean;
   leagueOverviewLoaded: boolean;
-  leagueLineupStatus: Record<string, { isOptimal: boolean; swapCount: number; delta: number } | null>;
+  leagueLineupStatus: Record<string, LeagueLineupStatus | null>;
   committedSimsByLeague: CommittedSimsByLeague;
   leagueSimCache: Record<string, Record<number, CachedSimRow>>;
   simQueue: string[];
@@ -347,15 +348,34 @@ function OverviewTab({
                       : lineupStatus.delta >= 0.5
                       ? "bg-yellow-500"
                       : "bg-emerald-500";
+                    // A risky late-game starter with no bench player left to
+                    // swap in is a separate warning from the swap delta — the
+                    // lineup can be "optimal" and still be one inactive call
+                    // away from a 0.
+                    const riskLabel = lineupStatus.pivotRiskCount > 0
+                      ? `${lineupStatus.pivotRiskCount} questionable starter${lineupStatus.pivotRiskCount === 1 ? "" : "s"} with no backup left once inactives are announced`
+                      : null;
                     return (
-                      <span
-                        title={
-                          lineupStatus.isOptimal
-                            ? "Lineup already optimized for this week"
-                            : `${lineupStatus.swapCount} lineup swap${lineupStatus.swapCount === 1 ? "" : "s"} recommended (+${lineupStatus.delta.toFixed(1)} pts)`
-                        }
-                        className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`}
-                      />
+                      <>
+                        <span
+                          title={
+                            lineupStatus.isOptimal
+                              ? "Lineup already optimized for this week"
+                              : `${lineupStatus.swapCount} lineup swap${lineupStatus.swapCount === 1 ? "" : "s"} recommended (+${lineupStatus.delta.toFixed(1)} pts)`
+                          }
+                          className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`}
+                        />
+                        {riskLabel && (
+                          <span
+                            role="img"
+                            aria-label={riskLabel}
+                            title={riskLabel}
+                            className="text-[10px] font-bold leading-none text-amber-400 shrink-0"
+                          >
+                            !
+                          </span>
+                        )}
+                      </>
                     );
                   })()}
                   <button

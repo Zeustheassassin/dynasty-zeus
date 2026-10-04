@@ -13,6 +13,9 @@ export interface EspnInjuryEntry {
   team: string;
   status: string;
   date: string | null;
+  /** ESPN's one-line news note (cleaned), sent only for players with an
+   *  injury designation — see /api/injuries/espn. */
+  comment?: string | null;
 }
 
 const SKILL_POSITIONS = ["QB", "RB", "WR", "TE"];
@@ -38,19 +41,15 @@ const sameTeam = (sleeperTeam: string | null | undefined, espnTeam: string): boo
 };
 
 /**
- * Returns a players map with ESPN's injury status applied. Only players ESPN
- * lists are touched; everyone else keeps Sleeper's status. Matching is by
- * normalized name, and — because names collide — the position must agree and the
- * team must not contradict. ESPN wins when it has an entry: Sleeper's map can be
- * a day old, ESPN's report is refreshed continuously.
- *
- * Returns the ORIGINAL map (same reference) when nothing changes.
+ * Pairs each ESPN entry with the one Sleeper player it describes. Matching is
+ * by normalized name, and — because names collide — the position must agree
+ * and the team must not contradict. Unmatched or ambiguous entries are dropped.
  */
-export function applyInjuryOverrides(
+export function matchEspnInjuryEntries(
   players: Record<string, SleeperPlayer>,
   injuries: EspnInjuryEntry[]
-): Record<string, SleeperPlayer> {
-  if (injuries.length === 0) return players;
+): Array<{ player: SleeperPlayer; entry: EspnInjuryEntry }> {
+  if (injuries.length === 0) return [];
 
   const byName = new Map<string, SleeperPlayer[]>();
   for (const player of Object.values(players)) {
@@ -62,15 +61,31 @@ export function applyInjuryOverrides(
     else byName.set(key, [player]);
   }
 
-  let next: Record<string, SleeperPlayer> | null = null;
+  const matches: Array<{ player: SleeperPlayer; entry: EspnInjuryEntry }> = [];
   for (const entry of injuries) {
-    const override = mapEspnInjuryStatus(entry.status);
-    if (override === undefined) continue;
     const candidates = (byName.get(normalizeProjName(entry.name)) ?? [])
       .filter((p) => p.position === entry.position && sameTeam(p.team, entry.team));
-    if (candidates.length !== 1) continue; // unmatched or ambiguous — leave Sleeper's status alone
+    if (candidates.length === 1) matches.push({ player: candidates[0], entry });
+  }
+  return matches;
+}
 
-    const player = candidates[0];
+/**
+ * Returns a players map with ESPN's injury status applied. Only players ESPN
+ * lists are touched; everyone else keeps Sleeper's status. ESPN wins when it
+ * has an entry: Sleeper's map can be a day old, ESPN's report is refreshed
+ * continuously.
+ *
+ * Returns the ORIGINAL map (same reference) when nothing changes.
+ */
+export function applyInjuryOverrides(
+  players: Record<string, SleeperPlayer>,
+  injuries: EspnInjuryEntry[]
+): Record<string, SleeperPlayer> {
+  let next: Record<string, SleeperPlayer> | null = null;
+  for (const { player, entry } of matchEspnInjuryEntries(players, injuries)) {
+    const override = mapEspnInjuryStatus(entry.status);
+    if (override === undefined) continue;
     if ((player.injury_status ?? null) === override) continue;
     if (!next) next = { ...players };
     next[player.player_id] = { ...player, injury_status: override };

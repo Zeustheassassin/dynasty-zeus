@@ -18,7 +18,9 @@ import type {
   LeagueExpiringBlocks,
   LeagueMgmtData,
   TeamGameState,
+  LeagueLineupStatus,
 } from "../lib/types";
+import type { LineupAvailability } from "../lib/helpers/lineupAvailability";
 import { LEAGUE_HUB_GROUPS } from "../lib/leagueHubGroups";
 import { useLeagueTabState } from "./LeagueHub/hooks/useLeagueTabState";
 import StandingsTab from "./league/StandingsTab";
@@ -73,7 +75,8 @@ interface LeagueHubProps {
   leagueOverviewLoaded: boolean;
   leagueOverviewError: string | null;
   leagueOverviewUpdatedAt: number | null;
-  leagueLineupStatus: Record<string, { isOptimal: boolean; swapCount: number; delta: number } | null>;
+  leagueLineupStatus: Record<string, LeagueLineupStatus | null>;
+  lineupAvailability: LineupAvailability;
 
   // Computed
   selectedLeagueMateProfilesView: LeagueMateView[];
@@ -122,6 +125,7 @@ function LeagueHub({
   leagueOverviewData, loadingLeagueOverview, leagueOverviewLoaded, leagueOverviewError,
   leagueOverviewUpdatedAt,
   leagueLineupStatus,
+  lineupAvailability,
   selectedLeagueMateProfilesView,
   ignoredOwnerIds, toggleIgnoredOwner,
   projectionData, nflState, scheduleByTeam,
@@ -280,6 +284,7 @@ function LeagueHub({
             projectionData={projectionData}
             nflState={nflState}
             scheduleByTeam={scheduleByTeam}
+            availability={lineupAvailability}
           />
         )}
 
