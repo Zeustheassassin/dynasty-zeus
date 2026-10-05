@@ -22,6 +22,8 @@ import { ROUTE_TYPES } from "../shared/chartingConstants";
 import { pct, fmtPct } from "../shared/chartingTypes";
 import ChartingBoard, { type ChartingBoardConfig } from "../shared/ChartingBoard";
 import { usePffGameLog } from "../pff/usePffGameLog";
+import { useGameContextLog } from "../context/useGameContextLog";
+import GameContextPanel from "../context/GameContextPanel";
 import { PffLogBar, PffLogCells, PffLogFooter, PffLogHeaders } from "../pff/PffGameLogColumns";
 import { useChartingState } from "../shared/hooks/useChartingState";
 import { usePlayTags } from "../shared/hooks/usePlayTags";
@@ -116,6 +118,8 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
           onAddGame, onDeleteGame, onUpdateGame, onToggleEditBio, onBioChange, onSaveBio } = cs;
   // PFF's numbers for each charted game (Games tab).
   const pff = usePffGameLog(prospect.id, games, cs.markDataDirty);
+  // Each charted game's context (opponent defense, weather, cast) and the user's calls (Games tab).
+  const gameContext = useGameContextLog(prospect.id, games, cs.setGames, cs.markDataDirty);
 
   useEffect(() => {
     if (games.length === 0) return;
@@ -989,6 +993,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
                 </tfoot>
               </table>
             </div>
+            <GameContextPanel position={"TE"} games={games} log={gameContext} />
             </div>
           )}
         </div>

@@ -8,6 +8,8 @@ const log = logger("scouting/rb/RBChartingBoard");
 import PlayerNotesList from "../PlayerNotesList";
 import ChartingBoard from "../shared/ChartingBoard";
 import { usePffGameLog } from "../pff/usePffGameLog";
+import { useGameContextLog } from "../context/useGameContextLog";
+import GameContextPanel from "../context/GameContextPanel";
 import { PffLogBar, PffLogCells, PffLogFooter, PffLogHeaders } from "../pff/PffGameLogColumns";
 import type { ChartingBoardConfig } from "../shared/ChartingBoard";
 import { useChartingState } from "../shared/hooks/useChartingState";
@@ -178,6 +180,8 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
           onAddGame, onDeleteGame, onUpdateGame, onToggleEditBio, onBioChange, onSaveBio } = cs;
   // PFF's numbers for each charted game (Games tab).
   const pff = usePffGameLog(prospect.id, games, cs.markDataDirty);
+  // Each charted game's context (opponent defense, weather, cast) and the user's calls (Games tab).
+  const gameContext = useGameContextLog(prospect.id, games, cs.setGames, cs.markDataDirty);
 
   // Load plays when games change (paginated past the 1000-row PostgREST cap).
   useEffect(() => {
@@ -1066,6 +1070,7 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
                 </tfoot>
               </table>
             </div>
+            <GameContextPanel position={"RB"} games={games} log={gameContext} />
             </div>
           )}
         </div>

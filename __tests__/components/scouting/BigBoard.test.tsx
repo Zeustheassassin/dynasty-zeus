@@ -217,8 +217,8 @@ describe("BigBoard Above Exp columns", () => {
     const cols = ["AAE", "Outside", "Inside", "Deep", "Intermediate", "Short"];
     const at = headerLabels().indexOf("AAE");
     expect(headerLabels().slice(at, at + cols.length)).toEqual(cols);
-    expect(within(screen.getAllByRole("row")[0]).getAllByRole("columnheader").slice(-3).map((h) => h.textContent))
-      .toEqual(["Above Exp", "AAE Breakdown", "PFF (charted games)"]);
+    expect(within(screen.getAllByRole("row")[0]).getAllByRole("columnheader").slice(-4).map((h) => h.textContent))
+      .toEqual(["Above Exp", "AAE Breakdown", "PFF (charted games)", "Traits (your grades)"]);
     expect(cols.map((l) => cell("Quarter One", l))).toEqual(["+3.5", "+1.5", "+7.2", "—", "-3.0", "+2.0"]);
   });
 
@@ -565,5 +565,45 @@ describe("BigBoard Role column", () => {
     ]);
     fireEvent.click(screen.getByRole("columnheader", { name: "Role" }));
     expect(names()).toEqual(["Slot Guy", "X Guy", "No Role"]);
+  });
+});
+
+describe("BigBoard traits (beside the AE Score, with a toggle)", () => {
+  // Eleven QBs (enough to score); each has two new games graded for arm and creation.
+  const QBS = [prospect("qb1", "Quarter One", "QB", 3), ...Array.from({ length: 10 }, (_, i) => prospect(`pq${i}`, `Pool QB ${i}`, "QB", 10 + i))];
+  const graded = (id: string, k: number, arm: number) => ({
+    id: `${id}-g${k}`, prospect_id: id, season_year: 2026, created_at: "2026-10-06T00:00:00Z", opponent: "X", game_slot: k,
+    game_type: "regular", trait_grades: { arm: arm + k, creation: 5, accuracy: 9 },
+  });
+  const games = QBS.flatMap((p, i) => [graded(p.id, 0, p.id === "qb1" ? 9 : 2 + (i % 5)), graded(p.id, 1, p.id === "qb1" ? 9 : 2 + (i % 5))]);
+  const renderTraits = () => render(
+    <BigBoard
+      prospects={QBS} loading={false} onSelectProspect={vi.fn()} onUpdateRank={vi.fn()} onUpdateOverallRank={vi.fn()}
+      onUpdateGrade={vi.fn()} onUpdateDraftRound={vi.fn(async () => true)} draftYearFilter={null} setDraftYearFilter={vi.fn()}
+      games={games as never} rbPlays={[]} qbPlays={[]} tePlays={[]} loadPositionPlays={vi.fn()}
+    />,
+  );
+
+  it("shows each trait's average in its own band, and the score without traits by default", () => {
+    renderTraits();
+    fireEvent.click(screen.getByRole("button", { name: /^QB/ }));
+    expect(within(screen.getAllByRole("row")[0]).getAllByRole("columnheader").at(-1)!.textContent).toBe("Traits (your grades)");
+    expect(cell("Quarter One", "Arm")).toBe("9.5");
+    expect(cell("Quarter One", "Acc")).toBe("9.0");
+    expect(screen.getByRole("button", { name: "Without traits" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("the toggle shows the same score with the uncovered traits added, and remembers it", () => {
+    renderTraits();
+    const without = cell("Quarter One", "AE Score");
+    fireEvent.click(screen.getByRole("button", { name: "With traits" }));
+    const withT = cell("Quarter One", "AE Score");
+    expect(Number(withT)).toBeGreaterThan(Number(without));
+    const title = within(rowFor("Quarter One")).getAllByRole("cell")[headerLabels().indexOf("AE Score")].getAttribute("title")!;
+    expect(title).toContain("Trait Arm 9.5 / 10 over 2 graded games");
+    expect(title).not.toContain("Accuracy");
+    expect(JSON.parse(localStorage.getItem("bigBoardScoreTraits")!)).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Without traits" }));
+    expect(cell("Quarter One", "AE Score")).toBe(without);
   });
 });

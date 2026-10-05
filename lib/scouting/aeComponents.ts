@@ -17,17 +17,21 @@ import type { QBPlay, RBPlay } from "../types";
 import { TAG_COMPONENTS, TAG_COMPONENT_WEIGHTS, tagGameCounts, type tagStatReps } from "./tagStats";
 import type { OpponentTier } from "./opponentTier";
 import type { ProspectGameRouteTagCellsRow } from "./aggregateMerge";
+import { EMPTY_CONTEXT_DATA, type ContextCovariates, type GameContextData } from "./gameContext";
 
 /** What the screens need beyond plays and games to build the components and
- *  tag stats: ScoutingHub's PFF game rows and the two migration-064 views. */
+ *  tag stats: ScoutingHub's PFF game rows, the two migration-064 views and the
+ *  game context (migration 065). */
 export interface GradingData {
   pffGameRows: readonly PffGameRow[];
   /** prospect_game_route_counts: a WR game's charted receiving counts. */
   routeCounts: readonly ProspectGameRouteCountsRow[];
   /** prospect_game_route_tag_cells: a WR game's tagged routes. */
   routeTagCells: readonly ProspectGameRouteTagCellsRow[];
+  /** Each charted game's CFD game, weather, SP+ and supporting cast (gameContext.ts). */
+  context: GameContextData;
 }
-export const EMPTY_GRADING_DATA: GradingData = { pffGameRows: [], routeCounts: [], routeTagCells: [] };
+export const EMPTY_GRADING_DATA: GradingData = { pffGameRows: [], routeCounts: [], routeTagCells: [], context: EMPTY_CONTEXT_DATA };
 
 export interface ComponentInputs {
   prospects: readonly Pick<Prospect, "id" | "position">[];
@@ -45,6 +49,10 @@ export interface ComponentInputs {
   weights?: Readonly<Record<string, number>>;
   /** Floor on each component's true spread, as a share of its observed spread (aeComposite.ts). */
   spreadFloor?: number;
+  /** Each game's context covariates (gameContext.ts), for the stats whose SP+ / weather test passed. */
+  context?: ContextCovariates;
+  /** Keep every sample's per-game residuals (the Grading checks' context tests). */
+  byGame?: boolean;
 }
 
 // The floor on each component's true spread, as a share of its observed
@@ -77,7 +85,8 @@ function describe(def: CountStatDef, res: CountStatResult) {
     if (res.poolRate != null) parts.push(`(pool ${formatRate(def, res.poolRate)})`);
     if (s.rawAe != null) {
       const shift = def.dir * (s.ae - s.rawAe);
-      parts.push(`(${shift >= 0 ? "+" : "−"}${formatRate(def, Math.abs(shift))} for opponents)`);
+      const what = res.context?.weather ? "opponents and weather" : res.context?.opponent === "sp" ? "opponent defenses" : "opponents";
+      parts.push(`(${shift >= 0 ? "+" : "−"}${formatRate(def, Math.abs(shift))} for ${what})`);
     }
     return parts.join(" ");
   };
@@ -104,13 +113,13 @@ export function buildComponents(inp: ComponentInputs): ComponentBuild {
     });
   };
   for (const def of CHARTED_COMPONENTS) {
-    add(def, countStat(def, chartedGameCounts(def.key, { games: inp.games, qbPlays: inp.qbPlays, rbPlays: inp.rbPlays, wrRouteCounts: inp.wrRouteCounts }), inp.games, inp.tierByGame));
+    add(def, countStat(def, chartedGameCounts(def.key, { games: inp.games, qbPlays: inp.qbPlays, rbPlays: inp.rbPlays, wrRouteCounts: inp.wrRouteCounts }), inp.games, inp.tierByGame, { context: inp.context, byGame: inp.byGame }));
   }
   for (const def of PFF_COMPONENTS) {
-    add(def, countStat(def, pffGameCounts(def, inp.games, inp.pffGameRows, (id) => posOf.get(id)), inp.games, inp.tierByGame));
+    add(def, countStat(def, pffGameCounts(def, inp.games, inp.pffGameRows, (id) => posOf.get(id)), inp.games, inp.tierByGame, { context: inp.context, byGame: inp.byGame }));
   }
   for (const def of TAG_COMPONENTS) {
-    add(def, countStat(def, tagGameCounts(def.key, inp.tagReps), inp.games, inp.tierByGame));
+    add(def, countStat(def, tagGameCounts(def.key, inp.tagReps), inp.games, inp.tierByGame, { context: inp.context, byGame: inp.byGame }));
   }
   return { extra, results };
 }

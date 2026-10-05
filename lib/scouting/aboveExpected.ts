@@ -57,6 +57,7 @@ import {
   type FittedDifficulty,
 } from "./difficultyModel";
 import { playWeights, type PlayWeight } from "./seasonWeight";
+import { addGameResidual, type ByGame } from "./contextEffects";
 import { isTaggedPlay, type TagPosition } from "./playEra";
 import { correctionFor, withGarbageWeight, type CorrectionKey } from "./tagCorrection";
 
@@ -148,6 +149,11 @@ export interface AESlice { ae: number | null; n: number }
 // which sums each prospect's residuals by tier (AESample.byTier) for the AE
 // Score's opponent adjustment. The values are the same either way. QB takes
 // none: the user expects no cross-level effect on accuracy.
+/** Extra splits a caller can ask the sample functions for. byGame: each
+ *  prospect's residuals by charted game (AESample.byGame), for the
+ *  game-context effects (contextEffects.ts). Values are the same either way. */
+export interface SampleOptions { byGame?: boolean }
+
 export function aeValues(samples: Map<string, AESample | null>): Map<string, number | null> {
   return new Map([...samples].map(([id, s]) => [id, s?.ae ?? null]));
 }
@@ -248,10 +254,12 @@ export function computeRBAboveExpectedSamples(
   games: ScoutingGame[],
   rbPlays: RBPlay[],
   tierByGame?: ReadonlyMap<string, OpponentTier>,
+  opts: SampleOptions = {},
 ): Map<string, AESample | null> {
   const out = new Map<string, AESample | null>();
   const gameToProspect = buildGameToProspect(games);
   const playsByProspect = buildPlaysByProspect(rbPlays, gameToProspect);
+  const gameOf = opts.byGame ? (pl: RBPlay) => pl.game_id : undefined;
   const baselines = buildRBBaselines(rbPlays);
   const weightOf = sampleWeights("rb_srae", games);
   const tierOf = tierByGame && ((pl: RBPlay) => tierByGame.get(pl.game_id));
@@ -259,7 +267,7 @@ export function computeRBAboveExpectedSamples(
   for (const p of prospects) {
     if (p.position !== "RB") continue;
     const runs = (playsByProspect.get(p.id) ?? []).filter(isKnownRun);
-    out.set(p.id, runs.length < MIN_SAMPLE ? null : aboveExpectedSampleForPlays(runs, baselines, rbSuccess, { tierOf, weightOf }));
+    out.set(p.id, runs.length < MIN_SAMPLE ? null : aboveExpectedSampleForPlays(runs, baselines, rbSuccess, { tierOf, weightOf, gameOf }));
   }
 
   return out;
@@ -620,13 +628,20 @@ function modelAAE(ratedPasses: QBPlay[], R: ResolvedBaselines, weightOf?: PlayWe
 
 // modelAAE plus the sample behind it (see AESample). Same sums in the same
 // order, so `ae` is exactly modelAAE's value.
-function modelAAESample(ratedPasses: QBPlay[], R: ResolvedBaselines, weightOf?: PlayWeight): AESample | null {
+function modelAAESample(ratedPasses: QBPlay[], R: ResolvedBaselines, weightOf?: PlayWeight, byGame?: boolean): AESample | null {
   if (!R.model) return null;
   const s = emptyResidualSums();
-  for (const pl of ratedPasses) addResidual(s, throwValue(pl), expectedForPlay(pl, R)!, weightOf ? weightOf(pl) : 1);
+  const games: ByGame = {};
+  for (const pl of ratedPasses) {
+    const y = throwValue(pl), e = expectedForPlay(pl, R)!, w = weightOf ? weightOf(pl) : 1;
+    addResidual(s, y, e, w);
+    if (byGame) addGameResidual(games, pl.game_id, 1, y - e, w);
+  }
   const variance = residualVariancePts(s);
   if (variance == null) return null;
-  return { ae: parseFloat((((s.actual - s.expected) / s.w) * 100).toFixed(2)), n: s.n, w: s.w, variance };
+  const out: AESample = { ae: parseFloat((((s.actual - s.expected) / s.w) * 100).toFixed(2)), n: s.n, w: s.w, variance };
+  if (byGame) out.byGame = games;
+  return out;
 }
 
 // Overall AAE for an arbitrary QB play subset (a prospect's whole sample, or
@@ -649,6 +664,7 @@ export function computeQBAboveExpectedSamples(
   prospects: Prospect[],
   games: ScoutingGame[],
   qbPlays: QBPlay[],
+  opts: SampleOptions = {},
 ): Map<string, AESample | null> {
   const out = new Map<string, AESample | null>();
   const gameToProspect = buildGameToProspect(games);
@@ -659,7 +675,7 @@ export function computeQBAboveExpectedSamples(
   for (const p of prospects) {
     if (p.position !== "QB") continue;
     const ratedPasses = (playsByProspect.get(p.id) ?? []).filter(isQBGradedThrow);
-    out.set(p.id, ratedPasses.length < QB_MIN_SAMPLE ? null : modelAAESample(ratedPasses, R, weightOf));
+    out.set(p.id, ratedPasses.length < QB_MIN_SAMPLE ? null : modelAAESample(ratedPasses, R, weightOf, opts.byGame));
   }
 
   return out;
@@ -789,18 +805,20 @@ export function computeTERouteAboveExpectedSamples(
   games: ScoutingGame[],
   tePlays: TEPlay[],
   tierByGame?: ReadonlyMap<string, OpponentTier>,
+  opts: SampleOptions = {},
 ): Map<string, AESample | null> {
   const out = new Map<string, AESample | null>();
   const gameToProspect = buildGameToProspect(games);
   const playsByProspect = buildPlaysByProspect(tePlays, gameToProspect);
   const baselines = buildTERouteBaselines(tePlays);
+  const gameOf = opts.byGame ? (pl: TEPlay) => pl.game_id : undefined;
   const weightOf = sampleWeights("te_saer", games);
   const tierOf = tierByGame && ((pl: TEPlay) => tierByGame.get(pl.game_id));
 
   for (const p of prospects) {
     if (p.position !== "TE") continue;
     const routes = (playsByProspect.get(p.id) ?? []).filter(isRatedTERoute);
-    out.set(p.id, routes.length < MIN_SAMPLE ? null : aboveExpectedSampleForPlays(routes, baselines, teOpen, { tierOf, weightOf }));
+    out.set(p.id, routes.length < MIN_SAMPLE ? null : aboveExpectedSampleForPlays(routes, baselines, teOpen, { tierOf, weightOf, gameOf }));
   }
 
   return out;
@@ -857,18 +875,20 @@ export function computeTEBlockAboveExpectedSamples(
   games: ScoutingGame[],
   tePlays: TEPlay[],
   tierByGame?: ReadonlyMap<string, OpponentTier>,
+  opts: SampleOptions = {},
 ): Map<string, AESample | null> {
   const out = new Map<string, AESample | null>();
   const gameToProspect = buildGameToProspect(games);
   const playsByProspect = buildPlaysByProspect(tePlays, gameToProspect);
   const baselines = buildTEBlockBaselines(tePlays);
+  const gameOf = opts.byGame ? (pl: TEPlay) => pl.game_id : undefined;
   const weightOf = sampleWeights("te_saeb", games);
   const tierOf = tierByGame && ((pl: TEPlay) => tierByGame.get(pl.game_id));
 
   for (const p of prospects) {
     if (p.position !== "TE") continue;
     const blocks = (playsByProspect.get(p.id) ?? []).filter(isRatedTEBlock);
-    out.set(p.id, blocks.length < MIN_SAMPLE ? null : aboveExpectedSampleForPlays(blocks, baselines, teBlockWon, { tierOf, weightOf }));
+    out.set(p.id, blocks.length < MIN_SAMPLE ? null : aboveExpectedSampleForPlays(blocks, baselines, teBlockWon, { tierOf, weightOf, gameOf }));
   }
 
   return out;

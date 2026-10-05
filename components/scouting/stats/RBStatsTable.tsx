@@ -7,6 +7,7 @@ import type { Prospect, ScoutingGame, RBPlay, RBRunType } from "../../../lib/typ
 import { roleFitCols, roleFitRow } from "./roleFitCols";
 import { pffCols, pffRow } from "./pffCols";
 import { tagCols, tagRow, tagValuesFor } from "./tagCols";
+import { contextCols, traitCols } from "./contextCols";
 import type { TagStatValue } from "../../../lib/scouting/tagStats";
 import type { PffTotals } from "../../../lib/pff/totals";
 
@@ -19,6 +20,8 @@ interface Props {
   onSelectProspect?: (p: Prospect) => void;
   /** PFF over each prospect's charted games (ScoutingHub). */
   pffTotals?: Map<string, PffTotals>;
+  /** Per-prospect game-context and trait fields (contextCols.ts). */
+  contextExtras?: Map<string, Record<string, number | null>>;
 }
 
 const RUN_TYPES: RBRunType[] = ["outside_zone", "inside_zone", "outside_man_gap", "inside_man_gap"];
@@ -92,6 +95,9 @@ export const RB_STAT_COLS: ColDef[] = [
   ...tagCols("RB"),
   // PFF over the charted games
   ...pffCols("RB"),
+  // Game context and the user's trait grades (Stage 5)
+  ...contextCols("RB"),
+  ...traitCols("RB"),
 ];
 
 function succPct(plays: RBPlay[], filter: (p: RBPlay) => boolean): number | null {
@@ -109,7 +115,7 @@ function pct(n: number, d: number): number | null {
 
 // Extracted so the Phase I player-comparison tool can compute the same rows
 // for any two RB prospects without duplicating this logic.
-export function buildRBStatRows(prospects: Prospect[], games: ScoutingGame[], rbPlays: RBPlay[], pff?: Map<string, PffTotals>, tags?: Map<string, Record<string, TagStatValue>>): StatRow[] {
+export function buildRBStatRows(prospects: Prospect[], games: ScoutingGame[], rbPlays: RBPlay[], pff?: Map<string, PffTotals>, tags?: Map<string, Record<string, TagStatValue>>, extras?: Map<string, Record<string, number | null>>): StatRow[] {
     const sraeMap = computeRBAboveExpected(prospects, games, rbPlays);
     const sliceMap = computeRBRunSliceSRAE(prospects, games, rbPlays);
     const roleFits = computeRBRoleFits(prospects, games, rbPlays, pff);
@@ -219,6 +225,7 @@ export function buildRBStatRows(prospects: Prospect[], games: ScoutingGame[], rb
           raw_catches:   recCatches,
           ...tagRow("RB", tags?.get(p.id)),
           ...pffRow(pff?.get(p.id)),
+          ...extras?.get(p.id),
         } satisfies StatRow;
       });
 }
@@ -226,10 +233,10 @@ export function buildRBStatRows(prospects: Prospect[], games: ScoutingGame[], rb
 // "Min …" boxes beside the search bar — hide prospects below a sample size.
 const RB_MIN_FILTERS: MinFilterDef[] = [{ key: "runs", label: "Runs" }];
 
-export default function RBStatsTable({ prospects, games, rbPlays, loading, draftYearFilter, onSelectProspect, pffTotals }: Props) {
+export default function RBStatsTable({ prospects, games, rbPlays, loading, draftYearFilter, onSelectProspect, pffTotals, contextExtras }: Props) {
   const prospectMap = useMemo(() => new Map(prospects.map((p) => [p.id, p])), [prospects]);
   const tags = useMemo(() => tagValuesFor({ games, rbPlays }), [games, rbPlays]);
-  const rows = useMemo(() => buildRBStatRows(prospects, games, rbPlays, pffTotals, tags), [prospects, games, rbPlays, pffTotals, tags]);
+  const rows = useMemo(() => buildRBStatRows(prospects, games, rbPlays, pffTotals, tags, contextExtras), [prospects, games, rbPlays, pffTotals, tags, contextExtras]);
 
   return (
     <StatsTableShell

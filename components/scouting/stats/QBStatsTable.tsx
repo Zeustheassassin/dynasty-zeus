@@ -7,6 +7,7 @@ import type { Prospect, ScoutingGame, QBPlay, QBDepthZone } from "../../../lib/t
 import { roleFitCols, roleFitRow } from "./roleFitCols";
 import { pffCols, pffRow } from "./pffCols";
 import { tagCols, tagRow, tagValuesFor } from "./tagCols";
+import { contextCols, traitCols } from "./contextCols";
 import type { TagStatValue } from "../../../lib/scouting/tagStats";
 import type { PffTotals } from "../../../lib/pff/totals";
 
@@ -19,6 +20,8 @@ interface Props {
   onSelectProspect?: (p: Prospect) => void;
   /** PFF over each prospect's charted games (ScoutingHub). */
   pffTotals?: Map<string, PffTotals>;
+  /** Per-prospect game-context and trait fields (contextCols.ts). */
+  contextExtras?: Map<string, Record<string, number | null>>;
 }
 
 const DEPTH_ZONES: QBDepthZone[] = [
@@ -137,6 +140,9 @@ export const QB_STAT_COLS: ColDef[] = [
   // The tag-only stats (tagged plays only)
   ...tagCols("QB"),
   ...pffCols("QB"),
+  // Game context and the user's trait grades (Stage 5)
+  ...contextCols("QB"),
+  ...traitCols("QB"),
 ];
 
 function pct(n: number, d: number): number | null {
@@ -146,7 +152,7 @@ function pct(n: number, d: number): number | null {
 
 // Extracted so the Phase I player-comparison tool can compute the same rows
 // for any two QB prospects without duplicating this logic.
-export function buildQBStatRows(prospects: Prospect[], games: ScoutingGame[], qbPlays: QBPlay[], pff?: Map<string, PffTotals>, tags?: Map<string, Record<string, TagStatValue>>): StatRow[] {
+export function buildQBStatRows(prospects: Prospect[], games: ScoutingGame[], qbPlays: QBPlay[], pff?: Map<string, PffTotals>, tags?: Map<string, Record<string, TagStatValue>>, extras?: Map<string, Record<string, number | null>>): StatRow[] {
     const aaeMap = computeQBAboveExpected(prospects, games, qbPlays);
     const sliceMap = computeQBThrowSliceAAE(prospects, games, qbPlays);
     const roleFits = computeQBRoleFits(prospects, games, qbPlays, pff);
@@ -349,6 +355,7 @@ export function buildQBStatRows(prospects: Prospect[], games: ScoutingGame[], qb
           t_away:     pct(passRpoPlays.filter((pl) => pl.timing === "throw_away").length,    timingTotal),
           ...tagRow("QB", tags?.get(p.id)),
           ...pffRow(pff?.get(p.id)),
+          ...extras?.get(p.id),
         } satisfies StatRow;
       });
 }
@@ -356,10 +363,10 @@ export function buildQBStatRows(prospects: Prospect[], games: ScoutingGame[], qb
 // "Min …" boxes beside the search bar — hide prospects below a sample size.
 const QB_MIN_FILTERS: MinFilterDef[] = [{ key: "throws", label: "Throws" }];
 
-export default function QBStatsTable({ prospects, games, qbPlays, loading, draftYearFilter, onSelectProspect, pffTotals }: Props) {
+export default function QBStatsTable({ prospects, games, qbPlays, loading, draftYearFilter, onSelectProspect, pffTotals, contextExtras }: Props) {
   const prospectMap = useMemo(() => new Map(prospects.map((p) => [p.id, p])), [prospects]);
   const tags = useMemo(() => tagValuesFor({ games, qbPlays }), [games, qbPlays]);
-  const rows = useMemo(() => buildQBStatRows(prospects, games, qbPlays, pffTotals, tags), [prospects, games, qbPlays, pffTotals, tags]);
+  const rows = useMemo(() => buildQBStatRows(prospects, games, qbPlays, pffTotals, tags, contextExtras), [prospects, games, qbPlays, pffTotals, tags, contextExtras]);
 
   return (
     <StatsTableShell

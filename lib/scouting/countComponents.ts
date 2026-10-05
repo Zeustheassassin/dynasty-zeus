@@ -35,6 +35,9 @@ import { seasonWeights } from "./seasonWeight";
 import { measureTierEffects, resolveEffects, type TierEffects, type TierMeasurement } from "./opponentAdjust";
 import type { OpponentTier } from "./opponentTier";
 import type { CompositePos } from "./aeComposite";
+import { addGameResidual, type ByGame } from "./contextEffects";
+import { contextAdjust, contextSpecs, type MetricContext } from "./contextGrading";
+import type { ContextCovariates } from "./gameContext";
 
 /** One prospect-game's counts for a stat. */
 export interface GameCount {
@@ -84,6 +87,8 @@ export interface CountStatResult {
   /** Prospects behind the G5 measurement (charted against both P4 and G5). */
   tierProspects: number;
   measured: boolean;
+  /** The game-context model applied on top (contextGrading.ts), when this stat has one. */
+  context?: MetricContext;
 }
 
 const fmtNum = (v: number, dp: number) => (Number.isFinite(v) ? v.toFixed(dp) : "—");
@@ -95,13 +100,18 @@ export function formatRate(def: CountStatDef, rate: number): string {
 /**
  * Per-prospect samples for one stat, opponent-adjusted.
  * `games` supplies each game's season (weights); `tierByGame` its opponent tier.
+ * With `byGame`, each sample also carries its oriented per-game residuals
+ * (dir × (count − denominator × pool rate)) for the game-context effects.
  */
 export function countStat(
   def: CountStatDef,
   counts: readonly GameCount[],
   games: readonly Pick<ScoutingGame, "id" | "prospect_id" | "season_year">[],
   tierByGame?: ReadonlyMap<string, OpponentTier>,
+  { byGame: wantByGame = false, context }: { byGame?: boolean; context?: ContextCovariates } = {},
 ): CountStatResult {
+  const contextOn = !!context && contextSpecs(def.key, context, def.pos).length > 0;
+  const byGame = wantByGame || contextOn;
   const weights = seasonWeights(games);
   type Acc = { num: number; den: number; nw: number; dw: number; d2w: number; byGame: { num: number; den: number; gameId: string }[] };
   const by = new Map<string, Acc>();
@@ -147,6 +157,11 @@ export function countStat(
       }
       s.byTier = byTier;
     }
+    if (byGame) {
+      const perGame: ByGame = {};
+      for (const g of a.byGame) addGameResidual(perGame, g.gameId, g.den, def.dir * (g.num - g.den * poolRate), (weights.get(g.gameId) ?? 1) * g.den);
+      s.byGame = perGame;
+    }
     samples.set(id, s);
   }
 
@@ -154,10 +169,12 @@ export function countStat(
   const m = measureTierEffects(samples.values());
   const effects = resolveEffects(m);
   const measured = m.G5.effect != null || m.FCS.effect != null;
-  const adjusted = measured ? adjustCountSamples(samples, effects, def.scale) : samples;
+  const tierAdjusted = measured ? adjustCountSamples(samples, effects, def.scale) : samples;
+  // Opponent defense SP+ and weather where their held-out tests passed (contextGrading.ts).
+  const ctx = contextOn ? contextAdjust(def.key, def.pos, samples, tierAdjusted, context!, def.scale) : null;
   return {
-    def, samples: adjusted, poolRate: poolRate != null ? poolRate * def.scale : null, dispersion,
-    effects, tierProspects: m.G5.prospects, measured,
+    def, samples: ctx?.samples ?? tierAdjusted, poolRate: poolRate != null ? poolRate * def.scale : null, dispersion,
+    effects, tierProspects: m.G5.prospects, measured, ...(ctx ? { context: ctx.info } : {}),
   };
 }
 

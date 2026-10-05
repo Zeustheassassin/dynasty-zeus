@@ -24,6 +24,8 @@ import PlayTagControls, { PlayTagBadges } from "../shared/PlayTagControls";
 import type { PlayFacts } from "../../../lib/scouting/playTags";
 import { computeSAEForPlays, computeCoreSAEForPlays, type WRDifficultyModel } from "../../../lib/scouting/aggregateMerge";
 import { usePffGameLog } from "../pff/usePffGameLog";
+import { useGameContextLog } from "../context/useGameContextLog";
+import GameContextPanel from "../context/GameContextPanel";
 import { PffLogBar, PffLogCells, PffLogFooter, PffLogHeaders } from "../pff/PffGameLogColumns";
 
 const COVERAGES: { key: string; label: string }[] = [
@@ -96,6 +98,8 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
           onAddGame, onDeleteGame, onUpdateGame, onToggleEditBio, onBioChange, onSaveBio } = cs;
   // PFF's numbers for each charted game (Games tab, play list header).
   const pff = usePffGameLog(prospect.id, games, cs.markDataDirty);
+  // Each charted game's context (opponent defense, weather, cast) and the user's calls (Games tab).
+  const gameContext = useGameContextLog(prospect.id, games, cs.setGames, cs.markDataDirty);
 
   useEffect(() => {
     if (games.length === 0) return;
@@ -912,6 +916,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                 </tfoot>
               </table>
             </div>
+            <GameContextPanel position={prospect.position} games={games} log={gameContext} />
             </div>
           )}
         </div>

@@ -7,6 +7,7 @@ import type { Prospect, ScoutingGame, TEPlay, TEPositioning, TELocation, TECover
 import { roleFitCols, roleFitRow } from "./roleFitCols";
 import { pffCols, pffRow } from "./pffCols";
 import { tagCols, tagRow, tagValuesFor } from "./tagCols";
+import { contextCols, traitCols } from "./contextCols";
 import type { TagStatValue } from "../../../lib/scouting/tagStats";
 import type { PffTotals } from "../../../lib/pff/totals";
 
@@ -19,6 +20,8 @@ interface Props {
   onSelectProspect?: (p: Prospect) => void;
   /** PFF over each prospect's charted games (ScoutingHub). */
   pffTotals?: Map<string, PffTotals>;
+  /** Per-prospect game-context and trait fields (contextCols.ts). */
+  contextExtras?: Map<string, Record<string, number | null>>;
 }
 
 const POSITIONINGS: TEPositioning[] = ["wide", "slot", "inline", "full_back", "running_back", "wing_back"];
@@ -101,6 +104,9 @@ export const TE_STAT_COLS: ColDef[] = [
   // The tag-only stats (tagged plays only)
   ...tagCols("TE"),
   ...pffCols("TE"),
+  // Game context and the user's trait grades (Stage 5)
+  ...contextCols("TE"),
+  ...traitCols("TE"),
 ];
 
 function pct(n: number, d: number): number | null {
@@ -142,7 +148,7 @@ function blkSuccPct(plays: TEPlay[], filter: (p: TEPlay) => boolean): number | n
 
 // Extracted so the Phase I player-comparison tool can compute the same rows
 // for any two TE prospects without duplicating this logic.
-export function buildTEStatRows(prospects: Prospect[], games: ScoutingGame[], tePlays: TEPlay[], pff?: Map<string, PffTotals>, tags?: Map<string, Record<string, TagStatValue>>): StatRow[] {
+export function buildTEStatRows(prospects: Prospect[], games: ScoutingGame[], tePlays: TEPlay[], pff?: Map<string, PffTotals>, tags?: Map<string, Record<string, TagStatValue>>, extras?: Map<string, Record<string, number | null>>): StatRow[] {
     const teSaerMap = computeTERouteAboveExpected(prospects, games, tePlays);
     const teSaebMap = computeTEBlockAboveExpected(prospects, games, tePlays);
     const roleFits = computeTERoleFits(prospects, games, tePlays);
@@ -266,6 +272,7 @@ export function buildTEStatRows(prospects: Prospect[], games: ScoutingGame[], te
           raw_btk:      btk,
           ...tagRow("TE", tags?.get(p.id)),
           ...pffRow(pff?.get(p.id)),
+          ...extras?.get(p.id),
         } satisfies StatRow;
       });
 }
@@ -276,10 +283,10 @@ const TE_MIN_FILTERS: MinFilterDef[] = [
   { key: "blocks", label: "Blocks" },
 ];
 
-export default function TEStatsTable({ prospects, games, tePlays, loading, draftYearFilter, onSelectProspect, pffTotals }: Props) {
+export default function TEStatsTable({ prospects, games, tePlays, loading, draftYearFilter, onSelectProspect, pffTotals, contextExtras }: Props) {
   const prospectMap = useMemo(() => new Map(prospects.map((p) => [p.id, p])), [prospects]);
   const tags = useMemo(() => tagValuesFor({ games, tePlays }), [games, tePlays]);
-  const rows = useMemo(() => buildTEStatRows(prospects, games, tePlays, pffTotals, tags), [prospects, games, tePlays, pffTotals, tags]);
+  const rows = useMemo(() => buildTEStatRows(prospects, games, tePlays, pffTotals, tags, contextExtras), [prospects, games, tePlays, pffTotals, tags, contextExtras]);
 
   return (
     <StatsTableShell

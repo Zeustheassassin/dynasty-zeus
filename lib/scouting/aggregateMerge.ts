@@ -27,6 +27,7 @@ import {
   type ResidualSums,
 } from "./difficultyModel";
 import { seasonWeights } from "./seasonWeight";
+import { addGameResidual, type ByGame } from "./contextEffects";
 import { COVERAGE_ERAS, coverageEra, coverageEras, type CoverageEra } from "./coverageEra";
 import { isTaggedPlay } from "./playEra";
 import { correctionDesign, enabledSpecs, fitTagCorrection, GARBAGE_TIME_WEIGHT, RECENTER_TAGGED } from "./tagCorrection";
@@ -508,28 +509,73 @@ export function buildWRTierSplits(
   tagRows: readonly ProspectGameRouteTagCellsRow[] = [],
 ): WRTierSplits {
   const out: WRTierSplits = { all: new Map(), core: new Map() };
+  visitWRGameResiduals(gameRows, games, tagRows, (row) => {
+    const tier = tierOf(row.game_id);
+    if (!tier) return null;
+    const all = out.all.get(row.prospect_id) ?? {};
+    const core = out.core.get(row.prospect_id) ?? {};
+    out.all.set(row.prospect_id, all);
+    out.core.set(row.prospect_id, core);
+    return (c, resid) => {
+      addTierResidual(all, tier, c.n, resid, c.w * c.n);
+      if (!SAE_EX_ROUTE_TYPES.has(c.route_type)) addTierResidual(core, tier, c.n, resid, c.w * c.n);
+    };
+  });
+  return out;
+}
+
+/** Each prospect's WR residuals by charted game (all routes and core routes),
+ *  for the game-context effects (contextEffects.ts). Same model and cells as
+ *  the tier splits. */
+export interface WRGameSplits {
+  all: Map<string, ByGame>;
+  core: Map<string, ByGame>;
+}
+
+export function buildWRGameSplits(
+  gameRows: ProspectGameRouteCellsRow[],
+  games: readonly ScoutingGame[] = [],
+  tagRows: readonly ProspectGameRouteTagCellsRow[] = [],
+): WRGameSplits {
+  const out: WRGameSplits = { all: new Map(), core: new Map() };
+  visitWRGameResiduals(gameRows, games, tagRows, (row) => {
+    const all = out.all.get(row.prospect_id) ?? {};
+    const core = out.core.get(row.prospect_id) ?? {};
+    out.all.set(row.prospect_id, all);
+    out.core.set(row.prospect_id, core);
+    return (c, resid) => {
+      addGameResidual(all, row.game_id, c.n, resid, c.w * c.n);
+      if (!SAE_EX_ROUTE_TYPES.has(c.route_type)) addGameResidual(core, row.game_id, c.n, resid, c.w * c.n);
+    };
+  });
+  return out;
+}
+
+// Every WR game cell's residual (open − n × expected) under the WR model, with
+// its season weight. `onRow` is called once per game row and returns the
+// visitor for that row's cells, or null to skip the row.
+type WRCellVisitor = (c: { n: number; w: number; route_type: string }, resid: number) => void;
+function visitWRGameResiduals(
+  gameRows: ProspectGameRouteCellsRow[],
+  games: readonly ScoutingGame[],
+  tagRows: readonly ProspectGameRouteTagCellsRow[],
+  onRow: (row: ProspectGameRouteCellsRow) => WRCellVisitor | null,
+): void {
   const fitted = buildWRModel(gameRows, games, tagRows);
-  if (!fitted.model) return out;
+  if (!fitted.model) return;
   const model = { ...fitted, model: fitted.model };
   const weights = seasonWeights(games);
   const eras = coverageEras(games);
   const tagsBy = splitTagged(fitted) ? tagCellsByGame(tagRows) : null;
   for (const row of gameRows) {
-    const tier = tierOf(row.game_id);
-    if (!tier) continue;
+    const visit = onRow(row);
+    if (!visit) continue;
     const w = weights.get(row.game_id) ?? 1;
-    const all = out.all.get(row.prospect_id) ?? {};
-    const core = out.core.get(row.prospect_id) ?? {};
     for (const c of gameCells(row.cells, tagsBy?.get(row.game_id), w, eras.get(row.game_id) ?? "new")) {
       if (!(c.w > 0)) continue;
-      const resid = c.open - c.n * expectedFor(model, c);
-      addTierResidual(all, tier, c.n, resid, c.w * c.n);
-      if (!SAE_EX_ROUTE_TYPES.has(c.route_type)) addTierResidual(core, tier, c.n, resid, c.w * c.n);
+      visit(c, c.open - c.n * expectedFor(model, c));
     }
-    out.all.set(row.prospect_id, all);
-    out.core.set(row.prospect_id, core);
   }
-  return out;
 }
 
 // computeSAE / computeCoreSAE plus the sample behind each, for the

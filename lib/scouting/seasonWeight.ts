@@ -15,13 +15,16 @@
 // charted. A single game is a single season, so the per-game badges are
 // unaffected.
 import type { ScoutingGame } from "../types";
+import { gameFlagWeight } from "./gameFlags";
 
 export const SEASON_DECAY = 0.915;
 
 /** Game id → the weight of its plays. Each prospect's newest charted season
- *  counts in full; a game with no season counts in full too. */
+ *  counts in full; a game with no season counts in full too. A game the user
+ *  flagged (left early, played hurt) also carries its flag's weight
+ *  (gameFlags.ts), which is 1 until its test passes. */
 export function seasonWeights(
-  games: readonly Pick<ScoutingGame, "id" | "prospect_id" | "season_year">[],
+  games: readonly (Pick<ScoutingGame, "id" | "prospect_id" | "season_year"> & Partial<Pick<ScoutingGame, "played_hurt" | "left_early">>)[],
 ): Map<string, number> {
   const newest = new Map<string, number>();
   for (const g of games) {
@@ -32,7 +35,7 @@ export function seasonWeights(
   const out = new Map<string, number>();
   for (const g of games) {
     const top = newest.get(g.prospect_id);
-    out.set(g.id, top == null || !Number.isFinite(g.season_year) ? 1 : SEASON_DECAY ** (top - g.season_year));
+    out.set(g.id, (top == null || !Number.isFinite(g.season_year) ? 1 : SEASON_DECAY ** (top - g.season_year)) * gameFlagWeight(g));
   }
   return out;
 }

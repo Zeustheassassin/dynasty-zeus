@@ -29,7 +29,9 @@ import { tierGames, type OpponentTier } from "../../lib/scouting/opponentTier";
 import { applyOpponentStrength, type OpponentAdjusted } from "../../lib/scouting/opponentAdjust";
 import { classDraftedBy, makeLock, activeLock } from "../../lib/scouting/scoreLock";
 import { alignmentPenalty } from "../../lib/scouting/alignmentPenalty";
-import { buildWRTierSplits, type ProspectGameRouteCellsRow } from "../../lib/scouting/aggregateMerge";
+import { buildWRGameSplits, buildWRTierSplits, type ProspectGameRouteCellsRow } from "../../lib/scouting/aggregateMerge";
+import { gameCovariates, resolveGameContexts } from "../../lib/scouting/gameContext";
+import { contextAdjust, type HeadlineKey, type MetricContext } from "../../lib/scouting/contextGrading";
 import { SEASON_DECAY } from "../../lib/scouting/seasonWeight";
 import { POS_COLOR } from "../../lib/uiTheme";
 import { computeRoleFits } from "../../lib/scouting/roleFits";
@@ -44,8 +46,14 @@ import { pffValues, type PffTotals, type PffValues } from "../../lib/pff/totals"
 import { pffPos } from "../../lib/pff/stats";
 import { buildComponents, EMPTY_GRADING_DATA, type GradingData } from "../../lib/scouting/aeComponents";
 import { tagStatReps } from "../../lib/scouting/tagStats";
+import { traitAverages, traitComponents, traitsFor, TRAIT_WEIGHT, uncoveredTraits, type TraitAverage } from "../../lib/scouting/traits";
 
 type LoadPositionPlaysFn = (pos: "RB" | "QB" | "TE") => void;
+
+// The composite's headline metric keys → the context policy's (contextGrading.ts).
+const COMPOSITE_HEADLINE: Record<string, HeadlineKey | undefined> = {
+  aae: "qb_aae", srae: "rb_srae", sae: "wr_sae", csae: "wr_csae", te_saer: "te_saer", te_saeb: "te_saeb",
+};
 
 type BoardTab = "all" | "QB" | "RB" | "WR" | "TE";
 
@@ -105,6 +113,42 @@ const DYNASTY_WEIGHTS_KEY = "dynastyScoreWeights";
 // Live scores, or a drafted class's scores as they stood at the draft
 // (lib/scouting/scoreLock.ts). Per browser, a viewing preference.
 const SCORE_VIEW_KEY = "bigBoardScoreView";
+const SCORE_TRAITS_KEY = "bigBoardScoreTraits";
+
+type CompositeInputs = Parameters<typeof buildAEComposite>[0];
+
+const TRAIT_AVG_KEY = "trait_avg";
+const UNCOVERED_TRAITS_TEXT = (["QB", "RB", "WR", "TE"] as const)
+  .map((pos) => [pos, uncoveredTraits(pos).map((t) => t.label.toLowerCase())] as const)
+  .filter(([, ts]) => ts.length)
+  .map(([pos, ts]) => `${pos} ${ts.join(", ")}`)
+  .join("; ");
+const TRAITS_BAND_TOOLTIP =
+  "Your per-game trait grades (1–10), on games charted since traits began; averaged, older seasons a little less. " +
+  "Beside the AE Score: the \"With traits\" toggle adds the traits nothing else measures.";
+/** A prospect's mean over his position's graded traits. */
+function traitMean(t: Record<string, TraitAverage>, pos: string): number | null {
+  const xs = traitsFor(pos).map((x) => t[x.key]?.avg).filter((v): v is number => v != null);
+  return xs.length ? xs.reduce((s, v) => s + v, 0) / xs.length : null;
+}
+
+// Live AE Scores from a composite: its score plus a WR's alignment penalty.
+function liveScoresFrom(prospects: readonly ProspectWithStats[], composite: AEComposite): Map<string, ScoreView> {
+  const m = new Map<string, ScoreView>();
+  for (const p of prospects) {
+    const sc = composite.scores.get(p.id);
+    if (!sc || !isCompositePos(p.position)) continue;
+    const pc = composite.positions[p.position];
+    const alignment = p.position === "WR" ? alignmentPenalty(p) : null;
+    m.set(p.id, {
+      score: sc.score + (alignment?.value ?? 0),
+      components: sc.components.map((c) => ({ ...c, tau: pc.metrics.find((x) => x.key === c.key)?.tau ?? 0 })),
+      ...(alignment ? { alignment } : {}),
+      ...(sc.baseline ? { baseline: sc.baseline } : {}),
+    });
+  }
+  return m;
+}
 type ScoreViewMode = "live" | "draft";
 const WEIGHT_SLIDERS: { key: keyof DynastyWeights; label: string; hint: string }[] = [
   { key: "age",   label: "Age",   hint: "How much the career window (prime seasons left) counts" },
@@ -135,13 +179,14 @@ interface SortContext {
   ages: Map<string, ProspectAge>;
   roles: Map<string, RoleFit>;
   pff: Map<string, PffValues>;
+  traits: Map<string, Record<string, TraitAverage>>;
 }
 
 type SortKey =
   | "pre_draft_grade" | "post_draft_grade" | "grade_delta"
   | "personal_rank" | "overall_rank" | "ae_score" | "dynasty" | "dynasty_plus" | "role" | "name" | "school" | "conference" | "draft_class_year" | "height" | "weight" | "age" | "position"
   | "total_routes" | "total_games" | "targets" | "catches" | "drops" | "contested" | "contested_catches"
-  | "success_rate" | "target_rate" | "adj_success_above_exp" | `ae_${AEKey}`
+  | "success_rate" | "target_rate" | "adj_success_above_exp" | `ae_${AEKey}` | `trait_${string}`
   | "pct_left" | "pct_right" | "pct_slot" | "pct_backfield"
   | "depth_behind_los" | "depth_on_los" | "total_snaps"
   | "cvg_man" | "cvg_man_catch" | "cvg_zone" | "cvg_zone_catch"
@@ -216,6 +261,13 @@ function getSortValue(
   if (key.startsWith("ae_")) return aeMaps[key.slice(3) as AEKey].get(p.id) ?? null;
   // PFF over the charted games; none sinks both ways.
   if (key.startsWith("pff_")) return ctx.pff.get(p.id)?.[key] ?? null;
+  // The user's trait grades (average over graded games); ungraded sinks both ways.
+  if (key.startsWith("trait_")) {
+    const t = ctx.traits.get(p.id);
+    if (!t) return null;
+    if (key === TRAIT_AVG_KEY) return traitMean(t, p.position);
+    return t[key.slice("trait_".length)]?.avg ?? null;
+  }
   if (key === "school") return p.school;
   if (key === "conference") return p.conference ?? "";
   if (key === "position") return p.position;
@@ -303,6 +355,11 @@ export default function BigBoard({
 
   // Each game's opponent tier (P4 / G5 / FCS), for the opponent adjustment.
   const gameTiers = useMemo(() => tierGames(games), [games]);
+  // Each game's automatic context (migration 065) and the covariates the
+  // context effects read: opponent defense SP+ and weather count where their
+  // held-out tests passed (contextGrading.ts).
+  const contexts = useMemo(() => resolveGameContexts(games, gradingData.context), [games, gradingData.context]);
+  const contextCov = useMemo(() => gameCovariates(games, contexts, gameTiers.byGame), [games, contexts, gameTiers]);
 
   // One map per Above-Expected column, each holding only its own position's
   // prospects. null = under that metric's min-sample threshold. The headline
@@ -310,7 +367,10 @@ export default function BigBoard({
   // The AE Score (and the Dynasty scores built on it) take the samples after
   // the opponent-strength adjustment (opponentAdjust.ts). The AE columns keep
   // the unadjusted values, by the user's call.
-  const { aeMaps, composite, opponent } = useMemo<{ aeMaps: AEMaps; composite: AEComposite; opponent: OpponentAdjusted["effects"] }>(() => {
+  const { aeMaps, composite, compositeInputs, opponent, contextInfo } = useMemo<{
+    aeMaps: AEMaps; composite: AEComposite; compositeInputs: CompositeInputs;
+    opponent: OpponentAdjusted["effects"]; contextInfo: Record<HeadlineKey, MetricContext>;
+  }>(() => {
     const sae = new Map<string, number | null>();
     const csae = new Map<string, number | null>();
     const wr = new Map<string, AESample | null>();
@@ -323,28 +383,48 @@ export default function BigBoard({
       wrCore.set(p.id, p.core_sae_sample);
     }
     const tiers = gameTiers.byGame;
-    const qb = computeQBAboveExpectedSamples(prospects, games, qbPlays);
-    const rb = computeRBAboveExpectedSamples(prospects, games, rbPlays, tiers);
-    const teRoute = computeTERouteAboveExpectedSamples(prospects, games, tePlays, tiers);
-    const teBlock = computeTEBlockAboveExpectedSamples(prospects, games, tePlays, tiers);
+    const qb = computeQBAboveExpectedSamples(prospects, games, qbPlays, { byGame: true });
+    const rb = computeRBAboveExpectedSamples(prospects, games, rbPlays, tiers, { byGame: true });
+    const teRoute = computeTERouteAboveExpectedSamples(prospects, games, tePlays, tiers, { byGame: true });
+    const teBlock = computeTEBlockAboveExpectedSamples(prospects, games, tePlays, tiers, { byGame: true });
     // WR's tier splits come from the per-game cells; without them WR (and so
     // RB and TE, which borrow WR's effect) stays unadjusted.
     const splits = gameRouteCells ? buildWRTierSplits(gameRouteCells, (id) => tiers.get(id), games, gradingData.routeTagCells) : null;
     const withSplits = (m: Map<string, AESample | null>, by: Map<string, NonNullable<AESample["byTier"]>> | undefined) =>
       by ? new Map([...m].map(([id, smp]) => [id, smp ? { ...smp, byTier: by.get(id) ?? {} } : smp])) : m;
-    const opp = applyOpponentStrength({
-      rb,
-      wr: withSplits(wr, splits?.all),
-      wrCore: withSplits(wrCore, splits?.core),
-      teRoute,
-      teBlock,
-    });
+    // And by game, for the context effects.
+    const gameSplits = gameRouteCells ? buildWRGameSplits(gameRouteCells, games, gradingData.routeTagCells) : null;
+    const withGames = (m: Map<string, AESample | null>, by: Map<string, NonNullable<AESample["byGame"]>> | undefined) =>
+      by ? new Map([...m].map(([id, smp]) => [id, smp ? { ...smp, byGame: by.get(id) ?? {} } : smp])) : m;
+    const wrRaw = withGames(withSplits(wr, splits?.all), gameSplits?.all);
+    const wrCoreRaw = withGames(withSplits(wrCore, splits?.core), gameSplits?.core);
+    const opp = applyOpponentStrength({ rb, wr: wrRaw, wrCore: wrCoreRaw, teRoute, teBlock });
+    // Opponent defense SP+ / weather where their tests passed; everything else
+    // keeps today's tier adjustment untouched.
+    const qbC = contextAdjust("qb_aae", "QB", qb, qb, contextCov);
+    const rbC = contextAdjust("rb_srae", "RB", rb, opp.rb, contextCov);
+    const wrC = contextAdjust("wr_sae", "WR", wrRaw, opp.wr, contextCov);
+    const wrCoreC = contextAdjust("wr_csae", "WR", wrCoreRaw, opp.wrCore, contextCov);
+    const teRouteC = contextAdjust("te_saer", "TE", teRoute, opp.teRoute, contextCov);
+    const teBlockC = contextAdjust("te_saeb", "TE", teBlock, opp.teBlock, contextCov);
     // Breakdown slices come back as one record per prospect; split each slice
     // out into its own column map.
     const sliceCol = <K extends string>(m: Map<string, Record<K, AESlice>>, k: K) =>
       new Map([...m].map(([id, s]) => [id, s[k].ae]));
     const qbSlices = computeQBThrowSliceAAE(prospects, games, qbPlays);
     const rbSlices = computeRBRunSliceSRAE(prospects, games, rbPlays);
+    const compositeInputs: CompositeInputs = {
+      qb: qbC.samples, rb: rbC.samples, wr: wrC.samples, wrCore: wrCoreC.samples, teRoute: teRouteC.samples, teBlock: teBlockC.samples,
+      // The per-player components: the user's charting no AE reads yet, PFF's
+      // results where the user doesn't chart, and the tag-only stats.
+      extra: buildComponents({
+        prospects, games, tierByGame: tiers, qbPlays, rbPlays,
+        pffGameRows: gradingData.pffGameRows,
+        wrRouteCounts: gradingData.routeCounts,
+        tagReps: tagStatReps({ games, qbPlays, rbPlays, tePlays, wrTagRows: gradingData.routeTagCells }),
+        context: contextCov,
+      }).extra,
+    };
     return {
       aeMaps: {
         aae: aeValues(qb),
@@ -363,20 +443,14 @@ export default function BigBoard({
         srae_zone: sliceCol(rbSlices, "zone"),
         srae_mg: sliceCol(rbSlices, "man_gap"),
       },
-      composite: buildAEComposite({
-        qb, rb: opp.rb, wr: opp.wr, wrCore: opp.wrCore, teRoute: opp.teRoute, teBlock: opp.teBlock,
-        // The per-player components: the user's charting no AE reads yet, PFF's
-        // results where the user doesn't chart, and the tag-only stats.
-        extra: buildComponents({
-          prospects, games, tierByGame: tiers, qbPlays, rbPlays,
-          pffGameRows: gradingData.pffGameRows,
-          wrRouteCounts: gradingData.routeCounts,
-          tagReps: tagStatReps({ games, qbPlays, rbPlays, tePlays, wrTagRows: gradingData.routeTagCells }),
-        }).extra,
-      }),
+      composite: buildAEComposite(compositeInputs),
+      compositeInputs,
       opponent: opp.effects,
+      contextInfo: {
+        qb_aae: qbC.info, rb_srae: rbC.info, wr_sae: wrC.info, wr_csae: wrCoreC.info, te_saer: teRouteC.info, te_saeb: teBlockC.info,
+      },
     };
-  }, [prospects, games, rbPlays, qbPlays, tePlays, gameTiers, gameRouteCells, gradingData]);
+  }, [prospects, games, rbPlays, qbPlays, tePlays, gameTiers, gameRouteCells, gradingData, contextCov]);
 
   // Each prospect's charted games by opponent tier, for the AE Score tooltip.
   const gamesByTier = useMemo(() => {
@@ -391,6 +465,19 @@ export default function BigBoard({
     return m;
   }, [games, gameTiers]);
 
+  // Each prospect's charted opponents' average defensive SP+ (FBS opponents), for the tooltip.
+  const defenseFaced = useMemo(() => {
+    const acc = new Map<string, { sum: number; games: number }>();
+    for (const g of games) {
+      const sp = contexts.get(g.id)?.oppDefSp;
+      if (sp == null) continue;
+      const a = acc.get(g.prospect_id) ?? { sum: 0, games: 0 };
+      a.sum += sp; a.games++;
+      acc.set(g.prospect_id, a);
+    }
+    return new Map([...acc].map(([id, a]) => [id, { avg: a.sum / a.games, games: a.games }]));
+  }, [games, contexts]);
+
   const [scoreMode, setScoreMode] = useState<ScoreViewMode>(() =>
     getLocalStorageItem<ScoreViewMode>(SCORE_VIEW_KEY, "live") === "draft" ? "draft" : "live");
   function chooseScoreMode(mode: ScoreViewMode) {
@@ -398,25 +485,38 @@ export default function BigBoard({
     setLocalStorageItem(SCORE_VIEW_KEY, mode);
   }
 
+  // Traits (the user's per-game 1–10 grades, new games only) sit beside the
+  // AE Score. The toggle shows the same scores with the uncovered traits
+  // added (traits.ts); off by default, and draft-day snapshots never use it.
+  const [withTraits, setWithTraits] = useState<boolean>(() => getLocalStorageItem<boolean>(SCORE_TRAITS_KEY, false) === true);
+  function chooseTraits(on: boolean) {
+    setWithTraits(on);
+    setLocalStorageItem(SCORE_TRAITS_KEY, on);
+  }
+  const traitAvgs = useMemo(() => traitAverages(prospects, games), [prospects, games]);
+  const traitComposite = useMemo(() => {
+    if (!withTraits) return null;
+    const t = traitComponents(prospects, games);
+    const extra = compositeInputs.extra;
+    return buildAEComposite({
+      ...compositeInputs,
+      extra: {
+        QB: [...(extra?.QB ?? []), ...t.QB], RB: [...(extra?.RB ?? []), ...t.RB],
+        WR: [...(extra?.WR ?? []), ...t.WR], TE: [...(extra?.TE ?? []), ...t.TE],
+      },
+    });
+  }, [withTraits, compositeInputs, prospects, games]);
+  const shownComposite = traitComposite ?? composite;
+
   // The live AE Score: the composite, plus a WR's alignment penalty
   // (alignmentPenalty.ts). The penalty is part of the AE Score, so Dynasty and
-  // Dynasty+ carry it.
-  const liveScores = useMemo(() => {
-    const m = new Map<string, ScoreView>();
-    for (const p of prospects) {
-      const sc = composite.scores.get(p.id);
-      if (!sc || !isCompositePos(p.position)) continue;
-      const pc = composite.positions[p.position];
-      const alignment = p.position === "WR" ? alignmentPenalty(p) : null;
-      m.set(p.id, {
-        score: sc.score + (alignment?.value ?? 0),
-        components: sc.components.map((c) => ({ ...c, tau: pc.metrics.find((x) => x.key === c.key)?.tau ?? 0 })),
-        ...(alignment ? { alignment } : {}),
-        ...(sc.baseline ? { baseline: sc.baseline } : {}),
-      });
-    }
-    return m;
-  }, [prospects, composite]);
+  // Dynasty+ carry it. `liveScores` (never with traits) is what draft-day
+  // snapshots save; `shownLive` follows the traits toggle.
+  const liveScores = useMemo(() => liveScoresFrom(prospects, composite), [prospects, composite]);
+  const shownLive = useMemo(
+    () => (traitComposite ? liveScoresFrom(prospects, traitComposite) : liveScores),
+    [prospects, traitComposite, liveScores],
+  );
 
   // AE Score per prospect. Live by default: more charting sharpens the models
   // and spreads, and that should reach every class. "As of draft" swaps in a
@@ -431,13 +531,13 @@ export default function BigBoard({
       const snapshot: ScoreView | null = lock
         ? { score: lock.score, components: lock.components, alignment: lock.alignment, baseline: lock.baseline, lockedAt: lock.locked_at }
         : null;
-      const live = liveScores.get(p.id);
+      const live = shownLive.get(p.id);
       if (snapshot && (scoreMode === "draft" || !live)) { m.set(p.id, snapshot); continue; }
       if (!live) continue;
       m.set(p.id, lock ? { ...live, atDraft: { score: lock.score, lockedAt: lock.locked_at } } : live);
     }
     return m;
-  }, [prospects, liveScores, scoreMode]);
+  }, [prospects, shownLive, scoreMode]);
 
   // Snapshot each drafted prospect's AE Score the first time it's scored, once
   // every lazy input has landed: the draft-day record behind "As of draft".
@@ -565,8 +665,8 @@ export default function BigBoard({
   }, [prospects, pffTotals]);
 
   const sortCtx = useMemo<SortContext>(
-    () => ({ aeScores: scoreViews, dynasty, ages, roles: roleFits, pff: pffVals }),
-    [scoreViews, dynasty, ages, roleFits, pffVals],
+    () => ({ aeScores: scoreViews, dynasty, ages, roles: roleFits, pff: pffVals, traits: traitAvgs }),
+    [scoreViews, dynasty, ages, roleFits, pffVals, traitAvgs],
   );
 
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -618,7 +718,7 @@ export default function BigBoard({
     else {
       setSortKey(k);
       const pffLowerBetter = k.startsWith("pff_") && pffColumnDefs.find((c) => c.key === k)?.colorDir === -1;
-      setSortDir(pffLowerBetter ? "asc" : k.startsWith("ae_") || k.startsWith("dynasty") || k.startsWith("pff_") ? "desc" : "asc");
+      setSortDir(pffLowerBetter ? "asc" : k.startsWith("ae_") || k.startsWith("dynasty") || k.startsWith("pff_") || k.startsWith("trait_") ? "desc" : "asc");
     }
   }
 
@@ -689,6 +789,23 @@ export default function BigBoard({
     return <td key={c.key} className={`${tdBase} text-slate-300 ${cls}`} title={title}>{fmtVal(v, c.fmt)}</td>;
   }
 
+  // ── Trait cells ───────────────────────────────────────────────
+  // The user's per-game trait grades (1–10, new games only), averaged.
+  function traitCell(p: ProspectWithStats, c: ColDef, cls: string) {
+    const t = traitAvgs.get(p.id);
+    const isAvg = c.key === TRAIT_AVG_KEY;
+    const traitKey = c.key.slice("trait_".length);
+    if (!isAvg && !traitsFor(p.position).some((x) => x.key === traitKey)) return <td key={c.key} className={`${tdBase} ${cls}`} />;
+    const v = t ? (isAvg ? traitMean(t, p.position) : t[traitKey]?.avg ?? null) : null;
+    if (v == null) {
+      return <td key={c.key} className={`${tdBase} text-slate-600 ${cls}`} title="Not graded yet (new games only: grade traits in the board's Games tab)">—</td>;
+    }
+    const title = isAvg
+      ? traitsFor(p.position).filter((x) => t![x.key]).map((x) => `${x.label} ${t![x.key].avg.toFixed(1)} (${t![x.key].games} g)`).join(" · ")
+      : `${t![traitKey].games} graded game${t![traitKey].games === 1 ? "" : "s"}`;
+    return <td key={c.key} className={`${tdBase} text-fuchsia-300 ${cls}`} title={title}>{v.toFixed(1)}</td>;
+  }
+
   // ── AE Score cell ─────────────────────────────────────────────
   // "—" for a prospect under the position's sample floor, or at a position
   // without enough charted prospects to join the score yet; the tooltip says
@@ -696,7 +813,7 @@ export default function BigBoard({
   function scoreCell(p: ProspectWithStats) {
     const cls = `${tdBase} border-l border-slate-800`;
     if (!isCompositePos(p.position)) return <td className={cls} />;
-    const pc = composite.positions[p.position];
+    const pc = shownComposite.positions[p.position];
     const primary = pc.metrics[0];
     const sc = scoreViews.get(p.id);
     if (!sc) {
@@ -714,8 +831,10 @@ export default function BigBoard({
         return `${c.label} ${c.text ?? signed(c.ae, 2)} · ${Math.round(c.reliability * 100)}% taken as real · ` +
           `weight ${c.weight} × ${Math.round(c.reliability * 100)}% = ${(c.effectiveWeight ?? 0).toFixed(2)} → ${signed(c.z, 2)}`;
       }
+      const ctx = contextInfo[COMPOSITE_HEADLINE[c.key] ?? "qb_aae"];
+      const what = !COMPOSITE_HEADLINE[c.key] ? "opponents" : ctx.weather ? "opponents and weather" : ctx.opponent === "sp" && ctx.fit ? "opponent defenses" : "opponents";
       const ae = c.rawAe != null
-        ? `${signed(c.rawAe, 1)} (${signed(c.ae - c.rawAe, 1)} for opponents) = ${signed(c.ae, 1)}`
+        ? `${signed(c.rawAe, 1)} (${signed(c.ae - c.rawAe, 1)} for ${what}) = ${signed(c.ae, 1)}`
         : signed(c.ae, 1);
       return `${c.label} ${ae} on ${c.n} ${SAMPLE_UNIT[c.key] ?? "plays"} · ` +
         `${Math.round(c.reliability * 100)}% taken as real${fullAt(p.position, c.key)} · ${p.position} spread ±${c.tau.toFixed(1)} → ${signed(c.z, 2)}`;
@@ -729,6 +848,8 @@ export default function BigBoard({
     if (sc.baseline) lines.push(`${p.position} baseline: every ${p.position} sits ${Math.abs(sc.baseline).toFixed(1)} ${sc.baseline < 0 ? "lower" : "higher"} → ${signed(sc.baseline, 2)}`);
     const mix = gamesByTier.get(p.id);
     if (mix && p.position !== "QB") lines.push(`Charted opponents: ${mix.P4} P4 · ${mix.G5} G5 · ${mix.FCS} FCS`);
+    const sos = defenseFaced.get(p.id);
+    if (sos) lines.push(`Opponent defenses: SP+ ${sos.avg.toFixed(1)} allowed per game on average (charted pool ${contextCov.spRef.toFixed(1)}; lower is tougher), ${sos.games} game${sos.games === 1 ? "" : "s"}`);
     const after = [sc.alignment && "the alignment penalty", sc.baseline && `the ${p.position} baseline`].filter(Boolean).join(" and ");
     const head = `${signed(sc.score, 2)} true-talent SDs vs the average charted ${p.position}${after ? `, after ${after}` : ""}`;
     const title = [head, ...lines].join("\n");
@@ -830,9 +951,13 @@ export default function BigBoard({
     const how = e.source === "measured" ? `measured, ${e.prospects} players` : e.source;
     return `${pos} −${size} pts per G5/FCS rep (${how})`;
   };
+  // Headline metrics judged against opponent defense SP+ instead (contextGrading.ts).
+  const spText = (Object.values(contextInfo) as MetricContext[])
+    .filter((c) => c.opponent === "sp" && c.fit && c.fit.beta.opp_def_sp != null)
+    .map((c) => `${c.key === "wr_csae" ? "WR cSAE" : c.key} by opp. defense SP+ (${(c.fit!.beta.opp_def_sp * 100).toFixed(2)} pts per SP+ pt)`);
   const opponentStatus = !gameRouteCells
     ? "the per-game WR route data (migration 058) didn't load"
-    : [effectText("WR"), effectText("TE"), effectText("RB"), "QB not adjusted"].filter(Boolean).join(" · ") || "not enough games vs G5/FCS yet";
+    : [...spText, effectText("WR"), effectText("TE"), effectText("RB"), "QB not adjusted"].filter(Boolean).join(" · ") || "not enough games vs G5/FCS yet";
   const unrecognized = [...gameTiers.unrecognized].map(([name, n]) => `${name}${n > 1 ? ` (${n})` : ""}`);
 
   const compositeTooltip =
@@ -843,13 +968,27 @@ export default function BigBoard({
     "(QB sacks under pressure; RB broken tackles, explosives, pass pro, drops, open on routes; WR drops, contested catches), " +
     "PFF's results over the charted games where you don't chart (QB BTT%, TWP%, rushing; RB YCO/A, YPRR; WR/TE YPRR, YAC), " +
     "and the tag-only stats once enough tagged plays exist. A player without one keeps his score as it was. " +
-    "Reps against G5 and FCS opponents are discounted (the AE columns are not). " +
+    "Opponent strength is taken out (the AE columns keep it): WR cSAE, QB sacks under pressure and WR PFF YPRR by the opponent's defensive SP+, " +
+    "everything else by the opponent's P4 / G5 / FCS tier; WR contested catches and RB PFF YPRR by the game's weather too. " +
+    "Each passed a held-out test (Analysis → Grading checks); supporting cast is shown, never scored. " +
     `Older seasons count a little less, here and in the AE columns (each season back ×${SEASON_DECAY}). ` +
     "WRs lined up 75%+ on one side (or, milder, in the slot) lose up to 0.5 (0.2), most at 95%. " +
     `Small samples are discounted until full trust: WR at ${WR_ALL_FULL_TRUST} total / ${WR_CORE_FULL_TRUST} core routes, ` +
     `QB at ${QB_FULL_TRUST} throws, RB at ${RB_FULL_TRUST} runs (TE's ceiling is matched to WR's). ` +
     `RBs sit ${Math.abs(POSITION_BASELINE.RB ?? 0).toFixed(1)} lower across the board, to keep them from crowding the top. ` +
     `True spread: ${compositeStatus}.`;
+
+  // The Traits band: a position tab's six traits, or their average on All.
+  const traitColumnDefs: ColDef[] = boardTab === "all"
+    ? [{ key: TRAIT_AVG_KEY, label: "Traits", tooltip: "Average of a prospect's trait grades (1–10, your per-game grades on new games). Beside the AE Score." } as ColDef]
+    : traitsFor(boardTab).map((t) => ({
+      key: `trait_${t.key}`,
+      label: t.short,
+      tooltip: `${t.label}: your 1–10 grade, averaged over graded new games (older seasons count a little less). ` +
+        (t.coveredBy
+          ? `Beside the AE Score: ${t.coveredBy} already measures it.`
+          : `Uncovered: counts in the AE Score with "With traits" on (weight ${TRAIT_WEIGHT} at full trust).`),
+    } as ColDef));
 
   // The PFF band: a position tab's key PFF numbers, or the offense grade on All.
   const pffColumnDefs: ColDef[] = (() => {
@@ -1117,6 +1256,7 @@ export default function BigBoard({
             {pffColumnDefs.length > 0 && (
               <th colSpan={pffColumnDefs.length} title={PFF_BAND_TOOLTIP} className="px-2 py-1 text-center text-sky-900 font-medium border-r border-slate-800 whitespace-nowrap">PFF (charted games)</th>
             )}
+            <th colSpan={traitColumnDefs.length} title={TRAITS_BAND_TOOLTIP} className="px-2 py-1 text-center text-fuchsia-900 font-medium border-r border-slate-800 whitespace-nowrap">Traits (your grades)</th>
           </tr>
           <tr className="border-b border-slate-800 bg-slate-950">
             <th className="sticky left-0 z-20 bg-slate-950 w-6 text-slate-700 text-center px-1">⠿</th>
@@ -1139,6 +1279,7 @@ export default function BigBoard({
             {th("Role", "role", "border-l border-r border-slate-800 text-violet-500", roleTooltip)}
             {aeCols.map((c, i) => th(c.label, `ae_${c.key}`, `${aeBorder[i]} text-emerald-700`, c.tooltip))}
             {pffColumnDefs.map((c, i) => th(c.label, c.key as SortKey, `${pffBorder(i, pffColumnDefs.length)} text-sky-600`, c.tooltip))}
+            {traitColumnDefs.map((c, i) => th(c.label, c.key as SortKey, `${pffBorder(i, traitColumnDefs.length)} text-fuchsia-600`, c.tooltip))}
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-900">
@@ -1169,6 +1310,7 @@ export default function BigBoard({
                 {roleCell(p)}
                 {aeCols.map((c, i) => aeCell(p, c, aeBorder[i]))}
                 {pffColumnDefs.map((c, i) => pffCell(p, c, pffBorder(i, pffColumnDefs.length)))}
+                {traitColumnDefs.map((c, i) => traitCell(p, c, pffBorder(i, traitColumnDefs.length)))}
               </tr>
             );
           })}
@@ -1253,6 +1395,17 @@ export default function BigBoard({
               onClick={() => chooseScoreMode(mode)}
               className={`px-2 py-0.5 ${scoreMode === mode ? "bg-teal-800 text-white" : "bg-slate-900 text-slate-400 hover:bg-slate-800"}`}
             >{mode === "live" ? "Live" : "As of draft"}</button>
+          ))}
+        </div>
+        <div role="group" aria-label="Traits in the AE Score" className="inline-flex rounded border border-slate-700 overflow-hidden"
+          title={`Traits sit beside the AE Score. "With traits" shows the same live scores with the traits no charted or PFF stat already measures (${UNCOVERED_TRAITS_TEXT}) added at ${TRAIT_WEIGHT} each × trust; a prospect without grades keeps his score. Draft-day snapshots never include traits.`}>
+          {([false, true] as const).map((on) => (
+            <button
+              key={String(on)}
+              aria-pressed={withTraits === on}
+              onClick={() => chooseTraits(on)}
+              className={`px-2 py-0.5 ${withTraits === on ? "bg-fuchsia-900 text-white" : "bg-slate-900 text-slate-400 hover:bg-slate-800"}`}
+            >{on ? "With traits" : "Without traits"}</button>
           ))}
         </div>
         <span className="text-slate-500">Dynasty weights</span>

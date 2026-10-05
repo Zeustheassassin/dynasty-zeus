@@ -5,6 +5,7 @@ import type { Prospect, ProspectWithStats, ScoutingGame, RBPlay, QBPlay, TEPlay 
 import type { LoadPositionPlaysFn } from "../../ScoutingHub";
 import type { PffTotals } from "../../../lib/pff/totals";
 import { EMPTY_GRADING_DATA, type GradingData } from "../../../lib/scouting/aeComponents";
+import { contextExtras as contextExtrasFor } from "./contextCols";
 import type { ProspectGameRouteCellsRow } from "../../../lib/scouting/aggregateMerge";
 
 const WRStatsTable = dynamic(() => import("./WRStatsTable"), { ssr: false });
@@ -59,6 +60,8 @@ export default function AnalysisHub({
   gradingData = EMPTY_GRADING_DATA, gameRouteCells = null,
 }: Props) {
   const [posTab, setPosTab] = useState<PositionTab>("WR");
+  // Each prospect's game context and trait grades (Stage 5), for every table.
+  const contextExtras = useMemo(() => contextExtrasFor(prospects, games, gradingData.context), [prospects, games, gradingData.context]);
 
   // Trigger lazy fetch when a non-WR tab is activated. The fetch lives on
   // ScoutingHub now so its results are shared with GamesLog. Idempotent —
@@ -143,6 +146,7 @@ export default function AnalysisHub({
           draftYearFilter={draftYearFilter}
           onSelectProspect={onSelectProspect}
           pffTotals={pffTotals}
+          contextExtras={contextExtras}
           routeTagCells={gradingData.routeTagCells}
         />
       )}
@@ -155,6 +159,7 @@ export default function AnalysisHub({
           draftYearFilter={draftYearFilter}
           onSelectProspect={onSelectProspect}
           pffTotals={pffTotals}
+          contextExtras={contextExtras}
         />
       )}
       {posTab === "QB" && (
@@ -166,6 +171,7 @@ export default function AnalysisHub({
           draftYearFilter={draftYearFilter}
           onSelectProspect={onSelectProspect}
           pffTotals={pffTotals}
+          contextExtras={contextExtras}
         />
       )}
       {posTab === "TE" && (
@@ -177,6 +183,7 @@ export default function AnalysisHub({
           draftYearFilter={draftYearFilter}
           onSelectProspect={onSelectProspect}
           pffTotals={pffTotals}
+          contextExtras={contextExtras}
         />
       )}
       {posTab === "Grading" && (

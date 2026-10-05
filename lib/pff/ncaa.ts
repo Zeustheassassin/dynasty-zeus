@@ -188,6 +188,16 @@ export async function teamFacet(
   }, []);
 }
 
+/** Every offensive player of BOTH teams in one game, with that game's snaps
+ *  and grades (Stage 5 supporting cast; PFF ignores franchise_id here). */
+export async function gameOffense(client: PffClient, gameId: number): Promise<PffStatRow[]> {
+  return getOrEmpty(async () => {
+    const body = await client.get("/v1/facet/offense/summary", { league: "ncaa", game_id: gameId });
+    const r = reportBody(body, "offense_summary");
+    return Array.isArray(r) ? (r as PffStatRow[]) : [];
+  }, []);
+}
+
 /** A team's game(s) in one week, with whether PFF has charted them. */
 export async function weekGames(client: PffClient, season: number, week: number, franchiseId: number): Promise<PffGameInfo[]> {
   const body = await client.get<{ games?: PffGameInfo[] }>("/v1/games", {

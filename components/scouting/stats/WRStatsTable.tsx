@@ -6,6 +6,7 @@ import { roleFitCols, roleFitRow } from "./roleFitCols";
 import { pffCols, pffRow } from "./pffCols";
 import type { PffTotals } from "../../../lib/pff/totals";
 import { tagCols, tagRow, tagValuesFor } from "./tagCols";
+import { contextCols, traitCols } from "./contextCols";
 import type { TagStatValue } from "../../../lib/scouting/tagStats";
 import type { ProspectGameRouteTagCellsRow } from "../../../lib/scouting/aggregateMerge";
 
@@ -16,6 +17,8 @@ interface Props {
   onSelectProspect?: (p: Prospect) => void;
   /** PFF over each prospect's charted games (ScoutingHub). */
   pffTotals?: Map<string, PffTotals>;
+  /** Per-prospect game-context and trait fields (contextCols.ts). */
+  contextExtras?: Map<string, Record<string, number | null>>;
   /** Tagged WR routes per game (migration 064), for the tag-only stats. */
   routeTagCells?: readonly ProspectGameRouteTagCellsRow[];
 }
@@ -95,6 +98,9 @@ export const WR_STAT_COLS: ColDef[] = [
   // The tag-only stats (tagged routes only)
   ...tagCols("WR"),
   ...pffCols("WR"),
+  // Game context and the user's trait grades (Stage 5)
+  ...contextCols("WR"),
+  ...traitCols("WR"),
 ];
 
 function routeOpenPct(p: ProspectWithStats, rt: string): number | null {
@@ -145,7 +151,7 @@ function linedUpShares(lu: LinedUp | null) {
 
 // Extracted so the Phase I player-comparison tool can compute the same rows
 // for any two WR prospects without duplicating this logic.
-export function buildWRStatRows(prospectsWithStats: ProspectWithStats[], pff?: Map<string, PffTotals>, tags?: Map<string, Record<string, TagStatValue>>): StatRow[] {
+export function buildWRStatRows(prospectsWithStats: ProspectWithStats[], pff?: Map<string, PffTotals>, tags?: Map<string, Record<string, TagStatValue>>, extras?: Map<string, Record<string, number | null>>): StatRow[] {
   return prospectsWithStats
       .filter((p) => p.position === "WR")
       .map((p) => ({
@@ -235,16 +241,17 @@ export function buildWRStatRows(prospectsWithStats: ProspectWithStats[], pff?: M
         raw_routes: p.total_routes,
         ...tagRow("WR", tags?.get(p.id)),
         ...pffRow(pff?.get(p.id)),
+        ...extras?.get(p.id),
       }));
 }
 
 // "Min …" boxes beside the search bar — hide prospects below a sample size.
 const WR_MIN_FILTERS: MinFilterDef[] = [{ key: "routes", label: "Routes" }];
 
-export default function WRStatsTable({ prospectsWithStats, loading, draftYearFilter, onSelectProspect, pffTotals, routeTagCells }: Props) {
+export default function WRStatsTable({ prospectsWithStats, loading, draftYearFilter, onSelectProspect, pffTotals, routeTagCells, contextExtras }: Props) {
   const prospectMap = useMemo(() => new Map(prospectsWithStats.map((p) => [p.id, p])), [prospectsWithStats]);
   const tags = useMemo(() => tagValuesFor({ games: [], wrTagRows: routeTagCells ?? [] }), [routeTagCells]);
-  const rows = useMemo(() => buildWRStatRows(prospectsWithStats, pffTotals, tags), [prospectsWithStats, pffTotals, tags]);
+  const rows = useMemo(() => buildWRStatRows(prospectsWithStats, pffTotals, tags, contextExtras), [prospectsWithStats, pffTotals, tags, contextExtras]);
 
   return (
     <StatsTableShell

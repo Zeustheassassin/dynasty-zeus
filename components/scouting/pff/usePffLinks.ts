@@ -77,7 +77,8 @@ export function needsImport(p: LinkProspect, t: PffTotals | undefined): boolean 
 }
 
 /** `onStatsChanged`: the hub reloads its PFF columns after an import. */
-export function usePffLinks(onStatsChanged?: () => void) {
+/** `onImported`: the prospects an import just covered (the game context fills them next). */
+export function usePffLinks(onStatsChanged?: () => void, onImported?: (ids: string[]) => void) {
   const [prospects, setProspects] = useState<LinkProspect[]>([]);
   const [games, setGames] = useState<LinkGame[]>([]);
   const [pffRows, setPffRows] = useState<PffRows>(EMPTY_PFF);
@@ -173,7 +174,8 @@ export function usePffLinks(onStatsChanged?: () => void) {
     // After the reload, which clears the error on success.
     if (failure) setError(failure);
     onStatsChanged?.();
-  }, [reload, onStatsChanged]);
+    onImported?.(ids);
+  }, [reload, onStatsChanged, onImported]);
 
   /** After links change: import whichever of these prospects now need it. */
   const importIfNeeded = useCallback(async (ids: string[], fresh: (LinkRows & { pff: PffRows }) | null) => {

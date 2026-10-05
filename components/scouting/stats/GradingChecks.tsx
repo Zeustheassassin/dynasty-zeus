@@ -14,6 +14,7 @@ import { formatRate } from "../../../lib/scouting/countComponents";
 import { GT_MIN_PROSPECTS, GT_MIN_GARBAGE_PLAYS, ERA_CHECK_MIN_TAGGED } from "../../../lib/scouting/tagCorrection";
 import { MIN_POOL, type CompositePos } from "../../../lib/scouting/aeComposite";
 import type { ProspectGameRouteCellsRow } from "../../../lib/scouting/aggregateMerge";
+import GameContextChecks from "./GameContextChecks";
 
 interface Props {
   prospects: Prospect[];
@@ -90,7 +91,7 @@ function ComponentRows({ pos, checks }: { pos: CompositePos; checks: ComponentCh
             <td className={`${td} text-right`}>{r.poolRate != null ? formatRate(r.def, r.poolRate) : "—"}</td>
             <td className={`${td} text-right`}>{spread?.tau != null ? `±${formatRate(r.def, spread.tau)}` : "—"}</td>
             <td className={`${td} text-right`}>{medianTrust != null ? `${Math.round(medianTrust * 100)}%` : "—"}</td>
-            <td className={`${td} text-right`}>{r.measured ? `G5 ${formatRate(r.def, r.effects.G5 * r.def.scale)} (${r.tierProspects} players)` : `not yet (${r.tierProspects} players)`}</td>
+            <td className={`${td} text-right`}>{r.context?.opponent === "sp" && r.context.fit ? "Opp. defense SP+ (Game context below)" : r.measured ? `G5 ${formatRate(r.def, r.effects.G5 * r.def.scale)} (${r.tierProspects} players)` : `not yet (${r.tierProspects} players)`}</td>
             <td className={`${td} ${status === "Counting" ? "text-emerald-400" : "text-slate-500"}`}>{status}</td>
           </tr>
         );
@@ -180,6 +181,11 @@ export default function GradingChecks({ prospects, games, qbPlays, rbPlays, tePl
           <tbody>{POS.map((pos) => <ComponentRows key={pos} pos={pos} checks={report.components[pos]} />)}</tbody>
         </table>
       </Section>
+
+      <GameContextChecks
+        prospects={prospects} games={games} qbPlays={qbPlays} rbPlays={rbPlays} tePlays={tePlays}
+        gameRouteCells={gameRouteCells} gradingData={gradingData}
+      />
     </div>
   );
 }

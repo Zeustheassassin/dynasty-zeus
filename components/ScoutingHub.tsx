@@ -30,6 +30,8 @@ import type { ProspectGameRouteCountsRow } from "../lib/scouting/chartedComponen
 import type { GradingData } from "../lib/scouting/aeComponents";
 import { buildPffTotals } from "../lib/pff/totals";
 import { fetchPffRows, isMissingPffTables, type PffRows } from "./scouting/pff/pffClient";
+import { fetchGameContextData, isMissingContextTables } from "./scouting/context/contextClient";
+import { EMPTY_CONTEXT_DATA, type GameContextData } from "../lib/scouting/gameContext";
 
 const log = logger("ScoutingHub");
 
@@ -260,6 +262,8 @@ export default function ScoutingHub() {
   // after a failed load (or before 064 is applied): only those go blank.
   const [routeCounts, setRouteCounts] = useState<ProspectGameRouteCountsRow[]>([]);
   const [routeTagCells, setRouteTagCells] = useState<ProspectGameRouteTagCellsRow[]>([]);
+  // Migration 065: each charted game's CFD game, weather, SP+ and supporting cast.
+  const [contextData, setContextData] = useState<GameContextData>(EMPTY_CONTEXT_DATA);
   // Whether each lazy play load has landed. The Big Board only snapshots a
   // drafted prospect's AE Score once all three have, so it never saves a
   // half-computed score. (The route cells arrive with the hub's own load.)
@@ -288,6 +292,7 @@ export default function ScoutingHub() {
         { rows: pffData, error: pffErr },
         { rows: countData, error: countErr },
         { rows: tagCellData, error: tagCellErr },
+        { rows: contextRows, error: contextErr },
       ] = await Promise.all([
         supabase.from("prospects").select("*").order("personal_rank", { ascending: true, nullsFirst: false }),
         supabase.from("scouting_games").select("*").order("season_year", { ascending: false }),
@@ -322,6 +327,11 @@ export default function ScoutingHub() {
           (rows) => ({ rows, error: null }),
           (error: { message?: string; code?: string }) => ({ rows: [] as ProspectGameRouteTagCellsRow[], error }),
         ),
+        // Game context (migration 065). Its own query, so a failure only blanks the context.
+        fetchGameContextData().then(
+          (rows) => ({ rows, error: null }),
+          (error: unknown) => ({ rows: EMPTY_CONTEXT_DATA, error }),
+        ),
       ]);
       if (!isLoadCurrent(seq)) return; // superseded by a newer reload
       if (pErr) log.error("prospects load", { msg: pErr.message, code: pErr.code, details: pErr.details, hint: pErr.hint });
@@ -339,6 +349,10 @@ export default function ScoutingHub() {
       }
       if (countErr) logView064("prospect_game_route_counts", countErr);
       if (tagCellErr) logView064("prospect_game_route_tag_cells", tagCellErr);
+      if (contextErr) {
+        if (isMissingContextTables(contextErr)) log.warn("game context tables missing (apply migration 065); context blank");
+        else log.error("game context load (context blank)", { msg: String(contextErr) });
+      }
 
       // Reset lazy-fetch cache so a parent reload re-fetches plays the
       // next time AnalysisHub or GamesLog needs them.
@@ -356,6 +370,7 @@ export default function ScoutingHub() {
       setPffRows(pffData);
       setRouteCounts(countData);
       setRouteTagCells(tagCellData);
+      setContextData(contextRows);
       setGameSnapStatsRows((gssData ?? []) as GameSnapStatsRow[]);
       const rbRows = (rbStatsData ?? []) as RbRunTypeRow[];
       const qbRows = (qbStatsData ?? []) as QbThresholdRow[];
@@ -438,8 +453,8 @@ export default function ScoutingHub() {
   // The AE Score's per-player components and the tag stats read these
   // (lib/scouting/aeComponents.ts).
   const gradingData = useMemo<GradingData>(
-    () => ({ pffGameRows: pffRows.games, routeCounts, routeTagCells }),
-    [pffRows, routeCounts, routeTagCells],
+    () => ({ pffGameRows: pffRows.games, routeCounts, routeTagCells, context: contextData }),
+    [pffRows, routeCounts, routeTagCells, contextData],
   );
 
   const prospectsWithStats = useMemo(

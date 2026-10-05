@@ -1063,6 +1063,12 @@ export interface ScoutingGame {
   pff_game_id?: number | null;
   pff_match_status?: PffGameMatchStatus | null;
   pff_match_note?: string | null;
+  /** The user's call: he played this game hurt (migration 065; absent before it). */
+  played_hurt?: boolean;
+  /** NULL = not reviewed; true = he left early (confirmed); false = he didn't (migration 065). */
+  left_early?: boolean | null;
+  /** Per-game trait grades, 1–10 per trait key, new games only (migration 065, traits.ts). */
+  trait_grades?: Record<string, number> | null;
 }
 
 // PFF match states (migration 062). auto = linked by the matcher, confirmed =
@@ -1298,6 +1304,10 @@ export interface AESample {
    *  Only plays against a recognized opponent are counted. n and resid are
    *  unweighted; w is the season-weighted count (absent = n). */
   byTier?: Partial<Record<"P4" | "G5" | "FCS", { n: number; resid: number; w?: number }>>;
+  /** Residual sums by charted game (game id → reps, residual, season-weighted
+   *  reps), for the game-context effects (contextEffects.ts). Only filled when
+   *  a caller asks for it; n and resid unweighted, w season-weighted. */
+  byGame?: Record<string, { n: number; resid: number; w: number }>;
   /** Set once opponent-adjusted: the AE before the adjustment. */
   rawAe?: number;
 }

@@ -5,7 +5,8 @@
 // overrides any it got wrong, and where PFF's numbers for exactly these games are imported
 // and refreshed (migration 063). PFF data stays in the user's own rows.
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useContextFill } from "../context/useContextFill";
 import type { PffCandidate, PffGameOption } from "../../../lib/pff/api";
 import type { PffTotals } from "../../../lib/pff/totals";
 import { POS_COLOR, STATUS_CLASSES } from "../../../lib/uiTheme";
@@ -50,11 +51,17 @@ const btn = "rounded border border-slate-700 px-2 py-0.5 text-[11px] font-medium
 
 /** `onStatsChanged`: reload the hub's PFF columns after an import. */
 export default function PffLinksTab({ onStatsChanged }: { onStatsChanged?: () => void }) {
-  const s = usePffLinks(onStatsChanged);
+  // After every import, its prospects' game context is filled in too.
+  const queueRef = useRef<((ids: string[]) => void) | null>(null);
+  const afterImport = useCallback((ids: string[]) => queueRef.current?.(ids), []);
+  const s = usePffLinks(onStatsChanged, afterImport);
   const [filter, setFilter] = useState<"attention" | "all">("attention");
   const [search, setSearch] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
   const running = s.progress != null || s.importProgress != null;
+  // Game context (migration 065): fills itself on open and after imports.
+  const ctx = useContextFill(s.games, running || s.loading, onStatsChanged);
+  useEffect(() => { queueRef.current = ctx.queue; }, [ctx.queue]);
   const statsReady = s.statsError == null;
 
   const gamesByProspect = useMemo(() => {
@@ -101,8 +108,9 @@ export default function PffLinksTab({ onStatsChanged }: { onStatsChanged?: () =>
 
       {s.error && <div className="rounded border border-red-800 bg-red-900/30 px-3 py-2 text-xs text-red-300">{s.error}</div>}
       {s.statsError && <div className="rounded border border-amber-800 bg-amber-900/20 px-3 py-2 text-xs text-amber-300">{s.statsError}</div>}
+      {ctx.error && <div className="rounded border border-amber-800 bg-amber-900/20 px-3 py-2 text-xs text-amber-300">{ctx.error}</div>}
 
-      <div className="grid gap-2 sm:grid-cols-3 text-xs">
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 text-xs">
         <Summary title="Players" counts={playerCounts} badges={PLAYER_BADGE} />
         <Summary title="Charted games" counts={gameCounts} badges={GAME_BADGE} />
         <div className="rounded border border-slate-800 bg-slate-900/40 px-3 py-2">
@@ -119,6 +127,30 @@ export default function PffLinksTab({ onStatsChanged }: { onStatsChanged?: () =>
             {statTotals.stale > 0 && (
               <span className={`rounded border px-1.5 py-0.5 ${STATUS_CLASSES.serious}`} title="A game link changed since the import: grades and splits are blank until a refresh">
                 Out of date {statTotals.stale}
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="rounded border border-slate-800 bg-slate-900/40 px-3 py-2">
+          <div className="mb-1 font-semibold text-slate-300">Game context</div>
+          <div className="flex flex-wrap gap-1.5">
+            <span className={`rounded border px-1.5 py-0.5 ${STATUS_CLASSES.good}`} title="Charted games matched to their CollegeFootballData game (opponent defense SP+, venue, kickoff)">
+              Opponent {ctx.coverage.matched} / {ctx.coverage.games}
+            </span>
+            <span className={`rounded border px-1.5 py-0.5 ${STATUS_CLASSES.good}`} title="Games with game-time weather (domes count; Open-Meteo archive)">
+              Weather {ctx.coverage.weather}
+            </span>
+            <span className={`rounded border px-1.5 py-0.5 ${STATUS_CLASSES.good}`} title="Games with his line's block grades and his QB's grade (PFF)">
+              Cast {ctx.coverage.cast}
+            </span>
+            {ctx.coverage.pending > 0 && (
+              <span className={`rounded border px-1.5 py-0.5 ${MUTED}`} title="Recent games: the weather archive runs about five days behind; filled automatically later">
+                Weather pending {ctx.coverage.pending}
+              </span>
+            )}
+            {ctx.toFill.length > 0 && (
+              <span className={`rounded border px-1.5 py-0.5 ${STATUS_CLASSES.warning}`} title="Prospects with a game the fill would add to">
+                To fill {ctx.toFill.length}
               </span>
             )}
           </div>
@@ -157,6 +189,25 @@ export default function PffLinksTab({ onStatsChanged }: { onStatsChanged?: () =>
         >
           Refresh all stats
         </button>
+        <button
+          onClick={() => ctx.queue(ctx.toFill)}
+          disabled={running || ctx.running || s.loading || ctx.error != null || ctx.toFill.length === 0}
+          title="Fill in opponent defense, weather and supporting cast for games that need it (also runs on its own when this tab opens and after imports)"
+          className="rounded bg-teal-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-teal-600 disabled:opacity-50"
+        >
+          Fill context for {ctx.toFill.length}
+        </button>
+        {ctx.running && (
+          <>
+            <span className="text-xs text-slate-300" aria-live="polite">
+              Game context {ctx.progress!.done} / {ctx.progress!.total}
+              {ctx.progress!.failed > 0 && ` · ${ctx.progress!.failed} failed`}
+              {ctx.progress!.note && ` · ${ctx.progress!.note}`}
+            </span>
+            <button onClick={ctx.cancel} className={btn}>Stop</button>
+          </>
+        )}
+        {ctx.cfdRemaining != null && <span className="text-[11px] text-slate-500" title="CollegeFootballData's free tier is ~1,000 calls a month, shared with the Recruits tab">CFD calls left this month: {ctx.cfdRemaining}</span>}
         {running && (
           <>
             <span className="text-xs text-slate-300" aria-live="polite">

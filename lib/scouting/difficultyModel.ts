@@ -20,6 +20,7 @@
 // sum: league-wide above-expected is 0 by construction.
 
 import type { AESample } from "../types";
+import { addGameResidual, type ByGame } from "./contextEffects";
 
 // A situation dimension: the fixed bucket list and how to read a row's bucket.
 // Buckets come from the lists, not the data, so a bucket the league has never
@@ -294,14 +295,16 @@ export function addTierResidual(byTier: ByTier, tier: TierCode | null | undefine
 // `plays`, with its sample. Null when there are fewer than 2 plays or no
 // league model. `weightOf` is the play's season weight (default 1). With
 // `tierOf`, the residuals are also summed by the play's opponent tier
-// (AESample.byTier) for the AE Score's opponent adjustment.
+// (AESample.byTier) for the AE Score's opponent adjustment; with `gameOf`, by
+// game (AESample.byGame) for the game-context effects (contextEffects.ts).
 export function aboveExpectedSampleForPlays<T>(
   plays: T[],
   fitted: FittedDifficulty<T>,
   outcome: (row: T) => number,
-  { tierOf, weightOf }: {
+  { tierOf, weightOf, gameOf }: {
     tierOf?: (row: T) => TierCode | null | undefined;
     weightOf?: (row: T) => number;
+    gameOf?: (row: T) => string;
   } = {},
 ): AESample | null {
   const { model } = fitted;
@@ -309,17 +312,20 @@ export function aboveExpectedSampleForPlays<T>(
   const withModel = { ...fitted, model };
   const s = emptyResidualSums();
   const byTier: ByTier = {};
+  const byGame: ByGame = {};
   for (const pl of plays) {
     const y = outcome(pl);
     const e = expectedFor(withModel, pl);
     const w = weightOf ? weightOf(pl) : 1;
     addResidual(s, y, e, w);
     if (tierOf) addTierResidual(byTier, tierOf(pl), 1, y - e, w);
+    if (gameOf) addGameResidual(byGame, gameOf(pl), 1, y - e, w);
   }
   const variance = residualVariancePts(s);
   if (variance == null) return null;
   const out: AESample = { ae: toAbovePts(s.actual / s.w, s.expected / s.w), n: s.n, w: s.w, variance };
   if (tierOf) out.byTier = byTier;
+  if (gameOf) out.byGame = byGame;
   return out;
 }
 

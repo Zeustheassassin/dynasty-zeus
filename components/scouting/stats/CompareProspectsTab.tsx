@@ -10,6 +10,7 @@ import type { LoadPositionPlaysFn } from "../../ScoutingHub";
 import type { PffTotals } from "../../../lib/pff/totals";
 import type { GradingData } from "../../../lib/scouting/aeComponents";
 import { tagValuesFor } from "./tagCols";
+import { contextExtras } from "./contextCols";
 
 type PositionTab = "QB" | "RB" | "WR" | "TE";
 const POSITIONS: PositionTab[] = ["QB", "RB", "WR", "TE"];
@@ -116,14 +117,16 @@ export default function CompareProspectsTab({
     () => tagValuesFor({ games, qbPlays, rbPlays, tePlays, wrTagRows: gradingData?.routeTagCells ?? [] }),
     [games, qbPlays, rbPlays, tePlays, gradingData],
   );
+  // Game context and trait grades (Stage 5).
+  const extras = useMemo(() => contextExtras(prospects, games, gradingData?.context), [prospects, games, gradingData]);
   const { cols, rows } = useMemo((): { cols: ColDef[]; rows: StatRow[] } => {
     switch (position) {
-      case "RB": return { cols: RB_STAT_COLS, rows: buildRBStatRows(prospects, games, rbPlays, pffTotals, tags) };
-      case "QB": return { cols: QB_STAT_COLS, rows: buildQBStatRows(prospects, games, qbPlays, pffTotals, tags) };
-      case "TE": return { cols: TE_STAT_COLS, rows: buildTEStatRows(prospects, games, tePlays, pffTotals, tags) };
-      default:   return { cols: WR_STAT_COLS, rows: buildWRStatRows(prospectsWithStats, pffTotals, tags) };
+      case "RB": return { cols: RB_STAT_COLS, rows: buildRBStatRows(prospects, games, rbPlays, pffTotals, tags, extras) };
+      case "QB": return { cols: QB_STAT_COLS, rows: buildQBStatRows(prospects, games, qbPlays, pffTotals, tags, extras) };
+      case "TE": return { cols: TE_STAT_COLS, rows: buildTEStatRows(prospects, games, tePlays, pffTotals, tags, extras) };
+      default:   return { cols: WR_STAT_COLS, rows: buildWRStatRows(prospectsWithStats, pffTotals, tags, extras) };
     }
-  }, [position, prospects, prospectsWithStats, games, rbPlays, qbPlays, tePlays, pffTotals, tags]);
+  }, [position, prospects, prospectsWithStats, games, rbPlays, qbPlays, tePlays, pffTotals, tags, extras]);
 
   const positionProspects = useMemo(
     () => prospects.filter((p) => p.position === position),
