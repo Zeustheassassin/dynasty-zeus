@@ -36,6 +36,11 @@
 //   - alignment and route mix use in-app games only, and need
 //     WR_MIN_INAPP_SNAPS of them. Without that he's scored on skill alone and
 //     flagged "skill only".
+//
+// X also reads his release vs press (tape-grading expansion, Stage 4): the
+// share of tagged press reps where he won the release, once he has
+// X_RELEASE_REPS of them. It's an extra ingredient on top of the others, so a
+// receiver without the reps keeps exactly his old X%.
 import type { LinedUp } from "../types";
 import {
   aeOf, buildRoleFit, contrastFeature, mergeAESums, shrinkAE, skillFeature, usageFeature,
@@ -55,6 +60,9 @@ export interface WRRoleSkill {
 
 export interface WRRoleInputs {
   skill: WRRoleSkill;
+  /** Tagged press reps and how many releases he won, and the pool's win rate (0–1). */
+  release?: { won: number; n: number } | null;
+  leagueRelease?: number | null;
   /** In-app snaps by where he lined up, runs included (migration 060). */
   linedUp: LinedUp | null;
   /** In-app routes by route type (for the route-mix usage features). */
@@ -69,6 +77,8 @@ export const WR_MIN_ROUTES = 40;
 export const WR_MIN_INAPP_SNAPS = 40;
 // In-app press reps an X needs to be proven.
 export const X_PRESS_REPS = 10;
+// Tagged press reps before release vs press counts toward X.
+export const X_RELEASE_REPS = 10;
 // Each recipe's share for where he lined up (and, for Gadget, what he ran).
 export const ALIGN_WEIGHT = 0.1;
 
@@ -90,6 +100,10 @@ const SCALE = {
   zoneOverMan: 4.5,
   manZoneOverPress: 4.3,
   quickOverDownfield: 4,
+  // Release win rate vs press, pts over the pool's. PROVISIONAL: no tagged
+  // press reps existed when it was set; re-calibrate once 10 WRs have
+  // X_RELEASE_REPS.
+  release: 10,
 } as const;
 
 const QUICK_ROUTES = ["screen", "flat", "slant"];
@@ -153,6 +167,14 @@ export function wrFeatures(inp: WRRoleInputs): FeatureSet {
     // out: it can't be read either.
     f.press = { label: "vs press", kind: "skill", fit: Math.min(0.5, man.fit), display: "untested (no in-app press reps)", n: 0 };
   }
+  const rel = inp.release;
+  if (rel && rel.n >= X_RELEASE_REPS && inp.leagueRelease != null) {
+    const rate = rel.won / rel.n;
+    f.release = {
+      ...skillFeature("Release vs press (tagged)", (rate - inp.leagueRelease) * 100, rel.n, COVERAGE_PRIOR, SCALE.release, "tagged press reps"),
+      display: `won ${Math.round(rate * 100)}% vs ${Math.round(inp.leagueRelease * 100)}% pool on ${rel.n} tagged press reps`,
+    };
+  }
   const lu = inp.linedUp;
   if (lu && lu.snaps >= WR_MIN_INAPP_SNAPS) {
     // Outside receivers line up on the line most of the time (55–90% of snaps
@@ -186,6 +208,8 @@ export const WR_RECIPES: readonly BucketRecipe[] = [
       { feature: "man", weight: 0.2, core: true },
       { feature: "xRoutes", weight: 0.2 },
       { feature: "xShare", weight: ALIGN_WEIGHT },
+      // Only with X_RELEASE_REPS tagged press reps (see the header).
+      { feature: "release", weight: 0.2, core: true },
     ],
     size: { minHeightIn: 72, minWeightLb: 195 },
     requires: { feature: "press", minN: X_PRESS_REPS, why: `an X needs ${X_PRESS_REPS}+ in-app press reps` },

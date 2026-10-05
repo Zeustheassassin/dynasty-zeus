@@ -54,6 +54,21 @@ export interface CompositeMetric {
    *  from the metric's half point. Unset: the statistical reliability
    *  τ² / (τ² + v), which never reaches 100%. */
   fullTrustAt?: number | ((halfPoint: number) => number);
+  /** A component not every prospect has (PFF results, tag-only stats): it
+   *  counts only for prospects who have it, renormalized per player, with its
+   *  weight scaled by how far his sample is trusted. See buildPositionComposite. */
+  perPlayer?: true;
+  /** Tooltip text for a prospect's value, e.g. "6.1% on 210 attempts (pool 4.5%)". */
+  describe?: (id: string, sample: AESample) => string;
+  /** A floor on the true spread, as a share of the pool's observed spread
+   *  (the SD of the prospects' values). Paule–Mandel puts τ at 0 when the
+   *  pool doesn't yet spread beyond its noise; the floor keeps such a metric
+   *  counting, trusted by τ² / (τ² + v) at the floored τ. */
+  spreadFloor?: number;
+  /** The smallest sampling variance a sample is taken to have (default
+   *  MIN_VARIANCE, 1 pt², a guard for AE points). A component in other units
+   *  (yards per route, say) sets its own. */
+  minVariance?: number;
 }
 
 export interface MetricSpread {
@@ -72,6 +87,8 @@ export interface MetricSpread {
    *  statistically (median per-play noise / τ²), which sets the curve's shape. */
   halfPoint?: number;
   fullTrustAt?: number;
+  /** A per-player component (CompositeMetric.perPlayer). */
+  perPlayer?: true;
 }
 
 export type { ScoreComponent };
@@ -93,34 +110,36 @@ export interface PositionComposite {
   scores: Map<string, AEScore>;
 }
 
-const varianceOf = (s: AESample) => Math.max(s.variance, MIN_VARIANCE);
+const varianceOf = (s: AESample, min = MIN_VARIANCE) => Math.max(s.variance, min);
 
 // Generalized Q at a candidate τ²: each prospect weighted by 1 / (v + τ²).
-function generalizedQ(xs: AESample[], tau2: number): { q: number; mean: number } {
+function generalizedQ(xs: AESample[], tau2: number, minVar: number): { q: number; mean: number } {
   let sw = 0, swy = 0;
-  for (const s of xs) { const w = 1 / (varianceOf(s) + tau2); sw += w; swy += w * s.ae; }
+  for (const s of xs) { const w = 1 / (varianceOf(s, minVar) + tau2); sw += w; swy += w * s.ae; }
   const mean = swy / sw;
   let q = 0;
-  for (const s of xs) q += ((s.ae - mean) ** 2) / (varianceOf(s) + tau2);
+  for (const s of xs) q += ((s.ae - mean) ** 2) / (varianceOf(s, minVar) + tau2);
   return { q, mean };
 }
 
 // Paule–Mandel: the τ² at which the generalized Q equals its expectation
 // (k − 1). Q falls as τ² grows, so bisect. τ² = 0 when the pool spreads no
-// more than its noise alone would (Q already ≤ k − 1 at τ² = 0).
-export function estimateSpread(xs: AESample[]): { mean: number; tau2: number } {
+// more than its noise alone would (Q already ≤ k − 1 at τ² = 0). The search
+// starts at the pool's own scale, so metrics in small units (yards per route)
+// bisect as finely as AE points.
+export function estimateSpread(xs: AESample[], minVar = MIN_VARIANCE): { mean: number; tau2: number } {
   if (xs.length < 2) return { mean: xs[0]?.ae ?? 0, tau2: 0 };
   const target = xs.length - 1;
-  if (generalizedQ(xs, 0).q <= target) return { mean: generalizedQ(xs, 0).mean, tau2: 0 };
+  if (generalizedQ(xs, 0, minVar).q <= target) return { mean: generalizedQ(xs, 0, minVar).mean, tau2: 0 };
   let lo = 0;
-  let hi = 1;
-  while (generalizedQ(xs, hi).q > target) { lo = hi; hi *= 2; }
+  let hi = minVar === MIN_VARIANCE ? 1 : Math.max(1e-12, observedSD(xs) ** 2);
+  while (generalizedQ(xs, hi, minVar).q > target) { lo = hi; hi *= 2; }
   for (let i = 0; i < 60; i++) {
     const mid = (lo + hi) / 2;
-    if (generalizedQ(xs, mid).q > target) lo = mid; else hi = mid;
+    if (generalizedQ(xs, mid, minVar).q > target) lo = mid; else hi = mid;
   }
   const tau2 = (lo + hi) / 2;
-  return { mean: generalizedQ(xs, tau2).mean, tau2 };
+  return { mean: generalizedQ(xs, tau2, minVar).mean, tau2 };
 }
 
 // Trust with a full-trust ceiling (the user's call for WRs, 2026-10-01: 232
@@ -137,14 +156,40 @@ export function trustAt(n: number, full: number, halfPoint: number): number {
 
 const median = (xs: number[]) => { const a = [...xs].sort((x, y) => x - y); return a[Math.floor(a.length / 2)]; };
 
+// The SD of the prospects' values as observed (true spread and noise together).
+function observedSD(xs: readonly AESample[]): number {
+  if (xs.length < 2) return 0;
+  const mean = xs.reduce((s, x) => s + x.ae, 0) / xs.length;
+  return Math.sqrt(xs.reduce((s, x) => s + (x.ae - mean) ** 2, 0) / (xs.length - 1));
+}
+
 // metrics[0] is the primary metric: it decides whether the position is scored
 // and who gets a score. Later metrics add to that score once they're ready
 // themselves; until then they're left out and the weights renormalize.
 // `baseline` shifts every score at the position (see POSITION_BASELINE).
+//
+// Two kinds of later metric:
+//   - The user's own AEs (WR SAE, TE-SAEB): a prospect under the floor counts
+//     0 (average) for it, at its full weight. That's the right estimate for a
+//     metric everyone at the position is charted on.
+//   - Per-player components (`perPlayer`: PFF results, tag-only stats), which
+//     many prospects can never have: an old game has no tags, and some games
+//     have no PFF row. Counting those as 0 at full weight would pull every
+//     prospect without one toward the middle, so instead each counts only for
+//     prospects who have it, renormalized per player, and its weight scales
+//     with his trust in it (weight × reliability): one tagged game barely
+//     moves a player, a full sample counts at the full weight. Its numerator
+//     is the same shrunk z as any metric (weight × reliability × raw z), so
+//     a component that agrees with his other metrics leaves his score where
+//     it was. A prospect without a per-player sample keeps exactly the score
+//     he'd have without the component; so do positions whose component isn't
+//     ready, or weighted 0.
 export function buildPositionComposite(pos: CompositePos, metrics: CompositeMetric[], baseline = 0): PositionComposite {
   const fitted = metrics.map((m) => {
     const xs = [...m.samples.values()].filter((s): s is AESample => s != null);
-    const est = xs.length >= MIN_POOL ? estimateSpread(xs) : null;
+    const minVar = m.minVariance ?? MIN_VARIANCE;
+    const pm = xs.length >= MIN_POOL ? estimateSpread(xs, minVar) : null;
+    const est = pm && m.spreadFloor ? { ...pm, tau2: Math.max(pm.tau2, (m.spreadFloor * observedSD(xs)) ** 2) } : pm;
     const ready = est != null && est.tau2 > 0;
     const spread: MetricSpread = {
       key: m.key, label: m.label, weight: m.weight,
@@ -152,36 +197,45 @@ export function buildPositionComposite(pos: CompositePos, metrics: CompositeMetr
       ready,
       mean: ready ? est.mean : null,
       tau: ready ? Math.sqrt(est.tau2) : null,
+      ...(m.perPlayer ? { perPlayer: true as const } : {}),
     };
     if (ready && m.fullTrustAt != null) {
-      spread.halfPoint = median(xs.map((s) => varianceOf(s) * s.n)) / est.tau2;
+      spread.halfPoint = median(xs.map((s) => varianceOf(s, minVar) * s.n)) / est.tau2;
       spread.fullTrustAt = typeof m.fullTrustAt === "function" ? m.fullTrustAt(spread.halfPoint) : m.fullTrustAt;
     }
-    return { m, spread };
+    return { m, spread, minVar };
   });
   const spreads = fitted.map((f) => f.spread);
   const scores = new Map<string, AEScore>();
   const primary = fitted[0];
   if (!primary?.spread.ready) return { pos, ready: false, metrics: spreads, scores };
 
-  const ready = fitted.filter((f) => f.spread.ready);
-  const totalWeight = ready.reduce((s, f) => s + f.m.weight, 0);
+  const ready = fitted.filter((f) => f.spread.ready && !(f.m.perPlayer && !(f.m.weight > 0)));
+  const totalWeight = ready.reduce((s, f) => s + (f.m.perPlayer ? 0 : f.m.weight), 0);
   for (const [id, primarySample] of primary.m.samples) {
     if (!primarySample) continue;
     const components: ScoreComponent[] = [];
     let weighted = 0;
-    for (const { m, spread } of ready) {
+    let perPlayerWeight = 0;
+    for (const { m, spread, minVar } of ready) {
       const s = m.samples.get(id);
       if (!s) continue; // no evidence on this metric: the best estimate is average, 0
       const tau = spread.tau!;
       const reliability = spread.fullTrustAt != null
         ? trustAt(s.n, spread.fullTrustAt, spread.halfPoint!)
-        : (tau * tau) / (tau * tau + varianceOf(s));
+        : (tau * tau) / (tau * tau + varianceOf(s, minVar));
       const z = (reliability * (s.ae - spread.mean!)) / tau;
-      components.push({ key: m.key, label: m.label, weight: m.weight, ae: s.ae, rawAe: s.rawAe, n: s.n, reliability, z });
+      const c: ScoreComponent = { key: m.key, label: m.label, weight: m.weight, ae: s.ae, rawAe: s.rawAe, n: s.n, reliability, z };
+      if (m.perPlayer) {
+        c.perPlayer = true;
+        c.effectiveWeight = m.weight * reliability;
+        perPlayerWeight += c.effectiveWeight;
+      }
+      if (m.describe) c.text = m.describe(id, s);
+      components.push(c);
       weighted += m.weight * z;
     }
-    scores.set(id, { score: weighted / totalWeight + baseline, components, ...(baseline ? { baseline } : {}) });
+    scores.set(id, { score: weighted / (totalWeight + perPlayerWeight) + baseline, components, ...(baseline ? { baseline } : {}) });
   }
   return { pos, ready: true, metrics: spreads, scores };
 }
@@ -249,6 +303,9 @@ export interface AECompositeInputs {
   wrCore: Map<string, AESample | null>;
   teRoute: Map<string, AESample | null>;
   teBlock: Map<string, AESample | null>;
+  /** Per-player components by position (PFF results, tag-only stats), each a
+   *  `perPlayer` metric after the user's own. */
+  extra?: Partial<Record<CompositePos, CompositeMetric[]>>;
 }
 
 export interface AEComposite {
@@ -258,18 +315,21 @@ export interface AEComposite {
 }
 
 export function buildAEComposite(inp: AECompositeInputs): AEComposite {
+  const extra = (pos: CompositePos) => (inp.extra?.[pos] ?? []).map((m) => ({ ...m, perPlayer: true as const }));
   const WR = buildPositionComposite("WR", [
     { key: "csae", label: "cSAE", weight: WR_CORE_WEIGHT, samples: inp.wrCore, fullTrustAt: WR_CORE_FULL_TRUST },
     { key: "sae", label: "SAE", weight: WR_ALL_WEIGHT, samples: inp.wr, fullTrustAt: WR_ALL_FULL_TRUST },
+    ...extra("WR"),
   ], POSITION_BASELINE.WR);
   const matched = matchedCeiling(WR);
   const positions: Record<CompositePos, PositionComposite> = {
-    QB: buildPositionComposite("QB", [{ key: "aae", label: "AAE", weight: 1, samples: inp.qb, fullTrustAt: QB_FULL_TRUST }], POSITION_BASELINE.QB),
-    RB: buildPositionComposite("RB", [{ key: "srae", label: "SRAE", weight: 1, samples: inp.rb, fullTrustAt: RB_FULL_TRUST }], POSITION_BASELINE.RB),
+    QB: buildPositionComposite("QB", [{ key: "aae", label: "AAE", weight: 1, samples: inp.qb, fullTrustAt: QB_FULL_TRUST }, ...extra("QB")], POSITION_BASELINE.QB),
+    RB: buildPositionComposite("RB", [{ key: "srae", label: "SRAE", weight: 1, samples: inp.rb, fullTrustAt: RB_FULL_TRUST }, ...extra("RB")], POSITION_BASELINE.RB),
     WR,
     TE: buildPositionComposite("TE", [
       { key: "te_saer", label: "TE-SAER", weight: TE_ROUTE_WEIGHT, samples: inp.teRoute, fullTrustAt: matched },
       { key: "te_saeb", label: "TE-SAEB", weight: TE_BLOCK_WEIGHT, samples: inp.teBlock, fullTrustAt: matched },
+      ...extra("TE"),
     ], POSITION_BASELINE.TE),
   };
   const scores = new Map<string, AEScore>();

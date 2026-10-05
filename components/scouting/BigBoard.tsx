@@ -42,6 +42,8 @@ import { fmtVal, type ColDef } from "./stats/StatsTableShell";
 import { pffCols, PFF_ALL_TAB_KEY, PFF_BOARD_KEYS } from "./stats/pffCols";
 import { pffValues, type PffTotals, type PffValues } from "../../lib/pff/totals";
 import { pffPos } from "../../lib/pff/stats";
+import { buildComponents, EMPTY_GRADING_DATA, type GradingData } from "../../lib/scouting/aeComponents";
+import { tagStatReps } from "../../lib/scouting/tagStats";
 
 type LoadPositionPlaysFn = (pos: "RB" | "QB" | "TE") => void;
 
@@ -87,7 +89,8 @@ type AEMaps = Record<AEKey, Map<string, number | null>>;
 const PFF_BAND_TOOLTIP =
   "PFF's numbers over exactly the games you charted (never season totals). Counts add up game by game; " +
   "rates come from those sums (YPRR = PFF yards ÷ PFF routes); grades are PFF's own grade for those games. " +
-  "Import or refresh in Scouting → PFF Links. Not part of the AE Score yet.";
+  "Import or refresh in Scouting → PFF Links. The results you don't chart yourself (BTT%, TWP%, QB rushing, " +
+  "YCO/A, YPRR, YAC) are part of the AE Score; grades aren't.";
 
 // What each AE Score metric counts, for the cell tooltips.
 const SAMPLE_UNIT: Record<string, string> = {
@@ -182,6 +185,9 @@ interface Props {
   onLockAEScore?: (id: string, lock: AEScoreLock) => Promise<boolean>;
   /** PFF over each prospect's charted games (ScoutingHub). */
   pffTotals?: Map<string, PffTotals>;
+  /** PFF game rows and the migration-064 views, for the AE Score's per-player
+   *  components (lib/scouting/aeComponents.ts). */
+  gradingData?: GradingData;
 }
 
 function getSortValue(
@@ -284,6 +290,7 @@ export default function BigBoard({
   scoresReady = false,
   onLockAEScore,
   pffTotals,
+  gradingData = EMPTY_GRADING_DATA,
 }: Props) {
   // Trigger lazy load of all three position plays the first time the
   // board renders. ScoutingHub no-ops if a position is already loaded
@@ -322,7 +329,7 @@ export default function BigBoard({
     const teBlock = computeTEBlockAboveExpectedSamples(prospects, games, tePlays, tiers);
     // WR's tier splits come from the per-game cells; without them WR (and so
     // RB and TE, which borrow WR's effect) stays unadjusted.
-    const splits = gameRouteCells ? buildWRTierSplits(gameRouteCells, (id) => tiers.get(id), games) : null;
+    const splits = gameRouteCells ? buildWRTierSplits(gameRouteCells, (id) => tiers.get(id), games, gradingData.routeTagCells) : null;
     const withSplits = (m: Map<string, AESample | null>, by: Map<string, NonNullable<AESample["byTier"]>> | undefined) =>
       by ? new Map([...m].map(([id, smp]) => [id, smp ? { ...smp, byTier: by.get(id) ?? {} } : smp])) : m;
     const opp = applyOpponentStrength({
@@ -356,10 +363,20 @@ export default function BigBoard({
         srae_zone: sliceCol(rbSlices, "zone"),
         srae_mg: sliceCol(rbSlices, "man_gap"),
       },
-      composite: buildAEComposite({ qb, rb: opp.rb, wr: opp.wr, wrCore: opp.wrCore, teRoute: opp.teRoute, teBlock: opp.teBlock }),
+      composite: buildAEComposite({
+        qb, rb: opp.rb, wr: opp.wr, wrCore: opp.wrCore, teRoute: opp.teRoute, teBlock: opp.teBlock,
+        // The per-player components: the user's charting no AE reads yet, PFF's
+        // results where the user doesn't chart, and the tag-only stats.
+        extra: buildComponents({
+          prospects, games, tierByGame: tiers, qbPlays, rbPlays,
+          pffGameRows: gradingData.pffGameRows,
+          wrRouteCounts: gradingData.routeCounts,
+          tagReps: tagStatReps({ games, qbPlays, rbPlays, tePlays, wrTagRows: gradingData.routeTagCells }),
+        }).extra,
+      }),
       opponent: opp.effects,
     };
-  }, [prospects, games, rbPlays, qbPlays, tePlays, gameTiers, gameRouteCells]);
+  }, [prospects, games, rbPlays, qbPlays, tePlays, gameTiers, gameRouteCells, gradingData]);
 
   // Each prospect's charted games by opponent tier, for the AE Score tooltip.
   const gamesByTier = useMemo(() => {
@@ -536,8 +553,8 @@ export default function BigBoard({
   // Each prospect's role buckets (lib/scouting/roleFit.ts). They describe a
   // player and feed none of the scores.
   const roleFits = useMemo(
-    () => computeRoleFits(prospects, games, rbPlays, qbPlays, tePlays),
-    [prospects, games, rbPlays, qbPlays, tePlays],
+    () => computeRoleFits(prospects, games, rbPlays, qbPlays, tePlays, pffTotals),
+    [prospects, games, rbPlays, qbPlays, tePlays, pffTotals],
   );
 
   // PFF numbers over each prospect's charted games (lib/pff/totals.ts).
@@ -691,6 +708,12 @@ export default function BigBoard({
       return <td className={`${cls} text-slate-600`} title={why}>—</td>;
     }
     const lines = sc.components.map((c) => {
+      // A per-player component (PFF result, charted rate, tag stat): its value
+      // as shown, and its weight after trust.
+      if (c.perPlayer) {
+        return `${c.label} ${c.text ?? signed(c.ae, 2)} · ${Math.round(c.reliability * 100)}% taken as real · ` +
+          `weight ${c.weight} × ${Math.round(c.reliability * 100)}% = ${(c.effectiveWeight ?? 0).toFixed(2)} → ${signed(c.z, 2)}`;
+      }
       const ae = c.rawAe != null
         ? `${signed(c.rawAe, 1)} (${signed(c.ae - c.rawAe, 1)} for opponents) = ${signed(c.ae, 1)}`
         : signed(c.ae, 1);
@@ -816,6 +839,10 @@ export default function BigBoard({
     "AE Score: each prospect's headline Above-Expected, discounted for sample size and put in " +
     "true-talent SDs vs the average charted prospect at the position, so it compares across " +
     "positions. WR blends cSAE 70% and SAE 30%; TE blends TE-SAER 80% and TE-SAEB 20%. " +
+    "Each position's score also takes in, per player and weighted by how far his sample is trusted: your charting no AE reads " +
+    "(QB sacks under pressure; RB broken tackles, explosives, pass pro, drops, open on routes; WR drops, contested catches), " +
+    "PFF's results over the charted games where you don't chart (QB BTT%, TWP%, rushing; RB YCO/A, YPRR; WR/TE YPRR, YAC), " +
+    "and the tag-only stats once enough tagged plays exist. A player without one keeps his score as it was. " +
     "Reps against G5 and FCS opponents are discounted (the AE columns are not). " +
     `Older seasons count a little less, here and in the AE columns (each season back ×${SEASON_DECAY}). ` +
     "WRs lined up 75%+ on one side (or, milder, in the slot) lose up to 0.5 (0.2), most at 95%. " +

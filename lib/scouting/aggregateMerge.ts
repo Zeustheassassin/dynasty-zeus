@@ -14,6 +14,9 @@ import {
   makeDesign,
   fitDifficultyModel,
   expectedFromModel,
+  expectedFor,
+  levelOffset,
+  type DifficultyCorrection,
   type DifficultyDim,
   toAbovePts,
   emptyResidualSums,
@@ -25,6 +28,8 @@ import {
 } from "./difficultyModel";
 import { seasonWeights } from "./seasonWeight";
 import { COVERAGE_ERAS, coverageEra, coverageEras, type CoverageEra } from "./coverageEra";
+import { isTaggedPlay } from "./playEra";
+import { correctionDesign, enabledSpecs, fitTagCorrection, GARBAGE_TIME_WEIGHT, RECENTER_TAGGED } from "./tagCorrection";
 import { parseHeightInches } from "./prospectAge";
 import type { AESum } from "./roleFit";
 import { wrRoleFit, type WRRoleSkill } from "./roleFitWR";
@@ -126,16 +131,33 @@ export interface ProspectRouteStatsRow {
 const WR_RIDGE_LAMBDA = 3;
 
 // One route situation — a raw RoutePlay, or one cell of the route-cell views —
-// with the coverage definition it was charted under.
+// with the coverage definition it was charted under. A route charted with the
+// per-play tags (062) carries them, for the tag correction (tagCorrection.ts);
+// `tagged` is unset on every untagged route, so the correction never applies.
 interface WRSituation {
   route_type: string;
   coverage: string;
   alignment: string;
   on_line: boolean;
   era: CoverageEra;
+  tagged?: boolean;
+  red_zone?: boolean;
+  third_fourth_down?: boolean;
+  short_yardage?: boolean;
+  garbage_time?: boolean;
 }
-// `w` is the season weight of each of the cell's routes (1 = counts in full).
+// `w` is the weight of each of the cell's routes in a prospect's sample: its
+// season weight (1 = counts in full), times the garbage-time weight on a
+// tagged garbage-time cell.
 interface RouteCell extends WRSituation { n: number; open: number; w: number }
+
+/** A tagged route cell (migration 064) as parsed: its situation, its tags, and
+ *  the release-vs-press and broken-tackle-after-catch tags (null = n/a). */
+export interface RouteTagCell extends RouteCell {
+  tagged: true;
+  press_release: "won" | "lost" | null;
+  bt_after_catch: boolean | null;
+}
 
 const WR_COVERAGES = ["man", "press", "zone", "double"];
 const routeDim: DifficultyDim<WRSituation> = [ROUTE_TYPES, (s) => s.route_type];
@@ -159,11 +181,20 @@ const eraColumn = (era: CoverageEra) => WR_FIT_DESIGN.size + COVERAGE_ERAS.index
 const WR_LEVEL_DESIGN = makeDesign([routeDim, ...alignDims]);
 
 export type WRDifficultyModel = FittedDifficulty<WRSituation>;
+type WRModelWith = WRDifficultyModel & { model: Float64Array };
 
 // One row of the prospect_route_cells view (migration 057): cell key
 // "route_type|coverage|alignment|on_line" → [routes, open routes].
 export interface ProspectRouteCellsRow {
   prospect_id: string;
+  cells: Record<string, [number, number]> | null;
+}
+
+/** One row of prospect_game_route_tag_cells (migration 064): the game's TAGGED
+ *  routes, keyed route|coverage|alignment|on_line|rz|34|sy|gt|press|bt. */
+export interface ProspectGameRouteTagCellsRow {
+  prospect_id: string;
+  game_id: string;
   cells: Record<string, [number, number]> | null;
 }
 
@@ -179,27 +210,88 @@ function parseCells(raw: Record<string, [number, number]> | null | undefined, w 
   return out;
 }
 
+/** A game's tagged route cells (migration 064's key format). */
+export function parseTagCells(raw: Record<string, [number, number]> | null | undefined, w = 1, era: CoverageEra = "new"): RouteTagCell[] {
+  const out: RouteTagCell[] = [];
+  for (const [key, counts] of Object.entries(raw ?? {})) {
+    const p = key.split("|");
+    if (p.length !== 10 || !Array.isArray(counts)) continue;
+    const [n, open] = counts;
+    if (!(n > 0)) continue;
+    out.push({
+      route_type: p[0], coverage: p[1], alignment: p[2], on_line: p[3] === "on", era, n, open, w,
+      tagged: true,
+      red_zone: p[4] === "1", third_fourth_down: p[5] === "1", short_yardage: p[6] === "1", garbage_time: p[7] === "1",
+      press_release: p[8] === "won" || p[8] === "lost" ? p[8] : null,
+      bt_after_catch: p[9] === "-" ? null : p[9] === "1",
+    });
+  }
+  return out;
+}
+
+const situationKey = (c: WRSituation) => `${c.route_type}|${c.coverage}|${c.alignment}|${c.on_line}`;
+
+// Whether tagged routes need judging apart from untagged ones: only when the
+// WR model has a tag correction or garbage time is weighted. Otherwise a
+// tagged route counts exactly like any other, and the cells stay as 058 has
+// them (so every number is bit-for-bit what it was before Stage 4).
+const splitTagged = (model: WRDifficultyModel) => model.correction != null || GARBAGE_TIME_WEIGHT.wr_sae !== 1;
+
+// One game's route cells at weight `w`. With `tagCells`, its tagged routes are
+// split out of 058's cells into their own cells, carrying their tags and the
+// garbage-time weight; 058's cells keep the untagged rest.
+function gameCells(
+  cells: Record<string, [number, number]> | null | undefined,
+  tagCells: Record<string, [number, number]> | null | undefined,
+  w: number,
+  era: CoverageEra,
+): RouteCell[] {
+  const base = parseCells(cells, w, era);
+  if (!tagCells) return base;
+  const tags = parseTagCells(tagCells, w, era);
+  const byKey = new Map(base.map((c) => [situationKey(c), c]));
+  for (const t of tags) {
+    const b = byKey.get(situationKey(t));
+    if (!b) continue;
+    b.n = Math.max(0, b.n - t.n);
+    b.open = Math.min(b.n, Math.max(0, b.open - t.open));
+  }
+  const gt = GARBAGE_TIME_WEIGHT.wr_sae;
+  return [...base.filter((c) => c.n > 0), ...tags.map((t) => (t.garbage_time && gt !== 1 ? { ...t, w: w * gt } : t))];
+}
+
+const tagCellsByGame = (rows: readonly ProspectGameRouteTagCellsRow[]) => new Map(rows.map((r) => [r.game_id, r.cells]));
+
 // Each prospect's cells from the per-game rows, every game's routes carrying
 // its season weight and coverage era. Games of the same season and era merge
-// into one cell per situation.
+// into one cell per situation. Tagged routes split out (gameCells) only when
+// `tagRows` is given, and stay their own cells.
 function weightedCellsByProspect(
   gameRows: ProspectGameRouteCellsRow[],
   weights: Map<string, number>,
   eras: Map<string, CoverageEra>,
+  tagRows?: readonly ProspectGameRouteTagCellsRow[],
 ): Map<string, RouteCell[]> {
   const merged = new Map<string, Map<string, RouteCell>>();
+  const tagged = new Map<string, RouteCell[]>();
+  const tagsBy = tagRows ? tagCellsByGame(tagRows) : null;
   for (const row of gameRows) {
     const w = weights.get(row.game_id) ?? 1;
     const era = eras.get(row.game_id) ?? "new";
     const cells = merged.get(row.prospect_id) ?? new Map<string, RouteCell>();
     merged.set(row.prospect_id, cells);
-    for (const c of parseCells(row.cells, w, era)) {
+    for (const c of gameCells(row.cells, tagsBy?.get(row.game_id), w, era)) {
+      if (c.tagged) {
+        const list = tagged.get(row.prospect_id);
+        if (list) list.push(c); else tagged.set(row.prospect_id, [c]);
+        continue;
+      }
       const key = `${c.route_type}|${c.coverage}|${c.alignment}|${c.on_line}|${w}|${era}`;
       const acc = cells.get(key);
       if (acc) { acc.n += c.n; acc.open += c.open; } else cells.set(key, c);
     }
   }
-  return new Map([...merged].map(([id, cells]) => [id, [...cells.values()]]));
+  return new Map([...merged].map(([id, cells]) => [id, [...cells.values(), ...(tagged.get(id) ?? [])]]));
 }
 
 /** prospect_game_alignment (migration 060): one game's snaps by where he lined up. */
@@ -230,21 +322,6 @@ export function linedUpByProspect(
   return out;
 }
 
-// The logit offset that makes a set of cells' expected opens sum to `target`
-// (Newton's method; the sum rises steadily with the offset).
-function levelOffset(cells: { n: number; z: number }[], target: number): number {
-  let d = 0;
-  for (let i = 0; i < 50; i++) {
-    let f = -target, df = 0;
-    for (const c of cells) { const p = 1 / (1 + Math.exp(-(c.z + d))); f += c.n * p; df += c.n * p * (1 - p); }
-    if (!(df > 0)) break;
-    const step = f / df;
-    d = Math.min(5, Math.max(-5, d - step));
-    if (Math.abs(step) < 1e-12) break;
-  }
-  return d;
-}
-
 // The league model: every game's cells, summed and unweighted. `games`
 // supplies each game's coverage era; rows without a game (the per-prospect
 // 057 view) and unknown games count as the current definition. Null model
@@ -255,9 +332,60 @@ function levelOffset(cells: { n: number; z: number }[], target: number): number 
 // no-coverage model's. With one era present the offset is 0 by construction
 // (both fits' unpenalized intercepts already match the league's opens), so
 // it's skipped and the fit is the plain one.
+//
+// `tagRows` (migration 064) carry the tagged routes, for the tag correction
+// (tagCorrection.ts): fit on them alone, on top of this model, and only while
+// a WR tag is switched on (or the tagged era is re-centered).
 export function buildWRModel(
   cellRows: (ProspectRouteCellsRow & { game_id?: string })[],
   games: readonly Pick<ScoutingGame, "id" | "created_at">[] = [],
+  tagRows: readonly ProspectGameRouteTagCellsRow[] = [],
+): WRDifficultyModel {
+  const base = buildWRBaseModel(cellRows, games);
+  if (!base.model) return base;
+  const correction = wrCorrection({ ...base, model: base.model }, cellRows, games, tagRows);
+  return correction ? { ...base, correction } : base;
+}
+
+// Every tagged route cell in the league, unweighted, with its game's era.
+function leagueTagCells(tagRows: readonly ProspectGameRouteTagCellsRow[], eras: Map<string, CoverageEra>): RouteTagCell[] {
+  return tagRows.flatMap((r) => parseTagCells(r.cells, 1, eras.get(r.game_id) ?? "new"));
+}
+
+function wrCorrection(
+  base: WRModelWith,
+  cellRows: (ProspectRouteCellsRow & { game_id?: string })[],
+  games: readonly Pick<ScoutingGame, "id" | "created_at">[],
+  tagRows: readonly ProspectGameRouteTagCellsRow[],
+): DifficultyCorrection<WRSituation> | null {
+  const specs = enabledSpecs("wr_sae");
+  const recenter = RECENTER_TAGGED.wr_sae;
+  if ((!specs.length && !recenter) || !tagRows.length) return null;
+  const eras = coverageEras(games);
+  const tags = leagueTagCells(tagRows, eras);
+  const resid = (c: RouteCell) => c.open - c.n * expectedFromModel(base.model, WR_DESIGN.cols(c));
+  // Re-centered: the untagged routes' mean residual (every route's, minus the tagged ones').
+  let recenterTo: number | undefined;
+  if (recenter) {
+    let n = 0, r = 0;
+    for (const row of cellRows) for (const c of parseCells(row.cells, 1, (row.game_id != null ? eras.get(row.game_id) : undefined) ?? "new")) { n += c.n; r += resid(c); }
+    for (const c of tags) { n -= c.n; r -= resid(c); }
+    if (n > 0) recenterTo = r / n;
+  }
+  const fitted = fitTagCorrection<RouteTagCell>(
+    base,
+    { rows: tags, outcome: (c) => c.open / c.n, tagged: () => true, countOf: (c) => c.n },
+    specs,
+    { recenterTo },
+  );
+  // The same columns, read off any route (a cell, or a raw route's playCell).
+  return fitted ? { design: correctionDesign<WRSituation>(specs), model: fitted.model, applies: (c) => c.tagged === true } : null;
+}
+
+// The WR difficulty model without any tag correction.
+function buildWRBaseModel(
+  cellRows: (ProspectRouteCellsRow & { game_id?: string })[],
+  games: readonly Pick<ScoutingGame, "id" | "created_at">[],
 ): WRDifficultyModel {
   const eras = coverageEras(games);
   const league = new Map<string, RouteCell>();
@@ -269,7 +397,12 @@ export function buildWRModel(
       if (acc) { acc.n += c.n; acc.open += c.open; } else league.set(key, { ...c });
     }
   }
-  const cells = [...league.values()];
+  return fitWRCells([...league.values()]);
+}
+
+// The WR model fit on route cells (any grouping: the league's merged cells, or
+// per-game cells for a held-out fold), with each coverage era anchored.
+function fitWRCells(cells: readonly RouteCell[]): WRDifficultyModel {
   const rowsFor = (d: typeof WR_FIT_DESIGN) => cells.map((c) => ({ cols: d.cols(c), y: c.open / c.n, w: c.n }));
   const fitted = fitDifficultyModel(rowsFor(WR_FIT_DESIGN), WR_FIT_DESIGN.size, WR_RIDGE_LAMBDA);
   if (!fitted) return { design: WR_DESIGN, model: null };
@@ -290,11 +423,13 @@ export function buildWRModel(
 
 // Open / expected / squared-residual sums over a set of route cells. A cell of
 // n routes with k open adds k residuals of (1 − e) and n − k of −e, each at
-// the cell's season weight.
-function cellSums(cells: RouteCell[], model: Float64Array): ResidualSums {
+// the cell's weight (a cell weighted 0, garbage time left out, isn't counted).
+// A tagged cell's expected includes the tag correction (expectedFor).
+function cellSums(cells: RouteCell[], model: WRModelWith): ResidualSums {
   const s = emptyResidualSums();
   for (const c of cells) {
-    const e = expectedFromModel(model, WR_DESIGN.cols(c));
+    if (!(c.w > 0)) continue;
+    const e = expectedFor(model, c);
     s.n += c.n;
     s.w += c.w * c.n;
     s.w2 += c.w * c.w * c.n;
@@ -310,13 +445,18 @@ function cellSums(cells: RouteCell[], model: Float64Array): ResidualSums {
 // (season/career) apply it themselves before calling in.
 function saeFromCells(cells: RouteCell[], model: WRDifficultyModel): number | null {
   if (!model.model) return null;
-  const s = cellSums(cells, model.model);
+  const s = cellSums(cells, { ...model, model: model.model });
   return s.n > 0 ? toAbovePts(s.actual / s.w, s.expected / s.w) : null;
 }
 
+// A charted route as a one-route cell. A tagged route carries its tags, so the
+// tag correction (when one is on) judges it like the season numbers do.
 const playCell = (era: CoverageEra) => (p: RoutePlay): RouteCell => ({
   route_type: p.route_type, coverage: p.coverage, alignment: p.alignment, on_line: p.on_line, era,
   n: 1, open: p.was_open ? 1 : 0, w: 1,
+  ...(isTaggedPlay(p, "WR")
+    ? { tagged: true, red_zone: p.red_zone === true, third_fourth_down: p.third_fourth_down === true, short_yardage: p.short_yardage === true, garbage_time: p.garbage_time === true }
+    : {}),
 });
 
 // "Core-route" SAE — the same math as SAE, but Go (nine) and Screen routes
@@ -338,7 +478,7 @@ function computeSAE(
 }
 
 // saeFromCells plus the sample behind it (play count, sampling variance).
-function sampleFromCells(cells: RouteCell[], model: Float64Array): AESample | null {
+function sampleFromCells(cells: RouteCell[], model: WRModelWith): AESample | null {
   const s = cellSums(cells, model);
   const variance = residualVariancePts(s);
   if (variance == null) return null;
@@ -357,30 +497,34 @@ export interface WRTierSplits {
 
 // Each WR's residuals (open − expected) by the opponent tier of the game, for
 // the AE Score's opponent adjustment. The league model is refit from the
-// per-game cells, the same model the SAE columns use. `games` supplies the
-// seasons and coverage eras, so each tier's share of a WR's routes is
-// season-weighted like his SAE; the residuals themselves stay unweighted for
-// the tier measurement.
+// per-game cells (and `tagRows`, migration 064), the same model the SAE
+// columns use. `games` supplies the seasons and coverage eras, so each tier's
+// share of a WR's routes is weighted like his SAE; the residuals themselves
+// stay unweighted for the tier measurement.
 export function buildWRTierSplits(
   gameRows: ProspectGameRouteCellsRow[],
   tierOf: (gameId: string) => "P4" | "G5" | "FCS" | null | undefined,
   games: readonly ScoutingGame[] = [],
+  tagRows: readonly ProspectGameRouteTagCellsRow[] = [],
 ): WRTierSplits {
   const out: WRTierSplits = { all: new Map(), core: new Map() };
-  const { model } = buildWRModel(gameRows, games);
-  if (!model) return out;
+  const fitted = buildWRModel(gameRows, games, tagRows);
+  if (!fitted.model) return out;
+  const model = { ...fitted, model: fitted.model };
   const weights = seasonWeights(games);
   const eras = coverageEras(games);
+  const tagsBy = splitTagged(fitted) ? tagCellsByGame(tagRows) : null;
   for (const row of gameRows) {
     const tier = tierOf(row.game_id);
     if (!tier) continue;
     const w = weights.get(row.game_id) ?? 1;
     const all = out.all.get(row.prospect_id) ?? {};
     const core = out.core.get(row.prospect_id) ?? {};
-    for (const c of parseCells(row.cells, 1, eras.get(row.game_id) ?? "new")) {
-      const resid = c.open - c.n * expectedFromModel(model, WR_DESIGN.cols(c));
-      addTierResidual(all, tier, c.n, resid, w * c.n);
-      if (!SAE_EX_ROUTE_TYPES.has(c.route_type)) addTierResidual(core, tier, c.n, resid, w * c.n);
+    for (const c of gameCells(row.cells, tagsBy?.get(row.game_id), w, eras.get(row.game_id) ?? "new")) {
+      if (!(c.w > 0)) continue;
+      const resid = c.open - c.n * expectedFor(model, c);
+      addTierResidual(all, tier, c.n, resid, c.w * c.n);
+      if (!SAE_EX_ROUTE_TYPES.has(c.route_type)) addTierResidual(core, tier, c.n, resid, c.w * c.n);
     }
     out.all.set(row.prospect_id, all);
     out.core.set(row.prospect_id, core);
@@ -397,7 +541,7 @@ function computeSAESample(
   model: WRDifficultyModel,
 ): AESample | null {
   if (!v.has_charted_open_data || v.total_routes < 15 || !model.model) return null;
-  return sampleFromCells(cells, model.model);
+  return sampleFromCells(cells, { ...model, model: model.model });
 }
 
 function computeCoreSAESample(
@@ -408,7 +552,7 @@ function computeCoreSAESample(
   if (!v.has_charted_open_data || !model.model) return null;
   const core = cells.filter((c) => !SAE_EX_ROUTE_TYPES.has(c.route_type));
   if (core.reduce((s, c) => s + c.n, 0) < 15) return null;
-  return sampleFromCells(core, model.model);
+  return sampleFromCells(core, { ...model, model: model.model });
 }
 
 // Season/career cSAE, gated on 15 core routes. Exact: each cell carries its
@@ -428,7 +572,7 @@ function computeCoreSAE(
 // The WR role buckets' skill sums (roleFitWR.ts): his routes by route type and
 // by coverage, every game season-weighted like SAE. Press counts in-app games
 // only: before the 2026-05-01 redefinition some press reps were charted as man.
-function wrRoleSkill(cells: RouteCell[], model: Float64Array): WRRoleSkill {
+function wrRoleSkill(cells: RouteCell[], model: WRModelWith): WRRoleSkill {
   const sum = (pred: (c: RouteCell) => boolean): AESum => {
     const r = cellSums(cells.filter(pred), model);
     return { n: r.n, w: r.w, actual: r.actual, expected: r.expected };
@@ -441,6 +585,23 @@ function wrRoleSkill(cells: RouteCell[], model: Float64Array): WRRoleSkill {
     man: sum((c) => c.coverage === "man"),
     press: sum((c) => c.coverage === "press" && c.era === "new"),
   };
+}
+
+// Each WR's tagged press reps and releases won (migration 064), and the pool's
+// win rate, for the X bucket (roleFitWR.ts).
+function releaseByProspect(tagRows: readonly ProspectGameRouteTagCellsRow[]): { byProspect: Map<string, { won: number; n: number }>; league: number | null } {
+  const byProspect = new Map<string, { won: number; n: number }>();
+  let won = 0, n = 0;
+  for (const row of tagRows) {
+    for (const c of parseTagCells(row.cells)) {
+      if (c.press_release == null) continue;
+      const r = byProspect.get(row.prospect_id) ?? { won: 0, n: 0 };
+      r.n += c.n; n += c.n;
+      if (c.press_release === "won") { r.won += c.n; won += c.n; }
+      byProspect.set(row.prospect_id, r);
+    }
+  }
+  return { byProspect, league: n > 0 ? won / n : null };
 }
 
 // Routes run per route type in in-app games, for the role buckets' route mix.
@@ -526,8 +687,11 @@ export interface ProspectThresholdCounts {
 
 // `gameCellRows` is prospect_game_route_cells (migration 058) and `games` the
 // scouting games, for each route's season weight and coverage era. Pass
-// `wrModel` when the caller already built it from the same rows and games.
-// `alignmentRows` is prospect_game_alignment (migration 060), for lined_up.
+// `wrModel` when the caller already built it from the same rows and games
+// (and `tagRows`). `alignmentRows` is prospect_game_alignment (migration 060),
+// for lined_up. `tagRows` is prospect_game_route_tag_cells (migration 064):
+// the tagged routes, judged apart only while the WR model has a tag
+// correction or garbage time is weighted.
 export function buildProspectsWithStats(
   prospects: Prospect[],
   viewRows: ProspectRouteStatsRow[],
@@ -536,12 +700,14 @@ export function buildProspectsWithStats(
   thresholdCounts: ProspectThresholdCounts = {},
   wrModel: WRDifficultyModel = buildWRModel(gameCellRows, games),
   alignmentRows: readonly ProspectGameAlignmentRow[] = [],
+  tagRows: readonly ProspectGameRouteTagCellsRow[] = [],
 ): ProspectWithStats[] {
   const byProspect = new Map(viewRows.map((r) => [r.prospect_id, r]));
   const eras = coverageEras(games);
-  const cellsByProspect = weightedCellsByProspect(gameCellRows, seasonWeights(games), eras);
+  const cellsByProspect = weightedCellsByProspect(gameCellRows, seasonWeights(games), eras, splitTagged(wrModel) ? tagRows : undefined);
   const linedUp = linedUpByProspect(alignmentRows, eras);
   const { qbThrowsByProspect, teRoutesByProspect } = thresholdCounts;
+  const release = releaseByProspect(tagRows);
 
   return prospects.map((p) => {
     const v = byProspect.get(p.id);
@@ -585,7 +751,9 @@ export function buildProspectsWithStats(
       lined_up,
       role_fit: p.position === "WR" && wrModel.model
         ? wrRoleFit({
-            skill: wrRoleSkill(cells, wrModel.model),
+            skill: wrRoleSkill(cells, { ...wrModel, model: wrModel.model }),
+            release: release.byProspect.get(p.id) ?? null,
+            leagueRelease: release.league,
             linedUp: lined_up,
             inAppRouteCounts: inAppRouteCounts(cells),
             heightIn: parseHeightInches(p.height),
@@ -626,3 +794,25 @@ export function buildProspectsWithStats(
   });
 }
 
+
+// ── The Grading checks (tag readiness and tests, garbage time, era scale) ──
+/** One game's WR route cell with its prospect and game: 058's cells with the
+ *  game's tagged routes split out as their own cells (gameCells), unweighted. */
+export interface WRGradingCell extends RouteCell { prospect_id: string; game_id: string }
+
+export function wrGradingCells(
+  gameRows: readonly ProspectGameRouteCellsRow[],
+  tagRows: readonly ProspectGameRouteTagCellsRow[],
+  games: readonly Pick<ScoutingGame, "id" | "created_at">[],
+): WRGradingCell[] {
+  const eras = coverageEras(games);
+  const tagsBy = tagCellsByGame(tagRows);
+  return gameRows.flatMap((row) =>
+    gameCells(row.cells, tagsBy.get(row.game_id), 1, eras.get(row.game_id) ?? "new")
+      .map((c) => ({ ...c, w: 1, prospect_id: row.prospect_id, game_id: row.game_id })));
+}
+
+/** The WR model (no tag correction) fit on these cells, for a held-out fold. */
+export function fitWRGradingModel(cells: readonly WRGradingCell[]): WRDifficultyModel {
+  return fitWRCells(cells);
+}

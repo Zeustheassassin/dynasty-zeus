@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { qbRoleFit, computeQBRoleFits, QB_MIN_THROWS, type QBRoleInputs } from "@/lib/scouting/roleFitQB";
+import { qbRoleFit, computeQBRoleFits, QB_MIN_THROWS, QB_RUN_TAG_MIN, type QBRoleInputs } from "@/lib/scouting/roleFitQB";
+import type { PffTotals } from "@/lib/pff/totals";
 import { matchFor } from "@/lib/scouting/roleFit";
 import type { Prospect, QBPlay, ScoutingGame } from "@/lib/types";
 
@@ -55,5 +56,36 @@ describe("QB role buckets", () => {
     const games = [{ id: "g1", prospect_id: "qb", season_year: 2025 }] as unknown as ScoutingGame[];
     const fits = computeQBRoleFits(prospects, games, many(40, { game_id: "g1" }));
     expect(fits.get("qb")!.sample).toEqual({ n: 40, unit: "graded throws" });
+  });
+});
+
+describe("QB Dual-threat reads rushing skill (Stage 4)", () => {
+  const runner = [...many(60), ...many(20, { play_type: "run", accuracy: null, timing: null }), ...many(10, { timing: "scramble", accuracy: null })];
+  const dual = (extra: Partial<QBRoleInputs>) => matchFor(qbRoleFit({ plays: runner, slices: slices({}), heightIn: 74, weightLb: 215, ...extra })!, "dual_threat")!.pct;
+
+  it("is unchanged with no rushing data", () => {
+    expect(dual({})).toBe(dual({ pffRush: null, leagueRushYpc: 4.5 }));
+  });
+
+  it("is higher for a QB who gains yards when he runs than for one who gets stopped", () => {
+    const good = dual({ pffRush: { yards: 420, carries: 60 }, leagueRushYpc: 4.5 });
+    const poor = dual({ pffRush: { yards: 90, carries: 60 }, leagueRushYpc: 4.5 });
+    expect(good).toBeGreaterThan(poor + 10);
+  });
+
+  it(`reads tagged run success once he has ${QB_RUN_TAG_MIN} tagged runs`, () => {
+    const tagged = runner.map((pl, i) => (pl.play_type === "run" ? { ...pl, run_success: i % 4 !== 0 } : pl));
+    const fit = qbRoleFit({ plays: tagged, slices: slices({}), heightIn: 74, weightLb: 215, leagueRunSucc: 0.5 })!;
+    expect(fit.features.rushSucc).toBeDefined();
+    const few = qbRoleFit({ plays: tagged.slice(0, 60 + QB_RUN_TAG_MIN - 1), slices: slices({}), heightIn: 74, weightLb: 215, leagueRunSucc: 0.5 })!;
+    expect(few.features.rushSucc).toBeUndefined();
+  });
+
+  it("computeQBRoleFits reads each QB's PFF rushing from his totals", () => {
+    const prospects = [{ id: "q", position: "QB" }] as Prospect[];
+    const games = [{ id: "g1", prospect_id: "q" }] as ScoutingGame[];
+    const pff = new Map([["q", { sum: { rush_yards: 300, rush_att: 50 } } as unknown as PffTotals]]);
+    const fit = computeQBRoleFits(prospects, games, many(40, { game_id: "g1" }), pff).get("q")!;
+    expect(fit.features.rushPff!.display).toContain("6.0 vs 6.0 pool on 50 carries");
   });
 });

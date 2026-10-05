@@ -1258,6 +1258,13 @@ export interface ScoreComponent {
   reliability: number;
   /** This metric's score, in true-talent SDs. */
   z: number;
+  /** A per-player component (PFF result or tag-only stat, aeComposite.ts): it
+   *  counts at `effectiveWeight` (weight × reliability) and only for prospects
+   *  who have it. */
+  perPlayer?: boolean;
+  effectiveWeight?: number;
+  /** The value as shown, e.g. "6.1% on 210 attempts (pool 4.5%)". */
+  text?: string;
 }
 
 // A prospect's AE Score as it stood when the draft class was drafted, kept so

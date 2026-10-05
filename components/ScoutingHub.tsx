@@ -24,7 +24,10 @@ import {
   type ProspectRouteStatsRow,
   type ProspectGameRouteCellsRow,
   type ProspectGameAlignmentRow,
+  type ProspectGameRouteTagCellsRow,
 } from "../lib/scouting/aggregateMerge";
+import type { ProspectGameRouteCountsRow } from "../lib/scouting/chartedComponents";
+import type { GradingData } from "../lib/scouting/aeComponents";
 import { buildPffTotals } from "../lib/pff/totals";
 import { fetchPffRows, isMissingPffTables, type PffRows } from "./scouting/pff/pffClient";
 
@@ -159,6 +162,32 @@ async function fetchGameAlignment(): Promise<ProspectGameAlignmentRow[]> {
   }
 }
 
+// A per-game view (migration 064: prospect_game_route_counts /
+// prospect_game_route_tag_cells), paged. Throws on error, which includes the
+// view not existing.
+async function fetchGameView<T>(view: string, select: string): Promise<T[]> {
+  const PAGE = 1000;
+  const all: T[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from(view)
+      .select(select)
+      .order("game_id", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    all.push(...((data ?? []) as T[]));
+    if (!data || data.length < PAGE) return all;
+  }
+}
+
+// A 064 view failed to load: before the migration is applied that's expected
+// (warn), anything else is an error. Either way only its numbers go blank.
+function logView064(what: string, error: { message?: string; code?: string }) {
+  const missing = error.code === "42P01" || error.code === "PGRST205" || /does not exist|could not find/i.test(error.message ?? "");
+  if (missing) log.warn(`${what} view missing (apply migration 064); ${what === "prospect_game_route_counts" ? "charted WR hands / contested components" : "WR tag stats and tag correction"} blank`);
+  else log.error(`${what} load`, { msg: error.message, code: error.code });
+}
+
 const WRHub = dynamic(() => import("./scouting/wr/WRHub"), { ssr: false });
 const RBHub = dynamic(() => import("./scouting/rb/RBHub"), { ssr: false });
 const QBHub = dynamic(() => import("./scouting/qb/QBHub"), { ssr: false });
@@ -225,6 +254,12 @@ export default function ScoutingHub() {
   // The user's PFF stats for charted games (migration 063). Empty after a failed
   // load (or before 063 is applied): the PFF columns show "—".
   const [pffRows, setPffRows] = useState<PffRows>({ games: [], seasons: [] });
+  // Migration 064: each WR game's charted receiving counts (the AE Score's
+  // charted hands / contested components) and its TAGGED routes by situation
+  // and tag (WR tag stats, the WR tag correction, the Grading checks). Empty
+  // after a failed load (or before 064 is applied): only those go blank.
+  const [routeCounts, setRouteCounts] = useState<ProspectGameRouteCountsRow[]>([]);
+  const [routeTagCells, setRouteTagCells] = useState<ProspectGameRouteTagCellsRow[]>([]);
   // Whether each lazy play load has landed. The Big Board only snapshots a
   // drafted prospect's AE Score once all three have, so it never saves a
   // half-computed score. (The route cells arrive with the hub's own load.)
@@ -251,6 +286,8 @@ export default function ScoutingHub() {
         { data: qbStatsData, error: qbStatsErr },
         { data: teStatsData, error: teStatsErr },
         { rows: pffData, error: pffErr },
+        { rows: countData, error: countErr },
+        { rows: tagCellData, error: tagCellErr },
       ] = await Promise.all([
         supabase.from("prospects").select("*").order("personal_rank", { ascending: true, nullsFirst: false }),
         supabase.from("scouting_games").select("*").order("season_year", { ascending: false }),
@@ -276,6 +313,15 @@ export default function ScoutingHub() {
           (rows) => ({ rows, error: null }),
           (error: unknown) => ({ rows: { games: [], seasons: [] } as PffRows, error }),
         ),
+        // Migration 064, each its own query (a failure only blanks what it feeds).
+        fetchGameView<ProspectGameRouteCountsRow>("prospect_game_route_counts", "prospect_id,game_id,routes,targets,catches,drops,contested,contested_catches").then(
+          (rows) => ({ rows, error: null }),
+          (error: { message?: string; code?: string }) => ({ rows: [] as ProspectGameRouteCountsRow[], error }),
+        ),
+        fetchGameView<ProspectGameRouteTagCellsRow>("prospect_game_route_tag_cells", "prospect_id,game_id,cells").then(
+          (rows) => ({ rows, error: null }),
+          (error: { message?: string; code?: string }) => ({ rows: [] as ProspectGameRouteTagCellsRow[], error }),
+        ),
       ]);
       if (!isLoadCurrent(seq)) return; // superseded by a newer reload
       if (pErr) log.error("prospects load", { msg: pErr.message, code: pErr.code, details: pErr.details, hint: pErr.hint });
@@ -291,6 +337,8 @@ export default function ScoutingHub() {
         if (isMissingPffTables(pffErr)) log.warn("PFF stats tables missing (apply migration 063); PFF columns blank");
         else log.error("PFF stats load (PFF columns blank)", { msg: String(pffErr) });
       }
+      if (countErr) logView064("prospect_game_route_counts", countErr);
+      if (tagCellErr) logView064("prospect_game_route_tag_cells", tagCellErr);
 
       // Reset lazy-fetch cache so a parent reload re-fetches plays the
       // next time AnalysisHub or GamesLog needs them.
@@ -306,6 +354,8 @@ export default function ScoutingHub() {
       setGameRouteCells(cellData);
       setGameAlignment(alignData);
       setPffRows(pffData);
+      setRouteCounts(countData);
+      setRouteTagCells(tagCellData);
       setGameSnapStatsRows((gssData ?? []) as GameSnapStatsRow[]);
       const rbRows = (rbStatsData ?? []) as RbRunTypeRow[];
       const qbRows = (qbStatsData ?? []) as QbThresholdRow[];
@@ -377,7 +427,7 @@ export default function ScoutingHub() {
   // The WR difficulty model (coverage judged per definition era), fit once per
   // load. It feeds the SAE / cSAE columns and the WR charting board's per-game
   // badges, so both judge routes the same way.
-  const wrModel = useMemo(() => buildWRModel(gameRouteCells ?? [], games), [gameRouteCells, games]);
+  const wrModel = useMemo(() => buildWRModel(gameRouteCells ?? [], games, routeTagCells), [gameRouteCells, games, routeTagCells]);
 
   // Server-aggregated path: merge view rows + per-game route cells (WR SAE's
   // difficulty model, season-weighted by the games) into ProspectWithStats.
@@ -385,14 +435,20 @@ export default function ScoutingHub() {
   // PFF over each prospect's charted games (lib/pff/totals.ts): Analysis,
   // Compare and the Big Board's PFF columns.
   const pffTotals = useMemo(() => buildPffTotals(games, pffRows.games, pffRows.seasons), [games, pffRows]);
+  // The AE Score's per-player components and the tag stats read these
+  // (lib/scouting/aeComponents.ts).
+  const gradingData = useMemo<GradingData>(
+    () => ({ pffGameRows: pffRows.games, routeCounts, routeTagCells }),
+    [pffRows, routeCounts, routeTagCells],
+  );
 
   const prospectsWithStats = useMemo(
     (): ProspectWithStats[] =>
       buildProspectsWithStats(prospects, routeStatsRows, gameRouteCells ?? [], games, {
         qbThrowsByProspect,
         teRoutesByProspect,
-      }, wrModel, gameAlignment),
-    [prospects, routeStatsRows, gameRouteCells, games, qbThrowsByProspect, teRoutesByProspect, wrModel, gameAlignment],
+      }, wrModel, gameAlignment, routeTagCells),
+    [prospects, routeStatsRows, gameRouteCells, games, qbThrowsByProspect, teRoutesByProspect, wrModel, gameAlignment, routeTagCells],
   );
 
   async function handleAddProspect(data: Omit<Prospect, "id" | "user_id" | "created_at" | "updated_at">) {
@@ -681,6 +737,7 @@ export default function ScoutingHub() {
             scoresReady={scoresReady}
             onLockAEScore={handleLockAEScore}
             pffTotals={pffTotals}
+            gradingData={gradingData}
           />
         )}
 
@@ -711,6 +768,8 @@ export default function ScoutingHub() {
             draftYearFilter={draftYearFilter}
             setDraftYearFilter={setDraftYearFilter}
             pffTotals={pffTotals}
+            gradingData={gradingData}
+            gameRouteCells={gameRouteCells}
             onSelectProspect={(p) => {
               setPendingProspect(p);
               setPositionTab(p.position as PositionTab);
@@ -730,6 +789,7 @@ export default function ScoutingHub() {
             loadPositionPlays={loadPositionPlays}
             loading={loading}
             pffTotals={pffTotals}
+            gradingData={gradingData}
           />
         )}
 

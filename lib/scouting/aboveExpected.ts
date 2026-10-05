@@ -14,6 +14,12 @@
 // A prospect's plays are season-weighted (seasonWeight.ts): older tape counts
 // a little less than his newest. The per-game functions (`*ForPlays`) take a
 // single game, so they're unweighted.
+//
+// Plays charted with the per-play tags (playEra.ts) can carry a tag
+// correction on top of each model (tagCorrection.ts): a tagged play is judged
+// by today's model plus what its tags add; an untagged play by today's model
+// alone, exactly as before. Every correction is switched off until its tags
+// pass a held-out test, so for now every play is judged as before.
 
 import type {
   AESample,
@@ -38,17 +44,40 @@ import {
   makeDesign,
   fitDifficultyModel,
   fitFromPlays,
-  expectedFromModel,
+  expectedFor as expectedForRow,
   aboveExpectedForPlays,
   aboveExpectedSampleForPlays,
   emptyResidualSums,
   addResidual,
   residualVariancePts,
+  type DifficultyCorrection,
+  type DifficultyDesign,
   type DifficultyDim,
   type ModelRow,
   type FittedDifficulty,
 } from "./difficultyModel";
 import { playWeights, type PlayWeight } from "./seasonWeight";
+import { isTaggedPlay, type TagPosition } from "./playEra";
+import { correctionFor, withGarbageWeight, type CorrectionKey } from "./tagCorrection";
+
+// A model fit on `plays` (its training set, already filtered), with the tag
+// correction for `key` on top when one is switched on.
+function fitWithCorrection<T extends object>(
+  key: CorrectionKey,
+  pos: TagPosition,
+  plays: T[],
+  design: DifficultyDesign<T>,
+  outcome: (row: T) => number,
+  lambda: number,
+): FittedDifficulty<T> {
+  const fitted = fitFromPlays(plays, design, outcome, lambda);
+  const correction = correctionFor(key, fitted, { rows: plays, outcome, tagged: (pl) => isTaggedPlay(pl, pos) });
+  return correction ? { ...fitted, correction } : fitted;
+}
+
+// A prospect's play weight: season (seasonWeight.ts) × garbage time (tagCorrection.ts).
+const sampleWeights = (key: CorrectionKey, games: Parameters<typeof playWeights>[0]): PlayWeight =>
+  withGarbageWeight(key, playWeights(games));
 
 const RB_RUN_TYPES: RBRunType[] = ["outside_zone", "inside_zone", "outside_man_gap", "inside_man_gap"];
 const RB_FORMATIONS: RBFormation[] = ["gun", "pistol", "under_center"];
@@ -200,7 +229,7 @@ const RB_DESIGN = makeDesign(RB_DIMS);
 export type RBBaselines = FittedDifficulty<RBPlay>;
 
 export function buildRBBaselines(rbPlays: RBPlay[]): RBBaselines {
-  return fitFromPlays(rbPlays.filter(isKnownRun), RB_DESIGN, rbSuccess, RB_RIDGE_LAMBDA);
+  return fitWithCorrection("rb_srae", "RB", rbPlays.filter(isKnownRun), RB_DESIGN, rbSuccess, RB_RIDGE_LAMBDA);
 }
 
 // Actual-vs-expected for an arbitrary RB play subset (a prospect's whole
@@ -224,7 +253,7 @@ export function computeRBAboveExpectedSamples(
   const gameToProspect = buildGameToProspect(games);
   const playsByProspect = buildPlaysByProspect(rbPlays, gameToProspect);
   const baselines = buildRBBaselines(rbPlays);
-  const weightOf = playWeights(games);
+  const weightOf = sampleWeights("rb_srae", games);
   const tierOf = tierByGame && ((pl: RBPlay) => tierByGame.get(pl.game_id));
 
   for (const p of prospects) {
@@ -267,6 +296,11 @@ const RB_RUN_SLICES: readonly { key: RBRunSliceKey; runTypes: readonly RBRunType
 ];
 const RB_SLICE_DESIGN = makeDesign<RBPlay>([...RB_DIMS, [RB_RUN_TYPES, (pl) => pl.run_type]]);
 
+// The run-type model behind the SRAE breakdown columns and the role buckets'
+// zone / gap slices, with its own tag correction.
+const buildRBSliceModel = (rbPlays: RBPlay[]) =>
+  fitWithCorrection("rb_srae", "RB", rbPlays.filter(isKnownRun), RB_SLICE_DESIGN, rbSuccess, RB_RIDGE_LAMBDA);
+
 // Every RB gets an entry; a slice's `ae` is null under the 15-run headline
 // floor or the slice's own SLICE_MIN_SAMPLE.
 export function computeRBRunSliceSRAE(
@@ -276,8 +310,8 @@ export function computeRBRunSliceSRAE(
 ): Map<string, Record<RBRunSliceKey, AESlice>> {
   const out = new Map<string, Record<RBRunSliceKey, AESlice>>();
   const playsByProspect = buildPlaysByProspect(rbPlays, buildGameToProspect(games));
-  const fitted = fitFromPlays(rbPlays.filter(isKnownRun), RB_SLICE_DESIGN, rbSuccess, RB_RIDGE_LAMBDA);
-  const weightOf = playWeights(games);
+  const fitted = buildRBSliceModel(rbPlays);
+  const weightOf = sampleWeights("rb_srae", games);
 
   for (const p of prospects) {
     if (p.position !== "RB") continue;
@@ -378,13 +412,14 @@ interface QBBaselines {
   route:    Bucketed<RouteType>;
   global:   Acc;  // all graded throws — the shrinkage target
   rows:     ModelRow[];  // one per graded throw — the difficulty model's training set
+  throws:   QBPlay[];    // the same throws, for the tag correction
 }
 
 export function buildQBBaselines(leaguePlays: QBPlay[]): QBBaselines {
   const b: QBBaselines = {
     depth: {}, cvg: { man: { v: 0, n: 0 }, zone: { v: 0, n: 0 } },
     timing: {}, pressure: {}, platform: {}, route: {},
-    global: { v: 0, n: 0 }, rows: [],
+    global: { v: 0, n: 0 }, rows: [], throws: [],
   };
   const add = (acc: Acc | undefined, v: number): Acc => {
     const a = acc ?? { v: 0, n: 0 };
@@ -403,6 +438,7 @@ export function buildQBBaselines(leaguePlays: QBPlay[]): QBBaselines {
     if (pk)                   b.platform[pk]           = add(b.platform[pk], v);
     if (pl.route_type)        b.route[pl.route_type]   = add(b.route[pl.route_type], v);
     b.rows.push({ cols: QB_DESIGN.cols(pl), y: v });
+    b.throws.push(pl);
   }
   return b;
 }
@@ -419,6 +455,7 @@ export interface ResolvedBaselines {
   platform: Map<QBPlatformKey, number>;
   route:    Map<RouteType, number>;
   model:    Float64Array | null;  // fitDifficultyModel coefficients; null = no league throws
+  correction?: DifficultyCorrection<QBPlay> | null;  // tagCorrection.ts; absent = tagged throws judged as before
 }
 
 // Collapse one dimension's raw buckets into shrunk rates.
@@ -434,6 +471,10 @@ function resolveDim<K extends string>(raw: { [k: string]: Acc | undefined }, mea
 
 export function resolveBaselines(b: QBBaselines): ResolvedBaselines {
   const mean = b.global.n > 0 ? b.global.v / b.global.n : 0;
+  const model = fitDifficultyModel(b.rows, QB_DESIGN.size, QB_RIDGE_LAMBDA);
+  const correction = correctionFor("qb_aae", { design: QB_DESIGN, model }, {
+    rows: b.throws, outcome: throwValue, tagged: (pl) => isTaggedPlay(pl, "QB"),
+  });
   return {
     depth:    resolveDim<QBDepthZone>(b.depth, mean),
     cvg:      resolveDim<"man" | "zone">(b.cvg, mean),
@@ -441,16 +482,22 @@ export function resolveBaselines(b: QBBaselines): ResolvedBaselines {
     pressure: resolveDim<QBPressure>(b.pressure, mean),
     platform: resolveDim<QBPlatformKey>(b.platform, mean),
     route:    resolveDim<RouteType>(b.route, mean),
-    model:    fitDifficultyModel(b.rows, QB_DESIGN.size, QB_RIDGE_LAMBDA),
+    model,
+    ...(correction ? { correction } : {}),
   };
 }
 
 // Per-play expected throw value from the difficulty model: the league's odds
 // for a throw carrying exactly this play's situation tags, every filled
-// dimension's effect stacked. Null only when there is no model (no league
-// throws).
+// dimension's effect stacked (plus, on a tagged throw, the tag correction).
+// Null only when there is no model (no league throws).
 function expectedForPlay(pl: QBPlay, R: ResolvedBaselines): number | null {
-  return R.model ? expectedFromModel(R.model, QB_DESIGN.cols(pl)) : null;
+  return R.model ? expectedForRow({ design: QB_DESIGN, model: R.model, correction: R.correction }, pl) : null;
+}
+
+/** The fitted QB AAE model (with its tag correction), for the Grading checks. */
+export function qbFitted(R: ResolvedBaselines): FittedDifficulty<QBPlay> {
+  return { design: QB_DESIGN, model: R.model, correction: R.correction };
 }
 
 // Weighted expected throw value for one dimension AND the QB's actual throw
@@ -576,7 +623,7 @@ function modelAAE(ratedPasses: QBPlay[], R: ResolvedBaselines, weightOf?: PlayWe
 function modelAAESample(ratedPasses: QBPlay[], R: ResolvedBaselines, weightOf?: PlayWeight): AESample | null {
   if (!R.model) return null;
   const s = emptyResidualSums();
-  for (const pl of ratedPasses) addResidual(s, throwValue(pl), expectedFromModel(R.model, QB_DESIGN.cols(pl)), weightOf ? weightOf(pl) : 1);
+  for (const pl of ratedPasses) addResidual(s, throwValue(pl), expectedForPlay(pl, R)!, weightOf ? weightOf(pl) : 1);
   const variance = residualVariancePts(s);
   if (variance == null) return null;
   return { ae: parseFloat((((s.actual - s.expected) / s.w) * 100).toFixed(2)), n: s.n, w: s.w, variance };
@@ -607,7 +654,7 @@ export function computeQBAboveExpectedSamples(
   const gameToProspect = buildGameToProspect(games);
   const playsByProspect = buildPlaysByProspect(qbPlays, gameToProspect);
   const R = resolveBaselines(buildQBBaselines(qbPlays));
-  const weightOf = playWeights(games);
+  const weightOf = sampleWeights("qb_aae", games);
 
   for (const p of prospects) {
     if (p.position !== "QB") continue;
@@ -639,7 +686,7 @@ export function computeQBAAEBreakdown(
 ): QBAAEBreakdown {
   const R = resolveBaselines(buildQBBaselines(leaguePlays));
   const ratedPasses = prospectPlays.filter(isQBGradedThrow);
-  return breakdownFor(ratedPasses, R, playWeights(games));
+  return breakdownFor(ratedPasses, R, sampleWeights("qb_aae", games));
 }
 
 // ── QB AAE by throw location ─────────────────────────────────────────────
@@ -679,7 +726,7 @@ export function computeQBThrowSliceAAE(
   const out = new Map<string, Record<QBThrowSliceKey, AESlice>>();
   const playsByProspect = buildPlaysByProspect(qbPlays, buildGameToProspect(games));
   const R = resolveBaselines(buildQBBaselines(qbPlays));
-  const weightOf = playWeights(games);
+  const weightOf = sampleWeights("qb_aae", games);
 
   for (const p of prospects) {
     if (p.position !== "QB") continue;
@@ -725,7 +772,7 @@ const TE_ROUTE_DESIGN = makeDesign<TEPlay>([
 export type TERouteBaselines = FittedDifficulty<TEPlay>;
 
 export function buildTERouteBaselines(tePlays: TEPlay[]): TERouteBaselines {
-  return fitFromPlays(tePlays.filter(isRatedTERoute), TE_ROUTE_DESIGN, teOpen, TE_RIDGE_LAMBDA);
+  return fitWithCorrection("te_saer", "TE", tePlays.filter(isRatedTERoute), TE_ROUTE_DESIGN, teOpen, TE_RIDGE_LAMBDA);
 }
 
 // Actual-vs-expected open rate for an arbitrary TE route-run play subset. No
@@ -747,7 +794,7 @@ export function computeTERouteAboveExpectedSamples(
   const gameToProspect = buildGameToProspect(games);
   const playsByProspect = buildPlaysByProspect(tePlays, gameToProspect);
   const baselines = buildTERouteBaselines(tePlays);
-  const weightOf = playWeights(games);
+  const weightOf = sampleWeights("te_saer", games);
   const tierOf = tierByGame && ((pl: TEPlay) => tierByGame.get(pl.game_id));
 
   for (const p of prospects) {
@@ -793,7 +840,7 @@ const TE_BLOCK_DESIGN = makeDesign<TEPlay>([
 export type TEBlockBaselines = FittedDifficulty<TEPlay>;
 
 export function buildTEBlockBaselines(tePlays: TEPlay[]): TEBlockBaselines {
-  return fitFromPlays(tePlays.filter(isRatedTEBlock), TE_BLOCK_DESIGN, teBlockWon, TE_RIDGE_LAMBDA);
+  return fitWithCorrection("te_saeb", "TE", tePlays.filter(isRatedTEBlock), TE_BLOCK_DESIGN, teBlockWon, TE_RIDGE_LAMBDA);
 }
 
 // Actual-vs-expected block success for an arbitrary TE block-play subset. No
@@ -815,7 +862,7 @@ export function computeTEBlockAboveExpectedSamples(
   const gameToProspect = buildGameToProspect(games);
   const playsByProspect = buildPlaysByProspect(tePlays, gameToProspect);
   const baselines = buildTEBlockBaselines(tePlays);
-  const weightOf = playWeights(games);
+  const weightOf = sampleWeights("te_saeb", games);
   const tierOf = tierByGame && ((pl: TEPlay) => tierByGame.get(pl.game_id));
 
   for (const p of prospects) {
@@ -865,8 +912,8 @@ export function computeRBRoleSlices<K extends string>(
   const out = new Map<string, Record<K, AESlice>>();
   const playsByProspect = buildPlaysByProspect(rbPlays, buildGameToProspect(games));
   const headline = buildRBBaselines(rbPlays);
-  const byRunType = fitFromPlays(rbPlays.filter(isKnownRun), RB_SLICE_DESIGN, rbSuccess, RB_RIDGE_LAMBDA);
-  const weightOf = playWeights(games);
+  const byRunType = buildRBSliceModel(rbPlays);
+  const weightOf = sampleWeights("rb_srae", games);
   const keys = Object.keys(slices) as K[];
   for (const p of prospects) {
     if (p.position !== "RB") continue;
@@ -888,7 +935,7 @@ export function computeQBRoleSlices<K extends string>(
   const out = new Map<string, Record<K, AESlice>>();
   const playsByProspect = buildPlaysByProspect(qbPlays, buildGameToProspect(games));
   const R = resolveBaselines(buildQBBaselines(qbPlays));
-  const weightOf = playWeights(games);
+  const weightOf = sampleWeights("qb_aae", games);
   const keys = Object.keys(slices) as K[];
   for (const p of prospects) {
     if (p.position !== "QB") continue;
@@ -915,7 +962,8 @@ export function computeTERoleSlices<R extends string, B extends string>(
   const playsByProspect = buildPlaysByProspect(tePlays, buildGameToProspect(games));
   const routeModel = buildTERouteBaselines(tePlays);
   const blockModel = buildTEBlockBaselines(tePlays);
-  const weightOf = playWeights(games);
+  const routeWeight = sampleWeights("te_saer", games);
+  const blockWeight = sampleWeights("te_saeb", games);
   for (const p of prospects) {
     if (p.position !== "TE") continue;
     const plays = playsByProspect.get(p.id) ?? [];
@@ -923,9 +971,42 @@ export function computeTERoleSlices<R extends string, B extends string>(
     const blocks = plays.filter(isRatedTEBlock);
     const route = {} as Record<R, AESlice>;
     const block = {} as Record<B, AESlice>;
-    for (const k of Object.keys(routeSlices) as R[]) route[k] = sliceOf(routes, routeSlices[k], routeModel, teOpen, weightOf);
-    for (const k of Object.keys(blockSlices) as B[]) block[k] = sliceOf(blocks, blockSlices[k], blockModel, teBlockWon, weightOf);
+    for (const k of Object.keys(routeSlices) as R[]) route[k] = sliceOf(routes, routeSlices[k], routeModel, teOpen, routeWeight);
+    for (const k of Object.keys(blockSlices) as B[]) block[k] = sliceOf(blocks, blockSlices[k], blockModel, teBlockWon, blockWeight);
     out.set(p.id, { route, block });
   }
   return out;
+}
+
+// ── Model specs (the Grading checks: tag readiness, held-out tag tests,
+//    garbage time, era scale) ─────────────────────────────────────────────
+// Each QB / RB / TE model as data: which plays it's fit on, its design,
+// outcome and ridge. fitFromPlays(select(plays), design, outcome, lambda) is
+// exactly the model the metric uses before any tag correction. WR's lives in
+// aggregateMerge.ts (it's fit from route cells).
+export interface AEModelSpec<T extends { game_id: string }> {
+  key: CorrectionKey;
+  pos: TagPosition;
+  select: (plays: T[]) => T[];
+  design: DifficultyDesign<T>;
+  outcome: (row: T) => number;
+  lambda: number;
+}
+
+export const QB_MODEL_SPEC: AEModelSpec<QBPlay> = {
+  key: "qb_aae", pos: "QB", select: (plays) => plays.filter(isQBGradedThrow), design: QB_DESIGN, outcome: throwValue, lambda: QB_RIDGE_LAMBDA,
+};
+export const RB_MODEL_SPEC: AEModelSpec<RBPlay> = {
+  key: "rb_srae", pos: "RB", select: (plays) => plays.filter(isKnownRun), design: RB_DESIGN, outcome: rbSuccess, lambda: RB_RIDGE_LAMBDA,
+};
+export const TE_ROUTE_MODEL_SPEC: AEModelSpec<TEPlay> = {
+  key: "te_saer", pos: "TE", select: (plays) => plays.filter(isRatedTERoute), design: TE_ROUTE_DESIGN, outcome: teOpen, lambda: TE_RIDGE_LAMBDA,
+};
+export const TE_BLOCK_MODEL_SPEC: AEModelSpec<TEPlay> = {
+  key: "te_saeb", pos: "TE", select: (plays) => plays.filter(isRatedTEBlock), design: TE_BLOCK_DESIGN, outcome: teBlockWon, lambda: TE_RIDGE_LAMBDA,
+};
+
+/** The spec's model as the metric uses it: today's fit plus its tag correction. */
+export function fitSpec<T extends { game_id: string }>(spec: AEModelSpec<T>, plays: T[]): FittedDifficulty<T> {
+  return fitWithCorrection(spec.key, spec.pos, spec.select(plays), spec.design, spec.outcome, spec.lambda);
 }

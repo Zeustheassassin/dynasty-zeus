@@ -59,8 +59,10 @@ export function makeDesign<T>(dims: ReadonlyArray<DifficultyDim<T>>): Difficulty
 // value like QB throw value); `w` is how many identical plays the row stands
 // for — 1 for a raw play, the cell count when fitting from pre-aggregated
 // counts (WR). A cell of n plays with k successes is exactly n rows, so
-// {y: k/n, w: n} gives the same fit.
-export interface ModelRow { cols: number[]; y: number; w?: number }
+// {y: k/n, w: n} gives the same fit. `offset` is a fixed logit added to the
+// row's own (a model fit on top of another: the tag correction below takes
+// the base model's logit as its offset, so only its own columns are learned).
+export interface ModelRow { cols: number[]; y: number; w?: number; offset?: number }
 
 // Target clamp: keeps a league of all-success rows (y ≡ 1) from sending the
 // unpenalized intercept to +∞. Invisible at real data.
@@ -103,29 +105,31 @@ function solveLinear(A: Float64Array[], b: Float64Array): Float64Array | null {
 export function fitDifficultyModel(rawRows: ModelRow[], size: number, lambda: number): Float64Array | null {
   const rows = rawRows
     .filter((r) => (r.w ?? 1) > 0)
-    .map((r) => ({ cols: r.cols, w: r.w ?? 1, y: Math.min(Math.max(r.y, MODEL_Y_EPS), 1 - MODEL_Y_EPS) }));
+    .map((r) => ({ cols: r.cols, w: r.w ?? 1, y: Math.min(Math.max(r.y, MODEL_Y_EPS), 1 - MODEL_Y_EPS), off: r.offset ?? 0 }));
   if (!rows.length) return null;
   const P = size;
-  const logit = (b: Float64Array, cols: number[]) => { let s = b[0]; for (const c of cols) s += b[c]; return s; };
+  const logit = (b: Float64Array, r: { cols: number[]; off: number }) => { let s = r.off + b[0]; for (const c of r.cols) s += b[c]; return s; };
   // Penalized negative log-likelihood — every accepted step must lower it.
   const objective = (b: Float64Array) => {
     let f = 0;
-    for (const r of rows) { const z = logit(b, r.cols); f += r.w * (softplus(z) - r.y * z); }
+    for (const r of rows) { const z = logit(b, r); f += r.w * (softplus(z) - r.y * z); }
     for (let j = 1; j < P; j++) f += 0.5 * lambda * b[j] * b[j];
     return f;
   };
 
   let beta = new Float64Array(P);
-  let wSum = 0, ySum = 0;
-  for (const r of rows) { wSum += r.w; ySum += r.w * r.y; }
+  let wSum = 0, ySum = 0, offSum = 0;
+  for (const r of rows) { wSum += r.w; ySum += r.w * r.y; offSum += r.w * r.off; }
   const ybar = ySum / wSum;
-  beta[0] = Math.log(ybar / (1 - ybar));
+  // Start the intercept at the league rate, net of the average offset (0
+  // without offsets, so a plain fit starts exactly where it always has).
+  beta[0] = Math.log(ybar / (1 - ybar)) - offSum / wSum;
   let f = objective(beta);
   for (let iter = 0; iter < 50; iter++) {
     const g = new Float64Array(P);
     const H = Array.from({ length: P }, () => new Float64Array(P));
     for (const r of rows) {
-      const p = sigmoid(logit(beta, r.cols));
+      const p = sigmoid(logit(beta, r));
       const resid = r.w * (p - r.y);
       const w = r.w * p * (1 - p);
       g[0] += resid; H[0][0] += w;
@@ -155,12 +159,36 @@ export function fitDifficultyModel(rawRows: ModelRow[], size: number, lambda: nu
   return beta;
 }
 
+// The model's log-odds for a play carrying exactly these columns, plus any
+// fixed offset.
+export function logitFromModel(model: Float64Array, cols: number[], offset = 0): number {
+  let z = offset + model[0];
+  for (const c of cols) z += model[c];
+  return z;
+}
+
 // The league's expected outcome for a play carrying exactly these columns —
 // every filled dimension's effect stacked.
-export function expectedFromModel(model: Float64Array, cols: number[]): number {
-  let z = model[0];
-  for (const c of cols) z += model[c];
-  return sigmoid(z);
+export function expectedFromModel(model: Float64Array, cols: number[], offset = 0): number {
+  return sigmoid(logitFromModel(model, cols, offset));
+}
+
+// The logit offset that makes a set of plays' (or cells') expected outcomes
+// sum to `target` (Newton's method; the sum rises steadily with the offset).
+// `z` is each row's logit before the offset, `n` how many plays it stands for.
+// Used to anchor a level that is set rather than fit: WR's coverage eras
+// (aggregateMerge.ts) and the tag correction's (tagCorrection.ts).
+export function levelOffset(rows: readonly { n: number; z: number }[], target: number): number {
+  let d = 0;
+  for (let i = 0; i < 50; i++) {
+    let f = -target, df = 0;
+    for (const c of rows) { const p = sigmoid(c.z + d); f += c.n * p; df += c.n * p * (1 - p); }
+    if (!(df > 0)) break;
+    const step = f / df;
+    d = Math.min(5, Math.max(-5, d - step));
+    if (Math.abs(step) < 1e-12) break;
+  }
+  return d;
 }
 
 // Actual minus expected, in percentage points rounded to 2 dp. -0 is folded to
@@ -169,11 +197,42 @@ export function toAbovePts(actual: number, expected: number): number {
   return parseFloat(((actual - expected) * 100).toFixed(2)) || 0;
 }
 
+// The per-play tag correction (tagCorrection.ts): a second, small model fit on
+// TAGGED plays only, on top of the base model, whose logit it takes as a fixed
+// offset. A tagged play's expected is the base logit plus the correction's; an
+// untagged play never reaches it, so old plays are judged exactly as before
+// (the user won't re-chart old games, and tags must never change how an old
+// play is judged). `model[0]` is the correction's level, anchored rather than
+// fit (see tagCorrection.ts), and the rest are the tag effects.
+export interface DifficultyCorrection<T> {
+  design: DifficultyDesign<T>;
+  model: Float64Array;
+  /** Whether a row is a tagged play (or a tagged cell). */
+  applies: (row: T) => boolean;
+}
+
 // A fitted model bundled with its design, so callers can't pair a model with
-// the wrong column layout.
+// the wrong column layout. `correction` is absent (or null) until a tag is
+// switched on and there are tagged plays to fit it from.
 export interface FittedDifficulty<T> {
   design: DifficultyDesign<T>;
   model: Float64Array | null;
+  correction?: DifficultyCorrection<T> | null;
+}
+
+// The base model's logit for a row (no correction).
+export function baseLogitFor<T>(fitted: FittedDifficulty<T> & { model: Float64Array }, row: T): number {
+  return logitFromModel(fitted.model, fitted.design.cols(row));
+}
+
+// A row's expected outcome: the base model, plus the tag correction on a
+// tagged play. Every Above-Expected number goes through here (or, for QB,
+// aboveExpected.ts's expectedForPlay, which does the same), so the headline
+// metrics, slices, per-game badges and role buckets judge a play the same way.
+export function expectedFor<T>(fitted: FittedDifficulty<T> & { model: Float64Array }, row: T): number {
+  const z = baseLogitFor(fitted, row);
+  const c = fitted.correction;
+  return sigmoid(c && c.applies(row) ? logitFromModel(c.model, c.design.cols(row), z) : z);
 }
 
 export function fitFromPlays<T>(
@@ -245,13 +304,14 @@ export function aboveExpectedSampleForPlays<T>(
     weightOf?: (row: T) => number;
   } = {},
 ): AESample | null {
-  const { design, model } = fitted;
+  const { model } = fitted;
   if (!model || plays.length === 0) return null;
+  const withModel = { ...fitted, model };
   const s = emptyResidualSums();
   const byTier: ByTier = {};
   for (const pl of plays) {
     const y = outcome(pl);
-    const e = expectedFromModel(model, design.cols(pl));
+    const e = expectedFor(withModel, pl);
     const w = weightOf ? weightOf(pl) : 1;
     addResidual(s, y, e, w);
     if (tierOf) addTierResidual(byTier, tierOf(pl), 1, y - e, w);
@@ -272,15 +332,16 @@ export function aboveExpectedForPlays<T>(
   outcome: (row: T) => number,
   weightOf?: (row: T) => number,
 ): number | null {
-  const { design, model } = fitted;
+  const { model } = fitted;
   if (!model || plays.length === 0) return null;
+  const withModel = { ...fitted, model };
   let sumActual = 0;
   let sumExpected = 0;
   let sumW = 0;
   for (const pl of plays) {
     const w = weightOf ? weightOf(pl) : 1;
     sumActual += w * outcome(pl);
-    sumExpected += w * expectedFromModel(model, design.cols(pl));
+    sumExpected += w * expectedFor(withModel, pl);
     sumW += w;
   }
   return toAbovePts(sumActual / sumW, sumExpected / sumW);

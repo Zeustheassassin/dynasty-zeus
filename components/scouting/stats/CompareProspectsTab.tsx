@@ -8,6 +8,8 @@ import { TE_STAT_COLS, buildTEStatRows } from "./TEStatsTable";
 import { WR_STAT_COLS, buildWRStatRows } from "./WRStatsTable";
 import type { LoadPositionPlaysFn } from "../../ScoutingHub";
 import type { PffTotals } from "../../../lib/pff/totals";
+import type { GradingData } from "../../../lib/scouting/aeComponents";
+import { tagValuesFor } from "./tagCols";
 
 type PositionTab = "QB" | "RB" | "WR" | "TE";
 const POSITIONS: PositionTab[] = ["QB", "RB", "WR", "TE"];
@@ -29,6 +31,8 @@ interface Props {
   loading?: boolean;
   /** PFF over each prospect's charted games. */
   pffTotals?: Map<string, PffTotals>;
+  /** PFF rows and migration-064 views (the WR tag stats read its tag cells). */
+  gradingData?: GradingData;
 }
 
 function ProspectPicker({
@@ -91,7 +95,7 @@ function ProspectPicker({
 }
 
 export default function CompareProspectsTab({
-  prospects, prospectsWithStats, games, rbPlays, qbPlays, tePlays, loadPositionPlays, loading, pffTotals,
+  prospects, prospectsWithStats, games, rbPlays, qbPlays, tePlays, loadPositionPlays, loading, pffTotals, gradingData,
 }: Props) {
   const [position, setPosition] = useState<PositionTab>("WR");
   const [prospectA, setProspectA] = useState<Prospect | null>(null);
@@ -107,14 +111,19 @@ export default function CompareProspectsTab({
     setProspectB(null);
   };
 
+  // The tag-only stats, from whatever plays (and WR tag cells) are loaded.
+  const tags = useMemo(
+    () => tagValuesFor({ games, qbPlays, rbPlays, tePlays, wrTagRows: gradingData?.routeTagCells ?? [] }),
+    [games, qbPlays, rbPlays, tePlays, gradingData],
+  );
   const { cols, rows } = useMemo((): { cols: ColDef[]; rows: StatRow[] } => {
     switch (position) {
-      case "RB": return { cols: RB_STAT_COLS, rows: buildRBStatRows(prospects, games, rbPlays, pffTotals) };
-      case "QB": return { cols: QB_STAT_COLS, rows: buildQBStatRows(prospects, games, qbPlays, pffTotals) };
-      case "TE": return { cols: TE_STAT_COLS, rows: buildTEStatRows(prospects, games, tePlays, pffTotals) };
-      default:   return { cols: WR_STAT_COLS, rows: buildWRStatRows(prospectsWithStats, pffTotals) };
+      case "RB": return { cols: RB_STAT_COLS, rows: buildRBStatRows(prospects, games, rbPlays, pffTotals, tags) };
+      case "QB": return { cols: QB_STAT_COLS, rows: buildQBStatRows(prospects, games, qbPlays, pffTotals, tags) };
+      case "TE": return { cols: TE_STAT_COLS, rows: buildTEStatRows(prospects, games, tePlays, pffTotals, tags) };
+      default:   return { cols: WR_STAT_COLS, rows: buildWRStatRows(prospectsWithStats, pffTotals, tags) };
     }
-  }, [position, prospects, prospectsWithStats, games, rbPlays, qbPlays, tePlays, pffTotals]);
+  }, [position, prospects, prospectsWithStats, games, rbPlays, qbPlays, tePlays, pffTotals, tags]);
 
   const positionProspects = useMemo(
     () => prospects.filter((p) => p.position === position),

@@ -8,9 +8,15 @@
 // Skill is AAE (aboveExpected.ts) over a slice of his graded throws: short and
 // intermediate, deep, off-platform or on the run, under pressure. Usage is his
 // tendencies: how often he throws to his first read, checks down, takes sacks,
-// throws deep, extends plays, scrambles and runs. Dual-threat is usage alone:
-// designed QB runs record no result, so only how often he runs can count.
+// throws deep, extends plays, scrambles and runs.
+//
+// Dual-threat reads rushing skill too (tape-grading expansion, Stage 4): his
+// rushing yards per carry over the charted games (PFF; the charting records
+// no run yards), and, once he has QB_RUN_TAG_MIN tagged runs, his run success
+// from the per-play tags. Each is left out when he has none, so the usage
+// ingredients carry the bucket alone exactly as before.
 import type { Prospect, QBPlay, ScoutingGame } from "../types";
+import type { PffTotals } from "../pff/totals";
 import { computeQBRoleSlices } from "./aboveExpected";
 import { parseHeightInches } from "./prospectAge";
 import {
@@ -32,7 +38,16 @@ const SCALE = {
   deep: 1.7,
   offPlatform: 2.3,
   pressured: 1.5,
+  // Yards per carry over the pool's (PFF), calibrated on the 2026-10-05
+  // charting like the rest (prior RUSH_PRIOR carries).
+  rushYpc: 0.64,
+  // Tagged run success, pts over the pool's. PROVISIONAL: no tagged runs
+  // existed when it was set; re-calibrate once 10 QBs have QB_RUN_TAG_MIN.
+  runSucc: 8,
 } as const;
+const RUSH_PRIOR = 30;
+// Tagged runs (designed + scrambles) before run success counts.
+export const QB_RUN_TAG_MIN = 10;
 
 const isDeep = (pl: QBPlay) => pl.depth_zone?.startsWith("deep_") ?? false;
 const QB_SLICES = {
@@ -51,6 +66,11 @@ export interface QBRoleInputs {
   slices: Record<QBSliceKey, AESliceValue>;
   heightIn: number | null;
   weightLb: number | null;
+  /** His PFF rushing over the charted games, and the pool's yards per carry. */
+  pffRush?: { yards: number; carries: number } | null;
+  leagueRushYpc?: number | null;
+  /** The pool's tagged run success (0–1), for his tagged runs to be read against. */
+  leagueRunSucc?: number | null;
 }
 
 export function qbFeatures(inp: QBRoleInputs): FeatureSet {
@@ -92,6 +112,22 @@ export function qbFeatures(inp: QBRoleInputs): FeatureSet {
     const run = of(plays, (pl) => pl.play_type === "run");
     f.runShare = usageFeature("Designed runs", run, 0.05, 0.2, pct(run, "snaps"));
   }
+  const rush = inp.pffRush;
+  if (rush && rush.carries > 0 && inp.leagueRushYpc != null) {
+    const ypc = rush.yards / rush.carries;
+    f.rushPff = {
+      ...skillFeature("Rushing yards per carry (PFF)", ypc - inp.leagueRushYpc, rush.carries, RUSH_PRIOR, SCALE.rushYpc, "carries"),
+      display: `${ypc.toFixed(1)} vs ${inp.leagueRushYpc.toFixed(1)} pool on ${rush.carries} carries (PFF)`,
+    };
+  }
+  const tagged = plays.filter((pl) => pl.run_success != null);
+  if (tagged.length >= QB_RUN_TAG_MIN && inp.leagueRunSucc != null) {
+    const rate = tagged.filter((pl) => pl.run_success === true).length / tagged.length;
+    f.rushSucc = {
+      ...skillFeature("Run success (tagged)", (rate - inp.leagueRunSucc) * 100, tagged.length, RUSH_PRIOR, SCALE.runSucc, "tagged runs"),
+      display: `${Math.round(rate * 100)}% vs ${Math.round(inp.leagueRunSucc * 100)}% pool on ${tagged.length} tagged runs`,
+    };
+  }
   return f;
 }
 
@@ -126,11 +162,14 @@ export const QB_RECIPES: readonly BucketRecipe[] = [
     ],
   },
   {
-    // Usage alone (see the header).
+    // How much he runs, and how well (see the header): without rushing data
+    // the usage pair carries it alone, as it did before Stage 4.
     role: "dual_threat",
     ingredients: [
       { feature: "runShare", weight: 0.6 },
       { feature: "scramble", weight: 0.4 },
+      { feature: "rushPff", weight: 0.5, core: true },
+      { feature: "rushSucc", weight: 0.3, core: true },
     ],
   },
 ];
@@ -150,11 +189,24 @@ export function qbRoleFit(inp: QBRoleInputs): RoleFit | null {
   });
 }
 
-/** Every QB's buckets from the league's plays. */
-export function computeQBRoleFits(prospects: Prospect[], games: ScoutingGame[], qbPlays: QBPlay[]): Map<string, RoleFit | null> {
+/** Every QB's buckets from the league's plays (and PFF over his charted games). */
+export function computeQBRoleFits(
+  prospects: Prospect[], games: ScoutingGame[], qbPlays: QBPlay[], pff?: ReadonlyMap<string, PffTotals>,
+): Map<string, RoleFit | null> {
   const out = new Map<string, RoleFit | null>();
   const qbs = prospects.filter((p) => p.position === "QB");
   if (qbs.length === 0) return out;
+  // The pool's PFF yards per carry and tagged run success.
+  let yards = 0, carries = 0;
+  const rushOf = new Map<string, { yards: number; carries: number }>();
+  for (const p of qbs) {
+    const s = pff?.get(p.id)?.sum;
+    if (s?.rush_yards == null || !s.rush_att) continue;
+    rushOf.set(p.id, { yards: s.rush_yards, carries: s.rush_att });
+    yards += s.rush_yards; carries += s.rush_att;
+  }
+  const taggedRuns = qbPlays.filter((pl) => pl.run_success != null);
+  const leagueRunSucc = taggedRuns.length ? taggedRuns.filter((pl) => pl.run_success === true).length / taggedRuns.length : null;
   const slices = computeQBRoleSlices(prospects, games, qbPlays, QB_SLICES);
   const gameToProspect = new Map(games.map((g) => [g.id, g.prospect_id]));
   const playsBy = new Map<string, QBPlay[]>();
@@ -171,6 +223,9 @@ export function computeQBRoleFits(prospects: Prospect[], games: ScoutingGame[], 
       slices: s,
       heightIn: parseHeightInches(p.height),
       weightLb: p.weight,
+      pffRush: rushOf.get(p.id) ?? null,
+      leagueRushYpc: carries > 0 ? yards / carries : null,
+      leagueRunSucc,
     }) : null);
   }
   return out;

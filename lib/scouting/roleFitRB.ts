@@ -12,7 +12,13 @@
 // the easier scheme. The rest are rates against the league's rate on the same
 // kind of play (explosive, broken tackle and stuffed runs; pass-block wins;
 // open rate on routes; drops per target).
+//
+// The Three-down pass-pro gate also reads PFF's pass blocking over the charted
+// games (pressures allowed per pass-block snap; tape-grading expansion, Stage
+// 4), blended with the charted pass-block wins by reps. Without PFF rows the
+// gate reads the charting alone, as before.
 import type { Prospect, RBPlay, RBRunType, ScoutingGame } from "../types";
+import type { PffTotals } from "../pff/totals";
 import { computeRBRoleSlices } from "./aboveExpected";
 import { parseHeightInches } from "./prospectAge";
 import {
@@ -42,6 +48,9 @@ const SCALE = {
   recOpen: 2.6,
   bigOpen: 3.5,
   hands: 2.2,
+  // PFF pressures allowed per pass-block snap, pts under the pool's;
+  // calibrated on the 2026-10-05 charting (prior REC_PRIOR snaps).
+  pffPassPro: 2.2,
 } as const;
 
 const RUN_TYPES: readonly RBRunType[] = ["outside_zone", "inside_zone", "outside_man_gap", "inside_man_gap"];
@@ -107,6 +116,9 @@ export interface RBRoleInputs {
   league: Record<RateKey, Rate>;
   heightIn: number | null;
   weightLb: number | null;
+  /** PFF pass blocking over his charted games, and the pool's. */
+  pffPassPro?: Rate | null;
+  leaguePffPassPro?: Rate | null;
 }
 
 export function rbFeatures(inp: RBRoleInputs): FeatureSet {
@@ -131,7 +143,13 @@ export function rbFeatures(inp: RBRoleInputs): FeatureSet {
     hands: rateFeature("Hands (drops)", mine.drops, league.drops, REC_PRIOR, SCALE.hands, "targets", true),
   };
   f.handsOk = meetsBar(f.hands, HANDS_BAR, "Hands (no drops)");
-  f.passProOk = meetsBar(f.passPro, PASS_PRO_BAR, "Pass protection (decent is enough)");
+  // Pass protection for the gate: the charted wins, blended by reps with PFF's
+  // pressures allowed when he has PFF pass-block snaps.
+  const pp = inp.pffPassPro, lp = inp.leaguePffPassPro;
+  if (pp && pp.n > 0 && lp && lp.n > 0) {
+    f.pffPassPro = rateFeature("Pass protection (PFF pressures allowed)", pp, lp, REC_PRIOR, SCALE.pffPassPro, "pass-block snaps", true);
+  }
+  f.passProOk = meetsBar(blendByReps(f.passPro, f.pffPassPro, "Pass protection"), PASS_PRO_BAR, "Pass protection (decent is enough)");
   if (inp.weightLb != null) {
     const w = inp.weightLb;
     f.build = { label: "Build", kind: "body", fit: Math.min(1, Math.max(0, (w - BUILD_LB[0]) / (BUILD_LB[1] - BUILD_LB[0]))), display: `${w} lb` };
@@ -150,6 +168,15 @@ export function rbFeatures(inp: RBRoleInputs): FeatureSet {
     f.gapShare = usageFeature("Gap runs", g, 0.4, 0.7, `${Math.round(g * 100)}% of runs`);
   }
   return f;
+}
+
+// Two readings of one skill as one, weighted by the reps behind each. With
+// only one (no PFF snaps, or no charted pass blocks), that one unchanged.
+function blendByReps(a: Feature | undefined, b: Feature | undefined, label: string): Feature | undefined {
+  const na = a?.n ?? 0, nb = b?.n ?? 0;
+  if (!(nb > 0)) return a;
+  if (!(na > 0)) return b;
+  return { label, kind: "skill", fit: (na * a!.fit + nb * b!.fit) / (na + nb), display: `${a!.display} · ${b!.display}`, n: na + nb };
 }
 
 export const RB_RECIPES: readonly BucketRecipe[] = [
@@ -228,11 +255,22 @@ export function rbRoleFit(inp: RBRoleInputs): RoleFit | null {
   });
 }
 
-/** Every RB's buckets from the league's plays. */
-export function computeRBRoleFits(prospects: Prospect[], games: ScoutingGame[], rbPlays: RBPlay[]): Map<string, RoleFit | null> {
+/** Every RB's buckets from the league's plays (and PFF over his charted games). */
+export function computeRBRoleFits(
+  prospects: Prospect[], games: ScoutingGame[], rbPlays: RBPlay[], pff?: ReadonlyMap<string, PffTotals>,
+): Map<string, RoleFit | null> {
   const out = new Map<string, RoleFit | null>();
   const rbs = prospects.filter((p) => p.position === "RB");
   if (rbs.length === 0) return out;
+  // PFF pass blocking: pressures allowed ("hits") per pass-block snap.
+  const pffPP = new Map<string, Rate>();
+  const leaguePP: Rate = { hits: 0, n: 0 };
+  for (const p of rbs) {
+    const s = pff?.get(p.id)?.sum;
+    if (s?.pressures_allowed == null || !s.pass_block_snaps) continue;
+    pffPP.set(p.id, { hits: s.pressures_allowed, n: s.pass_block_snaps });
+    leaguePP.hits += s.pressures_allowed; leaguePP.n += s.pass_block_snaps;
+  }
   const slices = computeRBRoleSlices(prospects, games, rbPlays, RB_SLICES);
   const league = Object.fromEntries((Object.keys(RATES) as RateKey[]).map((k) => [k, RATES[k](rbPlays)])) as Record<RateKey, Rate>;
   const gameToProspect = new Map(games.map((g) => [g.id, g.prospect_id]));
@@ -251,6 +289,8 @@ export function computeRBRoleFits(prospects: Prospect[], games: ScoutingGame[], 
       league,
       heightIn: parseHeightInches(p.height),
       weightLb: p.weight,
+      pffPassPro: pffPP.get(p.id) ?? null,
+      leaguePffPassPro: leaguePP.n > 0 ? leaguePP : null,
     }) : null);
   }
   return out;

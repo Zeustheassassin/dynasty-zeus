@@ -3,6 +3,7 @@
 // from the per-game route cells in aggregateMerge.ts); RB / QB / TE are
 // computed from their plays here.
 import type { Prospect, QBPlay, RBPlay, ScoutingGame, TEPlay } from "../types";
+import type { PffTotals } from "../pff/totals";
 import type { RoleFit } from "./roleFit";
 import { computeRBRoleFits } from "./roleFitRB";
 import { computeQBRoleFits } from "./roleFitQB";
@@ -14,11 +15,13 @@ export function computeRoleFits(
   rbPlays: RBPlay[],
   qbPlays: QBPlay[],
   tePlays: TEPlay[],
+  /** PFF over each prospect's charted games: QB rushing, RB pass blocking. */
+  pff?: ReadonlyMap<string, PffTotals>,
 ): Map<string, RoleFit> {
   const list = [...prospects];
   const out = new Map<string, RoleFit>();
   for (const p of list) if (p.position === "WR" && p.role_fit) out.set(p.id, p.role_fit);
-  for (const m of [computeRBRoleFits(list, games, rbPlays), computeQBRoleFits(list, games, qbPlays), computeTERoleFits(list, games, tePlays)]) {
+  for (const m of [computeRBRoleFits(list, games, rbPlays, pff), computeQBRoleFits(list, games, qbPlays, pff), computeTERoleFits(list, games, tePlays)]) {
     for (const [id, fit] of m) if (fit) out.set(id, fit);
   }
   return out;

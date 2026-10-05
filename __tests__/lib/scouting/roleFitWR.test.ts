@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { wrRoleFit, wrFeatures, WR_MIN_ROUTES, WR_MIN_INAPP_SNAPS, X_PRESS_REPS, type WRRoleInputs, type WRRoleSkill } from "@/lib/scouting/roleFitWR";
+import { wrRoleFit, wrFeatures, WR_MIN_ROUTES, WR_MIN_INAPP_SNAPS, X_PRESS_REPS, X_RELEASE_REPS, type WRRoleInputs, type WRRoleSkill } from "@/lib/scouting/roleFitWR";
 import { matchFor, matchTooltip, roleLabel, type AESum } from "@/lib/scouting/roleFit";
 import type { LinedUp } from "@/lib/types";
 
@@ -117,5 +117,22 @@ describe("WR role buckets", () => {
     const fit = wrRoleFit(inputs(SLOT_SKILL, lined(20, 20, 160), { heightIn: 67, weightLb: 165 }))!;
     expect(matchFor(fit, "slot")!.sizeDrop).toBe(0);
     expect(matchFor(fit, "gadget")!.sizeDrop).toBe(0);
+  });
+});
+
+describe("WR X reads release vs press (tagged, Stage 4)", () => {
+  it(`leaves X% exactly as it was without ${X_RELEASE_REPS} tagged press reps`, () => {
+    const base = wrRoleFit(inputs(X_SKILL, lined(140, 30, 30)))!;
+    const thin = wrRoleFit(inputs(X_SKILL, lined(140, 30, 30), { release: { won: 9, n: X_RELEASE_REPS - 1 }, leagueRelease: 0.5 }))!;
+    expect(thin.matches).toEqual(base.matches);
+    expect(thin.features.release).toBeUndefined();
+  });
+
+  it("raises an X who wins his releases and lowers one who loses them", () => {
+    const base = matchFor(wrRoleFit(inputs(X_SKILL, lined(140, 30, 30)))!, "x")!.pct;
+    const wins = matchFor(wrRoleFit(inputs(X_SKILL, lined(140, 30, 30), { release: { won: 36, n: 40 }, leagueRelease: 0.55 }))!, "x")!.pct;
+    const loses = matchFor(wrRoleFit(inputs(X_SKILL, lined(140, 30, 30), { release: { won: 8, n: 40 }, leagueRelease: 0.55 }))!, "x")!.pct;
+    expect(wins).toBeGreaterThan(base);
+    expect(loses).toBeLessThan(base);
   });
 });

@@ -4,13 +4,18 @@ import dynamic from "next/dynamic";
 import type { Prospect, ProspectWithStats, ScoutingGame, RBPlay, QBPlay, TEPlay } from "../../../lib/types";
 import type { LoadPositionPlaysFn } from "../../ScoutingHub";
 import type { PffTotals } from "../../../lib/pff/totals";
+import { EMPTY_GRADING_DATA, type GradingData } from "../../../lib/scouting/aeComponents";
+import type { ProspectGameRouteCellsRow } from "../../../lib/scouting/aggregateMerge";
 
 const WRStatsTable = dynamic(() => import("./WRStatsTable"), { ssr: false });
 const RBStatsTable = dynamic(() => import("./RBStatsTable"), { ssr: false });
 const QBStatsTable = dynamic(() => import("./QBStatsTable"), { ssr: false });
 const TEStatsTable = dynamic(() => import("./TEStatsTable"), { ssr: false });
+const GradingChecks = dynamic(() => import("./GradingChecks"), { ssr: false });
 
-type PositionTab = "WR" | "RB" | "QB" | "TE";
+// The four position tables, plus the Grading checks (Stage 4: tag readiness and
+// tests, garbage time, era scale, AE Score components).
+type PositionTab = "WR" | "RB" | "QB" | "TE" | "Grading";
 
 interface Props {
   prospects: Prospect[];
@@ -26,6 +31,10 @@ interface Props {
   onSelectProspect?: (p: Prospect) => void;
   /** PFF over each prospect's charted games. */
   pffTotals?: Map<string, PffTotals>;
+  /** PFF rows and the migration-064 views (tag stats, components, Grading). */
+  gradingData?: GradingData;
+  /** prospect_game_route_cells (058), for the Grading checks' WR model. */
+  gameRouteCells?: ProspectGameRouteCellsRow[] | null;
 }
 
 const POSITION_LABELS: Record<PositionTab, string> = {
@@ -33,6 +42,7 @@ const POSITION_LABELS: Record<PositionTab, string> = {
   RB: "Running Back",
   WR: "Wide Receiver",
   TE: "Tight End",
+  Grading: "Grading checks",
 };
 
 const POSITION_DESCRIPTIONS: Record<PositionTab, string> = {
@@ -40,11 +50,13 @@ const POSITION_DESCRIPTIONS: Record<PositionTab, string> = {
   RB: "Role fit (Three-down · Zone · Gap/Power · Receiving · Big-play) · SRAE · Success% by run type, formation & box situation · Receiving",
   QB: "Role fit (Creator · Distributor · Vertical · Dual-threat) · AAE · Accuracy by depth, coverage, timing, pressure, platform, handling & route mix · Decision timing breakdown",
   TE: "Role fit (Inline Y · Move · H-back · Blocking) · TE-SAER · Open% by positioning, location & coverage · TE-SAEB · Block success above expected",
+  Grading: "Where the grading pieces that wait on data stand: per-play difficulty tags (and their held-out tests), garbage time, the era scale check, and every AE Score component's pool, spread and trust",
 };
 
 export default function AnalysisHub({
   prospects, prospectsWithStats, games, rbPlays, qbPlays, tePlays,
   loadPositionPlays, loading, draftYearFilter, setDraftYearFilter, onSelectProspect, pffTotals,
+  gradingData = EMPTY_GRADING_DATA, gameRouteCells = null,
 }: Props) {
   const [posTab, setPosTab] = useState<PositionTab>("WR");
 
@@ -54,6 +66,10 @@ export default function AnalysisHub({
   useEffect(() => {
     if (posTab === "RB" || posTab === "QB" || posTab === "TE") {
       loadPositionPlays(posTab);
+    } else if (posTab === "Grading") {
+      loadPositionPlays("RB");
+      loadPositionPlays("QB");
+      loadPositionPlays("TE");
     }
   }, [posTab, loadPositionPlays]);
 
@@ -71,7 +87,7 @@ export default function AnalysisHub({
       {/* Position tabs + filter row */}
       <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
         <div className="flex gap-1 border-b border-slate-800">
-          {(["QB", "RB", "WR", "TE"] as PositionTab[]).map((pos) => (
+          {(["QB", "RB", "WR", "TE", "Grading"] as PositionTab[]).map((pos) => (
             <button
               key={pos}
               onClick={() => setPosTab(pos)}
@@ -82,7 +98,7 @@ export default function AnalysisHub({
               }`}
             >
               <span className="hidden sm:inline">{POSITION_LABELS[pos]}</span>
-              <span className="sm:hidden">{pos}</span>
+              <span className="sm:hidden">{pos === "Grading" ? "Checks" : pos}</span>
             </button>
           ))}
         </div>
@@ -127,6 +143,7 @@ export default function AnalysisHub({
           draftYearFilter={draftYearFilter}
           onSelectProspect={onSelectProspect}
           pffTotals={pffTotals}
+          routeTagCells={gradingData.routeTagCells}
         />
       )}
       {posTab === "RB" && (
@@ -160,6 +177,18 @@ export default function AnalysisHub({
           draftYearFilter={draftYearFilter}
           onSelectProspect={onSelectProspect}
           pffTotals={pffTotals}
+        />
+      )}
+      {posTab === "Grading" && (
+        <GradingChecks
+          prospects={prospects}
+          games={games}
+          qbPlays={qbPlays}
+          rbPlays={rbPlays}
+          tePlays={tePlays}
+          gameRouteCells={gameRouteCells}
+          gradingData={gradingData}
+          loading={loading}
         />
       )}
     </div>

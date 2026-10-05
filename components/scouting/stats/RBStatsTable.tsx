@@ -6,6 +6,8 @@ import { computeRBRoleFits } from "../../../lib/scouting/roleFitRB";
 import type { Prospect, ScoutingGame, RBPlay, RBRunType } from "../../../lib/types";
 import { roleFitCols, roleFitRow } from "./roleFitCols";
 import { pffCols, pffRow } from "./pffCols";
+import { tagCols, tagRow, tagValuesFor } from "./tagCols";
+import type { TagStatValue } from "../../../lib/scouting/tagStats";
 import type { PffTotals } from "../../../lib/pff/totals";
 
 interface Props {
@@ -86,6 +88,8 @@ export const RB_STAT_COLS: ColDef[] = [
   { key: "raw_btk",        label: "BTkl",     group: "Raw", fmt: "count", width: 46 },
   { key: "raw_tgts",       label: "Tgts",     group: "Raw", fmt: "count", width: 46 },
   { key: "raw_catches",    label: "Catch",    group: "Raw", fmt: "count", width: 50 },
+  // The tag-only stats (tagged plays only)
+  ...tagCols("RB"),
   // PFF over the charted games
   ...pffCols("RB"),
 ];
@@ -105,10 +109,10 @@ function pct(n: number, d: number): number | null {
 
 // Extracted so the Phase I player-comparison tool can compute the same rows
 // for any two RB prospects without duplicating this logic.
-export function buildRBStatRows(prospects: Prospect[], games: ScoutingGame[], rbPlays: RBPlay[], pff?: Map<string, PffTotals>): StatRow[] {
+export function buildRBStatRows(prospects: Prospect[], games: ScoutingGame[], rbPlays: RBPlay[], pff?: Map<string, PffTotals>, tags?: Map<string, Record<string, TagStatValue>>): StatRow[] {
     const sraeMap = computeRBAboveExpected(prospects, games, rbPlays);
     const sliceMap = computeRBRunSliceSRAE(prospects, games, rbPlays);
-    const roleFits = computeRBRoleFits(prospects, games, rbPlays);
+    const roleFits = computeRBRoleFits(prospects, games, rbPlays, pff);
     // Build game → prospect map
     const gameToProspect = new Map<string, string>();
     for (const g of games) gameToProspect.set(g.id, g.prospect_id);
@@ -213,6 +217,7 @@ export function buildRBStatRows(prospects: Prospect[], games: ScoutingGame[], rb
           raw_btk:       pPlays.filter((pl) => pl.broken_tackle).length,
           raw_tgts:      recTgts,
           raw_catches:   recCatches,
+          ...tagRow("RB", tags?.get(p.id)),
           ...pffRow(pff?.get(p.id)),
         } satisfies StatRow;
       });
@@ -223,7 +228,8 @@ const RB_MIN_FILTERS: MinFilterDef[] = [{ key: "runs", label: "Runs" }];
 
 export default function RBStatsTable({ prospects, games, rbPlays, loading, draftYearFilter, onSelectProspect, pffTotals }: Props) {
   const prospectMap = useMemo(() => new Map(prospects.map((p) => [p.id, p])), [prospects]);
-  const rows = useMemo(() => buildRBStatRows(prospects, games, rbPlays, pffTotals), [prospects, games, rbPlays, pffTotals]);
+  const tags = useMemo(() => tagValuesFor({ games, rbPlays }), [games, rbPlays]);
+  const rows = useMemo(() => buildRBStatRows(prospects, games, rbPlays, pffTotals, tags), [prospects, games, rbPlays, pffTotals, tags]);
 
   return (
     <StatsTableShell

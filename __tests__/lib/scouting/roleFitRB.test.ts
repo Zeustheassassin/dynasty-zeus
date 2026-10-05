@@ -116,3 +116,20 @@ describe("RB role buckets", () => {
     expect(f.features.srae!.display).toMatch(/^\+\d/); // 67% vs the league's 58%
   });
 });
+
+describe("RB Three-down pass-pro gate adds PFF pass blocking (Stage 4)", () => {
+  const plays = [...runs(80, "inside_zone"), ...runs(40, "outside_zone"), ...passBlocks(20, 14)];
+  const three = (extra: Partial<RBRoleInputs>) =>
+    matchFor(rbRoleFit({ plays, slices: slices({ all: [6, 120] }), league: LEAGUE, heightIn: 72, weightLb: 222, ...extra })!, "three_down")!.pct;
+
+  it("is unchanged without PFF pass-block snaps", () => {
+    expect(three({})).toBe(three({ pffPassPro: null, leaguePffPassPro: { hits: 7, n: 100 } }));
+  });
+
+  it("cuts a back PFF says gives up pressure, and keeps one who gives up none", () => {
+    const leaky = three({ pffPassPro: { hits: 12, n: 60 }, leaguePffPassPro: { hits: 7, n: 100 } });
+    const clean = three({ pffPassPro: { hits: 0, n: 60 }, leaguePffPassPro: { hits: 7, n: 100 } });
+    expect(leaky).toBeLessThan(three({}));
+    expect(clean).toBeGreaterThanOrEqual(three({}));
+  });
+});

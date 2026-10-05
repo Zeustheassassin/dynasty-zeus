@@ -6,6 +6,9 @@ import {
   linedUpByProspect,
   computeSAEForPlays,
   computeCoreSAEForPlays,
+  parseTagCells,
+  wrGradingCells,
+  fitWRGradingModel,
   type ProspectRouteCellsRow,
   type ProspectGameRouteCellsRow,
   type ProspectRouteStatsRow,
@@ -483,5 +486,52 @@ describe("WR role buckets on ProspectWithStats", () => {
   it("is null under the route floor", () => {
     const rows = gameRowsFrom({ w: repeat(10, () => routePlay("ga", "slant", "zone", true)), l: leaguePlays });
     expect(buildProspectsWithStats([wr], [], rows, [inApp, league])[0].role_fit).toBeNull();
+  });
+});
+
+// =============================================================================
+// Tagged routes (migration 064, tape-grading expansion Stage 4)
+// =============================================================================
+
+describe("tagged WR routes", () => {
+  const TAG_ROWS = [{
+    prospect_id: "A", game_id: "a1",
+    cells: {
+      "curl|man|left|on|1|0|0|0|-|-": [3, 1],
+      "slant|press|right|on|0|1|0|1|won|1": [2, 2],
+    } as Record<string, [number, number]>,
+  }];
+
+  it("parses the tag key: situation, the four situation tags, release and broken tackle after the catch", () => {
+    const [curl, slant] = parseTagCells(TAG_ROWS[0].cells);
+    expect(curl).toMatchObject({ route_type: "curl", coverage: "man", alignment: "left", on_line: true, n: 3, open: 1, tagged: true, red_zone: true, third_fourth_down: false, garbage_time: false, press_release: null, bt_after_catch: null });
+    expect(slant).toMatchObject({ coverage: "press", red_zone: false, third_fourth_down: true, garbage_time: true, press_release: "won", bt_after_catch: true });
+  });
+
+  it("splits a game's tagged routes out of its 058 cells, keeping every route once", () => {
+    const rows: ProspectGameRouteCellsRow[] = [{ prospect_id: "A", game_id: "a1", cells: { "curl|man|left|on": [10, 5], "slant|press|right|on": [2, 2] } }];
+    const cells = wrGradingCells(rows, TAG_ROWS, []);
+    const untaggedCurl = cells.find((c) => c.route_type === "curl" && !c.tagged)!;
+    expect(untaggedCurl).toMatchObject({ n: 7, open: 4 });
+    expect(cells.find((c) => c.route_type === "slant" && !c.tagged)).toBeUndefined();
+    expect(cells.reduce((s, c) => s + c.n, 0)).toBe(12);
+    expect(cells.filter((c) => c.tagged).length).toBe(2);
+  });
+
+  it("fits the same model from per-game cells as from the league's", () => {
+    const plays = { A: repeat(40, (i) => routePlay(`a${i % 4}`, i % 2 ? "curl" : "nine", i % 3 ? "man" : "zone", i % 5 < 3)) };
+    const rows = gameRowsFrom(plays);
+    const viaGrading = fitWRGradingModel(wrGradingCells(rows, [], [])).model!;
+    const viaLeague = buildWRModel(rows).model!;
+    viaLeague.forEach((v, i) => expect(viaGrading[i]).toBeCloseTo(v, 6));
+  });
+
+  it("has no tag correction while every WR tag is off, so tagged routes are judged exactly as before", () => {
+    const plays = { A: repeat(40, (i) => routePlay("a1", i % 2 ? "curl" : "nine", "man", i % 5 < 3)) };
+    const rows = gameRowsFrom(plays);
+    const plain = buildWRModel(rows);
+    const withTags = buildWRModel(rows, [], TAG_ROWS);
+    expect(withTags.correction ?? null).toBeNull();
+    expect([...withTags.model!]).toEqual([...plain.model!]);
   });
 });

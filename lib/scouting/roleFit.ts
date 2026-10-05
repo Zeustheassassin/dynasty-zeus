@@ -64,7 +64,7 @@ export interface RoleInfo {
 // on.
 export const ROLES: Record<RolePos, readonly RoleInfo[]> = {
   WR: [
-    { key: "x",      label: "X",      short: "X",      tier: 0, description: "Excels vs press and man on slants, nines, comebacks, digs, corners and posts. Needs 10+ in-app press reps to be proven (X? until then)." },
+    { key: "x",      label: "X",      short: "X",      tier: 0, description: "Excels vs press and man on slants, nines, comebacks, digs, corners and posts. Needs 10+ in-app press reps to be proven (X? until then). Reads release vs press too once he has 10+ tagged press reps." },
     { key: "y",      label: "Y",      short: "Y",      tier: 0, description: "Good across most of the route tree; better vs man and zone than vs press. Same level as X." },
     { key: "slot",   label: "Slot",   short: "Slot",   tier: 1, description: "More limited to the short game: strong vs zone on slants, curls and flats; decent vs man; press doesn't count against him." },
     { key: "gadget", label: "Gadget", short: "Gadget", tier: 2, fallback: true, description: "The catch-all for a receiver who isn't good enough for X, Y or Slot (all under 50%): a special-teamer or one-touch-a-game role. Its % is how much his game is screens, flats and slants." },
@@ -86,7 +86,7 @@ export const ROLES: Record<RolePos, readonly RoleInfo[]> = {
     { key: "creator",     label: "Creator",     short: "Creator", tier: 0, description: "Extends plays; accurate off-platform and on the run; handles pressure." },
     { key: "distributor", label: "Distributor", short: "Distrib", tier: 1, description: "On time to the first read, accurate short and intermediate, rarely sacked, uses checkdowns." },
     { key: "vertical",    label: "Vertical",    short: "Vertical", tier: 2, description: "Throws deep a lot and accurately; takes more risky shots." },
-    { key: "dual_threat", label: "Dual-threat", short: "Dual",    tier: 3, description: "Runs and scrambles a lot. How often only: designed QB runs record no result." },
+    { key: "dual_threat", label: "Dual-threat", short: "Dual",    tier: 3, description: "Runs and scrambles a lot, and gains yards doing it (PFF yards per carry over the charted games; tagged run success once there are 10+ tagged runs)." },
   ],
 };
 

@@ -237,3 +237,90 @@ describe("position baseline", () => {
     for (const sc of comp.positions.QB.scores.values()) expect(sc.baseline).toBeUndefined();
   });
 });
+
+// ── Per-player components (tape-grading expansion, Stage 4) ───────────────
+describe("per-player components", () => {
+  const core = pool(SPREAD);
+  // A component only some prospects have (PFF results, tag-only stats).
+  const partial = (ids: string[], ae: (i: number) => number, variance = 4) =>
+    new Map<string, AESample | null>(ids.map((id, i) => [id, s(ae(i), variance)]));
+  const extraIds = ["p0", "p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9"];
+  const extra = (samples: Map<string, AESample | null>, weight = 0.5): CompositeMetric =>
+    ({ key: "x", label: "X", weight, samples, perPlayer: true });
+
+  it("leaves every prospect without the component exactly where he was", () => {
+    const plain = buildPositionComposite("QB", [metric(core)]);
+    // The component covers only the first ten pool ids... and two outsiders
+    // who aren't scored anyway. p0–p4 have it; p5–p9 don't.
+    const comp = partial(extraIds.slice(0, 5).concat(["q0", "q1", "q2", "q3", "q4"]), (i) => (i % 2 ? 6 : -6));
+    const withX = buildPositionComposite("QB", [metric(core), extra(comp)]);
+    expect(withX.metrics[1].ready).toBe(true);
+    for (const id of extraIds.slice(5)) expect(withX.scores.get(id)!.score).toBe(plain.scores.get(id)!.score);
+    for (const id of extraIds.slice(0, 5)) expect(withX.scores.get(id)!.score).not.toBe(plain.scores.get(id)!.score);
+  });
+
+  it("is ignored entirely at weight 0 (not yet approved)", () => {
+    const plain = buildPositionComposite("QB", [metric(core)]);
+    const withX = buildPositionComposite("QB", [metric(core), extra(partial(extraIds, (i) => SPREAD[i] * 3), 0)]);
+    for (const id of extraIds) expect(withX.scores.get(id)!.score).toBe(plain.scores.get(id)!.score);
+    expect(withX.scores.get("p0")!.components.some((c) => c.perPlayer)).toBe(false);
+  });
+
+  it("counts at weight × trust, and renormalizes per player", () => {
+    const comp = partial(extraIds, (i) => SPREAD[i]);
+    const withX = buildPositionComposite("QB", [metric(core), extra(comp, 0.5)]);
+    const sc = withX.scores.get("p9")!;
+    const c = sc.components.find((x) => x.perPlayer)!;
+    expect(c.effectiveWeight).toBeCloseTo(0.5 * c.reliability, 12);
+    const aae = sc.components.find((x) => !x.perPlayer)!;
+    expect(sc.score).toBeCloseTo((aae.z + 0.5 * c.z) / (1 + c.effectiveWeight!), 12);
+  });
+
+  it("leaves a player where he was when the component agrees with his AE", () => {
+    // The same numbers on both: his shrunk AE and the component's raw z match
+    // only at full trust, so use a near-noiseless component.
+    const comp = partial(extraIds, (i) => SPREAD[i], 1e-9);
+    const plain = buildPositionComposite("QB", [{ ...metric(pool(SPREAD, 1e-9)), }]);
+    const withX = buildPositionComposite("QB", [metric(pool(SPREAD, 1e-9)), { ...extra(comp, 1), minVariance: 1e-12 }]);
+    // The core clamps its variance at 1 pt², so compare on the core's own z.
+    for (const id of extraIds) {
+      const z = plain.scores.get(id)!.components[0].z;
+      const c = withX.scores.get(id)!.components.find((x) => x.perPlayer)!;
+      expect(c.reliability).toBeGreaterThan(0.999);
+      expect(withX.scores.get(id)!.score).toBeCloseTo((z + c.z) / (1 + c.effectiveWeight!), 12);
+    }
+  });
+
+  it("trusts a thin sample less, so one game barely moves him", () => {
+    const comp = new Map<string, AESample | null>(extraIds.map((id, i) => [id, s(SPREAD[i], i === 9 ? 400 : 4)]));
+    const withX = buildPositionComposite("QB", [metric(core), extra(comp, 1)]);
+    const thin = withX.scores.get("p9")!.components.find((x) => x.perPlayer)!;
+    const solid = withX.scores.get("p0")!.components.find((x) => x.perPlayer)!;
+    expect(thin.effectiveWeight!).toBeLessThan(solid.effectiveWeight! / 5);
+  });
+
+  it("with a spread floor, counts a component whose pool shows no spread beyond noise", () => {
+    const noisy = partial(extraIds, (i) => SPREAD[i], 100);
+    expect(buildPositionComposite("QB", [metric(core), extra(noisy)]).metrics[1].ready).toBe(false);
+    const floored = buildPositionComposite("QB", [metric(core), { ...extra(noisy), spreadFloor: 0.5 }]);
+    expect(floored.metrics[1].ready).toBe(true);
+    const sd = Math.sqrt(SPREAD_VAR);
+    expect(floored.metrics[1].tau).toBeCloseTo(0.5 * sd, 9);
+  });
+
+  it("reads small-unit components by their own variance, not the AE-points guard", () => {
+    // Yards per route: values ~0.1 apart, variances ~0.01.
+    const ypr = partial(extraIds, (i) => 2 + SPREAD[i] / 20, 0.01);
+    expect(buildPositionComposite("QB", [metric(core), extra(ypr)]).metrics[1].ready).toBe(false);
+    const own = buildPositionComposite("QB", [metric(core), { ...extra(ypr), minVariance: 1e-12 }]);
+    expect(own.metrics[1].ready).toBe(true);
+    expect(own.metrics[1].tau!).toBeGreaterThan(0.1);
+  });
+
+  it("buildAEComposite appends each position's extras after the user's own metrics", () => {
+    const qb = pool(SPREAD);
+    const comp = buildAEComposite({ qb, rb: new Map(), wr: new Map(), wrCore: new Map(), teRoute: new Map(), teBlock: new Map(), extra: { QB: [extra(partial(extraIds, (i) => SPREAD[i]))] } });
+    expect(comp.positions.QB.metrics.map((m) => m.key)).toEqual(["aae", "x"]);
+    expect(comp.positions.QB.metrics[1].perPlayer).toBe(true);
+  });
+});

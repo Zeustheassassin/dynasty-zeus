@@ -6,6 +6,8 @@ import { computeTERoleFits } from "../../../lib/scouting/roleFitTE";
 import type { Prospect, ScoutingGame, TEPlay, TEPositioning, TELocation, TECoverage } from "../../../lib/types";
 import { roleFitCols, roleFitRow } from "./roleFitCols";
 import { pffCols, pffRow } from "./pffCols";
+import { tagCols, tagRow, tagValuesFor } from "./tagCols";
+import type { TagStatValue } from "../../../lib/scouting/tagStats";
 import type { PffTotals } from "../../../lib/pff/totals";
 
 interface Props {
@@ -96,6 +98,8 @@ export const TE_STAT_COLS: ColDef[] = [
   { key: "raw_btk",      label: "BTkl",   group: "Raw", fmt: "count", width: 46 },
   // No charted yards: the app never types yards. PFF's are in the PFF groups.
   // PFF over the charted games
+  // The tag-only stats (tagged plays only)
+  ...tagCols("TE"),
   ...pffCols("TE"),
 ];
 
@@ -138,7 +142,7 @@ function blkSuccPct(plays: TEPlay[], filter: (p: TEPlay) => boolean): number | n
 
 // Extracted so the Phase I player-comparison tool can compute the same rows
 // for any two TE prospects without duplicating this logic.
-export function buildTEStatRows(prospects: Prospect[], games: ScoutingGame[], tePlays: TEPlay[], pff?: Map<string, PffTotals>): StatRow[] {
+export function buildTEStatRows(prospects: Prospect[], games: ScoutingGame[], tePlays: TEPlay[], pff?: Map<string, PffTotals>, tags?: Map<string, Record<string, TagStatValue>>): StatRow[] {
     const teSaerMap = computeTERouteAboveExpected(prospects, games, tePlays);
     const teSaebMap = computeTEBlockAboveExpected(prospects, games, tePlays);
     const roleFits = computeTERoleFits(prospects, games, tePlays);
@@ -260,6 +264,7 @@ export function buildTEStatRows(prospects: Prospect[], games: ScoutingGame[], te
           raw_cont_tgt: contTgt.length,
           raw_cont_ctch: contCatch.length,
           raw_btk:      btk,
+          ...tagRow("TE", tags?.get(p.id)),
           ...pffRow(pff?.get(p.id)),
         } satisfies StatRow;
       });
@@ -273,7 +278,8 @@ const TE_MIN_FILTERS: MinFilterDef[] = [
 
 export default function TEStatsTable({ prospects, games, tePlays, loading, draftYearFilter, onSelectProspect, pffTotals }: Props) {
   const prospectMap = useMemo(() => new Map(prospects.map((p) => [p.id, p])), [prospects]);
-  const rows = useMemo(() => buildTEStatRows(prospects, games, tePlays, pffTotals), [prospects, games, tePlays, pffTotals]);
+  const tags = useMemo(() => tagValuesFor({ games, tePlays }), [games, tePlays]);
+  const rows = useMemo(() => buildTEStatRows(prospects, games, tePlays, pffTotals, tags), [prospects, games, tePlays, pffTotals, tags]);
 
   return (
     <StatsTableShell

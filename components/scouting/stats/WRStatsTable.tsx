@@ -5,6 +5,9 @@ import type { LinedUp, Prospect, ProspectWithStats } from "../../../lib/types";
 import { roleFitCols, roleFitRow } from "./roleFitCols";
 import { pffCols, pffRow } from "./pffCols";
 import type { PffTotals } from "../../../lib/pff/totals";
+import { tagCols, tagRow, tagValuesFor } from "./tagCols";
+import type { TagStatValue } from "../../../lib/scouting/tagStats";
+import type { ProspectGameRouteTagCellsRow } from "../../../lib/scouting/aggregateMerge";
 
 interface Props {
   prospectsWithStats: ProspectWithStats[];
@@ -13,6 +16,8 @@ interface Props {
   onSelectProspect?: (p: Prospect) => void;
   /** PFF over each prospect's charted games (ScoutingHub). */
   pffTotals?: Map<string, PffTotals>;
+  /** Tagged WR routes per game (migration 064), for the tag-only stats. */
+  routeTagCells?: readonly ProspectGameRouteTagCellsRow[];
 }
 
 const ROUTE_LABELS: Record<string, string> = {
@@ -87,6 +92,8 @@ export const WR_STAT_COLS: ColDef[] = [
   { key: "raw_snaps",    label: "Snaps",   group: "Raw", fmt: "count", width: 52 },
   { key: "raw_routes",   label: "Routes",  group: "Raw", fmt: "count", width: 58 },
   // PFF over the charted games (yards live here: none are typed in the app)
+  // The tag-only stats (tagged routes only)
+  ...tagCols("WR"),
   ...pffCols("WR"),
 ];
 
@@ -138,7 +145,7 @@ function linedUpShares(lu: LinedUp | null) {
 
 // Extracted so the Phase I player-comparison tool can compute the same rows
 // for any two WR prospects without duplicating this logic.
-export function buildWRStatRows(prospectsWithStats: ProspectWithStats[], pff?: Map<string, PffTotals>): StatRow[] {
+export function buildWRStatRows(prospectsWithStats: ProspectWithStats[], pff?: Map<string, PffTotals>, tags?: Map<string, Record<string, TagStatValue>>): StatRow[] {
   return prospectsWithStats
       .filter((p) => p.position === "WR")
       .map((p) => ({
@@ -226,6 +233,7 @@ export function buildWRStatRows(prospectsWithStats: ProspectWithStats[], pff?: M
         raw_cont_ctch: p.contested_catches,
         raw_snaps: p.total_snaps,
         raw_routes: p.total_routes,
+        ...tagRow("WR", tags?.get(p.id)),
         ...pffRow(pff?.get(p.id)),
       }));
 }
@@ -233,9 +241,10 @@ export function buildWRStatRows(prospectsWithStats: ProspectWithStats[], pff?: M
 // "Min …" boxes beside the search bar — hide prospects below a sample size.
 const WR_MIN_FILTERS: MinFilterDef[] = [{ key: "routes", label: "Routes" }];
 
-export default function WRStatsTable({ prospectsWithStats, loading, draftYearFilter, onSelectProspect, pffTotals }: Props) {
+export default function WRStatsTable({ prospectsWithStats, loading, draftYearFilter, onSelectProspect, pffTotals, routeTagCells }: Props) {
   const prospectMap = useMemo(() => new Map(prospectsWithStats.map((p) => [p.id, p])), [prospectsWithStats]);
-  const rows = useMemo(() => buildWRStatRows(prospectsWithStats, pffTotals), [prospectsWithStats, pffTotals]);
+  const tags = useMemo(() => tagValuesFor({ games: [], wrTagRows: routeTagCells ?? [] }), [routeTagCells]);
+  const rows = useMemo(() => buildWRStatRows(prospectsWithStats, pffTotals, tags), [prospectsWithStats, pffTotals, tags]);
 
   return (
     <StatsTableShell
