@@ -20,6 +20,8 @@ import { ROUTE_TYPES } from "../shared/chartingConstants";
 import ChartingBoard, { type ChartingBoardConfig } from "../shared/ChartingBoard";
 import { useChartingState } from "../shared/hooks/useChartingState";
 import { computeSAEForPlays, computeCoreSAEForPlays, type WRDifficultyModel } from "../../../lib/scouting/aggregateMerge";
+import { usePffGameLog } from "../pff/usePffGameLog";
+import { PffLogBar, PffLogCells, PffLogFooter, PffLogHeaders } from "../pff/PffGameLogColumns";
 
 const COVERAGES: { key: string; label: string }[] = [
   { key: "man", label: "Man" },
@@ -70,7 +72,8 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
   const [playOutcome, setPlayOutcome] = useState<"caught" | "drop" | "incomplete" | null>(null);
   const [contested, setContested]     = useState(false);
   const [editingPlayId, setEditingPlayId] = useState<string | null>(null);
-  const [yards, setYards]             = useState("");
+  // No yards entry: yards come from PFF (game log, stats table). Old typed
+  // yards stay in route_plays.yards; nothing reads or rewrites them.
   const [playNotes, setPlayNotes]     = useState("");
   const [savingPlay, setSavingPlay]   = useState(false);
   const [playError, setPlayError]     = useState<string | null>(null);
@@ -88,6 +91,8 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
   const { tab, games, selectedGameId, loading, showAddGame, newGame, savingGame, gameError,
           editBio, bio, savingBio, onTabChange, onSelectGame, onToggleAddGame, onNewGameChange,
           onAddGame, onDeleteGame, onUpdateGame, onToggleEditBio, onBioChange, onSaveBio } = cs;
+  // PFF's numbers for each charted game (Games tab, play list header).
+  const pff = usePffGameLog(prospect.id, games, cs.markDataDirty);
 
   useEffect(() => {
     if (games.length === 0) return;
@@ -188,12 +193,12 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
 
   const gameStats = useMemo(() => {
     const map: Record<string, {
-      snaps: number; routes: number; targets: number; catches: number; yards: number;
+      snaps: number; routes: number; targets: number; catches: number;
       man: number; manOpen: number; press: number; pressOpen: number; zone: number; zoneOpen: number;
     }> = {};
     for (const p of plays) {
       if (!map[p.game_id]) map[p.game_id] = {
-        snaps: 0, routes: 0, targets: 0, catches: 0, yards: 0,
+        snaps: 0, routes: 0, targets: 0, catches: 0,
         man: 0, manOpen: 0, press: 0, pressOpen: 0, zone: 0, zoneOpen: 0,
       };
       map[p.game_id].snaps++;
@@ -201,7 +206,6 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
         map[p.game_id].routes++;
         if (p.targeted) map[p.game_id].targets++;
         if (p.targeted && p.success) map[p.game_id].catches++;
-        if (p.yards) map[p.game_id].yards += p.yards;
         if (p.coverage === "man") { map[p.game_id].man++; if (p.was_open) map[p.game_id].manOpen++; }
         else if (p.coverage === "press") { map[p.game_id].press++; if (p.was_open) map[p.game_id].pressOpen++; }
         else if (p.coverage === "zone") { map[p.game_id].zone++; if (p.was_open) map[p.game_id].zoneOpen++; }
@@ -256,19 +260,18 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
       targeted: noRouteRun ? false : targeted,
       success: (!noRouteRun && targeted) ? (playOutcome === "caught" ? true : playOutcome === "drop" ? false : null) : null,
       contested: (!noRouteRun && targeted) ? contested : false,
-      yards: (!noRouteRun && targeted && playOutcome === "caught" && yards) ? parseInt(yards, 10) : null,
       play_notes: playNotes,
     }).select().single();
     if (error) { setPlayError(error.message); }
     else if (data) {
       setPlays((prev) => [...prev, data as RoutePlay]);
-      setWasOpen(false); setTargeted(false); setPlayOutcome(null); setContested(false); setYards(""); setPlayNotes("");
+      setWasOpen(false); setTargeted(false); setPlayOutcome(null); setContested(false); setPlayNotes("");
       cs.markDataDirty();
     }
     setSavingPlay(false);
   }
 
-  async function handleBulkImport(parsedPlays: { route_type: RouteType; alignment: Alignment; on_line: boolean; coverage: CoverageType; was_open: boolean; targeted: boolean; success: boolean | null; yards: number | null; play_notes: string; no_route_run?: boolean }[]) {
+  async function handleBulkImport(parsedPlays: { route_type: RouteType; alignment: Alignment; on_line: boolean; coverage: CoverageType; was_open: boolean; targeted: boolean; success: boolean | null; play_notes: string; no_route_run?: boolean }[]) {
     if (!selectedGameId) return;
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
@@ -279,7 +282,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
   }
 
   async function handleSummaryImport(
-    reconstructedPlays: { route_type: RouteType; alignment: Alignment; on_line: boolean; coverage: string; targeted: boolean; success: boolean | null; contested: boolean; yards: number | null; play_notes: string; no_route_run: boolean }[],
+    reconstructedPlays: { route_type: RouteType; alignment: Alignment; on_line: boolean; coverage: string; targeted: boolean; success: boolean | null; contested: boolean; play_notes: string; no_route_run: boolean }[],
     totals: import("../SummaryGameImport").SummaryTotals,
   ) {
     if (!selectedGameId) return;
@@ -303,7 +306,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
   function resetForm() {
     setEditingPlayId(null); setNoRouteRun(false); setRouteType("curl"); setAlignment("right");
     setOnLine(true); setCoverage(""); setWasOpen(false); setTargeted(false);
-    setPlayOutcome(null); setContested(false); setYards(""); setPlayNotes("");
+    setPlayOutcome(null); setContested(false); setPlayNotes("");
   }
 
   function startEditPlay(pl: RoutePlay) {
@@ -311,7 +314,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
     setAlignment(pl.alignment); setOnLine(pl.on_line); setCoverage(pl.coverage ?? "");
     setWasOpen(pl.was_open); setTargeted(pl.targeted);
     setPlayOutcome(pl.targeted ? (pl.success === true ? "caught" : pl.success === false ? "drop" : "incomplete") : null);
-    setContested(pl.contested ?? false); setYards(pl.yards != null ? String(pl.yards) : ""); setPlayNotes(pl.play_notes ?? "");
+    setContested(pl.contested ?? false); setPlayNotes(pl.play_notes ?? "");
   }
 
   async function saveEditedPlay() {
@@ -323,7 +326,6 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
       was_open: noRouteRun ? false : wasOpen, targeted: noRouteRun ? false : targeted,
       success: (!noRouteRun && targeted) ? (playOutcome === "caught" ? true : playOutcome === "drop" ? false : null) : null,
       contested: (!noRouteRun && targeted) ? contested : false,
-      yards: (!noRouteRun && targeted && playOutcome === "caught" && yards) ? parseInt(yards, 10) : null,
       play_notes: playNotes,
     }).eq("id", editingPlayId).select().single();
     if (error) { setPlayError(error.message); }
@@ -736,7 +738,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                   <div className="flex gap-1.5">
                     <button onClick={() => setTargeted(true)}
                       className={`px-3 h-10 rounded text-xs font-medium transition ${targeted ? "bg-amber-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
-                    <button onClick={() => { setTargeted(false); setPlayOutcome(null); setContested(false); setYards(""); }}
+                    <button onClick={() => { setTargeted(false); setPlayOutcome(null); setContested(false); }}
                       className={`px-3 h-10 rounded text-xs font-medium transition ${!targeted ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
                   </div>
                 </div>
@@ -750,9 +752,9 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                   <div className="flex gap-1.5">
                     <button onClick={() => setPlayOutcome("caught")}
                       className={`px-4 h-10 rounded text-xs font-bold transition ${playOutcome === "caught" ? "bg-emerald-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Caught ✓</button>
-                    <button onClick={() => { setPlayOutcome("drop"); setYards(""); }}
+                    <button onClick={() => setPlayOutcome("drop")}
                       className={`px-4 h-10 rounded text-xs font-bold transition ${playOutcome === "drop" ? "bg-red-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Drop ✗</button>
-                    <button onClick={() => { setPlayOutcome("incomplete"); setYards(""); }}
+                    <button onClick={() => setPlayOutcome("incomplete")}
                       className={`px-4 h-10 rounded text-xs font-bold transition ${playOutcome === "incomplete" ? "bg-slate-500 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Incomplete</button>
                   </div>
                 </div>
@@ -765,14 +767,6 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                       className={`px-3 h-10 rounded text-xs font-medium transition ${!contested ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
                   </div>
                 </div>
-                {playOutcome === "caught" && (
-                  <div>
-                    <div className="text-xs text-slate-500 mb-2">Yards</div>
-                    <input type="number"
-                      className="w-20 h-10 px-2 bg-slate-800 border border-slate-700 rounded text-white text-sm focus:outline-none focus:border-blue-500"
-                      placeholder="0" value={yards} onChange={(e) => setYards(e.target.value)} />
-                  </div>
-                )}
               </div>
             )}
 
@@ -801,7 +795,13 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
 
             {gamePlays.length > 0 && (
               <div>
-                <div className="text-xs text-slate-500 mb-2">Plays This Game ({gamePlays.length})</div>
+                <div className="text-xs text-slate-500 mb-2">
+                  Plays This Game ({gamePlays.length})
+                  {(() => {
+                    const r = pff.rowFor(sg);
+                    return r ? <span className="ml-2 text-sky-400" title="PFF's numbers for this game (yards come from PFF)">PFF: {r.receptions ?? 0} rec · {r.rec_yards ?? 0} yds on {r.targets ?? 0} tgt</span> : null;
+                  })()}
+                </div>
                 <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
                   {[...gamePlays].reverse().map((pl, i) => (
                     <div key={pl.id} className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs transition ${editingPlayId === pl.id ? "bg-amber-900/40 border border-amber-700/60" : "bg-slate-900 border border-transparent"}`}>
@@ -822,7 +822,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                         </span>
                       )}
                       {!pl.no_route_run && (pl.targeted ? (
-                        pl.success === true ? <span className="text-emerald-400" title="Targeted: caught">Tgt ✓ {pl.yards ?? 0}yds</span>
+                        pl.success === true ? <span className="text-emerald-400" title="Targeted: caught">Tgt ✓</span>
                           : pl.success === false ? <span className="text-red-400" title="Targeted: drop">Tgt ✗</span>
                           : <span className="text-slate-400" title="Targeted: incomplete">Tgt inc</span>
                       ) : <span className="text-slate-600" title="Not targeted">Not Tgt</span>)}
@@ -847,6 +847,8 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
           ) : games.length === 0 ? (
             <div className="text-slate-500 text-sm text-center py-8">No games charted yet. Go to &quot;Chart Game&quot; to add one.</div>
           ) : (
+            <div>
+            <PffLogBar log={pff} gameCount={games.length} />
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -854,12 +856,12 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                     <th className="pb-2 pr-4">Season</th><th className="pb-2 pr-4">Opponent</th>
                     <th className="pb-2 pr-4">Type</th><th className="pb-2 pr-4 text-right">Routes</th>
                     <th className="pb-2 pr-4 text-right">Targets</th><th className="pb-2 pr-4 text-right">Catches</th>
-                    <th className="pb-2 text-right">Yards</th>
+                    <PffLogHeaders pos="WR" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-900">
                   {games.map((g) => {
-                    const gs = gameStats[g.id] ?? { routes: 0, targets: 0, catches: 0, yards: 0 };
+                    const gs = gameStats[g.id] ?? { routes: 0, targets: 0, catches: 0 };
                     return (
                       <tr key={g.id} className="hover:bg-slate-900/50 transition">
                         <td className="py-2 pr-4 text-slate-300">{g.season_year}</td>
@@ -868,7 +870,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                         <td className="py-2 pr-4 text-right text-blue-400">{gs.routes}</td>
                         <td className="py-2 pr-4 text-right text-slate-300">{gs.targets}</td>
                         <td className="py-2 pr-4 text-right text-emerald-400">{gs.catches}</td>
-                        <td className="py-2 text-right text-slate-300">{gs.yards}</td>
+                        <PffLogCells pos="WR" row={pff.rowFor(g)} whyEmpty={pff.whyEmpty(g)} />
                       </tr>
                     );
                   })}
@@ -879,10 +881,11 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                     <td className="pt-2 text-right text-blue-400">{stats.total}</td>
                     <td className="pt-2 text-right text-slate-300">{stats.targets}</td>
                     <td className="pt-2 text-right text-emerald-400">{stats.catches}</td>
-                    <td className="pt-2 text-right text-slate-300">—</td>
+                    <PffLogFooter pos="WR" totals={pff.totals} />
                   </tr>
                 </tfoot>
               </table>
+            </div>
             </div>
           )}
         </div>

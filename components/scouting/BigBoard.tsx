@@ -38,6 +38,10 @@ import {
   parseGrade, formatGrade, gradeColor, gradeDelta, gradeTier, gradeTierRange,
   GRADE_MIN, GRADE_MAX, GRADE_TIERS, type GradeField,
 } from "../../lib/scouting/prospectGrade";
+import { fmtVal, type ColDef } from "./stats/StatsTableShell";
+import { pffCols, PFF_ALL_TAB_KEY, PFF_BOARD_KEYS } from "./stats/pffCols";
+import { pffValues, type PffTotals, type PffValues } from "../../lib/pff/totals";
+import { pffPos } from "../../lib/pff/stats";
 
 type LoadPositionPlaysFn = (pos: "RB" | "QB" | "TE") => void;
 
@@ -79,6 +83,11 @@ const AE_COLUMNS: AEColumn[] = [
   { key: "srae_mg",   label: "Man Gap",      pos: "RB", group: "SRAE Breakdown", breakdown: true, tooltip: "SRAE on man gap runs (outside + inside man gap), each judged against man gap runs like it (formation, loaded box, unblocked defender stacked). Min. 10 such runs." },
 ];
 type AEMaps = Record<AEKey, Map<string, number | null>>;
+
+const PFF_BAND_TOOLTIP =
+  "PFF's numbers over exactly the games you charted (never season totals). Counts add up game by game; " +
+  "rates come from those sums (YPRR = PFF yards ÷ PFF routes); grades are PFF's own grade for those games. " +
+  "Import or refresh in Scouting → PFF Links. Not part of the AE Score yet.";
 
 // What each AE Score metric counts, for the cell tooltips.
 const SAMPLE_UNIT: Record<string, string> = {
@@ -122,6 +131,7 @@ interface SortContext {
   dynasty: Map<string, DynastyBreakdown>;
   ages: Map<string, ProspectAge>;
   roles: Map<string, RoleFit>;
+  pff: Map<string, PffValues>;
 }
 
 type SortKey =
@@ -139,6 +149,7 @@ type SortKey =
   | "open_pct_right" | "open_pct_right_on" | "open_pct_right_off"
   | "open_pct_left" | "open_pct_left_on" | "open_pct_left_off"
   | "open_pct_backfield"
+  | `pff_${string}`
 ;
 
 interface Props {
@@ -169,6 +180,8 @@ interface Props {
   scoresReady?: boolean;
   /** Save a drafted prospect's frozen AE Score; false if the write failed. */
   onLockAEScore?: (id: string, lock: AEScoreLock) => Promise<boolean>;
+  /** PFF over each prospect's charted games (ScoutingHub). */
+  pffTotals?: Map<string, PffTotals>;
 }
 
 function getSortValue(
@@ -195,6 +208,8 @@ function getSortValue(
   // null, not -BIG: on the All tab most rows have no value for a given AE
   // column (other positions), and the sort sinks those in both directions.
   if (key.startsWith("ae_")) return aeMaps[key.slice(3) as AEKey].get(p.id) ?? null;
+  // PFF over the charted games; none sinks both ways.
+  if (key.startsWith("pff_")) return ctx.pff.get(p.id)?.[key] ?? null;
   if (key === "school") return p.school;
   if (key === "conference") return p.conference ?? "";
   if (key === "position") return p.position;
@@ -268,6 +283,7 @@ export default function BigBoard({
   gameRouteCells = null,
   scoresReady = false,
   onLockAEScore,
+  pffTotals,
 }: Props) {
   // Trigger lazy load of all three position plays the first time the
   // board renders. ScoutingHub no-ops if a position is already loaded
@@ -524,9 +540,16 @@ export default function BigBoard({
     [prospects, games, rbPlays, qbPlays, tePlays],
   );
 
+  // PFF numbers over each prospect's charted games (lib/pff/totals.ts).
+  const pffVals = useMemo(() => {
+    const m = new Map<string, PffValues>();
+    for (const p of prospects) m.set(p.id, pffValues(pffTotals?.get(p.id)));
+    return m;
+  }, [prospects, pffTotals]);
+
   const sortCtx = useMemo<SortContext>(
-    () => ({ aeScores: scoreViews, dynasty, ages, roles: roleFits }),
-    [scoreViews, dynasty, ages, roleFits],
+    () => ({ aeScores: scoreViews, dynasty, ages, roles: roleFits, pff: pffVals }),
+    [scoreViews, dynasty, ages, roleFits, pffVals],
   );
 
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -573,9 +596,13 @@ export default function BigBoard({
 
   function toggleSort(k: SortKey) {
     if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    // AE columns and the Composite scores open best-first; every other column
-    // opens ascending.
-    else { setSortKey(k); setSortDir(k.startsWith("ae_") || k.startsWith("dynasty") ? "desc" : "asc"); }
+    // AE, PFF and the Composite scores open best-first; every other column
+    // opens ascending. (A PFF column where lower is better, e.g. TWP%, opens ascending.)
+    else {
+      setSortKey(k);
+      const pffLowerBetter = k.startsWith("pff_") && pffColumnDefs.find((c) => c.key === k)?.colorDir === -1;
+      setSortDir(pffLowerBetter ? "asc" : k.startsWith("ae_") || k.startsWith("dynasty") || k.startsWith("pff_") ? "desc" : "asc");
+    }
   }
 
   function th(label: string, key: SortKey, cls = "", title?: string) {
@@ -626,6 +653,23 @@ export default function BigBoard({
         {v >= 0 ? "+" : ""}{v.toFixed(1)}
       </td>
     );
+  }
+
+  // ── PFF cells ─────────────────────────────────────────────────
+  // PFF's numbers over exactly the charted games. "—" says why it's empty.
+  function pffCell(p: ProspectWithStats, c: ColDef, cls: string) {
+    const v = pffVals.get(p.id)?.[c.key];
+    if (v == null) {
+      const t = pffTotals?.get(p.id);
+      const why = !t ? "No charted games linked to PFF (Scouting → PFF Links)"
+        : t.games === 0 ? "PFF stats not imported yet (Scouting → PFF Links)"
+        : t.seasonsCurrent < t.seasons ? "PFF stats out of date (a game link changed): refresh in Scouting → PFF Links"
+        : "No PFF data for this";
+      return <td key={c.key} className={`${tdBase} text-slate-600 ${cls}`} title={why}>—</td>;
+    }
+    const t = pffTotals?.get(p.id);
+    const title = t ? `${c.tooltip ?? c.label} · ${t.games} of ${t.linked} linked charted game${t.linked === 1 ? "" : "s"}` : c.tooltip;
+    return <td key={c.key} className={`${tdBase} text-slate-300 ${cls}`} title={title}>{fmtVal(v, c.fmt)}</td>;
   }
 
   // ── AE Score cell ─────────────────────────────────────────────
@@ -779,6 +823,20 @@ export default function BigBoard({
     `QB at ${QB_FULL_TRUST} throws, RB at ${RB_FULL_TRUST} runs (TE's ceiling is matched to WR's). ` +
     `RBs sit ${Math.abs(POSITION_BASELINE.RB ?? 0).toFixed(1)} lower across the board, to keep them from crowding the top. ` +
     `True spread: ${compositeStatus}.`;
+
+  // The PFF band: a position tab's key PFF numbers, or the offense grade on All.
+  const pffColumnDefs: ColDef[] = (() => {
+    const pos = boardTab === "all" ? null : pffPos(boardTab);
+    if (!pos) {
+      const grade = pffCols("WR").find((c) => c.key === PFF_ALL_TAB_KEY)!;
+      return [{ ...grade, label: "PFF Grade" }];
+    }
+    const cols = pffCols(pos);
+    return PFF_BOARD_KEYS[pos]
+      .map((k) => cols.find((c) => c.key === k)!)
+      .filter(Boolean)
+      .map((c) => (c.key === PFF_ALL_TAB_KEY ? { ...c, label: "Grade" } : c));
+  })();
 
   const rankUpdater = boardTab === "all" ? onUpdateOverallRank : onUpdateRank;
   const rankField = (p: ProspectWithStats) => boardTab === "all" ? p.overall_rank : p.personal_rank;
@@ -996,6 +1054,7 @@ export default function BigBoard({
     const aeCols = isAll
       ? AE_COLUMNS.filter((c) => !c.breakdown)
       : AE_COLUMNS.filter((c) => c.pos === boardTab);
+    const pffBorder = (i: number, n: number) => `${i === 0 ? "border-l border-slate-800" : ""} ${i === n - 1 ? "border-r border-slate-800" : ""}`;
     // A border opens each position's cluster and each header band (and closes
     // the last), so WR's and TE's pairs read as one group on the All tab and a
     // breakdown sits apart from its headline metric.
@@ -1028,6 +1087,9 @@ export default function BigBoard({
             {aeGroups.map((g) => (
               <th key={g.group} colSpan={g.span} className="px-2 py-1 text-center text-emerald-900 font-medium border-r border-slate-800 whitespace-nowrap">{g.group}</th>
             ))}
+            {pffColumnDefs.length > 0 && (
+              <th colSpan={pffColumnDefs.length} title={PFF_BAND_TOOLTIP} className="px-2 py-1 text-center text-sky-900 font-medium border-r border-slate-800 whitespace-nowrap">PFF (charted games)</th>
+            )}
           </tr>
           <tr className="border-b border-slate-800 bg-slate-950">
             <th className="sticky left-0 z-20 bg-slate-950 w-6 text-slate-700 text-center px-1">⠿</th>
@@ -1049,6 +1111,7 @@ export default function BigBoard({
             {th("Dynasty+", "dynasty_plus", "border-r border-slate-800 text-teal-600", dynastyPlusTooltip)}
             {th("Role", "role", "border-l border-r border-slate-800 text-violet-500", roleTooltip)}
             {aeCols.map((c, i) => th(c.label, `ae_${c.key}`, `${aeBorder[i]} text-emerald-700`, c.tooltip))}
+            {pffColumnDefs.map((c, i) => th(c.label, c.key as SortKey, `${pffBorder(i, pffColumnDefs.length)} text-sky-600`, c.tooltip))}
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-900">
@@ -1078,6 +1141,7 @@ export default function BigBoard({
                 {dynastyCell(p, true)}
                 {roleCell(p)}
                 {aeCols.map((c, i) => aeCell(p, c, aeBorder[i]))}
+                {pffColumnDefs.map((c, i) => pffCell(p, c, pffBorder(i, pffColumnDefs.length)))}
               </tr>
             );
           })}

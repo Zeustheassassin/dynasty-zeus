@@ -7,6 +7,8 @@ import { logger } from "../../../lib/logger";
 const log = logger("scouting/rb/RBChartingBoard");
 import PlayerNotesList from "../PlayerNotesList";
 import ChartingBoard from "../shared/ChartingBoard";
+import { usePffGameLog } from "../pff/usePffGameLog";
+import { PffLogBar, PffLogCells, PffLogFooter, PffLogHeaders } from "../pff/PffGameLogColumns";
 import type { ChartingBoardConfig } from "../shared/ChartingBoard";
 import { useChartingState } from "../shared/hooks/useChartingState";
 import { pct } from "../shared/chartingTypes";
@@ -171,6 +173,8 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
           editBio, bio, savingBio,
           onTabChange, onSelectGame, onToggleAddGame, onNewGameChange,
           onAddGame, onDeleteGame, onUpdateGame, onToggleEditBio, onBioChange, onSaveBio } = cs;
+  // PFF's numbers for each charted game (Games tab).
+  const pff = usePffGameLog(prospect.id, games, cs.markDataDirty);
 
   // Load plays when games change (paginated past the 1000-row PostgREST cap).
   useEffect(() => {
@@ -980,6 +984,8 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
           ) : games.length === 0 ? (
             <div className="text-slate-500 text-sm text-center py-8">No games charted yet.</div>
           ) : (
+            <div>
+            <PffLogBar log={pff} gameCount={games.length} />
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -990,7 +996,8 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
                     <th className="pb-2 pr-4 text-right">Plays</th>
                     <th className="pb-2 pr-4 text-right">Run Att</th>
                     <th className="pb-2 pr-4 text-right">Routes</th>
-                    <th className="pb-2 text-right">Suc%</th>
+                    <th className="pb-2 pr-4 text-right">Suc%</th>
+                    <PffLogHeaders pos="RB" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-900">
@@ -1010,9 +1017,10 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
                         {routes.length > 0
                           ? <td className="py-2 pr-4 text-right text-blue-300">{routes.length} routes</td>
                           : <td className="py-2 pr-4 text-right text-slate-700">—</td>}
-                        <td className={`py-2 text-right font-medium ${sucPct !== null ? (parseInt(sucPct) >= 55 ? "text-emerald-400" : parseInt(sucPct) >= 40 ? "text-amber-400" : "text-red-400") : "text-slate-600"}`}>
+                        <td className={`py-2 pr-4 text-right font-medium ${sucPct !== null ? (parseInt(sucPct) >= 55 ? "text-emerald-400" : parseInt(sucPct) >= 40 ? "text-amber-400" : "text-red-400") : "text-slate-600"}`}>
                           {sucPct !== null ? `${sucPct}%` : "—"}
                         </td>
+                        <PffLogCells pos="RB" row={pff.rowFor(g)} whyEmpty={pff.whyEmpty(g)} />
                       </tr>
                     );
                   })}
@@ -1022,10 +1030,13 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
                     <td colSpan={3} className="pt-2">Total ({games.length} games)</td>
                     <td className="pt-2 text-right text-blue-400">{stats.totalPlays}</td>
                     <td className="pt-2 text-right text-green-400">{stats.runAttempts}</td>
-                    <td className="pt-2 text-right text-slate-400">—</td>
+                    <td className="pt-2 pr-4 text-right text-slate-400">—</td>
+                    <td className="pt-2 pr-4" />
+                    <PffLogFooter pos="RB" totals={pff.totals} />
                   </tr>
                 </tfoot>
               </table>
+            </div>
             </div>
           )}
         </div>

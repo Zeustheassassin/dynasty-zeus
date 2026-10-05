@@ -25,6 +25,8 @@ import {
   type ProspectGameRouteCellsRow,
   type ProspectGameAlignmentRow,
 } from "../lib/scouting/aggregateMerge";
+import { buildPffTotals } from "../lib/pff/totals";
+import { fetchPffRows, isMissingPffTables, type PffRows } from "./scouting/pff/pffClient";
 
 const log = logger("ScoutingHub");
 
@@ -220,6 +222,9 @@ export default function ScoutingHub() {
   // Per-game WR alignment over every play (migration 060), for the WR stats'
   // Lined Up columns. Empty after a failed load: those columns show "—".
   const [gameAlignment, setGameAlignment] = useState<ProspectGameAlignmentRow[]>([]);
+  // The user's PFF stats for charted games (migration 063). Empty after a failed
+  // load (or before 063 is applied): the PFF columns show "—".
+  const [pffRows, setPffRows] = useState<PffRows>({ games: [], seasons: [] });
   // Whether each lazy play load has landed. The Big Board only snapshots a
   // drafted prospect's AE Score once all three have, so it never saves a
   // half-computed score. (The route cells arrive with the hub's own load.)
@@ -245,6 +250,7 @@ export default function ScoutingHub() {
         { data: rbStatsData, error: rbStatsErr },
         { data: qbStatsData, error: qbStatsErr },
         { data: teStatsData, error: teStatsErr },
+        { rows: pffData, error: pffErr },
       ] = await Promise.all([
         supabase.from("prospects").select("*").order("personal_rank", { ascending: true, nullsFirst: false }),
         supabase.from("scouting_games").select("*").order("season_year", { ascending: false }),
@@ -265,6 +271,11 @@ export default function ScoutingHub() {
         supabase.from("prospect_rb_stats").select("prospect_id,total_snaps,run_type_stats_raw"),
         supabase.from("prospect_qb_stats").select("prospect_id,total_snaps,total_throws,depth_zone_stats_raw"),
         supabase.from("prospect_te_stats").select("prospect_id,total_snaps,total_routes,coverage_stats_raw,block_stats_raw"),
+        // PFF stats (migration 063). Its own query, so a failure only blanks the PFF columns.
+        fetchPffRows().then(
+          (rows) => ({ rows, error: null }),
+          (error: unknown) => ({ rows: { games: [], seasons: [] } as PffRows, error }),
+        ),
       ]);
       if (!isLoadCurrent(seq)) return; // superseded by a newer reload
       if (pErr) log.error("prospects load", { msg: pErr.message, code: pErr.code, details: pErr.details, hint: pErr.hint });
@@ -276,6 +287,10 @@ export default function ScoutingHub() {
       if (rbStatsErr) log.error("prospect_rb_stats load", { msg: rbStatsErr.message });
       if (qbStatsErr) log.error("prospect_qb_stats load", { msg: qbStatsErr.message });
       if (teStatsErr) log.error("prospect_te_stats load", { msg: teStatsErr.message });
+      if (pffErr) {
+        if (isMissingPffTables(pffErr)) log.warn("PFF stats tables missing (apply migration 063); PFF columns blank");
+        else log.error("PFF stats load (PFF columns blank)", { msg: String(pffErr) });
+      }
 
       // Reset lazy-fetch cache so a parent reload re-fetches plays the
       // next time AnalysisHub or GamesLog needs them.
@@ -290,6 +305,7 @@ export default function ScoutingHub() {
       setRouteStatsRows((rsData ?? []) as ProspectRouteStatsRow[]);
       setGameRouteCells(cellData);
       setGameAlignment(alignData);
+      setPffRows(pffData);
       setGameSnapStatsRows((gssData ?? []) as GameSnapStatsRow[]);
       const rbRows = (rbStatsData ?? []) as RbRunTypeRow[];
       const qbRows = (qbStatsData ?? []) as QbThresholdRow[];
@@ -366,6 +382,10 @@ export default function ScoutingHub() {
   // Server-aggregated path: merge view rows + per-game route cells (WR SAE's
   // difficulty model, season-weighted by the games) into ProspectWithStats.
   // Replaces the per-snap JS reduce.
+  // PFF over each prospect's charted games (lib/pff/totals.ts): Analysis,
+  // Compare and the Big Board's PFF columns.
+  const pffTotals = useMemo(() => buildPffTotals(games, pffRows.games, pffRows.seasons), [games, pffRows]);
+
   const prospectsWithStats = useMemo(
     (): ProspectWithStats[] =>
       buildProspectsWithStats(prospects, routeStatsRows, gameRouteCells ?? [], games, {
@@ -660,6 +680,7 @@ export default function ScoutingHub() {
             gameRouteCells={gameRouteCells}
             scoresReady={scoresReady}
             onLockAEScore={handleLockAEScore}
+            pffTotals={pffTotals}
           />
         )}
 
@@ -689,6 +710,7 @@ export default function ScoutingHub() {
             loading={loading}
             draftYearFilter={draftYearFilter}
             setDraftYearFilter={setDraftYearFilter}
+            pffTotals={pffTotals}
             onSelectProspect={(p) => {
               setPendingProspect(p);
               setPositionTab(p.position as PositionTab);
@@ -707,6 +729,7 @@ export default function ScoutingHub() {
             tePlays={tePlays}
             loadPositionPlays={loadPositionPlays}
             loading={loading}
+            pffTotals={pffTotals}
           />
         )}
 
@@ -719,7 +742,7 @@ export default function ScoutingHub() {
         )}
 
         {tab === "pff_links" && (
-          <PffLinksTab />
+          <PffLinksTab onStatsChanged={reloadHub} />
         )}
       </div>
     </div>

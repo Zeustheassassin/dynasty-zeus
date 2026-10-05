@@ -2,13 +2,14 @@
 // Scouting → PFF Links: which PFF player each prospect is, and which PFF game
 // each charted game is (migration 062). The matcher (/api/pff/match) links
 // what it's sure of; this is where the user confirms the doubtful ones and
-// overrides any it got wrong. Stage 2 will read PFF's numbers for exactly
-// these games. PFF data stays in the user's own rows.
+// overrides any it got wrong, and where PFF's numbers for exactly these games are imported
+// and refreshed (migration 063). PFF data stays in the user's own rows.
 
 import { useMemo, useState } from "react";
 import type { PffCandidate, PffGameOption } from "../../../lib/pff/api";
+import type { PffTotals } from "../../../lib/pff/totals";
 import { POS_COLOR, STATUS_CLASSES } from "../../../lib/uiTheme";
-import { fetchPffGames, searchPffPlayers, usePffLinks, type LinkGame, type LinkProspect } from "./usePffLinks";
+import { fetchPffGames, needsImport, searchPffPlayers, usePffLinks, type LinkGame, type LinkProspect } from "./usePffLinks";
 
 type Badge = { label: string; cls: string; hint: string };
 const MUTED = "border-slate-700 bg-slate-900 text-slate-400";
@@ -47,12 +48,14 @@ function StatusBadge({ badge }: { badge: Badge }) {
 
 const btn = "rounded border border-slate-700 px-2 py-0.5 text-[11px] font-medium text-slate-300 hover:border-slate-500 hover:text-white disabled:opacity-40";
 
-export default function PffLinksTab() {
-  const s = usePffLinks();
+/** `onStatsChanged`: reload the hub's PFF columns after an import. */
+export default function PffLinksTab({ onStatsChanged }: { onStatsChanged?: () => void }) {
+  const s = usePffLinks(onStatsChanged);
   const [filter, setFilter] = useState<"attention" | "all">("attention");
   const [search, setSearch] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
-  const running = s.progress != null;
+  const running = s.progress != null || s.importProgress != null;
+  const statsReady = s.statsError == null;
 
   const gamesByProspect = useMemo(() => {
     const m = new Map<string, LinkGame[]>();
@@ -63,7 +66,16 @@ export default function PffLinksTab() {
 
   const needsAttention = (p: LinkProspect) =>
     ATTENTION_PLAYER.has(p.pff_match_status ?? "")
-    || (gamesByProspect.get(p.id) ?? []).some((g) => ATTENTION_GAME.has(g.pff_match_status ?? ""));
+    || (gamesByProspect.get(p.id) ?? []).some((g) => ATTENTION_GAME.has(g.pff_match_status ?? ""))
+    || (statsReady && needsImport(p, s.totals.get(p.id)));
+
+  // PFF stats: prospects missing some, and every prospect with a linked game.
+  const toImport = s.prospects.filter((p) => needsImport(p, s.totals.get(p.id))).map((p) => p.id);
+  const withLinkedGames = s.prospects.filter((p) => (s.totals.get(p.id)?.linked ?? 0) > 0).map((p) => p.id);
+  const statTotals = [...s.totals.values()].reduce(
+    (acc, t) => ({ linked: acc.linked + t.linked, imported: acc.imported + t.games, stale: acc.stale + (t.seasonsCurrent < t.seasons ? 1 : 0) }),
+    { linked: 0, imported: 0, stale: 0 },
+  );
 
   const notRun = useMemo(() => s.prospects
     .filter((p) => p.pff_match_status == null || (gamesByProspect.get(p.id) ?? []).some((g) => g.pff_match_status == null))
@@ -82,15 +94,35 @@ export default function PffLinksTab() {
   return (
     <div className="space-y-3 max-w-5xl mx-auto">
       <p className="text-xs text-slate-400">
-        Links each prospect to his PFF player and each charted game to its PFF game, so PFF&apos;s numbers can come
-        from exactly the games you charted. Sure matches link themselves; confirm or fix the rest here.
+        Links each prospect to his PFF player and each charted game to its PFF game, so PFF&apos;s numbers come
+        from exactly the games you charted. Sure matches link themselves; confirm or fix the rest here. Newly
+        matched games get their PFF stats right away; Import / Refresh re-reads them.
       </p>
 
       {s.error && <div className="rounded border border-red-800 bg-red-900/30 px-3 py-2 text-xs text-red-300">{s.error}</div>}
+      {s.statsError && <div className="rounded border border-amber-800 bg-amber-900/20 px-3 py-2 text-xs text-amber-300">{s.statsError}</div>}
 
-      <div className="grid gap-2 sm:grid-cols-2 text-xs">
+      <div className="grid gap-2 sm:grid-cols-3 text-xs">
         <Summary title="Players" counts={playerCounts} badges={PLAYER_BADGE} />
         <Summary title="Charted games" counts={gameCounts} badges={GAME_BADGE} />
+        <div className="rounded border border-slate-800 bg-slate-900/40 px-3 py-2">
+          <div className="mb-1 font-semibold text-slate-300">PFF stats</div>
+          <div className="flex flex-wrap gap-1.5">
+            <span className={`rounded border px-1.5 py-0.5 ${STATUS_CLASSES.good}`} title="Linked charted games with PFF stats imported">
+              Imported {statTotals.imported} / {statTotals.linked} games
+            </span>
+            {toImport.length > 0 && (
+              <span className={`rounded border px-1.5 py-0.5 ${STATUS_CLASSES.warning}`} title="Prospects with a linked game not imported, or grades for a different set of games">
+                To import {toImport.length}
+              </span>
+            )}
+            {statTotals.stale > 0 && (
+              <span className={`rounded border px-1.5 py-0.5 ${STATUS_CLASSES.serious}`} title="A game link changed since the import: grades and splits are blank until a refresh">
+                Out of date {statTotals.stale}
+              </span>
+            )}
+          </div>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -109,12 +141,38 @@ export default function PffLinksTab() {
         >
           Re-check all
         </button>
+        <button
+          onClick={() => s.runImport(toImport)}
+          disabled={running || s.loading || !statsReady || toImport.length === 0}
+          title="Read PFF's stats for linked games not imported yet (about 5 PFF reads per prospect-season)"
+          className="rounded bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-600 disabled:opacity-50"
+        >
+          Import stats for {toImport.length}
+        </button>
+        <button
+          onClick={() => s.runImport(withLinkedGames)}
+          disabled={running || s.loading || !statsReady || withLinkedGames.length === 0}
+          title="Re-read PFF's stats for every linked game (PFF revises grades during the week)"
+          className={btn + " py-1.5"}
+        >
+          Refresh all stats
+        </button>
         {running && (
           <>
             <span className="text-xs text-slate-300" aria-live="polite">
-              Matching {s.progress!.done} / {s.progress!.total}
-              {s.progress!.failed > 0 && ` · ${s.progress!.failed} failed`}
-              {s.progress!.note && ` · ${s.progress!.note}`}
+              {s.progress ? (
+                <>
+                  Matching {s.progress.done} / {s.progress.total}
+                  {s.progress.failed > 0 && ` · ${s.progress.failed} failed`}
+                  {s.progress.note && ` · ${s.progress.note}`}
+                </>
+              ) : (
+                <>
+                  Importing PFF stats {s.importProgress!.done} / {s.importProgress!.total}
+                  {s.importProgress!.failed > 0 && ` · ${s.importProgress!.failed} failed`}
+                  {s.importProgress!.note && ` · ${s.importProgress!.note}`}
+                </>
+              )}
             </span>
             <button onClick={s.cancel} className={btn}>Stop</button>
           </>
@@ -189,6 +247,7 @@ function ProspectRow({ p, games, open, onToggle, disabled, links }: {
   const userCall = status === "confirmed" || status === "none";
   const linked = p.pff_player_id != null && (status === "auto" || status === "confirmed");
   const flagged = games.filter((g) => ATTENTION_GAME.has(g.pff_match_status ?? "")).length;
+  const totals = links.totals.get(p.id);
 
   return (
     <div className="rounded border border-slate-800 bg-slate-900/40">
@@ -202,6 +261,12 @@ function ProspectRow({ p, games, open, onToggle, disabled, links }: {
         <div className="flex flex-wrap items-center gap-1.5">
           <StatusBadge badge={PLAYER_BADGE[status] ?? PLAYER_BADGE[""]} />
           {flagged > 0 && <span className="text-[11px] text-amber-300">{flagged} game{flagged === 1 ? "" : "s"} to check</span>}
+          {linked && totals && totals.linked > 0 && <StatsBadge t={totals} />}
+          {linked && totals && totals.linked > 0 && (
+            <button disabled={disabled || links.statsError != null} onClick={() => links.runImport([p.id])} className={btn} title="Re-read his charted games from PFF">
+              Refresh stats
+            </button>
+          )}
           {status === "review" && p.pff_player_id != null && (
             <button disabled={disabled} onClick={() => links.confirmPlayer(p)} className={btn}>Confirm</button>
           )}
@@ -233,6 +298,20 @@ function ProspectRow({ p, games, open, onToggle, disabled, links }: {
         </div>
       )}
     </div>
+  );
+}
+
+function StatsBadge({ t }: { t: PffTotals }) {
+  const stale = t.seasonsCurrent < t.seasons;
+  const done = t.games === t.linked && !stale;
+  const cls = done ? STATUS_CLASSES.good : t.games === 0 ? MUTED : STATUS_CLASSES.warning;
+  const hint = stale
+    ? "A game link changed since the import: grades and splits are blank until a refresh"
+    : `PFF stats imported for ${t.games} of his ${t.linked} linked charted games`;
+  return (
+    <span title={hint} className={`shrink-0 rounded border px-1.5 py-0.5 text-[11px] font-semibold ${cls}`}>
+      Stats {t.games}/{t.linked}{stale ? " · out of date" : ""}
+    </span>
   );
 }
 
@@ -287,6 +366,8 @@ function GameRow({ g, playerId, disabled, links }: { g: LinkGame; playerId: numb
   const [err, setErr] = useState<string | null>(null);
   const status = g.pff_match_status ?? "";
   const userCall = status === "confirmed" || status === "none";
+  const imported = links.importedGameIds.has(g.id);
+  const why = links.missing.get(g.id);
 
   async function loadOptions() {
     if (playerId == null) return;
@@ -304,6 +385,11 @@ function GameRow({ g, playerId, disabled, links }: { g: LinkGame; playerId: numb
           <span className="text-slate-200">{g.season_year} vs {g.opponent || "?"}</span>
           {g.game_type !== "regular" && <span className="text-slate-500"> · {g.game_type}</span>}
           <span className="block break-words text-slate-400">{g.pff_match_note ?? "Not matched yet"}</span>
+          {(status === "auto" || status === "confirmed") && (
+            <span className={`block ${imported ? "text-emerald-400" : "text-slate-500"}`}>
+              {imported ? "PFF stats imported" : why ?? "PFF stats not imported yet"}
+            </span>
+          )}
         </span>
         <div className="flex flex-wrap items-center gap-1.5">
           <StatusBadge badge={GAME_BADGE[status] ?? GAME_BADGE[""]} />

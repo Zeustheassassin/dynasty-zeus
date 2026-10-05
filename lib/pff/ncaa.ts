@@ -127,6 +127,67 @@ export function seasonTeams(client: PffClient, season: number, now = Date.now())
   return value;
 }
 
+// ── Stats for a set of weeks (Stage 2 import) ────────────────
+// The `week` filter takes a comma-separated list (checked 2026-10-05). A
+// player report then returns his row for each of those games (`weeks`) and
+// PFF's own aggregate over exactly them (`week_totals`); the reports PFF keeps
+// season-level (passing/concept, passing/pressure, receiving/depth) return
+// just the aggregate, as a one-row list. Facets with season + weeks +
+// franchise return every player of that team aggregated over those weeks.
+
+export type PffStatRow = Record<string, unknown>;
+
+/** The response's report object: the known key, else the only key. */
+function reportBody(body: unknown, key: string): unknown {
+  if (!body || typeof body !== "object") return null;
+  const obj = body as Record<string, unknown>;
+  if (key in obj) return obj[key];
+  const keys = Object.keys(obj).filter((k) => k !== "restricted");
+  return keys.length === 1 ? obj[keys[0]] : null;
+}
+
+async function getOrEmpty<T>(run: () => Promise<T>, empty: T): Promise<T> {
+  try {
+    return await run();
+  } catch (err) {
+    if (err instanceof PffError && err.status === 404) return empty;
+    throw err;
+  }
+}
+
+/** His rows for the given weeks of one season, and PFF's total over them. */
+export async function playerWeeks(
+  client: PffClient, path: string, key: string, playerId: number, season: number, weeks: readonly number[],
+): Promise<{ weeks: PffStatRow[]; totals: PffStatRow[] }> {
+  return getOrEmpty(async () => {
+    const body = await client.get(`/v1/player/${path}`, { league: "ncaa", player_id: playerId, season, week: weeks.join(",") });
+    const r = reportBody(body, key) as { weeks?: PffStatRow[]; week_totals?: PffStatRow[] } | null;
+    return { weeks: r?.weeks ?? [], totals: r?.week_totals ?? [] };
+  }, { weeks: [], totals: [] });
+}
+
+/** A season-level report aggregated over the given weeks (one row, or none). */
+export async function playerAggregate(
+  client: PffClient, path: string, key: string, playerId: number, season: number, weeks: readonly number[],
+): Promise<PffStatRow | null> {
+  return getOrEmpty(async () => {
+    const body = await client.get(`/v1/player/${path}`, { league: "ncaa", player_id: playerId, season, week: weeks.join(",") });
+    const r = reportBody(body, key);
+    return Array.isArray(r) ? ((r[0] as PffStatRow | undefined) ?? null) : null;
+  }, null);
+}
+
+/** Every player of one team, aggregated over the given weeks of one season. */
+export async function teamFacet(
+  client: PffClient, path: string, key: string, season: number, weeks: readonly number[], franchiseId: number,
+): Promise<PffStatRow[]> {
+  return getOrEmpty(async () => {
+    const body = await client.get(`/v1/facet/${path}`, { league: "ncaa", season, week: weeks.join(","), franchise_id: franchiseId });
+    const r = reportBody(body, key);
+    return Array.isArray(r) ? (r as PffStatRow[]) : [];
+  }, []);
+}
+
 /** A team's game(s) in one week, with whether PFF has charted them. */
 export async function weekGames(client: PffClient, season: number, week: number, franchiseId: number): Promise<PffGameInfo[]> {
   const body = await client.get<{ games?: PffGameInfo[] }>("/v1/games", {

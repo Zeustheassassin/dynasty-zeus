@@ -6,6 +6,8 @@ import { logger } from "../../../lib/logger";
 
 const log = logger("scouting/qb/QBChartingBoard");
 import ChartingBoard from "../shared/ChartingBoard";
+import { usePffGameLog } from "../pff/usePffGameLog";
+import { PffLogBar, PffLogCells, PffLogFooter, PffLogHeaders } from "../pff/PffGameLogColumns";
 import type { ChartingBoardConfig } from "../shared/ChartingBoard";
 import { useChartingState } from "../shared/hooks/useChartingState";
 import QBPlayerCharts from "./QBPlayerCharts";
@@ -116,6 +118,8 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
           editBio, bio, savingBio,
           onTabChange, onSelectGame, onToggleAddGame, onNewGameChange,
           onAddGame, onDeleteGame, onUpdateGame, onToggleEditBio, onBioChange, onSaveBio } = cs;
+  // PFF's numbers for each charted game (Games tab).
+  const pff = usePffGameLog(prospect.id, games, cs.markDataDirty);
 
   // Load plays when games change (paginated past the 1000-row PostgREST cap).
   useEffect(() => {
@@ -835,6 +839,8 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
           ) : games.length === 0 ? (
             <div className="text-slate-500 text-sm text-center py-8">No games charted yet.</div>
           ) : (
+            <div>
+            <PffLogBar log={pff} gameCount={games.length} />
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -844,7 +850,8 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
                     <th className="pb-2 pr-4">Type</th>
                     <th className="pb-2 pr-4 text-right">Plays</th>
                     <th className="pb-2 pr-4 text-right">Throws</th>
-                    <th className="pb-2 text-right">On-Target%</th>
+                    <th className="pb-2 pr-4 text-right">On-Target%</th>
+                    <PffLogHeaders pos="QB" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-900">
@@ -863,9 +870,10 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
                         <td className="py-2 pr-4 text-slate-400 capitalize">{g.game_type}</td>
                         <td className="py-2 pr-4 text-right text-blue-400">{gp.length}</td>
                         <td className="py-2 pr-4 text-right text-slate-300">{thrown.length}</td>
-                        <td className={`py-2 text-right font-medium ${onTargetColor(otPct)}`}>
+                        <td className={`py-2 pr-4 text-right font-medium ${onTargetColor(otPct)}`}>
                           {fmtPct(otPct)}
                         </td>
+                        <PffLogCells pos="QB" row={pff.rowFor(g)} whyEmpty={pff.whyEmpty(g)} />
                       </tr>
                     );
                   })}
@@ -875,12 +883,14 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
                     <td colSpan={3} className="pt-2">Total ({games.length} games)</td>
                     <td className="pt-2 text-right text-blue-400">{headerStats.totalPlays}</td>
                     <td className="pt-2 text-right text-slate-300">{headerStats.thrown}</td>
-                    <td className={`pt-2 text-right font-medium ${onTargetColor(headerStats.onTargetPct)}`}>
+                    <td className={`pt-2 pr-4 text-right font-medium ${onTargetColor(headerStats.onTargetPct)}`}>
                       {fmtPct(headerStats.onTargetPct)}
                     </td>
+                    <PffLogFooter pos="QB" totals={pff.totals} />
                   </tr>
                 </tfoot>
               </table>
+            </div>
             </div>
           )}
         </div>

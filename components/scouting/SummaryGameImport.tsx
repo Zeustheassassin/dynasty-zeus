@@ -11,7 +11,6 @@ interface ReconstructedPlay {
   targeted: boolean;
   success: boolean | null;
   contested: boolean;
-  yards: number | null;
   play_notes: string;
   no_route_run: boolean;
 }
@@ -286,12 +285,12 @@ function reconstructPlays(s: GameSummary): ReconstructedPlay[] {
     for (const cov of COV_KEYS) {
       const total = cellCount[rt]![cov];
       const open  = Math.min(cellOpen[rt]![cov], total);
-      for (let i = 0; i < open;  i++) routePlays.push({ route_type: rt, alignment: "right", on_line: true, coverage: cov, was_open: true,  targeted: false, success: null, contested: false, yards: null, play_notes: "", no_route_run: false });
-      for (let i = open; i < total; i++) routePlays.push({ route_type: rt, alignment: "right", on_line: true, coverage: cov, was_open: false, targeted: false, success: null, contested: false, yards: null, play_notes: "", no_route_run: false });
+      for (let i = 0; i < open;  i++) routePlays.push({ route_type: rt, alignment: "right", on_line: true, coverage: cov, was_open: true,  targeted: false, success: null, contested: false, play_notes: "", no_route_run: false });
+      for (let i = open; i < total; i++) routePlays.push({ route_type: rt, alignment: "right", on_line: true, coverage: cov, was_open: false, targeted: false, success: null, contested: false, play_notes: "", no_route_run: false });
     }
     // Plays that didn't get a coverage slot (only happens if totalCovRoutes < totalRoutes)
     const covAssigned = COV_KEYS.reduce((a, k) => a + (cellCount[rt]![k] ?? 0), 0);
-    for (let i = covAssigned; i < count; i++) routePlays.push({ route_type: rt, alignment: "right", on_line: true, coverage: "", was_open: false, targeted: false, success: null, contested: false, yards: null, play_notes: "", no_route_run: false });
+    for (let i = covAssigned; i < count; i++) routePlays.push({ route_type: rt, alignment: "right", on_line: true, coverage: "", was_open: false, targeted: false, success: null, contested: false, play_notes: "", no_route_run: false });
   }
 
   // NRR plays (alignment-only snaps)
@@ -299,7 +298,7 @@ function reconstructPlays(s: GameSummary): ReconstructedPlay[] {
   const nrrPlays: ReconstructedPlay[] = Array.from({ length: nrrCount }, () => ({
     route_type: "other" as RouteType, alignment: "right" as Alignment, on_line: true,
     coverage: "" as CoverageType, was_open: false, targeted: false,
-    success: null, contested: false, yards: null, play_notes: "",
+    success: null, contested: false, play_notes: "",
     no_route_run: true,
   }));
 

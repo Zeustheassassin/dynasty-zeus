@@ -5,6 +5,8 @@ import { computeRBAboveExpected, computeRBRunSliceSRAE } from "../../../lib/scou
 import { computeRBRoleFits } from "../../../lib/scouting/roleFitRB";
 import type { Prospect, ScoutingGame, RBPlay, RBRunType } from "../../../lib/types";
 import { roleFitCols, roleFitRow } from "./roleFitCols";
+import { pffCols, pffRow } from "./pffCols";
+import type { PffTotals } from "../../../lib/pff/totals";
 
 interface Props {
   prospects: Prospect[];
@@ -13,6 +15,8 @@ interface Props {
   loading?: boolean;
   draftYearFilter?: number | null;
   onSelectProspect?: (p: Prospect) => void;
+  /** PFF over each prospect's charted games (ScoutingHub). */
+  pffTotals?: Map<string, PffTotals>;
 }
 
 const RUN_TYPES: RBRunType[] = ["outside_zone", "inside_zone", "outside_man_gap", "inside_man_gap"];
@@ -82,6 +86,8 @@ export const RB_STAT_COLS: ColDef[] = [
   { key: "raw_btk",        label: "BTkl",     group: "Raw", fmt: "count", width: 46 },
   { key: "raw_tgts",       label: "Tgts",     group: "Raw", fmt: "count", width: 46 },
   { key: "raw_catches",    label: "Catch",    group: "Raw", fmt: "count", width: 50 },
+  // PFF over the charted games
+  ...pffCols("RB"),
 ];
 
 function succPct(plays: RBPlay[], filter: (p: RBPlay) => boolean): number | null {
@@ -99,7 +105,7 @@ function pct(n: number, d: number): number | null {
 
 // Extracted so the Phase I player-comparison tool can compute the same rows
 // for any two RB prospects without duplicating this logic.
-export function buildRBStatRows(prospects: Prospect[], games: ScoutingGame[], rbPlays: RBPlay[]): StatRow[] {
+export function buildRBStatRows(prospects: Prospect[], games: ScoutingGame[], rbPlays: RBPlay[], pff?: Map<string, PffTotals>): StatRow[] {
     const sraeMap = computeRBAboveExpected(prospects, games, rbPlays);
     const sliceMap = computeRBRunSliceSRAE(prospects, games, rbPlays);
     const roleFits = computeRBRoleFits(prospects, games, rbPlays);
@@ -207,6 +213,7 @@ export function buildRBStatRows(prospects: Prospect[], games: ScoutingGame[], rb
           raw_btk:       pPlays.filter((pl) => pl.broken_tackle).length,
           raw_tgts:      recTgts,
           raw_catches:   recCatches,
+          ...pffRow(pff?.get(p.id)),
         } satisfies StatRow;
       });
 }
@@ -214,9 +221,9 @@ export function buildRBStatRows(prospects: Prospect[], games: ScoutingGame[], rb
 // "Min …" boxes beside the search bar — hide prospects below a sample size.
 const RB_MIN_FILTERS: MinFilterDef[] = [{ key: "runs", label: "Runs" }];
 
-export default function RBStatsTable({ prospects, games, rbPlays, loading, draftYearFilter, onSelectProspect }: Props) {
+export default function RBStatsTable({ prospects, games, rbPlays, loading, draftYearFilter, onSelectProspect, pffTotals }: Props) {
   const prospectMap = useMemo(() => new Map(prospects.map((p) => [p.id, p])), [prospects]);
-  const rows = useMemo(() => buildRBStatRows(prospects, games, rbPlays), [prospects, games, rbPlays]);
+  const rows = useMemo(() => buildRBStatRows(prospects, games, rbPlays, pffTotals), [prospects, games, rbPlays, pffTotals]);
 
   return (
     <StatsTableShell

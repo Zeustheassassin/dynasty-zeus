@@ -20,6 +20,28 @@ export interface PffMatchResponse {
   retryAfterMs: number | null;
 }
 
+/** Prospects per POST /api/pff/import; about 5 PFF reads per prospect-season. */
+export const PFF_IMPORT_BATCH = 4;
+
+export interface PffImportResult {
+  prospectId: string;
+  /** Charted games whose PFF stats were saved this run. */
+  imported?: number;
+  /** Seasons whose aggregate (grades, splits) was saved. */
+  seasons?: number;
+  /** Linked games PFF had nothing for, with why. */
+  missing?: { gameId: string; reason: string }[];
+  /** Why nothing was imported (not linked, no linked games, …). */
+  note?: string;
+  error?: string;
+}
+
+export interface PffImportResponse {
+  results: PffImportResult[];
+  /** Set when PFF's read budget ran out mid-batch: wait this long, then resend the unreached ids. */
+  retryAfterMs: number | null;
+}
+
 /** GET /api/pff/players: one directory hit. */
 export interface PffCandidate {
   id: number;

@@ -7,6 +7,7 @@ import { QB_STAT_COLS, buildQBStatRows } from "./QBStatsTable";
 import { TE_STAT_COLS, buildTEStatRows } from "./TEStatsTable";
 import { WR_STAT_COLS, buildWRStatRows } from "./WRStatsTable";
 import type { LoadPositionPlaysFn } from "../../ScoutingHub";
+import type { PffTotals } from "../../../lib/pff/totals";
 
 type PositionTab = "QB" | "RB" | "WR" | "TE";
 const POSITIONS: PositionTab[] = ["QB", "RB", "WR", "TE"];
@@ -26,6 +27,8 @@ interface Props {
   tePlays: TEPlay[];
   loadPositionPlays: LoadPositionPlaysFn;
   loading?: boolean;
+  /** PFF over each prospect's charted games. */
+  pffTotals?: Map<string, PffTotals>;
 }
 
 function ProspectPicker({
@@ -88,7 +91,7 @@ function ProspectPicker({
 }
 
 export default function CompareProspectsTab({
-  prospects, prospectsWithStats, games, rbPlays, qbPlays, tePlays, loadPositionPlays, loading,
+  prospects, prospectsWithStats, games, rbPlays, qbPlays, tePlays, loadPositionPlays, loading, pffTotals,
 }: Props) {
   const [position, setPosition] = useState<PositionTab>("WR");
   const [prospectA, setProspectA] = useState<Prospect | null>(null);
@@ -106,12 +109,12 @@ export default function CompareProspectsTab({
 
   const { cols, rows } = useMemo((): { cols: ColDef[]; rows: StatRow[] } => {
     switch (position) {
-      case "RB": return { cols: RB_STAT_COLS, rows: buildRBStatRows(prospects, games, rbPlays) };
-      case "QB": return { cols: QB_STAT_COLS, rows: buildQBStatRows(prospects, games, qbPlays) };
-      case "TE": return { cols: TE_STAT_COLS, rows: buildTEStatRows(prospects, games, tePlays) };
-      default:   return { cols: WR_STAT_COLS, rows: buildWRStatRows(prospectsWithStats) };
+      case "RB": return { cols: RB_STAT_COLS, rows: buildRBStatRows(prospects, games, rbPlays, pffTotals) };
+      case "QB": return { cols: QB_STAT_COLS, rows: buildQBStatRows(prospects, games, qbPlays, pffTotals) };
+      case "TE": return { cols: TE_STAT_COLS, rows: buildTEStatRows(prospects, games, tePlays, pffTotals) };
+      default:   return { cols: WR_STAT_COLS, rows: buildWRStatRows(prospectsWithStats, pffTotals) };
     }
-  }, [position, prospects, prospectsWithStats, games, rbPlays, qbPlays, tePlays]);
+  }, [position, prospects, prospectsWithStats, games, rbPlays, qbPlays, tePlays, pffTotals]);
 
   const positionProspects = useMemo(
     () => prospects.filter((p) => p.position === position),

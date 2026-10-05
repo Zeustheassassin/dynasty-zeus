@@ -4,6 +4,8 @@ import { render, screen, fireEvent, cleanup, within } from "@testing-library/rea
 import BigBoard from "@/components/scouting/BigBoard";
 import type { ProspectWithStats, AEScoreLock } from "@/lib/types";
 import type { RoleFit } from "@/lib/scouting/roleFit";
+import { totalsFor, type PffTotals } from "@/lib/pff/totals";
+import { GAME_STAT_KEYS, SEASON_STAT_KEYS, type PffGameRow, type PffSeasonRow } from "@/lib/pff/stats";
 
 // The Big Board's Above Exp group: one column per metric (AAE, SRAE, SAE, cSAE,
 // TE-SAER, TE-SAEB). The models themselves are tested in aboveExpected.test.ts
@@ -102,7 +104,7 @@ const AE_LABELS = ["AAE", "SRAE", "SAE", "cSAE", "TE-SAER", "TE-SAEB"];
 function renderBoard(
   prospects: ProspectWithStats[] = PROSPECTS,
   onUpdateDraftRound: (id: string, round: number | null) => Promise<boolean> = vi.fn(async () => true),
-  extra: { scoresReady?: boolean; onLockAEScore?: (id: string, lock: AEScoreLock) => Promise<boolean> } = {},
+  extra: { scoresReady?: boolean; onLockAEScore?: (id: string, lock: AEScoreLock) => Promise<boolean>; pffTotals?: Map<string, PffTotals> } = {},
 ) {
   return render(
     <BigBoard
@@ -135,6 +137,55 @@ const cell = (name: string, label: string) =>
 const aeRow = (name: string) => AE_LABELS.map((l) => cell(name, l));
 const names = () => bodyRows().map((r) => within(r).getAllByRole("cell")[2].textContent);
 
+describe("BigBoard PFF columns", () => {
+  // Wide One: two charted games, both imported, with a current 2025 aggregate.
+  const blankGame = Object.fromEntries(GAME_STAT_KEYS.map((k) => [k, null]));
+  const blankSeason = Object.fromEntries(SEASON_STAT_KEYS.map((k) => [k, null]));
+  const game = (id: string, pff: number, stats: Partial<PffGameRow>) => ({
+    ...blankGame, game_id: id, prospect_id: "wr1", pff_player_id: 1, pff_game_id: pff, season: 2025, week: 1,
+    franchise_id: 260, pff_position: "LWR", fetched_at: "", ...stats,
+  }) as PffGameRow;
+  const season = (ids: number[], stats: Partial<PffSeasonRow>) => ({
+    ...blankSeason, prospect_id: "wr1", pff_player_id: 1, season: 2025, pff_game_ids: ids, weeks: [], fetched_at: "", ...stats,
+  }) as PffSeasonRow;
+  const rows = [game("g1", 10, { routes: 20, rec_yards: 70, targets: 5, receptions: 4, drops: 1 }), game("g2", 11, { routes: 20, rec_yards: 30, targets: 3, receptions: 3, drops: 0 })];
+  const current = totalsFor(2, rows, new Map([[2025, season([10, 11], { grade_offense: 81.4, rec_adot: 12.3, team_dropbacks: 50 })]]));
+  const stale = totalsFor(3, rows, new Map([[2025, season([10], { grade_offense: 70 })]]));
+
+  it("shows a position tab's key PFF numbers over the charted games, rates from the sums", () => {
+    renderBoard(PROSPECTS, undefined, { pffTotals: new Map([["wr1", current]]) });
+    fireEvent.click(screen.getByRole("button", { name: /^WR/ }));
+    const labels = ["Grade", "YPRR", "TPRR", "Tgt Share", "aDOT", "Drop%"];
+    const at = headerLabels().indexOf("Grade");
+    expect(headerLabels().slice(at, at + labels.length)).toEqual(labels);
+    // YPRR 100 ÷ 40 routes; TPRR 8 ÷ 40; target share 8 ÷ 50 team dropbacks; drops 1 ÷ (7 + 1).
+    expect(labels.map((l) => cell("Wide One", l))).toEqual(["81.4", "2.50", "20.0%", "16.0%", "12.3", "12.5%"]);
+    expect(cell("Wide Two", "YPRR")).toBe("—");
+  });
+
+  it("shows just PFF's grade on the All tab", () => {
+    renderBoard(PROSPECTS, undefined, { pffTotals: new Map([["wr1", current]]) });
+    expect(headerLabels()).toContain("PFF Grade");
+    expect(cell("Wide One", "PFF Grade")).toBe("81.4");
+  });
+
+  it("blanks the grade, and says why, while a game link changed since the import", () => {
+    renderBoard(PROSPECTS, undefined, { pffTotals: new Map([["wr1", stale]]) });
+    fireEvent.click(screen.getByRole("button", { name: /^WR/ }));
+    const grade = within(rowFor("Wide One")).getAllByRole("cell")[headerLabels().indexOf("Grade")];
+    expect(grade.textContent).toBe("—");
+    expect(grade.getAttribute("title")).toMatch(/out of date/);
+    expect(cell("Wide One", "YPRR")).toBe("2.50"); // counts still add up
+  });
+
+  it("sorts a PFF column best-first on the first click", () => {
+    renderBoard(PROSPECTS, undefined, { pffTotals: new Map([["wr1", current]]) });
+    fireEvent.click(screen.getByRole("button", { name: /^WR/ }));
+    fireEvent.click(screen.getByRole("columnheader", { name: /^YPRR/ }));
+    expect(names()[0]).toBe("Wide One");
+  });
+});
+
 describe("BigBoard Above Exp columns", () => {
   it("shows every AE metric on the All tab, each row filling only its own position's", () => {
     renderBoard();
@@ -164,9 +215,10 @@ describe("BigBoard Above Exp columns", () => {
     renderBoard();
     fireEvent.click(screen.getByRole("button", { name: /^QB/ }));
     const cols = ["AAE", "Outside", "Inside", "Deep", "Intermediate", "Short"];
-    expect(headerLabels().slice(-cols.length)).toEqual(cols);
-    expect(within(screen.getAllByRole("row")[0]).getAllByRole("columnheader").slice(-2).map((h) => h.textContent))
-      .toEqual(["Above Exp", "AAE Breakdown"]);
+    const at = headerLabels().indexOf("AAE");
+    expect(headerLabels().slice(at, at + cols.length)).toEqual(cols);
+    expect(within(screen.getAllByRole("row")[0]).getAllByRole("columnheader").slice(-3).map((h) => h.textContent))
+      .toEqual(["Above Exp", "AAE Breakdown", "PFF (charted games)"]);
     expect(cols.map((l) => cell("Quarter One", l))).toEqual(["+3.5", "+1.5", "+7.2", "—", "-3.0", "+2.0"]);
   });
 
@@ -174,7 +226,8 @@ describe("BigBoard Above Exp columns", () => {
     renderBoard();
     fireEvent.click(screen.getByRole("button", { name: /^RB/ }));
     const cols = ["SRAE", "Outside", "Inside", "Zone", "Man Gap"];
-    expect(headerLabels().slice(-cols.length)).toEqual(cols);
+    const at = headerLabels().indexOf("SRAE");
+    expect(headerLabels().slice(at, at + cols.length)).toEqual(cols);
     expect(cols.map((l) => cell("Running One", l))).toEqual(["-2.0", "+4.0", "-5.5", "—", "+0.4"]);
   });
 

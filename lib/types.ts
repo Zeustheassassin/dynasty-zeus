@@ -1319,10 +1319,10 @@ export interface ProspectWithStats extends Prospect {
   drops: number;
   contested: number;
   contested_catches: number;
-  total_yards: number;
+  // No yards here: the app never types yards (Stage 2). They come from PFF
+  // over the charted games (lib/pff/totals.ts).
   success_rate: number | null;
   target_rate: number | null;
-  avg_ypc: number | null;
   pct_left: number | null;
   pct_right: number | null;
   pct_slot: number | null;

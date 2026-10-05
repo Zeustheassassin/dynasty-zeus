@@ -21,6 +21,8 @@ import type {
 import { ROUTE_TYPES } from "../shared/chartingConstants";
 import { pct, fmtPct } from "../shared/chartingTypes";
 import ChartingBoard, { type ChartingBoardConfig } from "../shared/ChartingBoard";
+import { usePffGameLog } from "../pff/usePffGameLog";
+import { PffLogBar, PffLogCells, PffLogFooter, PffLogHeaders } from "../pff/PffGameLogColumns";
 import { useChartingState } from "../shared/hooks/useChartingState";
 import TEPlayerCharts from "./TEPlayerCharts";
 import {
@@ -109,6 +111,8 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
   const { tab, games, selectedGameId, loading, showAddGame, newGame, savingGame, gameError,
           editBio, bio, savingBio, onTabChange, onSelectGame, onToggleAddGame, onNewGameChange,
           onAddGame, onDeleteGame, onUpdateGame, onToggleEditBio, onBioChange, onSaveBio } = cs;
+  // PFF's numbers for each charted game (Games tab).
+  const pff = usePffGameLog(prospect.id, games, cs.markDataDirty);
 
   useEffect(() => {
     if (games.length === 0) return;
@@ -909,6 +913,8 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
           ) : games.length === 0 ? (
             <div className="text-slate-500 text-sm text-center py-8">No games charted yet.</div>
           ) : (
+            <div>
+            <PffLogBar log={pff} gameCount={games.length} />
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -916,7 +922,8 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
                     <th className="pb-2 pr-4">Season</th><th className="pb-2 pr-4">Opponent</th>
                     <th className="pb-2 pr-4">Type</th><th className="pb-2 pr-4 text-right">Plays</th>
                     <th className="pb-2 pr-4 text-right">Routes</th><th className="pb-2 pr-4 text-right">Tgts</th>
-                    <th className="pb-2 pr-4 text-right">Blocks</th><th className="pb-2 text-right">Block Suc%</th>
+                    <th className="pb-2 pr-4 text-right">Blocks</th><th className="pb-2 pr-4 text-right">Block Suc%</th>
+                    <PffLogHeaders pos="TE" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-900">
@@ -936,9 +943,10 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
                         <td className="py-2 pr-4 text-right text-green-400">{routes.length || "—"}</td>
                         <td className="py-2 pr-4 text-right text-amber-400">{tgts || "—"}</td>
                         <td className="py-2 pr-4 text-right text-purple-400">{blocks.length || "—"}</td>
-                        <td className={`py-2 text-right font-medium ${bSucPct !== null ? (parseInt(bSucPct) >= 75 ? "text-emerald-400" : parseInt(bSucPct) >= 55 ? "text-amber-400" : "text-red-400") : "text-slate-600"}`}>
+                        <td className={`py-2 pr-4 text-right font-medium ${bSucPct !== null ? (parseInt(bSucPct) >= 75 ? "text-emerald-400" : parseInt(bSucPct) >= 55 ? "text-amber-400" : "text-red-400") : "text-slate-600"}`}>
                           {bSucPct !== null ? `${bSucPct}%` : "—"}
                         </td>
+                        <PffLogCells pos="TE" row={pff.rowFor(g)} whyEmpty={pff.whyEmpty(g)} />
                       </tr>
                     );
                   })}
@@ -950,10 +958,12 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
                     <td className="pt-2 text-right text-green-400">{stats.routeAttempts}</td>
                     <td className="pt-2 text-right text-amber-400">{stats.targets}</td>
                     <td className="pt-2 text-right text-purple-400">{stats.blockAttempts}</td>
-                    <td className="pt-2 text-right text-slate-400">{fmtPct(stats.blockSucPct)}</td>
+                    <td className="pt-2 pr-4 text-right text-slate-400">{fmtPct(stats.blockSucPct)}</td>
+                    <PffLogFooter pos="TE" totals={pff.totals} />
                   </tr>
                 </tfoot>
               </table>
+            </div>
             </div>
           )}
         </div>

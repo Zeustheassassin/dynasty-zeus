@@ -10,7 +10,6 @@ export interface ParsedPlay {
   was_open: boolean;
   targeted: boolean;
   success: boolean | null;
-  yards: number | null;
   play_notes: string;
   no_route_run: boolean;
   valid: boolean;
@@ -61,11 +60,13 @@ function parseBool(v: string): boolean {
 
 function parsePlay(row: string[]): ParsedPlay {
   const raw = row.join("\t");
-  if (row.length < 2) return { route_type: "other", alignment: "right", on_line: true, coverage: "", was_open: false, targeted: false, success: null, yards: null, play_notes: "", no_route_run: false, valid: false, raw, error: "Too few columns" };
+  if (row.length < 2) return { route_type: "other", alignment: "right", on_line: true, coverage: "", was_open: false, targeted: false, success: null, play_notes: "", no_route_run: false, valid: false, raw, error: "Too few columns" };
 
   const col = (i: number) => (row[i] ?? "").trim();
 
-  // Column order: Route | Alignment | On Line | Coverage | Open | Targeted | Success | Yards | Notes
+  // Column order: Route | Alignment | On Line | Coverage | Open | Targeted | Success | (Yards) | Notes
+  // The Yards column is kept in the layout so existing sheets still line up,
+  // but it is never read: no yards are typed in the app, they come from PFF.
   // Notes is always the last column, for both route rows and NRR rows, so a
   // paste that mixes row types still lines up under one fixed layout.
   const routeRaw = col(0).toLowerCase().replace(/\s+/g, " ").trim();
@@ -78,7 +79,7 @@ function parsePlay(row: string[]): ParsedPlay {
     const on_line = col(2) === "" ? true : parseBool(col(2));
     const play_notes = col(8) ?? "";
     const error = !alignValid ? `Unknown alignment "${col(1)}"` : undefined;
-    return { route_type: "other", alignment, on_line, coverage: "", was_open: false, targeted: false, success: null, yards: null, play_notes, no_route_run: true, valid: !error, raw, error };
+    return { route_type: "other", alignment, on_line, coverage: "", was_open: false, targeted: false, success: null, play_notes, no_route_run: true, valid: !error, raw, error };
   }
 
   const route_type: RouteType = ROUTE_MAP[routeRaw] ?? "other";
@@ -95,13 +96,11 @@ function parsePlay(row: string[]): ParsedPlay {
   const targeted = col(5) === "" ? false : parseBool(col(5));
   const successRaw = col(6);
   const success = targeted ? (successRaw === "" ? null : parseBool(successRaw)) : null;
-  const yardsRaw = col(7);
-  const yards = yardsRaw && !isNaN(parseInt(yardsRaw, 10)) ? parseInt(yardsRaw, 10) : null;
   const play_notes = col(8) ?? "";
 
   const error = !routeValid ? `Unknown route "${col(0)}"` : !alignValid ? `Unknown alignment "${col(1)}"` : undefined;
 
-  return { route_type, alignment, on_line, coverage, was_open, targeted, success, yards, play_notes, no_route_run: false, valid: !error, raw, error };
+  return { route_type, alignment, on_line, coverage, was_open, targeted, success, play_notes, no_route_run: false, valid: !error, raw, error };
 }
 
 export function parseInput(text: string): ParsedPlay[] {
@@ -179,7 +178,7 @@ export default function BulkGameImport({ gameLabel, onImport, onCancel }: Props)
           Column order — copy directly from your Google Sheet template:
         </div>
         <div className="grid grid-cols-9 gap-1 mb-2 text-center">
-          {["Route", "Alignment", "On Line?", "Coverage", "Open?", "Targeted?", "Success?", "Yards", "Notes"].map((h, i) => (
+          {["Route", "Alignment", "On Line?", "Coverage", "Open?", "Targeted?", "Success?", "(Yards)", "Notes"].map((h, i) => (
             <div key={h} className={`px-1 py-0.5 rounded text-xs font-medium ${i < 3 ? "bg-blue-900/50 text-blue-300" : i < 5 ? "bg-purple-900/50 text-purple-300" : i === 5 ? "bg-amber-900/50 text-amber-300" : i === 6 ? "bg-emerald-900/50 text-emerald-300" : "bg-slate-800 text-slate-400"}`}>
               {h}
             </div>
@@ -190,6 +189,7 @@ export default function BulkGameImport({ gameLabel, onImport, onCancel }: Props)
           <div><span className="text-slate-300">Alignment:</span> L / R / S / B (or Left / Right / Slot / Backfield)</div>
           <div><span className="text-slate-300">Coverage:</span> M / Z / P / D (Man / Zone / Press / Double) — leave blank if unknown</div>
           <div><span className="text-slate-300">Booleans:</span> Y or N &nbsp;·&nbsp; Leave Success blank if not targeted &nbsp;·&nbsp; Notes is always the last column, even on NRR rows (leave Coverage–Yards blank for those)</div>
+          <div><span className="text-slate-300">(Yards):</span> no longer read, the column only keeps Notes in place. Yards come from PFF for the games you chart.</div>
         </div>
         <div className="mt-2 text-amber-400/80">Coverage and Open feed the SAE/open-rate stats. A blank Open still saves as &ldquo;not open&rdquo; (the DB can&apos;t store &ldquo;unknown&rdquo;) and counts toward those numbers, so fill these two columns in from your chart before importing rather than leaving them blank.</div>
         <div className="mt-2 text-slate-600">Example (tab-separated, same as Google Sheets copy):</div>
@@ -242,7 +242,6 @@ export default function BulkGameImport({ gameLabel, onImport, onCancel }: Props)
                   <th className="px-2 py-1 text-left">Open</th>
                   <th className="px-2 py-1 text-left">Tgt</th>
                   <th className="px-2 py-1 text-left">Result</th>
-                  <th className="px-2 py-1 text-left">Yds</th>
                   <th className="px-2 py-1 text-left">Note</th>
                   <th className="px-2 py-1 text-left">Status</th>
                 </tr>
@@ -280,7 +279,6 @@ export default function BulkGameImport({ gameLabel, onImport, onCancel }: Props)
                           : <span className="text-slate-600">—</span>
                         : <span className="text-slate-600">—</span>}
                     </td>
-                    <td className="px-2 py-1 text-slate-300">{pl.yards ?? "—"}</td>
                     <td className="px-2 py-1 text-slate-500 max-w-24 truncate">{pl.play_notes || "—"}</td>
                     <td className="px-2 py-1">
                       {pl.valid

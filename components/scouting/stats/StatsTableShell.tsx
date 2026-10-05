@@ -11,7 +11,7 @@ export interface ColDef {
   key: string;
   label: string;
   group: string;
-  fmt?: "pct" | "pct0" | "count" | "dec1" | "plusMinus" | "name" | "yr";
+  fmt?: "pct" | "pct0" | "count" | "dec1" | "dec2" | "plusMinus" | "name" | "yr";
   sticky?: boolean;
   width?: number;
   /** 1 = higher is better, -1 = lower is better, 0/undefined = no color */
@@ -56,6 +56,7 @@ export function fmtVal(val: number | string | null, f?: ColDef["fmt"]): string {
     case "pct0":      return `${Math.round(val)}%`;
     case "count":     return String(Math.round(val));
     case "dec1":      return val.toFixed(1);
+    case "dec2":      return val.toFixed(2);
     case "plusMinus": return `${val >= 0 ? "+" : ""}${val.toFixed(1)}`;
     case "yr":        return String(Math.round(val));
     default:          return val.toFixed(1);
@@ -192,8 +193,8 @@ export default function StatsTableShell({
         // Raw count columns: show total
         result[c.key] = vals.reduce((s, v) => s + v, 0);
       } else {
-        // Pct / dec1 / plusMinus without a weightBy: fall back to mean
-        result[c.key] = parseFloat((vals.reduce((s, v) => s + v, 0) / vals.length).toFixed(1));
+        // Pct / dec1 / dec2 / plusMinus without a weightBy: fall back to mean
+        result[c.key] = parseFloat((vals.reduce((s, v) => s + v, 0) / vals.length).toFixed(c.fmt === "dec2" ? 2 : 1));
       }
     }
     return result;

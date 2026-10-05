@@ -5,6 +5,8 @@ import { computeTERouteAboveExpected, computeTEBlockAboveExpected } from "../../
 import { computeTERoleFits } from "../../../lib/scouting/roleFitTE";
 import type { Prospect, ScoutingGame, TEPlay, TEPositioning, TELocation, TECoverage } from "../../../lib/types";
 import { roleFitCols, roleFitRow } from "./roleFitCols";
+import { pffCols, pffRow } from "./pffCols";
+import type { PffTotals } from "../../../lib/pff/totals";
 
 interface Props {
   prospects: Prospect[];
@@ -13,6 +15,8 @@ interface Props {
   loading?: boolean;
   draftYearFilter?: number | null;
   onSelectProspect?: (p: Prospect) => void;
+  /** PFF over each prospect's charted games (ScoutingHub). */
+  pffTotals?: Map<string, PffTotals>;
 }
 
 const POSITIONINGS: TEPositioning[] = ["wide", "slot", "inline", "full_back", "running_back", "wing_back"];
@@ -90,9 +94,9 @@ export const TE_STAT_COLS: ColDef[] = [
   { key: "raw_cont_tgt", label: "ContTgt",group: "Raw", fmt: "count", width: 60 },
   { key: "raw_cont_ctch",label: "ContCtch",group:"Raw", fmt: "count", width: 68 },
   { key: "raw_btk",      label: "BTkl",   group: "Raw", fmt: "count", width: 46 },
-  // No YPC column — TEPlay doesn't track yards (unlike WR's route_plays),
-  // so there's no real data to show; a fake 0.0 for every player is worse
-  // than no column at all.
+  // No charted yards: the app never types yards. PFF's are in the PFF groups.
+  // PFF over the charted games
+  ...pffCols("TE"),
 ];
 
 function pct(n: number, d: number): number | null {
@@ -134,7 +138,7 @@ function blkSuccPct(plays: TEPlay[], filter: (p: TEPlay) => boolean): number | n
 
 // Extracted so the Phase I player-comparison tool can compute the same rows
 // for any two TE prospects without duplicating this logic.
-export function buildTEStatRows(prospects: Prospect[], games: ScoutingGame[], tePlays: TEPlay[]): StatRow[] {
+export function buildTEStatRows(prospects: Prospect[], games: ScoutingGame[], tePlays: TEPlay[], pff?: Map<string, PffTotals>): StatRow[] {
     const teSaerMap = computeTERouteAboveExpected(prospects, games, tePlays);
     const teSaebMap = computeTEBlockAboveExpected(prospects, games, tePlays);
     const roleFits = computeTERoleFits(prospects, games, tePlays);
@@ -256,6 +260,7 @@ export function buildTEStatRows(prospects: Prospect[], games: ScoutingGame[], te
           raw_cont_tgt: contTgt.length,
           raw_cont_ctch: contCatch.length,
           raw_btk:      btk,
+          ...pffRow(pff?.get(p.id)),
         } satisfies StatRow;
       });
 }
@@ -266,9 +271,9 @@ const TE_MIN_FILTERS: MinFilterDef[] = [
   { key: "blocks", label: "Blocks" },
 ];
 
-export default function TEStatsTable({ prospects, games, tePlays, loading, draftYearFilter, onSelectProspect }: Props) {
+export default function TEStatsTable({ prospects, games, tePlays, loading, draftYearFilter, onSelectProspect, pffTotals }: Props) {
   const prospectMap = useMemo(() => new Map(prospects.map((p) => [p.id, p])), [prospects]);
-  const rows = useMemo(() => buildTEStatRows(prospects, games, tePlays), [prospects, games, tePlays]);
+  const rows = useMemo(() => buildTEStatRows(prospects, games, tePlays, pffTotals), [prospects, games, tePlays, pffTotals]);
 
   return (
     <StatsTableShell

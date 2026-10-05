@@ -16,8 +16,13 @@ describe("BulkGameImport parseInput — Coverage/Open columns", () => {
     expect(play.was_open).toBe(true);
     expect(play.targeted).toBe(true);
     expect(play.success).toBe(true);
-    expect(play.yards).toBe(12);
     expect(play.valid).toBe(true);
+  });
+
+  it("ignores the Yards column (yards come from PFF) but keeps Notes in its place", () => {
+    const [play] = parseInput("curl\tR\tY\tM\tY\tY\tY\t12\tnice grab");
+    expect(play).not.toHaveProperty("yards");
+    expect(play.play_notes).toBe("nice grab");
   });
 
   it("supports all four coverage shorthand codes", () => {

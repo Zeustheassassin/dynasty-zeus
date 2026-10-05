@@ -38,6 +38,7 @@ export interface ProspectRouteStatsRow {
   total_games: number;
   total_snaps: number;
   total_routes: number;
+  /** Old typed yards (route_plays.yards). The view still returns them; nothing shows them. */
   total_yards: number;
   open_routes: number;
   targets: number;
@@ -47,6 +48,7 @@ export interface ProspectRouteStatsRow {
   contested_catches: number;
   success_rate: number | null;
   target_rate: number | null;
+  /** From the old typed yards, like total_yards; unused. */
   avg_ypc: number | null;
   pct_left: number | null;
   pct_right: number | null;
@@ -573,10 +575,8 @@ export function buildProspectsWithStats(
       drops: v?.drops ?? 0,
       contested: v?.contested ?? 0,
       contested_catches: v?.contested_catches ?? 0,
-      total_yards: v?.total_yards ?? 0,
       success_rate: v?.success_rate ?? null,
       target_rate: v?.target_rate ?? null,
-      avg_ypc: v?.avg_ypc ?? null,
       pct_left: v?.pct_left ?? null,
       pct_right: v?.pct_right ?? null,
       pct_slot: v?.pct_slot ?? null,

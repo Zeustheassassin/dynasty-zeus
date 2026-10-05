@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo } from "react";
 import dynamic from "next/dynamic";
 import type { Prospect, ProspectWithStats, ScoutingGame, RBPlay, QBPlay, TEPlay } from "../../../lib/types";
 import type { LoadPositionPlaysFn } from "../../ScoutingHub";
+import type { PffTotals } from "../../../lib/pff/totals";
 
 const WRStatsTable = dynamic(() => import("./WRStatsTable"), { ssr: false });
 const RBStatsTable = dynamic(() => import("./RBStatsTable"), { ssr: false });
@@ -23,6 +24,8 @@ interface Props {
   draftYearFilter: number | null;
   setDraftYearFilter: (y: number | null) => void;
   onSelectProspect?: (p: Prospect) => void;
+  /** PFF over each prospect's charted games. */
+  pffTotals?: Map<string, PffTotals>;
 }
 
 const POSITION_LABELS: Record<PositionTab, string> = {
@@ -41,7 +44,7 @@ const POSITION_DESCRIPTIONS: Record<PositionTab, string> = {
 
 export default function AnalysisHub({
   prospects, prospectsWithStats, games, rbPlays, qbPlays, tePlays,
-  loadPositionPlays, loading, draftYearFilter, setDraftYearFilter, onSelectProspect,
+  loadPositionPlays, loading, draftYearFilter, setDraftYearFilter, onSelectProspect, pffTotals,
 }: Props) {
   const [posTab, setPosTab] = useState<PositionTab>("WR");
 
@@ -123,6 +126,7 @@ export default function AnalysisHub({
           loading={loading}
           draftYearFilter={draftYearFilter}
           onSelectProspect={onSelectProspect}
+          pffTotals={pffTotals}
         />
       )}
       {posTab === "RB" && (
@@ -133,6 +137,7 @@ export default function AnalysisHub({
           loading={loading}
           draftYearFilter={draftYearFilter}
           onSelectProspect={onSelectProspect}
+          pffTotals={pffTotals}
         />
       )}
       {posTab === "QB" && (
@@ -143,6 +148,7 @@ export default function AnalysisHub({
           loading={loading}
           draftYearFilter={draftYearFilter}
           onSelectProspect={onSelectProspect}
+          pffTotals={pffTotals}
         />
       )}
       {posTab === "TE" && (
@@ -153,6 +159,7 @@ export default function AnalysisHub({
           loading={loading}
           draftYearFilter={draftYearFilter}
           onSelectProspect={onSelectProspect}
+          pffTotals={pffTotals}
         />
       )}
     </div>
