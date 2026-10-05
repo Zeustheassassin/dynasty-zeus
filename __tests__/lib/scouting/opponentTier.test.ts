@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { opponentTier, tierGames } from "@/lib/scouting/opponentTier";
+import { opponentSchool, opponentTier, schoolByExactName, tierGames } from "@/lib/scouting/opponentTier";
 
 describe("opponentTier", () => {
   it("reads team names and the other names they go by", () => {
@@ -50,5 +50,23 @@ describe("tierGames", () => {
     ]);
     expect([...t.byGame]).toEqual([["a", "P4"], ["b", "G5"]]);
     expect([...t.unrecognized]).toEqual([["Mystery U", 2]]);
+  });
+});
+
+describe("opponentSchool / schoolByExactName", () => {
+  it("resolves a charted opponent to CFD's school name, tags and typos allowed", () => {
+    expect(opponentSchool("Miami - CFP")).toBe("Miami");
+    expect(opponentSchool("Flordia State")).toBe("Florida State");
+    expect(opponentSchool("UNC")).toBe("North Carolina");
+    expect(opponentSchool("Mystery U")).toBeNull();
+    expect(opponentSchool(null)).toBeNull();
+  });
+
+  it("matches other sources' names exactly, never by typo distance", () => {
+    expect(schoolByExactName("Miami (FL)")).toBe("Miami");
+    expect(schoolByExactName("Texas")).toBe("Texas");
+    // Two letters from "Mississippi St": a typo match would pick the wrong school.
+    expect(schoolByExactName("Mississippi")).toBeNull();
+    expect(schoolByExactName("")).toBeNull();
   });
 });

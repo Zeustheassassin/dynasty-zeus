@@ -998,6 +998,8 @@ export type RouteType =
   | "flat" | "comeback" | "out" | "corner" | "other";
 export type Alignment = "left" | "right" | "slot" | "backfield";
 export type CoverageType = "man" | "zone" | "double" | "press" | "";
+/** Per-play tag (migration 062): beat press at the release or not. */
+export type PressRelease = "won" | "lost";
 
 export interface Prospect {
   id: string;
@@ -1032,6 +1034,11 @@ export interface Prospect {
    *  (migration 059; lib/scouting/scoreLock.ts). Optional: absent before the
    *  migration, and never sent on insert. */
   ae_score_lock?: AEScoreLock | null;
+  /** PFF link (migration 062; lib/pff/match.ts). Optional: absent before the
+   *  migration, and never sent on insert. Per user, never in shared views. */
+  pff_player_id?: number | null;
+  pff_match_status?: PffPlayerMatchStatus | null;
+  pff_match_note?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -1052,7 +1059,19 @@ export interface ScoutingGame {
   summary_drops: number | null;
   summary_contested: number | null;
   summary_contested_catches: number | null;
+  /** PFF game id of this charted game (migration 062). Optional: absent before the migration. */
+  pff_game_id?: number | null;
+  pff_match_status?: PffGameMatchStatus | null;
+  pff_match_note?: string | null;
 }
+
+// PFF match states (migration 062). auto = linked by the matcher, confirmed =
+// the user's call, review = a doubtful guess (may carry an id), none = the
+// user says there is no PFF counterpart. Games: not_charted = PFF has the game
+// but no row for him; no_match = no game of his team that season fits the
+// opponent; no_player = the prospect isn't linked.
+export type PffPlayerMatchStatus = "auto" | "confirmed" | "review" | "not_found" | "none";
+export type PffGameMatchStatus = "auto" | "confirmed" | "review" | "not_charted" | "no_match" | "no_player" | "none";
 
 export interface RoutePlay {
   id: string;
@@ -1070,6 +1089,14 @@ export interface RoutePlay {
   play_notes: string;
   no_route_run: boolean;
   created_at: string;
+  /** Situation tags (migration 062): NULL = charted before the tags existed.
+   *  Optional: absent before the migration. See lib/scouting/playEra.ts. */
+  red_zone?: boolean | null;
+  third_fourth_down?: boolean | null;
+  short_yardage?: boolean | null;
+  garbage_time?: boolean | null;
+  press_release?: PressRelease | null;
+  broken_tackle_after_catch?: boolean | null;
 }
 
 export interface RouteStat { count: number; open: number; targets: number; catches: number }
@@ -1079,6 +1106,7 @@ export interface CoverageStat { count: number; open: number; catches: number }
 export type RBFormation  = "gun" | "pistol" | "under_center";
 export type RBRunType    = "outside_man_gap" | "inside_man_gap" | "outside_zone" | "inside_zone" | "pass_block" | "run_block" | "decoy" | "route";
 export type RBRouteType  = "mid_curl" | "flats" | "big_boy_route";
+export type RBPassProLoss = "wrong_man" | "beaten";
 
 /** Full-career per-run-type success aggregate (prospect_rb_stats.run_type_stats_raw). */
 export interface RBRunTypeStat { count: number; success: number }
@@ -1101,6 +1129,17 @@ export interface RBPlay {
   route_type: RBRouteType | null;
   was_open: boolean | null;
   created_at: string;
+  /** Situation tags (migration 062): NULL = charted before the tags existed.
+   *  Optional: absent before the migration. See lib/scouting/playEra.ts. */
+  red_zone?: boolean | null;
+  third_fourth_down?: boolean | null;
+  short_yardage?: boolean | null;
+  garbage_time?: boolean | null;
+  hit_behind_line?: boolean | null;
+  missed_read?: boolean | null;
+  pass_pro_loss?: RBPassProLoss | null;
+  broken_tackle_after_catch?: boolean | null;
+  caught_from_behind?: boolean | null;
 }
 
 // ── QB Scouting ─────────────────────────────────────────────
@@ -1121,6 +1160,8 @@ export type QBPlatformSide = "strong_side" | "cross_body";
 export type QBPressure   = "clean" | "mid" | "backside" | "front_side";
 export type QBPressureHandling = "step_up" | "bail_front_side" | "bail_backside";
 export type QBTouch      = "correct" | "incorrect";
+export type QBReleaseTiming = "early" | "on_time" | "late";
+export type QBSackFault  = "qb" | "line" | "coverage";
 
 /** Full-career per-depth-zone (short/mid/deep) accuracy aggregate (prospect_qb_stats.depth_zone_stats_raw). */
 export interface QBDepthZoneStat { count: number; onTarget: number }
@@ -1146,6 +1187,20 @@ export interface QBPlay {
   touch: QBTouch | null;
   play_notes: string | null;
   created_at: string;
+  /** Situation tags (migration 062): NULL = charted before the tags existed.
+   *  Optional: absent before the migration. See lib/scouting/playEra.ts. */
+  red_zone?: boolean | null;
+  third_fourth_down?: boolean | null;
+  short_yardage?: boolean | null;
+  garbage_time?: boolean | null;
+  play_action?: boolean | null;
+  tight_window?: boolean | null;
+  release_timing?: QBReleaseTiming | null;
+  better_option_missed?: boolean | null;
+  sack_fault?: QBSackFault | null;
+  run_success?: boolean | null;
+  run_broken_tackle?: boolean | null;
+  run_explosive?: boolean | null;
 }
 
 // ── TE Scouting ─────────────────────────────────────────────
@@ -1154,6 +1209,7 @@ export type TEPositioning = "wide" | "slot" | "inline" | "full_back" | "running_
 export type TEPlayType    = "run_block" | "pass_block" | "route_run" | "decoy";
 export type TEBlockType   = "movement" | "inline";
 export type TECoverage    = "man" | "zone" | "press" | "double";
+export type TEBlockedDefender = "dl" | "lb" | "db";
 
 /** Full-career per-block-type success aggregate (prospect_te_stats.block_stats_raw). */
 export interface TEBlockStat { count: number; success: number }
@@ -1178,6 +1234,15 @@ export interface TEPlay {
   broken_tackle: boolean;
   play_notes: string | null;
   created_at: string;
+  /** Situation tags (migration 062): NULL = charted before the tags existed.
+   *  Optional: absent before the migration. See lib/scouting/playEra.ts. */
+  red_zone?: boolean | null;
+  third_fourth_down?: boolean | null;
+  short_yardage?: boolean | null;
+  garbage_time?: boolean | null;
+  blocked_defender?: TEBlockedDefender | null;
+  press_release?: PressRelease | null;
+  chipped_before_route?: boolean | null;
 }
 
 // One metric's part of a prospect's AE Score (lib/scouting/aeComposite.ts).

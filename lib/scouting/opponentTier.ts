@@ -78,6 +78,19 @@ function findTeam(opponent: string): (typeof OPPONENT_TEAMS)[number] | null {
   return best && !tie ? best : null;
 }
 
+/** The school (CFD's name) a charted opponent resolves to: tags dropped,
+ *  aliases and small typos allowed. null when the name isn't recognized. */
+export function opponentSchool(opponent: string | null | undefined): string | null {
+  return opponent ? findTeam(opponent)?.s ?? null : null;
+}
+
+/** Exact names and aliases only, no typo matching: for clean names from
+ *  another source (PFF), where a near-miss could be a different school
+ *  ("Mississippi" is two letters from "Mississippi St"). */
+export function schoolByExactName(name: string | null | undefined): string | null {
+  return name ? byName.get(norm(name))?.s ?? null : null;
+}
+
 /** The opponent's tier in that season; null when the name isn't recognized. */
 export function opponentTier(opponent: string | null | undefined, season: number): OpponentTier | null {
   if (!opponent) return null;

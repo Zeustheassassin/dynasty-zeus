@@ -167,8 +167,9 @@ const AnalysisHub = dynamic(() => import("./scouting/stats/AnalysisHub"), { ssr:
 const CompareProspectsTab = dynamic(() => import("./scouting/stats/CompareProspectsTab"), { ssr: false });
 const RecruitsTab = dynamic(() => import("./scouting/RecruitsTab"), { ssr: false });
 const RecruitStatsTab = dynamic(() => import("./scouting/RecruitStatsTab"), { ssr: false });
+const PffLinksTab = dynamic(() => import("./scouting/pff/PffLinksTab"), { ssr: false });
 
-type HubTab = "prospects" | "big_board" | "games_log" | "analysis" | "compare" | "recruits" | "recruit_stats";
+type HubTab = "prospects" | "big_board" | "games_log" | "analysis" | "compare" | "recruits" | "recruit_stats" | "pff_links";
 type PositionTab = "WR" | "RB" | "QB" | "TE";
 
 const POSITIONS: PositionTab[] = ["QB", "RB", "WR", "TE"];
@@ -491,6 +492,7 @@ export default function ScoutingHub() {
     { key: "compare",   label: "Compare" },
     { key: "recruits",  label: "Recruits" },
     { key: "recruit_stats", label: "Recruit Statistics" },
+    { key: "pff_links", label: "PFF Links" },
   ];
 
   const positionTabs: PositionTab[] = ["QB", "RB", "WR", "TE"];
@@ -586,7 +588,7 @@ export default function ScoutingHub() {
             </div>
           </div>
 
-          {/* Main tab bar. Six tabs are wider than a phone: the bar scrolls
+          {/* Main tab bar. The tabs are wider than a phone: the bar scrolls
               sideways there and centres only when it fits. (justify-center on an
               overflowing flex row pushed "Prospects" off the left edge, out of
               reach, and widened the whole page on the right.) */}
@@ -714,6 +716,10 @@ export default function ScoutingHub() {
 
         {tab === "recruit_stats" && (
           <RecruitStatsTab />
+        )}
+
+        {tab === "pff_links" && (
+          <PffLinksTab />
         )}
       </div>
     </div>

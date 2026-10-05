@@ -123,10 +123,22 @@ export function useChartingState(prospect: Prospect, options: Options) {
     if (updates.season_year !== undefined) cleaned.season_year = updates.season_year;
     if (updates.game_type !== undefined) cleaned.game_type = updates.game_type;
     if (Object.keys(cleaned).length === 0) return;
+    const before = games.find((g) => g.id === id);
+    const movedGame = before != null && (
+      (cleaned.opponent !== undefined && cleaned.opponent !== before.opponent)
+      || (cleaned.season_year !== undefined && cleaned.season_year !== before.season_year));
     const { error } = await supabase.from("scouting_games").update(cleaned).eq("id", id);
     if (error) { log.error("scouting_games update failed", { err: error.message }); return; }
     setGames((prev) => prev.map((g) => g.id === id ? { ...g, ...cleaned } as ScoutingGame : g));
     markDataDirty();
+    // A new season or opponent makes the game's PFF match stale (migration
+    // 062): clear it so the next PFF Links run matches it again. Its own
+    // request, so a database without 062 only logs a warning here.
+    if (movedGame) {
+      const { error: pffErr } = await supabase.from("scouting_games")
+        .update({ pff_game_id: null, pff_match_status: null, pff_match_note: null }).eq("id", id);
+      if (pffErr) log.warn("scouting_games PFF link reset failed", { err: pffErr.message });
+    }
   }
 
   async function saveBio() {
