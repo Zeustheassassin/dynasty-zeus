@@ -19,6 +19,9 @@ import type {
 import { ROUTE_TYPES } from "../shared/chartingConstants";
 import ChartingBoard, { type ChartingBoardConfig } from "../shared/ChartingBoard";
 import { useChartingState } from "../shared/hooks/useChartingState";
+import { usePlayTags } from "../shared/hooks/usePlayTags";
+import PlayTagControls, { PlayTagBadges } from "../shared/PlayTagControls";
+import type { PlayFacts } from "../../../lib/scouting/playTags";
 import { computeSAEForPlays, computeCoreSAEForPlays, type WRDifficultyModel } from "../../../lib/scouting/aggregateMerge";
 import { usePffGameLog } from "../pff/usePffGameLog";
 import { PffLogBar, PffLogCells, PffLogFooter, PffLogHeaders } from "../pff/PffGameLogColumns";
@@ -115,6 +118,16 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
     () => plays.filter((p) => p.game_id === selectedGameId),
     [plays, selectedGameId],
   );
+
+  // Per-play tags (migration 062): new plays write all of them, an edit of an
+  // older play writes none. Release vs press needs a pick on every press
+  // route; broken tackle shows on a catch.
+  const tags = usePlayTags("WR", selectedGameId, gamePlays);
+  const tagFacts: PlayFacts = {
+    press: !noRouteRun && coverage === "press",
+    catch: !noRouteRun && targeted && playOutcome === "caught",
+  };
+  const tagsMissing = tags.missing(tagFacts).length > 0;
 
   const stats = useMemo(() => {
     const routePlays  = plays.filter((p) => !p.no_route_run);
@@ -246,7 +259,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
   }, [plays]);
 
   async function logPlay() {
-    if (!selectedGameId) return;
+    if (!selectedGameId || tagsMissing) return;
     setPlayError(null); setSavingPlay(true);
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setPlayError("Not logged in."); setSavingPlay(false); return; }
@@ -260,17 +273,21 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
       targeted: noRouteRun ? false : targeted,
       success: (!noRouteRun && targeted) ? (playOutcome === "caught" ? true : playOutcome === "drop" ? false : null) : null,
       contested: (!noRouteRun && targeted) ? contested : false,
+      ...tags.payload(tagFacts),
       play_notes: playNotes,
     }).select().single();
     if (error) { setPlayError(error.message); }
     else if (data) {
       setPlays((prev) => [...prev, data as RoutePlay]);
       setWasOpen(false); setTargeted(false); setPlayOutcome(null); setContested(false); setPlayNotes("");
+      tags.reset();
       cs.markDataDirty();
     }
     setSavingPlay(false);
   }
 
+  // The two paste imports enter whole games and write no tag columns, so their
+  // plays stay untagged (judged like the 2026-04-30 import).
   async function handleBulkImport(parsedPlays: { route_type: RouteType; alignment: Alignment; on_line: boolean; coverage: CoverageType; was_open: boolean; targeted: boolean; success: boolean | null; play_notes: string; no_route_run?: boolean }[]) {
     if (!selectedGameId) return;
     const { data: { user } } = await supabase.auth.getUser();
@@ -307,9 +324,11 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
     setEditingPlayId(null); setNoRouteRun(false); setRouteType("curl"); setAlignment("right");
     setOnLine(true); setCoverage(""); setWasOpen(false); setTargeted(false);
     setPlayOutcome(null); setContested(false); setPlayNotes("");
+    tags.reset();
   }
 
   function startEditPlay(pl: RoutePlay) {
+    tags.startEdit(pl);
     setEditingPlayId(pl.id); setNoRouteRun(pl.no_route_run); setRouteType(pl.route_type);
     setAlignment(pl.alignment); setOnLine(pl.on_line); setCoverage(pl.coverage ?? "");
     setWasOpen(pl.was_open); setTargeted(pl.targeted);
@@ -318,7 +337,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
   }
 
   async function saveEditedPlay() {
-    if (!editingPlayId) return;
+    if (!editingPlayId || tagsMissing) return;
     setPlayError(null); setSavingPlay(true);
     const { data, error } = await supabase.from("route_plays").update({
       no_route_run: noRouteRun, route_type: noRouteRun ? "other" : routeType,
@@ -326,6 +345,8 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
       was_open: noRouteRun ? false : wasOpen, targeted: noRouteRun ? false : targeted,
       success: (!noRouteRun && targeted) ? (playOutcome === "caught" ? true : playOutcome === "drop" ? false : null) : null,
       contested: (!noRouteRun && targeted) ? contested : false,
+      // No tag columns at all when the play predates the tags.
+      ...tags.payload(tagFacts),
       play_notes: playNotes,
     }).eq("id", editingPlayId).select().single();
     if (error) { setPlayError(error.message); }
@@ -665,6 +686,8 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
               </div>
             </div>
 
+            <PlayTagControls tags={tags} facts={tagFacts} part="situation" accent="blue" />
+
             <div>
               <button onClick={() => setNoRouteRun((v) => !v)}
                 className={`w-full py-2 rounded text-sm font-semibold transition ${noRouteRun ? "bg-amber-700 text-white ring-2 ring-amber-500" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
@@ -770,6 +793,8 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
               </div>
             )}
 
+            <PlayTagControls tags={tags} facts={tagFacts} part="play" accent="blue" />
+
             {editingPlayId && (
               <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-900/30 border border-amber-700/50 rounded text-xs text-amber-300">
                 <span>✎</span><span>Editing play — make changes above then save</span>
@@ -780,12 +805,12 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
               <input className="flex-1 px-3 py-2 bg-slate-800 border border-slate-700 rounded text-white text-sm placeholder-slate-500 focus:outline-none focus:border-blue-500"
                 placeholder="Play note (optional)" value={playNotes} onChange={(e) => setPlayNotes(e.target.value)} />
               {editingPlayId ? (
-                <button onClick={saveEditedPlay} disabled={savingPlay || (!noRouteRun && targeted && playOutcome === null)}
+                <button onClick={saveEditedPlay} disabled={savingPlay || (!noRouteRun && targeted && playOutcome === null) || tagsMissing}
                   className="px-5 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm rounded font-medium transition whitespace-nowrap">
                   {savingPlay ? "…" : "Save Edit"}
                 </button>
               ) : (
-                <button onClick={logPlay} disabled={savingPlay || (!noRouteRun && targeted && playOutcome === null)}
+                <button onClick={logPlay} disabled={savingPlay || (!noRouteRun && targeted && playOutcome === null) || tagsMissing}
                   className="px-5 py-2 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white text-sm rounded font-medium transition">
                   {savingPlay ? "…" : "Log Play"}
                 </button>
@@ -826,6 +851,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
                           : pl.success === false ? <span className="text-red-400" title="Targeted: drop">Tgt ✗</span>
                           : <span className="text-slate-400" title="Targeted: incomplete">Tgt inc</span>
                       ) : <span className="text-slate-600" title="Not targeted">Not Tgt</span>)}
+                      <PlayTagBadges play={pl} position="WR" />
                       {pl.play_notes && <span className="text-slate-500 truncate">{pl.play_notes}</span>}
                       <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
                         <button onClick={() => editingPlayId === pl.id ? resetForm() : startEditPlay(pl)}

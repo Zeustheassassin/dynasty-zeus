@@ -10,6 +10,9 @@ import { usePffGameLog } from "../pff/usePffGameLog";
 import { PffLogBar, PffLogCells, PffLogFooter, PffLogHeaders } from "../pff/PffGameLogColumns";
 import type { ChartingBoardConfig } from "../shared/ChartingBoard";
 import { useChartingState } from "../shared/hooks/useChartingState";
+import { usePlayTags } from "../shared/hooks/usePlayTags";
+import PlayTagControls, { PlayTagBadges } from "../shared/PlayTagControls";
+import type { PlayFacts } from "../../../lib/scouting/playTags";
 import QBPlayerCharts from "./QBPlayerCharts";
 import { buildQBBaselines, resolveBaselines, computeQBAAEForPlays } from "../../../lib/scouting/aboveExpected";
 import type {
@@ -145,6 +148,9 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
   }, []);
 
   const gamePlays    = useMemo(() => plays.filter((p) => p.game_id === selectedGameId), [plays, selectedGameId]);
+  // Per-play tags (migration 062): new plays write all of them, an edit of an
+  // older play writes none.
+  const tags = usePlayTags("QB", selectedGameId, gamePlays);
 
   // Header + games-log-footer stats. The full Overview computation now lives
   // inside QBOverviewPanel; this minimal memo only keeps what the surrounding
@@ -213,6 +219,15 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
   // don't have a meaningful platform read.
   const needPlatformFields = needThrowFields;
   const needPlatformSide = needPlatformFields && platform === "on_the_run";
+  // Which tags apply: play action / better option on every dropback, tight
+  // window / release on throws, sack fault on sacks, run result on designed
+  // runs and scrambles.
+  const tagFacts: PlayFacts = {
+    dropback: needPassFields,
+    throw: needThrowFields,
+    sack: needPassFields && timing === "sack",
+    run: playType === "run" || (needPassFields && timing === "scramble"),
+  };
   const canLog =
     !savingPlay &&
     selectedGameId !== null &&
@@ -221,10 +236,12 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
     (!needPressureFields || pressure !== null) &&
     (!needPressureHandling || pressureHandling !== null) &&
     (!needPlatformFields || platform !== null) &&
-    (!needPlatformSide || platformSide !== null);
+    (!needPlatformSide || platformSide !== null) &&
+    tags.missing(tagFacts).length === 0;
 
   function resetForm() {
     setEditingPlayId(null);
+    tags.reset();
     setTiming(null);
     setAccuracy(null);
     setCompletion(null);
@@ -243,6 +260,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
 
   function startEditPlay(pl: QBPlay) {
     setEditingPlayId(pl.id);
+    tags.startEdit(pl);
     setSnapPos(pl.snap_position);
     setPlayType(pl.play_type);
     setTiming(pl.timing);
@@ -342,6 +360,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
       pressure:           isPass  ? pressure : null,
       pressure_handling:  isPass && pressure && pressure !== "clean" ? pressureHandling : null,
       touch:              isThrow ? touch : null,
+      ...tags.payload(tagFacts),
       play_notes: playNotes || null,
     }).select().single();
 
@@ -376,6 +395,8 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
       pressure:           isPass  ? pressure : null,
       pressure_handling:  isPass && pressure && pressure !== "clean" ? pressureHandling : null,
       touch:              isThrow ? touch : null,
+      // No tag columns at all when the play predates the tags.
+      ...tags.payload(tagFacts),
       play_notes: playNotes || null,
     }).eq("id", editingPlayId).select().single();
     if (error) { setPlayError(error.message); }
@@ -476,6 +497,8 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
               Logging: <span className="text-white">{sg.season_year} vs {sg.opponent}</span>
               <span className="ml-2 text-blue-400 text-xs">{gamePlays.length} plays</span>
             </div>
+
+            <PlayTagControls tags={tags} facts={tagFacts} part="situation" accent="blue" />
 
             {/* 1. Snap Position */}
             <div>
@@ -740,6 +763,8 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
               </div>
             )}
 
+            <PlayTagControls tags={tags} facts={tagFacts} part="play" accent="blue" />
+
             {/* Notes + Log / Save */}
             {editingPlayId && (
               <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-900/30 border border-amber-700/50 rounded text-xs text-amber-300">
@@ -810,6 +835,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
                       {pl.depth_zone && <span className="text-blue-300">{DEPTH_SHORT[pl.depth_zone]}</span>}
                       {pl.route_type && <span className="text-slate-300 capitalize">{pl.route_type}</span>}
                       {pl.coverage && <span className="text-purple-400 capitalize">{pl.coverage}</span>}
+                      <PlayTagBadges play={pl} position="QB" />
                       {pl.play_notes && <span className="text-slate-500 truncate">{pl.play_notes}</span>}
                       <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
                         <button

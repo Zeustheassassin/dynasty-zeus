@@ -11,6 +11,9 @@ import { usePffGameLog } from "../pff/usePffGameLog";
 import { PffLogBar, PffLogCells, PffLogFooter, PffLogHeaders } from "../pff/PffGameLogColumns";
 import type { ChartingBoardConfig } from "../shared/ChartingBoard";
 import { useChartingState } from "../shared/hooks/useChartingState";
+import { usePlayTags } from "../shared/hooks/usePlayTags";
+import PlayTagControls, { PlayTagBadges } from "../shared/PlayTagControls";
+import type { PlayFacts } from "../../../lib/scouting/playTags";
 import { pct } from "../shared/chartingTypes";
 import RBPlayerCharts from "./RBPlayerCharts";
 import { buildRBBaselines, computeRBAboveExpectedForPlays } from "../../../lib/scouting/aboveExpected";
@@ -189,6 +192,20 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
 
   const gamePlays = useMemo(() => plays.filter((p) => p.game_id === selectedGameId), [plays, selectedGameId]);
 
+  // Per-play tags (migration 062): new plays write all of them, an edit of an
+  // older play writes none. Hit behind the line / missed read on carries,
+  // the loss reason on a failed pass block, broken tackle on a catch, caught
+  // from behind on an explosive carry.
+  const tags = usePlayTags("RB", selectedGameId, gamePlays);
+  const isCarry = runType !== "pass_block" && runType !== "run_block" && runType !== "decoy" && runType !== "route";
+  const tagFacts: PlayFacts = {
+    run: isCarry,
+    explosiveRun: isCarry && explosivePlay,
+    passProLoss: runType === "pass_block" && success === false,
+    catch: runType === "route" && rbTargeted && rbOutcome === "caught",
+  };
+  const tagsMissing = tags.missing(tagFacts).length > 0;
+
   // ── Aggregate stats ───────────────────────────────────────────
   const stats = useMemo(() => {
     const runPlays = plays.filter(isRunPlay);
@@ -306,6 +323,7 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
 
   function resetPlayForm() {
     setEditingPlayId(null);
+    tags.reset();
     setFormation("gun");
     setRunType("outside_zone");
     setSuccess(null);
@@ -329,6 +347,7 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
     const isBlockPlay = runType === "pass_block" || runType === "run_block";
     // decoy needs no success; everything else does
     if (!isRoute && !isDecoy && success === null) return;
+    if (tagsMissing) return;
     setPlayError(null);
     setSavingPlay(true);
     const { data: { user } } = await supabase.auth.getUser();
@@ -346,6 +365,7 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
       broken_tackle: (isRoute || isBlockPlay || isDecoy) ? false : brokenTackle,
       explosive_play: (isRoute || isBlockPlay || isDecoy) ? false : explosivePlay,
       run_stuff: (isRoute || isBlockPlay || isDecoy) ? false : runStuff,
+      ...tags.payload(tagFacts),
       play_notes: playNotes || null,
     }).select().single();
     if (error) { setPlayError(error.message); }
@@ -359,6 +379,7 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
 
   function startEditPlay(pl: RBPlay) {
     setEditingPlayId(pl.id);
+    tags.startEdit(pl);
     setFormation(pl.formation);
     setRunType(pl.run_type);
     setSuccess(pl.run_type !== "route" ? pl.success : null);
@@ -385,6 +406,7 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
     const isDecoy = runType === "decoy";
     const isBlockPlay = runType === "pass_block" || runType === "run_block";
     if (!isRoute && !isDecoy && success === null) return;
+    if (tagsMissing) return;
     setPlayError(null);
     setSavingPlay(true);
     const { data, error } = await supabase.from("rb_plays").update({
@@ -399,6 +421,8 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
       broken_tackle: (isRoute || isBlockPlay || isDecoy) ? false : brokenTackle,
       explosive_play: (isRoute || isBlockPlay || isDecoy) ? false : explosivePlay,
       run_stuff: (isRoute || isBlockPlay || isDecoy) ? false : runStuff,
+      // No tag columns at all when the play predates the tags.
+      ...tags.payload(tagFacts),
       play_notes: playNotes || null,
     }).eq("id", editingPlayId).select().single();
     if (error) { setPlayError(error.message); }
@@ -668,6 +692,8 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
               <span className="ml-2 text-green-400 text-xs">{gamePlays.length} plays</span>
             </div>
 
+            <PlayTagControls tags={tags} facts={tagFacts} part="situation" accent="green" />
+
             {/* Formation */}
             <div>
               <div className="text-xs text-slate-500 mb-2">Formation</div>
@@ -886,6 +912,8 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
               </>
             )}
 
+            <PlayTagControls tags={tags} facts={tagFacts} part="play" accent="green" />
+
             {/* Notes + log */}
             {editingPlayId && (
               <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-900/30 border border-amber-700/50 rounded text-xs text-amber-300">
@@ -899,13 +927,13 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
                 placeholder="Play note (optional)" value={playNotes} onChange={(e) => setPlayNotes(e.target.value)} />
               {editingPlayId ? (
                 <button onClick={saveEditedPlay}
-                  disabled={savingPlay || (runType !== "route" && runType !== "decoy" && success === null) || (runType === "route" && rbTargeted && rbOutcome === null)}
+                  disabled={savingPlay || (runType !== "route" && runType !== "decoy" && success === null) || (runType === "route" && rbTargeted && rbOutcome === null) || tagsMissing}
                   className="px-5 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm rounded font-medium transition whitespace-nowrap">
                   {savingPlay ? "…" : "Save Edit"}
                 </button>
               ) : (
                 <button onClick={logPlay}
-                  disabled={savingPlay || (runType !== "route" && runType !== "decoy" && success === null) || (runType === "route" && rbTargeted && rbOutcome === null)}
+                  disabled={savingPlay || (runType !== "route" && runType !== "decoy" && success === null) || (runType === "route" && rbTargeted && rbOutcome === null) || tagsMissing}
                   className="px-5 py-2 bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white text-sm rounded font-medium transition">
                   {savingPlay ? "…" : "Log Play"}
                 </button>
@@ -960,6 +988,7 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
                             {pl.run_stuff && <span className="text-red-300">STF</span>}
                           </>
                         )}
+                        <PlayTagBadges play={pl} position="RB" />
                         {pl.play_notes && <span className="text-slate-500 truncate">{pl.play_notes}</span>}
                         <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
                           <button

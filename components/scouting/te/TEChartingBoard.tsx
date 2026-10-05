@@ -24,6 +24,9 @@ import ChartingBoard, { type ChartingBoardConfig } from "../shared/ChartingBoard
 import { usePffGameLog } from "../pff/usePffGameLog";
 import { PffLogBar, PffLogCells, PffLogFooter, PffLogHeaders } from "../pff/PffGameLogColumns";
 import { useChartingState } from "../shared/hooks/useChartingState";
+import { usePlayTags } from "../shared/hooks/usePlayTags";
+import PlayTagControls, { PlayTagBadges } from "../shared/PlayTagControls";
+import type { PlayFacts } from "../../../lib/scouting/playTags";
 import TEPlayerCharts from "./TEPlayerCharts";
 import {
   buildTERouteBaselines, computeTERouteAboveExpectedForPlays,
@@ -128,6 +131,17 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
     () => plays.filter((p) => p.game_id === selectedGameId),
     [plays, selectedGameId],
   );
+
+  // Per-play tags (migration 062): new plays write all of them, an edit of an
+  // older play writes none. Who he blocked on block reps (DL pre-selected),
+  // release vs press on press routes, chipped on routes.
+  const tags = usePlayTags("TE", selectedGameId, gamePlays);
+  const tagFacts: PlayFacts = {
+    block: playType === "run_block" || playType === "pass_block",
+    route: playType === "route_run",
+    press: playType === "route_run" && coverage === "press",
+  };
+  const tagsMissing = tags.missing(tagFacts).length > 0;
 
   const stats = useMemo(() => {
     const routePlays = plays.filter((p) => p.play_type === "route_run");
@@ -265,7 +279,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
     return map;
   }, [plays, games, teBlockBaselines]);
 
-  const canLog = useMemo(() => {
+  const playReady = useMemo(() => {
     if (!selectedGameId) return false;
     if (playType === "decoy") return true;
     if (playType === "run_block" || playType === "pass_block") return blockType !== null && blockSuccess !== null;
@@ -276,9 +290,11 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
     }
     return true;
   }, [selectedGameId, playType, blockType, blockSuccess, coverage, routeType, wasOpen, targeted, targetOutcome, contestedTarget, contestedCatch]);
+  const canLog = playReady && !tagsMissing;
 
   function resetPlayForm() {
     setEditingPlayId(null);
+    tags.reset();
     setBlockType(null); setBlockSuccess(null);
     setCoverage(null); setRouteType(null); setWasOpen(null); setTargeted(null);
     setTargetOutcome(null); setContestedTarget(null); setContestedCatch(null);
@@ -287,6 +303,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
 
   function startEditPlay(pl: TEPlay) {
     setEditingPlayId(pl.id);
+    tags.startEdit(pl);
     setLocation(pl.location);
     setPositioning(pl.positioning);
     setPlayType(pl.play_type);
@@ -319,6 +336,8 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
       contested_target: isTargeted ? contestedTarget : null,
       contested_catch: isTargeted && contestedTarget ? contestedCatch : null,
       broken_tackle: isTargeted && targetOutcome === "caught" ? brokenTackle : false,
+      // No tag columns at all when the play predates the tags.
+      ...tags.payload(tagFacts),
       play_notes: playNotes || null,
     }).eq("id", editingPlayId).select().single();
     if (error) { setPlayError(error.message); }
@@ -345,6 +364,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
       contested_target: isTargeted ? contestedTarget : null,
       contested_catch: isTargeted && contestedTarget ? contestedCatch : null,
       broken_tackle: isTargeted && targetOutcome === "caught" ? brokenTackle : false,
+      ...tags.payload(tagFacts),
       play_notes: playNotes || null,
     }).select().single();
     if (error) { setPlayError(error.message); }
@@ -653,6 +673,8 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
               <span className="ml-2 text-green-400 text-xs">{gamePlays.length} plays</span>
             </div>
 
+            <PlayTagControls tags={tags} facts={tagFacts} part="situation" accent="green" />
+
             <div>
               <div className="text-xs text-slate-500 mb-2">Location</div>
               <div className="flex gap-2">
@@ -835,6 +857,8 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
               </div>
             )}
 
+            <PlayTagControls tags={tags} facts={tagFacts} part="play" accent="green" />
+
             {editingPlayId && (
               <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-900/30 border border-amber-700/50 rounded text-xs text-amber-300">
                 <span>✎</span><span>Editing play — make changes above then save</span>
@@ -891,6 +915,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
                           </>
                         )}
                         {pl.broken_tackle && <span className="text-amber-400">BT</span>}
+                        <PlayTagBadges play={pl} position="TE" />
                         {pl.play_notes && <span className="text-slate-500 truncate">{pl.play_notes}</span>}
                         <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
                           <button onClick={() => editingPlayId === pl.id ? resetPlayForm() : startEditPlay(pl)}
