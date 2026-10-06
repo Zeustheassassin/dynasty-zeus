@@ -1,40 +1,23 @@
 "use client";
 import { useState, useMemo, useRef, useEffect } from "react";
-import type { ProspectWithStats, Prospect, RouteType, ScoutingGame, RBPlay, QBPlay, TEPlay, AESample, AEScoreLock, ScoreComponent } from "../../lib/types";
+import type { ProspectWithStats, Prospect, RouteType, ScoutingGame, RBPlay, QBPlay, TEPlay, AEScoreLock } from "../../lib/types";
 import { getLocalStorageItem, setLocalStorageItem } from "@/lib/hooks/useLocalStorage";
-import {
-  computeRBAboveExpectedSamples,
-  computeQBAboveExpectedSamples,
-  computeTERouteAboveExpectedSamples,
-  computeTEBlockAboveExpectedSamples,
-  computeQBThrowSliceAAE,
-  computeRBRunSliceSRAE,
-  aeValues,
-  type AESlice,
-} from "../../lib/scouting/aboveExpected";
 import {
   buildAEComposite, MIN_POOL,
   QB_FULL_TRUST, RB_FULL_TRUST, WR_ALL_FULL_TRUST, WR_CORE_FULL_TRUST, POSITION_BASELINE,
-  type AEComposite, type CompositePos,
 } from "../../lib/scouting/aeComposite";
 import {
-  scoreDynasty, PRIME_END_AGE, REFERENCE_ROOKIE_AGE,
-  DEFAULT_DYNASTY_WEIGHTS, WEIGHT_MIN, WEIGHT_MAX, WEIGHT_STEP,
+  PRIME_END_AGE, REFERENCE_ROOKIE_AGE,
+  WEIGHT_MIN, WEIGHT_MAX, WEIGHT_STEP,
   type DynastyBreakdown, type DynastyWeights,
 } from "../../lib/scouting/dynastyScore";
-import { prospectAgeAt, rookieSeasonAge, parseHeightInches, type ProspectAge } from "../../lib/scouting/prospectAge";
+import { type ProspectAge } from "../../lib/scouting/prospectAge";
 import { DRAFT_ROUND_CHOICES, UNDRAFTED_ROUND, draftRoundLabel } from "../../lib/draftRound";
-import { useRecruitIndex } from "../../hooks/useRecruitIndex";
-import { tierGames, type OpponentTier } from "../../lib/scouting/opponentTier";
-import { applyOpponentStrength, type OpponentAdjusted } from "../../lib/scouting/opponentAdjust";
-import { classDraftedBy, makeLock, activeLock } from "../../lib/scouting/scoreLock";
-import { alignmentPenalty } from "../../lib/scouting/alignmentPenalty";
-import { buildWRGameSplits, buildWRTierSplits, type ProspectGameRouteCellsRow } from "../../lib/scouting/aggregateMerge";
-import { gameCovariates, resolveGameContexts } from "../../lib/scouting/gameContext";
-import { contextAdjust, type HeadlineKey, type MetricContext } from "../../lib/scouting/contextGrading";
+import { classDraftedBy, makeLock } from "../../lib/scouting/scoreLock";
+import type { ProspectGameRouteCellsRow } from "../../lib/scouting/aggregateMerge";
+import type { MetricContext } from "../../lib/scouting/contextGrading";
 import { SEASON_DECAY } from "../../lib/scouting/seasonWeight";
 import { POS_COLOR } from "../../lib/uiTheme";
-import { computeRoleFits } from "../../lib/scouting/roleFits";
 import { matchFor, roleFitTooltip, roleLabel, versatileRuleText, type RoleFit } from "../../lib/scouting/roleFit";
 import {
   parseGrade, formatGrade, gradeColor, gradeDelta, gradeTier, gradeTierRange,
@@ -42,31 +25,26 @@ import {
 } from "../../lib/scouting/prospectGrade";
 import { fmtVal, type ColDef } from "./stats/StatsTableShell";
 import { pffCols, PFF_ALL_TAB_KEY, PFF_BOARD_KEYS } from "./stats/pffCols";
-import { pffValues, type PffTotals, type PffValues } from "../../lib/pff/totals";
+import type { PffTotals, PffValues } from "../../lib/pff/totals";
 import { pffPos } from "../../lib/pff/stats";
-import { buildComponents, EMPTY_GRADING_DATA, type GradingData } from "../../lib/scouting/aeComponents";
-import { tagStatReps } from "../../lib/scouting/tagStats";
+import { EMPTY_GRADING_DATA, type GradingData } from "../../lib/scouting/aeComponents";
 import { traitAverages, traitComponents, traitsFor, TRAIT_WEIGHT, uncoveredTraits, type TraitAverage } from "../../lib/scouting/traits";
+import {
+  COMPOSITE_HEADLINE, COMPOSITE_POS, isCompositePos, liveScoresFrom, scoreViewsFrom, dynastyScores, aeScoreMissingReason,
+  type AEKey, type AEMaps, type ScoreView, type ScoreViewMode,
+} from "../../lib/scouting/prospectScores";
+import { useProspectScores, useDynastyWeights } from "./shared/hooks/useProspectScores";
 
 type LoadPositionPlaysFn = (pos: "RB" | "QB" | "TE") => void;
 
-// The composite's headline metric keys → the context policy's (contextGrading.ts).
-const COMPOSITE_HEADLINE: Record<string, HeadlineKey | undefined> = {
-  aae: "qb_aae", srae: "rb_srae", sae: "wr_sae", csae: "wr_csae", te_saer: "te_saer", te_saeb: "te_saeb",
-};
-
 type BoardTab = "all" | "QB" | "RB" | "WR" | "TE";
 
-// One column per Above-Expected metric. The All tab shows every headline
-// column (a row fills only its own position's); a position tab shows its own
-// headline metrics plus, for QB and RB, the Analysis tables' breakdown columns
-// (`breakdown: true`, never on All). `group` is the header band each column sits
-// under. Tooltips match the Analysis tables' so the two describe each metric
-// the same way.
-type AEKey =
-  | "aae" | "srae" | "sae" | "csae" | "te_saer" | "te_saeb"
-  | "aae_out" | "aae_in" | "aae_deep" | "aae_mid" | "aae_short"
-  | "srae_out" | "srae_in" | "srae_zone" | "srae_mg";
+// One column per Above-Expected metric (AEKey, prospectScores.ts). The All tab
+// shows every headline column (a row fills only its own position's); a
+// position tab shows its own headline metrics plus, for QB and RB, the
+// Analysis tables' breakdown columns (`breakdown: true`, never on All). `group`
+// is the header band each column sits under. Tooltips match the Analysis
+// tables' so the two describe each metric the same way.
 interface AEColumn {
   key: AEKey;
   label: string;
@@ -92,7 +70,6 @@ const AE_COLUMNS: AEColumn[] = [
   { key: "srae_zone", label: "Zone",         pos: "RB", group: "SRAE Breakdown", breakdown: true, tooltip: "SRAE on zone runs (outside + inside zone), each judged against zone runs like it (formation, loaded box, unblocked defender stacked). Min. 10 such runs." },
   { key: "srae_mg",   label: "Man Gap",      pos: "RB", group: "SRAE Breakdown", breakdown: true, tooltip: "SRAE on man gap runs (outside + inside man gap), each judged against man gap runs like it (formation, loaded box, unblocked defender stacked). Min. 10 such runs." },
 ];
-type AEMaps = Record<AEKey, Map<string, number | null>>;
 
 const PFF_BAND_TOOLTIP =
   "PFF's numbers over exactly the games you charted (never season totals). Counts add up game by game; " +
@@ -104,18 +81,12 @@ const PFF_BAND_TOOLTIP =
 const SAMPLE_UNIT: Record<string, string> = {
   aae: "throws", srae: "runs", sae: "routes", csae: "core routes", te_saer: "routes", te_saeb: "blocks",
 };
-const COMPOSITE_POS: CompositePos[] = ["QB", "RB", "WR", "TE"];
-const isCompositePos = (pos: string): pos is CompositePos => (COMPOSITE_POS as string[]).includes(pos);
 const signed = (v: number, dp: number) => `${v >= 0 ? "+" : ""}${v.toFixed(dp)}`;
 
-// The Dynasty sliders, persisted per browser (a viewing preference).
-const DYNASTY_WEIGHTS_KEY = "dynastyScoreWeights";
 // Live scores, or a drafted class's scores as they stood at the draft
 // (lib/scouting/scoreLock.ts). Per browser, a viewing preference.
 const SCORE_VIEW_KEY = "bigBoardScoreView";
 const SCORE_TRAITS_KEY = "bigBoardScoreTraits";
-
-type CompositeInputs = Parameters<typeof buildAEComposite>[0];
 
 const TRAIT_AVG_KEY = "trait_avg";
 const UNCOVERED_TRAITS_TEXT = (["QB", "RB", "WR", "TE"] as const)
@@ -132,45 +103,11 @@ function traitMean(t: Record<string, TraitAverage>, pos: string): number | null 
   return xs.length ? xs.reduce((s, v) => s + v, 0) / xs.length : null;
 }
 
-// Live AE Scores from a composite: its score plus a WR's alignment penalty.
-function liveScoresFrom(prospects: readonly ProspectWithStats[], composite: AEComposite): Map<string, ScoreView> {
-  const m = new Map<string, ScoreView>();
-  for (const p of prospects) {
-    const sc = composite.scores.get(p.id);
-    if (!sc || !isCompositePos(p.position)) continue;
-    const pc = composite.positions[p.position];
-    const alignment = p.position === "WR" ? alignmentPenalty(p) : null;
-    m.set(p.id, {
-      score: sc.score + (alignment?.value ?? 0),
-      components: sc.components.map((c) => ({ ...c, tau: pc.metrics.find((x) => x.key === c.key)?.tau ?? 0 })),
-      ...(alignment ? { alignment } : {}),
-      ...(sc.baseline ? { baseline: sc.baseline } : {}),
-    });
-  }
-  return m;
-}
-type ScoreViewMode = "live" | "draft";
 const WEIGHT_SLIDERS: { key: keyof DynastyWeights; label: string; hint: string }[] = [
   { key: "age",   label: "Age",   hint: "How much the career window (prime seasons left) counts" },
   { key: "size",  label: "Size",  hint: "How much size counts: RBs and WRs carrying more weight for their height gain, lean and very light ones lose" },
   { key: "draft", label: "Draft", hint: "How much draft round counts in Dynasty Score Plus" },
 ];
-
-// The AE Score a cell shows: live, or in the "As of draft" view a drafted
-// class's saved snapshot. Each part carries the position spread it was scored
-// against.
-interface ScoreView {
-  score: number;
-  components: (ScoreComponent & { tau: number })[];
-  /** A WR's alignment penalty, already in `score`. */
-  alignment?: { label: string; value: number };
-  /** The position's baseline shift (aeComposite POSITION_BASELINE), already in `score`. */
-  baseline?: number;
-  /** Set when the value shown IS the draft-day snapshot. */
-  lockedAt?: string;
-  /** In the live view, the draft-day snapshot for reference. */
-  atDraft?: { score: number; lockedAt: string };
-}
 
 // Derived per-prospect values the sort reads.
 interface SortContext {
@@ -353,130 +290,14 @@ export default function BigBoard({
     loadPositionPlays("TE");
   }, [loadPositionPlays]);
 
-  // Each game's opponent tier (P4 / G5 / FCS), for the opponent adjustment.
-  const gameTiers = useMemo(() => tierGames(games), [games]);
-  // Each game's automatic context (migration 065) and the covariates the
-  // context effects read: opponent defense SP+ and weather count where their
-  // held-out tests passed (contextGrading.ts).
-  const contexts = useMemo(() => resolveGameContexts(games, gradingData.context), [games, gradingData.context]);
-  const contextCov = useMemo(() => gameCovariates(games, contexts, gameTiers.byGame), [games, contexts, gameTiers]);
-
-  // One map per Above-Expected column, each holding only its own position's
-  // prospects. null = under that metric's min-sample threshold. The headline
-  // samples also feed the cross-position AE Score, so each model is fit once.
-  // The AE Score (and the Dynasty scores built on it) take the samples after
-  // the opponent-strength adjustment (opponentAdjust.ts). The AE columns keep
-  // the unadjusted values, by the user's call.
-  const { aeMaps, composite, compositeInputs, opponent, contextInfo } = useMemo<{
-    aeMaps: AEMaps; composite: AEComposite; compositeInputs: CompositeInputs;
-    opponent: OpponentAdjusted["effects"]; contextInfo: Record<HeadlineKey, MetricContext>;
-  }>(() => {
-    const sae = new Map<string, number | null>();
-    const csae = new Map<string, number | null>();
-    const wr = new Map<string, AESample | null>();
-    const wrCore = new Map<string, AESample | null>();
-    for (const p of prospects) {
-      if (p.position !== "WR") continue;
-      sae.set(p.id, p.adj_success_above_exp);
-      csae.set(p.id, p.core_sae);
-      wr.set(p.id, p.sae_sample);
-      wrCore.set(p.id, p.core_sae_sample);
-    }
-    const tiers = gameTiers.byGame;
-    const qb = computeQBAboveExpectedSamples(prospects, games, qbPlays, { byGame: true });
-    const rb = computeRBAboveExpectedSamples(prospects, games, rbPlays, tiers, { byGame: true });
-    const teRoute = computeTERouteAboveExpectedSamples(prospects, games, tePlays, tiers, { byGame: true });
-    const teBlock = computeTEBlockAboveExpectedSamples(prospects, games, tePlays, tiers, { byGame: true });
-    // WR's tier splits come from the per-game cells; without them WR (and so
-    // RB and TE, which borrow WR's effect) stays unadjusted.
-    const splits = gameRouteCells ? buildWRTierSplits(gameRouteCells, (id) => tiers.get(id), games, gradingData.routeTagCells) : null;
-    const withSplits = (m: Map<string, AESample | null>, by: Map<string, NonNullable<AESample["byTier"]>> | undefined) =>
-      by ? new Map([...m].map(([id, smp]) => [id, smp ? { ...smp, byTier: by.get(id) ?? {} } : smp])) : m;
-    // And by game, for the context effects.
-    const gameSplits = gameRouteCells ? buildWRGameSplits(gameRouteCells, games, gradingData.routeTagCells) : null;
-    const withGames = (m: Map<string, AESample | null>, by: Map<string, NonNullable<AESample["byGame"]>> | undefined) =>
-      by ? new Map([...m].map(([id, smp]) => [id, smp ? { ...smp, byGame: by.get(id) ?? {} } : smp])) : m;
-    const wrRaw = withGames(withSplits(wr, splits?.all), gameSplits?.all);
-    const wrCoreRaw = withGames(withSplits(wrCore, splits?.core), gameSplits?.core);
-    const opp = applyOpponentStrength({ rb, wr: wrRaw, wrCore: wrCoreRaw, teRoute, teBlock });
-    // Opponent defense SP+ / weather where their tests passed; everything else
-    // keeps today's tier adjustment untouched.
-    const qbC = contextAdjust("qb_aae", "QB", qb, qb, contextCov);
-    const rbC = contextAdjust("rb_srae", "RB", rb, opp.rb, contextCov);
-    const wrC = contextAdjust("wr_sae", "WR", wrRaw, opp.wr, contextCov);
-    const wrCoreC = contextAdjust("wr_csae", "WR", wrCoreRaw, opp.wrCore, contextCov);
-    const teRouteC = contextAdjust("te_saer", "TE", teRoute, opp.teRoute, contextCov);
-    const teBlockC = contextAdjust("te_saeb", "TE", teBlock, opp.teBlock, contextCov);
-    // Breakdown slices come back as one record per prospect; split each slice
-    // out into its own column map.
-    const sliceCol = <K extends string>(m: Map<string, Record<K, AESlice>>, k: K) =>
-      new Map([...m].map(([id, s]) => [id, s[k].ae]));
-    const qbSlices = computeQBThrowSliceAAE(prospects, games, qbPlays);
-    const rbSlices = computeRBRunSliceSRAE(prospects, games, rbPlays);
-    const compositeInputs: CompositeInputs = {
-      qb: qbC.samples, rb: rbC.samples, wr: wrC.samples, wrCore: wrCoreC.samples, teRoute: teRouteC.samples, teBlock: teBlockC.samples,
-      // The per-player components: the user's charting no AE reads yet, PFF's
-      // results where the user doesn't chart, and the tag-only stats.
-      extra: buildComponents({
-        prospects, games, tierByGame: tiers, qbPlays, rbPlays,
-        pffGameRows: gradingData.pffGameRows,
-        wrRouteCounts: gradingData.routeCounts,
-        tagReps: tagStatReps({ games, qbPlays, rbPlays, tePlays, wrTagRows: gradingData.routeTagCells }),
-        context: contextCov,
-      }).extra,
-    };
-    return {
-      aeMaps: {
-        aae: aeValues(qb),
-        srae: aeValues(rb),
-        sae,
-        csae,
-        te_saer: aeValues(teRoute),
-        te_saeb: aeValues(teBlock),
-        aae_out: sliceCol(qbSlices, "outside"),
-        aae_in: sliceCol(qbSlices, "inside"),
-        aae_deep: sliceCol(qbSlices, "deep"),
-        aae_mid: sliceCol(qbSlices, "intermediate"),
-        aae_short: sliceCol(qbSlices, "short"),
-        srae_out: sliceCol(rbSlices, "outside"),
-        srae_in: sliceCol(rbSlices, "inside"),
-        srae_zone: sliceCol(rbSlices, "zone"),
-        srae_mg: sliceCol(rbSlices, "man_gap"),
-      },
-      composite: buildAEComposite(compositeInputs),
-      compositeInputs,
-      opponent: opp.effects,
-      contextInfo: {
-        qb_aae: qbC.info, rb_srae: rbC.info, wr_sae: wrC.info, wr_csae: wrCoreC.info, te_saer: teRouteC.info, te_saeb: teBlockC.info,
-      },
-    };
-  }, [prospects, games, rbPlays, qbPlays, tePlays, gameTiers, gameRouteCells, gradingData, contextCov]);
-
-  // Each prospect's charted games by opponent tier, for the AE Score tooltip.
-  const gamesByTier = useMemo(() => {
-    const m = new Map<string, Record<OpponentTier, number>>();
-    for (const g of games) {
-      const t = gameTiers.byGame.get(g.id);
-      if (!t) continue;
-      const r = m.get(g.prospect_id) ?? { P4: 0, G5: 0, FCS: 0 };
-      r[t]++;
-      m.set(g.prospect_id, r);
-    }
-    return m;
-  }, [games, gameTiers]);
-
-  // Each prospect's charted opponents' average defensive SP+ (FBS opponents), for the tooltip.
-  const defenseFaced = useMemo(() => {
-    const acc = new Map<string, { sum: number; games: number }>();
-    for (const g of games) {
-      const sp = contexts.get(g.id)?.oppDefSp;
-      if (sp == null) continue;
-      const a = acc.get(g.prospect_id) ?? { sum: 0, games: 0 };
-      a.sum += sp; a.games++;
-      acc.set(g.prospect_id, a);
-    }
-    return new Map([...acc].map(([id, a]) => [id, { avg: a.sum / a.games, games: a.games }]));
-  }, [games, contexts]);
+  // Every score the board shows, computed by the same hook the prospect
+  // Overview page uses (lib/scouting/prospectScores.ts), so the two always agree.
+  // The AE columns keep the unadjusted values; the AE Score (and the Dynasty
+  // scores built on it) take the opponent-strength and context adjustments.
+  const {
+    aeMaps, composite, compositeInputs, opponent, contextInfo,
+    gameTiers, contextCov, liveScores, gamesByTier, defenseFaced, hsClass, ages, roleFits, pffVals,
+  } = useProspectScores({ prospects, games, rbPlays, qbPlays, tePlays, gameRouteCells, gradingData, pffTotals });
 
   const [scoreMode, setScoreMode] = useState<ScoreViewMode>(() =>
     getLocalStorageItem<ScoreViewMode>(SCORE_VIEW_KEY, "live") === "draft" ? "draft" : "live");
@@ -510,34 +331,18 @@ export default function BigBoard({
 
   // The live AE Score: the composite, plus a WR's alignment penalty
   // (alignmentPenalty.ts). The penalty is part of the AE Score, so Dynasty and
-  // Dynasty+ carry it. `liveScores` (never with traits) is what draft-day
-  // snapshots save; `shownLive` follows the traits toggle.
-  const liveScores = useMemo(() => liveScoresFrom(prospects, composite), [prospects, composite]);
+  // Dynasty+ carry it. `liveScores` (never with traits, from the hook) is what
+  // draft-day snapshots save; `shownLive` follows the traits toggle.
   const shownLive = useMemo(
     () => (traitComposite ? liveScoresFrom(prospects, traitComposite) : liveScores),
     [prospects, traitComposite, liveScores],
   );
 
-  // AE Score per prospect. Live by default: more charting sharpens the models
-  // and spreads, and that should reach every class. "As of draft" swaps in a
-  // drafted class's draft-day snapshot (lib/scouting/scoreLock.ts). Live keeps
-  // the snapshot alongside for the tooltip. A prospect with a snapshot but no
-  // live score falls back to the snapshot.
-  const scoreViews = useMemo(() => {
-    const now = new Date();
-    const m = new Map<string, ScoreView>();
-    for (const p of prospects) {
-      const lock = activeLock(p, now);
-      const snapshot: ScoreView | null = lock
-        ? { score: lock.score, components: lock.components, alignment: lock.alignment, baseline: lock.baseline, lockedAt: lock.locked_at }
-        : null;
-      const live = shownLive.get(p.id);
-      if (snapshot && (scoreMode === "draft" || !live)) { m.set(p.id, snapshot); continue; }
-      if (!live) continue;
-      m.set(p.id, lock ? { ...live, atDraft: { score: lock.score, lockedAt: lock.locked_at } } : live);
-    }
-    return m;
-  }, [prospects, shownLive, scoreMode]);
+  // AE Score per prospect: live, or "As of draft" (prospectScores.ts scoreViewsFrom).
+  const scoreViews = useMemo(
+    () => scoreViewsFrom(prospects, shownLive, scoreMode, new Date()),
+    [prospects, shownLive, scoreMode],
+  );
 
   // Snapshot each drafted prospect's AE Score the first time it's scored, once
   // every lazy input has landed: the draft-day record behind "As of draft".
@@ -605,64 +410,15 @@ export default function BigBoard({
     })();
   }, [loading, prospects, onUpdateDraftRound]);
 
-  // Age: the birthday when there is one, else estimated from the 247 HS class
-  // year (prospectAge.ts). The estimate covers 2027-28 prospects, whose
-  // birthdates no public source carries.
-  const { matchProspect } = useRecruitIndex();
-  const hsClass = useMemo(
-    () => new Map(prospects.map((p) => [p.id, matchProspect(p)?.year ?? null])),
-    [prospects, matchProspect],
-  );
-  const ages = useMemo(() => {
-    const now = new Date();
-    const m = new Map<string, ProspectAge>();
-    for (const p of prospects) {
-      const a = prospectAgeAt(now, p.birthday, hsClass.get(p.id));
-      if (a) m.set(p.id, a);
-    }
-    return m;
-  }, [prospects, hsClass]);
 
-  const [weights, setWeights] = useState<DynastyWeights>(() => ({
-    ...DEFAULT_DYNASTY_WEIGHTS,
-    ...getLocalStorageItem<Partial<DynastyWeights>>(DYNASTY_WEIGHTS_KEY, {}),
-  }));
-  function setWeight(key: keyof DynastyWeights, value: number) {
-    const next = { ...weights, [key]: value };
-    setWeights(next);
-    setLocalStorageItem(DYNASTY_WEIGHTS_KEY, next);
-  }
+  // The Dynasty sliders, saved per browser; the Overview page reads the same weights.
+  const { weights, setWeight, reset: resetWeights } = useDynastyWeights();
 
   // Dynasty Score (+ Plus) for every prospect with an AE Score.
-  const dynasty = useMemo(() => {
-    const m = new Map<string, DynastyBreakdown>();
-    for (const p of prospects) {
-      const sc = scoreViews.get(p.id);
-      if (!sc || !isCompositePos(p.position)) continue;
-      m.set(p.id, scoreDynasty({
-        pos: p.position,
-        aeScore: sc.score,
-        rookieAge: rookieSeasonAge(p.draft_class_year, p.birthday, hsClass.get(p.id)),
-        heightIn: parseHeightInches(p.height),
-        weightLb: p.weight,
-        draftRound: p.draft_round,
-      }, weights));
-    }
-    return m;
-  }, [prospects, scoreViews, hsClass, weights]);
-  // Each prospect's role buckets (lib/scouting/roleFit.ts). They describe a
-  // player and feed none of the scores.
-  const roleFits = useMemo(
-    () => computeRoleFits(prospects, games, rbPlays, qbPlays, tePlays, pffTotals),
-    [prospects, games, rbPlays, qbPlays, tePlays, pffTotals],
+  const dynasty = useMemo(
+    () => dynastyScores(prospects, scoreViews, hsClass, weights),
+    [prospects, scoreViews, hsClass, weights],
   );
-
-  // PFF numbers over each prospect's charted games (lib/pff/totals.ts).
-  const pffVals = useMemo(() => {
-    const m = new Map<string, PffValues>();
-    for (const p of prospects) m.set(p.id, pffValues(pffTotals?.get(p.id)));
-    return m;
-  }, [prospects, pffTotals]);
 
   const sortCtx = useMemo<SortContext>(
     () => ({ aeScores: scoreViews, dynasty, ages, roles: roleFits, pff: pffVals, traits: traitAvgs }),
@@ -813,16 +569,9 @@ export default function BigBoard({
   function scoreCell(p: ProspectWithStats) {
     const cls = `${tdBase} border-l border-slate-800`;
     if (!isCompositePos(p.position)) return <td className={cls} />;
-    const pc = shownComposite.positions[p.position];
-    const primary = pc.metrics[0];
     const sc = scoreViews.get(p.id);
     if (!sc) {
-      const why = pc.ready
-        ? `Under the ${primary.label} sample floor`
-        : primary.qualified >= MIN_POOL
-          ? `${p.position}s are out of the AE Score: their ${primary.label}s don't spread more than sample noise yet`
-          : `${p.position}s join the AE Score once ${MIN_POOL} clear the ${primary.label} sample floor (${primary.qualified} now)`;
-      return <td className={`${cls} text-slate-600`} title={why}>—</td>;
+      return <td className={`${cls} text-slate-600`} title={aeScoreMissingReason(shownComposite, p.position)}>—</td>;
     }
     const lines = sc.components.map((c) => {
       // A per-player component (PFF result, charted rate, tag stat): its value
@@ -1423,7 +1172,7 @@ export default function BigBoard({
           </label>
         ))}
         <button
-          onClick={() => { setWeights(DEFAULT_DYNASTY_WEIGHTS); setLocalStorageItem(DYNASTY_WEIGHTS_KEY, DEFAULT_DYNASTY_WEIGHTS); }}
+          onClick={resetWeights}
           className="px-2 py-0.5 rounded bg-slate-800 text-slate-400 hover:bg-slate-700"
         >Reset</button>
       </div>

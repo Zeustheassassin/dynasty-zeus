@@ -2,6 +2,8 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, cleanup, within } from "@testing-library/react";
 import BigBoard from "@/components/scouting/BigBoard";
+import ProspectOverview, { type OverviewData } from "@/components/scouting/overview/ProspectOverview";
+import { EMPTY_GRADING_DATA } from "@/lib/scouting/aeComponents";
 import type { ProspectWithStats, AEScoreLock } from "@/lib/types";
 import type { RoleFit } from "@/lib/scouting/roleFit";
 import { totalsFor, type PffTotals } from "@/lib/pff/totals";
@@ -605,5 +607,45 @@ describe("BigBoard traits (beside the AE Score, with a toggle)", () => {
     expect(JSON.parse(localStorage.getItem("bigBoardScoreTraits")!)).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Without traits" }));
     expect(cell("Quarter One", "AE Score")).toBe(without);
+  });
+});
+
+// A prospect's Overview page reads the same hook as the board (useProspectScores),
+// so its AE Score, Dynasty and Dynasty+ must be the board's, cell for cell.
+describe("Prospect Overview agrees with the Big Board", () => {
+  const POOL = Array.from({ length: 10 }, (_, i) => prospect(`pq${i}`, `Pool QB ${i}`, "QB", 10 + i));
+  const overviewData = (prospects: ProspectWithStats[], extra: Partial<OverviewData> = {}): OverviewData => ({
+    prospects, games: [], rbPlays: [], qbPlays: [], tePlays: [], gameRouteCells: null,
+    gradingData: EMPTY_GRADING_DATA, loadPositionPlays: vi.fn(), scoresReady: true, ...extra,
+  });
+  const tile = (label: string) => screen.getByText(label, { selector: "div" }).parentElement!.textContent!;
+
+  it("shows the board's AE Score, Dynasty and Dynasty+, and his rank in the class", () => {
+    const all = [...PROSPECTS.map((p) => (p.id === "qb1" ? { ...p, draft_round: 1, birthday: "2005-06-01" } : p)), ...POOL];
+    renderBoard(all);
+    const ae = cell("Quarter One", "AE Score")!;
+    const dyn = cell("Quarter One", "Dynasty")!;
+    const plus = cell("Quarter One", "Dynasty+")!;
+    cleanup();
+    render(<ProspectOverview prospectId="qb1" data={overviewData(all)} />);
+    expect(tile("AE SCORE")).toContain(ae);
+    expect(tile("AE SCORE")).toMatch(/#\d+ of 11 · 2027 QBs/);
+    expect(tile("DYNASTY")).toContain(dyn);
+    expect(tile("DYNASTY+")).toContain(plus);
+    expect(tile("AAE")).toContain("+3.5");
+  });
+
+  it("says why there's no score yet, and loads every position's plays", () => {
+    const loadPositionPlays = vi.fn();
+    render(<ProspectOverview prospectId="qb1" data={overviewData(PROSPECTS, { loadPositionPlays })} />);
+    expect(tile("AE SCORE")).toContain("QBs join the AE Score once 10 clear the AAE sample floor (1 now)");
+    expect(tile("DYNASTY")).toContain("needs an AE Score");
+    expect(loadPositionPlays.mock.calls.map((c) => c[0]).sort()).toEqual(["QB", "RB", "TE"]);
+  });
+
+  it("waits for the plays before showing any score", () => {
+    render(<ProspectOverview prospectId="qb1" data={overviewData(PROSPECTS, { scoresReady: false })} />);
+    expect(screen.getByText(/Loading every position/)).toBeTruthy();
+    expect(screen.queryByText("AE SCORE")).toBeNull();
   });
 });

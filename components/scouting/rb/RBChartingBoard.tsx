@@ -7,6 +7,7 @@ import { logger } from "../../../lib/logger";
 const log = logger("scouting/rb/RBChartingBoard");
 import PlayerNotesList from "../PlayerNotesList";
 import ChartingBoard from "../shared/ChartingBoard";
+import ProspectOverview, { type OverviewData } from "../overview/ProspectOverview";
 import { usePffGameLog } from "../pff/usePffGameLog";
 import { useGameContextLog } from "../context/useGameContextLog";
 import GameContextPanel from "../context/GameContextPanel";
@@ -137,17 +138,19 @@ interface Props {
   prospect: Prospect;
   onBack: () => void;
   onDataChanged: () => void;
+  /** ScoutingHub's data for the Overview page (scores, percentiles). */
+  overviewData: OverviewData;
   allProspects: ProspectWithStats[];
   allGames: ScoutingGame[];
   leaguePlays: RBPlay[];
 }
 
-// Only the Charts tab renders hub-derived data (allProspects/leaguePlays from the hub's load);
-// Overview reads this board's own plays; its league baselines (built from leaguePlays) may be a
-// few plays stale, same as QB's once-per-mount league fetch, so it needs no hub reload per write.
-const RB_FRESH_DATA_TABS: readonly string[] = ["charts"];
+// The Overview page (scores, percentiles) and the Charts tab render hub-derived data, so a
+// write reloads the hub on entering them. Breakdown reads this board's own plays; its league
+// baselines (built from leaguePlays) may be a few plays stale, so it needs no hub reload per write.
+const RB_FRESH_DATA_TABS: readonly string[] = ["overview", "charts"];
 
-export default function RBChartingBoard({ prospect, onBack, onDataChanged, allProspects, allGames, leaguePlays }: Props) {
+export default function RBChartingBoard({ prospect, onBack, onDataChanged, overviewData, allProspects, allGames, leaguePlays }: Props) {
   // Position-specific play state
   const [plays, setPlays]                         = useState<RBPlay[]>([]);
   const [formation, setFormation]                 = useState<RBFormation>("gun");
@@ -451,10 +454,11 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
   }
 
   const tabs = [
-    { key: "overview", label: "Overview" },
-    { key: "chart",    label: "Chart Game" },
-    { key: "games",    label: "Games" },
-    { key: "charts",   label: "Charts" },
+    { key: "overview",  label: "Overview" },
+    { key: "breakdown", label: "Breakdown" },
+    { key: "games",     label: "Games" },
+    { key: "charts",    label: "Charts" },
+    { key: "chart",     label: "Chart Game" },
   ];
 
   return (
@@ -506,7 +510,8 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, allPr
           <div className="text-green-400">{stats.runAttempts} runs · {stats.routeAttempts} routes</div>
         </>
       )}
-      renderOverview={() => (
+      renderOverview={() => <ProspectOverview prospectId={prospect.id} data={overviewData} />}
+      renderBreakdown={() => (
         <div className="space-y-5">
           {loading ? (
             <div className="text-slate-500 text-sm text-center py-8">Loading…</div>

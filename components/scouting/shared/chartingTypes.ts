@@ -1,4 +1,4 @@
-export type BoardTab = "overview" | "chart" | "games";
+export type BoardTab = "overview" | "breakdown" | "chart" | "games" | "charts";
 
 export function pct(n: number, d: number): number | null {
   return d > 0 ? parseFloat(((n / d) * 100).toFixed(1)) : null;

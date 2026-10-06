@@ -21,6 +21,7 @@ import type {
 import { ROUTE_TYPES } from "../shared/chartingConstants";
 import { pct, fmtPct } from "../shared/chartingTypes";
 import ChartingBoard, { type ChartingBoardConfig } from "../shared/ChartingBoard";
+import ProspectOverview, { type OverviewData } from "../overview/ProspectOverview";
 import { usePffGameLog } from "../pff/usePffGameLog";
 import { useGameContextLog } from "../context/useGameContextLog";
 import GameContextPanel from "../context/GameContextPanel";
@@ -66,27 +67,30 @@ const TE_CONFIG: ChartingBoardConfig = {
 };
 
 const tabs = [
-  { key: "overview", label: "Overview" },
-  { key: "chart",    label: "Chart Game" },
-  { key: "games",    label: "Games" },
-  { key: "charts",   label: "Charts" },
+  { key: "overview",  label: "Overview" },
+  { key: "breakdown", label: "Breakdown" },
+  { key: "games",     label: "Games" },
+  { key: "charts",    label: "Charts" },
+  { key: "chart",     label: "Chart Game" },
 ];
 
 interface Props {
   prospect: Prospect;
   onBack: () => void;
   onDataChanged: () => void;
+  /** ScoutingHub's data for the Overview page (scores, percentiles). */
+  overviewData: OverviewData;
   allProspects: ProspectWithStats[];
   allGames: ScoutingGame[];
   leaguePlays: TEPlay[];
 }
 
-// Only the Charts tab renders hub-derived data (allProspects/leaguePlays from the hub's load);
-// Overview reads this board's own plays; its league baselines (built from leaguePlays) may be a
-// few plays stale, same as QB's once-per-mount league fetch, so it needs no hub reload per write.
-const TE_FRESH_DATA_TABS: readonly string[] = ["charts"];
+// The Overview page (scores, percentiles) and the Charts tab render hub-derived data, so a
+// write reloads the hub on entering them. Breakdown reads this board's own plays; its league
+// baselines (built from leaguePlays) may be a few plays stale, so it needs no hub reload per write.
+const TE_FRESH_DATA_TABS: readonly string[] = ["overview", "charts"];
 
-export default function TEChartingBoard({ prospect, onBack, onDataChanged, allProspects, allGames, leaguePlays }: Props) {
+export default function TEChartingBoard({ prospect, onBack, onDataChanged, overviewData, allProspects, allGames, leaguePlays }: Props) {
   const [plays, setPlays] = useState<TEPlay[]>([]);
 
   // Play logger form state
@@ -454,7 +458,8 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, allPr
           <div className="text-green-400">{stats.routeAttempts} routes · {stats.blockAttempts} blocks</div>
         </>
       )}
-      renderOverview={() => (
+      renderOverview={() => <ProspectOverview prospectId={prospect.id} data={overviewData} />}
+      renderBreakdown={() => (
         <div className="space-y-5">
           {loading ? (
             <div className="text-slate-500 text-sm text-center py-8">Loading…</div>

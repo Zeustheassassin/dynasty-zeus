@@ -18,6 +18,7 @@ import type {
 } from "../../../lib/types";
 import { ROUTE_TYPES } from "../shared/chartingConstants";
 import ChartingBoard, { type ChartingBoardConfig } from "../shared/ChartingBoard";
+import ProspectOverview, { type OverviewData } from "../overview/ProspectOverview";
 import { useChartingState } from "../shared/hooks/useChartingState";
 import { usePlayTags } from "../shared/hooks/usePlayTags";
 import PlayTagControls, { PlayTagBadges } from "../shared/PlayTagControls";
@@ -43,23 +44,30 @@ const ALIGNMENTS: { key: Alignment; label: string }[] = [
 const NFL_ROLES = ["X", "Y", "Slot", "X or Y", "Y or Slot", "Slot/Gadget", "Anything", "Sacrificial X", "Target Hog Y or Slot", ""];
 
 const tabs = [
-  { key: "overview", label: "Overview" },
-  { key: "chart",    label: "Chart Game" },
-  { key: "games",    label: "Games" },
-  { key: "charts",   label: "Charts" },
+  { key: "overview",  label: "Overview" },
+  { key: "breakdown", label: "Breakdown" },
+  { key: "games",     label: "Games" },
+  { key: "charts",    label: "Charts" },
+  { key: "chart",     label: "Chart Game" },
 ];
+
+// Overview (scores, percentiles), Breakdown (Core SAE, open % by alignment) and Charts all
+// render hub-derived data, so a write reloads the hub on entering any of them.
+const WR_FRESH_DATA_TABS: readonly string[] = ["overview", "breakdown", "charts"];
 
 interface Props {
   prospect: Prospect;
   onBack: () => void;
   onDataChanged: () => void;
+  /** ScoutingHub's data for the Overview page (scores, percentiles). */
+  overviewData: OverviewData;
   allProspects: ProspectWithStats[];
   /** The league WR difficulty model, built by ScoutingHub (the same one the
    *  SAE / cSAE columns use), for the per-game SAE badges. */
   wrModel: WRDifficultyModel;
 }
 
-export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, allProspects, wrModel }: Props) {
+export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, overviewData, allProspects, wrModel }: Props) {
   const [plays, setPlays] = useState<RoutePlay[]>([]);
 
   // Import panel state
@@ -91,6 +99,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
 
   const cs = useChartingState(prospect, {
     onDataChanged,
+    freshDataTabs: WR_FRESH_DATA_TABS,
     onDeleteGamePlays: (id) => setPlays((p) => p.filter((pl) => pl.game_id !== id)),
   });
   const { tab, games, selectedGameId, loading, showAddGame, newGame, savingGame, gameError,
@@ -428,7 +437,8 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, a
           {stats.successRate && <div className="text-emerald-400">{stats.successRate}% open</div>}
         </>
       )}
-      renderOverview={() => (
+      renderOverview={() => <ProspectOverview prospectId={prospect.id} data={overviewData} />}
+      renderBreakdown={() => (
         <div className="space-y-4">
           {loading ? (
             <div className="text-slate-500 text-sm text-center py-8">Loading…</div>

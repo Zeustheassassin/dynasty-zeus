@@ -1,6 +1,7 @@
 "use client";
 import { useState, useMemo, useEffect, startTransition } from "react";
 import dynamic from "next/dynamic";
+import type { OverviewData } from "../overview/ProspectOverview";
 import type { Prospect, ProspectWithStats, ScoutingGame, TEPlay, CoverageStat, TEBlockStat } from "../../../lib/types";
 
 type TECoverageKey = "man" | "zone" | "press" | "double";
@@ -23,6 +24,8 @@ export interface TEHubProps {
   setDraftYearFilter: (y: number | null) => void;
   navigateToProspect?: Prospect | null;
   onNavigated?: () => void;
+  /** ScoutingHub's data for the board's Overview page (scores, percentiles). */
+  overviewData: OverviewData;
   games: ScoutingGame[];
   tePlays: TEPlay[];
   teCoverageStatsByProspect: Map<string, Record<TECoverageKey, CoverageStat>>;
@@ -40,6 +43,7 @@ export default function TEHub({
   setDraftYearFilter,
   navigateToProspect,
   onNavigated,
+  overviewData,
   games,
   tePlays,
   teCoverageStatsByProspect,
@@ -68,6 +72,7 @@ export default function TEHub({
         prospect={selectedProspect}
         onBack={() => setSelectedProspect(null)} // the board reloads the hub on unmount if it wrote anything
         onDataChanged={onDataChanged}
+        overviewData={overviewData}
         allProspects={teProspects}
         allGames={games}
         leaguePlays={tePlays}

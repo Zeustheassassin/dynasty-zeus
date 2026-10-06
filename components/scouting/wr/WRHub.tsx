@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, startTransition } from "react";
 import dynamic from "next/dynamic";
+import type { OverviewData } from "../overview/ProspectOverview";
 import type { Prospect, ProspectWithStats } from "../../../lib/types";
 import type { WRDifficultyModel } from "../../../lib/scouting/aggregateMerge";
 
@@ -22,6 +23,8 @@ export interface WRHubProps {
   setDraftYearFilter: (y: number | null) => void;
   navigateToProspect?: Prospect | null;
   onNavigated?: () => void;
+  /** ScoutingHub's data for the board's Overview page (scores, percentiles). */
+  overviewData: OverviewData;
   /** The league WR model, for the charting board's per-game SAE badges. */
   wrModel: WRDifficultyModel;
 }
@@ -37,6 +40,7 @@ export default function WRHub({
   setDraftYearFilter,
   navigateToProspect,
   onNavigated,
+  overviewData,
   wrModel,
 }: WRHubProps) {
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
@@ -57,6 +61,7 @@ export default function WRHub({
         prospect={selectedProspect}
         onBack={() => setSelectedProspect(null)} // the board reloads the hub on unmount if it wrote anything
         onDataChanged={onDataChanged}
+        overviewData={overviewData}
         allProspects={prospectsWithStats}
         wrModel={wrModel}
       />

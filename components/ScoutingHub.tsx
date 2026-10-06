@@ -32,6 +32,7 @@ import { buildPffTotals } from "../lib/pff/totals";
 import { fetchPffRows, isMissingPffTables, type PffRows } from "./scouting/pff/pffClient";
 import { fetchGameContextData, isMissingContextTables } from "./scouting/context/contextClient";
 import { EMPTY_CONTEXT_DATA, type GameContextData } from "../lib/scouting/gameContext";
+import type { OverviewData } from "./scouting/overview/ProspectOverview";
 
 const log = logger("ScoutingHub");
 
@@ -623,8 +624,16 @@ export default function ScoutingHub() {
     }));
   }, [prospectsWithStats, games, snapsByProspect]);
 
+  // A prospect's Overview page: the Big Board's inputs, so its AE Score,
+  // Dynasty and percentiles match the board's (useProspectScores).
+  const overviewData = useMemo<OverviewData>(() => ({
+    prospects: prospectsWithStats, games, rbPlays, qbPlays, tePlays,
+    gameRouteCells, gradingData, pffTotals, loadPositionPlays, scoresReady,
+  }), [prospectsWithStats, games, rbPlays, qbPlays, tePlays, gameRouteCells, gradingData, pffTotals, loadPositionPlays, scoresReady]);
+
   // Shared props for all position hubs
   const hubProps = {
+    overviewData,
     prospectsWithStats,
     loading,
     onAddProspect: handleAddProspect,

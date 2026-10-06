@@ -44,6 +44,8 @@ export interface ChartingBoardProps {
   // Position-specific content
   renderHeaderStats?: () => React.ReactNode;
   renderOverview: () => React.ReactNode;
+  /** The Breakdown tab: the detail tables behind the Overview page. */
+  renderBreakdown?: () => React.ReactNode;
   renderGameBadge?: (game: ScoutingGame) => React.ReactNode;
   renderPlayLogger: (selectedGame: ScoutingGame | null) => React.ReactNode;
   renderGamesTable: () => React.ReactNode;
@@ -112,7 +114,7 @@ export default function ChartingBoard({
   editBio, bio, savingBio,
   onBack, onTabChange, onSelectGame, onToggleAddGame, onNewGameChange,
   onAddGame, onDeleteGame, onUpdateGame, onToggleEditBio, onBioChange, onSaveBio,
-  renderGameBadge, renderHeaderStats, renderOverview, renderPlayLogger, renderGamesTable, renderExtraTab,
+  renderGameBadge, renderHeaderStats, renderOverview, renderBreakdown, renderPlayLogger, renderGamesTable, renderExtraTab,
 }: ChartingBoardProps) {
   const a = ACCENT[config.accentColor];
   const selectedGame = games.find((g) => g.id === selectedGameId) ?? null;
@@ -271,8 +273,9 @@ export default function ChartingBoard({
         </div>
       )}
 
-      {/* Tab bar */}
-      <div className="flex gap-1 border-b border-slate-800">
+      {/* Tab bar. Five tabs are wider than a phone: the bar scrolls sideways
+          there instead of widening the page. */}
+      <div className="flex gap-1 border-b border-slate-800 overflow-x-auto">
         {tabs.map((t) => (
           <button key={t.key} onClick={() => onTabChange(t.key)}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition whitespace-nowrap ${
@@ -284,6 +287,9 @@ export default function ChartingBoard({
 
       {/* Overview tab */}
       {tab === "overview" && renderOverview()}
+
+      {/* Breakdown tab */}
+      {tab === "breakdown" && renderBreakdown?.()}
 
       {/* Chart Game tab */}
       {tab === "chart" && (
@@ -404,7 +410,7 @@ export default function ChartingBoard({
       {tab === "games" && renderGamesTable()}
 
       {/* Position-specific extra tabs (e.g., WR "charts") */}
-      {tab !== "overview" && tab !== "chart" && tab !== "games" && renderExtraTab?.(tab)}
+      {tab !== "overview" && tab !== "breakdown" && tab !== "chart" && tab !== "games" && renderExtraTab?.(tab)}
     </div>
   );
 }

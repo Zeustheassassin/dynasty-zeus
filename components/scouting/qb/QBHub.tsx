@@ -1,6 +1,7 @@
 "use client";
 import { useState, useMemo, useEffect, startTransition } from "react";
 import dynamic from "next/dynamic";
+import type { OverviewData } from "../overview/ProspectOverview";
 import { supabase } from "../../../lib/supabaseclient";
 import type { Prospect, ProspectWithStats, ChartingDecision, ScoutingGame, QBDepthZoneStat } from "../../../lib/types";
 
@@ -37,6 +38,8 @@ export interface QBHubProps {
   setDraftYearFilter: (y: number | null) => void;
   navigateToProspect?: Prospect | null;
   onNavigated?: () => void;
+  /** ScoutingHub's data for the board's Overview page (scores, percentiles). */
+  overviewData: OverviewData;
   games: ScoutingGame[];
   qbDepthZoneStatsByProspect: Map<string, Record<QBZoneKey, QBDepthZoneStat>>;
 }
@@ -53,6 +56,7 @@ export default function QBHub({
   setDraftYearFilter,
   navigateToProspect,
   onNavigated,
+  overviewData,
   games,
   qbDepthZoneStatsByProspect,
 }: QBHubProps) {
@@ -147,6 +151,7 @@ export default function QBHub({
         prospect={selectedProspect}
         onBack={() => setSelectedProspect(null)} // the board reloads the hub on unmount if it wrote anything
         onDataChanged={onDataChanged}
+        overviewData={overviewData}
         allProspects={qbProspects}
         allGames={games}
       />

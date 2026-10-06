@@ -1,6 +1,7 @@
 "use client";
 import { useState, useMemo, useEffect, startTransition } from "react";
 import dynamic from "next/dynamic";
+import type { OverviewData } from "../overview/ProspectOverview";
 import type { Prospect, ProspectWithStats, ScoutingGame, RBPlay, RBRunTypeStat } from "../../../lib/types";
 
 type RBRunTypeKey = "outside_zone" | "inside_zone" | "outside_man_gap" | "inside_man_gap";
@@ -22,6 +23,8 @@ export interface RBHubProps {
   setDraftYearFilter: (y: number | null) => void;
   navigateToProspect?: Prospect | null;
   onNavigated?: () => void;
+  /** ScoutingHub's data for the board's Overview page (scores, percentiles). */
+  overviewData: OverviewData;
   games: ScoutingGame[];
   rbPlays: RBPlay[];
   rbRunTypeStatsByProspect: Map<string, Record<RBRunTypeKey, RBRunTypeStat>>;
@@ -38,6 +41,7 @@ export default function RBHub({
   setDraftYearFilter,
   navigateToProspect,
   onNavigated,
+  overviewData,
   games,
   rbPlays,
   rbRunTypeStatsByProspect,
@@ -65,6 +69,7 @@ export default function RBHub({
         prospect={selectedProspect}
         onBack={() => setSelectedProspect(null)} // the board reloads the hub on unmount if it wrote anything
         onDataChanged={onDataChanged}
+        overviewData={overviewData}
         allProspects={rbProspects}
         allGames={games}
         leaguePlays={rbPlays}

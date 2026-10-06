@@ -6,6 +6,7 @@ import { logger } from "../../../lib/logger";
 
 const log = logger("scouting/qb/QBChartingBoard");
 import ChartingBoard from "../shared/ChartingBoard";
+import ProspectOverview, { type OverviewData } from "../overview/ProspectOverview";
 import { usePffGameLog } from "../pff/usePffGameLog";
 import { useGameContextLog } from "../context/useGameContextLog";
 import GameContextPanel from "../context/GameContextPanel";
@@ -65,6 +66,8 @@ interface Props {
   prospect: Prospect;
   onBack: () => void;
   onDataChanged: () => void;
+  /** ScoutingHub's data for the Overview page (scores, percentiles). */
+  overviewData: OverviewData;
   allProspects: ProspectWithStats[];
   allGames: ScoutingGame[];
 }
@@ -80,11 +83,12 @@ const DEPTH_SHORT: Record<QBDepthZone, string>   = {
   short_left:"SL", short_center:"SC", short_right:"SR",
 };
 
-// Only the Charts tab renders hub-derived data (allProspects/allGames from the hub's load);
-// Overview reads this board's own plays + its self-fetched leaguePlays.
-const QB_FRESH_DATA_TABS: readonly string[] = ["charts"];
+// The Overview page (scores, percentiles) and the Charts tab render hub-derived data, so a
+// write reloads the hub on entering them. Breakdown reads this board's own plays + its
+// self-fetched leaguePlays.
+const QB_FRESH_DATA_TABS: readonly string[] = ["overview", "charts"];
 
-export default function QBChartingBoard({ prospect, onBack, onDataChanged, allProspects, allGames }: Props) {
+export default function QBChartingBoard({ prospect, onBack, onDataChanged, overviewData, allProspects, allGames }: Props) {
   // Position-specific play state
   const [plays, setPlays]                   = useState<QBPlay[]>([]);
   // League-wide QB plays (across all charted prospects) — used to build the
@@ -435,10 +439,11 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
   }
 
   const tabs = [
-    { key: "overview", label: "Overview" },
-    { key: "chart",    label: "Chart Game" },
-    { key: "games",    label: "Games" },
-    { key: "charts",   label: "Charts" },
+    { key: "overview",  label: "Overview" },
+    { key: "breakdown", label: "Breakdown" },
+    { key: "games",     label: "Games" },
+    { key: "charts",    label: "Charts" },
+    { key: "chart",     label: "Chart Game" },
   ];
 
   return (
@@ -494,7 +499,8 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
           )}
         </>
       )}
-      renderOverview={() => (
+      renderOverview={() => <ProspectOverview prospectId={prospect.id} data={overviewData} />}
+      renderBreakdown={() => (
         <QBOverviewPanel
           plays={plays}
           leaguePlays={leaguePlays}
