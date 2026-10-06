@@ -97,8 +97,8 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
   const [accuracy, setAccuracy]             = useState<QBAccuracy | null>(null);
   const [completion, setCompletion]         = useState<QBCompletion | null>(null);
   const [intType, setIntType]               = useState<QBIntType | null>(null);
-  // Tipped-ball INTs only: was it the receiver's fault? Defaults to No (the
-  // pick scores as a miss), so the charter only clicks when it was on him.
+  // Tipped-ball INTs only: was it the receiver's fault? A record only (no
+  // grade reads it); defaults to No, so the charter only clicks when it was.
   const [intReceiverFault, setIntReceiverFault] = useState(false);
   const [targetPos, setTargetPos]           = useState<QBTargetPos | null>(null);
   const [depthZone, setDepthZone]           = useState<QBDepthZone | null>(null);
@@ -693,12 +693,12 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
                           </button>
                         ))}
                       </div>
-                      {/* Tipped pick: the receiver's fault scores like a drop in QB AAE */}
+                      {/* Tipped pick: was it the receiver's fault? A record only */}
                       {intType === "tipped" && (
                         <div className="mt-3">
                           <div className="text-xs text-slate-500 mb-2">
                             {(targetPos ?? "wr").toUpperCase()} Fault
-                            <span className="text-slate-600 ml-2">Yes = QB graded as if it were a drop</span>
+                            <span className="text-slate-600 ml-2">for the record; doesn&apos;t change any grade</span>
                           </div>
                           <div className="flex gap-2">
                             {([

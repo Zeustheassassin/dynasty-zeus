@@ -276,31 +276,30 @@ describe("computeQBAboveExpected", () => {
     expect(out.get("caught")!).toBeGreaterThan(out.get("dropped")!);
   });
 
-  it("graded throw value: an on-target interception scores as a miss, never a hit", () => {
-    // Identical QBs except two throws: on-target picks for one, on-target
-    // incompletions (drops) for the other, and off-target misses for a third.
-    // The picks must earn no credit (below the drops) and match the misses.
-    const prospects = [prospect("picked", "QB"), prospect("dropped", "QB"), prospect("missed", "QB")];
-    const games = [game("g_p", "picked"), game("g_d", "dropped"), game("g_m", "missed")];
+  it("graded throw value: an interception is graded on its accuracy, like any throw", () => {
+    // AAE is accuracy only. An on-target pick scores like an on-target drop;
+    // an off-target pick like an off-target incompletion. (The turnover is
+    // PFF's TWP% in the AE Score.)
+    const prospects = [prospect("pickOT", "QB"), prospect("dropOT", "QB"), prospect("pickMiss", "QB"), prospect("incMiss", "QB")];
+    const games = [game("g_po", "pickOT"), game("g_do", "dropOT"), game("g_pm", "pickMiss"), game("g_im", "incMiss")];
     const sample = (g: string, two: Partial<QBPlay> & { accuracy: QBAccuracy }) => [
       ...repeat(28, (i) => qbPlay(g, { accuracy: i % 4 ? "on_target" : "high", completion: i % 4 ? "caught" : "incomplete", depth_zone: "mid_center" })),
       ...repeat(2, () => qbPlay(g, { depth_zone: "mid_center", ...two })),
     ];
     const out = computeQBAboveExpected(prospects, games, [
-      ...sample("g_p", { accuracy: "on_target", completion: "interception", int_type: "bad_decision" }),
-      ...sample("g_d", { accuracy: "on_target", completion: "incomplete" }),
-      ...sample("g_m", { accuracy: "high", completion: "incomplete" }),
+      ...sample("g_po", { accuracy: "on_target", completion: "interception", int_type: "bad_decision" }),
+      ...sample("g_do", { accuracy: "on_target", completion: "incomplete" }),
+      ...sample("g_pm", { accuracy: "high", completion: "interception", int_type: "bad_throw" }),
+      ...sample("g_im", { accuracy: "high", completion: "incomplete" }),
     ]);
-    expect(out.get("picked")!).toBeLessThan(out.get("dropped")!);
-    expect(out.get("picked")!).toBe(out.get("missed")!);
+    expect(out.get("pickOT")!).toBe(out.get("dropOT")!);
+    expect(out.get("pickMiss")!).toBe(out.get("incMiss")!);
+    expect(out.get("pickOT")!).toBeGreaterThan(out.get("pickMiss")!);
   });
 
-  it("graded throw value: a tipped pick that was the receiver's fault scores like a drop", () => {
-    // A perfect ball that pops off the receiver into a defender's hands. Charted
-    // as his fault, the QB scores it like a drop; charted not his fault (or not
-    // asked, NULL), it stays a miss.
-    const prospects = [prospect("recFault", "QB"), prospect("notFault", "QB"), prospect("unasked", "QB"), prospect("dropped", "QB")];
-    const games = [game("g_r", "recFault"), game("g_n", "notFault"), game("g_u", "unasked"), game("g_d", "dropped")];
+  it("graded throw value: the WR Fault call on a tipped pick is a record only", () => {
+    const prospects = [prospect("recFault", "QB"), prospect("notFault", "QB"), prospect("unasked", "QB")];
+    const games = [game("g_r", "recFault"), game("g_n", "notFault"), game("g_u", "unasked")];
     const sample = (g: string, two: Partial<QBPlay> & { accuracy: QBAccuracy }) => [
       ...repeat(28, (i) => qbPlay(g, { accuracy: i % 4 ? "on_target" : "high", completion: i % 4 ? "caught" : "incomplete", depth_zone: "mid_center" })),
       ...repeat(2, () => qbPlay(g, { depth_zone: "mid_center", ...two })),
@@ -310,10 +309,8 @@ describe("computeQBAboveExpected", () => {
       ...sample("g_r", { ...tippedPick, int_receiver_fault: true }),
       ...sample("g_n", { ...tippedPick, int_receiver_fault: false }),
       ...sample("g_u", { ...tippedPick, int_receiver_fault: null }),
-      ...sample("g_d", { accuracy: "on_target", completion: "incomplete" }),
     ]);
-    expect(out.get("recFault")!).toBe(out.get("dropped")!);
-    expect(out.get("notFault")!).toBeLessThan(out.get("recFault")!);
+    expect(out.get("recFault")!).toBe(out.get("notFault")!);
     expect(out.get("unasked")!).toBe(out.get("notFault")!);
   });
 

@@ -1182,9 +1182,9 @@ export interface QBPlay {
   accuracy: QBAccuracy | null;
   completion: QBCompletion | null;
   int_type: QBIntType | null;
-  /** Tipped-ball INTs only (migration 066): true = the receiver's fault, so
-   *  QB AAE scores it like a drop. NULL = not asked. Optional: absent before
-   *  the migration. */
+  /** Tipped-ball INTs only (migration 066): true = the receiver's fault. A
+   *  record only: no grade reads it (QB AAE grades every pick on its accuracy).
+   *  NULL = not asked. Optional: absent before the migration. */
   int_receiver_fault?: boolean | null;
   target_pos: QBTargetPos | null;
   depth_zone: QBDepthZone | null;

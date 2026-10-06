@@ -83,7 +83,7 @@ export default function QBOverviewPanel({ plays, leaguePlays, games, loading }: 
       fifty_fifty: thrownPlays.filter((p) => p.int_type === "fifty_fifty").length,
       tipped: thrownPlays.filter((p) => p.int_type === "tipped").length,
     };
-    // Tipped picks charted as the receiver's fault (scored like a drop in AAE).
+    // Tipped picks charted as the receiver's fault (a record; no grade reads it).
     const intReceiverFault = thrownPlays.filter((p) => p.int_receiver_fault === true).length;
 
     const touchTracked = gradedThrows.filter((p) => p.touch != null);
