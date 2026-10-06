@@ -276,6 +276,25 @@ describe("computeQBAboveExpected", () => {
     expect(out.get("caught")!).toBeGreaterThan(out.get("dropped")!);
   });
 
+  it("graded throw value: an on-target interception scores as a miss, never a hit", () => {
+    // Identical QBs except two throws: on-target picks for one, on-target
+    // incompletions (drops) for the other, and off-target misses for a third.
+    // The picks must earn no credit (below the drops) and match the misses.
+    const prospects = [prospect("picked", "QB"), prospect("dropped", "QB"), prospect("missed", "QB")];
+    const games = [game("g_p", "picked"), game("g_d", "dropped"), game("g_m", "missed")];
+    const sample = (g: string, two: Partial<QBPlay> & { accuracy: QBAccuracy }) => [
+      ...repeat(28, (i) => qbPlay(g, { accuracy: i % 4 ? "on_target" : "high", completion: i % 4 ? "caught" : "incomplete", depth_zone: "mid_center" })),
+      ...repeat(2, () => qbPlay(g, { depth_zone: "mid_center", ...two })),
+    ];
+    const out = computeQBAboveExpected(prospects, games, [
+      ...sample("g_p", { accuracy: "on_target", completion: "interception", int_type: "bad_decision" }),
+      ...sample("g_d", { accuracy: "on_target", completion: "incomplete" }),
+      ...sample("g_m", { accuracy: "high", completion: "incomplete" }),
+    ]);
+    expect(out.get("picked")!).toBeLessThan(out.get("dropped")!);
+    expect(out.get("picked")!).toBe(out.get("missed")!);
+  });
+
   it("league-wide AAE nets to 0 (play-weighted) even when QBs face different situations", () => {
     // The unpenalized intercept makes the league's expected sum equal its actual
     // sum — the QBStatsTable footer relies on this.

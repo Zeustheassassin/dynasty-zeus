@@ -167,9 +167,17 @@ export function aeValues(samples: Map<string, AESample | null>): Map<string, num
 // bad as his accuracy looks") without letting catchable inaccuracy out-score a
 // pinpoint passer.
 //
+//   interception         → MISS_BASE                (0.20, whatever the grade)
 //   on_target            → 1.00
 //   any miss, caught     → MISS_BASE + CATCH_BONUS  (0.30)
 //   any miss, not caught → MISS_BASE                (0.20)
+//
+// An interception never scores better than a miss (the user's rule,
+// 2026-10-05: no credit for a bad play). An on-target pick (a placed ball to a
+// covered man, or one with the wrong zip) used to score 1.0 and so RAISED his
+// AAE by ~17–25 pts on that throw. It isn't docked below a miss: the turnover
+// itself is PFF's TWP% in the AE Score (pffComponents.ts), and the AE Score
+// counts each skill once.
 //
 // All values are tunable. Both the QB's actual value and every league baseline
 // are computed on this scale. tipped_ball / null accuracy never reach here
@@ -177,6 +185,7 @@ export function aeValues(samples: Map<string, AESample | null>): Map<string, num
 const MISS_BASE = 0.2;
 const CATCH_BONUS = 0.1;
 function throwValue(pl: QBPlay): number {
+  if (pl.completion === "interception") return MISS_BASE;
   if (pl.accuracy === "on_target") return 1;
   if (pl.accuracy == null) return 0;  // not reached — filtered upstream
   return pl.completion === "caught" ? MISS_BASE + CATCH_BONUS : MISS_BASE;
@@ -346,8 +355,8 @@ export function computeRBRunSliceSRAE(
 //   pressure handling, route type.
 //
 // Throw value is the graded score from throwValue() — on-target vs not, plus a
-// small bonus if a miss was caught — so the metric leans on QB placement, not
-// receiver bail-outs.
+// small bonus if a miss was caught, and an interception always a miss — so the
+// metric leans on QB placement, not receiver bail-outs.
 //
 // The difficulty model (difficultyModel.ts) is a ridge-regularized fractional
 // logistic regression of throw value on one-hot buckets of all seven
