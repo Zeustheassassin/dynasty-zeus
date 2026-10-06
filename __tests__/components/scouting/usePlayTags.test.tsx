@@ -55,6 +55,15 @@ describe("usePlayTags", () => {
     expect(result.current.payload({})).toMatchObject({ red_zone: false });
   });
 
+  it("an old RPO keeps play action on when edited, and nothing else is written", () => {
+    const old = { id: "p1", play_type: "rpo", play_action: true, red_zone: null };
+    const { result } = setup("QB", { gameId: "g1", plays: [old] });
+    act(() => result.current.startEdit(old));
+    expect(result.current.editingUntagged).toBe(true);
+    expect(result.current.payload({ dropback: true, throw: true, rpo: true })).toEqual({ play_action: true });
+    expect(result.current.payload({ dropback: true, throw: true })).toEqual({ play_action: null });
+  });
+
   it("edits a tagged play with its own values and rewrites every column", () => {
     const tagged = { id: "p2", red_zone: true, third_fourth_down: true, short_yardage: false, garbage_time: false, blocked_defender: "lb", press_release: null, chipped_before_route: null };
     const { result } = setup("TE", { gameId: "g1", plays: [tagged] });

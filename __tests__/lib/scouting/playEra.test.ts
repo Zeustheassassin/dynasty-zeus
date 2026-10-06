@@ -39,16 +39,16 @@ describe("isTaggedPlay", () => {
     expect(isTaggedPlay({ broken_tackle: false, explosive_play: false }, "RB")).toBe(false);
   });
 
-  it("treats any non-null tag, false included, as a tagged play", () => {
+  it("treats any non-null situation tag, false included, as a tagged play", () => {
     expect(isTaggedPlay({ red_zone: false }, "QB")).toBe(true);
     expect(isTaggedPlay({ garbage_time: false, third_fourth_down: false }, "TE")).toBe(true);
-    expect(isTaggedPlay({ release_timing: "on_time" }, "QB")).toBe(true);
+    expect(isTaggedPlay({ red_zone: false, release_timing: "on_time" }, "QB")).toBe(true);
   });
 
-  it("only reads the position's own tag columns", () => {
-    // press_release is a WR/TE tag, not a QB one.
-    expect(isTaggedPlay({ press_release: "won" }, "QB")).toBe(false);
-    expect(isTaggedPlay({ press_release: "won" }, "TE")).toBe(true);
+  it("a position tag alone leaves an old play old (RPO play action backfilled by 067)", () => {
+    expect(isTaggedPlay({ play_type: "rpo", play_action: true, red_zone: null }, "QB")).toBe(false);
+    expect(isTaggedPlay({ release_timing: "on_time" }, "QB")).toBe(false);
+    expect(isTaggedPlay({ press_release: "won" }, "TE")).toBe(false);
   });
 });
 

@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { isTaggedPlay, tagColumns, type TagPosition } from "@/lib/scouting/playEra";
 import {
-  carriedStickyValues, defaultTagValues, missingTags, tagBadges, tagDefault, tagPayload,
-  tagSpecs, tagValuesFromPlay, visibleTags, type PlayFacts,
+  carriedStickyValues, defaultTagValues, forcedTagPayload, missingTags, tagBadges, tagDefault, tagForced,
+  tagPayload, tagSpecs, tagValuesFromPlay, visibleTags, type PlayFacts,
 } from "@/lib/scouting/playTags";
 
 const POSITIONS: TagPosition[] = ["QB", "RB", "WR", "TE"];
@@ -96,6 +96,17 @@ describe("a new play's payload", () => {
     expect(route).toMatchObject({ blocked_defender: null, chipped_before_route: true, press_release: null });
   });
 
+  it("QB RPO: play action is always on, whatever was clicked", () => {
+    const rpoThrow: PlayFacts = { ...QB_THROW, rpo: true };
+    expect(tagPayload("QB", defaultTagValues("QB"), rpoThrow).play_action).toBe(true);
+    expect(tagPayload("QB", { ...defaultTagValues("QB"), play_action: false }, { ...QB_SACK, rpo: true }).play_action).toBe(true);
+    // A pass keeps the charter's own call.
+    expect(tagPayload("QB", defaultTagValues("QB"), QB_THROW).play_action).toBe(false);
+    const pa = tagSpecs("QB").find((s) => s.column === "play_action")!;
+    expect(tagForced(pa, rpoThrow)).toBe(true);
+    expect(tagForced(pa, QB_THROW)).toBe(false);
+  });
+
   it("drops a value that doesn't fit the tag, falling back to its default", () => {
     const p = tagPayload("QB", { ...defaultTagValues("QB"), release_timing: "whenever", tight_window: "yes" }, QB_THROW);
     expect(p.release_timing).toBe("on_time");
@@ -150,6 +161,18 @@ describe("sticky carry-over", () => {
   it("starts a new or untagged game off", () => {
     expect(carriedStickyValues("QB", [])).toEqual({ red_zone: false, garbage_time: false });
     expect(carriedStickyValues("QB", [{ route_type: "nine" }])).toEqual({ red_zone: false, garbage_time: false });
+  });
+});
+
+describe("editing a play charted before the tags", () => {
+  it("writes only the forced tags, and the play stays untagged", () => {
+    const rpo = forcedTagPayload("QB", { ...QB_THROW, rpo: true });
+    expect(rpo).toEqual({ play_action: true });
+    expect(isTaggedPlay(rpo, "QB")).toBe(false);
+    // Turned away from RPO, an old play loses it again.
+    expect(forcedTagPayload("QB", QB_THROW)).toEqual({ play_action: null });
+    expect(forcedTagPayload("QB", { ...QB_RUN, rpo: false })).toEqual({ play_action: null });
+    for (const pos of ["RB", "WR", "TE"] as const) expect(forcedTagPayload(pos, { run: true, route: true })).toEqual({});
   });
 });
 

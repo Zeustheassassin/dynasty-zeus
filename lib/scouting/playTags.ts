@@ -50,6 +50,11 @@ export function tagApplies(spec: PlayTagSpec, facts: PlayFacts): boolean {
   return spec.appliesTo == null || facts[spec.appliesTo] === true;
 }
 
+/** A tag that's on whatever was clicked (play action on an RPO). */
+export function tagForced(spec: PlayTagSpec, facts: PlayFacts): boolean {
+  return spec.forced != null && tagApplies(spec, facts) && facts[spec.forced.by] === true;
+}
+
 /** Keeps a value only if it fits the tag (a known value, or a boolean). */
 function validValue(spec: PlayTagSpec, v: TagValue | undefined): TagValue {
   if (v == null) return null;
@@ -109,9 +114,23 @@ export function tagPayload(
 ): Record<string, TagValue> {
   const out: Record<string, TagValue> = {};
   for (const spec of SPECS[position]) {
-    out[spec.column] = tagApplies(spec, facts)
-      ? validValue(spec, values[spec.column]) ?? tagDefault(spec)
-      : null;
+    out[spec.column] = !tagApplies(spec, facts) ? null
+      : tagForced(spec, facts) ? true
+      : validValue(spec, values[spec.column]) ?? tagDefault(spec);
+  }
+  return out;
+}
+
+/**
+ * The only tag columns an edit of an untagged (pre-tag) play writes: the
+ * forced ones, true where forced and NULL otherwise. So an old play turned
+ * into an RPO gets play action, and one turned away from RPO loses it, while
+ * its situation tags stay NULL and it stays untagged.
+ */
+export function forcedTagPayload(position: TagPosition, facts: PlayFacts): Record<string, TagValue> {
+  const out: Record<string, TagValue> = {};
+  for (const spec of SPECS[position]) {
+    if (spec.forced) out[spec.column] = tagForced(spec, facts) ? true : null;
   }
   return out;
 }

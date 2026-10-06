@@ -1,6 +1,6 @@
 "use client";
 import { isTaggedPlay, type PlayTagSpec, type TagPosition } from "../../../lib/scouting/playEra";
-import { tagBadges, tagOptions, visibleTags, type PlayFacts } from "../../../lib/scouting/playTags";
+import { tagBadges, tagForced, tagOptions, visibleTags, type PlayFacts } from "../../../lib/scouting/playTags";
 import type { PlayTags } from "./hooks/usePlayTags";
 
 const ACTIVE = { blue: "bg-blue-600 text-white", green: "bg-green-700 text-white" } as const;
@@ -44,12 +44,15 @@ export default function PlayTagControls({ tags, facts, part, accent }: Props) {
       {toggles.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {toggles.map((spec) => {
-            const on = tags.values[spec.column] === true;
+            // A forced tag (play action on an RPO) shows on and can't be turned off.
+            const forced = tagForced(spec, facts);
+            const on = forced || tags.values[spec.column] === true;
             return (
-              <button key={spec.column} type="button" aria-pressed={on}
+              <button key={spec.column} type="button" aria-pressed={on} disabled={forced}
                 onClick={() => tags.set(spec.column, !on)}
-                title={spec.entry === "sticky" ? `${spec.label}: stays on for the next play until you turn it off` : spec.label}
-                className={`px-3 py-1.5 rounded text-xs font-medium transition ${on ? ACTIVE[accent] : IDLE}`}>
+                title={forced ? `${spec.label}: ${spec.forced?.note}`
+                  : spec.entry === "sticky" ? `${spec.label}: stays on for the next play until you turn it off` : spec.label}
+                className={`px-3 py-1.5 rounded text-xs font-medium transition ${on ? ACTIVE[accent] : IDLE} ${forced ? "cursor-default" : ""}`}>
                 {spec.label}
               </button>
             );

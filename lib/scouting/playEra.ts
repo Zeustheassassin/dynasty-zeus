@@ -5,8 +5,11 @@
 //      definition; games created from 2026-05-01 were charted play by play.
 //   2. Tagged or not? Per PLAY (migration 062): the per-play tag columns are
 //      nullable with no default. NULL = charted before the tags existed; new
-//      plays save every tag, defaults included, so any non-null tag column
-//      marks a tagged play. Editing an old play leaves its tags NULL.
+//      plays save every tag, defaults included. The four situation tags apply
+//      to every play, so a non-null situation tag marks a tagged play. A
+//      position tag set on an old play doesn't: migration 067 turned play
+//      action on for every RPO, old ones included, and they stay old plays.
+//      Editing an old play leaves its tags NULL.
 //
 // One prospect can have all three kinds of play, and each is judged by its
 // own era's rules: a tag can only ever change how a TAGGED play is judged,
@@ -23,7 +26,8 @@
 // `appliesTo` is the play fact a tag needs (an exception tag can be scoped too:
 // "hit behind the line" only means something on a carry). A tag that doesn't
 // apply to a play is stored NULL. `required` = no default exists, so the
-// charter picks one whenever it applies. lib/scouting/playTags.ts turns this
+// charter picks one whenever it applies. `forced` = always on when a play fact
+// holds (an RPO is always play action, the user's rule 2026-10-06). lib/scouting/playTags.ts turns this
 // into what the boards write.
 import type { ScoutingGame } from "../types";
 import { coverageEra } from "./coverageEra";
@@ -34,6 +38,7 @@ export type TagEntry = "exception" | "preselected" | "sticky" | "conditional";
 /** What a board knows about the play being charted, as far as the tags care. */
 export type PlayFact =
   | "dropback"      // QB: a pass or RPO snap
+  | "rpo"           // QB: an RPO snap
   | "throw"         // QB: the ball was thrown (not a sack, scramble or throwaway)
   | "sack"          // QB: sacked
   | "run"           // QB: designed run or scramble; RB: a designed carry
@@ -63,6 +68,8 @@ export interface PlayTagSpec {
   required?: boolean;
   /** When a conditional tag applies. */
   when?: string;
+  /** Always on when this play fact holds: written true, the button locked on. */
+  forced?: { by: PlayFact; note: string };
 }
 
 /** On all four play tables. */
@@ -75,7 +82,7 @@ export const SITUATION_TAGS: readonly PlayTagSpec[] = [
 
 export const POSITION_TAGS: Readonly<Record<TagPosition, readonly PlayTagSpec[]>> = {
   QB: [
-    { column: "play_action",          label: "Play action",           short: "PA",        entry: "exception", appliesTo: "dropback" },
+    { column: "play_action",          label: "Play action",           short: "PA",        entry: "exception", appliesTo: "dropback", forced: { by: "rpo", note: "always on for an RPO" } },
     { column: "tight_window",         label: "Tight window",          short: "TW",        entry: "exception", appliesTo: "throw" },
     { column: "release_timing",       label: "Release",               short: "Rel",       entry: "preselected", values: ["early", "on_time", "late"], valueLabels: ["Early", "On time", "Late"], preset: "on_time", appliesTo: "throw" },
     { column: "better_option_missed", label: "Better option missed",  short: "BetterOpt", entry: "exception", appliesTo: "dropback" },
@@ -107,20 +114,18 @@ export function tagColumns(position: TagPosition): readonly string[] {
   return [...SITUATION_TAGS, ...POSITION_TAGS[position]].map((t) => t.column);
 }
 
-const COLUMNS: Readonly<Record<TagPosition, readonly string[]>> = {
-  QB: tagColumns("QB"),
-  RB: tagColumns("RB"),
-  WR: tagColumns("WR"),
-  TE: tagColumns("TE"),
-};
+const SITUATION_COLUMNS: readonly string[] = SITUATION_TAGS.map((t) => t.column);
 
 /**
- * True when the play was charted with the per-play tags: any tag column is
- * non-null. A play loaded before migration 062 (columns absent) is untagged.
+ * True when the play was charted with the per-play tags: a situation tag is
+ * non-null (every tagged play writes all four). A position tag alone doesn't
+ * count, so a backfilled one (play action on old RPOs, migration 067) leaves
+ * an old play old. A play loaded before migration 062 (columns absent) is
+ * untagged. The position is kept for callers; every table has the same four.
  */
-export function isTaggedPlay(play: object, position: TagPosition): boolean {
+export function isTaggedPlay(play: object, _position: TagPosition): boolean {
   const row = play as Record<string, unknown>;
-  return COLUMNS[position].some((c) => row[c] != null);
+  return SITUATION_COLUMNS.some((c) => row[c] != null);
 }
 
 export type GameSource = "imported" | "in_app";

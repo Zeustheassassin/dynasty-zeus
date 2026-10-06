@@ -2,7 +2,7 @@
 import { useMemo, useState } from "react";
 import { isTaggedPlay, type PlayTagSpec, type TagPosition } from "../../../../lib/scouting/playEra";
 import {
-  carriedStickyValues, defaultTagValues, missingTags, tagPayload, tagSpecs, tagValuesFromPlay,
+  carriedStickyValues, defaultTagValues, forcedTagPayload, missingTags, tagPayload, tagSpecs, tagValuesFromPlay,
   type PlayFacts, type TagValue, type TagValues,
 } from "../../../../lib/scouting/playTags";
 
@@ -16,7 +16,7 @@ export interface PlayTags {
   /** After a log, or to leave an edit: back to a fresh play (sticky tags keep their value). */
   reset: () => void;
   startEdit: (play: object) => void;
-  /** Tag columns to spread into the insert / update. Empty while editing an untagged play. */
+  /** Tag columns to spread into the insert / update. Only the forced ones (RPO play action) while editing an untagged play. */
   payload: (facts: PlayFacts) => Record<string, TagValue>;
   /** Required tags still to pick (blocks Log Play / Save Edit). */
   missing: (facts: PlayFacts) => readonly PlayTagSpec[];
@@ -81,7 +81,7 @@ export function usePlayTags(
       setEdit({ untagged, values: untagged ? {} : tagValuesFromPlay(play, position) });
     },
     payload(facts) {
-      return editingUntagged ? {} : tagPayload(position, values, facts);
+      return editingUntagged ? forcedTagPayload(position, facts) : tagPayload(position, values, facts);
     },
     missing(facts) {
       return editingUntagged ? NONE : missingTags(position, values, facts);

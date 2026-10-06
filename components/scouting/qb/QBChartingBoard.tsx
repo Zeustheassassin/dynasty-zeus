@@ -226,13 +226,14 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
   // don't have a meaningful platform read.
   const needPlatformFields = needThrowFields;
   const needPlatformSide = needPlatformFields && platform === "on_the_run";
-  // Which tags apply: play action / better option on every dropback, tight
-  // window / release on throws, sack fault on sacks, run result on designed
-  // runs and scrambles.
   // Only a tipped-ball pick carries the receiver's-fault call (DB CHECK, 066).
   const tippedInt = needThrowFields && completion === "interception" && intType === "tipped";
+  // Which tags apply: play action / better option on every dropback (play
+  // action forced on for an RPO), tight window / release on throws, sack fault
+  // on sacks, run result on designed runs and scrambles.
   const tagFacts: PlayFacts = {
     dropback: needPassFields,
+    rpo: playType === "rpo",
     throw: needThrowFields,
     sack: needPassFields && timing === "sack",
     run: playType === "run" || (needPassFields && timing === "scramble"),
