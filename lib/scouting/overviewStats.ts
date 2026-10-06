@@ -18,7 +18,7 @@
 import type { ProspectWithStats, QBPlay, RBPlay, ScoutingGame, TEPlay } from "../types";
 import type { PffValues } from "../pff/totals";
 
-export type OverviewFmt = "pct0" | "pct1" | "dec1" | "dec2" | "text";
+export type OverviewFmt = "pct0" | "pct1" | "dec1" | "dec2" | "int" | "text";
 /** Which bar colour: the user's charting or PFF. */
 export type OverviewTone = "chart" | "pff";
 
@@ -51,8 +51,8 @@ export interface OverviewSection {
   key: string;
   /** null = continues the section above it (a second row, no heading). */
   title: string | null;
-  /** "lg" / "md" = big-number tiles; "list" = label-and-number rows. */
-  size: "lg" | "md" | "list";
+  /** "lg" / "md" / "sm" = number tiles, biggest first; "list" = label-and-number rows. */
+  size: "lg" | "md" | "sm" | "list";
   stats: OverviewStat[];
 }
 

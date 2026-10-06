@@ -18,7 +18,7 @@ import type {
 } from "../../../lib/types";
 import { ROUTE_TYPES } from "../shared/chartingConstants";
 import ChartingBoard, { type ChartingBoardConfig } from "../shared/ChartingBoard";
-import ProspectOverview, { type OverviewData } from "../overview/ProspectOverview";
+import type { OverviewData } from "../overview/ProspectOverview";
 import { useChartingState } from "../shared/hooks/useChartingState";
 import { usePlayTags } from "../shared/hooks/usePlayTags";
 import PlayTagControls, { PlayTagBadges } from "../shared/PlayTagControls";
@@ -42,18 +42,6 @@ const ALIGNMENTS: { key: Alignment; label: string }[] = [
   { key: "backfield", label: "B" },
 ];
 const NFL_ROLES = ["X", "Y", "Slot", "X or Y", "Y or Slot", "Slot/Gadget", "Anything", "Sacrificial X", "Target Hog Y or Slot", ""];
-
-const tabs = [
-  { key: "overview",  label: "Overview" },
-  { key: "breakdown", label: "Breakdown" },
-  { key: "games",     label: "Games" },
-  { key: "charts",    label: "Charts" },
-  { key: "chart",     label: "Chart Game" },
-];
-
-// Overview (scores, percentiles), Breakdown (Core SAE, open % by alignment) and Charts all
-// render hub-derived data, so a write reloads the hub on entering any of them.
-const WR_FRESH_DATA_TABS: readonly string[] = ["overview", "breakdown", "charts"];
 
 interface Props {
   prospect: Prospect;
@@ -99,7 +87,6 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
 
   const cs = useChartingState(prospect, {
     onDataChanged,
-    freshDataTabs: WR_FRESH_DATA_TABS,
     onDeleteGamePlays: (id) => setPlays((p) => p.filter((pl) => pl.game_id !== id)),
   });
   const { tab, games, selectedGameId, loading, showAddGame, newGame, savingGame, gameError,
@@ -381,7 +368,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
 
   return (
     <ChartingBoard
-      prospect={prospect} config={wrConfig} tabs={tabs} gamePlayCounts={gamePlayCounts}
+      prospect={prospect} config={wrConfig} overviewData={overviewData} gamePlayCounts={gamePlayCounts}
       tab={tab} games={games} selectedGameId={selectedGameId} loading={loading}
       showAddGame={showAddGame} newGame={newGame} savingGame={savingGame} gameError={gameError}
       editBio={editBio} bio={bio} savingBio={savingBio} onBack={onBack}
@@ -437,7 +424,6 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
           {stats.successRate && <div className="text-emerald-400">{stats.successRate}% open</div>}
         </>
       )}
-      renderOverview={() => <ProspectOverview prospectId={prospect.id} data={overviewData} />}
       renderBreakdown={() => (
         <div className="space-y-4">
           {loading ? (
@@ -931,7 +917,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
           )}
         </div>
       )}
-      renderExtraTab={() => {
+      renderCharts={() => {
         const current = allProspects.find((p) => p.id === prospect.id);
         if (!current) return <div className="text-slate-500 text-sm text-center py-12">Loading prospect data…</div>;
         return <PlayerCharts prospect={current} allProspects={allProspects} />;

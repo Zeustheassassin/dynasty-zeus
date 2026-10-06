@@ -3,6 +3,8 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, cleanup, within } from "@testing-library/react";
 import BigBoard from "@/components/scouting/BigBoard";
 import ProspectOverview, { type OverviewData } from "@/components/scouting/overview/ProspectOverview";
+import ProspectScorePieces from "@/components/scouting/overview/ProspectScorePieces";
+import ProspectProduction from "@/components/scouting/overview/ProspectProduction";
 import { EMPTY_GRADING_DATA } from "@/lib/scouting/aeComponents";
 import type { ProspectWithStats, AEScoreLock } from "@/lib/types";
 import type { RoleFit } from "@/lib/scouting/roleFit";
@@ -647,5 +649,55 @@ describe("Prospect Overview agrees with the Big Board", () => {
     render(<ProspectOverview prospectId="qb1" data={overviewData(PROSPECTS, { scoresReady: false })} />);
     expect(screen.getByText(/Loading every position/)).toBeTruthy();
     expect(screen.queryByText("AE SCORE")).toBeNull();
+  });
+});
+
+describe("Prospect report: score pieces, Production and Print / PDF", () => {
+  const POOL = Array.from({ length: 10 }, (_, i) => prospect(`pq${i}`, `Pool QB ${i}`, "QB", 10 + i));
+  const data = (prospects: ProspectWithStats[]): OverviewData => ({
+    prospects, games: [], rbPlays: [], qbPlays: [], tePlays: [], gameRouteCells: null,
+    gradingData: EMPTY_GRADING_DATA, loadPositionPlays: vi.fn(), scoresReady: true,
+  });
+
+  it("breaks the board's AE Score into pieces that add up to it", () => {
+    renderBoard([...PROSPECTS, ...POOL]);
+    const ae = cell("Quarter One", "AE Score")!;
+    cleanup();
+    render(<ProspectScorePieces prospectId="qb1" data={data([...PROSPECTS, ...POOL])} />);
+    const rows = screen.getAllByRole("row").slice(1);
+    expect(within(rows[0]).getByText("AAE")).toBeTruthy();
+    expect(within(rows[0]).getByText("+3.5 on 50 throws")).toBeTruthy();
+    expect(rows.at(-1)!.textContent).toContain(ae);
+  });
+
+  it("says why there's nothing to break down without a score", () => {
+    render(<ProspectScorePieces prospectId="qb1" data={data(PROSPECTS)} />);
+    expect(screen.getByText(/Not scored yet: QBs join the AE Score once 10/)).toBeTruthy();
+  });
+
+  it("points to the import when Production has no numbers yet", () => {
+    render(<ProspectProduction prospectId="qb1" data={data(PROSPECTS)} />);
+    expect(screen.getByText(/No production numbers for his games yet/)).toBeTruthy();
+  });
+
+  it("prints the report on white: Overview, the score pieces and Production, then clears the copy", () => {
+    const print = vi.fn();
+    vi.stubGlobal("print", print);
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => { cb(0); return 1; });
+    render(<ProspectOverview prospectId="qb1" data={data([...PROSPECTS, ...POOL])} />);
+    expect(document.getElementById("prospect-print-root")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Print / PDF" }));
+    const root = document.getElementById("prospect-print-root")!;
+    expect(root.parentElement).toBe(document.body);
+    expect(print).toHaveBeenCalledTimes(1);
+    expect(within(root).getByText("PLAYER REPORT")).toBeTruthy();
+    expect(within(root).getByText("AE Score, piece by piece")).toBeTruthy();
+    expect(within(root).getByText("PRODUCTION")).toBeTruthy();
+    expect(within(root).queryByRole("button", { name: "Print / PDF" })).toBeNull();
+    expect(root.querySelector("article")!.className).toContain("bg-white");
+    fireEvent(window, new Event("afterprint"));
+    expect(document.getElementById("prospect-print-root")).toBeNull();
+    vi.unstubAllGlobals();
+    vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
   });
 });

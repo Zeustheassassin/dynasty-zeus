@@ -18,3 +18,33 @@ body {
   color: var(--foreground);
   font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
+
+/* Prospect report Print / PDF (components/scouting/overview/ProspectOverview.tsx).
+   The print copy is rendered straight into <body> as #prospect-print-root; on
+   paper it is the only thing shown, on a white page, colours kept. */
+#prospect-print-root {
+  display: none;
+}
+
+@media print {
+  @page {
+    margin: 12mm;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+  }
+
+  body > *:not(#prospect-print-root) {
+    display: none !important;
+  }
+
+  /* The print copy's denser layout (more tiles to a row) comes from the
+     report's LIGHT theme; zoom would be dropped by the CSS build. */
+  #prospect-print-root {
+    display: block;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

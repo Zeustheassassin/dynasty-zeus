@@ -30,7 +30,7 @@ import { pffPos } from "../../lib/pff/stats";
 import { EMPTY_GRADING_DATA, type GradingData } from "../../lib/scouting/aeComponents";
 import { traitAverages, traitComponents, traitsFor, TRAIT_WEIGHT, uncoveredTraits, type TraitAverage } from "../../lib/scouting/traits";
 import {
-  COMPOSITE_HEADLINE, COMPOSITE_POS, isCompositePos, liveScoresFrom, scoreViewsFrom, dynastyScores, aeScoreMissingReason,
+  COMPOSITE_HEADLINE, COMPOSITE_POS, isCompositePos, liveScoresFrom, scoreViewsFrom, dynastyScores, aeScoreMissingReason, SAMPLE_UNIT,
   type AEKey, type AEMaps, type ScoreView, type ScoreViewMode,
 } from "../../lib/scouting/prospectScores";
 import { useProspectScores, useDynastyWeights } from "./shared/hooks/useProspectScores";
@@ -77,10 +77,6 @@ const PFF_BAND_TOOLTIP =
   "Import or refresh in Scouting → PFF Links. The results you don't chart yourself (BTT%, TWP%, QB rushing, " +
   "YCO/A, YPRR, YAC) are part of the AE Score; grades aren't.";
 
-// What each AE Score metric counts, for the cell tooltips.
-const SAMPLE_UNIT: Record<string, string> = {
-  aae: "throws", srae: "runs", sae: "routes", csae: "core routes", te_saer: "routes", te_saeb: "blocks",
-};
 const signed = (v: number, dp: number) => `${v >= 0 ? "+" : ""}${v.toFixed(dp)}`;
 
 // Live scores, or a drafted class's scores as they stood at the draft

@@ -6,7 +6,7 @@ import { logger } from "../../../lib/logger";
 
 const log = logger("scouting/qb/QBChartingBoard");
 import ChartingBoard from "../shared/ChartingBoard";
-import ProspectOverview, { type OverviewData } from "../overview/ProspectOverview";
+import type { OverviewData } from "../overview/ProspectOverview";
 import { usePffGameLog } from "../pff/usePffGameLog";
 import { useGameContextLog } from "../context/useGameContextLog";
 import GameContextPanel from "../context/GameContextPanel";
@@ -83,11 +83,6 @@ const DEPTH_SHORT: Record<QBDepthZone, string>   = {
   short_left:"SL", short_center:"SC", short_right:"SR",
 };
 
-// The Overview page (scores, percentiles) and the Charts tab render hub-derived data, so a
-// write reloads the hub on entering them. Breakdown reads this board's own plays + its
-// self-fetched leaguePlays.
-const QB_FRESH_DATA_TABS: readonly string[] = ["overview", "charts"];
-
 export default function QBChartingBoard({ prospect, onBack, onDataChanged, overviewData, allProspects, allGames }: Props) {
   // Position-specific play state
   const [plays, setPlays]                   = useState<QBPlay[]>([]);
@@ -123,7 +118,6 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
   // Shared state via hook
   const cs = useChartingState(prospect, {
     onDataChanged,
-    freshDataTabs: QB_FRESH_DATA_TABS,
     onDeleteGamePlays: (id) => setPlays((p) => p.filter((pl) => pl.game_id !== id)),
   });
   const { tab, games, selectedGameId, loading, showAddGame, newGame, savingGame, gameError,
@@ -438,19 +432,11 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
     cs.markDataDirty();
   }
 
-  const tabs = [
-    { key: "overview",  label: "Overview" },
-    { key: "breakdown", label: "Breakdown" },
-    { key: "games",     label: "Games" },
-    { key: "charts",    label: "Charts" },
-    { key: "chart",     label: "Chart Game" },
-  ];
-
   return (
     <ChartingBoard
       prospect={prospect}
       config={QB_CONFIG}
-      tabs={tabs}
+      overviewData={overviewData}
       gamePlayCounts={gamePlayCounts}
       tab={tab} games={games} selectedGameId={selectedGameId} loading={loading}
       showAddGame={showAddGame} newGame={newGame} savingGame={savingGame} gameError={gameError}
@@ -499,7 +485,6 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
           )}
         </>
       )}
-      renderOverview={() => <ProspectOverview prospectId={prospect.id} data={overviewData} />}
       renderBreakdown={() => (
         <QBOverviewPanel
           plays={plays}
@@ -971,7 +956,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
           )}
         </div>
       )}
-      renderExtraTab={() => (
+      renderCharts={() => (
         <QBPlayerCharts prospect={prospect} allProspects={allProspects} allGames={allGames} leaguePlays={leaguePlays} />
       )}
     />

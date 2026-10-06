@@ -7,7 +7,7 @@ import { logger } from "../../../lib/logger";
 const log = logger("scouting/rb/RBChartingBoard");
 import PlayerNotesList from "../PlayerNotesList";
 import ChartingBoard from "../shared/ChartingBoard";
-import ProspectOverview, { type OverviewData } from "../overview/ProspectOverview";
+import type { OverviewData } from "../overview/ProspectOverview";
 import { usePffGameLog } from "../pff/usePffGameLog";
 import { useGameContextLog } from "../context/useGameContextLog";
 import GameContextPanel from "../context/GameContextPanel";
@@ -145,11 +145,6 @@ interface Props {
   leaguePlays: RBPlay[];
 }
 
-// The Overview page (scores, percentiles) and the Charts tab render hub-derived data, so a
-// write reloads the hub on entering them. Breakdown reads this board's own plays; its league
-// baselines (built from leaguePlays) may be a few plays stale, so it needs no hub reload per write.
-const RB_FRESH_DATA_TABS: readonly string[] = ["overview", "charts"];
-
 export default function RBChartingBoard({ prospect, onBack, onDataChanged, overviewData, allProspects, allGames, leaguePlays }: Props) {
   // Position-specific play state
   const [plays, setPlays]                         = useState<RBPlay[]>([]);
@@ -174,7 +169,6 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
   // Shared state via hook
   const cs = useChartingState(prospect, {
     onDataChanged,
-    freshDataTabs: RB_FRESH_DATA_TABS,
     onDeleteGamePlays: (id) => setPlays((p) => p.filter((pl) => pl.game_id !== id)),
   });
   const { tab, games, selectedGameId, loading, showAddGame, newGame, savingGame, gameError,
@@ -453,19 +447,11 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
     cs.markDataDirty();
   }
 
-  const tabs = [
-    { key: "overview",  label: "Overview" },
-    { key: "breakdown", label: "Breakdown" },
-    { key: "games",     label: "Games" },
-    { key: "charts",    label: "Charts" },
-    { key: "chart",     label: "Chart Game" },
-  ];
-
   return (
     <ChartingBoard
       prospect={prospect}
       config={RB_CONFIG}
-      tabs={tabs}
+      overviewData={overviewData}
       gamePlayCounts={gamePlayCounts}
       tab={tab} games={games} selectedGameId={selectedGameId} loading={loading}
       showAddGame={showAddGame} newGame={newGame} savingGame={savingGame} gameError={gameError}
@@ -510,7 +496,6 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
           <div className="text-green-400">{stats.runAttempts} runs · {stats.routeAttempts} routes</div>
         </>
       )}
-      renderOverview={() => <ProspectOverview prospectId={prospect.id} data={overviewData} />}
       renderBreakdown={() => (
         <div className="space-y-5">
           {loading ? (
@@ -1080,7 +1065,7 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
           )}
         </div>
       )}
-      renderExtraTab={() => (
+      renderCharts={() => (
         <RBPlayerCharts prospect={prospect} allProspects={allProspects} allGames={allGames} leaguePlays={leaguePlays} />
       )}
     />

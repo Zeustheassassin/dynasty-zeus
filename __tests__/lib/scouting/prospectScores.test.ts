@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
 import type { AEScoreLock, ProspectWithStats, ScoutingGame } from "../../../lib/types";
 import {
-  scoreViewsFrom, dynastyScores, gamesByTierFrom, defenseFacedFrom, type ScoreView,
+  scoreViewsFrom, dynastyScores, gamesByTierFrom, defenseFacedFrom, scorePieces, type ScoreView,
 } from "../../../lib/scouting/prospectScores";
+import { buildPositionComposite } from "../../../lib/scouting/aeComposite";
 import { DEFAULT_DYNASTY_WEIGHTS } from "../../../lib/scouting/dynastyScore";
 import type { GameContext } from "../../../lib/scouting/gameContext";
 import type { OpponentTier } from "../../../lib/scouting/opponentTier";
@@ -70,5 +71,48 @@ describe("gamesByTierFrom / defenseFacedFrom", () => {
     const m = defenseFacedFrom(games, contexts);
     expect(m.get("a")).toEqual({ avg: 25, games: 2 });
     expect(m.get("b")).toEqual({ avg: 18, games: 1 });
+  });
+});
+
+describe("scorePieces", () => {
+  // Twelve prospects on a primary metric, a secondary one (WR SAE-like, where a
+  // missing sample counts 0 at full weight) and a per-player component.
+  const ids = Array.from({ length: 12 }, (_, i) => `p${i}`);
+  const sample = (ae: number, n = 120, variance = 4) => ({ ae, n, variance });
+  const primary = { key: "csae", label: "cSAE", weight: 0.7, samples: new Map(ids.map((id, i) => [id, sample(i * 1.5 - 8)])) };
+  const secondary = { key: "sae", label: "SAE", weight: 0.3, samples: new Map(ids.map((id, i) => [id, i === 0 ? null : sample(i - 5)])) };
+  const extra = {
+    key: "yprr", label: "YPRR", weight: 0.5, perPlayer: true as const, minVariance: 1e-6,
+    samples: new Map(ids.slice(0, 11).map((id, i) => [id, sample(i * 0.2, 80, 0.01)])),
+    describe: (_id: string, s: { ae: number }) => `${s.ae.toFixed(2)} yds`,
+  };
+
+  it("adds up to the AE Score, alignment and baseline included", () => {
+    const pc = buildPositionComposite("WR", [primary, secondary, extra], -0.2);
+    for (const id of ["p0", "p5", "p11"]) {
+      const sc = pc.scores.get(id)!;
+      const view: ScoreView = {
+        score: sc.score - 0.18,
+        components: sc.components.map((c) => ({ ...c, tau: 1 })),
+        alignment: { label: "85% of snaps on the right side", value: -0.18 },
+        baseline: sc.baseline,
+      };
+      const pieces = scorePieces(view, pc);
+      expect(pieces.reduce((s, x) => s + x.add, 0)).toBeCloseTo(view.score, 10);
+      expect(pieces.map((x) => x.key)).toContain("baseline");
+      expect(pieces.at(-2)).toMatchObject({ key: "alignment", add: -0.18 });
+      // p11 has no YPRR sample: no per-player piece, and his score is still the sum.
+      expect(pieces.some((x) => x.key === "yprr")).toBe(id !== "p11");
+    }
+  });
+
+  it("describes each piece: AE sample, per-player weight after trust", () => {
+    const pc = buildPositionComposite("WR", [primary, secondary, extra]);
+    const sc = pc.scores.get("p5")!;
+    const pieces = scorePieces({ score: sc.score, components: sc.components.map((c) => ({ ...c, tau: 1 })) }, pc);
+    expect(pieces[0]).toMatchObject({ key: "csae", value: "-0.5 on 120 core routes", weight: "0.7" });
+    const y = pieces.find((x) => x.key === "yprr")!;
+    expect(y.value).toBe("1.00 yds");
+    expect(y.weight).toMatch(/^0\.5 × \d+% = 0\.\d\d$/);
   });
 });

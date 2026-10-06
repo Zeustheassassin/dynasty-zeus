@@ -8,8 +8,10 @@ import { useDeferredDataChanged } from "./useDeferredDataChanged";
 
 const log = logger("scouting/shared/useChartingState");
 
-// Board tabs that render data derived from the hub's own load (allProspects / league plays).
-const DEFAULT_FRESH_DATA_TABS: readonly string[] = ["overview", "charts"];
+// Board tabs that render data derived from the hub's own load: the report's Overview, and
+// Breakdown (the AE Score pieces and the radar charts, plus WR's Core SAE / open % by
+// alignment). Production reads PFF over the charted games, which charting doesn't change.
+const DEFAULT_FRESH_DATA_TABS: readonly string[] = ["overview", "breakdown"];
 
 interface Options {
   /** The hub's reload. Boards should call the returned `markDataDirty()` instead of this directly. */
@@ -17,7 +19,7 @@ interface Options {
   onDeleteGamePlays?: (gameId: string) => void;
   /**
    * Tabs that read hub-derived data and so need a reload when writes are pending. Must be a
-   * stable reference (module constant). Default: overview + charts.
+   * stable reference (module constant). Default: overview + breakdown.
    */
   freshDataTabs?: readonly string[];
 }

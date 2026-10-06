@@ -21,7 +21,7 @@ import {
   aeValues,
   type AESlice,
 } from "./aboveExpected";
-import { buildAEComposite, MIN_POOL, type AEComposite, type CompositePos } from "./aeComposite";
+import { buildAEComposite, MIN_POOL, type AEComposite, type CompositePos, type PositionComposite } from "./aeComposite";
 import { scoreDynasty, type DynastyBreakdown, type DynastyWeights } from "./dynastyScore";
 import { rookieSeasonAge, parseHeightInches } from "./prospectAge";
 import type { OpponentTier } from "./opponentTier";
@@ -179,6 +179,54 @@ export interface ScoreView {
   lockedAt?: string;
   /** In the live view, the draft-day snapshot for reference. */
   atDraft?: { score: number; lockedAt: string };
+}
+
+/** What each headline AE metric counts, for the score explanations. */
+export const SAMPLE_UNIT: Record<string, string> = {
+  aae: "throws", srae: "runs", sae: "routes", csae: "core routes", te_saer: "routes", te_saeb: "blocks",
+};
+
+/** One line of an AE Score, piece by piece. */
+export interface ScorePiece {
+  key: string;
+  label: string;
+  /** His number as shown ("+6.1 on 210 core routes", or a component's own text). */
+  value: string;
+  /** Share of his number taken as real (null for the fixed shifts). */
+  trust: number | null;
+  /** The weight it counts at ("0.7", or "0.5 × 82% = 0.41" for a per-player piece). */
+  weight: string | null;
+  /** How much it adds to the AE Score. The pieces sum to the score. */
+  add: number;
+}
+
+const sgn = (v: number, dp: number) => `${v >= 0 ? "+" : ""}${v.toFixed(dp)}`;
+
+/**
+ * An AE Score, piece by piece: each metric adds weight × z ÷ D, where D is
+ * the summed weight of the position's ready AE metrics plus his per-player
+ * components at weight × trust (buildPositionComposite). Then the WR
+ * alignment penalty and the position baseline. The adds sum to the score.
+ */
+export function scorePieces(view: ScoreView, pc: PositionComposite): ScorePiece[] {
+  const base = pc.metrics.filter((m) => m.ready && !m.perPlayer).reduce((s, m) => s + m.weight, 0);
+  const extra = view.components.reduce((s, c) => s + (c.perPlayer ? c.effectiveWeight ?? 0 : 0), 0);
+  const d = base + extra;
+  const pieces: ScorePiece[] = view.components.map((c) => {
+    const unit = SAMPLE_UNIT[c.key];
+    const value = c.perPlayer
+      ? c.text ?? sgn(c.ae, 2)
+      : c.rawAe != null
+        ? `${sgn(c.ae, 1)} on ${c.n} ${unit ?? "plays"} (${sgn(c.ae - c.rawAe, 1)} for opponents)`
+        : `${sgn(c.ae, 1)} on ${c.n} ${unit ?? "plays"}`;
+    const weight = c.perPlayer
+      ? `${c.weight} × ${Math.round(c.reliability * 100)}% = ${(c.effectiveWeight ?? 0).toFixed(2)}`
+      : `${c.weight}`;
+    return { key: c.key, label: c.label, value, trust: c.reliability, weight, add: d > 0 ? (c.weight * c.z) / d : 0 };
+  });
+  if (view.alignment) pieces.push({ key: "alignment", label: "One-side alignment", value: view.alignment.label, trust: null, weight: null, add: view.alignment.value });
+  if (view.baseline) pieces.push({ key: "baseline", label: "Position baseline", value: `every ${pc.pos} sits ${Math.abs(view.baseline).toFixed(1)} ${view.baseline < 0 ? "lower" : "higher"}`, trust: null, weight: null, add: view.baseline });
+  return pieces;
 }
 
 /**

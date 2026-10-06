@@ -21,7 +21,7 @@ import type {
 import { ROUTE_TYPES } from "../shared/chartingConstants";
 import { pct, fmtPct } from "../shared/chartingTypes";
 import ChartingBoard, { type ChartingBoardConfig } from "../shared/ChartingBoard";
-import ProspectOverview, { type OverviewData } from "../overview/ProspectOverview";
+import type { OverviewData } from "../overview/ProspectOverview";
 import { usePffGameLog } from "../pff/usePffGameLog";
 import { useGameContextLog } from "../context/useGameContextLog";
 import GameContextPanel from "../context/GameContextPanel";
@@ -66,14 +66,6 @@ const TE_CONFIG: ChartingBoardConfig = {
   nflRoles: NFL_ROLES,
 };
 
-const tabs = [
-  { key: "overview",  label: "Overview" },
-  { key: "breakdown", label: "Breakdown" },
-  { key: "games",     label: "Games" },
-  { key: "charts",    label: "Charts" },
-  { key: "chart",     label: "Chart Game" },
-];
-
 interface Props {
   prospect: Prospect;
   onBack: () => void;
@@ -84,11 +76,6 @@ interface Props {
   allGames: ScoutingGame[];
   leaguePlays: TEPlay[];
 }
-
-// The Overview page (scores, percentiles) and the Charts tab render hub-derived data, so a
-// write reloads the hub on entering them. Breakdown reads this board's own plays; its league
-// baselines (built from leaguePlays) may be a few plays stale, so it needs no hub reload per write.
-const TE_FRESH_DATA_TABS: readonly string[] = ["overview", "charts"];
 
 export default function TEChartingBoard({ prospect, onBack, onDataChanged, overviewData, allProspects, allGames, leaguePlays }: Props) {
   const [plays, setPlays] = useState<TEPlay[]>([]);
@@ -114,7 +101,6 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
 
   const cs = useChartingState(prospect, {
     onDataChanged,
-    freshDataTabs: TE_FRESH_DATA_TABS,
     onDeleteGamePlays: (id) => setPlays((p) => p.filter((pl) => pl.game_id !== id)),
   });
   const { tab, games, selectedGameId, loading, showAddGame, newGame, savingGame, gameError,
@@ -394,7 +380,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
 
   return (
     <ChartingBoard
-      prospect={prospect} config={TE_CONFIG} tabs={tabs} gamePlayCounts={gamePlayCounts}
+      prospect={prospect} config={TE_CONFIG} overviewData={overviewData} gamePlayCounts={gamePlayCounts}
       tab={tab} games={games} selectedGameId={selectedGameId} loading={loading}
       showAddGame={showAddGame} newGame={newGame} savingGame={savingGame} gameError={gameError}
       editBio={editBio} bio={bio} savingBio={savingBio} onBack={onBack}
@@ -458,7 +444,6 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
           <div className="text-green-400">{stats.routeAttempts} routes · {stats.blockAttempts} blocks</div>
         </>
       )}
-      renderOverview={() => <ProspectOverview prospectId={prospect.id} data={overviewData} />}
       renderBreakdown={() => (
         <div className="space-y-5">
           {loading ? (
@@ -1003,7 +988,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
           )}
         </div>
       )}
-      renderExtraTab={() => (
+      renderCharts={() => (
         <TEPlayerCharts prospect={prospect} allProspects={allProspects} allGames={allGames} leaguePlays={leaguePlays} />
       )}
     />

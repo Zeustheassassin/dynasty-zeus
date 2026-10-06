@@ -5,6 +5,9 @@ import { GAME_TYPES, CHARTING_DECISIONS } from "./chartingConstants";
 import { BASE_YEAR, FILM_YEARS, classYearOptionsWith } from "../../../lib/helpers/season";
 import { parseGrade, formatGrade, gradeColor, GRADE_MIN, GRADE_MAX } from "../../../lib/scouting/prospectGrade";
 import { DRAFT_ROUND_CHOICES, UNDRAFTED_ROUND, draftRoundLabel } from "../../../lib/draftRound";
+import ProspectOverview, { type OverviewData } from "../overview/ProspectOverview";
+import ProspectScorePieces from "../overview/ProspectScorePieces";
+import ProspectProduction from "../overview/ProspectProduction";
 
 export interface ChartingBoardConfig {
   positionLabel: string;
@@ -12,10 +15,22 @@ export interface ChartingBoardConfig {
   nflRoles: string[];
 }
 
+// Every board has the same tabs. Overview, the head of Breakdown and Production
+// are the prospect report (components/scouting/overview), drawn here for every
+// position; a board supplies its own detail and charts for Breakdown.
+const BOARD_TABS: { key: string; label: string }[] = [
+  { key: "overview",   label: "Overview" },
+  { key: "breakdown",  label: "Breakdown" },
+  { key: "production", label: "Production" },
+  { key: "games",      label: "Games" },
+  { key: "chart",      label: "Chart Game" },
+];
+
 export interface ChartingBoardProps {
   prospect: Prospect;
   config: ChartingBoardConfig;
-  tabs: { key: string; label: string }[];
+  /** ScoutingHub data for the report tabs (scores, percentiles, PFF). */
+  overviewData: OverviewData;
   // Shared UI state
   tab: string;
   games: ScoutingGame[];
@@ -43,13 +58,13 @@ export interface ChartingBoardProps {
   onSaveBio: () => void;
   // Position-specific content
   renderHeaderStats?: () => React.ReactNode;
-  renderOverview: () => React.ReactNode;
-  /** The Breakdown tab: the detail tables behind the Overview page. */
+  /** Breakdown, under the AE Score pieces: the position's detail tables. */
   renderBreakdown?: () => React.ReactNode;
+  /** Breakdown, last: the position's radar charts. */
+  renderCharts?: () => React.ReactNode;
   renderGameBadge?: (game: ScoutingGame) => React.ReactNode;
   renderPlayLogger: (selectedGame: ScoutingGame | null) => React.ReactNode;
   renderGamesTable: () => React.ReactNode;
-  renderExtraTab?: (tabKey: string) => React.ReactNode;
 }
 
 const ACCENT = {
@@ -108,13 +123,13 @@ function GradeInput({ label, value, focusBorder, onChange }: {
 }
 
 export default function ChartingBoard({
-  prospect, config, tabs,
+  prospect, config, overviewData,
   tab, games, selectedGameId, loading, gamePlayCounts,
   showAddGame, newGame, savingGame, gameError,
   editBio, bio, savingBio,
   onBack, onTabChange, onSelectGame, onToggleAddGame, onNewGameChange,
   onAddGame, onDeleteGame, onUpdateGame, onToggleEditBio, onBioChange, onSaveBio,
-  renderGameBadge, renderHeaderStats, renderOverview, renderBreakdown, renderPlayLogger, renderGamesTable, renderExtraTab,
+  renderGameBadge, renderHeaderStats, renderBreakdown, renderCharts, renderPlayLogger, renderGamesTable,
 }: ChartingBoardProps) {
   const a = ACCENT[config.accentColor];
   const selectedGame = games.find((g) => g.id === selectedGameId) ?? null;
@@ -276,7 +291,7 @@ export default function ChartingBoard({
       {/* Tab bar. Five tabs are wider than a phone: the bar scrolls sideways
           there instead of widening the page. */}
       <div className="flex gap-1 border-b border-slate-800 overflow-x-auto">
-        {tabs.map((t) => (
+        {BOARD_TABS.map((t) => (
           <button key={t.key} onClick={() => onTabChange(t.key)}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition whitespace-nowrap ${
               tab === t.key ? a.tabActive : "border-transparent text-slate-400 hover:text-white"
@@ -286,10 +301,19 @@ export default function ChartingBoard({
       </div>
 
       {/* Overview tab */}
-      {tab === "overview" && renderOverview()}
+      {tab === "overview" && <ProspectOverview prospectId={prospect.id} data={overviewData} />}
 
-      {/* Breakdown tab */}
-      {tab === "breakdown" && renderBreakdown?.()}
+      {/* Breakdown tab: how the AE Score adds up, the detail tables, the charts */}
+      {tab === "breakdown" && (
+        <div className="space-y-5">
+          <ProspectScorePieces prospectId={prospect.id} data={overviewData} />
+          {renderBreakdown?.()}
+          {renderCharts?.()}
+        </div>
+      )}
+
+      {/* Production tab */}
+      {tab === "production" && <ProspectProduction prospectId={prospect.id} data={overviewData} />}
 
       {/* Chart Game tab */}
       {tab === "chart" && (
@@ -408,9 +432,6 @@ export default function ChartingBoard({
 
       {/* Games tab */}
       {tab === "games" && renderGamesTable()}
-
-      {/* Position-specific extra tabs (e.g., WR "charts") */}
-      {tab !== "overview" && tab !== "breakdown" && tab !== "chart" && tab !== "games" && renderExtraTab?.(tab)}
     </div>
   );
 }

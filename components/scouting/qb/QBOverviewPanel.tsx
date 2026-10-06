@@ -409,7 +409,8 @@ export default function QBOverviewPanel({ plays, leaguePlays, games, loading }: 
 
           {stats.compTracked > 0 && (
             <div className="mt-3 space-y-2">
-              <div className="flex gap-3">
+              {/* Two by two on a phone: four side by side widened the page past 390 px. */}
+              <div className="grid grid-cols-2 sm:flex gap-3">
                 <div className="flex-1 p-2.5 bg-emerald-900/20 border border-emerald-800/40 rounded-lg flex items-center justify-between">
                   <span className="text-xs text-slate-400">Caught</span>
                   <span className="text-sm font-bold text-emerald-400">{stats.caughtPlays} <span className="text-xs font-normal text-slate-500">/ {stats.compTracked}</span></span>
@@ -428,7 +429,7 @@ export default function QBOverviewPanel({ plays, leaguePlays, games, loading }: 
                 </div>
               </div>
               {stats.intPlays > 0 && (
-                <div className="flex gap-2">
+                <div className="grid grid-cols-2 sm:flex gap-2">
                   {([
                     { key: "bad_throw",    label: "Bad Throw" },
                     { key: "bad_decision", label: "Bad Decision" },
