@@ -3,7 +3,9 @@
 > **Audience:** a developer who has just been handed the keys and has never seen this project.
 > **Goal:** explain what the app is, how the code is structured, how data flows, and how every major subsystem actually works — in enough depth to debug and extend it on day one.
 >
-> *Last reviewed: 2026-10-06, HEAD `c595cd3` (working tree) — **QB AAE grades interceptions on their accuracy again.** The user: AAE is accuracy only, so an on-target pick shouldn't hurt it. [throwValue](lib/scouting/aboveExpected.ts) drops the interception rule (`3b77834`) and its WR Fault exemption (`0f2c4d5`): an on-target pick scores 1.0 like a drop, an off-target one `MISS_BASE`. Turnovers still count in the QB AE Score through PFF TWP% (weight 0.4). The WR Fault Yes / No stays as a record only (the user's choice); its hint now says it doesn't change any grade. Real data: Kamario Taylor +1.20, Bailey +0.59, Manning +0.38, Maiava +0.36, Chambliss +0.22, the rest ≤0.26. See §11 QB AAE item 1. tsc/eslint clean, **1937/131 tests**.*
+> *Last reviewed: 2026-10-06, HEAD `2deae40` (working tree; committed as `cebd186`) — **New prospect Overview page (report page 1) at every position.** Each charting board's Overview tab is now a clean report modeled on Reception Perception's player report. The scores sit up top: AE Score with class rank and trust, Dynasty, Dynasty+, the position's AE metrics and PFF grade. Below them come the charting's win / loss calls (open rate vs coverage, run success by scheme, on-target rate, block wins) and PFF's box-score numbers over the charted games. Each number carries a percentile chip against every prospect at the position. The page has no source labels (the user's call); the tooltips name the source. The old Overview content moved unchanged to a new **Breakdown** tab. The Big Board's score pipeline moved into [prospectScores.ts](lib/scouting/prospectScores.ts) + [useProspectScores](components/scouting/shared/hooks/useProspectScores.ts), so both screens read the same numbers (a test renders both and compares). See §11 "Prospect Overview page". No migration. tsc/eslint/build clean, **1960/133 tests**; stubbed Playwright screenshots (QB pool) at desktop and 390 px.*
+
+> *Prior review: 2026-10-06, HEAD `c595cd3` (working tree; committed as `2deae40`) — **QB AAE grades interceptions on their accuracy again.** The user: AAE is accuracy only, so an on-target pick shouldn't hurt it. [throwValue](lib/scouting/aboveExpected.ts) drops the interception rule (`3b77834`) and its WR Fault exemption (`0f2c4d5`): an on-target pick scores 1.0 like a drop, an off-target one `MISS_BASE`. Turnovers still count in the QB AE Score through PFF TWP% (weight 0.4). The WR Fault Yes / No stays as a record only (the user's choice); its hint now says it doesn't change any grade. Real data: Kamario Taylor +1.20, Bailey +0.59, Manning +0.38, Maiava +0.36, Chambliss +0.22, the rest ≤0.26. See §11 QB AAE item 1. tsc/eslint clean, **1937/131 tests**.*
 >
 > *Prior review: 2026-10-06, HEAD `0f2c4d5` (working tree; committed as `97a2b30`) — **QB board: an RPO is always play action.** With play type RPO, the Play action tag shows on and locked (registry `forced: { by: "rpo" }` in [playEra.ts](lib/scouting/playEra.ts); `tagPayload` writes `true` whatever was clicked; a pass keeps the charter's call). Migration [067](supabase/migrations/067_qb_rpo_play_action.sql) (data only; applied by the user 2026-10-06 14:15 UTC after `97a2b30` was live, verified read-only: all 194 RPOs `play_action = true`, 179 still untagged, other plays unchanged, ledger row) set `play_action = true` on the 182 RPOs not already marked: 3 tagged plays charted with it off and 179 charted before the tags. So those 179 stay old plays, **`isTaggedPlay` now reads the four situation tags only** (every tagged play writes all four; checked read-only on all four tables, 263 tagged QB plays and none elsewhere, so it gives the same answer for every existing row). Editing an untagged play now writes only the forced tags (`forcedTagPayload`: play action on if it's an RPO, NULL if not), never its situation tags. No grade moves: the play-action correction is still switched off and no tag stat reads it. tsc/eslint clean, **1937/131 tests**.*
 >
@@ -452,7 +454,7 @@
 17. [Dev workflow: build, lint, test](#17-dev-workflow-build-lint-test)
 18. [CI pipeline (GitHub Actions)](#18-ci-pipeline-github-actions)
 19. [ESLint & TypeScript rules that bite](#19-eslint--typescript-rules-that-bite)
-20. [Test suite scope (1933 tests, 131 files)](#20-test-suite-scope-1933-tests-131-files)
+20. [Test suite scope (1960 tests, 133 files)](#20-test-suite-scope-1960-tests-133-files)
 21. [Common failure modes & where to look](#21-common-failure-modes--where-to-look)
 22. [Things intentionally NOT done (and why)](#22-things-intentionally-not-done-and-why)
 23. [Known open items & time bombs for the next owner](#23-known-open-items--time-bombs-for-the-next-owner)
@@ -1419,6 +1421,8 @@ Every position board is built on a single shared shell plus a position-specific 
 | QB | [QBChartingBoard.tsx](components/scouting/qb/QBChartingBoard.tsx) | `qb_plays` | blue | Franchise QB / Starter / Bridge / Backup | the richest logger — see below. Adds a 4th **"Charts"** tab ([QBPlayerCharts.tsx](components/scouting/qb/QBPlayerCharts.tsx)). |
 | TE | [TEChartingBoard.tsx](components/scouting/te/TEChartingBoard.tsx) | `te_plays` | **green** | (TE-specific) | dual-purpose: route-running (positioning, coverage, was-open) **and** blocking (run/pass block, movement/inline, block success). Adds a 4th **"Charts"** tab ([TEPlayerCharts.tsx](components/scouting/te/TEPlayerCharts.tsx)). |
 
+Since 2026-10-06 every board's tabs are **Overview · Breakdown · Games · Charts · Chart Game**. Overview is the new report page and Breakdown is the old Overview content; see "Prospect Overview page (report page 1)" below.
+
 > **Naming note:** there is **no `wr_plays` table** — WR receiving data lives in `route_plays` (migrations [007d](supabase/migrations/007d_route_plays_v2.sql)/[007e](supabase/migrations/007e_route_plays_was_open.sql)/[007h](supabase/migrations/007h_route_plays_no_route_run.sql)). The `league_route_baselines`, `prospect_route_stats` and `prospect_route_cells` views are all built from `route_plays`.
 
 **"Fully Charted" auto-promotion** ([deriveChartingDecision](components/scouting/shared/chartingConstants.ts#L21)) promotes a prospect's stored `charting_decision` up the `charting → partial_chart → fully_charted` chain based on per-position thresholds — **WR ≥ 150 routes, TE ≥ 120 routes, QB ≥ 150 throws, RB ≥ 6 games** — but never demotes, and leaves manual `pending`/`not_charting` alone. The counts come from the stat-stub views (`total_throws`, `total_routes`) plumbed through `buildProspectsWithStats`.
@@ -1874,6 +1878,58 @@ Stage 5 of the plan: every charted game, old and new, gets its context filled in
 
 **Verified.** Unit tests: [cfd.test.ts](__tests__/lib/cfd/cfd.test.ts), [weatherCast.test.ts](__tests__/lib/gameContext/weatherCast.test.ts), [contextEffects.test.ts](__tests__/lib/scouting/contextEffects.test.ts) (planted within-player effects recovered, sign rule, noise fails, seeded p), [gameContextGrading.test.ts](__tests__/lib/scouting/gameContextGrading.test.ts), [traits.test.ts](__tests__/lib/scouting/traits.test.ts), [gameContextPanel.test.tsx](__tests__/components/scouting/gameContextPanel.test.tsx), the traits block in BigBoard.test.tsx. Stubbed Playwright (QA login only; every Supabase table and `/api` route served from fake data, every write recorded): PFF Links card and the automatic fill, the Traits band and toggle, the Grading checks sections and a chance-check run, the Games tab (SP+ with rank, rain / dome, the mislabeled opponent, line grades, left-early confirm, hurt toggle, a trait grade saved with the others kept, no grades on old games), 390px without page overflow, no console errors beyond the stubs: 28/28.
 
+### Prospect Overview page (report page 1)
+
+Added 2026-10-06. The user asked for clean, presentable prospect pages like Reception Perception's player report: a 10,000-foot top page, with the detail one tab down. They approved it from a mockup canvas (sample numbers) the same day. **Their calls:**
+- The old Overview could be fully overhauled.
+- AE Score, Dynasty and Dynasty+ go on the top page.
+- **No source labels on the page**: no "charted" / "PFF" tags or notes. The tooltips name the source.
+- Box-score numbers must match PFF.
+- Percentile chips stay.
+- WR alignment comes from the in-app charting, with PFF's wide / slot split as the fallback.
+- Partial PFF coverage shows only in the tooltip.
+- A PDF print option is wanted (not built yet).
+
+- **Tabs, on all four boards:** Overview · Breakdown · Games · Charts · Chart Game.
+  - Breakdown is the old Overview content, unchanged (for QB, `QBOverviewPanel`).
+  - [ChartingBoard](components/scouting/shared/ChartingBoard.tsx) gained `renderBreakdown`.
+  - Its tab bar now scrolls sideways on a phone: five tabs overflowed 390 px.
+- **The page** ([ProspectOverview.tsx](components/scouting/overview/ProspectOverview.tsx)), top to bottom:
+  - A header: name; class, school, size, age, and games / snaps / sample. Chips show the role ("Projects X · used as Y"), the pre / post grade and the draft round.
+  - The score strip.
+  - Full-width sections, then a band of narrow sections, then the chip legend.
+  - It renders once `scoresReady` (all three lazy play loads have landed). Like the Big Board, it calls `loadPositionPlays` for RB / QB / TE, because the AE Score pools every position.
+- **Scores come from one pipeline.**
+  - The Big Board's memo chain (tiers → contexts → covariates → AE columns + composite → live scores → views → Dynasty) moved to [prospectScores.ts](lib/scouting/prospectScores.ts): `computeAEScores`, `liveScoresFrom`, `scoreViewsFrom`, `dynastyScores`, `aeScoreMissingReason`, `gamesByTierFrom`, `defenseFacedFrom`.
+  - The hook [useProspectScores](components/scouting/shared/hooks/useProspectScores.ts) wraps it and adds roles, ages and PFF values.
+  - `useDynastyWeights` holds the Dynasty sliders (localStorage `dynastyScoreWeights`), so the page uses the weights set on the Big Board.
+  - BigBoard keeps its view choices: live / as of draft, the traits toggle, and the draft-day snapshot write.
+  - It was a pure move. The 36 Big Board tests pass unchanged, and "Prospect Overview agrees with the Big Board" renders both screens on the same data and compares AE Score, Dynasty and Dynasty+.
+  - The page shows the live score (no traits), plus "at draft" for a drafted class. Rank is among the scored prospects of his class at his position; trust is the primary metric's reliability.
+- **Numbers** ([overviewStats.ts](lib/scouting/overviewStats.ts), pure).
+  - One builder per position (`wrOverview` / `qbOverview` / `rbOverview` / `teOverview`) returns sections of `OverviewStat`s with exact counts ("84 / 146").
+  - The charting supplies the win / loss calls.
+  - Box-score numbers come from `pffValues` over the charted games, so they match PFF. Without imported PFF stats the charted count stands in, and YPRR, aDOT and the PFF-only sections are left out.
+  - Definitions match the boards and the Analysis tables:
+    - QB graded throws are thrown balls with accuracy charted, tipped balls out.
+    - RB runs are designed carries.
+    - Press is folded into man.
+  - WR Aligned / Depth read `lined_up` (in-app games). Without it they fall back to PFF's wide / slot split, and Depth is dropped.
+  - TE alignment comes from the charting's positioning, since every TE game was charted in the app.
+- **Percentile chips.**
+  - `overviewPagesFor` builds the page of every prospect at the same position, all classes.
+  - `percentileRanks` mid-ranks each stat against the other prospects that have at least its `minN` sample, and only once `PERCENTILE_MIN_POOL` (10) qualify.
+  - Describing stats (`dir` 0: shares, aDOT, TTT) never rank. Lower-is-better stats (drops, TWP, stuffed, pressures allowed) flip.
+  - Chips are green at the 67th percentile and up, red at the 33rd and below.
+- **Freshness:** the Overview reads hub data, so every board's `freshDataTabs` now includes `overview`. WR also includes `breakdown`, which reads Core SAE and open % by alignment from the hub. A charted play reloads the hub once on entering those tabs.
+- **Data path:** ScoutingHub builds `overviewData` (the Big Board's inputs plus `loadPositionPlays` and `scoresReady`) and passes it through each position hub to its board.
+- **Not built yet (next stages):**
+  - Breakdown cleanup: the AE Score piece by piece, with the Charts radars folded in.
+  - A Production tab with PFF's full numbers.
+  - Print / PDF, as a light print version.
+- **Tests:** [overviewStats.test.ts](__tests__/lib/scouting/overviewStats.test.ts), [prospectScores.test.ts](__tests__/lib/scouting/prospectScores.test.ts), and the Overview block in [BigBoard.test.tsx](__tests__/components/scouting/BigBoard.test.tsx).
+- **Browser check:** stubbed scouting data (11 QBs, PFF for one), at desktop width and at 390 px (no sideways scroll).
+
 ### Standings: two ranking rules, one table
 
 [StandingsTab.tsx](components/league/StandingsTab.tsx) does **not** render `standings` in the order it receives it. Teams **at or above** the playoff cut line keep their real seeding (wins desc, then fpts desc); teams **below** it are re-ranked by **max PF, highest first** — once a team is eliminated its record has stopped deciding anything, and points-for penalises a team that lost with points on its bench, so max PF is the better read on who is closest to being good.
@@ -2254,7 +2310,7 @@ The flat config in [eslint.config.mjs](eslint.config.mjs) is minimal: it just sp
 
 Beyond ESLint, TypeScript is strict at the `tsc` step. `tsconfig.json` enables `strict`, plus `noUnusedLocals` and `noUnusedParameters` — so an unused import, variable, or function parameter is a **build/type-check failure**, not a warning. This is the single most common reason a local edit that "looks fine" red-X's in CI.
 
-## 20. Test suite scope (1933 tests, 131 files)
+## 20. Test suite scope (1960 tests, 133 files)
 
 Run via PowerShell. The suite is [Vitest](vitest.config.mts) in a `jsdom` environment, globbing `**/__tests__/**/*.{ts,tsx}` and `**/*.{test,spec}.{ts,tsx}`. It deliberately covers **pure logic and server routes, not UI rendering**. There are no e2e tests. A handful of narrow component-render tests (via `@testing-library/react`) live under [__tests__/components/](__tests__/components/), each pinning one piece of UI behavior (e.g. the Injury Report panels, the Analysis min filters, the Big Board's Above Exp columns).
 
@@ -2270,7 +2326,7 @@ The four "hard cores" — the high-value, previously-untested paths that were gi
 
 **Data-pipeline tests added Sept 21 2026 (audit Batch 2 step 6):** [playersLoad.test.ts](__tests__/hooks/playersLoad.test.ts) (the player-map loader in `useAppState`: `/api/players` failure/empty must not poison `_playersInMemory`, an FC outage loads players but persists nothing, manual refresh during an outage keeps values, cached path overlays current FC values / treats a values-less cache as a miss — each test gets a fresh module graph via `vi.resetModules()` because `_playersInMemory` is module state), [fantasyCalcValues.test.ts](__tests__/lib/helpers/fantasyCalcValues.test.ts) (`fetchFantasyCalcValues` normalisation + throw-on-bad-response, `withFcValues` purity/identity), and new cases in [useCalcValues.test.ts](__tests__/hooks/useCalcValues.test.ts) (empty/non-array 200 is an error and the next call retries). **Step 7 (service-role cache writes):** [supabaseAdmin.test.ts](__tests__/lib/supabaseAdmin.test.ts) (client construction/memoization, missing-key degrade, retry + logged PostgREST message/code, and the server-only import boundary), [afterResponse.test.ts](__tests__/lib/afterResponse.test.ts) (inside/outside a request scope), [cacheWrites.test.ts](__tests__/app/api/cacheWrites.test.ts) (`/api/fc-values` + `/api/cross-league-rosters` write via the service role and never the anon client), and [sleeperWeekly.test.ts](__tests__/app/api/sleeperWeekly.test.ts) (its mocks now capture writes at `upsertCacheRow` and assert the anon client is never written through). **Step 8 (shared FC loader):** [lib/server/fcValues.test.ts](__tests__/lib/server/fcValues.test.ts) (every branch of `getFcValues`: fresh/expired/unusable/unparseable cache, live fetch + service-role write, timeout signal, URL shapes, stale fallback, `allowStale:false`, `maxAgeMs`), [fcValues.test.ts](__tests__/app/api/fcValues.test.ts) (route shell: params, headers, 502), the route + real-helper wiring block in [cacheWrites.test.ts](__tests__/app/api/cacheWrites.test.ts), and the cron tests ([player-value-history](__tests__/app/api/cron/player-value-history.test.ts): 2QB / short-window / never-stale call, 502 with no writes; [simulation-history](__tests__/app/api/cron/simulation-history.test.ts): only-needed-formats, skip / abort / 502 policy).
 
-The remaining files cover helpers (math, scoring, lineup, lineup availability and late-game pivots ([lineupAvailability.test.ts](__tests__/lib/helpers/lineupAvailability.test.ts)), ESPN injury-news reads against real notes ([injuryNews.test.ts](__tests__/lib/helpers/injuryNews.test.ts)), picks, season, formatting, projection volatility, matchup volatility, gameday), the trade calculator, the scouting rank-reorder helper ([rankReorder.test.ts](__tests__/lib/scouting/rankReorder.test.ts)), the role buckets ([roleFit.test.ts](__tests__/lib/scouting/roleFit.test.ts) plus one test file per position), `withRetry`, the env guard, the `useLocalStorage` hook, and one feature hook ([useGamedayDashboard.test.ts](__tests__/app/hooks/useGamedayDashboard.test.ts)). When the suite runs you'll see expected `stderr` lines (e.g. "CRON_SECRET env var is not set", "quota exceeded — write skipped") — those are tests deliberately exercising error branches, not failures.
+The remaining files cover helpers (math, scoring, lineup, lineup availability and late-game pivots ([lineupAvailability.test.ts](__tests__/lib/helpers/lineupAvailability.test.ts)), ESPN injury-news reads against real notes ([injuryNews.test.ts](__tests__/lib/helpers/injuryNews.test.ts)), picks, season, formatting, projection volatility, matchup volatility, gameday), the trade calculator, the scouting rank-reorder helper ([rankReorder.test.ts](__tests__/lib/scouting/rankReorder.test.ts)), the role buckets ([roleFit.test.ts](__tests__/lib/scouting/roleFit.test.ts) plus one test file per position), the shared score pipeline ([prospectScores.test.ts](__tests__/lib/scouting/prospectScores.test.ts)) and the Overview page numbers and percentiles ([overviewStats.test.ts](__tests__/lib/scouting/overviewStats.test.ts)), `withRetry`, the env guard, the `useLocalStorage` hook, and one feature hook ([useGamedayDashboard.test.ts](__tests__/app/hooks/useGamedayDashboard.test.ts)). When the suite runs you'll see expected `stderr` lines (e.g. "CRON_SECRET env var is not set", "quota exceeded — write skipped") — those are tests deliberately exercising error branches, not failures.
 
 ## 21. Common failure modes & where to look
 
@@ -2328,7 +2384,7 @@ Other lower-priority items the audit flagged that I did not re-verify line-by-li
 4. `npm run dev` → confirm the app loads at `http://localhost:3000`.
 5. `npm run build` → confirm a production build succeeds (also generates `.next/types/` so the next step works).
 6. `npx tsc --noEmit` → confirm type-check passes (run it *after* the build).
-7. **In PowerShell** (not Git Bash): `npm run test` → confirm **1720 tests pass** across 112 files. If you see "0 tests," you're in the wrong shell.
+7. **In PowerShell** (not Git Bash): `npm run test` → confirm **1960 tests pass** across 133 files. If you see "0 tests," you're in the wrong shell.
 8. `npm run lint` → confirm clean (remember `exhaustive-deps` warnings won't fail it; the four error rules will).
 9. Read [AGENTS.md](AGENTS.md) — it warns this Next.js version diverges from public docs; consult `node_modules/next/dist/docs/` before writing framework code.
 10. Walk the entry path: [app/page.tsx](app/page.tsx) → [app/hooks/useAppState.ts](app/hooks/useAppState.ts) → [app/components/HubRouter.tsx](app/components/HubRouter.tsx).
