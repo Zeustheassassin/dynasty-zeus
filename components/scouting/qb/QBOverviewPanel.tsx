@@ -83,6 +83,8 @@ export default function QBOverviewPanel({ plays, leaguePlays, games, loading }: 
       fifty_fifty: thrownPlays.filter((p) => p.int_type === "fifty_fifty").length,
       tipped: thrownPlays.filter((p) => p.int_type === "tipped").length,
     };
+    // Tipped picks charted as the receiver's fault (scored like a drop in AAE).
+    const intReceiverFault = thrownPlays.filter((p) => p.int_receiver_fault === true).length;
 
     const touchTracked = gradedThrows.filter((p) => p.touch != null);
     const touchCorrect = touchTracked.filter((p) => p.touch === "correct").length;
@@ -202,7 +204,7 @@ export default function QBOverviewPanel({ plays, leaguePlays, games, loading }: 
       totalPlays, runPlays: runPlays.length, passRpo: passRpoPlays.length,
       thrown: thrownPlays.length, graded: gradedThrows.length, scrambles: scramblePlays.length,
       snapCounts, typeCounts, timingCounts, accCounts, onTargetPct,
-      compTracked, caughtPlays, incompletePlays, intPlays, catchPct, intPct, intTypeCounts,
+      compTracked, caughtPlays, incompletePlays, intPlays, catchPct, intPct, intTypeCounts, intReceiverFault,
       touchTracked: touchTracked.length, touchCorrect, touchPct,
       accByDepth, depthTierTotals,
       zoneStats, routeStats, cvgStats,
@@ -438,6 +440,9 @@ export default function QBOverviewPanel({ plays, leaguePlays, games, loading }: 
                       <div key={key} className="flex-1 p-2 bg-orange-900/20 border border-orange-800/30 rounded text-center">
                         <div className="text-xs text-slate-500 mb-0.5">{label}</div>
                         <div className="text-sm font-bold text-orange-300">{n || "—"}</div>
+                        {key === "tipped" && stats.intReceiverFault > 0 && (
+                          <div className="text-[10px] text-emerald-400/80">{stats.intReceiverFault} receiver&apos;s fault</div>
+                        )}
                       </div>
                     );
                   })}

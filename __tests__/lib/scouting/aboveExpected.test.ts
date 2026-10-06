@@ -295,6 +295,28 @@ describe("computeQBAboveExpected", () => {
     expect(out.get("picked")!).toBe(out.get("missed")!);
   });
 
+  it("graded throw value: a tipped pick that was the receiver's fault scores like a drop", () => {
+    // A perfect ball that pops off the receiver into a defender's hands. Charted
+    // as his fault, the QB scores it like a drop; charted not his fault (or not
+    // asked, NULL), it stays a miss.
+    const prospects = [prospect("recFault", "QB"), prospect("notFault", "QB"), prospect("unasked", "QB"), prospect("dropped", "QB")];
+    const games = [game("g_r", "recFault"), game("g_n", "notFault"), game("g_u", "unasked"), game("g_d", "dropped")];
+    const sample = (g: string, two: Partial<QBPlay> & { accuracy: QBAccuracy }) => [
+      ...repeat(28, (i) => qbPlay(g, { accuracy: i % 4 ? "on_target" : "high", completion: i % 4 ? "caught" : "incomplete", depth_zone: "mid_center" })),
+      ...repeat(2, () => qbPlay(g, { depth_zone: "mid_center", ...two })),
+    ];
+    const tippedPick = { accuracy: "on_target" as const, completion: "interception" as const, int_type: "tipped" as const };
+    const out = computeQBAboveExpected(prospects, games, [
+      ...sample("g_r", { ...tippedPick, int_receiver_fault: true }),
+      ...sample("g_n", { ...tippedPick, int_receiver_fault: false }),
+      ...sample("g_u", { ...tippedPick, int_receiver_fault: null }),
+      ...sample("g_d", { accuracy: "on_target", completion: "incomplete" }),
+    ]);
+    expect(out.get("recFault")!).toBe(out.get("dropped")!);
+    expect(out.get("notFault")!).toBeLessThan(out.get("recFault")!);
+    expect(out.get("unasked")!).toBe(out.get("notFault")!);
+  });
+
   it("league-wide AAE nets to 0 (play-weighted) even when QBs face different situations", () => {
     // The unpenalized intercept makes the league's expected sum equal its actual
     // sum — the QBStatsTable footer relies on this.

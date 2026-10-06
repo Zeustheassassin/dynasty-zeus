@@ -97,6 +97,9 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
   const [accuracy, setAccuracy]             = useState<QBAccuracy | null>(null);
   const [completion, setCompletion]         = useState<QBCompletion | null>(null);
   const [intType, setIntType]               = useState<QBIntType | null>(null);
+  // Tipped-ball INTs only: was it the receiver's fault? Defaults to No (the
+  // pick scores as a miss), so the charter only clicks when it was on him.
+  const [intReceiverFault, setIntReceiverFault] = useState(false);
   const [targetPos, setTargetPos]           = useState<QBTargetPos | null>(null);
   const [depthZone, setDepthZone]           = useState<QBDepthZone | null>(null);
   const [routeType, setRouteType]           = useState<RouteType | null>(null);
@@ -226,6 +229,8 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
   // Which tags apply: play action / better option on every dropback, tight
   // window / release on throws, sack fault on sacks, run result on designed
   // runs and scrambles.
+  // Only a tipped-ball pick carries the receiver's-fault call (DB CHECK, 066).
+  const tippedInt = needThrowFields && completion === "interception" && intType === "tipped";
   const tagFacts: PlayFacts = {
     dropback: needPassFields,
     throw: needThrowFields,
@@ -250,6 +255,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
     setAccuracy(null);
     setCompletion(null);
     setIntType(null);
+    setIntReceiverFault(false);
     setTargetPos(null);
     setDepthZone(null);
     setRouteType(null);
@@ -271,6 +277,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
     setAccuracy(pl.accuracy);
     setCompletion(pl.completion);
     setIntType(pl.int_type);
+    setIntReceiverFault(pl.int_receiver_fault ?? false);
     setTargetPos(pl.target_pos);
     setDepthZone(pl.depth_zone);
     setRouteType(pl.route_type);
@@ -355,6 +362,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
       accuracy:   isThrow ? accuracy   : null,
       completion: isThrow ? completion : null,
       int_type:   isThrow ? intType    : null,
+      int_receiver_fault: tippedInt ? intReceiverFault : null,
       target_pos: isThrow ? targetPos  : null,
       depth_zone: isThrow ? depthZone  : null,
       route_type: isThrow ? routeType : null,
@@ -390,6 +398,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
       accuracy:   isThrow ? accuracy   : null,
       completion: isThrow ? completion : null,
       int_type:   isThrow ? intType    : null,
+      int_receiver_fault: tippedInt ? intReceiverFault : null,
       target_pos: isThrow ? targetPos  : null,
       depth_zone: isThrow ? depthZone  : null,
       route_type: isThrow ? routeType  : null,
@@ -674,7 +683,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
                         ] as { key: QBIntType; label: string }[]).map(({ key, label }) => (
                           <button
                             key={key}
-                            onClick={() => setIntType((t) => t === key ? null : key)}
+                            onClick={() => { setIntType((t) => t === key ? null : key); setIntReceiverFault(false); }}
                             className={`px-4 py-1.5 rounded text-xs font-medium transition ${
                               intType === key ? "bg-orange-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"
                             }`}
@@ -683,6 +692,32 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
                           </button>
                         ))}
                       </div>
+                      {/* Tipped pick: the receiver's fault scores like a drop in QB AAE */}
+                      {intType === "tipped" && (
+                        <div className="mt-3">
+                          <div className="text-xs text-slate-500 mb-2">
+                            {(targetPos ?? "wr").toUpperCase()} Fault
+                            <span className="text-slate-600 ml-2">Yes = QB graded as if it were a drop</span>
+                          </div>
+                          <div className="flex gap-2">
+                            {([
+                              { value: true,  label: "Yes", cls: "bg-emerald-700" },
+                              { value: false, label: "No",  cls: "bg-orange-700" },
+                            ]).map(({ value, label, cls }) => (
+                              <button
+                                key={label}
+                                onClick={() => setIntReceiverFault(value)}
+                                aria-pressed={intReceiverFault === value}
+                                className={`px-4 py-1.5 rounded text-xs font-medium transition ${
+                                  intReceiverFault === value ? `${cls} text-white` : "bg-slate-800 text-slate-400 hover:bg-slate-700"
+                                }`}
+                              >
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -835,6 +870,9 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, allPr
                         <span className="text-red-400 font-bold">
                           INT{pl.int_type ? ` (${pl.int_type === "bad_throw" ? "BT" : pl.int_type === "bad_decision" ? "BD" : pl.int_type === "fifty_fifty" ? "50" : "TP"})` : ""}
                         </span>
+                      )}
+                      {pl.int_receiver_fault && (
+                        <span className="text-emerald-400">{(pl.target_pos ?? "wr").toUpperCase()} fault</span>
                       )}
                       {pl.depth_zone && <span className="text-blue-300">{DEPTH_SHORT[pl.depth_zone]}</span>}
                       {pl.route_type && <span className="text-slate-300 capitalize">{pl.route_type}</span>}

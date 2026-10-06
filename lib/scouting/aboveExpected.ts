@@ -168,6 +168,7 @@ export function aeValues(samples: Map<string, AESample | null>): Map<string, num
 // pinpoint passer.
 //
 //   interception         → MISS_BASE                (0.20, whatever the grade)
+//     … receiver's fault → scored like a drop (by its grade, below)
 //   on_target            → 1.00
 //   any miss, caught     → MISS_BASE + CATCH_BONUS  (0.30)
 //   any miss, not caught → MISS_BASE                (0.20)
@@ -179,13 +180,19 @@ export function aeValues(samples: Map<string, AESample | null>): Map<string, num
 // itself is PFF's TWP% in the AE Score (pffComponents.ts), and the AE Score
 // counts each skill once.
 //
+// The one exception (2026-10-06): a tipped-ball pick charted as the
+// receiver's fault (int_receiver_fault, migration 066), e.g. a perfect ball to
+// an open man that pops off him into the safety's hands. That's a drop that
+// happened to be caught by the defense, so it scores like one: on target =
+// 1.0, a miss = MISS_BASE.
+//
 // All values are tunable. Both the QB's actual value and every league baseline
 // are computed on this scale. tipped_ball / null accuracy never reach here
 // (filtered out by isQBGradedThrow).
 const MISS_BASE = 0.2;
 const CATCH_BONUS = 0.1;
 function throwValue(pl: QBPlay): number {
-  if (pl.completion === "interception") return MISS_BASE;
+  if (pl.completion === "interception" && !pl.int_receiver_fault) return MISS_BASE;
   if (pl.accuracy === "on_target") return 1;
   if (pl.accuracy == null) return 0;  // not reached — filtered upstream
   return pl.completion === "caught" ? MISS_BASE + CATCH_BONUS : MISS_BASE;
@@ -355,8 +362,9 @@ export function computeRBRunSliceSRAE(
 //   pressure handling, route type.
 //
 // Throw value is the graded score from throwValue() — on-target vs not, plus a
-// small bonus if a miss was caught, and an interception always a miss — so the
-// metric leans on QB placement, not receiver bail-outs.
+// small bonus if a miss was caught, and an interception a miss unless it was
+// the receiver's fault — so the metric leans on QB placement, not receiver
+// bail-outs (or receiver mistakes).
 //
 // The difficulty model (difficultyModel.ts) is a ridge-regularized fractional
 // logistic regression of throw value on one-hot buckets of all seven
