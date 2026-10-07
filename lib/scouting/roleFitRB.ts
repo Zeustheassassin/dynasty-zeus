@@ -1,6 +1,7 @@
 // RB role buckets: Three-down, Zone, Gap/Power, Receiving and Big-play
-// (approved by the user, 2026-10-02). Scoring is shared (roleFit.ts); this
-// file holds the RB features and recipes.
+// (approved by the user, 2026-10-02), plus Goal-line (2026-10-07), a
+// complement role (roleFit.ts COMPLEMENT_LINE). Scoring is shared
+// (roleFit.ts); this file holds the RB features and recipes.
 //
 // Every game counts. Unlike WR, the RB games charted before 2026-05-01 were
 // charted play by play (each took 13+ minutes; the WR import went in under
@@ -23,10 +24,18 @@
 // games (pressures allowed per pass-block snap; tape-grading expansion, Stage
 // 4), blended with the charted pass-block wins by reps. Without PFF rows the
 // gate reads the charting alone, as before.
+//
+// Goal-line (the user's recipe, 2026-10-07): inside runs above expected,
+// runs vs a loaded box, PFF yards after contact and missed tackles per carry,
+// not getting stuffed, the user's Power trait grade, and success on tagged
+// short-yardage / goal-line runs. Power counts once he has a graded game and
+// the short-yardage runs once he has RB_SY_TAG_MIN of them; until then the
+// other weights stretch to cover them.
 import type { Prospect, RBPlay, RBRunType, ScoutingGame } from "../types";
 import type { PffTotals } from "../pff/totals";
 import { computeRBRoleSlices } from "./aboveExpected";
 import { parseHeightInches } from "./prospectAge";
+import { traitAverages, type TraitAverage } from "./traits";
 import {
   buildRoleFit, contrastFeature, skillFeature, usageFeature,
   type AESliceValue, type BucketRecipe, type Feature, type FeatureSet, type RoleFit,
@@ -57,18 +66,39 @@ const SCALE = {
   // PFF pressures allowed per pass-block snap, pts under the pool's;
   // calibrated on the 2026-10-05 charting (prior REC_PRIOR snaps).
   pffPassPro: 2.2,
+  // Goal-line (2026-10-07), calibrated the same way on the 2026-10-07 data:
+  // inside-run AE (pts), PFF yards after contact per carry over the pool's
+  // (hundredths of a yard), and stuffs per run under the pool's (pts).
+  insideAE: 5.3,
+  yco: 24,
+  notStuffed: 2,
+  // PROVISIONAL, nothing to calibrate on yet (no Power grades, 5 tagged
+  // short-yardage runs in the pool): Power grade points over the 1–10 scale's
+  // midpoint, and short-yardage success pts over the pool's.
+  power: 1.8,
+  shortYardage: 8,
 } as const;
 
 const RUN_TYPES: readonly RBRunType[] = ["outside_zone", "inside_zone", "outside_man_gap", "inside_man_gap"];
 const isKnownRun = (pl: RBPlay) => RUN_TYPES.includes(pl.run_type) && pl.success !== null;
 const isZone = (pl: RBPlay) => pl.run_type === "outside_zone" || pl.run_type === "inside_zone";
 const isGap = (pl: RBPlay) => pl.run_type === "outside_man_gap" || pl.run_type === "inside_man_gap";
+const isInside = (pl: RBPlay) => pl.run_type === "inside_zone" || pl.run_type === "inside_man_gap";
+const isShortYardage = (pl: RBPlay) => isKnownRun(pl) && pl.short_yardage === true;
+
+// Tagged short-yardage / goal-line runs before their success counts.
+export const RB_SY_TAG_MIN = 10;
+const SY_PRIOR = 15;
+// Power grades: pseudo-games pulling his average toward the scale's midpoint.
+const POWER_PRIOR = 2;
+const POWER_MID = 5.5;
 
 const RB_SLICES = {
   all:    { pred: () => true },
   loaded: { pred: (pl: RBPlay) => pl.loaded_box },
   zone:   { pred: isZone, byRunType: true },
   gap:    { pred: isGap, byRunType: true },
+  inside: { pred: isInside, byRunType: true },
 };
 type RBSliceKey = keyof typeof RB_SLICES;
 
@@ -87,17 +117,19 @@ const RATES = {
   // Drops per target (success false = dropped; null = not caught but not a
   // drop, e.g. an uncatchable ball, so it doesn't count against his hands).
   drops:     (plays: RBPlay[]) => rateOf(routesOf(plays).filter((pl) => pl.targeted), (pl) => pl.success === false),
+  shortYardage: (plays: RBPlay[]) => rateOf(plays.filter(isShortYardage), (pl) => pl.success === true),
 };
 type RateKey = keyof typeof RATES;
 
-/** His rate minus the league's, as a skill feature. `perUnit` shows a count per rep (missed tackles can be 2+ on one carry) instead of a %. */
-function rateFeature(label: string, his: Rate, league: Rate, prior: number, scale: number, unit: string, lowerIsBetter = false, perUnit = false): Feature {
+/** His rate minus the league's, as a skill feature. `perUnit` shows a count per rep (missed tackles can be 2+ on one carry) instead of a %; a string names it (e.g. " yds after contact per carry"). */
+function rateFeature(label: string, his: Rate, league: Rate, prior: number, scale: number, unit: string, lowerIsBetter = false, perUnit: boolean | string = false): Feature {
   const h = pctOf(his), l = pctOf(league);
   const diff = h != null && l != null ? (lowerIsBetter ? l - h : h - l) : null;
   const f = skillFeature(label, diff, his.n, prior, scale, unit);
   if (h == null || l == null) return f;
   const show = (v: number) => (perUnit ? (v / 100).toFixed(2) : `${v.toFixed(0)}%`);
-  return { ...f, display: `${show(h)} vs ${show(l)} league${perUnit ? " per carry" : ""} on ${his.n} ${unit}` };
+  const per = typeof perUnit === "string" ? perUnit : perUnit ? " per carry" : "";
+  return { ...f, display: `${show(h)} vs ${show(l)} league${per} on ${his.n} ${unit}` };
 }
 
 const NO_RATE: Rate = { hits: 0, n: 0 };
@@ -132,6 +164,11 @@ export interface RBRoleInputs {
   leaguePffExplosive?: Rate | null;
   pffMissedTackles?: Rate | null;
   leaguePffMissedTackles?: Rate | null;
+  /** PFF yards after contact per carry over his charted games, and the pool's. */
+  pffYco?: Rate | null;
+  leaguePffYco?: Rate | null;
+  /** His Power trait average over graded games (traits.ts). */
+  power?: TraitAverage | null;
 }
 
 export function rbFeatures(inp: RBRoleInputs): FeatureSet {
@@ -154,7 +191,22 @@ export function rbFeatures(inp: RBRoleInputs): FeatureSet {
     recOpen: rateFeature("Open on routes", mine.open, league.open, REC_PRIOR, SCALE.recOpen, "routes"),
     bigOpen: rateFeature("Open on longer routes", mine.bigOpen, league.bigOpen, REC_PRIOR, SCALE.bigOpen, "longer routes"),
     hands: rateFeature("Hands (drops)", mine.drops, league.drops, REC_PRIOR, SCALE.hands, "targets", true),
+    insideAE: skillFeature("Inside runs", slices.inside.ae, slices.inside.n, RUN_PRIOR, SCALE.insideAE, "runs"),
+    yco: rateFeature("Yards after contact (PFF)", inp.pffYco ?? NO_RATE, inp.leaguePffYco ?? NO_RATE, RATE_PRIOR, SCALE.yco, "carries", false, " yds after contact per carry"),
+    // The other side of Big-play's style marker: for a goal-line back, fewer stuffs is better.
+    notStuffed: rateFeature("Not stuffed", mine.stuff, league.stuff, RATE_PRIOR, SCALE.notStuffed, "runs", true),
   };
+  // Left out (weights renormalize) until there's something to read.
+  if (mine.shortYardage.n >= RB_SY_TAG_MIN && league.shortYardage.n > 0) {
+    f.shortYardage = rateFeature("Short yardage / goal line (tagged)", mine.shortYardage, league.shortYardage, SY_PRIOR, SCALE.shortYardage, "tagged runs");
+  }
+  const pw = inp.power;
+  if (pw && pw.games > 0) {
+    f.power = {
+      ...skillFeature("Power (your grade)", pw.avg - POWER_MID, pw.games, POWER_PRIOR, SCALE.power, "graded games"),
+      display: `${pw.avg.toFixed(1)} / 10 over ${pw.games} graded game${pw.games === 1 ? "" : "s"}`,
+    };
+  }
   f.handsOk = meetsBar(f.hands, HANDS_BAR, "Hands (no drops)");
   // Pass protection for the gate: the charted wins, blended by reps with PFF's
   // pressures allowed when he has PFF pass-block snaps.
@@ -251,6 +303,22 @@ export const RB_RECIPES: readonly BucketRecipe[] = [
       { feature: "stuffed", weight: 0.1 },
     ],
   },
+  {
+    // The user's recipe (2026-10-07). A complement role: it's added after his
+    // lead role ("Zone / Goal-line") unless no other role reaches 60%.
+    // shortYardage and power are absent until he has them (renormalized).
+    role: "goal_line",
+    ingredients: [
+      { feature: "insideAE", weight: 0.25, core: true },
+      { feature: "shortYardage", weight: 0.15 },
+      { feature: "power", weight: 0.15 },
+      { feature: "yco", weight: 0.15, core: true },
+      { feature: "btk", weight: 0.1 },
+      { feature: "notStuffed", weight: 0.1 },
+      { feature: "loaded", weight: 0.1 },
+    ],
+    size: { minWeightLb: 215 },
+  },
 ];
 
 /** Null under RB_MIN_RUNS. */
@@ -293,6 +361,8 @@ export function computeRBRoleFits(
   const pffPP = pffRate((s) => s.pressures_allowed, (s) => s.pass_block_snaps);
   const pffExpl = pffRate((s) => s.rush_10plus, (s) => s.rush_att);
   const pffMtf = pffRate((s) => s.rush_mtf, (s) => s.rush_att);
+  const pffYco = pffRate((s) => s.yco, (s) => s.rush_att);
+  const traits = traitAverages(rbs, games);
   const slices = computeRBRoleSlices(prospects, games, rbPlays, RB_SLICES);
   const league = Object.fromEntries((Object.keys(RATES) as RateKey[]).map((k) => [k, RATES[k](rbPlays)])) as Record<RateKey, Rate>;
   const gameToProspect = new Map(games.map((g) => [g.id, g.prospect_id]));
@@ -317,6 +387,9 @@ export function computeRBRoleFits(
       leaguePffExplosive: pffExpl.pool,
       pffMissedTackles: pffMtf.mine.get(p.id) ?? null,
       leaguePffMissedTackles: pffMtf.pool,
+      pffYco: pffYco.mine.get(p.id) ?? null,
+      leaguePffYco: pffYco.pool,
+      power: traits.get(p.id)?.power ?? null,
     }) : null);
   }
   return out;

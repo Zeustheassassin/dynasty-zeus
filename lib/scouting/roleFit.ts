@@ -37,7 +37,7 @@
 export type RolePos = "QB" | "RB" | "WR" | "TE";
 
 export type WRRole = "x" | "y" | "slot" | "gadget";
-export type RBRole = "three_down" | "zone" | "gap" | "receiving" | "big_play";
+export type RBRole = "three_down" | "zone" | "gap" | "receiving" | "big_play" | "goal_line";
 export type TERole = "inline_y" | "move" | "h_back" | "blocking";
 export type QBRole = "creator" | "distributor" | "vertical" | "dual_threat";
 export type RoleKey = WRRole | RBRole | TERole | QBRole;
@@ -54,6 +54,11 @@ export interface RoleInfo {
   /** The catch-all: never competes, and leads only when every other bucket is
    *  under FALLBACK_LINE. */
   fallback?: true;
+  /** A complement role (RB Goal-line): named only when it fits
+   *  (COMPLEMENT_LINE+), and it leads only when no regular role reaches that
+   *  line. Otherwise, when it's his best or near-best match, it's shown after
+   *  the lead role ("Zone / Goal-line"), however high. */
+  complement?: true;
 }
 
 // Each position's buckets, highest ceiling first. The user wants the best case
@@ -75,6 +80,7 @@ export const ROLES: Record<RolePos, readonly RoleInfo[]> = {
     { key: "gap",        label: "Gap/Power",  short: "Gap",     tier: 2, description: "Wins on gap runs and against a stacked box, breaks tackles; heavier." },
     { key: "receiving",  label: "Receiving",  short: "Recv",    tier: 3, description: "Runs a lot of routes, often split out wide, gets open on longer routes." },
     { key: "big_play",   label: "Big-play",   short: "BigPlay", tier: 4, description: "Change of pace: lots of explosive runs and lots of runs stopped at or behind the line." },
+    { key: "goal_line",  label: "Goal-line",  short: "GL",      tier: 5, complement: true, description: "Short-yardage and goal-line back: wins on inside runs and against a loaded box, runs through contact (PFF yards after contact and missed tackles), rarely stuffed; your Power grade and his tagged short-yardage runs (10+) count once he has them. A complement: shown after his lead role (Zone / Goal-line) unless no other role reaches 60%." },
   ],
   TE: [
     { key: "inline_y", label: "Inline Y",    short: "InlineY",  tier: 0, description: "Mostly tight to the line; blocks well on the line and on the move and still runs routes." },
@@ -99,6 +105,11 @@ export const NEAR_TIE = 5;
 // The catch-all bucket (WR Gadget) leads when every other bucket is under
 // this: he isn't at least average at any real role.
 export const FALLBACK_LINE = 50;
+// A complement role (RB Goal-line) fits at this match, and can't lead once a
+// regular role reaches it; it's added after that role instead (the user's
+// call, 2026-10-07: "Zone / Goal-line" even at 95% Goal-line). Under it, the
+// complement isn't named as a second role either.
+export const COMPLEMENT_LINE = 60;
 // A match this high counts toward Versatile, which takes two such buckets.
 export const VERSATILE_PCT = 70;
 // A position's own Versatile rule, where it has one: every listed bucket
@@ -204,7 +215,8 @@ export interface RoleFit {
   pos: RolePos;
   /** The headline: the best case. */
   best: RoleKey;
-  /** A second bucket within NEAR_TIE of the best, shown as "best / hybrid". */
+  /** A second bucket within NEAR_TIE of the best, or a complement role (RB
+   *  Goal-line) that fits, shown as "best / hybrid". */
   hybrid: RoleKey | null;
   /** One per bucket, in ROLES order. */
   matches: RoleMatch[];
@@ -401,8 +413,12 @@ export function buildRoleFit(inp: FitInputs): RoleFit {
   const tierOf = (k: RoleKey) => roleInfo(k).tier;
   const byPct = (a: RoleMatch, b: RoleMatch) => b.pct - a.pct || rank(a.role) - rank(b.role);
   // The catch-all doesn't compete: it leads only when no real bucket reaches
-  // FALLBACK_LINE.
-  const pool = matches.filter((m) => !roleInfo(m.role).fallback);
+  // FALLBACK_LINE. A complement competes only while no regular bucket reaches
+  // COMPLEMENT_LINE.
+  const regular = matches.filter((m) => !roleInfo(m.role).fallback && !roleInfo(m.role).complement);
+  const complement = matches.find((m) => roleInfo(m.role).complement);
+  const sidelined = complement != null && regular.some((m) => m.pct >= COMPLEMENT_LINE);
+  const pool = complement && !sidelined ? [...regular, complement] : regular;
   const fallback = matches.find((m) => roleInfo(m.role).fallback);
   const top = Math.max(...pool.map((m) => m.pct));
   let best: RoleMatch;
@@ -420,7 +436,11 @@ export function buildRoleFit(inp: FitInputs): RoleFit {
     best = proven.length
       ? [...proven].sort((a, b) => tierOf(a.role) - tierOf(b.role) || byPct(a, b))[0]
       : [...contenders].sort(byPct)[0];
-    hybrid = contenders.filter((m) => m.role !== best.role).sort(byPct)[0] ?? null;
+    const fits = (m: RoleMatch) => !roleInfo(m.role).complement || m.pct >= COMPLEMENT_LINE;
+    hybrid = contenders.filter((m) => m.role !== best.role && fits(m)).sort(byPct)[0] ?? null;
+    // A sidelined complement that would have led or tied takes the second
+    // slot, over a near-tie regular bucket (whose % still shows).
+    if (sidelined && fits(complement) && complement.pct >= top - NEAR_TIE) hybrid = complement;
   }
   const skillOnly = !Object.values(inp.features).some((f) => f?.kind === "usage");
   const n = inp.sample.n;
@@ -469,9 +489,11 @@ export const confidenceLabel = (c: RoleConfidence) => CONFIDENCE_LABEL[c];
 /** The full tooltip: headline, every bucket's %, the headline's drivers. */
 export function roleFitTooltip(fit: RoleFit): string {
   const best = matchFor(fit, fit.best)!;
-  const head = fit.hybrid
-    ? `Best case: ${named(fit, fit.best)}, equally a ${named(fit, fit.hybrid)}`
-    : `Best case: ${named(fit, fit.best)}`;
+  const head = !fit.hybrid
+    ? `Best case: ${named(fit, fit.best)}`
+    : roleInfo(fit.hybrid).complement
+      ? `Best case: ${named(fit, fit.best)}, plus ${named(fit, fit.hybrid)} as a complement role`
+      : `Best case: ${named(fit, fit.best)}, equally a ${named(fit, fit.hybrid)}`;
   const all = [...fit.matches].sort((a, b) => b.pct - a.pct).map((m) => `${named(fit, m.role)} ${m.pct}%`).join(" · ");
   const lines = [head, all, ...best.drivers];
   if (best.sizeNote) lines.push(`Size: ${best.sizeNote} → −${Math.round(best.sizeDrop * 100)}%`);

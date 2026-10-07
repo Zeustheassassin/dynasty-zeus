@@ -1,7 +1,7 @@
 // Per-game trait grades (tape-grading expansion, Stage 5). Pure.
 //
 // The user grades a set of traits per position (six; WR eleven since
-// 2026-10-06), 1–10, per charted game, on NEW
+// 2026-10-06, RB seven since 2026-10-07), 1–10, per charted game, on NEW
 // games only (scouting_games.trait_grades, migration 065): an old game was
 // charted before traits existed and isn't re-watched, so it never gets them
 // and nothing about it changes.
@@ -43,6 +43,9 @@ export const TRAITS: Record<CompositePos, readonly TraitDef[]> = {
     { key: "long_speed", label: "Long speed", short: "Spd", coveredBy: "PFF 10+ yard runs and 15+ of 10+" },
     { key: "hands", label: "Hands", short: "Hnd", coveredBy: "charted drops" },
     { key: "pass_pro", label: "Pass pro", short: "PP", coveredBy: "charted pass blocks" },
+    // Added 2026-10-07 at the user's request, uncovered by their call: SRAE,
+    // YCO/A and missed tackles don't stand in for it.
+    { key: "power", label: "Power", short: "Pwr", coveredBy: null },
   ],
   WR: [
     { key: "release", label: "Release", short: "Rel", coveredBy: "release-vs-press tag" },

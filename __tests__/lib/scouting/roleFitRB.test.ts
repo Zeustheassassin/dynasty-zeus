@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { rbRoleFit, computeRBRoleFits, RB_MIN_RUNS, type RBRoleInputs } from "@/lib/scouting/roleFitRB";
-import { matchFor } from "@/lib/scouting/roleFit";
+import { rbRoleFit, computeRBRoleFits, RB_MIN_RUNS, RB_SY_TAG_MIN, type RBRoleInputs } from "@/lib/scouting/roleFitRB";
+import { matchFor, roleLabel } from "@/lib/scouting/roleFit";
 import type { Prospect, RBPlay, RBRunType, ScoutingGame } from "@/lib/types";
 import type { PffTotals } from "@/lib/pff/totals";
 
@@ -14,18 +14,21 @@ const routes = (n: number, open: number) => Array.from({ length: n }, (_, i) => 
 const passBlocks = (n: number, won: number) => Array.from({ length: n }, (_, i) => play({ run_type: "pass_block", success: i < won }));
 
 // League rates: stuffed 15%, pass pro 70%, open on routes 60%, on longer
-// routes 45%, drops 9% of targets. PFF pool: 10+ yard runs 16% of carries,
-// missed tackles 0.26 per carry.
+// routes 45%, drops 9% of targets, tagged short-yardage runs converted 70%.
+// PFF pool: 10+ yard runs 16% of carries, missed tackles 0.26 and yards after
+// contact 3.00 per carry.
 const LEAGUE = {
   stuff: { hits: 15, n: 100 },
   passPro: { hits: 70, n: 100 }, open: { hits: 60, n: 100 }, bigOpen: { hits: 45, n: 100 }, drops: { hits: 9, n: 100 },
+  shortYardage: { hits: 70, n: 100 },
 };
-const PFF_POOL = { leaguePffExplosive: { hits: 16, n: 100 }, leaguePffMissedTackles: { hits: 26, n: 100 } };
-const slices = (s: Partial<Record<"all" | "loaded" | "zone" | "gap", [number, number]>>): RBRoleInputs["slices"] => ({
+const PFF_POOL = { leaguePffExplosive: { hits: 16, n: 100 }, leaguePffMissedTackles: { hits: 26, n: 100 }, leaguePffYco: { hits: 300, n: 100 } };
+const slices = (s: Partial<Record<"all" | "loaded" | "zone" | "gap" | "inside", [number, number]>>): RBRoleInputs["slices"] => ({
   all: { ae: s.all?.[0] ?? 0, n: s.all?.[1] ?? 100 },
   loaded: { ae: s.loaded?.[0] ?? 0, n: s.loaded?.[1] ?? 10 },
   zone: { ae: s.zone?.[0] ?? 0, n: s.zone?.[1] ?? 50 },
   gap: { ae: s.gap?.[0] ?? 0, n: s.gap?.[1] ?? 50 },
+  inside: { ae: s.inside?.[0] ?? 0, n: s.inside?.[1] ?? 50 },
 });
 const fit = (plays: RBPlay[], sl: RBRoleInputs["slices"], heightIn: number | null = 71, weightLb: number | null = 212, pff: Partial<RBRoleInputs> = {}) =>
   rbRoleFit({ plays, slices: sl, league: LEAGUE, heightIn, weightLb, ...PFF_POOL, ...pff });
@@ -138,6 +141,58 @@ describe("RB role buckets", () => {
     const fits = computeRBRoleFits(prospects, games, league, new Map([["a", sum(60, 12, 18)], ["b", sum(40, 4, 8)]]));
     expect(fits.get("a")!.features.explosive!.display).toBe("20% vs 16% league on 60 carries");
     expect(fits.get("b")!.features.btk!.display).toBe("0.20 vs 0.26 league per carry on 40 carries");
+  });
+});
+
+describe("RB Goal-line (the user's recipe, 2026-10-07)", () => {
+  // A 225 lb back who wins inside and vs a loaded box, runs through contact
+  // and is rarely stuffed, and also wins on zone runs.
+  const plays = [...runs(70, "inside_zone"), ...runs(30, "inside_man_gap")];
+  const POWER_SLICES = slices({ all: [8, 100], zone: [10, 70], gap: [6, 30], inside: [10, 100], loaded: [8, 30] });
+  const PFF = { pffYco: { hits: 400, n: 100 }, pffMissedTackles: { hits: 35, n: 100 } };
+
+  it("makes a heavy back who wins inside and through contact a Goal-line fit, added after his lead role", () => {
+    const f = fit(plays, POWER_SLICES, 72, 225, PFF)!;
+    expect(matchFor(f, "goal_line")!.pct).toBeGreaterThanOrEqual(75);
+    expect(matchFor(f, "zone")!.pct).toBeGreaterThanOrEqual(60);
+    expect(f.best).not.toBe("goal_line"); // a lead role clears 60%
+    expect(f.hybrid).toBe("goal_line");
+    expect(roleLabel(f)).toMatch(/ \/ Goal-line$/);
+    expect(f.features.yco!.display).toBe("4.00 vs 3.00 league yds after contact per carry on 100 carries");
+    expect(f.features.notStuffed!.fit).toBeGreaterThan(0.5);
+  });
+
+  it("drops a light back under the 215 lb floor", () => {
+    expect(matchFor(fit(plays, POWER_SLICES, 70, 195, PFF)!, "goal_line")!.sizeDrop).toBeGreaterThan(0);
+  });
+
+  it("leaves Power out until he has a graded game, then reads it against the scale's midpoint", () => {
+    const AVG = slices({ all: [0, 100], inside: [0, 100] });
+    const base = fit(plays, AVG, 72, 225)!;
+    expect(base.features.power).toBeUndefined();
+    const strong = fit(plays, AVG, 72, 225, { power: { avg: 9, games: 3 } })!;
+    expect(strong.features.power!.display).toBe("9.0 / 10 over 3 graded games");
+    expect(matchFor(strong, "goal_line")!.pct).toBeGreaterThan(matchFor(base, "goal_line")!.pct);
+    const weak = fit(plays, AVG, 72, 225, { power: { avg: 2, games: 3 } })!;
+    expect(matchFor(weak, "goal_line")!.pct).toBeLessThan(matchFor(base, "goal_line")!.pct);
+  });
+
+  it(`counts tagged short-yardage runs only from ${RB_SY_TAG_MIN} on`, () => {
+    const sy = (n: number, made: number) => Array.from({ length: n }, (_, i) => play({ run_type: "inside_man_gap", short_yardage: true, success: i < made }));
+    expect(fit([...plays, ...sy(RB_SY_TAG_MIN - 1, 9)], POWER_SLICES, 72, 225, PFF)!.features.shortYardage).toBeUndefined();
+    const f = fit([...plays, ...sy(RB_SY_TAG_MIN, 10)], POWER_SLICES, 72, 225, PFF)!;
+    expect(f.features.shortYardage!.display).toBe("100% vs 70% league on 10 tagged runs");
+    expect(f.features.shortYardage!.fit).toBeGreaterThan(0.5);
+  });
+
+  it("reads his Power grades off the charted games' trait grades", () => {
+    const prospects = [{ id: "a", position: "RB", height: "6'0", weight: 225 }] as unknown as Prospect[];
+    const games = [
+      { id: "g1", prospect_id: "a", season_year: 2026, created_at: "2026-10-06T00:00:00Z", trait_grades: { power: 8 } },
+      { id: "g0", prospect_id: "a", season_year: 2026, created_at: "2026-09-01T00:00:00Z", trait_grades: null },
+    ] as unknown as ScoutingGame[];
+    const fits = computeRBRoleFits(prospects, games, runs(40, "inside_zone", { game_id: "g1" }));
+    expect(fits.get("a")!.features.power!.display).toBe("8.0 / 10 over 1 graded game");
   });
 });
 

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildRoleFit, scoreBucket, skillFeature, usageFeature, inverseUsageFeature, contrastFeature, shrinkAE,
   roleLabel, roleFitTooltip, matchTooltip, aeOf, mergeAESums,
-  ELITE_SIZE_SHARE, NEAR_TIE, VERSATILE_PCT, FALLBACK_LINE, versatileRuleText, hasVersatile, ROLES,
+  ELITE_SIZE_SHARE, NEAR_TIE, VERSATILE_PCT, FALLBACK_LINE, COMPLEMENT_LINE, versatileRuleText, hasVersatile, ROLES,
   type BucketRecipe, type FeatureSet, type Feature, type RolePos,
 } from "@/lib/scouting/roleFit";
 
@@ -150,7 +150,7 @@ describe("buildRoleFit", () => {
   });
 
   it("never calls an RB or QB Versatile: Three-down, Creator and Dual-threat already mean all-round", () => {
-    expect(fitAt("RB", [0.9, 0.9, 0.9, 0.9, 0.9]).versatile).toBe(false);
+    expect(fitAt("RB", [0.9, 0.9, 0.9, 0.9, 0.9, 0.9]).versatile).toBe(false);
     expect(fitAt("QB", [0.9, 0.9, 0.9, 0.9]).versatile).toBe(false);
     expect([hasVersatile("RB"), hasVersatile("QB"), hasVersatile("WR"), hasVersatile("TE")]).toEqual([false, false, true, true]);
   });
@@ -203,6 +203,32 @@ describe("buildRoleFit", () => {
     expect(slot.best).toBe("slot");
     expect(slot.hybrid).toBeNull();
     expect(FALLBACK_LINE).toBe(50);
+  });
+
+  // RB order: Three-down, Zone, Gap/Power, Receiving, Big-play, Goal-line.
+  it("adds Goal-line after a lead role at 60%+, however high it is (the user's call)", () => {
+    const r = fitAt("RB", [0.4, 0.65, 0.4, 0.4, 0.4, 0.95]);
+    expect([r.best, r.hybrid]).toEqual(["zone", "goal_line"]);
+    expect(roleLabel(r)).toBe("Zone / Goal-line");
+    expect(roleFitTooltip(r)).toContain("Best case: Zone, plus Goal-line as a complement role");
+    expect(COMPLEMENT_LINE).toBe(60);
+  });
+
+  it("lets Goal-line lead only when no other role reaches 60%", () => {
+    expect(roleLabel(fitAt("RB", [0.4, 0.59, 0.4, 0.4, 0.4, 0.95]))).toBe("Goal-line");
+    expect(roleLabel(fitAt("RB", [0.4, 0.6, 0.4, 0.4, 0.4, 0.95]))).toBe("Zone / Goal-line");
+  });
+
+  it("names Goal-line second only when it's his best or near-best match, and takes that slot from a near-tie role", () => {
+    expect(roleLabel(fitAt("RB", [0.4, 0.8, 0.4, 0.4, 0.4, 0.74]))).toBe("Zone");
+    expect(roleLabel(fitAt("RB", [0.4, 0.8, 0.4, 0.4, 0.4, 0.76]))).toBe("Zone / Goal-line");
+    expect(roleLabel(fitAt("RB", [0.4, 0.66, 0.64, 0.4, 0.4, 0.9]))).toBe("Zone / Goal-line");
+  });
+
+  it("doesn't name Goal-line under 60%, even in a near tie", () => {
+    const r = fitAt("RB", [0.4, 0.52, 0.4, 0.4, 0.4, 0.5]);
+    expect([r.best, r.hybrid]).toEqual(["zone", null]);
+    expect(roleLabel(fitAt("RB", [0.4, 0.52, 0.5, 0.4, 0.4, 0.5]))).toBe("Zone / Gap/Power");
   });
 
   it("explains one role's match in its tooltip", () => {

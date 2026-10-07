@@ -5,7 +5,7 @@
 import type { ColDef } from "./StatsTableShell";
 import {
   ROLES, confidenceLabel, matchFor, matchTooltip, roleFitTooltip, roleInfo, roleLabel,
-  hasVersatile, versatileRuleText, type RoleFit, type RolePos,
+  hasVersatile, versatileRuleText, COMPLEMENT_LINE, type RoleFit, type RolePos,
 } from "../../../lib/scouting/roleFit";
 
 const GROUP = "Role Fit";
@@ -14,7 +14,8 @@ export function roleFitCols(pos: RolePos): ColDef[] {
   return [
     {
       key: "role", label: "Role", group: GROUP, width: 110, titleKey: "role_tip",
-      tooltip: "Best-case NFL role from his charting plus height and weight. Two roles within 5 points read \"A / B\": equally a candidate for both, the higher-ceiling one first. \"?\" = not proven yet (an X needs 10+ in-app press reps). Hover a cell for why.",
+      tooltip: "Best-case NFL role from his charting plus height and weight. Two roles within 5 points read \"A / B\": equally a candidate for both, the higher-ceiling one first. \"?\" = not proven yet (an X needs 10+ in-app press reps). Hover a cell for why."
+        + ROLES[pos].filter((r) => r.complement).map((r) => ` ${r.label} is a complement role: named at ${COMPLEMENT_LINE}%+, it leads only when no other role reaches ${COMPLEMENT_LINE}%, otherwise it follows the lead role when it's his best or near-best match ("Zone / ${r.label}").`).join(""),
     },
     ...ROLES[pos].map((r): ColDef => ({
       key: `role_${r.key}`, label: `${r.short}%`, group: GROUP, fmt: "pct0", colorDir: 1, width: 64,
