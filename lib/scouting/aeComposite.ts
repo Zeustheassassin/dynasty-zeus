@@ -58,6 +58,12 @@ export interface CompositeMetric {
    *  counts only for prospects who have it, renormalized per player, with its
    *  weight scaled by how far his sample is trusted. See buildPositionComposite. */
   perPlayer?: true;
+  /** Added on top of the averaged score instead of averaged in: the prospect
+   *  gains weight × z (z = his shrunk distance from the pool mean, in τ), so
+   *  one at the pool's mean gets exactly 0 whatever his other metrics, one
+   *  better gains and one worse loses. For a modifier like fumbles, where a
+   *  weighted average would drag an elite player with an average rate down. */
+  additive?: true;
   /** Tooltip text for a prospect's value, e.g. "6.1% on 210 attempts (pool 4.5%)". */
   describe?: (id: string, sample: AESample) => string;
   /** A floor on the true spread, as a share of the pool's observed spread
@@ -89,6 +95,8 @@ export interface MetricSpread {
   fullTrustAt?: number;
   /** A per-player component (CompositeMetric.perPlayer). */
   perPlayer?: true;
+  /** Added on top, not averaged in (CompositeMetric.additive). */
+  additive?: true;
 }
 
 export type { ScoreComponent };
@@ -184,6 +192,11 @@ function observedSD(xs: readonly AESample[]): number {
 //     it was. A prospect without a per-player sample keeps exactly the score
 //     he'd have without the component; so do positions whose component isn't
 //     ready, or weighted 0.
+//   - Additive components (`additive`, also per-player: fumbles) aren't
+//     averaged at all. He gains weight × z on top of the averaged score, so
+//     a prospect at the pool's mean gets 0 however good the rest of his game
+//     is (averaged in, an average rate would pull an elite back down and lift
+//     a poor one), and the trust in his sample is already in z.
 export function buildPositionComposite(pos: CompositePos, metrics: CompositeMetric[], baseline = 0): PositionComposite {
   const fitted = metrics.map((m) => {
     const xs = [...m.samples.values()].filter((s): s is AESample => s != null);
@@ -198,6 +211,7 @@ export function buildPositionComposite(pos: CompositePos, metrics: CompositeMetr
       mean: ready ? est.mean : null,
       tau: ready ? Math.sqrt(est.tau2) : null,
       ...(m.perPlayer ? { perPlayer: true as const } : {}),
+      ...(m.additive ? { additive: true as const } : {}),
     };
     if (ready && m.fullTrustAt != null) {
       spread.halfPoint = median(xs.map((s) => varianceOf(s, minVar) * s.n)) / est.tau2;
@@ -217,6 +231,7 @@ export function buildPositionComposite(pos: CompositePos, metrics: CompositeMetr
     const components: ScoreComponent[] = [];
     let weighted = 0;
     let perPlayerWeight = 0;
+    let added = 0;
     for (const { m, spread, minVar } of ready) {
       const s = m.samples.get(id);
       if (!s) continue; // no evidence on this metric: the best estimate is average, 0
@@ -226,16 +241,22 @@ export function buildPositionComposite(pos: CompositePos, metrics: CompositeMetr
         : (tau * tau) / (tau * tau + varianceOf(s, minVar));
       const z = (reliability * (s.ae - spread.mean!)) / tau;
       const c: ScoreComponent = { key: m.key, label: m.label, weight: m.weight, ae: s.ae, rawAe: s.rawAe, n: s.n, reliability, z };
+      if (m.describe) c.text = m.describe(id, s);
+      components.push(c);
+      if (m.additive) {
+        c.perPlayer = true;
+        c.additive = true;
+        added += m.weight * z;
+        continue;
+      }
       if (m.perPlayer) {
         c.perPlayer = true;
         c.effectiveWeight = m.weight * reliability;
         perPlayerWeight += c.effectiveWeight;
       }
-      if (m.describe) c.text = m.describe(id, s);
-      components.push(c);
       weighted += m.weight * z;
     }
-    scores.set(id, { score: weighted / (totalWeight + perPlayerWeight) + baseline, components, ...(baseline ? { baseline } : {}) });
+    scores.set(id, { score: weighted / (totalWeight + perPlayerWeight) + added + baseline, components, ...(baseline ? { baseline } : {}) });
   }
   return { pos, ready: true, metrics: spreads, scores };
 }

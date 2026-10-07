@@ -11,8 +11,10 @@
 //       late (throws) · better option missed (dropbacks, sacks and scrambles
 //       included) · sack fault QB / line / coverage (sacks)
 //   RB  missed read (carries) · pass-pro loss wrong man vs beaten (failed pass
-//       blocks: the reason for a loss, not a loss rate) · caught from behind
-//       (explosive carries) · broken tackle after the catch (catches)
+//       blocks: the reason for a loss, not a loss rate) · broken tackle after
+//       the catch (catches). Caught from behind was dropped 2026-10-07 with
+//       the Explosive button it hung off; PFF's 15+ of 10+ runs reads long
+//       speed instead (pffComponents.ts).
 //   WR  release vs press win rate (press routes) · broken tackle after the
 //       catch (catches)
 //   TE  release vs press win rate (press routes) · chip rate (routes)
@@ -73,7 +75,6 @@ const RB_STATS: PlayStat<RBPlay>[] = [
   { key: "tag_rb_missed_read", label: "MissRead%", pos: "RB", unit: "carries", dir: -1, description: "Carries with a missed read (tagged carries).", of: bool("missed_read") },
   { key: "tag_rb_hbl", label: "HitBehind%", pos: "RB", unit: "carries", dir: 0, description: "Carries where he was hit behind the line (tagged carries): a difficulty tag, shown for context.", of: bool("hit_behind_line") },
   { key: "tag_rb_pp_wrong", label: "PP: Wrong man%", pos: "RB", unit: "pass-pro losses", dir: 0, description: "Of his failed pass blocks, the share where he picked up the wrong man (the rest: beaten). The loss rate itself is PB% in Blocking.", of: bool("pass_pro_loss", (v) => v === "wrong_man") },
-  { key: "tag_rb_cfb", label: "CaughtBehind%", pos: "RB", unit: "explosive runs", dir: -1, description: "Explosive runs where he was caught from behind (tagged): long speed.", of: bool("caught_from_behind") },
   { key: "tag_rb_btac", label: "BTAC%", pos: "RB", unit: "catches", dir: 1, description: "Catches with a broken tackle after the catch (tagged).", of: bool("broken_tackle_after_catch") },
 ];
 
@@ -189,7 +190,7 @@ export const TAG_COMPONENTS: readonly CountStatDef[] = Object.values(TAG_STATS).
 // moves him and an old-only player not at all.
 export const TAG_COMPONENT_WEIGHTS: Readonly<Record<string, number>> = {
   tag_qb_run_succ: 0.1, tag_qb_late: 0.05, tag_qb_better: 0.1,
-  tag_rb_missed_read: 0.1, tag_rb_cfb: 0.05, tag_rb_btac: 0.05,
+  tag_rb_missed_read: 0.1, tag_rb_btac: 0.05,
   tag_wr_press: 0.15, tag_wr_btac: 0.05,
   tag_te_press: 0.1,
 };

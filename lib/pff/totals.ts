@@ -22,8 +22,19 @@
 import type { ScoutingGame } from "../types";
 import {
   GAME_AVERAGE_KEYS, GAME_STAT_KEYS, SEASON_AVERAGE_KEYS, SEASON_AVERAGE_WEIGHT, SEASON_STAT_KEYS,
-  type GameStatKey, type PffGameRow, type PffSeasonRow, type SeasonStatKey,
+  type GameStatKey, type PffGameRow, type PffGameStats, type PffSeasonRow, type SeasonStatKey,
 } from "./stats";
+
+/**
+ * Plays with the ball in his hands, the denominator for fumbles: dropbacks
+ * (sacks and scrambles included) + designed runs + catches. Scrambles are in
+ * both PFF's dropbacks and its rush attempts, so they're taken out once.
+ * Null when PFF has none of the four.
+ */
+export function touchesOf(s: Pick<PffGameStats, "all_dropbacks" | "rush_att" | "scrambles" | "receptions">): number | null {
+  if (s.all_dropbacks == null && s.rush_att == null && s.receptions == null) return null;
+  return (s.all_dropbacks ?? 0) + (s.rush_att ?? 0) - (s.scrambles ?? 0) + (s.receptions ?? 0);
+}
 
 export interface PffTotals {
   /** Charted games linked to a PFF game. */
@@ -230,10 +241,14 @@ export function pffValues(t: PffTotals | null | undefined): PffValues {
     pff_15p_pct: pct(s.rush_15plus, s.rush_att),
     pff_brk_pct: pct(s.rush_15plus_yards, s.rush_yards),
     pff_10p: s.rush_10plus,
+    pff_10p_pct: pct(s.rush_10plus, s.rush_att),
+    pff_15of10: pct(s.rush_15plus, s.rush_10plus),
     pff_gap: s.gap_att,
     pff_zone: s.zone_att,
     pff_gap_pct: pct(s.gap_att, plus(s.gap_att, s.zone_att)),
     pff_fum: s.fumbles,
+    pff_touches: touchesOf(s),
+    pff_fum_pct: pct(s.fumbles, touchesOf(s)),
     pff_rtd: s.rush_td,
     pff_dsgn: minus(s.rush_att, s.scrambles),
     pff_dsgn_yds: s.designed_yards,

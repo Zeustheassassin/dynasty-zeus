@@ -39,8 +39,8 @@ export const TRAITS: Record<CompositePos, readonly TraitDef[]> = {
   RB: [
     { key: "vision", label: "Vision", short: "Vis", coveredBy: "missed-read tag" },
     { key: "burst", label: "Burst", short: "Bur", coveredBy: null },
-    { key: "contact_balance", label: "Contact balance", short: "Bal", coveredBy: "charted broken tackles and PFF YCO/A" },
-    { key: "long_speed", label: "Long speed", short: "Spd", coveredBy: "charted explosives and the caught-from-behind tag" },
+    { key: "contact_balance", label: "Contact balance", short: "Bal", coveredBy: "PFF missed tackles and YCO/A" },
+    { key: "long_speed", label: "Long speed", short: "Spd", coveredBy: "PFF 10+ yard runs and 15+ of 10+" },
     { key: "hands", label: "Hands", short: "Hnd", coveredBy: "charted drops" },
     { key: "pass_pro", label: "Pass pro", short: "PP", coveredBy: "charted pass blocks" },
   ],

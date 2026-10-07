@@ -76,13 +76,13 @@ describe("a new play's payload", () => {
 
   it("RB: carry tags NULL on a route, loss reason only on a failed pass block", () => {
     const route = tagPayload("RB", defaultTagValues("RB"), {});
-    expect(route).toMatchObject({ hit_behind_line: null, missed_read: null, pass_pro_loss: null, broken_tackle_after_catch: null, caught_from_behind: null });
+    expect(route).toMatchObject({ hit_behind_line: null, missed_read: null, pass_pro_loss: null, broken_tackle_after_catch: null });
     const caught = tagPayload("RB", defaultTagValues("RB"), { catch: true });
     expect(caught.broken_tackle_after_catch).toBe(false);
     const carry = tagPayload("RB", defaultTagValues("RB"), RB_CARRY);
-    expect(carry).toMatchObject({ hit_behind_line: false, missed_read: false, caught_from_behind: null });
-    const explosive = tagPayload("RB", defaultTagValues("RB"), { run: true, explosiveRun: true });
-    expect(explosive.caught_from_behind).toBe(false);
+    expect(carry).toMatchObject({ hit_behind_line: false, missed_read: false });
+    // Caught from behind was dropped (2026-10-07): new plays leave the column NULL.
+    expect("caught_from_behind" in carry).toBe(false);
     const loss = tagPayload("RB", { ...defaultTagValues("RB"), pass_pro_loss: "beaten" }, { passProLoss: true });
     expect(loss.pass_pro_loss).toBe("beaten");
   });

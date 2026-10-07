@@ -8,15 +8,17 @@
 // the user charts by hand that no Above-Expected metric reads:
 //
 //   QB  sacks taken under pressure (pocket management; AAE leaves sacks out)
-//   RB  broken tackles · explosive runs (SRAE reads success only) · pass
-//       protection · hands (drops per target) · getting open on routes
+//   RB  pass protection · hands (drops per target) · getting open on routes
 //   WR  hands (drops per catchable target) · contested catches (SAE reads
 //       getting open, not the catch)
 //
-// PFF's versions of the same skills (avoided tackles, 15+ yard runs,
-// pressures allowed, drops, contested catches, pressure-to-sack) stay out of
-// the score, so a skill isn't counted twice; they still show in the PFF
-// columns. These rates exist on every charted game, old ones included (no
+// PFF's versions of the same skills (pressures allowed, drops, contested
+// catches, pressure-to-sack) stay out of the score, so a skill isn't counted
+// twice; they still show in the PFF columns. RB broken tackles and explosive
+// runs used to be here too; since 2026-10-07 PFF's missed tackles and 10+
+// yard runs score them instead (pffComponents.ts) and the RB board no longer
+// charts them (rb_plays.broken_tackle / explosive_play stay on old plays,
+// unread). These rates exist on every charted game, old ones included (no
 // re-charting), and go through the same pipeline as PFF's results
 // (countComponents.ts): season-weighted, pool-relative, opponent-adjusted,
 // weighted by reliability, per player.
@@ -41,8 +43,6 @@ interface PlayCountDef<T> extends CountStatDef {
   of: (pl: T) => { n: number; hits: number } | null;
 }
 
-const RB_RUN_TYPES = new Set(["outside_zone", "inside_zone", "outside_man_gap", "inside_man_gap"]);
-const isKnownRun = (pl: RBPlay) => RB_RUN_TYPES.has(pl.run_type) && pl.success !== null;
 const one = (hit: boolean) => ({ n: 1, hits: hit ? 1 : 0 });
 
 export const QB_CHARTED: readonly PlayCountDef<QBPlay>[] = [
@@ -52,12 +52,6 @@ export const QB_CHARTED: readonly PlayCountDef<QBPlay>[] = [
 ];
 
 export const RB_CHARTED: readonly PlayCountDef<RBPlay>[] = [
-  { key: "ch_rb_btk", label: "BTkl%", source: "charted", pos: "RB", dir: 1, scale: 100, unit: "runs", floor: 30, suffix: "%",
-    description: "Runs with a broken tackle, from your charting.",
-    of: (pl) => (isKnownRun(pl) ? one(pl.broken_tackle) : null) },
-  { key: "ch_rb_expl", label: "Expl%", source: "charted", pos: "RB", dir: 1, scale: 100, unit: "runs", floor: 30, suffix: "%",
-    description: "Explosive runs, from your charting.",
-    of: (pl) => (isKnownRun(pl) ? one(pl.explosive_play) : null) },
   { key: "ch_rb_pb", label: "PB%", source: "charted", pos: "RB", dir: 1, scale: 100, unit: "pass blocks", floor: 15, suffix: "%",
     description: "Pass blocks won, from your charting.",
     of: (pl) => (pl.run_type === "pass_block" && pl.success !== null ? one(pl.success === true) : null) },
@@ -129,6 +123,6 @@ export function chartedGameCounts(key: string, inp: ChartedInputs): GameCount[] 
 // user's call (2026-10-05, the "heavier" set; see pffComponents.ts).
 export const CHARTED_COMPONENT_WEIGHTS: Readonly<Record<string, number>> = {
   ch_qb_p2s: 0.2,
-  ch_rb_btk: 0.3, ch_rb_expl: 0.2, ch_rb_pb: 0.15, ch_rb_drop: 0.1, ch_rb_open: 0.1,
+  ch_rb_pb: 0.15, ch_rb_drop: 0.1, ch_rb_open: 0.1,
   ch_wr_drop: 0.2, ch_wr_cc: 0.1,
 };

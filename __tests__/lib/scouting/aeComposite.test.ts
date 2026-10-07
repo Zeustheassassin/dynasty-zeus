@@ -324,3 +324,39 @@ describe("per-player components", () => {
     expect(comp.positions.QB.metrics[1].perPlayer).toBe(true);
   });
 });
+
+describe("additive components (fumbles)", () => {
+  const core = pool(SPREAD);
+  const ids = SPREAD.map((_, i) => `p${i}`);
+  // A pool whose precision-weighted mean is 0: the values mirror around it.
+  const fum = (value: (i: number) => number, weight = 0.2): CompositeMetric =>
+    ({ key: "fum", label: "Fum", weight, perPlayer: true, additive: true, samples: new Map(ids.map((id, i) => [id, s(value(i))])) });
+  const plain = buildPositionComposite("RB", [metric(core)]);
+
+  it("adds weight × z on top: an average rate changes nothing, whatever the rest of his score", () => {
+    // p9 (the best AE) and p0 (the worst) both sit at the pool's mean on fumbles.
+    const withF = buildPositionComposite("RB", [metric(core), fum((i) => (i === 0 || i === 9 ? 0 : SPREAD[i]))]);
+    for (const id of ["p0", "p9"]) {
+      const c = withF.scores.get(id)!.components.find((x) => x.additive)!;
+      expect(c.z).toBeCloseTo(0, 9);
+      expect(withF.scores.get(id)!.score).toBeCloseTo(plain.scores.get(id)!.score, 9);
+    }
+  });
+
+  it("rewards a better-than-average rate and penalizes a worse one by the same rule, elite or not", () => {
+    const withF = buildPositionComposite("RB", [metric(core), fum((i) => SPREAD[i])]);
+    for (const id of ids) {
+      const c = withF.scores.get(id)!.components.find((x) => x.additive)!;
+      expect(c.effectiveWeight).toBeUndefined();
+      expect(withF.scores.get(id)!.score).toBeCloseTo(plain.scores.get(id)!.score + 0.2 * c.z, 12);
+    }
+    // The best AE with a good rate gains (averaged in, it would be dragged toward his fumble z).
+    expect(withF.scores.get("p9")!.score).toBeGreaterThan(plain.scores.get("p9")!.score);
+    expect(withF.scores.get("p0")!.score).toBeLessThan(plain.scores.get("p0")!.score);
+  });
+
+  it("is ignored at weight 0 (a data point only)", () => {
+    const withF = buildPositionComposite("RB", [metric(core), fum((i) => SPREAD[i], 0)]);
+    for (const id of ids) expect(withF.scores.get(id)!.score).toBe(plain.scores.get(id)!.score);
+  });
+});

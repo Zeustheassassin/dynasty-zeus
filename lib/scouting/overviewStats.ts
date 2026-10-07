@@ -321,8 +321,7 @@ export function rbOverview(plays: readonly RBPlay[], pff: PffValues, cover: PffC
     {
       key: "runflags", title: null, size: "md", stats: [
         rate("sr_all", "All runs", runs.filter((pl) => pl.success === true).length, runs.length, { tone: "chart", dir: 1, minN: 25, tooltip: `${CHARTED}: carries marked a success.` }),
-        flag("explosive", "Explosive", (pl) => pl.explosive_play, 1, "marked explosive"),
-        flag("broken", "Broken tackle", (pl) => pl.broken_tackle, 1, "with a broken tackle"),
+        // Broken tackles and explosive runs come from PFF since 2026-10-07 (Rushing below).
         flag("stuffed", "Stuffed", (pl) => pl.run_stuff, -1, "stuffed"),
       ],
     },
@@ -333,7 +332,9 @@ export function rbOverview(plays: readonly RBPlay[], pff: PffValues, cover: PffC
       metric("ypc", "Yards / carry", pff.pff_ypc ?? null, "dec1", { tone: "pff", dir: 1, minN: 25, n: car, detail: `${num(pff, "pff_ryds")} yds / ${car}`, tooltip: `${PFF}: rushing yards ÷ carries.` }),
       metric("yco", "After contact / carry", pff.pff_yco_a ?? null, "dec2", { tone: "pff", dir: 1, minN: 25, n: car, detail: `${car} carries`, tooltip: `${PFF}: yards after contact ÷ carries.` }),
       metric("mtf", "Missed tackles / carry", pff.pff_mtf_a ?? null, "dec2", { tone: "pff", dir: 1, minN: 25, n: car, detail: `${num(pff, "pff_rmtf")} / ${car}`, tooltip: `${PFF}: avoided tackles as a runner ÷ carries.` }),
+      rate("r10", "10+ yard runs", num(pff, "pff_10p"), car, { tone: "pff", dir: 1, minN: 25, fmt: "pct1", tooltip: `${PFF}: carries of 10+ yards (explosive runs).` }),
       rate("r15", "15+ yard runs", num(pff, "pff_15p"), car, { tone: "pff", dir: 1, minN: 25, fmt: "pct1", tooltip: `${PFF}: carries of 15+ yards.` }),
+      rate("fum", "Fumbles", num(pff, "pff_fum"), num(pff, "pff_touches"), { tone: "pff", dir: -1, minN: 25, fmt: "pct1", detail: `${num(pff, "pff_fum")} / ${num(pff, "pff_touches")} touches`, tooltip: `${PFF}: fumbles ÷ touches (carries + catches).` }),
     ];
     const gap = pff.pff_gap_pct;
     if (gap != null) {

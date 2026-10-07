@@ -66,6 +66,8 @@ export interface CountStatDef {
   suffix: string;
   /** What it measures, for the header tooltip and the Grading checks. */
   description: string;
+  /** Added on top of the AE Score rather than averaged in (aeComposite.ts CompositeMetric.additive). */
+  additive?: true;
 }
 
 /** A component sample: an AESample (oriented, display units) plus the rate as shown. */

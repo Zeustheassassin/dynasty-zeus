@@ -38,9 +38,7 @@ export const RB_STAT_COLS: ColDef[] = [
   // Advanced
   { key: "srae",         label: "SRAE",     group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 66, tooltip: "Success Rate Above Expected — each run judged against runs like it (formation, loaded box, unblocked defender stacked), so a stuffed run into a free defender costs little. Min. 15 runs. Older seasons count a little less.", leagueOverride: 0 },
   { key: "succ_pct",     label: "Succ%",    group: "Advanced", fmt: "pct",       colorDir: 1,  width: 60, tooltip: "Success rate on all rushing attempts", weightBy: "runs" },
-  { key: "explosive_pct",label: "Expl%",    group: "Advanced", fmt: "pct",       colorDir: 1,  width: 58, tooltip: "Explosive play rate per rush attempt", weightBy: "runs" },
   { key: "stuff_pct",    label: "Stuff%",   group: "Advanced", fmt: "pct",       colorDir: -1, width: 56, tooltip: "Run stuff rate (stopped at or behind LOS)", weightBy: "runs" },
-  { key: "btk_pct",      label: "BTkl%",    group: "Advanced", fmt: "pct",       colorDir: 1,  width: 58, tooltip: "Broken tackle rate per rush attempt", weightBy: "runs" },
   // SRAE by run type (see computeRBRunSliceSRAE). Each run is judged against
   // the league's runs of the same run type, so each column nets to ~0 league-
   // wide. The league row weights each back by his runs in that slice.
@@ -86,9 +84,7 @@ export const RB_STAT_COLS: ColDef[] = [
   // Raw
   { key: "raw_snaps",      label: "Snaps",    group: "Raw", fmt: "count", width: 52 },
   { key: "raw_runs",       label: "Runs",     group: "Raw", fmt: "count", width: 46 },
-  { key: "raw_explosive",  label: "Expl",     group: "Raw", fmt: "count", width: 46 },
   { key: "raw_stuff",      label: "Stuff",    group: "Raw", fmt: "count", width: 46 },
-  { key: "raw_btk",        label: "BTkl",     group: "Raw", fmt: "count", width: 46 },
   { key: "raw_tgts",       label: "Tgts",     group: "Raw", fmt: "count", width: 46 },
   { key: "raw_catches",    label: "Catch",    group: "Raw", fmt: "count", width: 50 },
   // The tag-only stats (tagged plays only)
@@ -171,9 +167,7 @@ export function buildRBStatRows(prospects: Prospect[], games: ScoutingGame[], rb
           ...roleFitRow("RB", roleFits.get(p.id)),
           srae,
           succ_pct: succPct(runPlays, () => true),
-          explosive_pct: pct(pPlays.filter((pl) => pl.explosive_play).length, runPlays.length),
           stuff_pct: pct(pPlays.filter((pl) => pl.run_stuff).length, runPlays.length),
-          btk_pct: pct(pPlays.filter((pl) => pl.broken_tackle).length, runPlays.length),
           // SRAE by run type, with each slice's run count as its league-footer weight
           srae_out:  slices?.outside.ae ?? null, srae_out_n:  slices?.outside.n ?? 0,
           srae_in:   slices?.inside.ae ?? null,  srae_in_n:   slices?.inside.n ?? 0,
@@ -218,9 +212,7 @@ export function buildRBStatRows(prospects: Prospect[], games: ScoutingGame[], rb
           // Raw
           raw_snaps:     pPlays.length,
           raw_runs:      runPlays.length,
-          raw_explosive: pPlays.filter((pl) => pl.explosive_play).length,
           raw_stuff:     pPlays.filter((pl) => pl.run_stuff).length,
-          raw_btk:       pPlays.filter((pl) => pl.broken_tackle).length,
           raw_tgts:      recTgts,
           raw_catches:   recCatches,
           ...tagRow("RB", tags?.get(p.id)),

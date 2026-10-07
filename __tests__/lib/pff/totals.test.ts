@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildPffTotals, currentGameRow, gameAsTotals, pffValues, seasonIsCurrent } from "@/lib/pff/totals";
+import { buildPffTotals, currentGameRow, gameAsTotals, pffValues, seasonIsCurrent, touchesOf } from "@/lib/pff/totals";
 import { GAME_STAT_KEYS, SEASON_STAT_KEYS, type PffGameRow, type PffSeasonRow } from "@/lib/pff/stats";
 
 const blankGame = Object.fromEntries(GAME_STAT_KEYS.map((k) => [k, null])) as Record<(typeof GAME_STAT_KEYS)[number], null>;
@@ -105,5 +105,17 @@ describe("gameAsTotals", () => {
   it("shows one game's own grade and aDOT", () => {
     const v = pffValues(gameAsTotals(gameRow("g1", 100, 2025, { routes: 17, rec_yards: 49, grade_offense: 72.7, rec_adot: 24 })));
     expect([v.pff_gr_off, v.pff_radot, v.pff_yprr]).toEqual([72.7, 24, 2.88]);
+  });
+});
+
+describe("RB explosive runs and fumbles (2026-10-07)", () => {
+  it("rates 10+ runs per carry, 15+ as a share of 10+, and fumbles per touch", () => {
+    const v = pffValues(gameAsTotals(gameRow("g1", 100, 2025, { rush_att: 20, rush_10plus: 4, rush_15plus: 3, receptions: 5, fumbles: 1 })));
+    expect([v.pff_10p_pct, v.pff_15of10, v.pff_touches, v.pff_fum_pct]).toEqual([20, 75, 25, 4]);
+  });
+
+  it("counts a QB's scrambles once in his touches (they're in both dropbacks and rush attempts)", () => {
+    expect(touchesOf({ all_dropbacks: 40, rush_att: 8, scrambles: 3, receptions: null })).toBe(45);
+    expect(touchesOf({ all_dropbacks: null, rush_att: null, scrambles: null, receptions: null })).toBeNull();
   });
 });

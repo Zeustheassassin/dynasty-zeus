@@ -153,8 +153,9 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
   const [success, setSuccess]                     = useState<boolean | null>(null);
   const [loadedBox, setLoadedBox]                 = useState(false);
   const [unblockedDefender, setUnblockedDefender] = useState(false);
-  const [brokenTackle, setBrokenTackle]           = useState(false);
-  const [explosivePlay, setExplosivePlay]         = useState(false);
+  // Broken tackles and explosive runs aren't charted any more (2026-10-07):
+  // PFF's missed tackles and 10+ yard runs score them. Old plays keep their
+  // stored broken_tackle / explosive_play; new ones take the DB default.
   const [runStuff, setRunStuff]                   = useState(false);
   const [alignedAsWr, setAlignedAsWr]             = useState(false);
   const [rbRouteType, setRbRouteType]             = useState<RBRouteType | null>(null);
@@ -195,13 +196,11 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
 
   // Per-play tags (migration 062): new plays write all of them, an edit of an
   // older play writes none. Hit behind the line / missed read on carries,
-  // the loss reason on a failed pass block, broken tackle on a catch, caught
-  // from behind on an explosive carry.
+  // the loss reason on a failed pass block, broken tackle on a catch.
   const tags = usePlayTags("RB", selectedGameId, gamePlays);
   const isCarry = runType !== "pass_block" && runType !== "run_block" && runType !== "decoy" && runType !== "route";
   const tagFacts: PlayFacts = {
     run: isCarry,
-    explosiveRun: isCarry && explosivePlay,
     passProLoss: runType === "pass_block" && success === false,
     catch: runType === "route" && rbTargeted && rbOutcome === "caught",
   };
@@ -232,9 +231,7 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
     const manGap        = mergeRunTypeStats(outsideManGap, insideManGap);
     const zoneAttempt   = mergeRunTypeStats(outsideZone, insideZone);
 
-    // Post-play flags (% of run attempts only)
-    const brokenTackle  = runPlays.filter((p) => p.broken_tackle).length;
-    const explosivePlay = runPlays.filter((p) => p.explosive_play).length;
+    // Post-play flag (% of run attempts only)
     const runStuff      = runPlays.filter((p) => p.run_stuff).length;
 
     // Route run stats
@@ -272,8 +269,6 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
       manGap,
       zoneAttempt,
       flags: {
-        brokenTackle:  { count: brokenTackle,  pct: pct(brokenTackle,  runAttempts) },
-        explosivePlay: { count: explosivePlay, pct: pct(explosivePlay, runAttempts) },
         runStuff:      { count: runStuff,      pct: pct(runStuff,      runAttempts) },
       },
     };
@@ -330,8 +325,6 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
     setSuccess(null);
     setLoadedBox(false);
     setUnblockedDefender(false);
-    setBrokenTackle(false);
-    setExplosivePlay(false);
     setRunStuff(false);
     setAlignedAsWr(false);
     setRbRouteType(null);
@@ -363,8 +356,6 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
       was_open: isRoute ? rbWasOpen : false,
       loaded_box: (isRoute || isBlockPlay || isDecoy) ? false : loadedBox,
       unblocked_defender: (isRoute || isBlockPlay || isDecoy) ? false : unblockedDefender,
-      broken_tackle: (isRoute || isBlockPlay || isDecoy) ? false : brokenTackle,
-      explosive_play: (isRoute || isBlockPlay || isDecoy) ? false : explosivePlay,
       run_stuff: (isRoute || isBlockPlay || isDecoy) ? false : runStuff,
       ...tags.payload(tagFacts),
       play_notes: playNotes || null,
@@ -386,8 +377,6 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
     setSuccess(pl.run_type !== "route" ? pl.success : null);
     setLoadedBox(pl.loaded_box ?? false);
     setUnblockedDefender(pl.unblocked_defender ?? false);
-    setBrokenTackle(pl.broken_tackle ?? false);
-    setExplosivePlay(pl.explosive_play ?? false);
     setRunStuff(pl.run_stuff ?? false);
     setAlignedAsWr(pl.aligned_as_wr ?? false);
     setRbRouteType(pl.route_type ?? null);
@@ -419,8 +408,9 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
       was_open: isRoute ? rbWasOpen : false,
       loaded_box: (isRoute || isBlockPlay || isDecoy) ? false : loadedBox,
       unblocked_defender: (isRoute || isBlockPlay || isDecoy) ? false : unblockedDefender,
-      broken_tackle: (isRoute || isBlockPlay || isDecoy) ? false : brokenTackle,
-      explosive_play: (isRoute || isBlockPlay || isDecoy) ? false : explosivePlay,
+      // An old carry keeps its stored broken tackle / explosive; a play
+      // edited into a non-carry clears them (they were only ever on carries).
+      ...((isRoute || isBlockPlay || isDecoy) ? { broken_tackle: false, explosive_play: false } : {}),
       run_stuff: (isRoute || isBlockPlay || isDecoy) ? false : runStuff,
       // No tag columns at all when the play predates the tags.
       ...tags.payload(tagFacts),
@@ -647,22 +637,19 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
                 </div>
               )}
 
-              {/* Play outcome flags */}
+              {/* Play outcome flag */}
               {stats.runAttempts > 0 && (
                 <div className="p-4 bg-slate-900 rounded-lg border border-slate-800">
                   <div className="text-xs text-slate-500 mb-3">Play Outcome Flags <span className="text-slate-700">(% of {stats.runAttempts} run attempts)</span></div>
                   <div className="grid grid-cols-3 gap-3">
-                    {[
-                      { label: "Broken Tackle",  f: stats.flags.brokenTackle,  color: "text-amber-400" },
-                      { label: "Explosive Play", f: stats.flags.explosivePlay, color: "text-emerald-400" },
-                      { label: "Run Stuff",      f: stats.flags.runStuff,      color: "text-red-400" },
-                    ].map(({ label, f, color }) => (
-                      <div key={label} className="p-3 bg-slate-800/50 rounded-lg text-center">
-                        <div className="text-xs text-slate-500 mb-1">{label}</div>
-                        <div className={`text-xl font-bold ${color}`}>{f.count}</div>
-                        <div className="text-xs text-slate-500 mt-0.5">{f.pct !== null ? `${f.pct}%` : "—"}</div>
-                      </div>
-                    ))}
+                    <div className="p-3 bg-slate-800/50 rounded-lg text-center">
+                      <div className="text-xs text-slate-500 mb-1">Run Stuff</div>
+                      <div className="text-xl font-bold text-red-400">{stats.flags.runStuff.count}</div>
+                      <div className="text-xs text-slate-500 mt-0.5">{stats.flags.runStuff.pct !== null ? `${stats.flags.runStuff.pct}%` : "—"}</div>
+                    </div>
+                    <div className="col-span-2 p-3 text-xs text-slate-500 self-center">
+                      Broken tackles and explosive runs come from PFF (missed tackles, 10+ and 15+ yard runs): see the PFF columns on the Games tab.
+                    </div>
                   </div>
                 </div>
               )}
@@ -891,16 +878,10 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
                 <div>
                   <div className="text-xs text-slate-500 mb-2">Play Flags <span className="text-slate-700">(select if yes)</span></div>
                   <div className="flex gap-2">
-                    {[
-                      { label: "Broken Tackle", val: brokenTackle, set: setBrokenTackle, color: "bg-amber-700" },
-                      { label: "Explosive Play", val: explosivePlay, set: setExplosivePlay, color: "bg-emerald-800" },
-                      { label: "Run Stuff", val: runStuff, set: setRunStuff, color: "bg-red-800" },
-                    ].map(({ label, val, set, color }) => (
-                      <button key={label} onClick={() => set(!val)}
-                        className={`flex-1 py-2 rounded text-xs font-medium transition ${val ? `${color} text-white` : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
-                        {label}
-                      </button>
-                    ))}
+                    <button onClick={() => setRunStuff(!runStuff)} aria-pressed={runStuff}
+                      className={`flex-1 py-2 rounded text-xs font-medium transition ${runStuff ? "bg-red-800 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                      Run Stuff
+                    </button>
                   </div>
                 </div>
               </>

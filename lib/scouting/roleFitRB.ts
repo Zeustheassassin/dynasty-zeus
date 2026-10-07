@@ -10,8 +10,14 @@
 // loaded-box runs from the headline model; zone and gap runs from the run-type
 // model the SRAE breakdown columns use, so a back isn't credited for running
 // the easier scheme. The rest are rates against the league's rate on the same
-// kind of play (explosive, broken tackle and stuffed runs; pass-block wins;
-// open rate on routes; drops per target).
+// kind of play (stuffed runs; pass-block wins; open rate on routes; drops per
+// target).
+//
+// Explosive runs and broken tackles come from PFF over the charted games since
+// 2026-10-07 (10+ yard runs and missed tackles forced, per carry), when the RB
+// board stopped charting them. Their scales stayed: calibrated the same way on
+// PFF (best tenth of backs ≈ 0.8) they came out 3.60 and 5.25, the same as
+// the charted ones. A back with no PFF rows reads neutral on both.
 //
 // The Three-down pass-pro gate also reads PFF's pass blocking over the charted
 // games (pressures allowed per pass-block snap; tape-grading expansion, Stage
@@ -74,8 +80,6 @@ const pctOf = (r: Rate) => (r.n > 0 ? (r.hits / r.n) * 100 : null);
 // The plays each rate counts over, and what counts as a hit.
 const routesOf = (plays: RBPlay[]) => plays.filter((pl) => pl.run_type === "route");
 const RATES = {
-  explosive: (plays: RBPlay[]) => rateOf(plays.filter(isKnownRun), (pl) => pl.explosive_play),
-  btk:       (plays: RBPlay[]) => rateOf(plays.filter(isKnownRun), (pl) => pl.broken_tackle),
   stuff:     (plays: RBPlay[]) => rateOf(plays.filter(isKnownRun), (pl) => pl.run_stuff),
   passPro:   (plays: RBPlay[]) => rateOf(plays.filter((pl) => pl.run_type === "pass_block" && pl.success !== null), (pl) => pl.success === true),
   open:      (plays: RBPlay[]) => rateOf(routesOf(plays).filter((pl) => pl.was_open !== null), (pl) => pl.was_open === true),
@@ -86,13 +90,17 @@ const RATES = {
 };
 type RateKey = keyof typeof RATES;
 
-/** His rate minus the league's, as a skill feature. */
-function rateFeature(label: string, his: Rate, league: Rate, prior: number, scale: number, unit: string, lowerIsBetter = false): Feature {
+/** His rate minus the league's, as a skill feature. `perUnit` shows a count per rep (missed tackles can be 2+ on one carry) instead of a %. */
+function rateFeature(label: string, his: Rate, league: Rate, prior: number, scale: number, unit: string, lowerIsBetter = false, perUnit = false): Feature {
   const h = pctOf(his), l = pctOf(league);
   const diff = h != null && l != null ? (lowerIsBetter ? l - h : h - l) : null;
   const f = skillFeature(label, diff, his.n, prior, scale, unit);
-  return h != null && l != null ? { ...f, display: `${h.toFixed(0)}% vs ${l.toFixed(0)}% league on ${his.n} ${unit}` } : f;
+  if (h == null || l == null) return f;
+  const show = (v: number) => (perUnit ? (v / 100).toFixed(2) : `${v.toFixed(0)}%`);
+  return { ...f, display: `${show(h)} vs ${show(l)} league${perUnit ? " per carry" : ""} on ${his.n} ${unit}` };
 }
+
+const NO_RATE: Rate = { hits: 0, n: 0 };
 
 // A bell-cow's build: weight ramped from BUILD_LB[0] (0) to BUILD_LB[1] (1).
 // The user's call (2026-10-02): good size is part of what makes a workhorse,
@@ -119,6 +127,11 @@ export interface RBRoleInputs {
   /** PFF pass blocking over his charted games, and the pool's. */
   pffPassPro?: Rate | null;
   leaguePffPassPro?: Rate | null;
+  /** PFF 10+ yard runs and missed tackles forced per carry over his charted games, and the pool's. */
+  pffExplosive?: Rate | null;
+  leaguePffExplosive?: Rate | null;
+  pffMissedTackles?: Rate | null;
+  leaguePffMissedTackles?: Rate | null;
 }
 
 export function rbFeatures(inp: RBRoleInputs): FeatureSet {
@@ -133,8 +146,8 @@ export function rbFeatures(inp: RBRoleInputs): FeatureSet {
     zoneAE: skillFeature("Zone runs", slices.zone.ae, slices.zone.n, RUN_PRIOR, SCALE.zoneAE, "runs"),
     gapAE: skillFeature("Gap runs", slices.gap.ae, slices.gap.n, RUN_PRIOR, SCALE.gapAE, "runs"),
     zoneOverGap: contrastFeature("Zone over gap", slices.zone, slices.gap, RUN_PRIOR, SCALE.zoneOverGap),
-    explosive: rateFeature("Explosive runs", mine.explosive, league.explosive, RATE_PRIOR, SCALE.explosive, "runs"),
-    btk: rateFeature("Broken tackles", mine.btk, league.btk, RATE_PRIOR, SCALE.btk, "runs"),
+    explosive: rateFeature("Explosive runs (PFF 10+ yards)", inp.pffExplosive ?? NO_RATE, inp.leaguePffExplosive ?? NO_RATE, RATE_PRIOR, SCALE.explosive, "carries"),
+    btk: rateFeature("Broken tackles (PFF missed tackles)", inp.pffMissedTackles ?? NO_RATE, inp.leaguePffMissedTackles ?? NO_RATE, RATE_PRIOR, SCALE.btk, "carries", false, true),
     // More stuffs = more boom-bust: a style marker for the Big-play bucket only.
     stuffed: rateFeature("Stuffed (boom-bust)", mine.stuff, league.stuff, RATE_PRIOR, SCALE.stuffed, "runs"),
     passPro: rateFeature("Pass protection", mine.passPro, league.passPro, REC_PRIOR, SCALE.passPro, "pass blocks"),
@@ -262,15 +275,24 @@ export function computeRBRoleFits(
   const out = new Map<string, RoleFit | null>();
   const rbs = prospects.filter((p) => p.position === "RB");
   if (rbs.length === 0) return out;
-  // PFF pass blocking: pressures allowed ("hits") per pass-block snap.
-  const pffPP = new Map<string, Rate>();
-  const leaguePP: Rate = { hits: 0, n: 0 };
-  for (const p of rbs) {
-    const s = pff?.get(p.id)?.sum;
-    if (s?.pressures_allowed == null || !s.pass_block_snaps) continue;
-    pffPP.set(p.id, { hits: s.pressures_allowed, n: s.pass_block_snaps });
-    leaguePP.hits += s.pressures_allowed; leaguePP.n += s.pass_block_snaps;
-  }
+  // PFF over each back's charted games, and pooled over every back's:
+  // pressures allowed ("hits") per pass-block snap; 10+ yard runs and missed
+  // tackles forced per carry.
+  const pffRate = (hitsOf: (s: PffTotals["sum"]) => number | null, nOf: (s: PffTotals["sum"]) => number | null) => {
+    const mine = new Map<string, Rate>();
+    const pool: Rate = { hits: 0, n: 0 };
+    for (const p of rbs) {
+      const s = pff?.get(p.id)?.sum;
+      const hits = s ? hitsOf(s) : null, n = s ? nOf(s) : null;
+      if (hits == null || !n) continue;
+      mine.set(p.id, { hits, n });
+      pool.hits += hits; pool.n += n;
+    }
+    return { mine, pool: pool.n > 0 ? pool : null };
+  };
+  const pffPP = pffRate((s) => s.pressures_allowed, (s) => s.pass_block_snaps);
+  const pffExpl = pffRate((s) => s.rush_10plus, (s) => s.rush_att);
+  const pffMtf = pffRate((s) => s.rush_mtf, (s) => s.rush_att);
   const slices = computeRBRoleSlices(prospects, games, rbPlays, RB_SLICES);
   const league = Object.fromEntries((Object.keys(RATES) as RateKey[]).map((k) => [k, RATES[k](rbPlays)])) as Record<RateKey, Rate>;
   const gameToProspect = new Map(games.map((g) => [g.id, g.prospect_id]));
@@ -289,8 +311,12 @@ export function computeRBRoleFits(
       league,
       heightIn: parseHeightInches(p.height),
       weightLb: p.weight,
-      pffPassPro: pffPP.get(p.id) ?? null,
-      leaguePffPassPro: leaguePP.n > 0 ? leaguePP : null,
+      pffPassPro: pffPP.mine.get(p.id) ?? null,
+      leaguePffPassPro: pffPP.pool,
+      pffExplosive: pffExpl.mine.get(p.id) ?? null,
+      leaguePffExplosive: pffExpl.pool,
+      pffMissedTackles: pffMtf.mine.get(p.id) ?? null,
+      leaguePffMissedTackles: pffMtf.pool,
     }) : null);
   }
   return out;

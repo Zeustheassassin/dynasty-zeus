@@ -13,15 +13,15 @@ import type { PffGameLog } from "./usePffGameLog";
 const LOG_COLS: Record<PffPos, [key: string, label: string][]> = {
   QB: [["pff_gr_off", "Grade"], ["pff_db", "DB"], ["pff_cmp", "Cmp"], ["pff_att", "Att"], ["pff_pyds", "Yds"], ["pff_adj", "ADJ%"],
     ["pff_btt", "BTT"], ["pff_twp", "TWP"], ["pff_ttt", "TTT"], ["pff_padot", "aDOT"], ["pff_sk", "Sk"], ["pff_dsgn", "Dsgn"],
-    ["pff_scr", "Scr"], ["pff_ryds", "Rush Yds"]],
+    ["pff_scr", "Scr"], ["pff_ryds", "Rush Yds"], ["pff_fum", "Fum"]],
   RB: [["pff_gr_off", "Grade"], ["pff_snaps", "Snaps"], ["pff_car", "Car"], ["pff_ryds", "Yds"], ["pff_yco_a", "YCO/A"],
-    ["pff_rmtf", "MTF"], ["pff_15p", "15+"], ["pff_routes", "Rte"], ["pff_tgt", "Tgt"], ["pff_rec", "Rec"],
+    ["pff_rmtf", "MTF"], ["pff_10p", "10+"], ["pff_15p", "15+"], ["pff_fum", "Fum"], ["pff_routes", "Rte"], ["pff_tgt", "Tgt"], ["pff_rec", "Rec"],
     ["pff_recyds", "Rec Yds"], ["pff_pblk", "PB"], ["pff_pr_allowed", "Pr"]],
   WR: [["pff_gr_off", "Grade"], ["pff_snaps", "Snaps"], ["pff_routes", "Rte"], ["pff_tgt", "Tgt"], ["pff_rec", "Rec"],
     ["pff_recyds", "Yds"], ["pff_yac", "YAC"], ["pff_yprr", "YPRR"], ["pff_drops", "Drop"], ["pff_radot", "aDOT"],
-    ["pff_ctgt", "CTgt"], ["pff_crec", "CRec"]],
+    ["pff_ctgt", "CTgt"], ["pff_crec", "CRec"], ["pff_fum", "Fum"]],
   TE: [["pff_gr_off", "Grade"], ["pff_snaps", "Snaps"], ["pff_routes", "Rte"], ["pff_tgt", "Tgt"], ["pff_rec", "Rec"],
-    ["pff_recyds", "Yds"], ["pff_yprr", "YPRR"], ["pff_rblk", "RBlk"], ["pff_pblk", "PBlk"], ["pff_pr_allowed", "Pr"]],
+    ["pff_recyds", "Yds"], ["pff_yprr", "YPRR"], ["pff_rblk", "RBlk"], ["pff_pblk", "PBlk"], ["pff_pr_allowed", "Pr"], ["pff_fum", "Fum"]],
 };
 
 function logCols(pos: PffPos): ColDef[] {

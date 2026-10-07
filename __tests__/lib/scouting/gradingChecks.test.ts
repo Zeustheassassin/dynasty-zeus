@@ -43,7 +43,7 @@ describe("buildGradingReport", () => {
 
   it("reports every AE Score component by position", () => {
     expect(report.components.QB.map((c) => c.result.def.key)).toContain("pff_btt");
-    expect(report.components.RB.map((c) => c.result.def.key)).toContain("ch_rb_btk");
+    expect(report.components.RB.map((c) => c.result.def.key)).toEqual(expect.arrayContaining(["ch_rb_pb", "pff_rb_mtf"]));
     expect(report.components.WR.map((c) => c.result.def.key)).toContain("tag_wr_press");
   });
 });

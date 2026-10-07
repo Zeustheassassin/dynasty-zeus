@@ -20,6 +20,9 @@ const count = (key: string, label: string, group: string, tooltip: string) => co
 
 const games = (group: string): ColDef =>
   col("pff_g", "G", group, "count", { tooltip: "Charted games with PFF stats imported (Scouting → PFF Links)" });
+// Ball security: scored in the RB and QB AE Scores, a data point for WR / TE (pffComponents.ts).
+const fumblePct = (group: string): ColDef =>
+  col("pff_fum_pct", "Fum%", group, "pct", { colorDir: -1, weightBy: "pff_touches", tooltip: `Fumbles ÷ touches (dropbacks + designed runs + catches), ${OVER} (PFF)` });
 
 // ── QB ───────────────────────────────────────────────────────
 const QB: ColDef[] = [
@@ -66,6 +69,7 @@ const QB: ColDef[] = [
   count("pff_ryds", "Rush Yds", "PFF Rushing", "Rushing yards"),
   count("pff_rmtf", "MTF", "PFF Rushing", "Avoided tackles as a runner"),
   count("pff_fum", "Fum", "PFF Rushing", "Fumbles"),
+  fumblePct("PFF Rushing"),
 ];
 
 // ── RB ───────────────────────────────────────────────────────
@@ -83,13 +87,17 @@ const RB: ColDef[] = [
   col("pff_yco_a", "YCO/A", "PFF Rushing", "dec2", { colorDir: 1, tooltip: `Yards after contact per carry, ${OVER} (PFF)` }),
   count("pff_rmtf", "MTF", "PFF Rushing", "Avoided tackles as a runner"),
   col("pff_mtf_a", "MTF/A", "PFF Rushing", "dec2", { colorDir: 1, tooltip: `Avoided tackles per carry, ${OVER} (PFF)` }),
+  count("pff_10p", "10+", "PFF Rushing", "Runs of 10+ yards (PFF explosive runs)"),
+  col("pff_10p_pct", "10+%", "PFF Rushing", "pct", { colorDir: 1, weightBy: "pff_car", tooltip: `Share of carries that went 10+ yards, ${OVER} (PFF)` }),
   count("pff_15p", "15+", "PFF Rushing", "Runs of 15+ yards"),
   col("pff_15p_pct", "15+%", "PFF Rushing", "pct", { colorDir: 1, weightBy: "pff_car", tooltip: `Share of carries that went 15+ yards, ${OVER} (PFF)` }),
+  col("pff_15of10", "15+ of 10+", "PFF Rushing", "pct", { colorDir: 1, weightBy: "pff_10p", tooltip: `Of his 10+ yard runs, the share that went 15+ (long speed), ${OVER} (PFF)` }),
   col("pff_brk_pct", "Brk Yds%", "PFF Rushing", "pct", { colorDir: 1, tooltip: `Share of his rushing yards that came on 15+ yard runs (PFF breakaway %), ${OVER}` }),
   count("pff_gap", "Gap", "PFF Rushing", "Gap-scheme runs"),
   count("pff_zone", "Zone", "PFF Rushing", "Zone-scheme runs"),
   col("pff_gap_pct", "Gap%", "PFF Rushing", "pct", { tooltip: `Gap runs ÷ (gap + zone runs), ${OVER} (PFF)` }),
   count("pff_fum", "Fum", "PFF Rushing", "Fumbles"),
+  fumblePct("PFF Rushing"),
   count("pff_rtd", "TD", "PFF Rushing", "Rushing TDs"),
   count("pff_routes", "Routes", "PFF Receiving", "Routes run"),
   count("pff_tgt", "Tgt", "PFF Receiving", "Targets"),
@@ -133,6 +141,8 @@ const receiving = (pos: "WR" | "TE"): ColDef[] => [
   count("pff_deep_rec", "20+ Rec", "PFF Receiving", "Catches on 20+ yard targets"),
   count("pff_deep_yds", "20+ Yds", "PFF Receiving", "Yards on 20+ yard targets"),
   count("pff_rectd", "TD", "PFF Receiving", "Receiving TDs"),
+  count("pff_fum", "Fum", "PFF Receiving", "Fumbles"),
+  fumblePct("PFF Receiving"),
   ...(pos === "TE" ? [col("pff_inline_pct", "Inline%", "PFF Receiving", "pct", { weightBy: "pff_align_n", tooltip: `Snaps inline, of his inline + slot + wide snaps, ${OVER} (PFF)` })] : []),
   col("pff_slot_pct", "Slot%", "PFF Receiving", "pct", { weightBy: "pff_align_n", tooltip: `Snaps in the slot, of his inline + slot + wide snaps, ${OVER} (PFF)` }),
   col("pff_wide_pct", "Wide%", "PFF Receiving", "pct", { weightBy: "pff_align_n", tooltip: `Snaps out wide, of his inline + slot + wide snaps, ${OVER} (PFF)` }),

@@ -104,6 +104,7 @@ export function buildComponents(inp: ComponentInputs): ComponentBuild {
       weight: componentWeight(def.key, inp.weights),
       samples: res.samples,
       perPlayer: true,
+      ...(def.additive ? { additive: true as const } : {}),
       describe: describe(def, res),
       spreadFloor: inp.spreadFloor ?? COMPONENT_SPREAD_FLOOR,
       // Count components carry their own units (yards per route, %), so the

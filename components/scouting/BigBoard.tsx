@@ -570,6 +570,11 @@ export default function BigBoard({
       return <td className={`${cls} text-slate-600`} title={aeScoreMissingReason(shownComposite, p.position)}>—</td>;
     }
     const lines = sc.components.map((c) => {
+      // An additive piece (fumbles): added on top, 0 at the pool's rate.
+      if (c.additive) {
+        return `${c.label} ${c.text ?? signed(c.ae, 2)} · ${Math.round(c.reliability * 100)}% taken as real · ` +
+          `added on top: ${c.weight} × ${signed(c.z, 2)} = ${signed(c.weight * c.z, 2)}`;
+      }
       // A per-player component (PFF result, charted rate, tag stat): its value
       // as shown, and its weight after trust.
       if (c.perPlayer) {
@@ -710,8 +715,8 @@ export default function BigBoard({
     "true-talent SDs vs the average charted prospect at the position, so it compares across " +
     "positions. WR blends cSAE 70% and SAE 30%; TE blends TE-SAER 80% and TE-SAEB 20%. " +
     "Each position's score also takes in, per player and weighted by how far his sample is trusted: your charting no AE reads " +
-    "(QB sacks under pressure; RB broken tackles, explosives, pass pro, drops, open on routes; WR drops, contested catches), " +
-    "PFF's results over the charted games where you don't chart (QB BTT%, TWP%, rushing; RB YCO/A, YPRR; WR/TE YPRR, YAC), " +
+    "(QB sacks under pressure; RB pass pro, drops, open on routes; WR drops, contested catches), " +
+    "PFF's results over the charted games where you don't chart (QB BTT%, TWP%, rushing; RB YCO/A, missed tackles, 10+ yard runs, 15+ of 10+, YPRR; WR/TE YPRR, YAC; RB and QB fumbles), " +
     "and the tag-only stats once enough tagged plays exist. A player without one keeps his score as it was. " +
     "Opponent strength is taken out (the AE columns keep it): WR cSAE, QB sacks under pressure and WR PFF YPRR by the opponent's defensive SP+, " +
     "everything else by the opponent's P4 / G5 / FCS tier; WR contested catches and RB PFF YPRR by the game's weather too. " +

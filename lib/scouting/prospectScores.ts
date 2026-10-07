@@ -205,12 +205,13 @@ const sgn = (v: number, dp: number) => `${v >= 0 ? "+" : ""}${v.toFixed(dp)}`;
 /**
  * An AE Score, piece by piece: each metric adds weight × z ÷ D, where D is
  * the summed weight of the position's ready AE metrics plus his per-player
- * components at weight × trust (buildPositionComposite). Then the WR
- * alignment penalty and the position baseline. The adds sum to the score.
+ * components at weight × trust (buildPositionComposite). An additive piece
+ * (fumbles) adds weight × z outright. Then the WR alignment penalty and the
+ * position baseline. The adds sum to the score.
  */
 export function scorePieces(view: ScoreView, pc: PositionComposite): ScorePiece[] {
   const base = pc.metrics.filter((m) => m.ready && !m.perPlayer).reduce((s, m) => s + m.weight, 0);
-  const extra = view.components.reduce((s, c) => s + (c.perPlayer ? c.effectiveWeight ?? 0 : 0), 0);
+  const extra = view.components.reduce((s, c) => s + (c.perPlayer && !c.additive ? c.effectiveWeight ?? 0 : 0), 0);
   const d = base + extra;
   const pieces: ScorePiece[] = view.components.map((c) => {
     const unit = SAMPLE_UNIT[c.key];
@@ -219,10 +220,13 @@ export function scorePieces(view: ScoreView, pc: PositionComposite): ScorePiece[
       : c.rawAe != null
         ? `${sgn(c.ae, 1)} on ${c.n} ${unit ?? "plays"} (${sgn(c.ae - c.rawAe, 1)} for opponents)`
         : `${sgn(c.ae, 1)} on ${c.n} ${unit ?? "plays"}`;
-    const weight = c.perPlayer
-      ? `${c.weight} × ${Math.round(c.reliability * 100)}% = ${(c.effectiveWeight ?? 0).toFixed(2)}`
-      : `${c.weight}`;
-    return { key: c.key, label: c.label, value, trust: c.reliability, weight, add: d > 0 ? (c.weight * c.z) / d : 0 };
+    const weight = c.additive
+      ? `${c.weight}, added on top`
+      : c.perPlayer
+        ? `${c.weight} × ${Math.round(c.reliability * 100)}% = ${(c.effectiveWeight ?? 0).toFixed(2)}`
+        : `${c.weight}`;
+    const add = c.additive ? c.weight * c.z : d > 0 ? (c.weight * c.z) / d : 0;
+    return { key: c.key, label: c.label, value, trust: c.reliability, weight, add };
   });
   if (view.alignment) pieces.push({ key: "alignment", label: "One-side alignment", value: view.alignment.label, trust: null, weight: null, add: view.alignment.value });
   if (view.baseline) pieces.push({ key: "baseline", label: "Position baseline", value: `every ${pc.pos} sits ${Math.abs(view.baseline).toFixed(1)} ${view.baseline < 0 ? "lower" : "higher"}`, trust: null, weight: null, add: view.baseline });

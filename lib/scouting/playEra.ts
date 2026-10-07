@@ -42,7 +42,6 @@ export type PlayFact =
   | "throw"         // QB: the ball was thrown (not a sack, scramble or throwaway)
   | "sack"          // QB: sacked
   | "run"           // QB: designed run or scramble; RB: a designed carry
-  | "explosiveRun"  // RB: a carry marked Explosive Play
   | "passProLoss"   // RB: a pass-block rep marked Fail
   | "catch"         // RB / WR: targeted and caught
   | "route"         // TE: a route rep
@@ -96,7 +95,9 @@ export const POSITION_TAGS: Readonly<Record<TagPosition, readonly PlayTagSpec[]>
     { column: "missed_read",               label: "Missed read",               short: "MR",  entry: "exception", appliesTo: "run" },
     { column: "pass_pro_loss",             label: "Pass-pro loss",             short: "PP",  entry: "conditional", values: ["wrong_man", "beaten"], valueLabels: ["Wrong man", "Beaten"], required: true, appliesTo: "passProLoss", when: "pass-pro losses only" },
     { column: "broken_tackle_after_catch", label: "Broken tackle after catch", short: "BT",  entry: "conditional", appliesTo: "catch", when: "catches only" },
-    { column: "caught_from_behind",        label: "Caught from behind",        short: "CFB", entry: "conditional", appliesTo: "explosiveRun", when: "explosive runs only" },
+    // caught_from_behind was dropped 2026-10-07 with the Explosive button it
+    // showed on (PFF's 15+ of 10+ runs reads long speed instead). The column
+    // stays; new plays leave it NULL.
   ],
   WR: [
     { column: "press_release",             label: "Release vs press",          short: "Press", entry: "conditional", values: ["won", "lost"], valueLabels: ["Won", "Lost"], required: true, appliesTo: "press", when: "press snaps only (one required click)" },

@@ -115,4 +115,21 @@ describe("scorePieces", () => {
     expect(y.value).toBe("1.00 yds");
     expect(y.weight).toMatch(/^0\.5 × \d+% = 0\.\d\d$/);
   });
+
+  it("adds an additive piece (fumbles) outright, and the pieces still sum to the score", () => {
+    const fum = {
+      key: "fum", label: "Fum%", weight: 0.2, perPlayer: true as const, additive: true as const, minVariance: 1e-6,
+      samples: new Map(ids.map((id, i) => [id, sample(-(i % 4) * 0.5, 70, 0.05)])),
+    };
+    const pc = buildPositionComposite("RB", [primary, secondary, extra, fum], -0.2);
+    for (const id of ["p0", "p3", "p6"]) {
+      const sc = pc.scores.get(id)!;
+      const pieces = scorePieces({ score: sc.score, components: sc.components.map((c) => ({ ...c, tau: 1 })), baseline: sc.baseline }, pc);
+      expect(pieces.reduce((s, x) => s + x.add, 0)).toBeCloseTo(sc.score, 10);
+      const f = pieces.find((x) => x.key === "fum")!;
+      const c = sc.components.find((x) => x.key === "fum")!;
+      expect(f).toMatchObject({ weight: "0.2, added on top" });
+      expect(f.add).toBeCloseTo(0.2 * c.z, 12);
+    }
+  });
 });

@@ -78,13 +78,26 @@ describe("countStat", () => {
 describe("the component lists", () => {
   it("keep PFF to what the user doesn't chart (no skill counted twice)", () => {
     const pff = PFF_COMPONENTS.map((d) => d.key);
-    for (const doubled of ["pff_qb_p2s", "pff_rb_mtf", "pff_rb_15p", "pff_rb_pr", "pff_wr_drop", "pff_wr_cc", "pff_te_pr"]) expect(pff).not.toContain(doubled);
-    expect(CHARTED_COMPONENTS.map((d) => d.key)).toEqual(expect.arrayContaining(["ch_qb_p2s", "ch_rb_btk", "ch_rb_expl", "ch_rb_pb", "ch_wr_drop", "ch_wr_cc"]));
+    for (const doubled of ["pff_qb_p2s", "pff_rb_15p", "pff_rb_pr", "pff_wr_drop", "pff_wr_cc", "pff_te_pr"]) expect(pff).not.toContain(doubled);
+    expect(CHARTED_COMPONENTS.map((d) => d.key)).toEqual(expect.arrayContaining(["ch_qb_p2s", "ch_rb_pb", "ch_wr_drop", "ch_wr_cc"]));
   });
 
-  it("carry the user's approved weights (2026-10-05)", () => {
-    expect(PFF_COMPONENT_WEIGHTS).toEqual({ pff_btt: 0.4, pff_twp: 0.4, pff_qb_ypc: 0.3, pff_rb_yco: 0.3, pff_rb_yprr: 0.2, pff_wr_yprr: 0.5, pff_wr_yac: 0.2, pff_te_yprr: 0.5 });
-    expect(CHARTED_COMPONENT_WEIGHTS.ch_rb_btk).toBe(0.3);
+  it("score RB broken tackles and explosive runs from PFF, not the old charted buttons (2026-10-07)", () => {
+    const charted = CHARTED_COMPONENTS.map((d) => d.key);
+    expect(charted).not.toContain("ch_rb_btk");
+    expect(charted).not.toContain("ch_rb_expl");
+    expect(PFF_COMPONENTS.map((d) => d.key)).toEqual(expect.arrayContaining(["pff_rb_mtf", "pff_rb_10p", "pff_rb_15of10", "pff_qb_fum", "pff_rb_fum", "pff_wr_fum", "pff_te_fum"]));
+    expect(TAG_COMPONENTS.map((d) => d.key)).not.toContain("tag_rb_cfb");
+  });
+
+  it("carry the user's approved weights (2026-10-05, RB swap and fumbles 2026-10-07)", () => {
+    expect(PFF_COMPONENT_WEIGHTS).toEqual({
+      pff_btt: 0.4, pff_twp: 0.4, pff_qb_ypc: 0.3, pff_qb_fum: 0.05,
+      pff_rb_yco: 0.3, pff_rb_mtf: 0.3, pff_rb_10p: 0.2, pff_rb_15of10: 0.05, pff_rb_yprr: 0.2, pff_rb_fum: 0.2,
+      pff_wr_yprr: 0.5, pff_wr_yac: 0.2, pff_wr_fum: 0,
+      pff_te_yprr: 0.5, pff_te_fum: 0,
+    });
+    expect(CHARTED_COMPONENT_WEIGHTS.ch_rb_pb).toBe(0.15);
     expect(TAG_COMPONENT_WEIGHTS.tag_wr_press).toBe(0.15);
     // QB-fault sacks are shown, not scored: the charted sacks already score sacks.
     expect(TAG_COMPONENTS.map((d) => d.key)).not.toContain("tag_qb_qbsack");
@@ -106,18 +119,30 @@ describe("per-game counts", () => {
     expect(pffGameCounts(yprr, games, rows, () => "RB")).toEqual([]);
   });
 
-  it("charted: QB sacks per pressured dropback, RB broken tackles per known run, WR drops per catchable target", () => {
+  it("PFF: RB 15+ of 10+ runs, and fumbles per touch (dropbacks + designed runs + catches)", () => {
+    const games = [game("g1", "R")];
+    const count = (key: string, over: Partial<PffGameRow>) =>
+      pffGameCounts(PFF_COMPONENTS.find((d) => d.key === key)!, games, [pffRow("g1", "R", over)], () => key.split("_")[1].toUpperCase());
+    expect(count("pff_rb_15of10", { rush_10plus: 4, rush_15plus: 3 })).toEqual([{ prospectId: "R", gameId: "g1", num: 3, den: 4 }]);
+    expect(count("pff_rb_15of10", { rush_10plus: 0, rush_15plus: 0 })).toEqual([]);
+    expect(count("pff_rb_fum", { fumbles: 1, rush_att: 18, receptions: 2 })).toEqual([{ prospectId: "R", gameId: "g1", num: 1, den: 20 }]);
+    // A QB's scrambles are in both his dropbacks and his rush attempts: counted once.
+    expect(count("pff_qb_fum", { fumbles: 2, all_dropbacks: 40, rush_att: 8, scrambles: 3 })).toEqual([{ prospectId: "R", gameId: "g1", num: 2, den: 45 }]);
+    expect(count("pff_wr_fum", { fumbles: 0, receptions: 6 })).toEqual([{ prospectId: "R", gameId: "g1", num: 0, den: 6 }]);
+  });
+
+  it("charted: QB sacks per pressured dropback, RB pass blocks won, WR drops per catchable target", () => {
     const games = [game("q", "Q"), game("r", "R")];
     const qb = (over: Partial<QBPlay>) => ({ game_id: "q", play_type: "pass", pressure: "front_side", timing: "first_option", ...over }) as QBPlay;
-    const rb = (over: Partial<RBPlay>) => ({ game_id: "r", run_type: "inside_zone", success: true, broken_tackle: false, ...over }) as RBPlay;
+    const rb = (over: Partial<RBPlay>) => ({ game_id: "r", run_type: "pass_block", success: true, ...over }) as RBPlay;
     const inp = {
       games,
       qbPlays: [qb({ timing: "sack" }), qb({}), qb({ pressure: "clean", timing: "sack" }), qb({ play_type: "run" })],
-      rbPlays: [rb({ broken_tackle: true }), rb({}), rb({ run_type: "route", success: null }), rb({ success: null })],
+      rbPlays: [rb({}), rb({ success: false }), rb({ success: null }), rb({ run_type: "inside_zone" })],
       wrRouteCounts: [{ prospect_id: "W", game_id: "w", routes: 30, targets: 8, catches: 6, drops: 1, contested: 2, contested_catches: 1 }],
     };
     expect(chartedGameCounts("ch_qb_p2s", inp)).toEqual([{ prospectId: "Q", gameId: "q", num: 1, den: 2 }]);
-    expect(chartedGameCounts("ch_rb_btk", inp)).toEqual([{ prospectId: "R", gameId: "r", num: 1, den: 2 }]);
+    expect(chartedGameCounts("ch_rb_pb", inp)).toEqual([{ prospectId: "R", gameId: "r", num: 1, den: 2 }]);
     expect(chartedGameCounts("ch_wr_drop", inp)).toEqual([{ prospectId: "W", gameId: "w", num: 1, den: 7 }]);
     expect(chartedGameCounts("ch_wr_cc", inp)).toEqual([{ prospectId: "W", gameId: "w", num: 1, den: 2 }]);
   });
@@ -163,7 +188,8 @@ describe("buildComponents", () => {
     expect(b.results.length).toBe(CHARTED_COMPONENTS.length + PFF_COMPONENTS.length + TAG_COMPONENTS.length);
     const yprr = b.extra.WR.find((m) => m.key === "pff_wr_yprr")!;
     expect(yprr).toMatchObject({ label: "PFF YPRR", weight: 0.5, perPlayer: true, spreadFloor: COMPONENT_SPREAD_FLOOR });
-    expect(b.extra.RB.find((m) => m.key === "ch_rb_btk")!.label).toBe("BTkl%");
+    expect(b.extra.RB.find((m) => m.key === "pff_rb_mtf")).toMatchObject({ label: "PFF MTF/A", weight: 0.3 });
+    expect(b.extra.RB.find((m) => m.key === "ch_rb_pb")!.label).toBe("PB%");
     expect(b.extra.WR.find((m) => m.key === "tag_wr_press")!.label).toBe("Tag Press Win%");
   });
 });

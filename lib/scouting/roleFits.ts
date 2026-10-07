@@ -15,7 +15,7 @@ export function computeRoleFits(
   rbPlays: RBPlay[],
   qbPlays: QBPlay[],
   tePlays: TEPlay[],
-  /** PFF over each prospect's charted games: QB rushing, RB pass blocking. */
+  /** PFF over each prospect's charted games: QB rushing; RB pass blocking, 10+ yard runs and missed tackles. */
   pff?: ReadonlyMap<string, PffTotals>,
 ): Map<string, RoleFit> {
   const list = [...prospects];

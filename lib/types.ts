@@ -1273,6 +1273,9 @@ export interface ScoreComponent {
    *  who have it. */
   perPlayer?: boolean;
   effectiveWeight?: number;
+  /** Added on top of the averaged score (weight × z) instead of averaged in,
+   *  e.g. fumbles: 0 at the pool's mean (aeComposite.ts). No effectiveWeight. */
+  additive?: boolean;
   /** The value as shown, e.g. "6.1% on 210 attempts (pool 4.5%)". */
   text?: string;
 }
