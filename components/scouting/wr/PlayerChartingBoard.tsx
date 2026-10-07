@@ -702,7 +702,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
                 <div className="flex flex-wrap gap-1.5">
                   {ROUTE_TYPES.map((rt) => (
                     <button key={rt} onClick={() => setRouteType(rt)}
-                      className={`px-3 py-1.5 rounded text-xs font-medium capitalize transition ${routeType === rt ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                      className={`flex-1 whitespace-nowrap px-3 py-1.5 rounded text-xs font-medium capitalize transition ${routeType === rt ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                       {rt}
                     </button>
                   ))}
@@ -711,33 +711,33 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
             )}
 
             <div className="flex flex-wrap gap-4">
-              <div>
+              <div className="flex-1 whitespace-nowrap">
                 <div className="text-xs text-slate-500 mb-2">Alignment</div>
                 <div className="flex gap-1.5">
                   {ALIGNMENTS.map((a) => (
                     <button key={a.key} onClick={() => setAlignment(a.key)}
-                      className={`w-10 h-10 rounded font-bold text-sm transition ${alignment === a.key ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                      className={`flex-1 h-10 rounded font-bold text-sm transition ${alignment === a.key ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                       {a.label}
                     </button>
                   ))}
                 </div>
               </div>
-              <div>
+              <div className="flex-1 whitespace-nowrap">
                 <div className="text-xs text-slate-500 mb-2">Line</div>
                 <div className="flex gap-1.5">
                   <button onClick={() => setOnLine(true)}
-                    className={`px-3 h-10 rounded text-xs font-medium transition ${onLine ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>On</button>
+                    className={`flex-1 whitespace-nowrap px-3 h-10 rounded text-xs font-medium transition ${onLine ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>On</button>
                   <button onClick={() => setOnLine(false)}
-                    className={`px-3 h-10 rounded text-xs font-medium transition ${!onLine ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Off</button>
+                    className={`flex-1 whitespace-nowrap px-3 h-10 rounded text-xs font-medium transition ${!onLine ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Off</button>
                 </div>
               </div>
               {!noRouteRun && (
-                <div>
+                <div className="flex-1 whitespace-nowrap">
                   <div className="text-xs text-slate-500 mb-2">Coverage</div>
                   <div className="flex gap-1.5">
                     {COVERAGES.map((cv) => (
                       <button key={cv.key} onClick={() => setCoverage((c) => c === cv.key ? "" : cv.key)}
-                        className={`px-3 h-10 rounded text-xs font-medium transition ${coverage === cv.key ? "bg-orange-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                        className={`flex-1 whitespace-nowrap px-3 h-10 rounded text-xs font-medium transition ${coverage === cv.key ? "bg-orange-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         {cv.label}
                       </button>
                     ))}
@@ -745,24 +745,24 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
                 </div>
               )}
               {!noRouteRun && (
-                <div>
+                <div className="flex-1 whitespace-nowrap">
                   <div className="text-xs text-slate-500 mb-2">Got Open?</div>
                   <div className="flex gap-1.5">
                     <button onClick={() => setWasOpen(true)}
-                      className={`px-3 h-10 rounded text-xs font-medium transition ${wasOpen ? "bg-emerald-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
+                      className={`flex-1 whitespace-nowrap px-3 h-10 rounded text-xs font-medium transition ${wasOpen ? "bg-emerald-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
                     <button onClick={() => setWasOpen(false)}
-                      className={`px-3 h-10 rounded text-xs font-medium transition ${!wasOpen ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
+                      className={`flex-1 whitespace-nowrap px-3 h-10 rounded text-xs font-medium transition ${!wasOpen ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
                   </div>
                 </div>
               )}
               {!noRouteRun && (
-                <div>
+                <div className="flex-1 whitespace-nowrap">
                   <div className="text-xs text-slate-500 mb-2">Targeted?</div>
                   <div className="flex gap-1.5">
                     <button onClick={() => setTargeted(true)}
-                      className={`px-3 h-10 rounded text-xs font-medium transition ${targeted ? "bg-amber-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
+                      className={`flex-1 whitespace-nowrap px-3 h-10 rounded text-xs font-medium transition ${targeted ? "bg-amber-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
                     <button onClick={() => { setTargeted(false); setPlayOutcome(null); setContested(false); }}
-                      className={`px-3 h-10 rounded text-xs font-medium transition ${!targeted ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
+                      className={`flex-1 whitespace-nowrap px-3 h-10 rounded text-xs font-medium transition ${!targeted ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
                   </div>
                 </div>
               )}
@@ -770,24 +770,24 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
 
             {!noRouteRun && targeted && (
               <div className="flex flex-wrap gap-4 p-3 bg-slate-900/60 rounded-lg border border-slate-800">
-                <div>
+                <div className="flex-1 whitespace-nowrap">
                   <div className="text-xs text-slate-500 mb-2">Outcome</div>
                   <div className="flex gap-1.5">
                     <button onClick={() => setPlayOutcome("caught")}
-                      className={`px-4 h-10 rounded text-xs font-bold transition ${playOutcome === "caught" ? "bg-emerald-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Caught ✓</button>
+                      className={`flex-1 whitespace-nowrap px-4 h-10 rounded text-xs font-bold transition ${playOutcome === "caught" ? "bg-emerald-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Caught ✓</button>
                     <button onClick={() => setPlayOutcome("drop")}
-                      className={`px-4 h-10 rounded text-xs font-bold transition ${playOutcome === "drop" ? "bg-red-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Drop ✗</button>
+                      className={`flex-1 whitespace-nowrap px-4 h-10 rounded text-xs font-bold transition ${playOutcome === "drop" ? "bg-red-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Drop ✗</button>
                     <button onClick={() => setPlayOutcome("incomplete")}
-                      className={`px-4 h-10 rounded text-xs font-bold transition ${playOutcome === "incomplete" ? "bg-slate-500 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Incomplete</button>
+                      className={`flex-1 whitespace-nowrap px-4 h-10 rounded text-xs font-bold transition ${playOutcome === "incomplete" ? "bg-slate-500 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Incomplete</button>
                   </div>
                 </div>
-                <div>
+                <div className="flex-1 whitespace-nowrap">
                   <div className="text-xs text-slate-500 mb-2">Contested?</div>
                   <div className="flex gap-1.5">
                     <button onClick={() => setContested(true)}
-                      className={`px-3 h-10 rounded text-xs font-medium transition ${contested ? "bg-purple-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
+                      className={`flex-1 whitespace-nowrap px-3 h-10 rounded text-xs font-medium transition ${contested ? "bg-purple-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
                     <button onClick={() => setContested(false)}
-                      className={`px-3 h-10 rounded text-xs font-medium transition ${!contested ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
+                      className={`flex-1 whitespace-nowrap px-3 h-10 rounded text-xs font-medium transition ${!contested ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
                   </div>
                 </div>
               </div>

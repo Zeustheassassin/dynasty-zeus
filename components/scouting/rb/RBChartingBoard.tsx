@@ -681,7 +681,7 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
               <div className="flex gap-2">
                 {FORMATIONS.map((f) => (
                   <button key={f.key} onClick={() => setFormation(f.key)}
-                    className={`px-4 py-2 rounded text-sm font-medium transition ${formation === f.key ? "bg-green-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                    className={`flex-1 whitespace-nowrap px-4 py-2 rounded text-sm font-medium transition ${formation === f.key ? "bg-green-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                     {f.label}
                   </button>
                 ))}
@@ -760,59 +760,59 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
                       ))}
                     </div>
                   </div>
-                  <div>
+                  <div className="flex-1 whitespace-nowrap">
                     <div className="text-xs text-slate-500 mb-2">Aligned at Snap</div>
                     <div className="flex gap-1.5">
                       <button onClick={() => setAlignedAsWr(false)}
-                        className={`px-3 h-9 rounded text-xs font-medium transition ${!alignedAsWr ? "bg-green-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                        className={`flex-1 whitespace-nowrap px-3 h-9 rounded text-xs font-medium transition ${!alignedAsWr ? "bg-green-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         RB
                       </button>
                       <button onClick={() => setAlignedAsWr(true)}
-                        className={`px-3 h-9 rounded text-xs font-medium transition ${alignedAsWr ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                        className={`flex-1 whitespace-nowrap px-3 h-9 rounded text-xs font-medium transition ${alignedAsWr ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         WR Split Out
                       </button>
                     </div>
                   </div>
-                  <div>
+                  <div className="flex-1 whitespace-nowrap">
                     <div className="text-xs text-slate-500 mb-2">Targeted?</div>
                     <div className="flex gap-1.5">
                       <button onClick={() => setRbTargeted(true)}
-                        className={`px-3 h-9 rounded text-xs font-medium transition ${rbTargeted ? "bg-amber-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                        className={`flex-1 whitespace-nowrap px-3 h-9 rounded text-xs font-medium transition ${rbTargeted ? "bg-amber-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         Yes
                       </button>
                       <button onClick={() => { setRbTargeted(false); setRbOutcome(null); }}
-                        className={`px-3 h-9 rounded text-xs font-medium transition ${!rbTargeted ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                        className={`flex-1 whitespace-nowrap px-3 h-9 rounded text-xs font-medium transition ${!rbTargeted ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         No
                       </button>
                     </div>
                   </div>
-                  <div>
+                  <div className="flex-1 whitespace-nowrap">
                     <div className="text-xs text-slate-500 mb-2">Open on Play?</div>
                     <div className="flex gap-1.5">
                       <button onClick={() => setRbWasOpen(true)}
-                        className={`px-3 h-9 rounded text-xs font-medium transition ${rbWasOpen ? "bg-green-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                        className={`flex-1 whitespace-nowrap px-3 h-9 rounded text-xs font-medium transition ${rbWasOpen ? "bg-green-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         Yes
                       </button>
                       <button onClick={() => setRbWasOpen(false)}
-                        className={`px-3 h-9 rounded text-xs font-medium transition ${!rbWasOpen ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                        className={`flex-1 whitespace-nowrap px-3 h-9 rounded text-xs font-medium transition ${!rbWasOpen ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         No
                       </button>
                     </div>
                   </div>
                   {rbTargeted && (
-                    <div>
+                    <div className="flex-1 whitespace-nowrap">
                       <div className="text-xs text-slate-500 mb-2">Outcome</div>
                       <div className="flex gap-1.5">
                         <button onClick={() => setRbOutcome("caught")}
-                          className={`px-4 h-9 rounded text-xs font-bold transition ${rbOutcome === "caught" ? "bg-green-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                          className={`flex-1 whitespace-nowrap px-4 h-9 rounded text-xs font-bold transition ${rbOutcome === "caught" ? "bg-green-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                           Caught ✓
                         </button>
                         <button onClick={() => setRbOutcome("drop")}
-                          className={`px-4 h-9 rounded text-xs font-bold transition ${rbOutcome === "drop" ? "bg-red-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                          className={`flex-1 whitespace-nowrap px-4 h-9 rounded text-xs font-bold transition ${rbOutcome === "drop" ? "bg-red-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                           Drop ✗
                         </button>
                         <button onClick={() => setRbOutcome("incomplete")}
-                          className={`px-4 h-9 rounded text-xs font-bold transition ${rbOutcome === "incomplete" ? "bg-slate-500 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                          className={`flex-1 whitespace-nowrap px-4 h-9 rounded text-xs font-bold transition ${rbOutcome === "incomplete" ? "bg-slate-500 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                           Incomplete
                         </button>
                       </div>
@@ -843,18 +843,18 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
               <>
                 {/* Context toggles — run plays only */}
                 <div className="flex flex-wrap gap-3">
-                  <div>
+                  <div className="flex-1 whitespace-nowrap">
                     <div className="text-xs text-slate-500 mb-2">Loaded Box?</div>
                     <div className="flex gap-1.5">
-                      <button onClick={() => setLoadedBox(true)} className={`px-3 h-9 rounded text-xs font-medium transition ${loadedBox ? "bg-teal-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
-                      <button onClick={() => setLoadedBox(false)} className={`px-3 h-9 rounded text-xs font-medium transition ${!loadedBox ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
+                      <button onClick={() => setLoadedBox(true)} className={`flex-1 whitespace-nowrap px-3 h-9 rounded text-xs font-medium transition ${loadedBox ? "bg-teal-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
+                      <button onClick={() => setLoadedBox(false)} className={`flex-1 whitespace-nowrap px-3 h-9 rounded text-xs font-medium transition ${!loadedBox ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
                     </div>
                   </div>
-                  <div>
+                  <div className="flex-1 whitespace-nowrap">
                     <div className="text-xs text-slate-500 mb-2">Unblocked Defender?</div>
                     <div className="flex gap-1.5">
-                      <button onClick={() => setUnblockedDefender(true)} className={`px-3 h-9 rounded text-xs font-medium transition ${unblockedDefender ? "bg-orange-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
-                      <button onClick={() => setUnblockedDefender(false)} className={`px-3 h-9 rounded text-xs font-medium transition ${!unblockedDefender ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
+                      <button onClick={() => setUnblockedDefender(true)} className={`flex-1 whitespace-nowrap px-3 h-9 rounded text-xs font-medium transition ${unblockedDefender ? "bg-orange-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
+                      <button onClick={() => setUnblockedDefender(false)} className={`flex-1 whitespace-nowrap px-3 h-9 rounded text-xs font-medium transition ${!unblockedDefender ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
                     </div>
                   </div>
                 </div>

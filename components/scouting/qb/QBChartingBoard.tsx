@@ -538,7 +538,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
                 <div className="flex flex-wrap gap-2">
                   {TIMINGS.map(({ key, label }) => (
                     <button key={key} onClick={() => handleTimingChange(key)}
-                      className={`px-4 py-2 rounded text-sm font-medium transition ${
+                      className={`flex-1 whitespace-nowrap px-4 py-2 rounded text-sm font-medium transition ${
                         timing === key
                           ? key === "scramble" ? "bg-orange-600 text-white" : "bg-blue-600 text-white"
                           : "bg-slate-800 text-slate-400 hover:bg-slate-700"
@@ -558,7 +558,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
                   <div className="flex flex-wrap gap-2">
                     {PRESSURES.map(({ key, label, active }) => (
                       <button key={key} onClick={() => handlePressureChange(key)}
-                        className={`px-4 py-2 rounded text-sm font-medium transition ${pressure === key ? `${active} text-white` : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                        className={`flex-1 whitespace-nowrap px-4 py-2 rounded text-sm font-medium transition ${pressure === key ? `${active} text-white` : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         {label}
                       </button>
                     ))}
@@ -570,7 +570,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
                     <div className="flex flex-wrap gap-2">
                       {PRESSURE_HANDLINGS.map(({ key, label }) => (
                         <button key={key} onClick={() => setPressureHandling((h) => h === key ? null : key)}
-                          className={`px-4 py-2 rounded text-sm font-medium transition ${pressureHandling === key ? "bg-amber-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                          className={`flex-1 whitespace-nowrap px-4 py-2 rounded text-sm font-medium transition ${pressureHandling === key ? "bg-amber-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                           {label}
                         </button>
                       ))}
@@ -589,7 +589,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
                   <div className="flex flex-wrap gap-2">
                     {PLATFORMS.map(({ key, label }) => (
                       <button key={key} onClick={() => handlePlatformChange(key)}
-                        className={`px-4 py-2 rounded text-sm font-medium transition ${platform === key ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                        className={`flex-1 whitespace-nowrap px-4 py-2 rounded text-sm font-medium transition ${platform === key ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         {label}
                       </button>
                     ))}
@@ -600,7 +600,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
                       <div className="flex gap-2">
                         {PLATFORM_SIDES.map(({ key, label }) => (
                           <button key={key} onClick={() => setPlatformSide((s) => s === key ? null : key)}
-                            className={`px-4 py-1.5 rounded text-xs font-medium transition ${platformSide === key ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                            className={`flex-1 whitespace-nowrap px-4 py-1.5 rounded text-xs font-medium transition ${platformSide === key ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                             {label}
                           </button>
                         ))}
@@ -615,7 +615,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
                   <div className="flex flex-wrap gap-2">
                     {ACCURACIES.map(({ key, label, active }) => (
                       <button key={key} onClick={() => setAccuracy((a) => a === key ? null : key)}
-                        className={`px-4 py-2 rounded text-sm font-medium transition ${accuracy === key ? `${active} text-white` : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                        className={`flex-1 whitespace-nowrap px-4 py-2 rounded text-sm font-medium transition ${accuracy === key ? `${active} text-white` : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         {label}
                       </button>
                     ))}
@@ -632,7 +632,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
                       { key: "incorrect", label: "Incorrect", cls: "bg-red-700" },
                     ] as { key: QBTouch; label: string; cls: string }[]).map(({ key, label, cls }) => (
                       <button key={key} onClick={() => setTouch(key)}
-                        className={`px-5 py-2 rounded text-sm font-medium transition ${touch === key ? `${cls} text-white` : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                        className={`flex-1 whitespace-nowrap px-5 py-2 rounded text-sm font-medium transition ${touch === key ? `${cls} text-white` : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         {label}
                       </button>
                     ))}
@@ -654,7 +654,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
                           setCompletion((c) => c === key ? null : key);
                           if (key !== "interception") setIntType(null);
                         }}
-                        className={`px-5 py-2 rounded text-sm font-semibold transition ${
+                        className={`flex-1 whitespace-nowrap px-5 py-2 rounded text-sm font-semibold transition ${
                           completion === key ? `${cls} text-white` : "bg-slate-800 text-slate-400 hover:bg-slate-700"
                         }`}
                       >
@@ -676,7 +676,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
                           <button
                             key={key}
                             onClick={() => { setIntType((t) => t === key ? null : key); setIntReceiverFault(false); }}
-                            className={`px-4 py-1.5 rounded text-xs font-medium transition ${
+                            className={`flex-1 whitespace-nowrap px-4 py-1.5 rounded text-xs font-medium transition ${
                               intType === key ? "bg-orange-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"
                             }`}
                           >
@@ -700,7 +700,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
                                 key={label}
                                 onClick={() => setIntReceiverFault(value)}
                                 aria-pressed={intReceiverFault === value}
-                                className={`px-4 py-1.5 rounded text-xs font-medium transition ${
+                                className={`flex-1 whitespace-nowrap px-4 py-1.5 rounded text-xs font-medium transition ${
                                   intReceiverFault === value ? `${cls} text-white` : "bg-slate-800 text-slate-400 hover:bg-slate-700"
                                 }`}
                               >
@@ -722,7 +722,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
                       <button
                         key={pos}
                         onClick={() => setTargetPos((p) => p === pos ? null : pos)}
-                        className={`px-6 py-2 rounded text-sm font-semibold uppercase transition ${
+                        className={`flex-1 whitespace-nowrap px-6 py-2 rounded text-sm font-semibold uppercase transition ${
                           targetPos === pos ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"
                         }`}
                       >
@@ -735,10 +735,10 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
                 {/* Depth / Location 3×3 grid */}
                 <div>
                   <div className="text-xs text-slate-500 mb-2">Depth / Location</div>
-                  <table className="text-xs">
+                  <table className="w-full text-xs">
                     <thead>
                       <tr>
-                        <th className="pr-2 pb-1 text-slate-700 font-normal text-left" />
+                        <th className="w-px pr-2 pb-1 text-slate-700 font-normal text-left" />
                         {["Left", "Center", "Right"].map((l) => (
                           <th key={l} className="px-1 pb-1 text-slate-500 font-medium text-center">{l}</th>
                         ))}
@@ -772,7 +772,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
                   <div className="flex flex-wrap gap-1.5">
                     {ROUTE_TYPES.map((rt) => (
                       <button key={rt} onClick={() => setRouteType((r) => r === rt ? null : rt)}
-                        className={`px-3 py-1.5 rounded text-xs font-medium capitalize transition ${routeType === rt ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                        className={`flex-1 whitespace-nowrap px-3 py-1.5 rounded text-xs font-medium capitalize transition ${routeType === rt ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         {rt}
                       </button>
                     ))}
@@ -785,7 +785,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
                   <div className="flex gap-2">
                     {(["man", "zone"] as const).map((cvg) => (
                       <button key={cvg} onClick={() => setCoverage((c) => c === cvg ? null : cvg)}
-                        className={`px-6 py-2 rounded text-sm font-medium capitalize transition ${coverage === cvg ? "bg-purple-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                        className={`flex-1 whitespace-nowrap px-6 py-2 rounded text-sm font-medium capitalize transition ${coverage === cvg ? "bg-purple-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         {cvg}
                       </button>
                     ))}

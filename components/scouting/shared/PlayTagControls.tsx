@@ -52,7 +52,7 @@ export default function PlayTagControls({ tags, facts, part, accent }: Props) {
                 onClick={() => tags.set(spec.column, !on)}
                 title={forced ? `${spec.label}: ${spec.forced?.note}`
                   : spec.entry === "sticky" ? `${spec.label}: stays on for the next play until you turn it off` : spec.label}
-                className={`px-3 py-1.5 rounded text-xs font-medium transition ${on ? ACTIVE[accent] : IDLE} ${forced ? "cursor-default" : ""}`}>
+                className={`flex-1 whitespace-nowrap px-3 py-1.5 rounded text-xs font-medium transition ${on ? ACTIVE[accent] : IDLE} ${forced ? "cursor-default" : ""}`}>
                 {spec.label}
               </button>
             );
@@ -77,7 +77,7 @@ function TagPicker({ spec, tags, accent }: { spec: PlayTagSpec; tags: PlayTags; 
         return (
           <button key={String(opt.value)} type="button" aria-pressed={on}
             onClick={() => tags.set(spec.column, opt.value)}
-            className={`px-3 py-1.5 rounded text-xs font-medium transition ${on ? ACTIVE[accent] : IDLE} ${unpicked ? "ring-1 ring-amber-500/70" : ""}`}>
+            className={`flex-1 whitespace-nowrap px-3 py-1.5 rounded text-xs font-medium transition ${on ? ACTIVE[accent] : IDLE} ${unpicked ? "ring-1 ring-amber-500/70" : ""}`}>
             {opt.label}
           </button>
         );

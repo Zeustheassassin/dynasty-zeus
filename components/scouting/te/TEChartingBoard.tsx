@@ -686,7 +686,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
               <div className="flex flex-wrap gap-2">
                 {POSITIONINGS.map((p) => (
                   <button key={p.key} onClick={() => setPositioning(p.key)}
-                    className={`px-3 py-2 rounded text-sm font-medium transition ${positioning === p.key ? "bg-green-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                    className={`flex-1 whitespace-nowrap px-3 py-2 rounded text-sm font-medium transition ${positioning === p.key ? "bg-green-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                     {p.label}
                   </button>
                 ))}
@@ -730,26 +730,26 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
               <div className="space-y-3 p-3 bg-slate-900/60 rounded-lg border border-purple-900/50">
                 <div className="text-xs text-purple-400 font-medium">Block Details</div>
                 <div className="flex flex-wrap gap-4">
-                  <div>
+                  <div className="flex-1 whitespace-nowrap">
                     <div className="text-xs text-slate-500 mb-2">Block Type</div>
                     <div className="flex gap-2">
                       {(["movement", "inline"] as TEBlockType[]).map((bt) => (
                         <button key={bt} onClick={() => setBlockType(bt)}
-                          className={`px-4 py-2 rounded text-sm font-medium transition capitalize ${blockType === bt ? "bg-purple-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                          className={`flex-1 whitespace-nowrap px-4 py-2 rounded text-sm font-medium transition capitalize ${blockType === bt ? "bg-purple-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                           {bt.charAt(0).toUpperCase() + bt.slice(1)}
                         </button>
                       ))}
                     </div>
                   </div>
-                  <div>
+                  <div className="flex-1 whitespace-nowrap">
                     <div className="text-xs text-slate-500 mb-2">Outcome</div>
                     <div className="flex gap-2">
                       <button onClick={() => setBlockSuccess(true)}
-                        className={`px-4 py-2 rounded text-sm font-bold transition ${blockSuccess === true ? "bg-green-600 text-white ring-2 ring-green-400" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                        className={`flex-1 whitespace-nowrap px-4 py-2 rounded text-sm font-bold transition ${blockSuccess === true ? "bg-green-600 text-white ring-2 ring-green-400" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         ✓ Success
                       </button>
                       <button onClick={() => setBlockSuccess(false)}
-                        className={`px-4 py-2 rounded text-sm font-bold transition ${blockSuccess === false ? "bg-red-600 text-white ring-2 ring-red-400" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                        className={`flex-1 whitespace-nowrap px-4 py-2 rounded text-sm font-bold transition ${blockSuccess === false ? "bg-red-600 text-white ring-2 ring-red-400" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         ✗ Fail
                       </button>
                     </div>
@@ -777,29 +777,29 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
                   <div className="flex flex-wrap gap-1.5">
                     {ROUTE_TYPES.map((rt) => (
                       <button key={rt} onClick={() => setRouteType(rt)}
-                        className={`px-3 py-1.5 rounded text-xs font-medium transition ${routeType === rt ? "bg-blue-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                        className={`flex-1 whitespace-nowrap px-3 py-1.5 rounded text-xs font-medium transition ${routeType === rt ? "bg-blue-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         {ROUTE_LABELS[rt]}
                       </button>
                     ))}
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-4">
-                  <div>
+                  <div className="flex-1 whitespace-nowrap">
                     <div className="text-xs text-slate-500 mb-2">Was He Open?</div>
                     <div className="flex gap-1.5">
                       <button onClick={() => setWasOpen(true)}
-                        className={`px-4 h-9 rounded text-xs font-medium transition ${wasOpen === true ? "bg-green-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
+                        className={`flex-1 whitespace-nowrap px-4 h-9 rounded text-xs font-medium transition ${wasOpen === true ? "bg-green-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
                       <button onClick={() => setWasOpen(false)}
-                        className={`px-4 h-9 rounded text-xs font-medium transition ${wasOpen === false ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
+                        className={`flex-1 whitespace-nowrap px-4 h-9 rounded text-xs font-medium transition ${wasOpen === false ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
                     </div>
                   </div>
-                  <div>
+                  <div className="flex-1 whitespace-nowrap">
                     <div className="text-xs text-slate-500 mb-2">Targeted?</div>
                     <div className="flex gap-1.5">
                       <button onClick={() => setTargeted(true)}
-                        className={`px-4 h-9 rounded text-xs font-medium transition ${targeted === true ? "bg-amber-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
+                        className={`flex-1 whitespace-nowrap px-4 h-9 rounded text-xs font-medium transition ${targeted === true ? "bg-amber-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
                       <button onClick={() => { setTargeted(false); setTargetOutcome(null); setContestedTarget(null); setContestedCatch(null); }}
-                        className={`px-4 h-9 rounded text-xs font-medium transition ${targeted === false ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
+                        className={`flex-1 whitespace-nowrap px-4 h-9 rounded text-xs font-medium transition ${targeted === false ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
                     </div>
                   </div>
                 </div>
@@ -809,20 +809,20 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
                       <div className="text-xs text-slate-500 mb-2">Outcome</div>
                       <div className="flex gap-2">
                         <button onClick={() => setTargetOutcome("caught")}
-                          className={`px-4 py-2 rounded text-xs font-bold transition ${targetOutcome === "caught" ? "bg-green-600 text-white ring-2 ring-green-400" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>✓ Caught</button>
+                          className={`flex-1 whitespace-nowrap px-4 py-2 rounded text-xs font-bold transition ${targetOutcome === "caught" ? "bg-green-600 text-white ring-2 ring-green-400" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>✓ Caught</button>
                         <button onClick={() => { setTargetOutcome("dropped"); setBrokenTackle(false); }}
-                          className={`px-4 py-2 rounded text-xs font-bold transition ${targetOutcome === "dropped" ? "bg-red-600 text-white ring-2 ring-red-400" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>✗ Drop</button>
+                          className={`flex-1 whitespace-nowrap px-4 py-2 rounded text-xs font-bold transition ${targetOutcome === "dropped" ? "bg-red-600 text-white ring-2 ring-red-400" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>✗ Drop</button>
                         <button onClick={() => { setTargetOutcome("incomplete"); setContestedCatch(null); setBrokenTackle(false); }}
-                          className={`px-4 py-2 rounded text-xs font-bold transition ${targetOutcome === "incomplete" ? "bg-slate-500 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Incomplete</button>
+                          className={`flex-1 whitespace-nowrap px-4 py-2 rounded text-xs font-bold transition ${targetOutcome === "incomplete" ? "bg-slate-500 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Incomplete</button>
                       </div>
                     </div>
                     <div>
                       <div className="text-xs text-slate-500 mb-2">Contested Target?</div>
                       <div className="flex gap-1.5">
                         <button onClick={() => setContestedTarget(true)}
-                          className={`px-4 h-9 rounded text-xs font-medium transition ${contestedTarget === true ? "bg-orange-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
+                          className={`flex-1 whitespace-nowrap px-4 h-9 rounded text-xs font-medium transition ${contestedTarget === true ? "bg-orange-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
                         <button onClick={() => { setContestedTarget(false); setContestedCatch(null); }}
-                          className={`px-4 h-9 rounded text-xs font-medium transition ${contestedTarget === false ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
+                          className={`flex-1 whitespace-nowrap px-4 h-9 rounded text-xs font-medium transition ${contestedTarget === false ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
                       </div>
                     </div>
                     {contestedTarget === true && (
@@ -830,9 +830,9 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
                         <div className="text-xs text-slate-500 mb-2">Contested Catch?</div>
                         <div className="flex gap-1.5">
                           <button onClick={() => setContestedCatch(true)}
-                            className={`px-4 h-9 rounded text-xs font-medium transition ${contestedCatch === true ? "bg-orange-500 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
+                            className={`flex-1 whitespace-nowrap px-4 h-9 rounded text-xs font-medium transition ${contestedCatch === true ? "bg-orange-500 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
                           <button onClick={() => setContestedCatch(false)}
-                            className={`px-4 h-9 rounded text-xs font-medium transition ${contestedCatch === false ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
+                            className={`flex-1 whitespace-nowrap px-4 h-9 rounded text-xs font-medium transition ${contestedCatch === false ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
                         </div>
                       </div>
                     )}
@@ -845,7 +845,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
               <div>
                 <div className="text-xs text-slate-500 mb-2">Play Flags</div>
                 <button onClick={() => setBrokenTackle((v) => !v)}
-                  className={`px-4 py-2 rounded text-sm font-medium transition ${brokenTackle ? "bg-amber-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                  className={`w-full py-2 rounded text-sm font-medium transition ${brokenTackle ? "bg-amber-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                   Broken Tackle
                 </button>
               </div>
