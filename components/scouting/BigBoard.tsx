@@ -723,13 +723,13 @@ export default function BigBoard({
     `RBs sit ${Math.abs(POSITION_BASELINE.RB ?? 0).toFixed(1)} lower across the board, to keep them from crowding the top. ` +
     `True spread: ${compositeStatus}.`;
 
-  // The Traits band: a position tab's six traits, or their average on All.
+  // The Traits band: a position tab's traits, or their average on All.
   const traitColumnDefs: ColDef[] = boardTab === "all"
     ? [{ key: TRAIT_AVG_KEY, label: "Traits", tooltip: "Average of a prospect's trait grades (1–10, your per-game grades on new games). Beside the AE Score." } as ColDef]
     : traitsFor(boardTab).map((t) => ({
       key: `trait_${t.key}`,
       label: t.short,
-      tooltip: `${t.label}: your 1–10 grade, averaged over graded new games (older seasons count a little less). ` +
+      tooltip: `${t.label}: your 1–10 grade${t.hint ? ` (${t.hint})` : ""}, averaged over graded new games (older seasons count a little less). ` +
         (t.coveredBy
           ? `Beside the AE Score: ${t.coveredBy} already measures it.`
           : `Uncovered: counts in the AE Score with "With traits" on (weight ${TRAIT_WEIGHT} at full trust).`),

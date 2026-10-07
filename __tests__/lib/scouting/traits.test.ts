@@ -12,11 +12,12 @@ const g = (id: string, prospect: string, created: string, grades: Record<string,
   ({ id, prospect_id: prospect, season_year: season, created_at: created, trait_grades: grades }) as ScoutingGame;
 
 describe("traits", () => {
-  it("six per position; the uncovered ones are the user's list", () => {
-    for (const pos of ["QB", "RB", "WR", "TE"] as const) expect(TRAITS[pos]).toHaveLength(6);
+  it("six per position (WR eleven); the uncovered ones are the user's list", () => {
+    for (const pos of ["QB", "RB", "TE"] as const) expect(TRAITS[pos]).toHaveLength(6);
+    expect(TRAITS.WR.map((t) => t.short)).toEqual(["Rel", "Rte", "Sep", "Hnd", "CC", "YAC", "Spd", "Sud", "Str", "WM", "Scr"]);
     expect(uncoveredTraits("QB").map((t) => t.key)).toEqual(["arm", "creation"]);
     expect(uncoveredTraits("RB").map((t) => t.key)).toEqual(["burst"]);
-    expect(uncoveredTraits("WR")).toEqual([]);
+    expect(uncoveredTraits("WR").map((t) => t.key)).toEqual(["game_speed", "route_suddenness", "play_strength", "wasted_movement", "scramble_drill"]);
     expect(uncoveredTraits("TE").map((t) => t.key)).toEqual(["hands", "yac"]);
     expect(TRAIT_WEIGHT).toBe(0.2);
   });
@@ -54,7 +55,10 @@ describe("traits", () => {
     expect(arm).toMatchObject({ weight: 0.2, perPlayer: true });
     expect(arm.samples.get("q1")).toMatchObject({ ae: 6.5, n: 2 });
     expect(arm.samples.get("q1")!.variance).toBeCloseTo(0.25);
-    expect(comps.WR).toEqual([]);
+    // WR's uncovered traits have no graded games here: components with no samples.
+    expect(comps.WR.map((c) => [c.key, c.samples.size])).toEqual([
+      ["trait_game_speed", 0], ["trait_route_suddenness", 0], ["trait_play_strength", 0], ["trait_wasted_movement", 0], ["trait_scramble_drill", 0],
+    ]);
   });
 });
 

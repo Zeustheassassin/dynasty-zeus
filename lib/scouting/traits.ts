@@ -1,6 +1,7 @@
 // Per-game trait grades (tape-grading expansion, Stage 5). Pure.
 //
-// The user grades six traits per position, 1–10, per charted game, on NEW
+// The user grades a set of traits per position (six; WR eleven since
+// 2026-10-06), 1–10, per charted game, on NEW
 // games only (scouting_games.trait_grades, migration 065): an old game was
 // charted before traits existed and isn't re-watched, so it never gets them
 // and nothing about it changes.
@@ -22,6 +23,8 @@ export interface TraitDef {
   short: string;
   /** What already measures it in the AE Score (so it stays beside), or null when nothing does. */
   coveredBy: string | null;
+  /** How to read the grade, when 10 isn't obviously "best" (the column's tooltip). */
+  hint?: string;
 }
 
 export const TRAITS: Record<CompositePos, readonly TraitDef[]> = {
@@ -48,6 +51,16 @@ export const TRAITS: Record<CompositePos, readonly TraitDef[]> = {
     { key: "hands", label: "Hands", short: "Hnd", coveredBy: "charted drops" },
     { key: "contested_catch", label: "Contested catch", short: "CC", coveredBy: "charted contested catch %" },
     { key: "yac", label: "YAC", short: "YAC", coveredBy: "PFF YAC/R and the broken-tackle tag" },
+    // Added 2026-10-06 at the user's request; nothing charted or PFF measures
+    // any of them. Route suddenness and wasted movement aren't read by cSAE
+    // either (the user's call): a receiver can round a route, or waste
+    // movement, and still get open; being sudden and efficient is what makes
+    // the better route runner.
+    { key: "game_speed", label: "Game speed", short: "Spd", coveredBy: null },
+    { key: "route_suddenness", label: "Route suddenness", short: "Sud", coveredBy: null },
+    { key: "play_strength", label: "Play strength", short: "Str", coveredBy: null },
+    { key: "wasted_movement", label: "Wasted movement", short: "WM", coveredBy: null, hint: "10 = no wasted movement" },
+    { key: "scramble_drill", label: "Scramble drill", short: "Scr", coveredBy: null },
   ],
   TE: [
     { key: "inline_block", label: "Inline block", short: "Inl", coveredBy: "TE-SAEB" },

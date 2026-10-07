@@ -187,7 +187,7 @@ export default function GameContextPanel({ position, games, log }: {
                   <tr className="border-b border-slate-800 text-left text-slate-500">
                     <th className="pb-1.5 pr-3">Game</th>
                     {traits.map((t) => (
-                      <th key={t.key} className="pb-1.5 pr-2" title={t.coveredBy ? `${t.label} (already measured by ${t.coveredBy})` : `${t.label} (counts with the Big Board's "With traits" toggle)`}>{t.short}</th>
+                      <th key={t.key} className="pb-1.5 pr-2" title={`${t.label}${t.hint ? `, ${t.hint}` : ""} ${t.coveredBy ? `(already measured by ${t.coveredBy})` : `(counts with the Big Board's "With traits" toggle)`}`}>{t.short}</th>
                     ))}
                   </tr>
                 </thead>
