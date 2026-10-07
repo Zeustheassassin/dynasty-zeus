@@ -774,19 +774,6 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
                     </div>
                   </div>
                   <div className="flex-1 whitespace-nowrap">
-                    <div className="text-xs text-slate-500 mb-2">Targeted?</div>
-                    <div className="flex gap-1.5">
-                      <button onClick={() => setRbTargeted(true)}
-                        className={`flex-1 whitespace-nowrap px-3 h-9 rounded text-xs font-medium transition ${rbTargeted ? "bg-amber-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
-                        Yes
-                      </button>
-                      <button onClick={() => { setRbTargeted(false); setRbOutcome(null); }}
-                        className={`flex-1 whitespace-nowrap px-3 h-9 rounded text-xs font-medium transition ${!rbTargeted ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
-                        No
-                      </button>
-                    </div>
-                  </div>
-                  <div className="flex-1 whitespace-nowrap">
                     <div className="text-xs text-slate-500 mb-2">Open on Play?</div>
                     <div className="flex gap-1.5">
                       <button onClick={() => setRbWasOpen(true)}
@@ -795,6 +782,19 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
                       </button>
                       <button onClick={() => setRbWasOpen(false)}
                         className={`flex-1 whitespace-nowrap px-3 h-9 rounded text-xs font-medium transition ${!rbWasOpen ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                        No
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex-1 whitespace-nowrap">
+                    <div className="text-xs text-slate-500 mb-2">Targeted?</div>
+                    <div className="flex gap-1.5">
+                      <button onClick={() => setRbTargeted(true)}
+                        className={`flex-1 whitespace-nowrap px-3 h-9 rounded text-xs font-medium transition ${rbTargeted ? "bg-amber-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                        Yes
+                      </button>
+                      <button onClick={() => { setRbTargeted(false); setRbOutcome(null); }}
+                        className={`flex-1 whitespace-nowrap px-3 h-9 rounded text-xs font-medium transition ${!rbTargeted ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         No
                       </button>
                     </div>
