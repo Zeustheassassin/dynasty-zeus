@@ -8,6 +8,7 @@ import {
   getCurrentNflWeek,
   getSeasonYear,
   isValidNflState,
+  recentTransactionLegs,
 } from "@/lib/helpers/season";
 
 // ── calendarSeasonYear ───────────────────────────────────────────────────────
@@ -186,5 +187,42 @@ describe("getCurrentNflWeek", () => {
 
   it("treats a negative week as out of season", () => {
     expect(getCurrentNflWeek({ season_type: "regular", week: -1 })).toBe(0);
+  });
+});
+
+// ── recentTransactionLegs ────────────────────────────────────────────────────
+// Oct 7 2026: the Trade Log fetched only legs 1-2, so at leg 5 every trade from legs 3-5 (the
+// last three weeks) was missing. The legs must reach back far enough for a 30-day window and
+// one past the current leg.
+
+describe("recentTransactionLegs", () => {
+  it("covers a 30-day window plus the next leg mid-season", () => {
+    expect(recentTransactionLegs({ season_type: "regular", leg: 5, week: 5 }, 30)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(recentTransactionLegs({ season_type: "regular", leg: 10, week: 10 }, 30)).toEqual([5, 6, 7, 8, 9, 10, 11]);
+  });
+
+  it("reaches ceil(windowDays / 7) legs back", () => {
+    expect(recentTransactionLegs({ season_type: "regular", leg: 10 }, 7)).toEqual([9, 10, 11]);
+    expect(recentTransactionLegs({ season_type: "regular", leg: 10 }, 8)).toEqual([8, 9, 10, 11]);
+  });
+
+  it("never asks for leg 0 (always empty) or below", () => {
+    expect(recentTransactionLegs({ season_type: "regular", leg: 1 }, 30)).toEqual([1, 2]);
+    expect(recentTransactionLegs({ season_type: "regular", leg: 0, week: 0 }, 30)).toEqual([1, 2]);
+  });
+
+  it("falls back to week when leg is missing", () => {
+    expect(recentTransactionLegs({ season_type: "regular", week: 8 }, 30)).toEqual([3, 4, 5, 6, 7, 8, 9]);
+  });
+
+  it("uses leg 1 outside the season, where Sleeper files every offseason trade", () => {
+    expect(recentTransactionLegs({ season_type: "off", leg: 0, week: 0 }, 30)).toEqual([1, 2]);
+    expect(recentTransactionLegs({ season_type: "pre", leg: 3, week: 3 }, 30)).toEqual([1, 2]);
+    expect(recentTransactionLegs(null, 30)).toEqual([1, 2]);
+  });
+
+  it("follows the leg into the playoffs but stays inside the proxy's 0-22 range", () => {
+    expect(recentTransactionLegs({ season_type: "post", leg: 19 }, 30)).toEqual([14, 15, 16, 17, 18, 19, 20]);
+    expect(recentTransactionLegs({ season_type: "post", leg: 30 }, 30)).toEqual([16, 17, 18, 19, 20, 21, 22]);
   });
 });

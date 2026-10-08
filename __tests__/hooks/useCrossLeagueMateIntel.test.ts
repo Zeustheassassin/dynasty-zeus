@@ -114,7 +114,7 @@ describe("useCrossLeagueMateIntel — failure surfacing", () => {
     };
     api.impl.getUserLeagues = vi.fn(async () => [dynastyLeague]);
     api.impl.getLeagueRosters = vi.fn(async () => { throw new Error("429"); });
-    api.impl.getLeagueTransactions = vi.fn(async () => []);
+    api.impl.getLeagueRecentTrades = vi.fn(async () => []);
     api.impl.getLeagueDrafts = vi.fn(async () => []);
 
     const { result } = renderHook(() => useCrossLeagueMateIntel({ ...baseArgs, rosters }));

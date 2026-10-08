@@ -86,6 +86,9 @@ export const SLEEPER_LEAGUE_ROSTERS_REVALIDATE_S = 600;
 export const SLEEPER_LEAGUE_MATCHUPS_REVALIDATE_S = 300;
 /** transactions for a given week — 15m is fine in offseason; consider lowering during regular-season game days */
 export const SLEEPER_LEAGUE_TRANSACTIONS_REVALIDATE_S = 900;
+/** Lookback for /api/sleeper/league/[leagueId]/trades — the "past 30 days" every recent-trade view
+ *  (Trade Log, leaguemate + cross-league trade intel) counts over. */
+export const RECENT_TRADE_WINDOW_DAYS = 30;
 /** traded picks (past + future) */
 export const SLEEPER_LEAGUE_TRADED_PICKS_REVALIDATE_S = 1800;
 /** drafts associated with a league */
@@ -205,15 +208,16 @@ export const CROSS_LEAGUE_INTEL_OWNER_BATCH = 12;
 
 /**
  * GLOBAL cap (across every owner in the current batch, not per-owner) on how many "other
- * dynasty league" fetches run concurrently. Each one costs 5 Sleeper calls (rosters, 3x
- * transactions, drafts), so this bounds the real burst size the browser fires at once — live
+ * dynasty league" fetches run concurrently. Each one costs 3 Sleeper calls (rosters, recent
+ * trades, drafts — 5 before the 2026-10-07 recent-trades route replaced 3 per-leg transaction
+ * calls), so this bounds the real burst size the browser fires at once — live
  * testing against a 36-league account with OWNER_BATCH=4 and a naive PER-OWNER cap of 3 still
  * produced 60 concurrent calls (4 owners x 3 leagues x 5 calls) and tripped 429s; capping the
- * flattened queue globally instead keeps the worst-case burst at this number x 5.
+ * flattened queue globally instead keeps the worst-case burst at this number x 3.
  *
  * Sept 22 deferred follow-up #1: that queue now holds UNIQUE LEAGUES, not (owner, league)
  * pairs. The unit this number counts therefore changed, but what it bounds did NOT — a queue
- * item still costs exactly 5 Sleeper calls either way, so the peak burst is the same 2 x 5 = 10.
+ * item still costs the same Sleeper calls either way, so the peak burst is the same 2 x 3 = 6.
  * The dedup shortens the queue by however much the batch's owners share OTHER leagues with each
  * other, which makes the same cap drain faster; it deliberately does not widen it. Raise this only on
  * real 429 evidence, exactly as before.
@@ -250,8 +254,8 @@ export const GAMEDAY_DASHBOARD_CONCURRENCY = 3;
 export const OVERVIEW_REFRESH_ROSTERS_CONCURRENCY = 3;
 
 /**
- * Shared cap for the three "look up one target user" fan-outs — Trade Hub (useUserTrades, 5
- * Sleeper calls/league: rosters, 2x transactions, drafts, users), Shares/Exposure
+ * Shared cap for the three "look up one target user" fan-outs — Trade Hub (useUserTrades, 4
+ * Sleeper calls/league: rosters, recent trades, drafts, users), Shares/Exposure
  * (useUserExposure, 1 call/league: rosters), and Draft Scout (useDraftScout, 1-2 calls/league:
  * drafts, then draft picks if a rookie draft is found) — each previously fanned out across
  * every league the TARGET user (not the viewer) is in, uncapped. Since these scale with a
@@ -259,7 +263,7 @@ export const OVERVIEW_REFRESH_ROSTERS_CONCURRENCY = 3;
  * small-league viewer can trip this by looking up a whale (Sept 22 code-review 50-league-
  * scalability finding, Tier 1 #4). One shared constant since all three are single-shot,
  * user-triggered lookups (never run concurrently with each other) rather than a repeating
- * background fan-out; 3 keeps the worst case (useUserTrades, this number x 5) well short of the
+ * background fan-out; 3 keeps the worst case (useUserTrades, this number x 4) well short of the
  * burst sizes already proven safe elsewhere in this file.
  */
 export const TARGET_USER_LEAGUE_CONCURRENCY = 3;

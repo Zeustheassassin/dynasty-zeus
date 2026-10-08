@@ -667,6 +667,7 @@ export function HubRouter({
     historicalSnapshot={historicalSnapshot}
     tradeHubData={tradeHubData}
     loadingTradeHub={loadingTradeHub}
+    tradeHubError={tradeHubError}
     tradeHubUserId={tradeHubUserId}
     tradeAttempts={tradeAttempts}
     loadingTradeAttempts={loadingTradeAttempts}

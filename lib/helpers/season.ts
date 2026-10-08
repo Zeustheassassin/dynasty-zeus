@@ -77,6 +77,28 @@ export function getCurrentNflWeek(
   return nflState?.season_type === "regular" && rawWeek > 0 ? rawWeek : 0;
 }
 
+/** The Sleeper transaction legs (`/league/{id}/transactions/{leg}`) that can hold a transaction
+ *  from the last `windowDays` days. Sleeper files the WHOLE offseason and preseason under leg 1
+ *  (verified 2026-10-07: every league's leg 1 ran from early January to Sept 15, and leg 0 was
+ *  empty) and each regular-season leg after that spans about a week. So `windowDays` back from
+ *  the very start of the current leg reaches ceil(windowDays / 7) legs earlier, and one leg past
+ *  the current one covers a rollover the up-to-an-hour-cached /state/nfl hasn't caught up with.
+ *  Outside the regular season and playoffs every trade lands in leg 1.
+ *
+ *  A fixed [1, 2] here used to miss every trade from leg 3 on, which hid every trade from the
+ *  last two-plus weeks once the season reached week 3. */
+export function recentTransactionLegs(
+  nflState: { season_type?: string | null; leg?: number | null; week?: number | null } | null,
+  windowDays: number,
+): number[] {
+  const inSeason = nflState?.season_type === "regular" || nflState?.season_type === "post";
+  const raw = Number(nflState?.leg || nflState?.week || 1);
+  // 21 keeps leg + 1 inside the transactions proxy's 0-22 week range.
+  const current = inSeason && Number.isFinite(raw) ? Math.min(21, Math.max(1, Math.floor(raw))) : 1;
+  const first = Math.max(1, current - Math.ceil(windowDays / 7));
+  return Array.from({ length: current + 2 - first }, (_, i) => first + i);
+}
+
 /** Three-year NFL-season-year window starting from the current season year
  *  (e.g. ["2026","2027","2028"]). */
 export const YEARS = Array.from({ length: 3 }, (_, i) => String(Number(CURRENT_YEAR) + i));

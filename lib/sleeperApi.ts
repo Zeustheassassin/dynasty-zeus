@@ -196,6 +196,18 @@ async function getLeagueTransactionsMultiWeek(
   return results.flat();
 }
 
+/** A league's completed trades from the last RECENT_TRADE_WINDOW_DAYS days, across every
+ *  transaction leg that window reaches (the server picks the legs from /state/nfl) — one request
+ *  per league instead of one per leg. Throws on failure rather than returning [], so a caller can
+ *  tell a league that failed to load from one with no trades. */
+async function getLeagueRecentTrades(leagueId: string, bypass?: boolean): Promise<SleeperTransaction[]> {
+  return cachedGet<SleeperTransaction[]>(
+    `${PROXY_BASE}/league/${encodeURIComponent(leagueId)}/trades`,
+    TTL.leagueTransactions,
+    bypass,
+  );
+}
+
 // ===========================================================================
 // TRADED PICKS endpoints
 // ===========================================================================
@@ -294,6 +306,7 @@ export const sleeperApi = {
   getLeagueMatchups,
   getLeagueTransactions,
   getLeagueTransactionsMultiWeek,
+  getLeagueRecentTrades,
   getLeagueTradedPicks,
   getLeagueDrafts,
   getDraftPicks,

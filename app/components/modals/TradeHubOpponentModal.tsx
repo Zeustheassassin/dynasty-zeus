@@ -48,12 +48,12 @@ export function TradeHubOpponentModal({ tradeHubUserId, users, loadingTradeHub, 
           Past 30 days · All dynasty leagues · Up to 15 trades
         </div>
 
+        {!loadingTradeHub && <ErrorBanner message={tradeHubError} className="mb-4" />}
+
         {loadingTradeHub ? (
           <div className="text-sm text-gray-400">Loading trades...</div>
-        ) : tradeHubError ? (
-          <ErrorBanner message={tradeHubError} />
         ) : !tradeHubData?.length ? (
-          <div className="text-sm text-gray-400">No trades found in the past 30 days.</div>
+          !tradeHubError && <div className="text-sm text-gray-400">No trades found in the past 30 days.</div>
         ) : (
           tradeHubData.map((trade) => {
             const myRosterId = trade.myRosterId;

@@ -53,6 +53,7 @@ interface TradeHubProps {
   historicalSnapshot: HistoricalSnapshot | null;
   tradeHubData: AnnotatedTrade[] | null;
   loadingTradeHub: boolean;
+  tradeHubError: string | null;
   tradeHubUserId: string | null;
   tradeAttempts: TradeAttempt[];
   loadingTradeAttempts: boolean;
@@ -86,7 +87,7 @@ function TradeHub({
   tradePartnerRankings,
   setPlayerProfileId, loadUserExposure, loadUserTrades,
   historicalSnapshot,
-  tradeHubData, loadingTradeHub, tradeHubUserId,
+  tradeHubData, loadingTradeHub, tradeHubError, tradeHubUserId,
   tradeAttempts, loadingTradeAttempts, tradeAttemptsError, tradeAttemptsLeagueId,
   onMarkAttempted, onUpdateAttemptStatus, onDeleteAttempt, onLoadTradeAttempts,
   onRefreshDirection,
@@ -321,6 +322,7 @@ function TradeHub({
           <TradeLog
             tradeHubData={tradeHubData}
             loadingTradeHub={loadingTradeHub}
+            tradeHubError={tradeHubError}
             tradeHubUserId={tradeHubUserId}
             user={user}
             loadUserTrades={loadUserTrades}

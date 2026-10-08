@@ -1,7 +1,11 @@
 "use client";
 import { useState, useEffect } from "react";
 import { sleeperApi } from "../lib/sleeperApi";
+import { RECENT_TRADE_WINDOW_DAYS } from "../lib/constants";
+import { logger } from "../lib/logger";
 import type { SleeperLeague, SleeperRoster, SleeperPlayer } from "../lib/types";
+
+const log = logger("hooks/useLeagueMateIntel");
 
 interface TradeIntelEntry {
   tradeCount30d: number;
@@ -30,12 +34,14 @@ export function useLeagueMateIntel(
     const load = async () => {
       setLoadingLeagueMateIntel(true);
       try {
-        const [t1, t2] = await Promise.all([
-          sleeperApi.getLeagueTransactions(selectedLeague.league_id, 1),
-          sleeperApi.getLeagueTransactions(selectedLeague.league_id, 2),
-        ]);
+        const recentTrades = await sleeperApi
+          .getLeagueRecentTrades(selectedLeague.league_id)
+          .catch((err) => {
+            log.warn("recent trades fetch failed", { leagueId: selectedLeague.league_id, err: String(err) });
+            return [];
+          });
 
-        const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+        const thirtyDaysAgo = Date.now() - RECENT_TRADE_WINDOW_DAYS * 24 * 60 * 60 * 1000;
         const rosterStats: Record<string, TradeIntelEntry> = {};
         const ensureRoster = (rosterId: number | string) => {
           const key = String(rosterId);
@@ -51,7 +57,7 @@ export function useLeagueMateIntel(
           return rosterStats[key];
         };
 
-        [...t1, ...t2]
+        recentTrades
           .filter(
             (trade) =>
               trade?.type === "trade" &&

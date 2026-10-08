@@ -6,17 +6,19 @@ import type { AnnotatedTrade } from "../../hooks/useUserTrades";
 import { usePlayers } from "../../lib/PlayersContext";
 import { useValues } from "../../lib/ValuesContext";
 import { Card } from "../ui/Card";
+import ErrorBanner from "../ErrorBanner";
 
 interface TradeLogProps {
   tradeHubData: AnnotatedTrade[] | null;
   loadingTradeHub: boolean;
+  tradeHubError: string | null;
   tradeHubUserId: string | null;
   user: SleeperUser | null;
   loadUserTrades: (ownerId: string, bypass?: boolean) => void;
   onMarkAttempted: (attempt: Omit<TradeAttempt, "id" | "user_id" | "attempted_at" | "resolved_at">) => Promise<void>;
 }
 
-function TradeLog({ tradeHubData, loadingTradeHub, tradeHubUserId, user, loadUserTrades, onMarkAttempted }: TradeLogProps) {
+function TradeLog({ tradeHubData, loadingTradeHub, tradeHubError, tradeHubUserId, user, loadUserTrades, onMarkAttempted }: TradeLogProps) {
   const players = usePlayers();
   const { leagueAdjustedFcValues: calcFcValues, pickFcValues } = useValues();
 
@@ -62,7 +64,14 @@ function TradeLog({ tradeHubData, loadingTradeHub, tradeHubUserId, user, loadUse
         <p className="text-xs text-slate-500">Refreshing from Sleeper…</p>
       )}
 
-      {!loadingTradeHub && tradeHubUserId === user?.user_id && tradeHubData && tradeHubData.length === 0 && (
+      {!loadingTradeHub && tradeHubUserId === user?.user_id && (
+        <ErrorBanner
+          message={tradeHubError}
+          onRetry={() => { if (user?.user_id) loadUserTrades(user.user_id, true); }}
+        />
+      )}
+
+      {!loadingTradeHub && !tradeHubError && tradeHubUserId === user?.user_id && tradeHubData && tradeHubData.length === 0 && (
         <p className="text-sm text-slate-400">No trades found in the past 30 days.</p>
       )}
 

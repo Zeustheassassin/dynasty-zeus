@@ -54,3 +54,41 @@ describe("useUserTrades — concurrency cap", () => {
     releasers.forEach((release) => release());
   });
 });
+
+// Oct 7 2026: trades come from one recent-trades request per league (the server picks the legs).
+// A league that fails to load is reported instead of silently showing no trades.
+describe("useUserTrades — recent trades", () => {
+  const recentTrade = (id: string) => ({
+    transaction_id: id, type: "trade", status: "complete", created: Date.now() - 60_000,
+    roster_ids: [1, 2], adds: {}, drops: {}, draft_picks: [],
+  });
+
+  it("keeps the leagues that loaded and reports the ones that failed", async () => {
+    api.impl.getUserLeagues = vi.fn(async () => [dynastyLeague("L1"), dynastyLeague("L2")]);
+    api.impl.getLeagueRosters = vi.fn(async () => [{ roster_id: 1, owner_id: "me" }, { roster_id: 2, owner_id: "them" }]);
+    api.impl.getLeagueRecentTrades = vi.fn(async (leagueId: string) => {
+      if (leagueId === "L2") throw new Error("cachedFetch 502");
+      return [recentTrade("t1")];
+    });
+
+    const { result } = renderHook(() => useUserTrades());
+    await act(async () => { await result.current.loadUserTrades("me"); });
+
+    expect(result.current.tradeHubData?.map((t) => [t.transaction_id, t.leagueId])).toEqual([["t1", "L1"]]);
+    expect(result.current.tradeHubError).toMatch(/1 of 2 leagues/);
+    expect(api.impl.getLeagueRecentTrades).toHaveBeenCalledWith("L1", undefined);
+  });
+
+  it("leaves the error clear when every league loads", async () => {
+    api.impl.getUserLeagues = vi.fn(async () => [dynastyLeague("L1")]);
+    api.impl.getLeagueRosters = vi.fn(async () => [{ roster_id: 1, owner_id: "me" }, { roster_id: 2, owner_id: "them" }]);
+    api.impl.getLeagueRecentTrades = vi.fn(async () => [recentTrade("t1")]);
+
+    const { result } = renderHook(() => useUserTrades());
+    await act(async () => { await result.current.loadUserTrades("me", true); });
+
+    expect(result.current.tradeHubData).toHaveLength(1);
+    expect(result.current.tradeHubError).toBeNull();
+    expect(api.impl.getLeagueRecentTrades).toHaveBeenCalledWith("L1", true);
+  });
+});

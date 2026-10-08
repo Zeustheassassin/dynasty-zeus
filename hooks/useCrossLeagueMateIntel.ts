@@ -24,9 +24,9 @@ interface UseCrossLeagueMateIntelOptions {
 }
 
 
-/** One dynasty league's OWNER-INDEPENDENT data — the 5 Sleeper calls a league costs. Every
+/** One dynasty league's OWNER-INDEPENDENT data — the 3 Sleeper calls a league costs. Every
  *  owner in that league derives their own view from this one fetch (see ownerViewOfLeague),
- *  so a league shared by N owners in a batch costs 5 calls, not 5N. */
+ *  so a league shared by N owners in a batch costs 3 calls, not 3N. */
 interface LeagueSharedFetch {
   rosters: SleeperRoster[];
   trades: SleeperTransaction[];
@@ -43,16 +43,18 @@ interface LeagueIntelFetch {
   draftsData: SleeperDraft[];
 }
 
-/** One dynasty league's shared data — 5 Sleeper calls, fetched once per unique league_id. */
+/** One dynasty league's shared data — 3 Sleeper calls, fetched once per unique league_id. A
+ *  failed trades fetch degrades to no trades for that league, as each per-leg fetch did before. */
 async function fetchLeagueIntel(leagueId: string): Promise<LeagueSharedFetch> {
-  const [rosters, t0, t1, t2, draftsData] = await Promise.all([
+  const [rosters, trades, draftsData] = await Promise.all([
     sleeperApi.getLeagueRosters(leagueId),
-    sleeperApi.getLeagueTransactions(leagueId, 0),
-    sleeperApi.getLeagueTransactions(leagueId, 1),
-    sleeperApi.getLeagueTransactions(leagueId, 2),
+    sleeperApi.getLeagueRecentTrades(leagueId).catch((err) => {
+      log.warn("recent trades fetch failed", { leagueId, err: String(err) });
+      return [];
+    }),
     sleeperApi.getLeagueDrafts(leagueId),
   ]);
-  return { rosters, trades: [...t0, ...t1, ...t2], draftsData };
+  return { rosters, trades, draftsData };
 }
 
 /** Narrow a shared league fetch to one owner. The roster lookup is the ONLY owner-specific
