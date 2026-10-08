@@ -40,7 +40,7 @@ describe("WR stats: Lined Up (in-app)", () => {
 describe("WR stats: Role Fit", () => {
   const match = (role: RoleFit["best"], pct: number, drivers: string[] = []) => ({ role, pct, sizeDrop: 0, sizeNote: null, drivers, proven: true });
   const FIT: RoleFit = {
-    pos: "WR", best: "x", hybrid: "y", versatile: true, usedAs: "slot", confidence: "medium",
+    pos: "WR", best: "x", also: ["y"], versatile: true, usedAs: "slot", confidence: "medium",
     sample: { n: 150, unit: "routes" }, skillOnly: false, features: {},
     matches: [match("x", 82, ["+ vs press (in-app): +9.0 pts on 40 in-app routes"]), match("y", 79), match("slot", 55), match("gadget", 40)],
   };

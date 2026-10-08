@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildRoleFit, scoreBucket, skillFeature, usageFeature, inverseUsageFeature, contrastFeature, shrinkAE,
   roleLabel, roleFitTooltip, matchTooltip, aeOf, mergeAESums,
-  ELITE_SIZE_SHARE, NEAR_TIE, VERSATILE_PCT, FALLBACK_LINE, COMPLEMENT_LINE, versatileRuleText, hasVersatile, ROLES,
+  ELITE_SIZE_SHARE, NEAR_TIE, VERSATILE_PCT, FALLBACK_LINE, LEVELED, levelRuleText, noLevelReached, versatileRuleText, hasVersatile, ROLES,
   type BucketRecipe, type FeatureSet, type Feature, type RolePos,
 } from "@/lib/scouting/roleFit";
 
@@ -105,7 +105,7 @@ describe("buildRoleFit", () => {
   it("leads with the best fit, every role scored on its own", () => {
     const r = fit({ x: skill(0.4), y: skill(0.6), slot: skill(0.9), g: skill(0.3) });
     expect(r.best).toBe("slot");
-    expect(r.hybrid).toBeNull();
+    expect(r.also).toEqual([]);
     expect(r.matches.map((m) => m.role)).toEqual(["x", "y", "slot", "gadget"]);
     expect(r.matches.map((m) => m.pct)).toEqual([40, 60, 90, 30]);
   });
@@ -114,7 +114,7 @@ describe("buildRoleFit", () => {
     const r = fit({ x: skill(0.78), y: skill(0.6), slot: skill(0.8), g: skill(0.3) });
     expect(80 - 78).toBeLessThanOrEqual(NEAR_TIE);
     expect(r.best).toBe("x");
-    expect(r.hybrid).toBe("slot");
+    expect(r.also).toEqual(["slot"]);
     expect(roleLabel(r)).toBe("X / Slot");
   });
 
@@ -150,7 +150,7 @@ describe("buildRoleFit", () => {
   });
 
   it("never calls an RB or QB Versatile: Three-down, Creator and Dual-threat already mean all-round", () => {
-    expect(fitAt("RB", [0.9, 0.9, 0.9, 0.9, 0.9, 0.9]).versatile).toBe(false);
+    expect(fitAt("RB", [0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9]).versatile).toBe(false);
     expect(fitAt("QB", [0.9, 0.9, 0.9, 0.9]).versatile).toBe(false);
     expect([hasVersatile("RB"), hasVersatile("QB"), hasVersatile("WR"), hasVersatile("TE")]).toEqual([false, false, true, true]);
   });
@@ -196,39 +196,78 @@ describe("buildRoleFit", () => {
   it("makes Gadget the catch-all: it leads only when X, Y and Slot are all under 50%, and never competes", () => {
     const weak = fit({ x: skill(0.45), y: skill(0.4), slot: skill(0.48), g: skill(0.3) });
     expect(weak.best).toBe("gadget");
-    expect(weak.hybrid).toBeNull();
+    expect(weak.also).toEqual([]);
     expect(roleLabel(weak)).toBe("Gadget");
     // A higher Gadget % doesn't beat a real role that clears the line.
     const slot = fit({ x: skill(0.3), y: skill(0.4), slot: skill(0.55), g: skill(0.9) });
     expect(slot.best).toBe("slot");
-    expect(slot.hybrid).toBeNull();
+    expect(slot.also).toEqual([]);
     expect(FALLBACK_LINE).toBe(50);
   });
 
-  // RB order: Three-down, Zone, Gap/Power, Receiving, Big-play, Goal-line.
-  it("adds Goal-line after a lead role at 60%+, however high it is (the user's call)", () => {
-    const r = fitAt("RB", [0.4, 0.65, 0.4, 0.4, 0.4, 0.95]);
-    expect([r.best, r.hybrid]).toEqual(["zone", "goal_line"]);
-    expect(roleLabel(r)).toBe("Zone / Goal-line");
-    expect(roleFitTooltip(r)).toContain("Best case: Zone, plus Goal-line as a complement role");
-    expect(COMPLEMENT_LINE).toBe(60);
+  // RB order: Three-down, Zone, Gap/Power, Receiving, 2-Down, 3rd-Down, Big-play, Goal-line, Blocking/ST.
+  // Levels (the user, 2026-10-08): A Three-down; B Zone, Gap; C Receiving, 2-Down, 3rd-Down; D the rest.
+  it("labels an RB Three-down alone once it reaches its line", () => {
+    const r = fitAt("RB", [0.65, 0.9, 0.4, 0.9, 0.4, 0.4, 0.9, 0.9, 0.4]);
+    expect([r.best, r.also]).toEqual(["three_down", []]);
+    expect(LEVELED.RB).toEqual([65, 55, 55, 55]);
+    expect(roleLabel(fitAt("RB", [0.64, 0.7, 0.4, 0.6, 0.4, 0.4, 0.4, 0.95, 0.4]))).toBe("Zone / Receiving / Goal-line");
   });
 
-  it("lets Goal-line lead only when no other role reaches 60%", () => {
-    expect(roleLabel(fitAt("RB", [0.4, 0.59, 0.4, 0.4, 0.4, 0.95]))).toBe("Goal-line");
-    expect(roleLabel(fitAt("RB", [0.4, 0.6, 0.4, 0.4, 0.4, 0.95]))).toBe("Zone / Goal-line");
+  it("below Three-down names the better of Zone and Gap/Power, then one role per lower level that reaches its line", () => {
+    const r = fitAt("RB", [0.4, 0.6, 0.62, 0.4, 0.58, 0.56, 0.4, 0.7, 0.4]);
+    expect([r.best, r.also]).toEqual(["gap", ["two_down", "goal_line"]]);
+    expect(roleLabel(r)).toBe("Gap/Power / 2-Down / Goal-line");
+    expect(roleFitTooltip(r)).toContain("Best case: Gap/Power, plus 2-Down and Goal-line");
+    expect(roleLabel(fitAt("RB", [0.4, 0.6, 0.4, 0.54, 0.4, 0.4, 0.4, 0.7, 0.4]))).toBe("Zone / Goal-line");   // Receiving under its line
+    expect(roleLabel(fitAt("RB", [0.4, 0.56, 0.4, 0.4, 0.4, 0.4, 0.4, 0.95, 0.4]))).toBe("Zone / Goal-line");  // a higher level leads, however high Goal-line is
   });
 
-  it("names Goal-line second only when it's his best or near-best match, and takes that slot from a near-tie role", () => {
-    expect(roleLabel(fitAt("RB", [0.4, 0.8, 0.4, 0.4, 0.4, 0.74]))).toBe("Zone");
-    expect(roleLabel(fitAt("RB", [0.4, 0.8, 0.4, 0.4, 0.4, 0.76]))).toBe("Zone / Goal-line");
-    expect(roleLabel(fitAt("RB", [0.4, 0.66, 0.64, 0.4, 0.4, 0.9]))).toBe("Zone / Goal-line");
+  it("starts at level C without a Zone or Gap/Power role, and at D without either", () => {
+    expect(roleLabel(fitAt("RB", [0.5, 0.5, 0.5, 0.4, 0.6, 0.4, 0.4, 0.7, 0.4]))).toBe("2-Down / Goal-line");
+    expect(roleLabel(fitAt("RB", [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.6, 0.7, 0.4]))).toBe("Goal-line");
   });
 
-  it("doesn't name Goal-line under 60%, even in a near tie", () => {
-    const r = fitAt("RB", [0.4, 0.52, 0.4, 0.4, 0.4, 0.5]);
-    expect([r.best, r.hybrid]).toEqual(["zone", null]);
-    expect(roleLabel(fitAt("RB", [0.4, 0.52, 0.5, 0.4, 0.4, 0.5]))).toBe("Zone / Gap/Power");
+  it("gives a back who reaches no level his B or C role at 50%+ (B first, the user's call), else his best D role, flagged", () => {
+    const b = fitAt("RB", [0.6, 0.5, 0.45, 0.4, 0.54, 0.4, 0.53, 0.3, 0.3]);
+    expect([b.best, b.also]).toEqual(["zone", []]);                 // B at 50 beats C at 54 and D at 53
+    expect(noLevelReached(b)).toBe(true);
+    expect(roleFitTooltip(b)).toContain("Best case: Zone (no role reaches its level's line; his best 50%+ role above the last level)");
+    expect(fitAt("RB", [0.6, 0.49, 0.45, 0.4, 0.52, 0.4, 0.53, 0.3, 0.3]).best).toBe("two_down");
+    const r = fitAt("RB", [0.6, 0.49, 0.45, 0.49, 0.45, 0.4, 0.33, 0.3, 0.3]); // Three-down 60 doesn't count
+    expect([r.best, r.also]).toEqual(["big_play", []]);
+    expect(noLevelReached(r)).toBe(true);
+    expect(roleFitTooltip(r)).toContain("Best case: Big-play (no role reaches its level's line)");
+    expect(noLevelReached(fitAt("RB", [0.4, 0.56, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4]))).toBe(false);
+    expect(noLevelReached(fitAt("WR", [0.3, 0.3, 0.3, 0.3]))).toBe(false); // near-tie positions have no levels
+  });
+
+  it("names Blocking/ST only under 40% at every other role and at 55%+ itself (the user's call)", () => {
+    const st = fitAt("RB", [0.3, 0.39, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.55]);
+    expect([st.best, st.also]).toEqual(["blocking_st", []]);
+    expect(roleLabel(st)).toBe("Blocking/ST");
+    expect(fitAt("RB", [0.3, 0.4, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.9]).best).not.toBe("blocking_st");  // one role at 40%
+    expect(fitAt("RB", [0.3, 0.39, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.54]).best).not.toBe("blocking_st"); // can't block either
+    expect(fitAt("RB", [0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.39, 0.6]).best).toBe("blocking_st");      // Goal-line counts too
+    expect(fitAt("RB", [0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.41, 0.6]).best).toBe("goal_line");
+  });
+
+  it("explains the levels in words, and only where they apply", () => {
+    const t = levelRuleText("RB")!;
+    expect(t).toContain("A Three-down; B Zone or Gap/Power; C Receiving, 2-Down or 3rd-Down; D Big-play, Goal-line or Blocking/ST");
+    expect(t).toContain("(Three-down 65%, the rest 55%)");
+    expect(t).toContain("Reaching no level, he gets his best B or C role at 50%+ (B first), otherwise his best D role; greyed either way.");
+    expect(levelRuleText("WR")).toBeNull();
+  });
+
+  it("shows just the cut for a gate that reads the same thing as a listed ingredient", () => {
+    const weak: Feature = { label: "Not good in pass pro", kind: "skill", fit: 0, display: "90% vs 80% league" };
+    const recipe: BucketRecipe = {
+      role: "two_down", ingredients: [{ feature: "run", weight: 0.6 }, { feature: "weak", weight: 0.4 }],
+      gates: [{ feature: "good", maxCut: 0.5 }],
+    };
+    const m = scoreBucket(recipe, { run: skill(0.5), weak, good: { ...weak, label: "Holds up in pass pro" } }, null, null);
+    expect(m.drivers).toEqual(["− Not good in pass pro: 90% vs 80% league", "− Holds up in pass pro (−50%)"]);
   });
 
   it("explains one role's match in its tooltip", () => {

@@ -1,7 +1,9 @@
 // RB role buckets: Three-down, Zone, Gap/Power, Receiving and Big-play
-// (approved by the user, 2026-10-02), plus Goal-line (2026-10-07), a
-// complement role (roleFit.ts COMPLEMENT_LINE). Scoring is shared
-// (roleFit.ts); this file holds the RB features and recipes.
+// (approved by the user, 2026-10-02), plus Goal-line (2026-10-07) and 2-Down,
+// 3rd-Down and Blocking/ST (2026-10-08). A back is labeled by level (roleFit.ts
+// LEVELED, the user's levels): A Three-down; B Zone or Gap/Power; C
+// Receiving, 2-Down or 3rd-Down; D Big-play, Goal-line or Blocking/ST. Scoring
+// is shared (roleFit.ts); this file holds the RB features and recipes.
 //
 // Every game counts. Unlike WR, the RB games charted before 2026-05-01 were
 // charted play by play (each took 13+ minutes; the WR import went in under
@@ -31,6 +33,20 @@
 // short-yardage / goal-line runs. Power counts once he has a graded game and
 // the short-yardage runs once he has RB_SY_TAG_MIN of them; until then the
 // other weights stretch to cover them.
+//
+// 2-Down, 3rd-Down and Blocking/ST (the user's definitions, 2026-10-08):
+// - 2-Down: "a RB who isn't good at pass blocking and average to bad at
+//   receiving". Those limits are 40% of the match and Three-down's running
+//   and build the other 60%; then Three-down's passing-down bars turned
+//   around cut it (holding up in pass pro, catching well). So for one runner
+//   Three-down and 2-Down move in opposite directions.
+// - 3rd-Down: "excels in pass blocking and receiving but is average at best
+//   at actual running". Pass pro and receiving skill, cut for falling short of
+//   Three-down's pass-pro and hands bars, and cut for being a good runner.
+// - Blocking/ST: "only chosen if the player truly is terrible everywhere other
+//   than blocking". A catch-all whose % is how blocking-only he is (pass
+//   protection, cut for running or catching well); it's named only under 40%
+//   at every other role and at 55%+ itself (fallbackRule).
 import type { Prospect, RBPlay, RBRunType, ScoutingGame } from "../types";
 import type { PffTotals } from "../pff/totals";
 import { computeRBRoleSlices } from "./aboveExpected";
@@ -152,6 +168,25 @@ const GATE_MAX_CUT = 0.5;
 const meetsBar = (f: Feature | undefined, bar: number, label: string): Feature | undefined =>
   f && (f.n ?? 0) > 0 ? { ...f, label, fit: Math.min(1, f.fit / bar) } : undefined;
 
+// The other way round, for 2-Down and 3rd-Down's "average at best": a skill fit
+// at or under `lo` reads 1 (no cut), at or over `hi` 0 (the full cut), in
+// proportion between. The label names what's cutting him. With no reps the fit
+// sits at 0.5, so an unknown skill cuts partway: he isn't shown to be limited.
+const atMost = (f: Feature | undefined, lo: number, hi: number, label: string): Feature | undefined =>
+  f ? { ...f, label, fit: Math.min(1, Math.max(0, (hi - f.fit) / (hi - lo))) } : undefined;
+// 2-Down: no cut at or under average-minus pass pro, the full cut from
+// Three-down's bar up ("decently good" isn't "not good").
+const TWO_DOWN_PASS_PRO = [0.4, PASS_PRO_BAR] as const;
+// 2-Down: "average to bad" as a receiver means no cut up to a bit over
+// average; a clearly good receiver gets the full cut.
+const TWO_DOWN_RECV = [0.55, 0.7] as const;
+// 3rd-Down: "average at best" as a runner, so no cut up to average SRAE, the
+// full cut at a good runner's.
+const THIRD_DOWN_RUN = [0.5, 0.7] as const;
+// Receiving skill, for 3rd-Down's recipe and 2-Down's receiving cut: open on
+// routes, hands (drops), open on Other routes.
+const RECV_SKILL = [["recOpen", 0.25], ["hands", 0.2], ["bigOpen", 0.1]] as const;
+
 export interface RBRoleInputs {
   plays: RBPlay[];
   slices: Record<RBSliceKey, AESliceValue>;
@@ -216,7 +251,22 @@ export function rbFeatures(inp: RBRoleInputs): FeatureSet {
   if (pp && pp.n > 0 && lp && lp.n > 0) {
     f.pffPassPro = rateFeature("Pass protection (PFF pressures allowed)", pp, lp, REC_PRIOR, SCALE.pffPassPro, "pass-block snaps", true);
   }
-  f.passProOk = meetsBar(blendByReps(f.passPro, f.pffPassPro, "Pass protection"), PASS_PRO_BAR, "Pass protection (decent is enough)");
+  f.passProAll = blendByReps(f.passPro, f.pffPassPro, "Pass protection");
+  f.passProOk = meetsBar(f.passProAll, PASS_PRO_BAR, "Pass protection (decent is enough)");
+  f.recvSkill = {
+    label: "Receiving",
+    kind: "skill",
+    fit: RECV_SKILL.reduce((s, [k, w]) => s + w * f[k]!.fit, 0) / RECV_SKILL.reduce((s, [, w]) => s + w, 0),
+    display: `open ${f.recOpen!.display}; drops ${f.hands!.display}`,
+    n: f.recOpen!.n,
+  };
+  // The same readings twice: as 2-Down's ingredients (the limits that make
+  // the role) and as the gates that cut a back who doesn't have them.
+  f.passProWeak = atMost(f.passProAll, ...TWO_DOWN_PASS_PRO, "Not good in pass protection");
+  f.recvWeak = atMost(f.recvSkill, ...TWO_DOWN_RECV, "Average at best as a receiver");
+  f.passProGood = { ...f.passProWeak!, label: "Holds up in pass protection" };
+  f.recvGood = { ...f.recvWeak!, label: "Good receiver" };
+  f.runGood = atMost(f.srae, ...THIRD_DOWN_RUN, "Good runner");
   if (inp.weightLb != null) {
     const w = inp.weightLb;
     f.build = { label: "Build", kind: "body", fit: Math.min(1, Math.max(0, (w - BUILD_LB[0]) / (BUILD_LB[1] - BUILD_LB[0]))), display: `${w} lb` };
@@ -246,6 +296,18 @@ function blendByReps(a: Feature | undefined, b: Feature | undefined, label: stri
   return { label, kind: "skill", fit: (na * a!.fit + nb * b!.fit) / (na + nb), display: `${a!.display} · ${b!.display}`, n: na + nb };
 }
 
+// A lead back's running and build: Three-down's match before its bars, and
+// 2-Down's before its own.
+const RUNNER: Pick<BucketRecipe, "ingredients" | "size"> = {
+  ingredients: [
+    { feature: "srae", weight: 0.5, core: true },
+    { feature: "zoneAE", weight: 0.15 },
+    { feature: "gapAE", weight: 0.15 },
+    { feature: "build", weight: 0.2 },
+  ],
+  size: { minHeightIn: 69, minWeightLb: 205 },
+};
+
 export const RB_RECIPES: readonly BucketRecipe[] = [
   {
     // The user's definition (2026-10-02): a good runner in both schemes with
@@ -254,17 +316,58 @@ export const RB_RECIPES: readonly BucketRecipe[] = [
     // on hands or pass pro. How much his college used him on passing downs
     // doesn't count ("Used as" still shows it), nor does route open rate.
     role: "three_down",
-    ingredients: [
-      { feature: "srae", weight: 0.5, core: true },
-      { feature: "zoneAE", weight: 0.15 },
-      { feature: "gapAE", weight: 0.15 },
-      { feature: "build", weight: 0.2 },
-    ],
+    ...RUNNER,
     gates: [
       { feature: "handsOk", maxCut: GATE_MAX_CUT },
       { feature: "passProOk", maxCut: GATE_MAX_CUT },
     ],
-    size: { minHeightIn: 69, minWeightLb: 205 },
+  },
+  {
+    // The user's definition (2026-10-08): not good in pass pro, average to
+    // bad as a receiver. Those limits are the role, so they're 40% of the
+    // match; the other 60% is Three-down's runner (how good an early-down back
+    // he'd be). Then it's cut up to half each for holding up in pass pro and
+    // for catching well, so a back who can play passing downs never reads
+    // 2-Down on his running alone.
+    role: "two_down",
+    ingredients: [
+      ...RUNNER.ingredients.map((i) => ({ ...i, weight: i.weight * 0.6 })),
+      { feature: "passProWeak", weight: 0.2 },
+      { feature: "recvWeak", weight: 0.2 },
+    ],
+    size: RUNNER.size,
+    gates: [
+      { feature: "passProGood", maxCut: GATE_MAX_CUT },
+      { feature: "recvGood", maxCut: GATE_MAX_CUT },
+    ],
+  },
+  {
+    // The user's definition (2026-10-08): excels in pass pro and as a
+    // receiver, average at best as a runner. Pass pro and receiving skill,
+    // cut up to half each for missing Three-down's pass-pro or hands bar, and
+    // for being a good runner.
+    role: "third_down",
+    ingredients: [
+      { feature: "passProAll", weight: 0.45, core: true },
+      ...RECV_SKILL.map(([feature, weight]) => ({ feature, weight, ...(feature === "recOpen" ? { core: true } : {}) })),
+    ],
+    gates: [
+      { feature: "passProOk", maxCut: GATE_MAX_CUT },
+      { feature: "handsOk", maxCut: GATE_MAX_CUT },
+      { feature: "runGood", maxCut: GATE_MAX_CUT },
+    ],
+  },
+  {
+    // The user's definition (2026-10-08): the catch-all, chosen only when he's
+    // terrible at everything but blocking (fallbackRule in ROLES). Its % is
+    // how blocking-only he is: his pass protection (the only blocking charted
+    // for a back), cut up to half each for being a good runner or receiver.
+    role: "blocking_st",
+    ingredients: [{ feature: "passProAll", weight: 1, core: true }],
+    gates: [
+      { feature: "runGood", maxCut: GATE_MAX_CUT },
+      { feature: "recvGood", maxCut: GATE_MAX_CUT },
+    ],
   },
   {
     role: "zone",
@@ -306,9 +409,9 @@ export const RB_RECIPES: readonly BucketRecipe[] = [
     ],
   },
   {
-    // The user's recipe (2026-10-07). A complement role: it's added after his
-    // lead role ("Zone / Goal-line") unless no other role reaches 60%.
-    // shortYardage and power are absent until he has them (renormalized).
+    // The user's recipe (2026-10-07). Level D: at its line it follows a level-B
+    // or C role ("Zone / Goal-line"). shortYardage and power are absent until
+    // he has them (renormalized).
     role: "goal_line",
     ingredients: [
       { feature: "insideAE", weight: 0.25, core: true },

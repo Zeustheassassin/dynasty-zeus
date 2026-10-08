@@ -18,7 +18,7 @@ import type { ProspectGameRouteCellsRow } from "../../lib/scouting/aggregateMerg
 import type { MetricContext } from "../../lib/scouting/contextGrading";
 import { SEASON_DECAY } from "../../lib/scouting/seasonWeight";
 import { POS_COLOR } from "../../lib/uiTheme";
-import { matchFor, roleFitTooltip, roleLabel, versatileRuleText, type RoleFit } from "../../lib/scouting/roleFit";
+import { levelRuleText, matchFor, noLevelReached, roleFitTooltip, roleLabel, versatileRuleText, type RoleFit } from "../../lib/scouting/roleFit";
 import {
   parseGrade, formatGrade, gradeColor, gradeDelta, gradeTier, gradeTierRange,
   GRADE_MIN, GRADE_MAX, GRADE_TIERS, type GradeField,
@@ -654,9 +654,9 @@ export default function BigBoard({
     if (!fit) {
       return <td className={`${cls} text-slate-600`} title={isCompositePos(p.position) ? "Not enough tape for a role yet" : undefined}>—</td>;
     }
-    // Greyed when it's uncertain: little tape, or a headline not proven yet
-    // ("X?", an X without in-app press reps).
-    const weak = fit.confidence === "low" || matchFor(fit, fit.best)?.proven === false;
+    // Greyed when it's uncertain: little tape, a headline not proven yet ("X?",
+    // an X without in-app press reps), or an RB who reached no level.
+    const weak = fit.confidence === "low" || matchFor(fit, fit.best)?.proven === false || noLevelReached(fit);
     return (
       <td className={`${cls} font-medium ${weak ? "text-slate-500" : "text-slate-200"}`} title={roleFitTooltip(fit)}>
         {roleLabel(fit)}
@@ -666,7 +666,8 @@ export default function BigBoard({
   }
   const roleTooltip =
     "Role: the best-case NFL role from the charting plus height and weight (Analysis → Role Fit has every role's match %). " +
-    "Two roles within 5 points read \"A / B\", the higher-ceiling one first. \"?\" = not proven yet (an X needs 10+ in-app press reps). " +
+    "WR / TE / QB: two roles within 5 points read \"A / B\", the higher-ceiling one first. \"?\" = not proven yet (an X needs 10+ in-app press reps). " +
+    `RB: ${levelRuleText("RB")} ` +
     `V = Versatile: a WR ${versatileRuleText("WR")}, a TE ${versatileRuleText("TE")} (none for RB or QB: Three-down, Creator and Dual-threat already mean all-round). Greyed = little tape, or not proven yet. Feeds none of the scores.`;
 
   const dynastyTooltip =

@@ -546,7 +546,7 @@ describe("BigBoard WR alignment", () => {
 describe("BigBoard Role column", () => {
   const match = (role: RoleFit["best"], pct: number) => ({ role, pct, sizeDrop: 0, sizeNote: null, drivers: [], proven: true });
   const FIT: RoleFit = {
-    pos: "WR", best: "x", hybrid: "y", versatile: true, usedAs: "x", confidence: "high",
+    pos: "WR", best: "x", also: ["y"], versatile: true, usedAs: "x", confidence: "high",
     sample: { n: 240, unit: "routes" }, skillOnly: false, features: {},
     matches: [match("x", 82), match("y", 79), match("slot", 55), match("gadget", 40)],
   };
@@ -561,7 +561,7 @@ describe("BigBoard Role column", () => {
   });
 
   it("sorts by role, players without one sinking", () => {
-    const slot: RoleFit = { ...FIT, best: "slot", hybrid: null, matches: [match("x", 40), match("y", 50), match("slot", 80), match("gadget", 60)] };
+    const slot: RoleFit = { ...FIT, best: "slot", also: [], matches: [match("x", 40), match("y", 50), match("slot", 80), match("gadget", 60)] };
     renderBoard([
       prospect("a", "No Role", "RB", 1),
       prospect("b", "Slot Guy", "WR", 2, { role_fit: slot }),

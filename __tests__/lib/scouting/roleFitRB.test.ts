@@ -41,18 +41,18 @@ describe("RB role buckets", () => {
     expect(f.usedAs).toBe("zone");
   });
 
-  it("makes a heavy back who wins on gap runs and breaks tackles (PFF missed tackles) a Gap/Power back", () => {
-    const f = fit([...runs(25, "inside_zone"), ...runs(75, "inside_man_gap")],
+  it("makes a heavy back who wins on gap runs and breaks tackles (PFF missed tackles), but can't pass block, a Gap/Power back", () => {
+    const f = fit([...runs(25, "inside_zone"), ...runs(75, "inside_man_gap"), ...passBlocks(20, 8)],
       slices({ all: [6, 100], zone: [-4, 25], gap: [12, 75], loaded: [10, 20] }), 72, 228, { pffMissedTackles: { hits: 38, n: 100 } })!;
     expect(f.best).toBe("gap");
     expect(f.features.btk!.display).toBe("0.38 vs 0.26 league per carry on 100 carries");
   });
 
   it("makes a back who runs routes and gets open a Receiving back", () => {
-    const plays = [...runs(60, "outside_zone"), ...routes(50, 42), ...runs(0, "inside_zone")];
+    const plays = [...runs(30, "outside_zone"), ...runs(30, "inside_man_gap"), ...routes(50, 42)];
     plays.push(...Array.from({ length: 10 }, () => play({ run_type: "route", success: true, targeted: true, was_open: true, route_type: "big_boy_route" })));
-    const f = fit(plays, slices({ all: [-3, 60], zone: [-3, 60], gap: [0, 0] }))!;
-    expect(f.best).toBe("receiving");
+    const f = fit(plays, slices({ all: [-3, 60], zone: [-3, 30], gap: [-3, 30] }))!;
+    expect(f.best).toBe("receiving"); // level C: no Zone or Gap/Power role
   });
 
   it("makes a back with explosive runs (PFF 10+ yards) and stuffs a Big-play back", () => {
@@ -151,13 +151,15 @@ describe("RB Goal-line (the user's recipe, 2026-10-07)", () => {
   const POWER_SLICES = slices({ all: [8, 100], zone: [10, 70], gap: [6, 30], inside: [10, 100], loaded: [8, 30] });
   const PFF = { pffYco: { hits: 400, n: 100 }, pffMissedTackles: { hits: 35, n: 100 } };
 
-  it("makes a heavy back who wins inside and through contact a Goal-line fit, added after his lead role", () => {
-    const f = fit(plays, POWER_SLICES, 72, 225, PFF)!;
+  it("makes a heavy back who wins inside and through contact a Goal-line fit, named after his Zone role", () => {
+    // 4 drops in 10 targets keep him out of Three-down.
+    const drops = Array.from({ length: 10 }, (_, i) => play({ run_type: "route", targeted: true, was_open: true, route_type: "flats", success: i >= 4 }));
+    const f = fit([...plays, ...drops], POWER_SLICES, 72, 225, PFF)!;
     expect(matchFor(f, "goal_line")!.pct).toBeGreaterThanOrEqual(75);
     expect(matchFor(f, "zone")!.pct).toBeGreaterThanOrEqual(60);
-    expect(f.best).not.toBe("goal_line"); // a lead role clears 60%
-    expect(f.hybrid).toBe("goal_line");
-    expect(roleLabel(f)).toMatch(/ \/ Goal-line$/);
+    expect(f.best).toBe("zone"); // level B leads, Goal-line (level D) follows
+    expect(f.also[f.also.length - 1]).toBe("goal_line");
+    expect(roleLabel(f)).toMatch(/^Zone \/.* Goal-line$/);
     expect(f.features.yco!.display).toBe("4.00 vs 3.00 league yds after contact per carry on 100 carries");
     expect(f.features.notStuffed!.fit).toBeGreaterThan(0.5);
   });
@@ -210,5 +212,66 @@ describe("RB Three-down pass-pro gate adds PFF pass blocking (Stage 4)", () => {
     const clean = three({ pffPassPro: { hits: 0, n: 60 }, leaguePffPassPro: { hits: 7, n: 100 } });
     expect(leaky).toBeLessThan(three({}));
     expect(clean).toBeGreaterThanOrEqual(three({}));
+  });
+});
+
+describe("RB 2-Down, 3rd-Down and Blocking/ST (the user's definitions, 2026-10-08)", () => {
+  const targets = (n: number, drops: number) => Array.from({ length: n }, (_, i) =>
+    play({ run_type: "route", targeted: true, was_open: true, route_type: "flats", success: i >= drops }));
+  const quietRoutes = (n: number, open: number) => routes(n, open).map((p) => ({ ...p, route_type: "flats" as const }));
+  const RUNNER = slices({ all: [10, 100], zone: [10, 50], gap: [10, 50] });
+  const AVERAGE_RUNNER = slices({ all: [0, 100], zone: [0, 50], gap: [0, 50] });
+  const runner = (passing: RBPlay[]) => [...runs(50, "inside_zone"), ...runs(50, "inside_man_gap"), ...passing];
+
+  it("names a good, heavy runner who can't pass block and doesn't catch well 2-Down, after his run scheme", () => {
+    const f = fit(runner([...passBlocks(25, 10), ...quietRoutes(15, 5), ...targets(10, 3)]), RUNNER, 72, 225)!;
+    expect(f.best).not.toBe("three_down");
+    expect(f.also[0]).toBe("two_down");
+    expect(roleLabel(f)).toMatch(/^(Zone|Gap\/Power) \/ 2-Down/);
+    expect(matchFor(f, "two_down")!.pct).toBeGreaterThan(matchFor(f, "three_down")!.pct + 15);
+    expect(matchFor(f, "two_down")!.drivers.join(" ")).toContain("Not good in pass protection");
+  });
+
+  it("moves Three-down and 2-Down in opposite directions for the same runner", () => {
+    const f = fit(runner([...passBlocks(25, 23), ...quietRoutes(15, 13), ...targets(10, 0)]), RUNNER, 72, 225)!;
+    expect(f.best).toBe("three_down");
+    expect(matchFor(f, "two_down")!.pct).toBeLessThan(30);
+    expect(matchFor(f, "two_down")!.drivers).toContain("− Holds up in pass protection (−50%)");
+  });
+
+  it("makes an average runner who excels in pass pro and as a receiver a 3rd-Down back, and cuts it for a good runner", () => {
+    const passing = [...passBlocks(25, 25), ...quietRoutes(15, 14), ...targets(10, 0)];
+    const f = fit(runner(passing), AVERAGE_RUNNER, 71, 210)!;
+    expect(f.best).toBe("third_down");
+    expect(matchFor(f, "third_down")!.pct).toBeGreaterThanOrEqual(60);
+    const good = fit(runner(passing), RUNNER, 71, 210)!;
+    expect(matchFor(good, "third_down")!.pct).toBeLessThan(matchFor(f, "third_down")!.pct - 15);
+    expect(matchFor(good, "third_down")!.drivers.join(" ")).toContain("Good runner");
+  });
+
+  it("holds a back who can't pass block out of 3rd-Down, however well he catches", () => {
+    const f = fit(runner([...passBlocks(25, 8), ...quietRoutes(15, 14), ...targets(10, 0)]), AVERAGE_RUNNER, 71, 210)!;
+    expect(matchFor(f, "third_down")!.pct).toBeLessThan(50);
+  });
+
+  const BAD = slices({ all: [-15, 100], zone: [-15, 50], gap: [-15, 50], inside: [-15, 100], loaded: [-15, 20] });
+  const NO_PLAYS = { pffExplosive: { hits: 6, n: 100 }, pffMissedTackles: { hits: 10, n: 100 }, pffYco: { hits: 220, n: 100 } };
+  const stuffed = (plays: RBPlay[]) => plays.map((p, i) => (i < 15 ? { ...p, run_stuff: true } : p));
+
+  const poorReceiver = () => [...quietRoutes(15, 4), ...targets(10, 4)];
+  const blocker = (won: number) => fit(stuffed(runner([...passBlocks(25, won), ...poorReceiver()])), BAD, 70, 200, NO_PLAYS)!;
+
+  it("makes a back terrible at everything but blocking Blocking/ST", () => {
+    const f = blocker(25);
+    expect(Math.max(...f.matches.filter((m) => m.role !== "blocking_st").map((m) => m.pct))).toBeLessThan(40);
+    expect(f.best).toBe("blocking_st");
+    expect(roleLabel(f)).toBe("Blocking/ST");
+  });
+
+  it("doesn't call a back Blocking/ST when he can't block either, or when he's decent at something else", () => {
+    expect(blocker(12).best).not.toBe("blocking_st");
+    const canRun = fit(runner([...passBlocks(25, 25), ...poorReceiver()]), RUNNER, 72, 225)!;
+    expect(canRun.best).not.toBe("blocking_st");
+    expect(matchFor(canRun, "blocking_st")!.pct).toBeLessThan(matchFor(blocker(25), "blocking_st")!.pct); // cut for running well
   });
 });
