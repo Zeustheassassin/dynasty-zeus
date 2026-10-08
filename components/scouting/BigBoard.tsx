@@ -1134,7 +1134,11 @@ export default function BigBoard({
       <p className="text-xs text-slate-600 mb-2 text-center">AE Score true spread: {compositeStatus}</p>
       <p className="text-xs text-slate-600 mb-2 text-center">
         Opponent strength (scores only): {opponentStatus}
-        {unrecognized.length > 0 && <span className="text-amber-700"> · Unrecognized opponents: {unrecognized.join(", ")}</span>}
+        {unrecognized.length > 0 && (
+          <span className="text-amber-700" title="Rename the opponent, or link the game in Scouting → PFF Links: a name matched to a PFF game there is remembered for your other games.">
+            {" "}· Unrecognized opponents: {unrecognized.join(", ")}
+          </span>
+        )}
       </p>
       <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 mb-3 text-xs text-slate-400">
         <div role="group" aria-label="Score view" className="inline-flex rounded border border-slate-700 overflow-hidden"

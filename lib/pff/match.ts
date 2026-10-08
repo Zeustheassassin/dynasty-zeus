@@ -24,7 +24,7 @@
 // time and "postseason" is week 15 and later.
 // ============================================================
 
-import { opponentSchool, schoolByExactName } from "../scouting/opponentTier";
+import { opponentSchool, schoolByExactName, type LearnedNames } from "../scouting/opponentTier";
 import type { PffGameMatchStatus, PffPlayerMatchStatus } from "../types";
 import type { PffPlayer, PffScheduleGame, PffTeam, PffWeekRow } from "./ncaa";
 
@@ -106,10 +106,11 @@ export function pffTeamSchool(team: Pick<PffTeam, "city"> | null | undefined): s
 
 const compact = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 
-/** Does a charted opponent (free text) name this PFF team? */
-export function opponentIsTeam(charted: string, team: Pick<PffTeam, "city"> | null | undefined): boolean {
+/** Does a charted opponent (free text) name this PFF team? `learned`: names
+ *  the user taught by linking other games (learnOpponents). */
+export function opponentIsTeam(charted: string, team: Pick<PffTeam, "city"> | null | undefined, learned?: LearnedNames): boolean {
   if (!team?.city) return false;
-  const a = opponentSchool(charted);
+  const a = opponentSchool(charted, learned);
   const b = pffTeamSchool(team);
   if (a && b) return a === b;
   // One side unrecognized: fall back to the bare names.
@@ -249,8 +250,9 @@ export function candidateEvidence(
   games: readonly ChartedGame[],
   /** His games per season, for the seasons fetched; null when none were. */
   his: ReadonlyMap<number, readonly HisGame[]> | null,
+  learned?: LearnedNames,
 ): CandidateEvidence {
-  const school = opponentSchool(prospect.school);
+  const school = opponentSchool(prospect.school, learned);
   const pffSchool = pffTeamSchool(player.team);
   let gamesFound = 0;
   let gamesChecked = 0;
@@ -259,7 +261,7 @@ export function candidateEvidence(
       const season = his.get(g.season_year);
       if (!season) continue;
       gamesChecked++;
-      if (season.some((h) => opponentIsTeam(g.opponent, h.opponent))) gamesFound++;
+      if (season.some((h) => opponentIsTeam(g.opponent, h.opponent, learned))) gamesFound++;
     }
   }
   return {
@@ -415,11 +417,13 @@ export function noPlayerGames(games: readonly ChartedGame[], note: string): Game
  * `his` = his games per season; `schedules` = his team's whole PFF schedule
  * per season (to tell "no row for him" from "no such game"). Games the user
  * confirmed or ruled out are left alone, and their PFF games aren't reused.
+ * `learned`: opponent names the user taught by linking other games.
  */
 export function matchGames(
   games: readonly ChartedGame[],
   his: ReadonlyMap<number, readonly HisGame[]>,
   schedules: ReadonlyMap<number, readonly HisGame[]>,
+  learned?: LearnedNames,
 ): GameDecision[] {
   const taken = new Set(games.filter(isUserGameDecision).map((g) => g.pff_game_id).filter((id): id is number => id != null));
   const open = games.filter((g) => !isUserGameDecision(g));
@@ -431,9 +435,9 @@ export function matchGames(
     const groups = new Map<string, { charted: ChartedGame[]; fits: HisGame[] }>();
 
     for (const g of charted) {
-      const fits = mine.filter((h) => opponentIsTeam(g.opponent, h.opponent));
+      const fits = mine.filter((h) => opponentIsTeam(g.opponent, h.opponent, learned));
       if (fits.length === 0) {
-        out.push(unmatchedGame(g, season, schedules.get(season) ?? [], taken, his.has(season) && mine.length > 0));
+        out.push(unmatchedGame(g, season, schedules.get(season) ?? [], taken, his.has(season) && mine.length > 0, learned));
         continue;
       }
       const key = fits.map((h) => h.pffGameId).join(",");
@@ -509,8 +513,9 @@ function unmatchedGame(
   schedule: readonly HisGame[],
   taken: ReadonlySet<number>,
   hasRows: boolean,
+  learned?: LearnedNames,
 ): GameDecision {
-  const onSchedule = schedule.filter((s) => !taken.has(s.pffGameId) && opponentIsTeam(g.opponent, s.opponent)).sort(byKickoff);
+  const onSchedule = schedule.filter((s) => !taken.has(s.pffGameId) && opponentIsTeam(g.opponent, s.opponent, learned)).sort(byKickoff);
   if (onSchedule.length > 0) {
     const s = onSchedule[0];
     const why = hasRows ? `PFF has no row for him in ${describeGame(s)}` : `PFF has no ${season} rows for him; his team played ${describeGame(s)}`;
@@ -519,7 +524,7 @@ function unmatchedGame(
       lookup: { season, week: s.week, teamId: s.teamId },
     };
   }
-  const known = opponentSchool(g.opponent);
+  const known = opponentSchool(g.opponent, learned);
   const note = !known
     ? `Couldn't read the opponent "${g.opponent}"`
     : hasRows || schedule.length > 0

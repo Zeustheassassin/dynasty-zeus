@@ -31,6 +31,7 @@ import type { PffClient } from "../pff/client";
 import { teamCast, trimOffenseRows, type PffOffenseRow, type TeamCast } from "../pff/cast";
 import { isPostseasonGame, pffTeamSchool } from "../pff/match";
 import { gameOffense, seasonTeams } from "../pff/ncaa";
+import { fetchLearnedOpponentNames } from "../scouting/learnedOpponentNames";
 import { opponentSchool } from "../scouting/opponentTier";
 import {
   archiveReady, fetchArchive, kickoffMs, POINTS_PER_REQUEST, summarizeWindow, windowDates,
@@ -72,11 +73,17 @@ const isLinked = (g: GameRow) => g.pff_game_id != null && LINKED.has(g.pff_match
 export async function fillGameContext(deps: ContextDeps, prospectIds: readonly string[]): Promise<ContextRun> {
   const { supabase, userId } = deps;
   const now = deps.now ?? Date.now();
-  const [pRes, gRes, fRes] = await Promise.all([
+  const [pRes, gRes, fRes, learned] = await Promise.all([
     supabase.from("prospects").select("id,position,school,pff_player_id").in("id", prospectIds),
     supabase.from("scouting_games").select("id,prospect_id,season_year,opponent,game_type,pff_game_id,pff_match_status").in("prospect_id", prospectIds),
     supabase.from("prospect_game_pff").select("game_id,franchise_id,snaps").in("prospect_id", prospectIds),
+    // Opponent names the user taught by linking games to PFF: an unlinked game typed the same way still finds its CFD game.
+    fetchLearnedOpponentNames(supabase).catch((err: unknown) => {
+      log.warn("learned opponent names unavailable", { err: String(err) });
+      return new Map<string, string>();
+    }),
   ]);
+  const chartedSchool = (name: string | null | undefined) => opponentSchool(name, learned);
   const loadErr = pRes.error ?? gRes.error;
   if (loadErr) throw new Error(loadErr.message);
   const prospects = new Map(((pRes.data ?? []) as ProspectRow[]).map((p) => [p.id, p]));
@@ -143,9 +150,9 @@ export async function fillGameContext(deps: ContextDeps, prospectIds: readonly s
     const info = isLinked(g) ? pffSeason.get(g.season_year)?.games.find((x) => x.id === g.pff_game_id) : undefined;
     return matchCfdGame({
       season: g.season_year,
-      chartedOpponentSchool: opponentSchool(g.opponent),
+      chartedOpponentSchool: chartedSchool(g.opponent),
       chartedPostseason: isPostseasonGame(g),
-      teamSchool: schoolOf(g.season_year, franchiseOf.get(g.id)) ?? opponentSchool(p?.school ?? ""),
+      teamSchool: schoolOf(g.season_year, franchiseOf.get(g.id)) ?? chartedSchool(p?.school),
       pff: info ? {
         homeSchool: schoolOf(g.season_year, info.home_franchise_id),
         awaySchool: schoolOf(g.season_year, info.away_franchise_id),
@@ -163,7 +170,7 @@ export async function fillGameContext(deps: ContextDeps, prospectIds: readonly s
     let list = await seasonGames(cache, s);
     // A game that should be findable (linked to PFF, or a recognized opponent)
     // but isn't in the cached FBS schedule: an FCS-vs-FCS game, or one added since.
-    const findable = (g: GameRow) => isLinked(g) || opponentSchool(g.opponent) != null;
+    const findable = (g: GameRow) => isLinked(g) || chartedSchool(g.opponent) != null;
     if (deps.cfd && inSeason.some((g) => findable(g) && matchOne(g, list).status !== "auto")) {
       await ensureSeasonGames(cache, s, "fbs", { unmatched: true });
       await ensureSeasonGames(cache, s, "fcs", { unmatched: true });

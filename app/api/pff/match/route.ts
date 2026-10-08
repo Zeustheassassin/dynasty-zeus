@@ -19,6 +19,7 @@ import { getPffClient, PffError } from "../../../../lib/pff/client";
 import type { ChartedGame } from "../../../../lib/pff/match";
 import { matchProspect, type ProspectMatch, type ProspectToMatch } from "../../../../lib/pff/runMatch";
 import { checkRateLimit } from "../../../../lib/rateLimit";
+import { fetchLearnedOpponentNames } from "../../../../lib/scouting/learnedOpponentNames";
 import { requireUser } from "../../../../lib/server/requireUser";
 
 export const maxDuration = 300;
@@ -51,13 +52,18 @@ export async function POST(req: NextRequest) {
     return apiError(`prospectIds must be 1–${PFF_MATCH_BATCH} prospect ids`, 400, "INVALID_PROSPECTS");
   }
 
-  const [prospectsRes, gamesRes, snapsRes] = await Promise.all([
+  const [prospectsRes, gamesRes, snapsRes, learned] = await Promise.all([
     supabase.from("prospects").select("id,name,position,school,birthday,pff_player_id,pff_match_status").in("id", ids),
     supabase.from("scouting_games")
       .select("id,prospect_id,season_year,opponent,game_type,game_slot,created_at,pff_game_id,pff_match_status")
       .in("prospect_id", ids),
     // Plays charted per game: tells a rematch's two PFF games apart.
     supabase.from("prospect_game_snap_stats").select("game_id,snaps_charted").in("prospect_id", ids),
+    // Opponent names the user taught by linking other games; without them, those names go to the user again.
+    fetchLearnedOpponentNames(supabase).catch((err: unknown) => {
+      log.warn("learned opponent names unavailable", { err: String(err) });
+      return new Map<string, string>();
+    }),
   ]);
   const loadErr = prospectsRes.error ?? gamesRes.error;
   if (loadErr) {
@@ -81,7 +87,7 @@ export async function POST(req: NextRequest) {
       continue;
     }
     try {
-      const m = await matchProspect(client, p, games.filter((g) => g.prospect_id === p.id));
+      const m = await matchProspect(client, p, games.filter((g) => g.prospect_id === p.id), learned);
       const saveErr = await save(supabase, m);
       results.push({
         prospectId: p.id,

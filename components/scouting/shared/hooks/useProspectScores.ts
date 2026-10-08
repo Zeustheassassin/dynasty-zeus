@@ -2,7 +2,7 @@
 import { useMemo, useState } from "react";
 import type { ProspectAge } from "../../../../lib/scouting/prospectAge";
 import { prospectAgeAt } from "../../../../lib/scouting/prospectAge";
-import { tierGames, type GameTiers, type OpponentTier } from "../../../../lib/scouting/opponentTier";
+import { learnOpponents, tierGames, type GameTiers, type OpponentTier } from "../../../../lib/scouting/opponentTier";
 import { gameCovariates, resolveGameContexts, type ContextCovariates, type GameContext } from "../../../../lib/scouting/gameContext";
 import { computeRoleFits } from "../../../../lib/scouting/roleFits";
 import type { RoleFit } from "../../../../lib/scouting/roleFit";
@@ -52,7 +52,10 @@ export function useProspectScores(
   const { prospects, games, rbPlays, qbPlays, tePlays, gameRouteCells, gradingData, pffTotals } = input;
 
   // Each game's opponent tier (P4 / G5 / FCS), for the opponent adjustment.
-  const gameTiers = useMemo(() => tierGames(games), [games]);
+  // A name the tables can't read takes the opponent of its PFF link, and that
+  // name is learned for the user's other games (learnOpponents).
+  const learned = useMemo(() => learnOpponents(games, gradingData.context.rows), [games, gradingData.context]);
+  const gameTiers = useMemo(() => tierGames(games, learned), [games, learned]);
   // Each game's automatic context (migration 065) and the covariates the
   // context effects read: opponent defense SP+ and weather count where their
   // held-out tests passed (contextGrading.ts).

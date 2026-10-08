@@ -69,6 +69,9 @@ describe("positions and schools", () => {
     expect(opponentIsTeam("Miami - CFP", TEAMS.get(220))).toBe(true);
     expect(opponentIsTeam("Flordia State", { city: "Florida State" })).toBe(true);
     expect(opponentIsTeam("Manual-Check-Opponent", TEAMS.get(260))).toBe(false);
+    // A name the user taught by linking another game.
+    expect(opponentIsTeam("The Bucks", TEAMS.get(260))).toBe(false);
+    expect(opponentIsTeam("The Bucks", TEAMS.get(260), new Map([["thebucks", "Ohio State"]]))).toBe(true);
   });
 
   it("reads postseason from the game type or a tag", () => {
@@ -209,6 +212,13 @@ describe("matchGames", () => {
     expect(d.find((x) => x.gameId === notCharted.id)).toMatchObject({ status: "not_charted", pffGameId: 40, lookup: { season: 2025, week: 9, teamId: 190 } });
     expect(d.find((x) => x.gameId === noMatch.id)).toMatchObject({ status: "no_match", pffGameId: null });
     expect(d.find((x) => x.gameId === unreadable.id)?.note).toContain("Couldn't read the opponent");
+  });
+
+  it("matches a game typed like one the user linked by hand before", () => {
+    const g = game(2025, "Ole Miss Rebels Football");
+    const fits = new Map([[2025, [his(10, 8, 226, 45)]]]);
+    expect(matchGames([g], fits, new Map())[0]).toMatchObject({ status: "no_match" });
+    expect(matchGames([g], fits, new Map(), new Map([["olemissrebelsfootball", "Ole Miss"]]))[0]).toMatchObject({ status: "auto", pffGameId: 10 });
   });
 
   it("never touches the user's calls, and doesn't reuse their PFF games", () => {

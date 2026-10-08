@@ -10,7 +10,7 @@
 // game PFF has no row for him in. Season team lists are cached (ncaa.ts).
 // ============================================================
 
-import { opponentSchool } from "../scouting/opponentTier";
+import { opponentSchool, type LearnedNames } from "../scouting/opponentTier";
 import type { PffPlayerMatchStatus } from "../types";
 import type { PffClient } from "./client";
 import {
@@ -59,10 +59,12 @@ export async function findCandidates(client: PffClient, name: string): Promise<P
   return [...seen.values()];
 }
 
+/** `learned`: opponent names the user taught by linking other games (learnedOpponentNames.ts). */
 export async function matchProspect(
   client: PffClient,
   prospect: ProspectToMatch,
   games: readonly ChartedGame[],
+  learned?: LearnedNames,
 ): Promise<ProspectMatch> {
   const seasons = [...new Set(games.map((g) => g.season_year))].sort();
   const teams = new Map<number, Promise<PffSeasonTeams>>();
@@ -94,7 +96,7 @@ export async function matchProspect(
       .sort((a, b) => Number(b.pos) - Number(a.pos) || Number(b.name === "exact") - Number(a.name === "exact"));
     const evidence: CandidateEvidence[] = [];
     for (const c of candidates.slice(0, MAX_CANDIDATES)) {
-      evidence.push(candidateEvidence(prospect, c.p, games, seasons.length ? await logFor(c.p.id) : null));
+      evidence.push(candidateEvidence(prospect, c.p, games, seasons.length ? await logFor(c.p.id) : null, learned));
     }
     player = decidePlayer(prospect, evidence);
     const unchecked = candidates.slice(MAX_CANDIDATES).filter((c) => c.pos).length;
@@ -118,13 +120,13 @@ export async function matchProspect(
     let teamIds = [...new Set((his.get(season) ?? []).map((h) => h.teamId))];
     if (teamIds.length === 0) {
       // No rows for him that season: fall back to his listed school's schedule.
-      const school = opponentSchool(prospect.school);
+      const school = opponentSchool(prospect.school, learned);
       teamIds = school ? [...t.teams.values()].filter((tm) => pffTeamSchool(tm) === school).map((tm) => tm.franchise_id) : [];
     }
     schedules.set(season, teamSchedule(teamIds, season, t.teams, t.games));
   }
 
-  const decisions = matchGames(games, his, schedules);
+  const decisions = matchGames(games, his, schedules, learned);
   for (const d of decisions) {
     if (d.status !== "not_charted" || !d.lookup || d.pffGameId == null) continue;
     const info = (await weekGames(client, d.lookup.season, d.lookup.week, d.lookup.teamId)).find((g) => g.id === d.pffGameId);

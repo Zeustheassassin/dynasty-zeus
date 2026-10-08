@@ -29,7 +29,7 @@ import {
   gameCovariates, OPPONENT_SP_SPECS, OPPONENT_TIER_SPECS, resolveGameContexts, WEATHER_SPECS, type ContextCovariates,
 } from "./gameContext";
 import { flaggedGameTest, LEFT_EARLY_WEIGHT, PLAYED_HURT_WEIGHT, type FlagWeightTest } from "./gameFlags";
-import { tierGames } from "./opponentTier";
+import { learnOpponents, tierGames } from "./opponentTier";
 import { tagStatReps } from "./tagStats";
 import { isTraitGame, traitsFor } from "./traits";
 
@@ -94,7 +94,7 @@ const list = (m: Map<string, { byGame?: ByGame } | null>) => [...m].map(([id, s]
 export function contextMetrics(inp: ContextInputs): { metrics: ContextMetric[]; cc: ContextCovariates } {
   const prospects = inp.prospects as Prospect[];
   const games = inp.games as ScoutingGame[];
-  const tiers = tierGames(games).byGame;
+  const tiers = tierGames(games, learnOpponents(games, inp.gradingData.context.rows)).byGame;
   const cc = gameCovariates(games, resolveGameContexts(games, inp.gradingData.context), tiers);
   const metrics: ContextMetric[] = [];
   const head = (key: (typeof HEADLINE_KEYS)[number], samples: ContextMetric["samples"]) =>

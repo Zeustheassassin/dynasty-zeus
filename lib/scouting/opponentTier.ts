@@ -7,11 +7,13 @@
 //
 // Matching, in order: drop tags people add ("Miami - CFP", "Alabama CC",
 // "Georgia SEC Championship"), then an exact match on any of the team's
-// names, then the ALIASES below, then a one- or two-letter typo match when
-// exactly one team is that close ("Flordia State", "South Flordia"). Anything
-// left is null: that game carries no opponent effect, and the Big Board lists
-// it so the name can be fixed. Teams and tiers: opponentTierData.ts,
-// generated from CollegeFootballData.
+// names, then the ALIASES below, then the names the user taught by linking
+// games to PFF (learnOpponents), then a one- or two-letter typo match when
+// exactly one team is that close ("Flordia State", "South Flordia"). A game
+// whose name still doesn't match takes the opponent of the PFF game it's
+// linked to. Anything left is null: that game carries no opponent effect, and
+// the Big Board lists it so the name can be fixed. Teams and tiers:
+// opponentTierData.ts, generated from CollegeFootballData.
 
 import { OPPONENT_TEAMS, TIER_SEASONS, type TierCode } from "./opponentTierData";
 
@@ -35,6 +37,8 @@ const ALIASES: Record<string, string> = {
   louisianalafayette: "Louisiana",
   northcarolinastate: "NC State",
   ullafayette: "Louisiana",
+  latech: "Louisiana Tech",
+  floridaatlanticuniversity: "Florida Atlantic",
 };
 
 // Every name a team goes by (aliases included, so their typos match too).
@@ -60,13 +64,23 @@ function typoDistance(a: string, b: string): number {
   return d[a.length][b.length];
 }
 
-function findTeam(opponent: string): (typeof OPPONENT_TEAMS)[number] | null {
-  const k = norm(stripTags(opponent));
+/** Opponent names the user taught by linking games to PFF: the typed name
+ *  (tags, case and punctuation dropped) → the school. See learnOpponents. */
+export type LearnedNames = ReadonlyMap<string, string>;
+
+type Team = (typeof OPPONENT_TEAMS)[number];
+
+const nameKey = (opponent: string) => norm(stripTags(opponent));
+
+function findTeam(opponent: string, learned?: LearnedNames): Team | null {
+  const k = nameKey(opponent);
   if (!k) return null;
   const exact = byName.get(k);
   if (exact) return exact;
+  const taught = learned?.get(k);
+  if (taught && bySchool.has(taught)) return bySchool.get(taught)!;
   if (k.length < 6) return null;
-  let best: (typeof OPPONENT_TEAMS)[number] | null = null;
+  let best: Team | null = null;
   let bestD = 3;
   let tie = false;
   for (const [name, team] of byName) {
@@ -79,9 +93,9 @@ function findTeam(opponent: string): (typeof OPPONENT_TEAMS)[number] | null {
 }
 
 /** The school (CFD's name) a charted opponent resolves to: tags dropped,
- *  aliases and small typos allowed. null when the name isn't recognized. */
-export function opponentSchool(opponent: string | null | undefined): string | null {
-  return opponent ? findTeam(opponent)?.s ?? null : null;
+ *  aliases, learned names and small typos allowed. null when the name isn't recognized. */
+export function opponentSchool(opponent: string | null | undefined, learned?: LearnedNames): string | null {
+  return opponent ? findTeam(opponent, learned)?.s ?? null : null;
 }
 
 /** Exact names and aliases only, no typo matching: for clean names from
@@ -91,16 +105,63 @@ export function schoolByExactName(name: string | null | undefined): string | nul
   return name ? byName.get(norm(name))?.s ?? null : null;
 }
 
-/** The opponent's tier in that season; null when the name isn't recognized. */
-export function opponentTier(opponent: string | null | undefined, season: number): OpponentTier | null {
-  if (!opponent) return null;
-  const team = findTeam(opponent);
+function teamTier(team: Team | null | undefined, season: number): OpponentTier | null {
   if (!team) return null;
   if (typeof team.t === "string") return team.t;
   // Seasons outside the table use the nearest one listed.
   const nearest = [...TIER_SEASONS].sort((a, b) => Math.abs(a - season) - Math.abs(b - season));
   for (const s of nearest) if (team.t[s]) return team.t[s]!;
   return null;
+}
+
+/** The opponent's tier in that season; null when the name isn't recognized. */
+export function opponentTier(opponent: string | null | undefined, season: number, learned?: LearnedNames): OpponentTier | null {
+  return opponent ? teamTier(findTeam(opponent, learned), season) : null;
+}
+
+// ── Names learned from PFF links ─────────────────────────────
+
+/** What the user's PFF links say about opponent names the tables can't read. */
+export interface LearnedOpponents {
+  /** game id → the school of the PFF game it's linked to. */
+  byGame: ReadonlyMap<string, string>;
+  /** Every such typed name → its school, for the user's other games. */
+  byName: LearnedNames;
+}
+
+export const NO_LEARNED_OPPONENTS: LearnedOpponents = { byGame: new Map(), byName: new Map() };
+
+const LINKED = new Set(["auto", "confirmed"]);
+
+/**
+ * The opponent names the user taught by linking charted games to PFF (most
+ * often by picking the game by hand in PFF Links): a linked game whose typed
+ * opponent isn't recognized, and whose game context (migration 065) names the
+ * PFF game's opponent. That game takes the PFF opponent, and the typed name
+ * reads as that school on every other game too, so the next game typed the
+ * same way is recognized and matches PFF on its own. Unlinking the game
+ * forgets the name. A name linked to two different schools is left out.
+ */
+export function learnOpponents(
+  games: readonly { id: string; opponent: string | null; pff_game_id?: number | null; pff_match_status?: string | null }[],
+  contextRows: readonly { game_id: string; opponent_school: string | null }[],
+): LearnedOpponents {
+  const linkedSchool = new Map(contextRows.filter((r) => r.opponent_school && bySchool.has(r.opponent_school)).map((r) => [r.game_id, r.opponent_school!]));
+  const byGame = new Map<string, string>();
+  const byName = new Map<string, string>();
+  const clashing = new Set<string>();
+  for (const g of games) {
+    const school = linkedSchool.get(g.id);
+    if (!school || !g.opponent || g.pff_game_id == null || !LINKED.has(g.pff_match_status ?? "")) continue;
+    if (findTeam(g.opponent)) continue;
+    byGame.set(g.id, school);
+    const k = nameKey(g.opponent);
+    if (!k) continue;
+    if (byName.has(k) && byName.get(k) !== school) clashing.add(k);
+    byName.set(k, school);
+  }
+  for (const k of clashing) byName.delete(k);
+  return { byGame, byName };
 }
 
 export interface GameTiers {
@@ -110,11 +171,17 @@ export interface GameTiers {
   unrecognized: Map<string, number>;
 }
 
-export function tierGames(games: readonly { id: string; opponent: string | null; season_year: number }[]): GameTiers {
+/** Each game's opponent tier: its typed name first, then the PFF game it's linked to, then the learned names. */
+export function tierGames(
+  games: readonly { id: string; opponent: string | null; season_year: number }[],
+  learned: LearnedOpponents = NO_LEARNED_OPPONENTS,
+): GameTiers {
   const byGame = new Map<string, OpponentTier>();
   const unrecognized = new Map<string, number>();
   for (const g of games) {
-    const t = opponentTier(g.opponent, g.season_year);
+    const taught = learned.byGame.get(g.id) ?? (g.opponent ? learned.byName.get(nameKey(g.opponent)) : undefined);
+    const team = (g.opponent ? findTeam(g.opponent) : null) ?? (taught ? bySchool.get(taught) : null);
+    const t = teamTier(team, g.season_year);
     if (t) byGame.set(g.id, t);
     else if (g.opponent?.trim()) unrecognized.set(g.opponent.trim(), (unrecognized.get(g.opponent.trim()) ?? 0) + 1);
   }

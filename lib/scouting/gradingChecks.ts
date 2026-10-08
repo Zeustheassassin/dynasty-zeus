@@ -32,7 +32,7 @@ import {
 import { buildAEComposite, type CompositePos, type MetricSpread } from "./aeComposite";
 import { buildComponents, type GradingData } from "./aeComponents";
 import { tagStatReps } from "./tagStats";
-import { tierGames } from "./opponentTier";
+import { learnOpponents, tierGames } from "./opponentTier";
 import { gameCovariates, resolveGameContexts } from "./gameContext";
 import type { CountStatResult } from "./countComponents";
 
@@ -157,7 +157,7 @@ export function buildGradingReport(inp: GradingInputs): GradingReport {
 
   // Every component, and its spread as the composite would see it (the core
   // metrics are left out, so only the components' spreads are read).
-  const tiers = tierGames(inp.games).byGame;
+  const tiers = tierGames(inp.games, learnOpponents(inp.games, inp.gradingData.context.rows)).byGame;
   const built = buildComponents({
     prospects: inp.prospects, games: inp.games, tierByGame: tiers,
     context: gameCovariates(inp.games, resolveGameContexts(inp.games, inp.gradingData.context), tiers),
