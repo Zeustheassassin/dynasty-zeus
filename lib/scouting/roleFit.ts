@@ -78,7 +78,7 @@ export const ROLES: Record<RolePos, readonly RoleInfo[]> = {
     { key: "three_down", label: "Three-down", short: "3-Down",  tier: 0, description: "The workhorse: wins on zone and gap runs, reliable hands (no drops), holds up in pass protection, and the build to carry the load." },
     { key: "zone",       label: "Zone",       short: "Zone",    tier: 1, description: "One-cut runner: much better on zone runs than gap runs." },
     { key: "gap",        label: "Gap/Power",  short: "Gap",     tier: 2, description: "Wins on gap runs and against a stacked box, breaks tackles; heavier." },
-    { key: "receiving",  label: "Receiving",  short: "Recv",    tier: 3, description: "Runs a lot of routes, often split out wide, gets open on longer routes." },
+    { key: "receiving",  label: "Receiving",  short: "Recv",    tier: 3, description: "Runs a lot of routes, often split out wide, gets open on the harder routes (WR routes, wheels, angles, seams)." },
     { key: "big_play",   label: "Big-play",   short: "BigPlay", tier: 4, description: "Change of pace: lots of explosive runs and lots of runs stopped at or behind the line." },
     { key: "goal_line",  label: "Goal-line",  short: "GL",      tier: 5, complement: true, description: "Short-yardage and goal-line back: wins on inside runs and against a loaded box, runs through contact (PFF yards after contact and missed tackles), rarely stuffed; your Power grade and his tagged short-yardage runs (10+) count once he has them. A complement: shown after his lead role (Zone / Goal-line) unless no other role reaches 60%." },
   ],

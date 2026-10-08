@@ -45,6 +45,16 @@ const FORMATIONS: { key: RBFormation; label: string }[] = [
   { key: "under_center", label: "Under Center" },
 ];
 
+// Route labels only: the stored keys predate the 2026-10-07 rename (Mid Curl, Flats, Big Boy
+// Route), so charted plays keep their route with no migration. `short` is the play-log tag.
+// Other is not a catch-all: it is the old Big Boy Route, the hardest part of an RB's tree
+// (everything a WR would run, plus wheels, angles and seams). The Receiving bucket scores it.
+const ROUTE_TYPES: { key: RBRouteType; label: string; short: string }[] = [
+  { key: "mid_curl",      label: "Curl/Screen",  short: "Curl/Scr" },
+  { key: "flats",         label: "Flat/Options", short: "Flat/Opt" },
+  { key: "big_boy_route", label: "Other",        short: "Other" },
+];
+
 const NFL_ROLES = ["Bellcow", "1A/1B", "Lead Back", "Receiving Back", "Change-of-Pace", "Committee", ""];
 
 const RB_CONFIG: ChartingBoardConfig = {
@@ -241,7 +251,7 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
     const routeOpen     = routeRuns.filter((p) => p.was_open).length;
 
     // Route type breakdown
-    const routeByType = (["mid_curl", "flats", "big_boy_route"] as RBRouteType[]).reduce((acc, rt) => {
+    const routeByType = ROUTE_TYPES.map((r) => r.key).reduce((acc, rt) => {
       const rp = routeRuns.filter((p) => p.route_type === rt);
       acc[rt] = {
         routes:  rp.length,
@@ -600,11 +610,7 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/60">
-                      {([
-                        { key: "mid_curl" as RBRouteType, label: "Mid Curl" },
-                        { key: "flats" as RBRouteType, label: "Flats" },
-                        { key: "big_boy_route" as RBRouteType, label: "Big Boy Route" },
-                      ]).map(({ key, label }) => {
+                      {ROUTE_TYPES.map(({ key, label }) => {
                         const r = stats.routeByType[key];
                         const catchPct = r.targets > 0 ? ((r.catches / r.targets) * 100).toFixed(0) : null;
                         return (
@@ -748,11 +754,7 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
                   <div className="w-full">
                     <div className="text-xs text-slate-500 mb-2">Route Type</div>
                     <div className="flex gap-2">
-                      {([
-                        { key: "mid_curl" as RBRouteType, label: "Mid Curl" },
-                        { key: "flats" as RBRouteType, label: "Flats" },
-                        { key: "big_boy_route" as RBRouteType, label: "Big Boy Route" },
-                      ]).map(({ key, label }) => (
+                      {ROUTE_TYPES.map(({ key, label }) => (
                         <button key={key} onClick={() => setRbRouteType(rbRouteType === key ? null : key)}
                           className={`flex-1 py-2 rounded text-xs font-medium transition ${rbRouteType === key ? "bg-blue-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                           {label}
@@ -942,7 +944,7 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
                           <>
                             {pl.route_type && (
                               <span className="text-blue-300 text-[10px]">
-                                {pl.route_type === "mid_curl" ? "Curl" : pl.route_type === "flats" ? "Flat" : "BBR"}
+                                {ROUTE_TYPES.find((r) => r.key === pl.route_type)?.short}
                               </span>
                             )}
                             {pl.aligned_as_wr && <span className="text-blue-300">WR</span>}

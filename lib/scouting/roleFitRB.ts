@@ -113,6 +113,8 @@ const RATES = {
   stuff:     (plays: RBPlay[]) => rateOf(plays.filter(isKnownRun), (pl) => pl.run_stuff),
   passPro:   (plays: RBPlay[]) => rateOf(plays.filter((pl) => pl.run_type === "pass_block" && pl.success !== null), (pl) => pl.success === true),
   open:      (plays: RBPlay[]) => rateOf(routesOf(plays).filter((pl) => pl.was_open !== null), (pl) => pl.was_open === true),
+  // "Other" on the board (stored big_boy_route): the hardest part of an RB's tree, everything
+  // a WR would run plus wheels, angles and seams.
   bigOpen:   (plays: RBPlay[]) => rateOf(routesOf(plays).filter((pl) => pl.route_type === "big_boy_route" && pl.was_open !== null), (pl) => pl.was_open === true),
   // Drops per target (success false = dropped; null = not caught but not a
   // drop, e.g. an uncatchable ball, so it doesn't count against his hands).
@@ -189,7 +191,7 @@ export function rbFeatures(inp: RBRoleInputs): FeatureSet {
     stuffed: rateFeature("Stuffed (boom-bust)", mine.stuff, league.stuff, RATE_PRIOR, SCALE.stuffed, "runs"),
     passPro: rateFeature("Pass protection", mine.passPro, league.passPro, REC_PRIOR, SCALE.passPro, "pass blocks"),
     recOpen: rateFeature("Open on routes", mine.open, league.open, REC_PRIOR, SCALE.recOpen, "routes"),
-    bigOpen: rateFeature("Open on longer routes", mine.bigOpen, league.bigOpen, REC_PRIOR, SCALE.bigOpen, "longer routes"),
+    bigOpen: rateFeature("Open on Other routes", mine.bigOpen, league.bigOpen, REC_PRIOR, SCALE.bigOpen, "Other routes"),
     hands: rateFeature("Hands (drops)", mine.drops, league.drops, REC_PRIOR, SCALE.hands, "targets", true),
     insideAE: skillFeature("Inside runs", slices.inside.ae, slices.inside.n, RUN_PRIOR, SCALE.insideAE, "runs"),
     yco: rateFeature("Yards after contact (PFF)", inp.pffYco ?? NO_RATE, inp.leaguePffYco ?? NO_RATE, RATE_PRIOR, SCALE.yco, "carries", false, " yds after contact per carry"),
