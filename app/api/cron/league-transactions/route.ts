@@ -82,10 +82,15 @@ const TIME_BUDGET_MS = 270_000;
 // is forgiving about high-numbered week queries (returns []).
 const TRANSACTION_LOOKBACK_WEEKS = 4;
 
-// How many transactions to keep per user. The frontend query slices to
-// the top 200 by created DESC; we don't need to store more than that.
-// Older rows aren't deleted by the cron (no cleanup policy here) — they
-// just stop being read once the 200th row is newer than them.
+// How many transactions to write per user per run: the 200 most recently
+// COMPLETED (status_updated), which is everything that can have appeared since
+// the last run 2-6h ago. Rows from earlier runs stay in the table (no cleanup
+// policy here) and the Alerts Hub reads them by its own windows
+// (hooks/leagueTransactionsFetch.ts). Not by `created`: a trade's `created` is
+// its proposal, often a day and sometimes weeks before acceptance, and in
+// season 200 rows by `created` reach back only ~3-4 days, so a slow-accepted
+// trade fell outside the cap the first time it showed up complete and was
+// never stored.
 const PER_USER_TX_CAP = 200;
 
 interface SleeperNflStateBasic {
@@ -239,9 +244,10 @@ async function processUser(
 
   if (!collected.length) return 0;
 
-  // Keep only the freshest PER_USER_TX_CAP rows in memory before write,
-  // so a user with many old transactions doesn't generate a huge upsert.
-  collected.sort((a, b) => b.created - a.created);
+  // Keep only the PER_USER_TX_CAP most recently completed rows in memory before
+  // write, so a user with many old transactions doesn't generate a huge upsert.
+  const completedAt = (r: CacheRow) => r.payload.status_updated ?? r.created;
+  collected.sort((a, b) => completedAt(b) - completedAt(a));
   const toWrite = collected.slice(0, PER_USER_TX_CAP);
 
   let written = 0;

@@ -50,6 +50,7 @@ import { useCalcValues } from "../../hooks/useCalcValues";
 import { useLeagueMateIntel } from "../../hooks/useLeagueMateIntel";
 import { useDraftScout } from "../../hooks/useDraftScout";
 import { useLeagueOverview } from "../../hooks/useLeagueOverview";
+import { fetchCachedLeagueTransactions } from "../../hooks/leagueTransactionsFetch";
 import { useNflState } from "./useNflState";
 import { useGamedayState } from "./useGamedayState";
 import { useNflSchedule } from "./useNflSchedule";
@@ -2751,7 +2752,9 @@ const saveSnapshotNow = async () => {
   // Reads pre-annotated rows from league_transactions_cache. Rows are
   // produced by the server-side cron at app/api/cron/league-transactions
   // every 2 hours (see vercel.json), eliminating the ~240 Sleeper calls/cold-session this
-  // effect used to do client-side. Only fetched once per session (on login) —
+  // effect used to do client-side. Trades and other moves are read as separate
+  // windows (fetchCachedLeagueTransactions) so waiver volume can't crowd trades out.
+  // Only fetched once per session (on login) —
   // refreshTransactions lets the Alerts Hub's Trades/Waivers tabs re-query on
   // demand instead of waiting for a full page reload.
   // requestId guard: a manual refresh can overlap the mount-time load (or a second manual
@@ -2761,21 +2764,13 @@ const saveSnapshotNow = async () => {
     const requestId = beginTransactionsLoad();
     setLoadingTransactions(true);
     try {
-      const { data, error } = await supabase
-        .from("league_transactions_cache")
-        .select("payload")
-        .eq("user_id", uid)
-        .order("created", { ascending: false })
-        .limit(200);
+      const txs = await fetchCachedLeagueTransactions(uid);
       if (!isTransactionsLoadCurrent(requestId)) return;
-      if (error) {
-        log.error("league_transactions_cache load failed", { err: error.message });
-        return;
-      }
-      const txs = (data ?? []).map(
-        (r: { payload: unknown }) => r.payload as AnnotatedTransaction
-      );
       setLeagueTransactions(txs);
+    } catch (err) {
+      if (isTransactionsLoadCurrent(requestId)) {
+        log.error("league_transactions_cache load failed", { err: String(err) });
+      }
     } finally {
       if (isTransactionsLoadCurrent(requestId)) setLoadingTransactions(false);
     }

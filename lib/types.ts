@@ -139,6 +139,9 @@ export interface SleeperTransaction {
   week: number;
   created: number;
   updated: number;
+  /** When the move reached its status — for a trade, acceptance (plus any review period), which can
+   *  be days or weeks after `created` (the proposal). */
+  status_updated?: number;
   roster_ids: number[];
   adds: Record<string, number> | null;
   drops: Record<string, number> | null;

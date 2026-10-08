@@ -1,5 +1,6 @@
 "use client";
 import type { WatchlistEntry, SleeperPlayer, TradeAttempt } from "../lib/types";
+import { RECENT_TRADE_WINDOW_DAYS } from "../lib/constants";
 import type { AlertsFeedTab } from "../app/hooks/useHubRouting";
 import type { DashboardAlert, LeagueTransaction, InjuryReportPlayer } from "./AlertsPage/alertsPageHelpers";
 import { POS_COLOR } from "./AlertsPage/alertsPageHelpers";
@@ -191,7 +192,7 @@ export default function AlertsPage({
             {loadingTransactions ? (
               <p className="text-sm text-blue-400 py-4">Loading trades across your leagues…</p>
             ) : tradeActivity.length === 0 ? (
-              <EmptyState>No recent trades found in your leagues.</EmptyState>
+              <EmptyState>No trades in your leagues in the last {RECENT_TRADE_WINDOW_DAYS} days.</EmptyState>
             ) : (
               <div className="space-y-3">
                 {tradeActivity.map((tx) => (

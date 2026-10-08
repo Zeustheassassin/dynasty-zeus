@@ -555,6 +555,39 @@ describe("GET per-user annotation pipeline", () => {
     expect(Math.min(...createds)).toBe(50);
   });
 
+  it("caps by completion time, so a trade proposed long before it was accepted is still stored", async () => {
+    oneUser();
+    route((u) => u.includes("/user/sleeper-1/leagues/"), [
+      dynastyLeague("L1", "Dynasty One"),
+    ]);
+    route((u) => u.includes("/league/L1/users"), []);
+    route((u) => u.includes("/league/L1/rosters"), []);
+    route((u) => u.includes("/league/L1/drafts"), []);
+    // 250 waiver moves completed at 1000..1249, plus one trade proposed at
+    // created 0 (older than all of them) but accepted at 5000 (newest).
+    const waivers = Array.from({ length: 250 }, (_, i) =>
+      completeTx({
+        transaction_id: `w${i}`,
+        type: "waiver",
+        created: 1000 + i,
+        status_updated: 1000 + i,
+      })
+    );
+    const lateTrade = completeTx({ transaction_id: "late-trade", created: 0, status_updated: 5000 });
+    route((u) => u.includes("/league/L1/transactions/5"), [...waivers, lateTrade]);
+
+    const GET = await loadGET();
+    await GET(makeReq(`Bearer ${SECRET}`));
+    const batch = fake.upserts[0] as Array<{ transaction_id: string; created: number }>;
+    expect(batch).toHaveLength(200);
+    const late = batch.find((r) => r.transaction_id === "late-trade");
+    // Stored, and still dated by its proposal (the column the feed orders by).
+    expect(late?.created).toBe(0);
+    // The other 199 are the most recently completed waivers (1051..1249).
+    expect(batch.some((r) => r.transaction_id === "w50")).toBe(false);
+    expect(batch.some((r) => r.transaction_id === "w51")).toBe(true);
+  });
+
   it("continues (no throw) and records 0 rows written when the upsert errors", async () => {
     oneUser();
     fake.upsertError = { message: "upsert exploded" };

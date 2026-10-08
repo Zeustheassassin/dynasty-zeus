@@ -89,6 +89,11 @@ export const SLEEPER_LEAGUE_TRANSACTIONS_REVALIDATE_S = 900;
 /** Lookback for /api/sleeper/league/[leagueId]/trades — the "past 30 days" every recent-trade view
  *  (Trade Log, leaguemate + cross-league trade intel) counts over. */
 export const RECENT_TRADE_WINDOW_DAYS = 30;
+/** Alerts Hub Trades tab: the newest this many trades from the last RECENT_TRADE_WINDOW_DAYS. Read as
+ *  its own window so in-season waiver volume can't push trades off it (hooks/leagueTransactionsFetch.ts). */
+export const ALERTS_HUB_TRADE_LIMIT = 100;
+/** Alerts Hub Waivers tab + drop alerts: the newest this many non-trade moves. */
+export const ALERTS_HUB_MOVE_LIMIT = 200;
 /** traded picks (past + future) */
 export const SLEEPER_LEAGUE_TRADED_PICKS_REVALIDATE_S = 1800;
 /** drafts associated with a league */
