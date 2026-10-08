@@ -8,6 +8,7 @@ import { DRAFT_ROUND_CHOICES, UNDRAFTED_ROUND, draftRoundLabel } from "../../../
 import ProspectOverview, { type OverviewData } from "../overview/ProspectOverview";
 import ProspectScorePieces from "../overview/ProspectScorePieces";
 import ProspectProduction from "../overview/ProspectProduction";
+import { getLocalStorageItem, setLocalStorageItem } from "../../../lib/hooks/useLocalStorage";
 
 export interface ChartingBoardConfig {
   positionLabel: string;
@@ -66,6 +67,9 @@ export interface ChartingBoardProps {
   renderPlayLogger: (selectedGame: ScoutingGame | null) => React.ReactNode;
   renderGamesTable: () => React.ReactNode;
 }
+
+/** Remembers whether the Chart Game tab's games list is collapsed (for split-screen charting). */
+const GAMES_COLLAPSED_KEY = "chartingGamesCollapsed";
 
 const ACCENT = {
   blue: {
@@ -133,6 +137,13 @@ export default function ChartingBoard({
 }: ChartingBoardProps) {
   const a = ACCENT[config.accentColor];
   const selectedGame = games.find((g) => g.id === selectedGameId) ?? null;
+
+  const [gamesCollapsed, setGamesCollapsedState] = useState<boolean>(
+    () => getLocalStorageItem<boolean>(GAMES_COLLAPSED_KEY, false) === true);
+  const setGamesCollapsed = (collapsed: boolean) => {
+    setGamesCollapsedState(collapsed);
+    setLocalStorageItem(GAMES_COLLAPSED_KEY, collapsed);
+  };
 
   const [editingGameId, setEditingGameId] = useState<string | null>(null);
   const [editGameOpponent, setEditGameOpponent] = useState("");
@@ -317,12 +328,26 @@ export default function ChartingBoard({
 
       {/* Chart Game tab */}
       {tab === "chart" && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* Game list sidebar */}
+        <div className={gamesCollapsed ? "flex gap-3" : "grid grid-cols-1 md:grid-cols-3 gap-4"}>
+          {/* Game list sidebar. Collapses to a thin rail so the logger gets the
+              full width when charting in split screen. */}
+          {gamesCollapsed ? (
+            <button onClick={() => setGamesCollapsed(false)}
+              title="Show games" aria-label="Show games list" aria-expanded={false}
+              className="self-start flex-shrink-0 flex flex-col items-center gap-2 px-1.5 py-2 bg-slate-900 border border-slate-800 hover:border-slate-600 rounded-lg text-slate-400 hover:text-white transition">
+              <span aria-hidden="true" className="text-sm leading-none">»</span>
+              <span className="text-xs [writing-mode:vertical-rl]">Games ({games.length})</span>
+            </button>
+          ) : (
           <div className="md:col-span-1">
-            <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center justify-between gap-2 mb-2">
               <span className="text-sm font-medium text-slate-300">Games ({games.length})</span>
-              <button onClick={onToggleAddGame} className={`px-2 py-1 ${a.addBtn} text-white text-xs rounded transition`}>+ Add</button>
+              <div className="flex items-center gap-1">
+                <button onClick={onToggleAddGame} className={`px-2 py-1 ${a.addBtn} text-white text-xs rounded transition`}>+ Add</button>
+                <button onClick={() => setGamesCollapsed(true)}
+                  title="Hide games" aria-label="Hide games list" aria-expanded={true}
+                  className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs rounded transition">«</button>
+              </div>
             </div>
             {showAddGame && (
               <div className="mb-3 p-3 bg-slate-900 border border-slate-700 rounded-lg space-y-2">
@@ -422,9 +447,10 @@ export default function ChartingBoard({
               )}
             </div>
           </div>
+          )}
 
           {/* Position-specific play logger */}
-          <div className="md:col-span-2">
+          <div className={gamesCollapsed ? "flex-1 min-w-0" : "md:col-span-2"}>
             {renderPlayLogger(selectedGame)}
           </div>
         </div>
