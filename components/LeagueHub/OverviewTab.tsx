@@ -19,6 +19,8 @@ import type {
   LeagueHubTab,
   LeagueMgmtData,
   LeagueLineupStatus,
+  EarlyLockDay,
+  EarlyLockStatus,
 } from "../../lib/types";
 import type { CommittedSimsByLeague, CachedSimRow, LeagueOverviewEntry } from "../../lib/types";
 import { removeLocalStorageItem } from "@/lib/hooks/useLocalStorage";
@@ -48,6 +50,14 @@ interface OverviewTabProps {
 // useAppState's loadLeagueOverview interval), so a click that's refused here
 // isn't leaving the dots any staler than they'd already be getting refreshed to.
 const REFRESH_COOLDOWN_MS = 5 * 60 * 1000;
+
+// The T/F/S flags' floor: the same 0.5-point noise floor below which the lineup dot stays green.
+const EARLY_LOCK_STAKE_MIN = 0.5;
+const EARLY_LOCK_TAGS: Record<EarlyLockDay, { letter: string; name: string }> = {
+  Thu: { letter: "T", name: "Thursday" },
+  Fri: { letter: "F", name: "Friday" },
+  Sat: { letter: "S", name: "Saturday" },
+};
 
 function OverviewTab({
   leagues,
@@ -230,6 +240,12 @@ function OverviewTab({
   });
   }, [leagues, leagueOverviewData, user, calcFcValues, redraftValues, pickFcValues, players, committedSimsByLeague, leagueSimCache, mountedAt, leagueMgmtData, sortConfig]);
 
+  // T/F/S flags shown per league. Every row reserves room for the most any league shows, so the
+  // dots stay in one column.
+  const flaggedEarlyLocks = (leagueId: string): EarlyLockStatus[] =>
+    (leagueLineupStatus[leagueId]?.earlyLocks ?? []).filter((e) => e.stake >= EARLY_LOCK_STAKE_MIN);
+  const earlyLockSlots = Math.max(0, ...leagueRows.map((row) => flaggedEarlyLocks(row.league.league_id).length));
+
   if (loadingLeagueOverview && !leagueOverviewLoaded) return <p className="text-sm text-blue-400">Loading league data…</p>;
   if (!leagues.length) return <p className="text-sm text-slate-500">No leagues found.</p>;
 
@@ -355,8 +371,35 @@ function OverviewTab({
                     const riskLabel = lineupStatus.pivotRiskCount > 0
                       ? `${lineupStatus.pivotRiskCount} questionable starter${lineupStatus.pivotRiskCount === 1 ? "" : "s"} with no backup left once inactives are announced`
                       : null;
+                    // T / F / S: part of the suggested change involves a player in a
+                    // Thursday / Friday / Saturday game and locks at that kickoff — fix this
+                    // league by then. Each goes away once its game starts (stakes only count
+                    // players whose game is still Upcoming).
+                    const earlyLocks = flaggedEarlyLocks(row.league.league_id);
                     return (
                       <>
+                        {earlyLockSlots > 0 && (
+                          <span
+                            className="flex justify-end gap-px shrink-0"
+                            style={{ width: `${earlyLockSlots * 0.5}rem` }}
+                          >
+                            {earlyLocks.map(({ day, stake, moves }) => {
+                              const { letter, name } = EARLY_LOCK_TAGS[day];
+                              const label = `${name} game: ${moves.length > 0 ? `move ${moves.join(", ")}` : "make a lineup move"} before kickoff (+${stake.toFixed(1)} pts)`;
+                              return (
+                                <span
+                                  key={day}
+                                  role="img"
+                                  aria-label={label}
+                                  title={label}
+                                  className="text-[10px] font-bold leading-none text-sky-400"
+                                >
+                                  {letter}
+                                </span>
+                              );
+                            })}
+                          </span>
+                        )}
                         <span
                           title={
                             lineupStatus.isOptimal

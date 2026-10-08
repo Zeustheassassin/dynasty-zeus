@@ -521,6 +521,21 @@ export interface LeagueLineupStatus {
   /** Risky starters (Questionable etc.) whose inactive call lands after every
    *  bench player who could replace them has kicked off. */
   pivotRiskCount: number;
+  /** One entry per Thursday/Friday/Saturday whose not-yet-started games hold part of the
+   *  suggested change (stake > 0), in kickoff order. */
+  earlyLocks: EarlyLockStatus[];
+}
+
+/** Thursday, Friday or Saturday, US Eastern: game days that lock before the Sunday slate. */
+export type EarlyLockDay = "Thu" | "Fri" | "Sat";
+
+export interface EarlyLockStatus {
+  day: EarlyLockDay;
+  /** Points the suggestion loses if that day's games kick off with this lineup unchanged —
+   *  what's riding on a move before then (getEarlyLockStake). */
+  stake: number;
+  /** Names of that day's players the suggestion moves in, out, or to another slot. */
+  moves: string[];
 }
 
 export interface GamedayLineupRow {

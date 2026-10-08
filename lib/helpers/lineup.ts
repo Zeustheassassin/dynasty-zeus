@@ -142,6 +142,10 @@ export interface SuggestedLineupInput {
    *  status — the user marked them out, or this week's ESPN note says they're
    *  unlikely to play (see isAvailabilityExcluded in lineupAvailability.ts). */
   isExcludedFn?: (id: string) => boolean;
+  /** Players to hold exactly where they are (their starting slot, or the bench) as if their
+   *  game had kicked off, while still scoring them as not yet played. Prices what a lineup
+   *  loses if an early game locks with no change made (getEarlyLockStake). */
+  holdFn?: (id: string) => boolean;
 }
 
 export interface SuggestedLineupSwap {
@@ -193,6 +197,9 @@ export function computeSuggestedLineup(
     const kickoffAt = kickoffFn(id);
     return kickoffAt != null && now >= kickoffAt;
   };
+  // Whether a player can't move: his game has started, or the caller is holding him in place.
+  // Scoring below still reads hasGameStarted, so a held player who won't play stays at 0.
+  const isFrozen = (id: string) => hasGameStarted(id) || (input.holdFn?.(id) ?? false);
 
   // What a player is expected to score in THIS lineup. A player the coach
   // treats as out (Out/IR/Doubtful tag, marked out, ESPN "unlikely to play")
@@ -226,7 +233,7 @@ export function computeSuggestedLineup(
   // Final is therefore never a legal swap-in, so exclude them from the fill
   // pool entirely (already-starting players are exempt since keeping them
   // put isn't a move).
-  const isLockedOut = (id: string) => !currentStarterIds.has(id) && hasGameStarted(id);
+  const isLockedOut = (id: string) => !currentStarterIds.has(id) && isFrozen(id);
 
   // A currently-starting player whose own game has already started is locked
   // to their EXACT current slot for the rest of the week — Sleeper doesn't
@@ -234,10 +241,10 @@ export function computeSuggestedLineup(
   // live, and the real-world result can't be undone. Pre-assign these by
   // roster-position index before the greedy fill runs, so nothing below (not
   // even a rankScoreFn/injury-driven pick) can bump them to the bench or
-  // shuffle their slot.
+  // shuffle their slot. A held starter (holdFn) is pinned the same way.
   const lockedSlotIndexes = new Map<number, SleeperPlayer>();
   currentStarterRows.forEach((row, index) => {
-    if (row.player?.player_id && hasGameStarted(row.player.player_id)) {
+    if (row.player?.player_id && isFrozen(row.player.player_id)) {
       lockedSlotIndexes.set(index, row.player);
     }
   });
@@ -322,4 +329,40 @@ export function computeSuggestedLineup(
   const suggestedLineupScore = lineup.reduce((sum, row) => sum + (row.score || 0), 0);
 
   return { currentStarterRows, lineup, swaps, currentLineupScore, suggestedLineupScore };
+}
+
+export interface EarlyLockStake {
+  /** Points the suggested lineup loses if the early game kicks off with no change made. */
+  points: number;
+  /** Early-game players the suggestion moves: into or out of the lineup, or to another slot. */
+  moves: SleeperPlayer[];
+}
+
+/** What's riding on an early game (e.g. Thursday night) before it locks: the suggested
+ *  lineup's points minus the best lineup still reachable once that game's players are held
+ *  where they stand. 0 when the suggestion can wait until after it kicks off. `isEarlyFn`
+ *  should be true only for players whose early game hasn't started. */
+export function getEarlyLockStake(
+  input: SuggestedLineupInput,
+  isEarlyFn: (id: string) => boolean,
+  now: number = Date.now()
+): EarlyLockStake {
+  if (!(input.playerIds ?? []).some(isEarlyFn)) return { points: 0, moves: [] };
+
+  const suggested = computeSuggestedLineup(input, now);
+  const held = computeSuggestedLineup({ ...input, holdFn: isEarlyFn }, now);
+
+  const slotById = (rows: LineupCoachRow[]) =>
+    new Map(rows.flatMap((r) => (r.player ? [[r.player.player_id, r.slot] as const] : [])));
+  const before = slotById(suggested.currentStarterRows);
+  const after = slotById(suggested.lineup);
+  const moves = (input.playerIds ?? [])
+    .filter((id) => isEarlyFn(id) && before.get(id) !== after.get(id))
+    .map((id) => input.players[id])
+    .filter((p): p is SleeperPlayer => !!p);
+
+  return {
+    points: Math.max(0, suggested.suggestedLineupScore - held.suggestedLineupScore),
+    moves,
+  };
 }

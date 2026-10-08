@@ -22,8 +22,11 @@ import {
   computeScoringMultipliers,
   getLeagueNumQbs,
   computeSuggestedLineup,
+  getEarlyLockStake,
   recomputeConsensusFpts,
   resolveGameState,
+  getEarlyLockDay,
+  EARLY_LOCK_DAYS,
   getProjectionKickoffAt,
   getGamedayPollPlan,
   getCurrentNflWeek,
@@ -1948,6 +1951,14 @@ const saveSnapshotNow = async () => {
     const { isExcludedFn, isRiskFn, isUnavailableFn } = getLineupAvailabilityChecks(lineupAvailability);
     const scheduledKickoff = (id: string) =>
       resolveGameState(lineupPlayers[id]?.team, scheduleByTeam, kickoffFn(id)).kickoffAt;
+    // The Thursday/Friday/Saturday game a player is in, if it hasn't kicked off. The T/F/S
+    // flags price what the suggestion loses if that day's games lock before the lineup changes.
+    const upcomingEarlyLockDay = (id: string) => {
+      const game = resolveGameState(lineupPlayers[id]?.team, scheduleByTeam, kickoffFn(id));
+      return game.state === "Upcoming" && game.kickoffAt != null ? getEarlyLockDay(game.kickoffAt) : null;
+    };
+    const playerName = (p: SleeperPlayer) =>
+      p.full_name || `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim() || p.player_id;
 
     Object.values(leagueOverviewData).forEach(({ league, rosters: leagueRosters }) => {
       const isSelectedLeague = league.league_id === selectedLeague?.league_id;
@@ -1975,7 +1986,7 @@ const saveSnapshotNow = async () => {
         return resolveGameState(player?.team, scheduleByTeam, fallbackKickoffAt).state !== "Upcoming";
       };
 
-      const { lineup, swaps, currentLineupScore, suggestedLineupScore } = computeSuggestedLineup({
+      const lineupInput = {
         rosterPositions,
         starters: myRoster.starters,
         playerIds: eligiblePlayerIds,
@@ -1985,6 +1996,11 @@ const saveSnapshotNow = async () => {
         hasKickoffData,
         isLockedFn,
         isExcludedFn,
+      };
+      const { lineup, swaps, currentLineupScore, suggestedLineupScore } = computeSuggestedLineup(lineupInput);
+      const earlyLocks = EARLY_LOCK_DAYS.flatMap((day) => {
+        const stake = getEarlyLockStake(lineupInput, (id) => upcomingEarlyLockDay(id) === day);
+        return stake.points > 0 ? [{ day, stake: stake.points, moves: stake.moves.map(playerName) }] : [];
       });
       const pivotRisks = getLatePivotRisks({
         lineup,
@@ -2000,6 +2016,7 @@ const saveSnapshotNow = async () => {
         swapCount: swaps.length,
         delta: Math.max(0, suggestedLineupScore - currentLineupScore),
         pivotRiskCount: pivotRisks.filter((risk) => risk.pivots.length === 0).length,
+        earlyLocks,
       };
     });
 

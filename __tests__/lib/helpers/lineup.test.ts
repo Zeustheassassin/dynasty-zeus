@@ -7,6 +7,7 @@ import {
   getLineupSlotEligiblePositions,
   rebalanceLineupForKickoffWindows,
   computeSuggestedLineup,
+  getEarlyLockStake,
 } from "@/lib/helpers/lineup";
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -592,5 +593,74 @@ describe("computeSuggestedLineup", () => {
     });
     expect(result.lineup[0].player?.player_id).toBe("rb2");
     expect(result.swaps).toHaveLength(0);
+  });
+});
+
+describe("getEarlyLockStake", () => {
+  // thu* play Thursday night (not started yet); sun* play Sunday.
+  const players: Record<string, SleeperPlayer> = {
+    thuRb: mkPlayer("thuRb", "RB"),
+    thuWr: mkPlayer("thuWr", "WR"),
+    sunRb: mkPlayer("sunRb", "RB"),
+    sunWr: mkPlayer("sunWr", "WR"),
+  };
+  const scores: Record<string, number> = { thuRb: 15, thuWr: 12, sunRb: 9, sunWr: 5 };
+  const scoreFn = (id: string) => scores[id] ?? 0;
+  const isThursday = (id: string) => id.startsWith("thu");
+
+  it("prices a benched Thursday player who should start", () => {
+    const stake = getEarlyLockStake(
+      { rosterPositions: ["RB"], starters: ["sunRb"], playerIds: ["sunRb", "thuRb"], players, scoreFn, hasKickoffData: false },
+      isThursday
+    );
+    expect(stake.points).toBe(6); // thuRb 15 vs sunRb 9, lost once Thursday locks
+    expect(stake.moves.map((p) => p.player_id)).toEqual(["thuRb"]);
+  });
+
+  it("prices an out Thursday starter at his replacement's full score, not his stale projection", () => {
+    // Held in place he'd score 0 (he won't play), so leaving him in costs sunRb's 9.
+    const stake = getEarlyLockStake(
+      {
+        rosterPositions: ["RB"], starters: ["thuRb"], playerIds: ["thuRb", "sunRb"], players, scoreFn,
+        hasKickoffData: false, isExcludedFn: (id) => id === "thuRb",
+      },
+      isThursday
+    );
+    expect(stake.points).toBe(9);
+    expect(stake.moves.map((p) => p.player_id)).toEqual(["thuRb"]);
+  });
+
+  it("flags a Thursday player who has to change slots to make room", () => {
+    // Best: thuWr at WR, sunRb at FLEX (21). Held at FLEX, thuWr leaves WR to sunWr (17).
+    const stake = getEarlyLockStake(
+      {
+        rosterPositions: ["WR", "FLEX"], starters: ["sunWr", "thuWr"], playerIds: ["sunWr", "thuWr", "sunRb"],
+        players, scoreFn, hasKickoffData: false,
+      },
+      isThursday
+    );
+    expect(stake.points).toBe(4);
+    expect(stake.moves.map((p) => p.player_id)).toEqual(["thuWr"]);
+  });
+
+  it("is 0 when the suggested change only touches Sunday players", () => {
+    // sunRb should start over a 2-point RB, but the Thursday WR stays put either way.
+    const stake = getEarlyLockStake(
+      {
+        rosterPositions: ["RB", "WR"], starters: ["rb1", "thuWr"], playerIds: ["rb1", "thuWr", "sunRb"],
+        players: { ...players, rb1: mkPlayer("rb1", "RB") }, scoreFn: (id) => (id === "rb1" ? 2 : scoreFn(id)),
+        hasKickoffData: false,
+      },
+      isThursday
+    );
+    expect(stake).toEqual({ points: 0, moves: [] });
+  });
+
+  it("is 0 with no Thursday player on the roster", () => {
+    const stake = getEarlyLockStake(
+      { rosterPositions: ["RB"], starters: ["sunRb"], playerIds: ["sunRb"], players, scoreFn, hasKickoffData: false },
+      isThursday
+    );
+    expect(stake).toEqual({ points: 0, moves: [] });
   });
 });

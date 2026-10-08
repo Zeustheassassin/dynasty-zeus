@@ -13,7 +13,7 @@ import {
 import type {
   SleeperLeague, SleeperRoster, SleeperMatchup, SleeperPlayer, SleeperUser,
   ProjectionRow, GamedayMatchup, GamedayTeamView, GamedayLineupRow,
-  GamedayReserveRow, GamedayDashboardEntry, GamedayDashboardRaw, TeamGameState,
+  GamedayReserveRow, GamedayDashboardEntry, GamedayDashboardRaw, TeamGameState, EarlyLockDay,
 } from "../types";
 
 interface KickoffSource {
@@ -72,6 +72,19 @@ export const formatKickoffTime = (kickoffAt: number | null) => {
   } catch {
     return "--";
   }
+};
+
+const ET_WEEKDAY = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short" });
+
+/** Days whose games lock before the Sunday slate, in kickoff order. A lineup move involving
+ *  one of their players has to be made by then. */
+export const EARLY_LOCK_DAYS: readonly EarlyLockDay[] = ["Thu", "Fri", "Sat"];
+
+/** The early-lock day a kickoff falls on, US Eastern, or null for Sunday through Wednesday.
+ *  Eastern, not the viewer's zone: Thursday night's 8:15 PM ET kickoff is already Friday in UTC. */
+export const getEarlyLockDay = (kickoffAt: number): EarlyLockDay | null => {
+  const day = ET_WEEKDAY.format(kickoffAt);
+  return EARLY_LOCK_DAYS.find((d) => d === day) ?? null;
 };
 
 /** A scoreboard covering fewer teams than this is treated as a failed/partial

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   resolveGameState, buildGamedayMatchups, getKickoffState, getGamedayResultStatus, getMatchupWinProbability,
+  getEarlyLockDay,
 } from "@/lib/helpers/gameday";
 import type {
   SleeperLeague, SleeperRoster, SleeperMatchup, SleeperPlayer, ProjectionRow, TeamGameState,
@@ -97,6 +98,27 @@ const fullSchedule = (extra: Record<string, TeamGameState> = {}): Record<string,
 };
 
 // ── resolveGameState ─────────────────────────────────────────────────────
+
+describe("getEarlyLockDay", () => {
+  it("reads Thursday night in Eastern time, though it is already Friday in UTC", () => {
+    expect(getEarlyLockDay(Date.UTC(2026, 9, 9, 0, 15))).toBe("Thu"); // Thu Oct 8, 8:15 PM EDT
+  });
+
+  it("counts an afternoon Thanksgiving kickoff as Thursday", () => {
+    expect(getEarlyLockDay(Date.UTC(2026, 10, 26, 17, 30))).toBe("Thu"); // Thu Nov 26, 12:30 PM EST
+  });
+
+  it("reads Friday and Saturday games, including a Friday night that is Saturday in UTC", () => {
+    expect(getEarlyLockDay(Date.UTC(2026, 11, 26, 1, 15))).toBe("Fri"); // Fri Dec 25, 8:15 PM EST
+    expect(getEarlyLockDay(Date.UTC(2026, 11, 19, 21, 30))).toBe("Sat"); // Sat Dec 19, 4:30 PM EST
+  });
+
+  it("is null for Sunday and Monday, and for a Wednesday night that is Thursday in UTC", () => {
+    expect(getEarlyLockDay(Date.UTC(2026, 9, 11, 17, 0))).toBeNull(); // Sun Oct 11, 1:00 PM EDT
+    expect(getEarlyLockDay(Date.UTC(2026, 9, 13, 0, 15))).toBeNull(); // Mon Oct 12, 8:15 PM EDT
+    expect(getEarlyLockDay(Date.UTC(2026, 9, 8, 3, 0))).toBeNull(); // Wed Oct 7, 11:00 PM EDT
+  });
+});
 
 describe("resolveGameState", () => {
   it("uses the scheduled game's state and kickoff when the team is found", () => {
