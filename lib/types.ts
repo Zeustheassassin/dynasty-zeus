@@ -1052,6 +1052,10 @@ export interface Prospect {
    *  (migration 059; lib/scouting/scoreLock.ts). Optional: absent before the
    *  migration, and never sent on insert. */
   ae_score_lock?: AEScoreLock | null;
+  /** Scores as of the last Big Board visit, for the draft board (migration 068;
+   *  lib/scouting/boardScores.ts). Optional: absent before the migration, and
+   *  never sent on insert. */
+  board_scores?: BoardScores | null;
   /** PFF link (migration 062; lib/pff/match.ts). Optional: absent before the
    *  migration, and never sent on insert. Per user, never in shared views. */
   pff_player_id?: number | null;
@@ -1310,6 +1314,23 @@ export interface AEScoreLock {
   /** The position's baseline shift, already in `score` (aeComposite POSITION_BASELINE). */
   baseline?: number;
   locked_at: string;
+}
+
+// A prospect's scores as of the last Big Board visit (migration 068), for the
+// Draft Hub's rookie board, which never computes scores itself. Live and
+// without traits, at the Dynasty sliders' weights then
+// (lib/scouting/boardScores.ts).
+export interface BoardScores {
+  /** Dynasty Score; null without an AE Score. */
+  dynasty: number | null;
+  /** Dynasty Score Plus; null until a round is set (or without an AE Score). */
+  plus: number | null;
+  /** The sample dot (lib/scouting/sampleSize.ts): plays charted (null under the
+   *  floor), share of a full sample (0–1) and its tier. */
+  sample: { n: number | null; share: number; tier: "full" | "half" | "quarter" | "low" };
+  /** The slider weights the Dynasty scores were taken at. */
+  weights: { age: number; size: number; draft: number };
+  saved_at: string;
 }
 
 // One prospect's above-expected plus the sample it rests on. `variance` is the

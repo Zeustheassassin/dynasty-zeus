@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, cleanup, within } from "@testing-library/react";
 import BigBoard from "@/components/scouting/BigBoard";
 import ProspectOverview, { type OverviewData } from "@/components/scouting/overview/ProspectOverview";
 import ProspectScorePieces from "@/components/scouting/overview/ProspectScorePieces";
 import ProspectProduction from "@/components/scouting/overview/ProspectProduction";
 import { EMPTY_GRADING_DATA } from "@/lib/scouting/aeComponents";
-import type { ProspectWithStats, AEScoreLock } from "@/lib/types";
+import type { ProspectWithStats, AEScoreLock, BoardScores } from "@/lib/types";
 import type { RoleFit } from "@/lib/scouting/roleFit";
 import { totalsFor, type PffTotals } from "@/lib/pff/totals";
 import { GAME_STAT_KEYS, SEASON_STAT_KEYS, type PffGameRow, type PffSeasonRow } from "@/lib/pff/stats";
@@ -62,11 +62,13 @@ vi.mock("@/lib/scouting/aboveExpected", () => {
 });
 
 // The recruit index (247 HS class year, for estimated ages) is a table load;
-// here a per-id stub, filled by the age tests.
-const { HS_CLASS } = vi.hoisted(() => ({ HS_CLASS: {} as Record<string, number> }));
+// here a per-id stub, filled by the age tests. RECRUITS.complete says the
+// whole table loaded (the draft board's scores wait for it).
+const { HS_CLASS, RECRUITS } = vi.hoisted(() => ({ HS_CLASS: {} as Record<string, number>, RECRUITS: { complete: true } }));
 vi.mock("@/hooks/useRecruitIndex", () => ({
   useRecruitIndex: () => ({
     loaded: true,
+    complete: RECRUITS.complete,
     recruitCount: 0,
     matchProspect: (p: { name: string }) => {
       const id = Object.keys(HS_CLASS).find((k) => k === p.name);
@@ -81,6 +83,7 @@ vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect()
 afterEach(() => {
   cleanup();
   NOISE.variance = 4;
+  RECRUITS.complete = true;
   for (const k of Object.keys(HS_CLASS)) delete HS_CLASS[k];
   localStorage.clear();
 });
@@ -108,7 +111,10 @@ const AE_LABELS = ["AAE", "SRAE", "SAE", "cSAE", "TE-SAER", "TE-SAEB"];
 function renderBoard(
   prospects: ProspectWithStats[] = PROSPECTS,
   onUpdateDraftRound: (id: string, round: number | null) => Promise<boolean> = vi.fn(async () => true),
-  extra: { scoresReady?: boolean; onLockAEScore?: (id: string, lock: AEScoreLock) => Promise<boolean>; pffTotals?: Map<string, PffTotals> } = {},
+  extra: {
+    scoresReady?: boolean; onLockAEScore?: (id: string, lock: AEScoreLock) => Promise<boolean>; pffTotals?: Map<string, PffTotals>;
+    inputsComplete?: boolean; onSaveBoardScores?: (scores: Record<string, BoardScores>) => Promise<boolean>;
+  } = {},
 ) {
   return render(
     <BigBoard
@@ -482,6 +488,112 @@ describe("BigBoard Dynasty Score", () => {
     renderBoard([...PROSPECTS, ...POOL]);
     fireEvent.click(screen.getByRole("columnheader", { name: "Dynasty" }));
     expect(names()[0]).toBe("Pool QB 9");
+  });
+});
+
+describe("BigBoard saves the draft board's scores", () => {
+  const POOL = Array.from({ length: 10 }, (_, i) => prospect(`pq${i}`, `Pool QB ${i}`, "QB", 10 + i));
+  const BOARD = [...PROSPECTS.map((p) => (p.id === "qb1" ? { ...p, draft_round: 1 } : p)), ...POOL];
+  type SaveFn = (scores: Record<string, BoardScores>) => Promise<boolean>;
+  const savesOf = (save: ReturnType<typeof vi.fn<SaveFn>>) => save.mock.calls.map(([scores]) => scores);
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    vi.setSystemTime(new Date("2026-10-09T12:00:00Z"));
+  });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("saves every prospect's Dynasty, Dynasty+ and sample dot in one call once everything has loaded", async () => {
+    const save = vi.fn<SaveFn>(async () => true);
+    renderBoard(BOARD, undefined, { scoresReady: true, onSaveBoardScores: save });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(save).toHaveBeenCalledTimes(1);
+    const [scores] = savesOf(save);
+    expect(Object.keys(scores).sort()).toEqual(BOARD.map((p) => p.id).sort());
+    const qb = scores.qb1;
+    expect(qb.dynasty).toBeCloseTo(Number(cell("Quarter One", "Dynasty")), 2);
+    expect(qb.plus).toBeCloseTo(Number(cell("Quarter One", "Dynasty+")), 2);
+    expect(qb.sample).toEqual({ n: 50, share: 0.278, tier: "quarter" }); // 50 of 180 throws
+    expect(qb.weights).toEqual({ age: 1, size: 1, draft: 2 });
+    expect(qb.saved_at).toBe("2026-10-09T12:00:01.000Z");
+    // No AE Score (the RB pool is too small): saved with blank Dynasty, for the dot.
+    expect(scores.rb1).toMatchObject({ dynasty: null, plus: null, sample: { n: 50, tier: "quarter" } }); // 50 of 125 runs
+  });
+
+  it("waits for the plays, every hub load and the whole 247 index", async () => {
+    const save = vi.fn<SaveFn>(async () => true);
+    const a = renderBoard(BOARD, undefined, { scoresReady: false, onSaveBoardScores: save });
+    await vi.advanceTimersByTimeAsync(2000);
+    a.unmount();
+    const b = renderBoard(BOARD, undefined, { scoresReady: true, inputsComplete: false, onSaveBoardScores: save });
+    await vi.advanceTimersByTimeAsync(2000);
+    b.unmount();
+    RECRUITS.complete = false;
+    renderBoard(BOARD, undefined, { scoresReady: true, onSaveBoardScores: save });
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it("writes only the rows that changed since the last save", async () => {
+    const first = vi.fn<SaveFn>(async () => true);
+    const a = renderBoard(BOARD, undefined, { scoresReady: true, onSaveBoardScores: first });
+    await vi.advanceTimersByTimeAsync(1000);
+    a.unmount();
+    const [saved] = savesOf(first);
+    // Reloaded with those scores, one of them since moved (a round was set).
+    const reloaded = BOARD.map((p) => ({ ...p, board_scores: saved[p.id] }) as ProspectWithStats)
+      .map((p) => (p.id === "pq3" ? { ...p, draft_round: 2 } : p));
+    const second = vi.fn<SaveFn>(async () => true);
+    renderBoard(reloaded, undefined, { scoresReady: true, onSaveBoardScores: second });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(second).toHaveBeenCalledTimes(1);
+    expect(Object.keys(savesOf(second)[0])).toEqual(["pq3"]);
+  });
+
+  it("saves live scores, even in the As of draft view", async () => {
+    const lock: AEScoreLock = { score: -0.42, components: [], locked_at: "2026-05-02T00:00:00.000Z" };
+    const board = BOARD.map((p) => (p.id === "qb1" ? { ...p, draft_class_year: 2026, ae_score_lock: lock } : p));
+    localStorage.setItem("bigBoardScoreView", JSON.stringify("draft"));
+    const save = vi.fn<SaveFn>(async () => true);
+    renderBoard(board, undefined, { scoresReady: true, onSaveBoardScores: save });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(cell("Quarter One", "Dynasty")).toBe("-0.42"); // the screen shows the snapshot
+    expect(savesOf(save)[0].qb1.dynasty).not.toBeCloseTo(-0.42, 2); // the draft board gets live
+  });
+
+  it("re-saves at the new weights once a slider settles, and saves what's pending on leaving", async () => {
+    const save = vi.fn<SaveFn>(async () => true);
+    const { unmount } = renderBoard(BOARD, undefined, { scoresReady: true, onSaveBoardScores: save });
+    await vi.advanceTimersByTimeAsync(1000);
+    fireEvent.change(screen.getByRole("slider", { name: "Draft weight" }), { target: { value: "0.5" } });
+    await vi.advanceTimersByTimeAsync(500);
+    expect(save).toHaveBeenCalledTimes(1); // still settling
+    await vi.advanceTimersByTimeAsync(500);
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(savesOf(save)[1].qb1.weights).toEqual({ age: 1, size: 1, draft: 0.5 });
+    expect(savesOf(save)[1].qb1.plus).toBeCloseTo(savesOf(save)[1].qb1.dynasty! + 0.5, 2);
+    // Moved, then left before it settled: saved on the way out.
+    fireEvent.change(screen.getByRole("slider", { name: "Draft weight" }), { target: { value: "1" } });
+    unmount();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(save).toHaveBeenCalledTimes(3);
+    expect(savesOf(save)[2].qb1.weights.draft).toBe(1);
+  });
+
+  it("tries a failed save again on the next change", async () => {
+    const save = vi.fn<SaveFn>(async () => false);
+    const props = {
+      loading: false, onSelectProspect: vi.fn(), onUpdateRank: vi.fn(), onUpdateOverallRank: vi.fn(), onUpdateGrade: vi.fn(),
+      onUpdateDraftRound: vi.fn(async () => true), draftYearFilter: null, setDraftYearFilter: vi.fn(),
+      games: [], rbPlays: [], qbPlays: [], tePlays: [], loadPositionPlays: vi.fn(), scoresReady: true, onSaveBoardScores: save,
+    };
+    const { rerender } = render(<BigBoard prospects={BOARD} {...props} />);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(save).toHaveBeenCalledTimes(1);
+    // The same scores again (e.g. the hub reloaded): still unsaved, so they go again.
+    rerender(<BigBoard prospects={[...BOARD]} {...props} />);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(Object.keys(savesOf(save)[1]).sort()).toEqual(Object.keys(savesOf(save)[0]).sort());
   });
 });
 

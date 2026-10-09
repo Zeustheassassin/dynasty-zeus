@@ -19,6 +19,9 @@ const ROOKIE_YEAR = String(BASE_YEAR);
 
 type NflDraftEntry = { team: string; round: number | null; pick: number | null };
 
+// How long typing must pause before a note saves to the account.
+const NOTE_SYNC_DELAY_MS = 800;
+
 interface RookieBigBoardProps {
   rookies: RookieBoardPlayer[];
   rookieSearch: string;
@@ -47,7 +50,11 @@ export default function RookieBigBoard({
   const { fcNameValues } = useValues();
 
   const [tierLabels, setTierLabels]         = useState<Record<string, number>>({});
-  const [playerNotes, setPlayerNotes]       = useState<Record<string, string>>({});
+  // Notes follow the account (rookie_board_tiers.notes, migration 068). This
+  // browser's copy shows until the account's load.
+  const [playerNotes, setPlayerNotes]       = useState<Record<string, string>>(() =>
+    getLocalStorageItem<Record<string, string>>(`draftNotes_${ROOKIE_YEAR}`, {})
+  );
   const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null);
   const [posFilter, setPosFilter]           = useState<string | null>(null);
 
@@ -136,11 +143,6 @@ export default function RookieBigBoard({
   });
 
   useEffect(() => {
-    const notes = getLocalStorageItem<Record<string, string> | null>(`draftNotes_${ROOKIE_YEAR}`, null);
-    if (notes) setPlayerNotes(notes);
-  }, []);
-
-  useEffect(() => {
     const load = async () => {
       if (supabaseUser) {
         try {
@@ -175,6 +177,58 @@ export default function RookieBigBoard({
       if (error) log.error("tier sync failed", { err: error.message });
     });
   };
+
+  // Notes ride the tiers row for the year; an upsert of notes alone leaves the
+  // tiers as they are. Empty notes aren't kept.
+  const syncNotesToSupabase = useCallback((notes: Record<string, string>) => {
+    if (!supabaseUser) return;
+    const kept = Object.fromEntries(Object.entries(notes).filter(([, text]) => text.trim()));
+    supabase.from("rookie_board_tiers").upsert(
+      { user_id: supabaseUser.id, year: ROOKIE_YEAR, notes: kept, updated_at: new Date().toISOString() },
+      { onConflict: "user_id,year" }
+    ).then(
+      ({ error }) => { if (error) log.error("notes sync failed", { err: error.message }); },
+      (e: unknown) => log.error("notes sync failed", { err: String(e) }),
+    );
+  }, [supabaseUser]);
+
+  // Typing saves to this browser at once and to the account once it pauses;
+  // leaving the board saves anything still waiting.
+  const noteSyncRef = useRef<{ timer: ReturnType<typeof setTimeout> | null; notes: Record<string, string> | null }>({ timer: null, notes: null });
+  const flushNotes = useCallback(() => {
+    const pending = noteSyncRef.current;
+    if (pending.timer) clearTimeout(pending.timer);
+    pending.timer = null;
+    if (pending.notes) syncNotesToSupabase(pending.notes);
+    pending.notes = null;
+  }, [syncNotesToSupabase]);
+  useEffect(() => () => flushNotes(), [flushNotes]);
+
+  // Load the account's notes. An account without any yet takes this browser's
+  // (the notes lived only in localStorage before migration 068).
+  useEffect(() => {
+    if (!supabaseUser) return;
+    let cancelled = false;
+    supabase
+      .from("rookie_board_tiers")
+      .select("notes")
+      .eq("user_id", supabaseUser.id)
+      .eq("year", ROOKIE_YEAR)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) { log.error("notes load failed", { err: error.message }); return; }
+        const remote = (data?.notes ?? null) as Record<string, string> | null;
+        if (remote && Object.keys(remote).length > 0) {
+          setPlayerNotes(remote);
+          setLocalStorageItem(`draftNotes_${ROOKIE_YEAR}`, remote);
+        } else {
+          const local = getLocalStorageItem<Record<string, string>>(`draftNotes_${ROOKIE_YEAR}`, {});
+          if (Object.values(local).some((text) => text.trim())) syncNotesToSupabase(local);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [supabaseUser, syncNotesToSupabase]);
 
   const syncDraftInfoToSupabase = useCallback((info: Record<string, NflDraftEntry>) => {
     if (!supabaseUser) return;
@@ -227,6 +281,10 @@ export default function RookieBigBoard({
     const next = { ...playerNotes, [playerId]: text };
     setPlayerNotes(next);
     setLocalStorageItem(`draftNotes_${ROOKIE_YEAR}`, next);
+    const pending = noteSyncRef.current;
+    pending.notes = next;
+    if (pending.timer) clearTimeout(pending.timer);
+    pending.timer = setTimeout(flushNotes, NOTE_SYNC_DELAY_MS);
   };
 
   async function saveSnapshot() {

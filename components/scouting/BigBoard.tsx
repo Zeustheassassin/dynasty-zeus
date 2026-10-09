@@ -1,6 +1,6 @@
 "use client";
 import { useState, useMemo, useRef, useEffect } from "react";
-import type { ProspectWithStats, Prospect, RouteType, ScoutingGame, RBPlay, QBPlay, TEPlay, AEScoreLock } from "../../lib/types";
+import type { ProspectWithStats, Prospect, RouteType, ScoutingGame, RBPlay, QBPlay, TEPlay, AEScoreLock, BoardScores } from "../../lib/types";
 import { getLocalStorageItem, setLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 import {
   buildAEComposite, MIN_POOL,
@@ -35,6 +35,7 @@ import {
 } from "../../lib/scouting/prospectScores";
 import { useProspectScores, useDynastyWeights } from "./shared/hooks/useProspectScores";
 import { SAMPLE_FULL, SAMPLE_TIERS, sampleSizes, sampleText, type SampleSize } from "../../lib/scouting/sampleSize";
+import { boardScoresKey, buildBoardScores, changedBoardScores, type BoardScoresValue } from "../../lib/scouting/boardScores";
 
 type LoadPositionPlaysFn = (pos: "RB" | "QB" | "TE") => void;
 
@@ -84,6 +85,8 @@ const signed = (v: number, dp: number) => `${v >= 0 ? "+" : ""}${v.toFixed(dp)}`
 // (lib/scouting/scoreLock.ts). Per browser, a viewing preference.
 const SCORE_VIEW_KEY = "bigBoardScoreView";
 const SCORE_TRAITS_KEY = "bigBoardScoreTraits";
+// How long the Dynasty sliders must sit still before the draft board's scores save.
+const BOARD_SCORES_DELAY_MS = 1000;
 
 const TRAIT_AVG_KEY = "trait_avg";
 const UNCOVERED_TRAITS_TEXT = (["QB", "RB", "WR", "TE"] as const)
@@ -163,6 +166,12 @@ interface Props {
   scoresReady?: boolean;
   /** Save a drafted prospect's frozen AE Score; false if the write failed. */
   onLockAEScore?: (id: string, lock: AEScoreLock) => Promise<boolean>;
+  /** None of the hub's loads failed, so the scores are complete enough to save
+   *  for the draft board. */
+  inputsComplete?: boolean;
+  /** Save prospects' draft-board scores (prospects.board_scores, migration 068)
+   *  in one call; false if the write failed. */
+  onSaveBoardScores?: (scores: Record<string, BoardScores>) => Promise<boolean>;
   /** PFF over each prospect's charted games (ScoutingHub). */
   pffTotals?: Map<string, PffTotals>;
   /** PFF game rows and the migration-064 views, for the AE Score's per-player
@@ -278,6 +287,8 @@ export default function BigBoard({
   gameRouteCells = null,
   scoresReady = false,
   onLockAEScore,
+  inputsComplete = true,
+  onSaveBoardScores,
   pffTotals,
   gradingData = EMPTY_GRADING_DATA,
 }: Props) {
@@ -296,7 +307,7 @@ export default function BigBoard({
   // scores built on it) take the opponent-strength and context adjustments.
   const {
     aeMaps, composite, compositeInputs, opponent, contextInfo,
-    gameTiers, contextCov, liveScores, gamesByTier, defenseFaced, hsClass, ages, roleFits, pffVals,
+    gameTiers, contextCov, liveScores, gamesByTier, defenseFaced, hsClass, recruitsReady, ages, roleFits, pffVals,
   } = useProspectScores({ prospects, games, rbPlays, qbPlays, tePlays, gameRouteCells, gradingData, pffTotals });
 
   const [scoreMode, setScoreMode] = useState<ScoreViewMode>(() =>
@@ -423,6 +434,59 @@ export default function BigBoard({
   // Each prospect's charted sample against his position's full sample
   // (sampleSize.ts): the dot beside the rank. Always live, in either score view.
   const samples = useMemo(() => sampleSizes(prospects, compositeInputs), [prospects, compositeInputs]);
+
+  // The draft board's scores (prospects.board_scores, migration 068;
+  // boardScores.ts): Dynasty, Dynasty+ and the sample dot as of this visit.
+  // Always live and without traits, whatever this screen shows, at the
+  // sliders' weights. Saved once every input has landed (the plays, the hub's
+  // other loads, the 247 index behind estimated ages), changed rows only, in
+  // one call. A slider drag settles first, leaving the board saves anything
+  // still pending, and saves run one after another so an older one can't land
+  // last.
+  const savedDynasty = useMemo(
+    () => dynastyScores(prospects, scoreViewsFrom(prospects, liveScores, "live", new Date()), hsClass, weights),
+    [prospects, liveScores, hsClass, weights],
+  );
+  const boardScores = useMemo(
+    () => buildBoardScores(prospects, savedDynasty, samples, weights),
+    [prospects, savedDynasty, samples, weights],
+  );
+  const canSaveScores = scoresReady && inputsComplete && recruitsReady && onSaveBoardScores != null;
+  // What this visit has written (or is writing), by boardScoresKey.
+  const savedScoresRef = useRef(new Map<string, string | null>());
+  const pendingScoresRef = useRef<Map<string, BoardScoresValue> | null>(null);
+  const saveChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  const flushScoresRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    if (!canSaveScores || !onSaveBoardScores) return;
+    const changed = changedBoardScores(prospects, boardScores, savedScoresRef.current);
+    pendingScoresRef.current = changed.size ? changed : null;
+    if (!changed.size) return;
+    const flush = () => {
+      const rows = pendingScoresRef.current;
+      pendingScoresRef.current = null;
+      if (!rows) return;
+      const before = new Map([...rows.keys()].map((id) => [id, savedScoresRef.current.get(id)]));
+      for (const [id, v] of rows) savedScoresRef.current.set(id, boardScoresKey(v));
+      const savedAt = new Date().toISOString();
+      const payload = Object.fromEntries([...rows].map(([id, v]) => [id, { ...v, saved_at: savedAt }]));
+      saveChainRef.current = saveChainRef.current
+        .then(() => onSaveBoardScores(payload))
+        .catch(() => false)
+        .then((ok) => {
+          if (ok) return;
+          // Failed: forget them, so the next change tries again.
+          for (const [id, prev] of before) {
+            if (prev === undefined) savedScoresRef.current.delete(id);
+            else savedScoresRef.current.set(id, prev);
+          }
+        });
+    };
+    flushScoresRef.current = flush;
+    const timer = setTimeout(flush, BOARD_SCORES_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [canSaveScores, prospects, boardScores, onSaveBoardScores]);
+  useEffect(() => () => flushScoresRef.current(), []);
 
   const sortCtx = useMemo<SortContext>(
     () => ({ aeScores: scoreViews, dynasty, ages, roles: roleFits, pff: pffVals, traits: traitAvgs, samples }),

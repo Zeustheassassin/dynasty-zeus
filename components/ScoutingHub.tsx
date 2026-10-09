@@ -6,6 +6,7 @@ import { logger } from "../lib/logger";
 import { useLatestRequest } from "../hooks/useLatestRequest";
 import type {
   AEScoreLock,
+  BoardScores,
   Prospect,
   ProspectWithStats,
   ScoutingGame,
@@ -270,6 +271,10 @@ export default function ScoutingHub() {
   // half-computed score. (The route cells arrive with the hub's own load.)
   const [playsLoaded, setPlaysLoaded] = useState({ RB: false, QB: false, TE: false });
   const scoresReady = playsLoaded.RB && playsLoaded.QB && playsLoaded.TE;
+  // No load in the last loadAll failed. A failed load blanks only what it
+  // feeds, but the scores then differ from a full load's, so the Big Board
+  // doesn't save the draft board's scores from them.
+  const [inputsComplete, setInputsComplete] = useState(false);
   const { begin: beginLoad, isCurrent: isLoadCurrent } = useLatestRequest();
   const mountedRef = useRef(false);
 
@@ -372,6 +377,8 @@ export default function ScoutingHub() {
       setRouteCounts(countData);
       setRouteTagCells(tagCellData);
       setContextData(contextRows);
+      setInputsComplete(!(pErr || gErr || rsErr || cellErr || alignErr || gssErr || rbStatsErr || qbStatsErr || teStatsErr
+        || pffErr || countErr || tagCellErr || contextErr));
       setGameSnapStatsRows((gssData ?? []) as GameSnapStatsRow[]);
       const rbRows = (rbStatsData ?? []) as RbRunTypeRow[];
       const qbRows = (qbStatsData ?? []) as QbThresholdRow[];
@@ -389,6 +396,7 @@ export default function ScoutingHub() {
       setTeBlockStatsByProspect(new Map(teRows.map((r) => [r.prospect_id, fillBlockStats(r.block_stats_raw)])));
     } catch (e) {
       log.error("loadAll", { msg: String(e) });
+      if (isLoadCurrent(seq)) setInputsComplete(false);
     } finally {
       if (isLoadCurrent(seq)) setLoading(false);
     }
@@ -552,28 +560,53 @@ export default function ScoutingHub() {
     );
   }
 
-  // Overall rank: #1 across all positions within a draft class
+  // Overall rank: #1 across all positions within a draft class. The draft
+  // board's order comes from it, so the move is one all-or-nothing call
+  // (migration 068's move_prospect_overall_rank): the server moves him and
+  // renumbers the class 1..N, and a failure can't leave the class half
+  // renumbered. The board repaints at once; the server's ranks replace that
+  // guess if they differ, and a failed call puts the old ranks back.
   async function handleUpdateOverallRank(id: string, targetRank: number) {
     const clamp = Math.max(1, targetRank);
     const mover = prospects.find((p) => p.id === id);
     if (!mover) return;
+    const cls = mover.draft_class_year;
 
     const rankedOthers = prospects
-      .filter((p) => p.overall_rank != null && p.id !== id && p.draft_class_year === mover.draft_class_year)
+      .filter((p) => p.overall_rank != null && p.id !== id && p.draft_class_year === cls)
       .sort((a, b) => (a.overall_rank ?? 0) - (b.overall_rank ?? 0));
 
     rankedOthers.splice(Math.min(clamp - 1, rankedOthers.length), 0, mover);
 
     const rankMap = new Map<string, number>(rankedOthers.map((p, i) => [p.id, i + 1]));
-    const changed = rankedOthers.filter((p) => p.overall_rank !== rankMap.get(p.id));
+    const previous = new Map(prospects.filter((p) => p.draft_class_year === cls).map((p) => [p.id, p.overall_rank]));
     setProspects((prev) => prev.map((p) => rankMap.has(p.id) ? { ...p, overall_rank: rankMap.get(p.id)! } : p));
 
-    await Promise.all(
-      changed.map((p) =>
-        supabase.from("prospects").update({ overall_rank: rankMap.get(p.id), updated_at: new Date().toISOString() }).eq("id", p.id)
-      )
-    );
+    const { data, error } = await supabase.rpc("move_prospect_overall_rank", { p_id: id, p_rank: clamp });
+    if (error) {
+      log.error("move prospect overall rank (needs migration 068)", { msg: error.message, code: error.code });
+      setProspects((prev) => prev.map((p) => previous.has(p.id) ? { ...p, overall_rank: previous.get(p.id) ?? null } : p));
+      return;
+    }
+    const server = new Map(((data ?? []) as { prospect_id: string; new_rank: number }[]).map((r) => [r.prospect_id, r.new_rank]));
+    const differs = [...previous.keys()].some((pid) => (server.get(pid) ?? null) !== (rankMap.get(pid) ?? previous.get(pid) ?? null));
+    if (differs) {
+      setProspects((prev) => prev.map((p) => p.draft_class_year === cls ? { ...p, overall_rank: server.get(p.id) ?? null } : p));
+    }
   }
+
+  // The draft board's scores (prospects.board_scores, migration 068), many
+  // prospects in one call. Not mirrored into state: nothing on this hub reads
+  // them, and the Big Board tracks what it saved. False on a failed write.
+  // Stable, so the Big Board's save delay isn't restarted by every render here.
+  const handleSaveBoardScores = useCallback(async (scores: Record<string, BoardScores>): Promise<boolean> => {
+    const { error } = await supabase.rpc("save_prospect_board_scores", { p_scores: scores });
+    if (error) {
+      log.error("save draft board scores (needs migration 068)", { msg: error.message, code: error.code });
+      return false;
+    }
+    return true;
+  }, []);
 
   const hubTabs: { key: HubTab; label: string }[] = [
     { key: "prospects", label: "Prospects" },
@@ -760,6 +793,8 @@ export default function ScoutingHub() {
             gameRouteCells={gameRouteCells}
             scoresReady={scoresReady}
             onLockAEScore={handleLockAEScore}
+            inputsComplete={inputsComplete}
+            onSaveBoardScores={handleSaveBoardScores}
             pffTotals={pffTotals}
             gradingData={gradingData}
           />

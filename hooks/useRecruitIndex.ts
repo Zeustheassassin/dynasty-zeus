@@ -6,6 +6,8 @@ import { loadRecruitSnapshot, peekRecruitSnapshot, type RecruitSnapshot } from "
 
 export interface UseRecruitIndexReturn {
   loaded: boolean;
+  /** Loaded, and every page of the table came back (a failed page leaves some prospects unmatched). */
+  complete: boolean;
   matchProspect: (p: MatchableProspect) => RecruitRow | null;
   recruitCount: number;
 }
@@ -39,5 +41,5 @@ export function useRecruitIndex(): UseRecruitIndexReturn {
     [index]
   );
 
-  return { loaded: snapshot !== null, matchProspect, recruitCount: snapshot?.rows.length ?? 0 };
+  return { loaded: snapshot !== null, complete: snapshot?.complete === true, matchProspect, recruitCount: snapshot?.rows.length ?? 0 };
 }

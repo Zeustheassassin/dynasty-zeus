@@ -32,6 +32,9 @@ export interface UseProspectScoresReturn extends AEScores {
   defenseFaced: Map<string, { avg: number; games: number }>;
   /** 247 HS class year per prospect (null when unmatched), for estimated ages. */
   hsClass: Map<string, number | null>;
+  /** The whole 247 index has loaded, so every estimated age (and the Dynasty
+   *  scores built on it) is final. Before that, hsClass is empty. */
+  recruitsReady: boolean;
   /** Age today: the birthday if set, else estimated from the HS class. */
   ages: Map<string, ProspectAge>;
   /** Each prospect's role buckets (roleFit.ts). They feed none of the scores. */
@@ -75,7 +78,7 @@ export function useProspectScores(
   // Age: the birthday when there is one, else estimated from the 247 HS class
   // year (prospectAge.ts). The estimate covers 2027-28 prospects, whose
   // birthdates no public source carries.
-  const { matchProspect } = useRecruitIndex();
+  const { matchProspect, complete: recruitsReady } = useRecruitIndex();
   const hsClass = useMemo(
     () => new Map(prospects.map((p) => [p.id, matchProspect(p)?.year ?? null])),
     [prospects, matchProspect],
@@ -102,7 +105,7 @@ export function useProspectScores(
   }, [prospects, pffTotals]);
 
   return {
-    ...ae, gameTiers, contexts, contextCov, liveScores, gamesByTier, defenseFaced, hsClass, ages, roleFits, pffVals,
+    ...ae, gameTiers, contexts, contextCov, liveScores, gamesByTier, defenseFaced, hsClass, recruitsReady, ages, roleFits, pffVals,
   };
 }
 
