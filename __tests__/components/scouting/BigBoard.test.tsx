@@ -332,13 +332,15 @@ describe("BigBoard AE Score", () => {
 });
 
 describe("BigBoard sample dot", () => {
-  // The stubs chart 50 plays on every QB / RB / TE sample: 50 of 232 throws
-  // (21%) and 50 of 160 runs (31%). WRs carry their own counts.
+  // The stubs chart 50 plays on every QB / RB / TE sample: 50 of 180 throws
+  // (27%), 50 of 125 runs (40%), 50 of 140 TE routes (35%). WRs carry their
+  // own route counts, against 160.
   const smp = (ae: number, n: number) => ({ ae, n, variance: 4 });
   const WRS = [
-    prospect("wf", "Wide Full", "WR", 7, { core_sae_sample: smp(1, 170), sae_sample: smp(1, 240) }),
-    prospect("wh", "Wide Half", "WR", 8, { core_sae_sample: smp(1, 100), sae_sample: smp(1, 150) }),
-    prospect("wc", "Wide Core Full", "WR", 9, { core_sae_sample: smp(1, 200), sae_sample: smp(1, 220) }),
+    prospect("wf", "Wide Full", "WR", 7, { sae_sample: smp(1, 160) }),
+    prospect("wh", "Wide Half", "WR", 8, { sae_sample: smp(1, 80) }),
+    prospect("wq", "Wide Quarter", "WR", 9, { sae_sample: smp(1, 40) }),
+    prospect("wl", "Wide Low", "WR", 10, { sae_sample: smp(1, 39) }),
   ];
   const dot = (name: string) => within(rowFor(name)).getAllByRole("cell")[headerLabels().indexOf("Smp")];
   const tier = (name: string) => within(dot(name)).getByRole("img").getAttribute("aria-label");
@@ -352,27 +354,26 @@ describe("BigBoard sample dot", () => {
     }
   });
 
-  it("colours each prospect by his share of a full sample, with the counts in the tooltip", () => {
+  it("colours each prospect by his share of a full sample, with the count in the tooltip", () => {
     renderBoard([...PROSPECTS, ...WRS]);
     expect(tier("Wide Full")).toBe("Sample: Full");
-    expect(dot("Wide Full").getAttribute("title")).toBe("Sample full: 170 core routes (full at 168) · 240 routes (full at 232) (70/30)");
-    // 0.7 × 100/168 + 0.3 × 150/232 = 61%.
+    expect(dot("Wide Full").getAttribute("title")).toBe("Sample full: 160 routes (full at 160)");
     expect(tier("Wide Half")).toBe("Sample: 50–99.9%");
-    expect(dot("Wide Half").getAttribute("title")).toBe("Sample 61% of full: 100 of 168 core routes · 150 of 232 routes (70/30)");
-    // Full on core routes alone isn't full.
-    expect(tier("Wide Core Full")).toBe("Sample: 50–99.9%");
-    expect(tier("Running One")).toBe("Sample: 25–49.9%");
-    expect(tier("Quarter One")).toBe("Sample: Under 25%");
+    expect(dot("Wide Half").getAttribute("title")).toBe("Sample 50% of full: 80 of 160 routes");
+    expect(tier("Wide Quarter")).toBe("Sample: 25–49.9%");
+    expect(tier("Wide Low")).toBe("Sample: Under 25%");
     expect(tier("Wide Two")).toBe("Sample: Under 25%");
-    expect(dot("Wide Two").getAttribute("title")).toContain("under the cSAE sample floor (full at 168 core routes)");
-    // Before TEs join the AE Score, a TE's routes are read against WR's 232.
-    expect(dot("Tight One").getAttribute("title")).toBe("Sample 21% of full: 50 of 232 routes");
+    expect(dot("Wide Two").getAttribute("title")).toBe("Sample 0% of full: under the SAE sample floor (full at 160 routes)");
+    expect(tier("Quarter One")).toBe("Sample: 25–49.9%");
+    expect(dot("Quarter One").getAttribute("title")).toBe("Sample 27% of full: 50 of 180 throws");
+    expect(dot("Running One").getAttribute("title")).toBe("Sample 40% of full: 50 of 125 runs");
+    expect(dot("Tight One").getAttribute("title")).toBe("Sample 35% of full: 50 of 140 routes");
   });
 
-  it("explains the ceilings in the header and the legend", () => {
+  it("explains the full samples in the header and the legend", () => {
     renderBoard();
-    const ceilings = "QB 232 throws · RB 160 runs · WR 168 core routes + 232 routes (70/30) · TE 232 routes, WR's until TEs join the AE Score";
-    expect(screen.getByRole("columnheader", { name: "Smp" }).getAttribute("title")).toContain(ceilings);
+    expect(screen.getByRole("columnheader", { name: "Smp" }).getAttribute("title"))
+      .toContain("Full: QB 180 throws · RB 125 runs · WR 160 routes · TE 140 routes.");
     const legend = screen.getByRole("list", { name: "Sample size" });
     expect(within(legend).getAllByRole("listitem").map((li) => li.textContent))
       .toEqual(["Smp (sample charted):", "Full", "50–99.9%", "25–49.9%", "Under 25%"]);
@@ -381,7 +382,7 @@ describe("BigBoard sample dot", () => {
   it("sorts fullest-first on the first click", () => {
     renderBoard([...PROSPECTS, ...WRS]);
     fireEvent.click(screen.getByRole("columnheader", { name: "Smp" }));
-    expect(names().slice(0, 4)).toEqual(["Wide Full", "Wide Core Full", "Wide Half", "Running One"]);
+    expect(names().slice(0, 4)).toEqual(["Wide Full", "Wide Half", "Running One", "Tight One"]);
   });
 });
 

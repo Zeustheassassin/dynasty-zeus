@@ -34,7 +34,7 @@ import {
   type AEKey, type AEMaps, type ScoreView, type ScoreViewMode,
 } from "../../lib/scouting/prospectScores";
 import { useProspectScores, useDynastyWeights } from "./shared/hooks/useProspectScores";
-import { SAMPLE_TIERS, sampleCeilings, samplePartText, sampleSizes, type SampleSize } from "../../lib/scouting/sampleSize";
+import { SAMPLE_FULL, SAMPLE_TIERS, sampleSizes, sampleText, type SampleSize } from "../../lib/scouting/sampleSize";
 
 type LoadPositionPlaysFn = (pos: "RB" | "QB" | "TE") => void;
 
@@ -420,12 +420,9 @@ export default function BigBoard({
     [prospects, scoreViews, hsClass, weights],
   );
 
-  // Each prospect's charted sample against the AE Score's full-trust ceilings
+  // Each prospect's charted sample against his position's full sample
   // (sampleSize.ts): the dot beside the rank. Always live, in either score view.
-  const samples = useMemo(
-    () => sampleSizes(prospects, compositeInputs, composite),
-    [prospects, compositeInputs, composite],
-  );
+  const samples = useMemo(() => sampleSizes(prospects, compositeInputs), [prospects, compositeInputs]);
 
   const sortCtx = useMemo<SortContext>(
     () => ({ aeScores: scoreViews, dynasty, ages, roles: roleFits, pff: pffVals, traits: traitAvgs, samples }),
@@ -678,8 +675,7 @@ export default function BigBoard({
   }
   // ── Sample dot ────────────────────────────────────────────────
   // How much of a full sample is charted (sampleSize.ts): green full, yellow
-  // 50–99.9%, orange 25–49.9%, red under 25%. The tooltip gives the counts.
-  const mixText = (cs: { weight: number }[]) => (cs.length > 1 ? ` (${cs.map((c) => Math.round(c.weight * 100)).join("/")})` : "");
+  // 50–99.9%, orange 25–49.9%, red under 25%. The tooltip gives the count.
   function sampleCell(p: ProspectWithStats) {
     const s = samples.get(p.id);
     const style = { left: 68, minWidth: 40, width: 40 };
@@ -688,21 +684,16 @@ export default function BigBoard({
     const t = SAMPLE_TIERS.find((x) => x.tier === s.tier)!;
     const how = s.tier === "full" ? "full" : `${Math.floor(s.share * 100)}% of full`;
     return (
-      <td style={style} className={cls} title={`Sample ${how}: ${s.parts.map(samplePartText).join(" · ")}${mixText(s.parts)}`}>
+      <td style={style} className={cls} title={`Sample ${how}: ${sampleText(s)}`}>
         <span role="img" aria-label={`Sample: ${t.label}`} className={`inline-block w-2.5 h-2.5 rounded-full align-middle ${t.dot}`} />
       </td>
     );
   }
-  const teMatched = composite.positions.TE.metrics.some((m) => !m.perPlayer && m.fullTrustAt != null);
-  const ceilingText = COMPOSITE_POS.map((pos) => {
-    const cs = sampleCeilings(pos, composite);
-    const plays = cs.map((c) => `${c.full} ${SAMPLE_UNIT[c.key] ?? "plays"}`).join(" + ");
-    const note = pos !== "TE" ? "" : teMatched ? ", matched to WR's" : ", WR's until TEs join the AE Score";
-    return `${pos} ${plays}${mixText(cs)}${note}`;
-  }).join(" · ");
   const sampleTooltip =
-    "Sample: how much of a full sample you've charted. Full is where the AE Score counts a sample at face value: " +
-    `${ceilingText}. Green full · yellow 50–99.9% · orange 25–49.9% · red under 25%. Always the live charting, in either score view.`;
+    "Sample: how much of a full sample you've charted. Full: " +
+    COMPOSITE_POS.map((pos) => `${pos} ${SAMPLE_FULL[pos].full} ${SAMPLE_UNIT[SAMPLE_FULL[pos].key] ?? "plays"}`).join(" · ") +
+    ". Green full · yellow 50–99.9% · orange 25–49.9% · red under 25%. Sets the dots only (the AE Score keeps its own full-trust ceilings). " +
+    "Always the live charting, in either score view.";
 
   const roleTooltip =
     "Role: the best-case NFL role from the charting plus height and weight (Analysis → Role Fit has every role's match %). " +
