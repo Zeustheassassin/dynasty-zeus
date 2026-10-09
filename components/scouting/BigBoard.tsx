@@ -34,6 +34,7 @@ import {
   type AEKey, type AEMaps, type ScoreView, type ScoreViewMode,
 } from "../../lib/scouting/prospectScores";
 import { useProspectScores, useDynastyWeights } from "./shared/hooks/useProspectScores";
+import { SAMPLE_TIERS, sampleCeilings, samplePartText, sampleSizes, type SampleSize } from "../../lib/scouting/sampleSize";
 
 type LoadPositionPlaysFn = (pos: "RB" | "QB" | "TE") => void;
 
@@ -113,11 +114,12 @@ interface SortContext {
   roles: Map<string, RoleFit>;
   pff: Map<string, PffValues>;
   traits: Map<string, Record<string, TraitAverage>>;
+  samples: Map<string, SampleSize>;
 }
 
 type SortKey =
   | "pre_draft_grade" | "post_draft_grade" | "grade_delta"
-  | "personal_rank" | "overall_rank" | "ae_score" | "dynasty" | "dynasty_plus" | "role" | "name" | "school" | "conference" | "draft_class_year" | "height" | "weight" | "age" | "position"
+  | "personal_rank" | "overall_rank" | "sample" | "ae_score" | "dynasty" | "dynasty_plus" | "role" | "name" | "school" | "conference" | "draft_class_year" | "height" | "weight" | "age" | "position"
   | "total_routes" | "total_games" | "targets" | "catches" | "drops" | "contested" | "contested_catches"
   | "success_rate" | "target_rate" | "adj_success_above_exp" | `ae_${AEKey}` | `trait_${string}`
   | "pct_left" | "pct_right" | "pct_slot" | "pct_backfield"
@@ -183,6 +185,8 @@ function getSortValue(
   if (key === "personal_rank") return p.personal_rank ?? BIG;
   if (key === "overall_rank") return p.overall_rank ?? BIG;
   if (key === "name") return p.name;
+  // Share of a full sample; a position without one (none charted) sinks both ways.
+  if (key === "sample") return ctx.samples.get(p.id)?.share ?? null;
   // Unscored (under the floor, or a position not in the score yet) sinks both ways.
   if (key === "ae_score") return ctx.aeScores.get(p.id)?.score ?? null;
   if (key === "dynasty") return ctx.dynasty.get(p.id)?.dynasty ?? null;
@@ -416,9 +420,16 @@ export default function BigBoard({
     [prospects, scoreViews, hsClass, weights],
   );
 
+  // Each prospect's charted sample against the AE Score's full-trust ceilings
+  // (sampleSize.ts): the dot beside the rank. Always live, in either score view.
+  const samples = useMemo(
+    () => sampleSizes(prospects, compositeInputs, composite),
+    [prospects, compositeInputs, composite],
+  );
+
   const sortCtx = useMemo<SortContext>(
-    () => ({ aeScores: scoreViews, dynasty, ages, roles: roleFits, pff: pffVals, traits: traitAvgs }),
-    [scoreViews, dynasty, ages, roleFits, pffVals, traitAvgs],
+    () => ({ aeScores: scoreViews, dynasty, ages, roles: roleFits, pff: pffVals, traits: traitAvgs, samples }),
+    [scoreViews, dynasty, ages, roleFits, pffVals, traitAvgs, samples],
   );
 
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -470,7 +481,7 @@ export default function BigBoard({
     else {
       setSortKey(k);
       const pffLowerBetter = k.startsWith("pff_") && pffColumnDefs.find((c) => c.key === k)?.colorDir === -1;
-      setSortDir(pffLowerBetter ? "asc" : k.startsWith("ae_") || k.startsWith("dynasty") || k.startsWith("pff_") || k.startsWith("trait_") ? "desc" : "asc");
+      setSortDir(pffLowerBetter ? "asc" : k === "sample" || k.startsWith("ae_") || k.startsWith("dynasty") || k.startsWith("pff_") || k.startsWith("trait_") ? "desc" : "asc");
     }
   }
 
@@ -490,14 +501,15 @@ export default function BigBoard({
     );
   }
 
-  function stickyTh(label: string, key: SortKey, leftPx: number, widthPx: number) {
+  function stickyTh(label: string, key: SortKey, leftPx: number, widthPx: number, title?: string, padX = "px-1.5") {
     const active = sortKey === key;
     return (
       <th
         key={key}
+        title={title}
         onClick={() => toggleSort(key)}
         style={{ left: leftPx, minWidth: widthPx, width: widthPx }}
-        className={`sticky z-20 bg-slate-950 px-1.5 py-1.5 text-center whitespace-nowrap cursor-pointer hover:text-white transition select-none border-r border-slate-800 ${
+        className={`sticky z-20 bg-slate-950 ${padX} py-1.5 text-center whitespace-nowrap cursor-pointer hover:text-white transition select-none border-r border-slate-800 ${
           active ? "text-blue-400" : "text-slate-500"
         }`}
       >
@@ -664,6 +676,34 @@ export default function BigBoard({
       </td>
     );
   }
+  // ── Sample dot ────────────────────────────────────────────────
+  // How much of a full sample is charted (sampleSize.ts): green full, yellow
+  // 50–99.9%, orange 25–49.9%, red under 25%. The tooltip gives the counts.
+  const mixText = (cs: { weight: number }[]) => (cs.length > 1 ? ` (${cs.map((c) => Math.round(c.weight * 100)).join("/")})` : "");
+  function sampleCell(p: ProspectWithStats) {
+    const s = samples.get(p.id);
+    const style = { left: 68, minWidth: 40, width: 40 };
+    const cls = "sticky z-10 bg-slate-950 border-r border-slate-800 text-center";
+    if (!s) return <td style={style} className={cls} />;
+    const t = SAMPLE_TIERS.find((x) => x.tier === s.tier)!;
+    const how = s.tier === "full" ? "full" : `${Math.floor(s.share * 100)}% of full`;
+    return (
+      <td style={style} className={cls} title={`Sample ${how}: ${s.parts.map(samplePartText).join(" · ")}${mixText(s.parts)}`}>
+        <span role="img" aria-label={`Sample: ${t.label}`} className={`inline-block w-2.5 h-2.5 rounded-full align-middle ${t.dot}`} />
+      </td>
+    );
+  }
+  const teMatched = composite.positions.TE.metrics.some((m) => !m.perPlayer && m.fullTrustAt != null);
+  const ceilingText = COMPOSITE_POS.map((pos) => {
+    const cs = sampleCeilings(pos, composite);
+    const plays = cs.map((c) => `${c.full} ${SAMPLE_UNIT[c.key] ?? "plays"}`).join(" + ");
+    const note = pos !== "TE" ? "" : teMatched ? ", matched to WR's" : ", WR's until TEs join the AE Score";
+    return `${pos} ${plays}${mixText(cs)}${note}`;
+  }).join(" · ");
+  const sampleTooltip =
+    "Sample: how much of a full sample you've charted. Full is where the AE Score counts a sample at face value: " +
+    `${ceilingText}. Green full · yellow 50–99.9% · orange 25–49.9% · red under 25%. Always the live charting, in either score view.`;
+
   const roleTooltip =
     "Role: the best-case NFL role from the charting plus height and weight (Analysis → Role Fit has every role's match %). " +
     "WR / TE / QB: two roles within 5 points read \"A / B\", the higher-ceiling one first. \"?\" = not proven yet (an X needs 10+ in-app press reps). " +
@@ -910,7 +950,8 @@ export default function BigBoard({
             </span>
           )}
         </td>
-        <td style={{ left: 68, minWidth: 140, width: 140 }}
+        {sampleCell(p)}
+        <td style={{ left: 108, minWidth: 140, width: 140 }}
           className="sticky z-10 bg-slate-950 border-r border-slate-800 px-1.5 py-1.5 text-center text-white font-medium whitespace-nowrap">
           {p.name}
         </td>
@@ -994,7 +1035,8 @@ export default function BigBoard({
           <tr className="border-b border-slate-700 bg-slate-950">
             <th className="sticky left-0 z-20 bg-slate-950 w-6" />
             <th style={{ left: 24, minWidth: 44 }} className="sticky z-20 bg-slate-950" />
-            <th style={{ left: 68, minWidth: 140 }} className="sticky z-20 bg-slate-950 border-r border-slate-800" />
+            <th style={{ left: 68, minWidth: 40 }} className="sticky z-20 bg-slate-950" />
+            <th style={{ left: 108, minWidth: 140 }} className="sticky z-20 bg-slate-950 border-r border-slate-800" />
             <th colSpan={3} className="px-2 py-1 text-center text-amber-900 font-medium border-r border-slate-800">Grade</th>
             <th colSpan={1} className="px-2 py-1 text-center text-indigo-900 font-medium border-r border-slate-800">NFL Draft</th>
             <th colSpan={1} className="px-2 py-1 text-center text-slate-600 font-medium border-r border-slate-800">{secondaryGroup}</th>
@@ -1012,7 +1054,8 @@ export default function BigBoard({
           <tr className="border-b border-slate-800 bg-slate-950">
             <th className="sticky left-0 z-20 bg-slate-950 w-6 text-slate-700 text-center px-1">⠿</th>
             {stickyTh(primaryLabel, primaryKey, 24, 44)}
-            {stickyTh("Name", "name", 68, 140)}
+            {stickyTh("Smp", "sample", 68, 40, sampleTooltip, "px-0.5")}
+            {stickyTh("Name", "name", 108, 140)}
             {th("Pre", "pre_draft_grade", "border-l border-slate-800 text-amber-700")}
             {th("Post", "post_draft_grade", "text-amber-700")}
             {th("Δ", "grade_delta", "border-r border-slate-800 text-amber-700")}
@@ -1127,6 +1170,16 @@ export default function BigBoard({
             <span aria-hidden="true" className={`inline-block w-2.5 h-2.5 rounded-sm ${t.swatch}`} />
             <span className={`font-semibold ${t.text}`}>{t.label}</span>
             <span className="text-slate-500">{gradeTierRange(t)}</span>
+          </li>
+        ))}
+      </ul>
+      {/* Sample legend — the Smp column's dots. */}
+      <ul aria-label="Sample size" title={sampleTooltip} className="flex flex-wrap justify-center gap-x-4 gap-y-1 mb-2 text-xs">
+        <li className="text-slate-500 whitespace-nowrap">Smp (sample charted):</li>
+        {SAMPLE_TIERS.map((t) => (
+          <li key={t.tier} className="flex items-center gap-1.5 whitespace-nowrap">
+            <span aria-hidden="true" className={`inline-block w-2.5 h-2.5 rounded-full ${t.dot}`} />
+            <span className="text-slate-400">{t.label}</span>
           </li>
         ))}
       </ul>
