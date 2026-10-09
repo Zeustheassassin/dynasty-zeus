@@ -44,6 +44,8 @@ import { useSleeperUser } from "../../hooks/useSleeperUser";
 import { usePlayerStats } from "../../hooks/usePlayerStats";
 import { useManagementState } from "../../hooks/useManagementState";
 import { useRookieBoardState, ROOKIE_BOARD_VERSION, ROOKIE_BOARD_RESET_KEY } from "../../hooks/useRookieBoardState";
+import { useDraftBoardProspects } from "../../hooks/useDraftBoardProspects";
+import { draftBoardRookies, unionRookies, sameRookie, isDraftedRookie } from "../../lib/helpers/draftBoard";
 import { useAlerts } from "../../hooks/useAlerts";
 import { useUserExposure } from "../../hooks/useUserExposure";
 import { useUserTrades } from "../../hooks/useUserTrades";
@@ -2322,11 +2324,23 @@ const saveSnapshotNow = async () => {
     return set;
   }, [draftPicks, players]);
 
+  // ── The user's draft board in the live draft (draft board sync Stage 4) ──
+  // The Scouting prospects in the Draft Hub board's order, given the market
+  // pool's Sleeper id / ADP / FC by name. It drives the user's own predicted
+  // slots, Top Available and the position counts; the pool (`rookies`) drives
+  // everyone else's predictions and REACH/VALUE.
+  const draftBoardProspects = useDraftBoardProspects(supabaseUser?.id ?? null, nflState, mainTab === "DRAFT");
+  const boardRookies = useMemo(() => draftBoardRookies(draftBoardProspects, rookies), [draftBoardProspects, rookies]);
+  // The user's slots go down the board, then past it into the pool.
+  const myPickList = useMemo(() => unionRookies(boardRookies, rookies), [boardRookies, rookies]);
+  // Everyone else picks from the pool plus any board prospect Sleeper doesn't list yet.
+  const marketPool = useMemo(() => unionRookies(rookies, boardRookies), [rookies, boardRookies]);
+
   // ── Draft board prediction engine ─────────────────────────────────────────
   // Key design decisions:
   // - Actual picks detected by pick_no (overall pick number), not by roster matching
   // - Non-user slots: ranked by Sleeper ADP position (relative rookie rank, not absolute value)
-  // - User's slots: ranked by their personal big board
+  // - User's slots: ranked by their draft board (Scouting OVR), then the pool past it
   // - Need multiplier capped at 1.20 — tiebreaker only, never overrides ADP tier
   // - allPicks.owner_id = current owner after trades (used for slot ownership)
   const draftPredictionEngine = useMemo<{
@@ -2334,7 +2348,7 @@ const saveSnapshotNow = async () => {
     poolRankByPlayerId: Record<string, number>;
     poolRankByName: Record<string, number>;
   }>(() => {
-    if (!draftSettings || !rosters.length || !rookies.length || !selectedLeague) {
+    if (!draftSettings || !rosters.length || !marketPool.length || !selectedLeague) {
       return { predictions: {}, poolRankByPlayerId: {}, poolRankByName: {} };
     }
 
@@ -2403,7 +2417,7 @@ const saveSnapshotNow = async () => {
     // then fall back to FC value / ADP / board rank for the tail (rookies past the
     // ~50-pick consensus coverage). When consensus is inactive: pure FC ordering as
     // before (FC value primary, ADP fine-grained tiebreaker, board rank tail).
-    const fullPool = [...rookies]
+    const fullPool = [...marketPool]
       .map((r: RookieBoardPlayer, boardIdx: number) => {
         const consensusPick = getConsensusPick(r);
         const dynVal = getRookieValue(r);
@@ -2436,8 +2450,12 @@ const saveSnapshotNow = async () => {
       })
       .sort((a, b) => a._sortKey - b._sortKey);
 
-    // User's personal board order for their own slots
-    const boardSorted = [...rookies];
+    // The user's own slots: their draft board, then the pool past it
+    const boardSorted = myPickList;
+    const boardRankOf = (r: RookieBoardPlayer): number => boardRookies.findIndex((b) => sameRookie(b, r)) + 1;
+    // A slot the user set holds a Sleeper id or a name, from the board or the pool
+    const findPicked = (oid: string): RookieBoardPlayer | undefined =>
+      myPickList.find((r) => r.player_id === oid || r.name === oid);
 
     // slot → current owner_id (after trades), from allPicks
     const slotOwnerMap = new Map<string, number>();
@@ -2506,7 +2524,7 @@ const saveSnapshotNow = async () => {
       if (p?.full_name) usedNames.add(normalizeRookieName(p.full_name));
     });
     Object.values(myDraftSlotPicks).forEach((pid) => {
-      const r = rookies.find((rk: RookieBoardPlayer) => rk.player_id === pid || rk.name === pid);
+      const r = findPicked(pid);
       if (r?.name) usedNames.add(normalizeRookieName(r.name));
     });
 
@@ -2555,9 +2573,9 @@ const saveSnapshotNow = async () => {
         // User override for their own picks
         if (myDraftSlotPicks[slotStr]) {
           const oid = myDraftSlotPicks[slotStr];
-          const ov = rookies.find((r: RookieBoardPlayer) => r.player_id === oid || r.name === oid);
+          const ov = findPicked(oid);
           if (ov) {
-            predictions[slotStr] = { name: ov.name, position: ov.position, team: ov.team || "", adp: ov.adp ?? 999, player_id: ov.player_id, boardRank: rookies.indexOf(ov) + 1, poolRank: 0 };
+            predictions[slotStr] = { name: ov.name, position: ov.position, team: ov.team || "", adp: ov.adp ?? 999, player_id: ov.player_id, boardRank: boardRankOf(ov), poolRank: 0 };
             if (rosterId) { simCounts[rosterId] = simCounts[rosterId] || {}; simCounts[rosterId][ov.position] = (simCounts[rosterId][ov.position] || 0) + 1; }
           }
           continue;
@@ -2587,7 +2605,7 @@ const saveSnapshotNow = async () => {
           .sort((a, b) => b.score - a.score)[0];
 
         if (best) {
-          const boardRank = rookies.findIndex((r: RookieBoardPlayer) => (r.player_id && r.player_id === best.player_id) || normalizeRookieName(r.name) === normalizeRookieName(best.name)) + 1;
+          const boardRank = boardRankOf(best);
           // poolRank = player's position in consensus dynasty-value pool (1 = most valuable).
           // Used to flag REACH/VALUE on user's predicted slots:
           //   overallPick << poolRank → reaching ahead of consensus
@@ -2612,7 +2630,7 @@ const saveSnapshotNow = async () => {
     });
 
     return { predictions, poolRankByPlayerId, poolRankByName };
-  }, [draftSettings, rosters, rookies, draftPicks, draftedPlayerIds, myDraftSlotPicks, allPicks, selectedLeague, players, leagueAdjustedFcValues, ownerDraftTendencies, user?.user_id, consensusCurrentYear]);
+  }, [draftSettings, rosters, marketPool, boardRookies, myPickList, draftPicks, draftedPlayerIds, myDraftSlotPicks, allPicks, selectedLeague, players, leagueAdjustedFcValues, ownerDraftTendencies, user?.user_id, consensusCurrentYear]);
 
   const predictedDraftPicks = draftPredictionEngine.predictions;
   const draftPoolRanks = useMemo(
@@ -2620,20 +2638,10 @@ const saveSnapshotNow = async () => {
     [draftPredictionEngine]
   );
 
+  // The top of the user's draft board still on the board (boardRank = place on it).
   const topAvailableRookies = useMemo(
-    () =>
-      rookies
-        .map((player, index) => ({
-          ...player,
-          boardRank: index + 1,
-        }))
-        .filter((player: RookieBoardPlayer & { boardRank: number }) => {
-          if (player.player_id && draftedPlayerIds.has(String(player.player_id))) return false;
-          if (player.name && draftedPlayerIds.has(`name:${normalizeRookieName(player.name)}`)) return false;
-          return true;
-        })
-        .slice(0, 10),
-    [rookies, draftedPlayerIds]
+    () => boardRookies.filter((player) => !isDraftedRookie(player, draftedPlayerIds)).slice(0, 10),
+    [boardRookies, draftedPlayerIds]
   );
   const dashboardOwnedPlayers = useMemo(() => {
     const map = new Map<string, OwnedPlayerEntry>();
@@ -3480,6 +3488,8 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     predictedDraftPicks,
     draftPoolRanks,
     topAvailableRookies,
+    boardRookies,
+    myPickList,
     tradeHubSection,
     calcOpponentRosterId,
     selectedLeagueDraftHasOccurred,

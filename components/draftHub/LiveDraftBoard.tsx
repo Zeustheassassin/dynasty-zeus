@@ -13,6 +13,7 @@ import type {
   LeagueDraftSnapshotData, LeagueDraftSnapshotPick,
 } from "../../lib/types";
 import { posColor, normalizeRookieName } from "./shared";
+import { isDraftedRookie } from "../../lib/helpers/draftBoard";
 import type { GridPick } from "./shared";
 
 // Rookie-draft class year tracks the CALENDAR (upcoming class), not the NFL season.
@@ -35,7 +36,10 @@ interface LiveDraftBoardProps {
   draftPicks: SleeperDraftPick[];
   draftOrder: Record<string, number>;
   allPicks: AugmentedPick[];
-  rookies: RookieBoardPlayer[];
+  /** The user's draft board (position counts, Top Available). */
+  boardRookies: RookieBoardPlayer[];
+  /** The board, then the market pool past it (the slot picker). */
+  myPickList: RookieBoardPlayer[];
   draftedPlayerIds: Set<string>;
   predictedDraftPicks: Record<string, PredictedPick>;
   draftPoolRanks: DraftPoolRanks;
@@ -51,7 +55,7 @@ export default function LiveDraftBoard({
   draftSlotSearchQuery, setDraftSlotSearchQuery,
   user,
   draftSettings, draftPicks, draftOrder, allPicks,
-  rookies, draftedPlayerIds, predictedDraftPicks, draftPoolRanks, topAvailableRookies,
+  boardRookies, myPickList, draftedPlayerIds, predictedDraftPicks, draftPoolRanks, topAvailableRookies,
   refreshDraftBoard, loadDraftScout, loadingDraftRefresh,
 }: LiveDraftBoardProps) {
   const players = usePlayers();
@@ -299,7 +303,7 @@ export default function LiveDraftBoard({
               <div className="flex flex-wrap gap-2">
                 {(["QB", "RB", "WR", "TE"] as const).map((pos) => {
                   const taken = draftPicks.filter((dp) => players[dp.player_id]?.position === pos).length;
-                  const avail = rookies.filter((r) => r.position === pos && !draftedPlayerIds.has(String(r.player_id))).length;
+                  const avail = boardRookies.filter((r) => r.position === pos && !isDraftedRookie(r, draftedPlayerIds)).length;
                   const pctTaken = draftPicks.length > 0 ? Math.round((taken / draftPicks.length) * 100) : 0;
                   const barColors: Record<string, string> = { QB: "bg-red-500", RB: "bg-green-500", WR: "bg-blue-500", TE: "bg-yellow-500" };
                   return (
@@ -364,14 +368,16 @@ export default function LiveDraftBoard({
                 const isMySlot = pick.owner_id && String(pick.owner_id) === String(myRosterId);
                 const userOverrideId = myDraftSlotPicks[slotStr];
                 const userOverride = userOverrideId
-                  ? rookies.find((r) => r.player_id === userOverrideId || r.name === userOverrideId)
+                  ? myPickList.find((r) => r.player_id === userOverrideId || r.name === userOverrideId)
                   : null;
                 const prediction = !actualPlayer && !userOverrideId ? predictedDraftPicks[slotStr] : null;
                 const overallPick = (round - 1) * rosters.length + (i + 1);
                 // Same ±7/+4 thresholds as the actual/predicted badges below (and
                 // HistoricalLeagueDrafts' snapshot grid) — kept in sync with the legend.
-                const isReach = userOverride && typeof userOverride.adp === "number" && overallPick < userOverride.adp - 7;
-                const isValue = userOverride && typeof userOverride.adp === "number" && overallPick > userOverride.adp + 4;
+                // No ADP is stored as MAX_SAFE_INTEGER: no flag then.
+                const overrideAdp = userOverride && userOverride.adp < Number.MAX_SAFE_INTEGER ? userOverride.adp : null;
+                const isReach = overrideAdp != null && overallPick < overrideAdp - 7;
+                const isValue = overrideAdp != null && overallPick > overrideAdp + 4;
                 const predReach = isMySlot && prediction && (prediction.poolRank ?? 0) > 0 && overallPick < (prediction.poolRank ?? 999) - 7;
                 const predValue = isMySlot && prediction && (prediction.poolRank ?? 0) > 0 && overallPick > (prediction.poolRank ?? 0) + 4;
                 // Actual-pick REACH/VALUE: compare overall pick to that player's pool rank.
@@ -459,19 +465,19 @@ export default function LiveDraftBoard({
                           onChange={(e) => setDraftSlotSearchQuery(e.target.value)}
                         />
                         <div className="max-h-44 overflow-y-auto space-y-0.5">
-                          {(rookies
-                            .map((r, idx) => ({ ...r, boardRank: idx + 1 })) as Array<RookieBoardPlayer & { boardRank: number }>)
+                          {myPickList
                             .filter((r) => r.name && (!draftSlotSearchQuery || r.name.toLowerCase().includes(draftSlotSearchQuery.toLowerCase())))
                             .filter((r) =>
-                              !draftedPlayerIds.has(String(r.player_id)) &&
-                              !Object.entries(myDraftSlotPicks).some(([s, pid]) => s !== slotStr && pid === r.player_id)
+                              !isDraftedRookie(r, draftedPlayerIds) &&
+                              !Object.entries(myDraftSlotPicks).some(([s, pid]) => s !== slotStr && pid === (r.player_id || r.name))
                             )
                             .slice(0, 15)
                             .map((r) => {
-                              const reachAmt = typeof r.adp === "number" ? Math.round(overallPick - r.adp) : null;
+                              // No ADP is MAX_SAFE_INTEGER: no REACH/VALUE then.
+                              const reachAmt = r.adp < Number.MAX_SAFE_INTEGER ? Math.round(overallPick - r.adp) : null;
                               return (
                                 <button
-                                  key={`${r.boardRank}-${r.player_id || r.name}`}
+                                  key={r.player_id || r.name}
                                   className="w-full text-left px-2 py-1 rounded hover:bg-slate-800 flex items-center justify-between gap-1"
                                   onClick={() => {
                                     setMyDraftSlotPicks((prev) => ({ ...prev, [slotStr]: r.player_id || r.name }));
@@ -479,7 +485,7 @@ export default function LiveDraftBoard({
                                     setDraftSlotSearchQuery("");
                                   }}
                                 >
-                                  <span className="text-white text-[10px] truncate">#{r.boardRank} {r.name}</span>
+                                  <span className="text-white text-[10px] truncate">{r.boardRank ? `#${r.boardRank} ` : ""}{r.name}</span>
                                   <span className="flex items-center gap-1 shrink-0">
                                     <span className={`text-[9px] ${posColor[r.position] || "text-slate-400"}`}>{r.position}</span>
                                     {reachAmt !== null && reachAmt < -8 && <span className="text-[8px] text-orange-400 font-bold">REACH</span>}
@@ -513,14 +519,14 @@ export default function LiveDraftBoard({
           <div>
             <h2 className="text-lg font-semibold">Top Available Rookies From Your Big Board</h2>
             <p className="text-sm text-slate-400">
-              Automatically removes players after they are drafted in this Sleeper draft.
+              Your Rookie Big Board (Scouting OVR order). Players drop off once drafted in this Sleeper draft.
             </p>
           </div>
         </div>
-        {!rookies.length ? (
-          <div className="text-slate-400 text-sm">Your rookie board is still loading from Sleeper.</div>
+        {!boardRookies.length ? (
+          <div className="text-slate-400 text-sm">No prospects on your Rookie Big Board for this class yet. Add them in Scouting.</div>
         ) : topAvailableRookies.length === 0 ? (
-          <div className="text-slate-400 text-sm">No ranked rookies are currently available.</div>
+          <div className="text-slate-400 text-sm">Everyone on your board has been drafted.</div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {topAvailableRookies.map((player) => (

@@ -15,7 +15,7 @@
 
 import { normalizeRookieName } from "./formatting";
 import { nflDraftSlotLabel } from "../draftRound";
-import type { BoardScores, Prospect } from "../types";
+import type { BoardScores, Prospect, RookieBoardPlayer } from "../types";
 
 export const DRAFT_BOARD_POSITIONS = ["QB", "RB", "WR", "TE"] as const;
 
@@ -185,6 +185,66 @@ export function draftBoardSnapshotRows(
       ? { team: p.draft_team ?? "", round: p.draft_round, pick: p.draft_pick }
       : null,
   }));
+}
+
+// ── The live draft (Stage 4) ────────────────────────────────
+
+/**
+ * The board as the live draft's rookie list, in board order. Each prospect
+ * takes the market pool's Sleeper id, NFL team, ADP and FC value by
+ * normalized name (Stage 5 replaces this with the Sleeper link); without a
+ * match he keeps no id, his drafted NFL team and no ADP.
+ */
+export function draftBoardRookies(
+  board: readonly DraftBoardProspect[],
+  pool: readonly RookieBoardPlayer[],
+): RookieBoardPlayer[] {
+  const poolByName = new Map<string, RookieBoardPlayer>();
+  for (const r of pool) {
+    const key = normalizeRookieName(r.name);
+    if (key && !poolByName.has(key)) poolByName.set(key, r);
+  }
+  return board.map((p, i) => {
+    const m = poolByName.get(normalizeRookieName(p.name));
+    return {
+      player_id: m?.player_id ?? null,
+      name: p.name,
+      position: p.position,
+      team: m?.team || p.draft_team || "",
+      adp: m?.adp ?? Number.MAX_SAFE_INTEGER,
+      fcValue: m?.fcValue ?? 0,
+      boardRank: i + 1,
+    };
+  });
+}
+
+/** The same rookie by Sleeper id or normalized name. */
+export function sameRookie(a: Pick<RookieBoardPlayer, "player_id" | "name">, b: Pick<RookieBoardPlayer, "player_id" | "name">): boolean {
+  if (a.player_id && b.player_id && a.player_id === b.player_id) return true;
+  return !!a.name && normalizeRookieName(a.name) === normalizeRookieName(b.name);
+}
+
+/**
+ * `first`, then the rookies of `rest` not in it (by Sleeper id or name). The
+ * board then the pool is the user's own pick list; the pool then the board is
+ * the market pool, so a prospect Sleeper doesn't list yet still counts.
+ */
+export function unionRookies(
+  first: readonly RookieBoardPlayer[],
+  rest: readonly RookieBoardPlayer[],
+): RookieBoardPlayer[] {
+  const ids = new Set(first.map((r) => r.player_id).filter(Boolean));
+  const names = new Set(first.map((r) => normalizeRookieName(r.name)));
+  return [
+    ...first,
+    ...rest.filter((r) => !(r.player_id && ids.has(r.player_id)) && !names.has(normalizeRookieName(r.name))),
+  ];
+}
+
+/** Taken in this draft: by Sleeper id, or by `name:` (draftedPlayerIds carries both). */
+export function isDraftedRookie(r: Pick<RookieBoardPlayer, "player_id" | "name">, drafted: ReadonlySet<string>): boolean {
+  if (r.player_id && drafted.has(String(r.player_id))) return true;
+  return !!r.name && drafted.has(`name:${normalizeRookieName(r.name)}`);
 }
 
 // ── Tiers and notes (rookie_board_tiers, keyed by prospect id) ──

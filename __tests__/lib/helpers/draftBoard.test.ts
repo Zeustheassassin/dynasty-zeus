@@ -1,9 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
   sortDraftBoard, nflDraftLabel, latestScoresSavedAt, fcClassValues, fcValueFor,
-  draftBoardSnapshotRows, readTiers, readNotes, type DraftBoardProspect,
+  draftBoardSnapshotRows, readTiers, readNotes, draftBoardRookies, unionRookies, sameRookie, isDraftedRookie,
+  type DraftBoardProspect,
 } from "../../../lib/helpers/draftBoard";
-import type { BoardScores } from "../../../lib/types";
+import { normalizeRookieName } from "../../../lib/helpers/formatting";
+import type { BoardScores, RookieBoardPlayer } from "../../../lib/types";
 
 const scores = (dynasty: number | null, saved_at = "2026-10-09T19:19:15.322Z", plus: number | null = null): BoardScores => ({
   dynasty, plus,
@@ -165,5 +167,41 @@ describe("readTiers / readNotes", () => {
     expect(readTiers(null)).toEqual({});
     expect(readTiers([1, 2])).toEqual({});
     expect(readNotes("x")).toEqual({});
+  });
+});
+
+describe("live draft (Stage 4)", () => {
+  const pool = (player_id: string | null, name: string, extra: Partial<RookieBoardPlayer> = {}): RookieBoardPlayer => ({
+    player_id, name, position: "WR", team: "", adp: Number.MAX_SAFE_INTEGER, fcValue: 0, ...extra,
+  });
+
+  it("draftBoardRookies keeps board order and takes the pool's id, team, ADP and FC by name", () => {
+    const board = [
+      prospect("a", "Jeremiah Smith", 1),
+      prospect("b", "Ryan Williams Jr.", 2, null, { draft_team: "NYJ" }),
+      prospect("c", "Nobody Listed", null),
+    ];
+    const out = draftBoardRookies(board, [pool("9001", "Ryan Williams", { team: "", adp: 3.5, fcValue: 6000 }), pool("9000", "Jeremiah Smith", { team: "CLE", adp: 1.2, fcValue: 8000 })]);
+    expect(out.map((r) => [r.player_id, r.name, r.team, r.adp, r.fcValue, r.boardRank])).toEqual([
+      ["9000", "Jeremiah Smith", "CLE", 1.2, 8000, 1],
+      ["9001", "Ryan Williams Jr.", "NYJ", 3.5, 6000, 2],
+      [null, "Nobody Listed", "", Number.MAX_SAFE_INTEGER, 0, 3],
+    ]);
+  });
+
+  it("unionRookies appends only rookies not already listed, by id or name", () => {
+    const first = [pool("1", "Al One"), pool(null, "Bo Two")];
+    const rest = [pool("1", "Al One Renamed"), pool("2", "Bo Two Jr."), pool("3", "Cy Three")];
+    expect(unionRookies(first, rest).map((r) => r.name)).toEqual(["Al One", "Bo Two", "Cy Three"]);
+  });
+
+  it("sameRookie and isDraftedRookie match by Sleeper id or normalized name", () => {
+    expect(sameRookie(pool("1", "A"), pool("1", "B"))).toBe(true);
+    expect(sameRookie(pool(null, "Omar Cooper"), pool("7", "Omar Cooper Jr."))).toBe(true);
+    expect(sameRookie(pool("1", "A"), pool("2", "B"))).toBe(false);
+    const drafted = new Set(["42", `name:${normalizeRookieName("Omar Cooper")}`]);
+    expect(isDraftedRookie(pool("42", "X"), drafted)).toBe(true);
+    expect(isDraftedRookie(pool(null, "Omar Cooper Jr."), drafted)).toBe(true);
+    expect(isDraftedRookie(pool("43", "Y"), drafted)).toBe(false);
   });
 });

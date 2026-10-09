@@ -62,7 +62,10 @@ interface DraftHubProps {
   draftOrder: Record<string, number>;
   allPicks: AugmentedPick[];
 
-  rookies: RookieBoardPlayer[];
+  /** The user's draft board (Scouting prospects, board order) for the live draft. */
+  boardRookies: RookieBoardPlayer[];
+  /** The board, then the market pool past it: what the user's own slots pick from. */
+  myPickList: RookieBoardPlayer[];
 
   draftedPlayerIds: Set<string>;
   predictedDraftPicks: Record<string, PredictedPick>;
@@ -88,7 +91,7 @@ function DraftHub({
   draftSlotSearchQuery, setDraftSlotSearchQuery,
   user,
   draftSettings, draftPicks, draftOrder, allPicks,
-  rookies,
+  boardRookies, myPickList,
   draftedPlayerIds, predictedDraftPicks, draftPoolRanks, topAvailableRookies,
   refreshDraftBoard, loadDraftScout,
   loadingDraftRefresh,
@@ -146,7 +149,8 @@ function DraftHub({
           draftPicks={draftPicks}
           draftOrder={draftOrder}
           allPicks={allPicks}
-          rookies={rookies}
+          boardRookies={boardRookies}
+          myPickList={myPickList}
           draftedPlayerIds={draftedPlayerIds}
           predictedDraftPicks={predictedDraftPicks}
           draftPoolRanks={draftPoolRanks}

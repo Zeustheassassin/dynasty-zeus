@@ -226,6 +226,8 @@ interface HubRouterProps {
   predictedDraftPicks: Record<string, PredictedPick>;
   draftPoolRanks: DraftPoolRanks;
   topAvailableRookies: RookieBoardPlayer[];
+  boardRookies: RookieBoardPlayer[];
+  myPickList: RookieBoardPlayer[];
 
   // Trade Hub
   tradeHubSection: "CALCULATOR" | "FINDER" | "TRADE_LOG" | "ATTEMPTS";
@@ -337,7 +339,7 @@ export function HubRouter({
   draftHubSection, setDraftHubSection, myDraftSlotPicks, setMyDraftSlotPicks,
   draftSlotEditing, setDraftSlotEditing, draftSlotSearchQuery, setDraftSlotSearchQuery,
   draftSettings, draftPicks, draftOrder, predictedDraftPicks, draftPoolRanks,
-  topAvailableRookies,
+  topAvailableRookies, boardRookies, myPickList,
   tradeHubSection, calcOpponentRosterId,
   selectedLeagueDraftHasOccurred,
   leaguePlayerTags, handleSetAssetDisposition,
@@ -604,7 +606,8 @@ export function HubRouter({
     draftPicks={draftPicks}
     draftOrder={draftOrder}
     allPicks={allPicks}
-    rookies={rookies}
+    boardRookies={boardRookies}
+    myPickList={myPickList}
     draftedPlayerIds={draftedPlayerIds}
     predictedDraftPicks={predictedDraftPicks}
     draftPoolRanks={draftPoolRanks}

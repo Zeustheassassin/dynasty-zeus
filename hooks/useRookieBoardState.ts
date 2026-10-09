@@ -9,13 +9,14 @@ import type { RookieBoardPlayer } from "../lib/types";
 
 const log = logger("hooks/useRookieBoardState");
 
-// The market pool behind the live draft: the upstream sheet, Sleeper ADP and
+// The market pool behind the live draft: Sleeper's rookie ADP list and
 // FantasyCalc, in the order the user last dragged it into, else FantasyCalc's.
 // Read-only since draft board sync Stage 3 (2026-10-09): the Draft Hub's Rookie
 // Big Board lists the user's Scouting prospects in the Big Board's OVR order
 // instead (components/draftHub/RookieBigBoard.tsx), so nothing here is dragged,
 // added or renamed any more. Orders and overrides saved before then still
-// apply. Stage 4 splits the live draft between that board and this pool.
+// apply. Stage 4 dropped the upstream Google Sheet (a 2026-only list) and adds
+// the user's board prospects to this pool in useAppState.
 
 // ── Constants (exported so the logout handler can clear the old local keys) ──
 // The rookie-draft class year tracks the CALENDAR (the upcoming/active draft
@@ -24,13 +25,6 @@ export const ROOKIE_YEAR = String(BASE_YEAR);
 export const ROOKIE_BOARD_POSITIONS = new Set(["QB", "RB", "WR", "TE"]);
 export const ROOKIE_BOARD_VERSION = `${ROOKIE_YEAR}_sf_v5`;
 export const ROOKIE_BOARD_RESET_KEY = `rookieBoardReset_${ROOKIE_BOARD_VERSION}`;
-
-// Built-in name corrections for upstream sheet typos. Applied as a fallback when the user
-// has no override for that name. User overrides (in the rookie_board_overrides
-// table) take precedence over this list.
-const ROOKIE_NAME_CORRECTIONS: Record<string, string> = {
-  "max kalre": "Max Klare",
-};
 
 interface RookieAddition {
   name: string;
@@ -58,10 +52,9 @@ type OrderSource =
   | { kind: "saved"; names: string[] }
   | { kind: "none" };
 
-// Everything fetched over the network: the sheet, Sleeper ADP, FantasyCalc
-// and the saved order.
+// Everything fetched over the network: Sleeper ADP, FantasyCalc and the
+// saved order.
 interface RawBoardData {
-  sheetPlayers: { name: string; position: string }[]; // raw sheet names, corrections NOT yet applied
   adpByName: Map<string, AdpPlayerInfo>;
   fcByName: Map<string, number>;
   fcBySleeperId: Map<string, number>;
@@ -69,24 +62,23 @@ interface RawBoardData {
 }
 
 function buildBoard(raw: RawBoardData, overrides: UserRookieOverrides): RookieBoardPlayer[] {
-  const { sheetPlayers, adpByName, fcByName, fcBySleeperId, orderSource } = raw;
+  const { adpByName, fcByName, fcBySleeperId, orderSource } = raw;
 
-  const correctedSheet = sheetPlayers.map((player) => {
-    const norm = normalizeRookieName(player.name);
-    // User edit takes precedence over the built-in correction list.
-    const corrected = overrides.nameEdits[norm] ?? ROOKIE_NAME_CORRECTIONS[norm];
+  // Sleeper's rookies, with the user's saved name edits.
+  const names = [...adpByName.values()].map((player) => {
+    const corrected = overrides.nameEdits[normalizeRookieName(player.name)];
     return { name: corrected ?? player.name, position: player.position };
   });
 
-  // Append user-added rookies that aren't already in the upstream sheet.
-  const sheetNameSet = new Set(correctedSheet.map((p) => normalizeRookieName(p.name)));
+  // Append user-added rookies that Sleeper doesn't list.
+  const nameSet = new Set(names.map((p) => normalizeRookieName(p.name)));
   for (const added of overrides.added) {
-    if (!sheetNameSet.has(normalizeRookieName(added.name))) {
-      correctedSheet.push({ name: added.name, position: added.position });
+    if (!nameSet.has(normalizeRookieName(added.name))) {
+      names.push({ name: added.name, position: added.position });
     }
   }
 
-  const canonicalBoard = correctedSheet
+  const canonicalBoard = names
     .map((player) => {
       const norm = normalizeRookieName(player.name);
       const adpPlayer = adpByName.get(norm);
@@ -137,17 +129,14 @@ export function useRookieBoardState(supabaseUser: { id: string } | null): UseRoo
   const [rookies, setRookies] = useState<RookieBoardPlayer[]>([]);
   const userId = supabaseUser?.id ?? null;
 
-  // Fetch the sheet, Sleeper ADP, FantasyCalc values and, signed in, the saved
+  // Fetch Sleeper ADP, FantasyCalc values and, signed in, the saved
   // order and overrides. Runs on mount and on login / logout.
   useEffect(() => {
-    const controller = new AbortController();
-    const { signal } = controller;
     let cancelled = false;
 
     const load = async () => {
-      // 1. Sheet, Sleeper ADP (for metadata) and FC Superflex (2QB) raw data in parallel
-      const [sheetText, adpResponse, fcRaw] = await Promise.all([
-        fetch('/api/rookie-board-sheet', { signal }).then((res) => res.text()),
+      // 1. Sleeper ADP (the names) and FC Superflex (2QB) raw data in parallel
+      const [adpResponse, fcRaw] = await Promise.all([
         sleeperApi.getRookieBoardADP(ROOKIE_YEAR).catch(() => []),
         getFcValuesRaw(2, true).catch(() => []),
       ]);
@@ -170,20 +159,8 @@ export function useRookieBoardState(supabaseUser: { id: string } | null): UseRoo
         });
       }
 
-      // Raw sheet names — corrections are applied later by buildBoard, not here.
-      const sheetPlayers = sheetText
-        .split("\n")
-        .slice(1)
-        .map((row) => {
-          const cols = row.split(",");
-          return {
-            name: cols[0]?.replace(/"/g, "").trim() ?? "",
-            position: cols[1]?.replace(/"/g, "").trim(),
-          };
-        })
-        .filter((player) => player.name && player.name !== "Player Invalid");
-
-      // Sleeper ADP only used for player_id, position, team metadata — NOT for sort order
+      // Sleeper's rookie list: the names, player_id, position, team and ADP
+      // (ADP is a tiebreaker, not the sort order)
       const adpByName = new Map<string, AdpPlayerInfo>();
       (adpResponse as unknown as SleeperAdpEntry[])
         .filter((entry) =>
@@ -243,13 +220,13 @@ export function useRookieBoardState(supabaseUser: { id: string } | null): UseRoo
       }
 
       if (cancelled) return;
-      setRookies(buildBoard({ sheetPlayers, adpByName, fcByName, fcBySleeperId, orderSource }, overrides));
+      setRookies(buildBoard({ adpByName, fcByName, fcBySleeperId, orderSource }, overrides));
     };
 
     load().catch((e: unknown) => {
       if (!cancelled) log.warn("rookie pool load failed", { err: String(e) });
     });
-    return () => { cancelled = true; controller.abort(); };
+    return () => { cancelled = true; };
   }, [userId]);
 
   return { rookies };
