@@ -21,6 +21,8 @@
 // - Size slows a player down but never rules him out. Below a bucket's NFL
 //   size floor the match drops, faster the further below; a prospect who is
 //   elite at the bucket's core skills keeps most of it (ELITE_SIZE_SHARE).
+//   A bucket can also be graded but never named as his role below a size
+//   (`nameFrom`, RB Goal-line).
 // - Match % = 100 × the weighted feature average × (1 − size drop). Every
 //   bucket gets its own %, so they don't add to 100: a player can be 86% X and
 //   84% Y.
@@ -81,11 +83,11 @@ export const ROLES: Record<RolePos, readonly RoleInfo[]> = {
     { key: "three_down",  label: "Three-down",  short: "3-Down",   tier: 0, description: "The workhorse: wins on zone and gap runs, reliable hands (no drops), holds up in pass protection, and the build to carry the load. Level A: when he reaches it, it's his whole label." },
     { key: "zone",        label: "Zone",        short: "Zone",     tier: 1, description: "One-cut runner: much better on zone runs than gap runs. Level B, with Gap/Power: whichever he fits better." },
     { key: "gap",         label: "Gap/Power",   short: "Gap",      tier: 1, description: "Wins on gap runs and against a stacked box, breaks tackles; heavier. Level B, with Zone: whichever he fits better." },
-    { key: "receiving",   label: "Receiving",   short: "Recv",     tier: 2, description: "Runs a lot of routes, often split out wide, gets open on the harder routes (WR routes, wheels, angles, seams). Level C." },
+    { key: "receiving",   label: "Receiving",   short: "Recv",     tier: 2, description: "Runs a lot of routes, often split out wide, gets open on the harder routes (WR routes, wheels, angles, seams), no drops, and produces on his routes (PFF yards per route run). Level C." },
     { key: "two_down",    label: "2-Down",      short: "2-Down",   tier: 2, description: "Early-down runner who comes off the field on passing downs: not good in pass protection and average at best as a receiver (40% of the match), with the Three-down back's running and build (60%). Holding up in pass pro or catching well cuts it. Level C." },
     { key: "third_down",  label: "3rd-Down",    short: "3rd-Down", tier: 2, description: "Passing-down back: excels in pass protection and as a receiver (open on routes, no drops), average at best as a runner. Falling short in pass pro or hands cuts it, and so does being a good runner. Level C." },
     { key: "big_play",    label: "Big-play",    short: "BigPlay",  tier: 3, description: "Change of pace: lots of explosive runs and lots of runs stopped at or behind the line. Level D." },
-    { key: "goal_line",   label: "Goal-line",   short: "GL",       tier: 3, description: "Short-yardage and goal-line back: wins on inside runs and against a loaded box, runs through contact (PFF yards after contact and missed tackles), rarely stuffed; your Power grade and his tagged short-yardage runs (10+) count once he has them. Level D." },
+    { key: "goal_line",   label: "Goal-line",   short: "GL",       tier: 3, description: "Short-yardage and goal-line back: wins on inside runs and against a loaded box, runs through contact (PFF yards after contact and missed tackles), rarely stuffed; your Power grade and his tagged short-yardage runs (10+) count once he has them. Graded at any size, but never named as a back's role under 200 lb (an elite small back can still grade well). Level D." },
     { key: "blocking_st", label: "Blocking/ST", short: "Blk/ST",   tier: 3, fallback: true, fallbackRule: { under: 40, atLeast: 55 }, description: "Blocking and special teams: named only when he's under 40% at every other role and this reads 55%+. Its % is how blocking-only he is: his pass protection, cut for being a good runner or a good receiver. Level D." },
   ],
   TE: [
@@ -240,6 +242,11 @@ export interface BucketRecipe {
    *  fit of 0), in proportion to how far short he falls; a gate feature that's
    *  missing cuts nothing. RB Three-down gates on hands and pass protection. */
   gates?: readonly { feature: string; maxCut: number }[];
+  /** Below this size the bucket is still graded but never named as his role
+   *  (RB Goal-line; the user, 2026-10-08: an elite small back can grade well
+   *  there and see some goal-line work, but it "just shouldn't be a projected
+   *  role"). */
+  nameFrom?: SizeFloor;
 }
 
 export interface RoleMatch {
@@ -255,6 +262,8 @@ export interface RoleMatch {
   /** False while the recipe's `requires` isn't met; `pendingWhy` says why. */
   proven: boolean;
   pendingWhy?: string;
+  /** Under the recipe's `nameFrom` size: graded, never named as his role (e.g. "193 under 200"). */
+  unnamed?: string;
 }
 
 export type RoleConfidence = "high" | "medium" | "low";
@@ -380,6 +389,7 @@ export function scoreBucket(recipe: BucketRecipe, features: FeatureSet, heightIn
   const raw = wsum > 0 ? sum / wsum : 0.5;
   const elite = coreW > 0 && coreSum / coreW >= ELITE_FIT;
   const size = sizeDrop(recipe.size, heightIn, weightLb);
+  const tooSmall = sizeDrop(recipe.nameFrom, heightIn, weightLb).short;
   const drop = size.drop * (elite ? ELITE_SIZE_SHARE : 1);
   const top = parts
     .map(({ f, weight }) => ({ f, pull: (weight / (wsum || 1)) * (f.fit - 0.5) }))
@@ -408,6 +418,7 @@ export function scoreBucket(recipe: BucketRecipe, features: FeatureSet, heightIn
     drivers,
     proven,
     ...(proven ? {} : { pendingWhy: `${req!.why} (has ${features[req!.feature]?.n ?? 0})` }),
+    ...(tooSmall ? { unnamed: tooSmall } : {}),
   };
 }
 
@@ -472,13 +483,14 @@ function catchAllNamed(m: RoleMatch, matches: readonly RoleMatch[]): boolean {
 // a proven bucket wins a tie. An unproven one leads only when no proven bucket
 // is within NEAR_TIE (shown "X?"): an untested X isn't demoted to a worse
 // role, and isn't promoted over a better-supported one either. The catch-all
-// doesn't compete; it leads only when catchAllNamed.
+// doesn't compete; it leads only when catchAllNamed. A bucket he's too small
+// to be named for (`unnamed`) is left out.
 function pickByNearTie(order: readonly RoleInfo[], matches: readonly RoleMatch[]): RoleMatch[] {
   const byPct = byPctIn(order);
   const tierOf = (k: RoleKey) => roleInfo(k).tier;
   const fallback = matches.find((m) => roleInfo(m.role).fallback);
   if (fallback && catchAllNamed(fallback, matches)) return [fallback];
-  const pool = matches.filter((m) => !roleInfo(m.role).fallback);
+  const pool = matches.filter((m) => !roleInfo(m.role).fallback && !m.unnamed);
   const top = Math.max(...pool.map((m) => m.pct));
   const contenders = pool.filter((m) => top - m.pct <= NEAR_TIE);
   const proven = contenders.filter((m) => m.proven);
@@ -493,18 +505,18 @@ function pickByNearTie(order: readonly RoleInfo[], matches: readonly RoleMatch[]
 // the first, otherwise lower levels add their best role at their line.
 // Reaching none, his best middle-level role at NO_LEVEL_LINE+ (higher level
 // first), else his best role at the last level. A catch-all counts only when
-// catchAllNamed.
+// catchAllNamed, and a bucket he's too small to be named for (`unnamed`) never.
 function pickByLevel(order: readonly RoleInfo[], matches: readonly RoleMatch[], lines: readonly number[]): RoleMatch[] {
   const byPct = byPctIn(order);
   const levels = [...new Set(order.map((r) => r.tier))].sort((a, b) => a - b);
   const bestAt = (lv: number) => matches
-    .filter((m) => roleInfo(m.role).tier === lv && (!roleInfo(m.role).fallback || catchAllNamed(m, matches)))
+    .filter((m) => roleInfo(m.role).tier === lv && !m.unnamed && (!roleInfo(m.role).fallback || catchAllNamed(m, matches)))
     .sort(byPct)[0] as RoleMatch | undefined;
   const reaches = (m: RoleMatch | undefined): m is RoleMatch => m != null && m.pct >= lines[roleInfo(m.role).tier];
   const top = levels.findIndex((lv) => reaches(bestAt(lv)));
   if (top < 0) {
     const middle = levels.slice(1, -1).map(bestAt).find((m) => m != null && m.pct >= NO_LEVEL_LINE);
-    return [middle ?? bestAt(levels[levels.length - 1]) ?? matches.filter((m) => !roleInfo(m.role).fallback).sort(byPct)[0]];
+    return [middle ?? bestAt(levels[levels.length - 1]) ?? matches.filter((m) => !roleInfo(m.role).fallback && !m.unnamed).sort(byPct)[0]];
   }
   if (top === 0) return [bestAt(levels[0])!];
   return levels.slice(top).map(bestAt).filter(reaches);
@@ -560,6 +572,7 @@ export function matchTooltip(fit: RoleFit, role: RoleKey): string {
   const lines = [`${info.label} ${m.pct}%: ${info.description}`, ...m.drivers];
   if (m.sizeNote) lines.push(`Size: ${m.sizeNote} → −${Math.round(m.sizeDrop * 100)}%`);
   if (m.pendingWhy) lines.push(`Unproven: ${m.pendingWhy}`);
+  if (m.unnamed) lines.push(`Never named as his role: ${m.unnamed}`);
   return lines.join("\n");
 }
 

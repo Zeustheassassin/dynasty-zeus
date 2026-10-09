@@ -68,6 +68,14 @@ describe("scoreBucket", () => {
     expect(elite.sizeNote).toContain("elite");
   });
 
+  it("grades a bucket under its nameFrom size as usual but marks it unnamed", () => {
+    const named: BucketRecipe = { ...recipe, nameFrom: { minWeightLb: 200 } };
+    const small = scoreBucket(named, { a: skill(0.9), b: usage(1) }, 67, 170);
+    expect(small.pct).toBe(scoreBucket(recipe, { a: skill(0.9), b: usage(1) }, 67, 170).pct);
+    expect(small.unnamed).toBe(`5'7" 170 under 200`);
+    expect(scoreBucket(named, { a: skill(0.9), b: usage(1) }, 67, 200).unnamed).toBeUndefined();
+  });
+
   it("cuts a gated bucket in proportion to how far short of each gate he falls", () => {
     const gated: BucketRecipe = { role: "x", ingredients: [{ feature: "a", weight: 1 }], gates: [{ feature: "g1", maxCut: 0.5 }, { feature: "g2", maxCut: 0.5 }] };
     expect(scoreBucket(gated, { a: skill(0.8), g1: skill(1), g2: skill(1) }, null, null).pct).toBe(80);

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { rbRoleFit, computeRBRoleFits, RB_MIN_RUNS, RB_SY_TAG_MIN, type RBRoleInputs } from "@/lib/scouting/roleFitRB";
-import { matchFor, roleLabel } from "@/lib/scouting/roleFit";
+import { rbRoleFit, computeRBRoleFits, GOAL_LINE_NAMED_LB, RB_MIN_RUNS, RB_SY_TAG_MIN, type RBRoleInputs } from "@/lib/scouting/roleFitRB";
+import { matchFor, matchTooltip, roleLabel } from "@/lib/scouting/roleFit";
 import type { Prospect, RBPlay, RBRunType, ScoutingGame } from "@/lib/types";
 import type { PffTotals } from "@/lib/pff/totals";
 
@@ -168,6 +168,21 @@ describe("RB Goal-line (the user's recipe, 2026-10-07)", () => {
     expect(matchFor(fit(plays, POWER_SLICES, 70, 195, PFF)!, "goal_line")!.sizeDrop).toBeGreaterThan(0);
   });
 
+  it(`grades an elite small back well at Goal-line but never names him one under ${GOAL_LINE_NAMED_LB} lb`, () => {
+    // Elite inside and through contact at 5'7" 193 (the Wayne Knight case, 2026-10-08).
+    const elite = slices({ all: [12, 100], zone: [12, 70], gap: [12, 30], inside: [20, 100], loaded: [25, 30] });
+    const small = fit(plays, elite, 67, 193, { pffYco: { hits: 700, n: 100 } })!;
+    const gl = matchFor(small, "goal_line")!;
+    expect(gl.pct).toBeGreaterThanOrEqual(75);
+    expect(gl.unnamed).toBe(`5'7" 193 under 200`);
+    expect([small.best, ...small.also]).not.toContain("goal_line");
+    expect(matchTooltip(small, "goal_line")).toContain(`Never named as his role: 5'7" 193 under 200`);
+    // At 200 lb he can be named again.
+    const bigger = fit(plays, elite, 67, GOAL_LINE_NAMED_LB, { pffYco: { hits: 700, n: 100 } })!;
+    expect(matchFor(bigger, "goal_line")!.unnamed).toBeUndefined();
+    expect([bigger.best, ...bigger.also]).toContain("goal_line");
+  });
+
   it("leaves Power out until he has a graded game, then reads it against the scale's midpoint", () => {
     const AVG = slices({ all: [0, 100], inside: [0, 100] });
     const base = fit(plays, AVG, 72, 225)!;
@@ -247,6 +262,20 @@ describe("RB 2-Down, 3rd-Down and Blocking/ST (the user's definitions, 2026-10-0
     const good = fit(runner(passing), RUNNER, 71, 210)!;
     expect(matchFor(good, "third_down")!.pct).toBeLessThan(matchFor(f, "third_down")!.pct - 15);
     expect(matchFor(good, "third_down")!.drivers.join(" ")).toContain("Good runner");
+  });
+
+  it("reads PFF yards per route run as receiving skill: a productive receiver isn't 2-Down", () => {
+    // Open a bit under the league's rate and can't pass block; PFF says what he does with his routes.
+    const passing = [...passBlocks(25, 10), ...quietRoutes(15, 8), ...targets(10, 2)];
+    const pool = { leaguePffYprr: { hits: 100, n: 100 } };
+    const quiet = fit(runner(passing), RUNNER, 69, 195, { ...pool, pffYprr: { hits: 25, n: 25 } })!;
+    const productive = fit(runner(passing), RUNNER, 69, 195, { ...pool, pffYprr: { hits: 75, n: 25 } })!;
+    expect(productive.features.yprr!.display).toBe("3.00 vs 1.00 league yds per route run on 25 routes");
+    expect(matchFor(productive, "receiving")!.pct).toBeGreaterThan(matchFor(quiet, "receiving")!.pct + 5);
+    expect(matchFor(productive, "two_down")!.pct).toBeLessThan(matchFor(quiet, "two_down")!.pct - 15);
+    expect(matchFor(productive, "two_down")!.drivers.join(" ")).toContain("Good receiver");
+    // Without PFF rows it reads neutral.
+    expect(fit(runner(passing), RUNNER, 69, 195)!.features.yprr!.fit).toBe(0.5);
   });
 
   it("holds a back who can't pass block out of 3rd-Down, however well he catches", () => {
