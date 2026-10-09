@@ -10,6 +10,7 @@
 // ============================================================
 
 import { cachedFetch } from "./clientFetch";
+import { firstKickoff } from "./helpers/draftClass";
 import type { TeamGameState } from "./types";
 
 const PROXY_BASE = "/api/nfl-scoreboard";
@@ -31,4 +32,23 @@ async function getNflScoreboard(week: number, bypass?: boolean): Promise<Record<
   }
 }
 
-export const scheduleApi = { getNflScoreboard };
+// A season's Week 1 kickoffs are set months ahead, so an hour per browser is
+// plenty; a failed lookup (the proxy answers {}) is retried after that.
+const WEEK1_TTL_MS = 60 * 60_000;
+
+/** The first Week 1 kickoff (ms) of an NFL season, or null when ESPN has no
+ *  schedule for it yet or the lookup failed. For the draft board's class
+ *  (lib/helpers/draftClass.ts). */
+async function getWeek1Kickoff(season: number): Promise<number | null> {
+  try {
+    const games = await cachedFetch<Record<string, TeamGameState>>(
+      `${PROXY_BASE}?week=1&season=${season}`,
+      { ttlMs: WEEK1_TTL_MS }
+    );
+    return firstKickoff(games, season);
+  } catch {
+    return null;
+  }
+}
+
+export const scheduleApi = { getNflScoreboard, getWeek1Kickoff };

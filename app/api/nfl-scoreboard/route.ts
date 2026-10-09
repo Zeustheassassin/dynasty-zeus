@@ -22,15 +22,26 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!Number.isFinite(week) || week < 1 || week > 22) {
     return NextResponse.json({});
   }
+  // Optional season (ESPN's `dates`), e.g. a season's Week 1 for the draft
+  // board's class switch (lib/helpers/draftClass.ts). Without it ESPN serves
+  // the current season.
+  const seasonParam = searchParams.get('season');
+  if (seasonParam != null && !/^20\d\d$/.test(seasonParam)) {
+    return NextResponse.json({});
+  }
+  const season = seasonParam != null ? Number(seasonParam) : null;
 
   try {
     const res = await fetch(
-      `${ESPN_SCOREBOARD_BASE_URL}?week=${week}&seasontype=2`,
+      `${ESPN_SCOREBOARD_BASE_URL}?week=${week}&seasontype=2${season != null ? `&dates=${season}` : ''}`,
       { next: { revalidate: NFL_SCOREBOARD_REVALIDATE_S } }
     );
     if (!res.ok) return NextResponse.json({});
 
     const json = await res.json();
+    // A season ESPN has no schedule for yet comes back empty; a reply for any
+    // other season would be the wrong games.
+    if (season != null && Number(json?.season?.year) !== season) return NextResponse.json({});
     const events: EspnEvent[] = Array.isArray(json?.events) ? json.events : [];
     const parsed = parseEspnScoreboard(events);
     const incomplete = findIncompleteLiveGames(parsed);
