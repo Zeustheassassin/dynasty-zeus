@@ -17,7 +17,6 @@ interface ValuesContextValue {
   rawFcValues: Record<string, number>;
   leagueAdjustedRedraftValues: Record<string, number>;
   pickFcValues: Record<string, number>;
-  fcNameValues: Record<string, number>;
   selectedLeagueDirection: RosterDirectionProfile | null;
   selectedLeagueDirectionAdjusted: RosterDirectionProfile | null;
   selectedLeagueSimulation: LeagueSimulation | null;
@@ -38,7 +37,6 @@ const ValuesContext = createContext<ValuesContextValue>({
   rawFcValues: {},
   leagueAdjustedRedraftValues: {},
   pickFcValues: {},
-  fcNameValues: {},
   selectedLeagueDirection: null,
   selectedLeagueDirectionAdjusted: null,
   selectedLeagueSimulation: null,
@@ -52,7 +50,6 @@ export function ValuesProvider({
   rawFcValues,
   leagueAdjustedRedraftValues,
   pickFcValues,
-  fcNameValues,
   selectedLeagueDirection,
   selectedLeagueDirectionAdjusted,
   selectedLeagueSimulation,
@@ -68,7 +65,6 @@ export function ValuesProvider({
       rawFcValues,
       leagueAdjustedRedraftValues,
       pickFcValues,
-      fcNameValues,
       selectedLeagueDirection,
       selectedLeagueDirectionAdjusted,
       selectedLeagueSimulation,
@@ -80,7 +76,6 @@ export function ValuesProvider({
       rawFcValues,
       leagueAdjustedRedraftValues,
       pickFcValues,
-      fcNameValues,
       selectedLeagueDirection,
       selectedLeagueDirectionAdjusted,
       selectedLeagueSimulation,

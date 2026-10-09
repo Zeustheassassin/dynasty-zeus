@@ -1,407 +1,310 @@
 "use client";
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import type { Dispatch, SetStateAction } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
 import { supabase } from "../../lib/supabaseclient";
 import { logger } from "../../lib/logger";
-import { BASE_YEAR } from "../../lib/helpers";
 import { useAuth } from "../../lib/AuthContext";
-import { useValues } from "../../lib/ValuesContext";
-import type { RookieBoardPlayer } from "../../lib/types";
-import { posBadge, rookieKey, fuzzyFcLookup, normalizeRookieName } from "./shared";
-import { getLocalStorageItem, setLocalStorageItem } from "@/lib/hooks/useLocalStorage";
-import { nflDraftSlotLabel, UNDRAFTED_ROUND } from "../../lib/draftRound";
+import { getFcValuesRaw } from "../../lib/fcValuesStore";
+import { useDraftBoardClass } from "../../hooks/useDraftBoardClass";
+import { SAMPLE_TIERS } from "../../lib/scouting/sampleTiers";
+import {
+  DRAFT_BOARD_COLUMNS, DRAFT_BOARD_POSITIONS, sortDraftBoard, nflDraftLabel, latestScoresSavedAt,
+  fcClassValues, fcValueFor, draftBoardSnapshotRows, readTiers, readNotes, type DraftBoardProspect,
+} from "../../lib/helpers/draftBoard";
+import type { BoardScores, SleeperNFLState } from "../../lib/types";
+import { posBadge, normalizeRookieName } from "./shared";
 
 const log = logger("components/draftHub/RookieBigBoard");
 
-// Rookie-draft class year tracks the CALENDAR (upcoming class), not the NFL season.
-const ROOKIE_YEAR = String(BASE_YEAR);
-
-type NflDraftEntry = { team: string; round: number | null; pick: number | null };
+// The rookie board for the class the Draft Hub is on (useDraftBoardClass):
+// the user's Scouting prospects in the Big Board's OVR order, with the scores
+// that board saved (lib/helpers/draftBoard.ts). Tiers and notes are the one
+// thing edited here, keyed by prospect id on the user's rookie_board_tiers row
+// for the class year.
 
 // How long typing must pause before a note saves to the account.
 const NOTE_SYNC_DELAY_MS = 800;
+const TIER_CHOICES = Array.from({ length: 15 }, (_, i) => i + 1);
+const SAMPLE_UNIT: Record<string, string> = { QB: "throws", RB: "runs", WR: "routes", TE: "routes" };
+
+// One grid for the header and every row, so the columns line up:
+// OVR · sample dot · player · Dyn · Dyn+ · FC · tier · note.
+const GRID =
+  "grid grid-cols-[1.5rem_0.625rem_minmax(0,1fr)_2.25rem_2.25rem_2.5rem_2.25rem_1rem] " +
+  "sm:grid-cols-[2rem_0.75rem_minmax(0,1fr)_3rem_3rem_3.5rem_3rem_1.5rem] gap-1 sm:gap-2 items-center";
+
+const signed = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}`;
+
+const OVR_TOOLTIP = "OVR: your Scouting Big Board's overall rank for the class. Change it there. Unranked prospects sit below, by Dynasty Score.";
+const DYN_TOOLTIP = "Dynasty Score as of your last Scouting Big Board visit (live, without traits, at the sliders' weights then).";
+const PLUS_TOOLTIP = "Dynasty Score Plus: Dynasty plus draft capital. Shows once the NFL draft round is set on the Scouting Big Board.";
+const FC_TOOLTIP = "FantasyCalc Superflex dynasty value, matched by name to FantasyCalc's rookies of this class. Blank until FantasyCalc lists him.";
+const NO_SCORES = "No saved scores yet: open Scouting → Big Board to save them";
+
+interface LoadedBoard {
+  /** The load this answers (user, class, reload count). */
+  key: string;
+  year: number;
+  error: boolean;
+  rows: DraftBoardProspect[];
+  tiers: Record<string, number>;
+  notes: Record<string, string>;
+}
+
+interface PendingNotes {
+  year: number;
+  notes: Record<string, string>;
+  timer: ReturnType<typeof setTimeout> | null;
+}
 
 interface RookieBigBoardProps {
-  rookies: RookieBoardPlayer[];
+  nflState: SleeperNFLState | null;
+  draftedPlayerIds: Set<string>;
   rookieSearch: string;
   setRookieSearch: (s: string) => void;
-  dragIndex: number | null;
-  setDragIndex: (i: number | null) => void;
-  tempRanks: Record<number, string>;
-  setTempRanks: Dispatch<SetStateAction<Record<number, string>>>;
-  draftedPlayerIds: Set<string>;
-  movePlayer: (fromIndex: number, toIndex: number) => void;
-  handleRankChange: (currentIndex: number, newRank: string) => void;
-  addRookie: (name: string, position: string) => void;
-  editRookieName: (originalName: string, newName: string) => void;
-  removeAddedRookie: (name: string) => void;
-  clearNameEdit: (originalName: string) => void;
-  rookieOverrides: { added: { name: string; position: string }[]; nameEdits: Record<string, string> };
+  onOpenScouting: () => void;
+}
+
+function sampleDot(pos: string, s: BoardScores["sample"] | undefined) {
+  const t = s && SAMPLE_TIERS.find((x) => x.tier === s.tier);
+  if (!s || !t) return <span aria-hidden="true" />;
+  const how = s.tier === "full" ? "full" : `${Math.floor(s.share * 100)}% of full`;
+  const count = s.n == null ? "under the sample floor" : `${s.n} ${SAMPLE_UNIT[pos] ?? "plays"} charted`;
+  return (
+    <span
+      role="img"
+      aria-label={`Sample: ${t.label}`}
+      title={`Sample ${how}: ${count}`}
+      className={`justify-self-center inline-block w-2.5 h-2.5 rounded-full ${t.dot}`}
+    />
+  );
+}
+
+function scoreCell(v: number | null | undefined, title: string) {
+  if (v == null) return <span className="text-right text-xs text-slate-600" title={title}>—</span>;
+  return (
+    <span className={`text-right text-xs font-semibold tabular-nums ${v >= 0 ? "text-emerald-400" : "text-red-400"}`} title={title}>
+      {signed(v)}
+    </span>
+  );
 }
 
 export default function RookieBigBoard({
-  rookies, rookieSearch, setRookieSearch,
-  dragIndex, setDragIndex, tempRanks, setTempRanks,
-  draftedPlayerIds, movePlayer, handleRankChange,
-  addRookie, editRookieName, removeAddedRookie, clearNameEdit, rookieOverrides,
+  nflState, draftedPlayerIds, rookieSearch, setRookieSearch, onOpenScouting,
 }: RookieBigBoardProps) {
   const { supabaseUser } = useAuth();
-  const { fcNameValues } = useValues();
+  const userId = supabaseUser?.id ?? null;
+  const { classYear, ready } = useDraftBoardClass(nflState);
 
-  const [tierLabels, setTierLabels]         = useState<Record<string, number>>({});
-  // Notes follow the account (rookie_board_tiers.notes, migration 068). This
-  // browser's copy shows until the account's load.
-  const [playerNotes, setPlayerNotes]       = useState<Record<string, string>>(() =>
-    getLocalStorageItem<Record<string, string>>(`draftNotes_${ROOKIE_YEAR}`, {})
-  );
-  const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null);
   const [posFilter, setPosFilter]           = useState<string | null>(null);
-
-  const [nflDraftInfo, setNflDraftInfo] = useState<Record<string, NflDraftEntry>>(() =>
-    getLocalStorageItem<Record<string, NflDraftEntry>>("nflDraftInfo", {})
-  );
-  const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
-  const [draftTeam, setDraftTeam]   = useState("");
-  const [draftRound, setDraftRound] = useState("");
-  const [draftPick, setDraftPick]   = useState("");
+  const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null);
+  const [reloads, setReloads]               = useState(0);
+  const [saveFailed, setSaveFailed]         = useState(false);
 
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [snapshotName, setSnapshotName]   = useState("");
   const [saving, setSaving]               = useState(false);
   const [saveSuccess, setSaveSuccess]     = useState(false);
+  const [snapshotError, setSnapshotError] = useState(false);
 
-  // Add Rookie modal
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [addName, setAddName]           = useState("");
-  const [addPosition, setAddPosition]   = useState<"QB" | "RB" | "WR" | "TE">("WR");
-
-  // Inline rename per row
-  const [editingNameId, setEditingNameId] = useState<string | null>(null);
-  const [editName, setEditName]           = useState("");
-
-  function commitAddRookie() {
-    if (!addName.trim()) return;
-    addRookie(addName, addPosition);
-    setAddName("");
-    setAddPosition("WR");
-    setShowAddModal(false);
-  }
-
-  function commitNameEdit(originalName: string) {
-    editRookieName(originalName, editName);
-    setEditingNameId(null);
-  }
-
-  // Quick lookup so each row knows whether it's a user-added rookie (deletable) or just renamed.
-  const addedNameSet = new Set(rookieOverrides.added.map((a) => a.name.toLowerCase()));
-
-  const fcVal = useCallback(
-    (r: RookieBoardPlayer): number => fuzzyFcLookup(r.name, fcNameValues) || r.fcValue || 0,
-    [fcNameValues],
-  );
-
-  const fcRanks = useMemo<Record<string, number>>(() => {
-    const ranks: Record<string, number> = {};
-    [...rookies]
-      .filter((r) => fcVal(r) > 0)
-      .sort((a, b) => fcVal(b) - fcVal(a))
-      .forEach((r, i) => { ranks[rookieKey(r)] = i + 1; });
-    return ranks;
-  }, [rookies, fcVal]);
-
-  const userFcRanks = useMemo<Record<string, number>>(() => {
-    const ranks: Record<string, number> = {};
-    rookies
-      .filter((r) => fcVal(r) > 0)
-      .forEach((r, i) => { ranks[rookieKey(r)] = i + 1; });
-    return ranks;
-  }, [rookies, fcVal]);
-
-  const filteredRookies = useMemo(
-    () =>
-      rookies
-        .map((p, originalIndex) => ({ p, originalIndex }))
-        .filter(
-          ({ p }) =>
-            p.name &&
-            p.name !== "Player Invalid" &&
-            p.name.toLowerCase().includes(rookieSearch.toLowerCase()) &&
-            (!posFilter || p.position === posFilter),
-        ),
-    [rookies, rookieSearch, posFilter],
-  );
-
-  const bigBoardParentRef = useRef<HTMLDivElement>(null);
-
-  // eslint-disable-next-line react-hooks/incompatible-library
-  const bigBoardVirtualizer = useVirtualizer({
-    count: filteredRookies.length,
-    getScrollElement: () => bigBoardParentRef.current,
-    estimateSize: () => 44,
-    overscan: 8,
-  });
-
+  // ── Load ────────────────────────────────────────────────────
+  // The class's prospects and the year's tiers and notes, fresh on every
+  // visit (this mounts each time the board is opened). Waits for the class
+  // to settle, so it doesn't load one class and then the other.
+  const loadKey = userId && ready ? `${userId}|${classYear}|${reloads}` : null;
+  const [loaded, setLoaded] = useState<LoadedBoard | null>(null);
   useEffect(() => {
-    const load = async () => {
-      if (supabaseUser) {
-        try {
-          const { data, error } = await supabase
-            .from("rookie_board_tiers")
-            .select("tiers")
-            .eq("user_id", supabaseUser.id)
-            .eq("year", ROOKIE_YEAR)
-            .single();
-          if (!error && data?.tiers && typeof data.tiers === "object") {
-            setTierLabels(data.tiers as Record<string, number>);
-            setLocalStorageItem(`draftTiersV2_${ROOKIE_YEAR}`, data.tiers);
-            return;
-          }
-        } catch {}
-      }
-      const tiers = getLocalStorageItem<Record<string, number> | null>(`draftTiersV2_${ROOKIE_YEAR}`, null);
-      if (tiers) {
-        delete tiers["null"];
-        setTierLabels(tiers);
-      }
+    if (!loadKey || !userId) return;
+    let cancelled = false;
+    const year = classYear;
+    const fail = (err: string) => {
+      if (cancelled) return;
+      log.error("draft board load failed", { err });
+      setLoaded({ key: loadKey, year, error: true, rows: [], tiers: {}, notes: {} });
     };
-    load();
-  }, [supabaseUser]);
+    Promise.all([
+      supabase
+        .from("prospects")
+        .select(DRAFT_BOARD_COLUMNS)
+        .eq("user_id", userId)
+        .eq("draft_class_year", year)
+        .in("position", [...DRAFT_BOARD_POSITIONS]),
+      supabase
+        .from("rookie_board_tiers")
+        .select("tiers,notes")
+        .eq("user_id", userId)
+        .eq("year", String(year))
+        .maybeSingle(),
+    ]).then(([prospects, saved]) => {
+      if (cancelled) return;
+      const err = prospects.error ?? saved.error;
+      if (err) { fail(err.message); return; }
+      setLoaded({
+        key: loadKey,
+        year,
+        error: false,
+        rows: sortDraftBoard((prospects.data ?? []) as DraftBoardProspect[]),
+        tiers: readTiers(saved.data?.tiers),
+        notes: readNotes(saved.data?.notes),
+      });
+    }, (e: unknown) => fail(String(e)));
+    return () => { cancelled = true; };
+  }, [loadKey, userId, classYear]);
+  const board = loaded && loaded.key === loadKey ? loaded : null;
+  const rows = board?.rows;
 
-  const syncTiersToSupabase = (tiers: Record<string, number>) => {
-    if (!supabaseUser) return;
-    supabase.from("rookie_board_tiers").upsert(
-      { user_id: supabaseUser.id, year: ROOKIE_YEAR, tiers, updated_at: new Date().toISOString() },
-      { onConflict: "user_id,year" }
-    ).then(({ error }) => {
-      if (error) log.error("tier sync failed", { err: error.message });
-    });
-  };
-
-  // Notes ride the tiers row for the year; an upsert of notes alone leaves the
-  // tiers as they are. Empty notes aren't kept.
-  const syncNotesToSupabase = useCallback((notes: Record<string, string>) => {
-    if (!supabaseUser) return;
-    const kept = Object.fromEntries(Object.entries(notes).filter(([, text]) => text.trim()));
-    supabase.from("rookie_board_tiers").upsert(
-      { user_id: supabaseUser.id, year: ROOKIE_YEAR, notes: kept, updated_at: new Date().toISOString() },
-      { onConflict: "user_id,year" }
-    ).then(
-      ({ error }) => { if (error) log.error("notes sync failed", { err: error.message }); },
-      (e: unknown) => log.error("notes sync failed", { err: String(e) }),
+  // ── FantasyCalc (the shared store; no extra request when it's warm) ──
+  const [fcRaw, setFcRaw] = useState<unknown[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    getFcValuesRaw(2, true).then(
+      (data) => { if (!cancelled) setFcRaw(data); },
+      (e: unknown) => log.warn("FantasyCalc values unavailable", { err: String(e) }),
     );
-  }, [supabaseUser]);
+    return () => { cancelled = true; };
+  }, []);
+  const fcMap = useMemo(() => fcClassValues(fcRaw, classYear), [fcRaw, classYear]);
+  const fcById = useMemo(() => {
+    const out = new Map<string, number>();
+    for (const p of rows ?? []) out.set(p.id, fcValueFor(p.name, p.position, fcMap));
+    return out;
+  }, [rows, fcMap]);
 
-  // Typing saves to this browser at once and to the account once it pauses;
-  // leaving the board saves anything still waiting.
-  const noteSyncRef = useRef<{ timer: ReturnType<typeof setTimeout> | null; notes: Record<string, string> | null }>({ timer: null, notes: null });
+  // ── Saves ───────────────────────────────────────────────────
+  // Tiers and notes ride the user's rookie_board_tiers row for the year; an
+  // upsert of one column leaves the other alone. One write at a time, so an
+  // older map can't land after a newer one.
+  const writeChainRef = useRef<Promise<void>>(Promise.resolve());
+  const saveYearRow = useCallback((year: number, patch: { tiers?: Record<string, number>; notes?: Record<string, string> }) => {
+    if (!userId) return;
+    const row = { user_id: userId, year: String(year), ...patch, updated_at: new Date().toISOString() };
+    writeChainRef.current = writeChainRef.current
+      .then(() => supabase.from("rookie_board_tiers").upsert(row, { onConflict: "user_id,year" }))
+      .then(
+        ({ error }) => {
+          if (error) log.error("draft board save failed", { err: error.message });
+          setSaveFailed(!!error);
+        },
+        (e: unknown) => {
+          log.error("draft board save failed", { err: String(e) });
+          setSaveFailed(true);
+        },
+      );
+  }, [userId]);
+
+  // Typing saves once it pauses; leaving the board saves anything waiting.
+  const pendingNotesRef = useRef<PendingNotes | null>(null);
   const flushNotes = useCallback(() => {
-    const pending = noteSyncRef.current;
+    const pending = pendingNotesRef.current;
+    if (!pending) return;
     if (pending.timer) clearTimeout(pending.timer);
-    pending.timer = null;
-    if (pending.notes) syncNotesToSupabase(pending.notes);
-    pending.notes = null;
-  }, [syncNotesToSupabase]);
+    pendingNotesRef.current = null;
+    saveYearRow(pending.year, { notes: readNotes(pending.notes) });
+  }, [saveYearRow]);
   useEffect(() => () => flushNotes(), [flushNotes]);
 
-  // Load the account's notes. An account without any yet takes this browser's
-  // (the notes lived only in localStorage before migration 068).
-  useEffect(() => {
-    if (!supabaseUser) return;
-    let cancelled = false;
-    supabase
-      .from("rookie_board_tiers")
-      .select("notes")
-      .eq("user_id", supabaseUser.id)
-      .eq("year", ROOKIE_YEAR)
-      .maybeSingle()
-      .then(({ data, error }) => {
-        if (cancelled) return;
-        if (error) { log.error("notes load failed", { err: error.message }); return; }
-        const remote = (data?.notes ?? null) as Record<string, string> | null;
-        if (remote && Object.keys(remote).length > 0) {
-          setPlayerNotes(remote);
-          setLocalStorageItem(`draftNotes_${ROOKIE_YEAR}`, remote);
-        } else {
-          const local = getLocalStorageItem<Record<string, string>>(`draftNotes_${ROOKIE_YEAR}`, {});
-          if (Object.values(local).some((text) => text.trim())) syncNotesToSupabase(local);
-        }
-      });
-    return () => { cancelled = true; };
-  }, [supabaseUser, syncNotesToSupabase]);
-
-  const syncDraftInfoToSupabase = useCallback((info: Record<string, NflDraftEntry>) => {
-    if (!supabaseUser) return;
-    supabase.from("player_nfl_draft_info").upsert(
-      { user_id: supabaseUser.id, draft_info: info, updated_at: new Date().toISOString() },
-      { onConflict: "user_id" }
-    ).then(({ error }) => {
-      if (error) log.error("nfl draft info sync failed", { err: error.message });
-    });
-  }, [supabaseUser]);
-
-  // Load NFL draft info from Supabase when signed in; falls back to localStorage and uploads
-  // any local-only data on first sync so existing entries survive the migration.
-  useEffect(() => {
-    if (!supabaseUser) return;
-    supabase
-      .from("player_nfl_draft_info")
-      .select("draft_info")
-      .eq("user_id", supabaseUser.id)
-      .maybeSingle()
-      .then(({ data, error }) => {
-        if (error) { log.error("nfl draft info load failed", { err: error.message }); return; }
-        const remote = (data?.draft_info ?? null) as Record<string, NflDraftEntry> | null;
-        if (remote && Object.keys(remote).length > 0) {
-          setNflDraftInfo(remote);
-          setLocalStorageItem("nflDraftInfo", remote);
-        } else {
-          const local = getLocalStorageItem<Record<string, NflDraftEntry>>("nflDraftInfo", {});
-          if (Object.keys(local).length > 0) syncDraftInfoToSupabase(local);
-        }
-      });
-  }, [supabaseUser, syncDraftInfoToSupabase]);
-
-  const saveTier = (playerId: string, tierNum: number) => {
-    const next = { ...tierLabels, [playerId]: tierNum };
-    setTierLabels(next);
-    setLocalStorageItem(`draftTiersV2_${ROOKIE_YEAR}`, next);
-    syncTiersToSupabase(next);
+  const setTier = (id: string, tier: number | null) => {
+    if (!board) return;
+    const next = { ...board.tiers };
+    if (tier == null) delete next[id];
+    else next[id] = tier;
+    setLoaded((prev) => (prev && prev.key === board.key ? { ...prev, tiers: next } : prev));
+    saveYearRow(board.year, { tiers: next });
   };
 
-  const removeTier = (playerId: string) => {
-    const next = { ...tierLabels };
-    delete next[playerId];
-    setTierLabels(next);
-    setLocalStorageItem(`draftTiersV2_${ROOKIE_YEAR}`, next);
-    syncTiersToSupabase(next);
-  };
-
-  const saveNote = (playerId: string, text: string) => {
-    const next = { ...playerNotes, [playerId]: text };
-    setPlayerNotes(next);
-    setLocalStorageItem(`draftNotes_${ROOKIE_YEAR}`, next);
-    const pending = noteSyncRef.current;
-    pending.notes = next;
-    if (pending.timer) clearTimeout(pending.timer);
-    pending.timer = setTimeout(flushNotes, NOTE_SYNC_DELAY_MS);
+  const saveNote = (id: string, text: string) => {
+    if (!board) return;
+    const next = { ...board.notes, [id]: text };
+    setLoaded((prev) => (prev && prev.key === board.key ? { ...prev, notes: next } : prev));
+    if (pendingNotesRef.current && pendingNotesRef.current.year !== board.year) flushNotes();
+    const pending = pendingNotesRef.current;
+    if (pending?.timer) clearTimeout(pending.timer);
+    pendingNotesRef.current = { year: board.year, notes: next, timer: setTimeout(flushNotes, NOTE_SYNC_DELAY_MS) };
   };
 
   async function saveSnapshot() {
-    if (!supabaseUser || !snapshotName.trim()) return;
+    if (!userId || !board || !snapshotName.trim()) return;
     setSaving(true);
-    const snapshotData = rookies.map((p, i) => {
-      const key = p.player_id || `name:${p.name}`;
-      return {
-        player_id: p.player_id ?? null,
-        name: p.name,
-        position: p.position,
-        team: p.team ?? null,
-        rank: i + 1,
-        tier: tierLabels[key] ?? null,
-        fc_value: fcVal(p),
-        nfl_draft: nflDraftInfo[key] ?? null,
-      };
-    });
-    const { error } = await supabase
-      .from("big_board_snapshots")
-      .upsert(
-        { user_id: supabaseUser.id, name: snapshotName.trim(), snapshot_data: snapshotData, saved_at: new Date().toISOString() },
-        { onConflict: "user_id,name" }
-      );
-    setSaving(false);
-    if (error) {
-      log.error("snapshot save failed", { err: error.message });
-    } else {
+    setSnapshotError(false);
+    const snapshotData = draftBoardSnapshotRows(board.rows, board.tiers, (p) => fcById.get(p.id) ?? 0);
+    try {
+      const { error } = await supabase
+        .from("big_board_snapshots")
+        .upsert(
+          { user_id: userId, name: snapshotName.trim(), snapshot_data: snapshotData, saved_at: new Date().toISOString() },
+          { onConflict: "user_id,name" }
+        );
+      if (error) throw new Error(error.message);
       setSaveSuccess(true);
       setTimeout(() => { setSaveSuccess(false); setShowSaveModal(false); setSnapshotName(""); }, 1000);
+    } catch (e: unknown) {
+      log.error("snapshot save failed", { err: e instanceof Error ? e.message : String(e) });
+      setSnapshotError(true);
+    } finally {
+      setSaving(false);
     }
   }
 
-  function openDraftEdit(id: string) {
-    const info = nflDraftInfo[id];
-    setDraftTeam(info?.team ?? "");
-    setDraftRound(info?.round != null ? String(info.round) : "");
-    setDraftPick(info?.pick != null ? String(info.pick) : "");
-    setEditingDraftId(id);
+  // ── What shows ──────────────────────────────────────────────
+  const visible = useMemo(() => {
+    const q = rookieSearch.trim().toLowerCase();
+    return (rows ?? []).filter((p) =>
+      (!posFilter || p.position === posFilter) &&
+      (!q || p.name.toLowerCase().includes(q) || (p.school ?? "").toLowerCase().includes(q)));
+  }, [rows, rookieSearch, posFilter]);
+
+  const ranked = useMemo(() => (rows ?? []).filter((p) => p.overall_rank != null).length, [rows]);
+  const savedAt = useMemo(() => latestScoresSavedAt(rows ?? []), [rows]);
+  const unscored = useMemo(() => (rows ?? []).filter((p) => !p.board_scores).length, [rows]);
+
+  if (!supabaseUser) {
+    return (
+      <div className="text-slate-500 text-center py-16 text-sm">
+        Sign in to see your draft board. It lists your Scouting prospects in your Big Board&apos;s order.
+      </div>
+    );
   }
 
-  function commitDraftEdit(id: string, team: string, round: string, pick: string) {
-    const t  = team.trim().toUpperCase().slice(0, 3);
-    const rd = parseInt(round, 10);
-    const pk = parseInt(pick, 10);
-    const updated = { ...nflDraftInfo };
-    if (!t && isNaN(rd) && isNaN(pk)) {
-      delete updated[id];
-    } else {
-      updated[id] = { team: t, round: isNaN(rd) ? null : rd, pick: isNaN(pk) ? null : pk };
-    }
-    setNflDraftInfo(updated);
-    setLocalStorageItem("nflDraftInfo", updated);
-    syncDraftInfoToSupabase(updated);
-    setEditingDraftId(null);
+  if (!board) {
+    return <div className="text-slate-500 text-center py-16 text-sm">Loading your draft board…</div>;
   }
+
+  if (board.error) {
+    return (
+      <div className="text-center py-16">
+        <p className="text-slate-400 text-sm">Couldn&apos;t load your {board.year} draft board.</p>
+        <button
+          onClick={() => setReloads((n) => n + 1)}
+          className="mt-3 px-3 py-1.5 text-xs font-semibold bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition"
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
+
+  if (board.rows.length === 0) {
+    return (
+      <div className="text-center py-16 max-w-md mx-auto px-4">
+        <p className="text-slate-300 text-sm font-medium">No {board.year} prospects yet.</p>
+        <p className="text-slate-500 text-xs mt-2">
+          The draft board lists your Scouting prospects in the {board.year} class, in your Big Board&apos;s OVR
+          order. Add them in Scouting, then rank them on the Big Board.
+        </p>
+        <button
+          onClick={onOpenScouting}
+          className="mt-4 px-4 py-1.5 text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition"
+        >
+          Open Scouting
+        </button>
+      </div>
+    );
+  }
+
+  const searching = !!rookieSearch.trim();
+  const noteProspect = expandedNoteId ? board.rows.find((p) => p.id === expandedNoteId) : undefined;
 
   return (
     <div className="max-w-3xl mx-auto">
-
-      {/* Add Rookie modal */}
-      {showAddModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-          onClick={() => setShowAddModal(false)}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="add-rookie-title"
-            tabIndex={-1}
-            onKeyDown={(e) => { if (e.key === "Escape") setShowAddModal(false); }}
-            className="bg-slate-900 border border-slate-700 rounded-2xl p-5 w-full max-w-sm mx-4 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 id="add-rookie-title" className="text-white font-semibold text-sm mb-1">Add Rookie</h2>
-            <p className="text-slate-500 text-xs mb-4">
-              Add a player who isn&apos;t in the upstream rookie list. Spelling matters — exact matches to Sleeper&apos;s player database get team / ADP / FC value automatically.
-            </p>
-            <input
-              autoFocus
-              type="text"
-              placeholder="Player name (e.g. Cam Skattebo)"
-              value={addName}
-              onChange={(e) => setAddName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") commitAddRookie(); }}
-              className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white text-sm placeholder-slate-500 focus:outline-none focus:border-indigo-500 mb-3"
-            />
-            <div className="flex gap-1.5 mb-4">
-              {(["QB", "RB", "WR", "TE"] as const).map((pos) => (
-                <button
-                  key={pos}
-                  onClick={() => setAddPosition(pos)}
-                  className={`flex-1 px-2 py-1.5 text-xs font-bold rounded border transition ${
-                    addPosition === pos
-                      ? posBadge[pos] + " border-transparent"
-                      : "border-slate-700 text-slate-500 hover:text-white"
-                  }`}
-                >
-                  {pos}
-                </button>
-              ))}
-            </div>
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setShowAddModal(false)}
-                className="px-4 py-1.5 text-sm text-slate-400 hover:text-white transition"
-              >Cancel</button>
-              <button
-                onClick={commitAddRookie}
-                disabled={!addName.trim()}
-                className="px-4 py-1.5 text-sm font-semibold rounded-lg transition disabled:opacity-50 bg-indigo-600 hover:bg-indigo-500 text-white"
-              >Add</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Save Board modal */}
       {showSaveModal && (
@@ -425,12 +328,13 @@ export default function RookieBigBoard({
             <input
               autoFocus
               type="text"
-              placeholder={`e.g. ${ROOKIE_YEAR} Pre-Draft`}
+              placeholder={`e.g. ${board.year} Pre-Draft`}
               value={snapshotName}
               onChange={(e) => setSnapshotName(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") saveSnapshot(); }}
               className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white text-sm placeholder-slate-500 focus:outline-none focus:border-indigo-500 mb-4"
             />
+            {snapshotError && <p role="alert" className="text-red-400 text-xs -mt-2 mb-3">Couldn&apos;t save the snapshot. Try again.</p>}
             <div className="flex justify-end gap-2">
               <button
                 onClick={() => setShowSaveModal(false)}
@@ -455,93 +359,85 @@ export default function RookieBigBoard({
         </div>
       )}
 
-      {/* Note popup overlay */}
-      {expandedNoteId && (() => {
-        const np = rookies.find((r) => rookieKey(r) === expandedNoteId);
-        return (
+      {/* Note popup */}
+      {noteProspect && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => setExpandedNoteId(null)}
+        >
           <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-            onClick={() => setExpandedNoteId(null)}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="note-popup-title"
+            tabIndex={-1}
+            onKeyDown={(e) => { if (e.key === "Escape") setExpandedNoteId(null); }}
+            className="bg-slate-900 border border-slate-700 rounded-2xl p-5 w-full max-w-md mx-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
           >
-            <div
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="note-popup-title"
-              tabIndex={-1}
-              onKeyDown={(e) => { if (e.key === "Escape") setExpandedNoteId(null); }}
-              className="bg-slate-900 border border-slate-700 rounded-2xl p-5 w-full max-w-md mx-4 shadow-2xl"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <div id="note-popup-title" className="text-sm font-semibold text-white">{np?.name}</div>
-                  <div className="text-xs text-slate-500">{np?.position}{np?.team ? ` · ${np.team}` : ""}</div>
-                </div>
-                <button aria-label="Close note editor" onClick={() => setExpandedNoteId(null)} className="text-slate-500 hover:text-white text-lg leading-none">✕</button>
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <div id="note-popup-title" className="text-sm font-semibold text-white">{noteProspect.name}</div>
+                <div className="text-xs text-slate-500">{noteProspect.position}{noteProspect.school ? ` · ${noteProspect.school}` : ""}</div>
               </div>
-              <textarea
-                autoFocus
-                value={playerNotes[expandedNoteId] || ""}
-                onChange={(e) => saveNote(expandedNoteId, e.target.value)}
-                placeholder="Scouting notes, injury flags, scheme fit..."
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-white resize-none focus:outline-none focus:border-blue-500 placeholder:text-slate-600"
-                rows={5}
-              />
-              <div className="flex justify-end mt-3">
-                <button
-                  onClick={() => setExpandedNoteId(null)}
-                  className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-lg transition"
-                >Done</button>
-              </div>
+              <button aria-label="Close note editor" onClick={() => setExpandedNoteId(null)} className="text-slate-500 hover:text-white text-lg leading-none">✕</button>
+            </div>
+            <textarea
+              autoFocus
+              aria-label={`Note on ${noteProspect.name}`}
+              value={board.notes[noteProspect.id] || ""}
+              onChange={(e) => saveNote(noteProspect.id, e.target.value)}
+              placeholder="Scouting notes, injury flags, scheme fit..."
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-white resize-none focus:outline-none focus:border-blue-500 placeholder:text-slate-600"
+              rows={5}
+            />
+            <div className="flex justify-end mt-3">
+              <button
+                onClick={() => setExpandedNoteId(null)}
+                className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-lg transition"
+              >Done</button>
             </div>
           </div>
-        );
-      })()}
+        </div>
+      )}
 
-      {/* min-w-0 lets the search box shrink below its default input width so the
-          buttons stay on a phone screen; flex-wrap catches the search hint. */}
+      {/* Class + Save Board */}
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div className="min-w-0">
+          <h2 className="text-white font-semibold text-sm">{board.year} Rookie Class</h2>
+          <p className="text-[11px] text-slate-500">
+            {ranked} ranked · {board.rows.length - ranked} unranked · order from Scouting → Big Board (OVR)
+          </p>
+        </div>
+        <button
+          onClick={() => { setSnapshotError(false); setShowSaveModal(true); }}
+          className="px-3 py-1.5 text-xs font-semibold bg-indigo-700 hover:bg-indigo-600 text-white rounded-lg transition shrink-0"
+        >
+          Save Board
+        </button>
+      </div>
+
+      {/* min-w-0 lets the search box shrink on a phone; flex-wrap catches the hint. */}
       <div className="flex flex-wrap items-center gap-3 mb-2">
         <input
           type="text"
-          placeholder="Search rookies..."
+          aria-label="Search prospects"
+          placeholder="Search name or school..."
           value={rookieSearch}
           onChange={(e) => setRookieSearch(e.target.value)}
           className="flex-1 min-w-0 p-2 rounded bg-slate-800 text-sm"
         />
-        {rookieSearch && (
-          <span className="text-[11px] text-slate-500">Tiers hidden while searching</span>
+        {searching && (
+          <span className="text-[11px] text-slate-500">Tier dividers hidden while searching</span>
         )}
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="px-3 py-1.5 text-xs font-semibold bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition shrink-0"
-        >
-          + Add Rookie
-        </button>
-        {supabaseUser && (
-          <button
-            onClick={() => setShowSaveModal(true)}
-            className="px-3 py-1.5 text-xs font-semibold bg-indigo-700 hover:bg-indigo-600 text-white rounded-lg transition shrink-0"
-          >
-            Save Board
-          </button>
-        )}
-      </div>
-
-      {/* ±N vs FC legend */}
-      <div className="flex items-center gap-1 text-[10px] text-slate-600 mb-2 px-0.5">
-        <span>±N vs FC rank:</span>
-        <span className="text-emerald-500 font-semibold">+N</span>
-        <span>you rank higher ·</span>
-        <span className="text-red-500 font-semibold">−N</span>
-        <span>you rank lower than FantasyCalc</span>
       </div>
 
       {/* Position filter pills */}
-      <div className="flex items-center gap-1.5 mb-3">
-        {(["QB", "RB", "WR", "TE"] as const).map((pos) => (
+      <div className="flex items-center gap-1.5 mb-2">
+        {DRAFT_BOARD_POSITIONS.map((pos) => (
           <button
             key={pos}
             onClick={() => setPosFilter((prev) => prev === pos ? null : pos)}
+            aria-pressed={posFilter === pos}
             className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition ${
               posFilter === pos
                 ? posBadge[pos] + " border-transparent"
@@ -561,265 +457,139 @@ export default function RookieBigBoard({
         )}
       </div>
 
-      {/* Virtualized player list */}
-      <div
-        ref={bigBoardParentRef}
-        className="overflow-auto min-h-[600px] h-[calc(100vh-260px)]"
-      >
-        <div
-          style={{
-            height: `${bigBoardVirtualizer.getTotalSize()}px`,
-            width: "100%",
-            position: "relative",
-          }}
-        >
-          {bigBoardVirtualizer.getVirtualItems().map((virtualItem) => {
-            const { p, originalIndex } = filteredRookies[virtualItem.index];
-            const displayIndex = virtualItem.index;
-            const prevEntry = displayIndex > 0 ? filteredRookies[displayIndex - 1] : null;
+      {/* Legend: the sample dots, and how fresh the scores are */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-500 mb-1 px-0.5">
+        <ul aria-label="Sample charted" className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <li>Sample:</li>
+          {SAMPLE_TIERS.map((t) => (
+            <li key={t.tier} className="flex items-center gap-1 whitespace-nowrap">
+              <span aria-hidden="true" className={`inline-block w-2 h-2 rounded-full ${t.dot}`} />
+              {t.label}
+            </li>
+          ))}
+        </ul>
+      </div>
+      <p className="text-[10px] text-slate-600 mb-3 px-0.5">
+        {savedAt
+          ? `Scores from your last Big Board visit, ${new Date(savedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}.`
+          : "No saved scores yet."}
+        {unscored > 0 && ` ${unscored} without scores: open Scouting → Big Board to save them.`}
+      </p>
 
-            const tierKey     = p.player_id || `name:${p.name}`;
-            const prevTierKey = prevEntry
-              ? (prevEntry.p.player_id || `name:${prevEntry.p.name}`)
-              : null;
-            const hasNote  = !!(playerNotes[rookieKey(p)] || "").trim();
-            const myTier   = tierLabels[tierKey];
-            const prevTier = prevTierKey ? tierLabels[prevTierKey] : undefined;
-            const showDivider = !rookieSearch && displayIndex > 0 && myTier !== prevTier;
+      {saveFailed && (
+        <p role="alert" className="text-xs text-red-400 bg-red-950/30 border border-red-900/50 rounded-lg px-3 py-2 mb-2">
+          Couldn&apos;t save your last tier or note change. It&apos;ll try again with your next edit.
+        </p>
+      )}
 
-            const fcRank   = fcRanks[rookieKey(p)];
-            const userRank = userFcRanks[rookieKey(p)];
-            const gap = fcRank !== undefined && userRank !== undefined
-              ? fcRank - userRank
-              : null;
+      {/* Column headers */}
+      <div className={`${GRID} px-2 sm:px-3 mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500`}>
+        <span className="text-center" title={OVR_TOOLTIP}>OVR</span>
+        <span aria-hidden="true" />
+        <span>Player</span>
+        <span className="text-right" title={DYN_TOOLTIP}>Dyn</span>
+        <span className="text-right" title={PLUS_TOOLTIP}>Dyn+</span>
+        <span className="text-right" title={FC_TOOLTIP}>FC</span>
+        <span className="text-center">Tier</span>
+        <span aria-hidden="true" />
+      </div>
 
-            const playerDynVal = fcVal(p);
-            // Match by both player_id and normalized name — name-only rookies (e.g. unmatched
-            // FantasyCalc entries with no Sleeper player_id) would otherwise never show TAKEN
-            // when drafted by other teams.
-            const isTaken = (!!p.player_id && draftedPlayerIds.has(String(p.player_id)))
-              || (!!p.name && draftedPlayerIds.has(`name:${normalizeRookieName(p.name)}`));
+      {visible.length === 0 && (
+        <p className="text-slate-500 text-center py-8 text-sm">No prospects match.</p>
+      )}
 
-            return (
-              <div
-                key={virtualItem.key}
-                data-index={virtualItem.index}
-                ref={bigBoardVirtualizer.measureElement}
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  width: "100%",
-                  transform: `translateY(${virtualItem.start}px)`,
-                }}
-              >
-                {showDivider && (
-                  <div className="flex items-center gap-3 my-2 px-1">
-                    <div className="flex-1 h-px bg-slate-600/50" />
-                    {myTier !== undefined && (
-                      <span className="text-[10px] font-bold tracking-widest text-slate-500 uppercase">Tier {myTier}</span>
-                    )}
-                    <div className="flex-1 h-px bg-slate-600/50" />
-                  </div>
+      {visible.map((p, i) => {
+        const prev = i > 0 ? visible[i - 1] : null;
+        const myTier = board.tiers[p.id];
+        const unrankedStart = p.overall_rank == null && (!prev || prev.overall_rank != null);
+        const showTierDivider = !searching && !!prev && myTier !== board.tiers[prev.id];
+        const hasNote = !!(board.notes[p.id] || "").trim();
+        const fc = fcById.get(p.id) ?? 0;
+        const nfl = nflDraftLabel(p);
+        const taken = draftedPlayerIds.has(`name:${normalizeRookieName(p.name)}`);
+        const s = p.board_scores;
+        const badge = posBadge[p.position] || "bg-slate-700 text-slate-400";
+        const dynTitle = !s ? NO_SCORES
+          : s.dynasty == null ? "Needs an AE Score first (chart more of him in Scouting)"
+          : `${DYN_TOOLTIP} Age ×${s.weights.age}, size ×${s.weights.size}.`;
+        const plusTitle = !s ? NO_SCORES
+          : s.plus == null ? (s.dynasty == null ? "Needs an AE Score first" : "Shows once the NFL draft round is set on the Scouting Big Board")
+          : `Dynasty Score Plus as of your last Big Board visit. Draft capital ×${s.weights.draft}.`;
+
+        return (
+          <div key={p.id}>
+            {unrankedStart && (
+              <div className="flex items-center gap-3 my-2 px-1">
+                <div className="flex-1 h-px bg-slate-700/60" />
+                <span className="text-[10px] font-bold tracking-widest text-slate-500 uppercase">Unranked · by Dynasty Score</span>
+                <div className="flex-1 h-px bg-slate-700/60" />
+              </div>
+            )}
+            {showTierDivider && (
+              <div className="flex items-center gap-3 my-2 px-1">
+                <div className="flex-1 h-px bg-slate-600/50" />
+                {myTier !== undefined && (
+                  <span className="text-[10px] font-bold tracking-widest text-slate-500 uppercase">Tier {myTier}</span>
                 )}
+                <div className="flex-1 h-px bg-slate-600/50" />
+              </div>
+            )}
 
-                <div
-                  draggable={editingDraftId !== tierKey && editingNameId !== tierKey}
-                  onDragStart={() => { if (editingDraftId !== tierKey && editingNameId !== tierKey) setDragIndex(originalIndex); }}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={() => {
-                    if (dragIndex !== null) {
-                      movePlayer(dragIndex, originalIndex);
-                      setDragIndex(null);
-                    }
-                  }}
-                  className={`flex items-center justify-between bg-slate-800/70 px-3 py-1.5 mb-0.5 rounded-lg text-sm cursor-move hover:bg-slate-700/70 transition${isTaken ? " opacity-40" : ""}`}
-                >
-                  <div className="flex gap-3 items-center min-w-0">
-                    <input
-                      type="number"
-                      value={tempRanks[originalIndex] ?? originalIndex + 1}
-                      onChange={(e) => setTempRanks((prev) => ({ ...prev, [originalIndex]: e.target.value }))}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          handleRankChange(originalIndex, String(tempRanks[originalIndex] ?? originalIndex + 1));
-                          setTempRanks((prev) => { const u = { ...prev }; delete u[originalIndex]; return u; });
-                        }
-                      }}
-                      onBlur={() => {
-                        if (tempRanks[originalIndex] !== undefined) {
-                          handleRankChange(originalIndex, tempRanks[originalIndex]);
-                          setTempRanks((prev) => { const u = { ...prev }; delete u[originalIndex]; return u; });
-                        }
-                      }}
-                      className="w-12 text-center bg-transparent text-slate-400 outline-none"
-                    />
-                    <div className="flex items-center gap-2 min-w-0">
-                      {editingNameId === tierKey ? (
-                        <input
-                          autoFocus
-                          value={editName}
-                          onChange={(e) => setEditName(e.target.value)}
-                          onBlur={() => commitNameEdit(p.name)}
-                          onKeyDown={(e) => { if (e.key === "Enter") commitNameEdit(p.name); if (e.key === "Escape") setEditingNameId(null); }}
-                          onClick={(e) => e.stopPropagation()}
-                          onMouseDown={(e) => e.stopPropagation()}
-                          className="font-medium px-1.5 py-0.5 bg-slate-900 border border-blue-500 rounded text-white focus:outline-none min-w-0 flex-shrink"
-                        />
-                      ) : (
-                        <span className="font-medium truncate">{p.name}</span>
-                      )}
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold shrink-0 ${posBadge[p.position] || "bg-slate-700 text-slate-400"}`}>
-                        {p.position}
-                      </span>
-                      {p.team && <span className="text-[10px] text-slate-500 shrink-0">{p.team}</span>}
-                      {playerDynVal > 0 && <span className="text-[10px] text-slate-400 font-mono shrink-0">{playerDynVal.toLocaleString()}</span>}
-                      {/* NFL Draft tag */}
-                      {editingDraftId === tierKey ? (
-                        <div
-                          className="flex items-center gap-1"
-                          onBlur={(e) => {
-                            if (!e.currentTarget.contains(e.relatedTarget as Node))
-                              commitDraftEdit(tierKey, draftTeam, draftRound, draftPick);
-                          }}
-                          onClick={(e) => e.stopPropagation()}
-                          onMouseDown={(e) => e.stopPropagation()}
-                        >
-                          <input
-                            autoFocus
-                            placeholder="TM"
-                            maxLength={3}
-                            className="w-9 px-1 py-0.5 bg-slate-900 border border-indigo-500 rounded text-white text-[10px] focus:outline-none text-center uppercase"
-                            value={draftTeam}
-                            onChange={(e) => setDraftTeam(e.target.value.toUpperCase())}
-                            onKeyDown={(e) => { if (e.key === "Enter") commitDraftEdit(tierKey, draftTeam, draftRound, draftPick); if (e.key === "Escape") setEditingDraftId(null); }}
-                          />
-                          <input
-                            placeholder="Rd"
-                            title={`Round 1–7, or ${UNDRAFTED_ROUND} for undrafted`}
-                            type="number" min={1} max={UNDRAFTED_ROUND}
-                            className="w-7 px-0.5 py-0.5 bg-slate-900 border border-indigo-500 rounded text-white text-[10px] focus:outline-none text-center"
-                            value={draftRound}
-                            onChange={(e) => setDraftRound(e.target.value)}
-                            onKeyDown={(e) => { if (e.key === "Enter") commitDraftEdit(tierKey, draftTeam, draftRound, draftPick); if (e.key === "Escape") setEditingDraftId(null); }}
-                          />
-                          <input
-                            placeholder="#"
-                            type="number" min={1}
-                            className="w-9 px-0.5 py-0.5 bg-slate-900 border border-indigo-500 rounded text-white text-[10px] focus:outline-none text-center"
-                            value={draftPick}
-                            onChange={(e) => setDraftPick(e.target.value)}
-                            onKeyDown={(e) => { if (e.key === "Enter") commitDraftEdit(tierKey, draftTeam, draftRound, draftPick); if (e.key === "Escape") setEditingDraftId(null); }}
-                          />
-                        </div>
-                      ) : (() => {
-                        const info = nflDraftInfo[tierKey];
-                        const hasInfo = info?.team || info?.round != null || info?.pick != null;
-                        const label = hasInfo ? nflDraftSlotLabel(info) : null;
-                        return (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); openDraftEdit(tierKey); }}
-                            onMouseDown={(e) => e.stopPropagation()}
-                            className="shrink-0"
-                            title={hasInfo ? "Edit NFL draft slot" : "Add NFL draft slot"}
-                          >
-                            {label ? (
-                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-900/50 text-indigo-300 font-medium border border-indigo-700/50">
-                                {label}
-                              </span>
-                            ) : (
-                              <span className="text-[10px] px-1.5 py-0.5 rounded border border-dashed border-slate-600 text-slate-500 hover:border-indigo-500 hover:text-indigo-400 transition font-medium">
-                                + NFL
-                              </span>
-                            )}
-                          </button>
-                        );
-                      })()}
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 shrink-0 ml-2">
-                    {/* Edit name + (for renamed rookies) reset to upstream + (for user-added) delete */}
-                    {editingNameId !== tierKey && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setEditName(p.name); setEditingNameId(tierKey); }}
-                        onMouseDown={(e) => e.stopPropagation()}
-                        className="text-slate-600 hover:text-blue-400 text-xs leading-none"
-                        title="Edit name"
-                      >✎</button>
-                    )}
-                    {editingNameId !== tierKey && Object.values(rookieOverrides.nameEdits).some((v) => v.toLowerCase() === p.name.toLowerCase()) && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const entry = Object.entries(rookieOverrides.nameEdits).find(([, v]) => v.toLowerCase() === p.name.toLowerCase());
-                          if (entry) clearNameEdit(entry[0]);
-                        }}
-                        onMouseDown={(e) => e.stopPropagation()}
-                        className="text-slate-600 hover:text-amber-400 text-xs leading-none"
-                        title="Reset to original sheet name"
-                      >↺</button>
-                    )}
-                    {addedNameSet.has(p.name.toLowerCase()) && editingNameId !== tierKey && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); if (window.confirm(`Remove ${p.name} from your rookie board?`)) removeAddedRookie(p.name); }}
-                        onMouseDown={(e) => e.stopPropagation()}
-                        className="text-slate-600 hover:text-red-400 text-xs leading-none"
-                        title="Remove from board"
-                      >✕</button>
-                    )}
-                    {isTaken && <span className="text-[9px] font-bold text-slate-500 border border-slate-700 px-1 py-0.5 rounded leading-none">TAKEN</span>}
-                    {gap === null ? (
-                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded text-slate-400 bg-slate-700/60 border border-slate-600/40" title="Not ranked by FantasyCalc">NR</span>
-                    ) : gap === 0 ? (
-                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded text-slate-400 bg-slate-800/40" title="Same rank as FantasyCalc">Even</span>
-                    ) : (
-                      <span
-                        className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                          gap > 0 ? "text-emerald-400 bg-emerald-900/20" : "text-red-400 bg-red-900/20"
-                        }`}
-                        title={gap > 0 ? `You rank them ${gap} spots higher than FantasyCalc` : `You rank them ${Math.abs(gap)} spots lower than FantasyCalc`}
-                      >
-                        {gap > 0 ? `+${gap}` : `${gap}`}
-                      </span>
-                    )}
-
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setExpandedNoteId(rookieKey(p)); }}
-                      className={`text-sm transition ${hasNote ? "text-amber-400 hover:text-amber-300" : "text-slate-600 hover:text-slate-400"}`}
-                      title={hasNote ? "View/edit note" : "Add note"}
-                    >
-                      {hasNote ? "📝" : "○"}
-                    </button>
-
-                    {!rookieSearch && (
-                      <select
-                        value={myTier ?? ""}
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value);
-                          if (!isNaN(val)) saveTier(tierKey, val);
-                          else removeTier(tierKey);
-                        }}
-                        onClick={(e) => e.stopPropagation()}
-                        className={`text-[10px] font-bold rounded px-1 py-0.5 outline-none cursor-pointer border transition ${
-                          myTier !== undefined
-                            ? "bg-blue-900/40 border-blue-800/60 text-blue-300"
-                            : "bg-slate-700/50 border-slate-700 text-slate-500"
-                        }`}
-                      >
-                        <option value="">Tier</option>
-                        {Array.from({ length: 15 }, (_, i) => i + 1).map((n) => (
-                          <option key={n} value={n}>T{n}</option>
-                        ))}
-                      </select>
-                    )}
-                  </div>
+            <div className={`${GRID} bg-slate-800/70 px-2 sm:px-3 py-1.5 mb-0.5 rounded-lg text-sm${taken ? " opacity-40" : ""}`}>
+              <span className="text-center text-xs font-mono text-slate-400">{p.overall_rank ?? "—"}</span>
+              {sampleDot(p.position, s?.sample)}
+              {/* On a phone the name gets the whole first line and the
+                  position badge drops to the second, beside the school. */}
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="font-medium truncate">{p.name}</span>
+                  <span className={`hidden sm:inline text-[10px] px-1.5 py-0.5 rounded-full font-semibold shrink-0 ${badge}`}>
+                    {p.position}
+                  </span>
+                </div>
+                <div className="text-[10px] truncate">
+                  <span className={`sm:hidden mr-1 px-1 rounded font-semibold ${badge}`}>{p.position}</span>
+                  {nfl
+                    ? <span className="text-indigo-300">{nfl}</span>
+                    : <span className="text-slate-500">{p.school || "—"}</span>}
+                  {taken && <span className="ml-1.5 font-bold text-slate-400">TAKEN</span>}
                 </div>
               </div>
-            );
-          })}
-        </div>
-      </div>
+              {scoreCell(s?.dynasty, dynTitle)}
+              {scoreCell(s?.plus, plusTitle)}
+              <span className="text-right text-[10px] font-mono text-slate-400 tabular-nums" title={FC_TOOLTIP}>
+                {fc > 0 ? fc.toLocaleString() : "—"}
+              </span>
+              <select
+                aria-label={`Tier for ${p.name}`}
+                value={myTier ?? ""}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value, 10);
+                  setTier(p.id, Number.isNaN(val) ? null : val);
+                }}
+                className={`w-full appearance-none text-center text-[10px] font-bold rounded px-0.5 py-0.5 outline-none cursor-pointer border transition ${
+                  myTier !== undefined
+                    ? "bg-blue-900/40 border-blue-800/60 text-blue-300"
+                    : "bg-slate-700/50 border-slate-700 text-slate-500"
+                }`}
+              >
+                <option value="">Tier</option>
+                {TIER_CHOICES.map((n) => (
+                  <option key={n} value={n}>T{n}</option>
+                ))}
+              </select>
+              <button
+                onClick={() => setExpandedNoteId(p.id)}
+                aria-label={hasNote ? `Edit note on ${p.name}` : `Add note on ${p.name}`}
+                title={hasNote ? "View/edit note" : "Add note"}
+                className={`text-sm leading-none transition ${hasNote ? "text-amber-400 hover:text-amber-300" : "text-slate-600 hover:text-slate-400"}`}
+              >
+                {hasNote ? "📝" : "○"}
+              </button>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

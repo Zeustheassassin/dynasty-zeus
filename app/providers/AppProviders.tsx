@@ -24,7 +24,6 @@ interface AppProvidersProps {
   rawFcValues?: Record<string, number>;
   leagueAdjustedRedraftValues: Record<string, number>;
   pickFcValues: Record<string, number>;
-  fcNameValues: Record<string, number>;
   selectedLeagueDirection: RosterDirectionProfile | null;
   selectedLeagueDirectionAdjusted: RosterDirectionProfile | null;
   selectedLeagueSimulation: LeagueSimulation | null;
@@ -52,7 +51,6 @@ export function AppProviders({
   rawFcValues = {},
   leagueAdjustedRedraftValues,
   pickFcValues,
-  fcNameValues,
   selectedLeagueDirection,
   selectedLeagueDirectionAdjusted,
   selectedLeagueSimulation,
@@ -70,7 +68,6 @@ export function AppProviders({
       rawFcValues={rawFcValues}
       leagueAdjustedRedraftValues={leagueAdjustedRedraftValues}
       pickFcValues={pickFcValues}
-      fcNameValues={fcNameValues}
       selectedLeagueDirection={selectedLeagueDirection}
       selectedLeagueDirectionAdjusted={selectedLeagueDirectionAdjusted}
       selectedLeagueSimulation={selectedLeagueSimulation}

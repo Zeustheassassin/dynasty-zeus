@@ -9,11 +9,6 @@ export { POS_COLOR as posColor, POS_BADGE as posBadge } from "../../lib/uiTheme"
 
 export const PICK_KEY_RE = /^\d{4}-(\d+)\.(\d+)$/;
 
-// Stable key for a rookie board player — uses player_id when available so that
-// pre-draft players (no Sleeper ID yet) don't all collapse onto the same null key.
-export const rookieKey = (r: { player_id?: string | null; name: string }): string =>
-  r.player_id || `name:${normalizeRookieName(r.name)}`;
-
 export function closestPickEquiv(playerValue: number, pickFcValues: Record<string, number>): { label: string; pickNo: number } {
   if (playerValue <= 0 || !Object.keys(pickFcValues).length) return { label: "—", pickNo: 0 };
   let bestKey = "";
@@ -38,32 +33,6 @@ export function pickEquivColor(equivPickNo: number, draftedPickNo: number): stri
   if (diff >= 12)  return "text-red-400";
   if (diff >= 4)   return "text-orange-400";
   return "text-slate-300";
-}
-
-export function levenshtein(a: string, b: string): number {
-  const m = a.length, n = b.length;
-  const dp: number[][] = Array.from({ length: m + 1 }, (_, i) =>
-    Array.from({ length: n + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0))
-  );
-  for (let i = 1; i <= m; i++)
-    for (let j = 1; j <= n; j++)
-      dp[i][j] = a[i - 1] === b[j - 1]
-        ? dp[i - 1][j - 1]
-        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
-  return dp[m][n];
-}
-
-export function fuzzyFcLookup(name: string, fcNameValues: Record<string, number>): number {
-  const norm = normalizeRookieName(name);
-  if (fcNameValues[norm] !== undefined) return fcNameValues[norm];
-  const maxDist = norm.length <= 12 ? 1 : 2;
-  let bestVal = 0, bestDist = Infinity;
-  for (const [key, val] of Object.entries(fcNameValues)) {
-    if (val <= 0 || Math.abs(key.length - norm.length) > maxDist) continue;
-    const dist = levenshtein(norm, key);
-    if (dist <= maxDist && dist < bestDist) { bestDist = dist; bestVal = val; }
-  }
-  return bestVal;
 }
 
 export function toPickSlot(avgPickNo: number, teamSize = 12): string {

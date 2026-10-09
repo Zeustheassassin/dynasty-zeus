@@ -398,8 +398,9 @@ export default function BigBoard({
   // on every device and feeds Dynasty Score Plus. This moves any old local
   // rounds into the database once. A prospect that already has a database
   // round keeps it. Written entries leave localStorage; a failed write stays
-  // for the next visit. "nflDraftInfo" is left alone: the Rookie Big Board
-  // keeps its own Sleeper-id entries under that key.
+  // for the next visit. "nflDraftInfo" itself is left alone: it also holds the
+  // retired Draft Hub editor's Sleeper-id entries (draft board sync Stage 3
+  // reads NFL draft slots from the prospect instead).
   const migratedRoundsRef = useRef(false);
   useEffect(() => {
     if (loading || prospects.length === 0 || migratedRoundsRef.current) return;

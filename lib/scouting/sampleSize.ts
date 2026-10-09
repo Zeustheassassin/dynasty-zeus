@@ -16,15 +16,9 @@
 import type { ProspectWithStats } from "../types";
 import type { CompositePos } from "./aeComposite";
 import { isCompositePos, SAMPLE_UNIT, type CompositeInputs } from "./prospectScores";
+import type { SampleTier } from "./sampleTiers";
 
-export type SampleTier = "full" | "half" | "quarter" | "low";
-
-export const SAMPLE_TIERS: { tier: SampleTier; label: string; dot: string }[] = [
-  { tier: "full",    label: "Full",      dot: "bg-emerald-400" },
-  { tier: "half",    label: "50–99.9%",  dot: "bg-yellow-400" },
-  { tier: "quarter", label: "25–49.9%",  dot: "bg-orange-500" },
-  { tier: "low",     label: "Under 25%", dot: "bg-red-500" },
-];
+export { SAMPLE_TIERS, type SampleTier } from "./sampleTiers";
 
 /** A position's full sample: the metric whose plays count, and how many. */
 export interface SampleFull {

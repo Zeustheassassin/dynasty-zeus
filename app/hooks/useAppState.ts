@@ -363,13 +363,9 @@ const {
 } = useManagementState(supabaseUser);
 
 // ── ROOKIE BOARD ───────────────────────────────────────────────
-const {
-  rookies, setRookies,
-  fcNameValues,
-  handleRankChange,
-  addRookie, editRookieName, removeAddedRookie, clearNameEdit,
-  rookieOverrides,
-} = useRookieBoardState(supabaseUser);
+// The market pool behind the live draft (sheet + Sleeper ADP + FC). The Draft
+// Hub's Rookie Big Board reads the user's Scouting prospects instead.
+const { rookies } = useRookieBoardState(supabaseUser);
 
 
 
@@ -3253,12 +3249,6 @@ const saveSnapshotNow = async () => {
   // -------------------------
   // UI
   // -------------------------
-  const movePlayer = (fromIndex: number, toIndex: number) => {
-  const updated = [...rookies];
-  const [moved] = updated.splice(fromIndex, 1);
-  updated.splice(toIndex, 0, moved);
-  setRookies(updated);
-};
 const onNavigateToAttempts = useCallback((leagueId: string) => {
   const league = leaguesRef2.current.find((l) => l.league_id === leagueId);
   if (league) {
@@ -3328,7 +3318,6 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     rawFcValues: calcFcValues,
     leagueAdjustedRedraftValues,
     pickFcValues,
-    fcNameValues,
     selectedLeagueDirection,
     selectedLeagueDirectionAdjusted,
     selectedLeagueSimulation,
@@ -3491,10 +3480,6 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     predictedDraftPicks,
     draftPoolRanks,
     topAvailableRookies,
-    movePlayer,
-    handleRankChange,
-    addRookie, editRookieName, removeAddedRookie, clearNameEdit,
-    rookieOverrides,
     tradeHubSection,
     calcOpponentRosterId,
     selectedLeagueDraftHasOccurred,

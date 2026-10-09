@@ -7,16 +7,26 @@ import { nflDraftSlotLabel } from "../../lib/draftRound";
 
 type NflDraft = { team: string; round: number | null; pick: number | null } | null;
 
+// A saved row. Snapshots from the Scouting-driven board (draft board sync
+// Stage 3, lib/helpers/draftBoard.ts) also carry the prospect id, school, OVR
+// and Dynasty / Dynasty+; older ones (the dragged board) don't.
 type SnapshotPlayer = {
   player_id: string | null;
+  prospect_id?: string;
   name: string;
   position: string;
   team: string | null;
+  school?: string | null;
   rank: number;
+  ovr?: number | null;
   tier: number | null;
   fc_value: number;
+  dynasty?: number | null;
+  plus?: number | null;
   nfl_draft: NflDraft;
 };
+
+const signed = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}`;
 
 type Snapshot = {
   id: string;
@@ -148,9 +158,10 @@ export default function HistoricalBigBoards() {
             {players.map((p) => {
               const nfl = p.nfl_draft;
               const nflLabel = nfl ? nflDraftSlotLabel(nfl) : null;
+              const where = p.team || p.school;
               return (
                 <div
-                  key={`${p.rank}-${p.name}`}
+                  key={p.prospect_id ?? `${p.rank}-${p.name}`}
                   className="flex items-center gap-2 bg-slate-800/70 px-3 py-2 rounded-lg text-sm"
                 >
                   <span className="w-7 text-center text-slate-500 text-xs font-mono shrink-0">{p.rank}</span>
@@ -158,7 +169,7 @@ export default function HistoricalBigBoards() {
                   <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold shrink-0 ${posBadge[p.position] || "bg-slate-700 text-slate-400"}`}>
                     {p.position}
                   </span>
-                  {p.team && <span className="text-[10px] text-slate-500 shrink-0">{p.team}</span>}
+                  {where && <span className="text-[10px] text-slate-500 shrink-0 truncate max-w-[8rem]">{where}</span>}
                   {p.tier != null && (
                     <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-900/40 border border-blue-800/60 text-blue-300 shrink-0">
                       T{p.tier}
@@ -167,6 +178,16 @@ export default function HistoricalBigBoards() {
                   {nflLabel && (
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-900/50 text-indigo-300 font-medium border border-indigo-700/50 shrink-0">
                       {nflLabel}
+                    </span>
+                  )}
+                  {p.dynasty != null && (
+                    <span className="text-[10px] shrink-0 text-slate-500" title="Dynasty Score when saved">
+                      Dyn <span className={`font-semibold ${p.dynasty >= 0 ? "text-emerald-400" : "text-red-400"}`}>{signed(p.dynasty)}</span>
+                    </span>
+                  )}
+                  {p.plus != null && (
+                    <span className="text-[10px] shrink-0 text-slate-500" title="Dynasty Score Plus when saved">
+                      Dyn+ <span className={`font-semibold ${p.plus >= 0 ? "text-emerald-400" : "text-red-400"}`}>{signed(p.plus)}</span>
                     </span>
                   )}
                   {p.fc_value > 0 && (

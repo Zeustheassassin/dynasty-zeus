@@ -198,7 +198,6 @@ export default function UserScoutHub({
                 leagueAdjustedFcValues={spyLeagueBundle.leagueAdjustedFcValues}
                 leagueAdjustedRedraftValues={spyLeagueBundle.leagueAdjustedRedraftValues}
                 pickFcValues={pickFcValues}
-                fcNameValues={{}}
                 selectedLeagueDirection={spyLeagueBundle.selectedLeagueDirection}
                 selectedLeagueDirectionAdjusted={spyLeagueBundle.selectedLeagueDirectionAdjusted}
                 selectedLeagueSimulation={spyLeagueBundle.selectedLeagueSimulation}

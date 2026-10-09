@@ -1,16 +1,23 @@
 "use client";
-import { useState, useEffect, useRef, type Dispatch, type SetStateAction } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabaseclient";
 import { BASE_YEAR, normalizeRookieName } from "../lib/helpers";
 import { getFcValuesRaw } from "../lib/fcValuesStore";
 import { logger } from "../lib/logger";
 import { sleeperApi } from "../lib/sleeperApi";
-import { getLocalStorageItem, setLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 import type { RookieBoardPlayer } from "../lib/types";
 
 const log = logger("hooks/useRookieBoardState");
 
-// ── Constants (exported so page.tsx logout handler can clear the right keys) ──
+// The market pool behind the live draft: the upstream sheet, Sleeper ADP and
+// FantasyCalc, in the order the user last dragged it into, else FantasyCalc's.
+// Read-only since draft board sync Stage 3 (2026-10-09): the Draft Hub's Rookie
+// Big Board lists the user's Scouting prospects in the Big Board's OVR order
+// instead (components/draftHub/RookieBigBoard.tsx), so nothing here is dragged,
+// added or renamed any more. Orders and overrides saved before then still
+// apply. Stage 4 splits the live draft between that board and this pool.
+
+// ── Constants (exported so the logout handler can clear the old local keys) ──
 // The rookie-draft class year tracks the CALENDAR (the upcoming/active draft
 // class, which rolls Jan 1) — NOT the NFL season year (which holds in Jan/Feb).
 export const ROOKIE_YEAR = String(BASE_YEAR);
@@ -19,20 +26,18 @@ export const ROOKIE_BOARD_VERSION = `${ROOKIE_YEAR}_sf_v5`;
 export const ROOKIE_BOARD_RESET_KEY = `rookieBoardReset_${ROOKIE_BOARD_VERSION}`;
 
 // Built-in name corrections for upstream sheet typos. Applied as a fallback when the user
-// hasn't set their own override for that name. User overrides (in rookie_board_overrides
+// has no override for that name. User overrides (in the rookie_board_overrides
 // table) take precedence over this list.
 const ROOKIE_NAME_CORRECTIONS: Record<string, string> = {
   "max kalre": "Max Klare",
 };
 
-const ROOKIE_OVERRIDES_LS_KEY = `rookieBoardOverrides_${ROOKIE_BOARD_VERSION}`;
-
-export interface RookieAddition {
+interface RookieAddition {
   name: string;
   position: string;
 }
 
-export interface UserRookieOverrides {
+interface UserRookieOverrides {
   added: RookieAddition[];
   nameEdits: Record<string, string>; // normalized old name → corrected name
 }
@@ -47,18 +52,14 @@ interface AdpPlayerInfo {
   adp: number;
 }
 
-// Where the saved board order comes from: the DB (logged in, has a saved row),
-// the localStorage cache (logged out, or DB had nothing), or nowhere yet
-// (first time this board version has loaded for this browser/user).
+// The order the user last saved (rookie_board, signed in), or none: then
+// FantasyCalc's.
 type OrderSource =
-  | { kind: "supabase" | "local"; names: string[] }
-  | { kind: "first-time" };
+  | { kind: "saved"; names: string[] }
+  | { kind: "none" };
 
-// Everything fetched over the network (Sleeper ADP, FantasyCalc, the sheet,
-// and the saved order), cached here so that adding/editing/removing an
-// override only recomputes the board in memory — it never re-fetches. Rookie
-// overrides change on every keystroke of a name edit; re-hitting Sleeper's
-// ADP endpoint on each one risks tripping their rate limiting.
+// Everything fetched over the network: the sheet, Sleeper ADP, FantasyCalc
+// and the saved order.
 interface RawBoardData {
   sheetPlayers: { name: string; position: string }[]; // raw sheet names, corrections NOT yet applied
   adpByName: Map<string, AdpPlayerInfo>;
@@ -108,7 +109,7 @@ function buildBoard(raw: RawBoardData, overrides: UserRookieOverrides): RookieBo
       return a.name.localeCompare(b.name);
     });
 
-  if (orderSource.kind === "first-time") return canonicalBoard;
+  if (orderSource.kind === "none") return canonicalBoard;
 
   const orderMap = new Map(orderSource.names.map((name, i) => [normalizeRookieName(name), i]));
   return [...canonicalBoard].sort((a, b) => {
@@ -121,150 +122,30 @@ function buildBoard(raw: RawBoardData, overrides: UserRookieOverrides): RookieBo
   });
 }
 
+interface SleeperAdpEntry {
+  player_id?: string | number;
+  player?: { first_name?: string; last_name?: string; position?: string; team?: string };
+  stats?: { adp_dynasty_2qb?: number };
+}
+
 export interface UseRookieBoardStateReturn {
+  /** The market pool, in the saved order (else FantasyCalc's). */
   rookies: RookieBoardPlayer[];
-  setRookies: Dispatch<SetStateAction<RookieBoardPlayer[]>>;
-  fcNameValues: Record<string, number>;
-  handleRankChange: (currentIndex: number, newRank: string) => void;
-  addRookie: (name: string, position: string) => void;
-  editRookieName: (originalName: string, newName: string) => void;
-  removeAddedRookie: (name: string) => void;
-  clearNameEdit: (originalName: string) => void;
-  rookieOverrides: UserRookieOverrides;
 }
 
 export function useRookieBoardState(supabaseUser: { id: string } | null): UseRookieBoardStateReturn {
   const [rookies, setRookies] = useState<RookieBoardPlayer[]>([]);
-  const [fcNameValues, setFcNameValues] = useState<Record<string, number>>({});
-  const [rookieOverrides, setRookieOverrides] = useState<UserRookieOverrides>(() =>
-    getLocalStorageItem<UserRookieOverrides>(ROOKIE_OVERRIDES_LS_KEY, EMPTY_OVERRIDES)
-  );
+  const userId = supabaseUser?.id ?? null;
 
-  // Stable ref so the save-effect can read the current user without declaring
-  // supabaseUser as a dependency (which would overwrite Supabase data on login).
-  const supabaseUserRef = useRef<{ id: string } | null>(null);
-  useEffect(() => { supabaseUserRef.current = supabaseUser; }, [supabaseUser]);
-
-  // The network-fetched sheet/ADP/FC/saved-order data, cached so overrides
-  // can be re-applied (buildBoard) without re-fetching. Null until the first
-  // load completes.
-  const rawDataRef = useRef<RawBoardData | null>(null);
-  const [rawDataVersion, setRawDataVersion] = useState(0);
-
-  // Load user overrides (additions + name edits) from Supabase on login.
-  useEffect(() => {
-    if (!supabaseUser?.id) return;
-    supabase
-      .from("rookie_board_overrides")
-      .select("added,name_edits")
-      .eq("user_id", supabaseUser.id)
-      .eq("year", ROOKIE_BOARD_VERSION)
-      .maybeSingle()
-      .then(({ data, error }) => {
-        if (error) { log.error("rookie_board_overrides load failed", { err: error.message }); return; }
-        if (!data) return;
-        const next: UserRookieOverrides = {
-          added: Array.isArray(data.added) ? (data.added as RookieAddition[]) : [],
-          nameEdits: (data.name_edits && typeof data.name_edits === "object")
-            ? (data.name_edits as Record<string, string>) : {},
-        };
-        setRookieOverrides(next);
-        setLocalStorageItem(ROOKIE_OVERRIDES_LS_KEY, next);
-      });
-  }, [supabaseUser?.id]);
-
-  // Persist override changes to localStorage + Supabase.
-  const saveOverrides = (next: UserRookieOverrides) => {
-    setRookieOverrides(next);
-    setLocalStorageItem(ROOKIE_OVERRIDES_LS_KEY, next);
-    const user = supabaseUserRef.current;
-    if (user) {
-      supabase.from("rookie_board_overrides").upsert(
-        {
-          user_id: user.id,
-          year: ROOKIE_BOARD_VERSION,
-          added: next.added,
-          name_edits: next.nameEdits,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "user_id,year" }
-      ).then(({ error }) => {
-        if (error) log.error("rookie_board_overrides save failed", { err: error.message });
-      });
-    }
-  };
-
-  const addRookie = (name: string, position: string) => {
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    const norm = normalizeRookieName(trimmed);
-    if (rookieOverrides.added.some((a) => normalizeRookieName(a.name) === norm)) return;
-    saveOverrides({ ...rookieOverrides, added: [...rookieOverrides.added, { name: trimmed, position }] });
-  };
-
-  const editRookieName = (originalName: string, newName: string) => {
-    const trimmed = newName.trim();
-    if (!trimmed) return;
-    const normOld = normalizeRookieName(originalName);
-    if (normalizeRookieName(trimmed) === normOld) return; // no-op
-    saveOverrides({ ...rookieOverrides, nameEdits: { ...rookieOverrides.nameEdits, [normOld]: trimmed } });
-  };
-
-  const removeAddedRookie = (name: string) => {
-    const norm = normalizeRookieName(name);
-    saveOverrides({ ...rookieOverrides, added: rookieOverrides.added.filter((a) => normalizeRookieName(a.name) !== norm) });
-  };
-
-  const clearNameEdit = (originalName: string) => {
-    const norm = normalizeRookieName(originalName);
-    if (!(norm in rookieOverrides.nameEdits)) return;
-    const next = { ...rookieOverrides.nameEdits };
-    delete next[norm];
-    saveOverrides({ ...rookieOverrides, nameEdits: next });
-  };
-
-  /** Moves a rookie to a new rank position by dragging or typing. */
-  const handleRankChange = (currentIndex: number, newRank: string) => {
-    const rank = parseInt(newRank, 10);
-    if (!rank || rank < 1 || rank > rookies.length) return;
-    const updated: RookieBoardPlayer[] = [...rookies];
-    const [moved] = updated.splice(currentIndex, 1);
-    updated.splice(rank - 1, 0, moved);
-    setRookies(updated);
-  };
-
-  // Save to localStorage + Supabase whenever the board changes.
-  // Uses ref for supabaseUser to avoid triggering on login.
-  useEffect(() => {
-    if (rookies.length > 0) {
-      setLocalStorageItem(`rookieBoard_${ROOKIE_BOARD_VERSION}`, rookies);
-      const user = supabaseUserRef.current;
-      if (user) {
-        const orderedNames = rookies.map((r) => r.name);
-        supabase.from("rookie_board").upsert(
-          { user_id: user.id, year: ROOKIE_BOARD_VERSION, players: orderedNames, updated_at: new Date().toISOString() },
-          { onConflict: "user_id,year" }
-        ).then(({ error }: { error: { message: string; code?: string } | null }) => {
-          if (error) log.error("rookie_board save failed", { err: error.message, code: error.code });
-        });
-      }
-    }
-  }, [rookies]); // intentionally omits supabaseUser — use ref to avoid overwriting Supabase on login
-
-  // Fetch the sheet, Sleeper ADP, FantasyCalc values, and saved order.
-  // Runs on mount AND whenever supabaseUser.id changes (login / logout) —
-  // deliberately does NOT depend on rookieOverrides. Overrides change on
-  // every keystroke of a name edit/add, and re-running this would mean a new
-  // Sleeper ADP + FantasyCalc fetch per keystroke; instead the results are
-  // cached in rawDataRef and re-combined with overrides by buildBoard below,
-  // entirely in memory.
+  // Fetch the sheet, Sleeper ADP, FantasyCalc values and, signed in, the saved
+  // order and overrides. Runs on mount and on login / logout.
   useEffect(() => {
     const controller = new AbortController();
     const { signal } = controller;
     let cancelled = false;
 
-    const loadRawData = async () => {
-      // 1. Fetch sheet, Sleeper ADP (for metadata), and FC Superflex (2QB) raw data in parallel
+    const load = async () => {
+      // 1. Sheet, Sleeper ADP (for metadata) and FC Superflex (2QB) raw data in parallel
       const [sheetText, adpResponse, fcRaw] = await Promise.all([
         fetch('/api/rookie-board-sheet', { signal }).then((res) => res.text()),
         sleeperApi.getRookieBoardADP(ROOKIE_YEAR).catch(() => []),
@@ -272,10 +153,9 @@ export function useRookieBoardState(supabaseUser: { id: string } | null): UseRoo
       ]);
       if (cancelled) return;
 
-      // Build name → FC value map and sleeperId → FC value map
+      // Name → FC value and sleeperId → FC value
       const fcByName = new Map<string, number>();
       const fcBySleeperId = new Map<string, number>();
-
       if (Array.isArray(fcRaw)) {
         (fcRaw as { player?: { position?: string; name?: string; firstName?: string; lastName?: string; sleeperId?: string | number }; value?: number }[]).forEach((entry) => {
           if (entry.player?.position === "PICK") return;
@@ -288,7 +168,6 @@ export function useRookieBoardState(supabaseUser: { id: string } | null): UseRoo
             fcBySleeperId.set(String(sid), entry.value);
           }
         });
-        setFcNameValues(Object.fromEntries(fcByName));
       }
 
       // Raw sheet names — corrections are applied later by buildBoard, not here.
@@ -304,11 +183,6 @@ export function useRookieBoardState(supabaseUser: { id: string } | null): UseRoo
         })
         .filter((player) => player.name && player.name !== "Player Invalid");
 
-      interface SleeperAdpEntry {
-        player_id?: string | number;
-        player?: { first_name?: string; last_name?: string; position?: string; team?: string };
-        stats?: { adp_dynasty_2qb?: number };
-      }
       // Sleeper ADP only used for player_id, position, team metadata — NOT for sort order
       const adpByName = new Map<string, AdpPlayerInfo>();
       (adpResponse as unknown as SleeperAdpEntry[])
@@ -333,65 +207,50 @@ export function useRookieBoardState(supabaseUser: { id: string } | null): UseRoo
           });
         });
 
-      // 2. Resolve the saved order once: Supabase (if logged in) > localStorage > none yet.
-      //    Isolated try/catch so a Supabase error falls through to localStorage.
-      let orderSource: OrderSource = { kind: "first-time" };
-      const currentUser = supabaseUserRef.current;
-      if (currentUser) {
-        try {
-          const { data, error } = await supabase
+      // 2. Signed in: the saved order and overrides. A failed read falls back
+      //    to FantasyCalc's order and no overrides.
+      let orderSource: OrderSource = { kind: "none" };
+      let overrides: UserRookieOverrides = EMPTY_OVERRIDES;
+      if (userId) {
+        const [order, saved] = await Promise.all([
+          supabase
             .from("rookie_board")
             .select("players")
-            .eq("user_id", currentUser.id)
+            .eq("user_id", userId)
             .eq("year", ROOKIE_BOARD_VERSION)
-            .single();
-          if (!error && data?.players && Array.isArray(data.players) && data.players.length > 0) {
-            orderSource = { kind: "supabase", names: data.players as string[] };
-          }
-        } catch {
-          // Supabase unreachable — fall through to localStorage / FC default
+            .maybeSingle(),
+          supabase
+            .from("rookie_board_overrides")
+            .select("added,name_edits")
+            .eq("user_id", userId)
+            .eq("year", ROOKIE_BOARD_VERSION)
+            .maybeSingle(),
+        ]);
+        if (order.error) {
+          log.warn("rookie_board load failed", { err: order.error.message });
+        } else if (Array.isArray(order.data?.players) && order.data.players.length > 0) {
+          orderSource = { kind: "saved", names: order.data.players as string[] };
         }
-      }
-      if (orderSource.kind === "first-time") {
-        const saved = getLocalStorageItem<RookieBoardPlayer[] | null>(`rookieBoard_${ROOKIE_BOARD_VERSION}`, null);
-        const hasReset = getLocalStorageItem<boolean>(ROOKIE_BOARD_RESET_KEY, false);
-        if (hasReset && saved) {
-          const savedNames = saved.map((p: RookieBoardPlayer | string) => (typeof p === "string" ? p : p.name));
-          orderSource = { kind: "local", names: savedNames };
+        if (saved.error) {
+          log.warn("rookie_board_overrides load failed", { err: saved.error.message });
+        } else if (saved.data) {
+          overrides = {
+            added: Array.isArray(saved.data.added) ? (saved.data.added as RookieAddition[]) : [],
+            nameEdits: (saved.data.name_edits && typeof saved.data.name_edits === "object")
+              ? (saved.data.name_edits as Record<string, string>) : {},
+          };
         }
       }
 
       if (cancelled) return;
-      rawDataRef.current = { sheetPlayers, adpByName, fcByName, fcBySleeperId, orderSource };
-      setRawDataVersion((v) => v + 1); // refs don't trigger renders — bump to run the build effect below
+      setRookies(buildBoard({ sheetPlayers, adpByName, fcByName, fcBySleeperId, orderSource }, overrides));
     };
 
-    loadRawData().catch(() => {});
+    load().catch((e: unknown) => {
+      if (!cancelled) log.warn("rookie pool load failed", { err: String(e) });
+    });
     return () => { cancelled = true; controller.abort(); };
-  }, [supabaseUser?.id]);
+  }, [userId]);
 
-  // Recombine the cached raw data with the current overrides into the visible
-  // board — pure in-memory work, runs whenever either changes. This is what
-  // makes adding/editing/removing a rookie a local re-sort instead of a
-  // network reload.
-  useEffect(() => {
-    const raw = rawDataRef.current;
-    if (!raw) return;
-    const board = buildBoard(raw, rookieOverrides);
-    setRookies(board);
-    setLocalStorageItem(`rookieBoard_${ROOKIE_BOARD_VERSION}`, board);
-    if (raw.orderSource.kind === "first-time") setLocalStorageItem(ROOKIE_BOARD_RESET_KEY, true);
-  }, [rawDataVersion, rookieOverrides]);
-
-  return {
-    rookies,
-    setRookies,
-    fcNameValues,
-    handleRankChange,
-    addRookie,
-    editRookieName,
-    removeAddedRookie,
-    clearNameEdit,
-    rookieOverrides,
-  };
+  return { rookies };
 }

@@ -4,7 +4,7 @@ import { useLeague } from "../lib/LeagueContext";
 import { useValues } from "../lib/ValuesContext";
 import PickValuesTab from "./draft/PickValuesTab";
 import type {
-  SleeperLeague, SleeperUser, SleeperDraft, SleeperDraftPick,
+  SleeperLeague, SleeperUser, SleeperDraft, SleeperDraftPick, SleeperNFLState,
   AugmentedPick, RookieBoardPlayer, PredictedPick, DraftPoolRanks,
 } from "../lib/types";
 import DraftHistory from "./draftHub/DraftHistory";
@@ -71,16 +71,13 @@ interface DraftHubProps {
 
   refreshDraftBoard: () => void;
   loadDraftScout: (userId: string) => void;
-  movePlayer: (fromIndex: number, toIndex: number) => void;
-  handleRankChange: (currentIndex: number, newRank: string) => void;
-  addRookie: (name: string, position: string) => void;
-  editRookieName: (originalName: string, newName: string) => void;
-  removeAddedRookie: (name: string) => void;
-  clearNameEdit: (originalName: string) => void;
-  rookieOverrides: { added: { name: string; position: string }[]; nameEdits: Record<string, string> };
   loadingDraftRefresh: boolean;
 
   leagues: SleeperLeague[];
+  /** Sleeper's /state/nfl: the Rookie Big Board's class falls back to it (useDraftBoardClass). */
+  nflState: SleeperNFLState | null;
+  /** Opens Scouting, where the Rookie Big Board's prospects and order come from. */
+  onOpenScouting: () => void;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
@@ -93,16 +90,14 @@ function DraftHub({
   draftSettings, draftPicks, draftOrder, allPicks,
   rookies,
   draftedPlayerIds, predictedDraftPicks, draftPoolRanks, topAvailableRookies,
-  refreshDraftBoard, loadDraftScout, movePlayer, handleRankChange,
-  addRookie, editRookieName, removeAddedRookie, clearNameEdit, rookieOverrides,
+  refreshDraftBoard, loadDraftScout,
   loadingDraftRefresh,
   leagues,
+  nflState, onOpenScouting,
 }: DraftHubProps) {
   const { rosters } = useLeague();
   const { pickFcValues } = useValues();
   const [rookieSearch, setRookieSearch] = useState("");
-  const [dragIndex, setDragIndex] = useState<number | null>(null);
-  const [tempRanks, setTempRanks] = useState<Record<number, string>>({});
 
   const myRosterId = rosters.find((r) => r.owner_id === user?.user_id)?.roster_id;
 
@@ -167,21 +162,11 @@ function DraftHub({
          ══════════════════════════════════════════════════════ */}
       {draftHubSection === "BIG_BOARD" && (
         <RookieBigBoard
-          rookies={rookies}
+          nflState={nflState}
+          draftedPlayerIds={draftedPlayerIds}
           rookieSearch={rookieSearch}
           setRookieSearch={setRookieSearch}
-          dragIndex={dragIndex}
-          setDragIndex={setDragIndex}
-          tempRanks={tempRanks}
-          setTempRanks={setTempRanks}
-          draftedPlayerIds={draftedPlayerIds}
-          movePlayer={movePlayer}
-          handleRankChange={handleRankChange}
-          addRookie={addRookie}
-          editRookieName={editRookieName}
-          removeAddedRookie={removeAddedRookie}
-          clearNameEdit={clearNameEdit}
-          rookieOverrides={rookieOverrides}
+          onOpenScouting={onOpenScouting}
         />
       )}
 

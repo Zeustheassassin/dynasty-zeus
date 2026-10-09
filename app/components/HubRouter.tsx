@@ -226,13 +226,6 @@ interface HubRouterProps {
   predictedDraftPicks: Record<string, PredictedPick>;
   draftPoolRanks: DraftPoolRanks;
   topAvailableRookies: RookieBoardPlayer[];
-  movePlayer: (fromIndex: number, toIndex: number) => void;
-  handleRankChange: (currentIndex: number, newRank: string) => void;
-  addRookie: (name: string, position: string) => void;
-  editRookieName: (originalName: string, newName: string) => void;
-  removeAddedRookie: (name: string) => void;
-  clearNameEdit: (originalName: string) => void;
-  rookieOverrides: { added: { name: string; position: string }[]; nameEdits: Record<string, string> };
 
   // Trade Hub
   tradeHubSection: "CALCULATOR" | "FINDER" | "TRADE_LOG" | "ATTEMPTS";
@@ -344,8 +337,7 @@ export function HubRouter({
   draftHubSection, setDraftHubSection, myDraftSlotPicks, setMyDraftSlotPicks,
   draftSlotEditing, setDraftSlotEditing, draftSlotSearchQuery, setDraftSlotSearchQuery,
   draftSettings, draftPicks, draftOrder, predictedDraftPicks, draftPoolRanks,
-  topAvailableRookies, movePlayer, handleRankChange,
-  addRookie, editRookieName, removeAddedRookie, clearNameEdit, rookieOverrides,
+  topAvailableRookies,
   tradeHubSection, calcOpponentRosterId,
   selectedLeagueDraftHasOccurred,
   leaguePlayerTags, handleSetAssetDisposition,
@@ -366,6 +358,9 @@ export function HubRouter({
   playerProfileId, calcFcValues, leagueAdjustedRedraftValues, playerNotes, savePlayerNote,
   myPlayerSet,
 }: HubRouterProps) {
+  // Stable, so the memoized Draft Hub doesn't re-render on every router render.
+  const openScoutingHub = React.useCallback(() => setMainTab("SCOUTING_HUB"), [setMainTab]);
+
   return (
     <>
       <div className={
@@ -616,15 +611,10 @@ export function HubRouter({
     topAvailableRookies={topAvailableRookies}
     refreshDraftBoard={refreshDraftBoard}
     loadDraftScout={loadDraftScout}
-    movePlayer={movePlayer}
-    handleRankChange={handleRankChange}
-    addRookie={addRookie}
-    editRookieName={editRookieName}
-    removeAddedRookie={removeAddedRookie}
-    clearNameEdit={clearNameEdit}
-    rookieOverrides={rookieOverrides}
     loadingDraftRefresh={loadingDraftRefresh}
     leagues={leagues}
+    nflState={nflState}
+    onOpenScouting={openScoutingHub}
   />
   </ErrorBoundary>
 )}
