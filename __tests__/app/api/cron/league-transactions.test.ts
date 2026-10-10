@@ -68,6 +68,34 @@ function makeQueryBuilder(table: string) {
   };
 }
 
+// ── Pacer stub ────────────────────────────────────────────────────────
+// A real 200/min pacer would add ~300ms per Sleeper call to every test. The
+// stub counts calls (so tests can assert every Sleeper request is paced) and
+// runs an optional per-call hook (the time-budget test advances the clock).
+const pacer = vi.hoisted(() => ({
+  rpm: [] as number[],
+  calls: 0,
+  onPace: null as null | (() => void),
+}));
+vi.mock("../../../../lib/sleeperServer", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../../lib/sleeperServer")>();
+  return {
+    ...actual,
+    createPacer: (rpm: number) => {
+      pacer.rpm.push(rpm);
+      return async () => {
+        pacer.calls++;
+        pacer.onPace?.();
+      };
+    },
+  };
+});
+
+// Runs default to 14:00 UTC — not the once-a-day 4-leg sweep (00:xx UTC), so
+// the leg window doesn't depend on when the suite happens to run.
+const MIDDAY_UTC = new Date("2026-10-10T14:00:00Z");
+const DEEP_SWEEP_UTC = new Date("2026-10-10T00:05:00Z");
+
 vi.mock("@supabase/supabase-js", () => ({
   createClient: (_url: string, _key: string, _opts: unknown) => {
     fake.createClientCalls++;
@@ -176,12 +204,18 @@ beforeEach(() => {
   };
   fetchRoutes = [];
   installFetch();
+  pacer.rpm = [];
+  pacer.calls = 0;
+  pacer.onPace = null;
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(MIDDAY_UTC);
   process.env.CRON_SECRET = SECRET;
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://x.supabase.co";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "service.role.key";
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
   // Restore env
@@ -294,30 +328,44 @@ describe("GET week-window calculation", () => {
     fake.links = { rows: [], error: null }; // no users → skip fan-out, just inspect weeks
   });
 
-  it("derives 4 descending weeks from nflState.leg", async () => {
+  // Sleeper call-budget Stage 2 (10/10): 2 legs a run — Sleeper files a move
+  // under the leg it was proposed in, and every stored in-season move this
+  // season completed in its filing leg or the next.
+  it("derives 2 descending legs from nflState.leg", async () => {
     route((u) => u.includes("/state/nfl"), { week: 99, leg: 10 });
     const GET = await loadGET();
     const res = await GET(makeReq(`Bearer ${SECRET}`));
     const body = await res.json();
-    // leg (10) preferred over week (99); lookback 4 → [10,9,8,7]
+    // leg (10) preferred over week (99); lookback 2 → [10,9]
+    expect(body.weeks).toEqual([10, 9]);
+    expect(body.deepSweep).toBe(false);
+  });
+
+  it("reads 4 legs on the first run of the UTC day (slow-accepted trades)", async () => {
+    vi.setSystemTime(DEEP_SWEEP_UTC);
+    route((u) => u.includes("/state/nfl"), { leg: 10 });
+    const GET = await loadGET();
+    const body = await (await GET(makeReq(`Bearer ${SECRET}`))).json();
     expect(body.weeks).toEqual([10, 9, 8, 7]);
+    expect(body.deepSweep).toBe(true);
   });
 
   it("falls back to nflState.week when leg is absent", async () => {
     route((u) => u.includes("/state/nfl"), { week: 6 });
     const GET = await loadGET();
     const res = await GET(makeReq(`Bearer ${SECRET}`));
-    expect((await res.json()).weeks).toEqual([6, 5, 4, 3]);
+    expect((await res.json()).weeks).toEqual([6, 5]);
   });
 
   it("clamps the upper bound to week 18", async () => {
     route((u) => u.includes("/state/nfl"), { leg: 50 });
     const GET = await loadGET();
     const res = await GET(makeReq(`Bearer ${SECRET}`));
-    expect((await res.json()).weeks).toEqual([18, 17, 16, 15]);
+    expect((await res.json()).weeks).toEqual([18, 17]);
   });
 
   it("never emits a week below 1 (offseason / week 1)", async () => {
+    vi.setSystemTime(DEEP_SWEEP_UTC); // 4-leg lookback, so the floor actually bites
     route((u) => u.includes("/state/nfl"), { leg: 2 });
     const GET = await loadGET();
     const res = await GET(makeReq(`Bearer ${SECRET}`));
@@ -639,5 +687,88 @@ describe("GET per-user annotation pipeline", () => {
     expect(body.linksFound).toBe(2);
     expect(body.usersProcessed).toBe(2);
     expect(body.rowsWritten).toBe(1);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// Sleeper call budget (Stage 2, 2026-10-10): leagues fetched once across
+// users, every Sleeper request paced, time budget stops new leagues only
+// ════════════════════════════════════════════════════════════════════
+
+describe("GET Sleeper call budget", () => {
+  const twoUsersSharingL1 = () => {
+    fake.links = {
+      rows: [
+        { user_id: "auth-1", sleeper_user_id: "sleeper-1" },
+        { user_id: "auth-2", sleeper_user_id: "sleeper-2" },
+      ],
+      error: null,
+    };
+    route((u) => u.includes("/state/nfl"), { leg: 5, week: 5 });
+    route((u) => u.includes("/user/sleeper-1/leagues/"), [
+      dynastyLeague("L1", "Shared Dynasty"),
+      dynastyLeague("L2", "Only One"),
+    ]);
+    route((u) => u.includes("/user/sleeper-2/leagues/"), [dynastyLeague("L1", "Shared Dynasty")]);
+    route((u) => u.includes("/league/L1/transactions/5"), [completeTx({ transaction_id: "shared-tx" })]);
+    route((u) => u.includes("/league/L2/transactions/5"), [completeTx({ transaction_id: "own-tx" })]);
+  };
+  const fetchedUrls = () =>
+    (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.map((c) => String(c[0]));
+
+  it("fetches a league shared by two users once, and writes it for both", async () => {
+    twoUsersSharingL1();
+    const GET = await loadGET();
+    const body = await (await GET(makeReq(`Bearer ${SECRET}`))).json();
+
+    const l1Calls = fetchedUrls().filter((u) => u.includes("/league/L1/"));
+    // 2 legs + users + rosters + drafts — once, not once per member.
+    expect(l1Calls).toHaveLength(5);
+    expect(body.leaguesFound).toBe(2);
+    expect(body.usersProcessed).toBe(2);
+
+    const byUser = Object.fromEntries(
+      (fake.upserts as Array<Array<{ user_id: string; transaction_id: string }>>).map((batch) => [
+        batch[0].user_id,
+        batch.map((r) => r.transaction_id).sort(),
+      ])
+    );
+    expect(byUser).toEqual({ "auth-1": ["own-tx", "shared-tx"], "auth-2": ["shared-tx"] });
+  });
+
+  it("paces every Sleeper request at LEAGUE_TX_CRON_RPM", async () => {
+    twoUsersSharingL1();
+    const { LEAGUE_TX_CRON_RPM } = await import("@/lib/constants");
+    const GET = await loadGET();
+    const body = await (await GET(makeReq(`Bearer ${SECRET}`))).json();
+
+    expect(pacer.rpm).toEqual([LEAGUE_TX_CRON_RPM]);
+    // state + 2 league lists + 2 leagues x 5 = 13, every one through the pacer.
+    expect(fetchedUrls()).toHaveLength(13);
+    expect(pacer.calls).toBe(13);
+    expect(body.sleeperCalls).toBe(13);
+  });
+
+  it("past the time budget it stops starting leagues but still writes what it fetched", async () => {
+    fake.links = { rows: [{ user_id: "auth-1", sleeper_user_id: "sleeper-1" }], error: null };
+    route((u) => u.includes("/state/nfl"), { leg: 5, week: 5 });
+    route((u) =>
+      u.includes("/user/sleeper-1/leagues/"),
+      Array.from({ length: 6 }, (_, i) => dynastyLeague(`L${i + 1}`, `League ${i + 1}`))
+    );
+    for (let i = 1; i <= 6; i++) {
+      route((u) => u.includes(`/league/L${i}/transactions/5`), [completeTx({ transaction_id: `tx-L${i}` })]);
+    }
+    // Each paced request "takes" 20s, so the 270s budget runs out mid-run.
+    pacer.onPace = () => vi.setSystemTime(Date.now() + 20_000);
+
+    const GET = await loadGET();
+    const body = await (await GET(makeReq(`Bearer ${SECRET}`))).json();
+
+    expect(body.leaguesSkippedTimeBudget).toBeGreaterThan(0);
+    expect(body.leaguesSkippedTimeBudget).toBeLessThan(6);
+    const written = (fake.upserts[0] as Array<{ transaction_id: string }>).map((r) => r.transaction_id);
+    expect(written).toHaveLength(6 - body.leaguesSkippedTimeBudget);
+    expect(body.usersProcessed).toBe(1);
   });
 });

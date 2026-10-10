@@ -16,7 +16,9 @@ const h = vi.hoisted(() => {
   const createClient = vi.fn();
   const safeFetch = vi.fn();
   const withConcurrency = vi.fn();
-  return { checkRateLimit, getUser, createClient, safeFetch, withConcurrency };
+  // Counts paced requests so a test can assert every Sleeper call goes through the pacer.
+  const pacer = { rpm: [] as number[], calls: 0 };
+  return { checkRateLimit, getUser, createClient, safeFetch, withConcurrency, pacer };
 });
 
 // Rate limiter: allow by default; individual tests can override.
@@ -120,21 +122,32 @@ h.safeFetch.mockImplementation(async (url: string) => {
   return null;
 });
 const withConcurrency = h.withConcurrency;
-h.withConcurrency.mockImplementation(
-  async (items: unknown[], fn: (item: unknown) => Promise<void>) => {
-    for (const item of items) await fn(item);
+// Sequential, but honours shouldBail like the real pool does before each item.
+const sequentialPool = async (
+  items: unknown[],
+  fn: (item: unknown) => Promise<void>,
+  _limit?: number,
+  opts?: { shouldBail?: () => boolean },
+) => {
+  for (const item of items) {
+    if (opts?.shouldBail?.()) break;
+    await fn(item);
   }
-);
+};
+h.withConcurrency.mockImplementation(sequentialPool);
 vi.mock("../../../lib/sleeperServer", () => ({
   safeFetch: h.safeFetch,
   withConcurrency: h.withConcurrency,
   // The real pacer sleeps to hold the crawl under Sleeper's rate ceiling;
-  // in tests it resolves immediately so the suite doesn't wait on wall clock.
-  createPacer: () => async () => {},
+  // in tests it resolves immediately (counting calls) so the suite doesn't wait on wall clock.
+  createPacer: (rpm: number) => {
+    h.pacer.rpm.push(rpm);
+    return async () => { h.pacer.calls++; };
+  },
 }));
 
-import { POST } from "@/app/api/compile-consensus/route";
-import { COMPILE_MAX_CONNECTED_USERS } from "@/lib/constants";
+import { POST, maxDuration } from "@/app/api/compile-consensus/route";
+import { COMPILE_MAX_CONNECTED_USERS, COMPILE_TARGET_RPM, COMPILE_PICKS_DEADLINE_MS } from "@/lib/constants";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -192,11 +205,9 @@ beforeEach(() => {
     }
     return null;
   });
-  withConcurrency.mockImplementation(
-    async (items: unknown[], fn: (item: unknown) => Promise<void>) => {
-      for (const item of items) await fn(item);
-    }
-  );
+  withConcurrency.mockImplementation(sequentialPool);
+  h.pacer.rpm = [];
+  h.pacer.calls = 0;
 });
 
 // ── Guard: rate limiting ──────────────────────────────────────────────────────
@@ -769,5 +780,73 @@ describe("POST compile-consensus — locked years", () => {
       makeReq({ sleeperUserId: "200", accessToken: "t", years: [THIS_YEAR] }) as never
     );
     expect(res.status).toBe(200);
+  });
+});
+
+// ── Sleeper call budget (Stage 2, 2026-10-10) ────────────────────────────────
+// Every Sleeper call — discovery, the player map, each draft's picks — is paced at
+// COMPILE_TARGET_RPM (450/min). A recent class is ~4,000 calls (~9 min), so the route runs
+// up to 800s, and a class whose picks fetch is cut off keeps its previous compile.
+describe("POST compile-consensus — Sleeper call budget", () => {
+  function oneLeagueTwoDrafts() {
+    fetchResponders.push((url) => {
+      if (url.endsWith(`/user/200/leagues/nfl/${THIS_YEAR}`)) return [dynastyLeague("L1")];
+      if (url.endsWith("/league/L1/rosters")) return [{ roster_id: 1, owner_id: "200" }];
+      if (url.includes("/leagues/nfl/")) return [];
+      if (url.endsWith(`/user/200/drafts/nfl/${THIS_YEAR}`))
+        return ["D1", "D2"].map((draft_id) => ({
+          draft_id, league_id: "L1", season: String(THIS_YEAR), status: "complete", settings: { rounds: 4 },
+        }));
+      if (url.includes("/drafts/nfl/")) return [];
+      if (url.endsWith("/players/nfl")) {
+        const db: Record<string, unknown> = {};
+        for (let i = 0; i < 200; i++) db[`x${i}`] = { first_name: "Db", last_name: `${i}` };
+        return db;
+      }
+      if (url.includes("/picks"))
+        return [{ player_id: "rook", pick_no: 1, metadata: { first_name: "Rookie", last_name: "One", position: "WR", years_exp: 0 } }];
+      return undefined;
+    });
+  }
+
+  it("runs up to 800s (needs Vercel Pro)", () => {
+    expect(maxDuration).toBe(800);
+  });
+
+  it("paces every Sleeper call at COMPILE_TARGET_RPM, including the player map and every draft's picks", async () => {
+    oneLeagueTwoDrafts();
+    await readEvents(await POST(makeReq({ sleeperUserId: "200", accessToken: "t", years: [THIS_YEAR] }) as never));
+
+    const urls = safeFetch.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.endsWith("/players/nfl"))).toBe(true);
+    expect(urls.filter((u) => u.includes("/picks"))).toHaveLength(2);
+    expect(h.pacer.rpm).toEqual([COMPILE_TARGET_RPM]);
+    expect(h.pacer.calls).toBe(urls.length);
+  });
+
+  it("keeps a class's previous compile when its picks fetch runs out of time", async () => {
+    oneLeagueTwoDrafts();
+    let now = 1_700_000_000_000;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+    // The first draft's picks take the compile past its picks deadline.
+    fetchResponders.unshift((url) => {
+      if (url.endsWith("/draft/D1/picks")) now += COMPILE_PICKS_DEADLINE_MS + 1_000;
+      return undefined;
+    });
+    try {
+      const events = await readEvents(
+        await POST(makeReq({ sleeperUserId: "200", accessToken: "t", years: [THIS_YEAR] }) as never)
+      );
+      const urls = safeFetch.mock.calls.map((c) => String(c[0]));
+      expect(urls.some((u) => u.endsWith("/draft/D2/picks"))).toBe(false);
+      // Nothing written for the class: no cache upsert, no prune, no meta, no year_done.
+      expect(upserts.filter((u) => u.table === "consensus_draft_cache")).toHaveLength(0);
+      expect(upserts.filter((u) => u.table === "consensus_draft_meta")).toHaveLength(0);
+      expect(deletes).toHaveLength(0);
+      expect(events.some((e) => e.type === "year_done")).toBe(false);
+      expect(events.some((e) => String(e.message ?? "").includes("kept its previous compile"))).toBe(true);
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 });

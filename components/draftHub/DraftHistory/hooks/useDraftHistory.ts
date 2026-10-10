@@ -8,6 +8,7 @@ import { useLeague } from "../../../../lib/LeagueContext";
 import { useValues } from "../../../../lib/ValuesContext";
 import { BASE_YEAR, ROOKIE_DRAFT_MAX_ROUNDS } from "../../../../lib/helpers";
 import { toPickSlot } from "../../shared";
+import { compileByClass } from "./compileByClass";
 import type { SleeperLeague, SleeperUser } from "../../../../lib/types";
 import type {
   HistoryDraftPick, HistoryDraftEntry, SleeperDraftBasic,
@@ -317,78 +318,45 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
     // the server disagree.
     years = years.filter((y) => !consensusMeta[String(y)]?.locked);
     if (years.length === 0) return;
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) return;
 
     setCompiling(true);
     setCompileLog("Starting compilation…");
     setCompileProgress(0);
 
-    try {
-      const res = await fetch("/api/compile-consensus", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sleeperUserId: user.user_id,
-          accessToken:   session.access_token,
-          years,
-        }),
-      });
-
-      if (!res.ok || !res.body) {
-        setCompileLog("Failed to start compilation — check that you are logged in.");
-        setCompiling(false);
-        return;
-      }
-
-      const reader  = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer    = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const event = JSON.parse(line);
-            if (event.type === "status" || event.type === "done" || event.type === "error") {
-              if (event.message)  setCompileLog(event.message);
-              if (event.progress !== undefined) setCompileProgress(event.progress);
-            }
-            if (event.type === "year_done") {
-              setConsensusMeta((prev) => ({
-                ...prev,
-                [String(event.year)]: {
-                  draftCount:         event.draftCount,
-                  leagueCount:        event.leagueCount,
-                  connectedUserCount: event.connectedUserCount ?? 0,
-                  compiledAt:         new Date().toISOString(),
-                  // A freshly compiled year is never locked — a locked one could
-                  // not have been compiled (the route rejects it).
-                  locked:             false,
-                },
-              }));
-              setConsensusCache((prev) => {
-                const next = { ...prev };
-                delete next[String(event.year)];
-                return next;
-              });
-              setConsensusHistory((prev) => {
-                const next = { ...prev };
-                delete next[String(event.year)];
-                return next;
-              });
-            }
-          } catch { /* malformed line — skip */ }
-        }
-      }
-    } catch (err) {
-      setCompileLog(`Error: ${(err as Error)?.message ?? "Unknown error"}`);
-    }
+    // One class per request — see compileByClass for why.
+    await compileByClass({
+      years,
+      sleeperUserId: user.user_id,
+      getAccessToken: async () => (await supabase.auth.getSession()).data.session?.access_token ?? null,
+      onLog: setCompileLog,
+      onProgress: setCompileProgress,
+      onYearDone: (event) => {
+        if (event.year === undefined) return;
+        const year = String(event.year);
+        setConsensusMeta((prev) => ({
+          ...prev,
+          [year]: {
+            draftCount:         event.draftCount ?? 0,
+            leagueCount:        event.leagueCount ?? 0,
+            connectedUserCount: event.connectedUserCount ?? 0,
+            compiledAt:         new Date().toISOString(),
+            // A freshly compiled year is never locked — a locked one could
+            // not have been compiled (the route rejects it).
+            locked:             false,
+          },
+        }));
+        setConsensusCache((prev) => {
+          const next = { ...prev };
+          delete next[year];
+          return next;
+        });
+        setConsensusHistory((prev) => {
+          const next = { ...prev };
+          delete next[year];
+          return next;
+        });
+      },
+    });
 
     setCompiling(false);
     setCompileProgress(100);

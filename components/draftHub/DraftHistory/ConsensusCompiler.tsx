@@ -106,6 +106,7 @@ export default function ConsensusCompiler({
         <div className="mt-3 border-t border-slate-700 pt-3">
           <div className="text-xs text-slate-400 mb-2">
             Select years to compile. Existing data for each selected year will be replaced.
+            Years compile one after another (a recent class takes about 9 minutes), so keep this tab open until they finish.
           </div>
           <div className="flex flex-wrap gap-1.5 mb-3">
             {YEAR_RANGE.map((yr) => {

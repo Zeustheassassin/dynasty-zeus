@@ -11,6 +11,7 @@ import {
   COMPILE_MAX_LEAGUES,
   COMPILE_TARGET_RPM,
   COMPILE_DISCOVERY_BUDGET_MS,
+  COMPILE_PICKS_DEADLINE_MS,
   SLEEPER_PLAYERS_TIMEOUT_MS,
   getCompilationYearRange,
   getDiscoveryYears,
@@ -19,7 +20,9 @@ import { ROOKIE_DRAFT_MAX_ROUNDS } from "../../../lib/helpers/season";
 import { isDynastyLeague } from "../../../lib/helpers/leagueType";
 
 // Allow up to 5 minutes for large networks (Vercel Pro/Enterprise)
-export const maxDuration = 300;
+// 800s needs Vercel Pro (Hobby caps functions at 300s). Every Sleeper call here is paced at
+// COMPILE_TARGET_RPM (450/min), and a recent draft class is ~4,000 calls — ~9 min.
+export const maxDuration = 800;
 
 const SLEEPER_BASE        = SLEEPER_BASE_URL;
 const CONCURRENCY         = COMPILE_CONCURRENCY;
@@ -98,11 +101,14 @@ async function compileDrafts(
   emit: (event: object) => void
 ): Promise<void> {
 
-  // Every Sleeper call in the discovery phase goes through this pacer. Bounded
-  // concurrency alone does not bound the request *rate* — see createPacer.
+  // Every Sleeper call this compile makes — discovery, the player map, every
+  // draft's picks — goes through this pacer. Bounded concurrency alone does not
+  // bound the request *rate* — see createPacer.
   const pace = createPacer(COMPILE_TARGET_RPM);
-  const deadline = Date.now() + COMPILE_DISCOVERY_BUDGET_MS;
+  const startedAt = Date.now();
+  const deadline = startedAt + COMPILE_DISCOVERY_BUDGET_MS;
   const outOfTime = () => Date.now() > deadline;
+  const picksOutOfTime = () => Date.now() > startedAt + COMPILE_PICKS_DEADLINE_MS;
   const paced = async <T,>(url: string, timeoutMs?: number): Promise<T | null> => {
     await pace();
     return safeFetch<T>(url, timeoutMs);
@@ -314,7 +320,7 @@ async function compileDrafts(
   // Many 2024/2025 picks have no metadata.first_name/last_name because the player was added
   // to Sleeper's database after the dynasty draft was held. Without this fallback those picks
   // are silently skipped, causing the compiled draft count to be correct but the player list empty.
-  const sleeperPlayers = await safeFetch<Record<string, SleeperPlayerBasic>>(
+  const sleeperPlayers = await paced<Record<string, SleeperPlayerBasic>>(
     `${SLEEPER_BASE}/players/nfl`,
     PLAYERS_TIMEOUT_MS
   ) ?? {};
@@ -346,6 +352,15 @@ async function compileDrafts(
       continue;
     }
 
+    if (picksOutOfTime()) {
+      emit({
+        type: "status",
+        message: `Out of time before ${year}'s picks — its previous compile is unchanged. Compile ${year} on its own to refresh it.`,
+        progress: 67,
+      });
+      continue;
+    }
+
     emit({
       type: "status",
       message: `Fetching picks from ${draftIds.length} ${year} rookie drafts (this may take a few minutes)…`,
@@ -361,11 +376,12 @@ async function compileDrafts(
     }>();
 
     let draftsOk = 0, draftsFailed = 0, picksSkippedVet = 0;
+    let picksTruncated = false;
 
     await withConcurrency(
       draftIds,
       async (draftId) => {
-        const picks = await safeFetch<SleeperPickBasic[]>(`${SLEEPER_BASE}/draft/${draftId}/picks`);
+        const picks = await paced<SleeperPickBasic[]>(`${SLEEPER_BASE}/draft/${draftId}/picks`);
         if (!Array.isArray(picks)) { draftsFailed++; return; }
         draftsOk++;
 
@@ -400,8 +416,21 @@ async function compileDrafts(
           if (name.length > entry.player_name.length) entry.player_name = name;
         });
       },
-      PICKS_CONCURRENCY
+      PICKS_CONCURRENCY,
+      { shouldBail: () => { if (picksOutOfTime()) { picksTruncated = true; return true; } return false; } },
     );
+
+    // A class cut off mid-fetch is not written: the write below prunes every
+    // row this run didn't produce, so a half-fetched class would replace a
+    // complete board with a thinner one. Keep the previous compile instead.
+    if (picksTruncated) {
+      emit({
+        type: "status",
+        message: `Ran out of time fetching ${year}'s picks (${draftsOk + draftsFailed}/${draftIds.length} drafts) — kept its previous compile. Compile ${year} on its own to refresh it.`,
+        progress: 85,
+      });
+      continue;
+    }
 
     emit({
       type: "status",

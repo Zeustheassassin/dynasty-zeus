@@ -49,6 +49,21 @@ vi.mock("@/lib/server/fcValues", () => ({ getFcValues: h.getFcValues }));
 vi.mock("@/lib/helpers/simulation", () => ({ simulateLeague: h.simulateLeague }));
 const fcOk = { data: [], source: "cache", fetchedAt: "2026-09-21T09:00:00.000Z" };
 
+// A real SIM_HISTORY_CRON_RPM pacer would add ~120ms per Sleeper call to every
+// test (and the time-budget test freezes Date.now, which the real pacer reads).
+// The stub counts calls so a test can assert every Sleeper request is paced.
+const pacer = vi.hoisted(() => ({ rpm: [] as number[], calls: 0 }));
+vi.mock("../../../../lib/sleeperServer", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../../lib/sleeperServer")>();
+  return {
+    ...actual,
+    createPacer: (rpm: number) => {
+      pacer.rpm.push(rpm);
+      return async () => { pacer.calls++; };
+    },
+  };
+});
+
 vi.mock("@supabase/supabase-js", () => ({
   createClient: (_url: string, _key: string, _opts: unknown) => {
     fake.createClientCalls++;
@@ -104,6 +119,8 @@ beforeEach(() => {
   h.simulateLeague.mockReset();
   fetchRoutes = [];
   installFetch();
+  pacer.rpm = [];
+  pacer.calls = 0;
   process.env.CRON_SECRET = SECRET;
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://x.supabase.co";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "service.role.key";
@@ -238,6 +255,32 @@ describe("GET league discovery", () => {
     const body = await res.json();
     expect(body.leaguesFound).toBe(1);
     expect(rosterFetchCount).toBe(1);
+  });
+});
+
+describe("GET Sleeper call budget", () => {
+  // Sleeper call-budget Stage 2 (2026-10-10): concurrency caps alone bounded calls in flight, not
+  // calls per minute. Every Sleeper request now waits on one pacer at SIM_HISTORY_CRON_RPM.
+  it("paces every Sleeper request through one pacer at SIM_HISTORY_CRON_RPM", async () => {
+    const { SIM_HISTORY_CRON_RPM } = await import("@/lib/constants");
+    fake.links = { rows: [{ sleeper_user_id: "s1" }], error: null };
+    route((u) => u.includes("/user/s1/leagues/"), [{
+      league_id: "L1", name: "Dynasty", settings: { taxi_slots: 2, best_ball: 0 },
+      roster_positions: ["QB", "RB", "WR", "TE", "FLEX", "BN"],
+    }]);
+    route((u) => u.includes("/state/nfl"), { season_type: "regular", week: 5, season: "2026" });
+
+    const GET = await loadGET();
+    const body = await (await GET(makeReq(`Bearer ${SECRET}`))).json();
+
+    const sleeperFetches = (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls
+      .map((c) => String(c[0]))
+      .filter((u) => u.includes("sleeper"));
+    // league list, players, state, projections, 4 stat weeks, the league's 4 core calls.
+    expect(sleeperFetches.length).toBeGreaterThanOrEqual(11);
+    expect(pacer.rpm).toEqual([SIM_HISTORY_CRON_RPM]);
+    expect(pacer.calls).toBe(sleeperFetches.length);
+    expect(body.sleeperCalls).toBe(sleeperFetches.length);
   });
 });
 
@@ -461,12 +504,12 @@ describe("GET time budget", () => {
   const run = async () => (await loadGET())(makeReq(`Bearer ${SECRET}`));
 
   it("stops starting new per-league simulations once the time budget is exceeded", async () => {
-    // The mocked clock below jumps past TIME_BUDGET_MS on the very first roster fetch. Under
-    // the old chunk loop the budget was only re-checked at batch boundaries, so all 5 leagues
-    // of the first batch ran regardless and only 1 was skipped. The rolling pool re-checks
-    // before handing out each item, so the second worker sees the blown budget immediately and
-    // nothing further starts — the guard doing its job sooner, not a weaker guard.
-    const leagues = Array.from({ length: 6 }, (_, i) => ({
+    // The mocked clock below jumps past TIME_BUDGET_MS on the first roster fetch. Every Sleeper
+    // request now waits its turn on the pacer first (Stage 2, 10/10), so the pool's first wave —
+    // one league per CONCURRENCY slot (5) — is handed out at t=0, before any request has fired,
+    // exactly as in production. What the guard owes is that nothing starts AFTER the budget is
+    // blown: the rolling pool re-checks before handing out each item, so leagues 6-12 never start.
+    const leagues = Array.from({ length: 12 }, (_, i) => ({
       league_id: `L${i + 1}`,
       name: `League ${i + 1}`,
       settings: { taxi_slots: 2, best_ball: 0 },
@@ -482,8 +525,7 @@ describe("GET time budget", () => {
     route((u) => {
       if (u.includes("/rosters")) {
         rosterFetches.push(u);
-        // Mirrors the wall-clock TIME_BUDGET_MS the route enforces (270_000) — simulate the
-        // first batch's fan-out taking long enough that the next batch's pre-check trips.
+        // Mirrors the wall-clock TIME_BUDGET_MS the route enforces (270_000).
         now += 271_000;
         return true;
       }
@@ -494,10 +536,10 @@ describe("GET time budget", () => {
       const res = await run();
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.leaguesFound).toBe(6);
-      // Only the league that blew the clock ever started.
-      expect(rosterFetches).toHaveLength(1);
-      expect(body.leaguesSkippedTimeBudget).toBe(5);
+      expect(body.leaguesFound).toBe(12);
+      // Only the first wave (one per concurrency slot) ever started.
+      expect(rosterFetches).toHaveLength(5);
+      expect(body.leaguesSkippedTimeBudget).toBe(7);
     } finally {
       nowSpy.mockRestore();
     }

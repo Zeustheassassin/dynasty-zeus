@@ -320,15 +320,42 @@ export const COMPILE_MAX_CONNECTED_USERS = 500;
 export const COMPILE_MAX_LEAGUES = 4000;
 
 /**
- * Target request rate for the consensus compile, in requests per minute.
+ * Target request rate for the consensus compile, in requests per minute — EVERY Sleeper call it
+ * makes (discovery, the player map, and each draft's picks) goes through one createPacer at this.
  *
- * Sleeper's published guidance is to stay under ~1000 calls/minute. Bounded
- * concurrency alone does not enforce that (see createPacer in
- * ./sleeperServer) — 15 concurrent calls at 150 ms each is 6000/min. This is
- * the number the pacer actually holds the crawl to, with headroom under the
- * ceiling so a burst of fast responses can't overshoot it.
+ * Sleeper's published guidance is to stay under ~1000 calls/minute per IP, and every server job and
+ * proxied browser request is assumed to share one IP. Bounded concurrency alone does not enforce a
+ * rate (see createPacer in ./sleeperServer) — 15 concurrent calls at 150 ms each is 6000/min. Was 850
+ * for discovery with the picks step unpaced (8 at a time, ~1,200-2,400/min); 450 for everything
+ * since 2026-10-10 (Sleeper call-budget Stage 2). A recent draft class is ~4,000 calls (~2,400
+ * discovery + ~1,650 drafts' picks), ~9 min at this pace — which is why the route's maxDuration is
+ * 800s (Vercel Pro) and the compile panel sends one class per request.
  */
-export const COMPILE_TARGET_RPM = 850;
+export const COMPILE_TARGET_RPM = 450;
+
+/**
+ * Request pace for the league-transactions cron (app/api/cron/league-transactions), in requests
+ * per minute — every Sleeper call it makes goes through one createPacer at this rate.
+ *
+ * Sleeper's ceiling is ~1000/min per IP, and Vercel's egress IPs aren't fixed, so every server job
+ * and every proxied browser request is assumed to share one budget. This cron runs every 2h in
+ * season and used to fire ~1,130 unpaced calls a run (each user's leagues fetched separately, 4
+ * transaction legs each, 42 in flight). Deduped across users and cut to 2 legs it's ~94 leagues x 5
+ * calls = ~470 a run (~2.4 min at this pace; the once-a-day 4-leg sweep ~660, ~3.3 min), inside its
+ * 270s budget while leaving the rest of the minute's budget for people using the app.
+ */
+export const LEAGUE_TX_CRON_RPM = 200;
+
+/**
+ * Request pace for the weekly simulation-history cron (app/api/cron/simulation-history), in
+ * requests per minute. It re-reads every past week's matchups per league, so its volume peaks late
+ * season: ~94 leagues x (4 core + 16 matchup calls) = ~1,880 at Week 17 — ~3.8 min at this pace,
+ * inside its 270s budget. It runs alone (Tue 09:00 UTC; the transactions cron's 08:00 run is done
+ * in ~2.5 min), so it can take more of the minute than LEAGUE_TX_CRON_RPM. If the league count grows
+ * much past ~110, late-season runs will start hitting the time budget (logged, and reported as
+ * leaguesSkippedTimeBudget) before they hit Sleeper's limit.
+ */
+export const SIM_HISTORY_CRON_RPM = 500;
 
 /**
  * Years the connected-user network is discovered across, independent of which
@@ -350,11 +377,20 @@ export function getDiscoveryYears(): number[] {
 
 /**
  * Wall-clock budget for the discovery + draft-scan phases, in ms. Vercel kills
- * the route at maxDuration (300s); this leaves room for the picks fetch and the
+ * the route at maxDuration (800s); this leaves room for the picks fetch and the
  * Supabase writes that follow, and makes a partial run report honestly rather
- * than being cut off mid-write.
+ * than being cut off mid-write. A recent class's ~2,400 discovery calls take
+ * ~320s at COMPILE_TARGET_RPM.
  */
-export const COMPILE_DISCOVERY_BUDGET_MS = 180_000;
+export const COMPILE_DISCOVERY_BUDGET_MS = 420_000;
+
+/**
+ * Last moment (ms from the compile's start) a new draft's picks fetch may begin. Leaves ~80s of the
+ * 800s maxDuration for fetches in flight and the year's writes. A class whose picks fetch is cut off
+ * here is NOT written — its previous compile stays — because a compile prunes every row the new run
+ * didn't produce, and a half-fetched class would replace a good board with a thinner one.
+ */
+export const COMPILE_PICKS_DEADLINE_MS = 720_000;
 
 /** Default request timeout for Sleeper API calls (ms) */
 export const SLEEPER_REQUEST_TIMEOUT_MS = 15_000;

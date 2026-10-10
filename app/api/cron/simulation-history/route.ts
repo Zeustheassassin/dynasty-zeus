@@ -29,12 +29,18 @@
 //   - Upsert with onConflict (league_id, roster_id, season, week) so a
 //     retried/duplicate run for the same week overwrites cleanly
 //     instead of accumulating dupes.
+//
+// Every Sleeper request (api.sleeper.app and the api.sleeper.com
+// projections host) goes through one createPacer at SIM_HISTORY_CRON_RPM
+// (Sleeper call-budget plan Stage 2, 2026-10-10). Its concurrency caps alone
+// bounded calls in flight, not calls per minute — 5 leagues x (4 core + 4
+// matchup) in flight at ~150ms each is far past Sleeper's ~1000/min.
 // ============================================================
 
 import { NextRequest, NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
-import { safeFetch, withConcurrency } from "../../../../lib/sleeperServer";
+import { safeFetch, withConcurrency, createPacer } from "../../../../lib/sleeperServer";
 import { getFcValues, type FcRawEntry } from "../../../../lib/server/fcValues";
 import {
   CURRENT_YEAR, BASE_YEAR,
@@ -44,7 +50,7 @@ import {
 } from "../../../../lib/helpers";
 import {
   SLEEPER_BASE_URL, SLEEPER_PROJECTIONS_BASE, ROOKIE_BOARD_SHEET_URL,
-  SLEEPER_PLAYERS_TIMEOUT_MS, SLEEPER_REQUEST_TIMEOUT_MS,
+  SLEEPER_PLAYERS_TIMEOUT_MS, SLEEPER_REQUEST_TIMEOUT_MS, SIM_HISTORY_CRON_RPM,
 } from "../../../../lib/constants";
 import { simulateLeague } from "../../../../lib/helpers/simulation";
 import { projectRookiesByRoster } from "../../../../lib/helpers/rookieProjection";
@@ -86,6 +92,9 @@ const WEEKLY_MATCHUP_CONCURRENCY = 4;
 // league-transactions/route.ts's TIME_BUDGET_MS.
 const TIME_BUDGET_MS = 270_000;
 
+/** safeFetch behind this run's pacer — every Sleeper request goes through one. */
+type PacedFetch = <T>(url: string, timeoutMs?: number) => Promise<T | null>;
+
 async function fetchText(url: string, timeoutMs = SLEEPER_REQUEST_TIMEOUT_MS): Promise<string> {
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
@@ -110,8 +119,8 @@ interface SimPlayer {
   value?: number;
 }
 
-async function fetchSlimPlayers(): Promise<Record<string, SimPlayer>> {
-  const raw = await safeFetch<Record<string, Record<string, unknown>>>(
+async function fetchSlimPlayers(paced: PacedFetch): Promise<Record<string, SimPlayer>> {
+  const raw = await paced<Record<string, Record<string, unknown>>>(
     `${SLEEPER_BASE_URL}/players/nfl`,
     SLEEPER_PLAYERS_TIMEOUT_MS
   );
@@ -192,15 +201,16 @@ const PROJ_POS_PARAMS = "position[]=QB&position[]=RB&position[]=WR&position[]=TE
 
 async function fetchRawProjections(
   season: string,
-  currentWeek: number
+  currentWeek: number,
+  paced: PacedFetch
 ): Promise<{ items: RawProjItem[]; isSeasonMode: boolean }> {
   if (currentWeek <= 0) {
     const url = `${SLEEPER_PROJECTIONS_BASE}/${season}?season_type=regular&${PROJ_POS_PARAMS}`;
-    const data = await safeFetch<RawProjItem[]>(url);
+    const data = await paced<RawProjItem[]>(url);
     return { items: Array.isArray(data) ? data : [], isSeasonMode: true };
   }
   const url = `${SLEEPER_PROJECTIONS_BASE}/${season}/${currentWeek}?season_type=regular&${PROJ_POS_PARAMS}`;
-  const data = await safeFetch<RawProjItem[]>(url);
+  const data = await paced<RawProjItem[]>(url);
   return { items: Array.isArray(data) ? data : [], isSeasonMode: false };
 }
 
@@ -245,7 +255,8 @@ interface RawStatItem {
 
 async function fetchPlayerStats(
   season: string,
-  currentWeek: number
+  currentWeek: number,
+  paced: PacedFetch
 ): Promise<Record<string, PlayerUsage> | null> {
   if (currentWeek < 2) return null;
   const lookback = 4;
@@ -258,7 +269,7 @@ async function fetchPlayerStats(
   // returns {} for every player, which silently zeroed all usage data.
   const weekData = await Promise.all(
     weeks.map((w) =>
-      safeFetch<Record<string, RawStatItem>>(`${SLEEPER_BASE_URL}/stats/nfl/regular/${season}/${w}`)
+      paced<Record<string, RawStatItem>>(`${SLEEPER_BASE_URL}/stats/nfl/regular/${season}/${w}`)
     )
   );
 
@@ -326,11 +337,12 @@ interface SleeperAdpEntry {
 
 async function fetchCanonicalRookieBoard(
   rookieYear: string,
-  fc2qb: FcValueMap
+  fc2qb: FcValueMap,
+  paced: PacedFetch
 ): Promise<RookieBoardPlayer[]> {
   const [sheetText, adpRaw] = await Promise.all([
     fetchText(ROOKIE_BOARD_SHEET_URL),
-    safeFetch<SleeperAdpEntry[]>(
+    paced<SleeperAdpEntry[]>(
       `${SLEEPER_PROJECTIONS_BASE}/${encodeURIComponent(rookieYear)}` +
         `?season_type=regular&position=QB&position=RB&position=WR&position=TE&order_by=adp_dynasty_2qb`
     ),
@@ -408,12 +420,12 @@ interface LeagueCore {
   standings: StandingRow[];
 }
 
-async function fetchLeagueCore(league: SleeperLeague): Promise<LeagueCore | null> {
+async function fetchLeagueCore(league: SleeperLeague, paced: PacedFetch): Promise<LeagueCore | null> {
   const [rosters, users, tradedPicks, drafts] = await Promise.all([
-    safeFetch<SleeperRoster[]>(`${SLEEPER_BASE_URL}/league/${league.league_id}/rosters`),
-    safeFetch<SleeperUser[]>(`${SLEEPER_BASE_URL}/league/${league.league_id}/users`),
-    safeFetch<SleeperTradedPick[]>(`${SLEEPER_BASE_URL}/league/${league.league_id}/traded_picks`),
-    safeFetch<SleeperDraft[]>(`${SLEEPER_BASE_URL}/league/${league.league_id}/drafts`),
+    paced<SleeperRoster[]>(`${SLEEPER_BASE_URL}/league/${league.league_id}/rosters`),
+    paced<SleeperUser[]>(`${SLEEPER_BASE_URL}/league/${league.league_id}/users`),
+    paced<SleeperTradedPick[]>(`${SLEEPER_BASE_URL}/league/${league.league_id}/traded_picks`),
+    paced<SleeperDraft[]>(`${SLEEPER_BASE_URL}/league/${league.league_id}/drafts`),
   ]);
   const rosterList = Array.isArray(rosters) ? rosters : [];
   if (!rosterList.length) return null;
@@ -496,6 +508,15 @@ export async function GET(req: NextRequest): Promise<Response> {
 
   const runStartedAt = Date.now();
 
+  // Every Sleeper request this run waits its turn here.
+  const pace = createPacer(SIM_HISTORY_CRON_RPM);
+  let sleeperCalls = 0;
+  const paced: PacedFetch = async <T,>(url: string, timeoutMs?: number) => {
+    await pace();
+    sleeperCalls++;
+    return safeFetch<T>(url, timeoutMs);
+  };
+
   // ── 1. Discover unique dynasty leagues across every registered user ──
   const { data: links, error: linksErr } = await supabase
     .from("user_sleeper_links")
@@ -510,7 +531,7 @@ export async function GET(req: NextRequest): Promise<Response> {
   await withConcurrency(
     uniqueSleeperIds,
     async (sleeperUserId) => {
-      const userLeagues = await safeFetch<SleeperLeague[]>(
+      const userLeagues = await paced<SleeperLeague[]>(
         `${SLEEPER_BASE_URL}/user/${sleeperUserId}/leagues/nfl/${CURRENT_YEAR}`
       );
       (userLeagues ?? []).filter(isDynastyLeague).forEach((l) => leagueMap.set(l.league_id, l));
@@ -525,8 +546,8 @@ export async function GET(req: NextRequest): Promise<Response> {
 
   // ── 2. Shared, league-independent data — fetched once for the whole run ──
   const [players, nflState] = await Promise.all([
-    fetchSlimPlayers(),
-    safeFetch<SleeperNFLState>(`${SLEEPER_BASE_URL}/state/nfl`),
+    fetchSlimPlayers(paced),
+    paced<SleeperNFLState>(`${SLEEPER_BASE_URL}/state/nfl`),
   ]);
   // currentWeek/isOffseason drive every league's simulation mode this run — a failed fetch (or a
   // 200 response with an unexpected/malformed body — safeFetch casts the JSON with no runtime
@@ -574,9 +595,9 @@ export async function GET(req: NextRequest): Promise<Response> {
     playerStats,
     rookies,
   ] = await Promise.all([
-    fetchRawProjections(season, currentWeek),
-    fetchPlayerStats(season, currentWeek),
-    isOffseason && fc2qb ? fetchCanonicalRookieBoard(rookieYear, fc2qb) : Promise.resolve([]),
+    fetchRawProjections(season, currentWeek, paced),
+    fetchPlayerStats(season, currentWeek, paced),
+    isOffseason && fc2qb ? fetchCanonicalRookieBoard(rookieYear, fc2qb, paced) : Promise.resolve([]),
   ]);
 
   // ── 3. Per-league simulate + collect rows ──
@@ -599,7 +620,7 @@ export async function GET(req: NextRequest): Promise<Response> {
         return [];
       }
 
-      const core = await fetchLeagueCore(league);
+      const core = await fetchLeagueCore(league, paced);
       if (!core) return [];
 
       const scoringSettings = league.scoring_settings ?? DEFAULT_SCORING;
@@ -616,7 +637,7 @@ export async function GET(req: NextRequest): Promise<Response> {
         const results = await withConcurrency(weeks, async (week) => ({
           week,
           matchups:
-            (await safeFetch<SleeperMatchup[]>(
+            (await paced<SleeperMatchup[]>(
               `${SLEEPER_BASE_URL}/league/${league.league_id}/matchups/${week}`
             )) ?? [],
         }), WEEKLY_MATCHUP_CONCURRENCY);
@@ -714,6 +735,7 @@ export async function GET(req: NextRequest): Promise<Response> {
       leaguesSimulated,
       leaguesSkipped,
       leaguesSkippedTimeBudget,
+      sleeperCalls,
     });
   }
 
@@ -730,6 +752,7 @@ export async function GET(req: NextRequest): Promise<Response> {
       rowsWritten,
       season,
       currentWeek,
+      sleeperCalls,
     },
     { status: allSkipped ? 502 : 200 }
   );
