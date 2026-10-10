@@ -594,6 +594,66 @@ describe("computeSuggestedLineup", () => {
     expect(result.lineup[0].player?.player_id).toBe("rb2");
     expect(result.swaps).toHaveLength(0);
   });
+
+  // isByeFn: the player's team has no game this week.
+  it("benches a starter on bye for a bench player who plays, counting the bye as 0", () => {
+    // rb2's 15 stands in for a stale projection; on bye he scores nothing.
+    const result = computeSuggestedLineup({
+      rosterPositions: ["RB"],
+      starters: ["rb2"],
+      playerIds: ["rb1", "rb2"],
+      players,
+      scoreFn,
+      hasKickoffData: false,
+      isByeFn: (id) => id === "rb2",
+    });
+    expect(result.lineup[0].player?.player_id).toBe("rb1");
+    expect(result.currentLineupScore).toBe(0);
+    expect(result.swaps).toHaveLength(1);
+    expect(result.swaps[0]).toMatchObject({ slot: "RB", delta: 10 });
+    expect(result.swaps[0].current?.player_id).toBe("rb2");
+  });
+
+  it("starts a player with no projection over one on bye", () => {
+    const result = computeSuggestedLineup({
+      rosterPositions: ["FLEX"],
+      starters: ["rb2"],
+      playerIds: ["rb2", "te0"],
+      players: { ...players, te0: mkPlayer("te0", "TE") }, // te0 has no score
+      scoreFn,
+      hasKickoffData: false,
+      isByeFn: (id) => id === "rb2",
+    });
+    expect(result.lineup[0].player?.player_id).toBe("te0");
+  });
+
+  it("starts an injury-tagged player over one on bye, since he might still play", () => {
+    const result = computeSuggestedLineup({
+      rosterPositions: ["RB"],
+      starters: ["rb2"],
+      playerIds: ["rb1", "rb2"],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      players: { ...players, rb1: { ...players.rb1, injury_status: "Doubtful" } as any },
+      scoreFn,
+      hasKickoffData: false,
+      isByeFn: (id) => id === "rb2",
+    });
+    expect(result.lineup[0].player?.player_id).toBe("rb1");
+  });
+
+  it("falls back to a player on bye rather than leaving a slot empty", () => {
+    const result = computeSuggestedLineup({
+      rosterPositions: ["RB"],
+      starters: ["rb2"],
+      playerIds: ["rb2"],
+      players,
+      scoreFn,
+      hasKickoffData: false,
+      isByeFn: () => true,
+    });
+    expect(result.lineup[0].player?.player_id).toBe("rb2");
+    expect(result.swaps).toHaveLength(0);
+  });
 });
 
 describe("getEarlyLockStake", () => {

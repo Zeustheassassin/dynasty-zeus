@@ -25,6 +25,7 @@ import {
   getEarlyLockStake,
   recomputeConsensusFpts,
   resolveGameState,
+  isGameStartedState,
   getEarlyLockDay,
   EARLY_LOCK_DAYS,
   getProjectionKickoffAt,
@@ -1975,14 +1976,14 @@ const saveSnapshotNow = async () => {
       const taxiSet = new Set((myRoster.taxi ?? []).map((id) => String(id)));
       const eligiblePlayerIds = (myRoster.players ?? []).filter((id) => !taxiSet.has(String(id)));
 
-      // Same lock-out rule as the Starters tab's Lineup Coach — a bench
-      // player whose real-world game has already started can't legally be
-      // suggested as a swap-in for this dot either.
-      const isLockedFn = (id: string) => {
-        const player = lineupPlayers[id];
-        const fallbackKickoffAt = getProjectionKickoffAt(projectionBySleeperId.get(String(id)));
-        return resolveGameState(player?.team, scheduleByTeam, fallbackKickoffAt).state !== "Upcoming";
-      };
+      // Same lock-out and bye rules as the Starters tab's Lineup Coach — a
+      // bench player whose real-world game has already started can't legally
+      // be suggested as a swap-in for this dot either, and a bye ("No game")
+      // never locks.
+      const gameState = (id: string) =>
+        resolveGameState(lineupPlayers[id]?.team, scheduleByTeam, kickoffFn(id)).state;
+      const isLockedFn = (id: string) => isGameStartedState(gameState(id));
+      const isByeFn = (id: string) => gameState(id) === "No game";
 
       const lineupInput = {
         rosterPositions,
@@ -1994,6 +1995,7 @@ const saveSnapshotNow = async () => {
         hasKickoffData,
         isLockedFn,
         isExcludedFn,
+        isByeFn,
       };
       const { lineup, swaps, currentLineupScore, suggestedLineupScore } = computeSuggestedLineup(lineupInput);
       const earlyLocks = EARLY_LOCK_DAYS.flatMap((day) => {

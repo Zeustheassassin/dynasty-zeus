@@ -142,6 +142,9 @@ export interface SuggestedLineupInput {
    *  status — the user marked them out, or this week's ESPN note says they're
    *  unlikely to play (see isAvailabilityExcluded in lineupAvailability.ts). */
   isExcludedFn?: (id: string) => boolean;
+  /** Players whose team has no game this week (bye). They count as 0, and the coach starts one
+   *  only when nobody else on the roster, healthy or not, can fill the slot. */
+  isByeFn?: (id: string) => boolean;
   /** Players to hold exactly where they are (their starting slot, or the bench) as if their
    *  game had kicked off, while still scoring them as not yet played. Prices what a lineup
    *  loses if an early game locks with no change made (getEarlyLockStake). */
@@ -182,6 +185,7 @@ export function computeSuggestedLineup(
   const kickoffFn = input.kickoffFn ?? (() => null);
   const isExcluded = (id: string, p: SleeperPlayer) =>
     isInjuryExcludedFromLineup(p) || (input.isExcludedFn?.(id) ?? false);
+  const isBye = (id: string) => input.isByeFn?.(id) ?? false;
   const myPlayerIds = playerIds ?? [];
   const used = new Set<string>();
   const initialLineup: LineupCoachRow[] = [];
@@ -206,9 +210,11 @@ export function computeSuggestedLineup(
   // counts as 0 until his game starts — a projection doesn't zero out when the
   // news breaks, so otherwise benching him reads as a points LOSS and the
   // swap's delta (and the League Overview dot) hides exactly the case that
-  // matters. Once his game has started the real result takes over.
+  // matters. Once his game has started the real result takes over. A player
+  // on bye has no game to start, so he stays at 0 all week.
   const expectedScore = (id: string) => {
     const p = players[id];
+    if (isBye(id)) return 0;
     return p && isExcluded(id, p) && !hasGameStarted(id) ? 0 : scoreFn(id);
   };
 
@@ -277,17 +283,19 @@ export function computeSuggestedLineup(
     }
 
     const eligible = getLineupSlotEligiblePositions(slot);
-    const candidates = (allowInjured: boolean) =>
-      myPlayerIds
-        .filter((id) => !used.has(id) && !isLockedOut(id))
-        .map((id) => ({ id, p: players[id] }))
-        .filter(({ p }) => p && eligible.includes(p.position))
-        .filter(({ id, p }) => allowInjured || !isExcluded(id, p))
-        .sort((a, b) => rankScoreFn(b.id) - rankScoreFn(a.id));
+    const candidates = myPlayerIds
+      .filter((id) => !used.has(id) && !isLockedOut(id))
+      .map((id) => ({ id, p: players[id] }))
+      .filter(({ p }) => p && eligible.includes(p.position))
+      .sort((a, b) => rankScoreFn(b.id) - rankScoreFn(a.id));
     // Don't recommend an Out/IR/Doubtful (or marked-out) player over a healthy
     // one even if a stale projection still ranks them higher — but rather than
     // leave a slot empty, fall back to them when no healthy eligible player exists.
-    const best = candidates(false)[0] ?? candidates(true)[0];
+    // A player on bye comes last of all: an injured player might still play.
+    const best =
+      candidates.find(({ id, p }) => !isBye(id) && !isExcluded(id, p)) ??
+      candidates.find(({ id }) => !isBye(id)) ??
+      candidates[0];
     if (best) {
       used.add(best.id);
       initialLineup.push({ slot, player: best.p, score: expectedScore(best.id), kickoffAt: kickoffFn(best.id) });

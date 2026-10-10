@@ -119,6 +119,10 @@ export const resolveGameState = (
   return { state: getKickoffState(fallbackKickoffAt), kickoffAt: fallbackKickoffAt };
 };
 
+/** True once a game is Live or Final, the point Sleeper locks a player's slot.
+ *  "No game" (a bye) never locks: a player on bye can be moved all week. */
+export const isGameStartedState = (state: string) => state === "Live" || state === "Final";
+
 /** Probability team A beats team B: 0/1/0.5 once every starter on both sides
  *  is done, otherwise from each side's projected final and remaining spread.
  *  Returns null when games remain but neither side has any uncertainty left —

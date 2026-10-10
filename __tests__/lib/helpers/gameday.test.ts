@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   resolveGameState, buildGamedayMatchups, getKickoffState, getGamedayResultStatus, getMatchupWinProbability,
-  getEarlyLockDay,
+  getEarlyLockDay, isGameStartedState,
 } from "@/lib/helpers/gameday";
 import type {
   SleeperLeague, SleeperRoster, SleeperMatchup, SleeperPlayer, ProjectionRow, TeamGameState,
@@ -151,6 +151,15 @@ describe("resolveGameState", () => {
       state: "Upcoming",
       kickoffAt: null,
     });
+  });
+});
+
+describe("isGameStartedState", () => {
+  it("locks Live and Final games only — a bye never locks", () => {
+    expect(isGameStartedState("Live")).toBe(true);
+    expect(isGameStartedState("Final")).toBe(true);
+    expect(isGameStartedState("Upcoming")).toBe(false);
+    expect(isGameStartedState("No game")).toBe(false);
   });
 });
 

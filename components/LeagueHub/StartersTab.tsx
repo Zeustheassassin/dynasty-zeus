@@ -3,6 +3,7 @@ import { memo, useEffect, useState } from "react";
 import {
   getProjectionKickoffAt,
   computeSuggestedLineup,
+  isGameStartedState,
   getProjectionVolatility,
   getOpponentProjectedScore,
   getLineupRange,
@@ -132,13 +133,12 @@ function StartersTab({ projectionData, nflState, scheduleByTeam, availability }:
   // Real game-state check (Live/Final vs Upcoming) for the Lineup Coach's
   // lock-out rule — mirrors Gameday Hub's resolveGameState, falling back to
   // the same kickoff-timestamp heuristic only when a team is missing from
-  // scheduleByTeam (bye week, or the ESPN scoreboard fetch hasn't loaded).
-  const playerIsLocked = (id: string) => {
-    if (!isInSeason) return false;
-    const player = players[id];
-    const fallbackKickoffAt = playerKickoffAt(id);
-    return resolveGameState(player?.team, scheduleByTeam, fallbackKickoffAt).state !== "Upcoming";
-  };
+  // scheduleByTeam (the ESPN scoreboard fetch hasn't loaded). A team missing
+  // from a full scoreboard is on bye ("No game"), which never locks.
+  const playerGameState = (id: string) =>
+    resolveGameState(players[id]?.team, scheduleByTeam, playerKickoffAt(id)).state;
+  const playerIsLocked = (id: string) => isInSeason && isGameStartedState(playerGameState(id));
+  const playerIsOnBye = (id: string) => isInSeason && playerGameState(id) === "No game";
 
   // Only meaningful in-season, where projectionData carries each active
   // source's own fpts — offseason redraft values have no per-source spread.
@@ -176,6 +176,7 @@ function StartersTab({ projectionData, nflState, scheduleByTeam, availability }:
     hasKickoffData: isInSeason && hasKickoffData,
     isLockedFn: playerIsLocked,
     isExcludedFn: isInSeason ? isExcludedFn : undefined,
+    isByeFn: playerIsOnBye,
   });
   const lineupDelta = suggestedLineupScore - currentLineupScore;
 
@@ -225,6 +226,7 @@ function StartersTab({ projectionData, nflState, scheduleByTeam, availability }:
   const availabilityReason = (current: SleeperPlayer | null) => {
     if (!current) return null;
     const id = current.player_id;
+    if (playerIsOnBye(id)) return `${current.full_name} is on bye`;
     if (overrides[id] === "OUT") return `${current.full_name} is marked out this week`;
     const tag = String(current.injury_status || current.status || "");
     if (/\bout\b|\bir\b|doubtful|inactive|suspended/i.test(tag)) return `${current.full_name} is ${tag.toLowerCase()}`;
@@ -327,6 +329,10 @@ function StartersTab({ projectionData, nflState, scheduleByTeam, availability }:
   // locked either way).
   const renderOutToggle = (player: SleeperPlayer) => {
     if (!isInSeason || playerIsLocked(player.player_id)) return null;
+    // Nothing to mark out: he has no game. The tag explains the "—" score.
+    if (playerIsOnBye(player.player_id)) {
+      return <span className="text-[9px] font-semibold px-1 rounded border border-slate-700 text-slate-400 shrink-0">BYE</span>;
+    }
     const isOut = overrides[player.player_id] === "OUT";
     return (
       <button
