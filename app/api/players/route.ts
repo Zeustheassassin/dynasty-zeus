@@ -1,6 +1,8 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-import { SLEEPER_BASE_URL, PLAYERS_REVALIDATE_S, NFL_STATE_REVALIDATE_S } from '../../../lib/constants';
+import {
+  SLEEPER_BASE_URL, PLAYERS_REVALIDATE_S, NFL_STATE_REVALIDATE_S, PLAYERS_CDN_MAX_AGE_S, PLAYERS_CDN_STALE_S,
+} from '../../../lib/constants';
 import { logger } from '../../../lib/logger';
 import { checkRateLimit } from '../../../lib/rateLimit';
 
@@ -8,11 +10,12 @@ const log = logger('api/players');
 
 // Proxies the Sleeper player map + NFL state with server-side caching.
 // Slims the player map server-side so clients download ~500 KB instead of ~5 MB raw.
-// Players cached 24 hours, NFL state cached 1 hour.
+// NFL state cached 1 hour.
 // Sleeper's raw player map (~5 MB) exceeds Next's 2 MB Data Cache item limit, so the
 // fetch-level revalidate does not actually cache it — the CDN Cache-Control header below
-// is what stops every request re-downloading and re-slimming it. `?fresh=1` (manual injury
-// refresh) bypasses both layers and is never cached.
+// (5 min fresh + 1 min stale-while-revalidate) is what stops every request re-downloading and
+// re-slimming it, while keeping Sleeper's injury designations at most ~6 min old. `?fresh=1`
+// (the injury report's and Roster Overview's Refresh) bypasses both layers and is never cached.
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const rl = await checkRateLimit(request, 10, 60_000, 'players');
   if (!rl.allowed) return rl.response;
@@ -80,7 +83,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
     return NextResponse.json(
       { players, nflState },
-      { headers: { 'Cache-Control': fresh ? 'no-store' : 'public, s-maxage=300, stale-while-revalidate=3600' } }
+      {
+        headers: {
+          'Cache-Control': fresh
+            ? 'no-store'
+            : `public, s-maxage=${PLAYERS_CDN_MAX_AGE_S}, stale-while-revalidate=${PLAYERS_CDN_STALE_S}`,
+        },
+      }
     );
   } catch (err) {
     log.error('fetch failed', { error: String(err) });

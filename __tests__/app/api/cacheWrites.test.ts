@@ -5,7 +5,8 @@ import { NextRequest } from "next/server";
 // so the routes' anon-client upserts were denied by RLS and nothing was ever cached (fc_values_cache
 // stuck at one 2026-04-29 row; the other three tables empty). Reads still use the anon client; the
 // WRITES must go through the service-role helper. Covers /api/fc-values (route + real getFcValues, step 8
-// wiring) and /api/cross-league-rosters (/api/stats/sleeper-weekly has its own file).
+// wiring); /api/stats/sleeper-weekly has its own file. (/api/cross-league-rosters was covered here until
+// it was retired 10/10 — its rosters now come from the League Overview's shared Sleeper roster fetch.)
 
 const h = vi.hoisted(() => ({
   checkRateLimit: vi.fn(async () => ({ allowed: true, remaining: 29 })),
@@ -124,69 +125,6 @@ describe("GET /api/fc-values — route + helper wiring", () => {
     const res = await GET(req("/api/fc-values?numQbs=3"));
     expect(res.status).toBe(400);
     expect(global.fetch).not.toHaveBeenCalled();
-    expect(readTables).toEqual([]);
-  });
-});
-
-describe("GET /api/cross-league-rosters — cache writes", () => {
-  const ROSTERS = [
-    { roster_id: 1, owner_id: "111", players: ["a"] },
-    { roster_id: 2, owner_id: "222", players: ["b"] },
-  ];
-  const stubRosters = (body: unknown = ROSTERS, status = 200) => {
-    global.fetch = vi.fn(async () => new Response(JSON.stringify(body), { status })) as never;
-  };
-  const url = "/api/cross-league-rosters?sleeper_user_id=222&league_id=999";
-
-  it("caches the requested owner's roster through the service role, never the anon client", async () => {
-    stubRosters();
-    const { GET } = await load("@/app/api/cross-league-rosters/route");
-    const res = await GET(req(url));
-    await flush();
-
-    expect(await res.json()).toEqual({ roster: ROSTERS[1] });
-    expect(h.upsertCacheRow).toHaveBeenCalledTimes(1);
-    expect(h.upsertCacheRow).toHaveBeenCalledWith(
-      "cross_league_rosters_cache",
-      expect.objectContaining({ sleeper_user_id: "222", league_id: "999", roster: ROSTERS[1] })
-    );
-    expect(anonWrites).toBe(0);
-  });
-
-  it("does not write when the owner has no roster in that league", async () => {
-    stubRosters([{ roster_id: 1, owner_id: "111" }]);
-    const { GET } = await load("@/app/api/cross-league-rosters/route");
-    const res = await GET(req(url));
-    await flush();
-    expect(await res.json()).toEqual({ roster: null });
-    expect(h.upsertCacheRow).not.toHaveBeenCalled();
-  });
-
-  it("serves a fresh cache hit without fetching or writing", async () => {
-    cachedRow = { roster: ROSTERS[1], cached_at: NOW() };
-    stubRosters();
-    const { GET } = await load("@/app/api/cross-league-rosters/route");
-    const res = await GET(req(url));
-    await flush();
-    expect(await res.json()).toEqual({ roster: ROSTERS[1] });
-    expect(global.fetch).not.toHaveBeenCalled();
-    expect(h.upsertCacheRow).not.toHaveBeenCalled();
-  });
-
-  it("returns 502 and writes nothing when Sleeper is down", async () => {
-    stubRosters({ error: "down" }, 500);
-    const { GET } = await load("@/app/api/cross-league-rosters/route");
-    const res = await GET(req(url));
-    await flush();
-    expect(res.status).toBe(502);
-    expect(h.upsertCacheRow).not.toHaveBeenCalled();
-  });
-
-  it("rejects malformed ids before touching the cache", async () => {
-    stubRosters();
-    const { GET } = await load("@/app/api/cross-league-rosters/route");
-    const res = await GET(req("/api/cross-league-rosters?sleeper_user_id=abc&league_id=999"));
-    expect(res.status).toBe(400);
     expect(readTables).toEqual([]);
   });
 });

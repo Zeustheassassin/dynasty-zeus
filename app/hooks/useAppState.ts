@@ -70,14 +70,14 @@ import { buildConsensusOrder, buildPersonalDispositions, buildPersonalSignals, b
 import { MY_DISPOSITIONS, pickDispositionKey, normalizeDisposition } from "../../lib/helpers/dispositions";
 import type { PersonalSignal } from "../../lib/helpers/personalRankings";
 import { useSimulatorState } from "./useSimulatorState";
-import { fetchSleeperUser } from "../../lib/sleeperUserCache";
 import { sleeperApi } from "../../lib/sleeperApi";
+import { PLAYERS_BACKGROUND_REFRESH_MS, ROSTER_OVERVIEW_FRESH_GAP_MS } from "../../lib/constants";
 import { getLocalStorageItem, setLocalStorageItem, removeLocalStorageItem, removeLocalStorageItemsByPrefix } from "@/lib/hooks/useLocalStorage";
 import type { LeagueRef } from "../../components/AlertsPage/alertsPageHelpers";
 import { isReserveEligible } from "../../components/AlertsPage/alertsPageHelpers";
 import type {
   AlertsCenterItem,
-  SleeperPlayer, SleeperLeague, SleeperLeagueSettings, SleeperRoster, SleeperTradedPick,
+  SleeperPlayer, SleeperLeague, SleeperLeagueSettings, SleeperRoster,
   SleeperDraft, SleeperDraftPick, GamedayMatchup,
   SleeperMatchup, AnnotatedTransaction,
   AugmentedPick,
@@ -97,8 +97,12 @@ import type {
 // payload if loadPlayers is called more than once in the same browser session (e.g. strict-mode
 // double-invoke in dev, or a Sleeper reconnect event).
 let _playersInMemory: Record<string, SleeperPlayer> | null = null;
-
-// fetchSleeperUser imported from lib/sleeperUserCache (shared with useLeagues)
+// When the player map on screen was last pulled from /api/players (0 = not yet). Drives the
+// background re-pull past PLAYERS_BACKGROUND_REFRESH_MS, so Sleeper's injury designations — which
+// decide every IR-eligibility count — don't sit for the cache's full 24h.
+let _playersFetchedAt = 0;
+const playersMapIsStale = () =>
+  _playersFetchedAt > 0 && Date.now() - _playersFetchedAt >= PLAYERS_BACKGROUND_REFRESH_MS;
 
 // ── Page-local interfaces (shapes that don't warrant a lib/types entry) ──────
 // AugmentedPick, AnnotatedTransaction, StandingRow are exported from lib/types.ts
@@ -141,7 +145,7 @@ export function useAppState() {
   } = usePlayerAnnotations(supabaseUser);
   const { personalOrdering, setPersonalOrdering, savePersonalOrdering } = usePersonalRankings(supabaseUser);
 
-  // Ref so loadRoster's useCallback (deps: [user, players]) always reads the latest tags
+  // Ref so loadRoster's useCallback (deps: [user, ...]) always reads the latest tags
   // without needing leaguePlayerTags in its own deps — mirrors supabaseUserRef in usePlayerAnnotations.ts
   const leaguePlayerTagsRef = useRef(leaguePlayerTags);
   useEffect(() => { leaguePlayerTagsRef.current = leaguePlayerTags; }, [leaguePlayerTags]);
@@ -317,11 +321,37 @@ const [standings, setStandings] = useState<StandingRow[]>([]);
   useEffect(() => { leaguesRef2.current = leagues; }, [leagues]);
   useEffect(() => { selectedLeagueRef.current = selectedLeague; }, [selectedLeague]);
 
-  const [allLeagueData, setAllLeagueData] = useState<{ leagueId: string; leagueName: string; roster: SleeperRoster | null; settings: SleeperLeagueSettings | null }[]>([]);
-  const [loadingAllLeagueData, setLoadingAllLeagueData] = useState(false);
+  // The user's own roster in every league — the injury report (Starting / IR x/y), Shares and the
+  // Dashboard grid. Read straight off the League Overview's roster fetch (sleeperApi's shared
+  // roster cache, 5m server / 3m browser), so Roster Overview's Refresh and the overview poll move
+  // all of them together. Until 10/10 this came from /api/cross-league-rosters' own 6h Supabase
+  // copy, which no refresh reached. Empty until the overview's first pass lands; a league whose
+  // fetch failed outright keeps roster null (the Shares denominator still counts it).
+  const allLeagueData = useMemo<{ leagueId: string; leagueName: string; roster: SleeperRoster | null; settings: SleeperLeagueSettings | null }[]>(() => {
+    if (!user || !leagueOverviewLoaded) return [];
+    return leagues.map((league) => ({
+      leagueId: league.league_id,
+      leagueName: league.name,
+      roster: leagueOverviewData[league.league_id]?.rosters.find((r) => r.owner_id === user.user_id) ?? null,
+      settings: league.settings ?? null,
+    }));
+  }, [user, leagues, leagueOverviewData, leagueOverviewLoaded]);
+  const loadingAllLeagueData = loadingLeagueOverview && !leagueOverviewLoaded;
   const [shareSearch, setShareSearch] = useState("");
   const [sharePosition, setSharePosition] = useState("ALL");
-  const [freeAgents, setFreeAgents] = useState<SleeperPlayer[]>([]);
+  // Top 20 unrostered players by value in the selected league. Derived here rather than set inside
+  // loadRoster so it follows the player map: the saved league is restored as soon as the league
+  // list loads (on a cold start that can beat the player map), and the map is re-pulled in the
+  // background every ~15 min.
+  const freeAgents = useMemo<SleeperPlayer[]>(() => {
+    if (!rosters.length) return [];
+    const rosteredIds = new Set<string>();
+    rosters.forEach((r) => (r.players || []).forEach((p) => rosteredIds.add(p)));
+    return Object.values(players || {})
+      .filter((p) => p && !rosteredIds.has(String(p.player_id)))
+      .sort((a, b) => (b.value || 0) - (a.value || 0))
+      .slice(0, 20);
+  }, [rosters, players]);
 const {
   selectedUserId, setSelectedUserId,
   externalShares,
@@ -679,6 +709,7 @@ const fetchFreshPlayers = useCallback(async (signal?: AbortSignal, opts?: { bypa
   const body = await res.json();
   const fetched: Record<string, SleeperPlayer> | undefined = body?.players;
   if (!fetched || Object.keys(fetched).length === 0) throw new Error("players response was empty");
+  _playersFetchedAt = Date.now();
   setNflState(body.nflState);
 
   // FantasyCalc is only the value overlay — its outage must not block the player map itself.
@@ -717,6 +748,15 @@ useEffect(() => {
   const controller = new AbortController();
   const { signal } = controller;
 
+  // Shown from a cached copy that's past PLAYERS_BACKGROUND_REFRESH_MS: keep it on screen and
+  // re-pull /api/players (the normal CDN-cached route, not ?fresh=1) behind it.
+  const repullIfStale = () => {
+    if (!playersMapIsStale()) return;
+    fetchFreshPlayers(signal).catch((err) => {
+      if (!signal.aborted) log.warn("background player map refresh failed", { err: String(err) });
+    });
+  };
+
   const loadPlayers = async () => {
     // Fast path: already loaded this session — skip localStorage and network entirely
     if (_playersInMemory) {
@@ -724,6 +764,7 @@ useEffect(() => {
       // nflState is React state and resets on remount — reload it from the cached route
       fetch('/api/nfl-state', { signal })
         .then(r => r.json()).then((s) => { if (!signal.aborted) setNflState(s); }).catch(() => {});
+      repullIfStale();
       return;
     }
 
@@ -750,6 +791,7 @@ useEffect(() => {
 
       if (hasRookieFields && hasValues) {
         _playersInMemory = parsedCache;
+        _playersFetchedAt = cachedAt;
         setPlayers(parsedCache);
         // Still load pick values and nflState even when players come from cache. The cached
         // `.value`s can be up to a day old, so overlay the current FantasyCalc values as well.
@@ -767,6 +809,7 @@ useEffect(() => {
           .catch((err) => log.warn("FantasyCalc refresh of cached players failed", { err: String(err) }));
         fetch('/api/nfl-state', { signal })
           .then(r => r.json()).then((s) => { if (!signal.aborted) setNflState(s); }).catch(() => {});
+        repullIfStale();
         return;
       }
     }
@@ -779,6 +822,19 @@ useEffect(() => {
   return () => controller.abort();
 }, [setNflState, fetchFreshPlayers]);
 
+// While the app stays open, re-pull the player map once it passes PLAYERS_BACKGROUND_REFRESH_MS
+// (checked every 5 min, so at 15-20 min old; at most one attempt per 5 min even while
+// /api/players is failing). Same CDN-cached request as above, not ?fresh=1.
+const refreshPlayersIfStale = useCallback(async () => {
+  if (!playersMapIsStale()) return;
+  try {
+    await fetchFreshPlayers();
+  } catch (err) {
+    log.warn("background player map refresh failed", { err: String(err) });
+  }
+}, [fetchFreshPlayers]);
+useVisibilityPolling(refreshPlayersIfStale, 5 * 60 * 1000);
+
 const [refreshingInjuryReport, setRefreshingInjuryReport] = useState(false);
 const refreshInjuryReport = useCallback(async () => {
   setRefreshingInjuryReport(true);
@@ -790,6 +846,30 @@ const refreshInjuryReport = useCallback(async () => {
     setRefreshingInjuryReport(false);
   }
 }, [fetchFreshPlayers]);
+
+// Roster Overview's Refresh: every league's rosters past both roster caches AND Sleeper's current
+// player map (?fresh=1), together — IR-Eligible / IR Stale need both (who sits where, and Sleeper's
+// own designation). Within ROSTER_OVERVIEW_FRESH_GAP_MS of the last one it's an ordinary reload,
+// which reads back what that refresh just fetched.
+const lastRosterOverviewFreshAtRef = useRef(0);
+const [refreshingRosterOverview, setRefreshingRosterOverview] = useState(false);
+const refreshRosterOverview = useCallback(async () => {
+  const fresh = Date.now() - lastRosterOverviewFreshAtRef.current >= ROSTER_OVERVIEW_FRESH_GAP_MS;
+  if (fresh) lastRosterOverviewFreshAtRef.current = Date.now();
+  setRefreshingRosterOverview(true);
+  try {
+    await Promise.all([
+      loadLeagueOverview(fresh ? { freshRosters: true } : undefined),
+      fresh
+        ? fetchFreshPlayers(undefined, { bypassCache: true }).catch((err) =>
+            log.error("Roster Overview player refresh failed", { err: String(err) })
+          )
+        : null,
+    ]);
+  } finally {
+    setRefreshingRosterOverview(false);
+  }
+}, [loadLeagueOverview, fetchFreshPlayers]);
 
 
 const refreshDraftBoard = useCallback(async () => {
@@ -916,16 +996,16 @@ useEffect(() => {
   // leagueOverviewLoaded guards against duplicate calls; leagues.length triggers when leagues first load
 }, [mainTab, leagueHubTab, leagueOverviewLoaded, leagues.length, loadLeagueOverview, loadNflState, loadRedraftValues]);
 
-// Keep leagueOverviewData (and the Overview status dots derived from it) from
-// sitting stale for the whole session once it's first loaded. loadLeagueOverview
-// re-fetches every league through sleeperApi, which already caches rosters for
-// 5m client-side (TTL.leagueRosters) — polling every 2m just means the next poll
-// after that 5m mark picks up a real refetch, bounding staleness to a few
-// minutes without hammering Sleeper on every tick. Manual "Refresh Rosters" on
-// the Overview tab still exists for an immediate force-refresh. useVisibilityPolling pauses
-// while the tab is hidden and never overlaps a still-running load.
+// Keep leagueOverviewData (and the Overview status dots, Roster Overview's IR columns, and
+// allLeagueData's injury report / Dashboard grid derived from it) from sitting stale for the
+// whole session once it's first loaded. loadLeagueOverview re-fetches every league through
+// sleeperApi, which already caches rosters for 3m client-side (TTL.leagueRosters) — polling every
+// 2m just means the next poll after that 3m mark picks up a real refetch, bounding staleness to a
+// few minutes without hammering Sleeper on every tick. Manual "Refresh Rosters" on the Overview
+// tab and Roster Overview's Refresh still exist for an immediate force-refresh.
+// useVisibilityPolling pauses while the tab is hidden and never overlaps a still-running load.
 const showsLeagueOverviewData =
-  (mainTab === "LEAGUES" && leagueHubTab === "OVERVIEW") ||
+  (mainTab === "LEAGUES" && (leagueHubTab === "OVERVIEW" || leagueHubTab === "ROSTER_OVERVIEW")) ||
   mainTab === "ALERTS" ||
   mainTab === "DASHBOARD";
 useVisibilityPolling(
@@ -1118,41 +1198,22 @@ useEffect(() => {
   // -------------------------
   // LOAD ALL LEAGUES FOR SHARES
   // -------------------------
+  // allLeagueData is derived from the League Overview (above), so start that load whenever the
+  // user or their league list changes — not only when a tab that shows it opens (Shares never
+  // did) — and restore the last selected league alongside it rather than after it.
   useEffect(() => {
-    const loadAll = async () => {
-      if (!user || !leagues.length) return;
+    if (!user || !leagues.length) return;
+    loadLeagueOverview();
+    const savedLeague = getLocalStorageItem<{ league_id: string } | null>("selectedLeague", null);
+    if (savedLeague) {
+      const match = leagues.find((l) => l.league_id === savedLeague.league_id);
+      if (match) loadRosterRef.current?.(match);
+    }
+  }, [user, leagues, loadLeagueOverview]);
 
-      setLoadingAllLeagueData(true);
-      try {
-        const results = await Promise.all(
-          leagues.map(async (league) => {
-            const { roster } = await fetch(
-              `/api/cross-league-rosters?sleeper_user_id=${encodeURIComponent(user.user_id)}&league_id=${encodeURIComponent(league.league_id)}`
-            ).then((r) => r.json()).catch(() => ({ roster: null }));
-
-            return {
-              leagueId: league.league_id,
-              leagueName: league.name,
-              roster,
-              settings: league.settings ?? null,
-            };
-          })
-        );
-
-        setAllLeagueData(results);
-
-        const savedLeague = getLocalStorageItem<{ league_id: string } | null>("selectedLeague", null);
-        if (savedLeague) {
-          const match = leagues.find((l) => l.league_id === savedLeague.league_id);
-          if (match) loadRosterRef.current?.(match);
-        }
-      } finally {
-        setLoadingAllLeagueData(false);
-      }
-    };
-
-    loadAll();
-  }, [user, leagues]);
+  // loadRoster's 2h leagueData_* roster copy was retired 10/10 — sleeperApi's own cache is the only
+  // browser layer now. Clear what older builds left so it stops holding localStorage quota.
+  useEffect(() => { removeLocalStorageItemsByPrefix("leagueData_"); }, []);
 
   // -------------------------
   // SHARES
@@ -1192,54 +1253,26 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
 
   setSelectedLeague(league);
 
-  // ── Step 1: Rosters, traded picks, and drafts — from cache or network ────
-  // Cache key is per-league; TTL is 2 hours (short enough to stay fresh during
-  // trade season, long enough to avoid redundant fetches when switching leagues)
-  const LEAGUE_CACHE_TTL = 2 * 60 * 60 * 1000;
-  const leagueCacheKey = `leagueData_${league.league_id}`;
-  let cacheHit = false;
-  let allRosters: SleeperRoster[] = [];
-  let tradedPicksData: SleeperTradedPick[] = [];
-  let draftsData: SleeperDraft[] = [];
-  type LeagueCache = { data: { allRosters: SleeperRoster[]; tradedPicksData: SleeperTradedPick[]; draftsData: SleeperDraft[] }; cachedAt: number };
-  const leagueCached = getLocalStorageItem<LeagueCache | null>(leagueCacheKey, null);
-  if (leagueCached && Date.now() - leagueCached.cachedAt < LEAGUE_CACHE_TTL) {
-    allRosters      = leagueCached.data.allRosters;
-    tradedPicksData = leagueCached.data.tradedPicksData;
-    draftsData      = leagueCached.data.draftsData;
-    cacheHit = true;
-  }
-  if (!cacheHit) {
-    [allRosters, tradedPicksData, draftsData] = await Promise.all([
-      sleeperApi.getLeagueRosters(league.league_id),
-      sleeperApi.getLeagueTradedPicks(league.league_id),
-      sleeperApi.getLeagueDrafts(league.league_id),
-    ]);
-    setLocalStorageItem(leagueCacheKey, { data: { allRosters, tradedPicksData, draftsData }, cachedAt: Date.now() });
-    if (isStale()) return;
-  }
+  // ── Step 1: Rosters, traded picks, drafts, and league users ─────────────
+  // Straight through sleeperApi's own browser cache (rosters 3m — the same entries the League
+  // Overview reads — traded picks / users 10m, drafts 30m). The separate 2h leagueData_* copy that
+  // sat on top of it was retired 10/10: it held a roster for up to two hours past any trade,
+  // waiver or IR move. Owner names come from the one league-users call rather than a
+  // /user/{id} lookup per roster.
+  const [allRosters, tradedPicksData, draftsData, leagueUsers] = await Promise.all([
+    sleeperApi.getLeagueRosters(league.league_id),
+    sleeperApi.getLeagueTradedPicks(league.league_id),
+    sleeperApi.getLeagueDrafts(league.league_id),
+    sleeperApi.getLeagueUsers(league.league_id),
+  ]);
+  if (isStale()) return;
   setRosters(allRosters);
 
   // ── Step 2: Synchronous work derived from rosters ────────────────────────
-  const rosteredIds = new Set<string>();
-  allRosters.forEach((r) => {
-    (r.players || []).forEach((p: string) => rosteredIds.add(p));
-  });
-
+  // (Free agents are derived from `rosters` + the player map — see `freeAgents` above.)
   const myRoster = allRosters.find((r) => r.owner_id === user?.user_id);
   if (!myRoster) { setReadyLeagueId(league.league_id); return; }
   setRoster(myRoster);
-
-  setFreeAgents(
-    Object.values(players || {})
-      .filter((p) => p && !rosteredIds.has(String(p.player_id)))
-      .sort((a, b) => (b.value || 0) - (a.value || 0))
-      .slice(0, 20)
-  );
-
-  // ── Step 3: User names — fetchSleeperUser has its own module-level cache ──
-  const userResults = await Promise.all(allRosters.map((r) => fetchSleeperUser(r.owner_id)));
-  if (isStale()) return;
 
   // ── Steps 2/4/6: Pick window, traded-pick ownership, and draft slots ─────
   // Shared with useSpyState/useLeagueOverview via buildLeaguePickPool — see
@@ -1274,13 +1307,14 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
   setAllPicks(tempPicks);
   setPicks(myPicks);
 
-  // ── Step 7: Apply user names ─────────────────────────────────────────────
+  // ── Step 7: Apply user names (from the league-users call in step 1) ─────
+  const displayNameById = new Map(leagueUsers.map((u) => [u.user_id, u.display_name]));
   const userMap: Record<string | number, string> = {};
-  allRosters.forEach((r, i: number) => {
-    const u = userResults[i];
-    if (u) {
-      userMap[r.roster_id] = u.display_name;
-      userMap[r.owner_id] = u.display_name;
+  allRosters.forEach((r) => {
+    const name = displayNameById.get(r.owner_id);
+    if (name) {
+      userMap[r.roster_id] = name;
+      userMap[r.owner_id] = name;
     }
   });
   setUsers(userMap);
@@ -1303,7 +1337,7 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
   );
   setReadyLeagueId(league.league_id);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- setReadyLeagueId is a stable setter; TDZ prevents adding to deps (useSimulatorState is called after this callback)
-}, [user, players, beginLoadRoster, isLoadRosterCurrent]);
+}, [user, beginLoadRoster, isLoadRosterCurrent]);
 loadRosterRef.current = loadRoster;
 
 const refreshFcTrends = async () => {
@@ -3394,6 +3428,8 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     redraftValues,
     loadLeagueOverview,
     loadingLeagueOverview,
+    refreshRosterOverview,
+    refreshingRosterOverview,
     onNavigateToAttempts,
     onNavigateToLeague,
     onOpenRosterOverview,

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 import { renderHook, act, waitFor, cleanup } from "@testing-library/react";
 
 // Regression coverage for the player-map loader in useAppState (audit Batch 2 step 6).
@@ -76,6 +76,11 @@ const playersOf = (r: { current: { providerProps: { players: Record<string, { va
   r.current.providerProps.players;
 const playersFetches = () => urls.filter((u) => u.startsWith("/api/players")).length;
 const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 25)); });
+
+// The first import transforms useAppState's whole module graph (~5.3s cold here), which sat right on
+// the 5s per-test timeout and flaked whichever test ran first. Pay it once up front; resetModules
+// below only re-evaluates the already-transformed modules (~50-100ms a test).
+beforeAll(async () => { await import("@/app/hooks/useAppState"); }, 60_000);
 
 beforeEach(() => {
   vi.resetModules(); // fresh _playersInMemory
@@ -160,9 +165,9 @@ describe("player map loader — fresh path", () => {
 });
 
 describe("player map loader — cached path", () => {
-  const seedCache = (players: Record<string, unknown>) => {
+  const seedCache = (players: Record<string, unknown>, cachedAt = Date.now()) => {
     window.localStorage.setItem("playersCache", JSON.stringify(players));
-    window.localStorage.setItem("playersCacheAt", String(Date.now()));
+    window.localStorage.setItem("playersCacheAt", String(cachedAt));
   };
 
   it("overlays the current FantasyCalc values onto the cached players (and never hits /api/players)", async () => {
@@ -204,5 +209,53 @@ describe("player map loader — cached path", () => {
 
     await waitFor(() => expect(playersOf(result)["1"]?.value).toBe(9000));
     expect(playersFetches()).toBe(1);
+  });
+});
+
+// Sleeper call-budget Stage 1 (10/10): the browser copy of Sleeper's player map — whose
+// injury_status decides every IR-eligibility count — used to sit for its full 24h. Past
+// PLAYERS_BACKGROUND_REFRESH_MS (15 min) it's now re-pulled behind the copy on screen, through the
+// normal CDN-cached /api/players (never ?fresh=1, which only the Refresh buttons send).
+describe("player map loader — background re-pull past 15 min", () => {
+  const seedCache = (cachedAt: number) => {
+    window.localStorage.setItem("playersCache", JSON.stringify({ "1": player("1", { value: 1000 }), "2": player("2", { value: 500 }) }));
+    window.localStorage.setItem("playersCacheAt", String(cachedAt));
+  };
+  const players = () => urls.filter((u) => u.startsWith("/api/players"));
+
+  it("a cached copy older than 15 min is shown, then replaced by a background re-pull", async () => {
+    seedCache(Date.now() - 20 * 60_000);
+    up.players = () => json(playersBody({ injury_status: "Out" }));
+    const { result } = await mount();
+
+    await waitFor(() => expect(playersOf(result)["1"]?.injury_status).toBe("Out"));
+    expect(players()).toEqual(["/api/players"]);
+    const cached = JSON.parse(window.localStorage.getItem("playersCache") ?? "null");
+    expect(cached["1"].injury_status).toBe("Out");
+  });
+
+  it("a cached copy younger than 15 min is not re-pulled", async () => {
+    seedCache(Date.now() - 10 * 60_000);
+    const { result } = await mount();
+    await waitFor(() => expect(playersOf(result)["1"]?.value).toBe(9000));
+    await settle();
+    expect(players()).toEqual([]);
+  });
+
+  it("the session's in-memory copy is re-pulled on a later mount once it's past 15 min", async () => {
+    const first = await mount();
+    await waitFor(() => expect(playersOf(first.result)["1"]?.value).toBe(9000));
+    first.unmount();
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(Date.now() + 20 * 60_000);
+      up.players = () => json(playersBody({ injury_status: "IR" }));
+      const second = await mount(); // same module graph: _playersInMemory is still set
+      await waitFor(() => expect(playersOf(second.result)["1"]?.injury_status).toBe("IR"));
+      expect(players()).toEqual(["/api/players", "/api/players"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

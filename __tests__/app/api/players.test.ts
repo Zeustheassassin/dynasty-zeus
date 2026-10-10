@@ -30,12 +30,33 @@ describe("GET /api/players", () => {
     const res = await get();
     expect(res.status).toBe(200);
     expect(res.headers.get("Cache-Control")).toContain("s-maxage=300");
+    // Sleeper call-budget Stage 1 (10/10): the CDN may serve a stale copy for at most a minute while
+    // it revalidates — it was an hour, which kept sparse traffic always a visit behind on injuries.
+    expect(res.headers.get("Cache-Control")).toContain("stale-while-revalidate=60");
+    expect(res.headers.get("Cache-Control")).not.toContain("stale-while-revalidate=3600");
     const body = await res.json();
     expect(body.players["1"].injury_status).toBe("Out");
     expect(body.players["1"].extra).toBeUndefined();
     for (const [, opts] of fetchMock.mock.calls) {
       expect(opts.next?.revalidate).toBeGreaterThan(0);
       expect(opts.cache).toBeUndefined();
+    }
+  });
+
+  it("keeps Sleeper's injury_status, injury_body_part and injury_notes (IR eligibility + injury report)", async () => {
+    fetchMock.mockImplementation(async (url: string) =>
+      url.includes("/players/nfl")
+        ? new Response(JSON.stringify({
+            "1": { player_id: "1", full_name: "A B", position: "WR", status: "Injured Reserve",
+                   injury_status: "IR", injury_body_part: "Knee", injury_notes: "ACL" },
+          }))
+        : new Response(JSON.stringify({ season: "2026", week: 3 }))
+    );
+    for (const qs of ["", "?fresh=1"]) {
+      const body = await (await get(qs)).json();
+      expect(body.players["1"]).toMatchObject({
+        status: "Injured Reserve", injury_status: "IR", injury_body_part: "Knee", injury_notes: "ACL",
+      });
     }
   });
 

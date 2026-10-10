@@ -1,8 +1,8 @@
 // ============================================================
 // Service-role Supabase client — SERVER-ONLY.
 // ============================================================
-// The shared cache tables (fc_values_cache, fc_redraft_values_cache, sleeper_stats_cache,
-// cross_league_rosters_cache) give anon/authenticated a SELECT policy and nothing else (migrations
+// The shared cache tables (fc_values_cache, fc_redraft_values_cache, sleeper_stats_cache — and the
+// now-unused cross_league_rosters_cache) give anon/authenticated a SELECT policy and nothing else (migrations
 // 026/053), so a write through the anon client in lib/supabaseclient.ts is denied by RLS. Those writes
 // must come from the service role, on the server — NOT from an anon INSERT/UPDATE policy, which would
 // let any browser poison the cache every user reads.

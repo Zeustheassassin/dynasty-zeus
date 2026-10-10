@@ -18,6 +18,10 @@ interface RosterOverviewTabProps {
   leagueOverviewLoaded: boolean;
   leagueOverviewUpdatedAt: number | null;
   loadLeagueOverview: () => Promise<void>;
+  /** Refresh button: every league's rosters past both roster caches AND Sleeper's current player
+   *  map (/api/players?fresh=1) — IR-Eligible / IR Stale depend on both. */
+  onRefresh: () => Promise<void>;
+  refreshing: boolean;
   loadRoster: (league: SleeperLeague) => void;
   setLeagueHubTab: (tab: LeagueHubTab) => void;
   personalOrdering: string[];
@@ -56,6 +60,8 @@ function RosterOverviewTab({
   leagueOverviewLoaded,
   leagueOverviewUpdatedAt,
   loadLeagueOverview,
+  onRefresh,
+  refreshing,
   loadRoster,
   setLeagueHubTab,
   personalOrdering,
@@ -193,11 +199,12 @@ function RosterOverviewTab({
         </div>
         <div className="flex flex-col items-end gap-1 shrink-0">
           <button
-            onClick={() => loadLeagueOverview()}
-            disabled={loadingLeagueOverview}
+            onClick={() => onRefresh()}
+            disabled={loadingLeagueOverview || refreshing}
+            title="Re-pull every league's rosters and Sleeper's current injury designations"
             className="text-[10px] font-semibold border rounded-lg px-2.5 py-1 transition disabled:opacity-50 border-slate-700 text-slate-400 hover:text-white hover:border-slate-500 whitespace-nowrap"
           >
-            {loadingLeagueOverview ? "Refreshing…" : "Refresh"}
+            {loadingLeagueOverview || refreshing ? "Refreshing…" : "Refresh"}
           </button>
           {updatedLabel && (
             <span className="text-[10px] text-slate-600 whitespace-nowrap">{updatedLabel}</span>

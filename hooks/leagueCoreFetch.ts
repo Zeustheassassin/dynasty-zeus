@@ -37,10 +37,12 @@ export interface LeagueCoreFetchResult {
 
 export async function fetchLeagueCore(
   leagueId: string,
-  opts: { aliasRosterId?: boolean } = {}
+  // bypassRosters: skip the browser + server roster caches (Roster Overview's Refresh). Only the
+  // rosters — traded picks, drafts and users don't move the IR / starter views it refreshes.
+  opts: { aliasRosterId?: boolean; bypassRosters?: boolean } = {}
 ): Promise<LeagueCoreFetchResult> {
   const [rostersData, tradedPicksData, draftsData, usersData] = await Promise.all([
-    sleeperApi.getLeagueRosters(leagueId),
+    sleeperApi.getLeagueRosters(leagueId, opts.bypassRosters),
     sleeperApi.getLeagueTradedPicks(leagueId),
     sleeperApi.getLeagueDrafts(leagueId),
     sleeperApi.getLeagueUsers(leagueId),

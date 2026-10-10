@@ -29,8 +29,8 @@ interface TeamSummaryGridProps {
 }
 
 // Cross-league "my teams" summary (A7) — one card per connected league,
-// record from the already-loaded roster (allLeagueData, Phase-pre-existing
-// cross-league-rosters fetch) plus a playoff-odds trend sparkline sourced
+// record from the already-loaded roster (allLeagueData, read off the League
+// Overview's roster fetch) plus a playoff-odds trend sparkline sourced
 // from Phase F's league_simulation_history table. No new per-league fetch
 // beyond the batched odds-history read. Also shows each league's strategic
 // direction bucket (same Elite/True Contender/.../Hopeless vocabulary as

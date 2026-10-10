@@ -21,8 +21,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 export type CacheTable =
   | "fc_values_cache"
   | "fc_redraft_values_cache"
-  | "sleeper_stats_cache"
-  | "cross_league_rosters_cache";
+  | "sleeper_stats_cache";
 
 /** PostgrestError is a plain object, not an Error, so `String(err)` would log "[object Object]". */
 function describeReadError(err: unknown): { err: string; code?: string } {

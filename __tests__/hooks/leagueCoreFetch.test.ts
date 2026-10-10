@@ -64,6 +64,25 @@ describe("fetchLeagueCore", () => {
     expect(userMap.u3).toBe("Team");
   });
 
+  it("bypassRosters skips the roster caches only — traded picks, drafts and users stay cached", async () => {
+    for (const k of ["getLeagueRosters", "getLeagueTradedPicks", "getLeagueDrafts", "getLeagueUsers"]) {
+      api.impl[k] = vi.fn(async () => []);
+    }
+
+    await fetchLeagueCore("L1", { bypassRosters: true });
+
+    expect(api.impl.getLeagueRosters).toHaveBeenCalledWith("L1", true);
+    expect(api.impl.getLeagueTradedPicks).toHaveBeenCalledWith("L1");
+    expect(api.impl.getLeagueDrafts).toHaveBeenCalledWith("L1");
+    expect(api.impl.getLeagueUsers).toHaveBeenCalledWith("L1");
+  });
+
+  it("reads rosters through the cache by default", async () => {
+    api.impl.getLeagueRosters = vi.fn(async () => []);
+    await fetchLeagueCore("L1");
+    expect(api.impl.getLeagueRosters).toHaveBeenCalledWith("L1", undefined);
+  });
+
   it("coerces a non-array response to an empty array rather than throwing", async () => {
     api.impl.getLeagueRosters = vi.fn(async () => null as unknown as SleeperRoster[]);
 

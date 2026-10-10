@@ -8,7 +8,7 @@
 //   - never calls connectSleeper / setLocalStorageItem('sleeperUser')
 //   - never upserts user_sleeper_links or any Supabase table
 //   - never triggers the league-transactions cron
-//   - never writes the committedSimRows_v2 / leagueData_* caches
+//   - never writes the committedSimRows_v2 cache
 // Everything is fetched through lib/sleeperApi read-only proxies and
 // FantasyCalc, and held in local React state only. See
 // [project_spy_username_switching] in memory for why this matters.

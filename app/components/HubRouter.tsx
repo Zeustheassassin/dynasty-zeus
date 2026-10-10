@@ -33,6 +33,7 @@ import type { PlayerUsage } from "../../hooks/usePlayerStats";
 import type { DashboardAlert, LeagueTransaction, InjuryReportPlayer } from "../../components/AlertsPage/alertsPageHelpers";
 import type { ExposureData } from "../../hooks/useUserExposure";
 import type { DraftScoutLeague } from "../../hooks/useDraftScout";
+import type { LoadLeagueOverviewOpts } from "../../hooks/useLeagueOverview";
 import type { StandingRow, AnnotatedTransaction } from "../../components/LeagueHub/leagueHubTypes";
 import type { ShareEntry } from "../../components/DataHub/dataHubTypes";
 import type { PersonalSignal } from "../../lib/helpers/personalRankings";
@@ -98,8 +99,10 @@ interface HubRouterProps {
   refreshingInjuryReport: boolean;
   allTradeAttempts: TradeAttempt[];
   allLeagueData: DashboardLeagueEntry[];
-  loadLeagueOverview: () => Promise<void>;
+  loadLeagueOverview: (opts?: LoadLeagueOverviewOpts) => Promise<void>;
   loadingLeagueOverview: boolean;
+  refreshRosterOverview: () => Promise<void>;
+  refreshingRosterOverview: boolean;
   onNavigateToAttempts: (leagueId: string) => void;
   onNavigateToLeague: (leagueId: string) => void;
   onOpenRosterOverview: () => void;
@@ -310,7 +313,8 @@ export function HubRouter({
   visibleDashboardAlerts, actionableDashboardAlerts, watchlistEntries,
   dismissDashboardAlert, leagueTransactions, loadingTransactions, refreshTransactions,
   injuryReportPlayers, refreshInjuryReport, refreshingInjuryReport, allTradeAttempts, allLeagueData,
-  loadLeagueOverview, loadingLeagueOverview, onNavigateToAttempts, onNavigateToLeague,
+  loadLeagueOverview, loadingLeagueOverview, refreshRosterOverview, refreshingRosterOverview,
+  onNavigateToAttempts, onNavigateToLeague,
   onOpenRosterOverview, onOpenCrossLeaguePlayers, onOpenInjuryReport, onOpenAllTrades, onOpenValueTrends,
   showAllOpenTrades, setShowAllOpenTrades, alertsFeedTab, setAlertsFeedTab,
   leagueHubTab, setLeagueHubTab, activeLeagueHubGroup, standings,
@@ -477,6 +481,8 @@ export function HubRouter({
             leagueOverviewLoaded={leagueOverviewLoaded}
             leagueOverviewError={leagueOverviewError}
             leagueOverviewUpdatedAt={leagueOverviewUpdatedAt}
+            refreshRosterOverview={refreshRosterOverview}
+            refreshingRosterOverview={refreshingRosterOverview}
             leagueLineupStatus={leagueLineupStatus}
             lineupAvailability={lineupAvailability}
             selectedLeagueMateProfilesView={selectedLeagueMateProfilesView}

@@ -16,10 +16,24 @@ interface SleeperUserShape {
   user_id: string;
 }
 
+export interface LoadLeagueOverviewOpts {
+  /** Skip the browser + server roster caches (Roster Overview's Refresh). */
+  freshRosters?: boolean;
+}
+
+export interface UseLeagueOverviewReturn {
+  leagueOverviewData: Record<string, LeagueOverviewEntry>;
+  loadingLeagueOverview: boolean;
+  leagueOverviewLoaded: boolean;
+  leagueOverviewError: string | null;
+  leagueOverviewUpdatedAt: number | null;
+  loadLeagueOverview: (opts?: LoadLeagueOverviewOpts) => Promise<void>;
+}
+
 export function useLeagueOverview(
   leagues: SleeperLeague[],
   user: SleeperUserShape | null
-) {
+): UseLeagueOverviewReturn {
   const [leagueOverviewData, setLeagueOverviewData] = useState<Record<string, LeagueOverviewEntry>>({});
   const [loadingLeagueOverview, setLoadingLeagueOverview] = useState(false);
   const [leagueOverviewLoaded, setLeagueOverviewLoaded] = useState(false);
@@ -38,10 +52,13 @@ export function useLeagueOverview(
   // leagueOverviewLoaded flips true, each previously starting its own full per-league fan-out.
   // A call made while one is already running now joins that same in-flight promise instead of
   // firing a redundant fetch (Sept 22 code-review 50-league-scalability, Tier 2 finding #7).
+  // A freshRosters call never joins: a cached poll already in flight can't stand in for a Refresh
+  // that skips the roster caches, so it starts its own pass and the older one is discarded.
   const inFlightRef = useRef<Promise<void> | null>(null);
 
-  const loadLeagueOverview = useCallback((): Promise<void> => {
-    if (inFlightRef.current) return inFlightRef.current;
+  const loadLeagueOverview = useCallback((opts?: LoadLeagueOverviewOpts): Promise<void> => {
+    const freshRosters = opts?.freshRosters === true;
+    if (inFlightRef.current && !freshRosters) return inFlightRef.current;
 
     const run = async () => {
       const currentLeagues = leaguesRef.current;
@@ -53,7 +70,9 @@ export function useLeagueOverview(
       try {
         const fetchLeague = async (league: SleeperLeague) => {
           try {
-            const { rosters, tradedPicks, drafts, userMap } = await fetchLeagueCore(league.league_id);
+            const { rosters, tradedPicks, drafts, userMap } = await fetchLeagueCore(league.league_id, {
+              bypassRosters: freshRosters,
+            });
 
             // Pick pool: shared with useAppState.loadRoster/useSpyState via buildLeaguePickPool.
             // Overview renders every league at once, so it caps round depth at ROUNDS.length
@@ -82,7 +101,19 @@ export function useLeagueOverview(
           .forEach(({ league, rosters: lr, picks, userMap }) => {
             byLeague[league.league_id] = { league, rosters: lr, picks, userMap };
           });
-        setLeagueOverviewData(byLeague);
+        // A league that failed this pass (a 429, a blip) keeps its last good entry instead of
+        // dropping out. This map now feeds the injury report, Shares and the Dashboard too
+        // (useAppState's allLeagueData) and is re-polled every couple of minutes, so dropping it
+        // would make a league flicker out of all of them on one transient failure. Leagues the
+        // user is no longer in are still pruned.
+        setLeagueOverviewData((prev) => {
+          const next: Record<string, LeagueOverviewEntry> = {};
+          for (const league of currentLeagues) {
+            const entry = byLeague[league.league_id] ?? prev[league.league_id];
+            if (entry) next[league.league_id] = entry;
+          }
+          return next;
+        });
         setLeagueOverviewLoaded(true);
         // If every league failed (empty result on a non-empty league list), surface an error.
         if (Object.keys(byLeague).length === 0 && currentLeagues.length > 0) {
@@ -100,8 +131,9 @@ export function useLeagueOverview(
       }
     };
 
-    const promise = run().finally(() => {
-      inFlightRef.current = null;
+    const promise: Promise<void> = run().finally(() => {
+      // Only clear our own slot — a freshRosters pass may have replaced it while this one ran.
+      if (inFlightRef.current === promise) inFlightRef.current = null;
     });
     inFlightRef.current = promise;
     return promise;

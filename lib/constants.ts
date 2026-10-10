@@ -59,8 +59,17 @@ export const FC_VALUES_CLIENT_TTL_MS = 10 * 60_000;
 /** Timeout for the client fetching /api/fc-values (lib/fcValuesStore.ts). */
 export const FC_VALUES_CLIENT_TIMEOUT_MS = 10_000;
 
-/** Cross-league roster lookups — rosters change with trades/waivers */
-export const CROSS_LEAGUE_ROSTERS_TTL_MS = 6 * 60 * 60 * 1000;
+/** The browser keeps Sleeper's player map (injury designations included) for up to a day; past
+ *  this age it is re-pulled from /api/players in the background, both on load and while the app
+ *  stays open. The CDN copy behind that route is at most ~6 min old (PLAYERS_CDN_* below), so
+ *  Roster Overview's IR-Eligible / IR Stale and the injury report trail Sleeper by ~20 min at worst
+ *  without a manual refresh. */
+export const PLAYERS_BACKGROUND_REFRESH_MS = 15 * 60 * 1000;
+
+/** Roster Overview's Refresh skips every roster cache and re-pulls Sleeper's whole player map
+ *  (?fresh=1). A second click inside this gap just re-reads what the first one fetched, so a few
+ *  impatient clicks can't turn into repeated 50-league bypass bursts. */
+export const ROSTER_OVERVIEW_FRESH_GAP_MS = 60_000;
 
 /** Sleeper weekly stats — completed weeks never change; 7-day TTL is conservative */
 export const SLEEPER_STATS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -72,6 +81,13 @@ export const NFL_STATE_REVALIDATE_S = 3600;
 /** Sleeper player map — refreshed every 24 hours */
 export const PLAYERS_REVALIDATE_S = 86400;
 
+/** /api/players CDN window. Sleeper's raw map is too big for the Data Cache, so this header is the
+ *  only cache: a copy is served fresh for 5 min, then stale for at most 1 more while it revalidates
+ *  (was an hour, which left sparse traffic always a visit behind). Sleeper asks for /players/nfl
+ *  at most daily; this holds it to ~1 call per 5-6 min site-wide while anyone is active. */
+export const PLAYERS_CDN_MAX_AGE_S = 300;
+export const PLAYERS_CDN_STALE_S = 60;
+
 // ── Sleeper proxy revalidate windows (seconds) ────────────────
 // Server-side Next.js Data Cache TTLs for `/api/sleeper/*` routes.
 // Client-side TTLs (used with cachedFetch) live in lib/sleeperApi.ts
@@ -80,8 +96,9 @@ export const PLAYERS_REVALIDATE_S = 86400;
 export const SLEEPER_USER_REVALIDATE_S = 3600;
 /** league list updates at draft / season change */
 export const SLEEPER_USER_LEAGUES_REVALIDATE_S = 1800;
-/** rosters change on trades / waivers — 10m balances freshness vs Sleeper load */
-export const SLEEPER_LEAGUE_ROSTERS_REVALIDATE_S = 600;
+/** rosters change on trades / waivers / IR moves — 5m (browser: 3m) keeps Roster Overview and the
+ *  injury report close behind Sleeper; Refresh bypasses both */
+export const SLEEPER_LEAGUE_ROSTERS_REVALIDATE_S = 300;
 /** matchups update live during games — keep short for in-game freshness */
 export const SLEEPER_LEAGUE_MATCHUPS_REVALIDATE_S = 300;
 /** transactions for a given week — 15m is fine in offseason; consider lowering during regular-season game days */

@@ -112,13 +112,13 @@ function OverviewTab({
     setRefreshingRosters(true);
     const total = leagues.length;
     setRosterRefreshProgress({ done: 0, total });
-    // Clear both cache layers: leagueData_* (loadRoster's 2h cache) and
-    // sleeperCache:* (cachedFetch's 5m cache). The bypass: true flag below
-    // also forces the server proxy to skip its Next.js Data Cache.
+    // Clear cachedFetch's sleeperCache:* browser layer (the only one since the 2h
+    // leagueData_* copy was retired 10/10). The bypass: true flag below also forces
+    // the server proxy to skip its Next.js Data Cache.
     const keysToRemove: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
-      if (key?.startsWith("leagueData_") || key?.startsWith("sleeperCache:")) keysToRemove.push(key);
+      if (key?.startsWith("sleeperCache:")) keysToRemove.push(key);
     }
     keysToRemove.forEach((k) => removeLocalStorageItem(k));
     // Capped at OVERVIEW_REFRESH_ROSTERS_CONCURRENCY leagues at once rather than firing every

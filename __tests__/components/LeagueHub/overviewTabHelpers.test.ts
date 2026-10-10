@@ -3,14 +3,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { waitFor } from "@testing-library/react";
 import { refreshAllLeagueRosters } from "@/components/LeagueHub/overviewTabHelpers";
 import { OVERVIEW_REFRESH_ROSTERS_CONCURRENCY } from "@/lib/constants";
-import { getLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 import type { SleeperLeague } from "@/lib/types";
 
 // Sept 22 code-review 50-league-scalability finding, Tier 1 #3: OverviewTab's manual "Refresh
 // Rosters" button fanned out every league at once (4 concurrent Sleeper calls each, all
 // guaranteed real requests via bypass:true) — the same unbounded-burst shape Batch 1 fixed for
 // Gameday Dashboard. These tests cover the extracted fix: a bounded per-league concurrency cap,
-// with per-league progress reporting and the leagueData_* cache write preserved.
+// with per-league progress reporting preserved.
 
 type Fn = (...args: never[]) => unknown;
 const api = vi.hoisted(() => ({ impl: {} as Record<string, Fn> }));
@@ -69,29 +68,28 @@ describe("refreshAllLeagueRosters — concurrency cap", () => {
     expect(done).toHaveBeenCalledTimes(2);
   });
 
-  it("writes each league's rosters/traded-picks/drafts into its leagueData_* cache entry", async () => {
+  // 10/10 (Sleeper call-budget Stage 1): the 2h leagueData_* copy this used to write is retired —
+  // the bypass answers land in sleeperApi's own cache, which loadRoster and the overview read.
+  it("bypasses the cache on all four calls and writes no leagueData_* entry", async () => {
     const leagues = [league("A")];
-    api.impl.getLeagueRosters = vi.fn(async () => [{ roster_id: 1 }]);
-    api.impl.getLeagueTradedPicks = vi.fn(async () => [{ season: "2027" }]);
-    api.impl.getLeagueDrafts = vi.fn(async () => [{ draft_id: "d1" }]);
+    for (const k of ["getLeagueRosters", "getLeagueTradedPicks", "getLeagueDrafts", "getLeagueUsers"]) {
+      api.impl[k] = vi.fn(async () => []);
+    }
 
     await refreshAllLeagueRosters(leagues, () => {});
 
-    const cached = getLocalStorageItem<{ data: { allRosters: unknown[]; tradedPicksData: unknown[]; draftsData: unknown[] } } | null>(
-      "leagueData_A", null
-    );
-    expect(cached?.data.allRosters).toEqual([{ roster_id: 1 }]);
-    expect(cached?.data.tradedPicksData).toEqual([{ season: "2027" }]);
-    expect(cached?.data.draftsData).toEqual([{ draft_id: "d1" }]);
+    for (const k of ["getLeagueRosters", "getLeagueTradedPicks", "getLeagueDrafts", "getLeagueUsers"]) {
+      expect(api.impl[k]).toHaveBeenCalledWith("A", true);
+    }
+    expect(Object.keys(localStorage).filter((k) => k.startsWith("leagueData_"))).toEqual([]);
   });
 
-  it("falls back to an empty roster list (rather than rejecting) when getLeagueRosters fails", async () => {
+  it("resolves (rather than rejecting) when getLeagueRosters fails, still counting the league done", async () => {
     const leagues = [league("A")];
     api.impl.getLeagueRosters = vi.fn(() => Promise.reject(new Error("429")));
+    const done = vi.fn();
 
-    await expect(refreshAllLeagueRosters(leagues, () => {})).resolves.toBeUndefined();
-
-    const cached = getLocalStorageItem<{ data: { allRosters: unknown[] } } | null>("leagueData_A", null);
-    expect(cached?.data.allRosters).toEqual([]);
+    await expect(refreshAllLeagueRosters(leagues, done)).resolves.toBeUndefined();
+    expect(done).toHaveBeenCalledTimes(1);
   });
 });

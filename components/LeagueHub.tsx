@@ -75,6 +75,9 @@ interface LeagueHubProps {
   leagueOverviewLoaded: boolean;
   leagueOverviewError: string | null;
   leagueOverviewUpdatedAt: number | null;
+  /** Roster Overview's Refresh — rosters past every cache + Sleeper's current player map. */
+  refreshRosterOverview: () => Promise<void>;
+  refreshingRosterOverview: boolean;
   leagueLineupStatus: Record<string, LeagueLineupStatus | null>;
   lineupAvailability: LineupAvailability;
 
@@ -123,7 +126,7 @@ function LeagueHub({
   loadingActivity, loadingLeagueWeeklyMatchups,
   leagueNotes, activityTransactions,
   leagueOverviewData, loadingLeagueOverview, leagueOverviewLoaded, leagueOverviewError,
-  leagueOverviewUpdatedAt,
+  leagueOverviewUpdatedAt, refreshRosterOverview, refreshingRosterOverview,
   leagueLineupStatus,
   lineupAvailability,
   selectedLeagueMateProfilesView,
@@ -246,6 +249,8 @@ function LeagueHub({
             leagueOverviewLoaded={leagueOverviewLoaded}
             leagueOverviewUpdatedAt={leagueOverviewUpdatedAt}
             loadLeagueOverview={loadLeagueOverview}
+            onRefresh={refreshRosterOverview}
+            refreshing={refreshingRosterOverview}
             loadRoster={loadRoster}
             setLeagueHubTab={setLeagueHubTab}
             personalOrdering={personalOrdering}

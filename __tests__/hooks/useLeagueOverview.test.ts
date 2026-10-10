@@ -111,7 +111,91 @@ describe("useLeagueOverview — in-flight dedupe", () => {
   });
 });
 
+describe("useLeagueOverview — freshRosters (Roster Overview Refresh)", () => {
+  it("bypasses the roster cache for every league", async () => {
+    const leagues = [league("A"), league("B")];
+    api.impl.getLeagueRosters = vi.fn(async () => []);
+
+    const { result } = renderHook(() => useLeagueOverview(leagues, user));
+    await act(async () => { await result.current.loadLeagueOverview({ freshRosters: true }); });
+
+    expect(api.impl.getLeagueRosters).toHaveBeenCalledWith("A", true);
+    expect(api.impl.getLeagueRosters).toHaveBeenCalledWith("B", true);
+  });
+
+  it("does not join a cached load already in flight — it starts its own pass, which wins", async () => {
+    const leagues = [league("A")];
+    const pending: { bypass: boolean | undefined; release: (v: unknown) => void }[] = [];
+    api.impl.getLeagueRosters = vi.fn((_id: string, bypass?: boolean) =>
+      new Promise((resolve) => pending.push({ bypass, release: resolve }))
+    );
+
+    const { result } = renderHook(() => useLeagueOverview(leagues, user));
+    let cached!: Promise<void>;
+    let fresh!: Promise<void>;
+    act(() => { cached = result.current.loadLeagueOverview(); });
+    await waitFor(() => expect(pending.length).toBe(1));
+    act(() => { fresh = result.current.loadLeagueOverview({ freshRosters: true }); });
+
+    expect(fresh).not.toBe(cached);
+    await waitFor(() => expect(pending.length).toBe(2));
+    expect(pending.map((p) => !!p.bypass)).toEqual([false, true]);
+
+    // The fresh answer lands first; the older cached answer arriving afterwards must not replace it.
+    const mine = (players: string[]) => [{ roster_id: 1, owner_id: "me", players }];
+    pending[1].release(mine(["fresh"]));
+    await act(async () => { await fresh; });
+    pending[0].release(mine(["stale"]));
+    await act(async () => { await cached; });
+
+    expect(result.current.leagueOverviewData.A.rosters[0].players).toEqual(["fresh"]);
+    // And a plain call afterwards gets a new pass rather than a dangling in-flight slot.
+    let next!: Promise<void>;
+    act(() => { next = result.current.loadLeagueOverview(); });
+    await waitFor(() => expect(pending.length).toBe(3));
+    pending[2].release(mine(["next"]));
+    await act(async () => { await next; });
+    expect(result.current.leagueOverviewData.A.rosters[0].players).toEqual(["next"]);
+  });
+});
+
 describe("useLeagueOverview — per-league failure isolation", () => {
+  it("keeps a league's last good entry when a later pass fails for it", async () => {
+    // allLeagueData (injury report, Shares, Dashboard) is derived from this map and re-polled every
+    // couple of minutes — one 429 must not make a league vanish from all of them.
+    const leagues = [league("A"), league("B")];
+    let failA = false;
+    api.impl.getLeagueRosters = vi.fn((leagueId: string) =>
+      leagueId === "A" && failA
+        ? Promise.reject(new Error("429"))
+        : Promise.resolve([{ roster_id: 1, owner_id: "me", players: [leagueId] }])
+    );
+
+    const { result } = renderHook(() => useLeagueOverview(leagues, user));
+    await act(async () => { await result.current.loadLeagueOverview(); });
+    const firstA = result.current.leagueOverviewData.A;
+    expect(firstA).toBeDefined();
+
+    failA = true;
+    await act(async () => { await result.current.loadLeagueOverview(); });
+
+    expect(result.current.leagueOverviewData.A).toBe(firstA);
+    expect(result.current.leagueOverviewData.B).toBeDefined();
+    expect(result.current.leagueOverviewError).toBeNull();
+  });
+
+  it("prunes leagues the user is no longer in", async () => {
+    api.impl.getLeagueRosters = vi.fn(async () => []);
+    const { result, rerender } = renderHook(({ ls }) => useLeagueOverview(ls, user), {
+      initialProps: { ls: [league("A"), league("B")] },
+    });
+    await act(async () => { await result.current.loadLeagueOverview(); });
+    rerender({ ls: [league("B")] });
+    await act(async () => { await result.current.loadLeagueOverview(); });
+
+    expect(Object.keys(result.current.leagueOverviewData)).toEqual(["B"]);
+  });
+
   it("drops only the league whose fetch failed, keeping the rest", async () => {
     const leagues = [league("bad"), league("good")];
     api.impl.getLeagueRosters = vi.fn((leagueId: string) =>
