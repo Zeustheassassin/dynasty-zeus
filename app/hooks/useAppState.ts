@@ -31,6 +31,7 @@ import {
   getProjectionKickoffAt,
   getGamedayPollPlan,
   getCurrentNflWeek,
+  isDraftBoardDormant,
   PROJECTION_REFRESH_MS,
   buildInjuryNewsFlags,
   getLineupAvailabilityChecks,
@@ -251,6 +252,12 @@ const { playerStats } = usePlayerStats(nflStatsSeason, nflStatsWeek);
 // docblock for why that one is a different computation. A plain const rather than useMemo
 // because the value is a primitive: dependency arrays compare it by value.
 const currentNflWeek = getCurrentNflWeek(nflState);
+
+// Weeks 1–17 the Live Draft Board is blank and makes no Sleeper calls (user 10/10) — see
+// isDraftBoardDormant. Before nflState loads that's unknown, so the Board's load waits for it
+// rather than spend two calls it may not need. Primitives, compared by value in dependency arrays.
+const draftBoardDormant = isDraftBoardDormant(nflState);
+const draftBoardLoads = nflState != null && !draftBoardDormant;
 
 const [pickFcValues, setPickFcValues] = useState<Record<string, number>>({});
 const [fcTrendData, setFcTrendData] = useState<FcTrendEntry[]>([]);
@@ -903,7 +910,7 @@ useEffect(() => {
   const status = draftSettings?.status;
   const isLive = status === "drafting" || status === "paused";
   const onBoard = mainTab === "DRAFT" && draftHubSection === "BOARD";
-  if (!isLive || !onBoard) return;
+  if (!isLive || !onBoard || !draftBoardLoads) return;
   if (typeof document === "undefined") return;
 
   const POLL_MS = 30_000;
@@ -918,7 +925,7 @@ useEffect(() => {
   if (document.visibilityState === "visible") startTimer();
   document.addEventListener("visibilitychange", onVisibilityChange);
   return () => { stopTimer(); document.removeEventListener("visibilitychange", onVisibilityChange); };
-}, [mainTab, draftHubSection, draftSettings?.status, refreshDraftBoard]);
+}, [mainTab, draftHubSection, draftSettings?.status, draftBoardLoads, refreshDraftBoard]);
 
 // Keep redraft values matched to the selected league's QB format (superflex=2 vs
 // single-QB=1) so the redraft-rank half of the direction bucket is format-correct.
@@ -1191,9 +1198,9 @@ useEffect(() => {
 // Rookie board save + load effects live in useRookieBoardState (extracted hook).
 
 useEffect(() => {
-  if (!selectedLeague || mainTab !== "DRAFT" || draftHubSection !== "BOARD") return;
+  if (!selectedLeague || mainTab !== "DRAFT" || draftHubSection !== "BOARD" || !draftBoardLoads) return;
   refreshDraftBoard();
-}, [selectedLeague, mainTab, draftHubSection, refreshDraftBoard]);
+}, [selectedLeague, mainTab, draftHubSection, draftBoardLoads, refreshDraftBoard]);
 
   // -------------------------
   // LOAD ALL LEAGUES FOR SHARES

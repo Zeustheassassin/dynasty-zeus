@@ -9,6 +9,9 @@ import {
   getSeasonYear,
   isValidNflState,
   recentTransactionLegs,
+  isDraftBoardDormant,
+  isSeasonUnderway,
+  FANTASY_CHAMPIONSHIP_WEEK,
 } from "@/lib/helpers/season";
 
 // ── calendarSeasonYear ───────────────────────────────────────────────────────
@@ -224,5 +227,54 @@ describe("recentTransactionLegs", () => {
   it("follows the leg into the playoffs but stays inside the proxy's 0-22 range", () => {
     expect(recentTransactionLegs({ season_type: "post", leg: 19 }, 30)).toEqual([14, 15, 16, 17, 18, 19, 20]);
     expect(recentTransactionLegs({ season_type: "post", leg: 30 }, 30)).toEqual([16, 17, 18, 19, 20, 21, 22]);
+  });
+});
+
+// ── isDraftBoardDormant ──────────────────────────────────────────────────────
+// Weeks 1–17 the Live Draft Board is blank and makes no Sleeper calls (user 10/10).
+
+describe("isDraftBoardDormant", () => {
+  it("is on for regular-season weeks 1 through the fantasy championship week", () => {
+    expect(FANTASY_CHAMPIONSHIP_WEEK).toBe(17);
+    expect(isDraftBoardDormant({ season_type: "regular", week: 1 })).toBe(true);
+    expect(isDraftBoardDormant({ season_type: "regular", week: 17 })).toBe(true);
+  });
+
+  it("is off from Week 18, in the playoffs, the preseason and the offseason, and without a state", () => {
+    expect(isDraftBoardDormant({ season_type: "regular", week: 18 })).toBe(false);
+    expect(isDraftBoardDormant({ season_type: "post", week: 1 })).toBe(false);
+    expect(isDraftBoardDormant({ season_type: "pre", week: 3 })).toBe(false);
+    expect(isDraftBoardDormant({ season_type: "off", week: 0 })).toBe(false);
+    expect(isDraftBoardDormant({ season_type: "regular", week: 0 })).toBe(false);
+    expect(isDraftBoardDormant(null)).toBe(false);
+  });
+});
+
+// ── isSeasonUnderway ─────────────────────────────────────────────────────────
+// When Draft History treats a league-season's draft list as settled.
+
+describe("isSeasonUnderway", () => {
+  const state = (season: string, season_type: string) => ({ season, season_type, week: season_type === "regular" ? 5 : 0 });
+
+  it("is true for a past season and for this one from Week 1 on (regular season or playoffs)", () => {
+    expect(isSeasonUnderway("2025", state("2026", "pre"))).toBe(true);
+    expect(isSeasonUnderway("2026", state("2026", "regular"))).toBe(true);
+    expect(isSeasonUnderway("2026", state("2026", "post"))).toBe(true);
+  });
+
+  it("is false for this season before Week 1, and for a later one", () => {
+    expect(isSeasonUnderway("2026", state("2026", "pre"))).toBe(false);
+    expect(isSeasonUnderway("2026", state("2026", "off"))).toBe(false);
+    expect(isSeasonUnderway("2027", state("2026", "regular"))).toBe(false);
+  });
+
+  it("without a valid state, counts only seasons before the calendar season year", () => {
+    expect(isSeasonUnderway(String(Number(CURRENT_YEAR) - 1), null)).toBe(true);
+    expect(isSeasonUnderway(CURRENT_YEAR, null)).toBe(false);
+    expect(isSeasonUnderway(CURRENT_YEAR, {})).toBe(false);
+  });
+
+  it("is false for a season that isn't a year", () => {
+    expect(isSeasonUnderway("soon", state("2026", "regular"))).toBe(false);
   });
 });

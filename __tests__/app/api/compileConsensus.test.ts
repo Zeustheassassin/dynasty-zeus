@@ -164,6 +164,23 @@ vi.mock("@/lib/server/sleeperBudget", async (importOriginal) => {
   };
 });
 
+// Saved completed drafts (migration 070), in memory. Empty unless a test seeds it, so the tests above
+// see every draft fetched from Sleeper as before.
+const snapshots = vi.hoisted(() => ({
+  saved: new Map<string, unknown[]>(),
+  reads: [] as string[][],
+  saves: [] as Array<{ draftId: string; leagueId: string | null; season: string; rounds: number | null; picks: unknown[] }>,
+}));
+vi.mock("@/lib/server/draftSnapshots", () => ({
+  readSavedDrafts: async (ids: string[]) => {
+    snapshots.reads.push(ids);
+    return new Map(ids.filter((id) => snapshots.saved.has(id)).map((id) => [
+      id, { draftId: id, leagueId: null, season: "x", picks: snapshots.saved.get(id) },
+    ]));
+  },
+  saveDrafts: async (drafts: typeof snapshots.saves) => { snapshots.saves.push(...drafts); return drafts.length; },
+}));
+
 import { POST, maxDuration } from "@/app/api/compile-consensus/route";
 import { COMPILE_MAX_CONNECTED_USERS, COMPILE_TARGET_RPM, COMPILE_PICKS_DEADLINE_MS } from "@/lib/constants";
 
@@ -228,6 +245,9 @@ beforeEach(() => {
   h.pacer.calls = 0;
   budget.waits = [];
   budget.failWhen = null;
+  snapshots.saved.clear();
+  snapshots.reads = [];
+  snapshots.saves = [];
 });
 
 // ── Guard: rate limiting ──────────────────────────────────────────────────────
@@ -899,6 +919,88 @@ describe("POST compile-consensus — Sleeper call budget", () => {
       expect(deletes).toHaveLength(0);
       expect(events.some((e) => e.type === "year_done")).toBe(false);
       expect(events.some((e) => String(e.message ?? "").includes("kept its previous compile"))).toBe(true);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+});
+
+describe("POST compile-consensus — saved draft snapshots", () => {
+  /** L1 holds D1 + D2 (complete) and D3 (still drafting) this year. */
+  function oneLeagueThreeDrafts() {
+    fetchResponders.push((url) => {
+      if (url.endsWith(`/user/200/leagues/nfl/${THIS_YEAR}`)) return [dynastyLeague("L1")];
+      if (url.endsWith("/league/L1/rosters")) return [{ roster_id: 1, owner_id: "200" }];
+      if (url.includes("/leagues/nfl/")) return [];
+      if (url.endsWith(`/user/200/drafts/nfl/${THIS_YEAR}`))
+        return [
+          { draft_id: "D1", league_id: "L1", season: String(THIS_YEAR), status: "complete", settings: { rounds: 4 } },
+          { draft_id: "D2", league_id: "L1", season: String(THIS_YEAR), status: "complete", settings: { rounds: 4 } },
+          { draft_id: "D3", league_id: "L1", season: String(THIS_YEAR), status: "drafting", settings: { rounds: 4 } },
+        ];
+      if (url.includes("/drafts/nfl/")) return [];
+      if (url.endsWith("/players/nfl")) {
+        const db: Record<string, unknown> = {};
+        for (let i = 0; i < 200; i++) db[`x${i}`] = { first_name: "Db", last_name: `${i}` };
+        return db;
+      }
+      const m = url.match(/\/draft\/(\w+)\/picks$/);
+      if (m) return [{
+        player_id: `fresh-${m[1]}`, pick_no: 1, round: 1, draft_slot: 1, picked_by: "u9", reactions: { a: 1 },
+        metadata: { first_name: "Fresh", last_name: m[1], position: "RB", team: "NYJ", years_exp: 0, news_updated: "1" },
+      }];
+      return undefined;
+    });
+  }
+  const savedPick = (player_id: string, pick_no: number) =>
+    ({ player_id, pick_no, round: 1, draft_slot: pick_no, picked_by: "u1", metadata: { first_name: "Saved", last_name: "One", position: "WR", years_exp: "0" } });
+  const compile = async () =>
+    readEvents(await POST(makeReq({ sleeperUserId: "200", accessToken: "t", years: [THIS_YEAR] }) as never));
+
+  it("reads a saved completed draft instead of asking Sleeper, and saves the completed ones it fetched", async () => {
+    oneLeagueThreeDrafts();
+    snapshots.saved.set("D1", [savedPick("saved-1", 2)]);
+    await compile();
+
+    const picksUrls = safeFetch.mock.calls.map((c) => String(c[0])).filter((u) => u.includes("/picks"));
+    expect(picksUrls).toEqual([expect.stringMatching(/\/draft\/D2\/picks$/), expect.stringMatching(/\/draft\/D3\/picks$/)]);
+    // Only completed drafts are looked up.
+    expect(snapshots.reads).toEqual([["D1", "D2"]]);
+    // D2 saved, trimmed; D3 (still drafting) never saved.
+    expect(snapshots.saves).toEqual([{
+      draftId: "D2", leagueId: "L1", season: String(THIS_YEAR), rounds: 4,
+      picks: [{ pick_no: 1, round: 1, draft_slot: 1, player_id: "fresh-D2", picked_by: "u9",
+        metadata: { first_name: "Fresh", last_name: "D2", position: "RB", team: "NYJ", years_exp: 0 } }],
+    }]);
+    // The saved draft's picks count in the class like fetched ones.
+    const rows = upserts.find((u) => u.table === "consensus_draft_cache")!.rows as Array<{ player_id: string; avg_pick_no: number }>;
+    expect(rows.map((r) => r.player_id).sort()).toEqual(["fresh-D2", "fresh-D3", "saved-1"]);
+    expect(rows.find((r) => r.player_id === "saved-1")!.avg_pick_no).toBe(2);
+  });
+
+  it("asks Sleeper for no picks at all when every completed draft is saved", async () => {
+    oneLeagueThreeDrafts();
+    snapshots.saved.set("D1", [savedPick("s1", 1)]);
+    snapshots.saved.set("D2", [savedPick("s2", 2)]);
+    await compile();
+    const picksUrls = safeFetch.mock.calls.map((c) => String(c[0])).filter((u) => u.includes("/picks"));
+    expect(picksUrls).toEqual([expect.stringMatching(/\/draft\/D3\/picks$/)]);
+    expect(snapshots.saves).toEqual([]);
+  });
+
+  it("still saves the drafts it fetched when the class is cut off", async () => {
+    oneLeagueThreeDrafts();
+    let now = 1_700_000_000_000;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+    fetchResponders.unshift((url) => {
+      if (url.endsWith("/draft/D1/picks")) now += COMPILE_PICKS_DEADLINE_MS + 1_000;
+      return undefined;
+    });
+    try {
+      const events = await compile();
+      expect(events.some((e) => String(e.message ?? "").includes("kept its previous compile"))).toBe(true);
+      expect(upserts.filter((u) => u.table === "consensus_draft_cache")).toHaveLength(0);
+      expect(snapshots.saves.map((d) => d.draftId)).toEqual(["D1"]);
     } finally {
       nowSpy.mockRestore();
     }

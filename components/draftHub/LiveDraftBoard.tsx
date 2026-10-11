@@ -4,7 +4,7 @@ import { supabase } from "../../lib/supabaseclient";
 import { usePlayers } from "../../lib/PlayersContext";
 import { useAuth } from "../../lib/AuthContext";
 import { useLeague } from "../../lib/LeagueContext";
-import { BASE_YEAR } from "../../lib/helpers";
+import { BASE_YEAR, FANTASY_CHAMPIONSHIP_WEEK } from "../../lib/helpers";
 import { removeLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 import { logger } from "../../lib/logger";
 import type {
@@ -47,6 +47,8 @@ interface LiveDraftBoardProps {
   refreshDraftBoard: () => void;
   loadDraftScout: (userId: string) => void;
   loadingDraftRefresh: boolean;
+  /** Weeks 1–17 (isDraftBoardDormant): the board is blank and nothing on it calls Sleeper. */
+  dormant: boolean;
 }
 
 export default function LiveDraftBoard({
@@ -57,6 +59,7 @@ export default function LiveDraftBoard({
   draftSettings, draftPicks, draftOrder, allPicks,
   boardRookies, myPickList, draftedPlayerIds, predictedDraftPicks, draftPoolRanks, topAvailableRookies,
   refreshDraftBoard, loadDraftScout, loadingDraftRefresh,
+  dormant,
 }: LiveDraftBoardProps) {
   const players = usePlayers();
   const { supabaseUser } = useAuth();
@@ -166,6 +169,20 @@ export default function LiveDraftBoard({
       return changed ? cleaned : prev;
     });
   }, [draftPicks, draftedPlayerIds, rosters, myDraftSlotPicks, setMyDraftSlotPicks]);
+
+  // In season there's no draft to follow, so no board, no Refresh and no Draft Scout — useAppState
+  // doesn't load the board then either (user 10/10).
+  if (dormant) {
+    return (
+      <div role="status" className="max-w-xl mx-auto mt-8 rounded-xl border border-slate-700 bg-slate-800/50 p-6 text-center">
+        <div className="text-sm font-semibold text-slate-200">Rookie drafts are done for the season</div>
+        <p className="mt-2 text-xs text-slate-400">
+          The Live Draft Board is off through Week {FANTASY_CHAMPIONSHIP_WEEK} and comes back after it for
+          next year&apos;s draft. Past drafts are under Draft History.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <>

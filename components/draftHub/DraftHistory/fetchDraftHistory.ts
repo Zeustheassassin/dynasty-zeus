@@ -1,90 +1,106 @@
-import { sleeperApi } from "../../../lib/sleeperApi";
-import { withConcurrency } from "../../../lib/concurrency";
-import { BASE_YEAR, ROOKIE_DRAFT_MAX_ROUNDS } from "../../../lib/helpers";
-import { DRAFT_HISTORY_LEAGUE_CONCURRENCY } from "../../../lib/constants";
+import { withRetry } from "../../../lib/withRetry";
+import { logger } from "../../../lib/logger";
+import { DRAFT_HISTORY_LEAGUES_PER_REQUEST, DRAFT_HISTORY_MAX_IDLE_ROUNDS } from "../../../lib/constants";
 import type { SleeperLeague } from "../../../lib/types";
-import type { SleeperDraftBasic, SleeperPickBasic } from "../shared";
+import type { DraftHistoryResponse, SavedDraftPick } from "../../../lib/draft/rookieDrafts";
 
-// Rookie-draft class year tracks the CALENDAR (upcoming class), not the NFL season.
-export const ROOKIE_YEAR = String(BASE_YEAR);
+const log = logger("components/draftHub/DraftHistory/fetchDraftHistory");
 
-/** How far back each current league's previous_league_id chain is walked. */
-const PREVIOUS_SEASONS = 3;
-
-/** One rookie draft's raw picks, labeled with the CURRENT league's name (every season of a league's
+/** One rookie draft's picks, labeled with the CURRENT league's name (every season of a league's
  *  chain shows under the name it has today) and the season's own league_id. */
 export interface RawHistoryDraft {
   leagueName: string;
   leagueId: string;
   season: string;
   draftId: string;
-  picks: SleeperPickBasic[];
+  picks: SavedDraftPick[];
 }
 
-/** Rookie-length drafts only. Past classes count once complete; the current class also while it's
- *  drafting or paused, so its partial picks show as a live ADP read. */
-export function isHistoryRookieDraft(d: SleeperDraftBasic): boolean {
-  const rounds = d.settings?.rounds ?? d.rounds ?? 99;
-  if (rounds > ROOKIE_DRAFT_MAX_ROUNDS) return false;
-  if (d.season !== ROOKIE_YEAR) return d.status === "complete";
-  return d.status === "complete" || d.status === "drafting" || d.status === "paused";
+/** The route's own 429 or a 5xx — worth another try. */
+class RetryableHistoryError extends Error {
+  constructor(readonly status: number, readonly retryAfterMs: number) {
+    super(`/api/draft-history ${status}`);
+  }
 }
+
+async function postDraftHistory(leagueIds: string[]): Promise<DraftHistoryResponse> {
+  return withRetry(
+    async () => {
+      const res = await fetch("/api/draft-history", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ leagueIds }),
+      });
+      if (res.status === 429 || res.status >= 500) {
+        const secs = Number(res.headers.get("Retry-After"));
+        throw new RetryableHistoryError(res.status, Number.isFinite(secs) && secs > 0 ? Math.min(secs, 60) * 1000 : 0);
+      }
+      if (!res.ok) throw new Error(`/api/draft-history ${res.status}`);
+      return (await res.json()) as DraftHistoryResponse;
+    },
+    3,
+    (err) => err instanceof RetryableHistoryError,
+    (err, i) => (err instanceof RetryableHistoryError && err.retryAfterMs > 0 ? err.retryAfterMs : 500 * 2 ** i),
+  );
+}
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
- * Every rookie draft across `leagues` and up to PREVIOUS_SEASONS seasons back through each one's
- * previous_league_id chain — ~11 Sleeper calls a league (3 league lookups, 4 draft lists, ~4 pick
- * lists), ~550 at 50 leagues.
+ * Every rookie draft across `leagues` and up to 3 seasons back through each one's previous_league_id
+ * chain, from /api/draft-history: saved drafts come straight from Supabase (migration 070), and the
+ * server asks Sleeper only for what isn't saved yet — so once a league's drafts are saved, a visit
+ * costs no Sleeper calls at all. (Until the snapshots this walked Sleeper from the browser, ~11 calls
+ * a league and ~550 at 50 leagues, on every visit.)
  *
- * DRAFT_HISTORY_LEAGUE_CONCURRENCY leagues at a time, each league's calls one after another, so
- * Draft History never has more than that many calls waiting in sleeperApi's queue — the overview
- * poll or a Refresh queued behind it waits for those, not for the whole list. (Until 10/10 this was
- * a nested Promise.all that fired every call at once.)
+ * DRAFT_HISTORY_LEAGUES_PER_REQUEST leagues a request, one request at a time. A request that runs out
+ * of time (a cold load) sends the leagues it didn't finish back as `pending`, and they go out again
+ * with the next batch — after `retryAfterMs` if Sleeper asked the server to slow down. Gives up with
+ * what it has after DRAFT_HISTORY_MAX_IDLE_ROUNDS requests in a row that finish nothing, or on a
+ * request that fails outright.
  *
- * `shouldBail` stops the walk between calls (a superseded load); `onLeagueDone` fires once per
- * league for a progress count. A failed lookup skips just that season, as before.
+ * `shouldBail` stops between requests (a superseded load); `onLeagueDone` fires once per league for a
+ * progress count.
  */
 export async function fetchRookieDraftHistory(
   leagues: SleeperLeague[],
   opts: { shouldBail?: () => boolean; onLeagueDone?: () => void } = {}
 ): Promise<RawHistoryDraft[]> {
   const bail = () => opts.shouldBail?.() === true;
+  const nameById = new Map(leagues.map((l) => [l.league_id, l.name]));
+  let pending = Array.from(nameById.keys());
+  const found: RawHistoryDraft[] = [];
+  let idleRounds = 0;
 
-  const loadLeague = async (league: SleeperLeague): Promise<RawHistoryDraft[]> => {
-    const found: RawHistoryDraft[] = [];
-    // Always include the current league so its in-progress / completed current-year draft appears.
-    const toCheck: string[] = [league.league_id];
-    let prevId: string | null = league.previous_league_id ?? null;
-    let depth = 0;
-    while (prevId && depth < PREVIOUS_SEASONS && !bail()) {
-      toCheck.push(prevId);
-      const prev = await sleeperApi.getLeagueInfo(prevId);
-      if (!prev) break;
-      prevId = prev.previous_league_id ?? null;
-      depth++;
+  while (pending.length > 0 && !bail()) {
+    const batch = pending.slice(0, DRAFT_HISTORY_LEAGUES_PER_REQUEST);
+    let res: DraftHistoryResponse;
+    try {
+      res = await postDraftHistory(batch);
+    } catch (err) {
+      log.warn("draft history request failed — showing what loaded", { err: String(err), leaguesLeft: pending.length });
+      break;
     }
+    if (bail()) break;
 
-    for (const leagueId of toCheck) {
-      if (bail()) break;
-      try {
-        const drafts: SleeperDraftBasic[] = await sleeperApi.getLeagueDrafts(leagueId);
-        if (!Array.isArray(drafts)) continue;
-        for (const draft of drafts.filter(isHistoryRookieDraft)) {
-          if (bail()) break;
-          const picks: SleeperPickBasic[] = await sleeperApi.getDraftPicks(draft.draft_id);
-          if (!Array.isArray(picks)) continue;
-          found.push({ leagueName: league.name, leagueId, season: draft.season, draftId: draft.draft_id, picks });
-        }
-      } catch {
-        // The getOrNull-style calls above return []/null rather than throw; this only guards a
-        // season against something unexpected so it can't take the whole league down with it.
+    const finished = new Set<string>();
+    for (const league of res.leagues ?? []) {
+      if (!nameById.has(league.leagueId) || finished.has(league.leagueId)) continue;
+      finished.add(league.leagueId);
+      const leagueName = nameById.get(league.leagueId) ?? "";
+      for (const d of league.drafts) {
+        found.push({ leagueName, leagueId: d.leagueId, season: d.season, draftId: d.draftId, picks: d.picks });
       }
+      opts.onLeagueDone?.();
     }
-    opts.onLeagueDone?.();
-    return found;
-  };
+    pending = pending.filter((id) => !finished.has(id));
 
-  const perLeague = await withConcurrency(leagues, loadLeague, DRAFT_HISTORY_LEAGUE_CONCURRENCY, {
-    shouldBail: bail,
-  });
-  return perLeague.flat();
+    if (finished.size > 0) idleRounds = 0;
+    else if (++idleRounds >= DRAFT_HISTORY_MAX_IDLE_ROUNDS) {
+      log.warn("draft history stopped making progress — showing what loaded", { leaguesLeft: pending.length });
+      break;
+    }
+    if (pending.length > 0 && res.retryAfterMs) await sleep(Math.min(res.retryAfterMs, 60_000));
+  }
+  return found;
 }

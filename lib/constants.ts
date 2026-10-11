@@ -451,12 +451,30 @@ export const LEAGUEMATES_LEAGUE_CONCURRENCY = 3;
 export const LEAGUEMATES_OWNER_CONCURRENCY = 4;
 
 /**
- * Draft History (components/draftHub/DraftHistory/fetchDraftHistory.ts): leagues walked at once.
- * Each walks its previous_league_id chain and reads every season's drafts and rookie-draft picks one
- * call at a time (~11 calls a league), so at most this many Draft History calls are ever queued —
- * it was an unbounded nested Promise.all of ~550 calls at 50 leagues before 10/10.
+ * Draft History (app/api/draft-history): leagues one request walks at once, and completed drafts'
+ * picks it fetches at once. Each league walks its previous_league_id chain one Sleeper call at a time,
+ * and only for a league-season that isn't saved yet or whose draft list isn't final (migration 070) —
+ * so a warm load makes no Sleeper calls at all. (An unbounded nested Promise.all of ~550 browser calls
+ * at 50 leagues before 10/10; 3 leagues at a time from the browser until the snapshots.)
  */
 export const DRAFT_HISTORY_LEAGUE_CONCURRENCY = 3;
+
+/** Seasons walked back through each current league's previous_league_id chain. */
+export const DRAFT_HISTORY_PREVIOUS_SEASONS = 3;
+
+/** Leagues per /api/draft-history request. ~70 KB of picks a league (4 seasons), so 20 keeps a
+ *  response far under Vercel's 4.5 MB body cap; a warm load at 50 leagues is 3 requests. */
+export const DRAFT_HISTORY_LEAGUES_PER_REQUEST = 20;
+
+/** How long one /api/draft-history request keeps starting Sleeper calls. Leagues it didn't finish come
+ *  back as `pending` and the browser asks again; whatever was saved is never fetched twice. */
+export const DRAFT_HISTORY_FILL_BUDGET_MS = 25_000;
+
+/** /api/draft-history requests a minute per IP — a cold load at 50 leagues is about one per 25s. */
+export const DRAFT_HISTORY_RPM_PER_IP = 30;
+
+/** Requests in a row that finish no league before the browser gives up and shows what it has. */
+export const DRAFT_HISTORY_MAX_IDLE_ROUNDS = 3;
 
 /**
  * Years the connected-user network is discovered across, independent of which

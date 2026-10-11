@@ -77,6 +77,32 @@ export function getCurrentNflWeek(
   return nflState?.season_type === "regular" && rawWeek > 0 ? rawWeek : 0;
 }
 
+/** The fantasy championship week — Sleeper's default playoffs end in Week 17. */
+export const FANTASY_CHAMPIONSHIP_WEEK = 17;
+
+/** Weeks 1–17 of the regular season. The Live Draft Board stays blank then and makes no Sleeper
+ *  calls (user 10/10): every league's rookie draft is done, and the next class only matters once the
+ *  fantasy season is over. False without an nflState — the caller decides what "not loaded" means. */
+export function isDraftBoardDormant(
+  nflState?: { season_type?: string | null; week?: number | null } | null,
+): boolean {
+  const week = getCurrentNflWeek(nflState);
+  return week >= 1 && week <= FANTASY_CHAMPIONSHIP_WEEK;
+}
+
+/** Whether NFL season `season` has reached its regular season: a past season, or this one from Week 1
+ *  on (regular season or playoffs). Draft History treats a league-season's draft list as settled from
+ *  then on. Without a valid nflState only past seasons count, by the calendar season year. */
+export function isSeasonUnderway(season: string, nflState: unknown): boolean {
+  const s = Number(season);
+  if (!Number.isInteger(s)) return false;
+  const valid = isValidNflState(nflState);
+  const current = Number(valid ? nflState.season : CURRENT_YEAR);
+  if (s < current) return true;
+  if (s > current) return false;
+  return valid && (nflState.season_type === "regular" || nflState.season_type === "post");
+}
+
 /** The Sleeper transaction legs (`/league/{id}/transactions/{leg}`) that can hold a transaction
  *  from the last `windowDays` days. Sleeper files the WHOLE offseason and preseason under leg 1
  *  (verified 2026-10-07: every league's leg 1 ran from early January to Sept 15, and leg 0 was

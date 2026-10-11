@@ -2,6 +2,7 @@
 import React, { useState } from "react";
 import { useLeague } from "../lib/LeagueContext";
 import { useValues } from "../lib/ValuesContext";
+import { isDraftBoardDormant } from "../lib/helpers";
 import PickValuesTab from "./draft/PickValuesTab";
 import type {
   SleeperLeague, SleeperUser, SleeperDraft, SleeperDraftPick, SleeperNFLState,
@@ -158,6 +159,7 @@ function DraftHub({
           refreshDraftBoard={refreshDraftBoard}
           loadDraftScout={loadDraftScout}
           loadingDraftRefresh={loadingDraftRefresh}
+          dormant={isDraftBoardDormant(nflState)}
         />
       )}
 

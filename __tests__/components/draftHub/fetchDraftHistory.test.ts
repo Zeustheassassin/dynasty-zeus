@@ -1,109 +1,113 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { DRAFT_HISTORY_LEAGUE_CONCURRENCY } from "@/lib/constants";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { DRAFT_HISTORY_LEAGUES_PER_REQUEST, DRAFT_HISTORY_MAX_IDLE_ROUNDS } from "@/lib/constants";
+import type { DraftHistoryResponse } from "@/lib/draft/rookieDrafts";
 
-// Sleeper call-budget Stage 3 (10/10): Draft History's load was a nested Promise.all over every
-// league x season x draft (~550 calls at 50 leagues, all at once). Now a few leagues at a time, each
-// league's calls one after another — same drafts found, same filters.
+// Draft History snapshots (10/10): the browser no longer walks Sleeper itself (~11 calls a league,
+// ~550 at 50 leagues, on every visit). It posts its leagues to /api/draft-history in batches, which
+// answers from saved drafts and asks Sleeper only for what isn't saved; leagues a request ran out of
+// time for come back as `pending` and go out again.
 
-const h = vi.hoisted(() => ({
-  open: 0,
-  maxOpen: 0,
-  calls: [] as string[],
-  // league_id -> previous_league_id (null = chain ends)
-  chain: {} as Record<string, string | null>,
-  // league_id -> drafts
-  drafts: {} as Record<string, Array<{ draft_id: string; season: string; status: string; settings?: { rounds?: number } }>>,
-}));
+import { fetchRookieDraftHistory } from "@/components/draftHub/DraftHistory/fetchDraftHistory";
 
-async function track<T>(label: string, value: () => T): Promise<T> {
-  h.calls.push(label);
-  h.open++;
-  h.maxOpen = Math.max(h.maxOpen, h.open);
-  await new Promise((r) => setTimeout(r, 1));
-  h.open--;
-  return value();
+const pick = (player_id: string) => ({ pick_no: 1, round: 1, draft_slot: 1, player_id, picked_by: "u1", metadata: {} });
+const stats = { savedDrafts: 0, fetchedDrafts: 0, liveDrafts: 0, sleeperRequests: 0 };
+
+/** Each request's league ids, and a responder deciding what the route answers. */
+let requests: string[][];
+let respond: (leagueIds: string[], n: number) => Response | DraftHistoryResponse;
+
+function finished(leagueIds: string[]): DraftHistoryResponse {
+  return {
+    leagues: leagueIds.map((leagueId) => ({
+      leagueId,
+      drafts: [{ leagueId: `${leagueId}-prev`, season: "2025", draftId: `${leagueId}-d`, picks: [pick(`p-${leagueId}`)] }],
+    })),
+    pending: [],
+    stats,
+  };
 }
 
-vi.mock("@/lib/sleeperApi", () => ({
-  sleeperApi: {
-    getLeagueInfo: vi.fn((id: string) =>
-      track(`info:${id}`, () => (id in h.chain ? { league_id: id, previous_league_id: h.chain[id] } : null))),
-    getLeagueDrafts: vi.fn((id: string) => track(`drafts:${id}`, () => h.drafts[id] ?? [])),
-    getDraftPicks: vi.fn((draftId: string) =>
-      track(`picks:${draftId}`, () => [{ player_id: `p-${draftId}`, round: 1, draft_slot: 1, pick_no: 1, picked_by: "u1" }])),
-  },
-}));
-
-import { fetchRookieDraftHistory, ROOKIE_YEAR } from "@/components/draftHub/DraftHistory/fetchDraftHistory";
-
-const PREV = String(Number(ROOKIE_YEAR) - 1);
-const rookie = (draft_id: string, season: string, status = "complete") =>
-  ({ draft_id, season, status, settings: { rounds: 4 } });
-
 beforeEach(() => {
-  h.open = 0;
-  h.maxOpen = 0;
-  h.calls = [];
-  h.chain = {};
-  h.drafts = {};
+  requests = [];
+  respond = (ids) => finished(ids);
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
+    expect(url).toBe("/api/draft-history");
+    expect(init.method).toBe("POST");
+    const { leagueIds } = JSON.parse(String(init.body)) as { leagueIds: string[] };
+    requests.push(leagueIds);
+    const out = respond(leagueIds, requests.length);
+    return out instanceof Response ? out : new Response(JSON.stringify(out), { status: 200 });
+  }));
+});
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
+const leaguesOf = (n: number) => Array.from({ length: n }, (_, i) => ({ league_id: `L${i}`, name: `League ${i}` }));
+
 describe("fetchRookieDraftHistory", () => {
-  it("walks up to 3 seasons back and labels every season with the current league's name", async () => {
-    h.chain = { p1: "p2", p2: "p3", p3: "p4", p4: null };
-    h.drafts = {
-      cur: [rookie("d-cur", ROOKIE_YEAR)],
-      p1: [rookie("d-p1", PREV)],
-      p3: [rookie("d-p3", String(Number(PREV) - 2))],
-      p4: [rookie("d-p4", "2019")], // 4 seasons back — never reached
-    };
-    const out = await fetchRookieDraftHistory([{ league_id: "cur", name: "Dynasty", previous_league_id: "p1" }] as never[]);
-    expect(out.map((d) => [d.leagueId, d.draftId, d.leagueName])).toEqual([
-      ["cur", "d-cur", "Dynasty"], ["p1", "d-p1", "Dynasty"], ["p3", "d-p3", "Dynasty"],
-    ]);
-    expect(h.calls.filter((c) => c.startsWith("info:"))).toEqual(["info:p1", "info:p2", "info:p3"]);
-    expect(out[0].picks[0].player_id).toBe("p-d-cur");
-  });
-
-  it("keeps rookie-length drafts: complete for past classes, also drafting/paused for this year's", async () => {
-    h.drafts = {
-      cur: [
-        rookie("live", ROOKIE_YEAR, "drafting"),
-        rookie("paused", ROOKIE_YEAR, "paused"),
-        rookie("pre", ROOKIE_YEAR, "pre_draft"),
-        { draft_id: "startup", season: ROOKIE_YEAR, status: "complete", settings: { rounds: 25 } },
-        rookie("old-live", PREV, "drafting"),
-        rookie("old-done", PREV),
-      ],
-    };
-    const out = await fetchRookieDraftHistory([{ league_id: "cur", name: "L" }] as never[]);
-    expect(out.map((d) => d.draftId)).toEqual(["live", "paused", "old-done"]);
-  });
-
-  it("never has more than DRAFT_HISTORY_LEAGUE_CONCURRENCY calls open, and reports each league done", async () => {
-    const leagues = Array.from({ length: 10 }, (_, i) => {
-      const id = `L${i}`;
-      h.chain[`${id}-prev`] = null;
-      h.drafts[id] = [rookie(`${id}-d`, ROOKIE_YEAR)];
-      h.drafts[`${id}-prev`] = [rookie(`${id}-pd`, PREV)];
-      return { league_id: id, name: id, previous_league_id: `${id}-prev` };
-    });
+  it("posts the leagues in batches and labels every draft with the current league's name", async () => {
+    const leagues = leaguesOf(DRAFT_HISTORY_LEAGUES_PER_REQUEST + 5);
     const onLeagueDone = vi.fn();
     const out = await fetchRookieDraftHistory(leagues as never[], { onLeagueDone });
-    expect(out).toHaveLength(20);
-    expect(h.maxOpen).toBe(DRAFT_HISTORY_LEAGUE_CONCURRENCY);
-    expect(onLeagueDone).toHaveBeenCalledTimes(10);
+
+    expect(requests.map((r) => r.length)).toEqual([DRAFT_HISTORY_LEAGUES_PER_REQUEST, 5]);
+    expect(out).toHaveLength(leagues.length);
+    expect(out[0]).toEqual({ leagueName: "League 0", leagueId: "L0-prev", season: "2025", draftId: "L0-d", picks: [pick("p-L0")] });
+    expect(onLeagueDone).toHaveBeenCalledTimes(leagues.length);
   });
 
-  it("stops queueing calls once shouldBail turns true (a superseded load)", async () => {
-    const leagues = Array.from({ length: 10 }, (_, i) => {
-      h.drafts[`L${i}`] = [rookie(`L${i}-d`, ROOKIE_YEAR)];
-      return { league_id: `L${i}`, name: `L${i}` };
-    });
-    // Superseded the moment the first call goes out: no other league starts, and the one that did
-    // stops before its picks call.
-    const out = await fetchRookieDraftHistory(leagues as never[], { shouldBail: () => h.calls.length > 0 });
-    expect(h.calls).toEqual(["drafts:L0"]);
+  it("sends a pending league again with the next batch, after retryAfterMs when Sleeper asked to slow down", async () => {
+    vi.useFakeTimers();
+    const leagues = leaguesOf(3);
+    respond = (ids, n) => (n === 1
+      ? { ...finished(ids.slice(0, 1)), pending: ids.slice(1), retryAfterMs: 5_000 }
+      : finished(ids));
+    const p = fetchRookieDraftHistory(leagues as never[]);
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(requests).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    const out = await p;
+    expect(requests).toEqual([["L0", "L1", "L2"], ["L1", "L2"]]);
+    expect(out.map((d) => d.draftId)).toEqual(["L0-d", "L1-d", "L2-d"]);
+  });
+
+  it("gives up with what it has after DRAFT_HISTORY_MAX_IDLE_ROUNDS requests that finish nothing", async () => {
+    respond = (ids) => ({ leagues: [], pending: ids, stats });
+    const out = await fetchRookieDraftHistory(leaguesOf(2) as never[]);
+    expect(requests).toHaveLength(DRAFT_HISTORY_MAX_IDLE_ROUNDS);
     expect(out).toEqual([]);
+  });
+
+  it("retries the route's own 429, then keeps going", async () => {
+    vi.useFakeTimers();
+    respond = (ids, n) => (n === 1
+      ? new Response("{}", { status: 429, headers: { "Retry-After": "2" } })
+      : finished(ids));
+    const p = fetchRookieDraftHistory(leaguesOf(1) as never[]);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(await p).toHaveLength(1);
+    expect(requests).toHaveLength(2);
+  });
+
+  it("shows what loaded when a request fails outright", async () => {
+    const leagues = leaguesOf(DRAFT_HISTORY_LEAGUES_PER_REQUEST + 1);
+    respond = (ids, n) => (n === 1 ? finished(ids) : new Response("{}", { status: 400 }));
+    const out = await fetchRookieDraftHistory(leagues as never[]);
+    expect(out).toHaveLength(DRAFT_HISTORY_LEAGUES_PER_REQUEST);
+  });
+
+  it("stops between requests once shouldBail turns true (a superseded load)", async () => {
+    const leagues = leaguesOf(DRAFT_HISTORY_LEAGUES_PER_REQUEST * 2);
+    const out = await fetchRookieDraftHistory(leagues as never[], { shouldBail: () => requests.length > 0 });
+    expect(requests).toHaveLength(1);
+    expect(out).toEqual([]); // the superseded answer is dropped too
+  });
+
+  it("ignores a league the route answers that wasn't asked for", async () => {
+    respond = (ids) => finished([...ids, "stranger"]);
+    const out = await fetchRookieDraftHistory(leaguesOf(1) as never[]);
+    expect(out.map((d) => d.draftId)).toEqual(["L0-d"]);
   });
 });

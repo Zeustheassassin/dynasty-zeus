@@ -48,8 +48,8 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
   const [historyData, setHistoryData]       = useState<HistoryDraftEntry[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyLoaded, setHistoryLoaded]   = useState(false);
-  // Leagues finished / total during the first load — the calls are paced by sleeperApi's queue now
-  // (~2.5 min for ~550 calls on a cold cache), so the spinner counts them.
+  // Leagues finished / total during the load. Saved drafts come back in a second or two; a league
+  // whose drafts aren't saved yet waits on the server's Sleeper calls, so the spinner counts them.
   const [historyProgress, setHistoryProgress] = useState<{ done: number; total: number } | null>(null);
   const [historyTab, setHistoryTab]         = useState<"LEAGUE" | "CONSENSUS" | "MY_PICKS" | "GRADES">("LEAGUE");
   const [selectedHistoryYear, setSelectedHistoryYear] = useState("ALL");
@@ -84,9 +84,9 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
   //
   // The player map and FC values often land after this tab opens; either changing mid-load restarts
   // the load so the board is built from the newest ones (as before). `cancelled` makes the
-  // abandoned pass stop queueing Sleeper calls and drop its result — it used to run on to the end
-  // alongside the new one, and whichever finished last won. The restarted pass reads back whatever
-  // the abandoned one already fetched from sleeperApi's cache.
+  // abandoned pass stop sending requests and drop its result — it used to run on to the end
+  // alongside the new one, and whichever finished last won. Whatever the abandoned pass got the
+  // server to save, the restarted one reads back from the saved drafts.
   useEffect(() => {
     if (historyLoaded || !leagues.length) return;
     let cancelled = false;

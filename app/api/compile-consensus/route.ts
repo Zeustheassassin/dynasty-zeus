@@ -4,6 +4,8 @@ import { checkRateLimit } from "../../../lib/rateLimit";
 import { apiError } from "../../../lib/apiHelpers";
 import { safeFetch, withConcurrency, createPacer } from "../../../lib/sleeperServer";
 import { waitForSleeperSlot, SleeperBudgetTimeoutError } from "../../../lib/server/sleeperBudget";
+import { readSavedDrafts, saveDrafts, type DraftSnapshotInput } from "../../../lib/server/draftSnapshots";
+import { trimDraftPicks } from "../../../lib/draft/rookieDrafts";
 import {
   SLEEPER_BASE_URL,
   COMPILE_CONCURRENCY,
@@ -185,6 +187,9 @@ async function compileDrafts(
   const candidateDraftsByYear: Record<number, SleeperUserDraft[]> = {};
   years.forEach((yr) => { candidateDraftsByYear[yr] = []; });
   const seenDraftIds = new Set<string>();
+  // Each candidate draft by id — Step 4 needs its status (only a completed draft's picks are saved
+  // or read back) and its league / season / rounds for the save.
+  const draftById = new Map<string, SleeperUserDraft>();
   const currentYear = new Date().getFullYear();
 
   // The caller is swept alongside their network. Their own leagues would
@@ -218,6 +223,7 @@ async function compileDrafts(
           // Rookie-only drafts are short; this drops startup/full-roster drafts.
           if ((d.settings?.rounds ?? 99) > ROOKIE_DRAFT_MAX_ROUNDS) return;
           seenDraftIds.add(d.draft_id);
+          draftById.set(d.draft_id, d);
           candidateDraftsByYear[season].push(d);
         });
       }
@@ -367,9 +373,17 @@ async function compileDrafts(
       continue;
     }
 
+    // Completed drafts already saved — by an earlier compile or by Draft History (migration 070) —
+    // are read from Supabase instead of Sleeper. A completed draft never changes; one still in
+    // progress is always fetched.
+    const savedDrafts = await readSavedDrafts(draftIds.filter((id) => draftById.get(id)?.status === "complete"));
+    const toFetch = draftIds.length - savedDrafts.size;
+
     emit({
       type: "status",
-      message: `Fetching picks from ${draftIds.length} ${year} rookie drafts (this may take a few minutes)…`,
+      message: savedDrafts.size > 0
+        ? `Fetching picks from ${toFetch} ${year} rookie drafts (${savedDrafts.size} more already saved)…`
+        : `Fetching picks from ${draftIds.length} ${year} rookie drafts (this may take a few minutes)…`,
       progress: 67,
     });
 
@@ -383,18 +397,33 @@ async function compileDrafts(
 
     let draftsOk = 0, draftsFailed = 0, picksSkippedVet = 0;
     let picksTruncated = false;
+    // Completed drafts fetched this run, saved once the class's fetch loop ends.
+    const draftsToSave: DraftSnapshotInput[] = [];
 
     await withConcurrency(
       draftIds,
       async (draftId) => {
-        let picks: SleeperPickBasic[] | null;
-        try {
-          picks = await paced<SleeperPickBasic[]>(`${SLEEPER_BASE}/draft/${draftId}/picks`);
-        } catch (err) {
-          // Waited on the global budget past the picks deadline: the class is cut off, same as
-          // the shouldBail below — not a failed draft, which would let a thinner class be written.
-          if (err instanceof SleeperBudgetTimeoutError) { picksTruncated = true; return; }
-          throw err;
+        let picks: SleeperPickBasic[] | null = savedDrafts.get(draftId)?.picks ?? null;
+        if (!picks) {
+          try {
+            picks = await paced<SleeperPickBasic[]>(`${SLEEPER_BASE}/draft/${draftId}/picks`);
+          } catch (err) {
+            // Waited on the global budget past the picks deadline: the class is cut off, same as
+            // the shouldBail below — not a failed draft, which would let a thinner class be written.
+            if (err instanceof SleeperBudgetTimeoutError) { picksTruncated = true; return; }
+            throw err;
+          }
+          const draft = draftById.get(draftId);
+          const trimmed = draft?.status === "complete" ? trimDraftPicks(picks) : null;
+          if (draft && trimmed && trimmed.length > 0) {
+            draftsToSave.push({
+              draftId,
+              leagueId: draft.league_id ?? null,
+              season: String(draft.season),
+              rounds: draft.settings?.rounds ?? null,
+              picks: trimmed,
+            });
+          }
         }
         if (!Array.isArray(picks)) { draftsFailed++; return; }
         draftsOk++;
@@ -434,6 +463,10 @@ async function compileDrafts(
       { shouldBail: () => { if (picksOutOfTime()) { picksTruncated = true; return true; } return false; } },
     );
 
+    // Saved even when the class was cut off below: those drafts are finished, so the next compile
+    // (or Draft History) reads them instead of asking Sleeper again.
+    await saveDrafts(draftsToSave);
+
     // A class cut off mid-fetch is not written: the write below prunes every
     // row this run didn't produce, so a half-fetched class would replace a
     // complete board with a thinner one. Keep the previous compile instead.
@@ -448,7 +481,7 @@ async function compileDrafts(
 
     emit({
       type: "status",
-      message: `${year}: ${draftsOk} drafts fetched, ${draftsFailed} failed, ${playerMap.size} unique players found (${picksSkippedVet} vet picks filtered). Saving…`,
+      message: `${year}: ${draftsOk} drafts read (${savedDrafts.size} from saved picks), ${draftsFailed} failed, ${playerMap.size} unique players found (${picksSkippedVet} vet picks filtered). Saving…`,
       progress: 85,
     });
 
