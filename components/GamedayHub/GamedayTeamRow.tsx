@@ -8,7 +8,8 @@ interface GamedayTeamRowProps {
   // team" row only — projected while games are in progress, actual once
   // every starter on both sides has finished. Omitted elsewhere (e.g. the
   // single-league matchup grid), which keeps this row's plain styling.
-  resultStatus?: { status: "win" | "loss" | "tie"; final: boolean; winProbability?: number | null; pointsNeeded?: number } | null;
+  // `close` = projected within GAMEDAY_CLOSE_MARGIN, not final yet.
+  resultStatus?: { status: "win" | "loss" | "tie"; final: boolean; close?: boolean; winProbability?: number | null; pointsNeeded?: number } | null;
   // Chance this team wins its matchup (0-1). Shown only while the matchup is undecided.
   winProbability?: number;
 }
@@ -16,6 +17,8 @@ interface GamedayTeamRowProps {
 // Condensed team summary shared by the single-league matchup grid and the
 // cross-league Gameday Dashboard, so the two views can't visually drift apart.
 function GamedayTeamRow({ team, resultStatus, winProbability }: GamedayTeamRowProps) {
+  // In progress: green / yellow (winning by 10 or less) / orange (losing by 10
+  // or less) / red outline. Final: solid green or red.
   const isDecided = resultStatus && resultStatus.status !== "tie";
   const containerClasses = !isDecided
     ? "border-gray-800 bg-gray-950/60"
@@ -24,8 +27,8 @@ function GamedayTeamRow({ team, resultStatus, winProbability }: GamedayTeamRowPr
       ? "border-green-600 bg-green-900/30"
       : "border-red-600 bg-red-900/30"
     : resultStatus.status === "win"
-    ? "border-green-500 bg-gray-950/60"
-    : "border-red-500 bg-gray-950/60";
+    ? resultStatus.close ? "border-yellow-400 bg-gray-950/60" : "border-green-500 bg-gray-950/60"
+    : resultStatus.close ? "border-orange-500 bg-gray-950/60" : "border-red-500 bg-gray-950/60";
 
   const winPct = winProbability ?? resultStatus?.winProbability;
 

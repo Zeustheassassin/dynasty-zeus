@@ -150,15 +150,23 @@ const toCorrelated = (team: GamedayTeamView): CorrelatedPlayer[] =>
       stdDev: row.remainingStdDev,
     }));
 
+/** A projected margin this size or smaller (either way) is a close game on the Gameday
+ *  Dashboard: yellow outline when winning, orange when losing, until the matchup is final. */
+export const GAMEDAY_CLOSE_MARGIN = 10;
+
+const round1 = (n: number) => Math.round(n * 10) / 10;
+
 /** Win/loss read on a Gameday Dashboard matchup: projected (from
  *  projectedFinal) while any starter on either side hasn't finished yet,
  *  actual (from actualPoints) once every starter on both sides is Final.
  *  `winProbability` moves with the game; `pointsNeeded` is what my remaining
- *  players must add to match the opponent's projected final. */
+ *  players must add to match the opponent's projected final. `close` = not
+ *  final and the projected finals, as shown (one decimal), are within
+ *  GAMEDAY_CLOSE_MARGIN. */
 export function getGamedayResultStatus(
   myTeam: GamedayTeamView | null | undefined,
   oppTeam: GamedayTeamView | null | undefined
-): { status: "win" | "loss" | "tie"; final: boolean; winProbability: number | null; pointsNeeded: number } | null {
+): { status: "win" | "loss" | "tie"; final: boolean; close: boolean; winProbability: number | null; pointsNeeded: number } | null {
   if (!myTeam || !oppTeam) return null;
   const final = myTeam.upcomingStarters === 0 && myTeam.liveStarters === 0
     && oppTeam.upcomingStarters === 0 && oppTeam.liveStarters === 0;
@@ -168,6 +176,7 @@ export function getGamedayResultStatus(
   return {
     status,
     final,
+    close: !final && Math.abs(round1(round1(myScore) - round1(oppScore))) <= GAMEDAY_CLOSE_MARGIN,
     winProbability: getMatchupWinProbability(myTeam, oppTeam),
     pointsNeeded: final ? 0 : Math.max(Math.round((oppTeam.projectedFinal - myTeam.actualPoints) * 10) / 10, 0),
   };

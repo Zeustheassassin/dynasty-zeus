@@ -532,6 +532,21 @@ describe("win probability", () => {
     const { me } = teams(upcoming, { pts: 0, proj: 10 }, { pts: 0, proj: 10 });
     expect(getGamedayResultStatus(me, null)).toBeNull();
   });
+
+  it("getGamedayResultStatus marks a projected margin of 10 or less (either way) as close, until final", () => {
+    const status = (my: number, opp: number, schedule = upcoming) => {
+      const t = teams(schedule, { pts: schedule === upcoming ? 0 : my, proj: my }, { pts: schedule === upcoming ? 0 : opp, proj: opp });
+      return getGamedayResultStatus(t.me, t.opp)!;
+    };
+    expect(teams(upcoming, { pts: 0, proj: 30.1 }, { pts: 0, proj: 20 }).me.projectedFinal).toBeCloseTo(30.1, 6);
+    expect(status(30, 20)).toMatchObject({ status: "win", close: true }); // up exactly 10 → yellow
+    expect(status(30.1, 20)).toMatchObject({ status: "win", close: false }); // up 10.1 → green
+    expect(status(20, 30)).toMatchObject({ status: "loss", close: true }); // down exactly 10 → orange
+    expect(status(20, 30.1)).toMatchObject({ status: "loss", close: false }); // down 10.1 → red
+    // Final: never close, whatever the margin (solid green / red).
+    expect(status(25, 20, bothFinal)).toMatchObject({ status: "win", final: true, close: false });
+    expect(status(20, 25, bothFinal)).toMatchObject({ status: "loss", final: true, close: false });
+  });
 });
 
 // ── per-stat pace, correlation, ESPN injury overlay through the builder ──
