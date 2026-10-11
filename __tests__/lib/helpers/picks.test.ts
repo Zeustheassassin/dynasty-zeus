@@ -4,6 +4,7 @@ import {
   getStoredPickValue,
   isSnakeDraft,
   getDraftRoundSlot,
+  rookieDraftRoundCount,
 } from "@/lib/helpers/picks";
 import { CURRENT_YEAR } from "@/lib/helpers/season";
 
@@ -130,5 +131,26 @@ describe("getDraftRoundSlot", () => {
 
   it("returns baseSlot as-is when totalTeams < 2", () => {
     expect(getDraftRoundSlot(snakeDraft, 2, 3, 1)).toBe(3);
+  });
+});
+
+// Pick Values' round count (2026-10-11): the Live Draft Board — the only thing that loads a draft —
+// is blank in Weeks 1–17, so the league's own draft_rounds setting stands in rather than a flat 4.
+describe("rookieDraftRoundCount", () => {
+  it("prefers the loaded draft's rounds, from settings or the top level", () => {
+    expect(rookieDraftRoundCount({ settings: { rounds: 3 } }, { draft_rounds: 5 })).toBe(3);
+    expect(rookieDraftRoundCount({ rounds: 5 }, { draft_rounds: 4 })).toBe(5);
+  });
+
+  it("falls back to the league's draft_rounds when no draft is loaded", () => {
+    expect(rookieDraftRoundCount(null, { draft_rounds: 3 })).toBe(3);
+    expect(rookieDraftRoundCount(undefined, { draft_rounds: 6 })).toBe(6);
+  });
+
+  it("skips a startup-sized or missing count, ending at 4", () => {
+    expect(rookieDraftRoundCount({ settings: { rounds: 25 } }, { draft_rounds: 3 })).toBe(3);
+    expect(rookieDraftRoundCount({ settings: { rounds: 25 } }, null)).toBe(4);
+    expect(rookieDraftRoundCount(null, { draft_rounds: 0 })).toBe(4);
+    expect(rookieDraftRoundCount(null, null)).toBe(4);
   });
 });

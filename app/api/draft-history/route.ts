@@ -117,7 +117,9 @@ async function loadDraftHistory(leagueIds: string[]): Promise<DraftHistoryRespon
   /** Stop starting Sleeper calls: out of time, or Sleeper said slow down. */
   const stopped = () => retryAfterMs !== undefined || Date.now() > deadline;
 
-  const sleeper = async <T,>(url: string, opts: { revalidate: number; bypass?: boolean }): Promise<T | null> => {
+  /** Sleeper's parsed answer — which can itself be null (an unknown league) — or undefined when the
+   *  request failed. */
+  const sleeper = async <T,>(url: string, opts: { revalidate: number; bypass?: boolean }): Promise<T | undefined> => {
     sleeperRequests++;
     try {
       return await fetchSleeperJson<T>(url, opts);
@@ -130,7 +132,7 @@ async function loadDraftHistory(leagueIds: string[]): Promise<DraftHistoryRespon
           err: err instanceof SleeperUpstreamError ? `status ${err.status}` : String(err),
         });
       }
-      return null;
+      return undefined;
     }
   };
 
@@ -152,7 +154,9 @@ async function loadDraftHistory(leagueIds: string[]): Promise<DraftHistoryRespon
   }
 
   // ── 2. Walk each league's chain, checking a league-season with Sleeper only when it must ──
-  const rowsToSave: LeagueSeasonRow[] = [];
+  // By league id: a row built here can be amended later in the request (a dead-end link cut, an
+  // empty draft dropped) and is saved once, at the end.
+  const rowsToSave = new Map<string, LeagueSeasonRow>();
   const draftMeta = new Map<string, DraftMeta>();
 
   /** A league-season row from a fresh Sleeper draft list, plus this class's drafts in progress. */
@@ -183,10 +187,13 @@ async function loadDraftHistory(leagueIds: string[]): Promise<DraftHistoryRespon
   const walkLeague = async (leagueId: string): Promise<SeasonDrafts[] | null> => {
     const seasons: SeasonDrafts[] = [];
     let id: string | null = leagueId;
+    /** The row whose previous_league_id led to `id` (null when there's no row to amend). */
+    let childRow: LeagueSeasonRow | null = null;
     for (let depth = 0; id && depth <= DRAFT_HISTORY_PREVIOUS_SEASONS; depth++) {
       const saved = rows.get(id);
       if (saved?.final) {
         seasons.push({ leagueId: id, season: saved.season, completeIds: saved.rookie_draft_ids, liveIds: [] });
+        childRow = saved;
         id = saved.previous_league_id;
         continue;
       }
@@ -196,10 +203,19 @@ async function loadDraftHistory(leagueIds: string[]): Promise<DraftHistoryRespon
       let season: string | undefined = saved?.season;
       let previousLeagueId: string | null = saved?.previous_league_id ?? null;
       if (!saved) {
-        const info: SleeperLeagueInfo | null = await sleeper<SleeperLeagueInfo | null>(`${B}/league/${id}`, { revalidate: SLEEPER_LEAGUE_INFO_REVALIDATE_S });
-        if (!info || typeof info.season !== "string") {
+        const info: SleeperLeagueInfo | null | undefined = await sleeper<SleeperLeagueInfo | null>(`${B}/league/${id}`, { revalidate: SLEEPER_LEAGUE_INFO_REVALIDATE_S });
+        if (info === undefined) {
           if (stopped()) return null;
-          break; // Sleeper doesn't know this league — the chain ends here, as it always has
+          break; // the request failed: the chain ends here this time, and is tried again next visit
+        }
+        if (!info || typeof info.season !== "string") {
+          // Sleeper doesn't know this league: the chain ends here. Cut the link that led to it so
+          // later visits stop at the season before without asking again.
+          if (childRow) {
+            childRow.previous_league_id = null;
+            rowsToSave.set(childRow.league_id, childRow);
+          }
+          break;
         }
         season = info.season;
         // Sleeper sends "0" (or nothing) for a league with no previous season.
@@ -214,13 +230,17 @@ async function loadDraftHistory(leagueIds: string[]): Promise<DraftHistoryRespon
       if (Array.isArray(drafts)) {
         const built = await buildRow(id, season!, previousLeagueId, drafts);
         rows.set(id, built.row);
-        rowsToSave.push(built.row);
+        rowsToSave.set(id, built.row);
         seasons.push({ leagueId: id, season: season!, completeIds: built.row.rookie_draft_ids, liveIds: built.liveIds });
+        childRow = built.row;
       } else if (stopped()) {
         return null;
       } else if (saved) {
         // Couldn't re-check: show what was saved.
         seasons.push({ leagueId: id, season: saved.season, completeIds: saved.rookie_draft_ids, liveIds: [] });
+        childRow = saved;
+      } else {
+        childRow = null;
       }
       // (No list and nothing saved: this season's drafts are skipped and the walk goes on, as before.)
       id = previousLeagueId;
@@ -229,7 +249,6 @@ async function loadDraftHistory(leagueIds: string[]): Promise<DraftHistoryRespon
   };
 
   const walks = await withConcurrency(leagueIds, walkLeague, DRAFT_HISTORY_LEAGUE_CONCURRENCY);
-  await saveLeagueSeasons(rowsToSave);
 
   // ── 3. Picks: saved ones in one read; the rest from Sleeper ──
   const done = walks.filter((w): w is SeasonDrafts[] => w !== null);
@@ -253,16 +272,25 @@ async function loadDraftHistory(leagueIds: string[]): Promise<DraftHistoryRespon
       attempted.add(draftId);
       if (!picks) return;
       const meta = draftMeta.get(draftId) ?? seasonOf(done, draftId);
+      if (picks.length === 0) {
+        // A completed draft with no picks (an offline draft nobody entered, say): nothing to show
+        // or save. Dropped from a final row so it isn't asked for again every visit.
+        const row = rows.get(meta.leagueId);
+        if (row?.final) {
+          row.rookie_draft_ids = row.rookie_draft_ids.filter((id) => id !== draftId);
+          rowsToSave.set(row.league_id, row);
+        }
+        return;
+      }
       const draft: SavedDraft = { draftId, leagueId: meta.leagueId, season: meta.season, picks };
       fetched.set(draftId, draft);
-      // A completed draft with no picks is shown but not saved — more likely a bad answer than a
-      // real empty draft, so it's asked for again next time.
-      if (picks.length > 0) toSave.push({ ...draft, rounds: meta.rounds });
+      toSave.push({ ...draft, rounds: meta.rounds });
     },
     DRAFT_HISTORY_LEAGUE_CONCURRENCY,
     { shouldBail: stopped },
   );
   await saveDrafts(toSave);
+  await saveLeagueSeasons(Array.from(rowsToSave.values()));
 
   // This class's drafts still in progress: live picks through the picks proxy's Data Cache entry, never saved.
   const live = new Map<string, SavedDraft>();
@@ -305,7 +333,7 @@ async function loadDraftHistory(leagueIds: string[]): Promise<DraftHistoryRespon
   const stats = { savedDrafts: savedDrafts.size, fetchedDrafts: fetched.size, liveDrafts: live.size, sleeperRequests };
   if (sleeperRequests > 0) {
     log.info("draft history filled from Sleeper", {
-      leagues: leagueIds.length, pending: pending.length, rowsSaved: rowsToSave.length, ...stats,
+      leagues: leagueIds.length, pending: pending.length, rowsSaved: rowsToSave.size, ...stats,
       ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
     });
   }

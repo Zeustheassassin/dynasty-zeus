@@ -4,8 +4,8 @@
 // Highlights any picks owned by the current user.
 import { useMemo } from "react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from "recharts";
-import type { SleeperDraft, AugmentedPick } from "../../lib/types";
-import { BASE_YEAR } from "../../lib/helpers";
+import type { SleeperDraft, SleeperLeagueSettings, AugmentedPick } from "../../lib/types";
+import { BASE_YEAR, rookieDraftRoundCount } from "../../lib/helpers";
 import { ChartCard, ChartTooltip, chartGridProps, chartAxisProps, chartTickStyle } from "../charts/ChartCard";
 import { CHART_CATEGORICAL } from "../../lib/chartTheme";
 // Rookie-draft class year tracks the CALENDAR (upcoming class), not the NFL season.
@@ -16,6 +16,8 @@ interface PickValuesTabProps {
   pickFcValues: Record<string, number>;
   allPicks: AugmentedPick[];
   draftSettings: SleeperDraft | null;
+  /** The selected league's settings — its `draft_rounds` stands in when no draft is loaded. */
+  leagueSettings: SleeperLeagueSettings | null;
   numSlots: number;
   myRosterId: number | undefined;
 }
@@ -24,12 +26,11 @@ export default function PickValuesTab({
   pickFcValues,
   allPicks,
   draftSettings,
+  leagueSettings,
   numSlots,
   myRosterId,
 }: PickValuesTabProps) {
-  const roundCount = Number(
-    draftSettings?.settings?.rounds ?? draftSettings?.rounds ?? 4
-  );
+  const roundCount = rookieDraftRoundCount(draftSettings, leagueSettings);
   const slots = numSlots || 12;
 
   const curveData = useMemo(

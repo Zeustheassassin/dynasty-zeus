@@ -1,0 +1,277 @@
+{
+  "source": "ESPN scoreboard, NYG @ LAR Monday Night Football, captured 2026-09-21/22 by scripts/capture-live-fixtures.mjs (90s interval). Fields trimmed to what lib/espnScoreboard.ts reads; values and nesting are ESPN's own.",
+  "live": {
+    "id": "401872947",
+    "shortName": "NYG @ LAR",
+    "date": "2026-09-22T00:15Z",
+    "status": {
+      "clock": 894,
+      "displayClock": "14:54",
+      "period": 1,
+      "type": {
+        "id": "2",
+        "name": "STATUS_IN_PROGRESS",
+        "state": "in",
+        "completed": false,
+        "description": "In Progress",
+        "detail": "14:54 - 1st Quarter",
+        "shortDetail": "14:54 - 1st"
+      }
+    },
+    "competitions": [
+      {
+        "date": "2026-09-22T00:15Z",
+        "status": {
+          "clock": 894,
+          "displayClock": "14:54",
+          "period": 1,
+          "type": {
+            "id": "2",
+            "name": "STATUS_IN_PROGRESS",
+            "state": "in",
+            "completed": false,
+            "description": "In Progress",
+            "detail": "14:54 - 1st Quarter",
+            "shortDetail": "14:54 - 1st"
+          },
+          "isTBDFlex": false
+        },
+        "situation": {
+          "possession": "19",
+          "down": 2,
+          "distance": 6,
+          "isRedZone": false
+        },
+        "competitors": [
+          {
+            "id": "14",
+            "homeAway": "home",
+            "score": "0",
+            "team": {
+              "id": "14",
+              "abbreviation": "LAR"
+            }
+          },
+          {
+            "id": "19",
+            "homeAway": "away",
+            "score": "0",
+            "team": {
+              "id": "19",
+              "abbreviation": "NYG"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "noPossession": {
+    "capturedAt": "2026-09-22T01-04-43-584Z",
+    "event": {
+      "id": "401872947",
+      "shortName": "NYG @ LAR",
+      "date": "2026-09-22T00:15Z",
+      "competitions": [
+        {
+          "date": "2026-09-22T00:15Z",
+          "status": {
+            "clock": 667,
+            "displayClock": "11:07",
+            "period": 2,
+            "type": {
+              "id": "2",
+              "name": "STATUS_IN_PROGRESS",
+              "state": "in",
+              "completed": false,
+              "description": "In Progress",
+              "detail": "11:07 - 2nd Quarter",
+              "shortDetail": "11:07 - 2nd"
+            },
+            "isTBDFlex": false
+          },
+          "situation": {
+            "down": -1,
+            "distance": 10,
+            "isRedZone": true
+          },
+          "competitors": [
+            {
+              "id": "14",
+              "homeAway": "home",
+              "score": "13",
+              "team": {
+                "id": "14",
+                "abbreviation": "LAR"
+              }
+            },
+            {
+              "id": "19",
+              "homeAway": "away",
+              "score": "0",
+              "team": {
+                "id": "19",
+                "abbreviation": "NYG"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "halftime": {
+    "capturedAt": "2026-09-22T01-45-21-437Z",
+    "event": {
+      "id": "401872947",
+      "shortName": "NYG @ LAR",
+      "date": "2026-09-22T00:15Z",
+      "competitions": [
+        {
+          "date": "2026-09-22T00:15Z",
+          "status": {
+            "clock": 0,
+            "displayClock": "0:00",
+            "period": 2,
+            "type": {
+              "id": "23",
+              "name": "STATUS_HALFTIME",
+              "state": "in",
+              "completed": false,
+              "description": "Halftime",
+              "detail": "Halftime",
+              "shortDetail": "Halftime"
+            },
+            "isTBDFlex": false
+          },
+          "situation": {
+            "down": 1,
+            "distance": 10,
+            "isRedZone": false
+          },
+          "competitors": [
+            {
+              "id": "14",
+              "homeAway": "home",
+              "score": "14",
+              "team": {
+                "id": "14",
+                "abbreviation": "LAR"
+              }
+            },
+            {
+              "id": "19",
+              "homeAway": "away",
+              "score": "3",
+              "team": {
+                "id": "19",
+                "abbreviation": "NYG"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "endPeriod": {
+    "capturedAt": "2026-09-22T02-35-01-467Z",
+    "event": {
+      "id": "401872947",
+      "shortName": "NYG @ LAR",
+      "date": "2026-09-22T00:15Z",
+      "competitions": [
+        {
+          "date": "2026-09-22T00:15Z",
+          "status": {
+            "clock": 0,
+            "displayClock": "0:00",
+            "period": 3,
+            "type": {
+              "id": "22",
+              "name": "STATUS_END_PERIOD",
+              "state": "in",
+              "completed": false,
+              "description": "End of Period",
+              "detail": "End of 3rd Quarter",
+              "shortDetail": "End of 3rd"
+            },
+            "isTBDFlex": false
+          },
+          "situation": {
+            "possession": "19",
+            "down": 1,
+            "distance": 10,
+            "isRedZone": false
+          },
+          "competitors": [
+            {
+              "id": "14",
+              "homeAway": "home",
+              "score": "21",
+              "team": {
+                "id": "14",
+                "abbreviation": "LAR"
+              }
+            },
+            {
+              "id": "19",
+              "homeAway": "away",
+              "score": "6",
+              "team": {
+                "id": "19",
+                "abbreviation": "NYG"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "final": {
+    "capturedAt": "2026-09-22T03-12-38-989Z",
+    "event": {
+      "id": "401872947",
+      "shortName": "NYG @ LAR",
+      "date": "2026-09-22T00:15Z",
+      "competitions": [
+        {
+          "date": "2026-09-22T00:15Z",
+          "status": {
+            "clock": 0,
+            "displayClock": "0:00",
+            "period": 4,
+            "type": {
+              "id": "3",
+              "name": "STATUS_FINAL",
+              "state": "post",
+              "completed": true,
+              "description": "Final",
+              "detail": "Final",
+              "shortDetail": "Final"
+            },
+            "isTBDFlex": false
+          },
+          "situation": null,
+          "competitors": [
+            {
+              "id": "14",
+              "homeAway": "home",
+              "score": "28",
+              "team": {
+                "id": "14",
+                "abbreviation": "LAR"
+              }
+            },
+            {
+              "id": "19",
+              "homeAway": "away",
+              "score": "6",
+              "team": {
+                "id": "19",
+                "abbreviation": "NYG"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

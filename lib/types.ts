@@ -56,6 +56,8 @@ export interface SleeperLeagueSettings {
   reserve_allow_na?: number;
   reserve_allow_dnr?: number;
   reserve_allow_cov?: number;
+  /** Rounds in each season's rookie draft (dynasty) — what Sleeper builds future picks from. */
+  draft_rounds?: number;
 }
 
 export interface SleeperRoster {

@@ -241,6 +241,24 @@ describe("POST /api/draft-history — first visit (nothing saved)", () => {
     expect(sleeperPaths).toContain("/league/99");
     expect(sleeperPaths.some((p) => p.startsWith("/league/0"))).toBe(false);
     expect((store.savedRows as Row[]).find((r) => r.league_id === "30")?.previous_league_id).toBeNull();
+    // The link to the league Sleeper doesn't know is cut on the saved row, so the next visit stops
+    // there without asking again.
+    expect((store.rows.get("20") as Row).previous_league_id).toBeNull();
+    sleeperPaths = [];
+    const again = await post({ leagueIds: ["20", "30"] });
+    expect(sleeperPaths).toEqual([]);
+    expect(again.body.leagues.map((l: { drafts: unknown[] }) => l.drafts.length)).toEqual([1, 1]);
+  });
+
+  it("keeps the link when asking about the previous league fails — it's tried again next visit", async () => {
+    world.leagues = { "20": { season: yr(0), previous_league_id: "21" }, "21": { season: yr(1), previous_league_id: null } };
+    world.drafts = { "20": [rookie("da", yr(0))] };
+    world.picks = { da: [rawPick("x")] };
+    world.fail["/league/21"] = () => new Response("down", { status: 503 });
+    const { body } = await post({ leagueIds: ["20"] });
+    expect(body.pending).toEqual([]);
+    expect((store.rows.get("20") as Row).previous_league_id).toBe("21");
+    expect(store.rows.has("21")).toBe(false);
   });
 
   it("skips a completed draft whose picks fail to load (the league still finishes), and doesn't save it", async () => {
@@ -254,12 +272,26 @@ describe("POST /api/draft-history — first visit (nothing saved)", () => {
     expect((store.savedDrafts as Saved[]).map((d) => d.draftId)).toEqual(["ok"]);
   });
 
-  it("doesn't save a completed draft that came back with no picks", async () => {
+  it("drops a completed draft that came back with no picks from its final row, so it isn't asked for again", async () => {
+    world.leagues = { "10": { season: yr(0), previous_league_id: null } };
+    world.drafts = { "10": [rookie("empty", yr(0)), rookie("full", yr(0))] };
+    world.picks = { empty: [], full: [rawPick("x")] };
+    const { body } = await post({ leagueIds: ["10"] });
+    expect(body.leagues[0].drafts.map((d: { draftId: string }) => d.draftId)).toEqual(["full"]);
+    expect((store.savedDrafts as Saved[]).map((d) => d.draftId)).toEqual(["full"]);
+    expect(store.savedRows).toEqual([savedRow("10", yr(0), null, ["full"])]);
+    sleeperPaths = [];
+    await post({ leagueIds: ["10"] });
+    expect(sleeperPaths).toEqual([]);
+  });
+
+  it("keeps an empty completed draft on a row that isn't final yet (the list is re-checked anyway)", async () => {
+    world.state = PRESEASON;
     world.leagues = { "10": { season: yr(0), previous_league_id: null } };
     world.drafts = { "10": [rookie("empty", yr(0))] };
     world.picks = { empty: [] };
-    const { body } = await post({ leagueIds: ["10"] });
-    expect(body.leagues[0].drafts).toEqual([{ leagueId: "10", season: yr(0), draftId: "empty", picks: [] }]);
+    await post({ leagueIds: ["10"] });
+    expect(store.savedRows).toEqual([savedRow("10", yr(0), null, ["empty"], false)]);
     expect(store.savedDrafts).toEqual([]);
   });
 });

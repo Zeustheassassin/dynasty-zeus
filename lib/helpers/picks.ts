@@ -86,6 +86,21 @@ export const getDraftRoundSlot = (
 const MAX_SUPPORTED_ROUNDS = 6;
 const ALL_ROUNDS = Array.from({ length: MAX_SUPPORTED_ROUNDS }, (_, i) => i + 1);
 
+/** Rookie-draft rounds for a league's pick board: the loaded draft's own count, else the league's
+ *  `draft_rounds` setting, else 4. The draft is only loaded by the Live Draft Board, which stays
+ *  blank in Weeks 1–17 — without the league fallback every league read as 4 rounds then. A count
+ *  outside 1–MAX_SUPPORTED_ROUNDS (a startup-sized draft) is skipped. */
+export function rookieDraftRoundCount(
+  draft: { settings?: { rounds?: number } | null; rounds?: number } | null | undefined,
+  leagueSettings: { draft_rounds?: number } | null | undefined,
+): number {
+  for (const raw of [draft?.settings?.rounds ?? draft?.rounds, leagueSettings?.draft_rounds]) {
+    const n = Number(raw);
+    if (Number.isInteger(n) && n >= 1 && n <= MAX_SUPPORTED_ROUNDS) return n;
+  }
+  return 4;
+}
+
 /** "perLeague": builds up to MAX_SUPPORTED_ROUNDS then trims to max(league settings rounds,
  *  traded-pick max round, ROUNDS.length), falls back to a padded-roster-id slot label, and
  *  labels non-current-year picks with a bare round — used by loadRoster and useSpyState, which

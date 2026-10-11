@@ -99,7 +99,7 @@ function DraftHub({
   leagues,
   nflState, onOpenScouting,
 }: DraftHubProps) {
-  const { rosters } = useLeague();
+  const { rosters, selectedLeague } = useLeague();
   const { pickFcValues } = useValues();
   const [rookieSearch, setRookieSearch] = useState("");
 
@@ -184,6 +184,7 @@ function DraftHub({
           pickFcValues={pickFcValues}
           allPicks={allPicks}
           draftSettings={draftSettings}
+          leagueSettings={selectedLeague?.settings ?? null}
           numSlots={rosters.length || 12}
           myRosterId={myRosterId}
         />
