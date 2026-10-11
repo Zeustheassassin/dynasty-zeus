@@ -11,7 +11,6 @@ export async function GET(
   return proxySleeper({
     req,
     logNamespace: 'api/sleeper/league/traded-picks',
-    rateLimitKey: 'sleeper-league-traded-picks',
     revalidate: SLEEPER_LEAGUE_TRADED_PICKS_REVALIDATE_S,
     supportsBypass: true,
     resolve: async () => {

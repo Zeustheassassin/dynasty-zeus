@@ -17,6 +17,7 @@
 
 import { logger } from "./logger";
 import { withRetry } from "./withRetry";
+import type { RequestQueue } from "./requestQueue";
 
 const log = logger("clientFetch");
 
@@ -30,34 +31,94 @@ class NonRetryableHttpError extends Error {
   }
 }
 
+/** A 429 on a queued request. The queue is already paused for its Retry-After by the time this is
+ *  thrown, so the retry waits on the queue rather than on withRetry's back-off. */
+class RateLimitedError extends Error {
+  constructor(public retryAfterMs: number, url: string) {
+    super(`cachedFetch 429 — ${url} (retry after ${retryAfterMs}ms)`);
+    this.name = "RateLimitedError";
+  }
+}
+
+/** Pause when a 429 carries no usable Retry-After. Our own limiter always sends one; this covers a
+ *  429 from somewhere that doesn't (Sleeper itself, read cross-origin, can't expose the header). */
+export const RETRY_AFTER_DEFAULT_MS = 5_000;
+/** Floor, so a "Retry-After: 0" from a window that is just rolling over can't spin a hot loop. */
+export const RETRY_AFTER_MIN_MS = 1_000;
+/** Ceiling — the server's Sleeper bucket is a 60s window, so nothing legitimate asks for longer. */
+export const RETRY_AFTER_MAX_MS = 60_000;
+
+/** Retry-After as a wait in ms: delta-seconds or an HTTP date (RFC 9110 §10.2.3), clamped to
+ *  [RETRY_AFTER_MIN_MS, RETRY_AFTER_MAX_MS]; RETRY_AFTER_DEFAULT_MS when missing or unparseable. */
+export function parseRetryAfterMs(header: string | null, now = Date.now()): number {
+  const clamp = (ms: number) => Math.min(RETRY_AFTER_MAX_MS, Math.max(RETRY_AFTER_MIN_MS, ms));
+  const value = header?.trim();
+  if (!value) return RETRY_AFTER_DEFAULT_MS;
+  if (/^\d+$/.test(value)) return clamp(Number(value) * 1000);
+  // An HTTP date always spells out its day/month names. Without letters, V8's lenient Date.parse
+  // would read junk like "-5" or "1.5" as a year.
+  const at = /[a-z]/i.test(value) ? Date.parse(value) : NaN;
+  return Number.isNaN(at) ? RETRY_AFTER_DEFAULT_MS : clamp(at - now);
+}
+
 // In-flight request coalescing: concurrent callers for the same fetch URL share a
 // single network request instead of each firing their own on a cold cache. Prevents
 // a "cache stampede" (e.g. several tabs/hooks requesting the same league at once),
 // which both wastes requests and pushes the per-IP proxy rate limiter.
 const inFlight = new Map<string, Promise<unknown>>();
 
+interface FetchJsonOpts {
+  /** Aborts the underlying fetch after this many ms (each retry attempt gets its own timer). Omit for no timeout. */
+  timeoutMs?: number;
+  /** Total attempts (first try + retries) on a retryable failure. Defaults to 3 — lower this for
+   *  a caller where timeoutMs is already generous, so attempts*timeoutMs doesn't compound into an
+   *  unexpectedly long worst case (a caller migrating off a single-attempt raw fetch(), say). */
+  retries?: number;
+  /** Runs every attempt through this queue (lib/sleeperApi.ts's `sleeperRequestQueue`): each
+   *  attempt waits for a slot and a token, and a 429 pauses the WHOLE queue for the response's
+   *  Retry-After — the server answers every Sleeper route from one per-IP bucket, so the requests
+   *  waiting behind it would hit the same wall. Without a queue a 429 is retried on the plain
+   *  200/400ms back-off like any other transient failure. */
+  queue?: RequestQueue;
+}
+
 /**
  * Fetch + JSON-parse with bounded retry. Retries transient failures (network
- * error, 429, 5xx) with exponential back-off; throws immediately on a
+ * error, 429, 5xx) with exponential back-off — or, for a 429 on a queued
+ * request, after the queue's Retry-After pause; throws immediately on a
  * deterministic 4xx so we don't burn retries on a request that can't succeed.
  */
-async function fetchAndParse<T>(url: string, timeoutMs?: number, retries = 3): Promise<T> {
-  return withRetry<T>(
-    async () => {
-      const res = timeoutMs != null
-        ? await fetch(url, { signal: AbortSignal.timeout(timeoutMs) })
-        : await fetch(url);
-      if (!res.ok) {
-        if (res.status >= 400 && res.status < 500 && res.status !== 429) {
-          throw new NonRetryableHttpError(res.status, url);
-        }
-        throw new Error(`cachedFetch ${res.status} — ${url}`);
+async function fetchAndParse<T>(url: string, opts: FetchJsonOpts): Promise<T> {
+  const { timeoutMs, retries = 3, queue } = opts;
+  const attempt = async (): Promise<T> => {
+    const res = timeoutMs != null
+      ? await fetch(url, { signal: AbortSignal.timeout(timeoutMs) })
+      : await fetch(url);
+    if (!res.ok) {
+      if (res.status === 429 && queue) {
+        const retryAfterMs = parseRetryAfterMs(res.headers.get("Retry-After"));
+        queue.pauseFor(retryAfterMs);
+        throw new RateLimitedError(retryAfterMs, url);
       }
-      return (await res.json()) as T;
-    },
+      if (res.status >= 400 && res.status < 500 && res.status !== 429) {
+        throw new NonRetryableHttpError(res.status, url);
+      }
+      throw new Error(`cachedFetch ${res.status} — ${url}`);
+    }
+    return (await res.json()) as T;
+  };
+  return withRetry<T>(
+    queue ? () => queue.run(attempt) : attempt,
     retries,
     (err) => !(err instanceof NonRetryableHttpError),
+    (err, i) => (err instanceof RateLimitedError ? 0 : 200 * 2 ** i),
   );
+}
+
+/** The uncached half of cachedFetch — same retry policy and optional queue, but no localStorage
+ *  and no in-flight coalescing. For a call that is deliberately never cached (sleeperApi's ADP). */
+export function fetchJson<T>(url: string, opts: FetchJsonOpts = {}): Promise<T> {
+  return fetchAndParse<T>(url, opts);
 }
 
 interface CacheEntry<T> {
@@ -65,16 +126,10 @@ interface CacheEntry<T> {
   expiresAt: number;
 }
 
-interface CachedFetchOpts {
+interface CachedFetchOpts extends FetchJsonOpts {
   ttlMs: number;
   cacheKey?: string;
   bypass?: boolean;
-  /** Aborts the underlying fetch after this many ms (each retry attempt gets its own timer). Omit for no timeout. */
-  timeoutMs?: number;
-  /** Total attempts (first try + retries) on a retryable failure. Defaults to 3 — lower this for
-   *  a caller where timeoutMs is already generous, so attempts*timeoutMs doesn't compound into an
-   *  unexpectedly long worst case (a caller migrating off a single-attempt raw fetch(), say). */
-  retries?: number;
 }
 
 function readCache<T>(key: string): { hit: true; data: T } | { hit: false } {
@@ -179,7 +234,7 @@ function writeCache<T>(key: string, data: T, ttlMs: number): void {
 export async function cachedFetch<T>(url: string, opts: CachedFetchOpts): Promise<T> {
   // SSR: no window → no cache layer, but still retry transient failures.
   if (typeof window === "undefined") {
-    return fetchAndParse<T>(url, opts.timeoutMs, opts.retries);
+    return fetchAndParse<T>(url, opts);
   }
 
   const key = CACHE_PREFIX + (opts.cacheKey ?? url);
@@ -195,7 +250,7 @@ export async function cachedFetch<T>(url: string, opts: CachedFetchOpts): Promis
   if (existing) return existing as Promise<T>;
 
   const request = (async (): Promise<T> => {
-    const data = await fetchAndParse<T>(url, opts.timeoutMs, opts.retries);
+    const data = await fetchAndParse<T>(url, opts);
     writeCache(key, data, opts.ttlMs);
     return data;
   })();

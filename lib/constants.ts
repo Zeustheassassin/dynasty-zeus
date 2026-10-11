@@ -358,6 +358,55 @@ export const LEAGUE_TX_CRON_RPM = 200;
 export const SIM_HISTORY_CRON_RPM = 500;
 
 /**
+ * The browser-wide Sleeper request queue (lib/sleeperApi.ts's `sleeperRequestQueue`, built on
+ * lib/requestQueue.ts) every sleeperApi call goes through — one per open tab. Cache hits never
+ * touch it. Sized so one tab can't trip the server's shared bucket below by itself: the most it can
+ * send in any 60s is BURST + 60 x PER_SEC = 280 < SLEEPER_PROXY_RPM_PER_IP. A second tab (or two
+ * people behind one NAT) can, and the 429 that comes back pauses the queue for its Retry-After.
+ *
+ * What the pace costs on a cold cache at ~50 leagues: the League Overview's ~200 calls land in ~35s
+ * (the first 100 at once), Leaguemates' ~450 owner lookups in ~2 min, Draft History's ~550 calls in
+ * ~2.5 min. Warm-cache reloads are mostly localStorage hits and stay instant.
+ */
+export const SLEEPER_BROWSER_MAX_IN_FLIGHT = 6;
+export const SLEEPER_BROWSER_BURST = 100;
+export const SLEEPER_BROWSER_PER_SEC = 3;
+
+/**
+ * One shared rate-limit bucket per client IP for every /api/sleeper/* route (lib/server/
+ * sleeperProxy.ts and the trades route), replacing a separate 60/min bucket per route. Per route
+ * was the wrong shape at ~50 leagues: one League Overview pass is ~50 calls on each of four routes,
+ * so a Refresh plus a poll inside a minute 429'd each other on rosters while other routes sat idle.
+ * In-process per warm lambda in production (no Upstash; see lib/rateLimit.ts), like every limit.
+ */
+export const SLEEPER_PROXY_RPM_PER_IP = 300;
+export const SLEEPER_PROXY_RATE_LIMIT_KEY = "sleeper-proxy";
+
+/**
+ * Retry-After (seconds) the proxies send when Sleeper itself answers 429 without one. They pass
+ * Sleeper's 429 through rather than turning it into a 502, so the browser queue backs off instead of
+ * retrying at 200/400ms into a limit that covers the whole server IP.
+ */
+export const SLEEPER_UPSTREAM_RETRY_AFTER_S = 30;
+
+/**
+ * Leaguemates tab (components/DataHub/leaguemateStats.ts): leagues whose rosters + users load at
+ * once, then owners whose league lists load at once (one call each — ~450 owners at 50 leagues, all
+ * fired together before 10/10). Small enough that the queue never holds more than a few of them, so
+ * the overview poll or a Refresh doesn't wait behind the whole list.
+ */
+export const LEAGUEMATES_LEAGUE_CONCURRENCY = 3;
+export const LEAGUEMATES_OWNER_CONCURRENCY = 4;
+
+/**
+ * Draft History (components/draftHub/DraftHistory/fetchDraftHistory.ts): leagues walked at once.
+ * Each walks its previous_league_id chain and reads every season's drafts and rookie-draft picks one
+ * call at a time (~11 calls a league), so at most this many Draft History calls are ever queued —
+ * it was an unbounded nested Promise.all of ~550 calls at 50 leagues before 10/10.
+ */
+export const DRAFT_HISTORY_LEAGUE_CONCURRENCY = 3;
+
+/**
  * Years the connected-user network is discovered across, independent of which
  * years are being compiled.
  *

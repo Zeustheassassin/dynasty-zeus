@@ -1,10 +1,10 @@
 "use client";
 import React from "react";
 import { usePlayers } from "../../lib/PlayersContext";
-import { sleeperApi } from "../../lib/sleeperApi";
-import type { SleeperLeague, SleeperRoster, SleeperUser, LeagueMateStatEntry } from "../../lib/types";
+import type { SleeperLeague, SleeperUser, LeagueMateStatEntry } from "../../lib/types";
 import { POS_COLOR } from "./dataHubHelpers";
-import type { ExposureData, FetchedRoster, FetchedUser } from "./dataHubTypes";
+import type { ExposureData } from "./dataHubTypes";
+import { loadLeagueMateStats, type LeagueMateStatsProgress } from "./leaguemateStats";
 import { CURRENT_YEAR } from "../../lib/helpers";
 
 interface LeaguematesTabProps {
@@ -39,54 +39,20 @@ function LeaguematesTab({
   const players = usePlayers();
 
   const [expandedMateId, setExpandedMateId] = React.useState<string | null>(null);
+  // Owner lookups are paced by sleeperApi's queue now (~2 min for ~450 owners on a cold cache),
+  // so the loading line counts them rather than sitting on a bare "Loading…".
+  const [progress, setProgress] = React.useState<LeagueMateStatsProgress | null>(null);
 
-  const loadLeagueMateStats = async () => {
+  const loadStats = async () => {
     if (!user || !leagues.length) return;
     setLoadingLeagueMateStats(true);
+    setProgress(null);
     try {
-      const myLeagueData = await Promise.all(
-        leagues.map(async (league) => {
-          const [rostersRes, leagueUsersRes] = await Promise.all([
-            sleeperApi.getLeagueRosters(league.league_id).catch(() => [] as SleeperRoster[]),
-            sleeperApi.getLeagueUsers(league.league_id),
-          ]);
-          return { league, rosters: rostersRes as FetchedRoster[], leagueUsers: leagueUsersRes as FetchedUser[] };
-        })
-      );
-
-      const displayNameMap: Record<string, string> = {};
-      const sharedLeaguesCount: Record<string, number> = {};
-      const allOwnerIds = new Set<string>();
-
-      myLeagueData.forEach(({ rosters: lr, leagueUsers }) => {
-        leagueUsers.forEach((u) => {
-          if (u?.user_id && u?.display_name) displayNameMap[u.user_id] = u.display_name;
-        });
-        lr.forEach((r) => {
-          if (!r.owner_id || r.owner_id === user!.user_id) return;
-          allOwnerIds.add(r.owner_id);
-          sharedLeaguesCount[r.owner_id] = (sharedLeaguesCount[r.owner_id] || 0) + 1;
-        });
-      });
-
-      const ownerStats = await Promise.all([...allOwnerIds].map(async (ownerId) => {
-        const theirLeagues = await sleeperApi
-          .getUserLeagues(ownerId, CURRENT_YEAR)
-          .catch(() => [] as SleeperLeague[]);
-
-        return {
-          userId: ownerId,
-          displayName: displayNameMap[ownerId] || ownerId,
-          totalLeagues: theirLeagues.filter((l) => (l.settings?.best_ball ?? 0) === 0).length,
-          bestBallLeagues: theirLeagues.filter((l) => (l.settings?.best_ball ?? 0) !== 0).length,
-          sharedLeagues: sharedLeaguesCount[ownerId] || 0,
-        };
-      }));
-
-      setLeagueMateStats(ownerStats);
+      setLeagueMateStats(await loadLeagueMateStats(leagues, user.user_id, setProgress));
       setLeagueMateStatsLoaded(true);
     } finally {
       setLoadingLeagueMateStats(false);
+      setProgress(null);
     }
   };
 
@@ -117,7 +83,7 @@ function LeaguematesTab({
         <h2 className="text-base font-semibold text-white">League Mate Stats</h2>
         {!leagueMateStatsLoaded ? (
           <button
-            onClick={loadLeagueMateStats}
+            onClick={loadStats}
             disabled={loadingLeagueMateStats}
             className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded transition"
           >
@@ -125,7 +91,7 @@ function LeaguematesTab({
           </button>
         ) : (
           <button
-            onClick={loadLeagueMateStats}
+            onClick={loadStats}
             disabled={loadingLeagueMateStats}
             className="px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 disabled:opacity-50 rounded transition"
           >
@@ -138,7 +104,10 @@ function LeaguematesTab({
         <p className="text-sm text-slate-500">Click Load Stats to fetch data across all your leagues.</p>
       )}
       {loadingLeagueMateStats && (
-        <p className="text-sm text-blue-400">Loading league mate data…</p>
+        <p className="text-sm text-blue-400" aria-live="polite">
+          Loading league mate data…
+          {progress && progress.total > 0 && ` ${progress.done} / ${progress.total} owners`}
+        </p>
       )}
 
       {leagueMateStatsLoaded && (

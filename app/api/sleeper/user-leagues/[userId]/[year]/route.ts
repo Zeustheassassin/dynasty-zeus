@@ -13,7 +13,6 @@ export async function GET(
   return proxySleeper({
     req,
     logNamespace: 'api/sleeper/user-leagues',
-    rateLimitKey: 'sleeper-user-leagues',
     revalidate: SLEEPER_USER_LEAGUES_REVALIDATE_S,
     supportsBypass: false,
     resolve: async () => {

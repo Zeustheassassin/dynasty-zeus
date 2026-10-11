@@ -11,7 +11,6 @@ export async function GET(
   return proxySleeper({
     req,
     logNamespace: 'api/sleeper/league/drafts',
-    rateLimitKey: 'sleeper-league-drafts',
     revalidate: SLEEPER_LEAGUE_DRAFTS_REVALIDATE_S,
     supportsBypass: true,
     resolve: async () => {

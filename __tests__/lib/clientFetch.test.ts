@@ -1,6 +1,14 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { cachedFetch } from "@/lib/clientFetch";
+import {
+  cachedFetch,
+  fetchJson,
+  parseRetryAfterMs,
+  RETRY_AFTER_DEFAULT_MS,
+  RETRY_AFTER_MAX_MS,
+  RETRY_AFTER_MIN_MS,
+} from "@/lib/clientFetch";
+import { createRequestQueue } from "@/lib/requestQueue";
 
 // Characterization of the browser cache layer in front of /api/sleeper/*: TTL hit/miss/expiry,
 // bypass, in-flight coalescing, retry policy, and quota eviction.
@@ -192,5 +200,118 @@ describe("cachedFetch — localStorage write failures", () => {
     });
     expect(await cachedFetch("/api/sleeper/a", { ttlMs: 1000 })).toEqual({ v: 1 });
     expect(window.localStorage.getItem(P + "victim")).not.toBeNull();
+  });
+});
+
+describe("parseRetryAfterMs", () => {
+  const NOW = Date.UTC(2026, 9, 10, 18);
+  it("reads delta-seconds and HTTP dates, clamped to [MIN, MAX]", () => {
+    expect(parseRetryAfterMs("7", NOW)).toBe(7_000);
+    expect(parseRetryAfterMs(" 12 ", NOW)).toBe(12_000);
+    expect(parseRetryAfterMs(new Date(NOW + 9_000).toUTCString(), NOW)).toBe(9_000);
+    expect(parseRetryAfterMs("0", NOW)).toBe(RETRY_AFTER_MIN_MS);
+    expect(parseRetryAfterMs(new Date(NOW - 5_000).toUTCString(), NOW)).toBe(RETRY_AFTER_MIN_MS);
+    expect(parseRetryAfterMs("3600", NOW)).toBe(RETRY_AFTER_MAX_MS);
+  });
+
+  it("falls back to the default when the header is missing or unreadable", () => {
+    for (const h of [null, "", "  ", "soon", "-5", "1.5"]) {
+      expect(parseRetryAfterMs(h, NOW), String(h)).toBe(RETRY_AFTER_DEFAULT_MS);
+    }
+  });
+});
+
+describe("cachedFetch — with a request queue (sleeperApi's)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.UTC(2026, 9, 10, 18));
+  });
+
+  const limited = (retryAfter?: string) =>
+    new Response("{}", { status: 429, headers: retryAfter ? { "Retry-After": retryAfter } : {} });
+
+  it("a 429 pauses the WHOLE queue for its Retry-After, then the retry and everything behind it go", async () => {
+    const queue = createRequestQueue({ maxInFlight: 6, burst: 100, refillPerSec: 100 });
+    fetchMock.mockImplementationOnce(async () => limited("3"));
+
+    const a = cachedFetch("/api/sleeper/a", { ttlMs: 1000, queue });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(queue.stats().pausedUntil).toBe(Date.now() + 3_000);
+
+    // A different route queued during the pause waits too — the server's bucket is shared.
+    const b = cachedFetch("/api/sleeper/b", { ttlMs: 1000, queue });
+    await vi.advanceTimersByTimeAsync(2_999);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await a).toEqual({ v: 1 });
+    expect(await b).toEqual({ v: 1 });
+    expect(fetchMock.mock.calls.map(([u]) => u)).toEqual(["/api/sleeper/a", "/api/sleeper/a", "/api/sleeper/b"]);
+  });
+
+  it("no Retry-After pauses for the default rather than the old 200ms", async () => {
+    const queue = createRequestQueue({ maxInFlight: 6, burst: 100, refillPerSec: 100 });
+    fetchMock.mockImplementationOnce(async () => limited());
+    const a = cachedFetch("/api/sleeper/a", { ttlMs: 1000, queue });
+    await vi.advanceTimersByTimeAsync(RETRY_AFTER_DEFAULT_MS - 1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await a).toEqual({ v: 1 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives up after 3 attempts of 429s, without caching", async () => {
+    const queue = createRequestQueue({ maxInFlight: 6, burst: 100, refillPerSec: 100 });
+    fetchMock.mockImplementation(async () => limited("1"));
+    const a = cachedFetch("/api/sleeper/a", { ttlMs: 1000, queue });
+    await Promise.all([vi.advanceTimersByTimeAsync(5_000), expect(a).rejects.toThrow(/429/)]);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(window.localStorage.getItem(P + "/api/sleeper/a")).toBeNull();
+  });
+
+  it("keeps the old policy for everything else: a 4xx isn't retried, a 5xx backs off 200/400ms", async () => {
+    const queue = createRequestQueue({ maxInFlight: 6, burst: 100, refillPerSec: 100 });
+    fetchMock.mockImplementation(async () => json({}, 404));
+    const notFound = cachedFetch("/api/sleeper/nf", { ttlMs: 1000, queue });
+    await Promise.all([vi.advanceTimersByTimeAsync(0), expect(notFound).rejects.toThrow(/404/)]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    fetchMock.mockReset();
+    fetchMock.mockImplementationOnce(async () => json({}, 503)).mockImplementation(async () => json({ v: 2 }));
+    const flaky = cachedFetch("/api/sleeper/flaky", { ttlMs: 1000, queue });
+    await vi.advanceTimersByTimeAsync(199);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await flaky).toEqual({ v: 2 });
+    expect(queue.stats().pausedUntil).toBe(0); // only a 429 pauses the queue
+  });
+
+  it("only network attempts take a token — a cache hit never touches the queue", async () => {
+    const queue = createRequestQueue({ maxInFlight: 6, burst: 2, refillPerSec: 0.01 });
+    window.localStorage.setItem(P + "/api/sleeper/hit", entry({ v: "cached" }, Date.now() + 10_000));
+    expect(await cachedFetch("/api/sleeper/hit", { ttlMs: 1000, queue })).toEqual({ v: "cached" });
+    expect(queue.stats().tokens).toBe(2);
+    await cachedFetch("/api/sleeper/miss", { ttlMs: 1000, queue });
+    expect(queue.stats().tokens).toBe(1);
+  });
+
+  it("without a queue a 429 is still retried on the plain back-off (other cachedFetch callers)", async () => {
+    fetchMock.mockImplementationOnce(async () => limited("30"));
+    const a = cachedFetch("/api/injuries/detail?x=1", { ttlMs: 1000 });
+    await vi.advanceTimersByTimeAsync(200);
+    expect(await a).toEqual({ v: 1 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("fetchJson", () => {
+  it("is uncached and goes through the queue when given one", async () => {
+    const queue = createRequestQueue({ maxInFlight: 6, burst: 5, refillPerSec: 0.01 });
+    expect(await fetchJson("https://api.sleeper.app/x", { queue })).toEqual({ v: 1 });
+    expect(await fetchJson("https://api.sleeper.app/x", { queue })).toEqual({ v: 1 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(window.localStorage.length).toBe(0);
+    expect(queue.stats().tokens).toBe(3);
   });
 });

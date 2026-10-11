@@ -11,7 +11,6 @@ export async function GET(
   return proxySleeper({
     req,
     logNamespace: 'api/sleeper/league/matchups',
-    rateLimitKey: 'sleeper-league-matchups',
     revalidate: SLEEPER_LEAGUE_MATCHUPS_REVALIDATE_S,
     // Live scoring polls pass ?bypass=1 — the server cache would otherwise
     // make scores look several minutes stale.

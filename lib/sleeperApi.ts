@@ -12,6 +12,15 @@
 // functions throw on non-OK responses; `getOrNull*` swallow errors
 // and return null / [] so callers can short-circuit cleanly.
 //
+// Every network request (never a cache hit) waits its turn in ONE
+// browser-wide queue, `sleeperRequestQueue` — at most
+// SLEEPER_BROWSER_MAX_IN_FLIGHT open, SLEEPER_BROWSER_BURST back to
+// back, then SLEEPER_BROWSER_PER_SEC a second — and a 429 pauses the
+// whole queue for its Retry-After. So the League Overview poll,
+// Roster Overview's Refresh, Leaguemates and Draft History share
+// one budget instead of racing each other into the server's per-IP
+// Sleeper bucket (SLEEPER_PROXY_RPM_PER_IP).
+//
 // Live drafts: pass `bypassCache: true` to `getDraftPicks` so an
 // in-progress draft never serves stale picks from localStorage.
 //
@@ -20,12 +29,25 @@
 //   const user = await sleeperApi.getUserByUsername("john_doe");
 // ============================================================
 
-import { cachedFetch } from "./clientFetch";
-import { withRetry } from "./withRetry";
-import { SLEEPER_PROJECTIONS_BASE } from "./constants";
+import { cachedFetch, fetchJson } from "./clientFetch";
+import { createRequestQueue } from "./requestQueue";
+import {
+  SLEEPER_PROJECTIONS_BASE,
+  SLEEPER_BROWSER_MAX_IN_FLIGHT,
+  SLEEPER_BROWSER_BURST,
+  SLEEPER_BROWSER_PER_SEC,
+} from "./constants";
 import { logger } from "./logger";
 
 const log = logger("lib/sleeperApi");
+
+/** The one queue every Sleeper request from this tab goes through. Exported for tests and for
+ *  poking at `stats()` from the console; callers go through `sleeperApi`, never this directly. */
+export const sleeperRequestQueue = createRequestQueue({
+  maxInFlight: SLEEPER_BROWSER_MAX_IN_FLIGHT,
+  burst: SLEEPER_BROWSER_BURST,
+  refillPerSec: SLEEPER_BROWSER_PER_SEC,
+});
 import type {
   SleeperUser,
   SleeperLeague,
@@ -67,13 +89,13 @@ async function cachedGet<T>(url: string, ttlMs: number, bypass?: boolean): Promi
   // but keep the unsuffixed URL as the cacheKey so the fresh result populates
   // the same localStorage slot a non-bypass call would read from.
   const fetchUrl = bypass ? appendBypassParam(url) : url;
-  return cachedFetch<T>(fetchUrl, { ttlMs, bypass, cacheKey: url });
+  return cachedFetch<T>(fetchUrl, { ttlMs, bypass, cacheKey: url, queue: sleeperRequestQueue });
 }
 
 async function cachedGetOrNull<T>(url: string, ttlMs: number, bypass?: boolean): Promise<T | null> {
   const fetchUrl = bypass ? appendBypassParam(url) : url;
   try {
-    return await cachedFetch<T>(fetchUrl, { ttlMs, bypass, cacheKey: url });
+    return await cachedFetch<T>(fetchUrl, { ttlMs, bypass, cacheKey: url, queue: sleeperRequestQueue });
   } catch (err) {
     // Callers of the getOrNull* functions treat this as "nothing yet" (empty array / null),
     // not an error — but that made a 429 or a genuine outage invisible (Sept 21 audit finding
@@ -265,16 +287,13 @@ async function getDraftPicks(
 // (The player map + NFL state are served by the shared `/api/players` proxy.)
 
 // This bypasses the proxy + browser cache, so it is one of the flakiest call
-// paths. Wrap in withRetry so a single transient blip on a hub switch doesn't
-// hard-fail. Retries only fire on failure — successful
+// paths. fetchJson retries a transient blip (network error, 5xx) so a hub
+// switch doesn't hard-fail, and still waits its turn in sleeperRequestQueue
+// like every other Sleeper call. Retries only fire on failure — successful
 // requests (the norm) cost nothing extra.
 async function getOrNull<T>(url: string): Promise<T | null> {
   try {
-    return await withRetry<T>(async () => {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`Sleeper API error ${res.status} — ${url}`);
-      return (await res.json()) as T;
-    }, 3);
+    return await fetchJson<T>(url, { queue: sleeperRequestQueue });
   } catch {
     return null;
   }

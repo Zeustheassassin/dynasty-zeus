@@ -7,18 +7,24 @@
  * 4xx HTTP response that will never succeed on retry). It defaults to retrying
  * every error, preserving the original behaviour. When it returns false the
  * error is re-thrown immediately without further attempts or back-off.
+ *
+ * `delayMs` overrides the wait before the next attempt, per error — lib/clientFetch.ts returns 0
+ * for a 429 when its request queue is already holding the retry for the response's Retry-After.
+ * Omitted, it is the 200 × 2^i schedule above.
  */
 export async function withRetry<T>(
   fn: () => PromiseLike<T>,
   attempts = 3,
   shouldRetry: (err: unknown) => boolean = () => true,
+  delayMs: (err: unknown, attempt: number) => number = (_err, i) => 200 * 2 ** i,
 ): Promise<T> {
   let lastErr: unknown;
   for (let i = 0; i < attempts; i++) {
     try { return await fn(); } catch (err) {
       lastErr = err;
       if (i >= attempts - 1 || !shouldRetry(err)) break;
-      await new Promise((r) => setTimeout(r, 200 * 2 ** i));
+      const wait = delayMs(err, i);
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
     }
   }
   throw lastErr;

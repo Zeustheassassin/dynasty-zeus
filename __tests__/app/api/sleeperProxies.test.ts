@@ -4,7 +4,9 @@ import * as C from "@/lib/constants";
 
 // Characterization of the 10 /api/sleeper/* proxy routes, written BEFORE they are collapsed
 // into a shared helper (audit Batch 6). Pins per-route: param validation, upstream URL,
-// revalidate window, ?bypass behavior, rate-limit key, and 502 shape.
+// revalidate window, ?bypass behavior, and 502 shape. The rate limit is one shared Sleeper
+// bucket for every route since 10/10 (Sleeper call-budget Stage 3), and Sleeper's own 429
+// comes back as a 429 with a Retry-After instead of a 502.
 
 const h = vi.hoisted(() => ({ checkRateLimit: vi.fn() }));
 vi.mock("@/lib/rateLimit", () => ({ checkRateLimit: h.checkRateLimit }));
@@ -16,7 +18,6 @@ interface Spec {
   name: string;
   // ctx is `never` so every route's own params shape is assignable; the call site casts.
   load: () => Promise<{ GET: (req: NextRequest, ctx: never) => Promise<NextResponse> }>;
-  rlKey: string;
   params: Record<string, string>;
   upstream: string;
   revalidate: number;
@@ -28,19 +29,19 @@ interface Spec {
 const FAIL = { error: "Upstream Sleeper request failed" };
 const specs: Spec[] = [
   {
-    name: "draft picks", rlKey: "sleeper-draft-picks", params: { draftId: "999" },
+    name: "draft picks", params: { draftId: "999" },
     load: () => import("@/app/api/sleeper/draft/[draftId]/picks/route"),
     upstream: `${B}/draft/999/picks`, revalidate: C.SLEEPER_DRAFT_PICKS_REVALIDATE_S, bypass: false, errorBody: FAIL,
     badParams: BAD_ID.map((draftId) => ({ draftId })),
   },
   {
-    name: "league drafts", rlKey: "sleeper-league-drafts", params: { leagueId: "123" },
+    name: "league drafts", params: { leagueId: "123" },
     load: () => import("@/app/api/sleeper/league/[leagueId]/drafts/route"),
     upstream: `${B}/league/123/drafts`, revalidate: C.SLEEPER_LEAGUE_DRAFTS_REVALIDATE_S, bypass: true, errorBody: FAIL,
     badParams: BAD_ID.map((leagueId) => ({ leagueId })),
   },
   {
-    name: "league matchups", rlKey: "sleeper-league-matchups", params: { leagueId: "123", week: "5" },
+    name: "league matchups", params: { leagueId: "123", week: "5" },
     load: () => import("@/app/api/sleeper/league/[leagueId]/matchups/[week]/route"),
     upstream: `${B}/league/123/matchups/5`, revalidate: C.SLEEPER_LEAGUE_MATCHUPS_REVALIDATE_S, bypass: true, errorBody: FAIL,
     badParams: [
@@ -49,25 +50,25 @@ const specs: Spec[] = [
     ],
   },
   {
-    name: "league rosters", rlKey: "sleeper-league-rosters", params: { leagueId: "123" },
+    name: "league rosters", params: { leagueId: "123" },
     load: () => import("@/app/api/sleeper/league/[leagueId]/rosters/route"),
     upstream: `${B}/league/123/rosters`, revalidate: C.SLEEPER_LEAGUE_ROSTERS_REVALIDATE_S, bypass: true, errorBody: FAIL,
     badParams: BAD_ID.map((leagueId) => ({ leagueId })),
   },
   {
-    name: "league info", rlKey: "sleeper-league-info", params: { leagueId: "123" },
+    name: "league info", params: { leagueId: "123" },
     load: () => import("@/app/api/sleeper/league/[leagueId]/route"),
     upstream: `${B}/league/123`, revalidate: C.SLEEPER_LEAGUE_INFO_REVALIDATE_S, bypass: false, errorBody: { error: "Upstream error" },
     badParams: BAD_ID.map((leagueId) => ({ leagueId })),
   },
   {
-    name: "league traded picks", rlKey: "sleeper-league-traded-picks", params: { leagueId: "123" },
+    name: "league traded picks", params: { leagueId: "123" },
     load: () => import("@/app/api/sleeper/league/[leagueId]/traded-picks/route"),
     upstream: `${B}/league/123/traded_picks`, revalidate: C.SLEEPER_LEAGUE_TRADED_PICKS_REVALIDATE_S, bypass: true, errorBody: FAIL,
     badParams: BAD_ID.map((leagueId) => ({ leagueId })),
   },
   {
-    name: "league transactions", rlKey: "sleeper-league-transactions", params: { leagueId: "123", week: "0" },
+    name: "league transactions", params: { leagueId: "123", week: "0" },
     load: () => import("@/app/api/sleeper/league/[leagueId]/transactions/[week]/route"),
     upstream: `${B}/league/123/transactions/0`, revalidate: C.SLEEPER_LEAGUE_TRANSACTIONS_REVALIDATE_S, bypass: true, errorBody: FAIL,
     // week 0 is valid here (offseason), unlike matchups
@@ -77,13 +78,13 @@ const specs: Spec[] = [
     ],
   },
   {
-    name: "league users", rlKey: "sleeper-league-users", params: { leagueId: "123" },
+    name: "league users", params: { leagueId: "123" },
     load: () => import("@/app/api/sleeper/league/[leagueId]/users/route"),
     upstream: `${B}/league/123/users`, revalidate: C.SLEEPER_LEAGUE_USERS_REVALIDATE_S, bypass: true, errorBody: FAIL,
     badParams: BAD_ID.map((leagueId) => ({ leagueId })),
   },
   {
-    name: "user leagues", rlKey: "sleeper-user-leagues", params: { userId: "456", year: "2026" },
+    name: "user leagues", params: { userId: "456", year: "2026" },
     load: () => import("@/app/api/sleeper/user-leagues/[userId]/[year]/route"),
     upstream: `${B}/user/456/leagues/nfl/2026`, revalidate: C.SLEEPER_USER_LEAGUES_REVALIDATE_S, bypass: false, errorBody: FAIL,
     badParams: [
@@ -92,7 +93,7 @@ const specs: Spec[] = [
     ],
   },
   {
-    name: "user by username", rlKey: "sleeper-user", params: { username: "john_doe-1.x" },
+    name: "user by username", params: { username: "john_doe-1.x" },
     load: () => import("@/app/api/sleeper/user/[username]/route"),
     upstream: `${B}/user/john_doe-1.x`, revalidate: C.SLEEPER_USER_REVALIDATE_S, bypass: false, errorBody: { error: "Upstream error" },
     badParams: ["", "a b", "a/b", "x".repeat(51), "a?b"].map((username) => ({ username })),
@@ -113,7 +114,7 @@ const call = (s: Spec, params: Record<string, string>, qs = "") =>
   s.load().then((m) => m.GET(new NextRequest(`http://localhost/api/sleeper/x${qs}`), { params: Promise.resolve(params) } as never));
 
 describe.each(specs)("/api/sleeper proxy: $name", (s) => {
-  it("proxies the upstream URL with the configured revalidate window and a 60/min limiter", async () => {
+  it("proxies the upstream URL with the configured revalidate window and the shared Sleeper bucket", async () => {
     const res = await call(s, s.params);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: 1 });
@@ -122,7 +123,11 @@ describe.each(specs)("/api/sleeper proxy: $name", (s) => {
     expect(url).toBe(s.upstream);
     expect(opts).toEqual({ next: { revalidate: s.revalidate } });
     expect(s.revalidate).toBeGreaterThan(0);
-    expect(h.checkRateLimit.mock.calls[0].slice(1)).toEqual([60, 60_000, s.rlKey]);
+    // Every route draws from ONE per-IP bucket (10/10) — a separate 60/min bucket per route let a
+    // League Overview pass and a Refresh 429 each other on rosters while other routes sat idle.
+    expect(h.checkRateLimit.mock.calls[0].slice(1)).toEqual([
+      C.SLEEPER_PROXY_RPM_PER_IP, 60_000, C.SLEEPER_PROXY_RATE_LIMIT_KEY,
+    ]);
   });
 
   it("returns the rate-limit response without fetching when limited", async () => {
@@ -152,6 +157,21 @@ describe.each(specs)("/api/sleeper proxy: $name", (s) => {
     const res = await call(s, s.params);
     expect(res.status).toBe(502);
     expect(await res.json()).toEqual(s.errorBody);
+  });
+
+  it("passes Sleeper's own 429 through with its Retry-After, or a default when it sends none", async () => {
+    fetchMock.mockImplementation(async () => new Response("slow", { status: 429, headers: { "Retry-After": "12" } }));
+    let res = await call(s, s.params);
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("12");
+
+    for (const header of [undefined, "Wed, 21 Oct 2026 07:28:00 GMT", "soon"]) {
+      fetchMock.mockImplementation(async () =>
+        new Response("slow", { status: 429, headers: header ? { "Retry-After": header } : {} }));
+      res = await call(s, s.params);
+      expect(res.status, String(header)).toBe(429);
+      expect(res.headers.get("Retry-After"), String(header)).toBe(String(C.SLEEPER_UPSTREAM_RETRY_AFTER_S));
+    }
   });
 
   it("maps a thrown fetch to 502", async () => {

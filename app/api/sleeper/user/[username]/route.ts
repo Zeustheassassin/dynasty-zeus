@@ -12,7 +12,6 @@ export async function GET(
   return proxySleeper({
     req,
     logNamespace: 'api/sleeper/user',
-    rateLimitKey: 'sleeper-user',
     revalidate: SLEEPER_USER_REVALIDATE_S,
     supportsBypass: false,
     errorMessage: 'Upstream error',

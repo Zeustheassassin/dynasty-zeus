@@ -1,18 +1,17 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../../../../lib/supabaseclient";
 import { logger } from "../../../../lib/logger";
-import { sleeperApi } from "../../../../lib/sleeperApi";
 import { usePlayers } from "../../../../lib/PlayersContext";
 import { useAuth } from "../../../../lib/AuthContext";
 import { useLeague } from "../../../../lib/LeagueContext";
 import { useValues } from "../../../../lib/ValuesContext";
-import { BASE_YEAR, ROOKIE_DRAFT_MAX_ROUNDS } from "../../../../lib/helpers";
 import { toPickSlot } from "../../shared";
 import { compileByClass } from "./compileByClass";
+import { fetchRookieDraftHistory } from "../fetchDraftHistory";
 import type { SleeperLeague, SleeperUser } from "../../../../lib/types";
 import type {
-  HistoryDraftPick, HistoryDraftEntry, SleeperDraftBasic,
-  SleeperPickBasic, ConsensusCacheRow, ConsensusHistoryPoint, ConsensusMoverEntry,
+  HistoryDraftPick, HistoryDraftEntry,
+  ConsensusCacheRow, ConsensusHistoryPoint, ConsensusMoverEntry,
 } from "../../shared";
 import { getLocalStorageItem, setLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 import {
@@ -21,9 +20,6 @@ import {
 } from "../../../../lib/draft/playerTier";
 
 const log = logger("components/draftHub/DraftHistory");
-
-// Rookie-draft class year tracks the CALENDAR (upcoming class), not the NFL season.
-const ROOKIE_YEAR = String(BASE_YEAR);
 
 // Deliberately NOT the old "consensusPlayerGrades" key: that one still holds the
 // retired hit/neutral/bust marks, and reusing it would overwrite the only local
@@ -52,6 +48,9 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
   const [historyData, setHistoryData]       = useState<HistoryDraftEntry[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyLoaded, setHistoryLoaded]   = useState(false);
+  // Leagues finished / total during the first load — the calls are paced by sleeperApi's queue now
+  // (~2.5 min for ~550 calls on a cold cache), so the spinner counts them.
+  const [historyProgress, setHistoryProgress] = useState<{ done: number; total: number } | null>(null);
   const [historyTab, setHistoryTab]         = useState<"LEAGUE" | "CONSENSUS" | "MY_PICKS" | "GRADES">("LEAGUE");
   const [selectedHistoryYear, setSelectedHistoryYear] = useState("ALL");
   const [myPicksSort, setMyPicksSort] = useState<{ col: "times" | "avgPick" | "value"; dir: "asc" | "desc" }>({ col: "times", dir: "desc" });
@@ -81,73 +80,58 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
 
   // ── Effects ───────────────────────────────────────────────────────────────
 
-  // Load historical draft data when HISTORY tab first opens
+  // Load historical draft data when HISTORY tab first opens.
+  //
+  // The player map and FC values often land after this tab opens; either changing mid-load restarts
+  // the load so the board is built from the newest ones (as before). `cancelled` makes the
+  // abandoned pass stop queueing Sleeper calls and drop its result — it used to run on to the end
+  // alongside the new one, and whichever finished last won. The restarted pass reads back whatever
+  // the abandoned one already fetched from sleeperApi's cache.
   useEffect(() => {
     if (historyLoaded || !leagues.length) return;
+    let cancelled = false;
 
     const load = async () => {
       setHistoryLoading(true);
-      const results: HistoryDraftEntry[] = [];
+      let done = 0;
+      setHistoryProgress({ done, total: leagues.length });
 
-      await Promise.all(leagues.map(async (league) => {
-        // Always include the current league so its in-progress / completed current-year draft appears.
-        const toCheck: Array<{ id: string; name: string }> = [
-          { id: league.league_id, name: league.name },
-        ];
-        let prevId: string | null = league.previous_league_id ?? null;
-        let depth = 0;
-        while (prevId && depth < 3) {
-          toCheck.push({ id: prevId, name: league.name });
-          const pl = await sleeperApi.getLeagueInfo(prevId);
-          if (!pl) break;
-          prevId = pl.previous_league_id ?? null;
-          depth++;
-        }
+      const drafts = await fetchRookieDraftHistory(leagues, {
+        shouldBail: () => cancelled,
+        onLeagueDone: () => {
+          done++;
+          if (!cancelled) setHistoryProgress({ done, total: leagues.length });
+        },
+      });
+      if (cancelled) return;
 
-        await Promise.all(toCheck.map(async ({ id: leagueId, name: leagueName }) => {
-          try {
-            const drafts: SleeperDraftBasic[] = await sleeperApi.getLeagueDrafts(leagueId);
-            if (!Array.isArray(drafts)) return;
-            const rookieDrafts = drafts.filter((d) => {
-              const rounds = d.settings?.rounds ?? d.rounds ?? 99;
-              if (rounds > ROOKIE_DRAFT_MAX_ROUNDS) return false;
-              // Past years: only completed drafts.
-              if (d.season !== ROOKIE_YEAR) return d.status === "complete";
-              // Current year: include in-progress drafts so partial picks show as live ADP signal.
-              return d.status === "complete" || d.status === "drafting" || d.status === "paused";
-            });
-            await Promise.all(rookieDrafts.map(async (draft) => {
-              try {
-                const picks: SleeperPickBasic[] = await sleeperApi.getDraftPicks(draft.draft_id);
-                if (!Array.isArray(picks)) return;
-                const processed: HistoryDraftPick[] = picks.map((pick) => {
-                  const p = players[pick.player_id];
-                  const val = calcFcValues[pick.player_id] ?? p?.value ?? 0;
-                  return {
-                    slot: `${pick.round}.${String(pick.draft_slot).padStart(2, "0")}`,
-                    pickNo: pick.pick_no,
-                    player_id: pick.player_id,
-                    name: p?.full_name || `${pick.metadata?.first_name || ""} ${pick.metadata?.last_name || ""}`.trim() || "Unknown",
-                    position: p?.position || pick.metadata?.position || "",
-                    team: p?.team || pick.metadata?.team || "",
-                    value: val,
-                    pickedByUserId: pick.picked_by || null,
-                  };
-                }).sort((a, b) => a.pickNo - b.pickNo);
-                results.push({ leagueName, leagueId, season: draft.season, draftId: draft.draft_id, picks: processed });
-              } catch {}
-            }));
-          } catch {}
-        }));
+      const results: HistoryDraftEntry[] = drafts.map(({ picks, ...draft }) => ({
+        ...draft,
+        picks: picks.map((pick): HistoryDraftPick => {
+          const p = players[pick.player_id];
+          const val = calcFcValues[pick.player_id] ?? p?.value ?? 0;
+          return {
+            slot: `${pick.round}.${String(pick.draft_slot).padStart(2, "0")}`,
+            pickNo: pick.pick_no,
+            player_id: pick.player_id,
+            name: p?.full_name || `${pick.metadata?.first_name || ""} ${pick.metadata?.last_name || ""}`.trim() || "Unknown",
+            position: p?.position || pick.metadata?.position || "",
+            team: p?.team || pick.metadata?.team || "",
+            value: val,
+            pickedByUserId: pick.picked_by || null,
+          };
+        }).sort((a, b) => a.pickNo - b.pickNo),
       }));
 
       results.sort((a, b) => b.season.localeCompare(a.season) || a.leagueName.localeCompare(b.leagueName));
       setHistoryData(results);
       setHistoryLoading(false);
+      setHistoryProgress(null);
       setHistoryLoaded(true);
     };
 
     load();
+    return () => { cancelled = true; };
   }, [historyLoaded, leagues, players, calcFcValues]);
 
   // Auto-select the most recent year once history or compiled meta data loads
@@ -523,6 +507,7 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
   return {
     // loading / navigation state
     historyLoading,
+    historyProgress,
     historyLoaded,
     historyData,
     historyTab,

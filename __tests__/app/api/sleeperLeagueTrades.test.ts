@@ -56,7 +56,10 @@ describe("/api/sleeper/league/[leagueId]/trades", () => {
     const res = await call("123");
     expect(res.status).toBe(200);
     expect(legUrls()).toEqual([1, 2, 3, 4, 5, 6].map((leg) => `${B}/league/123/transactions/${leg}`));
-    expect(h.checkRateLimit.mock.calls[0].slice(1)).toEqual([60, 60_000, "sleeper-league-trades"]);
+    // The same per-IP bucket as every other /api/sleeper/* route (10/10; was its own 60/min).
+    expect(h.checkRateLimit.mock.calls[0].slice(1)).toEqual([
+      C.SLEEPER_PROXY_RPM_PER_IP, 60_000, C.SLEEPER_PROXY_RATE_LIMIT_KEY,
+    ]);
   });
 
   it("returns only completed trades inside the window, from every leg", async () => {
@@ -87,6 +90,22 @@ describe("/api/sleeper/league/[leagueId]/trades", () => {
     const res = await call("123");
     expect(res.status).toBe(502);
     expect(await res.json()).toEqual({ error: "Upstream Sleeper request failed" });
+  });
+
+  it("passes Sleeper's 429 on a leg through as a 429 with a Retry-After, not a partial list", async () => {
+    legs = { 2: [tx("a", 20)], 4: 429 };
+    const res = await call("123");
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe(String(C.SLEEPER_UPSTREAM_RETRY_AFTER_S));
+  });
+
+  it("passes Sleeper's 429 on /state/nfl through without fetching any leg", async () => {
+    fetchMock.mockImplementationOnce(async () =>
+      new Response("slow", { status: 429, headers: { "Retry-After": "7" } }));
+    const res = await call("123");
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("7");
+    expect(legUrls()).toEqual([]);
   });
 
   it("returns 502 without fetching any leg when /state/nfl is unavailable or malformed", async () => {

@@ -113,6 +113,21 @@ describe("withRetry", () => {
     expect(fn).toHaveBeenCalledTimes(2);
   });
 
+  it("delayMs overrides the wait per error, and a 0 wait retries without a timer", async () => {
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+    const queued = new Error("429 — the queue is holding it");
+    const fn = vi.fn()
+      .mockRejectedValueOnce(queued)
+      .mockRejectedValueOnce(new Error("503"))
+      .mockResolvedValue("ok");
+    const promise = withRetry(fn, 3, () => true, (err, i) => (err === queued ? 0 : 1000 + i));
+    await vi.runAllTimersAsync();
+    expect(await promise).toBe("ok");
+    expect(fn).toHaveBeenCalledTimes(3);
+    // Only the 503 waited (attempt index 1); the queued 429 went straight back.
+    expect(setTimeoutSpy.mock.calls.map((c) => c[1])).toEqual([1001]);
+  });
+
   it("does not fire a delay after the final failing attempt", async () => {
     const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
 
