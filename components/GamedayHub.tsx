@@ -1,6 +1,6 @@
 "use client";
 import React from "react";
-import type { SleeperLeague, GamedayMatchup, GamedayDashboardEntry } from "../lib/types";
+import type { SleeperLeague, GamedayMatchup, GamedayDashboardEntry, CommittedSimsByLeague, CachedSimRow } from "../lib/types";
 import type { GamedayHubTab } from "../app/hooks/useHubRouting";
 import ErrorBoundary from "./ErrorBoundary";
 import LeagueMatchupsTab from "./GamedayHub/LeagueMatchupsTab";
@@ -32,6 +32,9 @@ interface GamedayHubProps {
   loadingGamedayDashboard: boolean;
   gamedayDashboardUpdatedAt: number | null;
   onRefreshGamedayDashboard: () => void;
+  /** League Overview's sim results — the dashboard sorts and tags by the user's playoff odds. */
+  committedSimsByLeague: CommittedSimsByLeague;
+  leagueSimCache: Record<string, Record<number, CachedSimRow>>;
 }
 
 const TABS: { id: GamedayHubTab; label: string }[] = [
@@ -57,6 +60,8 @@ function GamedayHub({
   loadingGamedayDashboard,
   gamedayDashboardUpdatedAt,
   onRefreshGamedayDashboard,
+  committedSimsByLeague,
+  leagueSimCache,
 }: GamedayHubProps) {
   return (
     <div className="max-w-6xl mx-auto px-4 py-6 space-y-5">
@@ -101,6 +106,8 @@ function GamedayHub({
             updatedAt={gamedayDashboardUpdatedAt}
             live={gamedayLive}
             onRefresh={onRefreshGamedayDashboard}
+            committedSimsByLeague={committedSimsByLeague}
+            leagueSimCache={leagueSimCache}
             onOpenLeague={(league) => {
               loadRoster(league);
               setGamedayHubTab("MATCHUPS");

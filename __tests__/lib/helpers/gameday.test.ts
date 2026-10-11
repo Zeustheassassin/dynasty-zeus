@@ -1,10 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
   resolveGameState, buildGamedayMatchups, getKickoffState, getGamedayResultStatus, getMatchupWinProbability,
-  getEarlyLockDay, isGameStartedState,
+  getEarlyLockDay, isGameStartedState, getGamedayPlayoffOdds, sortGamedayDashboardEntries,
 } from "@/lib/helpers/gameday";
 import type {
   SleeperLeague, SleeperRoster, SleeperMatchup, SleeperPlayer, ProjectionRow, TeamGameState,
+  GamedayDashboardEntry, CachedSimRow, SimRow,
 } from "@/lib/types";
 
 const HOUR = 60 * 60 * 1000;
@@ -649,5 +650,52 @@ describe("buildGamedayMatchups — correlation", () => {
     };
     // Same means either way (QB 20 vs WR 16); the shared-team opponent moves with my QB.
     expect(winProb("wrSame")).toBeGreaterThan(winProb("wrOther"));
+  });
+});
+
+describe("Gameday Dashboard playoff-odds order", () => {
+  const mkEntry = (id: string, name: string, myRosterId: number | null = 1): GamedayDashboardEntry => ({
+    league: mkLeague({ league_id: id, name }),
+    myTeam: null,
+    oppTeam: null,
+    myRosterId,
+    myRecord: myRosterId == null ? null : { wins: 0, losses: 0, ties: 0 },
+    error: myRosterId == null,
+  });
+  const committed = (rosterId: number, playoffOdds: number): Record<number, SimRow> => ({
+    [rosterId]: { rosterId, wins: 0, losses: 0, ties: 0, pointsFor: 0, playoffOdds },
+  });
+  const cached = (rosterId: number, playoff_odds: number): Record<number, CachedSimRow> => ({
+    [rosterId]: {
+      league_id: "x", roster_id: rosterId, playoff_odds, title_odds: 0, expected_wins: 0,
+      avg_finish: 0, finish_range: null, computed_at: null,
+    },
+  });
+
+  it("reads the Run All Sims commit first, then the saved sim, and skips leagues never simulated", () => {
+    const entries = [mkEntry("a", "A"), mkEntry("b", "B", 3), mkEntry("c", "C"), mkEntry("d", "D", null)];
+    const odds = getGamedayPlayoffOdds(
+      entries,
+      { a: committed(1, 91.2) },
+      { a: cached(1, 40), b: { ...cached(1, 99), ...cached(3, 12.5) }, d: cached(1, 80) }
+    );
+    // b uses the user's own roster (3), not roster 1's 99%; d failed to load so has no roster.
+    expect(odds).toEqual({ a: 91.2, b: 12.5 });
+  });
+
+  it("sorts best odds first, equal odds by league name, and unsimulated leagues last", () => {
+    const entries = [
+      mkEntry("none2", "Zeta"), mkEntry("low", "Low"), mkEntry("tieB", "Bravo"),
+      mkEntry("none1", "Alpha"), mkEntry("tieA", "Able"), mkEntry("high", "High"),
+    ];
+    const sorted = sortGamedayDashboardEntries(entries, { low: 38.4, tieB: 100, tieA: 100, high: 99.6 });
+    expect(sorted.map((e) => e.league.league_id)).toEqual(["tieA", "tieB", "high", "low", "none1", "none2"]);
+    // Pure: the input order is left alone.
+    expect(entries[0].league.league_id).toBe("none2");
+  });
+
+  it("treats 0% as a real sim result, ahead of a league with no sim", () => {
+    const sorted = sortGamedayDashboardEntries([mkEntry("none", "A"), mkEntry("zero", "B")], { zero: 0 });
+    expect(sorted.map((e) => e.league.league_id)).toEqual(["zero", "none"]);
   });
 });

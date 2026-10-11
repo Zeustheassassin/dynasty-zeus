@@ -543,6 +543,8 @@ export function HubRouter({
             gamedayDashboardEntries={gamedayDashboardEntries}
             loadingGamedayDashboard={loadingGamedayDashboard}
             onRefreshGamedayDashboard={onRefreshGamedayDashboard}
+            committedSimsByLeague={committedSimsByLeague}
+            leagueSimCache={leagueSimCache}
           />
           </ErrorBoundary>
         )}

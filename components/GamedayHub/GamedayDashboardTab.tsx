@@ -1,7 +1,8 @@
 "use client";
-import React from "react";
-import type { SleeperLeague, GamedayDashboardEntry } from "../../lib/types";
-import { getGamedayResultStatus } from "../../lib/helpers/gameday";
+import React, { useMemo } from "react";
+import type { SleeperLeague, GamedayDashboardEntry, CommittedSimsByLeague, CachedSimRow } from "../../lib/types";
+import { getGamedayResultStatus, getGamedayPlayoffOdds, sortGamedayDashboardEntries } from "../../lib/helpers/gameday";
+import Badge from "../ui/Badge";
 import GamedayTeamRow from "./GamedayTeamRow";
 import LiveStamp from "./LiveStamp";
 
@@ -13,9 +14,23 @@ interface GamedayDashboardTabProps {
   live: boolean;
   onRefresh: () => void;
   onOpenLeague: (league: SleeperLeague) => void;
+  /** League Overview's sim results — order the cards and tag each with the user's playoff odds. */
+  committedSimsByLeague: CommittedSimsByLeague;
+  leagueSimCache: Record<string, Record<number, CachedSimRow>>;
 }
 
-function GamedayDashboardTab({ week, entries, loading, updatedAt, live, onRefresh, onOpenLeague }: GamedayDashboardTabProps) {
+function GamedayDashboardTab({
+  week, entries, loading, updatedAt, live, onRefresh, onOpenLeague, committedSimsByLeague, leagueSimCache,
+}: GamedayDashboardTabProps) {
+  const playoffOddsByLeague = useMemo(
+    () => getGamedayPlayoffOdds(entries, committedSimsByLeague, leagueSimCache),
+    [entries, committedSimsByLeague, leagueSimCache]
+  );
+  const sortedEntries = useMemo(
+    () => sortGamedayDashboardEntries(entries, playoffOddsByLeague),
+    [entries, playoffOddsByLeague]
+  );
+
   return (
     <div className="space-y-5">
       <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
@@ -70,27 +85,55 @@ function GamedayDashboardTab({ week, entries, loading, updatedAt, live, onRefres
             </div>
           ) : (
             <div className="grid gap-3 lg:grid-cols-2">
-              {entries.map((entry) => (
-                <button
-                  key={entry.league.league_id}
-                  onClick={() => onOpenLeague(entry.league)}
-                  className="rounded-2xl border border-gray-800 bg-gray-900/60 p-4 text-left transition hover:border-gray-700"
-                >
-                  <div className="mb-3 truncate text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    {entry.league.name}
-                  </div>
-                  {entry.error ? (
-                    <div className="text-xs text-red-400">Couldn&apos;t load this league — try refreshing.</div>
-                  ) : !entry.myTeam ? (
-                    <div className="text-xs text-gray-500">No matchup this week.</div>
-                  ) : (
-                    <div className="space-y-3">
-                      <GamedayTeamRow team={entry.myTeam} resultStatus={getGamedayResultStatus(entry.myTeam, entry.oppTeam)} />
-                      {entry.oppTeam && <GamedayTeamRow team={entry.oppTeam} />}
+              {sortedEntries.map((entry) => {
+                const playoffOdds = playoffOddsByLeague[entry.league.league_id];
+                const record = entry.myRecord;
+                return (
+                  <button
+                    key={entry.league.league_id}
+                    onClick={() => onOpenLeague(entry.league)}
+                    className="rounded-2xl border border-gray-800 bg-gray-900/60 p-4 text-left transition hover:border-gray-700"
+                  >
+                    <div className="mb-3 flex items-center justify-between gap-2">
+                      <div className="min-w-0 truncate text-xs font-semibold uppercase tracking-wide text-gray-500">
+                        {entry.league.name}
+                      </div>
+                      {(playoffOdds != null || record) && (
+                        <div className="flex shrink-0 items-center gap-1.5">
+                          {playoffOdds != null && (
+                            // Same color cut-offs as League Overview's Playoff% column.
+                            <span title="Playoff odds from your last League Overview sim">
+                              <Badge
+                                tone={playoffOdds >= 50 ? "good" : playoffOdds >= 25 ? "warning" : "critical"}
+                                className="font-mono"
+                              >
+                                {playoffOdds}% playoff
+                              </Badge>
+                            </span>
+                          )}
+                          {record && (
+                            <span title="Your record in this league">
+                              <Badge tone="neutral" className="font-mono">
+                                {record.wins}-{record.losses}{record.ties > 0 ? `-${record.ties}` : ""}
+                              </Badge>
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
-                  )}
-                </button>
-              ))}
+                    {entry.error ? (
+                      <div className="text-xs text-red-400">Couldn&apos;t load this league — try refreshing.</div>
+                    ) : !entry.myTeam ? (
+                      <div className="text-xs text-gray-500">No matchup this week.</div>
+                    ) : (
+                      <div className="space-y-3">
+                        <GamedayTeamRow team={entry.myTeam} resultStatus={getGamedayResultStatus(entry.myTeam, entry.oppTeam)} />
+                        {entry.oppTeam && <GamedayTeamRow team={entry.oppTeam} />}
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           )}
         </>

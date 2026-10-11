@@ -14,6 +14,7 @@ import type {
   SleeperLeague, SleeperRoster, SleeperMatchup, SleeperPlayer, SleeperUser,
   ProjectionRow, GamedayMatchup, GamedayTeamView, GamedayLineupRow,
   GamedayReserveRow, GamedayDashboardEntry, GamedayDashboardRaw, TeamGameState, EarlyLockDay,
+  CommittedSimsByLeague, CachedSimRow,
 } from "../types";
 
 interface KickoffSource {
@@ -410,13 +411,22 @@ export function buildGamedayDashboardEntries(
 ): GamedayDashboardEntry[] {
   return raw.map((item): GamedayDashboardEntry => {
     const { league, rosters, users, matchups } = item;
-    if (item.error) return { league, myTeam: null, oppTeam: null, error: true };
+    const none = { myTeam: null, oppTeam: null, myRosterId: null, myRecord: null };
+    if (item.error) return { league, ...none, error: true };
 
     const myRoster = rosters.find((r) => r.owner_id === user?.user_id);
-    if (!myRoster) return { league, myTeam: null, oppTeam: null, error: false };
+    if (!myRoster) return { league, ...none, error: false };
 
+    const mine = {
+      myRosterId: myRoster.roster_id,
+      myRecord: {
+        wins: myRoster.settings?.wins ?? 0,
+        losses: myRoster.settings?.losses ?? 0,
+        ties: myRoster.settings?.ties ?? 0,
+      },
+    };
     const myEntry = matchups.find((m) => Number(m.roster_id) === Number(myRoster.roster_id));
-    if (!myEntry) return { league, myTeam: null, oppTeam: null, error: false };
+    if (!myEntry) return { league, myTeam: null, oppTeam: null, ...mine, error: false };
 
     const scopedMatchups = matchups.filter((m) => Number(m.matchup_id) === Number(myEntry.matchup_id));
 
@@ -432,6 +442,45 @@ export function buildGamedayDashboardEntries(
     const [matchup] = buildGamedayMatchups(league, rosters, scopedMatchups, week, players, projectionData, userMap, scheduleByTeam, liveStatsByPlayerId);
     const myTeam = matchup?.teams.find((t) => t.rosterId === myRoster.roster_id) ?? null;
     const oppTeam = matchup?.teams.find((t) => t.rosterId !== myRoster.roster_id) ?? null;
-    return { league, myTeam, oppTeam, error: false };
+    return { league, myTeam, oppTeam, ...mine, error: false };
+  });
+}
+
+/**
+ * The user's playoff odds per league, read the way League Overview's Playoff% column reads them:
+ * the last "Run All Sims" commit first, then the saved sim (league_simulations). A league that has
+ * never been simulated is left out rather than shown as 0%.
+ */
+export function getGamedayPlayoffOdds(
+  entries: GamedayDashboardEntry[],
+  committedSimsByLeague: CommittedSimsByLeague,
+  leagueSimCache: Record<string, Record<number, CachedSimRow>>
+): Record<string, number> {
+  const odds: Record<string, number> = {};
+  entries.forEach(({ league, myRosterId }) => {
+    if (myRosterId == null) return;
+    const value = committedSimsByLeague[league.league_id]?.[myRosterId]?.playoffOdds
+      ?? leagueSimCache[league.league_id]?.[myRosterId]?.playoff_odds;
+    if (value != null) odds[league.league_id] = value;
+  });
+  return odds;
+}
+
+/**
+ * Gameday Dashboard order: best playoff odds first, as League Overview sorts its Playoff% column
+ * (equal odds by league name). Leagues with no sim yet go last, by name. Odds only change when
+ * sims are re-run, so live score polls never reshuffle the cards.
+ */
+export function sortGamedayDashboardEntries(
+  entries: GamedayDashboardEntry[],
+  playoffOddsByLeague: Record<string, number>
+): GamedayDashboardEntry[] {
+  return [...entries].sort((a, b) => {
+    const oddsA = playoffOddsByLeague[a.league.league_id];
+    const oddsB = playoffOddsByLeague[b.league.league_id];
+    if (oddsA == null && oddsB != null) return 1;
+    if (oddsB == null && oddsA != null) return -1;
+    if (oddsA != null && oddsB != null && oddsA !== oddsB) return oddsB - oddsA;
+    return a.league.name.localeCompare(b.league.name);
   });
 }

@@ -77,7 +77,9 @@ describe("useGamedayDashboard", () => {
   it("builds one entry per league, splitting myTeam and oppTeam by roster ownership", async () => {
     const leagueA = mkLeague("A");
     const leagueB = mkLeague("B");
-    getLeagueRosters.mockResolvedValue([mkRoster(1, "me"), mkRoster(2, "them")]);
+    const myRoster = mkRoster(1, "me");
+    myRoster.settings = { ...myRoster.settings, wins: 5, losses: 2, ties: 1 };
+    getLeagueRosters.mockResolvedValue([myRoster, mkRoster(2, "them")]);
     getLeagueUsers.mockResolvedValue([mkUser("me", "Me"), mkUser("them", "Them")]);
     getLeagueMatchups.mockResolvedValue([mkMatchup(1, 1, 10), mkMatchup(1, 2, 20)]);
 
@@ -91,6 +93,8 @@ describe("useGamedayDashboard", () => {
       expect(entry.error).toBe(false);
       expect(entry.myTeam?.rosterId).toBe(1);
       expect(entry.oppTeam?.rosterId).toBe(2);
+      expect(entry.myRosterId).toBe(1);
+      expect(entry.myRecord).toEqual({ wins: 5, losses: 2, ties: 1 });
     }
     expect(result.current.gamedayDashboardWeek).toBe(1);
   });
@@ -116,6 +120,8 @@ describe("useGamedayDashboard", () => {
     const entryB = result.current.gamedayDashboardEntries.find((e) => e.league.league_id === "B")!;
     expect(entryA.error).toBe(true);
     expect(entryA.myTeam).toBeNull();
+    expect(entryA.myRosterId).toBeNull();
+    expect(entryA.myRecord).toBeNull();
     expect(entryB.error).toBe(false);
     expect(entryB.myTeam?.rosterId).toBe(1);
   });
@@ -136,6 +142,9 @@ describe("useGamedayDashboard", () => {
     expect(entry.error).toBe(false);
     expect(entry.myTeam).toBeNull();
     expect(entry.oppTeam).toBeNull();
+    // Still sortable/taggable by playoff odds and record without a matchup.
+    expect(entry.myRosterId).toBe(1);
+    expect(entry.myRecord).toEqual({ wins: 0, losses: 0, ties: 0 });
   });
 
   it("passes bypass through to the matchup fetch only", async () => {

@@ -622,6 +622,11 @@ export interface GamedayDashboardEntry {
   league: SleeperLeague;
   myTeam: GamedayTeamView | null;
   oppTeam: GamedayTeamView | null;
+  /** The user's roster here, set even in a week with no matchup — keys the League Overview
+   *  sim odds the dashboard sorts and tags by. Null when the league failed or has no roster. */
+  myRosterId: number | null;
+  /** The user's season record off the roster (through last week), for the card's header tag. */
+  myRecord: { wins: number; losses: number; ties: number } | null;
   error: boolean;
 }
 
