@@ -6,10 +6,26 @@ import * as C from "@/lib/constants";
 // into a shared helper (audit Batch 6). Pins per-route: param validation, upstream URL,
 // revalidate window, ?bypass behavior, and 502 shape. The rate limit is one shared Sleeper
 // bucket for every route since 10/10 (Sleeper call-budget Stage 3), and Sleeper's own 429
-// comes back as a 429 with a Retry-After instead of a 502.
+// comes back as a 429 with a Retry-After instead of a 502. Since Stage 4 the routes cache through
+// unstable_cache (fetchSleeperJson) rather than fetch's own revalidate, so the global Sleeper budget
+// counts only calls that reach Sleeper — each one takes an interactive slot.
 
 const h = vi.hoisted(() => ({ checkRateLimit: vi.fn() }));
 vi.mock("@/lib/rateLimit", () => ({ checkRateLimit: h.checkRateLimit }));
+
+// unstable_cache needs Next's incremental cache, which only exists inside a running server. Stand
+// in with a pass-through that records each cached call's key and revalidate window.
+const nc = vi.hoisted(() => ({ cached: [] as { key: string[]; revalidate: number }[] }));
+vi.mock("next/cache", () => ({
+  unstable_cache: (fn: () => Promise<unknown>, key: string[], opts: { revalidate: number }) => () => {
+    nc.cached.push({ key, revalidate: opts.revalidate });
+    return fn();
+  },
+}));
+const budget = vi.hoisted(() => ({ slots: [] as string[] }));
+vi.mock("@/lib/server/sleeperBudget", () => ({
+  waitForSleeperSlot: async (priority: string) => { budget.slots.push(priority); },
+}));
 
 const B = C.SLEEPER_BASE_URL;
 const BAD_ID = ["abc", "12a", "", "1".repeat(31), "1/2", "..%2f"];
@@ -104,6 +120,8 @@ const fetchMock = vi.fn();
 beforeEach(() => {
   h.checkRateLimit.mockReset();
   h.checkRateLimit.mockResolvedValue({ allowed: true, remaining: 59 });
+  nc.cached = [];
+  budget.slots = [];
   fetchMock.mockReset();
   fetchMock.mockImplementation(async () => new Response(JSON.stringify({ ok: 1 })));
   vi.stubGlobal("fetch", fetchMock);
@@ -121,8 +139,12 @@ describe.each(specs)("/api/sleeper proxy: $name", (s) => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, opts] = fetchMock.mock.calls[0];
     expect(url).toBe(s.upstream);
-    expect(opts).toEqual({ next: { revalidate: s.revalidate } });
+    // The Data Cache wrapper holds the revalidate window; the fetch inside it is uncached.
+    expect(opts).toEqual({ cache: "no-store" });
+    expect(nc.cached).toEqual([{ key: ["sleeper-json", s.upstream], revalidate: s.revalidate }]);
     expect(s.revalidate).toBeGreaterThan(0);
+    // The call that reaches Sleeper takes one interactive slot in the global budget.
+    expect(budget.slots).toEqual(["interactive"]);
     // Every route draws from ONE per-IP bucket (10/10) — a separate 60/min bucket per route let a
     // League Overview pass and a Refresh 429 each other on rosters while other routes sat idle.
     expect(h.checkRateLimit.mock.calls[0].slice(1)).toEqual([
@@ -136,6 +158,7 @@ describe.each(specs)("/api/sleeper proxy: $name", (s) => {
     const res = await call(s, s.params);
     expect(res.status).toBe(429);
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(budget.slots).toEqual([]);
   });
 
   it("rejects invalid params with 400 and never calls Sleeper", async () => {
@@ -144,12 +167,14 @@ describe.each(specs)("/api/sleeper proxy: $name", (s) => {
       expect(res.status, JSON.stringify(bad)).toBe(400);
     }
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(budget.slots).toEqual([]);
   });
 
-  it(s.bypass ? "?bypass=1 skips the fetch cache" : "ignores ?bypass (always uses the fetch cache)", async () => {
+  it(s.bypass ? "?bypass=1 skips the Data Cache" : "ignores ?bypass (always uses the Data Cache)", async () => {
     await call(s, s.params, "?bypass=1");
-    const opts = fetchMock.mock.calls[0][1];
-    expect(opts).toEqual(s.bypass ? { cache: "no-store" } : { next: { revalidate: s.revalidate } });
+    expect(fetchMock.mock.calls[0]).toEqual([s.upstream, { cache: "no-store" }]);
+    expect(nc.cached).toEqual(s.bypass ? [] : [{ key: ["sleeper-json", s.upstream], revalidate: s.revalidate }]);
+    expect(budget.slots).toEqual(["interactive"]);
   });
 
   it("maps upstream non-OK to 502 with the route's error body", async () => {

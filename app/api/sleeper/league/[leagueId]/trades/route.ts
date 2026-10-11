@@ -7,7 +7,12 @@ import {
   SLEEPER_LEAGUE_TRANSACTIONS_REVALIDATE_S,
 } from '@/lib/constants';
 import { SLEEPER_ID_RE } from '@/lib/apiHelpers';
-import { checkSleeperProxyRateLimit, sleeperUpstreamRateLimited } from '@/lib/server/sleeperProxy';
+import {
+  checkSleeperProxyRateLimit,
+  fetchSleeperJson,
+  SleeperUpstreamError,
+  sleeperUpstreamRateLimited,
+} from '@/lib/server/sleeperProxy';
 import { isValidNflState, recentTransactionLegs } from '@/lib/helpers/season';
 import { logger } from '@/lib/logger';
 import type { SleeperTransaction } from '@/lib/types';
@@ -22,10 +27,11 @@ const FAIL = { error: 'Upstream Sleeper request failed' };
  * browser ONE rate-limited request rather than one per leg: a 36-league Trade Log at 7 legs a
  * league would otherwise be ~250 calls against the Sleeper proxies' rate limit, and every 429
  * there silently drops that leg's trades. The per-leg upstream URLs are the same ones the
- * per-week transactions proxy fetches, so the two share Next's Data Cache entries.
+ * per-week transactions proxy fetches, so the two share Next's Data Cache entries (fetchSleeperJson).
  *
  * Draws from the same per-IP bucket as every other /api/sleeper/* route (one token per request,
- * however many legs it reads — those mostly come out of the Data Cache).
+ * however many legs it reads — those mostly come out of the Data Cache). Each leg that misses the
+ * cache takes its own slot in the global Sleeper budget.
  *
  * Any leg failing returns a 502 rather than a partial list — a missing leg reads as "no trades" —
  * except Sleeper's own 429, which goes back as a 429 with a Retry-After like the other proxies.
@@ -44,16 +50,19 @@ export async function GET(
   const bypass = req.nextUrl.searchParams.get('bypass') === '1';
 
   try {
-    const stateRes = await fetch(`${SLEEPER_BASE_URL}/state/nfl`, {
-      next: { revalidate: NFL_STATE_REVALIDATE_S },
-    });
-    if (stateRes.status === 429) {
-      log.error('nfl state rate limited by Sleeper', { leagueId });
-      return sleeperUpstreamRateLimited(stateRes);
+    let nflState: unknown;
+    try {
+      nflState = await fetchSleeperJson<unknown>(`${SLEEPER_BASE_URL}/state/nfl`, { revalidate: NFL_STATE_REVALIDATE_S });
+    } catch (err) {
+      if (err instanceof SleeperUpstreamError && err.status === 429) {
+        log.error('nfl state rate limited by Sleeper', { leagueId });
+        return sleeperUpstreamRateLimited(err.retryAfter);
+      }
+      log.error('nfl state unavailable', { leagueId, error: String(err) });
+      return NextResponse.json(FAIL, { status: 502 });
     }
-    const nflState: unknown = stateRes.ok ? await stateRes.json() : null;
     if (!isValidNflState(nflState)) {
-      log.error('nfl state unavailable or malformed', { status: stateRes.status, leagueId });
+      log.error('nfl state malformed', { leagueId });
       return NextResponse.json(FAIL, { status: 502 });
     }
 
@@ -61,24 +70,27 @@ export async function GET(
     // A leg Sleeper 429s is remembered rather than thrown, so the response can carry its
     // Retry-After instead of collapsing into the generic 502 below. A holder, not a `let`: TS
     // doesn't see assignments made inside the map callbacks and would narrow a `let` to null.
-    const limited: { res: Response | null } = { res: null };
+    const limited: { retryAfter: string | null; hit: boolean } = { retryAfter: null, hit: false };
     const pages = await Promise.all(
       legs.map(async (leg) => {
-        const res = await fetch(
-          `${SLEEPER_BASE_URL}/league/${leagueId}/transactions/${leg}`,
-          bypass ? { cache: 'no-store' } : { next: { revalidate: SLEEPER_LEAGUE_TRANSACTIONS_REVALIDATE_S } }
-        );
-        if (res.status === 429) {
-          limited.res ??= res;
-          return null;
+        try {
+          return await fetchSleeperJson<SleeperTransaction[] | null>(
+            `${SLEEPER_BASE_URL}/league/${leagueId}/transactions/${leg}`,
+            { revalidate: SLEEPER_LEAGUE_TRANSACTIONS_REVALIDATE_S, bypass }
+          );
+        } catch (err) {
+          if (err instanceof SleeperUpstreamError && err.status === 429) {
+            if (!limited.hit) limited.retryAfter = err.retryAfter;
+            limited.hit = true;
+            return null;
+          }
+          throw err;
         }
-        if (!res.ok) throw new Error(`leg ${leg} upstream ${res.status}`);
-        return (await res.json()) as SleeperTransaction[] | null;
       })
     );
-    if (limited.res) {
+    if (limited.hit) {
       log.error('leg rate limited by Sleeper', { leagueId });
-      return sleeperUpstreamRateLimited(limited.res);
+      return sleeperUpstreamRateLimited(limited.retryAfter);
     }
 
     const since = Date.now() - RECENT_TRADE_WINDOW_DAYS * 24 * 60 * 60 * 1000;

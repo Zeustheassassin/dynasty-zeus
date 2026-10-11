@@ -327,11 +327,15 @@ export const COMPILE_MAX_LEAGUES = 4000;
  * proxied browser request is assumed to share one IP. Bounded concurrency alone does not enforce a
  * rate (see createPacer in ./sleeperServer) — 15 concurrent calls at 150 ms each is 6000/min. Was 850
  * for discovery with the picks step unpaced (8 at a time, ~1,200-2,400/min); 450 for everything
- * since 2026-10-10 (Sleeper call-budget Stage 2). A recent draft class is ~4,000 calls (~2,400
- * discovery + ~1,650 drafts' picks), ~9 min at this pace — which is why the route's maxDuration is
- * 800s (Vercel Pro) and the compile panel sends one class per request.
+ * from Stage 2 of the Sleeper call-budget plan (2026-10-10); 360 since Stage 4, the most the global
+ * budget lets a background job make (SLEEPER_BUDGET_BACKGROUND_CAP per 10s window), and less while
+ * people are using the app. A recent draft class is ~4,000 calls (~2,400 discovery + ~1,650 drafts'
+ * picks), ~11 min at this pace — which is why the route's maxDuration is 800s (Vercel Pro) and the
+ * compile panel sends one class per request. Browsing during a recent class's compile can push its
+ * discovery past COMPILE_DISCOVERY_BUDGET_MS (partial coverage, and it says so) or its picks past
+ * COMPILE_PICKS_DEADLINE_MS (the previous compile is kept).
  */
-export const COMPILE_TARGET_RPM = 450;
+export const COMPILE_TARGET_RPM = 360;
 
 /**
  * Request pace for the league-transactions cron (app/api/cron/league-transactions), in requests
@@ -349,13 +353,21 @@ export const LEAGUE_TX_CRON_RPM = 200;
 /**
  * Request pace for the weekly simulation-history cron (app/api/cron/simulation-history), in
  * requests per minute. It re-reads every past week's matchups per league, so its volume peaks late
- * season: ~94 leagues x (4 core + 16 matchup calls) = ~1,880 at Week 17 — ~3.8 min at this pace,
- * inside its 270s budget. It runs alone (Tue 09:00 UTC; the transactions cron's 08:00 run is done
- * in ~2.5 min), so it can take more of the minute than LEAGUE_TX_CRON_RPM. If the league count grows
- * much past ~110, late-season runs will start hitting the time budget (logged, and reported as
- * leaguesSkippedTimeBudget) before they hit Sleeper's limit.
+ * season: ~94 leagues x (4 core + 16 matchup calls) = ~1,880 at Week 17 — ~5.2 min at this pace.
+ * It runs alone (Tue 09:00 UTC; the transactions cron's 08:00 run is done in ~2.5 min), so it can
+ * take more of the minute than LEAGUE_TX_CRON_RPM. 500 in Stage 2; 360 since Stage 4, the most the
+ * global budget gives a background job (SLEEPER_BUDGET_BACKGROUND_CAP per 10s window).
  */
-export const SIM_HISTORY_CRON_RPM = 500;
+export const SIM_HISTORY_CRON_RPM = 360;
+
+/**
+ * Wall-clock ceiling for the simulation-history cron to start NEW leagues, in ms. Its maxDuration is
+ * 800s (Vercel Pro) since Stage 4 — at 360/min Week 17's ~1,880 calls take ~313s, past the 270s of
+ * 300 it had — and this leaves 80s for leagues in flight to finish and write their rows. Room for
+ * ~4,000 calls (~200 leagues late season) before late-season runs start reporting
+ * leaguesSkippedTimeBudget.
+ */
+export const SIM_HISTORY_CRON_TIME_BUDGET_MS = 720_000;
 
 /**
  * The browser-wide Sleeper request queue (lib/sleeperApi.ts's `sleeperRequestQueue`, built on
@@ -388,6 +400,46 @@ export const SLEEPER_PROXY_RATE_LIMIT_KEY = "sleeper-proxy";
  * retrying at 200/400ms into a limit that covers the whole server IP.
  */
 export const SLEEPER_UPSTREAM_RETRY_AFTER_S = 30;
+
+/**
+ * The global Sleeper call budget (lib/server/sleeperBudget.ts, Supabase migration 069): every
+ * server-side call that actually reaches Sleeper — a proxy's Data Cache miss or background refresh,
+ * the other Sleeper-backed routes, the transactions and simulation-history crons, the consensus
+ * compile — counts in one 10-second window shared by every lambda.
+ *
+ * WINDOW_CAP calls a window = at most 700 in any 60s (a minute can touch 7 windows), 600 sustained,
+ * under Sleeper's ~1000/min/IP. Someone waiting on a page may take a slot while the window is under
+ * WINDOW_CAP; the background jobs only while it's under BACKGROUND_CAP, so they leave the last 40 of
+ * every window to people using the app. The window length and the 6-row ring live in the SQL
+ * function; only the caps are passed in.
+ */
+export const SLEEPER_BUDGET_WINDOW_MS = 10_000;
+export const SLEEPER_BUDGET_WINDOW_CAP = 100;
+export const SLEEPER_BUDGET_BACKGROUND_CAP = 60;
+
+/**
+ * How long a page's Sleeper call waits for room when the window is full: one window, so it almost
+ * always gets a slot when the next one opens. Past this it goes anyway (logged as an overflow) — a
+ * full window means a brief wait, never a failed request. The browser sets no timeout on proxied
+ * calls, so the wait is safe; the tab's queue just holds its in-flight slots that long.
+ */
+export const SLEEPER_BUDGET_INTERACTIVE_MAX_WAIT_MS = 10_000;
+
+/**
+ * The shared counter is one Supabase RPC per Sleeper call. One that errors or takes longer than
+ * RPC_TIMEOUT_MS marks Supabase down for this lambda instance for FALLBACK_COOLDOWN_MS, during which
+ * the instance counts in its own in-process window (same caps, per instance) instead of paying the
+ * timeout on every call. The jobs keep their own createPacer rate either way.
+ */
+export const SLEEPER_BUDGET_RPC_TIMEOUT_MS = 1_500;
+export const SLEEPER_BUDGET_FALLBACK_COOLDOWN_MS = 30_000;
+
+/**
+ * Background jobs stop waiting for a slot this long after their own time budget runs out, so a
+ * league still in flight gives up (and is reported as failed, not written half-empty) before Vercel
+ * kills the function at maxDuration and drops every user's rows with it.
+ */
+export const SLEEPER_BUDGET_JOB_GRACE_MS = 10_000;
 
 /**
  * Leaguemates tab (components/DataHub/leaguemateStats.ts): leagues whose rosters + users load at
@@ -429,7 +481,7 @@ export function getDiscoveryYears(): number[] {
  * the route at maxDuration (800s); this leaves room for the picks fetch and the
  * Supabase writes that follow, and makes a partial run report honestly rather
  * than being cut off mid-write. A recent class's ~2,400 discovery calls take
- * ~320s at COMPILE_TARGET_RPM.
+ * ~400s at COMPILE_TARGET_RPM (360/min) with nobody else using the app.
  */
 export const COMPILE_DISCOVERY_BUDGET_MS = 420_000;
 

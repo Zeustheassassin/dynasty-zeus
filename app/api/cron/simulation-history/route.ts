@@ -35,6 +35,11 @@
 // (Sleeper call-budget plan Stage 2, 2026-10-10). Its concurrency caps alone
 // bounded calls in flight, not calls per minute — 5 leagues x (4 core + 4
 // matchup) in flight at ~150ms each is far past Sleeper's ~1000/min.
+// Each call also takes a "background" slot in the global Sleeper budget
+// (lib/server/sleeperBudget.ts, Stage 4), so the run only calls while the
+// shared 10s window is under 60. A call still waiting past the time budget
+// + grace throws, failing its league (no odds written for it) instead of
+// simulating on missing weeks.
 // ============================================================
 
 import { NextRequest, NextResponse } from "next/server";
@@ -50,8 +55,10 @@ import {
 } from "../../../../lib/helpers";
 import {
   SLEEPER_BASE_URL, SLEEPER_PROJECTIONS_BASE, ROOKIE_BOARD_SHEET_URL,
-  SLEEPER_PLAYERS_TIMEOUT_MS, SLEEPER_REQUEST_TIMEOUT_MS, SIM_HISTORY_CRON_RPM,
+  SLEEPER_PLAYERS_TIMEOUT_MS, SLEEPER_REQUEST_TIMEOUT_MS, SIM_HISTORY_CRON_RPM, SLEEPER_BUDGET_JOB_GRACE_MS,
+  SIM_HISTORY_CRON_TIME_BUDGET_MS,
 } from "../../../../lib/constants";
+import { waitForSleeperSlot } from "../../../../lib/server/sleeperBudget";
 import { simulateLeague } from "../../../../lib/helpers/simulation";
 import { projectRookiesByRoster } from "../../../../lib/helpers/rookieProjection";
 import { logger } from "../../../../lib/logger";
@@ -65,7 +72,9 @@ import type { PlayerUsage } from "../../../../hooks/usePlayerStats";
 
 const log = logger("cron/simulation-history");
 
-export const maxDuration = 300;
+// 800s needs Vercel Pro. 300 until Stage 4 of the Sleeper call-budget plan (2026-10-10): the global
+// budget holds background jobs to 360 calls/min, and Week 17's ~1,880 calls take ~313s at that.
+export const maxDuration = 800;
 
 // Per-league / per-Sleeper-user concurrency cap — matches the other crons
 // so overlapping runs keep a similar load profile against Sleeper.
@@ -85,14 +94,15 @@ const WEEKLY_MATCHUP_CONCURRENCY = 4;
 // Wall-clock ceiling for starting NEW league-simulation batches (the dominant
 // cost — one fetchLeagueCore + simulateLeague per league — and the one whose
 // size scales with total unique dynasty leagues across every registered
-// user), well under `maxDuration` (300s) so in-flight work can finish and
+// user), well under `maxDuration` (800s) so in-flight work can finish and
 // write its rows before Vercel kills the function outright — which would
 // silently drop every remaining league's odds for this run instead of the
-// graceful early-stop this guard gives. Same shape and value as
-// league-transactions/route.ts's TIME_BUDGET_MS.
-const TIME_BUDGET_MS = 270_000;
+// graceful early-stop this guard gives. Same shape as
+// league-transactions/route.ts's TIME_BUDGET_MS (720s of 800 here; 270 of 300 there).
+const TIME_BUDGET_MS = SIM_HISTORY_CRON_TIME_BUDGET_MS;
 
-/** safeFetch behind this run's pacer — every Sleeper request goes through one. */
+/** safeFetch behind this run's pacer and the global budget — every Sleeper request goes through
+ *  one. Null when Sleeper fails; throws SleeperBudgetTimeoutError when no budget slot came in time. */
 type PacedFetch = <T>(url: string, timeoutMs?: number) => Promise<T | null>;
 
 async function fetchText(url: string, timeoutMs = SLEEPER_REQUEST_TIMEOUT_MS): Promise<string> {
@@ -508,11 +518,14 @@ export async function GET(req: NextRequest): Promise<Response> {
 
   const runStartedAt = Date.now();
 
-  // Every Sleeper request this run waits its turn here.
+  // Every Sleeper request this run waits its turn here, then for room in the
+  // global budget's window — giving up (throwing) past the time budget + grace.
   const pace = createPacer(SIM_HISTORY_CRON_RPM);
+  const budgetDeadline = runStartedAt + TIME_BUDGET_MS + SLEEPER_BUDGET_JOB_GRACE_MS;
   let sleeperCalls = 0;
   const paced: PacedFetch = async <T,>(url: string, timeoutMs?: number) => {
     await pace();
+    await waitForSleeperSlot("background", { deadlineAt: budgetDeadline });
     sleeperCalls++;
     return safeFetch<T>(url, timeoutMs);
   };

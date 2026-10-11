@@ -10,6 +10,21 @@ const h = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/rateLimit", () => ({ checkRateLimit: h.checkRateLimit }));
 
+// The live stats go through fetchSleeperJson (unstable_cache + the global Sleeper budget). Outside a
+// running Next server unstable_cache has no incremental cache, so: a pass-through that records each
+// cached call's key and window, and a budget stub that records slot priorities.
+const nc = vi.hoisted(() => ({ cached: [] as { key: string[]; revalidate: number }[] }));
+vi.mock("next/cache", () => ({
+  unstable_cache: (fn: () => Promise<unknown>, key: string[], opts: { revalidate: number }) => () => {
+    nc.cached.push({ key, revalidate: opts.revalidate });
+    return fn();
+  },
+}));
+const budget = vi.hoisted(() => ({ slots: [] as string[] }));
+vi.mock("@/lib/server/sleeperBudget", () => ({
+  waitForSleeperSlot: async (priority: string) => { budget.slots.push(priority); },
+}));
+
 const load = async <T,>(path: string): Promise<T> => {
   vi.resetModules(); // fresh module = fresh in-memory cache in the injuries route
   return (await import(path)) as T;
@@ -20,6 +35,8 @@ const req = (url: string) => new NextRequest(`http://localhost${url}`) as never;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  nc.cached = [];
+  budget.slots = [];
   h.checkRateLimit.mockResolvedValue({ allowed: true, remaining: 29 });
 });
 
@@ -45,6 +62,13 @@ describe("GET /api/stats/sleeper-live", () => {
     });
     // The /stats/nfl/{season}/{week}?season_type=regular form returns {} for every player.
     expect(String(fetchMock.mock.calls[0][0])).toContain("/stats/nfl/regular/2026/3");
+    // Held in the Data Cache for NFL_LIVE_STATS_REVALIDATE_S; the call that reached Sleeper took a slot.
+    const { NFL_LIVE_STATS_REVALIDATE_S } = await import("@/lib/constants");
+    expect(nc.cached).toEqual([{
+      key: ["sleeper-json", String(fetchMock.mock.calls[0][0])],
+      revalidate: NFL_LIVE_STATS_REVALIDATE_S,
+    }]);
+    expect(budget.slots).toEqual(["interactive"]);
   });
 
   it("rejects a bad season or week without calling upstream", async () => {

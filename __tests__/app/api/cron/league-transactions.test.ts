@@ -18,6 +18,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { CURRENT_YEAR } from "@/lib/helpers/season";
+import { SLEEPER_BASE_URL as C_BASE } from "@/lib/constants";
 
 const SECRET = "super-secret-cron-token";
 
@@ -87,6 +88,24 @@ vi.mock("../../../../lib/sleeperServer", async (importOriginal) => {
         pacer.calls++;
         pacer.onPace?.();
       };
+    },
+  };
+});
+
+// The global Sleeper budget (call-budget Stage 4) lives in Supabase. The stub records each call's
+// priority and deadline; `failWhen` makes a wait give up as one would past its deadline.
+// SleeperBudgetTimeoutError stays the real class so the route's error handling sees the real thing.
+const budget = vi.hoisted(() => ({
+  waits: [] as { priority: string; deadlineAt?: number }[],
+  failWhen: null as null | ((n: number) => boolean),
+}));
+vi.mock("@/lib/server/sleeperBudget", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/server/sleeperBudget")>();
+  return {
+    ...actual,
+    waitForSleeperSlot: async (priority: string, opts: { deadlineAt?: number } = {}) => {
+      budget.waits.push({ priority, deadlineAt: opts.deadlineAt });
+      if (budget.failWhen?.(budget.waits.length)) throw new actual.SleeperBudgetTimeoutError();
     },
   };
 });
@@ -207,6 +226,8 @@ beforeEach(() => {
   pacer.rpm = [];
   pacer.calls = 0;
   pacer.onPace = null;
+  budget.waits = [];
+  budget.failWhen = null;
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(MIDDAY_UTC);
   process.env.CRON_SECRET = SECRET;
@@ -747,6 +768,38 @@ describe("GET Sleeper call budget", () => {
     expect(fetchedUrls()).toHaveLength(13);
     expect(pacer.calls).toBe(13);
     expect(body.sleeperCalls).toBe(13);
+  });
+
+  it("takes a background slot in the global budget for every Sleeper call, giving up after the time budget", async () => {
+    twoUsersSharingL1();
+    const { SLEEPER_BUDGET_JOB_GRACE_MS } = await import("@/lib/constants");
+    const GET = await loadGET();
+    await GET(makeReq(`Bearer ${SECRET}`));
+
+    expect(fetchedUrls()).toHaveLength(13);
+    // The clock is pinned, so the deadline is exactly the run's 270s budget plus the grace.
+    const deadlineAt = MIDDAY_UTC.getTime() + 270_000 + SLEEPER_BUDGET_JOB_GRACE_MS;
+    expect(budget.waits).toEqual(Array(13).fill({ priority: "background", deadlineAt }));
+  });
+
+  it("fails a league whose call gives up on the budget instead of writing half its data", async () => {
+    fake.links = { rows: [{ user_id: "auth-1", sleeper_user_id: "sleeper-1" }], error: null };
+    route((u) => u.includes("/state/nfl"), { leg: 5, week: 5 });
+    route((u) => u.includes("/user/sleeper-1/leagues/"), [dynastyLeague("L1", "League 1")]);
+    route((u) => u.includes("/league/L1/transactions/5"), [completeTx({ transaction_id: "fetched-tx" })]);
+    // State and the league list get slots; L1's first call (leg 5) does too, the rest give up.
+    budget.failWhen = (n) => n >= 4;
+
+    const GET = await loadGET();
+    const res = await GET(makeReq(`Bearer ${SECRET}`));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(fetchedUrls()).toContain(`${C_BASE}/league/L1/transactions/5`);
+    expect(body.leaguesFailed).toBe(1);
+    // The leg that did come back isn't written without its league's names and rosters.
+    expect(fake.upserts).toHaveLength(0);
+    expect(body.rowsWritten).toBe(0);
   });
 
   it("past the time budget it stops starting leagues but still writes what it fetched", async () => {

@@ -6,6 +6,7 @@ import { apiError, parseIntParam } from '../../../../lib/apiHelpers';
 import { logger } from '../../../../lib/logger';
 import { upsertCacheRow } from '../../../../lib/supabaseAdmin';
 import { afterResponse } from '../../../../lib/afterResponse';
+import { waitForSleeperSlot } from '../../../../lib/server/sleeperBudget';
 
 const log = logger('api/stats/sleeper-weekly');
 
@@ -65,6 +66,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // NOTE the path shape: /stats/nfl/regular/{season}/{week}. The older
     // /stats/nfl/{season}/{week}?season_type=regular form returns an empty {} for
     // every player, for every week and season.
+    await waitForSleeperSlot('interactive');
     const res = await fetch(
       `${SLEEPER_BASE_URL}/stats/nfl/regular/${season}/${week}`
     );

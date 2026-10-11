@@ -1,8 +1,8 @@
 // ============================================================
 // Consensus compile — one draft class per request
 // ============================================================
-// Every Sleeper call a compile makes is paced at COMPILE_TARGET_RPM (450/min,
-// lib/constants.ts), and a recent class alone is ~4,000 calls — ~9 minutes of
+// Every Sleeper call a compile makes is paced at COMPILE_TARGET_RPM (360/min,
+// lib/constants.ts), and a recent class alone is ~4,000 calls — ~11 minutes of
 // the route's 800s limit. Several classes in one request would run out of time
 // and come back partial (the route keeps a class's previous compile when its
 // picks fetch is cut off), so the panel sends them one at a time, in order.

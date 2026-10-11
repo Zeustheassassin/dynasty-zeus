@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { checkRateLimit } from "../../../lib/rateLimit";
 import { apiError, isValidSleeperId } from "../../../lib/apiHelpers";
 import { safeFetch } from "../../../lib/sleeperServer";
+import { waitForSleeperSlot } from "../../../lib/server/sleeperBudget";
 import { SLEEPER_BASE_URL } from "../../../lib/constants";
 import { logger } from "../../../lib/logger";
 
@@ -113,6 +114,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     return apiError("No linked Sleeper account", 403, "NO_SLEEPER_LINK");
   }
 
+  await waitForSleeperSlot("interactive");
   const rosters = await safeFetch<Array<{ owner_id?: string; co_owners?: string[] | null }>>(`${SLEEPER_BASE_URL}/league/${leagueId}/rosters`);
   const isMember = Array.isArray(rosters) && rosters.some((r) =>
     String(r.owner_id) === String(link.sleeper_user_id) ||

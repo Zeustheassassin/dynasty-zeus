@@ -23,6 +23,12 @@
 //     LEAGUE_TX_CRON_RPM, so the run's request RATE is bounded, not just
 //     its concurrency (which bounds nothing once latency drops).
 //   ~1,130 unpaced calls a run became ~470 paced ones.
+//   - Stage 4: each call also takes a "background" slot in the global
+//     Sleeper budget (lib/server/sleeperBudget.ts), so the run only calls
+//     while the shared 10s window is under 60 and yields to people using
+//     the app. A call still waiting past the time budget + grace throws,
+//     which fails its league (nothing written for it) rather than writing
+//     half a league's data.
 //
 // Auth + idempotency (same shape as the other cron routes):
 //   - Authorization: Bearer ${CRON_SECRET}
@@ -39,7 +45,8 @@ import { safeFetch, withConcurrency, createPacer } from "../../../../lib/sleeper
 import { getDraftRoundSlot } from "../../../../lib/helpers/picks";
 import { CURRENT_YEAR } from "../../../../lib/helpers/season";
 import { isDynastyLeague } from "../../../../lib/helpers/leagueType";
-import { SLEEPER_BASE_URL, LEAGUE_TX_CRON_RPM } from "../../../../lib/constants";
+import { SLEEPER_BASE_URL, LEAGUE_TX_CRON_RPM, SLEEPER_BUDGET_JOB_GRACE_MS } from "../../../../lib/constants";
+import { waitForSleeperSlot } from "../../../../lib/server/sleeperBudget";
 import { logger } from "../../../../lib/logger";
 import { verifyCron } from "../../../../lib/server/verifyCron";
 import type {
@@ -131,6 +138,8 @@ interface CacheRow {
 /** A league's annotated transactions, shared by every user in it. */
 type LeagueRow = Omit<CacheRow, "user_id">;
 
+/** safeFetch behind the run's pacer and the global budget: null when Sleeper fails, throws
+ *  SleeperBudgetTimeoutError when no budget slot came before the deadline. */
 type PacedFetch = <T>(url: string) => Promise<T | null>;
 
 /**
@@ -299,11 +308,14 @@ export async function GET(req: NextRequest): Promise<Response> {
   const runStartedAt = Date.now();
   const outOfTime = () => Date.now() - runStartedAt > TIME_BUDGET_MS;
 
-  // Every Sleeper request this run waits its turn here.
+  // Every Sleeper request this run waits its turn here, then for room in the
+  // global budget's window — giving up (throwing) past the time budget + grace.
   const pace = createPacer(LEAGUE_TX_CRON_RPM);
+  const budgetDeadline = runStartedAt + TIME_BUDGET_MS + SLEEPER_BUDGET_JOB_GRACE_MS;
   let sleeperCalls = 0;
   const paced: PacedFetch = async <T,>(url: string) => {
     await pace();
+    await waitForSleeperSlot("background", { deadlineAt: budgetDeadline });
     sleeperCalls++;
     return safeFetch<T>(url);
   };

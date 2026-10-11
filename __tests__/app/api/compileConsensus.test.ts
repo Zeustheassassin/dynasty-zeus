@@ -146,6 +146,24 @@ vi.mock("../../../lib/sleeperServer", () => ({
   },
 }));
 
+// The global Sleeper budget (call-budget Stage 4) lives in Supabase. The stub records each call's
+// priority and deadline; `failWhen` makes a wait give up as one would past its deadline.
+// SleeperBudgetTimeoutError stays the real class so the route's instanceof check sees it.
+const budget = vi.hoisted(() => ({
+  waits: [] as { priority: string; deadlineAt?: number }[],
+  failWhen: null as null | (() => boolean),
+}));
+vi.mock("@/lib/server/sleeperBudget", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/server/sleeperBudget")>();
+  return {
+    ...actual,
+    waitForSleeperSlot: async (priority: string, opts: { deadlineAt?: number } = {}) => {
+      budget.waits.push({ priority, deadlineAt: opts.deadlineAt });
+      if (budget.failWhen?.()) throw new actual.SleeperBudgetTimeoutError();
+    },
+  };
+});
+
 import { POST, maxDuration } from "@/app/api/compile-consensus/route";
 import { COMPILE_MAX_CONNECTED_USERS, COMPILE_TARGET_RPM, COMPILE_PICKS_DEADLINE_MS } from "@/lib/constants";
 
@@ -208,6 +226,8 @@ beforeEach(() => {
   withConcurrency.mockImplementation(sequentialPool);
   h.pacer.rpm = [];
   h.pacer.calls = 0;
+  budget.waits = [];
+  budget.failWhen = null;
 });
 
 // ── Guard: rate limiting ──────────────────────────────────────────────────────
@@ -785,8 +805,9 @@ describe("POST compile-consensus — locked years", () => {
 
 // ── Sleeper call budget (Stage 2, 2026-10-10) ────────────────────────────────
 // Every Sleeper call — discovery, the player map, each draft's picks — is paced at
-// COMPILE_TARGET_RPM (450/min). A recent class is ~4,000 calls (~9 min), so the route runs
-// up to 800s, and a class whose picks fetch is cut off keeps its previous compile.
+// COMPILE_TARGET_RPM (360/min since Stage 4, the most a background job gets from the global
+// budget). A recent class is ~4,000 calls (~11 min), so the route runs up to 800s, and a class
+// whose picks fetch is cut off keeps its previous compile.
 describe("POST compile-consensus — Sleeper call budget", () => {
   function oneLeagueTwoDrafts() {
     fetchResponders.push((url) => {
@@ -822,6 +843,39 @@ describe("POST compile-consensus — Sleeper call budget", () => {
     expect(urls.filter((u) => u.includes("/picks"))).toHaveLength(2);
     expect(h.pacer.rpm).toEqual([COMPILE_TARGET_RPM]);
     expect(h.pacer.calls).toBe(urls.length);
+  });
+
+  it("takes a background slot in the global budget for every Sleeper call, giving up at the picks deadline", async () => {
+    oneLeagueTwoDrafts();
+    const now = 1_700_000_000_000;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+    try {
+      await readEvents(await POST(makeReq({ sleeperUserId: "200", accessToken: "t", years: [THIS_YEAR] }) as never));
+      const urls = safeFetch.mock.calls.map((c) => String(c[0]));
+      expect(budget.waits).toEqual(
+        Array(urls.length).fill({ priority: "background", deadlineAt: now + COMPILE_PICKS_DEADLINE_MS })
+      );
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("keeps a class's previous compile when a picks fetch gives up waiting on the budget", async () => {
+    oneLeagueTwoDrafts();
+    // Everything up to the player map gets a slot; the first draft's picks wait past the deadline.
+    budget.failWhen = () => String(safeFetch.mock.calls.at(-1)?.[0] ?? "").endsWith("/players/nfl");
+    const events = await readEvents(
+      await POST(makeReq({ sleeperUserId: "200", accessToken: "t", years: [THIS_YEAR] }) as never)
+    );
+    const urls = safeFetch.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.endsWith("/players/nfl"))).toBe(true);
+    expect(urls.some((u) => u.endsWith("/draft/D1/picks"))).toBe(false);
+    // Cut off, not "a draft failed": nothing written for the class, and no error event.
+    expect(upserts.filter((u) => u.table === "consensus_draft_cache")).toHaveLength(0);
+    expect(upserts.filter((u) => u.table === "consensus_draft_meta")).toHaveLength(0);
+    expect(deletes).toHaveLength(0);
+    expect(events.some((e) => e.type === "error")).toBe(false);
+    expect(events.some((e) => String(e.message ?? "").includes("kept its previous compile"))).toBe(true);
   });
 
   it("keeps a class's previous compile when its picks fetch runs out of time", async () => {

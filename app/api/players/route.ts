@@ -5,6 +5,7 @@ import {
 } from '../../../lib/constants';
 import { logger } from '../../../lib/logger';
 import { checkRateLimit } from '../../../lib/rateLimit';
+import { waitForSleeperSlot } from '../../../lib/server/sleeperBudget';
 
 const log = logger('api/players');
 
@@ -21,6 +22,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!rl.allowed) return rl.response;
   const fresh = request.nextUrl.searchParams.get('fresh') === '1';
   try {
+    // The raw map never fits the Data Cache, so every pass that gets here (past the CDN) really
+    // calls Sleeper for it — one slot in the global Sleeper budget. `fresh` skips the NFL-state
+    // cache too, so that's a second; otherwise the state usually comes from the Data Cache, and the
+    // odd hourly miss isn't counted.
+    await waitForSleeperSlot('interactive');
+    if (fresh) await waitForSleeperSlot('interactive');
     const [playersRes, stateRes] = await Promise.all([
       fetch(`${SLEEPER_BASE_URL}/players/nfl`, fresh ? { cache: 'no-store' } : { next: { revalidate: PLAYERS_REVALIDATE_S } }),
       fetch(`${SLEEPER_BASE_URL}/state/nfl`,   fresh ? { cache: 'no-store' } : { next: { revalidate: NFL_STATE_REVALIDATE_S } }),

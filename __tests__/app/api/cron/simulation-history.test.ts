@@ -64,6 +64,24 @@ vi.mock("../../../../lib/sleeperServer", async (importOriginal) => {
   };
 });
 
+// The global Sleeper budget (call-budget Stage 4) lives in Supabase. The stub records each call's
+// priority and deadline; `failWhen` makes a wait give up as one would past its deadline.
+// SleeperBudgetTimeoutError stays the real class.
+const budget = vi.hoisted(() => ({
+  waits: [] as { priority: string; deadlineAt?: number }[],
+  failWhen: null as null | (() => boolean),
+}));
+vi.mock("@/lib/server/sleeperBudget", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/server/sleeperBudget")>();
+  return {
+    ...actual,
+    waitForSleeperSlot: async (priority: string, opts: { deadlineAt?: number } = {}) => {
+      budget.waits.push({ priority, deadlineAt: opts.deadlineAt });
+      if (budget.failWhen?.()) throw new actual.SleeperBudgetTimeoutError();
+    },
+  };
+});
+
 vi.mock("@supabase/supabase-js", () => ({
   createClient: (_url: string, _key: string, _opts: unknown) => {
     fake.createClientCalls++;
@@ -121,6 +139,8 @@ beforeEach(() => {
   installFetch();
   pacer.rpm = [];
   pacer.calls = 0;
+  budget.waits = [];
+  budget.failWhen = null;
   process.env.CRON_SECRET = SECRET;
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://x.supabase.co";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "service.role.key";
@@ -281,6 +301,56 @@ describe("GET Sleeper call budget", () => {
     expect(pacer.rpm).toEqual([SIM_HISTORY_CRON_RPM]);
     expect(pacer.calls).toBe(sleeperFetches.length);
     expect(body.sleeperCalls).toBe(sleeperFetches.length);
+  });
+
+  // Stage 4: each call also waits for a background slot in the global budget, and gives up at the
+  // time budget plus the grace, before maxDuration.
+  it("takes a background budget slot for every Sleeper request, with a deadline after the time budget", async () => {
+    const { SIM_HISTORY_CRON_TIME_BUDGET_MS, SLEEPER_BUDGET_JOB_GRACE_MS } = await import("@/lib/constants");
+    fake.links = { rows: [{ sleeper_user_id: "s1" }], error: null };
+    route((u) => u.includes("/user/s1/leagues/"), [{
+      league_id: "L1", name: "Dynasty", settings: { taxi_slots: 2, best_ball: 0 },
+      roster_positions: ["QB", "RB", "WR", "TE", "FLEX", "BN"],
+    }]);
+    route((u) => u.includes("/state/nfl"), { season_type: "regular", week: 5, season: "2026" });
+    const now = 1_000_000;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+    try {
+      const GET = await loadGET();
+      await GET(makeReq(`Bearer ${SECRET}`));
+      const sleeperFetches = (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls
+        .map((c) => String(c[0]))
+        .filter((u) => u.includes("sleeper"));
+      const deadlineAt = now + SIM_HISTORY_CRON_TIME_BUDGET_MS + SLEEPER_BUDGET_JOB_GRACE_MS;
+      expect(budget.waits).toEqual(Array(sleeperFetches.length).fill({ priority: "background", deadlineAt }));
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("writes no odds for a league whose calls give up on the budget, rather than simulating on missing weeks", async () => {
+    fake.links = { rows: [{ sleeper_user_id: "s1" }], error: null };
+    route((u) => u.includes("/user/s1/leagues/"), [{
+      league_id: "L1", name: "Dynasty", settings: { taxi_slots: 2, best_ball: 0 },
+      roster_positions: ["QB", "RB", "WR", "TE", "FLEX", "BN"],
+    }]);
+    route((u) => u.includes("/state/nfl"), { season_type: "regular", week: 5, season: "2026" });
+    // The league's core calls get slots; once its rosters are in, the weekly matchups give up.
+    let rostersFetched = false;
+    route((u) => (u.includes("/rosters") ? (rostersFetched = true) : false), [{ roster_id: 1, owner_id: "o1", settings: {} }]);
+    budget.failWhen = () => rostersFetched;
+    h.simulateLeague.mockReturnValue({
+      rows: [{ rosterId: 1, playoffOdds: 0.5, titleOdds: 0.1, expectedWins: 5, avgFinish: 4, finishRange: "3-5" }],
+    });
+
+    const GET = await loadGET();
+    const res = await GET(makeReq(`Bearer ${SECRET}`));
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(rostersFetched).toBe(true);
+    expect(h.simulateLeague).not.toHaveBeenCalled();
+    expect(fake.historyUpserts).toBe(0);
+    expect(body.leaguesSimulated).toBe(0);
   });
 });
 
@@ -503,6 +573,15 @@ describe("GET time budget", () => {
   // maxDuration=300s with none of the graceful early-stop accounting the other cron has.
   const run = async () => (await loadGET())(makeReq(`Bearer ${SECRET}`));
 
+  it("runs up to 800s (Vercel Pro) since the global budget holds it to 360 calls/min", async () => {
+    vi.resetModules();
+    const { maxDuration } = await import("../../../../app/api/cron/simulation-history/route");
+    const { SIM_HISTORY_CRON_TIME_BUDGET_MS } = await import("@/lib/constants");
+    expect(maxDuration).toBe(800);
+    // The budget leaves in-flight leagues time to finish and write before the hard kill.
+    expect(SIM_HISTORY_CRON_TIME_BUDGET_MS).toBeLessThanOrEqual(maxDuration * 1000 - 60_000);
+  });
+
   it("stops starting new per-league simulations once the time budget is exceeded", async () => {
     // The mocked clock below jumps past TIME_BUDGET_MS on the first roster fetch. Every Sleeper
     // request now waits its turn on the pacer first (Stage 2, 10/10), so the pool's first wave —
@@ -519,14 +598,15 @@ describe("GET time budget", () => {
     route((u) => u.includes("/user/s1/leagues/"), leagues);
     route((u) => u.includes("/state/nfl"), { season_type: "regular", week: 5, season: "2026" });
 
+    const { SIM_HISTORY_CRON_TIME_BUDGET_MS } = await import("@/lib/constants");
     const rosterFetches: string[] = [];
     let now = 1_000_000;
     const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
     route((u) => {
       if (u.includes("/rosters")) {
         rosterFetches.push(u);
-        // Mirrors the wall-clock TIME_BUDGET_MS the route enforces (270_000).
-        now += 271_000;
+        // Just past the wall-clock budget the route enforces.
+        now += SIM_HISTORY_CRON_TIME_BUDGET_MS + 1_000;
         return true;
       }
       return false;

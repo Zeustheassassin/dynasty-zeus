@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { checkRateLimit } from "../../../lib/rateLimit";
 import { apiError } from "../../../lib/apiHelpers";
 import { safeFetch, withConcurrency, createPacer } from "../../../lib/sleeperServer";
+import { waitForSleeperSlot, SleeperBudgetTimeoutError } from "../../../lib/server/sleeperBudget";
 import {
   SLEEPER_BASE_URL,
   COMPILE_CONCURRENCY,
@@ -21,7 +22,8 @@ import { isDynastyLeague } from "../../../lib/helpers/leagueType";
 
 // Allow up to 5 minutes for large networks (Vercel Pro/Enterprise)
 // 800s needs Vercel Pro (Hobby caps functions at 300s). Every Sleeper call here is paced at
-// COMPILE_TARGET_RPM (450/min), and a recent draft class is ~4,000 calls — ~9 min.
+// COMPILE_TARGET_RPM (360/min) and takes a background slot in the global Sleeper budget, and a
+// recent draft class is ~4,000 calls — ~11 min.
 export const maxDuration = 800;
 
 const SLEEPER_BASE        = SLEEPER_BASE_URL;
@@ -103,14 +105,18 @@ async function compileDrafts(
 
   // Every Sleeper call this compile makes — discovery, the player map, every
   // draft's picks — goes through this pacer. Bounded concurrency alone does not
-  // bound the request *rate* — see createPacer.
+  // bound the request *rate* — see createPacer. Then it waits for room in the
+  // global Sleeper budget as a background job (the window under 60 of 100), and
+  // throws SleeperBudgetTimeoutError if none comes before the picks deadline.
   const pace = createPacer(COMPILE_TARGET_RPM);
   const startedAt = Date.now();
   const deadline = startedAt + COMPILE_DISCOVERY_BUDGET_MS;
   const outOfTime = () => Date.now() > deadline;
-  const picksOutOfTime = () => Date.now() > startedAt + COMPILE_PICKS_DEADLINE_MS;
+  const picksDeadline = startedAt + COMPILE_PICKS_DEADLINE_MS;
+  const picksOutOfTime = () => Date.now() > picksDeadline;
   const paced = async <T,>(url: string, timeoutMs?: number): Promise<T | null> => {
     await pace();
+    await waitForSleeperSlot("background", { deadlineAt: picksDeadline });
     return safeFetch<T>(url, timeoutMs);
   };
 
@@ -381,7 +387,15 @@ async function compileDrafts(
     await withConcurrency(
       draftIds,
       async (draftId) => {
-        const picks = await paced<SleeperPickBasic[]>(`${SLEEPER_BASE}/draft/${draftId}/picks`);
+        let picks: SleeperPickBasic[] | null;
+        try {
+          picks = await paced<SleeperPickBasic[]>(`${SLEEPER_BASE}/draft/${draftId}/picks`);
+        } catch (err) {
+          // Waited on the global budget past the picks deadline: the class is cut off, same as
+          // the shouldBail below — not a failed draft, which would let a thinner class be written.
+          if (err instanceof SleeperBudgetTimeoutError) { picksTruncated = true; return; }
+          throw err;
+        }
         if (!Array.isArray(picks)) { draftsFailed++; return; }
         draftsOk++;
 

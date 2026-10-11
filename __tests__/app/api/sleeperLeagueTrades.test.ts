@@ -11,6 +11,20 @@ import { GET } from "@/app/api/sleeper/league/[leagueId]/trades/route";
 const h = vi.hoisted(() => ({ checkRateLimit: vi.fn() }));
 vi.mock("@/lib/rateLimit", () => ({ checkRateLimit: h.checkRateLimit }));
 
+// unstable_cache needs Next's incremental cache (only inside a running server): a pass-through that
+// records each cached call's key and revalidate window. The budget stub records slot priorities.
+const nc = vi.hoisted(() => ({ cached: [] as { key: string[]; revalidate: number }[] }));
+vi.mock("next/cache", () => ({
+  unstable_cache: (fn: () => Promise<unknown>, key: string[], opts: { revalidate: number }) => () => {
+    nc.cached.push({ key, revalidate: opts.revalidate });
+    return fn();
+  },
+}));
+const budget = vi.hoisted(() => ({ slots: [] as string[] }));
+vi.mock("@/lib/server/sleeperBudget", () => ({
+  waitForSleeperSlot: async (priority: string) => { budget.slots.push(priority); },
+}));
+
 const B = C.SLEEPER_BASE_URL;
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = Date.UTC(2026, 9, 7, 16);
@@ -36,6 +50,8 @@ beforeEach(() => {
   h.checkRateLimit.mockResolvedValue({ allowed: true, remaining: 59 });
   state = { season_type: "regular", week: 5, leg: 5, season: "2026" };
   legs = {};
+  nc.cached = [];
+  budget.slots = [];
   fetchMock.mockClear();
   vi.stubGlobal("fetch", fetchMock);
 });
@@ -74,15 +90,25 @@ describe("/api/sleeper/league/[leagueId]/trades", () => {
     expect(ids).toEqual(["leg1", "leg3", "today"]);
   });
 
-  it("uses the server fetch caches, and skips the leg cache (not the state cache) on ?bypass=1", async () => {
+  it("uses the server Data Cache, and skips the leg cache (not the state cache) on ?bypass=1", async () => {
+    const stateEntry = { key: ["sleeper-json", `${B}/state/nfl`], revalidate: C.NFL_STATE_REVALIDATE_S };
+    const legEntries = [1, 2, 3, 4, 5, 6].map((leg) => ({
+      key: ["sleeper-json", `${B}/league/123/transactions/${leg}`],
+      revalidate: C.SLEEPER_LEAGUE_TRANSACTIONS_REVALIDATE_S,
+    }));
     await call("123");
-    expect(fetchMock.mock.calls[0]).toEqual([`${B}/state/nfl`, { next: { revalidate: C.NFL_STATE_REVALIDATE_S } }]);
-    expect(fetchMock.mock.calls[1][1]).toEqual({ next: { revalidate: C.SLEEPER_LEAGUE_TRANSACTIONS_REVALIDATE_S } });
+    // Keyed by URL, so the state is the /api/nfl-state entry and each leg the per-week proxy's.
+    expect(nc.cached).toEqual([stateEntry, ...legEntries]);
+    expect(fetchMock.mock.calls.every(([, init]) => init?.cache === "no-store")).toBe(true);
+    // Every call that reaches Sleeper (all 7 here — the stand-in cache never hits) takes a slot.
+    expect(budget.slots).toEqual(Array(7).fill("interactive"));
 
+    nc.cached = [];
     fetchMock.mockClear();
     await call("123", "?bypass=1");
-    expect(fetchMock.mock.calls[0][1]).toEqual({ next: { revalidate: C.NFL_STATE_REVALIDATE_S } });
-    expect(fetchMock.mock.calls[1][1]).toEqual({ cache: "no-store" });
+    expect(nc.cached).toEqual([stateEntry]);
+    expect(legUrls()).toHaveLength(6);
+    expect(fetchMock.mock.calls.every(([, init]) => init?.cache === "no-store")).toBe(true);
   });
 
   it("returns 502 rather than a partial list when any leg fails", async () => {

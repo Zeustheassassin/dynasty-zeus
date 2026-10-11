@@ -3,6 +3,7 @@ import { SLEEPER_BASE_URL, NFL_LIVE_STATS_REVALIDATE_S } from '../../../../lib/c
 import { checkRateLimit } from '../../../../lib/rateLimit';
 import { apiError, parseIntParam } from '../../../../lib/apiHelpers';
 import { logger } from '../../../../lib/logger';
+import { fetchSleeperJson, SleeperUpstreamError } from '../../../../lib/server/sleeperProxy';
 
 const log = logger('api/stats/sleeper-live');
 
@@ -29,15 +30,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (week === null) return apiError('week must be an integer between 1 and 22', 400, 'INVALID_WEEK');
 
   try {
-    const res = await fetch(
+    const raw = await fetchSleeperJson<Record<string, Record<string, number>> | null>(
       `${SLEEPER_BASE_URL}/stats/nfl/regular/${season}/${week}`,
-      { next: { revalidate: NFL_LIVE_STATS_REVALIDATE_S } }
+      { revalidate: NFL_LIVE_STATS_REVALIDATE_S }
     );
-    if (!res.ok) {
-      log.error('upstream non-OK', { status: res.status, season, week });
-      return NextResponse.json({}, { status: 502 });
-    }
-    const raw: Record<string, Record<string, number>> = await res.json();
 
     const trimmed: Record<string, Record<string, number>> = {};
     for (const [playerId, stats] of Object.entries(raw ?? {})) {
@@ -50,7 +46,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
     return NextResponse.json(trimmed);
   } catch (err) {
-    log.error('fetch failed', { error: String(err) });
+    if (err instanceof SleeperUpstreamError) {
+      log.error('upstream non-OK', { status: err.status, season, week });
+    } else {
+      log.error('fetch failed', { error: String(err) });
+    }
     return NextResponse.json({}, { status: 502 });
   }
 }
