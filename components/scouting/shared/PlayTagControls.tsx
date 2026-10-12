@@ -12,6 +12,8 @@ interface Props {
   /** "situation" = the four situation tags (top of the logger); "play" = the position's tags that apply. */
   part: "situation" | "play";
   accent: "blue" | "green";
+  /** Full-height (h-10) buttons, to match a logger whose other buttons are h-10. */
+  tall?: boolean;
 }
 
 /**
@@ -21,7 +23,8 @@ interface Props {
  * tags that apply to the play show. While editing a play charted before the
  * tags, nothing shows (its tags are never written).
  */
-export default function PlayTagControls({ tags, facts, part, accent }: Props) {
+export default function PlayTagControls({ tags, facts, part, accent, tall = false }: Props) {
+  const height = tall ? "h-10" : "py-1.5";
   if (tags.editingUntagged) {
     return part === "situation" ? (
       <div className="px-3 py-1.5 rounded bg-slate-900 border border-slate-800 text-xs text-slate-500">
@@ -52,7 +55,7 @@ export default function PlayTagControls({ tags, facts, part, accent }: Props) {
                 onClick={() => tags.set(spec.column, !on)}
                 title={forced ? `${spec.label}: ${spec.forced?.note}`
                   : spec.entry === "sticky" ? `${spec.label}: stays on for the next play until you turn it off` : spec.label}
-                className={`flex-1 whitespace-nowrap px-3 py-1.5 rounded text-xs font-medium transition ${on ? ACTIVE[accent] : IDLE} ${forced ? "cursor-default" : ""}`}>
+                className={`flex-1 whitespace-nowrap px-3 ${height} rounded text-xs font-medium transition ${on ? ACTIVE[accent] : IDLE} ${forced ? "cursor-default" : ""}`}>
                 {spec.label}
               </button>
             );
@@ -60,13 +63,13 @@ export default function PlayTagControls({ tags, facts, part, accent }: Props) {
         </div>
       )}
       {pickers.map((spec) => (
-        <TagPicker key={spec.column} spec={spec} tags={tags} accent={accent} />
+        <TagPicker key={spec.column} spec={spec} tags={tags} accent={accent} height={height} />
       ))}
     </div>
   );
 }
 
-function TagPicker({ spec, tags, accent }: { spec: PlayTagSpec; tags: PlayTags; accent: "blue" | "green" }) {
+function TagPicker({ spec, tags, accent, height }: { spec: PlayTagSpec; tags: PlayTags; accent: "blue" | "green"; height: string }) {
   const value = tags.values[spec.column] ?? null;
   const unpicked = spec.required && value == null;
   return (
@@ -77,7 +80,7 @@ function TagPicker({ spec, tags, accent }: { spec: PlayTagSpec; tags: PlayTags; 
         return (
           <button key={String(opt.value)} type="button" aria-pressed={on}
             onClick={() => tags.set(spec.column, opt.value)}
-            className={`flex-1 whitespace-nowrap px-3 py-1.5 rounded text-xs font-medium transition ${on ? ACTIVE[accent] : IDLE} ${unpicked ? "ring-1 ring-amber-500/70" : ""}`}>
+            className={`flex-1 whitespace-nowrap px-3 ${height} rounded text-xs font-medium transition ${on ? ACTIVE[accent] : IDLE} ${unpicked ? "ring-1 ring-amber-500/70" : ""}`}>
             {opt.label}
           </button>
         );

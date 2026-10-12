@@ -36,10 +36,10 @@ const COVERAGES: { key: string; label: string }[] = [
   { key: "press", label: "Press" },
 ];
 const ALIGNMENTS: { key: Alignment; label: string }[] = [
-  { key: "left",      label: "L" },
-  { key: "right",     label: "R" },
-  { key: "slot",      label: "S" },
-  { key: "backfield", label: "B" },
+  { key: "left",      label: "Left" },
+  { key: "right",     label: "Right" },
+  { key: "slot",      label: "Slot" },
+  { key: "backfield", label: "Backfield" },
 ];
 const NFL_ROLES = ["X", "Y", "Slot", "X or Y", "Y or Slot", "Slot/Gadget", "Anything", "Sacrificial X", "Target Hog Y or Slot", ""];
 
@@ -686,11 +686,11 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
               </div>
             </div>
 
-            <PlayTagControls tags={tags} facts={tagFacts} part="situation" accent="blue" />
+            <PlayTagControls tags={tags} facts={tagFacts} part="situation" accent="blue" tall />
 
             <div>
               <button onClick={() => setNoRouteRun((v) => !v)}
-                className={`w-full py-2 rounded text-sm font-semibold transition ${noRouteRun ? "bg-amber-700 text-white ring-2 ring-amber-500" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                className={`w-full h-10 rounded text-sm font-semibold transition ${noRouteRun ? "bg-amber-700 text-white ring-2 ring-amber-500" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                 {noRouteRun ? "✓ No Route Run (Aligned Only — run play / blocking)" : "No Route Run"}
               </button>
               {noRouteRun && <p className="text-xs text-amber-400/70 mt-1">Counts as a snap on field. Only alignment and line are recorded.</p>}
@@ -702,7 +702,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
                 <div className="flex flex-wrap gap-1.5">
                   {ROUTE_TYPES.map((rt) => (
                     <button key={rt} onClick={() => setRouteType(rt)}
-                      className={`flex-1 whitespace-nowrap px-3 py-1.5 rounded text-xs font-medium capitalize transition ${routeType === rt ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                      className={`flex-1 whitespace-nowrap px-3 h-10 rounded text-xs font-medium capitalize transition ${routeType === rt ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                       {rt}
                     </button>
                   ))}
@@ -716,7 +716,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
                 <div className="flex gap-1.5">
                   {ALIGNMENTS.map((a) => (
                     <button key={a.key} onClick={() => setAlignment(a.key)}
-                      className={`flex-1 h-10 rounded font-bold text-sm transition ${alignment === a.key ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                      className={`flex-1 whitespace-nowrap px-3 h-10 rounded text-xs font-medium transition ${alignment === a.key ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                       {a.label}
                     </button>
                   ))}
@@ -793,7 +793,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
               </div>
             )}
 
-            <PlayTagControls tags={tags} facts={tagFacts} part="play" accent="blue" />
+            <PlayTagControls tags={tags} facts={tagFacts} part="play" accent="blue" tall />
 
             {editingPlayId && (
               <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-900/30 border border-amber-700/50 rounded text-xs text-amber-300">
@@ -802,16 +802,16 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
               </div>
             )}
             <div className="flex gap-2">
-              <input className="flex-1 px-3 py-2 bg-slate-800 border border-slate-700 rounded text-white text-sm placeholder-slate-500 focus:outline-none focus:border-blue-500"
+              <input className="flex-1 px-3 h-10 bg-slate-800 border border-slate-700 rounded text-white text-sm placeholder-slate-500 focus:outline-none focus:border-blue-500"
                 placeholder="Play note (optional)" value={playNotes} onChange={(e) => setPlayNotes(e.target.value)} />
               {editingPlayId ? (
                 <button onClick={saveEditedPlay} disabled={savingPlay || (!noRouteRun && targeted && playOutcome === null) || tagsMissing}
-                  className="px-5 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm rounded font-medium transition whitespace-nowrap">
+                  className="px-5 h-10 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm rounded font-medium transition whitespace-nowrap">
                   {savingPlay ? "…" : "Save Edit"}
                 </button>
               ) : (
                 <button onClick={logPlay} disabled={savingPlay || (!noRouteRun && targeted && playOutcome === null) || tagsMissing}
-                  className="px-5 py-2 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white text-sm rounded font-medium transition">
+                  className="px-5 h-10 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white text-sm rounded font-medium transition">
                   {savingPlay ? "…" : "Log Play"}
                 </button>
               )}
