@@ -15,7 +15,9 @@ export const ROUTE_TYPES: RouteType[] = [
 ];
 
 // Auto-promote within the charting → partial_chart → fully_charted chain.
-// Manual "pending" (Undecided) and "not_charting" are left alone, and we never demote.
+// Charting even one game means the user decided to chart him, so "pending"
+// (Undecided) with a charted game joins the chain too (the user's call,
+// 2026-10-12). "not_charting" is left alone, and we never demote.
 // Fully-charted thresholds:
 //   WR = 150 routes · TE = 120 routes · QB = 150 throws · RB = 6 games.
 export function deriveChartingDecision(
@@ -25,7 +27,8 @@ export function deriveChartingDecision(
   totalRoutes?: number,
   totalThrows?: number,
 ): ChartingDecision {
-  if (stored === "pending" || stored === "not_charting") return stored;
+  if (stored === "not_charting") return stored;
+  if (stored === "pending" && totalGames < 1) return stored;
 
   if (position === "WR") {
     if ((totalRoutes ?? 0) >= 150) return "fully_charted";
@@ -39,6 +42,6 @@ export function deriveChartingDecision(
     if (totalGames >= 8) return "fully_charted";
   }
 
-  if (totalGames >= 1 && stored === "charting") return "partial_chart";
+  if (totalGames >= 1 && (stored === "charting" || stored === "pending")) return "partial_chart";
   return stored;
 }
