@@ -42,6 +42,43 @@ export interface PffImportResponse {
   retryAfterMs: number | null;
 }
 
+/** Prospects per POST /api/pff/bio; one PFF read per linked prospect. */
+export const PFF_BIO_BATCH = 20;
+
+/** Height, weight and birthday as the prospect has them now. */
+export interface BioOnFile {
+  /** As typed ("6'2\""); "" when blank. */
+  height: string;
+  weight: number | null;
+  /** YYYY-MM-DD. */
+  birthday: string | null;
+}
+
+/** PFF's directory numbers for him, each null when PFF leaves it blank. */
+export interface PffBio {
+  heightIn: number | null;
+  weight: number | null;
+  /** YYYY-MM-DD. */
+  dob: string | null;
+}
+
+export interface PffBioResult {
+  prospectId: string;
+  name: string;
+  current: BioOnFile;
+  /** Null when PFF wasn't read for him (see note / error). */
+  pff: PffBio | null;
+  /** Why PFF wasn't read: not linked, link waiting on the user, … */
+  note?: string;
+  error?: string;
+}
+
+export interface PffBioResponse {
+  results: PffBioResult[];
+  /** Set when PFF's read budget ran out mid-batch: wait this long, then resend the unreached ids. */
+  retryAfterMs: number | null;
+}
+
 /** GET /api/pff/players: one directory hit. */
 export interface PffCandidate {
   id: number;

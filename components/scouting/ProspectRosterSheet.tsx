@@ -6,6 +6,8 @@ import { classYearOptionsWith } from "../../lib/helpers/season";
 import { reorderRanksWithinClass } from "../../lib/scouting/rankReorder";
 import { logger } from "../../lib/logger";
 import type { ProspectWithStats, ChartingDecision } from "../../lib/types";
+import PffBioFillPanel from "./pff/PffBioFillPanel";
+import { usePffBioFill } from "./pff/usePffBioFill";
 
 const log = logger("ProspectRosterSheet");
 
@@ -29,6 +31,36 @@ interface RowState {
   charting_notes: string;
 }
 
+function rowState(p: ProspectWithStats): RowState {
+  return {
+    school: p.school,
+    conference: p.conference,
+    height: p.height,
+    weight: p.weight,
+    birthday: p.birthday,
+    draft_class_year: p.draft_class_year,
+    should_play: p.should_play,
+    charting_decision: p.charting_decision,
+    charting_notes: p.charting_notes,
+  };
+}
+
+/** After a reload: each field the database changed comes from `after`; the rest stay as typed. */
+function syncChanged(local: RowState, before: RowState, after: RowState): RowState {
+  const pick = <K extends keyof RowState>(k: K): RowState[K] => (after[k] !== before[k] ? after[k] : local[k]);
+  return {
+    school: pick("school"),
+    conference: pick("conference"),
+    height: pick("height"),
+    weight: pick("weight"),
+    birthday: pick("birthday"),
+    draft_class_year: pick("draft_class_year"),
+    should_play: pick("should_play"),
+    charting_decision: pick("charting_decision"),
+    charting_notes: pick("charting_notes"),
+  };
+}
+
 interface ColumnSizes {
   school: number;
   conference: number;
@@ -46,17 +78,17 @@ interface RosterRowProps {
 }
 
 function RosterRow({ p, nflRoles, sizes, rank, onRankCommit }: RosterRowProps) {
-  const [local, setLocal] = useState<RowState>({
-    school: p.school,
-    conference: p.conference,
-    height: p.height,
-    weight: p.weight,
-    birthday: p.birthday,
-    draft_class_year: p.draft_class_year,
-    should_play: p.should_play,
-    charting_decision: p.charting_decision,
-    charting_notes: p.charting_notes,
-  });
+  const [local, setLocal] = useState<RowState>(() => rowState(p));
+  // A hub reload (after Fill from PFF or Auto-fill Conferences) brings new
+  // props: take the fields it changed, keep the rest as typed. Render-phase
+  // adjust, not an effect (react-set-state-in-effect).
+  const [seen, setSeen] = useState(p);
+  if (p !== seen) {
+    const before = rowState(seen);
+    const after = rowState(p);
+    setSeen(p);
+    setLocal((l) => syncChanged(l, before, after));
+  }
   const [saving, setSaving] = useState(false);
   // The rank input is controlled by the parent-owned `rank` prop while not being
   // edited, so a reorder updates every sibling row live. `rankEdit` holds the
@@ -203,6 +235,8 @@ export default function ProspectRosterSheet({ prospects, nflRoles, onDataChanged
   // there). An entry present here wins over the prop value; only filled on edit.
   const [rankOverride, setRankOverride] = useState<Map<string, number | null>>(() => new Map());
   const [rankError, setRankError] = useState<string | null>(null);
+  const fill = usePffBioFill(onDataChanged);
+  const fillBusy = fill.phase === "linking" || fill.phase === "importing" || fill.phase === "reading" || fill.phase === "saving";
 
   // When a real data reload arrives (onDataChanged → the hub re-fetches and the
   // `prospects` prop identity changes), the optimistic overrides are obsolete:
@@ -373,14 +407,24 @@ export default function ProspectRosterSheet({ prospects, nflRoles, onDataChanged
           </button>
         ))}
         <button
+          onClick={() => fill.start(filteredSorted)}
+          disabled={fillBusy || filteredSorted.length === 0}
+          className="ml-auto px-3 py-1 rounded text-xs font-medium bg-sky-700 hover:bg-sky-600 disabled:opacity-50 text-white transition"
+          title={`Height, weight and birthday from PFF for the ${filteredSorted.length} prospect(s) shown. New prospects are linked to PFF first. You review every change before it's saved.`}
+        >
+          {fillBusy ? "Filling…" : "Fill from PFF"}
+        </button>
+        <button
           onClick={autofillConferences}
           disabled={bulkSaving}
-          className="ml-auto px-3 py-1 rounded text-xs font-medium bg-amber-700 hover:bg-amber-600 disabled:opacity-50 text-white transition"
+          className="px-3 py-1 rounded text-xs font-medium bg-amber-700 hover:bg-amber-600 disabled:opacity-50 text-white transition"
           title="Overwrite Conference for every prospect whose school is recognized in the school→conference map."
         >
           {bulkSaving ? "Updating…" : "Auto-fill Conferences"}
         </button>
       </div>
+
+      <PffBioFillPanel fill={fill} />
 
       {rankError && (
         <p className="text-red-400 text-xs mb-3" role="alert">{rankError}</p>

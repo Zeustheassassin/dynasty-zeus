@@ -9,14 +9,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { logger } from "../../../lib/logger";
-import { PFF_MATCH_BATCH, type PffCandidate, type PffGameOption, type PffMatchResponse } from "../../../lib/pff/api";
+import type { PffCandidate, PffGameOption } from "../../../lib/pff/api";
 import { buildPffTotals, currentGameRow, type PffTotals } from "../../../lib/pff/totals";
 import { fetchAllRows } from "../../../lib/scouting/fetchPlays";
 import { supabase } from "../../../lib/supabaseclient";
 import type { PffGameMatchStatus, PffPlayerMatchStatus } from "../../../lib/types";
 import {
-  fetchPffRows, isMissingPffTables, PFF_STATS_MIGRATION_HINT, pffAuthHeader, runPffImport,
-  type PffImportProgress, type PffRows,
+  fetchPffRows, isMissingPffTables, PFF_STATS_MIGRATION_HINT, pffAuthHeader, runPffImport, runPffMatch,
+  type PffBatchProgress, type PffImportProgress, type PffRows,
 } from "./pffClient";
 
 const log = logger("scouting/pff/usePffLinks");
@@ -44,12 +44,7 @@ export interface LinkGame {
   pff_match_note: string | null;
 }
 
-export interface MatchProgress {
-  done: number;
-  total: number;
-  failed: number;
-  note: string | null;
-}
+export type MatchProgress = PffBatchProgress;
 
 const PROSPECT_COLS = "id,name,position,school,draft_class_year,pff_player_id,pff_match_status,pff_match_note";
 const GAME_COLS = "id,prospect_id,season_year,opponent,game_type,game_slot,pff_game_id,pff_match_status,pff_match_note";
@@ -65,8 +60,6 @@ async function fetchRows(): Promise<LinkRows> {
   ]);
   return { prospects, games };
 }
-
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 const playerLinked = (p: LinkProspect) =>
   p.pff_player_id != null && (p.pff_match_status === "auto" || p.pff_match_status === "confirmed");
@@ -190,37 +183,9 @@ export function usePffLinks(onStatsChanged?: () => void, onImported?: (ids: stri
   const runMatch = useCallback(async (ids: string[]) => {
     if (ids.length === 0) return;
     cancelRef.current = false;
-    let done = 0;
-    let failed = 0;
-    setProgress({ done, total: ids.length, failed, note: null });
     let failure: string | null = null;
     try {
-      const queue = [...ids];
-      while (queue.length > 0 && !cancelRef.current) {
-        const batch = queue.splice(0, PFF_MATCH_BATCH);
-        const res = await fetch("/api/pff/match", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...(await pffAuthHeader()) },
-          body: JSON.stringify({ prospectIds: batch }),
-        });
-        const body = (await res.json().catch(() => null)) as (PffMatchResponse & { error?: string }) | null;
-        if (!res.ok || !body) {
-          if (res.status === 429) {
-            queue.unshift(...batch);
-            setProgress({ done, total: ids.length, failed, note: "Rate limited, waiting a minute…" });
-            await sleep(60_000);
-            continue;
-          }
-          throw new Error(body?.error ?? `HTTP ${res.status}`);
-        }
-        const unreached = body.results.filter((r) => r.error?.startsWith("Not reached")).map((r) => r.prospectId);
-        failed += body.results.filter((r) => r.error && !r.error.startsWith("Not reached")).length;
-        done += batch.length - unreached.length;
-        queue.unshift(...unreached);
-        const wait = body.retryAfterMs;
-        setProgress({ done, total: ids.length, failed, note: wait ? "PFF read budget used up, waiting for it to reset…" : null });
-        if (wait) await sleep(Math.min(wait, 65_000));
-      }
+      await runPffMatch(ids, { onProgress: setProgress, isCancelled: () => cancelRef.current });
     } catch (err) {
       log.error("PFF match run failed", { err: String(err) });
       failure = `Matching stopped: ${err instanceof Error ? err.message : String(err)}`;
