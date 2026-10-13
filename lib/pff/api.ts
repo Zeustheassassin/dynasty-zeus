@@ -45,13 +45,15 @@ export interface PffImportResponse {
 /** Prospects per POST /api/pff/bio; one PFF read per linked prospect. */
 export const PFF_BIO_BATCH = 20;
 
-/** Height, weight and birthday as the prospect has them now. */
+/** Height, weight, birthday and eligible-thru year as the prospect has them now. */
 export interface BioOnFile {
   /** As typed ("6'2\""); "" when blank. */
   height: string;
   weight: number | null;
   /** YYYY-MM-DD. */
   birthday: string | null;
+  /** Last draft he can enter (migration 071); null when blank. */
+  eligibleThru: number | null;
 }
 
 /** PFF's directory numbers for him, each null when PFF leaves it blank. */
@@ -60,6 +62,8 @@ export interface PffBio {
   weight: number | null;
   /** YYYY-MM-DD. */
   dob: string | null;
+  /** PFF's current_eligible_year: the year his college eligibility runs out. */
+  eligibleThru: number | null;
 }
 
 export interface PffBioResult {

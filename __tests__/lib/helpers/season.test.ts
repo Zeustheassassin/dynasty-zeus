@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   BASE_YEAR,
+  CLASS_YEARS,
   CURRENT_YEAR,
   YEARS,
   ROUNDS,
@@ -12,6 +13,7 @@ import {
   isDraftBoardDormant,
   isSeasonUnderway,
   FANTASY_CHAMPIONSHIP_WEEK,
+  classYearOptionsWith,
 } from "@/lib/helpers/season";
 
 // ── calendarSeasonYear ───────────────────────────────────────────────────────
@@ -136,6 +138,22 @@ describe("YEARS", () => {
 describe("BASE_YEAR", () => {
   it("is the raw calendar year", () => {
     expect(BASE_YEAR).toBe(new Date().getFullYear());
+  });
+});
+
+// ── CLASS_YEARS ──────────────────────────────────────────────────────────────
+// The draft-year dropdowns run through the last draft a freshman enrolling this
+// fall could stay in school for: five seasons, so BASE_YEAR + 5 (2026 → 2031).
+
+describe("CLASS_YEARS", () => {
+  it("runs from this year through five years out", () => {
+    expect(CLASS_YEARS).toEqual([0, 1, 2, 3, 4, 5].map((i) => BASE_YEAR + i));
+  });
+
+  it("keeps an out-of-window year when editing, in order", () => {
+    expect(classYearOptionsWith(BASE_YEAR - 1)).toEqual([BASE_YEAR - 1, ...CLASS_YEARS]);
+    expect(classYearOptionsWith(BASE_YEAR + 2)).toBe(CLASS_YEARS);
+    expect(classYearOptionsWith(null)).toBe(CLASS_YEARS);
   });
 });
 

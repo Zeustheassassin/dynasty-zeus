@@ -4,8 +4,8 @@ import { bioChanges, bioPatches, heightText, pffHeightInches, readPffBio, type B
 const row = (current: Partial<BioRow["current"]>, pff: Partial<BioRow["pff"]>, id = "p1"): BioRow => ({
   prospectId: id,
   name: `Name ${id}`,
-  current: { height: "", weight: null, birthday: null, ...current },
-  pff: { heightIn: null, weight: null, dob: null, ...pff },
+  current: { height: "", weight: null, birthday: null, eligibleThru: null, ...current },
+  pff: { heightIn: null, weight: null, dob: null, eligibleThru: null, ...pff },
 });
 
 describe("pffHeightInches", () => {
@@ -31,13 +31,15 @@ describe("pffHeightInches", () => {
 
 describe("readPffBio", () => {
   it("keeps plausible values", () => {
-    expect(readPffBio({ height: 603, weight: 215, dob: "2005-04-26" })).toEqual({ heightIn: 75, weight: 215, dob: "2005-04-26" });
+    expect(readPffBio({ height: 603, weight: 215, dob: "2005-04-26", current_eligible_year: 2028 })).toEqual({ heightIn: 75, weight: 215, dob: "2005-04-26", eligibleThru: 2028 });
   });
   it("trims a timestamp birthday to the date", () => {
     expect(readPffBio({ height: null, weight: null, dob: "2005-04-26T00:00:00Z" }).dob).toBe("2005-04-26");
   });
   it("drops implausible weights and unreadable birthdays", () => {
-    expect(readPffBio({ height: null, weight: 0, dob: "unknown" })).toEqual({ heightIn: null, weight: null, dob: null });
+    expect(readPffBio({ height: null, weight: 0, dob: "unknown" })).toEqual({ heightIn: null, weight: null, dob: null, eligibleThru: null });
+    expect(readPffBio({ height: null, weight: null, dob: null, current_eligible_year: 0 }).eligibleThru).toBeNull();
+    expect(readPffBio({ height: null, weight: null, dob: null, current_eligible_year: null }).eligibleThru).toBeNull();
     expect(readPffBio({ height: null, weight: 900, dob: "2005-13-45" }).weight).toBeNull();
     expect(readPffBio({ height: null, weight: 900, dob: "2005-13-45" }).dob).toBeNull();
   });
@@ -82,6 +84,17 @@ describe("bioChanges", () => {
     ]);
   });
 
+  it("fills Eligible Thru from PFF and PFF's year wins, ticked", () => {
+    expect(bioChanges([row({}, { eligibleThru: 2028 })])).toEqual([
+      expect.objectContaining({ key: "p1:eligible_thru_year", field: "eligible_thru_year", from: null, to: 2028, kind: "fill", on: true }),
+    ]);
+    expect(bioChanges([row({ eligibleThru: 2027 }, { eligibleThru: 2028 })])).toEqual([
+      expect.objectContaining({ field: "eligible_thru_year", from: 2027, to: 2028, kind: "update", on: true }),
+    ]);
+    expect(bioChanges([row({ eligibleThru: 2028 }, { eligibleThru: 2028 })])).toEqual([]);
+    expect(bioChanges([row({ eligibleThru: 2028 }, { eligibleThru: null })])).toEqual([]);
+  });
+
   it("skips fields that already match", () => {
     expect(bioChanges([row({ height: `6'0"`, weight: 200, birthday: "2005-01-02" }, { heightIn: 72, weight: 200, dob: "2005-01-02" })])).toEqual([]);
   });
@@ -91,11 +104,11 @@ describe("bioPatches", () => {
   it("groups the chosen fields into one update per prospect", () => {
     const changes = bioChanges([
       row({ height: `6'3"`, weight: 215 }, { heightIn: 76, weight: 220 }, "a"),
-      row({}, { dob: "2005-01-02" }, "b"),
+      row({}, { dob: "2005-01-02", eligibleThru: 2029 }, "b"),
     ]);
     expect([...bioPatches(changes)]).toEqual([
       ["a", { height: `6'4"`, weight: 220 }],
-      ["b", { birthday: "2005-01-02" }],
+      ["b", { birthday: "2005-01-02", eligible_thru_year: 2029 }],
     ]);
   });
 });

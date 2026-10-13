@@ -1,6 +1,6 @@
 "use client";
-// Roster sheet → Fill from PFF: height, weight and birthday from PFF for the
-// prospects on screen. Prospects never matched are linked first (the PFF
+// Roster sheet → Fill from PFF: height, weight, birthday and eligible-thru
+// year from PFF for the prospects on screen. Prospects never matched are linked first (the PFF
 // Links matcher, which links only sure matches; their newly matched games'
 // stats are imported right after, as a PFF Links match run does). Then
 // /api/pff/bio reads PFF's numbers and lib/scouting/pffBio.ts lists what

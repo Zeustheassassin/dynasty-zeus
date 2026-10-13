@@ -140,10 +140,11 @@ export const ROUNDS = [1, 2, 3, 4];
  *  dropped 6-round rookie drafts that History/Consensus accepted). */
 export const ROOKIE_DRAFT_MAX_ROUNDS = 6;
 
-/** Forward window for the Add-Prospect draft-class-year dropdown.
- *  [BASE_YEAR, BASE_YEAR+1, BASE_YEAR+2, BASE_YEAR+3] — current class plus
- *  the next three so scouts can stash early notes on future classes. */
-export const CLASS_YEARS: number[] = Array.from({ length: 4 }, (_, i) => BASE_YEAR + i);
+/** Forward window for the draft-class-year dropdowns (projected draft year,
+ *  eligible-thru year). [BASE_YEAR … BASE_YEAR+5]: the current class through
+ *  the last draft a freshman enrolling this fall could stay in school for
+ *  (five seasons, e.g. a 2026 freshman → the 2031 draft). */
+export const CLASS_YEARS: number[] = Array.from({ length: 6 }, (_, i) => BASE_YEAR + i);
 
 /** Trailing window for charting-board NFL film year selectors.
  *  [BASE_YEAR-3, BASE_YEAR-2, BASE_YEAR-1, BASE_YEAR] — you can chart

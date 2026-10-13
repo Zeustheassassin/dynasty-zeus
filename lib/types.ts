@@ -1033,7 +1033,12 @@ export interface Prospect {
   school: string;
   conference: string;
   position: string;
+  /** The user's projected draft year ("Projected Draft Year"). */
   draft_class_year: number;
+  /** Last draft he can enter, when his college eligibility runs out (migration
+   *  071; Fill from PFF). Optional: absent before the migration, and never sent
+   *  on insert. Null = unknown. */
+  eligible_thru_year?: number | null;
   height: string;
   weight: number | null;
   birthday: string | null;

@@ -26,6 +26,7 @@ interface RowState {
   weight: number | null;
   birthday: string | null;
   draft_class_year: number;
+  eligible_thru_year: number | null;
   should_play: string;
   charting_decision: ChartingDecision;
   charting_notes: string;
@@ -39,6 +40,7 @@ function rowState(p: ProspectWithStats): RowState {
     weight: p.weight,
     birthday: p.birthday,
     draft_class_year: p.draft_class_year,
+    eligible_thru_year: p.eligible_thru_year ?? null,
     should_play: p.should_play,
     charting_decision: p.charting_decision,
     charting_notes: p.charting_notes,
@@ -55,6 +57,7 @@ function syncChanged(local: RowState, before: RowState, after: RowState): RowSta
     weight: pick("weight"),
     birthday: pick("birthday"),
     draft_class_year: pick("draft_class_year"),
+    eligible_thru_year: pick("eligible_thru_year"),
     should_play: pick("should_play"),
     charting_decision: pick("charting_decision"),
     charting_notes: pick("charting_notes"),
@@ -97,10 +100,11 @@ function RosterRow({ p, nflRoles, sizes, rank, onRankCommit }: RosterRowProps) {
 
   async function saveFields(changes: Partial<RowState>) {
     setSaving(true);
-    await supabase
+    const { error } = await supabase
       .from("prospects")
       .update({ ...changes, updated_at: new Date().toISOString() })
       .eq("id", p.id);
+    if (error) log.error("prospect field save failed", { prospectId: p.id, fields: Object.keys(changes), err: error.message, code: error.code });
     setSaving(false);
   }
 
@@ -162,13 +166,25 @@ function RosterRow({ p, nflRoles, sizes, rank, onRankCommit }: RosterRowProps) {
       </td>
 
       <td className={tdShrink}>
-        <select className={sel} value={local.draft_class_year}
+        <select className={sel} value={local.draft_class_year} aria-label={`Projected draft year for ${p.name}`}
           onChange={(e) => {
             const v = Number(e.target.value);
             setLocal((l) => ({ ...l, draft_class_year: v }));
             saveFields({ draft_class_year: v });
           }}>
           {classYearOptionsWith(local.draft_class_year).map((y) => <option key={y}>{y}</option>)}
+        </select>
+      </td>
+
+      <td className={tdShrink}>
+        <select className={sel} value={local.eligible_thru_year ?? ""} aria-label={`Eligible thru year for ${p.name}`}
+          onChange={(e) => {
+            const v = e.target.value ? Number(e.target.value) : null;
+            setLocal((l) => ({ ...l, eligible_thru_year: v }));
+            saveFields({ eligible_thru_year: v });
+          }}>
+          <option value="">—</option>
+          {classYearOptionsWith(local.eligible_thru_year).map((y) => <option key={y}>{y}</option>)}
         </select>
       </td>
 
@@ -212,7 +228,7 @@ function RosterRow({ p, nflRoles, sizes, rank, onRankCommit }: RosterRowProps) {
   );
 }
 
-type SortKey = "name" | "draft_class_year" | "personal_rank";
+type SortKey = "name" | "draft_class_year" | "eligible_thru_year" | "personal_rank";
 
 interface Props {
   prospects: ProspectWithStats[];
@@ -356,6 +372,7 @@ export default function ProspectRosterSheet({ prospects, nflRoles, onDataChanged
       let vb: string | number = 0;
       if (sortKey === "name") { va = a.name; vb = b.name; }
       else if (sortKey === "draft_class_year") { va = a.draft_class_year; vb = b.draft_class_year; }
+      else if (sortKey === "eligible_thru_year") { va = a.eligible_thru_year ?? 9999; vb = b.eligible_thru_year ?? 9999; }
       else { va = rankFor(a) ?? 9999; vb = rankFor(b) ?? 9999; }
       if (typeof va === "string")
         return sortDir === "asc" ? va.localeCompare(vb as string) : (vb as string).localeCompare(va);
@@ -410,7 +427,7 @@ export default function ProspectRosterSheet({ prospects, nflRoles, onDataChanged
           onClick={() => fill.start(filteredSorted)}
           disabled={fillBusy || filteredSorted.length === 0}
           className="ml-auto px-3 py-1 rounded text-xs font-medium bg-sky-700 hover:bg-sky-600 disabled:opacity-50 text-white transition"
-          title={`Height, weight and birthday from PFF for the ${filteredSorted.length} prospect(s) shown. New prospects are linked to PFF first. You review every change before it's saved.`}
+          title={`Height, weight, birthday and Eligible Thru from PFF for the ${filteredSorted.length} prospect(s) shown. New prospects are linked to PFF first. You review every change before it's saved.`}
         >
           {fillBusy ? "Filling…" : "Fill from PFF"}
         </button>
@@ -455,7 +472,16 @@ export default function ProspectRosterSheet({ prospects, nflRoles, onDataChanged
                   onClick={() => toggleSort("draft_class_year")}
                   className="text-slate-500 hover:text-white transition"
                 >
-                  Draft Yr{sortIndicator("draft_class_year")}
+                  Projected Draft Year{sortIndicator("draft_class_year")}
+                </button>
+              </th>
+              <th className={thShrink} style={shrinkStyle}>
+                <button
+                  onClick={() => toggleSort("eligible_thru_year")}
+                  className="text-slate-500 hover:text-white transition"
+                  title="The last draft he can enter: the year his college eligibility runs out (from PFF via Fill from PFF, or set by hand)"
+                >
+                  Eligible Thru{sortIndicator("eligible_thru_year")}
                 </button>
               </th>
               <th className={thShrink} style={shrinkStyle}>Charting</th>

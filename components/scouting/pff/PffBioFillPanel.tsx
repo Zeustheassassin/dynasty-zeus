@@ -7,7 +7,7 @@ import type { BioChange, BioField } from "../../../lib/scouting/pffBio";
 import { STATUS_CLASSES } from "../../../lib/uiTheme";
 import type { BioFillPhase, BioFillSummary, UsePffBioFillReturn } from "./usePffBioFill";
 
-const FIELD_LABEL: Record<BioField, string> = { height: "Height", weight: "Weight", birthday: "Birthday" };
+const FIELD_LABEL: Record<BioField, string> = { height: "Height", weight: "Weight", birthday: "Birthday", eligible_thru_year: "Eligible Thru" };
 
 const RUNNING: Partial<Record<BioFillPhase, string>> = {
   linking: "Linking new prospects to PFF",
@@ -104,7 +104,7 @@ export default function PffBioFillPanel({ fill }: { fill: UsePffBioFillReturn })
               {changes.length > 0
                 ? `PFF has ${changes.length} change${changes.length === 1 ? "" : "s"}. Ticked ones are saved.`
                 : summary.read > 0
-                  ? `Height, weight and birthday already match PFF for the ${summary.read} prospect${summary.read === 1 ? "" : "s"} read.`
+                  ? `Height, weight, birthday and Eligible Thru already match PFF for the ${summary.read} prospect${summary.read === 1 ? "" : "s"} read.`
                   : "Nothing to fill: none of these prospects are linked to PFF."}
             </span>
             {changes.length > 1 && (

@@ -228,7 +228,7 @@ export default function ChartingBoard({
               </div>
             ))}
             <div>
-              <label className="block text-xs text-slate-500 mb-1">Draft Class Year</label>
+              <label className="block text-xs text-slate-500 mb-1">Projected Draft Year</label>
               <select className={`w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-white text-sm focus:outline-none ${a.focusBorder}`}
                 value={bio.draft_class_year ?? BASE_YEAR} onChange={(e) => onBioChange({ draft_class_year: Number(e.target.value) })}>
                 {classYearOptionsWith(bio.draft_class_year).map((y) => <option key={y}>{y}</option>)}
