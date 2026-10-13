@@ -3,7 +3,9 @@
 > **Audience:** a developer who has just been handed the keys and has never seen this project.
 > **Goal:** explain what the app is, how the code is structured, how data flows, and how every major subsystem actually works — in enough depth to debug and extend it on day one.
 >
-> *Last reviewed: 2026-10-12, HEAD `1f416ef` (working tree; committed as `05b4956`) — **Charting a game moves Undecided along.** At the user's request, [deriveChartingDecision](components/scouting/shared/chartingConstants.ts) now treats a prospect left on Undecided (`pending`) with at least one charted game like one set to Charting: Partial Chart, or Fully Charted past the position's threshold. Undecided with no games and Not Charting stay put; nothing is demoted. Derived at load (never written back), so it took effect for 5 prospects at once (Kamario Taylor, Brandon Inniss, Gavin Sawchuk, Deshonne Redeaux, Shahn Alston). New [chartingDecision.test.ts](__tests__/components/scouting/chartingDecision.test.ts); tsc / eslint clean, 2284 tests / 161 files.*
+> *Last reviewed: 2026-10-13, HEAD `7a66c06` (working tree; committed as `dddc3b7`) — **Eligible Thru + Projected Draft Year.** Migration [071](supabase/migrations/071_prospect_eligible_thru.sql) (applied by the user 2026-10-13 14:29 UTC, verified read-only: column, CHECK 2000–2100, ledger row, comment) adds `prospects.eligible_thru_year`, the last draft a prospect can enter. PFF's undocumented `current_eligible_year` is exactly that (enrollment year + 5; not the first eligible draft), and the user chose it over an estimated first-eligible year. Fill from PFF fills it like height / weight (PFF wins, ticked, never blanked). The Prospect Data sheet shows **Projected Draft Year** (renamed from Draft Yr; same `draft_class_year`; the charting board's bio label too) then **Eligible Thru** (sortable, editable select). `CLASS_YEARS` now runs `BASE_YEAR` … `+5` (2026–2031). The sheet's per-field saves log failed writes. Migration tested on a throwaway local Postgres 18 (applies twice, CHECK rejects 1999). tsc / eslint / build clean, 2288 tests / 161 files; no live browser pass (a QA pass needs another Sleeper connect). Details under "Fill from PFF".*
+>
+> *Prior review: 2026-10-12, HEAD `1f416ef` (working tree; committed as `05b4956`) — **Charting a game moves Undecided along.** At the user's request, [deriveChartingDecision](components/scouting/shared/chartingConstants.ts) now treats a prospect left on Undecided (`pending`) with at least one charted game like one set to Charting: Partial Chart, or Fully Charted past the position's threshold. Undecided with no games and Not Charting stay put; nothing is demoted. Derived at load (never written back), so it took effect for 5 prospects at once (Kamario Taylor, Brandon Inniss, Gavin Sawchuk, Deshonne Redeaux, Shahn Alston). New [chartingDecision.test.ts](__tests__/components/scouting/chartingDecision.test.ts); tsc / eslint clean, 2284 tests / 161 files.*
 >
 > *Prior review: 2026-10-12, HEAD `6bffe64` (working tree; committed as `c8055ff`) — **Fill from PFF on the Prospect Data sheet.** A button on each position hub's Prospect Data tab fills height, weight and birthday from PFF for the prospects shown: never-matched prospects are linked first (PFF Links matcher, sure matches only, plus a stats import for their charted games), the new read-only `POST /api/pff/bio` reads PFF's directory (one read per auto / confirmed link), and a review panel lists every change with a tick box before anything is saved. Height / weight: PFF wins, a PFF blank never blanks; birthday: fills blanks, a differing one is offered unticked (the user keeps Wikipedia birthdays). Also: roster rows now take the fields a hub reload changed (they showed stale values until a remount), and the import / match / bio batch loops share `runPffBatches`. See "Fill from PFF" under the PFF sections. tsc / eslint / build clean, 2279 tests / 160 files; live QA-account pass on local dev (stubbed PFF numbers, test row reset).*
 >
@@ -518,7 +520,7 @@
 17. [Dev workflow: build, lint, test](#17-dev-workflow-build-lint-test)
 18. [CI pipeline (GitHub Actions)](#18-ci-pipeline-github-actions)
 19. [ESLint & TypeScript rules that bite](#19-eslint--typescript-rules-that-bite)
-20. [Test suite scope (2284 tests, 161 files)](#20-test-suite-scope-2284-tests-161-files)
+20. [Test suite scope (2288 tests, 161 files)](#20-test-suite-scope-2288-tests-161-files)
 21. [Common failure modes & where to look](#21-common-failure-modes--where-to-look)
 22. [Things intentionally NOT done (and why)](#22-things-intentionally-not-done-and-why)
 23. [Known open items & time bombs for the next owner](#23-known-open-items--time-bombs-for-the-next-owner)
@@ -1865,7 +1867,7 @@ Stage 2 of the plan: PFF's numbers for **exactly the games the user charted** (n
 
 **Verified.** Read-only run of the real importer against PFF for one player per position (Tate WR 2024 + 2025, Mendoza QB, Trey'Dez Green TE 2025 + 2026, Hardy RB), stored and read back the way the columns round: every count, rate, aDOT and grade the app shows equals PFF's own aggregate for exactly those weeks (what PFF's site shows for that week filter). Stubbed Playwright run as the QA account (PFF tables and links stubbed, no Sleeper / PFF traffic): Big Board band and All-tab grade, the four Analysis tables' groups, PFF Links summary + Refresh all, a board's Games tab + Refresh PFF, no Yards input, 390px without page overflow, no console errors: 21/21. Tests: [stats.test.ts](__tests__/lib/pff/stats.test.ts), [totals.test.ts](__tests__/lib/pff/totals.test.ts), [runImport.test.ts](__tests__/lib/pff/runImport.test.ts), [pffCols.test.ts](__tests__/components/scouting/pffCols.test.ts), PFF cases in BigBoard.test.tsx and BulkGameImport.test.ts.
 
-### Fill from PFF: height, weight and birthday (Prospect Data sheet, 2026-10-12)
+### Fill from PFF: height, weight, birthday, Eligible Thru (Prospect Data sheet, 2026-10-12)
 
 The user asked for a button instead of asking for a bulk PFF size sync each time (one was run by hand that morning: 29 heights and 70 weights changed across the 2027 class).
 
@@ -1883,6 +1885,13 @@ The user asked for a button instead of asking for a bulk PFF size sync each time
 - Birthday: PFF fills a blank one (ticked). One PFF disagrees with is shown **unticked** ("PFF differs"). PFF has birthdays for few college players (11 of 150 in the 2027 class, 2 of them different), and the user deliberately keeps Wikipedia's.
 - Implausible PFF values are dropped: heights outside 4'0"–7'11", weights outside 120–400, unreadable dates.
 - The panel also lists prospects with no birthday on file or in PFF (to fill by hand), and the ones PFF wasn't read for, with why.
+
+**Eligible Thru + Projected Draft Year (2026-10-13).**
+- New column `prospects.eligible_thru_year` (migration [071](supabase/migrations/071_prospect_eligible_thru.sql), nullable, CHECK 2000–2100; **must be applied before the code deploys**, or `/api/pff/bio` answers with a "apply migration 071" error and the sheet's Eligible Thru edits only log). It's the **last** draft he can enter, the year his college eligibility runs out. PFF's `/v1/players` `current_eligible_year` is exactly that, though PFF doesn't document it: checked on the 2027 class, where it equals enrollment year + 5 (Arch Manning 2028, Jeremiah Smith and Julian Sayin 2029, grads like Conner Weigman 2027). It is **not** the first draft he's eligible for. The user chose this one over an estimated first-eligible year.
+- Fill from PFF fills it like height and weight: PFF's wins, ticked; a PFF blank never blanks it (`eligible_thru_year` is a `BioField`, named after its column so `bioPatches` writes it directly).
+- Prospect Data: **Projected Draft Year** (was "Draft Yr"; same `draft_class_year`) then **Eligible Thru** (a select with "—", sortable, editable by hand). The charting board's bio box says "Projected Draft Year" too (was "Draft Class Year"); the prospect lists' short "Draft Yr" sort buttons are unchanged.
+- `CLASS_YEARS` ([season.ts](lib/helpers/season.ts)) runs `BASE_YEAR` … `BASE_YEAR + 5` (2026–2031): a freshman enrolling this fall can stay through the draft five years out. It feeds every Add Prospect form, both year selects here and the charting board. `classYearOptionsWith` still keeps an older saved year in the list.
+- The sheet's per-field saves now log a failed write (they ignored the error before).
 
 **Also fixed.**
 - Roster rows kept their own copy of every field and never re-read props, so after a hub reload (this fill, or the older Auto-fill Conferences) new values didn't show until the sheet remounted. On a reload, each row now takes exactly the fields the database changed and keeps the rest as typed (`syncChanged`, a render-phase adjust).
@@ -2488,7 +2497,7 @@ The flat config in [eslint.config.mjs](eslint.config.mjs) is minimal: it just sp
 
 Beyond ESLint, TypeScript is strict at the `tsc` step. `tsconfig.json` enables `strict`, plus `noUnusedLocals` and `noUnusedParameters` — so an unused import, variable, or function parameter is a **build/type-check failure**, not a warning. This is the single most common reason a local edit that "looks fine" red-X's in CI.
 
-## 20. Test suite scope (2284 tests, 161 files)
+## 20. Test suite scope (2288 tests, 161 files)
 
 Run via PowerShell. The suite is [Vitest](vitest.config.mts) in a `jsdom` environment, globbing `**/__tests__/**/*.{ts,tsx}` and `**/*.{test,spec}.{ts,tsx}`. It deliberately covers **pure logic and server routes, not UI rendering**. There are no e2e tests. A handful of narrow component-render tests (via `@testing-library/react`) live under [__tests__/components/](__tests__/components/), each pinning one piece of UI behavior (e.g. the Injury Report panels, the Analysis min filters, the Big Board's Above Exp columns).
 
@@ -2579,11 +2588,11 @@ Other lower-priority items the audit flagged that I did not re-verify line-by-li
 4. `npm run dev` → confirm the app loads at `http://localhost:3000`.
 5. `npm run build` → confirm a production build succeeds (also generates `.next/types/` so the next step works).
 6. `npx tsc --noEmit` → confirm type-check passes (run it *after* the build).
-7. **In PowerShell** (not Git Bash): `npm run test` → confirm **2284 tests pass** across 161 files. If you see "0 tests," you're in the wrong shell.
+7. **In PowerShell** (not Git Bash): `npm run test` → confirm **2288 tests pass** across 161 files. If you see "0 tests," you're in the wrong shell.
 8. `npm run lint` → confirm clean (remember `exhaustive-deps` warnings won't fail it; the four error rules will).
 9. Read [AGENTS.md](AGENTS.md) — it warns this Next.js version diverges from public docs; consult `node_modules/next/dist/docs/` before writing framework code.
 10. Walk the entry path: [app/page.tsx](app/page.tsx) → [app/hooks/useAppState.ts](app/hooks/useAppState.ts) → [app/components/HubRouter.tsx](app/components/HubRouter.tsx).
-11. Skim [supabase/migrations/](supabase/migrations/) (currently through `053`) to understand the data model's evolution.
+11. Skim [supabase/migrations/](supabase/migrations/) (currently through `071`) to understand the data model's evolution.
 
 ---
 
