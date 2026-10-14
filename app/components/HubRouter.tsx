@@ -483,6 +483,7 @@ export function HubRouter({
             user={user}
             leagues={leagues}
             players={players}
+            leagueOverviewData={leagueOverviewData}
             items={todoItems}
             done={todoDone}
             onMarkDone={markTodoDone}

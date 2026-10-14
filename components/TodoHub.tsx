@@ -1,13 +1,12 @@
 "use client";
 import React, { memo, useEffect, useMemo, useState } from "react";
-import type { SleeperLeague, SleeperPlayer, SleeperUser } from "../lib/types";
+import type { LeagueOverviewEntry, SleeperLeague, SleeperPlayer, SleeperUser } from "../lib/types";
 import type { TodoView } from "../app/hooks/useHubRouting";
 import type { TodoDoneMark } from "../app/hooks/useTodoDone";
 import {
   getActionState,
   groupActionsByLeague,
   groupActionsByPlayer,
-  sleeperLeagueUrl,
   type ActionAppTab,
   type ActionItem,
   type ActionKind,
@@ -19,13 +18,16 @@ import { injuryStatusStyle } from "./AlertsPage/alertsPageHelpers";
 import { POS_COLOR, STATUS_CLASSES } from "../lib/uiTheme";
 import Button from "./ui/Button";
 import EmptyState from "./ui/EmptyState";
+import SleeperLink from "./TodoHub/SleeperLink";
+import WaiverWatchTab from "./TodoHub/WaiverWatchTab";
 
 // ============================================================
 // To-Do hub: every move the user's leagues need made in Sleeper, in one list
 // (lib/helpers/actionQueue.ts builds it in useAppState). By league is the work
 // order — earliest deadline first; By player answers "where do I bench him".
 // Done marks are this device only and come back flagged if data fetched after
-// the click still has the move.
+// the click still has the move. Waiver Watch (components/TodoHub/WaiverWatchTab)
+// sets each league's rising free agents beside the user's lowest-value players.
 // ============================================================
 
 interface TodoHubProps {
@@ -33,6 +35,8 @@ interface TodoHubProps {
   leagues: SleeperLeague[];
   /** Sleeper's raw player map — names, positions and status badges. */
   players: Record<string, SleeperPlayer>;
+  /** Every league's rosters — Waiver Watch's free agents and drop list. */
+  leagueOverviewData: Record<string, LeagueOverviewEntry>;
   items: ActionItem[];
   done: Record<string, DoneRecord>;
   onMarkDone: (marks: TodoDoneMark[]) => void;
@@ -55,6 +59,7 @@ interface TodoHubProps {
 const VIEWS: { id: TodoView; label: string }[] = [
   { id: "BY_LEAGUE", label: "By league" },
   { id: "BY_PLAYER", label: "By player" },
+  { id: "WAIVER_WATCH", label: "Waiver Watch" },
 ];
 
 const KIND_TAG: Record<ActionKind, { label: string; cls: string }> = {
@@ -75,21 +80,6 @@ interface VisibleItem {
 }
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
-
-function SleeperLink({ leagueId, compact = false }: { leagueId: string; compact?: boolean }) {
-  return (
-    <a
-      href={sleeperLeagueUrl(leagueId)}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="inline-flex items-center gap-1 rounded-full border border-slate-700 bg-slate-800/70 px-2.5 py-1 text-[11px] font-semibold text-slate-200 transition hover:border-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-    >
-      {compact ? "Sleeper" : "Open in Sleeper"}
-      <span aria-hidden="true">↗</span>
-      <span className="sr-only">(opens in a new tab)</span>
-    </a>
-  );
-}
 
 function DeadlineChip({ item, now }: { item: ActionItem; now: number }) {
   if (item.deadline == null) return null;
@@ -157,6 +147,7 @@ function TodoHub({
   user,
   leagues,
   players,
+  leagueOverviewData,
   items,
   done,
   onMarkDone,
@@ -226,6 +217,7 @@ function TodoHub({
     );
   }
 
+  const waiverWatch = view === "WAIVER_WATCH";
   const row = (v: VisibleItem, opts: { leagueLabel?: string; actions?: React.ReactNode } = {}) => (
     <ActionRow key={v.item.key} entry={v} now={now} onMarkDone={onMarkDone} {...opts} />
   );
@@ -238,9 +230,11 @@ function TodoHub({
           <p className="text-xs text-slate-400">
             {!overviewLoaded
               ? "Loading your leagues…"
-              : visible.length === 0
-                ? "Nothing to do right now."
-                : `${plural(visible.length, "move")} in ${plural(leagueGroups.length, "league")}. Make each one in Sleeper, then mark it done.`}
+              : waiverWatch
+                ? "Each league's rising free agents next to your lowest-value players."
+                : visible.length === 0
+                  ? "Nothing to do right now."
+                  : `${plural(visible.length, "move")} in ${plural(leagueGroups.length, "league")}. Make each one in Sleeper, then mark it done.`}
           </p>
         </div>
         <div className="flex flex-col items-end gap-1 shrink-0">
@@ -257,14 +251,14 @@ function TodoHub({
         </div>
       </div>
 
-      <div role="tablist" aria-label="To-Do view" className="flex gap-1 border-b border-slate-800">
+      <div role="tablist" aria-label="To-Do view" className="flex gap-1 overflow-x-auto border-b border-slate-800">
         {VIEWS.map((tab) => (
           <button
             key={tab.id}
             role="tab"
             aria-selected={view === tab.id}
             onClick={() => setView(tab.id)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition ${
+            className={`shrink-0 whitespace-nowrap px-3 sm:px-4 py-2 text-sm font-medium border-b-2 -mb-px transition ${
               view === tab.id ? "border-blue-500 text-blue-400" : "border-transparent text-slate-500 hover:text-slate-300"
             }`}
           >
@@ -273,14 +267,23 @@ function TodoHub({
         ))}
       </div>
 
-      {!isInSeason && (
+      {!waiverWatch && !isInSeason && (
         <p className="text-[11px] text-slate-500">Offseason — roster and IR moves only. Lineup moves start in Week 1.</p>
       )}
-      {isInSeason && overviewLoaded && !lineupReady && (
+      {!waiverWatch && isInSeason && overviewLoaded && !lineupReady && (
         <p className="text-[11px] text-slate-500">Loading this week&apos;s projections — lineup moves will appear shortly.</p>
       )}
 
-      {!overviewLoaded ? (
+      {waiverWatch ? (
+        <WaiverWatchTab
+          user={user}
+          leagues={leagues}
+          players={players}
+          leagueOverviewData={leagueOverviewData}
+          overviewLoaded={overviewLoaded}
+          onOpenInApp={onOpenInApp}
+        />
+      ) : !overviewLoaded ? (
         <p className="text-sm text-blue-400">Loading your leagues…</p>
       ) : visible.length === 0 ? (
         <EmptyState>Lineups and rosters look set in every league.</EmptyState>
@@ -373,7 +376,7 @@ function TodoHub({
         </div>
       )}
 
-      {hidden.length > 0 && (
+      {!waiverWatch && hidden.length > 0 && (
         <div className="rounded-xl border border-slate-800 bg-slate-950/40">
           <button
             type="button"

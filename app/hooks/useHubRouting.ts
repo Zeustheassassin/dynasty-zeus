@@ -21,7 +21,7 @@ const ALERTS_FEED_TABS = ["transactions", "waivers", "injury", "alerts"] as cons
 export type AlertsFeedTab = typeof ALERTS_FEED_TABS[number];
 const GAMEDAY_HUB_TABS = ["MATCHUPS", "DASHBOARD"] as const;
 export type GamedayHubTab = typeof GAMEDAY_HUB_TABS[number];
-const TODO_VIEWS = ["BY_LEAGUE", "BY_PLAYER"] as const;
+const TODO_VIEWS = ["BY_LEAGUE", "BY_PLAYER", "WAIVER_WATCH"] as const;
 export type TodoView = typeof TODO_VIEWS[number];
 
 const MAIN_TABS = HUBS.map((h) => h.id) as MainTab[];

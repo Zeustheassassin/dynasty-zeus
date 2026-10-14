@@ -3,7 +3,16 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup, within } from "@testing-library/react";
 import TodoHub from "@/components/TodoHub";
 import type { ActionItem, DoneRecord } from "@/lib/helpers/actionQueue";
-import type { SleeperLeague, SleeperPlayer, SleeperUser } from "@/lib/types";
+import type { LeagueOverviewEntry, SleeperLeague, SleeperPlayer, SleeperRoster, SleeperUser } from "@/lib/types";
+import type { WeeklyValueRisers } from "@/hooks/useWeeklyValueRisers";
+
+// Waiver Watch's Supabase read, stubbed per test.
+const risers = vi.hoisted(() => ({
+  state: { data: null, error: null, loading: false, retry: () => {} } as {
+    data: WeeklyValueRisers | null; error: string | null; loading: boolean; retry: () => void;
+  },
+}));
+vi.mock("@/hooks/useWeeklyValueRisers", () => ({ useWeeklyValueRisers: () => risers.state }));
 
 // This project doesn't set `test.globals: true`, so testing-library's auto-cleanup never registers.
 afterEach(cleanup);
@@ -43,6 +52,7 @@ function renderHub(props: Partial<React.ComponentProps<typeof TodoHub>> = {}) {
       user={{ user_id: "me" } as SleeperUser}
       leagues={LEAGUES}
       players={PLAYERS}
+      leagueOverviewData={{}}
       items={[SWAP, IR_MOVE]}
       done={{}}
       view="BY_LEAGUE"
@@ -163,5 +173,99 @@ describe("TodoHub — states", () => {
     const { onRefresh } = renderHub();
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     expect(onRefresh).toHaveBeenCalled();
+  });
+});
+
+describe("TodoHub — Waiver Watch", () => {
+  const WW_PLAYERS = {
+    ...PLAYERS,
+    low: { player_id: "low", full_name: "Low Guy", position: "RB", team: "NYJ", value: 800 },
+    mid: { player_id: "mid", full_name: "Mid Guy", position: "WR", team: "NYG", value: 2500 },
+    irGuy: { player_id: "irGuy", full_name: "Ir Guy", position: "TE", team: "LV", injury_status: "IR", value: 300 },
+    hot: { player_id: "hot", full_name: "Hot Pickup", position: "WR", team: "DET", value: 2200 },
+    warm: { player_id: "warm", full_name: "Warm Pickup", position: "TE", team: "ARI", value: 600 },
+  } as unknown as Record<string, SleeperPlayer>;
+  const lg = (id: string, name: string, reserveSlots: number) =>
+    ({ league_id: id, name, roster_positions: ["WR", "BN"], settings: { reserve_slots: reserveSlots } } as unknown as SleeperLeague);
+  const rosterOf = (owner: string, players: string[], reserve: string[] = []) =>
+    ({ owner_id: owner, players, reserve, taxi: [] } as unknown as SleeperRoster);
+  const ALPHA = lg("A", "Alpha", 1);
+  const BRAVO = lg("B", "Bravo", 0);
+  const OVERVIEW: Record<string, LeagueOverviewEntry> = {
+    // Alpha: lowest is Low Guy (800); Ir Guy sits in the one IR slot with no overflow, so he's off.
+    A: { league: ALPHA, rosters: [rosterOf("me", ["low", "mid", "irGuy"], ["irGuy"])], picks: [], userMap: {} },
+    // Bravo: Hot Pickup is rostered by someone else; lowest is Mid Guy (2500), nothing beats it.
+    B: { league: BRAVO, rosters: [rosterOf("me", ["mid"]), rosterOf("other", ["hot"])], picks: [], userMap: {} },
+  };
+  const DATA: WeeklyValueRisers = {
+    latestDate: "2026-10-14",
+    baseDate: "2026-10-07",
+    risers: [
+      { playerId: "hot", from: 1500, to: 2200, gain: 700 },
+      { playerId: "warm", from: 200, to: 600, gain: 400 },
+    ],
+  };
+
+  function renderWatch(state: Partial<typeof risers.state> = {}, props: Partial<React.ComponentProps<typeof TodoHub>> = {}) {
+    risers.state = { data: DATA, error: null, loading: false, retry: vi.fn(), ...state };
+    return renderHub({
+      view: "WAIVER_WATCH",
+      leagues: [BRAVO, ALPHA],
+      players: WW_PLAYERS,
+      leagueOverviewData: OVERVIEW,
+      done: { "irEligible:A:p2": { at: NOW + 1 } },
+      ...props,
+    });
+  }
+
+  it("is the third tab", () => {
+    const { setView } = renderHub();
+    fireEvent.click(screen.getByRole("tab", { name: "Waiver Watch" }));
+    expect(setView).toHaveBeenCalledWith("WAIVER_WATCH");
+  });
+
+  it("puts a league whose rising free agent beats your lowest player first, highlighted", () => {
+    renderWatch();
+    expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["Alpha", "Bravo"]);
+    expect(screen.getByText("1 league has a rising free agent worth more than your lowest player.")).toBeTruthy();
+    const alpha = within(screen.getByRole("region", { name: "Alpha" }));
+    expect(alpha.getByText("Upgrade +1,400")).toBeTruthy();
+    expect(alpha.getByText("Worth more than Low Guy")).toBeTruthy();
+    expect(alpha.getByText("+700")).toBeTruthy();
+    expect(alpha.queryByText("Ir Guy")).toBeNull();
+    const bravo = within(screen.getByRole("region", { name: "Bravo" }));
+    expect(bravo.queryByText("Hot Pickup")).toBeNull();
+    expect(bravo.getByText("Warm Pickup")).toBeTruthy();
+    expect(bravo.queryByText(/Worth more than/)).toBeNull();
+  });
+
+  it("links each league to Sleeper and its roster in the app", () => {
+    const { onOpenInApp } = renderWatch();
+    const alpha = within(screen.getByRole("region", { name: "Alpha" }));
+    expect(alpha.getByRole("link", { name: /Open in Sleeper/ }).getAttribute("href")).toBe("https://sleeper.com/leagues/A");
+    fireEvent.click(alpha.getByRole("button", { name: "Open in app" }));
+    expect(onOpenInApp).toHaveBeenCalledWith("A", "ROSTERS");
+  });
+
+  it("leaves out the move list's Done section and season notes", () => {
+    renderWatch({}, { isInSeason: false });
+    expect(screen.queryByText(/Marked done this week/)).toBeNull();
+    expect(screen.queryByText(/Offseason/)).toBeNull();
+    cleanup();
+    renderWatch({}, { lineupReady: false });
+    expect(screen.queryByText(/lineup moves will appear/)).toBeNull();
+  });
+
+  it("still shows your lowest players while the risers fail to load, with Retry", () => {
+    const retry = vi.fn();
+    renderWatch({ data: null, error: "boom", retry });
+    expect(within(screen.getByRole("region", { name: "Alpha" })).getByText("Low Guy")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(retry).toHaveBeenCalled();
+  });
+
+  it("says when there isn't a week of value history yet", () => {
+    renderWatch({ data: null });
+    expect(screen.getByText(/need a week of value history/)).toBeTruthy();
   });
 });

@@ -128,11 +128,19 @@ describe("useHubRouting", () => {
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
     expect(result.current.todoView).toBe("BY_LEAGUE");
+
+    act(() => {
+      setUrl("hub=TODO&tab=WAIVER_WATCH");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(result.current.todoView).toBe("WAIVER_WATCH");
   });
 
   it("restores the last To-Do view from localStorage, ignoring a stale value", () => {
     localStorage.setItem("todoView", JSON.stringify("BY_PLAYER"));
     expect(renderHook(() => useHubRouting()).result.current.todoView).toBe("BY_PLAYER");
+    localStorage.setItem("todoView", JSON.stringify("WAIVER_WATCH"));
+    expect(renderHook(() => useHubRouting()).result.current.todoView).toBe("WAIVER_WATCH");
     localStorage.setItem("todoView", JSON.stringify("WAIVER_WATCH_OLD"));
     expect(renderHook(() => useHubRouting()).result.current.todoView).toBe("BY_LEAGUE");
   });
