@@ -3,9 +3,12 @@ import {
   buildActionQueue,
   compareActionItems,
   getActionState,
+  getAttentionLeagues,
+  getStepIndex,
   groupActionsByLeague,
   groupActionsByPlayer,
   sleeperLeagueUrl,
+  splitActionsByState,
   type ActionItem,
   type ActionQueueInput,
 } from "@/lib/helpers/actionQueue";
@@ -226,5 +229,87 @@ describe("getActionState — Done marks", () => {
 describe("sleeperLeagueUrl", () => {
   it("is the league page the user verified on phone and desktop", () => {
     expect(sleeperLeagueUrl("1312563760086405120")).toBe("https://sleeper.com/leagues/1312563760086405120");
+  });
+});
+
+// ── To-Do Stage 3: stepping through the leagues needing attention ─────────────
+
+describe("splitActionsByState", () => {
+  const base: Omit<ActionItem, "key" | "kind" | "expiresAt"> = {
+    leagueId: "A", leagueName: "Alpha", playerIds: [], title: "t", detail: "d", deadline: null,
+    deadlineLabel: null, earlyLockDay: null, appTab: "ROSTERS", asOf: 1_000,
+  };
+  const open: ActionItem = { ...base, key: "open", kind: "irEligible", expiresAt: null };
+  const doneItem: ActionItem = { ...base, key: "done", kind: "irEligible", expiresAt: null };
+  const flagged: ActionItem = { ...base, key: "flagged", kind: "irEligible", expiresAt: null };
+  const expired: ActionItem = { ...base, key: "expired", kind: "lineup", expiresAt: 5_000 };
+
+  it("shows open and flagged items, hides done ones, drops expired ones from both", () => {
+    const { visible, hidden } = splitActionsByState(
+      [open, doneItem, flagged, expired],
+      { done: { at: 2_000 }, flagged: { at: 900 }, expired: { at: 2_000 } },
+      5_000
+    );
+    expect(visible.map((v) => [v.item.key, v.state])).toEqual([["open", "open"], ["flagged", "stillShowing"]]);
+    expect(hidden.map((i) => i.key)).toEqual(["done"]);
+  });
+
+  it("keeps a timed item until its moment passes", () => {
+    expect(splitActionsByState([expired], {}, 4_999).visible.map((v) => v.item.key)).toEqual(["expired"]);
+  });
+});
+
+describe("getAttentionLeagues — the To-Do hub's By league order", () => {
+  const items = buildActionQueue(INPUT);
+
+  it("lists every league with a move, in By league order, each with its Open in app tab", () => {
+    const groups = groupActionsByLeague(items, [C, B, A]);
+    expect(getAttentionLeagues(items, {}, [C, B, A], 0)).toEqual(
+      groups.map((g) => ({ leagueId: g.league.league_id, appTab: g.appTab }))
+    );
+    expect(groups.map((g) => g.league.league_id)).toEqual(["A", "B", "C"]);
+    expect(getAttentionLeagues(items, {}, [C, B, A], 0)[2]).toEqual({ leagueId: "C", appTab: "ROSTERS" });
+  });
+
+  it("drops a league once every move in it is marked done", () => {
+    const done = Object.fromEntries(items.filter((i) => i.leagueId === "C").map((i) => [i.key, { at: Number.MAX_SAFE_INTEGER }]));
+    expect(getAttentionLeagues(items, done, [A, B, C], 0).map((s) => s.leagueId)).toEqual(["A", "B"]);
+  });
+
+  it("keeps a league whose done move came back flagged", () => {
+    const flagged = items.map((i) => (i.leagueId === "C" ? { ...i, asOf: 10 } : i));
+    const done = Object.fromEntries(flagged.filter((i) => i.leagueId === "C").map((i) => [i.key, { at: 5 }]));
+    expect(getAttentionLeagues(flagged, done, [A, B, C], 0).map((s) => s.leagueId)).toEqual(["A", "B", "C"]);
+  });
+
+  it("leaves out moves past their lock, like the hub", () => {
+    const live = items.filter((i) => i.expiresAt == null || i.expiresAt > THU);
+    expect(getAttentionLeagues(items, {}, [A, B, C], THU)).toEqual(getAttentionLeagues(live, {}, [A, B, C], 0));
+  });
+});
+
+describe("getStepIndex", () => {
+  const stops = ["L1", "L2", "L3"].map((leagueId) => ({ leagueId, appTab: "STARTERS" as const }));
+
+  it("steps to the neighbour of the selected league, stopping at either end", () => {
+    expect(getStepIndex({ stops, cursor: 1 }, "L2", 1)).toBe(2);
+    expect(getStepIndex({ stops, cursor: 1 }, "L2", -1)).toBe(0);
+    expect(getStepIndex({ stops, cursor: 2 }, "L3", 1)).toBeNull();
+    expect(getStepIndex({ stops, cursor: 0 }, "L1", -1)).toBeNull();
+  });
+
+  it("goes by the selected league, not the cursor, when it's on the list", () => {
+    expect(getStepIndex({ stops, cursor: 0 }, "L3", -1)).toBe(1);
+  });
+
+  it("off the list: Next continues after the last stop landed on, Prev goes back to it", () => {
+    expect(getStepIndex({ stops, cursor: 1 }, "elsewhere", 1)).toBe(2);
+    expect(getStepIndex({ stops, cursor: 1 }, "elsewhere", -1)).toBe(1);
+    expect(getStepIndex({ stops, cursor: 1 }, null, 1)).toBe(2);
+  });
+
+  it("off the list before the first step: Next starts at the top, Prev goes nowhere", () => {
+    expect(getStepIndex({ stops, cursor: -1 }, "elsewhere", 1)).toBe(0);
+    expect(getStepIndex({ stops, cursor: -1 }, "elsewhere", -1)).toBeNull();
   });
 });

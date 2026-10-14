@@ -5,6 +5,8 @@ import type { SleeperUser, SleeperLeague, SleeperPlayer, LeagueHubTab, SleeperNF
 import { HUBS, type MainTab } from "../../lib/hubs";
 import { setLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 import { CommandPalette } from "../../components/CommandPalette";
+import type { TodoView } from "../hooks/useHubRouting";
+import type { LeagueStepTarget } from "../hooks/useLeagueStepper";
 import { useModalBehavior } from "../../lib/hooks/useModalBehavior";
 import { ACCENT_CLASSES } from "../../lib/uiTheme";
 import Button from "../../components/ui/Button";
@@ -27,7 +29,17 @@ interface MainLayoutProps {
   setDataHubTab: (t: "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "STAT_PROJECTIONS" | "LEAGUEMATES" | "DEPTH_CHARTS" | "MY_SHARES" | "COMPARE") => void;
   setDraftHubSection: (s: "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL") => void;
   setPlayerProfileId: (id: string | null) => void;
+  setTodoView: (view: TodoView) => void;
+  // Stepping through the leagues needing attention (To-Do Stage 3): [ / ] and the palette
+  stepLeague: (dir: 1 | -1) => boolean;
+  peekLeagueStep: (dir: 1 | -1) => LeagueStepTarget | null;
   children: React.ReactNode;
+}
+
+/** Typing into a field — the [ / ] shortcuts stay out of the way. */
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
 }
 
 // Seasonal primary hub set for the mobile bottom nav (R3) — mirrors the
@@ -90,6 +102,9 @@ export function MainLayout({
   setDataHubTab,
   setDraftHubSection,
   setPlayerProfileId,
+  setTodoView,
+  stepLeague,
+  peekLeagueStep,
   children,
 }: MainLayoutProps) {
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -105,6 +120,22 @@ export function MainLayout({
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, []);
+
+  // [ / ] — previous / next league needing attention, on the League Hub and To-Do only. Skipped
+  // while typing, with a modifier held, on key repeat (holding ] would load league after league)
+  // and while a dialog is open (the palette, the More sheet, a player profile).
+  useEffect(() => {
+    if (mainTab !== "LEAGUES" && mainTab !== "TODO") return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== "[" && e.key !== "]") return;
+      if (e.metaKey || e.ctrlKey || e.altKey || e.repeat || e.defaultPrevented) return;
+      if (isTypingTarget(e.target) || document.querySelector('[aria-modal="true"]')) return;
+      e.preventDefault();
+      stepLeague(e.key === "]" ? 1 : -1);
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [mainTab, stepLeague]);
 
   const isInSeason = nflState?.season_type === "regular" && (nflState?.week ?? 0) > 0;
   const primaryMobileHubIds = isInSeason ? IN_SEASON_MOBILE_HUBS : OFFSEASON_MOBILE_HUBS;
@@ -275,6 +306,10 @@ export function MainLayout({
           setDataHubTab={setDataHubTab}
           setDraftHubSection={setDraftHubSection}
           setPlayerProfileId={setPlayerProfileId}
+          setTodoView={setTodoView}
+          leagues={leagues}
+          stepLeague={stepLeague}
+          peekLeagueStep={peekLeagueStep}
           onClose={() => setPaletteOpen(false)}
         />
       )}

@@ -18,7 +18,7 @@ import { PlayerProfilePanel } from "./modals/PlayerProfilePanel";
 import { AllOpenTradesPanel } from "./modals/AllOpenTradesPanel";
 import type { AlertsFeedTab, GamedayHubTab, TodoView } from "../hooks/useHubRouting";
 import type { TodoDoneMark } from "../hooks/useTodoDone";
-import type { ActionAppTab, ActionItem, DoneRecord } from "../../lib/helpers/actionQueue";
+import type { ActionAppTab, ActionItem, DoneRecord, LeagueStepSession } from "../../lib/helpers/actionQueue";
 import type {
   SleeperPlayer, SleeperLeague, SleeperRoster,
   SleeperNFLState, SleeperUser, SleeperDraft, SleeperDraftPick,
@@ -130,9 +130,15 @@ interface HubRouterProps {
   /** Players with a To-Do move still open — the Injury Report's "See moves" link. */
   todoPlayerIds: Set<string>;
   onSeeTodoMoves: (playerId: string) => void;
+  /** Open in app — also starts a run through the leagues needing attention (useLeagueStepper). */
   onOpenTodoLeague: (leagueId: string, tab: ActionAppTab) => void;
   refreshTodo: () => Promise<void>;
   refreshingTodo: boolean;
+  /** The open run through the leagues needing attention — the League Hub bar shows during one. */
+  leagueStepSession: LeagueStepSession | null;
+  stepLeague: (dir: 1 | -1) => boolean;
+  endLeagueStepping: () => void;
+  backToTodo: () => void;
 
   // League Hub
   leagueHubTab: LeagueHubTab;
@@ -338,6 +344,7 @@ export function HubRouter({
   showAllOpenTrades, setShowAllOpenTrades, alertsFeedTab, setAlertsFeedTab,
   todoItems, todoDone, markTodoDone, undoTodoDone, todoView, setTodoView, todoFocusPlayerId, todoPlayerIds,
   onSeeTodoMoves, onOpenTodoLeague, refreshTodo, refreshingTodo,
+  leagueStepSession, stepLeague, endLeagueStepping, backToTodo,
   leagueHubTab, setLeagueHubTab, activeLeagueHubGroup, standings,
   committedSimsByLeague, leagueSimCache, simQueue, simProgress,
   loadingActivity, loadingLeagueWeeklyMatchups,
@@ -553,6 +560,11 @@ export function HubRouter({
             onSetAssetDisposition={handleSetAssetDisposition}
             noInterestPlayers={noInterestPlayers}
             onSetNoInterest={setNoInterest}
+            selectedLeagueId={selectedLeague?.league_id ?? null}
+            stepSession={leagueStepSession}
+            onStepLeague={stepLeague}
+            onEndStepping={endLeagueStepping}
+            onBackToTodo={backToTodo}
           />
           </ErrorBoundary>
         )}

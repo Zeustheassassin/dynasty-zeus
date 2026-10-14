@@ -68,6 +68,7 @@ import { MY_DISPOSITIONS, pickDispositionKey, normalizeDisposition } from "../..
 import type { PersonalSignal } from "../../lib/helpers/personalRankings";
 import { useSimulatorState } from "./useSimulatorState";
 import { useTodoDone } from "./useTodoDone";
+import { useLeagueStepper } from "./useLeagueStepper";
 import { buildActionQueue, getActionState, type ActionAppTab, type ActionItem } from "../../lib/helpers/actionQueue";
 import { sleeperApi } from "../../lib/sleeperApi";
 import { PLAYERS_BACKGROUND_REFRESH_MS, ROSTER_OVERVIEW_FRESH_GAP_MS, ROSTER_DATA_MAX_AGE_MS } from "../../lib/constants";
@@ -3382,6 +3383,21 @@ const onSeeTodoMoves = useCallback((playerId: string) => {
   setMainTab("TODO");
 }, [setTodoView, setMainTab]);
 
+// To-Do Stage 3: step through the leagues needing attention (League Hub bar, [ / ], command
+// palette) in To-Do's By league order, landing each on its Open in app tab. To-Do's Open in app
+// starts the run (useLeagueStepper).
+const leagueStepper = useLeagueStepper({
+  userId: user?.user_id ?? null,
+  items: todoItems,
+  done: todoDone,
+  leagues,
+  selectedLeagueId: selectedLeague?.league_id ?? null,
+  inLeagueHub: mainTab === "LEAGUES",
+  lineupPending: currentNflWeek > 0 && Object.keys(leagueLineupStatus).length === 0,
+  open: onOpenTodoLeague,
+});
+const backToTodo = useCallback(() => setMainTab("TODO"), [setMainTab]);
+
 // To-Do Refresh: Roster Overview's refresh (rosters past both caches + Sleeper's player map, at
 // most once a minute), then the selected league's own roster — its lineup items read `roster`,
 // not the overview copy. That reload reads what the overview pass just cached (zero new calls).
@@ -3461,6 +3477,9 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     setDataHubTab,
     setDraftHubSection,
     setPlayerProfileId,
+    setTodoView,
+    stepLeague: leagueStepper.step,
+    peekLeagueStep: leagueStepper.peek,
   };
   const hubRouterProps = {
     mainTab,
@@ -3510,7 +3529,12 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     todoFocusPlayerId,
     todoPlayerIds,
     onSeeTodoMoves,
-    onOpenTodoLeague,
+    // To-Do's Open in app also starts a run through the leagues needing attention.
+    onOpenTodoLeague: leagueStepper.openFromTodo,
+    leagueStepSession: leagueStepper.session,
+    stepLeague: leagueStepper.step,
+    endLeagueStepping: leagueStepper.end,
+    backToTodo,
     refreshTodo,
     refreshingTodo,
     showAllOpenTrades, setShowAllOpenTrades,

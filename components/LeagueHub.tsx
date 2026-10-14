@@ -21,6 +21,7 @@ import type {
   LeagueLineupStatus,
 } from "../lib/types";
 import type { LineupAvailability } from "../lib/helpers/lineupAvailability";
+import type { LeagueStepSession } from "../lib/helpers/actionQueue";
 import { LEAGUE_HUB_GROUPS } from "../lib/leagueHubGroups";
 import { useLeagueTabState } from "./LeagueHub/hooks/useLeagueTabState";
 import StandingsTab from "./league/StandingsTab";
@@ -35,6 +36,7 @@ import NotesTab from "./LeagueHub/NotesTab";
 import RecapTab from "./LeagueHub/RecapTab";
 import PowerRankingsTab from "./LeagueHub/PowerRankingsTab";
 import ActivityTab from "./LeagueHub/ActivityTab";
+import LeagueStepperBar from "./LeagueHub/LeagueStepperBar";
 import ErrorBanner from "./ErrorBanner";
 import type { StandingRow, AnnotatedTransaction } from "./LeagueHub/leagueHubTypes";
 import { Card } from "./ui/Card";
@@ -115,6 +117,13 @@ interface LeagueHubProps {
   // opponent's own SELL_NO/SELL_OK willingness tag above)
   noInterestPlayers: LeagueExpiringBlocks;
   onSetNoInterest: (leagueId: string, playerId: string, days: number | null) => void;
+
+  // Stepping through the leagues needing attention (To-Do Stage 3) — the bar shows during a run.
+  selectedLeagueId: string | null;
+  stepSession: LeagueStepSession | null;
+  onStepLeague: (dir: 1 | -1) => void;
+  onEndStepping: () => void;
+  onBackToTodo: () => void;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
@@ -138,6 +147,7 @@ function LeagueHub({
   setPlayerProfileId,
   leaguePlayerTags, onSetAssetDisposition,
   noInterestPlayers, onSetNoInterest,
+  selectedLeagueId, stepSession, onStepLeague, onEndStepping, onBackToTodo,
 }: LeagueHubProps) {
   const {
     leagueSearch, setLeagueSearch,
@@ -151,6 +161,16 @@ function LeagueHub({
   return (
     <div className={`mx-auto px-4 py-6 ${leagueHubTab === "ROSTERS" || leagueHubTab === "OPP_ROSTERS" || leagueHubTab === "ROSTER_TOOLS" ? "max-w-7xl" : leagueHubTab === "OVERVIEW" ? "max-w-6xl" : "max-w-5xl"}`}>
       <>
+        {stepSession && (
+          <LeagueStepperBar
+            session={stepSession}
+            leagues={leagues}
+            selectedLeagueId={selectedLeagueId}
+            onStep={onStepLeague}
+            onBackToTodo={onBackToTodo}
+            onClose={onEndStepping}
+          />
+        )}
         {leagueOverviewError && (
           <div className="mb-4">
             <ErrorBanner message={leagueOverviewError} onRetry={loadLeagueOverview} />

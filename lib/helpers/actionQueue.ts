@@ -8,6 +8,8 @@
 //     Sleeper's raw player map (never the ESPN-overlaid one).
 // Pure: useAppState builds the list, the To-Do hub renders it. Done marks live
 // in localStorage (app/hooks/useTodoDone.ts); getActionState reads them.
+// getAttentionLeagues / getStepIndex drive stepping through the leagues with a
+// move left (app/hooks/useLeagueStepper.ts) in the hub's own By league order.
 // ============================================================
 import { getRosterSlotSummary } from "./rosterSlots";
 import { LINEUP_DELTA_FLOOR } from "./lineup";
@@ -253,6 +255,29 @@ export function getActionState(item: Pick<ActionItem, "asOf">, record: DoneRecor
   return item.asOf != null && item.asOf >= record.at ? "stillShowing" : "done";
 }
 
+export interface VisibleAction {
+  item: ActionItem;
+  state: ActionState;
+}
+
+/** What the hub shows at `now`: `visible` (open or flagged "Still showing") and `hidden` (marked
+ *  done). Items past `expiresAt` are in neither — the move can't be made any more. */
+export function splitActionsByState(
+  items: ActionItem[],
+  done: Record<string, DoneRecord>,
+  now: number
+): { visible: VisibleAction[]; hidden: ActionItem[] } {
+  const visible: VisibleAction[] = [];
+  const hidden: ActionItem[] = [];
+  for (const item of items) {
+    if (item.expiresAt != null && now >= item.expiresAt) continue;
+    const state = getActionState(item, done[item.key]);
+    if (state === "done") hidden.push(item);
+    else visible.push({ item, state });
+  }
+  return { visible, hidden };
+}
+
 // ── Views ─────────────────────────────────────────────────────────────────────
 
 export interface LeagueActionGroup {
@@ -288,6 +313,52 @@ export function groupActionsByLeague(items: ActionItem[], leagues: SleeperLeague
     }
     return a.league.name.localeCompare(b.league.name);
   });
+}
+
+// ── Stepping through leagues (League Hub bar, [ / ], command palette) ─────────
+
+/** One league to step to and the League Hub tab it opens on. */
+export interface LeagueStop {
+  leagueId: string;
+  appTab: ActionAppTab;
+}
+
+/** The leagues needing attention at `now` — every league with a move still on the To-Do list, in
+ *  By league order (the same split + grouping the hub renders), each with its Open in app tab. */
+export function getAttentionLeagues(
+  items: ActionItem[],
+  done: Record<string, DoneRecord>,
+  leagues: SleeperLeague[],
+  now: number
+): LeagueStop[] {
+  const { visible } = splitActionsByState(items, done, now);
+  return groupActionsByLeague(visible.map((v) => v.item), leagues).map((g) => ({
+    leagueId: g.league.league_id,
+    appTab: g.appTab,
+  }));
+}
+
+/** A run through the leagues needing attention, fixed when it starts so the order and count don't
+ *  shift under the user while projections reload or a roster poll lands. */
+export interface LeagueStepSession {
+  /** Sleeper user the run belongs to — a different account's run is ignored. */
+  userId: string;
+  stops: LeagueStop[];
+  /** The stop the run last landed on; -1 before the first. */
+  cursor: number;
+}
+
+/** Index of the stop Prev (-1) / Next (+1) goes to from the selected league: the one before / after
+ *  it when it's on the list; off the list, Next goes to the stop after the last one landed on and
+ *  Prev back to that stop. Null past either end. */
+export function getStepIndex(
+  session: Pick<LeagueStepSession, "stops" | "cursor">,
+  selectedLeagueId: string | null,
+  dir: 1 | -1
+): number | null {
+  const at = selectedLeagueId ? session.stops.findIndex((s) => s.leagueId === selectedLeagueId) : -1;
+  const target = at >= 0 ? at + dir : dir > 0 ? session.cursor + 1 : session.cursor;
+  return target >= 0 && target < session.stops.length ? target : null;
 }
 
 export interface PlayerActionGroup {

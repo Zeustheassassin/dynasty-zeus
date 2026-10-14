@@ -1,12 +1,15 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { SleeperPlayer, LeagueHubTab } from "../lib/types";
+import type { SleeperPlayer, LeagueHubTab, SleeperLeague } from "../lib/types";
 import { HUBS, type MainTab } from "../lib/hubs";
 import { LEAGUE_HUB_GROUPS } from "../lib/leagueHubGroups";
 import { useModalBehavior } from "../lib/hooks/useModalBehavior";
+import type { TodoView } from "../app/hooks/useHubRouting";
+import type { LeagueStepTarget } from "../app/hooks/useLeagueStepper";
 
 // Local copies of the sub-tab unions — every other hub/tab consumer (HubRouter,
 // DataHub, DraftHub, useHubRouting) keeps its own copy rather than a shared type.
+// TodoView is the exception: useHubRouting exports it and the To-Do hub imports it too.
 type TradeHubSection = "CALCULATOR" | "FINDER" | "TRADE_LOG" | "ATTEMPTS";
 type DataHubTab = "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "STAT_PROJECTIONS" | "LEAGUEMATES" | "DEPTH_CHARTS" | "MY_SHARES" | "COMPARE";
 type DraftHubSection = "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL";
@@ -19,6 +22,13 @@ export interface CommandPaletteProps {
   setDataHubTab: (t: DataHubTab) => void;
   setDraftHubSection: (s: DraftHubSection) => void;
   setPlayerProfileId: (id: string | null) => void;
+  setTodoView: (view: TodoView) => void;
+  /** League names for the stepping entries. */
+  leagues: SleeperLeague[];
+  /** Prev (-1) / Next (+1) league needing attention (useLeagueStepper). */
+  stepLeague: (dir: 1 | -1) => boolean;
+  /** Where stepLeague would go, without going. */
+  peekLeagueStep: (dir: 1 | -1) => LeagueStepTarget | null;
   onClose: () => void;
 }
 
@@ -37,6 +47,11 @@ const DATA_HUB_LABELS: Record<DataHubTab, string> = {
   DEPTH_CHARTS: "Depth Charts",
   MY_SHARES: "My Shares",
   COMPARE: "Compare Players",
+};
+const TODO_VIEW_LABELS: Record<TodoView, string> = {
+  BY_LEAGUE: "By league",
+  BY_PLAYER: "By player",
+  WAIVER_WATCH: "Waiver Watch",
 };
 const DRAFT_HUB_LABELS: Record<DraftHubSection, string> = {
   BOARD: "Live Draft Board",
@@ -61,6 +76,12 @@ const NAV_ITEMS: NavItem[] = [
     label: h.label,
     isHub: true,
     run: (p: CommandPaletteProps) => p.setMainTab(h.id),
+  })),
+  ...(Object.keys(TODO_VIEW_LABELS) as TodoView[]).map((v) => ({
+    key: `todo:${v}`,
+    label: `To-Do: ${TODO_VIEW_LABELS[v]}`,
+    isHub: false,
+    run: (p: CommandPaletteProps) => { p.setMainTab("TODO"); p.setTodoView(v); },
   })),
   ...(Object.keys(TRADE_HUB_LABELS) as TradeHubSection[]).map((s) => ({
     key: `trade:${s}`,
@@ -92,6 +113,9 @@ const MAX_NAV_RESULTS = 10;
 const MAX_PLAYER_RESULTS = 8;
 const MIN_PLAYER_QUERY_LENGTH = 2;
 
+// Hyphens dropped on both sides, so "todo" finds To-Do.
+const normalize = (s: string) => s.toLowerCase().replace(/-/g, "");
+
 interface ResultItem {
   key: string;
   label: string;
@@ -99,7 +123,7 @@ interface ResultItem {
 }
 
 export function CommandPalette(props: CommandPaletteProps) {
-  const { players, setPlayerProfileId, onClose } = props;
+  const { players, setPlayerProfileId, leagues, stepLeague, peekLeagueStep, onClose } = props;
   useModalBehavior(onClose);
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -108,12 +132,37 @@ export function CommandPalette(props: CommandPaletteProps) {
 
   useEffect(() => { inputRef.current?.focus(); }, []);
 
+  // Stepping through the leagues needing attention (To-Do Stage 3), worked out once as the palette
+  // opens: Next always when there's a league to go to; Previous only when it comes before Next —
+  // outside a run in the League Hub, Prev would jump to the end of the list.
+  const [stepItems] = useState((): ResultItem[] => {
+    const next = peekLeagueStep(1);
+    const prev = peekLeagueStep(-1);
+    const item = (dir: 1 | -1, word: string, target: LeagueStepTarget): ResultItem => {
+      const name = leagues.find((l) => l.league_id === target.stop.leagueId)?.name ?? "League";
+      return {
+        key: `step:${dir}`,
+        label: `${word} league needing attention: ${name} (${target.index + 1} of ${target.total})`,
+        run: () => { stepLeague(dir); },
+      };
+    };
+    return [
+      ...(next ? [item(1, "Next", next)] : []),
+      ...(prev && (!next || prev.index < next.index) ? [item(-1, "Previous", prev)] : []),
+    ];
+  });
+
+  const stepMatches = useMemo(() => {
+    const q = normalize(query.trim());
+    return q ? stepItems.filter((item) => normalize(item.label).includes(q)) : stepItems;
+  }, [query, stepItems]);
+
   const navMatches = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = normalize(query.trim());
     // Empty query: browse the top-level hubs only — sub-tabs are a search
     // refinement, not something to dump in a blank-state list.
     const pool = q ? NAV_ITEMS : NAV_ITEMS.filter((item) => item.isHub);
-    const matches = q ? NAV_ITEMS.filter((item) => item.label.toLowerCase().includes(q)) : pool;
+    const matches = q ? NAV_ITEMS.filter((item) => normalize(item.label).includes(q)) : pool;
     return matches.slice(0, MAX_NAV_RESULTS);
   }, [query]);
 
@@ -133,13 +182,14 @@ export function CommandPalette(props: CommandPaletteProps) {
   }, [players, query]);
 
   const results: ResultItem[] = useMemo(() => [
+    ...stepMatches,
     ...navMatches.map((item) => ({ key: item.key, label: item.label, run: () => item.run(props) })),
     ...playerMatches.map((p) => ({
       key: `player:${p.player_id}`,
       label: `${p.full_name}${p.team ? ` — ${p.team}` : ""}${p.position ? ` (${p.position})` : ""}`,
       run: () => setPlayerProfileId(p.player_id),
     })),
-  ], [navMatches, playerMatches, props, setPlayerProfileId]);
+  ], [stepMatches, navMatches, playerMatches, props, setPlayerProfileId]);
 
   useEffect(() => {
     listRef.current?.children[selectedIndex]?.scrollIntoView({ block: "nearest" });

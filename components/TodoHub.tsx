@@ -4,14 +4,14 @@ import type { LeagueOverviewEntry, SleeperLeague, SleeperPlayer, SleeperUser } f
 import type { TodoView } from "../app/hooks/useHubRouting";
 import type { TodoDoneMark } from "../app/hooks/useTodoDone";
 import {
-  getActionState,
   groupActionsByLeague,
   groupActionsByPlayer,
+  splitActionsByState,
   type ActionAppTab,
   type ActionItem,
   type ActionKind,
-  type ActionState,
   type DoneRecord,
+  type VisibleAction,
 } from "../lib/helpers/actionQueue";
 import { formatDayTime } from "../lib/helpers/formatting";
 import { injuryStatusStyle } from "./AlertsPage/alertsPageHelpers";
@@ -74,11 +74,6 @@ const KIND_TAG: Record<ActionKind, { label: string; cls: string }> = {
 const DAY_LETTER = { Thu: "T", Fri: "F", Sat: "S" } as const;
 const DAY_NAME = { Thu: "Thursday", Fri: "Friday", Sat: "Saturday" } as const;
 
-interface VisibleItem {
-  item: ActionItem;
-  state: ActionState;
-}
-
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 function DeadlineChip({ item, now }: { item: ActionItem; now: number }) {
@@ -91,7 +86,7 @@ function DeadlineChip({ item, now }: { item: ActionItem; now: number }) {
 function ActionRow({
   entry, now, leagueLabel, onMarkDone, actions,
 }: {
-  entry: VisibleItem;
+  entry: VisibleAction;
   now: number;
   /** By player shows which league each move is in. */
   leagueLabel?: string;
@@ -172,17 +167,8 @@ function TodoHub({
   }, []);
   const [showDone, setShowDone] = useState(false);
 
-  const { visible, hidden } = useMemo(() => {
-    const visibleItems: VisibleItem[] = [];
-    const hiddenItems: ActionItem[] = [];
-    for (const item of items) {
-      if (item.expiresAt != null && now >= item.expiresAt) continue;
-      const state = getActionState(item, done[item.key]);
-      if (state === "done") hiddenItems.push(item);
-      else visibleItems.push({ item, state });
-    }
-    return { visible: visibleItems, hidden: hiddenItems };
-  }, [items, done, now]);
+  // Same split the League Hub's stepping bar orders its leagues by (getAttentionLeagues).
+  const { visible, hidden } = useMemo(() => splitActionsByState(items, done, now), [items, done, now]);
 
   const stateByKey = useMemo(() => new Map(visible.map((v) => [v.item.key, v])), [visible]);
   const leagueGroups = useMemo(
@@ -218,7 +204,7 @@ function TodoHub({
   }
 
   const waiverWatch = view === "WAIVER_WATCH";
-  const row = (v: VisibleItem, opts: { leagueLabel?: string; actions?: React.ReactNode } = {}) => (
+  const row = (v: VisibleAction, opts: { leagueLabel?: string; actions?: React.ReactNode } = {}) => (
     <ActionRow key={v.item.key} entry={v} now={now} onMarkDone={onMarkDone} {...opts} />
   );
 
@@ -293,7 +279,7 @@ function TodoHub({
             const id = group.league.league_id;
             const groupItems = group.items
               .map((item) => stateByKey.get(item.key))
-              .filter((v): v is VisibleItem => !!v);
+              .filter((v): v is VisibleAction => !!v);
             return (
               <section key={id} aria-label={group.league.name} className="rounded-xl border border-slate-800 bg-slate-900">
                 {/* On a phone the league name gets its own line — sharing one with the buttons cut it

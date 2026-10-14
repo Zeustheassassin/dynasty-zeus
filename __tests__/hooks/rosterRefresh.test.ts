@@ -232,6 +232,32 @@ describe("To-Do hub (Stage 1, 10/14)", () => {
     expect(result.current.providerProps.myRoster?.reserve).toEqual(["p1"]);
   });
 
+  it("Open in app starts a run through the leagues needing attention (Stage 3)", async () => {
+    const { result } = await mount();
+    await waitFor(() => expect(myEntry(result)?.roster?.starters).toEqual(["p1"]));
+    sleeper = { myRoster: { players: ["p1", "p2"], starters: ["p1"], reserve: [] }, p1Status: "Out" };
+    await act(async () => { await result.current.hubRouterProps.refreshTodo(); });
+    expect(todoKeys(result)).toContain("irEligible:555:p1");
+
+    // From To-Do the palette's Next goes to the top of the list.
+    expect(result.current.mainLayoutProps.peekLeagueStep(1)).toEqual({
+      stop: { leagueId: "555", appTab: "ROSTERS" }, index: 0, total: 1,
+    });
+    act(() => result.current.hubRouterProps.onOpenTodoLeague("555", "ROSTERS"));
+    expect(result.current.hubRouterProps.mainTab).toBe("LEAGUES");
+    expect(result.current.hubRouterProps.leagueHubTab).toBe("ROSTERS");
+    await waitFor(() => expect(result.current.hubRouterProps.selectedLeague?.league_id).toBe("555"));
+    expect(result.current.hubRouterProps.leagueStepSession).toMatchObject({
+      userId: ME, stops: [{ leagueId: "555", appTab: "ROSTERS" }], cursor: 0,
+    });
+    // League 1 of 1: in the League Hub there's nowhere further to step.
+    expect(result.current.mainLayoutProps.peekLeagueStep(1)).toBeNull();
+    act(() => result.current.hubRouterProps.backToTodo());
+    expect(result.current.hubRouterProps.mainTab).toBe("TODO");
+    act(() => result.current.hubRouterProps.endLeagueStepping());
+    expect(result.current.hubRouterProps.leagueStepSession).toBeNull();
+  });
+
   it("See moves opens By player on that player", async () => {
     const { result } = await mount();
     await waitFor(() => expect(result.current.mainLayoutProps.user?.user_id).toBe(ME));
