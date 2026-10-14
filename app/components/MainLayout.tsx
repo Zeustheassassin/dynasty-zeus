@@ -32,8 +32,9 @@ interface MainLayoutProps {
 
 // Seasonal primary hub set for the mobile bottom nav (R3) — mirrors the
 // isRegularSeason check used everywhere else in the app (see
-// lib/helpers/rookieProjection.ts's `isOffseason`).
-const IN_SEASON_MOBILE_HUBS: MainTab[] = ["TRADE_HUB", "LEAGUES", "GAMEDAY_HUB", "ALERTS"];
+// lib/helpers/rookieProjection.ts's `isOffseason`). In season To-Do takes
+// Trade Hub's spot (user, 10/14); Trade Hub moves to More.
+const IN_SEASON_MOBILE_HUBS: MainTab[] = ["TODO", "LEAGUES", "GAMEDAY_HUB", "ALERTS"];
 const OFFSEASON_MOBILE_HUBS: MainTab[] = ["TRADE_HUB", "LEAGUES", "DATA_HUB", "ALERTS"];
 
 function MobileOverflowSheet({

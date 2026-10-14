@@ -5,6 +5,11 @@
 // ============================================================
 import type { LineupCoachRow, SleeperPlayer } from "../types";
 
+/** Points a suggested lineup change has to be worth before anything flags it: the League
+ *  Overview dot stays green below it (projection recompute noise between two close players),
+ *  the T/F/S flags need a stake this big, and the To-Do hub hides smaller lineup changes. */
+export const LINEUP_DELTA_FLOOR = 0.5;
+
 /** Positions that can fill a FLEX slot. */
 export const FLEX_ELIGIBLE_POSITIONS = ["RB", "WR", "TE"];
 

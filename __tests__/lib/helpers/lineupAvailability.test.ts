@@ -130,6 +130,18 @@ describe("getLatePivotRisks", () => {
     expect(getLatePivotRisks(base({ isRiskFn: () => false }), now)).toEqual([]);
     expect(getLatePivotRisks(base({ kickoffFn: () => null }), now)).toEqual([]);
   });
+
+  // swapBy (To-Do hub, 10/14): the last chance to bench him for an earlier-game backup.
+  it("gives the last earlier-game backup's kickoff as swapBy", () => {
+    const risks = getLatePivotRisks(base({}), now);
+    expect(risks[0].swapBy).toBe(early); // wrEarly fits WR and kicks off before inactives
+  });
+
+  it("has no swapBy once every earlier-game backup has kicked off, or none fits", () => {
+    expect(getLatePivotRisks(base({}), early)[0].swapBy).toBeNull();
+    expect(getLatePivotRisks(base({ playerIds: ["coker", "rbEarly"] }), now)[0].swapBy).toBeNull();
+    expect(getLatePivotRisks(base({ isUnavailableFn: (id) => id === "wrEarly" }), now)[0].swapBy).toBeNull();
+  });
 });
 
 describe("getLineupAvailabilityChecks", () => {

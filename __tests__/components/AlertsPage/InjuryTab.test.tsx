@@ -203,3 +203,42 @@ describe("InjuryTab — IR-eligibility badge and chip outline", () => {
     expect(screen.getByText("Dynasty 26").className).not.toContain("border-red-500");
   });
 });
+
+describe("InjuryTab — See moves (To-Do hub)", () => {
+  const entry: InjuryReportPlayer = {
+    player: mkPlayer(),
+    playerId: "p1",
+    leagues: [{ id: "leagueA", name: "Alpha" }],
+    startingLeagues: [{ id: "leagueA", name: "Alpha" }],
+    irLeagues: [],
+    irEligibleLeagues: [],
+    isWatchlisted: false,
+  };
+  const renderTab = (todoPlayerIds: Set<string>, onSeeTodoMoves = vi.fn(), setExpandedInjuryId = vi.fn()) =>
+    render(
+      <InjuryTab
+        injuryReportPlayers={[entry]}
+        currentNFLWeek={5}
+        expandedInjuryId={null}
+        setExpandedInjuryId={setExpandedInjuryId}
+        todoPlayerIds={todoPlayerIds}
+        onSeeTodoMoves={onSeeTodoMoves}
+      />
+    );
+
+  it("links a player with open moves to the To-Do hub, without expanding the row", () => {
+    const onSeeTodoMoves = vi.fn();
+    const setExpandedInjuryId = vi.fn();
+    renderTab(new Set(["p1"]), onSeeTodoMoves, setExpandedInjuryId);
+    fireEvent.click(screen.getByRole("button", { name: /See moves for Test Player/ }));
+    expect(onSeeTodoMoves).toHaveBeenCalledWith("p1");
+    expect(setExpandedInjuryId).not.toHaveBeenCalled();
+    // The status badge is untouched.
+    expect(screen.getByText("Questionable")).toBeTruthy();
+  });
+
+  it("shows no link for a player with nothing to do", () => {
+    renderTab(new Set(["someoneElse"]));
+    expect(screen.queryByText("See moves")).toBeNull();
+  });
+});

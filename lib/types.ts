@@ -433,6 +433,10 @@ export interface LeagueOverviewEntry {
   rosters: SleeperRoster[];
   picks: AugmentedPick[];
   userMap: Record<string, string>;
+  /** Earliest moment in Sleeper these rosters can reflect: the fetch time for a cache-skipping
+   *  Refresh, otherwise the fetch time less ROSTER_DATA_MAX_AGE_MS. The To-Do hub re-checks a
+   *  Done item only against rosters newer than the click. */
+  rostersAsOf?: number;
 }
 
 // ── League hub ───────────────────────────────────────────────
@@ -526,6 +530,45 @@ export interface LeagueLineupStatus {
   /** One entry per Thursday/Friday/Saturday whose not-yet-started games hold part of the
    *  suggested change (stake > 0), in kickoff order. */
   earlyLocks: EarlyLockStatus[];
+  /** The suggested swaps themselves (swapCount of them) — the To-Do hub lists them. */
+  swaps: LineupStatusSwap[];
+  /** The pivotRiskCount starters: risky, with no bench player left once inactives land. */
+  pivotRisks: LineupStatusPivotRisk[];
+  /** Starting slots the suggestion can only fill with a player on bye or ruled out, or with no
+   *  one at all — only a pickup fixes them. */
+  emptySlots: LineupStatusEmptySlot[];
+  /** Earliest moment in Sleeper the roster behind this status can reflect (see
+   *  LeagueOverviewEntry.rostersAsOf); null when unknown. */
+  asOf: number | null;
+}
+
+export interface LineupStatusSwap {
+  slot: string;
+  /** Bench player the suggestion starts. */
+  inId: string;
+  /** Starter he replaces; null when that slot is empty now. */
+  outId: string | null;
+  delta: number;
+  /** First kickoff, still to come, of the two players — the move has to be made before it. */
+  lockAt: number | null;
+}
+
+export interface LineupStatusPivotRisk {
+  slot: string;
+  playerId: string;
+  kickoffAt: number;
+  /** When his inactive call should land (kickoff − 90 min). */
+  decisionAt: number;
+  /** Last kickoff before decisionAt among bench players who could still go in for him; null
+   *  when none is left (only a pickup in a later game helps). */
+  swapBy: number | null;
+}
+
+export interface LineupStatusEmptySlot {
+  slot: string;
+  /** The player the suggestion is left with, or null when no one on the roster fits the slot. */
+  playerId: string | null;
+  reason: "none" | "bye" | "out";
 }
 
 /** Thursday, Friday or Saturday, US Eastern: game days that lock before the Sunday slate. */

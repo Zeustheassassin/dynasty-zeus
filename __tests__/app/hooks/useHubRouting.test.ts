@@ -116,6 +116,27 @@ describe("useHubRouting", () => {
     replaceSpy.mockRestore();
   });
 
+  it("keeps the To-Do view (By league / By player) in the URL and restores it", () => {
+    const { result } = renderHook(() => useHubRouting());
+    expect(result.current.todoView).toBe("BY_LEAGUE");
+    act(() => { result.current.setMainTab("TODO"); });
+    act(() => { result.current.setTodoView("BY_PLAYER"); });
+    expect(new URLSearchParams(window.location.search).get("tab")).toBe("BY_PLAYER");
+
+    act(() => {
+      setUrl("hub=TODO&tab=BY_LEAGUE");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(result.current.todoView).toBe("BY_LEAGUE");
+  });
+
+  it("restores the last To-Do view from localStorage, ignoring a stale value", () => {
+    localStorage.setItem("todoView", JSON.stringify("BY_PLAYER"));
+    expect(renderHook(() => useHubRouting()).result.current.todoView).toBe("BY_PLAYER");
+    localStorage.setItem("todoView", JSON.stringify("WAIVER_WATCH_OLD"));
+    expect(renderHook(() => useHubRouting()).result.current.todoView).toBe("BY_LEAGUE");
+  });
+
   it("ignores a popstate event with no recognizable hub", () => {
     const { result } = renderHook(() => useHubRouting());
     act(() => { result.current.setMainTab("TRADE_HUB"); });

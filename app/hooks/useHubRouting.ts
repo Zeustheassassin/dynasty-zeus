@@ -21,6 +21,8 @@ const ALERTS_FEED_TABS = ["transactions", "waivers", "injury", "alerts"] as cons
 export type AlertsFeedTab = typeof ALERTS_FEED_TABS[number];
 const GAMEDAY_HUB_TABS = ["MATCHUPS", "DASHBOARD"] as const;
 export type GamedayHubTab = typeof GAMEDAY_HUB_TABS[number];
+const TODO_VIEWS = ["BY_LEAGUE", "BY_PLAYER"] as const;
+export type TodoView = typeof TODO_VIEWS[number];
 
 const MAIN_TABS = HUBS.map((h) => h.id) as MainTab[];
 const LEAGUE_HUB_TABS = LEAGUE_HUB_GROUPS.flatMap((g) => g.tabs.map((t) => t.id)) as LeagueHubTab[];
@@ -44,7 +46,7 @@ function restore<T>(key: string, allowed: readonly T[], fallback: T): T {
 // back stack).
 function subTabForHub(
   hub: MainTab,
-  state: { tradeHubSection: TradeHubSection; leagueHubTab: LeagueHubTab; dataHubTab: DataHubTab; draftHubSection: DraftHubSection; alertsFeedTab: AlertsFeedTab; gamedayHubTab: GamedayHubTab }
+  state: { tradeHubSection: TradeHubSection; leagueHubTab: LeagueHubTab; dataHubTab: DataHubTab; draftHubSection: DraftHubSection; alertsFeedTab: AlertsFeedTab; gamedayHubTab: GamedayHubTab; todoView: TodoView }
 ): string | null {
   switch (hub) {
     case "TRADE_HUB": return state.tradeHubSection;
@@ -53,6 +55,7 @@ function subTabForHub(
     case "DRAFT": return state.draftHubSection;
     case "ALERTS": return state.alertsFeedTab;
     case "GAMEDAY_HUB": return state.gamedayHubTab;
+    case "TODO": return state.todoView;
     default: return null;
   }
 }
@@ -129,6 +132,13 @@ export function useHubRouting() {
       ? (tab as GamedayHubTab)
       : restore("gamedayHubTab", GAMEDAY_HUB_TABS, "DASHBOARD");
   });
+  const [todoView, setTodoView] = useState<TodoView>(() => {
+    const hub = readUrlHub();
+    const tab = readUrlTab();
+    return hub === "TODO" && tab && (TODO_VIEWS as readonly string[]).includes(tab)
+      ? (tab as TodoView)
+      : restore("todoView", TODO_VIEWS, "BY_LEAGUE");
+  });
 
   // Persist each sub-tab selection (writing to localStorage is an
   // external-system sync, the intended use of effects — not a React state
@@ -139,10 +149,11 @@ export function useHubRouting() {
   useEffect(() => { setLocalStorageItem("draftHubSection", draftHubSection); }, [draftHubSection]);
   useEffect(() => { setLocalStorageItem("alertsFeedTab", alertsFeedTab); }, [alertsFeedTab]);
   useEffect(() => { setLocalStorageItem("gamedayHubTab", gamedayHubTab); }, [gamedayHubTab]);
+  useEffect(() => { setLocalStorageItem("todoView", todoView); }, [todoView]);
 
   const setMainTab = useCallback((tab: MainTab) => { setMainTabState(tab); }, []);
 
-  const currentSubTab = subTabForHub(mainTab, { tradeHubSection, leagueHubTab, dataHubTab, draftHubSection, alertsFeedTab, gamedayHubTab });
+  const currentSubTab = subTabForHub(mainTab, { tradeHubSection, leagueHubTab, dataHubTab, draftHubSection, alertsFeedTab, gamedayHubTab, todoView });
 
   // Sync state -> URL. `prevRef`/`isFirstRunRef` live only inside this effect's
   // closure trail (read and written here alone), so there's no stale-closure
@@ -186,6 +197,7 @@ export function useHubRouting() {
         else if (hub === "DRAFT" && (DRAFT_HUB_SECTIONS as readonly string[]).includes(tab)) setDraftHubSection(tab as DraftHubSection);
         else if (hub === "ALERTS" && (ALERTS_FEED_TABS as readonly string[]).includes(tab)) setAlertsFeedTab(tab as AlertsFeedTab);
         else if (hub === "GAMEDAY_HUB" && (GAMEDAY_HUB_TABS as readonly string[]).includes(tab)) setGamedayHubTab(tab as GamedayHubTab);
+        else if (hub === "TODO" && (TODO_VIEWS as readonly string[]).includes(tab)) setTodoView(tab as TodoView);
       }
     }
     window.addEventListener("popstate", onPopState);
@@ -200,5 +212,6 @@ export function useHubRouting() {
     draftHubSection, setDraftHubSection,
     alertsFeedTab, setAlertsFeedTab,
     gamedayHubTab, setGamedayHubTab,
+    todoView, setTodoView,
   };
 }

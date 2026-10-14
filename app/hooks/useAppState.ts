@@ -21,13 +21,10 @@ import {
   withFcValues,
   computeScoringMultipliers,
   getLeagueNumQbs,
-  computeSuggestedLineup,
-  getEarlyLockStake,
+  buildLeagueLineupStatus,
   recomputeConsensusFpts,
   resolveGameState,
   isGameStartedState,
-  getEarlyLockDay,
-  EARLY_LOCK_DAYS,
   getProjectionKickoffAt,
   getGamedayPollPlan,
   getCurrentNflWeek,
@@ -35,7 +32,6 @@ import {
   PROJECTION_REFRESH_MS,
   buildInjuryNewsFlags,
   getLineupAvailabilityChecks,
-  getLatePivotRisks,
   lineupWeekKey,
   type LineupAvailability,
 } from "../../lib/helpers";
@@ -71,8 +67,10 @@ import { buildConsensusOrder, buildPersonalDispositions, buildPersonalSignals, b
 import { MY_DISPOSITIONS, pickDispositionKey, normalizeDisposition } from "../../lib/helpers/dispositions";
 import type { PersonalSignal } from "../../lib/helpers/personalRankings";
 import { useSimulatorState } from "./useSimulatorState";
+import { useTodoDone } from "./useTodoDone";
+import { buildActionQueue, getActionState, type ActionAppTab, type ActionItem } from "../../lib/helpers/actionQueue";
 import { sleeperApi } from "../../lib/sleeperApi";
-import { PLAYERS_BACKGROUND_REFRESH_MS, ROSTER_OVERVIEW_FRESH_GAP_MS } from "../../lib/constants";
+import { PLAYERS_BACKGROUND_REFRESH_MS, ROSTER_OVERVIEW_FRESH_GAP_MS, ROSTER_DATA_MAX_AGE_MS } from "../../lib/constants";
 import { getLocalStorageItem, setLocalStorageItem, removeLocalStorageItem, removeLocalStorageItemsByPrefix } from "@/lib/hooks/useLocalStorage";
 import type { LeagueRef } from "../../components/AlertsPage/alertsPageHelpers";
 import { isReserveEligible } from "../../components/AlertsPage/alertsPageHelpers";
@@ -162,6 +160,7 @@ export function useAppState() {
     draftHubSection, setDraftHubSection,
     alertsFeedTab, setAlertsFeedTab,
     gamedayHubTab, setGamedayHubTab,
+    todoView, setTodoView,
   } = useHubRouting();
   const [showAllOpenTrades, setShowAllOpenTrades] = useState(false);
 
@@ -170,6 +169,10 @@ export function useAppState() {
   // -------------------------
   const [selectedLeague, setSelectedLeague] = useState<SleeperLeague | null>(null);
   const [roster, setRoster] = useState<SleeperRoster | null>(null);
+  // Earliest moment in Sleeper `roster` can reflect (load time less the roster caches' max age) —
+  // the selected league's LeagueLineupStatus.asOf, so a To-Do Done mark isn't re-checked against it
+  // too early.
+  const [rosterAsOf, setRosterAsOf] = useState<number | null>(null);
   const [rosters, setRosters] = useState<SleeperRoster[]>([]);
   const [players, setPlayers] = useState<Record<string, SleeperPlayer>>({});
 
@@ -287,6 +290,7 @@ const [standings, setStandings] = useState<StandingRow[]>([]);
     onDisconnect: () => {
       setSelectedLeague(null);
       setRoster(null);
+      setRosterAsOf(null);
       setRosters([]);
       setPicks([]);
       setMainTab("DASHBOARD");
@@ -993,6 +997,11 @@ useEffect(() => {
     loadNflState();
     loadRedraftValues();
   }
+  // The To-Do hub is built from the same overview rosters (plus the lineup status below).
+  if (mainTab === "TODO" && !leagueOverviewLoaded && leagues.length > 0) {
+    loadLeagueOverview();
+    loadNflState();
+  }
   // Also load overview when Alerts or the Dashboard opens — Alerts needs it for
   // cross-league data, and the Dashboard's Your Teams grid needs full per-league
   // rosters (not just the user's own) to rank/bucket each team's direction (Phase J).
@@ -1013,6 +1022,7 @@ useEffect(() => {
 // useVisibilityPolling pauses while the tab is hidden and never overlaps a still-running load.
 const showsLeagueOverviewData =
   (mainTab === "LEAGUES" && (leagueHubTab === "OVERVIEW" || leagueHubTab === "ROSTER_OVERVIEW")) ||
+  mainTab === "TODO" ||
   mainTab === "ALERTS" ||
   mainTab === "DASHBOARD";
 useVisibilityPolling(
@@ -1069,7 +1079,9 @@ useEffect(() => {
 }, [playerProfileId, leagues.length, user, leagueOverviewLoaded, redraftValues, loadRedraftValues, loadLeagueOverview]);
 
 useEffect(() => {
-  if (mainTab === "LEAGUES" && (leagueHubTab === "SIMULATOR" || leagueHubTab === "OVERVIEW")) {
+  // The To-Do hub's lineup items read the same leagueLineupStatus as the Overview dot, so it needs
+  // this week's projections and schedule too.
+  if ((mainTab === "LEAGUES" && (leagueHubTab === "SIMULATOR" || leagueHubTab === "OVERVIEW")) || mainTab === "TODO") {
     loadNflState();
     loadRedraftValues();
     const simulatorProjectionWeek = currentNflWeek;
@@ -1080,8 +1092,8 @@ useEffect(() => {
     } else if (!projectionLoaded) {
       loadProjections(simulatorProjectionWeek === 0 ? "season" : simulatorProjectionWeek, enabledExtraSources);
     }
-    // OVERVIEW's League Overview lineup-status dot needs real per-team game
-    // state for the same lock-out reason as the Starters effect above.
+    // OVERVIEW's League Overview lineup-status dot (and the To-Do hub's lineup items) need real
+    // per-team game state for the same lock-out reason as the Starters effect above.
     loadSchedule(simulatorProjectionWeek);
   }
   // projectionWeek/projectionLoaded are in deps and set inside this effect; the conditional guards prevent loops
@@ -1251,6 +1263,7 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
   // its rosters/picks/users over the league the user actually ended up on.
   const seq = beginLoadRoster();
   const isStale = () => !isLoadRosterCurrent(seq);
+  const loadStartedAt = Date.now();
 
   // ── Save recent league ───────────────────────────────────────────────────
   let recents = getLocalStorageItem<{ league_id: string; name: string }[]>("recentLeagues", []);
@@ -1280,6 +1293,7 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
   const myRoster = allRosters.find((r) => r.owner_id === user?.user_id);
   if (!myRoster) { setReadyLeagueId(league.league_id); return; }
   setRoster(myRoster);
+  setRosterAsOf(loadStartedAt - ROSTER_DATA_MAX_AGE_MS);
 
   // ── Steps 2/4/6: Pick window, traded-pick ownership, and draft slots ─────
   // Shared with useSpyState/useLeagueOverview via buildLeaguePickPool — see
@@ -1991,18 +2005,16 @@ const saveSnapshotNow = async () => {
     const { isExcludedFn, isRiskFn, isUnavailableFn } = getLineupAvailabilityChecks(lineupAvailability);
     const scheduledKickoff = (id: string) =>
       resolveGameState(lineupPlayers[id]?.team, scheduleByTeam, kickoffFn(id)).kickoffAt;
-    // The Thursday/Friday/Saturday game a player is in, if it hasn't kicked off. The T/F/S
-    // flags price what the suggestion loses if that day's games lock before the lineup changes.
-    const upcomingEarlyLockDay = (id: string) => {
+    // A player's kickoff while his game is still to come — the T/F/S flags and each swap's lock time.
+    const upcomingKickoff = (id: string) => {
       const game = resolveGameState(lineupPlayers[id]?.team, scheduleByTeam, kickoffFn(id));
-      return game.state === "Upcoming" && game.kickoffAt != null ? getEarlyLockDay(game.kickoffAt) : null;
+      return game.state === "Upcoming" ? game.kickoffAt : null;
     };
-    const playerName = (p: SleeperPlayer) =>
-      p.full_name || `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim() || p.player_id;
 
-    Object.values(leagueOverviewData).forEach(({ league, rosters: leagueRosters }) => {
+    Object.values(leagueOverviewData).forEach(({ league, rosters: leagueRosters, rostersAsOf }) => {
       const isSelectedLeague = league.league_id === selectedLeague?.league_id;
-      const myRoster = isSelectedLeague && roster
+      const useSelectedRoster = isSelectedLeague && !!roster;
+      const myRoster = useSelectedRoster
         ? roster
         : leagueRosters.find((r) => r.owner_id === user.user_id);
       if (!myRoster) { status[league.league_id] = null; return; }
@@ -2026,43 +2038,56 @@ const saveSnapshotNow = async () => {
       const isLockedFn = (id: string) => isGameStartedState(gameState(id));
       const isByeFn = (id: string) => gameState(id) === "No game";
 
-      const lineupInput = {
-        rosterPositions,
-        starters: myRoster.starters,
-        playerIds: eligiblePlayerIds,
-        players: lineupPlayers,
-        scoreFn,
-        kickoffFn,
-        hasKickoffData,
-        isLockedFn,
-        isExcludedFn,
-        isByeFn,
-      };
-      const { lineup, swaps, currentLineupScore, suggestedLineupScore } = computeSuggestedLineup(lineupInput);
-      const earlyLocks = EARLY_LOCK_DAYS.flatMap((day) => {
-        const stake = getEarlyLockStake(lineupInput, (id) => upcomingEarlyLockDay(id) === day);
-        return stake.points > 0 ? [{ day, stake: stake.points, moves: stake.moves.map(playerName) }] : [];
-      });
-      const pivotRisks = getLatePivotRisks({
-        lineup,
-        playerIds: eligiblePlayerIds,
-        players: lineupPlayers,
-        scoreFn,
-        kickoffFn: scheduledKickoff,
+      // The coach run, T/F/S stakes, no-backup risks and the To-Do hub's swap / empty-slot
+      // lists all come out of one call (lib/helpers/lineupStatus.ts).
+      status[league.league_id] = buildLeagueLineupStatus({
+        lineup: {
+          rosterPositions,
+          starters: myRoster.starters,
+          playerIds: eligiblePlayerIds,
+          players: lineupPlayers,
+          scoreFn,
+          kickoffFn,
+          hasKickoffData,
+          isLockedFn,
+          isExcludedFn,
+          isByeFn,
+        },
+        upcomingKickoffFn: upcomingKickoff,
+        scheduledKickoffFn: scheduledKickoff,
         isRiskFn,
         isUnavailableFn,
+        asOf: useSelectedRoster ? rosterAsOf : rostersAsOf ?? null,
       });
-      status[league.league_id] = {
-        isOptimal: swaps.length === 0,
-        swapCount: swaps.length,
-        delta: Math.max(0, suggestedLineupScore - currentLineupScore),
-        pivotRiskCount: pivotRisks.filter((risk) => risk.pivots.length === 0).length,
-        earlyLocks,
-      };
     });
 
     return status;
-  }, [leagueOverviewData, leagueOverviewLoaded, projectionData, projectionLoaded, lineupAvailability, scheduleByTeam, loadingSchedule, roster, currentNflWeek, user?.user_id, selectedLeague?.league_id]);
+  }, [leagueOverviewData, leagueOverviewLoaded, projectionData, projectionLoaded, lineupAvailability, scheduleByTeam, loadingSchedule, roster, rosterAsOf, currentNflWeek, user?.user_id, selectedLeague?.league_id]);
+
+  // ── To-Do hub ───────────────────────────────────────────────────────────────
+  // Every move the user's leagues need made in Sleeper (lib/helpers/actionQueue.ts): lineup items
+  // straight off leagueLineupStatus above, roster/IR items off the same overview rosters Roster
+  // Overview counts, IR eligibility from Sleeper's raw player map. No Sleeper calls of its own.
+  const todoItems = useMemo((): ActionItem[] => {
+    if (!user?.user_id || !leagueOverviewLoaded) return [];
+    return buildActionQueue({
+      leagues,
+      leagueOverviewData,
+      lineupStatus: leagueLineupStatus,
+      userId: user.user_id,
+      players,
+      lineupPlayers: lineupAvailability.players,
+    });
+  }, [user?.user_id, leagueOverviewLoaded, leagues, leagueOverviewData, leagueLineupStatus, players, lineupAvailability.players]);
+  // Done marks: this device, per Supabase account and NFL week (useTodoDone).
+  const todoWeekKey = nflState?.season ? lineupWeekKey(nflState.season, currentNflWeek) : null;
+  const { done: todoDone, markDone: markTodoDone, undoDone: undoTodoDone } = useTodoDone(supabaseUser?.id ?? null, todoWeekKey);
+  // Players with a move still on the list — the Injury Report's "See moves" link.
+  const todoPlayerIds = useMemo(
+    () => new Set(todoItems.filter((item) => getActionState(item, todoDone[item.key]) !== "done").flatMap((item) => item.playerIds)),
+    [todoItems, todoDone]
+  );
+  const [todoFocusPlayerId, setTodoFocusPlayerId] = useState<string | null>(null);
 
   const selectedLeagueMateProfiles = useMemo((): LeagueMateView[] => {
     if (!selectedLeague || !rosters.length || !user?.user_id) return [];
@@ -3341,6 +3366,39 @@ const onOpenInjuryReport = useCallback(() => {
   setMainTab("ALERTS");
 }, [setAlertsFeedTab, setMainTab]);
 
+// To-Do hub: "Open in app" lands on the tab the move is made from (lineup -> Starters, roster/IR ->
+// Rosters); the Injury Report's "See moves" opens By player on that player.
+const onOpenTodoLeague = useCallback((leagueId: string, tab: ActionAppTab) => {
+  const league = leaguesRef2.current.find((l) => l.league_id === leagueId);
+  if (!league) return;
+  loadRoster(league);
+  setLeagueHubTab(tab);
+  setMainTab("LEAGUES");
+}, [loadRoster, setLeagueHubTab, setMainTab]);
+
+const onSeeTodoMoves = useCallback((playerId: string) => {
+  setTodoFocusPlayerId(playerId);
+  setTodoView("BY_PLAYER");
+  setMainTab("TODO");
+}, [setTodoView, setMainTab]);
+
+// To-Do Refresh: Roster Overview's refresh (rosters past both caches + Sleeper's player map, at
+// most once a minute), then the selected league's own roster — its lineup items read `roster`,
+// not the overview copy. That reload reads what the overview pass just cached (zero new calls).
+const [refreshingTodo, setRefreshingTodo] = useState(false);
+const refreshTodo = useCallback(async () => {
+  setRefreshingTodo(true);
+  try {
+    await refreshRosterOverview();
+    const league = selectedLeagueRef.current;
+    if (league) await loadRoster(league);
+  } catch (err) {
+    log.error("To-Do refresh failed", { err: String(err) });
+  } finally {
+    setRefreshingTodo(false);
+  }
+}, [refreshRosterOverview, loadRoster]);
+
 const onOpenAllTrades = useCallback(() => {
   setShowAllOpenTrades(true);
 }, []);
@@ -3444,6 +3502,17 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     onOpenInjuryReport,
     onOpenAllTrades,
     onOpenValueTrends,
+    todoItems,
+    todoDone,
+    markTodoDone,
+    undoTodoDone,
+    todoView, setTodoView,
+    todoFocusPlayerId,
+    todoPlayerIds,
+    onSeeTodoMoves,
+    onOpenTodoLeague,
+    refreshTodo,
+    refreshingTodo,
     showAllOpenTrades, setShowAllOpenTrades,
     alertsFeedTab, setAlertsFeedTab,
     leagueHubTab, setLeagueHubTab,

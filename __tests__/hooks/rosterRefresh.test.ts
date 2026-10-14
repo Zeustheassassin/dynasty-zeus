@@ -197,3 +197,47 @@ describe("loadRoster", () => {
     expect(Object.keys(window.localStorage).filter((k) => k.startsWith("leagueData_"))).toEqual([]);
   });
 });
+
+describe("To-Do hub (Stage 1, 10/14)", () => {
+  const todoKeys = (r: Hook) => r.current.hubRouterProps.todoItems.map((i) => i.key);
+
+  it("lists an IR move off the overview rosters; its Refresh re-pulls them past the caches", async () => {
+    const { result } = await mount();
+    await waitFor(() => expect(myEntry(result)?.roster?.starters).toEqual(["p1"]));
+    await waitFor(() => expect(result.current.providerProps.players.p1?.injury_status).toBe("Questionable"));
+    expect(todoKeys(result)).toEqual([]);
+
+    // Sleeper now lists p1 Out; this league lets Out players onto its one open IR slot.
+    sleeper = { myRoster: { players: ["p1", "p2"], starters: ["p1"], reserve: [] }, p1Status: "Out" };
+    const clickedAt = Date.now();
+    await act(async () => { await result.current.hubRouterProps.refreshTodo(); });
+
+    expect(rosterCalls.filter((c) => c.bypass).map((c) => c.leagueId)).toEqual(["555"]);
+    expect(urls).toContain("/api/players?fresh=1");
+    const item = result.current.hubRouterProps.todoItems.find((i) => i.key === "irEligible:555:p1");
+    expect(item).toMatchObject({ kind: "irEligible", appTab: "ROSTERS", title: "Move Player p1 to IR" });
+    // A cache-skipping pass is as fresh as the click, so a Done mark made before it is re-checked.
+    expect(item!.asOf).toBeGreaterThanOrEqual(clickedAt);
+    // The Injury Report's "See moves" knows p1 has a move.
+    expect(result.current.hubRouterProps.todoPlayerIds.has("p1")).toBe(true);
+  });
+
+  it("Refresh also reloads the selected league, whose lineup reads its own roster", async () => {
+    window.localStorage.setItem("selectedLeague", JSON.stringify(LEAGUE));
+    const { result } = await mount();
+    await waitFor(() => expect(result.current.providerProps.myRoster?.reserve).toEqual([]));
+
+    sleeper = { myRoster: { players: ["p1", "p2"], starters: [], reserve: ["p1"] }, p1Status: "Out" };
+    await act(async () => { await result.current.hubRouterProps.refreshTodo(); });
+    expect(result.current.providerProps.myRoster?.reserve).toEqual(["p1"]);
+  });
+
+  it("See moves opens By player on that player", async () => {
+    const { result } = await mount();
+    await waitFor(() => expect(result.current.mainLayoutProps.user?.user_id).toBe(ME));
+    act(() => result.current.hubRouterProps.onSeeTodoMoves("p1"));
+    expect(result.current.hubRouterProps.mainTab).toBe("TODO");
+    expect(result.current.hubRouterProps.todoView).toBe("BY_PLAYER");
+    expect(result.current.hubRouterProps.todoFocusPlayerId).toBe("p1");
+  });
+});

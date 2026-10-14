@@ -2,11 +2,13 @@
 import React from "react";
 import dynamic from "next/dynamic";
 import { isWideHub, type MainTab } from "../../lib/hubs";
+import { getCurrentNflWeek } from "../../lib/helpers/season";
 import Dashboard from "../../components/Dashboard";
 import type { DashboardLeagueEntry } from "../../components/Dashboard/TeamSummaryGrid";
 import AlertsPage from "../../components/AlertsPage";
 import ManagementHub from "../../components/ManagementHub";
 import GamedayHub from "../../components/GamedayHub";
+import TodoHub from "../../components/TodoHub";
 import ErrorBoundary from "../../components/ErrorBoundary";
 import { ExposureModal } from "./modals/ExposureModal";
 import { DraftScoutModal } from "./modals/DraftScoutModal";
@@ -14,7 +16,9 @@ import type { DraftScoutPatterns } from "./modals/DraftScoutModal";
 import { TradeHubOpponentModal } from "./modals/TradeHubOpponentModal";
 import { PlayerProfilePanel } from "./modals/PlayerProfilePanel";
 import { AllOpenTradesPanel } from "./modals/AllOpenTradesPanel";
-import type { AlertsFeedTab, GamedayHubTab } from "../hooks/useHubRouting";
+import type { AlertsFeedTab, GamedayHubTab, TodoView } from "../hooks/useHubRouting";
+import type { TodoDoneMark } from "../hooks/useTodoDone";
+import type { ActionAppTab, ActionItem, DoneRecord } from "../../lib/helpers/actionQueue";
 import type {
   SleeperPlayer, SleeperLeague, SleeperRoster,
   SleeperNFLState, SleeperUser, SleeperDraft, SleeperDraftPick,
@@ -114,6 +118,21 @@ interface HubRouterProps {
   setShowAllOpenTrades: (show: boolean) => void;
   alertsFeedTab: AlertsFeedTab;
   setAlertsFeedTab: (tab: AlertsFeedTab) => void;
+
+  // To-Do hub
+  todoItems: ActionItem[];
+  todoDone: Record<string, DoneRecord>;
+  markTodoDone: (marks: TodoDoneMark[]) => void;
+  undoTodoDone: (key: string) => void;
+  todoView: TodoView;
+  setTodoView: (view: TodoView) => void;
+  todoFocusPlayerId: string | null;
+  /** Players with a To-Do move still open — the Injury Report's "See moves" link. */
+  todoPlayerIds: Set<string>;
+  onSeeTodoMoves: (playerId: string) => void;
+  onOpenTodoLeague: (leagueId: string, tab: ActionAppTab) => void;
+  refreshTodo: () => Promise<void>;
+  refreshingTodo: boolean;
 
   // League Hub
   leagueHubTab: LeagueHubTab;
@@ -317,6 +336,8 @@ export function HubRouter({
   onNavigateToAttempts, onNavigateToLeague,
   onOpenRosterOverview, onOpenCrossLeaguePlayers, onOpenInjuryReport, onOpenAllTrades, onOpenValueTrends,
   showAllOpenTrades, setShowAllOpenTrades, alertsFeedTab, setAlertsFeedTab,
+  todoItems, todoDone, markTodoDone, undoTodoDone, todoView, setTodoView, todoFocusPlayerId, todoPlayerIds,
+  onSeeTodoMoves, onOpenTodoLeague, refreshTodo, refreshingTodo,
   leagueHubTab, setLeagueHubTab, activeLeagueHubGroup, standings,
   committedSimsByLeague, leagueSimCache, simQueue, simProgress,
   loadingActivity, loadingLeagueWeeklyMatchups,
@@ -451,6 +472,32 @@ export function HubRouter({
             onNavigateToAttempts={onNavigateToAttempts}
             feedTab={alertsFeedTab}
             setFeedTab={setAlertsFeedTab}
+            todoPlayerIds={todoPlayerIds}
+            onSeeTodoMoves={onSeeTodoMoves}
+          />
+          </ErrorBoundary>
+        )}
+        {mainTab === "TODO" && (
+          <ErrorBoundary label="To-Do">
+          <TodoHub
+            user={user}
+            leagues={leagues}
+            players={players}
+            items={todoItems}
+            done={todoDone}
+            onMarkDone={markTodoDone}
+            onUndoDone={undoTodoDone}
+            view={todoView}
+            setView={setTodoView}
+            focusPlayerId={todoFocusPlayerId}
+            isInSeason={getCurrentNflWeek(nflState) > 0}
+            lineupReady={Object.keys(leagueLineupStatus).length > 0}
+            overviewLoaded={leagueOverviewLoaded}
+            loadingOverview={loadingLeagueOverview}
+            updatedAt={leagueOverviewUpdatedAt}
+            refreshing={refreshingTodo || refreshingRosterOverview}
+            onRefresh={refreshTodo}
+            onOpenInApp={onOpenTodoLeague}
           />
           </ErrorBoundary>
         )}

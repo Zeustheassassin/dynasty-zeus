@@ -1,0 +1,230 @@
+import { describe, it, expect } from "vitest";
+import {
+  buildActionQueue,
+  compareActionItems,
+  getActionState,
+  groupActionsByLeague,
+  groupActionsByPlayer,
+  sleeperLeagueUrl,
+  type ActionItem,
+  type ActionQueueInput,
+} from "@/lib/helpers/actionQueue";
+import { INACTIVES_LEAD_MS } from "@/lib/helpers/lineupAvailability";
+import type {
+  LeagueLineupStatus,
+  LeagueOverviewEntry,
+  SleeperLeague,
+  SleeperLeagueSettings,
+  SleeperPlayer,
+  SleeperRoster,
+} from "@/lib/types";
+
+// To-Do hub action list (Stage 1, 10/14): lineup items straight off LeagueLineupStatus, roster/IR
+// items off Roster Overview's counts (getRosterSlotSummary), Done marks re-checked only against
+// data newer than the click.
+
+const ME = "me";
+// Week of Thu 2026-10-15 (US Eastern): TNF, Sunday early and SNF kickoffs.
+const THU = Date.parse("2026-10-16T00:15:00Z");
+const SUN_EARLY = Date.parse("2026-10-18T17:00:00Z");
+const SUN_LATE = Date.parse("2026-10-19T00:20:00Z");
+
+const mk = (id: string, position: string, injury_status: string | null = null): SleeperPlayer =>
+  ({ player_id: id, full_name: `Player ${id}`, position, team: "KC", injury_status, status: "Active" } as SleeperPlayer);
+
+const PLAYERS: Record<string, SleeperPlayer> = {
+  p1: mk("p1", "RB"),
+  p2: mk("p2", "WR"),
+  p3: mk("p3", "WR", "Questionable"),
+  pBye: mk("pBye", "QB"),
+  irA: mk("irA", "RB", "IR"),
+  stale: mk("stale", "TE"),
+  tx: mk("tx", "WR", "IR"),
+  outB: mk("outB", "RB", "Out"),
+};
+
+function league(id: string, name: string, s: Partial<SleeperLeagueSettings>, rosterPositions = ["RB", "FLEX", "BN"]): SleeperLeague {
+  return {
+    league_id: id, name, season: "2026", roster_positions: rosterPositions,
+    settings: { reserve_allow_out: 1, taxi_slots: 2, ...s } as SleeperLeagueSettings, scoring_settings: {},
+  } as SleeperLeague;
+}
+function roster(players: string[], reserve: string[] = [], taxi: string[] = []): SleeperRoster {
+  return { roster_id: 1, owner_id: ME, players, starters: [], reserve, taxi, settings: {} } as unknown as SleeperRoster;
+}
+function entry(l: SleeperLeague, r: SleeperRoster, rostersAsOf?: number): LeagueOverviewEntry {
+  return { league: l, rosters: [r, { ...r, owner_id: "other", roster_id: 2 }], picks: [], userMap: {}, rostersAsOf };
+}
+function status(over: Partial<LeagueLineupStatus>): LeagueLineupStatus {
+  return {
+    isOptimal: false, swapCount: 0, delta: 0, pivotRiskCount: 0, earlyLocks: [],
+    swaps: [], pivotRisks: [], emptySlots: [], asOf: 100, ...over,
+  };
+}
+
+// Alpha: over the limit by one (4 active of 3), one stale IR player, one IR-eligible with an open slot.
+const A = league("A", "Alpha", { reserve_slots: 2 });
+// Bravo: IR full, so its Out player can't move there.
+const B = league("B", "Bravo", { reserve_slots: 1 });
+// Charlie: no lineup status (offseason-style) but an IR-eligible player.
+const C = league("C", "Charlie", { reserve_slots: 1 });
+
+const OVERVIEW: Record<string, LeagueOverviewEntry> = {
+  A: entry(A, roster(["p1", "p2", "p3", "irA", "stale", "tx"], ["stale"], ["tx"]), 200),
+  B: entry(B, roster(["outB", "pBye", "stale"], ["stale"]), 300),
+  C: entry(C, roster(["irA"])),
+};
+
+const LINEUP: Record<string, LeagueLineupStatus | null> = {
+  A: status({
+    swapCount: 1, delta: 4,
+    swaps: [{ slot: "FLEX", inId: "p1", outId: "p2", delta: 4, lockAt: THU }],
+    earlyLocks: [{ day: "Thu", stake: 4, moves: ["Player p1"] }],
+    pivotRiskCount: 1,
+    pivotRisks: [{ slot: "WR", playerId: "p3", kickoffAt: SUN_LATE, decisionAt: SUN_LATE - INACTIVES_LEAD_MS, swapBy: SUN_EARLY }],
+    emptySlots: [{ slot: "K", playerId: null, reason: "none" }, { slot: "K", playerId: null, reason: "none" }],
+  }),
+  // Under the dot's 0.5 floor: the swap isn't listed, but the bye slot is.
+  B: status({
+    swapCount: 1, delta: 0.3,
+    swaps: [{ slot: "RB", inId: "outB", outId: null, delta: 0.3, lockAt: SUN_EARLY }],
+    emptySlots: [{ slot: "SUPER_FLEX", playerId: "pBye", reason: "bye" }],
+    asOf: 300,
+  }),
+  C: null,
+};
+
+const INPUT: ActionQueueInput = {
+  leagues: [A, B, C], leagueOverviewData: OVERVIEW, lineupStatus: LINEUP, userId: ME, players: PLAYERS,
+};
+const byKey = (items: ActionItem[]) => new Map(items.map((i) => [i.key, i]));
+
+describe("buildActionQueue — lineup items", () => {
+  it("lists a swap with its lock time, T badge and Starters landing", () => {
+    const item = byKey(buildActionQueue(INPUT)).get("lineup:A:p1:p2");
+    expect(item).toMatchObject({
+      kind: "lineup", leagueId: "A", leagueName: "Alpha", playerIds: ["p1", "p2"],
+      title: "Start Player p1 over Player p2", detail: "FLEX · +4.0 pts",
+      deadline: THU, deadlineLabel: "Locks", expiresAt: THU, earlyLockDay: "Thu", appTab: "STARTERS", asOf: 100,
+    });
+  });
+
+  it("hides lineup changes under the dot's 0.5-point floor", () => {
+    const keys = buildActionQueue(INPUT).map((i) => i.key);
+    expect(keys.some((k) => k.startsWith("lineup:B"))).toBe(false);
+  });
+
+  it("badges T/F/S only when the League Overview flags that day", () => {
+    const quiet = { ...LINEUP, A: { ...LINEUP.A!, earlyLocks: [{ day: "Thu" as const, stake: 0.3, moves: [] }] } };
+    const item = byKey(buildActionQueue({ ...INPUT, lineupStatus: quiet })).get("lineup:A:p1:p2");
+    expect(item?.earlyLockDay).toBeNull();
+    expect(item?.deadline).toBe(THU);
+  });
+
+  it("times a no-backup risk by the last earlier-game swap, else by inactives", () => {
+    const item = byKey(buildActionQueue(INPUT)).get("pivotRisk:A:p3");
+    expect(item).toMatchObject({
+      kind: "pivotRisk", playerIds: ["p3"], deadline: SUN_EARLY, deadlineLabel: "Swap by",
+      expiresAt: SUN_LATE - INACTIVES_LEAD_MS, appTab: "STARTERS",
+    });
+    expect(item?.detail).toContain("Questionable");
+
+    const noSwap = { ...LINEUP, A: { ...LINEUP.A!, pivotRisks: [{ ...LINEUP.A!.pivotRisks[0], swapBy: null }] } };
+    const late = byKey(buildActionQueue({ ...INPUT, lineupStatus: noSwap })).get("pivotRisk:A:p3");
+    expect(late).toMatchObject({ deadline: SUN_LATE - INACTIVES_LEAD_MS, deadlineLabel: "Inactives" });
+  });
+
+  it("lists slots only a pickup can fill, with distinct keys for repeated slots", () => {
+    const items = buildActionQueue(INPUT).filter((i) => i.kind === "emptySlot");
+    expect(items.map((i) => [i.key, i.title])).toEqual([
+      ["emptySlot:A:K:none:0", "No one to start at K"],
+      ["emptySlot:A:K:none:1", "No one to start at K"],
+      ["emptySlot:B:SUPER_FLEX:pBye:0", "Player pBye is on bye at SFLEX"],
+    ]);
+    expect(items.every((i) => i.deadline === null && i.appTab === "STARTERS")).toBe(true);
+  });
+});
+
+describe("buildActionQueue — roster items (Roster Overview's counts)", () => {
+  it("flags over the limit, stale IR and IR-eligible with an open slot; never a taxi player", () => {
+    const items = buildActionQueue(INPUT).filter((i) => i.leagueId === "A" && i.appTab === "ROSTERS");
+    expect(items.map((i) => i.key).sort()).toEqual(["irEligible:A:irA", "irStale:A:stale", "overLimit:A"]);
+    const map = byKey(items);
+    expect(map.get("overLimit:A")).toMatchObject({ title: "Over the roster limit by 1", playerIds: [], asOf: 200 });
+    expect(map.get("irStale:A:stale")?.detail).toContain("active roster full");
+    expect(map.get("irEligible:A:irA")).toMatchObject({ title: "Move Player irA to IR", detail: "IR · 1 open IR slot" });
+  });
+
+  it("lists no IR-eligible move once the league's IR is full", () => {
+    const keys = buildActionQueue(INPUT).filter((i) => i.leagueId === "B").map((i) => i.key);
+    expect(keys).not.toContain("irEligible:B:outB");
+    expect(keys).toContain("irStale:B:stale");
+  });
+
+  it("still lists roster items with no lineup status (offseason)", () => {
+    const items = buildActionQueue({ ...INPUT, lineupStatus: {} });
+    expect(items.every((i) => i.appTab === "ROSTERS")).toBe(true);
+    expect(items.map((i) => i.key)).toContain("irEligible:C:irA");
+    expect(byKey(items).get("irEligible:C:irA")?.asOf).toBeNull();
+  });
+
+  it("skips leagues where I have no roster", () => {
+    const items = buildActionQueue({ ...INPUT, userId: "nobody", lineupStatus: {} });
+    expect(items).toEqual([]);
+  });
+});
+
+describe("ordering and views", () => {
+  const items = buildActionQueue(INPUT);
+
+  it("sorts earliest deadline first, untimed after", () => {
+    const deadlines = items.map((i) => i.deadline);
+    const timed = deadlines.filter((d): d is number => d != null);
+    expect(timed).toEqual([...timed].sort((a, b) => a - b));
+    expect(deadlines.indexOf(null)).toBe(timed.length);
+    expect([...items].sort(compareActionItems)).toEqual(items);
+  });
+
+  it("By league: earliest deadline first, untimed leagues after by name; Open in app follows the top item", () => {
+    const groups = groupActionsByLeague(items, [C, B, A]);
+    expect(groups.map((g) => g.league.name)).toEqual(["Alpha", "Bravo", "Charlie"]);
+    expect(groups[0]).toMatchObject({ deadline: THU, appTab: "STARTERS" });
+    expect(groups[2]).toMatchObject({ deadline: null, appTab: "ROSTERS" });
+  });
+
+  it("By player: a swap shows under both players; league-wide items last", () => {
+    const groups = groupActionsByPlayer(items, PLAYERS);
+    const p1 = groups.find((g) => g.playerId === "p1");
+    const p2 = groups.find((g) => g.playerId === "p2");
+    expect(p1?.items.map((i) => i.key)).toEqual(["lineup:A:p1:p2"]);
+    expect(p2?.items.map((i) => i.key)).toEqual(["lineup:A:p1:p2"]);
+    expect(groups[groups.length - 1].playerId).toBeNull();
+    expect(groups[groups.length - 1].items.map((i) => i.kind).sort()).toEqual(["emptySlot", "emptySlot", "overLimit"]);
+    // irA has moves in two leagues.
+    expect(groups.find((g) => g.playerId === "irA")?.items.map((i) => i.leagueId)).toEqual(["A", "C"]);
+  });
+});
+
+describe("getActionState — Done marks", () => {
+  const item = { asOf: 1_000 };
+  it("is open with no mark", () => {
+    expect(getActionState(item, undefined)).toBe("open");
+  });
+  it("stays hidden while the data predates the click", () => {
+    expect(getActionState(item, { at: 1_001 })).toBe("done");
+    expect(getActionState({ asOf: null }, { at: 0 })).toBe("done");
+  });
+  it("comes back flagged when data from after the click still has it", () => {
+    expect(getActionState(item, { at: 1_000 })).toBe("stillShowing");
+    expect(getActionState(item, { at: 500 })).toBe("stillShowing");
+  });
+  it("stays hidden for the week once marked again", () => {
+    expect(getActionState(item, { at: 500, final: true })).toBe("done");
+  });
+});
+
+describe("sleeperLeagueUrl", () => {
+  it("is the league page the user verified on phone and desktop", () => {
+    expect(sleeperLeagueUrl("1312563760086405120")).toBe("https://sleeper.com/leagues/1312563760086405120");
+  });
+});

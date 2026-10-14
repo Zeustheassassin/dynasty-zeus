@@ -36,6 +36,7 @@ import {
   SLEEPER_BROWSER_MAX_IN_FLIGHT,
   SLEEPER_BROWSER_BURST,
   SLEEPER_BROWSER_PER_SEC,
+  SLEEPER_LEAGUE_ROSTERS_CLIENT_TTL_MS,
 } from "./constants";
 import { logger } from "./logger";
 
@@ -70,7 +71,7 @@ const PROXY_BASE = "/api/sleeper";
 const TTL = {
   user:               3_600_000, //  60m  (server: 3600s)
   userLeagues:          600_000, //  10m  (server: 1800s)
-  leagueRosters:        180_000, //   3m  (server:  300s)
+  leagueRosters: SLEEPER_LEAGUE_ROSTERS_CLIENT_TTL_MS, // 3m (server: 300s)
   leagueMatchups:        60_000, //   1m  (server:  300s)
   leagueTransactions:   480_000, //   8m  (server:  900s)
   leagueTradedPicks:    600_000, //  10m  (server: 1800s)

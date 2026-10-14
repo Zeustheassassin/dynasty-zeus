@@ -19,6 +19,7 @@ export * from "./injuryOverrides";
 export * from "./injuryNews";
 export * from "./lineup";
 export * from "./lineupAvailability";
+export * from "./lineupStatus";
 export * from "./picks";
 export * from "./direction";
 export * from "./dispositions";

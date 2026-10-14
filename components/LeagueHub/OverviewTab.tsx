@@ -7,6 +7,7 @@ import {
   getCommitmentNameColor,
   isFuturePaid,
   getPaidFutureDotColor,
+  LINEUP_DELTA_FLOOR,
 } from "../../lib/helpers";
 import { usePlayers } from "../../lib/PlayersContext";
 import { useLeague } from "../../lib/LeagueContext";
@@ -52,7 +53,7 @@ interface OverviewTabProps {
 const REFRESH_COOLDOWN_MS = 5 * 60 * 1000;
 
 // The T/F/S flags' floor: the same 0.5-point noise floor below which the lineup dot stays green.
-const EARLY_LOCK_STAKE_MIN = 0.5;
+const EARLY_LOCK_STAKE_MIN = LINEUP_DELTA_FLOOR;
 const EARLY_LOCK_TAGS: Record<EarlyLockDay, { letter: string; name: string }> = {
   Thu: { letter: "T", name: "Thursday" },
   Fri: { letter: "F", name: "Friday" },
@@ -361,7 +362,7 @@ function OverviewTab({
                     // leagues that were actually fine). Yellow: 0.5–3. Red: > 3.
                     const dotColor = lineupStatus.delta > 3
                       ? "bg-red-500"
-                      : lineupStatus.delta >= 0.5
+                      : lineupStatus.delta >= LINEUP_DELTA_FLOOR
                       ? "bg-yellow-500"
                       : "bg-emerald-500";
                     // A risky late-game starter with no bench player left to

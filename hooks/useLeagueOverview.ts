@@ -4,7 +4,7 @@ import { logger } from "../lib/logger";
 import { fetchLeagueCore } from "./leagueCoreFetch";
 import { buildLeaguePickPool } from "../lib/helpers";
 import { withConcurrency } from "../lib/concurrency";
-import { LEAGUE_OVERVIEW_CONCURRENCY } from "../lib/constants";
+import { LEAGUE_OVERVIEW_CONCURRENCY, ROSTER_DATA_MAX_AGE_MS } from "../lib/constants";
 import type {
   SleeperLeague,
   LeagueOverviewEntry,
@@ -70,6 +70,7 @@ export function useLeagueOverview(
       try {
         const fetchLeague = async (league: SleeperLeague) => {
           try {
+            const fetchedAt = Date.now();
             const { rosters, tradedPicks, drafts, userMap } = await fetchLeagueCore(league.league_id, {
               bypassRosters: freshRosters,
             });
@@ -80,7 +81,8 @@ export function useLeagueOverview(
             // see __tests__/hooks/pickWindowCopies.test.ts for the pinned per-caller behavior.
             const tempPicks = buildLeaguePickPool(rosters, tradedPicks, drafts, "overview");
 
-            return { league, rosters, picks: tempPicks, userMap };
+            const rostersAsOf = freshRosters ? fetchedAt : fetchedAt - ROSTER_DATA_MAX_AGE_MS;
+            return { league, rosters, picks: tempPicks, userMap, rostersAsOf };
           } catch (err) {
             log.warn("loadLeagueOverview league fetch error", { err: String(err) });
             return null;
@@ -98,8 +100,8 @@ export function useLeagueOverview(
         const byLeague: Record<string, LeagueOverviewEntry> = {};
         results
           .filter((r): r is NonNullable<typeof r> => r !== null)
-          .forEach(({ league, rosters: lr, picks, userMap }) => {
-            byLeague[league.league_id] = { league, rosters: lr, picks, userMap };
+          .forEach(({ league, rosters: lr, picks, userMap, rostersAsOf }) => {
+            byLeague[league.league_id] = { league, rosters: lr, picks, userMap, rostersAsOf };
           });
         // A league that failed this pass (a 429, a blip) keeps its last good entry instead of
         // dropping out. This map now feeds the injury report, Shares and the Dashboard too

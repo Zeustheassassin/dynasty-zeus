@@ -2,7 +2,7 @@
 import React, { useEffect, useMemo } from "react";
 import { usePlayers } from "../../lib/PlayersContext";
 import { buildConsensusOrder, reconcilePersonalOrdering } from "../../lib/helpers/personalRankings";
-import { isReserveEligible } from "../AlertsPage/alertsPageHelpers";
+import { getRosterSlotSummary } from "../../lib/helpers/rosterSlots";
 import type {
   SleeperLeague,
   SleeperUser,
@@ -122,38 +122,10 @@ function RosterOverviewTab({
       const myRoster = entry.rosters.find((r) => r.owner_id === user.user_id);
       if (!myRoster) continue;
 
-      // Sleeper's roster.players is the full union — actives + IR + taxi —
-      // so subtract IR and taxi to get the starters/bench count.
-      const reserveSet = new Set(myRoster.reserve ?? []);
-      const taxiSet = new Set(myRoster.taxi ?? []);
-      const allPlayers = myRoster.players ?? [];
-      const activeFilled = allPlayers.filter((pid) => !reserveSet.has(pid) && !taxiSet.has(pid)).length;
-      const activeCap = (league.roster_positions ?? []).length;
-      const irFilled = (myRoster.reserve ?? []).length;
-      const irCap = league.settings?.reserve_slots ?? 0;
-      const taxiFilled = (myRoster.taxi ?? []).length;
-      const taxiCap = league.settings?.taxi_slots ?? 0;
-
-      // Only count IR-eligible players who AREN'T already on IR — those are
-      // the ones the user could still claim into a reserve slot. Taxi players
-      // generally can't be IR'd, so exclude them too. Eligibility itself uses
-      // the same rule as the Alerts page's Injury Report (isReserveEligible):
-      // gated by this league's reserve_allow_* settings, and only counted if
-      // the reserve slot isn't already full.
-      const reserveFull = irFilled >= irCap;
-      const unflaggedInjuries = allPlayers.filter((pid) => {
-        if (reserveSet.has(pid) || taxiSet.has(pid) || reserveFull) return false;
-        const playerData = players?.[pid];
-        return !!playerData && isReserveEligible(playerData, league.settings);
-      }).length;
-
-      // Players sitting in reserve slots whose current status no longer
-      // qualifies them for IR (e.g. activated off injury, tag cleared) —
-      // these need to be moved back to the active roster or dropped.
-      const staleIR = (myRoster.reserve ?? []).filter((pid) => {
-        const playerData = players?.[pid];
-        return !!playerData && !isReserveEligible(playerData, league.settings);
-      }).length;
+      // Counts and IR flags come from the same helper the To-Do hub's roster items use
+      // (lib/helpers/rosterSlots.ts): IR-Eligible = eligible players still active while an IR
+      // slot is open; IR Stale = IR players Sleeper no longer lists as eligible.
+      const slots = getRosterSlotSummary(league, myRoster, players);
 
       const leagueRosteredIds = new Set<string>();
       entry.rosters.forEach((r) => (r.players ?? []).forEach((pid) => leagueRosteredIds.add(pid)));
@@ -163,11 +135,11 @@ function RosterOverviewTab({
         leagueId: league.league_id,
         leagueName: league.name,
         league,
-        active: { filled: activeFilled, cap: activeCap },
-        ir: { filled: irFilled, cap: irCap },
-        taxi: { filled: taxiFilled, cap: taxiCap },
-        unflaggedInjuries,
-        staleIR,
+        active: slots.active,
+        ir: slots.ir,
+        taxi: slots.taxi,
+        unflaggedInjuries: slots.irEligibleIds.length,
+        staleIR: slots.staleIrIds.length,
         topFreeAgents,
       });
     }

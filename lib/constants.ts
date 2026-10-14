@@ -99,6 +99,13 @@ export const SLEEPER_USER_LEAGUES_REVALIDATE_S = 1800;
 /** rosters change on trades / waivers / IR moves — 5m (browser: 3m) keeps Roster Overview and the
  *  injury report close behind Sleeper; Refresh bypasses both */
 export const SLEEPER_LEAGUE_ROSTERS_REVALIDATE_S = 300;
+/** The browser's TTL on those rosters (lib/sleeperApi.ts). */
+export const SLEEPER_LEAGUE_ROSTERS_CLIENT_TTL_MS = 180_000;
+/** Oldest a cached roster can be on screen: the browser copy (3m) of a server copy (5m). A To-Do
+ *  item marked Done is re-checked only against rosters fetched at least this long after the click,
+ *  or by a Refresh that skipped both caches. The server copy is stale-while-revalidate, so the first
+ *  read after a long quiet spell can be older still; the re-check flag says to Refresh. */
+export const ROSTER_DATA_MAX_AGE_MS = SLEEPER_LEAGUE_ROSTERS_CLIENT_TTL_MS + SLEEPER_LEAGUE_ROSTERS_REVALIDATE_S * 1000;
 /** matchups update live during games — keep short for in-game freshness */
 export const SLEEPER_LEAGUE_MATCHUPS_REVALIDATE_S = 300;
 /** transactions for a given week — 15m is fine in offseason; consider lowering during regular-season game days */

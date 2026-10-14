@@ -10,9 +10,15 @@ type InjuryTabProps = {
   currentNFLWeek: number;
   expandedInjuryId: string | null;
   setExpandedInjuryId: (id: string | null) => void;
+  /** Players with a To-Do move still open — their rows link to the To-Do hub's By player view.
+   *  The statuses shown here are untouched. */
+  todoPlayerIds?: Set<string>;
+  onSeeTodoMoves?: (playerId: string) => void;
 };
 
-function InjuryTab({ injuryReportPlayers, currentNFLWeek, expandedInjuryId, setExpandedInjuryId }: InjuryTabProps) {
+function InjuryTab({
+  injuryReportPlayers, currentNFLWeek, expandedInjuryId, setExpandedInjuryId, todoPlayerIds, onSeeTodoMoves,
+}: InjuryTabProps) {
   return (
     <div>
       {injuryReportPlayers.length === 0 ? (
@@ -32,58 +38,72 @@ function InjuryTab({ injuryReportPlayers, currentNFLWeek, expandedInjuryId, setE
             // now — used to ring the starting/bench chip red without touching
             // its starting/bench fill color.
             const irEligibleIds = new Set(irEligibleLeagues.map((l) => l.id));
+            const hasMoves = !!onSeeTodoMoves && !!todoPlayerIds?.has(playerId);
 
             return (
               <div key={playerId} className="rounded-2xl border border-slate-800 overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => setExpandedInjuryId(isExpanded ? null : playerId)}
-                  className="w-full text-left bg-slate-950/40 px-3 py-2.5 flex items-center gap-3 hover:bg-slate-800/40 transition"
-                >
-                  <span className={`text-[10px] font-bold shrink-0 ${POS_COLOR[player.position] ?? "text-slate-400"}`}>
-                    {player.position}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium text-white truncate">{player.full_name}</div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-xs text-slate-400">{player.team || "FA"}</span>
-                      {startingLeagues.length > 0 && (
-                        <span className="text-[10px] text-emerald-500">
-                          Starting in {startingLeagues.length} {startingLeagues.length === 1 ? "league" : "leagues"}
+                <div className="flex items-stretch bg-slate-950/40">
+                  <button
+                    type="button"
+                    onClick={() => setExpandedInjuryId(isExpanded ? null : playerId)}
+                    aria-expanded={isExpanded}
+                    className="min-w-0 flex-1 text-left px-3 py-2.5 flex items-center gap-3 hover:bg-slate-800/40 transition"
+                  >
+                    <span className={`text-[10px] font-bold shrink-0 ${POS_COLOR[player.position] ?? "text-slate-400"}`}>
+                      {player.position}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-medium text-white truncate">{player.full_name}</div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs text-slate-400">{player.team || "FA"}</span>
+                        {startingLeagues.length > 0 && (
+                          <span className="text-[10px] text-emerald-500">
+                            Starting in {startingLeagues.length} {startingLeagues.length === 1 ? "league" : "leagues"}
+                          </span>
+                        )}
+                        {isWatchlisted && leagues.length === 0 && (
+                          <span className="text-[10px] text-amber-500">Watchlist only</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {showBye && (
+                        <span className="text-[10px] font-semibold border border-purple-700 bg-purple-900/30 text-purple-300 px-2 py-0.5 rounded-lg">
+                          Bye Wk {byeWeek}
                         </span>
                       )}
-                      {isWatchlisted && leagues.length === 0 && (
-                        <span className="text-[10px] text-amber-500">Watchlist only</span>
+                      {leagues.length > 0 && (
+                        <span className="text-[10px] font-semibold border border-slate-600 bg-slate-800/60 text-slate-300 px-2 py-0.5 rounded-lg whitespace-nowrap">
+                          {startingLeagues.length > 0
+                            ? `Starting ${startingLeagues.length}/${leagues.length}`
+                            : `Owned ${leagues.length}`}
+                        </span>
                       )}
+                      {irEligibleLeagues.length > 0 && (
+                        <span
+                          className="text-[10px] font-semibold border border-red-800 bg-red-950/40 text-red-300 px-2 py-0.5 rounded-lg whitespace-nowrap"
+                          title="Leagues on IR / leagues where this player is currently IR-eligible (excludes taxi squads, leagues whose settings don't allow their current status on IR, and leagues whose IR is already full)"
+                        >
+                          IR {irLeagues.length}/{irEligibleLeagues.length}
+                        </span>
+                      )}
+                      <span className={`text-[10px] font-semibold border px-2 py-0.5 rounded-lg ${statusCls}`} title={statusTitle}>
+                        {statusLabel}
+                      </span>
+                      <span className={`inline-block transition-transform duration-150 text-slate-600 text-xs ${isExpanded ? "rotate-180" : ""}`}>▼</span>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {showBye && (
-                      <span className="text-[10px] font-semibold border border-purple-700 bg-purple-900/30 text-purple-300 px-2 py-0.5 rounded-lg">
-                        Bye Wk {byeWeek}
-                      </span>
-                    )}
-                    {leagues.length > 0 && (
-                      <span className="text-[10px] font-semibold border border-slate-600 bg-slate-800/60 text-slate-300 px-2 py-0.5 rounded-lg whitespace-nowrap">
-                        {startingLeagues.length > 0
-                          ? `Starting ${startingLeagues.length}/${leagues.length}`
-                          : `Owned ${leagues.length}`}
-                      </span>
-                    )}
-                    {irEligibleLeagues.length > 0 && (
-                      <span
-                        className="text-[10px] font-semibold border border-red-800 bg-red-950/40 text-red-300 px-2 py-0.5 rounded-lg whitespace-nowrap"
-                        title="Leagues on IR / leagues where this player is currently IR-eligible (excludes taxi squads, leagues whose settings don't allow their current status on IR, and leagues whose IR is already full)"
-                      >
-                        IR {irLeagues.length}/{irEligibleLeagues.length}
-                      </span>
-                    )}
-                    <span className={`text-[10px] font-semibold border px-2 py-0.5 rounded-lg ${statusCls}`} title={statusTitle}>
-                      {statusLabel}
-                    </span>
-                    <span className={`inline-block transition-transform duration-150 text-slate-600 text-xs ${isExpanded ? "rotate-180" : ""}`}>▼</span>
-                  </div>
-                </button>
+                  </button>
+                  {hasMoves && (
+                    <button
+                      type="button"
+                      onClick={() => onSeeTodoMoves?.(playerId)}
+                      aria-label={`See moves for ${player.full_name} in To-Do`}
+                      className="shrink-0 border-l border-slate-800 px-2.5 text-[10px] font-semibold text-blue-400 hover:bg-slate-800/40 hover:text-blue-300 transition whitespace-nowrap"
+                    >
+                      See moves
+                    </button>
+                  )}
+                </div>
 
                 {isExpanded && (
                   <div className="border-t border-slate-800 bg-slate-900/60 px-4 py-3 space-y-2.5">

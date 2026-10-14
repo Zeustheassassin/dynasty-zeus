@@ -30,6 +30,9 @@ type AlertsPageProps = {
   onNavigateToAttempts: (leagueId: string) => void;
   feedTab: AlertsFeedTab;
   setFeedTab: (tab: AlertsFeedTab) => void;
+  /** Players with a To-Do move still open; their Injury Report rows get "See moves". */
+  todoPlayerIds?: Set<string>;
+  onSeeTodoMoves?: (playerId: string) => void;
 };
 
 export default function AlertsPage({
@@ -49,6 +52,8 @@ export default function AlertsPage({
   onNavigateToAttempts,
   feedTab,
   setFeedTab,
+  todoPlayerIds,
+  onSeeTodoMoves,
 }: AlertsPageProps) {
   const {
     expandedInjuryId,
@@ -377,6 +382,8 @@ export default function AlertsPage({
             currentNFLWeek={currentNFLWeek}
             expandedInjuryId={expandedInjuryId}
             setExpandedInjuryId={setExpandedInjuryId}
+            todoPlayerIds={todoPlayerIds}
+            onSeeTodoMoves={onSeeTodoMoves}
           />
         )}
       </Card>

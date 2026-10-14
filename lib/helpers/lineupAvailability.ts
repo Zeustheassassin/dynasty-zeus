@@ -95,6 +95,10 @@ export interface LatePivotRisk {
   /** Bench players who can fill his slot and whose game hasn't started by
    *  decisionAt, best projection first. Empty = no way out if he sits. */
   pivots: SleeperPlayer[];
+  /** The last kickoff, still to come and before decisionAt, of a bench player who
+   *  could fill his slot — the last chance to bench him for one of them ahead of
+   *  the inactive call. Null when none is left. */
+  swapBy: number | null;
 }
 
 export interface LatePivotRiskInput {
@@ -128,17 +132,22 @@ export function getLatePivotRisks(input: LatePivotRiskInput, now: number = Date.
     if (now >= decisionAt) continue;
 
     const eligible = getLineupSlotEligiblePositions(row.slot);
-    const pivots = input.playerIds
+    const backups = input.playerIds
       .filter((id) => !starting.has(id))
       .map((id) => input.players[id])
       .filter((p): p is SleeperPlayer => !!p && eligible.includes(p.position))
-      .filter((p) => !input.isUnavailableFn(p.player_id) && input.scoreFn(p.player_id) > 0)
+      .filter((p) => !input.isUnavailableFn(p.player_id) && input.scoreFn(p.player_id) > 0);
+    const pivots = backups
       .filter((p) => {
         const kickoff = input.kickoffFn(p.player_id);
         return kickoff != null && kickoff > decisionAt;
       })
       .sort((a, b) => input.scoreFn(b.player_id) - input.scoreFn(a.player_id));
-    risks.push({ slot: row.slot, player, kickoffAt, decisionAt, pivots });
+    const earlierKickoffs = backups
+      .map((p) => input.kickoffFn(p.player_id))
+      .filter((kickoff): kickoff is number => kickoff != null && kickoff > now && kickoff <= decisionAt);
+    const swapBy = earlierKickoffs.length > 0 ? Math.max(...earlierKickoffs) : null;
+    risks.push({ slot: row.slot, player, kickoffAt, decisionAt, pivots, swapBy });
   }
   return risks;
 }

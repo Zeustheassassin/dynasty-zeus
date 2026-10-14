@@ -14,6 +14,17 @@ export const formatRelativeDate = (ts: number) => {
   return "1 month ago";
 };
 
+/** "Sun 7:20 PM" in the viewer's time zone; "--" for a missing time. Lineup Coach notes and the
+ *  To-Do hub's deadlines. */
+export const formatDayTime = (ms: number | null) => {
+  if (ms == null || !Number.isFinite(ms)) return "--";
+  try {
+    return new Date(ms).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
+  } catch {
+    return "--";
+  }
+};
+
 /** Normalises a rookie player name for fuzzy matching:
  *  strips suffixes (Jr, II, etc.) and non-alpha characters. */
 export const normalizeRookieName = (name: string) =>

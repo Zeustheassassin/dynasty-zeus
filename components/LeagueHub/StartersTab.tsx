@@ -12,6 +12,7 @@ import {
   getLineupAvailabilityChecks,
   getLatePivotRisks,
   getLineupSlotEligiblePositions,
+  formatDayTime,
   type LineupAvailability,
   type InjuryNewsFlag,
 } from "../../lib/helpers";
@@ -34,16 +35,6 @@ interface StartersTabProps {
    *  same object, so the two can't disagree). */
   availability: LineupAvailability;
 }
-
-/** "Sun 7:20 PM" in the viewer's time zone. */
-const formatDayTime = (ms: number | null) => {
-  if (ms == null || !Number.isFinite(ms)) return "--";
-  try {
-    return new Date(ms).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
-  } catch {
-    return "--";
-  }
-};
 
 const NEWS_LEAN_LABEL: Record<InjuryNewsFlag["lean"], string> = {
   "likely-out": "Likely out",
