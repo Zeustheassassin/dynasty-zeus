@@ -172,14 +172,20 @@ describe("buildWaiverWatch", () => {
     expect(alpha.upgrade).toBe(1600);
   });
 
-  it("puts leagues with an upgrade first, skips leagues with no roster of mine", () => {
+  it("skips leagues with no roster of mine; a league without an upgrade has none flagged", () => {
     const rows = build();
     expect(rows.map((r) => r.league.name)).toEqual(["Alpha", "Bravo"]);
     expect(rows[1].upgrade).toBeNull();
     expect(rows[1].risers.every((r) => !r.beatsLowest)).toBe(true);
   });
 
-  it("orders by name when no league has an upgrade, and still lists the lowest players with no risers", () => {
+  it("keeps the user's Sleeper order — an upgrade doesn't move a league up (10/14)", () => {
+    const rows = build({ leagues: [{ ...A, display_order: 1 }, { ...B, display_order: 0 }, C] });
+    expect(rows.map((r) => r.league.name)).toEqual(["Bravo", "Alpha"]);
+    expect(rows[1].upgrade).toBe(1600);
+  });
+
+  it("still lists the lowest players with no risers", () => {
     const rows = build({ risers: [] });
     expect(rows.map((r) => r.league.name)).toEqual(["Alpha", "Bravo"]);
     expect(rows[0].risers).toEqual([]);

@@ -53,6 +53,8 @@ function renderHub(props: Partial<React.ComponentProps<typeof TodoHub>> = {}) {
       leagues={LEAGUES}
       players={PLAYERS}
       leagueOverviewData={{}}
+      committedSimsByLeague={{}}
+      leagueSimCache={{}}
       items={[SWAP, IR_MOVE]}
       done={{}}
       view="BY_LEAGUE"
@@ -224,9 +226,10 @@ describe("TodoHub — Waiver Watch", () => {
     expect(setView).toHaveBeenCalledWith("WAIVER_WATCH");
   });
 
-  it("puts a league whose rising free agent beats your lowest player first, highlighted", () => {
+  it("lists leagues in the user's Sleeper order, highlighting one whose rising free agent beats the lowest player", () => {
     renderWatch();
-    expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["Alpha", "Bravo"]);
+    // Sleeper order is the list order here (Bravo, then Alpha); the upgrade doesn't move Alpha up.
+    expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["Bravo", "Alpha"]);
     expect(screen.getByText("1 league has a rising free agent worth more than your lowest player.")).toBeTruthy();
     const alpha = within(screen.getByRole("region", { name: "Alpha" }));
     expect(alpha.getByText("Upgrade +1,400")).toBeTruthy();
@@ -267,5 +270,46 @@ describe("TodoHub — Waiver Watch", () => {
   it("says when there isn't a week of value history yet", () => {
     renderWatch({ data: null });
     expect(screen.getByText(/need a week of value history/)).toBeTruthy();
+  });
+});
+
+describe("TodoHub — playoff odds on every league (10/14)", () => {
+  const entry = (leagueId: string) => ({
+    league: { league_id: leagueId }, rosters: [{ roster_id: 4, owner_id: "me", players: [] }], picks: [], userMap: {},
+  }) as unknown as LeagueOverviewEntry;
+  const sim = (playoff_odds: number) => ({
+    4: { league_id: "x", roster_id: 4, playoff_odds, title_odds: 0, expected_wins: 0, avg_finish: 0, finish_range: null, computed_at: null },
+  });
+  const props = {
+    leagueOverviewData: { A: entry("A"), B: entry("B") },
+    leagueSimCache: { B: sim(62) },
+    committedSimsByLeague: { A: { 4: { rosterId: 4, wins: 0, losses: 0, ties: 0, pointsFor: 0, playoffOdds: 8 } } },
+  };
+
+  it("By league: each card's odds, colored like League Overview", () => {
+    renderHub(props);
+    const bravo = within(screen.getByRole("region", { name: "Bravo" }));
+    const alpha = within(screen.getByRole("region", { name: "Alpha" }));
+    expect(bravo.getByText("62% playoff").className).toContain("emerald");
+    expect(alpha.getByText("8% playoff").className).toContain("red");
+  });
+
+  it("says No sim for a league that has never been simulated", () => {
+    renderHub({ ...props, leagueSimCache: {}, committedSimsByLeague: {} });
+    expect(within(screen.getByRole("region", { name: "Bravo" })).getByText("No sim")).toBeTruthy();
+  });
+
+  it("By player: beside each move's league", () => {
+    renderHub({ ...props, view: "BY_PLAYER" });
+    const ace = within(screen.getByRole("region", { name: "Ace Runner" }));
+    expect(ace.getByText("Bravo")).toBeTruthy();
+    expect(ace.getByText("62% playoff")).toBeTruthy();
+  });
+
+  it("Waiver Watch: on each league card", () => {
+    risers.state = { data: null, error: null, loading: false, retry: vi.fn() };
+    renderHub({ ...props, view: "WAIVER_WATCH" });
+    expect(within(screen.getByRole("region", { name: "Alpha" })).getByText("8% playoff")).toBeTruthy();
+    expect(within(screen.getByRole("region", { name: "Bravo" })).getByText("62% playoff")).toBeTruthy();
   });
 });

@@ -188,11 +188,11 @@ describe("ordering and views", () => {
     expect([...items].sort(compareActionItems)).toEqual(items);
   });
 
-  it("By league: earliest deadline first, untimed leagues after by name; Open in app follows the top item", () => {
+  it("By league: a Thursday lock leads; the rest follow the user's Sleeper order; Open in app follows the top item", () => {
     const groups = groupActionsByLeague(items, [C, B, A]);
-    expect(groups.map((g) => g.league.name)).toEqual(["Alpha", "Bravo", "Charlie"]);
+    expect(groups.map((g) => g.league.name)).toEqual(["Alpha", "Charlie", "Bravo"]);
     expect(groups[0]).toMatchObject({ deadline: THU, appTab: "STARTERS" });
-    expect(groups[2]).toMatchObject({ deadline: null, appTab: "ROSTERS" });
+    expect(groups[1]).toMatchObject({ deadline: null, appTab: "ROSTERS" });
   });
 
   it("By player: a swap shows under both players; league-wide items last", () => {
@@ -205,6 +205,49 @@ describe("ordering and views", () => {
     expect(groups[groups.length - 1].items.map((i) => i.kind).sort()).toEqual(["emptySlot", "emptySlot", "overLimit"]);
     // irA has moves in two leagues.
     expect(groups.find((g) => g.playerId === "irA")?.items.map((i) => i.leagueId)).toEqual(["A", "C"]);
+  });
+});
+
+describe("By league order (the user, 10/14): moves due before Sunday's slate, then Sleeper order", () => {
+  // Week of Thu 2026-10-15. Eastern times.
+  const ET = (iso: string) => Date.parse(`${iso}-04:00`);
+  const at = {
+    thu: ET("2026-10-15T20:15"),
+    sat: ET("2026-10-17T16:30"),
+    london: ET("2026-10-18T09:30"),
+    inactives1pm: ET("2026-10-18T11:30"),
+    sun1pm: ET("2026-10-18T13:00"),
+    mnf: ET("2026-10-19T20:15"),
+  };
+  const move = (leagueId: string, deadline: number | null): ActionItem => ({
+    key: `k:${leagueId}`, kind: deadline == null ? "irEligible" : "lineup", leagueId, leagueName: leagueId,
+    playerIds: [], title: leagueId, detail: "", deadline, deadlineLabel: deadline == null ? null : "Locks",
+    expiresAt: deadline, earlyLockDay: null, appTab: deadline == null ? "ROSTERS" : "STARTERS", asOf: null,
+  });
+  // Sleeper order (display_order) runs opposite to the list Sleeper sent, to show it's what's read.
+  const ids = ["mnf", "sun1pm", "inactives", "untimed", "london", "sat", "thu"];
+  const sleeperLeagues = ids.map((id, i) => ({ league_id: id, name: `League ${id}`, display_order: ids.length - 1 - i }) as SleeperLeague);
+  const moves = [
+    move("thu", at.thu), move("sat", at.sat), move("london", at.london), move("inactives", at.inactives1pm),
+    move("sun1pm", at.sun1pm), move("mnf", at.mnf), move("untimed", null),
+  ];
+
+  it("puts Thursday / Saturday / Sunday-morning moves first by deadline, then everything else in Sleeper order", () => {
+    const order = groupActionsByLeague(moves, sleeperLeagues).map((g) => g.league.league_id);
+    // Early: thu, sat, london (by deadline). Then Sleeper order (display_order): thu=0 sat=1 london=2
+    // untimed=3 inactives=4 sun1pm=5 mnf=6 — a 1 p.m. inactive call and a MNF lock aren't early.
+    expect(order).toEqual(["thu", "sat", "london", "untimed", "inactives", "sun1pm", "mnf"]);
+  });
+
+  it("orders early leagues with the same deadline by Sleeper order", () => {
+    const twoThu = [move("sat", at.thu), move("thu", at.thu)];
+    expect(groupActionsByLeague(twoThu, sleeperLeagues).map((g) => g.league.league_id)).toEqual(["thu", "sat"]);
+  });
+
+  it("falls back to list order when Sleeper sends no display_order", () => {
+    const plain = ids.map((id) => ({ league_id: id, name: id }) as SleeperLeague);
+    const late = [move("mnf", at.mnf), move("untimed", null), move("sun1pm", at.sun1pm)];
+    expect(groupActionsByLeague(late, plain).map((g) => g.league.league_id)).toEqual(["mnf", "sun1pm", "untimed"]);
   });
 });
 
@@ -267,8 +310,8 @@ describe("getAttentionLeagues — the To-Do hub's By league order", () => {
     expect(getAttentionLeagues(items, {}, [C, B, A], 0)).toEqual(
       groups.map((g) => ({ leagueId: g.league.league_id, appTab: g.appTab }))
     );
-    expect(groups.map((g) => g.league.league_id)).toEqual(["A", "B", "C"]);
-    expect(getAttentionLeagues(items, {}, [C, B, A], 0)[2]).toEqual({ leagueId: "C", appTab: "ROSTERS" });
+    expect(groups.map((g) => g.league.league_id)).toEqual(["A", "C", "B"]);
+    expect(getAttentionLeagues(items, {}, [C, B, A], 0)[1]).toEqual({ leagueId: "C", appTab: "ROSTERS" });
   });
 
   it("drops a league once every move in it is marked done", () => {

@@ -2,10 +2,11 @@ import { describe, it, expect } from "vitest";
 import {
   resolveGameState, buildGamedayMatchups, getKickoffState, getGamedayResultStatus, getMatchupWinProbability,
   getEarlyLockDay, isGameStartedState, getGamedayPlayoffOdds, sortGamedayDashboardEntries,
+  isBeforeSundaySlate, getPlayoffOdds, getMyPlayoffOddsByLeague,
 } from "@/lib/helpers/gameday";
 import type {
   SleeperLeague, SleeperRoster, SleeperMatchup, SleeperPlayer, ProjectionRow, TeamGameState,
-  GamedayDashboardEntry, CachedSimRow, SimRow,
+  GamedayDashboardEntry, CachedSimRow, SimRow, LeagueOverviewEntry,
 } from "@/lib/types";
 
 const HOUR = 60 * 60 * 1000;
@@ -712,5 +713,62 @@ describe("Gameday Dashboard playoff-odds order", () => {
   it("treats 0% as a real sim result, ahead of a league with no sim", () => {
     const sorted = sortGamedayDashboardEntries([mkEntry("none", "A"), mkEntry("zero", "B")], { zero: 0 });
     expect(sorted.map((e) => e.league.league_id)).toEqual(["zero", "none"]);
+  });
+});
+
+describe("isBeforeSundaySlate — To-Do By league's early leagues (10/14)", () => {
+  // Week of Thu 2026-10-15, Eastern (EDT, UTC-4).
+  const ET = (iso: string) => Date.parse(`${iso}-04:00`);
+
+  it("counts Wednesday through Saturday, and Thursday night even though it's Friday in UTC", () => {
+    expect(isBeforeSundaySlate(ET("2026-10-14T13:00"))).toBe(true); // Wed (Christmas-style)
+    expect(isBeforeSundaySlate(ET("2026-10-15T20:15"))).toBe(true); // TNF = Fri 00:15 UTC
+    expect(isBeforeSundaySlate(ET("2026-10-16T20:00"))).toBe(true); // Fri
+    expect(isBeforeSundaySlate(ET("2026-10-17T16:30"))).toBe(true); // Sat
+  });
+
+  it("counts Sunday morning's international games, not the 1 p.m. games' 11:30 inactives", () => {
+    expect(isBeforeSundaySlate(ET("2026-10-18T08:00"))).toBe(true); // London inactives
+    expect(isBeforeSundaySlate(ET("2026-10-18T09:30"))).toBe(true); // London kickoff
+    expect(isBeforeSundaySlate(ET("2026-10-18T10:59"))).toBe(true);
+    expect(isBeforeSundaySlate(ET("2026-10-18T11:00"))).toBe(false);
+    expect(isBeforeSundaySlate(ET("2026-10-18T11:30"))).toBe(false);
+    expect(isBeforeSundaySlate(ET("2026-10-18T13:00"))).toBe(false);
+    expect(isBeforeSundaySlate(ET("2026-10-18T20:20"))).toBe(false);
+  });
+
+  it("leaves Monday and Tuesday with the slate", () => {
+    expect(isBeforeSundaySlate(ET("2026-10-19T20:15"))).toBe(false);
+    expect(isBeforeSundaySlate(ET("2026-10-20T20:00"))).toBe(false);
+  });
+});
+
+describe("getPlayoffOdds / getMyPlayoffOddsByLeague — To-Do's playoff pills (10/14)", () => {
+  const sim = (playoff_odds: number): CachedSimRow => ({
+    league_id: "x", roster_id: 0, playoff_odds, title_odds: 0, expected_wins: 0, avg_finish: 0,
+    finish_range: null, computed_at: null,
+  });
+  const committedRow = (playoffOdds: number): SimRow => ({ rosterId: 0, wins: 0, losses: 0, ties: 0, pointsFor: 0, playoffOdds });
+
+  it("reads the Run All Sims commit first, then the saved sim, else null (never 0)", () => {
+    expect(getPlayoffOdds("a", 1, { a: { 1: committedRow(70) } }, { a: { 1: sim(20) } })).toBe(70);
+    expect(getPlayoffOdds("a", 1, {}, { a: { 1: sim(20) } })).toBe(20);
+    expect(getPlayoffOdds("a", 1, {}, { a: { 1: sim(0) } })).toBe(0);
+    expect(getPlayoffOdds("a", 1, {}, {})).toBeNull();
+  });
+
+  it("finds the user's roster in each overview league; leagues without one are left out", () => {
+    const entry = (rosters: { roster_id: number; owner_id: string }[]) => ({ rosters }) as unknown as LeagueOverviewEntry;
+    const odds = getMyPlayoffOddsByLeague(
+      {
+        a: entry([{ roster_id: 1, owner_id: "other" }, { roster_id: 2, owner_id: "me" }]),
+        b: entry([{ roster_id: 5, owner_id: "me" }]),
+        c: entry([{ roster_id: 1, owner_id: "other" }]),
+      },
+      "me",
+      {},
+      { a: { 1: sim(99), 2: sim(41.5) } }
+    );
+    expect(odds).toEqual({ a: 41.5, b: null });
   });
 });

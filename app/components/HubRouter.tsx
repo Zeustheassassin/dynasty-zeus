@@ -491,6 +491,8 @@ export function HubRouter({
             leagues={leagues}
             players={players}
             leagueOverviewData={leagueOverviewData}
+            committedSimsByLeague={committedSimsByLeague}
+            leagueSimCache={leagueSimCache}
             items={todoItems}
             done={todoDone}
             onMarkDone={markTodoDone}

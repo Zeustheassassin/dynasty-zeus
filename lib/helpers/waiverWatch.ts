@@ -12,6 +12,7 @@
 // ============================================================
 import { isReserveEligible } from "../../components/AlertsPage/alertsPageHelpers";
 import { getRosterSlotSummary } from "./rosterSlots";
+import { getSleeperLeagueOrder } from "./leagueOrder";
 import type { LeagueOverviewEntry, SleeperLeague, SleeperPlayer, SleeperRoster } from "../types";
 
 /** Rising free agents and drop candidates shown per league. */
@@ -134,8 +135,8 @@ export interface WaiverWatchInput {
   risers: ValueRiser[];
 }
 
-/** One row per league the user has a roster in: leagues with a pickup that beats the lowest
- *  player first (biggest upgrade first), then the rest by name. */
+/** One row per league the user has a roster in, in the user's Sleeper order (the user's call,
+ *  10/14; leagues with an upgrade are highlighted in place rather than moved up). */
 export function buildWaiverWatch(input: WaiverWatchInput): WaiverWatchRow[] {
   const { leagues, leagueOverviewData, userId, players, risers } = input;
   const rows: WaiverWatchRow[] = [];
@@ -167,9 +168,8 @@ export function buildWaiverWatch(input: WaiverWatchInput): WaiverWatchRow[] {
       upgrade: floor != null && best > floor ? best - floor : null,
     });
   }
-  return rows.sort((a, b) => {
-    if ((a.upgrade == null) !== (b.upgrade == null)) return a.upgrade == null ? 1 : -1;
-    if (a.upgrade != null && b.upgrade != null && a.upgrade !== b.upgrade) return b.upgrade - a.upgrade;
-    return a.league.name.localeCompare(b.league.name);
-  });
+  const sleeperOrder = getSleeperLeagueOrder(leagues);
+  return rows.sort(
+    (a, b) => (sleeperOrder.get(a.league.league_id) ?? 0) - (sleeperOrder.get(b.league.league_id) ?? 0)
+  );
 }

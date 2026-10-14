@@ -7,13 +7,15 @@ import { useWeeklyValueRisers } from "../../hooks/useWeeklyValueRisers";
 import { POS_COLOR, STATUS_CLASSES } from "../../lib/uiTheme";
 import Button from "../ui/Button";
 import EmptyState from "../ui/EmptyState";
+import PlayoffOddsBadge from "../ui/PlayoffOddsBadge";
 import SleeperLink from "./SleeperLink";
 
 // ============================================================
 // To-Do hub → Waiver Watch: one card per league, the two free agents whose
 // value rose most this week beside the user's two lowest-value players
-// (lib/helpers/waiverWatch.ts). A pickup worth more than the lowest player is
-// highlighted, and those leagues come first. Read-only — no Done marks.
+// (lib/helpers/waiverWatch.ts), in the user's Sleeper league order. A pickup
+// worth more than the lowest player is highlighted, and each league shows the
+// user's playoff odds. Read-only — no Done marks.
 // ============================================================
 
 interface WaiverWatchTabProps {
@@ -21,6 +23,8 @@ interface WaiverWatchTabProps {
   leagues: SleeperLeague[];
   players: Record<string, SleeperPlayer>;
   leagueOverviewData: Record<string, LeagueOverviewEntry>;
+  /** The user's playoff odds per league (null = never simulated). */
+  playoffOdds: Record<string, number | null>;
   overviewLoaded: boolean;
   onOpenInApp: (leagueId: string, tab: ActionAppTab) => void;
 }
@@ -84,7 +88,7 @@ function LowestRow({ candidate, player }: { candidate: DropCandidate; player: Sl
 }
 
 export default function WaiverWatchTab({
-  user, leagues, players, leagueOverviewData, overviewLoaded, onOpenInApp,
+  user, leagues, players, leagueOverviewData, playoffOdds, overviewLoaded, onOpenInApp,
 }: WaiverWatchTabProps) {
   const { data, error, loading, retry } = useWeeklyValueRisers(true);
 
@@ -145,11 +149,14 @@ export default function WaiverWatchTab({
                 <h3 className="min-w-0 basis-full truncate text-sm font-semibold text-slate-100 sm:basis-0 sm:flex-1">
                   {row.league.name}
                 </h3>
-                {row.upgrade != null && (
-                  <span className={`mr-auto text-[10px] font-semibold border rounded px-1.5 py-px sm:mr-0 ${STATUS_CLASSES.good}`}>
-                    Upgrade +{row.upgrade.toLocaleString()}
-                  </span>
-                )}
+                <div className="mr-auto flex items-center gap-1.5 sm:mr-0">
+                  {id in playoffOdds && <PlayoffOddsBadge odds={playoffOdds[id]} />}
+                  {row.upgrade != null && (
+                    <span className={`text-[10px] font-semibold border rounded px-1.5 py-px ${STATUS_CLASSES.good}`}>
+                      Upgrade +{row.upgrade.toLocaleString()}
+                    </span>
+                  )}
+                </div>
                 <SleeperLink leagueId={id} />
                 <Button variant="ghost" size="sm" onClick={() => onOpenInApp(id, "ROSTERS")}>
                   Open in app

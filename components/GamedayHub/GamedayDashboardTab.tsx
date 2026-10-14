@@ -3,6 +3,7 @@ import React, { useMemo } from "react";
 import type { SleeperLeague, GamedayDashboardEntry, CommittedSimsByLeague, CachedSimRow } from "../../lib/types";
 import { getGamedayResultStatus, getGamedayPlayoffOdds, sortGamedayDashboardEntries } from "../../lib/helpers/gameday";
 import Badge from "../ui/Badge";
+import PlayoffOddsBadge from "../ui/PlayoffOddsBadge";
 import GamedayTeamRow from "./GamedayTeamRow";
 import LiveStamp from "./LiveStamp";
 
@@ -100,17 +101,7 @@ function GamedayDashboardTab({
                       </div>
                       {(playoffOdds != null || record) && (
                         <div className="flex shrink-0 items-center gap-1.5">
-                          {playoffOdds != null && (
-                            // Same color cut-offs as League Overview's Playoff% column.
-                            <span title="Playoff odds from your last League Overview sim">
-                              <Badge
-                                tone={playoffOdds >= 50 ? "good" : playoffOdds >= 25 ? "warning" : "critical"}
-                                className="font-mono"
-                              >
-                                {playoffOdds}% playoff
-                              </Badge>
-                            </span>
-                          )}
+                          {playoffOdds != null && <PlayoffOddsBadge odds={playoffOdds} />}
                           {record && (
                             <span title="Your record in this league">
                               <Badge tone="neutral" className="font-mono">

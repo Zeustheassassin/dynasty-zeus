@@ -1,6 +1,6 @@
 "use client";
 import React, { memo, useEffect, useMemo, useState } from "react";
-import type { LeagueOverviewEntry, SleeperLeague, SleeperPlayer, SleeperUser } from "../lib/types";
+import type { CachedSimRow, CommittedSimsByLeague, LeagueOverviewEntry, SleeperLeague, SleeperPlayer, SleeperUser } from "../lib/types";
 import type { TodoView } from "../app/hooks/useHubRouting";
 import type { TodoDoneMark } from "../app/hooks/useTodoDone";
 import {
@@ -14,10 +14,12 @@ import {
   type VisibleAction,
 } from "../lib/helpers/actionQueue";
 import { formatDayTime } from "../lib/helpers/formatting";
+import { getMyPlayoffOddsByLeague } from "../lib/helpers/gameday";
 import { injuryStatusStyle } from "./AlertsPage/alertsPageHelpers";
 import { POS_COLOR, STATUS_CLASSES } from "../lib/uiTheme";
 import Button from "./ui/Button";
 import EmptyState from "./ui/EmptyState";
+import PlayoffOddsBadge from "./ui/PlayoffOddsBadge";
 import SleeperLink from "./TodoHub/SleeperLink";
 import WaiverWatchTab from "./TodoHub/WaiverWatchTab";
 
@@ -28,6 +30,8 @@ import WaiverWatchTab from "./TodoHub/WaiverWatchTab";
 // Done marks are this device only and come back flagged if data fetched after
 // the click still has the move. Waiver Watch (components/TodoHub/WaiverWatchTab)
 // sets each league's rising free agents beside the user's lowest-value players.
+// Every league shows the user's playoff odds (League Overview's sims), so a move in
+// a league they're tanking can wait.
 // ============================================================
 
 interface TodoHubProps {
@@ -35,8 +39,12 @@ interface TodoHubProps {
   leagues: SleeperLeague[];
   /** Sleeper's raw player map — names, positions and status badges. */
   players: Record<string, SleeperPlayer>;
-  /** Every league's rosters — Waiver Watch's free agents and drop list. */
+  /** Every league's rosters — Waiver Watch's free agents and drop list, and the user's roster
+   *  for the playoff odds. */
   leagueOverviewData: Record<string, LeagueOverviewEntry>;
+  /** League Overview's sims — each league's playoff-odds pill (getPlayoffOdds). */
+  committedSimsByLeague: CommittedSimsByLeague;
+  leagueSimCache: Record<string, Record<number, CachedSimRow>>;
   items: ActionItem[];
   done: Record<string, DoneRecord>;
   onMarkDone: (marks: TodoDoneMark[]) => void;
@@ -84,12 +92,13 @@ function DeadlineChip({ item, now }: { item: ActionItem; now: number }) {
 }
 
 function ActionRow({
-  entry, now, leagueLabel, onMarkDone, actions,
+  entry, now, leagueLabel, leagueOdds, onMarkDone, actions,
 }: {
   entry: VisibleAction;
   now: number;
-  /** By player shows which league each move is in. */
+  /** By player shows which league each move is in, with the user's playoff odds there. */
   leagueLabel?: string;
+  leagueOdds?: number | null;
   onMarkDone: TodoHubProps["onMarkDone"];
   actions?: React.ReactNode;
 }) {
@@ -99,7 +108,12 @@ function ActionRow({
   return (
     <li className="flex items-start gap-2 px-3 py-2.5 border-b border-slate-800/70 last:border-0">
       <div className="min-w-0 flex-1 space-y-1">
-        {leagueLabel && <div className="text-[11px] font-semibold text-slate-400 truncate">{leagueLabel}</div>}
+        {leagueLabel && (
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate text-[11px] font-semibold text-slate-400">{leagueLabel}</span>
+            {leagueOdds !== undefined && <PlayoffOddsBadge odds={leagueOdds} className="px-1.5 py-px text-[10px]" />}
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-1.5">
           {item.earlyLockDay && (
             <span
@@ -143,6 +157,8 @@ function TodoHub({
   leagues,
   players,
   leagueOverviewData,
+  committedSimsByLeague,
+  leagueSimCache,
   items,
   done,
   onMarkDone,
@@ -180,6 +196,10 @@ function TodoHub({
     [visible, players]
   );
   const leagueName = useMemo(() => new Map(leagues.map((l) => [l.league_id, l.name])), [leagues]);
+  const playoffOdds = useMemo(
+    () => (user ? getMyPlayoffOddsByLeague(leagueOverviewData, user.user_id, committedSimsByLeague, leagueSimCache) : {}),
+    [user, leagueOverviewData, committedSimsByLeague, leagueSimCache]
+  );
 
   // "See moves" from the Injury Report: bring that player's card into view.
   useEffect(() => {
@@ -204,7 +224,7 @@ function TodoHub({
   }
 
   const waiverWatch = view === "WAIVER_WATCH";
-  const row = (v: VisibleAction, opts: { leagueLabel?: string; actions?: React.ReactNode } = {}) => (
+  const row = (v: VisibleAction, opts: { leagueLabel?: string; leagueOdds?: number | null; actions?: React.ReactNode } = {}) => (
     <ActionRow key={v.item.key} entry={v} now={now} onMarkDone={onMarkDone} {...opts} />
   );
 
@@ -266,6 +286,7 @@ function TodoHub({
           leagues={leagues}
           players={players}
           leagueOverviewData={leagueOverviewData}
+          playoffOdds={playoffOdds}
           overviewLoaded={overviewLoaded}
           onOpenInApp={onOpenInApp}
         />
@@ -288,7 +309,10 @@ function TodoHub({
                   <h3 className="min-w-0 basis-full truncate text-sm font-semibold text-slate-100 sm:basis-0 sm:flex-1">
                     {group.league.name}
                   </h3>
-                  <span className="mr-auto text-[10px] text-slate-500 sm:mr-0">{plural(groupItems.length, "move")}</span>
+                  <div className="mr-auto flex items-center gap-1.5 sm:mr-0">
+                    {id in playoffOdds && <PlayoffOddsBadge odds={playoffOdds[id]} />}
+                    <span className="text-[10px] text-slate-500">{plural(groupItems.length, "move")}</span>
+                  </div>
                   <SleeperLink leagueId={id} />
                   <Button variant="ghost" size="sm" onClick={() => onOpenInApp(id, group.appTab)}>
                     Open in app
@@ -345,6 +369,7 @@ function TodoHub({
                     if (!v) return null;
                     return row(v, {
                       leagueLabel: leagueName.get(item.leagueId) ?? item.leagueName,
+                      leagueOdds: playoffOdds[item.leagueId],
                       actions: (
                         <>
                           <SleeperLink leagueId={item.leagueId} compact />

@@ -33,6 +33,9 @@ export interface SleeperLeague {
   draft_id: string | null;
   previous_league_id: string | null;
   metadata?: Record<string, string>;
+  /** Where the league sits in the user's own league list in the Sleeper app (0 = top). The
+   *  user-leagues list comes back sorted by it; getSleeperLeagueOrder reads it. */
+  display_order?: number;
 }
 
 export interface SleeperLeagueSettings {

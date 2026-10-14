@@ -14,7 +14,7 @@ import type {
   SleeperLeague, SleeperRoster, SleeperMatchup, SleeperPlayer, SleeperUser,
   ProjectionRow, GamedayMatchup, GamedayTeamView, GamedayLineupRow,
   GamedayReserveRow, GamedayDashboardEntry, GamedayDashboardRaw, TeamGameState, EarlyLockDay,
-  CommittedSimsByLeague, CachedSimRow,
+  CommittedSimsByLeague, CachedSimRow, LeagueOverviewEntry,
 } from "../types";
 
 interface KickoffSource {
@@ -87,6 +87,23 @@ export const getEarlyLockDay = (kickoffAt: number): EarlyLockDay | null => {
   const day = ET_WEEKDAY.format(kickoffAt);
   return EARLY_LOCK_DAYS.find((d) => d === day) ?? null;
 };
+
+const ET_DAY_HOUR = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York", weekday: "short", hour: "numeric", hourCycle: "h23",
+});
+/** Sunday cut-off, Eastern: the international games kick off at 9:30 a.m.; the 1 p.m. games'
+ *  inactives come out at 11:30, and a deadline that late belongs with the main slate. */
+const SUNDAY_EARLY_BEFORE_HOUR_ET = 11;
+
+/** A deadline ahead of Sunday's main slate: Wednesday (Christmas), Thursday, Friday, Saturday, or
+ *  Sunday before 11 a.m. ET (London / Germany games). Monday and Tuesday come after the slate. */
+export function isBeforeSundaySlate(at: number): boolean {
+  const parts = ET_DAY_HOUR.formatToParts(at);
+  const day = parts.find((p) => p.type === "weekday")?.value;
+  const hour = Number(parts.find((p) => p.type === "hour")?.value);
+  if (day === "Sun") return hour < SUNDAY_EARLY_BEFORE_HOUR_ET;
+  return day === "Wed" || EARLY_LOCK_DAYS.some((d) => d === day);
+}
 
 /** A scoreboard covering fewer teams than this is treated as a failed/partial
  *  fetch, not proof that a missing team is on bye. A real week has 12+ teams
@@ -456,10 +473,39 @@ export function buildGamedayDashboardEntries(
 }
 
 /**
- * The user's playoff odds per league, read the way League Overview's Playoff% column reads them:
- * the last "Run All Sims" commit first, then the saved sim (league_simulations). A league that has
- * never been simulated is left out rather than shown as 0%.
+ * A roster's playoff odds in a league, read the way League Overview's Playoff% column reads them:
+ * the last "Run All Sims" commit first, then the saved sim (league_simulations). Null for a league
+ * that has never been simulated — not 0%.
  */
+export function getPlayoffOdds(
+  leagueId: string,
+  rosterId: number,
+  committedSimsByLeague: CommittedSimsByLeague,
+  leagueSimCache: Record<string, Record<number, CachedSimRow>>
+): number | null {
+  return committedSimsByLeague[leagueId]?.[rosterId]?.playoffOdds
+    ?? leagueSimCache[leagueId]?.[rosterId]?.playoff_odds
+    ?? null;
+}
+
+/** The user's playoff odds in every league they have a roster in (getPlayoffOdds; null = never
+ *  simulated), finding their roster in the League Overview rosters — the To-Do hub's league pills. */
+export function getMyPlayoffOddsByLeague(
+  leagueOverviewData: Record<string, LeagueOverviewEntry>,
+  userId: string,
+  committedSimsByLeague: CommittedSimsByLeague,
+  leagueSimCache: Record<string, Record<number, CachedSimRow>>
+): Record<string, number | null> {
+  const odds: Record<string, number | null> = {};
+  for (const [leagueId, entry] of Object.entries(leagueOverviewData)) {
+    const myRoster = entry.rosters.find((r) => r.owner_id === userId);
+    if (myRoster) odds[leagueId] = getPlayoffOdds(leagueId, myRoster.roster_id, committedSimsByLeague, leagueSimCache);
+  }
+  return odds;
+}
+
+/** The user's playoff odds per Gameday Dashboard league (getPlayoffOdds); never-simulated leagues
+ *  are left out. */
 export function getGamedayPlayoffOdds(
   entries: GamedayDashboardEntry[],
   committedSimsByLeague: CommittedSimsByLeague,
@@ -468,8 +514,7 @@ export function getGamedayPlayoffOdds(
   const odds: Record<string, number> = {};
   entries.forEach(({ league, myRosterId }) => {
     if (myRosterId == null) return;
-    const value = committedSimsByLeague[league.league_id]?.[myRosterId]?.playoffOdds
-      ?? leagueSimCache[league.league_id]?.[myRosterId]?.playoff_odds;
+    const value = getPlayoffOdds(league.league_id, myRosterId, committedSimsByLeague, leagueSimCache);
     if (value != null) odds[league.league_id] = value;
   });
   return odds;

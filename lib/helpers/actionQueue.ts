@@ -13,7 +13,8 @@
 // ============================================================
 import { getRosterSlotSummary } from "./rosterSlots";
 import { LINEUP_DELTA_FLOOR } from "./lineup";
-import { getEarlyLockDay } from "./gameday";
+import { getEarlyLockDay, isBeforeSundaySlate } from "./gameday";
+import { getSleeperLeagueOrder } from "./leagueOrder";
 import type {
   EarlyLockDay,
   LeagueLineupStatus,
@@ -289,8 +290,10 @@ export interface LeagueActionGroup {
   appTab: ActionAppTab;
 }
 
-/** By league: one group per league, earliest deadline first; leagues with only untimed items
- *  after, by name. `items` should already be sorted (buildActionQueue's order). */
+/** By league: one group per league. Leagues with a move due before Sunday's main slate (Thursday /
+ *  Friday / Saturday games, Sunday-morning international games — isBeforeSundaySlate) come first,
+ *  earliest deadline first; every other league follows in the user's Sleeper order (the user's
+ *  call, 10/14), timed or not. */
 export function groupActionsByLeague(items: ActionItem[], leagues: SleeperLeague[]): LeagueActionGroup[] {
   const byLeague = new Map<string, ActionItem[]>();
   for (const item of items) {
@@ -305,13 +308,13 @@ export function groupActionsByLeague(items: ActionItem[], leagues: SleeperLeague
     const sorted = [...list].sort(compareActionItems);
     groups.push({ league, items: sorted, deadline: sorted[0].deadline, appTab: sorted[0].appTab });
   }
+  const sleeperOrder = getSleeperLeagueOrder(leagues);
+  const early = (g: LeagueActionGroup) => g.deadline != null && isBeforeSundaySlate(g.deadline);
   return groups.sort((a, b) => {
-    if (a.deadline !== b.deadline) {
-      if (a.deadline == null) return 1;
-      if (b.deadline == null) return -1;
-      return a.deadline - b.deadline;
-    }
-    return a.league.name.localeCompare(b.league.name);
+    const earlyA = early(a);
+    if (earlyA !== early(b)) return earlyA ? -1 : 1;
+    if (earlyA && a.deadline !== b.deadline) return a.deadline! - b.deadline!;
+    return (sleeperOrder.get(a.league.league_id) ?? 0) - (sleeperOrder.get(b.league.league_id) ?? 0);
   });
 }
 
