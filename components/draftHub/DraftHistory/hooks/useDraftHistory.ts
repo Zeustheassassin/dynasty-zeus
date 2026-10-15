@@ -26,6 +26,25 @@ const log = logger("components/draftHub/DraftHistory");
 // copy of them the moment the first tier is set.
 const TIERS_LS_KEY = "consensusPlayerTiers";
 
+/**
+ * The one query for a year's compiled board. The Consensus tab and the Pick Slot
+ * Grades tab both fill the same consensusCache entry, and the Consensus loader
+ * skips any year already cached — so a narrower or unordered read here lands
+ * straight on the Consensus board (that's how it once lost its sort and its
+ * Drafts counts). Returns null on a failed read so the year stays uncached and
+ * retries, rather than caching [] and claiming there's no data.
+ */
+async function fetchConsensusRows(userId: string, year: string): Promise<ConsensusCacheRow[] | null> {
+  const { data, error } = await supabase
+    .from("consensus_draft_cache")
+    .select("player_id, player_name, position, team, avg_pick_no, draft_count")
+    .eq("user_id", userId)
+    .eq("year", parseInt(year, 10))
+    .order("avg_pick_no", { ascending: true });
+  if (error) { log.error("consensus rows load failed", { err: error.message, year }); return null; }
+  return (data ?? []) as ConsensusCacheRow[];
+}
+
 type ConsensusMeta = Record<string, {
   draftCount: number;
   leagueCount: number;
@@ -212,13 +231,8 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
 
     void (async () => {
       setLoadingCacheYear(selectedHistoryYear);
-      const { data } = await supabase
-        .from("consensus_draft_cache")
-        .select("player_id, player_name, position, team, avg_pick_no, draft_count")
-        .eq("user_id", supabaseUser.id)
-        .eq("year", parseInt(selectedHistoryYear, 10))
-        .order("avg_pick_no", { ascending: true });
-      setConsensusCache((prev) => ({ ...prev, [selectedHistoryYear]: (data ?? []) as ConsensusCacheRow[] }));
+      const rows = await fetchConsensusRows(supabaseUser.id, selectedHistoryYear);
+      if (rows) setConsensusCache((prev) => ({ ...prev, [selectedHistoryYear]: rows }));
       setLoadingCacheYear(null);
     })();
   }, [supabaseUser?.id, historyTab, selectedHistoryYear, consensusMeta]); // eslint-disable-line
@@ -255,14 +269,9 @@ export function useDraftHistory(leagues: SleeperLeague[], user: SleeperUser | nu
     if (historyTab !== "GRADES" || !supabaseUser) return;
     const yearsToLoad = Object.keys(consensusMeta).filter((yr) => consensusCache[yr] === undefined);
     yearsToLoad.forEach((year) => {
-      supabase
-        .from("consensus_draft_cache")
-        .select("player_id, player_name, position, avg_pick_no")
-        .eq("user_id", supabaseUser.id)
-        .eq("year", parseInt(year, 10))
-        .then(({ data }) => {
-          setConsensusCache((prev) => ({ ...prev, [year]: (data ?? []) as ConsensusCacheRow[] }));
-        });
+      void fetchConsensusRows(supabaseUser.id, year).then((rows) => {
+        if (rows) setConsensusCache((prev) => ({ ...prev, [year]: rows }));
+      });
     });
   }, [historyTab, supabaseUser?.id]); // eslint-disable-line
 
