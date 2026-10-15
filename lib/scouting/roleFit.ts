@@ -35,11 +35,15 @@
 //
 // Buckets describe a player. They don't feed the AE Score or the Dynasty
 // Scores (the user's call, 2026-10-02).
+//
+// Beside the roles a player can carry a tag: a style note, not a role, so it
+// never competes with the buckets or their levels. RB Inside / Outside
+// (2026-10-15) is the only one so far.
 
 export type RolePos = "QB" | "RB" | "WR" | "TE";
 
 export type WRRole = "x" | "y" | "slot" | "gadget";
-export type RBRole = "three_down" | "zone" | "gap" | "receiving" | "two_down" | "third_down" | "big_play" | "goal_line" | "blocking_st";
+export type RBRole = "three_down" | "zone" | "gap" | "scheme_versatile" | "receiving" | "two_down" | "third_down" | "big_play" | "goal_line" | "blocking_st";
 export type TERole = "inline_y" | "move" | "h_back" | "blocking";
 export type QBRole = "creator" | "distributor" | "vertical" | "dual_threat";
 export type RoleKey = WRRole | RBRole | TERole | QBRole;
@@ -69,9 +73,9 @@ export interface RoleInfo {
 // X and Y are the same level, Slot a step below (more limited to the short
 // game), and Gadget catches the receivers who aren't good enough for any of
 // the three. The TE / QB orders are a proposal the user hasn't weighed in on.
-// RB tiers are levels, all the user's (2026-10-08): A Three-down; B Zone or
-// Gap/Power, whichever he fits better; C Receiving, 2-Down or 3rd-Down; D
-// Big-play, Goal-line or Blocking/ST (LEVELED).
+// RB tiers are levels, all the user's (2026-10-08): A Three-down; B Zone,
+// Gap/Power or Scheme Versatile (2026-10-15), whichever he fits best; C
+// Receiving, 2-Down or 3rd-Down; D Big-play, Goal-line or Blocking/ST (LEVELED).
 export const ROLES: Record<RolePos, readonly RoleInfo[]> = {
   WR: [
     { key: "x",      label: "X",      short: "X",      tier: 0, description: "Excels vs press and man on slants, nines, comebacks, digs, corners and posts. Needs 10+ in-app press reps to be proven (X? until then). Reads release vs press too once he has 10+ tagged press reps." },
@@ -81,8 +85,9 @@ export const ROLES: Record<RolePos, readonly RoleInfo[]> = {
   ],
   RB: [
     { key: "three_down",  label: "Three-down",  short: "3-Down",   tier: 0, description: "The workhorse: wins on zone and gap runs, reliable hands (no drops), holds up in pass protection, and the build to carry the load. Level A: when he reaches it, it's his whole label." },
-    { key: "zone",        label: "Zone",        short: "Zone",     tier: 1, description: "One-cut runner: much better on zone runs than gap runs. Level B, with Gap/Power: whichever he fits better." },
-    { key: "gap",         label: "Gap/Power",   short: "Gap",      tier: 1, description: "Wins on gap runs and against a stacked box, breaks tackles; heavier. Level B, with Zone: whichever he fits better." },
+    { key: "zone",        label: "Zone",        short: "Zone",     tier: 1, description: "One-cut runner: much better on zone runs than gap runs. Level B, with Gap/Power and Scheme Versatile: whichever he fits best." },
+    { key: "gap",         label: "Gap/Power",   short: "Gap",      tier: 1, description: "Wins on gap runs and against a stacked box, breaks tackles; heavier. Level B, with Zone and Scheme Versatile: whichever he fits best." },
+    { key: "scheme_versatile", label: "Scheme Versatile", short: "Scheme", tier: 1, description: "Runs both schemes: clearly above average on zone runs and on gap runs, so neither one is his scheme. Read mostly from the weaker of the two; average or worse at either cuts it in half. Level B, with Zone and Gap/Power: whichever he fits best." },
     { key: "receiving",   label: "Receiving",   short: "Recv",     tier: 2, description: "Runs a lot of routes, often split out wide, gets open on the harder routes (WR routes, wheels, angles, seams), no drops, and produces on his routes (PFF yards per route run). Level C." },
     { key: "two_down",    label: "2-Down",      short: "2-Down",   tier: 2, description: "Early-down runner who comes off the field on passing downs: not good in pass protection and average at best as a receiver (40% of the match), with the Three-down back's running and build (60%). Holding up in pass pro or catching well cuts it. Level C." },
     { key: "third_down",  label: "3rd-Down",    short: "3rd-Down", tier: 2, description: "Passing-down back: excels in pass protection and as a receiver (open on routes, no drops), average at best as a runner. Falling short in pass pro or hands cuts it, and so does being a good runner. Level C." },
@@ -106,6 +111,34 @@ export const ROLES: Record<RolePos, readonly RoleInfo[]> = {
 
 const ROLE_INFO = new Map<RoleKey, RoleInfo>(Object.values(ROLES).flat().map((r) => [r.key, r]));
 export const roleInfo = (key: RoleKey): RoleInfo => ROLE_INFO.get(key)!;
+
+/** A style note shown after the role ("Zone / Goal-line · Inside"), not a role. */
+export interface RoleTag {
+  key: "inside" | "outside";
+  label: string;
+  /** The numbers behind it, for the tooltip. */
+  why: string;
+}
+
+// RB Inside / Outside (the user, 2026-10-15): "designed for players who are + in
+// one and - in the other with a significant difference". Above average on both
+// (Darius Taylor) or below on both (Dilin Jones) gets neither. Read off the
+// inside and outside run SRAE (the run-type model, as the Analysis Inside /
+// Outside columns), each pulled toward average for its sample (which never
+// flips its sign): one side above 0 and the other below, RUN_SIDE_GAP+ pts
+// apart, with RUN_SIDE_MIN_RUNS+ runs on each side (the Analysis columns' own
+// floor).
+// The 5 is mine, set on the 2026-10-15 charting: the user's mildest example,
+// Isaac Brown, is 5.3 apart (−10.8 inside, +4.4 outside on 16 runs each).
+export const RUN_SIDE_GAP = 5;
+export const RUN_SIDE_MIN_RUNS = 10;
+
+/** A position's tag rule in words, for tooltips; null where there are no tags. */
+export function roleTagRuleText(pos: RolePos): string | null {
+  if (pos !== "RB") return null;
+  return `Inside / Outside: above average (SRAE) on inside runs and below on outside ones, or the reverse, ${RUN_SIDE_GAP}+ pts apart after the sample discount, `
+    + `with ${RUN_SIDE_MIN_RUNS}+ runs on each and above average on one side, below on the other.`;
+}
 
 // Two buckets within this many points are a near tie: the higher-ceiling one
 // leads and the other shows as the hybrid ("X / Y"). Not at a LEVELED
@@ -289,6 +322,8 @@ export interface RoleFit {
   skillOnly: boolean;
   /** Every feature behind the matches, for the "why" lines. */
   features: FeatureSet;
+  /** Style tags after the role (RB Inside / Outside); absent or empty when none. */
+  tags?: RoleTag[];
 }
 
 /** Running above-expected sums over some reps (weights = season weights). */
@@ -557,9 +592,11 @@ export function matchFor(fit: RoleFit, role: RoleKey): RoleMatch | undefined {
 // A role's name, with "?" while it's unproven (e.g. an X without press tape).
 const named = (fit: RoleFit, role: RoleKey) => `${roleInfo(role).label}${matchFor(fit, role)?.proven === false ? "?" : ""}`;
 
-/** "X", "X / Y", "Zone / 2-Down / Goal-line", or "X?" for an unproven role. */
+/** "X", "X / Y", "Zone / 2-Down / Goal-line", "X?" for an unproven role, and any tag after a dot
+ *  ("Zone / Goal-line · Inside"). */
 export function roleLabel(fit: RoleFit): string {
-  return [fit.best, ...fit.also].map((r) => named(fit, r)).join(" / ");
+  const roles = [fit.best, ...fit.also].map((r) => named(fit, r)).join(" / ");
+  return [roles, ...(fit.tags ?? []).map((t) => t.label)].join(" · ");
 }
 
 const listOf = (names: string[]) => (names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0]);
@@ -593,6 +630,7 @@ export function roleFitTooltip(fit: RoleFit): string {
   const all = [...fit.matches].sort((a, b) => b.pct - a.pct).map((m) => `${named(fit, m.role)} ${m.pct}%`).join(" · ");
   const lines = [head, all, ...best.drivers];
   if (best.sizeNote) lines.push(`Size: ${best.sizeNote} → −${Math.round(best.sizeDrop * 100)}%`);
+  for (const t of fit.tags ?? []) lines.push(`${t.label}: ${t.why}`);
   for (const m of fit.matches) if (m.pendingWhy && (m.role === fit.best || fit.also.includes(m.role))) lines.push(`${roleInfo(m.role).label}?: ${m.pendingWhy}`);
   if (fit.usedAs && fit.usedAs !== fit.best) lines.push(`Used as: ${roleInfo(fit.usedAs).label}`);
   if (fit.versatile) lines.push(`Versatile: ${versatileRuleText(fit.pos)}`);

@@ -1,9 +1,10 @@
 // RB role buckets: Three-down, Zone, Gap/Power, Receiving and Big-play
-// (approved by the user, 2026-10-02), plus Goal-line (2026-10-07) and 2-Down,
-// 3rd-Down and Blocking/ST (2026-10-08). A back is labeled by level (roleFit.ts
-// LEVELED, the user's levels): A Three-down; B Zone or Gap/Power; C
-// Receiving, 2-Down or 3rd-Down; D Big-play, Goal-line or Blocking/ST. Scoring
-// is shared (roleFit.ts); this file holds the RB features and recipes.
+// (approved by the user, 2026-10-02), plus Goal-line (2026-10-07), 2-Down,
+// 3rd-Down and Blocking/ST (2026-10-08) and Scheme Versatile (2026-10-15). A
+// back is labeled by level (roleFit.ts LEVELED, the user's levels): A
+// Three-down; B Zone, Gap/Power or Scheme Versatile; C Receiving, 2-Down or
+// 3rd-Down; D Big-play, Goal-line or Blocking/ST. Scoring is shared
+// (roleFit.ts); this file holds the RB features and recipes.
 //
 // Every game counts. Unlike WR, the RB games charted before 2026-05-01 were
 // charted play by play (each took 13+ minutes; the WR import went in under
@@ -52,14 +53,17 @@
 //   than blocking". A catch-all whose % is how blocking-only he is (pass
 //   protection, cut for running or catching well); it's named only under 40%
 //   at every other role and at 55%+ itself (fallbackRule).
+//
+// Inside / Outside (2026-10-15) are tags, not roles: runSideTag, rule and
+// knobs in roleFit.ts (RUN_SIDE_GAP).
 import type { Prospect, RBPlay, RBRunType, ScoutingGame } from "../types";
 import type { PffTotals } from "../pff/totals";
 import { computeRBRoleSlices } from "./aboveExpected";
 import { parseHeightInches } from "./prospectAge";
 import { traitAverages, type TraitAverage } from "./traits";
 import {
-  buildRoleFit, contrastFeature, skillFeature, usageFeature,
-  type AESliceValue, type BucketRecipe, type Feature, type FeatureSet, type RoleFit,
+  buildRoleFit, contrastFeature, shrinkAE, signed, skillFeature, usageFeature, RUN_SIDE_GAP, RUN_SIDE_MIN_RUNS,
+  type AESliceValue, type BucketRecipe, type Feature, type FeatureSet, type RoleFit, type RoleTag,
 } from "./roleFit";
 
 // Fewer known runs than this: no bucket.
@@ -109,6 +113,7 @@ const isKnownRun = (pl: RBPlay) => RUN_TYPES.includes(pl.run_type) && pl.success
 const isZone = (pl: RBPlay) => pl.run_type === "outside_zone" || pl.run_type === "inside_zone";
 const isGap = (pl: RBPlay) => pl.run_type === "outside_man_gap" || pl.run_type === "inside_man_gap";
 const isInside = (pl: RBPlay) => pl.run_type === "inside_zone" || pl.run_type === "inside_man_gap";
+const isOutside = (pl: RBPlay) => pl.run_type === "outside_zone" || pl.run_type === "outside_man_gap";
 const isShortYardage = (pl: RBPlay) => isKnownRun(pl) && pl.short_yardage === true;
 
 // Tagged short-yardage / goal-line runs before their success counts.
@@ -127,6 +132,8 @@ const RB_SLICES = {
   zone:   { pred: isZone, byRunType: true },
   gap:    { pred: isGap, byRunType: true },
   inside: { pred: isInside, byRunType: true },
+  // The Inside / Outside tags only.
+  outside: { pred: isOutside, byRunType: true },
 };
 type RBSliceKey = keyof typeof RB_SLICES;
 
@@ -195,6 +202,11 @@ const TWO_DOWN_RECV = [0.55, 0.7] as const;
 // 3rd-Down: "average at best" as a runner, so no cut up to average SRAE, the
 // full cut at a good runner's.
 const THIRD_DOWN_RUN = [0.5, 0.7] as const;
+// Scheme Versatile: "better than average at both zone and gap". The weaker
+// scheme's fit has to clear average; no cut from SCHEME_BOTH_FULL up (about
+// 2 pts above expected after the sample discount), the full cut at or under
+// average, in proportion between.
+const SCHEME_BOTH_FULL = 0.6;
 // Receiving skill, for 3rd-Down's recipe and 2-Down's receiving cut: open on
 // routes, hands (drops), PFF yards per route run, open on Other routes.
 const RECV_SKILL = [["recOpen", 0.25], ["hands", 0.2], ["yprr", 0.2], ["bigOpen", 0.1]] as const;
@@ -283,6 +295,15 @@ export function rbFeatures(inp: RBRoleInputs): FeatureSet {
   f.passProGood = { ...f.passProWeak!, label: "Holds up in pass protection" };
   f.recvGood = { ...f.recvWeak!, label: "Good receiver" };
   f.runGood = atMost(f.srae, ...THIRD_DOWN_RUN, "Good runner");
+  // Scheme Versatile reads the weaker of zone and gap, and gates on it clearing average.
+  const zoneWeaker = f.zoneAE!.fit <= f.gapAE!.fit;
+  const weaker = zoneWeaker ? f.zoneAE! : f.gapAE!;
+  f.schemeMin = { ...weaker, label: `Weaker scheme (${zoneWeaker ? "zone" : "gap"})` };
+  f.schemeBoth = {
+    ...weaker,
+    label: "Above average on both zone and gap runs",
+    fit: Math.min(1, Math.max(0, (weaker.fit - 0.5) / (SCHEME_BOTH_FULL - 0.5))),
+  };
   if (inp.weightLb != null) {
     const w = inp.weightLb;
     f.build = { label: "Build", kind: "body", fit: Math.min(1, Math.max(0, (w - BUILD_LB[0]) / (BUILD_LB[1] - BUILD_LB[0]))), display: `${w} lb` };
@@ -406,6 +427,23 @@ export const RB_RECIPES: readonly BucketRecipe[] = [
     size: { minWeightLb: 210 },
   },
   {
+    // The user (2026-10-15): one "that isn't Gap or Zone" for a back "better
+    // than average at both zone and gap" (Marcellous Hawkins: "not a Zone
+    // specific runner"). Level B with them, so the better fit wins. Mostly the
+    // weaker scheme, so being great at one can't carry it; gated on that
+    // weaker one clearing average. No usage: how his college split the schemes
+    // isn't the point. Size floor between Zone's and Gap/Power's (mine).
+    role: "scheme_versatile",
+    ingredients: [
+      { feature: "schemeMin", weight: 0.5, core: true },
+      { feature: "zoneAE", weight: 0.2 },
+      { feature: "gapAE", weight: 0.2 },
+      { feature: "srae", weight: 0.1 },
+    ],
+    size: { minWeightLb: 200 },
+    gates: [{ feature: "schemeBoth", maxCut: GATE_MAX_CUT }],
+  },
+  {
     role: "receiving",
     ingredients: [
       { feature: "recOpen", weight: 0.3, core: true },
@@ -447,11 +485,34 @@ export const RB_RECIPES: readonly BucketRecipe[] = [
   },
 ];
 
+/** Inside or Outside: above average on one side's runs and below on the other's, RUN_SIDE_GAP+
+ *  pts apart after the sample discount, with RUN_SIDE_MIN_RUNS+ runs on each (roleFit.ts). Null
+ *  otherwise — above average on both or below on both gets neither. */
+export function runSideTag(slices: Pick<RBRoleInputs["slices"], "inside" | "outside">): RoleTag | null {
+  const { inside, outside } = slices;
+  if (inside.n < RUN_SIDE_MIN_RUNS || outside.n < RUN_SIDE_MIN_RUNS) return null;
+  const i = shrinkAE(inside.ae, inside.n, RUN_PRIOR);
+  const o = shrinkAE(outside.ae, outside.n, RUN_PRIOR);
+  const gap = Math.abs(i - o);
+  if (gap < RUN_SIDE_GAP) return null;
+  const isIn = i > o;
+  // + on one side, − on the other (the discount only scales toward 0, so the signs are his own).
+  if (!(Math.max(i, o) > 0 && Math.min(i, o) < 0)) return null;
+  const side = (name: string, s: AESliceValue) => `${name} ${signed(s.ae ?? 0)} pts on ${s.n} runs`;
+  const [strong, weak] = isIn ? [side("inside", inside), side("outside", outside)] : [side("outside", outside), side("inside", inside)];
+  return {
+    key: isIn ? "inside" : "outside",
+    label: isIn ? "Inside" : "Outside",
+    why: `${strong} vs ${weak} (SRAE): ${gap.toFixed(1)} pts apart after the sample discount`,
+  };
+}
+
 /** Null under RB_MIN_RUNS. */
 export function rbRoleFit(inp: RBRoleInputs): RoleFit | null {
   const runs = inp.plays.filter(isKnownRun).length;
   if (runs < RB_MIN_RUNS) return null;
-  return buildRoleFit({
+  const tag = runSideTag(inp.slices);
+  const fit = buildRoleFit({
     pos: "RB",
     recipes: RB_RECIPES,
     features: rbFeatures(inp),
@@ -460,6 +521,7 @@ export function rbRoleFit(inp: RBRoleInputs): RoleFit | null {
     sample: { n: runs, unit: "runs" },
     confidenceAt: { medium: 60, high: 120 },
   });
+  return tag ? { ...fit, tags: [tag] } : fit;
 }
 
 /** Every RB's buckets from the league's plays (and PFF over his charted games). */

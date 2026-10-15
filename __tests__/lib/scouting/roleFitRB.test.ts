@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { rbRoleFit, computeRBRoleFits, GOAL_LINE_NAMED_LB, RB_MIN_RUNS, RB_SY_TAG_MIN, type RBRoleInputs } from "@/lib/scouting/roleFitRB";
-import { matchFor, matchTooltip, roleLabel } from "@/lib/scouting/roleFit";
+import { rbRoleFit, computeRBRoleFits, runSideTag, GOAL_LINE_NAMED_LB, RB_MIN_RUNS, RB_SY_TAG_MIN, type RBRoleInputs } from "@/lib/scouting/roleFitRB";
+import { matchFor, matchTooltip, roleFitTooltip, roleLabel, RUN_SIDE_GAP, RUN_SIDE_MIN_RUNS } from "@/lib/scouting/roleFit";
 import type { Prospect, RBPlay, RBRunType, ScoutingGame } from "@/lib/types";
 import type { PffTotals } from "@/lib/pff/totals";
 
@@ -23,12 +23,14 @@ const LEAGUE = {
   shortYardage: { hits: 70, n: 100 },
 };
 const PFF_POOL = { leaguePffExplosive: { hits: 16, n: 100 }, leaguePffMissedTackles: { hits: 26, n: 100 }, leaguePffYco: { hits: 300, n: 100 } };
-const slices = (s: Partial<Record<"all" | "loaded" | "zone" | "gap" | "inside", [number, number]>>): RBRoleInputs["slices"] => ({
+const slices = (s: Partial<Record<"all" | "loaded" | "zone" | "gap" | "inside" | "outside", [number, number]>>): RBRoleInputs["slices"] => ({
   all: { ae: s.all?.[0] ?? 0, n: s.all?.[1] ?? 100 },
   loaded: { ae: s.loaded?.[0] ?? 0, n: s.loaded?.[1] ?? 10 },
   zone: { ae: s.zone?.[0] ?? 0, n: s.zone?.[1] ?? 50 },
   gap: { ae: s.gap?.[0] ?? 0, n: s.gap?.[1] ?? 50 },
   inside: { ae: s.inside?.[0] ?? 0, n: s.inside?.[1] ?? 50 },
+  // Unset, outside mirrors inside: no split, so no Inside / Outside tag in tests about the roles.
+  outside: { ae: (s.outside ?? s.inside)?.[0] ?? 0, n: (s.outside ?? s.inside)?.[1] ?? 50 },
 });
 const fit = (plays: RBPlay[], sl: RBRoleInputs["slices"], heightIn: number | null = 71, weightLb: number | null = 212, pff: Partial<RBRoleInputs> = {}) =>
   rbRoleFit({ plays, slices: sl, league: LEAGUE, heightIn, weightLb, ...PFF_POOL, ...pff });
@@ -238,11 +240,12 @@ describe("RB 2-Down, 3rd-Down and Blocking/ST (the user's definitions, 2026-10-0
   const AVERAGE_RUNNER = slices({ all: [0, 100], zone: [0, 50], gap: [0, 50] });
   const runner = (passing: RBPlay[]) => [...runs(50, "inside_zone"), ...runs(50, "inside_man_gap"), ...passing];
 
-  it("names a good, heavy runner who can't pass block and doesn't catch well 2-Down, after his run scheme", () => {
+  it("names a good, heavy runner who can't pass block and doesn't catch well 2-Down, after his run role", () => {
     const f = fit(runner([...passBlocks(25, 10), ...quietRoutes(15, 5), ...targets(10, 3)]), RUNNER, 72, 225)!;
     expect(f.best).not.toBe("three_down");
     expect(f.also[0]).toBe("two_down");
-    expect(roleLabel(f)).toMatch(/^(Zone|Gap\/Power) \/ 2-Down/);
+    // +10 on zone and on gap runs: Scheme Versatile (2026-10-15) is his level-B role.
+    expect(roleLabel(f)).toMatch(/^Scheme Versatile \/ 2-Down/);
     expect(matchFor(f, "two_down")!.pct).toBeGreaterThan(matchFor(f, "three_down")!.pct + 15);
     expect(matchFor(f, "two_down")!.drivers.join(" ")).toContain("Not good in pass protection");
   });
@@ -302,5 +305,100 @@ describe("RB 2-Down, 3rd-Down and Blocking/ST (the user's definitions, 2026-10-0
     const canRun = fit(runner([...passBlocks(25, 25), ...poorReceiver()]), RUNNER, 72, 225)!;
     expect(canRun.best).not.toBe("blocking_st");
     expect(matchFor(canRun, "blocking_st")!.pct).toBeLessThan(matchFor(blocker(25), "blocking_st")!.pct); // cut for running well
+  });
+});
+
+// Inside / Outside tags (the user, 2026-10-15): "+ in one and - in the other with a significant
+// difference"; above average on both or below on both gets neither. Real 2026-10-15 numbers.
+describe("RB Inside / Outside tags", () => {
+  const side = (inside: [number, number], outside: [number, number]) => runSideTag({
+    inside: { ae: inside[0], n: inside[1] }, outside: { ae: outside[0], n: outside[1] },
+  });
+
+  it("tags the user's examples", () => {
+    expect(side([21.9, 42], [-8.4, 30])?.label).toBe("Inside");   // Marcellous Hawkins
+    expect(side([14.5, 28], [-16.9, 18])?.label).toBe("Inside");  // Nate Frazier
+    expect(side([-10.8, 16], [4.4, 16])?.label).toBe("Outside");  // Isaac Brown, 5.3 apart
+  });
+
+  it("gives neither to a back below average on both sides, however far apart (Dilin Jones, Demond Claiborne)", () => {
+    expect(side([-23.1, 24], [-11.8, 20])).toBeNull();
+    expect(side([-1.1, 54], [-22.7, 23])).toBeNull();          // 9.2 apart
+  });
+
+  it("gives neither to a back above average on both sides (Darius Taylor)", () => {
+    expect(side([11.7, 31], [2, 20])).toBeNull();               // 5.1 apart
+  });
+
+  it("tags a back just over average on one side and just under on the other, given the gap", () => {
+    expect(side([6.3, 77], [-1.1, 25])?.label).toBe("Inside");  // Justice Haynes, 5.05 apart
+    expect(side([1.4, 23], [-15.3, 15])?.label).toBe("Inside"); // Waymond Jordan
+  });
+
+  it("needs the gap: good at both, a little better inside, is no tag", () => {
+    expect(side([7, 44], [4.8, 45])).toBeNull();                   // LJ Martin-like, ~1.3 apart
+  });
+
+  it("needs RUN_SIDE_MIN_RUNS runs on each side", () => {
+    expect(side([2.6, 46], [-32.5, RUN_SIDE_MIN_RUNS - 2])).toBeNull();   // 8 outside runs
+    expect(side([2.6, 46], [-32.5, RUN_SIDE_MIN_RUNS])?.label).toBe("Inside");
+  });
+
+  it("measures the gap after the sample discount, at RUN_SIDE_GAP", () => {
+    // 30 runs each (the prior): half of each AE counts, so raw 2×gap apart is exactly the line.
+    expect(side([RUN_SIDE_GAP + 0.2, 30], [-RUN_SIDE_GAP + 0.2, 30])?.key).toBe("inside");  // 2×5.0 raw apart
+    expect(side([RUN_SIDE_GAP, 30], [-RUN_SIDE_GAP + 0.2, 30])).toBeNull();                 // 2×4.9
+    // Exactly average on one side isn't below average.
+    expect(side([20, 30], [0, 30])).toBeNull();
+  });
+
+  it("explains itself, and shows after the role in the label and tooltip", () => {
+    const t = side([21.9, 42], [-8.4, 30])!;
+    expect(t.why).toBe("inside +21.9 pts on 42 runs vs outside -8.4 pts on 30 runs (SRAE): 17.0 pts apart after the sample discount");
+    const plays = [...runs(42, "inside_zone"), ...runs(30, "outside_zone")];
+    const f = fit(plays, slices({ all: [9.4, 72], inside: [21.9, 42], outside: [-8.4, 30] }), 71, 221)!;
+    expect(f.tags?.map((x) => x.key)).toEqual(["inside"]);
+    expect(roleLabel(f)).toMatch(/ · Inside$/);
+    expect(roleFitTooltip(f)).toContain("Inside: inside +21.9 pts on 42 runs");
+    const plain = fit(plays, slices({ all: [0, 72] }))!;
+    expect(plain.tags).toBeUndefined();
+    expect(roleLabel(plain)).not.toContain("·");
+  });
+});
+
+// Scheme Versatile (the user, 2026-10-15): level B with Zone and Gap/Power, for a back "better than
+// average at both zone and gap" — Marcellous Hawkins, "not a Zone specific runner". Real numbers.
+describe("RB Scheme Versatile", () => {
+  // Mostly zone in college, like Hawkins (63% zone), so Zone's usage share favors Zone.
+  const zoneHeavy = [...runs(45, "inside_zone"), ...runs(27, "inside_man_gap")];
+  const levelB = (f: NonNullable<ReturnType<typeof fit>>) =>
+    (["zone", "gap", "scheme_versatile"] as const).map((r) => matchFor(f, r)!).sort((a, b) => b.pct - a.pct)[0].role;
+
+  it("beats Zone for a back above average on both schemes, however zone-heavy his college was (Hawkins)", () => {
+    const f = fit(zoneHeavy, slices({ all: [9.4, 72], zone: [6.1, 45], gap: [15, 27] }), 74, 221)!;
+    expect(levelB(f)).toBe("scheme_versatile");
+    expect(matchFor(f, "scheme_versatile")!.pct).toBeGreaterThan(matchFor(f, "zone")!.pct);
+    expect(matchFor(f, "scheme_versatile")!.drivers.join(" ")).toContain("Weaker scheme (zone)");
+  });
+
+  it("leaves a zone-only back Zone, cut in half for his gap runs", () => {
+    const f = fit(zoneHeavy, slices({ all: [4, 72], zone: [9.4, 47], gap: [-6.9, 23] }), 71, 210)!;  // Ahmad Hardy
+    expect(levelB(f)).toBe("zone");
+    expect(matchFor(f, "scheme_versatile")!.drivers).toContain("− Above average on both zone and gap runs (−50%)");
+  });
+
+  it("isn't Scheme Versatile for a gap back who's average at zone (Kaelon Black) or a thin gap sample (Jeremy Payne)", () => {
+    const black = fit(zoneHeavy, slices({ all: [4.5, 72], zone: [-0.6, 38], gap: [11.1, 34] }), 70, 211)!;
+    expect(levelB(black)).not.toBe("scheme_versatile");
+    const payne = fit(zoneHeavy, slices({ all: [2.4, 26], zone: [0.3, 23], gap: [14.4, 3] }), 68, 180)!;
+    expect(matchFor(payne, "scheme_versatile")!.pct).toBeLessThan(40);
+  });
+
+  it("reads Scheme Versatile / 2-Down / Goal-line · Inside for a Hawkins-like back", () => {
+    const plays = [...runs(42, "inside_zone"), ...runs(30, "outside_man_gap"), ...passBlocks(20, 9), ...routes(12, 4)];
+    const f = fit(plays, slices({ all: [9.4, 72], zone: [6.1, 45], gap: [15, 27], inside: [21.9, 42], outside: [-8.4, 30], loaded: [8, 20] }), 74, 221,
+      { pffYco: { hits: 420, n: 100 }, pffMissedTackles: { hits: 35, n: 100 } })!;
+    expect(roleLabel(f)).toMatch(/^Scheme Versatile \/ /);
+    expect(roleLabel(f)).toMatch(/ · Inside$/);
   });
 });

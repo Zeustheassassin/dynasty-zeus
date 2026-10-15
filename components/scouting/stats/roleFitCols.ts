@@ -5,7 +5,7 @@
 import type { ColDef } from "./StatsTableShell";
 import {
   ROLES, confidenceLabel, matchFor, matchTooltip, roleFitTooltip, roleInfo, roleLabel,
-  hasVersatile, versatileRuleText, levelRuleText, type RoleFit, type RolePos,
+  hasVersatile, versatileRuleText, levelRuleText, roleTagRuleText, type RoleFit, type RolePos,
 } from "../../../lib/scouting/roleFit";
 
 const GROUP = "Role Fit";
@@ -13,10 +13,11 @@ const GROUP = "Role Fit";
 export function roleFitCols(pos: RolePos): ColDef[] {
   return [
     {
-      // RB labels run to three roles ("Gap/Power / 2-Down / Goal-line").
-      key: "role", label: "Role", group: GROUP, width: levelRuleText(pos) ? 190 : 110, titleKey: "role_tip",
+      // RB labels run to three roles and a tag ("Gap/Power / 2-Down / Goal-line · Inside").
+      key: "role", label: "Role", group: GROUP, width: levelRuleText(pos) ? 230 : 110, titleKey: "role_tip",
       tooltip: "Best-case NFL role from his charting plus height and weight. "
         + (levelRuleText(pos) ?? "Two roles within 5 points read \"A / B\": equally a candidate for both, the higher-ceiling one first. \"?\" = not proven yet (an X needs 10+ in-app press reps).")
+        + (roleTagRuleText(pos) ? ` ${roleTagRuleText(pos)}` : "")
         + " Hover a cell for why.",
     },
     ...ROLES[pos].map((r): ColDef => ({

@@ -18,7 +18,7 @@ import type { ProspectGameRouteCellsRow } from "../../lib/scouting/aggregateMerg
 import type { MetricContext } from "../../lib/scouting/contextGrading";
 import { SEASON_DECAY } from "../../lib/scouting/seasonWeight";
 import { POS_COLOR } from "../../lib/uiTheme";
-import { levelRuleText, matchFor, noLevelReached, roleFitTooltip, roleLabel, versatileRuleText, type RoleFit } from "../../lib/scouting/roleFit";
+import { levelRuleText, matchFor, noLevelReached, roleFitTooltip, roleLabel, roleTagRuleText, versatileRuleText, type RoleFit } from "../../lib/scouting/roleFit";
 import {
   parseGrade, formatGrade, gradeColor, gradeDelta, gradeTier, gradeTierRange,
   GRADE_MIN, GRADE_MAX, GRADE_TIERS, type GradeField,
@@ -763,7 +763,7 @@ export default function BigBoard({
   const roleTooltip =
     "Role: the best-case NFL role from the charting plus height and weight (Analysis → Role Fit has every role's match %). " +
     "WR / TE / QB: two roles within 5 points read \"A / B\", the higher-ceiling one first. \"?\" = not proven yet (an X needs 10+ in-app press reps). " +
-    `RB: ${levelRuleText("RB")} ` +
+    `RB: ${levelRuleText("RB")} ${roleTagRuleText("RB")} ` +
     `V = Versatile: a WR ${versatileRuleText("WR")}, a TE ${versatileRuleText("TE")} (none for RB or QB: Three-down, Creator and Dual-threat already mean all-round). Greyed = little tape, or not proven yet. Feeds none of the scores.`;
 
   const dynastyTooltip =
