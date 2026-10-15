@@ -34,9 +34,11 @@
  * consensus cache by a decade, so he cannot appear.)
  */
 
-export const SKILL_POSITIONS = ["QB", "RB", "WR", "TE"] as const;
+import { fantasySkillPosition, isSkillPosition } from "../helpers/playerPosition";
 
-export type SkillPosition = (typeof SKILL_POSITIONS)[number];
+// The skill-position list and the multi-eligibility rule live in lib/helpers/playerPosition.ts,
+// which also normalizes the app's player map (2026-10-15); re-exported for existing imports.
+export { SKILL_POSITIONS, isSkillPosition, type SkillPosition } from "../helpers/playerPosition";
 
 /** The three (disagreeing) things we can know about one player's position. */
 export interface PositionSources {
@@ -48,17 +50,11 @@ export interface PositionSources {
   fantasyPositions?: readonly string[] | null;
 }
 
-export function isSkillPosition(position: string | null | undefined): position is SkillPosition {
-  return !!position && (SKILL_POSITIONS as readonly string[]).includes(position);
-}
-
 /** True when any source above puts this player at a skill position. */
 export function countsAsSkillPlayer(sources: PositionSources): boolean {
   if (isSkillPosition(sources.compiled)) return true;
-  if (isSkillPosition(sources.current)) return true;
-  const eligible = sources.fantasyPositions ?? [];
-  // Multi-eligibility only — a lone "RB" here is every fullback in the league.
-  return eligible.length > 1 && eligible.some(isSkillPosition);
+  // Current position, or multi-eligibility only — a lone "RB" here is every fullback in the league.
+  return isSkillPosition(fantasySkillPosition(sources.current, sources.fantasyPositions));
 }
 
 /**

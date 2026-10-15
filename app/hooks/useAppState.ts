@@ -69,6 +69,7 @@ import type { PersonalSignal } from "../../lib/helpers/personalRankings";
 import { useSimulatorState } from "./useSimulatorState";
 import { useTodoDone } from "./useTodoDone";
 import { useLeagueStepper } from "./useLeagueStepper";
+import { withFantasyPositions } from "../../lib/helpers/playerPosition";
 import { buildActionQueue, getActionState, type ActionAppTab, type ActionItem } from "../../lib/helpers/actionQueue";
 import { sleeperApi } from "../../lib/sleeperApi";
 import { PLAYERS_BACKGROUND_REFRESH_MS, ROSTER_OVERVIEW_FRESH_GAP_MS, ROSTER_DATA_MAX_AGE_MS } from "../../lib/constants";
@@ -719,8 +720,10 @@ const fetchFreshPlayers = useCallback(async (signal?: AbortSignal, opts?: { bypa
   // "already loaded" for the rest of the session.
   if (!res.ok) throw new Error(`players ${res.status}`);
   const body = await res.json();
-  const fetched: Record<string, SleeperPlayer> | undefined = body?.players;
-  if (!fetched || Object.keys(fetched).length === 0) throw new Error("players response was empty");
+  const fetchedRaw: Record<string, SleeperPlayer> | undefined = body?.players;
+  if (!fetchedRaw || Object.keys(fetchedRaw).length === 0) throw new Error("players response was empty");
+  // /api/players already does this; a response cached before it did (CDN) is caught here.
+  const fetched = withFantasyPositions(fetchedRaw);
   _playersFetchedAt = Date.now();
   setNflState(body.nflState);
 
@@ -785,7 +788,8 @@ useEffect(() => {
     const ONE_DAY = 24 * 60 * 60 * 1000;
 
     if (cached && cachedAt && Date.now() - cachedAt < ONE_DAY) {
-      const parsedCache = cached;
+      // A map cached before two-way players were normalized (Travis Hunter as DB) is fixed on read.
+      const parsedCache = withFantasyPositions(cached);
       const cacheSample = Object.values(parsedCache).find((player) => player && typeof player === "object") as Record<string, unknown> | undefined;
       const hasRookieFields =
         cacheSample &&

@@ -69,6 +69,7 @@ import type {
   RookieBoardPlayer, AugmentedPick,
 } from "../../../../lib/types";
 import type { PlayerUsage } from "../../../../hooks/usePlayerStats";
+import { fantasySkillPosition } from "../../../../lib/helpers/playerPosition";
 
 const log = logger("cron/simulation-history");
 
@@ -142,7 +143,8 @@ async function fetchSlimPlayers(paced: PacedFetch): Promise<Record<string, SimPl
     players[id] = {
       player_id: (p.player_id as string) ?? id,
       full_name: (p.full_name as string) ?? "",
-      position: (p.position as string) ?? "",
+      // A two-way player listed at a defensive position plays his fantasy one (Travis Hunter: DB → WR).
+      position: fantasySkillPosition(p.position as string | undefined, p.fantasy_positions as string[] | undefined),
       team: (p.team as string | null) ?? null,
       years_exp: (p.years_exp as number | null) ?? null,
     };

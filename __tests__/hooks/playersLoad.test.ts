@@ -259,3 +259,26 @@ describe("player map loader — background re-pull past 15 min", () => {
     }
   });
 });
+
+describe("player map loader — two-way players read at their fantasy position (Travis Hunter, 10/15)", () => {
+  const hunter = (extra: Record<string, unknown> = {}) =>
+    player("1", { full_name: "Travis Hunter", position: "DB", fantasy_positions: ["DB", "WR"], ...extra });
+  const positionOf = (r: Parameters<typeof playersOf>[0], id: string) =>
+    (playersOf(r)[id] as { position?: string; sleeper_position?: string } | undefined);
+
+  it("fixes a map cached before the change, without refetching it", async () => {
+    window.localStorage.setItem("playersCache", JSON.stringify({ "1": hunter({ value: 1000 }), "2": player("2", { value: 500 }) }));
+    window.localStorage.setItem("playersCacheAt", String(Date.now()));
+    const { result } = await mount();
+    await waitFor(() => expect(positionOf(result, "1")?.position).toBe("WR"));
+    expect(positionOf(result, "1")?.sleeper_position).toBe("DB");
+    expect(positionOf(result, "2")?.position).toBe("WR");
+    expect(playersFetches()).toBe(0);
+  });
+
+  it("fixes a /api/players answer that still says DB (a CDN copy from before the change)", async () => {
+    up.players = () => json({ players: { "1": hunter(), "2": player("2") }, nflState: null });
+    const { result } = await mount();
+    await waitFor(() => expect(positionOf(result, "1")?.position).toBe("WR"));
+  });
+});

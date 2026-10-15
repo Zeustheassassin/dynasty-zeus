@@ -6,6 +6,7 @@ import {
 import { logger } from '../../../lib/logger';
 import { checkRateLimit } from '../../../lib/rateLimit';
 import { waitForSleeperSlot } from '../../../lib/server/sleeperBudget';
+import { withFantasyPositions } from '../../../lib/helpers/playerPosition';
 
 const log = logger('api/players');
 
@@ -52,6 +53,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       player_id: string; full_name: string; position: string; team: string | null;
       age: number | null; birth_date: string | null; years_exp: number | null; search_rank: number | null;
       fantasy_positions: string[]; active: boolean; status: string;
+      /** Sleeper's primary position when `position` was moved to a fantasy one (playerPosition.ts). */
+      sleeper_position?: string;
       injury_status: string | null;
       injury_body_part: string | null;
       injury_notes: string | null;
@@ -88,8 +91,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       };
     }
 
+    // A two-way player listed at a defensive position reads as his fantasy one (Travis Hunter: DB → WR).
     return NextResponse.json(
-      { players, nflState },
+      { players: withFantasyPositions(players), nflState },
       {
         headers: {
           'Cache-Control': fresh

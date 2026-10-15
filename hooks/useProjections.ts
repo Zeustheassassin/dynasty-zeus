@@ -5,13 +5,14 @@ import { SLEEPER_PROJECTIONS_BASE } from "../lib/constants";
 import { computeLeagueFpts, DEFAULT_SCORING } from "../lib/helpers/scoring";
 import { useLocalStorage } from "../lib/hooks/useLocalStorage";
 import type { SleeperPlayer, ProjectionRow } from "../lib/types";
+import { fantasySkillPosition } from "../lib/helpers/playerPosition";
 
 const ENABLED_EXTRA_SOURCES_KEY = "dz.projections.enabledExtraSources";
 
 /** Raw item shape returned by Sleeper's projections API endpoints. */
 interface SleeperRawProjectionItem {
   player_id?: string | number;
-  player?: { position?: string; first_name?: string; last_name?: string };
+  player?: { position?: string; fantasy_positions?: string[]; first_name?: string; last_name?: string };
   stats?: Record<string, number>;
   game?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
@@ -287,7 +288,8 @@ export function useProjections(
           sleeperData = Array.isArray(data) ? data : [];
         }
         sleeperData.forEach((item: SleeperRawProjectionItem) => {
-          const pos: string = item.player?.position ?? "";
+          // Rows repeat Sleeper's primary position — "DB" for Travis Hunter, a WR here.
+          const pos = fantasySkillPosition(item.player?.position, item.player?.fantasy_positions);
           if (!["QB", "RB", "WR", "TE"].includes(pos) || !item.player_id) return;
           const leagueFpts = calcFpts(item.stats as Record<string, number> | undefined, pos);
           if (leagueFpts <= 0) return;
@@ -406,7 +408,7 @@ export function useProjections(
           const seasonRaw: SleeperRawProjectionItem[] = posResults.flat();
           if (seasonRaw.length > 0) {
             seasonRaw.forEach((item: SleeperRawProjectionItem) => {
-              const pos: string = item.player?.position ?? "";
+              const pos = fantasySkillPosition(item.player?.position, item.player?.fantasy_positions);
               if (!["QB", "RB", "WR", "TE"].includes(pos) || !item.player_id) return;
               const leagueFpts = calcFpts(item.stats as Record<string, number> | undefined, pos);
               if (leagueFpts <= 0) return;

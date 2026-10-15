@@ -288,3 +288,42 @@ describe("useProjections — fresh (post-inactives) reloads", () => {
     urls.forEach((url) => expect(url).not.toContain("bypass"));
   });
 });
+
+// Travis Hunter (10/15): Sleeper returns him in the WR projection query, but the row repeats his
+// primary position, "DB" — the row was dropped, so he projected 0 everywhere.
+describe("useProjections — two-way players", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps a DB row eligible at WR and scores it as a WR", async () => {
+    const players = {
+      "12530": { player_id: "12530", full_name: "Travis Hunter", position: "WR", fantasy_positions: ["DB", "WR"], team: "JAX" },
+      "77": { player_id: "77", full_name: "Pure Corner", position: "DB", fantasy_positions: ["DB"], team: "JAX" },
+    } as unknown as Record<string, import("@/lib/types").SleeperPlayer>;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) => {
+        if (url.includes("/projections/nfl/") && /\/\d+\?season_type=regular&position\[\]/.test(url)) {
+          return Promise.resolve({
+            json: () => Promise.resolve([
+              { player_id: "12530", player: { position: "DB", fantasy_positions: ["DB", "WR"] }, stats: { rec: 4, rec_yd: 60 } },
+              { player_id: "77", player: { position: "DB", fantasy_positions: ["DB"] }, stats: { rec: 1, rec_yd: 10 } },
+            ]),
+          });
+        }
+        return Promise.resolve({ json: () => Promise.resolve([]) });
+      })
+    );
+
+    const { result } = renderHook(() => useProjections(players, null));
+    await act(async () => {
+      await result.current.loadProjections(6);
+    });
+
+    const ids = result.current.projectionData.map((r) => r.sleeperId);
+    expect(ids).toEqual(["12530"]);
+    expect(result.current.projectionData[0]).toMatchObject({ position: "WR" });
+    expect(result.current.projectionData[0].fpts).toBeGreaterThan(0);
+  });
+});

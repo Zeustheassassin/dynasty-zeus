@@ -60,6 +60,21 @@ describe("GET /api/players", () => {
     }
   });
 
+  it("serves Travis Hunter (DB, [DB, WR]) as a WR, keeping Sleeper's DB; a fullback stays FB", async () => {
+    fetchMock.mockImplementation(async (url: string) =>
+      url.includes("/players/nfl")
+        ? new Response(JSON.stringify({
+            "12530": { player_id: "12530", full_name: "Travis Hunter", position: "DB", fantasy_positions: ["DB", "WR"], team: "JAX" },
+            "9": { player_id: "9", full_name: "Full Back", position: "FB", fantasy_positions: ["RB"] },
+          }))
+        : new Response(JSON.stringify({ season: "2026", week: 6 }))
+    );
+    const body = await (await get()).json();
+    expect(body.players["12530"]).toMatchObject({ position: "WR", sleeper_position: "DB", fantasy_positions: ["DB", "WR"] });
+    expect(body.players["9"].position).toBe("FB");
+    expect(body.players["9"].sleeper_position).toBeUndefined();
+  });
+
   it("?fresh=1 is never cached and bypasses the fetch cache", async () => {
     const res = await get("?fresh=1");
     expect(res.headers.get("Cache-Control")).toBe("no-store");

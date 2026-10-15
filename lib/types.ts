@@ -119,6 +119,10 @@ export interface SleeperPlayer {
   depth_chart_order?: number | null;
   search_rank: number | null;
   fantasy_positions: string[];
+  /** Sleeper's own primary position, set only when it isn't QB/RB/WR/TE but `fantasy_positions`
+   *  makes the player one — `position` then holds that one (Travis Hunter: DB → WR;
+   *  lib/helpers/playerPosition.ts). */
+  sleeper_position?: string;
   college: string | null;
   height: string | null;
   weight: string | null;
