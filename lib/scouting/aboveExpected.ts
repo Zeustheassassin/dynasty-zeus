@@ -60,6 +60,7 @@ import { playWeights, type PlayWeight } from "./seasonWeight";
 import { addGameResidual, type ByGame } from "./contextEffects";
 import { isTaggedPlay, type TagPosition } from "./playEra";
 import { correctionFor, withGarbageWeight, type CorrectionKey } from "./tagCorrection";
+import { runMixWeight, type RunMix } from "./runMix";
 
 // A model fit on `plays` (its training set, already filtered), with the tag
 // correction for `key` on top when one is switched on.
@@ -257,12 +258,16 @@ export function computeRBAboveExpectedForPlays(
   return aboveExpectedForPlays(plays.filter(isKnownRun), baselines, rbSuccess);
 }
 
+/** runMix: count each back's runs in this mix of run types (runMix.ts), for
+ *  the AE Score's NFL run mix. The SRAE column leaves it unset. */
+export interface RBSampleOptions extends SampleOptions { runMix?: RunMix }
+
 export function computeRBAboveExpectedSamples(
   prospects: Prospect[],
   games: ScoutingGame[],
   rbPlays: RBPlay[],
   tierByGame?: ReadonlyMap<string, OpponentTier>,
-  opts: SampleOptions = {},
+  opts: RBSampleOptions = {},
 ): Map<string, AESample | null> {
   const out = new Map<string, AESample | null>();
   const gameToProspect = buildGameToProspect(games);
@@ -275,7 +280,10 @@ export function computeRBAboveExpectedSamples(
   for (const p of prospects) {
     if (p.position !== "RB") continue;
     const runs = (playsByProspect.get(p.id) ?? []).filter(isKnownRun);
-    out.set(p.id, runs.length < MIN_SAMPLE ? null : aboveExpectedSampleForPlays(runs, baselines, rbSuccess, { tierOf, weightOf, gameOf }));
+    if (runs.length < MIN_SAMPLE) { out.set(p.id, null); continue; }
+    const mixOf = opts.runMix ? runMixWeight(runs, opts.runMix) : null;
+    const w = mixOf ? (pl: RBPlay) => weightOf(pl) * mixOf(pl) : weightOf;
+    out.set(p.id, aboveExpectedSampleForPlays(runs, baselines, rbSuccess, { tierOf, weightOf: w, gameOf }));
   }
 
   return out;

@@ -345,7 +345,8 @@ export function buildAEComposite(inp: AECompositeInputs): AEComposite {
   const matched = matchedCeiling(WR);
   const positions: Record<CompositePos, PositionComposite> = {
     QB: buildPositionComposite("QB", [{ key: "aae", label: "AAE", weight: 1, samples: inp.qb, fullTrustAt: QB_FULL_TRUST }, ...extra("QB")], POSITION_BASELINE.QB),
-    RB: buildPositionComposite("RB", [{ key: "srae", label: "SRAE", weight: 1, samples: inp.rb, fullTrustAt: RB_FULL_TRUST }, ...extra("RB")], POSITION_BASELINE.RB),
+    // RB's samples come in at the NFL run mix (runMix.ts), so its label says so.
+    RB: buildPositionComposite("RB", [{ key: "srae", label: "SRAE (NFL run mix)", weight: 1, samples: inp.rb, fullTrustAt: RB_FULL_TRUST }, ...extra("RB")], POSITION_BASELINE.RB),
     WR,
     TE: buildPositionComposite("TE", [
       { key: "te_saer", label: "TE-SAER", weight: TE_ROUTE_WEIGHT, samples: inp.teRoute, fullTrustAt: matched },

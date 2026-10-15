@@ -811,6 +811,8 @@ export default function BigBoard({
     "AE Score: each prospect's headline Above-Expected, discounted for sample size and put in " +
     "true-talent SDs vs the average charted prospect at the position, so it compares across " +
     "positions. WR blends cSAE 70% and SAE 30%; TE blends TE-SAER 80% and TE-SAEB 20%. " +
+    "RB SRAE counts his runs in the NFL's mix (inside zone 37%, outside zone 19.5%, inside gap 28%, outside gap 15.5%; " +
+    "zone vs gap from PFF's NFL data), each run type moved from his own share by how many he ran; the SRAE column keeps every run as charted. " +
     "Each position's score also takes in, per player and weighted by how far his sample is trusted: your charting no AE reads " +
     "(QB sacks under pressure; RB pass pro, drops, open on routes; WR drops, contested catches), " +
     "PFF's results over the charted games where you don't chart (QB BTT%, TWP%, rushing; RB YCO/A, missed tackles, 10+ yard runs, 15+ of 10+, YPRR; WR/TE YPRR, YAC; RB and QB fumbles), " +

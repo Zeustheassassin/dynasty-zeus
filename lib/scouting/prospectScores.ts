@@ -33,6 +33,7 @@ import type { ContextCovariates, GameContext } from "./gameContext";
 import { contextAdjust, type HeadlineKey, type MetricContext } from "./contextGrading";
 import { buildComponents, type GradingData } from "./aeComponents";
 import { tagStatReps } from "./tagStats";
+import { NFL_RUN_MIX } from "./runMix";
 
 export const COMPOSITE_POS: CompositePos[] = ["QB", "RB", "WR", "TE"];
 export const isCompositePos = (pos: string): pos is CompositePos => (COMPOSITE_POS as string[]).includes(pos);
@@ -98,6 +99,9 @@ export function computeAEScores(
   }
   const qb = computeQBAboveExpectedSamples(prospects, games, qbPlays, { byGame: true });
   const rb = computeRBAboveExpectedSamples(prospects, games, rbPlays, tiers, { byGame: true });
+  // The RB AE Score counts each back's runs in the NFL's run mix (runMix.ts);
+  // the SRAE column keeps every run as charted.
+  const rbNfl = computeRBAboveExpectedSamples(prospects, games, rbPlays, tiers, { byGame: true, runMix: NFL_RUN_MIX });
   const teRoute = computeTERouteAboveExpectedSamples(prospects, games, tePlays, tiers, { byGame: true });
   const teBlock = computeTEBlockAboveExpectedSamples(prospects, games, tePlays, tiers, { byGame: true });
   // WR's tier splits come from the per-game cells; without them WR (and so
@@ -111,11 +115,11 @@ export function computeAEScores(
     by ? new Map([...m].map(([id, smp]) => [id, smp ? { ...smp, byGame: by.get(id) ?? {} } : smp])) : m;
   const wrRaw = withGames(withSplits(wr, splits?.all), gameSplits?.all);
   const wrCoreRaw = withGames(withSplits(wrCore, splits?.core), gameSplits?.core);
-  const opp = applyOpponentStrength({ rb, wr: wrRaw, wrCore: wrCoreRaw, teRoute, teBlock });
+  const opp = applyOpponentStrength({ rb: rbNfl, wr: wrRaw, wrCore: wrCoreRaw, teRoute, teBlock });
   // Opponent defense SP+ / weather where their tests passed; everything else
   // keeps today's tier adjustment untouched.
   const qbC = contextAdjust("qb_aae", "QB", qb, qb, contextCov);
-  const rbC = contextAdjust("rb_srae", "RB", rb, opp.rb, contextCov);
+  const rbC = contextAdjust("rb_srae", "RB", rbNfl, opp.rb, contextCov);
   const wrC = contextAdjust("wr_sae", "WR", wrRaw, opp.wr, contextCov);
   const wrCoreC = contextAdjust("wr_csae", "WR", wrCoreRaw, opp.wrCore, contextCov);
   const teRouteC = contextAdjust("te_saer", "TE", teRoute, opp.teRoute, contextCov);

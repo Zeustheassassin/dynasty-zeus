@@ -27,6 +27,7 @@ import {
 } from "@/lib/scouting/aboveExpected";
 import { aboveExpectedSampleForPlays, expectedFromModel } from "@/lib/scouting/difficultyModel";
 import { SEASON_DECAY } from "@/lib/scouting/seasonWeight";
+import { NFL_RUN_MIX, runMixWeight } from "@/lib/scouting/runMix";
 import type {
   Prospect,
   ScoutingGame,
@@ -972,6 +973,38 @@ describe("AE samples", () => {
     const short = rbPlays.filter((pl) => pl.game_id === "g_rbA").slice(0, 14);
     expect(computeRBAboveExpectedSamples(prospects, games, short).get("rbA")).toBeNull();
     expect(computeQBAboveExpectedSamples(prospects, games, qbPlays.slice(0, 24)).get("qbA")).toBeNull();
+  });
+});
+
+// =============================================================================
+// The AE Score's NFL run mix (runMix.ts)
+// =============================================================================
+
+describe("RB samples at the NFL run mix", () => {
+  // One situation bucket, so every run is expected at the same rate. Back "a"
+  // ran 40 inside gap at 50% and 10 inside zone at 90%: 58% overall.
+  const rbs = [prospect("a", "RB")];
+  const runs = [
+    ...repeat(200, (i) => rbPlay("g_bg", "inside_zone", "gun", i % 10 < 6, false)),
+    ...repeat(40, (i) => rbPlay("g_a", "inside_man_gap", "gun", i % 10 < 5, false)),
+    ...repeat(10, (i) => rbPlay("g_a", "inside_zone", "gun", i % 10 < 9, false)),
+  ];
+  const games = [game("g_a", "a")];
+
+  it("counts his runs in the mix's proportions and keeps his run count", () => {
+    const plain = computeRBAboveExpectedSamples(rbs, games, runs).get("a")!;
+    const mixed = computeRBAboveExpectedSamples(rbs, games, runs, undefined, { runMix: NFL_RUN_MIX }).get("a")!;
+    const mine = runs.filter((pl) => pl.game_id === "g_a");
+    const w = runMixWeight(mine);
+    const W = mine.reduce((s, pl) => s + w(pl), 0);
+    const rate = mine.reduce((s, pl) => s + w(pl) * (pl.success ? 1 : 0), 0) / W;
+    // Same expected rate on every run, so the whole shift is his success rate's
+    // (AE values are rounded to 0.01).
+    expect(mixed.ae - plain.ae).toBeCloseTo((rate - 0.58) * 100, 1);
+    // Inside zone, where he's better, counts for more at the NFL's 37%.
+    expect(mixed.ae).toBeGreaterThan(plain.ae);
+    expect(mixed.n).toBe(50);
+    expect(mixed.w).toBeCloseTo(50, 9);
   });
 });
 

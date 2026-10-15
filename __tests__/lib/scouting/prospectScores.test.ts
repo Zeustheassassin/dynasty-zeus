@@ -1,8 +1,12 @@
 import { describe, it, expect } from "vitest";
-import type { AEScoreLock, ProspectWithStats, ScoutingGame } from "../../../lib/types";
+import type { AEScoreLock, ProspectWithStats, RBPlay, ScoutingGame } from "../../../lib/types";
 import {
-  scoreViewsFrom, dynastyScores, gamesByTierFrom, defenseFacedFrom, scorePieces, type ScoreView,
+  scoreViewsFrom, dynastyScores, gamesByTierFrom, defenseFacedFrom, scorePieces, computeAEScores, type ScoreView,
 } from "../../../lib/scouting/prospectScores";
+import { computeRBAboveExpectedSamples } from "../../../lib/scouting/aboveExpected";
+import { EMPTY_GRADING_DATA } from "../../../lib/scouting/aeComponents";
+import { gameCovariates } from "../../../lib/scouting/gameContext";
+import { NFL_RUN_MIX } from "../../../lib/scouting/runMix";
 import { buildPositionComposite } from "../../../lib/scouting/aeComposite";
 import { DEFAULT_DYNASTY_WEIGHTS } from "../../../lib/scouting/dynastyScore";
 import type { GameContext } from "../../../lib/scouting/gameContext";
@@ -40,6 +44,32 @@ describe("scoreViewsFrom", () => {
     expect(m.get("d")).toMatchObject({ score: 1.1, lockedAt: "2026-05-02T00:00:00.000Z" });
     expect(m.get("u")).toEqual(live(0.9));
     expect(scoreViewsFrom(all, scores, "live", now).get("s")).toMatchObject({ score: -0.3 });
+  });
+});
+
+describe("computeAEScores", () => {
+  it("scores RBs at the NFL run mix, while the SRAE column keeps every run as charted", () => {
+    const run = (game_id: string, run_type: string, success: boolean) =>
+      ({ game_id, run_type, formation: "gun", success, loaded_box: false, unblocked_defender: false }) as unknown as RBPlay;
+    const rbs = Array.from({ length: 12 }, (_, i) => prospect(`rb${i}`, "RB"));
+    const games = rbs.map((p) => game(`g_${p.id}`, p.id));
+    // Each back: 20 inside gap and 10 inside zone, success rates spread by back.
+    const rbPlays = rbs.flatMap((p, i) => [
+      ...Array.from({ length: 20 }, (_, k) => run(`g_${p.id}`, "inside_man_gap", k < 6 + i)),
+      ...Array.from({ length: 10 }, (_, k) => run(`g_${p.id}`, "inside_zone", k < 9 - (i % 5))),
+    ]);
+    const s = computeAEScores(
+      { prospects: rbs, games, rbPlays, qbPlays: [], tePlays: [], gameRouteCells: null, gradingData: EMPTY_GRADING_DATA },
+      new Map(), gameCovariates(games, new Map(), new Map()),
+    );
+    const plain = computeRBAboveExpectedSamples(rbs, games, rbPlays);
+    const mixed = computeRBAboveExpectedSamples(rbs, games, rbPlays, undefined, { runMix: NFL_RUN_MIX });
+    for (const p of rbs) {
+      expect(s.aeMaps.srae.get(p.id)).toBe(plain.get(p.id)!.ae);
+      expect(s.compositeInputs.rb.get(p.id)!.ae).toBeCloseTo(mixed.get(p.id)!.ae, 9);
+    }
+    // And the mix really moves them, so the checks above aren't the same number twice.
+    expect(Math.abs(mixed.get("rb0")!.ae - plain.get("rb0")!.ae)).toBeGreaterThan(1);
   });
 });
 
