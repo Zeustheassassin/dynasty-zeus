@@ -19,6 +19,7 @@ import { AllOpenTradesPanel } from "./modals/AllOpenTradesPanel";
 import type { AlertsFeedTab, GamedayHubTab, TodoView } from "../hooks/useHubRouting";
 import type { TodoDoneMark } from "../hooks/useTodoDone";
 import type { ActionAppTab, ActionItem, DoneRecord, LeagueStepSession } from "../../lib/helpers/actionQueue";
+import type { SimRunWait } from "../../lib/helpers/simRunReadiness";
 import type {
   SleeperPlayer, SleeperLeague, SleeperRoster,
   SleeperNFLState, SleeperUser, SleeperDraft, SleeperDraftPick,
@@ -26,7 +27,7 @@ import type {
   LeagueMateView, CommittedSimsByLeague, CachedSimRow, RookieBoardPlayer,
   GamedayMatchup, GamedayDashboardEntry, WatchlistEntry,
   TradeAttempt, TradeAttemptStatus, FcTrendEntry, PredictedPick, DraftPoolRanks,
-  LeagueHubTab, ProjectionRow, SimulationTeamRow,
+  LeagueHubTab, ProjectionRow, SimulationTeamRow, SimRunProgress,
   LeagueMgmtData, CommPaymentsData, TradePartnerRanking,
   AssetDisposition, LeagueAssetDispositions, LeagueExpiringBlocks,
   TeamGameState, LeagueLineupStatus,
@@ -148,7 +149,8 @@ interface HubRouterProps {
   committedSimsByLeague: CommittedSimsByLeague;
   leagueSimCache: Record<string, Record<number, CachedSimRow>>;
   simQueue: string[];
-  simProgress: { done: number; total: number } | null;
+  simProgress: SimRunProgress | null;
+  simRunWait: SimRunWait | null;
   loadingActivity: boolean;
   loadingLeagueWeeklyMatchups: boolean;
   leagueNotes: Record<string, string>;
@@ -346,7 +348,7 @@ export function HubRouter({
   onSeeTodoMoves, onOpenTodoLeague, refreshTodo, refreshingTodo,
   leagueStepSession, stepLeague, endLeagueStepping, backToTodo,
   leagueHubTab, setLeagueHubTab, activeLeagueHubGroup, standings,
-  committedSimsByLeague, leagueSimCache, simQueue, simProgress,
+  committedSimsByLeague, leagueSimCache, simQueue, simProgress, simRunWait,
   loadingActivity, loadingLeagueWeeklyMatchups,
   leagueNotes, activityTransactions, leagueOverviewData, leagueOverviewLoaded, leagueOverviewError,
   leagueOverviewUpdatedAt,
@@ -529,6 +531,7 @@ export function HubRouter({
             leagueSimCache={leagueSimCache}
             simQueue={simQueue}
             simProgress={simProgress}
+            simRunWait={simRunWait}
             loadingActivity={loadingActivity}
             loadingLeagueWeeklyMatchups={loadingLeagueWeeklyMatchups}
             leagueNotes={leagueNotes}

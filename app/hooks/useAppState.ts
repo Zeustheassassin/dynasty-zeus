@@ -222,11 +222,13 @@ const {
   redraftValues,
   loadingRedraft,
   redraftError,
+  redraftSettledNumQbs,
   loadCalcValues,
   loadRedraftValues,
 } = useCalcValues();
 const {
   projectionData, setProjectionData,
+  projectionLoadedFor,
   loadingProjections,
   projectionWeek, setProjectionWeek,
   projectionSeasonYear,
@@ -1083,26 +1085,9 @@ useEffect(() => {
   if (!leagueOverviewLoaded && leagues.length > 0 && user) loadLeagueOverview();
 }, [playerProfileId, leagues.length, user, leagueOverviewLoaded, redraftValues, loadRedraftValues, loadLeagueOverview]);
 
-useEffect(() => {
-  // The To-Do hub's lineup items read the same leagueLineupStatus as the Overview dot, so it needs
-  // this week's projections and schedule too.
-  if ((mainTab === "LEAGUES" && (leagueHubTab === "SIMULATOR" || leagueHubTab === "OVERVIEW")) || mainTab === "TODO") {
-    loadNflState();
-    loadRedraftValues();
-    const simulatorProjectionWeek = currentNflWeek;
-    if (projectionWeek !== simulatorProjectionWeek) {
-      setProjectionWeek(simulatorProjectionWeek);
-      setProjectionLoaded(false);
-      loadProjections(simulatorProjectionWeek === 0 ? "season" : simulatorProjectionWeek, enabledExtraSources);
-    } else if (!projectionLoaded) {
-      loadProjections(simulatorProjectionWeek === 0 ? "season" : simulatorProjectionWeek, enabledExtraSources);
-    }
-    // OVERVIEW's League Overview lineup-status dot (and the To-Do hub's lineup items) need real
-    // per-team game state for the same lock-out reason as the Starters effect above.
-    loadSchedule(simulatorProjectionWeek);
-  }
-  // projectionWeek/projectionLoaded are in deps and set inside this effect; the conditional guards prevent loops
-}, [mainTab, leagueHubTab, selectedLeague?.league_id, currentNflWeek, projectionWeek, projectionLoaded, enabledExtraSources, loadRedraftValues, loadProjections, loadNflState, loadSchedule, setProjectionLoaded, setProjectionWeek]);
+// The Simulator/Overview projections effect and the Season Simulator's weekly-matchups effect
+// sit below the useSimulatorState call: a Run All Sims pass needs both for every league it steps
+// through, wherever the user is, and the queue only exists after that call.
 
 useEffect(() => {
   if (mainTab !== "GAMEDAY_HUB") return;
@@ -1142,48 +1127,6 @@ useEffect(() => {
   if (!currentWeek || gamedayDashboardWeek === currentWeek) return;
   loadGamedayDashboard(leagues, user, currentWeek);
 }, [mainTab, gamedayHubTab, currentNflWeek, gamedayDashboardWeek, loadGamedayDashboard, leagues, user]);
-
-useEffect(() => {
-  const leagueId = selectedLeague?.league_id;
-  if (mainTab !== "LEAGUES" || leagueHubTab !== "SIMULATOR" || !leagueId) return;
-  // Not gated on NFL's season_type: Sleeper generates each league's schedule right
-  // after its rookie draft, weeks before the NFL regular season starts. Always try
-  // fetching it — simulateLeague already falls back to a generated round-robin for
-  // any week Sleeper returns no matchups for, so this is safe pre-draft too.
-  if (leagueWeeklyMatchups[leagueId]) return;
-
-  let cancelled = false;
-
-  const loadLeagueWeeklyHistory = async () => {
-    const regularSeasonWeeks = Math.max(1, Number(selectedLeague?.settings?.playoff_week_start || 15) - 1);
-    if (regularSeasonWeeks <= 0) return;
-
-    setLoadingLeagueWeeklyMatchups(true);
-    try {
-      const weeks = Array.from({ length: regularSeasonWeeks }, (_, idx) => idx + 1);
-      const results = await Promise.all(
-        weeks.map(async (week) => {
-          const data = await sleeperApi.getLeagueMatchups(leagueId, week).catch(() => [] as SleeperMatchup[]);
-          return {
-            week,
-            matchups: Array.isArray(data) ? data : [],
-          };
-        })
-      );
-      if (!cancelled) {
-        setLeagueWeeklyMatchups((prev) => ({
-          ...prev,
-          [leagueId]: results,
-        }));
-      }
-    } finally {
-      if (!cancelled) setLoadingLeagueWeeklyMatchups(false);
-    }
-  };
-
-  loadLeagueWeeklyHistory();
-  return () => { cancelled = true; };
-}, [mainTab, leagueHubTab, selectedLeague?.league_id, selectedLeague?.settings?.playoff_week_start, leagueWeeklyMatchups, setLeagueWeeklyMatchups, setLoadingLeagueWeeklyMatchups]);
 
 
 useEffect(() => {
@@ -1293,6 +1236,36 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
   if (isStale()) return;
   setRosters(allRosters);
 
+  // ── Owner names + standings (from the league-users call in step 1) ───────
+  // Set before the no-roster early return below: the Season Simulator and Run All Sims read
+  // them for every team, and a league with no roster of mine (co-owned under another owner_id)
+  // used to keep the previous league's standings, matched to these teams by roster_id.
+  const displayNameById = new Map(leagueUsers.map((u) => [u.user_id, u.display_name]));
+  const userMap: Record<string | number, string> = {};
+  allRosters.forEach((r) => {
+    const name = displayNameById.get(r.owner_id);
+    if (name) {
+      userMap[r.roster_id] = name;
+      userMap[r.owner_id] = name;
+    }
+  });
+  setUsers(userMap);
+  setStandings(
+    allRosters
+      .map((r) => ({
+        roster_id: r.roster_id,
+        wins: r.settings?.wins || 0,
+        losses: r.settings?.losses || 0,
+        ties: r.settings?.ties || 0,
+        fpts: r.settings?.fpts || 0,
+        max_pf: r.settings?.ppts || 0,
+        owner_id: r.owner_id,
+      }))
+      .sort((a, b) =>
+        b.wins !== a.wins ? b.wins - a.wins : b.fpts - a.fpts
+      )
+  );
+
   // ── Step 2: Synchronous work derived from rosters ────────────────────────
   // (Free agents are derived from `rosters` + the player map — see `freeAgents` above.)
   const myRoster = allRosters.find((r) => r.owner_id === user?.user_id);
@@ -1332,35 +1305,6 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
 
   setAllPicks(tempPicks);
   setPicks(myPicks);
-
-  // ── Step 7: Apply user names (from the league-users call in step 1) ─────
-  const displayNameById = new Map(leagueUsers.map((u) => [u.user_id, u.display_name]));
-  const userMap: Record<string | number, string> = {};
-  allRosters.forEach((r) => {
-    const name = displayNameById.get(r.owner_id);
-    if (name) {
-      userMap[r.roster_id] = name;
-      userMap[r.owner_id] = name;
-    }
-  });
-  setUsers(userMap);
-
-  // ── Step 8: Standings ────────────────────────────────────────────────────
-  setStandings(
-    allRosters
-      .map((r) => ({
-        roster_id: r.roster_id,
-        wins: r.settings?.wins || 0,
-        losses: r.settings?.losses || 0,
-        ties: r.settings?.ties || 0,
-        fpts: r.settings?.fpts || 0,
-        max_pf: r.settings?.ppts || 0,
-        owner_id: r.owner_id,
-      }))
-      .sort((a, b) =>
-        b.wins !== a.wins ? b.wins - a.wins : b.fpts - a.fpts
-      )
-  );
   setReadyLeagueId(league.league_id);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- setReadyLeagueId is a stable setter; TDZ prevents adding to deps (useSimulatorState is called after this callback)
 }, [user, beginLoadRoster, isLoadRosterCurrent]);
@@ -1651,6 +1595,7 @@ const saveSnapshotNow = async () => {
     leagueSimCache,
     simQueue,
     simProgress,
+    simRunWait,
     readyLeagueId, setReadyLeagueId,
     myDraftSlotPicks, setMyDraftSlotPicks,
     draftSlotEditing, setDraftSlotEditing,
@@ -1665,7 +1610,10 @@ const saveSnapshotNow = async () => {
     nflState,
     projectionData,
     projectionWeek,
+    projectionLoadedFor,
     loadingProjections,
+    loadingRedraft,
+    redraftSettledNumQbs,
     playerStats,
     leagueWeeklyMatchups,
     standings,
@@ -1677,6 +1625,78 @@ const saveSnapshotNow = async () => {
     leagues,
     loadRoster,
   });
+  const simRunActive = simQueue.length > 0;
+
+  useEffect(() => {
+    // The To-Do hub's lineup items read the same leagueLineupStatus as the Overview dot, so it needs
+    // this week's projections and schedule too. A Run All Sims pass needs them for each league it
+    // selects, from any tab — useProjections clears the data whenever the league's scoring differs,
+    // and this reloads it under the new scoring before the queue saves that league.
+    if ((mainTab === "LEAGUES" && (leagueHubTab === "SIMULATOR" || leagueHubTab === "OVERVIEW")) || mainTab === "TODO" || simRunActive) {
+      loadNflState();
+      // The selected league's format, like the league-switch effect above — a no-arg call reused
+      // whatever format loaded last and, early in a session, could supersede that effect's load.
+      loadRedraftValues(selectedLeague ? getLeagueNumQbs(selectedLeague) : undefined);
+      const simulatorProjectionWeek = currentNflWeek;
+      if (projectionWeek !== simulatorProjectionWeek) {
+        setProjectionWeek(simulatorProjectionWeek);
+        setProjectionLoaded(false);
+        loadProjections(simulatorProjectionWeek === 0 ? "season" : simulatorProjectionWeek, enabledExtraSources);
+      } else if (!projectionLoaded) {
+        loadProjections(simulatorProjectionWeek === 0 ? "season" : simulatorProjectionWeek, enabledExtraSources);
+      }
+      // OVERVIEW's League Overview lineup-status dot (and the To-Do hub's lineup items) need real
+      // per-team game state for the same lock-out reason as the Starters effect above.
+      loadSchedule(simulatorProjectionWeek);
+    }
+    // projectionWeek/projectionLoaded are in deps and set inside this effect; the conditional guards prevent loops
+  }, [mainTab, leagueHubTab, simRunActive, selectedLeague, currentNflWeek, projectionWeek, projectionLoaded, enabledExtraSources, loadRedraftValues, loadProjections, loadNflState, loadSchedule, setProjectionLoaded, setProjectionWeek]);
+
+  // Weekly matchups (the real schedule + played-week scores) for the Season Simulator tab, and for
+  // every league a Run All Sims pass selects. Without them simulateLeague falls back to a generated
+  // round-robin and projections alone, which is why a batch run (from the Overview, where these
+  // never loaded) disagreed with the same league's Simulator tab.
+  // Not gated on NFL's season_type: Sleeper generates each league's schedule right after its rookie
+  // draft, weeks before the NFL regular season starts. Always try fetching it — simulateLeague
+  // already falls back to a generated round-robin for any week Sleeper returns no matchups for, so
+  // this is safe pre-draft too.
+  // Keyed by league and never cancelled: a load that finishes after a league switch still lands, so
+  // the next visit (or run) reuses it instead of asking Sleeper again.
+  const weeklyMatchupsInFlightRef = useRef(new Set<string>());
+  useEffect(() => {
+    const leagueId = selectedLeague?.league_id;
+    if (!leagueId) return;
+    if (!((mainTab === "LEAGUES" && leagueHubTab === "SIMULATOR") || simRunActive)) return;
+    const inFlight = weeklyMatchupsInFlightRef.current;
+    if (leagueWeeklyMatchups[leagueId] || inFlight.has(leagueId)) return;
+    const regularSeasonWeeks = Math.max(1, Number(selectedLeague?.settings?.playoff_week_start || 15) - 1);
+
+    const loadLeagueWeeklyHistory = async () => {
+      inFlight.add(leagueId);
+      setLoadingLeagueWeeklyMatchups(true);
+      try {
+        const weeks = Array.from({ length: regularSeasonWeeks }, (_, idx) => idx + 1);
+        const results = await Promise.all(
+          weeks.map(async (week) => {
+            const data = await sleeperApi.getLeagueMatchups(leagueId, week).catch(() => [] as SleeperMatchup[]);
+            return {
+              week,
+              matchups: Array.isArray(data) ? data : [],
+            };
+          })
+        );
+        setLeagueWeeklyMatchups((prev) => ({
+          ...prev,
+          [leagueId]: results,
+        }));
+      } finally {
+        inFlight.delete(leagueId);
+        if (inFlight.size === 0) setLoadingLeagueWeeklyMatchups(false);
+      }
+    };
+
+    loadLeagueWeeklyHistory();
+  }, [mainTab, leagueHubTab, simRunActive, selectedLeague?.league_id, selectedLeague?.settings?.playoff_week_start, leagueWeeklyMatchups, setLeagueWeeklyMatchups, setLoadingLeagueWeeklyMatchups]);
 
   const selectedLeagueDirection = useMemo((): RosterDirectionProfile | null => {
     if (!selectedLeague || !rosters.length || !user?.user_id) return null;
@@ -3550,6 +3570,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     leagueSimCache,
     simQueue,
     simProgress,
+    simRunWait,
     loadingActivity,
     loadingLeagueWeeklyMatchups,
     leagueNotes,

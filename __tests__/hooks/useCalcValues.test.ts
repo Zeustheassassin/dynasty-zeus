@@ -66,6 +66,46 @@ describe("useCalcValues — empty / failed responses are errors, not loaded-but-
   });
 });
 
+// Run All Sims waits for redraftSettledNumQbs to match each league's QB format. It has to settle on
+// a failure too (else one FantasyCalc outage holds every league until the skip timer), and has to
+// return to the loaded format when a later load for another format failed.
+describe("useCalcValues — redraftSettledNumQbs", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    invalidateFcValuesCache();
+  });
+  const ok = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
+
+  it("is null before any load and the loaded format after one", async () => {
+    global.fetch = vi.fn(async () => ok(fcResponse("p1", 3000))) as never;
+    const { result } = renderHook(() => useCalcValues());
+    expect(result.current.redraftSettledNumQbs).toBeNull();
+
+    await act(async () => { await result.current.loadRedraftValues(1); });
+    expect(result.current.redraftSettledNumQbs).toBe(1);
+  });
+
+  it("settles on a failed load, then back on the format in hand when that one is asked for again", async () => {
+    global.fetch = vi.fn(async (url: string) =>
+      url.includes("numQbs=1") ? new Response("[]", { status: 200 }) : ok(fcResponse("sf-player", 5000))
+    ) as never;
+    const { result } = renderHook(() => useCalcValues());
+
+    await act(async () => { await result.current.loadRedraftValues(2); });
+    expect(result.current.redraftSettledNumQbs).toBe(2);
+
+    await act(async () => { await result.current.loadRedraftValues(1); });
+    expect(result.current.redraftError).not.toBeNull();
+    expect(result.current.redraftSettledNumQbs).toBe(1);
+    expect(result.current.redraftValues).toEqual({ "sf-player": 5000 });
+
+    const callsBefore = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.length;
+    await act(async () => { await result.current.loadRedraftValues(2); });
+    expect((global.fetch as ReturnType<typeof vi.fn>).mock.calls.length).toBe(callsBefore); // values in hand, no refetch
+    expect(result.current.redraftSettledNumQbs).toBe(2);
+  });
+});
+
 describe("useCalcValues — loadRedraftValues race guard", () => {
   beforeEach(() => {
     vi.restoreAllMocks();

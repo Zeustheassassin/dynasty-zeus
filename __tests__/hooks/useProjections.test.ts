@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useProjections } from "@/hooks/useProjections";
+import { DEFAULT_SCORING, projectionScoringKey } from "@/lib/helpers/scoring";
 
 // The bug this guards against: projectionData carries no league_id/scoring on
 // its rows — it's fpts baked with whatever scoring was active when computed.
@@ -35,6 +36,38 @@ describe("useProjections — scoring-settings cache invalidation", () => {
     rerender({ scoring: scoringB });
     expect(result.current.projectionLoaded).toBe(false);
     expect(result.current.projectionData).toEqual([]);
+  });
+
+  // Run All Sims compares this stamp with each league's scoring before saving that league's odds.
+  it("stamps the loaded data with its week and scoring, and clears the stamp on a scoring change", async () => {
+    const scoringA = { rec: 1 };
+    const scoringB = { rec: 0.5 };
+    const { result, rerender } = renderHook(
+      ({ scoring }) => useProjections({}, scoring),
+      { initialProps: { scoring: scoringA as Record<string, number> | null } }
+    );
+    expect(result.current.projectionLoadedFor).toBeNull();
+
+    await act(async () => {
+      await result.current.loadProjections(6);
+    });
+    expect(result.current.projectionLoadedFor).toEqual({ week: 6, scoringKey: projectionScoringKey(scoringA) });
+
+    rerender({ scoring: scoringB });
+    expect(result.current.projectionLoadedFor).toBeNull();
+
+    await act(async () => {
+      await result.current.loadProjections("season");
+    });
+    expect(result.current.projectionLoadedFor).toEqual({ week: 0, scoringKey: projectionScoringKey(scoringB) });
+  });
+
+  it("stamps DEFAULT_SCORING's key when the league has no scoring settings", async () => {
+    const { result } = renderHook(() => useProjections({}, null));
+    await act(async () => {
+      await result.current.loadProjections(6);
+    });
+    expect(result.current.projectionLoadedFor?.scoringKey).toBe(projectionScoringKey(DEFAULT_SCORING));
   });
 
   it("does not reset when the scoring settings object changes reference but not content", async () => {

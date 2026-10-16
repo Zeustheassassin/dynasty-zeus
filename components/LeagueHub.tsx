@@ -19,9 +19,11 @@ import type {
   LeagueMgmtData,
   TeamGameState,
   LeagueLineupStatus,
+  SimRunProgress,
 } from "../lib/types";
 import type { LineupAvailability } from "../lib/helpers/lineupAvailability";
 import type { LeagueStepSession } from "../lib/helpers/actionQueue";
+import type { SimRunWait } from "../lib/helpers/simRunReadiness";
 import { LEAGUE_HUB_GROUPS } from "../lib/leagueHubGroups";
 import { useLeagueTabState } from "./LeagueHub/hooks/useLeagueTabState";
 import StandingsTab from "./league/StandingsTab";
@@ -61,7 +63,8 @@ interface LeagueHubProps {
   committedSimsByLeague: CommittedSimsByLeague;
   leagueSimCache: Record<string, Record<number, CachedSimRow>>;
   simQueue: string[];
-  simProgress: { done: number; total: number } | null;
+  simProgress: SimRunProgress | null;
+  simRunWait: SimRunWait | null;
 
   // Loading states
   loadingActivity: boolean;
@@ -131,7 +134,7 @@ function LeagueHub({
   leagueHubTab, setLeagueHubTab, activeLeagueHubGroup,
   leagues, user, leagueMgmtData, standings, setSelectedLeague,
   picks, allPicks,
-  committedSimsByLeague, leagueSimCache, simQueue, simProgress,
+  committedSimsByLeague, leagueSimCache, simQueue, simProgress, simRunWait,
   loadingActivity, loadingLeagueWeeklyMatchups,
   leagueNotes, activityTransactions,
   leagueOverviewData, loadingLeagueOverview, leagueOverviewLoaded, leagueOverviewError,
@@ -228,6 +231,7 @@ function LeagueHub({
             leagueSimCache={leagueSimCache}
             simQueue={simQueue}
             simProgress={simProgress}
+            simRunWait={simRunWait}
             loadRoster={loadRoster}
             setLeagueHubTab={setLeagueHubTab}
             loadLeagueOverview={loadLeagueOverview}

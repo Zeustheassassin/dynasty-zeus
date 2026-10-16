@@ -26,6 +26,10 @@ export function useCalcValues() {
   const [loadingRedraft, setLoadingRedraft] = useState(false);
   const [redraftLoaded, setRedraftLoaded] = useState(false);
   const [redraftError, setRedraftError] = useState<string | null>(null);
+  // Format (num_qbs) of the latest redraft load to finish, whether it succeeded or failed. Run All
+  // Sims waits for it to match each league's format, so a failed load lets the run go on with the
+  // values already in hand (as the Simulator tab does) instead of holding it up.
+  const [redraftSettledNumQbs, setRedraftSettledNumQbs] = useState<number | null>(null);
 
   // Refs so useCallback can read current values without stale closures
   const calcValuesNumQbsRef = useRef(calcValuesNumQbs);
@@ -67,7 +71,11 @@ export function useCalcValues() {
   const loadRedraftValues = useCallback(async (numQbs: number = redraftNumQbsRef.current) => {
     // Already loaded for this format → nothing to do (no-arg refresh callers reuse
     // the last-loaded format, so they don't thrash).
-    if (redraftLoadedRef.current && redraftNumQbsRef.current === numQbs) return;
+    if (redraftLoadedRef.current && redraftNumQbsRef.current === numQbs) {
+      // The values in hand are this format, even if a later load for another format failed.
+      setRedraftSettledNumQbs(numQbs);
+      return;
+    }
     const seq = ++redraftSeq.current;
     setLoadingRedraft(true);
     setRedraftError(null);
@@ -82,7 +90,10 @@ export function useCalcValues() {
       log.error("loadRedraftValues failed", { err: String(err) });
       if (seq === redraftSeq.current) setRedraftError("Couldn't load redraft values from FantasyCalc.");
     } finally {
-      if (seq === redraftSeq.current) setLoadingRedraft(false);
+      if (seq === redraftSeq.current) {
+        setLoadingRedraft(false);
+        setRedraftSettledNumQbs(numQbs);
+      }
     }
   }, []);
 
@@ -93,6 +104,7 @@ export function useCalcValues() {
     redraftValues,
     loadingRedraft,
     redraftError,
+    redraftSettledNumQbs,
     loadCalcValues,
     loadRedraftValues,
   };

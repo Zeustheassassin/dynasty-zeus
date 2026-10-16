@@ -2,7 +2,7 @@
 import { useState, useRef, useEffect, useMemo, useCallback, type Dispatch, type SetStateAction } from "react";
 import { normalizeProjName, getProjectionKickoffAt } from "../lib/helpers";
 import { SLEEPER_PROJECTIONS_BASE } from "../lib/constants";
-import { computeLeagueFpts, DEFAULT_SCORING } from "../lib/helpers/scoring";
+import { computeLeagueFpts, DEFAULT_SCORING, projectionScoringKey } from "../lib/helpers/scoring";
 import { useLocalStorage } from "../lib/hooks/useLocalStorage";
 import type { SleeperPlayer, ProjectionRow } from "../lib/types";
 import { fantasySkillPosition } from "../lib/helpers/playerPosition";
@@ -55,9 +55,18 @@ export interface LoadProjectionsOpts {
   fresh?: boolean;
 }
 
+/** The week (0 = full season) and scoring (projectionScoringKey) the current projectionData was
+ *  built for. Null until a load finishes, and again once a scoring change or source toggle
+ *  clears the data. */
+export interface ProjectionLoadedFor {
+  week: number;
+  scoringKey: string;
+}
+
 export interface UseProjectionsReturn {
   projectionData: ProjectionRow[];
   setProjectionData: Dispatch<SetStateAction<ProjectionRow[]>>;
+  projectionLoadedFor: ProjectionLoadedFor | null;
   loadingProjections: boolean;
   projectionWeek: number;
   setProjectionWeek: Dispatch<SetStateAction<number>>;
@@ -87,6 +96,7 @@ export function useProjections(
   leagueScoringSettings: Record<string, number> | null
 ): UseProjectionsReturn {
   const [projectionData, setProjectionData] = useState<ProjectionRow[]>([]);
+  const [projectionLoadedFor, setProjectionLoadedFor] = useState<ProjectionLoadedFor | null>(null);
   const [loadingProjections, setLoadingProjections] = useState(false);
   const [projectionWeek, setProjectionWeek] = useState(1);
   const [projectionSeasonYear, setProjectionSeasonYear] = useState<number | null>(null);
@@ -111,6 +121,7 @@ export function useProjections(
       // Force the auto-load effect to re-run with the new source set; clear
       // current rows so users see a loading state instead of stale data.
       setProjectionData([]);
+      setProjectionLoadedFor(null);
       setProjectionLoaded(false);
     },
     [enabledExtraSources, setEnabledExtraSources]
@@ -125,13 +136,14 @@ export function useProjections(
   // scoring here so switching leagues (different scoring_settings) invalidates
   // the cache instead of silently reusing another league's fpts numbers.
   const scoringKey = useMemo(
-    () => JSON.stringify(leagueScoringSettings ?? DEFAULT_SCORING),
+    () => projectionScoringKey(leagueScoringSettings),
     [leagueScoringSettings]
   );
   const loadedScoringKeyRef = useRef<string | null>(null);
   useEffect(() => {
     if (loadedScoringKeyRef.current !== null && loadedScoringKeyRef.current !== scoringKey) {
       setProjectionData([]);
+      setProjectionLoadedFor(null);
       setProjectionLoaded(false);
     }
   }, [scoringKey]);
@@ -470,11 +482,13 @@ export function useProjections(
       });
       rows.sort((a, b) => b.fpts - a.fpts);
       if (requestId !== requestIdRef.current) return; // superseded by a newer call
+      const loadedScoringKey = projectionScoringKey(activeScoring);
       setProjectionData(rows);
+      setProjectionLoadedFor({ week: week === "season" ? 0 : week, scoringKey: loadedScoringKey });
       setProjectionSeasonYear(resolvedProjectionYear);
       setProjectionSourceStatus(statusMap);
       setProjectionLoaded(true);
-      loadedScoringKeyRef.current = JSON.stringify(activeScoring);
+      loadedScoringKeyRef.current = loadedScoringKey;
     } finally {
       if (requestId === requestIdRef.current) setLoadingProjections(false);
     }
@@ -483,6 +497,7 @@ export function useProjections(
   return {
     projectionData,
     setProjectionData,
+    projectionLoadedFor,
     loadingProjections,
     projectionWeek,
     setProjectionWeek,

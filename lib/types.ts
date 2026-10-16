@@ -489,6 +489,14 @@ export interface CommittedSimsByLeague {
   [leagueId: string]: Record<number, SimRow>;
 }
 
+/** Run All Sims progress. `done` counts saved + skipped leagues; `skipped` lists the league ids
+ *  whose inputs never finished loading, which keep their previous odds. */
+export interface SimRunProgress {
+  done: number;
+  total: number;
+  skipped: string[];
+}
+
 /** Supabase-persisted sim row (snake_case columns from league_simulations table) */
 export interface CachedSimRow {
   league_id: string;

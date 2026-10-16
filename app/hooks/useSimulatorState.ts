@@ -4,17 +4,24 @@ import type { User } from "@supabase/supabase-js";
 import { supabase } from "../../lib/supabaseclient";
 import { logger } from "../../lib/logger";
 import { simulateLeague, buildRostersWithTrade, type PoolPlayer } from "../../lib/helpers/simulation";
+import { getSimRunWait, type SimRunWait } from "../../lib/helpers/simRunReadiness";
 import { getLocalStorageItem, setLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 import { CURRENT_YEAR } from "../../lib/helpers/season";
 import { ROOKIE_YEAR } from "../../hooks/useRookieBoardState";
 import type { PlayerUsage } from "../../hooks/usePlayerStats";
+import type { ProjectionLoadedFor } from "../../hooks/useProjections";
 import type {
   SleeperLeague, SleeperRoster, SleeperPlayer, SleeperMatchup, SleeperNFLState,
   CommittedSimsByLeague, CachedSimRow, SimRow, SimulationTeamRow, LeagueSimulation,
-  ProjectionRow, StandingRow,
+  ProjectionRow, StandingRow, SimRunProgress,
 } from "../../lib/types";
 
 const log = logger("useSimulatorState");
+
+/** How long Run All Sims waits for one league's inputs before skipping it (its previous odds
+ *  stay). Generous: a cold league needs ~18 Sleeper calls through the browser queue (3/s), and
+ *  a Sleeper 429 can pause that queue for up to a minute. */
+export const SIM_RUN_LEAGUE_TIMEOUT_MS = 90_000;
 
 export interface SimulatorCtx {
   selectedLeague: SleeperLeague | null;
@@ -23,7 +30,10 @@ export interface SimulatorCtx {
   nflState: SleeperNFLState | null;
   projectionData: ProjectionRow[];
   projectionWeek: number;
+  projectionLoadedFor: ProjectionLoadedFor | null;
   loadingProjections: boolean;
+  loadingRedraft: boolean;
+  redraftSettledNumQbs: number | null;
   playerStats: Record<string, PlayerUsage> | null;
   leagueWeeklyMatchups: Record<string, { week: number; matchups: SleeperMatchup[] }[]>;
   standings: StandingRow[];
@@ -41,7 +51,9 @@ export interface SimulatorResult {
   committedSimsByLeague: CommittedSimsByLeague;
   leagueSimCache: Record<string, Record<number, CachedSimRow>>;
   simQueue: string[];
-  simProgress: { done: number; total: number } | null;
+  simProgress: SimRunProgress | null;
+  /** What the league at the front of the queue is still waiting on (null when idle or saving). */
+  simRunWait: SimRunWait | null;
   simSalt: number;
   readyLeagueId: string | null;
   setReadyLeagueId: React.Dispatch<React.SetStateAction<string | null>>;
@@ -64,7 +76,8 @@ export interface SimulatorResult {
 export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
   const {
     selectedLeague, rosters, players, nflState,
-    projectionData, projectionWeek, loadingProjections, playerStats,
+    projectionData, projectionWeek, projectionLoadedFor, loadingProjections,
+    loadingRedraft, redraftSettledNumQbs, playerStats,
     leagueWeeklyMatchups, standings, users,
     leagueAdjustedFcValues, leagueAdjustedRedraftValues,
     projectedRookiesByRoster, supabaseUser, leagues, loadRoster,
@@ -73,7 +86,7 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
   const [leagueSimCache, setLeagueSimCache] = useState<Record<string, Record<number, CachedSimRow>>>({});
   const [readyLeagueId, setReadyLeagueId] = useState<string | null>(null);
   const [simQueue, setSimQueue] = useState<string[]>([]);
-  const [simProgress, setSimProgress] = useState<{ done: number; total: number } | null>(null);
+  const [simProgress, setSimProgress] = useState<SimRunProgress | null>(null);
   // Persisted so odds/wins/etc. stay stable across reloads and navigation — every reader
   // of simulateLeague (the live Season Simulator tab, the Trade Calculator/Finder preview,
   // Dashboard tiles) shares this one seed, and a fresh Math.random() draw on every mount
@@ -356,40 +369,76 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
     }
   }, [supabaseUser, nflState]);
 
-  // Queue state machine: when the front of the queue is ready (loadRoster finished),
-  // save the sim, advance the queue, and start loading the next league.
-  useEffect(() => {
-    if (!simQueue.length) return;
-    if (readyLeagueId !== simQueue[0]) return;
-    // Projections are cached in flat, un-league-scoped state and get invalidated
-    // (loadingProjections flips true) the instant this league's scoring settings
-    // differ from what's currently cached — wait for that reload to finish so we
-    // never save a sim computed against the previous league's scoring/fpts.
-    if (loadingProjections) return;
+  // What the league at the front of the Run All Sims queue is still waiting on. Every input
+  // selectedLeagueSimulation reads must belong to that league before its odds are saved — see
+  // lib/helpers/simRunReadiness.ts for what used to slip through when only the rosters were awaited.
+  const playersLoaded = Object.keys(players).length > 0;
+  const simRunWait = useMemo((): SimRunWait | null => {
+    if (!simQueue.length) return null;
+    return getSimRunWait({
+      leagueId: simQueue[0],
+      selectedLeague,
+      readyLeagueId,
+      playersLoaded,
+      nflState,
+      projectionWeek,
+      loadingProjections,
+      projectionLoadedFor,
+      loadingRedraft,
+      redraftSettledNumQbs,
+      leagueWeeklyMatchups,
+    });
+  }, [
+    simQueue, selectedLeague, readyLeagueId, playersLoaded, nflState, projectionWeek,
+    loadingProjections, projectionLoadedFor, loadingRedraft, redraftSettledNumQbs, leagueWeeklyMatchups,
+  ]);
+  // Read by the skip timer's log line without restarting the timer on every change.
+  const simRunWaitRef = useRef<SimRunWait | null>(null);
+  useEffect(() => { simRunWaitRef.current = simRunWait; }, [simRunWait]);
 
-    const leagueId = simQueue[0];
-    if (
-      selectedLeagueSimulation?.rows?.length &&
-      selectedLeague?.league_id === leagueId
-    ) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- state machine: sim result must be committed synchronously before queue advances
-      saveSimulationToSupabase(leagueId, selectedLeagueSimulation.rows);
-    }
-
-    const remaining = simQueue.slice(1);
+  // Drops the front league and starts loading the next one.
+  const advanceSimQueue = useCallback((queue: string[]) => {
+    const remaining = queue.slice(1);
     setSimQueue(remaining);
     setSimProgress((prev) => prev ? { ...prev, done: prev.done + 1 } : null);
-
     if (remaining.length > 0) {
       const nextLeague = leagues.find((l) => l.league_id === remaining[0]);
       if (nextLeague) loadRoster(nextLeague);
     }
-  }, [simQueue, readyLeagueId, loadingProjections, selectedLeagueSimulation, selectedLeague?.league_id, leagues, saveSimulationToSupabase, loadRoster]);
+  }, [leagues, loadRoster]);
+
+  // Queue state machine: once every input belongs to the front league, save its sim, advance
+  // the queue, and start loading the next league.
+  useEffect(() => {
+    if (!simQueue.length || simRunWait) return;
+    const leagueId = simQueue[0];
+    if (selectedLeagueSimulation?.rows?.length) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- state machine: sim result must be committed synchronously before queue advances
+      saveSimulationToSupabase(leagueId, selectedLeagueSimulation.rows);
+    }
+    advanceSimQueue(simQueue);
+  }, [simQueue, simRunWait, selectedLeagueSimulation, saveSimulationToSupabase, advanceSimQueue]);
+
+  // A league whose inputs never finish loading (a failed roster fetch, a projections error) used
+  // to hold the queue forever. Skip it after SIM_RUN_LEAGUE_TIMEOUT_MS without saving — its
+  // previous odds stay — and name it in the progress line. Restarts only when the front changes.
+  useEffect(() => {
+    if (!simQueue.length) return;
+    const leagueId = simQueue[0];
+    const timer = setTimeout(() => {
+      log.warn("Run All Sims skipped a league whose inputs never finished loading", {
+        leagueId, waitingOn: simRunWaitRef.current,
+      });
+      setSimProgress((prev) => prev ? { ...prev, skipped: [...prev.skipped, leagueId] } : null);
+      advanceSimQueue(simQueue);
+    }, SIM_RUN_LEAGUE_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [simQueue, advanceSimQueue]);
 
   const handleRunAllSims = useCallback(() => {
     if (!leagues.length) return;
     const leagueIds = leagues.map((l) => l.league_id);
-    setSimProgress({ done: 0, total: leagueIds.length });
+    setSimProgress({ done: 0, total: leagueIds.length, skipped: [] });
     setReadyLeagueId(null);
     const newSalt = Math.floor(Math.random() * 1_000_000);
     setSimSalt(newSalt);
@@ -405,6 +454,7 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
     leagueSimCache,
     simQueue,
     simProgress,
+    simRunWait,
     simSalt,
     readyLeagueId,
     setReadyLeagueId,

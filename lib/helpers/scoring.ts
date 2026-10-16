@@ -25,6 +25,13 @@ export const DEFAULT_SCORING: Record<string, number> = {
   rec_2pt: 2, rush_2pt: 2, pass_2pt: 2,
 };
 
+/** Identifies the scoring a set of projection fpts was computed with (DEFAULT_SCORING when the
+ *  league has none). useProjections stamps its loaded data with it, and Run All Sims compares it
+ *  against each league's own scoring before saving that league's odds. */
+export function projectionScoringKey(scoring: Record<string, number> | null | undefined): string {
+  return JSON.stringify(scoring ?? DEFAULT_SCORING);
+}
+
 /**
  * FC (FantasyCalc) dynasty value baseline — the scoring format FC uses when
  * computing its dynasty values. Used to derive per-position adjustment

@@ -23,7 +23,8 @@ import type {
   EarlyLockDay,
   EarlyLockStatus,
 } from "../../lib/types";
-import type { CommittedSimsByLeague, CachedSimRow, LeagueOverviewEntry } from "../../lib/types";
+import type { CommittedSimsByLeague, CachedSimRow, LeagueOverviewEntry, SimRunProgress } from "../../lib/types";
+import { SIM_RUN_WAIT_LABELS, type SimRunWait } from "../../lib/helpers/simRunReadiness";
 import { removeLocalStorageItem } from "@/lib/hooks/useLocalStorage";
 
 interface OverviewTabProps {
@@ -37,7 +38,8 @@ interface OverviewTabProps {
   committedSimsByLeague: CommittedSimsByLeague;
   leagueSimCache: Record<string, Record<number, CachedSimRow>>;
   simQueue: string[];
-  simProgress: { done: number; total: number } | null;
+  simProgress: SimRunProgress | null;
+  simRunWait: SimRunWait | null;
   loadRoster: (league: SleeperLeague) => void;
   setLeagueHubTab: (tab: LeagueHubTab) => void;
   loadLeagueOverview: () => Promise<void>;
@@ -60,6 +62,18 @@ const EARLY_LOCK_TAGS: Record<EarlyLockDay, { letter: string; name: string }> = 
   Sat: { letter: "S", name: "Saturday" },
 };
 
+// Hover text for the Run All Sims progress line: the league being simulated, then any league
+// skipped because its data never finished loading (those keep their previous odds).
+function simProgressTitle(progress: SimRunProgress, simQueue: string[], leagues: SleeperLeague[]): string | undefined {
+  const nameOf = (id: string) => leagues.find((l) => l.league_id === id)?.name ?? id;
+  const lines: string[] = [];
+  if (simQueue.length > 0) lines.push(`Simulating ${nameOf(simQueue[0])}`);
+  if (progress.skipped.length > 0) {
+    lines.push(`Skipped (data didn't load, previous odds kept): ${progress.skipped.map(nameOf).join(", ")}`);
+  }
+  return lines.length ? lines.join("\n") : undefined;
+}
+
 function OverviewTab({
   leagues,
   user,
@@ -72,6 +86,7 @@ function OverviewTab({
   leagueSimCache,
   simQueue,
   simProgress,
+  simRunWait,
   loadRoster,
   setLeagueHubTab,
   loadLeagueOverview,
@@ -285,10 +300,15 @@ function OverviewTab({
                 style={{ width: `${(simProgress.done / simProgress.total) * 100}%` }}
               />
             </div>
-            <span className="text-[10px] text-slate-400 whitespace-nowrap">
+            <span
+              className="text-[10px] text-slate-400 whitespace-nowrap"
+              title={simProgressTitle(simProgress, simQueue, leagues)}
+            >
               {simProgress.done === simProgress.total
-                ? `Done — ${simProgress.total} leagues updated`
-                : `${simProgress.done} / ${simProgress.total}`}
+                ? simProgress.skipped.length > 0
+                  ? `Done — ${simProgress.total - simProgress.skipped.length} leagues updated · ${simProgress.skipped.length} skipped`
+                  : `Done — ${simProgress.total} leagues updated`
+                : `${simProgress.done} / ${simProgress.total}${simRunWait ? ` · ${SIM_RUN_WAIT_LABELS[simRunWait]}` : ""}`}
             </span>
           </div>
         )}
