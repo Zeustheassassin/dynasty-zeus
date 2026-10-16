@@ -33,6 +33,9 @@ export function productionPage(pos: PffPos, pff: PffValues, cols: readonly ColDe
       sections.push(section);
     }
     const value = pff[c.key] ?? null;
+    // A lower-is-better share (Fum%, Drop%, Pr%, TWP%, Sk%, P2S%) ranks on a sample-adjusted
+    // rate over its own denominator, like the Overview's (percentileRanks); still qualified by games.
+    const chances = c.colorDir === -1 && c.fmt === "pct" && c.weightBy ? pff[c.weightBy] ?? null : null;
     section.stats.push({
       key: c.key,
       label: group === "Grades" ? GRADE_LABEL[c.label] ?? c.label : c.label,
@@ -43,6 +46,7 @@ export function productionPage(pos: PffPos, pff: PffValues, cols: readonly ColDe
       n: games,
       minN: PRODUCTION_MIN_GAMES,
       tooltip: c.tooltip ?? c.label,
+      ...(chances != null && chances > 0 ? { rare: { chances } } : {}),
     });
   }
   return { meta: games ? [`${games} game${games === 1 ? "" : "s"}`] : [], main: sections, columns: [] };

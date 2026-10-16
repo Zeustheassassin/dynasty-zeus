@@ -49,6 +49,53 @@ describe("percentileRanks", () => {
     expect(r.get("p0")).toBe(Math.round((8 + 0.5) / 9 * 100));
   });
 
+  // User 10/16: Jadan Baugh, 0 fumbles on 196 touches, read 71st — the raw rate tied him with
+  // every clean back, down to 0 of 30. The real RB pool that day (fumbles / touches, 25+ touches).
+  describe("rare-event shares rank on a sample-adjusted rate", () => {
+    const RB_FUMBLES: [string, number, number][] = [
+      ["baugh", 0, 196], ["fletcher", 0, 108], ["martin", 0, 97], ["raymond", 0, 94], ["hawkins", 0, 87],
+      ["wisner", 0, 86], ["johnson", 0, 82], ["allen", 0, 79], ["black", 0, 76], ["randall", 0, 74],
+      ["singleton", 0, 73], ["love", 0, 63], ["taylor", 0, 61], ["washingtonM", 0, 55], ["frazier", 0, 50],
+      ["durham", 0, 47], ["jones", 0, 46], ["knight", 0, 34], ["miller", 0, 33], ["payne", 0, 30], ["cobb", 0, 30],
+      ["haynes", 1, 110], ["price", 1, 77], ["smothers", 1, 73], ["hardy", 1, 69], ["coleman", 1, 64],
+      ["hughes", 1, 63], ["washingtonB", 1, 61], ["cook", 1, 53], ["henry", 1, 50], ["brownI", 1, 33],
+      ["lacy", 2, 135], ["jordan", 2, 41], ["claiborne", 3, 91], ["brownR", 3, 67],
+    ];
+    const fumblePage = (fum: number, touches: number): OverviewPage => ({
+      meta: [], columns: [],
+      main: [{ key: "s", title: "S", size: "lg", stats: [{
+        key: "fum", label: "Fumbles", value: (fum / touches) * 100, fmt: "pct1", tone: "pff",
+        dir: -1, n: touches, minN: 25, tooltip: "", rare: { chances: touches },
+      }] }],
+    });
+    const ranks = () => percentileRanks(new Map(RB_FUMBLES.map(([id, f, t]) => [id, fumblePage(f, t)] as const))).get("fum")!;
+
+    it("puts the biggest clean sample first", () => {
+      expect(ranks().get("baugh")).toBe(99);
+    });
+
+    it("orders clean backs by sample, every one above every back who fumbled", () => {
+      const r = ranks();
+      expect(r.get("baugh")!).toBeGreaterThan(r.get("fletcher")!);
+      expect(r.get("fletcher")!).toBeGreaterThan(r.get("cobb")!);
+      expect(r.get("payne")).toBe(r.get("cobb")); // same 0 of 30 still ties
+      const worstClean = Math.min(...RB_FUMBLES.filter(([, f]) => f === 0).map(([id]) => r.get(id)!));
+      const bestFumbler = Math.max(...RB_FUMBLES.filter(([, f]) => f > 0).map(([id]) => r.get(id)!));
+      expect(worstClean).toBeGreaterThan(bestFumbler);
+    });
+
+    it("weighs the sample behind a fumble: 1 of 110 beats 1 of 33", () => {
+      const r = ranks();
+      expect(r.get("haynes")!).toBeGreaterThan(r.get("brownI")!);
+    });
+
+    it("leaves a higher-is-better share on its raw rate", () => {
+      const pages = new Map<string, OverviewPage>(Array.from({ length: 10 }, (_, i) => [`p${i}`, pageWith(i < 2 ? 50 : i, i === 0 ? 300 : 30)] as const));
+      const r = percentileRanks(pages).get("x")!;
+      expect(r.get("p0")).toBe(r.get("p1")); // same rate, different samples: still a tie
+    });
+  });
+
   it("leaves out thin samples, and ranks nothing until the pool is big enough", () => {
     const pages = new Map<string, OverviewPage>(Array.from({ length: PERCENTILE_MIN_POOL }, (_, i) => [`p${i}`, pageWith(i, i === 0 ? 5 : 100)] as const));
     expect(percentileRanks(pages).has("x")).toBe(false); // one is under minN → 9 qualify
@@ -159,6 +206,13 @@ describe("rbOverview", () => {
     expect(stat(page, "pb_won")).toMatchObject({ detail: "1 / 2" });
     expect(stat(page, "rb_open")).toMatchObject({ detail: "1 / 1 routes" });
     expect(page.meta).toEqual(["1 game", "6 snaps", "3 carries"]);
+  });
+
+  it("marks the lower-is-better shares as rare-event ranks, and only those", () => {
+    const page = rbOverview(plays, { pff_g: 1, pff_fum: 0, pff_touches: 40, pff_drops: 1, pff_catchable: 12, pff_car: 30, pff_10p: 3 }, null, 1);
+    expect(stat(page, "fum")).toMatchObject({ dir: -1, rare: { chances: 40 }, detail: "0 / 40 touches" });
+    expect(stat(page, "stuffed")).toMatchObject({ dir: -1, rare: { chances: 3 } });
+    expect(stat(page, "sr_all")?.rare).toBeUndefined();
   });
 });
 

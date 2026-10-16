@@ -32,6 +32,16 @@ describe("productionPage", () => {
     expect(stat("pff_tprr")).toMatchObject({ n: 6, minN: PRODUCTION_MIN_GAMES });
   });
 
+  // User 10/16: a raw-rate rank tied every clean prospect (0 of 196 read the same as 0 of 30).
+  it("hands a lower-is-better share its own denominator for the sample-adjusted rank", () => {
+    const rb = productionPage("RB", { pff_g: 8, pff_fum_pct: 0, pff_touches: 196, pff_drop_pct: 4, pff_catchable: 25 });
+    const rbStat = (key: string) => rb.main.flatMap((s) => s.stats).find((s) => s.key === key);
+    expect(rbStat("pff_fum_pct")).toMatchObject({ dir: -1, rare: { chances: 196 }, n: 8 });
+    expect(rbStat("pff_drop_pct")).toMatchObject({ rare: { chances: 25 } });
+    expect(stat("pff_drop_pct")?.rare).toBeUndefined(); // no catchable count on the TE page above
+    expect(stat("pff_tprr")?.rare).toBeUndefined();
+  });
+
   it("is empty-headed with no PFF stats", () => {
     expect(productionPage("QB", {}).meta).toEqual([]);
   });

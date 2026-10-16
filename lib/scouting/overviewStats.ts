@@ -43,6 +43,10 @@ export interface OverviewStat {
   /** The sample behind the number, and the least it needs to be ranked. */
   n: number;
   minN: number;
+  /** A share of bad events (fumbles, drops, sacks, pressures allowed, ...) and the chances
+   *  behind it (touches, catchable balls, dropbacks): ranked on a sample-adjusted rate, so
+   *  0 of 196 outranks 0 of 30 (see percentileRanks). */
+  rare?: { chances: number };
   /** Where the number comes from and how it's counted. */
   tooltip: string;
 }
@@ -83,13 +87,15 @@ interface RateOpts {
   fmt?: "pct0" | "pct1";
   detail?: string;
 }
-/** A share: num ÷ den as a percent, with "num / den" under it. */
+/** A share: num ÷ den as a percent, with "num / den" under it. A lower-is-better share is
+ *  a count of bad events, ranked on a sample-adjusted rate (`rare`). */
 function rate(key: string, label: string, num: number, den: number, o: RateOpts): OverviewStat {
   const value = pctOf(num, den);
   return {
     key, label, note: o.note, value, fmt: o.fmt ?? "pct0",
     detail: den > 0 ? (o.detail ?? `${num} / ${den}`) : undefined,
     bar: clampBar(value), tone: o.tone, dir: o.dir, n: den, minN: o.minN, tooltip: o.tooltip,
+    ...(o.dir === -1 ? { rare: { chances: den } } : {}),
   };
 }
 
@@ -484,26 +490,56 @@ function allStats(page: OverviewPage): OverviewStat[] {
   return [...page.main, ...page.columns].flatMap((s) => s.stats);
 }
 
+/** `chances`: a rare-event share's denominator, else null (ranked on the raw value). */
+type PoolEntry = { id: string; v: number; dir: 1 | -1; chances: number | null };
+
+const medianOf = (xs: number[]) => {
+  const s = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+};
+
+/**
+ * A rare-event share (fumbles, drops, sacks, pressures allowed), re-read for ranking: each
+ * prospect's rate pulled toward the pool's as if a typical (median) sample at the pool rate
+ * were added to his own. Ranking the raw rate tied every clean prospect — 21 of 35 backs had
+ * 0 fumbles, so 0 of 196 touches and 0 of 30 both read 71st (user, 2026-10-16). Pulled, a
+ * bigger clean sample sits further below the pool rate and ranks higher; any clean sample
+ * still beats any rate above the pool's. Only the rank uses it; the page shows the raw rate.
+ */
+function sampleAdjusted(list: PoolEntry[]): PoolEntry[] {
+  const sampled = list.filter((e) => e.chances != null && e.chances > 0);
+  const totalN = sampled.reduce((t, e) => t + e.chances!, 0);
+  if (!(totalN > 0)) return list;
+  const poolRate = sampled.reduce((t, e) => t + e.v * e.chances!, 0) / totalN;
+  const prior = medianOf(sampled.map((e) => e.chances!));
+  return list.map((e) =>
+    e.chances != null && e.chances > 0 ? { ...e, v: (e.v * e.chances + poolRate * prior) / (e.chances + prior) } : e
+  );
+}
+
 /**
  * Where each prospect's numbers rank among every prospect at the position with
  * enough of a sample for that number (stat key → prospect id → 1–99). Mid-rank
  * against the others: the best of the pool reads 99, the worst 1, a tie splits
- * the difference. A stat with fewer than PERCENTILE_MIN_POOL qualifiers isn't
+ * the difference. Rare-event shares rank on a sample-adjusted rate
+ * (sampleAdjusted). A stat with fewer than PERCENTILE_MIN_POOL qualifiers isn't
  * ranked at all, and a describing stat (dir 0) never is.
  */
 export function percentileRanks(pages: ReadonlyMap<string, OverviewPage>): Map<string, Map<string, number>> {
-  const pools = new Map<string, { id: string; v: number; dir: 1 | -1 }[]>();
+  const pools = new Map<string, PoolEntry[]>();
   for (const [id, page] of pages) {
     for (const s of allStats(page)) {
       if (s.dir === 0 || s.value == null || s.n < s.minN) continue;
       const list = pools.get(s.key) ?? [];
-      list.push({ id, v: s.value, dir: s.dir });
+      list.push({ id, v: s.value, dir: s.dir, chances: s.rare?.chances ?? null });
       pools.set(s.key, list);
     }
   }
   const out = new Map<string, Map<string, number>>();
-  for (const [key, list] of pools) {
-    if (list.length < PERCENTILE_MIN_POOL) continue;
+  for (const [key, raw] of pools) {
+    if (raw.length < PERCENTILE_MIN_POOL) continue;
+    const list = raw.some((e) => e.chances != null) ? sampleAdjusted(raw) : raw;
     const ranks = new Map<string, number>();
     for (const me of list) {
       let worse = 0, tied = 0;
