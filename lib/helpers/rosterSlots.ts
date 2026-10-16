@@ -6,9 +6,12 @@
 // IR eligibility reads Sleeper's own designation (the raw players map, never
 // the ESPN-overlaid gameday map) through isReserveEligible, gated by the
 // league's reserve_allow_* settings — the same rule as the Injury Report.
+// A player whose game this week has kicked off is locked in Sleeper and can't
+// be moved to IR until the week turns over, so he isn't listed as eligible.
 // ============================================================
 import { isReserveEligible } from "../../components/AlertsPage/alertsPageHelpers";
-import type { SleeperLeague, SleeperPlayer, SleeperRoster } from "../types";
+import { hasTeamGameStarted } from "./gameday";
+import type { SleeperLeague, SleeperPlayer, SleeperRoster, TeamGameState } from "../types";
 
 export interface SlotFill {
   filled: number;
@@ -20,8 +23,8 @@ export interface RosterSlotSummary {
   active: SlotFill;
   ir: SlotFill;
   taxi: SlotFill;
-  /** IR-eligible players still on the active roster. Empty while IR is full (0 of 0 counts as
-   *  full) — they can't be moved there. */
+  /** IR-eligible players still on the active roster whose game this week hasn't kicked off.
+   *  Empty while IR is full (0 of 0 counts as full) — they can't be moved there. */
   irEligibleIds: string[];
   /** Players in IR slots whose Sleeper designation no longer qualifies them. */
   staleIrIds: string[];
@@ -30,7 +33,9 @@ export interface RosterSlotSummary {
 export function getRosterSlotSummary(
   league: Pick<SleeperLeague, "roster_positions" | "settings">,
   roster: Pick<SleeperRoster, "players" | "reserve" | "taxi">,
-  players: Record<string, SleeperPlayer> | null | undefined
+  players: Record<string, SleeperPlayer> | null | undefined,
+  /** This week's NFL scoreboard (useNflSchedule). Omitted = no game counts as started. */
+  scheduleByTeam: Record<string, TeamGameState> = {}
 ): RosterSlotSummary {
   // Sleeper's roster.players is the full union — actives + IR + taxi — so subtract IR and taxi
   // to get the starters/bench count.
@@ -43,12 +48,15 @@ export function getRosterSlotSummary(
 
   // Only IR-eligible players who AREN'T already on IR — those are the ones the user could still
   // claim into a reserve slot. Taxi players generally can't be IR'd, so they're excluded too, and
-  // nothing counts once the reserve slots are full.
+  // nothing counts once the reserve slots are full. Nor does a player whose game has kicked off:
+  // Sleeper has locked him for the week (user, 10/15 — the window was missed).
   const reserveFull = reserve.length >= irCap;
   const irEligibleIds = allPlayers.filter((pid) => {
     if (reserveSet.has(pid) || taxiSet.has(pid) || reserveFull) return false;
     const playerData = players?.[pid];
-    return !!playerData && isReserveEligible(playerData, league.settings);
+    return !!playerData
+      && isReserveEligible(playerData, league.settings)
+      && !hasTeamGameStarted(playerData.team, scheduleByTeam);
   });
 
   // Players sitting in reserve slots whose current status no longer qualifies them for IR (e.g.

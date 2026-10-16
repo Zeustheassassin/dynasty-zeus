@@ -9,6 +9,7 @@ import type {
   SleeperLeagueSettings,
   SleeperPlayer,
   SleeperRoster,
+  TeamGameState,
 } from "@/lib/types";
 
 // Pins Roster Overview's IR-Eligible / IR Stale counts — who Sleeper will let the user put on
@@ -106,7 +107,12 @@ const EXPECTED: Record<string, { eligible: string; stale: string }> = {
 
 function renderTab(
   players: Record<string, SleeperPlayer> = PLAYERS,
-  props: { onRefresh?: () => Promise<void>; loadLeagueOverview?: () => Promise<void>; refreshing?: boolean } = {}
+  props: {
+    onRefresh?: () => Promise<void>;
+    loadLeagueOverview?: () => Promise<void>;
+    refreshing?: boolean;
+    scheduleByTeam?: Record<string, TeamGameState>;
+  } = {}
 ) {
   return render(
     <PlayersProvider players={players}>
@@ -123,6 +129,7 @@ function renderTab(
         loadRoster={vi.fn()}
         setLeagueHubTab={vi.fn()}
         personalOrdering={[]}
+        scheduleByTeam={props.scheduleByTeam ?? {}}
       />
     </PlayersProvider>
   );
@@ -162,6 +169,35 @@ describe("RosterOverviewTab — IR-Eligible / IR Stale counts", () => {
     renderTab({ ...PLAYERS, irReserve: p("irReserve", null) });
     expect(cellsFor("Charlie")[5]).toBe("2");
     expect(cellsFor("Alpha")[4]).toBe("6");
+  });
+
+  // User 10/15: once a player's game has kicked off Sleeper locks him for the week — the IR window
+  // was missed, so he isn't IR-eligible anywhere until the week turns over.
+  it("leaves out players whose game this week has kicked off; IR Stale is unchanged", () => {
+    const game = (state: TeamGameState["state"]) => ({ KC: { kickoffAt: Date.parse("2026-10-18T17:00:00Z"), state } });
+    for (const state of ["Live", "Final"] as const) {
+      cleanup();
+      renderTab(PLAYERS, { scheduleByTeam: game(state) });
+      expect(cellsFor("Alpha")[4]).toBe("—");
+      expect(cellsFor("Bravo")[4]).toBe("—");
+      expect(cellsFor("Alpha")[5]).toBe("1");
+      expect(cellsFor("Bravo")[5]).toBe("1");
+    }
+    cleanup();
+    renderTab(PLAYERS, { scheduleByTeam: game("Upcoming") });
+    expect(cellsFor("Alpha")[4]).toBe("7");
+  });
+
+  it("only locks the players on the team whose game started", () => {
+    // "out" moves to BUF, still to play; everyone else is KC, already kicked off.
+    renderTab(
+      { ...PLAYERS, out: { ...PLAYERS.out, team: "BUF" } },
+      { scheduleByTeam: {
+        KC: { kickoffAt: Date.parse("2026-10-18T17:00:00Z"), state: "Live" },
+        BUF: { kickoffAt: Date.parse("2026-10-18T20:25:00Z"), state: "Upcoming" },
+      } }
+    );
+    expect(cellsFor("Alpha")[4]).toBe("1");
   });
 
   it("uses status when injury_status is empty (Sleeper puts some designations there)", () => {

@@ -141,6 +141,15 @@ export const resolveGameState = (
  *  "No game" (a bye) never locks: a player on bye can be moved all week. */
 export const isGameStartedState = (state: string) => state === "Live" || state === "Final";
 
+/** True once this team's game this week has kicked off (Live or Final), from the real scoreboard
+ *  only. Sleeper locks the player then, so he can't be moved to IR until the week turns over —
+ *  the IR-eligible flags (Roster Overview, To-Do, Injury Report) leave him out. With no scoreboard
+ *  loaded (offseason, failed fetch) nobody counts as started. */
+export const hasTeamGameStarted = (
+  team: string | null | undefined,
+  scheduleByTeam: Record<string, TeamGameState>
+): boolean => isGameStartedState(resolveGameState(team, scheduleByTeam, null).state);
+
 /** Probability team A beats team B: 0/1/0.5 once every starter on both sides
  *  is done, otherwise from each side's projected final and remaining spread.
  *  Returns null when games remain but neither side has any uncertainty left —

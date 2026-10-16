@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   resolveGameState, buildGamedayMatchups, getKickoffState, getGamedayResultStatus, getMatchupWinProbability,
-  getEarlyLockDay, isGameStartedState, getGamedayPlayoffOdds, sortGamedayDashboardEntries,
+  getEarlyLockDay, isGameStartedState, hasTeamGameStarted, getGamedayPlayoffOdds, sortGamedayDashboardEntries,
   isBeforeSundaySlate, getPlayoffOdds, getMyPlayoffOddsByLeague,
 } from "@/lib/helpers/gameday";
 import type {
@@ -162,6 +162,26 @@ describe("isGameStartedState", () => {
     expect(isGameStartedState("Final")).toBe(true);
     expect(isGameStartedState("Upcoming")).toBe(false);
     expect(isGameStartedState("No game")).toBe(false);
+  });
+});
+
+describe("hasTeamGameStarted (IR-eligible lock)", () => {
+  const at = Date.parse("2026-10-18T17:00:00Z");
+  // A full week's scoreboard (12+ teams), so a team missing from it is on bye.
+  const fullWeek: Record<string, TeamGameState> = Object.fromEntries(
+    ["BUF", "MIA", "NYJ", "NE", "DAL", "PHI", "NYG", "WAS", "GB", "CHI", "DET", "MIN"].map((t) => [t, { kickoffAt: at, state: "Upcoming" as const }])
+  );
+
+  it("is true once the team's game is Live or Final", () => {
+    expect(hasTeamGameStarted("KC", { ...fullWeek, KC: { kickoffAt: at, state: "Live" } })).toBe(true);
+    expect(hasTeamGameStarted("KC", { ...fullWeek, KC: { kickoffAt: at, state: "Final" } })).toBe(true);
+    expect(hasTeamGameStarted("KC", { ...fullWeek, KC: { kickoffAt: at, state: "Upcoming" } })).toBe(false);
+  });
+
+  it("never locks a bye, a free agent, or anyone when the scoreboard hasn't loaded", () => {
+    expect(hasTeamGameStarted("KC", fullWeek)).toBe(false);
+    expect(hasTeamGameStarted(null, fullWeek)).toBe(false);
+    expect(hasTeamGameStarted("KC", {})).toBe(false);
   });
 });
 

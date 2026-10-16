@@ -82,7 +82,7 @@ function InjuryTab({
                       {irEligibleLeagues.length > 0 && (
                         <span
                           className="text-[10px] font-semibold border border-red-800 bg-red-950/40 text-red-300 px-2 py-0.5 rounded-lg whitespace-nowrap"
-                          title="Leagues on IR / leagues where this player is currently IR-eligible (excludes taxi squads, leagues whose settings don't allow their current status on IR, and leagues whose IR is already full)"
+                          title="Leagues on IR / leagues where this player is currently IR-eligible (excludes taxi squads, leagues whose settings don't allow their current status on IR, leagues whose IR is already full, and every league once his game this week has kicked off — Sleeper locks him until the week turns over)"
                         >
                           IR {irLeagues.length}/{irEligibleLeagues.length}
                         </span>

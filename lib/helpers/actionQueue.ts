@@ -21,6 +21,7 @@ import type {
   LeagueOverviewEntry,
   SleeperLeague,
   SleeperPlayer,
+  TeamGameState,
 } from "../types";
 
 export type ActionKind = "lineup" | "pivotRisk" | "emptySlot" | "overLimit" | "irStale" | "irEligible";
@@ -68,6 +69,9 @@ export interface ActionQueueInput {
   /** The map the Lineup Coach ran on (ESPN's fresher statuses applied) — status words on the
    *  lineup kinds, so they match why the coach flagged them. Defaults to `players`. */
   lineupPlayers?: Record<string, SleeperPlayer>;
+  /** This week's NFL scoreboard — a player whose game has kicked off is locked in Sleeper, so
+   *  there's no "Move to IR" item for him until the week turns over. */
+  scheduleByTeam?: Record<string, TeamGameState>;
 }
 
 export const LINEUP_KINDS: readonly ActionKind[] = ["lineup", "pivotRisk", "emptySlot"];
@@ -183,7 +187,7 @@ export function buildActionQueue(input: ActionQueueInput): ActionItem[] {
     const entry = leagueOverviewData[leagueId];
     const myRoster = entry?.rosters.find((r) => r.owner_id === userId);
     if (!entry || !myRoster) continue;
-    const slots = getRosterSlotSummary(league, myRoster, players);
+    const slots = getRosterSlotSummary(league, myRoster, players, input.scheduleByTeam);
     const asOf = entry.rostersAsOf ?? null;
     const rosterBase = {
       ...base, deadline: null, deadlineLabel: null, expiresAt: null, earlyLockDay: null, appTab: "ROSTERS" as const, asOf,

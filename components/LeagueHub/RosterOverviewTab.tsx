@@ -8,6 +8,7 @@ import type {
   SleeperUser,
   LeagueOverviewEntry,
   LeagueHubTab,
+  TeamGameState,
 } from "../../lib/types";
 
 interface RosterOverviewTabProps {
@@ -25,6 +26,9 @@ interface RosterOverviewTabProps {
   loadRoster: (league: SleeperLeague) => void;
   setLeagueHubTab: (tab: LeagueHubTab) => void;
   personalOrdering: string[];
+  /** This week's NFL scoreboard — IR-Eligible leaves out players whose game has kicked off
+   *  (Sleeper locks them until the week turns over). */
+  scheduleByTeam: Record<string, TeamGameState>;
 }
 
 interface Row {
@@ -65,6 +69,7 @@ function RosterOverviewTab({
   loadRoster,
   setLeagueHubTab,
   personalOrdering,
+  scheduleByTeam,
 }: RosterOverviewTabProps) {
   const players = usePlayers();
 
@@ -124,8 +129,9 @@ function RosterOverviewTab({
 
       // Counts and IR flags come from the same helper the To-Do hub's roster items use
       // (lib/helpers/rosterSlots.ts): IR-Eligible = eligible players still active while an IR
-      // slot is open; IR Stale = IR players Sleeper no longer lists as eligible.
-      const slots = getRosterSlotSummary(league, myRoster, players);
+      // slot is open and their game hasn't kicked off; IR Stale = IR players Sleeper no longer
+      // lists as eligible.
+      const slots = getRosterSlotSummary(league, myRoster, players, scheduleByTeam);
 
       const leagueRosteredIds = new Set<string>();
       entry.rosters.forEach((r) => (r.players ?? []).forEach((pid) => leagueRosteredIds.add(pid)));
@@ -145,7 +151,7 @@ function RosterOverviewTab({
     }
     result.sort((a, b) => a.leagueName.localeCompare(b.leagueName));
     return result;
-  }, [user, leagues, leagueOverviewData, players, personalOrder]);
+  }, [user, leagues, leagueOverviewData, players, personalOrder, scheduleByTeam]);
 
   if (!user || leagues.length === 0) {
     return (
@@ -197,7 +203,7 @@ function RosterOverviewTab({
                 <span className="text-right">Active</span>
                 <span className="text-right">IR</span>
                 <span className="text-right">Taxi</span>
-                <span className="text-right" title="IR-eligible players still on the active roster (could be moved to IR)">IR-Eligible</span>
+                <span className="text-right" title="IR-eligible players still on the active roster (could be moved to IR). Leaves out players whose game this week has already kicked off — Sleeper locks them until the week turns over.">IR-Eligible</span>
                 <span className="text-right" title="Players in your IR slots whose current status no longer qualifies them for IR">IR Stale</span>
                 <span title="Top 2 unrostered players in this league, ranked by your personal board">Top FAs</span>
               </div>

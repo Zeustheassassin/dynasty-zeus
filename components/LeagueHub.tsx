@@ -278,6 +278,7 @@ function LeagueHub({
             loadRoster={loadRoster}
             setLeagueHubTab={setLeagueHubTab}
             personalOrdering={personalOrdering}
+            scheduleByTeam={scheduleByTeam}
           />
         )}
 

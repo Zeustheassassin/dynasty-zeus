@@ -164,6 +164,20 @@ describe("buildActionQueue — roster items (Roster Overview's counts)", () => {
     expect(keys).toContain("irStale:B:stale");
   });
 
+  // User 10/15: Sleeper locks a player once his game kicks off — he can't go to IR until the week
+  // turns over, so no "Move to IR" for him. Stale IR items are left as they are.
+  it("lists no IR move for a player whose game has kicked off", () => {
+    for (const state of ["Live", "Final"] as const) {
+      const items = buildActionQueue({ ...INPUT, scheduleByTeam: { KC: { kickoffAt: SUN_EARLY, state } } });
+      const keys = items.map((i) => i.key);
+      expect(keys).not.toContain("irEligible:A:irA");
+      expect(keys).not.toContain("irEligible:C:irA");
+      expect(keys).toContain("irStale:A:stale");
+    }
+    const upcoming = buildActionQueue({ ...INPUT, scheduleByTeam: { KC: { kickoffAt: SUN_EARLY, state: "Upcoming" } } });
+    expect(upcoming.map((i) => i.key)).toContain("irEligible:A:irA");
+  });
+
   it("still lists roster items with no lineup status (offseason)", () => {
     const items = buildActionQueue({ ...INPUT, lineupStatus: {} });
     expect(items.every((i) => i.appTab === "ROSTERS")).toBe(true);

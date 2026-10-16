@@ -25,6 +25,7 @@ import {
   recomputeConsensusFpts,
   resolveGameState,
   isGameStartedState,
+  hasTeamGameStarted,
   getProjectionKickoffAt,
   getGamedayPollPlan,
   getCurrentNflWeek,
@@ -1035,6 +1036,21 @@ const showsLeagueOverviewData =
 useVisibilityPolling(
   () => loadLeagueOverview(),
   showsLeagueOverviewData && leagueOverviewLoaded ? 2 * 60 * 1000 : null
+);
+
+// The same views flag IR-eligible players (Roster Overview, the To-Do hub, the Alerts injury
+// report) and leave out anyone whose game this week has kicked off — Sleeper locks him until the
+// week turns over. That needs this week's scoreboard: loaded on entry (Overview and To-Do already
+// load it with their projections), then re-read silently every 2 minutes so a kickoff while the
+// page sits open drops him without a reload. The scoreboard is 30s server-cached ESPN, not Sleeper.
+useEffect(() => {
+  if ((mainTab === "LEAGUES" && leagueHubTab === "ROSTER_OVERVIEW") || mainTab === "ALERTS") {
+    loadSchedule(currentNflWeek);
+  }
+}, [mainTab, leagueHubTab, currentNflWeek, loadSchedule]);
+useVisibilityPolling(
+  () => loadSchedule(currentNflWeek, { bypass: true }),
+  showsLeagueOverviewData && currentNflWeek > 0 ? 2 * 60 * 1000 : null
 );
 
 useEffect(() => {
@@ -2102,8 +2118,9 @@ const saveSnapshotNow = async () => {
       userId: user.user_id,
       players,
       lineupPlayers: lineupAvailability.players,
+      scheduleByTeam,
     });
-  }, [user?.user_id, leagueOverviewLoaded, leagues, leagueOverviewData, leagueLineupStatus, players, lineupAvailability.players]);
+  }, [user?.user_id, leagueOverviewLoaded, leagues, leagueOverviewData, leagueLineupStatus, players, lineupAvailability.players, scheduleByTeam]);
   // Done marks: this device, per Supabase account and NFL week (useTodoDone).
   const todoWeekKey = nflState?.season ? lineupWeekKey(nflState.season, currentNflWeek) : null;
   const { done: todoDone, markDone: markTodoDone, undoDone: undoTodoDone } = useTodoDone(supabaseUser?.id ?? null, todoWeekKey);
@@ -2776,7 +2793,9 @@ const saveSnapshotNow = async () => {
     // IR-badge denominator: leagues already counted in irMap, plus leagues
     // where the player isn't on IR yet but could be added right now (status
     // allowed by that league's reserve_allow_* settings AND that league's
-    // reserve isn't already full). Taxi-squad slots are never IR-eligible.
+    // reserve isn't already full AND his game this week hasn't kicked off —
+    // Sleeper locks him at kickoff until the week turns over). Taxi-squad
+    // slots are never IR-eligible.
     const irEligibleMap = new Map<string, LeagueRef[]>();
     allLeagueData.forEach((entry) => {
       const leagueId = entry?.leagueId;
@@ -2804,7 +2823,11 @@ const saveSnapshotNow = async () => {
           irMap.set(String(playerId), existing);
         }
         const playerData = players[playerId];
-        const eligible = onReserve || (!reserveFull && !!playerData && isReserveEligible(playerData, entry?.settings));
+        const eligible = onReserve || (
+          !reserveFull && !!playerData
+          && isReserveEligible(playerData, entry?.settings)
+          && !hasTeamGameStarted(playerData.team, scheduleByTeam)
+        );
         if (eligible) {
           const existing = irEligibleMap.get(String(playerId)) || [];
           if (leagueId && entry?.leagueName && !existing.some((l) => l.id === leagueId)) {
@@ -2860,7 +2883,7 @@ const saveSnapshotNow = async () => {
     };
 
     return result.sort((a, b) => severityOrder(a.player) - severityOrder(b.player));
-  }, [allLeagueData, dashboardOwnedPlayers, watchlistEntries, players]);
+  }, [allLeagueData, dashboardOwnedPlayers, watchlistEntries, players, scheduleByTeam]);
 
   // ── League transactions feed ──────────────────────────────────────────────
   // Reads pre-annotated rows from league_transactions_cache. Rows are
