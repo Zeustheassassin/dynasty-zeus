@@ -40,6 +40,8 @@ interface Row {
   taxi: { filled: number; cap: number };
   unflaggedInjuries: number;
   staleIR: number;
+  /** Of staleIR, how many are locked (game kicked off) until the week turns over. */
+  staleIRLocked: number;
   topFreeAgents: string[];
 }
 
@@ -130,7 +132,7 @@ function RosterOverviewTab({
       // Counts and IR flags come from the same helper the To-Do hub's roster items use
       // (lib/helpers/rosterSlots.ts): IR-Eligible = eligible players still active while an IR
       // slot is open and their game hasn't kicked off; IR Stale = IR players Sleeper no longer
-      // lists as eligible.
+      // lists as eligible, with how many of them are locked until next week.
       const slots = getRosterSlotSummary(league, myRoster, players, scheduleByTeam);
 
       const leagueRosteredIds = new Set<string>();
@@ -146,6 +148,7 @@ function RosterOverviewTab({
         taxi: slots.taxi,
         unflaggedInjuries: slots.irEligibleIds.length,
         staleIR: slots.staleIrIds.length,
+        staleIRLocked: slots.staleIrLockedIds.length,
         topFreeAgents,
       });
     }
@@ -204,7 +207,7 @@ function RosterOverviewTab({
                 <span className="text-right">IR</span>
                 <span className="text-right">Taxi</span>
                 <span className="text-right" title="IR-eligible players still on the active roster (could be moved to IR). Leaves out players whose game this week has already kicked off — Sleeper locks them until the week turns over.">IR-Eligible</span>
-                <span className="text-right" title="Players in your IR slots whose current status no longer qualifies them for IR">IR Stale</span>
+                <span className="text-right" title="Players in your IR slots whose current status no longer qualifies them for IR. &quot;Locked&quot; = his game this week has kicked off, so Sleeper won't let you move him until the week turns over.">IR Stale</span>
                 <span title="Top 2 unrostered players in this league, ranked by your personal board">Top FAs</span>
               </div>
               <div className="space-y-0.5">
@@ -233,8 +236,14 @@ function RosterOverviewTab({
                       <span className={`text-right font-mono ${row.unflaggedInjuries > 0 ? "text-orange-300" : "text-slate-600"}`}>
                         {row.unflaggedInjuries > 0 ? row.unflaggedInjuries : "—"}
                       </span>
-                      <span className={`text-right font-mono ${row.staleIR > 0 ? "text-red-400 font-bold" : "text-slate-600"}`}>
+                      <span
+                        className={`text-right font-mono whitespace-nowrap ${row.staleIR > 0 ? "text-red-400 font-bold" : "text-slate-600"}`}
+                        title={row.staleIRLocked > 0 ? `${row.staleIRLocked} locked until next week — his game has kicked off, so Sleeper won't let you move him off IR yet` : undefined}
+                      >
                         {row.staleIR > 0 ? row.staleIR : "—"}
+                        {row.staleIRLocked > 0 && (
+                          <span className="font-sans font-normal text-[10px] text-slate-400"> · {row.staleIRLocked} locked</span>
+                        )}
                       </span>
                       <span className="text-slate-400 truncate">
                         {row.topFreeAgents.length === 0

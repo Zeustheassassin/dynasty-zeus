@@ -127,6 +127,14 @@ function ActionRow({
           )}
           <span className={`text-[10px] font-semibold border rounded px-1.5 py-px ${tag.cls}`}>{tag.label}</span>
           <span className="text-sm text-slate-100">{item.title}</span>
+          {item.locked && (
+            <span
+              className="text-[10px] font-semibold border rounded px-1.5 py-px border-slate-600 bg-slate-800/60 text-slate-300 whitespace-nowrap"
+              title="His game this week has kicked off, so Sleeper won't let you move him until the week turns over. Until he's off IR, Sleeper blocks your adds and trades in this league."
+            >
+              Locked until next week
+            </span>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
           <span className="text-[11px] text-slate-400">{item.detail}</span>

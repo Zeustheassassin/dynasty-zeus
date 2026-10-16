@@ -173,19 +173,35 @@ describe("RosterOverviewTab — IR-Eligible / IR Stale counts", () => {
 
   // User 10/15: once a player's game has kicked off Sleeper locks him for the week — the IR window
   // was missed, so he isn't IR-eligible anywhere until the week turns over.
-  it("leaves out players whose game this week has kicked off; IR Stale is unchanged", () => {
+  // User 10/16: Sleeper locks moving him OFF IR too — a stale player stays counted but is marked.
+  it("leaves out players whose game this week has kicked off; a stale one stays, marked locked", () => {
     const game = (state: TeamGameState["state"]) => ({ KC: { kickoffAt: Date.parse("2026-10-18T17:00:00Z"), state } });
     for (const state of ["Live", "Final"] as const) {
       cleanup();
       renderTab(PLAYERS, { scheduleByTeam: game(state) });
       expect(cellsFor("Alpha")[4]).toBe("—");
       expect(cellsFor("Bravo")[4]).toBe("—");
-      expect(cellsFor("Alpha")[5]).toBe("1");
-      expect(cellsFor("Bravo")[5]).toBe("1");
+      expect(cellsFor("Alpha")[5]).toBe("1 · 1 locked");
+      expect(cellsFor("Bravo")[5]).toBe("1 · 1 locked");
     }
     cleanup();
     renderTab(PLAYERS, { scheduleByTeam: game("Upcoming") });
     expect(cellsFor("Alpha")[4]).toBe("7");
+    expect(cellsFor("Alpha")[5]).toBe("1");
+  });
+
+  it("marks only the stale players whose own game started", () => {
+    // Charlie's IR: "healthy" (stale, KC) and "irReserve" (still eligible). Move "healthy" to BUF,
+    // still to play: nothing locked. Add a second stale KC player: 2, 1 of them locked.
+    const schedule = {
+      KC: { kickoffAt: Date.parse("2026-10-18T17:00:00Z"), state: "Live" as const },
+      BUF: { kickoffAt: Date.parse("2026-10-18T20:25:00Z"), state: "Upcoming" as const },
+    };
+    renderTab({ ...PLAYERS, healthy: { ...PLAYERS.healthy, team: "BUF" } }, { scheduleByTeam: schedule });
+    expect(cellsFor("Charlie")[5]).toBe("1");
+    cleanup();
+    renderTab({ ...PLAYERS, healthy: { ...PLAYERS.healthy, team: "BUF" }, irReserve: p("irReserve", null) }, { scheduleByTeam: schedule });
+    expect(cellsFor("Charlie")[5]).toBe("2 · 1 locked");
   });
 
   it("only locks the players on the team whose game started", () => {

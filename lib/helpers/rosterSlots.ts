@@ -7,7 +7,8 @@
 // the ESPN-overlaid gameday map) through isReserveEligible, gated by the
 // league's reserve_allow_* settings — the same rule as the Injury Report.
 // A player whose game this week has kicked off is locked in Sleeper and can't
-// be moved to IR until the week turns over, so he isn't listed as eligible.
+// be moved onto or off IR until the week turns over: he isn't listed as
+// eligible, and a stale one stays listed but marked locked.
 // ============================================================
 import { isReserveEligible } from "../../components/AlertsPage/alertsPageHelpers";
 import { hasTeamGameStarted } from "./gameday";
@@ -28,6 +29,10 @@ export interface RosterSlotSummary {
   irEligibleIds: string[];
   /** Players in IR slots whose Sleeper designation no longer qualifies them. */
   staleIrIds: string[];
+  /** The stale ones whose game this week has kicked off: Sleeper won't let him off IR until the
+   *  week turns over. Still in staleIrIds (user, 10/15: listed, marked "locked until next week") —
+   *  he's still stale, and Sleeper blocks adds and trades while he sits there. */
+  staleIrLockedIds: string[];
 }
 
 export function getRosterSlotSummary(
@@ -65,6 +70,7 @@ export function getRosterSlotSummary(
     const playerData = players?.[pid];
     return !!playerData && !isReserveEligible(playerData, league.settings);
   });
+  const staleIrLockedIds = staleIrIds.filter((pid) => hasTeamGameStarted(players?.[pid]?.team, scheduleByTeam));
 
   return {
     active: {
@@ -75,5 +81,6 @@ export function getRosterSlotSummary(
     taxi: { filled: taxi.length, cap: league.settings?.taxi_slots ?? 0 },
     irEligibleIds,
     staleIrIds,
+    staleIrLockedIds,
   };
 }

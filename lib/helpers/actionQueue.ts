@@ -51,6 +51,10 @@ export interface ActionItem {
   /** Thursday / Friday / Saturday — a lineup change the League Overview's T/F/S flags price
    *  at LINEUP_DELTA_FLOOR or more, locking at that day's kickoff. */
   earlyLockDay: EarlyLockDay | null;
+  /** Can't be made until the week turns over: his game has kicked off, so Sleeper has locked him
+   *  (a stale IR player — user, 10/15: listed, marked "locked until next week"). Sorts after the
+   *  league's moves that can be made now. */
+  locked?: true;
   appTab: ActionAppTab;
   /** Earliest moment in Sleeper the data behind the item can reflect; a Done mark is re-checked
    *  only against data newer than the click. */
@@ -205,6 +209,7 @@ export function buildActionQueue(input: ActionQueueInput): ActionItem[] {
       });
     }
     const activeFull = slots.active.cap > 0 && slots.active.filled >= slots.active.cap;
+    const lockedStale = new Set(slots.staleIrLockedIds);
     for (const id of slots.staleIrIds) {
       const word = statusOf(players, id);
       items.push({
@@ -214,6 +219,7 @@ export function buildActionQueue(input: ActionQueueInput): ActionItem[] {
         playerIds: [id],
         title: `Move ${name(id)} off IR`,
         detail: `Sleeper lists him as ${word || "healthy"}, not IR-eligible here${activeFull ? " · active roster full — drop someone to activate him" : ""}`,
+        ...(lockedStale.has(id) ? { locked: true as const } : {}),
       });
     }
     const openIr = slots.ir.cap - slots.ir.filled;
@@ -231,14 +237,17 @@ export function buildActionQueue(input: ActionQueueInput): ActionItem[] {
   return items.sort(compareActionItems);
 }
 
-/** Earliest deadline first (untimed after), then lineup before roster kinds, then by title. */
+/** Earliest deadline first (untimed after), then moves that can be made now before locked ones,
+ *  then lineup before roster kinds, then by title. */
 export function compareActionItems(a: ActionItem, b: ActionItem): number {
   if (a.deadline !== b.deadline) {
     if (a.deadline == null) return 1;
     if (b.deadline == null) return -1;
     return a.deadline - b.deadline;
   }
-  return KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.title.localeCompare(b.title);
+  return Number(!!a.locked) - Number(!!b.locked)
+    || KIND_ORDER[a.kind] - KIND_ORDER[b.kind]
+    || a.title.localeCompare(b.title);
 }
 
 // ── Done marks ────────────────────────────────────────────────────────────────

@@ -178,6 +178,20 @@ describe("buildActionQueue — roster items (Roster Overview's counts)", () => {
     expect(upcoming.map((i) => i.key)).toContain("irEligible:A:irA");
   });
 
+  // User 10/16: Sleeper won't move him off IR either once his game starts — still listed, marked.
+  it("keeps a stale IR move once his game has kicked off, marked locked and after the moves that can be made", () => {
+    const started = buildActionQueue({ ...INPUT, scheduleByTeam: { KC: { kickoffAt: SUN_EARLY, state: "Live" } } });
+    const stale = byKey(started).get("irStale:A:stale");
+    expect(stale).toMatchObject({ kind: "irStale", title: "Move Player stale off IR", locked: true });
+    // Locked sorts after a move that can be made now, even one of a later kind.
+    const canDo = { ...stale!, key: "irEligible:A:x", kind: "irEligible" as const, title: "Move Player x to IR", locked: undefined };
+    expect(compareActionItems(stale!, canDo)).toBeGreaterThan(0);
+    expect(compareActionItems({ ...stale!, locked: undefined }, canDo)).toBeLessThan(0);
+
+    const notYet = byKey(buildActionQueue({ ...INPUT, scheduleByTeam: { KC: { kickoffAt: SUN_EARLY, state: "Upcoming" } } }));
+    expect(notYet.get("irStale:A:stale")?.locked).toBeUndefined();
+  });
+
   it("still lists roster items with no lineup status (offseason)", () => {
     const items = buildActionQueue({ ...INPUT, lineupStatus: {} });
     expect(items.every((i) => i.appTab === "ROSTERS")).toBe(true);
