@@ -27,9 +27,9 @@ describe("teBlockDefaults", () => {
 });
 
 describe("tePlayTypeForPositioning", () => {
-  it("starts Inline and Wing Back as a Pass Block, whatever was on", () => {
-    expect(tePlayTypeForPositioning("inline", "route_run")).toBe("pass_block");
-    expect(tePlayTypeForPositioning("wing_back", "run_block")).toBe("pass_block");
+  it("starts Inline and Wing Back as a Run Block, whatever was on", () => {
+    expect(tePlayTypeForPositioning("inline", "route_run")).toBe("run_block");
+    expect(tePlayTypeForPositioning("wing_back", "pass_block")).toBe("run_block");
   });
 
   it("leaves the play type alone everywhere else", () => {

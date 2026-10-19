@@ -325,7 +325,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
     }
   }
 
-  // Moving him re-reads the defaults: Inline / Wing Back start as a Pass Block, and a block rep
+  // Moving him re-reads the defaults: Inline / Wing Back start as a Run Block, and a block rep
   // takes the new alignment's block type and defender (an outcome already picked stays).
   function selectPositioning(next: TEPositioning) {
     if (next === positioning) return;

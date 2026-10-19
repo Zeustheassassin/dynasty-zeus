@@ -3,8 +3,9 @@
 // charter can change, so a typical rep is a click or two:
 //   - Wide   → a block rep is a Movement block on a DB, Success.
 //   - Slot   → a block rep is a Movement block on an LB, Success.
-//   - Inline / Wing Back → the play starts as a Pass Block; a block rep (pass
-//     or run) is an Inline block on a DL, Success.
+//   - Inline / Wing Back → the play starts as a Run Block (the user, 10/19,
+//     first said Pass Block); a block rep (run or pass) is an Inline block on
+//     a DL, Success.
 //   - Route Run → Zone coverage, not targeted; once targeted, not contested.
 // Full Back / Running Back have no block defaults (pick type and outcome).
 // Pure: TEChartingBoard applies these when positioning or play type is picked,
@@ -44,9 +45,9 @@ export const TE_ROUTE_DEFAULTS: { coverage: TECoverage; targeted: boolean } = { 
 /** A target's pre-filled pick once "Targeted? Yes" is on. */
 export const TE_TARGET_DEFAULTS: { contestedTarget: boolean } = { contestedTarget: false };
 
-/** The play type after moving to `positioning`: Inline and Wing Back start as a Pass Block. */
+/** The play type after moving to `positioning`: Inline and Wing Back start as a Run Block. */
 export function tePlayTypeForPositioning(positioning: TEPositioning, current: TEPlayType): TEPlayType {
-  return positioning === "inline" || positioning === "wing_back" ? "pass_block" : current;
+  return positioning === "inline" || positioning === "wing_back" ? "run_block" : current;
 }
 
 export const isTEBlock = (playType: TEPlayType) => playType === "run_block" || playType === "pass_block";
