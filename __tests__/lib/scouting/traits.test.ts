@@ -12,14 +12,15 @@ const g = (id: string, prospect: string, created: string, grades: Record<string,
   ({ id, prospect_id: prospect, season_year: season, created_at: created, trait_grades: grades }) as ScoutingGame;
 
 describe("traits", () => {
-  it("six per position (WR eleven, RB seven); the uncovered ones are the user's list", () => {
-    for (const pos of ["QB", "TE"] as const) expect(TRAITS[pos]).toHaveLength(6);
+  it("six per position (WR eleven, TE nine, RB seven); the uncovered ones are the user's list", () => {
+    expect(TRAITS.QB).toHaveLength(6);
+    expect(TRAITS.TE.map((t) => t.short)).toEqual(["Inl", "Mov", "Rel", "Rte", "Hnd", "YAC", "Spd", "Sud", "JB"]);
     expect(TRAITS.RB.map((t) => t.short)).toEqual(["Vis", "Bur", "Bal", "Spd", "Hnd", "PP", "Pwr"]);
     expect(TRAITS.WR.map((t) => t.short)).toEqual(["Rel", "Rte", "Sep", "Hnd", "CC", "YAC", "Spd", "Sud", "Str", "WM", "Scr"]);
     expect(uncoveredTraits("QB").map((t) => t.key)).toEqual(["arm", "creation"]);
     expect(uncoveredTraits("RB").map((t) => t.key)).toEqual(["burst", "power"]);
     expect(uncoveredTraits("WR").map((t) => t.key)).toEqual(["game_speed", "route_suddenness", "play_strength", "wasted_movement", "scramble_drill"]);
-    expect(uncoveredTraits("TE").map((t) => t.key)).toEqual(["hands", "yac"]);
+    expect(uncoveredTraits("TE").map((t) => t.key)).toEqual(["hands", "yac", "game_speed", "suddenness", "jump_balls"]);
     expect(TRAIT_WEIGHT).toBe(0.2);
   });
 

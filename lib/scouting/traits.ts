@@ -1,7 +1,7 @@
 // Per-game trait grades (tape-grading expansion, Stage 5). Pure.
 //
 // The user grades a set of traits per position (six; WR eleven since
-// 2026-10-06, RB seven since 2026-10-07), 1–10, per charted game, on NEW
+// 2026-10-06, RB seven since 2026-10-07, TE nine since 2026-10-19), 1–10, per charted game, on NEW
 // games only (scouting_games.trait_grades, migration 065): an old game was
 // charted before traits existed and isn't re-watched, so it never gets them
 // and nothing about it changes.
@@ -72,6 +72,12 @@ export const TRAITS: Record<CompositePos, readonly TraitDef[]> = {
     { key: "route_craft", label: "Route craft", short: "Rte", coveredBy: "TE-SAER" },
     { key: "hands", label: "Hands", short: "Hnd", coveredBy: null },
     { key: "yac", label: "YAC", short: "YAC", coveredBy: null },
+    // Added 2026-10-19 at the user's request. Nothing in the TE score measures any of them:
+    // TE-SAER reads getting open, not speed or suddenness (like WR's Game speed and Route
+    // suddenness beside SAE / cSAE), and the TE board's contested targets / catches aren't scored.
+    { key: "game_speed", label: "Game speed", short: "Spd", coveredBy: null },
+    { key: "suddenness", label: "Suddenness", short: "Sud", coveredBy: null },
+    { key: "jump_balls", label: "Jump balls", short: "JB", coveredBy: null },
   ],
 };
 
