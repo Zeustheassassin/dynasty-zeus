@@ -13,8 +13,10 @@ export interface PlayTags {
   /** Editing a play charted before the tags: nothing is shown or written. */
   editingUntagged: boolean;
   set: (column: string, value: TagValue) => void;
-  /** After a log, or to leave an edit: back to a fresh play (sticky tags keep their value). */
-  reset: () => void;
+  /** After a log, or to leave an edit: back to a fresh play (sticky tags keep their value).
+   *  `overrides` pre-fill the fresh play past the tags' own defaults (the TE board's
+   *  blocked defender by alignment). */
+  reset: (overrides?: Record<string, TagValue>) => void;
   startEdit: (play: object) => void;
   /** Tag columns to spread into the insert / update. Only the forced ones (RPO play action) while editing an untagged play. */
   payload: (facts: PlayFacts) => Record<string, TagValue>;
@@ -72,9 +74,9 @@ export function usePlayTags(
         setDraft((d) => ({ ...d, [column]: value }));
       }
     },
-    reset() {
+    reset(overrides) {
       setEdit(null);
-      setDraft(defaultTagValues(position));
+      setDraft({ ...defaultTagValues(position), ...overrides });
     },
     startEdit(play) {
       const untagged = !isTaggedPlay(play, position);

@@ -82,4 +82,16 @@ describe("usePlayTags", () => {
     act(() => result.current.reset());
     expect(result.current.values.red_zone).toBe(true);
   });
+
+  // TE board defaults (user, 10/19): a wide TE's next block rep starts on a DB, not the DL preset.
+  it("resets to a fresh play with overrides past the tags' own defaults, leaving an edit", () => {
+    const tagged = { id: "p3", red_zone: false, third_fourth_down: false, short_yardage: false, garbage_time: false, blocked_defender: "lb", press_release: null, chipped_before_route: null };
+    const { result } = setup("TE", { gameId: "g1", plays: [tagged] });
+    act(() => result.current.startEdit(tagged));
+    act(() => result.current.reset({ blocked_defender: "db" }));
+    expect(result.current.values.blocked_defender).toBe("db");
+    expect(result.current.payload({ block: true }).blocked_defender).toBe("db");
+    act(() => result.current.reset());
+    expect(result.current.values.blocked_defender).toBe("dl");
+  });
 });

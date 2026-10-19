@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, afterAll } from "vitest";
 import { render, screen, fireEvent, cleanup, within } from "@testing-library/react";
 import TodoHub from "@/components/TodoHub";
 import type { ActionItem, DoneRecord } from "@/lib/helpers/actionQueue";
@@ -18,6 +18,12 @@ vi.mock("@/hooks/useWeeklyValueRisers", () => ({ useWeeklyValueRisers: () => ris
 afterEach(cleanup);
 
 const HOUR = 3_600_000;
+// By league puts a league first only when its deadline falls before Sunday's slate (Wed–Sun
+// morning ET), so the moves below are timed from a fixed Thursday noon ET — on a Monday or
+// Tuesday a real clock put Alpha first and failed the ordering test.
+vi.useFakeTimers({ toFake: ["Date"] });
+vi.setSystemTime(new Date("2026-10-15T16:00:00Z"));
+afterAll(() => { vi.useRealTimers(); });
 const NOW = Date.now();
 
 const LEAGUES = [

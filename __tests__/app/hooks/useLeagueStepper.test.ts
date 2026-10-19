@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, afterAll } from "vitest";
 import { renderHook, act, cleanup } from "@testing-library/react";
 import { useLeagueStepper, type UseLeagueStepperArgs } from "@/app/hooks/useLeagueStepper";
 import type { ActionItem } from "@/lib/helpers/actionQueue";
@@ -9,6 +9,13 @@ import type { SleeperLeague } from "@/lib/types";
 // order, fixed when it starts; League Hub steps walk it, steps from elsewhere start a new one.
 
 afterEach(cleanup);
+
+// By league puts a league first only when its deadline falls before Sunday's slate (Wed–Sun
+// morning ET), so the moves below are timed from a fixed Thursday noon ET — on a Monday or
+// Tuesday a real clock reordered every league and failed these tests.
+vi.useFakeTimers({ toFake: ["Date"] });
+vi.setSystemTime(new Date("2026-10-15T16:00:00Z"));
+afterAll(() => { vi.useRealTimers(); });
 
 const NOW = Date.now();
 const HOUR = 3_600_000;

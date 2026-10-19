@@ -32,6 +32,9 @@ import PlayTagControls, { PlayTagBadges } from "../shared/PlayTagControls";
 import type { PlayFacts } from "../../../lib/scouting/playTags";
 import TEPlayerCharts from "./TEPlayerCharts";
 import {
+  isTEBlock, teBlockDefaults, tePlayTypeForPositioning, TE_ROUTE_DEFAULTS, TE_TARGET_DEFAULTS,
+} from "../../../lib/scouting/teChartingDefaults";
+import {
   buildTERouteBaselines, computeTERouteAboveExpectedForPlays,
   buildTEBlockBaselines, computeTEBlockAboveExpectedForPlays,
 } from "../../../lib/scouting/aboveExpected";
@@ -86,10 +89,10 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
   const [playType, setPlayType]               = useState<TEPlayType>("route_run");
   const [blockType, setBlockType]             = useState<TEBlockType | null>(null);
   const [blockSuccess, setBlockSuccess]       = useState<boolean | null>(null);
-  const [coverage, setCoverage]               = useState<TECoverage | null>(null);
+  const [coverage, setCoverage]               = useState<TECoverage | null>(TE_ROUTE_DEFAULTS.coverage);
   const [routeType, setRouteType]             = useState<RouteType | null>(null);
   const [wasOpen, setWasOpen]                 = useState<boolean | null>(null);
-  const [targeted, setTargeted]               = useState<boolean | null>(null);
+  const [targeted, setTargeted]               = useState<boolean | null>(TE_ROUTE_DEFAULTS.targeted);
   const [targetOutcome, setTargetOutcome]     = useState<TargetOutcome>(null);
   const [contestedTarget, setContestedTarget] = useState<boolean | null>(null);
   const [contestedCatch, setContestedCatch]   = useState<boolean | null>(null);
@@ -286,13 +289,55 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
   }, [selectedGameId, playType, blockType, blockSuccess, coverage, routeType, wasOpen, targeted, targetOutcome, contestedTarget, contestedCatch]);
   const canLog = playReady && !tagsMissing;
 
+  // The next play keeps location, positioning and play type, so it starts from that
+  // alignment's defaults (lib/scouting/teChartingDefaults.ts — the user's, 10/19).
   function resetPlayForm() {
     setEditingPlayId(null);
-    tags.reset();
-    setBlockType(null); setBlockSuccess(null);
-    setCoverage(null); setRouteType(null); setWasOpen(null); setTargeted(null);
+    const block = isTEBlock(playType) ? teBlockDefaults(positioning) : null;
+    tags.reset(block ? { blocked_defender: block.blockedDefender } : undefined);
+    setBlockType(block?.blockType ?? null); setBlockSuccess(block?.blockSuccess ?? null);
+    const route = playType === "route_run";
+    setCoverage(route ? TE_ROUTE_DEFAULTS.coverage : null); setRouteType(null); setWasOpen(null);
+    setTargeted(route ? TE_ROUTE_DEFAULTS.targeted : null);
     setTargetOutcome(null); setContestedTarget(null); setContestedCatch(null);
     setBrokenTackle(false); setPlayNotes("");
+  }
+
+  // Picking a play type fills its defaults for where he lined up; picking the one already on
+  // changes nothing (it used to clear the block picks).
+  function selectPlayType(next: TEPlayType, pos: TEPositioning = positioning) {
+    if (next === playType && pos === positioning) return;
+    setPlayType(next);
+    if (isTEBlock(next)) {
+      const d = teBlockDefaults(pos);
+      setBlockType(d.blockType); setBlockSuccess(d.blockSuccess);
+      tags.set("blocked_defender", d.blockedDefender);
+    } else {
+      setBlockType(null); setBlockSuccess(null);
+    }
+    if (next === "route_run") {
+      setCoverage(TE_ROUTE_DEFAULTS.coverage); setTargeted(TE_ROUTE_DEFAULTS.targeted);
+      setTargetOutcome(null); setContestedTarget(null); setContestedCatch(null); setBrokenTackle(false);
+    }
+    if (next === "decoy") {
+      setCoverage(null); setRouteType(null); setWasOpen(null); setTargeted(null);
+      setTargetOutcome(null); setContestedTarget(null); setContestedCatch(null); setBrokenTackle(false);
+    }
+  }
+
+  // Moving him re-reads the defaults: Inline / Wing Back start as a Pass Block, and a block rep
+  // takes the new alignment's block type and defender (an outcome already picked stays).
+  function selectPositioning(next: TEPositioning) {
+    if (next === positioning) return;
+    setPositioning(next);
+    const nextType = tePlayTypeForPositioning(next, playType);
+    if (nextType !== playType) { selectPlayType(nextType, next); return; }
+    if (isTEBlock(playType)) {
+      const d = teBlockDefaults(next);
+      setBlockType(d.blockType);
+      if (blockSuccess === null) setBlockSuccess(d.blockSuccess);
+      tags.set("blocked_defender", d.blockedDefender);
+    }
   }
 
   function startEditPlay(pl: TEPlay) {
@@ -685,7 +730,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
               <div className="text-xs text-slate-500 mb-2">Positioning</div>
               <div className="flex flex-wrap gap-2">
                 {POSITIONINGS.map((p) => (
-                  <button key={p.key} onClick={() => setPositioning(p.key)}
+                  <button key={p.key} onClick={() => selectPositioning(p.key)}
                     className={`flex-1 whitespace-nowrap px-3 py-2 rounded text-sm font-medium transition ${positioning === p.key ? "bg-green-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                     {p.label}
                   </button>
@@ -696,24 +741,19 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
             <div>
               <div className="text-xs text-slate-500 mb-2">Play Type</div>
               <div className="flex gap-2">
-                <button onClick={() => { setPlayType("run_block"); setBlockType(null); setBlockSuccess(null); }}
+                <button onClick={() => selectPlayType("run_block")}
                   className={`flex-1 py-2 rounded text-sm font-medium transition ${playType === "run_block" ? "bg-purple-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                   Run Block
                 </button>
-                <button onClick={() => { setPlayType("pass_block"); setBlockType(null); setBlockSuccess(null); }}
+                <button onClick={() => selectPlayType("pass_block")}
                   className={`flex-1 py-2 rounded text-sm font-medium transition ${playType === "pass_block" ? "bg-purple-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                   Pass Block
                 </button>
-                <button onClick={() => { setPlayType("route_run"); setBlockType(null); setBlockSuccess(null); }}
+                <button onClick={() => selectPlayType("route_run")}
                   className={`flex-1 py-2 rounded text-sm font-medium transition ${playType === "route_run" ? "bg-blue-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                   Route Run
                 </button>
-                <button onClick={() => {
-                  setPlayType("decoy");
-                  setBlockType(null); setBlockSuccess(null);
-                  setCoverage(null); setRouteType(null); setWasOpen(null); setTargeted(null);
-                  setTargetOutcome(null); setContestedTarget(null); setContestedCatch(null); setBrokenTackle(false);
-                }}
+                <button onClick={() => selectPlayType("decoy")}
                   className={`flex-1 py-2 rounded text-sm font-medium transition ${playType === "decoy" ? "bg-amber-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                   Decoy
                 </button>
@@ -796,7 +836,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
                   <div className="flex-1 whitespace-nowrap">
                     <div className="text-xs text-slate-500 mb-2">Targeted?</div>
                     <div className="flex gap-1.5">
-                      <button onClick={() => setTargeted(true)}
+                      <button onClick={() => { setTargeted(true); if (contestedTarget === null) setContestedTarget(TE_TARGET_DEFAULTS.contestedTarget); }}
                         className={`flex-1 whitespace-nowrap px-4 h-9 rounded text-xs font-medium transition ${targeted === true ? "bg-amber-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
                       <button onClick={() => { setTargeted(false); setTargetOutcome(null); setContestedTarget(null); setContestedCatch(null); }}
                         className={`flex-1 whitespace-nowrap px-4 h-9 rounded text-xs font-medium transition ${targeted === false ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
