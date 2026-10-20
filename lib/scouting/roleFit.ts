@@ -216,7 +216,9 @@ export const VERSATILE_PCT = 70;
 // user's calls (2026-10-02): a WR is Versatile above 60% at both X and Y (an
 // X? doesn't count). RB and QB have none: Three-down already is the all-round
 // back, and Creator and Dual-threat are the all-round QBs. TE keeps the
-// default, VERSATILE_PCT+ in two or more buckets.
+// default, VERSATILE_PCT+ in two or more buckets, but All-Around already means
+// it (the user, 2026-10-20: "Drop V for all around"): an all-round role
+// (standsAloneAt) never counts toward the two, and its player is never V.
 export interface VersatileRule { roles: readonly RoleKey[]; above: number }
 export const VERSATILE_RULES: Partial<Record<RolePos, VersatileRule | null>> = {
   WR: { roles: ["x", "y"], above: 60 },
@@ -231,7 +233,10 @@ export const hasVersatile = (pos: RolePos) => VERSATILE_RULES[pos] !== null;
 export function versatileRuleText(pos: RolePos): string {
   const rule = VERSATILE_RULES[pos];
   if (rule === null) return "not used at this position";
-  if (!rule) return `${VERSATILE_PCT}%+ in two or more roles`;
+  if (!rule) {
+    const alone = ROLES[pos].find((r) => r.standsAloneAt != null);
+    return `${VERSATILE_PCT}%+ in two or more roles${alone ? ` other than ${alone.label}, and never when he's ${alone.label}` : ""}`;
+  }
   const names = rule.roles.map((k) => roleInfo(k).label);
   return `above ${rule.above}% at both ${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
@@ -327,7 +332,7 @@ export interface RoleFit {
   also: RoleKey[];
   /** One per bucket, in ROLES order. */
   matches: RoleMatch[];
-  /** The position's VERSATILE_RULES entry (always false at RB and QB), else VERSATILE_PCT+ in two or more buckets. */
+  /** The position's VERSATILE_RULES entry (always false at RB and QB), else VERSATILE_PCT+ in two or more buckets other than an all-round one (TE All-Around), and never when that's his role. */
   versatile: boolean;
   /** The bucket his usage alone points to; null without usage data. */
   usedAs: RoleKey | null;
@@ -505,10 +510,12 @@ export interface FitInputs {
   confidenceAt: { medium: number; high: number };
 }
 
-function isVersatile(pos: RolePos, matches: readonly RoleMatch[]): boolean {
+function isVersatile(pos: RolePos, matches: readonly RoleMatch[], best: RoleKey): boolean {
   const rule = VERSATILE_RULES[pos];
   if (rule === null) return false;
-  if (!rule) return matches.filter((m) => m.pct >= VERSATILE_PCT).length >= 2;
+  const allRound = (k: RoleKey) => roleInfo(k).standsAloneAt != null;
+  if (allRound(best)) return false;
+  if (!rule) return matches.filter((m) => m.pct >= VERSATILE_PCT && !allRound(m.role)).length >= 2;
   return rule.roles.every((k) => {
     const m = matches.find((x) => x.role === k);
     return m != null && m.proven && m.pct > rule.above;
@@ -596,7 +603,7 @@ export function buildRoleFit(inp: FitInputs): RoleFit {
     best: best.role,
     also: also.map((m) => m.role),
     matches,
-    versatile: isVersatile(inp.pos, matches),
+    versatile: isVersatile(inp.pos, matches, best.role),
     usedAs: skillOnly ? null : usedAsRole(inp.recipes, inp.features, order),
     confidence: n >= inp.confidenceAt.high ? "high" : n >= inp.confidenceAt.medium ? "medium" : "low",
     sample: inp.sample,

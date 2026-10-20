@@ -155,7 +155,21 @@ describe("buildRoleFit", () => {
     expect(fitAt("TE", [0.4, 0.72, 0.71, 0.4, 0.4]).versatile).toBe(true);
     expect(fitAt("TE", [0.4, 0.72, 0.69, 0.4, 0.4]).versatile).toBe(false);
     expect(VERSATILE_PCT).toBe(70);
-    expect(versatileRuleText("TE")).toBe("70%+ in two or more roles");
+    expect(versatileRuleText("TE")).toBe("70%+ in two or more roles other than All-Around, and never when he's All-Around");
+  });
+
+  it("never calls an All-Around TE Versatile, and doesn't count All-Around toward it", () => {
+    // All-Around (named) plus two more roles at 70%+: still no V.
+    expect(fitAt("TE", [0.71, 0.72, 0.71, 0.4, 0.4]).versatile).toBe(false);
+    // All-Around at 70%+ but unproven, plus one role: not two.
+    const unproven = buildRoleFit({
+      pos: "TE",
+      recipes: ROLES.TE.map((r, i) => ({ role: r.key, ingredients: [{ feature: `f${i}`, weight: 1 }], ...(i === 0 ? { requires: { feature: "f0", minN: 15, why: "needs 15 routes" } } : {}) })),
+      features: { f0: { ...skill(0.75), n: 13 }, f1: skill(0.72), f2: skill(0.4), f3: skill(0.4), f4: skill(0.4) },
+      heightIn: null, weightLb: null, sample: { n: 80, unit: "snaps" }, confidenceAt: { medium: 60, high: 120 },
+    });
+    expect(unproven.best).toBe("inline_y");
+    expect(unproven.versatile).toBe(false);
   });
 
   it("names TE All-Around alone at its line, and never under it", () => {
