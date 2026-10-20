@@ -118,7 +118,7 @@ const TE_POSITIONINGS: TEPositioning[] = ["wide", "slot", "inline", "full_back",
 // mutually-exclusive merge the old weighted average relied on.
 const TE_COVERAGES: TECoverage[] = ["man", "press", "zone", "double"];
 
-const MIN_SAMPLE = 15;
+export const MIN_SAMPLE = 15;
 // QB AAE samples 7 dimensions so each dimension's expected estimate is noisier
 // than the 2-dimension RB/TE versions — raise the minimum to compensate.
 const QB_MIN_SAMPLE = 25;

@@ -1,14 +1,18 @@
 // TE role buckets: Inline Y, Move/Big slot, H-back/Wing and Blocking TE
-// (approved by the user, 2026-10-02). Scoring is shared (roleFit.ts); this
-// file holds the TE features and recipes. Every TE game was charted in the
-// app, play by play.
+// (approved by the user, 2026-10-02), and All-Around (the user, 2026-10-20).
+// Scoring is shared (roleFit.ts); this file holds the TE features and
+// recipes. Every TE game was charted in the app, play by play.
 //
 // Route skill comes from the TE-SAER model and block skill from TE-SAEB
 // (aboveExpected.ts), each over a slice of his reps. Usage is where he lined
 // up (positioning) and what he did (route, block) as shares of his snaps.
+// All-Around also reads the user's Hands trait grade: charted drops can't say
+// who catches (2 drops on 81 TE targets on 2026-10-20), and nothing else
+// measures hands.
 import type { Prospect, ScoutingGame, TEPlay } from "../types";
-import { computeTERoleSlices } from "./aboveExpected";
+import { computeTERoleSlices, MIN_SAMPLE } from "./aboveExpected";
 import { parseHeightInches } from "./prospectAge";
+import { traitAverages, type TraitAverage } from "./traits";
 import {
   buildRoleFit, skillFeature, usageFeature,
   type AESliceValue, type BucketRecipe, type FeatureSet, type RoleFit,
@@ -23,6 +27,22 @@ export const TE_MIN_SNAPS = 40;
 const PRIOR = 30;
 const ROUTE_SCALE = 4;
 const BLOCK_SCALE = 3.6;
+// Hands grades: pseudo-games pulling his average toward the 1–10 scale's
+// midpoint, and the grade points over it that read like the best tenth.
+// PROVISIONAL, as RB Power's: 7 TEs have a Hands grade on 2026-10-20.
+const HANDS_PRIOR = 2;
+const HANDS_MID = 5.5;
+const HANDS_SCALE = 1.8;
+// All-Around: "Can Catch, Can Block". The weaker side's fit has to clear
+// average; no cut from BOTH_FULL up (about 2 pts above expected after the
+// sample discount), the full GATE_MAX_CUT at or under average, in proportion
+// between. RB Scheme Versatile's rule.
+const BOTH_FULL = 0.6;
+const GATE_MAX_CUT = 0.5;
+// "Can Catch" needs a route sample: All-Around isn't proven (so never named)
+// under TE-SAER's own floor. A blocker's +16 on 13 routes (Alex Honig,
+// 2026-10-20) mustn't make him an all-round TE.
+export const ALL_AROUND_MIN_ROUTES = MIN_SAMPLE;
 
 const ROUTE_SLICES = {
   all:  () => true,
@@ -41,6 +61,8 @@ export interface TERoleInputs {
   block: Record<keyof typeof BLOCK_SLICES, AESliceValue>;
   heightIn: number | null;
   weightLb: number | null;
+  /** His Hands trait average over graded games (traits.ts). */
+  hands?: TraitAverage | null;
 }
 
 export function teFeatures(inp: TERoleInputs): FeatureSet {
@@ -53,6 +75,23 @@ export function teFeatures(inp: TERoleInputs): FeatureSet {
     inlineBlockAE: skillFeature("Inline blocks", block.inline.ae, block.inline.n, PRIOR, BLOCK_SCALE, "blocks"),
     moveBlockAE: skillFeature("Movement blocks", block.movement.ae, block.movement.n, PRIOR, BLOCK_SCALE, "blocks"),
   };
+  // All-Around reads the weaker of routes and blocking, and gates on it clearing average.
+  const routeWeaker = f.routeAE!.fit <= f.blockAE!.fit;
+  const weaker = routeWeaker ? f.routeAE! : f.blockAE!;
+  f.bothMin = { ...weaker, label: `Weaker side (${routeWeaker ? "routes" : "blocking"})` };
+  f.bothGood = {
+    ...weaker,
+    label: "Above average on both routes and blocking",
+    fit: Math.min(1, Math.max(0, (weaker.fit - 0.5) / (BOTH_FULL - 0.5))),
+  };
+  // Left out (weights renormalize) until he has a graded game.
+  const h = inp.hands;
+  if (h && h.games > 0) {
+    f.hands = {
+      ...skillFeature("Hands (your grade)", h.avg - HANDS_MID, h.games, HANDS_PRIOR, HANDS_SCALE, "graded games"),
+      display: `${h.avg.toFixed(1)} / 10 over ${h.games} graded game${h.games === 1 ? "" : "s"}`,
+    };
+  }
   const snaps = plays.length;
   if (snaps > 0) {
     const share = (pred: (pl: TEPlay) => boolean) => plays.filter(pred).length / snaps;
@@ -72,6 +111,24 @@ export function teFeatures(inp: TERoleInputs): FeatureSet {
 }
 
 export const TE_RECIPES: readonly BucketRecipe[] = [
+  {
+    // The user (2026-10-20): "TE's who can do it all. Have Size Can Catch Can
+    // Block are just all around freaks" (Patrick Overmyer). Mostly the weaker
+    // side, so being great at one can't carry it; then both sides and his
+    // hands, cut for average or worse at either. No usage: where his college
+    // lined him up isn't the point. Size floor mine: Overmyer's 6'5" 240 is the
+    // user's idea of size, so 6'4" 240.
+    role: "all_around",
+    ingredients: [
+      { feature: "bothMin", weight: 0.4, core: true },
+      { feature: "routeAE", weight: 0.2, core: true },
+      { feature: "blockAE", weight: 0.2, core: true },
+      { feature: "hands", weight: 0.2 },
+    ],
+    gates: [{ feature: "bothGood", maxCut: GATE_MAX_CUT }],
+    requires: { feature: "routeAE", minN: ALL_AROUND_MIN_ROUTES, why: `needs ${ALL_AROUND_MIN_ROUTES}+ rated routes` },
+    size: { minHeightIn: 76, minWeightLb: 240 },
+  },
   {
     role: "inline_y",
     ingredients: [
@@ -134,6 +191,7 @@ export function computeTERoleFits(prospects: Prospect[], games: ScoutingGame[], 
   const tes = prospects.filter((p) => p.position === "TE");
   if (tes.length === 0) return out;
   const slices = computeTERoleSlices(prospects, games, tePlays, ROUTE_SLICES, BLOCK_SLICES);
+  const traits = traitAverages(tes, games);
   const gameToProspect = new Map(games.map((g) => [g.id, g.prospect_id]));
   const playsBy = new Map<string, TEPlay[]>();
   for (const pl of tePlays) {
@@ -150,6 +208,7 @@ export function computeTERoleFits(prospects: Prospect[], games: ScoutingGame[], 
       block: s.block,
       heightIn: parseHeightInches(p.height),
       weightLb: p.weight,
+      hands: traits.get(p.id)?.hands ?? null,
     }) : null);
   }
   return out;

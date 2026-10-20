@@ -3,6 +3,7 @@ import {
   buildRoleFit, scoreBucket, skillFeature, usageFeature, inverseUsageFeature, contrastFeature, shrinkAE,
   roleLabel, roleFitTooltip, matchTooltip, aeOf, mergeAESums,
   ELITE_SIZE_SHARE, NEAR_TIE, VERSATILE_PCT, FALLBACK_LINE, LEVELED, levelRuleText, noLevelReached, versatileRuleText, hasVersatile, ROLES,
+  ALL_AROUND_LINE, standAloneRuleText,
   type BucketRecipe, type FeatureSet, type Feature, type RolePos,
 } from "@/lib/scouting/roleFit";
 
@@ -151,10 +152,33 @@ describe("buildRoleFit", () => {
   });
 
   it("calls a TE Versatile at 70%+ in two roles", () => {
-    expect(fitAt("TE", [0.72, 0.71, 0.4, 0.4]).versatile).toBe(true);
-    expect(fitAt("TE", [0.72, 0.69, 0.4, 0.4]).versatile).toBe(false);
+    expect(fitAt("TE", [0.4, 0.72, 0.71, 0.4, 0.4]).versatile).toBe(true);
+    expect(fitAt("TE", [0.4, 0.72, 0.69, 0.4, 0.4]).versatile).toBe(false);
     expect(VERSATILE_PCT).toBe(70);
     expect(versatileRuleText("TE")).toBe("70%+ in two or more roles");
+  });
+
+  it("names TE All-Around alone at its line, and never under it", () => {
+    const aa = ALL_AROUND_LINE / 100;
+    // At the line it's his whole label, even with another role higher.
+    const at = fitAt("TE", [aa, 0.8, 0.4, 0.4, 0.78]);
+    expect(at.best).toBe("all_around");
+    expect(at.also).toEqual([]);
+    expect(roleLabel(at)).toBe("All-Around");
+    // Under it, graded but never named, even as his top match.
+    const under = fitAt("TE", [aa - 0.01, 0.6, 0.4, 0.4, 0.58]);
+    expect(under.best).toBe("inline_y");
+    expect(under.also).toEqual(["blocking"]);
+    // Unproven, never named either.
+    const unproven = buildRoleFit({
+      pos: "TE",
+      recipes: ROLES.TE.map((r, i) => ({ role: r.key, ingredients: [{ feature: `f${i}`, weight: 1 }], ...(i === 0 ? { requires: { feature: "f0", minN: 15, why: "needs 15 routes" } } : {}) })),
+      features: { f0: { ...skill(0.9), n: 13 }, f1: skill(0.6), f2: skill(0.4), f3: skill(0.4), f4: skill(0.4) },
+      heightIn: null, weightLb: null, sample: { n: 80, unit: "snaps" }, confidenceAt: { medium: 60, high: 120 },
+    });
+    expect(unproven.best).toBe("inline_y");
+    expect(standAloneRuleText("TE")).toContain(`All-Around stands alone: at ${ALL_AROUND_LINE}%+`);
+    expect(standAloneRuleText("WR")).toBeNull();
   });
 
   it("never calls an RB or QB Versatile: Three-down, Creator and Dual-threat already mean all-round", () => {

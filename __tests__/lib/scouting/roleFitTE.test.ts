@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { teRoleFit, computeTERoleFits, TE_MIN_SNAPS, type TERoleInputs } from "@/lib/scouting/roleFitTE";
-import { matchFor } from "@/lib/scouting/roleFit";
+import { teRoleFit, computeTERoleFits, TE_MIN_SNAPS, ALL_AROUND_MIN_ROUTES, type TERoleInputs } from "@/lib/scouting/roleFitTE";
+import { matchFor, ALL_AROUND_LINE } from "@/lib/scouting/roleFit";
 import type { Prospect, ScoutingGame, TEPlay } from "@/lib/types";
 
 const play = (over: Partial<TEPlay>): TEPlay => ({
@@ -28,10 +28,56 @@ describe("TE role buckets", () => {
     expect(f.usedAs).toBe("move");
   });
 
-  it("makes an inline TE who blocks well and still wins on routes an Inline Y", () => {
+  it("makes an inline TE who wins on routes and blocks a bit above average an Inline Y", () => {
+    const plays = [...many(50, { positioning: "inline" }), ...many(60, block())];
+    const f = teRoleFit(inputs(plays, { all: 6 }, { all: 2, inline: 2 }))!;
+    expect(f.best).toBe("inline_y");
+    expect(matchFor(f, "all_around")!.pct).toBeLessThan(ALL_AROUND_LINE);
+  });
+
+  it("makes a TE who wins on routes and as a blocker, with the size, All-Around, on its own", () => {
     const plays = [...many(50, { positioning: "inline" }), ...many(60, block())];
     const f = teRoleFit(inputs(plays, { all: 10 }, { all: 10, inline: 10 }))!;
-    expect(f.best).toBe("inline_y");
+    expect(f.best).toBe("all_around");
+    expect(f.also).toEqual([]);
+    expect(matchFor(f, "all_around")!.pct).toBeGreaterThanOrEqual(ALL_AROUND_LINE);
+  });
+
+  it("keeps a great receiver who can't block out of All-Around (the weaker side gates it)", () => {
+    const plays = [...many(70, { positioning: "slot" }), ...many(40, block())];
+    const f = teRoleFit(inputs(plays, { all: 14, man: 14 }, { all: -4 }))!;
+    const m = matchFor(f, "all_around")!;
+    expect(m.pct).toBeLessThan(40);
+    expect(m.drivers.some((d) => d.startsWith("− Above average on both routes and blocking") && d.endsWith("(−50%)"))).toBe(true);
+    expect(f.best).toBe("move");
+  });
+
+  it(`never names All-Around under ${ALL_AROUND_MIN_ROUTES} rated routes`, () => {
+    const plays = [...many(13, { positioning: "inline" }), ...many(60, block())];
+    const inp = inputs(plays, { all: 16 }, { all: 10, inline: 10 });
+    const f = teRoleFit({ ...inp, route: { ...inp.route, all: slice(16, ALL_AROUND_MIN_ROUTES - 2) } })!;
+    const m = matchFor(f, "all_around")!;
+    expect(m.proven).toBe(false);
+    expect(m.pendingWhy).toContain(`needs ${ALL_AROUND_MIN_ROUTES}+ rated routes`);
+    expect(f.best).not.toBe("all_around");
+  });
+
+  it("reads your Hands grade into All-Around, and leaves it out until a game is graded", () => {
+    const plays = [...many(50, { positioning: "inline" }), ...many(60, block())];
+    const base = inputs(plays, { all: 3 }, { all: 3, inline: 3 });
+    const none = matchFor(teRoleFit(base)!, "all_around")!.pct;
+    const good = teRoleFit({ ...base, hands: { avg: 9, games: 2 } })!;
+    const poor = teRoleFit({ ...base, hands: { avg: 3, games: 2 } })!;
+    expect(good.features.hands!.display).toBe("9.0 / 10 over 2 graded games");
+    expect(none).toBeLessThan(matchFor(good, "all_around")!.pct);
+    expect(none).toBeGreaterThan(matchFor(poor, "all_around")!.pct);
+    expect(teRoleFit(base)!.features.hands).toBeUndefined();
+  });
+
+  it("drops All-Around under 6'4\" 240", () => {
+    const plays = [...many(50, { positioning: "inline" }), ...many(60, block())];
+    const m = matchFor(teRoleFit(inputs(plays, {}, {}, { heightIn: 75, weightLb: 235 }))!, "all_around")!;
+    expect(m.sizeDrop).toBeCloseTo(0.06 + 5 * 0.006);
   });
 
   it("makes an inline blocker with thin receiving a Blocking TE", () => {
@@ -60,6 +106,15 @@ describe("TE role buckets", () => {
     const prospects = [{ id: "te", position: "TE", height: "6'5\"", weight: 250 }] as unknown as Prospect[];
     const games = [{ id: "g1", prospect_id: "te", season_year: 2025 }] as unknown as ScoutingGame[];
     const plays = [...many(30, { game_id: "g1", positioning: "slot" }), ...many(20, { game_id: "g1", ...block() })];
-    expect(computeTERoleFits(prospects, games, plays).get("te")!.sample).toEqual({ n: 50, unit: "snaps" });
+    const fit = computeTERoleFits(prospects, games, plays).get("te")!;
+    expect(fit.sample).toEqual({ n: 50, unit: "snaps" });
+    expect(fit.features.hands).toBeUndefined();
+  });
+
+  it("takes the Hands grade from his graded games", () => {
+    const prospects = [{ id: "te", position: "TE", height: "6'5\"", weight: 250 }] as unknown as Prospect[];
+    const games = [{ id: "g1", prospect_id: "te", season_year: 2025, created_at: "2026-10-19T12:00:00Z", trait_grades: { hands: 8, inline_block: 9 } }] as unknown as ScoutingGame[];
+    const plays = [...many(30, { game_id: "g1", positioning: "slot" }), ...many(20, { game_id: "g1", ...block() })];
+    expect(computeTERoleFits(prospects, games, plays).get("te")!.features.hands!.display).toBe("8.0 / 10 over 1 graded game");
   });
 });

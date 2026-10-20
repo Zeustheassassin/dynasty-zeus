@@ -58,6 +58,7 @@ vi.mock("@/lib/scouting/aboveExpected", () => {
     computeRBRoleSlices: () => new Map(),
     computeQBRoleSlices: () => new Map(),
     computeTERoleSlices: () => new Map(),
+    MIN_SAMPLE: 15,
   };
 });
 

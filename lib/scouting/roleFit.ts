@@ -44,7 +44,7 @@ export type RolePos = "QB" | "RB" | "WR" | "TE";
 
 export type WRRole = "x" | "y" | "slot" | "gadget";
 export type RBRole = "three_down" | "zone" | "gap" | "scheme_versatile" | "receiving" | "two_down" | "third_down" | "big_play" | "goal_line" | "blocking_st";
-export type TERole = "inline_y" | "move" | "h_back" | "blocking";
+export type TERole = "all_around" | "inline_y" | "move" | "h_back" | "blocking";
 export type QBRole = "creator" | "distributor" | "vertical" | "dual_threat";
 export type RoleKey = WRRole | RBRole | TERole | QBRole;
 
@@ -66,6 +66,11 @@ export interface RoleInfo {
    *  RB Blocking/ST (the user, 2026-10-08: only when he's truly terrible at
    *  everything but blocking). */
   fallbackRule?: { under: number; atLeast: number };
+  /** An all-round role, named only at this match or above (and proven), and
+   *  then his whole label: it leads over every other bucket and takes no
+   *  hybrid. Below it the bucket is graded but never named. TE All-Around
+   *  (the user, 2026-10-20). Near-tie positions only. */
+  standsAloneAt?: number;
 }
 
 // Each position's buckets, highest ceiling first. The user wants the best case
@@ -76,6 +81,10 @@ export interface RoleInfo {
 // RB tiers are levels, all the user's (2026-10-08): A Three-down; B Zone,
 // Gap/Power or Scheme Versatile (2026-10-15), whichever he fits best; C
 // Receiving, 2-Down or 3rd-Down; D Big-play, Goal-line or Blocking/ST (LEVELED).
+// TE All-Around is the user's (2026-10-20): the TE who can do it all, "Have
+// Size, Can Catch, Can Block". Like RB Three-down it stands alone once it
+// reaches its line (standsAloneAt).
+export const ALL_AROUND_LINE = 65;
 export const ROLES: Record<RolePos, readonly RoleInfo[]> = {
   WR: [
     { key: "x",      label: "X",      short: "X",      tier: 0, description: "Excels vs press and man on slants, nines, comebacks, digs, corners and posts. Needs 10+ in-app press reps to be proven (X? until then). Reads release vs press too once he has 10+ tagged press reps." },
@@ -96,6 +105,7 @@ export const ROLES: Record<RolePos, readonly RoleInfo[]> = {
     { key: "blocking_st", label: "Blocking/ST", short: "Blk/ST",   tier: 3, fallback: true, fallbackRule: { under: 40, atLeast: 55 }, description: "Blocking and special teams: named only when he's under 40% at every other role and this reads 55%+. Its % is how blocking-only he is: his pass protection, cut for being a good runner or a good receiver. Level D." },
   ],
   TE: [
+    { key: "all_around", label: "All-Around", short: "AllArnd", tier: 0, standsAloneAt: ALL_AROUND_LINE, description: `Does it all: wins on routes and as a blocker (read mostly from the weaker of the two), your Hands grade, and the size (6'4" 240). Average or worse at either side cuts it in half. Proven at 15+ rated routes. Named only at ${ALL_AROUND_LINE}%+ and proven, and then it's his whole label.` },
     { key: "inline_y", label: "Inline Y",    short: "InlineY",  tier: 0, description: "Mostly tight to the line; blocks well on the line and on the move and still runs routes." },
     { key: "move",     label: "Move/Big slot", short: "Move",   tier: 1, description: "Mostly in the slot or split wide; wins on routes, especially vs man." },
     { key: "h_back",   label: "H-back/Wing", short: "H-back",   tier: 2, description: "Wing, fullback or backfield; blocks on the move and runs to the flat." },
@@ -138,6 +148,12 @@ export function roleTagRuleText(pos: RolePos): string | null {
   if (pos !== "RB") return null;
   return `Inside / Outside: above average (SRAE) on inside runs and below on outside ones, or the reverse, ${RUN_SIDE_GAP}+ pts apart after the sample discount, `
     + `with ${RUN_SIDE_MIN_RUNS}+ runs on each and above average on one side, below on the other.`;
+}
+
+/** A position's stand-alone role in words, for tooltips; null where there's none. */
+export function standAloneRuleText(pos: RolePos): string | null {
+  const r = ROLES[pos].find((x) => x.standsAloneAt != null);
+  return r ? `${r.label} stands alone: at ${r.standsAloneAt}%+ it's his whole label; under that it's graded but never named.` : null;
 }
 
 // Two buckets within this many points are a near tie: the higher-ceiling one
@@ -519,13 +535,19 @@ function catchAllNamed(m: RoleMatch, matches: readonly RoleMatch[]): boolean {
 // is within NEAR_TIE (shown "X?"): an untested X isn't demoted to a worse
 // role, and isn't promoted over a better-supported one either. The catch-all
 // doesn't compete; it leads only when catchAllNamed. A bucket he's too small
-// to be named for (`unnamed`) is left out.
+// to be named for (`unnamed`) is left out. An all-round role (standsAloneAt)
+// doesn't compete either: at its line, proven, it's his whole label.
 function pickByNearTie(order: readonly RoleInfo[], matches: readonly RoleMatch[]): RoleMatch[] {
   const byPct = byPctIn(order);
   const tierOf = (k: RoleKey) => roleInfo(k).tier;
+  const allRound = matches.find((m) => {
+    const line = roleInfo(m.role).standsAloneAt;
+    return line != null && m.pct >= line && m.proven && !m.unnamed;
+  });
+  if (allRound) return [allRound];
   const fallback = matches.find((m) => roleInfo(m.role).fallback);
   if (fallback && catchAllNamed(fallback, matches)) return [fallback];
-  const pool = matches.filter((m) => !roleInfo(m.role).fallback && !m.unnamed);
+  const pool = matches.filter((m) => !roleInfo(m.role).fallback && !m.unnamed && roleInfo(m.role).standsAloneAt == null);
   const top = Math.max(...pool.map((m) => m.pct));
   const contenders = pool.filter((m) => top - m.pct <= NEAR_TIE);
   const proven = contenders.filter((m) => m.proven);
