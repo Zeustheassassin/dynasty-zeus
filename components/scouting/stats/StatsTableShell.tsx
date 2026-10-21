@@ -25,6 +25,10 @@ export interface ColDef {
    *  When set, the league total is sum(value*weight) / sum(weight), not mean of values.
    *  This produces a true global rate / play-weighted mean instead of average-of-averages. */
   weightBy?: string;
+  /** For pct columns: row fields holding the rate's own counts (`hit` of `of`, e.g. 3 open of 5
+   *  rated routes). The Compare tab shows them beside the % as "3/5", so a 100% on one rep reads
+   *  differently from a 100% on 50. */
+  counts?: { hit: string; of: string };
 }
 
 /** A "Min {label}" box next to the search bar that hides rows whose `key`

@@ -12,6 +12,15 @@ import type { GradingData } from "../../../lib/scouting/aeComponents";
 import { tagValuesFor } from "./tagCols";
 import { contextExtras } from "./contextCols";
 
+// A % row's counts as "3/5" (ColDef.counts), or null when the column has none
+// or nothing was rated.
+function countsText(row: StatRow, c: ColDef): string | null {
+  if (!c.counts) return null;
+  const hit = row[c.counts.hit];
+  const of = row[c.counts.of];
+  return typeof hit === "number" && typeof of === "number" && of > 0 ? `${hit}/${of}` : null;
+}
+
 type PositionTab = "QB" | "RB" | "WR" | "TE";
 const POSITIONS: PositionTab[] = ["QB", "RB", "WR", "TE"];
 const POSITION_LABELS: Record<PositionTab, string> = {
@@ -187,6 +196,9 @@ export default function CompareProspectsTab({
                 {groupCols.map((c) => {
                   const va = rowA[c.key];
                   const vb = rowB[c.key];
+                  // Counts sit on the inner edge of each side, next to the label.
+                  const ca = countsText(rowA, c);
+                  const cb = countsText(rowB, c);
                   const numA = typeof va === "number" && !isNaN(va) ? va : null;
                   const numB = typeof vb === "number" && !isNaN(vb) ? vb : null;
                   let betterSide: "a" | "b" | null = null;
@@ -200,6 +212,7 @@ export default function CompareProspectsTab({
                         title={c.titleKey && typeof rowA[c.titleKey] === "string" ? (rowA[c.titleKey] as string) : undefined}
                       >
                         {fmtVal(va, c.fmt)}
+                        {ca && <span className="ml-1.5 text-[11px] font-normal tabular-nums text-slate-500">{ca}</span>}
                       </div>
                       <div className="text-[10px] text-slate-600 px-3 text-center whitespace-nowrap" title={c.tooltip ?? c.label}>
                         {c.label}
@@ -208,6 +221,7 @@ export default function CompareProspectsTab({
                         className={`text-right ${betterSide === "b" ? "font-bold text-emerald-400" : "text-slate-300"}`}
                         title={c.titleKey && typeof rowB[c.titleKey] === "string" ? (rowB[c.titleKey] as string) : undefined}
                       >
+                        {cb && <span className="mr-1.5 text-[11px] font-normal tabular-nums text-slate-500">{cb}</span>}
                         {fmtVal(vb, c.fmt)}
                       </div>
                     </div>

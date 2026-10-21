@@ -32,6 +32,9 @@ const ROUTE_LABELS: Record<string, string> = {
   nine: "Go", post: "Post", dig: "Dig", curl: "Curl", slant: "Slant",
   screen: "Scr", flat: "Flat", comeback: "CB", out: "Out", corner: "Cor", other: "Oth",
 };
+// The counts behind a route's open% and a block type's success% (ColDef.counts).
+const rtCounts = (rt: string) => ({ hit: `rt_${rt}_open_n`, of: `rt_${rt}_rated_n` });
+const blkCounts = (prefix: string) => ({ hit: `${prefix}_won_n`, of: `${prefix}_rated_n` });
 
 export const TE_STAT_COLS: ColDef[] = [
   // Identity
@@ -73,22 +76,22 @@ export const TE_STAT_COLS: ColDef[] = [
   { key: "cvg_press_open",  label: "Press%", group: "By Coverage", fmt: "pct", colorDir: 1, width: 62, weightBy: "cvg_press_rated_n" },
   { key: "cvg_double_open", label: "Dbl%",   group: "By Coverage", fmt: "pct", colorDir: 1, width: 56, weightBy: "cvg_double_rated_n" },
   // By Route
-  { key: "rt_nine",     label: ROUTE_LABELS.nine,     group: "Open% by Route", fmt: "pct", colorDir: 1, width: 52, weightBy: "rt_nine_rated_n" },
-  { key: "rt_post",     label: ROUTE_LABELS.post,     group: "Open% by Route", fmt: "pct", colorDir: 1, width: 52, weightBy: "rt_post_rated_n" },
-  { key: "rt_dig",      label: ROUTE_LABELS.dig,      group: "Open% by Route", fmt: "pct", colorDir: 1, width: 48, weightBy: "rt_dig_rated_n" },
-  { key: "rt_curl",     label: ROUTE_LABELS.curl,     group: "Open% by Route", fmt: "pct", colorDir: 1, width: 50, weightBy: "rt_curl_rated_n" },
-  { key: "rt_slant",    label: ROUTE_LABELS.slant,    group: "Open% by Route", fmt: "pct", colorDir: 1, width: 52, weightBy: "rt_slant_rated_n" },
-  { key: "rt_screen",   label: ROUTE_LABELS.screen,   group: "Open% by Route", fmt: "pct", colorDir: 1, width: 50, weightBy: "rt_screen_rated_n" },
-  { key: "rt_flat",     label: ROUTE_LABELS.flat,     group: "Open% by Route", fmt: "pct", colorDir: 1, width: 48, weightBy: "rt_flat_rated_n" },
-  { key: "rt_comeback", label: ROUTE_LABELS.comeback, group: "Open% by Route", fmt: "pct", colorDir: 1, width: 48, weightBy: "rt_comeback_rated_n" },
-  { key: "rt_out",      label: ROUTE_LABELS.out,      group: "Open% by Route", fmt: "pct", colorDir: 1, width: 48, weightBy: "rt_out_rated_n" },
-  { key: "rt_corner",   label: ROUTE_LABELS.corner,   group: "Open% by Route", fmt: "pct", colorDir: 1, width: 50, weightBy: "rt_corner_rated_n" },
+  { key: "rt_nine",     label: ROUTE_LABELS.nine,     group: "Open% by Route", fmt: "pct", colorDir: 1, width: 52, weightBy: "rt_nine_rated_n",     counts: rtCounts("nine") },
+  { key: "rt_post",     label: ROUTE_LABELS.post,     group: "Open% by Route", fmt: "pct", colorDir: 1, width: 52, weightBy: "rt_post_rated_n",     counts: rtCounts("post") },
+  { key: "rt_dig",      label: ROUTE_LABELS.dig,      group: "Open% by Route", fmt: "pct", colorDir: 1, width: 48, weightBy: "rt_dig_rated_n",      counts: rtCounts("dig") },
+  { key: "rt_curl",     label: ROUTE_LABELS.curl,     group: "Open% by Route", fmt: "pct", colorDir: 1, width: 50, weightBy: "rt_curl_rated_n",     counts: rtCounts("curl") },
+  { key: "rt_slant",    label: ROUTE_LABELS.slant,    group: "Open% by Route", fmt: "pct", colorDir: 1, width: 52, weightBy: "rt_slant_rated_n",    counts: rtCounts("slant") },
+  { key: "rt_screen",   label: ROUTE_LABELS.screen,   group: "Open% by Route", fmt: "pct", colorDir: 1, width: 50, weightBy: "rt_screen_rated_n",   counts: rtCounts("screen") },
+  { key: "rt_flat",     label: ROUTE_LABELS.flat,     group: "Open% by Route", fmt: "pct", colorDir: 1, width: 48, weightBy: "rt_flat_rated_n",     counts: rtCounts("flat") },
+  { key: "rt_comeback", label: ROUTE_LABELS.comeback, group: "Open% by Route", fmt: "pct", colorDir: 1, width: 48, weightBy: "rt_comeback_rated_n", counts: rtCounts("comeback") },
+  { key: "rt_out",      label: ROUTE_LABELS.out,      group: "Open% by Route", fmt: "pct", colorDir: 1, width: 48, weightBy: "rt_out_rated_n",      counts: rtCounts("out") },
+  { key: "rt_corner",   label: ROUTE_LABELS.corner,   group: "Open% by Route", fmt: "pct", colorDir: 1, width: 50, weightBy: "rt_corner_rated_n",   counts: rtCounts("corner") },
   // Blocking
-  { key: "blk_succ",       label: "Blk%",      group: "Blocking", fmt: "pct", colorDir: 1, width: 56, tooltip: "Overall block success%", weightBy: "blocks" },
-  { key: "run_blk_succ",   label: "RunBlk%",   group: "Blocking", fmt: "pct", colorDir: 1, width: 66, weightBy: "run_blk_n" },
-  { key: "pass_blk_succ",  label: "PsBlk%",    group: "Blocking", fmt: "pct", colorDir: 1, width: 64, weightBy: "pass_blk_n" },
-  { key: "mvmt_blk_succ",  label: "MvmtBlk%",  group: "Blocking", fmt: "pct", colorDir: 1, width: 72, tooltip: "Movement block success%", weightBy: "mvmt_blk_n" },
-  { key: "inln_blk_succ",  label: "InlnBlk%",  group: "Blocking", fmt: "pct", colorDir: 1, width: 72, tooltip: "Inline block success%", weightBy: "inln_blk_n" },
+  { key: "blk_succ",       label: "Blk%",      group: "Blocking", fmt: "pct", colorDir: 1, width: 56, tooltip: "Overall block success%", weightBy: "blocks", counts: blkCounts("blk") },
+  { key: "run_blk_succ",   label: "RunBlk%",   group: "Blocking", fmt: "pct", colorDir: 1, width: 66, weightBy: "run_blk_n", counts: blkCounts("run_blk") },
+  { key: "pass_blk_succ",  label: "PsBlk%",    group: "Blocking", fmt: "pct", colorDir: 1, width: 64, weightBy: "pass_blk_n", counts: blkCounts("pass_blk") },
+  { key: "mvmt_blk_succ",  label: "MvmtBlk%",  group: "Blocking", fmt: "pct", colorDir: 1, width: 72, tooltip: "Movement block success%", weightBy: "mvmt_blk_n", counts: blkCounts("mvmt_blk") },
+  { key: "inln_blk_succ",  label: "InlnBlk%",  group: "Blocking", fmt: "pct", colorDir: 1, width: 72, tooltip: "Inline block success%", weightBy: "inln_blk_n", counts: blkCounts("inln_blk") },
   // Raw
   { key: "raw_routes",   label: "Routes", group: "Raw", fmt: "count", width: 58 },
   { key: "raw_blocks",   label: "Blocks", group: "Raw", fmt: "count", width: 58 },
@@ -140,10 +143,13 @@ function cvgOpenPct(routePlays: TEPlay[], cvg: "man" | "zone" | "press" | "doubl
   return pct(sub.filter((p) => p.was_open === true).length, sub.length);
 }
 
-function blkSuccPct(plays: TEPlay[], filter: (p: TEPlay) => boolean): number | null {
+// A block group's success%, with the blocks won and rated behind it (rated =
+// block_success charted). `prefix` names the row fields: `${prefix}_won_n`,
+// `${prefix}_rated_n`; the % goes under its own key.
+function blkSucc(plays: TEPlay[], filter: (p: TEPlay) => boolean, pctKey: string, prefix: string): Record<string, number | null> {
   const sub = plays.filter(filter).filter((p) => p.block_success !== null);
-  if (sub.length === 0) return null;
-  return pct(sub.filter((p) => p.block_success === true).length, sub.length);
+  const won = sub.filter((p) => p.block_success === true).length;
+  return { [pctKey]: pct(won, sub.length), [`${prefix}_won_n`]: won, [`${prefix}_rated_n`]: sub.length };
 }
 
 // Extracted so the Phase I player-comparison tool can compute the same rows
@@ -250,12 +256,15 @@ export function buildTEStatRows(prospects: Prospect[], games: ScoutingGame[], te
           ...Object.fromEntries(
             ROUTE_TYPES.map((rt) => [`rt_${rt}_rated_n`, ratedRoutes.filter((pl) => pl.route_type === rt).length])
           ),
+          ...Object.fromEntries(
+            ROUTE_TYPES.map((rt) => [`rt_${rt}_open_n`, ratedRoutes.filter((pl) => pl.route_type === rt && pl.was_open === true).length])
+          ),
           // Blocking
-          blk_succ:      blkSuccPct(blockPlays, () => true),
-          run_blk_succ:  blkSuccPct(blockPlays, (pl) => pl.play_type === "run_block"),
-          pass_blk_succ: blkSuccPct(blockPlays, (pl) => pl.play_type === "pass_block"),
-          mvmt_blk_succ: blkSuccPct(blockPlays, (pl) => pl.block_type === "movement"),
-          inln_blk_succ: blkSuccPct(blockPlays, (pl) => pl.block_type === "inline"),
+          ...blkSucc(blockPlays, () => true, "blk_succ", "blk"),
+          ...blkSucc(blockPlays, (pl) => pl.play_type === "run_block", "run_blk_succ", "run_blk"),
+          ...blkSucc(blockPlays, (pl) => pl.play_type === "pass_block", "pass_blk_succ", "pass_blk"),
+          ...blkSucc(blockPlays, (pl) => pl.block_type === "movement", "mvmt_blk_succ", "mvmt_blk"),
+          ...blkSucc(blockPlays, (pl) => pl.block_type === "inline", "inln_blk_succ", "inln_blk"),
           run_blk_n:  blockPlays.filter((pl) => pl.play_type === "run_block").length,
           pass_blk_n: blockPlays.filter((pl) => pl.play_type === "pass_block").length,
           mvmt_blk_n: blockPlays.filter((pl) => pl.block_type === "movement").length,
