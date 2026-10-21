@@ -464,7 +464,7 @@ export function teOverview(plays: readonly TEPlay[], pff: PffValues, cover: PffC
           cov("te_man", "Man", (pl) => pl.coverage === "man" || pl.coverage === "press", 15, "(incl. press)"),
           cov("te_zone", "Zone", (pl) => pl.coverage === "zone", 15),
           cov("te_press", "Press", (pl) => pl.coverage === "press", 10),
-          cov("te_double", "Double", (pl) => pl.coverage === "double", 10),
+          cov("te_double", "Double", (pl) => pl.double_coverage === true || pl.coverage === "double", 10),
         ],
       },
       {

@@ -92,12 +92,12 @@ describe("the tag correction", () => {
   });
 
   it("is off unless a tag is switched on", () => {
-    // What's on (2026-10-21): the tags that passed held out, plus every TE block tag by the user's call.
+    // What's on (2026-10-21): the tags that passed held out, plus every TE block tag and Double coverage by the user's call.
     expect(ENABLED_TAG_CORRECTIONS).toEqual({
       qb_aae: ["play_action"],
       rb_srae: ["hit_behind_line", "short_yardage", "third_fourth_down"],
-      wr_sae: [],
-      te_saer: [],
+      wr_sae: ["double_coverage"],
+      te_saer: ["double_coverage"],
       te_saeb: ["blocked_defender", "red_zone", "third_fourth_down", "short_yardage"],
     });
     expect(correctionFor("rb_srae", base, { rows: plays, outcome, tagged: isTagged }, { enabled: [] })).toBeNull();

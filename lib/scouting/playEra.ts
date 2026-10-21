@@ -17,7 +17,8 @@
 // Play-by-Play / Paste Summary imports write no tag columns, so those plays
 // stay untagged too.
 //
-// The tag registry below mirrors migration 062's columns and CHECKs. `entry`
+// The tag registry below mirrors migration 062's columns and CHECKs (and 072's
+// double_coverage on the WR and TE tables). `entry`
 // is how the boards ask for each tag (the user's click budget):
 //   exception   — off unless clicked
 //   preselected — the common answer is filled in (`preset`)
@@ -44,7 +45,7 @@ export type PlayFact =
   | "run"           // QB: designed run or scramble; RB: a designed carry
   | "passProLoss"   // RB: a pass-block rep marked Fail
   | "catch"         // RB / WR: targeted and caught
-  | "route"         // TE: a route rep
+  | "route"         // WR / TE: a route rep
   | "press"         // WR / TE: a route against press
   | "block";        // TE: a run- or pass-block rep
 
@@ -100,11 +101,16 @@ export const POSITION_TAGS: Readonly<Record<TagPosition, readonly PlayTagSpec[]>
     // stays; new plays leave it NULL.
   ],
   WR: [
+    // Doubled on top of its coverage (the user, 2026-10-21: elite WRs are
+    // doubled more than a one-pick coverage button let him chart). Replaces
+    // the Double coverage button; routes charted as Double before stay so.
+    { column: "double_coverage",           label: "Double coverage",           short: "Dbl",   entry: "exception", appliesTo: "route" },
     { column: "press_release",             label: "Release vs press",          short: "Press", entry: "conditional", values: ["won", "lost"], valueLabels: ["Won", "Lost"], required: true, appliesTo: "press", when: "press snaps only (one required click)" },
     { column: "broken_tackle_after_catch", label: "Broken tackle after catch", short: "BT",    entry: "conditional", appliesTo: "catch", when: "catches only" },
   ],
   TE: [
     { column: "blocked_defender",     label: "Blocked",               short: "Blk",   entry: "conditional", values: ["dl", "lb", "db"], valueLabels: ["DL", "LB", "DB"], preset: "dl", appliesTo: "block", when: "block reps only" },
+    { column: "double_coverage",      label: "Double coverage",       short: "Dbl",   entry: "exception", appliesTo: "route" },
     { column: "press_release",        label: "Release vs press",      short: "Press", entry: "conditional", values: ["won", "lost"], valueLabels: ["Won", "Lost"], required: true, appliesTo: "press", when: "press snaps only" },
     { column: "chipped_before_route", label: "Chipped before route",  short: "Chip",  entry: "exception", appliesTo: "route" },
   ],

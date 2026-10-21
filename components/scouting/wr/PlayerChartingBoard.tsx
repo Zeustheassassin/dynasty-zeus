@@ -29,12 +29,14 @@ import { useGameContextLog } from "../context/useGameContextLog";
 import GameContextPanel from "../context/GameContextPanel";
 import { PffLogBar, PffLogCells, PffLogFooter, PffLogHeaders } from "../pff/PffGameLogColumns";
 
+// Double is a tag now (migration 072), on top of the coverage. A route charted
+// as Double coverage before that keeps its button while it's being edited.
 const COVERAGES: { key: string; label: string }[] = [
   { key: "man", label: "Man" },
   { key: "zone", label: "Zone" },
-  { key: "double", label: "Double" },
   { key: "press", label: "Press" },
 ];
+const LEGACY_DOUBLE = { key: "double", label: "Double (old)" };
 const ALIGNMENTS: { key: Alignment; label: string }[] = [
   { key: "left",      label: "Left" },
   { key: "right",     label: "Right" },
@@ -121,9 +123,10 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
 
   // Per-play tags (migration 062): new plays write all of them, an edit of an
   // older play writes none. Release vs press needs a pick on every press
-  // route; broken tackle shows on a catch.
+  // route; broken tackle shows on a catch; Double on any route.
   const tags = usePlayTags("WR", selectedGameId, gamePlays);
   const tagFacts: PlayFacts = {
+    route: !noRouteRun,
     press: !noRouteRun && coverage === "press",
     catch: !noRouteRun && targeted && playOutcome === "caught",
   };
@@ -176,7 +179,10 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
       // (press is counted once in routePlays.length).
       const cvgPlays = cvg === "man"
         ? routePlays.filter((p) => p.coverage === "man" || p.coverage === "press")
-        : routePlays.filter((p) => p.coverage === cvg);
+        : cvg === "double"
+          // The tag (on top of man / zone / press), or the old Double coverage.
+          ? routePlays.filter((p) => p.double_coverage === true || p.coverage === "double")
+          : routePlays.filter((p) => p.coverage === cvg);
       const cvgOpen  = cvgPlays.filter((p) => p.was_open).length;
       const cvgTgt   = cvgPlays.filter((p) => p.targeted).length;
       const cvgCtch  = cvgPlays.filter((p) => p.targeted && p.success).length;
@@ -735,7 +741,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
                 <div className="flex-1 whitespace-nowrap">
                   <div className="text-xs text-slate-500 mb-2">Coverage</div>
                   <div className="flex gap-1.5">
-                    {COVERAGES.map((cv) => (
+                    {(coverage === "double" ? [...COVERAGES, LEGACY_DOUBLE] : COVERAGES).map((cv) => (
                       <button key={cv.key} onClick={() => setCoverage((c) => c === cv.key ? "" : cv.key)}
                         className={`flex-1 whitespace-nowrap px-3 h-10 rounded text-xs font-medium transition ${coverage === cv.key ? "bg-orange-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         {cv.label}

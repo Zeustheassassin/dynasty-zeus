@@ -64,6 +64,8 @@ const RED_ZONE: DifficultyTagSpec = { column: "red_zone", label: "Red zone", buc
 const THIRD_FOURTH: DifficultyTagSpec = { column: "third_fourth_down", label: "3rd/4th down", buckets: ON };
 const SHORT_YARDAGE: DifficultyTagSpec = { column: "short_yardage", label: "Short yardage / goal line", buckets: ON };
 const SITUATIONS = [RED_ZONE, THIRD_FOURTH, SHORT_YARDAGE] as const;
+// Doubled on a route, on top of its coverage (migration 072, WR and TE).
+const DOUBLE_COVERAGE: DifficultyTagSpec = { column: "double_coverage", label: "Double coverage", buckets: ON };
 
 // A TE block on 3rd/4th down, as a pass or a run block (the user, 2026-10-21:
 // a pass block on 3rd down, when the defense is more likely to bring pressure,
@@ -86,8 +88,8 @@ export const DIFFICULTY_TAGS: Record<CorrectionKey, readonly DifficultyTagSpec[]
     ...SITUATIONS,
   ],
   rb_srae: [{ column: "hit_behind_line", label: "Hit behind the line", buckets: ON }, ...SITUATIONS],
-  wr_sae: [...SITUATIONS],
-  te_saer: [...SITUATIONS],
+  wr_sae: [DOUBLE_COVERAGE, ...SITUATIONS],
+  te_saer: [DOUBLE_COVERAGE, ...SITUATIONS],
   te_saeb: [{ column: "blocked_defender", label: "Blocked LB / DB (vs DL)", buckets: ["lb", "db"] }, RED_ZONE, TE_BLOCK_THIRD_FOURTH, SHORT_YARDAGE],
 };
 
@@ -113,11 +115,15 @@ export const DIFFICULTY_TAGS: Record<CorrectionKey, readonly DifficultyTagSpec[]
 // down by pass / run block. Held out it's level with today's model (+0.1%),
 // so it costs nothing, and the ridge keeps a thin tag (5 tagged 3rd/4th-down
 // pass blocks on that date) near 0 until it has the reps.
+// Double coverage (WR SAE / cSAE, TE-SAER) is on from its first tagged route,
+// also the user's call (2026-10-21): it replaced the Double coverage button,
+// and elite WRs are doubled more than one coverage pick let him chart. 0
+// tagged doubles on that date, so it moves nothing until he charts some.
 export const ENABLED_TAG_CORRECTIONS: Record<CorrectionKey, readonly string[]> = {
   qb_aae: ["play_action"],
   rb_srae: ["hit_behind_line", "short_yardage", "third_fourth_down"],
-  wr_sae: [],
-  te_saer: [],
+  wr_sae: ["double_coverage"],
+  te_saer: ["double_coverage"],
   te_saeb: ["blocked_defender", "red_zone", "third_fourth_down", "short_yardage"],
 };
 

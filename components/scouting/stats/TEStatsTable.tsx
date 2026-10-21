@@ -134,7 +134,10 @@ const MIN_PRESS_ROUTES = 10;
 function cvgOpenPct(routePlays: TEPlay[], cvg: "man" | "zone" | "press" | "double"): number | null {
   const filter = cvg === "man"
     ? (pl: TEPlay) => pl.coverage === "man" || pl.coverage === "press"
-    : (pl: TEPlay) => pl.coverage === cvg;
+    : cvg === "double"
+      // The tag (on top of man / zone / press, migration 072), or the old Double coverage.
+      ? (pl: TEPlay) => pl.double_coverage === true || pl.coverage === "double"
+      : (pl: TEPlay) => pl.coverage === cvg;
   const sub = routePlays.filter(filter).filter((p) => p.was_open !== null);
   if (cvg === "man" && sub.length < MIN_MAN_ROUTES) return null;
   if (cvg === "zone" && sub.length < MIN_ZONE_ROUTES) return null;
@@ -246,7 +249,9 @@ export function buildTEStatRows(prospects: Prospect[], games: ScoutingGame[], te
               `cvg_${cvg}_rated_n`,
               cvg === "man"
                 ? ratedRoutes.filter((pl) => pl.coverage === "man" || pl.coverage === "press").length
-                : ratedRoutes.filter((pl) => pl.coverage === cvg).length,
+                : cvg === "double"
+                  ? ratedRoutes.filter((pl) => pl.double_coverage === true || pl.coverage === "double").length
+                  : ratedRoutes.filter((pl) => pl.coverage === cvg).length,
             ])
           ),
           // By route

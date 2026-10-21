@@ -14,7 +14,7 @@ const QB_SACK: PlayFacts = { dropback: true, sack: true };
 const QB_SCRAMBLE: PlayFacts = { dropback: true, run: true };
 const QB_RUN: PlayFacts = { run: true };
 const RB_CARRY: PlayFacts = { run: true };
-const WR_ROUTE: PlayFacts = {};
+const WR_ROUTE: PlayFacts = { route: true };
 const TE_BLOCK: PlayFacts = { block: true };
 
 describe("defaults", () => {
@@ -143,8 +143,10 @@ describe("what shows", () => {
     }
     expect(cols(visibleTags("QB", QB_THROW, "play"))).toEqual(["play_action", "tight_window", "release_timing", "better_option_missed"]);
     expect(cols(visibleTags("QB", QB_SCRAMBLE, "play"))).toEqual(["play_action", "better_option_missed", "run_success", "run_broken_tackle", "run_explosive"]);
-    expect(cols(visibleTags("WR", WR_ROUTE, "play"))).toEqual([]);
-    expect(cols(visibleTags("TE", { route: true }, "play"))).toEqual(["chipped_before_route"]);
+    expect(cols(visibleTags("WR", WR_ROUTE, "play"))).toEqual(["double_coverage"]);
+    expect(cols(visibleTags("WR", {}, "play"))).toEqual([]); // no route run
+    expect(cols(visibleTags("TE", { route: true }, "play"))).toEqual(["double_coverage", "chipped_before_route"]);
+    expect(cols(visibleTags("TE", { block: true }, "play"))).toEqual(["blocked_defender"]);
   });
 });
 
@@ -181,7 +183,7 @@ describe("editing", () => {
     const play = { red_zone: true, third_fourth_down: false, short_yardage: false, garbage_time: false, press_release: null, broken_tackle_after_catch: true };
     expect(tagValuesFromPlay(play, "WR")).toEqual({
       red_zone: true, third_fourth_down: false, short_yardage: false, garbage_time: false,
-      press_release: null, broken_tackle_after_catch: true,
+      double_coverage: false, press_release: null, broken_tackle_after_catch: true,
     });
     expect(tagValuesFromPlay({ red_zone: false, blocked_defender: null }, "TE").blocked_defender).toBe("dl");
   });
@@ -194,6 +196,7 @@ describe("play-list badges", () => {
     expect(tagBadges(tagPayload("QB", defaultTagValues("QB"), QB_SACK), "QB")).toEqual([]); // Line = preset
     expect(tagBadges({ ...tagPayload("QB", defaultTagValues("QB"), QB_RUN), run_success: false }, "QB").map((b) => b.text)).toEqual(["Run ✗"]);
     expect(tagBadges({ red_zone: false, press_release: "won" }, "WR").map((b) => b.text)).toEqual(["Press Won"]);
+    expect(tagBadges({ ...tagPayload("WR", defaultTagValues("WR"), WR_ROUTE), double_coverage: true }, "WR").map((b) => b.text)).toEqual(["Dbl"]);
     expect(tagBadges({ red_zone: false, blocked_defender: "lb" }, "TE").map((b) => b.text)).toEqual(["Blk LB"]);
   });
 

@@ -171,7 +171,10 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
       // % calc. Press still appears separately. Total routes are unchanged.
       const cp = cov === "man"
         ? routePlays.filter((p) => p.coverage === "man" || p.coverage === "press")
-        : routePlays.filter((p) => p.coverage === cov);
+        : cov === "double"
+          // The tag (on top of man / zone / press), or the old Double coverage.
+          ? routePlays.filter((p) => p.double_coverage === true || p.coverage === "double")
+          : routePlays.filter((p) => p.coverage === cov);
       const tgt  = cp.filter((p) => p.targeted === true);
       const ctch = tgt.filter((p) => p.caught === true);
       const open = cp.filter((p) => p.was_open === true);
@@ -804,10 +807,11 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
                 <div>
                   <div className="text-xs text-slate-500 mb-2">Coverage</div>
                   <div className="flex gap-2">
-                    {(["man", "zone", "press", "double"] as TECoverage[]).map((cov) => (
+                    {/* Double is a tag now (migration 072); an old Double route keeps its button while edited. */}
+                    {(coverage === "double" ? ["man", "zone", "press", "double"] as TECoverage[] : ["man", "zone", "press"] as TECoverage[]).map((cov) => (
                       <button key={cov} onClick={() => setCoverage(cov)}
                         className={`flex-1 py-2 rounded text-xs font-medium transition capitalize ${coverage === cov ? "bg-blue-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
-                        {cov.charAt(0).toUpperCase() + cov.slice(1)}
+                        {cov === "double" ? "Double (old)" : cov.charAt(0).toUpperCase() + cov.slice(1)}
                       </button>
                     ))}
                   </div>

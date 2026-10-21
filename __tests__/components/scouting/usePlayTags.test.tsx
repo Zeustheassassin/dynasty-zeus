@@ -75,7 +75,7 @@ describe("usePlayTags", () => {
     act(() => result.current.set("press_release", "won"));
     expect(result.current.payload({ route: true, press: true })).toEqual({
       red_zone: true, third_fourth_down: true, short_yardage: false, garbage_time: false,
-      blocked_defender: null, press_release: "won", chipped_before_route: false,
+      blocked_defender: null, double_coverage: false, press_release: "won", chipped_before_route: false,
     });
     // An edit's sticky change doesn't leak into the next new play.
     act(() => result.current.set("red_zone", false));

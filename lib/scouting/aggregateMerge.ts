@@ -147,6 +147,8 @@ interface WRSituation {
   third_fourth_down?: boolean;
   short_yardage?: boolean;
   garbage_time?: boolean;
+  /** Doubled, on top of its coverage (migration 072). */
+  double_coverage?: boolean;
 }
 // `w` is the weight of each of the cell's routes in a prospect's sample: its
 // season weight (1 = counts in full), times the garbage-time weight on a
@@ -218,7 +220,8 @@ export interface ProspectRouteCellsRow {
 }
 
 /** One row of prospect_game_route_tag_cells (migration 064): the game's TAGGED
- *  routes, keyed route|coverage|alignment|on_line|rz|34|sy|gt|press|bt. */
+ *  routes, keyed route|coverage|alignment|on_line|rz|34|sy|gt|press|bt, and
+ *  since migration 072 |dbl (double coverage, '1' / '0'). */
 export interface ProspectGameRouteTagCellsRow {
   prospect_id: string;
   game_id: string;
@@ -242,7 +245,8 @@ export function parseTagCells(raw: Record<string, [number, number]> | null | und
   const out: RouteTagCell[] = [];
   for (const [key, counts] of Object.entries(raw ?? {})) {
     const p = key.split("|");
-    if (p.length !== 10 || !Array.isArray(counts)) continue;
+    // 10 parts before migration 072, 11 after (|dbl).
+    if ((p.length !== 10 && p.length !== 11) || !Array.isArray(counts)) continue;
     const [n, open] = counts;
     if (!(n > 0)) continue;
     out.push({
@@ -251,6 +255,7 @@ export function parseTagCells(raw: Record<string, [number, number]> | null | und
       red_zone: p[4] === "1", third_fourth_down: p[5] === "1", short_yardage: p[6] === "1", garbage_time: p[7] === "1",
       press_release: p[8] === "won" || p[8] === "lost" ? p[8] : null,
       bt_after_catch: p[9] === "-" ? null : p[9] === "1",
+      double_coverage: p[10] === "1",
     });
   }
   return out;
@@ -482,7 +487,7 @@ const playCell = (era: CoverageEra) => (p: RoutePlay): RouteCell => ({
   route_type: p.route_type, coverage: p.coverage, alignment: p.alignment, on_line: p.on_line, era,
   n: 1, open: p.was_open ? 1 : 0, w: 1,
   ...(isTaggedPlay(p, "WR")
-    ? { tagged: true, red_zone: p.red_zone === true, third_fourth_down: p.third_fourth_down === true, short_yardage: p.short_yardage === true, garbage_time: p.garbage_time === true }
+    ? { tagged: true, red_zone: p.red_zone === true, third_fourth_down: p.third_fourth_down === true, short_yardage: p.short_yardage === true, garbage_time: p.garbage_time === true, double_coverage: p.double_coverage === true }
     : {}),
 });
 
@@ -676,6 +681,23 @@ function releaseByProspect(tagRows: readonly ProspectGameRouteTagCellsRow[]): { 
   return { byProspect, league: n > 0 ? won / n : null };
 }
 
+// Each WR's tagged double-coverage routes (migration 072): routes, open, and
+// catches (a caught route carries the broken-tackle tag). A route charted as
+// Double coverage before the tag is already in prospect_route_stats' double.
+function taggedDoubleByProspect(tagRows: readonly ProspectGameRouteTagCellsRow[]): Map<string, { count: number; open: number; catches: number }> {
+  const out = new Map<string, { count: number; open: number; catches: number }>();
+  for (const row of tagRows) {
+    for (const c of parseTagCells(row.cells)) {
+      if (!c.double_coverage || c.coverage === "double") continue;
+      const r = out.get(row.prospect_id) ?? { count: 0, open: 0, catches: 0 };
+      r.count += c.n; r.open += c.open;
+      if (c.bt_after_catch != null) r.catches += c.n;
+      out.set(row.prospect_id, r);
+    }
+  }
+  return out;
+}
+
 // Routes run per route type in in-app games, for the role buckets' route mix.
 function inAppRouteCounts(cells: RouteCell[]): Partial<Record<string, number>> {
   const out: Partial<Record<string, number>> = {};
@@ -726,12 +748,16 @@ function buildRouteStats(
   return out;
 }
 
+// `taggedDouble`: his routes tagged Double on top of their coverage (072),
+// added to the double bucket (they stay in their own coverage's too).
 function buildCoverageStats(
   raw: Record<string, { count: number; open: number; catches: number }>,
   has_charted_open_data: boolean,
+  taggedDouble?: { count: number; open: number; catches: number },
 ): Record<"man" | "zone" | "double" | "press", CoverageStat> {
   const make = (type: "man" | "zone" | "double" | "press"): CoverageStat => {
-    const r = raw[type];
+    const t = type === "double" ? taggedDouble : undefined;
+    const r = t ? { count: (raw.double?.count ?? 0) + t.count, open: (raw.double?.open ?? 0) + t.open, catches: (raw.double?.catches ?? 0) + t.catches } : raw[type];
     const count = r?.count ?? 0;
     return {
       count,
@@ -780,6 +806,7 @@ export function buildProspectsWithStats(
   const linedUp = linedUpByProspect(alignmentRows, eras);
   const { qbThrowsByProspect, teRoutesByProspect } = thresholdCounts;
   const release = releaseByProspect(tagRows);
+  const taggedDouble = taggedDoubleByProspect(tagRows);
 
   return prospects.map((p) => {
     const v = byProspect.get(p.id);
@@ -841,7 +868,7 @@ export function buildProspectsWithStats(
       depth_on_los: v?.depth_on_los ?? 0,
       has_charted_open_data,
       route_stats: buildRouteStats(v?.route_stats_raw ?? {}, has_charted_open_data),
-      coverage_stats: buildCoverageStats(v?.coverage_stats_raw ?? {}, has_charted_open_data),
+      coverage_stats: buildCoverageStats(v?.coverage_stats_raw ?? {}, has_charted_open_data, taggedDouble.get(p.id)),
       open_pct_slot: v?.open_pct_slot ?? null,
       open_pct_slot_on_line: v?.open_pct_slot_on_line ?? null,
       open_pct_slot_off_line: v?.open_pct_slot_off_line ?? null,

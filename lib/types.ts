@@ -1193,6 +1193,8 @@ export interface RoutePlay {
   third_fourth_down?: boolean | null;
   short_yardage?: boolean | null;
   garbage_time?: boolean | null;
+  /** Doubled on this route, on top of its coverage (migration 072). */
+  double_coverage?: boolean | null;
   press_release?: PressRelease | null;
   broken_tackle_after_catch?: boolean | null;
 }
@@ -1343,6 +1345,8 @@ export interface TEPlay {
   short_yardage?: boolean | null;
   garbage_time?: boolean | null;
   blocked_defender?: TEBlockedDefender | null;
+  /** Doubled on this route, on top of its coverage (migration 072). */
+  double_coverage?: boolean | null;
   press_release?: PressRelease | null;
   chipped_before_route?: boolean | null;
 }

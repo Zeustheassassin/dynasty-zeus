@@ -15,6 +15,7 @@ import {
   type ProspectGameAlignmentRow,
 } from "@/lib/scouting/aggregateMerge";
 import { coverageEras } from "@/lib/scouting/coverageEra";
+import { expectedFor } from "@/lib/scouting/difficultyModel";
 import { SEASON_DECAY } from "@/lib/scouting/seasonWeight";
 import type { Prospect, RoutePlay, RouteType, CoverageType, Alignment, ScoutingGame } from "@/lib/types";
 
@@ -541,12 +542,49 @@ describe("tagged WR routes", () => {
     viaLeague.forEach((v, i) => expect(viaGrading[i]).toBeCloseTo(v, 6));
   });
 
-  it("has no tag correction while every WR tag is off, so tagged routes are judged exactly as before", () => {
+  it("with no doubled routes, the Double tag changes nothing: tagged routes are judged exactly as before", () => {
     const plays = { A: repeat(40, (i) => routePlay("a1", i % 2 ? "curl" : "nine", "man", i % 5 < 3)) };
     const rows = gameRowsFrom(plays);
     const plain = buildWRModel(rows);
     const withTags = buildWRModel(rows, [], TAG_ROWS);
-    expect(withTags.correction ?? null).toBeNull();
     expect([...withTags.model!]).toEqual([...plain.model!]);
+    for (const c of parseTagCells(TAG_ROWS[0].cells)) {
+      expect(expectedFor({ ...withTags, model: withTags.model! }, c)).toBeCloseTo(expectedFor({ ...plain, model: plain.model! }, c), 9);
+    }
+  });
+
+  it("reads the Double tag from 072's 11-part key; a 10-part key (before 072) is not doubled", () => {
+    const [dbl] = parseTagCells({ "nine|zone|left|off|0|0|0|0|-|-|1": [4, 1] });
+    expect(dbl).toMatchObject({ route_type: "nine", coverage: "zone", n: 4, open: 1, double_coverage: true });
+    expect(parseTagCells({ "nine|zone|left|off|0|0|0|0|-|-|0": [4, 1] })[0].double_coverage).toBe(false);
+    expect(parseTagCells(TAG_ROWS[0].cells)[0].double_coverage).toBe(false);
+  });
+
+  it("judges a doubled route as the harder rep: a closed doubled route costs less", () => {
+    // Zone nines, tagged: open 50% when single-covered, 10% when doubled.
+    const plays = { A: repeat(200, (i) => routePlay(`a${i % 4}`, "nine", "zone", i % 2 === 0)) };
+    const rows = gameRowsFrom(plays);
+    const tagRows = ["a0", "a1", "a2", "a3"].map((game_id) => ({
+      prospect_id: "A", game_id,
+      cells: { "nine|zone|left|on|0|0|0|0|-|-|0": [30, 15], "nine|zone|left|on|0|0|0|0|-|-|1": [20, 2] } as Record<string, [number, number]>,
+    }));
+    const model = buildWRModel(rows, [], tagRows);
+    const tagged = (double_coverage: boolean) => ({
+      ...routePlay("g1", "nine", "zone", false), red_zone: false, third_fourth_down: false, short_yardage: false, garbage_time: false, double_coverage,
+    }) as RoutePlay;
+    expect(computeSAEForPlays([tagged(true)], model)! - computeSAEForPlays([tagged(false)], model)!).toBeGreaterThan(15);
+  });
+
+  it("counts tagged doubles in the Double coverage stats, on top of the old Double coverage", () => {
+    const tagRows = [{
+      prospect_id: "A", game_id: "a1",
+      cells: { "nine|zone|left|off|0|0|0|0|-|-|1": [3, 1], "curl|man|left|off|0|0|0|0|-|1|1": [2, 2], "curl|man|left|off|0|0|0|0|-|-|0": [5, 4] } as Record<string, [number, number]>,
+    }];
+    const stats = [{
+      prospect_id: "A", total_routes: 20, open_routes: 10, has_charted_open_data: true, route_stats_raw: {},
+      coverage_stats_raw: { double: { count: 2, open: 0, catches: 0 } },
+    }] as unknown as ProspectRouteStatsRow[];
+    const [a] = buildProspectsWithStats([{ id: "A", position: "WR", name: "A" } as unknown as Prospect], stats, [], [], {}, undefined, [], tagRows);
+    expect(a.coverage_stats.double).toEqual({ count: 7, open: 3, catches: 2 });
   });
 });
