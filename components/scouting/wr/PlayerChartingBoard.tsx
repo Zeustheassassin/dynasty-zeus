@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useMemo } from "react";
+import { Fragment, useState, useEffect, useMemo } from "react";
 import { supabase } from "../../../lib/supabaseclient";
 import { logger } from "../../../lib/logger";
 
@@ -22,6 +22,9 @@ import type { OverviewData } from "../overview/ProspectOverview";
 import { useChartingState } from "../shared/hooks/useChartingState";
 import { usePlayTags } from "../shared/hooks/usePlayTags";
 import PlayTagControls, { PlayTagBadges } from "../shared/PlayTagControls";
+import RouteVariantPicker, { RouteVariantMark } from "../shared/RouteVariantPicker";
+import { useRouteVariant } from "../shared/hooks/useRouteVariant";
+import { splitByRouteVariant } from "../../../lib/scouting/routeVariants";
 import type { PlayFacts } from "../../../lib/scouting/playTags";
 import { computeSAEForPlays, computeCoreSAEForPlays, type WRDifficultyModel } from "../../../lib/scouting/aggregateMerge";
 import { usePffGameLog } from "../pff/usePffGameLog";
@@ -67,6 +70,8 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
   // Play form state
   const [noRouteRun, setNoRouteRun]   = useState(false);
   const [routeType, setRouteType]     = useState<RouteType>("curl");
+  // Sub-route (migration 073), data collection only: starts on the route's default.
+  const variant = useRouteVariant("curl");
   const [alignment, setAlignment]     = useState<Alignment>("right");
   const [onLine, setOnLine]           = useState(true);
   const [coverage, setCoverage]       = useState("");
@@ -131,6 +136,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
     catch: !noRouteRun && targeted && playOutcome === "caught",
   };
   const tagsMissing = tags.missing(tagFacts).length > 0;
+  const variantMissing = !noRouteRun && variant.missing(routeType);
 
   const stats = useMemo(() => {
     const routePlays  = plays.filter((p) => !p.no_route_run);
@@ -162,14 +168,31 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
     const onLineN = plays.filter((p) => p.on_line).length;
     const totalOpen = routePlays.filter((p) => p.was_open).length;
 
-    const routeStats: Partial<Record<RouteType, { count: number; open: number; targets: number; catches: number; successRate: string | null }>> = {};
+    type RouteRow = { count: number; open: number; targets: number; catches: number; successRate: string | null };
+    const routeRow = (rtPlays: RoutePlay[]): RouteRow => {
+      const rtOpen = rtPlays.filter((p) => p.was_open).length;
+      return {
+        count: rtPlays.length, open: rtOpen,
+        targets: rtPlays.filter((p) => p.targeted).length,
+        catches: rtPlays.filter((p) => p.targeted && p.success).length,
+        successRate: ((rtOpen / rtPlays.length) * 100).toFixed(0) + "%",
+      };
+    };
+    // Each route with its sub-routes under it (data collection only), and the
+    // routes charted before sub-routes as "Not split" once any are split.
+    const routeStats: Partial<Record<RouteType, RouteRow & {
+      variants: (RouteRow & { key: string; label: string; yards?: string })[];
+      unsplit: RouteRow | null;
+    }>> = {};
     for (const rt of ROUTE_TYPES) {
       const rtPlays = routePlays.filter((p) => p.route_type === rt);
       if (rtPlays.length === 0) continue;
-      const rtOpen = rtPlays.filter((p) => p.was_open).length;
-      const rtTgt  = rtPlays.filter((p) => p.targeted).length;
-      const rtCtch = rtPlays.filter((p) => p.targeted && p.success).length;
-      routeStats[rt] = { count: rtPlays.length, open: rtOpen, targets: rtTgt, catches: rtCtch, successRate: ((rtOpen / rtPlays.length) * 100).toFixed(0) + "%" };
+      const { splits, unsplit } = splitByRouteVariant(rt, rtPlays);
+      routeStats[rt] = {
+        ...routeRow(rtPlays),
+        variants: splits.map((sp) => ({ key: sp.spec.key, label: sp.spec.label, yards: sp.spec.yards, ...routeRow(sp.plays) })),
+        unsplit: splits.length > 0 && unsplit.length > 0 ? routeRow(unsplit) : null,
+      };
     }
 
     const cvgStats = (["man", "zone", "double", "press"] as const).map((cvg) => {
@@ -265,7 +288,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
   }, [plays]);
 
   async function logPlay() {
-    if (!selectedGameId || tagsMissing) return;
+    if (!selectedGameId || tagsMissing || variantMissing) return;
     setPlayError(null); setSavingPlay(true);
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setPlayError("Not logged in."); setSavingPlay(false); return; }
@@ -273,6 +296,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
       user_id: user.id, game_id: selectedGameId,
       no_route_run: noRouteRun,
       route_type: noRouteRun ? "other" : routeType,
+      route_variant: noRouteRun ? null : variant.value,
       alignment, on_line: onLine,
       coverage: noRouteRun ? "" : coverage,
       was_open: noRouteRun ? false : wasOpen,
@@ -287,6 +311,8 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
       setPlays((prev) => [...prev, data as RoutePlay]);
       setWasOpen(false); setTargeted(false); setPlayOutcome(null); setContested(false); setPlayNotes("");
       tags.reset();
+      // The route stays on for the next play; its sub-route goes back to the default.
+      variant.reset(routeType);
       cs.markDataDirty();
     }
     setSavingPlay(false);
@@ -327,7 +353,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
   }
 
   function resetForm() {
-    setEditingPlayId(null); setNoRouteRun(false); setRouteType("curl"); setAlignment("right");
+    setEditingPlayId(null); setNoRouteRun(false); setRouteType("curl"); variant.reset("curl"); setAlignment("right");
     setOnLine(true); setCoverage(""); setWasOpen(false); setTargeted(false);
     setPlayOutcome(null); setContested(false); setPlayNotes("");
     tags.reset();
@@ -335,6 +361,9 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
 
   function startEditPlay(pl: RoutePlay) {
     tags.startEdit(pl);
+    // A No Route Run play's "other" is a placeholder, not a route charted before sub-routes.
+    if (pl.no_route_run) variant.reset(pl.route_type);
+    else variant.startEdit(pl.route_variant);
     setEditingPlayId(pl.id); setNoRouteRun(pl.no_route_run); setRouteType(pl.route_type);
     setAlignment(pl.alignment); setOnLine(pl.on_line); setCoverage(pl.coverage ?? "");
     setWasOpen(pl.was_open); setTargeted(pl.targeted);
@@ -343,10 +372,11 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
   }
 
   async function saveEditedPlay() {
-    if (!editingPlayId || tagsMissing) return;
+    if (!editingPlayId || tagsMissing || variantMissing) return;
     setPlayError(null); setSavingPlay(true);
     const { data, error } = await supabase.from("route_plays").update({
       no_route_run: noRouteRun, route_type: noRouteRun ? "other" : routeType,
+      route_variant: noRouteRun ? null : variant.value,
       alignment, on_line: onLine, coverage: noRouteRun ? "" : coverage,
       was_open: noRouteRun ? false : wasOpen, targeted: noRouteRun ? false : targeted,
       success: (!noRouteRun && targeted) ? (playOutcome === "caught" ? true : playOutcome === "drop" ? false : null) : null,
@@ -509,8 +539,14 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
                         .sort((a, b) => (stats.routeStats[b]?.count ?? 0) - (stats.routeStats[a]?.count ?? 0))
                         .map((rt) => {
                           const rs = stats.routeStats[rt]!;
+                          // Sub-routes under their route (data collection only), then "Not split".
+                          const subRows = [
+                            ...rs.variants.map((v) => ({ key: v.key, label: v.label, yards: v.yards, row: v })),
+                            ...(rs.unsplit ? [{ key: "unsplit", label: "Not split", yards: undefined, row: rs.unsplit }] : []),
+                          ];
                           return (
-                            <tr key={rt} className="hover:bg-slate-800/40">
+                            <Fragment key={rt}>
+                            <tr className="hover:bg-slate-800/40">
                               <td className="py-1.5 pr-3 text-white font-medium capitalize">{rt}</td>
                               <td className="py-1.5 px-2 text-right text-blue-400">{rs.count}</td>
                               <td className="py-1.5 px-2 text-right text-emerald-300">{rs.open || "—"}</td>
@@ -525,6 +561,23 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
                                 {stats.total > 0 ? ((rs.count / stats.total) * 100).toFixed(0) : 0}%
                               </td>
                             </tr>
+                            {subRows.map(({ key, label, yards, row }) => (
+                              <tr key={`${rt}-${key}`} className="hover:bg-slate-800/40 text-slate-400">
+                                <td className="py-1 pr-3 pl-4 whitespace-nowrap">
+                                  <span className="text-slate-600 mr-1" aria-hidden="true">↳</span>{label}
+                                  {yards && <span className="ml-1 text-[10px] text-slate-600">{yards}</span>}
+                                </td>
+                                <td className="py-1 px-2 text-right">{row.count}</td>
+                                <td className="py-1 px-2 text-right">{row.open || "—"}</td>
+                                <td className="py-1 px-2 text-right">{row.targets || "—"}</td>
+                                <td className="py-1 px-2 text-right">{row.catches || "—"}</td>
+                                <td className="py-1 px-2 text-right">{row.successRate ?? "—"}</td>
+                                <td className="py-1 pl-2 text-right text-slate-600">
+                                  {stats.total > 0 ? ((row.count / stats.total) * 100).toFixed(0) : 0}%
+                                </td>
+                              </tr>
+                            ))}
+                            </Fragment>
                           );
                         })}
                     </tbody>
@@ -707,12 +760,13 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
                 <div className="text-xs text-slate-500 mb-2">Route Type</div>
                 <div className="flex flex-wrap gap-1.5">
                   {ROUTE_TYPES.map((rt) => (
-                    <button key={rt} onClick={() => setRouteType(rt)}
+                    <button key={rt} onClick={() => { variant.pickRoute(rt, routeType); setRouteType(rt); }}
                       className={`flex-1 whitespace-nowrap px-3 h-10 rounded text-xs font-medium capitalize transition ${routeType === rt ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                       {rt}
                     </button>
                   ))}
                 </div>
+                <RouteVariantPicker route={routeType} variant={variant} accent="blue" tall />
               </div>
             )}
 
@@ -811,12 +865,12 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
               <input className="flex-1 px-3 h-10 bg-slate-800 border border-slate-700 rounded text-white text-sm placeholder-slate-500 focus:outline-none focus:border-blue-500"
                 placeholder="Play note (optional)" value={playNotes} onChange={(e) => setPlayNotes(e.target.value)} />
               {editingPlayId ? (
-                <button onClick={saveEditedPlay} disabled={savingPlay || (!noRouteRun && targeted && playOutcome === null) || tagsMissing}
+                <button onClick={saveEditedPlay} disabled={savingPlay || (!noRouteRun && targeted && playOutcome === null) || tagsMissing || variantMissing}
                   className="px-5 h-10 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm rounded font-medium transition whitespace-nowrap">
                   {savingPlay ? "…" : "Save Edit"}
                 </button>
               ) : (
-                <button onClick={logPlay} disabled={savingPlay || (!noRouteRun && targeted && playOutcome === null) || tagsMissing}
+                <button onClick={logPlay} disabled={savingPlay || (!noRouteRun && targeted && playOutcome === null) || tagsMissing || variantMissing}
                   className="px-5 h-10 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white text-sm rounded font-medium transition">
                   {savingPlay ? "…" : "Log Play"}
                 </button>
@@ -840,6 +894,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
                       {pl.no_route_run
                         ? <span className="text-amber-500 font-medium">aligned</span>
                         : <span className="text-white capitalize font-medium">{pl.route_type}</span>}
+                      {!pl.no_route_run && <RouteVariantMark route={pl.route_type} variant={pl.route_variant} />}
                       <span className="text-slate-500 uppercase text-xs">{pl.alignment[0]}</span>
                       <span className="text-slate-600">{pl.on_line ? "OL" : "Off"}</span>
                       {!pl.no_route_run && pl.coverage && (

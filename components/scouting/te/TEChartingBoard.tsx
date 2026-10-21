@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useMemo } from "react";
+import { Fragment, useState, useEffect, useMemo } from "react";
 import { supabase } from "../../../lib/supabaseclient";
 import { fetchAllRows } from "../../../lib/scouting/fetchPlays";
 import { logger } from "../../../lib/logger";
@@ -18,7 +18,7 @@ import type {
   TECoverage,
   RouteType,
 } from "../../../lib/types";
-import { ROUTE_TYPES } from "../shared/chartingConstants";
+import { ROUTE_LABELS, ROUTE_TYPES } from "../shared/chartingConstants";
 import { pct, fmtPct } from "../shared/chartingTypes";
 import ChartingBoard, { type ChartingBoardConfig } from "../shared/ChartingBoard";
 import type { OverviewData } from "../overview/ProspectOverview";
@@ -29,6 +29,9 @@ import { PffLogBar, PffLogCells, PffLogFooter, PffLogHeaders } from "../pff/PffG
 import { useChartingState } from "../shared/hooks/useChartingState";
 import { usePlayTags } from "../shared/hooks/usePlayTags";
 import PlayTagControls, { PlayTagBadges } from "../shared/PlayTagControls";
+import RouteVariantPicker, { RouteVariantMark } from "../shared/RouteVariantPicker";
+import { useRouteVariant } from "../shared/hooks/useRouteVariant";
+import { splitByRouteVariant } from "../../../lib/scouting/routeVariants";
 import type { PlayFacts } from "../../../lib/scouting/playTags";
 import TEPlayerCharts from "./TEPlayerCharts";
 import {
@@ -55,11 +58,6 @@ const POSITIONINGS: { key: TEPositioning; label: string }[] = [
   { key: "running_back", label: "Running Back" },
   { key: "wing_back",    label: "Wing Back" },
 ];
-
-const ROUTE_LABELS: Record<RouteType, string> = {
-  nine: "Nine", post: "Post", dig: "Dig", curl: "Curl", slant: "Slant",
-  screen: "Screen", flat: "Flat", comeback: "Comeback", out: "Out", corner: "Corner", other: "Other",
-};
 
 type TargetOutcome = "caught" | "dropped" | "incomplete" | null;
 
@@ -91,6 +89,8 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
   const [blockSuccess, setBlockSuccess]       = useState<boolean | null>(null);
   const [coverage, setCoverage]               = useState<TECoverage | null>(TE_ROUTE_DEFAULTS.coverage);
   const [routeType, setRouteType]             = useState<RouteType | null>(null);
+  // Sub-route (migration 073), data collection only: a picked route starts on its default.
+  const variant = useRouteVariant(null);
   const [wasOpen, setWasOpen]                 = useState<boolean | null>(null);
   const [targeted, setTargeted]               = useState<boolean | null>(TE_ROUTE_DEFAULTS.targeted);
   const [targetOutcome, setTargetOutcome]     = useState<TargetOutcome>(null);
@@ -139,6 +139,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
     press: playType === "route_run" && coverage === "press",
   };
   const tagsMissing = tags.missing(tagFacts).length > 0;
+  const variantMissing = playType === "route_run" && variant.missing(routeType);
 
   const stats = useMemo(() => {
     const routePlays = plays.filter((p) => p.play_type === "route_run");
@@ -158,12 +159,20 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
     const runBlockSuc = runBlocks.filter((p) => p.block_success === true).length;
     const passBlockSuc= passBlocks.filter((p) => p.block_success === true).length;
 
-    const routeBreakdown = ROUTE_TYPES.map((rt) => {
-      const rp   = routePlays.filter((p) => p.route_type === rt);
+    const routeRow = (rp: TEPlay[]) => {
       const tgt  = rp.filter((p) => p.targeted === true);
       const ctch = tgt.filter((p) => p.caught === true);
       const open = rp.filter((p) => p.was_open === true);
-      return { route: rt, attempts: rp.length, openPct: pct(open.length, rp.length), targetPct: pct(tgt.length, rp.length), catchPct: pct(ctch.length, tgt.length) };
+      return { attempts: rp.length, openPct: pct(open.length, rp.length), targetPct: pct(tgt.length, rp.length), catchPct: pct(ctch.length, tgt.length) };
+    };
+    // Each route with its sub-routes under it (data collection only), and the
+    // routes charted before sub-routes as "Not split" once any are split.
+    const routeBreakdown = ROUTE_TYPES.map((rt) => {
+      const rp = routePlays.filter((p) => p.route_type === rt);
+      const { splits, unsplit } = splitByRouteVariant(rt, rp);
+      const subs = splits.map((sp) => ({ key: sp.spec.key as string, label: sp.spec.label, yards: sp.spec.yards, ...routeRow(sp.plays) }));
+      if (splits.length > 0 && unsplit.length > 0) subs.push({ key: "unsplit", label: "Not split", yards: undefined, ...routeRow(unsplit) });
+      return { route: rt, ...routeRow(rp), subs };
     }).filter((r) => r.attempts > 0);
 
     const coverageBreakdown = (["man", "zone", "press", "double"] as TECoverage[]).map((cov) => {
@@ -290,7 +299,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
     }
     return true;
   }, [selectedGameId, playType, blockType, blockSuccess, coverage, routeType, wasOpen, targeted, targetOutcome, contestedTarget, contestedCatch]);
-  const canLog = playReady && !tagsMissing;
+  const canLog = playReady && !tagsMissing && !variantMissing;
 
   // The next play keeps location, positioning and play type, so it starts from that
   // alignment's defaults (lib/scouting/teChartingDefaults.ts — the user's, 10/19).
@@ -300,7 +309,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
     tags.reset(block ? { blocked_defender: block.blockedDefender } : undefined);
     setBlockType(block?.blockType ?? null); setBlockSuccess(block?.blockSuccess ?? null);
     const route = playType === "route_run";
-    setCoverage(route ? TE_ROUTE_DEFAULTS.coverage : null); setRouteType(null); setWasOpen(null);
+    setCoverage(route ? TE_ROUTE_DEFAULTS.coverage : null); setRouteType(null); variant.reset(null); setWasOpen(null);
     setTargeted(route ? TE_ROUTE_DEFAULTS.targeted : null);
     setTargetOutcome(null); setContestedTarget(null); setContestedCatch(null);
     setBrokenTackle(false); setPlayNotes("");
@@ -323,7 +332,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
       setTargetOutcome(null); setContestedTarget(null); setContestedCatch(null); setBrokenTackle(false);
     }
     if (next === "decoy") {
-      setCoverage(null); setRouteType(null); setWasOpen(null); setTargeted(null);
+      setCoverage(null); setRouteType(null); variant.reset(null); setWasOpen(null); setTargeted(null);
       setTargetOutcome(null); setContestedTarget(null); setContestedCatch(null); setBrokenTackle(false);
     }
   }
@@ -353,6 +362,8 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
     setBlockSuccess(pl.block_success ?? null);
     setCoverage(pl.coverage ?? null);
     setRouteType(pl.route_type ?? null);
+    if (pl.play_type === "route_run") variant.startEdit(pl.route_variant);
+    else variant.reset(null);
     setWasOpen(pl.was_open ?? null);
     setTargeted(pl.targeted ?? null);
     setTargetOutcome(pl.targeted ? (pl.caught ? "caught" : pl.dropped ? "dropped" : "incomplete") : null);
@@ -372,6 +383,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
       location, positioning, play_type: playType,
       block_type: isBlock ? blockType : null, block_success: isBlock ? blockSuccess : null,
       coverage: isRoute ? coverage : null, route_type: isRoute ? routeType : null,
+      route_variant: isRoute ? variant.value : null,
       was_open: isRoute ? wasOpen : null, targeted: isRoute ? targeted : null,
       caught: isTargeted ? targetOutcome === "caught" : null,
       dropped: isTargeted ? targetOutcome === "dropped" : null,
@@ -400,6 +412,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
       location, positioning, play_type: playType,
       block_type: isBlock ? blockType : null, block_success: isBlock ? blockSuccess : null,
       coverage: isRoute ? coverage : null, route_type: isRoute ? routeType : null,
+      route_variant: isRoute ? variant.value : null,
       was_open: isRoute ? wasOpen : null, targeted: isRoute ? targeted : null,
       caught: isTargeted ? targetOutcome === "caught" : null,
       dropped: isTargeted ? targetOutcome === "dropped" : null,
@@ -616,13 +629,27 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
                       </thead>
                       <tbody className="divide-y divide-slate-800/60">
                         {stats.routeBreakdown.map((r) => (
-                          <tr key={r.route} className="hover:bg-slate-800/30">
+                          <Fragment key={r.route}>
+                          <tr className="hover:bg-slate-800/30">
                             <td className="py-2 pr-3 text-white font-medium capitalize">{ROUTE_LABELS[r.route]}</td>
                             <td className="py-2 px-2 text-right text-blue-400">{r.attempts}</td>
                             <td className={`py-2 px-2 text-right text-sm ${r.openPct !== null ? (r.openPct >= 50 ? "text-emerald-400" : "text-amber-400") : "text-slate-600"}`}>{fmtPct(r.openPct)}</td>
                             <td className="py-2 px-2 text-right text-amber-400">{fmtPct(r.targetPct)}</td>
                             <td className={`py-2 pl-2 text-right font-semibold ${r.catchPct !== null ? (r.catchPct >= 65 ? "text-emerald-400" : r.catchPct >= 50 ? "text-amber-400" : "text-red-400") : "text-slate-600"}`}>{fmtPct(r.catchPct)}</td>
                           </tr>
+                          {r.subs.map((sub) => (
+                            <tr key={`${r.route}-${sub.key}`} className="hover:bg-slate-800/30 text-xs text-slate-400">
+                              <td className="py-1 pr-3 pl-5 whitespace-nowrap">
+                                <span className="text-slate-600 mr-1" aria-hidden="true">↳</span>{sub.label}
+                                {sub.yards && <span className="ml-1 text-[10px] text-slate-600">{sub.yards}</span>}
+                              </td>
+                              <td className="py-1 px-2 text-right">{sub.attempts}</td>
+                              <td className="py-1 px-2 text-right">{fmtPct(sub.openPct)}</td>
+                              <td className="py-1 px-2 text-right">{fmtPct(sub.targetPct)}</td>
+                              <td className="py-1 pl-2 text-right">{fmtPct(sub.catchPct)}</td>
+                            </tr>
+                          ))}
+                          </Fragment>
                         ))}
                       </tbody>
                     </table>
@@ -820,12 +847,13 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
                   <div className="text-xs text-slate-500 mb-2">Route</div>
                   <div className="flex flex-wrap gap-1.5">
                     {ROUTE_TYPES.map((rt) => (
-                      <button key={rt} onClick={() => setRouteType(rt)}
+                      <button key={rt} onClick={() => { variant.pickRoute(rt, routeType); setRouteType(rt); }}
                         className={`flex-1 whitespace-nowrap px-3 py-1.5 rounded text-xs font-medium transition ${routeType === rt ? "bg-blue-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         {ROUTE_LABELS[rt]}
                       </button>
                     ))}
                   </div>
+                  <RouteVariantPicker route={routeType} variant={variant} accent="green" />
                 </div>
                 <div className="flex flex-wrap gap-4">
                   <div className="flex-1 whitespace-nowrap">
@@ -944,6 +972,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
                         ) : isDecoy ? null : (
                           <>
                             {pl.route_type && <span className="text-blue-300">{ROUTE_LABELS[pl.route_type]}</span>}
+                            <RouteVariantMark route={pl.route_type} variant={pl.route_variant} />
                             {pl.coverage && <span className="text-slate-500 capitalize">{pl.coverage}</span>}
                             {pl.was_open ? <span className="text-emerald-400">Open</span> : pl.was_open === false ? <span className="text-slate-600">Cvrd</span> : null}
                             {pl.targeted

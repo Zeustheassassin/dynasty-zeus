@@ -14,6 +14,11 @@ export const ROUTE_TYPES: RouteType[] = [
   "nine", "post", "dig", "curl", "slant", "screen", "flat", "comeback", "out", "corner", "other",
 ];
 
+export const ROUTE_LABELS: Record<RouteType, string> = {
+  nine: "Nine", post: "Post", dig: "Dig", curl: "Curl", slant: "Slant",
+  screen: "Screen", flat: "Flat", comeback: "Comeback", out: "Out", corner: "Corner", other: "Other",
+};
+
 // Auto-promote within the charting → partial_chart → fully_charted chain.
 // Charting even one game means the user decided to chart him, so "pending"
 // (Undecided) with a charted game joins the chain too (the user's call,

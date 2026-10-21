@@ -7,6 +7,7 @@
 // ============================================================
 
 import type { RoleFit } from "./scouting/roleFit";
+import type { RouteVariant } from "./scouting/routeVariants";
 
 // ── Sleeper data shapes ──────────────────────────────────────
 
@@ -1176,6 +1177,9 @@ export interface RoutePlay {
   user_id: string;
   game_id: string;
   route_type: RouteType;
+  /** Sub-route (migration 073; lib/scouting/routeVariants.ts), data collection
+   *  only. NULL = charted before sub-routes, a paste import, or no route run. */
+  route_variant?: RouteVariant | null;
   alignment: Alignment;
   on_line: boolean;
   coverage: CoverageType;
@@ -1329,6 +1333,9 @@ export interface TEPlay {
   block_success: boolean | null;
   coverage: TECoverage | null;
   route_type: RouteType | null;
+  /** Sub-route (migration 073; lib/scouting/routeVariants.ts), data collection
+   *  only. NULL = not a route, or charted before sub-routes. */
+  route_variant?: RouteVariant | null;
   was_open: boolean | null;
   targeted: boolean | null;
   caught: boolean | null;
