@@ -37,13 +37,18 @@ export interface DifficultyDesign<T> {
    *  A dimension that is null on the row adds no column, so that dimension
    *  pulls the row neither way. */
   cols(row: T): number[];
+  /** A fixed logit the row carries into the fit and into its expected, never
+   *  fit itself (TE-SAER: WR's route × coverage pattern, routeCoveragePattern.ts).
+   *  Absent = 0. */
+  offset?(row: T): number;
 }
 
-export function makeDesign<T>(dims: ReadonlyArray<DifficultyDim<T>>): DifficultyDesign<T> {
+export function makeDesign<T>(dims: ReadonlyArray<DifficultyDim<T>>, offset?: (row: T) => number): DifficultyDesign<T> {
   let col = 1;
   const maps = dims.map(([buckets]) => new Map(buckets.map((b) => [b, col++] as const)));
   return {
     size: col,
+    ...(offset ? { offset } : {}),
     cols(row: T): number[] {
       const out: number[] = [];
       dims.forEach(([, bucketOf], d) => {
@@ -101,9 +106,13 @@ function solveLinear(A: Float64Array[], b: Float64Array): Float64Array | null {
 // strength: each bucket's effect is pulled toward 0 (league average) as if
 // backed by `lambda` plays of no information, so a bucket seen a handful of
 // times can't swing the model. Each position validates its own lambda on
-// held-out prospects (see the constants beside each metric). Returns the
-// coefficient vector (index 0 = intercept), or null when there are no rows.
-export function fitDifficultyModel(rawRows: ModelRow[], size: number, lambda: number): Float64Array | null {
+// held-out prospects (see the constants beside each metric). `lambda` can
+// also be one strength per column (index 0, the intercept, is never
+// penalized), so a dimension can be held to a stricter bar than the rest (WR's
+// route × coverage, aggregateMerge.ts). Returns the coefficient vector (index
+// 0 = intercept), or null when there are no rows.
+export function fitDifficultyModel(rawRows: ModelRow[], size: number, lambda: number | ArrayLike<number>): Float64Array | null {
+  const lam = (j: number) => (typeof lambda === "number" ? lambda : lambda[j]);
   const rows = rawRows
     .filter((r) => (r.w ?? 1) > 0)
     .map((r) => ({ cols: r.cols, w: r.w ?? 1, y: Math.min(Math.max(r.y, MODEL_Y_EPS), 1 - MODEL_Y_EPS), off: r.offset ?? 0 }));
@@ -114,7 +123,7 @@ export function fitDifficultyModel(rawRows: ModelRow[], size: number, lambda: nu
   const objective = (b: Float64Array) => {
     let f = 0;
     for (const r of rows) { const z = logit(b, r); f += r.w * (softplus(z) - r.y * z); }
-    for (let j = 1; j < P; j++) f += 0.5 * lambda * b[j] * b[j];
+    for (let j = 1; j < P; j++) f += 0.5 * lam(j) * b[j] * b[j];
     return f;
   };
 
@@ -139,7 +148,7 @@ export function fitDifficultyModel(rawRows: ModelRow[], size: number, lambda: nu
         for (const c of r.cols) H[a][c] += w;
       }
     }
-    for (let j = 1; j < P; j++) { g[j] += lambda * beta[j]; H[j][j] += lambda; }
+    for (let j = 1; j < P; j++) { g[j] += lam(j) * beta[j]; H[j][j] += lam(j); }
     const step = solveLinear(H, g);
     if (!step) break;
     let t = 1;
@@ -221,9 +230,10 @@ export interface FittedDifficulty<T> {
   correction?: DifficultyCorrection<T> | null;
 }
 
-// The base model's logit for a row (no correction).
+// The base model's logit for a row (no correction), with the design's fixed
+// offset.
 export function baseLogitFor<T>(fitted: FittedDifficulty<T> & { model: Float64Array }, row: T): number {
-  return logitFromModel(fitted.model, fitted.design.cols(row));
+  return logitFromModel(fitted.model, fitted.design.cols(row), fitted.design.offset?.(row) ?? 0);
 }
 
 // A row's expected outcome: the base model, plus the tag correction on a
@@ -244,7 +254,7 @@ export function fitFromPlays<T>(
 ): FittedDifficulty<T> {
   return {
     design,
-    model: fitDifficultyModel(plays.map((pl) => ({ cols: design.cols(pl), y: outcome(pl) })), design.size, lambda),
+    model: fitDifficultyModel(plays.map((pl) => ({ cols: design.cols(pl), y: outcome(pl), offset: design.offset?.(pl) })), design.size, lambda),
   };
 }
 

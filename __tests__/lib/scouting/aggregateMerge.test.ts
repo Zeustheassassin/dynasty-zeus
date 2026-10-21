@@ -150,6 +150,21 @@ describe("WR SAE difficulty model", () => {
     const openGoVsPress = computeSAEForPlays([routePlay("g1", "nine", "press", true)], model)!;
     expect(openGoVsPress).toBeGreaterThan(openGoVsZone + 10);
   });
+
+  it("each route has its own coverage effect: press hurts a curl, not a nine", () => {
+    // Nines: press 45%, zone 40%. Curls: press 60%, zone 90%. Route + coverage
+    // alone would split press's effect between the two; route × coverage gives
+    // each its own, so each closed route costs about what its own rate says.
+    const model = modelFrom([
+      ...repeat(200, (i) => routePlay("g_bg", "nine", "press", i % 20 < 9)),
+      ...repeat(200, (i) => routePlay("g_bg", "nine", "zone", i % 5 < 2)),
+      ...repeat(200, (i) => routePlay("g_bg", "curl", "press", i % 5 < 3)),
+      ...repeat(200, (i) => routePlay("g_bg", "curl", "zone", i % 10 < 9)),
+    ]);
+    const closed = (route: RouteType, cov: CoverageType) => computeSAEForPlays([routePlay("g1", route, cov, false)], model)!;
+    expect(Math.abs(closed("nine", "press") + 45)).toBeLessThan(4);
+    expect(Math.abs(closed("curl", "press") + 60)).toBeLessThan(4);
+  });
 });
 
 // =============================================================================

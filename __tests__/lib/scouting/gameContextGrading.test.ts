@@ -59,8 +59,8 @@ describe("resolveGameContexts / gameCovariates", () => {
 
 describe("contextGrading policy", () => {
   it("switches on only what passed (cast never)", () => {
-    expect([...OPPONENT_SP].sort()).toEqual(["ch_qb_p2s", "pff_wr_yprr", "wr_csae"]);
-    expect([...WEATHER_ON].sort()).toEqual(["ch_wr_cc", "pff_rb_yprr"]);
+    expect([...OPPONENT_SP].sort()).toEqual(["ch_qb_p2s", "pff_qb_fum", "pff_wr_yprr", "wr_csae", "wr_sae"]);
+    expect([...WEATHER_ON].sort()).toEqual(["ch_wr_cc", "ch_wr_drop", "pff_btt", "pff_rb_yprr", "qb_aae"]);
     expect(CAST_ON.size).toBe(0);
     expect(metricContext("rb_srae")).toEqual({ opponent: "tier", weather: false, cast: false });
   });

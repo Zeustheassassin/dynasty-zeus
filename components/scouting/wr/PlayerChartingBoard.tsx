@@ -471,7 +471,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
                 {(() => {
                   const coreSae = allProspects.find((p) => p.id === prospect.id)?.core_sae ?? null;
                   return (
-                    <div className="p-3 bg-slate-900 rounded-lg border border-slate-800" title="Open Rate Above Expected, excluding Go (Nine) and Screen routes. Each route is judged against routes like it (route, coverage incl. press, slot/outside, on/off line). Min. 15 core routes.">
+                    <div className="p-3 bg-slate-900 rounded-lg border border-slate-800" title="Open Rate Above Expected, excluding Go (Nine) and Screen routes. Each route is judged against routes like it (route, coverage incl. press, each route's own coverage effect, slot/outside, on/off line). Min. 15 core routes.">
                       <div className="text-xs text-slate-500 mb-1">Core SAE</div>
                       <div className={`text-xl font-bold ${coreSae == null ? "text-slate-600" : coreSae >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                         {coreSae == null ? "—" : `${coreSae >= 0 ? "+" : ""}${coreSae.toFixed(1)}`}

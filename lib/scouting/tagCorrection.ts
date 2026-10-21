@@ -28,10 +28,12 @@
 // Every tag starts switched OFF (ENABLED_TAG_CORRECTIONS). A tag is switched
 // on only after the held-out test (heldOutTagTest) shows it improves
 // predictions for prospects the fit never saw, the same bar every other
-// dimension had to clear (snap position failed it in 2026-10). Until there are
-// enough tagged plays to run the test, tagReadiness says how far off it is.
+// dimension had to clear (snap position failed it in 2026-10); TE-SAEB's tags
+// are the user's exception (2026-10-21, see ENABLED_TAG_CORRECTIONS). Until
+// there are enough tagged plays to run the test, tagReadiness says how far off
+// it is.
 import {
-  makeDesign, fitDifficultyModel, logitFromModel, levelOffset,
+  makeDesign, fitDifficultyModel, logitFromModel, baseLogitFor, levelOffset,
   type DifficultyCorrection, type DifficultyDesign, type FittedDifficulty,
 } from "./difficultyModel";
 import type { PlayEra } from "./playEra";
@@ -52,6 +54,9 @@ export interface DifficultyTagSpec {
   label: string;
   /** Boolean tags: ["on"]. Text tags: the non-reference values. */
   buckets: readonly string[];
+  /** A bucket read from more than the column (TE-SAEB's 3rd/4th down, split
+   *  by pass or run block). Absent: the column's own value. */
+  bucketOf?: (row: object) => string | null;
 }
 
 const ON = ["on"] as const;
@@ -59,6 +64,19 @@ const RED_ZONE: DifficultyTagSpec = { column: "red_zone", label: "Red zone", buc
 const THIRD_FOURTH: DifficultyTagSpec = { column: "third_fourth_down", label: "3rd/4th down", buckets: ON };
 const SHORT_YARDAGE: DifficultyTagSpec = { column: "short_yardage", label: "Short yardage / goal line", buckets: ON };
 const SITUATIONS = [RED_ZONE, THIRD_FOURTH, SHORT_YARDAGE] as const;
+
+// A TE block on 3rd/4th down, as a pass or a run block (the user, 2026-10-21:
+// a pass block on 3rd down, when the defense is more likely to bring pressure,
+// isn't the same rep as one on 1st or 2nd). 1st/2nd down is the reference.
+const TE_BLOCK_THIRD_FOURTH: DifficultyTagSpec = {
+  column: "third_fourth_down",
+  label: "3rd/4th down (pass / run block)",
+  buckets: ["pass_block", "run_block"],
+  bucketOf: (row) => {
+    const r = row as { third_fourth_down?: unknown; play_type?: unknown };
+    return r.third_fourth_down === true && (r.play_type === "pass_block" || r.play_type === "run_block") ? r.play_type : null;
+  },
+};
 
 // The approved difficulty tags (plan, 2026-10-04), by the model they'd enter.
 export const DIFFICULTY_TAGS: Record<CorrectionKey, readonly DifficultyTagSpec[]> = {
@@ -70,15 +88,37 @@ export const DIFFICULTY_TAGS: Record<CorrectionKey, readonly DifficultyTagSpec[]
   rb_srae: [{ column: "hit_behind_line", label: "Hit behind the line", buckets: ON }, ...SITUATIONS],
   wr_sae: [...SITUATIONS],
   te_saer: [...SITUATIONS],
-  te_saeb: [{ column: "blocked_defender", label: "Blocked LB / DB (vs DL)", buckets: ["lb", "db"] }, ...SITUATIONS],
+  te_saeb: [{ column: "blocked_defender", label: "Blocked LB / DB (vs DL)", buckets: ["lb", "db"] }, RED_ZONE, TE_BLOCK_THIRD_FOURTH, SHORT_YARDAGE],
 };
 
-// Switched on per model, tag by tag, only after heldOutTagTest shows the tag
-// improves held-out predictions. All off: 0 of 30,000 plays were tagged when
-// Stage 4 was built (2026-10-05). The Grading checks tab (Analysis) reports
-// when each tag has enough plays to test and what the test says.
+// Switched on per model, tag by tag, only after the held-out test shows the tag
+// improves held-out predictions, except TE-SAEB (below). The Grading checks
+// tab (Analysis) reports when each tag has enough plays to test and what the
+// test says.
+//
+// First run on real tagged data, 2026-10-21 (RB 733 tagged runs from 32 RBs,
+// QB 360 throws from 10, TE 309 blocks from 9), held to the game-context bar
+// (contextEffects.ts): lower held-out error, in most of the 5 folds, and
+// better than 95% of runs with the tag shuffled across plays.
+//   - RB hit behind the line: 6.2% better, 5/5 folds, p .005 (29% success vs
+//     51% expected). Short yardage: 1.5%, p .005 (73% vs 53%). 3rd/4th down:
+//     1.0%, p .005, and still adds with short yardage (46 of their 86 plays
+//     overlap). All three: 9.0%.
+//   - QB play action: 0.5%, 4/5 folds, p .045 (87% accurate vs 79% expected).
+//   - Failed: QB tight window, red zone for every model, 3rd/4th down for QB /
+//     WR / TE routes. Too few to test: short yardage for QB / WR / TE, and
+//     garbage time everywhere (7 tagged plays in all).
+// TE-SAEB takes every block tag by the user's call (2026-10-21: "I want to take
+// tons into account"): who he blocked, red zone, short yardage and 3rd/4th
+// down by pass / run block. Held out it's level with today's model (+0.1%),
+// so it costs nothing, and the ridge keeps a thin tag (5 tagged 3rd/4th-down
+// pass blocks on that date) near 0 until it has the reps.
 export const ENABLED_TAG_CORRECTIONS: Record<CorrectionKey, readonly string[]> = {
-  qb_aae: [], rb_srae: [], wr_sae: [], te_saer: [], te_saeb: [],
+  qb_aae: ["play_action"],
+  rb_srae: ["hit_behind_line", "short_yardage", "third_fourth_down"],
+  wr_sae: [],
+  te_saer: [],
+  te_saeb: ["blocked_defender", "red_zone", "third_fourth_down", "short_yardage"],
 };
 
 // Re-center a model's tagged era on its older eras (the era scale check's fix):
@@ -112,6 +152,10 @@ const val = (row: Row, column: string): unknown => (row as Record<string, unknow
 
 /** The model bucket a row carries for a tag, or null (reference value or untagged). */
 export function tagBucket(spec: DifficultyTagSpec, row: Row): string | null {
+  if (spec.bucketOf) {
+    const b = spec.bucketOf(row);
+    return b != null && spec.buckets.includes(b) ? b : null;
+  }
   const v = val(row, spec.column);
   if (v === true) return spec.buckets.includes("on") ? "on" : null;
   return typeof v === "string" && spec.buckets.includes(v) ? v : null;
@@ -156,7 +200,7 @@ export function fitTagCorrection<T extends Row>(
   if (tagged.length === 0) return null;
   const count = inp.countOf ?? (() => 1);
   const design = correctionDesign<T>(specs);
-  const zBase = tagged.map((r) => logitFromModel(base.model, base.design.cols(r)));
+  const zBase = tagged.map((r) => baseLogitFor(base, r));
   const fitted = fitDifficultyModel(
     tagged.map((r, i) => ({ cols: design.cols(r), y: inp.outcome(r), w: count(r), offset: zBase[i] })),
     design.size,
@@ -199,7 +243,7 @@ function olderMeanResidual<T extends Row>(base: WithModel<T>, inp: CorrectionInp
     if (inp.tagged(row)) continue;
     const c = count(row);
     n += c;
-    r += c * (inp.outcome(row) - 1 / (1 + Math.exp(-logitFromModel(base.model, base.design.cols(row)))));
+    r += c * (inp.outcome(row) - 1 / (1 + Math.exp(-baseLogitFor(base, row))));
   }
   return n > 0 ? r / n : null;
 }
@@ -306,7 +350,7 @@ export function heldOutTagTest<T extends Row>(
       const corr = fitTagCorrection(withModel, { ...inp, rows: train }, [spec]);
       for (const row of test) {
         const y = inp.outcome(row), c = count(row);
-        const z = logitFromModel(withModel.model, withModel.design.cols(row));
+        const z = baseLogitFor(withModel, row);
         const zc = corr ? logitFromModel(corr.model, corr.design.cols(row), z) : z;
         baseLoss += c * logLoss(y, 1 / (1 + Math.exp(-z)));
         withLoss += c * logLoss(y, 1 / (1 + Math.exp(-zc)));

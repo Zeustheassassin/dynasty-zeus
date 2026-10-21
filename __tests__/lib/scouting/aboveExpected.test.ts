@@ -877,6 +877,23 @@ describe("TE difficulty models", () => {
     expect(closed("press") - closed("man")).toBeGreaterThan(25);
   });
 
+  it("TE-SAER: positioning doesn't change a route's expected; WR's route × coverage shape does", () => {
+    const B = buildTERouteBaselines([
+      ...repeat(100, (i) => tePlay("g_bg", { route_type: "nine", coverage: "zone", positioning: "slot", was_open: i % 2 === 0 })),
+      ...repeat(100, (i) => tePlay("g_bg", { route_type: "nine", coverage: "press", positioning: "inline", was_open: i % 2 === 0 })),
+      ...repeat(100, (i) => tePlay("g_bg", { route_type: "curl", coverage: "zone", positioning: "slot", was_open: i % 4 !== 0 })),
+      ...repeat(100, (i) => tePlay("g_bg", { route_type: "curl", coverage: "press", positioning: "wide", was_open: i % 4 !== 0 })),
+    ]);
+    const closed = (route_type: TEPlay["route_type"], coverage: TEPlay["coverage"], positioning: TEPlay["positioning"]) =>
+      computeTERouteAboveExpectedForPlays([tePlay("g1", { route_type, coverage, positioning, was_open: false })], B)!;
+    expect(closed("nine", "zone", "slot")).toBe(closed("nine", "zone", "inline"));
+    // Same open rates against press and zone for both routes, yet against press a
+    // nine is expected to be open more than a curl, relative to their zone reps.
+    const nineGap = closed("nine", "zone", "slot") - closed("nine", "press", "slot");
+    const curlGap = closed("curl", "zone", "slot") - closed("curl", "press", "slot");
+    expect(nineGap).toBeGreaterThan(curlGap + 10);
+  });
+
   it("TE-SAEB: a lost movement block costs less than a lost inline block", () => {
     const B = buildTEBlockBaselines([
       ...repeat(200, (i) => tePlay("g_bg", { play_type: "run_block", block_type: "movement", block_success: i % 10 < 6 })),

@@ -4,7 +4,7 @@ import {
   aboveExpectedSampleForPlays, type FittedDifficulty,
 } from "@/lib/scouting/difficultyModel";
 import {
-  fitTagCorrection, correctionFor, enabledSpecs, tagReadiness, heldOutTagTest, garbageTimeTest,
+  fitTagCorrection, correctionFor, enabledSpecs, tagBucket, tagReadiness, heldOutTagTest, garbageTimeTest,
   eraResiduals, eraDrift, withGarbageWeight, DIFFICULTY_TAGS, ENABLED_TAG_CORRECTIONS,
   TEST_MIN_ON_PLAYS, TEST_MIN_PROSPECTS, ERA_CHECK_MIN_TAGGED, GT_MIN_PROSPECTS,
 } from "@/lib/scouting/tagCorrection";
@@ -91,11 +91,44 @@ describe("the tag correction", () => {
     expect(aboveExpectedSampleForPlays(rzOnly, withCorr, outcome)!.ae).toBeGreaterThan(aboveExpectedSampleForPlays(rzOnly, base, outcome)!.ae + 10);
   });
 
-  it("is off unless a tag is switched on (all off today)", () => {
-    for (const k of Object.keys(ENABLED_TAG_CORRECTIONS) as (keyof typeof ENABLED_TAG_CORRECTIONS)[]) expect(ENABLED_TAG_CORRECTIONS[k]).toEqual([]);
-    expect(correctionFor("rb_srae", base, { rows: plays, outcome, tagged: isTagged })).toBeNull();
+  it("is off unless a tag is switched on", () => {
+    // What's on (2026-10-21): the tags that passed held out, plus every TE block tag by the user's call.
+    expect(ENABLED_TAG_CORRECTIONS).toEqual({
+      qb_aae: ["play_action"],
+      rb_srae: ["hit_behind_line", "short_yardage", "third_fourth_down"],
+      wr_sae: [],
+      te_saer: [],
+      te_saeb: ["blocked_defender", "red_zone", "third_fourth_down", "short_yardage"],
+    });
+    expect(correctionFor("rb_srae", base, { rows: plays, outcome, tagged: isTagged }, { enabled: [] })).toBeNull();
     expect(correctionFor("rb_srae", base, { rows: plays, outcome, tagged: isTagged }, { enabled: ["red_zone"] })).not.toBeNull();
     expect(enabledSpecs("te_saeb", ["blocked_defender"]).map((s) => s.column)).toEqual(["blocked_defender"]);
+    expect(enabledSpecs("te_saeb").map((s) => s.column)).toEqual(["blocked_defender", "red_zone", "third_fourth_down", "short_yardage"]);
+  });
+
+  it("splits a TE block on 3rd/4th down by pass or run block", () => {
+    const spec = DIFFICULTY_TAGS.te_saeb.find((s) => s.column === "third_fourth_down")!;
+    expect(spec.buckets).toEqual(["pass_block", "run_block"]);
+    expect(tagBucket(spec, { third_fourth_down: true, play_type: "pass_block" })).toBe("pass_block");
+    expect(tagBucket(spec, { third_fourth_down: true, play_type: "run_block" })).toBe("run_block");
+    // 1st/2nd down is the reference, and an untagged block has no bucket.
+    expect(tagBucket(spec, { third_fourth_down: false, play_type: "pass_block" })).toBeNull();
+    expect(tagBucket(spec, { third_fourth_down: null, play_type: "run_block" })).toBeNull();
+    // Every other model keeps the plain on / off 3rd/4th-down tag.
+    expect(DIFFICULTY_TAGS.rb_srae.find((s) => s.column === "third_fourth_down")!.buckets).toEqual(["on"]);
+  });
+
+  it("anchors on the base model's full logit, a design offset included", () => {
+    // No columns: each box's rate rides in on the offset alone.
+    const off = makeDesign<P>([], (p) => (p.box === "a" ? Math.log(0.6 / 0.4) : Math.log(0.4 / 0.6)));
+    const b = withModel(fitFromPlays([...plays], off, outcome, 3));
+    const logit = (p: number) => Math.log(p / (1 - p));
+    // The offset is in every expected: the two boxes sit exactly its gap apart.
+    expect(logit(expectedFor(b, { box: "a" } as P)) - logit(expectedFor(b, { box: "b" } as P))).toBeCloseTo(2 * Math.log(1.5), 9);
+    const c = correctionFor("rb_srae", b, { rows: plays, outcome, tagged: isTagged }, { enabled: ["red_zone"] })!;
+    const tagged = plays.filter(isTagged);
+    const sum = (f: FittedDifficulty<P> & { model: Float64Array }) => tagged.reduce((s, p) => s + expectedFor(f, p), 0);
+    expect(sum({ ...b, correction: c })).toBeCloseTo(sum(b), 6);
   });
 
   it("re-centers the tagged era on the older plays when asked", () => {

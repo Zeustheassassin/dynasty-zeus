@@ -61,6 +61,7 @@ import { addGameResidual, type ByGame } from "./contextEffects";
 import { isTaggedPlay, type TagPosition } from "./playEra";
 import { correctionFor, withGarbageWeight, type CorrectionKey } from "./tagCorrection";
 import { runMixWeight, type RunMix } from "./runMix";
+import { routeCoverageOffset } from "./routeCoveragePattern";
 
 // A model fit on `plays` (its training set, already filtered), with the tag
 // correction for `key` on top when one is switched on.
@@ -779,28 +780,32 @@ export function computeQBThrowSliceAAE(
 }
 
 // ── TE (shared) ──────────────────────────────────────────────────────────
-// Ridge strength for both TE models. Only a few TEs are charted yet, too few
-// to validate on held-out prospects the way QB / WR / RB were, so this borrows
-// QB's value (10), the heaviest of the three: with thin data the model stays
-// close to league average and firms up as charting grows. Re-validate once
-// ~10 TEs are charted.
+// Ridge strength for both TE models. Borrowed from QB (10) when only a few TEs
+// were charted; validated leave-one-TE-out on 2026-10-19 (7 TEs) and again on
+// 2026-10-21 (11 TEs, 378 rated routes, 450 rated blocks): best of 1–300 for
+// TE-SAER, level with 30 for TE-SAEB.
 const TE_RIDGE_LAMBDA = 10;
 
 // ── TE TE-SAER (route running) ───────────────────────────────────────────
 // Open Rate Above Expected: the TE's open rate on rated routes minus the
 // difficulty model's expected open rate for those same routes. Situation
-// dimensions:
-//   route type, coverage (press its own bucket), positioning (inline / slot /
-//   wide / wing / backfield).
-// Mirrors WR SAE's route + coverage + alignment. Location (left / right) is
-// left out — a side of the field, not a difficulty.
+// dimensions, fit on TE routes only:
+//   route type, coverage (press its own bucket),
+// plus how that route plays against that coverage (a nine against press vs
+// against zone), borrowed as a fixed shape from WR's routes
+// (routeCoveragePattern.ts) because TEs are too few to learn it. TE's own
+// levels all come from TE data.
+// Positioning (inline / slot / wide / wing / backfield) was dropped 2026-10-21:
+// held out by TE it added nothing (route + coverage alone predicted a hair
+// better), and coverage, which added nothing on 2026-10-19, now earns its
+// place. Location (left / right) is left out — a side of the field, not a
+// difficulty.
 const isRatedTERoute = (pl: TEPlay) => pl.play_type === "route_run" && pl.was_open !== null;
 const teOpen = (pl: TEPlay) => (pl.was_open ? 1 : 0);
 const TE_ROUTE_DESIGN = makeDesign<TEPlay>([
   [ROUTE_TYPES,     (pl) => pl.route_type],
   [TE_COVERAGES,    (pl) => pl.coverage],
-  [TE_POSITIONINGS, (pl) => pl.positioning],
-]);
+], (pl) => routeCoverageOffset(pl.route_type, pl.coverage));
 
 export type TERouteBaselines = FittedDifficulty<TEPlay>;
 
@@ -855,6 +860,11 @@ export function computeTERouteAboveExpected(
 // dimensions:
 //   run vs pass block, movement vs inline block, positioning (a detached
 //   block from the slot or wing is a different rep than one from inline).
+// On a tagged block the tag correction (tagCorrection.ts) adds who he blocked
+// (DL / LB / DB), red zone, short yardage and 3rd/4th down by pass or run
+// block. The user's call (2026-10-21) is to take all of it into account; held
+// out by TE, block type alone predicts best (about 1% better than all of this),
+// and the full set is level with play + block + positioning alone.
 // Both run and pass blocks are included; plays missing block_type or
 // block_success are excluded from both the prospect's sample and the league
 // model. 15-block minimum sample.

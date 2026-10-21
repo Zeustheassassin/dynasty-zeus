@@ -47,8 +47,8 @@ export const TE_STAT_COLS: ColDef[] = [
   // Role buckets (lib/scouting/roleFitTE.ts)
   ...roleFitCols("TE"),
   // Advanced
-  { key: "te_saer",    label: "TE-SAER", group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 76, tooltip: "Route SAE — Open Rate Above Expected, each route judged against routes like it (route, coverage incl. press, positioning stacked) (15+ rated routes) Older seasons count a little less.", leagueOverride: 0 },
-  { key: "te_saeb",    label: "TE-SAEB", group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 76, tooltip: "Block SAE — Block Success Above Expected, each block judged against blocks like it (run/pass, movement/inline, positioning stacked) (15+ rated blocks) Older seasons count a little less.", leagueOverride: 0 },
+  { key: "te_saer",    label: "TE-SAER", group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 76, tooltip: "Route SAE — Open Rate Above Expected, each route judged against routes like it (route and coverage incl. press, plus how that route plays against that coverage, borrowed from WR routes) (15+ rated routes) Older seasons count a little less.", leagueOverride: 0 },
+  { key: "te_saeb",    label: "TE-SAEB", group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 76, tooltip: "Block SAE — Block Success Above Expected, each block judged against blocks like it (run/pass, movement/inline, positioning stacked; on tagged blocks also who he blocked, red zone, short yardage, 3rd/4th down by pass/run) (15+ rated blocks) Older seasons count a little less.", leagueOverride: 0 },
   { key: "open_pct",   label: "Open%",   group: "Advanced", fmt: "pct",       colorDir: 1,  width: 62, weightBy: "rated_routes_n" },
   { key: "tgt_pct",    label: "Tgt%",    group: "Advanced", fmt: "pct",       colorDir: 1,  width: 58, weightBy: "routes" },
   { key: "catch_pct",  label: "Catch%",  group: "Advanced", fmt: "pct",       colorDir: 1,  width: 62, weightBy: "raw_tgts" },

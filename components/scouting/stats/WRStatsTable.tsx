@@ -38,7 +38,7 @@ export const WR_STAT_COLS: ColDef[] = [
   // Role buckets (lib/scouting/roleFitWR.ts)
   ...roleFitCols("WR"),
   // Advanced
-  { key: "sae",      label: "SAE",    group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 62, tooltip: "Success (Open) Rate Above Expected — each route judged against routes like it (route, coverage incl. press, slot/outside, on/off line stacked), so a hard rep costs little when he isn't open. Min. 15 routes. Older seasons count a little less.", leagueOverride: 0 },
+  { key: "sae",      label: "SAE",    group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 62, tooltip: "Success (Open) Rate Above Expected — each route judged against routes like it (route, coverage incl. press, each route's own coverage effect, slot/outside, on/off line stacked), so a hard rep costs little when he isn't open. Min. 15 routes. Older seasons count a little less.", leagueOverride: 0 },
   { key: "core_sae", label: "cSAE",   group: "Advanced", fmt: "plusMinus", colorDir: 1,  width: 64, tooltip: "Core-Route SAE — same as SAE, but excludes Go (Nine) and Screen routes, which are scheme-driven rather than a receiver beating coverage. Min. 15 core routes. Older seasons count a little less.", leagueOverride: 0 },
   { key: "open_pct", label: "Open%",  group: "Advanced", fmt: "pct",       colorDir: 1,  width: 62, tooltip: "% of routes where player was open", weightBy: "routes" },
   { key: "tgt_pct",  label: "Tgt%",   group: "Advanced", fmt: "pct",       colorDir: 1,  width: 58, tooltip: "Targets per route run", weightBy: "routes" },

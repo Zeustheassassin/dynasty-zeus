@@ -94,7 +94,8 @@ export interface ProspectRouteStatsRow {
 // The WR's open rate on routes run minus the difficulty model's expected open
 // rate for those same routes (difficultyModel.ts). Situation dimensions:
 //   route type, coverage (press its own bucket — a harder look than off man),
-//   alignment (outside / slot / backfield), on / off the line.
+//   alignment (outside / slot / backfield), on / off the line, and route ×
+//   coverage (since 2026-10-21: each route's own press / man / zone effect).
 // A go route against press counts as the hard rep it is: not getting open
 // there costs little, getting open earns a lot. Left and right are one
 // "outside" bucket — which side of the field isn't a difficulty (TE-SAER
@@ -166,13 +167,38 @@ const alignDims: DifficultyDim<WRSituation>[] = [
   [["outside", "slot", "backfield"], (s) => (s.alignment === "left" || s.alignment === "right" ? "outside" : s.alignment || null)],
   [["on", "off"],                    (s) => (s.on_line ? "on" : "off")],
 ];
+// How a route plays against a coverage, beyond route and coverage alone (the
+// user, 2026-10-21: "a Nine might be easier to win vs press or man than it is
+// vs zone"). Without it the two effects just add: against press a nine was
+// expected open 38% of the time and a curl 78%, where the league managed 48%
+// and 66%. One bucket per route × coverage, shared by both coverage eras (the
+// era-split version predicted a little worse). Its ridge is stricter than the
+// rest (WR_PAIR_LAMBDA): at the same λ 3 the pairs soaked up part of the route
+// and coverage effects, so a pair with few or no routes (every double) lost
+// its stacking; at 30 route and coverage carry the general effect and a pair
+// only moves where its own routes say so. Held out by WR (5 folds, 12,570
+// routes, 92 WRs): 0.31% lower log loss, all 5 folds (λ 3: 0.29%, 4 of 5;
+// 100: 0.22%). TE-SAER borrows its shape (routeCoveragePattern.ts).
+const WR_PAIR_LAMBDA = 30;
+const routeCoverageDim: DifficultyDim<WRSituation> = [
+  ROUTE_TYPES.flatMap((r) => WR_COVERAGES.map((c) => `${r}|${c}`)),
+  (s) => (s.route_type && s.coverage ? `${s.route_type}|${s.coverage}` : null),
+];
 // The fitted dimensions: coverage gets one bucket per coverage per era.
 const WR_FIT_DIMS: DifficultyDim<WRSituation>[] = [
   routeDim,
   [WR_COVERAGES.flatMap((c) => COVERAGE_ERAS.map((e) => `${c}@${e}`)), (s) => (s.coverage ? `${s.coverage}@${s.era}` : null)],  // "" = uncharted
   ...alignDims,
+  routeCoverageDim,
 ];
 const WR_FIT_DESIGN = makeDesign(WR_FIT_DIMS);
+// Per-column ridge: WR_RIDGE_LAMBDA everywhere, WR_PAIR_LAMBDA on the route ×
+// coverage columns (the last dimension, so the last block of columns).
+const WR_FIT_LAMBDA = (() => {
+  const v = new Float64Array(WR_FIT_DESIGN.size).fill(WR_RIDGE_LAMBDA);
+  v.fill(WR_PAIR_LAMBDA, WR_FIT_DESIGN.size - routeCoverageDim[0].length);
+  return v;
+})();
 // What the expectations use: the fitted columns plus one column per era that
 // holds its level anchor (set by buildWRModel, not fit). makeDesign numbers
 // columns in order, so the era columns follow the fitted ones.
@@ -405,7 +431,7 @@ function buildWRBaseModel(
 // per-game cells for a held-out fold), with each coverage era anchored.
 function fitWRCells(cells: readonly RouteCell[]): WRDifficultyModel {
   const rowsFor = (d: typeof WR_FIT_DESIGN) => cells.map((c) => ({ cols: d.cols(c), y: c.open / c.n, w: c.n }));
-  const fitted = fitDifficultyModel(rowsFor(WR_FIT_DESIGN), WR_FIT_DESIGN.size, WR_RIDGE_LAMBDA);
+  const fitted = fitDifficultyModel(rowsFor(WR_FIT_DESIGN), WR_FIT_DESIGN.size, WR_FIT_LAMBDA);
   if (!fitted) return { design: WR_DESIGN, model: null };
   const model = new Float64Array(WR_DESIGN.size);
   model.set(fitted);

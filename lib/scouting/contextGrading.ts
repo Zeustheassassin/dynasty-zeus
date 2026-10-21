@@ -13,15 +13,22 @@
 //   QB charted sacks per pressured dropback (+4.6%, p .03), WR PFF YPRR
 //   (+2.0%, p .005). Everywhere else today's tier adjustment stays exactly as
 //   it was (opponentAdjust.ts / countComponents.ts), including RB and TE
-//   borrowing WR's tier effect. QB AAE still isn't adjusted (SP+ +0.5%, p .15).
+//   borrowing WR's tier effect. QB AAE isn't opponent-adjusted (SP+ +0.5%,
+//   p .15).
 // - Weather (wind, rain, cold) on top of the opponent model: WR contested
 //   catch % (+3.4%, p .005: rain costs ~18 pts) and RB PFF YPRR (+3.0%,
-//   p .035: wind). No headline AE passed.
+//   p .035: wind). No headline AE passed then.
 // - Supporting cast passed for 7 stats (6 of them his QB's grade in that game,
 //   for receiving stats), but it stays OUT of every score by the user's call
 //   (2026-10-05): a same-game grade rises with the whole offense's good day,
 //   partly because of him, so taking it out would mark down players who make
 //   their QB look good. It's filled in and shown, and tested in Grading checks.
+// - Rerun 2026-10-21 (689 charted games); five more passed and are switched on
+//   (user OK): QB AAE weather (+6.7% held out, p .03: wind and rain cost
+//   accuracy, the first headline AE with a context input), PFF BTT% weather
+//   (+13.7%, p .005), WR SAE against SP+ (+1.0%, p .025, joining cSAE), PFF
+//   QB Fum% against SP+ (+5.2%, p .04) and WR charted Drop% weather (+0.5%,
+//   p .045).
 import type { AESample } from "../types";
 import type { CompositePos } from "./aeComposite";
 import { adjustForContext, CONTEXT_TEST_MIN_PROSPECTS, fitContext, type ByGame, type ContextFit, type CovariateSpec } from "./contextEffects";
@@ -30,9 +37,9 @@ import {
 } from "./gameContext";
 
 /** Metrics (headline AE keys and component keys) judged against opponent defense SP+ instead of tiers. */
-export const OPPONENT_SP: ReadonlySet<string> = new Set(["wr_csae", "ch_qb_p2s", "pff_wr_yprr"]);
+export const OPPONENT_SP: ReadonlySet<string> = new Set(["wr_csae", "ch_qb_p2s", "pff_wr_yprr", "wr_sae", "pff_qb_fum"]);
 /** Metrics whose weather effect counts. */
-export const WEATHER_ON: ReadonlySet<string> = new Set(["ch_wr_cc", "pff_rb_yprr"]);
+export const WEATHER_ON: ReadonlySet<string> = new Set(["ch_wr_cc", "pff_rb_yprr", "qb_aae", "pff_btt", "ch_wr_drop"]);
 /** Supporting cast never counts in a score (the user's call); kept for the checks. */
 export const CAST_ON: ReadonlySet<string> = new Set();
 

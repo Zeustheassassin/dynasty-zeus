@@ -15,7 +15,7 @@ import { type ProspectAge } from "../../lib/scouting/prospectAge";
 import { DRAFT_ROUND_CHOICES, UNDRAFTED_ROUND, draftRoundLabel } from "../../lib/draftRound";
 import { classDraftedBy, makeLock } from "../../lib/scouting/scoreLock";
 import type { ProspectGameRouteCellsRow } from "../../lib/scouting/aggregateMerge";
-import type { MetricContext } from "../../lib/scouting/contextGrading";
+import { HEADLINE_LABEL, type HeadlineKey, type MetricContext } from "../../lib/scouting/contextGrading";
 import { SEASON_DECAY } from "../../lib/scouting/seasonWeight";
 import { POS_COLOR } from "../../lib/uiTheme";
 import { levelRuleText, matchFor, noLevelReached, roleFitTooltip, roleLabel, roleTagRuleText, standAloneRuleText, versatileRuleText, type RoleFit } from "../../lib/scouting/roleFit";
@@ -57,20 +57,20 @@ interface AEColumn {
 }
 const AE_COLUMNS: AEColumn[] = [
   { key: "aae",     label: "AAE",     pos: "QB", group: "Above Exp", tooltip: "Accuracy Above Expected — each throw judged against throws like it (all situation tags stacked). Min. 25 graded passes. Older seasons count a little less." },
-  { key: "srae",    label: "SRAE",    pos: "RB", group: "Above Exp", tooltip: "Success Rate Above Expected — each run judged against runs like it (formation, loaded box, unblocked defender stacked). Min. 15 runs. Older seasons count a little less." },
-  { key: "sae",     label: "SAE",     pos: "WR", group: "Above Exp", tooltip: "Success (Open) Rate Above Expected — each route judged against routes like it (route, coverage incl. press, slot/outside, on/off line stacked). Min. 15 routes. Older seasons count a little less." },
+  { key: "srae",    label: "SRAE",    pos: "RB", group: "Above Exp", tooltip: "Success Rate Above Expected — each run judged against runs like it (formation, loaded box, unblocked defender stacked; on tagged runs also hit behind the line, short yardage, 3rd/4th down). Min. 15 runs. Older seasons count a little less." },
+  { key: "sae",     label: "SAE",     pos: "WR", group: "Above Exp", tooltip: "Success (Open) Rate Above Expected — each route judged against routes like it (route, coverage incl. press, each route's own coverage effect, slot/outside, on/off line stacked). Min. 15 routes. Older seasons count a little less." },
   { key: "csae",    label: "cSAE",    pos: "WR", group: "Above Exp", tooltip: "Core-Route SAE — same as SAE, but excludes Go (Nine) and Screen routes. Min. 15 core routes. Older seasons count a little less." },
-  { key: "te_saer", label: "TE-SAER", pos: "TE", group: "Above Exp", tooltip: "Route SAE — Open Rate Above Expected, each route judged against routes like it (route, coverage incl. press, positioning stacked). Min. 15 rated routes. Older seasons count a little less." },
-  { key: "te_saeb", label: "TE-SAEB", pos: "TE", group: "Above Exp", tooltip: "Block SAE — Block Success Above Expected, each block judged against blocks like it (run/pass, movement/inline, positioning stacked). Min. 15 rated blocks. Older seasons count a little less." },
+  { key: "te_saer", label: "TE-SAER", pos: "TE", group: "Above Exp", tooltip: "Route SAE — Open Rate Above Expected, each route judged against routes like it (route and coverage incl. press, plus how that route plays against that coverage, borrowed from WR routes). Min. 15 rated routes. Older seasons count a little less." },
+  { key: "te_saeb", label: "TE-SAEB", pos: "TE", group: "Above Exp", tooltip: "Block SAE — Block Success Above Expected, each block judged against blocks like it (run/pass, movement/inline, positioning stacked; on tagged blocks also who he blocked, red zone, short yardage, 3rd/4th down by pass/run). Min. 15 rated blocks. Older seasons count a little less." },
   { key: "aae_out",   label: "Outside",      pos: "QB", group: "AAE Breakdown", breakdown: true, tooltip: "AAE on outside throws (left or right third of the field), each judged against throws like it. Min. 10 such throws." },
   { key: "aae_in",    label: "Inside",       pos: "QB", group: "AAE Breakdown", breakdown: true, tooltip: "AAE on inside throws (middle third of the field), each judged against throws like it. Min. 10 such throws." },
   { key: "aae_deep",  label: "Deep",         pos: "QB", group: "AAE Breakdown", breakdown: true, tooltip: "AAE on deep throws (20+ yds), each judged against throws like it. Min. 10 such throws." },
   { key: "aae_mid",   label: "Intermediate", pos: "QB", group: "AAE Breakdown", breakdown: true, tooltip: "AAE on intermediate throws (10–20 yds), each judged against throws like it. Min. 10 such throws." },
   { key: "aae_short", label: "Short",        pos: "QB", group: "AAE Breakdown", breakdown: true, tooltip: "AAE on short throws (under 10 yds), each judged against throws like it. Min. 10 such throws." },
-  { key: "srae_out",  label: "Outside",      pos: "RB", group: "SRAE Breakdown", breakdown: true, tooltip: "SRAE on outside runs (outside zone + outside man gap), each judged against outside runs like it (formation, loaded box, unblocked defender stacked). Min. 10 such runs." },
-  { key: "srae_in",   label: "Inside",       pos: "RB", group: "SRAE Breakdown", breakdown: true, tooltip: "SRAE on inside runs (inside zone + inside man gap), each judged against inside runs like it (formation, loaded box, unblocked defender stacked). Min. 10 such runs." },
-  { key: "srae_zone", label: "Zone",         pos: "RB", group: "SRAE Breakdown", breakdown: true, tooltip: "SRAE on zone runs (outside + inside zone), each judged against zone runs like it (formation, loaded box, unblocked defender stacked). Min. 10 such runs." },
-  { key: "srae_mg",   label: "Man Gap",      pos: "RB", group: "SRAE Breakdown", breakdown: true, tooltip: "SRAE on man gap runs (outside + inside man gap), each judged against man gap runs like it (formation, loaded box, unblocked defender stacked). Min. 10 such runs." },
+  { key: "srae_out",  label: "Outside",      pos: "RB", group: "SRAE Breakdown", breakdown: true, tooltip: "SRAE on outside runs (outside zone + outside man gap), each judged against outside runs like it (formation, loaded box, unblocked defender stacked; tagged runs also hit behind the line, short yardage, 3rd/4th down). Min. 10 such runs." },
+  { key: "srae_in",   label: "Inside",       pos: "RB", group: "SRAE Breakdown", breakdown: true, tooltip: "SRAE on inside runs (inside zone + inside man gap), each judged against inside runs like it (formation, loaded box, unblocked defender stacked; tagged runs also hit behind the line, short yardage, 3rd/4th down). Min. 10 such runs." },
+  { key: "srae_zone", label: "Zone",         pos: "RB", group: "SRAE Breakdown", breakdown: true, tooltip: "SRAE on zone runs (outside + inside zone), each judged against zone runs like it (formation, loaded box, unblocked defender stacked; tagged runs also hit behind the line, short yardage, 3rd/4th down). Min. 10 such runs." },
+  { key: "srae_mg",   label: "Man Gap",      pos: "RB", group: "SRAE Breakdown", breakdown: true, tooltip: "SRAE on man gap runs (outside + inside man gap), each judged against man gap runs like it (formation, loaded box, unblocked defender stacked; tagged runs also hit behind the line, short yardage, 3rd/4th down). Min. 10 such runs." },
 ];
 
 const PFF_BAND_TOOLTIP =
@@ -656,7 +656,7 @@ export default function BigBoard({
           `weight ${c.weight} × ${Math.round(c.reliability * 100)}% = ${(c.effectiveWeight ?? 0).toFixed(2)} → ${signed(c.z, 2)}`;
       }
       const ctx = contextInfo[COMPOSITE_HEADLINE[c.key] ?? "qb_aae"];
-      const what = !COMPOSITE_HEADLINE[c.key] ? "opponents" : ctx.weather ? "opponents and weather" : ctx.opponent === "sp" && ctx.fit ? "opponent defenses" : "opponents";
+      const what = !COMPOSITE_HEADLINE[c.key] ? "opponents" : ctx.weather ? (ctx.key === "qb_aae" ? "weather" : "opponents and weather") : ctx.opponent === "sp" && ctx.fit ? "opponent defenses" : "opponents";
       const ae = c.rawAe != null
         ? `${signed(c.rawAe, 1)} (${signed(c.ae - c.rawAe, 1)} for ${what}) = ${signed(c.ae, 1)}`
         : signed(c.ae, 1);
@@ -802,7 +802,7 @@ export default function BigBoard({
   // Headline metrics judged against opponent defense SP+ instead (contextGrading.ts).
   const spText = (Object.values(contextInfo) as MetricContext[])
     .filter((c) => c.opponent === "sp" && c.fit && c.fit.beta.opp_def_sp != null)
-    .map((c) => `${c.key === "wr_csae" ? "WR cSAE" : c.key} by opp. defense SP+ (${(c.fit!.beta.opp_def_sp * 100).toFixed(2)} pts per SP+ pt)`);
+    .map((c) => `${HEADLINE_LABEL[c.key as HeadlineKey] ?? c.key} by opp. defense SP+ (${(c.fit!.beta.opp_def_sp * 100).toFixed(2)} pts per SP+ pt)`);
   const opponentStatus = !gameRouteCells
     ? "the per-game WR route data (migration 058) didn't load"
     : [...spText, effectText("WR"), effectText("TE"), effectText("RB"), "QB not adjusted"].filter(Boolean).join(" · ") || "not enough games vs G5/FCS yet";
@@ -818,8 +818,8 @@ export default function BigBoard({
     "(QB sacks under pressure; RB pass pro, drops, open on routes; WR drops, contested catches), " +
     "PFF's results over the charted games where you don't chart (QB BTT%, TWP%, rushing; RB YCO/A, missed tackles, 10+ yard runs, 15+ of 10+, YPRR; WR/TE YPRR, YAC; RB and QB fumbles), " +
     "and the tag-only stats once enough tagged plays exist. A player without one keeps his score as it was. " +
-    "Opponent strength is taken out (the AE columns keep it): WR cSAE, QB sacks under pressure and WR PFF YPRR by the opponent's defensive SP+, " +
-    "everything else by the opponent's P4 / G5 / FCS tier; WR contested catches and RB PFF YPRR by the game's weather too. " +
+    "Opponent strength is taken out (the AE columns keep it): WR cSAE and SAE, QB sacks under pressure, QB PFF fumbles and WR PFF YPRR by the opponent's defensive SP+, " +
+    "everything else but QB AAE by the opponent's P4 / G5 / FCS tier; QB AAE, QB PFF BTT%, WR drops, WR contested catches and RB PFF YPRR by the game's weather too. " +
     "Each passed a held-out test (Analysis → Grading checks); supporting cast is shown, never scored. " +
     `Older seasons count a little less, here and in the AE columns (each season back ×${SEASON_DECAY}). ` +
     "WRs lined up 75%+ on one side (or, milder, in the slot) lose up to 0.5 (0.2), most at 95%. " +
