@@ -7,7 +7,7 @@ import { computeRBAboveExpectedSamples } from "../../../lib/scouting/aboveExpect
 import { EMPTY_GRADING_DATA } from "../../../lib/scouting/aeComponents";
 import { gameCovariates } from "../../../lib/scouting/gameContext";
 import { NFL_RUN_MIX } from "../../../lib/scouting/runMix";
-import { buildPositionComposite } from "../../../lib/scouting/aeComposite";
+import { buildPositionComposite, TE_FIELD_TIME_PAIR } from "../../../lib/scouting/aeComposite";
 import { DEFAULT_DYNASTY_WEIGHTS } from "../../../lib/scouting/dynastyScore";
 import type { GameContext } from "../../../lib/scouting/gameContext";
 import type { OpponentTier } from "../../../lib/scouting/opponentTier";
@@ -160,6 +160,19 @@ describe("scorePieces", () => {
       const c = sc.components.find((x) => x.key === "fum")!;
       expect(f).toMatchObject({ weight: "0.2, added on top" });
       expect(f.add).toBeCloseTo(0.2 * c.z, 12);
+    }
+  });
+
+  it("adds TE blocking as its field-time effect, and the pieces still sum to the score", () => {
+    const route = { key: "te_saer", label: "TE-SAER", weight: 1, samples: primary.samples };
+    const block = { key: "te_saeb", label: "TE-SAEB", weight: 0, samples: new Map(ids.map((id, i) => [id, sample(5 - i)])) };
+    const pc = buildPositionComposite("TE", [route, block, extra], 0, TE_FIELD_TIME_PAIR);
+    for (const id of ["p0", "p5", "p11"]) {
+      const sc = pc.scores.get(id)!;
+      const pieces = scorePieces({ score: sc.score, components: sc.components.map((c) => ({ ...c, tau: 1 })) }, pc);
+      expect(pieces.reduce((s, x) => s + x.add, 0)).toBeCloseTo(sc.score, 10);
+      const b = pieces.find((x) => x.key === "te_saeb")!;
+      expect(b.weight).toMatch(/^field time: \d+% of snaps × \d\.\d\d per snap$/);
     }
   });
 });

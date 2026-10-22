@@ -106,7 +106,7 @@ export const PFF_COMPONENTS: readonly PffStatDef[] = [
 
 // Each component's weight in its position's score at full trust, next to the
 // user's own metric(s) (QB AAE 1 · RB SRAE 1 · WR cSAE 0.7 + SAE 0.3 · TE-SAER
-// 0.8 + TE-SAEB 0.2). The user's call (2026-10-05): the "heavier" set, so PFF
+// 1, with TE-SAEB through field time). The user's call (2026-10-05): the "heavier" set, so PFF
 // fills the gaps the charting misses while the user's grading stays the
 // biggest piece. Each prospect's own weight is this × his trust in the sample
 // (aeComposite.ts), so today, at 4–5 charted games, PFF and the charted

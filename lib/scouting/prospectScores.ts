@@ -210,8 +210,9 @@ const sgn = (v: number, dp: number) => `${v >= 0 ? "+" : ""}${v.toFixed(dp)}`;
  * An AE Score, piece by piece: each metric adds weight × z ÷ D, where D is
  * the summed weight of the position's ready AE metrics plus his per-player
  * components at weight × trust (buildPositionComposite). An additive piece
- * (fumbles) adds weight × z outright. Then the WR alignment penalty and the
- * position baseline. The adds sum to the score.
+ * (fumbles) adds weight × z outright. A paired modifier (TE blocking through
+ * field time) adds its contribution ÷ D. Then the WR alignment penalty and
+ * the position baseline. The adds sum to the score.
  */
 export function scorePieces(view: ScoreView, pc: PositionComposite): ScorePiece[] {
   const base = pc.metrics.filter((m) => m.ready && !m.perPlayer).reduce((s, m) => s + m.weight, 0);
@@ -228,8 +229,10 @@ export function scorePieces(view: ScoreView, pc: PositionComposite): ScorePiece[
       ? `${c.weight}, added on top`
       : c.perPlayer
         ? `${c.weight} × ${Math.round(c.reliability * 100)}% = ${(c.effectiveWeight ?? 0).toFixed(2)}`
-        : `${c.weight}`;
-    const add = c.additive ? c.weight * c.z : d > 0 ? (c.weight * c.z) / d : 0;
+        : c.contribution != null
+          ? `field time: ${c.via ?? "snaps"}`
+          : `${c.weight}`;
+    const add = c.additive ? c.weight * c.z : d > 0 ? (c.contribution ?? c.weight * c.z) / d : 0;
     return { key: c.key, label: c.label, value, trust: c.reliability, weight, add };
   });
   if (view.alignment) pieces.push({ key: "alignment", label: "One-side alignment", value: view.alignment.label, trust: null, weight: null, add: view.alignment.value });

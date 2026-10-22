@@ -11,8 +11,11 @@ import {
   buildPositionComposite,
   buildAEComposite,
   MIN_POOL,
+  TE_SPREAD_FLOOR,
+  TE_FIELD_TIME_PAIR,
   type CompositeMetric,
 } from "@/lib/scouting/aeComposite";
+import { teRouteEquivalent } from "@/lib/scouting/teFieldTime";
 import type { AESample } from "@/lib/types";
 
 const s = (ae: number, variance = 4, n = 100): AESample => ({ ae, n, variance });
@@ -155,7 +158,8 @@ describe("buildAEComposite", () => {
     // pool earns about the same score.
     const ratio = comp.scores.get("rbp9")!.score / comp.scores.get("qbp9")!.score;
     expect(Math.abs(ratio - 1)).toBeLessThan(0.15);
-    expect(comp.positions.TE.metrics.map((m) => m.weight)).toEqual([0.8, 0.2]);
+    // TE: routes carry the weight in full, blocking adds through field time.
+    expect(comp.positions.TE.metrics.map((m) => m.weight)).toEqual([1, 0]);
     // WR leads with cSAE (70%), SAE behind it (30%).
     expect(comp.positions.WR.metrics.map((m) => [m.key, m.weight])).toEqual([["csae", 0.7], ["sae", 0.3]]);
     const wr = comp.scores.get("wrp9")!;
@@ -171,6 +175,58 @@ describe("buildAEComposite", () => {
     const comp = buildAEComposite({ qb: empty, rb: empty, wr, wrCore, teRoute: empty, teBlock: empty });
     expect(comp.scores.has("goScreenGuy")).toBe(false);
     expect(comp.scores.has("p0")).toBe(true);
+  });
+});
+
+describe("TE: switched on at the spread floor, blocking through field time", () => {
+  // Eleven TEs whose values spread no more than their noise: Paule–Mandel τ 0.
+  const NOISY = [-5, -3, -2, -1, 0, 0, 1, 1, 2, 3, 4];
+  const te = (aes: number[], variance = 64) => new Map<string, AESample | null>(aes.map((ae, i) => [`te${i}`, s(ae, variance, 40)]));
+  const empty = new Map<string, AESample | null>();
+  const board = (teRoute: Map<string, AESample | null>, teBlock: Map<string, AESample | null>) =>
+    buildAEComposite({ qb: empty, rb: empty, wr: empty, wrCore: empty, teRoute, teBlock });
+
+  it("scores TEs on half the observed spread when the pool shows none of its own", () => {
+    const route = te(NOISY);
+    expect(estimateSpread([...route.values()] as AESample[]).tau2).toBe(0);
+    const pc = board(route, te([...NOISY].reverse())).positions.TE;
+    expect(pc.ready).toBe(true);
+    const sd = Math.sqrt(NOISY.reduce((a, x) => a + x * x, 0) / 10 - (NOISY.reduce((a, x) => a + x, 0) ** 2) / 110);
+    expect(pc.metrics[0]).toMatchObject({ key: "te_saer", floored: true });
+    expect(pc.metrics[0].tau).toBeCloseTo(0.5 * sd, 9);
+    expect(TE_SPREAD_FLOOR).toBe(0.5);
+  });
+
+  it("drops the floor flag once Paule–Mandel reads a wider spread", () => {
+    const pc = board(te(SPREAD.map((x) => x * 3), 4), te(SPREAD, 4)).positions.TE;
+    expect(pc.metrics[0].floored).toBeUndefined();
+  });
+
+  it("adds blocking as the field-time effect on top of the route z", () => {
+    const pc = board(te(NOISY), te([...NOISY].reverse())).positions.TE;
+    const tauB = pc.metrics[1].tau!;
+    for (const sc of pc.scores.values()) {
+      const [r, b] = sc.components;
+      expect([r.key, b.key]).toEqual(["te_saer", "te_saeb"]);
+      expect(b.weight).toBe(0);
+      expect(b.contribution).toBeCloseTo(teRouteEquivalent(r.z, b.z, tauB) - r.z, 12);
+      expect(b.via).toMatch(/^\d+% of snaps × \d\.\d\d per snap$/);
+      expect(sc.score).toBeCloseTo(teRouteEquivalent(r.z, b.z, tauB), 12);
+    }
+  });
+
+  it("scores a TE without a blocking sample on routes alone", () => {
+    const block = te([...NOISY].reverse());
+    block.set("te0", null);
+    block.set("extra", s(0, 64, 40)); // keeps blocking at 11 qualified
+    const sc = board(te(NOISY), block).positions.TE.scores.get("te0")!;
+    expect(sc.components.map((c) => c.key)).toEqual(["te_saer"]);
+    expect(sc.score).toBeCloseTo(sc.components[0].z, 12);
+  });
+
+  it("is the pair rule buildAEComposite uses", () => {
+    expect(TE_FIELD_TIME_PAIR).toMatchObject({ primary: "te_saer", modifier: "te_saeb" });
+    expect(TE_FIELD_TIME_PAIR.combine).toBe(teRouteEquivalent);
   });
 });
 

@@ -28,9 +28,10 @@
 //
 // A position joins the score only once MIN_POOL prospects clear its primary
 // metric's sample floor. τ can't be read off a handful of players. TE sat at
-// 3 when this shipped and joins on its own once charting reaches 10.
+// 3 when this shipped; it joined on 2026-10-21 with a spread floor (TE_SPREAD_FLOOR).
 
 import type { AESample, ScoreComponent } from "../types";
+import { describeFieldTime, teRouteEquivalent } from "./teFieldTime";
 
 export type CompositePos = "QB" | "RB" | "WR" | "TE";
 
@@ -97,6 +98,26 @@ export interface MetricSpread {
   perPlayer?: true;
   /** Added on top, not averaged in (CompositeMetric.additive). */
   additive?: true;
+  /** τ is the spread floor's, not Paule–Mandel's (CompositeMetric.spreadFloor). */
+  floored?: true;
+}
+
+/** Two of a position's own metrics scored as one by a rule instead of
+ *  weighted side by side (TE: routes and blocking through field time,
+ *  teFieldTime.ts). */
+export interface PairedMetrics {
+  /** The metric the pair is scored in; its weight is the pair's. */
+  primary: string;
+  /** The metric that works through the rule. Weight 0: it adds the rule's
+   *  effect (ScoreComponent.contribution), not weight × z. */
+  modifier: string;
+  /** The pair's z, in the primary's SDs, from the two shrunk z's and the
+   *  modifier's spread τ (pts), which turns its z back into points.
+   *  combine(z, 0, τ) must be z: a prospect without a modifier sample is
+   *  average on it, so he's scored on the primary alone. */
+  combine: (zPrimary: number, zModifier: number, tauModifier: number) => number;
+  /** How the rule read him, for the breakdown. */
+  describe?: (zPrimary: number, zModifier: number, tauModifier: number) => string;
 }
 
 export type { ScoreComponent };
@@ -197,12 +218,18 @@ function observedSD(xs: readonly AESample[]): number {
 //     a prospect at the pool's mean gets 0 however good the rest of his game
 //     is (averaged in, an average rate would pull an elite back down and lift
 //     a poor one), and the trust in his sample is already in z.
-export function buildPositionComposite(pos: CompositePos, metrics: CompositeMetric[], baseline = 0): PositionComposite {
+//
+// `paired` scores two of the user's own metrics as one (PairedMetrics): the
+// primary adds weight × z as usual, and the modifier adds the rest of the
+// pair's score, weight × (combine(z, zModifier) − z), so the pieces still sum
+// to the score.
+export function buildPositionComposite(pos: CompositePos, metrics: CompositeMetric[], baseline = 0, paired?: PairedMetrics): PositionComposite {
   const fitted = metrics.map((m) => {
     const xs = [...m.samples.values()].filter((s): s is AESample => s != null);
     const minVar = m.minVariance ?? MIN_VARIANCE;
     const pm = xs.length >= MIN_POOL ? estimateSpread(xs, minVar) : null;
-    const est = pm && m.spreadFloor ? { ...pm, tau2: Math.max(pm.tau2, (m.spreadFloor * observedSD(xs)) ** 2) } : pm;
+    const floor2 = pm && m.spreadFloor ? (m.spreadFloor * observedSD(xs)) ** 2 : 0;
+    const est = pm && floor2 > pm.tau2 ? { ...pm, tau2: floor2 } : pm;
     const ready = est != null && est.tau2 > 0;
     const spread: MetricSpread = {
       key: m.key, label: m.label, weight: m.weight,
@@ -212,6 +239,7 @@ export function buildPositionComposite(pos: CompositePos, metrics: CompositeMetr
       tau: ready ? Math.sqrt(est.tau2) : null,
       ...(m.perPlayer ? { perPlayer: true as const } : {}),
       ...(m.additive ? { additive: true as const } : {}),
+      ...(ready && est !== pm ? { floored: true as const } : {}),
     };
     if (ready && m.fullTrustAt != null) {
       spread.halfPoint = median(xs.map((s) => varianceOf(s, minVar) * s.n)) / est.tau2;
@@ -249,6 +277,7 @@ export function buildPositionComposite(pos: CompositePos, metrics: CompositeMetr
         added += m.weight * z;
         continue;
       }
+      if (m.key === paired?.modifier) continue; // adds through the pair's rule, below
       if (m.perPlayer) {
         c.perPlayer = true;
         c.effectiveWeight = m.weight * reliability;
@@ -256,15 +285,24 @@ export function buildPositionComposite(pos: CompositePos, metrics: CompositeMetr
       }
       weighted += m.weight * z;
     }
+    const lead = paired && components.find((c) => c.key === paired.primary);
+    const mod = paired && components.find((c) => c.key === paired.modifier);
+    const modTau = paired && ready.find((f) => f.m.key === paired.modifier)?.spread.tau;
+    if (paired && lead && mod && modTau) {
+      mod.contribution = lead.weight * (paired.combine(lead.z, mod.z, modTau) - lead.z);
+      if (paired.describe) mod.via = paired.describe(lead.z, mod.z, modTau);
+      weighted += mod.contribution;
+    }
     scores.set(id, { score: weighted / (totalWeight + perPlayerWeight) + added + baseline, components, ...(baseline ? { baseline } : {}) });
   }
   return { pos, ready: true, metrics: spreads, scores };
 }
 
 // ── The board's inputs ───────────────────────────────────────────────────
-// One headline metric each for QB and RB. TE blends route running (SAER) with
-// blocking (SAEB): blocking scores no fantasy points but keeps a rookie TE on
-// the field, so it gets a fifth.
+// One headline metric each for QB and RB. TE pairs route running (SAER) with
+// blocking (SAEB) through field time (teFieldTime.ts): blocking scores no
+// fantasy points but decides how often he's on the field, so it moves his
+// score through his snaps, not as a weighted share.
 //
 // WR leans on cSAE, 70/30 with SAE, by the user's call (2026-10-01). A nine is
 // often a clear-out with no intent to win, and a screen is close to an
@@ -312,8 +350,24 @@ export function matchedCeiling(wr: PositionComposite): ((halfPoint: number) => n
   const multiple = 1 / (boost - 1);
   return (h) => Math.round(multiple * h);
 }
-const TE_ROUTE_WEIGHT = 0.8;
-const TE_BLOCK_WEIGHT = 0.2;
+// TE: routes carry the charted weight in full and blocking adds through field
+// time (weight 0, PairedMetrics). Replaced SAER 0.8 + SAEB 0.2 on 2026-10-21.
+const TE_ROUTE_WEIGHT = 1;
+const TE_BLOCK_WEIGHT = 0;
+export const TE_FIELD_TIME_PAIR: PairedMetrics = {
+  primary: "te_saer",
+  modifier: "te_saeb",
+  combine: teRouteEquivalent,
+  describe: describeFieldTime,
+};
+
+// TEs joined before their pool showed its own spread (the user's call,
+// 2026-10-21: 11 TEs at ~40 routes each, Paule–Mandel τ 0 on both metrics,
+// the observed spread no wider than the noise). The floor keeps τ at half the
+// observed spread, the same floor the components use (aeComponents.ts), so
+// scores stay heavily shrunk; Paule–Mandel takes over once it reads higher.
+// To revisit after about 30–40 more TE games.
+export const TE_SPREAD_FLOOR = 0.5;
 
 export interface AECompositeInputs {
   qb: Map<string, AESample | null>;
@@ -349,10 +403,10 @@ export function buildAEComposite(inp: AECompositeInputs): AEComposite {
     RB: buildPositionComposite("RB", [{ key: "srae", label: "SRAE (NFL run mix)", weight: 1, samples: inp.rb, fullTrustAt: RB_FULL_TRUST }, ...extra("RB")], POSITION_BASELINE.RB),
     WR,
     TE: buildPositionComposite("TE", [
-      { key: "te_saer", label: "TE-SAER", weight: TE_ROUTE_WEIGHT, samples: inp.teRoute, fullTrustAt: matched },
-      { key: "te_saeb", label: "TE-SAEB", weight: TE_BLOCK_WEIGHT, samples: inp.teBlock, fullTrustAt: matched },
+      { key: "te_saer", label: "TE-SAER", weight: TE_ROUTE_WEIGHT, samples: inp.teRoute, fullTrustAt: matched, spreadFloor: TE_SPREAD_FLOOR },
+      { key: "te_saeb", label: "TE-SAEB", weight: TE_BLOCK_WEIGHT, samples: inp.teBlock, fullTrustAt: matched, spreadFloor: TE_SPREAD_FLOOR },
       ...extra("TE"),
-    ], POSITION_BASELINE.TE),
+    ], POSITION_BASELINE.TE, TE_FIELD_TIME_PAIR),
   };
   const scores = new Map<string, AEScore>();
   for (const pc of Object.values(positions)) for (const [id, sc] of pc.scores) scores.set(id, sc);

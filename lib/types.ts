@@ -1381,6 +1381,12 @@ export interface ScoreComponent {
   additive?: boolean;
   /** The value as shown, e.g. "6.1% on 210 attempts (pool 4.5%)". */
   text?: string;
+  /** What it adds to the weighted sum in place of weight × z: a paired
+   *  metric's modifier (TE blocking through field time, aeComposite.ts
+   *  PairedMetrics). Its weight is 0. */
+  contribution?: number;
+  /** How the pair's rule read him, e.g. "81% of snaps × 1.19 per snap". */
+  via?: string;
 }
 
 // A prospect's AE Score as it stood when the draft class was drafted, kept so

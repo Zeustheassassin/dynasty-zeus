@@ -115,7 +115,7 @@ function ScoreStrip({ p, pos, report }: { p: ProspectWithStats; pos: CompositePo
       `${signed(sc.score, 2)} true-talent SDs vs the average charted ${pos}`,
       ...sc.components.map((c) =>
         `${c.label} ${c.text ?? signed(c.ae, c.perPlayer ? 2 : 1)} · ${Math.round(c.reliability * 100)}% taken as real → ` +
-        (c.additive ? `adds ${signed(c.weight * c.z, 2)}` : signed(c.z, 2))),
+        (c.additive ? `adds ${signed(c.weight * c.z, 2)}` : c.contribution != null ? `${signed(c.z, 2)}, field time (${c.via ?? "snaps"}) adds ${signed(c.contribution, 2)}` : signed(c.z, 2))),
       ...(sc.alignment ? [`Alignment: ${sc.alignment.label} → ${signed(sc.alignment.value, 2)}`] : []),
       ...(sc.baseline ? [`${pos} baseline → ${signed(sc.baseline, 2)}`] : []),
       "Breakdown has it piece by piece.",

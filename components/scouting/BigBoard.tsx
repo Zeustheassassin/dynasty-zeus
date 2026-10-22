@@ -660,8 +660,9 @@ export default function BigBoard({
       const ae = c.rawAe != null
         ? `${signed(c.rawAe, 1)} (${signed(c.ae - c.rawAe, 1)} for ${what}) = ${signed(c.ae, 1)}`
         : signed(c.ae, 1);
+      const fieldTime = c.contribution != null ? ` · field time ${c.via ?? ""} → adds ${signed(c.contribution, 2)}` : "";
       return `${c.label} ${ae} on ${c.n} ${SAMPLE_UNIT[c.key] ?? "plays"} · ` +
-        `${Math.round(c.reliability * 100)}% taken as real${fullAt(p.position, c.key)} · ${p.position} spread ±${c.tau.toFixed(1)} → ${signed(c.z, 2)}`;
+        `${Math.round(c.reliability * 100)}% taken as real${fullAt(p.position, c.key)} · ${p.position} spread ±${c.tau.toFixed(1)} → ${signed(c.z, 2)}${fieldTime}`;
     });
     if (sc.lockedAt) {
       lines.push(`As of draft: frozen ${new Date(sc.lockedAt).toLocaleDateString()}, the ${p.draft_class_year} class's draft-day score`);
@@ -786,7 +787,7 @@ export default function BigBoard({
   const compositeStatus = COMPOSITE_POS.map((pos) => {
     const pc = composite.positions[pos];
     const m = pc.metrics[0];
-    if (pc.ready) return `${pos} ±${m.tau!.toFixed(1)} pts (${m.qualified})`;
+    if (pc.ready) return `${pos} ±${m.tau!.toFixed(1)} pts (${m.qualified}${m.floored ? ", at the spread floor" : ""})`;
     return m.qualified >= MIN_POOL ? `${pos} out, no spread beyond noise (${m.qualified})` : `${pos} joins at ${MIN_POOL} (${m.qualified} now)`;
   }).join(" · ");
   // Opponent-strength status: how much easier a G5 / FCS rep counts, by
