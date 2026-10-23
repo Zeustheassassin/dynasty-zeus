@@ -67,8 +67,9 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
   const [showBulkImport, setShowBulkImport]       = useState(false);
   const [showSummaryImport, setShowSummaryImport] = useState(false);
 
-  // Play form state
-  const [noRouteRun, setNoRouteRun]   = useState(false);
+  // Play form state. Every play starts as No Route Run (the user, 10/23); Route Run
+  // opens on Curl.
+  const [noRouteRun, setNoRouteRun]   = useState(true);
   const [routeType, setRouteType]     = useState<RouteType>("curl");
   // Sub-route (migration 073), data collection only: starts on the route's default.
   const variant = useRouteVariant("curl");
@@ -355,7 +356,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
   }
 
   function resetForm() {
-    setEditingPlayId(null); setNoRouteRun(false); setRouteType("curl"); variant.reset("curl"); setAlignment("right");
+    setEditingPlayId(null); setNoRouteRun(true); setRouteType("curl"); variant.reset("curl"); setAlignment("right");
     setOnLine(true); setCoverage(""); setWasOpen(false); setTargeted(false);
     setPlayOutcome(null); setContested(false); setPlayNotes("");
     tags.reset();
