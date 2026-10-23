@@ -3,7 +3,9 @@
 > **Audience:** a developer who has just been handed the keys and has never seen this project.
 > **Goal:** explain what the app is, how the code is structured, how data flows, and how every major subsystem actually works — in enough depth to debug and extend it on day one.
 >
-> *Last reviewed: 2026-10-23, HEAD `80d45c4` (working tree) — **Ball placement is five toggles, not one pick (WR / TE).** The user: a target can be High or Low, In front or Behind, or both (High and in front), all of those are outside his frame, and Outside frame also stands alone (over his head with no jump, at his knees in stride).
+> *Last reviewed: 2026-10-23, HEAD `6329bc1` (working tree) — **Docs only: the activation list.** The user asked for one list of everything collected but not yet used, so it's on their list to switch on later: §23 "Collected, not yet used: the activation list" (stored-only data, tags waiting on a test, components that join on their own, model revisits by sample or date). No code change.*
+>
+> *Prior review: 2026-10-23, HEAD `80d45c4` (working tree; committed as `6329bc1`, deploy success) — **Ball placement is five toggles, not one pick (WR / TE).** The user: a target can be High or Low, In front or Behind, or both (High and in front), all of those are outside his frame, and Outside frame also stands alone (over his head with no jump, at his knees in stride).
 > - **Registry** ([playEra.ts](lib/scouting/playEra.ts) `CATCH_DIFFICULTY_TAGS`): `ball_high`, `ball_low`, `ball_in_front`, `ball_behind`, `ball_outside_frame`, exception toggles in one labelled "Ball placement" row (new `PlayTagSpec.group`). `excludes` turns the other of a pair off (High ↔ Low, In front ↔ Behind; `toggleTag` in [playTags.ts](lib/scouting/playTags.ts)); `onWith` puts Outside frame on and locks it while any direction is on (`tagForced(spec, facts, values)`, written true by `tagPayload`). On target = nothing picked, so a typical target still costs no click. The play list badges the directions and shows "Off frame" only when it stands alone. 078's single-pick `ball_placement` left the registry: new plays leave it NULL. `usePlayTags.set` is functional while editing, so one click's two changes both stick.
 > - **Migration [080](supabase/migrations/080_ball_placement_toggles.sql) — applied by the user 2026-10-23 15:49 UTC, before the push (verified read-only: five columns and three checks on both tables, ledger row, the 20 picks copied exactly with On target → all five off, none left uncopied). It had to go first:** the five booleans on route_plays and te_plays; checks not High+Low, not In front+Behind, Outside frame on with any direction; the **one UPDATE, approved by the user ("Copy them over")**: the 20 WR targets charted with 078's pick (12 on target, 6 high, 1 in front, 1 behind) copied into the toggles, only where the old pick is set and the new columns are empty, `ball_placement` itself untouched and its comment marked retired. No DROP. Tested on a local Postgres 18 (copies exact, re-run safe, the three checks reject what they should).
 > - Tests: toggles, pairs, Outside frame forced and alone, badges in [playTags.test.ts](__tests__/lib/scouting/playTags.test.ts); 080 vs the registry, its checks and its one scoped UPDATE in [playEra.test.ts](__tests__/lib/scouting/playEra.test.ts). tsc / eslint / build clean, **2551 tests / 185 files**. Not looked at in a browser.*
@@ -2760,6 +2762,37 @@ The remaining files cover helpers (math, scoring, lineup, lineup availability an
 - **No leaguemate-trade alerts feed.** A prior cron wrote one `alerts` row per league-wide trade; it was pure noise (the same trades already appear under the Trades tab) and was removed. See [memory: project_leaguemate_alerts_server_side_april28.md](C:/Users/bstefely.NPCSEALANTS/.claude/projects/c--Users-bstefely-NPCSEALANTS-dynastyzeus-app/memory/project_leaguemate_alerts_server_side_april28.md) for the history.
 
 ## 23. Known open items & time bombs for the next owner
+
+### Collected, not yet used: the activation list
+
+The user's list of charted data that nothing grades yet, so it can be switched on later (started 2026-10-23; add to it whenever something ships as data collection only). The user's rules for every item: data collection only until there's enough to make a difference, and **never penalize players charted before it** — older plays stay judged by today's model (the tag-correction anchoring, §11 "Grading"), and a credit only new plays can earn counts an older-only player as average, never as a miss.
+
+**1. Stored, read by nothing (activating means building the grade):**
+
+| What | Since | Columns | Activating it | Ready when |
+|---|---|---|---|---|
+| Sub-routes (WR, TE, QB; RB from 077) | 073–075, 077 | `route_variant` | A route's sub-route as a difficulty term in WR SAE / TE-SAER (the way coverage is), depth for QB AAE, RB receiving | Enough of each sub-route (the boards' route breakdowns count them) |
+| RB route tree | 077 | `rb_plays.route_detail` (+ `route_variant`) | Grade RB receiving off the route itself instead of the bucket (today only the Receiving role's Other open rate reads `route_type`); pre-077 plays keep their bucket | The user expects a few months |
+| Catch difficulty (WR, TE) | 078–080 | `ball_high` / `ball_low` / `ball_in_front` / `ball_behind` / `ball_outside_frame`, `adjusted_to_ball`, `hit_at_catch` (every target), `sideline_target` (catches), `incompletion_reason` (incompletions) | (a) WR Drop% / Contested catch% judged against how hard the ball was (anchored, older targets unchanged); (b) catch rate on catchable targets (leave out Uncatchable / Out of bounds); (c) a difficult-catch credit, older-only players = average. TE has no charted catch piece yet, so it would be new | A few hundred tagged targets; 2026-10-23: WR 425 charted targets (62 tagged), TE 142 (101) |
+| QB Didn't sense pressure | 076 | `qb_plays.didnt_sense_pressure` | A tag-only stat like Late% (tagStats.ts), maybe a pocket-awareness piece | ~10 QBs with tagged dropbacks |
+| QB tipped pick, receiver's fault | 066 | `qb_plays.int_receiver_fault` | Excuse those picks somewhere (QB AAE grades every pick on accuracy; turnovers come from PFF TWP%) — a decision first | The user's call |
+
+Retired, not to activate: 078's single-pick `ball_placement` (080 copied it into the toggles).
+
+**2. Charted, waiting on a test (a switch, no build):** **Analysis → Grading checks** says when each is testable and whether it passes; the switches are in [tagCorrection.ts](lib/scouting/tagCorrection.ts) and [contextGrading.ts](lib/scouting/contextGrading.ts).
+- Tag corrections still off (`ENABLED_TAG_CORRECTIONS`): QB AAE tight window, red zone, 3rd/4th down (failed 2026-10-21), short yardage (too few); RB SRAE red zone (failed); WR SAE and TE-SAER red zone, 3rd/4th down (failed), short yardage (too few).
+- Garbage-time weight, all five models (`GARBAGE_TIME_WEIGHT` 1 until `garbageTimeTest` has the plays).
+- Era re-centering (`RECENTER_TAGGED`, off until the era check shows the tagged plays drifting).
+- Game context: re-read as charting grows (`OPPONENT_SP`, `WEATHER_ON`); `CAST_ON` stays empty by the user's call.
+
+**3. Joins on its own (nothing to do, just watch):** the tag AE components with weights the user approved 2026-10-05 (QB Run Succ% 0.1, Late% 0.05, BetterOpt% 0.1; RB MissRead% 0.1, BTAC% 0.05; WR Press Win% 0.15, BTAC% 0.05; TE Press Win% 0.1) each join once enough prospects have a sample, weighted by trust; trait components join the With-traits view once 10 prospects at a position are graded. Shown only, by design (no direction): QB Early%, Sack: QB / Line%, QB Sack%, RB HitBehind%, PP: Wrong man%, TE Chip%.
+
+**4. Model revisits on a sample or a date:**
+- TE field time dials ([teFieldTime.ts](lib/scouting/teFieldTime.ts)): hone after ~30–40 more TE games (from 2026-10-21).
+- TE-SAER / TE-SAEB spread: τ was 0 on 2026-10-21; needs ~70–100 rated routes per TE.
+- RB AE level shift (−0.2 kept by the user): revisit ~2026-12-19.
+- TE route × coverage table ([routeCoveragePattern.ts](lib/scouting/routeCoveragePattern.ts)): a frozen copy of WR's term; refit once WR charting has grown a lot.
+- Provisional QB run-success and WR release role scales: re-calibrate once 10 players have the reps.
 
 **Sub-routes (2026-10-21, QB + Zig 2026-10-22):** migrations [073](supabase/migrations/073_route_variants.sql) and [074](supabase/migrations/074_route_variant_options.sql) have to be applied before the code deploys, or every new WR / TE / QB play save fails (the boards write `route_variant`). To add a sub-route: add it to `ROUTE_VARIANTS` and INSERT the pair into `route_variant_options` in a new migration (the test compares the two); never re-create a CHECK. Data collection only: when there are enough of each sub-route, the next step is to put them into WR SAE / TE-SAER (a route's sub-route as a difficulty term, the way coverage is), and the paste imports still write none.
 
