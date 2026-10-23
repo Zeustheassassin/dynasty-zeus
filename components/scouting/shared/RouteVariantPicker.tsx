@@ -12,7 +12,7 @@ interface Props {
   variant: UseRouteVariantReturn;
   /** Which board it's on: a few sub-routes are one board's only (Scramble Drill, QB). */
   board: RouteVariantBoard;
-  /** The board's accent: WR and QB "blue" (bg-blue-600), TE "green" (its route buttons are bg-blue-700). */
+  /** The board's accent: WR and QB "blue" (bg-blue-600), TE and RB "green" (their route buttons are bg-blue-700). */
   accent: "blue" | "green";
   /** Full-height (h-10) buttons, to match a logger whose other buttons are h-10. */
   tall?: boolean;

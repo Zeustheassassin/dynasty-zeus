@@ -24,6 +24,9 @@
 //   preselected — the common answer is filled in (`preset`)
 //   sticky      — keeps the previous play's value within a game
 //   conditional — shown only when it applies (`when`)
+// `step` is where a board asks it: beside the field it goes with, in the
+// user's charting order (2026-10-23: situation, alignment, play type, what he
+// did, what happened). No step = the Tags row after the play.
 // `appliesTo` is the play fact a tag needs (an exception tag can be scoped too:
 // "hit behind the line" only means something on a carry). A tag that doesn't
 // apply to a play is stored NULL. `required` = no default exists, so the
@@ -35,6 +38,17 @@ import { coverageEra } from "./coverageEra";
 
 export type TagPosition = "QB" | "RB" | "WR" | "TE";
 export type TagEntry = "exception" | "preselected" | "sticky" | "conditional";
+/** The logger field a tag sits beside (a board renders PlayTagControls with that step). */
+export type TagStep =
+  | "playType"  // QB: under Play Type
+  | "read"      // QB: under Timing (the read)
+  | "pressure"  // QB: in the pressure box
+  | "throw"     // QB: in the throw box, before the result
+  | "run"       // RB: with the carry's play flags
+  | "block"     // RB / TE: with the block
+  | "route"     // TE: under the route
+  | "coverage"  // WR / TE: under Coverage
+  | "catch";    // RB / WR: with a catch
 
 /** What a board knows about the play being charted, as far as the tags care. */
 export type PlayFact =
@@ -70,6 +84,8 @@ export interface PlayTagSpec {
   when?: string;
   /** Always on when this play fact holds: written true, the button locked on. */
   forced?: { by: PlayFact; note: string };
+  /** Where the board asks it; absent = the Tags row after the play. */
+  step?: TagStep;
 }
 
 /** On all four play tables. */
@@ -82,22 +98,22 @@ export const SITUATION_TAGS: readonly PlayTagSpec[] = [
 
 export const POSITION_TAGS: Readonly<Record<TagPosition, readonly PlayTagSpec[]>> = {
   QB: [
-    { column: "play_action",          label: "Play action",           short: "PA",        entry: "exception", appliesTo: "dropback", forced: { by: "rpo", note: "always on for an RPO" } },
-    { column: "tight_window",         label: "Tight window",          short: "TW",        entry: "exception", appliesTo: "throw" },
-    { column: "release_timing",       label: "Release",               short: "Rel",       entry: "preselected", values: ["early", "on_time", "late"], valueLabels: ["Early", "On time", "Late"], preset: "on_time", appliesTo: "throw" },
-    { column: "better_option_missed", label: "Better option missed",  short: "BetterOpt", entry: "exception", appliesTo: "dropback" },
+    { column: "play_action",          label: "Play action",           short: "PA",        entry: "exception", appliesTo: "dropback", forced: { by: "rpo", note: "always on for an RPO" }, step: "playType" },
+    { column: "tight_window",         label: "Tight window",          short: "TW",        entry: "exception", appliesTo: "throw", step: "throw" },
+    { column: "release_timing",       label: "Release",               short: "Rel",       entry: "preselected", values: ["early", "on_time", "late"], valueLabels: ["Early", "On time", "Late"], preset: "on_time", appliesTo: "throw", step: "throw" },
+    { column: "better_option_missed", label: "Better option missed",  short: "BetterOpt", entry: "exception", appliesTo: "dropback", step: "read" },
     // Every dropback, clean pocket included (the user, 2026-10-22). Data collection only.
-    { column: "didnt_sense_pressure", label: "Didn't sense pressure", short: "NoSense",   entry: "exception", appliesTo: "dropback" },
-    { column: "sack_fault",           label: "Sack fault",            short: "Sack",      entry: "conditional", values: ["qb", "line", "coverage"], valueLabels: ["QB", "Line", "Coverage"], preset: "line", appliesTo: "sack", when: "sacks only" },
+    { column: "didnt_sense_pressure", label: "Didn't sense pressure", short: "NoSense",   entry: "exception", appliesTo: "dropback", step: "pressure" },
+    { column: "sack_fault",           label: "Sack fault",            short: "Sack",      entry: "conditional", values: ["qb", "line", "coverage"], valueLabels: ["QB", "Line", "Coverage"], preset: "line", appliesTo: "sack", when: "sacks only", step: "pressure" },
     { column: "run_success",          label: "Run result",            short: "Run",       entry: "conditional", valueLabels: ["Success", "Fail"], required: true, appliesTo: "run", when: "runs and scrambles only" },
     { column: "run_broken_tackle",    label: "Broken tackle",         short: "BT",        entry: "conditional", appliesTo: "run", when: "runs and scrambles only" },
     { column: "run_explosive",        label: "Explosive",             short: "Exp",       entry: "conditional", appliesTo: "run", when: "runs and scrambles only" },
   ],
   RB: [
-    { column: "hit_behind_line",           label: "Hit behind the line",       short: "HBL", entry: "exception", appliesTo: "run" },
-    { column: "missed_read",               label: "Missed read",               short: "MR",  entry: "exception", appliesTo: "run" },
-    { column: "pass_pro_loss",             label: "Pass-pro loss",             short: "PP",  entry: "conditional", values: ["wrong_man", "beaten"], valueLabels: ["Wrong man", "Beaten"], required: true, appliesTo: "passProLoss", when: "pass-pro losses only" },
-    { column: "broken_tackle_after_catch", label: "Broken tackle after catch", short: "BT",  entry: "conditional", appliesTo: "catch", when: "catches only" },
+    { column: "hit_behind_line",           label: "Hit behind the line",       short: "HBL", entry: "exception", appliesTo: "run", step: "run" },
+    { column: "missed_read",               label: "Missed read",               short: "MR",  entry: "exception", appliesTo: "run", step: "run" },
+    { column: "pass_pro_loss",             label: "Pass-pro loss",             short: "PP",  entry: "conditional", values: ["wrong_man", "beaten"], valueLabels: ["Wrong man", "Beaten"], required: true, appliesTo: "passProLoss", when: "pass-pro losses only", step: "block" },
+    { column: "broken_tackle_after_catch", label: "Broken tackle after catch", short: "BT",  entry: "conditional", appliesTo: "catch", when: "catches only", step: "catch" },
     // caught_from_behind was dropped 2026-10-07 with the Explosive button it
     // showed on (PFF's 15+ of 10+ runs reads long speed instead). The column
     // stays; new plays leave it NULL.
@@ -106,15 +122,15 @@ export const POSITION_TAGS: Readonly<Record<TagPosition, readonly PlayTagSpec[]>
     // Doubled on top of its coverage (the user, 2026-10-21: elite WRs are
     // doubled more than a one-pick coverage button let him chart). Replaces
     // the Double coverage button; routes charted as Double before stay so.
-    { column: "double_coverage",           label: "Double coverage",           short: "Dbl",   entry: "exception", appliesTo: "route" },
-    { column: "press_release",             label: "Release vs press",          short: "Press", entry: "conditional", values: ["won", "lost"], valueLabels: ["Won", "Lost"], required: true, appliesTo: "press", when: "press snaps only (one required click)" },
-    { column: "broken_tackle_after_catch", label: "Broken tackle after catch", short: "BT",    entry: "conditional", appliesTo: "catch", when: "catches only" },
+    { column: "double_coverage",           label: "Double coverage",           short: "Dbl",   entry: "exception", appliesTo: "route", step: "coverage" },
+    { column: "press_release",             label: "Release vs press",          short: "Press", entry: "conditional", values: ["won", "lost"], valueLabels: ["Won", "Lost"], required: true, appliesTo: "press", when: "press snaps only (one required click)", step: "coverage" },
+    { column: "broken_tackle_after_catch", label: "Broken tackle after catch", short: "BT",    entry: "conditional", appliesTo: "catch", when: "catches only", step: "catch" },
   ],
   TE: [
-    { column: "blocked_defender",     label: "Blocked",               short: "Blk",   entry: "conditional", values: ["dl", "lb", "db"], valueLabels: ["DL", "LB", "DB"], preset: "dl", appliesTo: "block", when: "block reps only" },
-    { column: "double_coverage",      label: "Double coverage",       short: "Dbl",   entry: "exception", appliesTo: "route" },
-    { column: "press_release",        label: "Release vs press",      short: "Press", entry: "conditional", values: ["won", "lost"], valueLabels: ["Won", "Lost"], required: true, appliesTo: "press", when: "press snaps only" },
-    { column: "chipped_before_route", label: "Chipped before route",  short: "Chip",  entry: "exception", appliesTo: "route" },
+    { column: "blocked_defender",     label: "Blocked",               short: "Blk",   entry: "conditional", values: ["dl", "lb", "db"], valueLabels: ["DL", "LB", "DB"], preset: "dl", appliesTo: "block", when: "block reps only", step: "block" },
+    { column: "double_coverage",      label: "Double coverage",       short: "Dbl",   entry: "exception", appliesTo: "route", step: "coverage" },
+    { column: "press_release",        label: "Release vs press",      short: "Press", entry: "conditional", values: ["won", "lost"], valueLabels: ["Won", "Lost"], required: true, appliesTo: "press", when: "press snaps only", step: "coverage" },
+    { column: "chipped_before_route", label: "Chipped before route",  short: "Chip",  entry: "exception", appliesTo: "route", step: "route" },
   ],
 };
 

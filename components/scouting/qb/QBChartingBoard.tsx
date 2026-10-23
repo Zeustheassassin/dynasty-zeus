@@ -515,6 +515,8 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
               <span className="ml-2 text-blue-400 text-xs">{gamePlays.length} plays</span>
             </div>
 
+            {/* The user's charting order (2026-10-23): situation, alignment (snap), play type,
+                the read and the pocket, where the ball went, then what happened. */}
             <PlayTagControls tags={tags} facts={tagFacts} part="situation" accent="blue" />
 
             {/* 1. Snap Position */}
@@ -541,6 +543,9 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
                   </button>
                 ))}
               </div>
+              <div className="mt-2">
+                <PlayTagControls tags={tags} facts={tagFacts} part="play" step="playType" accent="blue" />
+              </div>
             </div>
 
             {/* 3. Timing — only for RPO / Pass */}
@@ -558,6 +563,9 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
                       {label}
                     </button>
                   ))}
+                </div>
+                <div className="mt-2">
+                  <PlayTagControls tags={tags} facts={tagFacts} part="play" step="read" accent="blue" />
                 </div>
               </div>
             )}
@@ -589,12 +597,79 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
                     </div>
                   </div>
                 )}
+                <PlayTagControls tags={tags} facts={tagFacts} part="play" step="pressure" accent="blue" />
               </div>
             )}
 
             {/* 5-8. Throw details — only when timing is set and not scramble */}
             {needThrowFields && (
               <div className="space-y-4 p-4 bg-slate-900/60 rounded-lg border border-blue-900/40">
+                {/* Target Position */}
+                <div>
+                  <div className="text-xs text-slate-500 mb-2">Target Position</div>
+                  <div className="flex gap-2">
+                    {(["rb", "wr", "te"] as QBTargetPos[]).map((pos) => (
+                      <button
+                        key={pos}
+                        onClick={() => setTargetPos((p) => p === pos ? null : pos)}
+                        className={`flex-1 whitespace-nowrap px-6 py-2 rounded text-sm font-semibold uppercase transition ${
+                          targetPos === pos ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"
+                        }`}
+                      >
+                        {pos.toUpperCase()}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Route Type */}
+                <div>
+                  <div className="text-xs text-slate-500 mb-2">Route Type</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {ROUTE_TYPES.map((rt) => (
+                      <button key={rt} onClick={() => { const next = routeType === rt ? null : rt; variant.pickRoute(next, routeType); setRouteType(next); }}
+                        className={`flex-1 whitespace-nowrap px-3 py-1.5 rounded text-xs font-medium capitalize transition ${routeType === rt ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                        {rt}
+                      </button>
+                    ))}
+                  </div>
+                  <RouteVariantPicker route={routeType} variant={variant} board="QB" accent="blue" />
+                </div>
+
+                {/* Depth / Location 3×3 grid */}
+                <div>
+                  <div className="text-xs text-slate-500 mb-2">Depth / Location</div>
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr>
+                        <th className="w-px pr-2 pb-1 text-slate-700 font-normal text-left" />
+                        {["Left", "Center", "Right"].map((l) => (
+                          <th key={l} className="px-1 pb-1 text-slate-500 font-medium text-center">{l}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {DEPTH_ROWS.map(({ label, depths }) => (
+                        <tr key={label}>
+                          <td className="pr-2 py-1 text-slate-500 whitespace-nowrap text-right">{label}</td>
+                          {depths.map(({ key, loc }) => (
+                            <td key={key} className="px-1 py-1">
+                              <button
+                                onClick={() => setDepthZone((d) => d === key ? null : key)}
+                                className={`w-full py-2 px-3 rounded text-xs font-medium transition whitespace-nowrap ${
+                                  depthZone === key ? "bg-blue-600 text-white ring-1 ring-blue-400" : "bg-slate-800 text-slate-400 hover:bg-slate-700"
+                                }`}
+                              >
+                                {loc}
+                              </button>
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
                 {/* Platform */}
                 <div>
                   <div className="text-xs text-slate-500 mb-2">Platform</div>
@@ -650,6 +725,8 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
                     ))}
                   </div>
                 </div>
+
+                <PlayTagControls tags={tags} facts={tagFacts} part="play" step="throw" accent="blue" />
 
                 {/* Completion */}
                 <div>
@@ -724,72 +801,6 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
                       )}
                     </div>
                   )}
-                </div>
-
-                {/* Target Position */}
-                <div>
-                  <div className="text-xs text-slate-500 mb-2">Target Position</div>
-                  <div className="flex gap-2">
-                    {(["rb", "wr", "te"] as QBTargetPos[]).map((pos) => (
-                      <button
-                        key={pos}
-                        onClick={() => setTargetPos((p) => p === pos ? null : pos)}
-                        className={`flex-1 whitespace-nowrap px-6 py-2 rounded text-sm font-semibold uppercase transition ${
-                          targetPos === pos ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"
-                        }`}
-                      >
-                        {pos.toUpperCase()}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Depth / Location 3×3 grid */}
-                <div>
-                  <div className="text-xs text-slate-500 mb-2">Depth / Location</div>
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr>
-                        <th className="w-px pr-2 pb-1 text-slate-700 font-normal text-left" />
-                        {["Left", "Center", "Right"].map((l) => (
-                          <th key={l} className="px-1 pb-1 text-slate-500 font-medium text-center">{l}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {DEPTH_ROWS.map(({ label, depths }) => (
-                        <tr key={label}>
-                          <td className="pr-2 py-1 text-slate-500 whitespace-nowrap text-right">{label}</td>
-                          {depths.map(({ key, loc }) => (
-                            <td key={key} className="px-1 py-1">
-                              <button
-                                onClick={() => setDepthZone((d) => d === key ? null : key)}
-                                className={`w-full py-2 px-3 rounded text-xs font-medium transition whitespace-nowrap ${
-                                  depthZone === key ? "bg-blue-600 text-white ring-1 ring-blue-400" : "bg-slate-800 text-slate-400 hover:bg-slate-700"
-                                }`}
-                              >
-                                {loc}
-                              </button>
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Route Type */}
-                <div>
-                  <div className="text-xs text-slate-500 mb-2">Route Type</div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {ROUTE_TYPES.map((rt) => (
-                      <button key={rt} onClick={() => { const next = routeType === rt ? null : rt; variant.pickRoute(next, routeType); setRouteType(next); }}
-                        className={`flex-1 whitespace-nowrap px-3 py-1.5 rounded text-xs font-medium capitalize transition ${routeType === rt ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
-                        {rt}
-                      </button>
-                    ))}
-                  </div>
-                  <RouteVariantPicker route={routeType} variant={variant} board="QB" accent="blue" />
                 </div>
 
                 {/* Coverage */}

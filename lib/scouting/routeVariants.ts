@@ -6,7 +6,8 @@
 // DATA COLLECTION ONLY for now: no grade, model or aggregate view reads it
 // until there are enough of each to use.
 //
-// WR, TE and QB boards (QB from 2026-10-22, the receiver's route on a throw).
+// WR, TE and QB boards (QB from 2026-10-22, the receiver's route on a throw),
+// and RB from 2026-10-23 (lib/scouting/rbRouteTree.ts, migration 077).
 // Picking a route starts it on its default sub-route
 // (Other has none, so a pick is required). Depths are PFF's bands, by the
 // user's call: Short 0–9, Intermediate 10–19, Deep 20+ yards.
@@ -32,7 +33,7 @@ export type RouteVariant =
   | "called_scramble_drill";
 
 /** The charting boards that log sub-routes. */
-export type RouteVariantBoard = "WR" | "TE" | "QB";
+export type RouteVariantBoard = "WR" | "TE" | "QB" | "RB";
 
 export interface RouteVariantSpec {
   key: RouteVariant;
@@ -41,7 +42,7 @@ export interface RouteVariantSpec {
   short: string;
   /** PFF depth band, on the depth sub-routes. */
   yards?: string;
-  /** Only these boards offer it (unset: all three). The database list
+  /** Only these boards offer it (unset: every board). The database list
    *  (route_variant_options) is shared, so this is the board's rule alone. */
   boards?: readonly RouteVariantBoard[];
 }

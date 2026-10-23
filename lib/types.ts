@@ -1228,9 +1228,17 @@ export interface RBPlay {
   explosive_play: boolean;
   run_stuff: boolean;
   play_notes: string | null;
+  /** Split out wide at the snap. Asked on every play from migration 077 on;
+   *  before that only on routes (other plays read false). */
   aligned_as_wr: boolean;
   targeted: boolean;
+  /** The RB bucket. Charted directly before migration 077; since then saved
+   *  from route_detail (lib/scouting/rbRouteTree.ts rbBucketFor). */
   route_type: RBRouteType | null;
+  /** The route off the WR / TE tree, and its sub-route (migration 077). NULL =
+   *  charted before the tree (the bucket only) or not a route. Optional: absent before 077. */
+  route_detail?: RouteType | null;
+  route_variant?: RouteVariant | null;
   was_open: boolean | null;
   created_at: string;
   /** Situation tags (migration 062): NULL = charted before the tags existed.

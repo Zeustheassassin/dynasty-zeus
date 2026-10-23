@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useMemo } from "react";
+import { Fragment, useState, useEffect, useMemo } from "react";
 import { supabase } from "../../../lib/supabaseclient";
 import { fetchAllRows } from "../../../lib/scouting/fetchPlays";
 import { logger } from "../../../lib/logger";
@@ -18,6 +18,11 @@ import { usePlayTags } from "../shared/hooks/usePlayTags";
 import PlayTagControls, { PlayTagBadges } from "../shared/PlayTagControls";
 import type { PlayFacts } from "../../../lib/scouting/playTags";
 import { pct } from "../shared/chartingTypes";
+import { ROUTE_LABELS, ROUTE_TYPES as TREE_ROUTES } from "../shared/chartingConstants";
+import RouteVariantPicker, { RouteVariantMark } from "../shared/RouteVariantPicker";
+import { useRouteVariant } from "../shared/hooks/useRouteVariant";
+import { routeVariantSpec } from "../../../lib/scouting/routeVariants";
+import { RB_BACKFIELD_ROUTES, rbBucketFor, rbRouteOffered } from "../../../lib/scouting/rbRouteTree";
 import RBPlayerCharts from "./RBPlayerCharts";
 import { buildRBBaselines, computeRBAboveExpectedForPlays } from "../../../lib/scouting/aboveExpected";
 import type {
@@ -28,6 +33,7 @@ import type {
   RBFormation,
   RBRunType,
   RBRouteType,
+  RouteType,
 } from "../../../lib/types";
 
 // A "run play" is a designed carry — excludes pass-block, run-block, decoy, and
@@ -45,10 +51,12 @@ const FORMATIONS: { key: RBFormation; label: string }[] = [
   { key: "under_center", label: "Under Center" },
 ];
 
-// Route labels only: the stored keys predate the 2026-10-07 rename (Mid Curl, Flats, Big Boy
-// Route), so charted plays keep their route with no migration. `short` is the play-log tag.
-// Other is not a catch-all: it is the old Big Boy Route, the hardest part of an RB's tree
-// (everything a WR would run, plus wheels, angles and seams). The Receiving bucket scores it.
+// The three RB route buckets (rb_plays.route_type). Route labels only: the stored keys predate
+// the 2026-10-07 rename (Mid Curl, Flats, Big Boy Route), so charted plays keep their route with
+// no migration. `short` is the play-log tag. Other is not a catch-all: it is the old Big Boy
+// Route, the hardest part of an RB's tree (everything a WR would run, plus wheels, angles and
+// seams). The Receiving bucket scores it. Since migration 077 the board asks the route off the
+// WR / TE tree instead and saves its bucket from it (lib/scouting/rbRouteTree.ts).
 const ROUTE_TYPES: { key: RBRouteType; label: string; short: string }[] = [
   { key: "mid_curl",      label: "Curl/Screen",  short: "Curl/Scr" },
   { key: "flats",         label: "Flat/Options", short: "Flat/Opt" },
@@ -167,7 +175,12 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
   // PFF's missed tackles and 10+ yard runs score them. Old plays keep their
   // stored broken_tackle / explosive_play; new ones take the DB default.
   const [runStuff, setRunStuff]                   = useState(false);
+  // Split out wide at the snap: asked with the formation on every play, RB by default.
   const [alignedAsWr, setAlignedAsWr]             = useState(false);
+  // The route off the WR / TE tree and its sub-route (migration 077). The bucket is
+  // only set while editing a play charted before the tree, which may keep it.
+  const [routeDetail, setRouteDetail]             = useState<RouteType | null>(null);
+  const variant = useRouteVariant(null);
   const [rbRouteType, setRbRouteType]             = useState<RBRouteType | null>(null);
   const [rbWasOpen, setRbWasOpen]                 = useState(false);
   const [rbTargeted, setRbTargeted]               = useState(false);
@@ -215,6 +228,10 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
     catch: runType === "route" && rbTargeted && rbOutcome === "caught",
   };
   const tagsMissing = tags.missing(tagFacts).length > 0;
+  // Other has no default sub-route: it's picked before Log Play.
+  const variantMissing = runType === "route" && variant.missing(routeDetail);
+  // A route's bucket: from the tree route, or the one an older play was charted with.
+  const routeBucket = routeDetail ? rbBucketFor(routeDetail, variant.value) : rbRouteType;
 
   // ── Aggregate stats ───────────────────────────────────────────
   const stats = useMemo(() => {
@@ -250,17 +267,33 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
     const routeDrops    = routeRuns.filter((p) => p.targeted && p.success === false).length;
     const routeOpen     = routeRuns.filter((p) => p.was_open).length;
 
-    // Route type breakdown
+    // Route type breakdown: each bucket, with the tree routes saved in it under it
+    // (migration 077, data collection only) and "Not split" for the routes charted
+    // before the tree once any are split.
+    type RouteRow = { routes: number; open: number; targets: number; catches: number };
+    const routeRow = (rp: RBPlay[]): RouteRow => ({
+      routes:  rp.length,
+      open:    rp.filter((p) => p.was_open).length,
+      targets: rp.filter((p) => p.targeted).length,
+      catches: rp.filter((p) => p.targeted && p.success === true).length,
+    });
     const routeByType = ROUTE_TYPES.map((r) => r.key).reduce((acc, rt) => {
       const rp = routeRuns.filter((p) => p.route_type === rt);
-      acc[rt] = {
-        routes:  rp.length,
-        open:    rp.filter((p) => p.was_open).length,
-        targets: rp.filter((p) => p.targeted).length,
-        catches: rp.filter((p) => p.targeted && p.success === true).length,
-      };
+      const byTree = new Map<string, RBPlay[]>();
+      for (const p of rp) {
+        if (!p.route_detail) continue;
+        const key = `${p.route_detail}|${p.route_variant ?? ""}`;
+        byTree.set(key, [...(byTree.get(key) ?? []), p]);
+      }
+      const tree = [...byTree.entries()].map(([key, tp]) => {
+        const spec = routeVariantSpec(tp[0].route_detail, tp[0].route_variant);
+        const route = ROUTE_LABELS[tp[0].route_detail as RouteType];
+        return { key, label: spec ? `${route} · ${spec.label}` : route, ...routeRow(tp) };
+      }).sort((a, b) => b.routes - a.routes);
+      const unsplit = rp.filter((p) => !p.route_detail);
+      acc[rt] = { ...routeRow(rp), tree, unsplit: tree.length > 0 && unsplit.length > 0 ? routeRow(unsplit) : null };
       return acc;
-    }, {} as Record<RBRouteType, { routes: number; open: number; targets: number; catches: number }>);
+    }, {} as Record<RBRouteType, RouteRow & { tree: (RouteRow & { key: string; label: string })[]; unsplit: RouteRow | null }>);
 
     return {
       totalPlays: plays.length,
@@ -337,11 +370,32 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
     setUnblockedDefender(false);
     setRunStuff(false);
     setAlignedAsWr(false);
+    setRouteDetail(null);
+    variant.reset(null);
     setRbRouteType(null);
     setRbWasOpen(false);
     setRbTargeted(false);
     setRbOutcome(null);
     setPlayNotes("");
+  }
+
+  // Split out wide offers the whole WR / TE tree; back in the backfield, a route
+  // only a WR-aligned back runs is cleared.
+  function pickAlignment(wide: boolean) {
+    setAlignedAsWr(wide);
+    if (routeDetail && !rbRouteOffered(routeDetail, wide)) {
+      setRouteDetail(null);
+      variant.reset(null);
+    }
+  }
+
+  // Clicking the route already on clears it. Touching the tree replaces an older
+  // play's bucket.
+  function pickTreeRoute(rt: RouteType) {
+    const next = routeDetail === rt ? null : rt;
+    variant.pickRoute(next, routeDetail);
+    setRouteDetail(next);
+    setRbRouteType(null);
   }
 
   async function logPlay() {
@@ -351,7 +405,7 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
     const isBlockPlay = runType === "pass_block" || runType === "run_block";
     // decoy needs no success; everything else does
     if (!isRoute && !isDecoy && success === null) return;
-    if (tagsMissing) return;
+    if (tagsMissing || variantMissing) return;
     setPlayError(null);
     setSavingPlay(true);
     const { data: { user } } = await supabase.auth.getUser();
@@ -361,8 +415,11 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
       formation, run_type: runType,
       success: isRoute ? (rbTargeted ? (rbOutcome === "caught" ? true : rbOutcome === "drop" ? false : null) : null) : isDecoy ? null : success,
       targeted: isRoute ? rbTargeted : false,
-      aligned_as_wr: isRoute ? alignedAsWr : false,
-      route_type: isRoute ? (rbRouteType ?? null) : null,
+      // Every play from migration 077 on, not only routes.
+      aligned_as_wr: alignedAsWr,
+      route_type: isRoute ? (routeBucket ?? null) : null,
+      route_detail: isRoute ? routeDetail : null,
+      route_variant: isRoute && routeDetail ? variant.value : null,
       was_open: isRoute ? rbWasOpen : false,
       loaded_box: (isRoute || isBlockPlay || isDecoy) ? false : loadedBox,
       unblocked_defender: (isRoute || isBlockPlay || isDecoy) ? false : unblockedDefender,
@@ -389,6 +446,9 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
     setUnblockedDefender(pl.unblocked_defender ?? false);
     setRunStuff(pl.run_stuff ?? false);
     setAlignedAsWr(pl.aligned_as_wr ?? false);
+    setRouteDetail(pl.route_detail ?? null);
+    if (pl.route_detail) variant.startEdit(pl.route_variant);
+    else variant.reset(null);
     setRbRouteType(pl.route_type ?? null);
     setRbWasOpen(pl.was_open ?? false);
     setRbTargeted(pl.targeted ?? false);
@@ -406,15 +466,18 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
     const isDecoy = runType === "decoy";
     const isBlockPlay = runType === "pass_block" || runType === "run_block";
     if (!isRoute && !isDecoy && success === null) return;
-    if (tagsMissing) return;
+    if (tagsMissing || variantMissing) return;
     setPlayError(null);
     setSavingPlay(true);
     const { data, error } = await supabase.from("rb_plays").update({
       formation, run_type: runType,
       success: isRoute ? (rbTargeted ? (rbOutcome === "caught" ? true : rbOutcome === "drop" ? false : null) : null) : isDecoy ? null : success,
       targeted: isRoute ? rbTargeted : false,
-      aligned_as_wr: isRoute ? alignedAsWr : false,
-      route_type: isRoute ? (rbRouteType ?? null) : null,
+      aligned_as_wr: alignedAsWr,
+      // An older route left off the tree keeps the bucket it was charted with.
+      route_type: isRoute ? (routeBucket ?? null) : null,
+      route_detail: isRoute ? routeDetail : null,
+      route_variant: isRoute && routeDetail ? variant.value : null,
       was_open: isRoute ? rbWasOpen : false,
       loaded_box: (isRoute || isBlockPlay || isDecoy) ? false : loadedBox,
       unblocked_defender: (isRoute || isBlockPlay || isDecoy) ? false : unblockedDefender,
@@ -613,8 +676,14 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
                       {ROUTE_TYPES.map(({ key, label }) => {
                         const r = stats.routeByType[key];
                         const catchPct = r.targets > 0 ? ((r.catches / r.targets) * 100).toFixed(0) : null;
+                        // Tree routes saved in this bucket (data collection only), then "Not split".
+                        const subRows = [
+                          ...r.tree.map((t) => ({ key: t.key, label: t.label, row: t })),
+                          ...(r.unsplit ? [{ key: "unsplit", label: "Not split", row: r.unsplit }] : []),
+                        ];
                         return (
-                          <tr key={key} className="hover:bg-slate-800/30">
+                          <Fragment key={key}>
+                          <tr className="hover:bg-slate-800/30">
                             <td className="py-2 pr-2 text-sm font-medium text-white">{label}</td>
                             <td className="py-2 px-2 text-right text-sm text-blue-400">{r.routes || "—"}</td>
                             <td className="py-2 px-2 text-right text-sm text-emerald-400">{r.open > 0 ? r.open : "—"}</td>
@@ -628,6 +697,18 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
                               ) : "—"}
                             </td>
                           </tr>
+                          {subRows.map(({ key: sk, label: sl, row }) => (
+                            <tr key={`${key}-${sk}`} className="hover:bg-slate-800/30 text-xs text-slate-400">
+                              <td className="py-1 pr-2 pl-4 whitespace-nowrap">
+                                <span className="text-slate-600 mr-1" aria-hidden="true">↳</span>{sl}
+                              </td>
+                              <td className="py-1 px-2 text-right">{row.routes}</td>
+                              <td className="py-1 px-2 text-right">{row.open || "—"}</td>
+                              <td className="py-1 px-2 text-right">{row.targets || "—"}</td>
+                              <td className="py-1 pl-2 text-right">{row.catches || "—"}</td>
+                            </tr>
+                          ))}
+                          </Fragment>
                         );
                       })}
                       {/* Total row */}
@@ -679,68 +760,88 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
               <span className="ml-2 text-green-400 text-xs">{gamePlays.length} plays</span>
             </div>
 
+            {/* The user's charting order (2026-10-23): situation, alignment, play type, what he did, what happened. */}
             <PlayTagControls tags={tags} facts={tagFacts} part="situation" accent="green" />
 
-            {/* Formation */}
-            <div>
-              <div className="text-xs text-slate-500 mb-2">Formation</div>
-              <div className="flex gap-2">
-                {FORMATIONS.map((f) => (
-                  <button key={f.key} onClick={() => setFormation(f.key)}
-                    className={`flex-1 whitespace-nowrap px-4 py-2 rounded text-sm font-medium transition ${formation === f.key ? "bg-green-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
-                    {f.label}
+            {/* Alignment: formation, and split out wide (every play, RB by default) */}
+            <div className="flex flex-wrap gap-4">
+              <div className="flex-1 whitespace-nowrap">
+                <div className="text-xs text-slate-500 mb-2">Formation</div>
+                <div className="flex gap-2">
+                  {FORMATIONS.map((f) => (
+                    <button key={f.key} onClick={() => setFormation(f.key)}
+                      className={`flex-1 whitespace-nowrap px-4 py-2 rounded text-sm font-medium transition ${formation === f.key ? "bg-green-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="flex-1 whitespace-nowrap">
+                <div className="text-xs text-slate-500 mb-2">Aligned at Snap</div>
+                <div className="flex gap-2">
+                  <button onClick={() => pickAlignment(false)} aria-pressed={!alignedAsWr}
+                    className={`flex-1 whitespace-nowrap px-4 py-2 rounded text-sm font-medium transition ${!alignedAsWr ? "bg-green-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                    RB
                   </button>
-                ))}
+                  <button onClick={() => pickAlignment(true)} aria-pressed={alignedAsWr}
+                    className={`flex-1 whitespace-nowrap px-4 py-2 rounded text-sm font-medium transition ${alignedAsWr ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                    WR Split Out
+                  </button>
+                </div>
               </div>
             </div>
 
-            {/* Run Type */}
+            {/* Play Type: run plays and pass plays in their own boxes, one click either way */}
             <div>
-              <div className="text-xs text-slate-500 mb-2">Run Type</div>
+              <div className="text-xs text-slate-500 mb-2">Play Type</div>
               <div className="space-y-2">
-                {/* Man Gap group */}
-                <div className="p-2 bg-slate-900 border border-slate-800 rounded-lg">
-                  <div className="text-xs text-slate-600 mb-1.5 font-medium uppercase tracking-wider">Man Gap</div>
-                  <div className="flex gap-2">
-                    {(["outside_man_gap", "inside_man_gap"] as RBRunType[]).map((rt) => (
-                      <button key={rt} onClick={() => setRunType(rt)}
-                        className={`flex-1 py-2 rounded text-xs font-medium transition ${runType === rt ? "bg-green-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
-                        {rt === "outside_man_gap" ? "Outside" : "Inside"}
-                      </button>
-                    ))}
+                <div className="p-2 bg-slate-900 border border-slate-800 rounded-lg space-y-2">
+                  <div className="text-xs text-green-500/80 font-medium uppercase tracking-wider">Run Play</div>
+                  <div className="flex flex-wrap gap-2">
+                    <div className="flex-1 min-w-[10rem]">
+                      <div className="text-[10px] text-slate-600 mb-1 font-medium uppercase tracking-wider">Man Gap</div>
+                      <div className="flex gap-2">
+                        {(["outside_man_gap", "inside_man_gap"] as RBRunType[]).map((rt) => (
+                          <button key={rt} onClick={() => setRunType(rt)}
+                            className={`flex-1 py-2 rounded text-xs font-medium transition ${runType === rt ? "bg-green-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                            {rt === "outside_man_gap" ? "Outside" : "Inside"}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex-1 min-w-[10rem]">
+                      <div className="text-[10px] text-slate-600 mb-1 font-medium uppercase tracking-wider">Zone</div>
+                      <div className="flex gap-2">
+                        {(["outside_zone", "inside_zone"] as RBRunType[]).map((rt) => (
+                          <button key={rt} onClick={() => setRunType(rt)}
+                            className={`flex-1 py-2 rounded text-xs font-medium transition ${runType === rt ? "bg-green-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                            {rt === "outside_zone" ? "Outside" : "Inside"}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   </div>
-                </div>
-                {/* Zone group */}
-                <div className="p-2 bg-slate-900 border border-slate-800 rounded-lg">
-                  <div className="text-xs text-slate-600 mb-1.5 font-medium uppercase tracking-wider">Zone Attempt</div>
-                  <div className="flex gap-2">
-                    {(["outside_zone", "inside_zone"] as RBRunType[]).map((rt) => (
-                      <button key={rt} onClick={() => setRunType(rt)}
-                        className={`flex-1 py-2 rounded text-xs font-medium transition ${runType === rt ? "bg-green-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
-                        {rt === "outside_zone" ? "Outside" : "Inside"}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                {/* Pass block / Run block / Decoy */}
-                <div className="flex gap-2">
-                  <button onClick={() => setRunType("pass_block")}
-                    className={`flex-1 py-2 rounded text-sm font-medium transition ${runType === "pass_block" ? "bg-purple-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
-                    Pass Block
-                  </button>
                   <button onClick={() => setRunType("run_block")}
-                    className={`flex-1 py-2 rounded text-sm font-medium transition ${runType === "run_block" ? "bg-orange-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                    className={`w-full py-2 rounded text-sm font-medium transition ${runType === "run_block" ? "bg-orange-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                     Run Block
                   </button>
-                  <button onClick={() => setRunType("decoy")}
-                    className={`flex-1 py-2 rounded text-sm font-medium transition ${runType === "decoy" ? "bg-amber-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
-                    Decoy
-                  </button>
                 </div>
-                {/* Route run */}
-                <button onClick={() => { setRunType("route"); setSuccess(null); setRbOutcome(null); }}
-                  className={`w-full py-2 rounded text-sm font-medium transition ${runType === "route" ? "bg-blue-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
-                  Route Run
+                <div className="p-2 bg-slate-900 border border-slate-800 rounded-lg space-y-2">
+                  <div className="text-xs text-blue-400/80 font-medium uppercase tracking-wider">Pass Play</div>
+                  <div className="flex gap-2">
+                    <button onClick={() => { setRunType("route"); setSuccess(null); setRbOutcome(null); }}
+                      className={`flex-1 py-2 rounded text-sm font-medium transition ${runType === "route" ? "bg-blue-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                      Route Run
+                    </button>
+                    <button onClick={() => setRunType("pass_block")}
+                      className={`flex-1 py-2 rounded text-sm font-medium transition ${runType === "pass_block" ? "bg-purple-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                      Pass Block
+                    </button>
+                  </div>
+                </div>
+                <button onClick={() => setRunType("decoy")}
+                  className={`w-full py-2 rounded text-sm font-medium transition ${runType === "decoy" ? "bg-amber-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                  Decoy
                 </button>
               </div>
             </div>
@@ -749,32 +850,27 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
             {runType === "route" ? (
               <div className="space-y-3 p-3 bg-slate-900/60 rounded-lg border border-blue-900/50">
                 <div className="text-xs text-blue-400 font-medium">Route Run Options</div>
+                {/* The route off the WR / TE tree: the backfield routes, or every route split out wide. */}
+                <div>
+                  <div className="text-xs text-slate-500 mb-2">
+                    Route <span className="text-slate-600">{alignedAsWr ? "· split out wide: full route tree" : "· from the backfield"}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(alignedAsWr ? TREE_ROUTES : RB_BACKFIELD_ROUTES).map((rt) => (
+                      <button key={rt} onClick={() => pickTreeRoute(rt)}
+                        className={`flex-1 whitespace-nowrap px-3 py-1.5 rounded text-xs font-medium transition ${routeDetail === rt ? "bg-blue-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                        {ROUTE_LABELS[rt]}
+                      </button>
+                    ))}
+                  </div>
+                  <RouteVariantPicker route={routeDetail} variant={variant} board="RB" accent="green" />
+                  {!routeDetail && rbRouteType && (
+                    <div className="mt-2 text-[10px] text-slate-500">
+                      Charted before the route tree as {ROUTE_TYPES.find((r) => r.key === rbRouteType)?.label}. Pick a route to replace it, or leave it.
+                    </div>
+                  )}
+                </div>
                 <div className="flex flex-wrap gap-4">
-                  {/* Route Type */}
-                  <div className="w-full">
-                    <div className="text-xs text-slate-500 mb-2">Route Type</div>
-                    <div className="flex gap-2">
-                      {ROUTE_TYPES.map(({ key, label }) => (
-                        <button key={key} onClick={() => setRbRouteType(rbRouteType === key ? null : key)}
-                          className={`flex-1 py-2 rounded text-xs font-medium transition ${rbRouteType === key ? "bg-blue-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="flex-1 whitespace-nowrap">
-                    <div className="text-xs text-slate-500 mb-2">Aligned at Snap</div>
-                    <div className="flex gap-1.5">
-                      <button onClick={() => setAlignedAsWr(false)}
-                        className={`flex-1 whitespace-nowrap px-3 h-9 rounded text-xs font-medium transition ${!alignedAsWr ? "bg-green-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
-                        RB
-                      </button>
-                      <button onClick={() => setAlignedAsWr(true)}
-                        className={`flex-1 whitespace-nowrap px-3 h-9 rounded text-xs font-medium transition ${alignedAsWr ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
-                        WR Split Out
-                      </button>
-                    </div>
-                  </div>
                   <div className="flex-1 whitespace-nowrap">
                     <div className="text-xs text-slate-500 mb-2">Open on Play?</div>
                     <div className="flex gap-1.5">
@@ -821,21 +917,25 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
                     </div>
                   )}
                 </div>
+                <PlayTagControls tags={tags} facts={tagFacts} part="play" step="catch" accent="green" />
               </div>
             ) : runType === "pass_block" || runType === "run_block" ? (
-              /* Pass Block / Run Block — Success/Fail only */
-              <div>
-                <div className="text-xs text-slate-500 mb-2">Result</div>
-                <div className="flex gap-3">
-                  <button onClick={() => setSuccess(true)}
-                    className={`flex-1 py-3 rounded-lg text-sm font-bold transition ${success === true ? "bg-green-600 text-white ring-2 ring-green-400" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
-                    ✓ SUCCESS
-                  </button>
-                  <button onClick={() => setSuccess(false)}
-                    className={`flex-1 py-3 rounded-lg text-sm font-bold transition ${success === false ? "bg-red-600 text-white ring-2 ring-red-400" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
-                    ✗ FAIL
-                  </button>
+              /* Pass Block / Run Block — Success/Fail, then why a pass block was lost */
+              <div className="space-y-3">
+                <div>
+                  <div className="text-xs text-slate-500 mb-2">Result</div>
+                  <div className="flex gap-3">
+                    <button onClick={() => setSuccess(true)}
+                      className={`flex-1 py-3 rounded-lg text-sm font-bold transition ${success === true ? "bg-green-600 text-white ring-2 ring-green-400" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                      ✓ SUCCESS
+                    </button>
+                    <button onClick={() => setSuccess(false)}
+                      className={`flex-1 py-3 rounded-lg text-sm font-bold transition ${success === false ? "bg-red-600 text-white ring-2 ring-red-400" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                      ✗ FAIL
+                    </button>
+                  </div>
                 </div>
+                <PlayTagControls tags={tags} facts={tagFacts} part="play" step="block" accent="green" />
               </div>
             ) : runType === "decoy" ? (
               <div className="p-3 bg-slate-900/60 rounded-lg border border-slate-700/50 text-xs text-slate-500">
@@ -876,15 +976,16 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
                   </div>
                 </div>
 
-                {/* Post-play flags */}
-                <div>
-                  <div className="text-xs text-slate-500 mb-2">Play Flags <span className="text-slate-700">(select if yes)</span></div>
+                {/* Post-play flags, then the carry's tags (hit behind the line, missed read) */}
+                <div className="space-y-2">
+                  <div className="text-xs text-slate-500">Play Flags <span className="text-slate-700">(select if yes)</span></div>
                   <div className="flex gap-2">
                     <button onClick={() => setRunStuff(!runStuff)} aria-pressed={runStuff}
                       className={`flex-1 py-2 rounded text-xs font-medium transition ${runStuff ? "bg-red-800 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                       Run Stuff
                     </button>
                   </div>
+                  <PlayTagControls tags={tags} facts={tagFacts} part="play" step="run" accent="green" />
                 </div>
               </>
             )}
@@ -904,13 +1005,13 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
                 placeholder="Play note (optional)" value={playNotes} onChange={(e) => setPlayNotes(e.target.value)} />
               {editingPlayId ? (
                 <button onClick={saveEditedPlay}
-                  disabled={savingPlay || (runType !== "route" && runType !== "decoy" && success === null) || (runType === "route" && rbTargeted && rbOutcome === null) || tagsMissing}
+                  disabled={savingPlay || (runType !== "route" && runType !== "decoy" && success === null) || (runType === "route" && rbTargeted && rbOutcome === null) || tagsMissing || variantMissing}
                   className="px-5 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm rounded font-medium transition whitespace-nowrap">
                   {savingPlay ? "…" : "Save Edit"}
                 </button>
               ) : (
                 <button onClick={logPlay}
-                  disabled={savingPlay || (runType !== "route" && runType !== "decoy" && success === null) || (runType === "route" && rbTargeted && rbOutcome === null) || tagsMissing}
+                  disabled={savingPlay || (runType !== "route" && runType !== "decoy" && success === null) || (runType === "route" && rbTargeted && rbOutcome === null) || tagsMissing || variantMissing}
                   className="px-5 py-2 bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white text-sm rounded font-medium transition">
                   {savingPlay ? "…" : "Log Play"}
                 </button>
@@ -939,15 +1040,22 @@ export default function RBChartingBoard({ prospect, onBack, onDataChanged, overv
                       }`}>
                         <span className="text-slate-500 w-5 flex-shrink-0">{gamePlays.length - i}</span>
                         <span className="text-slate-400">{fLabel[pl.formation]}</span>
+                        {pl.aligned_as_wr && <span className="text-blue-300" title="Split out wide">WR</span>}
                         <span className={`font-medium ${isRoute ? "text-blue-400" : "text-white"}`}>{rtLabel[pl.run_type]}</span>
                         {isRoute ? (
                           <>
-                            {pl.route_type && (
+                            {pl.route_detail ? (
+                              <>
+                                <span className="text-blue-300" title={`Saved as ${ROUTE_TYPES.find((r) => r.key === pl.route_type)?.label ?? "no bucket"}`}>
+                                  {ROUTE_LABELS[pl.route_detail]}
+                                </span>
+                                <RouteVariantMark route={pl.route_detail} variant={pl.route_variant} />
+                              </>
+                            ) : pl.route_type && (
                               <span className="text-blue-300 text-[10px]">
                                 {ROUTE_TYPES.find((r) => r.key === pl.route_type)?.short}
                               </span>
                             )}
-                            {pl.aligned_as_wr && <span className="text-blue-300">WR</span>}
                             {pl.was_open && <span className="text-emerald-300">Open</span>}
                             {pl.targeted
                               ? pl.success === true ? <span className="text-emerald-400">✓</span>

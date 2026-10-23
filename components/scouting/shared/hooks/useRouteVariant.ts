@@ -19,7 +19,7 @@ export interface UseRouteVariantReturn {
 }
 
 /**
- * Sub-route state for the WR, TE and QB boards (lib/scouting/routeVariants.ts).
+ * Sub-route state for the WR, TE, QB and RB boards (lib/scouting/routeVariants.ts).
  * `initialRoute` = the route the board starts on.
  */
 export function useRouteVariant(initialRoute: RouteType | null): UseRouteVariantReturn {

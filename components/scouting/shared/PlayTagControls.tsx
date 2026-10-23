@@ -1,5 +1,5 @@
 "use client";
-import { isTaggedPlay, type PlayTagSpec, type TagPosition } from "../../../lib/scouting/playEra";
+import { isTaggedPlay, type PlayTagSpec, type TagPosition, type TagStep } from "../../../lib/scouting/playEra";
 import { tagBadges, tagForced, tagOptions, visibleTags, type PlayFacts } from "../../../lib/scouting/playTags";
 import type { PlayTags } from "./hooks/usePlayTags";
 
@@ -11,6 +11,9 @@ interface Props {
   facts: PlayFacts;
   /** "situation" = the four situation tags (top of the logger); "play" = the position's tags that apply. */
   part: "situation" | "play";
+  /** The play tags of one logger step, shown beside that step's field with no
+   *  heading of their own; absent = the Tags row after the play (lib/scouting/playEra.ts). */
+  step?: TagStep;
   accent: "blue" | "green";
   /** Full-height (h-10) buttons, to match a logger whose other buttons are h-10. */
   tall?: boolean;
@@ -23,7 +26,7 @@ interface Props {
  * tags that apply to the play show. While editing a play charted before the
  * tags, nothing shows (its tags are never written).
  */
-export default function PlayTagControls({ tags, facts, part, accent, tall = false }: Props) {
+export default function PlayTagControls({ tags, facts, part, step, accent, tall = false }: Props) {
   const height = tall ? "h-10" : "py-1.5";
   if (tags.editingUntagged) {
     return part === "situation" ? (
@@ -32,7 +35,7 @@ export default function PlayTagControls({ tags, facts, part, accent, tall = fals
       </div>
     ) : null;
   }
-  const specs = visibleTags(tags.position, facts, part);
+  const specs = visibleTags(tags.position, facts, part, step);
   if (specs.length === 0) return null;
   const toggles = specs.filter((s) => !s.values && !s.required);
   const pickers = specs.filter((s) => s.values || s.required);
@@ -40,10 +43,12 @@ export default function PlayTagControls({ tags, facts, part, accent, tall = fals
 
   return (
     <div className="space-y-2">
-      <div className="text-xs text-slate-500">
-        {part === "situation" ? "Situation" : "Tags"}
-        {sticky.length > 0 && <span className="text-slate-600"> · {sticky.join(" and ")} stay on for the next play</span>}
-      </div>
+      {!step && (
+        <div className="text-xs text-slate-500">
+          {part === "situation" ? "Situation" : "Tags"}
+          {sticky.length > 0 && <span className="text-slate-600"> · {sticky.join(" and ")} stay on for the next play</span>}
+        </div>
+      )}
       {toggles.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {toggles.map((spec) => {

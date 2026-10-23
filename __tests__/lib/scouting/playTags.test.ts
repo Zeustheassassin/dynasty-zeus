@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isTaggedPlay, tagColumns, type TagPosition } from "@/lib/scouting/playEra";
+import { SITUATION_TAGS, isTaggedPlay, tagColumns, type TagPosition, type TagStep } from "@/lib/scouting/playEra";
 import {
   carriedStickyValues, defaultTagValues, forcedTagPayload, missingTags, tagBadges, tagDefault, tagForced,
   tagPayload, tagSpecs, tagValuesFromPlay, visibleTags, type PlayFacts,
@@ -7,6 +7,7 @@ import {
 
 const POSITIONS: TagPosition[] = ["QB", "RB", "WR", "TE"];
 const cols = (specs: { column: string }[]) => specs.map((s) => s.column);
+const SITUATION = new Set(SITUATION_TAGS.map((s) => s.column));
 
 // A typical play per position, as the boards describe it.
 const QB_THROW: PlayFacts = { dropback: true, throw: true };
@@ -139,19 +140,47 @@ describe("click budget", () => {
 });
 
 describe("what shows", () => {
+  const STEPS: (TagStep | undefined)[] = [undefined, "playType", "read", "pressure", "throw", "run", "block", "route", "coverage", "catch"];
+  // A play's tags at every step of the logger, in registry order.
+  const everyStep = (pos: TagPosition, facts: PlayFacts) =>
+    tagSpecs(pos).map((s) => s.column).filter((c) => STEPS.some((st) => cols(visibleTags(pos, facts, "play", st)).includes(c)));
+
   it("situation row on every play; play tags only where they apply", () => {
     for (const pos of POSITIONS) {
       expect(cols(visibleTags(pos, {}, "situation"))).toEqual(["red_zone", "third_fourth_down", "short_yardage", "garbage_time"]);
     }
-    expect(cols(visibleTags("QB", QB_THROW, "play"))).toEqual(["play_action", "tight_window", "release_timing", "better_option_missed", "didnt_sense_pressure"]);
-    expect(cols(visibleTags("QB", QB_SCRAMBLE, "play"))).toEqual(["play_action", "better_option_missed", "didnt_sense_pressure", "run_success", "run_broken_tackle", "run_explosive"]);
+    expect(everyStep("QB", QB_THROW)).toEqual(["play_action", "tight_window", "release_timing", "better_option_missed", "didnt_sense_pressure"]);
+    expect(everyStep("QB", QB_SCRAMBLE)).toEqual(["play_action", "better_option_missed", "didnt_sense_pressure", "run_success", "run_broken_tackle", "run_explosive"]);
     // Every dropback, clean pocket included (the user, 2026-10-22); never a designed run.
-    expect(cols(visibleTags("QB", QB_SACK, "play"))).toContain("didnt_sense_pressure");
-    expect(cols(visibleTags("QB", QB_RUN, "play"))).not.toContain("didnt_sense_pressure");
-    expect(cols(visibleTags("WR", WR_ROUTE, "play"))).toEqual(["double_coverage"]);
-    expect(cols(visibleTags("WR", {}, "play"))).toEqual([]); // no route run
-    expect(cols(visibleTags("TE", { route: true }, "play"))).toEqual(["double_coverage", "chipped_before_route"]);
-    expect(cols(visibleTags("TE", { block: true }, "play"))).toEqual(["blocked_defender"]);
+    expect(everyStep("QB", QB_SACK)).toContain("didnt_sense_pressure");
+    expect(everyStep("QB", QB_RUN)).not.toContain("didnt_sense_pressure");
+    expect(everyStep("WR", WR_ROUTE)).toEqual(["double_coverage"]);
+    expect(everyStep("WR", {})).toEqual([]); // no route run
+    expect(everyStep("TE", { route: true })).toEqual(["double_coverage", "chipped_before_route"]);
+    expect(everyStep("TE", { block: true })).toEqual(["blocked_defender"]);
+  });
+
+  it("puts each tag beside the field it goes with (the user's charting order, 2026-10-23)", () => {
+    const at = (pos: TagPosition, facts: PlayFacts, step?: TagStep) => cols(visibleTags(pos, facts, "play", step));
+    expect(at("QB", QB_THROW, "playType")).toEqual(["play_action"]);
+    expect(at("QB", QB_THROW, "read")).toEqual(["better_option_missed"]);
+    expect(at("QB", QB_THROW, "pressure")).toEqual(["didnt_sense_pressure"]);
+    expect(at("QB", QB_SACK, "pressure")).toEqual(["didnt_sense_pressure", "sack_fault"]);
+    expect(at("QB", QB_THROW, "throw")).toEqual(["tight_window", "release_timing"]);
+    // Only a QB run's tags are left for the Tags row after the play.
+    expect(at("QB", QB_THROW)).toEqual([]);
+    expect(at("QB", QB_SCRAMBLE)).toEqual(["run_success", "run_broken_tackle", "run_explosive"]);
+    expect(at("RB", RB_CARRY, "run")).toEqual(["hit_behind_line", "missed_read"]);
+    expect(at("RB", { passProLoss: true }, "block")).toEqual(["pass_pro_loss"]);
+    expect(at("RB", { catch: true }, "catch")).toEqual(["broken_tackle_after_catch"]);
+    expect(at("WR", { route: true, press: true }, "coverage")).toEqual(["double_coverage", "press_release"]);
+    expect(at("WR", { route: true, catch: true }, "catch")).toEqual(["broken_tackle_after_catch"]);
+    expect(at("TE", { route: true, press: true }, "coverage")).toEqual(["double_coverage", "press_release"]);
+    expect(at("TE", { route: true }, "route")).toEqual(["chipped_before_route"]);
+    expect(at("TE", TE_BLOCK, "block")).toEqual(["blocked_defender"]);
+    for (const pos of ["RB", "WR", "TE"] as const) {
+      expect(tagSpecs(pos).filter((s) => !s.step && !SITUATION.has(s.column)).map((s) => s.column), pos).toEqual([]);
+    }
   });
 });
 

@@ -745,30 +745,8 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
               </div>
             </div>
 
+            {/* The user's charting order (2026-10-23): situation, alignment, play type, the route, then what happened. */}
             <PlayTagControls tags={tags} facts={tagFacts} part="situation" accent="blue" tall />
-
-            <div>
-              <button onClick={() => setNoRouteRun((v) => !v)}
-                className={`w-full h-10 rounded text-sm font-semibold transition ${noRouteRun ? "bg-amber-700 text-white ring-2 ring-amber-500" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
-                {noRouteRun ? "✓ No Route Run (Aligned Only — run play / blocking)" : "No Route Run"}
-              </button>
-              {noRouteRun && <p className="text-xs text-amber-400/70 mt-1">Counts as a snap on field. Only alignment and line are recorded.</p>}
-            </div>
-
-            {!noRouteRun && (
-              <div>
-                <div className="text-xs text-slate-500 mb-2">Route Type</div>
-                <div className="flex flex-wrap gap-1.5">
-                  {ROUTE_TYPES.map((rt) => (
-                    <button key={rt} onClick={() => { variant.pickRoute(rt, routeType); setRouteType(rt); }}
-                      className={`flex-1 whitespace-nowrap px-3 h-10 rounded text-xs font-medium capitalize transition ${routeType === rt ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
-                      {rt}
-                    </button>
-                  ))}
-                </div>
-                <RouteVariantPicker route={routeType} variant={variant} board="WR" accent="blue" tall />
-              </div>
-            )}
 
             <div className="flex flex-wrap gap-4">
               <div className="flex-1 whitespace-nowrap">
@@ -791,8 +769,41 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
                     className={`flex-1 whitespace-nowrap px-3 h-10 rounded text-xs font-medium transition ${!onLine ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Off</button>
                 </div>
               </div>
-              {!noRouteRun && (
-                <div className="flex-1 whitespace-nowrap">
+            </div>
+
+            <div>
+              <div className="text-xs text-slate-500 mb-2">Play Type</div>
+              <div className="flex gap-1.5">
+                <button onClick={() => setNoRouteRun(false)} aria-pressed={!noRouteRun}
+                  className={`flex-1 whitespace-nowrap px-3 h-10 rounded text-sm font-semibold transition ${!noRouteRun ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                  Route Run
+                </button>
+                <button onClick={() => setNoRouteRun(true)} aria-pressed={noRouteRun}
+                  className={`flex-1 whitespace-nowrap px-3 h-10 rounded text-sm font-semibold transition ${noRouteRun ? "bg-amber-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                  No Route Run
+                </button>
+              </div>
+              {noRouteRun && <p className="text-xs text-amber-400/70 mt-1">Run play / blocking: counts as a snap on field. Only alignment and line are recorded.</p>}
+            </div>
+
+            {!noRouteRun && (
+              <div>
+                <div className="text-xs text-slate-500 mb-2">Route Type</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {ROUTE_TYPES.map((rt) => (
+                    <button key={rt} onClick={() => { variant.pickRoute(rt, routeType); setRouteType(rt); }}
+                      className={`flex-1 whitespace-nowrap px-3 h-10 rounded text-xs font-medium capitalize transition ${routeType === rt ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                      {rt}
+                    </button>
+                  ))}
+                </div>
+                <RouteVariantPicker route={routeType} variant={variant} board="WR" accent="blue" tall />
+              </div>
+            )}
+
+            {!noRouteRun && (
+              <div className="space-y-2">
+                <div>
                   <div className="text-xs text-slate-500 mb-2">Coverage</div>
                   <div className="flex gap-1.5">
                     {(coverage === "double" ? [...COVERAGES, LEGACY_DOUBLE] : COVERAGES).map((cv) => (
@@ -803,8 +814,12 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
                     ))}
                   </div>
                 </div>
-              )}
-              {!noRouteRun && (
+                <PlayTagControls tags={tags} facts={tagFacts} part="play" step="coverage" accent="blue" tall />
+              </div>
+            )}
+
+            {!noRouteRun && (
+              <div className="flex flex-wrap gap-4">
                 <div className="flex-1 whitespace-nowrap">
                   <div className="text-xs text-slate-500 mb-2">Got Open?</div>
                   <div className="flex gap-1.5">
@@ -814,8 +829,6 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
                       className={`flex-1 whitespace-nowrap px-3 h-10 rounded text-xs font-medium transition ${!wasOpen ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
                   </div>
                 </div>
-              )}
-              {!noRouteRun && (
                 <div className="flex-1 whitespace-nowrap">
                   <div className="text-xs text-slate-500 mb-2">Targeted?</div>
                   <div className="flex gap-1.5">
@@ -825,31 +838,34 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
                       className={`flex-1 whitespace-nowrap px-3 h-10 rounded text-xs font-medium transition ${!targeted ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
                   </div>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
 
             {!noRouteRun && targeted && (
-              <div className="flex flex-wrap gap-4 p-3 bg-slate-900/60 rounded-lg border border-slate-800">
-                <div className="flex-1 whitespace-nowrap">
-                  <div className="text-xs text-slate-500 mb-2">Outcome</div>
-                  <div className="flex gap-1.5">
-                    <button onClick={() => setPlayOutcome("caught")}
-                      className={`flex-1 whitespace-nowrap px-4 h-10 rounded text-xs font-bold transition ${playOutcome === "caught" ? "bg-emerald-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Caught ✓</button>
-                    <button onClick={() => setPlayOutcome("drop")}
-                      className={`flex-1 whitespace-nowrap px-4 h-10 rounded text-xs font-bold transition ${playOutcome === "drop" ? "bg-red-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Drop ✗</button>
-                    <button onClick={() => setPlayOutcome("incomplete")}
-                      className={`flex-1 whitespace-nowrap px-4 h-10 rounded text-xs font-bold transition ${playOutcome === "incomplete" ? "bg-slate-500 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Incomplete</button>
+              <div className="space-y-3 p-3 bg-slate-900/60 rounded-lg border border-slate-800">
+                <div className="flex flex-wrap gap-4">
+                  <div className="flex-1 whitespace-nowrap">
+                    <div className="text-xs text-slate-500 mb-2">Outcome</div>
+                    <div className="flex gap-1.5">
+                      <button onClick={() => setPlayOutcome("caught")}
+                        className={`flex-1 whitespace-nowrap px-4 h-10 rounded text-xs font-bold transition ${playOutcome === "caught" ? "bg-emerald-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Caught ✓</button>
+                      <button onClick={() => setPlayOutcome("drop")}
+                        className={`flex-1 whitespace-nowrap px-4 h-10 rounded text-xs font-bold transition ${playOutcome === "drop" ? "bg-red-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Drop ✗</button>
+                      <button onClick={() => setPlayOutcome("incomplete")}
+                        className={`flex-1 whitespace-nowrap px-4 h-10 rounded text-xs font-bold transition ${playOutcome === "incomplete" ? "bg-slate-500 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Incomplete</button>
+                    </div>
+                  </div>
+                  <div className="flex-1 whitespace-nowrap">
+                    <div className="text-xs text-slate-500 mb-2">Contested?</div>
+                    <div className="flex gap-1.5">
+                      <button onClick={() => setContested(true)}
+                        className={`flex-1 whitespace-nowrap px-3 h-10 rounded text-xs font-medium transition ${contested ? "bg-purple-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
+                      <button onClick={() => setContested(false)}
+                        className={`flex-1 whitespace-nowrap px-3 h-10 rounded text-xs font-medium transition ${!contested ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
+                    </div>
                   </div>
                 </div>
-                <div className="flex-1 whitespace-nowrap">
-                  <div className="text-xs text-slate-500 mb-2">Contested?</div>
-                  <div className="flex gap-1.5">
-                    <button onClick={() => setContested(true)}
-                      className={`flex-1 whitespace-nowrap px-3 h-10 rounded text-xs font-medium transition ${contested ? "bg-purple-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
-                    <button onClick={() => setContested(false)}
-                      className={`flex-1 whitespace-nowrap px-3 h-10 rounded text-xs font-medium transition ${!contested ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
-                  </div>
-                </div>
+                <PlayTagControls tags={tags} facts={tagFacts} part="play" step="catch" accent="blue" tall />
               </div>
             )}
 

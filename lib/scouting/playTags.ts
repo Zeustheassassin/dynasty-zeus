@@ -16,7 +16,7 @@
 // Nothing here feeds a grade yet (Stage 4).
 import {
   POSITION_TAGS, SITUATION_TAGS,
-  type PlayFact, type PlayTagSpec, type TagPosition,
+  type PlayFact, type PlayTagSpec, type TagPosition, type TagStep,
 } from "./playEra";
 
 export type TagValue = boolean | string | null;
@@ -146,14 +146,18 @@ export function missingTags(
   );
 }
 
-/** The tags to show for this play: the situation row, or the play's own tags. */
+/**
+ * The tags to show for this play: the situation row, or the play's own tags
+ * at one step of the logger (no step = the Tags row after the play).
+ */
 export function visibleTags(
   position: TagPosition,
   facts: PlayFacts,
   part: "situation" | "play",
+  step?: TagStep,
 ): PlayTagSpec[] {
   return SPECS[position].filter(
-    (spec) => isSituationTag(spec) === (part === "situation") && tagApplies(spec, facts),
+    (spec) => isSituationTag(spec) === (part === "situation") && spec.step === step && tagApplies(spec, facts),
   );
 }
 

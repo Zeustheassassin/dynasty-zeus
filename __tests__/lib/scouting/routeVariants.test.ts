@@ -23,9 +23,9 @@ describe("route sub-routes", () => {
     expect(labels("post")).toEqual(["Short", "Intermediate", "Deep", "Post Sit"]);
     expect(labels("nine")).toEqual(["Nine", "Back Shoulder Fade", "Seam Route", "Love of the Game", "Sluggo", "Stop and Go"]);
     expect(labels("other")).toEqual(["Option", "Texas", "Wheel", "Block and Release", "Out and Up", "Zig"]);
-    // Every other bucket is the same on all three boards.
+    // Every other bucket is the same on every board.
     for (const rt of ROUTE_TYPES.filter((r) => r !== "other")) {
-      for (const board of ["TE", "QB"] as const) expect(routeVariantsFor(rt, board)).toEqual(routeVariantsFor(rt, "WR"));
+      for (const board of ["TE", "QB", "RB"] as const) expect(routeVariantsFor(rt, board)).toEqual(routeVariantsFor(rt, "WR"));
     }
     for (const rt of ROUTE_TYPES) {
       const keys = ROUTE_VARIANTS[rt].map((v) => v.key);
@@ -34,10 +34,11 @@ describe("route sub-routes", () => {
   });
 
   it("offers Scramble Drill under Other on the QB board only", () => {
-    const keys = (board: "WR" | "TE" | "QB") => routeVariantsFor("other", board).map((v) => v.key);
+    const keys = (board: "WR" | "TE" | "QB" | "RB") => routeVariantsFor("other", board).map((v) => v.key);
     expect(keys("QB")).toEqual(["option", "texas", "wheel", "block_release", "out_and_up", "zig", "called_scramble_drill"]);
     expect(keys("WR")).not.toContain("called_scramble_drill");
     expect(keys("TE")).toEqual(keys("WR"));
+    expect(keys("RB")).toEqual(keys("WR"));
     expect(routeVariantSpec("other", "called_scramble_drill")).toMatchObject({ label: "Scramble Drill", short: "Scramble Drill", boards: ["QB"] });
   });
 

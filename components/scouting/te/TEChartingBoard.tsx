@@ -799,30 +799,29 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
             {(playType === "run_block" || playType === "pass_block") && (
               <div className="space-y-3 p-3 bg-slate-900/60 rounded-lg border border-purple-900/50">
                 <div className="text-xs text-purple-400 font-medium">Block Details</div>
-                <div className="flex flex-wrap gap-4">
-                  <div className="flex-1 whitespace-nowrap">
-                    <div className="text-xs text-slate-500 mb-2">Block Type</div>
-                    <div className="flex gap-2">
-                      {(["movement", "inline"] as TEBlockType[]).map((bt) => (
-                        <button key={bt} onClick={() => setBlockType(bt)}
-                          className={`flex-1 whitespace-nowrap px-4 py-2 rounded text-sm font-medium transition capitalize ${blockType === bt ? "bg-purple-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
-                          {bt.charAt(0).toUpperCase() + bt.slice(1)}
-                        </button>
-                      ))}
-                    </div>
+                <div>
+                  <div className="text-xs text-slate-500 mb-2">Block Type</div>
+                  <div className="flex gap-2">
+                    {(["movement", "inline"] as TEBlockType[]).map((bt) => (
+                      <button key={bt} onClick={() => setBlockType(bt)}
+                        className={`flex-1 whitespace-nowrap px-4 py-2 rounded text-sm font-medium transition capitalize ${blockType === bt ? "bg-purple-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                        {bt.charAt(0).toUpperCase() + bt.slice(1)}
+                      </button>
+                    ))}
                   </div>
-                  <div className="flex-1 whitespace-nowrap">
-                    <div className="text-xs text-slate-500 mb-2">Outcome</div>
-                    <div className="flex gap-2">
-                      <button onClick={() => setBlockSuccess(true)}
-                        className={`flex-1 whitespace-nowrap px-4 py-2 rounded text-sm font-bold transition ${blockSuccess === true ? "bg-green-600 text-white ring-2 ring-green-400" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
-                        ✓ Success
-                      </button>
-                      <button onClick={() => setBlockSuccess(false)}
-                        className={`flex-1 whitespace-nowrap px-4 py-2 rounded text-sm font-bold transition ${blockSuccess === false ? "bg-red-600 text-white ring-2 ring-red-400" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
-                        ✗ Fail
-                      </button>
-                    </div>
+                </div>
+                <PlayTagControls tags={tags} facts={tagFacts} part="play" step="block" accent="green" />
+                <div>
+                  <div className="text-xs text-slate-500 mb-2">Outcome</div>
+                  <div className="flex gap-2">
+                    <button onClick={() => setBlockSuccess(true)}
+                      className={`flex-1 whitespace-nowrap px-4 py-2 rounded text-sm font-bold transition ${blockSuccess === true ? "bg-green-600 text-white ring-2 ring-green-400" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                      ✓ Success
+                    </button>
+                    <button onClick={() => setBlockSuccess(false)}
+                      className={`flex-1 whitespace-nowrap px-4 py-2 rounded text-sm font-bold transition ${blockSuccess === false ? "bg-red-600 text-white ring-2 ring-red-400" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                      ✗ Fail
+                    </button>
                   </div>
                 </div>
               </div>
@@ -831,18 +830,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
             {playType === "route_run" && (
               <div className="space-y-3 p-3 bg-slate-900/60 rounded-lg border border-blue-900/50">
                 <div className="text-xs text-blue-400 font-medium">Route Details</div>
-                <div>
-                  <div className="text-xs text-slate-500 mb-2">Coverage</div>
-                  <div className="flex gap-2">
-                    {/* Double is a tag now (migration 072); an old Double route keeps its button while edited. */}
-                    {(coverage === "double" ? ["man", "zone", "press", "double"] as TECoverage[] : ["man", "zone", "press"] as TECoverage[]).map((cov) => (
-                      <button key={cov} onClick={() => setCoverage(cov)}
-                        className={`flex-1 py-2 rounded text-xs font-medium transition capitalize ${coverage === cov ? "bg-blue-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
-                        {cov === "double" ? "Double (old)" : cov.charAt(0).toUpperCase() + cov.slice(1)}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                {/* The route he ran first, then what happened (the user's charting order, 2026-10-23). */}
                 <div>
                   <div className="text-xs text-slate-500 mb-2">Route</div>
                   <div className="flex flex-wrap gap-1.5">
@@ -855,6 +843,20 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
                   </div>
                   <RouteVariantPicker route={routeType} variant={variant} board="TE" accent="green" />
                 </div>
+                <PlayTagControls tags={tags} facts={tagFacts} part="play" step="route" accent="green" />
+                <div>
+                  <div className="text-xs text-slate-500 mb-2">Coverage</div>
+                  <div className="flex gap-2">
+                    {/* Double is a tag now (migration 072); an old Double route keeps its button while edited. */}
+                    {(coverage === "double" ? ["man", "zone", "press", "double"] as TECoverage[] : ["man", "zone", "press"] as TECoverage[]).map((cov) => (
+                      <button key={cov} onClick={() => setCoverage(cov)}
+                        className={`flex-1 py-2 rounded text-xs font-medium transition capitalize ${coverage === cov ? "bg-blue-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                        {cov === "double" ? "Double (old)" : cov.charAt(0).toUpperCase() + cov.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <PlayTagControls tags={tags} facts={tagFacts} part="play" step="coverage" accent="green" />
                 <div className="flex flex-wrap gap-4">
                   <div className="flex-1 whitespace-nowrap">
                     <div className="text-xs text-slate-500 mb-2">Was He Open?</div>
