@@ -305,16 +305,16 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
   }, [selectedGameId, playType, blockType, blockSuccess, coverage, routeType, wasOpen, targeted, targetOutcome, contestedTarget, contestedCatch]);
   const canLog = playReady && !tagsMissing && !variantMissing;
 
-  // The next play keeps location, positioning and play type, so it starts from that
-  // alignment's defaults (lib/scouting/teChartingDefaults.ts — the user's, 10/19).
+  // The next play starts blank (the user, 10/23): the board's opening state, Left / Inline /
+  // Route Run with the route defaults (lib/scouting/teChartingDefaults.ts). Sticky tags keep
+  // their value.
   function resetPlayForm() {
     setEditingPlayId(null);
-    const block = isTEBlock(playType) ? teBlockDefaults(positioning) : null;
-    tags.reset(block ? { blocked_defender: block.blockedDefender } : undefined);
-    setBlockType(block?.blockType ?? null); setBlockSuccess(block?.blockSuccess ?? null);
-    const route = playType === "route_run";
-    setCoverage(route ? TE_ROUTE_DEFAULTS.coverage : null); setRouteType(null); variant.reset(null); setWasOpen(null);
-    setTargeted(route ? TE_ROUTE_DEFAULTS.targeted : null);
+    tags.reset();
+    setLocation("left"); setPositioning("inline"); setPlayType("route_run");
+    setBlockType(null); setBlockSuccess(null);
+    setCoverage(TE_ROUTE_DEFAULTS.coverage); setRouteType(null); variant.reset(null); setWasOpen(null);
+    setTargeted(TE_ROUTE_DEFAULTS.targeted);
     setTargetOutcome(null); setContestedTarget(null); setContestedCatch(null);
     setBrokenTackle(false); setPlayNotes("");
   }

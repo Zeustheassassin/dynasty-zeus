@@ -252,9 +252,13 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
     (!needPlatformSide || platformSide !== null) &&
     tags.missing(tagFacts).length === 0;
 
+  // After a log, an edit or a Cancel the next play starts blank: the board's
+  // opening state (sticky tags keep their value).
   function resetForm() {
     setEditingPlayId(null);
     tags.reset();
+    setSnapPos("shotgun");
+    setPlayType("pass");
     setTiming(null);
     setAccuracy(null);
     setCompletion(null);

@@ -313,10 +313,8 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
     if (error) { setPlayError(error.message); }
     else if (data) {
       setPlays((prev) => [...prev, data as RoutePlay]);
-      setWasOpen(false); setTargeted(false); setPlayOutcome(null); setContested(false); setPlayNotes("");
-      tags.reset();
-      // The route stays on for the next play; its sub-route goes back to the default.
-      variant.reset(routeType);
+      // The next play starts blank: the board's opening state (sticky tags keep their value).
+      resetForm();
       cs.markDataDirty();
     }
     setSavingPlay(false);
