@@ -15,6 +15,8 @@ import type { ChartingBoardConfig } from "../shared/ChartingBoard";
 import { useChartingState } from "../shared/hooks/useChartingState";
 import { usePlayTags } from "../shared/hooks/usePlayTags";
 import PlayTagControls, { PlayTagBadges } from "../shared/PlayTagControls";
+import RouteVariantPicker, { RouteVariantMark } from "../shared/RouteVariantPicker";
+import { useRouteVariant } from "../shared/hooks/useRouteVariant";
 import type { PlayFacts } from "../../../lib/scouting/playTags";
 import QBPlayerCharts from "./QBPlayerCharts";
 import { buildQBBaselines, resolveBaselines, computeQBAAEForPlays } from "../../../lib/scouting/aboveExpected";
@@ -102,6 +104,8 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
   const [targetPos, setTargetPos]           = useState<QBTargetPos | null>(null);
   const [depthZone, setDepthZone]           = useState<QBDepthZone | null>(null);
   const [routeType, setRouteType]           = useState<RouteType | null>(null);
+  // The receiver's sub-route under the route (data collection only, lib/scouting/routeVariants.ts).
+  const variant = useRouteVariant(null);
   const [coverage, setCoverage]             = useState<"man" | "zone" | null>(null);
   const [platform, setPlatform]             = useState<QBPlatform | null>(null);
   const [platformSide, setPlatformSide]     = useState<QBPlatformSide | null>(null);
@@ -241,6 +245,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
     selectedGameId !== null &&
     (!needPassFields || timing !== null) &&
     (!needThrowFields || (accuracy !== null && depthZone !== null && routeType !== null && coverage !== null)) &&
+    !(needThrowFields && variant.missing(routeType)) &&
     (!needPressureFields || pressure !== null) &&
     (!needPressureHandling || pressureHandling !== null) &&
     (!needPlatformFields || platform !== null) &&
@@ -258,6 +263,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
     setTargetPos(null);
     setDepthZone(null);
     setRouteType(null);
+    variant.reset(null);
     setCoverage(null);
     setPlatform(null);
     setPlatformSide(null);
@@ -280,6 +286,8 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
     setTargetPos(pl.target_pos);
     setDepthZone(pl.depth_zone);
     setRouteType(pl.route_type);
+    if (pl.route_type) variant.startEdit(pl.route_variant);
+    else variant.reset(null);
     setCoverage(pl.coverage);
     setPlatform(pl.platform);
     setPlatformSide(pl.platform_side);
@@ -304,6 +312,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
       setTargetPos(null);
       setDepthZone(null);
       setRouteType(null);
+      variant.reset(null);
       setCoverage(null);
       setPlatform(null);
       setPlatformSide(null);
@@ -321,6 +330,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
       setTargetPos(null);
       setDepthZone(null);
       setRouteType(null);
+      variant.reset(null);
       setCoverage(null);
       // Platform only applies to throws, so clear when we move into a non-throw timing.
       setPlatform(null);
@@ -365,6 +375,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
       target_pos: isThrow ? targetPos  : null,
       depth_zone: isThrow ? depthZone  : null,
       route_type: isThrow ? routeType : null,
+      route_variant: isThrow ? variant.value : null,
       coverage:   isThrow ? coverage  : null,
       platform:           isThrow ? platform : null,
       platform_side:      isThrow && platform === "on_the_run" ? platformSide : null,
@@ -401,6 +412,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
       target_pos: isThrow ? targetPos  : null,
       depth_zone: isThrow ? depthZone  : null,
       route_type: isThrow ? routeType  : null,
+      route_variant: isThrow ? variant.value : null,
       coverage:   isThrow ? coverage   : null,
       platform:           isThrow ? platform : null,
       platform_side:      isThrow && platform === "on_the_run" ? platformSide : null,
@@ -771,12 +783,13 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
                   <div className="text-xs text-slate-500 mb-2">Route Type</div>
                   <div className="flex flex-wrap gap-1.5">
                     {ROUTE_TYPES.map((rt) => (
-                      <button key={rt} onClick={() => setRouteType((r) => r === rt ? null : rt)}
+                      <button key={rt} onClick={() => { const next = routeType === rt ? null : rt; variant.pickRoute(next, routeType); setRouteType(next); }}
                         className={`flex-1 whitespace-nowrap px-3 py-1.5 rounded text-xs font-medium capitalize transition ${routeType === rt ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                         {rt}
                       </button>
                     ))}
                   </div>
+                  <RouteVariantPicker route={routeType} variant={variant} accent="blue" />
                 </div>
 
                 {/* Coverage */}
@@ -868,6 +881,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
                       )}
                       {pl.depth_zone && <span className="text-blue-300">{DEPTH_SHORT[pl.depth_zone]}</span>}
                       {pl.route_type && <span className="text-slate-300 capitalize">{pl.route_type}</span>}
+                      <RouteVariantMark route={pl.route_type} variant={pl.route_variant} />
                       {pl.coverage && <span className="text-purple-400 capitalize">{pl.coverage}</span>}
                       <PlayTagBadges play={pl} position="QB" />
                       {pl.play_notes && <span className="text-slate-500 truncate">{pl.play_notes}</span>}

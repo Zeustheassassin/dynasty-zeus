@@ -10,7 +10,7 @@ const IDLE = "bg-slate-800 text-slate-400 hover:bg-slate-700";
 interface Props {
   route: RouteType | null;
   variant: UseRouteVariantReturn;
-  /** The board's accent: WR "blue" (bg-blue-600), TE "green" (its route buttons are bg-blue-700). */
+  /** The board's accent: WR and QB "blue" (bg-blue-600), TE "green" (its route buttons are bg-blue-700). */
   accent: "blue" | "green";
   /** Full-height (h-10) buttons, to match a logger whose other buttons are h-10. */
   tall?: boolean;

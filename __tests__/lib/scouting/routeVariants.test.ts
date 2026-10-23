@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import {
   DEFAULT_ROUTE_VARIANT, ROUTE_VARIANTS, defaultRouteVariant, routeVariantMissing, routeVariantSpec, splitByRouteVariant,
@@ -22,7 +22,7 @@ describe("route sub-routes", () => {
     expect(labels("corner")).toEqual(["Short", "Intermediate", "Deep"]);
     expect(labels("post")).toEqual(["Short", "Intermediate", "Deep", "Post Sit"]);
     expect(labels("nine")).toEqual(["Nine", "Back Shoulder Fade", "Seam Route", "Love of the Game", "Sluggo", "Stop and Go"]);
-    expect(labels("other")).toEqual(["Option", "Texas", "Wheel", "Block and Release", "Out and Up"]);
+    expect(labels("other")).toEqual(["Option", "Texas", "Wheel", "Block and Release", "Out and Up", "Zig"]);
     for (const rt of ROUTE_TYPES) {
       const keys = ROUTE_VARIANTS[rt].map((v) => v.key);
       expect(new Set(keys).size).toBe(keys.length);
@@ -68,13 +68,29 @@ describe("route sub-routes", () => {
     expect(splitByRouteVariant("curl", [{ route_variant: null }]).splits).toEqual([]);
   });
 
-  it("matches migration 073's CHECK pair for pair", () => {
-    const sql = readFileSync(join(process.cwd(), "supabase/migrations/073_route_variants.sql"), "utf8");
-    const fromSql: Record<string, string[]> = {};
-    for (const m of sql.matchAll(/WHEN ''(\w+)''\s+THEN route_variant IN \(([^)]*)\)/g)) {
-      fromSql[m[1]] = [...m[2].matchAll(/''(\w+)''/g)].map((k) => k[1]);
+  it("matches the database's sub-route list (route_variant_options, 074 on) pair for pair", () => {
+    // Every migration's INSERT INTO route_variant_options, so a sub-route
+    // added later in its own migration is read too.
+    const dir = join(process.cwd(), "supabase/migrations");
+    const fromSql = new Set<string>();
+    for (const f of readdirSync(dir).filter((x) => x.endsWith(".sql")).sort()) {
+      const sql = readFileSync(join(dir, f), "utf8");
+      for (const ins of sql.matchAll(/INSERT INTO public\.route_variant_options[^;]*;/g)) {
+        for (const m of ins[0].matchAll(/\('(\w+)',\s*'(\w+)'\)/g)) fromSql.add(`${m[1]}|${m[2]}`);
+      }
     }
-    const fromCode = Object.fromEntries(ROUTE_TYPES.map((rt) => [rt, ROUTE_VARIANTS[rt].map((v) => v.key)]));
-    expect(fromSql).toEqual(fromCode);
+    const fromCode = new Set(ROUTE_TYPES.flatMap((rt) => ROUTE_VARIANTS[rt].map((v) => `${rt}|${v.key}`)));
+    expect([...fromSql].sort()).toEqual([...fromCode].sort());
+    expect(fromSql.has("other|zig")).toBe(true);
+  });
+
+  it("drops only 073's two CHECKs in 074, after each table's foreign key is on", () => {
+    const sql = readFileSync(join(process.cwd(), "supabase/migrations/074_route_variant_options.sql"), "utf8");
+    // Comments aside, the one DROP is the approved one (the user, 2026-10-22).
+    const code = sql.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
+    expect(code.match(/\bDROP\b/g)).toHaveLength(1);
+    expect(code).toMatch(/DROP CONSTRAINT IF EXISTS %I', tbl, tbl \|\| '_route_variant_check'/);
+    expect(code.indexOf("_route_variant_fkey' AND conrelid")).toBeLessThan(code.indexOf("DROP CONSTRAINT"));
+    expect(code).not.toMatch(/\b(DELETE|TRUNCATE|UPDATE)\b/);
   });
 });

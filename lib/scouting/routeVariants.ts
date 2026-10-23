@@ -6,14 +6,17 @@
 // DATA COLLECTION ONLY for now: no grade, model or aggregate view reads it
 // until there are enough of each to use.
 //
-// WR and TE boards. Picking a route starts it on its default sub-route
+// WR, TE and QB boards (QB from 2026-10-22, the receiver's route on a throw).
+// Picking a route starts it on its default sub-route
 // (Other has none, so a pick is required). Depths are PFF's bands, by the
 // user's call: Short 0–9, Intermediate 10–19, Deep 20+ yards.
 //
 // NULL route_variant = charted before sub-routes existed (or a paste import,
 // which writes none). Keys are per route: "short" on a Curl and "short" on
 // a Dig share the key, so depth can later be read across routes.
-// supabase/migrations/073_route_variants.sql checks the same pairs.
+// The database checks the same pairs against public.route_variant_options
+// (migration 074): a new sub-route here needs an INSERT there in a new
+// migration, which __tests__/lib/scouting/routeVariants.test.ts checks.
 // ============================================================
 
 import type { RouteType } from "../types";
@@ -25,7 +28,7 @@ export type RouteVariant =
   | "short" | "intermediate" | "deep"
   | "post_dig" | "post_sit"
   | "nine" | "back_shoulder_fade" | "seam" | "love_of_the_game" | "sluggo" | "stop_and_go"
-  | "option" | "texas" | "wheel" | "block_release" | "out_and_up";
+  | "option" | "texas" | "wheel" | "block_release" | "out_and_up" | "zig";
 
 export interface RouteVariantSpec {
   key: RouteVariant;
@@ -77,6 +80,7 @@ export const ROUTE_VARIANTS: Record<RouteType, readonly RouteVariantSpec[]> = {
     { key: "wheel",         label: "Wheel",             short: "Wheel" },
     { key: "block_release", label: "Block and Release", short: "Blk & Rel" },
     { key: "out_and_up",    label: "Out and Up",        short: "Out & Up" },
+    { key: "zig",           label: "Zig",               short: "Zig" },
   ],
 };
 

@@ -30,6 +30,17 @@ describe("useRouteVariant", () => {
     expect(result.current.value).toBeNull();
   });
 
+  it("clears the sub-route when the QB board's route is clicked off, and takes Zig under Other", () => {
+    const { result } = renderHook(() => useRouteVariant(null));
+    act(() => result.current.pickRoute("other", null));
+    act(() => result.current.set("zig"));
+    expect(result.current.missing("other")).toBe(false);
+    // QB route buttons toggle: clicking Other again leaves no route.
+    act(() => result.current.pickRoute(null, "other"));
+    expect(result.current.value).toBeNull();
+    expect(result.current.missing(null)).toBe(false);
+  });
+
   it("lets an old route be edited without a sub-route, until its route changes", () => {
     const { result } = renderHook(() => useRouteVariant("curl"));
     act(() => result.current.startEdit(null));

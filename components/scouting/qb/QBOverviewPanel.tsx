@@ -1,5 +1,5 @@
 "use client";
-import { useMemo } from "react";
+import { Fragment, useMemo } from "react";
 import type {
   QBPlay,
   QBSnapPosition,
@@ -12,6 +12,7 @@ import type {
   ScoutingGame,
 } from "../../../lib/types";
 import { ROUTE_TYPES } from "../shared/chartingConstants";
+import { splitByRouteVariant } from "../../../lib/scouting/routeVariants";
 import { pct, fmtPct } from "../shared/chartingTypes";
 import { computeQBAAEBreakdown } from "../../../lib/scouting/aboveExpected";
 import PlayerNotesList from "../PlayerNotesList";
@@ -118,13 +119,10 @@ export default function QBOverviewPanel({ plays, leaguePlays, games, loading }: 
       .reduce((acc, k) => { acc[k] = zoneStat(k); return acc; }, {} as Record<QBDepthZone, ZoneStat>);
 
     type RouteStat = { total: number; onTarget: number; man: number; manOT: number; zone: number; zoneOT: number };
-    const routeStats: Partial<Record<RouteType, RouteStat>> = {};
-    for (const rt of ROUTE_TYPES) {
-      const rp = gradedThrows.filter((p) => p.route_type === rt);
-      if (rp.length === 0) continue;
+    const routeStat = (rp: QBPlay[]): RouteStat => {
       const manP  = rp.filter((p) => p.coverage === "man");
       const zoneP = rp.filter((p) => p.coverage === "zone");
-      routeStats[rt] = {
+      return {
         total: rp.length,
         onTarget: rp.filter((p) => p.accuracy === "on_target").length,
         man: manP.length,
@@ -132,6 +130,18 @@ export default function QBOverviewPanel({ plays, leaguePlays, games, loading }: 
         zone: zoneP.length,
         zoneOT: zoneP.filter((p) => p.accuracy === "on_target").length,
       };
+    };
+    // Each route with its sub-routes under it (data collection only), and the
+    // throws charted before sub-routes as "Not split" once any are split.
+    type SubRouteStat = RouteStat & { key: string; label: string; yards?: string };
+    const routeStats: Partial<Record<RouteType, RouteStat & { subs: SubRouteStat[] }>> = {};
+    for (const rt of ROUTE_TYPES) {
+      const rp = gradedThrows.filter((p) => p.route_type === rt);
+      if (rp.length === 0) continue;
+      const { splits, unsplit } = splitByRouteVariant(rt, rp);
+      const subs: SubRouteStat[] = splits.map((sp) => ({ key: sp.spec.key, label: sp.spec.label, yards: sp.spec.yards, ...routeStat(sp.plays) }));
+      if (splits.length > 0 && unsplit.length > 0) subs.push({ key: "unsplit", label: "Not split", ...routeStat(unsplit) });
+      routeStats[rt] = { ...routeStat(rp), subs };
     }
 
     const manP  = gradedThrows.filter((p) => p.coverage === "man");
@@ -684,7 +694,8 @@ export default function QBOverviewPanel({ plays, leaguePlays, games, loading }: 
                     const manOTPct  = pct(rs.manOT,  rs.man);
                     const zoneOTPct = pct(rs.zoneOT, rs.zone);
                     return (
-                      <tr key={rt} className="hover:bg-slate-800/40">
+                      <Fragment key={rt}>
+                      <tr className="hover:bg-slate-800/40">
                         <td className="py-1.5 pr-3 text-white font-medium capitalize">{rt}</td>
                         <td className="py-1.5 px-2 text-right text-blue-400">{rs.total}</td>
                         <td className={`py-1.5 px-2 text-right font-semibold ${onTargetColor(otPct)}`}>
@@ -699,6 +710,21 @@ export default function QBOverviewPanel({ plays, leaguePlays, games, loading }: 
                           {rs.zone > 0 ? fmtPct(zoneOTPct) : "—"}
                         </td>
                       </tr>
+                      {rs.subs.map((sub) => (
+                        <tr key={`${rt}-${sub.key}`} className="hover:bg-slate-800/40 text-slate-400">
+                          <td className="py-1 pr-3 pl-5 whitespace-nowrap">
+                            <span className="text-slate-600 mr-1" aria-hidden="true">↳</span>{sub.label}
+                            {sub.yards && <span className="ml-1 text-[10px] text-slate-600">{sub.yards}</span>}
+                          </td>
+                          <td className="py-1 px-2 text-right">{sub.total}</td>
+                          <td className="py-1 px-2 text-right">{fmtPct(pct(sub.onTarget, sub.total))}</td>
+                          <td className="py-1 px-2 text-right">{sub.man || "—"}</td>
+                          <td className="py-1 px-2 text-right">{sub.man > 0 ? fmtPct(pct(sub.manOT, sub.man)) : "—"}</td>
+                          <td className="py-1 px-2 text-right">{sub.zone || "—"}</td>
+                          <td className="py-1 pl-2 text-right">{sub.zone > 0 ? fmtPct(pct(sub.zoneOT, sub.zone)) : "—"}</td>
+                        </tr>
+                      ))}
+                      </Fragment>
                     );
                   })}
               </tbody>

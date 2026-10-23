@@ -1287,6 +1287,10 @@ export interface QBPlay {
   target_pos: QBTargetPos | null;
   depth_zone: QBDepthZone | null;
   route_type: RouteType | null;
+  /** The receiver's sub-route (migration 074; lib/scouting/routeVariants.ts),
+   *  data collection only. NULL = charted before sub-routes, a paste import,
+   *  or not a throw. */
+  route_variant?: RouteVariant | null;
   coverage: "man" | "zone" | null;
   platform: QBPlatform | null;
   platform_side: QBPlatformSide | null;
