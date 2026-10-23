@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import {
-  DEFAULT_ROUTE_VARIANT, ROUTE_VARIANTS, defaultRouteVariant, routeVariantMissing, routeVariantSpec, splitByRouteVariant,
+  DEFAULT_ROUTE_VARIANT, ROUTE_VARIANTS, defaultRouteVariant, routeVariantMissing, routeVariantSpec, routeVariantsFor, splitByRouteVariant,
   type RouteVariant,
 } from "@/lib/scouting/routeVariants";
 import { ROUTE_TYPES } from "@/components/scouting/shared/chartingConstants";
@@ -10,7 +10,7 @@ import type { RouteType } from "@/lib/types";
 
 describe("route sub-routes", () => {
   it("breaks every route bucket down, in the user's order", () => {
-    const labels = (rt: RouteType) => ROUTE_VARIANTS[rt].map((v) => v.label);
+    const labels = (rt: RouteType) => routeVariantsFor(rt, "WR").map((v) => v.label);
     expect(Object.keys(ROUTE_VARIANTS).sort()).toEqual([...ROUTE_TYPES].sort());
     expect(labels("screen")).toEqual(["WR Screen", "Bubble Screen", "Interior Screen"]);
     expect(labels("flat")).toEqual(["True Flat", "Quick Out"]);
@@ -23,10 +23,22 @@ describe("route sub-routes", () => {
     expect(labels("post")).toEqual(["Short", "Intermediate", "Deep", "Post Sit"]);
     expect(labels("nine")).toEqual(["Nine", "Back Shoulder Fade", "Seam Route", "Love of the Game", "Sluggo", "Stop and Go"]);
     expect(labels("other")).toEqual(["Option", "Texas", "Wheel", "Block and Release", "Out and Up", "Zig"]);
+    // Every other bucket is the same on all three boards.
+    for (const rt of ROUTE_TYPES.filter((r) => r !== "other")) {
+      for (const board of ["TE", "QB"] as const) expect(routeVariantsFor(rt, board)).toEqual(routeVariantsFor(rt, "WR"));
+    }
     for (const rt of ROUTE_TYPES) {
       const keys = ROUTE_VARIANTS[rt].map((v) => v.key);
       expect(new Set(keys).size).toBe(keys.length);
     }
+  });
+
+  it("offers Called Scramble Drill under Other on the QB board only", () => {
+    const keys = (board: "WR" | "TE" | "QB") => routeVariantsFor("other", board).map((v) => v.key);
+    expect(keys("QB")).toEqual(["option", "texas", "wheel", "block_release", "out_and_up", "zig", "called_scramble_drill"]);
+    expect(keys("WR")).not.toContain("called_scramble_drill");
+    expect(keys("TE")).toEqual(keys("WR"));
+    expect(routeVariantSpec("other", "called_scramble_drill")).toMatchObject({ label: "Called Scramble Drill", boards: ["QB"] });
   });
 
   it("starts each route on the user's default (Other on none), and every default is one of its sub-routes", () => {
@@ -82,6 +94,7 @@ describe("route sub-routes", () => {
     const fromCode = new Set(ROUTE_TYPES.flatMap((rt) => ROUTE_VARIANTS[rt].map((v) => `${rt}|${v.key}`)));
     expect([...fromSql].sort()).toEqual([...fromCode].sort());
     expect(fromSql.has("other|zig")).toBe(true);
+    expect(fromSql.has("other|called_scramble_drill")).toBe(true);
   });
 
   it("drops only 073's two CHECKs in 074, after each table's foreign key is on", () => {

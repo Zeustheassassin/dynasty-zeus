@@ -766,7 +766,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
                     </button>
                   ))}
                 </div>
-                <RouteVariantPicker route={routeType} variant={variant} accent="blue" tall />
+                <RouteVariantPicker route={routeType} variant={variant} board="WR" accent="blue" tall />
               </div>
             )}
 

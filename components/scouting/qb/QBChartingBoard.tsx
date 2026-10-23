@@ -789,7 +789,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
                       </button>
                     ))}
                   </div>
-                  <RouteVariantPicker route={routeType} variant={variant} accent="blue" />
+                  <RouteVariantPicker route={routeType} variant={variant} board="QB" accent="blue" />
                 </div>
 
                 {/* Coverage */}

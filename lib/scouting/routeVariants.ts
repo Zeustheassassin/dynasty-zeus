@@ -28,7 +28,11 @@ export type RouteVariant =
   | "short" | "intermediate" | "deep"
   | "post_dig" | "post_sit"
   | "nine" | "back_shoulder_fade" | "seam" | "love_of_the_game" | "sluggo" | "stop_and_go"
-  | "option" | "texas" | "wheel" | "block_release" | "out_and_up" | "zig";
+  | "option" | "texas" | "wheel" | "block_release" | "out_and_up" | "zig"
+  | "called_scramble_drill";
+
+/** The charting boards that log sub-routes. */
+export type RouteVariantBoard = "WR" | "TE" | "QB";
 
 export interface RouteVariantSpec {
   key: RouteVariant;
@@ -37,6 +41,9 @@ export interface RouteVariantSpec {
   short: string;
   /** PFF depth band, on the depth sub-routes. */
   yards?: string;
+  /** Only these boards offer it (unset: all three). The database list
+   *  (route_variant_options) is shared, so this is the board's rule alone. */
+  boards?: readonly RouteVariantBoard[];
 }
 
 const SHORT: RouteVariantSpec        = { key: "short",        label: "Short",        short: "Short", yards: "0–9" };
@@ -81,8 +88,15 @@ export const ROUTE_VARIANTS: Record<RouteType, readonly RouteVariantSpec[]> = {
     { key: "block_release", label: "Block and Release", short: "Blk & Rel" },
     { key: "out_and_up",    label: "Out and Up",        short: "Out & Up" },
     { key: "zig",           label: "Zig",               short: "Zig" },
+    // QB only (the user, 2026-10-22): a designed scramble, not a receiver's route.
+    { key: "called_scramble_drill", label: "Called Scramble Drill", short: "Scramble Drill", boards: ["QB"] },
   ],
 };
+
+/** A route's sub-routes as one board offers them, in button order. */
+export function routeVariantsFor(route: RouteType, board: RouteVariantBoard): readonly RouteVariantSpec[] {
+  return ROUTE_VARIANTS[route].filter((v) => !v.boards || v.boards.includes(board));
+}
 
 /** The sub-route a route starts on (the user's defaults). Other has none: it's picked every time. */
 export const DEFAULT_ROUTE_VARIANT: Record<RouteType, RouteVariant | null> = {

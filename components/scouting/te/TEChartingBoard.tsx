@@ -853,7 +853,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
                       </button>
                     ))}
                   </div>
-                  <RouteVariantPicker route={routeType} variant={variant} accent="green" />
+                  <RouteVariantPicker route={routeType} variant={variant} board="TE" accent="green" />
                 </div>
                 <div className="flex flex-wrap gap-4">
                   <div className="flex-1 whitespace-nowrap">

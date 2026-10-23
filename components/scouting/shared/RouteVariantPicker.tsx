@@ -1,6 +1,6 @@
 "use client";
 import type { RouteType } from "../../../lib/types";
-import { ROUTE_VARIANTS, routeVariantSpec } from "../../../lib/scouting/routeVariants";
+import { routeVariantSpec, routeVariantsFor, type RouteVariantBoard } from "../../../lib/scouting/routeVariants";
 import { ROUTE_LABELS } from "./chartingConstants";
 import type { UseRouteVariantReturn } from "./hooks/useRouteVariant";
 
@@ -10,6 +10,8 @@ const IDLE = "bg-slate-800 text-slate-400 hover:bg-slate-700";
 interface Props {
   route: RouteType | null;
   variant: UseRouteVariantReturn;
+  /** Which board it's on: a few sub-routes are one board's only (Called Scramble Drill, QB). */
+  board: RouteVariantBoard;
   /** The board's accent: WR and QB "blue" (bg-blue-600), TE "green" (its route buttons are bg-blue-700). */
   accent: "blue" | "green";
   /** Full-height (h-10) buttons, to match a logger whose other buttons are h-10. */
@@ -22,9 +24,9 @@ interface Props {
  * click. Other starts unpicked and is outlined in amber until a pick.
  * Depth sub-routes show PFF's yard band.
  */
-export default function RouteVariantPicker({ route, variant, accent, tall = false }: Props) {
+export default function RouteVariantPicker({ route, variant, board, accent, tall = false }: Props) {
   if (!route) return null;
-  const specs = ROUTE_VARIANTS[route];
+  const specs = routeVariantsFor(route, board);
   const unpicked = variant.missing(route);
   const height = tall ? "h-10" : "py-1.5";
   const name = ROUTE_LABELS[route];
