@@ -1262,7 +1262,8 @@ export type QBTargetPos  = "rb" | "wr" | "te";
 export type QBPlatform   = "on_platform" | "off_platform" | "on_the_run";
 export type QBPlatformSide = "strong_side" | "cross_body";
 export type QBPressure   = "clean" | "mid" | "backside" | "front_side";
-export type QBPressureHandling = "step_up" | "bail_front_side" | "bail_backside";
+/** "backpedal" added 2026-10-22 (migration 076). */
+export type QBPressureHandling = "step_up" | "bail_front_side" | "bail_backside" | "backpedal";
 export type QBTouch      = "correct" | "incorrect";
 export type QBReleaseTiming = "early" | "on_time" | "late";
 export type QBSackFault  = "qb" | "line" | "coverage";
@@ -1309,6 +1310,8 @@ export interface QBPlay {
   tight_window?: boolean | null;
   release_timing?: QBReleaseTiming | null;
   better_option_missed?: boolean | null;
+  /** Tag (migration 076): every dropback. NULL = charted before the tag. */
+  didnt_sense_pressure?: boolean | null;
   sack_fault?: QBSackFault | null;
   run_success?: boolean | null;
   run_broken_tackle?: boolean | null;

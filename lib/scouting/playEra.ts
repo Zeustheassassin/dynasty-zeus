@@ -18,7 +18,7 @@
 // stay untagged too.
 //
 // The tag registry below mirrors migration 062's columns and CHECKs (and 072's
-// double_coverage on the WR and TE tables). `entry`
+// double_coverage on the WR and TE tables, 076's didnt_sense_pressure on QB). `entry`
 // is how the boards ask for each tag (the user's click budget):
 //   exception   — off unless clicked
 //   preselected — the common answer is filled in (`preset`)
@@ -86,6 +86,8 @@ export const POSITION_TAGS: Readonly<Record<TagPosition, readonly PlayTagSpec[]>
     { column: "tight_window",         label: "Tight window",          short: "TW",        entry: "exception", appliesTo: "throw" },
     { column: "release_timing",       label: "Release",               short: "Rel",       entry: "preselected", values: ["early", "on_time", "late"], valueLabels: ["Early", "On time", "Late"], preset: "on_time", appliesTo: "throw" },
     { column: "better_option_missed", label: "Better option missed",  short: "BetterOpt", entry: "exception", appliesTo: "dropback" },
+    // Every dropback, clean pocket included (the user, 2026-10-22). Data collection only.
+    { column: "didnt_sense_pressure", label: "Didn't sense pressure", short: "NoSense",   entry: "exception", appliesTo: "dropback" },
     { column: "sack_fault",           label: "Sack fault",            short: "Sack",      entry: "conditional", values: ["qb", "line", "coverage"], valueLabels: ["QB", "Line", "Coverage"], preset: "line", appliesTo: "sack", when: "sacks only" },
     { column: "run_success",          label: "Run result",            short: "Run",       entry: "conditional", valueLabels: ["Success", "Fail"], required: true, appliesTo: "run", when: "runs and scrambles only" },
     { column: "run_broken_tackle",    label: "Broken tackle",         short: "BT",        entry: "conditional", appliesTo: "run", when: "runs and scrambles only" },

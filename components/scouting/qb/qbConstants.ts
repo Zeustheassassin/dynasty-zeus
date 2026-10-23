@@ -77,6 +77,8 @@ export const PRESSURE_HANDLINGS: { key: QBPressureHandling; label: string }[] = 
   { key: "step_up",          label: "Step Up" },
   { key: "bail_front_side",  label: "Bail Front Side" },
   { key: "bail_backside",    label: "Bail Backside" },
+  // The user, 2026-10-22 (migration 076).
+  { key: "backpedal",        label: "Backpedal" },
 ];
 
 // 3×3 depth-zone grid layout

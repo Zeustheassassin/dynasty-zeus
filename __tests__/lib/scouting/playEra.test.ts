@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { countPlayEras, gameSource, isTaggedPlay, playEra, POSITION_TAGS, SITUATION_TAGS, tagColumns } from "@/lib/scouting/playEra";
 
 const imported = { created_at: "2026-04-30T20:07:28Z" };
@@ -28,6 +30,13 @@ describe("tag registry", () => {
     expect(te.blocked_defender.values).toEqual(["dl", "lb", "db"]);
     expect(te.blocked_defender.preset).toBe("dl");
     expect(POSITION_TAGS.RB.find((t) => t.column === "pass_pro_loss")?.values).toEqual(["wrong_man", "beaten"]);
+  });
+
+  it("adds migration 076's QB tag: Didn't sense pressure, off unless clicked, every dropback", () => {
+    const qb = Object.fromEntries(POSITION_TAGS.QB.map((t) => [t.column, t]));
+    expect(qb.didnt_sense_pressure).toMatchObject({ label: "Didn't sense pressure", entry: "exception", appliesTo: "dropback" });
+    const sql = readFileSync(join(process.cwd(), "supabase/migrations/076_qb_backpedal_sense_pressure.sql"), "utf8");
+    expect(sql).toMatch(/ADD COLUMN IF NOT EXISTS didnt_sense_pressure boolean;/);
   });
 });
 

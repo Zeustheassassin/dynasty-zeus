@@ -22,6 +22,7 @@ describe("defaults", () => {
     expect(defaultTagValues("QB")).toEqual({
       red_zone: false, third_fourth_down: false, short_yardage: false, garbage_time: false,
       play_action: false, tight_window: false, release_timing: "on_time", better_option_missed: false,
+      didnt_sense_pressure: false,
       sack_fault: "line", run_success: null, run_broken_tackle: false, run_explosive: false,
     });
     expect(defaultTagValues("TE").blocked_defender).toBe("dl");
@@ -59,19 +60,20 @@ describe("a new play's payload", () => {
     const p = tagPayload("QB", defaultTagValues("QB"), QB_THROW);
     expect(p).toMatchObject({
       play_action: false, tight_window: false, release_timing: "on_time", better_option_missed: false,
+      didnt_sense_pressure: false,
       sack_fault: null, run_success: null, run_broken_tackle: null, run_explosive: null,
     });
   });
 
   it("QB sack: fault pre-selected line; throw-only tags NULL", () => {
     const p = tagPayload("QB", defaultTagValues("QB"), QB_SACK);
-    expect(p).toMatchObject({ sack_fault: "line", play_action: false, better_option_missed: false, tight_window: null, release_timing: null, run_success: null });
+    expect(p).toMatchObject({ sack_fault: "line", play_action: false, better_option_missed: false, didnt_sense_pressure: false, tight_window: null, release_timing: null, run_success: null });
   });
 
   it("QB designed run: only the run result and situation tags", () => {
     const v = { ...defaultTagValues("QB"), run_success: true, run_explosive: true };
     const p = tagPayload("QB", v, QB_RUN);
-    expect(p).toMatchObject({ run_success: true, run_broken_tackle: false, run_explosive: true, play_action: null, better_option_missed: null, release_timing: null, sack_fault: null });
+    expect(p).toMatchObject({ run_success: true, run_broken_tackle: false, run_explosive: true, play_action: null, better_option_missed: null, didnt_sense_pressure: null, release_timing: null, sack_fault: null });
   });
 
   it("RB: carry tags NULL on a route, loss reason only on a failed pass block", () => {
@@ -141,8 +143,11 @@ describe("what shows", () => {
     for (const pos of POSITIONS) {
       expect(cols(visibleTags(pos, {}, "situation"))).toEqual(["red_zone", "third_fourth_down", "short_yardage", "garbage_time"]);
     }
-    expect(cols(visibleTags("QB", QB_THROW, "play"))).toEqual(["play_action", "tight_window", "release_timing", "better_option_missed"]);
-    expect(cols(visibleTags("QB", QB_SCRAMBLE, "play"))).toEqual(["play_action", "better_option_missed", "run_success", "run_broken_tackle", "run_explosive"]);
+    expect(cols(visibleTags("QB", QB_THROW, "play"))).toEqual(["play_action", "tight_window", "release_timing", "better_option_missed", "didnt_sense_pressure"]);
+    expect(cols(visibleTags("QB", QB_SCRAMBLE, "play"))).toEqual(["play_action", "better_option_missed", "didnt_sense_pressure", "run_success", "run_broken_tackle", "run_explosive"]);
+    // Every dropback, clean pocket included (the user, 2026-10-22); never a designed run.
+    expect(cols(visibleTags("QB", QB_SACK, "play"))).toContain("didnt_sense_pressure");
+    expect(cols(visibleTags("QB", QB_RUN, "play"))).not.toContain("didnt_sense_pressure");
     expect(cols(visibleTags("WR", WR_ROUTE, "play"))).toEqual(["double_coverage"]);
     expect(cols(visibleTags("WR", {}, "play"))).toEqual([]); // no route run
     expect(cols(visibleTags("TE", { route: true }, "play"))).toEqual(["double_coverage", "chipped_before_route"]);

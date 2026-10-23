@@ -191,7 +191,7 @@ export default function QBOverviewPanel({ plays, leaguePlays, games, loading }: 
     const pressureCharted = PRESSURE_KEYS.reduce((s, k) => s + pressureBreakdown[k].total, 0);
     const pressureMissing = passRpoPlays.length - pressureCharted;
 
-    const HANDLING_KEYS = ["step_up", "bail_front_side", "bail_backside"] as const;
+    const HANDLING_KEYS = ["step_up", "bail_front_side", "bail_backside", "backpedal"] as const;
     type HandlingKey = (typeof HANDLING_KEYS)[number];
     const handlingBreakdown = HANDLING_KEYS.reduce((acc, k) => {
       acc[k] = { total: 0, gradedThrows: 0, onTarget: 0 };
@@ -557,7 +557,7 @@ export default function QBOverviewPanel({ plays, leaguePlays, games, loading }: 
               <span className="text-amber-500/70 text-[10px]">{stats.handlingMissing} missing handling data</span>
             )}
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {PRESSURE_HANDLINGS.map(({ key, label }) => {
               const b = stats.handlingBreakdown[key];
               const sharePct = pct(b.total, stats.handlingCharted);
@@ -576,7 +576,7 @@ export default function QBOverviewPanel({ plays, leaguePlays, games, loading }: 
             })}
           </div>
           <p className="text-[10px] text-slate-600 mt-3">
-            Only pressured plays are included (Clean Pocket excluded). Share % is within charted-handling plays so the three buckets sum to 100%. On-target % is within each bucket, graded throws only.
+            Only pressured plays are included (Clean Pocket excluded). Share % is within charted-handling plays so the buckets sum to 100%. On-target % is within each bucket, graded throws only.
           </p>
         </div>
       )}

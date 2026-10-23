@@ -417,7 +417,8 @@ type Bucketed<K extends string> = Partial<Record<K, Acc>>;
 // toward average. Re-validate as the dataset grows.
 const QB_RIDGE_LAMBDA = 10;
 
-const QB_HANDLING_BUCKETS: QBPressureHandling[] = ["step_up", "bail_front_side", "bail_backside"];
+// Backpedal joined 2026-10-22: with few charted, the ridge holds it near 0.
+const QB_HANDLING_BUCKETS: QBPressureHandling[] = ["step_up", "bail_front_side", "bail_backside", "backpedal"];
 // One one-hot column per bucket of every dimension (see difficultyModel.ts).
 const QB_DESIGN = makeDesign<QBPlay>([
   [QB_DEPTH_ZONES,      (pl) => pl.depth_zone],

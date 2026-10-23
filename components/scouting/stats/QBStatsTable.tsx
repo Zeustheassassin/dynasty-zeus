@@ -3,7 +3,7 @@ import { useMemo } from "react";
 import StatsTableShell, { StatRow, ColDef, MinFilterDef } from "./StatsTableShell";
 import { computeQBAboveExpected, computeQBThrowSliceAAE } from "../../../lib/scouting/aboveExpected";
 import { computeQBRoleFits } from "../../../lib/scouting/roleFitQB";
-import type { Prospect, ScoutingGame, QBPlay, QBDepthZone } from "../../../lib/types";
+import type { Prospect, ScoutingGame, QBPlay, QBDepthZone, QBPressureHandling } from "../../../lib/types";
 import { roleFitCols, roleFitRow } from "./roleFitCols";
 import { pffCols, pffRow } from "./pffCols";
 import { tagCols, tagRow, tagValuesFor } from "./tagCols";
@@ -120,13 +120,15 @@ export const QB_STAT_COLS: ColDef[] = [
   { key: "prs_front_share", label: "Fnt%",     group: "Pressure", fmt: "pct",            width: 56, tooltip: "% of pass/RPO with Front Side Pressure",     weightBy: "passrpo_n" },
   { key: "prs_front_ot",    label: "Fnt OT%",  group: "Pressure", fmt: "pct", colorDir: 1, width: 70, tooltip: "On-target% with Front Side Pressure",       weightBy: "prs_front_graded_n" },
 
-  // Pressure Handling — share of pressured plays + on-target% per of 3 buckets
+  // Pressure Handling — share of pressured plays + on-target% per bucket (4: Backpedal joined 2026-10-22)
   { key: "hdl_step_share",  label: "Step%",    group: "Handling", fmt: "pct",            width: 60, tooltip: "% of pressured plays where QB stepped up",          weightBy: "handled_n" },
   { key: "hdl_step_ot",     label: "Step OT%", group: "Handling", fmt: "pct", colorDir: 1, width: 74, tooltip: "On-target% when stepping up vs pressure",          weightBy: "hdl_step_graded_n" },
   { key: "hdl_bfs_share",   label: "BFS%",     group: "Handling", fmt: "pct",            width: 56, tooltip: "% of pressured plays where QB bailed front-side",   weightBy: "handled_n" },
   { key: "hdl_bfs_ot",      label: "BFS OT%",  group: "Handling", fmt: "pct", colorDir: 1, width: 70, tooltip: "On-target% when bailing front-side vs pressure",   weightBy: "hdl_bfs_graded_n" },
   { key: "hdl_bbs_share",   label: "BBS%",     group: "Handling", fmt: "pct",            width: 56, tooltip: "% of pressured plays where QB bailed backside",     weightBy: "handled_n" },
   { key: "hdl_bbs_ot",      label: "BBS OT%",  group: "Handling", fmt: "pct", colorDir: 1, width: 70, tooltip: "On-target% when bailing backside vs pressure",     weightBy: "hdl_bbs_graded_n" },
+  { key: "hdl_bp_share",    label: "BP%",      group: "Handling", fmt: "pct",            width: 52, tooltip: "% of pressured plays where QB backpedaled",         weightBy: "handled_n" },
+  { key: "hdl_bp_ot",       label: "BP OT%",   group: "Handling", fmt: "pct", colorDir: 1, width: 66, tooltip: "On-target% when backpedaling vs pressure",         weightBy: "hdl_bp_graded_n" },
 
   // Timing — share of pass/RPO plays for each of 7 timing buckets
   { key: "t_first",    label: "1st%",  group: "Timing", fmt: "pct", colorDir: 1,  width: 54, tooltip: "% of pass/RPO thrown to first option", weightBy: "timing_n" },
@@ -254,7 +256,7 @@ export function buildQBStatRows(prospects: Prospect[], games: ScoutingGame[], qb
         // Pressure Handling — share of pressured plays, OT% within bucket's graded throws
         const pressuredPlays = passRpoPlays.filter((pl) => pl.pressure && pl.pressure !== "clean");
         const handledN = pressuredPlays.length;
-        const hdlBucket = (k: "step_up" | "bail_front_side" | "bail_backside") => {
+        const hdlBucket = (k: QBPressureHandling) => {
           const bucket = pressuredPlays.filter((pl) => pl.pressure_handling === k);
           const bucketGraded = bucket.filter((pl) =>
             pl.timing !== "scramble" && pl.timing !== "sack" && pl.timing !== "throw_away" &&
@@ -266,6 +268,7 @@ export function buildQBStatRows(prospects: Prospect[], games: ScoutingGame[], qb
         const hdlStep = hdlBucket("step_up");
         const hdlBfs  = hdlBucket("bail_front_side");
         const hdlBbs  = hdlBucket("bail_backside");
+        const hdlBp   = hdlBucket("backpedal");
 
         const slices = sliceMap.get(p.id);
 
@@ -344,6 +347,7 @@ export function buildQBStatRows(prospects: Prospect[], games: ScoutingGame[], qb
           hdl_step_share: hdlStep.share, hdl_step_ot: hdlStep.ot, hdl_step_graded_n: hdlStep.graded,
           hdl_bfs_share:  hdlBfs.share,  hdl_bfs_ot:  hdlBfs.ot,  hdl_bfs_graded_n:  hdlBfs.graded,
           hdl_bbs_share:  hdlBbs.share,  hdl_bbs_ot:  hdlBbs.ot,  hdl_bbs_graded_n:  hdlBbs.graded,
+          hdl_bp_share:   hdlBp.share,   hdl_bp_ot:   hdlBp.ot,   hdl_bp_graded_n:   hdlBp.graded,
 
           // Timing
           t_first:    pct(passRpoPlays.filter((pl) => pl.timing === "first_option").length,  timingTotal),
