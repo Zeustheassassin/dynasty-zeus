@@ -1205,7 +1205,7 @@ export interface RoutePlay extends CatchDifficultyTags {
 
 /** Where the ball arrived on a WR / TE target (migration 078, data collection only). */
 export type BallPlacement = "on_target" | "high" | "low" | "behind" | "in_front" | "outside_frame";
-export type IncompletionReason = "uncatchable" | "broken_up";
+export type IncompletionReason = "uncatchable" | "broken_up" | "out_of_bounds";
 
 /** What made a WR / TE target hard to catch (migration 078): every target, whatever
  *  the result; the reason on incompletions. NULL = not a target, or charted before. */

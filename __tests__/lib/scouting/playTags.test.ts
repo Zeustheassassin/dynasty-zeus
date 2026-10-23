@@ -189,10 +189,12 @@ describe("catch difficulty tags (migration 078, data collection only)", () => {
   const TARGET: PlayFacts = { route: true, target: true };
   const INCOMPLETE: PlayFacts = { route: true, target: true, incompletion: true };
 
-  it("shows on every WR / TE target in the targeted box, the reason only on an incompletion", () => {
+  it("shows on every WR / TE target in the targeted box, sideline only on a catch, the reason only on an incompletion", () => {
     for (const pos of ["WR", "TE"] as const) {
-      expect(cols(visibleTags(pos, TARGET, "play", "target")), pos).toEqual(["ball_placement", "adjusted_to_ball", "hit_at_catch", "sideline_target"]);
-      expect(cols(visibleTags(pos, INCOMPLETE, "play", "target")), pos).toEqual(CATCH_COLS);
+      // Adjusted and hit count on a miss too; sideline only on a catch (the user, 2026-10-23).
+      expect(cols(visibleTags(pos, TARGET, "play", "target")), pos).toEqual(["ball_placement", "adjusted_to_ball", "hit_at_catch"]);
+      expect(cols(visibleTags(pos, { ...TARGET, catch: true }, "play", "target")), pos).toEqual(["ball_placement", "adjusted_to_ball", "hit_at_catch", "sideline_target"]);
+      expect(cols(visibleTags(pos, INCOMPLETE, "play", "target")), pos).toEqual(["ball_placement", "adjusted_to_ball", "hit_at_catch", "incompletion_reason"]);
       expect(cols(visibleTags(pos, { route: true }, "play", "target")), pos).toEqual([]); // not targeted
     }
     for (const pos of ["QB", "RB"] as const) for (const c of CATCH_COLS) expect(tagColumns(pos)).not.toContain(c);

@@ -44,7 +44,8 @@ describe("tag registry", () => {
       const tags = Object.fromEntries(POSITION_TAGS[pos].map((t) => [t.column, t]));
       expect(tags.ball_placement.values).toEqual(checkValues("ball_placement"));
       expect(tags.ball_placement.preset).toBe("on_target");
-      expect(tags.incompletion_reason.values).toEqual(checkValues("incompletion_reason"));
+      // 079 added Out of bounds to 078's two answers.
+      expect(tags.incompletion_reason.values).toEqual([...checkValues("incompletion_reason"), "out_of_bounds"]);
       expect(tags.incompletion_reason.required).toBe(true);
       for (const col of ["ball_placement", "adjusted_to_ball", "hit_at_catch", "sideline_target", "incompletion_reason"]) {
         expect(code).toContain(`ADD COLUMN IF NOT EXISTS ${col} `);
@@ -52,6 +53,22 @@ describe("tag registry", () => {
         for (const specs of Object.values(DIFFICULTY_TAGS)) expect(specs.map((s) => s.column)).not.toContain(col);
       }
     }
+  });
+
+  it("matches migration 079's Why incomplete answers, dropping only 078's check, after the new one is on", () => {
+    const sql = readFileSync(join(process.cwd(), "supabase/migrations/079_incompletion_out_of_bounds.sql"), "utf8");
+    const code = sql.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
+    const values = [...(code.match(/incompletion_reason IN \(([^)]*)\)/)?.[1] ?? "").matchAll(/''(\w+)''/g)].map((m) => m[1]);
+    for (const pos of ["WR", "TE"] as const) {
+      const spec = POSITION_TAGS[pos].find((t) => t.column === "incompletion_reason");
+      expect(spec?.values).toEqual(values);
+      expect(spec?.valueLabels).toEqual(["Uncatchable", "Broken up", "Out of bounds"]);
+    }
+    // The one DROP is the approved one (the user, 2026-10-23), after the new check goes on.
+    expect(code.match(/\bDROP\b/g)).toHaveLength(1);
+    expect(code).toMatch(/DROP CONSTRAINT IF EXISTS %I', tbl, tbl \|\| '_incompletion_reason_check'/);
+    expect(code.indexOf("ADD CONSTRAINT")).toBeLessThan(code.indexOf("DROP CONSTRAINT"));
+    expect(code).not.toMatch(/\b(DELETE|TRUNCATE|UPDATE)\b/);
   });
 
   it("adds migration 076's QB tag: Didn't sense pressure, off unless clicked, every dropback", () => {

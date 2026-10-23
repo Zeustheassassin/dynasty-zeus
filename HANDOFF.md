@@ -3,7 +3,12 @@
 > **Audience:** a developer who has just been handed the keys and has never seen this project.
 > **Goal:** explain what the app is, how the code is structured, how data flows, and how every major subsystem actually works — in enough depth to debug and extend it on day one.
 >
-> *Last reviewed: 2026-10-23, HEAD `9d1aca1` (working tree) — **Catch difficulty tags on the WR and TE boards, data collection only.** The user asked what's chartable that explains how hard a catch was, approved all five suggestions, and set the rule: data collection only until there's enough to make a difference, and never penalize players charted before the tags.
+> *Last reviewed: 2026-10-23, HEAD `e2cecca` (working tree) — **Why incomplete gets Out of bounds; Sideline asked on catches only.** The user: add Out of bounds beside Uncatchable and Broken up; and "Adjusted to ball and hit at catch can both be checked even if it is an incomplete. Sideline (feet in bounds) would really only apply if the ball is caught."
+> - **Out of bounds** (`out_of_bounds`, third answer, [playEra.ts](lib/scouting/playEra.ts) `CATCH_DIFFICULTY_TAGS`, `IncompletionReason` in [types.ts](lib/types.ts)). **Migration [079](supabase/migrations/079_incompletion_out_of_bounds.sql) — applied by the user 2026-10-23 14:55 UTC, before the push (verified read-only: the three-answer check on both tables, 078's checks gone, ledger row, sideline comment; saved answers intact). It had to go first:** `<table>_incompletion_reason_values` (three answers) goes on route_plays and te_plays first, then 078's two-answer `<table>_incompletion_reason_check` is dropped, the one DROP, approved by the user ("Swap the check"); it removes a rule, not data. The 3 answers saved so far (2 broken_up, 1 uncatchable) are in the new list. Tested on a local Postgres 18 (rejected before, accepted after, re-run safe, unknown answers still rejected).
+> - **Sideline** `appliesTo: "catch"` (was every target); the TE board now passes a `catch` fact. A throw that ends out of bounds is an Out of bounds incompletion, so the boundary is still recorded either way. 079 updates the column comment only: 3 WR incompletions charted since 078 keep Sideline = No (no UPDATE).
+> - Tests: 079 vs the registry and its one DROP after the new check in [playEra.test.ts](__tests__/lib/scouting/playEra.test.ts); sideline on catches in [playTags.test.ts](__tests__/lib/scouting/playTags.test.ts). tsc / eslint / build clean, **2548 tests / 185 files**. Not looked at in a browser.*
+>
+> *Prior review: 2026-10-23, HEAD `9d1aca1` (working tree; committed as `e2cecca`, deploy success) — **Catch difficulty tags on the WR and TE boards, data collection only.** The user asked what's chartable that explains how hard a catch was, approved all five suggestions, and set the rule: data collection only until there's enough to make a difference, and never penalize players charted before the tags.
 > - **The tags** ([playEra.ts](lib/scouting/playEra.ts) `CATCH_DIFFICULTY_TAGS`, on WR and TE, `step: "target"`, shown in the targeted box): **Ball placement** On target (pre-selected) / High / Low / Behind / In front / Outside frame; **Adjusted to the ball**, **Hit at the catch**, **Sideline (feet in bounds)** (exceptions); **Why incomplete** Uncatchable / Broken up (required, incompletions only; Contested already covers a contested loss). New play facts `target` / `incompletion` (both boards). All but the reason apply on **every target, whatever the result**, so a later catch model can read them as difficulty, not outcome (an "adjusted catch" asked only on catches would just encode the catch). A typical target costs no click; an incompletion costs one.
 > - **Scored nowhere:** not in `DIFFICULTY_TAGS` / `ENABLED_TAG_CORRECTIONS` / tagStats (tested in [playEra.test.ts](__tests__/lib/scouting/playEra.test.ts)). Old plays stay NULL; the paste imports write none. When they're scored later, the tag-correction rules already keep older plays judged exactly as today (§11 "Grading"); a credit only tagged targets can earn should count an untagged player as average.
 > - **Migration [078](supabase/migrations/078_catch_difficulty_tags.sql) — applied by the user 2026-10-23 13:55 UTC, before the push (verified read-only: five columns on both tables, the four CHECKs, ledger row; WR 23,458 · TE 1,361 plays unchanged). It had to go first** (a new WR / TE play writes every tag column, so without these every new WR / TE play save fails): `ball_placement`, `adjusted_to_ball`, `hit_at_catch`, `sideline_target`, `incompletion_reason` on `route_plays` and `te_plays`, CHECKs on the two text tags. Additive only. Tested on a local Postgres 18 (re-run safe, valid values save, unknown ones rejected). Live read-only: 425 charted WR targets (62 tagged), 142 TE (101 tagged), so the sample builds slowly.
@@ -620,7 +625,7 @@
 17. [Dev workflow: build, lint, test](#17-dev-workflow-build-lint-test)
 18. [CI pipeline (GitHub Actions)](#18-ci-pipeline-github-actions)
 19. [ESLint & TypeScript rules that bite](#19-eslint--typescript-rules-that-bite)
-20. [Test suite scope (2547 tests, 185 files)](#20-test-suite-scope-2547-tests-185-files)
+20. [Test suite scope (2548 tests, 185 files)](#20-test-suite-scope-2548-tests-185-files)
 21. [Common failure modes & where to look](#21-common-failure-modes--where-to-look)
 22. [Things intentionally NOT done (and why)](#22-things-intentionally-not-done-and-why)
 23. [Known open items & time bombs for the next owner](#23-known-open-items--time-bombs-for-the-next-owner)
@@ -2084,7 +2089,7 @@ Stage 3 of the plan: the approved tags (migration 062's columns) are now charted
 | all | Red zone (sticky) · 3rd/4th down · Short yardage / goal line · Garbage time (sticky) | |
 | QB | | Play action, Better option missed (dropbacks: pass / RPO, incl. sacks, scrambles, throwaways) · Tight window, Release Early / **On time** / Late (throws) · Sack fault QB / **Line** / Coverage (sacks) · Run result Success / Fail (required), Broken tackle, Explosive (designed runs + scrambles) |
 | RB | | Hit behind the line, Missed read (carries) · Pass-pro loss Wrong man / Beaten (required; pass blocks marked Fail) · Broken tackle after catch (caught targets). Caught from behind was dropped 2026-10-07 with the Explosive Play button it showed on |
-| WR | | Release vs press Won / Lost (required; routes vs Press) · Broken tackle after catch (caught targets) · since 078 (data collection only): Ball placement **On target** / High / Low / Behind / In front / Outside frame, Adjusted to the ball, Hit at the catch, Sideline (every target) · Why incomplete Uncatchable / Broken up (required; incompletions) |
+| WR | | Release vs press Won / Lost (required; routes vs Press) · Broken tackle after catch (caught targets) · since 078 (data collection only): Ball placement **On target** / High / Low / Behind / In front / Outside frame, Adjusted to the ball, Hit at the catch (every target) · Sideline (catches) · Why incomplete Uncatchable / Broken up / Out of bounds (required; incompletions; Out of bounds from 079) |
 | TE | | Blocked **DL** / LB / DB (run / pass block reps) · Release vs press Won / Lost (required; routes vs Press) · Chipped before route (routes) · the same five catch difficulty tags as WR (078, data collection only) |
 
 Bold = pre-selected. TE release vs press is required like WR's (the plan only said "1 required click" for WR; a won/lost rep has no safe default). A typical play (QB pass or sack, RB carry, WR route not vs press, TE block or route) needs **no** tag click; a sacked QB's fault is pre-selected.
@@ -2670,7 +2675,7 @@ The flat config in [eslint.config.mjs](eslint.config.mjs) is minimal: it just sp
 
 Beyond ESLint, TypeScript is strict at the `tsc` step. `tsconfig.json` enables `strict`, plus `noUnusedLocals` and `noUnusedParameters` — so an unused import, variable, or function parameter is a **build/type-check failure**, not a warning. This is the single most common reason a local edit that "looks fine" red-X's in CI.
 
-## 20. Test suite scope (2547 tests, 185 files)
+## 20. Test suite scope (2548 tests, 185 files)
 
 Run via PowerShell. The suite is [Vitest](vitest.config.mts) in a `jsdom` environment, globbing `**/__tests__/**/*.{ts,tsx}` and `**/*.{test,spec}.{ts,tsx}`. It deliberately covers **pure logic and server routes, not UI rendering**. There are no e2e tests. A handful of narrow component-render tests (via `@testing-library/react`) live under [__tests__/components/](__tests__/components/), each pinning one piece of UI behavior (e.g. the Injury Report panels, the Analysis min filters, the Big Board's Above Exp columns).
 
@@ -2793,7 +2798,7 @@ Other lower-priority items the audit flagged that I did not re-verify line-by-li
 4. `npm run dev` → confirm the app loads at `http://localhost:3000`.
 5. `npm run build` → confirm a production build succeeds (also generates `.next/types/` so the next step works).
 6. `npx tsc --noEmit` → confirm type-check passes (run it *after* the build).
-7. **In PowerShell** (not Git Bash): `npm run test` → confirm **2547 tests pass** across 185 files. If you see "0 tests," you're in the wrong shell.
+7. **In PowerShell** (not Git Bash): `npm run test` → confirm **2548 tests pass** across 185 files. If you see "0 tests," you're in the wrong shell.
 8. `npm run lint` → confirm clean (remember `exhaustive-deps` warnings won't fail it; the four error rules will).
 9. Read [AGENTS.md](AGENTS.md) — it warns this Next.js version diverges from public docs; consult `node_modules/next/dist/docs/` before writing framework code.
 10. Walk the entry path: [app/page.tsx](app/page.tsx) → [app/hooks/useAppState.ts](app/hooks/useAppState.ts) → [app/components/HubRouter.tsx](app/components/HubRouter.tsx).

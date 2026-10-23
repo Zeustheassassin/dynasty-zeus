@@ -19,7 +19,7 @@
 //
 // The tag registry below mirrors migration 062's columns and CHECKs (and 072's
 // double_coverage on the WR and TE tables, 076's didnt_sense_pressure on QB,
-// 078's catch-difficulty tags on WR and TE). `entry`
+// 078's catch-difficulty tags on WR and TE, 079's Out of bounds). `entry`
 // is how the boards ask for each tag (the user's click budget):
 //   exception   — off unless clicked
 //   preselected — the common answer is filled in (`preset`)
@@ -60,7 +60,7 @@ export type PlayFact =
   | "sack"          // QB: sacked
   | "run"           // QB: designed run or scramble; RB: a designed carry
   | "passProLoss"   // RB: a pass-block rep marked Fail
-  | "catch"         // RB / WR: targeted and caught
+  | "catch"         // RB / WR / TE: targeted and caught
   | "target"        // WR / TE: targeted, whatever the result
   | "incompletion"  // WR / TE: targeted, neither caught nor dropped
   | "route"         // WR / TE: a route rep
@@ -93,16 +93,19 @@ export interface PlayTagSpec {
 }
 
 // What made a WR / TE target hard to catch (the user, 2026-10-23, migration
-// 078). Asked on every target, whatever the result (incompletion reason on
-// incompletions), so a later catch model reads them as difficulty rather than
-// as the outcome. DATA COLLECTION ONLY until there are enough tagged targets to
+// 078). Placement, adjusting and a hit on every target, whatever the result,
+// so a later catch model reads them as difficulty rather than as the outcome;
+// sideline on catches, the incompletion reason on incompletions (the user's
+// calls). DATA COLLECTION ONLY until there are enough tagged targets to
 // matter (the user's call): no correction, stat or score reads them.
 const CATCH_DIFFICULTY_TAGS: readonly PlayTagSpec[] = [
   { column: "ball_placement",      label: "Ball placement",            short: "Ball", entry: "preselected", values: ["on_target", "high", "low", "behind", "in_front", "outside_frame"], valueLabels: ["On target", "High", "Low", "Behind", "In front", "Outside frame"], preset: "on_target", appliesTo: "target", step: "target" },
   { column: "adjusted_to_ball",    label: "Adjusted to the ball",      short: "Adj",  entry: "exception", appliesTo: "target", step: "target" },
   { column: "hit_at_catch",        label: "Hit at the catch",          short: "Hit",  entry: "exception", appliesTo: "target", step: "target" },
-  { column: "sideline_target",     label: "Sideline (feet in bounds)", short: "SL",   entry: "exception", appliesTo: "target", step: "target" },
-  { column: "incompletion_reason", label: "Why incomplete",            short: "Inc",  entry: "conditional", values: ["uncatchable", "broken_up"], valueLabels: ["Uncatchable", "Broken up"], required: true, appliesTo: "incompletion", when: "incompletions only", step: "target" },
+  // Catches only (the user, 2026-10-23): a throw that ends out of bounds is an Out of bounds incompletion.
+  { column: "sideline_target",     label: "Sideline (feet in bounds)", short: "SL",   entry: "exception", appliesTo: "catch", step: "target" },
+  // Out of bounds added 2026-10-23 (the user, migration 079).
+  { column: "incompletion_reason", label: "Why incomplete",            short: "Inc",  entry: "conditional", values: ["uncatchable", "broken_up", "out_of_bounds"], valueLabels: ["Uncatchable", "Broken up", "Out of bounds"], required: true, appliesTo: "incompletion", when: "incompletions only", step: "target" },
 ];
 
 /** On all four play tables. */
