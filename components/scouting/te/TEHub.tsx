@@ -69,6 +69,8 @@ export default function TEHub({
   if (selectedProspect) {
     return (
       <TEChartingBoard
+        // A fresh board per prospect, so jumping straight to another one re-reads where he lines up.
+        key={selectedProspect.id}
         prospect={selectedProspect}
         onBack={() => setSelectedProspect(null)} // the board reloads the hub on unmount if it wrote anything
         onDataChanged={onDataChanged}

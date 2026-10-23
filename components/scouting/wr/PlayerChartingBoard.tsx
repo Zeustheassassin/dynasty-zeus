@@ -1,5 +1,5 @@
 "use client";
-import { Fragment, useState, useEffect, useMemo } from "react";
+import { Fragment, useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "../../../lib/supabaseclient";
 import { logger } from "../../../lib/logger";
 
@@ -25,6 +25,7 @@ import PlayTagControls, { PlayTagBadges } from "../shared/PlayTagControls";
 import RouteVariantPicker, { RouteVariantMark } from "../shared/RouteVariantPicker";
 import { useRouteVariant } from "../shared/hooks/useRouteVariant";
 import { splitByRouteVariant } from "../../../lib/scouting/routeVariants";
+import { usualWRAlignment } from "../../../lib/scouting/usualAlignment";
 import type { PlayFacts } from "../../../lib/scouting/playTags";
 import { computeSAEForPlays, computeCoreSAEForPlays, type WRDifficultyModel } from "../../../lib/scouting/aggregateMerge";
 import { usePffGameLog } from "../pff/usePffGameLog";
@@ -73,6 +74,8 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
   const [routeType, setRouteType]     = useState<RouteType>("curl");
   // Sub-route (migration 073), data collection only: starts on the route's default.
   const variant = useRouteVariant("curl");
+  // Where he lines up most (`usual`, below) once his plays load; Right on the line until
+  // then, or with none charted.
   const [alignment, setAlignment]     = useState<Alignment>("right");
   const [onLine, setOnLine]           = useState(true);
   const [coverage, setCoverage]       = useState("");
@@ -86,6 +89,10 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
   const [playNotes, setPlayNotes]     = useState("");
   const [savingPlay, setSavingPlay]   = useState(false);
   const [playError, setPlayError]     = useState<string | null>(null);
+  // Where he lines up most (lib/scouting/usualAlignment.ts), counted once from his plays when
+  // the board opens and kept for every play while it stays open (the user, 10/23); null = none
+  // charted, undefined = not loaded yet.
+  const usual = useRef<ReturnType<typeof usualWRAlignment> | undefined>(undefined);
 
   const wrConfig: ChartingBoardConfig = {
     positionLabel: prospect.position ?? "WR",
@@ -119,6 +126,10 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
         from += PAGE;
       }
       setPlays(allPlays);
+      if (usual.current === undefined) {
+        usual.current = usualWRAlignment(allPlays);
+        if (usual.current) { setAlignment(usual.current.alignment); setOnLine(usual.current.onLine); }
+      }
     })();
   }, [games]);
 
@@ -356,8 +367,9 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
   }
 
   function resetForm() {
-    setEditingPlayId(null); setNoRouteRun(true); setRouteType("curl"); variant.reset("curl"); setAlignment("right");
-    setOnLine(true); setCoverage(""); setWasOpen(false); setTargeted(false);
+    setEditingPlayId(null); setNoRouteRun(true); setRouteType("curl"); variant.reset("curl");
+    setAlignment(usual.current?.alignment ?? "right"); setOnLine(usual.current?.onLine ?? true);
+    setCoverage(""); setWasOpen(false); setTargeted(false);
     setPlayOutcome(null); setContested(false); setPlayNotes("");
     tags.reset();
   }

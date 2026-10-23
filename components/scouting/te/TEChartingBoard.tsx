@@ -1,5 +1,5 @@
 "use client";
-import { Fragment, useState, useEffect, useMemo } from "react";
+import { Fragment, useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "../../../lib/supabaseclient";
 import { fetchAllRows } from "../../../lib/scouting/fetchPlays";
 import { logger } from "../../../lib/logger";
@@ -32,6 +32,7 @@ import PlayTagControls, { PlayTagBadges } from "../shared/PlayTagControls";
 import RouteVariantPicker, { RouteVariantMark } from "../shared/RouteVariantPicker";
 import { useRouteVariant } from "../shared/hooks/useRouteVariant";
 import { splitByRouteVariant } from "../../../lib/scouting/routeVariants";
+import { usualTEAlignment } from "../../../lib/scouting/usualAlignment";
 import type { PlayFacts } from "../../../lib/scouting/playTags";
 import TEPlayerCharts from "./TEPlayerCharts";
 import {
@@ -81,7 +82,8 @@ interface Props {
 export default function TEChartingBoard({ prospect, onBack, onDataChanged, overviewData, allProspects, allGames, leaguePlays }: Props) {
   const [plays, setPlays] = useState<TEPlay[]>([]);
 
-  // Play logger form state
+  // Play logger form state. Location and positioning: where he lines up most (`usual`, below)
+  // once his plays load; Left Inline until then, or with none charted.
   const [location, setLocation]               = useState<TELocation>("left");
   const [positioning, setPositioning]         = useState<TEPositioning>("inline");
   const [playType, setPlayType]               = useState<TEPlayType>("route_run");
@@ -101,6 +103,10 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
   const [savingPlay, setSavingPlay]           = useState(false);
   const [playError, setPlayError]             = useState<string | null>(null);
   const [editingPlayId, setEditingPlayId]     = useState<string | null>(null);
+  // Where he lines up most (lib/scouting/usualAlignment.ts), counted once from his plays when
+  // the board opens and kept for every play while it stays open (the user, 10/23); null = none
+  // charted, undefined = not loaded yet.
+  const usual = useRef<ReturnType<typeof usualTEAlignment> | undefined>(undefined);
 
   const cs = useChartingState(prospect, {
     onDataChanged,
@@ -120,7 +126,12 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
     fetchAllRows<TEPlay>((from, to) =>
       supabase.from("te_plays").select("*").in("game_id", ids).order("created_at").range(from, to)
     )
-      .then((rows) => setPlays(rows))
+      .then((rows) => {
+        setPlays(rows);
+        if (usual.current !== undefined) return;
+        usual.current = usualTEAlignment(rows);
+        if (usual.current) { setLocation(usual.current.location); setPositioning(usual.current.positioning); }
+      })
       .catch((err) => log.error("te_plays load failed", { err: String(err) }));
   }, [games]);
 
@@ -305,13 +316,14 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
   }, [selectedGameId, playType, blockType, blockSuccess, coverage, routeType, wasOpen, targeted, targetOutcome, contestedTarget, contestedCatch]);
   const canLog = playReady && !tagsMissing && !variantMissing;
 
-  // The next play starts blank (the user, 10/23): the board's opening state, Left / Inline /
-  // Route Run with the route defaults (lib/scouting/teChartingDefaults.ts). Sticky tags keep
-  // their value.
+  // The next play starts blank (the user, 10/23): where he lines up most (Left / Inline with
+  // none charted), Route Run with the route defaults (lib/scouting/teChartingDefaults.ts).
+  // Sticky tags keep their value.
   function resetPlayForm() {
     setEditingPlayId(null);
     tags.reset();
-    setLocation("left"); setPositioning("inline"); setPlayType("route_run");
+    setLocation(usual.current?.location ?? "left"); setPositioning(usual.current?.positioning ?? "inline");
+    setPlayType("route_run");
     setBlockType(null); setBlockSuccess(null);
     setCoverage(TE_ROUTE_DEFAULTS.coverage); setRouteType(null); variant.reset(null); setWasOpen(null);
     setTargeted(TE_ROUTE_DEFAULTS.targeted);
