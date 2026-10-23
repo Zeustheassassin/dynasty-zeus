@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { countPlayEras, gameSource, isTaggedPlay, playEra, POSITION_TAGS, SITUATION_TAGS, tagColumns } from "@/lib/scouting/playEra";
+import { DIFFICULTY_TAGS } from "@/lib/scouting/tagCorrection";
 
 const imported = { created_at: "2026-04-30T20:07:28Z" };
 const inApp = { created_at: "2026-06-01T00:00:00Z" };
@@ -30,6 +31,27 @@ describe("tag registry", () => {
     expect(te.blocked_defender.values).toEqual(["dl", "lb", "db"]);
     expect(te.blocked_defender.preset).toBe("dl");
     expect(POSITION_TAGS.RB.find((t) => t.column === "pass_pro_loss")?.values).toEqual(["wrong_man", "beaten"]);
+  });
+
+  it("adds migration 078's catch difficulty tags to WR and TE, matching its columns and CHECKs, scored nowhere", () => {
+    const sql = readFileSync(join(process.cwd(), "supabase/migrations/078_catch_difficulty_tags.sql"), "utf8");
+    const code = sql.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
+    expect(code).not.toMatch(/\b(DROP|DELETE|TRUNCATE|UPDATE)\b/);
+    expect(code).toMatch(/ARRAY\['route_plays', 'te_plays'\]/);
+    const checkValues = (col: string) =>
+      [...(code.match(new RegExp(`${col} IN \\(([^)]*)\\)`))?.[1] ?? "").matchAll(/''(\w+)''/g)].map((m) => m[1]);
+    for (const pos of ["WR", "TE"] as const) {
+      const tags = Object.fromEntries(POSITION_TAGS[pos].map((t) => [t.column, t]));
+      expect(tags.ball_placement.values).toEqual(checkValues("ball_placement"));
+      expect(tags.ball_placement.preset).toBe("on_target");
+      expect(tags.incompletion_reason.values).toEqual(checkValues("incompletion_reason"));
+      expect(tags.incompletion_reason.required).toBe(true);
+      for (const col of ["ball_placement", "adjusted_to_ball", "hit_at_catch", "sideline_target", "incompletion_reason"]) {
+        expect(code).toContain(`ADD COLUMN IF NOT EXISTS ${col} `);
+        // Data collection only (the user, 2026-10-23): no Above-Expected correction reads them.
+        for (const specs of Object.values(DIFFICULTY_TAGS)) expect(specs.map((s) => s.column)).not.toContain(col);
+      }
+    }
   });
 
   it("adds migration 076's QB tag: Didn't sense pressure, off unless clicked, every dropback", () => {

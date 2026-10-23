@@ -18,7 +18,8 @@
 // stay untagged too.
 //
 // The tag registry below mirrors migration 062's columns and CHECKs (and 072's
-// double_coverage on the WR and TE tables, 076's didnt_sense_pressure on QB). `entry`
+// double_coverage on the WR and TE tables, 076's didnt_sense_pressure on QB,
+// 078's catch-difficulty tags on WR and TE). `entry`
 // is how the boards ask for each tag (the user's click budget):
 //   exception   — off unless clicked
 //   preselected — the common answer is filled in (`preset`)
@@ -48,6 +49,7 @@ export type TagStep =
   | "block"     // RB / TE: with the block
   | "route"     // TE: under the route
   | "coverage"  // WR / TE: under Coverage
+  | "target"    // WR / TE: in the targeted box, after the outcome
   | "catch";    // RB / WR: with a catch
 
 /** What a board knows about the play being charted, as far as the tags care. */
@@ -59,6 +61,8 @@ export type PlayFact =
   | "run"           // QB: designed run or scramble; RB: a designed carry
   | "passProLoss"   // RB: a pass-block rep marked Fail
   | "catch"         // RB / WR: targeted and caught
+  | "target"        // WR / TE: targeted, whatever the result
+  | "incompletion"  // WR / TE: targeted, neither caught nor dropped
   | "route"         // WR / TE: a route rep
   | "press"         // WR / TE: a route against press
   | "block";        // TE: a run- or pass-block rep
@@ -87,6 +91,19 @@ export interface PlayTagSpec {
   /** Where the board asks it; absent = the Tags row after the play. */
   step?: TagStep;
 }
+
+// What made a WR / TE target hard to catch (the user, 2026-10-23, migration
+// 078). Asked on every target, whatever the result (incompletion reason on
+// incompletions), so a later catch model reads them as difficulty rather than
+// as the outcome. DATA COLLECTION ONLY until there are enough tagged targets to
+// matter (the user's call): no correction, stat or score reads them.
+const CATCH_DIFFICULTY_TAGS: readonly PlayTagSpec[] = [
+  { column: "ball_placement",      label: "Ball placement",            short: "Ball", entry: "preselected", values: ["on_target", "high", "low", "behind", "in_front", "outside_frame"], valueLabels: ["On target", "High", "Low", "Behind", "In front", "Outside frame"], preset: "on_target", appliesTo: "target", step: "target" },
+  { column: "adjusted_to_ball",    label: "Adjusted to the ball",      short: "Adj",  entry: "exception", appliesTo: "target", step: "target" },
+  { column: "hit_at_catch",        label: "Hit at the catch",          short: "Hit",  entry: "exception", appliesTo: "target", step: "target" },
+  { column: "sideline_target",     label: "Sideline (feet in bounds)", short: "SL",   entry: "exception", appliesTo: "target", step: "target" },
+  { column: "incompletion_reason", label: "Why incomplete",            short: "Inc",  entry: "conditional", values: ["uncatchable", "broken_up"], valueLabels: ["Uncatchable", "Broken up"], required: true, appliesTo: "incompletion", when: "incompletions only", step: "target" },
+];
 
 /** On all four play tables. */
 export const SITUATION_TAGS: readonly PlayTagSpec[] = [
@@ -125,12 +142,14 @@ export const POSITION_TAGS: Readonly<Record<TagPosition, readonly PlayTagSpec[]>
     { column: "double_coverage",           label: "Double coverage",           short: "Dbl",   entry: "exception", appliesTo: "route", step: "coverage" },
     { column: "press_release",             label: "Release vs press",          short: "Press", entry: "conditional", values: ["won", "lost"], valueLabels: ["Won", "Lost"], required: true, appliesTo: "press", when: "press snaps only (one required click)", step: "coverage" },
     { column: "broken_tackle_after_catch", label: "Broken tackle after catch", short: "BT",    entry: "conditional", appliesTo: "catch", when: "catches only", step: "catch" },
+    ...CATCH_DIFFICULTY_TAGS,
   ],
   TE: [
     { column: "blocked_defender",     label: "Blocked",               short: "Blk",   entry: "conditional", values: ["dl", "lb", "db"], valueLabels: ["DL", "LB", "DB"], preset: "dl", appliesTo: "block", when: "block reps only", step: "block" },
     { column: "double_coverage",      label: "Double coverage",       short: "Dbl",   entry: "exception", appliesTo: "route", step: "coverage" },
     { column: "press_release",        label: "Release vs press",      short: "Press", entry: "conditional", values: ["won", "lost"], valueLabels: ["Won", "Lost"], required: true, appliesTo: "press", when: "press snaps only", step: "coverage" },
     { column: "chipped_before_route", label: "Chipped before route",  short: "Chip",  entry: "exception", appliesTo: "route", step: "route" },
+    ...CATCH_DIFFICULTY_TAGS,
   ],
 };
 

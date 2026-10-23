@@ -128,11 +128,14 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
 
   // Per-play tags (migration 062): new plays write all of them, an edit of an
   // older play writes none. Release vs press needs a pick on every press
-  // route; broken tackle shows on a catch; Double on any route.
+  // route; broken tackle shows on a catch; Double on any route; the catch
+  // difficulty tags (078) on every target, the reason on an incompletion.
   const tags = usePlayTags("WR", selectedGameId, gamePlays);
   const tagFacts: PlayFacts = {
     route: !noRouteRun,
     press: !noRouteRun && coverage === "press",
+    target: !noRouteRun && targeted,
+    incompletion: !noRouteRun && targeted && playOutcome === "incomplete",
     catch: !noRouteRun && targeted && playOutcome === "caught",
   };
   const tagsMissing = tags.missing(tagFacts).length > 0;
@@ -865,6 +868,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
                     </div>
                   </div>
                 </div>
+                <PlayTagControls tags={tags} facts={tagFacts} part="play" step="target" accent="blue" tall />
                 <PlayTagControls tags={tags} facts={tagFacts} part="play" step="catch" accent="blue" tall />
               </div>
             )}

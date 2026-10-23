@@ -131,12 +131,15 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
 
   // Per-play tags (migration 062): new plays write all of them, an edit of an
   // older play writes none. Who he blocked on block reps (DL pre-selected),
-  // release vs press on press routes, chipped on routes.
+  // release vs press on press routes, chipped on routes, the catch difficulty
+  // tags (078) on every target and the reason on an incompletion.
   const tags = usePlayTags("TE", selectedGameId, gamePlays);
   const tagFacts: PlayFacts = {
     block: playType === "run_block" || playType === "pass_block",
     route: playType === "route_run",
     press: playType === "route_run" && coverage === "press",
+    target: playType === "route_run" && targeted === true,
+    incompletion: playType === "route_run" && targeted === true && targetOutcome === "incomplete",
   };
   const tagsMissing = tags.missing(tagFacts).length > 0;
   const variantMissing = playType === "route_run" && variant.missing(routeType);
@@ -910,6 +913,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
                         </div>
                       </div>
                     )}
+                    <PlayTagControls tags={tags} facts={tagFacts} part="play" step="target" accent="green" />
                   </div>
                 )}
               </div>

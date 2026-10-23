@@ -1172,7 +1172,7 @@ export interface ScoutingGame {
 export type PffPlayerMatchStatus = "auto" | "confirmed" | "review" | "not_found" | "none";
 export type PffGameMatchStatus = "auto" | "confirmed" | "review" | "not_charted" | "no_match" | "no_player" | "none";
 
-export interface RoutePlay {
+export interface RoutePlay extends CatchDifficultyTags {
   id: string;
   user_id: string;
   game_id: string;
@@ -1201,6 +1201,20 @@ export interface RoutePlay {
   double_coverage?: boolean | null;
   press_release?: PressRelease | null;
   broken_tackle_after_catch?: boolean | null;
+}
+
+/** Where the ball arrived on a WR / TE target (migration 078, data collection only). */
+export type BallPlacement = "on_target" | "high" | "low" | "behind" | "in_front" | "outside_frame";
+export type IncompletionReason = "uncatchable" | "broken_up";
+
+/** What made a WR / TE target hard to catch (migration 078): every target, whatever
+ *  the result; the reason on incompletions. NULL = not a target, or charted before. */
+export interface CatchDifficultyTags {
+  ball_placement?: BallPlacement | null;
+  adjusted_to_ball?: boolean | null;
+  hit_at_catch?: boolean | null;
+  sideline_target?: boolean | null;
+  incompletion_reason?: IncompletionReason | null;
 }
 
 export interface RouteStat { count: number; open: number; targets: number; catches: number }
@@ -1337,7 +1351,7 @@ export type TEBlockedDefender = "dl" | "lb" | "db";
 /** Full-career per-block-type success aggregate (prospect_te_stats.block_stats_raw). */
 export interface TEBlockStat { count: number; success: number }
 
-export interface TEPlay {
+export interface TEPlay extends CatchDifficultyTags {
   id: string;
   user_id: string;
   game_id: string;

@@ -140,7 +140,7 @@ describe("click budget", () => {
 });
 
 describe("what shows", () => {
-  const STEPS: (TagStep | undefined)[] = [undefined, "playType", "read", "pressure", "throw", "run", "block", "route", "coverage", "catch"];
+  const STEPS: (TagStep | undefined)[] = [undefined, "playType", "read", "pressure", "throw", "run", "block", "route", "coverage", "target", "catch"];
   // A play's tags at every step of the logger, in registry order.
   const everyStep = (pos: TagPosition, facts: PlayFacts) =>
     tagSpecs(pos).map((s) => s.column).filter((c) => STEPS.some((st) => cols(visibleTags(pos, facts, "play", st)).includes(c)));
@@ -184,6 +184,42 @@ describe("what shows", () => {
   });
 });
 
+describe("catch difficulty tags (migration 078, data collection only)", () => {
+  const CATCH_COLS = ["ball_placement", "adjusted_to_ball", "hit_at_catch", "sideline_target", "incompletion_reason"];
+  const TARGET: PlayFacts = { route: true, target: true };
+  const INCOMPLETE: PlayFacts = { route: true, target: true, incompletion: true };
+
+  it("shows on every WR / TE target in the targeted box, the reason only on an incompletion", () => {
+    for (const pos of ["WR", "TE"] as const) {
+      expect(cols(visibleTags(pos, TARGET, "play", "target")), pos).toEqual(["ball_placement", "adjusted_to_ball", "hit_at_catch", "sideline_target"]);
+      expect(cols(visibleTags(pos, INCOMPLETE, "play", "target")), pos).toEqual(CATCH_COLS);
+      expect(cols(visibleTags(pos, { route: true }, "play", "target")), pos).toEqual([]); // not targeted
+    }
+    for (const pos of ["QB", "RB"] as const) for (const c of CATCH_COLS) expect(tagColumns(pos)).not.toContain(c);
+  });
+
+  it("costs no click on a typical target: On target pre-selected, the rest off; one pick on an incompletion", () => {
+    const d = defaultTagValues("WR");
+    expect([d.ball_placement, d.adjusted_to_ball, d.hit_at_catch, d.sideline_target, d.incompletion_reason]).toEqual(["on_target", false, false, false, null]);
+    expect(missingTags("WR", d, TARGET)).toEqual([]);
+    expect(cols(missingTags("TE", defaultTagValues("TE"), INCOMPLETE))).toEqual(["incompletion_reason"]);
+    expect(missingTags("TE", { ...defaultTagValues("TE"), incompletion_reason: "broken_up" }, INCOMPLETE)).toEqual([]);
+  });
+
+  it("writes NULL off a target and the defaults on one", () => {
+    const route = tagPayload("WR", defaultTagValues("WR"), { route: true });
+    for (const c of CATCH_COLS) expect(route[c], c).toBeNull();
+    const caught = tagPayload("TE", defaultTagValues("TE"), { ...TARGET, catch: true });
+    expect(caught).toMatchObject({ ball_placement: "on_target", adjusted_to_ball: false, hit_at_catch: false, sideline_target: false, incompletion_reason: null });
+  });
+
+  it("badges only what's off the routine: a placement other than On target, the on tags, the reason", () => {
+    const play = { red_zone: false, ball_placement: "high", adjusted_to_ball: true, hit_at_catch: false, sideline_target: true, incompletion_reason: "uncatchable" };
+    expect(tagBadges(play, "WR").map((b) => b.text)).toEqual(["Ball High", "Adj", "SL", "Inc Uncatchable"]);
+    expect(tagBadges({ red_zone: false, ball_placement: "on_target" }, "TE")).toEqual([]);
+  });
+});
+
 describe("sticky carry-over", () => {
   it("starts a game with its last charted value, skipping untagged plays", () => {
     const plays = [
@@ -218,6 +254,8 @@ describe("editing", () => {
     expect(tagValuesFromPlay(play, "WR")).toEqual({
       red_zone: true, third_fourth_down: false, short_yardage: false, garbage_time: false,
       double_coverage: false, press_release: null, broken_tackle_after_catch: true,
+      // The catch difficulty tags (078) weren't on this play: their defaults, ready if it becomes a target.
+      ball_placement: "on_target", adjusted_to_ball: false, hit_at_catch: false, sideline_target: false, incompletion_reason: null,
     });
     expect(tagValuesFromPlay({ red_zone: false, blocked_defender: null }, "TE").blocked_defender).toBe("dl");
   });

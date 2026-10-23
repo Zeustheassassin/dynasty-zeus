@@ -3,7 +3,13 @@
 > **Audience:** a developer who has just been handed the keys and has never seen this project.
 > **Goal:** explain what the app is, how the code is structured, how data flows, and how every major subsystem actually works — in enough depth to debug and extend it on day one.
 >
-> *Last reviewed: 2026-10-23, HEAD `0d43abe` (working tree) — **Chart Game in the order the user watches a play, on all four boards; RB routes off the WR / TE route tree.** The user: "First thing i look at is Situation. Then I look at Allignment. Then i begin the play … what route … then what happened" (open, targeted, caught, coverage), whatever the position.
+> *Last reviewed: 2026-10-23, HEAD `9d1aca1` (working tree) — **Catch difficulty tags on the WR and TE boards, data collection only.** The user asked what's chartable that explains how hard a catch was, approved all five suggestions, and set the rule: data collection only until there's enough to make a difference, and never penalize players charted before the tags.
+> - **The tags** ([playEra.ts](lib/scouting/playEra.ts) `CATCH_DIFFICULTY_TAGS`, on WR and TE, `step: "target"`, shown in the targeted box): **Ball placement** On target (pre-selected) / High / Low / Behind / In front / Outside frame; **Adjusted to the ball**, **Hit at the catch**, **Sideline (feet in bounds)** (exceptions); **Why incomplete** Uncatchable / Broken up (required, incompletions only; Contested already covers a contested loss). New play facts `target` / `incompletion` (both boards). All but the reason apply on **every target, whatever the result**, so a later catch model can read them as difficulty, not outcome (an "adjusted catch" asked only on catches would just encode the catch). A typical target costs no click; an incompletion costs one.
+> - **Scored nowhere:** not in `DIFFICULTY_TAGS` / `ENABLED_TAG_CORRECTIONS` / tagStats (tested in [playEra.test.ts](__tests__/lib/scouting/playEra.test.ts)). Old plays stay NULL; the paste imports write none. When they're scored later, the tag-correction rules already keep older plays judged exactly as today (§11 "Grading"); a credit only tagged targets can earn should count an untagged player as average.
+> - **Migration [078](supabase/migrations/078_catch_difficulty_tags.sql) — applied by the user 2026-10-23 13:55 UTC, before the push (verified read-only: five columns on both tables, the four CHECKs, ledger row; WR 23,458 · TE 1,361 plays unchanged). It had to go first** (a new WR / TE play writes every tag column, so without these every new WR / TE play save fails): `ball_placement`, `adjusted_to_ball`, `hit_at_catch`, `sideline_target`, `incompletion_reason` on `route_plays` and `te_plays`, CHECKs on the two text tags. Additive only. Tested on a local Postgres 18 (re-run safe, valid values save, unknown ones rejected). Live read-only: 425 charted WR targets (62 tagged), 142 TE (101 tagged), so the sample builds slowly.
+> - Tests: new tags in [playTags.test.ts](__tests__/lib/scouting/playTags.test.ts) (where they show, no click on a typical target, NULL off a target, badges), 078 vs the registry in [playEra.test.ts](__tests__/lib/scouting/playEra.test.ts), [usePlayTags.test.tsx](__tests__/components/scouting/usePlayTags.test.tsx), and [chartingTagSteps.test.ts](__tests__/components/scouting/chartingTagSteps.test.ts) now requires the `target` step on both boards. tsc / eslint / build clean, **2547 tests / 185 files**. Not looked at in a browser.*
+>
+> *Prior review: 2026-10-23, HEAD `0d43abe` (working tree; committed as `9d1aca1`, deploy success) — **Chart Game in the order the user watches a play, on all four boards; RB routes off the WR / TE route tree.** The user: "First thing i look at is Situation. Then I look at Allignment. Then i begin the play … what route … then what happened" (open, targeted, caught, coverage), whatever the position.
 > - **Order:** Situation → alignment → play type → what he did → what happened. WR: Alignment + Line → **Play Type** (Route Run / No Route Run, two buttons replacing the No Route Run toggle; Route Run is the default, so no extra click) → Route + sub-route → Coverage → Got Open / Targeted → Outcome / Contested. TE: route box is Route → Coverage (was Coverage → Route); block box is Block Type → who he blocked → Outcome. QB: throw box is Target → Route → Depth → Platform → Accuracy → Touch → Release / Tight window → Result → Coverage (was Platform → Accuracy → Touch → Result → Target → Depth → Route → Coverage). RB: Formation + **Aligned at Snap** → Play Type in a **Run Play** box (Man Gap, Zone, Run Block) and a **Pass Play** box (Route Run, Pass Block), Decoy apart (the user asked whether a Run / Pass pick first would help; boxes give that read without a click) → details. Nothing stored changes except the RB items below.
 > - **Tags beside their field:** `PlayTagSpec.step` / `TagStep` in [playEra.ts](lib/scouting/playEra.ts), `visibleTags(…, step)` in [playTags.ts](lib/scouting/playTags.ts), `PlayTagControls step=` (no heading). E.g. release vs press and Double under Coverage, play action under QB Play Type, Didn't sense pressure / Sack fault in the pressure box, Blocked DL/LB/DB in the TE block box. The Tags row (no step) stays as a catch-all; only QB run result / BT / explosive use it now. [chartingTagSteps.test.ts](__tests__/components/scouting/chartingTagSteps.test.ts) reads each board's source so every step its tags use is rendered (a required tag with no button would block Log Play).
 > - **RB Aligned at Snap** (RB / WR Split Out) moved up beside Formation, **saved on every play** (was routes only), RB by default (the user's call). WR% and Split-out-wide already mean % of snaps, so they get fuller from here on; older non-route plays read false.
@@ -614,7 +620,7 @@
 17. [Dev workflow: build, lint, test](#17-dev-workflow-build-lint-test)
 18. [CI pipeline (GitHub Actions)](#18-ci-pipeline-github-actions)
 19. [ESLint & TypeScript rules that bite](#19-eslint--typescript-rules-that-bite)
-20. [Test suite scope (2542 tests, 185 files)](#20-test-suite-scope-2542-tests-185-files)
+20. [Test suite scope (2547 tests, 185 files)](#20-test-suite-scope-2547-tests-185-files)
 21. [Common failure modes & where to look](#21-common-failure-modes--where-to-look)
 22. [Things intentionally NOT done (and why)](#22-things-intentionally-not-done-and-why)
 23. [Known open items & time bombs for the next owner](#23-known-open-items--time-bombs-for-the-next-owner)
@@ -2078,8 +2084,8 @@ Stage 3 of the plan: the approved tags (migration 062's columns) are now charted
 | all | Red zone (sticky) · 3rd/4th down · Short yardage / goal line · Garbage time (sticky) | |
 | QB | | Play action, Better option missed (dropbacks: pass / RPO, incl. sacks, scrambles, throwaways) · Tight window, Release Early / **On time** / Late (throws) · Sack fault QB / **Line** / Coverage (sacks) · Run result Success / Fail (required), Broken tackle, Explosive (designed runs + scrambles) |
 | RB | | Hit behind the line, Missed read (carries) · Pass-pro loss Wrong man / Beaten (required; pass blocks marked Fail) · Broken tackle after catch (caught targets). Caught from behind was dropped 2026-10-07 with the Explosive Play button it showed on |
-| WR | | Release vs press Won / Lost (required; routes vs Press) · Broken tackle after catch (caught targets) |
-| TE | | Blocked **DL** / LB / DB (run / pass block reps) · Release vs press Won / Lost (required; routes vs Press) · Chipped before route (routes) |
+| WR | | Release vs press Won / Lost (required; routes vs Press) · Broken tackle after catch (caught targets) · since 078 (data collection only): Ball placement **On target** / High / Low / Behind / In front / Outside frame, Adjusted to the ball, Hit at the catch, Sideline (every target) · Why incomplete Uncatchable / Broken up (required; incompletions) |
+| TE | | Blocked **DL** / LB / DB (run / pass block reps) · Release vs press Won / Lost (required; routes vs Press) · Chipped before route (routes) · the same five catch difficulty tags as WR (078, data collection only) |
 
 Bold = pre-selected. TE release vs press is required like WR's (the plan only said "1 required click" for WR; a won/lost rep has no safe default). A typical play (QB pass or sack, RB carry, WR route not vs press, TE block or route) needs **no** tag click; a sacked QB's fault is pre-selected.
 
@@ -2664,7 +2670,7 @@ The flat config in [eslint.config.mjs](eslint.config.mjs) is minimal: it just sp
 
 Beyond ESLint, TypeScript is strict at the `tsc` step. `tsconfig.json` enables `strict`, plus `noUnusedLocals` and `noUnusedParameters` — so an unused import, variable, or function parameter is a **build/type-check failure**, not a warning. This is the single most common reason a local edit that "looks fine" red-X's in CI.
 
-## 20. Test suite scope (2542 tests, 185 files)
+## 20. Test suite scope (2547 tests, 185 files)
 
 Run via PowerShell. The suite is [Vitest](vitest.config.mts) in a `jsdom` environment, globbing `**/__tests__/**/*.{ts,tsx}` and `**/*.{test,spec}.{ts,tsx}`. It deliberately covers **pure logic and server routes, not UI rendering**. There are no e2e tests. A handful of narrow component-render tests (via `@testing-library/react`) live under [__tests__/components/](__tests__/components/), each pinning one piece of UI behavior (e.g. the Injury Report panels, the Analysis min filters, the Big Board's Above Exp columns).
 
@@ -2787,7 +2793,7 @@ Other lower-priority items the audit flagged that I did not re-verify line-by-li
 4. `npm run dev` → confirm the app loads at `http://localhost:3000`.
 5. `npm run build` → confirm a production build succeeds (also generates `.next/types/` so the next step works).
 6. `npx tsc --noEmit` → confirm type-check passes (run it *after* the build).
-7. **In PowerShell** (not Git Bash): `npm run test` → confirm **2542 tests pass** across 185 files. If you see "0 tests," you're in the wrong shell.
+7. **In PowerShell** (not Git Bash): `npm run test` → confirm **2547 tests pass** across 185 files. If you see "0 tests," you're in the wrong shell.
 8. `npm run lint` → confirm clean (remember `exhaustive-deps` warnings won't fail it; the four error rules will).
 9. Read [AGENTS.md](AGENTS.md) — it warns this Next.js version diverges from public docs; consult `node_modules/next/dist/docs/` before writing framework code.
 10. Walk the entry path: [app/page.tsx](app/page.tsx) → [app/hooks/useAppState.ts](app/hooks/useAppState.ts) → [app/components/HubRouter.tsx](app/components/HubRouter.tsx).
