@@ -33,12 +33,12 @@ describe("route sub-routes", () => {
     }
   });
 
-  it("offers Called Scramble Drill under Other on the QB board only", () => {
+  it("offers Scramble Drill under Other on the QB board only", () => {
     const keys = (board: "WR" | "TE" | "QB") => routeVariantsFor("other", board).map((v) => v.key);
     expect(keys("QB")).toEqual(["option", "texas", "wheel", "block_release", "out_and_up", "zig", "called_scramble_drill"]);
     expect(keys("WR")).not.toContain("called_scramble_drill");
     expect(keys("TE")).toEqual(keys("WR"));
-    expect(routeVariantSpec("other", "called_scramble_drill")).toMatchObject({ label: "Called Scramble Drill", boards: ["QB"] });
+    expect(routeVariantSpec("other", "called_scramble_drill")).toMatchObject({ label: "Scramble Drill", short: "Scramble Drill", boards: ["QB"] });
   });
 
   it("starts each route on the user's default (Other on none), and every default is one of its sub-routes", () => {

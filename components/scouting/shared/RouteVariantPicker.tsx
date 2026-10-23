@@ -10,7 +10,7 @@ const IDLE = "bg-slate-800 text-slate-400 hover:bg-slate-700";
 interface Props {
   route: RouteType | null;
   variant: UseRouteVariantReturn;
-  /** Which board it's on: a few sub-routes are one board's only (Called Scramble Drill, QB). */
+  /** Which board it's on: a few sub-routes are one board's only (Scramble Drill, QB). */
   board: RouteVariantBoard;
   /** The board's accent: WR and QB "blue" (bg-blue-600), TE "green" (its route buttons are bg-blue-700). */
   accent: "blue" | "green";

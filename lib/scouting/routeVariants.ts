@@ -88,8 +88,9 @@ export const ROUTE_VARIANTS: Record<RouteType, readonly RouteVariantSpec[]> = {
     { key: "block_release", label: "Block and Release", short: "Blk & Rel" },
     { key: "out_and_up",    label: "Out and Up",        short: "Out & Up" },
     { key: "zig",           label: "Zig",               short: "Zig" },
-    // QB only (the user, 2026-10-22): a designed scramble, not a receiver's route.
-    { key: "called_scramble_drill", label: "Called Scramble Drill", short: "Scramble Drill", boards: ["QB"] },
+    // QB only (the user, 2026-10-22): a designed scramble, not a receiver's route. Shown as
+    // "Scramble Drill" (the user); the key keeps its first name, saved plays use it.
+    { key: "called_scramble_drill", label: "Scramble Drill", short: "Scramble Drill", boards: ["QB"] },
   ],
 };
 
