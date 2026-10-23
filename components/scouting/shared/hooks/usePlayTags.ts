@@ -65,7 +65,8 @@ export function usePlayTags(
     editingUntagged,
     set(column, value) {
       if (edit) {
-        if (!edit.untagged) setEdit({ ...edit, values: { ...edit.values, [column]: value } });
+        // Functional, so one click that sets two tags (Low turns High off) keeps both.
+        if (!edit.untagged) setEdit((e) => (e && !e.untagged ? { ...e, values: { ...e.values, [column]: value } } : e));
         return;
       }
       if (stickyColumns.has(column)) {

@@ -50,9 +50,24 @@ export function tagApplies(spec: PlayTagSpec, facts: PlayFacts): boolean {
   return spec.appliesTo == null || facts[spec.appliesTo] === true;
 }
 
-/** A tag that's on whatever was clicked (play action on an RPO). */
-export function tagForced(spec: PlayTagSpec, facts: PlayFacts): boolean {
-  return spec.forced != null && tagApplies(spec, facts) && facts[spec.forced.by] === true;
+/**
+ * A tag that's on whatever was clicked: play action on an RPO (a play fact),
+ * or Outside frame while High / Low / In front / Behind is on (other tags).
+ */
+export function tagForced(spec: PlayTagSpec, facts: PlayFacts, values: TagValues = {}): boolean {
+  if (!tagApplies(spec, facts)) return false;
+  if (spec.forced != null && facts[spec.forced.by] === true) return true;
+  return spec.onWith != null && spec.onWith.some((c) => values[c] === true);
+}
+
+/**
+ * What one click on an on/off tag sets: the tag, and the tag it excludes
+ * turned off when it goes on (High turns Low off).
+ */
+export function toggleTag(spec: PlayTagSpec, on: boolean): Record<string, TagValue> {
+  const out: Record<string, TagValue> = { [spec.column]: on };
+  if (on && spec.excludes) out[spec.excludes] = false;
+  return out;
 }
 
 /** Keeps a value only if it fits the tag (a known value, or a boolean). */
@@ -115,7 +130,7 @@ export function tagPayload(
   const out: Record<string, TagValue> = {};
   for (const spec of SPECS[position]) {
     out[spec.column] = !tagApplies(spec, facts) ? null
-      : tagForced(spec, facts) ? true
+      : tagForced(spec, facts, values) ? true
       : validValue(spec, values[spec.column]) ?? tagDefault(spec);
   }
   return out;
@@ -191,6 +206,8 @@ export function tagBadges(play: object, position: TagPosition): TagBadge[] {
       const label = tagOptions(spec).find((o) => o.value === v)?.label ?? String(v);
       out.push({ column: spec.column, text: `${spec.short} ${v ? "✓" : "✗"}`, title: `${spec.label}: ${label}` });
     } else if (v === true) {
+      // Outside frame says nothing new beside High / Low / In front / Behind.
+      if (spec.onWith?.some((c) => row[c] === true)) continue;
       out.push({ column: spec.column, text: spec.short, title: spec.label });
     }
   }

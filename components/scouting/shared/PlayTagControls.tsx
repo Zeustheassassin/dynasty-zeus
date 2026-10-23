@@ -1,6 +1,6 @@
 "use client";
 import { isTaggedPlay, type PlayTagSpec, type TagPosition, type TagStep } from "../../../lib/scouting/playEra";
-import { tagBadges, tagForced, tagOptions, visibleTags, type PlayFacts } from "../../../lib/scouting/playTags";
+import { tagBadges, tagForced, tagOptions, toggleTag, visibleTags, type PlayFacts } from "../../../lib/scouting/playTags";
 import type { PlayTags } from "./hooks/usePlayTags";
 
 const ACTIVE = { blue: "bg-blue-600 text-white", green: "bg-green-700 text-white" } as const;
@@ -38,8 +38,28 @@ export default function PlayTagControls({ tags, facts, part, step, accent, tall 
   const specs = visibleTags(tags.position, facts, part, step);
   if (specs.length === 0) return null;
   const toggles = specs.filter((s) => !s.values && !s.required);
+  const loose = toggles.filter((s) => !s.group);
+  // Grouped on/off tags (Ball placement) get a labelled row of their own.
+  const groups = [...new Set(toggles.flatMap((s) => (s.group ? [s.group] : [])))];
   const pickers = specs.filter((s) => s.values || s.required);
   const sticky = specs.filter((s) => s.entry === "sticky").map((s) => s.label);
+
+  const toggle = (spec: PlayTagSpec) => {
+    // A forced tag (play action on an RPO, Outside frame with High / Low /
+    // In front / Behind) shows on and can't be turned off.
+    const forced = tagForced(spec, facts, tags.values);
+    const on = forced || tags.values[spec.column] === true;
+    const note = spec.forced?.note ?? (spec.onWith ? "on with High, Low, In front or Behind" : "");
+    return (
+      <button key={spec.column} type="button" aria-pressed={on} disabled={forced}
+        onClick={() => { for (const [column, value] of Object.entries(toggleTag(spec, !on))) tags.set(column, value); }}
+        title={forced ? `${spec.label}: ${note}`
+          : spec.entry === "sticky" ? `${spec.label}: stays on for the next play until you turn it off` : spec.label}
+        className={`flex-1 whitespace-nowrap px-3 ${height} rounded text-xs font-medium transition ${on ? ACTIVE[accent] : IDLE} ${forced ? "cursor-default" : ""}`}>
+        {spec.label}
+      </button>
+    );
+  };
 
   return (
     <div className="space-y-2">
@@ -49,22 +69,15 @@ export default function PlayTagControls({ tags, facts, part, step, accent, tall 
           {sticky.length > 0 && <span className="text-slate-600"> · {sticky.join(" and ")} stay on for the next play</span>}
         </div>
       )}
-      {toggles.length > 0 && (
+      {groups.map((group) => (
+        <div key={group} role="group" aria-label={group} className="flex flex-wrap items-center gap-1.5">
+          <span className="text-xs mr-1 text-slate-500">{group}</span>
+          {toggles.filter((s) => s.group === group).map(toggle)}
+        </div>
+      ))}
+      {loose.length > 0 && (
         <div className="flex flex-wrap gap-2">
-          {toggles.map((spec) => {
-            // A forced tag (play action on an RPO) shows on and can't be turned off.
-            const forced = tagForced(spec, facts);
-            const on = forced || tags.values[spec.column] === true;
-            return (
-              <button key={spec.column} type="button" aria-pressed={on} disabled={forced}
-                onClick={() => tags.set(spec.column, !on)}
-                title={forced ? `${spec.label}: ${spec.forced?.note}`
-                  : spec.entry === "sticky" ? `${spec.label}: stays on for the next play until you turn it off` : spec.label}
-                className={`flex-1 whitespace-nowrap px-3 ${height} rounded text-xs font-medium transition ${on ? ACTIVE[accent] : IDLE} ${forced ? "cursor-default" : ""}`}>
-                {spec.label}
-              </button>
-            );
-          })}
+          {loose.map(toggle)}
         </div>
       )}
       {pickers.map((spec) => (

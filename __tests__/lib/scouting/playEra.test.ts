@@ -40,10 +40,11 @@ describe("tag registry", () => {
     expect(code).toMatch(/ARRAY\['route_plays', 'te_plays'\]/);
     const checkValues = (col: string) =>
       [...(code.match(new RegExp(`${col} IN \\(([^)]*)\\)`))?.[1] ?? "").matchAll(/''(\w+)''/g)].map((m) => m[1]);
+    expect(checkValues("ball_placement")).toEqual(["on_target", "high", "low", "behind", "in_front", "outside_frame"]);
     for (const pos of ["WR", "TE"] as const) {
       const tags = Object.fromEntries(POSITION_TAGS[pos].map((t) => [t.column, t]));
-      expect(tags.ball_placement.values).toEqual(checkValues("ball_placement"));
-      expect(tags.ball_placement.preset).toBe("on_target");
+      // 080 retired the single pick for the ball placement toggles.
+      expect(tags.ball_placement).toBeUndefined();
       // 079 added Out of bounds to 078's two answers.
       expect(tags.incompletion_reason.values).toEqual([...checkValues("incompletion_reason"), "out_of_bounds"]);
       expect(tags.incompletion_reason.required).toBe(true);
@@ -53,6 +54,31 @@ describe("tag registry", () => {
         for (const specs of Object.values(DIFFICULTY_TAGS)) expect(specs.map((s) => s.column)).not.toContain(col);
       }
     }
+  });
+
+  it("matches migration 080's ball placement toggles, copying 078's picks with its one approved UPDATE", () => {
+    const sql = readFileSync(join(process.cwd(), "supabase/migrations/080_ball_placement_toggles.sql"), "utf8");
+    const code = sql.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
+    const BALL = ["ball_high", "ball_low", "ball_in_front", "ball_behind", "ball_outside_frame"];
+    for (const pos of ["WR", "TE"] as const) {
+      const tags = Object.fromEntries(POSITION_TAGS[pos].map((t) => [t.column, t]));
+      expect(BALL.map((c) => tags[c]?.excludes ?? null)).toEqual(["ball_low", "ball_high", "ball_behind", "ball_in_front", null]);
+      expect(tags.ball_outside_frame.onWith).toEqual(["ball_high", "ball_low", "ball_in_front", "ball_behind"]);
+      for (const c of BALL) {
+        expect(tags[c]).toMatchObject({ entry: "exception", appliesTo: "target", step: "target", group: "Ball placement" });
+        expect(code).toContain(`ADD COLUMN IF NOT EXISTS ${c} boolean`);
+        for (const specs of Object.values(DIFFICULTY_TAGS)) expect(specs.map((s) => s.column)).not.toContain(c);
+      }
+    }
+    expect(code).toMatch(/CHECK \(NOT \(ball_high AND ball_low\)\)/);
+    expect(code).toMatch(/CHECK \(NOT \(ball_in_front AND ball_behind\)\)/);
+    expect(code).toMatch(/CHECK \(ball_outside_frame IS TRUE OR NOT \(COALESCE\(ball_high, false\) OR COALESCE\(ball_low, false\) OR COALESCE\(ball_in_front, false\) OR COALESCE\(ball_behind, false\)\)\)/);
+    // The one UPDATE (the user, 2026-10-23): only rows with an old pick and no new value.
+    expect(code.match(/\bUPDATE\b/g)).toHaveLength(1);
+    expect(code).toMatch(/WHERE ball_placement IS NOT NULL\s+AND ball_high IS NULL AND ball_low IS NULL AND ball_in_front IS NULL\s+AND ball_behind IS NULL AND ball_outside_frame IS NULL/);
+    // ball_placement is only read (right of each =), never set.
+    expect(code).not.toMatch(/^\s*ball_placement\s*=/m);
+    expect(code).not.toMatch(/\b(DROP|DELETE|TRUNCATE)\b/);
   });
 
   it("matches migration 079's Why incomplete answers, dropping only 078's check, after the new one is on", () => {

@@ -19,7 +19,8 @@
 //
 // The tag registry below mirrors migration 062's columns and CHECKs (and 072's
 // double_coverage on the WR and TE tables, 076's didnt_sense_pressure on QB,
-// 078's catch-difficulty tags on WR and TE, 079's Out of bounds). `entry`
+// 078's catch-difficulty tags on WR and TE, 079's Out of bounds, 080's ball
+// placement toggles). `entry`
 // is how the boards ask for each tag (the user's click budget):
 //   exception   — off unless clicked
 //   preselected — the common answer is filled in (`preset`)
@@ -90,6 +91,13 @@ export interface PlayTagSpec {
   forced?: { by: PlayFact; note: string };
   /** Where the board asks it; absent = the Tags row after the play. */
   step?: TagStep;
+  /** On/off tags shown together as one labelled row (Ball placement). */
+  group?: string;
+  /** Turned off when this one is turned on (High and Low can't both be on). */
+  excludes?: string;
+  /** Always on while any of these tags is on: written true, the button locked
+   *  on (Outside frame with High / Low / In front / Behind, the user's rule). */
+  onWith?: readonly string[];
 }
 
 // What made a WR / TE target hard to catch (the user, 2026-10-23, migration
@@ -98,8 +106,19 @@ export interface PlayTagSpec {
 // sideline on catches, the incompletion reason on incompletions (the user's
 // calls). DATA COLLECTION ONLY until there are enough tagged targets to
 // matter (the user's call): no correction, stat or score reads them.
+// Ball placement (the user, 2026-10-23, migration 080; replaces 078's single
+// pick ball_placement): High or Low, In front or Behind, either pair or both
+// (High and in front), and Outside frame, on whenever any of those four is and
+// also on its own (over his head with no jump, at his knees in stride). On
+// target = none of the five.
+const DIRECTIONS = ["ball_high", "ball_low", "ball_in_front", "ball_behind"] as const;
+const BALL = "Ball placement";
 const CATCH_DIFFICULTY_TAGS: readonly PlayTagSpec[] = [
-  { column: "ball_placement",      label: "Ball placement",            short: "Ball", entry: "preselected", values: ["on_target", "high", "low", "behind", "in_front", "outside_frame"], valueLabels: ["On target", "High", "Low", "Behind", "In front", "Outside frame"], preset: "on_target", appliesTo: "target", step: "target" },
+  { column: "ball_high",           label: "High",                      short: "High",      entry: "exception", appliesTo: "target", step: "target", group: BALL, excludes: "ball_low" },
+  { column: "ball_low",            label: "Low",                       short: "Low",       entry: "exception", appliesTo: "target", step: "target", group: BALL, excludes: "ball_high" },
+  { column: "ball_in_front",       label: "In front",                  short: "In front",  entry: "exception", appliesTo: "target", step: "target", group: BALL, excludes: "ball_behind" },
+  { column: "ball_behind",         label: "Behind",                    short: "Behind",    entry: "exception", appliesTo: "target", step: "target", group: BALL, excludes: "ball_in_front" },
+  { column: "ball_outside_frame",  label: "Outside frame",             short: "Off frame", entry: "exception", appliesTo: "target", step: "target", group: BALL, onWith: DIRECTIONS },
   { column: "adjusted_to_ball",    label: "Adjusted to the ball",      short: "Adj",  entry: "exception", appliesTo: "target", step: "target" },
   { column: "hit_at_catch",        label: "Hit at the catch",          short: "Hit",  entry: "exception", appliesTo: "target", step: "target" },
   // Catches only (the user, 2026-10-23): a throw that ends out of bounds is an Out of bounds incompletion.

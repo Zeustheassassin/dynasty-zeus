@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { SITUATION_TAGS, isTaggedPlay, tagColumns, type TagPosition, type TagStep } from "@/lib/scouting/playEra";
 import {
   carriedStickyValues, defaultTagValues, forcedTagPayload, missingTags, tagBadges, tagDefault, tagForced,
-  tagPayload, tagSpecs, tagValuesFromPlay, visibleTags, type PlayFacts,
+  tagPayload, tagSpecs, tagValuesFromPlay, toggleTag, visibleTags, type PlayFacts,
 } from "@/lib/scouting/playTags";
 
 const POSITIONS: TagPosition[] = ["QB", "RB", "WR", "TE"];
@@ -184,44 +184,79 @@ describe("what shows", () => {
   });
 });
 
-describe("catch difficulty tags (migration 078, data collection only)", () => {
-  const CATCH_COLS = ["ball_placement", "adjusted_to_ball", "hit_at_catch", "sideline_target", "incompletion_reason"];
+describe("catch difficulty tags (migrations 078–080, data collection only)", () => {
+  const BALL = ["ball_high", "ball_low", "ball_in_front", "ball_behind", "ball_outside_frame"];
+  const CATCH_COLS = [...BALL, "adjusted_to_ball", "hit_at_catch", "sideline_target", "incompletion_reason"];
   const TARGET: PlayFacts = { route: true, target: true };
   const INCOMPLETE: PlayFacts = { route: true, target: true, incompletion: true };
+  const spec = (pos: TagPosition, column: string) => tagSpecs(pos).find((s) => s.column === column)!;
 
   it("shows on every WR / TE target in the targeted box, sideline only on a catch, the reason only on an incompletion", () => {
     for (const pos of ["WR", "TE"] as const) {
       // Adjusted and hit count on a miss too; sideline only on a catch (the user, 2026-10-23).
-      expect(cols(visibleTags(pos, TARGET, "play", "target")), pos).toEqual(["ball_placement", "adjusted_to_ball", "hit_at_catch"]);
-      expect(cols(visibleTags(pos, { ...TARGET, catch: true }, "play", "target")), pos).toEqual(["ball_placement", "adjusted_to_ball", "hit_at_catch", "sideline_target"]);
-      expect(cols(visibleTags(pos, INCOMPLETE, "play", "target")), pos).toEqual(["ball_placement", "adjusted_to_ball", "hit_at_catch", "incompletion_reason"]);
+      expect(cols(visibleTags(pos, TARGET, "play", "target")), pos).toEqual([...BALL, "adjusted_to_ball", "hit_at_catch"]);
+      expect(cols(visibleTags(pos, { ...TARGET, catch: true }, "play", "target")), pos).toEqual([...BALL, "adjusted_to_ball", "hit_at_catch", "sideline_target"]);
+      expect(cols(visibleTags(pos, INCOMPLETE, "play", "target")), pos).toEqual([...BALL, "adjusted_to_ball", "hit_at_catch", "incompletion_reason"]);
       expect(cols(visibleTags(pos, { route: true }, "play", "target")), pos).toEqual([]); // not targeted
+      // 078's single pick is retired: new plays don't write it.
+      expect(tagColumns(pos)).not.toContain("ball_placement");
     }
     for (const pos of ["QB", "RB"] as const) for (const c of CATCH_COLS) expect(tagColumns(pos)).not.toContain(c);
   });
 
-  it("costs no click on a typical target: On target pre-selected, the rest off; one pick on an incompletion", () => {
+  it("costs no click on a typical target (on target = nothing picked); one pick on an incompletion", () => {
     const d = defaultTagValues("WR");
-    expect([d.ball_placement, d.adjusted_to_ball, d.hit_at_catch, d.sideline_target, d.incompletion_reason]).toEqual(["on_target", false, false, false, null]);
+    for (const c of CATCH_COLS) expect(d[c], c).toBe(c === "incompletion_reason" ? null : false);
     expect(missingTags("WR", d, TARGET)).toEqual([]);
     expect(cols(missingTags("TE", defaultTagValues("TE"), INCOMPLETE))).toEqual(["incompletion_reason"]);
     expect(missingTags("TE", { ...defaultTagValues("TE"), incompletion_reason: "broken_up" }, INCOMPLETE)).toEqual([]);
+  });
+
+  it("ball placement: High or Low, In front or Behind, in one row", () => {
+    for (const pos of ["WR", "TE"] as const) {
+      expect(BALL.map((c) => spec(pos, c).group)).toEqual(Array(5).fill("Ball placement"));
+      expect(toggleTag(spec(pos, "ball_high"), true)).toEqual({ ball_high: true, ball_low: false });
+      expect(toggleTag(spec(pos, "ball_low"), true)).toEqual({ ball_low: true, ball_high: false });
+      expect(toggleTag(spec(pos, "ball_in_front"), true)).toEqual({ ball_in_front: true, ball_behind: false });
+      expect(toggleTag(spec(pos, "ball_behind"), true)).toEqual({ ball_behind: true, ball_in_front: false });
+      // Turning one off touches only it; Outside frame excludes nothing.
+      expect(toggleTag(spec(pos, "ball_high"), false)).toEqual({ ball_high: false });
+      expect(toggleTag(spec(pos, "ball_outside_frame"), true)).toEqual({ ball_outside_frame: true });
+    }
+  });
+
+  it("puts Outside frame on with any direction (the user's rule), and lets it stand alone", () => {
+    const of = spec("WR", "ball_outside_frame");
+    const values = defaultTagValues("WR");
+    expect(tagForced(of, TARGET, values)).toBe(false);
+    for (const dir of ["ball_high", "ball_low", "ball_in_front", "ball_behind"]) {
+      expect(tagForced(of, TARGET, { ...values, [dir]: true }), dir).toBe(true);
+    }
+    expect(tagForced(of, { route: true }, { ...values, ball_high: true })).toBe(false); // not a target
+    // High and in front: High, In front and Outside frame, even if Outside frame was never clicked.
+    expect(tagPayload("TE", { ...defaultTagValues("TE"), ball_high: true, ball_in_front: true }, TARGET)).toMatchObject({
+      ball_high: true, ball_low: false, ball_in_front: true, ball_behind: false, ball_outside_frame: true,
+    });
+    // Alone: over his head with no jump.
+    expect(tagPayload("WR", { ...values, ball_outside_frame: true }, TARGET)).toMatchObject({
+      ball_high: false, ball_low: false, ball_in_front: false, ball_behind: false, ball_outside_frame: true,
+    });
   });
 
   it("writes NULL off a target and the defaults on one", () => {
     const route = tagPayload("WR", defaultTagValues("WR"), { route: true });
     for (const c of CATCH_COLS) expect(route[c], c).toBeNull();
     const caught = tagPayload("TE", defaultTagValues("TE"), { ...TARGET, catch: true });
-    expect(caught).toMatchObject({ ball_placement: "on_target", adjusted_to_ball: false, hit_at_catch: false, sideline_target: false, incompletion_reason: null });
+    expect(caught).toMatchObject({ ball_outside_frame: false, adjusted_to_ball: false, hit_at_catch: false, sideline_target: false, incompletion_reason: null });
   });
 
-  it("badges only what's off the routine: a placement other than On target, the on tags, the reason", () => {
-    const play = { red_zone: false, ball_placement: "high", adjusted_to_ball: true, hit_at_catch: false, sideline_target: true, incompletion_reason: "uncatchable" };
-    expect(tagBadges(play, "WR").map((b) => b.text)).toEqual(["Ball High", "Adj", "SL", "Inc Uncatchable"]);
-    expect(tagBadges({ red_zone: false, ball_placement: "on_target" }, "TE")).toEqual([]);
+  it("badges only what's off the routine, and not an Outside frame a direction already implies", () => {
+    const play = { red_zone: false, ball_high: true, ball_low: false, ball_in_front: true, ball_behind: false, ball_outside_frame: true, adjusted_to_ball: true, hit_at_catch: false, sideline_target: true, incompletion_reason: "out_of_bounds" };
+    expect(tagBadges(play, "WR").map((b) => b.text)).toEqual(["High", "In front", "Adj", "SL", "Inc Out of bounds"]);
+    expect(tagBadges({ red_zone: false, ball_outside_frame: true, ball_high: false }, "TE").map((b) => b.text)).toEqual(["Off frame"]);
+    expect(tagBadges({ red_zone: false, ball_high: false, ball_outside_frame: false }, "TE")).toEqual([]);
   });
 });
-
 describe("sticky carry-over", () => {
   it("starts a game with its last charted value, skipping untagged plays", () => {
     const plays = [
@@ -257,7 +292,8 @@ describe("editing", () => {
       red_zone: true, third_fourth_down: false, short_yardage: false, garbage_time: false,
       double_coverage: false, press_release: null, broken_tackle_after_catch: true,
       // The catch difficulty tags (078) weren't on this play: their defaults, ready if it becomes a target.
-      ball_placement: "on_target", adjusted_to_ball: false, hit_at_catch: false, sideline_target: false, incompletion_reason: null,
+      ball_high: false, ball_low: false, ball_in_front: false, ball_behind: false, ball_outside_frame: false,
+      adjusted_to_ball: false, hit_at_catch: false, sideline_target: false, incompletion_reason: null,
     });
     expect(tagValuesFromPlay({ red_zone: false, blocked_defender: null }, "TE").blocked_defender).toBe("dl");
   });

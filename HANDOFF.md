@@ -3,7 +3,12 @@
 > **Audience:** a developer who has just been handed the keys and has never seen this project.
 > **Goal:** explain what the app is, how the code is structured, how data flows, and how every major subsystem actually works — in enough depth to debug and extend it on day one.
 >
-> *Last reviewed: 2026-10-23, HEAD `e2cecca` (working tree) — **Why incomplete gets Out of bounds; Sideline asked on catches only.** The user: add Out of bounds beside Uncatchable and Broken up; and "Adjusted to ball and hit at catch can both be checked even if it is an incomplete. Sideline (feet in bounds) would really only apply if the ball is caught."
+> *Last reviewed: 2026-10-23, HEAD `80d45c4` (working tree) — **Ball placement is five toggles, not one pick (WR / TE).** The user: a target can be High or Low, In front or Behind, or both (High and in front), all of those are outside his frame, and Outside frame also stands alone (over his head with no jump, at his knees in stride).
+> - **Registry** ([playEra.ts](lib/scouting/playEra.ts) `CATCH_DIFFICULTY_TAGS`): `ball_high`, `ball_low`, `ball_in_front`, `ball_behind`, `ball_outside_frame`, exception toggles in one labelled "Ball placement" row (new `PlayTagSpec.group`). `excludes` turns the other of a pair off (High ↔ Low, In front ↔ Behind; `toggleTag` in [playTags.ts](lib/scouting/playTags.ts)); `onWith` puts Outside frame on and locks it while any direction is on (`tagForced(spec, facts, values)`, written true by `tagPayload`). On target = nothing picked, so a typical target still costs no click. The play list badges the directions and shows "Off frame" only when it stands alone. 078's single-pick `ball_placement` left the registry: new plays leave it NULL. `usePlayTags.set` is functional while editing, so one click's two changes both stick.
+> - **Migration [080](supabase/migrations/080_ball_placement_toggles.sql) — applied by the user 2026-10-23 15:49 UTC, before the push (verified read-only: five columns and three checks on both tables, ledger row, the 20 picks copied exactly with On target → all five off, none left uncopied). It had to go first:** the five booleans on route_plays and te_plays; checks not High+Low, not In front+Behind, Outside frame on with any direction; the **one UPDATE, approved by the user ("Copy them over")**: the 20 WR targets charted with 078's pick (12 on target, 6 high, 1 in front, 1 behind) copied into the toggles, only where the old pick is set and the new columns are empty, `ball_placement` itself untouched and its comment marked retired. No DROP. Tested on a local Postgres 18 (copies exact, re-run safe, the three checks reject what they should).
+> - Tests: toggles, pairs, Outside frame forced and alone, badges in [playTags.test.ts](__tests__/lib/scouting/playTags.test.ts); 080 vs the registry, its checks and its one scoped UPDATE in [playEra.test.ts](__tests__/lib/scouting/playEra.test.ts). tsc / eslint / build clean, **2551 tests / 185 files**. Not looked at in a browser.*
+>
+> *Prior review: 2026-10-23, HEAD `e2cecca` (working tree; committed as `80d45c4`, deploy success) — **Why incomplete gets Out of bounds; Sideline asked on catches only.** The user: add Out of bounds beside Uncatchable and Broken up; and "Adjusted to ball and hit at catch can both be checked even if it is an incomplete. Sideline (feet in bounds) would really only apply if the ball is caught."
 > - **Out of bounds** (`out_of_bounds`, third answer, [playEra.ts](lib/scouting/playEra.ts) `CATCH_DIFFICULTY_TAGS`, `IncompletionReason` in [types.ts](lib/types.ts)). **Migration [079](supabase/migrations/079_incompletion_out_of_bounds.sql) — applied by the user 2026-10-23 14:55 UTC, before the push (verified read-only: the three-answer check on both tables, 078's checks gone, ledger row, sideline comment; saved answers intact). It had to go first:** `<table>_incompletion_reason_values` (three answers) goes on route_plays and te_plays first, then 078's two-answer `<table>_incompletion_reason_check` is dropped, the one DROP, approved by the user ("Swap the check"); it removes a rule, not data. The 3 answers saved so far (2 broken_up, 1 uncatchable) are in the new list. Tested on a local Postgres 18 (rejected before, accepted after, re-run safe, unknown answers still rejected).
 > - **Sideline** `appliesTo: "catch"` (was every target); the TE board now passes a `catch` fact. A throw that ends out of bounds is an Out of bounds incompletion, so the boundary is still recorded either way. 079 updates the column comment only: 3 WR incompletions charted since 078 keep Sideline = No (no UPDATE).
 > - Tests: 079 vs the registry and its one DROP after the new check in [playEra.test.ts](__tests__/lib/scouting/playEra.test.ts); sideline on catches in [playTags.test.ts](__tests__/lib/scouting/playTags.test.ts). tsc / eslint / build clean, **2548 tests / 185 files**. Not looked at in a browser.*
@@ -625,7 +630,7 @@
 17. [Dev workflow: build, lint, test](#17-dev-workflow-build-lint-test)
 18. [CI pipeline (GitHub Actions)](#18-ci-pipeline-github-actions)
 19. [ESLint & TypeScript rules that bite](#19-eslint--typescript-rules-that-bite)
-20. [Test suite scope (2548 tests, 185 files)](#20-test-suite-scope-2548-tests-185-files)
+20. [Test suite scope (2551 tests, 185 files)](#20-test-suite-scope-2551-tests-185-files)
 21. [Common failure modes & where to look](#21-common-failure-modes--where-to-look)
 22. [Things intentionally NOT done (and why)](#22-things-intentionally-not-done-and-why)
 23. [Known open items & time bombs for the next owner](#23-known-open-items--time-bombs-for-the-next-owner)
@@ -2089,7 +2094,7 @@ Stage 3 of the plan: the approved tags (migration 062's columns) are now charted
 | all | Red zone (sticky) · 3rd/4th down · Short yardage / goal line · Garbage time (sticky) | |
 | QB | | Play action, Better option missed (dropbacks: pass / RPO, incl. sacks, scrambles, throwaways) · Tight window, Release Early / **On time** / Late (throws) · Sack fault QB / **Line** / Coverage (sacks) · Run result Success / Fail (required), Broken tackle, Explosive (designed runs + scrambles) |
 | RB | | Hit behind the line, Missed read (carries) · Pass-pro loss Wrong man / Beaten (required; pass blocks marked Fail) · Broken tackle after catch (caught targets). Caught from behind was dropped 2026-10-07 with the Explosive Play button it showed on |
-| WR | | Release vs press Won / Lost (required; routes vs Press) · Broken tackle after catch (caught targets) · since 078 (data collection only): Ball placement **On target** / High / Low / Behind / In front / Outside frame, Adjusted to the ball, Hit at the catch (every target) · Sideline (catches) · Why incomplete Uncatchable / Broken up / Out of bounds (required; incompletions; Out of bounds from 079) |
+| WR | | Release vs press Won / Lost (required; routes vs Press) · Broken tackle after catch (caught targets) · since 078 (data collection only): Ball placement toggles High or Low · In front or Behind · Outside frame (on with any direction, or alone; on target = none; from 080, was one pick), Adjusted to the ball, Hit at the catch (every target) · Sideline (catches) · Why incomplete Uncatchable / Broken up / Out of bounds (required; incompletions; Out of bounds from 079) |
 | TE | | Blocked **DL** / LB / DB (run / pass block reps) · Release vs press Won / Lost (required; routes vs Press) · Chipped before route (routes) · the same five catch difficulty tags as WR (078, data collection only) |
 
 Bold = pre-selected. TE release vs press is required like WR's (the plan only said "1 required click" for WR; a won/lost rep has no safe default). A typical play (QB pass or sack, RB carry, WR route not vs press, TE block or route) needs **no** tag click; a sacked QB's fault is pre-selected.
@@ -2675,7 +2680,7 @@ The flat config in [eslint.config.mjs](eslint.config.mjs) is minimal: it just sp
 
 Beyond ESLint, TypeScript is strict at the `tsc` step. `tsconfig.json` enables `strict`, plus `noUnusedLocals` and `noUnusedParameters` — so an unused import, variable, or function parameter is a **build/type-check failure**, not a warning. This is the single most common reason a local edit that "looks fine" red-X's in CI.
 
-## 20. Test suite scope (2548 tests, 185 files)
+## 20. Test suite scope (2551 tests, 185 files)
 
 Run via PowerShell. The suite is [Vitest](vitest.config.mts) in a `jsdom` environment, globbing `**/__tests__/**/*.{ts,tsx}` and `**/*.{test,spec}.{ts,tsx}`. It deliberately covers **pure logic and server routes, not UI rendering**. There are no e2e tests. A handful of narrow component-render tests (via `@testing-library/react`) live under [__tests__/components/](__tests__/components/), each pinning one piece of UI behavior (e.g. the Injury Report panels, the Analysis min filters, the Big Board's Above Exp columns).
 
@@ -2798,7 +2803,7 @@ Other lower-priority items the audit flagged that I did not re-verify line-by-li
 4. `npm run dev` → confirm the app loads at `http://localhost:3000`.
 5. `npm run build` → confirm a production build succeeds (also generates `.next/types/` so the next step works).
 6. `npx tsc --noEmit` → confirm type-check passes (run it *after* the build).
-7. **In PowerShell** (not Git Bash): `npm run test` → confirm **2548 tests pass** across 185 files. If you see "0 tests," you're in the wrong shell.
+7. **In PowerShell** (not Git Bash): `npm run test` → confirm **2551 tests pass** across 185 files. If you see "0 tests," you're in the wrong shell.
 8. `npm run lint` → confirm clean (remember `exhaustive-deps` warnings won't fail it; the four error rules will).
 9. Read [AGENTS.md](AGENTS.md) — it warns this Next.js version diverges from public docs; consult `node_modules/next/dist/docs/` before writing framework code.
 10. Walk the entry path: [app/page.tsx](app/page.tsx) → [app/hooks/useAppState.ts](app/hooks/useAppState.ts) → [app/components/HubRouter.tsx](app/components/HubRouter.tsx).

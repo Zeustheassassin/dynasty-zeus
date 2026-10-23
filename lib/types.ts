@@ -1203,14 +1203,24 @@ export interface RoutePlay extends CatchDifficultyTags {
   broken_tackle_after_catch?: boolean | null;
 }
 
-/** Where the ball arrived on a WR / TE target (migration 078, data collection only). */
+/** 078's single-pick ball placement, retired by 080's toggles (still holds what
+ *  was charted with it; 080 copied each into the toggles). */
 export type BallPlacement = "on_target" | "high" | "low" | "behind" | "in_front" | "outside_frame";
 export type IncompletionReason = "uncatchable" | "broken_up" | "out_of_bounds";
 
-/** What made a WR / TE target hard to catch (migration 078): every target, whatever
- *  the result; the reason on incompletions. NULL = not a target, or charted before. */
+/** What made a WR / TE target hard to catch (migrations 078–080, data collection
+ *  only): every target, whatever the result; sideline on catches, the reason on
+ *  incompletions. NULL = not a target (or not asked), or charted before. */
 export interface CatchDifficultyTags {
+  /** Retired 2026-10-23 (migration 080); new plays leave it NULL. */
   ball_placement?: BallPlacement | null;
+  /** Ball placement (080): High or Low, In front or Behind, and Outside frame (on
+   *  whenever any of the four is, and on its own). On target = none. */
+  ball_high?: boolean | null;
+  ball_low?: boolean | null;
+  ball_in_front?: boolean | null;
+  ball_behind?: boolean | null;
+  ball_outside_frame?: boolean | null;
   adjusted_to_ball?: boolean | null;
   hit_at_catch?: boolean | null;
   sideline_target?: boolean | null;

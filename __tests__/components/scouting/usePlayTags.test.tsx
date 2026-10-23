@@ -77,7 +77,8 @@ describe("usePlayTags", () => {
       red_zone: true, third_fourth_down: true, short_yardage: false, garbage_time: false,
       blocked_defender: null, double_coverage: false, press_release: "won", chipped_before_route: false,
       // Not targeted: the catch difficulty tags (078) are NULL.
-      ball_placement: null, adjusted_to_ball: null, hit_at_catch: null, sideline_target: null, incompletion_reason: null,
+      ball_high: null, ball_low: null, ball_in_front: null, ball_behind: null, ball_outside_frame: null,
+      adjusted_to_ball: null, hit_at_catch: null, sideline_target: null, incompletion_reason: null,
     });
     // An edit's sticky change doesn't leak into the next new play.
     act(() => result.current.set("red_zone", false));
