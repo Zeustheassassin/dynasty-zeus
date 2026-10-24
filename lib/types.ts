@@ -976,6 +976,14 @@ export type CommPaymentsData = Record<
   >
 >;
 
+/** LeagueSafe link per league per season (leaguesafe_links, migration 081).
+ *  "" = the user cleared that season, which beats a link carried over from
+ *  the league's previous season. */
+export type LeagueSafeLinks = Record<
+  string, // league_id
+  Record<number, string> // { 2026: "https://www.leaguesafe.com/…", 2027: "" }
+>;
+
 // ── Projection source ────────────────────────────────────────
 
 export type ProjSourceId = "fantasypros" | "numberfire" | "sleeper";

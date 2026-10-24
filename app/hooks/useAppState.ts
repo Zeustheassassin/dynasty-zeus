@@ -409,7 +409,8 @@ const {
   commToolsUsers, setCommToolsUsers,
   loadingCommToolsRosters, setLoadingCommToolsRosters,
   leagueBylaws, saveLeagueBylaws,
-} = useManagementState(supabaseUser);
+  leagueSafeLinks, saveLeagueSafeLink,
+} = useManagementState(supabaseUser, leagues);
 
 // ── ROOKIE BOARD ───────────────────────────────────────────────
 // The market pool behind the live draft (sheet + Sleeper ADP + FC). The Draft
@@ -3714,6 +3715,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     commToolsUsers, setCommToolsUsers,
     loadingCommToolsRosters, setLoadingCommToolsRosters,
     leagueBylaws, saveLeagueBylaws,
+    leagueSafeLinks, saveLeagueSafeLink,
     draftScoutUserId,
     clearDraftScout,
     loadingDraftScout,

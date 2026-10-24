@@ -5,15 +5,18 @@ import { logger } from "../lib/logger";
 
 const log = logger("components/ManagementHub");
 import { SLEEPER_BASE_URL, getPaymentYears } from "../lib/constants";
-import type { LeagueMgmtData, CommPaymentsData, LeagueCommitmentStatus, SleeperLeague, SleeperRoster, SleeperUser } from "../lib/types";
-import { getCommitmentNameColor } from "../lib/helpers";
+import type { LeagueMgmtData, CommPaymentsData, LeagueCommitmentStatus, LeagueSafeLinks, SleeperLeague, SleeperRoster, SleeperUser } from "../lib/types";
+import type { MgmtHubTab } from "../hooks/useManagementState";
+import { getCommitmentNameColor, getMissingLeagueSafeYears } from "../lib/helpers";
 import { useAuth } from "../lib/AuthContext";
 import { Card } from "./ui/Card";
 import ErrorBanner from "./ErrorBanner";
+import LeagueSafeTable from "./ManagementHub/LeagueSafeTable";
 
 // ── Column definitions (generated dynamically from current year) ───────────
-// Window: [currentYear - 1 ... currentYear + 3] — auto-advances each year.
-// Adding DB columns for new years is handled in migration 002.
+// Window: [currentYear ... currentYear + 3] — auto-advances each Jan 1. The
+// LeagueSafe tab uses the same four years. Paid columns past paid_2037 need a
+// migration (see MAX_PROVISIONED_PAYMENT_YEAR); LeagueSafe rows don't.
 const PAYMENT_YEARS = getPaymentYears();
 
 const PAID_YEAR_COLS = PAYMENT_YEARS.map((year) => ({
@@ -29,13 +32,23 @@ const MGMT_COLS: { key: string; label: string }[] = [
   { key: "offseason_budget", label: "Offseason Budget" },
 ];
 
+const MGMT_HUB_TABS: { id: MgmtHubTab; label: string }[] = [
+  { id: "LEAGUE_MGMT", label: "League Management" },
+  { id: "LEAGUESAFE", label: "LeagueSafe" },
+  { id: "COMMISSIONER_TOOLS", label: "Commissioner Tools" },
+  { id: "BYLAWS", label: "Bylaws" },
+];
+
 // ── Props ──────────────────────────────────────────────────────────────────
 interface ManagementHubProps {
-  mgmtHubTab: "LEAGUE_MGMT" | "COMMISSIONER_TOOLS" | "BYLAWS";
-  setMgmtHubTab: (tab: "LEAGUE_MGMT" | "COMMISSIONER_TOOLS" | "BYLAWS") => void;
+  mgmtHubTab: MgmtHubTab;
+  setMgmtHubTab: (tab: MgmtHubTab) => void;
 
   leagueBylaws: Record<string, string>;
   saveLeagueBylaws: (leagueId: string, text: string) => void;
+
+  leagueSafeLinks: LeagueSafeLinks;
+  saveLeagueSafeLink: (leagueId: string, season: number, url: string) => Promise<boolean>;
 
   leagues: SleeperLeague[];
   leagueMgmtData: LeagueMgmtData;
@@ -60,6 +73,8 @@ function ManagementHub({
   setMgmtHubTab,
   leagueBylaws,
   saveLeagueBylaws,
+  leagueSafeLinks,
+  saveLeagueSafeLink,
   leagues,
   leagueMgmtData,
   setLeagueMgmtData,
@@ -252,9 +267,21 @@ function ManagementHub({
     }
   };
 
+  const handleLeagueSafeSave = async (leagueId: string, season: number, url: string) => {
+    const ok = await saveLeagueSafeLink(leagueId, season, url);
+    if (!ok) showSaveError("LeagueSafe link didn't save — check your connection and try again.");
+    return ok;
+  };
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   const commLeagues = leagues.filter((l) => !!leagueMgmtData[l.league_id]?.commissioner);
+  const commLeagueIds = new Set(commLeagues.map((l) => l.league_id));
+  const missingLeagueSafes = commLeagues
+    .map((l) => ({ league: l, years: getMissingLeagueSafeYears(leagueSafeLinks[l.league_id], PAYMENT_YEARS) }))
+    .filter((entry) => entry.years.length > 0);
+  const missingLeagueSafeCount = missingLeagueSafes.reduce((sum, entry) => sum + entry.years.length, 0);
+  const leagueSafeYearRange = `${PAYMENT_YEARS[0]}–${PAYMENT_YEARS[PAYMENT_YEARS.length - 1]}`;
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-6 space-y-5">
@@ -279,38 +306,21 @@ function ManagementHub({
       {/* Save error banner */}
       <ErrorBanner message={saveError} className="text-xs" />
 
-      {/* Sub-tab nav */}
-      <div className="flex gap-1 bg-slate-800/60 rounded-xl p-1">
-        <button
-          onClick={() => setMgmtHubTab("LEAGUE_MGMT")}
-          className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition ${
-            mgmtHubTab === "LEAGUE_MGMT"
-              ? "bg-slate-700 text-white"
-              : "text-slate-400 hover:text-white"
-          }`}
-        >
-          League Management
-        </button>
-        <button
-          onClick={() => setMgmtHubTab("COMMISSIONER_TOOLS")}
-          className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition ${
-            mgmtHubTab === "COMMISSIONER_TOOLS"
-              ? "bg-slate-700 text-white"
-              : "text-slate-400 hover:text-white"
-          }`}
-        >
-          Commissioner Tools
-        </button>
-        <button
-          onClick={() => setMgmtHubTab("BYLAWS")}
-          className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition ${
-            mgmtHubTab === "BYLAWS"
-              ? "bg-slate-700 text-white"
-              : "text-slate-400 hover:text-white"
-          }`}
-        >
-          Bylaws
-        </button>
+      {/* Sub-tab nav — wraps so all four tabs fit at phone width */}
+      <div className="flex flex-wrap gap-1 bg-slate-800/60 rounded-xl p-1">
+        {MGMT_HUB_TABS.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setMgmtHubTab(tab.id)}
+            className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition ${
+              mgmtHubTab === tab.id
+                ? "bg-slate-700 text-white"
+                : "text-slate-400 hover:text-white"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
       {/* ── LEAGUE MANAGEMENT ── */}
@@ -409,6 +419,62 @@ function ManagementHub({
               </table>
             </div>
           )}
+        </Card>
+      )}
+
+      {/* ── LEAGUESAFE ── */}
+      {mgmtHubTab === "LEAGUESAFE" && (
+        <Card className="space-y-3">
+          {leagues.length === 0 ? (
+            <p className="text-slate-400 text-sm">Connect your Sleeper account to see your leagues.</p>
+          ) : (
+            <>
+              <p className="text-xs text-slate-400">
+                Paste each league&apos;s LeagueSafe link for every season, {leagueSafeYearRange}. Links open in a new
+                tab and stay with the league when Sleeper renews it. In leagues you run, a season with no link
+                shows <span className="text-amber-300">Not created</span>.
+              </p>
+              <LeagueSafeTable
+                leagues={leagues}
+                years={PAYMENT_YEARS}
+                links={leagueSafeLinks}
+                commissionerIds={commLeagueIds}
+                canEdit={!!supabaseUser}
+                onSave={handleLeagueSafeSave}
+              />
+            </>
+          )}
+        </Card>
+      )}
+
+      {/* ── COMMISSIONER TOOLS: seasons with no LeagueSafe yet ── */}
+      {mgmtHubTab === "COMMISSIONER_TOOLS" && commLeagues.length > 0 && (
+        <Card className="space-y-3">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
+            <div className="text-sm font-semibold text-slate-200">LeagueSafe, {leagueSafeYearRange}</div>
+            <div className={`text-xs ${missingLeagueSafeCount > 0 ? "text-amber-300" : "text-emerald-400"}`}>
+              {missingLeagueSafeCount > 0
+                ? `${missingLeagueSafeCount} season${missingLeagueSafeCount === 1 ? "" : "s"} across ${missingLeagueSafes.length} league${missingLeagueSafes.length === 1 ? "" : "s"} still need${missingLeagueSafeCount === 1 ? "s" : ""} a LeagueSafe`
+                : "Every season has a LeagueSafe"}
+            </div>
+          </div>
+          {missingLeagueSafes.length > 0 && (
+            <ul className="space-y-0.5 text-xs text-slate-400">
+              {missingLeagueSafes.map(({ league, years }) => (
+                <li key={league.league_id}>
+                  <span className="text-slate-200">{league.name}</span>: {years.join(", ")}
+                </li>
+              ))}
+            </ul>
+          )}
+          <LeagueSafeTable
+            leagues={commLeagues}
+            years={PAYMENT_YEARS}
+            links={leagueSafeLinks}
+            commissionerIds={commLeagueIds}
+            canEdit={!!supabaseUser}
+            onSave={handleLeagueSafeSave}
+          />
         </Card>
       )}
 

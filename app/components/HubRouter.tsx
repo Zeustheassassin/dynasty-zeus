@@ -28,7 +28,7 @@ import type {
   GamedayMatchup, GamedayDashboardEntry, WatchlistEntry,
   TradeAttempt, TradeAttemptStatus, FcTrendEntry, PredictedPick, DraftPoolRanks,
   LeagueHubTab, ProjectionRow, SimulationTeamRow, SimRunProgress,
-  LeagueMgmtData, CommPaymentsData, TradePartnerRanking,
+  LeagueMgmtData, CommPaymentsData, LeagueSafeLinks, TradePartnerRanking,
   AssetDisposition, LeagueAssetDispositions, LeagueExpiringBlocks,
   TeamGameState, LeagueLineupStatus,
 } from "../../lib/types";
@@ -39,6 +39,7 @@ import type { DashboardAlert, LeagueTransaction, InjuryReportPlayer } from "../.
 import type { ExposureData } from "../../hooks/useUserExposure";
 import type { DraftScoutLeague } from "../../hooks/useDraftScout";
 import type { LoadLeagueOverviewOpts } from "../../hooks/useLeagueOverview";
+import type { MgmtHubTab } from "../../hooks/useManagementState";
 import type { StandingRow, AnnotatedTransaction } from "../../components/LeagueHub/leagueHubTypes";
 import type { ShareEntry } from "../../components/DataHub/dataHubTypes";
 import type { PersonalSignal } from "../../lib/helpers/personalRankings";
@@ -296,10 +297,12 @@ interface HubRouterProps {
   refreshFcTrends: () => void;
 
   // Management Hub
-  mgmtHubTab: "LEAGUE_MGMT" | "COMMISSIONER_TOOLS" | "BYLAWS";
-  setMgmtHubTab: (tab: "LEAGUE_MGMT" | "COMMISSIONER_TOOLS" | "BYLAWS") => void;
+  mgmtHubTab: MgmtHubTab;
+  setMgmtHubTab: (tab: MgmtHubTab) => void;
   leagueBylaws: Record<string, string>;
   saveLeagueBylaws: (leagueId: string, text: string) => void;
+  leagueSafeLinks: LeagueSafeLinks;
+  saveLeagueSafeLink: (leagueId: string, season: number, url: string) => Promise<boolean>;
   leagueMgmtData: LeagueMgmtData;
   setLeagueMgmtData: React.Dispatch<React.SetStateAction<LeagueMgmtData>>;
   commPaymentsData: CommPaymentsData;
@@ -390,6 +393,7 @@ export function HubRouter({
   commToolsRosters, setCommToolsRosters, commToolsUsers, setCommToolsUsers,
   loadingCommToolsRosters, setLoadingCommToolsRosters,
   leagueBylaws, saveLeagueBylaws,
+  leagueSafeLinks, saveLeagueSafeLink,
   draftScoutUserId, clearDraftScout, loadingDraftScout, draftScoutData, draftScoutPatterns,
   playerProfileId, calcFcValues, leagueAdjustedRedraftValues, playerNotes, savePlayerNote,
   myPlayerSet,
@@ -776,6 +780,8 @@ export function HubRouter({
     setMgmtHubTab={setMgmtHubTab}
     leagueBylaws={leagueBylaws}
     saveLeagueBylaws={saveLeagueBylaws}
+    leagueSafeLinks={leagueSafeLinks}
+    saveLeagueSafeLink={saveLeagueSafeLink}
     leagues={leagues}
     leagueMgmtData={leagueMgmtData}
     setLeagueMgmtData={setLeagueMgmtData}

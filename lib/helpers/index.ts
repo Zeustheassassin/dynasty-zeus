@@ -26,6 +26,7 @@ export * from "./dispositions";
 export * from "./valueHistory";
 export * from "./valueTrends";
 export * from "./leagueCommitment";
+export * from "./leagueSafe";
 export * from "./projectionVolatility";
 export * from "./matchupVolatility";
 export * from "./leagueType";
