@@ -2,7 +2,7 @@
 -- DynastyZeus — Migration 081
 -- Run in the Supabase SQL editor after migration 080, BEFORE the code that
 -- uses it deploys: until this table exists the Management Hub's LeagueSafe
--- tab loads empty and every link save fails ("Save failed" banner).
+-- tab loads empty and every link save fails ("LeagueSafe link didn't save").
 -- ============================================================
 -- The user, 2026-10-24: keep every league's LeagueSafe link for each season,
 -- and on Commissioner Tools show which seasons have no LeagueSafe created
@@ -20,8 +20,11 @@
 -- league (lib/helpers/leagueSafe.ts). url = '' means the user cleared that
 -- season; the check keeps anything but an http(s) link out.
 --
--- Purely additive: no DROP, DELETE, ALTER on existing tables, or TRUNCATE.
--- Re-runnable.
+-- Additive: no DELETE, TRUNCATE, ALTER on an existing table, or DROP of a
+-- table, column or row. The one DROP is DROP POLICY IF EXISTS on this new
+-- table's own policy, recreated identically on the next line so the file can
+-- re-run; on a first run it drops nothing. The SQL editor flags it as
+-- "destructive" anyway.
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS public.leaguesafe_links (
