@@ -1,7 +1,7 @@
 import { sleeperApi } from "../../lib/sleeperApi";
 import { withConcurrency } from "../../lib/concurrency";
 import { OVERVIEW_REFRESH_ROSTERS_CONCURRENCY } from "../../lib/constants";
-import type { SleeperLeague } from "../../lib/types";
+import type { SleeperLeague, SleeperRoster, AugmentedPick, SimRow, CachedSimRow } from "../../lib/types";
 
 /**
  * Force-refreshes every league's rosters/traded-picks/drafts/users from Sleeper (bypass:true, so
@@ -30,4 +30,43 @@ export async function refreshAllLeagueRosters(
     ]);
     onLeagueDone();
   }, OVERVIEW_REFRESH_ROSTERS_CONCURRENCY);
+}
+
+/**
+ * The Overview's 1.01% column: the chance you hold the first pick of the draft this season's sim
+ * decides (league season + 1). Each 1st you hold in that draft carries its original roster's
+ * last-place odds, so a traded-in 1st counts and a traded-away own 1st doesn't.
+ *
+ * `odds` is null when there's no sim yet, or when the saved sim predates 1.01 odds being kept
+ * (migration 082) — the Overview shows "—" for those until the next Run All Sims.
+ */
+export function getMyOneOhOneOdds(args: {
+  leagueSeason: string;
+  myRosterId: number;
+  picks: AugmentedPick[];
+  rosters: SleeperRoster[];
+  userMap: Record<string, string>;
+  committedRows: Record<number, SimRow> | undefined;
+  cachedRows: Record<number, CachedSimRow> | undefined;
+  hasSim: boolean;
+}): { odds: number | null; title: string | undefined } {
+  const { leagueSeason, myRosterId, picks, rosters, userMap, committedRows, cachedRows, hasSim } = args;
+  const draftSeason = String(Number(leagueSeason) + 1);
+  const sources = picks
+    .filter((p) => Number(p.owner_id) === myRosterId && Number(p.round) === 1 && String(p.season) === draftSeason)
+    .map((p) => {
+      const rid = Number(p.roster_id);
+      const ownerId = rosters.find((r) => Number(r.roster_id) === rid)?.owner_id;
+      return {
+        odds: committedRows?.[rid]?.oneOhOneOdds ?? cachedRows?.[rid]?.one_oh_one_odds ?? null,
+        label: rid === myRosterId ? "your own 1st" : `${(ownerId && userMap[ownerId]) || `Team ${rid}`}'s 1st`,
+      };
+    });
+  if (!hasSim) return { odds: null, title: undefined };
+  if (sources.some((s) => s.odds === null)) return { odds: null, title: "Run All Sims to get 1.01 odds" };
+  if (sources.length === 0) return { odds: 0, title: `You don't hold a ${draftSeason} 1st` };
+  return {
+    odds: Math.round(sources.reduce((sum, s) => sum + (s.odds ?? 0), 0) * 10) / 10,
+    title: `Chance you hold the ${draftSeason} 1.01: ${sources.map((s) => `${s.odds}% via ${s.label}`).join(" + ")}\nThe sim gives the 1.01 to the non-playoff team with the lowest max PF.`,
+  };
 }

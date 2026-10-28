@@ -12,7 +12,7 @@ import {
 import { usePlayers } from "../../lib/PlayersContext";
 import { useLeague } from "../../lib/LeagueContext";
 import { useValues } from "../../lib/ValuesContext";
-import { refreshAllLeagueRosters } from "./overviewTabHelpers";
+import { refreshAllLeagueRosters, getMyOneOhOneOdds } from "./overviewTabHelpers";
 import type {
   SleeperLeague,
   SleeperUser,
@@ -100,12 +100,12 @@ function OverviewTab({
     leagueAdjustedRedraftValues: redraftValues,
     pickFcValues,
   } = useValues();
-  const [sortConfig, setSortConfig] = React.useState<{ key: "league" | "direction" | "playoff"; dir: "asc" | "desc" } | null>(null);
-  const toggleSort = React.useCallback((key: "league" | "direction" | "playoff") => {
+  const [sortConfig, setSortConfig] = React.useState<{ key: "league" | "direction" | "playoff" | "oneOhOne"; dir: "asc" | "desc" } | null>(null);
+  const toggleSort = React.useCallback((key: "league" | "direction" | "playoff" | "oneOhOne") => {
     setSortConfig((prev) => {
       if (prev?.key === key) return { key, dir: prev.dir === "asc" ? "desc" : "asc" };
-      // Playoff% defaults high-to-low (most useful first); the rest default A-Z / best-to-worst.
-      return { key, dir: key === "playoff" ? "desc" : "asc" };
+      // Playoff% and 1.01% default high-to-low (most useful first); the rest default A-Z / best-to-worst.
+      return { key, dir: key === "playoff" || key === "oneOhOne" ? "desc" : "asc" };
     });
   }, []);
   const [refreshingRosters, setRefreshingRosters] = React.useState(false);
@@ -215,6 +215,17 @@ function OverviewTab({
     const totalSeconds = myPicks.filter((p) => Number(p.round) === 2).length;
     const totalThirds = myPicks.filter((p) => Number(p.round) === 3).length;
 
+    const { odds: oneOhOneOdds, title: oneOhOneTitle } = getMyOneOhOneOdds({
+      leagueSeason: league.season,
+      myRosterId: Number(myRosterId),
+      picks: ownedPicks,
+      rosters: lr,
+      userMap: entry.userMap,
+      committedRows: committedSimsByLeague[league.league_id],
+      cachedRows: leagueSimCache[league.league_id],
+      hasSim: hasCachedSim,
+    });
+
     const mgmtRow = leagueMgmtData[league.league_id];
 
     return {
@@ -227,6 +238,8 @@ function OverviewTab({
       playoffOdds,
       hasCachedSim,
       simAge,
+      oneOhOneOdds,
+      oneOhOneTitle,
       ownFirst,
       totalFirsts,
       totalSeconds,
@@ -242,6 +255,8 @@ function OverviewTab({
         cmp = a.league.name.localeCompare(b.league.name);
       } else if (sortConfig.key === "direction") {
         cmp = (bucketOrder[a.bucket] ?? 999) - (bucketOrder[b.bucket] ?? 999);
+      } else if (sortConfig.key === "oneOhOne") {
+        cmp = (a.oneOhOneOdds ?? -1) - (b.oneOhOneOdds ?? -1);
       } else {
         cmp = a.playoffOdds - b.playoffOdds;
       }
@@ -265,7 +280,7 @@ function OverviewTab({
   if (loadingLeagueOverview && !leagueOverviewLoaded) return <p className="text-sm text-blue-400">Loading league data…</p>;
   if (!leagues.length) return <p className="text-sm text-slate-500">No leagues found.</p>;
 
-  const GRID = "grid grid-cols-[minmax(180px,1.4fr)_52px_minmax(170px,1.1fr)_56px_56px_56px_56px_64px_72px_56px_48px_48px_48px] gap-2 items-center px-1";
+  const GRID = "grid grid-cols-[minmax(180px,1.4fr)_52px_minmax(170px,1.1fr)_56px_56px_56px_56px_64px_56px_72px_56px_48px_48px_48px] gap-2 items-center px-1";
 
   return (
     <div className="space-y-3">
@@ -330,7 +345,7 @@ function OverviewTab({
       </div>
 
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 overflow-x-auto">
-        <div className="min-w-[1050px]">
+        <div className="min-w-[1110px]">
           <div className={`${GRID} text-[10px] uppercase tracking-wide text-slate-500 mb-1 pb-2 border-b border-slate-800`}>
             <button
               type="button"
@@ -357,6 +372,14 @@ function OverviewTab({
               className="flex items-center justify-center gap-0.5 hover:text-slate-300 transition"
             >
               Playoff%{sortConfig?.key === "playoff" && <span>{sortConfig.dir === "asc" ? "▲" : "▼"}</span>}
+            </button>
+            <button
+              type="button"
+              onClick={() => toggleSort("oneOhOne")}
+              title="Chance you hold the 1.01 in next year's rookie draft, from every 1st you own in it"
+              className="flex items-center justify-center gap-0.5 hover:text-slate-300 transition"
+            >
+              1.01%{sortConfig?.key === "oneOhOne" && <span>{sortConfig.dir === "asc" ? "▲" : "▼"}</span>}
             </button>
             <span className="text-center">Paid Future</span>
             <span className="text-center">Own 1st</span>
@@ -479,6 +502,15 @@ function OverviewTab({
                     >
                       run sim →
                     </button>
+                  )}
+                </div>
+                <div className="text-center" title={row.oneOhOneTitle}>
+                  {row.oneOhOneOdds === null ? (
+                    <span className="text-slate-600">—</span>
+                  ) : (
+                    <span className={`font-mono font-semibold ${row.oneOhOneOdds > 0 ? "text-slate-200" : "text-slate-600"}`}>
+                      {row.oneOhOneOdds}%
+                    </span>
                   )}
                 </div>
                 <div className="flex justify-center" title={row.paidFuture ? "Paid ahead for a future season" : "Not paid ahead"}>

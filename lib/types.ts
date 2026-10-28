@@ -482,6 +482,8 @@ export interface SimRow {
   ties: number;
   pointsFor: number;
   playoffOdds: number;
+  /** Chance this roster finishes last (the 1.01). Absent on sims saved before it was kept. */
+  oneOhOneOdds?: number;
   playoffSeed?: number;
   simWins?: number;
 }
@@ -507,6 +509,8 @@ export interface CachedSimRow {
   expected_wins: number;
   avg_finish: number;
   finish_range: string | null;
+  /** Chance this roster finishes last (the 1.01); null on rows saved before migration 082. */
+  one_oh_one_odds?: number | null;
   computed_at: string | null;
 }
 

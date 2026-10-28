@@ -1920,8 +1920,10 @@ const saveSnapshotNow = async () => {
         const bestBucket = (Object.entries(bucketProbabilities).sort((a, b) => b[1] - a[1])[0]?.[0] || "mid") as "early" | "mid" | "late";
         // Derive finish range directly from slotProbabilities so it is always
         // consistent with expectedSlot and expectedValue — never stale.
-        // slot k+1 is given to the team finishing (totalTeams - k)th, so
-        // P(finish j) = slotProbabilities[totalTeams - j] (0-based).
+        // slot k+1 is read as finishing (totalTeams - k)th, so
+        // P(finish j) = slotProbabilities[totalTeams - j] (0-based). Slots follow playoff
+        // results for playoff teams and reverse max PF outside them (simulation.ts), so this
+        // is the draft-position range rather than the regular-season finish.
         let cumFinish = 0;
         let floorFinishPos = totalTeams;
         let ceilFinishPos = totalTeams;

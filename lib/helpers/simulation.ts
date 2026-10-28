@@ -406,9 +406,14 @@ export function simulateLeague({
   };
 
   const seededIndex = (seededIds: number[], rosterId: number) => seededIds.indexOf(rosterId);
-  const simulatePlayoffs = (seededIds: number[], rng: () => number) => {
-    if (seededIds.length === 0) return null;
-    if (seededIds.length === 1) return seededIds[0];
+  // Plays the bracket and returns every playoff team's final place, champion first. Teams knocked
+  // out in the same round are separated by a placement game when there are exactly two of them
+  // (Sleeper's 3rd- and 5th-place games), otherwise by seed. Placement games are played after the
+  // final, so the champion comes from the same RNG draws as before they existed.
+  const simulatePlayoffs = (seededIds: number[], rng: () => number): number[] => {
+    if (seededIds.length <= 1) return [...seededIds];
+    const bySeed = (ids: number[]) => [...ids].sort((a, b) => seededIndex(seededIds, a) - seededIndex(seededIds, b));
+    const eliminatedByRound: number[][] = [];
 
     let roundTeams = [...seededIds];
     if (byeTeams > 0 && roundTeams.length > byeTeams) {
@@ -420,20 +425,33 @@ export function simulateLeague({
         const low = openingRound.pop()!;
         winners.push(playMatch(high, low, 0, rng).winner);
       }
-      roundTeams = [...byes, ...winners].sort((a, b) => seededIndex(seededIds, a) - seededIndex(seededIds, b));
+      eliminatedByRound.push(roundTeams.slice(byeTeams).filter((id) => !winners.includes(id)));
+      roundTeams = bySeed([...byes, ...winners]);
     }
 
     while (roundTeams.length > 1) {
-      const roundSeeds = [...roundTeams].sort((a, b) => seededIndex(seededIds, a) - seededIndex(seededIds, b));
+      const roundSeeds = bySeed(roundTeams);
       const winners: number[] = [];
       while (roundSeeds.length >= 2) {
         const high = roundSeeds.shift()!;
         const low = roundSeeds.pop()!;
         winners.push(playMatch(high, low, 0, rng).winner);
       }
-      roundTeams = winners.sort((a, b) => seededIndex(seededIds, a) - seededIndex(seededIds, b));
+      eliminatedByRound.push(roundTeams.filter((id) => !winners.includes(id)));
+      roundTeams = bySeed(winners);
     }
-    return roundTeams[0];
+
+    const places = [...roundTeams];
+    for (let round = eliminatedByRound.length - 1; round >= 0; round--) {
+      const out = bySeed(eliminatedByRound[round]);
+      if (out.length === 2) {
+        const placement = playMatch(out[0], out[1], 0, rng);
+        places.push(placement.winner, placement.loser);
+      } else {
+        places.push(...out);
+      }
+    }
+    return places;
   };
 
   rows.forEach((row) => {
@@ -533,12 +551,23 @@ export function simulateLeague({
   // sim itself is projecting.
   const hasMedianMatch = Number(selectedLeague?.settings?.league_average_match || 0) === 1;
 
+  // Rookie draft order (every league the user is in, 2026-10-27): playoff teams pick last by
+  // playoff result (champion last, runner-up next, …), and every team outside the playoffs picks
+  // by reverse max PF, so the lowest max PF among them gets the 1.01. Max PF starts from Sleeper's to-date figure (never
+  // below PF); each simulated week adds the team's simulated score plus its average weekly gap
+  // between max PF and PF so far (bench points it left on the table). Draws no random numbers.
+  const maxPfGainPerWeek = new Map<number, number>(rows.map((row) => [
+    row.rosterId,
+    weeksPlayed > 0 ? Math.max(0, (row.maxPf - row.pointsFor) / weeksPlayed) : 0,
+  ]));
+
   const leagueSeed = String(leagueId).split("").reduce((acc, char, idx) => acc + char.charCodeAt(0) * (idx + 1), 0) + simSalt;
   const simStartWeek = currentWeek > 0 ? currentWeek : 1;
   for (let sim = 0; sim < simCount; sim++) {
     const rng = createSeededRandom(leagueSeed + sim * 7919 + regularSeasonWeeks * 17);
     const winMap = new Map<number, number>(rows.map((row) => [row.rosterId, row.actualWins]));
     const pointMap = new Map<number, number>(rows.map((row) => [row.rosterId, row.pointsFor]));
+    const maxPfMap = new Map<number, number>(rows.map((row) => [row.rosterId, Math.max(row.maxPf, row.pointsFor)]));
 
     scheduleByWeek
       .filter((week) => week.week >= simStartWeek)
@@ -548,6 +577,8 @@ export function simulateLeague({
           const result = playMatch(aRosterId, bRosterId, week.week, rng);
           pointMap.set(aRosterId, (pointMap.get(aRosterId) || 0) + result.aPoints);
           pointMap.set(bRosterId, (pointMap.get(bRosterId) || 0) + result.bPoints);
+          maxPfMap.set(aRosterId, (maxPfMap.get(aRosterId) || 0) + result.aPoints + (maxPfGainPerWeek.get(aRosterId) || 0));
+          maxPfMap.set(bRosterId, (maxPfMap.get(bRosterId) || 0) + result.bPoints + (maxPfGainPerWeek.get(bRosterId) || 0));
           winMap.set(result.winner, (winMap.get(result.winner) || 0) + 1);
           weekPoints.set(aRosterId, result.aPoints);
           weekPoints.set(bRosterId, result.bPoints);
@@ -585,14 +616,17 @@ export function simulateLeague({
       const stats = simulationStats[rosterId];
       stats.winsSum += winMap.get(rosterId) || 0;
       stats.finishCounts[index + 1] += 1;
-      stats.slotCounts[rosters.length - index] += 1;
     });
+    seededIds.slice(playoffTeams)
+      .sort((a, b) => (maxPfMap.get(a) || 0) - (maxPfMap.get(b) || 0))
+      .forEach((rosterId, index) => { simulationStats[rosterId].slotCounts[index + 1] += 1; });
     seededIds.slice(0, playoffTeams).forEach((rosterId, index) => {
       simulationStats[rosterId].playoffCount += 1;
       if (index < byeTeams) simulationStats[rosterId].byeCount += 1;
     });
-    const championRosterId = simulatePlayoffs(seededIds.slice(0, playoffTeams), rng);
-    if (championRosterId != null) simulationStats[championRosterId].titleCount += 1;
+    const playoffPlaces = simulatePlayoffs(seededIds.slice(0, playoffTeams), rng);
+    if (playoffPlaces.length > 0) simulationStats[playoffPlaces[0]].titleCount += 1;
+    playoffPlaces.forEach((rosterId, place) => { simulationStats[rosterId].slotCounts[rosters.length - place] += 1; });
   }
 
   rows.forEach((row) => {
@@ -615,6 +649,7 @@ export function simulateLeague({
     row.slotProbabilities = slotCounts.map((count) => count / simCount);
     row.allPlayExpectedWins = weeksPlayed > 0 ? Math.round((row.allPlayWins / Math.max(rosters.length - 1, 1)) * 10) / 10 : 0;
     row.luckScore = weeksPlayed > 0 ? Math.round((row.actualWins - row.allPlayExpectedWins) * 10) / 10 : 0;
+    // Lowest max PF among the non-playoff teams (see the draft-order note above the sim loop).
     row.oneOhOneOdds = Math.round(((slotCounts[1] || 0) / simCount) * 1000) / 10;
     row.upcomingSchedule = row.upcomingSchedule.slice(0, 4);
   });

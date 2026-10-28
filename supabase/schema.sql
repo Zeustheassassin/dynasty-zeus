@@ -268,6 +268,8 @@ create table if not exists league_simulations (
   expected_wins real not null default 0,
   avg_finish real not null default 0,
   finish_range text not null default '',
+  -- Chance this roster finishes last (the 1.01); NULL on rows saved before migration 082
+  one_oh_one_odds real,
   computed_at timestamptz not null default now(),
   unique(user_id, league_id, roster_id)
 );

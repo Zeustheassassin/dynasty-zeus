@@ -123,7 +123,7 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
     if (!supabaseUser) return;
     supabase
       .from("league_simulations")
-      .select("league_id,roster_id,playoff_odds,title_odds,expected_wins,avg_finish,finish_range,computed_at")
+      .select("league_id,roster_id,playoff_odds,title_odds,expected_wins,avg_finish,finish_range,one_oh_one_odds,computed_at")
       .eq("user_id", supabaseUser.id)
       .then(({ data }) => {
         if (!data?.length) return;
@@ -300,6 +300,7 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
         expected_wins: row.expectedWins ?? 0,
         avg_finish: row.avgFinish ?? 0,
         finish_range: row.finishRange ?? "",
+        one_oh_one_odds: row.oneOhOneOdds ?? 0,
         computed_at: now,
       }])
     );
@@ -312,6 +313,7 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
         ties: 0,
         pointsFor: row.pointsFor ?? 0,
         playoffOdds: row.playoffOdds ?? 0,
+        oneOhOneOdds: row.oneOhOneOdds ?? 0,
       }])
     );
     setCommittedSimsByLeague((prev) => {
@@ -329,6 +331,7 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
         expected_wins: row.expectedWins ?? 0,
         avg_finish: row.avgFinish ?? 0,
         finish_range: row.finishRange ?? "",
+        one_oh_one_odds: row.oneOhOneOdds ?? 0,
         computed_at: now,
       }));
       supabase

@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { waitFor } from "@testing-library/react";
-import { refreshAllLeagueRosters } from "@/components/LeagueHub/overviewTabHelpers";
+import { refreshAllLeagueRosters, getMyOneOhOneOdds } from "@/components/LeagueHub/overviewTabHelpers";
 import { OVERVIEW_REFRESH_ROSTERS_CONCURRENCY } from "@/lib/constants";
-import type { SleeperLeague } from "@/lib/types";
+import type { SleeperLeague, SleeperRoster, AugmentedPick, SimRow, CachedSimRow } from "@/lib/types";
 
 // Sept 22 code-review 50-league-scalability finding, Tier 1 #3: OverviewTab's manual "Refresh
 // Rosters" button fanned out every league at once (4 concurrent Sleeper calls each, all
@@ -91,5 +91,60 @@ describe("refreshAllLeagueRosters — concurrency cap", () => {
 
     await expect(refreshAllLeagueRosters(leagues, done)).resolves.toBeUndefined();
     expect(done).toHaveBeenCalledTimes(1);
+  });
+});
+
+// 10/27: the Overview's 1.01% column — the chance you hold the first pick of next year's rookie
+// draft, summed over every 1st you own in it (each carries its original roster's last-place odds).
+describe("getMyOneOhOneOdds", () => {
+  const rosters = [1, 2, 3].map((id) => ({ roster_id: id, owner_id: `u${id}` }) as unknown as SleeperRoster);
+  const userMap = { u1: "Me", u2: "Alice", u3: "Bob" };
+  const pick = (season: string, round: number, rosterId: number, ownerId: number): AugmentedPick =>
+    ({ season, round, roster_id: rosterId, owner_id: ownerId, previous_owner_id: rosterId }) as AugmentedPick;
+  const committed = (odds: Record<number, number | undefined>): Record<number, SimRow> =>
+    Object.fromEntries(Object.entries(odds).map(([rid, o]) => [rid, {
+      rosterId: Number(rid), wins: 0, losses: 0, ties: 0, pointsFor: 0, playoffOdds: 0, oneOhOneOdds: o,
+    }]));
+  const cached = (odds: Record<number, number | null>): Record<number, CachedSimRow> =>
+    Object.fromEntries(Object.entries(odds).map(([rid, o]) => [rid, {
+      league_id: "L", roster_id: Number(rid), playoff_odds: 0, title_odds: 0, expected_wins: 0,
+      avg_finish: 0, finish_range: null, one_oh_one_odds: o, computed_at: null,
+    }]));
+  const base = { leagueSeason: "2026", myRosterId: 1, rosters, userMap, cachedRows: undefined, hasSim: true };
+
+  it("sums the odds of every next-draft 1st you hold — own and traded-in — and ignores other seasons, rounds and traded-away picks", () => {
+    const picks = [
+      pick("2027", 1, 1, 1), // own 1st, kept
+      pick("2027", 1, 2, 1), // Alice's 1st, traded to me
+      pick("2027", 1, 3, 3), // Bob's 1st, Bob still has it
+      pick("2027", 2, 3, 1), // Bob's 2nd — not a 1st
+      pick("2028", 1, 3, 1), // Bob's 2028 1st — not the draft this season decides
+    ];
+    const r = getMyOneOhOneOdds({ ...base, picks, committedRows: committed({ 1: 2.4, 2: 30.1, 3: 67.5 }) });
+    expect(r.odds).toBe(32.5);
+    expect(r.title).toContain("2027 1.01: 2.4% via your own 1st + 30.1% via Alice's 1st");
+  });
+
+  it("gives 0 when your own 1st was traded away and you hold no other", () => {
+    const picks = [pick("2027", 1, 1, 2), pick("2027", 1, 2, 2), pick("2027", 1, 3, 3)];
+    const r = getMyOneOhOneOdds({ ...base, picks, committedRows: committed({ 1: 80, 2: 10, 3: 10 }) });
+    expect(r).toEqual({ odds: 0, title: "You don't hold a 2027 1st" });
+  });
+
+  it("falls back to the saved Supabase rows when this device has no committed 1.01 odds", () => {
+    const picks = [pick("2027", 1, 1, 1)];
+    const r = getMyOneOhOneOdds({ ...base, picks, committedRows: committed({ 1: undefined }), cachedRows: cached({ 1: 12.3 }) });
+    expect(r.odds).toBe(12.3);
+  });
+
+  it("shows no number for a sim saved before 1.01 odds were kept, rather than a made-up 0%", () => {
+    const picks = [pick("2027", 1, 1, 1)];
+    const r = getMyOneOhOneOdds({ ...base, picks, committedRows: undefined, cachedRows: cached({ 1: null }) });
+    expect(r).toEqual({ odds: null, title: "Run All Sims to get 1.01 odds" });
+  });
+
+  it("shows nothing when the league has no sim at all", () => {
+    const r = getMyOneOhOneOdds({ ...base, picks: [pick("2027", 1, 1, 1)], committedRows: undefined, hasSim: false });
+    expect(r).toEqual({ odds: null, title: undefined });
   });
 });

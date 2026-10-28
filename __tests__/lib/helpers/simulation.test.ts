@@ -186,6 +186,62 @@ describe("simulateLeague — invariants", () => {
     });
   }
 
+  // 10/27: every league the user is in sets the rookie draft by reverse max PF for teams outside
+  // the playoffs and by playoff result for teams in them. A finished regular season (week 10 here,
+  // playoffs start week 10) leaves nothing to simulate, so the standings and max PF below decide
+  // the non-playoff slots outright; only the bracket is still random.
+  it("orders non-playoff teams by reverse max PF (1.01 = lowest, not the worst record) and playoff teams by playoff result", () => {
+    const sim = simulateLeague(mkArgs({
+      nflState: { week: 10, season_type: "regular" } as never,
+      standings: [
+        { roster_id: 1, wins: 8, losses: 1, fpts: 900, max_pf: 990 },
+        { roster_id: 2, wins: 7, losses: 2, fpts: 880, max_pf: 960 },
+        { roster_id: 3, wins: 6, losses: 3, fpts: 700, max_pf: 750 }, // lowest max PF, but a playoff team
+        { roster_id: 4, wins: 5, losses: 4, fpts: 860, max_pf: 940 },
+        { roster_id: 5, wins: 3, losses: 6, fpts: 790, max_pf: 820 }, // non-playoff, lower max PF
+        { roster_id: 6, wins: 1, losses: 8, fpts: 850, max_pf: 930 }, // worst record
+      ] as never,
+    }))!;
+    const row = (id: number) => sim.rowByRosterId.get(id)!;
+    expect(row(5).oneOhOneOdds).toBe(100);
+    expect(row(6).oneOhOneOdds).toBe(0);
+    expect(row(3).oneOhOneOdds).toBe(0);
+    expect(row(6).slotProbabilities[2]).toBe(1);
+
+    // Playoff teams (1–4) fill slots 3–6 by playoff result: the champion picks last (slot 6).
+    const playoffIds = [1, 2, 3, 4];
+    for (const id of playoffIds) {
+      expect(row(id).slotProbabilities[1] + row(id).slotProbabilities[2]).toBe(0);
+      expect(Math.round(row(id).slotProbabilities[6] * 1000) / 10).toBe(row(id).titleOdds);
+    }
+    for (const slot of [3, 4, 5, 6]) {
+      expect(playoffIds.reduce((t, id) => t + row(id).slotProbabilities[slot], 0)).toBeCloseTo(1, 6);
+    }
+    // Semifinal losers play for 3rd, so the top seed can land 3rd (slot 4) or 4th (slot 3) —
+    // not just whichever of the two its seed would give.
+    expect(row(1).slotProbabilities[3]).toBeGreaterThan(0);
+    expect(row(1).slotProbabilities[4]).toBeGreaterThan(0);
+  });
+
+  it("with byes, the opening-round losers play for 5th and pick 1st/2nd; bye teams never do", () => {
+    // Finished season, all 6 teams in: seeds are fixed (roster 1 = 1 seed … roster 6 = 6 seed).
+    const sim = simulateLeague(mkArgs({
+      selectedLeague: league({ playoff_teams: 6 }) as never,
+      nflState: { week: 10, season_type: "regular" } as never,
+      standings: [8, 7, 6, 5, 3, 1].map((wins, i) => ({ roster_id: i + 1, wins, losses: 9 - wins, fpts: 800, max_pf: 900 })) as never,
+    }))!;
+    expect(sim.byeTeams).toBe(2);
+    const row = (id: number) => sim.rowByRosterId.get(id)!;
+    const firstTwo = (id: number) => row(id).slotProbabilities[1] + row(id).slotProbabilities[2];
+    expect(firstTwo(1)).toBe(0);
+    expect(firstTwo(2)).toBe(0);
+    expect([3, 4, 5, 6].reduce((t, id) => t + firstTwo(id), 0)).toBeCloseTo(2, 6);
+    // the 5th-place game: the 6 seed sometimes wins it (slot 2) and sometimes loses it (slot 1)
+    expect(row(6).slotProbabilities[1]).toBeGreaterThan(0);
+    expect(row(6).slotProbabilities[2]).toBeGreaterThan(0);
+    sim.rows.forEach((r) => expect(Math.round(r.slotProbabilities[6] * 1000) / 10).toBe(r.titleOdds));
+  });
+
   it("offseason uses 350 sims, in-season 250", () => {
     expect(simulateLeague(mkArgs())!.simCount).toBe(350);
     expect(simulateLeague(inSeasonArgs())!.simCount).toBe(250);
@@ -212,7 +268,7 @@ describe("simulateLeague — golden output", () => {
             "bye": 0,
             "ew": 4.5,
             "fin": 3.1,
-            "first": 9.7,
+            "first": 15.7,
             "id": 3,
             "lineup": 5.9,
             "luck": 0,
@@ -231,7 +287,7 @@ describe("simulateLeague — golden output", () => {
             "bye": 0,
             "ew": 4.5,
             "fin": 3.3,
-            "first": 13.7,
+            "first": 14,
             "id": 6,
             "lineup": 5.6,
             "luck": 0,
@@ -250,7 +306,7 @@ describe("simulateLeague — golden output", () => {
             "bye": 0,
             "ew": 4.5,
             "fin": 3.4,
-            "first": 16.9,
+            "first": 14.6,
             "id": 5,
             "lineup": 4.6,
             "luck": 0,
@@ -269,7 +325,7 @@ describe("simulateLeague — golden output", () => {
             "bye": 0,
             "ew": 4.5,
             "fin": 3.6,
-            "first": 16,
+            "first": 17.7,
             "id": 2,
             "lineup": 3.8,
             "luck": 0,
@@ -288,7 +344,7 @@ describe("simulateLeague — golden output", () => {
             "bye": 0,
             "ew": 4.5,
             "fin": 3.8,
-            "first": 17.4,
+            "first": 22.6,
             "id": 4,
             "lineup": 2.4,
             "luck": 0,
@@ -307,7 +363,7 @@ describe("simulateLeague — golden output", () => {
             "bye": 0,
             "ew": 4.5,
             "fin": 3.8,
-            "first": 26.3,
+            "first": 15.4,
             "id": 1,
             "lineup": 1.7,
             "luck": 0,
@@ -386,7 +442,7 @@ describe("simulateLeague — golden output", () => {
             "bye": 0,
             "ew": 4.5,
             "fin": 3.1,
-            "first": 10.6,
+            "first": 11.1,
             "id": 3,
             "lineup": 7.9,
             "luck": 0,
@@ -405,7 +461,7 @@ describe("simulateLeague — golden output", () => {
             "bye": 0,
             "ew": 4.5,
             "fin": 3.2,
-            "first": 14,
+            "first": 11.4,
             "id": 6,
             "lineup": 5.6,
             "luck": 0,
@@ -424,7 +480,7 @@ describe("simulateLeague — golden output", () => {
             "bye": 0,
             "ew": 4.5,
             "fin": 3.4,
-            "first": 13.7,
+            "first": 16.6,
             "id": 5,
             "lineup": 4.6,
             "luck": 0,
@@ -443,7 +499,7 @@ describe("simulateLeague — golden output", () => {
             "bye": 0,
             "ew": 4.5,
             "fin": 3.6,
-            "first": 13.7,
+            "first": 23.1,
             "id": 2,
             "lineup": 3.8,
             "luck": 0,
@@ -481,7 +537,7 @@ describe("simulateLeague — golden output", () => {
             "bye": 0,
             "ew": 4.5,
             "fin": 4,
-            "first": 27.7,
+            "first": 17.4,
             "id": 4,
             "lineup": 2.4,
             "luck": 0,
@@ -556,7 +612,7 @@ describe("simulateLeague — golden output", () => {
             "bye": 0,
             "ew": 5.4,
             "fin": 2.2,
-            "first": 2.8,
+            "first": 0.8,
             "id": 6,
             "lineup": 104,
             "luck": 0.2,
@@ -575,7 +631,7 @@ describe("simulateLeague — golden output", () => {
             "bye": 0,
             "ew": 5,
             "fin": 2.5,
-            "first": 2.4,
+            "first": 0,
             "id": 3,
             "lineup": 97.4,
             "luck": -0.4,
@@ -594,7 +650,7 @@ describe("simulateLeague — golden output", () => {
             "bye": 0,
             "ew": 4.1,
             "fin": 3.4,
-            "first": 10.8,
+            "first": 5.2,
             "id": 1,
             "lineup": 83.7,
             "luck": -0.2,
@@ -613,7 +669,7 @@ describe("simulateLeague — golden output", () => {
             "bye": 0,
             "ew": 4.4,
             "fin": 3.6,
-            "first": 8.4,
+            "first": 1.2,
             "id": 4,
             "lineup": 67.8,
             "luck": 0,
@@ -632,7 +688,7 @@ describe("simulateLeague — golden output", () => {
             "bye": 0,
             "ew": 3.7,
             "fin": 4.5,
-            "first": 30.4,
+            "first": 27.2,
             "id": 2,
             "lineup": 85.9,
             "luck": -0.4,
@@ -651,7 +707,7 @@ describe("simulateLeague — golden output", () => {
             "bye": 0,
             "ew": 3.4,
             "fin": 4.9,
-            "first": 45.2,
+            "first": 65.6,
             "id": 5,
             "lineup": 86.2,
             "luck": -0.2,
@@ -732,7 +788,7 @@ describe("simulateLeague — golden output", () => {
             "bye": 0,
             "ew": 9.1,
             "fin": 1.6,
-            "first": 0.4,
+            "first": 0.8,
             "id": 6,
             "lineup": 104,
             "luck": 0.2,
@@ -751,7 +807,7 @@ describe("simulateLeague — golden output", () => {
             "bye": 0,
             "ew": 7.9,
             "fin": 2,
-            "first": 0.8,
+            "first": 0.4,
             "id": 3,
             "lineup": 97.4,
             "luck": -0.4,
@@ -770,7 +826,7 @@ describe("simulateLeague — golden output", () => {
             "bye": 0,
             "ew": 4.7,
             "fin": 3.9,
-            "first": 12,
+            "first": 11.6,
             "id": 1,
             "lineup": 83.7,
             "luck": -0.2,
@@ -789,7 +845,7 @@ describe("simulateLeague — golden output", () => {
             "bye": 0,
             "ew": 4.4,
             "fin": 4.5,
-            "first": 21.2,
+            "first": 0.8,
             "id": 4,
             "lineup": 67.8,
             "luck": 0,
@@ -808,7 +864,7 @@ describe("simulateLeague — golden output", () => {
             "bye": 0,
             "ew": 4.3,
             "fin": 4.6,
-            "first": 33.6,
+            "first": 34.4,
             "id": 2,
             "lineup": 85.9,
             "luck": -0.4,
@@ -827,7 +883,7 @@ describe("simulateLeague — golden output", () => {
             "bye": 0,
             "ew": 4.6,
             "fin": 4.5,
-            "first": 32,
+            "first": 52,
             "id": 5,
             "lineup": 86.2,
             "luck": -0.2,
