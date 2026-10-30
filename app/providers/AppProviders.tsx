@@ -24,6 +24,11 @@ interface AppProvidersProps {
   rawFcValues?: Record<string, number>;
   leagueAdjustedRedraftValues: Record<string, number>;
   pickFcValues: Record<string, number>;
+  /** FantasyCalc's pick values and the user's own (Draft Hub → Pick Values). Optional for the
+   *  same reason as rawFcValues — read-only spy mode never mounts the Draft Hub. */
+  marketPickFcValues?: Record<string, number>;
+  pickValueOverrides?: Record<string, number>;
+  savePickValueOverrides?: (next: Record<string, number>) => void;
   selectedLeagueDirection: RosterDirectionProfile | null;
   selectedLeagueDirectionAdjusted: RosterDirectionProfile | null;
   selectedLeagueSimulation: LeagueSimulation | null;
@@ -41,6 +46,10 @@ interface AppProvidersProps {
   children: React.ReactNode;
 }
 
+// Stable defaults so read-only spy mode doesn't hand ValuesProvider a new object every render.
+const NO_OVERRIDES: Record<string, number> = {};
+const noop = () => {};
+
 export function AppProviders({
   supabaseUser,
   players,
@@ -51,6 +60,9 @@ export function AppProviders({
   rawFcValues = {},
   leagueAdjustedRedraftValues,
   pickFcValues,
+  marketPickFcValues = pickFcValues,
+  pickValueOverrides = NO_OVERRIDES,
+  savePickValueOverrides = noop,
   selectedLeagueDirection,
   selectedLeagueDirectionAdjusted,
   selectedLeagueSimulation,
@@ -68,6 +80,9 @@ export function AppProviders({
       rawFcValues={rawFcValues}
       leagueAdjustedRedraftValues={leagueAdjustedRedraftValues}
       pickFcValues={pickFcValues}
+      marketPickFcValues={marketPickFcValues}
+      pickValueOverrides={pickValueOverrides}
+      savePickValueOverrides={savePickValueOverrides}
       selectedLeagueDirection={selectedLeagueDirection}
       selectedLeagueDirectionAdjusted={selectedLeagueDirectionAdjusted}
       selectedLeagueSimulation={selectedLeagueSimulation}

@@ -16,7 +16,13 @@ interface ValuesContextValue {
    */
   rawFcValues: Record<string, number>;
   leagueAdjustedRedraftValues: Record<string, number>;
+  /** Pick values every consumer should use: FantasyCalc with the user's own values laid over it. */
   pickFcValues: Record<string, number>;
+  /** FantasyCalc's pick values alone — the defaults the Pick Values editor shows. */
+  marketPickFcValues: Record<string, number>;
+  /** The user's own pick values by key ("2027-1.01", "2028-1"); empty when none are set. */
+  pickValueOverrides: Record<string, number>;
+  savePickValueOverrides: (next: Record<string, number>) => void;
   selectedLeagueDirection: RosterDirectionProfile | null;
   selectedLeagueDirectionAdjusted: RosterDirectionProfile | null;
   selectedLeagueSimulation: LeagueSimulation | null;
@@ -37,6 +43,9 @@ const ValuesContext = createContext<ValuesContextValue>({
   rawFcValues: {},
   leagueAdjustedRedraftValues: {},
   pickFcValues: {},
+  marketPickFcValues: {},
+  pickValueOverrides: {},
+  savePickValueOverrides: () => {},
   selectedLeagueDirection: null,
   selectedLeagueDirectionAdjusted: null,
   selectedLeagueSimulation: null,
@@ -50,6 +59,9 @@ export function ValuesProvider({
   rawFcValues,
   leagueAdjustedRedraftValues,
   pickFcValues,
+  marketPickFcValues,
+  pickValueOverrides,
+  savePickValueOverrides,
   selectedLeagueDirection,
   selectedLeagueDirectionAdjusted,
   selectedLeagueSimulation,
@@ -65,6 +77,9 @@ export function ValuesProvider({
       rawFcValues,
       leagueAdjustedRedraftValues,
       pickFcValues,
+      marketPickFcValues,
+      pickValueOverrides,
+      savePickValueOverrides,
       selectedLeagueDirection,
       selectedLeagueDirectionAdjusted,
       selectedLeagueSimulation,
@@ -76,6 +91,9 @@ export function ValuesProvider({
       rawFcValues,
       leagueAdjustedRedraftValues,
       pickFcValues,
+      marketPickFcValues,
+      pickValueOverrides,
+      savePickValueOverrides,
       selectedLeagueDirection,
       selectedLeagueDirectionAdjusted,
       selectedLeagueSimulation,

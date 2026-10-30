@@ -368,3 +368,124 @@ export const fetchFantasyCalcValues = async (
 
   return { playerValues, pickValues, trendData };
 };
+
+// ── User pick-value overrides ────────────────────────────────────────────────
+// The user can replace FantasyCalc's pick values with their own (Draft Hub → Pick Values),
+// one set for every league. Overrides use the same keys as the pick value map: an exact slot
+// ("2027-1.01") for the next rookie class, a whole round ("2028-1") for later classes.
+// FantasyCalc stays the default for every key the user hasn't set.
+
+export const PICK_OVERRIDE_KEY_RE = /^(\d{4})-(\d+)(?:\.(\d{2}))?$/;
+
+/** Slots per round the editor and the expansion below work in — FantasyCalc's slot prices are
+ *  12-team, and the app reads slot N the same way in every league size. */
+export const PICK_VALUE_SLOTS = 12;
+
+const padSlot = (slot: number) => String(slot).padStart(2, "0");
+
+/** Which Early/Mid/Late band a slot falls in — the same thirds the pick cards use. */
+export const pickBandForSlot = (slot: number, slots = PICK_VALUE_SLOTS): "early" | "mid" | "late" => {
+  if (slot <= Math.ceil(slots / 3)) return "early";
+  if (slot <= Math.ceil((slots * 2) / 3)) return "mid";
+  return "late";
+};
+
+/** A value map's price for one exact slot: the published slot price, else the slot's
+ *  Early/Mid/Late band, else the round. 0 when the map has none of the three. */
+export const slotValueFrom = (
+  values: Record<string, number>,
+  season: string | number,
+  round: number,
+  slot: number,
+  slots = PICK_VALUE_SLOTS,
+): number =>
+  values[`${season}-${round}.${padSlot(slot)}`] ??
+  values[`${season}-${round}-${pickBandForSlot(slot, slots)}`] ??
+  values[`${season}-${round}`] ??
+  0;
+
+/** Drops anything that isn't a well-formed key with a positive, finite value. */
+export const cleanPickValueOverrides = (raw: unknown): Record<string, number> => {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, number> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const n = Number(value);
+    if (PICK_OVERRIDE_KEY_RE.test(key) && Number.isFinite(n) && n > 0) out[key] = Math.round(n);
+  }
+  return out;
+};
+
+/**
+ * The pick value map with the user's overrides applied. With no overrides it returns
+ * `market` itself, so every consumer sees FantasyCalc unchanged.
+ *
+ * A class with any slot override gets every slot of every round written out (the user's value
+ * where set, otherwise the market price for that slot), and its Early/Mid/Late band and round
+ * values are rebuilt from those slots. That keeps the three ways the app reads a pick — exact
+ * slot (pick cards), band, round average (League Overview, direction, unknown-slot picks) —
+ * agreeing with each other. A round override ("2028-1") replaces that round's value directly.
+ */
+export const applyPickValueOverrides = (
+  market: Record<string, number>,
+  overrides: Record<string, number>,
+  slots = PICK_VALUE_SLOTS,
+): Record<string, number> => {
+  const keys = Object.keys(overrides);
+  if (keys.length === 0) return market;
+  const out = { ...market };
+
+  const slotEdits = new Map<string, Set<number>>(); // season -> rounds with a slot override
+  for (const key of keys) {
+    const m = key.match(PICK_OVERRIDE_KEY_RE);
+    if (!m || !m[3]) continue;
+    if (!slotEdits.has(m[1])) slotEdits.set(m[1], new Set());
+    slotEdits.get(m[1])!.add(Number(m[2]));
+  }
+
+  for (const [season, editedRounds] of slotEdits) {
+    const marketRounds = Object.keys(market)
+      .map((key) => key.match(PICK_OVERRIDE_KEY_RE))
+      .filter((m): m is RegExpMatchArray => !!m && m[1] === season)
+      .map((m) => Number(m[2]));
+    const lastRound = Math.max(ROUNDS.length, ...marketRounds, ...editedRounds);
+    for (let round = 1; round <= lastRound; round++) {
+      const values = Array.from({ length: slots }, (_, i) =>
+        overrides[`${season}-${round}.${padSlot(i + 1)}`] ?? slotValueFrom(market, season, round, i + 1, slots));
+      if (values.every((v) => v <= 0)) continue;
+      values.forEach((v, i) => { out[`${season}-${round}.${padSlot(i + 1)}`] = v; });
+      const mean = (vals: number[]) => Math.round(vals.reduce((s, v) => s + v, 0) / vals.length);
+      for (const band of ["early", "mid", "late"] as const) {
+        const inBand = values.filter((_, i) => pickBandForSlot(i + 1, slots) === band);
+        if (inBand.length > 0) out[`${season}-${round}-${band}`] = mean(inBand);
+      }
+      out[`${season}-${round}`] = mean(values);
+    }
+  }
+
+  for (const key of keys) {
+    const m = key.match(PICK_OVERRIDE_KEY_RE);
+    if (m && !m[3]) out[key] = overrides[key];
+  }
+  return out;
+};
+
+/** Season-round keys ("2027-1") where the user set at least one exact slot — the pick cards
+ *  read these rounds as the user's own slot-by-slot curve. */
+export const userSlotCurveRounds = (overrides: Record<string, number>): Set<string> => {
+  const rounds = new Set<string>();
+  for (const key of Object.keys(overrides)) {
+    const m = key.match(PICK_OVERRIDE_KEY_RE);
+    if (m?.[3]) rounds.add(`${m[1]}-${m[2]}`);
+  }
+  return rounds;
+};
+
+/** The rookie class the Pick Values editor sets slot by slot: the earliest year FantasyCalc
+ *  publishes slot or Early/Mid/Late prices for (its nearest class), else next year. */
+export const nextPickValueClass = (market: Record<string, number>): string => {
+  const years = Object.keys(market)
+    .map((key) => key.match(/^(\d{4})-1(?:\.\d{2}|-early)$/)?.[1])
+    .filter((y): y is string => !!y)
+    .sort();
+  return years[0] ?? String(Number(CURRENT_YEAR) + 1);
+};

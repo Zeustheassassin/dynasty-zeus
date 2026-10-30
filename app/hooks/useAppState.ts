@@ -11,6 +11,7 @@ import { normalizeRookieName } from "../../components/draftHub/shared";
 import {
   CURRENT_YEAR,
   getStoredPickValue, buildLeaguePickPool, sortOwnerPicks,
+  applyPickValueOverrides, cleanPickValueOverrides, userSlotCurveRounds,
   getBucketColor, getAdjustedDirectionBucket, classifyOppDirection,
   sum,
   buildGamedayMatchups,
@@ -64,6 +65,7 @@ import { useGamedayLiveData } from "./useGamedayLiveData";
 import { useActivityState } from "./useActivityState";
 import { usePlayerAnnotations } from "./usePlayerAnnotations";
 import { usePersonalRankings } from "./usePersonalRankings";
+import { usePickValueOverrides, PICK_VALUE_OVERRIDES_KEY } from "./usePickValueOverrides";
 import { buildConsensusOrder, buildPersonalDispositions, buildPersonalSignals, buildPersonalRankGaps } from "../../lib/helpers/personalRankings";
 import { MY_DISPOSITIONS, pickDispositionKey, normalizeDisposition } from "../../lib/helpers/dispositions";
 import type { PersonalSignal } from "../../lib/helpers/personalRankings";
@@ -146,6 +148,7 @@ export function useAppState() {
     handleSetAssetDisposition,
   } = usePlayerAnnotations(supabaseUser);
   const { personalOrdering, setPersonalOrdering, savePersonalOrdering } = usePersonalRankings(supabaseUser);
+  const { pickValueOverrides, setPickValueOverrides, savePickValueOverrides } = usePickValueOverrides(supabaseUser);
 
   // Ref so loadRoster's useCallback (deps: [user, ...]) always reads the latest tags
   // without needing leaguePlayerTags in its own deps — mirrors supabaseUserRef in usePlayerAnnotations.ts
@@ -267,7 +270,15 @@ const currentNflWeek = getCurrentNflWeek(nflState);
 const draftBoardDormant = isDraftBoardDormant(nflState);
 const draftBoardLoads = nflState != null && !draftBoardDormant;
 
-const [pickFcValues, setPickFcValues] = useState<Record<string, number>>({});
+// FantasyCalc's pick values as fetched. Everything else reads pickFcValues below: these with
+// the user's own pick values (Draft Hub → Pick Values) laid over them.
+const [marketPickFcValues, setPickFcValues] = useState<Record<string, number>>({});
+const pickFcValues = useMemo(
+  () => applyPickValueOverrides(marketPickFcValues, pickValueOverrides),
+  [marketPickFcValues, pickValueOverrides]
+);
+// Rounds where the user priced picks slot by slot — pick cards read those as the user's curve.
+const userCurveRounds = useMemo(() => userSlotCurveRounds(pickValueOverrides), [pickValueOverrides]);
 const [fcTrendData, setFcTrendData] = useState<FcTrendEntry[]>([]);
 const [loadingFcTrends, setLoadingFcTrends] = useState(false);
 
@@ -575,6 +586,22 @@ useEffect(() => {
         setLocalStorageItem("personalRankings_v1", ids);
       }
     });
+  // 10b. The user's own rookie pick values (one jsonb row per user, migration 083). Server wins
+  // once it answers, so a value cleared on another device clears here too; if the load fails
+  // (e.g. 083 not applied yet) the localStorage copy stays in charge.
+  supabase
+    .from("pick_value_overrides")
+    .select("overrides")
+    .eq("user_id", supabaseUser.id)
+    .maybeSingle()
+    .then(({ data, error }) => {
+      if (cancelled) return;
+      if (error) { log.error("pick_value_overrides load failed", { err: error.message }); return; }
+      if (!data) return;
+      const overrides = cleanPickValueOverrides((data as { overrides?: unknown }).overrides);
+      setPickValueOverrides(overrides);
+      setLocalStorageItem(PICK_VALUE_OVERRIDES_KEY, overrides);
+    });
   // 11. Lineup Coach Out/In calls (lineup_availability_overrides) — per week, every league.
   // Server wins once it answers: a call cleared on another device must clear
   // here too. If the load fails (e.g. migration 061 not applied yet) the
@@ -597,7 +624,7 @@ useEffect(() => {
       setLocalStorageItem("lineupAvailability_v1", map);
     });
   return () => { cancelled = true; };
-}, [supabaseUser, loadNotes, setSupabaseMessage, setLeagueNotes, setLeaguePlayerTags, setPlayerNotes, setPersonalOrdering, setNoInterestPlayers, setDiscardedTrades, setLineupAvailabilityOverrides]);
+}, [supabaseUser, loadNotes, setSupabaseMessage, setLeagueNotes, setLeaguePlayerTags, setPlayerNotes, setPersonalOrdering, setPickValueOverrides, setNoInterestPlayers, setDiscardedTrades, setLineupAvailabilityOverrides]);
 
 // Load network consensus draft data for the current draft year. Drives
 // predictedDraftPicks once draftCount >= CONSENSUS_MIN_DRAFTS; until then
@@ -684,6 +711,7 @@ const signOut = async () => {
   setDiscardedTrades({});
   setLineupAvailabilityOverrides({});
   setPersonalOrdering([]);
+  setPickValueOverrides({});
   // Clear localStorage user-specific data so next user starts fresh (shared-
   // computer sign-out/sign-in must not leak the previous user's tags, notes,
   // rankings, or committed sim state to whoever logs in next).
@@ -702,6 +730,7 @@ const signOut = async () => {
   removeLocalStorageItem("lineupAvailability_v1");
   removeLocalStorageItem("ignoredOwnerIds");
   removeLocalStorageItem("personalRankings_v1");
+  removeLocalStorageItem(PICK_VALUE_OVERRIDES_KEY);
   removeLocalStorageItem("committedSimRows_v2");
   removeLocalStorageItemsByPrefix("draftPicks_");
   // Disconnect Sleeper so the app returns fully to the logged-out state
@@ -1908,9 +1937,13 @@ const saveSnapshotNow = async () => {
         // users expect slot 2 to be close to the range top, not halfway down. Interpolating
         // gives a fair expected value that scales evenly from worst team (slot 1 = ceiling)
         // to best team (slot N = floor).
+        // A round the user priced slot by slot (Draft Hub → Pick Values) is their own curve, so
+        // read it straight: the pick's odds of each slot times the user's value there.
         const ceilingValue = Math.max(...slotValues);
         const floorValue = Math.min(...slotValues);
-        const expectedValue = totalTeams <= 1
+        const expectedValue = userCurveRounds.has(`${pick.season}-${pick.round}`)
+          ? Math.round(slotProbabilities.reduce((s, probability, idx) => s + probability * slotValues[idx], 0))
+          : totalTeams <= 1
           ? ceilingValue
           : Math.round(ceilingValue - (ceilingValue - floorValue) * (expectedSlot - 1) / (totalTeams - 1));
         const likelySlots = slotProbabilities
@@ -1963,7 +1996,7 @@ const saveSnapshotNow = async () => {
         }];
       })
     ) as Record<string, DynamicPickValue>;
-  }, [selectedLeague?.league_id, selectedLeague?.settings?.playoff_teams, selectedLeagueSimulation, allPicks, pickFcValues, rosters]);
+  }, [selectedLeague?.league_id, selectedLeague?.settings?.playoff_teams, selectedLeagueSimulation, allPicks, pickFcValues, userCurveRounds, rosters]);
 
   // What the Lineup Coach knows beyond Sleeper's player map: ESPN's fresher
   // statuses (gamedayPlayers), this week's ESPN news reads, and the user's own
@@ -3493,6 +3526,9 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     rawFcValues: calcFcValues,
     leagueAdjustedRedraftValues,
     pickFcValues,
+    marketPickFcValues,
+    pickValueOverrides,
+    savePickValueOverrides,
     selectedLeagueDirection,
     selectedLeagueDirectionAdjusted,
     selectedLeagueSimulation,

@@ -99,8 +99,8 @@ function DraftHub({
   leagues,
   nflState, onOpenScouting,
 }: DraftHubProps) {
-  const { rosters, selectedLeague } = useLeague();
-  const { pickFcValues } = useValues();
+  const { rosters } = useLeague();
+  const { pickFcValues, marketPickFcValues, pickValueOverrides, savePickValueOverrides } = useValues();
   const [rookieSearch, setRookieSearch] = useState("");
 
   const myRosterId = rosters.find((r) => r.owner_id === user?.user_id)?.roster_id;
@@ -181,11 +181,11 @@ function DraftHub({
          ══════════════════════════════════════════════════════ */}
       {draftHubSection === "PICK_VALUES" && (
         <PickValuesTab
+          marketPickFcValues={marketPickFcValues}
           pickFcValues={pickFcValues}
+          pickValueOverrides={pickValueOverrides}
+          savePickValueOverrides={savePickValueOverrides}
           allPicks={allPicks}
-          draftSettings={draftSettings}
-          leagueSettings={selectedLeague?.settings ?? null}
-          numSlots={rosters.length || 12}
           myRosterId={myRosterId}
         />
       )}

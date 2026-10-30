@@ -203,6 +203,20 @@ create policy "personal_rankings_self" on personal_rankings for all
   using (auth.uid()::text = user_id::text)
   with check (auth.uid()::text = user_id::text);
 
+-- ── pick_value_overrides (the user's own rookie pick values) ───
+-- One row per user — jsonb map of pick value key ("2027-1.01", "2028-1") to the
+-- user's value; FantasyCalc fills every key not in it. Migration 083 (live grants there).
+create table if not exists pick_value_overrides (
+  user_id uuid references auth.users(id) on delete cascade not null primary key,
+  overrides jsonb not null default '{}'::jsonb check (jsonb_typeof(overrides) = 'object'),
+  updated_at timestamptz not null default now()
+);
+alter table pick_value_overrides enable row level security;
+drop policy if exists "pick_value_overrides_self" on pick_value_overrides;
+create policy "pick_value_overrides_self" on pick_value_overrides for all
+  using (auth.uid()::text = user_id::text)
+  with check (auth.uid()::text = user_id::text);
+
 -- ── player_value_snapshots (dynasty value baseline for alerts) ─
 -- One row per user — the entire player map snapshot lives in the jsonb column.
 create table if not exists player_value_snapshots (
