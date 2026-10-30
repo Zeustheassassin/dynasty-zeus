@@ -8,6 +8,7 @@ interface FinderDirectionPanelProps {
   directionRefreshing: boolean;
   setDirectionRefreshing: (v: boolean) => void;
   onRefreshDirection: () => void;
+  leagueUpdating: boolean;
   selectedLeagueMateProfilesView: LeagueMateView[];
   setFinderTargetOppRosterId: (id: number | null) => void;
   isChampionshipPush: boolean;
@@ -32,6 +33,7 @@ export function FinderDirectionPanel({
   directionRefreshing,
   setDirectionRefreshing,
   onRefreshDirection,
+  leagueUpdating,
   selectedLeagueMateProfilesView,
   setFinderTargetOppRosterId,
   isChampionshipPush,
@@ -69,19 +71,20 @@ export function FinderDirectionPanel({
                 <button
                   type="button"
                   onClick={() => { setDirectionRefreshing(true); onRefreshDirection(); }}
-                  disabled={directionRefreshing}
-                  title="Reload direction data"
-                  className="text-slate-600 hover:text-slate-400 transition disabled:opacity-40"
+                  disabled={directionRefreshing || leagueUpdating}
+                  title="Pull this league's rosters fresh from Sleeper, re-run its season sim, and rebuild the trades"
+                  className="flex items-center gap-1 rounded-full border border-slate-600 px-2 py-0.5 text-[10px] font-semibold text-slate-300 hover:border-slate-400 hover:text-white transition disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
                     viewBox="0 0 16 16"
                     fill="currentColor"
                     aria-hidden="true"
-                    className={`w-3 h-3 ${directionRefreshing ? "animate-spin" : ""}`}
+                    className={`w-3 h-3 ${directionRefreshing || leagueUpdating ? "animate-spin" : ""}`}
                   >
                     <path fillRule="evenodd" d="M13.836 2.477a.75.75 0 0 1 .75.75v3.182a.75.75 0 0 1-.75.75h-3.182a.75.75 0 0 1 0-1.5h1.37l-.84-.841a4.5 4.5 0 0 0-7.08 1.196.75.75 0 1 1-1.31-.734 6 6 0 0 1 9.44-1.595l.842.841V3.227a.75.75 0 0 1 .75-.75Zm-.911 7.5A.75.75 0 0 1 13.199 11a6 6 0 0 1-9.44 1.595l-.842-.841v1.017a.75.75 0 0 1-1.5 0V9.591a.75.75 0 0 1 .75-.75H5.35a.75.75 0 0 1 0 1.5H3.98l.84.841a4.5 4.5 0 0 0 7.08-1.196.75.75 0 0 1 1.025-.009Z" clipRule="evenodd" />
                   </svg>
+                  {directionRefreshing || leagueUpdating ? "Updating…" : "Update league"}
                 </button>
               </div>
               <div className="mt-1 text-sm text-slate-200">{finderDirectionProfile.summary}</div>

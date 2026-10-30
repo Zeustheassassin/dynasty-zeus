@@ -18,6 +18,38 @@ import type { TradeResult } from "./finderTypes";
 import { ordinalSuffix, buildTradeFingerprint } from "./shared";
 import { computeFinderAdjustedNet, EVEN_NET_THRESHOLD } from "./calculatorUtils";
 import { Card } from "../ui/Card";
+import { fairnessTier, type TradeFairness } from "./FinderScoring";
+
+const FAIRNESS_TIER_STYLE = [
+  { label: "On the fair mark", color: "border-emerald-800 bg-emerald-950/30 text-emerald-300" },
+  { label: "Close to fair", color: "border-sky-800 bg-sky-950/30 text-sky-300" },
+  { label: "Off the fair mark", color: "border-slate-700 bg-slate-800/30 text-slate-400" },
+];
+
+/** Where a Finder trade lands against the mark both sides would call fair (FinderScoring). A
+ *  rebuild <-> win-now trade also shows who comes out ahead on redraft value. */
+function FairnessChip({ fairness }: { fairness: TradeFairness }) {
+  const { label, color } = FAIRNESS_TIER_STYLE[fairnessTier(fairness)];
+  const pct = Math.round(fairness.netPct * 1000) / 10;
+  const dynasty = pct === 0 ? "even" : `${pct > 0 ? "you" : "them"} +${Math.abs(pct)}%`;
+  const redraft = Math.round(Math.abs(fairness.redraftNet));
+  const target = fairness.target === 0
+    ? "about even on dynasty value"
+    : fairness.target > 0
+    ? "you ~3% ahead on dynasty value, them ahead on redraft (you're rebuilding, they're win-now)"
+    : "them ~3% ahead on dynasty value, you ahead on redraft (you're win-now, they're rebuilding)";
+  return (
+    <span
+      title={`Fair mark for this trade: ${target}.`}
+      className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${color}`}
+    >
+      {label} &middot; dynasty {dynasty}
+      {fairness.crossDirection && redraft > 0 && (
+        <> &middot; redraft {fairness.redraftNet > 0 ? "you" : "them"} +{redraft.toLocaleString()}</>
+      )}
+    </span>
+  );
+}
 
 interface TradeCardProps {
   trade: TradeResult;
@@ -308,6 +340,7 @@ export default function TradeCard({
           <span className="rounded-full border border-violet-800 bg-violet-950/30 px-2 py-0.5 text-[10px] font-semibold text-violet-300">
             {tradeIntent.label}
           </span>
+          {trade.fairness && <FairnessChip fairness={trade.fairness} />}
           {trade.isBuyLow && (
             <span className="rounded-full border border-emerald-700 bg-emerald-950/40 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
               Buy Low Target

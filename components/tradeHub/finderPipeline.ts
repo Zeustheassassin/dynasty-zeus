@@ -9,7 +9,10 @@ import {
   isFutureInsulationAsset, isOldProducerBuy,
   getAgeUrgency, getFutureValue, computeTeamWindow, getPickSlotBonus,
   isBalanced, LOW_VALUE_FLOOR, MID_VALUE_CEILING,
+  computeTradeFairness, fairnessScore, isFairEnough,
 } from "./FinderScoring";
+import type { TradeSide, TradeFairness } from "./FinderScoring";
+import { computeFinderAdjustedNet } from "./calculatorUtils";
 import { finderPickKey } from "./finderUtils";
 import { buildTradeFingerprint } from "./shared";
 import type { TradeResult } from "./finderTypes";
@@ -84,6 +87,9 @@ export interface FinderPipelineCtx {
   playerDispositions: Record<string, { sell: string; buy: string }>;
   // Functions
   finderPickValue: (p: AugmentedPick) => number;
+  /** Value of the bodies a roster must drop to take on extra players — the same cost the
+   *  trade cards fold into their net (computeFinderAdjustedNet). */
+  calcDropCost: (rosterId: number, netPlayerGain: number) => number;
   buildPostTradePlayers: (
     baseRoster: SleeperRoster | undefined,
     give: PlayerWithValue[],
@@ -138,7 +144,7 @@ export function runFinderPipeline(
     discardedFingerprints, simDiscardedFingerprints, opponentAversionTags, globalAversionTags,
     historicalSnapshot, playerStats, crossLeagueExposure, buyLowPlayerIds,
     nflState, selectedLeagueSimulation, selectedLeagueDraftHasOccurred,
-    weeklyProjMap, playerDispositions, finderPickValue, buildPostTradePlayers,
+    weeklyProjMap, playerDispositions, finderPickValue, calcDropCost, buildPostTradePlayers,
     getNFLDepthIdx, rosterPlayers, isBlockedSellDisposition,
     isBlockedBuyDisposition, isWantToTrade, isOffload, isPricey, isOpenToSell,
     failsDirectionGuardrail, getDirectionTradeScore, getTradeLineupSafety,
@@ -356,6 +362,11 @@ export function runFinderPipeline(
     || CONTENDER_BUCKETS.includes(finderDirection)
     || (myFinderPlayoffOdds >= 50 && !SELLER_BUCKETS.includes(finderDirection))
   );
+  // The user's side for the fair-target rule (FinderScoring.computeTradeFairness): win-now as
+  // above, rebuilding when tanking or in a seller bucket, otherwise in between.
+  const userSide: TradeSide = userIsWinNow ? "winNow"
+    : iAmTankingFinder || SELLER_BUCKETS.includes(finderDirection) ? "rebuild"
+    : "neutral";
   const userWindowOk = (r: TradeResult): boolean =>
     userIsWinNow
     || !!deferredTargetPlayerId
@@ -863,30 +874,55 @@ export function runFinderPipeline(
         return sps;
       })();
 
-      // Asymmetric (acceptance-first ranking): steeply penalize the USER overpaying
-      // (net < 0), but only mildly and boundedly reward the user gaining value (net > 0) so a
-      // single lopsided-but-acceptable deal can't dominate the board. Pairs with the signed
-      // user-gain sort in FinderResults. At net = 0 this is 0, matching the prior symmetric form.
-      const balancePenalty = r.net < 0
-        ? -Math.pow(Math.abs(r.net) / 150, 1.5) * 3   // user pays up — steep penalty
-        : Math.min(r.net / 150, 4);                    // user gains — small bounded reward
+      // Fair target (user policy 10/30, see FinderScoring): rank by how close the trade lands to
+      // the mark both sides would call fair — about even between same-direction teams; the
+      // rebuilder ~3% ahead on dynasty value (and the win-now side ahead on redraft value) when a
+      // rebuilding team meets a win-now team. Judged on the same adjusted net the card shows.
+      // Replaces the old asymmetric term that rewarded the user winning the value.
+      const fairness: TradeFairness = (() => {
+        const adj = computeFinderAdjustedNet(r, calcDropCost, Number(myRoster?.roster_id ?? 0));
+        const oppProfileFair = oppProfileByRosterId.get(Number(r.oppRosterId));
+        const oppOddsFair = oppProfileFair?.playoffOdds
+          ?? selectedLeagueSimulation?.rowByRosterId?.get(Number(r.oppRosterId))?.playoffOdds
+          ?? 50;
+        const oppCls = classifyOppDirection(oppProfileFair?.directionProfile?.bucket ?? "", oppOddsFair);
+        const oppSide: TradeSide = oppCls.isElite || oppCls.isContender ? "winNow"
+          : oppCls.isRebuild || oppCls.isHopeless ? "rebuild"
+          : "neutral";
+        const redraftOf = (list: PlayerWithValue[]) =>
+          list.reduce((s: number, p) => s + (redraftValues?.[p.player_id] ?? 0), 0);
+        return computeTradeFairness({
+          net: adj.net, giveTotal: adj.giveTotalAdj, receiveTotal: adj.receiveTotalAdj,
+          redraftGive: redraftOf(valueBearingGive(r)), redraftReceive: redraftOf(r.receive),
+          user: userSide, opp: oppSide,
+        });
+      })();
+      // Lottery tickets are lopsided by design and exempt from the fair target (cap below), so
+      // they keep the balance term they always had: a steep tax on the user overpaying, a small
+      // bounded reward for gaining.
+      const fairnessTerm = r.format === "Lottery"
+        ? (r.net < 0 ? -Math.pow(Math.abs(r.net) / 150, 1.5) * 3 : Math.min(r.net / 150, 4))
+        : fairnessScore(fairness);
 
       // Contender tier-up overpay credit: user policy — on a win-now team that's deep at a
       // position (a viable, ≥1500-value body still on the roster after the two given players
       // leave), a 2-for-1 that consolidates surplus into one difference-maker is worth
-      // deliberately overpaying for. This cancels balancePenalty's steep overpay tax for
-      // exactly that shape (2-for-1, user net-negative, give-side positions still have depth
-      // left behind) rather than letting a premium the user explicitly wants get scored like a
-      // bad-value trade. Every other trade shape is unaffected.
+      // deliberately overpaying for. This cancels the fair-target penalty for exactly that
+      // shape (2-for-1, user net-negative, give-side positions still have depth left behind)
+      // rather than letting a premium the user explicitly wants get scored like a bad-value
+      // trade, and exempts it from the fair-target cap below. Every other shape is unaffected.
+      // "Net-negative" is the net the card shows (fairness.netPct), not the raw generation net:
+      // the star discount can flip a raw overpay into a card that shows the user well ahead, and
+      // that isn't an overpay to excuse (seen live 10/30: a raw-overpay 2-for-1 at "you +10.1%").
       const tierUpOverpayCredit = (() => {
-        if (!userIsWinNow || r.net >= 0) return 0;
+        if (!userIsWinNow || fairness.netPct >= 0) return 0;
         if (r.give.length !== 2 || r.receive.length !== 1) return 0;
         const posSet = new Set(r.give.map((p) => p.position));
         for (const pos of posSet) {
           const givenAtPos = r.give.filter((p) => p.position === pos).length;
           if ((myViableDepth[pos] ?? 0) - givenAtPos < 1) return 0;
         }
-        return -balancePenalty;
+        return Math.max(0, -fairnessTerm);
       })();
 
       const futurePickBonus = (() => {
@@ -1574,7 +1610,7 @@ export function runFinderPipeline(
       const userFitBucket = getDirectionTradeScore(r) + lineupSafety.score + teamWindowBonus
         + starterQualityBonus + depthAwareTierBonus + rosterBalanceScore + championshipBonus
         + futurePickBonus + standingsPressureScore + sameTeamConflictPenalty;
-      const valueEdgeBucket = r.score + balancePenalty + tierUpOverpayCredit + starPremiumScore + pickSlotScore + handcuffBonus;
+      const valueEdgeBucket = r.score + fairnessTerm + tierUpOverpayCredit + starPremiumScore + pickSlotScore + handcuffBonus;
       const structureBucket = formatBonus + rosterConsolidationBonus + timelineMismatchPenalty;
       const signalsBucket = dispositionScore + marketIntelScore + archetypeWinRateBonus
         + seasonTimingBonus + usageSignalScore + exposureBonus + sellHighConfirmScore + dispositionBonus
@@ -1600,6 +1636,8 @@ export function runFinderPipeline(
         // strategyScore so the >0 reject gate below can never be flipped by the de-rank.
         rankScore: strategyScore + midValueSoftPenalty,
         oppDirectionScore,
+        fairness,
+        isTierUpOverpay: tierUpOverpayCredit > 0,
         sort: Math.abs(Math.sin(deferredFinderSeed * ((resultIndex.get(r) ?? 0) + 1)) * 10000) % 1,
       };
     })
@@ -1615,6 +1653,12 @@ export function runFinderPipeline(
       const isStandardSwap = !r.draftCapital && r.format !== "Lottery";
       return !isStandardSwap || oppDirectionScore >= ACCEPT_FLOOR;
     })
+    // Fair-target cap (user policy 10/30): nothing more than FAIR_CAP apart on dynasty value,
+    // and a rebuild <-> win-now trade can't leave the win-now side behind on redraft value.
+    // Lottery tickets are intentionally lopsided and exempt; so is the contender tier-up
+    // overpay the user asked for (credit above).
+    .filter(({ r, fairness, isTierUpOverpay }) =>
+      r.format === "Lottery" || isTierUpOverpay || isFairEnough(fairness))
     .sort((a, b) => {
       // Rank by the full strategy/value model first; the draft-pick-year preference
       // (bucketPriority) is only a tiebreak, so an excellent player trade can't be buried
@@ -1623,7 +1667,7 @@ export function runFinderPipeline(
       if (a.bucketPriority !== b.bucketPriority) return a.bucketPriority - b.bucketPriority;
       return a.sort - b.sort;
     })
-    .map(({ r }) => r);
+    .map(({ r, fairness }) => ({ ...r, fairness }));
 
   // ── Sim-vetting candidate pool ─────────────────────────────────────────
   // Expose the top standard-swap, win-now candidates so the caller can real-simulate

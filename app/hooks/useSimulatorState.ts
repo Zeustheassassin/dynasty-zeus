@@ -65,6 +65,8 @@ export interface SimulatorResult {
   setDraftSlotSearchQuery: React.Dispatch<React.SetStateAction<string>>;
   saveSimulationToSupabase: (leagueId: string, simRows: SimulationTeamRow[]) => void;
   handleRunAllSims: () => void;
+  /** Re-run and save one league's sim (the Trade Finder's Update league button). */
+  runSimForLeague: (leagueId: string) => void;
   previewTradeSimulation: (
     myRosterId: number,
     opponentRosterId: number,
@@ -451,6 +453,19 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
     if (first) loadRoster(first);
   }, [leagues, loadRoster]);
 
+  // One league through the same queue (waits until every sim input belongs to that league, then
+  // saves its sim): the Trade Finder's Update league button. Keeps the current salt so the other
+  // leagues' saved odds stay comparable, and clears the Run All Sims progress line so a finished
+  // run's "36 / 36" can't tick past its total.
+  const runSimForLeague = useCallback((leagueId: string) => {
+    const league = leagues.find((l) => l.league_id === leagueId);
+    if (!league || simQueue.length > 0) return;
+    setSimProgress(null);
+    setReadyLeagueId(null);
+    setSimQueue([leagueId]);
+    loadRoster(league);
+  }, [leagues, loadRoster, simQueue.length]);
+
   return {
     selectedLeagueSimulation,
     committedSimsByLeague,
@@ -469,6 +484,7 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
     setDraftSlotSearchQuery,
     saveSimulationToSupabase,
     handleRunAllSims,
+    runSimForLeague,
     previewTradeSimulation,
   };
 }

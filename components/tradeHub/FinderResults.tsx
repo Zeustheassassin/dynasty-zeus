@@ -8,6 +8,7 @@ import type { PlayerWithValue } from "./shared";
 import { buildTradeFingerprint } from "./shared";
 import { finderPickKey } from "./finderUtils";
 import { computeFinderAdjustedNet } from "./calculatorUtils";
+import { fairnessTier } from "./FinderScoring";
 import TradeCard from "./TradeCard";
 
 interface FinderResultsProps {
@@ -116,9 +117,9 @@ export default function FinderResults({
       );
       return !recentFingerprints.has(fp);
     })
-    .map((trade) => {
-      // Same canonical adjusted-net TradeCard displays (shared helper), so the sort key
-      // can't drift from each card's badge.
+    .map((trade, order) => {
+      // Same canonical adjusted-net TradeCard displays (shared helper), so the net can't
+      // drift from each card's badge. `order` is the pipeline's own ranking.
       const { net } = computeFinderAdjustedNet(trade, calcDropCost, myRoster?.roster_id ?? 0);
       const fp = buildTradeFingerprint(
         leagueId,
@@ -127,12 +128,12 @@ export default function FinderResults({
         [...trade.receive.map((p) => p.player_id), ...trade.receivePicks.map((p) => finderPickKey(p))],
       );
       const playoffOddsGain = playoffOddsGainByFingerprint.get(fp);
-      return { trade, net, playoffOddsGain };
+      return { trade, net, playoffOddsGain, order };
     })
-    // Acceptance-first ranking: every trade here already cleared the opponent-acceptance
-    // gate in the pipeline, so order the survivors by the USER's gain — most favorable
-    // first — instead of "closest to even". Keep bonus buy-low slots grouped after the
-    // headline board (they're often ~even net) so they stay visible instead of scattered.
+    // Fair-target ranking (user policy 10/30): every trade here already cleared the
+    // opponent-acceptance gate and the fair-target cap in the pipeline. Show the ones on the
+    // fair mark first, then close ones, then the rest, each tier in the pipeline's own strategy
+    // order. Keep bonus buy-low slots grouped after the headline board so they stay visible.
     .sort((a, b) => {
       if (sortMode === "playoffImpact") {
         // Trades outside the win-now sim-vetted pool have no real gain figure — push them
@@ -147,7 +148,9 @@ export default function FinderResults({
       const aBuy = a.trade.isBuyLow ? 1 : 0;
       const bBuy = b.trade.isBuyLow ? 1 : 0;
       if (aBuy !== bBuy) return aBuy - bBuy;
-      return b.net - a.net;
+      const tierDiff = fairnessTier(a.trade.fairness) - fairnessTier(b.trade.fairness);
+      if (tierDiff !== 0) return tierDiff;
+      return a.order - b.order;
     });
 
   return (

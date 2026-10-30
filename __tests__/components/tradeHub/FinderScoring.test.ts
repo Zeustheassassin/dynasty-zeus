@@ -18,6 +18,13 @@ import {
   isBalancedTierUpWithStarDiscount,
   computeTeamWindow,
   getPickSlotBonus,
+  computeTradeFairness,
+  fairDynastyTarget,
+  fairnessScore,
+  fairnessTier,
+  isFairEnough,
+  FAIR_CAP,
+  FAIR_TILT,
 } from "@/components/tradeHub/FinderScoring";
 import { CURRENT_YEAR } from "@/lib/helpers/season";
 
@@ -487,5 +494,65 @@ describe("getPickSlotBonus", () => {
   it("round 3+ always returns 0", () => {
     expect(getPickSlotBonus(pick("3.01", 3))).toBe(0);
     expect(getPickSlotBonus(pick("4.01", 4))).toBe(0);
+  });
+});
+
+// 10/30 user policy: lean toward trades both sides would call fair — about even between teams
+// heading the same way; rebuilder slightly ahead on dynasty value and the win-now side ahead on
+// redraft value when the two meet. Dynasty value never more than 8% apart.
+describe("fair target", () => {
+  const fair = (over: Partial<Parameters<typeof computeTradeFairness>[0]>) => computeTradeFairness({
+    net: 0, giveTotal: 6000, receiveTotal: 6000, redraftGive: 3000, redraftReceive: 3000,
+    user: "neutral", opp: "neutral", ...over,
+  });
+
+  it("targets even between same-direction teams and tilts 3% to the rebuilder otherwise", () => {
+    expect(fairDynastyTarget("winNow", "winNow")).toBe(0);
+    expect(fairDynastyTarget("rebuild", "rebuild")).toBe(0);
+    expect(fairDynastyTarget("neutral", "winNow")).toBe(0);
+    expect(fairDynastyTarget("rebuild", "winNow")).toBe(FAIR_TILT);
+    expect(fairDynastyTarget("winNow", "rebuild")).toBe(-FAIR_TILT);
+  });
+
+  it("measures the gap from the fair mark as a share of the bigger side", () => {
+    // user rebuilding, +180 on a 6,000 trade = exactly the 3% mark
+    const onMark = fair({ net: 180, receiveTotal: 6180, user: "rebuild", opp: "winNow", redraftGive: 3000, redraftReceive: 1500 });
+    expect(onMark.netPct).toBeCloseTo(180 / 6180, 6);
+    expect(onMark.gap).toBeLessThan(0.002);
+    expect(fairnessTier(onMark)).toBe(0);
+    // dead even between two contenders
+    expect(fair({ user: "winNow", opp: "winNow" }).gap).toBe(0);
+  });
+
+  it("allows up to 8% off on dynasty value and no more", () => {
+    expect(isFairEnough(fair({ net: 480, receiveTotal: 6000, giveTotal: 5520 }))).toBe(true);
+    expect(isFairEnough(fair({ net: -480, giveTotal: 6000, receiveTotal: 5520 }))).toBe(true);
+    expect(isFairEnough(fair({ net: 540, receiveTotal: 6000, giveTotal: 5460 }))).toBe(false);
+    expect(FAIR_CAP).toBe(0.08);
+  });
+
+  it("drops a rebuild <-> win-now trade that leaves the win-now side behind on redraft value", () => {
+    // user contending, opp rebuilding: user must gain this-season value
+    expect(fair({ user: "winNow", opp: "rebuild", redraftGive: 3000, redraftReceive: 3800 }).redraftOk).toBe(true);
+    expect(fair({ user: "winNow", opp: "rebuild", redraftGive: 3800, redraftReceive: 3000 }).redraftOk).toBe(false);
+    // user rebuilding, opp contending: the opp must gain it
+    expect(fair({ user: "rebuild", opp: "winNow", redraftGive: 3000, redraftReceive: 1000 }).redraftOk).toBe(true);
+    expect(fair({ user: "rebuild", opp: "winNow", redraftGive: 1000, redraftReceive: 3000 }).redraftOk).toBe(false);
+    // small shortfalls are noise (under 150 or 5% of the redraft value moving)
+    expect(fair({ user: "winNow", opp: "rebuild", redraftGive: 3100, redraftReceive: 3000 }).redraftOk).toBe(true);
+    // same-direction trades have no redraft rule
+    expect(fair({ user: "winNow", opp: "winNow", redraftGive: 3800, redraftReceive: 3000 }).redraftOk).toBe(true);
+    expect(isFairEnough(fair({ user: "winNow", opp: "rebuild", redraftGive: 3800, redraftReceive: 3000 }))).toBe(false);
+  });
+
+  it("ranks the fair mark highest and falls off steeply past it", () => {
+    const at = (gap: number) => fairnessScore({ netPct: gap, target: 0, gap, redraftNet: 0, crossDirection: false, redraftOk: true });
+    expect(at(0)).toBe(4);
+    expect(at(0.03)).toBeGreaterThan(-1);
+    expect(at(0.03)).toBeLessThan(0);
+    expect(at(0.08)).toBeLessThan(-15);
+    expect(at(0.01)).toBeGreaterThan(at(0.02));
+    expect([0.01, 0.03, 0.06].map((gap) => fairnessTier({ netPct: gap, target: 0, gap, redraftNet: 0, crossDirection: false, redraftOk: true }))).toEqual([0, 1, 2]);
+    expect(fairnessTier(undefined)).toBe(2);
   });
 });

@@ -1,4 +1,5 @@
 import type { PlayerWithValue, PickWithValue } from "./shared";
+import type { TradeFairness } from "./FinderScoring";
 
 export type MarketSignal = "SELL_HIGH" | "BUY_LOW" | "LIQUID" | "NONE";
 
@@ -18,6 +19,9 @@ export type TradeResult = {
   // that exact player on ≥2 of their other dynasty leagues. It is value-neutral — excluded
   // from all value math (isBalanced, net, badge) — and only nudges acceptance scoring.
   sweetenerPlayerId?: string;
+  // Where the trade lands against the fair mark (FinderScoring.computeTradeFairness) — set by
+  // runFinderPipeline on every trade it returns; drives the results order and the card's line.
+  fairness?: TradeFairness;
 };
 
 // The give side with any value-neutral sweetener stripped out. EVERY scoring term that reads

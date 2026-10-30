@@ -290,6 +290,8 @@ interface HubRouterProps {
   deleteAttempt: (id: string) => Promise<void>;
   loadTradeAttempts: (leagueId: string) => Promise<void>;
   onRefreshDirection: () => void;
+  /** Trade Finder "Update league" in progress (fresh rosters + this league's sim). */
+  leagueUpdating: boolean;
   buyLowPlayerIds: string[];
   playerStats: Record<string, { avgTargets: number; avgCarries: number; snapPct: number; gamesPlayed: number; recentTargets?: number; recentCarries?: number; recentSnapPct?: number; targetTrend?: number; carryTrend?: number; snapTrend?: number }> | null;
   fcTrendData: FcTrendEntry[];
@@ -386,7 +388,7 @@ export function HubRouter({
   tradeHubData, loadingTradeHub, tradeHubError, tradeHubUserId, setTradeHubUserId, setTradeHubData,
   tradeAttempts, loadingTradeAttempts, tradeAttemptsError, tradeAttemptsLeagueId,
   markTradeAttempted, updateAttemptStatus, deleteAttempt, loadTradeAttempts,
-  onRefreshDirection, buyLowPlayerIds,
+  onRefreshDirection, leagueUpdating, buyLowPlayerIds,
   playerStats, fcTrendData, loadingFcTrends, refreshFcTrends,
   mgmtHubTab, setMgmtHubTab, leagueMgmtData, setLeagueMgmtData,
   commPaymentsData, setCommPaymentsData, commToolsLeagueId, setCommToolsLeagueId,
@@ -748,6 +750,7 @@ export function HubRouter({
     onDeleteAttempt={deleteAttempt}
     onLoadTradeAttempts={loadTradeAttempts}
     onRefreshDirection={onRefreshDirection}
+    leagueUpdating={leagueUpdating}
     buyLowPlayerIds={buyLowPlayerIds}
     ignoredOwnerIds={ignoredOwnerIds}
     toggleIgnoredOwner={toggleIgnoredOwner}

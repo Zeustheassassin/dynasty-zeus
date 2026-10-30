@@ -135,6 +135,7 @@ const baseCtx = (over: Partial<FinderPipelineCtx> = {}): FinderPipelineCtx => {
     playerDispositions: {},
     // Functions — neutral stubs
     finderPickValue: (p) => (p as unknown as PickWithValue).value ?? 0,
+    calcDropCost: () => 0,
     buildPostTradePlayers: () => [],
     getNFLDepthIdx: () => null,
     rosterPlayers: () => [],
@@ -244,10 +245,11 @@ describe("runFinderPipeline — basic acceptance & filtering", () => {
   });
 
   it("keeps a multi-piece trade already balanced without its sub-700 piece", () => {
-    // [3000] vs [3000] is balanced without the 500 bonus, so the 500 is a genuine extra
-    // (not fake balance) and survives the anti-padding gate.
+    // [3300] vs [3000] is balanced without the 500 bonus, so the 500 is a genuine extra
+    // (not fake balance) and survives the anti-padding gate. (3300, not 3000: with the 500 the
+    // trade must stay inside the 8% fair-target cap — 3500 vs 3300 is 5.7%.)
     const t = mkTrade({
-      give: [mkPlayer("g1", "WR", 3000, { team: "SF" })],
+      give: [mkPlayer("g1", "WR", 3300, { team: "SF" })],
       receive: [mkPlayer("r1", "RB", 3000, { team: "KC" }), mkPlayer("r2", "WR", 500, { team: "BUF" })],
       format: "1 for 2",
     });
@@ -400,6 +402,24 @@ describe("runFinderPipeline — contender tier-up overpay credit", () => {
     );
     expect(allTrades).toHaveLength(0);
   });
+
+  it("judges the overpay on the card's net: a raw overpay the star discount flips to a user win past 8% gets no exemption", () => {
+    // Seen live 10/30: 2×1600 for 3100 is a raw overpay (−100), but the card applies the star
+    // discount (−372 on the give side) and shows the user +272 (8.8%) — not an overpay to excuse.
+    const flipped = mkTrade({
+      give: [mkPlayer("h1", "RB", 1600), mkPlayer("h2", "RB", 1600)],
+      receive: [mkPlayer("s1", "RB", 3100)],
+      score: 100, // high enough that only the fair-target cap can drop it
+      net: -100,
+      format: "2 for 1",
+    });
+    const depth = [mkPlayer("h1", "RB", 1600), mkPlayer("h2", "RB", 1600), mkPlayer("backup", "RB", 1600)];
+    const { allTrades } = runFinderPipeline(
+      [flipped],
+      baseCtx({ finderDirection: "Elite", myFinderPlayoffOdds: 80, myPlayers: depth }),
+    );
+    expect(allTrades).toHaveLength(0);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -535,17 +555,18 @@ describe("runFinderPipeline — dedup & slotting", () => {
   });
 
   it("drops a near-duplicate trade (same opp, same receive players, large give overlap)", () => {
-    // Both 2-for-1 to opp 2 receiving STAR; give sides share g1 (overlap 0.5).
+    // Both 2-for-1 to opp 2 receiving STAR; give sides share g1 (overlap 0.5). STAR 3700 keeps
+    // both inside the 8% fair-target cap once the star discount applies (+125 on 3700).
     const a = mkTrade({
       give: [mkPlayer("g1", "WR", 2000), mkPlayer("g2", "RB", 2000)],
-      receive: [mkPlayer("STAR", "RB", 3000)],
+      receive: [mkPlayer("STAR", "RB", 3700)],
       oppRosterId: 2,
       score: 150,
       format: "2-for-1",
     });
     const b = mkTrade({
       give: [mkPlayer("g1", "WR", 2000), mkPlayer("g3", "TE", 2000)],
-      receive: [mkPlayer("STAR", "RB", 3000)],
+      receive: [mkPlayer("STAR", "RB", 3700)],
       oppRosterId: 2,
       score: 140,
       format: "2-for-1",
@@ -722,8 +743,9 @@ describe("runFinderPipeline — structural guardrails", () => {
       QB1: qb as unknown as SleeperPlayer,
       WR1: wr as unknown as SleeperPlayer,
     };
+    // A 6400 RB going the other way keeps it a fair trade (8% fair-target cap): +124 on 6524.
     const t = mkTrade({
-      give: [],
+      give: [mkPlayer("G1", "RB", 6400, { team: "NYJ" })],
       receive: [qb, wr],
       format: "2-for-1",
     });
@@ -1276,21 +1298,24 @@ describe("runFinderPipeline — valueConcentrationPenalty", () => {
   });
 
   it("penalizes 3 give-side pieces worth ~1000 each vs. a single ~3000 receive-side piece, only when flagged", () => {
-    // manyForOne: give has 3+ pieces, receive has exactly 1, and the best give piece (1000) is
-    // under half the receive piece's value (3000 × 0.5 = 1500) → -15 when flagged.
+    // manyForOne: give has 3+ pieces, receive has exactly 1, and the best give piece (1150) is
+    // under half the receive piece's value (3000 × 0.5 = 1500) → -15 when flagged. 1150, not
+    // 1000: after the star discount 3×1000 for 3000 reads +12% for the user, outside the 8%
+    // fair-target cap; 3×1150 lands at −90 (2.9%).
     const manyForOne = mkTrade({
-      give: [mkPlayer("g1", "WR", 1000), mkPlayer("g2", "RB", 1000), mkPlayer("g3", "TE", 1000)],
+      give: [mkPlayer("g1", "WR", 1150), mkPlayer("g2", "RB", 1150), mkPlayer("g3", "TE", 1150)],
       receive: [mkPlayer("r1", "RB", 3000)],
       oppRosterId: 2, score: 100, format: "3-for-1",
     });
-    // Score 55, not an arbitrary "15 below" — manyForOne's shape already carries its own
+    // Score 50, not an arbitrary "15 below" — manyForOne's shape already carries its own
     // starPremiumScore (-22, distinct signal) and formatBonus (-2, 4-piece trade) baggage versus
-    // this clean 1-for-1's formatBonus (+12), so 55 is the calibrated point where the -15 flag
-    // flips the ranking (unflagged: manyForOne 76 > competitor 67; flagged: 61 < 67).
+    // this clean 1-for-1's formatBonus (+12) and its dead-even fair-target bonus (+4 vs. ~-0.5
+    // for manyForOne's 2.9%), so 50 is the calibrated point where the -15 flag flips the ranking
+    // (unflagged: manyForOne ~70.5 > competitor 66; flagged: ~55.5 < 66).
     const cleanCompetitor = mkTrade({
       give: [mkPlayer("cg1", "WR", 3000)],
       receive: [mkPlayer("cr1", "RB", 3000)],
-      oppRosterId: 3, score: 55,
+      oppRosterId: 3, score: 50,
     });
     const rosters = [mkRoster(1, "USER", []), mkRoster(2, "OPP", []), mkRoster(3, "OPP2", [])];
 
@@ -1308,8 +1333,9 @@ describe("runFinderPipeline — valueConcentrationPenalty", () => {
   });
 
   it("does not penalize a package that isn't shaped many-for-one (2-for-1, below the 3+ threshold)", () => {
+    // 2×1600 for 3000 stays inside the 8% fair-target cap after the star discount (+155).
     const twoForOne = mkTrade({
-      give: [mkPlayer("g1", "WR", 1000), mkPlayer("g2", "RB", 1000)],
+      give: [mkPlayer("g1", "WR", 1600), mkPlayer("g2", "RB", 1600)],
       receive: [mkPlayer("r1", "RB", 3000)],
       oppRosterId: 2, score: 100, format: "2-for-1",
     });
@@ -1333,7 +1359,7 @@ describe("runFinderPipeline — valueConcentrationPenalty", () => {
     // clean same-value competitor (opp 20/21). Global scope means the -15 lands on BOTH many-for-one
     // trades identically, so both lose to their competitor in exactly the same way.
     const manyForOneOppA = mkTrade({
-      give: [mkPlayer("g1", "WR", 1000), mkPlayer("g2", "RB", 1000), mkPlayer("g3", "TE", 1000)],
+      give: [mkPlayer("g1", "WR", 1150), mkPlayer("g2", "RB", 1150), mkPlayer("g3", "TE", 1150)],
       receive: [mkPlayer("r1", "RB", 3000)],
       oppRosterId: 2, score: 100, format: "3-for-1",
     });
@@ -1342,7 +1368,7 @@ describe("runFinderPipeline — valueConcentrationPenalty", () => {
       oppRosterId: 20, score: 55,
     });
     const manyForOneOppB = mkTrade({
-      give: [mkPlayer("g4", "WR", 1000), mkPlayer("g5", "RB", 1000), mkPlayer("g6", "TE", 1000)],
+      give: [mkPlayer("g4", "WR", 1150), mkPlayer("g5", "RB", 1150), mkPlayer("g6", "TE", 1150)],
       receive: [mkPlayer("r2", "RB", 3000)],
       oppRosterId: 3, score: 100, format: "3-for-1",
     });
@@ -1372,8 +1398,9 @@ describe("runFinderPipeline — valueConcentrationPenalty", () => {
 
 describe("runFinderPipeline — starPremiumScore pick handling", () => {
   it("a low-value round-1 pick no longer gets an easier ride than an equally low-value round-2 pick", () => {
-    // Give a 4000-value star; receive a small filler (200) plus a low-value (700) pick, far
-    // below the 0.78/0.83 threshold ratios either way. Before the fix, a non-near-top round-1
+    // Give a 4000-value star; receive a 2100 filler plus a 2200 pick — the best receive piece is
+    // well under the 0.78/0.83 threshold ratios either way, while the package as a whole stays
+    // inside the 8% fair-target cap (−142 after the star discount). Before the fix, a non-near-top round-1
     // pick collapsed the penalty scale to 0.10 (round(0.10×22)=2) — LESS penalized than the
     // same-value round-2 pick's 0.75 scale (round(0.75×22)=17), backwards: the "better" pick
     // round bought a bigger discount on an equally bad trade. After the fix, round-1 uses the
@@ -1382,14 +1409,14 @@ describe("runFinderPipeline — starPremiumScore pick handling", () => {
     // shape, values, positions), so this ordering flip isolates the fix.
     const round1Trade = mkTrade({
       give: [mkPlayer("star1", "WR", 4000)],
-      receive: [mkPlayer("filler1", "WR", 200)],
-      receivePicks: [{ round: 1, season: CY, value: 700 } as unknown as PickWithValue],
+      receive: [mkPlayer("filler1", "WR", 2100)],
+      receivePicks: [{ round: 1, season: CY, value: 2200 } as unknown as PickWithValue],
       oppRosterId: 2, score: 100, format: "1 for 2",
     });
     const round2Trade = mkTrade({
       give: [mkPlayer("star2", "WR", 4000)],
-      receive: [mkPlayer("filler2", "WR", 200)],
-      receivePicks: [{ round: 2, season: CY, value: 700 } as unknown as PickWithValue],
+      receive: [mkPlayer("filler2", "WR", 2100)],
+      receivePicks: [{ round: 2, season: CY, value: 2200 } as unknown as PickWithValue],
       oppRosterId: 3, score: 100, format: "1 for 2",
     });
     const { allTrades } = runFinderPipeline(
@@ -1419,16 +1446,18 @@ describe("runFinderPipeline — timelineMismatchPenalty (future 1st + aging vet)
   // timelineMismatchPenalty. This mirrors the starPremiumScore round1-vs-round2 test above.
   const NY = String(Number(CY) + 1);
   const rosters = [mkRoster(1, "USER", []), mkRoster(2, "OPP", []), mkRoster(3, "OPP2", [])];
+  // The 3300 side (rather than 3000) keeps each package inside the 8% fair-target cap once the
+  // star discount applies (about 2% apart).
 
   it("penalizes a future 1st-round pick together with an aging veteran in the same return", () => {
     const mismatched = mkTrade({
-      give: [mkPlayer("g1", "WR", 3000, { age: 24 })],
+      give: [mkPlayer("g1", "WR", 3300, { age: 24 })],
       receive: [mkPlayer("agingRB", "RB", 2000, { age: 33 })],
       receivePicks: [{ round: 1, season: NY, value: 1500 } as unknown as PickWithValue],
       oppRosterId: 2, score: 100, format: "1 for 2",
     });
     const noMismatch = mkTrade({
-      give: [mkPlayer("g2", "WR", 3000, { age: 24 })],
+      give: [mkPlayer("g2", "WR", 3300, { age: 24 })],
       receive: [mkPlayer("youngRB", "RB", 2000, { age: 22 })], // same value, not aging
       receivePicks: [{ round: 1, season: NY, value: 1500 } as unknown as PickWithValue],
       oppRosterId: 3, score: 100, format: "1 for 2",
@@ -1440,13 +1469,13 @@ describe("runFinderPipeline — timelineMismatchPenalty (future 1st + aging vet)
 
   it("does not penalize a CURRENT-year 1st-round pick paired with an aging vet (not a future first)", () => {
     const currentYearPick = mkTrade({
-      give: [mkPlayer("g1", "WR", 3000, { age: 24 })],
+      give: [mkPlayer("g1", "WR", 3300, { age: 24 })],
       receive: [mkPlayer("agingRB1", "RB", 2000, { age: 33 })],
       receivePicks: [{ round: 1, season: CY, value: 1500 } as unknown as PickWithValue],
       oppRosterId: 2, score: 100, format: "1 for 2",
     });
     const futurePick = mkTrade({
-      give: [mkPlayer("g2", "WR", 3000, { age: 24 })],
+      give: [mkPlayer("g2", "WR", 3300, { age: 24 })],
       receive: [mkPlayer("agingRB2", "RB", 2000, { age: 33 })],
       receivePicks: [{ round: 1, season: NY, value: 1500 } as unknown as PickWithValue],
       oppRosterId: 3, score: 100, format: "1 for 2",
@@ -1462,13 +1491,13 @@ describe("runFinderPipeline — timelineMismatchPenalty (future 1st + aging vet)
     const mismatched = mkTrade({
       give: [mkPlayer("agingRB", "RB", 2000, { age: 33 })],
       givePicks: [{ round: 1, season: NY, value: 1500 } as unknown as PickWithValue],
-      receive: [mkPlayer("r1", "WR", 3000, { age: 24 })],
+      receive: [mkPlayer("r1", "WR", 3300, { age: 24 })],
       oppRosterId: 2, score: 100, format: "2 for 1",
     });
     const noMismatch = mkTrade({
       give: [mkPlayer("youngRB", "RB", 2000, { age: 22 })], // same value, not aging
       givePicks: [{ round: 1, season: NY, value: 1500 } as unknown as PickWithValue],
-      receive: [mkPlayer("r2", "WR", 3000, { age: 24 })],
+      receive: [mkPlayer("r2", "WR", 3300, { age: 24 })],
       oppRosterId: 3, score: 100, format: "2 for 1",
     });
     const { allTrades } = runFinderPipeline([mismatched, noMismatch], baseCtx({ rosters }));
@@ -1757,5 +1786,78 @@ describe("runFinderPipeline — simCandidates", () => {
     // But the discarded trade is excluded from the actual displayed list.
     expect(after.allTrades.some((t) => t.give[0].player_id === "g1")).toBe(false);
     expect(before.allTrades.some((t) => t.give[0].player_id === "g1")).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Fair target (user policy 2026-10-30): trades land near the mark both sides would call fair —
+// about even between same-direction teams; the rebuilder ~3% ahead on dynasty value (and the
+// win-now side ahead on redraft value) when the two meet. Never more than 8% apart.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("runFinderPipeline — fair target", () => {
+  const rosters = [mkRoster(1, "USER", []), mkRoster(2, "OPP", []), mkRoster(3, "OPP2", [])];
+  const eliteOpp = {
+    rosterId: 2, playoffOdds: 85, directionProfile: { bucket: "Elite" },
+  } as unknown as FinderPipelineCtx["tradePartnerRankings"][number];
+  // A rebuilding user: seller bucket, low odds (so not win-now).
+  const rebuildingUser = { finderDirection: "Rebuilder", myFinderPlayoffOdds: 10, hasMySim: true };
+
+  it("drops a trade more than 8% apart on dynasty value, keeps one inside it", () => {
+    const tooRich = mkTrade({ give: [mkPlayer("g1", "WR", 3000)], receive: [mkPlayer("r1", "WR", 3300)], oppRosterId: 2 });
+    const fair = mkTrade({ give: [mkPlayer("g2", "WR", 3000)], receive: [mkPlayer("r2", "WR", 3200)], oppRosterId: 3 });
+    const { allTrades } = runFinderPipeline([tooRich, fair], baseCtx({ rosters }));
+    // 3300 for 3000 is 9.1% in the user's favor; 3200 for 3000 is 6.3%
+    expect(allTrades.map((t) => t.oppRosterId)).toEqual([3]);
+    expect(allTrades[0].fairness?.netPct).toBeCloseTo(200 / 3200, 6);
+  });
+
+  it("aims a rebuilding user ~3% ahead on dynasty value against a contender, which wins redraft value", () => {
+    const redraftValues = { vet: 2600, young: 900, g1: 900, r1: 2600 };
+    // user (rebuilding) sends a win-now vet, gets a young WR worth slightly more dynasty value
+    const t = mkTrade({
+      give: [mkPlayer("vet", "WR", 3000, { age: 27 })],
+      receive: [mkPlayer("young", "WR", 3090, { age: 22 })],
+      oppRosterId: 2,
+    });
+    const { allTrades } = runFinderPipeline([t], baseCtx({
+      ...rebuildingUser, rosters, tradePartnerRankings: [eliteOpp], redraftValues,
+    }));
+    expect(allTrades).toHaveLength(1);
+    const f = allTrades[0].fairness!;
+    expect(f.crossDirection).toBe(true);
+    expect(f.target).toBe(0.03);
+    expect(f.gap).toBeLessThan(0.002);   // 90 on 3090 = 2.9%: on the mark
+    expect(f.redraftNet).toBe(900 - 2600); // the contender gains this-season value
+    expect(f.redraftOk).toBe(true);
+  });
+
+  it("drops a rebuild <-> contender trade that leaves the contender behind on redraft value", () => {
+    const redraftValues = { vet: 2600, young: 900 };
+    // the reverse: the contender would hand over the producer for a non-producer
+    const t = mkTrade({
+      give: [mkPlayer("young", "WR", 3000, { age: 22 })],
+      receive: [mkPlayer("vet", "WR", 3090, { age: 27 })],
+      oppRosterId: 2,
+    });
+    const { allTrades } = runFinderPipeline([t], baseCtx({
+      ...rebuildingUser, rosters, tradePartnerRankings: [eliteOpp], redraftValues,
+    }));
+    expect(allTrades).toHaveLength(0);
+  });
+
+  it("leaves Lottery tickets out of the cap (intentionally pick-skewed)", () => {
+    // a rebuilding team sells a young flier for a pick (a contender won't give a player for a pick
+    // alone — oppDirOk Rule 2), 1500 for 900: far outside 8%, but a Lottery ticket by design
+    const hopelessOpp = {
+      rosterId: 2, playoffOdds: 5, directionProfile: { bucket: "Hopeless" },
+    } as unknown as FinderPipelineCtx["tradePartnerRankings"][number];
+    const lottery = mkTrade({
+      give: [], givePicks: [{ round: 2, season: CY, value: 1500 } as unknown as PickWithValue],
+      receive: [mkPlayer("lp", "WR", 900, { age: 22 })],
+      format: "Lottery", oppRosterId: 2, score: 100,
+    });
+    const { allTrades } = runFinderPipeline([lottery], baseCtx({ rosters, tradePartnerRankings: [hopelessOpp] }));
+    expect(allTrades.map((t) => t.format)).toEqual(["Lottery"]);
   });
 });

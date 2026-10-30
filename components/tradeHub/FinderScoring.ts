@@ -214,6 +214,76 @@ export const isBalancedTierUpWithStarDiscount = (giveVals: number[], receiveVals
   return true;
 };
 
+// ── Fair target ───────────────────────────────────────────────────────────────
+// User policy (2026-10-30): lean toward trades both sides would call fair. Between two teams
+// heading the same way that means about even on dynasty value. When a rebuilding team trades
+// with a win-now team, the fair mark moves: the rebuilder comes out slightly ahead on dynasty
+// value and the win-now side comes out ahead on redraft (this-season) value. Dynasty value must
+// stay close either way — nothing more than FAIR_CAP apart.
+export const FAIR_TILT = 0.03; // the rebuilding side's dynasty edge at the fair mark
+export const FAIR_CAP = 0.08;  // the most a trade's dynasty value may be off, either way
+
+export type TradeSide = "winNow" | "rebuild" | "neutral";
+
+/** Where the user's dynasty net should land, as a share of the bigger side (+ = user ahead). */
+export const fairDynastyTarget = (user: TradeSide, opp: TradeSide): number =>
+  user === "rebuild" && opp === "winNow" ? FAIR_TILT
+    : user === "winNow" && opp === "rebuild" ? -FAIR_TILT
+    : 0;
+
+export interface TradeFairness {
+  /** User's dynasty net ÷ the bigger side's dynasty value (+ = user receives more). */
+  netPct: number;
+  /** fairDynastyTarget for this pairing. */
+  target: number;
+  /** How far the trade lands from its fair mark (|netPct − target|). */
+  gap: number;
+  /** User's redraft net: redraft value received − given (picks count 0). */
+  redraftNet: number;
+  /** A rebuild ↔ win-now trade (the fair mark is tilted). */
+  crossDirection: boolean;
+  /** False when a cross-direction trade leaves the win-now side behind on redraft value. */
+  redraftOk: boolean;
+}
+
+export const computeTradeFairness = ({
+  net, giveTotal, receiveTotal, redraftGive, redraftReceive, user, opp,
+}: {
+  net: number; giveTotal: number; receiveTotal: number;
+  redraftGive: number; redraftReceive: number;
+  user: TradeSide; opp: TradeSide;
+}): TradeFairness => {
+  const netPct = net / Math.max(giveTotal, receiveTotal, 1);
+  const target = fairDynastyTarget(user, opp);
+  const redraftNet = redraftReceive - redraftGive;
+  const crossDirection = target !== 0;
+  // The win-now side should gain this-season value. A small shortfall (under 150 or 5% of the
+  // redraft value moving) is noise, not a reason to drop the trade.
+  const tolerance = Math.max(150, 0.05 * Math.max(redraftGive, redraftReceive));
+  const winNowRedraftGain = user === "winNow" ? redraftNet : -redraftNet;
+  return {
+    netPct,
+    target,
+    gap: Math.abs(netPct - target),
+    redraftNet,
+    crossDirection,
+    redraftOk: !crossDirection || winNowRedraftGain >= -tolerance,
+  };
+};
+
+/** Within FAIR_CAP on dynasty value and, for a rebuild ↔ win-now trade, the win-now side not
+ *  behind on redraft value. */
+export const isFairEnough = (f: TradeFairness): boolean =>
+  Math.abs(f.netPct) <= FAIR_CAP + 1e-9 && f.redraftOk;
+
+/** Ranking term: +4 on the fair mark, ~0 at 3% off, about −16 at 8% off. */
+export const fairnessScore = (f: TradeFairness): number =>
+  4 - Math.pow(f.gap * 100, 1.5) * 0.9;
+
+/** Display tier: 0 = on the fair mark (within 1.5%), 1 = close (within 4%), 2 = further. */
+export const fairnessTier = (f: TradeFairness | undefined): number =>
+  !f ? 2 : f.gap <= 0.015 ? 0 : f.gap <= 0.04 ? 1 : 2;
+
 // ── Team window ───────────────────────────────────────────────────────────────
 
 // Returns avg years until positional cliffs across the starting lineup.

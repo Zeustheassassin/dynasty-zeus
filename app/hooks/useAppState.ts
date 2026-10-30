@@ -8,6 +8,7 @@ const log = logger("app/page");
 import { useAuthState, LAST_LOGIN_EMAIL_KEY } from "./useAuthState";
 import { useHubRouting } from "./useHubRouting";
 import { normalizeRookieName } from "../../components/draftHub/shared";
+import { refreshAllLeagueRosters } from "../../components/LeagueHub/overviewTabHelpers";
 import {
   CURRENT_YEAR,
   getStoredPickValue, buildLeaguePickPool, sortOwnerPicks,
@@ -1648,6 +1649,7 @@ const saveSnapshotNow = async () => {
     draftSlotSearchQuery, setDraftSlotSearchQuery,
     saveSimulationToSupabase,
     handleRunAllSims,
+    runSimForLeague,
     previewTradeSimulation,
   } = useSimulatorState({
     selectedLeague,
@@ -3502,10 +3504,28 @@ const onOpenAllTrades = useCallback(() => {
   setShowAllOpenTrades(true);
 }, []);
 
-const onRefreshDirection = useCallback(() => {
+// Trade Finder "Update league": pull this league's rosters, traded picks, drafts and users
+// straight from Sleeper past every cache (4 calls), then re-run and save its season sim through
+// the Run All Sims queue (which reloads the roster from that refreshed cache). The finder's
+// direction and trades rebuild from the new rosters and saved sim on their own.
+const [updatingLeagueRosters, setUpdatingLeagueRosters] = useState(false);
+const onRefreshDirection = useCallback(async () => {
   const league = selectedLeagueRef.current;
-  if (league) { loadRedraftValues(); loadRoster(league); }
-}, [loadRedraftValues, loadRoster]);
+  if (!league) return;
+  setUpdatingLeagueRosters(true);
+  try {
+    await refreshAllLeagueRosters([league], () => {});
+    loadRedraftValues();
+    runSimForLeague(league.league_id);
+  } catch (err) {
+    log.error("Trade Finder league update failed", { err: String(err) });
+    loadRoster(league);
+  } finally {
+    setUpdatingLeagueRosters(false);
+  }
+}, [loadRedraftValues, loadRoster, runSimForLeague]);
+const leagueUpdating = updatingLeagueRosters
+  || (!!selectedLeague && simQueue.includes(selectedLeague.league_id));
 
 // -------------------------
 // MY CURRENT LEAGUE PLAYER SET
@@ -3740,6 +3760,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     deleteAttempt,
     loadTradeAttempts,
     onRefreshDirection,
+    leagueUpdating,
     buyLowPlayerIds,
     playerStats,
     fcTrendData,

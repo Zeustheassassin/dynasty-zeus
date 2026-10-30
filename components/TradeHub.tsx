@@ -64,6 +64,7 @@ interface TradeHubProps {
   onDeleteAttempt: (id: string) => Promise<void>;
   onLoadTradeAttempts: (leagueId: string) => Promise<void>;
   onRefreshDirection: () => void;
+  leagueUpdating: boolean;
   buyLowPlayerIds: string[];
   ignoredOwnerIds: string[];
   toggleIgnoredOwner: (ownerId: string) => void;
@@ -91,6 +92,7 @@ function TradeHub({
   tradeAttempts, loadingTradeAttempts, tradeAttemptsError, tradeAttemptsLeagueId,
   onMarkAttempted, onUpdateAttemptStatus, onDeleteAttempt, onLoadTradeAttempts,
   onRefreshDirection,
+  leagueUpdating,
   buyLowPlayerIds,
   ignoredOwnerIds, toggleIgnoredOwner,
   nflState,
@@ -276,6 +278,7 @@ function TradeHub({
             selectedLeagueMateProfilesView={selectedLeagueMateProfilesView}
             tradePartnerRankings={tradePartnerRankings}
             onRefreshDirection={onRefreshDirection}
+            leagueUpdating={leagueUpdating}
             buyLowPlayerIds={buyLowPlayerIds}
             ignoredOwnerIds={ignoredOwnerIds}
             nflState={nflState}

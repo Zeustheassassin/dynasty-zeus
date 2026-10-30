@@ -75,6 +75,8 @@ interface TradeFinderProps {
   selectedLeagueMateProfilesView: LeagueMateView[];
   tradePartnerRankings: TradePartnerRanking[];
   onRefreshDirection: () => void;
+  /** "Update league" in progress: fresh rosters from Sleeper, then this league's sim. */
+  leagueUpdating: boolean;
   buyLowPlayerIds: string[];
   ignoredOwnerIds: string[];
   nflState?: { week: number; season_type: string; season: string; display_week?: number } | null;
@@ -115,6 +117,7 @@ function TradeFinder({
   leagueMateProfileByRosterId, selectedLeagueMateProfilesView,
   tradePartnerRankings,
   onRefreshDirection,
+  leagueUpdating,
   buyLowPlayerIds,
   ignoredOwnerIds,
   nflState,
@@ -1273,6 +1276,7 @@ function TradeFinder({
         weeklyProjMap: finderWeeklyProjMap,
         playerDispositions,
         finderPickValue,
+        calcDropCost,
         buildPostTradePlayers,
         getNFLDepthIdx,
         rosterPlayers,
@@ -1421,6 +1425,7 @@ function TradeFinder({
               directionRefreshing={directionRefreshing}
               setDirectionRefreshing={setDirectionRefreshing}
               onRefreshDirection={onRefreshDirection}
+              leagueUpdating={leagueUpdating}
               selectedLeagueMateProfilesView={selectedLeagueMateProfilesView}
               setFinderTargetOppRosterId={setFinderTargetOppRosterId}
               isChampionshipPush={isChampionshipPush}
