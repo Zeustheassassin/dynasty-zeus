@@ -68,6 +68,19 @@ export const yearsToCliff = (player: SleeperPlayer): number => {
   return Math.max(0, cliff - age);
 };
 
+// A player who isn't scoring for his team this season: on IR / out / PUP / NFI, or worth little
+// in redraft next to his dynasty value (a stash, a rookie behind a starter). User insight
+// (2026-10-30): a win-now team parts with these — and with picks — far more readily than with a
+// player who starts for it.
+const NON_PRODUCER_STATUSES = new Set(["ir", "out", "pup", "nfi", "dnr"]);
+export const NON_PRODUCER_REDRAFT_RATIO = 0.4;
+export const isNonProducer = (
+  player: { value: number; injury_status?: string | null },
+  redraftValue: number,
+): boolean =>
+  NON_PRODUCER_STATUSES.has(String(player.injury_status ?? "").toLowerCase())
+  || (player.value > 0 && redraftValue < player.value * NON_PRODUCER_REDRAFT_RATIO);
+
 export const isPremiumCurrentPick = (pick: AugmentedPick) =>
   String(pick?.season) === CURRENT_YEAR && String(pick?.slot || "").match(/^1\.(0[1-6]|[1-6])$/);
 

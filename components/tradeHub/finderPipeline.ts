@@ -9,7 +9,7 @@ import {
   isFutureInsulationAsset, isOldProducerBuy,
   getAgeUrgency, getFutureValue, computeTeamWindow, getPickSlotBonus,
   isBalanced, LOW_VALUE_FLOOR, MID_VALUE_CEILING,
-  computeTradeFairness, fairnessScore, isFairEnough,
+  computeTradeFairness, fairnessScore, isFairEnough, isNonProducer,
 } from "./FinderScoring";
 import type { TradeSide, TradeFairness } from "./FinderScoring";
 import { computeFinderAdjustedNet } from "./calculatorUtils";
@@ -630,6 +630,13 @@ export function runFinderPipeline(
         const oppReceivesVets    = oppReceivesPlayers.filter((p) => isOldProducerBuy(p)).length;
         const oppGivesVets       = oppGivesPlayers.filter((p) => isOldProducerBuy(p)).length;
         const oppGivesYoung      = oppGivesPlayers.filter((p) => isFutureInsulationAsset(p)).length;
+        // User insight (10/30): a win-now team parts with picks, and with prospects who aren't
+        // scoring for it (IR, or little redraft value next to their dynasty value), far more
+        // readily than with a player who starts for it — so those are acceptance reasons for a
+        // contender, not costs. (Giving a starter is already priced by the netRedraft term.)
+        const oppGivesNonProducers = oppGivesPlayers
+          .filter((p) => isNonProducer(p, redraftValues?.[p.player_id] ?? 0)).length;
+        const winNowGivesEasily = oppGivesPicks.length * 3 + oppGivesNonProducers * 4;
 
         const pickRecvScore = (base1st: number, base2nd: number, baseLate: number) =>
           oppReceivesPicks.reduce((s: number, p) => {
@@ -666,7 +673,7 @@ export function runFinderPipeline(
           const netRedraft = oppReceivesRedraft - oppGivesRedraft;
           ods += Math.min(netRedraft / 40, 12);
           ods -= pickRecvScore(12, 8, 5);
-          ods -= pickGiveScore(4, 3, 2);
+          ods += winNowGivesEasily;
           ods += oppReceivesVets * 5;
           ods -= oppReceivesYoung * 6;
           if (oppReceivesPlayers.length === 0 && oppReceivesPicks.length > 0) ods -= 14;
@@ -675,6 +682,7 @@ export function runFinderPipeline(
           const netRedraft = oppReceivesRedraft - oppGivesRedraft;
           ods += Math.min(netRedraft / 50, 8);
           ods -= pickRecvScore(8, 5, 3);
+          ods += winNowGivesEasily;
           ods -= oppReceivesYoung * 3;
           ods += oppReceivesVets * 4;
           if (oppReceivesPlayers.length === 0 && oppReceivesPicks.length > 0) ods -= 10;
@@ -1739,6 +1747,10 @@ export function runFinderPipeline(
   };
   const MAX_COMPLEX_TRADES = 2;
   let complexTradeCount = 0;
+  // Trades that bring the user picks earn their slots by rank like any other, up to half the
+  // board (user policy 10/30: "up to 6", and zero is fine when player trades rank higher).
+  const MAX_PICK_RECEIVE_TRADES = 6;
+  let pickReceiveTradeCount = 0;
   const topTrades = shuffledForDisplay.reduce((acc: TradeResult[], r) => {
       if (acc.length >= FINAL_TRADE_COUNT) return acc;
       const allIds = [
@@ -1758,10 +1770,10 @@ export function runFinderPipeline(
         if ((oppCount[oppKey] || 0) >= 4) return acc;
       }
       const totalPieces = r.give.length + r.receive.length + r.givePicks.length + r.receivePicks.length;
-      if (totalPieces >= 5) {
-        if (complexTradeCount >= MAX_COMPLEX_TRADES) return acc;
-        complexTradeCount++;
-      }
+      if (totalPieces >= 5 && complexTradeCount >= MAX_COMPLEX_TRADES) return acc;
+      if (r.receivePicks.length > 0 && pickReceiveTradeCount >= MAX_PICK_RECEIVE_TRADES) return acc;
+      if (totalPieces >= 5) complexTradeCount++;
+      if (r.receivePicks.length > 0) pickReceiveTradeCount++;
       addToSlots(acc, r, allIds, key);
       return acc;
     }, []);

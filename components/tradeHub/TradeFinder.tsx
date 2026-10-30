@@ -4,6 +4,7 @@ import {
   getStoredPickValue,
   getSeasonYear,
   CONTENDER_BUCKETS,
+  SELLER_BUCKETS,
 } from "../../lib/helpers";
 
 import type {
@@ -402,9 +403,10 @@ function TradeFinder({
         ["Stranded", "Fading Out", "Hopeless"].includes(finderDirection)
       ) && !isStockpiledRebuild;
       // Draft capital mode: auto-enabled for any sell-side team so pick trades
-      // are always part of the result pool alongside normal player swaps.
-      // Suppressed for stockpiled teams so suggestions skew to player tier-ups.
-      const draftCapitalMode = (isHardSellSide || finderDirection === "Rebuilder") && !isStockpiledRebuild;
+      // are always part of the result pool alongside normal player swaps — a pick-rich
+      // "Consolidate" rebuild included (user, 10/30: pick-rich rebuilds can still see pick
+      // trades; its scoring branch is neutral on picks, so they compete on fit, not hoarding).
+      const draftCapitalMode = SELLER_BUCKETS.includes(finderDirection);
       // Prefer future picks when in a deep rebuild — pick position matters more
       // than current-year upside for teams rebuilding over 2+ year horizon.
       const finderPreferFuturePicks = ["Stranded", "Fading Out", "Hopeless"].includes(finderDirection)
@@ -702,6 +704,12 @@ function TradeFinder({
           : oppTopBase;
         const oppName = users[oppRoster.owner_id] || `Team ${oppRoster.roster_id}`;
 
+        // Player-for-picks trades start from a neutral base score (0). Player swaps start from
+        // posScore, a small positional-fit number; these used to start from minus the raw value
+        // gap in points (often -100 to -600), which sank nearly every pick trade before ranking —
+        // and the pipeline's fair-target term already scores that gap (user, 10/30: show
+        // rebuilders more trades that bring back picks).
+        const DRAFT_CAPITAL_BASE_SCORE = 0;
         if (draftCapitalMode) {
           for (const mp of myTop) {
             if (isBlockedSellDisposition(mp.player_id)) continue;
@@ -711,7 +719,7 @@ function TradeFinder({
               if (!oppReceiveOk(oppPlayers, [mp], [])) continue;
               results.push({
                 give: [mp], receive: [], givePicks: [], receivePicks: [pick], oppName, oppRosterId: oppRoster.roster_id,
-                score: -Math.abs(pick.value - mp.value), net: pick.value - mp.value, format: "1 for 1", draftCapital: true,
+                score: DRAFT_CAPITAL_BASE_SCORE, net: pick.value - mp.value, format: "1 for 1", draftCapital: true,
               });
             }
           }
@@ -726,7 +734,7 @@ function TradeFinder({
                 if (!oppReceiveOk(oppPlayers, [mp], [])) continue;
                 results.push({
                   give: [mp], receive: [], givePicks: [], receivePicks: [p1, p2], oppName, oppRosterId: oppRoster.roster_id,
-                  score: -Math.abs((p1.value + p2.value) - mp.value), net: p1.value + p2.value - mp.value, format: "1 for 2", draftCapital: true,
+                  score: DRAFT_CAPITAL_BASE_SCORE, net: p1.value + p2.value - mp.value, format: "1 for 2", draftCapital: true,
                 });
               }
             }
@@ -743,7 +751,7 @@ function TradeFinder({
                 if (!isBalancedWithStarDiscount([mp1.value, mp2.value], [pick.value])) continue;
                 results.push({
                   give: [mp1, mp2], receive: [], givePicks: [], receivePicks: [pick], oppName, oppRosterId: oppRoster.roster_id,
-                  score: -Math.abs(pick.value - (mp1.value + mp2.value)), net: pick.value - mp1.value - mp2.value, format: "2 for 1", draftCapital: true,
+                  score: DRAFT_CAPITAL_BASE_SCORE, net: pick.value - mp1.value - mp2.value, format: "2 for 1", draftCapital: true,
                 });
               }
             }

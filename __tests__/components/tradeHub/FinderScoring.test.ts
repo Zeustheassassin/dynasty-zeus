@@ -19,6 +19,7 @@ import {
   computeTeamWindow,
   getPickSlotBonus,
   computeTradeFairness,
+  isNonProducer,
   fairDynastyTarget,
   fairnessScore,
   fairnessTier,
@@ -554,5 +555,22 @@ describe("fair target", () => {
     expect(at(0.01)).toBeGreaterThan(at(0.02));
     expect([0.01, 0.03, 0.06].map((gap) => fairnessTier({ netPct: gap, target: 0, gap, redraftNet: 0, crossDirection: false, redraftOk: true }))).toEqual([0, 1, 2]);
     expect(fairnessTier(undefined)).toBe(2);
+  });
+});
+
+// 10/30 user insight: a win-now team parts with picks, and with prospects who aren't scoring for
+// it, far more readily than with a player who starts for it.
+describe("isNonProducer", () => {
+  it("counts a player on IR / out / PUP / NFI as not producing, whatever his redraft value", () => {
+    expect(isNonProducer({ value: 3000, injury_status: "IR" }, 2800)).toBe(true);
+    expect(isNonProducer({ value: 3000, injury_status: "Out" }, 2800)).toBe(true);
+    expect(isNonProducer({ value: 3000, injury_status: "PUP" }, 2800)).toBe(true);
+    expect(isNonProducer({ value: 3000, injury_status: "Questionable" }, 2800)).toBe(false);
+  });
+
+  it("counts a stash worth little in redraft next to his dynasty value as not producing", () => {
+    expect(isNonProducer({ value: 4000 }, 1200)).toBe(true);   // 30% of dynasty value
+    expect(isNonProducer({ value: 4000 }, 1700)).toBe(false);  // 42.5%
+    expect(isNonProducer({ value: 3000, injury_status: null }, 3500)).toBe(false);
   });
 });

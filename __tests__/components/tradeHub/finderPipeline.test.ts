@@ -1861,3 +1861,56 @@ describe("runFinderPipeline — fair target", () => {
     expect(allTrades.map((t) => t.format)).toEqual(["Lottery"]);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// Pick-receiving trades (user policy 2026-10-30): up to 6 of the 12 headline trades may bring
+// the user picks, earned by rank; a contender gives picks and non-producing prospects readily.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("runFinderPipeline — pick-receiving trades", () => {
+  it("lets at most 6 of the 12 headline trades bring the user picks, filling the rest by rank", () => {
+    const NY = String(Number(CY) + 1);
+    const pickTrades = Array.from({ length: 8 }, (_, i) => mkTrade({
+      give: [mkPlayer(`pg${i}`, "WR", 3000)],
+      receivePicks: [{ round: 1, season: NY, roster_id: 2 + i, value: 3000 } as unknown as PickWithValue],
+      oppRosterId: 2 + i, score: 100, format: "1 for 1", draftCapital: true,
+    }));
+    const playerTrades = Array.from({ length: 8 }, (_, i) => mkTrade({
+      give: [mkPlayer(`xg${i}`, "WR", 3000)],
+      receive: [mkPlayer(`xr${i}`, "WR", 3000)],
+      oppRosterId: 20 + i, score: 50,
+    }));
+    const rosters = [
+      mkRoster(1, "USER", []),
+      ...pickTrades.map((t) => mkRoster(t.oppRosterId, `P${t.oppRosterId}`, [])),
+      ...playerTrades.map((t) => mkRoster(t.oppRosterId, `X${t.oppRosterId}`, [])),
+    ];
+    const { allTrades } = runFinderPipeline([...pickTrades, ...playerTrades], baseCtx({ rosters }));
+    expect(allTrades).toHaveLength(12);
+    expect(allTrades.filter((t) => t.receivePicks.length > 0)).toHaveLength(6);
+    // the pick trades rank higher here, so they take the first 6 places
+    expect(allTrades.slice(0, 6).every((t) => t.receivePicks.length > 0)).toBe(true);
+  });
+
+  it("ranks a contender handing over a prospect on IR above the same trade for a healthy one", () => {
+    const eliteA = { rosterId: 2, playoffOdds: 85, directionProfile: { bucket: "Elite" } } as unknown as FinderPipelineCtx["tradePartnerRankings"][number];
+    const eliteB = { rosterId: 3, playoffOdds: 85, directionProfile: { bucket: "Elite" } } as unknown as FinderPipelineCtx["tradePartnerRankings"][number];
+    const rosters = [mkRoster(1, "USER", []), mkRoster(2, "OPP", []), mkRoster(3, "OPP2", [])];
+    // identical trades (same values, same redraft values) except the received player's status
+    const injured = mkTrade({
+      give: [mkPlayer("g1", "WR", 3000)],
+      receive: [mkPlayer("hurt", "WR", 3000, { injury_status: "IR" })],
+      oppRosterId: 2,
+    });
+    const healthy = mkTrade({
+      give: [mkPlayer("g2", "WR", 3000)],
+      receive: [mkPlayer("well", "WR", 3000)],
+      oppRosterId: 3,
+    });
+    const redraftValues = { g1: 2500, g2: 2500, hurt: 2500, well: 2500 };
+    const { allTrades } = runFinderPipeline([healthy, injured], baseCtx({
+      rosters, tradePartnerRankings: [eliteA, eliteB], redraftValues,
+    }));
+    expect(allTrades.map((t) => t.oppRosterId)).toEqual([2, 3]);
+  });
+});

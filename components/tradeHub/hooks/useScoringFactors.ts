@@ -315,13 +315,13 @@ export function createScoringFactors({
       // Consolidate (pick-rich, dynasty-strong, not competing this year): condense surplus
       // depth/picks into fewer, stronger (ideally young) assets — do NOT reward hoarding MORE
       // picks the way the plain rebuild branch does. This is the branch a "Consolidate" team needs.
+      // Picks coming in are neutral here, not penalized (user, 10/30: pick-rich rebuilds can
+      // still see pick trades) — it used to subtract picksIn/200 and 5 per future 1st.
       score += assetConsolidation > 0 ? assetConsolidation * 6 : assetConsolidation * 2;
       score += youngCoreBuys * 9;
       score += insulationBuys * 7;
       score -= insulationSells * 8;
       score += (incomingDynasty - outgoingDynasty) / 200;
-      score -= picksIn / 200;
-      score -= futureFirstsIn * 5;
       score -= oldProducerBuys * 12;
       score += strongPosSells * 2;
     } else if (finderDirection === "Fading Contender") {
