@@ -61,6 +61,10 @@ import {
 import { waitForSleeperSlot } from "../../../../lib/server/sleeperBudget";
 import { simulateLeague } from "../../../../lib/helpers/simulation";
 import { buildStandingRows } from "../../../../lib/helpers/standings";
+import {
+  remainingRegularSeasonWeeks, scoreWeeklyProjections, trimSleeperProjectionWeek,
+  type WeeklyProjectionWeek,
+} from "../../../../lib/helpers/weeklyProjections";
 import { projectRookiesByRoster } from "../../../../lib/helpers/rookieProjection";
 import { logger } from "../../../../lib/logger";
 import { verifyCron } from "../../../../lib/server/verifyCron";
@@ -225,6 +229,31 @@ async function fetchRawProjections(
   const url = `${SLEEPER_PROJECTIONS_BASE}/${season}/${currentWeek}?season_type=regular&${PROJ_POS_PARAMS}`;
   const data = await paced<RawProjItem[]>(url);
   return { items: Array.isArray(data) ? data : [], isSeasonMode: false };
+}
+
+/** Trimmed Sleeper projections for each of `weeks` (lib/helpers/weeklyProjections.ts). The current
+ *  week reuses the raw items already fetched for projectionData; a week that fails or comes back
+ *  empty is left out, and simulateLeague then falls back for every league this run. */
+async function fetchWeeklyProjectionWeeks(
+  season: string,
+  weeks: number[],
+  currentWeekItems: RawProjItem[] | null,
+  currentWeek: number,
+  paced: PacedFetch
+): Promise<Record<number, WeeklyProjectionWeek>> {
+  const out: Record<number, WeeklyProjectionWeek> = {};
+  await withConcurrency(weeks, async (week) => {
+    const items = week === currentWeek && currentWeekItems
+      ? currentWeekItems
+      : await paced<RawProjItem[]>(
+          `${SLEEPER_PROJECTIONS_BASE}/${season}/${week}?season_type=regular&${PROJ_POS_PARAMS}`,
+          SLEEPER_PLAYERS_TIMEOUT_MS
+        );
+    const trimmed = trimSleeperProjectionWeek(Array.isArray(items) ? items : []);
+    if (Object.keys(trimmed).length > 0) out[week] = trimmed;
+    else log.warn("weekly projections missing — leagues fall back to hashed byes", { season, week });
+  }, WEEKLY_MATCHUP_CONCURRENCY);
+  return out;
 }
 
 function buildProjectionRows(
@@ -608,6 +637,15 @@ export async function GET(req: NextRequest): Promise<Response> {
     isOffseason && fc2qb ? fetchCanonicalRookieBoard(rookieYear, fc2qb, paced) : Promise.resolve([]),
   ]);
 
+  // Sleeper's projections for every regular-season week still to play (byes, injury return dates —
+  // see lib/helpers/weeklyProjections.ts), through the latest one any league plays before its
+  // playoffs. This week's are the raw items fetched above; the rest come one ~2 MB week at a time.
+  const lastRegularWeek = leagues.reduce(
+    (max, l) => Math.max(max, Number(l.settings?.playoff_week_start || 15) - 1), 0);
+  const weeklyProjectionWeeks = await fetchWeeklyProjectionWeeks(
+    season, remainingRegularSeasonWeeks(currentWeek, lastRegularWeek),
+    projIsSeasonMode ? null : rawProjItems, currentWeek, paced);
+
   // ── 3. Per-league simulate + collect rows ──
   let leaguesSimulated = 0;
   let leaguesSkipped = 0;
@@ -639,9 +677,13 @@ export async function GET(req: NextRequest): Promise<Response> {
       const projectionData = buildProjectionRows(rawProjItems, projIsSeasonMode, scoringSettings, players);
       const projectionWeek = projIsSeasonMode ? 0 : currentWeek;
 
+      // Every regular-season week, played or not, like the Simulator tab: played weeks give the
+      // scores, the rest Sleeper's real schedule (until 2026-10-30 only played weeks were fetched,
+      // so every week still to play was simulated against a generated round-robin opponent).
       let leagueWeeklyMatchups: Record<string, { week: number; matchups: SleeperMatchup[] }[]> = {};
-      if (currentWeek > 1) {
-        const weeks = Array.from({ length: currentWeek - 1 }, (_, i) => i + 1);
+      if (currentWeek > 0) {
+        const regularSeasonWeeks = Math.max(1, Number(league.settings?.playoff_week_start || 15) - 1);
+        const weeks = Array.from({ length: regularSeasonWeeks }, (_, i) => i + 1);
         const results = await withConcurrency(weeks, async (week) => ({
           week,
           matchups:
@@ -679,6 +721,7 @@ export async function GET(req: NextRequest): Promise<Response> {
         leagueAdjustedFcValues,
         leagueAdjustedRedraftValues,
         projectedRookiesByRoster,
+        weeklyProjections: scoreWeeklyProjections(weeklyProjectionWeeks, scoringSettings),
         // Deliberately a fresh random seed each run, not the persisted per-
         // browser simSalt_v1 — this is a server cron with no single "the"
         // user session to match (each browser has its own persisted salt).

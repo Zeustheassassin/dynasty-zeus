@@ -28,6 +28,7 @@ function readyInput(overrides: Partial<SimRunReadinessInput> = {}): SimRunReadin
     loadingRedraft: false,
     redraftSettledNumQbs: 2,
     leagueWeeklyMatchups: { L1: [] },
+    weeklyProjectionsSettled: true,
     ...overrides,
   };
 }
@@ -90,5 +91,11 @@ describe("getSimRunWait", () => {
   it("waits for this league's weekly matchups (another league's don't count)", () => {
     expect(getSimRunWait(readyInput({ leagueWeeklyMatchups: {} }))).toBe("matchups");
     expect(getSimRunWait(readyInput({ leagueWeeklyMatchups: { L0: [] } }))).toBe("matchups");
+  });
+
+  it("waits for the remaining-week projections (byes, injury return dates) to settle", () => {
+    expect(getSimRunWait(readyInput({ weeklyProjectionsSettled: false }))).toBe("weeklyProjections");
+    // Checked after the league's own inputs, so the progress line names those first.
+    expect(getSimRunWait(readyInput({ weeklyProjectionsSettled: false, leagueWeeklyMatchups: {} }))).toBe("matchups");
   });
 });

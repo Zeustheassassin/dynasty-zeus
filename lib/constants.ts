@@ -74,6 +74,11 @@ export const ROSTER_OVERVIEW_FRESH_GAP_MS = 60_000;
 /** Sleeper weekly stats — completed weeks never change; 7-day TTL is conservative */
 export const SLEEPER_STATS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
+/** Sleeper's per-week projections (/api/projections/sleeper-week) — re-read hourly so injury news
+ *  (a player ruled out, a return date moving) reaches the season simulator the same day. The
+ *  browser keeps its copy for the same hour. */
+export const SLEEPER_WEEKLY_PROJECTIONS_TTL_MS = 60 * 60 * 1000;
+
 // ── Cache TTLs (seconds, for Next.js revalidate) ──────────────
 /** Sleeper NFL state — refreshed every hour */
 export const NFL_STATE_REVALIDATE_S = 3600;

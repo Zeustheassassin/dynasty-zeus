@@ -50,6 +50,8 @@ function baseCtx(overrides: Partial<SimulatorCtx> = {}): SimulatorCtx {
     leagueAdjustedFcValues: {},
     leagueAdjustedRedraftValues: {},
     projectedRookiesByRoster: new Map(),
+    weeklyProjections: null,
+    weeklyProjectionsSettled: true,
     supabaseUser: null,
     leagues: [L1, L2],
     loadRoster: vi.fn(async () => {}),
@@ -111,6 +113,25 @@ describe("Run All Sims queue", () => {
     expect(result.current.committedSimsByLeague.L1).toBeUndefined();
 
     rerender({ ...ready, leagueWeeklyMatchups: { L1: [{ week: 1, matchups: [] }] } });
+    expect(result.current.committedSimsByLeague.L1?.[1]?.playoffOdds).toBe(12);
+  });
+
+  it("waits for the remaining-week projections before saving", () => {
+    const ready = baseCtx({
+      selectedLeague: L1,
+      projectionData: [{ fpts: 12 } as never],
+      projectionLoadedFor: { week: 6, scoringKey: projectionScoringKey(halfPpr) },
+      leagueWeeklyMatchups: { L1: [{ week: 1, matchups: [] }] },
+      weeklyProjectionsSettled: false,
+    });
+    const { result, rerender } = renderHook((ctx: SimulatorCtx) => useSimulatorState(ctx), { initialProps: ready });
+    act(() => { result.current.handleRunAllSims(); });
+    act(() => { result.current.setReadyLeagueId("L1"); });
+
+    expect(result.current.simRunWait).toBe("weeklyProjections");
+    expect(result.current.committedSimsByLeague.L1).toBeUndefined();
+
+    rerender({ ...ready, weeklyProjectionsSettled: true });
     expect(result.current.committedSimsByLeague.L1?.[1]?.playoffOdds).toBe(12);
   });
 

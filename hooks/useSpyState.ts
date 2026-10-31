@@ -13,7 +13,7 @@
 // FantasyCalc, and held in local React state only. See
 // [project_spy_username_switching] in memory for why this matters.
 // ============================================================
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { getLocalStorageItem, setLocalStorageItem } from "../lib/hooks/useLocalStorage";
 import { logger } from "../lib/logger";
 import { sleeperApi } from "../lib/sleeperApi";
@@ -25,12 +25,14 @@ import {
   CURRENT_YEAR, buildLeaguePickPool, sortOwnerPicks,
   computeScoringMultipliers, getRosterDirectionProfile,
   getAdjustedDirectionBucket, getBucketColor, fetchFantasyCalcValues,
-  isDynastyLeague,
+  isDynastyLeague, getCurrentNflWeek, DEFAULT_SCORING,
 } from "../lib/helpers";
 import { simulateLeague } from "../lib/helpers/simulation";
 import { buildStandingRows } from "../lib/helpers/standings";
 import { projectRookiesByRoster } from "../lib/helpers/rookieProjection";
+import { remainingRegularSeasonWeeks, scoreWeeklyProjections } from "../lib/helpers/weeklyProjections";
 import { useLeagueOverview } from "./useLeagueOverview";
+import { useWeeklyProjections } from "./useWeeklyProjections";
 import type { PlayerUsage } from "./usePlayerStats";
 import type {
   SleeperUser, SleeperLeague, SleeperRoster, SleeperPlayer, SleeperNFLState,
@@ -174,6 +176,16 @@ export function useSpyState({
   const { leagueOverviewData, loadingLeagueOverview, leagueOverviewLoaded, loadLeagueOverview } =
     useLeagueOverview(targetLeagues, targetUser);
 
+  // Sleeper's remaining-week projections (byes, injury return dates) through the latest regular-season
+  // week any of the target's leagues plays — the same shared store as the user's own sims.
+  const spyProjectionWeeks = useMemo(() => {
+    const lastRegularWeek = targetLeagues.reduce(
+      (max, l) => Math.max(max, Number(l.settings?.playoff_week_start || 15) - 1), 0);
+    return remainingRegularSeasonWeeks(getCurrentNflWeek(nflState), lastRegularWeek);
+  }, [targetLeagues, nflState]);
+  const { weeklyProjections: rawWeeklyProjections } =
+    useWeeklyProjections(nflState?.season ?? null, spyProjectionWeeks);
+
   // Drill-down league
   const [selectedSpyLeague, setSelectedSpyLeague] = useState<SleeperLeague | null>(null);
   const [loadingLeague, setLoadingLeague] = useState(false);
@@ -316,6 +328,7 @@ export function useSpyState({
       leagueAdjustedFcValues,
       leagueAdjustedRedraftValues,
       projectedRookiesByRoster: projectedRookies,
+      weeklyProjections: scoreWeeklyProjections(rawWeeklyProjections, scoring ?? DEFAULT_SCORING),
       simSalt,
     });
 
@@ -352,7 +365,7 @@ export function useSpyState({
       selectedLeagueDirectionAdjusted,
       selectedLeagueSimulation,
     };
-  }, [players, redraftValues, pickFcValues, nflState, rookies, projectionData, projectionWeek, playerStats, simSalt]);
+  }, [players, redraftValues, pickFcValues, nflState, rookies, projectionData, projectionWeek, playerStats, rawWeeklyProjections, simSalt]);
 
   const selectSpyLeague = useCallback(async (league: SleeperLeague) => {
     if (!targetUser) return;

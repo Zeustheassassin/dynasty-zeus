@@ -22,6 +22,7 @@ import {
   fetchFantasyCalcValues,
   withFcValues,
   computeScoringMultipliers,
+  DEFAULT_SCORING,
   getLeagueNumQbs,
   buildLeagueLineupStatus,
   recomputeConsensusFpts,
@@ -42,6 +43,8 @@ import { projectRookiesByRoster } from "../../lib/helpers/rookieProjection";
 import { buildStandingRows } from "../../lib/helpers/standings";
 import { useLatestRequest } from "../../hooks/useLatestRequest";
 import { useProjections } from "../../hooks/useProjections";
+import { useWeeklyProjections, weeklyProjectionsKey } from "../../hooks/useWeeklyProjections";
+import { remainingRegularSeasonWeeks, scoreWeeklyProjections } from "../../lib/helpers/weeklyProjections";
 import { useSleeperUser } from "../../hooks/useSleeperUser";
 import { usePlayerStats } from "../../hooks/usePlayerStats";
 import { useManagementState } from "../../hooks/useManagementState";
@@ -1623,6 +1626,24 @@ const saveSnapshotNow = async () => {
     ]
   );
 
+  // Sleeper's projections for every regular-season week still to play, through the latest week any
+  // of the user's leagues plays before its playoffs. Loaded whenever it's the regular season, not
+  // just on the Simulator tab: selectedLeagueSimulation feeds pick values, direction and Trade
+  // Finder previews from every tab. Scored for the selected league below.
+  const simProjectionWeeks = useMemo(() => {
+    const lastRegularWeek = leagues.reduce(
+      (max, l) => Math.max(max, Number(l.settings?.playoff_week_start || 15) - 1), 0);
+    return remainingRegularSeasonWeeks(currentNflWeek, lastRegularWeek);
+  }, [leagues, currentNflWeek]);
+  const { weeklyProjections: rawWeeklyProjections, settledKey: weeklyProjectionsSettledKey } =
+    useWeeklyProjections(nflState?.season ?? null, simProjectionWeeks);
+  const selectedLeagueWeeklyProjections = useMemo(
+    () => scoreWeeklyProjections(rawWeeklyProjections, selectedLeague?.scoring_settings ?? DEFAULT_SCORING),
+    [rawWeeklyProjections, selectedLeague?.scoring_settings]
+  );
+  const weeklyProjectionsSettled = simProjectionWeeks.length === 0
+    || weeklyProjectionsSettledKey === weeklyProjectionsKey(nflState?.season ?? "", simProjectionWeeks);
+
   const {
     selectedLeagueSimulation,
     committedSimsByLeague,
@@ -1656,6 +1677,8 @@ const saveSnapshotNow = async () => {
     leagueAdjustedFcValues,
     leagueAdjustedRedraftValues,
     projectedRookiesByRoster,
+    weeklyProjections: selectedLeagueWeeklyProjections,
+    weeklyProjectionsSettled,
     supabaseUser,
     leagues,
     loadRoster,

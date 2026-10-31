@@ -77,6 +77,7 @@ function mkArgs(over: Partial<SimulateLeagueArgs> = {}): SimulateLeagueArgs {
     leagueAdjustedFcValues: f.fc,
     leagueAdjustedRedraftValues: f.redraft,
     projectedRookiesByRoster: new Map<number, PoolPlayer[]>(),
+    weeklyProjections: null,
     simSalt: 0,
     ...over,
   };
@@ -245,6 +246,55 @@ describe("simulateLeague — invariants", () => {
   it("offseason uses 350 sims, in-season 250", () => {
     expect(simulateLeague(mkArgs())!.simCount).toBe(350);
     expect(simulateLeague(inSeasonArgs())!.simCount).toBe(250);
+  });
+});
+
+// 10/30: in-season, Sleeper's projection for each remaining week decides who plays it — a bye, an
+// injury until the week Sleeper expects him back, a backup who won't play. inSeasonArgs is week 4
+// of a 9-week regular season, so weeks 4–9 are left. Player "100" is roster 1's first QB and has
+// no this-week projection in the fixture, so his strength comes from his weekly projections.
+describe("simulateLeague — weekly availability", () => {
+  const WEEKS = [4, 5, 6, 7, 8, 9];
+  const ids = Object.keys(buildFixture().players);
+  /** Every player projected at 10 every remaining week, except where `qb100` says otherwise. */
+  const weekly = (qb100: (week: number) => number, weeks = WEEKS) =>
+    Object.fromEntries(weeks.map((week) => [week, Object.fromEntries(
+      ids.map((id) => [id, id === "100" ? qb100(week) : 10] as const).filter(([, pts]) => pts > 0),
+    )]));
+  const row1 = (sim: LeagueSimulation) => sim.rowByRosterId.get(1)!;
+
+  it("drops a player projected for none of the remaining weeks from his team", () => {
+    const healthy = simulateLeague(inSeasonArgs({ weeklyProjections: weekly(() => 40) }))!;
+    const outForSeason = simulateLeague(inSeasonArgs({ weeklyProjections: weekly(() => 0) }))!;
+    expect(row1(outForSeason).lineupScore).toBeLessThan(row1(healthy).lineupScore - 15);
+    expect(row1(outForSeason).expectedWins).toBeLessThan(row1(healthy).expectedWins);
+  });
+
+  it("counts a player only from the week Sleeper projects him back", () => {
+    const backWeek6 = simulateLeague(inSeasonArgs({ weeklyProjections: weekly((w) => (w >= 6 ? 40 : 0)) }))!;
+    // Same full-strength team either way: his strength is his projection in the weeks he plays.
+    const healthy = simulateLeague(inSeasonArgs({ weeklyProjections: weekly(() => 40) }))!;
+    expect(row1(backWeek6).lineupScore).toBeCloseTo(row1(healthy).lineupScore, 6);
+    // The schedule preview shows him missing weeks 4–5 and back in 6–7.
+    const preview = Object.fromEntries(row1(backWeek6).upcomingSchedule.map((g) => [g.week, g.projectedPoints]));
+    expect(preview[4]).toBeLessThan(preview[6]);
+    expect(preview[5]).toBeLessThan(preview[7]);
+    expect(preview[6]).toBeCloseTo(Math.round(row1(backWeek6).lineupScore * 10) / 10, 6);
+    // …and the sims see the two missed weeks.
+    expect(row1(backWeek6).expectedWins).toBeLessThan(row1(healthy).expectedWins);
+  });
+
+  it("with every player projected every week, nobody sits out a hashed bye", () => {
+    const sim = simulateLeague(inSeasonArgs({ weeklyProjections: weekly(() => 40) }))!;
+    sim.rows.forEach((row) => row.upcomingSchedule.forEach((g) => {
+      expect(g.projectedPoints).toBeCloseTo(Math.round(row.lineupScore * 10) / 10, 6);
+    }));
+  });
+
+  it("falls back to the old rules when any remaining week is missing", () => {
+    const missingWeek9 = simulateLeague(inSeasonArgs({ weeklyProjections: weekly(() => 0, [4, 5, 6, 7, 8]) }))!;
+    const none = simulateLeague(inSeasonArgs())!;
+    expect(summarize(missingWeek9)).toEqual(summarize(none));
   });
 });
 

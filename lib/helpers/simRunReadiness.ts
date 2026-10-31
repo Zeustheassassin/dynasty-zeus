@@ -20,7 +20,8 @@ export type SimRunWait =
   | "nflState"        // current week unknown — the sim would run in offseason mode
   | "projections"     // this week's projections under THIS league's scoring
   | "redraftValues"   // redraft values in this league's QB format (1QB vs superflex)
-  | "matchups";       // this league's weekly matchups (real schedule + played-week scores)
+  | "matchups"        // this league's weekly matchups (real schedule + played-week scores)
+  | "weeklyProjections"; // Sleeper's remaining-week projections (byes, injury return dates)
 
 /** Short progress-line text for each wait. */
 export const SIM_RUN_WAIT_LABELS: Record<SimRunWait, string> = {
@@ -30,6 +31,7 @@ export const SIM_RUN_WAIT_LABELS: Record<SimRunWait, string> = {
   projections: "loading projections for its scoring",
   redraftValues: "loading player values",
   matchups: "loading schedule",
+  weeklyProjections: "loading byes and injury return dates",
 };
 
 export interface SimRunReadinessInput {
@@ -48,6 +50,9 @@ export interface SimRunReadinessInput {
   /** Format of the latest redraft load to finish, success or failure (useCalcValues). */
   redraftSettledNumQbs: number | null;
   leagueWeeklyMatchups: Record<string, unknown>;
+  /** The remaining-week projections load has settled, success or failure (useWeeklyProjections).
+   *  League-independent, so a settled load serves every league in the queue. */
+  weeklyProjectionsSettled: boolean;
 }
 
 export function getSimRunWait(input: SimRunReadinessInput): SimRunWait | null {
@@ -77,5 +82,6 @@ export function getSimRunWait(input: SimRunReadinessInput): SimRunWait | null {
   }
 
   if (!input.leagueWeeklyMatchups[leagueId]) return "matchups";
+  if (!input.weeklyProjectionsSettled) return "weeklyProjections";
   return null;
 }

@@ -12,6 +12,7 @@ import {
   createSeededRandom, randomNormal, buildRoundRobinSchedule,
   average, logisticWinProb, percentileFromCounts,
 } from "./math";
+import { remainingRegularSeasonWeeks, type ScoredWeeklyProjections } from "./weeklyProjections";
 import type { PlayerUsage } from "../../hooks/usePlayerStats";
 import type {
   SleeperLeague, SleeperRoster, SleeperPlayer, SleeperMatchup, SleeperNFLState,
@@ -62,6 +63,11 @@ export interface SimulateLeagueArgs {
   leagueAdjustedFcValues: Record<string, number>;
   leagueAdjustedRedraftValues: Record<string, number>;
   projectedRookiesByRoster: Map<number, PoolPlayer[]>;
+  /** Sleeper's projections for each remaining regular-season week, scored for this league
+   *  (scoreWeeklyProjections). In-season, when every week left to play is present, they decide who
+   *  is available each week — byes, injury return dates, backups. Null or a missing week falls
+   *  back to the hashed byes and this week's injury designations. */
+  weeklyProjections: ScoredWeeklyProjections | null;
   simSalt: number;
 }
 
@@ -79,6 +85,7 @@ export function simulateLeague({
   leagueAdjustedFcValues,
   leagueAdjustedRedraftValues,
   projectedRookiesByRoster,
+  weeklyProjections,
   simSalt,
 }: SimulateLeagueArgs): LeagueSimulation | null {
   if (!selectedLeague || !rosters.length) return null;
@@ -104,9 +111,30 @@ export function simulateLeague({
     : 0;
   const projectionIsSeason = projectionWeek === 0;
 
+  // Weekly availability (2026-10-30). Sleeper projects a player to nothing in any week he won't
+  // play — his bye, every week until it expects him back from an injury, or as a backup — so with
+  // every remaining week's projections in hand, a player plays a simulated week only when Sleeper
+  // projects him to score in it, and one projected for none of them leaves the team's pool.
+  // All or nothing: one missing week keeps the hashed byes and this-week-only injury designations.
+  const remainingWeeks = remainingRegularSeasonWeeks(currentWeek, regularSeasonWeeks);
+  const weeklyMode = remainingWeeks.length > 0 && remainingWeeks.every((week) => !!weeklyProjections?.[week]);
+  const projectedToPlay = (playerId: string, week: number): boolean =>
+    (weeklyProjections?.[week]?.[playerId] ?? 0) > 0;
+  /** A player's average projection over the remaining weeks he's projected to play. */
+  const averageWeeklyProjection = (playerId: string): number => {
+    const weeks = remainingWeeks.filter((week) => projectedToPlay(playerId, week));
+    return weeks.length ? weeks.reduce((sum, week) => sum + (weeklyProjections?.[week]?.[playerId] ?? 0), 0) / weeks.length : 0;
+  };
+
+  // A player's strength in a week he plays: this week's projection, else (weekly mode) his
+  // average over the weeks Sleeper projects him back, else value-based.
   const scorePlayer = (playerId: string) => {
     const projected = projectionMap.get(String(playerId));
     if (typeof projected === "number" && projected > 0) return projected;
+    if (weeklyMode) {
+      const later = averageWeeklyProjection(playerId);
+      if (later > 0) return later;
+    }
     const redraftVal = leagueAdjustedRedraftValues[playerId] ?? 0;
     if (redraftVal > 0) return redraftVal / 250;
     const p = players[playerId] as SleeperPlayer | undefined;
@@ -159,6 +187,13 @@ export function simulateLeague({
     return Math.min(0.97, rate);
   };
 
+  /** Known before any dice roll: on bye, or (weekly mode) not projected to play that week. */
+  const isOutForWeek = (p: PoolPlayer, week: number): boolean => {
+    if (weeklyMode) return !projectedToPlay(p.id, week);
+    const byeWk = getPlayerByeWeek(p.id, p.nflTeam);
+    return byeWk > 0 && byeWk === week;
+  };
+
   const pickBestStarters = (pool: PoolPlayer[], unavailableIds: Set<string>): { score: number; used: Set<string> } => {
     const avail = [...pool].filter((p) => !unavailableIds.has(p.id)).sort((a, b) => b.score - a.score);
     const used = new Set<string>();
@@ -179,7 +214,9 @@ export function simulateLeague({
         if (!p || !["QB", "RB", "WR", "TE"].includes(p.position)) return null;
         return { id, position: p.position, nflTeam: p.team, score: scorePlayer(id) } as PoolPlayer;
       })
-      .filter((p): p is PoolPlayer => p !== null);
+      .filter((p): p is PoolPlayer => p !== null)
+      // Out for every week left (season-ending IR, a backup who won't play): not part of the team.
+      .filter((p) => !weeklyMode || remainingWeeks.some((week) => projectedToPlay(p.id, week)));
     const rookieExtras: PoolPlayer[] = simulationMode === "offseason"
       ? (projectedRookiesByRoster.get(Number(rEntry.roster_id)) || [])
       : [];
@@ -355,6 +392,16 @@ export function simulateLeague({
     rosterBaseScore.set(row.rosterId, score > 0 ? score : 1);
   });
 
+  /** Share of a team's full lineup it can field in `week` from who is projected to play, before
+   *  any injury roll (weekly mode only, else 1). Drives the schedule preview's projections. */
+  const expectedWeekRatio = (rosterId: number, week: number): number => {
+    const pool = rosterPoolMap.get(rosterId) || [];
+    if (!weeklyMode || pool.length === 0) return 1;
+    const out = new Set(pool.filter((p) => isOutForWeek(p, week)).map((p) => p.id));
+    const baseRaw = rosterBaseScore.get(rosterId) || 1;
+    return Math.max(0.35, Math.min(1.0, pickBestStarters(pool, out).score / baseRaw));
+  };
+
   const playMatch = (aRosterId: number, bRosterId: number, simWeek: number, rng: () => number) => {
     const aRow = rowByRosterId.get(aRosterId);
     const bRow = rowByRosterId.get(bRosterId);
@@ -364,17 +411,16 @@ export function simulateLeague({
       const pool = rosterPoolMap.get(rosterId) || [];
       if (simWeek > 0 && pool.length > 0) {
         const unavail = new Set<string>();
-        // NOTE: rng() is only drawn for players NOT on bye this week — bye-week
-        // players consume zero random draws. Harmless today since bye status is
-        // deterministic per player/week (same for a given roster+simSalt every
-        // time), but it means the shape of the RNG stream depends on roster
-        // composition and pool ordering. Do NOT reorder `pool` or change the
-        // bye-skip logic without expecting every subsequent random draw in this
-        // sim to shift — that would silently change results for otherwise-
-        // unrelated simSalt values, including already-committed sim rows.
+        // NOTE: rng() is only drawn for players who can play this week — a player
+        // on bye (or, in weekly mode, not projected to play) consumes zero random
+        // draws. Harmless since that is deterministic per player/week (same for a
+        // given roster+simSalt every time), but it means the shape of the RNG
+        // stream depends on roster composition and pool ordering. Do NOT reorder
+        // `pool` or change the skip logic without expecting every subsequent
+        // random draw in this sim to shift — that would silently change results
+        // for otherwise-unrelated simSalt values, including already-committed sim rows.
         pool.forEach((p) => {
-          const byeWk = getPlayerByeWeek(p.id, p.nflTeam);
-          if (byeWk > 0 && byeWk === simWeek) {
+          if (isOutForWeek(p, simWeek)) {
             unavail.add(p.id);
           } else if (rng() < getPlayerInjuryRate(p.id, p.position, simWeek)) {
             unavail.add(p.id);
@@ -487,7 +533,9 @@ export function simulateLeague({
         const aRow = rowByRosterId.get(aRosterId);
         const bRow = rowByRosterId.get(bRosterId);
         if (!aRow || !bRow) return null;
-        const aProb = logisticWinProb(aRow.powerScore, bRow.powerScore, 14);
+        const aRatio = expectedWeekRatio(aRosterId, week.week);
+        const bRatio = expectedWeekRatio(bRosterId, week.week);
+        const aProb = logisticWinProb(aRow.powerScore * aRatio, bRow.powerScore * bRatio, 14);
         const bProb = 1 - aProb;
         const matchup = {
           week: week.week,
@@ -495,11 +543,11 @@ export function simulateLeague({
           aRosterId,
           aName: aRow.ownerName,
           aWinProb: aProb,
-          aProjected: Math.round(aRow.lineupScore * 10) / 10,
+          aProjected: Math.round(aRow.lineupScore * aRatio * 10) / 10,
           bRosterId,
           bName: bRow.ownerName,
           bWinProb: bProb,
-          bProjected: Math.round(bRow.lineupScore * 10) / 10,
+          bProjected: Math.round(bRow.lineupScore * bRatio * 10) / 10,
         };
         aRow.upcomingSchedule.push({
           week: week.week,

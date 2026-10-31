@@ -10,6 +10,7 @@ import { CURRENT_YEAR } from "../../lib/helpers/season";
 import { ROOKIE_YEAR } from "../../hooks/useRookieBoardState";
 import type { PlayerUsage } from "../../hooks/usePlayerStats";
 import type { ProjectionLoadedFor } from "../../hooks/useProjections";
+import type { ScoredWeeklyProjections } from "../../lib/helpers/weeklyProjections";
 import type {
   SleeperLeague, SleeperRoster, SleeperPlayer, SleeperMatchup, SleeperNFLState,
   CommittedSimsByLeague, CachedSimRow, SimRow, SimulationTeamRow, LeagueSimulation,
@@ -41,6 +42,10 @@ export interface SimulatorCtx {
   leagueAdjustedFcValues: Record<string, number>;
   leagueAdjustedRedraftValues: Record<string, number>;
   projectedRookiesByRoster: Map<number, PoolPlayer[]>;
+  /** Sleeper's remaining-week projections scored for the selected league (simulateLeague). */
+  weeklyProjections: ScoredWeeklyProjections | null;
+  /** The remaining-week projections load has settled (or there are none to load). */
+  weeklyProjectionsSettled: boolean;
   supabaseUser: User | null;
   leagues: SleeperLeague[];
   loadRoster: (league: SleeperLeague) => Promise<void>;
@@ -82,7 +87,8 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
     loadingRedraft, redraftSettledNumQbs, playerStats,
     leagueWeeklyMatchups, standings, users,
     leagueAdjustedFcValues, leagueAdjustedRedraftValues,
-    projectedRookiesByRoster, supabaseUser, leagues, loadRoster,
+    projectedRookiesByRoster, weeklyProjections, weeklyProjectionsSettled,
+    supabaseUser, leagues, loadRoster,
   } = ctx;
 
   const [leagueSimCache, setLeagueSimCache] = useState<Record<string, Record<number, CachedSimRow>>>({});
@@ -243,6 +249,7 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
         leagueAdjustedFcValues,
         leagueAdjustedRedraftValues,
         projectedRookiesByRoster,
+        weeklyProjections,
         simSalt,
       }),
     [
@@ -260,6 +267,7 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
       users,
       simSalt,
       projectedRookiesByRoster,
+      weeklyProjections,
     ]
   );
 
@@ -282,12 +290,13 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
         leagueAdjustedFcValues,
         leagueAdjustedRedraftValues,
         projectedRookiesByRoster,
+        weeklyProjections,
         simSalt,
       }),
     [
       selectedLeague, rosters, players, nflState, projectionData, projectionWeek, playerStats,
       leagueWeeklyMatchups, standings, users, leagueAdjustedFcValues, leagueAdjustedRedraftValues,
-      projectedRookiesByRoster, simSalt,
+      projectedRookiesByRoster, weeklyProjections, simSalt,
     ]
   );
 
@@ -392,10 +401,12 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
       loadingRedraft,
       redraftSettledNumQbs,
       leagueWeeklyMatchups,
+      weeklyProjectionsSettled,
     });
   }, [
     simQueue, selectedLeague, readyLeagueId, playersLoaded, nflState, projectionWeek,
     loadingProjections, projectionLoadedFor, loadingRedraft, redraftSettledNumQbs, leagueWeeklyMatchups,
+    weeklyProjectionsSettled,
   ]);
   // Read by the skip timer's log line without restarting the timer on every change.
   const simRunWaitRef = useRef<SimRunWait | null>(null);

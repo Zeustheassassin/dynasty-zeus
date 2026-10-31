@@ -528,7 +528,9 @@ describe("GET weekly-matchup fetch concurrency", () => {
     };
     fake.links = { rows: [{ sleeper_user_id: "s1" }], error: null };
     route((u) => u.includes("/user/s1/leagues/"), [league]);
-    // week 6 -> weeks 1..5 fetched for matchups: a 4-call chunk then a 1-call chunk.
+    // week 6 -> every regular-season week (1..14, no playoff_week_start = Sleeper's default 15)
+    // fetched for matchups since 10/30, played or not, so the weeks still to play use Sleeper's
+    // real schedule instead of a generated round-robin.
     route((u) => u.includes("/state/nfl"), { season_type: "regular", week: 6, season: "2026" });
     route((u) => u.includes("/rosters"), [{ roster_id: 1, owner_id: "owner1", settings: {} }]);
     h.simulateLeague.mockReturnValue({
@@ -561,8 +563,44 @@ describe("GET weekly-matchup fetch concurrency", () => {
     const GET = await loadGET();
     const res = await GET(makeReq(`Bearer ${SECRET}`));
     expect(res.status).toBe(200);
-    expect(totalMatchupCalls).toBe(5);
+    expect(totalMatchupCalls).toBe(14);
     expect(maxConcurrentMatchupCalls).toBe(4);
+  });
+});
+
+describe("GET weekly availability projections", () => {
+  // 10/30: simulateLeague reads Sleeper's projection for every regular-season week still to play
+  // (byes, injury return dates). This week's reuses the projections already fetched for
+  // projectionData; later weeks are fetched once per run and scored under each league's rules.
+  it("passes the remaining weeks, scored for the league, to simulateLeague", async () => {
+    const league = {
+      league_id: "L-1", name: "Dynasty", settings: { taxi_slots: 2, best_ball: 0, playoff_week_start: 15 },
+      roster_positions: ["QB", "RB", "WR", "TE", "FLEX", "SUPER_FLEX", "BN"],
+      scoring_settings: { rec: 1, rec_yd: 0.1, bonus_rec_te: 0.5 },
+    };
+    fake.links = { rows: [{ sleeper_user_id: "s1" }], error: null };
+    route((u) => u.includes("/user/s1/leagues/"), [league]);
+    route((u) => u.includes("/state/nfl"), { season_type: "regular", week: 13, season: "2026" });
+    route((u) => u.includes("/rosters"), [{ roster_id: 1, owner_id: "owner1", settings: {} }]);
+    route((u) => u.includes("/projections/nfl/2026/13"), [
+      { player_id: "te1", player: { position: "TE" }, stats: { rec: 4, rec_yd: 50, pts_ppr: 9 } },
+      { player_id: "wr1", player: { position: "WR" }, stats: { pts_ppr: 0 } }, // bye
+    ]);
+    route((u) => u.includes("/projections/nfl/2026/14"), [
+      { player_id: "wr1", player: { position: "WR" }, stats: { rec: 6, rec_yd: 80, pts_ppr: 14 } },
+    ]);
+    h.simulateLeague.mockReturnValue({
+      rows: [{ rosterId: 1, playoffOdds: 0.5, titleOdds: 0.1, expectedWins: 5, avgFinish: 4, finishRange: "3-5" }],
+    });
+
+    const GET = await loadGET();
+    expect((await GET(makeReq(`Bearer ${SECRET}`))).status).toBe(200);
+    const projectionCalls = (vi.mocked(fetch).mock.calls as unknown[][])
+      .map(([u]) => String(u)).filter((u) => u.includes("/projections/nfl/2026/13"));
+    expect(projectionCalls).toHaveLength(1); // fetched once, shared by projectionData and week 13
+    expect(h.simulateLeague).toHaveBeenCalledWith(expect.objectContaining({
+      weeklyProjections: { 13: { te1: 11 }, 14: { wr1: 14 } },
+    }));
   });
 });
 
