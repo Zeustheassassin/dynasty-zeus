@@ -60,6 +60,7 @@ import {
 } from "../../../../lib/constants";
 import { waitForSleeperSlot } from "../../../../lib/server/sleeperBudget";
 import { simulateLeague } from "../../../../lib/helpers/simulation";
+import { buildStandingRows } from "../../../../lib/helpers/standings";
 import { projectRookiesByRoster } from "../../../../lib/helpers/rookieProjection";
 import { logger } from "../../../../lib/logger";
 import { verifyCron } from "../../../../lib/server/verifyCron";
@@ -461,15 +462,7 @@ async function fetchLeagueCore(league: SleeperLeague, paced: PacedFetch): Promis
   const allPicks: AugmentedPick[] = buildLeaguePickPool(rosterList, tradedPicksList, draftList, "overview");
   const currentDraft = draftList.find((d) => d.season === CURRENT_YEAR) ?? null;
 
-  const standings: StandingRow[] = rosterList.map((r) => ({
-    roster_id: r.roster_id,
-    wins: r.settings?.wins || 0,
-    losses: r.settings?.losses || 0,
-    ties: r.settings?.ties || 0,
-    fpts: r.settings?.fpts || 0,
-    max_pf: r.settings?.ppts || 0,
-    owner_id: r.owner_id,
-  }));
+  const standings: StandingRow[] = buildStandingRows(rosterList);
 
   return { rosters: rosterList, userNames, allPicks, draftSettings: currentDraft, standings };
 }

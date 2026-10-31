@@ -28,6 +28,7 @@ import {
   isDynastyLeague,
 } from "../lib/helpers";
 import { simulateLeague } from "../lib/helpers/simulation";
+import { buildStandingRows } from "../lib/helpers/standings";
 import { projectRookiesByRoster } from "../lib/helpers/rookieProjection";
 import { useLeagueOverview } from "./useLeagueOverview";
 import type { PlayerUsage } from "./usePlayerStats";
@@ -116,17 +117,7 @@ async function loadSpyLeagueCore(
 
   const picks = myRoster ? sortOwnerPicks(tempPicks, myRoster.roster_id) : [];
 
-  const standings: StandingRow[] = rosters
-    .map((r) => ({
-      roster_id: r.roster_id,
-      wins: r.settings?.wins || 0,
-      losses: r.settings?.losses || 0,
-      ties: r.settings?.ties || 0,
-      fpts: r.settings?.fpts || 0,
-      max_pf: r.settings?.ppts || 0,
-      owner_id: r.owner_id,
-    }))
-    .sort((a, b) => (b.wins !== a.wins ? b.wins - a.wins : b.fpts - a.fpts));
+  const standings: StandingRow[] = buildStandingRows(rosters);
 
   return { rosters, users, allPicks: tempPicks, picks, standings, myRoster, draftSettings: currentDraft, freeAgents };
 }

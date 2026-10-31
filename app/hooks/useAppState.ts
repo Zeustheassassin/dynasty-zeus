@@ -39,6 +39,7 @@ import {
   type LineupAvailability,
 } from "../../lib/helpers";
 import { projectRookiesByRoster } from "../../lib/helpers/rookieProjection";
+import { buildStandingRows } from "../../lib/helpers/standings";
 import { useLatestRequest } from "../../hooks/useLatestRequest";
 import { useProjections } from "../../hooks/useProjections";
 import { useSleeperUser } from "../../hooks/useSleeperUser";
@@ -1297,21 +1298,7 @@ const loadRoster = useCallback(async (league: SleeperLeague) => {
     }
   });
   setUsers(userMap);
-  setStandings(
-    allRosters
-      .map((r) => ({
-        roster_id: r.roster_id,
-        wins: r.settings?.wins || 0,
-        losses: r.settings?.losses || 0,
-        ties: r.settings?.ties || 0,
-        fpts: r.settings?.fpts || 0,
-        max_pf: r.settings?.ppts || 0,
-        owner_id: r.owner_id,
-      }))
-      .sort((a, b) =>
-        b.wins !== a.wins ? b.wins - a.wins : b.fpts - a.fpts
-      )
-  );
+  setStandings(buildStandingRows(allRosters));
 
   // ── Step 2: Synchronous work derived from rosters ────────────────────────
   // (Free agents are derived from `rosters` + the player map — see `freeAgents` above.)

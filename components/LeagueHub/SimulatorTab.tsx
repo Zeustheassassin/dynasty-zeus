@@ -113,7 +113,7 @@ function SimulatorTab({
           <div className="grid grid-cols-[minmax(180px,1.45fr)_78px_108px_88px_92px_92px_88px_82px_96px_92px_110px] gap-2 px-3 pb-1 text-[10px] font-bold uppercase tracking-widest text-slate-600">
             <span>Team</span>
             <span className="text-center">Power</span>
-            <span className="text-center">Proj Max PF</span>
+            <span className="text-center" title="Max PF so far plus the sims' average for the rest of the regular season. The 1.01 goes to the non-playoff team that ends lowest on this.">Proj Max PF</span>
             <span className="text-center">Exp Wins</span>
             <span className="text-center">Avg Finish</span>
             <span className="text-center">Finish Band</span>

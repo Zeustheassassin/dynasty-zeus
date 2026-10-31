@@ -186,15 +186,12 @@ export function simulateLeague({
     rosterPoolMap.set(Number(rEntry.roster_id), [...existing, ...rookieExtras]);
   });
 
-  const buildLineupStrength = (rosterEntry: SleeperRoster, pool: PoolPlayer[]) => {
+  const buildLineupStrength = (pool: PoolPlayer[]) => {
     const { score: rawLineupScore, used } = pickBestStarters(pool, new Set());
     const bench = pool.filter((p) => !used.has(p.id));
     const rawBenchDepth = bench.slice(0, 5).reduce((s, p) => s + p.score, 0);
     const weeklyLineupScore = rawLineupScore / (projectionIsSeason ? regularSeasonWeeks : 1);
     const weeklyBenchDepth = rawBenchDepth / (projectionIsSeason ? regularSeasonWeeks : 1);
-    const seasonProjection = projectionIsSeason
-      ? rawLineupScore
-      : Number(rosterEntry?.settings?.ppts || 0) + (Math.max(regularSeasonWeeks - Math.max(currentWeek - 1, 0), 0) * rawLineupScore);
 
     const teamVolatilityMultiplier = (() => {
       const starters = pool.filter((p) => used.has(p.id) && players[p.id]);
@@ -231,7 +228,6 @@ export function simulateLeague({
     return {
       lineupScore: weeklyLineupScore,
       benchDepth: weeklyBenchDepth,
-      projectedMaxPf: Math.round(seasonProjection * 10) / 10,
       powerScore: Math.round((weeklyLineupScore + weeklyBenchDepth * 0.35) * 10) / 10,
       weeklyStdDev: Math.max(8, (weeklyLineupScore * 0.16 + weeklyBenchDepth * 0.08) * teamVolatilityMultiplier),
     };
@@ -239,7 +235,7 @@ export function simulateLeague({
 
   const rows: SimulationTeamRow[] = rosters.map((rosterEntry) => {
     const pool = rosterPoolMap.get(Number(rosterEntry.roster_id)) || [];
-    const strength = buildLineupStrength(rosterEntry, pool);
+    const strength = buildLineupStrength(pool);
     const standing = standings.find((entry) => Number(entry.roster_id) === Number(rosterEntry.roster_id));
     const ownerName = users[rosterEntry.owner_id] || `Team ${rosterEntry.roster_id}`;
     return {
@@ -251,6 +247,7 @@ export function simulateLeague({
       pointsFor: Number(standing?.fpts || rosterEntry.settings?.fpts || 0),
       maxPf: Number(standing?.max_pf || rosterEntry.settings?.ppts || 0),
       ...strength,
+      projectedMaxPf: 0,
       expectedWins: 0,
       avgFinish: 0,
       projectedFinish: 0,
@@ -536,11 +533,12 @@ export function simulateLeague({
       winsSum: 0,
       finishCounts: Array.from({ length: rosters.length + 1 }, () => 0),
       slotCounts: Array.from({ length: rosters.length + 1 }, () => 0),
+      maxPfSum: 0,
       playoffCount: 0,
       byeCount: 0,
       titleCount: 0,
     }])
-  ) as Record<number, { winsSum: number; finishCounts: number[]; slotCounts: number[]; playoffCount: number; byeCount: number; titleCount: number }>;
+  ) as Record<number, { winsSum: number; finishCounts: number[]; slotCounts: number[]; maxPfSum: number; playoffCount: number; byeCount: number; titleCount: number }>;
 
   // Sleeper's "play against the league median score" setting — each week,
   // on top of the normal head-to-head result, every roster also earns a win
@@ -602,19 +600,20 @@ export function simulateLeague({
         wins: winMap.get(row.rosterId) || 0,
         points: pointMap.get(row.rosterId) || 0,
         powerScore: row.powerScore,
-        projectedMaxPf: row.projectedMaxPf,
+        maxPf: maxPfMap.get(row.rosterId) || 0,
       }))
       .sort((a, b) => {
         if (b.wins !== a.wins) return b.wins - a.wins;
         if (b.points !== a.points) return b.points - a.points;
         if (b.powerScore !== a.powerScore) return b.powerScore - a.powerScore;
-        return b.projectedMaxPf - a.projectedMaxPf;
+        return b.maxPf - a.maxPf;
       });
 
     const seededIds = simStandings.map((entry) => entry.rosterId);
     seededIds.forEach((rosterId, index) => {
       const stats = simulationStats[rosterId];
       stats.winsSum += winMap.get(rosterId) || 0;
+      stats.maxPfSum += maxPfMap.get(rosterId) || 0;
       stats.finishCounts[index + 1] += 1;
     });
     seededIds.slice(playoffTeams)
@@ -639,6 +638,9 @@ export function simulateLeague({
     const ceilingFinish = percentileFromCounts(finishCounts, 0.8);
 
     row.expectedWins = Math.round((stats.winsSum / simCount) * 10) / 10;
+    // Max PF so far plus the sims' average for the rest of the regular season — the same figure
+    // the 1.01 race below is decided on.
+    row.projectedMaxPf = Math.round((stats.maxPfSum / simCount) * 10) / 10;
     row.avgFinish = Math.round(expectedFinish * 10) / 10;
     row.projectedFinish = likelyFinish;
     row.finishRange = `${floorFinish || likelyFinish}-${ceilingFinish || likelyFinish}`;

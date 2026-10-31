@@ -18,6 +18,27 @@
  * season simulator, which seeds playoffs from it — this is a display transform
  * applied at the table, deliberately, so the two can't drift.
  */
+import type { SleeperRoster, StandingRow } from "../types";
+
+/**
+ * The `standings` array useAppState / useSpyState / the simulation-history cron feed the season
+ * simulator: one row per roster, wins desc then points for desc. Sleeper sends points for and max
+ * PF as whole points plus hundredths (`fpts` + `fpts_decimal`, `ppts` + `ppts_decimal`); both halves
+ * are kept, since the sim's 1.01 race (lowest max PF) can come down to a few points.
+ */
+export function buildStandingRows(rosters: readonly SleeperRoster[]): StandingRow[] {
+  return rosters
+    .map((r) => ({
+      roster_id: r.roster_id,
+      wins: r.settings?.wins || 0,
+      losses: r.settings?.losses || 0,
+      ties: r.settings?.ties || 0,
+      fpts: (r.settings?.fpts || 0) + (r.settings?.fpts_decimal || 0) / 100,
+      max_pf: (r.settings?.ppts || 0) + (r.settings?.ppts_decimal || 0) / 100,
+      owner_id: r.owner_id,
+    }))
+    .sort((a, b) => (b.wins !== a.wins ? b.wins - a.wins : b.fpts - a.fpts));
+}
 
 /** Only the fields the ordering reads — callers pass their full standings row. */
 export interface StandingsOrderRow {
