@@ -29,6 +29,9 @@ function readyInput(overrides: Partial<SimRunReadinessInput> = {}): SimRunReadin
     redraftSettledNumQbs: 2,
     leagueWeeklyMatchups: { L1: [] },
     weeklyProjectionsSettled: true,
+    liveWeekMatchupsFetchedAt: 2_000,
+    simRunStartedAt: 1_000,
+    scheduleWeek: 6,
     ...overrides,
   };
 }
@@ -91,6 +94,28 @@ describe("getSimRunWait", () => {
   it("waits for this league's weekly matchups (another league's don't count)", () => {
     expect(getSimRunWait(readyInput({ leagueWeeklyMatchups: {} }))).toBe("matchups");
     expect(getSimRunWait(readyInput({ leagueWeeklyMatchups: { L0: [] } }))).toBe("matchups");
+  });
+
+  // 10/30: games already played this week count their real points, so a run saves a league only
+  // with its live-week scores fetched since the run started and this week's NFL scoreboard.
+  it("waits for this week's scores fetched since the run started", () => {
+    expect(getSimRunWait(readyInput({ liveWeekMatchupsFetchedAt: null }))).toBe("matchups");
+    expect(getSimRunWait(readyInput({ liveWeekMatchupsFetchedAt: 500, simRunStartedAt: 1_000 }))).toBe("matchups");
+    expect(getSimRunWait(readyInput({ liveWeekMatchupsFetchedAt: 1_000, simRunStartedAt: 1_000 }))).toBeNull();
+  });
+
+  it("waits for this week's scoreboard (another week's doesn't count)", () => {
+    expect(getSimRunWait(readyInput({ scheduleWeek: 0 }))).toBe("scoreboard");
+    expect(getSimRunWait(readyInput({ scheduleWeek: 5 }))).toBe("scoreboard");
+  });
+
+  it("doesn't wait for live-week scores or a scoreboard once the regular season is over", () => {
+    const playoffs = { season_type: "regular", week: 16 } as SleeperNFLState;
+    expect(getSimRunWait(readyInput({
+      nflState: playoffs, projectionWeek: 16,
+      projectionLoadedFor: { week: 16, scoringKey: projectionScoringKey(halfPpr) },
+      liveWeekMatchupsFetchedAt: null, scheduleWeek: 0,
+    }))).toBeNull();
   });
 
   it("waits for the remaining-week projections (byes, injury return dates) to settle", () => {

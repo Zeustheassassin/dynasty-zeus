@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { simulateLeague, buildRostersWithTrade, type SimulateLeagueArgs, type PoolPlayer } from "@/lib/helpers/simulation";
-import type { LeagueSimulation, SleeperMatchup } from "@/lib/types";
+import type { LeagueSimulation, SleeperMatchup, TeamGameState } from "@/lib/types";
 
 // Characterization ("golden") tests for the season simulator, written BEFORE any refactor or
 // Web Worker move (audit Batch 1 step 5). The RNG is seeded from league_id + simSalt, so every
@@ -78,6 +78,7 @@ function mkArgs(over: Partial<SimulateLeagueArgs> = {}): SimulateLeagueArgs {
     leagueAdjustedRedraftValues: f.redraft,
     projectedRookiesByRoster: new Map<number, PoolPlayer[]>(),
     weeklyProjections: null,
+    currentWeekGames: null,
     simSalt: 0,
     ...over,
   };
@@ -295,6 +296,81 @@ describe("simulateLeague — weekly availability", () => {
     const missingWeek9 = simulateLeague(inSeasonArgs({ weeklyProjections: weekly(() => 0, [4, 5, 6, 7, 8]) }))!;
     const none = simulateLeague(inSeasonArgs())!;
     expect(summarize(missingWeek9)).toEqual(summarize(none));
+  });
+});
+
+// 10/30: games already played this week count their real points; only the rest of the week is
+// simulated. inSeasonArgs is week 4. Roster r's players are ids 100 + (r-1)*11 + k, k = 0..10 in POS
+// order, on NFL team TEAMS[(r-1)*11 + k % 8]; each roster starts k = 0,2,3,5,6,9,4,1 in the league's
+// QB, RB, RB, WR, WR, TE, FLEX, SUPER_FLEX slots and benches k = 7, 8, 10.
+describe("simulateLeague — this week's games already played", () => {
+  const STARTER_KS = [0, 2, 3, 5, 6, 9, 4, 1];
+  const ids = (r: number) => Array.from({ length: 11 }, (_, k) => String(100 + (r - 1) * 11 + k));
+  const week4 = (points: (r: number, k: number) => number): { week: number; matchups: SleeperMatchup[] } => ({
+    week: 4,
+    matchups: [1, 2, 3, 4, 5, 6].map((r) => ({
+      matchup_id: Math.ceil(r / 2), roster_id: r, custom_points: null,
+      points: STARTER_KS.reduce((sum, k) => sum + points(r, k), 0),
+      starters: STARTER_KS.map((k) => ids(r)[k]),
+      starters_points: STARTER_KS.map((k) => points(r, k)),
+      players: ids(r),
+      players_points: Object.fromEntries(ids(r).map((id, k) => [id, points(r, k)])),
+    })),
+  });
+  const games = (state: (team: string) => TeamGameState | null) =>
+    Object.fromEntries(TEAMS.map((t) => [t, state(t)]).filter(([, g]) => g !== null));
+  const final = { kickoffAt: 0, state: "Final" } as TeamGameState;
+  const upcoming = { kickoffAt: 0, state: "Upcoming" } as TeamGameState;
+  const args = (points: (r: number, k: number) => number, gameState: (team: string) => TeamGameState | null) => {
+    const base = inSeasonArgs();
+    return inSeasonArgs({
+      leagueWeeklyMatchups: { "1234567890": [...base.leagueWeeklyMatchups["1234567890"], week4(points)] },
+      currentWeekGames: games(gameState),
+    });
+  };
+  const week4Game = (sim: LeagueSimulation, rosterId: number) =>
+    sim.rowByRosterId.get(rosterId)!.upcomingSchedule.find((g) => g.week === 4)!;
+
+  it("a finished week counts the real scores: the result is settled", () => {
+    const sim = simulateLeague(args((r) => (r === 1 ? 40 : 5), () => final))!;
+    expect(week4Game(sim, 1).projectedPoints).toBe(320);
+    expect(week4Game(sim, 1).winProb).toBe(1);
+    expect(week4Game(sim, 2).projectedPoints).toBe(40);
+    const notPlayed = simulateLeague(args((r) => (r === 1 ? 40 : 5), () => upcoming))!;
+    expect(sim.rowByRosterId.get(1)!.expectedWins).toBeGreaterThan(notPlayed.rowByRosterId.get(1)!.expectedWins + 0.2);
+  });
+
+  it("max PF takes the best lineup in hindsight, bench points included", () => {
+    const benchQuiet = simulateLeague(args((r, k) => (r === 1 && k === 7 ? 0 : 40), () => final))!;
+    const benchBig = simulateLeague(args((r, k) => (r === 1 && k === 7 ? 100 : 40), () => final))!;
+    // The benched WR's 100 replaces a 40 in the best lineup; points for and the result don't move.
+    expect(benchBig.rowByRosterId.get(1)!.projectedMaxPf - benchQuiet.rowByRosterId.get(1)!.projectedMaxPf).toBeCloseTo(60, 6);
+    expect(benchBig.rowByRosterId.get(1)!.expectedWins).toBe(benchQuiet.rowByRosterId.get(1)!.expectedWins);
+  });
+
+  it("a partly played week keeps the points already scored and simulates only the rest", () => {
+    // Team AAA has played: roster 1's starting QB (k = 0) is on it.
+    const aaaOnly = (team: string) => (team === "AAA" ? final : upcoming);
+    const qbQuiet = simulateLeague(args((r, k) => (r === 1 && k === 0 ? 0 : 10), aaaOnly))!;
+    const qbBig = simulateLeague(args((r, k) => (r === 1 && k === 0 ? 50 : 10), aaaOnly))!;
+    expect(week4Game(qbBig, 1).projectedPoints - week4Game(qbQuiet, 1).projectedPoints).toBeCloseTo(50, 1);
+    expect(week4Game(qbBig, 1).winProb).toBeGreaterThan(0);
+    expect(week4Game(qbBig, 1).winProb).toBeLessThan(1);
+  });
+
+  it("a live game adds the rest of its expected points to what's scored so far", () => {
+    const live = { kickoffAt: 0, state: "Live", period: 3, clockSeconds: 450 } as TeamGameState; // 37.5% left
+    const points = (r: number, k: number) => (r === 1 && k === 0 ? 20 : 10);
+    const done = simulateLeague(args(points, (t) => (t === "AAA" ? final : upcoming)))!;
+    const midGame = simulateLeague(args(points, (t) => (t === "AAA" ? live : upcoming)))!;
+    expect(week4Game(midGame, 1).projectedPoints).toBeGreaterThan(week4Game(done, 1).projectedPoints);
+  });
+
+  it("until a game kicks off, or without this week's scoreboard, the week is simulated whole as before", () => {
+    const points = (r: number) => (r === 1 ? 40 : 5);
+    const nothingPlayed = summarize(simulateLeague(args(points, () => upcoming))!);
+    const noScoreboard = summarize(simulateLeague({ ...args(points, () => upcoming), currentWeekGames: null })!);
+    expect(nothingPlayed).toEqual(noScoreboard);
   });
 });
 

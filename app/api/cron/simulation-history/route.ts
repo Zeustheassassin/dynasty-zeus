@@ -56,13 +56,14 @@ import {
 import {
   SLEEPER_BASE_URL, SLEEPER_PROJECTIONS_BASE, ROOKIE_BOARD_SHEET_URL,
   SLEEPER_PLAYERS_TIMEOUT_MS, SLEEPER_REQUEST_TIMEOUT_MS, SIM_HISTORY_CRON_RPM, SLEEPER_BUDGET_JOB_GRACE_MS,
-  SIM_HISTORY_CRON_TIME_BUDGET_MS,
+  SIM_HISTORY_CRON_TIME_BUDGET_MS, ESPN_SCOREBOARD_BASE_URL,
 } from "../../../../lib/constants";
+import { parseEspnScoreboard, type EspnEvent } from "../../../../lib/espnScoreboard";
 import { waitForSleeperSlot } from "../../../../lib/server/sleeperBudget";
 import { simulateLeague } from "../../../../lib/helpers/simulation";
 import { buildStandingRows } from "../../../../lib/helpers/standings";
 import {
-  remainingRegularSeasonWeeks, scoreWeeklyProjections, trimSleeperProjectionWeek,
+  getRegularSeasonWeeks, remainingRegularSeasonWeeks, scoreWeeklyProjections, trimSleeperProjectionWeek,
   type WeeklyProjectionWeek,
 } from "../../../../lib/helpers/weeklyProjections";
 import { projectRookiesByRoster } from "../../../../lib/helpers/rookieProjection";
@@ -71,7 +72,7 @@ import { verifyCron } from "../../../../lib/server/verifyCron";
 import type {
   SleeperLeague, SleeperRoster, SleeperUser, SleeperDraft, SleeperTradedPick,
   SleeperMatchup, SleeperNFLState, SleeperPlayer, StandingRow, ProjectionRow,
-  RookieBoardPlayer, AugmentedPick,
+  RookieBoardPlayer, AugmentedPick, TeamGameState,
 } from "../../../../lib/types";
 import type { PlayerUsage } from "../../../../hooks/usePlayerStats";
 import { fantasySkillPosition } from "../../../../lib/helpers/playerPosition";
@@ -254,6 +255,25 @@ async function fetchWeeklyProjectionWeeks(
     else log.warn("weekly projections missing — leagues fall back to hashed byes", { season, week });
   }, WEEKLY_MATCHUP_CONCURRENCY);
   return out;
+}
+
+/** This week's NFL scoreboard keyed by team (ESPN — the same parse as /api/nfl-scoreboard), so games
+ *  already played count their real points (simulateLeague's currentWeekGames; this run's matchup
+ *  fetch has the scores). Null in the offseason or when ESPN fails: the week is simulated whole. */
+async function fetchCurrentWeekGames(currentWeek: number): Promise<Record<string, TeamGameState> | null> {
+  if (currentWeek <= 0) return null;
+  try {
+    const res = await fetch(`${ESPN_SCOREBOARD_BASE_URL}?week=${currentWeek}&seasontype=2`, {
+      signal: AbortSignal.timeout(SLEEPER_REQUEST_TIMEOUT_MS),
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    const games = parseEspnScoreboard(Array.isArray(json?.events) ? (json.events as EspnEvent[]) : []);
+    return Object.keys(games).length > 0 ? games : null;
+  } catch (err) {
+    log.warn("ESPN scoreboard unavailable — this week is simulated whole", { err: String(err) });
+    return null;
+  }
 }
 
 function buildProjectionRows(
@@ -641,10 +661,13 @@ export async function GET(req: NextRequest): Promise<Response> {
   // see lib/helpers/weeklyProjections.ts), through the latest one any league plays before its
   // playoffs. This week's are the raw items fetched above; the rest come one ~2 MB week at a time.
   const lastRegularWeek = leagues.reduce(
-    (max, l) => Math.max(max, Number(l.settings?.playoff_week_start || 15) - 1), 0);
-  const weeklyProjectionWeeks = await fetchWeeklyProjectionWeeks(
-    season, remainingRegularSeasonWeeks(currentWeek, lastRegularWeek),
-    projIsSeasonMode ? null : rawProjItems, currentWeek, paced);
+    (max, l) => Math.max(max, getRegularSeasonWeeks(l)), 0);
+  const [weeklyProjectionWeeks, currentWeekGames] = await Promise.all([
+    fetchWeeklyProjectionWeeks(
+      season, remainingRegularSeasonWeeks(currentWeek, lastRegularWeek),
+      projIsSeasonMode ? null : rawProjItems, currentWeek, paced),
+    fetchCurrentWeekGames(currentWeek),
+  ]);
 
   // ── 3. Per-league simulate + collect rows ──
   let leaguesSimulated = 0;
@@ -682,7 +705,7 @@ export async function GET(req: NextRequest): Promise<Response> {
       // so every week still to play was simulated against a generated round-robin opponent).
       let leagueWeeklyMatchups: Record<string, { week: number; matchups: SleeperMatchup[] }[]> = {};
       if (currentWeek > 0) {
-        const regularSeasonWeeks = Math.max(1, Number(league.settings?.playoff_week_start || 15) - 1);
+        const regularSeasonWeeks = getRegularSeasonWeeks(league);
         const weeks = Array.from({ length: regularSeasonWeeks }, (_, i) => i + 1);
         const results = await withConcurrency(weeks, async (week) => ({
           week,
@@ -722,6 +745,7 @@ export async function GET(req: NextRequest): Promise<Response> {
         leagueAdjustedRedraftValues,
         projectedRookiesByRoster,
         weeklyProjections: scoreWeeklyProjections(weeklyProjectionWeeks, scoringSettings),
+        currentWeekGames,
         // Deliberately a fresh random seed each run, not the persisted per-
         // browser simSalt_v1 — this is a server cron with no single "the"
         // user session to match (each browser has its own persisted salt).

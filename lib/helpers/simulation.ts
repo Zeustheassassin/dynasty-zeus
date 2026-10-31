@@ -12,11 +12,12 @@ import {
   createSeededRandom, randomNormal, buildRoundRobinSchedule,
   average, logisticWinProb, percentileFromCounts,
 } from "./math";
-import { remainingRegularSeasonWeeks, type ScoredWeeklyProjections } from "./weeklyProjections";
+import { getRegularSeasonWeeks, remainingRegularSeasonWeeks, type ScoredWeeklyProjections } from "./weeklyProjections";
+import { gameFractionRemaining, normalCdf } from "./gamedayLive";
 import type { PlayerUsage } from "../../hooks/usePlayerStats";
 import type {
   SleeperLeague, SleeperRoster, SleeperPlayer, SleeperMatchup, SleeperNFLState,
-  SimulationTeamRow, LeagueSimulation, ProjectionRow, StandingRow,
+  SimulationTeamRow, LeagueSimulation, ProjectionRow, StandingRow, TeamGameState,
 } from "../types";
 
 export type PoolPlayer = { id: string; position: string; nflTeam: string | null; score: number };
@@ -68,6 +69,10 @@ export interface SimulateLeagueArgs {
    *  is available each week — byes, injury return dates, backups. Null or a missing week falls
    *  back to the hashed byes and this week's injury designations. */
   weeklyProjections: ScoredWeeklyProjections | null;
+  /** The NFL scoreboard for the current week, keyed by team (ESPN, via /api/nfl-scoreboard). With
+   *  this week's Sleeper matchups in leagueWeeklyMatchups, games that have kicked off count their
+   *  real points and only the rest of the week is simulated. Null: the whole week is simulated. */
+  currentWeekGames: Record<string, TeamGameState> | null;
   simSalt: number;
 }
 
@@ -86,6 +91,7 @@ export function simulateLeague({
   leagueAdjustedRedraftValues,
   projectedRookiesByRoster,
   weeklyProjections,
+  currentWeekGames,
   simSalt,
 }: SimulateLeagueArgs): LeagueSimulation | null {
   if (!selectedLeague || !rosters.length) return null;
@@ -95,7 +101,7 @@ export function simulateLeague({
   const isRegularSeason = nflState?.season_type === "regular" && nflWeek > 0;
   const currentWeek = isRegularSeason ? nflWeek : 0;
   const simulationMode = (currentWeek > 0 ? "in_season" : "offseason") as "in_season" | "offseason";
-  const regularSeasonWeeks = Math.max(1, Number(selectedLeague?.settings?.playoff_week_start || 15) - 1);
+  const regularSeasonWeeks = getRegularSeasonWeeks(selectedLeague);
   const playoffTeams = Number(selectedLeague?.settings?.playoff_teams || Math.ceil(rosters.length / 2));
   const byeTeams = playoffTeams >= 6 ? 2 : playoffTeams === 5 ? 1 : 0;
   const simCount = simulationMode === "offseason" ? 350 : 250;
@@ -194,11 +200,15 @@ export function simulateLeague({
     return byeWk > 0 && byeWk === week;
   };
 
-  const pickBestStarters = (pool: PoolPlayer[], unavailableIds: Set<string>): { score: number; used: Set<string> } => {
+  const pickBestStarters = (
+    pool: PoolPlayer[],
+    unavailableIds: Set<string>,
+    slots: readonly string[] = lineupSlots,
+  ): { score: number; used: Set<string> } => {
     const avail = [...pool].filter((p) => !unavailableIds.has(p.id)).sort((a, b) => b.score - a.score);
     const used = new Set<string>();
     let score = 0;
-    lineupSlots.forEach((slot: string) => {
+    slots.forEach((slot: string) => {
       const eligible = slot === "FLEX" ? ["RB", "WR", "TE"] : slot === "SUPER_FLEX" ? ["QB", "RB", "WR", "TE"] : [slot];
       const next = avail.find((p) => !used.has(p.id) && eligible.includes(p.position));
       if (next) { used.add(next.id); score += next.score; }
@@ -402,13 +412,117 @@ export function simulateLeague({
     return Math.max(0.35, Math.min(1.0, pickBestStarters(pool, out).score / baseRaw));
   };
 
+  // This week's games already played (2026-10-30). Once a player's NFL game kicks off his points
+  // are real: a started starter keeps what he's scored (plus, mid-game, the rest of his projection
+  // for the share of the game left), and only the slots still open — starters who haven't played,
+  // or on bye — are simulated, filled from players who haven't played yet, the way a manager sets
+  // the rest of his lineup. Needs this week's Sleeper matchups and an NFL scoreboard for this week;
+  // without either (or before any rostered player has played) the week is simulated whole.
+  interface PartialWeek {
+    /** Points this team's started starters have scored. */
+    lockedPoints: number;
+    /** Those starters' projected points still to come in live games (raw projection scale). */
+    liveRemainingRaw: number;
+    /** Lineup slots with no started starter in them. */
+    openSlots: string[];
+    /** Every rostered player whose game has started: points so far, raw projection still to come. */
+    started: Map<string, { position: string; points: number; remainingRaw: number }>;
+  }
+  const fractionOfGameLeft = (team: string | null | undefined): number => {
+    const game = team ? currentWeekGames?.[team] : undefined;
+    // Not on the board: a bye, or a scoreboard that didn't load — nothing played either way.
+    return game ? (gameFractionRemaining(game) ?? 0.5) : 1;
+  };
+  const partialWeekByRoster = new Map<number, PartialWeek>();
+  if (currentWeek > 0 && currentWeekGames) {
+    (weeklyHistory.find((week) => week.week === currentWeek)?.matchups || []).forEach((entry) => {
+      const started = new Map<string, { position: string; points: number; remainingRaw: number }>();
+      (entry.players || []).forEach((id) => {
+        const p = players[id] as SleeperPlayer | undefined;
+        if (!p || !["QB", "RB", "WR", "TE"].includes(p.position)) return;
+        const left = fractionOfGameLeft(p.team);
+        if (left >= 1) return;
+        started.set(id, { position: p.position, points: Number(entry.players_points?.[id] || 0), remainingRaw: scorePlayer(id) * left });
+      });
+      if (started.size === 0) return;
+      let lockedPoints = 0;
+      let liveRemainingRaw = 0;
+      const openSlots: string[] = [];
+      // Sleeper lists starters in roster_positions order, so starters[i] fills lineupSlots[i].
+      lineupSlots.forEach((slot: string, idx: number) => {
+        const starter = entry.starters?.[idx];
+        const done = starter ? started.get(starter) : undefined;
+        if (done) {
+          lockedPoints += done.points;
+          liveRemainingRaw += done.remainingRaw;
+        } else {
+          openSlots.push(slot);
+        }
+      });
+      partialWeekByRoster.set(Number(entry.roster_id), { lockedPoints, liveRemainingRaw, openSlots, started });
+    });
+  }
+
+  /** This week's expected final score and remaining variance for a team that has already played
+   *  some of it (no injury roll) — the schedule preview's "This Week". Null when nothing's played. */
+  const partialWeekOutlook = (rosterId: number, row: SimulationTeamRow): { mean: number; variance: number } | null => {
+    const partial = partialWeekByRoster.get(rosterId);
+    if (!partial) return null;
+    const pool = rosterPoolMap.get(rosterId) || [];
+    const out = new Set(pool.filter((p) => partial.started.has(p.id) || isOutForWeek(p, currentWeek)).map((p) => p.id));
+    const restRaw = partial.liveRemainingRaw + pickBestStarters(pool, out, partial.openSlots).score;
+    const baseRaw = rosterBaseScore.get(rosterId) || 1;
+    const sd = row.weeklyStdDev * 0.82;
+    return {
+      mean: partial.lockedPoints + row.lineupScore * (restRaw / baseRaw),
+      variance: sd * sd * Math.min(1, restRaw / baseRaw),
+    };
+  };
+
+  /** One team's simulated week: its points, its max PF before the bench-gap term, and the share of
+   *  the week that gap applies to (all of it, unless part of the week is already played). */
+  type WeekScore = { points: number; maxPf: number; gapShare: number };
+
   const playMatch = (aRosterId: number, bRosterId: number, simWeek: number, rng: () => number) => {
     const aRow = rowByRosterId.get(aRosterId);
     const bRow = rowByRosterId.get(bRosterId);
-    if (!aRow || !bRow) return { winner: aRosterId, loser: bRosterId, aPoints: 0, bPoints: 0 };
+    if (!aRow || !bRow) {
+      return { winner: aRosterId, loser: bRosterId, aPoints: 0, bPoints: 0, aMaxPf: 0, bMaxPf: 0, aGapShare: 1, bGapShare: 1 };
+    }
 
-    const computeScore = (rosterId: number, row: SimulationTeamRow): number => {
-      const pool = rosterPoolMap.get(rosterId) || [];
+    const computePartialScore = (rosterId: number, row: SimulationTeamRow, partial: PartialWeek, pool: PoolPlayer[]): WeekScore => {
+      const unavail = new Set<string>();
+      pool.forEach((p) => {
+        if (partial.started.has(p.id) || isOutForWeek(p, simWeek)) {
+          unavail.add(p.id);
+        } else if (rng() < getPlayerInjuryRate(p.id, p.position, simWeek)) {
+          unavail.add(p.id);
+        }
+      });
+      const baseRaw = rosterBaseScore.get(rosterId) || 1;
+      // Raw projections → this team's calibrated weekly points (lineupScore is blended toward its
+      // actual results; baseRaw is its full lineup's raw projection).
+      const calibration = row.lineupScore / baseRaw;
+      const restRaw = partial.liveRemainingRaw + pickBestStarters(pool, unavail, partial.openSlots).score;
+      const restShare = Math.min(1, restRaw / baseRaw);
+      const expectedRest = restRaw * calibration;
+      const rest = Math.max(0, expectedRest + randomNormal(rng) * row.weeklyStdDev * 0.82 * Math.sqrt(restShare));
+      const points = partial.lockedPoints + rest;
+      // Max PF: the best lineup in hindsight from every rostered player's week — real points for
+      // those who've played, and for those who haven't their projection moved by the same draw
+      // as the team's simulated rest.
+      const restScale = expectedRest > 0 ? rest / expectedRest : 0;
+      const weekPlayers: PoolPlayer[] = [
+        ...[...partial.started].map(([id, s]) => ({
+          id, position: s.position, nflTeam: null, score: s.points + s.remainingRaw * calibration * restScale,
+        })),
+        ...pool.filter((p) => !unavail.has(p.id)).map((p) => ({ ...p, score: p.score * calibration * restScale })),
+      ];
+      const maxPf = Math.max(points, pickBestStarters(weekPlayers, new Set()).score);
+      return { points, maxPf, gapShare: restShare };
+    };
+
+    const computeWholeWeekScore = (rosterId: number, row: SimulationTeamRow, pool: PoolPlayer[]): number => {
       if (simWeek > 0 && pool.length > 0) {
         const unavail = new Set<string>();
         // NOTE: rng() is only drawn for players who can play this week — a player
@@ -436,16 +550,29 @@ export function simulateLeague({
       return Math.max(scoreFloor, row.lineupScore + randomNormal(rng) * row.weeklyStdDev);
     };
 
-    const aPoints = computeScore(aRosterId, aRow);
-    const bPoints = computeScore(bRosterId, bRow);
-    if (aPoints === bPoints) {
+    const computeScore = (rosterId: number, row: SimulationTeamRow): WeekScore => {
+      const pool = rosterPoolMap.get(rosterId) || [];
+      const partial = simWeek > 0 && simWeek === currentWeek ? partialWeekByRoster.get(rosterId) : undefined;
+      if (partial) return computePartialScore(rosterId, row, partial, pool);
+      const points = computeWholeWeekScore(rosterId, row, pool);
+      return { points, maxPf: points, gapShare: 1 };
+    };
+
+    const a = computeScore(aRosterId, aRow);
+    const b = computeScore(bRosterId, bRow);
+    const scores = {
+      aPoints: a.points, bPoints: b.points,
+      aMaxPf: a.maxPf, bMaxPf: b.maxPf,
+      aGapShare: a.gapShare, bGapShare: b.gapShare,
+    };
+    if (a.points === b.points) {
       return rng() < 0.5
-        ? { winner: aRosterId, loser: bRosterId, aPoints, bPoints }
-        : { winner: bRosterId, loser: aRosterId, aPoints, bPoints };
+        ? { winner: aRosterId, loser: bRosterId, ...scores }
+        : { winner: bRosterId, loser: aRosterId, ...scores };
     }
-    return aPoints > bPoints
-      ? { winner: aRosterId, loser: bRosterId, aPoints, bPoints }
-      : { winner: bRosterId, loser: aRosterId, aPoints, bPoints };
+    return a.points > b.points
+      ? { winner: aRosterId, loser: bRosterId, ...scores }
+      : { winner: bRosterId, loser: aRosterId, ...scores };
   };
 
   const seededIndex = (seededIds: number[], rosterId: number) => seededIds.indexOf(rosterId);
@@ -535,7 +662,22 @@ export function simulateLeague({
         if (!aRow || !bRow) return null;
         const aRatio = expectedWeekRatio(aRosterId, week.week);
         const bRatio = expectedWeekRatio(bRosterId, week.week);
-        const aProb = logisticWinProb(aRow.powerScore * aRatio, bRow.powerScore * bRatio, 14);
+        let aExpected = aRow.lineupScore * aRatio;
+        let bExpected = bRow.lineupScore * bRatio;
+        let aProb = logisticWinProb(aRow.powerScore * aRatio, bRow.powerScore * bRatio, 14);
+        // Part of this week already played: real points so far plus the expected rest, and the odds
+        // from how much is still left to play on each side.
+        const aOutlook = week.week === currentWeek ? partialWeekOutlook(aRosterId, aRow) : null;
+        const bOutlook = week.week === currentWeek ? partialWeekOutlook(bRosterId, bRow) : null;
+        if (aOutlook || bOutlook) {
+          const wholeWeekVariance = (row: SimulationTeamRow) => (row.weeklyStdDev * 0.82) ** 2;
+          aExpected = aOutlook?.mean ?? aExpected;
+          bExpected = bOutlook?.mean ?? bExpected;
+          const spread = Math.sqrt((aOutlook?.variance ?? wholeWeekVariance(aRow)) + (bOutlook?.variance ?? wholeWeekVariance(bRow)));
+          aProb = spread > 0
+            ? normalCdf((aExpected - bExpected) / spread)
+            : aExpected > bExpected ? 1 : aExpected < bExpected ? 0 : 0.5;
+        }
         const bProb = 1 - aProb;
         const matchup = {
           week: week.week,
@@ -543,11 +685,11 @@ export function simulateLeague({
           aRosterId,
           aName: aRow.ownerName,
           aWinProb: aProb,
-          aProjected: Math.round(aRow.lineupScore * aRatio * 10) / 10,
+          aProjected: Math.round(aExpected * 10) / 10,
           bRosterId,
           bName: bRow.ownerName,
           bWinProb: bProb,
-          bProjected: Math.round(bRow.lineupScore * bRatio * 10) / 10,
+          bProjected: Math.round(bExpected * 10) / 10,
         };
         aRow.upcomingSchedule.push({
           week: week.week,
@@ -602,6 +744,8 @@ export function simulateLeague({
   // by reverse max PF, so the lowest max PF among them gets the 1.01. Max PF starts from Sleeper's to-date figure (never
   // below PF); each simulated week adds the team's simulated score plus its average weekly gap
   // between max PF and PF so far (bench points it left on the table). Draws no random numbers.
+  // A week already partly played adds its best lineup in hindsight instead (real points for those
+  // who've played) plus the gap for only the share of the week still to play.
   const maxPfGainPerWeek = new Map<number, number>(rows.map((row) => [
     row.rosterId,
     weeksPlayed > 0 ? Math.max(0, (row.maxPf - row.pointsFor) / weeksPlayed) : 0,
@@ -623,8 +767,8 @@ export function simulateLeague({
           const result = playMatch(aRosterId, bRosterId, week.week, rng);
           pointMap.set(aRosterId, (pointMap.get(aRosterId) || 0) + result.aPoints);
           pointMap.set(bRosterId, (pointMap.get(bRosterId) || 0) + result.bPoints);
-          maxPfMap.set(aRosterId, (maxPfMap.get(aRosterId) || 0) + result.aPoints + (maxPfGainPerWeek.get(aRosterId) || 0));
-          maxPfMap.set(bRosterId, (maxPfMap.get(bRosterId) || 0) + result.bPoints + (maxPfGainPerWeek.get(bRosterId) || 0));
+          maxPfMap.set(aRosterId, (maxPfMap.get(aRosterId) || 0) + result.aMaxPf + (maxPfGainPerWeek.get(aRosterId) || 0) * result.aGapShare);
+          maxPfMap.set(bRosterId, (maxPfMap.get(bRosterId) || 0) + result.bMaxPf + (maxPfGainPerWeek.get(bRosterId) || 0) * result.bGapShare);
           winMap.set(result.winner, (winMap.get(result.winner) || 0) + 1);
           weekPoints.set(aRosterId, result.aPoints);
           weekPoints.set(bRosterId, result.bPoints);

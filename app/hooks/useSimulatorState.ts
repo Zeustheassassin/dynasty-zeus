@@ -14,7 +14,7 @@ import type { ScoredWeeklyProjections } from "../../lib/helpers/weeklyProjection
 import type {
   SleeperLeague, SleeperRoster, SleeperPlayer, SleeperMatchup, SleeperNFLState,
   CommittedSimsByLeague, CachedSimRow, SimRow, SimulationTeamRow, LeagueSimulation,
-  ProjectionRow, StandingRow, SimRunProgress,
+  ProjectionRow, StandingRow, SimRunProgress, TeamGameState,
 } from "../../lib/types";
 
 const log = logger("useSimulatorState");
@@ -46,6 +46,12 @@ export interface SimulatorCtx {
   weeklyProjections: ScoredWeeklyProjections | null;
   /** The remaining-week projections load has settled (or there are none to load). */
   weeklyProjectionsSettled: boolean;
+  /** This week's NFL scoreboard, only when the loaded one is for the current week (simulateLeague). */
+  currentWeekGames: Record<string, TeamGameState> | null;
+  /** Week the loaded scoreboard belongs to (useNflSchedule; 0 until one settles). */
+  scheduleWeek: number;
+  /** When each league's current-week matchups (live scores) were last fetched. */
+  liveWeekMatchupsFetchedAt: Record<string, number>;
   supabaseUser: User | null;
   leagues: SleeperLeague[];
   loadRoster: (league: SleeperLeague) => Promise<void>;
@@ -59,6 +65,8 @@ export interface SimulatorResult {
   simProgress: SimRunProgress | null;
   /** What the league at the front of the queue is still waiting on (null when idle or saving). */
   simRunWait: SimRunWait | null;
+  /** When the current (or last) run started; null before the first. */
+  simRunStartedAt: number | null;
   simSalt: number;
   readyLeagueId: string | null;
   setReadyLeagueId: React.Dispatch<React.SetStateAction<string | null>>;
@@ -88,6 +96,7 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
     leagueWeeklyMatchups, standings, users,
     leagueAdjustedFcValues, leagueAdjustedRedraftValues,
     projectedRookiesByRoster, weeklyProjections, weeklyProjectionsSettled,
+    currentWeekGames, scheduleWeek, liveWeekMatchupsFetchedAt,
     supabaseUser, leagues, loadRoster,
   } = ctx;
 
@@ -95,6 +104,9 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
   const [readyLeagueId, setReadyLeagueId] = useState<string | null>(null);
   const [simQueue, setSimQueue] = useState<string[]>([]);
   const [simProgress, setSimProgress] = useState<SimRunProgress | null>(null);
+  // When the current Run All Sims / Update league run started: a league's live-week scores must be
+  // fetched after it, so points scored since the last fetch are in its saved odds.
+  const [simRunStartedAt, setSimRunStartedAt] = useState<number | null>(null);
   // Persisted so odds/wins/etc. stay stable across reloads and navigation — every reader
   // of simulateLeague (the live Season Simulator tab, the Trade Calculator/Finder preview,
   // Dashboard tiles) shares this one seed, and a fresh Math.random() draw on every mount
@@ -250,6 +262,7 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
         leagueAdjustedRedraftValues,
         projectedRookiesByRoster,
         weeklyProjections,
+        currentWeekGames,
         simSalt,
       }),
     [
@@ -268,6 +281,7 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
       simSalt,
       projectedRookiesByRoster,
       weeklyProjections,
+      currentWeekGames,
     ]
   );
 
@@ -291,12 +305,13 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
         leagueAdjustedRedraftValues,
         projectedRookiesByRoster,
         weeklyProjections,
+        currentWeekGames,
         simSalt,
       }),
     [
       selectedLeague, rosters, players, nflState, projectionData, projectionWeek, playerStats,
       leagueWeeklyMatchups, standings, users, leagueAdjustedFcValues, leagueAdjustedRedraftValues,
-      projectedRookiesByRoster, weeklyProjections, simSalt,
+      projectedRookiesByRoster, weeklyProjections, currentWeekGames, simSalt,
     ]
   );
 
@@ -402,11 +417,14 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
       redraftSettledNumQbs,
       leagueWeeklyMatchups,
       weeklyProjectionsSettled,
+      liveWeekMatchupsFetchedAt: liveWeekMatchupsFetchedAt[simQueue[0]] ?? null,
+      simRunStartedAt,
+      scheduleWeek,
     });
   }, [
     simQueue, selectedLeague, readyLeagueId, playersLoaded, nflState, projectionWeek,
     loadingProjections, projectionLoadedFor, loadingRedraft, redraftSettledNumQbs, leagueWeeklyMatchups,
-    weeklyProjectionsSettled,
+    weeklyProjectionsSettled, liveWeekMatchupsFetchedAt, simRunStartedAt, scheduleWeek,
   ]);
   // Read by the skip timer's log line without restarting the timer on every change.
   const simRunWaitRef = useRef<SimRunWait | null>(null);
@@ -456,6 +474,7 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
     const leagueIds = leagues.map((l) => l.league_id);
     setSimProgress({ done: 0, total: leagueIds.length, skipped: [] });
     setReadyLeagueId(null);
+    setSimRunStartedAt(Date.now());
     const newSalt = Math.floor(Math.random() * 1_000_000);
     setSimSalt(newSalt);
     setLocalStorageItem("simSalt_v1", newSalt);
@@ -473,6 +492,7 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
     if (!league || simQueue.length > 0) return;
     setSimProgress(null);
     setReadyLeagueId(null);
+    setSimRunStartedAt(Date.now());
     setSimQueue([leagueId]);
     loadRoster(league);
   }, [leagues, loadRoster, simQueue.length]);
@@ -484,6 +504,7 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
     simQueue,
     simProgress,
     simRunWait,
+    simRunStartedAt,
     simSalt,
     readyLeagueId,
     setReadyLeagueId,

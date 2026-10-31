@@ -78,6 +78,12 @@ export function scoreWeeklyProjections(
   return scored;
 }
 
+/** A league's regular-season length: every week before its playoffs (Sleeper's default playoff
+ *  start is week 15). */
+export function getRegularSeasonWeeks(league: { settings?: { playoff_week_start?: number | null } | null } | null | undefined): number {
+  return Math.max(1, Number(league?.settings?.playoff_week_start || 15) - 1);
+}
+
 /** The regular-season weeks a sim still has to play: this week through the last week before the
  *  playoffs. Empty outside the regular season or once it's over. */
 export function remainingRegularSeasonWeeks(currentWeek: number, regularSeasonWeeks: number): number[] {

@@ -44,7 +44,7 @@ import { buildStandingRows } from "../../lib/helpers/standings";
 import { useLatestRequest } from "../../hooks/useLatestRequest";
 import { useProjections } from "../../hooks/useProjections";
 import { useWeeklyProjections, weeklyProjectionsKey } from "../../hooks/useWeeklyProjections";
-import { remainingRegularSeasonWeeks, scoreWeeklyProjections } from "../../lib/helpers/weeklyProjections";
+import { getRegularSeasonWeeks, remainingRegularSeasonWeeks, scoreWeeklyProjections } from "../../lib/helpers/weeklyProjections";
 import { useSleeperUser } from "../../hooks/useSleeperUser";
 import { usePlayerStats } from "../../hooks/usePlayerStats";
 import { useManagementState } from "../../hooks/useManagementState";
@@ -80,7 +80,9 @@ import { useLeagueStepper } from "./useLeagueStepper";
 import { withFantasyPositions } from "../../lib/helpers/playerPosition";
 import { buildActionQueue, getActionState, type ActionAppTab, type ActionItem } from "../../lib/helpers/actionQueue";
 import { sleeperApi } from "../../lib/sleeperApi";
-import { PLAYERS_BACKGROUND_REFRESH_MS, ROSTER_OVERVIEW_FRESH_GAP_MS, ROSTER_DATA_MAX_AGE_MS } from "../../lib/constants";
+import {
+  PLAYERS_BACKGROUND_REFRESH_MS, ROSTER_OVERVIEW_FRESH_GAP_MS, ROSTER_DATA_MAX_AGE_MS, LIVE_WEEK_MATCHUPS_MAX_AGE_MS,
+} from "../../lib/constants";
 import { getLocalStorageItem, setLocalStorageItem, removeLocalStorageItem, removeLocalStorageItemsByPrefix } from "@/lib/hooks/useLocalStorage";
 import type { LeagueRef } from "../../components/AlertsPage/alertsPageHelpers";
 import { isReserveEligible } from "../../components/AlertsPage/alertsPageHelpers";
@@ -223,7 +225,7 @@ const {
   selectedGamedayMatchupId, setSelectedGamedayMatchupId,
   loadGamedayMatchups,
 } = useGamedayState();
-const { scheduleByTeam, loadingSchedule, loadSchedule } = useNflSchedule();
+const { scheduleByTeam, scheduleWeek, loadingSchedule, loadSchedule } = useNflSchedule();
 const {
   calcFcValues,
   loadingCalcValues,
@@ -1632,7 +1634,7 @@ const saveSnapshotNow = async () => {
   // Finder previews from every tab. Scored for the selected league below.
   const simProjectionWeeks = useMemo(() => {
     const lastRegularWeek = leagues.reduce(
-      (max, l) => Math.max(max, Number(l.settings?.playoff_week_start || 15) - 1), 0);
+      (max, l) => Math.max(max, getRegularSeasonWeeks(l)), 0);
     return remainingRegularSeasonWeeks(currentNflWeek, lastRegularWeek);
   }, [leagues, currentNflWeek]);
   const { weeklyProjections: rawWeeklyProjections, settledKey: weeklyProjectionsSettledKey } =
@@ -1644,6 +1646,23 @@ const saveSnapshotNow = async () => {
   const weeklyProjectionsSettled = simProjectionWeeks.length === 0
     || weeklyProjectionsSettledKey === weeklyProjectionsKey(nflState?.season ?? "", simProjectionWeeks);
 
+  // This week's games already played count their real points in the sim (simulateLeague's
+  // currentWeekGames), from the scoreboard when it's this week's. Keyed on each game's state and
+  // quarter so a live-clock poll every 30s doesn't re-run 250 seasons; a quarter change or a final
+  // does. Each league's live-week scores are re-fetched by the weekly-matchups effect below.
+  const currentWeekGamesSignature = currentNflWeek > 0 && scheduleWeek === currentNflWeek
+    ? Object.entries(scheduleByTeam)
+        .map(([team, game]) => `${team}:${game.state}:${game.state === "Live" ? (game.status === "halftime" ? "H" : game.period ?? 0) : ""}`)
+        .sort()
+        .join("|")
+    : "";
+  const currentWeekGames = useMemo(
+    () => (currentWeekGamesSignature ? scheduleByTeam : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-sim on a game's state/quarter change, not every clock tick
+    [currentWeekGamesSignature]
+  );
+  const [liveWeekMatchupsFetchedAt, setLiveWeekMatchupsFetchedAt] = useState<Record<string, number>>({});
+
   const {
     selectedLeagueSimulation,
     committedSimsByLeague,
@@ -1651,6 +1670,7 @@ const saveSnapshotNow = async () => {
     simQueue,
     simProgress,
     simRunWait,
+    simRunStartedAt,
     readyLeagueId, setReadyLeagueId,
     myDraftSlotPicks, setMyDraftSlotPicks,
     draftSlotEditing, setDraftSlotEditing,
@@ -1679,6 +1699,9 @@ const saveSnapshotNow = async () => {
     projectedRookiesByRoster,
     weeklyProjections: selectedLeagueWeeklyProjections,
     weeklyProjectionsSettled,
+    currentWeekGames,
+    scheduleWeek,
+    liveWeekMatchupsFetchedAt,
     supabaseUser,
     leagues,
     loadRoster,
@@ -1719,34 +1742,58 @@ const saveSnapshotNow = async () => {
   // already falls back to a generated round-robin for any week Sleeper returns no matchups for, so
   // this is safe pre-draft too.
   // Keyed by league and never cancelled: a load that finishes after a league switch still lands, so
-  // the next visit (or run) reuses it instead of asking Sleeper again.
+  // the next visit (or run) reuses it instead of asking Sleeper again — except the regular-season
+  // week being played (2026-10-30): its scores feed the sim's already-played games, so it's
+  // re-fetched when older than LIVE_WEEK_MATCHUPS_MAX_AGE_MS on a Simulator visit, and fresh from
+  // Sleeper (bypassing the caches) for every league a run saves.
   const weeklyMatchupsInFlightRef = useRef(new Set<string>());
   useEffect(() => {
     const leagueId = selectedLeague?.league_id;
     if (!leagueId) return;
     if (!((mainTab === "LEAGUES" && leagueHubTab === "SIMULATOR") || simRunActive)) return;
     const inFlight = weeklyMatchupsInFlightRef.current;
-    if (leagueWeeklyMatchups[leagueId] || inFlight.has(leagueId)) return;
-    const regularSeasonWeeks = Math.max(1, Number(selectedLeague?.settings?.playoff_week_start || 15) - 1);
+    if (inFlight.has(leagueId)) return;
+    const regularSeasonWeeks = getRegularSeasonWeeks(selectedLeague);
+    const liveWeek = currentNflWeek >= 1 && currentNflWeek <= regularSeasonWeeks ? currentNflWeek : 0;
+    const existing = leagueWeeklyMatchups[leagueId];
+    const fetchedAt = liveWeekMatchupsFetchedAt[leagueId];
+    const liveWeekStale = liveWeek > 0 && (
+      fetchedAt == null
+      || (simRunActive ? fetchedAt < (simRunStartedAt ?? 0) : Date.now() - fetchedAt > LIVE_WEEK_MATCHUPS_MAX_AGE_MS)
+    );
+    if (existing && !liveWeekStale) return;
 
     const loadLeagueWeeklyHistory = async () => {
       inFlight.add(leagueId);
       setLoadingLeagueWeeklyMatchups(true);
       try {
-        const weeks = Array.from({ length: regularSeasonWeeks }, (_, idx) => idx + 1);
-        const results = await Promise.all(
-          weeks.map(async (week) => {
-            const data = await sleeperApi.getLeagueMatchups(leagueId, week).catch(() => [] as SleeperMatchup[]);
-            return {
-              week,
-              matchups: Array.isArray(data) ? data : [],
-            };
-          })
-        );
-        setLeagueWeeklyMatchups((prev) => ({
-          ...prev,
-          [leagueId]: results,
-        }));
+        if (!existing) {
+          const weeks = Array.from({ length: regularSeasonWeeks }, (_, idx) => idx + 1);
+          const results = await Promise.all(
+            weeks.map(async (week) => {
+              const data = await sleeperApi.getLeagueMatchups(leagueId, week, simRunActive && week === liveWeek)
+                .catch(() => [] as SleeperMatchup[]);
+              return {
+                week,
+                matchups: Array.isArray(data) ? data : [],
+              };
+            })
+          );
+          setLeagueWeeklyMatchups((prev) => ({
+            ...prev,
+            [leagueId]: results,
+          }));
+        } else {
+          const data = await sleeperApi.getLeagueMatchups(leagueId, liveWeek, simRunActive).catch(() => null);
+          // A failed refresh keeps the scores already in hand rather than holding a run up.
+          if (Array.isArray(data)) {
+            setLeagueWeeklyMatchups((prev) => ({
+              ...prev,
+              [leagueId]: (prev[leagueId] ?? existing).map((w) => (w.week === liveWeek ? { week: liveWeek, matchups: data } : w)),
+            }));
+          }
+        }
+        if (liveWeek > 0) setLiveWeekMatchupsFetchedAt((prev) => ({ ...prev, [leagueId]: Date.now() }));
       } finally {
         inFlight.delete(leagueId);
         if (inFlight.size === 0) setLoadingLeagueWeeklyMatchups(false);
@@ -1754,7 +1801,7 @@ const saveSnapshotNow = async () => {
     };
 
     loadLeagueWeeklyHistory();
-  }, [mainTab, leagueHubTab, simRunActive, selectedLeague?.league_id, selectedLeague?.settings?.playoff_week_start, leagueWeeklyMatchups, setLeagueWeeklyMatchups, setLoadingLeagueWeeklyMatchups]);
+  }, [mainTab, leagueHubTab, simRunActive, simRunStartedAt, selectedLeague, currentNflWeek, leagueWeeklyMatchups, liveWeekMatchupsFetchedAt, setLeagueWeeklyMatchups, setLoadingLeagueWeeklyMatchups]);
 
   const selectedLeagueDirection = useMemo((): RosterDirectionProfile | null => {
     if (!selectedLeague || !rosters.length || !user?.user_id) return null;

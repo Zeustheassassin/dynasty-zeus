@@ -30,7 +30,7 @@ import {
 import { simulateLeague } from "../lib/helpers/simulation";
 import { buildStandingRows } from "../lib/helpers/standings";
 import { projectRookiesByRoster } from "../lib/helpers/rookieProjection";
-import { remainingRegularSeasonWeeks, scoreWeeklyProjections } from "../lib/helpers/weeklyProjections";
+import { getRegularSeasonWeeks, remainingRegularSeasonWeeks, scoreWeeklyProjections } from "../lib/helpers/weeklyProjections";
 import { useLeagueOverview } from "./useLeagueOverview";
 import { useWeeklyProjections } from "./useWeeklyProjections";
 import type { PlayerUsage } from "./usePlayerStats";
@@ -180,7 +180,7 @@ export function useSpyState({
   // week any of the target's leagues plays — the same shared store as the user's own sims.
   const spyProjectionWeeks = useMemo(() => {
     const lastRegularWeek = targetLeagues.reduce(
-      (max, l) => Math.max(max, Number(l.settings?.playoff_week_start || 15) - 1), 0);
+      (max, l) => Math.max(max, getRegularSeasonWeeks(l)), 0);
     return remainingRegularSeasonWeeks(getCurrentNflWeek(nflState), lastRegularWeek);
   }, [targetLeagues, nflState]);
   const { weeklyProjections: rawWeeklyProjections } =
@@ -329,6 +329,8 @@ export function useSpyState({
       leagueAdjustedRedraftValues,
       projectedRookiesByRoster: projectedRookies,
       weeklyProjections: scoreWeeklyProjections(rawWeeklyProjections, scoring ?? DEFAULT_SCORING),
+      // No weekly matchups here, so no live-week scores to count either.
+      currentWeekGames: null,
       simSalt,
     });
 

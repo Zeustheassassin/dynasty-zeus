@@ -79,6 +79,11 @@ export const SLEEPER_STATS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
  *  browser keeps its copy for the same hour. */
 export const SLEEPER_WEEKLY_PROJECTIONS_TTL_MS = 60 * 60 * 1000;
 
+/** How old a league's current-week matchups (live scores) can get before a Season Simulator visit
+ *  re-fetches them — the sim counts games already played this week at their real points. Run All
+ *  Sims always re-fetches them for each league it saves. */
+export const LIVE_WEEK_MATCHUPS_MAX_AGE_MS = 5 * 60 * 1000;
+
 // ── Cache TTLs (seconds, for Next.js revalidate) ──────────────
 /** Sleeper NFL state — refreshed every hour */
 export const NFL_STATE_REVALIDATE_S = 3600;
