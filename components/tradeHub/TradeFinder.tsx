@@ -1587,6 +1587,7 @@ function TradeFinder({
               { key: "PRICEY", label: "Pricey — Unlikely to Sell", labelCls: "text-amber-500", chipCls: "border-amber-800 bg-amber-950/30 text-amber-300", xCls: "text-amber-600" },
               { key: "SHOPPING", label: "Shopping — Small Interest", labelCls: "text-orange-500", chipCls: "border-orange-800 bg-orange-950/30 text-orange-300", xCls: "text-orange-600" },
               { key: "OFFLOAD", label: "Offload — Move ASAP", labelCls: "text-red-500", chipCls: "border-red-800 bg-red-950/30 text-red-300", xCls: "text-red-600" },
+              { key: "DANGER", label: "Danger — On the Roster Crunch List", labelCls: "text-red-400", chipCls: "border-red-700 bg-red-950/30 text-red-300", xCls: "text-red-600" },
             ];
             const sellNoCount = byDisposition("SELL_NO").length;
             const hasAny = buckets.some((b) => byDisposition(b.key).length > 0) || sellNoCount > 0;
@@ -1600,7 +1601,16 @@ function TradeFinder({
                     <div key={key}>
                       <div className={`text-[9px] font-bold uppercase tracking-widest ${labelCls} mb-1`}>{label}</div>
                       <div className="flex flex-wrap gap-1.5">
-                        {entries.map(([id]) => (
+                        {entries.map(([id]) => key === "DANGER" ? (
+                          // Comes from the list itself, so there's no tag here to clear.
+                          <span
+                            key={id}
+                            title="Back in the trade pool until this player's value lifts them off the list"
+                            className={`rounded-full border px-2 py-0.5 text-[10px] ${chipCls}`}
+                          >
+                            {assetLabel(id)}
+                          </span>
+                        ) : (
                           <button
                             key={id}
                             onClick={() => onSetAssetDisposition(leagueId, id, null)}

@@ -11,7 +11,7 @@ export const normalizeDisposition = (
   d === "WANT_TO_TRADE" ? "SHOPPING" : d;
 
 /** Dispositions valid for assets on the user's own roster. */
-export const MY_DISPOSITIONS: { value: Exclude<AssetDisposition, "WANT_TO_TRADE" | "SELL_NO" | "SELL_OK">; label: string; hint: string }[] = [
+export const MY_DISPOSITIONS: { value: Exclude<AssetDisposition, "WANT_TO_TRADE" | "SELL_NO" | "SELL_OK" | "DANGER">; label: string; hint: string }[] = [
   { value: "CORE", label: "Core", hint: "Do not sell" },
   { value: "PRICEY", label: "Pricey", hint: "Most likely not going to sell" },
   { value: "SHOPPING", label: "Shopping", hint: "Small interest in selling" },

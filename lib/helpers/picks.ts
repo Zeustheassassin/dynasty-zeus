@@ -109,22 +109,12 @@ export function rookieDraftRoundCount(
  *  used by useLeagueOverview, which renders every league at once. */
 export type PickPoolMode = "perLeague" | "overview";
 
-/** Builds a league's full pick pool (every roster's picks across the pick-year window), shared by
- *  the three client copies of this logic: useAppState.loadRoster, useSpyState.loadSpyLeagueCore,
- *  and useLeagueOverview. The season-window and traded-pick-application rules below are identical
- *  across all three callers; `mode` captures where they intentionally diverge (round depth and
- *  slot-label fallback) — see __tests__/hooks/pickWindowCopies.test.ts, which pins each
- *  difference per caller so a future edit here can't silently change one of them. */
-export function buildLeaguePickPool(
-  rosters: SleeperRoster[],
-  tradedPicks: SleeperTradedPick[],
-  drafts: SleeperDraft[],
-  mode: PickPoolMode
-): AugmentedPick[] {
-  // Skip seasons whose rookie draft is complete (those picks are spent); extend the window
-  // forward to keep it the same length. A startup-sized draft (>6 rounds) also retires that
-  // season if no separate rookie-sized draft exists for it — that pattern means rookies were
-  // consumed inside the startup itself and no follow-on rookie draft will fire.
+/** The seasons a league still has picks for, earliest first: YEARS.length seasons from the current
+ *  one, skipping any whose rookie draft is complete (those picks are spent). A startup-sized draft
+ *  (>6 rounds) also retires that season if no separate rookie-sized draft exists for it — that
+ *  pattern means rookies were consumed inside the startup itself and no follow-on rookie draft
+ *  will fire. */
+export function pickSeasonWindow(drafts: SleeperDraft[]): string[] {
   const seasonsWithRookieDraft = new Set(
     drafts
       .filter((d) => {
@@ -148,6 +138,47 @@ export function buildLeaguePickPool(
     const y = String(baseYearNum + offset);
     if (!completedDraftSeasons.has(y)) pickYearWindow.push(y);
   }
+  return pickYearWindow;
+}
+
+/** How many picks one roster owns in each round of one season's rookie draft (index 0 = round 1).
+ *  Counts every round the league drafts: the overview pick pool stops at ROUNDS.length, so it
+ *  would miss a 5th-round pick. */
+export function ownedPicksByRound(
+  rosters: Pick<SleeperRoster, "roster_id">[],
+  tradedPicks: SleeperTradedPick[],
+  season: string,
+  rounds: number,
+  ownerRosterId: number
+): number[] {
+  const owners = new Map<string, number>();
+  for (let round = 1; round <= rounds; round++) {
+    rosters.forEach((r) => owners.set(`${round}-${r.roster_id}`, r.roster_id));
+  }
+  tradedPicks.forEach((tp) => {
+    const key = `${tp.round}-${tp.roster_id}`;
+    if (String(tp.season) === season && owners.has(key)) owners.set(key, tp.owner_id);
+  });
+  const counts = Array.from({ length: rounds }, () => 0);
+  owners.forEach((owner, key) => {
+    if (owner === ownerRosterId) counts[Number(key.split("-")[0]) - 1]++;
+  });
+  return counts;
+}
+
+/** Builds a league's full pick pool (every roster's picks across the pick-year window), shared by
+ *  the three client copies of this logic: useAppState.loadRoster, useSpyState.loadSpyLeagueCore,
+ *  and useLeagueOverview. The season-window and traded-pick-application rules below are identical
+ *  across all three callers; `mode` captures where they intentionally diverge (round depth and
+ *  slot-label fallback) — see __tests__/hooks/pickWindowCopies.test.ts, which pins each
+ *  difference per caller so a future edit here can't silently change one of them. */
+export function buildLeaguePickPool(
+  rosters: SleeperRoster[],
+  tradedPicks: SleeperTradedPick[],
+  drafts: SleeperDraft[],
+  mode: PickPoolMode
+): AugmentedPick[] {
+  const pickYearWindow = pickSeasonWindow(drafts);
 
   const buildRounds = mode === "perLeague" ? ALL_ROUNDS : ROUNDS;
   let tempPicks: AugmentedPick[] = [];

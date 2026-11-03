@@ -64,6 +64,16 @@ describe("fetchLeagueCore", () => {
     expect(userMap.u3).toBe("Team");
   });
 
+  it("bypassTradedPicks skips the traded-pick caches only", async () => {
+    for (const k of ["getLeagueRosters", "getLeagueTradedPicks", "getLeagueDrafts", "getLeagueUsers"]) {
+      api.impl[k] = vi.fn(async () => []);
+    }
+    await fetchLeagueCore("L1", { bypassTradedPicks: true });
+    expect(api.impl.getLeagueTradedPicks).toHaveBeenCalledWith("L1", true);
+    expect(api.impl.getLeagueDrafts).toHaveBeenCalledWith("L1");
+    expect(api.impl.getLeagueUsers).toHaveBeenCalledWith("L1");
+  });
+
   it("bypassRosters skips the roster caches only — traded picks, drafts and users stay cached", async () => {
     for (const k of ["getLeagueRosters", "getLeagueTradedPicks", "getLeagueDrafts", "getLeagueUsers"]) {
       api.impl[k] = vi.fn(async () => []);

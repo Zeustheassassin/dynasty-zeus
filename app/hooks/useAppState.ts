@@ -73,6 +73,7 @@ import { usePersonalRankings } from "./usePersonalRankings";
 import { usePickValueOverrides, PICK_VALUE_OVERRIDES_KEY } from "./usePickValueOverrides";
 import { buildConsensusOrder, buildPersonalDispositions, buildPersonalSignals, buildPersonalRankGaps } from "../../lib/helpers/personalRankings";
 import { MY_DISPOSITIONS, pickDispositionKey, normalizeDisposition } from "../../lib/helpers/dispositions";
+import { getDangerIdsByLeague, withDangerTags } from "../../lib/helpers/rosterCrunch";
 import type { PersonalSignal } from "../../lib/helpers/personalRankings";
 import { useSimulatorState } from "./useSimulatorState";
 import { useTodoDone } from "./useTodoDone";
@@ -371,6 +372,19 @@ const [standings, setStandings] = useState<StandingRow[]>([]);
     }));
   }, [user, leagues, leagueOverviewData, leagueOverviewLoaded]);
   const loadingAllLeagueData = loadingLeagueOverview && !leagueOverviewLoaded;
+
+  // What every tag reader sees: the stored tags with Danger over players on a league's Roster Crunch
+  // list. The overview is re-polled every couple of minutes, so the lists are compared as a string
+  // and the map only changes when someone actually moves on or off one. Otherwise each poll would
+  // hand Trade Finder a new map and re-run it.
+  const dangerIdsKey = useMemo(
+    () => JSON.stringify(getDangerIdsByLeague(leagueOverviewData, user?.user_id, players)),
+    [leagueOverviewData, user?.user_id, players]
+  );
+  const leaguePlayerTagsWithDanger = useMemo(
+    () => withDangerTags(leaguePlayerTags, JSON.parse(dangerIdsKey) as Record<string, string[]>),
+    [leaguePlayerTags, dangerIdsKey]
+  );
   const [shareSearch, setShareSearch] = useState("");
   const [sharePosition, setSharePosition] = useState("ALL");
   // Top 20 unrostered players by value in the selected league. Derived here rather than set inside
@@ -1066,7 +1080,7 @@ useEffect(() => {
 // tab and Roster Overview's Refresh still exist for an immediate force-refresh.
 // useVisibilityPolling pauses while the tab is hidden and never overlaps a still-running load.
 const showsLeagueOverviewData =
-  (mainTab === "LEAGUES" && (leagueHubTab === "OVERVIEW" || leagueHubTab === "ROSTER_OVERVIEW")) ||
+  (mainTab === "LEAGUES" && (leagueHubTab === "OVERVIEW" || leagueHubTab === "ROSTER_OVERVIEW" || leagueHubTab === "ROSTER_CRUNCH")) ||
   mainTab === "TODO" ||
   mainTab === "ALERTS" ||
   mainTab === "DASHBOARD";
@@ -3795,7 +3809,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     tradeHubSection,
     calcOpponentRosterId,
     selectedLeagueDraftHasOccurred,
-    leaguePlayerTags,
+    leaguePlayerTags: leaguePlayerTagsWithDanger,
     handleSetAssetDisposition,
     noInterestPlayers,
     setNoInterest,

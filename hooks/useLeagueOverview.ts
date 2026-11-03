@@ -17,7 +17,7 @@ interface SleeperUserShape {
 }
 
 export interface LoadLeagueOverviewOpts {
-  /** Skip the browser + server roster caches (Roster Overview's Refresh). */
+  /** Skip the browser + server roster and traded-pick caches (Refresh on Roster Overview and Roster Crunch). */
   freshRosters?: boolean;
 }
 
@@ -73,6 +73,7 @@ export function useLeagueOverview(
             const fetchedAt = Date.now();
             const { rosters, tradedPicks, drafts, userMap } = await fetchLeagueCore(league.league_id, {
               bypassRosters: freshRosters,
+              bypassTradedPicks: freshRosters,
             });
 
             // Pick pool: shared with useAppState.loadRoster/useSpyState via buildLeaguePickPool.
@@ -82,7 +83,7 @@ export function useLeagueOverview(
             const tempPicks = buildLeaguePickPool(rosters, tradedPicks, drafts, "overview");
 
             const rostersAsOf = freshRosters ? fetchedAt : fetchedAt - ROSTER_DATA_MAX_AGE_MS;
-            return { league, rosters, picks: tempPicks, userMap, rostersAsOf };
+            return { league, rosters, picks: tempPicks, userMap, rostersAsOf, tradedPicks, drafts };
           } catch (err) {
             log.warn("loadLeagueOverview league fetch error", { err: String(err) });
             return null;
@@ -100,8 +101,8 @@ export function useLeagueOverview(
         const byLeague: Record<string, LeagueOverviewEntry> = {};
         results
           .filter((r): r is NonNullable<typeof r> => r !== null)
-          .forEach(({ league, rosters: lr, picks, userMap, rostersAsOf }) => {
-            byLeague[league.league_id] = { league, rosters: lr, picks, userMap, rostersAsOf };
+          .forEach(({ league, rosters: lr, picks, userMap, rostersAsOf, tradedPicks, drafts }) => {
+            byLeague[league.league_id] = { league, rosters: lr, picks, userMap, rostersAsOf, tradedPicks, drafts };
           });
         // A league that failed this pass (a 429, a blip) keeps its last good entry instead of
         // dropping out. This map now feeds the injury report, Shares and the Dashboard too

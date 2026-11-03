@@ -31,6 +31,7 @@ import OverviewTab from "./LeagueHub/OverviewTab";
 import SimulatorTab from "./LeagueHub/SimulatorTab";
 import RostersTab from "./LeagueHub/RostersTab";
 import RosterOverviewTab from "./LeagueHub/RosterOverviewTab";
+import RosterCrunchTab from "./LeagueHub/RosterCrunchTab";
 import OppRostersTab from "./LeagueHub/OppRostersTab";
 import StartersTab from "./LeagueHub/StartersTab";
 import RosterToolsTab from "./LeagueHub/RosterToolsTab";
@@ -162,7 +163,7 @@ function LeagueHub({
   } = useLeagueTabState();
 
   return (
-    <div className={`mx-auto px-4 py-6 ${leagueHubTab === "ROSTERS" || leagueHubTab === "OPP_ROSTERS" || leagueHubTab === "ROSTER_TOOLS" ? "max-w-7xl" : leagueHubTab === "OVERVIEW" ? "max-w-none" : "max-w-5xl"}`}>
+    <div className={`mx-auto px-4 py-6 ${leagueHubTab === "ROSTERS" || leagueHubTab === "OPP_ROSTERS" || leagueHubTab === "ROSTER_TOOLS" ? "max-w-7xl" : leagueHubTab === "OVERVIEW" || leagueHubTab === "ROSTER_CRUNCH" ? "max-w-none" : "max-w-5xl"}`}>
       <>
         {stepSession && (
           <LeagueStepperBar
@@ -279,6 +280,22 @@ function LeagueHub({
             setLeagueHubTab={setLeagueHubTab}
             personalOrdering={personalOrdering}
             scheduleByTeam={scheduleByTeam}
+          />
+        )}
+
+        {leagueHubTab === "ROSTER_CRUNCH" && (
+          <RosterCrunchTab
+            leagues={leagues}
+            user={user}
+            leagueOverviewData={leagueOverviewData}
+            loadingLeagueOverview={loadingLeagueOverview}
+            leagueOverviewLoaded={leagueOverviewLoaded}
+            loadLeagueOverview={loadLeagueOverview}
+            onRefresh={refreshRosterOverview}
+            refreshing={refreshingRosterOverview}
+            loadRoster={loadRoster}
+            setLeagueHubTab={setLeagueHubTab}
+            setPlayerProfileId={setPlayerProfileId}
           />
         )}
 

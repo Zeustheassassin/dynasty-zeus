@@ -52,7 +52,10 @@ export interface SleeperLeagueSettings {
   waiver_budget?: number;
   waiver_day_of_week?: number;
   taxi_slots?: number;
+  /** Taxi Squad Years Experience Limit: a player past it must be activated. 0 = No Max. */
   taxi_years?: number;
+  /** Allow Non-Rookies For Taxi. 1 = anyone inside the limit; otherwise only rookies can be added. */
+  taxi_allow_vets?: number;
   reserve_slots?: number;
   reserve_allow_out?: number;
   reserve_allow_doubtful?: number;
@@ -445,6 +448,9 @@ export interface LeagueOverviewEntry {
    *  Refresh, otherwise the fetch time less ROSTER_DATA_MAX_AGE_MS. The To-Do hub re-checks a
    *  Done item only against rosters newer than the click. */
   rostersAsOf?: number;
+  /** Raw inputs for Roster Crunch, which counts every round the league drafts (`picks` stops at 4). */
+  tradedPicks?: SleeperTradedPick[];
+  drafts?: SleeperDraft[];
 }
 
 // ── League hub ───────────────────────────────────────────────
@@ -454,6 +460,7 @@ export type LeagueHubTab =
   | "SIMULATOR"
   | "ROSTERS"
   | "ROSTER_OVERVIEW"
+  | "ROSTER_CRUNCH"
   | "OPP_ROSTERS"
   | "STANDINGS"
   | "STARTERS"
@@ -999,8 +1006,10 @@ export type ProjSourceId = "fantasypros" | "numberfire" | "sleeper";
 // SELL_NO/SELL_OK apply to assets on any other roster in the league. No stored
 // value means Neutral — Neutral is never persisted. "WANT_TO_TRADE" is a legacy
 // value from before this type was widened; treat it as equivalent to SHOPPING
-// wherever a disposition is read.
-export type AssetDisposition = "CORE" | "PRICEY" | "SHOPPING" | "OFFLOAD" | "SELL_NO" | "SELL_OK" | "WANT_TO_TRADE";
+// wherever a disposition is read. "DANGER" is never stored: withDangerTags
+// (lib/helpers/rosterCrunch.ts) lays it over the stored tags for players on a
+// league's Roster Crunch list.
+export type AssetDisposition = "CORE" | "PRICEY" | "SHOPPING" | "OFFLOAD" | "SELL_NO" | "SELL_OK" | "WANT_TO_TRADE" | "DANGER";
 export type LeagueAssetDispositions = Record<string, Record<string, AssetDisposition>>;
 
 // Time-boxed Trade Finder suppressions (finder_temp_blocks): per-league map of

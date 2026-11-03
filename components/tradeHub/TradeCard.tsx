@@ -458,6 +458,9 @@ export default function TradeCard({
                     {disposition === "CORE" && (
                       <span title="Marked Core — Do Not Sell" className="hidden sm:inline-flex text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-emerald-700 bg-emerald-950/40 text-emerald-300 shrink-0">Core</span>
                     )}
+                    {disposition === "DANGER" && (
+                      <span title="On this league's Roster Crunch list — has to be cut or traded before next season" className="hidden sm:inline-flex text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-red-700 bg-red-950/40 text-red-300 shrink-0">Danger</span>
+                    )}
                     {disposition === "PRICEY" && (
                       <span title="Marked Pricey — most likely not going to sell" className="hidden sm:inline-flex text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-amber-700 bg-amber-950/40 text-amber-300 shrink-0">Pricey</span>
                     )}
