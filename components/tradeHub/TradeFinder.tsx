@@ -27,7 +27,7 @@ import FinderResults from "./FinderResults";
 import { FinderDirectionPanel } from "./FinderDirectionPanel";
 import {
   packageOk, posTotals, isBalancedWithStarDiscount, isBalancedTierUpWithStarDiscount, LOW_VALUE_FLOOR,
-  tierShapeRank, tradeImpactPasses, titleGain, type TradeSimImpact,
+  qbRoomOk, tierShapeRank, tradeImpactPasses, titleGain, type TradeSimImpact,
 } from "./FinderScoring";
 import {
   finderPickKey,
@@ -603,22 +603,20 @@ function TradeFinder({
         (p) => p.position === "QB" && p.value >= top32QBFloor
       );
 
-      // Returns true if giving these players still leaves ≥3 top-32 QBs on my roster.
-      // Bypassed in Tank Mode — user explicitly chose to shed QB depth.
-      const qbSafe = (givePlayers: PlayerWithValue[]) => {
-        if (finderTankMode) return true;
-        const qbsGiven = givePlayers.filter((p) => p.position === "QB" && p.value >= top32QBFloor).length;
-        return myTop32QBs.length - qbsGiven >= 3;
-      };
+      // Both sides of every trade answer to the QB room rule (FinderScoring.qbRoomOk). Tank Mode lifts
+      // my sell floor, since the user has chosen to shed QB depth. Searching for a QB by name lifts my
+      // cap: that's me saying I want him.
+      const qbSafe = (givePlayers: PlayerWithValue[], receivePlayers: PlayerWithValue[]) =>
+        qbRoomOk(myTop32QBs.length, givePlayers, receivePlayers, top32QBFloor, {
+          sellFloorLifted: finderTankMode,
+          buyCapLifted: !!deferredTargetPlayerId && receivePlayers.some((p) => p.player_id === deferredTargetPlayerId),
+        });
 
-      // Returns true if the opponent still has ≥3 top-32 QBs after giving these players away
-      const oppQbSafe = (oppPlayersList: PlayerWithValue[], givePlayers: PlayerWithValue[]) => {
-        const oppTop32QBs = oppPlayersList.filter(
-          (p) => p.position === "QB" && p.value >= top32QBFloor
+      const oppQbSafe = (oppPlayersList: PlayerWithValue[], oppGives: PlayerWithValue[], oppGets: PlayerWithValue[]) =>
+        qbRoomOk(
+          oppPlayersList.filter((p) => p.position === "QB" && p.value >= top32QBFloor).length,
+          oppGives, oppGets, top32QBFloor,
         );
-        const qbsGiven = givePlayers.filter((p) => p.position === "QB" && p.value >= top32QBFloor).length;
-        return oppTop32QBs.length - qbsGiven >= 3;
-      };
 
       const oppReceiveOk = (oppPlayersList: PlayerWithValue[], givePlayers: PlayerWithValue[], receivePlayers: PlayerWithValue[]) => {
         const outgoingIds = new Set(receivePlayers.map((p) => p.player_id));
@@ -735,7 +733,8 @@ function TradeFinder({
             if (isBlockedSellDisposition(mp.player_id)) continue;
             for (const pick of oppPicks) {
               if (!isBalancedWithStarDiscount([mp.value], [pick.value])) continue;
-              if (!qbSafe([mp])) continue;
+              if (!qbSafe([mp], [])) continue;
+              if (!oppQbSafe(oppPlayers, [], [mp])) continue;
               if (!oppReceiveOk(oppPlayers, [mp], [])) continue;
               results.push({
                 give: [mp], receive: [], givePicks: [], receivePicks: [pick], oppName, oppRosterId: oppRoster.roster_id,
@@ -750,7 +749,8 @@ function TradeFinder({
               for (let j = i + 1; j < oppPicks.length; j++) {
                 const p1 = oppPicks[i], p2 = oppPicks[j];
                 if (!isBalancedWithStarDiscount([mp.value], [p1.value, p2.value])) continue;
-                if (!qbSafe([mp])) continue;
+                if (!qbSafe([mp], [])) continue;
+                if (!oppQbSafe(oppPlayers, [], [mp])) continue;
                 if (!oppReceiveOk(oppPlayers, [mp], [])) continue;
                 results.push({
                   give: [mp], receive: [], givePicks: [], receivePicks: [p1, p2], oppName, oppRosterId: oppRoster.roster_id,
@@ -765,7 +765,8 @@ function TradeFinder({
               const mp1 = myTop[i], mp2 = myTop[j];
               if (isBlockedSellDisposition(mp1.player_id) || isBlockedSellDisposition(mp2.player_id)) continue;
               if (!myPkgOk([mp1, mp2])) continue;
-              if (!qbSafe([mp1, mp2])) continue;
+              if (!qbSafe([mp1, mp2], [])) continue;
+              if (!oppQbSafe(oppPlayers, [], [mp1, mp2])) continue;
               if (!oppReceiveOk(oppPlayers, [mp1, mp2], [])) continue;
               for (const pick of oppPicks) {
                 if (!isBalancedWithStarDiscount([mp1.value, mp2.value], [pick.value])) continue;
@@ -806,8 +807,8 @@ function TradeFinder({
           for (let oi = 0; oi < oppCap(18); oi++) {
             const op = oppTop[oi];
             if (!isBalancedWithStarDiscount([mp.value], [op.value])) continue;
-            if (!qbSafe([mp])) continue;
-            if (!oppQbSafe(oppPlayers, [op])) continue;
+            if (!qbSafe([mp], [op])) continue;
+            if (!oppQbSafe(oppPlayers, [op], [mp])) continue;
             if (!oppReceiveOk(oppPlayers, [mp], [op])) continue;
             results.push({
               give: [mp], receive: [op], givePicks: [], receivePicks: [], oppName, oppRosterId: oppRoster.roster_id,
@@ -816,7 +817,8 @@ function TradeFinder({
             });
             // Value-neutral sweetener variant of the same balanced base (net/score unchanged).
             if (sweetenerPiece && sweetenerPiece.player_id !== mp.player_id
-              && myPkgOk([mp, sweetenerPiece]) && qbSafe([mp, sweetenerPiece])) {
+              && myPkgOk([mp, sweetenerPiece]) && qbSafe([mp, sweetenerPiece], [op])
+              && oppQbSafe(oppPlayers, [op], [mp, sweetenerPiece])) {
               results.push({
                 give: [mp, sweetenerPiece], receive: [op], givePicks: [], receivePicks: [], oppName, oppRosterId: oppRoster.roster_id,
                 score: posScore([mp], [op]),
@@ -834,8 +836,8 @@ function TradeFinder({
               const op1 = oppTop[i], op2 = oppTop[j];
               if (!isBalancedWithStarDiscount([mp.value], [op1.value, op2.value])) continue;
               if (!packageOk([op1, op2])) continue;
-              if (!qbSafe([mp])) continue;
-              if (!oppQbSafe(oppPlayers, [op1, op2])) continue;
+              if (!qbSafe([mp], [op1, op2])) continue;
+              if (!oppQbSafe(oppPlayers, [op1, op2], [mp])) continue;
               if (!oppReceiveOk(oppPlayers, [mp], [op1, op2])) continue;
               results.push({
                 give: [mp], receive: [op1, op2], givePicks: [], receivePicks: [], oppName, oppRosterId: oppRoster.roster_id,
@@ -854,8 +856,8 @@ function TradeFinder({
                 const op1 = oppTop[i], op2 = oppTop[j], op3 = oppTop[k];
                 if (!isBalancedWithStarDiscount([mp.value], [op1.value, op2.value, op3.value])) continue;
                 if (!packageOk([op1, op2, op3])) continue;
-                if (!qbSafe([mp])) continue;
-                if (!oppQbSafe(oppPlayers, [op1, op2, op3])) continue;
+                if (!qbSafe([mp], [op1, op2, op3])) continue;
+                if (!oppQbSafe(oppPlayers, [op1, op2, op3], [mp])) continue;
                 if (!oppReceiveOk(oppPlayers, [mp], [op1, op2, op3])) continue;
                 results.push({
                   give: [mp], receive: [op1, op2, op3], givePicks: [], receivePicks: [], oppName, oppRosterId: oppRoster.roster_id,
@@ -876,8 +878,8 @@ function TradeFinder({
                   const op1 = oppTop[i], op2 = oppTop[j], op3 = oppTop[k], op4 = oppTop[l];
                   if (!isBalancedWithStarDiscount([mp.value], [op1.value, op2.value, op3.value, op4.value])) continue;
                   if (!packageOk([op1, op2, op3, op4])) continue;
-                  if (!qbSafe([mp])) continue;
-                  if (!oppQbSafe(oppPlayers, [op1, op2, op3, op4])) continue;
+                  if (!qbSafe([mp], [op1, op2, op3, op4])) continue;
+                  if (!oppQbSafe(oppPlayers, [op1, op2, op3, op4], [mp])) continue;
                   if (!oppReceiveOk(oppPlayers, [mp], [op1, op2, op3, op4])) continue;
                   results.push({
                     give: [mp], receive: [op1, op2, op3, op4], givePicks: [], receivePicks: [], oppName, oppRosterId: oppRoster.roster_id,
@@ -900,8 +902,8 @@ function TradeFinder({
               const balanceCheck = tierUpEligible ? isBalancedTierUpWithStarDiscount : isBalancedWithStarDiscount;
               if (!balanceCheck([mp1.value, mp2.value], [op.value])) continue;
               if (!myPkgOk([mp1, mp2])) continue;
-              if (!qbSafe([mp1, mp2])) continue;
-              if (!oppQbSafe(oppPlayers, [op])) continue;
+              if (!qbSafe([mp1, mp2], [op])) continue;
+              if (!oppQbSafe(oppPlayers, [op], [mp1, mp2])) continue;
               if (!oppReceiveOk(oppPlayers, [mp1, mp2], [op])) continue;
               results.push({
                 give: [mp1, mp2], receive: [op], givePicks: [], receivePicks: [], oppName, oppRosterId: oppRoster.roster_id,
@@ -922,8 +924,8 @@ function TradeFinder({
                 if (!isBalancedWithStarDiscount([mp1.value, mp2.value], [op1.value, op2.value])) continue;
                 if (!myPkgOk([mp1, mp2])) continue;
                 if (!packageOk([op1, op2])) continue;
-                if (!qbSafe([mp1, mp2])) continue;
-                if (!oppQbSafe(oppPlayers, [op1, op2])) continue;
+                if (!qbSafe([mp1, mp2], [op1, op2])) continue;
+                if (!oppQbSafe(oppPlayers, [op1, op2], [mp1, mp2])) continue;
                 if (!oppReceiveOk(oppPlayers, [mp1, mp2], [op1, op2])) continue;
                 results.push({
                   give: [mp1, mp2], receive: [op1, op2], givePicks: [], receivePicks: [], oppName, oppRosterId: oppRoster.roster_id,
@@ -946,8 +948,8 @@ function TradeFinder({
                   if (!isBalancedWithStarDiscount([mp1.value, mp2.value], [op1.value, op2.value, op3.value])) continue;
                   if (!myPkgOk([mp1, mp2])) continue;
                   if (!packageOk([op1, op2, op3])) continue;
-                  if (!qbSafe([mp1, mp2])) continue;
-                  if (!oppQbSafe(oppPlayers, [op1, op2, op3])) continue;
+                  if (!qbSafe([mp1, mp2], [op1, op2, op3])) continue;
+                  if (!oppQbSafe(oppPlayers, [op1, op2, op3], [mp1, mp2])) continue;
                   if (!oppReceiveOk(oppPlayers, [mp1, mp2], [op1, op2, op3])) continue;
                   results.push({
                     give: [mp1, mp2], receive: [op1, op2, op3], givePicks: [], receivePicks: [], oppName, oppRosterId: oppRoster.roster_id,
@@ -972,8 +974,8 @@ function TradeFinder({
                     if (!isBalancedWithStarDiscount([mp1.value, mp2.value], [op1.value, op2.value, op3.value, op4.value])) continue;
                     if (!myPkgOk([mp1, mp2])) continue;
                     if (!packageOk([op1, op2, op3, op4])) continue;
-                    if (!qbSafe([mp1, mp2])) continue;
-                    if (!oppQbSafe(oppPlayers, [op1, op2, op3, op4])) continue;
+                    if (!qbSafe([mp1, mp2], [op1, op2, op3, op4])) continue;
+                    if (!oppQbSafe(oppPlayers, [op1, op2, op3, op4], [mp1, mp2])) continue;
                     if (!oppReceiveOk(oppPlayers, [mp1, mp2], [op1, op2, op3, op4])) continue;
                     results.push({
                       give: [mp1, mp2], receive: [op1, op2, op3, op4], givePicks: [], receivePicks: [], oppName, oppRosterId: oppRoster.roster_id,
@@ -993,14 +995,14 @@ function TradeFinder({
             for (let k = j + 1; k < myCap(10); k++) {
               const mp1 = myTop[i], mp2 = myTop[j], mp3 = myTop[k];
               if (!myPkgOk([mp1, mp2, mp3])) continue;
-              if (!qbSafe([mp1, mp2, mp3])) continue;
               for (let a = 0; a < oppCap(10); a++) {
                 for (let b = a + 1; b < oppCap(10); b++) {
                   for (let c = b + 1; c < oppCap(10); c++) {
                     const op1 = oppTop[a], op2 = oppTop[b], op3 = oppTop[c];
                     if (!isBalancedWithStarDiscount([mp1.value, mp2.value, mp3.value], [op1.value, op2.value, op3.value])) continue;
                     if (!packageOk([op1, op2, op3])) continue;
-                    if (!oppQbSafe(oppPlayers, [op1, op2, op3])) continue;
+                    if (!qbSafe([mp1, mp2, mp3], [op1, op2, op3])) continue;
+                    if (!oppQbSafe(oppPlayers, [op1, op2, op3], [mp1, mp2, mp3])) continue;
                     if (!oppReceiveOk(oppPlayers, [mp1, mp2, mp3], [op1, op2, op3])) continue;
                     results.push({
                       give: [mp1, mp2, mp3], receive: [op1, op2, op3], givePicks: [], receivePicks: [], oppName, oppRosterId: oppRoster.roster_id,
@@ -1020,7 +1022,6 @@ function TradeFinder({
             for (let k = j + 1; k < myCap(8); k++) {
               const mp1 = myTop[i], mp2 = myTop[j], mp3 = myTop[k];
               if (!myPkgOk([mp1, mp2, mp3])) continue;
-              if (!qbSafe([mp1, mp2, mp3])) continue;
               for (let a = 0; a < oppCap(8); a++) {
                 for (let b = a + 1; b < oppCap(8); b++) {
                   for (let c = b + 1; c < oppCap(8); c++) {
@@ -1028,7 +1029,8 @@ function TradeFinder({
                       const op1 = oppTop[a], op2 = oppTop[b], op3 = oppTop[c], op4 = oppTop[d];
                       if (!isBalancedWithStarDiscount([mp1.value, mp2.value, mp3.value], [op1.value, op2.value, op3.value, op4.value])) continue;
                       if (!packageOk([op1, op2, op3, op4])) continue;
-                      if (!oppQbSafe(oppPlayers, [op1, op2, op3, op4])) continue;
+                      if (!qbSafe([mp1, mp2, mp3], [op1, op2, op3, op4])) continue;
+                      if (!oppQbSafe(oppPlayers, [op1, op2, op3, op4], [mp1, mp2, mp3])) continue;
                       if (!oppReceiveOk(oppPlayers, [mp1, mp2, mp3], [op1, op2, op3, op4])) continue;
                       results.push({
                         give: [mp1, mp2, mp3], receive: [op1, op2, op3, op4], givePicks: [], receivePicks: [], oppName, oppRosterId: oppRoster.roster_id,
@@ -1050,7 +1052,6 @@ function TradeFinder({
               for (let l = k + 1; l < myCap(8); l++) {
                 const mp1 = myTop[i], mp2 = myTop[j], mp3 = myTop[k], mp4 = myTop[l];
                 if (!myPkgOk([mp1, mp2, mp3, mp4])) continue;
-                if (!qbSafe([mp1, mp2, mp3, mp4])) continue;
                 for (let a = 0; a < oppCap(8); a++) {
                   for (let b = a + 1; b < oppCap(8); b++) {
                     for (let c = b + 1; c < oppCap(8); c++) {
@@ -1058,7 +1059,8 @@ function TradeFinder({
                         const op1 = oppTop[a], op2 = oppTop[b], op3 = oppTop[c], op4 = oppTop[d];
                         if (!isBalancedWithStarDiscount([mp1.value, mp2.value, mp3.value, mp4.value], [op1.value, op2.value, op3.value, op4.value])) continue;
                         if (!packageOk([op1, op2, op3, op4])) continue;
-                        if (!oppQbSafe(oppPlayers, [op1, op2, op3, op4])) continue;
+                        if (!qbSafe([mp1, mp2, mp3, mp4], [op1, op2, op3, op4])) continue;
+                        if (!oppQbSafe(oppPlayers, [op1, op2, op3, op4], [mp1, mp2, mp3, mp4])) continue;
                         if (!oppReceiveOk(oppPlayers, [mp1, mp2, mp3, mp4], [op1, op2, op3, op4])) continue;
                         results.push({
                           give: [mp1, mp2, mp3, mp4], receive: [op1, op2, op3, op4], givePicks: [], receivePicks: [], oppName, oppRosterId: oppRoster.roster_id,
@@ -1082,8 +1084,8 @@ function TradeFinder({
           for (const myPick of myEqualizerPicks) {
             for (const op of oppTop) {
               if (!isBalancedWithStarDiscount([mp.value, myPick.value], [op.value])) continue;
-              if (!qbSafe([mp])) continue;
-              if (!oppQbSafe(oppPlayers, [op])) continue;
+              if (!qbSafe([mp], [op])) continue;
+              if (!oppQbSafe(oppPlayers, [op], [mp])) continue;
               if (!oppReceiveOk(oppPlayers, [mp], [op])) continue;
               results.push({
                 give: [mp], receive: [op], givePicks: [myPick], receivePicks: [], oppName, oppRosterId: oppRoster.roster_id,
@@ -1099,11 +1101,11 @@ function TradeFinder({
           for (let j = i + 1; j < Math.min(myTop.length, 7); j++) {
             const mp1 = myTop[i], mp2 = myTop[j];
             if (!myPkgOk([mp1, mp2])) continue;
-            if (!qbSafe([mp1, mp2])) continue;
             for (const myPick of myEqualizerPicks) {
               for (const op of oppTop) {
                 if (!isBalancedWithStarDiscount([mp1.value, mp2.value, myPick.value], [op.value])) continue;
-                if (!oppQbSafe(oppPlayers, [op])) continue;
+                if (!qbSafe([mp1, mp2], [op])) continue;
+                if (!oppQbSafe(oppPlayers, [op], [mp1, mp2])) continue;
                 if (!oppReceiveOk(oppPlayers, [mp1, mp2], [op])) continue;
                 results.push({
                   give: [mp1, mp2], receive: [op], givePicks: [myPick], receivePicks: [], oppName, oppRosterId: oppRoster.roster_id,
@@ -1120,8 +1122,8 @@ function TradeFinder({
           for (const op of oppTop) {
             for (const oppPick of oppEqualizerPicks) {
               if (!isBalancedWithStarDiscount([mp.value], [op.value, oppPick.value])) continue;
-              if (!qbSafe([mp])) continue;
-              if (!oppQbSafe(oppPlayers, [op])) continue;
+              if (!qbSafe([mp], [op])) continue;
+              if (!oppQbSafe(oppPlayers, [op], [mp])) continue;
               if (!oppReceiveOk(oppPlayers, [mp], [op])) continue;
               results.push({
                 give: [mp], receive: [op], givePicks: [], receivePicks: [oppPick], oppName, oppRosterId: oppRoster.roster_id,
@@ -1138,8 +1140,8 @@ function TradeFinder({
             for (let j = i + 1; j < oppCap(8); j++) {
               const op1 = oppTop[i], op2 = oppTop[j];
               if (!packageOk([op1, op2])) continue;
-              if (!qbSafe([mp])) continue;
-              if (!oppQbSafe(oppPlayers, [op1, op2])) continue;
+              if (!qbSafe([mp], [op1, op2])) continue;
+              if (!oppQbSafe(oppPlayers, [op1, op2], [mp])) continue;
               if (!oppReceiveOk(oppPlayers, [mp], [op1, op2])) continue;
               for (const oppPick of oppEqualizerPicks) {
                 if (!isBalancedWithStarDiscount([mp.value], [op1.value, op2.value, oppPick.value])) continue;
@@ -1163,6 +1165,7 @@ function TradeFinder({
         );
         const oppLotteryPlayers = oppPlayers.filter((p) => {
           if (isBlockedBuyDisposition(p.player_id, oppRoster.roster_id)) return false;
+          if (!qbSafe([], [p])) return false;
           const age = Number(p.age || 99);
           const val = Number(p.value || 0);
           if (val < 60 || val >= FINDER_LOTTERY_CEILING) return false;

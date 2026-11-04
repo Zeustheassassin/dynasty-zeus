@@ -3,7 +3,9 @@
 > **Audience:** a developer who has just been handed the keys and has never seen this project.
 > **Goal:** explain what the app is, how the code is structured, how data flows, and how every major subsystem actually works — in enough depth to debug and extend it on day one.
 >
-> *Last reviewed: 2026-11-04, HEAD `bd20ad4` (working tree) — **Trade Finder: Championship Impact and the Trade Shape setting.** The user asked for a championship impact option for teams making a contending push, and a tier up / tier down setting, then pinned the second down: only "different versions of trades that I might prefer", with "the rules ... the same otherwise". Checking how to build the first exposed that every trade preview was mostly chance: a swap of two players nobody starts "moved" playoff odds between −6.8 and +6.4 points. `previewTradeSimulation` now measures with the same dice for both runs (`TradeImpactMeasure` in simulation.ts; normal runs are untouched, golden snapshots unchanged). See "Trade Shape and Championship Impact" under the Finder sections and "Measuring a trade" in the sim section. The Trade Hub also loads the weekly scores the sim needs; before, the Finder ran on a generated schedule with no past results unless the Simulator tab had been opened that session. No migration. 2715 tests, 192 files.*
+> *Last reviewed: 2026-11-04, HEAD `3cd9e17` (working tree) — **Trade Finder: the QB room rule.** A team with three capable QBs (top 32 by value) won't trade for another unless one goes back, whatever the value, and nobody sells below three unless one comes back. Replaces a check that rejected every trade involving a team under three, even with no QB in it (4–6 of 11 opponents were off the board in every league checked), and that rejected QB-for-QB swaps between full rooms. See `qbSafe` under candidate generation. No migration. 2727 tests, 192 files.*
+>
+> *Prior review: 2026-11-04, HEAD `bd20ad4` (working tree; committed as `3cd9e17`) — **Trade Finder: Championship Impact and the Trade Shape setting.** The user asked for a championship impact option for teams making a contending push, and a tier up / tier down setting, then pinned the second down: only "different versions of trades that I might prefer", with "the rules ... the same otherwise". Checking how to build the first exposed that every trade preview was mostly chance: a swap of two players nobody starts "moved" playoff odds between −6.8 and +6.4 points. `previewTradeSimulation` now measures with the same dice for both runs (`TradeImpactMeasure` in simulation.ts; normal runs are untouched, golden snapshots unchanged). See "Trade Shape and Championship Impact" under the Finder sections and "Measuring a trade" in the sim section. The Trade Hub also loads the weekly scores the sim needs; before, the Finder ran on a generated schedule with no past results unless the Simulator tab had been opened that session. No migration. 2714 tests, 192 files.*
 >
 > *Prior review: 2026-11-03, HEAD `53454fe` (working tree; committed as `bd20ad4`) — **Roster Crunch page and the Danger tag.** The user kept a hand-built sheet of, per league, next-draft picks by round, taxi rules, and the lowest-value players who would have to go once IR players come back and the rookie class arrives, plus 2 extra names. It is now League Hub → Rosters → Roster Crunch, and every listed player reads Danger across the app, which lifts a Core or Pricey hold in Trade Finder until their value takes them off the list. See "Roster Crunch" in §5. Pure logic in [rosterCrunch.ts](lib/helpers/rosterCrunch.ts); no migration, nothing stored. Refresh on Roster Overview and Roster Crunch now also skips the traded-pick caches (36 more uncached calls per refresh). 2672 tests, 192 files.*
 >
@@ -660,7 +662,7 @@
 17. [Dev workflow: build, lint, test](#17-dev-workflow-build-lint-test)
 18. [CI pipeline (GitHub Actions)](#18-ci-pipeline-github-actions)
 19. [ESLint & TypeScript rules that bite](#19-eslint--typescript-rules-that-bite)
-20. [Test suite scope (2715 tests, 192 files)](#20-test-suite-scope-2715-tests-192-files)
+20. [Test suite scope (2727 tests, 192 files)](#20-test-suite-scope-2727-tests-192-files)
 21. [Common failure modes & where to look](#21-common-failure-modes--where-to-look)
 22. [Things intentionally NOT done (and why)](#22-things-intentionally-not-done-and-why)
 23. [Known open items & time bombs for the next owner](#23-known-open-items--time-bombs-for-the-next-owner)
@@ -1504,7 +1506,7 @@ For each opponent roster (excluding ignored owners and respecting the optional o
 
 **Per-candidate gates at generation time** (cheap rejects before the expensive scoring):
 - `isBalanced(give, receive)` — the value gate in [FinderScoring.ts:129-140](components/tradeHub/FinderScoring.ts#L129): the adjusted gap must be ≤ 600 absolute AND the lighter side ≥ 85% of the heavier. Crucially, surplus bodies below 700 grant **zero** waiver/balance credit (`tradeWaiverAdj`, [FinderScoring.ts:104-119](components/tradeHub/FinderScoring.ts#L104)), so a sub-700 throw-in can't manufacture fake balance.
-- `qbSafe` / `oppQbSafe` — neither side may be left with fewer than 3 top-32 QBs (bypassed for me in Tank Mode), [TradeFinder.tsx:491-504](components/tradeHub/TradeFinder.tsx#L491).
+- `qbSafe` / `oppQbSafe` — the **QB room rule** (user, 2026-11-04), both wrapping `qbRoomOk` in [FinderScoring.ts](components/tradeHub/FinderScoring.ts). "Capable" is top 32 by league-adjusted dynasty value. A team with 3 capable QBs takes no QB unless one goes back, whatever the value, so a QB-for-QB swap between two full rooms is fine and a fourth QB for a receiver isn't. Nobody sells below 3 unless one comes back. A team under 3 is otherwise free to trade. Searching for a QB by name lifts my cap, and Tank Mode lifts my sell floor. It also covers player-for-picks trades, sweeteners and Lottery tickets. `oppDirectionScore`'s penalty for a QB who wouldn't start for the team taking him now only applies when no QB goes back, so a team with two better QBs still won't take a third for a non-QB.
 - `oppReceiveOk` — an *impact* incoming player (value ≥ 2000) at QB/WR/TE must crack the opponent's post-trade top-N at the position (QB top-3, WR top-5, TE top-2), [TradeFinder.tsx:506-527](components/tradeHub/TradeFinder.tsx#L506).
 - `packageOk` / `myPkgOk` — at most one QB and one TE per package (lifted for me in Tank Mode), [FinderScoring.ts:88-92](components/tradeHub/FinderScoring.ts#L88).
 
@@ -1564,8 +1566,6 @@ Everything above is heuristic — value/direction/depth scoring, no actual seaso
 **Championship Impact** (`finderSortMode`, shown to `isWinNowTeam` teams, not only `isChampionshipPush`). `titleGainByFingerprint` switches the pipeline to a different pool and board: `simCandidates` walks the ranked swaps for up to 30 (`CHAMPIONSHIP_POOL_SIZE`), at most 4 per target player, skipping trades with no `lineupGain`, and the 95% skip doesn't apply since a locked-in team still has title odds to gain. Once anything is measured, `shuffledForDisplay` is only measured trades, biggest gain first, so the slots fill by gain. Live, it shows 3–7 trades out of 30. Playoff Impact stays a re-sort of the cards in FinderResults and doesn't rebuild the memo.
 
 **Trade Shape** (`finderTierMode`, state in TradeHub beside the strategy override, for any team). `tierShapeRank` gives 0 for the headline shape, 1 for a related one, null otherwise. Tier up: one player back, 2+ assets out, and that player ≥10% (`TIER_STEP`) above the best asset going out; 2 for 1 is the headline, 2 + pick for 1 and 1 + pick for 1 are related. Tier down: one player out, 2+ assets back, ≥10% above the best coming back; 1 for 2 is the headline, 1 for 3, 1 for 4, 1 for 2 + pick, 1 for 1 + pick and 1 for 2 picks are related. Headline shapes sort first in the pipeline and in FinderResults, so related ones only fill what's left. **It is only a filter on shape (user, 2026-11-04): every other rule applies exactly as on the normal board**, including the measured odds check, `strategyScore > 0`, the acceptance floor, the fair cap, and the overpay allowance staying contender-only. Boards can be thinner than Any, and can be empty.
-
-**Open, for the user to decide:** see "Trade Finder QB rule" in §23.
 
 ---
 
@@ -2755,7 +2755,7 @@ The flat config in [eslint.config.mjs](eslint.config.mjs) is minimal: it just sp
 
 Beyond ESLint, TypeScript is strict at the `tsc` step. `tsconfig.json` enables `strict`, plus `noUnusedLocals` and `noUnusedParameters` — so an unused import, variable, or function parameter is a **build/type-check failure**, not a warning. This is the single most common reason a local edit that "looks fine" red-X's in CI.
 
-## 20. Test suite scope (2715 tests, 192 files)
+## 20. Test suite scope (2727 tests, 192 files)
 
 Run via PowerShell. The suite is [Vitest](vitest.config.mts) in a `jsdom` environment, globbing `**/__tests__/**/*.{ts,tsx}` and `**/*.{test,spec}.{ts,tsx}`. It deliberately covers **pure logic and server routes, not UI rendering**. There are no e2e tests. A handful of narrow component-render tests (via `@testing-library/react`) live under [__tests__/components/](__tests__/components/), each pinning one piece of UI behavior (e.g. the Injury Report panels, the Analysis min filters, the Big Board's Above Exp columns).
 
@@ -2840,13 +2840,13 @@ The remaining files cover helpers (math, scoring, lineup, lineup availability an
 
 ## 23. Known open items & time bombs for the next owner
 
-### Trade Finder QB rule (found 2026-11-04, user's call)
+### Sim bracket with 7 or 8 playoff teams (found 2026-11-04, not fixed)
 
-`qbSafe` / `oppQbSafe` in TradeFinder.tsx return `top32QBs − qbsGiven >= 3`, so a team already holding fewer than 3 top-32 QBs fails even when no QB moves. Every standard trade with that team is thrown out at generation. Measured on 5 of the test account's Superflex leagues: 4–6 of 11 opponents are off the board entirely. A user team under 3 would get only Lottery trades, which likely explains The Colosseum's empty board noted on 10/30 (it has 3 now). The likely fix is `qbsGiven === 0 || …` on both, which would change every Finder board, so it needs the user's OK.
+`byeTeams` is 2 whenever `playoff_teams >= 6`, but a 7-team bracket has 1 bye and an 8-team bracket has none. With 7 teams the opening round is 5 teams, so `simulatePlayoffs` pairs 2 games and eliminates the middle seed without a game; with 8, that happens a round later. `titleOddsFromSeeding` copies this so the two agree. Of the user's 36 leagues, 35 have 6 playoff teams and 1 (The Dynasty League) has 7.
 
-### Sim bracket with 8 playoff teams (found 2026-11-04, not fixed)
+### Finder boards fill with unmeasured trades
 
-`byeTeams` is 2 whenever `playoff_teams >= 6`. With 8 teams that gives 5 after the opening round, and `simulatePlayoffs` pairs 2 games and drops the middle seed without a game. `titleOddsFromSeeding` copies this so the two agree. Sleeper's 8-team bracket has no byes.
+A win-now team's board measures only the top 22 trades of its shape. Those that fail are hidden and unmeasured trades take their slots, so a card with no odds on it hasn't been checked. On one 72% team, 19 of 22 failed on the normal board, and 6 of 12 Tier Up cards had no odds. Championship Impact shows only measured trades.
 
 ### Collected, not yet used: the activation list
 

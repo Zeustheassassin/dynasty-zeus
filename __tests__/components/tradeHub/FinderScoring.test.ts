@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { PlayerWithValue, PickWithValue } from "@/components/tradeHub/shared";
 import {
-  tierShapeRank, tradeImpactPasses, playoffGain, titleGain, type TradeSimImpact,
+  qbRoomOk, tierShapeRank, tradeImpactPasses, playoffGain, titleGain, type TradeSimImpact,
 } from "@/components/tradeHub/FinderScoring";
 import {
   isAgingAsset,
@@ -687,5 +687,69 @@ describe("tradeImpactPasses", () => {
     const liftsThem = { myPlayoffAfter: 65, myTitleAfter: 12, oppIsRebuildSide: true, oppPlayoffDelta: 3 };
     expect(tradeImpactPasses(impact(liftsThem), "recommended")).toBe(false);
     expect(tradeImpactPasses(impact(liftsThem), "championshipImpact")).toBe(true);
+  });
+});
+
+describe("qbRoomOk", () => {
+  const FLOOR = 1600;
+  const qb = (value: number) => ({ position: "QB", value });
+  const wr = (value = 4000) => ({ position: "WR", value });
+  const hurts = qb(3271);
+  const young = qb(3545);
+  const backup = qb(900); // not capable
+
+  it("the user's example: two full rooms can swap QBs", () => {
+    expect(qbRoomOk(3, [hurts], [young], FLOOR)).toBe(true);
+    expect(qbRoomOk(3, [young], [hurts], FLOOR)).toBe(true);
+  });
+
+  it("a full room won't take a QB unless one goes back, however good the value", () => {
+    expect(qbRoomOk(3, [wr(1000)], [qb(9000)], FLOOR)).toBe(false);
+    expect(qbRoomOk(4, [wr()], [hurts], FLOOR)).toBe(false);
+    expect(qbRoomOk(3, [wr(), wr()], [young], FLOOR)).toBe(false);
+  });
+
+  it("a full room won't take a backup QB either", () => {
+    expect(qbRoomOk(3, [wr()], [backup], FLOOR)).toBe(false);
+  });
+
+  it("sending a backup back doesn't make room for a fourth capable QB", () => {
+    expect(qbRoomOk(3, [backup], [hurts], FLOOR)).toBe(false);
+  });
+
+  it("a room with space can add one, up to three", () => {
+    expect(qbRoomOk(2, [wr()], [hurts], FLOOR)).toBe(true);
+    expect(qbRoomOk(0, [wr()], [hurts], FLOOR)).toBe(true);
+  });
+
+  it("the fix: a team under three makes any trade that doesn't touch its QBs", () => {
+    expect(qbRoomOk(2, [wr()], [wr()], FLOOR)).toBe(true);
+    expect(qbRoomOk(1, [wr(), wr()], [wr()], FLOOR)).toBe(true);
+    expect(qbRoomOk(0, [wr()], [], FLOOR)).toBe(true);
+  });
+
+  it("nobody sells below three, but a QB coming back keeps the count", () => {
+    expect(qbRoomOk(3, [hurts], [wr()], FLOOR)).toBe(false);
+    expect(qbRoomOk(2, [hurts], [wr()], FLOOR)).toBe(false);
+    expect(qbRoomOk(2, [hurts], [young], FLOOR)).toBe(true);
+  });
+
+  it("a surplus can be sold down to three", () => {
+    expect(qbRoomOk(4, [hurts], [wr()], FLOOR)).toBe(true);
+    expect(qbRoomOk(5, [hurts], [wr()], FLOOR)).toBe(true);
+  });
+
+  it("a QB who isn't capable can be sold from any room", () => {
+    expect(qbRoomOk(2, [backup], [wr()], FLOOR)).toBe(true);
+  });
+
+  it("Tank Mode lifts only the sell floor", () => {
+    expect(qbRoomOk(2, [hurts], [wr()], FLOOR, { sellFloorLifted: true })).toBe(true);
+    expect(qbRoomOk(3, [wr()], [young], FLOOR, { sellFloorLifted: true })).toBe(false);
+  });
+
+  it("searching for a QB by name lifts only the cap", () => {
+    expect(qbRoomOk(3, [wr()], [young], FLOOR, { buyCapLifted: true })).toBe(true);
+    expect(qbRoomOk(3, [hurts], [wr()], FLOOR, { buyCapLifted: true })).toBe(false);
   });
 });

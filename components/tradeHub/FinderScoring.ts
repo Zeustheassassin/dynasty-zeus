@@ -297,6 +297,36 @@ export const fairnessScore = (f: TradeFairness): number =>
 export const fairnessTier = (f: TradeFairness | undefined): number =>
   !f ? 2 : f.gap <= 0.015 ? 0 : f.gap <= 0.04 ? 1 : 2;
 
+// ── QB rooms ──────────────────────────────────────────────────────────────────
+// User rule (2026-11-04): a team with three capable QBs (top 32 by value) won't trade for another
+// unless one goes back, however good the value. Hurts for Young is a real trade between two full
+// rooms; a fourth QB for a receiver isn't. And nobody sells below three unless one comes back. A
+// team already short of three is otherwise free to trade: a deal that doesn't touch its QBs doesn't
+// change anything about its room. Every league the user is in is Superflex or 2QB, where three
+// means two starters and a spare.
+export const QB_ROOM_SIZE = 3;
+
+type QbRoomAsset = { position: string; value: number };
+
+export const qbRoomOk = (
+  capableHeld: number,
+  outgoing: QbRoomAsset[],
+  incoming: QbRoomAsset[],
+  capableFloor: number,
+  { sellFloorLifted = false, buyCapLifted = false }: { sellFloorLifted?: boolean; buyCapLifted?: boolean } = {},
+): boolean => {
+  const qbsOut = outgoing.filter((p) => p.position === "QB");
+  const qbsIn = incoming.filter((p) => p.position === "QB");
+  const capableOut = qbsOut.filter((p) => p.value >= capableFloor).length;
+  const capableIn = qbsIn.filter((p) => p.value >= capableFloor).length;
+  const capableAfter = capableHeld - capableOut + capableIn;
+  if (!buyCapLifted) {
+    if (qbsIn.length > qbsOut.length && capableHeld - capableOut >= QB_ROOM_SIZE) return false;
+    if (capableIn > capableOut && capableAfter > QB_ROOM_SIZE) return false;
+  }
+  return sellFloorLifted || capableOut <= capableIn || capableAfter >= QB_ROOM_SIZE;
+};
+
 // ── Tier up / tier down ───────────────────────────────────────────────────────
 // A filter on the shape of the trades the Finder would already show, for any team (user,
 // 2026-11-04: "different versions of trades that I might prefer ... I want the rules to stay the

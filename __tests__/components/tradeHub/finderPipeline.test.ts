@@ -2103,3 +2103,31 @@ describe("runFinderPipeline — Championship Impact view", () => {
     expect(allTrades).toHaveLength(2);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// A QB going back (user, 2026-11-04): Maye, Love and Young's owner won't take Hurts for a receiver,
+// since he wouldn't start there, but will take him for Young.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("runFinderPipeline — a QB coming to a team whose room is set", () => {
+  const players = {
+    maye: { player_id: "maye", position: "QB" },
+    love: { player_id: "love", position: "QB" },
+    young: { player_id: "young", position: "QB" },
+  } as unknown as Record<string, SleeperPlayer>;
+  const calcFcValues = { maye: 7549, love: 5145, young: 3545 };
+  const rosters = [mkRoster(1, "USER", []), mkRoster(2, "OPP", ["maye", "love", "young"])];
+  const hurts = () => mkPlayer("hurts", "QB", 3271);
+
+  it("takes him when a QB goes back", () => {
+    const swap = mkTrade({ give: [hurts()], receive: [mkPlayer("young", "QB", 3545)], format: "1 for 1" });
+    const { allTrades } = runFinderPipeline([swap], baseCtx({ rosters, players, calcFcValues, hasSuperFlex: true }));
+    expect(allTrades).toHaveLength(1);
+  });
+
+  it("won't take him for a receiver", () => {
+    const noQbBack = mkTrade({ give: [hurts()], receive: [mkPlayer("wr", "WR", 3500)], format: "1 for 1" });
+    const { allTrades } = runFinderPipeline([noQbBack], baseCtx({ rosters, players, calcFcValues, hasSuperFlex: true }));
+    expect(allTrades).toHaveLength(0);
+  });
+});

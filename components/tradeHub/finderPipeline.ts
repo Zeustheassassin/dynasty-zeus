@@ -773,7 +773,11 @@ export function runFinderPipeline(
             ...oppGivesPicks.map((p) => p.value)
           );
           const giveQualityFactor = Math.min(1.0, oppGiveTopValue / 2500);
-          oppReceivesPlayers.filter((p) => p.position === "QB").forEach((qb) => {
+          // Taking a QB who wouldn't start is a hard no, unless one's going back (user, 2026-11-04):
+          // Hurts for Young swaps a room's third QB for another, it doesn't add one.
+          const oppQbsIn = oppReceivesPlayers.filter((p) => p.position === "QB");
+          const oppQbsBack = oppGivesPlayers.filter((p) => p.position === "QB").length;
+          if (oppQbsIn.length > oppQbsBack) oppQbsIn.forEach((qb) => {
             const qbsAbove = oppQBValuesSorted.filter((v) => v > qb.value).length;
             if (qbsAbove >= qbStartingSlots) {
               const depthExcess = qbsAbove - qbStartingSlots + 1;
