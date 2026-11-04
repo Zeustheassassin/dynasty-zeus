@@ -298,30 +298,82 @@ export const fairnessTier = (f: TradeFairness | undefined): number =>
   !f ? 2 : f.gap <= 0.015 ? 0 : f.gap <= 0.04 ? 1 : 2;
 
 // ── QB rooms ──────────────────────────────────────────────────────────────────
-// User rule (2026-11-04): a team with three capable QBs (top 32 by value) won't trade for another
-// unless one goes back, however good the value. Hurts for Young is a real trade between two full
-// rooms; a fourth QB for a receiver isn't. And nobody sells below three unless one comes back. A
-// team already short of three is otherwise free to trade: a deal that doesn't touch its QBs doesn't
-// change anything about its room. Every league the user is in is Superflex or 2QB, where three
-// means two starters and a spare.
+// User rules (2026-11-04). A team with three capable QBs won't trade for another unless one goes
+// back, however good the value: Hurts for Young is a real trade between two full rooms, a fourth QB
+// for a receiver isn't. A team with two only adds a third for one of two reasons: a super elite QB,
+// moving on from a lower-tier starter it already has, or a cheap low-end starter like Jacoby
+// Brissett, someone a 2nd or a 2nd and a 3rd buys but not a 1st. Nobody sells below three unless one
+// comes back. Otherwise a team short of three is free
+// to trade: a deal that doesn't touch its QBs changes nothing about its room. Every league the user
+// is in is Superflex or 2QB, where three means two starters and a spare.
 export const QB_ROOM_SIZE = 3;
+const CAPABLE_QB_RANK = 32;
+// Allen, Williams, Maye, Burrow in 11/2026: the next QB is 16% cheaper than the fourth.
+const SUPER_ELITE_QB_COUNT = 4;
 
-type QbRoomAsset = { position: string; value: number };
+type QbRoomAsset = { player_id: string; position: string; value: number };
+
+export interface QbTiers {
+  isCapable: (qb: QbRoomAsset) => boolean;
+  isSuperElite: (qb: QbRoomAsset) => boolean;
+  isInexpensiveStarter: (qb: QbRoomAsset) => boolean;
+}
+
+/** The most a cheap starter is worth (user, 2026-11-04): "essentially acquire with a 2nd round pick,
+ *  maybe a second and a third, but a first rounder is too expensive". A 2nd and a 3rd aren't worth
+ *  their sum to the team selling one player, and that sum can top a late 1st, so the 3rd counts the
+ *  way tradeWaiverAdj counts any extra piece in a 2 for 1. Never reaches the cheapest 1st. */
+export const cheapStarterCeiling = (secondRound: number, thirdRound: number, cheapestFirst: number): number => {
+  const buys = secondRound + tradeWaiverAdj([secondRound, thirdRound], [0]);
+  return cheapestFirst > 0 ? Math.min(buys, cheapestFirst - 1) : buys;
+};
+
+/** QB tiers from every QB's dynasty value, highest first, a player's redraft value, and the most a
+ *  cheap starter is worth. Sleeper's depth charts don't reach the app, so a QB with redraft value is
+ *  the sign he's playing: FantasyCalc's redraft list has the 32 who are, and leaves out backups.
+ *  Capable means top 32 by value or playing, so a young backup worth a lot counts and so does a
+ *  cheap vet who starts. */
+export const buildQbTiers = (
+  qbValuesHighToLow: number[],
+  redraftValue: (playerId: string) => number,
+  inexpensiveCeiling: number,
+): QbTiers => {
+  const capableFloor = qbValuesHighToLow[CAPABLE_QB_RANK - 1] ?? 0;
+  const superEliteFloor = qbValuesHighToLow[SUPER_ELITE_QB_COUNT - 1] ?? Infinity;
+  const isStarting = (qb: QbRoomAsset) => redraftValue(qb.player_id) > 0;
+  return {
+    isCapable: (qb) => qb.value >= capableFloor || isStarting(qb),
+    isSuperElite: (qb) => qb.value >= superEliteFloor,
+    isInexpensiveStarter: (qb) => qb.value <= inexpensiveCeiling && isStarting(qb),
+  };
+};
 
 export const qbRoomOk = (
-  capableHeld: number,
+  heldCapable: QbRoomAsset[],
   outgoing: QbRoomAsset[],
   incoming: QbRoomAsset[],
-  capableFloor: number,
+  tiers: QbTiers,
   { sellFloorLifted = false, buyCapLifted = false }: { sellFloorLifted?: boolean; buyCapLifted?: boolean } = {},
 ): boolean => {
   const qbsOut = outgoing.filter((p) => p.position === "QB");
   const qbsIn = incoming.filter((p) => p.position === "QB");
-  const capableOut = qbsOut.filter((p) => p.value >= capableFloor).length;
-  const capableIn = qbsIn.filter((p) => p.value >= capableFloor).length;
-  const capableAfter = capableHeld - capableOut + capableIn;
+  const capableOut = qbsOut.filter((p) => tiers.isCapable(p)).length;
+  const capableIn = qbsIn.filter((p) => tiers.isCapable(p)).length;
+  const capableKept = heldCapable.length - capableOut;
+  const capableAfter = capableKept + capableIn;
   if (!buyCapLifted) {
-    if (qbsIn.length > qbsOut.length && capableHeld - capableOut >= QB_ROOM_SIZE) return false;
+    if (qbsIn.length > qbsOut.length) {
+      if (capableKept >= QB_ROOM_SIZE) return false;
+      if (capableKept === QB_ROOM_SIZE - 1) {
+        const keepsLowerTier = heldCapable.some(
+          (q) => !tiers.isSuperElite(q) && !qbsOut.some((out) => out.player_id === q.player_id),
+        );
+        const worthAThird = qbsIn.every(
+          (qb) => tiers.isInexpensiveStarter(qb) || (tiers.isSuperElite(qb) && keepsLowerTier),
+        );
+        if (!worthAThird) return false;
+      }
+    }
     if (capableIn > capableOut && capableAfter > QB_ROOM_SIZE) return false;
   }
   return sellFloorLifted || capableOut <= capableIn || capableAfter >= QB_ROOM_SIZE;

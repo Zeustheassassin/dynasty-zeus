@@ -27,7 +27,7 @@ import FinderResults from "./FinderResults";
 import { FinderDirectionPanel } from "./FinderDirectionPanel";
 import {
   packageOk, posTotals, isBalancedWithStarDiscount, isBalancedTierUpWithStarDiscount, LOW_VALUE_FLOOR,
-  qbRoomOk, tierShapeRank, tradeImpactPasses, titleGain, type TradeSimImpact,
+  buildQbTiers, cheapStarterCeiling, qbRoomOk, tierShapeRank, type TradeSimImpact,
 } from "./FinderScoring";
 import {
   finderPickKey,
@@ -37,7 +37,10 @@ import {
 } from "./finderUtils";
 import type { MarketSignal, TradeResult, FinderStrategyOverride, FinderSortMode, FinderTierMode } from "./finderTypes";
 import { YEARS } from "./shared";
-import { isWinNowTeam, runFinderPipeline } from "./finderPipeline";
+import { isWinNowTeam, prepareFinderPipeline } from "./finderPipeline";
+import {
+  TRADE_CHECK_LIMIT_MS, finderBoardView, measureBoardTrades, newMeasuredTrades, unmeasuredTrades, type MeasuredTrades,
+} from "./finderTradeChecks";
 import type { PlayerWithValue, PickWithValue } from "./shared";
 import { Card } from "../ui/Card";
 
@@ -274,7 +277,6 @@ function TradeFinder({
       .sort((a, b) => b - a),
     [players, calcFcValues]
   );
-  const top32QBFloor = allQBsSorted[31] ?? 0;
 
 
   // Entire render-time finder pipeline hoisted into one memo so typing in the
@@ -441,7 +443,6 @@ function TradeFinder({
       // Win-now teams get the impact views. Only Championship Impact changes which trades are on
       // the board; Playoff Impact just reorders the cards, in FinderResults.
       const userIsWinNow = isWinNowTeam({ iAmTankingFinder, isChampionshipPush, finderDirection, myFinderPlayoffOdds });
-      const championshipBoard = userIsWinNow && championshipSelected;
       // Auto-strategy label for UI display
       const autoStrategyLabel: string = finderStrategyOverride === "TANK"
         ? "Full Tank Mode"
@@ -466,6 +467,16 @@ function TradeFinder({
                       : "Direction Mix";
       const priorityDraftYear = String(
         Number(finderSeasonYear) + (selectedLeagueDraftHasOccurred ? 1 : 0)
+      );
+      // A cheap starter is priced in the next draft's picks, at the user's own values where set.
+      const qbTiers = buildQbTiers(
+        allQBsSorted,
+        (id) => (redraftValues as Record<string, number> | null | undefined)?.[id] ?? 0,
+        cheapStarterCeiling(
+          pickFcValues[`${priorityDraftYear}-2`] ?? 0,
+          pickFcValues[`${priorityDraftYear}-3`] ?? 0,
+          pickFcValues[`${priorityDraftYear}-1-late`] ?? pickFcValues[`${priorityDraftYear}-1`] ?? 0,
+        ),
       );
       const orderedDraftYears = [
         ...YEARS.filter((year) => Number(year) >= Number(priorityDraftYear)),
@@ -596,27 +607,20 @@ function TradeFinder({
         ? allOppPlayers.find((p) => p.player_id === deferredTargetPlayerId) ?? null
         : null;
 
-      // top32QBFloor is memoised at component level (allQBsSorted / top32QBFloor)
-
-      // How many of my QBs are within top-32 threshold
-      const myTop32QBs = myPlayers.filter(
-        (p) => p.position === "QB" && p.value >= top32QBFloor
-      );
-
       // Both sides of every trade answer to the QB room rule (FinderScoring.qbRoomOk). Tank Mode lifts
       // my sell floor, since the user has chosen to shed QB depth. Searching for a QB by name lifts my
       // cap: that's me saying I want him.
+      const capableQBs = (list: PlayerWithValue[]) =>
+        list.filter((p) => p.position === "QB" && qbTiers.isCapable(p));
+      const myCapableQBs = capableQBs(myPlayers);
       const qbSafe = (givePlayers: PlayerWithValue[], receivePlayers: PlayerWithValue[]) =>
-        qbRoomOk(myTop32QBs.length, givePlayers, receivePlayers, top32QBFloor, {
+        qbRoomOk(myCapableQBs, givePlayers, receivePlayers, qbTiers, {
           sellFloorLifted: finderTankMode,
           buyCapLifted: !!deferredTargetPlayerId && receivePlayers.some((p) => p.player_id === deferredTargetPlayerId),
         });
 
       const oppQbSafe = (oppPlayersList: PlayerWithValue[], oppGives: PlayerWithValue[], oppGets: PlayerWithValue[]) =>
-        qbRoomOk(
-          oppPlayersList.filter((p) => p.position === "QB" && p.value >= top32QBFloor).length,
-          oppGives, oppGets, top32QBFloor,
-        );
+        qbRoomOk(capableQBs(oppPlayersList), oppGives, oppGets, qbTiers);
 
       const oppReceiveOk = (oppPlayersList: PlayerWithValue[], givePlayers: PlayerWithValue[], receivePlayers: PlayerWithValue[]) => {
         const outgoingIds = new Set(receivePlayers.map((p) => p.player_id));
@@ -1206,20 +1210,6 @@ function TradeFinder({
           .filter(([, expiresAt]) => isBlockActive(expiresAt))
           .map(([fp]) => fp)
       );
-      // Trades the measuring effect below has already ruled out — applied only to the final
-      // displayed list (see finderPipeline.ts's shuffledForDisplay), never to the candidate pool
-      // itself. Only a win-now team's board is judged this way.
-      const simDiscardedFingerprints = new Set(
-        userIsWinNow
-          ? [...simImpacts.entries()]
-              .filter(([, impact]) => !tradeImpactPasses(impact, championshipBoard ? "championshipImpact" : "recommended"))
-              .map(([fp]) => fp)
-          : []
-      );
-      const titleGainByFingerprint = championshipBoard
-        ? new Map([...simImpacts.entries()].map(([fp, impact]) => [fp, titleGain(impact)]))
-        : undefined;
-
       // ── "Never Accept" aversion tags ──────────────────────────────────────
       // Built from every PREDICTED_DECLINE trade_attempts row in this league (see TradeCard.tsx's
       // Never Accept panel + finderPipeline.ts's aversionPenalty/valueConcentrationPenalty). A
@@ -1267,7 +1257,7 @@ function TradeFinder({
       }
 
       // ── Scoring + slotting pipeline ──────────────────────────────────────
-      const { allTrades, recentFingerprints, rosterOverflow, simCandidates } = runFinderPipeline(results, {
+      const buildBoard = prepareFinderPipeline(results, {
         allPicks,
         players,
         calcFcValues: calcFcValues as Record<string, number>,
@@ -1301,9 +1291,8 @@ function TradeFinder({
         leagueMateProfileByRosterId,
         tradeAttempts,
         discardedFingerprints,
-        simDiscardedFingerprints,
         finderTierMode,
-        titleGainByFingerprint,
+        isInexpensiveStarterQb: qbTiers.isInexpensiveStarter,
         opponentAversionTags,
         globalAversionTags,
         historicalSnapshot,
@@ -1332,7 +1321,7 @@ function TradeFinder({
       });
 
       return {
-        allTrades, recentFingerprints, rosterOverflow, simCandidates,
+        buildBoard,
         finderDirectionProfile, finderDirection, autoStrategyLabel,
         isChampionshipPush, finderTankMode, draftCapitalMode,
         finderPreferFuturePicks, iAmTankingFinder, weakPositions,
@@ -1344,93 +1333,79 @@ function TradeFinder({
     selectedLeague, selectedLeagueDirectionAdjusted, loadingCalcValues, nflState,
     users, selectedLeagueDynamicPickValues, finderRosterPlayersMap, rosters,
     calcFcValues, user, playerDispositions, finderSignals, leaguePlayerTags, allPicks,
-    noInterestPlayers, discardedTrades, simImpacts, championshipSelected, finderTierMode,
+    noInterestPlayers, discardedTrades, finderTierMode,
     selectedLeagueDraftHasOccurred, pickFcValues, redraftValues, marketSignalMap,
     players, deferredPinnedPlayerId, deferredTargetOppRosterId, deferredTargetPlayerId,
-    top32QBFloor, nflTeamDepth, ignoredOwnerIds, selectedLeagueSimulation,
+    allQBsSorted, nflTeamDepth, ignoredOwnerIds, selectedLeagueSimulation,
     deferredFinderSeed, tradePartnerRankings, leagueMateProfileByRosterId,
     tradeAttempts, historicalSnapshot, playerStats, crossLeagueExposure,
     buyLowPlayerIds, finderWeeklyProjMap, finderStrategyOverride,
   ]);
 
+  // The board for what's been measured so far. Scoring doesn't depend on measurements, so this is
+  // all that re-runs when they arrive, and it takes a moment rather than seconds.
+  const finderBoard = useMemo(() => {
+    if (!finderModel) return null;
+    return finderModel.buildBoard(finderBoardView(simImpacts, finderModel.userIsWinNow, championshipSelected));
+  }, [finderModel, simImpacts, championshipSelected]);
+
   // ── Real-simulation vetting pass ───────────────────────────────────────
-  // finderModel.simCandidates is the Finder's top heuristically-ranked, win-now standard-swap
-  // candidates (finderPipeline.ts). Heuristic scoring alone lets trades through that barely move
-  // the real odds, so this measures each one with the simulateLeague engine, through the same
-  // previewTradeSimulation the cards' Preview button uses. tradeImpactPasses then judges both sides
-  // from the one run, since it returns every roster's odds.
+  // A win-now team's cards get checked in the simulator, because heuristic scoring alone lets trades
+  // through that barely move the real odds. It measures the candidate pool (finderPipeline.ts) with
+  // the same previewTradeSimulation the cards' Preview button uses, and tradeImpactPasses judges both
+  // sides from the one run, since it returns every roster's odds. A trade that fails leaves its slot
+  // to an unmeasured one, so it goes round again on those until the board is all checked or the time
+  // runs out. The board only changes at the end, so cards don't jump around while being read.
   //
   // Each trade is compared to a no-trade run with the same dice, never to the Simulator's forecast:
   // that one has different luck, and two such runs can differ by several points when nothing changed.
   //
-  // Yielding a tick between calls is the concession that keeps this compatible with the earlier
-  // "never eagerly sim every Finder candidate" decision (project_trade_sim_preview_plan) — the UI
-  // stays responsive. Finished measurements stay in the ref, so a pass cut short by a re-render
-  // picks up where it stopped.
-  const measuredRef = useRef<{
-    forPreview: typeof previewTradeSimulation | null;
-    baseline: ReturnType<typeof previewTradeSimulation>;
-    impacts: Map<string, TradeSimImpact>;
-    unmeasurable: Set<string>;
-  }>({ forPreview: null, baseline: null, impacts: new Map(), unmeasurable: new Set() });
+  // Yielding a tick between calls keeps the page responsive, and finished measurements stay in the
+  // ref, so a pass cut short by a click or new data picks up where it stopped.
+  const measuredRef = useRef<MeasuredTrades>(newMeasuredTrades(null));
   React.useEffect(() => {
-    const candidates = finderModel?.simCandidates ?? [];
-    if (candidates.length === 0) {
+    const firstCandidates = finderBoard?.simCandidates ?? [];
+    if (!finderModel || firstCandidates.length === 0) {
       setSimVettingProgress(null);
       return;
     }
     if (measuredRef.current.forPreview !== previewTradeSimulation) {
-      measuredRef.current = { forPreview: previewTradeSimulation, baseline: null, impacts: new Map(), unmeasurable: new Set() };
+      measuredRef.current = newMeasuredTrades(previewTradeSimulation);
     }
     const measured = measuredRef.current;
+    const board = `${finderTierMode}|${championshipSelected}`;
+    if (measured.board !== board) {
+      measured.board = board;
+      measured.spentMs = 0;
+    }
     const publish = () => {
       if (simImpactState.forPreview === previewTradeSimulation && simImpactState.impacts.size === measured.impacts.size) return;
       setSimImpactState({ forPreview: previewTradeSimulation, impacts: new Map(measured.impacts) });
     };
-    const missing = candidates.filter((c) => !measured.impacts.has(c.fingerprint) && !measured.unmeasurable.has(c.fingerprint));
-    // simCandidates is a stable pool (finderPipeline.ts derives it from discardedFingerprints only,
-    // never from measurements — see shuffledForDisplay), so once it's all measured there's nothing
-    // new to do. Without this check, the memo recomputing after publish() (needed so allTrades picks
-    // up the measurements) would hand this effect a fresh-but-identical array and start over.
-    if (missing.length === 0) {
+    // Publishing hands this effect a new board. With nothing new on it, or no time left, stop there.
+    if (unmeasuredTrades(measured, firstCandidates).length === 0 || measured.spentMs >= TRADE_CHECK_LIMIT_MS) {
       setSimVettingProgress(null);
       publish();
       return;
     }
     let cancelled = false;
-    setSimVettingProgress({ done: 0, total: missing.length });
-    (async () => {
-      for (let i = 0; i < missing.length; i++) {
-        if (cancelled) return;
-        const c = missing[i];
-        if (!measured.baseline) measured.baseline = previewTradeSimulation(c.myRosterId, c.oppRosterId, [], []);
-        const after = previewTradeSimulation(c.myRosterId, c.oppRosterId, c.giveIds, c.receiveIds);
-        const myBefore = measured.baseline?.rowByRosterId?.get(c.myRosterId);
-        const myAfter = after?.rowByRosterId?.get(c.myRosterId);
-        const oppBefore = measured.baseline?.rowByRosterId?.get(c.oppRosterId);
-        const oppAfter = after?.rowByRosterId?.get(c.oppRosterId);
-        if (myBefore && myAfter && oppBefore && oppAfter) {
-          measured.impacts.set(c.fingerprint, {
-            myPlayoffBefore: myBefore.playoffOdds, myPlayoffAfter: myAfter.playoffOdds,
-            myTitleBefore: myBefore.titleOdds, myTitleAfter: myAfter.titleOdds,
-            oppPlayoffDelta: oppAfter.playoffOdds - oppBefore.playoffOdds,
-            oppTitleDelta: oppAfter.titleOdds - oppBefore.titleOdds,
-            oppIsContender: c.oppIsContender, oppIsRebuildSide: c.oppIsRebuildSide,
-          });
-        } else {
-          measured.unmeasurable.add(c.fingerprint);
-        }
-        if (!cancelled) setSimVettingProgress({ done: i + 1, total: missing.length });
-        // Yield to the main thread between sim calls so this can't jank the UI.
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
-      if (!cancelled) {
-        setSimVettingProgress(null);
-        publish();
-      }
-    })();
+    measureBoardTrades({
+      measured,
+      preview: previewTradeSimulation,
+      firstCandidates,
+      // What the board would be with these results, and so what's next to check.
+      nextCandidates: () => finderModel.buildBoard(finderBoardView(measured.impacts, finderModel.userIsWinNow, championshipSelected)).simCandidates,
+      isCancelled: () => cancelled,
+      // Low priority: urgent updates restart any low-priority render already running (Refresh, a
+      // player search), which then can't finish until this pass does.
+      onProgress: (done, total) => startTransition(() => setSimVettingProgress({ done, total })),
+    }).then(() => {
+      if (cancelled) return;
+      setSimVettingProgress(null);
+      publish();
+    });
     return () => { cancelled = true; };
-  }, [finderModel?.simCandidates, previewTradeSimulation, simImpactState]);
+  }, [finderBoard?.simCandidates, finderModel, previewTradeSimulation, simImpactState, finderTierMode, championshipSelected]);
 
   if (!selectedLeague) return (
     <p className="text-slate-400 text-sm">Select a league from the dropdown above to use the Trade Finder.</p>
@@ -1447,10 +1422,10 @@ function TradeFinder({
     </div>
   );
   if (loadingCalcValues) return <p className="text-sm text-blue-400">Loading player values…</p>;
-  if (!finderModel) return null;
+  if (!finderModel || !finderBoard) return null;
 
+  const { allTrades, recentFingerprints, rosterOverflow } = finderBoard;
   const {
-    allTrades, recentFingerprints, rosterOverflow,
     finderDirectionProfile, finderDirection, autoStrategyLabel,
     isChampionshipPush, finderTankMode, draftCapitalMode,
     finderPreferFuturePicks, iAmTankingFinder, weakPositions,
@@ -1483,7 +1458,7 @@ function TradeFinder({
               finderStrategyOverride={finderStrategyOverride}
               setFinderStrategyOverride={setFinderStrategyOverride}
               finderTierMode={finderTierMode}
-              setFinderTierMode={(mode) => startTransition(() => setFinderTierMode(mode))}
+              setFinderTierMode={setFinderTierMode}
             />
             <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Find trades involving a specific player</p>
             {pinnedPlayer ? (
@@ -1583,7 +1558,7 @@ function TradeFinder({
                       type="button"
                       aria-pressed={boardView === mode}
                       title={title}
-                      onClick={() => startTransition(() => setFinderSortMode(mode))}
+                      onClick={() => setFinderSortMode(mode)}
                       className={`px-2.5 py-1.5 transition ${boardView === mode ? "bg-blue-600 text-white" : "text-slate-400 hover:text-slate-200"}`}
                     >
                       {label}

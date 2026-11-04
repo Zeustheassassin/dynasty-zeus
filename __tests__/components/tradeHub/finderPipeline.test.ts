@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { runFinderPipeline } from "@/components/tradeHub/finderPipeline";
+import { prepareFinderPipeline, runFinderPipeline } from "@/components/tradeHub/finderPipeline";
 import type { FinderPipelineCtx } from "@/components/tradeHub/finderPipeline";
 import type { TradeResult } from "@/components/tradeHub/finderTypes";
 import type { PlayerWithValue, PickWithValue } from "@/components/tradeHub/shared";
@@ -1707,12 +1707,12 @@ describe("runFinderPipeline — simCandidates", () => {
     expect(simCandidates).toHaveLength(0);
   });
 
-  it("is empty once the user is already near-locked into the playoffs", () => {
+  it("includes a team locked into the playoffs, which can still gain title odds", () => {
     const { simCandidates } = runFinderPipeline(
       [standardTrade()],
       baseCtx({ finderDirection: "Elite", myFinderPlayoffOdds: 97, hasMySim: true }),
     );
-    expect(simCandidates).toHaveLength(0);
+    expect(simCandidates).toHaveLength(1);
   });
 
   it("excludes draft-capital and Lottery-format trades", () => {
@@ -2037,9 +2037,8 @@ describe("runFinderPipeline — Championship Impact view", () => {
   });
   const fp = (n: number, target = `r${n}`) => buildTradeFingerprint("L1", 2, [`g${n}`], [target]);
 
-  it("measures a locked-in team, which the standard board skips: title odds can still rise", () => {
+  it("measures a locked-in team: title odds can still rise", () => {
     const locked = { ...winNow, myFinderPlayoffOdds: 97 };
-    expect(runFinderPipeline([swap(1)], baseCtx(locked)).simCandidates).toHaveLength(0);
     expect(runFinderPipeline([swap(1)], baseCtx({ ...locked, titleGainByFingerprint: new Map() })).simCandidates).toHaveLength(1);
   });
 
@@ -2129,5 +2128,131 @@ describe("runFinderPipeline — a QB coming to a team whose room is set", () => 
     const noQbBack = mkTrade({ give: [hurts()], receive: [mkPlayer("wr", "WR", 3500)], format: "1 for 1" });
     const { allTrades } = runFinderPipeline([noQbBack], baseCtx({ rosters, players, calcFcValues, hasSuperFlex: true }));
     expect(allTrades).toHaveLength(0);
+  });
+});
+
+describe("runFinderPipeline — a cheap starter as a third QB", () => {
+  const players = {
+    maye: { player_id: "maye", position: "QB" },
+    love: { player_id: "love", position: "QB" },
+  } as unknown as Record<string, SleeperPlayer>;
+  const calcFcValues = { maye: 7549, love: 5145 };
+  const rosters = [mkRoster(1, "USER", []), mkRoster(2, "OPP", ["maye", "love"])];
+  const trade = () => mkTrade({
+    give: [mkPlayer("brissett", "QB", 1321)], receive: [mkPlayer("wr", "WR", 1400)], format: "1 for 1",
+  });
+  const ctx = { rosters, players, calcFcValues, hasSuperFlex: true };
+
+  it("a team with two better QBs takes him", () => {
+    const { allTrades } = runFinderPipeline([trade()], baseCtx({
+      ...ctx, isInexpensiveStarterQb: (qb) => qb.player_id === "brissett",
+    }));
+    expect(allTrades).toHaveLength(1);
+  });
+
+  it("but not a QB who isn't one", () => {
+    const { allTrades } = runFinderPipeline([trade()], baseCtx({ ...ctx, isInexpensiveStarterQb: () => false }));
+    expect(allTrades).toHaveLength(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Checking the board (user, 2026-11-04): when a measured trade fails, the unmeasured trade that
+// takes its slot gets measured next, so a win-now team's cards all get checked.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("runFinderPipeline — checking the board", () => {
+  const winNow = { finderDirection: "Elite", myFinderPlayoffOdds: 80, hasMySim: true, deferredTargetOppRosterId: 2 };
+  const swap = (n: number) => mkTrade({
+    give: [mkPlayer(`g${n}`, "WR", 3000)], receive: [mkPlayer(`r${n}`, "RB", 3000)], format: "1 for 1",
+  });
+  const trades = Array.from({ length: 40 }, (_, i) => swap(i));
+  // Ties break on a seeded shuffle, so the pool has to be asked for, not assumed.
+  const poolFingerprints = () =>
+    runFinderPipeline(trades, baseCtx(winNow)).simCandidates.map((c) => c.fingerprint);
+
+  it("starts with the pool, whose top 12 are the board", () => {
+    const { simCandidates, allTrades } = runFinderPipeline(trades, baseCtx({ ...winNow, measuredFingerprints: new Set() }));
+    expect(simCandidates).toHaveLength(22);
+    expect(allTrades).toHaveLength(12);
+  });
+
+  it("then takes the trades that reach the board once the pool's failures are hidden", () => {
+    const pool = poolFingerprints();
+    const { simCandidates, allTrades } = runFinderPipeline(trades, baseCtx({
+      ...winNow,
+      measuredFingerprints: new Set(pool),
+      simDiscardedFingerprints: new Set(pool),
+    }));
+    const boardFingerprints = allTrades.map((t) => buildTradeFingerprint("L1", 2, [t.give[0].player_id], [t.receive[0].player_id]));
+    expect(boardFingerprints).toHaveLength(12);
+    expect(boardFingerprints.some((f) => pool.includes(f))).toBe(false);
+    expect(simCandidates.map((c) => c.fingerprint)).toEqual([...pool, ...boardFingerprints]);
+  });
+
+  it("asks for nothing new once every card has been measured", () => {
+    const pool = poolFingerprints();
+    const { simCandidates } = runFinderPipeline(trades, baseCtx({ ...winNow, measuredFingerprints: new Set(pool) }));
+    expect(simCandidates).toHaveLength(22);
+  });
+
+  it("won't ask without measurements to compare to", () => {
+    expect(runFinderPipeline(trades, baseCtx({
+      ...winNow, simDiscardedFingerprints: new Set(poolFingerprints()),
+    })).simCandidates).toHaveLength(22);
+  });
+
+  it("leaves a team that isn't win-now alone", () => {
+    const { simCandidates } = runFinderPipeline(trades, baseCtx({
+      finderDirection: "Hopeless", myFinderPlayoffOdds: 5, hasMySim: true, iAmTankingFinder: true,
+      measuredFingerprints: new Set(),
+    }));
+    expect(simCandidates).toHaveLength(0);
+  });
+
+  it("leaves Championship Impact to its own pool", () => {
+    const { simCandidates } = runFinderPipeline(trades, baseCtx({
+      ...winNow,
+      titleGainByFingerprint: new Map(),
+      measuredFingerprints: new Set(),
+    }));
+    expect(simCandidates).toHaveLength(30);
+  });
+});
+
+describe("prepareFinderPipeline", () => {
+  const winNow = { finderDirection: "Elite", myFinderPlayoffOdds: 80, hasMySim: true };
+  const swap = (n: number) => mkTrade({
+    give: [mkPlayer(`g${n}`, "WR", 3000)], receive: [mkPlayer(`r${n}`, "RB", 3000)], format: "1 for 1",
+  });
+  const fp = (n: number) => buildTradeFingerprint("L1", 2, [`g${n}`], [`r${n}`]);
+
+  it("scores once, however many times measurements change the board", () => {
+    let scored = 0;
+    const buildBoard = prepareFinderPipeline([swap(1), swap(2)], baseCtx({
+      ...winNow,
+      getDirectionTradeScore: () => { scored++; return 0; },
+    }));
+    const scoredOnce = scored;
+    expect(scoredOnce).toBeGreaterThan(0);
+    expect(buildBoard({}).allTrades).toHaveLength(2);
+    expect(buildBoard({ simDiscardedFingerprints: new Set([fp(1)]) }).allTrades).toHaveLength(1);
+    expect(buildBoard({ titleGainByFingerprint: new Map([[fp(2), 3]]) }).allTrades).toHaveLength(1);
+    expect(scored).toBe(scoredOnce);
+  });
+
+  it("a board build leaves the next one unaffected", () => {
+    const buildBoard = prepareFinderPipeline([swap(1), swap(2)], baseCtx(winNow));
+    const first = buildBoard({}).allTrades.map((t) => t.give[0].player_id);
+    buildBoard({ simDiscardedFingerprints: new Set([fp(1), fp(2)]) });
+    expect(buildBoard({}).allTrades.map((t) => t.give[0].player_id)).toEqual(first);
+  });
+
+  it("matches running it all at once", () => {
+    const trades = [swap(1), swap(2), swap(3)];
+    const ctx = baseCtx({ ...winNow, deferredFinderSeed: 0.5 });
+    const view = { simDiscardedFingerprints: new Set([fp(2)]) };
+    expect(prepareFinderPipeline(trades, ctx)(view).allTrades.map((t) => t.give[0].player_id))
+      .toEqual(runFinderPipeline(trades, { ...ctx, ...view }).allTrades.map((t) => t.give[0].player_id));
   });
 });

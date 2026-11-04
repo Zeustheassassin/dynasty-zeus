@@ -1247,3 +1247,81 @@ describe("mixSeed", () => {
     expect(Math.abs(injured - 0.065)).toBeLessThan(0.02);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// Playoff brackets. Ten identical teams, with records far enough apart that the seeds can't change
+// in the one week left, so every playoff game is a coin flip and each seed's title odds are simple:
+// a seed with a bye needs fewer wins.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("simulateLeague — playoff brackets", () => {
+  const TEAMS = 10;
+  const POSITIONS = ["QB", "QB", "RB", "RB", "WR", "WR", "WR", "TE"];
+  const bracketArgs = (playoffTeams: number, over: Partial<SimulateLeagueArgs> = {}) => {
+    const players: Record<string, unknown> = {};
+    const projections: { sleeperId: string; fpts: number }[] = [];
+    const rosters = Array.from({ length: TEAMS }, (_, t) => {
+      const ids = POSITIONS.map((position, slot) => {
+        const id = String(1000 + t * 100 + slot);
+        players[id] = { player_id: id, full_name: id, position, team: "AAA", age: 25, years_exp: 3, injury_status: null };
+        projections.push({ sleeperId: id, fpts: 15 });
+        return id;
+      });
+      return { roster_id: t + 1, owner_id: `o${t + 1}`, players: ids, settings: { wins: 0, losses: 0, fpts: 0, ppts: 0 } };
+    });
+    return mkArgs({
+      selectedLeague: {
+        league_id: "1234567890",
+        roster_positions: ["QB", "RB", "RB", "WR", "WR", "TE", "SUPER_FLEX", "BN"],
+        settings: { playoff_week_start: 15, playoff_teams: playoffTeams },
+      } as never,
+      rosters: rosters as never,
+      players: players as never,
+      users: Object.fromEntries(rosters.map((r) => [r.owner_id, r.owner_id])),
+      nflState: { week: 14, season_type: "regular" } as never,
+      projectionData: projections as never,
+      projectionWeek: 14,
+      leagueAdjustedFcValues: {},
+      leagueAdjustedRedraftValues: {},
+      // Roster 1 is the 1 seed, roster 2 the 2 seed, and so on.
+      standings: rosters.map((r, i) => ({ roster_id: r.roster_id, wins: 30 - i * 3, losses: i * 3, fpts: 1000, max_pf: 1100 })) as never,
+      ...over,
+    });
+  };
+  const titleOdds = (sim: LeagueSimulation) =>
+    Array.from({ length: TEAMS }, (_, i) => sim.rowByRosterId.get(i + 1)!.titleOdds);
+  const measured = (playoffTeams: number) => {
+    const args = bracketArgs(playoffTeams);
+    return simulateLeague({ ...args, impact: { trials: 50, historyRosters: args.rosters } })!;
+  };
+
+  it.each([
+    [4, 0, [25, 25, 25, 25, 0, 0, 0, 0, 0, 0]],
+    [6, 2, [25, 25, 12.5, 12.5, 12.5, 12.5, 0, 0, 0, 0]],
+    [7, 1, [25, 12.5, 12.5, 12.5, 12.5, 12.5, 12.5, 0, 0, 0]],
+    [8, 0, [12.5, 12.5, 12.5, 12.5, 12.5, 12.5, 12.5, 12.5, 0, 0]],
+    [10, 6, [12.5, 12.5, 12.5, 12.5, 12.5, 12.5, 6.2, 6.2, 6.2, 6.2]],
+  ])("%i playoff teams: %i byes, and every seed has its fair chance", (playoffTeams, byes, expected) => {
+    const sim = measured(playoffTeams);
+    expect(sim.byeTeams).toBe(byes);
+    expect(titleOdds(sim)).toEqual(expected);
+  });
+
+  it("7 playoff teams: only the 1 seed sits out the first round", () => {
+    const sim = simulateLeague(bracketArgs(7))!;
+    expect(sim.rowByRosterId.get(1)!.byeOdds).toBe(100);
+    expect(sim.rowByRosterId.get(2)!.byeOdds).toBe(0);
+  });
+
+  it("7 playoff teams: playing the brackets out agrees, and no seed is dropped without a game", () => {
+    const RUNS = 12; // 3,000 seasons
+    const totals = Array.from({ length: TEAMS }, () => 0);
+    for (let salt = 0; salt < RUNS; salt++) {
+      titleOdds(simulateLeague(bracketArgs(7, { simSalt: salt * 53 + 1 }))!).forEach((odds, i) => { totals[i] += odds / RUNS; });
+    }
+    [25, 12.5, 12.5, 12.5, 12.5, 12.5, 12.5, 0, 0, 0].forEach((expected, i) => {
+      expect(Math.abs(totals[i] - expected)).toBeLessThan(3);
+    });
+    expect(totals[4]).toBeGreaterThan(8); // the 5 seed, the one the old bracket eliminated
+  }, 30000);
+});

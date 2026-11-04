@@ -127,7 +127,9 @@ export function simulateLeague({
   const simulationMode = (currentWeek > 0 ? "in_season" : "offseason") as "in_season" | "offseason";
   const regularSeasonWeeks = getRegularSeasonWeeks(selectedLeague);
   const playoffTeams = Number(selectedLeague?.settings?.playoff_teams || Math.ceil(rosters.length / 2));
-  const byeTeams = playoffTeams >= 6 ? 2 : playoffTeams === 5 ? 1 : 0;
+  // A bracket fills the next power of two, and the top seeds sit out the difference: 6 teams get 2
+  // byes, 7 get 1, 8 get none.
+  const byeTeams = 2 ** Math.ceil(Math.log2(Math.max(playoffTeams, 1))) - playoffTeams;
   const simCount = impact?.trials ?? (simulationMode === "offseason" ? 350 : 250);
   const weeklyHistory = (leagueWeeklyMatchups[leagueId] || []) as Array<{ week: number; matchups: SleeperMatchup[] }>;
   const projectionMap = new Map(

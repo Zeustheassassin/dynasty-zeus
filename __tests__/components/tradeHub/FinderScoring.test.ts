@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { PlayerWithValue, PickWithValue } from "@/components/tradeHub/shared";
 import {
-  qbRoomOk, tierShapeRank, tradeImpactPasses, playoffGain, titleGain, type TradeSimImpact,
+  buildQbTiers, cheapStarterCeiling, qbRoomOk, tierShapeRank, tradeImpactPasses, playoffGain, titleGain, type TradeSimImpact,
 } from "@/components/tradeHub/FinderScoring";
 import {
   isAgingAsset,
@@ -690,66 +690,189 @@ describe("tradeImpactPasses", () => {
   });
 });
 
-describe("qbRoomOk", () => {
-  const FLOOR = 1600;
-  const qb = (value: number) => ({ position: "QB", value });
-  const wr = (value = 4000) => ({ position: "WR", value });
-  const hurts = qb(3271);
-  const young = qb(3545);
-  const backup = qb(900); // not capable
+describe("QB rooms", () => {
+  // FantasyCalc's Superflex dynasty values, November 2026.
+  const VALUES = [
+    10820, 7740, 7549, 7219, 6061, 5943, 5785, 5580, 5271, 5145, 4103, 4038, 4010, 4009, 3830, 3759, 3545, 3539, 3538,
+    3271, 2469, 2412, 2354, 2317, 2302, 2283, 2052, 2034, 1960, 1753, 1706, 1605, 1476, 1474, 1425, 1321, 1145,
+  ];
+  const REDRAFT: Record<string, number> = {
+    allen: 11125, caleb: 6118, burrow: 8178, lawrence: 5689, hurts: 900, young: 2234, stafford: 3247,
+    mayfield: 1853, willis: 1114, cousins: 2298, rodgers: 2141, brissett: 526,
+  };
+  // FantasyCalc's 2027 2nd, 3rd and late 1st, November 2026.
+  const CEILING = cheapStarterCeiling(1545, 1069, 2460);
+  const tiers = buildQbTiers(VALUES, (id) => REDRAFT[id] ?? 0, CEILING);
+  const qb = (player_id: string, value: number) => ({ player_id, position: "QB", value });
+  const wr = (value = 4000) => ({ player_id: `wr${value}`, position: "WR", value });
+  const allen = qb("allen", 10820);
+  const caleb = qb("caleb", 7740);
+  const burrow = qb("burrow", 7219);
+  const lawrence = qb("lawrence", 6061);
+  const young = qb("young", 3545);
+  const hurts = qb("hurts", 3271);
+  const stafford = qb("stafford", 2317);
+  const mayfield = qb("mayfield", 2283);
+  const simpson = qb("simpson", 2052); // valuable rookie who isn't playing
+  const willis = qb("willis", 2034);
+  const cousins = qb("cousins", 1753);
+  const rodgers = qb("rodgers", 1476);
+  const beck = qb("beck", 1425); // not playing
+  const brissett = qb("brissett", 1321);
+  const minshew = qb("minshew", 1145); // not playing
 
-  it("the user's example: two full rooms can swap QBs", () => {
-    expect(qbRoomOk(3, [hurts], [young], FLOOR)).toBe(true);
-    expect(qbRoomOk(3, [young], [hurts], FLOOR)).toBe(true);
+  describe("what a cheap starter costs", () => {
+    it("a 2nd plus the part of a 3rd that really adds value, well under a 1st", () => {
+      expect(CEILING).toBe(1994);
+    });
+
+    it("the raw sum of a 2nd and a 3rd would top a late 1st, which is why it isn't used", () => {
+      expect(1545 + 1069).toBeGreaterThan(2460);
+    });
+
+    it("never reaches the cheapest 1st, even with a 2nd valued near it", () => {
+      expect(cheapStarterCeiling(2300, 1100, 2460)).toBe(2459);
+    });
+
+    it("still works with no 1st value to compare to", () => {
+      expect(cheapStarterCeiling(1545, 1069, 0)).toBe(1994);
+    });
+
+    it("follows the user's own pick values", () => {
+      expect(cheapStarterCeiling(1000, 800, 2460)).toBe(1336);
+    });
   });
 
-  it("a full room won't take a QB unless one goes back, however good the value", () => {
-    expect(qbRoomOk(3, [wr(1000)], [qb(9000)], FLOOR)).toBe(false);
-    expect(qbRoomOk(4, [wr()], [hurts], FLOOR)).toBe(false);
-    expect(qbRoomOk(3, [wr(), wr()], [young], FLOOR)).toBe(false);
+  describe("tiers", () => {
+    it("super elite is the top four", () => {
+      expect([allen, caleb, burrow].every(tiers.isSuperElite)).toBe(true);
+      expect(tiers.isSuperElite(lawrence)).toBe(false);
+    });
+
+    it("capable is top 32 by value or playing", () => {
+      expect([allen, stafford, simpson].every(tiers.isCapable)).toBe(true); // by value
+      expect([rodgers, brissett].every(tiers.isCapable)).toBe(true); // playing, outside the top 32
+      expect(tiers.isCapable(beck)).toBe(false);
+      expect(tiers.isCapable(minshew)).toBe(false);
+    });
+
+    it("a cheap starter is cheap and playing, like Brissett", () => {
+      expect([brissett, rodgers, cousins].every(tiers.isInexpensiveStarter)).toBe(true);
+      expect(tiers.isInexpensiveStarter(mayfield)).toBe(false); // too expensive
+      expect(tiers.isInexpensiveStarter(willis)).toBe(false); // just over
+      expect(tiers.isInexpensiveStarter(beck)).toBe(false); // not playing
+      expect(tiers.isInexpensiveStarter(simpson)).toBe(false); // neither
+    });
+
+    it("counts everyone as capable and no one as elite with no values yet", () => {
+      const empty = buildQbTiers([], () => 0, 0);
+      expect(empty.isCapable(minshew)).toBe(true);
+      expect(empty.isSuperElite(allen)).toBe(false);
+    });
   });
 
-  it("a full room won't take a backup QB either", () => {
-    expect(qbRoomOk(3, [wr()], [backup], FLOOR)).toBe(false);
+  describe("a full room", () => {
+    const full = [lawrence, stafford, hurts];
+
+    it("the user's example: two full rooms can swap QBs", () => {
+      expect(qbRoomOk(full, [hurts], [young], tiers)).toBe(true);
+      expect(qbRoomOk([qb("maye", 7549), qb("love", 5145), young], [young], [hurts], tiers)).toBe(true);
+    });
+
+    it("won't take a QB unless one goes back, however good the value", () => {
+      expect(qbRoomOk(full, [wr(1000)], [allen], tiers)).toBe(false);
+      expect(qbRoomOk([...full, young], [wr()], [hurts], tiers)).toBe(false);
+      expect(qbRoomOk(full, [wr(), wr()], [young], tiers)).toBe(false);
+    });
+
+    it("won't take a cheap starter or a backup either", () => {
+      expect(qbRoomOk(full, [wr()], [brissett], tiers)).toBe(false);
+      expect(qbRoomOk(full, [wr()], [minshew], tiers)).toBe(false);
+    });
+
+    it("sending a backup back doesn't make room for a fourth capable QB", () => {
+      expect(qbRoomOk(full, [minshew], [young], tiers)).toBe(false);
+    });
+
+    it("a cheap starter fills a spot: two good QBs and Brissett is a full room", () => {
+      expect(qbRoomOk([lawrence, stafford, brissett], [wr()], [rodgers], tiers)).toBe(false);
+      expect(qbRoomOk([lawrence, stafford, brissett], [wr()], [allen], tiers)).toBe(false);
+    });
   });
 
-  it("sending a backup back doesn't make room for a fourth capable QB", () => {
-    expect(qbRoomOk(3, [backup], [hurts], FLOOR)).toBe(false);
+  describe("a team with two adding a third", () => {
+    const lowerTier = [young, stafford];
+
+    it("takes a super elite QB, moving on from a lower-tier starter", () => {
+      expect(qbRoomOk(lowerTier, [wr()], [allen], tiers)).toBe(true);
+      expect(qbRoomOk([burrow, stafford], [wr()], [allen], tiers)).toBe(true);
+    });
+
+    it("won't take a super elite QB with no lower-tier starter to move on from", () => {
+      expect(qbRoomOk([allen, burrow], [wr()], [caleb], tiers)).toBe(false);
+    });
+
+    it("takes a cheap starter, however good the two it has", () => {
+      expect(qbRoomOk(lowerTier, [wr()], [brissett], tiers)).toBe(true);
+      expect(qbRoomOk([allen, burrow], [wr()], [brissett], tiers)).toBe(true);
+    });
+
+    it("won't take anyone in between, even a QB who'd start for it", () => {
+      expect(qbRoomOk(lowerTier, [wr()], [lawrence], tiers)).toBe(false);
+      expect(qbRoomOk(lowerTier, [wr()], [hurts], tiers)).toBe(false);
+      expect(qbRoomOk(lowerTier, [wr()], [mayfield], tiers)).toBe(false);
+    });
+
+    it("won't take a backup who isn't playing", () => {
+      expect(qbRoomOk(lowerTier, [wr()], [minshew], tiers)).toBe(false);
+      expect(qbRoomOk(lowerTier, [wr()], [simpson], tiers)).toBe(false);
+    });
+
+    it("can make any swap: a QB going back isn't adding a third", () => {
+      expect(qbRoomOk(lowerTier, [stafford], [hurts], tiers)).toBe(true);
+      expect(qbRoomOk(lowerTier, [young], [lawrence], tiers)).toBe(true);
+    });
   });
 
-  it("a room with space can add one, up to three", () => {
-    expect(qbRoomOk(2, [wr()], [hurts], FLOOR)).toBe(true);
-    expect(qbRoomOk(0, [wr()], [hurts], FLOOR)).toBe(true);
+  describe("a team with room", () => {
+    it("takes any QB, up to two", () => {
+      expect(qbRoomOk([stafford], [wr()], [hurts], tiers)).toBe(true);
+      expect(qbRoomOk([], [wr()], [minshew], tiers)).toBe(true);
+    });
+
+    it("the fix: a team under three makes any trade that doesn't touch its QBs", () => {
+      expect(qbRoomOk([young, stafford], [wr()], [wr()], tiers)).toBe(true);
+      expect(qbRoomOk([stafford], [wr(), wr()], [wr()], tiers)).toBe(true);
+      expect(qbRoomOk([], [wr()], [], tiers)).toBe(true);
+    });
   });
 
-  it("the fix: a team under three makes any trade that doesn't touch its QBs", () => {
-    expect(qbRoomOk(2, [wr()], [wr()], FLOOR)).toBe(true);
-    expect(qbRoomOk(1, [wr(), wr()], [wr()], FLOOR)).toBe(true);
-    expect(qbRoomOk(0, [wr()], [], FLOOR)).toBe(true);
+  describe("selling", () => {
+    it("nobody sells below three, but a QB coming back keeps the count", () => {
+      expect(qbRoomOk([lawrence, stafford, hurts], [hurts], [wr()], tiers)).toBe(false);
+      expect(qbRoomOk([stafford, hurts], [hurts], [wr()], tiers)).toBe(false);
+      expect(qbRoomOk([stafford, hurts], [hurts], [young], tiers)).toBe(true);
+    });
+
+    it("a surplus can be sold down to three", () => {
+      expect(qbRoomOk([lawrence, stafford, hurts, young], [hurts], [wr()], tiers)).toBe(true);
+    });
+
+    it("a QB who isn't capable can be sold from any room", () => {
+      expect(qbRoomOk([stafford, hurts], [minshew], [wr()], tiers)).toBe(true);
+    });
   });
 
-  it("nobody sells below three, but a QB coming back keeps the count", () => {
-    expect(qbRoomOk(3, [hurts], [wr()], FLOOR)).toBe(false);
-    expect(qbRoomOk(2, [hurts], [wr()], FLOOR)).toBe(false);
-    expect(qbRoomOk(2, [hurts], [young], FLOOR)).toBe(true);
-  });
+  describe("exceptions", () => {
+    it("Tank Mode lifts only the sell floor", () => {
+      expect(qbRoomOk([stafford, hurts], [hurts], [wr()], tiers, { sellFloorLifted: true })).toBe(true);
+      expect(qbRoomOk([lawrence, stafford, hurts], [wr()], [young], tiers, { sellFloorLifted: true })).toBe(false);
+    });
 
-  it("a surplus can be sold down to three", () => {
-    expect(qbRoomOk(4, [hurts], [wr()], FLOOR)).toBe(true);
-    expect(qbRoomOk(5, [hurts], [wr()], FLOOR)).toBe(true);
-  });
-
-  it("a QB who isn't capable can be sold from any room", () => {
-    expect(qbRoomOk(2, [backup], [wr()], FLOOR)).toBe(true);
-  });
-
-  it("Tank Mode lifts only the sell floor", () => {
-    expect(qbRoomOk(2, [hurts], [wr()], FLOOR, { sellFloorLifted: true })).toBe(true);
-    expect(qbRoomOk(3, [wr()], [young], FLOOR, { sellFloorLifted: true })).toBe(false);
-  });
-
-  it("searching for a QB by name lifts only the cap", () => {
-    expect(qbRoomOk(3, [wr()], [young], FLOOR, { buyCapLifted: true })).toBe(true);
-    expect(qbRoomOk(3, [hurts], [wr()], FLOOR, { buyCapLifted: true })).toBe(false);
+    it("searching for a QB by name lifts only the cap", () => {
+      expect(qbRoomOk([lawrence, stafford, hurts], [wr()], [young], tiers, { buyCapLifted: true })).toBe(true);
+      expect(qbRoomOk([young, stafford], [wr()], [hurts], tiers, { buyCapLifted: true })).toBe(true);
+      expect(qbRoomOk([lawrence, stafford, hurts], [hurts], [wr()], tiers, { buyCapLifted: true })).toBe(false);
+    });
   });
 });
