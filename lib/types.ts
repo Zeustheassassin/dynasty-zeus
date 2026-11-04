@@ -121,7 +121,6 @@ export interface SleeperPlayer {
   bye_week: number | null;
   role?: string;
   number: number | null;
-  depth_chart_position: number | null;
   depth_chart_order?: number | null;
   search_rank: number | null;
   fantasy_positions: string[];

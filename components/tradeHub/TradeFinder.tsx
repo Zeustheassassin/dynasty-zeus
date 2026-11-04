@@ -27,7 +27,7 @@ import FinderResults from "./FinderResults";
 import { FinderDirectionPanel } from "./FinderDirectionPanel";
 import {
   packageOk, posTotals, isBalancedWithStarDiscount, isBalancedTierUpWithStarDiscount, LOW_VALUE_FLOOR,
-  buildQbTiers, cheapStarterCeiling, qbRoomOk, tierShapeRank, type TradeSimImpact,
+  buildQbTiers, cheapStarterCeiling, isQbPlaying, qbRoomOk, tierShapeRank, type TradeSimImpact,
 } from "./FinderScoring";
 import {
   finderPickKey,
@@ -471,7 +471,7 @@ function TradeFinder({
       // A cheap starter is priced in the next draft's picks, at the user's own values where set.
       const qbTiers = buildQbTiers(
         allQBsSorted,
-        (id) => (redraftValues as Record<string, number> | null | undefined)?.[id] ?? 0,
+        (id) => isQbPlaying(players[id]?.depth_chart_order, (redraftValues as Record<string, number> | null | undefined)?.[id] ?? 0),
         cheapStarterCeiling(
           pickFcValues[`${priorityDraftYear}-2`] ?? 0,
           pickFcValues[`${priorityDraftYear}-3`] ?? 0,

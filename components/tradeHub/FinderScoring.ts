@@ -301,8 +301,8 @@ export const fairnessTier = (f: TradeFairness | undefined): number =>
 // User rules (2026-11-04). A team with three capable QBs won't trade for another unless one goes
 // back, however good the value: Hurts for Young is a real trade between two full rooms, a fourth QB
 // for a receiver isn't. A team with two only adds a third for one of two reasons: a super elite QB,
-// moving on from a lower-tier starter it already has, or a cheap low-end starter like Jacoby
-// Brissett, someone a 2nd or a 2nd and a 3rd buys but not a 1st. Nobody sells below three unless one
+// moving on from a lower-tier starter it already has, or a cheap low-end starter, someone a 2nd or a
+// 2nd and a 3rd buys but not a 1st. Nobody sells below three unless one
 // comes back. Otherwise a team short of three is free
 // to trade: a deal that doesn't touch its QBs changes nothing about its room. Every league the user
 // is in is Superflex or 2QB, where three means two starters and a spare.
@@ -328,19 +328,24 @@ export const cheapStarterCeiling = (secondRound: number, thirdRound: number, che
   return cheapestFirst > 0 ? Math.min(buys, cheapestFirst - 1) : buys;
 };
 
-/** QB tiers from every QB's dynasty value, highest first, a player's redraft value, and the most a
- *  cheap starter is worth. Sleeper's depth charts don't reach the app, so a QB with redraft value is
- *  the sign he's playing: FantasyCalc's redraft list has the 32 who are, and leaves out backups.
- *  Capable means top 32 by value or playing, so a young backup worth a lot counts and so does a
- *  cheap vet who starts. */
+/** Whether a QB is playing. Sleeper's depth chart decides when he's on it: it's the more current of
+ *  the two (11/2026: it had Minshew as Arizona's starter when that was announced, while FantasyCalc
+ *  still listed Brissett, who'd been traded). A QB off the chart falls back to FantasyCalc's redraft
+ *  list of the 32 who are playing. */
+export const isQbPlaying = (depthChartOrder: number | null | undefined, redraftValue: number): boolean =>
+  depthChartOrder != null ? depthChartOrder === 1 : redraftValue > 0;
+
+/** QB tiers from every QB's dynasty value, highest first, whether a player is playing, and the most a
+ *  cheap starter is worth. Capable means top 32 by value or playing, so a young backup worth a lot
+ *  counts and so does a cheap vet who starts. */
 export const buildQbTiers = (
   qbValuesHighToLow: number[],
-  redraftValue: (playerId: string) => number,
+  isPlaying: (playerId: string) => boolean,
   inexpensiveCeiling: number,
 ): QbTiers => {
   const capableFloor = qbValuesHighToLow[CAPABLE_QB_RANK - 1] ?? 0;
   const superEliteFloor = qbValuesHighToLow[SUPER_ELITE_QB_COUNT - 1] ?? Infinity;
-  const isStarting = (qb: QbRoomAsset) => redraftValue(qb.player_id) > 0;
+  const isStarting = (qb: QbRoomAsset) => isPlaying(qb.player_id);
   return {
     isCapable: (qb) => qb.value >= capableFloor || isStarting(qb),
     isSuperElite: (qb) => qb.value >= superEliteFloor,

@@ -38,7 +38,7 @@ function DepthChartsTab() {
     teamMap.get(p.team)![p.position].push(p);
   });
   // Sort each position group:
-  //   1. Explicit depth_chart_order (0 = starter, ascending)
+  //   1. Explicit depth_chart_order (1 = starter, ascending)
   //   2. Fallback: dynasty value descending (higher value = more likely the starter)
   teamMap.forEach((posMap) => {
     Object.keys(posMap).forEach((pos) => {

@@ -9,6 +9,7 @@ import { useAuthState, LAST_LOGIN_EMAIL_KEY } from "./useAuthState";
 import { useHubRouting } from "./useHubRouting";
 import { normalizeRookieName } from "../../components/draftHub/shared";
 import { refreshAllLeagueRosters } from "../../components/LeagueHub/overviewTabHelpers";
+import { nextManUp } from "../../lib/helpers/depthChart";
 import {
   CURRENT_YEAR,
   getStoredPickValue, buildLeaguePickPool, sortOwnerPicks,
@@ -3184,34 +3185,22 @@ const saveSnapshotNow = async () => {
 
         // Opportunity alert: when a tracked player goes out, surface their backup
         if (/out|doubtful|ir|suspended|inactive/i.test(nextStatus)) {
-          const injuredPlayer = players[playerId];
-          if (injuredPlayer?.team && injuredPlayer?.position) {
-            const backups = Object.entries(players)
-              .filter(([pid, p]) =>
-                pid !== playerId &&
-                p?.team === injuredPlayer.team &&
-                p?.position === injuredPlayer.position &&
-                p?.depth_chart_position != null &&
-                !/out|ir|suspended|inactive/i.test((p.injury_status || p.status || "").toLowerCase())
-              )
-              .sort(([, a], [, b]) => (a.depth_chart_position ?? 99) - (b.depth_chart_position ?? 99));
-
-            if (backups.length > 0) {
-              const [backupId, backup] = backups[0];
-              incomingAlerts.push({
-                id: `opp-${playerId}-${backupId}`,
-                category: "market",
-                source: "internal",
-                severity: "medium",
-                title: `${backup.full_name} opportunity`,
-                detail: `With ${snapshot.full_name} now ${nextStatus.toLowerCase()}, ${backup.full_name} (${backup.team || injuredPlayer.team}) moves into an expanded role.`,
-                actionable: true,
-                timestamp: Date.now(),
-                playerId: String(backupId),
-                teamLabel: backup.team || null,
-                payload: { injuredPlayerId: playerId, injuredName: snapshot.full_name, triggerStatus: nextStatus },
-              });
-            }
+          const moving = nextManUp(players, playerId);
+          if (moving) {
+            const [backupId, backup] = moving;
+            incomingAlerts.push({
+              id: `opp-${playerId}-${backupId}`,
+              category: "market",
+              source: "internal",
+              severity: "medium",
+              title: `${backup.full_name} opportunity`,
+              detail: `With ${snapshot.full_name} now ${nextStatus.toLowerCase()}, ${backup.full_name} (${backup.team}) moves into an expanded role.`,
+              actionable: true,
+              timestamp: Date.now(),
+              playerId: String(backupId),
+              teamLabel: backup.team || null,
+              payload: { injuredPlayerId: playerId, injuredName: snapshot.full_name, triggerStatus: nextStatus },
+            });
           }
         }
       }

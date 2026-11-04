@@ -58,6 +58,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       injury_status: string | null;
       injury_body_part: string | null;
       injury_notes: string | null;
+      /** 1 = starter at his position on his NFL team. Unique per team and position; absent for a
+       *  player Sleeper hasn't placed on the chart. */
+      depth_chart_order?: number;
     }
     // Only keep the fields the app actually uses — strips ~90% of the payload.
     // injury_status is needed by Gameday badges, alerts, and the Roster
@@ -88,6 +91,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         injury_status:     (p.injury_status ?? null) as string | null,
         injury_body_part:  (p.injury_body_part ?? null) as string | null,
         injury_notes:      (p.injury_notes ?? null) as string | null,
+        ...(typeof p.depth_chart_order === 'number' ? { depth_chart_order: p.depth_chart_order } : {}),
       };
     }
 

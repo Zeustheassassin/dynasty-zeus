@@ -60,6 +60,23 @@ describe("GET /api/players", () => {
     }
   });
 
+  it("carries Sleeper's depth chart order, and only for players on the chart", async () => {
+    fetchMock.mockImplementation(async (url: string) =>
+      url.includes("/players/nfl")
+        ? new Response(JSON.stringify({
+            "1": { player_id: "1", full_name: "A B", position: "QB", depth_chart_order: 1, depth_chart_position: "QB" },
+            "2": { player_id: "2", full_name: "C D", position: "QB", depth_chart_order: null },
+            "3": { player_id: "3", full_name: "E F", position: "QB" },
+          }))
+        : new Response(JSON.stringify({ season: "2026", week: 3 }))
+    );
+    const body = await (await get()).json();
+    expect(body.players["1"].depth_chart_order).toBe(1);
+    expect(body.players["1"].depth_chart_position).toBeUndefined();
+    expect("depth_chart_order" in body.players["2"]).toBe(false);
+    expect("depth_chart_order" in body.players["3"]).toBe(false);
+  });
+
   it("serves Travis Hunter (DB, [DB, WR]) as a WR, keeping Sleeper's DB; a fullback stays FB", async () => {
     fetchMock.mockImplementation(async (url: string) =>
       url.includes("/players/nfl")

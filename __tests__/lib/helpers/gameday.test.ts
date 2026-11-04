@@ -71,7 +71,6 @@ const mkPlayer = (over: Partial<SleeperPlayer>): SleeperPlayer => ({
   active: true,
   bye_week: null,
   number: 1,
-  depth_chart_position: 1,
   search_rank: 1,
   fantasy_positions: ["QB"],
   college: null,

@@ -40,8 +40,7 @@ export function PlayerProfilePanel({
 
   // Team depth chart for this player's position group. Sorted by Sleeper's
   // depth_chart_order when present, otherwise dynasty value descending — the
-  // same logic the Data Hub Depth Charts tab uses (the slim /api/players proxy
-  // strips depth_chart_order, so in practice this falls back to value order).
+  // same logic the Data Hub Depth Charts tab uses.
   const depthGroup = useMemo<SleeperPlayer[]>(() => {
     if (!p?.team || !DEPTH_POSITIONS.includes(p.position)) return [];
     return Object.values(players)
