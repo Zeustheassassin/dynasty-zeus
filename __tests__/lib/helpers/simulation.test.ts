@@ -1257,14 +1257,18 @@ describe("mixSeed", () => {
 describe("simulateLeague — playoff brackets", () => {
   const TEAMS = 10;
   const POSITIONS = ["QB", "QB", "RB", "RB", "WR", "WR", "WR", "TE"];
-  const bracketArgs = (playoffTeams: number, over: Partial<SimulateLeagueArgs> = {}) => {
+  const bracketArgs = (
+    playoffTeams: number,
+    over: Partial<SimulateLeagueArgs> = {},
+    { seedType, strengths }: { seedType?: number; strengths?: number[] } = {},
+  ) => {
     const players: Record<string, unknown> = {};
     const projections: { sleeperId: string; fpts: number }[] = [];
     const rosters = Array.from({ length: TEAMS }, (_, t) => {
       const ids = POSITIONS.map((position, slot) => {
         const id = String(1000 + t * 100 + slot);
         players[id] = { player_id: id, full_name: id, position, team: "AAA", age: 25, years_exp: 3, injury_status: null };
-        projections.push({ sleeperId: id, fpts: 15 });
+        projections.push({ sleeperId: id, fpts: strengths?.[t] ?? 15 });
         return id;
       });
       return { roster_id: t + 1, owner_id: `o${t + 1}`, players: ids, settings: { wins: 0, losses: 0, fpts: 0, ppts: 0 } };
@@ -1273,7 +1277,7 @@ describe("simulateLeague — playoff brackets", () => {
       selectedLeague: {
         league_id: "1234567890",
         roster_positions: ["QB", "RB", "RB", "WR", "WR", "TE", "SUPER_FLEX", "BN"],
-        settings: { playoff_week_start: 15, playoff_teams: playoffTeams },
+        settings: { playoff_week_start: 15, playoff_teams: playoffTeams, playoff_seed_type: seedType },
       } as never,
       rosters: rosters as never,
       players: players as never,
@@ -1305,6 +1309,52 @@ describe("simulateLeague — playoff brackets", () => {
     const sim = measured(playoffTeams);
     expect(sim.byeTeams).toBe(byes);
     expect(titleOdds(sim)).toEqual(expected);
+  });
+
+  describe("bracket type", () => {
+    // Seeds 1 and 2 are equals, 4 and 5 are strong, 3 and 6 are weak. In a fixed bracket the 1 seed
+    // always draws the strong 4/5 winner and the 2 seed the weak 3/6 winner, so the 2 seed has the
+    // easier road. Re-seeded, the 1 seed draws whoever's lowest: the strong team when 3 beats 6, the
+    // weak one when 6 beats 3. Those even out, so the two top seeds have the same chance.
+    const strengths = [20, 20, 10, 25, 25, 10, 10, 10, 10, 10];
+    const exact = (seedType: number) => {
+      const args = bracketArgs(6, {}, { seedType, strengths });
+      return titleOdds(simulateLeague({ ...args, impact: { trials: 50, historyRosters: args.rosters } })!);
+    };
+
+    it("re-seeded (1): the best seed left plays the worst", () => {
+      const odds = exact(1);
+      expect(Math.abs(odds[0] - odds[1])).toBeLessThanOrEqual(0.1);
+    });
+
+    it("fixed (0): the 1 seed draws the 4/5 winner, the 2 seed the 3/6 winner", () => {
+      const odds = exact(0);
+      expect(odds[1] - odds[0]).toBeGreaterThan(3);
+    });
+
+    it("both brackets are a real share of 100", () => {
+      [0, 1].forEach((seedType) => {
+        expect(Math.abs(exact(seedType).reduce((sum, odds) => sum + odds, 0) - 100)).toBeLessThan(0.5);
+      });
+    });
+
+    it("playing a fixed bracket out agrees", () => {
+      const RUNS = 12; // 3,000 seasons
+      const totals = Array.from({ length: TEAMS }, () => 0);
+      for (let salt = 0; salt < RUNS; salt++) {
+        titleOdds(simulateLeague(bracketArgs(6, { simSalt: salt * 61 + 2 }, { seedType: 0, strengths }))!)
+          .forEach((odds, i) => { totals[i] += odds / RUNS; });
+      }
+      exact(0).forEach((odds, i) => expect(Math.abs(totals[i] - odds)).toBeLessThan(3));
+      expect(totals[1] - totals[0]).toBeGreaterThan(1);
+    }, 30000);
+
+    it("a fixed 7-team bracket: 1 bye, then 2 v 7, 3 v 6, 4 v 5, as The Dynasty League really played", () => {
+      const args = bracketArgs(7, {}, { seedType: 0 });
+      const sim = simulateLeague({ ...args, impact: { trials: 50, historyRosters: args.rosters } })!;
+      expect(sim.byeTeams).toBe(1);
+      expect(titleOdds(sim)).toEqual([25, 12.5, 12.5, 12.5, 12.5, 12.5, 12.5, 0, 0, 0]);
+    });
   });
 
   it("7 playoff teams: only the 1 seed sits out the first round", () => {

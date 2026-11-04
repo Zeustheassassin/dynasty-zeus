@@ -42,6 +42,8 @@ export interface SleeperLeague {
 export interface SleeperLeagueSettings {
   playoff_week_start: number;
   playoff_teams: number;
+  /** 0 = fixed bracket (the 1 seed gets the 4/5 winner), 1 = re-seeded after every round. */
+  playoff_seed_type?: number;
   num_teams: number;
   league_average_match?: number; // 1 = teams also play against the weekly league-median score
 

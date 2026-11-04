@@ -645,6 +645,30 @@ export function simulateLeague({
   };
 
   const seededIndex = (seededIds: number[], rosterId: number) => seededIds.indexOf(rosterId);
+  // Sleeper's playoff_seed_type, read off real 2025 brackets. With 1 the bracket is re-seeded after
+  // every round, so the best seed left plays the worst. With 0 it's fixed: neighbors below play, and
+  // their winners meet in that order, so the 1 seed gets the 4/5 winner however 3 v 6 goes.
+  const fixedBracket = selectedLeague?.settings?.playoff_seed_type === 0;
+  // Each seed's place in a full bracket: 1 v 8, 4 v 5, 2 v 7, 3 v 6. A seed past the last playoff
+  // team is a bye.
+  const bracketSlotBySeed: number[] = [];
+  {
+    let order = [0];
+    while (order.length < playoffTeams + byeTeams) {
+      const lastSeed = order.length * 2 - 1;
+      order = order.flatMap((seed) => [seed, lastSeed - seed]);
+    }
+    order.forEach((seed, slot) => { bracketSlotBySeed[seed] = slot; });
+  }
+  /** One round's games among the teams still alive, in the order they're played. */
+  const pairRound = (alive: number[], seededIds: number[]): Array<[number, number]> => {
+    const teams = [...alive].sort((a, b) => fixedBracket
+      ? bracketSlotBySeed[seededIndex(seededIds, a)] - bracketSlotBySeed[seededIndex(seededIds, b)]
+      : seededIndex(seededIds, a) - seededIndex(seededIds, b));
+    const pairs: Array<[number, number]> = [];
+    while (teams.length >= 2) pairs.push([teams.shift()!, fixedBracket ? teams.shift()! : teams.pop()!]);
+    return pairs;
+  };
   // Plays the bracket and returns every playoff team's final place, champion first. Teams knocked
   // out in the same round are separated by a placement game when there are exactly two of them
   // (Sleeper's 3rd- and 5th-place games), otherwise by seed. Placement games are played after the
@@ -657,25 +681,15 @@ export function simulateLeague({
     let roundTeams = [...seededIds];
     if (byeTeams > 0 && roundTeams.length > byeTeams) {
       const byes = roundTeams.slice(0, byeTeams);
-      const openingRound = roundTeams.slice(byeTeams);
-      const winners: number[] = [];
-      while (openingRound.length >= 2) {
-        const high = openingRound.shift()!;
-        const low = openingRound.pop()!;
-        winners.push(playMatch(high, low, 0, rng).winner);
-      }
+      const winners = pairRound(roundTeams.slice(byeTeams), seededIds)
+        .map(([high, low]) => playMatch(high, low, 0, rng).winner);
       eliminatedByRound.push(roundTeams.slice(byeTeams).filter((id) => !winners.includes(id)));
       roundTeams = bySeed([...byes, ...winners]);
     }
 
     while (roundTeams.length > 1) {
-      const roundSeeds = bySeed(roundTeams);
-      const winners: number[] = [];
-      while (roundSeeds.length >= 2) {
-        const high = roundSeeds.shift()!;
-        const low = roundSeeds.pop()!;
-        winners.push(playMatch(high, low, 0, rng).winner);
-      }
+      const winners = pairRound(roundTeams, seededIds)
+        .map(([high, low]) => playMatch(high, low, 0, rng).winner);
       eliminatedByRound.push(roundTeams.filter((id) => !winners.includes(id)));
       roundTeams = bySeed(winners);
     }
@@ -710,13 +724,6 @@ export function simulateLeague({
     const known = titleOddsBySeeding.get(key);
     if (known) return known;
     const odds = new Map<number, number>();
-    const bySeed = (ids: number[]) => [...ids].sort((a, b) => seededIndex(seededIds, a) - seededIndex(seededIds, b));
-    const pairUp = (ids: number[]) => {
-      const seeds = [...ids];
-      const pairs: Array<[number, number]> = [];
-      while (seeds.length >= 2) pairs.push([seeds.shift()!, seeds.pop()!]);
-      return pairs;
-    };
     const everyResult = (
       pairs: Array<[number, number]>,
       chance: number,
@@ -734,11 +741,11 @@ export function simulateLeague({
         if (roundTeams.length === 1) odds.set(roundTeams[0], (odds.get(roundTeams[0]) || 0) + chance);
         return;
       }
-      everyResult(pairUp(bySeed(roundTeams)), chance, (winners, next) => playRound(bySeed(winners), next));
+      everyResult(pairRound(roundTeams, seededIds), chance, (winners, next) => playRound(winners, next));
     };
     if (byeTeams > 0 && seededIds.length > byeTeams) {
       const byes = seededIds.slice(0, byeTeams);
-      everyResult(pairUp(seededIds.slice(byeTeams)), 1, (winners, next) => playRound(bySeed([...byes, ...winners]), next));
+      everyResult(pairRound(seededIds.slice(byeTeams), seededIds), 1, (winners, next) => playRound([...byes, ...winners], next));
     } else {
       playRound(seededIds, 1);
     }
